@@ -23,6 +23,9 @@ sts2_decompiled/
 # 沙箱测试配置（含本机绝对路径；由 scripts/generate_sandbox_wsb.bat 生成）
 scripts/sandbox_test.wsb
 
+# Install log
+install.log
+
 # OS
 .DS_Store
 Thumbs.db

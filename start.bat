@@ -10,8 +10,7 @@ for /f "tokens=5" %%a in ('netstat -ano 2^>nul ^| findstr ":7860 " ^| findstr "L
 timeout /t 1 >nul
 
 cd /d "%~dp0backend"
-call .venv\Scripts\activate.bat
 echo 启动 AgentTheSpire...
 echo 打开浏览器访问 http://localhost:7860
 start /b cmd /c "timeout /t 3 >nul && start "" http://localhost:7860"
-python main.py
+.venv\Scripts\python.exe main.py

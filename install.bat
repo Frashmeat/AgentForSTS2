@@ -1,4 +1,10 @@
 @echo off
+:: 第一次进入时开启日志（同时输出到屏幕和 install.log）
+if not defined INSTALL_LOGGING (
+    set INSTALL_LOGGING=1
+    call "%~f0" %* 2>&1 | powershell -NoProfile -Command "$input | Tee-Object -FilePath '%~dp0install.log'"
+    exit /b %errorlevel%
+)
 setlocal enabledelayedexpansion
 chcp 65001 >nul
 title AgentTheSpire Installer
