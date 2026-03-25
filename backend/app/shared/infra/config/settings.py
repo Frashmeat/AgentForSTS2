@@ -30,6 +30,11 @@ DEFAULT_LLM_CONFIG = {
 
 DEFAULT_CONFIG = {
     "llm": DEFAULT_LLM_CONFIG,
+    "migration": {
+        "use_modular_single_workflow": False,
+        "use_modular_batch_workflow": False,
+        "use_unified_ws_contract": False,
+    },
     "approval": {
         "auto_execute_low_risk": False,
         "allowed_commands": [],
@@ -147,6 +152,10 @@ class Settings:
     @property
     def approval(self) -> dict[str, Any]:
         return self.raw["approval"]
+
+    @property
+    def migration(self) -> dict[str, Any]:
+        return self.raw["migration"]
 
     @property
     def image_gen(self) -> dict[str, Any]:

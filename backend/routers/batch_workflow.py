@@ -36,6 +36,7 @@ from app.modules.workflow.application.context import WorkflowContext
 from app.modules.workflow.application.engine import WorkflowEngine
 from app.modules.workflow.application.policies import LimitedParallelPolicy
 from app.modules.workflow.application.step import WorkflowStep
+from app.shared.infra.feature_flags import resolve_workflow_migration_flags
 from config import get_config
 from image.generator import generate_images
 from image.postprocess import process_image
@@ -106,6 +107,11 @@ async def _run_batch_asset_engine(
     return await workflow.run(steps, WorkflowContext(initial or {}))
 
 
+def _batch_workflow_mode(config: dict | None = None) -> str:
+    flags = resolve_workflow_migration_flags(config)
+    return "modular" if flags.use_modular_batch_workflow else "legacy"
+
+
 async def _plan_group_approval_requests(group: list[PlanItem], llm_cfg: dict, project_root: Path):
     requirements = "\n".join(
         f"- [{item.type}] {item.name}: {item.description or item.implementation_notes}"
@@ -157,6 +163,12 @@ async def ws_batch(ws: WebSocket):
 
     selection_futures: dict[str, asyncio.Future] = {}
     cfg = get_config()
+    migration_flags = resolve_workflow_migration_flags(cfg)
+    _log.info(
+        "batch migration mode=%s unified_ws_contract=%s",
+        _batch_workflow_mode(cfg),
+        migration_flags.use_unified_ws_contract,
+    )
     concurrency = int(cfg.get("image_gen", {}).get("concurrency", 1))
     image_gen_sem = asyncio.Semaphore(max(1, concurrency))
     code_gen_lock = asyncio.Lock()

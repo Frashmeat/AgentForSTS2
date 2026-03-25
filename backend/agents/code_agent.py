@@ -1,5 +1,5 @@
 """
-Code Agent：通过 subprocess 调用 Claude Code CLI。
+Code Agent：通过统一 agent runner 调用 Claude/Codex CLI。
 负责生成/修改 C# 代码、dotnet build、错误修复、打包。
 """
 from __future__ import annotations

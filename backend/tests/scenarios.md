@@ -556,3 +556,65 @@ Dependency summary:
 | 所有依赖同一 Power 的三个资产并发等待 | S10 | SoulMark done event 广播，三者同时解锁 |
 | 批量中有一项失败，其余继续 | S09（注入错误测试） | `item_error` 事件，其他 item 不受影响，`error_count` = 1 |
 | Planner 输出缺少 `depends_on` | S07（负面测试） | Code Agent 遇到编译错误，`dotnet publish` 失败后报错 |
+
+---
+
+## Chunk 6 迁移回归补充场景
+
+### S11 — 单资产审批通过 / 拒绝
+
+**模式：** 单资产
+**目标：**
+- `approval_first` 模式下先收到 `approval_pending`
+- 批准后继续推送 `agent_stream` / `done`
+- 拒绝后直接返回失败态，不继续执行代码生成
+
+**检查点：**
+- `approval_pending.summary` 与 `requests[]` 非空
+- 前端审批面板状态会从 `pending` 切到 `approved` / `rejected`
+- 拒绝路径最终 `done.success == false`
+
+### S12 — 批量依赖流程 + 审批通过 / 拒绝
+
+**模式：** Mod 规划
+**目标：**
+- 依赖组在 `item_image_ready` 后等待组内资源就绪
+- 组审批通过后进入 `item_agent_stream`
+- 任一组被拒绝时，仅该组终止，`batch_done` 仍能汇总 `success_count` / `error_count`
+
+**检查点：**
+- `depends_on` 排序稳定
+- `item_approval_pending` 带 `item_id`
+- `batch_done` 统计与实际成功/失败数一致
+
+### S13 — 图像供应商切换
+
+**模式：** 单资产 / Mod 规划
+**目标：**
+- `image_gen.provider` 在 `bfl` / `volcengine` / `wanxiang` 间切换后仍能生成 prompt 并进入出图
+- prompt adapter 的 provider 映射不破坏透明背景资产流程
+
+**检查点：**
+- relic / power 仍走透明背景路径
+- `prompt_preview` 与 `image_ready` 事件协议不变
+- 供应商切换不影响后续 postprocess 输出路径
+
+### S14 — Claude / Codex backend 切换
+
+**模式：** 单资产 / Mod 规划
+**目标：**
+- `llm.agent_backend` 在 `claude` / `codex` 间切换后，审批规划、代码生成、构建修复入口都可继续运行
+- 统一 `agent_runner` / `text_runner` 不因 backend 切换退回旧直连逻辑
+
+**检查点：**
+- planner 输出结构一致
+- `agent_stream` 有连续输出
+- 构建失败时仍能进入统一修复回路
+
+### 推荐迁移演练顺序
+
+1. 关闭全部 migration flags，执行 `S01 + S07 + S11`，确认 legacy 默认安全。
+2. 仅开启 `use_unified_ws_contract`，执行 `S11 + S12`，确认前端事件契约无回归。
+3. 仅开启 `use_modular_single_workflow`，执行 `S01 + S13 + S14`。
+4. 仅开启 `use_modular_batch_workflow`，执行 `S07 + S12 + S14`。
+5. 三个开关全开后，再跑一次 `S09 + S10 + S13 + S14` 作为收尾验证。

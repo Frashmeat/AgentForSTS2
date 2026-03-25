@@ -1,0 +1,148 @@
+# 模块化解耦重构回归清单
+
+> 对应 `docs/2026-03-24-模块化解耦重构计划书.md` 的 Chunk 6。
+> 目标：在 legacy 与 modular 路径并存期间，保证可以按单资产、批量、前端协议三个维度独立切换，并可安全回退。
+
+---
+
+## 1. 迁移开关
+
+默认值必须保持 legacy 安全：
+
+```json
+{
+  "migration": {
+    "use_modular_single_workflow": false,
+    "use_modular_batch_workflow": false,
+    "use_unified_ws_contract": false
+  }
+}
+```
+
+推荐演练顺序：
+
+1. 全部关闭，验证 legacy 基线路径。
+2. 只开 `use_unified_ws_contract`，验证前端事件协议。
+3. 只开 `use_modular_single_workflow`，验证单资产流程。
+4. 只开 `use_modular_batch_workflow`，验证批量流程。
+5. 三个开关全开后做最终联调，再执行一次 legacy 回切。
+
+---
+
+## 2. 后端关键场景
+
+必须覆盖：
+
+- 单资产完整流程：`prompt_preview -> image_ready -> approval_pending/done`
+- 批量依赖流程：`plan_ready -> item_image_ready -> item_done -> batch_done`
+- 审批通过 / 拒绝：单资产与批量各至少一次
+- 图像供应商切换：`bfl` / `volcengine` / `wanxiang`
+- Claude / Codex backend 切换：planner、codegen、build-fix 都要冒烟
+
+建议对照场景文档执行：
+
+- `backend/tests/scenarios.md` 中 `S01 S07 S09 S10 S11 S12 S13 S14`
+
+---
+
+## 3. 前端关键场景
+
+必须覆盖：
+
+- 断线重连 / 异常断开提示：
+  `WorkflowClient.attachPersistentErrorHandlers`
+- 事件流顺序：
+  `stage_update -> prompt_preview -> image_ready -> done/error`
+- 审批状态展示：
+  `approval_pending` / `item_approval_pending` 的展示与按钮状态
+- 页面装配仍可工作：
+  `App.tsx` 单资产、批量、修改 Mod、崩溃分析四个入口可正常挂载
+
+手工检查建议：
+
+1. 启动前端后依次打开四个 Tab。
+2. 单资产执行一次 legacy flags 基线流程。
+3. 打开 `use_unified_ws_contract` 后重复一次单资产流程。
+4. 批量流程执行一次带依赖和审批的场景，确认审批态和事件顺序未回归。
+
+---
+
+## 4. 分阶段验证命令
+
+### 阶段 A：迁移开关与路由选择
+
+```powershell
+.\backend\.venv\Scripts\python.exe -m pytest .\backend\tests\test_migration_flags.py -v
+```
+
+通过标准：
+
+- 默认值全部为 `false`
+- 单资产 / 批量模式判定可独立切到 `modular`
+- 部分 rollout 时，未开启的开关仍保持 legacy
+
+### 阶段 B：后端工作流与审批
+
+```powershell
+.\backend\.venv\Scripts\python.exe -m pytest .\backend\tests -v
+```
+
+通过标准：
+
+- 工作流引擎、审批模式、配置归一化相关测试全部通过
+- 无新增事件协议断言失败
+
+### 阶段 C：前端 transport 与装配层
+
+```powershell
+node --experimental-strip-types --test .\frontend\tests\workflowSocket.test.ts .\frontend\tests\ws-client.test.ts .\frontend\tests\feature-shell.test.ts .\frontend\tests\app-migration-flags.test.ts
+```
+
+通过标准：
+
+- shared ws client 与 legacy facade 同时可用
+- `App.tsx` 能读取 migration flags，并保持 legacy 默认值安全
+- legacy page 薄包装仍委托到 feature view
+
+### 阶段 D：前端构建
+
+```powershell
+cd frontend
+npm run build
+```
+
+通过标准：
+
+- TypeScript / Vite 构建成功
+- 无因 migration flags 或 unified ws adapter 引入的构建错误
+
+### 阶段 E：桌面端/辅助工程
+
+```powershell
+dotnet build
+```
+
+通过标准：
+
+- 现有 .NET 工程无编译回归
+
+---
+
+## 5. 最终放行标准
+
+全部满足后，才允许删除迁移期桥接代码：
+
+- 关键用例全部通过
+- 单资产与批量流程无事件协议回归
+- `use_unified_ws_contract` 单独开启可稳定运行
+- `use_modular_single_workflow` / `use_modular_batch_workflow` 可分别开启并回退
+- 三个开关全开后仍可完成完整流程
+- 再次把三个开关全部关掉后，legacy 路径仍可工作
+
+---
+
+## 6. 当前收尾建议
+
+- 在真正删除 `frontend/src/lib/ws.ts`、`frontend/src/lib/batch_ws.ts` 前，先确认 `pages/BatchMode.tsx`、`features/mod-editor/view.tsx` 已不再依赖这些 facade。
+- 在真正删除 `backend/agents/code_agent.py` 中兼容入口前，先确认调用方和测试不再 monkeypatch `run_claude_code`。
+- `backend/agents/sts2_docs.py` 的 legacy export 仍被测试覆盖，未解除引用前不要删除。

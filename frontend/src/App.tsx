@@ -2,15 +2,60 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { Settings, Swords } from "lucide-react";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { approveApproval, executeApproval, rejectApproval, type ApprovalRequest } from "./lib/approvals";
-import { WorkflowSocket } from "./lib/ws";
+import { WorkflowSocket, type WsEvent } from "./lib/ws";
 import { cn } from "./lib/utils";
 import { BatchGenerationFeatureView } from "./features/batch-generation/view";
 import { LogAnalysisFeatureView } from "./features/log-analysis/view";
 import { ModEditorFeatureView } from "./features/mod-editor/view";
 import { type AssetType, getStageIndex, type Stage } from "./features/single-asset/model";
 import { SingleAssetFeatureView } from "./features/single-asset/view";
+import { loadAppConfig, resolveMigrationFlags, type WorkflowMigrationFlags } from "./shared/api/config";
+import type { WorkflowEvent } from "./shared/types/workflow";
+import { WorkflowClient } from "./shared/ws/client";
 
 type AppTab = "single" | "batch" | "edit" | "log";
+type AppWorkflowSocket = {
+  on(event: WsEvent["event"], handler: (data: WsEvent) => void): AppWorkflowSocket;
+  send(data: object): void;
+  waitOpen(): Promise<void>;
+  close(): void;
+};
+
+class UnifiedWorkflowSocket implements AppWorkflowSocket {
+  private client = new WorkflowClient("/api/ws/create");
+  private errorHandler: ((data: WsEvent) => void) | null = null;
+
+  on(event: WsEvent["event"], handler: (data: WsEvent) => void) {
+    this.client.on(event, handler as (data: WorkflowEvent) => void);
+    if (event === "error") {
+      this.errorHandler = handler;
+    }
+    return this;
+  }
+
+  send(data: object) {
+    this.client.send(data);
+  }
+
+  waitOpen(): Promise<void> {
+    return this.client.waitOpen().then(() => {
+      this.client.attachPersistentErrorHandlers((message) => {
+        this.errorHandler?.({ event: "error", stage: "error", message });
+      });
+    });
+  }
+
+  close() {
+    this.client.close();
+  }
+}
+
+function createWorkflowSocket(flags: WorkflowMigrationFlags): AppWorkflowSocket {
+  if (flags.use_unified_ws_contract) {
+    return new UnifiedWorkflowSocket();
+  }
+  return new WorkflowSocket();
+}
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<AppTab>("single");
@@ -43,7 +88,7 @@ export default function App() {
   const [approvalBusyActionId, setApprovalBusyActionId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [errorTrace, setErrorTrace] = useState<string | null>(null);
-  const [socket, setSocket] = useState<WorkflowSocket | null>(null);
+  const [socket, setSocket] = useState<AppWorkflowSocket | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [autoMode, setAutoMode] = useState(false);
   const autoModeRef = useRef(false);
@@ -52,14 +97,18 @@ export default function App() {
   const [uploadedImageName, setUploadedImageName] = useState<string>("");
   const [uploadedImagePreview, setUploadedImagePreview] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [migrationFlags, setMigrationFlags] = useState<WorkflowMigrationFlags>(() => resolveMigrationFlags(undefined));
 
   // 启动时从 config 读默认项目路径
   useEffect(() => {
-    fetch("/api/config").then(r => r.json()).then(cfg => {
-      if (cfg?.default_project_root && !projectRoot) {
-        setProjectRoot(cfg.default_project_root);
-      }
-    }).catch(() => {});
+    loadAppConfig()
+      .then((config) => {
+        setMigrationFlags(resolveMigrationFlags(config));
+        if (config?.default_project_root) {
+          setProjectRoot((current) => current || String(config.default_project_root));
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const appendGen   = useCallback((m: string) => setGenLog(p => [...p, m]), []);
@@ -100,7 +149,7 @@ export default function App() {
     // upload 模式直接跳过生图阶段；ai 模式先进 generating_image
     if (imageMode !== "upload") updateStage("generating_image");
 
-    const ws = new WorkflowSocket();
+    const ws = createWorkflowSocket(migrationFlags);
     setSocket(ws);
     ws.on("stage_update",   (d: any) => pushStage(d.scope, d.message));
     ws.on("progress",       (d: any) => appendGen(`${d.message}`));
