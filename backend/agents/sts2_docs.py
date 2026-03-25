@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from app.modules.knowledge.infra.sts2_docs_source import Sts2DocsKnowledgeSource
+
 # Full path to the decompiled API reference (same directory as this file)
 API_REF_PATH = Path(__file__).parent / "sts2_api_reference.md"
 
@@ -999,7 +1001,7 @@ _TYPE_DOCS: dict[str, str] = {
 }
 
 
-def get_docs_for_type(asset_type: str) -> str:
+def _get_docs_for_type_raw(asset_type: str) -> str:
     """
     Return the combined knowledge base for a specific asset type.
     Includes: common build/structure docs + type-specific API snippet.
@@ -1009,7 +1011,7 @@ def get_docs_for_type(asset_type: str) -> str:
     return _COMMON_DOCS + type_specific
 
 
-def get_planner_api_hints() -> str:
+def _get_planner_api_hints_raw() -> str:
     """
     Minimal API hints for the Planner LLM.
     Only names/pools/enums needed to write accurate implementation_notes.
@@ -1059,6 +1061,20 @@ Buffs: `StrengthPower`, `DexterityPower`, `ThornsPower`, `RegenPower`, `Artifact
 - Card effect: `protected override async Task OnPlay(PlayerChoiceContext ctx, CardPlay cardPlay)`
 - NEVER `new XxxModel()` — use `ModelDb.Card<T>()` / `.ToMutable()`
 """
+
+
+_KNOWLEDGE_SOURCE = Sts2DocsKnowledgeSource(
+    docs_for_type=_get_docs_for_type_raw,
+    planner_hints=_get_planner_api_hints_raw,
+)
+
+
+def get_docs_for_type(asset_type: str) -> str:
+    return _KNOWLEDGE_SOURCE.load_context("asset", asset_type=asset_type)
+
+
+def get_planner_api_hints() -> str:
+    return _KNOWLEDGE_SOURCE.load_context("planner")
 
 
 # Legacy export: full docs for all types combined (kept for compatibility).

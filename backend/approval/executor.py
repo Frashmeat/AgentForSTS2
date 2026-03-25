@@ -2,18 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
+from app.modules.approval.application.ports import ActionResult
+from app.modules.build.application.ports import BuildRequest
+from app.modules.build.infra.dotnet_builder import DotnetBuildBackend
 from approval.models import ActionRequest
-
-
-@dataclass
-class ActionResult:
-    success: bool
-    output: str = ""
-    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class ApprovalExecutor:
@@ -22,9 +16,10 @@ class ApprovalExecutor:
 
 
 class LocalApprovalExecutor(ApprovalExecutor):
-    def __init__(self, allowed_roots: list[Path], allowed_commands: list[list[str]]):
+    def __init__(self, allowed_roots: list[Path], allowed_commands: list[list[str]], build_backend=None):
         self.allowed_roots = [root.resolve() for root in allowed_roots]
         self.allowed_commands = allowed_commands
+        self.build_backend = build_backend or DotnetBuildBackend()
 
     def _resolve_path(self, raw_path: str) -> Path:
         candidate = Path(raw_path)
@@ -53,7 +48,17 @@ class LocalApprovalExecutor(ApprovalExecutor):
             path.write_text(content, encoding="utf-8")
             return ActionResult(success=True, output="", metadata={"path": str(path)})
 
-        if action.kind in {"run_command", "build_project", "deploy_mod"}:
+        if action.kind == "build_project":
+            command = [str(part) for part in action.payload["command"]]
+            self._ensure_command_allowed(command)
+            cwd_value = str(action.payload.get("cwd", "."))
+            cwd = self._resolve_path(cwd_value)
+            result = await self.build_backend.build(BuildRequest(command=command, cwd=cwd))
+            if not result.success:
+                raise RuntimeError(result.output.strip() or "build failed")
+            return ActionResult(success=True, output=result.output, metadata=result.metadata)
+
+        if action.kind in {"run_command", "deploy_mod"}:
             command = [str(part) for part in action.payload["command"]]
             self._ensure_command_allowed(command)
             cwd_value = str(action.payload.get("cwd", "."))

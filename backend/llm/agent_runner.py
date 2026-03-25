@@ -3,6 +3,12 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from app.shared.infra.llm.agent_backend import (
+    AgentBackendRegistry,
+    AgentRunner as PortAgentRunner,
+    FunctionAgentBackend,
+    resolve_agent_backend_name,
+)
 from config import get_config, normalize_llm_config
 from llm.agent_backends import run_claude_cli, run_codex_cli
 from llm.prompt_builder import append_global_ai_instructions
@@ -14,7 +20,14 @@ _AGENTS_CODEX_PATH = Path(__file__).parent.parent.parent / "AGENTS_CODEX.md"
 
 def resolve_agent_backend(llm_cfg: dict) -> str:
     cfg = normalize_llm_config(llm_cfg)
-    return cfg.get("agent_backend", "claude")
+    return resolve_agent_backend_name(cfg)
+
+
+def _build_default_registry() -> AgentBackendRegistry:
+    registry = AgentBackendRegistry()
+    registry.register("claude", FunctionAgentBackend(stream_fn=run_claude_cli))
+    registry.register("codex", FunctionAgentBackend(stream_fn=run_codex_cli))
+    return registry
 
 
 def _with_latest_runtime_custom_prompt(llm_cfg: dict) -> dict:
@@ -39,12 +52,14 @@ def build_agent_prompt(prompt: str, llm_cfg: dict, use_runtime_config: bool = Fa
     return append_global_ai_instructions(prompt, effective_cfg)
 
 
+class AgentRunner(PortAgentRunner):
+    pass
+
+
 async def run_agent_task(prompt: str, project_root: Path, stream_callback=None) -> str:
     llm_cfg = get_config()["llm"]
     backend = resolve_agent_backend(llm_cfg)
     logger.info("run_agent_task backend=%s project=%s prompt_len=%d", backend, project_root, len(prompt))
     prompt = build_agent_prompt(prompt, llm_cfg, use_runtime_config=True)
-
-    if backend == "codex":
-        return await run_codex_cli(prompt, project_root, llm_cfg, stream_callback)
-    return await run_claude_cli(prompt, project_root, llm_cfg, stream_callback)
+    runner = AgentRunner(registry=_build_default_registry())
+    return await runner.run(prompt, project_root, llm_cfg, stream_callback)

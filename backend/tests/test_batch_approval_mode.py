@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from approval.runtime import reset_approval_runtime
 from agents.planner import PlanItem
+from app.modules.workflow.application.step import WorkflowStep
 from routers import batch_workflow
 
 
@@ -83,3 +84,32 @@ async def test_send_item_approval_pending_emits_expected_event():
     assert ws.messages[-1]["item_id"] == "card_ignite"
     assert ws.messages[-1]["summary"] == "Need approval"
     assert ws.messages[-1]["requests"] == []
+
+
+@pytest.mark.asyncio
+async def test_batch_workflow_uses_dependency_graph_and_limited_parallelism():
+    class DummyWs:
+        def __init__(self):
+            self.messages: list[dict] = []
+
+        async def send_text(self, text: str):
+            self.messages.append(json.loads(text))
+
+    async def image_step(context):
+        return {"data": {"item_id": "card_ignite", "image": "abc"}}
+
+    async def done_step(context):
+        return {"data": {"item_id": "card_ignite", "success": True}}
+
+    ws = DummyWs()
+    await batch_workflow._run_batch_asset_engine(
+        ws,
+        [
+            WorkflowStep(name="done", handler=done_step, depends_on=["image_ready"]),
+            WorkflowStep(name="image_ready", handler=image_step),
+        ],
+        max_concurrency=2,
+    )
+
+    assert ws.messages[0]["event"] == "item_image_ready"
+    assert ws.messages[-1]["event"] == "item_done"

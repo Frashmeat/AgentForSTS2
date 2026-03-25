@@ -10,6 +10,9 @@ from typing import Literal
 import numpy as np
 from PIL import Image, ImageFilter
 
+from app.modules.image.domain.models import ImagePostProcessRequest
+from app.modules.image.infra.postprocess import FunctionalImagePostProcessor, ImagePostProcessPipeline
+
 # rembg 懒加载，仅在需要透明处理时导入
 _rembg_session = None
 _rembg_session_model: str | None = None
@@ -132,6 +135,21 @@ def process_image(
     对选中图片执行全套后处理，写入 mod 项目目录。
     返回生成的所有文件路径列表。
     """
+    pipeline = ImagePostProcessPipeline([FunctionalImagePostProcessor(_write_processed_variants)])
+    result = _run_pipeline_sync(
+        pipeline.run(
+            [source_img],
+            ImagePostProcessRequest(asset_type=asset_type, name=name, project_root=project_root),
+        )
+    )
+    return result
+
+
+async def _write_processed_variants(images: list[Image.Image], request: ImagePostProcessRequest) -> list[Path]:
+    source_img = images[0]
+    asset_type = request.asset_type
+    name = request.name
+    project_root = request.project_root
     profile = PROFILES[asset_type]
     variants = profile.get("variants", [])
     # character 类型每个 variant 有自己的 bg，其余类型共用 profile 级 bg
@@ -177,3 +195,14 @@ def process_image(
         written.append(out_path)
 
     return written
+
+
+def _run_pipeline_sync(coro):
+    import asyncio
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    raise RuntimeError("process_image should be called from a worker thread when event loop is running")

@@ -31,6 +31,11 @@ from agents.code_agent import (
     create_mod_project,
 )
 from agents.planner import plan_mod, plan_from_dict, topological_sort, find_groups, PlanItem
+from app.modules.workflow.application.batch_asset import BatchAssetWorkflow
+from app.modules.workflow.application.context import WorkflowContext
+from app.modules.workflow.application.engine import WorkflowEngine
+from app.modules.workflow.application.policies import LimitedParallelPolicy
+from app.modules.workflow.application.step import WorkflowStep
 from config import get_config
 from image.generator import generate_images
 from image.postprocess import process_image
@@ -64,6 +69,41 @@ async def _send_item_approval_pending(ws: WebSocket, item_id: str, summary: str,
         "summary": summary,
         "requests": [request.to_dict() for request in requests],
     }))
+
+
+async def _publish_batch_standard_event(ws: WebSocket, event) -> None:
+    if event.stage == "error":
+        await ws.send_text(json.dumps({"event": "item_error", "message": event.payload.get("message", "workflow error")}))
+        return
+
+    if event.payload.get("status") != "completed":
+        return
+
+    data = event.payload.get("data", {})
+    if event.stage == "approval_pending":
+        await ws.send_text(json.dumps({"event": "item_approval_pending", **data}))
+    elif event.stage == "image_ready":
+        await ws.send_text(json.dumps({"event": "item_image_ready", **data}))
+    elif event.stage == "agent_stream":
+        await ws.send_text(json.dumps({"event": "item_agent_stream", **data}))
+    elif event.stage == "done":
+        await ws.send_text(json.dumps({"event": "item_done", **data}))
+
+
+async def _run_batch_asset_engine(
+    ws: WebSocket,
+    steps: list[WorkflowStep],
+    initial: dict | None = None,
+    max_concurrency: int = 1,
+) -> WorkflowContext:
+    workflow = BatchAssetWorkflow(
+        engine=WorkflowEngine(
+            policy=LimitedParallelPolicy(max_concurrency=max_concurrency),
+            publisher=lambda event: _publish_batch_standard_event(ws, event),
+        ),
+        max_concurrency=max_concurrency,
+    )
+    return await workflow.run(steps, WorkflowContext(initial or {}))
 
 
 async def _plan_group_approval_requests(group: list[PlanItem], llm_cfg: dict, project_root: Path):

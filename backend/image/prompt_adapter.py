@@ -8,6 +8,7 @@ from typing import Literal
 
 import litellm
 
+from app.modules.image.application.ports import PromptOptimizer
 from config import get_config
 from llm.text_runner import complete_text, resolve_model
 
@@ -139,6 +140,17 @@ async def adapt_prompt(
     if result.get("prompt"):
         result["prompt"] = _sanitize_for_content_policy(result["prompt"])
     return result
+
+
+class DefaultPromptOptimizer(PromptOptimizer):
+    async def optimize(
+        self,
+        user_description: str,
+        asset_type: str,
+        provider: str,
+        needs_transparent_bg: bool,
+    ) -> dict:
+        return await adapt_prompt(user_description, asset_type, provider, needs_transparent_bg)
 
 
 def _parse_json_result(text: str) -> dict:

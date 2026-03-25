@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from approval.runtime import reset_approval_runtime
 from routers import workflow
+from app.modules.workflow.application.step import WorkflowStep
 
 
 @pytest.mark.asyncio
@@ -63,3 +64,31 @@ async def test_send_approval_pending_emits_expected_event():
     assert ws.messages[-1]["event"] == "approval_pending"
     assert ws.messages[-1]["summary"] == "Need approval"
     assert ws.messages[-1]["requests"] == []
+
+
+@pytest.mark.asyncio
+async def test_single_asset_workflow_uses_engine_and_emits_standard_events():
+    class DummyWs:
+        def __init__(self):
+            self.messages: list[dict] = []
+
+        async def send_text(self, text: str):
+            self.messages.append(json.loads(text))
+
+    async def emit_preview(context):
+        return {"data": {"prompt": "preview prompt"}}
+
+    async def emit_done(context):
+        return {"data": {"success": True}}
+
+    ws = DummyWs()
+    await workflow._run_single_asset_engine(
+        ws,
+        [
+            WorkflowStep(name="prompt_preview", handler=emit_preview),
+            WorkflowStep(name="done", handler=emit_done),
+        ],
+    )
+
+    assert ws.messages[0]["event"] == "prompt_preview"
+    assert ws.messages[-1]["event"] == "done"

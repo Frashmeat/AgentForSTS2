@@ -14,6 +14,14 @@ from typing import AsyncIterator
 import httpx
 from PIL import Image
 
+from app.modules.image.application.services import ImageService
+from app.modules.image.domain.models import ImageGenerationRequest
+from app.modules.image.infra.providers import (
+    BflImageProvider,
+    ComfyuiImageProvider,
+    JimengImageProvider,
+    WanxImageProvider,
+)
 from config import get_config
 
 logger = logging.getLogger(__name__)
@@ -369,28 +377,17 @@ async def generate_images(
     img_cfg = cfg["image_gen"]
     if batch_size is None:
         batch_size = img_cfg.get("batch_size", 3)
-    width, height = _resolve_gen_size(asset_type)
-
-    if img_cfg["mode"] == "local":
-        return await _generate_comfyui(
-            prompt,
-            img_cfg["local"]["comfyui_url"],
-            img_cfg["model"],
-            width, height, batch_size,
-        )
-
-    provider = img_cfg["provider"]
-    api_key = img_cfg["api_key"]
-
-    if provider in ("bfl", "fal"):
-        return await _generate_bfl(prompt, img_cfg["model"], api_key, width, height, batch_size)
-    elif provider == "volcengine":
-        api_secret = img_cfg.get("api_secret", "")
-        return await _generate_volcengine(prompt, api_key, api_secret, width, height, batch_size, progress_callback)
-    elif provider == "wanxiang":
-        return await _generate_wanxiang(prompt, api_key, width, height, batch_size)
-    else:
-        raise ValueError(f"Unknown image provider: {provider}")
+    provider = "comfyui" if img_cfg["mode"] == "local" else img_cfg["provider"]
+    request = ImageGenerationRequest(
+        provider=provider,
+        prompt=prompt,
+        asset_type=asset_type,
+        batch_size=batch_size,
+        negative_prompt=negative_prompt,
+        options={"config": img_cfg},
+    )
+    service = _build_image_service()
+    return await service.generate(request, progress_callback)
 
 
 def _resolve_gen_size(asset_type: str) -> tuple[int, int]:
@@ -403,3 +400,67 @@ def _resolve_gen_size(asset_type: str) -> tuple[int, int]:
         "character":       (512, 760),
     }
     return sizes.get(asset_type, (512, 512))
+
+
+def _build_image_service() -> ImageService:
+    return ImageService(
+        providers={
+            "bfl": BflImageProvider(_generate_with_bfl_provider),
+            "fal": BflImageProvider(_generate_with_bfl_provider),
+            "volcengine": JimengImageProvider(_generate_with_jimeng_provider),
+            "wanxiang": WanxImageProvider(_generate_with_wanx_provider),
+            "comfyui": ComfyuiImageProvider(_generate_with_comfyui_provider),
+        }
+    )
+
+
+async def _generate_with_bfl_provider(request: ImageGenerationRequest, progress_callback=None) -> list[Image.Image]:
+    img_cfg = request.options["config"]
+    width, height = _resolve_gen_size(request.asset_type)
+    return await _generate_bfl(
+        request.prompt,
+        img_cfg["model"],
+        img_cfg["api_key"],
+        width,
+        height,
+        request.batch_size,
+    )
+
+
+async def _generate_with_jimeng_provider(request: ImageGenerationRequest, progress_callback=None) -> list[Image.Image]:
+    img_cfg = request.options["config"]
+    width, height = _resolve_gen_size(request.asset_type)
+    return await _generate_volcengine(
+        request.prompt,
+        img_cfg["api_key"],
+        img_cfg.get("api_secret", ""),
+        width,
+        height,
+        request.batch_size,
+        progress_callback,
+    )
+
+
+async def _generate_with_wanx_provider(request: ImageGenerationRequest, progress_callback=None) -> list[Image.Image]:
+    img_cfg = request.options["config"]
+    width, height = _resolve_gen_size(request.asset_type)
+    return await _generate_wanxiang(
+        request.prompt,
+        img_cfg["api_key"],
+        width,
+        height,
+        request.batch_size,
+    )
+
+
+async def _generate_with_comfyui_provider(request: ImageGenerationRequest, progress_callback=None) -> list[Image.Image]:
+    img_cfg = request.options["config"]
+    width, height = _resolve_gen_size(request.asset_type)
+    return await _generate_comfyui(
+        request.prompt,
+        img_cfg["local"]["comfyui_url"],
+        img_cfg["model"],
+        width,
+        height,
+        request.batch_size,
+    )

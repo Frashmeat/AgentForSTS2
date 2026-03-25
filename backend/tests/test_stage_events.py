@@ -3,6 +3,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from app.shared.contracts.workflow_events import WorkflowEvent
 from llm.stage_events import build_stage_event
 
 
@@ -25,3 +26,9 @@ def test_build_stage_event_includes_item_id_when_provided():
         "message": "正在生成图像...",
         "item_id": "card_1",
     }
+
+
+def test_standard_workflow_event_keeps_stage_and_payload():
+    event = WorkflowEvent(stage="done", payload={"success": True})
+    assert event.stage == "done"
+    assert event.payload["success"] is True

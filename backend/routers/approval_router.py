@@ -4,7 +4,7 @@ import asyncio
 
 from fastapi import APIRouter, HTTPException
 
-from approval.runtime import get_approval_executor, get_approval_store
+from approval.runtime import get_approval_service, get_approval_store
 
 router = APIRouter(prefix="/approvals")
 
@@ -45,7 +45,7 @@ def reject_approval(action_id: str, body: dict):
 @router.post("/{action_id}/execute")
 def execute_approval(action_id: str):
     store = get_approval_store()
-    executor = get_approval_executor()
+    service = get_approval_service()
     try:
         action = store.get_request(action_id)
     except KeyError as exc:
@@ -55,13 +55,7 @@ def execute_approval(action_id: str):
         raise HTTPException(status_code=409, detail="Approval request must be approved before execution")
 
     try:
-        store.mark_running(action_id)
-        result = asyncio.run(executor.execute_action(action))
-        updated = store.mark_succeeded(action_id, {
-            "output": result.output,
-            **result.metadata,
-        })
+        updated = asyncio.run(service.execute_request(action_id))
         return updated.to_dict()
     except Exception as exc:
-        updated = store.mark_failed(action_id, str(exc))
-        return updated.to_dict()
+        raise HTTPException(status_code=500, detail=str(exc)) from exc

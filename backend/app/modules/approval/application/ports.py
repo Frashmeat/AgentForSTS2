@@ -1,0 +1,33 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Protocol
+
+from app.modules.approval.domain.models import ActionRequest
+
+
+@dataclass
+class ActionResult:
+    success: bool
+    output: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+class ActionExecutor(Protocol):
+    async def execute_action(self, action: ActionRequest) -> ActionResult: ...
+
+
+class ApprovalStore(Protocol):
+    def create_request(self, action: ActionRequest) -> ActionRequest: ...
+    def list_requests(self) -> list[ActionRequest]: ...
+    def get_request(self, action_id: str) -> ActionRequest: ...
+    def approve_request(self, action_id: str) -> ActionRequest: ...
+    def reject_request(self, action_id: str, reason: str) -> ActionRequest: ...
+    def mark_running(self, action_id: str) -> ActionRequest: ...
+    def mark_succeeded(self, action_id: str, result: dict | None = None) -> ActionRequest: ...
+    def mark_failed(self, action_id: str, reason: str) -> ActionRequest: ...
+
+
+class CommandRunner(Protocol):
+    async def run(self, command: list[str], cwd: Path) -> ActionResult: ...

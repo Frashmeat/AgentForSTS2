@@ -9,6 +9,12 @@ from typing import Awaitable, Callable, Optional
 
 import litellm
 
+from app.shared.infra.llm.text_backend import (
+    FunctionTextBackend,
+    TextBackendRegistry,
+    TextRunner as PortTextRunner,
+    resolve_text_backend_name,
+)
 from config import get_config, normalize_llm_config
 from llm.prompt_builder import append_global_ai_instructions
 
@@ -41,9 +47,7 @@ def resolve_model(llm_cfg: dict) -> str:
 
 def resolve_text_backend(llm_cfg: dict) -> str:
     cfg = normalize_llm_config(llm_cfg)
-    if cfg.get("mode") == "agent_cli":
-        return f"{cfg.get('agent_backend', 'claude')}_cli"
-    return "litellm"
+    return resolve_text_backend_name(cfg)
 
 
 def _with_latest_runtime_custom_prompt(llm_cfg: dict) -> dict:
@@ -69,12 +73,8 @@ async def complete_text(
     cwd: Optional[Path] = None,
 ) -> str:
     prompt = build_text_prompt(prompt, llm_cfg, use_runtime_config=True)
-    backend = resolve_text_backend(llm_cfg)
-    if backend == "litellm":
-        return await _complete_via_litellm(prompt, llm_cfg)
-    if backend == "codex_cli":
-        return await _complete_via_codex_cli(prompt, llm_cfg, cwd)
-    return await _complete_via_claude_cli(prompt, cwd)
+    runner = TextRunner(registry=_build_default_registry())
+    return await runner.complete(prompt, normalize_llm_config(llm_cfg), cwd)
 
 
 async def stream_text(
@@ -84,16 +84,46 @@ async def stream_text(
     on_chunk: Callable[[str], Awaitable[None]],
     cwd: Optional[Path] = None,
 ) -> str:
-    backend = resolve_text_backend(llm_cfg)
     system_prompt = build_system_prompt(system_prompt, llm_cfg, use_runtime_config=True)
-    if backend == "litellm":
-        return await _stream_via_litellm(system_prompt, user_prompt, llm_cfg, on_chunk)
+    runner = TextRunner(registry=_build_default_registry())
+    return await runner.stream(system_prompt, user_prompt, normalize_llm_config(llm_cfg), on_chunk, cwd)
 
+
+class TextRunner(PortTextRunner):
+    pass
+
+
+def _build_default_registry() -> TextBackendRegistry:
+    registry = TextBackendRegistry()
+    registry.register(
+        "litellm",
+        FunctionTextBackend(complete_fn=_complete_via_litellm, stream_fn=_stream_via_litellm),
+    )
+    registry.register(
+        "codex_cli",
+        FunctionTextBackend(complete_fn=_complete_via_codex_cli, stream_fn=_stream_via_cli_completion),
+    )
+    registry.register(
+        "claude_cli",
+        FunctionTextBackend(complete_fn=_complete_via_claude_cli, stream_fn=_stream_via_cli_completion),
+    )
+    return registry
+
+
+async def _stream_via_cli_completion(
+    system_prompt: str,
+    user_prompt: str,
+    llm_cfg: dict,
+    on_chunk: Callable[[str], Awaitable[None]],
+    cwd: Optional[Path] = None,
+) -> str:
+    backend = resolve_text_backend(llm_cfg)
     full_prompt = f"{system_prompt}\n\n{user_prompt}"
     if backend == "codex_cli":
         full_text = await _complete_via_codex_cli(full_prompt, llm_cfg, cwd)
     else:
         full_text = await _complete_via_claude_cli(full_prompt, cwd)
+
     chunk_size = 80
     for i in range(0, len(full_text), chunk_size):
         await on_chunk(full_text[i:i + chunk_size])

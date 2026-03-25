@@ -25,7 +25,7 @@ def get_approval_store() -> InMemoryApprovalStore:
 def get_approval_service() -> ApprovalService:
     global _service
     if _service is None:
-        _service = ApprovalService(get_approval_store())
+        _service = ApprovalService(get_approval_store(), get_approval_executor())
     return _service
 
 
@@ -42,8 +42,8 @@ def get_approval_executor() -> LocalApprovalExecutor:
 def reset_approval_runtime() -> None:
     global _store, _service, _executor
     _store = InMemoryApprovalStore()
-    _service = ApprovalService(_store)
     _executor = LocalApprovalExecutor(
         allowed_roots=[_repo_root()],
         allowed_commands=[],
     )
+    _service = ApprovalService(_store, _executor)

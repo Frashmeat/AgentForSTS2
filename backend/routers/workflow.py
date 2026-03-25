@@ -18,6 +18,10 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from approval.action_prompt import build_action_prompt
 from approval.runtime import get_approval_service
 from agents.code_agent import create_asset, create_custom_code, build_and_fix, create_mod_project, package_mod
+from app.modules.workflow.application.context import WorkflowContext
+from app.modules.workflow.application.engine import WorkflowEngine
+from app.modules.workflow.application.single_asset import SingleAssetWorkflow
+from app.modules.workflow.application.step import WorkflowStep
 from config import get_config
 from project_utils import create_project_from_template
 from image.generator import generate_images
@@ -60,6 +64,38 @@ async def _send_approval_pending(ws: WebSocket, summary: str, requests: list):
         "summary": summary,
         "requests": [request.to_dict() for request in requests],
     })
+
+
+async def _publish_standard_event(ws: WebSocket, event) -> None:
+    if event.stage == "error":
+        await _send(ws, "error", {"message": event.payload.get("message", "workflow error")})
+        return
+
+    if event.payload.get("status") != "completed":
+        return
+
+    data = event.payload.get("data", {})
+    if event.stage == "prompt_preview":
+        await _send(ws, "prompt_preview", data)
+    elif event.stage == "image_ready":
+        await _send(ws, "image_ready", data)
+    elif event.stage == "approval_pending":
+        await _send(ws, "approval_pending", data)
+    elif event.stage == "agent_stream":
+        await _send(ws, "agent_stream", data)
+    elif event.stage == "done":
+        await _send(ws, "done", data)
+    elif event.stage == "build_started":
+        await _send_stage(ws, "build", "build_started", data.get("message", "开始构建"))
+    elif event.stage == "build_finished":
+        await _send_stage(ws, "build", "build_finished", data.get("message", "构建完成"))
+
+
+async def _run_single_asset_engine(ws: WebSocket, steps: list[WorkflowStep], initial: dict | None = None) -> WorkflowContext:
+    workflow = SingleAssetWorkflow(
+        engine=WorkflowEngine(publisher=lambda event: _publish_standard_event(ws, event))
+    )
+    return await workflow.run(steps, WorkflowContext(initial or {}))
 
 
 async def _maybe_await_approval(ws: WebSocket, description: str, llm_cfg: dict, project_root: Path) -> bool:
