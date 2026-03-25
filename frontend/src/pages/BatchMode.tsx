@@ -91,7 +91,7 @@ const STATUS_LABELS: Record<ItemStatus, string> = {
 
 // ── 主组件 ────────────────────────────────────────────────────────────────────
 
-export default function BatchMode() {
+function BatchModePage() {
   const [stage, setStage] = useState<BatchStage>("input");
   const [requirements, setRequirements] = useState("");
   const [projectRoot, setProjectRoot] = useState("");
@@ -472,6 +472,14 @@ export default function BatchMode() {
       )}
     </div>
   );
+}
+
+export function BatchGenerationFeatureView() {
+  return <BatchModePage />;
+}
+
+export default function BatchMode() {
+  return <BatchGenerationFeatureView />;
 }
 
 // ── 计划审阅组件 ──────────────────────────────────────────────────────────────
