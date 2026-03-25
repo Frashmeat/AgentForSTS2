@@ -10,8 +10,7 @@ import { ModEditorFeatureView } from "./features/mod-editor/view";
 import { type AssetType, getStageIndex, type Stage } from "./features/single-asset/model";
 import { SingleAssetFeatureView } from "./features/single-asset/view";
 import { loadAppConfig, resolveMigrationFlags, type WorkflowMigrationFlags } from "./shared/api/config";
-import type { WorkflowEvent } from "./shared/types/workflow";
-import { WorkflowClient } from "./shared/ws/client";
+import { WorkflowSocketFacade } from "./shared/ws/facade";
 
 type AppTab = "single" | "batch" | "edit" | "log";
 type AppWorkflowSocket = {
@@ -21,12 +20,22 @@ type AppWorkflowSocket = {
   close(): void;
 };
 
+class UnifiedWorkflowFacade extends WorkflowSocketFacade<WsEvent> {
+  constructor() {
+    super("/api/ws/create");
+  }
+
+  attachPersistentErrorHandlers(onError: (message: string) => void) {
+    this.client.attachPersistentErrorHandlers(onError);
+  }
+}
+
 class UnifiedWorkflowSocket implements AppWorkflowSocket {
-  private client = new WorkflowClient("/api/ws/create");
+  private socket = new UnifiedWorkflowFacade();
   private errorHandler: ((data: WsEvent) => void) | null = null;
 
   on(event: WsEvent["event"], handler: (data: WsEvent) => void) {
-    this.client.on(event, handler as (data: WorkflowEvent) => void);
+    this.socket.on(event, handler);
     if (event === "error") {
       this.errorHandler = handler;
     }
@@ -34,19 +43,19 @@ class UnifiedWorkflowSocket implements AppWorkflowSocket {
   }
 
   send(data: object) {
-    this.client.send(data);
+    this.socket.send(data);
   }
 
   waitOpen(): Promise<void> {
-    return this.client.waitOpen().then(() => {
-      this.client.attachPersistentErrorHandlers((message) => {
+    return this.socket.waitOpen().then(() => {
+      this.socket.attachPersistentErrorHandlers((message) => {
         this.errorHandler?.({ event: "error", stage: "error", message });
       });
     });
   }
 
   close() {
-    this.client.close();
+    this.socket.close();
   }
 }
 

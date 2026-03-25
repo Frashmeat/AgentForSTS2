@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agents.sts2_docs import API_REF_PATH, BASELIB_SRC_PATH, _get_docs_for_type_raw, _get_planner_api_hints_raw
+from agents.sts2_docs import API_REF_PATH, BASELIB_SRC_PATH, get_docs_for_type, get_planner_api_hints
 from app.modules.codegen.application.artifact_writer import ArtifactWriter
 from app.modules.codegen.application.build_trigger import BuildTrigger
 from app.modules.codegen.application.prompt_assembler import PromptAssembler
@@ -57,8 +57,8 @@ def _build_api_lookup_section() -> str:
 
 def _build_codegen_service() -> CodegenService:
     knowledge_source = Sts2DocsKnowledgeSource(
-        docs_for_type=_get_docs_for_type_raw,
-        planner_hints=_get_planner_api_hints_raw,
+        docs_for_type=get_docs_for_type,
+        planner_hints=get_planner_api_hints,
     )
     assembler = PromptAssembler(
         knowledge_source=knowledge_source,

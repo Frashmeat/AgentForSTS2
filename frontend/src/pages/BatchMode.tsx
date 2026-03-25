@@ -12,6 +12,7 @@ import { AgentLog } from "../components/AgentLog";
 import { StageStatus } from "../components/StageStatus";
 import { BuildDeploy } from "../components/BuildDeploy";
 import { cn } from "../lib/utils";
+import { loadAppConfig } from "../shared/api/config";
 
 // ── 类型 ──────────────────────────────────────────────────────────────────────
 
@@ -97,9 +98,13 @@ function BatchModePage() {
   const [projectRoot, setProjectRoot] = useState("");
 
   useEffect(() => {
-    fetch("/api/config").then(r => r.json()).then(cfg => {
-      if (cfg?.default_project_root) setProjectRoot(cfg.default_project_root);
-    }).catch(() => {});
+    loadAppConfig()
+      .then((config) => {
+        if (config?.default_project_root) {
+          setProjectRoot(String(config.default_project_root));
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const [plan, setPlan] = useState<ModPlan | null>(() => {

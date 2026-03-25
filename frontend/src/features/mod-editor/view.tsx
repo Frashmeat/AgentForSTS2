@@ -5,6 +5,7 @@ import { AgentLog } from "../../components/AgentLog";
 import { BuildDeploy } from "../../components/BuildDeploy";
 import { StageStatus } from "../../components/StageStatus";
 import { WorkflowSocket } from "../../lib/ws";
+import { loadAppConfig } from "../../shared/api/config";
 
 type AnalyzeStage = "idle" | "scanning" | "streaming" | "done" | "error";
 type ModifyStage = "idle" | "running" | "done" | "error";
@@ -13,11 +14,10 @@ export function ModEditorFeatureView() {
   const [projectRoot, setProjectRoot] = useState("");
 
   useEffect(() => {
-    fetch("/api/config")
-      .then((response) => response.json())
+    loadAppConfig()
       .then((config) => {
         if (config?.default_project_root) {
-          setProjectRoot(config.default_project_root);
+          setProjectRoot(String(config.default_project_root));
         }
       })
       .catch(() => {});

@@ -1,5 +1,5 @@
 import type { WorkflowEvent } from "../shared/types/workflow.ts";
-import { WorkflowClient } from "../shared/ws/client.ts";
+import { WorkflowSocketFacade } from "../shared/ws/facade.ts";
 
 export type WsEvent = Extract<
   WorkflowEvent,
@@ -13,35 +13,29 @@ export type WsEvent = Extract<
   | { event: "error" }
 >;
 
-export class WorkflowSocket {
-  private client: WorkflowClient;
+export class WorkflowSocket extends WorkflowSocketFacade<WsEvent> {
   private errorHandler: ((data: WsEvent) => void) | null = null;
 
   constructor() {
-    this.client = new WorkflowClient("/api/ws/create");
+    super("/api/ws/create");
   }
 
-  on(event: WsEvent["event"], handler: (data: WsEvent) => void) {
-    this.client.on(event, handler as (data: import("../shared/types/workflow.ts").WorkflowEvent) => void);
+  override on<T extends WsEvent["event"]>(
+    event: T,
+    handler: (data: Extract<WsEvent, { event: T }>) => void
+  ) {
+    super.on(event, handler);
     if (event === "error") {
-      this.errorHandler = handler;
+      this.errorHandler = handler as (data: WsEvent) => void;
     }
     return this;
   }
 
-  send(data: object) {
-    this.client.send(data);
-  }
-
-  waitOpen(): Promise<void> {
-    return this.client.waitOpen().then(() => {
+  override waitOpen(): Promise<void> {
+    return super.waitOpen().then(() => {
       this.client.attachPersistentErrorHandlers((message) => {
         this.errorHandler?.({ event: "error", stage: "error", message });
       });
     });
-  }
-
-  close() {
-    this.client.close();
   }
 }

@@ -1,5 +1,5 @@
 import type { WorkflowEvent, ModPlan, PlanItem } from "../shared/types/workflow.ts";
-import { WorkflowClient } from "../shared/ws/client.ts";
+import { WorkflowSocketFacade } from "../shared/ws/facade.ts";
 
 export type BatchEvent = Extract<
   WorkflowEvent,
@@ -21,30 +21,8 @@ export type BatchEvent = Extract<
 
 export type { PlanItem, ModPlan };
 
-export class BatchSocket {
-  private client: WorkflowClient;
-
+export class BatchSocket extends WorkflowSocketFacade<BatchEvent> {
   constructor() {
-    this.client = new WorkflowClient("/api/ws/batch");
-  }
-
-  on<T extends BatchEvent["event"]>(
-    event: T,
-    handler: (data: Extract<BatchEvent, { event: T }>) => void
-  ) {
-    this.client.on(event, handler as (data: import("../shared/types/workflow.ts").WorkflowEvent) => void);
-    return this;
-  }
-
-  send(data: object) {
-    this.client.send(data);
-  }
-
-  waitOpen(): Promise<void> {
-    return this.client.waitOpen();
-  }
-
-  close() {
-    this.client.close();
+    super("/api/ws/batch");
   }
 }

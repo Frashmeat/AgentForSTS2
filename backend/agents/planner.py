@@ -7,8 +7,8 @@ from app.modules.planning.domain.models import AssetItemType, ModPlan, PlanItem
 from agents import sts2_docs
 
 _knowledge_source = Sts2DocsKnowledgeSource(
-    docs_for_type=sts2_docs._get_docs_for_type_raw,
-    planner_hints=sts2_docs._get_planner_api_hints_raw,
+    docs_for_type=sts2_docs.get_docs_for_type,
+    planner_hints=sts2_docs.get_planner_api_hints,
 )
 _service = PlanningService(knowledge_source=_knowledge_source)
 
