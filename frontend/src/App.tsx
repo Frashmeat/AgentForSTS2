@@ -9,8 +9,7 @@ import { LogAnalysisFeatureView } from "./features/log-analysis/view";
 import { ModEditorFeatureView } from "./features/mod-editor/view";
 import { type AssetType, getStageIndex, type Stage } from "./features/single-asset/model";
 import { SingleAssetFeatureView } from "./features/single-asset/view";
-import { loadAppConfig, resolveMigrationFlags, type WorkflowMigrationFlags } from "./shared/api/config";
-import { WorkflowSocketFacade } from "./shared/ws/facade";
+import { loadAppConfig } from "./shared/api/config";
 
 type AppTab = "single" | "batch" | "edit" | "log";
 type AppWorkflowSocket = {
@@ -20,49 +19,7 @@ type AppWorkflowSocket = {
   close(): void;
 };
 
-class UnifiedWorkflowFacade extends WorkflowSocketFacade<WsEvent> {
-  constructor() {
-    super("/api/ws/create");
-  }
-
-  attachPersistentErrorHandlers(onError: (message: string) => void) {
-    this.client.attachPersistentErrorHandlers(onError);
-  }
-}
-
-class UnifiedWorkflowSocket implements AppWorkflowSocket {
-  private socket = new UnifiedWorkflowFacade();
-  private errorHandler: ((data: WsEvent) => void) | null = null;
-
-  on(event: WsEvent["event"], handler: (data: WsEvent) => void) {
-    this.socket.on(event, handler);
-    if (event === "error") {
-      this.errorHandler = handler;
-    }
-    return this;
-  }
-
-  send(data: object) {
-    this.socket.send(data);
-  }
-
-  waitOpen(): Promise<void> {
-    return this.socket.waitOpen().then(() => {
-      this.socket.attachPersistentErrorHandlers((message) => {
-        this.errorHandler?.({ event: "error", stage: "error", message });
-      });
-    });
-  }
-
-  close() {
-    this.socket.close();
-  }
-}
-
-function createWorkflowSocket(flags: WorkflowMigrationFlags): AppWorkflowSocket {
-  if (flags.use_unified_ws_contract) {
-    return new UnifiedWorkflowSocket();
-  }
+function createWorkflowSocket(): AppWorkflowSocket {
   return new WorkflowSocket();
 }
 
@@ -106,13 +63,11 @@ export default function App() {
   const [uploadedImageName, setUploadedImageName] = useState<string>("");
   const [uploadedImagePreview, setUploadedImagePreview] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
-  const [migrationFlags, setMigrationFlags] = useState<WorkflowMigrationFlags>(() => resolveMigrationFlags(undefined));
 
   // 启动时从 config 读默认项目路径
   useEffect(() => {
     loadAppConfig()
       .then((config) => {
-        setMigrationFlags(resolveMigrationFlags(config));
         if (config?.default_project_root) {
           setProjectRoot((current) => current || String(config.default_project_root));
         }
@@ -158,7 +113,7 @@ export default function App() {
     // upload 模式直接跳过生图阶段；ai 模式先进 generating_image
     if (imageMode !== "upload") updateStage("generating_image");
 
-    const ws = createWorkflowSocket(migrationFlags);
+    const ws = createWorkflowSocket();
     setSocket(ws);
     ws.on("stage_update",   (d: any) => pushStage(d.scope, d.message));
     ws.on("progress",       (d: any) => appendGen(`${d.message}`));

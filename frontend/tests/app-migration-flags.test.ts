@@ -1,28 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
-import { resolveMigrationFlags } from "../src/shared/api/config.ts";
+function readSource(path: string) {
+  return readFileSync(new URL(path, import.meta.url), "utf8");
+}
 
-test("resolveMigrationFlags defaults to legacy-safe switches", () => {
-  assert.deepEqual(resolveMigrationFlags(undefined), {
-    use_modular_single_workflow: false,
-    use_modular_batch_workflow: false,
-    use_unified_ws_contract: false,
-  });
-});
+test("frontend config no longer exposes migration flag helpers", () => {
+  const configSource = readSource("../src/shared/api/config.ts");
+  const appSource = readSource("../src/App.tsx");
 
-test("resolveMigrationFlags keeps per-flag overrides independent", () => {
-  assert.deepEqual(
-    resolveMigrationFlags({
-      migration: {
-        use_modular_single_workflow: true,
-        use_unified_ws_contract: true,
-      },
-    }),
-    {
-      use_modular_single_workflow: true,
-      use_modular_batch_workflow: false,
-      use_unified_ws_contract: true,
-    }
-  );
+  assert.doesNotMatch(configSource, /resolveMigrationFlags/);
+  assert.doesNotMatch(configSource, /WorkflowMigrationFlags/);
+  assert.doesNotMatch(appSource, /resolveMigrationFlags/);
+  assert.doesNotMatch(appSource, /use_unified_ws_contract/);
 });

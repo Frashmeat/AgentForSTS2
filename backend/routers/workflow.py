@@ -17,12 +17,11 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from approval.action_prompt import build_action_prompt
 from approval.runtime import get_approval_service
-from agents.code_agent import create_asset, create_custom_code, build_and_fix, create_mod_project, package_mod
 from app.modules.workflow.application.context import WorkflowContext
+from app.modules.codegen.api import create_asset, create_custom_code, build_and_fix, create_mod_project, package_mod
 from app.modules.workflow.application.engine import WorkflowEngine
 from app.modules.workflow.application.single_asset import SingleAssetWorkflow
 from app.modules.workflow.application.step import WorkflowStep
-from app.shared.infra.feature_flags import resolve_workflow_migration_flags
 from config import get_config
 from project_utils import create_project_from_template
 from image.generator import generate_images
@@ -100,8 +99,7 @@ async def _run_single_asset_engine(ws: WebSocket, steps: list[WorkflowStep], ini
 
 
 def _single_workflow_mode(config: dict | None = None) -> str:
-    flags = resolve_workflow_migration_flags(config)
-    return "modular" if flags.use_modular_single_workflow else "legacy"
+    return "modular"
 
 
 async def _maybe_await_approval(ws: WebSocket, description: str, llm_cfg: dict, project_root: Path) -> bool:
@@ -184,12 +182,7 @@ async def ws_create(ws: WebSocket):
             return
 
         cfg = get_config()
-        migration_flags = resolve_workflow_migration_flags(cfg)
-        logger.info(
-            "[ws/create] migration mode=%s unified_ws_contract=%s",
-            _single_workflow_mode(cfg),
-            migration_flags.use_unified_ws_contract,
-        )
+        logger.info("[ws/create] workflow mode=%s", _single_workflow_mode(cfg))
         # 前端可覆盖 batch_size，否则用 config 默认值
         if "batch_size" in params:
             cfg["image_gen"]["batch_size"] = int(params["batch_size"])
