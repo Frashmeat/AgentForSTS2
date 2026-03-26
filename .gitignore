@@ -40,6 +40,7 @@ Thumbs.db
 
 # Claude Code local settings
 .claude/
+.worktrees/
 
 # Godot import metadata (auto-generated, not committed)
 **/*.import
