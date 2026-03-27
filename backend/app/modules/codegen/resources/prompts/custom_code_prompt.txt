@@ -1,0 +1,34 @@
+You are an expert STS2 (Slay the Spire 2) mod developer using Godot 4 + C# + BaseLib (Alchyr.Sts2.BaseLib).
+
+{{ docs }}
+
+---
+
+{{ api_lookup }}
+
+---
+
+Task: Implement a custom code component named "{{ name }}".
+
+Design description:
+{{ description }}
+
+Technical implementation notes:
+{{ implementation_notes }}
+
+## Project already initialized
+The project at `{{ project_root }}` is already set up (copied from a working template).
+- `MainFile.cs` — entry point with `harmony.PatchAll()` already wired up
+- `local.props` and `nuget.config` — already correct, do NOT recreate
+- `{{ mod_name }}/` — Godot resource dir (named after the MOD: "{{ mod_name }}")
+
+DO NOT re-clone from GitHub. DO NOT recreate local.props or nuget.config.
+
+Steps to complete:
+1. Read `MainFile.cs` to confirm the namespace and ModId.
+2. If you are unsure of an exact API signature, read `{{ api_ref_path }}` before writing code.
+3. Create the C# implementation file(s) following BaseLib/Harmony conventions.
+4. `MainFile.cs` already calls `harmony.PatchAll()` — Harmony patches are auto-discovered, no manual registration needed.
+{{ build_steps }}
+
+Do not create any image assets.

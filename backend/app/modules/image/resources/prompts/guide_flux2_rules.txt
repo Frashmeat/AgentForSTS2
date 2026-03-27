@@ -1,0 +1,8 @@
+- Natural language sentences, NOT tag lists
+- Put the main subject at the very beginning
+- Include specific materials, HEX colors where helpful (e.g. #9B59B6 purple)
+- Add camera/lens info: e.g. 'shot on Canon 85mm f/2.8, sharp focus'
+- Cinematic lighting description
+- Trading card game art style
+- NO negative prompts
+- For transparent-bg assets (relics, powers, icons): add 'isolated on pure white background, no shadow, no background'

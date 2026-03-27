@@ -1,0 +1,4 @@
+Full decompiled sts2.dll source: {{ decompiled_src_path }} (Read/Grep directly).
+Key subdirs: `MegaCrit.Sts2.Core.Commands\` (DamageCmd, PowerCmd, CreatureCmd…),
+`MegaCrit.Sts2.Core.Models.Cards\` (StrikeIronclad etc.), `MegaCrit.Sts2.Core.Models\`.
+Only fall back to ilspycmd if a specific class is missing from this directory.

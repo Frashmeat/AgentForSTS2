@@ -1,0 +1,4 @@
+Run `dotnet publish` in this STS2 mod project (this builds the DLL and exports the Godot .pck file).
+If there are compilation errors, fix them and re-run dotnet publish.
+Repeat until it succeeds or you've tried {{ max_attempts }} times.
+Report the final status clearly.

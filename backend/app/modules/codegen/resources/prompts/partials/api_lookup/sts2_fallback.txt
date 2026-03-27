@@ -1,0 +1,3 @@
+sts2.dll decompiled source is NOT available on this machine.
+Use `ilspycmd <path_to_sts2.dll>` to look up specific classes when needed.
+Game DLL is typically at: {{ ilspy_example_dll_path }}

@@ -13,8 +13,14 @@ from app.modules.codegen.application.prompt_assembler import PromptAssembler
 from app.modules.codegen.application.services import CodegenService
 from app.modules.codegen.domain.models import AssetCodegenRequest, AssetGroupRequest, CustomCodegenRequest, ModProjectRequest
 from app.modules.knowledge.infra.sts2_docs_source import Sts2DocsKnowledgeSource
+from app.shared.prompting import PromptLoader
 from config import get_decompiled_src_path
 from llm.agent_runner import run_agent_task
+
+_API_LOOKUP_PROMPT_ROOT = (
+    Path(__file__).resolve().parent.parent / "app" / "modules" / "codegen" / "resources" / "prompts" / "partials" / "api_lookup"
+)
+_ILSPY_EXAMPLE_DLL_PATH = "<STS2GamePath>/data_sts2_windows_x86_64/sts2.dll"
 
 
 async def run_claude_code(prompt: str, project_root: Path, stream_callback=None) -> str:
@@ -31,28 +37,32 @@ def _build_api_lookup_section() -> str:
     - 否则：告知用 ilspycmd（降级模式）
     BaseLib 反编译始终可用（在仓库内）。
     """
-    baselib_note = (
-        f"BaseLib (Alchyr.Sts2.BaseLib) decompiled source: `{BASELIB_SRC_PATH}`\n"
-        "Read this file directly for CustomCardModel, CustomPotionModel, PlaceholderCharacterModel, etc.\n"
-        "Do NOT curl GitHub for BaseLib — the local decompiled copy is authoritative."
+    prompt_loader = PromptLoader(root=_API_LOOKUP_PROMPT_ROOT)
+    title = prompt_loader.load("title.txt")
+    baselib_note = prompt_loader.render(
+        "baselib.txt",
+        {
+            "baselib_src_path": f"`{BASELIB_SRC_PATH}`",
+        },
     )
 
     decompiled_path = get_decompiled_src_path()
     if decompiled_path:
-        sts2_note = (
-            f"Full decompiled sts2.dll source: `{decompiled_path}` (Read/Grep directly).\n"
-            "Key subdirs: `MegaCrit.Sts2.Core.Commands\\` (DamageCmd, PowerCmd, CreatureCmd…),\n"
-            "`MegaCrit.Sts2.Core.Models.Cards\\` (StrikeIronclad etc.), `MegaCrit.Sts2.Core.Models\\`.\n"
-            "Only fall back to ilspycmd if a specific class is missing from this directory."
+        sts2_note = prompt_loader.render(
+            "sts2_local.txt",
+            {
+                "decompiled_src_path": f"`{decompiled_path}`",
+            },
         )
     else:
-        sts2_note = (
-            "sts2.dll decompiled source is NOT available on this machine.\n"
-            "Use `ilspycmd <path_to_sts2.dll>` to look up specific classes when needed.\n"
-            "Game DLL is typically at: `<STS2GamePath>/data_sts2_windows_x86_64/sts2.dll`"
+        sts2_note = prompt_loader.render(
+            "sts2_fallback.txt",
+            {
+                "ilspy_example_dll_path": f"`{_ILSPY_EXAMPLE_DLL_PATH}`",
+            },
         )
 
-    return f"## API Lookup\n{baselib_note}\n\n{sts2_note}"
+    return f"{title}\n{baselib_note}\n\n{sts2_note}"
 
 
 def _build_codegen_service() -> CodegenService:

@@ -1,0 +1,7 @@
+Create a new STS2 mod project named "{{ project_name }}" at {{ project_path }}.
+
+Steps:
+1. Clone the ModTemplate from https://github.com/Alchyr/ModTemplate-StS2 into {{ project_path }}
+2. Rename the project: update .csproj file, ModEntry.cs class name, and any other references to the template name.
+3. Check that `dotnet build` works (may fail without local.props, that's OK — just note it).
+4. Report what was created and what the user needs to configure next (local.props paths).

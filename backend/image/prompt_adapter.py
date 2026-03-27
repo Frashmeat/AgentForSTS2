@@ -4,18 +4,43 @@ Prompt Adapter：将用户的卡牌/遗物设计描述翻译为各图生模型�
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 
 import litellm
 
 from app.modules.image.application.ports import PromptOptimizer
+from app.shared.prompting import PromptLoader
 from config import get_config
 from llm.text_runner import complete_text, resolve_model
 
 ImageProvider = Literal["flux2", "sdxl", "jimeng", "wanxiang"]
 
-# 各模型的 prompt 风格说明，注入给 LLM 用于生成
-STYLE_GUIDES: dict[ImageProvider, dict] = {
+_PROMPT_ROOT = Path(__file__).resolve().parent.parent / "app" / "modules" / "image" / "resources" / "prompts"
+_PROMPT_LOADER = PromptLoader(root=_PROMPT_ROOT)
+_TRANSPARENT_BG_RULE = "The asset requires a transparent/white background (no background scene)"
+_FALLBACK_PROMPT_EN_SUFFIX = ", trading card game art style, dramatic cinematic lighting, highly detailed, sharp focus"
+_FALLBACK_PROMPT_EN_TRANSPARENT_SUFFIX = ", isolated on pure white background, no shadow, no background"
+_FALLBACK_PROMPT_CN_SUFFIX = "，交易卡牌艺术风格，电影级光照，高清细节"
+_FALLBACK_PROMPT_CN_TRANSPARENT_SUFFIX = "，白色纯净背景"
+_FALLBACK_SDXL_NEGATIVE_PROMPT = "blurry, low quality, text, watermark, signature, deformed"
+_ADAPT_PROMPT_TEMPLATE = """You are an expert at writing image generation prompts for trading card game assets. Extract ONLY the visual/artistic elements from the user's description and convert them into an optimized image prompt. IMPORTANT: Ignore all game mechanics — damage values, costs, card effects, upgrade conditions, numbers, keywords like 'deal X damage', 'gain Y block', etc. Focus solely on: appearance, materials, colors, style, lighting, mood, and composition. Return ONLY a JSON object with keys: 'prompt' and optionally 'negative_prompt'. No explanation, no markdown, just the JSON.
+
+Asset type: {{ asset_type }}
+Target model family: {{ provider }} ({{ guide_lang }} prompt style)
+Formula: {{ guide_formula }}
+Rules:
+{{ rules_text }}
+Example output: {{ guide_example }}
+{{ guide_negative_example_block }}
+
+User design description:
+{{ user_description }}
+
+Generate the optimized image prompt now (visual elements only, no game mechanics).
+"""
+
+_STYLE_GUIDE_DEFAULTS: dict[ImageProvider, dict[str, object]] = {
     "flux2": {
         "lang": "English",
         "formula": "Subject (most important first) + Action/Detail + Style + Camera + Lighting",
@@ -86,6 +111,56 @@ _CONTENT_SAFE_REPLACEMENTS: list[tuple[str, str]] = [
 ]
 
 
+def _load_prompt_resource(name: str, fallback_text: str) -> str:
+    text = _PROMPT_LOADER.load(name, fallback_template=fallback_text)
+    return text.strip()
+
+
+def _load_prompt_resource_lines(name: str, fallback_lines: list[str]) -> list[str]:
+    text = _load_prompt_resource(name, "\n".join(f"- {line}" for line in fallback_lines))
+    lines = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("- "):
+            line = line[2:].strip()
+        lines.append(line)
+    return lines
+
+
+def _build_style_guides() -> dict[ImageProvider, dict]:
+    guides: dict[ImageProvider, dict] = {}
+    for provider, defaults in _STYLE_GUIDE_DEFAULTS.items():
+        guide = {
+            "lang": defaults["lang"],
+            "formula": _load_prompt_resource(
+                f"guide_{provider}_formula.txt",
+                str(defaults["formula"]),
+            ),
+            "rules": _load_prompt_resource_lines(
+                f"guide_{provider}_rules.txt",
+                list(defaults["rules"]),
+            ),
+            "example": _load_prompt_resource(
+                f"guide_{provider}_example.txt",
+                str(defaults["example"]),
+            ),
+        }
+        negative_example = defaults.get("negative_example")
+        if negative_example is not None:
+            guide["negative_example"] = _load_prompt_resource(
+                f"guide_{provider}_negative_example.txt",
+                str(negative_example),
+            )
+        guides[provider] = guide
+    return guides
+
+
+# 各模型的 prompt 风格说明，注入给 LLM 用于生成
+STYLE_GUIDES: dict[ImageProvider, dict] = _build_style_guides()
+
+
 def _sanitize_for_content_policy(text: str) -> str:
     """替换可能触发内容审核的词汇（主要针对国内图生 API）。"""
     import re
@@ -108,25 +183,27 @@ async def adapt_prompt(
     cfg = get_config()
     llm_cfg = cfg["llm"]
     guide = STYLE_GUIDES[provider]
+    negative_example_block = ""
+    if guide.get("negative_example"):
+        negative_example_block = f"Example negative prompt: {guide['negative_example']}\n"
 
     rules_text = "\n".join(f"- {r}" for r in guide["rules"])
     if needs_transparent_bg and "transparent" not in " ".join(guide["rules"]).lower():
-        rules_text += "\n- The asset requires a transparent/white background (no background scene)"
+        rules_text += "\n- " + _load_prompt_resource("transparent_bg_rule.txt", _TRANSPARENT_BG_RULE)
 
-    full_prompt = (
-        "You are an expert at writing image generation prompts for trading card game assets. "
-        "Extract ONLY the visual/artistic elements from the user's description and convert them into an optimized image prompt. "
-        "IMPORTANT: Ignore all game mechanics — damage values, costs, card effects, upgrade conditions, numbers, keywords like 'deal X damage', 'gain Y block', etc. "
-        "Focus solely on: appearance, materials, colors, style, lighting, mood, and composition. "
-        "Return ONLY a JSON object with keys: 'prompt' and optionally 'negative_prompt'. "
-        "No explanation, no markdown, just the JSON.\n\n"
-        f"Asset type: {asset_type}\n"
-        f"Target model family: {provider} ({guide['lang']} prompt style)\n"
-        f"Formula: {guide['formula']}\n"
-        f"Rules:\n{rules_text}\n"
-        f"Example output: {guide['example']}\n\n"
-        f"User design description:\n{user_description}\n\n"
-        "Generate the optimized image prompt now (visual elements only, no game mechanics)."
+    full_prompt = _PROMPT_LOADER.render(
+        "adapt_prompt.txt",
+        {
+            "asset_type": asset_type,
+            "provider": provider,
+            "guide_example": guide["example"],
+            "guide_formula": guide["formula"],
+            "guide_lang": guide["lang"],
+            "guide_negative_example_block": negative_example_block,
+            "rules_text": rules_text,
+            "user_description": user_description,
+        },
+        fallback_template=_ADAPT_PROMPT_TEMPLATE,
     )
 
     try:
@@ -196,12 +273,18 @@ def _fallback_prompt(description: str, provider: ImageProvider, needs_transparen
     visual = re.sub(r'[，,]{2,}', '，', visual)  # 多余连续逗号
     visual = re.sub(r'\s{2,}', ' ', visual).strip(' ，,.')
 
-    bg_suffix = ", isolated on pure white background, no shadow, no background" if needs_transparent_bg else ""
+    bg_suffix = _load_prompt_resource(
+        "fallback_prompt_en_transparent_suffix.txt",
+        _FALLBACK_PROMPT_EN_TRANSPARENT_SUFFIX,
+    ) if needs_transparent_bg else ""
     if provider in ("flux2", "sdxl"):
-        prompt = f"{visual}, trading card game art style, dramatic cinematic lighting, highly detailed, sharp focus{bg_suffix}"
-        neg = "blurry, low quality, text, watermark, signature, deformed" if provider == "sdxl" else None
+        prompt = f"{visual}{_load_prompt_resource('fallback_prompt_en_suffix.txt', _FALLBACK_PROMPT_EN_SUFFIX)}{bg_suffix}"
+        neg = _load_prompt_resource("fallback_sdxl_negative_prompt.txt", _FALLBACK_SDXL_NEGATIVE_PROMPT) if provider == "sdxl" else None
     else:
-        bg_cn = "，白色纯净背景" if needs_transparent_bg else ""
-        prompt = f"{visual}，交易卡牌艺术风格，电影级光照，高清细节{bg_cn}"
+        bg_cn = _load_prompt_resource(
+            "fallback_prompt_cn_transparent_suffix.txt",
+            _FALLBACK_PROMPT_CN_TRANSPARENT_SUFFIX,
+        ) if needs_transparent_bg else ""
+        prompt = f"{visual}{_load_prompt_resource('fallback_prompt_cn_suffix.txt', _FALLBACK_PROMPT_CN_SUFFIX)}{bg_cn}"
         neg = None
     return {"prompt": prompt, "negative_prompt": neg}
