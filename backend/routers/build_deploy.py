@@ -14,7 +14,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, WebSocket
 
-from agents.code_agent import build_and_fix
+from app.modules.codegen.api import build_and_fix
 from config import get_config
 
 router = APIRouter()

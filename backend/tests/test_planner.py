@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from agents.planner import _parse_plan, topological_sort, _build_planner_prompt, PlanItem
+from app.modules.planning.api import parse_plan, topological_sort, build_planner_prompt, PlanItem
 
 
 # ── _parse_plan ───────────────────────────────────────────────────────────────
@@ -28,7 +28,7 @@ MINIMAL_PLAN_JSON = """{
 
 
 def test_parse_plan_basic():
-    plan = _parse_plan(MINIMAL_PLAN_JSON)
+    plan = parse_plan(MINIMAL_PLAN_JSON)
     assert plan.mod_name == "TestMod"
     assert plan.summary == "A test mod"
     assert len(plan.items) == 1
@@ -53,7 +53,7 @@ def test_parse_plan_with_dependencies():
          "image_description": "", "depends_on": ["power_burn"]}
       ]
     }"""
-    plan = _parse_plan(json_str)
+    plan = parse_plan(json_str)
     assert len(plan.items) == 2
     card_item = next(it for it in plan.items if it.id == "card_ignite")
     assert "power_burn" in card_item.depends_on
@@ -69,7 +69,7 @@ def test_parse_plan_custom_code_no_image():
          "needs_image": false, "image_description": "", "depends_on": []}
       ]
     }"""
-    plan = _parse_plan(json_str)
+    plan = parse_plan(json_str)
     item = plan.items[0]
     assert item.needs_image is False
     assert item.type == "custom_code"
@@ -85,7 +85,7 @@ def test_parse_plan_defaults_gracefully():
          "needs_image": true, "image_description": "", "depends_on": []}
       ]
     }"""
-    plan = _parse_plan(json_str)
+    plan = parse_plan(json_str)
     assert plan.summary == ""
     assert plan.mod_name == "Minimal"
 
@@ -135,7 +135,7 @@ def test_topo_sort_missing_dep_ignored():
 # ── _build_planner_prompt ─────────────────────────────────────────────────────
 
 def test_planner_prompt_contains_api_hints():
-    prompt = _build_planner_prompt("make a relic that triggers on attack")
+    prompt = build_planner_prompt("make a relic that triggers on attack")
     assert "OnPlay" in prompt
     assert "PowerModel" in prompt
     assert "ShouldReceiveCombatHooks" in prompt
@@ -143,12 +143,12 @@ def test_planner_prompt_contains_api_hints():
 
 def test_planner_prompt_contains_user_requirements():
     req = "unique_requirement_xyz_12345"
-    prompt = _build_planner_prompt(req)
+    prompt = build_planner_prompt(req)
     assert req in prompt
 
 
 def test_planner_prompt_contains_json_schema():
-    prompt = _build_planner_prompt("test")
+    prompt = build_planner_prompt("test")
     assert "implementation_notes" in prompt
     assert "depends_on" in prompt
     assert "needs_image" in prompt

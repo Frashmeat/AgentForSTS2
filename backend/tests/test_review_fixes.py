@@ -7,8 +7,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from agents import code_agent
 from routers import batch_workflow
+from app.modules.codegen import api as codegen_api
 
 
 @pytest.mark.asyncio
@@ -19,12 +19,12 @@ async def test_create_asset_prompt_uses_mod_localization_root(tmp_path, monkeypa
         captured["prompt"] = prompt
         return "ok"
 
-    monkeypatch.setattr(code_agent, "run_claude_code", fake_run)
+    monkeypatch.setattr(codegen_api, "run_claude_code", fake_run)
 
     project_root = tmp_path / "SampleMod"
     project_root.mkdir()
 
-    await code_agent.create_asset(
+    await codegen_api.create_asset(
         design_description="测试描述",
         asset_type="card",
         asset_name="DarkBlade",
@@ -39,8 +39,15 @@ async def test_create_asset_prompt_uses_mod_localization_root(tmp_path, monkeypa
     assert "DarkBlade/localization/zhs/<type>s.json" not in prompt
 
 
-def test_batch_workflow_imports_build_and_fix():
-    assert callable(batch_workflow.build_and_fix)
+def test_routers_import_module_entrypoints_instead_of_agents():
+    batch_source = Path(batch_workflow.__file__).read_text(encoding="utf-8")
+    workflow_source = Path(Path(batch_workflow.__file__).parent / "workflow.py").read_text(encoding="utf-8")
+    build_source = Path(Path(batch_workflow.__file__).parent / "build_deploy.py").read_text(encoding="utf-8")
+
+    assert "from agents.code_agent import" not in batch_source
+    assert "from agents.planner import" not in batch_source
+    assert "from agents.code_agent import" not in workflow_source
+    assert "from agents.code_agent import" not in build_source
 
 
 def test_batch_workflow_retry_path_does_not_call_missing_process_item():

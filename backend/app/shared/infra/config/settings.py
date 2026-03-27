@@ -30,11 +30,6 @@ DEFAULT_LLM_CONFIG = {
 
 DEFAULT_CONFIG = {
     "llm": DEFAULT_LLM_CONFIG,
-    "migration": {
-        "use_modular_single_workflow": False,
-        "use_modular_batch_workflow": False,
-        "use_unified_ws_contract": False,
-    },
     "approval": {
         "auto_execute_low_risk": False,
         "allowed_commands": [],
@@ -100,6 +95,7 @@ def normalize_llm_config(llm_cfg: Optional[dict[str, Any]]) -> dict[str, Any]:
 def normalize_config(config: Optional[dict[str, Any]]) -> dict[str, Any]:
     cfg = _deep_merge(DEFAULT_CONFIG, config or {})
     cfg["llm"] = normalize_llm_config(cfg.get("llm"))
+    cfg.pop("migration", None)
     return cfg
 
 
@@ -152,10 +148,6 @@ class Settings:
     @property
     def approval(self) -> dict[str, Any]:
         return self.raw["approval"]
-
-    @property
-    def migration(self) -> dict[str, Any]:
-        return self.raw["migration"]
 
     @property
     def image_gen(self) -> dict[str, Any]:
