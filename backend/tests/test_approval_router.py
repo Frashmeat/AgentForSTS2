@@ -2,6 +2,7 @@
 import sys
 from pathlib import Path
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -10,6 +11,15 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from approval.models import ActionRequest
 from approval.runtime import get_approval_store, get_approval_executor, reset_approval_runtime
 from routers.approval_router import router
+
+
+@pytest.fixture(autouse=True)
+def approval_runtime_isolation():
+    reset_approval_runtime()
+    try:
+        yield
+    finally:
+        reset_approval_runtime()
 
 
 def _create_action() -> ActionRequest:
@@ -26,34 +36,32 @@ def _create_action() -> ActionRequest:
 
 
 def test_approval_router_lists_and_updates_requests():
-    reset_approval_runtime()
     store = get_approval_store()
     action = store.create_request(_create_action())
 
     app = FastAPI()
     app.include_router(router, prefix="/api")
-    client = TestClient(app)
 
-    listed = client.get("/api/approvals")
-    assert listed.status_code == 200
-    assert listed.json()[0]["action_id"] == action.action_id
+    with TestClient(app) as client:
+        listed = client.get("/api/approvals")
+        assert listed.status_code == 200
+        assert listed.json()[0]["action_id"] == action.action_id
 
-    fetched = client.get(f"/api/approvals/{action.action_id}")
-    assert fetched.status_code == 200
-    assert fetched.json()["title"] == "Write source"
+        fetched = client.get(f"/api/approvals/{action.action_id}")
+        assert fetched.status_code == 200
+        assert fetched.json()["title"] == "Write source"
 
-    approved = client.post(f"/api/approvals/{action.action_id}/approve")
-    assert approved.status_code == 200
-    assert approved.json()["status"] == "approved"
+        approved = client.post(f"/api/approvals/{action.action_id}/approve")
+        assert approved.status_code == 200
+        assert approved.json()["status"] == "approved"
 
-    rejected = client.post(f"/api/approvals/{action.action_id}/reject", json={"reason": "Not safe"})
-    assert rejected.status_code == 200
-    assert rejected.json()["status"] == "rejected"
-    assert rejected.json()["error"] == "Not safe"
+        rejected = client.post(f"/api/approvals/{action.action_id}/reject", json={"reason": "Not safe"})
+        assert rejected.status_code == 200
+        assert rejected.json()["status"] == "rejected"
+        assert rejected.json()["error"] == "Not safe"
 
 
 def test_approval_router_execute_runs_approved_action(tmp_path):
-    reset_approval_runtime()
     store = get_approval_store()
     executor = get_approval_executor()
     executor.allowed_roots = [tmp_path]
@@ -65,9 +73,10 @@ def test_approval_router_execute_runs_approved_action(tmp_path):
 
     app = FastAPI()
     app.include_router(router, prefix="/api")
-    client = TestClient(app)
 
-    executed = client.post(f"/api/approvals/{action.action_id}/execute")
-    assert executed.status_code == 200
-    assert executed.json()["status"] == "succeeded"
+    with TestClient(app) as client:
+        executed = client.post(f"/api/approvals/{action.action_id}/execute")
+        assert executed.status_code == 200
+        assert executed.json()["status"] == "succeeded"
+
     assert (tmp_path / "Cards" / "TestCard.cs").exists()

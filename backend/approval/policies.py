@@ -15,5 +15,11 @@ def infer_risk_level(kind: str) -> RiskLevel:
     return _DEFAULT_RISK_BY_KIND.get(kind, "medium")
 
 
-def should_require_approval(risk_level: RiskLevel) -> bool:
+def should_require_approval(
+    risk_level: RiskLevel,
+    *,
+    auto_execute_low_risk: bool = False,
+) -> bool:
+    if risk_level == "low":
+        return not auto_execute_low_risk
     return risk_level in {"medium", "high"}

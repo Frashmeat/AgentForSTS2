@@ -129,6 +129,10 @@ async def _plan_group_approval_requests(group: list[PlanItem], llm_cfg: dict, pr
     return summary, actions
 
 
+def _group_key(group: list[PlanItem]) -> tuple[str, ...]:
+    return tuple(item.id for item in group)
+
+
 # ── HTTP 端点：规划 ────────────────────────────────────────────────────────────
 
 @router.post("/plan")
@@ -173,6 +177,8 @@ async def ws_batch(ws: WebSocket):
     image_gen_sem = asyncio.Semaphore(max(1, concurrency))
     code_gen_lock = asyncio.Lock()
     item_done_events: dict[str, asyncio.Event] = {}
+    approval_states: dict[tuple[str, ...], dict[str, object]] = {}
+    deferred_group_messages: dict[str, list[dict]] = {}
 
     async def send(event: str, **data):
         await ws.send_text(json.dumps({"event": event, **data}))
@@ -237,6 +243,47 @@ async def ws_batch(ws: WebSocket):
             for group in groups
             for item in group
         }
+
+        async def approve_group_actions(group: list[PlanItem]) -> None:
+            state = approval_states.get(_group_key(group))
+            if state is None or state.get("approved"):
+                return
+
+            service = get_approval_service()
+            store = getattr(service, "store", None)
+            if store is None:
+                raise RuntimeError("approval service store is not configured")
+
+            for action in state["actions"]:
+                if action.requires_approval and action.status != "approved":
+                    store.approve_request(action.action_id)
+
+            state["approved"] = True
+
+        async def execute_group_actions(group: list[PlanItem]) -> None:
+            state = approval_states.get(_group_key(group))
+            if state is None or state.get("actions_executed"):
+                return
+
+            service = get_approval_service()
+            for action in state["actions"]:
+                if action.status == "succeeded":
+                    continue
+                if action.requires_approval and action.status != "approved":
+                    raise RuntimeError("approval request must be approved before execution")
+                updated = await service.execute_request(action.action_id)
+                if updated.status == "failed":
+                    raise RuntimeError(updated.error or "approval action execution failed")
+
+            state["actions_executed"] = True
+
+        async def replay_deferred_group_messages(group: list[PlanItem]) -> None:
+            queued: list[dict] = []
+            for item in group:
+                queued.extend(deferred_group_messages.pop(item.id, []))
+
+            for msg in queued:
+                await handle_control_message(msg, defer_if_unready=False)
         if any(len(g) > 1 for g in groups):
             multi = [g for g in groups if len(g) > 1]
             await send("batch_progress", message=f"发现 {len(multi)} 个依赖组，将合并生成代码（更快）")
@@ -341,6 +388,7 @@ async def ws_batch(ws: WebSocket):
                 return
 
             async with code_gen_lock:
+                group_key = _group_key(group)
                 # 向所有 item 发送代码生成开始的通知
                 first_id = group[0].id
                 for item in group:
@@ -350,12 +398,31 @@ async def ws_batch(ws: WebSocket):
                 async def _stream(chunk: str):
                     await send("item_agent_stream", item_id=first_id, chunk=chunk)
 
+                approval_pending = False
                 try:
                     if cfg_loaded["llm"].get("execution_mode") == "approval_first":
-                        summary, actions = await _plan_group_approval_requests(group, cfg_loaded["llm"], project_root)
-                        for item in group:
-                            await _send_item_approval_pending(ws, item.id, summary, actions)
-                        return
+                        approval_state = approval_states.get(group_key)
+                        if approval_state is None:
+                            summary, actions = await _plan_group_approval_requests(group, cfg_loaded["llm"], project_root)
+                            approval_states[group_key] = {
+                                "summary": summary,
+                                "actions": actions,
+                                "approved": False,
+                                "actions_executed": False,
+                                "resume_requested": False,
+                            }
+                            for item in group:
+                                await _send_item_approval_pending(ws, item.id, summary, actions)
+                            approval_pending = True
+                            await replay_deferred_group_messages(group)
+                            return
+
+                        if not approval_state["approved"]:
+                            approval_pending = True
+                            return
+
+                        if not approval_state["actions_executed"]:
+                            await execute_group_actions(group)
 
                     if len(group) == 1:
                         item = group[0]
@@ -392,8 +459,9 @@ async def ws_batch(ws: WebSocket):
                             pass
                         error_ids.add(item.id)
                 finally:
-                    for item in group:
-                        item_done_events[item.id].set()
+                    if not approval_pending:
+                        for item in group:
+                            item_done_events[item.id].set()
 
         async def retry_group_for_item(item_id: str):
             group = group_by_item[item_id]
@@ -412,6 +480,62 @@ async def ws_batch(ws: WebSocket):
 
             tasks.append(asyncio.create_task(process_group_code(group)))
 
+        async def resume_group_for_item(item_id: str):
+            group = group_by_item[item_id]
+            group_key = _group_key(group)
+            state = approval_states.get(group_key)
+            if state is None:
+                return
+            if state.get("resume_requested"):
+                return
+
+            state["resume_requested"] = True
+            tasks.append(asyncio.create_task(process_group_code(group)))
+
+        async def handle_control_message(msg: dict, *, defer_if_unready: bool = True):
+            action = msg.get("action")
+            item_id = msg.get("item_id")
+
+            if action == "select_image" and item_id in selection_futures:
+                fut = selection_futures.get(item_id)
+                if fut and not fut.done():
+                    fut.set_result({"action": "select", "index": msg["index"]})
+                return
+
+            if action == "generate_more" and item_id in selection_futures:
+                fut = selection_futures.get(item_id)
+                if fut and not fut.done():
+                    fut.set_result({
+                        "action": "generate_more",
+                        "prompt": msg.get("prompt"),
+                        "negative_prompt": msg.get("negative_prompt"),
+                    })
+                return
+
+            if action == "approve_all" and item_id in items_by_id:
+                group = group_by_item[item_id]
+                state = approval_states.get(_group_key(group))
+                if state is None:
+                    if defer_if_unready:
+                        deferred_group_messages.setdefault(item_id, []).append(msg)
+                    return
+                await approve_group_actions(group)
+                return
+
+            if action == "resume" and item_id in items_by_id:
+                group = group_by_item[item_id]
+                state = approval_states.get(_group_key(group))
+                if state is None or not state["approved"]:
+                    if defer_if_unready:
+                        deferred_group_messages.setdefault(item_id, []).append(msg)
+                    return
+                await resume_group_for_item(item_id)
+                return
+
+            if action == "retry_item" and item_id in items_by_id:
+                pending.add(item_id)
+                await retry_group_for_item(item_id)
+
         # ── 6. 启动所有任务 ───────────────────────────────────────────────────
         items_by_id = {item.id: item for item in sorted_items}
         tasks = [asyncio.create_task(process_item_images(item)) for item in sorted_items]
@@ -423,27 +547,7 @@ async def ws_batch(ws: WebSocket):
             try:
                 raw = await asyncio.wait_for(ws.receive_text(), timeout=1.0)
                 msg = json.loads(raw)
-                action = msg.get("action")
-                item_id = msg.get("item_id")
-
-                if action == "select_image" and item_id in selection_futures:
-                    fut = selection_futures.get(item_id)
-                    if fut and not fut.done():
-                        fut.set_result({"action": "select", "index": msg["index"]})
-
-                elif action == "generate_more" and item_id in selection_futures:
-                    fut = selection_futures.get(item_id)
-                    if fut and not fut.done():
-                        fut.set_result({
-                            "action": "generate_more",
-                            "prompt": msg.get("prompt"),
-                            "negative_prompt": msg.get("negative_prompt"),
-                        })
-
-                elif action == "retry_item" and item_id in items_by_id:
-                    # 重置状态，重新跑该 item
-                    pending.add(item_id)
-                    await retry_group_for_item(item_id)
+                await handle_control_message(msg)
 
             except asyncio.TimeoutError:
                 pass

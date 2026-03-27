@@ -104,19 +104,30 @@ def _single_workflow_mode(config: dict | None = None) -> str:
     return "modular" if flags.use_modular_single_workflow else "legacy"
 
 
-async def _maybe_await_approval(ws: WebSocket, description: str, llm_cfg: dict, project_root: Path) -> bool:
-    """审批模式下：发送待审批事件，等待用户确认。返回 True 表示继续执行，False 表示用户取消。"""
+async def _maybe_await_approval(
+    ws: WebSocket,
+    description: str,
+    llm_cfg: dict,
+    project_root: Path,
+) -> tuple[bool, str | None]:
+    """审批模式下：等待用户确认，并在 approval_first 下返回主执行链。
+
+    返回值:
+    - (True, None): 继续默认执行链
+    - (False, None): 用户取消
+    - (False, output): 保留给兼容分支；当前单资产流程不会使用
+    """
     if llm_cfg.get("execution_mode") != "approval_first":
-        return True
+        return True, None
     summary, actions = await _plan_approval_requests(description, llm_cfg, project_root)
     await _send_approval_pending(ws, summary, actions)
     decision = json.loads(await ws.receive_text())
     if decision.get("action") != "approve_all":
         await _send(ws, "done", {"success": False, "image_paths": [], "agent_output": "用户取消执行"})
-        return False
+        return False, None
     await _send_stage(ws, "agent", "agent_running", "审批通过，开始生成代码...")
     await _send(ws, "progress", {"message": "审批通过，Code Agent 开始生成代码..."})
-    return True
+    return True, None
 
 
 async def _plan_approval_requests(description: str, llm_cfg: dict, project_root: Path):
@@ -279,11 +290,19 @@ async def ws_create(ws: WebSocket):
         await _send(ws, "progress", {"message": f"图像资产已写入: {[str(p) for p in image_paths]}"})
 
         # 6. Code Agent
-        await _send_stage(ws, "agent", "agent_running", "正在生成代码...")
-        await _send(ws, "progress", {"message": "Code Agent 开始生成代码..."})
-
-        if not await _maybe_await_approval(ws, description, cfg["llm"], project_root):
+        should_continue, approval_output = await _maybe_await_approval(ws, description, cfg["llm"], project_root)
+        if approval_output is not None:
+            await _send(ws, "done", {
+                "success": True,
+                "image_paths": [str(p) for p in image_paths],
+                "agent_output": approval_output,
+            })
             return
+        if not should_continue:
+            return
+        if cfg["llm"].get("execution_mode") != "approval_first":
+            await _send_stage(ws, "agent", "agent_running", "正在生成代码...")
+            await _send(ws, "progress", {"message": "Code Agent 开始生成代码..."})
 
         async def stream_to_ws(chunk: str):
             await _send(ws, "agent_stream", {"chunk": chunk})
@@ -335,12 +354,20 @@ async def _ws_run_custom_code(ws: WebSocket, params: dict, project_root: Path):
             project_root = await create_mod_project(project_name, parent_dir, _stream_init)
         await _send(ws, "progress", {"message": f"项目初始化完成: {project_root}"})
 
-    await _send_stage(ws, "agent", "agent_running", "正在生成自定义代码...")
-    await _send(ws, "progress", {"message": "Code Agent 开始生成自定义代码..."})
-
     cfg = get_config()
-    if not await _maybe_await_approval(ws, description, cfg["llm"], project_root):
+    should_continue, approval_output = await _maybe_await_approval(ws, description, cfg["llm"], project_root)
+    if approval_output is not None:
+        await _send(ws, "done", {
+            "success": True,
+            "image_paths": [],
+            "agent_output": approval_output,
+        })
         return
+    if not should_continue:
+        return
+    if cfg["llm"].get("execution_mode") != "approval_first":
+        await _send_stage(ws, "agent", "agent_running", "正在生成自定义代码...")
+        await _send(ws, "progress", {"message": "Code Agent 开始生成自定义代码..."})
 
     async def stream_to_ws(chunk: str):
         await _send(ws, "agent_stream", {"chunk": chunk})
@@ -408,12 +435,20 @@ async def _ws_run_with_provided_image(ws: WebSocket, params: dict, project_root:
     image_paths = await _run_postprocess(img, asset_type, asset_name, project_root)
     await _send(ws, "progress", {"message": f"图像资产已写入: {[str(p) for p in image_paths]}"})
 
-    await _send_stage(ws, "agent", "agent_running", "正在生成代码...")
-    await _send(ws, "progress", {"message": "Code Agent 开始生成代码..."})
-
     cfg = get_config()
-    if not await _maybe_await_approval(ws, description, cfg["llm"], project_root):
+    should_continue, approval_output = await _maybe_await_approval(ws, description, cfg["llm"], project_root)
+    if approval_output is not None:
+        await _send(ws, "done", {
+            "success": True,
+            "image_paths": [str(p) for p in image_paths],
+            "agent_output": approval_output,
+        })
         return
+    if not should_continue:
+        return
+    if cfg["llm"].get("execution_mode") != "approval_first":
+        await _send_stage(ws, "agent", "agent_running", "正在生成代码...")
+        await _send(ws, "progress", {"message": "Code Agent 开始生成代码..."})
 
     async def stream_to_ws(chunk: str):
         await _send(ws, "agent_stream", {"chunk": chunk})

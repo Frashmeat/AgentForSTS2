@@ -36,6 +36,10 @@ def test_infer_risk_level_defaults_by_action_kind():
 
 
 def test_should_require_approval_for_medium_and_high_risk():
-    assert should_require_approval("low") is False
+    assert should_require_approval("low") is True
     assert should_require_approval("medium") is True
     assert should_require_approval("high") is True
+
+
+def test_should_skip_approval_for_low_risk_when_auto_execute_enabled():
+    assert should_require_approval("low", auto_execute_low_risk=True) is False
