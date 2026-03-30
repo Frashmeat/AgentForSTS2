@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.modules.approval.application.ports import ActionExecutor, ApprovalStore
 from app.modules.approval.domain.models import ActionRequest
+from config import get_config
 
 
 class ApprovalService:
@@ -25,13 +26,17 @@ class ApprovalService:
 
         kind = raw_action["kind"]
         risk_level = infer_risk_level(kind)
+        approval_cfg = get_config().get("approval", {})
         return ActionRequest(
             kind=kind,
             title=raw_action["title"],
             reason=raw_action.get("reason", ""),
             payload=raw_action.get("payload", {}),
             risk_level=risk_level,
-            requires_approval=should_require_approval(risk_level),
+            requires_approval=should_require_approval(
+                risk_level,
+                auto_execute_low_risk=bool(approval_cfg.get("auto_execute_low_risk", False)),
+            ),
             source_backend=source_backend,
             source_workflow=source_workflow,
         )

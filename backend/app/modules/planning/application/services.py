@@ -7,33 +7,25 @@ from llm.text_runner import complete_text
 
 from app.modules.planning.application.dependency_graph import find_groups, topological_sort
 from app.modules.planning.domain.models import AssetItemType, ModPlan, PlanItem
+from app.shared.prompting import PromptLoader
 
 _NEEDS_IMAGE_TYPES: set[AssetItemType] = {"card", "card_fullscreen", "relic", "power", "character"}
+_PLANNER_PROMPT_BUNDLE_KEY = "planning.planner_prompt"
 
-
-class PlanningService:
-    def __init__(self, knowledge_source=None, text_completion=None) -> None:
-        self.knowledge_source = knowledge_source
-        self.text_completion = text_completion or complete_text
-
-    def build_planner_prompt(self, requirements: str) -> str:
-        api_hints = ""
-        if self.knowledge_source is not None:
-            api_hints = self.knowledge_source.load_context("planner")
-        return f"""You are an expert STS2 (Slay the Spire 2) mod developer and designer.
+_PLANNER_PROMPT_TEMPLATE = """You are an expert STS2 (Slay the Spire 2) mod developer and designer.
 The user wants to create a Slay the Spire 2 mod. Analyze their requirements and produce a detailed, structured mod plan.
 
-{api_hints}
+{{ api_hints }}
 
 User requirements:
-{requirements}
+{{ requirements }}
 
 Output a JSON object with this exact structure:
-{{
+{
   "mod_name": "EnglishModName",
   "summary": "一句话中文描述这个mod的主题",
   "items": [
-    {{
+    {
       "id": "type_name_snake",
       "type": "card" | "card_fullscreen" | "relic" | "power" | "character" | "custom_code",
       "name": "PascalCaseEnglishName",
@@ -43,9 +35,9 @@ Output a JSON object with this exact structure:
       "needs_image": true | false,
       "image_description": "中文视觉描述：画面主体、外观风格、颜色、氛围（不含游戏机制数值）",
       "depends_on": ["id_of_item_this_depends_on"]
-    }}
+    }
   ]
-}}
+}
 
 Rules:
 - type "custom_code": mechanics, buffs, passives, events, anything without a dedicated visual asset. needs_image = false.
@@ -58,8 +50,28 @@ Rules:
 - Create ONLY what the user asked for. Do not add extra items unless they are clearly implied by the requirements.
 - Output ONLY the JSON, no markdown, no explanation.
 - All string values must be valid JSON strings: escape double quotes as \\", backslashes as \\\\, newlines as \\n. Do NOT include raw newlines or unescaped quotes inside string values.
-- implementation_notes must be a single JSON string (no embedded code blocks with triple backticks — use plain text descriptions instead).
+- implementation_notes must be a single JSON string (no embedded code blocks with triple backticks - use plain text descriptions instead).
 """
+
+
+class PlanningService:
+    def __init__(self, knowledge_source=None, text_completion=None, prompt_loader: PromptLoader | None = None) -> None:
+        self.knowledge_source = knowledge_source
+        self.text_completion = text_completion or complete_text
+        self.prompt_loader = prompt_loader or PromptLoader()
+
+    def build_planner_prompt(self, requirements: str) -> str:
+        api_hints = ""
+        if self.knowledge_source is not None:
+            api_hints = self.knowledge_source.load_context("planner")
+        return self.prompt_loader.render(
+            _PLANNER_PROMPT_BUNDLE_KEY,
+            {
+                "api_hints": api_hints,
+                "requirements": requirements,
+            },
+            fallback_template=_PLANNER_PROMPT_TEMPLATE,
+        )
 
     async def plan_mod(self, requirements: str) -> ModPlan:
         cfg = get_config()

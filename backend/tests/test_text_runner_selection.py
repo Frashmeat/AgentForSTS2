@@ -1,9 +1,19 @@
 """Tests for text runner backend resolution."""
 import sys
+import types
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+if "litellm" not in sys.modules:
+    sys.modules["litellm"] = types.SimpleNamespace(acompletion=None)
+
+# test_planning_module injects a stub for llm.text_runner during collection.
+# Drop it here so this module imports the real implementation under test.
+sys.modules.pop("llm.text_runner", None)
+
+from app.shared.prompting import PromptLoader
+from llm import prompt_builder
 from llm.text_runner import build_text_prompt, build_system_prompt, resolve_text_backend, resolve_model
 
 
@@ -50,3 +60,10 @@ def test_build_text_prompt_uses_latest_runtime_custom_prompt_when_requested(monk
         {"custom_prompt": "stale prompt"},
         use_runtime_config=True,
     ) == "base prompt"
+
+
+def test_build_text_prompt_uses_shared_bundle_header_when_legacy_path_missing(monkeypatch):
+    prompt = build_text_prompt("base prompt", {"custom_prompt": "always answer in Chinese"})
+    expected_header = PromptLoader().load("llm.global_prompt_header").strip()
+
+    assert prompt == f"base prompt\n\n{expected_header}\nalways answer in Chinese"

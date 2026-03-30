@@ -12,6 +12,8 @@ from agents.sts2_docs import (
     STS2_MOD_DOCS,
 )
 
+RESOURCE_DIR = Path(__file__).parent.parent / "app" / "modules" / "knowledge" / "resources" / "sts2"
+
 
 def test_api_ref_file_exists():
     """The decompiled API reference markdown must be present."""
@@ -21,6 +23,22 @@ def test_api_ref_file_exists():
 def test_api_ref_file_not_empty():
     content = API_REF_PATH.read_text(encoding="utf-8")
     assert len(content) > 1000, "API reference file looks too small"
+
+
+def test_sts2_resource_files_exist():
+    expected_files = [
+        "common.md",
+        "card.md",
+        "relic.md",
+        "power.md",
+        "potion.md",
+        "character.md",
+        "custom_code.md",
+        "planner_hints.md",
+    ]
+
+    for file_name in expected_files:
+        assert (RESOURCE_DIR / file_name).exists(), f"Missing resource file: {file_name}"
 
 
 # ── get_docs_for_type ─────────────────────────────────────────────────────────
@@ -91,6 +109,15 @@ def test_unknown_type_returns_common_docs():
     assert len(docs) > 100
 
 
+def test_card_docs_include_resource_backed_common_and_type_sections():
+    docs = get_docs_for_type("card")
+    common_text = (RESOURCE_DIR / "common.md").read_text(encoding="utf-8").strip()
+    card_text = (RESOURCE_DIR / "card.md").read_text(encoding="utf-8").strip()
+
+    assert common_text in docs
+    assert card_text in docs
+
+
 # ── get_planner_api_hints ─────────────────────────────────────────────────────
 
 def test_planner_hints_contain_onplay():
@@ -122,6 +149,13 @@ def test_planner_hints_compact_size():
     hints = get_planner_api_hints()
     full_docs = STS2_MOD_DOCS
     assert len(hints) < len(full_docs) / 2, "planner hints should be much smaller than full docs"
+
+
+def test_planner_hints_match_resource_file():
+    hints = get_planner_api_hints()
+    resource_text = (RESOURCE_DIR / "planner_hints.md").read_text(encoding="utf-8").strip()
+
+    assert hints.strip() == resource_text
 
 
 # ── legacy STS2_MOD_DOCS ──────────────────────────────────────────────────────

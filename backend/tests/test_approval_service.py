@@ -2,6 +2,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from approval.service import ApprovalService
@@ -44,7 +46,36 @@ def test_service_converts_ai_plan_into_pending_requests():
     assert len(store.list_requests()) == 2
 
 
-def test_service_uses_low_risk_policy_for_reads():
+def test_service_requires_approval_for_low_risk_reads_by_default():
+    service = ApprovalService(InMemoryApprovalStore())
+
+    actions = service.create_requests_from_plan(
+        {
+            "actions": [
+                {
+                    "kind": "read_file",
+                    "title": "Read MainFile.cs",
+                    "reason": "Need namespace and ModId",
+                    "payload": {"path": "MainFile.cs"},
+                }
+            ]
+        },
+        source_backend="claude",
+        source_workflow="batch",
+    )
+
+    assert actions[0].risk_level == "low"
+    assert actions[0].requires_approval is True
+
+
+def test_service_skips_approval_for_low_risk_reads_when_auto_execute_enabled(monkeypatch: pytest.MonkeyPatch):
+    from app.modules.approval.application import services as approval_services
+
+    monkeypatch.setattr(
+        approval_services,
+        "get_config",
+        lambda: {"approval": {"auto_execute_low_risk": True}},
+    )
     service = ApprovalService(InMemoryApprovalStore())
 
     actions = service.create_requests_from_plan(

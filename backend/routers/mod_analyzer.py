@@ -8,6 +8,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, WebSocket
 
+from app.shared.prompting import PromptLoader
 from config import get_config
 from llm.stream import stream_analysis
 from llm.stage_events import build_stage_event
@@ -16,7 +17,11 @@ router = APIRouter()
 
 _SKIP_DIRS = {"bin", "obj", ".godot", "packages", ".git", ".vs", "__pycache__"}
 
-_SYSTEM_PROMPT = """\
+_PROMPT_LOADER = PromptLoader()
+_MOD_ANALYZER_SYSTEM_PROMPT_KEY = "analyzer.mod_analyzer_system"
+_MOD_ANALYZER_USER_PROMPT_KEY = "analyzer.mod_analyzer_user"
+
+_SYSTEM_PROMPT_TEMPLATE = """\
 你是 Slay the Spire 2 mod 开发专家。请分析给定的 mod 源码，用中文告诉用户以下内容：
 
 1. **Mod 基本信息**：名称、主题、整体风格
@@ -29,11 +34,39 @@ _SYSTEM_PROMPT = """\
 如果某类内容不存在，可以省略该节。
 """
 
+_USER_PROMPT_TEMPLATE = """\
+以下是 mod 项目的源码（路径：{{ project_root }}）：
+
+```
+{{ file_content }}
+```
+
+请分析这个 mod 的内容。
+"""
+
 
 async def _send_stage(ws: WebSocket, scope: str, stage: str, message: str):
     payload = build_stage_event(scope, stage, message)
     if payload:
         await ws.send_text(json.dumps({"event": "stage_update", **payload}))
+
+
+def _get_system_prompt() -> str:
+    return _PROMPT_LOADER.load(
+        _MOD_ANALYZER_SYSTEM_PROMPT_KEY,
+        fallback_template=_SYSTEM_PROMPT_TEMPLATE,
+    )
+
+
+def _build_prompt(project_root: Path, file_content: str) -> str:
+    return _PROMPT_LOADER.render(
+        _MOD_ANALYZER_USER_PROMPT_KEY,
+        {
+            "project_root": project_root,
+            "file_content": file_content,
+        },
+        fallback_template=_USER_PROMPT_TEMPLATE,
+    )
 
 
 def _scan_mod_files(project_root: Path) -> tuple[str, int]:
@@ -108,6 +141,8 @@ async def ws_analyze_mod(ws: WebSocket):
         params = json.loads(raw)
         project_root = Path(params.get("project_root", ""))
 
+        await _send_stage(ws, "text", "reading_input", "正在扫描 Mod 源码...")
+
         if not project_root.exists():
             await ws.send_text(json.dumps({
                 "event": "error",
@@ -115,7 +150,6 @@ async def ws_analyze_mod(ws: WebSocket):
             }))
             return
 
-        await _send_stage(ws, "text", "reading_input", "正在扫描 Mod 源码...")
         file_content, file_count = _scan_mod_files(project_root)
 
         if not file_content.strip():
@@ -128,11 +162,7 @@ async def ws_analyze_mod(ws: WebSocket):
         await ws.send_text(json.dumps({"event": "scan_info", "files": file_count}))
 
         await _send_stage(ws, "text", "preparing_prompt", "正在整理源码分析上下文...")
-        prompt = (
-            f"以下是 mod 项目的源码（路径：{project_root}）：\n\n"
-            f"```\n{file_content}\n```\n\n"
-            "请分析这个 mod 的内容。"
-        )
+        prompt = _build_prompt(project_root, file_content)
 
         cfg = get_config()
         llm_cfg = cfg["llm"]
@@ -146,7 +176,7 @@ async def ws_analyze_mod(ws: WebSocket):
             await ws.send_text(json.dumps({"event": "stream", "chunk": chunk}))
 
         await _send_stage(ws, "text", "ai_running", "正在调用 AI 分析 Mod...")
-        full_text = await stream_analysis(_SYSTEM_PROMPT, prompt, llm_cfg, send_chunk)
+        full_text = await stream_analysis(_get_system_prompt(), prompt, llm_cfg, send_chunk)
         await _send_stage(ws, "text", "done", "Mod 分析完成")
         await ws.send_text(json.dumps({"event": "done", "full": full_text}))
 

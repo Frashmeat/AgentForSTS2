@@ -11,6 +11,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, WebSocket
 
+from app.shared.prompting import PromptLoader
 from config import get_config
 from llm.stream import stream_analysis
 from llm.stage_events import build_stage_event
@@ -23,7 +24,12 @@ _LOG_PATH = Path(os.environ.get("APPDATA", "")) / "SlayTheSpire2" / "logs" / "go
 # 提取 log 时只保留最后这么多行（避免 token 爆炸）
 _MAX_LINES = 300
 
-_SYSTEM_PROMPT = """\
+_PROMPT_LOADER = PromptLoader()
+_LOG_ANALYZER_SYSTEM_PROMPT_KEY = "analyzer.log_analyzer_system"
+_LOG_ANALYZER_USER_PROMPT_KEY = "analyzer.log_analyzer_user"
+_LOG_ANALYZER_EXTRA_CONTEXT_PROMPT_KEY = "analyzer.log_analyzer_extra_context"
+
+_SYSTEM_PROMPT_TEMPLATE = """\
 你是一名 Slay the Spire 2 mod 开发专家，擅长分析游戏崩溃、黑屏、mod 加载失败等问题。
 你会收到游戏日志（godot.log）中提取的关键内容，请：
 1. 判断出现了什么问题（崩溃/黑屏/功能异常/mod 加载失败等）
@@ -40,6 +46,19 @@ _SYSTEM_PROMPT = """\
 
 请用中文回答，格式清晰，重点突出。
 """
+
+_USER_PROMPT_TEMPLATE = """\
+以下是 STS2 游戏日志内容（路径：{{ log_path }}）：
+```
+{{ log_content }}
+```{{ extra_context_block }}
+
+请分析上述日志，找出问题原因并给出修复建议。
+"""
+
+_EXTRA_CONTEXT_TEMPLATE = """
+
+用户补充说明：{{ extra_context }}"""
 
 
 async def _send_stage(ws: WebSocket, scope: str, stage: str, message: str):
@@ -76,16 +95,37 @@ def _read_log() -> tuple[str, bool]:
     return "\n".join(combined), True
 
 
+def _get_system_prompt() -> str:
+    return _PROMPT_LOADER.load(
+        _LOG_ANALYZER_SYSTEM_PROMPT_KEY,
+        fallback_template=_SYSTEM_PROMPT_TEMPLATE,
+    )
+
+
 def _build_prompt(extra_context: str) -> str:
     log_content, exists = _read_log()
     if not exists:
         return f"游戏日志文件不存在：{_LOG_PATH}\n请确认游戏已运行过至少一次。"
 
-    parts = ["以下是 STS2 游戏日志内容：\n```\n", log_content, "\n```"]
+    extra_context_block = ""
     if extra_context:
-        parts.append(f"\n\n用户补充说明：{extra_context}")
-    parts.append("\n\n请分析上述日志，找出问题原因并给出修复建议。")
-    return "".join(parts)
+        extra_context_block = _PROMPT_LOADER.render(
+            _LOG_ANALYZER_EXTRA_CONTEXT_PROMPT_KEY,
+            {
+                "extra_context": extra_context,
+            },
+            fallback_template=_EXTRA_CONTEXT_TEMPLATE,
+        )
+
+    return _PROMPT_LOADER.render(
+        _LOG_ANALYZER_USER_PROMPT_KEY,
+        {
+            "extra_context_block": extra_context_block,
+            "log_content": log_content,
+            "log_path": _LOG_PATH,
+        },
+        fallback_template=_USER_PROMPT_TEMPLATE,
+    )
 
 
 @router.websocket("/ws/analyze-log")
@@ -139,7 +179,7 @@ async def ws_analyze_log(ws: WebSocket):
             await ws.send_text(json.dumps({"event": "stream", "chunk": chunk}))
 
         await _send_stage(ws, "text", "ai_running", "正在调用 AI 分析日志...")
-        full_text = await stream_analysis(_SYSTEM_PROMPT, prompt, llm_cfg, send_chunk)
+        full_text = await stream_analysis(_get_system_prompt(), prompt, llm_cfg, send_chunk)
         await _send_stage(ws, "text", "done", "日志分析完成")
         await ws.send_text(json.dumps({"event": "done", "full": full_text}))
 

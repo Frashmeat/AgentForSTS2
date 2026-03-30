@@ -5,6 +5,7 @@ from pathlib import Path
 from approval.executor import LocalApprovalExecutor
 from approval.service import ApprovalService
 from approval.store import InMemoryApprovalStore
+from config import get_config
 
 _store: InMemoryApprovalStore | None = None
 _service: ApprovalService | None = None
@@ -13,6 +14,46 @@ _executor: LocalApprovalExecutor | None = None
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
+
+
+def _configured_allowed_roots() -> list[Path]:
+    approval_cfg = get_config().get("approval", {})
+    configured_roots = approval_cfg.get("allowed_roots", [])
+    repo_root = _repo_root()
+
+    roots: list[Path] = []
+    for raw_root in configured_roots:
+        candidate = Path(str(raw_root))
+        if not candidate.is_absolute():
+            candidate = repo_root / candidate
+        roots.append(candidate.resolve())
+
+    return roots or [repo_root]
+
+
+def _configured_allowed_commands() -> list[list[str]]:
+    approval_cfg = get_config().get("approval", {})
+    configured_commands = approval_cfg.get("allowed_commands", [])
+
+    normalized: list[list[str]] = []
+    for raw_command in configured_commands:
+        if isinstance(raw_command, str):
+            if raw_command:
+                normalized.append([raw_command])
+            continue
+        if isinstance(raw_command, (list, tuple)):
+            command = [str(part) for part in raw_command if str(part)]
+            if command:
+                normalized.append(command)
+
+    return normalized
+
+
+def _build_executor() -> LocalApprovalExecutor:
+    return LocalApprovalExecutor(
+        allowed_roots=_configured_allowed_roots(),
+        allowed_commands=_configured_allowed_commands(),
+    )
 
 
 def get_approval_store() -> InMemoryApprovalStore:
@@ -32,18 +73,12 @@ def get_approval_service() -> ApprovalService:
 def get_approval_executor() -> LocalApprovalExecutor:
     global _executor
     if _executor is None:
-        _executor = LocalApprovalExecutor(
-            allowed_roots=[_repo_root()],
-            allowed_commands=[],
-        )
+        _executor = _build_executor()
     return _executor
 
 
 def reset_approval_runtime() -> None:
     global _store, _service, _executor
     _store = InMemoryApprovalStore()
-    _executor = LocalApprovalExecutor(
-        allowed_roots=[_repo_root()],
-        allowed_commands=[],
-    )
+    _executor = _build_executor()
     _service = ApprovalService(_store, _executor)
