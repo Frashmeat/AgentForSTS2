@@ -5,7 +5,12 @@ from pathlib import Path
 from app.modules.codegen.domain.models import AssetCodegenRequest, AssetGroupRequest, CustomCodegenRequest, ModProjectRequest
 from app.shared.prompting import PromptLoader
 
-_PROMPT_ROOT = Path(__file__).resolve().parent.parent / "resources" / "prompts"
+_ASSET_PROMPT_KEY = "codegen.asset_prompt"
+_CUSTOM_CODE_PROMPT_KEY = "codegen.custom_code_prompt"
+_ASSET_GROUP_PROMPT_KEY = "codegen.asset_group_prompt"
+_BUILD_PROMPT_KEY = "codegen.build_prompt"
+_CREATE_MOD_PROJECT_PROMPT_KEY = "codegen.create_mod_project_prompt"
+_PACKAGE_PROMPT_KEY = "codegen.package_prompt"
 
 _ASSET_PROMPT_TEMPLATE = """You are an expert STS2 (Slay the Spire 2) mod developer using Godot 4 + C# + BaseLib (Alchyr.Sts2.BaseLib).
 
@@ -154,7 +159,7 @@ class PromptAssembler:
         self.knowledge_source = knowledge_source
         self.api_lookup_provider = api_lookup_provider
         self.api_ref_path = api_ref_path
-        self.prompt_loader = prompt_loader or PromptLoader(root=_PROMPT_ROOT)
+        self.prompt_loader = prompt_loader or PromptLoader()
 
     @staticmethod
     def _format_prompt_path(path: Path) -> str:
@@ -179,7 +184,7 @@ class PromptAssembler:
                 f"7. Confirm both the .dll and .pck were deployed to the mods folder."
             )
         return self.prompt_loader.render(
-            "asset_prompt.txt",
+            _ASSET_PROMPT_KEY,
             {
                 "api_lookup": api_lookup,
                 "api_ref_path": self.api_ref_path,
@@ -213,7 +218,7 @@ class PromptAssembler:
             )
         mod_name = request.project_root.name
         return self.prompt_loader.render(
-            "custom_code_prompt.txt",
+            _CUSTOM_CODE_PROMPT_KEY,
             {
                 "api_lookup": api_lookup,
                 "api_ref_path": self.api_ref_path,
@@ -269,7 +274,7 @@ class PromptAssembler:
 
         mod_name = request.project_root.name
         return self.prompt_loader.render(
-            "asset_group_prompt.txt",
+            _ASSET_GROUP_PROMPT_KEY,
             {
                 "api_lookup": api_lookup,
                 "asset_count": len(request.assets),
@@ -284,7 +289,7 @@ class PromptAssembler:
 
     def assemble_build_prompt(self, max_attempts: int) -> str:
         return self.prompt_loader.render(
-            "build_prompt.txt",
+            _BUILD_PROMPT_KEY,
             {"max_attempts": max_attempts},
             fallback_template=_BUILD_PROMPT_TEMPLATE,
         )
@@ -292,7 +297,7 @@ class PromptAssembler:
     def assemble_create_mod_project_prompt(self, request: ModProjectRequest) -> str:
         project_path = request.target_dir / request.project_name
         return self.prompt_loader.render(
-            "create_mod_project_prompt.txt",
+            _CREATE_MOD_PROJECT_PROMPT_KEY,
             {
                 "project_name": request.project_name,
                 "project_path": project_path,
@@ -302,7 +307,7 @@ class PromptAssembler:
 
     def assemble_package_prompt(self) -> str:
         return self.prompt_loader.render(
-            "package_prompt.txt",
+            _PACKAGE_PROMPT_KEY,
             {},
             fallback_template=_PACKAGE_PROMPT_TEMPLATE,
         )

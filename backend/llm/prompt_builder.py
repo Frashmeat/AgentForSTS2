@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from pathlib import Path
-
+from app.shared.prompting import PromptLoader
 from config import normalize_llm_config
 
 _GLOBAL_PROMPT_HEADER = "## User Configured Global AI Instructions"
-_GLOBAL_PROMPT_HEADER_RESOURCE_PATH = Path(__file__).with_name("resources") / "global_prompt_header.txt"
+_PROMPT_LOADER = PromptLoader()
+_GLOBAL_PROMPT_HEADER_BUNDLE_KEY = "llm.global_prompt_header"
 
 
 def _load_global_prompt_header() -> str:
-    try:
-        header = _GLOBAL_PROMPT_HEADER_RESOURCE_PATH.read_text(encoding="utf-8").strip()
-    except OSError:
-        return _GLOBAL_PROMPT_HEADER
+    header = _PROMPT_LOADER.load(
+        _GLOBAL_PROMPT_HEADER_BUNDLE_KEY,
+        fallback_template=_GLOBAL_PROMPT_HEADER,
+    ).strip()
     return header or _GLOBAL_PROMPT_HEADER
 
 

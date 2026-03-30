@@ -24,8 +24,10 @@ _LOG_PATH = Path(os.environ.get("APPDATA", "")) / "SlayTheSpire2" / "logs" / "go
 # 提取 log 时只保留最后这么多行（避免 token 爆炸）
 _MAX_LINES = 300
 
-_PROMPT_ROOT = Path(__file__).resolve().parent.parent / "app" / "modules" / "analyzer" / "resources" / "prompts"
-_PROMPT_LOADER = PromptLoader(root=_PROMPT_ROOT)
+_PROMPT_LOADER = PromptLoader()
+_LOG_ANALYZER_SYSTEM_PROMPT_KEY = "analyzer.log_analyzer_system"
+_LOG_ANALYZER_USER_PROMPT_KEY = "analyzer.log_analyzer_user"
+_LOG_ANALYZER_EXTRA_CONTEXT_PROMPT_KEY = "analyzer.log_analyzer_extra_context"
 
 _SYSTEM_PROMPT_TEMPLATE = """\
 你是一名 Slay the Spire 2 mod 开发专家，擅长分析游戏崩溃、黑屏、mod 加载失败等问题。
@@ -95,7 +97,7 @@ def _read_log() -> tuple[str, bool]:
 
 def _get_system_prompt() -> str:
     return _PROMPT_LOADER.load(
-        "log_analyzer_system.txt",
+        _LOG_ANALYZER_SYSTEM_PROMPT_KEY,
         fallback_template=_SYSTEM_PROMPT_TEMPLATE,
     )
 
@@ -108,7 +110,7 @@ def _build_prompt(extra_context: str) -> str:
     extra_context_block = ""
     if extra_context:
         extra_context_block = _PROMPT_LOADER.render(
-            "log_analyzer_extra_context.txt",
+            _LOG_ANALYZER_EXTRA_CONTEXT_PROMPT_KEY,
             {
                 "extra_context": extra_context,
             },
@@ -116,7 +118,7 @@ def _build_prompt(extra_context: str) -> str:
         )
 
     return _PROMPT_LOADER.render(
-        "log_analyzer_user.txt",
+        _LOG_ANALYZER_USER_PROMPT_KEY,
         {
             "extra_context_block": extra_context_block,
             "log_content": log_content,

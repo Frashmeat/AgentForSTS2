@@ -1,6 +1,0 @@
-以下是 STS2 游戏日志内容（路径：{{ log_path }}）：
-```
-{{ log_content }}
-```{{ extra_context_block }}
-
-请分析上述日志，找出问题原因并给出修复建议。

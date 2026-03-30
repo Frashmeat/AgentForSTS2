@@ -36,14 +36,25 @@ def test_api_lookup_section_reads_from_resource_templates(monkeypatch):
     monkeypatch.setattr(code_agent, "get_decompiled_src_path", lambda: "I:/fake/sts2-decompiled")
 
     temp_root = Path(__file__).parent / ".tmp" / f"api-lookup-{uuid.uuid4().hex}"
-    resource_root = temp_root / "api_lookup"
+    resource_root = temp_root / "prompts"
     resource_root.mkdir(parents=True)
     try:
-        (resource_root / "title.txt").write_text("## Resource Title", encoding="utf-8")
-        (resource_root / "baselib.txt").write_text("BaseLib from {{ baselib_src_path }}", encoding="utf-8")
-        (resource_root / "sts2_local.txt").write_text("Local src {{ decompiled_src_path }}", encoding="utf-8")
-        (resource_root / "sts2_fallback.txt").write_text("Fallback {{ ilspy_example_dll_path }}", encoding="utf-8")
-        monkeypatch.setattr(code_agent, "_API_LOOKUP_PROMPT_ROOT", resource_root)
+        (resource_root / "codegen.md").write_text(
+            """## api_lookup_title
+## Resource Title
+
+## api_lookup_baselib
+BaseLib from {{ baselib_src_path }}
+
+## api_lookup_sts2_local
+Local src {{ decompiled_src_path }}
+
+## api_lookup_sts2_fallback
+Fallback {{ ilspy_example_dll_path }}
+""",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(code_agent, "_PROMPT_LOADER", code_agent.PromptLoader(root=resource_root))
 
         section = code_agent._build_api_lookup_section()
 

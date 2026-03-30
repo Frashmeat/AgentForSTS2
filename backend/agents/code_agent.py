@@ -17,9 +17,11 @@ from app.shared.prompting import PromptLoader
 from config import get_decompiled_src_path
 from llm.agent_runner import run_agent_task
 
-_API_LOOKUP_PROMPT_ROOT = (
-    Path(__file__).resolve().parent.parent / "app" / "modules" / "codegen" / "resources" / "prompts" / "partials" / "api_lookup"
-)
+_PROMPT_LOADER = PromptLoader()
+_API_LOOKUP_TITLE_KEY = "codegen.api_lookup_title"
+_API_LOOKUP_BASELIB_KEY = "codegen.api_lookup_baselib"
+_API_LOOKUP_STS2_LOCAL_KEY = "codegen.api_lookup_sts2_local"
+_API_LOOKUP_STS2_FALLBACK_KEY = "codegen.api_lookup_sts2_fallback"
 _ILSPY_EXAMPLE_DLL_PATH = "<STS2GamePath>/data_sts2_windows_x86_64/sts2.dll"
 
 
@@ -37,30 +39,29 @@ def _build_api_lookup_section() -> str:
     - 否则：告知用 ilspycmd（降级模式）
     BaseLib 反编译始终可用（在仓库内）。
     """
-    prompt_loader = PromptLoader(root=_API_LOOKUP_PROMPT_ROOT)
-    title = prompt_loader.load("title.txt")
-    baselib_note = prompt_loader.render(
-        "baselib.txt",
+    title = _PROMPT_LOADER.load(_API_LOOKUP_TITLE_KEY).strip()
+    baselib_note = _PROMPT_LOADER.render(
+        _API_LOOKUP_BASELIB_KEY,
         {
             "baselib_src_path": f"`{BASELIB_SRC_PATH}`",
         },
-    )
+    ).strip()
 
     decompiled_path = get_decompiled_src_path()
     if decompiled_path:
-        sts2_note = prompt_loader.render(
-            "sts2_local.txt",
+        sts2_note = _PROMPT_LOADER.render(
+            _API_LOOKUP_STS2_LOCAL_KEY,
             {
                 "decompiled_src_path": f"`{decompiled_path}`",
             },
-        )
+        ).strip()
     else:
-        sts2_note = prompt_loader.render(
-            "sts2_fallback.txt",
+        sts2_note = _PROMPT_LOADER.render(
+            _API_LOOKUP_STS2_FALLBACK_KEY,
             {
                 "ilspy_example_dll_path": f"`{_ILSPY_EXAMPLE_DLL_PATH}`",
             },
-        )
+        ).strip()
 
     return f"{title}\n{baselib_note}\n\n{sts2_note}"
 

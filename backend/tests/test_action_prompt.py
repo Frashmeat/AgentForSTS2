@@ -30,9 +30,9 @@ def test_action_prompt_delivers_action_template():
 
 
 def test_action_prompt_template_exists_for_real_loader():
-    loader = PromptLoader(root=action_prompt_module._PROMPT_ROOT)
+    loader = PromptLoader()
 
-    template = loader.load("action_prompt.txt")
+    template = loader.load("approval.action_prompt")
 
     assert "{{ requirements_line }}" in template
     assert "Output ONLY JSON" in template
@@ -49,14 +49,14 @@ def test_action_prompt_uses_prompt_loader_with_trimmed_requirements(monkeypatch)
             return "rendered-from-loader"
 
     loader = FakeLoader()
-    monkeypatch.setattr(action_prompt_module, "_PROMPT_LOADER", loader)
+    monkeypatch.setattr(action_prompt_module, "_SHARED_PROMPT_LOADER", loader)
 
     prompt = build_action_prompt("  需要明确的步骤  ")
 
     assert prompt == "rendered-from-loader"
     assert loader.calls == [
         (
-            "action_prompt.txt",
+            "approval.action_prompt",
             {"requirements_line": "需要明确的步骤"},
             action_prompt_module._ACTION_PROMPT_TEMPLATE,
         )
@@ -73,9 +73,31 @@ def test_action_prompt_uses_default_requirements_when_input_empty(monkeypatch):
             return "rendered-default"
 
     loader = FakeLoader()
-    monkeypatch.setattr(action_prompt_module, "_PROMPT_LOADER", loader)
+    monkeypatch.setattr(action_prompt_module, "_SHARED_PROMPT_LOADER", loader)
 
     prompt = build_action_prompt("   ")
 
     assert prompt == "rendered-default"
     assert loader.calls[0][1] == {"requirements_line": "请提供必须满足的输入信息。"}
+
+
+def test_action_prompt_uses_shared_bundle_key_without_local_fallback(monkeypatch):
+    monkeypatch.setattr(
+        action_prompt_module,
+        "_PROMPT_LOADER",
+        PromptLoader(root=Path(__file__).parent / "missing-approval-prompts"),
+    )
+    monkeypatch.setattr(
+        action_prompt_module,
+        "_ACTION_PROMPT_TEMPLATE",
+        "fallback action {{ requirements_line }}",
+    )
+
+    prompt = build_action_prompt("需要明确的步骤")
+    expected = PromptLoader().render(
+        "approval.action_prompt",
+        {"requirements_line": "需要明确的步骤"},
+    )
+
+    assert prompt == expected
+    assert "fallback action" not in prompt

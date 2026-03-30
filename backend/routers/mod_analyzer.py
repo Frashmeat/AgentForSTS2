@@ -17,8 +17,9 @@ router = APIRouter()
 
 _SKIP_DIRS = {"bin", "obj", ".godot", "packages", ".git", ".vs", "__pycache__"}
 
-_PROMPT_ROOT = Path(__file__).resolve().parent.parent / "app" / "modules" / "analyzer" / "resources" / "prompts"
-_PROMPT_LOADER = PromptLoader(root=_PROMPT_ROOT)
+_PROMPT_LOADER = PromptLoader()
+_MOD_ANALYZER_SYSTEM_PROMPT_KEY = "analyzer.mod_analyzer_system"
+_MOD_ANALYZER_USER_PROMPT_KEY = "analyzer.mod_analyzer_user"
 
 _SYSTEM_PROMPT_TEMPLATE = """\
 你是 Slay the Spire 2 mod 开发专家。请分析给定的 mod 源码，用中文告诉用户以下内容：
@@ -52,14 +53,14 @@ async def _send_stage(ws: WebSocket, scope: str, stage: str, message: str):
 
 def _get_system_prompt() -> str:
     return _PROMPT_LOADER.load(
-        "mod_analyzer_system.txt",
+        _MOD_ANALYZER_SYSTEM_PROMPT_KEY,
         fallback_template=_SYSTEM_PROMPT_TEMPLATE,
     )
 
 
 def _build_prompt(project_root: Path, file_content: str) -> str:
     return _PROMPT_LOADER.render(
-        "mod_analyzer_user.txt",
+        _MOD_ANALYZER_USER_PROMPT_KEY,
         {
             "project_root": project_root,
             "file_content": file_content,

@@ -16,14 +16,14 @@ from llm.text_runner import complete_text, resolve_model
 
 ImageProvider = Literal["flux2", "sdxl", "jimeng", "wanxiang"]
 
-_PROMPT_ROOT = Path(__file__).resolve().parent.parent / "app" / "modules" / "image" / "resources" / "prompts"
-_PROMPT_LOADER = PromptLoader(root=_PROMPT_ROOT)
+_PROMPT_LOADER = PromptLoader()
 _TRANSPARENT_BG_RULE = "The asset requires a transparent/white background (no background scene)"
 _FALLBACK_PROMPT_EN_SUFFIX = ", trading card game art style, dramatic cinematic lighting, highly detailed, sharp focus"
 _FALLBACK_PROMPT_EN_TRANSPARENT_SUFFIX = ", isolated on pure white background, no shadow, no background"
 _FALLBACK_PROMPT_CN_SUFFIX = "，交易卡牌艺术风格，电影级光照，高清细节"
 _FALLBACK_PROMPT_CN_TRANSPARENT_SUFFIX = "，白色纯净背景"
 _FALLBACK_SDXL_NEGATIVE_PROMPT = "blurry, low quality, text, watermark, signature, deformed"
+_ADAPT_PROMPT_KEY = "image.adapt_prompt"
 _ADAPT_PROMPT_TEMPLATE = """You are an expert at writing image generation prompts for trading card game assets. Extract ONLY the visual/artistic elements from the user's description and convert them into an optimized image prompt. IMPORTANT: Ignore all game mechanics — damage values, costs, card effects, upgrade conditions, numbers, keywords like 'deal X damage', 'gain Y block', etc. Focus solely on: appearance, materials, colors, style, lighting, mood, and composition. Return ONLY a JSON object with keys: 'prompt' and optionally 'negative_prompt'. No explanation, no markdown, just the JSON.
 
 Asset type: {{ asset_type }}
@@ -135,22 +135,22 @@ def _build_style_guides() -> dict[ImageProvider, dict]:
         guide = {
             "lang": defaults["lang"],
             "formula": _load_prompt_resource(
-                f"guide_{provider}_formula.txt",
+                f"image.guide_{provider}_formula",
                 str(defaults["formula"]),
             ),
             "rules": _load_prompt_resource_lines(
-                f"guide_{provider}_rules.txt",
+                f"image.guide_{provider}_rules",
                 list(defaults["rules"]),
             ),
             "example": _load_prompt_resource(
-                f"guide_{provider}_example.txt",
+                f"image.guide_{provider}_example",
                 str(defaults["example"]),
             ),
         }
         negative_example = defaults.get("negative_example")
         if negative_example is not None:
             guide["negative_example"] = _load_prompt_resource(
-                f"guide_{provider}_negative_example.txt",
+                f"image.guide_{provider}_negative_example",
                 str(negative_example),
             )
         guides[provider] = guide
@@ -189,10 +189,10 @@ async def adapt_prompt(
 
     rules_text = "\n".join(f"- {r}" for r in guide["rules"])
     if needs_transparent_bg and "transparent" not in " ".join(guide["rules"]).lower():
-        rules_text += "\n- " + _load_prompt_resource("transparent_bg_rule.txt", _TRANSPARENT_BG_RULE)
+        rules_text += "\n- " + _load_prompt_resource("image.transparent_bg_rule", _TRANSPARENT_BG_RULE)
 
     full_prompt = _PROMPT_LOADER.render(
-        "adapt_prompt.txt",
+        _ADAPT_PROMPT_KEY,
         {
             "asset_type": asset_type,
             "provider": provider,
@@ -274,17 +274,17 @@ def _fallback_prompt(description: str, provider: ImageProvider, needs_transparen
     visual = re.sub(r'\s{2,}', ' ', visual).strip(' ，,.')
 
     bg_suffix = _load_prompt_resource(
-        "fallback_prompt_en_transparent_suffix.txt",
+        "image.fallback_prompt_en_transparent_suffix",
         _FALLBACK_PROMPT_EN_TRANSPARENT_SUFFIX,
     ) if needs_transparent_bg else ""
     if provider in ("flux2", "sdxl"):
-        prompt = f"{visual}{_load_prompt_resource('fallback_prompt_en_suffix.txt', _FALLBACK_PROMPT_EN_SUFFIX)}{bg_suffix}"
-        neg = _load_prompt_resource("fallback_sdxl_negative_prompt.txt", _FALLBACK_SDXL_NEGATIVE_PROMPT) if provider == "sdxl" else None
+        prompt = f"{visual}{_load_prompt_resource('image.fallback_prompt_en_suffix', _FALLBACK_PROMPT_EN_SUFFIX)}{bg_suffix}"
+        neg = _load_prompt_resource("image.fallback_sdxl_negative_prompt", _FALLBACK_SDXL_NEGATIVE_PROMPT) if provider == "sdxl" else None
     else:
         bg_cn = _load_prompt_resource(
-            "fallback_prompt_cn_transparent_suffix.txt",
+            "image.fallback_prompt_cn_transparent_suffix",
             _FALLBACK_PROMPT_CN_TRANSPARENT_SUFFIX,
         ) if needs_transparent_bg else ""
-        prompt = f"{visual}{_load_prompt_resource('fallback_prompt_cn_suffix.txt', _FALLBACK_PROMPT_CN_SUFFIX)}{bg_cn}"
+        prompt = f"{visual}{_load_prompt_resource('image.fallback_prompt_cn_suffix', _FALLBACK_PROMPT_CN_SUFFIX)}{bg_cn}"
         neg = None
     return {"prompt": prompt, "negative_prompt": neg}

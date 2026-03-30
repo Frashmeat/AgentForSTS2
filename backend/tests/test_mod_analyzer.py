@@ -102,8 +102,8 @@ def test_scan_mod_files_skips_ignored_directories_and_marks_truncation():
 def test_mod_analyzer_prompt_templates_exist_for_real_loader():
     module = _load_mod_analyzer()
 
-    system_template = module._PROMPT_LOADER.load("mod_analyzer_system.txt")
-    user_template = module._PROMPT_LOADER.load("mod_analyzer_user.txt")
+    system_template = module._PROMPT_LOADER.load("analyzer.mod_analyzer_system")
+    user_template = module._PROMPT_LOADER.load("analyzer.mod_analyzer_user")
 
     assert "Slay the Spire 2 mod 开发专家" in system_template
     assert "{{ project_root }}" in user_template
@@ -128,7 +128,7 @@ def test_get_system_prompt_uses_prompt_loader():
     prompt = module._get_system_prompt()
 
     assert prompt == "rendered-system-prompt"
-    assert loader.load_calls == [("mod_analyzer_system.txt", module._SYSTEM_PROMPT_TEMPLATE)]
+    assert loader.load_calls == [("analyzer.mod_analyzer_system", module._SYSTEM_PROMPT_TEMPLATE)]
 
 
 def test_build_prompt_uses_prompt_loader_for_user_template():
@@ -147,10 +147,10 @@ def test_build_prompt_uses_prompt_loader_for_user_template():
 
     prompt = module._build_prompt(Path("E:/STS2mod/MyMod"), "// Cards/Strike.cs\nclass Strike {}")
 
-    assert prompt == "rendered:mod_analyzer_user.txt"
+    assert prompt == "rendered:analyzer.mod_analyzer_user"
     assert loader.render_calls == [
         (
-            "mod_analyzer_user.txt",
+            "analyzer.mod_analyzer_user",
             {
                 "project_root": Path("E:/STS2mod/MyMod"),
                 "file_content": "// Cards/Strike.cs\nclass Strike {}",

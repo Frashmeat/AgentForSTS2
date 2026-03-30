@@ -1,3 +1,4 @@
+## action_prompt
 你正在撰写统一 AI 审批动作的指导。 Output ONLY JSON，后续步骤依赖纯 JSON 格式输出。
 
 User Input Requirements:

@@ -165,13 +165,13 @@ def test_asset_group_prompt_deduplicates_common_docs_and_keeps_dependency_detail
 
 
 def test_codegen_prompt_templates_exist_for_real_loader():
-    loader = PromptLoader(root=Path("backend/app/modules/codegen/resources/prompts"))
+    loader = PromptLoader()
 
-    template = loader.load("asset_prompt.txt")
-    group_template = loader.load("asset_group_prompt.txt")
-    build_template = loader.load("build_prompt.txt")
-    create_project_template = loader.load("create_mod_project_prompt.txt")
-    package_template = loader.load("package_prompt.txt")
+    template = loader.load("codegen.asset_prompt")
+    group_template = loader.load("codegen.asset_group_prompt")
+    build_template = loader.load("codegen.build_prompt")
+    create_project_template = loader.load("codegen.create_mod_project_prompt")
+    package_template = loader.load("codegen.package_prompt")
 
     assert 'Task: Create a new {{ asset_type }} named "{{ asset_name }}".{{ zhs_hint }}' in template
     assert "## Task: Create {{ asset_count }} related assets in ONE batch" in group_template
@@ -209,7 +209,7 @@ def test_asset_prompt_renders_codegen_template_with_runtime_variables():
     assert prompt == "rendered-asset-prompt"
     assert len(loader.calls) == 1
     template_name, variables, fallback_template = loader.calls[0]
-    assert template_name == "asset_prompt.txt"
+    assert template_name == "codegen.asset_prompt"
     assert variables["docs"] == "docs:relic"
     assert variables["api_lookup"] == "api-lookup"
     assert variables["zhs_hint"] == "\nSimplified Chinese display name (name_zhs): 燃烧遗物"
@@ -266,7 +266,7 @@ def test_asset_group_prompt_renders_codegen_template_with_prepared_sections():
     assert prompt == "rendered-group-prompt"
     assert len(loader.calls) == 1
     template_name, variables, fallback_template = loader.calls[0]
-    assert template_name == "asset_group_prompt.txt"
+    assert template_name == "codegen.asset_group_prompt"
     assert variables["api_lookup"] == "api-lookup"
     assert variables["class_names"] == "Ignite, BurnRelic"
     assert "### Asset 1: [card] Ignite" in variables["assets_section"]
@@ -294,7 +294,7 @@ def test_build_prompt_renders_codegen_template_with_attempt_limit():
     assert prompt == "rendered-build-prompt"
     assert len(loader.calls) == 1
     template_name, variables, fallback_template = loader.calls[0]
-    assert template_name == "build_prompt.txt"
+    assert template_name == "codegen.build_prompt"
     assert variables == {"max_attempts": 4}
     assert "Repeat until it succeeds or you've tried {{ max_attempts }} times." in fallback_template
 
@@ -319,7 +319,7 @@ def test_create_mod_project_prompt_renders_codegen_template_with_project_variabl
     assert prompt == "rendered-project-prompt"
     assert len(loader.calls) == 1
     template_name, variables, fallback_template = loader.calls[0]
-    assert template_name == "create_mod_project_prompt.txt"
+    assert template_name == "codegen.create_mod_project_prompt"
     assert variables["project_name"] == "MyCoolMod"
     assert variables["project_path"] == Path("mods/MyCoolMod")
     assert 'Create a new STS2 mod project named "{{ project_name }}" at {{ project_path }}.' in fallback_template
@@ -344,7 +344,7 @@ def test_package_prompt_renders_codegen_template():
     assert prompt == "rendered-package-prompt"
     assert len(loader.calls) == 1
     template_name, variables, fallback_template = loader.calls[0]
-    assert template_name == "package_prompt.txt"
+    assert template_name == "codegen.package_prompt"
     assert variables == {}
     assert "Build and package this STS2 mod completely:" in fallback_template
 
@@ -404,7 +404,7 @@ def test_codegen_service_build_and_fix_uses_template_backed_build_prompt():
     assert captured["project_root"] == _project_root()
     assert len(loader.calls) == 1
     template_name, variables, fallback_template = loader.calls[0]
-    assert template_name == "build_prompt.txt"
+    assert template_name == "codegen.build_prompt"
     assert variables == {"max_attempts": 5}
     assert "Repeat until it succeeds or you've tried {{ max_attempts }} times." in fallback_template
 
@@ -444,7 +444,7 @@ def test_codegen_service_create_mod_project_uses_template_backed_project_prompt(
     assert captured["project_root"] == Path("mods")
     assert len(loader.calls) == 1
     template_name, variables, fallback_template = loader.calls[0]
-    assert template_name == "create_mod_project_prompt.txt"
+    assert template_name == "codegen.create_mod_project_prompt"
     assert variables["project_name"] == "MyCoolMod"
     assert variables["project_path"] == Path("mods/MyCoolMod")
     assert 'Create a new STS2 mod project named "{{ project_name }}" at {{ project_path }}.' in fallback_template
@@ -484,6 +484,6 @@ def test_codegen_service_package_mod_uses_template_backed_package_prompt():
     assert captured["project_root"] == _project_root()
     assert len(loader.calls) == 1
     template_name, variables, fallback_template = loader.calls[0]
-    assert template_name == "package_prompt.txt"
+    assert template_name == "codegen.package_prompt"
     assert variables == {}
     assert "Build and package this STS2 mod completely:" in fallback_template

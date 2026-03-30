@@ -1,3 +1,0 @@
-BaseLib (Alchyr.Sts2.BaseLib) decompiled source: {{ baselib_src_path }}
-Read this file directly for CustomCardModel, CustomPotionModel, PlaceholderCharacterModel, etc.
-Do NOT curl GitHub for BaseLib — the local decompiled copy is authoritative.

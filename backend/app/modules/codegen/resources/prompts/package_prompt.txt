@@ -1,4 +1,0 @@
-Build and package this STS2 mod completely:
-1. Run `dotnet build` with Release configuration.
-2. Verify the .dll and .pck output files exist in the expected output directory.
-3. Report the output file paths.

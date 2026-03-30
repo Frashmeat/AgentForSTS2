@@ -58,9 +58,9 @@ def test_planning_service_uses_knowledge_source_for_prompt():
 
 
 def test_planning_prompt_template_exists_for_real_loader():
-    loader = PromptLoader(root=Path("backend/app/modules/planning/resources/prompts"))
+    loader = PromptLoader()
 
-    template = loader.load("planner_prompt.txt")
+    template = loader.load("planning.planner_prompt")
 
     assert "{{ api_hints }}" in template
     assert "{{ requirements }}" in template
@@ -85,11 +85,40 @@ def test_planning_service_build_planner_prompt_uses_prompt_loader():
     assert prompt == "rendered-planner-prompt"
     assert len(loader.calls) == 1
     template_name, variables, fallback_template = loader.calls[0]
-    assert template_name == "planner_prompt.txt"
+    assert template_name == "planning.planner_prompt"
     assert variables["api_hints"] == "OnPlay PowerModel ShouldReceiveCombatHooks"
     assert variables["requirements"] == "make a burning card"
     assert '"implementation_notes"' in fallback_template
     assert '"depends_on"' in fallback_template
+
+
+def test_planning_service_build_planner_prompt_uses_shared_bundle_key_without_local_fallback(monkeypatch):
+    from app.modules.planning.application import services as planning_services
+
+    monkeypatch.setattr(
+        planning_services,
+        "_PROMPT_ROOT",
+        Path(__file__).parent / "missing-planning-prompts",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        planning_services,
+        "_PLANNER_PROMPT_TEMPLATE",
+        "fallback prompt {{ api_hints }} :: {{ requirements }}",
+    )
+
+    service = planning_services.PlanningService(knowledge_source=FakeKnowledgeSource())
+    prompt = service.build_planner_prompt("make a burning card")
+    expected = PromptLoader().render(
+        "planning.planner_prompt",
+        {
+            "api_hints": "OnPlay PowerModel ShouldReceiveCombatHooks",
+            "requirements": "make a burning card",
+        },
+    )
+
+    assert prompt == expected
+    assert "fallback prompt" not in prompt
 
 
 def test_planning_service_parse_plan_infers_needs_image_from_item_type():

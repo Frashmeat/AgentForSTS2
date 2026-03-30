@@ -1,5 +1,0 @@
-- Use tag-based format, comma separated
-- Add quality tags: masterpiece, best quality, highly detailed, sharp focus
-- Use (tag:1.2) syntax for emphasis
-- Add negative prompt separately
-- For transparent-bg assets: add 'white background, simple background'

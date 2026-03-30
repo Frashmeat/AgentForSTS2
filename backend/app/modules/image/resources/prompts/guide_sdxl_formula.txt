@@ -1,1 +1,0 @@
-comma-separated tags + quality words + (emphasis:weight)

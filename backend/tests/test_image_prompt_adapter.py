@@ -8,29 +8,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-PROMPT_TEMPLATE_PATH = Path(__file__).parent.parent / "app" / "modules" / "image" / "resources" / "prompts" / "adapt_prompt.txt"
-PROMPT_RESOURCE_DIR = PROMPT_TEMPLATE_PATH.parent
-TRANSPARENT_BG_RULE_PATH = PROMPT_RESOURCE_DIR / "transparent_bg_rule.txt"
-FALLBACK_EN_SUFFIX_PATH = PROMPT_RESOURCE_DIR / "fallback_prompt_en_suffix.txt"
-FALLBACK_EN_TRANSPARENT_SUFFIX_PATH = PROMPT_RESOURCE_DIR / "fallback_prompt_en_transparent_suffix.txt"
-FALLBACK_CN_SUFFIX_PATH = PROMPT_RESOURCE_DIR / "fallback_prompt_cn_suffix.txt"
-FALLBACK_CN_TRANSPARENT_SUFFIX_PATH = PROMPT_RESOURCE_DIR / "fallback_prompt_cn_transparent_suffix.txt"
-SDXL_NEGATIVE_PATH = PROMPT_RESOURCE_DIR / "fallback_sdxl_negative_prompt.txt"
-GUIDE_RESOURCE_PATHS = [
-    PROMPT_RESOURCE_DIR / "guide_flux2_formula.txt",
-    PROMPT_RESOURCE_DIR / "guide_flux2_rules.txt",
-    PROMPT_RESOURCE_DIR / "guide_flux2_example.txt",
-    PROMPT_RESOURCE_DIR / "guide_sdxl_formula.txt",
-    PROMPT_RESOURCE_DIR / "guide_sdxl_rules.txt",
-    PROMPT_RESOURCE_DIR / "guide_sdxl_example.txt",
-    PROMPT_RESOURCE_DIR / "guide_sdxl_negative_example.txt",
-    PROMPT_RESOURCE_DIR / "guide_jimeng_formula.txt",
-    PROMPT_RESOURCE_DIR / "guide_jimeng_rules.txt",
-    PROMPT_RESOURCE_DIR / "guide_jimeng_example.txt",
-    PROMPT_RESOURCE_DIR / "guide_wanxiang_formula.txt",
-    PROMPT_RESOURCE_DIR / "guide_wanxiang_rules.txt",
-    PROMPT_RESOURCE_DIR / "guide_wanxiang_example.txt",
-]
+from app.shared.prompting import PromptLoader
+
+PROMPT_LOADER = PromptLoader()
 
 
 def _load_prompt_adapter():
@@ -63,8 +43,7 @@ def test_sanitize_for_content_policy_replaces_sensitive_terms():
 
 
 def test_adapt_prompt_template_exists():
-    assert PROMPT_TEMPLATE_PATH.exists()
-    content = PROMPT_TEMPLATE_PATH.read_text(encoding="utf-8")
+    content = PROMPT_LOADER.load("image.adapt_prompt")
     assert "{{ asset_type }}" in content
     assert "{{ provider }}" in content
     assert "{{ rules_text }}" in content
@@ -72,22 +51,37 @@ def test_adapt_prompt_template_exists():
 
 
 def test_image_prompt_resource_fragments_exist():
-    paths = [
-        TRANSPARENT_BG_RULE_PATH,
-        FALLBACK_EN_SUFFIX_PATH,
-        FALLBACK_EN_TRANSPARENT_SUFFIX_PATH,
-        FALLBACK_CN_SUFFIX_PATH,
-        FALLBACK_CN_TRANSPARENT_SUFFIX_PATH,
-        SDXL_NEGATIVE_PATH,
+    keys = [
+        "image.transparent_bg_rule",
+        "image.fallback_prompt_en_suffix",
+        "image.fallback_prompt_en_transparent_suffix",
+        "image.fallback_prompt_cn_suffix",
+        "image.fallback_prompt_cn_transparent_suffix",
+        "image.fallback_sdxl_negative_prompt",
     ]
 
-    for path in paths:
-        assert path.exists(), f"missing resource: {path.name}"
+    for key in keys:
+        assert PROMPT_LOADER.load(key).strip(), f"missing resource: {key}"
 
 
 def test_style_guide_resource_fragments_exist():
-    for path in GUIDE_RESOURCE_PATHS:
-        assert path.exists(), f"missing guide resource: {path.name}"
+    keys = [
+        "image.guide_flux2_formula",
+        "image.guide_flux2_rules",
+        "image.guide_flux2_example",
+        "image.guide_sdxl_formula",
+        "image.guide_sdxl_rules",
+        "image.guide_sdxl_example",
+        "image.guide_sdxl_negative_example",
+        "image.guide_jimeng_formula",
+        "image.guide_jimeng_rules",
+        "image.guide_jimeng_example",
+        "image.guide_wanxiang_formula",
+        "image.guide_wanxiang_rules",
+        "image.guide_wanxiang_example",
+    ]
+    for key in keys:
+        assert PROMPT_LOADER.load(key).strip(), f"missing guide resource: {key}"
 
 
 def test_adapt_prompt_renders_template_variables(monkeypatch):
@@ -118,16 +112,52 @@ def test_adapt_prompt_renders_template_variables(monkeypatch):
     assert "isolated on pure white background" in captured["prompt"]
 
 
+def test_image_prompt_adapter_uses_bundle_keys_for_prompt_resources(monkeypatch):
+    module = _load_prompt_adapter()
+
+    class FakePromptLoader:
+        def __init__(self) -> None:
+            self.load_calls: list[tuple[str, str]] = []
+            self.render_calls: list[tuple[str, dict[str, object], str]] = []
+
+        def load(self, template_name: str, *, fallback_template: str | None = None) -> str:
+            self.load_calls.append((template_name, fallback_template or ""))
+            return fallback_template or template_name
+
+        def render(self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None) -> str:
+            self.render_calls.append((template_name, variables, fallback_template or ""))
+            return '{"prompt":"ok"}'
+
+    async def fake_complete_text(prompt, llm_cfg):
+        return prompt
+
+    loader = FakePromptLoader()
+    monkeypatch.setattr(module, "_PROMPT_LOADER", loader)
+    monkeypatch.setattr(module, "complete_text", fake_complete_text)
+
+    asyncio.run(
+        module.adapt_prompt(
+            user_description="A floating blessing icon",
+            asset_type="icon",
+            provider="jimeng",
+            needs_transparent_bg=True,
+        )
+    )
+
+    assert loader.render_calls[0][0] == "image.adapt_prompt"
+    assert ("image.transparent_bg_rule", module._TRANSPARENT_BG_RULE) in loader.load_calls
+
+
 @pytest.mark.parametrize(
-    ("provider", "rules_resource", "negative_example_resource"),
+    ("provider", "rules_key", "negative_example_key"),
     [
-        ("flux2", "guide_flux2_rules.txt", None),
-        ("sdxl", "guide_sdxl_rules.txt", "guide_sdxl_negative_example.txt"),
-        ("jimeng", "guide_jimeng_rules.txt", None),
-        ("wanxiang", "guide_wanxiang_rules.txt", None),
+        ("flux2", "image.guide_flux2_rules", None),
+        ("sdxl", "image.guide_sdxl_rules", "image.guide_sdxl_negative_example"),
+        ("jimeng", "image.guide_jimeng_rules", None),
+        ("wanxiang", "image.guide_wanxiang_rules", None),
     ],
 )
-def test_adapt_prompt_includes_provider_guide_resources(monkeypatch, provider, rules_resource, negative_example_resource):
+def test_adapt_prompt_includes_provider_guide_resources(monkeypatch, provider, rules_key, negative_example_key):
     module = _load_prompt_adapter()
     captured = {}
 
@@ -146,11 +176,11 @@ def test_adapt_prompt_includes_provider_guide_resources(monkeypatch, provider, r
         )
     )
 
-    formula = (PROMPT_RESOURCE_DIR / f"guide_{provider}_formula.txt").read_text(encoding="utf-8").strip()
-    example = (PROMPT_RESOURCE_DIR / f"guide_{provider}_example.txt").read_text(encoding="utf-8").strip()
+    formula = PROMPT_LOADER.load(f"image.guide_{provider}_formula").strip()
+    example = PROMPT_LOADER.load(f"image.guide_{provider}_example").strip()
     rules = [
         line.strip()[2:]
-        for line in (PROMPT_RESOURCE_DIR / rules_resource).read_text(encoding="utf-8").splitlines()
+        for line in PROMPT_LOADER.load(rules_key).splitlines()
         if line.strip()
     ]
 
@@ -159,8 +189,8 @@ def test_adapt_prompt_includes_provider_guide_resources(monkeypatch, provider, r
     for rule in rules:
         assert f"- {rule}" in captured["prompt"]
 
-    if negative_example_resource:
-        negative_example = (PROMPT_RESOURCE_DIR / negative_example_resource).read_text(encoding="utf-8").strip()
+    if negative_example_key:
+        negative_example = PROMPT_LOADER.load(negative_example_key).strip()
         assert negative_example in captured["prompt"]
 
 

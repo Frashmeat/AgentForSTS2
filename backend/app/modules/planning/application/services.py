@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from config import get_config
 from llm.text_runner import complete_text
@@ -11,7 +10,7 @@ from app.modules.planning.domain.models import AssetItemType, ModPlan, PlanItem
 from app.shared.prompting import PromptLoader
 
 _NEEDS_IMAGE_TYPES: set[AssetItemType] = {"card", "card_fullscreen", "relic", "power", "character"}
-_PROMPT_ROOT = Path(__file__).resolve().parent.parent / "resources" / "prompts"
+_PLANNER_PROMPT_BUNDLE_KEY = "planning.planner_prompt"
 
 _PLANNER_PROMPT_TEMPLATE = """You are an expert STS2 (Slay the Spire 2) mod developer and designer.
 The user wants to create a Slay the Spire 2 mod. Analyze their requirements and produce a detailed, structured mod plan.
@@ -59,14 +58,14 @@ class PlanningService:
     def __init__(self, knowledge_source=None, text_completion=None, prompt_loader: PromptLoader | None = None) -> None:
         self.knowledge_source = knowledge_source
         self.text_completion = text_completion or complete_text
-        self.prompt_loader = prompt_loader or PromptLoader(root=_PROMPT_ROOT)
+        self.prompt_loader = prompt_loader or PromptLoader()
 
     def build_planner_prompt(self, requirements: str) -> str:
         api_hints = ""
         if self.knowledge_source is not None:
             api_hints = self.knowledge_source.load_context("planner")
         return self.prompt_loader.render(
-            "planner_prompt.txt",
+            _PLANNER_PROMPT_BUNDLE_KEY,
             {
                 "api_hints": api_hints,
                 "requirements": requirements,

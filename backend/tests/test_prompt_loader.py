@@ -26,6 +26,11 @@ def _make_temp_root() -> Path:
     return root
 
 
+def _write_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
 def test_prompt_loader_reads_utf8_template():
     root = _make_temp_root() / "prompts"
     root.mkdir()
@@ -111,5 +116,162 @@ def test_prompt_loader_uses_fallback_when_template_missing():
         )
 
         assert rendered == "Default fallback"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_prompt_loader_keeps_full_bundle_file_reads():
+    root = _make_temp_root()
+    bundle = root / "planning.md"
+    bundle_text = """# planning prompts
+
+## planner_prompt
+Hello {{ name }}
+## Keep this heading
+
+"""
+    _write_text(bundle, bundle_text)
+
+    try:
+        loader = PromptLoader(root)
+
+        assert loader.load("planning.md") == bundle_text
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_prompt_loader_loads_bundle_key_from_markdown_bundle():
+    root = _make_temp_root()
+    bundle = root / "planning.md"
+    bundle_text = """# planning prompts
+
+## planner_prompt
+Hello {{ name }}
+### Keep this heading
+
+"""
+    _write_text(bundle, bundle_text)
+
+    try:
+        loader = PromptLoader(root)
+
+        assert loader.load("planning.planner_prompt") == "Hello {{ name }}\n### Keep this heading\n\n"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_prompt_loader_renders_bundle_key_from_markdown_bundle():
+    root = _make_temp_root()
+    bundle = root / "planning.md"
+    bundle_text = """# planning prompts
+
+## planner_prompt
+Hello {{ name }}
+### Keep this heading
+
+"""
+    _write_text(bundle, bundle_text)
+
+    try:
+        loader = PromptLoader(root)
+
+        assert loader.render("planning.planner_prompt", {"name": "Alice"}) == "Hello Alice\n### Keep this heading\n\n"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_prompt_loader_rejects_legacy_txt_alias_requests():
+    root = _make_temp_root()
+    bundle = root / "planning.md"
+    bundle_text = """## planner_prompt
+Plan for {{ name }}
+"""
+    _write_text(bundle, bundle_text)
+
+    try:
+        loader = PromptLoader(root)
+
+        with pytest.raises(PromptNotFoundError, match="legacy_prompt.txt"):
+            loader.render("legacy_prompt.txt", {"name": "Silent"})
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_prompt_loader_raises_for_missing_bundle_key():
+    root = _make_temp_root()
+    _write_text(
+        root / "planning.md",
+        """## planner_prompt
+Plan
+""",
+    )
+
+    try:
+        loader = PromptLoader(root)
+
+        with pytest.raises(PromptNotFoundError, match="planning.missing_key"):
+            loader.load("planning.missing_key")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.mark.parametrize(
+    ("bundle_text", "message"),
+    [
+        (
+            """## bad-key
+Broken
+""",
+            "Invalid prompt bundle key",
+        ),
+        (
+            """## planner_prompt
+First
+## planner_prompt
+Second
+""",
+            "Duplicate prompt bundle key",
+        ),
+        (
+            """## planner_prompt
+
+""",
+            "Empty prompt bundle section",
+        ),
+    ],
+)
+def test_prompt_loader_rejects_invalid_bundle_markup(bundle_text: str, message: str):
+    root = _make_temp_root()
+    _write_text(root / "planning.md", bundle_text)
+
+    try:
+        loader = PromptLoader(root)
+
+        with pytest.raises(ValueError, match=message):
+            loader.load("planning.planner_prompt")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_prompt_loader_ignores_heading_like_text_inside_code_blocks():
+    root = _make_temp_root()
+    _write_text(
+        root / "planning.md",
+        """## planner_prompt
+```md
+## not_a_key
+```
+
+Actual content
+## second_prompt
+Second
+""",
+    )
+
+    try:
+        loader = PromptLoader(root)
+
+        assert loader.load("planning.planner_prompt") == "```md\n## not_a_key\n```\n\nActual content\n"
+        assert loader.load("planning.second_prompt") == "Second\n"
     finally:
         shutil.rmtree(root, ignore_errors=True)

@@ -34,9 +34,9 @@ def _load_log_analyzer():
 def test_log_analyzer_prompt_templates_exist_for_real_loader():
     module = _load_log_analyzer()
 
-    system_template = module._PROMPT_LOADER.load("log_analyzer_system.txt")
-    user_template = module._PROMPT_LOADER.load("log_analyzer_user.txt")
-    extra_context_template = module._PROMPT_LOADER.load("log_analyzer_extra_context.txt")
+    system_template = module._PROMPT_LOADER.load("analyzer.log_analyzer_system")
+    user_template = module._PROMPT_LOADER.load("analyzer.log_analyzer_user")
+    extra_context_template = module._PROMPT_LOADER.load("analyzer.log_analyzer_extra_context")
 
     assert "Slay the Spire 2 mod 开发专家" in system_template
     assert "{{ log_path }}" in user_template
@@ -62,7 +62,7 @@ def test_get_system_prompt_uses_prompt_loader():
     prompt = module._get_system_prompt()
 
     assert prompt == "rendered-system-prompt"
-    assert loader.load_calls == [("log_analyzer_system.txt", module._SYSTEM_PROMPT_TEMPLATE)]
+    assert loader.load_calls == [("analyzer.log_analyzer_system", module._SYSTEM_PROMPT_TEMPLATE)]
 
 
 def test_build_prompt_uses_prompt_loader_for_user_and_extra_context(monkeypatch):
@@ -82,19 +82,19 @@ def test_build_prompt_uses_prompt_loader_for_user_and_extra_context(monkeypatch)
 
     prompt = module._build_prompt("黑屏了，刚加了 MyMod")
 
-    assert prompt == "rendered:log_analyzer_user.txt"
+    assert prompt == "rendered:analyzer.log_analyzer_user"
     assert len(loader.render_calls) == 2
 
     extra_name, extra_variables, extra_fallback = loader.render_calls[0]
-    assert extra_name == "log_analyzer_extra_context.txt"
+    assert extra_name == "analyzer.log_analyzer_extra_context"
     assert extra_variables == {"extra_context": "黑屏了，刚加了 MyMod"}
     assert "用户补充说明" in extra_fallback
 
     user_name, user_variables, user_fallback = loader.render_calls[1]
-    assert user_name == "log_analyzer_user.txt"
+    assert user_name == "analyzer.log_analyzer_user"
     assert user_variables["log_path"] == module._LOG_PATH
     assert user_variables["log_content"] == "line1\nline2"
-    assert user_variables["extra_context_block"] == "rendered:log_analyzer_extra_context.txt"
+    assert user_variables["extra_context_block"] == "rendered:analyzer.log_analyzer_extra_context"
     assert "以下是 STS2 游戏日志内容" in user_fallback
     assert "请分析上述日志" in user_fallback
 

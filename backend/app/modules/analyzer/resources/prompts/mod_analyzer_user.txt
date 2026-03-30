@@ -1,7 +1,0 @@
-以下是 mod 项目的源码（路径：{{ project_root }}）：
-
-```
-{{ file_content }}
-```
-
-请分析这个 mod 的内容。
