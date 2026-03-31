@@ -13,7 +13,7 @@ Describe your card, relic, or power in plain text — AgentTheSpire generates th
 
 ### Features
 
-- **AI code generation** — Claude writes complete C# implementations from your description
+- **AI code generation** — Claude Code CLI or Codex CLI writes complete C# implementations from your description
 - **AI image generation** — FLUX.2 / 即梦 / 通义万相 generate card art and relic icons, background removed and cropped automatically
 - **One-click build & deploy** — `dotnet publish` + Godot PCK packaging, copied straight to your game's mods folder
 - **Batch creation** — describe a full mod theme, AI plans and generates all assets in one go
@@ -27,7 +27,7 @@ Describe your card, relic, or power in plain text — AgentTheSpire generates th
 | .NET SDK | 9.x | Yes |
 | Godot Mono | **4.5.1 exactly** | Yes |
 | Slay the Spire 2 | latest | Yes |
-| Claude Code CLI | latest | One of two LLM options |
+| Claude Code CLI / Codex CLI | latest | Optional for `agent_cli` mode |
 | LLM API Key | — | One of two LLM options |
 | Image Gen API Key | — | Optional |
 
@@ -49,10 +49,10 @@ See [TUTORIAL.md](TUTORIAL.md) for full setup and configuration guide.
 
 ### LLM Options
 
-| Mode | Provider |
-|------|---------|
-| `claude_subscription` | Claude Code CLI — best quality, requires Anthropic subscription |
-| `api_key` | Anthropic / Moonshot (Kimi) / DeepSeek / Qwen / Zhipu |
+| Mode | Backend / Provider |
+|------|---------------------|
+| `agent_cli` | `claude` or `codex` |
+| `api` | `anthropic` / `openai` / `moonshot` / `deepseek` / `qwen` / `zhipu` |
 
 ### Image Generation Options
 
@@ -71,7 +71,7 @@ See [TUTORIAL.md](TUTORIAL.md) for full setup and configuration guide.
 
 ### 功能
 
-- **AI 写代码** — Claude 根据描述生成完整 C# 实现，编译报错自动修复
+- **AI 写代码** — Claude Code CLI 或 Codex CLI 根据描述生成完整 C# 实现，编译报错自动修复
 - **AI 生图** — FLUX.2 / 即梦 / 通义万相生成卡图/遗物图标，自动去背景裁剪
 - **一键编译部署** — `dotnet publish` + Godot PCK 打包，自动复制到游戏 mods 目录
 - **批量创建** — 描述整个 mod 主题，AI 规划并批量生成所有素材
@@ -119,15 +119,35 @@ tools\start.bat             # 打开 http://localhost:7860
 
 ```
 AgentTheSpire/
-├── backend/          # Python FastAPI backend
-│   ├── agents/       # Code Agent, Planner
-│   ├── image/        # Image generation pipeline
-│   ├── llm/          # Unified LLM streaming
-│   └── routers/      # API routes
-├── frontend/         # React + TypeScript UI
-├── mod_template/     # C#/.NET Godot mod template
-└── tools/            # Install/start helpers, decompiler, sandbox tests
+├── backend/                         # Python FastAPI backend
+│   ├── app/
+│   │   ├── modules/                # approval / codegen / image / planning / workflow
+│   │   ├── shared/prompting/       # PromptLoader and prompt rendering utilities
+│   │   └── shared/resources/
+│   │       └── prompts/            # Unified runtime prompt bundles (*.md)
+│   ├── agents/                     # Legacy-compatible agent entrypoints
+│   ├── approval/                   # Approval flow adapters
+│   ├── image/                      # Image generation pipeline
+│   ├── llm/                        # Unified agent/text runner backends
+│   ├── routers/                    # API routes
+│   └── tests/                      # Backend test suite
+├── frontend/                       # React + TypeScript UI
+├── mod_template/                   # C#/.NET Godot mod template
+└── tools/                          # Install/start helpers and utility scripts
 ```
+
+## Runtime Prompt Bundles
+
+Runtime prompts are now consolidated under:
+
+- `backend/app/shared/resources/prompts/planning.md`
+- `backend/app/shared/resources/prompts/approval.md`
+- `backend/app/shared/resources/prompts/llm.md`
+- `backend/app/shared/resources/prompts/analyzer.md`
+- `backend/app/shared/resources/prompts/codegen.md`
+- `backend/app/shared/resources/prompts/image.md`
+
+These bundles are loaded by `backend/app/shared/prompting/prompt_loader.py` using `bundle.key` lookups such as `planning.planner_prompt` or `codegen.asset_prompt`.
 
 ## License
 

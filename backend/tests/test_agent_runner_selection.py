@@ -76,6 +76,6 @@ def test_build_agent_prompt_skips_agents_codex_for_non_codex_backend(monkeypatch
 
 def test_build_agent_prompt_uses_shared_bundle_header_when_legacy_path_missing(monkeypatch):
     prompt = build_agent_prompt("fix the project", {"custom_prompt": "prefer minimal edits"})
-    expected_header = PromptLoader().load("llm.global_prompt_header").strip()
+    expected_header = PromptLoader().load("runtime_agent.llm_global_prompt_header").strip()
 
     assert prompt == f"fix the project\n\n{expected_header}\nprefer minimal edits"

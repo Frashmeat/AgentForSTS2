@@ -21,29 +21,6 @@ _PROMPT_LOADER = PromptLoader()
 _MOD_ANALYZER_SYSTEM_PROMPT_KEY = "analyzer.mod_analyzer_system"
 _MOD_ANALYZER_USER_PROMPT_KEY = "analyzer.mod_analyzer_user"
 
-_SYSTEM_PROMPT_TEMPLATE = """\
-你是 Slay the Spire 2 mod 开发专家。请分析给定的 mod 源码，用中文告诉用户以下内容：
-
-1. **Mod 基本信息**：名称、主题、整体风格
-2. **卡牌列表**：每张卡的名称（英文/中文）、类型（攻击/技能/力量）、费用、效果、数值
-3. **遗物列表**：每个遗物的名称、稀有度、触发条件、效果
-4. **Power/Buff 列表**：名称、叠层方式、效果
-5. **特殊机制**：Harmony Patch、自定义系统、特殊交互等
-
-格式要清晰，数值要具体，方便用户后续描述想修改哪里。
-如果某类内容不存在，可以省略该节。
-"""
-
-_USER_PROMPT_TEMPLATE = """\
-以下是 mod 项目的源码（路径：{{ project_root }}）：
-
-```
-{{ file_content }}
-```
-
-请分析这个 mod 的内容。
-"""
-
 
 async def _send_stage(ws: WebSocket, scope: str, stage: str, message: str):
     payload = build_stage_event(scope, stage, message)
@@ -52,10 +29,7 @@ async def _send_stage(ws: WebSocket, scope: str, stage: str, message: str):
 
 
 def _get_system_prompt() -> str:
-    return _PROMPT_LOADER.load(
-        _MOD_ANALYZER_SYSTEM_PROMPT_KEY,
-        fallback_template=_SYSTEM_PROMPT_TEMPLATE,
-    )
+    return _PROMPT_LOADER.load(_MOD_ANALYZER_SYSTEM_PROMPT_KEY)
 
 
 def _build_prompt(project_root: Path, file_content: str) -> str:
@@ -65,7 +39,6 @@ def _build_prompt(project_root: Path, file_content: str) -> str:
             "project_root": project_root,
             "file_content": file_content,
         },
-        fallback_template=_USER_PROMPT_TEMPLATE,
     )
 
 
@@ -141,12 +114,12 @@ async def ws_analyze_mod(ws: WebSocket):
         params = json.loads(raw)
         project_root = Path(params.get("project_root", ""))
 
-        await _send_stage(ws, "text", "reading_input", "正在扫描 Mod 源码...")
+        await _send_stage(ws, "text", "reading_input", _PROMPT_LOADER.load("analyzer.mod_reading_stage").strip())
 
         if not project_root.exists():
             await ws.send_text(json.dumps({
                 "event": "error",
-                "message": f"路径不存在：{project_root}"
+                "message": _PROMPT_LOADER.render("analyzer.mod_path_missing_message", {"project_root": project_root}).strip()
             }))
             return
 
@@ -155,13 +128,13 @@ async def ws_analyze_mod(ws: WebSocket):
         if not file_content.strip():
             await ws.send_text(json.dumps({
                 "event": "error",
-                "message": f"未在 {project_root} 找到任何 .cs 源码文件"
+                "message": _PROMPT_LOADER.render("analyzer.mod_source_missing_message", {"project_root": project_root}).strip()
             }))
             return
 
         await ws.send_text(json.dumps({"event": "scan_info", "files": file_count}))
 
-        await _send_stage(ws, "text", "preparing_prompt", "正在整理源码分析上下文...")
+        await _send_stage(ws, "text", "preparing_prompt", _PROMPT_LOADER.load("analyzer.mod_preparing_stage").strip())
         prompt = _build_prompt(project_root, file_content)
 
         cfg = get_config()
@@ -172,12 +145,12 @@ async def ws_analyze_mod(ws: WebSocket):
             nonlocal streamed
             if not streamed:
                 streamed = True
-                await _send_stage(ws, "text", "ai_streaming", "AI 已开始输出分析结果...")
+                await _send_stage(ws, "text", "ai_streaming", _PROMPT_LOADER.load("analyzer.mod_streaming_stage").strip())
             await ws.send_text(json.dumps({"event": "stream", "chunk": chunk}))
 
-        await _send_stage(ws, "text", "ai_running", "正在调用 AI 分析 Mod...")
+        await _send_stage(ws, "text", "ai_running", _PROMPT_LOADER.load("analyzer.mod_running_stage").strip())
         full_text = await stream_analysis(_get_system_prompt(), prompt, llm_cfg, send_chunk)
-        await _send_stage(ws, "text", "done", "Mod 分析完成")
+        await _send_stage(ws, "text", "done", _PROMPT_LOADER.load("analyzer.mod_done_stage").strip())
         await ws.send_text(json.dumps({"event": "done", "full": full_text}))
 
     except Exception as e:

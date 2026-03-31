@@ -9,14 +9,14 @@ You are an expert STS2 (Slay the Spire 2) mod developer using Godot 4 + C# + Bas
 
 ---
 
-## Task: Create {{ asset_count }} related assets in ONE batch
+### Task: Create {{ asset_count }} related assets in ONE batch
 
 These assets are grouped because they depend on each other. Generate ALL of them in this single session.
 Class names in this group: {{ class_names }}
 
 {{ assets_section }}
 
-## Project already initialized
+### Project already initialized
 The project at `{{ project_root }}` is set up. Read `MainFile.cs` first to confirm namespace and ModId.
 - `local.props` and `nuget.config` — already correct, do NOT recreate
 - `Extensions/StringExtensions.cs` — image path helpers, already present
@@ -27,7 +27,7 @@ All res:// paths must use `{{ mod_name }}` as root.
 
 DO NOT re-clone from GitHub. DO NOT recreate local.props or nuget.config.
 
-## Steps
+### Steps
 
 1. Read `MainFile.cs` to confirm the exact namespace and ModId.
 2. For each asset in the group (in dependency order — dependencies first):
@@ -59,7 +59,7 @@ Design description (Chinese):
 Image assets already generated and placed at:
 {{ img_list }}
 
-## Project already initialized
+### Project already initialized
 The project at `{{ project_root }}` is already set up (copied from a working template).
 - `MainFile.cs` — entry point (read it to confirm the exact namespace and ModId)
 - `local.props` — already correct for this machine (do NOT recreate)
@@ -122,7 +122,7 @@ Design description:
 Technical implementation notes:
 {{ implementation_notes }}
 
-## Project already initialized
+### Project already initialized
 The project at `{{ project_root }}` is already set up (copied from a working template).
 - `MainFile.cs` — entry point with `harmony.PatchAll()` already wired up
 - `local.props` and `nuget.config` — already correct, do NOT recreate
@@ -162,4 +162,4 @@ Key subdirs: `MegaCrit.Sts2.Core.Commands\` (DamageCmd, PowerCmd, CreatureCmd…
 Only fall back to ilspycmd if a specific class is missing from this directory.
 
 ## api_lookup_title
-## API Lookup
+### API Lookup

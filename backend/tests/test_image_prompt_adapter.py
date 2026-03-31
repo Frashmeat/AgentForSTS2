@@ -16,12 +16,9 @@ PROMPT_LOADER = PromptLoader()
 def _load_prompt_adapter():
     sys.modules.setdefault("litellm", types.SimpleNamespace(acompletion=None))
     sys.modules.setdefault("config", types.SimpleNamespace(get_config=lambda: {"llm": {}}))
-    sys.modules.setdefault(
-        "llm.text_runner",
-        types.SimpleNamespace(
-            complete_text=lambda *args, **kwargs: None,
-            resolve_model=lambda cfg: "fake-model",
-        ),
+    sys.modules["llm.text_runner"] = types.SimpleNamespace(
+        complete_text=lambda *args, **kwargs: None,
+        resolve_model=lambda cfg: "fake-model",
     )
     sys.modules.pop("image.prompt_adapter", None)
     return importlib.import_module("image.prompt_adapter")
@@ -145,7 +142,7 @@ def test_image_prompt_adapter_uses_bundle_keys_for_prompt_resources(monkeypatch)
     )
 
     assert loader.render_calls[0][0] == "image.adapt_prompt"
-    assert ("image.transparent_bg_rule", module._TRANSPARENT_BG_RULE) in loader.load_calls
+    assert ("image.transparent_bg_rule", "") in loader.load_calls
 
 
 @pytest.mark.parametrize(
@@ -238,7 +235,7 @@ def test_adapt_prompt_adds_resource_backed_transparent_rule(monkeypatch):
         )
     )
 
-    assert "The asset requires a transparent/white background (no background scene)" in captured["prompt"]
+    assert PROMPT_LOADER.load("image.transparent_bg_rule").strip() in captured["prompt"]
 
 
 def test_fallback_prompt_keeps_resource_backed_suffixes_and_negative_prompt():

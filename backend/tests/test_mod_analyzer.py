@@ -19,16 +19,10 @@ class _DummyRouter:
 
 
 def _load_mod_analyzer():
-    sys.modules.setdefault("fastapi", types.SimpleNamespace(APIRouter=lambda: _DummyRouter(), WebSocket=object))
-    sys.modules.setdefault("config", types.SimpleNamespace(get_config=lambda: {"llm": {}}))
-    sys.modules.setdefault(
-        "llm.stream",
-        types.SimpleNamespace(stream_analysis=lambda *args, **kwargs: None),
-    )
-    sys.modules.setdefault(
-        "llm.stage_events",
-        types.SimpleNamespace(build_stage_event=lambda *args, **kwargs: None),
-    )
+    sys.modules["fastapi"] = types.SimpleNamespace(APIRouter=lambda: _DummyRouter(), WebSocket=object)
+    sys.modules["config"] = types.SimpleNamespace(get_config=lambda: {"llm": {}})
+    sys.modules["llm.stream"] = types.SimpleNamespace(stream_analysis=lambda *args, **kwargs: None)
+    sys.modules["llm.stage_events"] = types.SimpleNamespace(build_stage_event=lambda *args, **kwargs: None)
     sys.modules.pop("routers.mod_analyzer", None)
     return importlib.import_module("routers.mod_analyzer")
 
@@ -128,7 +122,7 @@ def test_get_system_prompt_uses_prompt_loader():
     prompt = module._get_system_prompt()
 
     assert prompt == "rendered-system-prompt"
-    assert loader.load_calls == [("analyzer.mod_analyzer_system", module._SYSTEM_PROMPT_TEMPLATE)]
+    assert loader.load_calls == [("analyzer.mod_analyzer_system", "")]
 
 
 def test_build_prompt_uses_prompt_loader_for_user_template():
@@ -155,7 +149,7 @@ def test_build_prompt_uses_prompt_loader_for_user_template():
                 "project_root": Path("E:/STS2mod/MyMod"),
                 "file_content": "// Cards/Strike.cs\nclass Strike {}",
             },
-            module._USER_PROMPT_TEMPLATE,
+            "",
         )
     ]
 

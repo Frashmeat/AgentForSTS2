@@ -174,7 +174,7 @@ def test_codegen_prompt_templates_exist_for_real_loader():
     package_template = loader.load("codegen.package_prompt")
 
     assert 'Task: Create a new {{ asset_type }} named "{{ asset_name }}".{{ zhs_hint }}' in template
-    assert "## Task: Create {{ asset_count }} related assets in ONE batch" in group_template
+    assert "### Task: Create {{ asset_count }} related assets in ONE batch" in group_template
     assert "Repeat until it succeeds or you've tried {{ max_attempts }} times." in build_template
     assert 'Create a new STS2 mod project named "{{ project_name }}" at {{ project_path }}.' in create_project_template
     assert "Build and package this STS2 mod completely:" in package_template
@@ -215,7 +215,7 @@ def test_asset_prompt_renders_codegen_template_with_runtime_variables():
     assert variables["zhs_hint"] == "\nSimplified Chinese display name (name_zhs): 燃烧遗物"
     assert variables["img_list"] == "  - images/burn.png"
     assert variables["build_step"] == "6. Do NOT run dotnet publish — the build will be done later after all assets are created."
-    assert 'Task: Create a new {{ asset_type }} named "{{ asset_name }}".{{ zhs_hint }}' in fallback_template
+    assert fallback_template == ""
 
 
 @pytest.mark.skipif(
@@ -272,7 +272,7 @@ def test_asset_group_prompt_renders_codegen_template_with_prepared_sections():
     assert "### Asset 1: [card] Ignite" in variables["assets_section"]
     assert "Depends on: power_burn" in variables["assets_section"]
     assert "(no image — code-only asset)" in variables["assets_section"]
-    assert '## Task: Create {{ asset_count }} related assets in ONE batch' in fallback_template
+    assert fallback_template == ""
 
 
 @pytest.mark.skipif(
@@ -296,7 +296,7 @@ def test_build_prompt_renders_codegen_template_with_attempt_limit():
     template_name, variables, fallback_template = loader.calls[0]
     assert template_name == "codegen.build_prompt"
     assert variables == {"max_attempts": 4}
-    assert "Repeat until it succeeds or you've tried {{ max_attempts }} times." in fallback_template
+    assert fallback_template == ""
 
 
 @pytest.mark.skipif(
@@ -322,7 +322,7 @@ def test_create_mod_project_prompt_renders_codegen_template_with_project_variabl
     assert template_name == "codegen.create_mod_project_prompt"
     assert variables["project_name"] == "MyCoolMod"
     assert variables["project_path"] == Path("mods/MyCoolMod")
-    assert 'Create a new STS2 mod project named "{{ project_name }}" at {{ project_path }}.' in fallback_template
+    assert fallback_template == ""
 
 
 @pytest.mark.skipif(
@@ -346,7 +346,7 @@ def test_package_prompt_renders_codegen_template():
     template_name, variables, fallback_template = loader.calls[0]
     assert template_name == "codegen.package_prompt"
     assert variables == {}
-    assert "Build and package this STS2 mod completely:" in fallback_template
+    assert fallback_template == ""
 
 
 def test_codegen_service_build_and_fix_uses_build_prompt():
@@ -406,7 +406,7 @@ def test_codegen_service_build_and_fix_uses_template_backed_build_prompt():
     template_name, variables, fallback_template = loader.calls[0]
     assert template_name == "codegen.build_prompt"
     assert variables == {"max_attempts": 5}
-    assert "Repeat until it succeeds or you've tried {{ max_attempts }} times." in fallback_template
+    assert fallback_template == ""
 
 
 @pytest.mark.skipif(
@@ -447,7 +447,7 @@ def test_codegen_service_create_mod_project_uses_template_backed_project_prompt(
     assert template_name == "codegen.create_mod_project_prompt"
     assert variables["project_name"] == "MyCoolMod"
     assert variables["project_path"] == Path("mods/MyCoolMod")
-    assert 'Create a new STS2 mod project named "{{ project_name }}" at {{ project_path }}.' in fallback_template
+    assert fallback_template == ""
 
 
 @pytest.mark.skipif(
@@ -486,4 +486,4 @@ def test_codegen_service_package_mod_uses_template_backed_package_prompt():
     template_name, variables, fallback_template = loader.calls[0]
     assert template_name == "codegen.package_prompt"
     assert variables == {}
-    assert "Build and package this STS2 mod completely:" in fallback_template
+    assert fallback_template == ""

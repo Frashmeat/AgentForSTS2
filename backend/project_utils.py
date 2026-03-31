@@ -9,6 +9,10 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+from app.shared.prompting import PromptLoader
+
+_TEXT_LOADER = PromptLoader()
+
 
 # ── local.props 自动生成 ──────────────────────────────────────────────────────
 
@@ -29,13 +33,13 @@ def ensure_local_props(project_root: Path) -> bool:
     if not sts2_path or not godot_path:
         return False
 
-    content = f"""<Project>
-  <PropertyGroup>
-    <STS2GamePath>{sts2_path}</STS2GamePath>
-    <GodotExePath>{godot_path}</GodotExePath>
-  </PropertyGroup>
-</Project>
-"""
+    content = _TEXT_LOADER.render(
+        "runtime_system.project_utils_local_props_template",
+        {
+            "sts2_path": sts2_path,
+            "godot_path": godot_path,
+        },
+    )
     props_path.write_text(content, encoding="utf-8")
     return True
 
@@ -91,7 +95,10 @@ def _find_sts2_via_registry() -> tuple[str | None, str]:
                         steam_path = Path(winreg.QueryValueEx(k, "InstallPath")[0])
                         result = _search_steam_libraries(steam_path)
                         if result:
-                            return str(result), f"通过 Steam 注册表找到 STS2: {result}"
+                            return str(result), _TEXT_LOADER.render(
+                                "runtime_system.project_utils_sts2_found_via_registry",
+                                {"path": result},
+                            )
                 except (FileNotFoundError, OSError):
                     continue
     except ImportError:
@@ -114,8 +121,11 @@ def _find_sts2_in_common_paths() -> tuple[str | None, str]:
     for root in common_steam_roots:
         result = _search_steam_libraries(root)
         if result:
-            return str(result), f"在常见路径找到 STS2: {result}"
-    return None, "未能自动找到 STS2，请手动填写路径"
+            return str(result), _TEXT_LOADER.render(
+                "runtime_system.project_utils_sts2_found_in_common_paths",
+                {"path": result},
+            )
+    return None, _TEXT_LOADER.load("runtime_system.project_utils_sts2_not_found")
 
 
 def _search_steam_libraries(steam_root: Path) -> Path | None:
@@ -164,16 +174,22 @@ def _find_godot() -> tuple[str | None, str]:
             continue
         matches = _glob.glob(str(Path(d) / "**" / pattern), recursive=True)
         if matches:
-            return matches[0], f"找到 Godot: {matches[0]}"
+            return matches[0], _TEXT_LOADER.render(
+                "runtime_system.project_utils_godot_found",
+                {"path": matches[0]},
+            )
 
     # 也搜索 PATH
     import shutil as _shutil
     for name in ("godot", "Godot"):
         found = _shutil.which(name)
         if found:
-            return found, f"在 PATH 中找到 Godot: {found}"
+            return found, _TEXT_LOADER.render(
+                "runtime_system.project_utils_godot_found_in_path",
+                {"path": found},
+            )
 
-    return None, "未能自动找到 Godot 4.5.1 Mono，请手动填写路径"
+    return None, _TEXT_LOADER.load("runtime_system.project_utils_godot_not_found")
 
 # ── 模板源 ─────────────────────────────────────────────────────────────────
 
@@ -233,9 +249,13 @@ def create_project_from_template(project_name: str, target_dir: Path) -> Path:
     src = _get_template_source()
     if not src.exists():
         raise FileNotFoundError(
-            f"Mod 模板目录不存在: {src}\n"
-            f"请将模板项目放到 {_DEFAULT_TEMPLATE}，"
-            f"或在 config.json 中设置 mod_template_path。"
+            _TEXT_LOADER.render(
+                "runtime_system.project_utils_template_missing",
+                {
+                    "template_path": src,
+                    "default_template_path": _DEFAULT_TEMPLATE,
+                },
+            )
         )
 
     project_root = target_dir / project_name

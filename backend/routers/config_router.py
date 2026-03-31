@@ -1,7 +1,9 @@
 from fastapi import APIRouter
+from app.shared.prompting import PromptLoader
 from config import get_config, update_config
 
 router = APIRouter(prefix="/config")
+_TEXT_LOADER = PromptLoader()
 
 
 @router.get("")
@@ -35,7 +37,7 @@ def detect_paths():
 async def test_imggen():
     from image.generator import generate_images
     try:
-        imgs = await generate_images("a glowing icon", "power", batch_size=1)
+        imgs = await generate_images(_TEXT_LOADER.load("runtime_system.config_image_test_prompt").strip(), "power", batch_size=1)
         return {"ok": True, "size": list(imgs[0].size)}
     except Exception as e:
         return {"ok": False, "error": str(e)[:300]}

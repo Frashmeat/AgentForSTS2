@@ -3,17 +3,12 @@ from __future__ import annotations
 from app.shared.prompting import PromptLoader
 from config import normalize_llm_config
 
-_GLOBAL_PROMPT_HEADER = "## User Configured Global AI Instructions"
 _PROMPT_LOADER = PromptLoader()
-_GLOBAL_PROMPT_HEADER_BUNDLE_KEY = "llm.global_prompt_header"
+_GLOBAL_PROMPT_HEADER_BUNDLE_KEY = "runtime_agent.llm_global_prompt_header"
 
 
 def _load_global_prompt_header() -> str:
-    header = _PROMPT_LOADER.load(
-        _GLOBAL_PROMPT_HEADER_BUNDLE_KEY,
-        fallback_template=_GLOBAL_PROMPT_HEADER,
-    ).strip()
-    return header or _GLOBAL_PROMPT_HEADER
+    return _PROMPT_LOADER.load(_GLOBAL_PROMPT_HEADER_BUNDLE_KEY).strip()
 
 
 def append_global_ai_instructions(base_prompt: str, llm_cfg: dict) -> str:

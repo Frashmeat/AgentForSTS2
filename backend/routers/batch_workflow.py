@@ -37,6 +37,7 @@ from app.modules.workflow.application.engine import WorkflowEngine
 from app.modules.workflow.application.policies import LimitedParallelPolicy
 from app.modules.workflow.application.step import WorkflowStep
 from app.shared.infra.feature_flags import resolve_workflow_migration_flags
+from app.shared.prompting import PromptLoader
 from config import get_config
 from image.generator import generate_images
 from image.postprocess import process_image
@@ -45,6 +46,7 @@ from llm.text_runner import complete_text
 from llm.stage_events import build_stage_event
 
 router = APIRouter()
+_TEXT_LOADER = PromptLoader()
 
 TRANSPARENT_TYPES = {"relic", "power"}
 
@@ -56,6 +58,12 @@ def _needs_transparent(asset_type: str) -> bool:
 def _img_provider_to_adapter(provider: str) -> ImageProvider:
     mapping = {"bfl": "flux2", "fal": "flux2", "volcengine": "jimeng", "wanxiang": "wanxiang"}
     return mapping.get(provider, "flux2")
+
+
+def _text(key: str, **variables: object) -> str:
+    if variables:
+        return _TEXT_LOADER.render(f"runtime_workflow.{key}", variables)
+    return _TEXT_LOADER.load(f"runtime_workflow.{key}")
 
 
 async def _run_postprocess(img, asset_type, asset_name, project_root):
@@ -74,7 +82,7 @@ async def _send_item_approval_pending(ws: WebSocket, item_id: str, summary: str,
 
 async def _publish_batch_standard_event(ws: WebSocket, event) -> None:
     if event.stage == "error":
-        await ws.send_text(json.dumps({"event": "item_error", "message": event.payload.get("message", "workflow error")}))
+        await ws.send_text(json.dumps({"event": "item_error", "message": event.payload.get("message", _text("batch_approval_error_default").strip())}))
         return
 
     if event.payload.get("status") != "completed":
@@ -120,7 +128,7 @@ async def _plan_group_approval_requests(group: list[PlanItem], llm_cfg: dict, pr
     prompt = build_action_prompt(requirements)
     raw = await complete_text(prompt, llm_cfg, cwd=project_root)
     plan = json.loads(raw)
-    summary = plan.get("summary", "This group requires approval before execution")
+    summary = plan.get("summary", _text("batch_approval_summary_default").strip())
     actions = get_approval_service().create_requests_from_plan(
         plan,
         source_backend=llm_cfg.get("agent_backend", "unknown"),
@@ -140,7 +148,7 @@ async def api_plan(body: dict):
     """接收用户需求文本，返回结构化 Mod 计划（JSON）。"""
     requirements: str = body.get("requirements", "")
     if not requirements.strip():
-        return {"error": "requirements 不能为空"}
+        return {"error": _text("batch_api_requirements_missing").strip()}
     plan = await plan_mod(requirements)
     return plan.to_dict()
 
@@ -202,11 +210,11 @@ async def ws_batch(ws: WebSocket):
             # 直接用已有 plan 执行，跳过规划阶段（恢复上次规划用）
             plan = plan_from_dict(params["plan"])
         else:
-            assert action == "start", "期望 action=start 或 start_with_plan"
+            assert action == "start", _text("batch_start_action_expected").strip()
             requirements: str = params["requirements"]
 
             # ── 2. 规划 ──────────────────────────────────────────────────────
-            await send_stage("text", "planning", "正在规划 Mod...")
+            await send_stage("text", "planning", _text("batch_planning_stage").strip())
             await send("planning")
             plan = await plan_mod(requirements)
             await send("plan_ready", plan=plan.to_dict())
@@ -214,7 +222,7 @@ async def ws_batch(ws: WebSocket):
             # ── 3. 等待用户确认计划 ───────────────────────────────────────────
             raw = await ws.receive_text()
             confirm = json.loads(raw)
-            assert confirm.get("action") == "confirm_plan", "期望 action=confirm_plan"
+            assert confirm.get("action") == "confirm_plan", _text("batch_confirm_plan_expected").strip()
             if confirm.get("plan"):
                 plan = plan_from_dict(confirm["plan"])
 
@@ -229,14 +237,14 @@ async def ws_batch(ws: WebSocket):
         if not list(project_root.glob("*.csproj")):
             project_name = project_root.name
             parent_dir = project_root.parent
-            await send_stage("project", "project_init", f"正在初始化项目 {project_name}...")
-            await send("batch_progress", message=f"未检测到项目，正在创建 {project_name}...")
+            await send_stage("project", "project_init", _text("batch_project_init_stage", project_name=project_name).strip())
+            await send("batch_progress", message=_text("batch_project_init_progress", project_name=project_name).strip())
 
             async def _init_stream(chunk: str):
                 await send("batch_progress", message=chunk)
 
             project_root = await create_mod_project(project_name, parent_dir, _init_stream)
-            await send("batch_progress", message=f"项目创建完成: {project_root}")
+            await send("batch_progress", message=_text("batch_project_init_done", project_root=project_root).strip())
 
         group_by_item = {
             item.id: group
@@ -286,7 +294,7 @@ async def ws_batch(ws: WebSocket):
                 await handle_control_message(msg, defer_if_unready=False)
         if any(len(g) > 1 for g in groups):
             multi = [g for g in groups if len(g) > 1]
-            await send("batch_progress", message=f"发现 {len(multi)} 个依赖组，将合并生成代码（更快）")
+            await send("batch_progress", message=_text("batch_multi_group_detected", group_count=len(multi)).strip())
 
         _log.info("batch_started: %d items, %d groups: %s",
                   len(sorted_items), len(groups),
@@ -300,15 +308,15 @@ async def ws_batch(ws: WebSocket):
             try:
                 if item.needs_image:
                     if item.provided_image_b64:
-                        await send("item_progress", item_id=item.id, message="使用用户提供的图片...")
+                        await send("item_progress", item_id=item.id, message=_text("batch_provided_image_progress").strip())
                         from PIL import Image as PilImage
                         img_data = base64.b64decode(item.provided_image_b64)
                         selected_img = PilImage.open(io.BytesIO(img_data)).convert("RGBA")
                     else:
                         img_desc = item.image_description or item.description
                         async with image_gen_sem:
-                            await send_stage("text", "prompt_adapting", "正在整理图像提示词...", item.id)
-                            await send("item_progress", item_id=item.id, message="正在优化图像提示词...")
+                            await send_stage("text", "prompt_adapting", _text("batch_prompt_adapting_stage").strip(), item.id)
+                            await send("item_progress", item_id=item.id, message=_text("batch_prompt_adapting_progress").strip())
                             adapted = await adapt_prompt(
                                 img_desc, item.type, img_provider,
                                 needs_transparent_bg=_needs_transparent(item.type),
@@ -319,8 +327,9 @@ async def ws_batch(ws: WebSocket):
                         while True:
                             async with image_gen_sem:
                                 idx = len(all_images)
-                                await send_stage("image", "image_generating", f"正在生成第 {idx + 1} 张图像...", item.id)
-                                await send("item_progress", item_id=item.id, message=f"正在生成第 {idx + 1} 张图像...")
+                                image_number = idx + 1
+                                await send_stage("image", "image_generating", _text("batch_image_generating_stage", image_number=image_number).strip(), item.id)
+                                await send("item_progress", item_id=item.id, message=_text("batch_image_generating_progress", image_number=image_number).strip())
                                 async def _img_progress(msg: str, _id=item.id):
                                     await send("item_progress", item_id=_id, message=msg)
                                 for _attempt in range(3):
@@ -333,7 +342,7 @@ async def ws_batch(ws: WebSocket):
                                     except Exception as _e:
                                         if _attempt == 2:
                                             raise
-                                        await send("item_progress", item_id=item.id, message=f"图像生成失败，重试 {_attempt+2}/3...")
+                                        await send("item_progress", item_id=item.id, message=_text("batch_image_generating_retry", retry_number=_attempt + 2).strip())
                                         await asyncio.sleep(2)
                                 all_images.append(img)
                             buf = io.BytesIO()
@@ -352,11 +361,11 @@ async def ws_batch(ws: WebSocket):
                             if result.get("negative_prompt") is not None:
                                 current_neg = result["negative_prompt"]
 
-                    await send_stage("image", "postprocess", "正在处理图像资产...", item.id)
-                    await send("item_progress", item_id=item.id, message="正在处理图像资产...")
+                    await send_stage("image", "postprocess", _text("batch_image_postprocess_stage").strip(), item.id)
+                    await send("item_progress", item_id=item.id, message=_text("batch_image_postprocess_progress").strip())
                     paths = await _run_postprocess(selected_img, item.type, item.name, project_root)
                     item_image_paths[item.id] = paths
-                    await send("item_progress", item_id=item.id, message="图像资产处理完成，等待组内其他资产...")
+                    await send("item_progress", item_id=item.id, message=_text("batch_image_postprocess_done").strip())
                 else:
                     item_image_paths[item.id] = []
             except Exception as e:
@@ -382,7 +391,7 @@ async def ws_batch(ws: WebSocket):
                 for item in group:
                     if item.id not in error_ids:
                         await send("item_error", item_id=item.id,
-                                   message=f"组内资产 {failed} 图片生成失败，跳过代码生成")
+                                   message=_text("batch_group_image_failure_skip", failed_items=failed).strip())
                         error_ids.add(item.id)
                         item_done_events[item.id].set()
                 return
@@ -392,8 +401,8 @@ async def ws_batch(ws: WebSocket):
                 # 向所有 item 发送代码生成开始的通知
                 first_id = group[0].id
                 for item in group:
-                    await send_stage("agent", "agent_running", "正在生成代码...", item.id)
-                    await send("item_progress", item_id=item.id, message="Code Agent 开始生成代码...")
+                    await send_stage("agent", "agent_running", _text("batch_agent_running_stage").strip(), item.id)
+                    await send("item_progress", item_id=item.id, message=_text("batch_agent_running_progress").strip())
 
                 async def _stream(chunk: str):
                     await send("item_agent_stream", item_id=first_id, chunk=chunk)
@@ -560,15 +569,15 @@ async def ws_batch(ws: WebSocket):
 
         # ── 最终统一编译（所有资产代码写完后只编译一次）────────────────────────
         if len(error_ids) < len(sorted_items) and cfg_loaded["llm"].get("execution_mode") != "approval_first":
-            await send_stage("build", "build_running", "正在统一编译与部署...")
-            await send("batch_progress", message="所有资产代码生成完毕，开始统一编译...")
+            await send_stage("build", "build_running", _text("batch_build_running_stage").strip())
+            await send("batch_progress", message=_text("batch_build_running_progress").strip())
             async def _build_stream(chunk: str):
                 await send("batch_progress", message=chunk)
             success, _ = await build_and_fix(project_root, _build_stream)
             if success:
-                await send("batch_progress", message="✓ 编译成功，DLL 和 .pck 已部署")
+                await send("batch_progress", message=_text("batch_build_success_progress").strip())
             else:
-                await send("batch_progress", message="⚠ 编译失败，请检查代码错误")
+                await send("batch_progress", message=_text("batch_build_failure_progress").strip())
 
         await send("batch_done", success_count=len(sorted_items) - len(error_ids), error_count=len(error_ids))
 

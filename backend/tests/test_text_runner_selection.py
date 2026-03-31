@@ -64,6 +64,6 @@ def test_build_text_prompt_uses_latest_runtime_custom_prompt_when_requested(monk
 
 def test_build_text_prompt_uses_shared_bundle_header_when_legacy_path_missing(monkeypatch):
     prompt = build_text_prompt("base prompt", {"custom_prompt": "always answer in Chinese"})
-    expected_header = PromptLoader().load("llm.global_prompt_header").strip()
+    expected_header = PromptLoader().load("runtime_agent.llm_global_prompt_header").strip()
 
     assert prompt == f"base prompt\n\n{expected_header}\nalways answer in Chinese"

@@ -1,4 +1,23 @@
-## planner_prompt
+## approval_action_prompt
+你正在撰写统一 AI 审批动作的指导。 Output ONLY JSON，后续步骤依赖纯 JSON 格式输出。
+
+User Input Requirements:
+- {{ requirements_line }}
+
+Template JSON structure to fill:
+{"actions": [
+  {
+    "kind": "read_file | write_file | run_command | build_project | deploy_mod",
+    "title": "简要标题，方便审批人员理解",
+    "reason": "说明动作所需的业务背景与目标",
+    "payload": {}
+  }
+]}
+
+## approval_default_requirements_line
+请提供必须满足的输入信息。
+
+## planning_planner_prompt
 You are an expert STS2 (Slay the Spire 2) mod developer and designer.
 The user wants to create a Slay the Spire 2 mod. Analyze their requirements and produce a detailed, structured mod plan.
 
@@ -38,3 +57,6 @@ Rules:
 - Output ONLY the JSON, no markdown, no explanation.
 - All string values must be valid JSON strings: escape double quotes as \\", backslashes as \\\\, newlines as \\n. Do NOT include raw newlines or unescaped quotes inside string values.
 - implementation_notes must be a single JSON string (no embedded code blocks with triple backticks - use plain text descriptions instead).
+
+## llm_global_prompt_header
+### User Configured Global AI Instructions

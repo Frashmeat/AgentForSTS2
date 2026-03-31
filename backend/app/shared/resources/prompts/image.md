@@ -14,6 +14,9 @@ User design description:
 
 Generate the optimized image prompt now (visual elements only, no game mechanics).
 
+## adapt_fallback_warning
+提示词 AI 优化失败，已使用模板回退。原因：{{ error_type }}: {{ error_message }}
+
 ## fallback_prompt_cn_suffix
 ，交易卡牌艺术风格，电影级光照，高清细节
 
@@ -32,6 +35,9 @@ blurry, low quality, text, watermark, signature, deformed
 ## guide_flux2_example
 A dark obsidian dagger with glowing #9B59B6 purple edge, dramatic rim lighting, intricate engravings catching golden highlights, trading card art style, shot on Canon 85mm f/2.8, sharp focus, cinematic atmosphere, isolated on pure white background
 
+## guide_flux2_lang
+English
+
 ## guide_flux2_formula
 Subject (most important first) + Action/Detail + Style + Camera + Lighting
 
@@ -48,6 +54,9 @@ Subject (most important first) + Action/Detail + Style + Camera + Lighting
 ## guide_jimeng_example
 暗黑黑曜石匕首，紫色边缘发光，精致雕纹，戏剧性光影，交易卡牌艺术风格，电影级照明，4K 高清细节，白色背景
 
+## guide_jimeng_lang
+Chinese
+
 ## guide_jimeng_formula
 主体 + 外观描述 + 细节 + 风格 + 质量词
 
@@ -60,6 +69,9 @@ Subject (most important first) + Action/Detail + Style + Camera + Lighting
 
 ## guide_sdxl_example
 dark obsidian dagger, glowing purple edge, intricate engravings, golden highlights, (masterpiece:1.2), best quality, highly detailed, trading card art, dramatic lighting, (sharp focus:1.3)
+
+## guide_sdxl_lang
+English
 
 ## guide_sdxl_formula
 comma-separated tags + quality words + (emphasis:weight)
@@ -76,6 +88,9 @@ blurry, low quality, text, watermark, signature
 
 ## guide_wanxiang_example
 暗黑黑曜石匕首，紫色边缘发光，特写镜头，戏剧性逆光，交易卡牌艺术风格，电影级光照，精致细节，4K，白色纯净背景
+
+## guide_wanxiang_lang
+Chinese
 
 ## guide_wanxiang_formula
 主体描述 + 场景描述 + 风格 + 镜头语言（特写/俯视等） + 氛围词 + 细节
