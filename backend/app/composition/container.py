@@ -12,6 +12,14 @@ from app.modules.platform.application.services import (
     JobQueryService,
     QuotaBillingService,
 )
+from app.modules.platform.runner import (
+    ApprovalAdapter,
+    BuildDeployAdapter,
+    ExecutionAdapter,
+    PlatformWorkflowRegistry,
+    StepDispatcher,
+    WorkflowRunner,
+)
 from app.modules.platform.infra.persistence.repositories import (
     AdminQueryRepositoriesSqlAlchemy,
     AIExecutionRepositorySqlAlchemy,
@@ -80,6 +88,12 @@ class ApplicationContainer:
             ("platform.event_service_factory", EventService),
             ("platform.approval_facade_service_factory", ApprovalFacadeService),
             ("platform.build_deploy_facade_service_factory", BuildDeployFacadeService),
+            ("platform.workflow_registry_factory", PlatformWorkflowRegistry),
+            ("platform.step_dispatcher_factory", StepDispatcher),
+            ("platform.execution_adapter_factory", ExecutionAdapter),
+            ("platform.workflow_runner_factory", WorkflowRunner),
+            ("platform.build_deploy_adapter_factory", BuildDeployAdapter),
+            ("platform.approval_adapter_factory", ApprovalAdapter),
         ):
             self._singletons.setdefault(key, instance)
         for key in (

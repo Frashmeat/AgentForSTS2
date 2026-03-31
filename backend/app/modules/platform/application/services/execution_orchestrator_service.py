@@ -3,9 +3,12 @@ from __future__ import annotations
 from datetime import datetime
 
 from app.modules.platform.application.services.quota_billing_service import QuotaBillingService
+from app.modules.platform.contracts.runner_contracts import StepExecutionRequest, StepExecutionResult
 from app.modules.platform.domain.models.enums import AIExecutionStatus, JobItemStatus, JobStatus
 from app.modules.platform.domain.repositories import AIExecutionRepository, JobEventRepository, JobRepository
 from app.modules.platform.infra.persistence.models import AIExecutionRecord
+from app.modules.platform.runner.workflow_registry import PlatformWorkflowRegistry
+from app.modules.platform.runner.workflow_runner import WorkflowRunner
 
 
 class ExecutionOrchestratorService:
@@ -13,13 +16,17 @@ class ExecutionOrchestratorService:
         self,
         job_repository: JobRepository,
         ai_execution_repository: AIExecutionRepository,
-        quota_billing_service: QuotaBillingService,
+        quota_billing_service: QuotaBillingService | None,
         job_event_repository: JobEventRepository,
+        workflow_registry: PlatformWorkflowRegistry | None = None,
+        workflow_runner: WorkflowRunner | None = None,
     ) -> None:
         self.job_repository = job_repository
         self.ai_execution_repository = ai_execution_repository
         self.quota_billing_service = quota_billing_service
         self.job_event_repository = job_event_repository
+        self.workflow_registry = workflow_registry
+        self.workflow_runner = workflow_runner
 
     def start_execution(
         self,
@@ -53,6 +60,8 @@ class ExecutionOrchestratorService:
         if item is None:
             return None
 
+        if self.quota_billing_service is None:
+            return None
         if not self.quota_billing_service.has_available_quota(user_id=user_id, now=now, amount=1):
             item.status = JobItemStatus.QUOTA_SKIPPED
             job.status = JobStatus.QUOTA_EXHAUSTED
@@ -104,3 +113,32 @@ class ExecutionOrchestratorService:
             ai_execution_id=execution.id,
         )
         return execution
+
+    async def run_registered_steps(
+        self,
+        *,
+        job_type: str,
+        item_type: str,
+        job_id: int,
+        job_item_id: int,
+        workflow_version: str,
+        step_protocol_version: str,
+        result_schema_version: str,
+        input_payload: dict[str, object] | None = None,
+    ) -> list[StepExecutionResult]:
+        if self.workflow_registry is None or self.workflow_runner is None:
+            raise RuntimeError("workflow runner is not configured")
+        steps = self.workflow_registry.resolve(job_type, item_type)
+        return await self.workflow_runner.run(
+            steps=steps,
+            base_request=StepExecutionRequest(
+                workflow_version=workflow_version,
+                step_protocol_version=step_protocol_version,
+                step_type="workflow.dispatch",
+                step_id="workflow.dispatch",
+                job_id=job_id,
+                job_item_id=job_item_id,
+                result_schema_version=result_schema_version,
+                input_payload=dict(input_payload or {}),
+            ),
+        )
