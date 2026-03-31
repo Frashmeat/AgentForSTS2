@@ -110,7 +110,16 @@ class ApplicationContainer:
             ("platform.batch_workflow_router_compat_service", "platform.batch_workflow_router_compat_service_factory"),
         ):
             factory = self._singletons[factory_key]
-            self._singletons.setdefault(key, factory())
+            if key in {
+                "platform.workflow_router_compat_service",
+                "platform.batch_workflow_router_compat_service",
+            }:
+                self._singletons.setdefault(
+                    key,
+                    factory(session_factory=db_session_factory),
+                )
+            else:
+                self._singletons.setdefault(key, factory())
         for key in (
             "platform.job_service",
             "platform.job_query_service",
