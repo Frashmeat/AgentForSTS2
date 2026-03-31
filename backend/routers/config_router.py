@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+from starlette.requests import Request
 from app.shared.prompting import PromptLoader
 from config import get_config, update_config
 
@@ -6,8 +7,23 @@ router = APIRouter(prefix="/config")
 _TEXT_LOADER = PromptLoader()
 
 
+def _config_facade(request):
+    if request is None:
+        return None
+    container = getattr(getattr(request.app.state, "container", None), "resolve_optional_singleton", None)
+    if container is None:
+        return None
+    flags = getattr(request.app.state.container, "platform_migration_flags", None)
+    if flags is None or not getattr(flags, "platform_service_split_enabled", False):
+        return None
+    return request.app.state.container.resolve_optional_singleton("platform.config_facade_service")
+
+
 @router.get("")
-def get_cfg():
+def get_cfg(request: Request = None):
+    facade = _config_facade(request)
+    if facade is not None:
+        return facade.get_masked_config()
     cfg = get_config()
     # 返回前脱敏 API key（只显示后4位）
     safe = _mask_keys(cfg)
@@ -15,7 +31,10 @@ def get_cfg():
 
 
 @router.patch("")
-def patch_cfg(body: dict):
+def patch_cfg(body: dict, request: Request = None):
+    facade = _config_facade(request)
+    if facade is not None:
+        return facade.patch_config(body)
     # Don't overwrite keys with masked placeholder values (e.g. "****yYWE")
     for section_key in ("llm", "image_gen"):
         section = body.get(section_key, {})
@@ -27,14 +46,20 @@ def patch_cfg(body: dict):
 
 
 @router.get("/detect_paths")
-def detect_paths():
+def detect_paths(request: Request = None):
+    facade = _config_facade(request)
+    if facade is not None:
+        return facade.detect_paths()
     """自动检测 STS2 和 Godot 路径，返回检测结果供用户确认后填入配置。"""
     from project_utils import detect_paths as _detect
     return _detect()
 
 
 @router.get("/test_imggen")
-async def test_imggen():
+async def test_imggen(request: Request = None):
+    facade = _config_facade(request)
+    if facade is not None:
+        return await facade.test_imggen()
     from image.generator import generate_images
     try:
         imgs = await generate_images(_TEXT_LOADER.load("runtime_system.config_image_test_prompt").strip(), "power", batch_size=1)

@@ -51,6 +51,16 @@ _TEXT_LOADER = PromptLoader()
 TRANSPARENT_TYPES = {"relic", "power"}
 
 
+def _batch_router_service(ws: WebSocket):
+    container = getattr(getattr(ws.app.state, "container", None), "resolve_optional_singleton", None)
+    if container is None:
+        return None
+    flags = getattr(ws.app.state.container, "platform_migration_flags", None)
+    if flags is None or not getattr(flags, "platform_runner_enabled", False):
+        return None
+    return ws.app.state.container.resolve_optional_singleton("platform.batch_workflow_router_compat_service")
+
+
 def _needs_transparent(asset_type: str) -> bool:
     return asset_type in TRANSPARENT_TYPES
 
@@ -144,12 +154,16 @@ def _group_key(group: list[PlanItem]) -> tuple[str, ...]:
 # ── HTTP 端点：规划 ────────────────────────────────────────────────────────────
 
 @router.post("/plan")
-async def api_plan(body: dict):
+def api_plan(body: dict):
+    return _legacy_api_plan(body)
+
+
+def _legacy_api_plan(body: dict):
     """接收用户需求文本，返回结构化 Mod 计划（JSON）。"""
     requirements: str = body.get("requirements", "")
     if not requirements.strip():
         return {"error": _text("batch_api_requirements_missing").strip()}
-    plan = await plan_mod(requirements)
+    plan = asyncio.run(plan_mod(requirements))
     return plan.to_dict()
 
 
@@ -157,6 +171,14 @@ async def api_plan(body: dict):
 
 @router.websocket("/ws/batch")
 async def ws_batch(ws: WebSocket):
+    service = _batch_router_service(ws)
+    if service is not None:
+        await service.handle_ws_batch(ws)
+        return
+    await _handle_legacy_ws_batch(ws)
+
+
+async def _handle_legacy_ws_batch(ws: WebSocket):
     """
     批量创建 Mod 资产的 WebSocket 端点。
 

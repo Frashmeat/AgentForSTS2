@@ -5,12 +5,15 @@ from typing import Any, Optional
 from app.modules.platform.application.services import (
     AdminQueryService,
     ApprovalFacadeService,
+    BatchWorkflowRouterCompatService,
     BuildDeployFacadeService,
+    ConfigFacadeService,
     EventService,
     ExecutionOrchestratorService,
     JobApplicationService,
     JobQueryService,
     QuotaBillingService,
+    WorkflowRouterCompatService,
 )
 from app.modules.platform.runner import (
     ApprovalAdapter,
@@ -88,6 +91,9 @@ class ApplicationContainer:
             ("platform.event_service_factory", EventService),
             ("platform.approval_facade_service_factory", ApprovalFacadeService),
             ("platform.build_deploy_facade_service_factory", BuildDeployFacadeService),
+            ("platform.config_facade_service_factory", ConfigFacadeService),
+            ("platform.workflow_router_compat_service_factory", WorkflowRouterCompatService),
+            ("platform.batch_workflow_router_compat_service_factory", BatchWorkflowRouterCompatService),
             ("platform.workflow_registry_factory", PlatformWorkflowRegistry),
             ("platform.step_dispatcher_factory", StepDispatcher),
             ("platform.execution_adapter_factory", ExecutionAdapter),
@@ -96,6 +102,15 @@ class ApplicationContainer:
             ("platform.approval_adapter_factory", ApprovalAdapter),
         ):
             self._singletons.setdefault(key, instance)
+        for key, factory_key in (
+            ("platform.approval_facade_service", "platform.approval_facade_service_factory"),
+            ("platform.build_deploy_facade_service", "platform.build_deploy_facade_service_factory"),
+            ("platform.config_facade_service", "platform.config_facade_service_factory"),
+            ("platform.workflow_router_compat_service", "platform.workflow_router_compat_service_factory"),
+            ("platform.batch_workflow_router_compat_service", "platform.batch_workflow_router_compat_service_factory"),
+        ):
+            factory = self._singletons[factory_key]
+            self._singletons.setdefault(key, factory())
         for key in (
             "platform.job_service",
             "platform.job_query_service",
