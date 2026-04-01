@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import type { ApprovalRequest } from "../src/lib/approvals.ts";
+import type { ApprovalRequest } from "../src/shared/api/approvals.ts";
 import {
   SINGLE_ASSET_SNAPSHOT_KEY,
   loadSingleAssetSnapshot,

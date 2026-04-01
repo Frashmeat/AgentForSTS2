@@ -1,4 +1,4 @@
-import { describeApprovalPayload, summarizeApprovalPending, type ApprovalRequest } from "../lib/approvals";
+import { describeApprovalPayload, summarizeApprovalPending, type ApprovalRequest } from "../shared/api/approvals";
 
 function riskLabel(risk: ApprovalRequest["risk_level"]): string {
   if (risk === "high") return "高风险";

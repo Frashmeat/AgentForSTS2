@@ -1,4 +1,4 @@
-import type { ApprovalRequest } from "../../lib/approvals";
+import type { ApprovalRequest } from "../../shared/api/approvals";
 import type { Stage } from "./model";
 
 export interface SingleAssetWorkflowState {

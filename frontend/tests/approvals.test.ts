@@ -8,7 +8,7 @@ import {
   listApprovals,
   summarizeApprovalPending,
   type ApprovalRequest,
-} from "../src/lib/approvals.ts";
+} from "../src/shared/api/approvals.ts";
 
 interface MockResponseInit {
   ok: boolean;

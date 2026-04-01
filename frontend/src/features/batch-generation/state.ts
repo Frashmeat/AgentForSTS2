@@ -1,4 +1,4 @@
-import type { ApprovalRequest } from "../../lib/approvals";
+import type { ApprovalRequest } from "../../shared/api/approvals";
 
 export type BatchItemStatus =
   | "pending"

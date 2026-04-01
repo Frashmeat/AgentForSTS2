@@ -1,4 +1,4 @@
-import type { ApprovalRequest } from "../../lib/approvals";
+import type { ApprovalRequest } from "../api/approvals";
 
 export type WorkflowScope = "project" | "text" | "image" | "agent" | "build";
 

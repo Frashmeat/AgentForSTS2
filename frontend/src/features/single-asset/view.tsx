@@ -6,7 +6,7 @@ import { ApprovalPanel } from "../../components/ApprovalPanel";
 import { BuildDeploy } from "../../components/BuildDeploy";
 import { StageStatus } from "../../components/StageStatus";
 import { cn } from "../../lib/utils";
-import type { ApprovalRequest } from "../../lib/approvals";
+import type { ApprovalRequest } from "../../shared/api/approvals";
 
 import { ASSET_TYPES, PRESETS, type AssetType, type PresetOption, type Stage } from "./model";
 

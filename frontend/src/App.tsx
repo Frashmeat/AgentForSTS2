@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useReducer } from "react";
 import { Settings, Swords } from "lucide-react";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { approveApproval, executeApproval, rejectApproval, type ApprovalRequest } from "./lib/approvals";
+import { approveApproval, executeApproval, rejectApproval, type ApprovalRequest } from "./shared/api/approvals";
 import { createSingleAssetSocket, type SingleAssetSocket } from "./lib/single_asset_ws";
 import { cn } from "./lib/utils";
 import { BatchGenerationFeatureView } from "./features/batch-generation/view";

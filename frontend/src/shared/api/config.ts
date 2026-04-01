@@ -1,3 +1,5 @@
+import { requestJson } from "./http.ts";
+
 export interface WorkflowMigrationFlags {
   use_modular_single_workflow: boolean;
   use_modular_batch_workflow: boolean;
@@ -8,6 +10,12 @@ export interface AppConfig {
   default_project_root?: string;
   migration?: Partial<WorkflowMigrationFlags>;
   [key: string]: unknown;
+}
+
+export interface DetectPathsResult {
+  sts2_path?: string;
+  godot_exe_path?: string;
+  notes: string[];
 }
 
 const DEFAULT_MIGRATION_FLAGS: WorkflowMigrationFlags = {
@@ -24,6 +32,16 @@ export function resolveMigrationFlags(config?: Pick<AppConfig, "migration"> | nu
 }
 
 export async function loadAppConfig(): Promise<AppConfig> {
-  const response = await fetch("/api/config");
-  return response.json();
+  return requestJson<AppConfig>("/api/config");
+}
+
+export async function updateAppConfig(patch: Partial<AppConfig>): Promise<AppConfig> {
+  return requestJson<AppConfig>("/api/config", {
+    method: "PATCH",
+    body: patch,
+  });
+}
+
+export async function detectAppPaths(): Promise<DetectPathsResult> {
+  return requestJson<DetectPathsResult>("/api/config/detect_paths");
 }

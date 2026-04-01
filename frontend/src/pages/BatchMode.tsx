@@ -5,7 +5,7 @@ import {
   Upload, Wand2,
 } from "lucide-react";
 import { ApprovalPanel } from "../components/ApprovalPanel";
-import { approveApproval, executeApproval, rejectApproval, type ApprovalRequest } from "../lib/approvals";
+import { approveApproval, executeApproval, rejectApproval, type ApprovalRequest } from "../shared/api/approvals";
 import { BatchSocket, PlanItem, ModPlan } from "../lib/batch_ws";
 import { AgentLog } from "../components/AgentLog";
 import { StageStatus } from "../components/StageStatus";

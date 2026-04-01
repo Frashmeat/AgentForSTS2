@@ -1,4 +1,4 @@
-import { getApproval, type ApprovalRequest } from "../../lib/approvals.ts";
+import { getApproval, type ApprovalRequest } from "../../shared/api/approvals.ts";
 import {
   createDefaultBatchItemState,
   createInitialBatchRuntimeState,
