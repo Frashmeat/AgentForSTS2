@@ -1,4 +1,4 @@
-import type { WorkflowMigrationFlags } from "../shared/api/config.ts";
+import type { WorkflowMigrationFlags } from "../shared/api/index.ts";
 import { WorkflowSocket, type WsEvent } from "./ws.ts";
 
 export type SingleAssetSocket = {

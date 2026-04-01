@@ -6,7 +6,7 @@ import {
   createProject,
   generateModPlan,
   packageProject,
-} from "../src/shared/api/workflow.ts";
+} from "../src/shared/api/index.ts";
 
 interface MockResponseInit {
   ok: boolean;

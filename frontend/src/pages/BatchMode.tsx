@@ -5,7 +5,7 @@ import {
   Upload, Wand2,
 } from "lucide-react";
 import { ApprovalPanel } from "../components/ApprovalPanel";
-import { approveApproval, executeApproval, rejectApproval, type ApprovalRequest } from "../shared/api/approvals";
+import { approveApproval, executeApproval, rejectApproval, type ApprovalRequest } from "../shared/api/index.ts";
 import { BatchSocket, PlanItem, ModPlan } from "../lib/batch_ws";
 import { AgentLog } from "../components/AgentLog";
 import { StageStatus } from "../components/StageStatus";
@@ -24,7 +24,7 @@ import {
   refreshRecoveredBatchApprovals,
   saveBatchRuntimeSnapshot,
 } from "../features/batch-generation/recovery";
-import { loadAppConfig } from "../shared/api/config";
+import { loadAppConfig } from "../shared/api/index.ts";
 
 type ItemStatus = BatchItemState["status"];
 type ItemState = BatchItemState;

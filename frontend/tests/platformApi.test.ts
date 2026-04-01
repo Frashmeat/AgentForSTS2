@@ -10,7 +10,7 @@ import {
   listPlatformJobItems,
   listPlatformJobs,
   startPlatformJob,
-} from "../src/shared/api/platform.ts";
+} from "../src/shared/api/index.ts";
 
 interface MockResponseInit {
   ok: boolean;

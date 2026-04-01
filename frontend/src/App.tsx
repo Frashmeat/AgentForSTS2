@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useReducer } from "react";
 import { Settings, Swords } from "lucide-react";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { approveApproval, executeApproval, rejectApproval, type ApprovalRequest } from "./shared/api/approvals";
+import { approveApproval, executeApproval, rejectApproval, type ApprovalRequest } from "./shared/api/index.ts";
 import { createSingleAssetSocket, type SingleAssetSocket } from "./lib/single_asset_ws";
 import { cn } from "./lib/utils";
 import { BatchGenerationFeatureView } from "./features/batch-generation/view";
@@ -17,7 +17,7 @@ import {
   saveSingleAssetSnapshot,
 } from "./features/single-asset/recovery";
 import { SingleAssetFeatureView } from "./features/single-asset/view";
-import { loadAppConfig, resolveMigrationFlags, type WorkflowMigrationFlags } from "./shared/api/config";
+import { loadAppConfig, resolveMigrationFlags, type WorkflowMigrationFlags } from "./shared/api/index.ts";
 
 type AppTab = "single" | "batch" | "edit" | "log";
 

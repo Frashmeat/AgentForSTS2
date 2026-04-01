@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildApiPath, requestJson } from "../src/shared/api/http.ts";
+import { buildApiPath, requestJson } from "../src/shared/api/index.ts";
 
 interface MockResponseInit {
   ok: boolean;

@@ -6,7 +6,7 @@ import { BuildDeploy } from "../../components/BuildDeploy";
 import { StageStatus } from "../../components/StageStatus";
 import { ModAnalysisSocket } from "../../lib/mod_analysis_ws";
 import { WorkflowSocket } from "../../lib/ws";
-import { loadAppConfig } from "../../shared/api/config";
+import { loadAppConfig } from "../../shared/api/index.ts";
 
 type AnalyzeStage = "idle" | "scanning" | "streaming" | "done" | "error";
 type ModifyStage = "idle" | "running" | "done" | "error";

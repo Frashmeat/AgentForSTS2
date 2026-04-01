@@ -5,7 +5,7 @@ import {
   detectAppPaths,
   loadAppConfig,
   updateAppConfig,
-} from "../src/shared/api/config.ts";
+} from "../src/shared/api/index.ts";
 
 interface MockResponseInit {
   ok: boolean;

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { X, FolderOpen, Gamepad2, Cpu, Image, Search } from "lucide-react";
-import { detectAppPaths, loadAppConfig, updateAppConfig } from "../shared/api/config";
+import { detectAppPaths, loadAppConfig, updateAppConfig } from "../shared/api/index.ts";
 
 const inputCls = "w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-100";
 const selectCls = "w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-slate-800 focus:outline-none focus:border-amber-400";

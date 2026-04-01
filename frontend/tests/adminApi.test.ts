@@ -6,7 +6,7 @@ import {
   listAdminAuditEvents,
   listAdminJobExecutions,
   listAdminQuotaRefunds,
-} from "../src/shared/api/admin.ts";
+} from "../src/shared/api/index.ts";
 
 interface MockResponseInit {
   ok: boolean;

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { resolveMigrationFlags } from "../src/shared/api/config.ts";
+import { resolveMigrationFlags } from "../src/shared/api/index.ts";
 
 test("resolveMigrationFlags defaults to legacy-safe switches", () => {
   assert.deepEqual(resolveMigrationFlags(undefined), {
