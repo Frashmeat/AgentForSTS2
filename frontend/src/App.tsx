@@ -1,114 +1,60 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useReducer } from "react";
 import { Settings, Swords } from "lucide-react";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { approveApproval, executeApproval, rejectApproval, type ApprovalRequest } from "./lib/approvals";
-import { WorkflowSocket, type WsEvent } from "./lib/ws";
+import { createSingleAssetSocket, type SingleAssetSocket } from "./lib/single_asset_ws";
 import { cn } from "./lib/utils";
 import { BatchGenerationFeatureView } from "./features/batch-generation/view";
 import { LogAnalysisFeatureView } from "./features/log-analysis/view";
 import { ModEditorFeatureView } from "./features/mod-editor/view";
 import { type AssetType, getStageIndex, type Stage } from "./features/single-asset/model";
+import { createInitialSingleAssetWorkflowState, singleAssetWorkflowReducer } from "./features/single-asset/state";
+import {
+  clearSingleAssetSnapshot,
+  hasSingleAssetRecoveryContext,
+  loadSingleAssetSnapshot,
+  refreshRecoveredSingleAssetApprovals,
+  saveSingleAssetSnapshot,
+} from "./features/single-asset/recovery";
 import { SingleAssetFeatureView } from "./features/single-asset/view";
 import { loadAppConfig, resolveMigrationFlags, type WorkflowMigrationFlags } from "./shared/api/config";
-import { WorkflowSocketFacade } from "./shared/ws/facade";
 
 type AppTab = "single" | "batch" | "edit" | "log";
-type AppWorkflowSocket = {
-  on(event: WsEvent["event"], handler: (data: WsEvent) => void): AppWorkflowSocket;
-  send(data: object): void;
-  waitOpen(): Promise<void>;
-  close(): void;
-};
-
-class UnifiedWorkflowFacade extends WorkflowSocketFacade<WsEvent> {
-  constructor() {
-    super("/api/ws/create");
-  }
-
-  attachPersistentErrorHandlers(onError: (message: string) => void) {
-    this.client.attachPersistentErrorHandlers(onError);
-  }
-}
-
-class UnifiedWorkflowSocket implements AppWorkflowSocket {
-  private socket = new UnifiedWorkflowFacade();
-  private errorHandler: ((data: WsEvent) => void) | null = null;
-
-  on(event: WsEvent["event"], handler: (data: WsEvent) => void) {
-    this.socket.on(event, handler);
-    if (event === "error") {
-      this.errorHandler = handler;
-    }
-    return this;
-  }
-
-  send(data: object) {
-    this.socket.send(data);
-  }
-
-  waitOpen(): Promise<void> {
-    return this.socket.waitOpen().then(() => {
-      this.socket.attachPersistentErrorHandlers((message) => {
-        this.errorHandler?.({ event: "error", stage: "error", message });
-      });
-    });
-  }
-
-  close() {
-    this.socket.close();
-  }
-}
-
-function createWorkflowSocket(flags: WorkflowMigrationFlags): AppWorkflowSocket {
-  if (flags.use_unified_ws_contract) {
-    return new UnifiedWorkflowSocket();
-  }
-  return new WorkflowSocket();
-}
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<AppTab>("single");
-  const [stage, setStage] = useState<Stage>("input");
-  const stageRef = useRef<Stage>("input");
-  function updateStage(s: Stage) { stageRef.current = s; setStage(s); }
+  const [initialSingleAssetSnapshot] = useState(() => loadSingleAssetSnapshot());
+  const [assetType, setAssetType] = useState<AssetType>(() => initialSingleAssetSnapshot?.assetType ?? "relic");
+  const [assetName, setAssetName] = useState(() => initialSingleAssetSnapshot?.assetName ?? "");
+  const [description, setDescription] = useState(() => initialSingleAssetSnapshot?.description ?? "");
+  const [projectRoot, setProjectRoot] = useState(() => initialSingleAssetSnapshot?.projectRoot ?? "");
 
-  const [assetType, setAssetType] = useState<AssetType>("relic");
-  const [assetName, setAssetName] = useState("");
-  const [description, setDescription] = useState("");
-  const [projectRoot, setProjectRoot] = useState("");
-
-  const [images, setImages] = useState<string[]>([]);
-  const [pendingSlots, setPendingSlots] = useState(0);
+  const [workflowState, dispatchWorkflow] = useReducer(
+    singleAssetWorkflowReducer,
+    undefined,
+    () => initialSingleAssetSnapshot?.workflowState ?? createInitialSingleAssetWorkflowState(),
+  );
   const batchOffsetRef = useRef(0);
-  const [promptPreview, setPromptPreview] = useState("");
-  const [negativePrompt, setNegativePrompt] = useState("");
-  const [promptFallbackWarn, setPromptFallbackWarn] = useState<string | null>(null);
-  const [currentPrompt, setCurrentPrompt] = useState("");
-  const [showMorePrompt, setShowMorePrompt] = useState(false);
-
-  const [genLog, setGenLog] = useState<string[]>([]);
-  const [agentLog, setAgentLog] = useState<string[]>([]);
-  const [flowStageCurrent, setFlowStageCurrent] = useState<string | null>(null);
-  const [flowStageHistory, setFlowStageHistory] = useState<string[]>([]);
-  const [agentStageCurrent, setAgentStageCurrent] = useState<string | null>(null);
-  const [agentStageHistory, setAgentStageHistory] = useState<string[]>([]);
-  const [approvalSummary, setApprovalSummary] = useState("");
-  const [approvalRequests, setApprovalRequests] = useState<ApprovalRequest[]>([]);
-  const [approvalBusyActionId, setApprovalBusyActionId] = useState<string | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [errorTrace, setErrorTrace] = useState<string | null>(null);
-  const [socket, setSocket] = useState<AppWorkflowSocket | null>(null);
+  const [socket, setSocket] = useState<SingleAssetSocket | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [autoMode, setAutoMode] = useState(false);
+  const [autoMode, setAutoMode] = useState(() => initialSingleAssetSnapshot?.autoMode ?? false);
   const autoModeRef = useRef(false);
-  const [imageMode, setImageMode] = useState<"ai" | "upload">("ai");
-  const [uploadedImageB64, setUploadedImageB64] = useState<string>("");
-  const [uploadedImageName, setUploadedImageName] = useState<string>("");
-  const [uploadedImagePreview, setUploadedImagePreview] = useState<string | null>(null);
+  const [imageMode, setImageMode] = useState<"ai" | "upload">(() => initialSingleAssetSnapshot?.imageMode ?? "ai");
+  const [uploadedImageB64, setUploadedImageB64] = useState<string>(() => initialSingleAssetSnapshot?.uploadedImageB64 ?? "");
+  const [uploadedImageName, setUploadedImageName] = useState<string>(() => initialSingleAssetSnapshot?.uploadedImageName ?? "");
+  const [uploadedImagePreview, setUploadedImagePreview] = useState<string | null>(() => initialSingleAssetSnapshot?.uploadedImagePreview ?? null);
   const [dragOver, setDragOver] = useState(false);
   const [migrationFlags, setMigrationFlags] = useState<WorkflowMigrationFlags>(() => resolveMigrationFlags(undefined));
+  const [restoredSnapshotMode, setRestoredSnapshotMode] = useState(() => initialSingleAssetSnapshot !== null);
+  const [restoredApprovalRefreshPending, setRestoredApprovalRefreshPending] = useState(
+    () => initialSingleAssetSnapshot?.workflowState.stage === "approval_pending",
+  );
 
   // 启动时从 config 读默认项目路径
+  useEffect(() => {
+    autoModeRef.current = autoMode;
+  }, [autoMode]);
+
   useEffect(() => {
     loadAppConfig()
       .then((config) => {
@@ -120,99 +66,154 @@ export default function App() {
       .catch(() => {});
   }, []);
 
-  const appendGen   = useCallback((m: string) => setGenLog(p => [...p, m]), []);
-  const appendAgent = useCallback((m: string) => setAgentLog(p => [...p, m]), []);
-  const pushStage = useCallback((scope: string, message: string) => {
-    if (scope === "agent") {
-      setAgentStageCurrent(message);
-      setAgentStageHistory(prev => prev[prev.length - 1] === message ? prev : [...prev, message]);
+  useEffect(() => {
+    const snapshot = {
+      assetType,
+      assetName,
+      description,
+      projectRoot,
+      imageMode,
+      autoMode,
+      uploadedImageB64,
+      uploadedImageName,
+      uploadedImagePreview,
+      workflowState,
+    };
+    if (!hasSingleAssetRecoveryContext(snapshot)) {
+      clearSingleAssetSnapshot();
       return;
     }
-    setFlowStageCurrent(message);
-    setFlowStageHistory(prev => prev[prev.length - 1] === message ? prev : [...prev, message]);
-  }, []);
+    saveSingleAssetSnapshot(localStorage, snapshot);
+  }, [
+    assetType,
+    assetName,
+    autoMode,
+    description,
+    imageMode,
+    projectRoot,
+    uploadedImageB64,
+    uploadedImageName,
+    uploadedImagePreview,
+    workflowState,
+  ]);
 
-  const step = getStageIndex(stage);
+  useEffect(() => {
+    if (!restoredApprovalRefreshPending) {
+      return;
+    }
+    let cancelled = false;
+    void refreshRecoveredSingleAssetApprovals({
+      assetType,
+      assetName,
+      description,
+      projectRoot,
+      imageMode,
+      autoMode,
+      uploadedImageB64,
+      uploadedImageName,
+      uploadedImagePreview,
+      workflowState,
+    }).then((refreshed) => {
+      if (cancelled) {
+        return;
+      }
+      dispatchWorkflow({
+        type: "approval_requests_updated",
+        requests: refreshed.workflowState.approvalRequests,
+      });
+      setRestoredApprovalRefreshPending(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    assetName,
+    assetType,
+    autoMode,
+    description,
+    imageMode,
+    projectRoot,
+    restoredApprovalRefreshPending,
+    uploadedImageB64,
+    uploadedImageName,
+    uploadedImagePreview,
+    workflowState,
+  ]);
+
+  const step = getStageIndex(workflowState.stage);
 
   async function startWorkflow() {
     if (!assetName.trim() || !description.trim() || !projectRoot.trim()) return;
-    setGenLog([]);
-    setAgentLog([]);
-    setFlowStageCurrent(null);
-    setFlowStageHistory([]);
-    setAgentStageCurrent(null);
-    setAgentStageHistory([]);
-    setApprovalSummary("");
-    setApprovalRequests([]);
-    setApprovalBusyActionId(null);
-    setImages([]);
-    setPendingSlots(0);
+    setRestoredSnapshotMode(false);
+    setRestoredApprovalRefreshPending(false);
     batchOffsetRef.current = 0;
-    setPromptPreview("");
-    setNegativePrompt("");
-    setPromptFallbackWarn(null);
-    setCurrentPrompt("");
-    setShowMorePrompt(false);
-    setErrorMsg(null);
-    setErrorTrace(null);
-    // upload 模式直接跳过生图阶段；ai 模式先进 generating_image
-    if (imageMode !== "upload") updateStage("generating_image");
+    dispatchWorkflow({ type: "workflow_started", imageMode });
 
-    const ws = createWorkflowSocket(migrationFlags);
+    const ws = createSingleAssetSocket(migrationFlags);
     setSocket(ws);
-    ws.on("stage_update",   (d: any) => pushStage(d.scope, d.message));
-    ws.on("progress",       (d: any) => appendGen(`${d.message}`));
-    ws.on("agent_stream",   (d: any) => appendAgent(d.chunk));
-    ws.on("error",          (d: any) => { setErrorMsg(d.message); setErrorTrace(d.traceback || null); updateStage("error"); });
+    ws.on("stage_update",   (d: any) => {
+      dispatchWorkflow({
+        type: d.scope === "agent" ? "agent_stage_pushed" : "flow_stage_pushed",
+        message: d.message,
+      });
+    });
+    ws.on("progress",       (d: any) => dispatchWorkflow({ type: "gen_log_appended", message: `${d.message}` }));
+    ws.on("agent_stream",   (d: any) => dispatchWorkflow({ type: "agent_log_appended", message: d.chunk }));
+    ws.on("error",          (d: any) => {
+      dispatchWorkflow({ type: "workflow_failed", message: d.message, traceback: d.traceback || null });
+    });
     ws.on("approval_pending", (d: any) => {
-      setApprovalSummary(d.summary || "");
-      setApprovalRequests(d.requests || []);
-      appendAgent("已生成待审批动作，等待用户审批后继续执行。");
-      updateStage("approval_pending");
+      dispatchWorkflow({
+        type: "approval_pending_received",
+        summary: d.summary || "",
+        requests: d.requests || [],
+      });
     });
     ws.on("prompt_preview", (d: any) => {
       if (autoModeRef.current) {
         ws.send({ action: "confirm", prompt: d.prompt, negative_prompt: d.negative_prompt || "" });
-        appendGen("自动模式：跳过 prompt 确认");
+        dispatchWorkflow({ type: "gen_log_appended", message: "自动模式：跳过 prompt 确认" });
         return;
       }
-      setPromptPreview(d.prompt);
-      setCurrentPrompt(d.prompt);
-      setNegativePrompt(d.negative_prompt || "");
-      setPromptFallbackWarn(d.fallback_warning || null);
-      updateStage("confirm_prompt");
+      dispatchWorkflow({
+        type: "prompt_preview_received",
+        prompt: d.prompt,
+        negativePrompt: d.negative_prompt || "",
+        fallbackWarning: d.fallback_warning || null,
+      });
     });
     ws.on("image_ready", (d: any) => {
-      setImages(prev => {
-        const next = [...prev];
-        next[batchOffsetRef.current + d.index] = d.image;
-        return next;
+      dispatchWorkflow({
+        type: "image_ready_received",
+        index: d.index,
+        image: d.image,
+        prompt: d.prompt,
+        batchOffset: batchOffsetRef.current,
       });
-      setPendingSlots(0);
-      setCurrentPrompt(d.prompt);
-      setShowMorePrompt(false);
       if (autoModeRef.current) {
-        appendGen("自动模式：自动选第 1 张图");
+        dispatchWorkflow({ type: "gen_log_appended", message: "自动模式：自动选第 1 张图" });
         ws.send({ action: "select", index: 0 });
-        updateStage("agent_running");
-        return;
+        dispatchWorkflow({ type: "stage_changed", stage: "agent_running" });
       }
-      updateStage("pick_image");
     });
     ws.on("done", (d: any) => {
-      appendAgent(d.success ? "✓ 构建成功！" : "✗ 构建失败");
-      updateStage("done");
+      dispatchWorkflow({ type: "agent_log_appended", message: d.success ? "✓ 构建成功！" : "✗ 构建失败" });
+      dispatchWorkflow({ type: "stage_changed", stage: "done" });
     });
 
     try {
       await ws.waitOpen();
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : String(err));
-      updateStage("error");
+      dispatchWorkflow({
+        type: "workflow_failed",
+        message: err instanceof Error ? err.message : String(err),
+        traceback: null,
+      });
       return;
     }
     if (imageMode === "upload" && uploadedImageB64) {
-      updateStage("agent_running");
+      dispatchWorkflow({ type: "stage_changed", stage: "agent_running" });
       ws.send({ action: "start", asset_type: assetType, asset_name: assetName, description, project_root: projectRoot, provided_image_b64: uploadedImageB64, provided_image_name: uploadedImageName });
     } else {
       ws.send({ action: "start", asset_type: assetType, asset_name: assetName, description, project_root: projectRoot });
@@ -221,22 +222,21 @@ export default function App() {
 
   function handleConfirmPrompt() {
     if (!socket) return;
-    updateStage("generating_image");
-    socket.send({ action: "confirm", prompt: promptPreview, negative_prompt: negativePrompt });
+    dispatchWorkflow({ type: "prompt_confirmed" });
+    socket.send({ action: "confirm", prompt: workflowState.promptPreview, negative_prompt: workflowState.negativePrompt });
   }
 
   function handleSelectImage(index: number) {
     if (!socket) return;
-    updateStage("agent_running");
+    dispatchWorkflow({ type: "image_selected" });
     socket.send({ action: "select", index });
   }
 
   function handleGenerateMore() {
     if (!socket) return;
-    batchOffsetRef.current = images.length;
-    setPendingSlots(1);
-    setShowMorePrompt(false);
-    socket.send({ action: "generate_more", prompt: currentPrompt, negative_prompt: negativePrompt || undefined });
+    batchOffsetRef.current = workflowState.images.length;
+    dispatchWorkflow({ type: "generate_more_requested", batchOffset: batchOffsetRef.current });
+    socket.send({ action: "generate_more", prompt: workflowState.currentPrompt, negative_prompt: workflowState.negativePrompt || undefined });
   }
 
   function handleImageFile(file: File) {
@@ -254,48 +254,35 @@ export default function App() {
   function reset() {
     socket?.close();
     setSocket(null);
-    updateStage("input");
+    clearSingleAssetSnapshot();
+    setRestoredSnapshotMode(false);
+    setRestoredApprovalRefreshPending(false);
     setUploadedImageB64("");
     setUploadedImageName("");
     setUploadedImagePreview(null);
-    setImages([]);
-    setPendingSlots(0);
     batchOffsetRef.current = 0;
-    setGenLog([]);
-    setAgentLog([]);
-    setFlowStageCurrent(null);
-    setFlowStageHistory([]);
-    setAgentStageCurrent(null);
-    setAgentStageHistory([]);
-    setApprovalSummary("");
-    setApprovalRequests([]);
-    setApprovalBusyActionId(null);
-    setPromptPreview("");
-    setNegativePrompt("");
-    setPromptFallbackWarn(null);
-    setCurrentPrompt("");
-    setShowMorePrompt(false);
-    setErrorMsg(null);
-    setErrorTrace(null);
+    dispatchWorkflow({ type: "workflow_reset" });
   }
-
-  // 判断错误发生在哪个阶段，用于在对应步骤内显示
-  const errorInStep2 = stage === "error" && step <= 2;
-  const errorInStep3 = stage === "error" && step > 2;
 
   async function handleApprovalAction(
     actionId: string,
     action: (id: string) => Promise<ApprovalRequest>,
   ) {
-    setApprovalBusyActionId(actionId);
+    dispatchWorkflow({ type: "approval_busy_set", actionId });
     try {
       const updated = await action(actionId);
-      setApprovalRequests(prev => prev.map(req => req.action_id === actionId ? updated : req));
+      dispatchWorkflow({
+        type: "approval_requests_updated",
+        requests: workflowState.approvalRequests.map(req => req.action_id === actionId ? updated : req),
+      });
     } catch (error) {
-      setErrorMsg(error instanceof Error ? error.message : String(error));
-      updateStage("error");
+      dispatchWorkflow({
+        type: "workflow_failed",
+        message: error instanceof Error ? error.message : String(error),
+        traceback: null,
+      });
     } finally {
-      setApprovalBusyActionId(null);
+      dispatchWorkflow({ type: "approval_busy_set", actionId: null });
     }
   }
 
@@ -382,35 +369,40 @@ export default function App() {
       {activeTab === "single" && (
         <SingleAssetFeatureView
           step={step}
-          stage={stage}
+          stage={workflowState.stage}
           assetType={assetType}
           assetName={assetName}
           description={description}
           projectRoot={projectRoot}
-          images={images}
-          pendingSlots={pendingSlots}
-          promptPreview={promptPreview}
-          negativePrompt={negativePrompt}
-          promptFallbackWarn={promptFallbackWarn}
-          currentPrompt={currentPrompt}
-          showMorePrompt={showMorePrompt}
-          genLog={genLog}
-          agentLog={agentLog}
-          flowStageCurrent={flowStageCurrent}
-          flowStageHistory={flowStageHistory}
-          agentStageCurrent={agentStageCurrent}
-          agentStageHistory={agentStageHistory}
-          approvalSummary={approvalSummary}
-          approvalRequests={approvalRequests}
-          approvalBusyActionId={approvalBusyActionId}
-          errorMsg={errorMsg}
-          errorTrace={errorTrace}
+          images={workflowState.images}
+          pendingSlots={workflowState.pendingSlots}
+          promptPreview={workflowState.promptPreview}
+          negativePrompt={workflowState.negativePrompt}
+          promptFallbackWarn={workflowState.promptFallbackWarn}
+          currentPrompt={workflowState.currentPrompt}
+          showMorePrompt={workflowState.showMorePrompt}
+          genLog={workflowState.genLog}
+          agentLog={workflowState.agentLog}
+          flowStageCurrent={workflowState.flowStageCurrent}
+          flowStageHistory={workflowState.flowStageHistory}
+          agentStageCurrent={workflowState.agentStageCurrent}
+          agentStageHistory={workflowState.agentStageHistory}
+          approvalSummary={workflowState.approvalSummary}
+          approvalRequests={workflowState.approvalRequests}
+          approvalBusyActionId={workflowState.approvalBusyActionId}
+          errorMsg={workflowState.errorMsg}
+          errorTrace={workflowState.errorTrace}
           autoMode={autoMode}
           imageMode={imageMode}
           uploadedImageB64={uploadedImageB64}
           uploadedImageName={uploadedImageName}
           uploadedImagePreview={uploadedImagePreview}
           dragOver={dragOver}
+          hasLiveSession={Boolean(socket)}
+          showRecoveredNotice={restoredSnapshotMode && !socket && workflowState.stage !== "input"}
+          onRestartWorkflow={() => {
+            void startWorkflow();
+          }}
           onAssetTypeChange={setAssetType}
           onAssetNameChange={setAssetName}
           onDescriptionChange={setDescription}
@@ -428,13 +420,13 @@ export default function App() {
             setAutoMode(next);
             autoModeRef.current = next;
           }}
-          onPromptPreviewChange={setPromptPreview}
-          onNegativePromptChange={setNegativePrompt}
+          onPromptPreviewChange={(value) => dispatchWorkflow({ type: "prompt_preview_changed", value })}
+          onNegativePromptChange={(value) => dispatchWorkflow({ type: "negative_prompt_changed", value })}
           onConfirmPrompt={handleConfirmPrompt}
           onSelectImage={handleSelectImage}
           onGenerateMore={handleGenerateMore}
-          onCurrentPromptChange={setCurrentPrompt}
-          onToggleShowMorePrompt={() => setShowMorePrompt((value) => !value)}
+          onCurrentPromptChange={(value) => dispatchWorkflow({ type: "current_prompt_changed", value })}
+          onToggleShowMorePrompt={() => dispatchWorkflow({ type: "show_more_prompt_toggled" })}
           onHandleImageFile={handleImageFile}
           onDragOverChange={setDragOver}
           onApprove={(actionId) => {

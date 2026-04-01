@@ -1,14 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { BatchSocket } from "../src/lib/batch_ws.ts";
+import { createSingleAssetSocket } from "../src/lib/single_asset_ws.ts";
 
 class MockWebSocket {
   static instances: MockWebSocket[] = [];
 
   static readonly CONNECTING = 0;
   static readonly OPEN = 1;
-  static readonly CLOSING = 2;
   static readonly CLOSED = 3;
 
   readyState = MockWebSocket.CONNECTING;
@@ -35,10 +34,6 @@ class MockWebSocket {
     this.onopen?.();
   }
 
-  emitMessage(data: unknown) {
-    this.onmessage?.({ data: JSON.stringify(data) });
-  }
-
   emitClose(event: { wasClean?: boolean; code?: number } = {}) {
     this.readyState = MockWebSocket.CLOSED;
     this.onclose?.(event);
@@ -53,27 +48,22 @@ test.beforeEach(() => {
   });
 });
 
-test("BatchSocket connects to batch websocket endpoint", () => {
-  new BatchSocket();
-
-  assert.equal(MockWebSocket.instances[0]?.url, "ws://localhost:7860/api/ws/batch");
-});
-
-test("BatchSocket dispatches typed batch events", () => {
-  const socket = new BatchSocket();
-  let received: { event: string; stage?: string; success_count?: number } | null = null;
-
-  socket.on("batch_done", (data) => {
-    received = data as { event: string; stage?: string; success_count?: number };
+test("createSingleAssetSocket uses create websocket endpoint under unified flag", () => {
+  createSingleAssetSocket({
+    use_modular_single_workflow: false,
+    use_modular_batch_workflow: false,
+    use_unified_ws_contract: true,
   });
 
-  MockWebSocket.instances[0].emitMessage({ event: "batch_done", success_count: 2, error_count: 0 });
-
-  assert.deepEqual(received, { event: "batch_done", stage: "batch_done", success_count: 2, error_count: 0 });
+  assert.equal(MockWebSocket.instances[0]?.url, "ws://localhost:7860/api/ws/create");
 });
 
-test("BatchSocket reports unexpected close as error event after open", async () => {
-  const socket = new BatchSocket();
+test("createSingleAssetSocket reports unexpected close as error event", async () => {
+  const socket = createSingleAssetSocket({
+    use_modular_single_workflow: false,
+    use_modular_batch_workflow: false,
+    use_unified_ws_contract: true,
+  });
   let message = "";
 
   socket.on("error", (data) => {

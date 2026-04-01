@@ -1,11 +1,11 @@
-import type { WorkflowEvent } from "../types/workflow.ts";
+import type { SocketEvent } from "./events.ts";
 import { WorkflowClient } from "./client.ts";
 
-export class WorkflowSocketFacade<TEvent extends WorkflowEvent> {
-  protected client: WorkflowClient;
+export class WorkflowSocketFacade<TEvent extends SocketEvent> {
+  protected client: WorkflowClient<TEvent>;
 
   constructor(path: string) {
-    this.client = new WorkflowClient(path);
+    this.client = new WorkflowClient<TEvent>(path);
   }
 
   on<T extends TEvent["event"]>(
@@ -22,6 +22,11 @@ export class WorkflowSocketFacade<TEvent extends WorkflowEvent> {
 
   waitOpen(): Promise<void> {
     return this.client.waitOpen();
+  }
+
+  attachPersistentErrorHandlers(onError: (message: string) => void) {
+    this.client.attachPersistentErrorHandlers(onError);
+    return this;
   }
 
   close() {

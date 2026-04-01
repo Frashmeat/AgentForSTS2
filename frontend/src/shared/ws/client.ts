@@ -1,24 +1,23 @@
-import type { WorkflowEvent } from "../types/workflow.ts";
-import { normalizeEvent } from "./events.ts";
+import { normalizeEvent, type SocketEvent } from "./events.ts";
 
-type EventName = WorkflowEvent["event"];
-type EventHandler = (data: WorkflowEvent) => void;
+type EventName<TEvent extends SocketEvent> = TEvent["event"];
+type EventHandler<TEvent extends SocketEvent> = (data: TEvent) => void;
 
-export class WorkflowClient {
+export class WorkflowClient<TEvent extends SocketEvent = SocketEvent> {
   private ws: WebSocket;
-  private listeners = new Map<string, EventHandler[]>();
+  private listeners = new Map<string, EventHandler<TEvent>[]>();
   private intentionallyClosed = false;
 
   constructor(path: string) {
     this.ws = new WebSocket(`ws://${location.host}${path}`);
     this.ws.onmessage = (event) => {
-      const normalized = normalizeEvent(JSON.parse(event.data));
+      const normalized = normalizeEvent(JSON.parse(event.data)) as TEvent;
       const handlers = this.listeners.get(normalized.event) ?? [];
       handlers.forEach((handler) => handler(normalized));
     };
   }
 
-  on(event: EventName, handler: EventHandler) {
+  on(event: EventName<TEvent>, handler: EventHandler<TEvent>) {
     const list = this.listeners.get(event) ?? [];
     this.listeners.set(event, [...list, handler]);
     return this;

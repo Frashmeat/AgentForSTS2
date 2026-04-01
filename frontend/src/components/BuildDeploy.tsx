@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { Hammer, CheckCircle2, Loader2, RotateCcw, Settings } from "lucide-react";
 import { AgentLog } from "./AgentLog";
+import { BuildDeploySocket } from "../lib/build_deploy_ws";
 
 type Stage = "idle" | "building" | "done" | "error";
 
@@ -14,7 +15,7 @@ export function BuildDeploy({ projectRoot, onOpenSettings }: Props) {
   const [log, setLog] = useState<string[]>([]);
   const [deployedTo, setDeployedTo] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
+  const wsRef = useRef<BuildDeploySocket | null>(null);
 
   function reset() {
     wsRef.current?.close();
@@ -25,35 +26,35 @@ export function BuildDeploy({ projectRoot, onOpenSettings }: Props) {
     setErrorMsg(null);
   }
 
-  function start() {
+  async function start() {
     if (!projectRoot.trim()) return;
     setStage("building");
     setLog([]);
     setDeployedTo(null);
     setErrorMsg(null);
 
-    const ws = new WebSocket(`ws://${location.host}/api/ws/build-deploy`);
+    const ws = new BuildDeploySocket();
     wsRef.current = ws;
-
-    ws.onopen = () => ws.send(JSON.stringify({ project_root: projectRoot.trim() }));
-
-    ws.onmessage = (e) => {
-      const msg = JSON.parse(e.data);
-      if (msg.event === "stream") {
-        setLog(prev => [...prev, msg.chunk]);
-      } else if (msg.event === "done") {
-        setDeployedTo(msg.deployed_to ?? null);
-        setStage("done");
-      } else if (msg.event === "error") {
-        setErrorMsg(msg.message);
-        setStage("error");
-      }
-    };
-
-    ws.onerror = () => {
-      setErrorMsg("WebSocket 连接失败");
+    ws.on("stream", (msg) => {
+      setLog(prev => [...prev, msg.chunk]);
+    });
+    ws.on("done", (msg) => {
+      setDeployedTo(msg.deployed_to ?? null);
+      setStage("done");
+    });
+    ws.on("error", (msg) => {
+      setErrorMsg(msg.message);
       setStage("error");
-    };
+    });
+
+    try {
+      await ws.waitOpen();
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : String(error));
+      setStage("error");
+      return;
+    }
+    ws.send({ project_root: projectRoot.trim() });
   }
 
   return (

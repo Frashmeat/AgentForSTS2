@@ -41,6 +41,9 @@ export interface SingleAssetFeatureViewProps {
   uploadedImageName: string;
   uploadedImagePreview: string | null;
   dragOver: boolean;
+  hasLiveSession: boolean;
+  showRecoveredNotice: boolean;
+  onRestartWorkflow: () => void;
   onAssetTypeChange: (value: AssetType) => void;
   onAssetNameChange: (value: string) => void;
   onDescriptionChange: (value: string) => void;
@@ -98,6 +101,9 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
     uploadedImageName,
     uploadedImagePreview,
     dragOver,
+    hasLiveSession,
+    showRecoveredNotice,
+    onRestartWorkflow,
     onAssetTypeChange,
     onAssetNameChange,
     onDescriptionChange,
@@ -135,6 +141,18 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
     <main className="px-6 py-6 grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)] gap-5 items-start">
       <Step num={1} title="描述设计" active={step === 0} done={step > 0}>
         <div className="space-y-4">
+          {showRecoveredNotice && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-700 space-y-2">
+              <p>当前展示的是本地恢复的单资产快照。审批状态会同步后端，但 prompt 确认、选图、补图和继续执行需要重新建立工作流连接。</p>
+              <button
+                onClick={onRestartWorkflow}
+                className="inline-flex items-center gap-1 rounded-md border border-amber-300 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100 transition-colors"
+              >
+                <RotateCcw size={11} />
+                按当前输入重新开始
+              </button>
+            </div>
+          )}
           <div className="space-y-2">
             <label className="text-xs font-medium text-slate-500">资产类型</label>
             <div className="flex gap-2 flex-wrap">
@@ -354,7 +372,11 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                   />
                 </>
               )}
-              <button onClick={onConfirmPrompt} className="w-full py-2.5 rounded-lg bg-amber-500 text-white font-bold text-sm hover:bg-amber-600 transition-colors">
+              <button
+                onClick={onConfirmPrompt}
+                disabled={!hasLiveSession}
+                className="w-full py-2.5 rounded-lg bg-amber-500 text-white font-bold text-sm hover:bg-amber-600 transition-colors disabled:cursor-not-allowed disabled:bg-slate-400"
+              >
                 确认，开始生图
               </button>
             </div>
@@ -391,8 +413,9 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                     <img src={`data:image/png;base64,${image}`} alt={`生成图 ${index + 1}`} className="w-full h-auto block" />
                     <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                       <button
+                        disabled={!hasLiveSession}
                         onClick={() => onSelectImage(index)}
-                        className="py-1.5 px-4 rounded-lg bg-amber-500 text-white font-bold text-sm hover:bg-amber-400 transition-colors shadow-lg"
+                        className="py-1.5 px-4 rounded-lg bg-amber-500 text-white font-bold text-sm hover:bg-amber-400 transition-colors shadow-lg disabled:cursor-not-allowed disabled:bg-slate-400"
                       >
                         用这张
                       </button>
@@ -430,8 +453,9 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                   />
                 )}
                 <button
+                  disabled={!hasLiveSession}
                   onClick={onGenerateMore}
-                  className="w-full py-2 rounded-lg border border-amber-400 text-amber-600 font-medium text-sm hover:bg-amber-50 transition-colors"
+                  className="w-full py-2 rounded-lg border border-amber-400 text-amber-600 font-medium text-sm hover:bg-amber-50 transition-colors disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400 disabled:bg-slate-50"
                 >
                   再来一张
                 </button>
@@ -452,6 +476,7 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                   onReject={onReject}
                   onExecute={onExecute}
                   onProceed={onProceedApproval}
+                  proceedDisabled={!hasLiveSession}
                 />
               ) : (
                 <>

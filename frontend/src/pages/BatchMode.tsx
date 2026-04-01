@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useReducer } from "react";
 import {
   Loader2, ChevronDown, ChevronUp, RotateCcw,
   CheckCircle2, XCircle, Clock, ImageIcon, Code2, Sparkles, AlertTriangle,
@@ -7,57 +7,27 @@ import {
 import { ApprovalPanel } from "../components/ApprovalPanel";
 import { approveApproval, executeApproval, rejectApproval, type ApprovalRequest } from "../lib/approvals";
 import { BatchSocket, PlanItem, ModPlan } from "../lib/batch_ws";
-import { pickActiveItemOnDone, pickActiveItemOnStart } from "../lib/batchActiveItem";
 import { AgentLog } from "../components/AgentLog";
 import { StageStatus } from "../components/StageStatus";
 import { BuildDeploy } from "../components/BuildDeploy";
 import { cn } from "../lib/utils";
+import {
+  batchWorkflowReducer,
+  createInitialBatchRuntimeState,
+  type BatchItemState,
+  type BatchRuntimeState,
+} from "../features/batch-generation/state";
+import {
+  clearBatchRuntimeSnapshot,
+  createRetryableBatchItemState,
+  loadBatchRuntimeSnapshot,
+  refreshRecoveredBatchApprovals,
+  saveBatchRuntimeSnapshot,
+} from "../features/batch-generation/recovery";
 import { loadAppConfig } from "../shared/api/config";
 
-// ── 类型 ──────────────────────────────────────────────────────────────────────
-
-type BatchStage = "input" | "planning" | "review_plan" | "executing" | "done" | "error";
-
-type ItemStatus =
-  | "pending"
-  | "img_generating"
-  | "awaiting_selection"
-  | "approval_pending"
-  | "code_generating"
-  | "done"
-  | "error";
-
-interface ItemState {
-  status: ItemStatus;
-  currentStage: string | null;
-  stageHistory: string[];
-  progress: string[];
-  images: string[];
-  agentLog: string[];
-  error: string | null;
-  errorTrace: string | null;
-  currentPrompt: string;
-  showMorePrompt: boolean;
-  approvalSummary: string;
-  approvalRequests: ApprovalRequest[];
-}
-
-function defaultItemState(): ItemState {
-  return {
-    status: "pending",
-    currentStage: null,
-    stageHistory: [],
-    progress: [],
-    images: [],
-    agentLog: [],
-    error: null,
-    errorTrace: null,
-    currentPrompt: "",
-    showMorePrompt: false,
-    approvalSummary: "",
-    approvalRequests: [],
-  };
-}
+type ItemStatus = BatchItemState["status"];
+type ItemState = BatchItemState;
 
 // ── 工具函数 ──────────────────────────────────────────────────────────────────
 
@@ -93,7 +63,6 @@ const STATUS_LABELS: Record<ItemStatus, string> = {
 // ── 主组件 ────────────────────────────────────────────────────────────────────
 
 function BatchModePage() {
-  const [stage, setStage] = useState<BatchStage>("input");
   const [requirements, setRequirements] = useState("");
   const [projectRoot, setProjectRoot] = useState("");
 
@@ -113,164 +82,157 @@ function BatchModePage() {
   const [editedItems, setEditedItems] = useState<PlanItem[]>(() => {
     try { const s = localStorage.getItem("ats_last_plan_items"); return s ? JSON.parse(s) : []; } catch { return []; }
   });
-  const [activeItemId, setActiveItemId] = useState<string | null>(null);
-  const [itemStates, setItemStates] = useState<Record<string, ItemState>>({});
-  const itemStatesRef = useRef<Record<string, ItemState>>({});
-  const [batchLog, setBatchLog] = useState<string[]>([]);
-  const [currentBatchStage, setCurrentBatchStage] = useState<string | null>(null);
-  const [batchStageHistory, setBatchStageHistory] = useState<string[]>([]);
-  const [globalError, setGlobalError] = useState<string | null>(null);
-  const [batchResult, setBatchResult] = useState<{ success: number; error: number } | null>(null);
-  const [approvalBusyActionId, setApprovalBusyActionId] = useState<string | null>(null);
+  const [initialRuntimeSnapshot] = useState<BatchRuntimeState | null>(() => (
+    plan || editedItems.length > 0 ? loadBatchRuntimeSnapshot() : null
+  ));
+  const [runtimeState, dispatchRuntime] = useReducer(
+    batchWorkflowReducer,
+    undefined,
+    () => initialRuntimeSnapshot ?? createInitialBatchRuntimeState(),
+  );
+  const [restoredSnapshotMode, setRestoredSnapshotMode] = useState(() => initialRuntimeSnapshot !== null);
+  const [restoredApprovalRefreshPending, setRestoredApprovalRefreshPending] = useState(() => initialRuntimeSnapshot !== null);
 
   const [autoSelectFirst, setAutoSelectFirst] = useState(false);
   const autoSelectRef = useRef(false);
   useEffect(() => { autoSelectRef.current = autoSelectFirst; }, [autoSelectFirst]);
   const socketRef = useRef<BatchSocket | null>(null);
 
-  // ── State updater helpers ─────────────────────────────────────────────────
+  useEffect(() => {
+    if (!plan || editedItems.length === 0) {
+      return;
+    }
+    const itemsForStorage = editedItems.map((item) => ({ ...item, provided_image_b64: undefined }));
+    try {
+      localStorage.setItem("ats_last_plan_items", JSON.stringify(itemsForStorage));
+    } catch {}
+  }, [plan, editedItems]);
 
-  const applyItemStates = useCallback((updater: (prev: Record<string, ItemState>) => Record<string, ItemState>) => {
-    const next = updater(itemStatesRef.current);
-    itemStatesRef.current = next;
-    setItemStates(next);
-  }, []);
+  useEffect(() => {
+    const shouldPersistRuntime = runtimeState.stage === "review_plan" || runtimeState.stage === "executing" || runtimeState.stage === "done";
+    const hasContext = Boolean(plan) || editedItems.length > 0;
+    if (!shouldPersistRuntime || !hasContext) {
+      clearBatchRuntimeSnapshot();
+      return;
+    }
+    saveBatchRuntimeSnapshot(localStorage, runtimeState);
+  }, [editedItems.length, plan, runtimeState]);
 
-  const updateItem = useCallback((id: string, patch: Partial<ItemState>) => {
-    applyItemStates(prev => ({
-      ...prev,
-      [id]: { ...(prev[id] ?? defaultItemState()), ...patch },
-    }));
-  }, [applyItemStates]);
+  useEffect(() => {
+    if (!restoredApprovalRefreshPending) {
+      return;
+    }
+    let cancelled = false;
 
-  const appendProgress = useCallback((id: string, msg: string) => {
-    applyItemStates(prev => {
-      const cur = prev[id] ?? defaultItemState();
-      return { ...prev, [id]: { ...cur, progress: [...cur.progress, msg] } };
+    void refreshRecoveredBatchApprovals(initialRuntimeSnapshot ?? runtimeState).then((refreshedState) => {
+      if (cancelled) {
+        return;
+      }
+      for (const [itemId, itemState] of Object.entries(refreshedState.itemStates)) {
+        const currentState = runtimeState.itemStates[itemId];
+        if (!currentState) {
+          continue;
+        }
+        if (
+          currentState.status === itemState.status &&
+          JSON.stringify(currentState.approvalRequests) === JSON.stringify(itemState.approvalRequests)
+        ) {
+          continue;
+        }
+        dispatchRuntime({
+          type: "item_state_patched",
+          itemId,
+          patch: {
+            status: itemState.status,
+            approvalRequests: itemState.approvalRequests,
+          },
+        });
+      }
+      setRestoredApprovalRefreshPending(false);
     });
-  }, [applyItemStates]);
 
-  const appendAgent = useCallback((id: string, chunk: string) => {
-    applyItemStates(prev => {
-      const cur = prev[id] ?? defaultItemState();
-      return { ...prev, [id]: { ...cur, agentLog: [...cur.agentLog, chunk] } };
-    });
-  }, [applyItemStates]);
-
-  const addImage = useCallback((id: string, b64: string, index: number, prompt: string) => {
-    applyItemStates(prev => {
-      const cur = prev[id] ?? defaultItemState();
-      const images = [...cur.images];
-      images[index] = b64;
-      return { ...prev, [id]: { ...cur, images, currentPrompt: prompt, status: "awaiting_selection" } };
-    });
-    // 如果当前没有 active item，自动跳到这个需要选图的 item
-    setActiveItemId(prev => prev ?? id);
-  }, [applyItemStates]);
+    return () => {
+      cancelled = true;
+    };
+  }, [initialRuntimeSnapshot, restoredApprovalRefreshPending, runtimeState]);
 
   // ── Start ─────────────────────────────────────────────────────────────────
 
   async function startPlanning() {
     if (!requirements.trim()) return;
-    setStage("planning");
-    setBatchLog([]);
-    setGlobalError(null);
-    itemStatesRef.current = {};
-    setItemStates({});
-    setBatchResult(null);
-    setCurrentBatchStage(null);
-    setBatchStageHistory([]);
+    setRestoredSnapshotMode(false);
+    setRestoredApprovalRefreshPending(false);
+    dispatchRuntime({ type: "planning_started" });
     setPlan(null);
-    setActiveItemId(null);
 
     const ws = new BatchSocket();
     socketRef.current = ws;
     _registerBatchHandlers(ws);
 
-    await ws.waitOpen();
+    try {
+      await ws.waitOpen();
+    } catch (error) {
+      dispatchRuntime({ type: "workflow_failed", message: error instanceof Error ? error.message : String(error) });
+      return;
+    }
     ws.send({ action: "start", requirements, project_root: projectRoot });
   }
 
   function _registerBatchHandlers(ws: BatchSocket) {
-    ws.on("planning", () => setBatchLog(l => [...l, "正在规划 Mod..."]));
+    ws.on("planning", () => dispatchRuntime({ type: "batch_log_appended", message: "正在规划 Mod..." }));
     ws.on("plan_ready", (d) => {
       setPlan(d.plan);
       setEditedItems(d.plan.items);
-      setStage("review_plan");
+      dispatchRuntime({ type: "plan_ready_received" });
       try {
         localStorage.setItem("ats_last_plan", JSON.stringify(d.plan));
         localStorage.setItem("ats_last_plan_items", JSON.stringify(d.plan.items));
       } catch {}
     });
-    ws.on("batch_progress", (d) => setBatchLog(l => [...l, d.message]));
+    ws.on("batch_progress", (d) => dispatchRuntime({ type: "batch_log_appended", message: d.message }));
     ws.on("stage_update", (d) => {
       if (d.item_id) {
-        applyItemStates(prev => {
-          const cur = prev[d.item_id!] ?? defaultItemState();
-          return {
-            ...prev,
-            [d.item_id!]: {
-              ...cur,
-              currentStage: d.message,
-              stageHistory: cur.stageHistory[cur.stageHistory.length - 1] === d.message ? cur.stageHistory : [...cur.stageHistory, d.message],
-            },
-          };
-        });
+        dispatchRuntime({ type: "item_stage_message", itemId: d.item_id!, message: d.message });
         return;
       }
-      setCurrentBatchStage(d.message);
-      setBatchStageHistory(prev => prev[prev.length - 1] === d.message ? prev : [...prev, d.message]);
+      dispatchRuntime({ type: "batch_stage_message", message: d.message });
     });
     ws.on("batch_started", (d) => {
-      const init: Record<string, ItemState> = {};
-      d.items.forEach(it => { init[it.id] = defaultItemState(); });
-      itemStatesRef.current = init;
-      setItemStates(init);
-      setStage("executing");
-      setActiveItemId(d.items[0]?.id ?? null);
+      dispatchRuntime({ type: "batch_started", items: d.items });
     });
     ws.on("item_started", (d) => {
-      updateItem(d.item_id, { status: "img_generating" });
-      setActiveItemId(prev => pickActiveItemOnStart(prev, itemStatesRef.current, d.item_id));
+      dispatchRuntime({ type: "item_started", itemId: d.item_id });
     });
     ws.on("item_progress", (d) => {
-      appendProgress(d.item_id, d.message);
-      if (d.message.includes("Code Agent")) {
-        updateItem(d.item_id, { status: "code_generating" });
-      }
+      dispatchRuntime({ type: "item_progress_received", itemId: d.item_id, message: d.message });
     });
     ws.on("item_image_ready", (d) => {
-      addImage(d.item_id, d.image, d.index, d.prompt);
+      dispatchRuntime({ type: "item_image_ready", itemId: d.item_id, image: d.image, index: d.index, prompt: d.prompt });
       if (autoSelectRef.current) {
         ws.send({ action: "select_image", item_id: d.item_id, index: 0 });
-        updateItem(d.item_id, { status: "code_generating" });
+        dispatchRuntime({ type: "item_state_patched", itemId: d.item_id, patch: { status: "code_generating" } });
       }
     });
-    ws.on("item_agent_stream", (d) => { appendAgent(d.item_id, d.chunk); });
+    ws.on("item_agent_stream", (d) => { dispatchRuntime({ type: "item_agent_stream", itemId: d.item_id, chunk: d.chunk }); });
     ws.on("item_approval_pending", (d) => {
-      updateItem(d.item_id, {
-        status: "approval_pending",
-        approvalSummary: d.summary,
-        approvalRequests: d.requests,
-      });
-      setActiveItemId(prev => prev ?? d.item_id);
+      dispatchRuntime({ type: "item_approval_pending", itemId: d.item_id, summary: d.summary, requests: d.requests });
     });
     ws.on("item_done", (d) => {
-      updateItem(d.item_id, { status: "done" });
-      setActiveItemId(prev => pickActiveItemOnDone(prev, d.item_id, itemStatesRef.current));
+      dispatchRuntime({ type: "item_done", itemId: d.item_id });
     });
     ws.on("item_error", (d) => {
-      updateItem(d.item_id, { status: "error", error: d.message, errorTrace: d.traceback ?? null });
+      dispatchRuntime({ type: "item_error", itemId: d.item_id, message: d.message, traceback: d.traceback ?? null });
     });
     ws.on("batch_done", (d) => {
-      setBatchResult({ success: d.success_count, error: d.error_count });
-      setStage("done");
+      dispatchRuntime({ type: "batch_done", success: d.success_count, error: d.error_count });
     });
-    ws.on("error", (d) => { setGlobalError(d.message); setStage("error"); });
+    ws.on("error", (d) => { dispatchRuntime({ type: "workflow_failed", message: d.message }); });
   }
 
   async function confirmPlan() {
     if (!plan) return;
+    setRestoredSnapshotMode(false);
+    setRestoredApprovalRefreshPending(false);
     const itemsForStorage = editedItems.map(it => ({ ...it, provided_image_b64: undefined }));
     try { localStorage.setItem("ats_last_plan_items", JSON.stringify(itemsForStorage)); } catch {}
 
@@ -279,11 +241,16 @@ function BatchModePage() {
       const ws = new BatchSocket();
       socketRef.current = ws;
       _registerBatchHandlers(ws);
-      await ws.waitOpen();
-      setStage("executing");
+      try {
+        await ws.waitOpen();
+      } catch (error) {
+        dispatchRuntime({ type: "workflow_failed", message: error instanceof Error ? error.message : String(error) });
+        return;
+      }
+      dispatchRuntime({ type: "stage_set", stage: "executing" });
       ws.send({ action: "start_with_plan", project_root: projectRoot, plan: { ...plan, items: editedItems } });
     } else {
-      setStage("executing");
+      dispatchRuntime({ type: "stage_set", stage: "executing" });
       socketRef.current.send({ action: "confirm_plan", plan: { ...plan, items: editedItems } });
     }
   }
@@ -291,69 +258,57 @@ function BatchModePage() {
   function handleSelectImage(itemId: string, index: number) {
     if (!socketRef.current) return;
     socketRef.current.send({ action: "select_image", item_id: itemId, index });
-    updateItem(itemId, { status: "code_generating" });
+    dispatchRuntime({ type: "item_state_patched", itemId, patch: { status: "code_generating" } });
     const nextAwaiting = editedItems.find(
-      it => it.id !== itemId && itemStatesRef.current[it.id]?.status === "awaiting_selection"
+      it => it.id !== itemId && runtimeState.itemStates[it.id]?.status === "awaiting_selection"
     );
-    if (nextAwaiting) setActiveItemId(nextAwaiting.id);
+    if (nextAwaiting) dispatchRuntime({ type: "active_item_set", itemId: nextAwaiting.id });
   }
 
   function handleRetryItem(itemId: string) {
     if (!socketRef.current) return;
     socketRef.current.send({ action: "retry_item", item_id: itemId });
-    updateItem(itemId, { status: "img_generating", error: null, errorTrace: null, progress: [], agentLog: [], images: [] });
+    dispatchRuntime({
+      type: "item_state_patched",
+      itemId,
+      patch: createRetryableBatchItemState(runtimeState.itemStates[itemId]),
+    });
   }
 
   function handleGenerateMore(itemId: string) {
     if (!socketRef.current) return;
-    const state = itemStatesRef.current[itemId];
+    const state = runtimeState.itemStates[itemId];
     socketRef.current.send({
       action: "generate_more",
       item_id: itemId,
       prompt: state?.currentPrompt,
     });
-    updateItem(itemId, { status: "img_generating", showMorePrompt: false });
+    dispatchRuntime({ type: "item_state_patched", itemId, patch: { status: "img_generating", showMorePrompt: false } });
   }
 
   function reset() {
     socketRef.current?.close();
     socketRef.current = null;
-    setStage("input");
+    clearBatchRuntimeSnapshot();
+    setRestoredSnapshotMode(false);
+    setRestoredApprovalRefreshPending(false);
     setPlan(null);
     setEditedItems([]);
-    itemStatesRef.current = {};
-    setItemStates({});
-    setBatchLog([]);
-    setGlobalError(null);
-    setBatchResult(null);
-    setActiveItemId(null);
-    setApprovalBusyActionId(null);
+    dispatchRuntime({ type: "workflow_reset" });
   }
 
   async function handleApprovalAction(
     actionId: string,
     action: (id: string) => Promise<ApprovalRequest>,
   ) {
-    setApprovalBusyActionId(actionId);
+    dispatchRuntime({ type: "approval_busy_set", actionId });
     try {
       const updated = await action(actionId);
-      applyItemStates(prev => {
-        const next: Record<string, ItemState> = { ...prev };
-        for (const [id, state] of Object.entries(prev)) {
-          const nextRequests = state.approvalRequests.map(req => req.action_id === actionId ? updated : req);
-          const nextStatus =
-            state.status === "approval_pending" && nextRequests.length > 0 && nextRequests.every(req => req.status === "succeeded")
-              ? "done"
-              : state.status;
-          next[id] = { ...state, approvalRequests: nextRequests, status: nextStatus };
-        }
-        return next;
-      });
+      dispatchRuntime({ type: "approval_request_updated", actionId, request: updated });
     } catch (error) {
-      setGlobalError(error instanceof Error ? error.message : String(error));
-      setStage("error");
+      dispatchRuntime({ type: "workflow_failed", message: error instanceof Error ? error.message : String(error) });
     } finally {
-      setApprovalBusyActionId(null);
+      dispatchRuntime({ type: "approval_busy_set", actionId: null });
     }
   }
 
@@ -362,7 +317,7 @@ function BatchModePage() {
   return (
     <div className="space-y-5">
       {/* 输入阶段 */}
-      {stage === "input" && (
+      {runtimeState.stage === "input" && (
         <div className="rounded-xl border border-amber-300 bg-white shadow-md p-5 space-y-4">
           <h2 className="font-semibold text-slate-800">描述你的 Mod 需求</h2>
           <p className="text-xs text-slate-400">
@@ -394,7 +349,7 @@ function BatchModePage() {
           </button>
           {plan && (
             <button
-              onClick={() => setStage("review_plan")}
+              onClick={() => dispatchRuntime({ type: "stage_set", stage: "review_plan" })}
               className="w-full py-2 rounded-lg border border-amber-200 text-amber-600 text-sm hover:bg-amber-50 transition-colors"
             >
               恢复上次规划：{plan.mod_name}
@@ -404,18 +359,18 @@ function BatchModePage() {
       )}
 
       {/* 规划中 */}
-      {stage === "planning" && (
+      {runtimeState.stage === "planning" && (
         <div className="rounded-xl border border-slate-200 bg-white p-5 space-y-3">
           <div className="flex items-center gap-2.5">
             <Loader2 size={16} className="text-amber-500 animate-spin" />
             <span className="text-sm font-medium text-slate-600">AI 正在规划 Mod...</span>
           </div>
-          {batchLog.length > 0 && <AgentLog lines={batchLog} />}
+          {runtimeState.batchLog.length > 0 && <AgentLog lines={runtimeState.batchLog} />}
         </div>
       )}
 
       {/* 审阅计划 */}
-      {stage === "review_plan" && plan && (
+      {runtimeState.stage === "review_plan" && plan && (
         <ReviewPlan
           plan={plan}
           editedItems={editedItems}
@@ -426,13 +381,13 @@ function BatchModePage() {
       )}
 
       {/* 全局错误 */}
-      {stage === "error" && (
+      {runtimeState.stage === "error" && (
         <div className="rounded-xl border border-red-200 bg-red-50 p-5 space-y-3">
           <div className="flex items-start gap-2">
             <AlertTriangle size={16} className="text-red-500 shrink-0 mt-0.5" />
             <div>
               <p className="text-sm font-semibold text-red-700">规划失败</p>
-              {globalError && <pre className="text-xs text-red-600 font-mono mt-1 whitespace-pre-wrap">{globalError}</pre>}
+              {runtimeState.globalError && <pre className="text-xs text-red-600 font-mono mt-1 whitespace-pre-wrap">{runtimeState.globalError}</pre>}
             </div>
           </div>
           <button onClick={reset} className="text-sm text-red-500 hover:text-red-700 flex items-center gap-1">
@@ -442,35 +397,40 @@ function BatchModePage() {
       )}
 
       {/* 执行阶段 + 完成 */}
-      {(stage === "executing" || stage === "done") && (
+      {(runtimeState.stage === "executing" || runtimeState.stage === "done") && (
         <ExecutionView
           items={editedItems}
-          itemStates={itemStates}
-          activeItemId={activeItemId}
-          setActiveItemId={setActiveItemId}
-          batchLog={batchLog}
-          currentBatchStage={currentBatchStage}
-          batchStageHistory={batchStageHistory}
-          batchResult={batchResult}
-          stage={stage}
+          itemStates={runtimeState.itemStates}
+          activeItemId={runtimeState.activeItemId}
+          setActiveItemId={(id) => dispatchRuntime({ type: "active_item_set", itemId: id })}
+          batchLog={runtimeState.batchLog}
+          currentBatchStage={runtimeState.currentBatchStage}
+          batchStageHistory={runtimeState.batchStageHistory}
+          batchResult={runtimeState.batchResult}
+          stage={runtimeState.stage}
           projectRoot={projectRoot}
+          hasLiveSession={Boolean(socketRef.current)}
+          showRecoveredNotice={restoredSnapshotMode && !socketRef.current}
+          canRestartExecution={Boolean(plan) && editedItems.length > 0}
+          onRestartExecution={() => { void confirmPlan(); }}
           autoSelectFirst={autoSelectFirst}
           onAutoSelectToggle={() => setAutoSelectFirst(v => !v)}
           onSelectImage={handleSelectImage}
           onGenerateMore={handleGenerateMore}
           onRetryItem={handleRetryItem}
-          approvalBusyActionId={approvalBusyActionId}
+          approvalBusyActionId={runtimeState.approvalBusyActionId}
           onApproveAction={(actionId) => { void handleApprovalAction(actionId, approveApproval); }}
           onRejectAction={(actionId) => { void handleApprovalAction(actionId, (id) => rejectApproval(id)); }}
           onExecuteAction={(actionId) => { void handleApprovalAction(actionId, executeApproval); }}
           onUpdatePrompt={(id, prompt) =>
-            updateItem(id, { currentPrompt: prompt })
+            dispatchRuntime({ type: "item_state_patched", itemId: id, patch: { currentPrompt: prompt } })
           }
           onToggleMorePrompt={(id) =>
-            applyItemStates(prev => ({
-              ...prev,
-              [id]: { ...prev[id], showMorePrompt: !prev[id]?.showMorePrompt },
-            }))
+            dispatchRuntime({
+              type: "item_state_patched",
+              itemId: id,
+              patch: { showMorePrompt: !runtimeState.itemStates[id]?.showMorePrompt },
+            })
           }
           onReset={reset}
         />
@@ -667,6 +627,7 @@ function ReviewPlan({
 function ExecutionView({
   items, itemStates, activeItemId, setActiveItemId,
   batchLog, currentBatchStage, batchStageHistory, batchResult, stage, projectRoot,
+  hasLiveSession, showRecoveredNotice, canRestartExecution, onRestartExecution,
   autoSelectFirst, onAutoSelectToggle,
   onSelectImage, onGenerateMore, onRetryItem, approvalBusyActionId, onApproveAction, onRejectAction, onExecuteAction, onUpdatePrompt, onToggleMorePrompt, onReset,
 }: {
@@ -680,6 +641,10 @@ function ExecutionView({
   batchResult: { success: number; error: number } | null;
   stage: "executing" | "done";
   projectRoot: string;
+  hasLiveSession: boolean;
+  showRecoveredNotice: boolean;
+  canRestartExecution: boolean;
+  onRestartExecution: () => void;
   autoSelectFirst: boolean;
   onAutoSelectToggle: () => void;
   onSelectImage: (id: string, idx: number) => void;
@@ -794,6 +759,20 @@ function ExecutionView({
 
       {/* 右：当前 item 详情 */}
       <div className="rounded-xl border border-slate-200 bg-white p-5 min-h-[300px]">
+        {showRecoveredNotice && (
+          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-700 space-y-2">
+            <p>当前展示的是本地恢复的执行快照。审批状态会自动同步后端，但选图、补图和重试不代表旧 WebSocket 会继续执行。</p>
+            {canRestartExecution && (
+              <button
+                onClick={onRestartExecution}
+                className="inline-flex items-center gap-1 rounded-md border border-amber-300 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100 transition-colors"
+              >
+                <RotateCcw size={11} />
+                按当前计划重新开始执行
+              </button>
+            )}
+          </div>
+        )}
         {!activeItem || !activeState ? (
           <div className="space-y-3">
             {batchLog.length > 0
@@ -805,6 +784,7 @@ function ExecutionView({
           <ItemDetailPanel
             item={activeItem}
             state={activeState}
+            hasLiveSession={hasLiveSession}
             onSelectImage={(idx) => onSelectImage(activeItem.id, idx)}
             onGenerateMore={() => onGenerateMore(activeItem.id)}
             onRetryItem={() => onRetryItem(activeItem.id)}
@@ -825,10 +805,12 @@ function ExecutionView({
 
 function ItemDetailPanel({
   item, state,
+  hasLiveSession,
   onSelectImage, onGenerateMore, onRetryItem, approvalBusyActionId, onApproveAction, onRejectAction, onExecuteAction, onUpdatePrompt, onToggleMorePrompt,
 }: {
   item: PlanItem;
   state: ItemState;
+  hasLiveSession: boolean;
   onSelectImage: (idx: number) => void;
   onGenerateMore: () => void;
   onRetryItem: () => void;
@@ -879,6 +861,12 @@ function ItemDetailPanel({
         />
       )}
 
+      {!hasLiveSession && state.status !== "done" && state.status !== "approval_pending" && (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+          当前是恢复后的本地快照。需要重新开始执行后，才能继续选图、补图或重试该资产。
+        </div>
+      )}
+
       {/* 图片画廊（等待选择时） */}
       {state.images.length > 0 && state.status !== "done" && (
         <div className="space-y-3">
@@ -896,8 +884,9 @@ function ItemDetailPanel({
                 {state.status === "awaiting_selection" && (
                   <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                     <button
+                      disabled={!hasLiveSession}
                       onClick={() => onSelectImage(i)}
-                      className="py-1.5 px-4 rounded-lg bg-amber-500 text-white font-bold text-sm hover:bg-amber-400 transition-colors shadow-lg"
+                      className="py-1.5 px-4 rounded-lg bg-amber-500 text-white font-bold text-sm hover:bg-amber-400 transition-colors shadow-lg disabled:cursor-not-allowed disabled:bg-slate-400"
                     >
                       用这张
                     </button>
@@ -914,8 +903,9 @@ function ItemDetailPanel({
           {state.status === "awaiting_selection" && (
             <div className="space-y-2 pt-2 border-t border-slate-100">
               <button
+                disabled={!hasLiveSession}
                 onClick={() => onSelectImage(0)}
-                className="w-full py-1.5 rounded-lg bg-amber-500 text-white text-sm font-bold hover:bg-amber-600 transition-colors"
+                className="w-full py-1.5 rounded-lg bg-amber-500 text-white text-sm font-bold hover:bg-amber-600 transition-colors disabled:cursor-not-allowed disabled:bg-slate-400"
               >
                 选第一张
               </button>
@@ -935,8 +925,9 @@ function ItemDetailPanel({
                 />
               )}
               <button
+                disabled={!hasLiveSession}
                 onClick={onGenerateMore}
-                className="w-full py-1.5 rounded-lg border border-amber-300 text-amber-600 text-sm hover:bg-amber-50 transition-colors"
+                className="w-full py-1.5 rounded-lg border border-amber-300 text-amber-600 text-sm hover:bg-amber-50 transition-colors disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400 disabled:bg-slate-50"
               >
                 再来一张
               </button>
@@ -969,8 +960,9 @@ function ItemDetailPanel({
             </div>
           </div>
           <button
+            disabled={!hasLiveSession}
             onClick={onRetryItem}
-            className="w-full py-1.5 rounded-lg bg-red-500 text-white text-sm font-bold hover:bg-red-600 transition-colors flex items-center justify-center gap-1"
+            className="w-full py-1.5 rounded-lg bg-red-500 text-white text-sm font-bold hover:bg-red-600 transition-colors flex items-center justify-center gap-1 disabled:cursor-not-allowed disabled:bg-slate-400"
           >
             <RotateCcw size={13} /> 重新生成此资产
           </button>

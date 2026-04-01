@@ -9,6 +9,11 @@ export interface ApprovalRequest {
   requires_approval: boolean;
   status: string;
   payload: Record<string, unknown>;
+  source_backend?: string;
+  source_workflow?: string;
+  created_at?: string;
+  result?: unknown;
+  error?: unknown;
 }
 
 export function summarizeApprovalPending(summary: string, requests: ApprovalRequest[]): string {
@@ -40,6 +45,24 @@ async function postApproval(path: string, body?: object): Promise<ApprovalReques
     throw new Error(await response.text());
   }
   return response.json();
+}
+
+async function getApprovalResource<T>(path: string): Promise<T> {
+  const response = await fetch(path, {
+    method: "GET",
+  });
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+  return response.json();
+}
+
+export function listApprovals(): Promise<ApprovalRequest[]> {
+  return getApprovalResource<ApprovalRequest[]>("/api/approvals");
+}
+
+export function getApproval(actionId: string): Promise<ApprovalRequest> {
+  return getApprovalResource<ApprovalRequest>(`/api/approvals/${actionId}`);
 }
 
 export function approveApproval(actionId: string): Promise<ApprovalRequest> {

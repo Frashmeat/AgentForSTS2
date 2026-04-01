@@ -14,6 +14,7 @@ export function ApprovalPanel({
   onReject,
   onExecute,
   onProceed,
+  proceedDisabled = false,
 }: {
   summary: string;
   requests: ApprovalRequest[];
@@ -22,6 +23,7 @@ export function ApprovalPanel({
   onReject?: (actionId: string) => void;
   onExecute?: (actionId: string) => void;
   onProceed?: () => void;
+  proceedDisabled?: boolean;
 }) {
   return (
     <div className="space-y-3">
@@ -89,7 +91,8 @@ export function ApprovalPanel({
       {onProceed && (
         <button
           onClick={onProceed}
-          className="w-full rounded-md bg-amber-500 px-3 py-2 text-sm font-medium text-white hover:bg-amber-600"
+          disabled={proceedDisabled}
+          className="w-full rounded-md bg-amber-500 px-3 py-2 text-sm font-medium text-white hover:bg-amber-600 disabled:cursor-not-allowed disabled:bg-slate-400"
         >
           确认，开始生成代码
         </button>

@@ -4,6 +4,7 @@ import { Loader2, RotateCcw, Search, Wrench } from "lucide-react";
 import { AgentLog } from "../../components/AgentLog";
 import { BuildDeploy } from "../../components/BuildDeploy";
 import { StageStatus } from "../../components/StageStatus";
+import { ModAnalysisSocket } from "../../lib/mod_analysis_ws";
 import { WorkflowSocket } from "../../lib/ws";
 import { loadAppConfig } from "../../shared/api/config";
 
@@ -29,7 +30,7 @@ export function ModEditorFeatureView() {
   const [analysisCurrentStage, setAnalysisCurrentStage] = useState<string | null>(null);
   const [analysisStageHistory, setAnalysisStageHistory] = useState<string[]>([]);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
-  const analyzeWsRef = useRef<WebSocket | null>(null);
+  const analyzeWsRef = useRef<ModAnalysisSocket | null>(null);
 
   const [modRequest, setModRequest] = useState("");
   const [modifyStage, setModifyStage] = useState<ModifyStage>("idle");
@@ -39,7 +40,7 @@ export function ModEditorFeatureView() {
   const [modifyError, setModifyError] = useState<string | null>(null);
   const modifyWsRef = useRef<WorkflowSocket | null>(null);
 
-  function startAnalysis() {
+  async function startAnalysis() {
     if (!projectRoot.trim()) {
       return;
     }
@@ -50,33 +51,37 @@ export function ModEditorFeatureView() {
     setAnalysisStageHistory([]);
     setAnalysisError(null);
 
-    const ws = new WebSocket(`ws://${location.host}/api/ws/analyze-mod`);
+    const ws = new ModAnalysisSocket();
     analyzeWsRef.current = ws;
-
-    ws.onopen = () => ws.send(JSON.stringify({ project_root: projectRoot.trim() }));
-    ws.onmessage = (event) => {
-      const message = JSON.parse(event.data);
-      if (message.event === "stage_update") {
-        setAnalysisCurrentStage(message.message);
-        setAnalysisStageHistory((previous) =>
-          previous[previous.length - 1] === message.message ? previous : [...previous, message.message]
-        );
-      } else if (message.event === "scan_info") {
-        setScanFiles(message.files);
-        setAnalyzeStage("streaming");
-      } else if (message.event === "stream") {
-        setAnalysisChunks((previous) => [...previous, message.chunk]);
-      } else if (message.event === "done") {
-        setAnalyzeStage("done");
-      } else if (message.event === "error") {
-        setAnalysisError(message.message);
-        setAnalyzeStage("error");
-      }
-    };
-    ws.onerror = () => {
-      setAnalysisError("WebSocket 连接失败");
+    ws.on("stage_update", (message) => {
+      setAnalysisCurrentStage(message.message);
+      setAnalysisStageHistory((previous) =>
+        previous[previous.length - 1] === message.message ? previous : [...previous, message.message]
+      );
+    });
+    ws.on("scan_info", (message) => {
+      setScanFiles(message.files);
+      setAnalyzeStage("streaming");
+    });
+    ws.on("stream", (message) => {
+      setAnalysisChunks((previous) => [...previous, message.chunk]);
+    });
+    ws.on("done", () => {
+      setAnalyzeStage("done");
+    });
+    ws.on("error", (message) => {
+      setAnalysisError(message.message);
       setAnalyzeStage("error");
-    };
+    });
+
+    try {
+      await ws.waitOpen();
+    } catch (error) {
+      setAnalysisError(error instanceof Error ? error.message : String(error));
+      setAnalyzeStage("error");
+      return;
+    }
+    ws.send({ project_root: projectRoot.trim() });
   }
 
   function resetAnalysis() {
@@ -120,7 +125,13 @@ export function ModEditorFeatureView() {
       setModifyStage("error");
     });
 
-    await ws.waitOpen();
+    try {
+      await ws.waitOpen();
+    } catch (error) {
+      setModifyError(error instanceof Error ? error.message : String(error));
+      setModifyStage("error");
+      return;
+    }
 
     const analysisContext =
       analysisChunks.length > 0 ? `当前 mod 分析概况：\n${analysisChunks.join("")}\n\n` : "";
