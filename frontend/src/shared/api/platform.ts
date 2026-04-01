@@ -1,16 +1,4 @@
-import { requestJson } from "./http.ts";
-
-function withQuery(path: string, query: Record<string, string | number | undefined>): string {
-  const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(query)) {
-    if (typeof value === "undefined") {
-      continue;
-    }
-    params.set(key, String(value));
-  }
-  const queryString = params.toString();
-  return queryString ? `${path}?${queryString}` : path;
-}
+import { buildApiPath, requestJson } from "./http.ts";
 
 export interface PlatformJobCreateItem {
   item_type: string;
@@ -70,7 +58,7 @@ export function createPlatformJob(
   userId: number,
   body: PlatformJobCreateRequest,
 ): Promise<PlatformJobSummary> {
-  return requestJson<PlatformJobSummary>(withQuery("/api/platform/jobs", { user_id: userId }), {
+  return requestJson<PlatformJobSummary>(buildApiPath("/api/platform/jobs", { user_id: userId }), {
     method: "POST",
     body,
   });
@@ -82,7 +70,7 @@ export function startPlatformJob(
   body: PlatformJobStartRequest,
 ): Promise<Record<string, unknown>> {
   return requestJson<Record<string, unknown>>(
-    withQuery(`/api/platform/jobs/${jobId}/start`, { user_id: userId }),
+    buildApiPath(`/api/platform/jobs/${jobId}/start`, { user_id: userId }),
     { method: "POST", body },
   );
 }
@@ -93,22 +81,22 @@ export function cancelPlatformJob(
   body: PlatformJobCancelRequest,
 ): Promise<Record<string, unknown>> {
   return requestJson<Record<string, unknown>>(
-    withQuery(`/api/platform/jobs/${jobId}/cancel`, { user_id: userId }),
+    buildApiPath(`/api/platform/jobs/${jobId}/cancel`, { user_id: userId }),
     { method: "POST", body },
   );
 }
 
 export function listPlatformJobs(userId: number): Promise<PlatformJobSummary[]> {
-  return requestJson<PlatformJobSummary[]>(withQuery("/api/platform/jobs", { user_id: userId }));
+  return requestJson<PlatformJobSummary[]>(buildApiPath("/api/platform/jobs", { user_id: userId }));
 }
 
 export function getPlatformJob(userId: number, jobId: number): Promise<PlatformJobDetail> {
-  return requestJson<PlatformJobDetail>(withQuery(`/api/platform/jobs/${jobId}`, { user_id: userId }));
+  return requestJson<PlatformJobDetail>(buildApiPath(`/api/platform/jobs/${jobId}`, { user_id: userId }));
 }
 
 export function listPlatformJobItems(userId: number, jobId: number): Promise<Array<Record<string, unknown>>> {
   return requestJson<Array<Record<string, unknown>>>(
-    withQuery(`/api/platform/jobs/${jobId}/items`, { user_id: userId }),
+    buildApiPath(`/api/platform/jobs/${jobId}/items`, { user_id: userId }),
   );
 }
 
@@ -118,7 +106,7 @@ export function listPlatformJobEvents(
   query: PlatformJobEventQuery = {},
 ): Promise<Array<Record<string, unknown>>> {
   return requestJson<Array<Record<string, unknown>>>(
-    withQuery(`/api/platform/jobs/${jobId}/events`, {
+    buildApiPath(`/api/platform/jobs/${jobId}/events`, {
       user_id: userId,
       after_id: query.afterId,
       limit: query.limit,
@@ -127,5 +115,5 @@ export function listPlatformJobEvents(
 }
 
 export function getPlatformQuota(userId: number): Promise<PlatformQuotaView> {
-  return requestJson<PlatformQuotaView>(withQuery("/api/platform/quota", { user_id: userId }));
+  return requestJson<PlatformQuotaView>(buildApiPath("/api/platform/quota", { user_id: userId }));
 }

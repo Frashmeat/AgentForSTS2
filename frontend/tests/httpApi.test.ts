@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { requestJson } from "../src/shared/api/http.ts";
+import { buildApiPath, requestJson } from "../src/shared/api/http.ts";
 
 interface MockResponseInit {
   ok: boolean;
@@ -57,5 +57,21 @@ test("requestJson throws response text on non-ok response", async () => {
   await assert.rejects(
     () => requestJson("/api/config"),
     /boom/,
+  );
+});
+
+test("buildApiPath appends only defined query params", () => {
+  assert.equal(
+    buildApiPath("/api/platform/jobs/123/events", {
+      user_id: 7,
+      after_id: 9,
+      limit: undefined,
+    }),
+    "/api/platform/jobs/123/events?user_id=7&after_id=9",
+  );
+
+  assert.equal(
+    buildApiPath("/api/admin/quota/refunds", {}),
+    "/api/admin/quota/refunds",
   );
 });
