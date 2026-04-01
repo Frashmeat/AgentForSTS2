@@ -67,3 +67,77 @@ test("admin optional query params are only appended when present", async () => {
   assert.equal(calls[2].input, "/api/admin/audit/events");
   assert.equal(calls[3].input, "/api/admin/audit/events?job_id=123");
 });
+
+test("admin endpoints expose typed execution and refund fields", async () => {
+  let callIndex = 0;
+  Object.assign(globalThis, {
+    fetch: async () => {
+      callIndex += 1;
+      if (callIndex === 1) {
+        return createMockResponse({
+          ok: true,
+          body: [
+            {
+              id: 1,
+              job_id: 123,
+              job_item_id: 1,
+              status: "succeeded",
+              provider: "openai",
+              model: "gpt-5",
+            },
+          ],
+        });
+      }
+      if (callIndex === 2) {
+        return createMockResponse({
+          ok: true,
+          body: {
+            id: 1,
+            job_id: 123,
+            job_item_id: 1,
+            status: "succeeded",
+            provider: "openai",
+            model: "gpt-5",
+            request_idempotency_key: "abc",
+            input_summary: "创建卡牌代码",
+            result_summary: "成功创建",
+            error_summary: "",
+            step_protocol_version: "v1",
+            result_schema_version: "v1",
+          },
+        });
+      }
+      if (callIndex === 3) {
+        return createMockResponse({
+          ok: true,
+          body: [
+            {
+              ai_execution_id: 1,
+              charge_status: "refunded",
+              refund_reason: "execution_failed",
+            },
+          ],
+        });
+      }
+      return createMockResponse({
+        ok: true,
+        body: [
+          {
+            event_id: 1,
+            event_type: "audit.logged",
+          },
+        ],
+      });
+    },
+  });
+
+  const executions = await listAdminJobExecutions(123);
+  const execution = await getAdminExecution(1);
+  const refunds = await listAdminQuotaRefunds();
+  const auditEvents = await listAdminAuditEvents();
+
+  assert.equal(executions[0].provider, "openai");
+  assert.equal(execution.request_idempotency_key, "abc");
+  assert.equal(refunds[0].refund_reason, "execution_failed");
+  assert.equal(auditEvents[0].event_type, "audit.logged");
+});

@@ -98,3 +98,78 @@ test("list platform getters compose required query params", async () => {
   assert.equal(calls[3].input, "/api/platform/jobs/123/events?user_id=7&after_id=9&limit=20");
   assert.equal(calls[4].input, "/api/platform/quota?user_id=7");
 });
+
+test("platform detail endpoints expose typed item, artifact and event fields", async () => {
+  let callIndex = 0;
+  Object.assign(globalThis, {
+    fetch: async () => {
+      callIndex += 1;
+      if (callIndex === 1) {
+        return createMockResponse({
+          ok: true,
+          body: {
+            id: 123,
+            job_type: "batch_mod_generation",
+            status: "running",
+            items: [
+              {
+                id: 1,
+                item_index: 0,
+                item_type: "card",
+                status: "done",
+                result_summary: "已创建",
+                error_summary: "",
+              },
+            ],
+            artifacts: [
+              {
+                id: 10,
+                artifact_type: "image",
+                file_name: "DarkBolt.png",
+                result_summary: "已生成卡图",
+              },
+            ],
+          },
+        });
+      }
+      if (callIndex === 2) {
+        return createMockResponse({
+          ok: true,
+          body: [
+            {
+              id: 1,
+              item_index: 0,
+              item_type: "card",
+              status: "done",
+              result_summary: "已创建",
+              error_summary: "",
+            },
+          ],
+        });
+      }
+      return createMockResponse({
+        ok: true,
+        body: [
+          {
+            event_id: 101,
+            event_type: "job.started",
+            job_id: 123,
+            occurred_at: "2026-04-01T10:12:30+00:00",
+            payload: { triggered_by: "user" },
+            job_item_id: null,
+            ai_execution_id: null,
+          },
+        ],
+      });
+    },
+  });
+
+  const detail = await getPlatformJob(7, 123);
+  const items = await listPlatformJobItems(7, 123);
+  const events = await listPlatformJobEvents(7, 123);
+
+  assert.equal(detail.items?.[0].item_type, "card");
+  assert.equal(detail.artifacts?.[0].artifact_type, "image");
+  assert.equal(items[0].item_index, 0);
+  assert.equal(events[0].event_type, "job.started");
+});

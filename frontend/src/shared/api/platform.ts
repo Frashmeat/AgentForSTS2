@@ -34,15 +34,47 @@ export interface PlatformJobSummary {
   failed_item_count?: number;
 }
 
+export interface PlatformJobActionResponse {
+  id?: number;
+  status?: string;
+  ok?: boolean;
+}
+
+export interface PlatformJobItemSummary {
+  id: number;
+  item_index: number;
+  item_type: string;
+  status: string;
+  result_summary: string;
+  error_summary: string;
+}
+
+export interface PlatformArtifactSummary {
+  id: number;
+  artifact_type: string;
+  file_name: string;
+  result_summary: string;
+}
+
 export interface PlatformJobDetail extends PlatformJobSummary {
   error_summary?: string;
-  items?: Array<Record<string, unknown>>;
-  artifacts?: Array<Record<string, unknown>>;
+  items?: PlatformJobItemSummary[];
+  artifacts?: PlatformArtifactSummary[];
 }
 
 export interface PlatformJobEventQuery {
   afterId?: number;
   limit?: number;
+}
+
+export interface PlatformJobEventView {
+  event_id: number;
+  event_type: string;
+  job_id: number;
+  occurred_at: string;
+  payload: Record<string, unknown>;
+  job_item_id: number | null;
+  ai_execution_id: number | null;
 }
 
 export interface PlatformQuotaView {
@@ -68,8 +100,8 @@ export function startPlatformJob(
   userId: number,
   jobId: number,
   body: PlatformJobStartRequest,
-): Promise<Record<string, unknown>> {
-  return requestJson<Record<string, unknown>>(
+): Promise<PlatformJobActionResponse> {
+  return requestJson<PlatformJobActionResponse>(
     buildApiPath(`/api/platform/jobs/${jobId}/start`, { user_id: userId }),
     { method: "POST", body },
   );
@@ -79,8 +111,8 @@ export function cancelPlatformJob(
   userId: number,
   jobId: number,
   body: PlatformJobCancelRequest,
-): Promise<Record<string, unknown>> {
-  return requestJson<Record<string, unknown>>(
+): Promise<PlatformJobActionResponse> {
+  return requestJson<PlatformJobActionResponse>(
     buildApiPath(`/api/platform/jobs/${jobId}/cancel`, { user_id: userId }),
     { method: "POST", body },
   );
@@ -94,8 +126,8 @@ export function getPlatformJob(userId: number, jobId: number): Promise<PlatformJ
   return requestJson<PlatformJobDetail>(buildApiPath(`/api/platform/jobs/${jobId}`, { user_id: userId }));
 }
 
-export function listPlatformJobItems(userId: number, jobId: number): Promise<Array<Record<string, unknown>>> {
-  return requestJson<Array<Record<string, unknown>>>(
+export function listPlatformJobItems(userId: number, jobId: number): Promise<PlatformJobItemSummary[]> {
+  return requestJson<PlatformJobItemSummary[]>(
     buildApiPath(`/api/platform/jobs/${jobId}/items`, { user_id: userId }),
   );
 }
@@ -104,8 +136,8 @@ export function listPlatformJobEvents(
   userId: number,
   jobId: number,
   query: PlatformJobEventQuery = {},
-): Promise<Array<Record<string, unknown>>> {
-  return requestJson<Array<Record<string, unknown>>>(
+): Promise<PlatformJobEventView[]> {
+  return requestJson<PlatformJobEventView[]>(
     buildApiPath(`/api/platform/jobs/${jobId}/events`, {
       user_id: userId,
       after_id: query.afterId,
