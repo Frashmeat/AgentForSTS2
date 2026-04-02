@@ -5,7 +5,9 @@ import {
   appendBuildDeployLog,
   applyBuildDeployActionResult,
   createIdleBuildDeployState,
+  describeBuildDeployCompletionView,
   describeBuildDeployAction,
+  describeBuildDeployRunningMessage,
   finalizeBuildProjectResult,
   finalizeDeployResult,
   finalizePackageProjectResult,
@@ -147,6 +149,68 @@ test("applyBuildDeployActionResult merges HTTP action result into state", () => 
       deployedTo: null,
       summary: "打包成功",
       errorMsg: null,
+    },
+  );
+});
+
+test("describeBuildDeployRunningMessage returns dedicated deploy text", () => {
+  assert.equal(
+    describeBuildDeployRunningMessage("deploy"),
+    "Code Agent 构建中（含 .pck 导出）…",
+  );
+  assert.equal(
+    describeBuildDeployRunningMessage("build"),
+    "仅构建中…",
+  );
+});
+
+test("describeBuildDeployCompletionView returns deployed card metadata", () => {
+  assert.deepEqual(
+    describeBuildDeployCompletionView(
+      finalizeDeployResult(startBuildDeployAction("deploy"), "E:/Mods/MyMod"),
+    ),
+    {
+      tone: "success",
+      title: "已部署",
+      detail: "E:/Mods/MyMod",
+      detailMonospace: true,
+      showOpenSettings: false,
+    },
+  );
+});
+
+test("describeBuildDeployCompletionView returns deploy warning metadata when auto deploy is missing", () => {
+  assert.deepEqual(
+    describeBuildDeployCompletionView(
+      finalizeDeployResult(startBuildDeployAction("deploy"), null),
+    ),
+    {
+      tone: "warning",
+      title: "构建成功，未自动部署",
+      detail: "在设置中配置 STS2 游戏路径后可自动复制到 Mods 文件夹",
+      detailMonospace: false,
+      showOpenSettings: true,
+    },
+  );
+});
+
+test("describeBuildDeployCompletionView returns build success metadata", () => {
+  assert.deepEqual(
+    describeBuildDeployCompletionView(
+      applyBuildDeployActionResult(
+        startBuildDeployAction("build"),
+        finalizeBuildProjectResult({
+          success: true,
+          output: "Build succeeded",
+        }),
+      ),
+    ),
+    {
+      tone: "success",
+      title: "构建成功",
+      detail: "已完成项目构建，可继续部署或排查构建输出。",
+      detailMonospace: false,
+      showOpenSettings: false,
     },
   );
 });

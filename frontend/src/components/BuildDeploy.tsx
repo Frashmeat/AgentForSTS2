@@ -7,7 +7,8 @@ import {
 } from "./buildDeployController.ts";
 import {
   createIdleBuildDeployState,
-  describeBuildDeployAction,
+  describeBuildDeployCompletionView,
+  describeBuildDeployRunningMessage,
   type BuildDeployState,
 } from "./buildDeployModel.ts";
 
@@ -20,6 +21,7 @@ export function BuildDeploy({ projectRoot, onOpenSettings }: Props) {
   const [state, setState] = useState<BuildDeployState>(() => createIdleBuildDeployState());
   const wsRef = useRef<BuildDeploySocketLike | null>(null);
   const controllerRef = useRef<ReturnType<typeof createBuildDeployController> | null>(null);
+  const completionView = describeBuildDeployCompletionView(state);
 
   if (!controllerRef.current) {
     controllerRef.current = createBuildDeployController({
@@ -70,59 +72,54 @@ export function BuildDeploy({ projectRoot, onOpenSettings }: Props) {
       {state.stage === "running" && state.log.length === 0 && state.action && (
         <div className="flex items-center gap-2 py-1">
           <Loader2 size={14} className="text-emerald-500 animate-spin" />
-          <span className="text-sm text-slate-400">
-            {state.action === "deploy"
-              ? "Code Agent 构建中（含 .pck 导出）…"
-              : `${describeBuildDeployAction(state.action)}中…`}
-          </span>
+          <span className="text-sm text-slate-400">{describeBuildDeployRunningMessage(state.action)}</span>
         </div>
       )}
 
       {state.log.length > 0 && <AgentLog lines={state.log} />}
 
-      {state.stage === "done" && (
+      {state.stage === "done" && completionView && (
         <div className="space-y-2">
-          {state.action === "deploy" && state.deployedTo ? (
-            <div className="flex items-start gap-2 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2">
-              <CheckCircle2 size={15} className="text-emerald-500 shrink-0 mt-0.5" />
-              <div>
-                <p className="text-sm font-medium text-emerald-700">已部署</p>
-                <p className="text-xs text-emerald-600 font-mono mt-0.5 break-all">
-                  {state.deployedTo}
-                </p>
-              </div>
-            </div>
-          ) : state.action === "deploy" ? (
-            <div className="flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
-              <CheckCircle2 size={15} className="text-amber-500 shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <p className="text-sm font-medium text-amber-700">构建成功，未自动部署</p>
-                <p className="text-xs text-amber-600 mt-0.5">
-                  在设置中配置 STS2 游戏路径后可自动复制到 Mods 文件夹
-                </p>
-              </div>
-              {onOpenSettings && (
-                <button
-                  onClick={onOpenSettings}
-                  className="shrink-0 text-amber-500 hover:text-amber-700 transition-colors"
+          <div
+            className={`flex items-start gap-2 rounded-lg px-3 py-2 ${
+              completionView.tone === "warning"
+                ? "bg-amber-50 border border-amber-200"
+                : "bg-emerald-50 border border-emerald-200"
+            }`}
+          >
+            <CheckCircle2
+              size={15}
+              className={`shrink-0 mt-0.5 ${
+                completionView.tone === "warning" ? "text-amber-500" : "text-emerald-500"
+              }`}
+            />
+            <div className="flex-1">
+              <p
+                className={`text-sm font-medium ${
+                  completionView.tone === "warning" ? "text-amber-700" : "text-emerald-700"
+                }`}
+              >
+                {completionView.title}
+              </p>
+              {completionView.detail && (
+                <p
+                  className={`text-xs mt-0.5 break-all ${
+                    completionView.tone === "warning" ? "text-amber-600" : "text-emerald-600"
+                  } ${completionView.detailMonospace ? "font-mono" : ""}`}
                 >
-                  <Settings size={14} />
-                </button>
+                  {completionView.detail}
+                </p>
               )}
             </div>
-          ) : (
-            <div className="flex items-start gap-2 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2">
-              <CheckCircle2 size={15} className="text-emerald-500 shrink-0 mt-0.5" />
-              <div>
-                <p className="text-sm font-medium text-emerald-700">{state.summary ?? "执行成功"}</p>
-                <p className="text-xs text-emerald-600 mt-0.5">
-                  {state.action === "build"
-                    ? "已完成项目构建，可继续部署或排查构建输出。"
-                    : "已完成项目打包。"}
-                </p>
-              </div>
-            </div>
-          )}
+            {completionView.showOpenSettings && onOpenSettings && (
+              <button
+                onClick={onOpenSettings}
+                className="shrink-0 text-amber-500 hover:text-amber-700 transition-colors"
+              >
+                <Settings size={14} />
+              </button>
+            )}
+          </div>
           <button
             onClick={() => controller.reset()}
             className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1 transition-colors"

@@ -22,6 +22,14 @@ export interface BuildDeployActionResult {
   errorMsg: string | null;
 }
 
+export interface BuildDeployCompletionView {
+  tone: "success" | "warning";
+  title: string;
+  detail: string | null;
+  detailMonospace: boolean;
+  showOpenSettings: boolean;
+}
+
 export function createIdleBuildDeployState(): BuildDeployState {
   return {
     stage: "idle",
@@ -137,6 +145,52 @@ export function applyBuildDeployActionResult(
     deployedTo: null,
     summary: result.summary,
     errorMsg: result.errorMsg,
+  };
+}
+
+export function describeBuildDeployRunningMessage(action: BuildDeployAction): string {
+  if (action === "deploy") {
+    return "Code Agent 构建中（含 .pck 导出）…";
+  }
+  return `${describeBuildDeployAction(action)}中…`;
+}
+
+export function describeBuildDeployCompletionView(
+  state: BuildDeployState,
+): BuildDeployCompletionView | null {
+  if (state.stage !== "done" || !state.action) {
+    return null;
+  }
+
+  if (state.action === "deploy" && state.deployedTo) {
+    return {
+      tone: "success",
+      title: "已部署",
+      detail: state.deployedTo,
+      detailMonospace: true,
+      showOpenSettings: false,
+    };
+  }
+
+  if (state.action === "deploy") {
+    return {
+      tone: "warning",
+      title: "构建成功，未自动部署",
+      detail: "在设置中配置 STS2 游戏路径后可自动复制到 Mods 文件夹",
+      detailMonospace: false,
+      showOpenSettings: true,
+    };
+  }
+
+  return {
+    tone: "success",
+    title: state.summary ?? "执行成功",
+    detail:
+      state.action === "build"
+        ? "已完成项目构建，可继续部署或排查构建输出。"
+        : "已完成项目打包。",
+    detailMonospace: false,
+    showOpenSettings: false,
   };
 }
 
