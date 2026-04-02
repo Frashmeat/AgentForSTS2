@@ -38,7 +38,7 @@ export function ModEditorFeatureView() {
   const [analysisChunks, setAnalysisChunks] = useState<string[]>([]);
   const [analysisCurrentStage, setAnalysisCurrentStage] = useState<string | null>(null);
   const [analysisStageHistory, setAnalysisStageHistory] = useState<string[]>([]);
-  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [analysisErrorMessage, setAnalysisErrorMessage] = useState<string | null>(null);
   const analyzeWsRef = useRef<ModEditorAnalysisSocketLike | null>(null);
 
   const [modRequest, setModRequest] = useState("");
@@ -46,7 +46,7 @@ export function ModEditorFeatureView() {
   const [agentLog, setAgentLog] = useState<string[]>([]);
   const [modifyCurrentStage, setModifyCurrentStage] = useState<string | null>(null);
   const [modifyStageHistory, setModifyStageHistory] = useState<string[]>([]);
-  const [modifyError, setModifyError] = useState<string | null>(null);
+  const [modifyErrorMessage, setModifyErrorMessage] = useState<string | null>(null);
   const modifyWsRef = useRef<ModEditorModifySocketLike | null>(null);
 
   const analysisController = createModEditorAnalysisController({
@@ -63,7 +63,7 @@ export function ModEditorFeatureView() {
       setAnalysisChunks([]);
       setAnalysisCurrentStage(null);
       setAnalysisStageHistory([]);
-      setAnalysisError(null);
+      setAnalysisErrorMessage(null);
     },
     applyAnalysisStageMessage(message) {
       setAnalysisCurrentStage(message);
@@ -82,7 +82,7 @@ export function ModEditorFeatureView() {
       setAnalyzeStage("done");
     },
     failAnalysis(message) {
-      setAnalysisError(message);
+      setAnalysisErrorMessage(message);
       setAnalyzeStage("error");
     },
     resetAnalysis() {
@@ -91,7 +91,7 @@ export function ModEditorFeatureView() {
       setAnalysisChunks([]);
       setAnalysisCurrentStage(null);
       setAnalysisStageHistory([]);
-      setAnalysisError(null);
+      setAnalysisErrorMessage(null);
     },
   });
 
@@ -108,7 +108,7 @@ export function ModEditorFeatureView() {
       setAgentLog([]);
       setModifyCurrentStage(null);
       setModifyStageHistory([]);
-      setModifyError(null);
+      setModifyErrorMessage(null);
     },
     applyModifyStageMessage(message) {
       setModifyCurrentStage(message);
@@ -124,7 +124,7 @@ export function ModEditorFeatureView() {
       setModifyStage("done");
     },
     failModify(message) {
-      setModifyError(message);
+      setModifyErrorMessage(message);
       setModifyStage("error");
     },
     resetModify() {
@@ -132,7 +132,7 @@ export function ModEditorFeatureView() {
       setAgentLog([]);
       setModifyCurrentStage(null);
       setModifyStageHistory([]);
-      setModifyError(null);
+      setModifyErrorMessage(null);
     },
   });
 
@@ -198,10 +198,10 @@ export function ModEditorFeatureView() {
           </div>
         )}
 
-        {(analysisText || analysisError) && (
+        {(analysisText || analysisErrorMessage) && (
           <div className="space-y-2">
-            {analysisError ? (
-              <pre className="text-xs text-red-600 font-mono whitespace-pre-wrap">{analysisError}</pre>
+            {analysisErrorMessage ? (
+              <pre className="text-xs text-red-600 font-mono whitespace-pre-wrap">{analysisErrorMessage}</pre>
             ) : (
               <pre className="text-sm text-slate-700 whitespace-pre-wrap font-sans leading-relaxed max-h-80 overflow-y-auto">
                 {analysisText}
@@ -262,9 +262,9 @@ export function ModEditorFeatureView() {
           </div>
         )}
 
-        {(agentLog.length > 0 || modifyError) && (
+        {(agentLog.length > 0 || modifyErrorMessage) && (
           <div className="space-y-2">
-            {modifyError && <pre className="text-xs text-red-600 font-mono whitespace-pre-wrap">{modifyError}</pre>}
+            {modifyErrorMessage && <pre className="text-xs text-red-600 font-mono whitespace-pre-wrap">{modifyErrorMessage}</pre>}
             {agentLog.length > 0 && <AgentLog lines={agentLog} />}
           </div>
         )}
