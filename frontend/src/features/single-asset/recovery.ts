@@ -56,8 +56,8 @@ interface SingleAssetWorkflowSnapshot {
   agentStageHistory: string[];
   approvalSummary: string;
   approvalRequests: ApprovalRequest[];
-  errorMsg: string | null;
-  errorTrace: string | null;
+  errorMessage: string | null;
+  errorTraceback: string | null;
 }
 
 interface SingleAssetSnapshot {
@@ -172,8 +172,8 @@ function normalizeWorkflowSnapshot(value: unknown): SingleAssetWorkflowState {
     approvalSummary: asString(value.approvalSummary),
     approvalRequests: normalizeApprovalRequests(value.approvalRequests),
     approvalBusyActionId: null,
-    errorMsg: asNullableString(value.errorMsg),
-    errorTrace: asNullableString(value.errorTrace),
+    errorMessage: asNullableString(value.errorMessage ?? value.errorMsg),
+    errorTraceback: asNullableString(value.errorTraceback ?? value.errorTrace),
   };
 }
 
@@ -206,8 +206,8 @@ export function serializeSingleAssetSnapshot(state: SingleAssetRecoveryState): S
       agentStageHistory: state.workflowState.agentStageHistory,
       approvalSummary: state.workflowState.approvalSummary,
       approvalRequests: state.workflowState.approvalRequests,
-      errorMsg: state.workflowState.errorMsg,
-      errorTrace: state.workflowState.errorTrace,
+      errorMessage: state.workflowState.errorMessage,
+      errorTraceback: state.workflowState.errorTraceback,
     },
   };
 }
@@ -298,7 +298,7 @@ export function hasSingleAssetRecoveryContext(state: SingleAssetRecoveryState): 
     state.workflowState.images.length > 0 ||
     state.workflowState.promptPreview.trim() ||
     state.workflowState.approvalRequests.length > 0 ||
-    state.workflowState.errorMsg ||
+    state.workflowState.errorMessage ||
     state.workflowState.genLog.length > 0 ||
     state.workflowState.agentLog.length > 0,
   );

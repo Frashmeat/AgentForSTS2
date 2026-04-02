@@ -12,8 +12,8 @@ test("start action resets old workflow state and enters image generation for ai 
     stage: "error" as const,
     images: ["old-image"],
     genLog: ["old log"],
-    errorMsg: "failed",
-    errorTrace: "trace",
+    errorMessage: "failed",
+    errorTraceback: "trace",
   };
 
   const next = singleAssetWorkflowReducer(dirty, {
@@ -24,8 +24,8 @@ test("start action resets old workflow state and enters image generation for ai 
   assert.equal(next.stage, "generating_image");
   assert.deepEqual(next.images, []);
   assert.deepEqual(next.genLog, []);
-  assert.equal(next.errorMsg, null);
-  assert.equal(next.errorTrace, null);
+  assert.equal(next.errorMessage, null);
+  assert.equal(next.errorTraceback, null);
 });
 
 test("prompt preview writes prompt fields and switches to confirm prompt", () => {
@@ -90,8 +90,8 @@ test("error action captures message and moves to error stage", () => {
   });
 
   assert.equal(next.stage, "error");
-  assert.equal(next.errorMsg, "boom");
-  assert.equal(next.errorTrace, "traceback");
+  assert.equal(next.errorMessage, "boom");
+  assert.equal(next.errorTraceback, "traceback");
 });
 
 test("reset clears workflow state back to defaults", () => {

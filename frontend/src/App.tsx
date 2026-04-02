@@ -361,8 +361,8 @@ export default function App() {
           approvalSummary={workflowState.approvalSummary}
           approvalRequests={workflowState.approvalRequests}
           approvalBusyActionId={workflowState.approvalBusyActionId}
-          errorMsg={workflowState.errorMsg}
-          errorTrace={workflowState.errorTrace}
+          errorMessage={workflowState.errorMessage}
+          errorTraceback={workflowState.errorTraceback}
           autoMode={autoMode}
           imageMode={imageMode}
           uploadedImageB64={uploadedImageB64}

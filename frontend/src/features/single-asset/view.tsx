@@ -34,8 +34,8 @@ export interface SingleAssetFeatureViewProps {
   approvalSummary: string;
   approvalRequests: ApprovalRequest[];
   approvalBusyActionId: string | null;
-  errorMsg: string | null;
-  errorTrace: string | null;
+  errorMessage: string | null;
+  errorTraceback: string | null;
   autoMode: boolean;
   imageMode: "ai" | "upload";
   uploadedImageB64: string;
@@ -98,8 +98,8 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
     approvalSummary,
     approvalRequests,
     approvalBusyActionId,
-    errorMsg,
-    errorTrace,
+    errorMessage,
+    errorTraceback,
     autoMode,
     imageMode,
     uploadedImageB64,
@@ -407,7 +407,7 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
             </div>
           )}
 
-          {errorInStep2 && <ErrorBlock message={errorMsg} traceback={errorTrace} log={genLog} onReset={onReset} />}
+          {errorInStep2 && <ErrorBlock message={errorMessage} traceback={errorTraceback} log={genLog} onReset={onReset} />}
 
           {step === 3 && (
             <div className="space-y-4">
@@ -505,7 +505,7 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
             </div>
           )}
 
-          {errorInStep3 && <ErrorBlock message={errorMsg} traceback={errorTrace} log={agentLog} onReset={onReset} />}
+          {errorInStep3 && <ErrorBlock message={errorMessage} traceback={errorTraceback} log={agentLog} onReset={onReset} />}
           {step < 4 && !errorInStep3 && <p className="text-sm text-slate-300">等待选择图片…</p>}
         </Step>
 

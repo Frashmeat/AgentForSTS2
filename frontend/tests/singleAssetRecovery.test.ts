@@ -138,3 +138,26 @@ test("restoreSingleAssetSnapshot rejects invalid payloads safely", () => {
   assert.equal(restoreSingleAssetSnapshot({ version: 999 }), null);
   assert.equal(restoreSingleAssetSnapshot(null), null);
 });
+
+test("restoreSingleAssetSnapshot keeps compatibility with legacy error field names", () => {
+  const restored = restoreSingleAssetSnapshot({
+    version: 1,
+    assetType: "relic",
+    assetName: "LegacyRelic",
+    description: "desc",
+    projectRoot: "E:/STS2mod",
+    imageMode: "ai",
+    autoMode: false,
+    uploadedImageB64: "",
+    uploadedImageName: "",
+    uploadedImagePreview: null,
+    workflowState: {
+      stage: "error",
+      errorMsg: "legacy message",
+      errorTrace: "legacy trace",
+    },
+  });
+
+  assert.equal(restored?.workflowState.errorMessage, "legacy message");
+  assert.equal(restored?.workflowState.errorTraceback, "legacy trace");
+});

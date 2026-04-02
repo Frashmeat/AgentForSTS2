@@ -19,8 +19,8 @@ export interface SingleAssetWorkflowState {
   approvalSummary: string;
   approvalRequests: ApprovalRequest[];
   approvalBusyActionId: string | null;
-  errorMsg: string | null;
-  errorTrace: string | null;
+  errorMessage: string | null;
+  errorTraceback: string | null;
 }
 
 export type SingleAssetWorkflowAction =
@@ -64,8 +64,8 @@ export function createInitialSingleAssetWorkflowState(): SingleAssetWorkflowStat
     approvalSummary: "",
     approvalRequests: [],
     approvalBusyActionId: null,
-    errorMsg: null,
-    errorTrace: null,
+    errorMessage: null,
+    errorTraceback: null,
   };
 }
 
@@ -121,8 +121,8 @@ export function singleAssetWorkflowReducer(
       return {
         ...state,
         stage: "error",
-        errorMsg: action.message,
-        errorTrace: action.traceback,
+        errorMessage: action.message,
+        errorTraceback: action.traceback,
       };
     case "workflow_reset":
       return createInitialSingleAssetWorkflowState();
