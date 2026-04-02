@@ -5,11 +5,14 @@ import { AgentLog } from "../../components/AgentLog";
 import { BuildDeploy } from "../../components/BuildDeploy";
 import { ProjectRootField } from "../../components/ProjectRootField";
 import { StageStatus } from "../../components/StageStatus";
-import { ModAnalysisSocket } from "../../lib/mod_analysis_ws";
-import { WorkflowSocket } from "../../lib/ws";
-import { resolveErrorMessage } from "../../shared/error.ts";
 import { useDefaultProjectRoot } from "../../shared/useDefaultProjectRoot.ts";
 import { useProjectCreation } from "../../shared/useProjectCreation.ts";
+import {
+  createModEditorAnalysisController,
+  createModEditorModifyController,
+  type ModEditorAnalysisSocketLike,
+  type ModEditorModifySocketLike,
+} from "./controller.ts";
 
 type AnalyzeStage = "idle" | "scanning" | "streaming" | "done" | "error";
 type ModifyStage = "idle" | "running" | "done" | "error";
@@ -36,7 +39,7 @@ export function ModEditorFeatureView() {
   const [analysisCurrentStage, setAnalysisCurrentStage] = useState<string | null>(null);
   const [analysisStageHistory, setAnalysisStageHistory] = useState<string[]>([]);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
-  const analyzeWsRef = useRef<ModAnalysisSocket | null>(null);
+  const analyzeWsRef = useRef<ModEditorAnalysisSocketLike | null>(null);
 
   const [modRequest, setModRequest] = useState("");
   const [modifyStage, setModifyStage] = useState<ModifyStage>("idle");
@@ -44,125 +47,94 @@ export function ModEditorFeatureView() {
   const [modifyCurrentStage, setModifyCurrentStage] = useState<string | null>(null);
   const [modifyStageHistory, setModifyStageHistory] = useState<string[]>([]);
   const [modifyError, setModifyError] = useState<string | null>(null);
-  const modifyWsRef = useRef<WorkflowSocket | null>(null);
+  const modifyWsRef = useRef<ModEditorModifySocketLike | null>(null);
 
-  async function startAnalysis() {
-    if (!projectRoot.trim()) {
-      return;
-    }
-    clearProjectCreationFeedback();
-    setAnalyzeStage("scanning");
-    setScanFiles(null);
-    setAnalysisChunks([]);
-    setAnalysisCurrentStage(null);
-    setAnalysisStageHistory([]);
-    setAnalysisError(null);
-
-    const ws = new ModAnalysisSocket();
-    analyzeWsRef.current = ws;
-    ws.on("stage_update", (message) => {
-      setAnalysisCurrentStage(message.message);
+  const analysisController = createModEditorAnalysisController({
+    closeAnalysisSocket() {
+      analyzeWsRef.current?.close();
+    },
+    setAnalysisSocket(socket) {
+      analyzeWsRef.current = socket;
+    },
+    clearProjectCreationFeedback,
+    startAnalysis() {
+      setAnalyzeStage("scanning");
+      setScanFiles(null);
+      setAnalysisChunks([]);
+      setAnalysisCurrentStage(null);
+      setAnalysisStageHistory([]);
+      setAnalysisError(null);
+    },
+    applyAnalysisStageMessage(message) {
+      setAnalysisCurrentStage(message);
       setAnalysisStageHistory((previous) =>
-        previous[previous.length - 1] === message.message ? previous : [...previous, message.message]
+        previous[previous.length - 1] === message ? previous : [...previous, message]
       );
-    });
-    ws.on("scan_info", (message) => {
-      setScanFiles(message.files);
+    },
+    applyAnalysisScanInfo(files) {
+      setScanFiles(files);
       setAnalyzeStage("streaming");
-    });
-    ws.on("stream", (message) => {
-      setAnalysisChunks((previous) => [...previous, message.chunk]);
-    });
-    ws.on("done", () => {
+    },
+    appendAnalysisChunk(chunk) {
+      setAnalysisChunks((previous) => [...previous, chunk]);
+    },
+    completeAnalysis() {
       setAnalyzeStage("done");
-    });
-    ws.on("error", (message) => {
-      setAnalysisError(message.message);
+    },
+    failAnalysis(message) {
+      setAnalysisError(message);
       setAnalyzeStage("error");
-    });
+    },
+    resetAnalysis() {
+      setAnalyzeStage("idle");
+      setScanFiles(null);
+      setAnalysisChunks([]);
+      setAnalysisCurrentStage(null);
+      setAnalysisStageHistory([]);
+      setAnalysisError(null);
+    },
+  });
 
-    try {
-      await ws.waitOpen();
-    } catch (error) {
-      setAnalysisError(resolveErrorMessage(error));
-      setAnalyzeStage("error");
-      return;
-    }
-    ws.send({ project_root: projectRoot.trim() });
-  }
-
-  function resetAnalysis() {
-    analyzeWsRef.current?.close();
-    analyzeWsRef.current = null;
-    setAnalyzeStage("idle");
-    setScanFiles(null);
-    setAnalysisChunks([]);
-    setAnalysisCurrentStage(null);
-    setAnalysisStageHistory([]);
-    setAnalysisError(null);
-  }
-
-  async function startModify() {
-    if (!projectRoot.trim() || !modRequest.trim()) {
-      return;
-    }
-    clearProjectCreationFeedback();
-    setModifyStage("running");
-    setAgentLog([]);
-    setModifyCurrentStage(null);
-    setModifyStageHistory([]);
-    setModifyError(null);
-
-    const ws = new WorkflowSocket();
-    modifyWsRef.current = ws;
-
-    ws.on("stage_update", (data: any) => {
-      setModifyCurrentStage(data.message);
+  const modifyController = createModEditorModifyController({
+    closeModifySocket() {
+      modifyWsRef.current?.close();
+    },
+    setModifySocket(socket) {
+      modifyWsRef.current = socket;
+    },
+    clearProjectCreationFeedback,
+    startModify() {
+      setModifyStage("running");
+      setAgentLog([]);
+      setModifyCurrentStage(null);
+      setModifyStageHistory([]);
+      setModifyError(null);
+    },
+    applyModifyStageMessage(message) {
+      setModifyCurrentStage(message);
       setModifyStageHistory((previous) =>
-        previous[previous.length - 1] === data.message ? previous : [...previous, data.message]
+        previous[previous.length - 1] === message ? previous : [...previous, message]
       );
-    });
-    ws.on("progress", (data: any) => setAgentLog((previous) => [...previous, data.message]));
-    ws.on("agent_stream", (data: any) => setAgentLog((previous) => [...previous, data.chunk]));
-    ws.on("done", (data: any) => {
-      setAgentLog((previous) => [...previous, data.success ? "✓ 修改完成！" : "✗ 修改失败"]);
+    },
+    appendModifyLog(line) {
+      setAgentLog((previous) => [...previous, line]);
+    },
+    completeModify(success) {
+      setAgentLog((previous) => [...previous, success ? "✓ 修改完成！" : "✗ 修改失败"]);
       setModifyStage("done");
-    });
-    ws.on("error", (data: any) => {
-      setModifyError(data.message);
+    },
+    failModify(message) {
+      setModifyError(message);
       setModifyStage("error");
-    });
-
-    try {
-      await ws.waitOpen();
-    } catch (error) {
-      setModifyError(resolveErrorMessage(error));
-      setModifyStage("error");
-      return;
-    }
-
-    const analysisContext =
-      analysisChunks.length > 0 ? `当前 mod 分析概况：\n${analysisChunks.join("")}\n\n` : "";
-
-    ws.send({
-      action: "start",
-      asset_type: "custom_code",
-      asset_name: "ModModification",
-      description: modRequest.trim(),
-      project_root: projectRoot.trim(),
-      implementation_notes: analysisContext + "这是对已有 mod 的修改请求，请定位到相关文件进行修改，不要新建不必要的文件。",
-    });
-  }
-
-  function resetModify() {
-    modifyWsRef.current?.close();
-    modifyWsRef.current = null;
-    setModifyStage("idle");
-    setAgentLog([]);
-    setModifyCurrentStage(null);
-    setModifyStageHistory([]);
-    setModifyError(null);
-  }
+    },
+    resetModify() {
+      setModifyStage("idle");
+      setAgentLog([]);
+      setModifyCurrentStage(null);
+      setModifyStageHistory([]);
+      setModifyError(null);
+    },
+  });
 
   const analysisText = analysisChunks.join("");
   const isAnalyzing = analyzeStage === "scanning" || analyzeStage === "streaming";
@@ -191,7 +163,9 @@ export function ModEditorFeatureView() {
           </div>
           {analyzeStage !== "idle" && (
             <button
-              onClick={resetAnalysis}
+              onClick={() => {
+                analysisController.reset();
+              }}
               className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1 transition-colors"
             >
               <RotateCcw size={11} /> 重新分析
@@ -201,7 +175,9 @@ export function ModEditorFeatureView() {
 
         {analyzeStage === "idle" && (
           <button
-            onClick={startAnalysis}
+            onClick={() => {
+              void analysisController.run(projectRoot);
+            }}
             disabled={!projectRoot.trim()}
             className="w-full py-2 rounded-lg border border-amber-400 text-amber-600 font-medium text-sm hover:bg-amber-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
           >
@@ -257,7 +233,9 @@ export function ModEditorFeatureView() {
         {modifyStage === "idle" || modifyStage === "done" || modifyStage === "error" ? (
           <div className="flex gap-2">
             <button
-              onClick={startModify}
+              onClick={() => {
+                void modifyController.run(projectRoot, modRequest, analysisText);
+              }}
               disabled={!projectRoot.trim() || !modRequest.trim()}
               className="flex-1 py-2.5 rounded-lg bg-amber-500 text-white font-bold text-sm hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
@@ -265,7 +243,9 @@ export function ModEditorFeatureView() {
             </button>
             {(modifyStage === "done" || modifyStage === "error") && (
               <button
-                onClick={resetModify}
+                onClick={() => {
+                  modifyController.reset();
+                }}
                 className="py-2.5 px-4 rounded-lg border border-slate-200 text-slate-400 hover:text-slate-600 text-sm transition-colors flex items-center gap-1.5"
               >
                 <RotateCcw size={13} /> 重试
