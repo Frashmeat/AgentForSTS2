@@ -10,4 +10,6 @@ test("BuildDeploy uses shared controller for action flow", () => {
   const source = readSource("../src/components/BuildDeploy.tsx");
 
   assert.match(source, /createBuildDeployController/);
+  assert.match(source, /describeBuildDeployRunningMessage/);
+  assert.match(source, /describeBuildDeployCompletionView/);
 });
