@@ -157,3 +157,79 @@ test("createBuildDeployController reset closes socket and clears state", () => {
     errorMsg: null,
   });
 });
+
+test("createBuildDeployController surfaces build request failure as error state", async () => {
+  const runtime = createRuntime();
+  const controller = createBuildDeployController(runtime.runtime, {
+    buildProject: async () => {
+      throw new Error("build exploded");
+    },
+    packageProject: async () => ({ success: true }),
+    createSocket: () => new FakeBuildDeploySocket(),
+  });
+
+  await controller.run("build", "E:/STS2mod/MyMod");
+
+  assert.deepEqual(runtime.getState(), {
+    stage: "error",
+    action: "build",
+    log: [],
+    deployedTo: null,
+    summary: null,
+    errorMsg: "build exploded",
+  });
+});
+
+test("createBuildDeployController surfaces deploy socket open failure as error state", async () => {
+  const runtime = createRuntime();
+  const socket = new FakeBuildDeploySocket();
+  socket.waitOpen = async () => {
+    throw new Error("socket open failed");
+  };
+  const controller = createBuildDeployController(runtime.runtime, {
+    buildProject: async () => ({
+      success: true,
+      output: "",
+    }),
+    packageProject: async () => ({ success: true }),
+    createSocket: () => socket,
+  });
+
+  await controller.run("deploy", "E:/STS2mod/MyMod");
+
+  assert.equal(runtime.getSocket(), null);
+  assert.deepEqual(runtime.getState(), {
+    stage: "error",
+    action: "deploy",
+    log: [],
+    deployedTo: null,
+    summary: null,
+    errorMsg: "socket open failed",
+  });
+});
+
+test("createBuildDeployController preserves streamed log when deploy emits error event", async () => {
+  const runtime = createRuntime();
+  const socket = new FakeBuildDeploySocket();
+  const controller = createBuildDeployController(runtime.runtime, {
+    buildProject: async () => ({
+      success: true,
+      output: "",
+    }),
+    packageProject: async () => ({ success: true }),
+    createSocket: () => socket,
+  });
+
+  await controller.run("deploy", "E:/STS2mod/MyMod");
+  socket.emit("stream", { chunk: "building..." });
+  socket.emit("error", { message: "deploy failed" });
+
+  assert.deepEqual(runtime.getState(), {
+    stage: "error",
+    action: "deploy",
+    log: ["building..."],
+    deployedTo: null,
+    summary: null,
+    errorMsg: "deploy failed",
+  });
+});
