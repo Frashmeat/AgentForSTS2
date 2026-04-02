@@ -23,6 +23,7 @@ sts2_decompiled/
 
 # 沙箱测试配置（含本机绝对路径；由 tools/generate_sandbox_wsb.bat 生成）
 tools/sandbox_test.wsb
+tools/latest/artifacts/
 
 # Install log
 install.log

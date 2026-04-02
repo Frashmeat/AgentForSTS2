@@ -1,0 +1,13 @@
+runtime/
+backend/.venv/
+backend/.tmp/
+backend/tests/
+backend/**/__pycache__/
+backend/**/*.pyc
+backend/2026-03-31-后端现状总结.md
+frontend/node_modules/
+frontend/.vite/
+mod_template/.godot/
+mod_template/.mono/
+mod_template/**/bin/
+mod_template/**/obj/

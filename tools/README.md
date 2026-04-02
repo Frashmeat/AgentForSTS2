@@ -23,6 +23,8 @@
   在 Windows Sandbox 中执行安装验证。
 - `tools\verify-install-bat.ps1`
   校验 `tools\install.bat` 的关键行为和格式。
+- `tools\latest\`
+  最新的打包与 Docker 部署脚本目录，包含 release bundle 打包脚本、Docker 部署脚本和模板文件。
 
 ## 说明
 
