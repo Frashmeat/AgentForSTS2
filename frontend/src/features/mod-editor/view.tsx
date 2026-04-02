@@ -3,6 +3,7 @@ import { Loader2, RotateCcw, Search, Wrench } from "lucide-react";
 
 import { AgentLog } from "../../components/AgentLog";
 import { BuildDeploy } from "../../components/BuildDeploy";
+import { ProjectRootField } from "../../components/ProjectRootField";
 import { StageStatus } from "../../components/StageStatus";
 import { ModAnalysisSocket } from "../../lib/mod_analysis_ws";
 import { WorkflowSocket } from "../../lib/ws";
@@ -187,27 +188,16 @@ export function ModEditorFeatureView() {
   return (
     <div className="max-w-2xl mx-auto space-y-5">
       <div className="rounded-xl border border-amber-300 bg-white shadow-md p-5 space-y-4">
-        <h2 className="font-semibold text-slate-800">Mod 项目路径</h2>
-        <input
+        <ProjectRootField
           value={projectRoot}
-          onChange={(event) => setProjectRoot(event.target.value)}
           placeholder="E:/STS2mod/testscenario/MyMod"
-          className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-100 font-mono"
+          createActionLabel="创建项目"
+          createBusy={projectCreateBusy}
+          createMessage={projectCreateMessage}
+          createError={projectCreateError}
+          onChange={setProjectRoot}
+          onCreateProject={() => { void handleCreateProject(); }}
         />
-        <button
-          onClick={() => { void handleCreateProject(); }}
-          disabled={projectCreateBusy || !projectRoot.trim()}
-          className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-700 hover:text-amber-800 disabled:text-slate-400 disabled:cursor-not-allowed transition-colors"
-        >
-          {projectCreateBusy ? <Loader2 size={12} className="animate-spin" /> : null}
-          创建项目
-        </button>
-        {projectCreateMessage && (
-          <p className="text-xs text-green-600">{projectCreateMessage}</p>
-        )}
-        {projectCreateError && (
-          <p className="text-xs text-red-600">{projectCreateError}</p>
-        )}
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white p-5 space-y-4">

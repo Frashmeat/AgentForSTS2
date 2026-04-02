@@ -5,6 +5,7 @@ import {
   Upload, Wand2,
 } from "lucide-react";
 import { ApprovalPanel } from "../components/ApprovalPanel";
+import { ProjectRootField } from "../components/ProjectRootField";
 import { approveApproval, createProject, executeApproval, generateModPlan, rejectApproval, type ApprovalRequest } from "../shared/api/index.ts";
 import { BatchSocket, PlanItem, ModPlan } from "../lib/batch_ws";
 import { AgentLog } from "../components/AgentLog";
@@ -377,29 +378,16 @@ function BatchModePage() {
             placeholder={"例如：\n我想做一个暗法师角色，主题是腐化和献祭。\n包含3张卡牌（攻击、技能、力量各一张），\n2个遗物（战斗开始触发），\n以及一个腐化叠层的 buff 机制。"}
             className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-100 resize-none"
           />
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-slate-500">Mod 项目路径</label>
-            <input
-              value={projectRoot}
-              onChange={e => setProjectRoot(e.target.value)}
-              placeholder="E:/STS2mod"
-              className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-amber-400 font-mono"
-            />
-            <button
-              onClick={() => { void handleCreateProject(); }}
-              disabled={createProjectBusy || !projectRoot.trim()}
-              className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-700 hover:text-amber-800 disabled:text-slate-400 disabled:cursor-not-allowed transition-colors"
-            >
-              {createProjectBusy ? <Loader2 size={12} className="animate-spin" /> : null}
-              创建项目
-            </button>
-            {createProjectMessage && (
-              <p className="text-xs text-green-600">{createProjectMessage}</p>
-            )}
-            {createProjectError && (
-              <p className="text-xs text-red-600">{createProjectError}</p>
-            )}
-          </div>
+          <ProjectRootField
+            value={projectRoot}
+            placeholder="E:/STS2mod"
+            createActionLabel="创建项目"
+            createBusy={createProjectBusy}
+            createMessage={createProjectMessage}
+            createError={createProjectError}
+            onChange={setProjectRoot}
+            onCreateProject={() => { void handleCreateProject(); }}
+          />
           <div className="grid gap-2 sm:grid-cols-2">
             <button
               onClick={startPlanning}

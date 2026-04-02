@@ -4,6 +4,7 @@ import { AlertTriangle, ChevronDown, ChevronUp, Loader2, RotateCcw } from "lucid
 import { AgentLog } from "../../components/AgentLog";
 import { ApprovalPanel } from "../../components/ApprovalPanel";
 import { BuildDeploy } from "../../components/BuildDeploy";
+import { ProjectRootField } from "../../components/ProjectRootField";
 import { StageStatus } from "../../components/StageStatus";
 import { cn } from "../../lib/utils";
 import type { ApprovalRequest } from "../../shared/api/index.ts";
@@ -195,32 +196,18 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                 className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-100 disabled:opacity-50"
               />
             </div>
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-slate-500">Mod 项目路径</label>
-              <input
-                value={projectRoot}
-                disabled={step > 0}
-                onChange={(event) => onProjectRootChange(event.target.value)}
-                placeholder="E:/STS2mod"
-                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-100 font-mono disabled:opacity-50"
-              />
-              {step === 0 && (
-                <button
-                  onClick={onCreateProject}
-                  disabled={projectCreateBusy || !projectRoot.trim()}
-                  className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-700 hover:text-amber-800 disabled:text-slate-400 disabled:cursor-not-allowed transition-colors"
-                >
-                  {projectCreateBusy ? <Loader2 size={12} className="animate-spin" /> : null}
-                  创建项目
-                </button>
-              )}
-              {projectCreateMessage && (
-                <p className="text-xs text-green-600">{projectCreateMessage}</p>
-              )}
-              {projectCreateError && (
-                <p className="text-xs text-red-600">{projectCreateError}</p>
-              )}
-            </div>
+            <ProjectRootField
+              value={projectRoot}
+              disabled={step > 0}
+              placeholder="E:/STS2mod"
+              showCreateAction={step === 0}
+              createActionLabel="创建项目"
+              createBusy={projectCreateBusy}
+              createMessage={projectCreateMessage}
+              createError={projectCreateError}
+              onChange={onProjectRootChange}
+              onCreateProject={onCreateProject}
+            />
           </div>
 
           {step === 0 && (
