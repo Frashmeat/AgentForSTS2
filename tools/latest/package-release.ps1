@@ -1,7 +1,9 @@
 [CmdletBinding()]
 param(
+    [ValidateSet("full", "workstation", "frontend", "web")]
+    [string]$Target = "workstation",
     [string]$OutputRoot = (Join-Path $PSScriptRoot "artifacts"),
-    [string]$ReleaseName = "agentthespire-release",
+    [string]$ReleaseName = "",
     [switch]$SkipFrontendBuild,
     [switch]$SkipZip
 )
@@ -91,19 +93,115 @@ function Invoke-RobocopySafe {
     }
 }
 
+function Get-ServiceDefinitions {
+    param([string]$SelectedTarget)
+
+    switch ($SelectedTarget) {
+        "full" {
+            return @(
+                @{ Name = "workstation"; IncludeBackend = $true; IncludeFrontend = $true; IncludeModTemplate = $true; TemplateDir = "workstation"; RemovePaths = @("backend/main_web.py", "backend/routers/platform_admin.py", "backend/routers/platform_jobs.py") },
+                @{ Name = "web"; IncludeBackend = $true; IncludeFrontend = $false; IncludeModTemplate = $false; TemplateDir = "web"; RemovePaths = @("backend/main_workstation.py", "backend/routers/workflow.py", "backend/routers/config_router.py", "backend/routers/batch_workflow.py", "backend/routers/log_analyzer.py", "backend/routers/mod_analyzer.py", "backend/routers/build_deploy.py", "backend/routers/approval_router.py") }
+            )
+        }
+        "workstation" {
+            return @(
+                @{ Name = "workstation"; IncludeBackend = $true; IncludeFrontend = $true; IncludeModTemplate = $true; TemplateDir = "workstation"; RemovePaths = @("backend/main_web.py", "backend/routers/platform_admin.py", "backend/routers/platform_jobs.py") }
+            )
+        }
+        "frontend" {
+            return @(
+                @{ Name = "frontend"; IncludeBackend = $false; IncludeFrontend = $true; IncludeModTemplate = $false; TemplateDir = "frontend"; RemovePaths = @() }
+            )
+        }
+        "web" {
+            return @(
+                @{ Name = "web"; IncludeBackend = $true; IncludeFrontend = $false; IncludeModTemplate = $false; TemplateDir = "web"; RemovePaths = @("backend/main_workstation.py", "backend/routers/workflow.py", "backend/routers/config_router.py", "backend/routers/batch_workflow.py", "backend/routers/log_analyzer.py", "backend/routers/mod_analyzer.py", "backend/routers/build_deploy.py", "backend/routers/approval_router.py") }
+            )
+        }
+        default {
+            throw "未知 Target: $SelectedTarget"
+        }
+    }
+}
+
+function Copy-ServiceBundle {
+    param(
+        [hashtable]$Service,
+        [string]$ReleaseDir,
+        [string]$RepoRoot,
+        [string]$BackendDir,
+        [string]$FrontendDistDir,
+        [string]$ModTemplateDir,
+        [string]$TemplatesDir
+    )
+
+    $serviceDir = Join-Path (Join-Path $ReleaseDir "services") $Service.Name
+    New-CleanDirectory -Path $serviceDir
+
+    if ($Service.IncludeBackend) {
+        Write-Host "整理 backend -> $($Service.Name)..."
+        Invoke-RobocopySafe -Source $BackendDir -Destination (Join-Path $serviceDir "backend") -ExcludeDirectories @(
+            ".venv",
+            ".tmp",
+            "tests",
+            "__pycache__",
+            ".pytest_cache"
+        ) -ExcludeFiles @(
+            "*.pyc",
+            "2026-03-31-后端现状总结.md"
+        )
+    }
+
+    if ($Service.IncludeFrontend) {
+        Write-Host "整理 frontend/dist -> $($Service.Name)..."
+        Invoke-RobocopySafe -Source $FrontendDistDir -Destination (Join-Path $serviceDir "frontend\dist")
+    }
+
+    if ($Service.IncludeModTemplate) {
+        Write-Host "整理 mod_template -> $($Service.Name)..."
+        Invoke-RobocopySafe -Source $ModTemplateDir -Destination (Join-Path $serviceDir "mod_template") -ExcludeDirectories @(
+            ".godot",
+            ".mono",
+            "bin",
+            "obj"
+        )
+    }
+
+    $templateRoot = Join-Path $TemplatesDir $Service.TemplateDir
+    Copy-Item -LiteralPath (Join-Path $templateRoot "Dockerfile") -Destination (Join-Path $serviceDir "Dockerfile") -Force
+    Copy-Item -LiteralPath (Join-Path $templateRoot ".dockerignore") -Destination (Join-Path $serviceDir ".dockerignore") -Force
+
+    if ($Service.TemplateDir -eq "frontend") {
+        Copy-Item -LiteralPath (Join-Path $templateRoot "nginx.conf") -Destination (Join-Path $serviceDir "nginx.conf") -Force
+    }
+
+    if ($Service.IncludeBackend) {
+        Copy-Item -LiteralPath (Join-Path $RepoRoot "config.example.json") -Destination (Join-Path $serviceDir "config.example.json") -Force
+    }
+
+    foreach ($relativePath in $Service.RemovePaths) {
+        $targetPath = Join-Path $serviceDir $relativePath
+        if (Test-Path -LiteralPath $targetPath) {
+            Remove-Item -LiteralPath $targetPath -Recurse -Force
+        }
+    }
+}
+
 function Write-ReleaseManifest {
     param(
         [string]$ReleaseDir,
-        [string]$RepoRoot
+        [string]$RepoRoot,
+        [string]$SelectedTarget,
+        [array]$Services
     )
 
     $commit = (& git -C $RepoRoot rev-parse --short HEAD).Trim()
     $manifest = @{
         release_name = Split-Path -Leaf $ReleaseDir
+        target = $SelectedTarget
         created_at = (Get-Date).ToString("s")
         git_commit = $commit
-        frontend_dist = "frontend/dist"
-        backend_entry = "backend/main.py"
+        services = [object[]]@($Services | ForEach-Object { $_.Name })
         compose_file = "docker-compose.yml"
     }
 
@@ -117,18 +215,25 @@ $frontendDistDir = Join-Path $frontendDir "dist"
 $backendDir = Join-Path $repoRoot "backend"
 $modTemplateDir = Join-Path $repoRoot "mod_template"
 $templatesDir = Join-Path $PSScriptRoot "templates"
-$releaseDir = Join-Path $OutputRoot $ReleaseName
-$zipPath = Join-Path $OutputRoot ("{0}.zip" -f $ReleaseName)
+$effectiveReleaseName = if ([string]::IsNullOrWhiteSpace($ReleaseName)) { "agentthespire-$Target-release" } else { $ReleaseName }
+$releaseDir = Join-Path $OutputRoot $effectiveReleaseName
+$zipPath = Join-Path $OutputRoot ("{0}.zip" -f $effectiveReleaseName)
+$composeTemplate = Join-Path $templatesDir ("compose.{0}.yml" -f $Target)
+$serviceDefinitions = Get-ServiceDefinitions -SelectedTarget $Target
 
 Assert-PathExists -Path $frontendDir -Label "frontend 目录"
 Assert-PathExists -Path $backendDir -Label "backend 目录"
-Assert-PathExists -Path $modTemplateDir -Label "mod_template 目录"
-Assert-PathExists -Path $templatesDir -Label "Docker 模板目录"
+Assert-PathExists -Path $templatesDir -Label "模板目录"
+Assert-PathExists -Path $composeTemplate -Label "compose 模板"
 
 Assert-CommandExists -CommandName "git"
 Assert-CommandExists -CommandName "robocopy"
 
-if (-not $SkipFrontendBuild) {
+if (@($serviceDefinitions | Where-Object { $_.IncludeModTemplate }).Count -gt 0) {
+    Assert-PathExists -Path $modTemplateDir -Label "mod_template 目录"
+}
+
+if ((@($serviceDefinitions | Where-Object { $_.IncludeFrontend }).Count -gt 0) -and (-not $SkipFrontendBuild)) {
     Assert-CommandExists -CommandName "node"
     Assert-CommandExists -CommandName "npm"
 
@@ -145,44 +250,22 @@ if (-not $SkipFrontendBuild) {
     }
 }
 
-Assert-PathExists -Path $frontendDistDir -Label "frontend/dist 构建产物"
+if (@($serviceDefinitions | Where-Object { $_.IncludeFrontend }).Count -gt 0) {
+    Assert-PathExists -Path $frontendDistDir -Label "frontend/dist 构建产物"
+}
 
 $null = New-Item -ItemType Directory -Path $OutputRoot -Force
 New-CleanDirectory -Path $releaseDir
+$null = New-Item -ItemType Directory -Path (Join-Path $releaseDir "services") -Force
 $null = New-Item -ItemType Directory -Path (Join-Path $releaseDir "runtime") -Force
-$null = New-Item -ItemType Directory -Path (Join-Path $releaseDir "frontend") -Force
 
-Write-Host "整理 backend..."
-Invoke-RobocopySafe -Source $backendDir -Destination (Join-Path $releaseDir "backend") -ExcludeDirectories @(
-    ".venv",
-    "tests",
-    "__pycache__",
-    ".pytest_cache"
-) -ExcludeFiles @(
-    "*.pyc",
-    "2026-03-31-后端现状总结.md"
-)
-Remove-DirectoryIfExists -Path (Join-Path $releaseDir "backend\.tmp")
-Remove-FileIfExists -Path (Join-Path $releaseDir "backend\2026-03-31-后端现状总结.md")
+foreach ($service in $serviceDefinitions) {
+    Copy-ServiceBundle -Service $service -ReleaseDir $releaseDir -RepoRoot $repoRoot -BackendDir $backendDir -FrontendDistDir $frontendDistDir -ModTemplateDir $modTemplateDir -TemplatesDir $templatesDir
+}
 
-Write-Host "整理 frontend/dist..."
-Invoke-RobocopySafe -Source $frontendDistDir -Destination (Join-Path $releaseDir "frontend\dist")
-
-Write-Host "整理 mod_template..."
-Invoke-RobocopySafe -Source $modTemplateDir -Destination (Join-Path $releaseDir "mod_template") -ExcludeDirectories @(
-    ".godot",
-    ".mono",
-    "bin",
-    "obj"
-)
-
-Copy-Item -LiteralPath (Join-Path $repoRoot "config.example.json") -Destination (Join-Path $releaseDir "config.example.json") -Force
+Copy-Item -LiteralPath $composeTemplate -Destination (Join-Path $releaseDir "docker-compose.yml") -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot "README.md") -Destination (Join-Path $releaseDir "README.md") -Force
-Copy-Item -LiteralPath (Join-Path $templatesDir "Dockerfile") -Destination (Join-Path $releaseDir "Dockerfile") -Force
-Copy-Item -LiteralPath (Join-Path $templatesDir "docker-compose.yml") -Destination (Join-Path $releaseDir "docker-compose.yml") -Force
-Copy-Item -LiteralPath (Join-Path $templatesDir ".dockerignore") -Destination (Join-Path $releaseDir ".dockerignore") -Force
-
-Write-ReleaseManifest -ReleaseDir $releaseDir -RepoRoot $repoRoot
+Write-ReleaseManifest -ReleaseDir $releaseDir -RepoRoot $repoRoot -SelectedTarget $Target -Services $serviceDefinitions
 
 if (-not $SkipZip) {
     if (Test-Path -LiteralPath $zipPath) {
@@ -194,6 +277,7 @@ if (-not $SkipZip) {
 
 Write-Host ""
 Write-Host "打包完成:"
+Write-Host "  Target      : $Target"
 Write-Host "  Release 目录: $releaseDir"
 if (-not $SkipZip) {
     Write-Host "  Zip 包      : $zipPath"

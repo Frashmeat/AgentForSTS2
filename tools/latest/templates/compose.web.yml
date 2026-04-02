@@ -16,18 +16,18 @@ services:
       timeout: 5s
       retries: 20
 
-  app:
+  web:
     build:
-      context: .
+      context: ./services/web
       dockerfile: Dockerfile
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
     ports:
-      - "${ATS_APP_PORT:-7860}:7860"
+      - "${ATS_WEB_PORT:-7870}:7870"
     volumes:
-      - ./runtime/config.json:/app/config.json:ro
+      - ./runtime/web.config.json:/app/config.json:ro
 
 volumes:
   ats_postgres_data:
