@@ -5,7 +5,7 @@ import {
   Upload, Wand2,
 } from "lucide-react";
 import { ApprovalPanel } from "../components/ApprovalPanel";
-import { approveApproval, executeApproval, rejectApproval, type ApprovalRequest } from "../shared/api/index.ts";
+import { approveApproval, executeApproval, generateModPlan, rejectApproval, type ApprovalRequest } from "../shared/api/index.ts";
 import { BatchSocket, PlanItem, ModPlan } from "../lib/batch_ws";
 import { AgentLog } from "../components/AgentLog";
 import { StageStatus } from "../components/StageStatus";
@@ -178,16 +178,36 @@ function BatchModePage() {
     ws.send({ action: "start", requirements, project_root: projectRoot });
   }
 
+  function applyGeneratedPlan(nextPlan: ModPlan) {
+    setPlan(nextPlan);
+    setEditedItems(nextPlan.items);
+    dispatchRuntime({ type: "plan_ready_received" });
+    try {
+      localStorage.setItem("ats_last_plan", JSON.stringify(nextPlan));
+      localStorage.setItem("ats_last_plan_items", JSON.stringify(nextPlan.items));
+    } catch {}
+  }
+
+  async function startPlanningFallback() {
+    if (!requirements.trim() || !projectRoot.trim()) return;
+    socketRef.current?.close();
+    socketRef.current = null;
+    setRestoredSnapshotMode(false);
+    setRestoredApprovalRefreshPending(false);
+    dispatchRuntime({ type: "planning_started" });
+    setPlan(null);
+
+    try {
+      applyGeneratedPlan(await generateModPlan(requirements));
+    } catch (error) {
+      dispatchRuntime({ type: "workflow_failed", message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
   function _registerBatchHandlers(ws: BatchSocket) {
     ws.on("planning", () => dispatchRuntime({ type: "batch_log_appended", message: "正在规划 Mod..." }));
     ws.on("plan_ready", (d) => {
-      setPlan(d.plan);
-      setEditedItems(d.plan.items);
-      dispatchRuntime({ type: "plan_ready_received" });
-      try {
-        localStorage.setItem("ats_last_plan", JSON.stringify(d.plan));
-        localStorage.setItem("ats_last_plan_items", JSON.stringify(d.plan.items));
-      } catch {}
+      applyGeneratedPlan(d.plan);
     });
     ws.on("batch_progress", (d) => dispatchRuntime({ type: "batch_log_appended", message: d.message }));
     ws.on("stage_update", (d) => {
@@ -339,14 +359,23 @@ function BatchModePage() {
               className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-amber-400 font-mono"
             />
           </div>
-          <button
-            onClick={startPlanning}
-            disabled={!requirements.trim() || !projectRoot.trim()}
-            className="w-full py-2.5 rounded-lg bg-amber-500 text-white font-bold text-sm hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
-          >
-            <Sparkles size={15} />
-            规划 Mod
-          </button>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <button
+              onClick={startPlanning}
+              disabled={!requirements.trim() || !projectRoot.trim()}
+              className="w-full py-2.5 rounded-lg bg-amber-500 text-white font-bold text-sm hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+            >
+              <Sparkles size={15} />
+              规划 Mod
+            </button>
+            <button
+              onClick={() => { void startPlanningFallback(); }}
+              disabled={!requirements.trim() || !projectRoot.trim()}
+              className="w-full py-2.5 rounded-lg border border-amber-300 text-amber-700 font-bold text-sm hover:bg-amber-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              快速规划（HTTP）
+            </button>
+          </div>
           {plan && (
             <button
               onClick={() => dispatchRuntime({ type: "stage_set", stage: "review_plan" })}
