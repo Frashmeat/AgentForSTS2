@@ -7,17 +7,23 @@ import { ProjectRootField } from "../../components/ProjectRootField";
 import { StageStatus } from "../../components/StageStatus";
 import { ModAnalysisSocket } from "../../lib/mod_analysis_ws";
 import { WorkflowSocket } from "../../lib/ws";
-import { createProject, loadAppConfig } from "../../shared/api/index.ts";
-import { deriveCreateProjectRequest } from "../../shared/projectCreation.ts";
+import { loadAppConfig } from "../../shared/api/index.ts";
+import { useProjectCreation } from "../../shared/useProjectCreation.ts";
 
 type AnalyzeStage = "idle" | "scanning" | "streaming" | "done" | "error";
 type ModifyStage = "idle" | "running" | "done" | "error";
 
 export function ModEditorFeatureView() {
   const [projectRoot, setProjectRoot] = useState("");
-  const [projectCreateBusy, setProjectCreateBusy] = useState(false);
-  const [projectCreateMessage, setProjectCreateMessage] = useState<string | null>(null);
-  const [projectCreateError, setProjectCreateError] = useState<string | null>(null);
+  const {
+    projectCreateBusy,
+    projectCreateMessage,
+    projectCreateError,
+    clearProjectCreationFeedback,
+    createProjectAtRoot,
+  } = useProjectCreation({
+    onProjectCreated: setProjectRoot,
+  });
 
   useEffect(() => {
     loadAppConfig()
@@ -49,8 +55,7 @@ export function ModEditorFeatureView() {
     if (!projectRoot.trim()) {
       return;
     }
-    setProjectCreateMessage(null);
-    setProjectCreateError(null);
+    clearProjectCreationFeedback();
     setAnalyzeStage("scanning");
     setScanFiles(null);
     setAnalysisChunks([]);
@@ -106,8 +111,7 @@ export function ModEditorFeatureView() {
     if (!projectRoot.trim() || !modRequest.trim()) {
       return;
     }
-    setProjectCreateMessage(null);
-    setProjectCreateError(null);
+    clearProjectCreationFeedback();
     setModifyStage("running");
     setAgentLog([]);
     setModifyCurrentStage(null);
@@ -165,22 +169,6 @@ export function ModEditorFeatureView() {
     setModifyError(null);
   }
 
-  async function handleCreateProject() {
-    setProjectCreateBusy(true);
-    setProjectCreateMessage(null);
-    setProjectCreateError(null);
-    try {
-      const request = deriveCreateProjectRequest(projectRoot);
-      const result = await createProject(request);
-      setProjectRoot(result.project_path);
-      setProjectCreateMessage(`项目已创建：${result.project_path}`);
-    } catch (error) {
-      setProjectCreateError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setProjectCreateBusy(false);
-    }
-  }
-
   const analysisText = analysisChunks.join("");
   const isAnalyzing = analyzeStage === "scanning" || analyzeStage === "streaming";
   const isModifying = modifyStage === "running";
@@ -196,7 +184,7 @@ export function ModEditorFeatureView() {
           createMessage={projectCreateMessage}
           createError={projectCreateError}
           onChange={setProjectRoot}
-          onCreateProject={() => { void handleCreateProject(); }}
+          onCreateProject={() => { void createProjectAtRoot(projectRoot).catch(() => {}); }}
         />
       </div>
 

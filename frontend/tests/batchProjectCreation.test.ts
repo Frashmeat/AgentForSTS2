@@ -9,8 +9,8 @@ function readSource(path: string) {
 test("BatchMode exposes create project action wired to workflow api", () => {
   const source = readSource("../src/pages/BatchMode.tsx");
 
-  assert.match(source, /createProject/);
-  assert.match(source, /deriveCreateProjectRequest/);
+  assert.match(source, /useProjectCreation/);
+  assert.match(source, /createProjectAtRoot/);
   assert.match(source, /创建项目/);
   assert.match(source, /createProjectBusy/);
 });

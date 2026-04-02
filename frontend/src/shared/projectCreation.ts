@@ -1,4 +1,5 @@
-import type { CreateProjectRequest } from "./api/workflow.ts";
+import { createProject } from "./api/index.ts";
+import type { CreateProjectRequest, CreateProjectResponse } from "./api/workflow.ts";
 
 const PROJECT_ROOT_EXAMPLE = "请填写完整的项目路径，例如 E:/STS2mod/MyMod";
 
@@ -25,4 +26,15 @@ export function deriveCreateProjectRequest(projectRoot: string): CreateProjectRe
     name: projectName,
     target_dir: targetDir,
   };
+}
+
+export type CreateProjectRequester = (
+  request: CreateProjectRequest,
+) => Promise<CreateProjectResponse>;
+
+export async function createProjectFromRoot(
+  projectRoot: string,
+  requestProject: CreateProjectRequester = createProject,
+): Promise<CreateProjectResponse> {
+  return requestProject(deriveCreateProjectRequest(projectRoot));
 }

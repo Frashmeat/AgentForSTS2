@@ -6,13 +6,13 @@ import {
 } from "lucide-react";
 import { ApprovalPanel } from "../components/ApprovalPanel";
 import { ProjectRootField } from "../components/ProjectRootField";
-import { approveApproval, createProject, executeApproval, generateModPlan, rejectApproval, type ApprovalRequest } from "../shared/api/index.ts";
+import { approveApproval, executeApproval, generateModPlan, rejectApproval, type ApprovalRequest } from "../shared/api/index.ts";
 import { BatchSocket, PlanItem, ModPlan } from "../lib/batch_ws";
 import { AgentLog } from "../components/AgentLog";
 import { StageStatus } from "../components/StageStatus";
 import { BuildDeploy } from "../components/BuildDeploy";
 import { cn } from "../lib/utils";
-import { deriveCreateProjectRequest } from "../shared/projectCreation.ts";
+import { useProjectCreation } from "../shared/useProjectCreation.ts";
 import {
   batchWorkflowReducer,
   createInitialBatchRuntimeState,
@@ -94,9 +94,16 @@ function BatchModePage() {
   );
   const [restoredSnapshotMode, setRestoredSnapshotMode] = useState(() => initialRuntimeSnapshot !== null);
   const [restoredApprovalRefreshPending, setRestoredApprovalRefreshPending] = useState(() => initialRuntimeSnapshot !== null);
-  const [createProjectBusy, setCreateProjectBusy] = useState(false);
-  const [createProjectMessage, setCreateProjectMessage] = useState<string | null>(null);
-  const [createProjectError, setCreateProjectError] = useState<string | null>(null);
+  const {
+    projectCreateBusy: createProjectBusy,
+    projectCreateMessage: createProjectMessage,
+    projectCreateError: createProjectError,
+    clearProjectCreationFeedback,
+    resetProjectCreationState,
+    createProjectAtRoot,
+  } = useProjectCreation({
+    onProjectCreated: setProjectRoot,
+  });
 
   const [autoSelectFirst, setAutoSelectFirst] = useState(false);
   const autoSelectRef = useRef(false);
@@ -165,8 +172,7 @@ function BatchModePage() {
 
   async function startPlanning() {
     if (!requirements.trim()) return;
-    setCreateProjectMessage(null);
-    setCreateProjectError(null);
+    clearProjectCreationFeedback();
     setRestoredSnapshotMode(false);
     setRestoredApprovalRefreshPending(false);
     dispatchRuntime({ type: "planning_started" });
@@ -199,8 +205,7 @@ function BatchModePage() {
     if (!requirements.trim() || !projectRoot.trim()) return;
     socketRef.current?.close();
     socketRef.current = null;
-    setCreateProjectMessage(null);
-    setCreateProjectError(null);
+    clearProjectCreationFeedback();
     setRestoredSnapshotMode(false);
     setRestoredApprovalRefreshPending(false);
     dispatchRuntime({ type: "planning_started" });
@@ -319,9 +324,7 @@ function BatchModePage() {
     socketRef.current?.close();
     socketRef.current = null;
     clearBatchRuntimeSnapshot();
-    setCreateProjectBusy(false);
-    setCreateProjectMessage(null);
-    setCreateProjectError(null);
+    resetProjectCreationState();
     setRestoredSnapshotMode(false);
     setRestoredApprovalRefreshPending(false);
     setPlan(null);
@@ -341,22 +344,6 @@ function BatchModePage() {
       dispatchRuntime({ type: "workflow_failed", message: error instanceof Error ? error.message : String(error) });
     } finally {
       dispatchRuntime({ type: "approval_busy_set", actionId: null });
-    }
-  }
-
-  async function handleCreateProject() {
-    setCreateProjectBusy(true);
-    setCreateProjectMessage(null);
-    setCreateProjectError(null);
-    try {
-      const request = deriveCreateProjectRequest(projectRoot);
-      const result = await createProject(request);
-      setProjectRoot(result.project_path);
-      setCreateProjectMessage(`项目已创建：${result.project_path}`);
-    } catch (error) {
-      setCreateProjectError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setCreateProjectBusy(false);
     }
   }
 
@@ -386,7 +373,7 @@ function BatchModePage() {
             createMessage={createProjectMessage}
             createError={createProjectError}
             onChange={setProjectRoot}
-            onCreateProject={() => { void handleCreateProject(); }}
+            onCreateProject={() => { void createProjectAtRoot(projectRoot).catch(() => {}); }}
           />
           <div className="grid gap-2 sm:grid-cols-2">
             <button

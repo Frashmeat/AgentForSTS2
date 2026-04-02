@@ -9,8 +9,8 @@ function readSource(path: string) {
 test("ModEditor wires create project action through workflow api", () => {
   const source = readSource("../src/features/mod-editor/view.tsx");
 
-  assert.match(source, /createProject/);
-  assert.match(source, /deriveCreateProjectRequest/);
+  assert.match(source, /useProjectCreation/);
+  assert.match(source, /createProjectAtRoot/);
   assert.match(source, /创建项目/);
   assert.match(source, /projectCreateBusy/);
 });

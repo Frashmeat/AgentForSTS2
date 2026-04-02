@@ -14,10 +14,10 @@ test("SingleAssetFeatureView exposes create project action", () => {
   assert.match(source, /projectCreateBusy/);
 });
 
-test("App wires single asset create project handler through workflow api", () => {
+test("App wires single asset create project handler through shared hook", () => {
   const source = readSource("../src/App.tsx");
 
-  assert.match(source, /createProject/);
-  assert.match(source, /deriveCreateProjectRequest/);
+  assert.match(source, /useProjectCreation/);
+  assert.match(source, /createProjectAtRoot/);
   assert.match(source, /onCreateProject/);
 });
