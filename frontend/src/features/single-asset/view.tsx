@@ -48,6 +48,10 @@ export interface SingleAssetFeatureViewProps {
   onAssetNameChange: (value: string) => void;
   onDescriptionChange: (value: string) => void;
   onProjectRootChange: (value: string) => void;
+  projectCreateBusy: boolean;
+  projectCreateMessage: string | null;
+  projectCreateError: string | null;
+  onCreateProject: () => void;
   onApplyPreset: (preset: PresetOption) => void;
   onStartWorkflow: () => void;
   onReset: () => void;
@@ -108,6 +112,10 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
     onAssetNameChange,
     onDescriptionChange,
     onProjectRootChange,
+    projectCreateBusy,
+    projectCreateMessage,
+    projectCreateError,
+    onCreateProject,
     onApplyPreset,
     onStartWorkflow,
     onReset,
@@ -196,6 +204,22 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                 placeholder="E:/STS2mod"
                 className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-100 font-mono disabled:opacity-50"
               />
+              {step === 0 && (
+                <button
+                  onClick={onCreateProject}
+                  disabled={projectCreateBusy || !projectRoot.trim()}
+                  className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-700 hover:text-amber-800 disabled:text-slate-400 disabled:cursor-not-allowed transition-colors"
+                >
+                  {projectCreateBusy ? <Loader2 size={12} className="animate-spin" /> : null}
+                  创建项目
+                </button>
+              )}
+              {projectCreateMessage && (
+                <p className="text-xs text-green-600">{projectCreateMessage}</p>
+              )}
+              {projectCreateError && (
+                <p className="text-xs text-red-600">{projectCreateError}</p>
+              )}
             </div>
           </div>
 

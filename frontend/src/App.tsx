@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useReducer } from "react";
 import { Settings, Swords } from "lucide-react";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { approveApproval, executeApproval, rejectApproval, type ApprovalRequest } from "./shared/api/index.ts";
+import { approveApproval, createProject, executeApproval, rejectApproval, type ApprovalRequest } from "./shared/api/index.ts";
 import { createSingleAssetSocket, type SingleAssetSocket } from "./lib/single_asset_ws";
 import { cn } from "./lib/utils";
 import { BatchGenerationFeatureView } from "./features/batch-generation/view";
@@ -17,6 +17,7 @@ import {
   saveSingleAssetSnapshot,
 } from "./features/single-asset/recovery";
 import { SingleAssetFeatureView } from "./features/single-asset/view";
+import { deriveCreateProjectRequest } from "./shared/projectCreation.ts";
 import { loadAppConfig, resolveMigrationFlags, type WorkflowMigrationFlags } from "./shared/api/index.ts";
 
 type AppTab = "single" | "batch" | "edit" | "log";
@@ -45,6 +46,9 @@ export default function App() {
   const [uploadedImagePreview, setUploadedImagePreview] = useState<string | null>(() => initialSingleAssetSnapshot?.uploadedImagePreview ?? null);
   const [dragOver, setDragOver] = useState(false);
   const [migrationFlags, setMigrationFlags] = useState<WorkflowMigrationFlags>(() => resolveMigrationFlags(undefined));
+  const [projectCreateBusy, setProjectCreateBusy] = useState(false);
+  const [projectCreateMessage, setProjectCreateMessage] = useState<string | null>(null);
+  const [projectCreateError, setProjectCreateError] = useState<string | null>(null);
   const [restoredSnapshotMode, setRestoredSnapshotMode] = useState(() => initialSingleAssetSnapshot !== null);
   const [restoredApprovalRefreshPending, setRestoredApprovalRefreshPending] = useState(
     () => initialSingleAssetSnapshot?.workflowState.stage === "approval_pending",
@@ -145,6 +149,8 @@ export default function App() {
 
   async function startWorkflow() {
     if (!assetName.trim() || !description.trim() || !projectRoot.trim()) return;
+    setProjectCreateMessage(null);
+    setProjectCreateError(null);
     setRestoredSnapshotMode(false);
     setRestoredApprovalRefreshPending(false);
     batchOffsetRef.current = 0;
@@ -260,8 +266,27 @@ export default function App() {
     setUploadedImageB64("");
     setUploadedImageName("");
     setUploadedImagePreview(null);
+    setProjectCreateBusy(false);
+    setProjectCreateMessage(null);
+    setProjectCreateError(null);
     batchOffsetRef.current = 0;
     dispatchWorkflow({ type: "workflow_reset" });
+  }
+
+  async function handleCreateProject() {
+    setProjectCreateBusy(true);
+    setProjectCreateMessage(null);
+    setProjectCreateError(null);
+    try {
+      const request = deriveCreateProjectRequest(projectRoot);
+      const result = await createProject(request);
+      setProjectRoot(result.project_path);
+      setProjectCreateMessage(`项目已创建：${result.project_path}`);
+    } catch (error) {
+      setProjectCreateError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setProjectCreateBusy(false);
+    }
   }
 
   async function handleApprovalAction(
@@ -407,6 +432,12 @@ export default function App() {
           onAssetNameChange={setAssetName}
           onDescriptionChange={setDescription}
           onProjectRootChange={setProjectRoot}
+          projectCreateBusy={projectCreateBusy}
+          projectCreateMessage={projectCreateMessage}
+          projectCreateError={projectCreateError}
+          onCreateProject={() => {
+            void handleCreateProject();
+          }}
           onApplyPreset={(preset) => {
             setAssetType(preset.assetType);
             setAssetName(preset.assetName);

@@ -5,12 +5,13 @@ import {
   Upload, Wand2,
 } from "lucide-react";
 import { ApprovalPanel } from "../components/ApprovalPanel";
-import { approveApproval, executeApproval, generateModPlan, rejectApproval, type ApprovalRequest } from "../shared/api/index.ts";
+import { approveApproval, createProject, executeApproval, generateModPlan, rejectApproval, type ApprovalRequest } from "../shared/api/index.ts";
 import { BatchSocket, PlanItem, ModPlan } from "../lib/batch_ws";
 import { AgentLog } from "../components/AgentLog";
 import { StageStatus } from "../components/StageStatus";
 import { BuildDeploy } from "../components/BuildDeploy";
 import { cn } from "../lib/utils";
+import { deriveCreateProjectRequest } from "../shared/projectCreation.ts";
 import {
   batchWorkflowReducer,
   createInitialBatchRuntimeState,
@@ -92,6 +93,9 @@ function BatchModePage() {
   );
   const [restoredSnapshotMode, setRestoredSnapshotMode] = useState(() => initialRuntimeSnapshot !== null);
   const [restoredApprovalRefreshPending, setRestoredApprovalRefreshPending] = useState(() => initialRuntimeSnapshot !== null);
+  const [createProjectBusy, setCreateProjectBusy] = useState(false);
+  const [createProjectMessage, setCreateProjectMessage] = useState<string | null>(null);
+  const [createProjectError, setCreateProjectError] = useState<string | null>(null);
 
   const [autoSelectFirst, setAutoSelectFirst] = useState(false);
   const autoSelectRef = useRef(false);
@@ -160,6 +164,8 @@ function BatchModePage() {
 
   async function startPlanning() {
     if (!requirements.trim()) return;
+    setCreateProjectMessage(null);
+    setCreateProjectError(null);
     setRestoredSnapshotMode(false);
     setRestoredApprovalRefreshPending(false);
     dispatchRuntime({ type: "planning_started" });
@@ -192,6 +198,8 @@ function BatchModePage() {
     if (!requirements.trim() || !projectRoot.trim()) return;
     socketRef.current?.close();
     socketRef.current = null;
+    setCreateProjectMessage(null);
+    setCreateProjectError(null);
     setRestoredSnapshotMode(false);
     setRestoredApprovalRefreshPending(false);
     dispatchRuntime({ type: "planning_started" });
@@ -310,6 +318,9 @@ function BatchModePage() {
     socketRef.current?.close();
     socketRef.current = null;
     clearBatchRuntimeSnapshot();
+    setCreateProjectBusy(false);
+    setCreateProjectMessage(null);
+    setCreateProjectError(null);
     setRestoredSnapshotMode(false);
     setRestoredApprovalRefreshPending(false);
     setPlan(null);
@@ -329,6 +340,22 @@ function BatchModePage() {
       dispatchRuntime({ type: "workflow_failed", message: error instanceof Error ? error.message : String(error) });
     } finally {
       dispatchRuntime({ type: "approval_busy_set", actionId: null });
+    }
+  }
+
+  async function handleCreateProject() {
+    setCreateProjectBusy(true);
+    setCreateProjectMessage(null);
+    setCreateProjectError(null);
+    try {
+      const request = deriveCreateProjectRequest(projectRoot);
+      const result = await createProject(request);
+      setProjectRoot(result.project_path);
+      setCreateProjectMessage(`项目已创建：${result.project_path}`);
+    } catch (error) {
+      setCreateProjectError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCreateProjectBusy(false);
     }
   }
 
@@ -358,6 +385,20 @@ function BatchModePage() {
               placeholder="E:/STS2mod"
               className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-amber-400 font-mono"
             />
+            <button
+              onClick={() => { void handleCreateProject(); }}
+              disabled={createProjectBusy || !projectRoot.trim()}
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-700 hover:text-amber-800 disabled:text-slate-400 disabled:cursor-not-allowed transition-colors"
+            >
+              {createProjectBusy ? <Loader2 size={12} className="animate-spin" /> : null}
+              创建项目
+            </button>
+            {createProjectMessage && (
+              <p className="text-xs text-green-600">{createProjectMessage}</p>
+            )}
+            {createProjectError && (
+              <p className="text-xs text-red-600">{createProjectError}</p>
+            )}
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
             <button
