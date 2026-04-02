@@ -423,7 +423,7 @@ function BatchModePage() {
             <AlertTriangle size={16} className="text-red-500 shrink-0 mt-0.5" />
             <div>
               <p className="text-sm font-semibold text-red-700">规划失败</p>
-              {runtimeState.globalError && <pre className="text-xs text-red-600 font-mono mt-1 whitespace-pre-wrap">{runtimeState.globalError}</pre>}
+              {runtimeState.workflowErrorMessage && <pre className="text-xs text-red-600 font-mono mt-1 whitespace-pre-wrap">{runtimeState.workflowErrorMessage}</pre>}
             </div>
           </div>
           <button onClick={reset} className="text-sm text-red-500 hover:text-red-700 flex items-center gap-1">

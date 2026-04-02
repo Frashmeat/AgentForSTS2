@@ -35,7 +35,7 @@ export interface BatchRuntimeState {
   batchLog: string[];
   currentBatchStage: string | null;
   batchStageHistory: string[];
-  globalError: string | null;
+  workflowErrorMessage: string | null;
   batchResult: { success: number; error: number } | null;
   approvalBusyActionId: string | null;
 }
@@ -92,7 +92,7 @@ export function createInitialBatchRuntimeState(): BatchRuntimeState {
     batchLog: [],
     currentBatchStage: null,
     batchStageHistory: [],
-    globalError: null,
+    workflowErrorMessage: null,
     batchResult: null,
     approvalBusyActionId: null,
   };
@@ -307,7 +307,7 @@ export function batchWorkflowReducer(state: BatchRuntimeState, action: BatchRunt
       return {
         ...state,
         stage: "error",
-        globalError: action.message,
+        workflowErrorMessage: action.message,
       };
     case "workflow_reset":
       return createInitialBatchRuntimeState();

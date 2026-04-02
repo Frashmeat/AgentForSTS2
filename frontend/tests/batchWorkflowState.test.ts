@@ -11,14 +11,14 @@ test("planning_started resets runtime and enters planning stage", () => {
     ...createInitialBatchRuntimeState(),
     stage: "error" as const,
     batchLog: ["old"],
-    globalError: "boom",
+    workflowErrorMessage: "boom",
   };
 
   const next = batchWorkflowReducer(dirty, { type: "planning_started" });
 
   assert.equal(next.stage, "planning");
   assert.deepEqual(next.batchLog, []);
-  assert.equal(next.globalError, null);
+  assert.equal(next.workflowErrorMessage, null);
 });
 
 test("batch_started initializes items and selects first item", () => {
