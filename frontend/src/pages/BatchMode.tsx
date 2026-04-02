@@ -91,9 +91,9 @@ function BatchModePage() {
   const [restoredSnapshotMode, setRestoredSnapshotMode] = useState(() => initialRuntimeSnapshot !== null);
   const [restoredApprovalRefreshPending, setRestoredApprovalRefreshPending] = useState(() => initialRuntimeSnapshot !== null);
   const {
-    projectCreateBusy: createProjectBusy,
-    projectCreateMessage: createProjectMessage,
-    projectCreateError: createProjectError,
+    projectCreateBusy,
+    projectCreateMessage,
+    projectCreateError,
     clearProjectCreationFeedback,
     resetProjectCreationState,
     createProjectAtRoot,
@@ -360,9 +360,9 @@ function BatchModePage() {
             value={projectRoot}
             placeholder="E:/STS2mod"
             createActionLabel="创建项目"
-            createBusy={createProjectBusy}
-            createMessage={createProjectMessage}
-            createError={createProjectError}
+            createBusy={projectCreateBusy}
+            createMessage={projectCreateMessage}
+            createError={projectCreateError}
             onChange={setProjectRoot}
             onCreateProject={() => { void createProjectAtRoot(projectRoot).catch(() => {}); }}
           />
