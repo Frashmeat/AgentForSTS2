@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Loader2, RotateCcw, Search, Wrench } from "lucide-react";
 
 import { AgentLog } from "../../components/AgentLog";
@@ -7,7 +7,7 @@ import { ProjectRootField } from "../../components/ProjectRootField";
 import { StageStatus } from "../../components/StageStatus";
 import { ModAnalysisSocket } from "../../lib/mod_analysis_ws";
 import { WorkflowSocket } from "../../lib/ws";
-import { loadAppConfig } from "../../shared/api/index.ts";
+import { useDefaultProjectRoot } from "../../shared/useDefaultProjectRoot.ts";
 import { useProjectCreation } from "../../shared/useProjectCreation.ts";
 
 type AnalyzeStage = "idle" | "scanning" | "streaming" | "done" | "error";
@@ -25,15 +25,9 @@ export function ModEditorFeatureView() {
     onProjectCreated: setProjectRoot,
   });
 
-  useEffect(() => {
-    loadAppConfig()
-      .then((config) => {
-        if (config?.default_project_root) {
-          setProjectRoot(String(config.default_project_root));
-        }
-      })
-      .catch(() => {});
-  }, []);
+  useDefaultProjectRoot({
+    setProjectRoot,
+  });
 
   const [analyzeStage, setAnalyzeStage] = useState<AnalyzeStage>("idle");
   const [scanFiles, setScanFiles] = useState<number | null>(null);

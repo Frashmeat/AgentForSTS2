@@ -17,8 +17,9 @@ import {
   saveSingleAssetSnapshot,
 } from "./features/single-asset/recovery";
 import { SingleAssetFeatureView } from "./features/single-asset/view";
-import { loadAppConfig, resolveMigrationFlags, type WorkflowMigrationFlags } from "./shared/api/index.ts";
+import { resolveMigrationFlags, type WorkflowMigrationFlags } from "./shared/api/index.ts";
 import { runApprovalAction } from "./shared/approvalAction.ts";
+import { useDefaultProjectRoot } from "./shared/useDefaultProjectRoot.ts";
 import { useProjectCreation } from "./shared/useProjectCreation.ts";
 
 type AppTab = "single" | "batch" | "edit" | "log";
@@ -67,16 +68,12 @@ export default function App() {
     autoModeRef.current = autoMode;
   }, [autoMode]);
 
-  useEffect(() => {
-    loadAppConfig()
-      .then((config) => {
-        setMigrationFlags(resolveMigrationFlags(config));
-        if (config?.default_project_root) {
-          setProjectRoot((current) => current || String(config.default_project_root));
-        }
-      })
-      .catch(() => {});
-  }, []);
+  useDefaultProjectRoot({
+    setProjectRoot,
+    onConfigLoaded(config) {
+      setMigrationFlags(resolveMigrationFlags(config));
+    },
+  });
 
   useEffect(() => {
     const snapshot = {

@@ -13,6 +13,7 @@ import { StageStatus } from "../components/StageStatus";
 import { BuildDeploy } from "../components/BuildDeploy";
 import { cn } from "../lib/utils";
 import { runApprovalAction } from "../shared/approvalAction.ts";
+import { useDefaultProjectRoot } from "../shared/useDefaultProjectRoot.ts";
 import { useProjectCreation } from "../shared/useProjectCreation.ts";
 import {
   batchWorkflowReducer,
@@ -69,15 +70,9 @@ function BatchModePage() {
   const [requirements, setRequirements] = useState("");
   const [projectRoot, setProjectRoot] = useState("");
 
-  useEffect(() => {
-    loadAppConfig()
-      .then((config) => {
-        if (config?.default_project_root) {
-          setProjectRoot(String(config.default_project_root));
-        }
-      })
-      .catch(() => {});
-  }, []);
+  useDefaultProjectRoot({
+    setProjectRoot,
+  });
 
   const [plan, setPlan] = useState<ModPlan | null>(() => {
     try { const s = localStorage.getItem("ats_last_plan"); return s ? JSON.parse(s) : null; } catch { return null; }
