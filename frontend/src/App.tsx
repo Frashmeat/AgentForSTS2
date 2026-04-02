@@ -2,12 +2,13 @@ import { useState, useRef, useEffect, useReducer } from "react";
 import { Settings, Swords } from "lucide-react";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { approveApproval, executeApproval, rejectApproval, type ApprovalRequest } from "./shared/api/index.ts";
-import { createSingleAssetSocket, type SingleAssetSocket } from "./lib/single_asset_ws";
+import { type SingleAssetSocket } from "./lib/single_asset_ws";
 import { cn } from "./lib/utils";
 import { BatchGenerationFeatureView } from "./features/batch-generation/view";
 import { LogAnalysisFeatureView } from "./features/log-analysis/view";
 import { ModEditorFeatureView } from "./features/mod-editor/view";
 import { type AssetType, getStageIndex, type Stage } from "./features/single-asset/model";
+import { createSingleAssetWorkflowController } from "./features/single-asset/controller.ts";
 import { createInitialSingleAssetWorkflowState, singleAssetWorkflowReducer } from "./features/single-asset/state";
 import {
   clearSingleAssetSnapshot,
@@ -152,101 +153,58 @@ export default function App() {
 
   const step = getStageIndex(workflowState.stage);
 
-  async function startWorkflow() {
-    if (!assetName.trim() || !description.trim() || !projectRoot.trim()) return;
-    clearProjectCreationFeedback();
-    setRestoredSnapshotMode(false);
-    setRestoredApprovalRefreshPending(false);
-    batchOffsetRef.current = 0;
-    dispatchWorkflow({ type: "workflow_started", imageMode });
-
-    const ws = createSingleAssetSocket(migrationFlags);
-    setSocket(ws);
-    ws.on("stage_update",   (d: any) => {
-      dispatchWorkflow({
-        type: d.scope === "agent" ? "agent_stage_pushed" : "flow_stage_pushed",
-        message: d.message,
-      });
-    });
-    ws.on("progress",       (d: any) => dispatchWorkflow({ type: "gen_log_appended", message: `${d.message}` }));
-    ws.on("agent_stream",   (d: any) => dispatchWorkflow({ type: "agent_log_appended", message: d.chunk }));
-    ws.on("error",          (d: any) => {
-      dispatchWorkflow({ type: "workflow_failed", message: d.message, traceback: d.traceback || null });
-    });
-    ws.on("approval_pending", (d: any) => {
-      dispatchWorkflow({
-        type: "approval_pending_received",
-        summary: d.summary || "",
-        requests: d.requests || [],
-      });
-    });
-    ws.on("prompt_preview", (d: any) => {
-      if (autoModeRef.current) {
-        ws.send({ action: "confirm", prompt: d.prompt, negative_prompt: d.negative_prompt || "" });
-        dispatchWorkflow({ type: "gen_log_appended", message: "自动模式：跳过 prompt 确认" });
-        return;
-      }
-      dispatchWorkflow({
-        type: "prompt_preview_received",
-        prompt: d.prompt,
-        negativePrompt: d.negative_prompt || "",
-        fallbackWarning: d.fallback_warning || null,
-      });
-    });
-    ws.on("image_ready", (d: any) => {
-      dispatchWorkflow({
-        type: "image_ready_received",
-        index: d.index,
-        image: d.image,
-        prompt: d.prompt,
-        batchOffset: batchOffsetRef.current,
-      });
-      if (autoModeRef.current) {
-        dispatchWorkflow({ type: "gen_log_appended", message: "自动模式：自动选第 1 张图" });
-        ws.send({ action: "select", index: 0 });
-        dispatchWorkflow({ type: "stage_changed", stage: "agent_running" });
-      }
-    });
-    ws.on("done", (d: any) => {
-      dispatchWorkflow({ type: "agent_log_appended", message: d.success ? "✓ 构建成功！" : "✗ 构建失败" });
-      dispatchWorkflow({ type: "stage_changed", stage: "done" });
-    });
-
-    try {
-      await ws.waitOpen();
-    } catch (err) {
+  const singleAssetWorkflowController = createSingleAssetWorkflowController({
+    closeSocket() {
+      socket?.close();
+    },
+    setSocket(nextSocket) {
+      setSocket(nextSocket);
+    },
+    getSocket() {
+      return socket;
+    },
+    clearProjectCreationFeedback,
+    setRestoredSnapshotMode,
+    setRestoredApprovalRefreshPending,
+    dispatchWorkflow,
+    reportWorkflowError(message, traceback) {
       dispatchWorkflow({
         type: "workflow_failed",
-        message: err instanceof Error ? err.message : String(err),
-        traceback: null,
+        message,
+        traceback,
       });
-      return;
-    }
-    if (imageMode === "upload" && uploadedImageB64) {
-      dispatchWorkflow({ type: "stage_changed", stage: "agent_running" });
-      ws.send({ action: "start", asset_type: assetType, asset_name: assetName, description, project_root: projectRoot, provided_image_b64: uploadedImageB64, provided_image_name: uploadedImageName });
-    } else {
-      ws.send({ action: "start", asset_type: assetType, asset_name: assetName, description, project_root: projectRoot });
-    }
+    },
+  });
+
+  async function startWorkflow() {
+    await singleAssetWorkflowController.start({
+      assetType,
+      assetName,
+      description,
+      projectRoot,
+      imageMode,
+      uploadedImageB64,
+      uploadedImageName,
+      autoMode: autoModeRef.current,
+      migrationFlags,
+    });
   }
 
   function handleConfirmPrompt() {
-    if (!socket) return;
-    dispatchWorkflow({ type: "prompt_confirmed" });
-    socket.send({ action: "confirm", prompt: workflowState.promptPreview, negative_prompt: workflowState.negativePrompt });
+    singleAssetWorkflowController.confirmPrompt(workflowState.promptPreview, workflowState.negativePrompt);
   }
 
   function handleSelectImage(index: number) {
-    if (!socket) return;
-    dispatchWorkflow({ type: "image_selected" });
-    socket.send({ action: "select", index });
+    singleAssetWorkflowController.selectImage(index);
   }
 
   function handleGenerateMore() {
-    if (!socket) return;
     batchOffsetRef.current = workflowState.images.length;
-    dispatchWorkflow({ type: "generate_more_requested", batchOffset: batchOffsetRef.current });
-    socket.send({ action: "generate_more", prompt: workflowState.currentPrompt, negative_prompt: workflowState.negativePrompt || undefined });
+    singleAssetWorkflowController.generateMore(
+      workflowState.currentPrompt,
+      workflowState.negativePrompt,
+      batchOffsetRef.current,
+    );
   }
 
   function handleImageFile(file: File) {
@@ -262,8 +220,7 @@ export default function App() {
   }
 
   function reset() {
-    socket?.close();
-    setSocket(null);
+    singleAssetWorkflowController.reset();
     clearSingleAssetSnapshot();
     setRestoredSnapshotMode(false);
     setRestoredApprovalRefreshPending(false);
@@ -272,7 +229,6 @@ export default function App() {
     setUploadedImagePreview(null);
     resetProjectCreationState();
     batchOffsetRef.current = 0;
-    dispatchWorkflow({ type: "workflow_reset" });
   }
 
   async function handleApprovalAction(
@@ -460,7 +416,7 @@ export default function App() {
             void handleApprovalAction(actionId, executeApproval);
           }}
           onProceedApproval={() => {
-            socket?.send({ action: "approve_all" });
+            singleAssetWorkflowController.proceedApproval();
           }}
           onOpenSettings={() => setSettingsOpen(true)}
         />
