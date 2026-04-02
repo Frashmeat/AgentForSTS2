@@ -2,11 +2,41 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  appendBuildDeployLog,
+  applyBuildDeployActionResult,
+  createIdleBuildDeployState,
   describeBuildDeployAction,
   finalizeBuildProjectResult,
+  finalizeDeployResult,
   finalizePackageProjectResult,
   normalizeBuildOutputLines,
+  startBuildDeployAction,
 } from "../src/components/buildDeployModel.ts";
+
+test("createIdleBuildDeployState returns cleared idle state", () => {
+  assert.deepEqual(createIdleBuildDeployState(), {
+    stage: "idle",
+    action: null,
+    log: [],
+    deployedTo: null,
+    summary: null,
+    errorMsg: null,
+  });
+});
+
+test("startBuildDeployAction resets previous feedback and enters running state", () => {
+  assert.deepEqual(
+    startBuildDeployAction("build"),
+    {
+      stage: "running",
+      action: "build",
+      log: [],
+      deployedTo: null,
+      summary: null,
+      errorMsg: null,
+    },
+  );
+});
 
 test("normalizeBuildOutputLines trims empty lines and preserves meaningful output", () => {
   assert.deepEqual(
@@ -69,6 +99,54 @@ test("finalizePackageProjectResult returns error state for failed package", () =
       summary: null,
       log: [],
       errorMsg: "打包失败",
+    },
+  );
+});
+
+test("appendBuildDeployLog appends stream output to current state", () => {
+  assert.deepEqual(
+    appendBuildDeployLog(startBuildDeployAction("deploy"), "packing assets"),
+    {
+      stage: "running",
+      action: "deploy",
+      log: ["packing assets"],
+      deployedTo: null,
+      summary: null,
+      errorMsg: null,
+    },
+  );
+});
+
+test("finalizeDeployResult marks deploy success with deployed path", () => {
+  assert.deepEqual(
+    finalizeDeployResult(
+      appendBuildDeployLog(startBuildDeployAction("deploy"), "done"),
+      "E:/Mods/MyMod",
+    ),
+    {
+      stage: "done",
+      action: "deploy",
+      log: ["done"],
+      deployedTo: "E:/Mods/MyMod",
+      summary: "已部署",
+      errorMsg: null,
+    },
+  );
+});
+
+test("applyBuildDeployActionResult merges HTTP action result into state", () => {
+  assert.deepEqual(
+    applyBuildDeployActionResult(
+      startBuildDeployAction("package"),
+      finalizePackageProjectResult({ success: true }),
+    ),
+    {
+      stage: "done",
+      action: "package",
+      log: [],
+      deployedTo: null,
+      summary: "打包成功",
+      errorMsg: null,
     },
   );
 });

@@ -1,16 +1,15 @@
 import { useRef, useState } from "react";
 import { Hammer, CheckCircle2, Loader2, RotateCcw, Settings } from "lucide-react";
 import { AgentLog } from "./AgentLog";
-import { BuildDeploySocket } from "../lib/build_deploy_ws";
-import { buildProject, packageProject } from "../shared/api/index.ts";
 import {
+  createBuildDeployController,
+  type BuildDeploySocketLike,
+} from "./buildDeployController.ts";
+import {
+  createIdleBuildDeployState,
   describeBuildDeployAction,
-  finalizeBuildProjectResult,
-  finalizePackageProjectResult,
-  type BuildDeployAction,
+  type BuildDeployState,
 } from "./buildDeployModel.ts";
-
-type Stage = "idle" | "running" | "done" | "error";
 
 interface Props {
   projectRoot: string;
@@ -18,106 +17,33 @@ interface Props {
 }
 
 export function BuildDeploy({ projectRoot, onOpenSettings }: Props) {
-  const [stage, setStage] = useState<Stage>("idle");
-  const [action, setAction] = useState<BuildDeployAction | null>(null);
-  const [log, setLog] = useState<string[]>([]);
-  const [deployedTo, setDeployedTo] = useState<string | null>(null);
-  const [summary, setSummary] = useState<string | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const wsRef = useRef<BuildDeploySocket | null>(null);
+  const [state, setState] = useState<BuildDeployState>(() => createIdleBuildDeployState());
+  const wsRef = useRef<BuildDeploySocketLike | null>(null);
+  const controllerRef = useRef<ReturnType<typeof createBuildDeployController> | null>(null);
 
-  function reset() {
-    wsRef.current?.close();
-    wsRef.current = null;
-    setStage("idle");
-    setAction(null);
-    setLog([]);
-    setDeployedTo(null);
-    setSummary(null);
-    setErrorMsg(null);
-  }
-
-  function startAction(nextAction: BuildDeployAction) {
-    wsRef.current?.close();
-    wsRef.current = null;
-    setAction(nextAction);
-    setStage("running");
-    setLog([]);
-    setDeployedTo(null);
-    setSummary(null);
-    setErrorMsg(null);
-  }
-
-  async function startDeploy() {
-    if (!projectRoot.trim()) return;
-    startAction("deploy");
-
-    const ws = new BuildDeploySocket();
-    wsRef.current = ws;
-    ws.on("stream", (msg) => {
-      setLog(prev => [...prev, msg.chunk]);
+  if (!controllerRef.current) {
+    controllerRef.current = createBuildDeployController({
+      closeSocket() {
+        wsRef.current?.close();
+      },
+      setSocket(socket) {
+        wsRef.current = socket;
+      },
+      setState(nextState) {
+        setState((previous) =>
+          typeof nextState === "function" ? nextState(previous) : nextState,
+        );
+      },
     });
-    ws.on("done", (msg) => {
-      setDeployedTo(msg.deployed_to ?? null);
-      setSummary(msg.deployed_to ? "已部署" : "构建成功");
-      setStage("done");
-    });
-    ws.on("error", (msg) => {
-      setErrorMsg(msg.message);
-      setStage("error");
-    });
-
-    try {
-      await ws.waitOpen();
-    } catch (error) {
-      setErrorMsg(error instanceof Error ? error.message : String(error));
-      setStage("error");
-      wsRef.current = null;
-      return;
-    }
-    ws.send({ project_root: projectRoot.trim() });
   }
-
-  async function startBuild() {
-    if (!projectRoot.trim()) return;
-    startAction("build");
-    try {
-      const result = finalizeBuildProjectResult(
-        await buildProject({ project_root: projectRoot.trim() }),
-      );
-      setLog(result.log);
-      setSummary(result.summary);
-      setErrorMsg(result.errorMsg);
-      setStage(result.stage);
-    } catch (error) {
-      setErrorMsg(error instanceof Error ? error.message : String(error));
-      setStage("error");
-    }
-  }
-
-  async function startPackage() {
-    if (!projectRoot.trim()) return;
-    startAction("package");
-    try {
-      const result = finalizePackageProjectResult(
-        await packageProject({ project_root: projectRoot.trim() }),
-      );
-      setLog(result.log);
-      setSummary(result.summary);
-      setErrorMsg(result.errorMsg);
-      setStage(result.stage);
-    } catch (error) {
-      setErrorMsg(error instanceof Error ? error.message : String(error));
-      setStage("error");
-    }
-  }
+  const controller = controllerRef.current;
 
   return (
     <div className="space-y-3 pt-3 border-t border-slate-100">
-      {stage === "idle" && (
+      {state.stage === "idle" && (
         <div className="flex flex-wrap gap-2">
           <button
-            onClick={startDeploy}
+            onClick={() => void controller.run("deploy", projectRoot)}
             disabled={!projectRoot.trim()}
             className="flex items-center gap-2 py-2 px-4 rounded-lg bg-emerald-500 text-white font-bold text-sm hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
@@ -125,14 +51,14 @@ export function BuildDeploy({ projectRoot, onOpenSettings }: Props) {
             构建并部署
           </button>
           <button
-            onClick={startBuild}
+            onClick={() => void controller.run("build", projectRoot)}
             disabled={!projectRoot.trim()}
             className="flex items-center gap-2 py-2 px-4 rounded-lg border border-slate-200 bg-white text-slate-700 font-medium text-sm hover:border-amber-300 hover:text-amber-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             仅构建
           </button>
           <button
-            onClick={startPackage}
+            onClick={() => void controller.run("package", projectRoot)}
             disabled={!projectRoot.trim()}
             className="flex items-center gap-2 py-2 px-4 rounded-lg border border-slate-200 bg-white text-slate-700 font-medium text-sm hover:border-amber-300 hover:text-amber-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
@@ -141,37 +67,39 @@ export function BuildDeploy({ projectRoot, onOpenSettings }: Props) {
         </div>
       )}
 
-      {stage === "running" && log.length === 0 && action && (
+      {state.stage === "running" && state.log.length === 0 && state.action && (
         <div className="flex items-center gap-2 py-1">
           <Loader2 size={14} className="text-emerald-500 animate-spin" />
           <span className="text-sm text-slate-400">
-            {action === "deploy"
+            {state.action === "deploy"
               ? "Code Agent 构建中（含 .pck 导出）…"
-              : `${describeBuildDeployAction(action)}中…`}
+              : `${describeBuildDeployAction(state.action)}中…`}
           </span>
         </div>
       )}
 
-      {log.length > 0 && (
-        <AgentLog lines={log} />
-      )}
+      {state.log.length > 0 && <AgentLog lines={state.log} />}
 
-      {stage === "done" && (
+      {state.stage === "done" && (
         <div className="space-y-2">
-          {action === "deploy" && deployedTo ? (
+          {state.action === "deploy" && state.deployedTo ? (
             <div className="flex items-start gap-2 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2">
               <CheckCircle2 size={15} className="text-emerald-500 shrink-0 mt-0.5" />
               <div>
                 <p className="text-sm font-medium text-emerald-700">已部署</p>
-                <p className="text-xs text-emerald-600 font-mono mt-0.5 break-all">{deployedTo}</p>
+                <p className="text-xs text-emerald-600 font-mono mt-0.5 break-all">
+                  {state.deployedTo}
+                </p>
               </div>
             </div>
-          ) : action === "deploy" ? (
+          ) : state.action === "deploy" ? (
             <div className="flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
               <CheckCircle2 size={15} className="text-amber-500 shrink-0 mt-0.5" />
               <div className="flex-1">
                 <p className="text-sm font-medium text-amber-700">构建成功，未自动部署</p>
-                <p className="text-xs text-amber-600 mt-0.5">在设置中配置 STS2 游戏路径后可自动复制到 Mods 文件夹</p>
+                <p className="text-xs text-amber-600 mt-0.5">
+                  在设置中配置 STS2 游戏路径后可自动复制到 Mods 文件夹
+                </p>
               </div>
               {onOpenSettings && (
                 <button
@@ -186,15 +114,17 @@ export function BuildDeploy({ projectRoot, onOpenSettings }: Props) {
             <div className="flex items-start gap-2 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2">
               <CheckCircle2 size={15} className="text-emerald-500 shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm font-medium text-emerald-700">{summary ?? "执行成功"}</p>
+                <p className="text-sm font-medium text-emerald-700">{state.summary ?? "执行成功"}</p>
                 <p className="text-xs text-emerald-600 mt-0.5">
-                  {action === "build" ? "已完成项目构建，可继续部署或排查构建输出。" : "已完成项目打包。"}
+                  {state.action === "build"
+                    ? "已完成项目构建，可继续部署或排查构建输出。"
+                    : "已完成项目打包。"}
                 </p>
               </div>
             </div>
           )}
           <button
-            onClick={reset}
+            onClick={() => controller.reset()}
             className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1 transition-colors"
           >
             <RotateCcw size={11} /> 重新执行
@@ -202,11 +132,11 @@ export function BuildDeploy({ projectRoot, onOpenSettings }: Props) {
         </div>
       )}
 
-      {stage === "error" && (
+      {state.stage === "error" && (
         <div className="space-y-2">
-          <p className="text-xs text-red-600 font-mono">{errorMsg}</p>
+          <p className="text-xs text-red-600 font-mono">{state.errorMsg}</p>
           <button
-            onClick={reset}
+            onClick={() => controller.reset()}
             className="text-xs text-slate-400 hover:text-red-500 flex items-center gap-1 transition-colors"
           >
             <RotateCcw size={11} /> 重试
