@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { ApprovalPanel } from "../components/ApprovalPanel";
 import { ProjectRootField } from "../components/ProjectRootField";
-import { approveApproval, executeApproval, generateModPlan, rejectApproval, type ApprovalRequest } from "../shared/api/index.ts";
+import { approveApproval, executeApproval, rejectApproval, type ApprovalRequest } from "../shared/api/index.ts";
 import { BatchSocket, PlanItem, ModPlan } from "../lib/batch_ws";
 import { AgentLog } from "../components/AgentLog";
 import { StageStatus } from "../components/StageStatus";
@@ -15,6 +15,7 @@ import { cn } from "../lib/utils";
 import { runApprovalAction } from "../shared/approvalAction.ts";
 import { useDefaultProjectRoot } from "../shared/useDefaultProjectRoot.ts";
 import { useProjectCreation } from "../shared/useProjectCreation.ts";
+import { createBatchPlanningController } from "../features/batch-generation/planningController.ts";
 import {
   batchWorkflowReducer,
   createInitialBatchRuntimeState,
@@ -28,7 +29,6 @@ import {
   refreshRecoveredBatchApprovals,
   saveBatchRuntimeSnapshot,
 } from "../features/batch-generation/recovery";
-import { loadAppConfig } from "../shared/api/index.ts";
 
 type ItemStatus = BatchItemState["status"];
 type ItemState = BatchItemState;
@@ -105,6 +105,7 @@ function BatchModePage() {
   const autoSelectRef = useRef(false);
   useEffect(() => { autoSelectRef.current = autoSelectFirst; }, [autoSelectFirst]);
   const socketRef = useRef<BatchSocket | null>(null);
+  const planningControllerRef = useRef<ReturnType<typeof createBatchPlanningController> | null>(null);
 
   useEffect(() => {
     if (!plan || editedItems.length === 0) {
@@ -166,27 +167,6 @@ function BatchModePage() {
 
   // ── Start ─────────────────────────────────────────────────────────────────
 
-  async function startPlanning() {
-    if (!requirements.trim()) return;
-    clearProjectCreationFeedback();
-    setRestoredSnapshotMode(false);
-    setRestoredApprovalRefreshPending(false);
-    dispatchRuntime({ type: "planning_started" });
-    setPlan(null);
-
-    const ws = new BatchSocket();
-    socketRef.current = ws;
-    _registerBatchHandlers(ws);
-
-    try {
-      await ws.waitOpen();
-    } catch (error) {
-      dispatchRuntime({ type: "workflow_failed", message: error instanceof Error ? error.message : String(error) });
-      return;
-    }
-    ws.send({ action: "start", requirements, project_root: projectRoot });
-  }
-
   function applyGeneratedPlan(nextPlan: ModPlan) {
     setPlan(nextPlan);
     setEditedItems(nextPlan.items);
@@ -195,23 +175,6 @@ function BatchModePage() {
       localStorage.setItem("ats_last_plan", JSON.stringify(nextPlan));
       localStorage.setItem("ats_last_plan_items", JSON.stringify(nextPlan.items));
     } catch {}
-  }
-
-  async function startPlanningFallback() {
-    if (!requirements.trim() || !projectRoot.trim()) return;
-    socketRef.current?.close();
-    socketRef.current = null;
-    clearProjectCreationFeedback();
-    setRestoredSnapshotMode(false);
-    setRestoredApprovalRefreshPending(false);
-    dispatchRuntime({ type: "planning_started" });
-    setPlan(null);
-
-    try {
-      applyGeneratedPlan(await generateModPlan(requirements));
-    } catch (error) {
-      dispatchRuntime({ type: "workflow_failed", message: error instanceof Error ? error.message : String(error) });
-    }
   }
 
   function _registerBatchHandlers(ws: BatchSocket) {
@@ -258,6 +221,34 @@ function BatchModePage() {
     });
     ws.on("error", (d) => { dispatchRuntime({ type: "workflow_failed", message: d.message }); });
   }
+
+  if (!planningControllerRef.current) {
+    planningControllerRef.current = createBatchPlanningController({
+      closeSocket() {
+        socketRef.current?.close();
+      },
+      setSocket(socket) {
+        socketRef.current = socket as BatchSocket | null;
+      },
+      clearProjectCreationFeedback,
+      setRestoredSnapshotMode,
+      setRestoredApprovalRefreshPending,
+      dispatchPlanningStarted() {
+        dispatchRuntime({ type: "planning_started" });
+      },
+      clearPlan() {
+        setPlan(null);
+      },
+      applyGeneratedPlan,
+      registerSocketHandlers(socket) {
+        _registerBatchHandlers(socket as BatchSocket);
+      },
+      reportWorkflowError(message) {
+        dispatchRuntime({ type: "workflow_failed", message });
+      },
+    });
+  }
+  const planningController = planningControllerRef.current;
 
   async function confirmPlan() {
     if (!plan) return;
@@ -377,7 +368,7 @@ function BatchModePage() {
           />
           <div className="grid gap-2 sm:grid-cols-2">
             <button
-              onClick={startPlanning}
+              onClick={() => { void planningController.startSocketPlanning(requirements, projectRoot); }}
               disabled={!requirements.trim() || !projectRoot.trim()}
               className="w-full py-2.5 rounded-lg bg-amber-500 text-white font-bold text-sm hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
             >
@@ -385,7 +376,7 @@ function BatchModePage() {
               规划 Mod
             </button>
             <button
-              onClick={() => { void startPlanningFallback(); }}
+              onClick={() => { void planningController.startHttpPlanning(requirements, projectRoot); }}
               disabled={!requirements.trim() || !projectRoot.trim()}
               className="w-full py-2.5 rounded-lg border border-amber-300 text-amber-700 font-bold text-sm hover:bg-amber-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
