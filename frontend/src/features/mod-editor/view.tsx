@@ -6,13 +6,17 @@ import { BuildDeploy } from "../../components/BuildDeploy";
 import { StageStatus } from "../../components/StageStatus";
 import { ModAnalysisSocket } from "../../lib/mod_analysis_ws";
 import { WorkflowSocket } from "../../lib/ws";
-import { loadAppConfig } from "../../shared/api/index.ts";
+import { createProject, loadAppConfig } from "../../shared/api/index.ts";
+import { deriveCreateProjectRequest } from "../../shared/projectCreation.ts";
 
 type AnalyzeStage = "idle" | "scanning" | "streaming" | "done" | "error";
 type ModifyStage = "idle" | "running" | "done" | "error";
 
 export function ModEditorFeatureView() {
   const [projectRoot, setProjectRoot] = useState("");
+  const [projectCreateBusy, setProjectCreateBusy] = useState(false);
+  const [projectCreateMessage, setProjectCreateMessage] = useState<string | null>(null);
+  const [projectCreateError, setProjectCreateError] = useState<string | null>(null);
 
   useEffect(() => {
     loadAppConfig()
@@ -44,6 +48,8 @@ export function ModEditorFeatureView() {
     if (!projectRoot.trim()) {
       return;
     }
+    setProjectCreateMessage(null);
+    setProjectCreateError(null);
     setAnalyzeStage("scanning");
     setScanFiles(null);
     setAnalysisChunks([]);
@@ -99,6 +105,8 @@ export function ModEditorFeatureView() {
     if (!projectRoot.trim() || !modRequest.trim()) {
       return;
     }
+    setProjectCreateMessage(null);
+    setProjectCreateError(null);
     setModifyStage("running");
     setAgentLog([]);
     setModifyCurrentStage(null);
@@ -156,6 +164,22 @@ export function ModEditorFeatureView() {
     setModifyError(null);
   }
 
+  async function handleCreateProject() {
+    setProjectCreateBusy(true);
+    setProjectCreateMessage(null);
+    setProjectCreateError(null);
+    try {
+      const request = deriveCreateProjectRequest(projectRoot);
+      const result = await createProject(request);
+      setProjectRoot(result.project_path);
+      setProjectCreateMessage(`项目已创建：${result.project_path}`);
+    } catch (error) {
+      setProjectCreateError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setProjectCreateBusy(false);
+    }
+  }
+
   const analysisText = analysisChunks.join("");
   const isAnalyzing = analyzeStage === "scanning" || analyzeStage === "streaming";
   const isModifying = modifyStage === "running";
@@ -170,6 +194,20 @@ export function ModEditorFeatureView() {
           placeholder="E:/STS2mod/testscenario/MyMod"
           className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-100 font-mono"
         />
+        <button
+          onClick={() => { void handleCreateProject(); }}
+          disabled={projectCreateBusy || !projectRoot.trim()}
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-700 hover:text-amber-800 disabled:text-slate-400 disabled:cursor-not-allowed transition-colors"
+        >
+          {projectCreateBusy ? <Loader2 size={12} className="animate-spin" /> : null}
+          创建项目
+        </button>
+        {projectCreateMessage && (
+          <p className="text-xs text-green-600">{projectCreateMessage}</p>
+        )}
+        {projectCreateError && (
+          <p className="text-xs text-red-600">{projectCreateError}</p>
+        )}
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white p-5 space-y-4">
