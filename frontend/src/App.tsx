@@ -18,6 +18,7 @@ import {
 } from "./features/single-asset/recovery";
 import { SingleAssetFeatureView } from "./features/single-asset/view";
 import { loadAppConfig, resolveMigrationFlags, type WorkflowMigrationFlags } from "./shared/api/index.ts";
+import { runApprovalAction } from "./shared/approvalAction.ts";
 import { useProjectCreation } from "./shared/useProjectCreation.ts";
 
 type AppTab = "single" | "batch" | "edit" | "log";
@@ -281,22 +282,26 @@ export default function App() {
     actionId: string,
     action: (id: string) => Promise<ApprovalRequest>,
   ) {
-    dispatchWorkflow({ type: "approval_busy_set", actionId });
-    try {
-      const updated = await action(actionId);
-      dispatchWorkflow({
-        type: "approval_requests_updated",
-        requests: workflowState.approvalRequests.map(req => req.action_id === actionId ? updated : req),
-      });
-    } catch (error) {
-      dispatchWorkflow({
-        type: "workflow_failed",
-        message: error instanceof Error ? error.message : String(error),
-        traceback: null,
-      });
-    } finally {
-      dispatchWorkflow({ type: "approval_busy_set", actionId: null });
-    }
+    await runApprovalAction({
+      actionId,
+      action,
+      onBusyChange(nextActionId) {
+        dispatchWorkflow({ type: "approval_busy_set", actionId: nextActionId });
+      },
+      onSuccess(updated) {
+        dispatchWorkflow({
+          type: "approval_requests_updated",
+          requests: workflowState.approvalRequests.map(req => req.action_id === actionId ? updated : req),
+        });
+      },
+      onError(message) {
+        dispatchWorkflow({
+          type: "workflow_failed",
+          message,
+          traceback: null,
+        });
+      },
+    });
   }
 
   return (

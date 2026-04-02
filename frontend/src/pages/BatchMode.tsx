@@ -12,6 +12,7 @@ import { AgentLog } from "../components/AgentLog";
 import { StageStatus } from "../components/StageStatus";
 import { BuildDeploy } from "../components/BuildDeploy";
 import { cn } from "../lib/utils";
+import { runApprovalAction } from "../shared/approvalAction.ts";
 import { useProjectCreation } from "../shared/useProjectCreation.ts";
 import {
   batchWorkflowReducer,
@@ -336,15 +337,19 @@ function BatchModePage() {
     actionId: string,
     action: (id: string) => Promise<ApprovalRequest>,
   ) {
-    dispatchRuntime({ type: "approval_busy_set", actionId });
-    try {
-      const updated = await action(actionId);
-      dispatchRuntime({ type: "approval_request_updated", actionId, request: updated });
-    } catch (error) {
-      dispatchRuntime({ type: "workflow_failed", message: error instanceof Error ? error.message : String(error) });
-    } finally {
-      dispatchRuntime({ type: "approval_busy_set", actionId: null });
-    }
+    await runApprovalAction({
+      actionId,
+      action,
+      onBusyChange(nextActionId) {
+        dispatchRuntime({ type: "approval_busy_set", actionId: nextActionId });
+      },
+      onSuccess(updated) {
+        dispatchRuntime({ type: "approval_request_updated", actionId, request: updated });
+      },
+      onError(message) {
+        dispatchRuntime({ type: "workflow_failed", message });
+      },
+    });
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
