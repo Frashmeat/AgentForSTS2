@@ -18,6 +18,7 @@
 - 确认本轮定向测试至少已通过：
   - `backend/tests/platform/e2e/test_platform_rollout_flags.py`
   - `backend/tests/platform/e2e/test_platform_job_lifecycle.py`
+  - 当前 e2e 已覆盖成功链路、cancel、quota exhausted、refund 与 rollout flags
 
 ## 开关启用顺序
 
@@ -41,6 +42,7 @@
 - `platform_runner_enabled`
   - 观察 `workflow` / `batch_workflow` compat service 已绑定 `session_factory`
   - 观察 `custom_code` 最小闭环会生成 `job.created -> job.queued -> job.item.completed -> job.completed`
+  - 观察无可用 quota 时，平台主链会把 job 标记为 `quota_exhausted`、item 标记为 `quota_skipped`
 - `platform_events_v1_enabled`
   - 当前阶段为配置占位，启用后应保证不破坏现有入口
 - `platform_step_protocol_enabled`
@@ -53,7 +55,8 @@
 3. 调用 `GET /api/platform/jobs/{job_id}`、`/items`、`/events` 验证主链写入
 4. 调用 `GET /api/platform/quota` 验证 quota 查询
 5. 调用 `GET /api/admin/jobs/{job_id}/executions` 或 `GET /api/admin/audit/events` 验证管理员查询
-6. 对 `ws/create` 发送 `custom_code` 请求，确认 compat service 走平台 runner 路径
+6. 对一个已 reserve 的 execution 执行 refund，验证 `/api/platform/quota` 的 `refunded` 与 `/api/admin/quota/refunds` 一致
+7. 对 `ws/create` 发送 `custom_code` 请求，确认 compat service 走平台 runner 路径
 
 ## 回退顺序
 
@@ -68,6 +71,8 @@
 - 平台 API 出现持续 `5xx`
 - 管理员查询接口返回结构异常
 - 事件链缺失 `job.created` / `job.queued` / `job.completed`
+- quota exhausted 后 job/item 状态与查询结果不一致
+- refund 后 `/api/platform/quota` 与 `/api/admin/quota/refunds` 结果不一致
 
 ## 当前已知边界
 
