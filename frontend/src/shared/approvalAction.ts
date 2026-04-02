@@ -1,13 +1,11 @@
+import { resolveErrorMessage } from "./error.ts";
+
 interface RunApprovalActionOptions<TResult> {
   actionId: string;
   action: (actionId: string) => Promise<TResult>;
   onBusyChange: (actionId: string | null) => void;
   onSuccess: (result: TResult) => void;
   onError: (message: string) => void;
-}
-
-function resolveErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 export async function runApprovalAction<TResult>(

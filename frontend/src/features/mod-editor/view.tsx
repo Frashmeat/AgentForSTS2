@@ -7,6 +7,7 @@ import { ProjectRootField } from "../../components/ProjectRootField";
 import { StageStatus } from "../../components/StageStatus";
 import { ModAnalysisSocket } from "../../lib/mod_analysis_ws";
 import { WorkflowSocket } from "../../lib/ws";
+import { resolveErrorMessage } from "../../shared/error.ts";
 import { useDefaultProjectRoot } from "../../shared/useDefaultProjectRoot.ts";
 import { useProjectCreation } from "../../shared/useProjectCreation.ts";
 
@@ -83,7 +84,7 @@ export function ModEditorFeatureView() {
     try {
       await ws.waitOpen();
     } catch (error) {
-      setAnalysisError(error instanceof Error ? error.message : String(error));
+      setAnalysisError(resolveErrorMessage(error));
       setAnalyzeStage("error");
       return;
     }
@@ -135,7 +136,7 @@ export function ModEditorFeatureView() {
     try {
       await ws.waitOpen();
     } catch (error) {
-      setModifyError(error instanceof Error ? error.message : String(error));
+      setModifyError(resolveErrorMessage(error));
       setModifyStage("error");
       return;
     }

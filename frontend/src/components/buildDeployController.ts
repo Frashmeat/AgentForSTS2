@@ -19,6 +19,7 @@ import {
   type BuildDeployAction,
   type BuildDeployState,
 } from "./buildDeployModel.ts";
+import { resolveErrorMessage } from "../shared/error.ts";
 
 export interface BuildDeploySocketLike {
   on<T extends BuildDeployEvent["event"]>(
@@ -44,10 +45,6 @@ interface BuildDeployControllerDeps {
   createSocket(): BuildDeploySocketLike;
   buildProject(request: BuildProjectRequest): Promise<BuildProjectResponse>;
   packageProject(request: PackageProjectRequest): Promise<PackageProjectResponse>;
-}
-
-function resolveErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 export function createBuildDeployController(

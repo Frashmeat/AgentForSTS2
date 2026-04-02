@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { resolveErrorMessage } from "./error.ts";
 import { createProjectFromRoot } from "./projectCreation.ts";
 
 interface UseProjectCreationOptions {
@@ -31,7 +32,7 @@ export function useProjectCreation(options: UseProjectCreationOptions = {}) {
       setProjectCreateMessage(`项目已创建：${result.project_path}`);
       return result;
     } catch (error) {
-      setProjectCreateError(error instanceof Error ? error.message : String(error));
+      setProjectCreateError(resolveErrorMessage(error));
       throw error;
     } finally {
       setProjectCreateBusy(false);

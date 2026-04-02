@@ -1,5 +1,6 @@
 import { BatchSocket, type ModPlan } from "../../lib/batch_ws.ts";
 import { generateModPlan } from "../../shared/api/index.ts";
+import { resolveErrorMessage } from "../../shared/error.ts";
 
 export interface BatchPlanningSocketLike {
   waitOpen(): Promise<void>;
@@ -23,10 +24,6 @@ export interface BatchPlanningRuntime {
 interface BatchPlanningDeps {
   createSocket(): BatchPlanningSocketLike;
   generateModPlan(requirements: string): Promise<ModPlan>;
-}
-
-function resolveErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 export function createBatchPlanningController(
