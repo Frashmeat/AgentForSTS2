@@ -35,7 +35,7 @@ FangedGrimoire/
 # Generated local assets / outputs
 godot/
 docs/
-backend/2026-03-31-后端现状总结.md
+.tmp/
 
 # OS
 .DS_Store
