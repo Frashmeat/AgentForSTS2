@@ -327,13 +327,7 @@ export function batchWorkflowReducer(state: BatchRuntimeState, action: BatchRunt
           const nextRequests = itemState.approvalRequests.map((req) =>
             req.action_id === action.actionId ? action.request : req,
           );
-          const nextStatus =
-            itemState.status === "approval_pending" &&
-            nextRequests.length > 0 &&
-            nextRequests.every((req) => req.status === "succeeded")
-              ? "done"
-              : itemState.status;
-          return [id, { ...itemState, approvalRequests: nextRequests, status: nextStatus }];
+          return [id, { ...itemState, approvalRequests: nextRequests }];
         }),
       ) as BatchItemStateRecord;
       return {

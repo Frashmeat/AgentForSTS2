@@ -280,6 +280,7 @@ def test_approval_first_pending_group_does_not_emit_batch_done_early(monkeypatch
                 self._queued_messages = list(queued_messages)
                 self._receive_calls = 0
                 self.messages: list[dict] = []
+                self.app = types.SimpleNamespace(state=types.SimpleNamespace(container=None))
 
             async def accept(self):
                 return None
@@ -406,6 +407,7 @@ def test_approval_first_group_can_resume_after_approve_all(monkeypatch, tmp_path
             def __init__(self, queued_messages: list[str]):
                 self._queued_messages = list(queued_messages)
                 self.messages: list[dict] = []
+                self.app = types.SimpleNamespace(state=types.SimpleNamespace(container=None))
 
             async def accept(self):
                 return None
@@ -486,6 +488,128 @@ def test_approval_first_group_can_resume_after_approve_all(monkeypatch, tmp_path
         assert "batch_done" in events
         assert fake_service.store.approved_ids == [request.action_id]
         assert fake_service.executed_ids == [request.action_id]
+        assert create_calls == [("HelperLogic", "实现一个 helper")]
+
+    asyncio.run(run())
+
+
+def test_approval_first_resume_does_not_reapprove_succeeded_actions(monkeypatch, tmp_path):
+    async def run():
+        request = ActionRequest(
+            kind="write_file",
+            title="Write grouped source",
+            reason="Need generated files for the group",
+            payload={"path": "Scripts/Helper.cs", "content": "// generated"},
+            risk_level="medium",
+            requires_approval=True,
+            source_backend="codex",
+            source_workflow="batch",
+        )
+        request.status = "succeeded"
+
+        class FakeApprovalStore:
+            def __init__(self):
+                self.approved_ids: list[str] = []
+
+            def approve_request(self, action_id: str):
+                self.approved_ids.append(action_id)
+                request.status = "approved"
+                return request
+
+        class FakeApprovalService:
+            def __init__(self):
+                self.store = FakeApprovalStore()
+                self.executed_ids: list[str] = []
+
+            async def execute_request(self, action_id: str):
+                self.executed_ids.append(action_id)
+                request.status = "succeeded"
+                return request
+
+        fake_service = FakeApprovalService()
+        create_calls: list[tuple[str, str]] = []
+
+        class DummyWs:
+            def __init__(self, queued_messages: list[str]):
+                self._queued_messages = list(queued_messages)
+                self.messages: list[dict] = []
+                self.app = types.SimpleNamespace(state=types.SimpleNamespace(container=None))
+
+            async def accept(self):
+                return None
+
+            async def send_text(self, text: str):
+                self.messages.append(json.loads(text))
+
+            async def receive_text(self) -> str:
+                if self._queued_messages:
+                    return self._queued_messages.pop(0)
+                while not any(message.get("event") == "batch_done" for message in self.messages):
+                    await asyncio.sleep(0.05)
+                raise WebSocketDisconnect()
+
+        monkeypatch.setattr(
+            batch_workflow,
+            "get_config",
+            lambda: {
+                "llm": {"agent_backend": "codex", "execution_mode": "approval_first"},
+                "image_gen": {"provider": "bfl", "concurrency": 1},
+                "migration": {},
+            },
+        )
+        monkeypatch.setattr(batch_workflow, "get_approval_service", lambda: fake_service)
+
+        async def fake_plan_group_approval_requests(group, llm_cfg, project_root):
+            assert [item.id for item in group] == ["helper_logic"]
+            assert llm_cfg["execution_mode"] == "approval_first"
+            assert project_root == tmp_path
+            return "Need approval", [request]
+
+        async def fake_create_custom_code(description, implementation_notes, name, project_root, stream_callback, skip_build=True):
+            create_calls.append((name, implementation_notes))
+            return "generated custom code"
+
+        monkeypatch.setattr(
+            batch_workflow,
+            "_plan_group_approval_requests",
+            fake_plan_group_approval_requests,
+        )
+        monkeypatch.setattr(batch_workflow, "create_custom_code", fake_create_custom_code)
+
+        (tmp_path / "TestMod.csproj").write_text("<Project />", encoding="utf-8")
+
+        plan = ModPlan(
+            mod_name="TestMod",
+            summary="approval-first batch",
+            items=[
+                PlanItem(
+                    id="helper_logic",
+                    type="custom_code",
+                    name="HelperLogic",
+                    description="一个帮助器",
+                    implementation_notes="实现一个 helper",
+                    needs_image=False,
+                ),
+            ],
+        )
+        ws = DummyWs(
+            [
+                json.dumps(
+                    {
+                        "action": "start_with_plan",
+                        "project_root": str(tmp_path),
+                        "plan": plan.to_dict(),
+                    }
+                ),
+                json.dumps({"action": "approve_all", "item_id": "helper_logic"}),
+                json.dumps({"action": "resume", "item_id": "helper_logic"}),
+            ]
+        )
+
+        await batch_workflow.ws_batch(ws)
+
+        assert fake_service.store.approved_ids == []
+        assert fake_service.executed_ids == []
         assert create_calls == [("HelperLogic", "实现一个 helper")]
 
     asyncio.run(run())

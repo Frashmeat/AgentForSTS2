@@ -96,7 +96,7 @@ test("item approval pending stores approval data", () => {
   assert.equal(next.itemStates["a"].approvalRequests.length, 1);
 });
 
-test("approval_request_updated marks item done when all requests succeeded", () => {
+test("approval_request_updated keeps item in approval_pending until workflow resumes", () => {
   const withApproval = batchWorkflowReducer(
     batchWorkflowReducer(createInitialBatchRuntimeState(), {
       type: "batch_started",
@@ -136,7 +136,8 @@ test("approval_request_updated marks item done when all requests succeeded", () 
     },
   });
 
-  assert.equal(next.itemStates["a"].status, "done");
+  assert.equal(next.itemStates["a"].status, "approval_pending");
+  assert.equal(next.itemStates["a"].approvalRequests[0].status, "succeeded");
 });
 
 test("workflow_reset returns runtime defaults", () => {

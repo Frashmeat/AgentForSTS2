@@ -128,7 +128,7 @@ test("refreshRecoveredBatchApprovals replaces stale approval requests with backe
   assert.equal(refreshed.itemStates["item-1"].status, "approval_pending");
 });
 
-test("refreshRecoveredBatchApprovals marks item done when all requests succeeded", async () => {
+test("refreshRecoveredBatchApprovals keeps item pending approval until workflow resumes", async () => {
   const runtime: BatchRuntimeState = {
     ...createInitialBatchRuntimeState(),
     stage: "executing",
@@ -146,7 +146,8 @@ test("refreshRecoveredBatchApprovals marks item done when all requests succeeded
     createApproval({ action_id: actionId, status: "succeeded" }),
   );
 
-  assert.equal(refreshed.itemStates["item-1"].status, "done");
+  assert.equal(refreshed.itemStates["item-1"].status, "approval_pending");
+  assert.equal(refreshed.itemStates["item-1"].approvalRequests[0].status, "succeeded");
 });
 
 test("createRetryableBatchItemState clears stale fields before retry", () => {

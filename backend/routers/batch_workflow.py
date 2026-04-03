@@ -282,7 +282,7 @@ async def _handle_legacy_ws_batch(ws: WebSocket, *, initial_params: dict | None 
                 raise RuntimeError("approval service store is not configured")
 
             for action in state["actions"]:
-                if action.requires_approval and action.status != "approved":
+                if action.requires_approval and action.status not in {"approved", "succeeded"}:
                     store.approve_request(action.action_id)
 
             state["approved"] = True

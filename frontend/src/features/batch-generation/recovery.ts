@@ -266,9 +266,7 @@ export async function refreshRecoveredBatchApprovals(
 
     itemStates = updateBatchItemStateRecord(itemStates, itemId, {
       approvalRequests,
-      status: approvalRequests.every((request) => request.status === "succeeded")
-        ? "done"
-        : "approval_pending",
+      status: "approval_pending",
     });
   }
 

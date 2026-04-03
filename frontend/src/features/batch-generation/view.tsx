@@ -13,6 +13,12 @@ import { StageStatus } from "../../components/StageStatus";
 import { BuildDeploy } from "../../components/BuildDeploy";
 import { cn } from "../../lib/utils";
 import { loadAppConfig } from "../../shared/api/config";
+import {
+  applyBatchApprovalUpdate,
+  canProceedBatchApproval,
+  markBatchApprovalResuming,
+  resumeBatchApprovalWorkflow,
+} from "./approval";
 import { openBatchPlanningSocket } from "./planningSession";
 
 // ── 类型 ──────────────────────────────────────────────────────────────────────
@@ -356,24 +362,24 @@ function BatchModePage() {
     setApprovalBusyActionId(actionId);
     try {
       const updated = await action(actionId);
-      applyItemStates(prev => {
-        const next: Record<string, ItemState> = { ...prev };
-        for (const [id, state] of Object.entries(prev)) {
-          const nextRequests = state.approvalRequests.map(req => req.action_id === actionId ? updated : req);
-          const nextStatus =
-            state.status === "approval_pending" && nextRequests.length > 0 && nextRequests.every(req => req.status === "succeeded")
-              ? "done"
-              : state.status;
-          next[id] = { ...state, approvalRequests: nextRequests, status: nextStatus };
-        }
-        return next;
-      });
+      applyItemStates(prev => applyBatchApprovalUpdate(prev, actionId, updated));
     } catch (error) {
       setGlobalError(error instanceof Error ? error.message : String(error));
       setStage("error");
     } finally {
       setApprovalBusyActionId(null);
     }
+  }
+
+  function handleProceedApproval(itemId: string) {
+    const socket = socketRef.current;
+    const state = itemStatesRef.current[itemId];
+    if (!socket || !state || !canProceedBatchApproval(state.approvalRequests)) {
+      return;
+    }
+
+    applyItemStates(prev => markBatchApprovalResuming(prev, itemId));
+    resumeBatchApprovalWorkflow(socket, itemId);
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -482,6 +488,8 @@ function BatchModePage() {
           onApproveAction={(actionId) => { void handleApprovalAction(actionId, approveApproval); }}
           onRejectAction={(actionId) => { void handleApprovalAction(actionId, (id) => rejectApproval(id)); }}
           onExecuteAction={(actionId) => { void handleApprovalAction(actionId, executeApproval); }}
+          onProceedApproval={handleProceedApproval}
+          hasLiveSession={socketRef.current !== null}
           onUpdatePrompt={(id, prompt) =>
             updateItem(id, { currentPrompt: prompt })
           }
@@ -687,7 +695,8 @@ function ExecutionView({
   items, itemStates, activeItemId, setActiveItemId,
   batchLog, currentBatchStage, batchStageHistory, batchResult, stage, projectRoot,
   autoSelectFirst, onAutoSelectToggle,
-  onSelectImage, onGenerateMore, onRetryItem, approvalBusyActionId, onApproveAction, onRejectAction, onExecuteAction, onUpdatePrompt, onToggleMorePrompt, onReset,
+  onSelectImage, onGenerateMore, onRetryItem, approvalBusyActionId, onApproveAction, onRejectAction, onExecuteAction,
+  onProceedApproval, hasLiveSession, onUpdatePrompt, onToggleMorePrompt, onReset,
 }: {
   items: PlanItem[];
   itemStates: Record<string, ItemState>;
@@ -708,6 +717,8 @@ function ExecutionView({
   onApproveAction: (actionId: string) => void;
   onRejectAction: (actionId: string) => void;
   onExecuteAction: (actionId: string) => void;
+  onProceedApproval: (itemId: string) => void;
+  hasLiveSession: boolean;
   onUpdatePrompt: (id: string, prompt: string) => void;
   onToggleMorePrompt: (id: string) => void;
   onReset: () => void;
@@ -831,6 +842,8 @@ function ExecutionView({
             onApproveAction={onApproveAction}
             onRejectAction={onRejectAction}
             onExecuteAction={onExecuteAction}
+            onProceedApproval={() => onProceedApproval(activeItem.id)}
+            proceedApprovalDisabled={!hasLiveSession || !canProceedBatchApproval(activeState.approvalRequests)}
             onUpdatePrompt={(p) => onUpdatePrompt(activeItem.id, p)}
             onToggleMorePrompt={() => onToggleMorePrompt(activeItem.id)}
           />
@@ -844,7 +857,8 @@ function ExecutionView({
 
 function ItemDetailPanel({
   item, state,
-  onSelectImage, onGenerateMore, onRetryItem, approvalBusyActionId, onApproveAction, onRejectAction, onExecuteAction, onUpdatePrompt, onToggleMorePrompt,
+  onSelectImage, onGenerateMore, onRetryItem, approvalBusyActionId, onApproveAction, onRejectAction, onExecuteAction,
+  onProceedApproval, proceedApprovalDisabled, onUpdatePrompt, onToggleMorePrompt,
 }: {
   item: PlanItem;
   state: ItemState;
@@ -855,6 +869,8 @@ function ItemDetailPanel({
   onApproveAction: (actionId: string) => void;
   onRejectAction: (actionId: string) => void;
   onExecuteAction: (actionId: string) => void;
+  onProceedApproval: () => void;
+  proceedApprovalDisabled: boolean;
   onUpdatePrompt: (p: string) => void;
   onToggleMorePrompt: () => void;
 }) {
@@ -895,6 +911,8 @@ function ItemDetailPanel({
           onApprove={onApproveAction}
           onReject={onRejectAction}
           onExecute={onExecuteAction}
+          onProceed={onProceedApproval}
+          proceedDisabled={proceedApprovalDisabled}
         />
       )}
 
