@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.composition.container import ApplicationContainer
+from app.shared.infra.config.settings import Settings
 from app.shared.infra.feature_flags import resolve_platform_migration_flags
 from config import get_config
 from routers import WEB_ROUTER_MODULES, WORKSTATION_ROUTER_MODULES
@@ -28,13 +29,17 @@ if sys.platform == "win32":
 AppRole = Literal["full", "workstation", "web"]
 
 
-def _create_base_app() -> FastAPI:
+def _create_base_app(role: AppRole, config: dict) -> FastAPI:
+    settings = Settings.from_dict(config)
+    runtime_config = settings.get_runtime(role)
     app = FastAPI(title="AgentTheSpire", version="0.1.0")
-    app.state.container = ApplicationContainer.from_config(get_config())
+    app.state.container = ApplicationContainer.from_config(config, runtime_role=role)
+    app.state.runtime_role = role
+    app.state.runtime_config_errors = settings.validate_for_role(role)
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:5173", "http://localhost:7860", "http://localhost:7870", "http://localhost:8080"],
+        allow_origins=runtime_config.get("cors_origins", []),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -97,7 +102,7 @@ def _mount_frontend(app: FastAPI) -> None:
 
 def create_app(role: AppRole) -> FastAPI:
     config = get_config()
-    app = _create_base_app()
+    app = _create_base_app(role, config)
 
     for module_name in get_router_modules_for_role(role, config):
         _include_router(app, module_name)

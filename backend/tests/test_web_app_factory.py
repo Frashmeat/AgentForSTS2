@@ -28,7 +28,7 @@ def test_create_app_for_web_includes_only_web_routes_and_skips_frontend_mount(mo
     included_modules: list[str] = []
     frontend_mounted = False
 
-    def fake_base_app() -> FastAPI:
+    def fake_base_app(role: str, config: dict) -> FastAPI:
         app = FastAPI()
         app.state.container = object()
         return app
@@ -61,7 +61,7 @@ def test_create_app_for_full_role_keeps_workstation_routes_and_flagged_platform_
         }
     }
 
-    def fake_base_app() -> FastAPI:
+    def fake_base_app(role: str, config: dict) -> FastAPI:
         app = FastAPI()
         app.state.container = object()
         return app

@@ -1,0 +1,40 @@
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from app.composition.container import ApplicationContainer
+from app.shared.infra.config.settings import Settings
+
+
+def test_settings_expose_web_runtime_defaults_and_validation():
+    settings = Settings.from_dict(None)
+
+    runtime = settings.get_runtime("web")
+
+    assert runtime["port"] == 7870
+    assert runtime["mount_frontend"] is False
+    assert runtime["requires_database"] is True
+    assert "http://localhost:7870" in runtime["cors_origins"]
+    assert settings.validate_for_role("web") == ["database.url is required for web runtime"]
+
+
+def test_web_runtime_container_skips_workstation_bridge_singletons():
+    container = ApplicationContainer.from_config(
+        {
+            "database": {
+                "url": "sqlite+pysqlite:///:memory:",
+            }
+        },
+        runtime_role="web",
+    )
+
+    assert container.runtime_role == "web"
+    assert container.has_singleton("platform.job_repository_factory") is True
+    assert container.has_singleton("platform.job_query_service_factory") is True
+    assert container.has_singleton("platform.admin_query_service_factory") is True
+    assert container.has_singleton("platform.config_facade_service_factory") is False
+    assert container.has_singleton("platform.workflow_registry_factory") is False
+    assert container.has_singleton("platform.approval_adapter_factory") is False
