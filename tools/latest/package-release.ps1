@@ -88,6 +88,7 @@ function Invoke-RobocopySafe {
     }
 
     & robocopy @arguments | Out-Null
+    # robocopy 的 0-7 都属于成功或可接受的差异状态，8 以上才表示失败。
     if ($LASTEXITCODE -gt 7) {
         throw "robocopy 失败，退出码: $LASTEXITCODE"
     }
@@ -96,6 +97,8 @@ function Invoke-RobocopySafe {
 function Get-ServiceDefinitions {
     param([string]$SelectedTarget)
 
+    # 每个目标都映射为一组需要打进 release bundle 的服务定义。
+    # RemovePaths 用来剔除当前目标不应暴露的入口和路由，避免把整仓库原样塞进镜像。
     switch ($SelectedTarget) {
         "full" {
             return @(
@@ -153,6 +156,7 @@ function Copy-ServiceBundle {
     }
 
     if ($Service.IncludeFrontend) {
+        # 这里只复制已经构建好的 dist，运行时不再依赖 Node 环境。
         Write-Host "整理 frontend/dist -> $($Service.Name)..."
         Invoke-RobocopySafe -Source $FrontendDistDir -Destination (Join-Path $serviceDir "frontend\dist")
     }
@@ -220,6 +224,8 @@ $releaseDir = Join-Path $OutputRoot $effectiveReleaseName
 $zipPath = Join-Path $OutputRoot ("{0}.zip" -f $effectiveReleaseName)
 $composeTemplate = Join-Path $templatesDir ("compose.{0}.yml" -f $Target)
 $serviceDefinitions = Get-ServiceDefinitions -SelectedTarget $Target
+$needsFrontend = @($serviceDefinitions | Where-Object { $_.IncludeFrontend }).Count -gt 0
+$needsModTemplate = @($serviceDefinitions | Where-Object { $_.IncludeModTemplate }).Count -gt 0
 
 Assert-PathExists -Path $frontendDir -Label "frontend 目录"
 Assert-PathExists -Path $backendDir -Label "backend 目录"
@@ -229,16 +235,17 @@ Assert-PathExists -Path $composeTemplate -Label "compose 模板"
 Assert-CommandExists -CommandName "git"
 Assert-CommandExists -CommandName "robocopy"
 
-if (@($serviceDefinitions | Where-Object { $_.IncludeModTemplate }).Count -gt 0) {
+if ($needsModTemplate) {
     Assert-PathExists -Path $modTemplateDir -Label "mod_template 目录"
 }
 
-if ((@($serviceDefinitions | Where-Object { $_.IncludeFrontend }).Count -gt 0) -and (-not $SkipFrontendBuild)) {
+if ($needsFrontend -and (-not $SkipFrontendBuild)) {
     Assert-CommandExists -CommandName "node"
     Assert-CommandExists -CommandName "npm"
 
     Push-Location $frontendDir
     try {
+        # 统一在打包阶段产出 dist，避免部署脚本再触发前端构建。
         Write-Host "构建前端产物..."
         & npm run build
         if ($LASTEXITCODE -ne 0) {
@@ -250,7 +257,7 @@ if ((@($serviceDefinitions | Where-Object { $_.IncludeFrontend }).Count -gt 0) -
     }
 }
 
-if (@($serviceDefinitions | Where-Object { $_.IncludeFrontend }).Count -gt 0) {
+if ($needsFrontend) {
     Assert-PathExists -Path $frontendDistDir -Label "frontend/dist 构建产物"
 }
 

@@ -87,12 +87,14 @@ function New-RuntimeConfig {
     $config["database"] = Ensure-Hashtable -Value $config["database"]
 
     if ($Mode -eq "web") {
+        # Web 目标始终接管数据库连接，并强制打开平台 API 相关开关。
         $config["database"]["url"] = "postgresql+psycopg://{0}:{1}@postgres:5432/{2}" -f $DbUser, $DbPassword, $DbName
         $config["database"]["echo"] = $false
         $config["database"]["pool_pre_ping"] = $true
         $config["migration"]["platform_jobs_api_enabled"] = $true
         $config["migration"]["platform_service_split_enabled"] = $true
     } else {
+        # workstation/full 中的工作站进程不应暴露 web 平台路由。
         $config["migration"]["platform_jobs_api_enabled"] = $false
         $config["migration"]["platform_service_split_enabled"] = $false
     }
@@ -117,6 +119,7 @@ function Write-ComposeEnvFile {
         [string]$ResolvedPostgresImage
     )
 
+    # Compose 模板的端口、数据库和镜像选择都从 runtime/.env 注入，bundle 本身保持静态。
     $lines = switch ($TargetName) {
         "full" {
             @(
@@ -223,6 +226,7 @@ function Resolve-PostgresImage {
         return $PreferredImage
     }
 
+    # 优先复用本机已有镜像，减少首次以外的网络拉取；都不存在时再回退到默认 upstream 名称。
     $candidates = @(
         "postgres:16-alpine",
         "m.daocloud.io/docker.io/library/postgres:16-alpine",
@@ -289,6 +293,7 @@ if ($ResetDatabase) {
     if ($Target -notin @("full", "web")) {
         throw "-ResetDatabase 仅适用于包含 Web 后端数据库的部署目标: full / web"
     }
+    # 数据库重置要在构建前做，避免保留旧卷里的脏迁移状态。
     Write-Host "检测到 -ResetDatabase，将删除 Docker 卷并重建数据库..."
     Invoke-DockerCompose -BundleDir $effectiveReleaseRoot -ComposeFile $composeFile -EnvFile $envFile -ComposeProjectName $effectiveProjectName -ComposeArgs @("down", "--volumes", "--remove-orphans")
 }
@@ -309,6 +314,7 @@ foreach ($serviceName in $buildServices) {
 }
 
 if ($missingBuildServices.Count -gt 0) {
+    # 构建和启动显式拆开：首次缺镜像才 build，后续 up 使用 --no-build 避免重复装依赖。
     Write-Host "检测到需要构建本地镜像: $($missingBuildServices -join ', ')"
     Invoke-DockerCompose -BundleDir $effectiveReleaseRoot -ComposeFile $composeFile -EnvFile $envFile -ComposeProjectName $effectiveProjectName -ComposeArgs @("build")
 }
