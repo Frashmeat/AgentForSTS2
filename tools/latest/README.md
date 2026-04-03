@@ -84,7 +84,8 @@ pwsh -File .\tools\latest\deploy-docker.ps1 -Target web -ResetDatabase
 - Docker 部署会自动把运行时配置写入 release bundle 的 `runtime/` 目录，不会直接覆盖仓库根目录的 `config.json`。
 - Docker 部署默认不会在每次执行时强制重建镜像；只有显式传入 `-RebuildImages` 时，才会重新进入镜像构建和依赖安装阶段。
 - `web` / `full` 目标会优先复用本机已存在的 Postgres 镜像；如需指定数据库镜像，可传入 `-PostgresImage`。
+- `full` 目标默认会先删除数据库卷并重建数据库；`web` 目标仍需显式传入 `-ResetDatabase`。
 - Docker 镜像默认把 `rembg[gpu]` 降为 CPU 版 `rembg`，优先保证后端服务可启动。
 - 工作站包会剔除 `platform_admin.py`、`platform_jobs.py` 和 `main_web.py`。
 - Web 包会剔除工作站路由和 `main_workstation.py`。
-- 数据库重置是危险操作，只会在 `full` / `web` 目标下显式传入 `-ResetDatabase` 时执行。
+- 数据库重置是危险操作；其中 `full` 目标会默认执行，`web` 目标只会在显式传入 `-ResetDatabase` 时执行。

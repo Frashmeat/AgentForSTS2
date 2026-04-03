@@ -261,6 +261,7 @@ $composeFile = Join-Path $effectiveReleaseRoot "docker-compose.yml"
 $runtimeDir = Join-Path $effectiveReleaseRoot "runtime"
 $envFile = Join-Path $runtimeDir ".env"
 $resolvedPostgresImage = Resolve-PostgresImage -PreferredImage $PostgresImage
+$shouldResetDatabase = $Target -eq "full" -or $ResetDatabase.IsPresent
 
 Assert-PathExists -Path $composeFile -Label "docker-compose.yml"
 $null = New-Item -ItemType Directory -Path $runtimeDir -Force
@@ -289,12 +290,17 @@ if ($Target -eq "full" -or $Target -eq "web") {
     Write-RuntimeConfigFile -Config $webConfig -OutputPath (Join-Path $runtimeDir "web.config.json")
 }
 
-if ($ResetDatabase) {
+if ($shouldResetDatabase) {
     if ($Target -notin @("full", "web")) {
         throw "-ResetDatabase 仅适用于包含 Web 后端数据库的部署目标: full / web"
     }
-    # 数据库重置要在构建前做，避免保留旧卷里的脏迁移状态。
-    Write-Host "检测到 -ResetDatabase，将删除 Docker 卷并重建数据库..."
+    # full 目标默认重建数据库，避免同机联调时复用旧卷里的脏迁移状态。
+    $resetReason = if ($Target -eq "full" -and (-not $ResetDatabase.IsPresent)) {
+        "检测到 full 目标，默认重建数据库"
+    } else {
+        "检测到 -ResetDatabase，将删除 Docker 卷并重建数据库"
+    }
+    Write-Host "$resetReason..."
     Invoke-DockerCompose -BundleDir $effectiveReleaseRoot -ComposeFile $composeFile -EnvFile $envFile -ComposeProjectName $effectiveProjectName -ComposeArgs @("down", "--volumes", "--remove-orphans")
 }
 
@@ -328,6 +334,7 @@ Write-Host "  Target       : $Target"
 Write-Host "  Release 目录 : $effectiveReleaseRoot"
 Write-Host "  Compose Env  : $envFile"
 Write-Host "  强制重建镜像 : $($RebuildImages.IsPresent)"
+Write-Host "  重建数据库   : $shouldResetDatabase"
 if ($Target -in @("full", "web")) {
     Write-Host "  Postgres 镜像: $resolvedPostgresImage"
 }
