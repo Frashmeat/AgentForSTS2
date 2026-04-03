@@ -185,5 +185,8 @@ Code Agent 开始生成代码...
 ## build_game_path_missing
 ⚠ 未配置 STS2 游戏路径，跳过部署（可在设置中配置）
 
+## build_game_path_invalid
+⚠ 配置的 STS2 Mods 路径不存在：{{ target_dir }}
+
 ## build_file_item
   ✓ {{ file_name }}

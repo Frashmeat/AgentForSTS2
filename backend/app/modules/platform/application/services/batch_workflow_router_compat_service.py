@@ -79,7 +79,7 @@ class BatchWorkflowRouterCompatService:
 
         from routers import batch_workflow as batch_router
 
-        await batch_router._handle_legacy_ws_batch(ws)
+        await batch_router._handle_legacy_ws_batch(ws, initial_params=params)
 
     async def _handle_platform_custom_code_plan(self, ws, params: dict, plan) -> None:
         project_root = Path(params["project_root"])

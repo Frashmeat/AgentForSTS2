@@ -48,12 +48,18 @@ if "agents.planner" not in sys.modules:
     planner_stub.PlanItem = _PlanItem
     sys.modules["agents.planner"] = planner_stub
 
+sys.modules.setdefault("image.generator", SimpleNamespace(generate_images=None))
+sys.modules.setdefault("image.postprocess", SimpleNamespace(process_image=None))
+sys.modules.setdefault("image.prompt_adapter", SimpleNamespace(adapt_prompt=None, ImageProvider=str))
+sys.modules.setdefault("llm.text_runner", SimpleNamespace(complete_text=None))
+
 pytest.importorskip("sqlalchemy")
 
 from app.modules.platform.application.services.batch_workflow_router_compat_service import BatchWorkflowRouterCompatService
 from app.modules.platform.infra.persistence import models as _platform_models  # noqa: F401
 from app.modules.platform.infra.persistence.models import JobEventRecord, JobItemRecord, JobRecord, platform_tables
 from app.shared.infra.db.base import Base
+import routers.batch_workflow as batch_router
 
 
 class _FakeWebSocket:
@@ -147,3 +153,36 @@ def test_batch_workflow_router_compat_service_can_use_platform_main_chain_for_cu
         "job.item.completed",
         "job.completed",
     ]
+
+
+def test_batch_workflow_router_compat_service_passes_prefetched_payload_to_legacy_handler(monkeypatch):
+    calls: list[tuple[dict, bool]] = []
+
+    async def fake_legacy_handler(ws, *, initial_params=None):
+        calls.append((initial_params, ws.accepted))
+        await ws.send_text(json.dumps({"event": "batch_done", "source": "legacy"}))
+
+    monkeypatch.setattr(batch_router, "_handle_legacy_ws_batch", fake_legacy_handler)
+
+    service = BatchWorkflowRouterCompatService(session_factory=lambda: None)
+    ws = _FakeWebSocket(
+        {
+            "action": "start",
+            "requirements": "做一个测试 Mod",
+            "project_root": "I:/compat-project",
+        }
+    )
+
+    asyncio.run(service.handle_ws_batch(ws))
+
+    assert calls == [
+        (
+            {
+                "action": "start",
+                "requirements": "做一个测试 Mod",
+                "project_root": "I:/compat-project",
+            },
+            True,
+        )
+    ]
+    assert ws.sent[-1]["source"] == "legacy"

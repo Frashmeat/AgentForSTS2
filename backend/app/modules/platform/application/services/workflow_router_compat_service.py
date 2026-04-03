@@ -51,7 +51,7 @@ class WorkflowRouterCompatService:
 
         from routers import workflow as workflow_router
 
-        await workflow_router._handle_legacy_ws_create(ws)
+        await workflow_router._handle_legacy_ws_create(ws, initial_params=params)
 
     async def _handle_platform_custom_code(self, ws, params: dict) -> None:
         project_root = Path(params["project_root"])

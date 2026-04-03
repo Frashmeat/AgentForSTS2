@@ -48,12 +48,18 @@ if "agents.planner" not in sys.modules:
     planner_stub.PlanItem = _PlanItem
     sys.modules["agents.planner"] = planner_stub
 
+sys.modules.setdefault("image.generator", SimpleNamespace(generate_images=None))
+sys.modules.setdefault("image.postprocess", SimpleNamespace(PROFILES={}, process_image=None))
+sys.modules.setdefault("image.prompt_adapter", SimpleNamespace(adapt_prompt=None, ImageProvider=str))
+sys.modules.setdefault("llm.text_runner", SimpleNamespace(complete_text=None))
+
 pytest.importorskip("sqlalchemy")
 
 from app.modules.platform.application.services.workflow_router_compat_service import WorkflowRouterCompatService
 from app.modules.platform.infra.persistence import models as _platform_models  # noqa: F401
 from app.modules.platform.infra.persistence.models import JobEventRecord, JobItemRecord, JobRecord, platform_tables
 from app.shared.infra.db.base import Base
+import routers.workflow as workflow_router
 
 
 class _FakeWebSocket:
@@ -125,3 +131,40 @@ def test_workflow_router_compat_service_can_use_platform_main_chain_for_custom_c
         "job.item.completed",
         "job.completed",
     ]
+
+
+def test_workflow_router_compat_service_passes_prefetched_payload_to_legacy_handler(monkeypatch):
+    calls: list[tuple[dict, bool]] = []
+
+    async def fake_legacy_handler(ws, *, initial_params=None):
+        calls.append((initial_params, ws.accepted))
+        await ws.send_text(json.dumps({"event": "done", "source": "legacy"}))
+
+    monkeypatch.setattr(workflow_router, "_handle_legacy_ws_create", fake_legacy_handler)
+
+    service = WorkflowRouterCompatService(session_factory=lambda: None)
+    ws = _FakeWebSocket(
+        {
+            "action": "start",
+            "asset_type": "relic",
+            "asset_name": "CompatRelic",
+            "description": "走 legacy 回退",
+            "project_root": "I:/compat-project",
+        }
+    )
+
+    asyncio.run(service.handle_ws_create(ws))
+
+    assert calls == [
+        (
+            {
+                "action": "start",
+                "asset_type": "relic",
+                "asset_name": "CompatRelic",
+                "description": "走 legacy 回退",
+                "project_root": "I:/compat-project",
+            },
+            True,
+        )
+    ]
+    assert ws.sent[-1]["source"] == "legacy"

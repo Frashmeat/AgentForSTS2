@@ -82,6 +82,12 @@ async def ws_build_deploy(ws: WebSocket):
         cfg = get_config()
         sts2_path_str = cfg.get("sts2_path", "")
         sts2_mods = Path(sts2_path_str) / "Mods" if sts2_path_str else None
+        if sts2_mods is not None and not sts2_mods.exists():
+            await ws.send_text(json.dumps({
+                "event": "error",
+                "message": _TEXT_LOADER.render("runtime_workflow.build_game_path_invalid", {"target_dir": sts2_mods}).strip(),
+            }))
+            return
 
         async def send_chunk(chunk: str):
             await ws.send_text(json.dumps({"event": "stream", "chunk": chunk}))

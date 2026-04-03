@@ -176,7 +176,7 @@ async def ws_batch(ws: WebSocket):
     await _handle_legacy_ws_batch(ws)
 
 
-async def _handle_legacy_ws_batch(ws: WebSocket):
+async def _handle_legacy_ws_batch(ws: WebSocket, *, initial_params: dict | None = None):
     """
     批量创建 Mod 资产的 WebSocket 端点。
 
@@ -191,7 +191,8 @@ async def _handle_legacy_ws_batch(ws: WebSocket):
       item_started / item_progress / item_image_ready / item_agent_stream /
       item_done / item_error / batch_done / error
     """
-    await ws.accept()
+    if initial_params is None:
+        await ws.accept()
 
     selection_futures: dict[str, asyncio.Future] = {}
     cfg = get_config()
@@ -213,8 +214,11 @@ async def _handle_legacy_ws_batch(ws: WebSocket):
 
     try:
         # ── 1. 接收启动参数 ──────────────────────────────────────────────────
-        raw = await ws.receive_text()
-        params = json.loads(raw)
+        if initial_params is None:
+            raw = await ws.receive_text()
+            params = json.loads(raw)
+        else:
+            params = initial_params
         action = params.get("action")
 
         project_root = Path(params["project_root"])

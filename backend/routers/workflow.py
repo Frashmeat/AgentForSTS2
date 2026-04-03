@@ -169,7 +169,7 @@ async def ws_create(ws: WebSocket):
     await _handle_legacy_ws_create(ws)
 
 
-async def _handle_legacy_ws_create(ws: WebSocket):
+async def _handle_legacy_ws_create(ws: WebSocket, *, initial_params: dict | None = None):
     """
     WebSocket 端点，驱动完整的创建工作流。
 
@@ -191,13 +191,15 @@ async def _handle_legacy_ws_create(ws: WebSocket):
     - done: {success, output_files}
     - error: {message}
     """
-    await ws.accept()
     client = ws.client
     logger.info("[ws/create] 连接建立 client=%s", client)
     try:
-        # 1. 接收初始参数
-        raw = await ws.receive_text()
-        params = json.loads(raw)
+        if initial_params is None:
+            await ws.accept()
+            raw = await ws.receive_text()
+            params = json.loads(raw)
+        else:
+            params = initial_params
         assert params.get("action") == "start"
 
         asset_type: AssetType = params["asset_type"]

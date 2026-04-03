@@ -13,6 +13,7 @@ import { StageStatus } from "../../components/StageStatus";
 import { BuildDeploy } from "../../components/BuildDeploy";
 import { cn } from "../../lib/utils";
 import { loadAppConfig } from "../../shared/api/config";
+import { openBatchPlanningSocket } from "./planningSession";
 
 // ── 类型 ──────────────────────────────────────────────────────────────────────
 
@@ -186,9 +187,18 @@ function BatchModePage() {
     const ws = new BatchSocket();
     socketRef.current = ws;
     _registerBatchHandlers(ws);
-
-    await ws.waitOpen();
-    ws.send({ action: "start", requirements, project_root: projectRoot });
+    const started = await openBatchPlanningSocket(ws, {
+      requirements,
+      projectRoot,
+      onOpenError(message) {
+        socketRef.current = null;
+        setGlobalError(message);
+        setStage("error");
+      },
+    });
+    if (!started) {
+      return;
+    }
   }
 
   function _registerBatchHandlers(ws: BatchSocket) {
@@ -279,9 +289,18 @@ function BatchModePage() {
       const ws = new BatchSocket();
       socketRef.current = ws;
       _registerBatchHandlers(ws);
-      await ws.waitOpen();
+      const started = await openBatchPlanningSocket(ws, {
+        payload: { action: "start_with_plan", project_root: projectRoot, plan: { ...plan, items: editedItems } },
+        onOpenError(message) {
+          socketRef.current = null;
+          setGlobalError(message);
+          setStage("error");
+        },
+      });
+      if (!started) {
+        return;
+      }
       setStage("executing");
-      ws.send({ action: "start_with_plan", project_root: projectRoot, plan: { ...plan, items: editedItems } });
     } else {
       setStage("executing");
       socketRef.current.send({ action: "confirm_plan", plan: { ...plan, items: editedItems } });
