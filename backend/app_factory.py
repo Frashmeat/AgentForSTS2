@@ -71,7 +71,10 @@ def _include_web_routers(app: FastAPI) -> None:
 
 def _resolve_platform_router_modules(config: dict) -> tuple[str, ...]:
     platform_flags = resolve_platform_migration_flags(config)
-    modules: list[str] = []
+    modules: list[str] = [
+        "routers.auth_router",
+        "routers.me_router",
+    ]
     if platform_flags.platform_jobs_api_enabled:
         modules.append("routers.platform_jobs")
     if platform_flags.platform_service_split_enabled:

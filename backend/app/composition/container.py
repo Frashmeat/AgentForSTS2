@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional
 
-from app.modules.auth.application import AuthService
+from app.modules.auth.application import AuthService, PBKDF2PasswordHasher
 from app.modules.auth.infra.persistence.repositories import (
     EmailVerificationRepositorySqlAlchemy,
     UserRepositorySqlAlchemy,
@@ -129,6 +129,7 @@ class ApplicationContainer:
             ("auth.user_repository_factory", UserRepositorySqlAlchemy),
             ("auth.email_verification_repository_factory", EmailVerificationRepositorySqlAlchemy),
             ("auth.auth_service_factory", AuthService),
+            ("auth.password_hasher_factory", PBKDF2PasswordHasher),
         ):
             self._singletons.setdefault(key, instance)
 
