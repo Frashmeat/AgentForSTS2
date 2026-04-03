@@ -12,7 +12,8 @@ param(
     [string]$PostgresDb = "agentthespire",
     [string]$PostgresUser = "agentthespire",
     [string]$PostgresPassword = "agentthespire",
-    [switch]$ResetDatabase
+    [switch]$ResetDatabase,
+    [switch]$RebuildImages
 )
 
 $ErrorActionPreference = "Stop"
@@ -169,6 +170,48 @@ function Invoke-DockerCompose {
     }
 }
 
+function Get-BuildServices {
+    param(
+        [ValidateSet("full", "workstation", "frontend", "web")]
+        [string]$TargetName
+    )
+
+    switch ($TargetName) {
+        "full" { return @("workstation", "web") }
+        "workstation" { return @("workstation") }
+        "frontend" { return @("frontend") }
+        "web" { return @("web") }
+        default { throw "未知 Target: $TargetName" }
+    }
+}
+
+function Get-ComposeImageName {
+    param(
+        [string]$ComposeProjectName,
+        [string]$ServiceName
+    )
+
+    return "{0}-{1}:latest" -f $ComposeProjectName, $ServiceName
+}
+
+function Test-DockerImageExists {
+    param([string]$ImageName)
+
+    & docker image inspect $ImageName *> $null
+    return $LASTEXITCODE -eq 0
+}
+
+function Remove-DockerImageIfExists {
+    param([string]$ImageName)
+
+    if (Test-DockerImageExists -ImageName $ImageName) {
+        & docker image rm -f $ImageName
+        if ($LASTEXITCODE -ne 0) {
+            throw "删除旧镜像失败: $ImageName"
+        }
+    }
+}
+
 $effectiveReleaseRoot = if ([string]::IsNullOrWhiteSpace($ReleaseRoot)) {
     Join-Path $PSScriptRoot ("artifacts\agentthespire-{0}-release" -f $Target)
 } else {
@@ -222,14 +265,35 @@ if ($ResetDatabase) {
     Invoke-DockerCompose -BundleDir $effectiveReleaseRoot -ComposeFile $composeFile -EnvFile $envFile -ComposeProjectName $effectiveProjectName -ComposeArgs @("down", "--volumes", "--remove-orphans")
 }
 
+$buildServices = Get-BuildServices -TargetName $Target
+$missingBuildServices = @()
+
+foreach ($serviceName in $buildServices) {
+    $imageName = Get-ComposeImageName -ComposeProjectName $effectiveProjectName -ServiceName $serviceName
+    if ($RebuildImages) {
+        Remove-DockerImageIfExists -ImageName $imageName
+        $missingBuildServices += $serviceName
+        continue
+    }
+    if (-not (Test-DockerImageExists -ImageName $imageName)) {
+        $missingBuildServices += $serviceName
+    }
+}
+
+if ($missingBuildServices.Count -gt 0) {
+    Write-Host "检测到需要构建本地镜像: $($missingBuildServices -join ', ')"
+    Invoke-DockerCompose -BundleDir $effectiveReleaseRoot -ComposeFile $composeFile -EnvFile $envFile -ComposeProjectName $effectiveProjectName -ComposeArgs @("build")
+}
+
 Write-Host "启动 Docker 部署..."
-Invoke-DockerCompose -BundleDir $effectiveReleaseRoot -ComposeFile $composeFile -EnvFile $envFile -ComposeProjectName $effectiveProjectName -ComposeArgs @("up", "-d", "--build")
+Invoke-DockerCompose -BundleDir $effectiveReleaseRoot -ComposeFile $composeFile -EnvFile $envFile -ComposeProjectName $effectiveProjectName -ComposeArgs @("up", "-d", "--no-build")
 
 Write-Host ""
 Write-Host "部署完成:"
 Write-Host "  Target       : $Target"
 Write-Host "  Release 目录 : $effectiveReleaseRoot"
 Write-Host "  Compose Env  : $envFile"
+Write-Host "  强制重建镜像 : $($RebuildImages.IsPresent)"
 switch ($Target) {
     "full" {
         Write-Host "  工作站地址   : http://127.0.0.1:$WorkstationPort"

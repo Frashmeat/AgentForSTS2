@@ -7,7 +7,7 @@
 - `package-release.ps1`
   按目标打包 release bundle，并输出 zip 包。
 - `deploy-docker.ps1`
-  按目标启动 Docker 部署，支持显式重置数据库。
+  按目标启动 Docker 部署，支持显式重置数据库和按需重建镜像。
 - `templates/compose.*.yml`
   不同目标的 Docker Compose 模板。
 - `templates/workstation/`
@@ -66,6 +66,12 @@ pwsh -File .\tools\latest\package-release.ps1 -Target full
 pwsh -File .\tools\latest\deploy-docker.ps1 -Target full
 ```
 
+如需强制重新构建镜像：
+
+```powershell
+pwsh -File .\tools\latest\deploy-docker.ps1 -Target workstation -RebuildImages
+```
+
 如需重置数据库：
 
 ```powershell
@@ -76,6 +82,7 @@ pwsh -File .\tools\latest\deploy-docker.ps1 -Target web -ResetDatabase
 
 - 当前脚本以 Windows PowerShell / PowerShell 7 为主。
 - Docker 部署会自动把运行时配置写入 release bundle 的 `runtime/` 目录，不会直接覆盖仓库根目录的 `config.json`。
+- Docker 部署默认不会在每次执行时强制重建镜像；只有显式传入 `-RebuildImages` 时，才会重新进入镜像构建和依赖安装阶段。
 - Docker 镜像默认把 `rembg[gpu]` 降为 CPU 版 `rembg`，优先保证后端服务可启动。
 - 工作站包会剔除 `platform_admin.py`、`platform_jobs.py` 和 `main_web.py`。
 - Web 包会剔除工作站路由和 `main_workstation.py`。
