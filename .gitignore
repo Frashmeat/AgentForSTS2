@@ -34,7 +34,26 @@ FangedGrimoire/
 
 # Generated local assets / outputs
 godot/
-docs/
+docs/*
+!docs/README.md
+!docs/01-总览/
+!docs/01-总览/**
+!docs/02-现状/
+!docs/02-现状/**
+!docs/03-方案/
+!docs/03-方案/**
+!docs/04-决策/
+!docs/04-决策/**
+!docs/05-审查与验证/
+!docs/05-审查与验证/**
+!docs/90-归档/
+!docs/90-归档/**
+!docs/superpowers/
+docs/superpowers/*
+!docs/superpowers/plans/
+docs/superpowers/plans/*
+!docs/superpowers/plans/2026-03-26-compat-layer-cleanup-plan.md
+!docs/superpowers/plans/2026-03-28-prompt-bundle-consolidation.md
 .tmp/
 
 # OS
