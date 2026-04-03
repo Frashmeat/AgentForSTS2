@@ -106,7 +106,7 @@ def test_platform_migration_script_exists_for_first_job_chain_revision():
         Path(__file__).resolve().parents[3]
         / "migrations"
         / "versions"
-        / "20260331_01_create_platform_job_chain.py"
+        / "20260331_01_platform_job_chain.py"
     )
 
     assert migration_path.exists()
@@ -114,3 +114,18 @@ def test_platform_migration_script_exists_for_first_job_chain_revision():
     source = migration_path.read_text(encoding="utf-8")
     assert "def upgrade()" in source
     assert "def downgrade()" in source
+
+
+def test_first_platform_revision_identifier_fits_alembic_version_limit():
+    migration_path = (
+        Path(__file__).resolve().parents[3]
+        / "migrations"
+        / "versions"
+        / "20260331_01_platform_job_chain.py"
+    )
+
+    source = migration_path.read_text(encoding="utf-8")
+    revision_line = next(line for line in source.splitlines() if line.startswith('revision = "'))
+    revision = revision_line.split('"')[1]
+
+    assert len(revision) <= 32

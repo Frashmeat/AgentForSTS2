@@ -5,7 +5,7 @@ from alembic import op
 from app.modules.platform.infra.persistence.models import platform_tables
 
 
-revision = "20260331_01_create_platform_job_chain"
+revision = "20260331_01_platform_job_chain"
 down_revision = None
 branch_labels = None
 depends_on = None

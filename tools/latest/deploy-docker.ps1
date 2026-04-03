@@ -12,6 +12,7 @@ param(
     [string]$PostgresDb = "agentthespire",
     [string]$PostgresUser = "agentthespire",
     [string]$PostgresPassword = "agentthespire",
+    [string]$PostgresImage = "",
     [switch]$ResetDatabase,
     [switch]$RebuildImages
 )
@@ -112,7 +113,8 @@ function Write-RuntimeConfigFile {
 function Write-ComposeEnvFile {
     param(
         [string]$TargetName,
-        [string]$EnvPath
+        [string]$EnvPath,
+        [string]$ResolvedPostgresImage
     )
 
     $lines = switch ($TargetName) {
@@ -124,6 +126,7 @@ function Write-ComposeEnvFile {
                 "ATS_POSTGRES_DB=$PostgresDb"
                 "ATS_POSTGRES_USER=$PostgresUser"
                 "ATS_POSTGRES_PASSWORD=$PostgresPassword"
+                "ATS_POSTGRES_IMAGE=$ResolvedPostgresImage"
             )
         }
         "workstation" {
@@ -139,6 +142,7 @@ function Write-ComposeEnvFile {
                 "ATS_POSTGRES_DB=$PostgresDb"
                 "ATS_POSTGRES_USER=$PostgresUser"
                 "ATS_POSTGRES_PASSWORD=$PostgresPassword"
+                "ATS_POSTGRES_IMAGE=$ResolvedPostgresImage"
             )
         }
         default {
@@ -212,6 +216,29 @@ function Remove-DockerImageIfExists {
     }
 }
 
+function Resolve-PostgresImage {
+    param([string]$PreferredImage)
+
+    if (-not [string]::IsNullOrWhiteSpace($PreferredImage)) {
+        return $PreferredImage
+    }
+
+    $candidates = @(
+        "postgres:16-alpine",
+        "m.daocloud.io/docker.io/library/postgres:16-alpine",
+        "postgres:15-alpine",
+        "m.daocloud.io/docker.io/library/postgres:15-alpine"
+    )
+
+    foreach ($candidate in $candidates) {
+        if (Test-DockerImageExists -ImageName $candidate) {
+            return $candidate
+        }
+    }
+
+    return "postgres:16-alpine"
+}
+
 $effectiveReleaseRoot = if ([string]::IsNullOrWhiteSpace($ReleaseRoot)) {
     Join-Path $PSScriptRoot ("artifacts\agentthespire-{0}-release" -f $Target)
 } else {
@@ -229,10 +256,11 @@ Assert-PathExists -Path $effectiveReleaseRoot -Label "release 目录"
 $composeFile = Join-Path $effectiveReleaseRoot "docker-compose.yml"
 $runtimeDir = Join-Path $effectiveReleaseRoot "runtime"
 $envFile = Join-Path $runtimeDir ".env"
+$resolvedPostgresImage = Resolve-PostgresImage -PreferredImage $PostgresImage
 
 Assert-PathExists -Path $composeFile -Label "docker-compose.yml"
 $null = New-Item -ItemType Directory -Path $runtimeDir -Force
-Write-ComposeEnvFile -TargetName $Target -EnvPath $envFile
+Write-ComposeEnvFile -TargetName $Target -EnvPath $envFile -ResolvedPostgresImage $resolvedPostgresImage
 
 if ($Target -in @("full", "workstation", "web")) {
     $serviceDir = Join-Path (Join-Path $effectiveReleaseRoot "services") "workstation"
@@ -294,6 +322,9 @@ Write-Host "  Target       : $Target"
 Write-Host "  Release 目录 : $effectiveReleaseRoot"
 Write-Host "  Compose Env  : $envFile"
 Write-Host "  强制重建镜像 : $($RebuildImages.IsPresent)"
+if ($Target -in @("full", "web")) {
+    Write-Host "  Postgres 镜像: $resolvedPostgresImage"
+}
 switch ($Target) {
     "full" {
         Write-Host "  工作站地址   : http://127.0.0.1:$WorkstationPort"
