@@ -17,9 +17,12 @@ export class WorkflowClient<TEvent extends SocketEvent = SocketEvent> {
     };
   }
 
-  on(event: EventName<TEvent>, handler: EventHandler<TEvent>) {
-    const list = this.listeners.get(event) ?? [];
-    this.listeners.set(event, [...list, handler]);
+  on<TName extends EventName<TEvent>>(
+    event: TName,
+    handler: (data: Extract<TEvent, { event: TName }>) => void
+  ) {
+    const list = (this.listeners.get(event) ?? []) as EventHandler<TEvent>[];
+    this.listeners.set(event, [...list, handler as EventHandler<TEvent>]);
     return this;
   }
 

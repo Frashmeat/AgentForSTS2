@@ -12,7 +12,7 @@ export class WorkflowSocketFacade<TEvent extends SocketEvent> {
     event: T,
     handler: (data: Extract<TEvent, { event: T }>) => void
   ) {
-    this.client.on(event, handler as (data: WorkflowEvent) => void);
+    this.client.on(event, handler);
     return this;
   }
 

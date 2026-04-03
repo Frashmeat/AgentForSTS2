@@ -27,7 +27,7 @@ export interface PackageProjectResponse {
   success: boolean;
 }
 
-function assertNoBusinessError(value: unknown): void {
+function assertNoBusinessError<T>(value: T | { error: string }): asserts value is T {
   if (
     typeof value === "object" &&
     value !== null &&
