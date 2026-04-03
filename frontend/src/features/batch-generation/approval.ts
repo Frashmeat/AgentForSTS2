@@ -10,7 +10,7 @@ function isProceedableStatus(status: string): boolean {
 }
 
 export function canProceedBatchApproval(requests: ApprovalRequest[]): boolean {
-  return requests.length > 0 && requests.every((request) => isProceedableStatus(request.status));
+  return requests.length === 0 || requests.every((request) => isProceedableStatus(request.status));
 }
 
 export function applyBatchApprovalUpdate(

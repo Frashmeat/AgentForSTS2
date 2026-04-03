@@ -25,7 +25,7 @@ function createApproval(overrides: Partial<ApprovalRequest> = {}): ApprovalReque
 }
 
 test("canProceedBatchApproval requires every approval to leave pending state", () => {
-  assert.equal(canProceedBatchApproval([]), false);
+  assert.equal(canProceedBatchApproval([]), true);
   assert.equal(canProceedBatchApproval([createApproval()]), false);
   assert.equal(
     canProceedBatchApproval([
