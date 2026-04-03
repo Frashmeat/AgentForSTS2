@@ -173,3 +173,30 @@ test("platform detail endpoints expose typed item, artifact and event fields", a
   assert.equal(items[0].item_index, 0);
   assert.equal(events[0].event_type, "job.started");
 });
+
+test("platform api defaults to web backend when runtime base is configured", async () => {
+  const calls: Array<{ input: unknown; init?: RequestInit }> = [];
+  Object.assign(globalThis, {
+    __AGENT_THE_SPIRE_API_BASES__: {
+      web: "http://127.0.0.1:7870",
+    },
+    fetch: async (input: unknown, init?: RequestInit) => {
+      calls.push({ input, init });
+      return createMockResponse({
+        ok: true,
+        body: {
+          daily_limit: 10,
+          daily_used: 1,
+          weekly_limit: 20,
+          weekly_used: 2,
+          refunded: 0,
+          next_reset_at: "2026-04-04T00:00:00+00:00",
+        },
+      });
+    },
+  });
+
+  await getPlatformQuota(7);
+
+  assert.equal(calls[0].input, "http://127.0.0.1:7870/api/platform/quota?user_id=7");
+});
