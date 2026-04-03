@@ -47,6 +47,21 @@ tools\start.bat             # Opens http://localhost:7860
 
 See [TUTORIAL.md](TUTORIAL.md) for full setup and configuration guide.
 
+### Backend Runtime Modes
+
+- `tools\start.bat`
+  Starts the legacy integrated `full` runtime on `http://localhost:7860`.
+- `tools\start_workstation.bat`
+  Starts `workstation-backend` only. This runtime serves the local workstation UI, local workflows, approvals, config, build, and deploy flows.
+- `tools\start_web.bat`
+  Starts `web-backend` only on `http://localhost:7870`. This runtime is for platform/auth/job/quota APIs and requires a valid `database.url`.
+
+Current deployment guidance:
+
+- Single-machine local use: prefer `workstation-backend`
+- Server-side platform APIs: prefer `web-backend`
+- `full` remains a compatibility runtime for transition and joint debugging
+
 ### LLM Options
 
 | Mode | Backend / Provider |
@@ -91,6 +106,21 @@ tools\start.bat             # 打开 http://localhost:7860
 ```
 
 详细配置说明见 [TUTORIAL.md](TUTORIAL.md)。
+
+### 后端运行形态
+
+- `tools\start.bat`
+  启动历史兼容态 `full` 运行时，监听 `http://localhost:7860`。
+- `tools\start_workstation.bat`
+  仅启动 `workstation-backend`。该运行时承接本地工作站 UI、本地工作流、审批、配置、构建与部署链路。
+- `tools\start_web.bat`
+  仅启动 `web-backend`，监听 `http://localhost:7870`。该运行时承接平台任务、认证、配额、历史记录等 API，并要求 `config.json` 中存在有效的 `database.url`。
+
+当前部署口径：
+
+- 单机本地使用，优先 `workstation-backend`
+- 服务器平台 API，优先 `web-backend`
+- `full` 继续保留给兼容态与联调态
 
 ---
 
