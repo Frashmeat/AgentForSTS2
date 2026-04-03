@@ -22,7 +22,28 @@ export type BatchEvent = Extract<
 export type { PlanItem, ModPlan };
 
 export class BatchSocket extends WorkflowSocketFacade<BatchEvent> {
+  private errorHandler: ((data: BatchEvent) => void) | null = null;
+
   constructor() {
     super("/api/ws/batch");
+  }
+
+  override on<T extends BatchEvent["event"]>(
+    event: T,
+    handler: (data: Extract<BatchEvent, { event: T }>) => void
+  ) {
+    super.on(event, handler);
+    if (event === "error") {
+      this.errorHandler = handler as (data: BatchEvent) => void;
+    }
+    return this;
+  }
+
+  override waitOpen(): Promise<void> {
+    return super.waitOpen().then(() => {
+      this.attachPersistentErrorHandlers((message) => {
+        this.errorHandler?.({ event: "error", stage: "error", message });
+      });
+    });
   }
 }

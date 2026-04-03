@@ -2,31 +2,14 @@
 
 from app.shared.prompting import PromptLoader
 
-_PROMPT_LOADER = PromptLoader()
 _SHARED_PROMPT_LOADER = PromptLoader()
-_ACTION_PROMPT_BUNDLE_KEY = "approval.action_prompt"
-_ACTION_PROMPT_TEMPLATE = """你正在撰写统一 AI 审批动作的指导。 Output ONLY JSON，后续步骤依赖纯 JSON 格式输出。
-
-User Input Requirements:
-- {{ requirements_line }}
-
-Template JSON structure to fill:
-{"actions": [
-  {
-    "kind": "read_file | write_file | run_command | build_project | deploy_mod",
-    "title": "简要标题，方便审批人员理解",
-    "reason": "说明动作所需的业务背景与目标",
-    "payload": {}
-  }
-]}
-"""
+_ACTION_PROMPT_BUNDLE_KEY = "runtime_agent.approval_action_prompt"
 
 
 def build_action_prompt(requirements: str) -> str:
     """返回包含统一动作结构的 AI 提示文本。"""
-    requirements_line = requirements.strip() or "请提供必须满足的输入信息。"
+    requirements_line = requirements.strip() or _SHARED_PROMPT_LOADER.load("runtime_agent.approval_default_requirements_line").strip()
     return _SHARED_PROMPT_LOADER.render(
         _ACTION_PROMPT_BUNDLE_KEY,
         {"requirements_line": requirements_line},
-        fallback_template=_ACTION_PROMPT_TEMPLATE,
     )

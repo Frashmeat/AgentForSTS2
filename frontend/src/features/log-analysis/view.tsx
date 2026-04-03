@@ -2,6 +2,8 @@ import { useRef, useState } from "react";
 import { Bug, Loader2, RotateCcw } from "lucide-react";
 
 import { StageStatus } from "../../components/StageStatus";
+import { LogAnalysisSocket } from "../../lib/log_analysis_ws";
+import { resolveErrorMessage } from "../../shared/error.ts";
 
 type Stage = "input" | "analyzing" | "done" | "error";
 
@@ -13,7 +15,7 @@ export function LogAnalysisFeatureView() {
   const [currentStage, setCurrentStage] = useState<string | null>(null);
   const [stageHistory, setStageHistory] = useState<string[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
+  const wsRef = useRef<LogAnalysisSocket | null>(null);
 
   function reset() {
     wsRef.current?.close();
@@ -26,7 +28,7 @@ export function LogAnalysisFeatureView() {
     setErrorMsg(null);
   }
 
-  function analyze() {
+  async function analyze() {
     setStage("analyzing");
     setLogLines(null);
     setChunks([]);
@@ -34,32 +36,36 @@ export function LogAnalysisFeatureView() {
     setStageHistory([]);
     setErrorMsg(null);
 
-    const ws = new WebSocket(`ws://${location.host}/api/ws/analyze-log`);
+    const ws = new LogAnalysisSocket();
     wsRef.current = ws;
-
-    ws.onopen = () => ws.send(JSON.stringify({ context }));
-    ws.onmessage = (event) => {
-      const message = JSON.parse(event.data);
-      if (message.event === "stage_update") {
-        setCurrentStage(message.message);
-        setStageHistory((previous) =>
-          previous[previous.length - 1] === message.message ? previous : [...previous, message.message]
-        );
-      } else if (message.event === "log_info") {
-        setLogLines(message.lines);
-      } else if (message.event === "stream") {
-        setChunks((previous) => [...previous, message.chunk]);
-      } else if (message.event === "done") {
-        setStage("done");
-      } else if (message.event === "error") {
-        setErrorMsg(message.message);
-        setStage("error");
-      }
-    };
-    ws.onerror = () => {
-      setErrorMsg("WebSocket 连接失败");
+    ws.on("stage_update", (message) => {
+      setCurrentStage(message.message);
+      setStageHistory((previous) =>
+        previous[previous.length - 1] === message.message ? previous : [...previous, message.message]
+      );
+    });
+    ws.on("log_info", (message) => {
+      setLogLines(message.lines);
+    });
+    ws.on("stream", (message) => {
+      setChunks((previous) => [...previous, message.chunk]);
+    });
+    ws.on("done", () => {
+      setStage("done");
+    });
+    ws.on("error", (message) => {
+      setErrorMsg(message.message);
       setStage("error");
-    };
+    });
+
+    try {
+      await ws.waitOpen();
+    } catch (error) {
+      setErrorMsg(resolveErrorMessage(error));
+      setStage("error");
+      return;
+    }
+    ws.send({ context });
   }
 
   const analysisText = chunks.join("");

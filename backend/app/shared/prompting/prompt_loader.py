@@ -36,7 +36,11 @@ class PromptLoader:
     def load(self, template_name: str, *, fallback_template: str | None = None) -> str:
         try:
             return self._load_template(template_name)
+        except PromptNotFoundError:
+            raise
         except FileNotFoundError as exc:
+            if self._parse_bundle_request(template_name) is not None:
+                raise PromptNotFoundError(f"Prompt template not found: {template_name}") from exc
             if fallback_template is not None:
                 return fallback_template
             raise PromptNotFoundError(f"Prompt template not found: {template_name}") from exc
@@ -76,8 +80,13 @@ class PromptLoader:
         if not bundle_name or not key:
             return None
 
+        if not _BUNDLE_KEY_PATTERN.fullmatch(bundle_name):
+            return None
+        if not _BUNDLE_KEY_PATTERN.fullmatch(key):
+            return None
+
         bundle_path = self._resolve_path(f"{bundle_name}.md")
-        if not bundle_path.is_file():
+        if not bundle_path.is_file() and "_" not in key:
             return None
         return bundle_name, key
 
@@ -99,7 +108,7 @@ class PromptLoader:
                     in_fence = True
                     active_fence = fence
 
-            heading_key = None if in_fence else self._parse_bundle_heading(line, strict=current_key is None)
+            heading_key = None if in_fence else self._parse_bundle_heading(line)
             if heading_key is None:
                 if current_key is not None:
                     current_lines.append(line)
@@ -119,14 +128,12 @@ class PromptLoader:
 
         return sections
 
-    def _parse_bundle_heading(self, line: str, *, strict: bool) -> str | None:
+    def _parse_bundle_heading(self, line: str) -> str | None:
         if not line.startswith(_BUNDLE_HEADING_PREFIX):
             return None
 
         key = line[len(_BUNDLE_HEADING_PREFIX) :].strip()
         if not _BUNDLE_KEY_PATTERN.fullmatch(key):
-            if not strict:
-                return None
             raise ValueError(f"Invalid prompt bundle key: {key}")
         return key
 

@@ -47,3 +47,49 @@
 ```
 
 请分析这个 mod 的内容。
+
+## log_excerpt_header
+=== 日志前段错误摘录 ===
+
+## log_tail_header
+=== 日志末段（最后300行）===
+
+## log_missing_message
+游戏日志文件不存在：{{ log_path }}
+请确认游戏已运行过至少一次。
+
+## log_reading_stage
+正在读取游戏日志...
+
+## log_preparing_stage
+正在整理日志分析上下文...
+
+## log_streaming_stage
+AI 已开始输出分析结果...
+
+## log_running_stage
+正在调用 AI 分析日志...
+
+## log_done_stage
+日志分析完成
+
+## mod_reading_stage
+正在扫描 Mod 源码...
+
+## mod_path_missing_message
+路径不存在：{{ project_root }}
+
+## mod_source_missing_message
+未在 {{ project_root }} 找到任何 .cs 源码文件
+
+## mod_preparing_stage
+正在整理源码分析上下文...
+
+## mod_streaming_stage
+AI 已开始输出分析结果...
+
+## mod_running_stage
+正在调用 AI 分析 Mod...
+
+## mod_done_stage
+Mod 分析完成

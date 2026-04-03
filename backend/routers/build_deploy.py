@@ -15,11 +15,23 @@ from pathlib import Path
 from fastapi import APIRouter, WebSocket
 
 from app.modules.codegen.api import build_and_fix
+from app.shared.prompting import PromptLoader
 from config import get_config
 
 router = APIRouter()
+_TEXT_LOADER = PromptLoader()
 
 _SKIP_DIRS = {"obj", "ref", ".godot"}
+
+
+def _build_deploy_facade(ws: WebSocket):
+    container = getattr(getattr(ws.app.state, "container", None), "resolve_optional_singleton", None)
+    if container is None:
+        return None
+    flags = getattr(ws.app.state.container, "platform_migration_flags", None)
+    if flags is None or not getattr(flags, "platform_service_split_enabled", False):
+        return None
+    return ws.app.state.container.resolve_optional_singleton("platform.build_deploy_facade_service")
 
 
 def _find_output_files(project_root: Path) -> list[Path]:
@@ -40,6 +52,10 @@ def _find_output_files(project_root: Path) -> list[Path]:
 
 @router.websocket("/ws/build-deploy")
 async def ws_build_deploy(ws: WebSocket):
+    facade = _build_deploy_facade(ws)
+    if facade is not None:
+        await facade.handle_ws_build_deploy(ws)
+        return
     """
     WebSocket：Code Agent 构建 mod，成功后复制产物到 STS2 Mods 文件夹。
 
@@ -59,7 +75,7 @@ async def ws_build_deploy(ws: WebSocket):
         if not project_root.exists():
             await ws.send_text(json.dumps({
                 "event": "error",
-                "message": f"路径不存在：{project_root}"
+                "message": _TEXT_LOADER.render("runtime_workflow.build_project_root_missing", {"project_root": project_root}),
             }))
             return
 
@@ -71,17 +87,17 @@ async def ws_build_deploy(ws: WebSocket):
             await ws.send_text(json.dumps({"event": "stream", "chunk": chunk}))
 
         # ── Step 1: Code Agent 构建（dotnet publish + Godot .pck export）──
-        await send_chunk("▶ Code Agent 开始构建...\n")
+        await send_chunk(f"{_TEXT_LOADER.load('runtime_workflow.build_agent_build_start').strip()}\n")
         success, _ = await build_and_fix(project_root, stream_callback=send_chunk)
 
         if not success:
             await ws.send_text(json.dumps({
                 "event": "error",
-                "message": "构建失败，请查看上方 Agent 输出"
+                "message": _TEXT_LOADER.load("runtime_workflow.build_build_failed").strip(),
             }))
             return
 
-        await send_chunk("\n✓ 构建成功！\n")
+        await send_chunk(f"\n{_TEXT_LOADER.load('runtime_workflow.build_build_succeeded').strip()}\n")
 
         mod_name = project_root.name
         deployed_to: str | None = None
@@ -96,26 +112,30 @@ async def ws_build_deploy(ws: WebSocket):
                 if existing:
                     file_names = [f.name for f in existing]
                     deployed_to = str(target_dir)
-                    await send_chunk(f"\n✓ 已通过 local.props 部署到 {target_dir}\n")
+                    await send_chunk(
+                        f"\n{_TEXT_LOADER.render('runtime_workflow.build_deployed_via_local_props', {'target_dir': target_dir}).strip()}\n"
+                    )
                     for f in existing:
-                        await send_chunk(f"  ✓ {f.name}\n")
+                        await send_chunk(f"{_TEXT_LOADER.render('runtime_workflow.build_file_item', {'file_name': f.name})}\n")
 
             # 如果 Mods 里没有，尝试从 bin/ 复制
             if not deployed_to:
                 output_files = _find_output_files(project_root)
                 if output_files:
                     target_dir.mkdir(parents=True, exist_ok=True)
-                    await send_chunk(f"\n▶ 复制到 {target_dir}...\n")
+                    await send_chunk(
+                        f"\n{_TEXT_LOADER.render('runtime_workflow.build_copying_to_target', {'target_dir': target_dir}).strip()}\n"
+                    )
                     for f in output_files:
                         shutil.copy2(f, target_dir / f.name)
-                        await send_chunk(f"  ✓ {f.name}\n")
+                        await send_chunk(f"{_TEXT_LOADER.render('runtime_workflow.build_file_item', {'file_name': f.name})}\n")
                     file_names = [f.name for f in output_files]
                     deployed_to = str(target_dir)
-                    await send_chunk("\n✓ 部署完成！\n")
+                    await send_chunk(f"\n{_TEXT_LOADER.load('runtime_workflow.build_deploy_finished').strip()}\n")
                 else:
-                    await send_chunk("\n⚠ 未找到构建产物（bin/ 和 Mods 均无 .dll/.pck）\n")
+                    await send_chunk(f"\n{_TEXT_LOADER.load('runtime_workflow.build_output_missing').strip()}\n")
         elif not sts2_mods:
-            await send_chunk("\n⚠ 未配置 STS2 游戏路径，跳过部署（可在设置中配置）\n")
+            await send_chunk(f"\n{_TEXT_LOADER.load('runtime_workflow.build_game_path_missing').strip()}\n")
 
         await ws.send_text(json.dumps({
             "event": "done",

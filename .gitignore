@@ -8,6 +8,7 @@ backend/**/__pycache__/
 backend/**/*.pyc
 backend/.pytest_cache/
 backend/*.egg-info/
+backend/tests/_tmp/
 
 # Node / frontend
 frontend/node_modules/
@@ -22,6 +23,7 @@ sts2_decompiled/
 
 # 沙箱测试配置（含本机绝对路径；由 tools/generate_sandbox_wsb.bat 生成）
 tools/sandbox_test.wsb
+tools/latest/artifacts/
 
 # Install log
 install.log
@@ -33,10 +35,12 @@ FangedGrimoire/
 # Generated local assets / outputs
 godot/
 docs/
+.tmp/
 
 # OS
 .DS_Store
 Thumbs.db
+pytest-cache-files-*/
 
 # Claude Code local settings
 .claude/

@@ -120,6 +120,35 @@ def test_prompt_loader_uses_fallback_when_template_missing():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_prompt_loader_does_not_fallback_when_bundle_file_missing():
+    root = _make_temp_root()
+    loader = PromptLoader(root)
+
+    try:
+        with pytest.raises(PromptNotFoundError, match="planning.planner_prompt"):
+            loader.load("planning.planner_prompt", fallback_template="Default")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_prompt_loader_does_not_fallback_when_bundle_key_missing():
+    root = _make_temp_root()
+    _write_text(
+        root / "planning.md",
+        """## planner_prompt
+Plan
+""",
+    )
+
+    try:
+        loader = PromptLoader(root)
+
+        with pytest.raises(PromptNotFoundError, match="planning.missing_key"):
+            loader.load("planning.missing_key", fallback_template="Default")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def test_prompt_loader_keeps_full_bundle_file_reads():
     root = _make_temp_root()
     bundle = root / "planning.md"
@@ -234,6 +263,14 @@ Second
         ),
         (
             """## planner_prompt
+First
+## invalid-key
+Second
+""",
+            "Invalid prompt bundle key",
+        ),
+        (
+            """## planner_prompt
 
 """,
             "Empty prompt bundle section",
@@ -273,5 +310,27 @@ Second
 
         assert loader.load("planning.planner_prompt") == "```md\n## not_a_key\n```\n\nActual content\n"
         assert loader.load("planning.second_prompt") == "Second\n"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_prompt_loader_rejects_invalid_heading_after_multiple_sections():
+    root = _make_temp_root()
+    _write_text(
+        root / "planning.md",
+        """## first_prompt
+First
+## second_prompt
+Second
+## Invalid Heading
+Broken
+""",
+    )
+
+    try:
+        loader = PromptLoader(root)
+
+        with pytest.raises(ValueError, match="Invalid prompt bundle key"):
+            loader.load("planning.first_prompt")
     finally:
         shutil.rmtree(root, ignore_errors=True)

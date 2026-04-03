@@ -8,7 +8,8 @@ from pathlib import Path
 
 import pytest
 
-_TMP_ROOT = Path(__file__).resolve().parent / "_tmp"
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_TMP_ROOT = _REPO_ROOT / ".tmp" / "pytest" / "tests"
 collect_ignore = ["_tmp"]
 
 

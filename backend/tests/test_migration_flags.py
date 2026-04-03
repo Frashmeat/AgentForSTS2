@@ -1,4 +1,4 @@
-"""Tests for finalized workflow routing after migration flags removal."""
+"""Tests for current workflow routing defaults."""
 import sys
 from pathlib import Path
 
@@ -8,7 +8,7 @@ from app.shared.infra.config.settings import normalize_config
 from routers import batch_workflow, workflow
 
 
-def test_normalize_config_strips_removed_migration_flags():
+def test_normalize_config_keeps_workflow_migration_flags_available():
     cfg = normalize_config(
         {
             "migration": {
@@ -19,7 +19,16 @@ def test_normalize_config_strips_removed_migration_flags():
         }
     )
 
-    assert "migration" not in cfg
+    assert cfg["migration"] == {
+        "use_modular_single_workflow": False,
+        "use_modular_batch_workflow": False,
+        "use_unified_ws_contract": False,
+        "platform_jobs_api_enabled": False,
+        "platform_service_split_enabled": False,
+        "platform_runner_enabled": False,
+        "platform_events_v1_enabled": False,
+        "platform_step_protocol_enabled": False,
+    }
 
 
 def test_workflow_routes_always_report_modular_mode():

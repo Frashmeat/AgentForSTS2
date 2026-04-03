@@ -17,16 +17,10 @@ class _DummyRouter:
 
 
 def _load_log_analyzer():
-    sys.modules.setdefault("fastapi", types.SimpleNamespace(APIRouter=lambda: _DummyRouter(), WebSocket=object))
-    sys.modules.setdefault("config", types.SimpleNamespace(get_config=lambda: {"llm": {}}))
-    sys.modules.setdefault(
-        "llm.stream",
-        types.SimpleNamespace(stream_analysis=lambda *args, **kwargs: None),
-    )
-    sys.modules.setdefault(
-        "llm.stage_events",
-        types.SimpleNamespace(build_stage_event=lambda *args, **kwargs: None),
-    )
+    sys.modules["fastapi"] = types.SimpleNamespace(APIRouter=lambda: _DummyRouter(), WebSocket=object)
+    sys.modules["config"] = types.SimpleNamespace(get_config=lambda: {"llm": {}})
+    sys.modules["llm.stream"] = types.SimpleNamespace(stream_analysis=lambda *args, **kwargs: None)
+    sys.modules["llm.stage_events"] = types.SimpleNamespace(build_stage_event=lambda *args, **kwargs: None)
     sys.modules.pop("routers.log_analyzer", None)
     return importlib.import_module("routers.log_analyzer")
 
@@ -62,7 +56,7 @@ def test_get_system_prompt_uses_prompt_loader():
     prompt = module._get_system_prompt()
 
     assert prompt == "rendered-system-prompt"
-    assert loader.load_calls == [("analyzer.log_analyzer_system", module._SYSTEM_PROMPT_TEMPLATE)]
+    assert loader.load_calls == [("analyzer.log_analyzer_system", "")]
 
 
 def test_build_prompt_uses_prompt_loader_for_user_and_extra_context(monkeypatch):
@@ -88,15 +82,14 @@ def test_build_prompt_uses_prompt_loader_for_user_and_extra_context(monkeypatch)
     extra_name, extra_variables, extra_fallback = loader.render_calls[0]
     assert extra_name == "analyzer.log_analyzer_extra_context"
     assert extra_variables == {"extra_context": "黑屏了，刚加了 MyMod"}
-    assert "用户补充说明" in extra_fallback
+    assert extra_fallback == ""
 
     user_name, user_variables, user_fallback = loader.render_calls[1]
     assert user_name == "analyzer.log_analyzer_user"
     assert user_variables["log_path"] == module._LOG_PATH
     assert user_variables["log_content"] == "line1\nline2"
     assert user_variables["extra_context_block"] == "rendered:analyzer.log_analyzer_extra_context"
-    assert "以下是 STS2 游戏日志内容" in user_fallback
-    assert "请分析上述日志" in user_fallback
+    assert user_fallback == ""
 
 
 def test_build_prompt_returns_missing_log_message_when_log_missing(monkeypatch):
@@ -195,7 +188,10 @@ def test_ws_analyze_log_emits_error_when_log_missing(monkeypatch):
     assert ws.accepted is True
     assert _event_names(ws.messages) == ["stage_update", "error"]
     assert ws.messages[0]["stage"] == "reading_input"
-    assert ws.messages[1] == {"event": "error", "message": f"日志文件不存在：{module._LOG_PATH}"}
+    assert ws.messages[1] == {
+        "event": "error",
+        "message": f"游戏日志文件不存在：{module._LOG_PATH}\n请确认游戏已运行过至少一次。",
+    }
 
 
 def test_ws_analyze_log_falls_back_to_error_when_stream_analysis_raises(monkeypatch):

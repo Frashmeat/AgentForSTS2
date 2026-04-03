@@ -4,9 +4,10 @@ import { AlertTriangle, ChevronDown, ChevronUp, Loader2, RotateCcw } from "lucid
 import { AgentLog } from "../../components/AgentLog";
 import { ApprovalPanel } from "../../components/ApprovalPanel";
 import { BuildDeploy } from "../../components/BuildDeploy";
+import { ProjectRootField } from "../../components/ProjectRootField";
 import { StageStatus } from "../../components/StageStatus";
 import { cn } from "../../lib/utils";
-import type { ApprovalRequest } from "../../lib/approvals";
+import type { ApprovalRequest } from "../../shared/api/index.ts";
 
 import { ASSET_TYPES, PRESETS, type AssetType, type PresetOption, type Stage } from "./model";
 
@@ -33,18 +34,25 @@ export interface SingleAssetFeatureViewProps {
   approvalSummary: string;
   approvalRequests: ApprovalRequest[];
   approvalBusyActionId: string | null;
-  errorMsg: string | null;
-  errorTrace: string | null;
+  errorMessage: string | null;
+  errorTraceback: string | null;
   autoMode: boolean;
   imageMode: "ai" | "upload";
   uploadedImageB64: string;
   uploadedImageName: string;
   uploadedImagePreview: string | null;
   dragOver: boolean;
+  hasLiveSession: boolean;
+  showRecoveredNotice: boolean;
+  onRestartWorkflow: () => void;
   onAssetTypeChange: (value: AssetType) => void;
   onAssetNameChange: (value: string) => void;
   onDescriptionChange: (value: string) => void;
   onProjectRootChange: (value: string) => void;
+  projectCreateBusy: boolean;
+  projectCreateMessage: string | null;
+  projectCreateError: string | null;
+  onCreateProject: () => void;
   onApplyPreset: (preset: PresetOption) => void;
   onStartWorkflow: () => void;
   onReset: () => void;
@@ -90,18 +98,25 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
     approvalSummary,
     approvalRequests,
     approvalBusyActionId,
-    errorMsg,
-    errorTrace,
+    errorMessage,
+    errorTraceback,
     autoMode,
     imageMode,
     uploadedImageB64,
     uploadedImageName,
     uploadedImagePreview,
     dragOver,
+    hasLiveSession,
+    showRecoveredNotice,
+    onRestartWorkflow,
     onAssetTypeChange,
     onAssetNameChange,
     onDescriptionChange,
     onProjectRootChange,
+    projectCreateBusy,
+    projectCreateMessage,
+    projectCreateError,
+    onCreateProject,
     onApplyPreset,
     onStartWorkflow,
     onReset,
@@ -135,6 +150,18 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
     <main className="px-6 py-6 grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)] gap-5 items-start">
       <Step num={1} title="描述设计" active={step === 0} done={step > 0}>
         <div className="space-y-4">
+          {showRecoveredNotice && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-700 space-y-2">
+              <p>当前展示的是本地恢复的单资产快照。审批状态会同步后端，但 prompt 确认、选图、补图和继续执行需要重新建立工作流连接。</p>
+              <button
+                onClick={onRestartWorkflow}
+                className="inline-flex items-center gap-1 rounded-md border border-amber-300 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100 transition-colors"
+              >
+                <RotateCcw size={11} />
+                按当前输入重新开始
+              </button>
+            </div>
+          )}
           <div className="space-y-2">
             <label className="text-xs font-medium text-slate-500">资产类型</label>
             <div className="flex gap-2 flex-wrap">
@@ -169,16 +196,18 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                 className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-100 disabled:opacity-50"
               />
             </div>
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-slate-500">Mod 项目路径</label>
-              <input
-                value={projectRoot}
-                disabled={step > 0}
-                onChange={(event) => onProjectRootChange(event.target.value)}
-                placeholder="E:/STS2mod"
-                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-100 font-mono disabled:opacity-50"
-              />
-            </div>
+            <ProjectRootField
+              value={projectRoot}
+              disabled={step > 0}
+              placeholder="E:/STS2mod"
+              showCreateAction={step === 0}
+              createActionLabel="创建项目"
+              createBusy={projectCreateBusy}
+              createMessage={projectCreateMessage}
+              createError={projectCreateError}
+              onChange={onProjectRootChange}
+              onCreateProject={onCreateProject}
+            />
           </div>
 
           {step === 0 && (
@@ -354,7 +383,11 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                   />
                 </>
               )}
-              <button onClick={onConfirmPrompt} className="w-full py-2.5 rounded-lg bg-amber-500 text-white font-bold text-sm hover:bg-amber-600 transition-colors">
+              <button
+                onClick={onConfirmPrompt}
+                disabled={!hasLiveSession}
+                className="w-full py-2.5 rounded-lg bg-amber-500 text-white font-bold text-sm hover:bg-amber-600 transition-colors disabled:cursor-not-allowed disabled:bg-slate-400"
+              >
                 确认，开始生图
               </button>
             </div>
@@ -374,7 +407,7 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
             </div>
           )}
 
-          {errorInStep2 && <ErrorBlock message={errorMsg} traceback={errorTrace} log={genLog} onReset={onReset} />}
+          {errorInStep2 && <ErrorBlock message={errorMessage} traceback={errorTraceback} log={genLog} onReset={onReset} />}
 
           {step === 3 && (
             <div className="space-y-4">
@@ -391,8 +424,9 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                     <img src={`data:image/png;base64,${image}`} alt={`生成图 ${index + 1}`} className="w-full h-auto block" />
                     <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                       <button
+                        disabled={!hasLiveSession}
                         onClick={() => onSelectImage(index)}
-                        className="py-1.5 px-4 rounded-lg bg-amber-500 text-white font-bold text-sm hover:bg-amber-400 transition-colors shadow-lg"
+                        className="py-1.5 px-4 rounded-lg bg-amber-500 text-white font-bold text-sm hover:bg-amber-400 transition-colors shadow-lg disabled:cursor-not-allowed disabled:bg-slate-400"
                       >
                         用这张
                       </button>
@@ -430,8 +464,9 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                   />
                 )}
                 <button
+                  disabled={!hasLiveSession}
                   onClick={onGenerateMore}
-                  className="w-full py-2 rounded-lg border border-amber-400 text-amber-600 font-medium text-sm hover:bg-amber-50 transition-colors"
+                  className="w-full py-2 rounded-lg border border-amber-400 text-amber-600 font-medium text-sm hover:bg-amber-50 transition-colors disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400 disabled:bg-slate-50"
                 >
                   再来一张
                 </button>
@@ -452,6 +487,7 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                   onReject={onReject}
                   onExecute={onExecute}
                   onProceed={onProceedApproval}
+                  proceedDisabled={!hasLiveSession}
                 />
               ) : (
                 <>
@@ -469,7 +505,7 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
             </div>
           )}
 
-          {errorInStep3 && <ErrorBlock message={errorMsg} traceback={errorTrace} log={agentLog} onReset={onReset} />}
+          {errorInStep3 && <ErrorBlock message={errorMessage} traceback={errorTraceback} log={agentLog} onReset={onReset} />}
           {step < 4 && !errorInStep3 && <p className="text-sm text-slate-300">等待选择图片…</p>}
         </Step>
 

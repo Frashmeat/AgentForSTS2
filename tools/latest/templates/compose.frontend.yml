@@ -1,0 +1,8 @@
+services:
+  frontend:
+    build:
+      context: ./services/frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${ATS_FRONTEND_PORT:-8080}:80"

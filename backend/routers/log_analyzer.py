@@ -29,37 +29,6 @@ _LOG_ANALYZER_SYSTEM_PROMPT_KEY = "analyzer.log_analyzer_system"
 _LOG_ANALYZER_USER_PROMPT_KEY = "analyzer.log_analyzer_user"
 _LOG_ANALYZER_EXTRA_CONTEXT_PROMPT_KEY = "analyzer.log_analyzer_extra_context"
 
-_SYSTEM_PROMPT_TEMPLATE = """\
-你是一名 Slay the Spire 2 mod 开发专家，擅长分析游戏崩溃、黑屏、mod 加载失败等问题。
-你会收到游戏日志（godot.log）中提取的关键内容，请：
-1. 判断出现了什么问题（崩溃/黑屏/功能异常/mod 加载失败等）
-2. 指出根本原因（精确到具体的错误信息、类名、方法名）
-3. 给出修复建议（具体到应该改哪个文件、哪段代码）
-
-常见问题参考：
-- LocException / token type StartObject：localization JSON 格式错误，用了嵌套对象而不是 flat key-value
-- Found end tag X expected Y：localization 文本里有方括号 [] 被解析为 BBCode 标签
-- DuplicateModelException：用 new XxxModel() 而不是 ModelDb.GetById() / .ToMutable()
-- Pack created with newer version：dotnet publish 用了错误的 Godot 版本（需 4.5.1）
-- must be marked with PoolAttribute：Card/Relic 类缺少 [Pool(...)] 标注
-- 黑屏无报错：通常是 dotnet build 未 publish，PCK 未更新
-
-请用中文回答，格式清晰，重点突出。
-"""
-
-_USER_PROMPT_TEMPLATE = """\
-以下是 STS2 游戏日志内容（路径：{{ log_path }}）：
-```
-{{ log_content }}
-```{{ extra_context_block }}
-
-请分析上述日志，找出问题原因并给出修复建议。
-"""
-
-_EXTRA_CONTEXT_TEMPLATE = """
-
-用户补充说明：{{ extra_context }}"""
-
 
 async def _send_stage(ws: WebSocket, scope: str, stage: str, message: str):
     payload = build_stage_event(scope, stage, message)
@@ -87,25 +56,22 @@ def _read_log() -> tuple[str, bool]:
 
     combined = []
     if extra:
-        combined.append("=== 日志前段错误摘录 ===")
+        combined.append(_PROMPT_LOADER.load("analyzer.log_excerpt_header").strip())
         combined.extend(extra[-100:])   # 最多 100 条
-        combined.append("=== 日志末段（最后300行）===")
+        combined.append(_PROMPT_LOADER.load("analyzer.log_tail_header").strip())
     combined.extend(tail)
 
     return "\n".join(combined), True
 
 
 def _get_system_prompt() -> str:
-    return _PROMPT_LOADER.load(
-        _LOG_ANALYZER_SYSTEM_PROMPT_KEY,
-        fallback_template=_SYSTEM_PROMPT_TEMPLATE,
-    )
+    return _PROMPT_LOADER.load(_LOG_ANALYZER_SYSTEM_PROMPT_KEY)
 
 
 def _build_prompt(extra_context: str) -> str:
     log_content, exists = _read_log()
     if not exists:
-        return f"游戏日志文件不存在：{_LOG_PATH}\n请确认游戏已运行过至少一次。"
+        return _PROMPT_LOADER.render("analyzer.log_missing_message", {"log_path": _LOG_PATH}).strip()
 
     extra_context_block = ""
     if extra_context:
@@ -114,7 +80,6 @@ def _build_prompt(extra_context: str) -> str:
             {
                 "extra_context": extra_context,
             },
-            fallback_template=_EXTRA_CONTEXT_TEMPLATE,
         )
 
     return _PROMPT_LOADER.render(
@@ -124,7 +89,6 @@ def _build_prompt(extra_context: str) -> str:
             "log_content": log_content,
             "log_path": _LOG_PATH,
         },
-        fallback_template=_USER_PROMPT_TEMPLATE,
     )
 
 
@@ -151,12 +115,12 @@ async def ws_analyze_log(ws: WebSocket):
         extra_context = params.get("context", "")
 
         # 读日志
-        await _send_stage(ws, "text", "reading_input", "正在读取游戏日志...")
+        await _send_stage(ws, "text", "reading_input", _PROMPT_LOADER.load("analyzer.log_reading_stage").strip())
         log_content, exists = _read_log()
         if not exists:
             await ws.send_text(json.dumps({
                 "event": "error",
-                "message": f"日志文件不存在：{_LOG_PATH}"
+                "message": _PROMPT_LOADER.render("analyzer.log_missing_message", {"log_path": _LOG_PATH}).strip()
             }))
             return
 
@@ -164,7 +128,7 @@ async def ws_analyze_log(ws: WebSocket):
         await ws.send_text(json.dumps({"event": "log_info", "lines": line_count}))
 
         # 构建 prompt
-        await _send_stage(ws, "text", "preparing_prompt", "正在整理日志分析上下文...")
+        await _send_stage(ws, "text", "preparing_prompt", _PROMPT_LOADER.load("analyzer.log_preparing_stage").strip())
         prompt = _build_prompt(extra_context)
 
         cfg = get_config()
@@ -175,12 +139,12 @@ async def ws_analyze_log(ws: WebSocket):
             nonlocal streamed
             if not streamed:
                 streamed = True
-                await _send_stage(ws, "text", "ai_streaming", "AI 已开始输出分析结果...")
+                await _send_stage(ws, "text", "ai_streaming", _PROMPT_LOADER.load("analyzer.log_streaming_stage").strip())
             await ws.send_text(json.dumps({"event": "stream", "chunk": chunk}))
 
-        await _send_stage(ws, "text", "ai_running", "正在调用 AI 分析日志...")
+        await _send_stage(ws, "text", "ai_running", _PROMPT_LOADER.load("analyzer.log_running_stage").strip())
         full_text = await stream_analysis(_get_system_prompt(), prompt, llm_cfg, send_chunk)
-        await _send_stage(ws, "text", "done", "日志分析完成")
+        await _send_stage(ws, "text", "done", _PROMPT_LOADER.load("analyzer.log_done_stage").strip())
         await ws.send_text(json.dumps({"event": "done", "full": full_text}))
 
     except Exception as e:

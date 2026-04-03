@@ -51,6 +51,9 @@ except ModuleNotFoundError:
         def post(self, path: str, *_args, **_kwargs):
             return lambda fn: self._register("POST", path, fn)
 
+        def patch(self, path: str, *_args, **_kwargs):
+            return lambda fn: self._register("PATCH", path, fn)
+
         def websocket(self, *_args, **_kwargs):
             return lambda fn: fn
 
@@ -169,7 +172,7 @@ except ModuleNotFoundError:
 
 try:
     importlib.import_module("image.prompt_adapter")
-except ModuleNotFoundError:
+except (ModuleNotFoundError, ImportError):
     prompt_adapter_stub = types.ModuleType("image.prompt_adapter")
 
     async def _unexpected_adapt_prompt(*_args, **_kwargs):

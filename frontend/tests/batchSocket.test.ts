@@ -8,12 +8,13 @@ class MockWebSocket {
 
   static readonly CONNECTING = 0;
   static readonly OPEN = 1;
+  static readonly CLOSING = 2;
   static readonly CLOSED = 3;
 
   readyState = MockWebSocket.CONNECTING;
   onopen: (() => void) | null = null;
   onerror: (() => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((event?: { wasClean?: boolean; code?: number }) => void) | null = null;
   onmessage: ((event: { data: string }) => void) | null = null;
   url: string;
 
@@ -26,7 +27,7 @@ class MockWebSocket {
 
   close() {
     this.readyState = MockWebSocket.CLOSED;
-    this.onclose?.();
+    this.onclose?.({ wasClean: true, code: 1000 });
   }
 
   emitOpen() {
@@ -36,6 +37,11 @@ class MockWebSocket {
 
   emitMessage(data: unknown) {
     this.onmessage?.({ data: JSON.stringify(data) });
+  }
+
+  emitClose(event: { wasClean?: boolean; code?: number } = {}) {
+    this.readyState = MockWebSocket.CLOSED;
+    this.onclose?.(event);
   }
 }
 
@@ -64,4 +70,21 @@ test("BatchSocket dispatches typed batch events", () => {
   MockWebSocket.instances[0].emitMessage({ event: "batch_done", success_count: 2, error_count: 0 });
 
   assert.deepEqual(received, { event: "batch_done", stage: "batch_done", success_count: 2, error_count: 0 });
+});
+
+test("BatchSocket reports unexpected close as error event after open", async () => {
+  const socket = new BatchSocket();
+  let message = "";
+
+  socket.on("error", (data) => {
+    message = data.message;
+  });
+
+  const pending = socket.waitOpen();
+  MockWebSocket.instances[0].emitOpen();
+  await pending;
+
+  MockWebSocket.instances[0].emitClose({ wasClean: false, code: 1006 });
+
+  assert.match(message, /WebSocket 连接意外断开/);
 });

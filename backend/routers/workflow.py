@@ -22,6 +22,7 @@ from app.modules.codegen.api import create_asset, create_custom_code, build_and_
 from app.modules.workflow.application.engine import WorkflowEngine
 from app.modules.workflow.application.single_asset import SingleAssetWorkflow
 from app.modules.workflow.application.step import WorkflowStep
+from app.shared.prompting import PromptLoader
 from config import get_config
 from project_utils import create_project_from_template
 from image.generator import generate_images
@@ -32,12 +33,23 @@ from llm.stage_events import build_stage_event
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+_TEXT_LOADER = PromptLoader()
 
 AssetType = Literal["card", "card_fullscreen", "relic", "power", "character"]
 
 # 透明背景资产类型
 TRANSPARENT_TYPES = {"relic", "power"}
 TRANSPARENT_CHARACTER_VARIANTS = {"character_icon", "map_marker"}
+
+
+def _workflow_router_service(ws: WebSocket):
+    container = getattr(getattr(ws.app.state, "container", None), "resolve_optional_singleton", None)
+    if container is None:
+        return None
+    flags = getattr(ws.app.state.container, "platform_migration_flags", None)
+    if flags is None or not getattr(flags, "platform_runner_enabled", False):
+        return None
+    return ws.app.state.container.resolve_optional_singleton("platform.workflow_router_compat_service")
 
 
 def _needs_transparent(asset_type: AssetType) -> bool:
@@ -59,6 +71,12 @@ async def _send_stage(ws: WebSocket, scope: str, stage: str, message: str):
         await _send(ws, "stage_update", payload)
 
 
+def _text(key: str, **variables: object) -> str:
+    if variables:
+        return _TEXT_LOADER.render(f"runtime_workflow.{key}", variables)
+    return _TEXT_LOADER.load(f"runtime_workflow.{key}")
+
+
 async def _send_approval_pending(ws: WebSocket, summary: str, requests: list):
     await _send(ws, "approval_pending", {
         "summary": summary,
@@ -68,7 +86,7 @@ async def _send_approval_pending(ws: WebSocket, summary: str, requests: list):
 
 async def _publish_standard_event(ws: WebSocket, event) -> None:
     if event.stage == "error":
-        await _send(ws, "error", {"message": event.payload.get("message", "workflow error")})
+        await _send(ws, "error", {"message": event.payload.get("message", _text("workflow_prompt_preview_error").strip())})
         return
 
     if event.payload.get("status") != "completed":
@@ -86,9 +104,9 @@ async def _publish_standard_event(ws: WebSocket, event) -> None:
     elif event.stage == "done":
         await _send(ws, "done", data)
     elif event.stage == "build_started":
-        await _send_stage(ws, "build", "build_started", data.get("message", "开始构建"))
+        await _send_stage(ws, "build", "build_started", data.get("message", _text("workflow_build_started").strip()))
     elif event.stage == "build_finished":
-        await _send_stage(ws, "build", "build_finished", data.get("message", "构建完成"))
+        await _send_stage(ws, "build", "build_finished", data.get("message", _text("workflow_build_finished").strip()))
 
 
 async def _run_single_asset_engine(ws: WebSocket, steps: list[WorkflowStep], initial: dict | None = None) -> WorkflowContext:
@@ -121,10 +139,10 @@ async def _maybe_await_approval(
     await _send_approval_pending(ws, summary, actions)
     decision = json.loads(await ws.receive_text())
     if decision.get("action") != "approve_all":
-        await _send(ws, "done", {"success": False, "image_paths": [], "agent_output": "用户取消执行"})
+        await _send(ws, "done", {"success": False, "image_paths": [], "agent_output": _text("workflow_approval_cancelled_output").strip()})
         return False, None
-    await _send_stage(ws, "agent", "agent_running", "审批通过，开始生成代码...")
-    await _send(ws, "progress", {"message": "审批通过，Code Agent 开始生成代码..."})
+    await _send_stage(ws, "agent", "agent_running", _text("workflow_approval_passed_stage").strip())
+    await _send(ws, "progress", {"message": _text("workflow_approval_passed_progress").strip()})
     return True, None
 
 
@@ -133,7 +151,7 @@ async def _plan_approval_requests(description: str, llm_cfg: dict, project_root:
     raw = await complete_text(prompt, llm_cfg, cwd=project_root)
     plan = json.loads(raw)
     service = get_approval_service()
-    summary = plan.get("summary", "Approval required before execution")
+    summary = plan.get("summary", _text("workflow_approval_output_default").strip())
     actions = service.create_requests_from_plan(
         plan,
         source_backend=llm_cfg.get("agent_backend", "unknown"),
@@ -144,6 +162,14 @@ async def _plan_approval_requests(description: str, llm_cfg: dict, project_root:
 
 @router.websocket("/ws/create")
 async def ws_create(ws: WebSocket):
+    service = _workflow_router_service(ws)
+    if service is not None:
+        await service.handle_ws_create(ws)
+        return
+    await _handle_legacy_ws_create(ws)
+
+
+async def _handle_legacy_ws_create(ws: WebSocket):
     """
     WebSocket 端点，驱动完整的创建工作流。
 
@@ -203,8 +229,8 @@ async def ws_create(ws: WebSocket):
         if not list(project_root.glob("*.csproj")):
             project_name = project_root.name
             parent_dir = project_root.parent
-            await _send_stage(ws, "project", "project_init", f"正在初始化项目 {project_name}...")
-            await _send(ws, "progress", {"message": f"正在从本地模板初始化项目 {project_name}..."})
+            await _send_stage(ws, "project", "project_init", _text("workflow_project_init_stage", project_name=project_name).strip())
+            await _send(ws, "progress", {"message": _text("workflow_project_init_progress", project_name=project_name).strip()})
             try:
                 project_root = await asyncio.get_event_loop().run_in_executor(
                     None, create_project_from_template, project_name, parent_dir
@@ -214,11 +240,11 @@ async def ws_create(ws: WebSocket):
                 async def _stream_init(chunk: str):
                     await _send(ws, "agent_stream", {"chunk": chunk})
                 project_root = await create_mod_project(project_name, parent_dir, _stream_init)
-            await _send(ws, "progress", {"message": f"项目初始化完成: {project_root}"})
+            await _send(ws, "progress", {"message": _text("workflow_project_init_done", project_root=project_root).strip()})
 
         # 2. Prompt Adaptation
-        await _send_stage(ws, "text", "prompt_adapting", "正在整理图像提示词...")
-        await _send(ws, "progress", {"message": "正在生成图像提示词..."})
+        await _send_stage(ws, "text", "prompt_adapting", _text("workflow_prompt_adapting_stage").strip())
+        await _send(ws, "progress", {"message": _text("workflow_prompt_adapting_progress").strip()})
         adapted = await adapt_prompt(
             description,
             asset_type,
@@ -248,8 +274,9 @@ async def ws_create(ws: WebSocket):
 
         while True:
             idx = len(all_images)
-            await _send_stage(ws, "image", "image_generating", f"正在生成第 {idx + 1} 张图像...")
-            await _send(ws, "progress", {"message": f"正在生成第 {idx + 1} 张图像…"})
+            image_number = idx + 1
+            await _send_stage(ws, "image", "image_generating", _text("workflow_image_generating_stage", image_number=image_number).strip())
+            await _send(ws, "progress", {"message": _text("workflow_image_generating_progress", image_number=image_number).strip()})
 
             async def _img_progress(msg: str):
                 await _send(ws, "progress", {"message": msg})
@@ -277,10 +304,10 @@ async def ws_create(ws: WebSocket):
                 # 继续循环生成下一张
 
         # 5. 后处理
-        await _send_stage(ws, "image", "postprocess", "正在处理图像资产...")
-        await _send(ws, "progress", {"message": "正在处理图像资产..."})
+        await _send_stage(ws, "image", "postprocess", _text("workflow_image_postprocess_stage").strip())
+        await _send(ws, "progress", {"message": _text("workflow_image_postprocess_progress").strip()})
         image_paths = await _run_postprocess(selected_img, asset_type, asset_name, project_root)
-        await _send(ws, "progress", {"message": f"图像资产已写入: {[str(p) for p in image_paths]}"})
+        await _send(ws, "progress", {"message": _text("workflow_image_paths_written", image_paths=[str(p) for p in image_paths]).strip()})
 
         # 6. Code Agent
         should_continue, approval_output = await _maybe_await_approval(ws, description, cfg["llm"], project_root)
@@ -294,8 +321,8 @@ async def ws_create(ws: WebSocket):
         if not should_continue:
             return
         if cfg["llm"].get("execution_mode") != "approval_first":
-            await _send_stage(ws, "agent", "agent_running", "正在生成代码...")
-            await _send(ws, "progress", {"message": "Code Agent 开始生成代码..."})
+            await _send_stage(ws, "agent", "agent_running", _text("workflow_agent_running_stage").strip())
+            await _send(ws, "progress", {"message": _text("workflow_agent_running_progress").strip()})
 
         async def stream_to_ws(chunk: str):
             await _send(ws, "agent_stream", {"chunk": chunk})
@@ -335,8 +362,8 @@ async def _ws_run_custom_code(ws: WebSocket, params: dict, project_root: Path):
     if not list(project_root.glob("*.csproj")):
         project_name = project_root.name
         parent_dir = project_root.parent
-        await _send_stage(ws, "project", "project_init", f"正在初始化项目 {project_name}...")
-        await _send(ws, "progress", {"message": f"正在从本地模板初始化项目 {project_name}..."})
+        await _send_stage(ws, "project", "project_init", _text("workflow_project_init_stage", project_name=project_name).strip())
+        await _send(ws, "progress", {"message": _text("workflow_project_init_progress", project_name=project_name).strip()})
         try:
             project_root = await asyncio.get_event_loop().run_in_executor(
                 None, create_project_from_template, project_name, parent_dir
@@ -345,7 +372,7 @@ async def _ws_run_custom_code(ws: WebSocket, params: dict, project_root: Path):
             async def _stream_init(chunk: str):
                 await _send(ws, "agent_stream", {"chunk": chunk})
             project_root = await create_mod_project(project_name, parent_dir, _stream_init)
-        await _send(ws, "progress", {"message": f"项目初始化完成: {project_root}"})
+        await _send(ws, "progress", {"message": _text("workflow_project_init_done", project_root=project_root).strip()})
 
     cfg = get_config()
     should_continue, approval_output = await _maybe_await_approval(ws, description, cfg["llm"], project_root)
@@ -359,8 +386,8 @@ async def _ws_run_custom_code(ws: WebSocket, params: dict, project_root: Path):
     if not should_continue:
         return
     if cfg["llm"].get("execution_mode") != "approval_first":
-        await _send_stage(ws, "agent", "agent_running", "正在生成自定义代码...")
-        await _send(ws, "progress", {"message": "Code Agent 开始生成自定义代码..."})
+        await _send_stage(ws, "agent", "agent_running", _text("workflow_custom_code_agent_running_stage").strip())
+        await _send(ws, "progress", {"message": _text("workflow_custom_code_agent_running_progress").strip()})
 
     async def stream_to_ws(chunk: str):
         await _send(ws, "agent_stream", {"chunk": chunk})
@@ -397,7 +424,7 @@ async def _ws_run_with_provided_image(ws: WebSocket, params: dict, project_root:
     else:
         image_path = Path(params["provided_image_path"])
         if not image_path.exists():
-            await _send(ws, "error", {"message": f"图片文件不存在：{image_path}"})
+            await _send(ws, "error", {"message": _text("workflow_provided_image_missing", image_path=image_path).strip()})
             return
         img_src = PILImage.open(image_path)
         fname = image_path.name
@@ -406,8 +433,8 @@ async def _ws_run_with_provided_image(ws: WebSocket, params: dict, project_root:
     if not list(project_root.glob("*.csproj")):
         project_name = project_root.name
         parent_dir = project_root.parent
-        await _send_stage(ws, "project", "project_init", f"正在初始化项目 {project_name}...")
-        await _send(ws, "progress", {"message": f"正在从本地模板初始化项目 {project_name}..."})
+        await _send_stage(ws, "project", "project_init", _text("workflow_project_init_stage", project_name=project_name).strip())
+        await _send(ws, "progress", {"message": _text("workflow_project_init_progress", project_name=project_name).strip()})
         try:
             project_root = await asyncio.get_event_loop().run_in_executor(
                 None, create_project_from_template, project_name, parent_dir
@@ -416,17 +443,17 @@ async def _ws_run_with_provided_image(ws: WebSocket, params: dict, project_root:
             async def _stream_init(chunk: str):
                 await _send(ws, "agent_stream", {"chunk": chunk})
             project_root = await create_mod_project(project_name, parent_dir, _stream_init)
-        await _send(ws, "progress", {"message": f"项目初始化完成: {project_root}"})
+        await _send(ws, "progress", {"message": _text("workflow_project_init_done", project_root=project_root).strip()})
 
-    await _send(ws, "progress", {"message": f"读取图片：{fname}"})
+    await _send(ws, "progress", {"message": _text("workflow_provided_image_reading", file_name=fname).strip()})
     img = await asyncio.get_event_loop().run_in_executor(
         None, lambda: img_src.convert("RGBA")
     )
 
-    await _send_stage(ws, "image", "postprocess", "正在处理图像资产...")
-    await _send(ws, "progress", {"message": "正在处理图像资产..."})
+    await _send_stage(ws, "image", "postprocess", _text("workflow_image_postprocess_stage").strip())
+    await _send(ws, "progress", {"message": _text("workflow_image_postprocess_progress").strip()})
     image_paths = await _run_postprocess(img, asset_type, asset_name, project_root)
-    await _send(ws, "progress", {"message": f"图像资产已写入: {[str(p) for p in image_paths]}"})
+    await _send(ws, "progress", {"message": _text("workflow_image_paths_written", image_paths=[str(p) for p in image_paths]).strip()})
 
     cfg = get_config()
     should_continue, approval_output = await _maybe_await_approval(ws, description, cfg["llm"], project_root)
@@ -440,8 +467,8 @@ async def _ws_run_with_provided_image(ws: WebSocket, params: dict, project_root:
     if not should_continue:
         return
     if cfg["llm"].get("execution_mode") != "approval_first":
-        await _send_stage(ws, "agent", "agent_running", "正在生成代码...")
-        await _send(ws, "progress", {"message": "Code Agent 开始生成代码..."})
+        await _send_stage(ws, "agent", "agent_running", _text("workflow_agent_running_stage").strip())
+        await _send(ws, "progress", {"message": _text("workflow_agent_running_progress").strip()})
 
     async def stream_to_ws(chunk: str):
         await _send(ws, "agent_stream", {"chunk": chunk})
@@ -461,13 +488,13 @@ async def _ws_run_with_provided_image(ws: WebSocket, params: dict, project_root:
 def _friendly_error(e: Exception) -> str:
     s = str(e)
     if "401" in s:
-        return "API Key 无效（401 Unauthorized）。请在设置中填写正确的 API Key。"
+        return _text("workflow_api_key_invalid").strip()
     if "403" in s:
-        return "API Key 无权限（403 Forbidden）。请确认 Key 已开通对应模型的访问权限。"
+        return _text("workflow_api_key_forbidden").strip()
     if "getaddrinfo" in s or "ConnectError" in type(e).__name__:
-        return f"网络连接失败，无法访问图像生成 API。请检查网络或代理设置。\n({type(e).__name__})"
+        return _text("workflow_network_error", error_type=type(e).__name__).strip()
     if "timeout" in s.lower() or "Timeout" in type(e).__name__:
-        return "请求超时。图像生成 API 响应过慢，请稍后重试。"
+        return _text("workflow_timeout_error").strip()
     return s
 
 
@@ -486,6 +513,10 @@ async def _run_postprocess(img, asset_type, asset_name, project_root):
 
 @router.post("/project/create")
 async def api_create_project(body: dict):
+    return await _legacy_api_create_project(body)
+
+
+async def _legacy_api_create_project(body: dict):
     """创建新 mod 项目。"""
     project_name = body["name"]
     target_dir = Path(body["target_dir"])
@@ -495,6 +526,10 @@ async def api_create_project(body: dict):
 
 @router.post("/project/build")
 async def api_build(body: dict):
+    return await _legacy_api_build(body)
+
+
+async def _legacy_api_build(body: dict):
     """手动触发 build。"""
     project_root = Path(body["project_root"])
     success, output = await build_and_fix(project_root)
@@ -503,6 +538,10 @@ async def api_build(body: dict):
 
 @router.post("/project/package")
 async def api_package(body: dict):
+    return await _legacy_api_package(body)
+
+
+async def _legacy_api_package(body: dict):
     """打包 mod。"""
     project_root = Path(body["project_root"])
     success = await package_mod(project_root)

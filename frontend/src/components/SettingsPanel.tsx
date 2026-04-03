@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { X, FolderOpen, Gamepad2, Cpu, Image, Search } from "lucide-react";
+import { detectAppPaths, loadAppConfig, updateAppConfig } from "../shared/api/index.ts";
 
 const inputCls = "w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-100";
 const selectCls = "w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-slate-800 focus:outline-none focus:border-amber-400";
@@ -52,7 +53,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [imgSecret, setImgSecret] = useState("");
 
   useEffect(() => {
-    fetch("/api/config").then(r => r.json()).then(setCfg);
+    loadAppConfig().then(setCfg);
   }, []);
 
   function set(path: string[], value: string | number) {
@@ -81,7 +82,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     setDetecting(true);
     setDetectNotes([]);
     try {
-      const res = await fetch("/api/config/detect_paths").then(r => r.json());
+      const res = await detectAppPaths();
       const notes: string[] = res.notes ?? [];
       if (res.sts2_path) {
         set(["sts2_path"], res.sts2_path);
@@ -105,11 +106,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     if (llmKey.trim()) body.llm.api_key = llmKey.trim();
     if (imgKey.trim()) body.image_gen.api_key = imgKey.trim();
     if (imgSecret.trim()) body.image_gen.api_secret = imgSecret.trim();
-    await fetch("/api/config", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    await updateAppConfig(body);
     setSaving(false);
     onClose();
   }

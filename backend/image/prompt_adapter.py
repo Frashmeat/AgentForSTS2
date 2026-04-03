@@ -17,83 +17,7 @@ from llm.text_runner import complete_text, resolve_model
 ImageProvider = Literal["flux2", "sdxl", "jimeng", "wanxiang"]
 
 _PROMPT_LOADER = PromptLoader()
-_TRANSPARENT_BG_RULE = "The asset requires a transparent/white background (no background scene)"
-_FALLBACK_PROMPT_EN_SUFFIX = ", trading card game art style, dramatic cinematic lighting, highly detailed, sharp focus"
-_FALLBACK_PROMPT_EN_TRANSPARENT_SUFFIX = ", isolated on pure white background, no shadow, no background"
-_FALLBACK_PROMPT_CN_SUFFIX = "，交易卡牌艺术风格，电影级光照，高清细节"
-_FALLBACK_PROMPT_CN_TRANSPARENT_SUFFIX = "，白色纯净背景"
-_FALLBACK_SDXL_NEGATIVE_PROMPT = "blurry, low quality, text, watermark, signature, deformed"
 _ADAPT_PROMPT_KEY = "image.adapt_prompt"
-_ADAPT_PROMPT_TEMPLATE = """You are an expert at writing image generation prompts for trading card game assets. Extract ONLY the visual/artistic elements from the user's description and convert them into an optimized image prompt. IMPORTANT: Ignore all game mechanics — damage values, costs, card effects, upgrade conditions, numbers, keywords like 'deal X damage', 'gain Y block', etc. Focus solely on: appearance, materials, colors, style, lighting, mood, and composition. Return ONLY a JSON object with keys: 'prompt' and optionally 'negative_prompt'. No explanation, no markdown, just the JSON.
-
-Asset type: {{ asset_type }}
-Target model family: {{ provider }} ({{ guide_lang }} prompt style)
-Formula: {{ guide_formula }}
-Rules:
-{{ rules_text }}
-Example output: {{ guide_example }}
-{{ guide_negative_example_block }}
-
-User design description:
-{{ user_description }}
-
-Generate the optimized image prompt now (visual elements only, no game mechanics).
-"""
-
-_STYLE_GUIDE_DEFAULTS: dict[ImageProvider, dict[str, object]] = {
-    "flux2": {
-        "lang": "English",
-        "formula": "Subject (most important first) + Action/Detail + Style + Camera + Lighting",
-        "rules": [
-            "Natural language sentences, NOT tag lists",
-            "Put the main subject at the very beginning",
-            "Include specific materials, HEX colors where helpful (e.g. #9B59B6 purple)",
-            "Add camera/lens info: e.g. 'shot on Canon 85mm f/2.8, sharp focus'",
-            "Cinematic lighting description",
-            "Trading card game art style",
-            "NO negative prompts",
-            "For transparent-bg assets (relics, powers, icons): add 'isolated on pure white background, no shadow, no background'",
-        ],
-        "example": "A dark obsidian dagger with glowing #9B59B6 purple edge, dramatic rim lighting, intricate engravings catching golden highlights, trading card art style, shot on Canon 85mm f/2.8, sharp focus, cinematic atmosphere, isolated on pure white background",
-    },
-    "sdxl": {
-        "lang": "English",
-        "formula": "comma-separated tags + quality words + (emphasis:weight)",
-        "rules": [
-            "Use tag-based format, comma separated",
-            "Add quality tags: masterpiece, best quality, highly detailed, sharp focus",
-            "Use (tag:1.2) syntax for emphasis",
-            "Add negative prompt separately",
-            "For transparent-bg assets: add 'white background, simple background'",
-        ],
-        "example": "dark obsidian dagger, glowing purple edge, intricate engravings, golden highlights, (masterpiece:1.2), best quality, highly detailed, trading card art, dramatic lighting, (sharp focus:1.3)",
-        "negative_example": "blurry, low quality, text, watermark, signature",
-    },
-    "jimeng": {
-        "lang": "Chinese",
-        "formula": "主体 + 外观描述 + 细节 + 风格 + 质量词",
-        "rules": [
-            "中文自然语言，使用短句，句子之间用逗号分隔",
-            "突出主体，外观描述具体清晰",
-            "避免古诗词或过于文学化的表达",
-            "加入风格词和质量词",
-            "透明背景类资产加：白色背景，简洁背景",
-        ],
-        "example": "暗黑黑曜石匕首，紫色边缘发光，精致雕纹，戏剧性光影，交易卡牌艺术风格，电影级照明，4K 高清细节，白色背景",
-    },
-    "wanxiang": {
-        "lang": "Chinese",
-        "formula": "主体描述 + 场景描述 + 风格 + 镜头语言（特写/俯视等） + 氛围词 + 细节",
-        "rules": [
-            "中文，风格词可以放前面",
-            "使用镜头语言词：特写、全景、俯视、仰视等",
-            "加入氛围词：戏剧性、神秘、史诗感等",
-            "系统会自动开启 prompt_extend 优化",
-            "透明背景类资产加：白色纯净背景",
-        ],
-        "example": "暗黑黑曜石匕首，紫色边缘发光，特写镜头，戏剧性逆光，交易卡牌艺术风格，电影级光照，精致细节，4K，白色纯净背景",
-    },
-}
 
 
 # 内容审核敏感词替换表（针对即梦/火山引擎等国内 API 的限制）
@@ -112,12 +36,11 @@ _CONTENT_SAFE_REPLACEMENTS: list[tuple[str, str]] = [
 
 
 def _load_prompt_resource(name: str, fallback_text: str) -> str:
-    text = _PROMPT_LOADER.load(name, fallback_template=fallback_text)
-    return text.strip()
+    return _PROMPT_LOADER.load(name).strip()
 
 
 def _load_prompt_resource_lines(name: str, fallback_lines: list[str]) -> list[str]:
-    text = _load_prompt_resource(name, "\n".join(f"- {line}" for line in fallback_lines))
+    text = _load_prompt_resource(name, "")
     lines = []
     for raw_line in text.splitlines():
         line = raw_line.strip()
@@ -131,28 +54,18 @@ def _load_prompt_resource_lines(name: str, fallback_lines: list[str]) -> list[st
 
 def _build_style_guides() -> dict[ImageProvider, dict]:
     guides: dict[ImageProvider, dict] = {}
-    for provider, defaults in _STYLE_GUIDE_DEFAULTS.items():
+    for provider in ("flux2", "sdxl", "jimeng", "wanxiang"):
         guide = {
-            "lang": defaults["lang"],
-            "formula": _load_prompt_resource(
-                f"image.guide_{provider}_formula",
-                str(defaults["formula"]),
-            ),
-            "rules": _load_prompt_resource_lines(
-                f"image.guide_{provider}_rules",
-                list(defaults["rules"]),
-            ),
-            "example": _load_prompt_resource(
-                f"image.guide_{provider}_example",
-                str(defaults["example"]),
-            ),
+            "lang": _load_prompt_resource(f"image.guide_{provider}_lang", ""),
+            "formula": _load_prompt_resource(f"image.guide_{provider}_formula", ""),
+            "rules": _load_prompt_resource_lines(f"image.guide_{provider}_rules", []),
+            "example": _load_prompt_resource(f"image.guide_{provider}_example", ""),
         }
-        negative_example = defaults.get("negative_example")
-        if negative_example is not None:
-            guide["negative_example"] = _load_prompt_resource(
-                f"image.guide_{provider}_negative_example",
-                str(negative_example),
-            )
+        negative_example_key = f"image.guide_{provider}_negative_example"
+        try:
+            guide["negative_example"] = _load_prompt_resource(negative_example_key, "")
+        except FileNotFoundError:
+            pass
         guides[provider] = guide
     return guides
 
@@ -189,7 +102,7 @@ async def adapt_prompt(
 
     rules_text = "\n".join(f"- {r}" for r in guide["rules"])
     if needs_transparent_bg and "transparent" not in " ".join(guide["rules"]).lower():
-        rules_text += "\n- " + _load_prompt_resource("image.transparent_bg_rule", _TRANSPARENT_BG_RULE)
+        rules_text += "\n- " + _load_prompt_resource("image.transparent_bg_rule", "")
 
     full_prompt = _PROMPT_LOADER.render(
         _ADAPT_PROMPT_KEY,
@@ -203,7 +116,6 @@ async def adapt_prompt(
             "rules_text": rules_text,
             "user_description": user_description,
         },
-        fallback_template=_ADAPT_PROMPT_TEMPLATE,
     )
 
     try:
@@ -211,7 +123,13 @@ async def adapt_prompt(
         result = _parse_json_result(raw)
     except Exception as e:
         result = _fallback_prompt(user_description, provider, needs_transparent_bg)
-        result["fallback_warning"] = f"提示词 AI 优化失败，已使用模板回退。原因：{type(e).__name__}: {e}"
+        result["fallback_warning"] = _PROMPT_LOADER.render(
+            "image.adapt_fallback_warning",
+            {
+                "error_type": type(e).__name__,
+                "error_message": e,
+            },
+        )
 
     # 对最终 prompt 做内容安全替换（防止国内图生 API 内容审核拦截）
     if result.get("prompt"):
@@ -275,16 +193,16 @@ def _fallback_prompt(description: str, provider: ImageProvider, needs_transparen
 
     bg_suffix = _load_prompt_resource(
         "image.fallback_prompt_en_transparent_suffix",
-        _FALLBACK_PROMPT_EN_TRANSPARENT_SUFFIX,
+        "",
     ) if needs_transparent_bg else ""
     if provider in ("flux2", "sdxl"):
-        prompt = f"{visual}{_load_prompt_resource('image.fallback_prompt_en_suffix', _FALLBACK_PROMPT_EN_SUFFIX)}{bg_suffix}"
-        neg = _load_prompt_resource("image.fallback_sdxl_negative_prompt", _FALLBACK_SDXL_NEGATIVE_PROMPT) if provider == "sdxl" else None
+        prompt = f"{visual}{_load_prompt_resource('image.fallback_prompt_en_suffix', '')}{bg_suffix}"
+        neg = _load_prompt_resource("image.fallback_sdxl_negative_prompt", "") if provider == "sdxl" else None
     else:
         bg_cn = _load_prompt_resource(
             "image.fallback_prompt_cn_transparent_suffix",
-            _FALLBACK_PROMPT_CN_TRANSPARENT_SUFFIX,
+            "",
         ) if needs_transparent_bg else ""
-        prompt = f"{visual}{_load_prompt_resource('image.fallback_prompt_cn_suffix', _FALLBACK_PROMPT_CN_SUFFIX)}{bg_cn}"
+        prompt = f"{visual}{_load_prompt_resource('image.fallback_prompt_cn_suffix', '')}{bg_cn}"
         neg = None
     return {"prompt": prompt, "negative_prompt": neg}
