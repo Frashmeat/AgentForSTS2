@@ -13,6 +13,7 @@ if str(ROOT) not in sys.path:
 
 from app.shared.infra.config.settings import get_config
 from app.shared.infra.db.base import Base
+from app.modules.auth.infra.persistence import models as _auth_models  # noqa: F401
 from app.modules.platform.infra.persistence import models as _platform_models  # noqa: F401
 
 config = context.config

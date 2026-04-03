@@ -1,3 +1,6 @@
-from .models import UserAccount
+from .models import EmailVerificationTicket, UserAccount
 
-__all__ = ["UserAccount"]
+__all__ = [
+    "EmailVerificationTicket",
+    "UserAccount",
+]

@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional
 
+from app.modules.auth.application import AuthService
+from app.modules.auth.infra.persistence.repositories import (
+    EmailVerificationRepositorySqlAlchemy,
+    UserRepositorySqlAlchemy,
+)
 from app.modules.platform.application.services import (
     AdminQueryService,
     ApprovalFacadeService,
@@ -85,7 +90,9 @@ class ApplicationContainer:
             resolve_platform_migration_flags(self.settings.to_dict()),
         )
         self._singletons.setdefault("platform.db_session_factory", db_session_factory)
+        self._singletons.setdefault("auth.db_session_factory", db_session_factory)
         self._bootstrap_platform_defaults(db_session_factory)
+        self._bootstrap_auth_defaults()
         if self.runtime_role != "web":
             self._bootstrap_workstation_bridge_defaults(db_session_factory)
         for key in (
@@ -114,6 +121,14 @@ class ApplicationContainer:
             ("platform.execution_orchestrator_service_factory", ExecutionOrchestratorService),
             ("platform.quota_billing_service_factory", QuotaBillingService),
             ("platform.event_service_factory", EventService),
+        ):
+            self._singletons.setdefault(key, instance)
+
+    def _bootstrap_auth_defaults(self) -> None:
+        for key, instance in (
+            ("auth.user_repository_factory", UserRepositorySqlAlchemy),
+            ("auth.email_verification_repository_factory", EmailVerificationRepositorySqlAlchemy),
+            ("auth.auth_service_factory", AuthService),
         ):
             self._singletons.setdefault(key, instance)
 

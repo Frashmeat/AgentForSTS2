@@ -23,3 +23,21 @@ class UserAccount:
 
     def can_use_platform(self) -> bool:
         return self.email_verified
+
+
+@dataclass(frozen=True, slots=True)
+class EmailVerificationTicket:
+    verification_id: int
+    user_id: int
+    purpose: str
+    code: str
+    email: str
+    expires_at: datetime
+    created_at: datetime
+    consumed_at: datetime | None = None
+
+    def is_expired(self, now: datetime) -> bool:
+        return now >= self.expires_at
+
+    def mark_consumed(self, consumed_at: datetime) -> "EmailVerificationTicket":
+        return replace(self, consumed_at=consumed_at)
