@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useReducer } from "react";
 import { Settings, Swords } from "lucide-react";
-import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import ExecutionModeDialog from "./components/ExecutionModeDialog.tsx";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { UserEntry } from "./components/UserEntry.tsx";
 import { approveApproval, executeApproval, rejectApproval, type ApprovalRequest } from "./shared/api/index.ts";
@@ -16,6 +17,7 @@ import { UserCenterJobDetailPage } from "./features/user-center/job-detail-page.
 import { UserCenterPage } from "./features/user-center/page.tsx";
 import { LogAnalysisFeatureView } from "./features/log-analysis/view";
 import { ModEditorFeatureView } from "./features/mod-editor/view";
+import type { PlatformExecutionRequest, WorkspaceTab } from "./features/platform-run/types.ts";
 import { type AssetType, getStageIndex } from "./features/single-asset/model";
 import { createSingleAssetWorkflowController } from "./features/single-asset/controller.ts";
 import { createInitialSingleAssetWorkflowState, singleAssetWorkflowReducer } from "./features/single-asset/state";
@@ -27,16 +29,40 @@ import {
   saveSingleAssetSnapshot,
 } from "./features/single-asset/recovery";
 import { SingleAssetFeatureView } from "./features/single-asset/view";
-import { resolveMigrationFlags, type WorkflowMigrationFlags } from "./shared/api/index.ts";
+import { loadLocalAiCapabilityStatus, resolveMigrationFlags, type WorkflowMigrationFlags } from "./shared/api/index.ts";
+import type { PlatformJobCreateItem } from "./shared/api/platform.ts";
 import { runApprovalAction } from "./shared/approvalAction.ts";
+import { useSession } from "./shared/session/hooks.ts";
 import { useDefaultProjectRoot } from "./shared/useDefaultProjectRoot.ts";
 import { useProjectCreation } from "./shared/useProjectCreation.ts";
 
-type AppTab = "single" | "batch" | "edit" | "log";
+type AppTab = WorkspaceTab;
+
+function resolveAppTab(value: string | null): AppTab {
+  switch (value) {
+    case "batch":
+    case "edit":
+    case "log":
+      return value;
+    default:
+      return "single";
+  }
+}
+
+function buildWorkspacePath(tab: AppTab): string {
+  return tab === "single" ? "/" : `/?tab=${tab}`;
+}
+
+interface PendingExecutionRequest extends PlatformExecutionRequest {
+  localAvailable: boolean;
+}
 
 export default function App() {
   const location = useLocation();
-  const [activeTab, setActiveTab] = useState<AppTab>("single");
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { isAuthenticated } = useSession();
+  const activeTab = resolveAppTab(searchParams.get("tab"));
   const [initialSingleAssetSnapshot] = useState(() => loadSingleAssetSnapshot());
   const [assetType, setAssetType] = useState<AssetType>(() => initialSingleAssetSnapshot?.assetType ?? "relic");
   const [assetName, setAssetName] = useState(() => initialSingleAssetSnapshot?.assetName ?? "");
@@ -63,6 +89,7 @@ export default function App() {
   const [restoredApprovalRefreshPending, setRestoredApprovalRefreshPending] = useState(
     () => initialSingleAssetSnapshot?.workflowState.stage === "approval_pending",
   );
+  const [pendingExecution, setPendingExecution] = useState<PendingExecutionRequest | null>(null);
   const {
     projectCreateBusy,
     projectCreateMessage,
@@ -199,6 +226,73 @@ export default function App() {
     });
   }
 
+  function updateActiveTab(nextTab: AppTab) {
+    if (location.pathname !== "/") {
+      return;
+    }
+    const nextSearchParams = new URLSearchParams(searchParams);
+    if (nextTab === "single") {
+      nextSearchParams.delete("tab");
+    } else {
+      nextSearchParams.set("tab", nextTab);
+    }
+    setSearchParams(nextSearchParams, { replace: true });
+  }
+
+  async function handleExecutionRequest(request: PlatformExecutionRequest) {
+    let capability;
+    try {
+      capability = await loadLocalAiCapabilityStatus();
+    } catch {
+      capability = {
+        text_ai_available: false,
+        image_ai_available: false,
+      };
+    }
+
+    setPendingExecution({
+      ...request,
+      localAvailable: capability.text_ai_available && (!request.requiresImageAi || capability.image_ai_available),
+    });
+  }
+
+  function handleChooseLocalExecution() {
+    if (pendingExecution === null) {
+      return;
+    }
+    const request = pendingExecution;
+    setPendingExecution(null);
+    request.runLocal();
+  }
+
+  function handleGoLoginForServerExecution() {
+    if (pendingExecution === null) {
+      return;
+    }
+    const request = pendingExecution;
+    setPendingExecution(null);
+    navigate("/auth/login", {
+      replace: true,
+      state: {
+        redirectTo: buildWorkspacePath(request.tab),
+      },
+    });
+  }
+
+  async function handleChooseServerExecution() {
+    if (pendingExecution === null) {
+      return;
+    }
+
+    if (!isAuthenticated) {
+      handleGoLoginForServerExecution();
+      return;
+    }
+
+    setPendingExecution(null);
+    navigate("/me");
+  }
+
   function handleConfirmPrompt() {
     singleAssetWorkflowController.confirmPrompt(workflowState.promptPreview, workflowState.negativePrompt);
   }
@@ -266,11 +360,27 @@ export default function App() {
   }
 
   function renderWorkspaceShell() {
+    const singleAssetRequiresImageAi = imageMode === "ai";
+    const singleAssetInputSummary = `${assetType}:${assetName.trim() || "未命名资产"}`;
+    const singleAssetItem: PlatformJobCreateItem = {
+      item_type: assetType,
+      input_summary: description.trim() || singleAssetInputSummary,
+      input_payload: {
+        asset_type: assetType,
+        asset_name: assetName.trim(),
+        description: description.trim(),
+        project_root: projectRoot.trim(),
+        image_mode: imageMode,
+        auto_mode: autoMode,
+        has_uploaded_image: Boolean(uploadedImageB64),
+      },
+    };
+
     return (
       <>
         <div className="px-6 pt-4 flex gap-1 border-b border-slate-200 bg-white">
           <button
-            onClick={() => setActiveTab("single")}
+            onClick={() => updateActiveTab("single")}
             className={cn(
               "px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors",
               activeTab === "single"
@@ -281,7 +391,7 @@ export default function App() {
             单资产
           </button>
           <button
-            onClick={() => setActiveTab("batch")}
+            onClick={() => updateActiveTab("batch")}
             className={cn(
               "px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors",
               activeTab === "batch"
@@ -292,7 +402,7 @@ export default function App() {
             Mod 规划
           </button>
           <button
-            onClick={() => setActiveTab("edit")}
+            onClick={() => updateActiveTab("edit")}
             className={cn(
               "px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors",
               activeTab === "edit"
@@ -303,7 +413,7 @@ export default function App() {
             修改 Mod
           </button>
           <button
-            onClick={() => setActiveTab("log")}
+            onClick={() => updateActiveTab("log")}
             className={cn(
               "px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors",
               activeTab === "log"
@@ -317,19 +427,19 @@ export default function App() {
 
         {activeTab === "batch" && (
           <div className="px-6 py-6">
-            <BatchGenerationFeatureView />
+            <BatchGenerationFeatureView onRequestExecution={handleExecutionRequest} />
           </div>
         )}
 
         {activeTab === "edit" && (
           <div className="px-6 py-6">
-            <ModEditorFeatureView />
+            <ModEditorFeatureView onRequestExecution={handleExecutionRequest} />
           </div>
         )}
 
         {activeTab === "log" && (
           <div className="px-6 py-6">
-            <LogAnalysisFeatureView />
+            <LogAnalysisFeatureView onRequestExecution={handleExecutionRequest} />
           </div>
         )}
 
@@ -385,7 +495,20 @@ export default function App() {
               setAssetName(preset.assetName);
               setDescription(preset.description);
             }}
-            onStartWorkflow={startWorkflow}
+            onStartWorkflow={() => {
+              void handleExecutionRequest({
+                title: "开始生成资产",
+                tab: "single",
+                jobType: "single_generate",
+                createdFrom: "single_asset",
+                inputSummary: singleAssetInputSummary,
+                requiresImageAi: singleAssetRequiresImageAi,
+                items: [singleAssetItem],
+                runLocal() {
+                  void startWorkflow();
+                },
+              });
+            }}
             onReset={reset}
             onImageModeChange={setImageMode}
             onAutoModeToggle={() => {
@@ -454,6 +577,18 @@ export default function App() {
       </Routes>
 
       {settingsOpen && isWorkspaceRoute && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
+      <ExecutionModeDialog
+        open={pendingExecution !== null}
+        title={pendingExecution?.title ?? "选择执行方式"}
+        localAvailable={pendingExecution?.localAvailable ?? false}
+        isAuthenticated={isAuthenticated}
+        onClose={() => setPendingExecution(null)}
+        onChooseLocal={handleChooseLocalExecution}
+        onChooseServer={() => {
+          void handleChooseServerExecution();
+        }}
+        onGoLogin={handleGoLoginForServerExecution}
+      />
     </div>
   );
 }

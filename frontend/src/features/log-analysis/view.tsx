@@ -4,10 +4,15 @@ import { Bug, Loader2, RotateCcw } from "lucide-react";
 import { StageStatus } from "../../components/StageStatus";
 import { LogAnalysisSocket } from "../../lib/log_analysis_ws";
 import { resolveErrorMessage } from "../../shared/error.ts";
+import type { PlatformExecutionRequest } from "../platform-run/types.ts";
 
 type Stage = "input" | "analyzing" | "done" | "error";
 
-export function LogAnalysisFeatureView() {
+export function LogAnalysisFeatureView({
+  onRequestExecution,
+}: {
+  onRequestExecution?: (request: PlatformExecutionRequest) => void;
+}) {
   const [stage, setStage] = useState<Stage>("input");
   const [context, setContext] = useState("");
   const [logLines, setLogLines] = useState<number | null>(null);
@@ -92,7 +97,35 @@ export function LogAnalysisFeatureView() {
 
         {stage === "input" || stage === "done" || stage === "error" ? (
           <div className="flex gap-2">
-            <button onClick={analyze} className="flex-1 py-2.5 rounded-lg bg-amber-500 text-white font-bold text-sm hover:bg-amber-600 transition-colors">
+            <button
+              onClick={() => {
+                if (!onRequestExecution) {
+                  void analyze();
+                  return;
+                }
+                onRequestExecution({
+                  title: "分析日志",
+                  tab: "log",
+                  jobType: "log_analysis",
+                  createdFrom: "log_analysis",
+                  inputSummary: context.trim() || "分析最近一次游戏日志",
+                  requiresImageAi: false,
+                  items: [
+                    {
+                      item_type: "log_analysis",
+                      input_summary: context.trim() || "分析最近一次游戏日志",
+                      input_payload: {
+                        context: context.trim(),
+                      },
+                    },
+                  ],
+                  runLocal() {
+                    void analyze();
+                  },
+                });
+              }}
+              className="flex-1 py-2.5 rounded-lg bg-amber-500 text-white font-bold text-sm hover:bg-amber-600 transition-colors"
+            >
               分析日志
             </button>
             {(stage === "done" || stage === "error") && (
