@@ -30,7 +30,7 @@ function createMockResponse(init: MockResponseInit) {
   };
 }
 
-test("createPlatformJob posts body with user_id query", async () => {
+test("platform compatibility api keeps explicit user_id query", async () => {
   const calls: Array<{ input: unknown; init?: RequestInit }> = [];
   Object.assign(globalThis, {
     fetch: async (input: unknown, init?: RequestInit) => {
