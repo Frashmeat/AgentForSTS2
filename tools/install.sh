@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 set -e
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+BACKEND_DIR="$ROOT_DIR/backend"
+FRONTEND_DIR="$ROOT_DIR/frontend"
+VENV_DIR="$BACKEND_DIR/.venv"
+VENV_PYTHON="$VENV_DIR/bin/python"
 
 echo ""
 echo " =============================="
@@ -9,33 +14,34 @@ echo "   AgentTheSpire Installer"
 echo " =============================="
 echo ""
 
-# 检查 Python
 if ! command -v python3 &>/dev/null; then
     echo "[ERROR] 未找到 python3，请先安装 Python 3.11+"
     exit 1
 fi
 
-# 检查 Node.js
 if ! command -v node &>/dev/null; then
     echo "[ERROR] 未找到 node，请先安装 Node.js 18+"
     exit 1
 fi
 
-# 检查 claude CLI
 if ! command -v claude &>/dev/null; then
     echo "[WARN] 未找到 claude CLI。"
     echo "       如需订阅账号模式，请运行: npm install -g @anthropic-ai/claude-code"
     echo ""
 fi
 
-# 后端依赖
-echo "[1/3] 安装后端 Python 依赖..."
-cd "$ROOT_DIR/backend"
-python3 -m pip install -r requirements.txt
+echo "[1/3] 准备后端 Python 虚拟环境..."
+cd "$BACKEND_DIR"
+if [[ ! -d "$VENV_DIR" ]]; then
+    python3 -m venv "$VENV_DIR"
+fi
+
+"$VENV_PYTHON" -m pip install --upgrade pip
+"$VENV_PYTHON" -m pip install -r requirements.txt
 
 echo ""
 echo "[1/3] 预下载 rembg 模型..."
-if ROOT_DIR="$ROOT_DIR" python3 - <<'PY'
+if ROOT_DIR="$ROOT_DIR" "$VENV_PYTHON" - <<'PY'
 import json
 import os
 from pathlib import Path
@@ -55,18 +61,15 @@ else
     echo "[WARN] rembg 模型预下载失败，首次抠图时会自动下载"
 fi
 
-# 前端依赖
 echo ""
 echo "[2/3] 安装前端 Node.js 依赖..."
-cd "$ROOT_DIR/frontend"
+cd "$FRONTEND_DIR"
 npm install
 
-# 前端构建
 echo ""
 echo "[3/3] 构建前端..."
 npm run build
 
-# 询问本地图生
 echo ""
 read -r -p "是否安装本地图像生成（ComfyUI + FLUX.2，需约 12GB 磁盘）？[y/N] " LOCAL_IMG
 if [[ "$LOCAL_IMG" =~ ^[Yy]$ ]]; then
