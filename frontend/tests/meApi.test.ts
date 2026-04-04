@@ -81,6 +81,7 @@ test("me api defaults to web backend when runtime base is configured", async () 
 });
 
 test("me api can create and start current user jobs without explicit user_id", async () => {
+  delete (globalThis as typeof globalThis & { __AGENT_THE_SPIRE_API_BASES__?: unknown }).__AGENT_THE_SPIRE_API_BASES__;
   const calls: Array<{ input: unknown; init?: RequestInit }> = [];
   Object.assign(globalThis, {
     fetch: async (input: unknown, init?: RequestInit) => {
