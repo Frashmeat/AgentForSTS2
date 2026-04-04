@@ -1,0 +1,20 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+
+function readSource(path: string) {
+  return readFileSync(new URL(path, import.meta.url), "utf8");
+}
+
+test("job detail page loads detail items and refund summary", () => {
+  const pageSource = readSource("../src/features/user-center/job-detail-page.tsx");
+  const summarySource = readSource("../src/features/user-center/refundSummary.tsx");
+
+  assert.match(pageSource, /getMyJob/);
+  assert.match(pageSource, /listMyJobItems/);
+  assert.match(pageSource, /RefundSummary/);
+  assert.match(summarySource, /original_deducted/);
+  assert.match(summarySource, /refunded_amount/);
+  assert.match(summarySource, /net_consumed/);
+  assert.match(summarySource, /refund_reason_summary/);
+});
