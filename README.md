@@ -90,6 +90,7 @@ Current deployment guidance:
 - **AI 生图** — FLUX.2 / 即梦 / 通义万相生成卡图/遗物图标，自动去背景裁剪
 - **一键编译部署** — `dotnet publish` + Godot PCK 打包，自动复制到游戏 mods 目录
 - **批量创建** — 描述整个 mod 主题，AI 规划并批量生成所有素材
+- **同一入口 + 用户中心** — 同一前端入口同时承接本地工作站链路与平台链路，已补登录/注册/用户中心/任务详情页
 
 ### 快速开始
 
@@ -121,6 +122,12 @@ tools\start.bat             # 打开 http://localhost:7860
 - 单机本地使用，优先 `workstation-backend`
 - 服务器平台 API，优先 `web-backend`
 - `full` 继续保留给兼容态与联调态
+
+当前前后端边界补充：
+
+- `workstation-backend` 继续承接本机工作流、配置、构建、部署与日志分析
+- `web-backend` 默认承接 `/api/auth/*`、`/api/me/*`、平台任务与配额接口
+- 用户中心只读取平台模式任务；BYOK / 本机执行不会进入服务器历史
 
 ---
 
