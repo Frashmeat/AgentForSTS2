@@ -9,7 +9,7 @@
 - `tools\setup_mod_deps.bat` / `./tools/setup_mod_deps.sh`
   安装或配置 Mod 开发依赖，如 .NET 9 和 Godot 4.5.1。
 - `tools\start.bat` / `./tools/start.sh`
-  启动生产模式服务。
+  启动历史兼容态 `full` 运行时。
 - `tools\start_workstation.bat`
   单独启动工作站后端，承接本地 UI 与本地工作流。
 - `tools\start_web.bat`
@@ -37,3 +37,6 @@
 - 生成型文件如 `tools\sandbox_test.wsb` 不应提交到仓库。
 - `tools\start_workstation.bat` 面向本地工作站运行。
 - `tools\start_web.bat` 面向独立 `web-backend` 运行，不负责前端静态文件托管。
+- 若采用拆分运行形态，通常是：
+  - `workstation-backend` 承接前端壳、本地工作流与 WebSocket
+  - `web-backend` 承接 `/api/auth/*`、`/api/me/*` 与平台任务查询/创建接口

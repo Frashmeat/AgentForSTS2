@@ -17,6 +17,7 @@ Describe your card, relic, or power in plain text — AgentTheSpire generates th
 - **AI image generation** — FLUX.2 / 即梦 / 通义万相 generate card art and relic icons, background removed and cropped automatically
 - **One-click build & deploy** — `dotnet publish` + Godot PCK packaging, copied straight to your game's mods folder
 - **Batch creation** — describe a full mod theme, AI plans and generates all assets in one go
+- **Hybrid execution routing** — one frontend shell now supports local BYOK flows and platform-mode task creation with auth, user center, and job detail pages
 
 ### Requirements
 
@@ -62,6 +63,13 @@ Current deployment guidance:
 - Server-side platform APIs: prefer `web-backend`
 - `full` remains a compatibility runtime for transition and joint debugging
 
+Current product behavior:
+
+- The workstation shell remains the only frontend entry.
+- `/auth/*`, `/me`, and `/me/jobs/:jobId` are now available in the same shell.
+- Choosing server mode creates a draft platform job first, then asks for start confirmation before queueing.
+- Local BYOK execution does not create platform history.
+
 ### LLM Options
 
 | Mode | Backend / Provider |
@@ -91,6 +99,7 @@ Current deployment guidance:
 - **一键编译部署** — `dotnet publish` + Godot PCK 打包，自动复制到游戏 mods 目录
 - **批量创建** — 描述整个 mod 主题，AI 规划并批量生成所有素材
 - **同一入口 + 用户中心** — 同一前端入口同时承接本地工作站链路与平台链路，已补登录/注册/用户中心/任务详情页
+- **统一执行分流** — 点击生成后可在“本机执行 / 服务器模式”之间分流；服务器模式先创建平台任务草稿，再确认开始
 
 ### 快速开始
 
@@ -128,6 +137,7 @@ tools\start.bat             # 打开 http://localhost:7860
 - `workstation-backend` 继续承接本机工作流、配置、构建、部署与日志分析
 - `web-backend` 默认承接 `/api/auth/*`、`/api/me/*`、平台任务与配额接口
 - 用户中心只读取平台模式任务；BYOK / 本机执行不会进入服务器历史
+- 服务器模式下，前端会先创建当前用户视角平台任务，再确认开始并跳转用户中心详情页
 
 ---
 
