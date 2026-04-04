@@ -1,9 +1,12 @@
 import { buildApiPath, requestJson } from "./http.ts";
 import type {
   PlatformJobDetail,
+  PlatformJobActionResponse,
+  PlatformJobCreateRequest,
   PlatformJobSummary,
   PlatformJobItemSummary,
   PlatformQuotaView,
+  PlatformJobStartRequest,
 } from "./platform.ts";
 
 export interface CurrentUserProfile {
@@ -33,9 +36,25 @@ export function listMyJobs(): Promise<PlatformJobSummary[]> {
   });
 }
 
+export function createMyJob(body: PlatformJobCreateRequest): Promise<PlatformJobSummary> {
+  return requestJson<PlatformJobSummary>(buildApiPath("/api/me/jobs", {}), {
+    backend: "web",
+    method: "POST",
+    body,
+  });
+}
+
 export function getMyJob(jobId: number): Promise<PlatformJobDetail> {
   return requestJson<PlatformJobDetail>(buildApiPath(`/api/me/jobs/${jobId}`, {}), {
     backend: "web",
+  });
+}
+
+export function startMyJob(jobId: number, body: PlatformJobStartRequest): Promise<PlatformJobActionResponse> {
+  return requestJson<PlatformJobActionResponse>(buildApiPath(`/api/me/jobs/${jobId}/start`, {}), {
+    backend: "web",
+    method: "POST",
+    body,
   });
 }
 

@@ -17,6 +17,7 @@ import { UserCenterJobDetailPage } from "./features/user-center/job-detail-page.
 import { UserCenterPage } from "./features/user-center/page.tsx";
 import { LogAnalysisFeatureView } from "./features/log-analysis/view";
 import { ModEditorFeatureView } from "./features/mod-editor/view";
+import { createAndStartPlatformFlow } from "./features/platform-run/createAndStartFlow.ts";
 import type { PlatformExecutionRequest, WorkspaceTab } from "./features/platform-run/types.ts";
 import { type AssetType, getStageIndex } from "./features/single-asset/model";
 import { createSingleAssetWorkflowController } from "./features/single-asset/controller.ts";
@@ -37,6 +38,8 @@ import { useDefaultProjectRoot } from "./shared/useDefaultProjectRoot.ts";
 import { useProjectCreation } from "./shared/useProjectCreation.ts";
 
 type AppTab = WorkspaceTab;
+
+const PLATFORM_WORKFLOW_VERSION = "2026.04.04";
 
 function resolveAppTab(value: string | null): AppTab {
   switch (value) {
@@ -284,13 +287,30 @@ export default function App() {
       return;
     }
 
+    const request = pendingExecution;
     if (!isAuthenticated) {
       handleGoLoginForServerExecution();
       return;
     }
 
     setPendingExecution(null);
-    navigate("/me");
+    try {
+      const result = await createAndStartPlatformFlow({
+        jobType: request.jobType,
+        workflowVersion: PLATFORM_WORKFLOW_VERSION,
+        inputSummary: request.inputSummary,
+        createdFrom: request.createdFrom,
+        items: request.items,
+        confirmStart(job) {
+          return window.confirm(
+            `已创建平台任务 #${job.id}。确认开始后会进入服务器队列，并按平台规则计费。是否继续开始？`,
+          );
+        },
+      });
+      navigate(`/me/jobs/${result.job.id}`);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "创建平台任务失败");
+    }
   }
 
   function handleConfirmPrompt() {

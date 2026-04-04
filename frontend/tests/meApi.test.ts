@@ -2,11 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  createMyJob,
   getMyJob,
   getMyProfile,
   getMyQuota,
   listMyJobItems,
   listMyJobs,
+  startMyJob,
 } from "../src/shared/api/index.ts";
 
 interface MockResponseInit {
@@ -76,4 +78,35 @@ test("me api defaults to web backend when runtime base is configured", async () 
   await getMyProfile();
 
   assert.equal(calls[0].input, "http://127.0.0.1:7870/api/me/profile");
+});
+
+test("me api can create and start current user jobs without explicit user_id", async () => {
+  const calls: Array<{ input: unknown; init?: RequestInit }> = [];
+  Object.assign(globalThis, {
+    fetch: async (input: unknown, init?: RequestInit) => {
+      calls.push({ input, init });
+      return createMockResponse({
+        ok: true,
+        body: {
+          id: 123,
+          status: calls.length === 1 ? "draft" : "queued",
+          job_type: "single_generate",
+        },
+      });
+    },
+  });
+
+  await createMyJob({
+    job_type: "single_generate",
+    workflow_version: "2026.04.04",
+    input_summary: "Dark Relic",
+    created_from: "single_asset",
+    items: [],
+  });
+  await startMyJob(123, { triggered_by: "user" });
+
+  assert.equal(calls[0].input, "/api/me/jobs");
+  assert.equal(calls[0].init?.method, "POST");
+  assert.equal(calls[1].input, "/api/me/jobs/123/start");
+  assert.equal(calls[1].init?.method, "POST");
 });

@@ -13,6 +13,7 @@ test("app and feature views expose server flow gate hooks", () => {
   const logSource = readSource("../src/features/log-analysis/view.tsx");
 
   assert.match(appSource, /ExecutionModeDialog/);
+  assert.match(appSource, /createAndStartPlatformFlow/);
   assert.match(appSource, /loadLocalAiCapabilityStatus/);
   assert.match(batchSource, /onRequestExecution/);
   assert.match(modSource, /onRequestExecution/);

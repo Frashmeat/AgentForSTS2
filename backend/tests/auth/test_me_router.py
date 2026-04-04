@@ -164,3 +164,53 @@ def test_me_router_exposes_quota_and_platform_jobs(client: TestClient):
     assert detail.json()["id"] == job.id
     assert items.status_code == 200
     assert items.json()[0]["item_type"] == "card"
+
+
+def test_me_router_can_create_and_start_current_user_job(client: TestClient):
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "username": "luna",
+            "email": "luna@example.com",
+            "password": "secret-123",
+        },
+    )
+    assert registered.status_code == 200
+
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    created = client.post(
+        "/api/me/jobs",
+        json={
+            "job_type": "single_generate",
+            "workflow_version": "2026.04.04",
+            "input_summary": "Dark Relic",
+            "created_from": "single_asset",
+            "items": [
+                {
+                    "item_type": "relic",
+                    "input_summary": "Dark Relic",
+                    "input_payload": {"asset_name": "DarkRelic"},
+                }
+            ],
+        },
+    )
+    assert created.status_code == 200
+    assert created.json()["status"] == "draft"
+
+    job_id = created.json()["id"]
+    started = client.post(
+        f"/api/me/jobs/{job_id}/start",
+        json={"triggered_by": "user"},
+    )
+
+    assert started.status_code == 200
+    assert started.json()["id"] == job_id
+    assert started.json()["status"] == "queued"
