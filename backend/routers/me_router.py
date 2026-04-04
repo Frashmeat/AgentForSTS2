@@ -1,0 +1,111 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+from fastapi import APIRouter, HTTPException, Request
+
+from app.modules.platform.application.services import JobApplicationService, JobQueryService, UserCenterService
+from app.modules.platform.contracts.job_commands import CreateJobCommand, StartJobCommand
+
+from ._auth_support import auth_session_scope, build_auth_service, require_current_user
+
+router = APIRouter(prefix="/me")
+
+
+def _build_user_center_service(session, request: Request) -> UserCenterService:
+    container = request.app.state.container
+    job_query_repository = container.resolve_singleton("platform.job_query_repository_factory")(session)
+    quota_query_repository = container.resolve_singleton("platform.quota_query_repository_factory")(session)
+    job_query_service = JobQueryService(
+        job_query_repository=job_query_repository,
+        quota_query_repository=quota_query_repository,
+    )
+    auth_service = build_auth_service(session, request)
+    return UserCenterService(
+        auth_service=auth_service,
+        job_query_service=job_query_service,
+    )
+
+
+def _build_job_application_service(session, request: Request) -> JobApplicationService:
+    container = request.app.state.container
+    job_repository = container.resolve_singleton("platform.job_repository_factory")(session)
+    job_event_repository = container.resolve_singleton("platform.job_event_repository_factory")(session)
+    return container.resolve_singleton("platform.job_application_service_factory")(
+        job_repository=job_repository,
+        job_event_repository=job_event_repository,
+    )
+
+
+@router.get("/profile")
+def get_profile(request: Request):
+    with auth_session_scope(request) as session:
+        user = require_current_user(request, session)
+        service = _build_user_center_service(session, request)
+        return service.get_profile(user.user_id).model_dump(exclude_none=True)
+
+
+@router.get("/quota")
+def get_quota(request: Request):
+    with auth_session_scope(request) as session:
+        user = require_current_user(request, session)
+        service = _build_user_center_service(session, request)
+        quota = service.get_quota(user.user_id, datetime.now(UTC))
+        if quota is None:
+            raise HTTPException(status_code=404, detail="quota not found")
+        return quota.model_dump(exclude_none=True)
+
+
+@router.get("/jobs")
+def list_jobs(request: Request):
+    with auth_session_scope(request) as session:
+        user = require_current_user(request, session)
+        service = _build_user_center_service(session, request)
+        return [item.model_dump() for item in service.list_jobs(user.user_id)]
+
+
+@router.post("/jobs")
+def create_job(request: Request, body: dict):
+    with auth_session_scope(request) as session:
+        user = require_current_user(request, session)
+        service = _build_job_application_service(session, request)
+        job = service.create_job(user.user_id, CreateJobCommand.model_validate(body))
+        return {
+            "id": job.id,
+            "job_type": job.job_type,
+            "status": job.status.value,
+            "workflow_version": job.workflow_version,
+        }
+
+
+@router.get("/jobs/{job_id}")
+def get_job_detail(request: Request, job_id: int):
+    with auth_session_scope(request) as session:
+        user = require_current_user(request, session)
+        service = _build_user_center_service(session, request)
+        detail = service.get_job_detail(user.user_id, job_id)
+        if detail is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        return detail.model_dump(exclude_none=True)
+
+
+@router.post("/jobs/{job_id}/start")
+def start_job(request: Request, job_id: int, body: dict):
+    with auth_session_scope(request) as session:
+        user = require_current_user(request, session)
+        service = _build_job_application_service(session, request)
+        job = service.start_job(
+            user.user_id,
+            StartJobCommand(job_id=job_id, triggered_by=body.get("triggered_by", "user")),
+        )
+        if job is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        return {"id": job.id, "status": job.status.value}
+
+
+@router.get("/jobs/{job_id}/items")
+def list_job_items(request: Request, job_id: int):
+    with auth_session_scope(request) as session:
+        user = require_current_user(request, session)
+        service = _build_user_center_service(session, request)
+        return [item.model_dump() for item in service.list_job_items(user.user_id, job_id)]

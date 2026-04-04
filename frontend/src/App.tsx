@@ -1,13 +1,25 @@
 import { useState, useRef, useEffect, useReducer } from "react";
 import { Settings, Swords } from "lucide-react";
+import { Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import ExecutionModeDialog from "./components/ExecutionModeDialog.tsx";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { UserEntry } from "./components/UserEntry.tsx";
 import { approveApproval, executeApproval, rejectApproval, type ApprovalRequest } from "./shared/api/index.ts";
 import { type SingleAssetSocket } from "./lib/single_asset_ws";
 import { cn } from "./lib/utils";
 import { BatchGenerationFeatureView } from "./features/batch-generation/view";
+import { ForgotPasswordPage } from "./features/auth/ForgotPasswordPage.tsx";
+import { LoginPage } from "./features/auth/LoginPage.tsx";
+import { RegisterPage } from "./features/auth/RegisterPage.tsx";
+import { ResetPasswordPage } from "./features/auth/ResetPasswordPage.tsx";
+import { VerifyEmailPage } from "./features/auth/VerifyEmailPage.tsx";
+import { UserCenterJobDetailPage } from "./features/user-center/job-detail-page.tsx";
+import { UserCenterPage } from "./features/user-center/page.tsx";
 import { LogAnalysisFeatureView } from "./features/log-analysis/view";
 import { ModEditorFeatureView } from "./features/mod-editor/view";
-import { type AssetType, getStageIndex, type Stage } from "./features/single-asset/model";
+import { createAndStartPlatformFlow } from "./features/platform-run/createAndStartFlow.ts";
+import type { PlatformExecutionRequest, WorkspaceTab } from "./features/platform-run/types.ts";
+import { type AssetType, getStageIndex } from "./features/single-asset/model";
 import { createSingleAssetWorkflowController } from "./features/single-asset/controller.ts";
 import { createInitialSingleAssetWorkflowState, singleAssetWorkflowReducer } from "./features/single-asset/state";
 import {
@@ -18,15 +30,42 @@ import {
   saveSingleAssetSnapshot,
 } from "./features/single-asset/recovery";
 import { SingleAssetFeatureView } from "./features/single-asset/view";
-import { resolveMigrationFlags, type WorkflowMigrationFlags } from "./shared/api/index.ts";
+import { loadLocalAiCapabilityStatus, resolveMigrationFlags, type WorkflowMigrationFlags } from "./shared/api/index.ts";
+import type { PlatformJobCreateItem } from "./shared/api/platform.ts";
 import { runApprovalAction } from "./shared/approvalAction.ts";
+import { useSession } from "./shared/session/hooks.ts";
 import { useDefaultProjectRoot } from "./shared/useDefaultProjectRoot.ts";
 import { useProjectCreation } from "./shared/useProjectCreation.ts";
 
-type AppTab = "single" | "batch" | "edit" | "log";
+type AppTab = WorkspaceTab;
+
+const PLATFORM_WORKFLOW_VERSION = "2026.04.04";
+
+function resolveAppTab(value: string | null): AppTab {
+  switch (value) {
+    case "batch":
+    case "edit":
+    case "log":
+      return value;
+    default:
+      return "single";
+  }
+}
+
+function buildWorkspacePath(tab: AppTab): string {
+  return tab === "single" ? "/" : `/?tab=${tab}`;
+}
+
+interface PendingExecutionRequest extends PlatformExecutionRequest {
+  localAvailable: boolean;
+}
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<AppTab>("single");
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { isAuthenticated } = useSession();
+  const activeTab = resolveAppTab(searchParams.get("tab"));
   const [initialSingleAssetSnapshot] = useState(() => loadSingleAssetSnapshot());
   const [assetType, setAssetType] = useState<AssetType>(() => initialSingleAssetSnapshot?.assetType ?? "relic");
   const [assetName, setAssetName] = useState(() => initialSingleAssetSnapshot?.assetName ?? "");
@@ -53,6 +92,7 @@ export default function App() {
   const [restoredApprovalRefreshPending, setRestoredApprovalRefreshPending] = useState(
     () => initialSingleAssetSnapshot?.workflowState.stage === "approval_pending",
   );
+  const [pendingExecution, setPendingExecution] = useState<PendingExecutionRequest | null>(null);
   const {
     projectCreateBusy,
     projectCreateMessage,
@@ -64,7 +104,6 @@ export default function App() {
     onProjectCreated: setProjectRoot,
   });
 
-  // 启动时从 config 读默认项目路径
   useEffect(() => {
     autoModeRef.current = autoMode;
   }, [autoMode]);
@@ -190,6 +229,90 @@ export default function App() {
     });
   }
 
+  function updateActiveTab(nextTab: AppTab) {
+    if (location.pathname !== "/") {
+      return;
+    }
+    const nextSearchParams = new URLSearchParams(searchParams);
+    if (nextTab === "single") {
+      nextSearchParams.delete("tab");
+    } else {
+      nextSearchParams.set("tab", nextTab);
+    }
+    setSearchParams(nextSearchParams, { replace: true });
+  }
+
+  async function handleExecutionRequest(request: PlatformExecutionRequest) {
+    let capability;
+    try {
+      capability = await loadLocalAiCapabilityStatus();
+    } catch {
+      capability = {
+        text_ai_available: false,
+        image_ai_available: false,
+      };
+    }
+
+    setPendingExecution({
+      ...request,
+      localAvailable: capability.text_ai_available && (!request.requiresImageAi || capability.image_ai_available),
+    });
+  }
+
+  function handleChooseLocalExecution() {
+    if (pendingExecution === null) {
+      return;
+    }
+    const request = pendingExecution;
+    setPendingExecution(null);
+    request.runLocal();
+  }
+
+  function handleGoLoginForServerExecution() {
+    if (pendingExecution === null) {
+      return;
+    }
+    const request = pendingExecution;
+    setPendingExecution(null);
+    navigate("/auth/login", {
+      replace: true,
+      state: {
+        redirectTo: buildWorkspacePath(request.tab),
+      },
+    });
+  }
+
+  async function handleChooseServerExecution() {
+    if (pendingExecution === null) {
+      return;
+    }
+
+    const request = pendingExecution;
+    if (!isAuthenticated) {
+      handleGoLoginForServerExecution();
+      return;
+    }
+
+    setPendingExecution(null);
+    try {
+      const result = await createAndStartPlatformFlow({
+        jobType: request.jobType,
+        workflowVersion: PLATFORM_WORKFLOW_VERSION,
+        inputSummary: request.inputSummary,
+        createdFrom: request.createdFrom,
+        items: request.items,
+        confirmStart(job) {
+          return window.confirm(
+            `已创建平台任务 #${job.id}。确认开始后会进入服务器队列，并按平台规则计费。是否继续开始？`,
+          );
+        },
+      });
+      navigate(`/me/jobs/${result.job.id}`);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "创建平台任务失败");
+    }
+  }
+
   function handleConfirmPrompt() {
     singleAssetWorkflowController.confirmPrompt(workflowState.promptPreview, workflowState.negativePrompt);
   }
@@ -213,7 +336,6 @@ export default function App() {
     reader.onload = ev => {
       const dataUrl = ev.target?.result as string;
       setUploadedImagePreview(dataUrl);
-      // 去掉 "data:image/png;base64," 前缀，只保留纯 base64
       setUploadedImageB64(dataUrl.split(",")[1] ?? "");
     };
     reader.readAsDataURL(file);
@@ -257,172 +379,236 @@ export default function App() {
     });
   }
 
+  function renderWorkspaceShell() {
+    const singleAssetRequiresImageAi = imageMode === "ai";
+    const singleAssetInputSummary = `${assetType}:${assetName.trim() || "未命名资产"}`;
+    const singleAssetItem: PlatformJobCreateItem = {
+      item_type: assetType,
+      input_summary: description.trim() || singleAssetInputSummary,
+      input_payload: {
+        asset_type: assetType,
+        asset_name: assetName.trim(),
+        description: description.trim(),
+        project_root: projectRoot.trim(),
+        image_mode: imageMode,
+        auto_mode: autoMode,
+        has_uploaded_image: Boolean(uploadedImageB64),
+      },
+    };
+
+    return (
+      <>
+        <div className="px-6 pt-4 flex gap-1 border-b border-slate-200 bg-white">
+          <button
+            onClick={() => updateActiveTab("single")}
+            className={cn(
+              "px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors",
+              activeTab === "single"
+                ? "border-amber-500 text-amber-600 bg-amber-50"
+                : "border-transparent text-slate-400 hover:text-slate-600"
+            )}
+          >
+            单资产
+          </button>
+          <button
+            onClick={() => updateActiveTab("batch")}
+            className={cn(
+              "px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors",
+              activeTab === "batch"
+                ? "border-amber-500 text-amber-600 bg-amber-50"
+                : "border-transparent text-slate-400 hover:text-slate-600"
+            )}
+          >
+            Mod 规划
+          </button>
+          <button
+            onClick={() => updateActiveTab("edit")}
+            className={cn(
+              "px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors",
+              activeTab === "edit"
+                ? "border-amber-500 text-amber-600 bg-amber-50"
+                : "border-transparent text-slate-400 hover:text-slate-600"
+            )}
+          >
+            修改 Mod
+          </button>
+          <button
+            onClick={() => updateActiveTab("log")}
+            className={cn(
+              "px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors",
+              activeTab === "log"
+                ? "border-amber-500 text-amber-600 bg-amber-50"
+                : "border-transparent text-slate-400 hover:text-slate-600"
+            )}
+          >
+            崩溃分析
+          </button>
+        </div>
+
+        {activeTab === "batch" && (
+          <div className="px-6 py-6">
+            <BatchGenerationFeatureView onRequestExecution={handleExecutionRequest} />
+          </div>
+        )}
+
+        {activeTab === "edit" && (
+          <div className="px-6 py-6">
+            <ModEditorFeatureView onRequestExecution={handleExecutionRequest} />
+          </div>
+        )}
+
+        {activeTab === "log" && (
+          <div className="px-6 py-6">
+            <LogAnalysisFeatureView onRequestExecution={handleExecutionRequest} />
+          </div>
+        )}
+
+        {activeTab === "single" && (
+          <SingleAssetFeatureView
+            step={step}
+            stage={workflowState.stage}
+            assetType={assetType}
+            assetName={assetName}
+            description={description}
+            projectRoot={projectRoot}
+            images={workflowState.images}
+            pendingSlots={workflowState.pendingSlots}
+            promptPreview={workflowState.promptPreview}
+            negativePrompt={workflowState.negativePrompt}
+            promptFallbackWarn={workflowState.promptFallbackWarn}
+            currentPrompt={workflowState.currentPrompt}
+            showMorePrompt={workflowState.showMorePrompt}
+            genLog={workflowState.genLog}
+            agentLog={workflowState.agentLog}
+            flowStageCurrent={workflowState.flowStageCurrent}
+            flowStageHistory={workflowState.flowStageHistory}
+            agentStageCurrent={workflowState.agentStageCurrent}
+            agentStageHistory={workflowState.agentStageHistory}
+            approvalSummary={workflowState.approvalSummary}
+            approvalRequests={workflowState.approvalRequests}
+            approvalBusyActionId={workflowState.approvalBusyActionId}
+            errorMessage={workflowState.errorMessage}
+            errorTraceback={workflowState.errorTraceback}
+            autoMode={autoMode}
+            imageMode={imageMode}
+            uploadedImageB64={uploadedImageB64}
+            uploadedImageName={uploadedImageName}
+            uploadedImagePreview={uploadedImagePreview}
+            dragOver={dragOver}
+            hasLiveSession={Boolean(socket)}
+            showRecoveredNotice={restoredSnapshotMode && !socket && workflowState.stage !== "input"}
+            onRestartWorkflow={() => {
+              void startWorkflow();
+            }}
+            onAssetTypeChange={setAssetType}
+            onAssetNameChange={setAssetName}
+            onDescriptionChange={setDescription}
+            onProjectRootChange={setProjectRoot}
+            projectCreateBusy={projectCreateBusy}
+            projectCreateMessage={projectCreateMessage}
+            projectCreateError={projectCreateError}
+            onCreateProject={() => {
+              void createProjectAtRoot(projectRoot).catch(() => {});
+            }}
+            onApplyPreset={(preset) => {
+              setAssetType(preset.assetType);
+              setAssetName(preset.assetName);
+              setDescription(preset.description);
+            }}
+            onStartWorkflow={() => {
+              void handleExecutionRequest({
+                title: "开始生成资产",
+                tab: "single",
+                jobType: "single_generate",
+                createdFrom: "single_asset",
+                inputSummary: singleAssetInputSummary,
+                requiresImageAi: singleAssetRequiresImageAi,
+                items: [singleAssetItem],
+                runLocal() {
+                  void startWorkflow();
+                },
+              });
+            }}
+            onReset={reset}
+            onImageModeChange={setImageMode}
+            onAutoModeToggle={() => {
+              const next = !autoMode;
+              setAutoMode(next);
+              autoModeRef.current = next;
+            }}
+            onPromptPreviewChange={(value) => dispatchWorkflow({ type: "prompt_preview_changed", value })}
+            onNegativePromptChange={(value) => dispatchWorkflow({ type: "negative_prompt_changed", value })}
+            onConfirmPrompt={handleConfirmPrompt}
+            onSelectImage={handleSelectImage}
+            onGenerateMore={handleGenerateMore}
+            onCurrentPromptChange={(value) => dispatchWorkflow({ type: "current_prompt_changed", value })}
+            onToggleShowMorePrompt={() => dispatchWorkflow({ type: "show_more_prompt_toggled" })}
+            onHandleImageFile={handleImageFile}
+            onDragOverChange={setDragOver}
+            onApprove={(actionId) => {
+              void handleApprovalAction(actionId, approveApproval);
+            }}
+            onReject={(actionId) => {
+              void handleApprovalAction(actionId, (id) => rejectApproval(id));
+            }}
+            onExecute={(actionId) => {
+              void handleApprovalAction(actionId, executeApproval);
+            }}
+            onProceedApproval={() => {
+              singleAssetWorkflowController.proceedApproval();
+            }}
+            onOpenSettings={() => setSettingsOpen(true)}
+          />
+        )}
+      </>
+    );
+  }
+
+  const isWorkspaceRoute = location.pathname === "/";
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800">
-      {/* Header */}
       <header className="sticky top-0 z-10 border-b border-slate-200 px-6 py-3 flex items-center justify-between bg-white/80 backdrop-blur-sm shadow-sm">
         <div className="flex items-center gap-2">
           <Swords className="text-amber-600" size={22} />
           <span className="font-bold tracking-wide text-amber-600 text-lg">AgentTheSpire</span>
         </div>
-        <button onClick={() => setSettingsOpen(true)} className="flex items-center gap-1.5 py-1.5 px-3 rounded-lg bg-slate-100 hover:bg-amber-50 hover:text-amber-700 text-slate-500 hover:border-amber-300 border border-transparent transition-colors text-sm font-medium">
-          <Settings size={14} />
-          设置
-        </button>
+        <div className="flex items-center gap-3">
+          <UserEntry />
+          {isWorkspaceRoute && (
+            <button onClick={() => setSettingsOpen(true)} className="flex items-center gap-1.5 py-1.5 px-3 rounded-lg bg-slate-100 hover:bg-amber-50 hover:text-amber-700 text-slate-500 hover:border-amber-300 border border-transparent transition-colors text-sm font-medium">
+              <Settings size={14} />
+              设置
+            </button>
+          )}
+        </div>
       </header>
 
-      {/* Tab 切换 */}
-      <div className="px-6 pt-4 flex gap-1 border-b border-slate-200 bg-white">
-        <button
-          onClick={() => setActiveTab("single")}
-          className={cn(
-            "px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors",
-            activeTab === "single"
-              ? "border-amber-500 text-amber-600 bg-amber-50"
-              : "border-transparent text-slate-400 hover:text-slate-600"
-          )}
-        >
-          单资产
-        </button>
-        <button
-          onClick={() => setActiveTab("batch")}
-          className={cn(
-            "px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors",
-            activeTab === "batch"
-              ? "border-amber-500 text-amber-600 bg-amber-50"
-              : "border-transparent text-slate-400 hover:text-slate-600"
-          )}
-        >
-          Mod 规划
-        </button>
-        <button
-          onClick={() => setActiveTab("edit")}
-          className={cn(
-            "px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors",
-            activeTab === "edit"
-              ? "border-amber-500 text-amber-600 bg-amber-50"
-              : "border-transparent text-slate-400 hover:text-slate-600"
-          )}
-        >
-          修改 Mod
-        </button>
-        <button
-          onClick={() => setActiveTab("log")}
-          className={cn(
-            "px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors",
-            activeTab === "log"
-              ? "border-amber-500 text-amber-600 bg-amber-50"
-              : "border-transparent text-slate-400 hover:text-slate-600"
-          )}
-        >
-          崩溃分析
-        </button>
-      </div>
+      <Routes>
+        <Route path="/" element={renderWorkspaceShell()} />
+        <Route path="/auth/login" element={<div className="px-6 py-10"><LoginPage /></div>} />
+        <Route path="/auth/register" element={<div className="px-6 py-10"><RegisterPage /></div>} />
+        <Route path="/auth/verify-email" element={<div className="px-6 py-10"><VerifyEmailPage /></div>} />
+        <Route path="/auth/forgot-password" element={<div className="px-6 py-10"><ForgotPasswordPage /></div>} />
+        <Route path="/auth/reset-password" element={<div className="px-6 py-10"><ResetPasswordPage /></div>} />
+        <Route path="/me" element={<UserCenterPage />} />
+        <Route path="/me/jobs/:jobId" element={<UserCenterJobDetailPage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
 
-      {activeTab === "batch" && (
-        <div className="px-6 py-6">
-          <BatchGenerationFeatureView />
-        </div>
-      )}
-
-      {activeTab === "edit" && (
-        <div className="px-6 py-6">
-          <ModEditorFeatureView />
-        </div>
-      )}
-
-      {activeTab === "log" && (
-        <div className="px-6 py-6">
-          <LogAnalysisFeatureView />
-        </div>
-      )}
-
-      {activeTab === "single" && (
-        <SingleAssetFeatureView
-          step={step}
-          stage={workflowState.stage}
-          assetType={assetType}
-          assetName={assetName}
-          description={description}
-          projectRoot={projectRoot}
-          images={workflowState.images}
-          pendingSlots={workflowState.pendingSlots}
-          promptPreview={workflowState.promptPreview}
-          negativePrompt={workflowState.negativePrompt}
-          promptFallbackWarn={workflowState.promptFallbackWarn}
-          currentPrompt={workflowState.currentPrompt}
-          showMorePrompt={workflowState.showMorePrompt}
-          genLog={workflowState.genLog}
-          agentLog={workflowState.agentLog}
-          flowStageCurrent={workflowState.flowStageCurrent}
-          flowStageHistory={workflowState.flowStageHistory}
-          agentStageCurrent={workflowState.agentStageCurrent}
-          agentStageHistory={workflowState.agentStageHistory}
-          approvalSummary={workflowState.approvalSummary}
-          approvalRequests={workflowState.approvalRequests}
-          approvalBusyActionId={workflowState.approvalBusyActionId}
-          errorMessage={workflowState.errorMessage}
-          errorTraceback={workflowState.errorTraceback}
-          autoMode={autoMode}
-          imageMode={imageMode}
-          uploadedImageB64={uploadedImageB64}
-          uploadedImageName={uploadedImageName}
-          uploadedImagePreview={uploadedImagePreview}
-          dragOver={dragOver}
-          hasLiveSession={Boolean(socket)}
-          showRecoveredNotice={restoredSnapshotMode && !socket && workflowState.stage !== "input"}
-          onRestartWorkflow={() => {
-            void startWorkflow();
-          }}
-          onAssetTypeChange={setAssetType}
-          onAssetNameChange={setAssetName}
-          onDescriptionChange={setDescription}
-          onProjectRootChange={setProjectRoot}
-          projectCreateBusy={projectCreateBusy}
-          projectCreateMessage={projectCreateMessage}
-          projectCreateError={projectCreateError}
-          onCreateProject={() => {
-            void createProjectAtRoot(projectRoot).catch(() => {});
-          }}
-          onApplyPreset={(preset) => {
-            setAssetType(preset.assetType);
-            setAssetName(preset.assetName);
-            setDescription(preset.description);
-          }}
-          onStartWorkflow={startWorkflow}
-          onReset={reset}
-          onImageModeChange={setImageMode}
-          onAutoModeToggle={() => {
-            const next = !autoMode;
-            setAutoMode(next);
-            autoModeRef.current = next;
-          }}
-          onPromptPreviewChange={(value) => dispatchWorkflow({ type: "prompt_preview_changed", value })}
-          onNegativePromptChange={(value) => dispatchWorkflow({ type: "negative_prompt_changed", value })}
-          onConfirmPrompt={handleConfirmPrompt}
-          onSelectImage={handleSelectImage}
-          onGenerateMore={handleGenerateMore}
-          onCurrentPromptChange={(value) => dispatchWorkflow({ type: "current_prompt_changed", value })}
-          onToggleShowMorePrompt={() => dispatchWorkflow({ type: "show_more_prompt_toggled" })}
-          onHandleImageFile={handleImageFile}
-          onDragOverChange={setDragOver}
-          onApprove={(actionId) => {
-            void handleApprovalAction(actionId, approveApproval);
-          }}
-          onReject={(actionId) => {
-            void handleApprovalAction(actionId, (id) => rejectApproval(id));
-          }}
-          onExecute={(actionId) => {
-            void handleApprovalAction(actionId, executeApproval);
-          }}
-          onProceedApproval={() => {
-            singleAssetWorkflowController.proceedApproval();
-          }}
-          onOpenSettings={() => setSettingsOpen(true)}
-        />
-      )}
-
-      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && isWorkspaceRoute && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
+      <ExecutionModeDialog
+        open={pendingExecution !== null}
+        title={pendingExecution?.title ?? "选择执行方式"}
+        localAvailable={pendingExecution?.localAvailable ?? false}
+        isAuthenticated={isAuthenticated}
+        onClose={() => setPendingExecution(null)}
+        onChooseLocal={handleChooseLocalExecution}
+        onChooseServer={() => {
+          void handleChooseServerExecution();
+        }}
+        onGoLogin={handleGoLoginForServerExecution}
+      />
     </div>
   );
 }

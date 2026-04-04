@@ -15,6 +15,10 @@ class JobListItem(ModelBase):
     total_item_count: int = 0
     succeeded_item_count: int = 0
     failed_item_count: int = 0
+    original_deducted: int = 0
+    refunded_amount: int = 0
+    net_consumed: int = 0
+    refund_reason_summary: str = ""
 
 
 @dataclass(slots=True)
@@ -43,6 +47,10 @@ class JobDetailView(ModelBase):
     input_summary: str = ""
     result_summary: str = ""
     error_summary: str = ""
+    original_deducted: int = 0
+    refunded_amount: int = 0
+    net_consumed: int = 0
+    refund_reason_summary: str = ""
     items: list[JobItemListItem] = field(default_factory=list)
     artifacts: list[ArtifactSummary] = field(default_factory=list)
 

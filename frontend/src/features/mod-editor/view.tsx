@@ -7,6 +7,7 @@ import { ProjectRootField } from "../../components/ProjectRootField";
 import { StageStatus } from "../../components/StageStatus";
 import { useDefaultProjectRoot } from "../../shared/useDefaultProjectRoot.ts";
 import { useProjectCreation } from "../../shared/useProjectCreation.ts";
+import type { PlatformExecutionRequest } from "../platform-run/types.ts";
 import {
   createModEditorAnalysisController,
   createModEditorModifyController,
@@ -17,7 +18,11 @@ import {
 type AnalyzeStage = "idle" | "scanning" | "streaming" | "done" | "error";
 type ModifyStage = "idle" | "running" | "done" | "error";
 
-export function ModEditorFeatureView() {
+export function ModEditorFeatureView({
+  onRequestExecution,
+}: {
+  onRequestExecution?: (request: PlatformExecutionRequest) => void;
+}) {
   const [projectRoot, setProjectRoot] = useState("");
   const {
     projectCreateBusy,
@@ -234,7 +239,33 @@ export function ModEditorFeatureView() {
           <div className="flex gap-2">
             <button
               onClick={() => {
-                void modifyController.run(projectRoot, modRequest, analysisText);
+                const executeLocal = () => {
+                  void modifyController.run(projectRoot, modRequest, analysisText);
+                };
+                if (!onRequestExecution) {
+                  executeLocal();
+                  return;
+                }
+                onRequestExecution({
+                  title: "执行 Mod 修改",
+                  tab: "edit",
+                  jobType: "mod_edit",
+                  createdFrom: "mod_editor",
+                  inputSummary: modRequest.trim(),
+                  requiresImageAi: false,
+                  items: [
+                    {
+                      item_type: "mod_edit",
+                      input_summary: modRequest.trim(),
+                      input_payload: {
+                        project_root: projectRoot.trim(),
+                        mod_request: modRequest.trim(),
+                        analysis_excerpt: analysisText.slice(0, 1000),
+                      },
+                    },
+                  ],
+                  runLocal: executeLocal,
+                });
               }}
               disabled={!projectRoot.trim() || !modRequest.trim()}
               className="flex-1 py-2.5 rounded-lg bg-amber-500 text-white font-bold text-sm hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"

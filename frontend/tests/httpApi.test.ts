@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildApiPath, requestJson } from "../src/shared/api/index.ts";
+import { buildApiPath, buildBackendUrl, requestJson } from "../src/shared/api/index.ts";
 
 interface MockResponseInit {
   ok: boolean;
@@ -60,6 +60,26 @@ test("requestJson throws response text on non-ok response", async () => {
   );
 });
 
+test("requestJson routes to configured web backend when backend target is set", async () => {
+  const calls: Array<{ input: unknown; init?: RequestInit }> = [];
+  Object.assign(globalThis, {
+    __AGENT_THE_SPIRE_API_BASES__: {
+      web: "http://127.0.0.1:7870",
+    },
+    fetch: async (input: unknown, init?: RequestInit) => {
+      calls.push({ input, init });
+      return createMockResponse({
+        ok: true,
+        body: { ok: true },
+      });
+    },
+  });
+
+  await requestJson<{ ok: boolean }>("/api/auth/me", { backend: "web" });
+
+  assert.equal(calls[0].input, "http://127.0.0.1:7870/api/auth/me");
+});
+
 test("buildApiPath appends only defined query params", () => {
   assert.equal(
     buildApiPath("/api/platform/jobs/123/events", {
@@ -74,4 +94,15 @@ test("buildApiPath appends only defined query params", () => {
     buildApiPath("/api/admin/quota/refunds", {}),
     "/api/admin/quota/refunds",
   );
+});
+
+test("buildBackendUrl keeps same-origin by default and applies configured workstation base", () => {
+  Object.assign(globalThis, {
+    __AGENT_THE_SPIRE_API_BASES__: {
+      workstation: "http://127.0.0.1:7860/",
+    },
+  });
+
+  assert.equal(buildBackendUrl("/api/config", "same-origin"), "/api/config");
+  assert.equal(buildBackendUrl("/api/config", "workstation"), "http://127.0.0.1:7860/api/config");
 });

@@ -1,8 +1,18 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+
 from app.modules.platform.contracts import ArtifactSummary, JobDetailView, JobEventView, JobItemListItem, JobListItem
 from app.modules.platform.domain.repositories import JobQueryRepository
-from app.modules.platform.infra.persistence.models import ArtifactRecord, JobEventRecord, JobItemRecord, JobRecord
+from app.modules.platform.infra.persistence.models import (
+    AIExecutionRecord,
+    ArtifactRecord,
+    ChargeStatus,
+    ExecutionChargeRecord,
+    JobEventRecord,
+    JobItemRecord,
+    JobRecord,
+)
 from sqlalchemy.orm import Session
 
 
@@ -16,6 +26,27 @@ def _enum_value(value: object) -> str:
     return value.value if hasattr(value, "value") else str(value)
 
 
+@dataclass(slots=True)
+class _RefundSummary:
+    original_deducted: int = 0
+    refunded_amount: int = 0
+    refund_reasons: list[str] = field(default_factory=list)
+
+    @property
+    def net_consumed(self) -> int:
+        return max(self.original_deducted - self.refunded_amount, 0)
+
+    @property
+    def refund_reason_summary(self) -> str:
+        return ", ".join(self.refund_reasons)
+
+    def append_reason(self, reason: str) -> None:
+        normalized = reason.strip()
+        if not normalized or normalized in self.refund_reasons:
+            return
+        self.refund_reasons.append(normalized)
+
+
 class JobQueryRepositorySqlAlchemy(JobQueryRepository):
     def __init__(self, session: Session) -> None:
         self.session = session
@@ -27,6 +58,7 @@ class JobQueryRepositorySqlAlchemy(JobQueryRepository):
             .order_by(JobRecord.created_at.desc(), JobRecord.id.desc())
             .all()
         )
+        refund_summaries = self._load_refund_summaries([row.id for row in rows])
         return [
             JobListItem(
                 id=row.id,
@@ -37,6 +69,10 @@ class JobQueryRepositorySqlAlchemy(JobQueryRepository):
                 total_item_count=row.total_item_count,
                 succeeded_item_count=row.succeeded_item_count,
                 failed_item_count=row.failed_business_item_count + row.failed_system_item_count,
+                original_deducted=refund_summaries.get(row.id, _RefundSummary()).original_deducted,
+                refunded_amount=refund_summaries.get(row.id, _RefundSummary()).refunded_amount,
+                net_consumed=refund_summaries.get(row.id, _RefundSummary()).net_consumed,
+                refund_reason_summary=refund_summaries.get(row.id, _RefundSummary()).refund_reason_summary,
             )
             for row in rows
         ]
@@ -45,13 +81,18 @@ class JobQueryRepositorySqlAlchemy(JobQueryRepository):
         row = self.session.query(JobRecord).filter(JobRecord.id == job_id, JobRecord.user_id == user_id).one_or_none()
         if row is None:
             return None
+        refund_summary = self._load_refund_summaries([row.id]).get(row.id, _RefundSummary())
         return JobDetailView(
-                id=row.id,
-                job_type=row.job_type,
-                status=_enum_value(row.status),
+            id=row.id,
+            job_type=row.job_type,
+            status=_enum_value(row.status),
             input_summary=row.input_summary,
             result_summary=row.result_summary,
             error_summary=row.error_summary,
+            original_deducted=refund_summary.original_deducted,
+            refunded_amount=refund_summary.refunded_amount,
+            net_consumed=refund_summary.net_consumed,
+            refund_reason_summary=refund_summary.refund_reason_summary,
             items=self.list_job_items(user_id, job_id),
             artifacts=self.list_artifact_summaries(user_id, job_id),
         )
@@ -75,6 +116,31 @@ class JobQueryRepositorySqlAlchemy(JobQueryRepository):
             )
             for row in rows
         ]
+
+    def _load_refund_summaries(self, job_ids: list[int]) -> dict[int, _RefundSummary]:
+        if not job_ids:
+            return {}
+
+        rows = (
+            self.session.query(
+                AIExecutionRecord.job_id,
+                ExecutionChargeRecord.charge_amount,
+                ExecutionChargeRecord.charge_status,
+                ExecutionChargeRecord.refund_reason,
+            )
+            .join(ExecutionChargeRecord, ExecutionChargeRecord.ai_execution_id == AIExecutionRecord.id)
+            .filter(AIExecutionRecord.job_id.in_(job_ids))
+            .all()
+        )
+
+        summaries: dict[int, _RefundSummary] = {}
+        for job_id, charge_amount, charge_status, refund_reason in rows:
+            summary = summaries.setdefault(job_id, _RefundSummary())
+            summary.original_deducted += int(charge_amount or 0)
+            if charge_status == ChargeStatus.REFUNDED:
+                summary.refunded_amount += int(charge_amount or 0)
+                summary.append_reason(str(refund_reason or ""))
+        return summaries
 
     def list_visible_events(self, user_id: int, job_id: int, after_id: int | None, limit: int) -> list[JobEventView]:
         query = (

@@ -13,6 +13,7 @@ import { StageStatus } from "../../components/StageStatus";
 import { BuildDeploy } from "../../components/BuildDeploy";
 import { cn } from "../../lib/utils";
 import { loadAppConfig } from "../../shared/api/config";
+import type { PlatformExecutionRequest } from "../platform-run/types.ts";
 import {
   applyBatchApprovalUpdate,
   canProceedBatchApproval,
@@ -99,7 +100,7 @@ const STATUS_LABELS: Record<ItemStatus, string> = {
 
 // ── 主组件 ────────────────────────────────────────────────────────────────────
 
-function BatchModePage() {
+function BatchModePage({ onRequestExecution }: { onRequestExecution?: (request: PlatformExecutionRequest) => void }) {
   const [stage, setStage] = useState<BatchStage>("input");
   const [requirements, setRequirements] = useState("");
   const [projectRoot, setProjectRoot] = useState("");
@@ -445,7 +446,38 @@ function BatchModePage() {
           plan={plan}
           editedItems={editedItems}
           setEditedItems={setEditedItems}
-          onConfirm={confirmPlan}
+          onConfirm={() => {
+            const executeLocal = () => {
+              void confirmPlan();
+            };
+            if (!onRequestExecution) {
+              executeLocal();
+              return;
+            }
+            onRequestExecution({
+              title: "执行 Mod 规划",
+              tab: "batch",
+              jobType: "batch_generate",
+              createdFrom: "batch_generation",
+              inputSummary: plan.summary || requirements.trim() || plan.mod_name,
+              requiresImageAi: editedItems.some(item => item.needs_image && !item.provided_image_b64),
+              items: editedItems.map((item, index) => ({
+                item_type: item.type,
+                input_summary: item.description || item.name,
+                input_payload: {
+                  item_index: index,
+                  name: item.name,
+                  description: item.description,
+                  needs_image: item.needs_image,
+                  has_uploaded_image: Boolean(item.provided_image_b64),
+                  image_description: item.image_description,
+                  implementation_notes: item.implementation_notes,
+                  depends_on: item.depends_on,
+                },
+              })),
+              runLocal: executeLocal,
+            });
+          }}
           onReset={reset}
         />
       )}
@@ -506,8 +538,12 @@ function BatchModePage() {
   );
 }
 
-export function BatchGenerationFeatureView() {
-  return <BatchModePage />;
+export function BatchGenerationFeatureView({
+  onRequestExecution,
+}: {
+  onRequestExecution?: (request: PlatformExecutionRequest) => void;
+}) {
+  return <BatchModePage onRequestExecution={onRequestExecution} />;
 }
 
 export default function BatchMode() {

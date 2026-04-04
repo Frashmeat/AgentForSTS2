@@ -32,6 +32,10 @@ export interface PlatformJobSummary {
   total_item_count?: number;
   succeeded_item_count?: number;
   failed_item_count?: number;
+  original_deducted?: number;
+  refunded_amount?: number;
+  net_consumed?: number;
+  refund_reason_summary?: string;
 }
 
 export interface PlatformJobActionResponse {
@@ -91,6 +95,7 @@ export function createPlatformJob(
   body: PlatformJobCreateRequest,
 ): Promise<PlatformJobSummary> {
   return requestJson<PlatformJobSummary>(buildApiPath("/api/platform/jobs", { user_id: userId }), {
+    backend: "web",
     method: "POST",
     body,
   });
@@ -103,7 +108,7 @@ export function startPlatformJob(
 ): Promise<PlatformJobActionResponse> {
   return requestJson<PlatformJobActionResponse>(
     buildApiPath(`/api/platform/jobs/${jobId}/start`, { user_id: userId }),
-    { method: "POST", body },
+    { backend: "web", method: "POST", body },
   );
 }
 
@@ -114,21 +119,26 @@ export function cancelPlatformJob(
 ): Promise<PlatformJobActionResponse> {
   return requestJson<PlatformJobActionResponse>(
     buildApiPath(`/api/platform/jobs/${jobId}/cancel`, { user_id: userId }),
-    { method: "POST", body },
+    { backend: "web", method: "POST", body },
   );
 }
 
 export function listPlatformJobs(userId: number): Promise<PlatformJobSummary[]> {
-  return requestJson<PlatformJobSummary[]>(buildApiPath("/api/platform/jobs", { user_id: userId }));
+  return requestJson<PlatformJobSummary[]>(buildApiPath("/api/platform/jobs", { user_id: userId }), {
+    backend: "web",
+  });
 }
 
 export function getPlatformJob(userId: number, jobId: number): Promise<PlatformJobDetail> {
-  return requestJson<PlatformJobDetail>(buildApiPath(`/api/platform/jobs/${jobId}`, { user_id: userId }));
+  return requestJson<PlatformJobDetail>(buildApiPath(`/api/platform/jobs/${jobId}`, { user_id: userId }), {
+    backend: "web",
+  });
 }
 
 export function listPlatformJobItems(userId: number, jobId: number): Promise<PlatformJobItemSummary[]> {
   return requestJson<PlatformJobItemSummary[]>(
     buildApiPath(`/api/platform/jobs/${jobId}/items`, { user_id: userId }),
+    { backend: "web" },
   );
 }
 
@@ -143,9 +153,12 @@ export function listPlatformJobEvents(
       after_id: query.afterId,
       limit: query.limit,
     }),
+    { backend: "web" },
   );
 }
 
 export function getPlatformQuota(userId: number): Promise<PlatformQuotaView> {
-  return requestJson<PlatformQuotaView>(buildApiPath("/api/platform/quota", { user_id: userId }));
+  return requestJson<PlatformQuotaView>(buildApiPath("/api/platform/quota", { user_id: userId }), {
+    backend: "web",
+  });
 }

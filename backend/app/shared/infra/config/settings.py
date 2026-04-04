@@ -28,8 +28,52 @@ DEFAULT_LLM_CONFIG = {
     "execution_mode": "legacy_direct",
 }
 
+DEFAULT_AUTH_CONFIG = {
+    "session_cookie_name": "agentthespire_session",
+    "session_secret": "",
+    "email_verification_code_ttl_seconds": 1800,
+    "password_reset_code_ttl_seconds": 1800,
+}
+
+DEFAULT_RUNTIME_CONFIG = {
+    "full": {
+        "host": "127.0.0.1",
+        "port": 7860,
+        "cors_origins": [
+            "http://localhost:5173",
+            "http://localhost:7860",
+            "http://localhost:7870",
+            "http://localhost:8080",
+        ],
+        "mount_frontend": True,
+        "requires_database": False,
+    },
+    "workstation": {
+        "host": "127.0.0.1",
+        "port": 7860,
+        "cors_origins": [
+            "http://localhost:5173",
+            "http://localhost:7860",
+        ],
+        "mount_frontend": True,
+        "requires_database": False,
+    },
+    "web": {
+        "host": "127.0.0.1",
+        "port": 7870,
+        "cors_origins": [
+            "http://localhost:5173",
+            "http://localhost:7870",
+            "http://localhost:8080",
+        ],
+        "mount_frontend": False,
+        "requires_database": True,
+    },
+}
+
 DEFAULT_CONFIG = {
     "llm": DEFAULT_LLM_CONFIG,
+    "auth": DEFAULT_AUTH_CONFIG,
     "migration": {
         "use_modular_single_workflow": False,
         "use_modular_batch_workflow": False,
@@ -45,6 +89,7 @@ DEFAULT_CONFIG = {
         "echo": False,
         "pool_pre_ping": True,
     },
+    "runtime": DEFAULT_RUNTIME_CONFIG,
     "approval": {
         "auto_execute_low_risk": False,
         "allowed_commands": [],
@@ -164,6 +209,10 @@ class Settings:
         return self.raw["approval"]
 
     @property
+    def auth(self) -> dict[str, Any]:
+        return self.raw["auth"]
+
+    @property
     def migration(self) -> dict[str, Any]:
         return self.raw["migration"]
 
@@ -174,6 +223,29 @@ class Settings:
     @property
     def image_gen(self) -> dict[str, Any]:
         return self.raw["image_gen"]
+
+    def get_runtime(self, role: str) -> dict[str, Any]:
+        runtime_cfg = self.raw.get("runtime", {})
+        return deepcopy(runtime_cfg.get(role, {}))
+
+    def validate_for_role(self, role: str) -> list[str]:
+        runtime = self.get_runtime(role)
+        errors: list[str] = []
+
+        cors_origins = runtime.get("cors_origins", [])
+        if not isinstance(cors_origins, list) or not cors_origins:
+            errors.append(f"runtime.{role}.cors_origins must contain at least one origin")
+
+        if runtime.get("requires_database", False):
+            database_url = str(self.database.get("url", "")).strip()
+            if not database_url:
+                errors.append(f"database.url is required for {role} runtime")
+
+        session_cookie_name = str(self.auth.get("session_cookie_name", "")).strip()
+        if not session_cookie_name:
+            errors.append("auth.session_cookie_name is required")
+
+        return errors
 
     def to_dict(self) -> dict[str, Any]:
         return deepcopy(self.raw)

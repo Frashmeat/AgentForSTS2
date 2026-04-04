@@ -10,6 +10,10 @@
   安装或配置 Mod 开发依赖，如 .NET 9 和 Godot 4.5.1。
 - `tools\start.bat` / `./tools/start.sh`
   启动生产模式服务。
+- `tools\start_workstation.bat`
+  单独启动工作站后端，承接本地 UI 与本地工作流。
+- `tools\start_web.bat`
+  单独启动 Web 后端，承接平台 API；要求已配置数据库。
 - `tools\start_dev.bat`
   启动开发模式，拉起后端热重载和 Vite 前端开发服务器。
 
@@ -31,3 +35,5 @@
 - 所有脚本都按“脚本目录的上一级是仓库根目录”处理路径。
 - `godot/`、`backend/`、`frontend/`、`config.json` 仍保留在仓库根目录，不随脚本移动。
 - 生成型文件如 `tools\sandbox_test.wsb` 不应提交到仓库。
+- `tools\start_workstation.bat` 面向本地工作站运行。
+- `tools\start_web.bat` 面向独立 `web-backend` 运行，不负责前端静态文件托管。

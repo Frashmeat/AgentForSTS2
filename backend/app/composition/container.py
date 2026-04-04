@@ -1,7 +1,12 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
+from app.modules.auth.application import AuthService, PBKDF2PasswordHasher
+from app.modules.auth.infra.persistence.repositories import (
+    EmailVerificationRepositorySqlAlchemy,
+    UserRepositorySqlAlchemy,
+)
 from app.modules.platform.application.services import (
     AdminQueryService,
     ApprovalFacadeService,
@@ -46,23 +51,36 @@ from app.shared.infra.feature_flags import (
 
 from .registry import ProviderRegistry
 
+RuntimeRole = Literal["full", "workstation", "web"]
+
 
 class ApplicationContainer:
-    def __init__(self, settings: Settings, registry: Optional[ProviderRegistry] = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        registry: Optional[ProviderRegistry] = None,
+        runtime_role: RuntimeRole = "full",
+    ) -> None:
         self.settings = settings
         self.registry = registry or ProviderRegistry()
+        self.runtime_role = runtime_role
         self._singletons: dict[str, Any] = {}
         self._bootstrap_defaults()
 
     @classmethod
-    def from_config(cls, config: Optional[dict[str, Any]]) -> "ApplicationContainer":
-        return cls(settings=Settings.from_dict(config))
+    def from_config(
+        cls,
+        config: Optional[dict[str, Any]],
+        runtime_role: RuntimeRole = "full",
+    ) -> "ApplicationContainer":
+        return cls(settings=Settings.from_dict(config), runtime_role=runtime_role)
 
     def _bootstrap_defaults(self) -> None:
         database_url = str(self.settings.database.get("url", "")).strip()
         db_session_factory = create_session_factory(self.settings.database) if database_url else None
 
         self._singletons.setdefault("settings", self.settings)
+        self._singletons.setdefault("runtime_role", self.runtime_role)
         self._singletons.setdefault(
             "workflow_migration_flags",
             resolve_workflow_migration_flags(self.settings.to_dict()),
@@ -72,6 +90,20 @@ class ApplicationContainer:
             resolve_platform_migration_flags(self.settings.to_dict()),
         )
         self._singletons.setdefault("platform.db_session_factory", db_session_factory)
+        self._singletons.setdefault("auth.db_session_factory", db_session_factory)
+        self._bootstrap_platform_defaults(db_session_factory)
+        self._bootstrap_auth_defaults()
+        if self.runtime_role != "web":
+            self._bootstrap_workstation_bridge_defaults(db_session_factory)
+        for key in (
+            "platform.job_service",
+            "platform.job_query_service",
+            "platform.admin_query_service",
+            "platform.runner",
+        ):
+            self._singletons.setdefault(key, None)
+
+    def _bootstrap_platform_defaults(self, db_session_factory: Any) -> None:
         for key, instance in (
             ("platform.job_repository_factory", JobRepositorySqlAlchemy),
             ("platform.job_query_repository_factory", JobQueryRepositorySqlAlchemy),
@@ -89,6 +121,20 @@ class ApplicationContainer:
             ("platform.execution_orchestrator_service_factory", ExecutionOrchestratorService),
             ("platform.quota_billing_service_factory", QuotaBillingService),
             ("platform.event_service_factory", EventService),
+        ):
+            self._singletons.setdefault(key, instance)
+
+    def _bootstrap_auth_defaults(self) -> None:
+        for key, instance in (
+            ("auth.user_repository_factory", UserRepositorySqlAlchemy),
+            ("auth.email_verification_repository_factory", EmailVerificationRepositorySqlAlchemy),
+            ("auth.auth_service_factory", AuthService),
+            ("auth.password_hasher_factory", PBKDF2PasswordHasher),
+        ):
+            self._singletons.setdefault(key, instance)
+
+    def _bootstrap_workstation_bridge_defaults(self, db_session_factory: Any) -> None:
+        for key, instance in (
             ("platform.approval_facade_service_factory", ApprovalFacadeService),
             ("platform.build_deploy_facade_service_factory", BuildDeployFacadeService),
             ("platform.config_facade_service_factory", ConfigFacadeService),
@@ -120,13 +166,6 @@ class ApplicationContainer:
                 )
             else:
                 self._singletons.setdefault(key, factory())
-        for key in (
-            "platform.job_service",
-            "platform.job_query_service",
-            "platform.admin_query_service",
-            "platform.runner",
-        ):
-            self._singletons.setdefault(key, None)
 
     def register_singleton(self, key: str, instance: Any) -> None:
         self._singletons[key] = instance

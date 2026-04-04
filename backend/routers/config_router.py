@@ -55,6 +55,18 @@ def detect_paths(request: Request = None):
     return _detect()
 
 
+@router.get("/local_ai_capability_status")
+def local_ai_capability_status(request: Request = None):
+    facade = _config_facade(request)
+    if facade is not None:
+        return facade.get_local_ai_capability_status()
+    cfg = get_config()
+    return {
+        "text_ai_available": _has_text_ai(cfg.get("llm", {})),
+        "image_ai_available": _has_image_ai(cfg.get("image_gen", {})),
+    }
+
+
 @router.get("/test_imggen")
 async def test_imggen(request: Request = None):
     facade = _config_facade(request)
@@ -77,4 +89,27 @@ def _mask_keys(cfg: dict) -> dict:
                 v = section[field]
                 section[field] = f"****{v[-4:]}" if len(v) > 4 else "****"
     return c
+
+
+def _has_text_ai(llm_cfg: dict) -> bool:
+    mode = str(llm_cfg.get("mode", "")).strip()
+    if mode == "agent_cli":
+        return str(llm_cfg.get("agent_backend", "")).strip() in {"claude", "codex"}
+    return all(str(llm_cfg.get(field, "")).strip() for field in ("provider", "model", "api_key"))
+
+
+def _has_image_ai(image_cfg: dict) -> bool:
+    mode = str(image_cfg.get("mode", "")).strip()
+    provider = str(image_cfg.get("provider", "")).strip()
+    model = str(image_cfg.get("model", "")).strip()
+
+    if mode == "local":
+        local_cfg = image_cfg.get("local", {})
+        return bool(model and str(local_cfg.get("comfyui_url", "")).strip())
+
+    if not all((provider, model, str(image_cfg.get("api_key", "")).strip())):
+        return False
+    if provider == "volcengine":
+        return bool(str(image_cfg.get("api_secret", "")).strip())
+    return True
 

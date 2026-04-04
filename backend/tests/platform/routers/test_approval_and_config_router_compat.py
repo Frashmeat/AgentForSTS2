@@ -74,6 +74,10 @@ def test_config_router_uses_facade_when_service_split_flag_enabled():
             calls.append("get")
             return {"llm": {"api_key": "****1234"}}
 
+        def get_local_ai_capability_status(self):
+            calls.append("local-ai")
+            return {"text_ai_available": True, "image_ai_available": False}
+
     app = FastAPI()
     app.state.container = _FakeContainer(
         service_split_enabled=True,
@@ -87,6 +91,13 @@ def test_config_router_uses_facade_when_service_split_flag_enabled():
     assert response.status_code == 200
     assert response.json() == {"llm": {"api_key": "****1234"}}
     assert calls == ["get"]
+
+    with TestClient(app) as client:
+        capability = client.get("/api/config/local_ai_capability_status")
+
+    assert capability.status_code == 200
+    assert capability.json() == {"text_ai_available": True, "image_ai_available": False}
+    assert calls == ["get", "local-ai"]
 
 
 def test_approval_router_keeps_legacy_behavior_when_service_split_flag_disabled():
