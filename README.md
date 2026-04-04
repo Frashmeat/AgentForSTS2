@@ -43,7 +43,7 @@ tools\setup_mod_deps.bat    # .NET 9 + Godot 4.5.1
 
 # Copy config.example.json → config.json, fill in your API keys and game path
 
-tools\start.bat             # Opens http://localhost:7860
+tools\start.bat             # Opens http://localhost:7860 (legacy full runtime)
 ```
 
 See [TUTORIAL.md](TUTORIAL.md) for full setup and configuration guide.
@@ -69,6 +69,13 @@ Current product behavior:
 - `/auth/*`, `/me`, and `/me/jobs/:jobId` are now available in the same shell.
 - Choosing server mode creates a draft platform job first, then asks for start confirmation before queueing.
 - Local BYOK execution does not create platform history.
+
+### Tool Scripts
+
+- Core install/start/dev helpers live in `tools/`.
+- `tools/latest/` contains the current packaging and Docker deployment scripts.
+- `tools/archive/` stores deprecated historical scripts. The old Windows Sandbox verification chain has been moved there and is no longer part of the primary workflow.
+- `tools/latest/artifacts/` and generated `sandbox_test.wsb` files are local outputs and are ignored by Git.
 
 ### LLM Options
 
@@ -112,7 +119,7 @@ tools\setup_mod_deps.bat    # 安装 .NET 9 + Godot 4.5.1
 
 # 复制 config.example.json → config.json，填入 API Key 和游戏路径
 
-tools\start.bat             # 打开 http://localhost:7860
+tools\start.bat             # 打开 http://localhost:7860（兼容态 full 运行时）
 ```
 
 详细配置说明见 [TUTORIAL.md](TUTORIAL.md)。
@@ -138,6 +145,13 @@ tools\start.bat             # 打开 http://localhost:7860
 - `web-backend` 默认承接 `/api/auth/*`、`/api/me/*`、平台任务与配额接口
 - 用户中心只读取平台模式任务；BYOK / 本机执行不会进入服务器历史
 - 服务器模式下，前端会先创建当前用户视角平台任务，再确认开始并跳转用户中心详情页
+
+### 工具脚本
+
+- 当前安装、启动、开发辅助脚本统一放在 `tools/`。
+- `tools/latest/` 存放当前推荐使用的打包与 Docker 部署脚本。
+- `tools/archive/` 存放已归档的历史脚本；旧的 Windows Sandbox 验证链路已经迁入该目录，不再作为主流程维护。
+- `tools/latest/artifacts/` 与生成出来的 `sandbox_test.wsb` 都属于本地产物，默认不会提交到 Git。
 
 ---
 
@@ -180,7 +194,7 @@ AgentTheSpire/
 │   └── tests/                      # Backend test suite
 ├── frontend/                       # React + TypeScript UI
 ├── mod_template/                   # C#/.NET Godot mod template
-└── tools/                          # Install/start helpers and utility scripts
+└── tools/                          # Install/start helpers, latest packaging scripts, archived historical scripts
 ```
 
 ## Runtime Prompt Bundles

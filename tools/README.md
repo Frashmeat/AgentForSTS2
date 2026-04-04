@@ -1,40 +1,46 @@
 # tools 目录说明
 
-本目录集中存放 AgentTheSpire 的安装、启动、开发辅助和沙箱验证脚本。
+本目录集中存放 AgentTheSpire 当前仍维护的安装、启动、开发辅助脚本，以及按目标打包/部署脚本。
 
-## 常用入口
+## 当前推荐入口
 
 - `tools\install.bat` / `./tools/install.sh`
-  安装后端依赖、前端依赖并构建前端。
+  安装后端依赖、前端依赖并构建前端。`install.sh` 现在也会优先使用 `backend/.venv`，避免把 Python 依赖直接装到全局环境。
 - `tools\setup_mod_deps.bat` / `./tools/setup_mod_deps.sh`
   安装或配置 Mod 开发依赖，如 .NET 9 和 Godot 4.5.1。
 - `tools\start.bat` / `./tools/start.sh`
-  启动历史兼容态 `full` 运行时。
+  启动历史兼容态 `full` 运行时。`start.sh` 会在缺少 `frontend/dist` 时自动构建，并优先使用 `backend/.venv` 中的 Python。
 - `tools\start_workstation.bat`
-  单独启动工作站后端，承接本地 UI 与本地工作流。
+  单独启动工作站后端，承接本地 UI、本地工作流、配置、构建与部署链路。
 - `tools\start_web.bat`
   单独启动 Web 后端，承接平台 API；要求已配置数据库。
 - `tools\start_dev.bat`
   启动开发模式，拉起后端热重载和 Vite 前端开发服务器。
+- `tools\latest\`
+  当前推荐使用的多目标打包与 Docker 部署脚本目录，支持 `full`、`workstation`、`frontend`、`web` 四种目标。
 
-## 辅助脚本
+## 开发辅助
 
 - `tools\decompile_sts2.py`
   反编译 `sts2.dll`，并把输出路径写入 `config.json`。
-- `tools\generate_sandbox_wsb.bat`
-  根据当前仓库路径生成 Windows Sandbox 配置文件 `tools\sandbox_test.wsb`。
-- `tools\sandbox_setup.bat`
-  在 Windows Sandbox 中执行安装验证。
 - `tools\verify-install-bat.ps1`
   校验 `tools\install.bat` 的关键行为和格式。
-- `tools\latest\`
-  最新的多目标打包与 Docker 部署脚本目录，支持 `full`、`workstation`、`frontend`、`web` 四种目标。
 
-## 说明
+## 已归档脚本
 
+- `tools\archive\`
+  已不再作为当前主流程维护的历史脚本目录。
+- `tools\archive\sandbox\`
+  旧的 Windows Sandbox 安装验证链路，包含 `generate_sandbox_wsb.bat`、`sandbox_setup.bat` 和 `sandbox_test.wsb.template`。这组脚本仅保留为历史参考，不再作为顶层推荐入口。
+
+## 生成物与说明
+
+- `tools\latest\artifacts\`
+  是 `tools\latest\package-release.ps1` 的默认本地产物输出目录，属于生成内容，不提交到仓库。
+- `sandbox_test.wsb`
+  是旧 Sandbox 脚本生成的本地文件，包含绝对路径，不提交到仓库。
 - 所有脚本都按“脚本目录的上一级是仓库根目录”处理路径。
 - `godot/`、`backend/`、`frontend/`、`config.json` 仍保留在仓库根目录，不随脚本移动。
-- 生成型文件如 `tools\sandbox_test.wsb` 不应提交到仓库。
 - `tools\start_workstation.bat` 面向本地工作站运行。
 - `tools\start_web.bat` 面向独立 `web-backend` 运行，不负责前端静态文件托管。
 - 若采用拆分运行形态，通常是：
