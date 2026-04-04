@@ -29,6 +29,13 @@ class ConfigFacadeService:
 
         return _detect()
 
+    def get_local_ai_capability_status(self) -> dict:
+        config = get_config()
+        return {
+            "text_ai_available": self._has_text_ai(config.get("llm", {})),
+            "image_ai_available": self._has_image_ai(config.get("image_gen", {})),
+        }
+
     async def test_imggen(self):
         from image.generator import generate_images
 
@@ -49,3 +56,24 @@ class ConfigFacadeService:
                     value = section[field]
                     section[field] = f"****{value[-4:]}" if len(value) > 4 else "****"
         return masked
+
+    def _has_text_ai(self, llm_cfg: dict) -> bool:
+        mode = str(llm_cfg.get("mode", "")).strip()
+        if mode == "agent_cli":
+            return str(llm_cfg.get("agent_backend", "")).strip() in {"claude", "codex"}
+        return all(str(llm_cfg.get(field, "")).strip() for field in ("provider", "model", "api_key"))
+
+    def _has_image_ai(self, image_cfg: dict) -> bool:
+        mode = str(image_cfg.get("mode", "")).strip()
+        provider = str(image_cfg.get("provider", "")).strip()
+        model = str(image_cfg.get("model", "")).strip()
+
+        if mode == "local":
+            local_cfg = image_cfg.get("local", {})
+            return bool(model and str(local_cfg.get("comfyui_url", "")).strip())
+
+        if not all((provider, model, str(image_cfg.get("api_key", "")).strip())):
+            return False
+        if provider == "volcengine":
+            return bool(str(image_cfg.get("api_secret", "")).strip())
+        return True

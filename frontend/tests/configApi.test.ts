@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   detectAppPaths,
+  loadLocalAiCapabilityStatus,
   loadAppConfig,
   updateAppConfig,
 } from "../src/shared/api/index.ts";
@@ -87,4 +88,27 @@ test("updateAppConfig patches config json body", async () => {
   assert.equal(calls[0].init?.method, "PATCH");
   assert.equal(calls[0].init?.body, JSON.stringify({ default_project_root: "E:/STS2mod/new" }));
   assert.equal(result.default_project_root, "E:/STS2mod/new");
+});
+
+test("loadLocalAiCapabilityStatus reads boolean-only capability endpoint", async () => {
+  const calls: Array<{ input: unknown; init?: RequestInit }> = [];
+  Object.assign(globalThis, {
+    fetch: async (input: unknown, init?: RequestInit) => {
+      calls.push({ input, init });
+      return createMockResponse({
+        ok: true,
+        body: {
+          text_ai_available: true,
+          image_ai_available: false,
+        },
+      });
+    },
+  });
+
+  const result = await loadLocalAiCapabilityStatus();
+
+  assert.equal(calls[0].input, "/api/config/local_ai_capability_status");
+  assert.equal(calls[0].init?.method, "GET");
+  assert.equal(result.text_ai_available, true);
+  assert.equal(result.image_ai_available, false);
 });

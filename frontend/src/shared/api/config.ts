@@ -18,6 +18,11 @@ export interface DetectPathsResult {
   notes: string[];
 }
 
+export interface LocalAiCapabilityStatus {
+  text_ai_available: boolean;
+  image_ai_available: boolean;
+}
+
 const DEFAULT_MIGRATION_FLAGS: WorkflowMigrationFlags = {
   use_modular_single_workflow: false,
   use_modular_batch_workflow: false,
@@ -44,4 +49,8 @@ export async function updateAppConfig(patch: Partial<AppConfig>): Promise<AppCon
 
 export async function detectAppPaths(): Promise<DetectPathsResult> {
   return requestJson<DetectPathsResult>("/api/config/detect_paths");
+}
+
+export async function loadLocalAiCapabilityStatus(): Promise<LocalAiCapabilityStatus> {
+  return requestJson<LocalAiCapabilityStatus>("/api/config/local_ai_capability_status");
 }
