@@ -1,5 +1,5 @@
 import { createContext, createElement, useEffect, useReducer, type ReactNode } from "react";
-import { requestJson } from "../api/http.ts";
+import { getAuthSession } from "../api/auth.ts";
 import type { SessionAction, SessionSnapshot, SessionState, SessionUser } from "./types.ts";
 
 interface SessionContextValue {
@@ -55,17 +55,13 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
   }
 }
 
-async function fetchSessionSnapshot(): Promise<SessionSnapshot> {
-  return requestJson<SessionSnapshot>("/api/auth/me", { backend: "web" });
-}
-
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(sessionReducer, undefined, createInitialSessionState);
 
   async function refreshSession() {
     dispatch({ type: "loading" });
     try {
-      const snapshot = await fetchSessionSnapshot();
+      const snapshot = await getAuthSession();
       dispatch({ type: "resolved", snapshot });
     } catch {
       dispatch({
