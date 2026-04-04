@@ -71,6 +71,7 @@ export function UserCenterPage() {
             {overview.profile.email}
             {overview.profile.email_verified ? " · 邮箱已验证" : " · 邮箱未验证"}
           </p>
+          <p className="mt-4 text-sm text-slate-500">这里只读取平台模式任务，不混入本机 BYOK、localStorage 恢复快照或 Agent 本地日志。</p>
         </section>
         <QuotaCard quota={overview.quota} />
         <HistoryList jobs={overview.jobs} />
