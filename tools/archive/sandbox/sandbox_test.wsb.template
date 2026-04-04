@@ -14,7 +14,7 @@
     </MappedFolder>
   </MappedFolders>
   <LogonCommand>
-    <Command>C:\Windows\System32\cmd.exe /c "C:\AgentTheSpire_host\tools\sandbox_setup.bat" > C:\sandbox_output\install_log.txt 2>&1</Command>
+    <Command>C:\Windows\System32\cmd.exe /c "C:\AgentTheSpire_host\tools\archive\sandbox\sandbox_setup.bat" > C:\sandbox_output\install_log.txt 2>&1</Command>
   </LogonCommand>
   <MemoryInMB>4096</MemoryInMB>
 </Configuration>
