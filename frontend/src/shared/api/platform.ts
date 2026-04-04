@@ -32,6 +32,10 @@ export interface PlatformJobSummary {
   total_item_count?: number;
   succeeded_item_count?: number;
   failed_item_count?: number;
+  original_deducted?: number;
+  refunded_amount?: number;
+  net_consumed?: number;
+  refund_reason_summary?: string;
 }
 
 export interface PlatformJobActionResponse {

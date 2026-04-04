@@ -12,6 +12,7 @@ import { LoginPage } from "./features/auth/LoginPage.tsx";
 import { RegisterPage } from "./features/auth/RegisterPage.tsx";
 import { ResetPasswordPage } from "./features/auth/ResetPasswordPage.tsx";
 import { VerifyEmailPage } from "./features/auth/VerifyEmailPage.tsx";
+import { UserCenterPage } from "./features/user-center/page.tsx";
 import { LogAnalysisFeatureView } from "./features/log-analysis/view";
 import { ModEditorFeatureView } from "./features/mod-editor/view";
 import { type AssetType, getStageIndex } from "./features/single-asset/model";
@@ -446,10 +447,7 @@ export default function App() {
         <Route path="/auth/verify-email" element={<div className="px-6 py-10"><VerifyEmailPage /></div>} />
         <Route path="/auth/forgot-password" element={<div className="px-6 py-10"><ForgotPasswordPage /></div>} />
         <Route path="/auth/reset-password" element={<div className="px-6 py-10"><ResetPasswordPage /></div>} />
-        <Route
-          path="/me"
-          element={<div className="px-6 py-10 text-sm text-slate-500">用户中心建设中。</div>}
-        />
+        <Route path="/me" element={<UserCenterPage />} />
         <Route
           path="/me/jobs/:jobId"
           element={<div className="px-6 py-10 text-sm text-slate-500">任务详情建设中。</div>}
