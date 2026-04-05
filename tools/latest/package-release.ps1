@@ -301,6 +301,30 @@ function Copy-ServiceBundle {
     }
 }
 
+function Copy-LauncherBundle {
+    param(
+        [string]$ReleaseDir,
+        [string]$RepoRoot,
+        [string]$TargetName
+    )
+
+    if ($TargetName -ne "workstation") {
+        return
+    }
+
+    $launcherDir = Join-Path $ReleaseDir "launcher"
+    $null = New-Item -ItemType Directory -Path $launcherDir -Force
+
+    foreach ($relativePath in @(
+        "tools\start_split_local.ps1",
+        "tools\start_split_local.bat",
+        "tools\stop_split_local.ps1",
+        "tools\stop_split_local.bat"
+    )) {
+        Copy-Item -LiteralPath (Join-Path $RepoRoot $relativePath) -Destination (Join-Path $launcherDir (Split-Path $relativePath -Leaf)) -Force
+    }
+}
+
 function Write-ReleaseManifest {
     param(
         [string]$ReleaseDir,
@@ -381,6 +405,7 @@ $null = New-Item -ItemType Directory -Path (Join-Path $releaseDir "runtime") -Fo
 foreach ($service in $serviceDefinitions) {
     Copy-ServiceBundle -Service $service -ReleaseDir $releaseDir -RepoRoot $repoRoot -BackendDir $backendDir -FrontendDistDir $frontendDistDir -ModTemplateDir $modTemplateDir -TemplatesDir $templatesDir
 }
+Copy-LauncherBundle -ReleaseDir $releaseDir -RepoRoot $repoRoot -TargetName $Target
 
 Copy-Item -LiteralPath $composeTemplate -Destination (Join-Path $releaseDir "docker-compose.yml") -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot "README.md") -Destination (Join-Path $releaseDir "README.md") -Force

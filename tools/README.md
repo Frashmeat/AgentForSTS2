@@ -14,6 +14,10 @@
   启动历史兼容态 `full` 运行时。`start.sh` 会在缺少 `frontend/dist` 时自动构建，并优先使用 `backend/.venv` 中的 Python。
 - `tools\start_workstation.bat`
   单独启动工作站后端，承接本地 UI、本地工作流、配置、构建与部署链路。
+- `tools\start_split_local.bat` / `tools\start_split_local.ps1`
+  启动“独立前端 + 本地 workstation”双进程形态。脚本会生成 `frontend/dist/runtime-config.js`、拉起本地静态前端服务和 `workstation-backend`，并默认打开本地前端地址。
+- `tools\stop_split_local.bat` / `tools\stop_split_local.ps1`
+  停止由 `start_split_local` 拉起的本地双进程，并清理 `runtime/split-local-state.json`。
 - `tools\start_web.bat`
   单独启动 Web 后端，承接平台 API；要求已配置数据库。
 - `tools\start_dev.bat`
@@ -48,6 +52,7 @@
 - 若采用拆分运行形态，通常是：
   - `workstation-backend` 承接前端壳、本地工作流与 WebSocket
   - `web-backend` 承接 `/api/auth/*`、`/api/me/*` 与平台任务查询/创建接口
+- `tools\latest\package-release.ps1 workstation` 现在会把本地 launcher 一并复制到 release 目录的 `launcher/` 下，便于后续安装器或用户包复用。
 
 ## 独立前端运行时配置
 
