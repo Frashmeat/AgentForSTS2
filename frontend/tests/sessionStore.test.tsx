@@ -33,6 +33,13 @@ test("session reducer resolves authenticated and anonymous states", () => {
   assert.equal(signedOut.user, null);
 });
 
+test("session reducer exposes unavailable state when auth backend cannot be reached", () => {
+  const unavailable = sessionReducer(createInitialSessionState(), { type: "unavailable" });
+
+  assert.equal(unavailable.status, "unavailable");
+  assert.equal(unavailable.user, null);
+});
+
 test("main entry mounts browser router and session provider", () => {
   const source = readSource("../src/main.tsx");
 

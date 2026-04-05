@@ -40,6 +40,11 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       };
     case "resolved":
       return resolveSessionState(action.snapshot);
+    case "unavailable":
+      return {
+        status: "unavailable",
+        user: null,
+      };
     case "signed_in":
       return {
         status: "authenticated",
@@ -64,13 +69,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const snapshot = await getAuthSession();
       dispatch({ type: "resolved", snapshot });
     } catch {
-      dispatch({
-        type: "resolved",
-        snapshot: {
-          authenticated: false,
-          user: null,
-        },
-      });
+      dispatch({ type: "unavailable" });
     }
   }
 

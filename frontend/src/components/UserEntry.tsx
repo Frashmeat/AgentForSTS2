@@ -8,7 +8,7 @@ function renderAvatar(username: string) {
 
 export function UserEntry() {
   const navigate = useNavigate();
-  const { currentUser, isAuthenticated, isLoading, markSignedOut } = useSession();
+  const { currentUser, isAuthAvailable, isAuthenticated, isLoading, markSignedOut } = useSession();
 
   async function handleLogout() {
     try {
@@ -21,6 +21,10 @@ export function UserEntry() {
 
   if (isLoading) {
     return <span className="text-sm text-slate-400">会话恢复中...</span>;
+  }
+
+  if (!isAuthAvailable) {
+    return <span className="text-sm text-slate-400">平台账号未启用</span>;
   }
 
   if (!isAuthenticated || currentUser === null) {

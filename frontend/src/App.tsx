@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useReducer } from "react";
 import { Settings, Swords } from "lucide-react";
 import { Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import ExecutionModeDialog from "./components/ExecutionModeDialog.tsx";
+import { PlatformAuthUnavailableNotice } from "./components/PlatformAuthUnavailableNotice.tsx";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { UserEntry } from "./components/UserEntry.tsx";
 import { approveApproval, executeApproval, rejectApproval, type ApprovalRequest } from "./shared/api/index.ts";
@@ -56,6 +57,14 @@ function buildWorkspacePath(tab: AppTab): string {
   return tab === "single" ? "/" : `/?tab=${tab}`;
 }
 
+function buildPlatformAuthUnavailableElement(title: string, description: string) {
+  return (
+    <div className="px-6 py-10">
+      <PlatformAuthUnavailableNotice title={title} description={description} />
+    </div>
+  );
+}
+
 interface PendingExecutionRequest extends PlatformExecutionRequest {
   localAvailable: boolean;
 }
@@ -64,7 +73,7 @@ export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { isAuthenticated } = useSession();
+  const { isAuthAvailable, isAuthenticated } = useSession();
   const activeTab = resolveAppTab(searchParams.get("tab"));
   const [initialSingleAssetSnapshot] = useState(() => loadSingleAssetSnapshot());
   const [assetType, setAssetType] = useState<AssetType>(() => initialSingleAssetSnapshot?.assetType ?? "relic");
@@ -586,13 +595,34 @@ export default function App() {
 
       <Routes>
         <Route path="/" element={renderWorkspaceShell()} />
-        <Route path="/auth/login" element={<div className="px-6 py-10"><LoginPage /></div>} />
-        <Route path="/auth/register" element={<div className="px-6 py-10"><RegisterPage /></div>} />
-        <Route path="/auth/verify-email" element={<div className="px-6 py-10"><VerifyEmailPage /></div>} />
-        <Route path="/auth/forgot-password" element={<div className="px-6 py-10"><ForgotPasswordPage /></div>} />
-        <Route path="/auth/reset-password" element={<div className="px-6 py-10"><ResetPasswordPage /></div>} />
-        <Route path="/me" element={<UserCenterPage />} />
-        <Route path="/me/jobs/:jobId" element={<UserCenterJobDetailPage />} />
+        <Route
+          path="/auth/login"
+          element={isAuthAvailable ? <div className="px-6 py-10"><LoginPage /></div> : buildPlatformAuthUnavailableElement("当前环境不支持登录", "这是本机工作站模式，未接入独立 Web 平台服务，因此登录与注册入口不可用。")}
+        />
+        <Route
+          path="/auth/register"
+          element={isAuthAvailable ? <div className="px-6 py-10"><RegisterPage /></div> : buildPlatformAuthUnavailableElement("当前环境不支持注册", "这是本机工作站模式，未接入独立 Web 平台服务，因此无法创建平台账号。")}
+        />
+        <Route
+          path="/auth/verify-email"
+          element={isAuthAvailable ? <div className="px-6 py-10"><VerifyEmailPage /></div> : buildPlatformAuthUnavailableElement("当前环境不支持邮箱验证", "请先接入独立 Web 平台服务，再使用平台账号验证链路。")}
+        />
+        <Route
+          path="/auth/forgot-password"
+          element={isAuthAvailable ? <div className="px-6 py-10"><ForgotPasswordPage /></div> : buildPlatformAuthUnavailableElement("当前环境不支持密码找回", "请先接入独立 Web 平台服务，再使用平台账号密码找回功能。")}
+        />
+        <Route
+          path="/auth/reset-password"
+          element={isAuthAvailable ? <div className="px-6 py-10"><ResetPasswordPage /></div> : buildPlatformAuthUnavailableElement("当前环境不支持密码重置", "请先接入独立 Web 平台服务，再使用平台账号密码重置功能。")}
+        />
+        <Route
+          path="/me"
+          element={isAuthAvailable ? <UserCenterPage /> : buildPlatformAuthUnavailableElement("当前环境未启用用户中心", "这是本机工作站模式。只有接入独立 Web 平台服务后，用户中心、任务记录和次数池才可用。")}
+        />
+        <Route
+          path="/me/jobs/:jobId"
+          element={isAuthAvailable ? <UserCenterJobDetailPage /> : buildPlatformAuthUnavailableElement("当前环境未启用用户中心", "这是本机工作站模式。只有接入独立 Web 平台服务后，平台任务详情才可用。")}
+        />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
 

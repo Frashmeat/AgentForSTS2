@@ -13,6 +13,8 @@ test("user entry exposes login register and authenticated avatar states", () => 
   assert.match(userEntry, /注册/);
   assert.match(userEntry, /renderAvatar/);
   assert.match(userEntry, /logoutSession/);
+  assert.match(userEntry, /平台账号未启用/);
+  assert.match(userEntry, /isAuthAvailable/);
 });
 
 test("app header mounts user entry and auth routes", () => {
@@ -22,4 +24,6 @@ test("app header mounts user entry and auth routes", () => {
   assert.match(appSource, /\/auth\/login/);
   assert.match(appSource, /\/auth\/register/);
   assert.match(appSource, /\/me/);
+  assert.match(appSource, /PlatformAuthUnavailableNotice/);
+  assert.match(appSource, /isAuthAvailable/);
 });

@@ -7,7 +7,7 @@ export interface SessionUser {
   email_verified_at?: string | null;
 }
 
-export type SessionStatus = "loading" | "anonymous" | "authenticated";
+export type SessionStatus = "loading" | "anonymous" | "authenticated" | "unavailable";
 
 export interface SessionState {
   status: SessionStatus;
@@ -22,5 +22,6 @@ export interface SessionSnapshot {
 export type SessionAction =
   | { type: "loading" }
   | { type: "resolved"; snapshot: SessionSnapshot }
+  | { type: "unavailable" }
   | { type: "signed_in"; user: SessionUser }
   | { type: "signed_out" };
