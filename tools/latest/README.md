@@ -41,42 +41,64 @@
 
 ## 推荐流程
 
-1. 运行 `pwsh -File .\tools\latest\package-release.ps1 -Target workstation`
+1. 运行 `pwsh -File .\tools\latest\package-release.ps1 workstation`
 2. 检查 `tools/latest/artifacts/agentthespire-workstation-release/`
 3. 准备好仓库根目录下的 `config.json`
-4. 运行 `pwsh -File .\tools\latest\deploy-docker.ps1 -Target workstation`
+4. 运行 `pwsh -File .\tools\latest\deploy-docker.ps1 workstation`
 
 常用示例：
 
 ```powershell
 # 给最终用户：前端 + 工作站
-pwsh -File .\tools\latest\package-release.ps1 -Target workstation
-pwsh -File .\tools\latest\deploy-docker.ps1 -Target workstation
+pwsh -File .\tools\latest\package-release.ps1 workstation
+pwsh -File .\tools\latest\deploy-docker.ps1 workstation
 
 # 只打前端静态站
-pwsh -File .\tools\latest\package-release.ps1 -Target frontend
-pwsh -File .\tools\latest\deploy-docker.ps1 -Target frontend
+pwsh -File .\tools\latest\package-release.ps1 frontend
+pwsh -File .\tools\latest\deploy-docker.ps1 frontend
 
 # 自己服务器：Web 后端
-pwsh -File .\tools\latest\package-release.ps1 -Target web
-pwsh -File .\tools\latest\deploy-docker.ps1 -Target web
+pwsh -File .\tools\latest\package-release.ps1 web
+pwsh -File .\tools\latest\deploy-docker.ps1 web
 
 # 同机验证完整组合
-pwsh -File .\tools\latest\package-release.ps1 -Target full
-pwsh -File .\tools\latest\deploy-docker.ps1 -Target full
+pwsh -File .\tools\latest\package-release.ps1 full
+pwsh -File .\tools\latest\deploy-docker.ps1 full
 ```
 
 如需强制重新构建镜像：
 
 ```powershell
-pwsh -File .\tools\latest\deploy-docker.ps1 -Target workstation -RebuildImages
+pwsh -File .\tools\latest\deploy-docker.ps1 workstation -Rebuild
 ```
 
 如需重置数据库：
 
 ```powershell
-pwsh -File .\tools\latest\deploy-docker.ps1 -Target web -ResetDatabase
+pwsh -File .\tools\latest\deploy-docker.ps1 web -ResetDb
 ```
+
+## 常用短参数
+
+- `package-release.ps1`
+  - `Target` 支持位置参数，也可写成 `-t`
+  - `-o` 输出目录
+  - `-n` 发布目录名
+  - `-NoFrontend` 跳过前端构建
+  - `-NoZip` 跳过 zip
+- `deploy-docker.ps1`
+  - `Target` 支持位置参数，也可写成 `-t`
+  - `-r` release 目录
+  - `-c` 配置文件路径
+  - `-n` Compose 项目名
+  - `-dbn` 数据库名
+  - `-ResetDb` 重建数据库
+  - `-Rebuild` 重建镜像
+- `build-workstation-installer.ps1`
+  - `-py` Python 版本
+  - `-p` 工作站端口
+  - `-NoRelease` 跳过 release 打包
+  - `-NoExe` 跳过安装器 EXE
 
 ## 说明
 
@@ -86,6 +108,7 @@ pwsh -File .\tools\latest\deploy-docker.ps1 -Target web -ResetDatabase
 - Docker 部署会自动把运行时配置写入 release bundle 的 `runtime/` 目录，不会直接覆盖仓库根目录的 `config.json`。
 - 如果 `runtime/*.config.json` 曾被误创建成目录，`deploy-docker.ps1` 会在写配置前自动清理并重建为文件。
 - Docker 部署默认不会在每次执行时强制重建镜像；只有显式传入 `-RebuildImages` 时，才会重新进入镜像构建和依赖安装阶段。
+- `deploy-docker.ps1` 的数据库名短参数使用 `-dbn`，避免与 PowerShell 内建的 `-Debug` 缩写冲突。
 - `web` / `full` 目标会优先复用本机已存在的 Postgres 镜像；如需指定数据库镜像，可传入 `-PostgresImage`。
 - `full` 目标默认会先删除数据库卷并重建数据库；`web` 目标仍需显式传入 `-ResetDatabase`。
 - Docker 镜像默认把 `rembg[gpu]` 降为 CPU 版 `rembg`，优先保证后端服务可启动。

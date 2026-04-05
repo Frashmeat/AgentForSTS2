@@ -1,10 +1,26 @@
 [CmdletBinding()]
 param(
+    # 基础参数
+    [Parameter(Position = 0, HelpMessage = "打包目标。可选 full / workstation / frontend / web。")]
+    [Alias("t")]
     [ValidateSet("full", "workstation", "frontend", "web")]
     [string]$Target = "workstation",
+
+    [Parameter(HelpMessage = "输出目录。默认写入 tools/latest/artifacts。")]
+    [Alias("o")]
     [string]$OutputRoot = (Join-Path $PSScriptRoot "artifacts"),
+
+    [Parameter(HelpMessage = "发布目录名。默认按目标生成 agentthespire-<target>-release。")]
+    [Alias("n")]
     [string]$ReleaseName = "",
+
+    # 行为开关
+    [Parameter(HelpMessage = "跳过前端构建。仅在已确认 frontend/dist 为最新时使用。")]
+    [Alias("NoFrontend")]
     [switch]$SkipFrontendBuild,
+
+    [Parameter(HelpMessage = "跳过 zip 归档，只保留 release 目录。")]
+    [Alias("NoZip")]
     [switch]$SkipZip
 )
 

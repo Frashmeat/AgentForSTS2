@@ -1,19 +1,64 @@
 [CmdletBinding()]
 param(
+    # 基础参数
+    [Parameter(Position = 0, HelpMessage = "部署目标。可选 full / workstation / frontend / web。")]
+    [Alias("t")]
     [ValidateSet("full", "workstation", "frontend", "web")]
     [string]$Target = "workstation",
+
+    [Parameter(HelpMessage = "release 目录。默认使用 tools/latest/artifacts/agentthespire-<target>-release。")]
+    [Alias("r")]
     [string]$ReleaseRoot = "",
+
+    [Parameter(HelpMessage = "运行时配置文件路径。默认读取仓库根目录 config.json。")]
+    [Alias("c")]
     [string]$ConfigPath = (Join-Path (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path "config.json"),
+
+    [Parameter(HelpMessage = "Compose 项目名。默认按 agentthespire-<target>-release 生成。")]
+    [Alias("n")]
     [string]$ProjectName = "",
+
+    # 端口参数
+    [Parameter(HelpMessage = "工作站端口。默认 7860。")]
+    [Alias("ws")]
     [string]$WorkstationPort = "7860",
+
+    [Parameter(HelpMessage = "Web 端口。默认 7870。")]
+    [Alias("wp")]
     [string]$WebPort = "7870",
+
+    [Parameter(HelpMessage = "前端静态站端口。默认 8080。")]
+    [Alias("fp")]
     [string]$FrontendPort = "8080",
+
+    # 数据库参数
+    [Parameter(HelpMessage = "Postgres 暴露到宿主机的端口。默认 5432。")]
+    [Alias("dbp")]
     [string]$PostgresHostPort = "5432",
+
+    [Parameter(HelpMessage = "Postgres 数据库名。默认 agentthespire。")]
+    [Alias("dbn")]
     [string]$PostgresDb = "agentthespire",
+
+    [Parameter(HelpMessage = "Postgres 用户名。默认 agentthespire。")]
+    [Alias("dbu")]
     [string]$PostgresUser = "agentthespire",
+
+    [Parameter(HelpMessage = "Postgres 密码。默认 agentthespire。")]
+    [Alias("dbpw")]
     [string]$PostgresPassword = "agentthespire",
+
+    [Parameter(HelpMessage = "Postgres 镜像名。留空时自动优先复用本机已有镜像。")]
+    [Alias("pg")]
     [string]$PostgresImage = "",
+
+    # 行为开关
+    [Parameter(HelpMessage = "重建数据库。full 默认会执行；web 目标可显式开启。")]
+    [Alias("ResetDb")]
     [switch]$ResetDatabase,
+
+    [Parameter(HelpMessage = "重建镜像。会删除当前项目对应镜像并重新 docker compose build。")]
+    [Alias("Rebuild")]
     [switch]$RebuildImages
 )
 

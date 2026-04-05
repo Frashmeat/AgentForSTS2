@@ -1,8 +1,22 @@
 [CmdletBinding()]
 param(
+    # 基础参数
+    [Parameter(HelpMessage = "Python 版本。默认 3.11.9。")]
+    [Alias("py")]
     [string]$PythonVersion = "3.11.9",
+
+    # 行为开关
+    [Parameter(HelpMessage = "跳过 release 打包，直接复用现有 release 目录。")]
+    [Alias("NoRelease")]
     [switch]$SkipReleaseBuild,
+
+    [Parameter(HelpMessage = "跳过安装器 EXE 生成，仅准备中间产物。")]
+    [Alias("NoExe")]
     [switch]$SkipInstallerExe,
+
+    # 端口参数
+    [Parameter(HelpMessage = "工作站端口。默认 7860。")]
+    [Alias("p")]
     [int]$Port = 7860
 )
 
