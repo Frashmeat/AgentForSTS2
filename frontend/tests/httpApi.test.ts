@@ -80,6 +80,33 @@ test("requestJson routes to configured web backend when backend target is set", 
   assert.equal(calls[0].input, "http://127.0.0.1:7870/api/auth/me");
 });
 
+test("buildBackendUrl falls back to current host on port 7870 for web backend", () => {
+  const runtimeGlobals = globalThis as typeof globalThis & {
+    __AGENT_THE_SPIRE_API_BASES__?: unknown;
+    location?: Location | URL;
+  };
+  const originalLocation = runtimeGlobals.location;
+
+  delete runtimeGlobals.__AGENT_THE_SPIRE_API_BASES__;
+  Object.defineProperty(runtimeGlobals, "location", {
+    value: new URL("http://127.0.0.1:7860/auth/login"),
+    configurable: true,
+  });
+
+  try {
+    assert.equal(buildBackendUrl("/api/auth/me", "web"), "http://127.0.0.1:7870/api/auth/me");
+  } finally {
+    if (typeof originalLocation === "undefined") {
+      delete runtimeGlobals.location;
+    } else {
+      Object.defineProperty(runtimeGlobals, "location", {
+        value: originalLocation,
+        configurable: true,
+      });
+    }
+  }
+});
+
 test("buildApiPath appends only defined query params", () => {
   assert.equal(
     buildApiPath("/api/platform/jobs/123/events", {

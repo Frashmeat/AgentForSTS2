@@ -21,6 +21,32 @@ function trimTrailingSlash(value: string): string {
   return value.replace(/\/+$/, "");
 }
 
+function inferBackendBaseFromLocation(target: BackendTarget): string {
+  if (target !== "web") {
+    return "";
+  }
+
+  const locationLike = (globalThis as typeof globalThis & {
+    location?: Location | URL;
+  }).location;
+
+  if (typeof locationLike === "undefined") {
+    return "";
+  }
+
+  try {
+    const currentUrl = new URL(locationLike.href);
+    if (currentUrl.port === "7870") {
+      return trimTrailingSlash(currentUrl.origin);
+    }
+
+    currentUrl.port = "7870";
+    return trimTrailingSlash(currentUrl.origin);
+  } catch {
+    return "";
+  }
+}
+
 function readRuntimeApiBase(target: BackendTarget): string {
   const runtimeBases = (
     globalThis as typeof globalThis & {
@@ -40,7 +66,11 @@ export function resolveBackendBaseUrl(target: BackendTarget): string {
   if (target === "same-origin") {
     return "";
   }
-  return readRuntimeApiBase(target);
+  const configuredBase = readRuntimeApiBase(target);
+  if (configuredBase) {
+    return configuredBase;
+  }
+  return inferBackendBaseFromLocation(target);
 }
 
 export function buildBackendUrl(path: string, target: BackendTarget): string {
