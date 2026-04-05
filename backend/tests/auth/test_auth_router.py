@@ -43,6 +43,27 @@ def client(tmp_path):
         yield test_client
 
 
+def _build_client(tmp_path, config_override: dict | None = None):
+    db_path = tmp_path / "auth-router-custom.sqlite3"
+    container = ApplicationContainer.from_config(
+        {
+            "database": {
+                "url": f"sqlite+pysqlite:///{db_path.as_posix()}",
+            },
+            **(config_override or {}),
+        },
+        runtime_role="web",
+    )
+    session = container.resolve_singleton("auth.db_session_factory")()
+    Base.metadata.create_all(session.bind)
+    session.close()
+
+    app = FastAPI()
+    app.state.container = container
+    app.include_router(router, prefix="/api")
+    return TestClient(app)
+
+
 def test_auth_router_register_login_me_verify_and_logout(client: TestClient):
     registered = client.post(
         "/api/auth/register",
@@ -180,3 +201,39 @@ def test_auth_router_rejects_reused_password_reset_code(client: TestClient):
         },
     )
     assert second_reset.status_code == 404
+
+
+def test_auth_router_uses_configured_cookie_attributes(tmp_path):
+    with _build_client(
+        tmp_path,
+        {
+            "auth": {
+                "session_cookie_secure": True,
+                "session_cookie_samesite": "none",
+                "session_cookie_domain": ".example.com",
+            }
+        },
+    ) as client:
+        registered = client.post(
+            "/api/auth/register",
+            json={
+                "username": "luna",
+                "email": "luna@example.com",
+                "password": "secret-123",
+            },
+        )
+        assert registered.status_code == 200
+
+        login = client.post(
+            "/api/auth/login",
+            json={
+                "login": "luna@example.com",
+                "password": "secret-123",
+            },
+        )
+        assert login.status_code == 200
+
+        cookie_header = login.headers["set-cookie"].lower()
+        assert "secure" in cookie_header
+        assert "samesite=none" in cookie_header
+        assert "domain=.example.com" in cookie_header

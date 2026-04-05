@@ -22,6 +22,35 @@
   },
   "mod_projects": [],
   "active_project": "",
+  "auth": {
+    "session_cookie_name": "agentthespire_session",
+    "session_secret": "",
+    "session_cookie_secure": false,
+    "session_cookie_samesite": "lax",
+    "session_cookie_domain": ""
+  },
+  "runtime": {
+    "workstation": {
+      "cors_origins": [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:7860",
+        "http://127.0.0.1:7860",
+        "http://localhost:8080",
+        "http://127.0.0.1:8080"
+      ]
+    },
+    "web": {
+      "cors_origins": [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:7870",
+        "http://127.0.0.1:7870",
+        "http://localhost:8080",
+        "http://127.0.0.1:8080"
+      ]
+    }
+  },
 
   "_注释_llm_mode可选值": ["agent_cli", "api"],
   "_注释_llm_agent_backend可选值": ["claude", "codex"],

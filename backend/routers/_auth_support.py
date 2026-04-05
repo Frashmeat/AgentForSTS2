@@ -67,6 +67,20 @@ def _session_secret(request: Request) -> str:
     return configured or "agentthespire-dev-session-secret"
 
 
+def _session_cookie_secure(request: Request) -> bool:
+    return bool(_settings(request).auth.get("session_cookie_secure", False))
+
+
+def _session_cookie_samesite(request: Request) -> str:
+    configured = str(_settings(request).auth.get("session_cookie_samesite", "lax")).strip().lower()
+    return configured if configured in {"lax", "strict", "none"} else "lax"
+
+
+def _session_cookie_domain(request: Request) -> str | None:
+    configured = str(_settings(request).auth.get("session_cookie_domain", "")).strip()
+    return configured or None
+
+
 def create_session_token(request: Request, user_id: int) -> str:
     payload = str(user_id)
     signature = hmac.new(
@@ -101,14 +115,23 @@ def issue_session_cookie(request: Request, response: Response, user_id: int) -> 
     response.set_cookie(
         key=_session_cookie_name(request),
         value=create_session_token(request, user_id),
+        path="/",
         httponly=True,
-        samesite="lax",
+        secure=_session_cookie_secure(request),
+        samesite=_session_cookie_samesite(request),
+        domain=_session_cookie_domain(request),
         max_age=SESSION_MAX_AGE_SECONDS,
     )
 
 
 def clear_session_cookie(request: Request, response: Response) -> None:
-    response.delete_cookie(_session_cookie_name(request))
+    response.delete_cookie(
+        key=_session_cookie_name(request),
+        path="/",
+        secure=_session_cookie_secure(request),
+        samesite=_session_cookie_samesite(request),
+        domain=_session_cookie_domain(request),
+    )
 
 
 def get_current_user(request: Request, session) -> UserAccount | None:

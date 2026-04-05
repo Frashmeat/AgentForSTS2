@@ -18,7 +18,20 @@ def test_settings_expose_web_runtime_defaults_and_validation():
     assert runtime["mount_frontend"] is False
     assert runtime["requires_database"] is True
     assert "http://localhost:7870" in runtime["cors_origins"]
+    assert "http://127.0.0.1:8080" in runtime["cors_origins"]
     assert settings.validate_for_role("web") == ["database.url is required for web runtime"]
+
+
+def test_settings_expose_workstation_runtime_origins_for_independent_frontend():
+    settings = Settings.from_dict(None)
+
+    runtime = settings.get_runtime("workstation")
+
+    assert runtime["port"] == 7860
+    assert runtime["mount_frontend"] is True
+    assert runtime["requires_database"] is False
+    assert "http://localhost:8080" in runtime["cors_origins"]
+    assert "http://127.0.0.1:8080" in runtime["cors_origins"]
 
 
 def test_web_runtime_container_skips_workstation_bridge_singletons():

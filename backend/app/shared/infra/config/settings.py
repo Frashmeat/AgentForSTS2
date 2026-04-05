@@ -31,6 +31,9 @@ DEFAULT_LLM_CONFIG = {
 DEFAULT_AUTH_CONFIG = {
     "session_cookie_name": "agentthespire_session",
     "session_secret": "",
+    "session_cookie_secure": False,
+    "session_cookie_samesite": "lax",
+    "session_cookie_domain": "",
     "email_verification_code_ttl_seconds": 1800,
     "password_reset_code_ttl_seconds": 1800,
 }
@@ -41,9 +44,13 @@ DEFAULT_RUNTIME_CONFIG = {
         "port": 7860,
         "cors_origins": [
             "http://localhost:5173",
+            "http://127.0.0.1:5173",
             "http://localhost:7860",
+            "http://127.0.0.1:7860",
             "http://localhost:7870",
+            "http://127.0.0.1:7870",
             "http://localhost:8080",
+            "http://127.0.0.1:8080",
         ],
         "mount_frontend": True,
         "requires_database": False,
@@ -53,7 +60,11 @@ DEFAULT_RUNTIME_CONFIG = {
         "port": 7860,
         "cors_origins": [
             "http://localhost:5173",
+            "http://127.0.0.1:5173",
             "http://localhost:7860",
+            "http://127.0.0.1:7860",
+            "http://localhost:8080",
+            "http://127.0.0.1:8080",
         ],
         "mount_frontend": True,
         "requires_database": False,
@@ -63,8 +74,11 @@ DEFAULT_RUNTIME_CONFIG = {
         "port": 7870,
         "cors_origins": [
             "http://localhost:5173",
+            "http://127.0.0.1:5173",
             "http://localhost:7870",
+            "http://127.0.0.1:7870",
             "http://localhost:8080",
+            "http://127.0.0.1:8080",
         ],
         "mount_frontend": False,
         "requires_database": True,
