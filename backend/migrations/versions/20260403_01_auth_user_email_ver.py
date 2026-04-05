@@ -5,7 +5,7 @@ from alembic import op
 from app.modules.auth.infra.persistence.models import auth_tables
 
 
-revision = "20260403_01_auth_user_and_email_verification"
+revision = "20260403_01_auth_user_email_ver"
 down_revision = "20260331_01_platform_job_chain"
 branch_labels = None
 depends_on = None

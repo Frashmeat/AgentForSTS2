@@ -129,3 +129,22 @@ def test_first_platform_revision_identifier_fits_alembic_version_limit():
     revision = revision_line.split('"')[1]
 
     assert len(revision) <= 32
+
+
+def test_all_revision_identifiers_fit_alembic_version_limit():
+    migrations_dir = Path(__file__).resolve().parents[3] / "migrations" / "versions"
+    revision_prefix = 'revision = "'
+
+    revisions: list[str] = []
+    for migration_path in sorted(migrations_dir.glob("*.py")):
+        if migration_path.name == ".gitkeep":
+            continue
+
+        source = migration_path.read_text(encoding="utf-8")
+        revision_line = next(
+            line for line in source.splitlines() if line.startswith(revision_prefix)
+        )
+        revisions.append(revision_line.split('"')[1])
+
+    assert revisions
+    assert all(len(revision) <= 32 for revision in revisions), revisions
