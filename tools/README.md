@@ -4,10 +4,12 @@
 
 ## 当前推荐入口
 
+- `tools\install.ps1`
+  Windows 推荐安装入口。统一安装或配置 .NET 9 SDK、Godot 4.5.1 Mono、后端依赖、前端依赖与前端构建；支持 `-OnlyModDeps` 只安装 Mod 开发依赖。
 - `tools\install.bat` / `./tools/install.sh`
-  安装后端依赖、前端依赖并构建前端。`install.sh` 现在也会优先使用 `backend/.venv`，避免把 Python 依赖直接装到全局环境。
+  兼容入口。`install.bat` 现在只负责转发到 `install.ps1`，避免原 bat 安装链路中途闪退；`install.sh` 继续用于 Linux / macOS / WSL。
 - `tools\setup_mod_deps.bat` / `./tools/setup_mod_deps.sh`
-  安装或配置 Mod 开发依赖，如 .NET 9 和 Godot 4.5.1。
+  Mod 开发依赖入口。Windows 下的 `setup_mod_deps.bat` 现在转发到 `install.ps1 -OnlyModDeps`；`setup_mod_deps.sh` 继续用于 Linux / macOS / WSL。
 - `tools\start.bat` / `./tools/start.sh`
   启动历史兼容态 `full` 运行时。`start.sh` 会在缺少 `frontend/dist` 时自动构建，并优先使用 `backend/.venv` 中的 Python。
 - `tools\start_workstation.bat`
@@ -24,7 +26,7 @@
 - `tools\decompile_sts2.py`
   反编译 `sts2.dll`，并把输出路径写入 `config.json`。
 - `tools\verify-install-bat.ps1`
-  校验 `tools\install.bat` 的关键行为和格式。
+  校验 `tools\install.bat` wrapper 与 `tools\install.ps1` 的关键安装行为。
 
 ## 已归档脚本
 

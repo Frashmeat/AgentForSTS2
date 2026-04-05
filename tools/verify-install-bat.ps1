@@ -1,55 +1,50 @@
 $ErrorActionPreference = 'Stop'
 
 $installBat = Join-Path $PSScriptRoot 'install.bat'
+$installPs1 = Join-Path $PSScriptRoot 'install.ps1'
 $content = Get-Content $installBat -Raw
+$psContent = Get-Content $installPs1 -Raw
 $bytes = [System.IO.File]::ReadAllBytes($installBat)
 
 $checks = @(
     @{
-        Name = 'supports PIP_INDEX_URL override'
-        Pattern = 'PIP_INDEX_URL'
+        Name = 'bat wrapper forwards to install.ps1'
+        Pattern = 'install.ps1'
     }
     @{
-        Name = 'defines pip fallback installer label'
-        Pattern = ':install_with_fallback'
+        Name = 'powershell entry supports OnlyModDeps'
+        Pattern = 'OnlyModDeps'
     }
     @{
-        Name = 'extends pip timeout'
-        Pattern = '--default-timeout'
-    }
-    @{
-        Name = 'defines progress helper'
-        Pattern = ':show_progress'
-    }
-    @{
-        Name = 'defines info logging helper'
-        Pattern = ':log_info'
-    }
-    @{
-        Name = 'logs step details with timestamps'
-        Pattern = '[INFO !TS!]'
-    }
-    @{
-        Name = 'defines log file initializer'
-        Pattern = ':init_log_file'
-    }
-    @{
-        Name = 'uses configurable log file path'
-        Pattern = 'INSTALL_LOG_FILE'
-    }
-    @{
-        Name = 'prewarms rembg model cache'
+        Name = 'powershell entry prewarms rembg model cache'
         Pattern = 'new_session(model)'
     }
     @{
-        Name = 'warns when rembg prewarm fails'
-        Pattern = '首次抠图时会自动下载'
+        Name = 'powershell entry handles dotnet install script'
+        Pattern = 'dotnet-install.ps1'
+    }
+    @{
+        Name = 'powershell entry writes Godot path into config'
+        Pattern = 'Set-GodotPathInConfig'
+    }
+    @{
+        Name = 'powershell entry installs frontend dependencies'
+        Pattern = 'Ensure-FrontendDependencies'
+    }
+    @{
+        Name = 'powershell entry exposes local image installation switch'
+        Pattern = 'InstallLocalImage'
+    }
+    @{
+        Name = 'bat wrapper pauses after execution'
+        Pattern = 'pause'
     }
 )
 
 $failed = @()
 foreach ($check in $checks) {
-    if ($content -notmatch [regex]::Escape($check.Pattern)) {
+    $target = if ($check.Name -like 'bat wrapper*') { $content } else { $psContent }
+    if ($target -notmatch [regex]::Escape($check.Pattern)) {
         $failed += $check.Name
     }
 }
@@ -58,16 +53,16 @@ if ($failed.Count -gt 0) {
     Write-Error ("install.bat verification failed: missing " + ($failed -join ', '))
 }
 
-if ($content -match 'npm install --silent') {
-    Write-Error 'install.bat verification failed: npm install is still silent'
+if ($content -match 'powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%install.ps1" %\*' -eq $false) {
+    Write-Error 'install.bat verification failed: wrapper does not forward arguments to install.ps1'
 }
 
-if ($content -match '--quiet') {
-    Write-Error 'install.bat verification failed: pip install is still quiet'
+if ($psContent -match 'npm install --silent') {
+    Write-Error 'install.ps1 verification failed: npm install is still silent'
 }
 
-if ($content -match 'python -m pip install --disable-pip-version-check --default-timeout 60 --retries 2 --index-url "!PIP_SOURCE!" %\*') {
-    Write-Error 'install.bat verification failed: pip helper still passes %* directly after source argument'
+if ($psContent -match '--quiet') {
+    Write-Error 'install.ps1 verification failed: pip install is still quiet'
 }
 
 $crlf = 0
@@ -86,4 +81,4 @@ if ($loneLf -gt 0) {
     Write-Error "install.bat verification failed: found $loneLf lone LF line endings"
 }
 
-Write-Host 'install.bat verification passed'
+Write-Host 'install.bat/install.ps1 verification passed'

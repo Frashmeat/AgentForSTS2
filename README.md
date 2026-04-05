@@ -38,8 +38,8 @@ Describe your card, relic, or power in plain text — AgentTheSpire generates th
 git clone https://github.com/yourname/AgentTheSpire.git
 cd AgentTheSpire
 
-tools\install.bat           # Python deps + frontend build
-tools\setup_mod_deps.bat    # .NET 9 + Godot 4.5.1
+powershell -ExecutionPolicy Bypass -File .\tools\install.ps1   # Windows 推荐入口：安装 .NET / Godot / Python deps / frontend build
+tools\install.bat                                           # 兼容入口，内部转发到 install.ps1
 
 # Copy config.example.json → config.json, fill in your API keys and game path
 
@@ -114,8 +114,11 @@ Current product behavior:
 git clone https://github.com/yourname/AgentTheSpire.git
 cd AgentTheSpire
 
-tools\install.bat           # 安装 Python 依赖，构建前端
-tools\setup_mod_deps.bat    # 安装 .NET 9 + Godot 4.5.1
+powershell -ExecutionPolicy Bypass -File .\tools\install.ps1   # Windows 推荐入口：安装 .NET / Godot / Python 依赖 / 前端构建
+tools\install.bat                                           # 兼容入口，内部转发到 install.ps1
+
+# 如果只想安装 .NET 9 + Godot 4.5.1：
+powershell -ExecutionPolicy Bypass -File .\tools\install.ps1 -OnlyModDeps
 
 # 复制 config.example.json → config.json，填入 API Key 和游戏路径
 
