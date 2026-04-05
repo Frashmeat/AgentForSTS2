@@ -42,6 +42,14 @@ function createApproval(overrides: Partial<ApprovalRequest> = {}): ApprovalReque
   };
 }
 
+function setWorkstationApiBase() {
+  Object.assign(globalThis, {
+    __AGENT_THE_SPIRE_API_BASES__: {
+      workstation: "http://127.0.0.1:7860",
+    },
+  });
+}
+
 test("summarizeApprovalPending prefers backend summary", () => {
   assert.equal(
     summarizeApprovalPending("需要先审批", [createApproval()]),
@@ -69,6 +77,7 @@ test("describeApprovalPayload prefers command then path", () => {
 
 test("listApprovals requests all approvals with GET", async () => {
   const calls: Array<{ input: unknown; init?: RequestInit }> = [];
+  setWorkstationApiBase();
   Object.assign(globalThis, {
     fetch: async (input: unknown, init?: RequestInit) => {
       calls.push({ input, init });
@@ -93,13 +102,14 @@ test("listApprovals requests all approvals with GET", async () => {
   const approvals = await listApprovals();
 
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].input, "/api/approvals");
+  assert.equal(calls[0].input, "http://127.0.0.1:7860/api/approvals");
   assert.equal(calls[0].init?.method, "GET");
   assert.equal(approvals[0].action_id, "req-1");
 });
 
 test("getApproval requests one approval by id", async () => {
   const calls: Array<{ input: unknown; init?: RequestInit }> = [];
+  setWorkstationApiBase();
   Object.assign(globalThis, {
     fetch: async (input: unknown, init?: RequestInit) => {
       calls.push({ input, init });
@@ -124,13 +134,14 @@ test("getApproval requests one approval by id", async () => {
   const approval = await getApproval("req-2");
 
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].input, "/api/approvals/req-2");
+  assert.equal(calls[0].input, "http://127.0.0.1:7860/api/approvals/req-2");
   assert.equal(calls[0].init?.method, "GET");
   assert.equal(approval.source_backend, "codex");
   assert.equal(approval.created_at, "2026-04-01T10:12:30.000000+00:00");
 });
 
 test("approveApproval throws response text when request fails", async () => {
+  setWorkstationApiBase();
   Object.assign(globalThis, {
     fetch: async () =>
       createMockResponse({

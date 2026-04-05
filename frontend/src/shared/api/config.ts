@@ -37,20 +37,27 @@ export function resolveMigrationFlags(config?: Pick<AppConfig, "migration"> | nu
 }
 
 export async function loadAppConfig(): Promise<AppConfig> {
-  return requestJson<AppConfig>("/api/config");
+  return requestJson<AppConfig>("/api/config", {
+    backend: "workstation",
+  });
 }
 
 export async function updateAppConfig(patch: Partial<AppConfig>): Promise<AppConfig> {
   return requestJson<AppConfig>("/api/config", {
+    backend: "workstation",
     method: "PATCH",
     body: patch,
   });
 }
 
 export async function detectAppPaths(): Promise<DetectPathsResult> {
-  return requestJson<DetectPathsResult>("/api/config/detect_paths");
+  return requestJson<DetectPathsResult>("/api/config/detect_paths", {
+    backend: "workstation",
+  });
 }
 
 export async function loadLocalAiCapabilityStatus(): Promise<LocalAiCapabilityStatus> {
-  return requestJson<LocalAiCapabilityStatus>("/api/config/local_ai_capability_status");
+  return requestJson<LocalAiCapabilityStatus>("/api/config/local_ai_capability_status", {
+    backend: "workstation",
+  });
 }

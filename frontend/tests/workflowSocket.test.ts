@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { WorkflowSocket } from "../src/lib/ws.ts";
+import { BuildDeploySocket } from "../src/lib/build_deploy_ws.ts";
 
 class MockWebSocket {
   static instances: MockWebSocket[] = [];
@@ -93,4 +94,40 @@ test("waitOpen 在连接成功时 resolve", async () => {
   MockWebSocket.instances[0].emitOpen();
 
   await pending;
+});
+
+test("workflow socket uses configured workstation websocket base", () => {
+  Object.assign(globalThis, {
+    __AGENT_THE_SPIRE_WS_BASES__: {
+      workstation: "wss://workstation.example.com",
+    },
+  });
+
+  new WorkflowSocket();
+
+  assert.equal(MockWebSocket.instances[0].url, "wss://workstation.example.com/api/ws/create");
+});
+
+test("workstation websocket clients fail loudly without workstation config on independent frontend", () => {
+  const runtimeGlobals = globalThis as typeof globalThis & {
+    __AGENT_THE_SPIRE_WS_BASES__?: unknown;
+    location?: { host?: string; href?: string };
+  };
+  const originalLocation = runtimeGlobals.location;
+
+  delete runtimeGlobals.__AGENT_THE_SPIRE_WS_BASES__;
+  Object.assign(runtimeGlobals, {
+    location: { host: "127.0.0.1:8080", href: "http://127.0.0.1:8080/" },
+  });
+
+  assert.throws(
+    () => new BuildDeploySocket(),
+    /workstation websocket endpoint is not configured/i,
+  );
+
+  if (typeof originalLocation === "undefined") {
+    delete runtimeGlobals.location;
+  } else {
+    Object.assign(runtimeGlobals, { location: originalLocation });
+  }
 });

@@ -1,7 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildApiPath, buildBackendUrl, requestJson } from "../src/shared/api/index.ts";
+import {
+  buildApiPath,
+  buildBackendUrl,
+  requestJson,
+  loadAppConfig,
+  generateModPlan,
+} from "../src/shared/api/index.ts";
 
 interface MockResponseInit {
   ok: boolean;
@@ -133,4 +139,75 @@ test("buildBackendUrl keeps same-origin by default and applies configured workst
 
   assert.equal(buildBackendUrl("/api/config", "same-origin"), "/api/config");
   assert.equal(buildBackendUrl("/api/config", "workstation"), "http://127.0.0.1:7860/api/config");
+});
+
+test("requestJson routes to configured workstation backend when backend target is set", async () => {
+  const calls: Array<{ input: unknown; init?: RequestInit }> = [];
+  Object.assign(globalThis, {
+    __AGENT_THE_SPIRE_API_BASES__: {
+      workstation: "http://127.0.0.1:7860",
+    },
+    fetch: async (input: unknown, init?: RequestInit) => {
+      calls.push({ input, init });
+      return createMockResponse({
+        ok: true,
+        body: { ok: true },
+      });
+    },
+  });
+
+  await requestJson<{ ok: boolean }>("/api/config", { backend: "workstation" });
+
+  assert.equal(calls[0].input, "http://127.0.0.1:7860/api/config");
+  assert.equal(calls[0].init?.credentials, "include");
+});
+
+test("independent frontend without workstation endpoint fails loudly", async () => {
+  const runtimeGlobals = globalThis as typeof globalThis & {
+    __AGENT_THE_SPIRE_API_BASES__?: unknown;
+    location?: Location | URL;
+  };
+  const originalLocation = runtimeGlobals.location;
+
+  delete runtimeGlobals.__AGENT_THE_SPIRE_API_BASES__;
+  Object.defineProperty(runtimeGlobals, "location", {
+    value: new URL("http://127.0.0.1:8080/"),
+    configurable: true,
+  });
+
+  try {
+    await assert.rejects(
+      () => loadAppConfig(),
+      /workstation backend endpoint is not configured/i,
+    );
+  } finally {
+    if (typeof originalLocation === "undefined") {
+      delete runtimeGlobals.location;
+    } else {
+      Object.defineProperty(runtimeGlobals, "location", {
+        value: originalLocation,
+        configurable: true,
+      });
+    }
+  }
+});
+
+test("workflow api routes through workstation backend", async () => {
+  const calls: Array<{ input: unknown; init?: RequestInit }> = [];
+  Object.assign(globalThis, {
+    __AGENT_THE_SPIRE_API_BASES__: {
+      workstation: "http://127.0.0.1:7860",
+    },
+    fetch: async (input: unknown, init?: RequestInit) => {
+      calls.push({ input, init });
+      return createMockResponse({
+        ok: true,
+        body: { plan: [] },
+      });
+    },
+  });
+
+  await generateModPlan("test requirements");
+
+  assert.equal(calls[0].input, "http://127.0.0.1:7860/api/plan");
 });

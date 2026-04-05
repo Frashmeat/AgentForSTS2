@@ -26,8 +26,17 @@ function createMockResponse(init: MockResponseInit) {
   };
 }
 
+function setWorkstationApiBase() {
+  Object.assign(globalThis, {
+    __AGENT_THE_SPIRE_API_BASES__: {
+      workstation: "http://127.0.0.1:7860",
+    },
+  });
+}
+
 test("loadAppConfig reads /api/config", async () => {
   const calls: Array<{ input: unknown; init?: RequestInit }> = [];
+  setWorkstationApiBase();
   Object.assign(globalThis, {
     fetch: async (input: unknown, init?: RequestInit) => {
       calls.push({ input, init });
@@ -40,13 +49,14 @@ test("loadAppConfig reads /api/config", async () => {
 
   const config = await loadAppConfig();
 
-  assert.equal(calls[0].input, "/api/config");
+  assert.equal(calls[0].input, "http://127.0.0.1:7860/api/config");
   assert.equal(calls[0].init?.method, "GET");
   assert.equal(config.default_project_root, "E:/STS2mod");
 });
 
 test("detectAppPaths reads detect paths endpoint", async () => {
   const calls: Array<{ input: unknown; init?: RequestInit }> = [];
+  setWorkstationApiBase();
   Object.assign(globalThis, {
     fetch: async (input: unknown, init?: RequestInit) => {
       calls.push({ input, init });
@@ -63,13 +73,14 @@ test("detectAppPaths reads detect paths endpoint", async () => {
 
   const result = await detectAppPaths();
 
-  assert.equal(calls[0].input, "/api/config/detect_paths");
+  assert.equal(calls[0].input, "http://127.0.0.1:7860/api/config/detect_paths");
   assert.equal(calls[0].init?.method, "GET");
   assert.equal(result.notes[0], "ok");
 });
 
 test("updateAppConfig patches config json body", async () => {
   const calls: Array<{ input: unknown; init?: RequestInit }> = [];
+  setWorkstationApiBase();
   Object.assign(globalThis, {
     fetch: async (input: unknown, init?: RequestInit) => {
       calls.push({ input, init });
@@ -84,7 +95,7 @@ test("updateAppConfig patches config json body", async () => {
     default_project_root: "E:/STS2mod/new",
   });
 
-  assert.equal(calls[0].input, "/api/config");
+  assert.equal(calls[0].input, "http://127.0.0.1:7860/api/config");
   assert.equal(calls[0].init?.method, "PATCH");
   assert.equal(calls[0].init?.body, JSON.stringify({ default_project_root: "E:/STS2mod/new" }));
   assert.equal(result.default_project_root, "E:/STS2mod/new");
@@ -92,6 +103,7 @@ test("updateAppConfig patches config json body", async () => {
 
 test("loadLocalAiCapabilityStatus reads boolean-only capability endpoint", async () => {
   const calls: Array<{ input: unknown; init?: RequestInit }> = [];
+  setWorkstationApiBase();
   Object.assign(globalThis, {
     fetch: async (input: unknown, init?: RequestInit) => {
       calls.push({ input, init });
@@ -107,7 +119,7 @@ test("loadLocalAiCapabilityStatus reads boolean-only capability endpoint", async
 
   const result = await loadLocalAiCapabilityStatus();
 
-  assert.equal(calls[0].input, "/api/config/local_ai_capability_status");
+  assert.equal(calls[0].input, "http://127.0.0.1:7860/api/config/local_ai_capability_status");
   assert.equal(calls[0].init?.method, "GET");
   assert.equal(result.text_ai_available, true);
   assert.equal(result.image_ai_available, false);

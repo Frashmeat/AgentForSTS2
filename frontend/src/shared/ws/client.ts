@@ -1,4 +1,5 @@
 import { normalizeEvent, type SocketEvent } from "./events.ts";
+import { buildWorkstationWebSocketUrl } from "../api/http.ts";
 
 type EventName<TEvent extends SocketEvent> = TEvent["event"];
 type EventHandler<TEvent extends SocketEvent> = (data: TEvent) => void;
@@ -9,7 +10,7 @@ export class WorkflowClient<TEvent extends SocketEvent = SocketEvent> {
   private intentionallyClosed = false;
 
   constructor(path: string) {
-    this.ws = new WebSocket(`ws://${location.host}${path}`);
+    this.ws = new WebSocket(buildWorkstationWebSocketUrl(path));
     this.ws.onmessage = (event) => {
       const normalized = normalizeEvent(JSON.parse(event.data)) as TEvent;
       const handlers = this.listeners.get(normalized.event) ?? [];

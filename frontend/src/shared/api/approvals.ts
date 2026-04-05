@@ -38,21 +38,27 @@ export function describeApprovalPayload(request: ApprovalRequest): string {
 }
 
 export function listApprovals(): Promise<ApprovalRequest[]> {
-  return requestJson<ApprovalRequest[]>("/api/approvals");
+  return requestJson<ApprovalRequest[]>("/api/approvals", {
+    backend: "workstation",
+  });
 }
 
 export function getApproval(actionId: string): Promise<ApprovalRequest> {
-  return requestJson<ApprovalRequest>(`/api/approvals/${actionId}`);
+  return requestJson<ApprovalRequest>(`/api/approvals/${actionId}`, {
+    backend: "workstation",
+  });
 }
 
 export function approveApproval(actionId: string): Promise<ApprovalRequest> {
   return requestJson<ApprovalRequest>(`/api/approvals/${actionId}/approve`, {
+    backend: "workstation",
     method: "POST",
   });
 }
 
 export function rejectApproval(actionId: string, reason = "Rejected from UI"): Promise<ApprovalRequest> {
   return requestJson<ApprovalRequest>(`/api/approvals/${actionId}/reject`, {
+    backend: "workstation",
     method: "POST",
     body: { reason },
   });
@@ -60,6 +66,7 @@ export function rejectApproval(actionId: string, reason = "Rejected from UI"): P
 
 export function executeApproval(actionId: string): Promise<ApprovalRequest> {
   return requestJson<ApprovalRequest>(`/api/approvals/${actionId}/execute`, {
+    backend: "workstation",
     method: "POST",
   });
 }

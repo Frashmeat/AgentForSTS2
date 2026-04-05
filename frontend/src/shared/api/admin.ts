@@ -31,17 +31,25 @@ export interface AdminAuditEvent {
 }
 
 export function listAdminJobExecutions(jobId: number): Promise<AdminExecutionListItem[]> {
-  return requestJson<AdminExecutionListItem[]>(`/api/admin/jobs/${jobId}/executions`);
+  return requestJson<AdminExecutionListItem[]>(`/api/admin/jobs/${jobId}/executions`, {
+    backend: "web",
+  });
 }
 
 export function getAdminExecution(executionId: number): Promise<AdminExecutionDetail> {
-  return requestJson<AdminExecutionDetail>(`/api/admin/executions/${executionId}`);
+  return requestJson<AdminExecutionDetail>(`/api/admin/executions/${executionId}`, {
+    backend: "web",
+  });
 }
 
 export function listAdminQuotaRefunds(userId?: number): Promise<AdminQuotaRefundItem[]> {
-  return requestJson<AdminQuotaRefundItem[]>(buildApiPath("/api/admin/quota/refunds", { user_id: userId }));
+  return requestJson<AdminQuotaRefundItem[]>(buildApiPath("/api/admin/quota/refunds", { user_id: userId }), {
+    backend: "web",
+  });
 }
 
 export function listAdminAuditEvents(jobId?: number): Promise<AdminAuditEvent[]> {
-  return requestJson<AdminAuditEvent[]>(buildApiPath("/api/admin/audit/events", { job_id: jobId }));
+  return requestJson<AdminAuditEvent[]>(buildApiPath("/api/admin/audit/events", { job_id: jobId }), {
+    backend: "web",
+  });
 }
