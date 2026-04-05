@@ -1,3 +1,62 @@
+<#
+.SYNOPSIS
+按目标启动 AgentTheSpire 的 Docker 部署。
+
+.DESCRIPTION
+读取 release bundle、生成运行时配置并执行 docker compose。
+直接执行脚本且不传任何参数时，会默认显示本帮助而不是立即启动部署。
+
+.PARAMETER Target
+部署目标。可选 full / workstation / frontend / web。
+
+.PARAMETER ReleaseRoot
+release 目录。默认使用 tools/latest/artifacts/agentthespire-<target>-release。
+
+.PARAMETER ConfigPath
+运行时配置文件路径。默认读取仓库根目录 config.json。
+
+.PARAMETER ProjectName
+Compose 项目名。默认按 agentthespire-<target>-release 生成。
+
+.PARAMETER WorkstationPort
+工作站端口。默认 7860。
+
+.PARAMETER WebPort
+Web 端口。默认 7870。
+
+.PARAMETER FrontendPort
+前端静态站端口。默认 8080。
+
+.PARAMETER PostgresHostPort
+Postgres 暴露到宿主机的端口。默认 5432。
+
+.PARAMETER PostgresDb
+Postgres 数据库名。默认 agentthespire。
+
+.PARAMETER PostgresUser
+Postgres 用户名。默认 agentthespire。
+
+.PARAMETER PostgresPassword
+Postgres 密码。默认 agentthespire。
+
+.PARAMETER PostgresImage
+Postgres 镜像名。留空时自动优先复用本机已有镜像。
+
+.PARAMETER ResetDatabase
+重建数据库。full 默认会执行；web 目标可显式开启。
+
+.PARAMETER RebuildImages
+重建镜像。会删除当前项目对应镜像并重新 docker compose build。
+
+.PARAMETER Help
+显示帮助说明并退出。
+
+.EXAMPLE
+pwsh -File .\tools\latest\deploy-docker.ps1 workstation
+
+.EXAMPLE
+pwsh -File .\tools\latest\deploy-docker.ps1 web -ResetDb -dbn agentthespire
+#>
 [CmdletBinding()]
 param(
     # 基础参数
@@ -59,10 +118,19 @@ param(
 
     [Parameter(HelpMessage = "重建镜像。会删除当前项目对应镜像并重新 docker compose build。")]
     [Alias("Rebuild")]
-    [switch]$RebuildImages
+    [switch]$RebuildImages,
+
+    [Parameter(HelpMessage = "显示帮助说明并退出。")]
+    [Alias("h")]
+    [switch]$Help
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($Help -or $PSBoundParameters.Count -eq 0) {
+    Get-Help -Full $PSCommandPath | Out-String | Write-Output
+    return
+}
 
 function Assert-PathExists {
     param(

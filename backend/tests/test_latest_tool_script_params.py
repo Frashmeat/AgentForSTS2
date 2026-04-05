@@ -40,6 +40,17 @@ $items | ConvertTo-Json -Depth 4
     return {item["name"]: item for item in payload}
 
 
+def _run_script_without_args(relative_path: str) -> subprocess.CompletedProcess[str]:
+    script_path = REPO_ROOT / relative_path
+    return subprocess.run(
+        ["pwsh", "-NoProfile", "-File", str(script_path)],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+
+
 def test_package_release_script_exposes_simplified_parameter_aliases_and_help():
     params = _load_script_params("tools/latest/package-release.ps1")
 
@@ -58,6 +69,9 @@ def test_package_release_script_exposes_simplified_parameter_aliases_and_help():
 
     assert "NoZip" in params["SkipZip"]["aliases"]
     assert "跳过 zip" in params["SkipZip"]["help"]
+
+    assert "h" in params["Help"]["aliases"]
+    assert "显示帮助" in params["Help"]["help"]
 
 
 def test_deploy_docker_script_exposes_simplified_parameter_aliases_and_help():
@@ -85,6 +99,9 @@ def test_deploy_docker_script_exposes_simplified_parameter_aliases_and_help():
     assert "Rebuild" in params["RebuildImages"]["aliases"]
     assert "重建镜像" in params["RebuildImages"]["help"]
 
+    assert "h" in params["Help"]["aliases"]
+    assert "显示帮助" in params["Help"]["help"]
+
 
 def test_build_workstation_installer_script_exposes_short_aliases_and_help():
     params = _load_script_params("tools/latest/build-workstation-installer.ps1")
@@ -100,3 +117,33 @@ def test_build_workstation_installer_script_exposes_short_aliases_and_help():
 
     assert "p" in params["Port"]["aliases"]
     assert "工作站端口" in params["Port"]["help"]
+
+    assert "h" in params["Help"]["aliases"]
+    assert "显示帮助" in params["Help"]["help"]
+
+
+def test_package_release_script_prints_help_when_run_without_args():
+    completed = _run_script_without_args("tools/latest/package-release.ps1")
+
+    assert completed.returncode == 0
+    assert "package-release.ps1" in completed.stdout
+    assert "PARAMETERS" in completed.stdout
+    assert "-Target" in completed.stdout
+
+
+def test_deploy_docker_script_prints_help_when_run_without_args():
+    completed = _run_script_without_args("tools/latest/deploy-docker.ps1")
+
+    assert completed.returncode == 0
+    assert "deploy-docker.ps1" in completed.stdout
+    assert "PARAMETERS" in completed.stdout
+    assert "-Target" in completed.stdout
+
+
+def test_build_workstation_installer_script_prints_help_when_run_without_args():
+    completed = _run_script_without_args("tools/latest/build-workstation-installer.ps1")
+
+    assert completed.returncode == 0
+    assert "build-workstation-installer.ps1" in completed.stdout
+    assert "PARAMETERS" in completed.stdout
+    assert "-PythonVersion" in completed.stdout

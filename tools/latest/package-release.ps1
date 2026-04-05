@@ -1,3 +1,35 @@
+<#
+.SYNOPSIS
+按目标打包 AgentTheSpire 的 release bundle。
+
+.DESCRIPTION
+根据目标生成可部署的 release 目录，并可选输出 zip 包。
+直接执行脚本且不传任何参数时，会默认显示本帮助而不是立即开始打包。
+
+.PARAMETER Target
+打包目标。可选 full / workstation / frontend / web。
+
+.PARAMETER OutputRoot
+输出目录。默认写入 tools/latest/artifacts。
+
+.PARAMETER ReleaseName
+发布目录名。默认按目标生成 agentthespire-<target>-release。
+
+.PARAMETER SkipFrontendBuild
+跳过前端构建。仅在已确认 frontend/dist 为最新时使用。
+
+.PARAMETER SkipZip
+跳过 zip 归档，只保留 release 目录。
+
+.PARAMETER Help
+显示帮助说明并退出。
+
+.EXAMPLE
+pwsh -File .\tools\latest\package-release.ps1 workstation
+
+.EXAMPLE
+pwsh -File .\tools\latest\package-release.ps1 -t web -NoZip
+#>
 [CmdletBinding()]
 param(
     # 基础参数
@@ -21,10 +53,19 @@ param(
 
     [Parameter(HelpMessage = "跳过 zip 归档，只保留 release 目录。")]
     [Alias("NoZip")]
-    [switch]$SkipZip
+    [switch]$SkipZip,
+
+    [Parameter(HelpMessage = "显示帮助说明并退出。")]
+    [Alias("h")]
+    [switch]$Help
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($Help -or $PSBoundParameters.Count -eq 0) {
+    Get-Help -Full $PSCommandPath | Out-String | Write-Output
+    return
+}
 
 function Get-RepoRoot {
     return (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path

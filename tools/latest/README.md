@@ -8,6 +8,8 @@
   按目标打包 release bundle，并输出 zip 包。
 - `deploy-docker.ps1`
   按目标启动 Docker 部署，支持显式重置数据库和按需重建镜像。
+- `build-workstation-installer.ps1`
+  构建 Windows 工作站安装器。
 - `templates/compose.*.yml`
   不同目标的 Docker Compose 模板。
 - `templates/workstation/`
@@ -41,6 +43,8 @@
 
 ## 推荐流程
 
+直接执行脚本名且不传参数时，脚本会默认输出帮助说明，不会立即执行实际打包或部署；也可以显式传入 `-h` 查看帮助。
+
 1. 运行 `pwsh -File .\tools\latest\package-release.ps1 workstation`
 2. 检查 `tools/latest/artifacts/agentthespire-workstation-release/`
 3. 准备好仓库根目录下的 `config.json`
@@ -49,6 +53,11 @@
 常用示例：
 
 ```powershell
+# 查看帮助
+pwsh -File .\tools\latest\package-release.ps1
+pwsh -File .\tools\latest\deploy-docker.ps1 -h
+pwsh -File .\tools\latest\build-workstation-installer.ps1
+
 # 给最终用户：前端 + 工作站
 pwsh -File .\tools\latest\package-release.ps1 workstation
 pwsh -File .\tools\latest\deploy-docker.ps1 workstation
@@ -86,6 +95,7 @@ pwsh -File .\tools\latest\deploy-docker.ps1 web -ResetDb
   - `-n` 发布目录名
   - `-NoFrontend` 跳过前端构建
   - `-NoZip` 跳过 zip
+  - `-h` 显示帮助
 - `deploy-docker.ps1`
   - `Target` 支持位置参数，也可写成 `-t`
   - `-r` release 目录
@@ -94,11 +104,13 @@ pwsh -File .\tools\latest\deploy-docker.ps1 web -ResetDb
   - `-dbn` 数据库名
   - `-ResetDb` 重建数据库
   - `-Rebuild` 重建镜像
+  - `-h` 显示帮助
 - `build-workstation-installer.ps1`
   - `-py` Python 版本
   - `-p` 工作站端口
   - `-NoRelease` 跳过 release 打包
   - `-NoExe` 跳过安装器 EXE
+  - `-h` 显示帮助
 
 ## 说明
 
