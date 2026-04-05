@@ -1,11 +1,21 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.modules.auth.application.ports import UserRepository
 from app.modules.auth.domain.models import UserAccount
 from app.modules.auth.infra.persistence.models import UserRecord
+
+
+def _as_utc_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def _to_domain(record: UserRecord) -> UserAccount:
@@ -15,8 +25,8 @@ def _to_domain(record: UserRecord) -> UserAccount:
         email=record.email,
         password_hash=record.password_hash,
         email_verified=record.email_verified,
-        created_at=record.created_at,
-        email_verified_at=record.email_verified_at,
+        created_at=_as_utc_datetime(record.created_at),
+        email_verified_at=_as_utc_datetime(record.email_verified_at),
     )
 
 

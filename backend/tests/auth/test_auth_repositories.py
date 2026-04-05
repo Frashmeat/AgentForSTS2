@@ -59,11 +59,13 @@ def test_email_verification_repository_supports_ticket_lifecycle(session: Sessio
         email=created.email,
         expires_at=datetime(2026, 4, 3, 10, 0, tzinfo=UTC) + timedelta(minutes=30),
     )
+    loaded_before_consumed = verification_repository.get_by_code("code-123", "verify_email")
     consumed = verification_repository.save(
         ticket.mark_consumed(datetime(2026, 4, 3, 10, 15, tzinfo=UTC))
     )
     loaded = verification_repository.get_by_code("code-123", "verify_email")
 
-    assert loaded is not None
-    assert loaded.user_id == created.user_id
+    assert loaded_before_consumed is not None
+    assert loaded_before_consumed.user_id == created.user_id
     assert consumed.consumed_at == datetime(2026, 4, 3, 10, 15, tzinfo=UTC)
+    assert loaded is None

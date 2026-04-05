@@ -101,6 +101,12 @@ def test_auth_router_supports_password_reset_round_trip(client: TestClient):
         },
     )
     assert reset.status_code == 200
+    assert "set-cookie" in {key.lower() for key in reset.headers.keys()}
+
+    me = client.get("/api/auth/me")
+    assert me.status_code == 200
+    assert me.json()["authenticated"] is True
+    assert me.json()["user"]["username"] == "luna"
 
     login = client.post(
         "/api/auth/login",
@@ -110,3 +116,67 @@ def test_auth_router_supports_password_reset_round_trip(client: TestClient):
         },
     )
     assert login.status_code == 200
+
+
+def test_auth_router_requires_authenticated_session_or_password_to_resend_verification(client: TestClient):
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "username": "luna",
+            "email": "luna@example.com",
+            "password": "secret-123",
+        },
+    )
+    assert registered.status_code == 200
+
+    anonymous_resend = client.post(
+        "/api/auth/resend-verification",
+        json={
+            "login": "luna@example.com",
+        },
+    )
+    assert anonymous_resend.status_code == 401
+
+    credentialed_resend = client.post(
+        "/api/auth/resend-verification",
+        json={
+            "login": "luna@example.com",
+            "password": "secret-123",
+        },
+    )
+    assert credentialed_resend.status_code == 200
+    assert credentialed_resend.json()["verification_code"]
+
+
+def test_auth_router_rejects_reused_password_reset_code(client: TestClient):
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "username": "luna",
+            "email": "luna@example.com",
+            "password": "secret-123",
+        },
+    )
+    assert registered.status_code == 200
+
+    forgot = client.post("/api/auth/forgot-password", json={"login": "luna@example.com"})
+    assert forgot.status_code == 200
+    reset_code = forgot.json()["reset_code"]
+
+    first_reset = client.post(
+        "/api/auth/reset-password",
+        json={
+            "code": reset_code,
+            "password": "secret-456",
+        },
+    )
+    assert first_reset.status_code == 200
+
+    second_reset = client.post(
+        "/api/auth/reset-password",
+        json={
+            "code": reset_code,
+            "password": "secret-789",
+        },
+    )
+    assert second_reset.status_code == 404

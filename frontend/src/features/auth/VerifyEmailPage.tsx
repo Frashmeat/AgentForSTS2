@@ -12,6 +12,7 @@ export function VerifyEmailPage() {
   const [searchParams] = useSearchParams();
   const [code, setCode] = useState(() => searchParams.get("code") ?? "");
   const [login, setLogin] = useState("");
+  const [password, setPassword] = useState("");
   const [formState, setFormState] = useState(createIdleAuthFormState);
 
   useEffect(() => {
@@ -30,9 +31,13 @@ export function VerifyEmailPage() {
   }
 
   async function handleResend() {
+    if (!login.trim() || !password.trim()) {
+      setFormState(createErrorAuthFormState("重发验证码需要输入登录名和密码"));
+      return;
+    }
     setFormState(createSubmittingAuthFormState());
     try {
-      const response = await resendVerification({ login });
+      const response = await resendVerification({ login, password });
       setCode(response.verification_code);
       setFormState(createSuccessAuthFormState(`新的验证码：${response.verification_code}`));
     } catch (error) {
@@ -59,6 +64,15 @@ export function VerifyEmailPage() {
             className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-amber-500"
             value={login}
             onChange={event => setLogin(event.target.value)}
+          />
+        </label>
+        <label className="block text-sm font-medium text-slate-700">
+          重发时使用的密码
+          <input
+            type="password"
+            className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-amber-500"
+            value={password}
+            onChange={event => setPassword(event.target.value)}
           />
         </label>
         {formState.status !== "idle" && formState.message && (

@@ -29,6 +29,7 @@ test("auth pages bind to auth api flows", () => {
   assert.match(registerPage, /registerWithPassword/);
   assert.match(verifyPage, /verifyEmailCode/);
   assert.match(verifyPage, /resendVerification/);
+  assert.match(verifyPage, /password/);
   assert.match(forgotPage, /requestPasswordReset/);
   assert.match(resetPage, /resetPasswordWithCode/);
 });

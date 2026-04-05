@@ -94,15 +94,14 @@ def verify_email(request: Request, body: dict):
 @router.post("/resend-verification")
 def resend_verification(request: Request, body: dict):
     login = str(body.get("login", "")).strip()
+    password = str(body.get("password", ""))
     with auth_session_scope(request) as session:
         service = build_auth_service(session, request)
-        user = service.authenticate_user(login=login, password=str(body.get("password", ""))) if body.get("password") else None
-        if user is None:
+        user = service.authenticate_user(login=login, password=password) if password else None
+        if user is None and not password:
             user = get_current_user(request, session)
-        if user is None and login:
-            user = build_auth_service(session, request).user_repository.get_by_login(login)
         if user is None:
-            raise HTTPException(status_code=404, detail="user not found")
+            raise HTTPException(status_code=401, detail="authentication required")
         ticket = create_email_ticket(user.user_id, user.email, "verify_email", request, session)
         return {"verification_code": ticket.code}
 
@@ -122,7 +121,7 @@ def forgot_password(request: Request, body: dict):
 
 
 @router.post("/reset-password")
-def reset_password(request: Request, body: dict):
+def reset_password(request: Request, response: Response, body: dict):
     code = str(body.get("code", "")).strip()
     new_password = str(body.get("password", ""))
     if not code or not new_password:
@@ -137,4 +136,5 @@ def reset_password(request: Request, body: dict):
         service = build_auth_service(session, request)
         user = service.reset_password(ticket.user_id, new_password)
         repository.save(ticket.mark_consumed(datetime.now(UTC)))
+        issue_session_cookie(request, response, user.user_id)
         return {"user": _user_payload(user)}

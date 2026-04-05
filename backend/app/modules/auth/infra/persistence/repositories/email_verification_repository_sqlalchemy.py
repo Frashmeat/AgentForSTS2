@@ -1,10 +1,20 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from sqlalchemy.orm import Session
 
 from app.modules.auth.application.ports import EmailVerificationRepository
 from app.modules.auth.domain.models import EmailVerificationTicket
 from app.modules.auth.infra.persistence.models import EmailVerificationRecord
+
+
+def _as_utc_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def _to_domain(record: EmailVerificationRecord) -> EmailVerificationTicket:
@@ -14,9 +24,9 @@ def _to_domain(record: EmailVerificationRecord) -> EmailVerificationTicket:
         purpose=record.purpose,
         code=record.code,
         email=record.email,
-        expires_at=record.expires_at,
-        created_at=record.created_at,
-        consumed_at=record.consumed_at,
+        expires_at=_as_utc_datetime(record.expires_at),
+        created_at=_as_utc_datetime(record.created_at),
+        consumed_at=_as_utc_datetime(record.consumed_at),
     )
 
 
@@ -49,6 +59,7 @@ class EmailVerificationRepositorySqlAlchemy(EmailVerificationRepository):
             .filter(
                 EmailVerificationRecord.code == code,
                 EmailVerificationRecord.purpose == purpose,
+                EmailVerificationRecord.consumed_at.is_(None),
             )
             .one_or_none()
         )
