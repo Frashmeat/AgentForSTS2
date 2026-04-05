@@ -25,6 +25,21 @@
 - `tools\latest\`
   当前推荐使用的多目标打包与 Docker 部署脚本目录，支持 `full`、`workstation`、`frontend`、`web` 四种目标。
 
+## 三种运行形态对比
+
+| 形态 | 推荐入口 | 前端托管方 | 适合谁 |
+| --- | --- | --- | --- |
+| 兼容态 `full` | `tools\start.bat` | `full` 后端 | 需要保留历史行为或做同机联调的开发者 |
+| 工作站托管态 | `tools\start_workstation.bat` | `workstation-backend` | 单机本地创作、BYOK、本机构建部署 |
+| 独立前端态 | `tools\start_split_local.bat` | 独立静态前端 | 需要单独发布前端站点，同时接入 `workstation-backend` 和 `web-backend` 的部署场景 |
+
+拆分运行时的接口边界：
+
+- `workstation-backend` 承接 `/api/config`、`/api/plan`、`/api/approvals/*` 与工作台 WebSocket
+- `web-backend` 承接 `/api/auth/*`、`/api/me/*`、`/api/admin/*` 与平台任务接口
+- 第一版只支持本机或 LAN 可达的 `workstation-backend`
+- 用户侧若需要单安装包，推荐打包内容是“独立静态前端 + workstation-backend + launcher”，`web-backend` 继续独立部署
+
 ## 开发辅助
 
 - `tools\decompile_sts2.py`
@@ -63,3 +78,4 @@
   - `window.__AGENT_THE_SPIRE_API_BASES__.web`
   - `window.__AGENT_THE_SPIRE_WS_BASES__.workstation`
 - 建议把该文件视为部署期配置文件，而不是前端源码的一部分；更换 `workstation` 或 `web` 地址时优先覆盖此文件，不重新构建前端。
+- `workstation` 地址应配置为本机或 LAN 可达地址，不应配置为公网用户本机地址。
