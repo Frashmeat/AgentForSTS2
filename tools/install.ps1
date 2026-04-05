@@ -466,7 +466,8 @@ from rembg import new_session
 
 root = Path(os.environ["ROOT_DIR"])
 cfg_path = root / "config.json"
-cfg = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}
+raw = cfg_path.read_text(encoding="utf-8-sig") if cfg_path.exists() else ""
+cfg = json.loads(raw) if raw.strip() else {}
 model = cfg.get("image_gen", {}).get("rembg_model", "birefnet-general")
 print(f"[INFO] rembg model: {model}")
 new_session(model)
