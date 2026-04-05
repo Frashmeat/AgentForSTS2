@@ -85,11 +85,19 @@ export function buildBackendUrl(path: string, target: BackendTarget): string {
 }
 
 export async function requestJson<T>(path: string, options: RequestJsonOptions = {}): Promise<T> {
-  const { body, headers, method = "GET", backend = "same-origin", ...rest } = options;
+  const {
+    body,
+    headers,
+    method = "GET",
+    backend = "same-origin",
+    credentials,
+    ...rest
+  } = options;
   const hasBody = typeof body !== "undefined";
   const response = await fetch(buildBackendUrl(path, backend), {
     ...rest,
     method,
+    credentials: credentials ?? (backend === "same-origin" ? undefined : "include"),
     headers: hasBody
       ? {
           "Content-Type": "application/json",

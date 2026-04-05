@@ -78,6 +78,7 @@ test("requestJson routes to configured web backend when backend target is set", 
   await requestJson<{ ok: boolean }>("/api/auth/me", { backend: "web" });
 
   assert.equal(calls[0].input, "http://127.0.0.1:7870/api/auth/me");
+  assert.equal(calls[0].init?.credentials, "include");
 });
 
 test("buildBackendUrl falls back to current host on port 7870 for web backend", () => {
