@@ -48,3 +48,13 @@
 - 若采用拆分运行形态，通常是：
   - `workstation-backend` 承接前端壳、本地工作流与 WebSocket
   - `web-backend` 承接 `/api/auth/*`、`/api/me/*` 与平台任务查询/创建接口
+
+## 独立前端运行时配置
+
+- 前端独立部署时，默认从站点根目录加载 `runtime-config.js`。
+- 默认源码文件位于 `frontend/public/runtime-config.js`，构建后会进入静态站点根目录。
+- 当前约定的运行时配置键：
+  - `window.__AGENT_THE_SPIRE_API_BASES__.workstation`
+  - `window.__AGENT_THE_SPIRE_API_BASES__.web`
+  - `window.__AGENT_THE_SPIRE_WS_BASES__.workstation`
+- 建议把该文件视为部署期配置文件，而不是前端源码的一部分；更换 `workstation` 或 `web` 地址时优先覆盖此文件，不重新构建前端。
