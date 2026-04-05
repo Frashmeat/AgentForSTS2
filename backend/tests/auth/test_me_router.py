@@ -82,6 +82,36 @@ def test_me_router_returns_current_user_profile(client: TestClient):
     assert profile.json()["email"] == "luna@example.com"
 
 
+def test_me_router_returns_zero_quota_view_for_new_user_without_quota_records(client: TestClient):
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "username": "luna",
+            "email": "luna@example.com",
+            "password": "secret-123",
+        },
+    )
+    assert registered.status_code == 200
+
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    quota = client.get("/api/me/quota")
+
+    assert quota.status_code == 200
+    assert quota.json()["daily_limit"] == 0
+    assert quota.json()["daily_used"] == 0
+    assert quota.json()["weekly_limit"] == 0
+    assert quota.json()["weekly_used"] == 0
+    assert quota.json()["refunded"] == 0
+
+
 def test_me_router_exposes_quota_and_platform_jobs(client: TestClient):
     registered = client.post(
         "/api/auth/register",

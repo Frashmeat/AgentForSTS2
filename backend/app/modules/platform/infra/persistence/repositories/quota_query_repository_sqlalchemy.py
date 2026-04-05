@@ -16,7 +16,7 @@ class QuotaQueryRepositorySqlAlchemy(QuotaQueryRepository):
     def get_current_quota_view(self, user_id: int, now: datetime) -> UserQuotaView | None:
         account = self.session.query(QuotaAccountRecord).filter(QuotaAccountRecord.user_id == user_id).one_or_none()
         if account is None:
-            return None
+            return UserQuotaView()
         buckets = (
             self.session.query(QuotaBucketRecord)
             .filter(
