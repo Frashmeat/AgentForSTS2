@@ -56,6 +56,59 @@ function New-CleanDirectory {
     $null = New-Item -ItemType Directory -Path $Path -Force
 }
 
+function Test-FrontendDependenciesReady {
+    param([string]$FrontendDir)
+
+    $packageJsonPath = Join-Path $FrontendDir "package.json"
+    $packageLockPath = Join-Path $FrontendDir "package-lock.json"
+    $nodeModulesDir = Join-Path $FrontendDir "node_modules"
+
+    if (-not (Test-Path -LiteralPath $packageJsonPath)) {
+        throw "缺少 frontend/package.json: $packageJsonPath"
+    }
+
+    if ((-not (Test-Path -LiteralPath $packageLockPath)) -or (-not (Test-Path -LiteralPath $nodeModulesDir))) {
+        return $false
+    }
+
+    $packageJson = Get-Content -LiteralPath $packageJsonPath -Raw | ConvertFrom-Json -AsHashtable
+    $requiredPackages = @()
+
+    if ($packageJson.ContainsKey("dependencies")) {
+        $requiredPackages += $packageJson.dependencies.Keys
+    }
+
+    if ($packageJson.ContainsKey("devDependencies")) {
+        $requiredPackages += $packageJson.devDependencies.Keys
+    }
+
+    foreach ($packageName in $requiredPackages | Sort-Object -Unique) {
+        $packagePath = Join-Path $nodeModulesDir ($packageName -replace "/", "\")
+        if (-not (Test-Path -LiteralPath $packagePath)) {
+            Write-Host "检测到缺失前端依赖: $packageName"
+            return $false
+        }
+    }
+
+    $packageJsonTime = (Get-Item -LiteralPath $packageJsonPath).LastWriteTimeUtc
+    $packageLockTime = (Get-Item -LiteralPath $packageLockPath).LastWriteTimeUtc
+    return $packageLockTime -ge $packageJsonTime
+}
+
+function Ensure-FrontendDependencies {
+    param([string]$FrontendDir)
+
+    if (Test-FrontendDependenciesReady -FrontendDir $FrontendDir) {
+        return
+    }
+
+    Write-Host "检测到前端依赖缺失或锁文件落后，执行 npm install..."
+    & npm install
+    if ($LASTEXITCODE -ne 0) {
+        throw "前端依赖安装失败"
+    }
+}
+
 function Invoke-RobocopySafe {
     param(
         [string]$Source,
@@ -245,6 +298,8 @@ if ($needsFrontend -and (-not $SkipFrontendBuild)) {
 
     Push-Location $frontendDir
     try {
+        Ensure-FrontendDependencies -FrontendDir $frontendDir
+
         # 统一在打包阶段产出 dist，避免部署脚本再触发前端构建。
         Write-Host "构建前端产物..."
         & npm run build

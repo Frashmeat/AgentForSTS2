@@ -81,6 +81,7 @@ pwsh -File .\tools\latest\deploy-docker.ps1 -Target web -ResetDatabase
 ## 说明
 
 - 当前脚本以 Windows PowerShell / PowerShell 7 为主。
+- `package-release.ps1` 在前端目标打包前会检查 `frontend/package.json`、`package-lock.json` 和 `node_modules`；若检测到依赖缺失或锁文件落后，会先执行一次 `npm install` 再构建前端。
 - Docker 部署会自动把运行时配置写入 release bundle 的 `runtime/` 目录，不会直接覆盖仓库根目录的 `config.json`。
 - Docker 部署默认不会在每次执行时强制重建镜像；只有显式传入 `-RebuildImages` 时，才会重新进入镜像构建和依赖安装阶段。
 - `web` / `full` 目标会优先复用本机已存在的 Postgres 镜像；如需指定数据库镜像，可传入 `-PostgresImage`。
