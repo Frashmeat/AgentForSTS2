@@ -108,6 +108,16 @@ function Write-RuntimeConfigFile {
         [string]$OutputPath
     )
 
+    $parentDir = Split-Path -Path $OutputPath -Parent
+    if (-not [string]::IsNullOrWhiteSpace($parentDir)) {
+        $null = New-Item -ItemType Directory -Path $parentDir -Force
+    }
+
+    if (Test-Path -LiteralPath $OutputPath -PathType Container) {
+        # runtime/*.config.json 属于脚本托管产物，若之前被错误创建成目录则在写入前自愈。
+        Remove-Item -LiteralPath $OutputPath -Recurse -Force
+    }
+
     $json = $Config | ConvertTo-Json -Depth 20
     Set-Content -LiteralPath $OutputPath -Value $json -Encoding UTF8
 }

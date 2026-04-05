@@ -84,6 +84,7 @@ pwsh -File .\tools\latest\deploy-docker.ps1 -Target web -ResetDatabase
 - `package-release.ps1` 在前端目标打包前会检查 `frontend/package.json`、`package-lock.json` 和 `node_modules`；若检测到依赖缺失或锁文件落后，会先执行一次 `npm install` 再构建前端。
 - `full` / `workstation` 目标下，前端若未显式注入 `web` API base，会默认把平台认证与用户中心请求回退到同主机的 `7870` 端口，避免误打到 `workstation` 的 `7860`。
 - Docker 部署会自动把运行时配置写入 release bundle 的 `runtime/` 目录，不会直接覆盖仓库根目录的 `config.json`。
+- 如果 `runtime/*.config.json` 曾被误创建成目录，`deploy-docker.ps1` 会在写配置前自动清理并重建为文件。
 - Docker 部署默认不会在每次执行时强制重建镜像；只有显式传入 `-RebuildImages` 时，才会重新进入镜像构建和依赖安装阶段。
 - `web` / `full` 目标会优先复用本机已存在的 Postgres 镜像；如需指定数据库镜像，可传入 `-PostgresImage`。
 - `full` 目标默认会先删除数据库卷并重建数据库；`web` 目标仍需显式传入 `-ResetDatabase`。
