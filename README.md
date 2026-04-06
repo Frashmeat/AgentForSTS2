@@ -184,6 +184,12 @@ window.__AGENT_THE_SPIRE_WS_BASES__ = {
 };
 ```
 
+`hybrid` Docker 部署时，必须显式传入平台侧地址，不能依赖默认回环地址：
+
+```powershell
+pwsh -NoProfile -File .\tools\latest\deploy-docker.ps1 hybrid -WebBaseUrl https://your-web-api.example.com
+```
+
 默认文件位置：
 
 - 源码开发：`frontend/public/runtime-config.js`

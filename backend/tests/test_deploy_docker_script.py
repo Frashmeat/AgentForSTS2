@@ -116,8 +116,15 @@ def test_deploy_docker_reuse_images_skips_build_when_local_image_exists(tmp_path
     assert "compose up" in result.docker_log
 
 
-def test_deploy_docker_hybrid_builds_frontend_and_workstation_without_postgres(tmp_path: Path):
+def test_deploy_docker_hybrid_requires_explicit_web_base_url(tmp_path: Path):
     result = _run_deploy(tmp_path, "hybrid")
+
+    assert result.returncode != 0
+    assert "-WebBaseUrl" in result.stderr
+
+
+def test_deploy_docker_hybrid_builds_frontend_and_workstation_without_postgres(tmp_path: Path):
+    result = _run_deploy(tmp_path, "hybrid", "-WebBaseUrl", "https://platform.example.com")
 
     runtime_config = tmp_path / "release" / "runtime" / "runtime-config.js"
 
@@ -126,3 +133,4 @@ def test_deploy_docker_hybrid_builds_frontend_and_workstation_without_postgres(t
     assert "compose build" in result.docker_log
     assert "compose up" in result.docker_log
     assert runtime_config.exists()
+    assert 'web: "https://platform.example.com"' in runtime_config.read_text(encoding="utf-8")

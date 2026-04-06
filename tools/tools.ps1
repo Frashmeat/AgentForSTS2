@@ -120,6 +120,7 @@ function Show-Help {
     Write-Host "  powershell -File .\tools\tools.ps1 split start -DryRun"
     Write-Host "  powershell -File .\tools\tools.ps1 latest package hybrid"
     Write-Host "  powershell -File .\tools\tools.ps1 latest package workstation"
+    Write-Host "  powershell -File .\tools\tools.ps1 latest deploy hybrid -WebBaseUrl https://your-web-api.example.com"
     Write-Host ""
 }
 
@@ -256,6 +257,17 @@ function Get-SplitStartCustomArgs {
     return $args
 }
 
+function Get-LatestDeployHybridArgs {
+    while ($true) {
+        $webBaseUrl = Read-Host "Web API 基地址（必填，例如 https://platform.example.com）"
+        if (-not [string]::IsNullOrWhiteSpace($webBaseUrl)) {
+            return @("-WebBaseUrl", $webBaseUrl.Trim())
+        }
+
+        Write-Host "hybrid 部署必须提供 Web API 基地址。" -ForegroundColor Yellow
+    }
+}
+
 function Resolve-ProfileArgs {
     param(
         $Command,
@@ -269,6 +281,9 @@ function Resolve-ProfileArgs {
     switch ($Profile.PromptHandler) {
         "SplitStartCustom" {
             return Get-SplitStartCustomArgs
+        }
+        "LatestDeployHybrid" {
+            return Get-LatestDeployHybridArgs
         }
         default {
             throw "未支持的参数提示处理器：$($Profile.PromptHandler)"
@@ -405,7 +420,7 @@ function Get-MenuGroups {
                     (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 deploy-docker.ps1 参数说明" -Args @("-Help"))
                 ))
                 (New-MenuCommand -Key "latest-deploy-hybrid" -Label "部署 hybrid release" -Description "部署正式推荐的 frontend + workstation 用户侧 bundle" -ScriptPath (Join-Path $toolsRoot "latest\deploy-docker.ps1") -InvocationName "latest deploy hybrid" -DefaultArgs @("hybrid") -Profiles @(
-                    (New-MenuProfile -Key "default" -Label "直接部署" -Description "按默认参数部署 hybrid")
+                    (New-MenuProfile -Key "default" -Label "输入 Web API 地址后部署" -Description "部署前先填写独立 web-backend 的访问地址" -PromptHandler "LatestDeployHybrid")
                     (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 deploy-docker.ps1 参数说明" -Args @("-Help"))
                 ))
                 (New-MenuCommand -Key "latest-deploy-full" -Label "部署 full release" -Description "执行 full Docker 部署" -ScriptPath (Join-Path $toolsRoot "latest\deploy-docker.ps1") -InvocationName "latest deploy full" -DefaultArgs @("full") -Profiles @(

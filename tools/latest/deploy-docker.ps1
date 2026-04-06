@@ -61,6 +61,9 @@ Postgres 镜像名。留空时自动优先复用本机已有镜像。
 pwsh -File .\tools\latest\deploy-docker.ps1 workstation
 
 .EXAMPLE
+pwsh -File .\tools\latest\deploy-docker.ps1 hybrid -WebBaseUrl https://your-web-api.example.com
+
+.EXAMPLE
 pwsh -File .\tools\latest\deploy-docker.ps1 web -ResetDb -dbn agentthespire
 #>
 [CmdletBinding()]
@@ -96,9 +99,9 @@ param(
     [Alias("fp")]
     [string]$FrontendPort = "8080",
 
-    [Parameter(HelpMessage = "前端运行时写入的 Web API 基地址。默认 http://127.0.0.1:7870。")]
+    [Parameter(HelpMessage = "前端运行时写入的 Web API 基地址。`hybrid` 目标下必填，用于指向独立部署的 `web-backend`。")]
     [Alias("wb")]
-    [string]$WebBaseUrl = "http://127.0.0.1:7870",
+    [string]$WebBaseUrl = "",
 
     # 数据库参数
     [Parameter(HelpMessage = "Postgres 暴露到宿主机的端口。默认 5432。")]
@@ -435,6 +438,10 @@ $effectiveProjectName = if ([string]::IsNullOrWhiteSpace($ProjectName)) {
     "agentthespire-$Target-release"
 } else {
     $ProjectName
+}
+
+if ($Target -eq "hybrid" -and [string]::IsNullOrWhiteSpace($WebBaseUrl)) {
+    throw "hybrid 部署必须显式传入 -WebBaseUrl，用于把前端平台接口指向独立部署的 web-backend，例如 https://your-web-api.example.com"
 }
 
 Assert-CommandExists -CommandName "docker"

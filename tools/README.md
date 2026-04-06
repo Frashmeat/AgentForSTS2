@@ -43,7 +43,7 @@ powershell -File .\tools\tools.ps1 dev decompile
 # latest 打包 / 部署
 powershell -File .\tools\tools.ps1 latest package hybrid
 powershell -File .\tools\tools.ps1 latest package workstation
-powershell -File .\tools\tools.ps1 latest deploy hybrid
+powershell -File .\tools\tools.ps1 latest deploy hybrid -WebBaseUrl https://your-web-api.example.com
 powershell -File .\tools\tools.ps1 latest deploy full
 powershell -File .\tools\tools.ps1 latest installer
 ```
@@ -157,6 +157,7 @@ tools/
 - `tools\latest\deploy-docker.ps1`
   按目标部署 Docker release。
   默认会基于当前 release 重新 `build` 目标镜像；只有显式传入 `-ReuseImages` 时才会复用已有镜像。
+  `hybrid` 目标下必须显式传入 `-WebBaseUrl`，用于把前端平台接口指向独立部署的 `web-backend`。
 - `tools\latest\build-workstation-installer.ps1`
   构建 Windows 工作站安装器。
 - `tools\latest\templates\`
@@ -179,7 +180,7 @@ tools/
 | --- | --- | --- | --- |
 | 兼容态 `full` | `tools.ps1 start full` | `full` 后端 | 保留历史行为或做同机联调 |
 | 工作站托管态 | `tools.ps1 start workstation` | `workstation-backend` | 单机本地创作、BYOK、本机构建部署 |
-| 正式部署目标 `hybrid` | `tools.ps1 latest package hybrid` / `tools.ps1 latest deploy hybrid` | 独立静态前端 | 用户侧正式交付，前端独立发布并接入 `workstation-backend` 与 `web-backend` |
+| 正式部署目标 `hybrid` | `tools.ps1 latest package hybrid` / `tools.ps1 latest deploy hybrid -WebBaseUrl https://your-web-api.example.com` | 独立静态前端 | 用户侧正式交付，前端独立发布并接入 `workstation-backend` 与 `web-backend` |
 | 本地验证形态 `split-local` | `tools.ps1 split start` | 独立静态前端 | 本地验证 `hybrid` 形态与开发联调 |
 
 拆分运行时的接口边界：
@@ -195,6 +196,6 @@ tools/
 - `tools.ps1` 现在默认优先提供菜单式选择，适合日常本地使用；参数直达模式更适合脚本化或熟悉命令后的快速调用。
 - `tools\latest\package-release.ps1 workstation` 仍会把 launcher 脚本复制到 release 目录下的 `launcher/` 中。
 - `tools\latest\package-release.ps1 hybrid` 会同时整理 `frontend` 与 `workstation` 两类用户侧服务，并附带 launcher。
-- `tools\latest\deploy-docker.ps1 hybrid` 只部署用户侧的 `frontend + workstation`，不负责同时拉起 `web-backend`。
+- `tools\latest\deploy-docker.ps1 hybrid -WebBaseUrl https://your-web-api.example.com` 只部署用户侧的 `frontend + workstation`，不负责同时拉起 `web-backend`。
 - `runtime-config.js` 仍属于部署期配置文件；更换 `workstation` 或 `web` 地址时优先覆盖该文件，不重新构建前端。
 - `workstation` 地址应配置为本机或 LAN 可达地址，不应配置为公网用户本机地址。

@@ -9,6 +9,7 @@
 - [x] 2.2 为 `deploy-docker.ps1` 增加或明确 `hybrid` 目标语义
 - [x] 2.3 补充 `hybrid` 的定向测试或脚本级验证
 - [x] 2.4 完成脚本任务后提交一次独立 commit
+- [x] 2.5 修正 `hybrid` Docker 部署默认把 `WebBaseUrl` 写成 `127.0.0.1` 的问题，改为显式要求传入 `-WebBaseUrl`
 
 ## 3. 文档与验收
 
@@ -16,3 +17,4 @@
 - [x] 3.2 更新 tools 文档，区分 `hybrid`、`full` 与 `split-local`
 - [x] 3.3 更新决策文档与验收文档，说明用户侧 / 服务器侧部署方式
 - [x] 3.4 完成文档任务后提交一次独立 commit
+- [x] 3.5 补充 `hybrid` 缺少 `-WebBaseUrl` 时的部署约束与排障说明
