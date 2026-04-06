@@ -41,7 +41,9 @@ powershell -File .\tools\tools.ps1 dev verify-install
 powershell -File .\tools\tools.ps1 dev decompile
 
 # latest 打包 / 部署
+powershell -File .\tools\tools.ps1 latest package hybrid
 powershell -File .\tools\tools.ps1 latest package workstation
+powershell -File .\tools\tools.ps1 latest deploy hybrid
 powershell -File .\tools\tools.ps1 latest deploy full
 powershell -File .\tools\tools.ps1 latest installer
 ```
@@ -177,19 +179,22 @@ tools/
 | --- | --- | --- | --- |
 | 兼容态 `full` | `tools.ps1 start full` | `full` 后端 | 保留历史行为或做同机联调 |
 | 工作站托管态 | `tools.ps1 start workstation` | `workstation-backend` | 单机本地创作、BYOK、本机构建部署 |
-| 独立前端态 | `tools.ps1 split start` | 独立静态前端 | 前端独立发布，同时接入 `workstation-backend` 和 `web-backend` |
+| 正式部署目标 `hybrid` | `tools.ps1 latest package hybrid` / `tools.ps1 latest deploy hybrid` | 独立静态前端 | 用户侧正式交付，前端独立发布并接入 `workstation-backend` 与 `web-backend` |
+| 本地验证形态 `split-local` | `tools.ps1 split start` | 独立静态前端 | 本地验证 `hybrid` 形态与开发联调 |
 
 拆分运行时的接口边界：
 
 - `workstation-backend` 承接 `/api/config`、`/api/plan`、`/api/approvals/*` 与工作台 WebSocket
 - `web-backend` 承接 `/api/auth/*`、`/api/me/*`、`/api/admin/*` 与平台任务接口
 - 第一版只支持本机或 LAN 可达的 `workstation-backend`
-- 用户侧若需要单安装包，推荐打包内容是“独立静态前端 + workstation-backend + launcher”，`web-backend` 继续独立部署
+- `hybrid` 用户侧若需要单安装包，推荐打包内容是“独立静态前端 + workstation-backend + launcher”，`web-backend` 继续独立部署
 
 ## 其它说明
 
 - 所有真实脚本都已经迁入功能目录，顶层旧脚本只保留兼容层职责。
 - `tools.ps1` 现在默认优先提供菜单式选择，适合日常本地使用；参数直达模式更适合脚本化或熟悉命令后的快速调用。
 - `tools\latest\package-release.ps1 workstation` 仍会把 launcher 脚本复制到 release 目录下的 `launcher/` 中。
+- `tools\latest\package-release.ps1 hybrid` 会同时整理 `frontend` 与 `workstation` 两类用户侧服务，并附带 launcher。
+- `tools\latest\deploy-docker.ps1 hybrid` 只部署用户侧的 `frontend + workstation`，不负责同时拉起 `web-backend`。
 - `runtime-config.js` 仍属于部署期配置文件；更换 `workstation` 或 `web` 地址时优先覆盖该文件，不重新构建前端。
 - `workstation` 地址应配置为本机或 LAN 可达地址，不应配置为公网用户本机地址。
