@@ -368,16 +368,23 @@ $releaseDir = Join-Path $OutputRoot $effectiveReleaseName
 $zipPath = Join-Path $OutputRoot ("{0}.zip" -f $effectiveReleaseName)
 $composeTemplate = Join-Path $templatesDir ("compose.{0}.yml" -f $Target)
 $serviceDefinitions = Get-ServiceDefinitions -SelectedTarget $Target
+$needsBackend = @($serviceDefinitions | Where-Object { $_.IncludeBackend }).Count -gt 0
 $needsFrontend = @($serviceDefinitions | Where-Object { $_.IncludeFrontend }).Count -gt 0
 $needsModTemplate = @($serviceDefinitions | Where-Object { $_.IncludeModTemplate }).Count -gt 0
 
-Assert-PathExists -Path $frontendDir -Label "frontend 目录"
-Assert-PathExists -Path $backendDir -Label "backend 目录"
 Assert-PathExists -Path $templatesDir -Label "模板目录"
 Assert-PathExists -Path $composeTemplate -Label "compose 模板"
 
 Assert-CommandExists -CommandName "git"
 Assert-CommandExists -CommandName "robocopy"
+
+if ($needsFrontend) {
+    Assert-PathExists -Path $frontendDir -Label "frontend 目录"
+}
+
+if ($needsBackend) {
+    Assert-PathExists -Path $backendDir -Label "backend 目录"
+}
 
 if ($needsModTemplate) {
     Assert-PathExists -Path $modTemplateDir -Label "mod_template 目录"
