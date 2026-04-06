@@ -403,7 +403,12 @@ Assert-PathExists -Path $effectiveReleaseRoot -Label "release 目录"
 $composeFile = Join-Path $effectiveReleaseRoot "docker-compose.yml"
 $runtimeDir = Join-Path $effectiveReleaseRoot "runtime"
 $envFile = Join-Path $runtimeDir ".env"
-$resolvedPostgresImage = Resolve-PostgresImage -PreferredImage $PostgresImage
+$targetNeedsPostgres = $Target -in @("full", "web")
+$resolvedPostgresImage = if ($targetNeedsPostgres) {
+    Resolve-PostgresImage -PreferredImage $PostgresImage
+} else {
+    ""
+}
 $shouldResetDatabase = $Target -eq "full" -or $ResetDatabase.IsPresent
 
 Assert-PathExists -Path $composeFile -Label "docker-compose.yml"
@@ -485,7 +490,7 @@ Write-Host "  Compose Env  : $envFile"
 Write-Host "  复用已有镜像 : $($ReuseImages.IsPresent)"
 Write-Host "  强制重建镜像 : $($RebuildImages.IsPresent)"
 Write-Host "  重建数据库   : $shouldResetDatabase"
-if ($Target -in @("full", "web")) {
+if ($targetNeedsPostgres) {
     Write-Host "  Postgres 镜像: $resolvedPostgresImage"
 }
 switch ($Target) {
