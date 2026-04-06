@@ -22,7 +22,7 @@ from pathlib import Path
 
 # 默认输出路径（与 config.json 同级，不在仓库内）
 _DEFAULT_OUTPUT = Path(__file__).parent.parent.parent / "sts2_decompiled"
-_CONFIG_PATH = Path(__file__).parent.parent / "config.json"
+_CONFIG_PATH = Path(__file__).parent.parent.parent / "config.json"
 
 _STS2_DLL_RELATIVE = "data_sts2_windows_x86_64/sts2.dll"
 
