@@ -7,7 +7,7 @@
 ## ⚡ 完整反编译源码（优先用这里，不要跑 ilspycmd）
 
 反编译目录路径由 `config.json` 的 `decompiled_src_path` 字段配置，已在你的 prompt 的 **API Lookup** 段注入。
-若该段显示"NOT available"，运行 `python tools/decompile_sts2.py --game-path <STS2路径>` 生成。
+若该段显示"NOT available"，运行 `python tools/dev/decompile_sts2.py --game-path <STS2路径>` 生成。
 
 常用子目录（在配置的反编译目录下）：
 ```
