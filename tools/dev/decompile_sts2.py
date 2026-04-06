@@ -6,6 +6,7 @@ decompile_sts2.py — 将 sts2.dll 反编译到本地目录，供 AgentTheSpire 
     python tools/dev/decompile_sts2.py --game-path "C:/Steam/steamapps/common/Slay the Spire 2"
     python tools/dev/decompile_sts2.py --dll-path "C:/path/to/sts2.dll"
     python tools/dev/decompile_sts2.py --game-path "..." --output "E:/my_decompiled"
+    python tools/dev/decompile_sts2.py  # 默认读取 config.json 中的 sts2_path
 
 运行后将输出目录写入 config.json 的 decompiled_src_path 字段。
 
@@ -27,18 +28,33 @@ _CONFIG_PATH = Path(__file__).parent.parent.parent / "config.json"
 _STS2_DLL_RELATIVE = "data_sts2_windows_x86_64/sts2.dll"
 
 
+def load_config() -> dict:
+    if not _CONFIG_PATH.exists():
+        return {}
+    with open(_CONFIG_PATH, "r", encoding="utf-8-sig") as f:
+        return json.load(f)
+
+
 def find_dll(game_path: str | None, dll_path: str | None) -> Path:
     if dll_path:
         p = Path(dll_path)
         if not p.exists():
             sys.exit(f"[ERROR] DLL not found: {p}")
         return p
-    if game_path:
-        p = Path(game_path) / _STS2_DLL_RELATIVE
+
+    resolved_game_path = game_path
+    if not resolved_game_path:
+        resolved_game_path = str(load_config().get("sts2_path", "")).strip()
+
+    if resolved_game_path:
+        p = Path(resolved_game_path) / _STS2_DLL_RELATIVE
         if not p.exists():
             sys.exit(f"[ERROR] sts2.dll not found at {p}")
         return p
-    sys.exit("[ERROR] Provide --game-path or --dll-path")
+
+    if game_path:
+        sys.exit(f"[ERROR] sts2.dll not found at {Path(game_path) / _STS2_DLL_RELATIVE}")
+    sys.exit("[ERROR] Provide --game-path or --dll-path, or set config.json.sts2_path")
 
 
 def run_decompile(dll: Path, output: Path) -> None:
@@ -57,11 +73,7 @@ def run_decompile(dll: Path, output: Path) -> None:
 
 
 def write_config(output: Path) -> None:
-    cfg = {}
-    if _CONFIG_PATH.exists():
-        # install.ps1 在 Windows PowerShell 下写 config.json 时可能带 BOM，这里兼容 utf-8-sig。
-        with open(_CONFIG_PATH, "r", encoding="utf-8-sig") as f:
-            cfg = json.load(f)
+    cfg = load_config()
     cfg["decompiled_src_path"] = str(output)
     with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2, ensure_ascii=False)
