@@ -1,4 +1,4 @@
-import { useEffect, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 
 import type { AppConfig } from "./api/config.ts";
 import { loadAppConfig } from "./api/index.ts";
@@ -17,11 +17,16 @@ interface UseDefaultProjectRootOptions {
 
 export function useDefaultProjectRoot(options: UseDefaultProjectRootOptions) {
   const { setProjectRoot, onConfigLoaded } = options;
+  const onConfigLoadedRef = useRef(onConfigLoaded);
+
+  useEffect(() => {
+    onConfigLoadedRef.current = onConfigLoaded;
+  }, [onConfigLoaded]);
 
   useEffect(() => {
     loadAppConfig()
       .then((config) => {
-        onConfigLoaded?.(config);
+        onConfigLoadedRef.current?.(config);
         const defaultProjectRoot =
           typeof config?.default_project_root === "string"
             ? config.default_project_root
@@ -31,5 +36,5 @@ export function useDefaultProjectRoot(options: UseDefaultProjectRootOptions) {
         );
       })
       .catch(() => {});
-  }, [onConfigLoaded, setProjectRoot]);
+  }, [setProjectRoot]);
 }
