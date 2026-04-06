@@ -342,8 +342,13 @@ function Get-ComposeImageName {
 function Test-DockerImageExists {
     param([string]$ImageName)
 
-    & docker image inspect $ImageName *> $null
-    return $LASTEXITCODE -eq 0
+    try {
+        & docker image inspect $ImageName 1>$null 2>$null
+        return $LASTEXITCODE -eq 0
+    }
+    catch {
+        return $false
+    }
 }
 
 function Remove-DockerImageIfExists {
