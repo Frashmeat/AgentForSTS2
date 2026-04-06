@@ -527,9 +527,13 @@ function Invoke-Route {
     }
 }
 
-if ($Help) {
+if ($Help -and [string]::IsNullOrWhiteSpace($Group)) {
     Show-Help
     return
+}
+
+if ($Help -and -not [string]::IsNullOrWhiteSpace($Group)) {
+    $RemainingArgs = @("-Help") + $RemainingArgs
 }
 
 if ([string]::IsNullOrWhiteSpace($Group)) {
