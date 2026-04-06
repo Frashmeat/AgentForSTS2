@@ -1,11 +1,23 @@
 # tools 目录说明
 
-本目录现在采用“一个统一入口 + 按功能分目录 + 顶层兼容 wrapper”的结构。
+本目录现在采用“一个统一入口 + 分层数字菜单 + 参数直达 + 顶层兼容 wrapper”的结构。
 
 ## 推荐入口
 
 - `powershell -File .\tools\tools.ps1`
-  默认显示可用脚本目录，并支持参数直达。
+  默认进入分层数字菜单，可直接用键盘选择分组、脚本和参数模板。
+
+菜单特性：
+
+- 直接运行后进入主菜单，不需要手输完整命令
+- 每一级都用数字键选择
+- 支持 `B` 返回上一级
+- 支持 `Q` 退出
+- 执行前会显示真实脚本路径、参数模板和命令预览，再次确认后才执行
+
+## 参数直达
+
+如果你已经熟悉命令，也可以继续用参数直达模式：
 
 常用示例：
 
@@ -33,6 +45,31 @@ powershell -File .\tools\tools.ps1 latest package workstation
 powershell -File .\tools\tools.ps1 latest deploy full
 powershell -File .\tools\tools.ps1 latest installer
 ```
+
+## 菜单结构
+
+主菜单当前包含：
+
+1. 安装
+2. 启动
+3. 拆分运行时
+4. 开发辅助
+5. 打包 / 部署
+
+每个脚本项下面还会继续进入“参数模板”菜单，例如：
+
+- 安装
+  - 直接执行
+  - 查看帮助
+- split-local 启动
+  - 默认启动
+  - DryRun 预览
+  - 启动但不打开浏览器
+  - 自定义端口 / Web API 地址
+- latest 打包
+  - 直接打包
+  - 打包但不压缩
+  - 查看帮助
 
 ## 目录结构
 
@@ -117,6 +154,7 @@ tools/
   按目标打包 release bundle，并可输出 zip。
 - `tools\latest\deploy-docker.ps1`
   按目标部署 Docker release。
+  默认会基于当前 release 重新 `build` 目标镜像；只有显式传入 `-ReuseImages` 时才会复用已有镜像。
 - `tools\latest\build-workstation-installer.ps1`
   构建 Windows 工作站安装器。
 - `tools\latest\templates\`
@@ -151,6 +189,7 @@ tools/
 ## 其它说明
 
 - 所有真实脚本都已经迁入功能目录，顶层旧脚本只保留兼容层职责。
+- `tools.ps1` 现在默认优先提供菜单式选择，适合日常本地使用；参数直达模式更适合脚本化或熟悉命令后的快速调用。
 - `tools\latest\package-release.ps1 workstation` 仍会把 launcher 脚本复制到 release 目录下的 `launcher/` 中。
 - `runtime-config.js` 仍属于部署期配置文件；更换 `workstation` 或 `web` 地址时优先覆盖该文件，不重新构建前端。
 - `workstation` 地址应配置为本机或 LAN 可达地址，不应配置为公网用户本机地址。

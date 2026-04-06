@@ -45,8 +45,11 @@ Postgres 镜像名。留空时自动优先复用本机已有镜像。
 .PARAMETER ResetDatabase
 重建数据库。full 默认会执行；web 目标可显式开启。
 
+.PARAMETER ReuseImages
+复用已有镜像。仅在镜像缺失时才执行 docker compose build。
+
 .PARAMETER RebuildImages
-重建镜像。会删除当前项目对应镜像并重新 docker compose build。
+强制重建镜像。会删除当前项目对应镜像并重新 docker compose build。
 
 .PARAMETER Help
 显示帮助说明并退出。
@@ -116,7 +119,11 @@ param(
     [Alias("ResetDb")]
     [switch]$ResetDatabase,
 
-    [Parameter(HelpMessage = "重建镜像。会删除当前项目对应镜像并重新 docker compose build。")]
+    [Parameter(HelpMessage = "复用已有镜像。仅在镜像缺失时才执行 docker compose build。")]
+    [Alias("Reuse")]
+    [switch]$ReuseImages,
+
+    [Parameter(HelpMessage = "强制重建镜像。会删除当前项目对应镜像并重新 docker compose build。")]
     [Alias("Rebuild")]
     [switch]$RebuildImages,
 
@@ -134,6 +141,10 @@ if ($Help -or $PSBoundParameters.Count -eq 0) {
 
 if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
     $ConfigPath = Join-Path (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path "config.json"
+}
+
+if ($ReuseImages.IsPresent -and $RebuildImages.IsPresent) {
+    throw "-ReuseImages 与 -RebuildImages 不能同时使用。"
 }
 
 function Assert-PathExists {
@@ -432,23 +443,29 @@ if ($shouldResetDatabase) {
 }
 
 $buildServices = Get-BuildServices -TargetName $Target
-$missingBuildServices = @()
+$servicesToBuild = @()
 
 foreach ($serviceName in $buildServices) {
     $imageName = Get-ComposeImageName -ComposeProjectName $effectiveProjectName -ServiceName $serviceName
     if ($RebuildImages) {
         Remove-DockerImageIfExists -ImageName $imageName
-        $missingBuildServices += $serviceName
+        $servicesToBuild += $serviceName
         continue
     }
-    if (-not (Test-DockerImageExists -ImageName $imageName)) {
-        $missingBuildServices += $serviceName
+
+    if ($ReuseImages) {
+        if (-not (Test-DockerImageExists -ImageName $imageName)) {
+            $servicesToBuild += $serviceName
+        }
+        continue
     }
+
+    $servicesToBuild += $serviceName
 }
 
-if ($missingBuildServices.Count -gt 0) {
-    # 构建和启动显式拆开：首次缺镜像才 build，后续 up 使用 --no-build 避免重复装依赖。
-    Write-Host "检测到需要构建本地镜像: $($missingBuildServices -join ', ')"
+if ($servicesToBuild.Count -gt 0) {
+    # 默认以当前 release 为准重建镜像，避免发布目录更新后仍复用旧镜像。
+    Write-Host "检测到需要构建本地镜像: $($servicesToBuild -join ', ')"
     Invoke-DockerCompose -BundleDir $effectiveReleaseRoot -ComposeFile $composeFile -EnvFile $envFile -ComposeProjectName $effectiveProjectName -ComposeArgs @("build")
 }
 
@@ -460,6 +477,7 @@ Write-Host "部署完成:"
 Write-Host "  Target       : $Target"
 Write-Host "  Release 目录 : $effectiveReleaseRoot"
 Write-Host "  Compose Env  : $envFile"
+Write-Host "  复用已有镜像 : $($ReuseImages.IsPresent)"
 Write-Host "  强制重建镜像 : $($RebuildImages.IsPresent)"
 Write-Host "  重建数据库   : $shouldResetDatabase"
 if ($Target -in @("full", "web")) {
