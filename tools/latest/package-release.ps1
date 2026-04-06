@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 按目标打包 AgentTheSpire 的 release bundle。
 
@@ -40,7 +40,7 @@ param(
 
     [Parameter(HelpMessage = "输出目录。默认写入 tools/latest/artifacts。")]
     [Alias("o")]
-    [string]$OutputRoot = (Join-Path $PSScriptRoot "artifacts"),
+    [string]$OutputRoot = "",
 
     [Parameter(HelpMessage = "发布目录名。默认按目标生成 agentthespire-<target>-release。")]
     [Alias("n")]
@@ -65,6 +65,10 @@ $ErrorActionPreference = "Stop"
 if ($Help -or $PSBoundParameters.Count -eq 0) {
     Get-Help -Full $PSCommandPath | Out-String | Write-Output
     return
+}
+
+if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
+    $OutputRoot = Join-Path $PSScriptRoot "artifacts"
 }
 
 function Get-RepoRoot {
@@ -316,10 +320,10 @@ function Copy-LauncherBundle {
     $null = New-Item -ItemType Directory -Path $launcherDir -Force
 
     foreach ($relativePath in @(
-        "tools\start_split_local.ps1",
-        "tools\start_split_local.bat",
-        "tools\stop_split_local.ps1",
-        "tools\stop_split_local.bat"
+        "tools\split-local\start_split_local.ps1",
+        "tools\split-local\start_split_local.bat",
+        "tools\split-local\stop_split_local.ps1",
+        "tools\split-local\stop_split_local.bat"
     )) {
         Copy-Item -LiteralPath (Join-Path $RepoRoot $relativePath) -Destination (Join-Path $launcherDir (Split-Path $relativePath -Leaf)) -Force
     }

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 按目标启动 AgentTheSpire 的 Docker 部署。
 
@@ -71,7 +71,7 @@ param(
 
     [Parameter(HelpMessage = "运行时配置文件路径。默认读取仓库根目录 config.json。")]
     [Alias("c")]
-    [string]$ConfigPath = (Join-Path (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path "config.json"),
+    [string]$ConfigPath = "",
 
     [Parameter(HelpMessage = "Compose 项目名。默认按 agentthespire-<target>-release 生成。")]
     [Alias("n")]
@@ -130,6 +130,10 @@ $ErrorActionPreference = "Stop"
 if ($Help -or $PSBoundParameters.Count -eq 0) {
     Get-Help -Full $PSCommandPath | Out-String | Write-Output
     return
+}
+
+if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
+    $ConfigPath = Join-Path (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path "config.json"
 }
 
 function Assert-PathExists {

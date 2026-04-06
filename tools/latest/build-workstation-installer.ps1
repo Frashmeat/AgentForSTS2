@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 构建 Windows 工作站安装器。
 
