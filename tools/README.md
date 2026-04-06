@@ -144,7 +144,7 @@ tools/
 ### dev
 
 - `tools\dev\decompile_sts2.py`
-  反编译 `sts2.dll`，并把输出路径写入 `config.json`。
+  反编译 `sts2.dll`，并把输出路径写入 `config.json`。不传参数时会默认读取 `config.json` 中的 `sts2_path`。
 - `tools\dev\verify-install-bat.ps1`
   校验顶层安装 wrapper 与实际 `install\install.ps1` 的关键行为。
 
