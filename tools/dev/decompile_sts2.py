@@ -59,7 +59,8 @@ def run_decompile(dll: Path, output: Path) -> None:
 def write_config(output: Path) -> None:
     cfg = {}
     if _CONFIG_PATH.exists():
-        with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
+        # install.ps1 在 Windows PowerShell 下写 config.json 时可能带 BOM，这里兼容 utf-8-sig。
+        with open(_CONFIG_PATH, "r", encoding="utf-8-sig") as f:
             cfg = json.load(f)
     cfg["decompiled_src_path"] = str(output)
     with open(_CONFIG_PATH, "w", encoding="utf-8") as f:

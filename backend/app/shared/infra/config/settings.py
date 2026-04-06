@@ -174,7 +174,8 @@ def normalize_config(config: Optional[dict[str, Any]]) -> dict[str, Any]:
 
 def load_config() -> dict[str, Any]:
     if CONFIG_PATH.exists():
-        with open(CONFIG_PATH, "r", encoding="utf-8") as file:
+        # tools/install/install.ps1 在 Windows PowerShell 下写 config.json 时可能带 BOM。
+        with open(CONFIG_PATH, "r", encoding="utf-8-sig") as file:
             saved = json.load(file)
         cfg = normalize_config(saved)
     else:
