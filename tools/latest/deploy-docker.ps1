@@ -7,7 +7,7 @@
 直接执行脚本且不传任何参数时，会默认显示本帮助而不是立即启动部署。
 
 .PARAMETER Target
-部署目标。可选 full / workstation / frontend / web。
+部署目标。可选 full / hybrid / workstation / frontend / web。
 
 .PARAMETER ReleaseRoot
 release 目录。默认使用 tools/latest/artifacts/agentthespire-<target>-release。
@@ -26,6 +26,9 @@ Web 端口。默认 7870。
 
 .PARAMETER FrontendPort
 前端静态站端口。默认 8080。
+
+.PARAMETER WebBaseUrl
+前端运行时写入的 Web API 基地址。`hybrid` 目标下用于指向独立部署的 `web-backend`。
 
 .PARAMETER PostgresHostPort
 Postgres 暴露到宿主机的端口。默认 5432。
@@ -63,9 +66,9 @@ pwsh -File .\tools\latest\deploy-docker.ps1 web -ResetDb -dbn agentthespire
 [CmdletBinding()]
 param(
     # 基础参数
-    [Parameter(Position = 0, HelpMessage = "部署目标。可选 full / workstation / frontend / web。")]
+    [Parameter(Position = 0, HelpMessage = "部署目标。可选 full / hybrid / workstation / frontend / web。")]
     [Alias("t")]
-    [ValidateSet("full", "workstation", "frontend", "web")]
+    [ValidateSet("full", "hybrid", "workstation", "frontend", "web")]
     [string]$Target = "workstation",
 
     [Parameter(HelpMessage = "release 目录。默认使用 tools/latest/artifacts/agentthespire-<target>-release。")]
@@ -92,6 +95,10 @@ param(
     [Parameter(HelpMessage = "前端静态站端口。默认 8080。")]
     [Alias("fp")]
     [string]$FrontendPort = "8080",
+
+    [Parameter(HelpMessage = "前端运行时写入的 Web API 基地址。默认 http://127.0.0.1:7870。")]
+    [Alias("wb")]
+    [string]$WebBaseUrl = "http://127.0.0.1:7870",
 
     # 数据库参数
     [Parameter(HelpMessage = "Postgres 暴露到宿主机的端口。默认 5432。")]
@@ -273,6 +280,12 @@ function Write-ComposeEnvFile {
         "workstation" {
             @("ATS_WORKSTATION_PORT=$WorkstationPort")
         }
+        "hybrid" {
+            @(
+                "ATS_WORKSTATION_PORT=$WorkstationPort"
+                "ATS_FRONTEND_PORT=$FrontendPort"
+            )
+        }
         "frontend" {
             @("ATS_FRONTEND_PORT=$FrontendPort")
         }
@@ -315,14 +328,41 @@ function Invoke-DockerCompose {
     }
 }
 
+function Write-FrontendRuntimeConfig {
+    param(
+        [string]$OutputPath,
+        [string]$ResolvedWorkstationBaseUrl,
+        [string]$ResolvedWorkstationWsBaseUrl,
+        [string]$ResolvedWebBaseUrl
+    )
+
+    $parentDir = Split-Path -Path $OutputPath -Parent
+    if (-not [string]::IsNullOrWhiteSpace($parentDir)) {
+        $null = New-Item -ItemType Directory -Path $parentDir -Force
+    }
+
+    $content = @"
+window.__AGENT_THE_SPIRE_API_BASES__ = {
+  workstation: "$ResolvedWorkstationBaseUrl",
+  web: "$ResolvedWebBaseUrl"
+};
+
+window.__AGENT_THE_SPIRE_WS_BASES__ = {
+  workstation: "$ResolvedWorkstationWsBaseUrl"
+};
+"@
+    Set-Content -LiteralPath $OutputPath -Value $content -Encoding UTF8
+}
+
 function Get-BuildServices {
     param(
-        [ValidateSet("full", "workstation", "frontend", "web")]
+        [ValidateSet("full", "hybrid", "workstation", "frontend", "web")]
         [string]$TargetName
     )
 
     switch ($TargetName) {
         "full" { return @("workstation", "web") }
+        "hybrid" { return @("workstation", "frontend") }
         "workstation" { return @("workstation") }
         "frontend" { return @("frontend") }
         "web" { return @("web") }
@@ -415,7 +455,7 @@ Assert-PathExists -Path $composeFile -Label "docker-compose.yml"
 $null = New-Item -ItemType Directory -Path $runtimeDir -Force
 Write-ComposeEnvFile -TargetName $Target -EnvPath $envFile -ResolvedPostgresImage $resolvedPostgresImage
 
-if ($Target -in @("full", "workstation", "web")) {
+if ($Target -in @("full", "hybrid", "workstation", "web")) {
     $serviceDir = Join-Path (Join-Path $effectiveReleaseRoot "services") "workstation"
     if ($Target -eq "web") {
         $serviceDir = Join-Path (Join-Path $effectiveReleaseRoot "services") "web"
@@ -423,9 +463,16 @@ if ($Target -in @("full", "workstation", "web")) {
     $sourceConfigPath = Get-SourceConfigPath -PreferredPath $ConfigPath -FallbackServiceDir $serviceDir
 }
 
-if ($Target -eq "full" -or $Target -eq "workstation") {
+if ($Target -in @("full", "hybrid", "workstation")) {
     $workstationConfig = New-RuntimeConfig -SourceConfigPath $sourceConfigPath -Mode "workstation" -DbUser $PostgresUser -DbPassword $PostgresPassword -DbName $PostgresDb
     Write-RuntimeConfigFile -Config $workstationConfig -OutputPath (Join-Path $runtimeDir "workstation.config.json")
+}
+
+if ($Target -eq "hybrid") {
+    Write-FrontendRuntimeConfig -OutputPath (Join-Path $runtimeDir "runtime-config.js") `
+        -ResolvedWorkstationBaseUrl ("http://127.0.0.1:{0}" -f $WorkstationPort) `
+        -ResolvedWorkstationWsBaseUrl ("ws://127.0.0.1:{0}" -f $WorkstationPort) `
+        -ResolvedWebBaseUrl $WebBaseUrl
 }
 
 if ($Target -eq "full" -or $Target -eq "web") {
@@ -497,6 +544,11 @@ switch ($Target) {
     "full" {
         Write-Host "  工作站地址   : http://127.0.0.1:$WorkstationPort"
         Write-Host "  Web 地址     : http://127.0.0.1:$WebPort"
+    }
+    "hybrid" {
+        Write-Host "  工作站地址   : http://127.0.0.1:$WorkstationPort"
+        Write-Host "  前端地址     : http://127.0.0.1:$FrontendPort"
+        Write-Host "  Web API 基址 : $WebBaseUrl"
     }
     "workstation" {
         Write-Host "  工作站地址   : http://127.0.0.1:$WorkstationPort"

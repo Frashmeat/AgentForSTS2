@@ -7,7 +7,7 @@
 直接执行脚本且不传任何参数时，会默认显示本帮助而不是立即开始打包。
 
 .PARAMETER Target
-打包目标。可选 full / workstation / frontend / web。
+打包目标。可选 full / hybrid / workstation / frontend / web。
 
 .PARAMETER OutputRoot
 输出目录。默认写入 tools/latest/artifacts。
@@ -33,9 +33,9 @@ pwsh -File .\tools\latest\package-release.ps1 -t web -NoZip
 [CmdletBinding()]
 param(
     # 基础参数
-    [Parameter(Position = 0, HelpMessage = "打包目标。可选 full / workstation / frontend / web。")]
+    [Parameter(Position = 0, HelpMessage = "打包目标。可选 full / hybrid / workstation / frontend / web。")]
     [Alias("t")]
-    [ValidateSet("full", "workstation", "frontend", "web")]
+    [ValidateSet("full", "hybrid", "workstation", "frontend", "web")]
     [string]$Target = "workstation",
 
     [Parameter(HelpMessage = "输出目录。默认写入 tools/latest/artifacts。")]
@@ -220,6 +220,12 @@ function Get-ServiceDefinitions {
                 @{ Name = "web"; IncludeBackend = $true; IncludeFrontend = $false; IncludeModTemplate = $false; TemplateDir = "web"; RemovePaths = @("backend/main_workstation.py", "backend/routers/workflow.py", "backend/routers/config_router.py", "backend/routers/batch_workflow.py", "backend/routers/log_analyzer.py", "backend/routers/mod_analyzer.py", "backend/routers/build_deploy.py", "backend/routers/approval_router.py") }
             )
         }
+        "hybrid" {
+            return @(
+                @{ Name = "workstation"; IncludeBackend = $true; IncludeFrontend = $true; IncludeModTemplate = $true; TemplateDir = "workstation"; RemovePaths = @("backend/main_web.py", "backend/routers/platform_admin.py", "backend/routers/platform_jobs.py") },
+                @{ Name = "frontend"; IncludeBackend = $false; IncludeFrontend = $true; IncludeModTemplate = $false; TemplateDir = "frontend"; RemovePaths = @() }
+            )
+        }
         "workstation" {
             return @(
                 @{ Name = "workstation"; IncludeBackend = $true; IncludeFrontend = $true; IncludeModTemplate = $true; TemplateDir = "workstation"; RemovePaths = @("backend/main_web.py", "backend/routers/platform_admin.py", "backend/routers/platform_jobs.py") }
@@ -312,7 +318,7 @@ function Copy-LauncherBundle {
         [string]$TargetName
     )
 
-    if ($TargetName -ne "workstation") {
+    if ($TargetName -notin @("workstation", "hybrid")) {
         return
     }
 

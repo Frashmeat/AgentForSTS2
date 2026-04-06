@@ -21,6 +21,9 @@ powershell -File .\tools\tools.ps1 split start -DryRun
 
 .EXAMPLE
 powershell -File .\tools\tools.ps1 latest package workstation
+
+.EXAMPLE
+powershell -File .\tools\tools.ps1 latest package hybrid
 #>
 param(
     [Parameter(Position = 0)]
@@ -115,6 +118,7 @@ function Show-Help {
     Write-Host "  powershell -File .\tools\tools.ps1 install"
     Write-Host "  powershell -File .\tools\tools.ps1 install mod"
     Write-Host "  powershell -File .\tools\tools.ps1 split start -DryRun"
+    Write-Host "  powershell -File .\tools\tools.ps1 latest package hybrid"
     Write-Host "  powershell -File .\tools\tools.ps1 latest package workstation"
     Write-Host ""
 }
@@ -376,6 +380,11 @@ function Get-MenuGroups {
                     (New-MenuProfile -Key "nozip" -Label "打包但不压缩" -Description "保留 release 目录，跳过 zip" -Args @("-NoZip"))
                     (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 package-release.ps1 参数说明" -Args @("-Help"))
                 ))
+                (New-MenuCommand -Key "latest-package-hybrid" -Label "打包 hybrid release" -Description "构建正式推荐的 frontend + workstation 用户侧 bundle" -ScriptPath (Join-Path $toolsRoot "latest\package-release.ps1") -InvocationName "latest package hybrid" -DefaultArgs @("hybrid") -Profiles @(
+                    (New-MenuProfile -Key "default" -Label "直接打包" -Description "按默认参数打包 hybrid")
+                    (New-MenuProfile -Key "nozip" -Label "打包但不压缩" -Description "保留 release 目录，跳过 zip" -Args @("-NoZip"))
+                    (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 package-release.ps1 参数说明" -Args @("-Help"))
+                ))
                 (New-MenuCommand -Key "latest-package-full" -Label "打包 full release" -Description "构建 full release bundle" -ScriptPath (Join-Path $toolsRoot "latest\package-release.ps1") -InvocationName "latest package full" -DefaultArgs @("full") -Profiles @(
                     (New-MenuProfile -Key "default" -Label "直接打包" -Description "按默认参数打包 full")
                     (New-MenuProfile -Key "nozip" -Label "打包但不压缩" -Description "保留 release 目录，跳过 zip" -Args @("-NoZip"))
@@ -393,6 +402,10 @@ function Get-MenuGroups {
                 ))
                 (New-MenuCommand -Key "latest-deploy-workstation" -Label "部署 workstation release" -Description "执行 workstation Docker 部署" -ScriptPath (Join-Path $toolsRoot "latest\deploy-docker.ps1") -InvocationName "latest deploy workstation" -DefaultArgs @("workstation") -Profiles @(
                     (New-MenuProfile -Key "default" -Label "直接部署" -Description "按默认参数部署 workstation")
+                    (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 deploy-docker.ps1 参数说明" -Args @("-Help"))
+                ))
+                (New-MenuCommand -Key "latest-deploy-hybrid" -Label "部署 hybrid release" -Description "部署正式推荐的 frontend + workstation 用户侧 bundle" -ScriptPath (Join-Path $toolsRoot "latest\deploy-docker.ps1") -InvocationName "latest deploy hybrid" -DefaultArgs @("hybrid") -Profiles @(
+                    (New-MenuProfile -Key "default" -Label "直接部署" -Description "按默认参数部署 hybrid")
                     (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 deploy-docker.ps1 参数说明" -Args @("-Help"))
                 ))
                 (New-MenuCommand -Key "latest-deploy-full" -Label "部署 full release" -Description "执行 full Docker 部署" -ScriptPath (Join-Path $toolsRoot "latest\deploy-docker.ps1") -InvocationName "latest deploy full" -DefaultArgs @("full") -Profiles @(

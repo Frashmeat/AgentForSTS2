@@ -47,16 +47,23 @@ def _write_fake_docker(bin_dir: Path) -> Path:
     return docker_cmd
 
 
-def _prepare_release_bundle(release_root: Path) -> tuple[Path, Path]:
-    (release_root / "services" / "workstation").mkdir(parents=True)
-    (release_root / "docker-compose.yml").write_text("services:\n  workstation:\n    image: fake\n", encoding="utf-8")
+def _prepare_release_bundle(release_root: Path, target: str) -> tuple[Path, Path]:
+    if target == "hybrid":
+        (release_root / "services" / "workstation").mkdir(parents=True)
+        (release_root / "services" / "frontend").mkdir(parents=True)
+        compose = "services:\n  workstation:\n    image: fake\n  frontend:\n    image: fake\n"
+    else:
+        (release_root / "services" / "workstation").mkdir(parents=True)
+        compose = "services:\n  workstation:\n    image: fake\n"
+
+    (release_root / "docker-compose.yml").write_text(compose, encoding="utf-8")
     config_path = release_root / "input-config.json"
     config_path.write_text(json.dumps({"migration": {}, "database": {}}), encoding="utf-8")
     return release_root, config_path
 
 
-def _run_deploy(tmp_path: Path, *extra_args: str) -> subprocess.CompletedProcess[str]:
-    release_root, config_path = _prepare_release_bundle(tmp_path / "release")
+def _run_deploy(tmp_path: Path, target: str = "workstation", *extra_args: str) -> subprocess.CompletedProcess[str]:
+    release_root, config_path = _prepare_release_bundle(tmp_path / "release", target)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     _write_fake_docker(bin_dir)
@@ -72,7 +79,7 @@ def _run_deploy(tmp_path: Path, *extra_args: str) -> subprocess.CompletedProcess
         "-NoProfile",
         "-File",
         str(SCRIPT_PATH),
-        "workstation",
+        target,
         "-ReleaseRoot",
         str(release_root),
         "-ConfigPath",
@@ -107,3 +114,15 @@ def test_deploy_docker_reuse_images_skips_build_when_local_image_exists(tmp_path
     assert result.returncode == 0, result.stderr
     assert "compose build" not in result.docker_log
     assert "compose up" in result.docker_log
+
+
+def test_deploy_docker_hybrid_builds_frontend_and_workstation_without_postgres(tmp_path: Path):
+    result = _run_deploy(tmp_path, "hybrid")
+
+    runtime_config = tmp_path / "release" / "runtime" / "runtime-config.js"
+
+    assert result.returncode == 0, result.stderr
+    assert "image inspect postgres:16-alpine" not in result.docker_log
+    assert "compose build" in result.docker_log
+    assert "compose up" in result.docker_log
+    assert runtime_config.exists()
