@@ -4,7 +4,7 @@ import type { SessionAction, SessionSnapshot, SessionState, SessionUser } from "
 
 interface SessionContextValue {
   state: SessionState;
-  refreshSession: () => Promise<void>;
+  refreshSession: () => Promise<SessionSnapshot | null>;
   markSignedIn: (user: SessionUser) => void;
   markSignedOut: () => void;
 }
@@ -63,13 +63,15 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(sessionReducer, undefined, createInitialSessionState);
 
-  async function refreshSession() {
+  async function refreshSession(): Promise<SessionSnapshot | null> {
     dispatch({ type: "loading" });
     try {
       const snapshot = await getAuthSession();
       dispatch({ type: "resolved", snapshot });
+      return snapshot;
     } catch {
       dispatch({ type: "unavailable" });
+      return null;
     }
   }
 

@@ -66,6 +66,21 @@ test("requestJson throws response text on non-ok response", async () => {
   );
 });
 
+test("requestJson unwraps json detail field on non-ok response", async () => {
+  Object.assign(globalThis, {
+    fetch: async () =>
+      createMockResponse({
+        ok: false,
+        text: "{\"detail\":\"authentication required\"}",
+      }),
+  });
+
+  await assert.rejects(
+    () => requestJson("/api/me/profile", { backend: "web" }),
+    /authentication required/,
+  );
+});
+
 test("requestJson routes to configured web backend when backend target is set", async () => {
   const calls: Array<{ input: unknown; init?: RequestInit }> = [];
   Object.assign(globalThis, {

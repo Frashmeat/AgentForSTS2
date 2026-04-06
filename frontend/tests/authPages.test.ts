@@ -26,10 +26,12 @@ test("auth pages bind to auth api flows", () => {
   const resetPage = readSource("../src/features/auth/ResetPasswordPage.tsx");
 
   assert.match(loginPage, /loginWithPassword/);
+  assert.match(loginPage, /refreshSession/);
   assert.match(registerPage, /registerWithPassword/);
   assert.match(verifyPage, /verifyEmailCode/);
   assert.match(verifyPage, /resendVerification/);
   assert.match(verifyPage, /password/);
   assert.match(forgotPage, /requestPasswordReset/);
   assert.match(resetPage, /resetPasswordWithCode/);
+  assert.match(resetPage, /refreshSession/);
 });

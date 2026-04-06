@@ -16,4 +16,5 @@ test("user center page composes profile quota and jobs overview", () => {
   assert.match(modelSource, /getMyProfile/);
   assert.match(modelSource, /getMyQuota/);
   assert.match(modelSource, /listMyJobs/);
+  assert.match(pageSource, /当前登录状态已失效/);
 });

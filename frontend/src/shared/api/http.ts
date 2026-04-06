@@ -29,6 +29,27 @@ function trimTrailingSlash(value: string): string {
   return value.replace(/\/+$/, "");
 }
 
+function extractResponseErrorMessage(rawText: string): string {
+  const trimmed = rawText.trim();
+  if (!trimmed) {
+    return "Request failed";
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as { detail?: unknown; message?: unknown };
+    if (typeof parsed.detail === "string" && parsed.detail.trim().length > 0) {
+      return parsed.detail;
+    }
+    if (typeof parsed.message === "string" && parsed.message.trim().length > 0) {
+      return parsed.message;
+    }
+  } catch {
+    // 保持原始文本回退。
+  }
+
+  return trimmed;
+}
+
 function readLocationUrl(): URL | null {
   const locationLike = (globalThis as typeof globalThis & {
     location?: Partial<Location> | URL;
@@ -196,7 +217,7 @@ export async function requestJson<T>(path: string, options: RequestJsonOptions =
   });
 
   if (!response.ok) {
-    throw new Error(await response.text());
+    throw new Error(extractResponseErrorMessage(await response.text()));
   }
 
   return response.json();

@@ -3,10 +3,18 @@ import { Link } from "react-router-dom";
 import { HistoryList } from "./historyList.tsx";
 import { loadUserCenterOverview, type UserCenterOverview } from "./model.ts";
 import { QuotaCard } from "./quotaCard.tsx";
+import { resolveErrorMessage } from "../../shared/error.ts";
 import { useSession } from "../../shared/session/hooks.ts";
 
+function toFriendlyUserCenterErrorMessage(message: string): string {
+  if (message.includes("authentication required")) {
+    return "当前登录状态已失效。若当前是 hybrid / 跨域部署，请检查 Web 后端 Cookie 的 SameSite、Secure 和 HTTPS 配置，然后重新登录。";
+  }
+  return message;
+}
+
 export function UserCenterPage() {
-  const { isAuthenticated, isLoading } = useSession();
+  const { isAuthenticated, isLoading, refreshSession } = useSession();
   const [overview, setOverview] = useState<UserCenterOverview | null>(null);
   const [error, setError] = useState("");
 
@@ -23,7 +31,11 @@ export function UserCenterPage() {
       })
       .catch(err => {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "加载用户中心失败");
+          const message = toFriendlyUserCenterErrorMessage(resolveErrorMessage(err) || "加载用户中心失败");
+          if (message.includes("当前登录状态已失效")) {
+            void refreshSession();
+          }
+          setError(message);
         }
       });
 
@@ -42,6 +54,7 @@ export function UserCenterPage() {
         <section className="mx-auto max-w-3xl rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
           <h1 className="text-2xl font-semibold text-slate-900">登录后查看用户中心</h1>
           <p className="mt-2 text-sm text-slate-500">平台任务、统一次数池和返还记录都绑定当前账号。</p>
+          {error ? <p className="mt-4 text-sm text-rose-600">{error}</p> : null}
           <Link
             to="/auth/login"
             className="mt-6 inline-flex rounded-xl bg-amber-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-amber-600"

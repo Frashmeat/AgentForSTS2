@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { resetPasswordWithCode } from "../../shared/api/auth.ts";
+import { resolveErrorMessage } from "../../shared/error.ts";
 import { useSession } from "../../shared/session/hooks.ts";
 import {
   createErrorAuthFormState,
@@ -8,10 +9,13 @@ import {
   createSubmittingAuthFormState,
 } from "./formModel.ts";
 
+const SESSION_PERSISTENCE_ERROR =
+  "密码已重置，但服务端会话未建立。若当前是 hybrid / 跨域部署，请检查 Web 后端 Cookie 的 SameSite、Secure 和 HTTPS 配置。";
+
 export function ResetPasswordPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { markSignedIn } = useSession();
+  const { refreshSession } = useSession();
   const [code, setCode] = useState(() => searchParams.get("code") ?? "");
   const [password, setPassword] = useState("");
   const [formState, setFormState] = useState(createIdleAuthFormState);
@@ -20,11 +24,14 @@ export function ResetPasswordPage() {
     event.preventDefault();
     setFormState(createSubmittingAuthFormState());
     try {
-      const response = await resetPasswordWithCode(code, password);
-      markSignedIn(response.user);
+      await resetPasswordWithCode(code, password);
+      const snapshot = await refreshSession();
+      if (!snapshot?.authenticated || snapshot.user === null) {
+        throw new Error(SESSION_PERSISTENCE_ERROR);
+      }
       navigate("/", { replace: true });
     } catch (error) {
-      setFormState(createErrorAuthFormState(error instanceof Error ? error.message : "重置密码失败"));
+      setFormState(createErrorAuthFormState(resolveErrorMessage(error) || "重置密码失败"));
     }
   }
 
