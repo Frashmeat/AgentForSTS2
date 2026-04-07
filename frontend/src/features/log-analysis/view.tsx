@@ -2,8 +2,14 @@ import { useRef, useState } from "react";
 import { Bug, Loader2, RotateCcw } from "lucide-react";
 
 import { StageStatus } from "../../components/StageStatus";
+import { AgentLog } from "../../components/AgentLog";
 import { LogAnalysisSocket } from "../../lib/log_analysis_ws";
 import { resolveErrorMessage, resolveWorkflowErrorMessage } from "../../shared/error.ts";
+import {
+  appendWorkflowLogEntry,
+  resolveNextWorkflowModel,
+  type WorkflowLogEntry,
+} from "../../shared/workflowLog.ts";
 import type { PlatformExecutionRequest } from "../platform-run/types.ts";
 
 type Stage = "input" | "analyzing" | "done" | "error";
@@ -17,6 +23,8 @@ export function LogAnalysisFeatureView({
   const [context, setContext] = useState("");
   const [logLines, setLogLines] = useState<number | null>(null);
   const [chunks, setChunks] = useState<string[]>([]);
+  const [entries, setEntries] = useState<WorkflowLogEntry[]>([]);
+  const [currentModel, setCurrentModel] = useState<string | null>(null);
   const [currentStage, setCurrentStage] = useState<string | null>(null);
   const [stageHistory, setStageHistory] = useState<string[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -28,6 +36,8 @@ export function LogAnalysisFeatureView({
     setStage("input");
     setLogLines(null);
     setChunks([]);
+    setEntries([]);
+    setCurrentModel(null);
     setCurrentStage(null);
     setStageHistory([]);
     setErrorMsg(null);
@@ -37,6 +47,8 @@ export function LogAnalysisFeatureView({
     setStage("analyzing");
     setLogLines(null);
     setChunks([]);
+    setEntries([]);
+    setCurrentModel(null);
     setCurrentStage(null);
     setStageHistory([]);
     setErrorMsg(null);
@@ -54,6 +66,14 @@ export function LogAnalysisFeatureView({
     });
     ws.on("stream", (message) => {
       setChunks((previous) => [...previous, message.chunk]);
+      const entry: WorkflowLogEntry = {
+        text: message.chunk,
+        source: message.source,
+        channel: message.channel,
+        model: message.model,
+      };
+      setEntries((previous) => appendWorkflowLogEntry(previous, entry));
+      setCurrentModel((previous) => resolveNextWorkflowModel(previous, entry));
     });
     ws.on("done", () => {
       setStage("done");
@@ -157,10 +177,7 @@ export function LogAnalysisFeatureView({
             <pre className="text-xs text-red-600 font-mono whitespace-pre-wrap">{errorMsg}</pre>
           ) : (
             <div className="prose prose-sm prose-slate max-w-none">
-              <pre className="text-sm text-slate-700 whitespace-pre-wrap font-sans leading-relaxed">
-                {analysisText}
-                {stage === "analyzing" && <span className="inline-block w-1.5 h-4 bg-violet-400 animate-pulse ml-0.5 align-text-bottom" />}
-              </pre>
+              <AgentLog lines={chunks} entries={entries} currentModel={currentModel} />
             </div>
           )}
         </div>

@@ -45,3 +45,67 @@ def test_build_deploy_ws_returns_error_when_sts2_path_is_configured_but_missing(
         "message": expected_message,
         "detail": expected_message,
     }
+
+
+def test_build_deploy_ws_stream_includes_model_metadata(monkeypatch, tmp_path):
+    async def fake_build_and_fix(project_root, stream_callback=None):
+        if stream_callback is not None:
+            await stream_callback("build ok")
+        return True, ""
+
+    game_root = tmp_path / "Game"
+    (game_root / "Mods").mkdir(parents=True)
+
+    monkeypatch.setattr(build_deploy_router, "build_and_fix", fake_build_and_fix)
+    monkeypatch.setattr(
+        build_deploy_router,
+        "get_config",
+        lambda: {
+            "sts2_path": str(game_root),
+            "llm": {
+                "agent_backend": "codex",
+                "model": "gpt-5.4",
+            },
+        },
+    )
+
+    app = FastAPI()
+    app.include_router(build_deploy_router.router, prefix="/api")
+    project_root = tmp_path / "MyMod"
+    project_root.mkdir()
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/api/ws/build-deploy") as ws:
+            ws.send_text(json.dumps({"project_root": str(project_root)}))
+            payloads = []
+            while True:
+                payload = ws.receive_json()
+                payloads.append(payload)
+                if payload.get("event") == "done":
+                    break
+
+    first_stream, second_stream, third_stream, *rest = payloads
+    done_payload = rest[-1]
+
+    assert first_stream == {
+        "event": "stream",
+        "chunk": build_deploy_router._TEXT_LOADER.load("runtime_workflow.build_agent_build_start").strip() + "\n",
+        "source": "build",
+        "channel": "raw",
+        "model": "gpt-5.4",
+    }
+    assert second_stream == {
+        "event": "stream",
+        "chunk": "build ok",
+        "source": "build",
+        "channel": "raw",
+        "model": "gpt-5.4",
+    }
+    assert third_stream == {
+        "event": "stream",
+        "chunk": "\n" + build_deploy_router._TEXT_LOADER.load("runtime_workflow.build_build_succeeded").strip() + "\n",
+        "source": "build",
+        "channel": "raw",
+        "model": "gpt-5.4",
+    }
+    assert done_payload["event"] == "done"

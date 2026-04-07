@@ -7,6 +7,11 @@ import { ProjectRootField } from "../../components/ProjectRootField";
 import { StageStatus } from "../../components/StageStatus";
 import { useDefaultProjectRoot } from "../../shared/useDefaultProjectRoot.ts";
 import { useProjectCreation } from "../../shared/useProjectCreation.ts";
+import {
+  appendWorkflowLogEntry,
+  resolveNextWorkflowModel,
+  type WorkflowLogEntry,
+} from "../../shared/workflowLog.ts";
 import type { PlatformExecutionRequest } from "../platform-run/types.ts";
 import {
   createModEditorAnalysisController,
@@ -41,6 +46,8 @@ export function ModEditorFeatureView({
   const [analyzeStage, setAnalyzeStage] = useState<AnalyzeStage>("idle");
   const [scanFiles, setScanFiles] = useState<number | null>(null);
   const [analysisChunks, setAnalysisChunks] = useState<string[]>([]);
+  const [analysisEntries, setAnalysisEntries] = useState<WorkflowLogEntry[]>([]);
+  const [analysisCurrentModel, setAnalysisCurrentModel] = useState<string | null>(null);
   const [analysisCurrentStage, setAnalysisCurrentStage] = useState<string | null>(null);
   const [analysisStageHistory, setAnalysisStageHistory] = useState<string[]>([]);
   const [analysisErrorMessage, setAnalysisErrorMessage] = useState<string | null>(null);
@@ -49,6 +56,8 @@ export function ModEditorFeatureView({
   const [modRequest, setModRequest] = useState("");
   const [modifyStage, setModifyStage] = useState<ModifyStage>("idle");
   const [agentLog, setAgentLog] = useState<string[]>([]);
+  const [modifyEntries, setModifyEntries] = useState<WorkflowLogEntry[]>([]);
+  const [modifyCurrentModel, setModifyCurrentModel] = useState<string | null>(null);
   const [modifyCurrentStage, setModifyCurrentStage] = useState<string | null>(null);
   const [modifyStageHistory, setModifyStageHistory] = useState<string[]>([]);
   const [modifyErrorMessage, setModifyErrorMessage] = useState<string | null>(null);
@@ -66,6 +75,8 @@ export function ModEditorFeatureView({
       setAnalyzeStage("scanning");
       setScanFiles(null);
       setAnalysisChunks([]);
+      setAnalysisEntries([]);
+      setAnalysisCurrentModel(null);
       setAnalysisCurrentStage(null);
       setAnalysisStageHistory([]);
       setAnalysisErrorMessage(null);
@@ -80,8 +91,11 @@ export function ModEditorFeatureView({
       setScanFiles(files);
       setAnalyzeStage("streaming");
     },
-    appendAnalysisChunk(chunk) {
+    appendAnalysisChunk(chunk, source, channel, model) {
       setAnalysisChunks((previous) => [...previous, chunk]);
+      const entry: WorkflowLogEntry = { text: chunk, source, channel, model };
+      setAnalysisEntries((previous) => appendWorkflowLogEntry(previous, entry));
+      setAnalysisCurrentModel((previous) => resolveNextWorkflowModel(previous, entry));
     },
     completeAnalysis() {
       setAnalyzeStage("done");
@@ -94,6 +108,8 @@ export function ModEditorFeatureView({
       setAnalyzeStage("idle");
       setScanFiles(null);
       setAnalysisChunks([]);
+      setAnalysisEntries([]);
+      setAnalysisCurrentModel(null);
       setAnalysisCurrentStage(null);
       setAnalysisStageHistory([]);
       setAnalysisErrorMessage(null);
@@ -111,6 +127,8 @@ export function ModEditorFeatureView({
     startModify() {
       setModifyStage("running");
       setAgentLog([]);
+      setModifyEntries([]);
+      setModifyCurrentModel(null);
       setModifyCurrentStage(null);
       setModifyStageHistory([]);
       setModifyErrorMessage(null);
@@ -121,11 +139,20 @@ export function ModEditorFeatureView({
         previous[previous.length - 1] === message ? previous : [...previous, message]
       );
     },
-    appendModifyLog(line) {
+    appendModifyLog(line, source, channel, model) {
       setAgentLog((previous) => [...previous, line]);
+      const entry: WorkflowLogEntry = { text: line, source, channel, model };
+      setModifyEntries((previous) => appendWorkflowLogEntry(previous, entry));
+      setModifyCurrentModel((previous) => resolveNextWorkflowModel(previous, entry));
     },
     completeModify(success) {
       setAgentLog((previous) => [...previous, success ? "✓ 修改完成！" : "✗ 修改失败"]);
+      const entry: WorkflowLogEntry = {
+        text: success ? "✓ 修改完成！" : "✗ 修改失败",
+        source: "workflow",
+        channel: "system",
+      };
+      setModifyEntries((previous) => appendWorkflowLogEntry(previous, entry));
       setModifyStage("done");
     },
     failModify(message) {
@@ -135,6 +162,8 @@ export function ModEditorFeatureView({
     resetModify() {
       setModifyStage("idle");
       setAgentLog([]);
+      setModifyEntries([]);
+      setModifyCurrentModel(null);
       setModifyCurrentStage(null);
       setModifyStageHistory([]);
       setModifyErrorMessage(null);
@@ -208,10 +237,11 @@ export function ModEditorFeatureView({
             {analysisErrorMessage ? (
               <pre className="text-xs text-red-600 font-mono whitespace-pre-wrap">{analysisErrorMessage}</pre>
             ) : (
-              <pre className="text-sm text-slate-700 whitespace-pre-wrap font-sans leading-relaxed max-h-80 overflow-y-auto">
-                {analysisText}
-                {isAnalyzing && <span className="inline-block w-1.5 h-4 bg-violet-400 animate-pulse ml-0.5 align-text-bottom" />}
-              </pre>
+              <AgentLog
+                lines={analysisChunks}
+                entries={analysisEntries}
+                currentModel={analysisCurrentModel}
+              />
             )}
           </div>
         )}
@@ -296,7 +326,9 @@ export function ModEditorFeatureView({
         {(agentLog.length > 0 || modifyErrorMessage) && (
           <div className="space-y-2">
             {modifyErrorMessage && <pre className="text-xs text-red-600 font-mono whitespace-pre-wrap">{modifyErrorMessage}</pre>}
-            {agentLog.length > 0 && <AgentLog lines={agentLog} />}
+            {agentLog.length > 0 && (
+              <AgentLog lines={agentLog} entries={modifyEntries} currentModel={modifyCurrentModel} />
+            )}
           </div>
         )}
 

@@ -222,6 +222,9 @@ def test_ws_analyze_mod_emits_minimal_event_sequence(monkeypatch):
         "done",
     ]
     assert [message["chunk"] for message in ws.messages if message["event"] == "stream"] == ["chunk-1", "chunk-2"]
+    assert [message["model"] for message in ws.messages if message["event"] == "stream"] == ["claude-sonnet-4-6", "claude-sonnet-4-6"]
+    assert [message["source"] for message in ws.messages if message["event"] == "stream"] == ["analysis", "analysis"]
+    assert [message["channel"] for message in ws.messages if message["event"] == "stream"] == ["raw", "raw"]
     assert ws.messages[1] == {"event": "scan_info", "files": 1}
     assert ws.messages[-1] == {"event": "done", "full": "full-result"}
 
@@ -244,7 +247,12 @@ def test_ws_analyze_mod_emits_error_when_scan_finds_no_sources(monkeypatch):
     assert ws.accepted is True
     assert _event_names(ws.messages) == ["stage_update", "error"]
     assert ws.messages[0]["stage"] == "reading_input"
-    assert ws.messages[1] == {"event": "error", "message": f"未在 {project_root} 找到任何 .cs 源码文件"}
+    assert ws.messages[1] == {
+        "event": "error",
+        "code": "source_files_missing",
+        "message": f"未在 {project_root} 找到任何 .cs 源码文件",
+        "detail": f"未在 {project_root} 找到任何 .cs 源码文件",
+    }
 
 
 def test_ws_analyze_mod_emits_reading_stage_before_missing_path_error(monkeypatch):
@@ -312,7 +320,12 @@ def test_ws_analyze_mod_falls_back_to_error_when_stream_analysis_raises(monkeypa
         "ai_running",
     ]
     assert ws.messages[1] == {"event": "scan_info", "files": 1}
-    assert ws.messages[-1] == {"event": "error", "message": "boom-mod"}
+    assert ws.messages[-1] == {
+        "event": "error",
+        "code": "mod_analysis_failed",
+        "message": "boom-mod",
+        "detail": "boom-mod",
+    }
 
 
 def test_ws_analyze_mod_preserves_stream_events_before_error(monkeypatch):
@@ -359,4 +372,12 @@ def test_ws_analyze_mod_preserves_stream_events_before_error(monkeypatch):
         "ai_streaming",
     ]
     assert [message["chunk"] for message in ws.messages if message["event"] == "stream"] == ["partial-mod"]
-    assert ws.messages[-1] == {"event": "error", "message": "boom-after-mod-stream"}
+    assert [message["model"] for message in ws.messages if message["event"] == "stream"] == ["claude-sonnet-4-6"]
+    assert [message["source"] for message in ws.messages if message["event"] == "stream"] == ["analysis"]
+    assert [message["channel"] for message in ws.messages if message["event"] == "stream"] == ["raw"]
+    assert ws.messages[-1] == {
+        "event": "error",
+        "code": "mod_analysis_failed",
+        "message": "boom-after-mod-stream",
+        "detail": "boom-after-mod-stream",
+    }

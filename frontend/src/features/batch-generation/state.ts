@@ -1,4 +1,10 @@
 import type { ApprovalRequest } from "../../shared/api/index.ts";
+import type { WorkflowLogChannel } from "../../shared/types/workflow.ts";
+import {
+  appendWorkflowLogEntry,
+  resolveNextWorkflowModel,
+  type WorkflowLogEntry,
+} from "../../shared/workflowLog.ts";
 
 export type BatchItemStatus =
   | "pending"
@@ -16,6 +22,8 @@ export interface BatchItemState {
   progress: string[];
   images: string[];
   agentLog: string[];
+  agentLogEntries: WorkflowLogEntry[];
+  currentAgentModel: string | null;
   error: string | null;
   errorTrace: string | null;
   currentPrompt: string;
@@ -50,7 +58,7 @@ export type BatchRuntimeAction =
   | { type: "item_started"; itemId: string }
   | { type: "item_progress_received"; itemId: string; message: string }
   | { type: "item_image_ready"; itemId: string; image: string; index: number; prompt: string }
-  | { type: "item_agent_stream"; itemId: string; chunk: string }
+  | { type: "item_agent_stream"; itemId: string; chunk: string; source?: string; channel?: WorkflowLogChannel; model?: string }
   | { type: "item_approval_pending"; itemId: string; summary: string; requests: ApprovalRequest[] }
   | { type: "item_done"; itemId: string }
   | { type: "item_error"; itemId: string; message: string; traceback: string | null }
@@ -71,6 +79,8 @@ export function createDefaultBatchItemState(): BatchItemState {
     progress: [],
     images: [],
     agentLog: [],
+    agentLogEntries: [],
+    currentAgentModel: null,
     error: null,
     errorTrace: null,
     currentPrompt: "",
@@ -127,14 +137,16 @@ export function appendBatchItemProgress(
 export function appendBatchItemAgentLog(
   record: BatchItemStateRecord,
   id: string,
-  chunk: string,
+  entry: WorkflowLogEntry,
 ): BatchItemStateRecord {
   const current = record[id] ?? createDefaultBatchItemState();
   return {
     ...record,
     [id]: {
       ...current,
-      agentLog: [...current.agentLog, chunk],
+      agentLog: [...current.agentLog, entry.text],
+      agentLogEntries: appendWorkflowLogEntry(current.agentLogEntries, entry),
+      currentAgentModel: resolveNextWorkflowModel(current.currentAgentModel, entry),
     },
   };
 }
@@ -268,7 +280,12 @@ export function batchWorkflowReducer(state: BatchRuntimeState, action: BatchRunt
     case "item_agent_stream":
       return {
         ...state,
-        itemStates: appendBatchItemAgentLog(state.itemStates, action.itemId, action.chunk),
+        itemStates: appendBatchItemAgentLog(state.itemStates, action.itemId, {
+          text: action.chunk,
+          source: action.source,
+          channel: action.channel,
+          model: action.model,
+        }),
       };
     case "item_approval_pending":
       return {

@@ -75,7 +75,12 @@ export function createBuildDeployController(
       const socket = createSocket();
       runtime.setSocket(socket);
       socket.on("stream", (message) => {
-        runtime.setState((previous) => appendBuildDeployLog(previous, message.chunk));
+        runtime.setState((previous) => appendBuildDeployLog(previous, {
+          text: message.chunk,
+          source: message.source,
+          channel: message.channel,
+          model: message.model,
+        }));
       });
       socket.on("done", (message) => {
         runtime.setState((previous) => finalizeDeployResult(previous, message.deployed_to ?? null));

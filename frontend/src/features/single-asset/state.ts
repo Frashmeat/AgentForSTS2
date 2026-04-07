@@ -1,4 +1,10 @@
 import type { ApprovalRequest } from "../../shared/api/index.ts";
+import type { WorkflowLogChannel } from "../../shared/types/workflow.ts";
+import {
+  appendWorkflowLogEntry,
+  resolveNextWorkflowModel,
+  type WorkflowLogEntry,
+} from "../../shared/workflowLog.ts";
 import type { Stage } from "./model";
 
 export interface SingleAssetWorkflowState {
@@ -12,6 +18,8 @@ export interface SingleAssetWorkflowState {
   showMorePrompt: boolean;
   genLog: string[];
   agentLog: string[];
+  agentLogEntries: WorkflowLogEntry[];
+  currentAgentModel: string | null;
   flowStageCurrent: string | null;
   flowStageHistory: string[];
   agentStageCurrent: string | null;
@@ -32,7 +40,7 @@ export type SingleAssetWorkflowAction =
   | { type: "workflow_reset" }
   | { type: "stage_changed"; stage: Stage }
   | { type: "gen_log_appended"; message: string }
-  | { type: "agent_log_appended"; message: string }
+  | { type: "agent_log_appended"; message: string; source?: string; channel?: WorkflowLogChannel; model?: string }
   | { type: "flow_stage_pushed"; message: string }
   | { type: "agent_stage_pushed"; message: string }
   | { type: "prompt_confirmed" }
@@ -57,6 +65,8 @@ export function createInitialSingleAssetWorkflowState(): SingleAssetWorkflowStat
     showMorePrompt: false,
     genLog: [],
     agentLog: [],
+    agentLogEntries: [],
+    currentAgentModel: null,
     flowStageCurrent: null,
     flowStageHistory: [],
     agentStageCurrent: null,
@@ -110,12 +120,18 @@ export function singleAssetWorkflowReducer(
       };
     }
     case "approval_pending_received":
+      const approvalEntry: WorkflowLogEntry = {
+        text: "已生成待审批动作，等待用户审批后继续执行。",
+        source: "workflow",
+        channel: "system",
+      };
       return {
         ...state,
         stage: "approval_pending",
         approvalSummary: action.summary,
         approvalRequests: action.requests,
-        agentLog: [...state.agentLog, "已生成待审批动作，等待用户审批后继续执行。"],
+        agentLog: [...state.agentLog, approvalEntry.text],
+        agentLogEntries: appendWorkflowLogEntry(state.agentLogEntries, approvalEntry),
       };
     case "workflow_failed":
       return {
@@ -137,9 +153,17 @@ export function singleAssetWorkflowReducer(
         genLog: [...state.genLog, action.message],
       };
     case "agent_log_appended":
+      const entry: WorkflowLogEntry = {
+        text: action.message,
+        source: action.source,
+        channel: action.channel,
+        model: action.model,
+      };
       return {
         ...state,
         agentLog: [...state.agentLog, action.message],
+        agentLogEntries: appendWorkflowLogEntry(state.agentLogEntries, entry),
+        currentAgentModel: resolveNextWorkflowModel(state.currentAgentModel, entry),
       };
     case "flow_stage_pushed":
       return {

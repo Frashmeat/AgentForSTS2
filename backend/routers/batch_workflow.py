@@ -43,6 +43,7 @@ from image.generator import generate_images
 from image.postprocess import process_image
 from image.prompt_adapter import adapt_prompt, ImageProvider
 from llm.text_runner import complete_text
+from llm.stream_metadata import build_stream_chunk_payload, resolve_agent_display_model
 from llm.stage_events import build_stage_event
 
 router = APIRouter()
@@ -232,6 +233,7 @@ async def _handle_legacy_ws_batch(ws: WebSocket, *, initial_params: dict | None 
 
         project_root = Path(params["project_root"])
         cfg_loaded = get_config()
+        agent_display_model = resolve_agent_display_model(cfg_loaded.get("llm", {}))
         img_provider = _img_provider_to_adapter(cfg_loaded["image_gen"]["provider"])
 
         if action == "start_with_plan":
@@ -441,7 +443,15 @@ async def _handle_legacy_ws_batch(ws: WebSocket, *, initial_params: dict | None 
                     await send("item_progress", item_id=item.id, message=_text("batch_agent_running_progress").strip())
 
                 async def _stream(chunk: str):
-                    await send("item_agent_stream", item_id=first_id, chunk=chunk)
+                    await send(
+                        "item_agent_stream",
+                        item_id=first_id,
+                        **build_stream_chunk_payload(
+                            chunk,
+                            source="agent",
+                            model=agent_display_model,
+                        ),
+                    )
 
                 approval_pending = False
                 try:

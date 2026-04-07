@@ -58,17 +58,28 @@ test("ModAnalysisSocket dispatches mod analysis events", () => {
   socket.on("scan_info", (data) => {
     received.push(data as Record<string, unknown>);
   });
+  socket.on("stream", (data) => {
+    received.push(data as Record<string, unknown>);
+  });
   socket.on("done", (data) => {
     received.push(data as Record<string, unknown>);
   });
 
   MockWebSocket.instances[0].emitMessage({ event: "stage_update", scope: "text", stage: "reading_input", message: "正在扫描项目" });
   MockWebSocket.instances[0].emitMessage({ event: "scan_info", files: 18 });
+  MockWebSocket.instances[0].emitMessage({
+    event: "stream",
+    chunk: "分析中",
+    source: "analysis",
+    channel: "raw",
+    model: "claude-sonnet-4-6",
+  });
   MockWebSocket.instances[0].emitMessage({ event: "done", full: "分析完成" });
 
   assert.deepEqual(received, [
     { event: "stage_update", scope: "text", stage: "reading_input", message: "正在扫描项目" },
     { event: "scan_info", stage: "scan_info", files: 18 },
+    { event: "stream", stage: "stream", chunk: "分析中", source: "analysis", channel: "raw", model: "claude-sonnet-4-6" },
     { event: "done", stage: "done", full: "分析完成" },
   ]);
 });

@@ -30,6 +30,7 @@ from image.generator import generate_images
 from image.postprocess import PROFILES, process_image
 from image.prompt_adapter import adapt_prompt, ImageProvider
 from llm.text_runner import complete_text
+from llm.stream_metadata import build_stream_chunk_payload, resolve_agent_display_model
 from llm.stage_events import build_stage_event
 
 logger = logging.getLogger(__name__)
@@ -232,6 +233,7 @@ async def _handle_legacy_ws_create(ws: WebSocket, *, initial_params: dict | None
             return
 
         cfg = get_config()
+        agent_display_model = resolve_agent_display_model(cfg.get("llm", {}))
         logger.info("[ws/create] workflow mode=%s", _single_workflow_mode(cfg))
         # 前端可覆盖 batch_size，否则用 config 默认值
         if "batch_size" in params:
@@ -251,7 +253,11 @@ async def _handle_legacy_ws_create(ws: WebSocket, *, initial_params: dict | None
             except FileNotFoundError:
                 # 模板不存在时回退到 Claude clone 方式
                 async def _stream_init(chunk: str):
-                    await _send(ws, "agent_stream", {"chunk": chunk})
+                    await _send(ws, "agent_stream", build_stream_chunk_payload(
+                        chunk,
+                        source="project_init",
+                        model=agent_display_model,
+                    ))
                 project_root = await create_mod_project(project_name, parent_dir, _stream_init)
             await _send(ws, "progress", {"message": _text("workflow_project_init_done", project_root=project_root).strip()})
 
@@ -338,7 +344,11 @@ async def _handle_legacy_ws_create(ws: WebSocket, *, initial_params: dict | None
             await _send(ws, "progress", {"message": _text("workflow_agent_running_progress").strip()})
 
         async def stream_to_ws(chunk: str):
-            await _send(ws, "agent_stream", {"chunk": chunk})
+            await _send(ws, "agent_stream", build_stream_chunk_payload(
+                chunk,
+                source="agent",
+                model=agent_display_model,
+            ))
 
         output = await create_asset(
             description, asset_type, asset_name,
@@ -378,6 +388,9 @@ async def _ws_run_custom_code(ws: WebSocket, params: dict, project_root: Path):
     description: str = params["description"]
     implementation_notes: str = params.get("implementation_notes", "")
 
+    cfg = get_config()
+    agent_display_model = resolve_agent_display_model(cfg.get("llm", {}))
+
     # 1.5 建立项目（如果不存在），从本地模板复制
     if not list(project_root.glob("*.csproj")):
         project_name = project_root.name
@@ -390,11 +403,14 @@ async def _ws_run_custom_code(ws: WebSocket, params: dict, project_root: Path):
             )
         except FileNotFoundError:
             async def _stream_init(chunk: str):
-                await _send(ws, "agent_stream", {"chunk": chunk})
+                await _send(ws, "agent_stream", build_stream_chunk_payload(
+                    chunk,
+                    source="project_init",
+                    model=agent_display_model,
+                ))
             project_root = await create_mod_project(project_name, parent_dir, _stream_init)
         await _send(ws, "progress", {"message": _text("workflow_project_init_done", project_root=project_root).strip()})
 
-    cfg = get_config()
     should_continue, approval_output = await _maybe_await_approval(ws, description, cfg["llm"], project_root)
     if approval_output is not None:
         await _send(ws, "done", {
@@ -410,7 +426,11 @@ async def _ws_run_custom_code(ws: WebSocket, params: dict, project_root: Path):
         await _send(ws, "progress", {"message": _text("workflow_custom_code_agent_running_progress").strip()})
 
     async def stream_to_ws(chunk: str):
-        await _send(ws, "agent_stream", {"chunk": chunk})
+        await _send(ws, "agent_stream", build_stream_chunk_payload(
+            chunk,
+            source="agent",
+            model=agent_display_model,
+        ))
 
     output = await create_custom_code(
         description=description,
@@ -434,6 +454,8 @@ async def _ws_run_with_provided_image(ws: WebSocket, params: dict, project_root:
     asset_type: AssetType = params["asset_type"]
     asset_name: str = params["asset_name"]
     description: str = params["description"]
+    cfg = get_config()
+    agent_display_model = resolve_agent_display_model(cfg.get("llm", {}))
 
     # 优先用 base64（浏览器上传），fallback 到本地路径
     if params.get("provided_image_b64"):
@@ -462,7 +484,11 @@ async def _ws_run_with_provided_image(ws: WebSocket, params: dict, project_root:
             )
         except FileNotFoundError:
             async def _stream_init(chunk: str):
-                await _send(ws, "agent_stream", {"chunk": chunk})
+                await _send(ws, "agent_stream", build_stream_chunk_payload(
+                    chunk,
+                    source="project_init",
+                    model=agent_display_model,
+                ))
             project_root = await create_mod_project(project_name, parent_dir, _stream_init)
         await _send(ws, "progress", {"message": _text("workflow_project_init_done", project_root=project_root).strip()})
 
@@ -476,7 +502,6 @@ async def _ws_run_with_provided_image(ws: WebSocket, params: dict, project_root:
     image_paths = await _run_postprocess(img, asset_type, asset_name, project_root)
     await _send(ws, "progress", {"message": _text("workflow_image_paths_written", image_paths=[str(p) for p in image_paths]).strip()})
 
-    cfg = get_config()
     should_continue, approval_output = await _maybe_await_approval(ws, description, cfg["llm"], project_root)
     if approval_output is not None:
         await _send(ws, "done", {
@@ -492,7 +517,11 @@ async def _ws_run_with_provided_image(ws: WebSocket, params: dict, project_root:
         await _send(ws, "progress", {"message": _text("workflow_agent_running_progress").strip()})
 
     async def stream_to_ws(chunk: str):
-        await _send(ws, "agent_stream", {"chunk": chunk})
+        await _send(ws, "agent_stream", build_stream_chunk_payload(
+            chunk,
+            source="agent",
+            model=agent_display_model,
+        ))
 
     output = await create_asset(
         description, asset_type, asset_name,

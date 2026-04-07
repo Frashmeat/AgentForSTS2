@@ -483,6 +483,8 @@ export default function App() {
             showMorePrompt={workflowState.showMorePrompt}
             genLog={workflowState.genLog}
             agentLog={workflowState.agentLog}
+            agentLogEntries={workflowState.agentLogEntries}
+            currentAgentModel={workflowState.currentAgentModel}
             flowStageCurrent={workflowState.flowStageCurrent}
             flowStageHistory={workflowState.flowStageHistory}
             agentStageCurrent={workflowState.agentStageCurrent}

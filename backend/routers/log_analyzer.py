@@ -15,6 +15,7 @@ from app.shared.infra.ws_errors import send_ws_error
 from app.shared.prompting import PromptLoader
 from config import get_config
 from llm.stream import stream_analysis
+from llm.stream_metadata import build_stream_chunk_payload, resolve_text_display_model
 from llm.stage_events import build_stage_event
 
 router = APIRouter()
@@ -137,6 +138,7 @@ async def ws_analyze_log(ws: WebSocket):
 
         cfg = get_config()
         llm_cfg = cfg["llm"]
+        display_model = resolve_text_display_model(llm_cfg)
         streamed = False
 
         async def send_chunk(chunk: str):
@@ -144,7 +146,14 @@ async def ws_analyze_log(ws: WebSocket):
             if not streamed:
                 streamed = True
                 await _send_stage(ws, "text", "ai_streaming", _PROMPT_LOADER.load("analyzer.log_streaming_stage").strip())
-            await ws.send_text(json.dumps({"event": "stream", "chunk": chunk}))
+            await ws.send_text(json.dumps({
+                "event": "stream",
+                **build_stream_chunk_payload(
+                    chunk,
+                    source="analysis",
+                    model=display_model,
+                ),
+            }))
 
         await _send_stage(ws, "text", "ai_running", _PROMPT_LOADER.load("analyzer.log_running_stage").strip())
         full_text = await stream_analysis(_get_system_prompt(), prompt, llm_cfg, send_chunk)

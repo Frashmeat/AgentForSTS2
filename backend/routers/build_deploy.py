@@ -18,6 +18,7 @@ from app.modules.codegen.api import build_and_fix
 from app.shared.infra.ws_errors import send_ws_error
 from app.shared.prompting import PromptLoader
 from config import get_config
+from llm.stream_metadata import build_stream_chunk_payload, resolve_agent_display_model
 
 router = APIRouter()
 _TEXT_LOADER = PromptLoader()
@@ -79,6 +80,8 @@ async def ws_build_deploy(ws: WebSocket):
             return
 
         cfg = get_config()
+        llm_cfg = cfg.get("llm", {})
+        display_model = resolve_agent_display_model(llm_cfg)
         sts2_path_str = cfg.get("sts2_path", "")
         sts2_mods = Path(sts2_path_str) / "Mods" if sts2_path_str else None
         if sts2_mods is not None and not sts2_mods.exists():
@@ -87,7 +90,14 @@ async def ws_build_deploy(ws: WebSocket):
             return
 
         async def send_chunk(chunk: str):
-            await ws.send_text(json.dumps({"event": "stream", "chunk": chunk}))
+            await ws.send_text(json.dumps({
+                "event": "stream",
+                **build_stream_chunk_payload(
+                    chunk,
+                    source="build",
+                    model=display_model,
+                ),
+            }))
 
         # ── Step 1: Code Agent 构建（dotnet publish + Godot .pck export）──
         await send_chunk(f"{_TEXT_LOADER.load('runtime_workflow.build_agent_build_start').strip()}\n")

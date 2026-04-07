@@ -59,11 +59,17 @@ test("BuildDeploySocket dispatches build-deploy events", () => {
     received.push(data as Record<string, unknown>);
   });
 
-  MockWebSocket.instances[0].emitMessage({ event: "stream", chunk: "building..." });
+  MockWebSocket.instances[0].emitMessage({
+    event: "stream",
+    chunk: "building...",
+    source: "build",
+    channel: "raw",
+    model: "gpt-5.4",
+  });
   MockWebSocket.instances[0].emitMessage({ event: "done", success: true, deployed_to: "E:/Mods/MyMod", files: ["MyMod.dll"] });
 
   assert.deepEqual(received, [
-    { event: "stream", stage: "stream", chunk: "building..." },
+    { event: "stream", stage: "stream", chunk: "building...", source: "build", channel: "raw", model: "gpt-5.4" },
     { event: "done", stage: "done", success: true, deployed_to: "E:/Mods/MyMod", files: ["MyMod.dll"] },
   ]);
 });

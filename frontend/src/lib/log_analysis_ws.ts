@@ -1,10 +1,10 @@
-import type { WorkflowScope } from "../shared/types/workflow.ts";
+import type { WorkflowLogChannel, WorkflowScope } from "../shared/types/workflow.ts";
 import { WorkflowSocketFacade } from "../shared/ws/facade.ts";
 
 export type LogAnalysisEvent =
   | { event: "stage_update"; stage: string; scope: WorkflowScope; message: string }
   | { event: "log_info"; stage: "log_info"; lines: number }
-  | { event: "stream"; stage: "stream"; chunk: string }
+  | { event: "stream"; stage: "stream"; chunk: string; source?: string; channel?: WorkflowLogChannel; model?: string }
   | { event: "done"; stage: "done"; full: string }
   | { event: "error"; stage: "error"; message: string; code?: string; detail?: string; request_id?: string };
 

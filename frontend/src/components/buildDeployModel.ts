@@ -2,6 +2,11 @@ import type {
   BuildProjectResponse,
   PackageProjectResponse,
 } from "../shared/api/workflow.ts";
+import {
+  appendWorkflowLogEntry,
+  resolveNextWorkflowModel,
+  type WorkflowLogEntry,
+} from "../shared/workflowLog.ts";
 
 export type BuildDeployAction = "deploy" | "build" | "package";
 export type BuildDeployStage = "idle" | "running" | "done" | "error";
@@ -10,6 +15,8 @@ export interface BuildDeployState {
   stage: BuildDeployStage;
   action: BuildDeployAction | null;
   log: string[];
+  logEntries: WorkflowLogEntry[];
+  currentModel: string | null;
   deployedTo: string | null;
   summary: string | null;
   errorMsg: string | null;
@@ -35,6 +42,8 @@ export function createIdleBuildDeployState(): BuildDeployState {
     stage: "idle",
     action: null,
     log: [],
+    logEntries: [],
+    currentModel: null,
     deployedTo: null,
     summary: null,
     errorMsg: null,
@@ -46,6 +55,8 @@ export function startBuildDeployAction(action: BuildDeployAction): BuildDeploySt
     stage: "running",
     action,
     log: [],
+    logEntries: [],
+    currentModel: null,
     deployedTo: null,
     summary: null,
     errorMsg: null,
@@ -54,11 +65,13 @@ export function startBuildDeployAction(action: BuildDeployAction): BuildDeploySt
 
 export function appendBuildDeployLog(
   state: BuildDeployState,
-  chunk: string,
+  entry: WorkflowLogEntry,
 ): BuildDeployState {
   return {
     ...state,
-    log: [...state.log, chunk],
+    log: [...state.log, entry.text],
+    logEntries: appendWorkflowLogEntry(state.logEntries, entry),
+    currentModel: resolveNextWorkflowModel(state.currentModel, entry),
   };
 }
 
@@ -142,6 +155,8 @@ export function applyBuildDeployActionResult(
     ...state,
     stage: result.stage,
     log: result.log,
+    logEntries: [],
+    currentModel: null,
     deployedTo: null,
     summary: result.summary,
     errorMsg: result.errorMsg,

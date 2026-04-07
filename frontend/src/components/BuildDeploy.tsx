@@ -69,14 +69,16 @@ export function BuildDeploy({ projectRoot, onOpenSettings }: Props) {
         </div>
       )}
 
-      {state.stage === "running" && state.log.length === 0 && state.action && (
+      {state.stage === "running" && state.logEntries.length === 0 && state.log.length === 0 && state.action && (
         <div className="flex items-center gap-2 py-1">
           <Loader2 size={14} className="text-emerald-500 animate-spin" />
           <span className="text-sm text-slate-400">{describeBuildDeployRunningMessage(state.action)}</span>
         </div>
       )}
 
-      {state.log.length > 0 && <AgentLog lines={state.log} />}
+      {(state.log.length > 0 || state.logEntries.length > 0) && (
+        <AgentLog lines={state.log} entries={state.logEntries} currentModel={state.currentModel} />
+      )}
 
       {state.stage === "done" && completionView && (
         <div className="space-y-2">

@@ -35,6 +35,7 @@ interface BatchItemSnapshot {
   progress: string[];
   images: string[];
   agentLog: string[];
+  currentAgentModel?: string | null;
   error: string | null;
   errorTrace: string | null;
   currentPrompt: string;
@@ -139,6 +140,8 @@ function normalizeBatchItemSnapshot(value: unknown): BatchItemState {
     progress: asStringArray(value.progress),
     images: asStringArray(value.images),
     agentLog: asStringArray(value.agentLog),
+    agentLogEntries: asStringArray(value.agentLog).map((text) => ({ text })),
+    currentAgentModel: asNullableString(value.currentAgentModel),
     error: asNullableString(value.error),
     errorTrace: asNullableString(value.errorTrace),
     currentPrompt: asString(value.currentPrompt),
@@ -175,6 +178,7 @@ export function serializeBatchRuntimeSnapshot(state: BatchRuntimeState): BatchRu
           progress: itemState.progress.slice(-MAX_PROGRESS_LINES),
           images: itemState.images.slice(-MAX_IMAGES),
           agentLog: itemState.agentLog.slice(-MAX_AGENT_LOG_LINES),
+          currentAgentModel: itemState.currentAgentModel,
           error: itemState.error,
           errorTrace: itemState.errorTrace,
           currentPrompt: itemState.currentPrompt,

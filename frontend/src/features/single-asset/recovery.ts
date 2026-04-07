@@ -50,6 +50,7 @@ interface SingleAssetWorkflowSnapshot {
   showMorePrompt: boolean;
   genLog: string[];
   agentLog: string[];
+  currentAgentModel: string | null;
   flowStageCurrent: string | null;
   flowStageHistory: string[];
   agentStageCurrent: string | null;
@@ -165,6 +166,8 @@ function normalizeWorkflowSnapshot(value: unknown): SingleAssetWorkflowState {
     showMorePrompt: asBoolean(value.showMorePrompt),
     genLog: asStringArray(value.genLog, MAX_GEN_LOG_LINES),
     agentLog: asStringArray(value.agentLog, MAX_AGENT_LOG_LINES),
+    agentLogEntries: asStringArray(value.agentLog, MAX_AGENT_LOG_LINES).map((text) => ({ text })),
+    currentAgentModel: asNullableString(value.currentAgentModel),
     flowStageCurrent: asNullableString(value.flowStageCurrent),
     flowStageHistory: asStringArray(value.flowStageHistory),
     agentStageCurrent: asNullableString(value.agentStageCurrent),
@@ -200,6 +203,7 @@ export function serializeSingleAssetSnapshot(state: SingleAssetRecoveryState): S
       showMorePrompt: state.workflowState.showMorePrompt,
       genLog: state.workflowState.genLog.slice(-MAX_GEN_LOG_LINES),
       agentLog: state.workflowState.agentLog.slice(-MAX_AGENT_LOG_LINES),
+      currentAgentModel: state.workflowState.currentAgentModel,
       flowStageCurrent: state.workflowState.flowStageCurrent,
       flowStageHistory: state.workflowState.flowStageHistory,
       agentStageCurrent: state.workflowState.agentStageCurrent,

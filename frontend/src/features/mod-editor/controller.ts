@@ -1,6 +1,7 @@
 import { ModAnalysisSocket, type ModAnalysisEvent } from "../../lib/mod_analysis_ws.ts";
 import { WorkflowSocket, type WsEvent } from "../../lib/ws.ts";
 import { resolveErrorMessage, resolveWorkflowErrorMessage } from "../../shared/error.ts";
+import type { WorkflowLogChannel } from "../../shared/types/workflow.ts";
 
 type ModAnalysisSocketEvent = ModAnalysisEvent["event"];
 type ModModifySocketEvent = Extract<
@@ -35,7 +36,7 @@ export interface ModEditorAnalysisRuntime {
   startAnalysis(): void;
   applyAnalysisStageMessage(message: string): void;
   applyAnalysisScanInfo(files: number): void;
-  appendAnalysisChunk(chunk: string): void;
+  appendAnalysisChunk(chunk: string, source?: string, channel?: WorkflowLogChannel, model?: string): void;
   completeAnalysis(): void;
   failAnalysis(message: string): void;
   resetAnalysis(): void;
@@ -47,7 +48,7 @@ export interface ModEditorModifyRuntime {
   clearProjectCreationFeedback(): void;
   startModify(): void;
   applyModifyStageMessage(message: string): void;
-  appendModifyLog(line: string): void;
+  appendModifyLog(line: string, source?: string, channel?: WorkflowLogChannel, model?: string): void;
   completeModify(success: boolean): void;
   failModify(message: string): void;
   resetModify(): void;
@@ -93,7 +94,7 @@ export function createModEditorAnalysisController(
       runtime.applyAnalysisScanInfo(message.files);
     });
     socket.on("stream", (message) => {
-      runtime.appendAnalysisChunk(message.chunk);
+      runtime.appendAnalysisChunk(message.chunk, message.source, message.channel, message.model);
     });
     socket.on("done", () => {
       runtime.completeAnalysis();
@@ -149,10 +150,10 @@ export function createModEditorModifyController(
       runtime.applyModifyStageMessage(message.message);
     });
     socket.on("progress", (message) => {
-      runtime.appendModifyLog(message.message);
+      runtime.appendModifyLog(message.message, "workflow", "system");
     });
     socket.on("agent_stream", (message) => {
-      runtime.appendModifyLog(message.chunk);
+      runtime.appendModifyLog(message.chunk, message.source, message.channel, message.model);
     });
     socket.on("done", (message) => {
       runtime.completeModify(Boolean(message.success));

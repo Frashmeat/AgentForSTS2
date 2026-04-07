@@ -168,6 +168,9 @@ def test_ws_analyze_log_emits_minimal_event_sequence(monkeypatch):
         "done",
     ]
     assert [message["chunk"] for message in ws.messages if message["event"] == "stream"] == ["chunk-1", "chunk-2"]
+    assert [message["model"] for message in ws.messages if message["event"] == "stream"] == ["claude-sonnet-4-6", "claude-sonnet-4-6"]
+    assert [message["source"] for message in ws.messages if message["event"] == "stream"] == ["analysis", "analysis"]
+    assert [message["channel"] for message in ws.messages if message["event"] == "stream"] == ["raw", "raw"]
     assert ws.messages[1] == {"event": "log_info", "lines": 2}
     assert ws.messages[-1] == {"event": "done", "full": "full-result"}
 
@@ -234,7 +237,12 @@ def test_ws_analyze_log_falls_back_to_error_when_stream_analysis_raises(monkeypa
         "ai_running",
     ]
     assert ws.messages[1] == {"event": "log_info", "lines": 2}
-    assert ws.messages[-1] == {"event": "error", "message": "boom-log"}
+    assert ws.messages[-1] == {
+        "event": "error",
+        "code": "log_analysis_failed",
+        "message": "boom-log",
+        "detail": "boom-log",
+    }
 
 
 def test_ws_analyze_log_preserves_stream_events_before_error(monkeypatch):
@@ -279,4 +287,12 @@ def test_ws_analyze_log_preserves_stream_events_before_error(monkeypatch):
         "ai_streaming",
     ]
     assert [message["chunk"] for message in ws.messages if message["event"] == "stream"] == ["partial-log"]
-    assert ws.messages[-1] == {"event": "error", "message": "boom-after-log-stream"}
+    assert [message["model"] for message in ws.messages if message["event"] == "stream"] == ["claude-sonnet-4-6"]
+    assert [message["source"] for message in ws.messages if message["event"] == "stream"] == ["analysis"]
+    assert [message["channel"] for message in ws.messages if message["event"] == "stream"] == ["raw"]
+    assert ws.messages[-1] == {
+        "event": "error",
+        "code": "log_analysis_failed",
+        "message": "boom-after-log-stream",
+        "detail": "boom-after-log-stream",
+    }

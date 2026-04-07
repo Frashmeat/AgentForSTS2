@@ -8,6 +8,7 @@ import { ProjectRootField } from "../../components/ProjectRootField";
 import { StageStatus } from "../../components/StageStatus";
 import { cn } from "../../lib/utils";
 import type { ApprovalRequest } from "../../shared/api/index.ts";
+import type { WorkflowLogEntry } from "../../shared/workflowLog.ts";
 
 import { ASSET_TYPES, PRESETS, type AssetType, type PresetOption, type Stage } from "./model";
 
@@ -27,6 +28,8 @@ export interface SingleAssetFeatureViewProps {
   showMorePrompt: boolean;
   genLog: string[];
   agentLog: string[];
+  agentLogEntries: WorkflowLogEntry[];
+  currentAgentModel: string | null;
   flowStageCurrent: string | null;
   flowStageHistory: string[];
   agentStageCurrent: string | null;
@@ -91,6 +94,8 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
     showMorePrompt,
     genLog,
     agentLog,
+    agentLogEntries,
+    currentAgentModel,
     flowStageCurrent,
     flowStageHistory,
     agentStageCurrent,
@@ -493,7 +498,7 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                 <>
                   <StageStatus current={agentStageCurrent} history={agentStageHistory} isComplete={stage === "done"} />
                   {agentLog.length > 0 ? (
-                    <AgentLog lines={agentLog} />
+                    <AgentLog lines={agentLog} entries={agentLogEntries} currentModel={currentAgentModel} />
                   ) : (
                     <div className="flex items-center gap-2.5 py-3">
                       <Loader2 size={16} className="text-violet-500 animate-spin" />

@@ -1,7 +1,8 @@
+import type { WorkflowLogChannel } from "../shared/types/workflow.ts";
 import { WorkflowSocketFacade } from "../shared/ws/facade.ts";
 
 export type BuildDeployEvent =
-  | { event: "stream"; stage: "stream"; chunk: string }
+  | { event: "stream"; stage: "stream"; chunk: string; source?: string; channel?: WorkflowLogChannel; model?: string }
   | { event: "done"; stage: "done"; success: boolean; deployed_to?: string | null; files?: string[] }
   | { event: "error"; stage: "error"; message: string; code?: string; detail?: string; request_id?: string };
 

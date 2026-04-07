@@ -133,6 +133,9 @@ export function createSingleAssetWorkflowController(
       runtime.dispatchWorkflow({
         type: "agent_log_appended",
         message: message.chunk,
+        source: message.source,
+        channel: message.channel,
+        model: message.model,
       });
     });
     socket.on("error", (message) => {
@@ -186,6 +189,8 @@ export function createSingleAssetWorkflowController(
       runtime.dispatchWorkflow({
         type: "agent_log_appended",
         message: message.success ? "✓ 构建成功！" : "✗ 构建失败",
+        source: "workflow",
+        channel: "system",
       });
       runtime.dispatchWorkflow({ type: "stage_changed", stage: "done" });
     });

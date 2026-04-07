@@ -15,6 +15,11 @@ import { ProjectRootField } from "../../components/ProjectRootField";
 import { cn } from "../../lib/utils";
 import { loadAppConfig } from "../../shared/api/config";
 import { resolveErrorMessage, resolveWorkflowErrorMessage } from "../../shared/error.ts";
+import {
+  appendWorkflowLogEntry,
+  resolveNextWorkflowModel,
+  type WorkflowLogEntry,
+} from "../../shared/workflowLog.ts";
 import type { PlatformExecutionRequest } from "../platform-run/types.ts";
 import {
   applyBatchApprovalUpdate,
@@ -44,6 +49,8 @@ interface ItemState {
   progress: string[];
   images: string[];
   agentLog: string[];
+  agentLogEntries: WorkflowLogEntry[];
+  currentAgentModel: string | null;
   error: string | null;
   errorTrace: string | null;
   currentPrompt: string;
@@ -60,6 +67,8 @@ function defaultItemState(): ItemState {
     progress: [],
     images: [],
     agentLog: [],
+    agentLogEntries: [],
+    currentAgentModel: null,
     error: null,
     errorTrace: null,
     currentPrompt: "",
@@ -160,10 +169,18 @@ function BatchModePage({ onRequestExecution }: { onRequestExecution?: (request: 
     });
   }, [applyItemStates]);
 
-  const appendAgent = useCallback((id: string, chunk: string) => {
+  const appendAgent = useCallback((id: string, entry: WorkflowLogEntry) => {
     applyItemStates(prev => {
       const cur = prev[id] ?? defaultItemState();
-      return { ...prev, [id]: { ...cur, agentLog: [...cur.agentLog, chunk] } };
+      return {
+        ...prev,
+        [id]: {
+          ...cur,
+          agentLog: [...cur.agentLog, entry.text],
+          agentLogEntries: appendWorkflowLogEntry(cur.agentLogEntries, entry),
+          currentAgentModel: resolveNextWorkflowModel(cur.currentAgentModel, entry),
+        },
+      };
     });
   }, [applyItemStates]);
 
@@ -265,7 +282,14 @@ function BatchModePage({ onRequestExecution }: { onRequestExecution?: (request: 
         updateItem(d.item_id, { status: "code_generating" });
       }
     });
-    ws.on("item_agent_stream", (d) => { appendAgent(d.item_id, d.chunk); });
+    ws.on("item_agent_stream", (d) => {
+      appendAgent(d.item_id, {
+        text: d.chunk,
+        source: d.source,
+        channel: d.channel,
+        model: d.model,
+      });
+    });
     ws.on("item_approval_pending", (d) => {
       updateItem(d.item_id, {
         status: "approval_pending",
@@ -333,7 +357,16 @@ function BatchModePage({ onRequestExecution }: { onRequestExecution?: (request: 
   function handleRetryItem(itemId: string) {
     if (!socketRef.current) return;
     socketRef.current.send({ action: "retry_item", item_id: itemId });
-    updateItem(itemId, { status: "img_generating", error: null, errorTrace: null, progress: [], agentLog: [], images: [] });
+    updateItem(itemId, {
+      status: "img_generating",
+      error: null,
+      errorTrace: null,
+      progress: [],
+      agentLog: [],
+      agentLogEntries: [],
+      currentAgentModel: null,
+      images: [],
+    });
   }
 
   function handleGenerateMore(itemId: string) {
@@ -1022,12 +1055,16 @@ function ItemDetailPanel({
       )}
 
       {/* Code Agent 日志 */}
-      {state.agentLog.length > 0 && (
-        <div className="space-y-1">
-          <p className="text-xs font-medium text-slate-500">Code Agent</p>
-          <AgentLog lines={state.agentLog} />
-        </div>
-      )}
+            {state.agentLog.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-slate-500">Code Agent</p>
+                <AgentLog
+                  lines={state.agentLog}
+                  entries={state.agentLogEntries}
+                  currentModel={state.currentAgentModel}
+                />
+              </div>
+            )}
 
       {/* 完成提示 */}
       {state.status === "done" && (
