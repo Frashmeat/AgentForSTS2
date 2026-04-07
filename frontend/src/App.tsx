@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, useReducer } from "react";
-import { Bug, LayoutDashboard, Sparkles, Wrench } from "lucide-react";
-import { Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { Bug, House, LayoutDashboard, Sparkles, Wrench } from "lucide-react";
+import { Link, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import ExecutionModeDialog from "./components/ExecutionModeDialog.tsx";
 import { PlatformAuthUnavailableNotice } from "./components/PlatformAuthUnavailableNotice.tsx";
+import { PlatformPageShell } from "./components/platform/PlatformPageShell.tsx";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { WorkspaceShell } from "./components/workspace/WorkspaceShell.tsx";
 import { approveApproval, executeApproval, rejectApproval, type ApprovalRequest } from "./shared/api/index.ts";
@@ -88,9 +89,20 @@ function buildWorkspacePath(tab: AppTab): string {
 
 function buildPlatformAuthUnavailableElement(title: string, description: string) {
   return (
-    <div className="px-6 py-10">
+    <PlatformPageShell
+      kicker="Platform Access"
+      title={title}
+      description="当前环境还没有接入独立 Web 平台服务，因此认证与用户中心能力不可用。"
+      actions={
+        <Link to="/" className="platform-page-action-link">
+          <House size={16} />
+          <span>返回首页</span>
+        </Link>
+      }
+      width="narrow"
+    >
       <PlatformAuthUnavailableNotice title={title} description={description} />
-    </div>
+    </PlatformPageShell>
   );
 }
 
@@ -570,23 +582,23 @@ export default function App() {
         />
         <Route
           path="/auth/login"
-          element={isAuthAvailable ? <div className="px-6 py-10"><LoginPage /></div> : buildPlatformAuthUnavailableElement("当前环境不支持登录", "这是本机工作站模式，未接入独立 Web 平台服务，因此登录与注册入口不可用。")}
+          element={isAuthAvailable ? <LoginPage /> : buildPlatformAuthUnavailableElement("当前环境不支持登录", "这是本机工作站模式，未接入独立 Web 平台服务，因此登录与注册入口不可用。")}
         />
         <Route
           path="/auth/register"
-          element={isAuthAvailable ? <div className="px-6 py-10"><RegisterPage /></div> : buildPlatformAuthUnavailableElement("当前环境不支持注册", "这是本机工作站模式，未接入独立 Web 平台服务，因此无法创建平台账号。")}
+          element={isAuthAvailable ? <RegisterPage /> : buildPlatformAuthUnavailableElement("当前环境不支持注册", "这是本机工作站模式，未接入独立 Web 平台服务，因此无法创建平台账号。")}
         />
         <Route
           path="/auth/verify-email"
-          element={isAuthAvailable ? <div className="px-6 py-10"><VerifyEmailPage /></div> : buildPlatformAuthUnavailableElement("当前环境不支持邮箱验证", "请先接入独立 Web 平台服务，再使用平台账号验证链路。")}
+          element={isAuthAvailable ? <VerifyEmailPage /> : buildPlatformAuthUnavailableElement("当前环境不支持邮箱验证", "请先接入独立 Web 平台服务，再使用平台账号验证链路。")}
         />
         <Route
           path="/auth/forgot-password"
-          element={isAuthAvailable ? <div className="px-6 py-10"><ForgotPasswordPage /></div> : buildPlatformAuthUnavailableElement("当前环境不支持密码找回", "请先接入独立 Web 平台服务，再使用平台账号密码找回功能。")}
+          element={isAuthAvailable ? <ForgotPasswordPage /> : buildPlatformAuthUnavailableElement("当前环境不支持密码找回", "请先接入独立 Web 平台服务，再使用平台账号密码找回功能。")}
         />
         <Route
           path="/auth/reset-password"
-          element={isAuthAvailable ? <div className="px-6 py-10"><ResetPasswordPage /></div> : buildPlatformAuthUnavailableElement("当前环境不支持密码重置", "请先接入独立 Web 平台服务，再使用平台账号密码重置功能。")}
+          element={isAuthAvailable ? <ResetPasswordPage /> : buildPlatformAuthUnavailableElement("当前环境不支持密码重置", "请先接入独立 Web 平台服务，再使用平台账号密码重置功能。")}
         />
         <Route
           path="/me"

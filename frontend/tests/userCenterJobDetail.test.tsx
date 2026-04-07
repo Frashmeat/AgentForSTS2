@@ -13,6 +13,8 @@ test("job detail page loads detail items and refund summary", () => {
   assert.match(pageSource, /getMyJob/);
   assert.match(pageSource, /listMyJobItems/);
   assert.match(pageSource, /RefundSummary/);
+  assert.match(pageSource, /to=\"\/\"/);
+  assert.match(pageSource, /返回首页/);
   assert.match(summarySource, /original_deducted/);
   assert.match(summarySource, /refunded_amount/);
   assert.match(summarySource, /net_consumed/);

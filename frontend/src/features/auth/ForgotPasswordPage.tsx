@@ -1,6 +1,8 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { PlatformPageShell } from "../../components/platform/PlatformPageShell.tsx";
 import { requestPasswordReset } from "../../shared/api/auth.ts";
+import { AuthHomeLink } from "./AuthHomeLink.tsx";
 import {
   createErrorAuthFormState,
   createIdleAuthFormState,
@@ -28,35 +30,41 @@ export function ForgotPasswordPage() {
   }
 
   return (
-    <section className="mx-auto w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
-      <h1 className="text-2xl font-semibold text-slate-900">找回密码</h1>
-      <p className="mt-2 text-sm text-slate-500">输入登录名或邮箱，获取重置密码所需的验证码。</p>
-      <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
-        <label className="block text-sm font-medium text-slate-700">
-          登录名
-          <input
-            className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-amber-500"
-            value={login}
-            onChange={event => setLogin(event.target.value)}
-          />
-        </label>
-        {formState.status !== "idle" && formState.message && (
-          <p className={formState.status === "error" ? "text-sm text-rose-600" : "text-sm text-emerald-600"}>
-            {formState.message}
-          </p>
-        )}
-        <button
-          type="submit"
-          className="w-full rounded-xl bg-amber-500 px-4 py-2 font-medium text-white transition hover:bg-amber-600"
-          disabled={formState.status === "submitting"}
-        >
-          获取重置码
-        </button>
-      </form>
-      <Link to="/auth/login" className="mt-4 inline-flex text-sm text-amber-600 hover:text-amber-700">
-        返回登录
-      </Link>
-    </section>
+    <PlatformPageShell
+      kicker="Platform Access"
+      title="找回密码"
+      description="输入登录名或邮箱，获取重置密码所需的验证码。"
+      actions={<AuthHomeLink />}
+      width="narrow"
+    >
+      <section className="platform-page-card p-8">
+        <form className="space-y-4" onSubmit={handleSubmit}>
+          <label className="block text-sm font-medium text-slate-700">
+            登录名
+            <input
+              className="platform-page-input mt-1"
+              value={login}
+              onChange={event => setLogin(event.target.value)}
+            />
+          </label>
+          {formState.status !== "idle" && formState.message && (
+            <p className={formState.status === "error" ? "text-sm text-rose-600" : "text-sm text-emerald-600"}>
+              {formState.message}
+            </p>
+          )}
+          <button
+            type="submit"
+            className="platform-page-primary-button w-full"
+            disabled={formState.status === "submitting"}
+          >
+            获取重置码
+          </button>
+        </form>
+        <Link to="/auth/login" className="mt-5 inline-flex text-sm font-medium text-[var(--workspace-accent)] transition hover:text-[var(--workspace-accent-strong)]">
+          返回登录
+        </Link>
+      </section>
+    </PlatformPageShell>
   );
 }
 

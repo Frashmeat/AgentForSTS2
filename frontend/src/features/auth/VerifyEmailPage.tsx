@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { PlatformPageShell } from "../../components/platform/PlatformPageShell.tsx";
 import { resendVerification, verifyEmailCode } from "../../shared/api/auth.ts";
+import { AuthHomeLink } from "./AuthHomeLink.tsx";
 import {
   createErrorAuthFormState,
   createIdleAuthFormState,
@@ -46,63 +48,69 @@ export function VerifyEmailPage() {
   }
 
   return (
-    <section className="mx-auto w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
-      <h1 className="text-2xl font-semibold text-slate-900">验证邮箱</h1>
-      <p className="mt-2 text-sm text-slate-500">注册后先完成邮箱验证，再开始平台模式。</p>
-      <form className="mt-6 space-y-4" onSubmit={handleVerify}>
-        <label className="block text-sm font-medium text-slate-700">
-          验证码
-          <input
-            className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-amber-500"
-            value={code}
-            onChange={event => setCode(event.target.value)}
-          />
-        </label>
-        <label className="block text-sm font-medium text-slate-700">
-          重发时使用的登录名
-          <input
-            className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-amber-500"
-            value={login}
-            onChange={event => setLogin(event.target.value)}
-          />
-        </label>
-        <label className="block text-sm font-medium text-slate-700">
-          重发时使用的密码
-          <input
-            type="password"
-            className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-amber-500"
-            value={password}
-            onChange={event => setPassword(event.target.value)}
-          />
-        </label>
-        {formState.status !== "idle" && formState.message && (
-          <p className={formState.status === "error" ? "text-sm text-rose-600" : "text-sm text-emerald-600"}>
-            {formState.message}
-          </p>
-        )}
-        <div className="flex gap-3">
-          <button
-            type="submit"
-            className="flex-1 rounded-xl bg-amber-500 px-4 py-2 font-medium text-white transition hover:bg-amber-600"
-            disabled={formState.status === "submitting"}
-          >
-            验证邮箱
-          </button>
-          <button
-            type="button"
-            className="rounded-xl border border-slate-200 px-4 py-2 font-medium text-slate-700 transition hover:border-slate-300"
-            onClick={() => {
-              void handleResend();
-            }}
-          >
-            重发验证码
-          </button>
-        </div>
-      </form>
-      <Link to="/auth/login" className="mt-4 inline-flex text-sm text-amber-600 hover:text-amber-700">
-        返回登录
-      </Link>
-    </section>
+    <PlatformPageShell
+      kicker="Platform Access"
+      title="验证邮箱"
+      description="注册后先完成邮箱验证，再开始平台模式。"
+      actions={<AuthHomeLink />}
+      width="narrow"
+    >
+      <section className="platform-page-card p-8">
+        <form className="space-y-4" onSubmit={handleVerify}>
+          <label className="block text-sm font-medium text-slate-700">
+            验证码
+            <input
+              className="platform-page-input mt-1"
+              value={code}
+              onChange={event => setCode(event.target.value)}
+            />
+          </label>
+          <label className="block text-sm font-medium text-slate-700">
+            重发时使用的登录名
+            <input
+              className="platform-page-input mt-1"
+              value={login}
+              onChange={event => setLogin(event.target.value)}
+            />
+          </label>
+          <label className="block text-sm font-medium text-slate-700">
+            重发时使用的密码
+            <input
+              type="password"
+              className="platform-page-input mt-1"
+              value={password}
+              onChange={event => setPassword(event.target.value)}
+            />
+          </label>
+          {formState.status !== "idle" && formState.message && (
+            <p className={formState.status === "error" ? "text-sm text-rose-600" : "text-sm text-emerald-600"}>
+              {formState.message}
+            </p>
+          )}
+          <div className="flex gap-3">
+            <button
+              type="submit"
+              className="platform-page-primary-button flex-1"
+              disabled={formState.status === "submitting"}
+            >
+              验证邮箱
+            </button>
+            <button
+              type="button"
+              className="platform-page-secondary-button"
+              onClick={() => {
+                void handleResend();
+              }}
+            >
+              重发验证码
+            </button>
+          </div>
+        </form>
+        <Link to="/auth/login" className="mt-5 inline-flex text-sm font-medium text-[var(--workspace-accent)] transition hover:text-[var(--workspace-accent-strong)]">
+          返回登录
+        </Link>
+      </section>
+    </PlatformPageShell>
   );
 }
 

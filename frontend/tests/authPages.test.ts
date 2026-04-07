@@ -19,19 +19,27 @@ test("auth form model exposes submitting success and error states", () => {
 });
 
 test("auth pages bind to auth api flows", () => {
+  const homeLinkSource = readSource("../src/features/auth/AuthHomeLink.tsx");
   const loginPage = readSource("../src/features/auth/LoginPage.tsx");
   const registerPage = readSource("../src/features/auth/RegisterPage.tsx");
   const verifyPage = readSource("../src/features/auth/VerifyEmailPage.tsx");
   const forgotPage = readSource("../src/features/auth/ForgotPasswordPage.tsx");
   const resetPage = readSource("../src/features/auth/ResetPasswordPage.tsx");
 
+  assert.match(homeLinkSource, /to=\"\/\"/);
+  assert.match(homeLinkSource, /返回首页/);
+  assert.match(loginPage, /AuthHomeLink/);
   assert.match(loginPage, /loginWithPassword/);
   assert.match(loginPage, /refreshSession/);
+  assert.match(registerPage, /AuthHomeLink/);
   assert.match(registerPage, /registerWithPassword/);
+  assert.match(verifyPage, /AuthHomeLink/);
   assert.match(verifyPage, /verifyEmailCode/);
   assert.match(verifyPage, /resendVerification/);
   assert.match(verifyPage, /password/);
+  assert.match(forgotPage, /AuthHomeLink/);
   assert.match(forgotPage, /requestPasswordReset/);
+  assert.match(resetPage, /AuthHomeLink/);
   assert.match(resetPage, /resetPasswordWithCode/);
   assert.match(resetPage, /refreshSession/);
 });

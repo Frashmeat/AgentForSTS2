@@ -32,13 +32,13 @@ export function UserEntry() {
       <div className="flex items-center gap-2">
         <Link
           to="/auth/login"
-          className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
+          className="rounded-xl border border-[var(--workspace-panel-border)] bg-white/70 px-3 py-1.5 text-sm font-medium text-[var(--workspace-accent-strong)] transition hover:border-[rgba(114,74,145,0.35)] hover:text-[var(--workspace-accent)]"
         >
           登录
         </Link>
         <Link
           to="/auth/register"
-          className="rounded-lg bg-amber-500 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-amber-600"
+          className="rounded-xl bg-[linear-gradient(135deg,var(--workspace-accent-strong),var(--workspace-accent))] px-3 py-1.5 text-sm font-medium text-white transition hover:brightness-110"
         >
           注册
         </Link>
@@ -48,15 +48,15 @@ export function UserEntry() {
 
   return (
     <div className="flex items-center gap-3">
-      <Link to="/me" className="flex items-center gap-2 rounded-full border border-slate-200 px-2 py-1 pr-3 transition hover:border-amber-300">
-        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-amber-100 text-sm font-semibold text-amber-700">
+      <Link to="/me" className="flex items-center gap-2 rounded-full border border-[var(--workspace-panel-border)] bg-white/75 px-2 py-1 pr-3 transition hover:border-[rgba(114,74,145,0.35)]">
+        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[rgba(114,74,145,0.12)] text-sm font-semibold text-[var(--workspace-accent-strong)]">
           {renderAvatar(currentUser.username)}
         </span>
         <span className="text-sm font-medium text-slate-700">{currentUser.username}</span>
       </Link>
       <button
         type="button"
-        className="text-sm text-slate-500 transition hover:text-slate-700"
+        className="text-sm text-[var(--workspace-text-muted)] transition hover:text-[var(--workspace-accent-strong)]"
         onClick={() => {
           void handleLogout();
         }}

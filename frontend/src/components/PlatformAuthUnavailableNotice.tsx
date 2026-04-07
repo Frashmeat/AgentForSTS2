@@ -8,7 +8,7 @@ export function PlatformAuthUnavailableNotice({
   description = "这是本机工作站模式。只有接入独立 Web 平台服务后，登录、注册和用户中心才可用。",
 }: PlatformAuthUnavailableNoticeProps) {
   return (
-    <section className="mx-auto max-w-3xl rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
+    <section className="platform-page-card p-8">
       <h1 className="text-2xl font-semibold text-slate-900">{title}</h1>
       <p className="mt-3 text-sm leading-6 text-slate-500">{description}</p>
     </section>

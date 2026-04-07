@@ -16,7 +16,7 @@ function renderStatus(status: string) {
 
 export function HistoryList({ jobs }: { jobs: PlatformJobSummary[] }) {
   return (
-    <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+    <section className="platform-page-card p-6">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold text-slate-900">平台任务历史</h2>
@@ -27,7 +27,7 @@ export function HistoryList({ jobs }: { jobs: PlatformJobSummary[] }) {
 
       <div className="mt-6 space-y-3">
         {jobs.length === 0 && (
-          <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-6 text-sm text-slate-500">
+          <div className="platform-page-empty px-4 py-6 text-sm text-slate-500">
             暂无平台任务记录。用户中心不会读取本机恢复记录或 localStorage 快照。
           </div>
         )}
@@ -35,7 +35,7 @@ export function HistoryList({ jobs }: { jobs: PlatformJobSummary[] }) {
           <Link
             key={job.id}
             to={`/me/jobs/${job.id}`}
-            className="block rounded-2xl border border-slate-200 px-4 py-4 transition hover:border-amber-300 hover:bg-amber-50/40"
+            className="platform-page-list-link block px-4 py-4"
           >
             <div className="flex items-center justify-between gap-3">
               <div>
