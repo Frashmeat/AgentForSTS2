@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 import { X, FolderOpen, Gamepad2, Cpu, Image, Search } from "lucide-react";
-import { detectAppPaths, loadAppConfig, pickAppPath, updateAppConfig } from "../shared/api/index.ts";
+import {
+  cancelDetectAppPathsTask,
+  getDetectAppPathsTask,
+  loadAppConfig,
+  pickAppPath,
+  startDetectAppPaths,
+  updateAppConfig,
+} from "../shared/api/index.ts";
 import { resolveErrorMessage } from "../shared/error.ts";
 import { createSettingsPickPathRequest, type SettingsPathField } from "./settingsPathPicker.ts";
 
@@ -51,6 +58,8 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [detecting, setDetecting] = useState(false);
+  const [detectionTaskId, setDetectionTaskId] = useState("");
+  const [detectionStep, setDetectionStep] = useState("");
   const [pathNotes, setPathNotes] = useState<string[]>([]);
   const [llmKey, setLlmKey] = useState("");
   const [imgKey, setImgKey] = useState("");
@@ -59,6 +68,63 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     loadAppConfig().then(setCfg);
   }, []);
+
+  useEffect(() => {
+    if (!detectionTaskId) {
+      return;
+    }
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    async function pollTask() {
+      try {
+        const snapshot = await getDetectAppPathsTask(detectionTaskId);
+        if (cancelled) {
+          return;
+        }
+
+        setDetectionStep(snapshot.current_step || "");
+        setPathNotes(snapshot.notes ?? []);
+        if (snapshot.sts2_path) {
+          set(["sts2_path"], snapshot.sts2_path);
+        }
+        if (snapshot.godot_exe_path) {
+          set(["godot_exe_path"], snapshot.godot_exe_path);
+        }
+
+        if (snapshot.status === "running" || snapshot.status === "pending") {
+          timer = setTimeout(pollTask, 500);
+          return;
+        }
+
+        if (snapshot.status === "failed") {
+          const message = snapshot.error?.trim() || "检测失败，请使用右侧选择按钮手动指定路径";
+          setPathNotes(prev => [...(snapshot.notes ?? prev), `检测失败：${message}`]);
+        }
+
+        setDetecting(false);
+        setDetectionTaskId("");
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        setDetecting(false);
+        setDetectionTaskId("");
+        setDetectionStep("");
+        setPathNotes([`检测失败：${resolveErrorMessage(error)}`]);
+      }
+    }
+
+    void pollTask();
+
+    return () => {
+      cancelled = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
+  }, [detectionTaskId]);
 
   function set(path: string[], value: string | number) {
     setCfg((prev: any) => {
@@ -84,23 +150,28 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
   async function detectPaths() {
     setDetecting(true);
+    setDetectionStep("准备启动检测任务");
     setPathNotes([]);
     try {
-      const res = await detectAppPaths();
-      const notes: string[] = res.notes ?? [];
-      if (res.sts2_path) {
-        set(["sts2_path"], res.sts2_path);
-        notes.push(`✓ STS2: ${res.sts2_path}`);
-      }
-      if (res.godot_exe_path) {
-        set(["godot_exe_path"], res.godot_exe_path);
-        notes.push(`✓ Godot: ${res.godot_exe_path}`);
-      }
-      setPathNotes(notes);
-    } catch {
-      setPathNotes(["检测失败，请使用右侧选择按钮手动指定路径"]);
-    } finally {
+      const task = await startDetectAppPaths();
+      setDetectionTaskId(task.task_id);
+      setDetectionStep(task.current_step || "检测中");
+      setPathNotes(task.notes ?? []);
+    } catch (error) {
+      setDetectionStep("");
+      setPathNotes([`检测失败：${resolveErrorMessage(error)}`]);
       setDetecting(false);
+    }
+  }
+
+  async function cancelDetectPaths() {
+    if (!detectionTaskId) return;
+    try {
+      const snapshot = await cancelDetectAppPathsTask(detectionTaskId);
+      setDetectionStep(snapshot.current_step || "检测已取消");
+      setPathNotes(snapshot.notes ?? ["检测已取消"]);
+    } catch (error) {
+      setPathNotes([`取消检测失败：${resolveErrorMessage(error)}`]);
     }
   }
 
@@ -167,14 +238,28 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             <>
               {/* ── 项目配置（最重要，放最前面）── */}
               <SGroup icon={<FolderOpen size={14} />} title="项目配置">
-                <button
-                  onClick={detectPaths}
-                  disabled={detecting}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 text-xs hover:border-amber-300 hover:text-amber-600 disabled:opacity-40 transition-colors"
-                >
-                  <Search size={12} />
-                  {detecting ? "检测中…" : "自动检测路径"}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={detectPaths}
+                    disabled={detecting}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 text-xs hover:border-amber-300 hover:text-amber-600 disabled:opacity-40 transition-colors"
+                  >
+                    <Search size={12} />
+                    {detecting ? "检测中…" : "自动检测路径"}
+                  </button>
+                  {detecting && (
+                    <button
+                      type="button"
+                      onClick={cancelDetectPaths}
+                      className="px-3 py-1.5 rounded-lg border border-rose-200 text-rose-600 text-xs hover:bg-rose-50 transition-colors"
+                    >
+                      中断检测
+                    </button>
+                  )}
+                </div>
+                {detectionStep && (
+                  <p className="text-xs text-amber-700">当前进度：{detectionStep}</p>
+                )}
                 {pathNotes.length > 0 && (
                   <div className="space-y-0.5">
                     {pathNotes.map((n, i) => (

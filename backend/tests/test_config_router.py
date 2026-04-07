@@ -90,6 +90,67 @@ def test_detect_paths_surfaces_detector_errors(monkeypatch):
         raise AssertionError("detect_paths should surface detector failures")
 
 
+def test_start_detect_paths_task_delegates_to_project_utils(monkeypatch):
+    def fake_start_detect_paths_task():
+        return {"task_id": "task-1", "status": "running", "notes": ["开始检测"], "can_cancel": True}
+
+    monkeypatch.setattr(config_router, "_config_facade", lambda request: None)
+    fake_module = types.SimpleNamespace(start_detect_paths_task=fake_start_detect_paths_task)
+    monkeypatch.setitem(sys.modules, "project_utils", fake_module)
+
+    result = config_router.start_detect_paths_task()
+
+    assert result["task_id"] == "task-1"
+    assert result["status"] == "running"
+
+
+def test_get_detect_paths_task_delegates_to_project_utils(monkeypatch):
+    def fake_get_detect_paths_task(task_id):
+        assert task_id == "task-1"
+        return {"task_id": task_id, "status": "completed", "notes": ["已完成"], "can_cancel": False}
+
+    monkeypatch.setattr(config_router, "_config_facade", lambda request: None)
+    fake_module = types.SimpleNamespace(get_detect_paths_task=fake_get_detect_paths_task)
+    monkeypatch.setitem(sys.modules, "project_utils", fake_module)
+
+    result = config_router.get_detect_paths_task("task-1")
+
+    assert result["task_id"] == "task-1"
+    assert result["status"] == "completed"
+
+
+def test_cancel_detect_paths_task_delegates_to_project_utils(monkeypatch):
+    def fake_cancel_detect_paths_task(task_id):
+        assert task_id == "task-1"
+        return {"task_id": task_id, "status": "cancelled", "notes": ["已取消"], "can_cancel": False}
+
+    monkeypatch.setattr(config_router, "_config_facade", lambda request: None)
+    fake_module = types.SimpleNamespace(cancel_detect_paths_task=fake_cancel_detect_paths_task)
+    monkeypatch.setitem(sys.modules, "project_utils", fake_module)
+
+    result = config_router.cancel_detect_paths_task("task-1")
+
+    assert result["task_id"] == "task-1"
+    assert result["status"] == "cancelled"
+
+
+def test_get_detect_paths_task_returns_404_when_task_missing(monkeypatch):
+    def fake_get_detect_paths_task(task_id):
+        raise KeyError(task_id)
+
+    monkeypatch.setattr(config_router, "_config_facade", lambda request: None)
+    fake_module = types.SimpleNamespace(get_detect_paths_task=fake_get_detect_paths_task)
+    monkeypatch.setitem(sys.modules, "project_utils", fake_module)
+
+    try:
+        config_router.get_detect_paths_task("missing")
+    except _DummyHttpException as exc:
+        assert exc.status_code == 404
+        assert "missing" in exc.detail
+    else:
+        raise AssertionError("missing detect task should return 404")
+
+
 def test_pick_path_delegates_to_project_utils(monkeypatch):
     calls = {}
 

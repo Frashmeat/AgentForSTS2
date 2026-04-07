@@ -60,6 +60,54 @@ def detect_paths(request: Request = None):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@router.post("/detect_paths/start")
+def start_detect_paths_task(request: Request = None):
+    try:
+        facade = _config_facade(request)
+        if facade is not None and hasattr(facade, "start_detect_paths_task"):
+            return facade.start_detect_paths_task()
+        from project_utils import start_detect_paths_task as _start
+        return _start()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/detect_paths/{task_id}")
+def get_detect_paths_task(task_id: str, request: Request = None):
+    try:
+        facade = _config_facade(request)
+        if facade is not None and hasattr(facade, "get_detect_paths_task"):
+            return facade.get_detect_paths_task(task_id)
+        from project_utils import get_detect_paths_task as _get
+        return _get(task_id)
+    except HTTPException:
+        raise
+    except KeyError as exc:
+        missing_task_id = exc.args[0] if exc.args else task_id
+        raise HTTPException(status_code=404, detail=f"未找到检测任务: {missing_task_id}") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/detect_paths/{task_id}/cancel")
+def cancel_detect_paths_task(task_id: str, request: Request = None):
+    try:
+        facade = _config_facade(request)
+        if facade is not None and hasattr(facade, "cancel_detect_paths_task"):
+            return facade.cancel_detect_paths_task(task_id)
+        from project_utils import cancel_detect_paths_task as _cancel
+        return _cancel(task_id)
+    except HTTPException:
+        raise
+    except KeyError as exc:
+        missing_task_id = exc.args[0] if exc.args else task_id
+        raise HTTPException(status_code=404, detail=f"未找到检测任务: {missing_task_id}") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @router.post("/pick_path")
 def pick_path(body: dict, request: Request = None):
     try:

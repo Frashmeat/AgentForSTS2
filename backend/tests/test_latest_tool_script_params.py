@@ -70,6 +70,9 @@ def test_package_release_script_exposes_simplified_parameter_aliases_and_help():
     assert "NoZip" in params["SkipZip"]["aliases"]
     assert "跳过 zip" in params["SkipZip"]["help"]
 
+    assert "Debug" in params
+    assert "db" in params["Debug"]["aliases"]
+
     assert "h" in params["Help"]["aliases"]
     assert "显示帮助" in params["Help"]["help"]
 

@@ -34,10 +34,18 @@ def _write_fake_robocopy(bin_dir: Path) -> None:
 
 def _prepare_common_layout(repo_root: Path) -> None:
     (repo_root / "tools" / "latest" / "templates").mkdir(parents=True, exist_ok=True)
+    (repo_root / "tools" / "split-local").mkdir(parents=True, exist_ok=True)
     (repo_root / "tools" / "latest" / "package-release.ps1").write_text(
         SCRIPT_SOURCE.read_text(encoding="utf-8"),
         encoding="utf-8",
     )
+    for name in (
+        "start_split_local.ps1",
+        "start_split_local.bat",
+        "stop_split_local.ps1",
+        "stop_split_local.bat",
+    ):
+        (repo_root / "tools" / "split-local" / name).write_text("echo launcher\n", encoding="utf-8")
     (repo_root / "README.md").write_text("repo readme\n", encoding="utf-8")
 
 
@@ -53,6 +61,11 @@ def _write_template_files(repo_root: Path, target: str) -> None:
         (template_root / "nginx.conf").write_text("events {}\nhttp {}\n", encoding="utf-8")
     elif target == "web":
         template_root = templates_root / "web"
+        template_root.mkdir(parents=True, exist_ok=True)
+        (template_root / "Dockerfile").write_text("FROM python:3.11-alpine\n", encoding="utf-8")
+        (template_root / ".dockerignore").write_text("__pycache__\n", encoding="utf-8")
+    elif target == "workstation":
+        template_root = templates_root / "workstation"
         template_root.mkdir(parents=True, exist_ok=True)
         (template_root / "Dockerfile").write_text("FROM python:3.11-alpine\n", encoding="utf-8")
         (template_root / ".dockerignore").write_text("__pycache__\n", encoding="utf-8")
@@ -119,3 +132,57 @@ def test_package_release_web_does_not_require_frontend_directory(tmp_path: Path)
     assert completed.returncode == 0, completed.stderr
     assert "缺少frontend 目录" not in completed.stderr
     assert (temp_repo / "tools" / "latest" / "artifacts" / "agentthespire-web-release").exists()
+
+
+def test_package_release_debug_reuses_previous_workstation_config(tmp_path: Path):
+    temp_repo = tmp_path / "repo"
+    _prepare_common_layout(temp_repo)
+    _write_template_files(temp_repo, "workstation")
+
+    backend_dir = temp_repo / "backend"
+    backend_dir.mkdir(parents=True, exist_ok=True)
+    (backend_dir / "main_workstation.py").write_text("print('ok')\n", encoding="utf-8")
+    frontend_dist = temp_repo / "frontend" / "dist"
+    frontend_dist.mkdir(parents=True, exist_ok=True)
+    (frontend_dist / "index.html").write_text("<html></html>\n", encoding="utf-8")
+    mod_template = temp_repo / "mod_template"
+    mod_template.mkdir(parents=True, exist_ok=True)
+    (mod_template / "README.md").write_text("template\n", encoding="utf-8")
+    (temp_repo / "config.example.json").write_text('{"mode":"example"}\n', encoding="utf-8")
+
+    previous_config = temp_repo / "tools" / "latest" / "artifacts" / "agentthespire-workstation-release" / "services" / "workstation" / "config.json"
+    previous_config.parent.mkdir(parents=True, exist_ok=True)
+    previous_config.write_text('{"mode":"debug"}\n', encoding="utf-8")
+
+    completed = _run_package_release(temp_repo, "workstation", "-NoFrontend", "-NoZip", "-Debug")
+
+    assert completed.returncode == 0, completed.stderr
+    generated_config = previous_config
+    assert generated_config.read_text(encoding="utf-8").strip() == '{"mode":"debug"}'
+
+
+def test_package_release_without_debug_resets_workstation_config_to_example(tmp_path: Path):
+    temp_repo = tmp_path / "repo"
+    _prepare_common_layout(temp_repo)
+    _write_template_files(temp_repo, "workstation")
+
+    backend_dir = temp_repo / "backend"
+    backend_dir.mkdir(parents=True, exist_ok=True)
+    (backend_dir / "main_workstation.py").write_text("print('ok')\n", encoding="utf-8")
+    frontend_dist = temp_repo / "frontend" / "dist"
+    frontend_dist.mkdir(parents=True, exist_ok=True)
+    (frontend_dist / "index.html").write_text("<html></html>\n", encoding="utf-8")
+    mod_template = temp_repo / "mod_template"
+    mod_template.mkdir(parents=True, exist_ok=True)
+    (mod_template / "README.md").write_text("template\n", encoding="utf-8")
+    (temp_repo / "config.example.json").write_text('{"mode":"example"}\n', encoding="utf-8")
+
+    previous_config = temp_repo / "tools" / "latest" / "artifacts" / "agentthespire-workstation-release" / "services" / "workstation" / "config.json"
+    previous_config.parent.mkdir(parents=True, exist_ok=True)
+    previous_config.write_text('{"mode":"debug"}\n', encoding="utf-8")
+
+    completed = _run_package_release(temp_repo, "workstation", "-NoFrontend", "-NoZip")
+
+    assert completed.returncode == 0, completed.stderr
+    generated_config = previous_config
+    assert generated_config.read_text(encoding="utf-8").strip() == '{"mode":"example"}'

@@ -4,6 +4,7 @@
 
 .DESCRIPTION
 根据目标生成可部署的 release 目录，并可选输出 zip 包。
+传入 PowerShell 内建的 `-Debug` 开关时，会在重新打包 `workstation` 相关目标时优先沿用旧 release 中已有的 `services/workstation/config.json`；未传入时默认使用 `config.example.json` 生成新的 `config.json`。
 直接执行脚本且不传任何参数时，会默认显示本帮助而不是立即开始打包。
 
 .PARAMETER Target
@@ -29,6 +30,9 @@ pwsh -File .\tools\latest\package-release.ps1 workstation
 
 .EXAMPLE
 pwsh -File .\tools\latest\package-release.ps1 -t web -NoZip
+
+.EXAMPLE
+pwsh -File .\tools\latest\package-release.ps1 workstation -Debug -NoZip
 #>
 [CmdletBinding()]
 param(
@@ -255,7 +259,9 @@ function Copy-ServiceBundle {
         [string]$BackendDir,
         [string]$FrontendDistDir,
         [string]$ModTemplateDir,
-        [string]$TemplatesDir
+        [string]$TemplatesDir,
+        [hashtable]$PreviousServiceConfigs = @{},
+        [switch]$ReuseExistingSettings
     )
 
     $serviceDir = Join-Path (Join-Path $ReleaseDir "services") $Service.Name
@@ -301,6 +307,18 @@ function Copy-ServiceBundle {
 
     if ($Service.IncludeBackend) {
         Copy-Item -LiteralPath (Join-Path $RepoRoot "config.example.json") -Destination (Join-Path $serviceDir "config.example.json") -Force
+
+        if ($Service.Name -eq "workstation") {
+            $configTargetPath = Join-Path $serviceDir "config.json"
+            $configContent = ""
+            if ($ReuseExistingSettings.IsPresent -and $PreviousServiceConfigs.ContainsKey($Service.Name)) {
+                $configContent = [string]$PreviousServiceConfigs[$Service.Name]
+            }
+            if ([string]::IsNullOrWhiteSpace($configContent)) {
+                $configContent = Get-Content -LiteralPath (Join-Path $RepoRoot "config.example.json") -Raw
+            }
+            Set-Content -LiteralPath $configTargetPath -Value $configContent -Encoding UTF8
+        }
     }
 
     foreach ($relativePath in $Service.RemovePaths) {
@@ -357,6 +375,17 @@ function Write-ReleaseManifest {
     $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
 }
 
+function Get-PreviousServiceConfigs {
+    param([string]$ExistingReleaseDir)
+
+    $configs = @{}
+    $workstationConfigPath = Join-Path $ExistingReleaseDir "services\workstation\config.json"
+    if (Test-Path -LiteralPath $workstationConfigPath) {
+        $configs["workstation"] = Get-Content -LiteralPath $workstationConfigPath -Raw
+    }
+    return $configs
+}
+
 $repoRoot = Get-RepoRoot
 $frontendDir = Join-Path $repoRoot "frontend"
 $frontendDistDir = Join-Path $frontendDir "dist"
@@ -368,9 +397,15 @@ $releaseDir = Join-Path $OutputRoot $effectiveReleaseName
 $zipPath = Join-Path $OutputRoot ("{0}.zip" -f $effectiveReleaseName)
 $composeTemplate = Join-Path $templatesDir ("compose.{0}.yml" -f $Target)
 $serviceDefinitions = Get-ServiceDefinitions -SelectedTarget $Target
+$reuseExistingSettings = $PSBoundParameters.ContainsKey("Debug")
 $needsBackend = @($serviceDefinitions | Where-Object { $_.IncludeBackend }).Count -gt 0
 $needsFrontend = @($serviceDefinitions | Where-Object { $_.IncludeFrontend }).Count -gt 0
 $needsModTemplate = @($serviceDefinitions | Where-Object { $_.IncludeModTemplate }).Count -gt 0
+$previousServiceConfigs = if ($reuseExistingSettings -and (Test-Path -LiteralPath $releaseDir)) {
+    Get-PreviousServiceConfigs -ExistingReleaseDir $releaseDir
+} else {
+    @{}
+}
 
 Assert-PathExists -Path $templatesDir -Label "模板目录"
 Assert-PathExists -Path $composeTemplate -Label "compose 模板"
@@ -420,7 +455,7 @@ $null = New-Item -ItemType Directory -Path (Join-Path $releaseDir "services") -F
 $null = New-Item -ItemType Directory -Path (Join-Path $releaseDir "runtime") -Force
 
 foreach ($service in $serviceDefinitions) {
-    Copy-ServiceBundle -Service $service -ReleaseDir $releaseDir -RepoRoot $repoRoot -BackendDir $backendDir -FrontendDistDir $frontendDistDir -ModTemplateDir $modTemplateDir -TemplatesDir $templatesDir
+    Copy-ServiceBundle -Service $service -ReleaseDir $releaseDir -RepoRoot $repoRoot -BackendDir $backendDir -FrontendDistDir $frontendDistDir -ModTemplateDir $modTemplateDir -TemplatesDir $templatesDir -PreviousServiceConfigs $previousServiceConfigs -ReuseExistingSettings:$reuseExistingSettings
 }
 Copy-LauncherBundle -ReleaseDir $releaseDir -RepoRoot $repoRoot -TargetName $Target
 
@@ -440,6 +475,7 @@ Write-Host ""
 Write-Host "打包完成:"
 Write-Host "  Target      : $Target"
 Write-Host "  Release 目录: $releaseDir"
+Write-Host "  沿用旧设置  : $reuseExistingSettings"
 if (-not $SkipZip) {
     Write-Host "  Zip 包      : $zipPath"
 }

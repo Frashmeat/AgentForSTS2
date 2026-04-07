@@ -2,10 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  cancelDetectAppPathsTask,
   detectAppPaths,
+  getDetectAppPathsTask,
   loadLocalAiCapabilityStatus,
   loadAppConfig,
   pickAppPath,
+  startDetectAppPaths,
   updateAppConfig,
 } from "../src/shared/api/index.ts";
 
@@ -77,6 +80,85 @@ test("detectAppPaths reads detect paths endpoint", async () => {
   assert.equal(calls[0].input, "http://127.0.0.1:7860/api/config/detect_paths");
   assert.equal(calls[0].init?.method, "GET");
   assert.equal(result.notes[0], "ok");
+});
+
+test("startDetectAppPaths posts detect task request", async () => {
+  const calls: Array<{ input: unknown; init?: RequestInit }> = [];
+  setWorkstationApiBase();
+  Object.assign(globalThis, {
+    fetch: async (input: unknown, init?: RequestInit) => {
+      calls.push({ input, init });
+      return createMockResponse({
+        ok: true,
+        body: {
+          task_id: "task-1",
+          status: "running",
+          current_step: "开始检测",
+          notes: ["开始检测"],
+          can_cancel: true,
+        },
+      });
+    },
+  });
+
+  const result = await startDetectAppPaths();
+
+  assert.equal(calls[0].input, "http://127.0.0.1:7860/api/config/detect_paths/start");
+  assert.equal(calls[0].init?.method, "POST");
+  assert.equal(result.task_id, "task-1");
+});
+
+test("getDetectAppPathsTask reads detect task status endpoint", async () => {
+  const calls: Array<{ input: unknown; init?: RequestInit }> = [];
+  setWorkstationApiBase();
+  Object.assign(globalThis, {
+    fetch: async (input: unknown, init?: RequestInit) => {
+      calls.push({ input, init });
+      return createMockResponse({
+        ok: true,
+        body: {
+          task_id: "task-1",
+          status: "completed",
+          current_step: "已完成",
+          notes: ["完成"],
+          sts2_path: "E:/steam/steamapps/common/Slay the Spire 2",
+          can_cancel: false,
+        },
+      });
+    },
+  });
+
+  const result = await getDetectAppPathsTask("task-1");
+
+  assert.equal(calls[0].input, "http://127.0.0.1:7860/api/config/detect_paths/task-1");
+  assert.equal(calls[0].init?.method, "GET");
+  assert.equal(result.status, "completed");
+});
+
+test("cancelDetectAppPathsTask posts cancel request", async () => {
+  const calls: Array<{ input: unknown; init?: RequestInit }> = [];
+  setWorkstationApiBase();
+  Object.assign(globalThis, {
+    fetch: async (input: unknown, init?: RequestInit) => {
+      calls.push({ input, init });
+      return createMockResponse({
+        ok: true,
+        body: {
+          task_id: "task-1",
+          status: "cancelled",
+          current_step: "已取消",
+          notes: ["已取消"],
+          can_cancel: false,
+        },
+      });
+    },
+  });
+
+  const result = await cancelDetectAppPathsTask("task-1");
+
+  assert.equal(calls[0].input, "http://127.0.0.1:7860/api/config/detect_paths/task-1/cancel");
+  assert.equal(calls[0].init?.method, "POST");
+  assert.equal(result.status, "cancelled");
 });
 
 test("pickAppPath posts pick path request to workstation config endpoint", async () => {

@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import glob
 import importlib
+import subprocess
 import shutil
 import sys
+import threading
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -40,3 +43,87 @@ def test_find_godot_detects_repo_local_install(monkeypatch, tmp_path):
 
     assert result == str(exe_path)
     assert "Godot" in note
+
+
+def test_pick_path_windows_does_not_force_timeout(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_run(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return subprocess.CompletedProcess(args[0], 0, stdout="C:\\mods\r\n", stderr="")
+
+    monkeypatch.setattr(project_utils.subprocess, "run", fake_run)
+
+    result = project_utils._pick_path_windows(
+        kind="directory",
+        title="选择默认 Mod 项目目录",
+        initial_path="",
+        filters=[],
+    )
+
+    assert result == "C:/mods"
+    assert "timeout" not in captured["kwargs"]
+
+
+def test_detect_paths_task_reports_progress_and_completion(monkeypatch):
+    progress_gate = threading.Event()
+
+    def fake_detect_paths_impl(reporter):
+        reporter.set_step("扫描 Steam 注册表")
+        reporter.add_note("开始扫描")
+        progress_gate.set()
+        reporter.set_sts2_path("E:/steam/steamapps/common/Slay the Spire 2")
+        reporter.set_godot_exe_path("C:/tools/Godot.exe")
+        reporter.add_note("检测完成")
+
+    monkeypatch.setattr(project_utils, "_run_detect_paths_impl", fake_detect_paths_impl)
+
+    task = project_utils.start_detect_paths_task()
+    assert task["status"] in {"pending", "running", "completed"}
+
+    assert progress_gate.wait(1.0)
+    snapshot = project_utils.get_detect_paths_task(task["task_id"])
+    assert snapshot["current_step"] in {"扫描 Steam 注册表", "检测完成"}
+    assert "开始扫描" in snapshot["notes"]
+
+    for _ in range(20):
+        snapshot = project_utils.get_detect_paths_task(task["task_id"])
+        if snapshot["status"] == "completed":
+            break
+        time.sleep(0.05)
+
+    assert snapshot["status"] == "completed"
+    assert snapshot["sts2_path"] == "E:/steam/steamapps/common/Slay the Spire 2"
+    assert snapshot["godot_exe_path"] == "C:/tools/Godot.exe"
+    assert snapshot["can_cancel"] is False
+
+
+def test_detect_paths_task_can_be_cancelled(monkeypatch):
+    entered = threading.Event()
+
+    def fake_detect_paths_impl(reporter):
+        reporter.set_step("长时间扫描")
+        entered.set()
+        for _ in range(50):
+            if reporter.is_cancelled():
+                reporter.add_note("检测已中断")
+                return
+            time.sleep(0.01)
+
+    monkeypatch.setattr(project_utils, "_run_detect_paths_impl", fake_detect_paths_impl)
+
+    task = project_utils.start_detect_paths_task()
+    assert entered.wait(1.0)
+
+    cancelled = project_utils.cancel_detect_paths_task(task["task_id"])
+    assert cancelled["status"] in {"running", "cancelled"}
+
+    for _ in range(20):
+        snapshot = project_utils.get_detect_paths_task(task["task_id"])
+        if snapshot["status"] == "cancelled":
+            break
+        time.sleep(0.05)
+
+    assert snapshot["status"] == "cancelled"
+    assert snapshot["can_cancel"] is False

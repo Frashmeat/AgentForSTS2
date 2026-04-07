@@ -20,6 +20,19 @@ export interface DetectPathsResult {
   notes: string[];
 }
 
+export type DetectPathsTaskStatus = "pending" | "running" | "completed" | "cancelled" | "failed";
+
+export interface DetectPathsTaskResult {
+  task_id: string;
+  status: DetectPathsTaskStatus;
+  current_step: string;
+  notes: string[];
+  sts2_path?: string;
+  godot_exe_path?: string;
+  error?: string | null;
+  can_cancel: boolean;
+}
+
 export interface LocalAiCapabilityStatus {
   text_ai_available: boolean;
   image_ai_available: boolean;
@@ -66,6 +79,26 @@ export async function updateAppConfig(patch: Partial<AppConfig>): Promise<AppCon
 export async function detectAppPaths(): Promise<DetectPathsResult> {
   return requestJson<DetectPathsResult>("/api/config/detect_paths", {
     backend: "workstation",
+  });
+}
+
+export async function startDetectAppPaths(): Promise<DetectPathsTaskResult> {
+  return requestJson<DetectPathsTaskResult>("/api/config/detect_paths/start", {
+    backend: "workstation",
+    method: "POST",
+  });
+}
+
+export async function getDetectAppPathsTask(taskId: string): Promise<DetectPathsTaskResult> {
+  return requestJson<DetectPathsTaskResult>(`/api/config/detect_paths/${encodeURIComponent(taskId)}`, {
+    backend: "workstation",
+  });
+}
+
+export async function cancelDetectAppPathsTask(taskId: string): Promise<DetectPathsTaskResult> {
+  return requestJson<DetectPathsTaskResult>(`/api/config/detect_paths/${encodeURIComponent(taskId)}/cancel`, {
+    backend: "workstation",
+    method: "POST",
   });
 }
 

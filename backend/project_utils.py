@@ -6,9 +6,13 @@ STS2 Mod 项目初始化工具
 """
 from __future__ import annotations
 
+import concurrent.futures
+import os
 import shutil
 import subprocess
 import sys
+import threading
+import uuid
 from pathlib import Path
 
 from app.shared.prompting import PromptLoader
@@ -17,6 +21,191 @@ _TEXT_LOADER = PromptLoader()
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _GODOT_DIRNAME = "Godot_v4.5.1-stable_mono_win64"
 _GODOT_EXE_NAME = f"{_GODOT_DIRNAME}.exe"
+_DETECT_TASKS: dict[str, "_DetectPathsTask"] = {}
+_DETECT_TASKS_LOCK = threading.Lock()
+
+
+class _DetectPathsProgressReporter:
+    def __init__(self, task: "_DetectPathsTask"):
+        self._task = task
+
+    def set_step(self, step: str) -> None:
+        self._task.set_step(step)
+
+    def add_note(self, note: str) -> None:
+        self._task.add_note(note)
+
+    def set_sts2_path(self, path: str) -> None:
+        self._task.set_sts2_path(path)
+
+    def set_godot_exe_path(self, path: str) -> None:
+        self._task.set_godot_exe_path(path)
+
+    def is_cancelled(self) -> bool:
+        return self._task.is_cancelled()
+
+
+class _DetectPathsTask:
+    def __init__(self, task_id: str):
+        self.task_id = task_id
+        self.status = "pending"
+        self.current_step = "等待开始"
+        self.notes = ["开始检测路径"]
+        self.sts2_path: str | None = None
+        self.godot_exe_path: str | None = None
+        self.error: str | None = None
+        self.can_cancel = True
+        self._cancel_event = threading.Event()
+        self._lock = threading.Lock()
+        self._thread = threading.Thread(target=self._run, name=f"detect-paths-{task_id}", daemon=True)
+
+    def start(self) -> None:
+        with self._lock:
+            self.status = "running"
+            self.current_step = "初始化检测任务"
+        self._thread.start()
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            return {
+                "task_id": self.task_id,
+                "status": self.status,
+                "current_step": self.current_step,
+                "notes": list(self.notes),
+                "sts2_path": self.sts2_path,
+                "godot_exe_path": self.godot_exe_path,
+                "error": self.error,
+                "can_cancel": self.can_cancel,
+            }
+
+    def cancel(self) -> dict:
+        self._cancel_event.set()
+        with self._lock:
+            if self.status in {"pending", "running"}:
+                self.current_step = "正在取消检测"
+                self._append_note("收到取消请求")
+        return self.snapshot()
+
+    def is_cancelled(self) -> bool:
+        return self._cancel_event.is_set()
+
+    def set_step(self, step: str) -> None:
+        if self.is_cancelled():
+            return
+        with self._lock:
+            self.current_step = step
+
+    def add_note(self, note: str) -> None:
+        with self._lock:
+            self._append_note(note)
+
+    def set_sts2_path(self, path: str) -> None:
+        with self._lock:
+            self.sts2_path = path
+            self._append_note(f"✓ STS2: {path}")
+
+    def set_godot_exe_path(self, path: str) -> None:
+        with self._lock:
+            self.godot_exe_path = path
+            self._append_note(f"✓ Godot: {path}")
+
+    def _append_note(self, note: str) -> None:
+        normalized = str(note).strip()
+        if not normalized:
+            return
+        if self.notes and self.notes[-1] == normalized:
+            return
+        self.notes.append(normalized)
+        if len(self.notes) > 80:
+            self.notes = self.notes[-80:]
+
+    def _finish(self, *, status: str, current_step: str, error: str | None = None) -> None:
+        with self._lock:
+            self.status = status
+            self.current_step = current_step
+            self.error = error
+            self.can_cancel = False
+            if error:
+                self._append_note(f"检测失败：{error}")
+
+    def _run(self) -> None:
+        reporter = _DetectPathsProgressReporter(self)
+        try:
+            _run_detect_paths_impl(reporter)
+            if self.is_cancelled():
+                self._finish(status="cancelled", current_step="检测已取消")
+            else:
+                self._finish(status="completed", current_step="检测完成")
+        except Exception as exc:
+            self._finish(status="failed", current_step="检测失败", error=str(exc))
+
+
+def start_detect_paths_task() -> dict:
+    task_id = uuid.uuid4().hex
+    task = _DetectPathsTask(task_id)
+    with _DETECT_TASKS_LOCK:
+        _DETECT_TASKS[task_id] = task
+    task.start()
+    return task.snapshot()
+
+
+def get_detect_paths_task(task_id: str) -> dict:
+    with _DETECT_TASKS_LOCK:
+        task = _DETECT_TASKS.get(task_id)
+    if task is None:
+        raise KeyError(task_id)
+    return task.snapshot()
+
+
+def cancel_detect_paths_task(task_id: str) -> dict:
+    with _DETECT_TASKS_LOCK:
+        task = _DETECT_TASKS.get(task_id)
+    if task is None:
+        raise KeyError(task_id)
+    return task.cancel()
+
+
+def _run_detect_paths_impl(reporter: _DetectPathsProgressReporter) -> None:
+    reporter.set_step("并发检测路径")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(_detect_sts2_with_progress, reporter),
+            executor.submit(_detect_godot_with_progress, reporter),
+        ]
+        for future in concurrent.futures.as_completed(futures):
+            future.result()
+
+
+def _detect_sts2_with_progress(reporter: _DetectPathsProgressReporter) -> None:
+    if reporter.is_cancelled():
+        return
+    reporter.set_step("检测 STS2 路径")
+    if sys.platform == "win32":
+        reporter.add_note("扫描 Steam 注册表")
+        sts2_path, note = _find_sts2_via_registry(reporter)
+        if note:
+            reporter.add_note(note)
+        if sts2_path:
+            reporter.set_sts2_path(sts2_path)
+            return
+
+    reporter.add_note("扫描常见 Steam 库目录")
+    sts2_path, note = _find_sts2_in_common_paths(reporter)
+    if note:
+        reporter.add_note(note)
+    if sts2_path:
+        reporter.set_sts2_path(sts2_path)
+
+
+def _detect_godot_with_progress(reporter: _DetectPathsProgressReporter) -> None:
+    if reporter.is_cancelled():
+        return
+    reporter.set_step("检测 Godot 路径")
+    godot_path, note = _find_godot(reporter)
+    if note:
+        reporter.add_note(note)
+    if godot_path:
+        reporter.set_godot_exe_path(godot_path)
 
 
 # ── local.props 自动生成 ──────────────────────────────────────────────────────
@@ -103,7 +292,7 @@ def pick_path(kind: str, title: str = "", initial_path: str = "", filters: list[
     return {"path": selected}
 
 
-def _find_sts2_via_registry() -> tuple[str | None, str]:
+def _find_sts2_via_registry(reporter: _DetectPathsProgressReporter | None = None) -> tuple[str | None, str]:
     """通过 Steam 注册表找 STS2 安装路径（Windows）。"""
     try:
         import winreg
@@ -113,7 +302,11 @@ def _find_sts2_via_registry() -> tuple[str | None, str]:
                 try:
                     with winreg.OpenKey(hive, sub) as k:
                         steam_path = Path(winreg.QueryValueEx(k, "InstallPath")[0])
-                        result = _search_steam_libraries(steam_path)
+                        if reporter is not None:
+                            if reporter.is_cancelled():
+                                return None, "检测已取消"
+                            reporter.add_note(f"检查 Steam 安装目录: {steam_path}")
+                        result = _search_steam_libraries(steam_path, reporter)
                         if result:
                             return str(result), _TEXT_LOADER.render(
                                 "runtime_system.project_utils_sts2_found_via_registry",
@@ -126,9 +319,8 @@ def _find_sts2_via_registry() -> tuple[str | None, str]:
     return None, ""
 
 
-def _find_sts2_in_common_paths() -> tuple[str | None, str]:
+def _find_sts2_in_common_paths(reporter: _DetectPathsProgressReporter | None = None) -> tuple[str | None, str]:
     """在常见 Steam 路径下搜索 STS2。"""
-    import os
     from config import get_config
 
     cfg_path = str(get_config().get("sts2_path", "")).strip()
@@ -143,14 +335,18 @@ def _find_sts2_in_common_paths() -> tuple[str | None, str]:
         Path(os.environ.get("USERPROFILE", "")) / ".steam" / "steam",
     ]
     for root in common_steam_roots:
+        if reporter is not None and reporter.is_cancelled():
+            return None, "检测已取消"
         if root is None:
             continue
+        if reporter is not None:
+            reporter.add_note(f"扫描目录: {root}")
         if root.name.lower() == "slay the spire 2" and root.exists():
             return str(root), _TEXT_LOADER.render(
                 "runtime_system.project_utils_sts2_found_in_common_paths",
                 {"path": root},
             )
-        result = _search_steam_libraries(root)
+        result = _search_steam_libraries(root, reporter)
         if result:
             return str(result), _TEXT_LOADER.render(
                 "runtime_system.project_utils_sts2_found_in_common_paths",
@@ -159,10 +355,13 @@ def _find_sts2_in_common_paths() -> tuple[str | None, str]:
     return None, _TEXT_LOADER.load("runtime_system.project_utils_sts2_not_found")
 
 
-def _search_steam_libraries(steam_root: Path) -> Path | None:
+def _search_steam_libraries(steam_root: Path, reporter: _DetectPathsProgressReporter | None = None) -> Path | None:
     """在 Steam 安装目录及其所有库路径中搜索 STS2。"""
     import re
     target = "Slay the Spire 2"
+
+    if reporter is not None and reporter.is_cancelled():
+        return None
 
     # 直接检查默认 steamapps
     candidate = steam_root / "steamapps" / "common" / target
@@ -175,7 +374,11 @@ def _search_steam_libraries(steam_root: Path) -> Path | None:
         try:
             text = vdf.read_text(encoding="utf-8", errors="replace")
             for m in re.finditer(r'"path"\s+"([^"]+)"', text):
+                if reporter is not None and reporter.is_cancelled():
+                    return None
                 lib = Path(m.group(1).replace("\\\\", "/"))
+                if reporter is not None:
+                    reporter.add_note(f"检查 Steam 库: {lib}")
                 candidate = lib / "steamapps" / "common" / target
                 if candidate.exists():
                     return candidate
@@ -184,10 +387,9 @@ def _search_steam_libraries(steam_root: Path) -> Path | None:
     return None
 
 
-def _find_godot() -> tuple[str | None, str]:
+def _find_godot(reporter: _DetectPathsProgressReporter | None = None) -> tuple[str | None, str]:
     """搜索 Godot 4.5.1 Mono 可执行文件。"""
     import glob as _glob
-    import os
     from config import get_config
 
     cfg_path = str(get_config().get("godot_exe_path", "")).strip()
@@ -199,6 +401,10 @@ def _find_godot() -> tuple[str | None, str]:
         str(Path.home() / "Godot" / _GODOT_EXE_NAME),
     ]
     for candidate in direct_candidates:
+        if reporter is not None and reporter.is_cancelled():
+            return None, "检测已取消"
+        if reporter is not None and candidate:
+            reporter.add_note(f"检查候选路径: {candidate}")
         resolved = _resolve_godot_candidate(candidate)
         if resolved is not None:
             return str(resolved), _TEXT_LOADER.render(
@@ -218,11 +424,15 @@ def _find_godot() -> tuple[str | None, str]:
     ]
     pattern = "Godot_v4.5.1*mono*win64.exe"
     for d in search_dirs:
+        if reporter is not None and reporter.is_cancelled():
+            return None, "检测已取消"
         if not d:
             continue
         root = Path(d)
         if not root.exists():
             continue
+        if reporter is not None:
+            reporter.add_note(f"扫描 Godot 目录: {root}")
         search_root = root if root.is_dir() else root.parent
         matches = _glob.glob(str(search_root / "**" / pattern), recursive=True)
         if matches:
@@ -234,6 +444,8 @@ def _find_godot() -> tuple[str | None, str]:
     # 也搜索 PATH
     import shutil as _shutil
     for name in ("godot", "Godot"):
+        if reporter is not None and reporter.is_cancelled():
+            return None, "检测已取消"
         found = _shutil.which(name)
         if found:
             return found, _TEXT_LOADER.render(
@@ -264,7 +476,6 @@ def _pick_path_windows(kind: str, title: str, initial_path: str, filters: list[l
         capture_output=True,
         text=True,
         encoding="utf-8",
-        timeout=60,
         check=False,
     )
     if completed.returncode != 0:
