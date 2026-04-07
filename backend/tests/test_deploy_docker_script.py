@@ -52,6 +52,9 @@ def _prepare_release_bundle(release_root: Path, target: str) -> tuple[Path, Path
         (release_root / "services" / "workstation").mkdir(parents=True)
         (release_root / "services" / "frontend").mkdir(parents=True)
         compose = "services:\n  workstation:\n    image: fake\n  frontend:\n    image: fake\n"
+    elif target == "web":
+        (release_root / "services" / "web").mkdir(parents=True)
+        compose = "services:\n  web:\n    image: fake\n"
     else:
         (release_root / "services" / "workstation").mkdir(parents=True)
         compose = "services:\n  workstation:\n    image: fake\n"
@@ -62,8 +65,15 @@ def _prepare_release_bundle(release_root: Path, target: str) -> tuple[Path, Path
     return release_root, config_path
 
 
-def _run_deploy(tmp_path: Path, target: str = "workstation", *extra_args: str) -> subprocess.CompletedProcess[str]:
+def _run_deploy(
+    tmp_path: Path,
+    target: str = "workstation",
+    *extra_args: str,
+    prepare_default_web_release: bool = False,
+) -> subprocess.CompletedProcess[str]:
     release_root, config_path = _prepare_release_bundle(tmp_path / "release", target)
+    if prepare_default_web_release:
+        _prepare_release_bundle(tmp_path / "agentthespire-web-release", "web")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     _write_fake_docker(bin_dir)
@@ -116,11 +126,15 @@ def test_deploy_docker_reuse_images_skips_build_when_local_image_exists(tmp_path
     assert "compose up" in result.docker_log
 
 
-def test_deploy_docker_hybrid_requires_explicit_web_base_url(tmp_path: Path):
-    result = _run_deploy(tmp_path, "hybrid")
+def test_deploy_docker_hybrid_defaults_to_local_web_base_url_and_deploys_web_release(tmp_path: Path):
+    result = _run_deploy(tmp_path, "hybrid", prepare_default_web_release=True)
+    runtime_config = tmp_path / "release" / "runtime" / "runtime-config.js"
 
-    assert result.returncode != 0
-    assert "-WebBaseUrl" in result.stderr
+    assert result.returncode == 0, result.stderr
+    assert "compose build" in result.docker_log
+    assert result.docker_log.count("compose up") == 2
+    assert runtime_config.exists()
+    assert 'web: "http://127.0.0.1:7870"' in runtime_config.read_text(encoding="utf-8")
 
 
 def test_deploy_docker_hybrid_builds_frontend_and_workstation_without_postgres(tmp_path: Path):
@@ -134,3 +148,10 @@ def test_deploy_docker_hybrid_builds_frontend_and_workstation_without_postgres(t
     assert "compose up" in result.docker_log
     assert runtime_config.exists()
     assert 'web: "https://platform.example.com"' in runtime_config.read_text(encoding="utf-8")
+
+
+def test_deploy_docker_hybrid_rejects_web_base_url_without_http_scheme(tmp_path: Path):
+    result = _run_deploy(tmp_path, "hybrid", "-WebBaseUrl", "127.0.0.1")
+
+    assert result.returncode != 0
+    assert "http:// 或 https://" in result.stderr

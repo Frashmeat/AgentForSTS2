@@ -5,6 +5,7 @@ import {
   detectAppPaths,
   loadLocalAiCapabilityStatus,
   loadAppConfig,
+  pickAppPath,
   updateAppConfig,
 } from "../src/shared/api/index.ts";
 
@@ -76,6 +77,42 @@ test("detectAppPaths reads detect paths endpoint", async () => {
   assert.equal(calls[0].input, "http://127.0.0.1:7860/api/config/detect_paths");
   assert.equal(calls[0].init?.method, "GET");
   assert.equal(result.notes[0], "ok");
+});
+
+test("pickAppPath posts pick path request to workstation config endpoint", async () => {
+  const calls: Array<{ input: unknown; init?: RequestInit }> = [];
+  setWorkstationApiBase();
+  Object.assign(globalThis, {
+    fetch: async (input: unknown, init?: RequestInit) => {
+      calls.push({ input, init });
+      return createMockResponse({
+        ok: true,
+        body: {
+          path: "C:/tools/Godot_v4.5.1-stable_mono_win64/Godot_v4.5.1-stable_mono_win64.exe",
+        },
+      });
+    },
+  });
+
+  const result = await pickAppPath({
+    kind: "file",
+    title: "选择 Godot 4.5.1 Mono 可执行文件",
+    initial_path: "C:/tools",
+    filters: [["Godot executable", "*.exe"]],
+  });
+
+  assert.equal(calls[0].input, "http://127.0.0.1:7860/api/config/pick_path");
+  assert.equal(calls[0].init?.method, "POST");
+  assert.equal(
+    calls[0].init?.body,
+    JSON.stringify({
+      kind: "file",
+      title: "选择 Godot 4.5.1 Mono 可执行文件",
+      initial_path: "C:/tools",
+      filters: [["Godot executable", "*.exe"]],
+    }),
+  );
+  assert.equal(result.path, "C:/tools/Godot_v4.5.1-stable_mono_win64/Godot_v4.5.1-stable_mono_win64.exe");
 });
 
 test("updateAppConfig patches config json body", async () => {

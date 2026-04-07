@@ -120,6 +120,7 @@ function Show-Help {
     Write-Host "  powershell -File .\tools\tools.ps1 split start -DryRun"
     Write-Host "  powershell -File .\tools\tools.ps1 latest package hybrid"
     Write-Host "  powershell -File .\tools\tools.ps1 latest package workstation"
+    Write-Host "  powershell -File .\tools\tools.ps1 latest deploy hybrid"
     Write-Host "  powershell -File .\tools\tools.ps1 latest deploy hybrid -WebBaseUrl https://your-web-api.example.com"
     Write-Host ""
 }
@@ -258,14 +259,12 @@ function Get-SplitStartCustomArgs {
 }
 
 function Get-LatestDeployHybridArgs {
-    while ($true) {
-        $webBaseUrl = Read-Host "Web API 基地址（必填，例如 https://platform.example.com）"
-        if (-not [string]::IsNullOrWhiteSpace($webBaseUrl)) {
-            return @("-WebBaseUrl", $webBaseUrl.Trim())
-        }
-
-        Write-Host "hybrid 部署必须提供 Web API 基地址。" -ForegroundColor Yellow
+    $webBaseUrl = Read-Host "Web API 基地址（直接回车使用默认 http://127.0.0.1:7870）"
+    if (-not [string]::IsNullOrWhiteSpace($webBaseUrl)) {
+        return @("-WebBaseUrl", $webBaseUrl.Trim())
     }
+
+    return @()
 }
 
 function Resolve-ProfileArgs {

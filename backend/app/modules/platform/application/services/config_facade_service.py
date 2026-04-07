@@ -29,6 +29,16 @@ class ConfigFacadeService:
 
         return _detect()
 
+    def pick_path(self, body: dict) -> dict:
+        from project_utils import pick_path as _pick
+
+        return _pick(
+            kind=body.get("kind", ""),
+            title=body.get("title", ""),
+            initial_path=body.get("initial_path", ""),
+            filters=body.get("filters") or [],
+        )
+
     def get_local_ai_capability_status(self) -> dict:
         config = get_config()
         return {

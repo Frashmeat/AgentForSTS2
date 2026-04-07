@@ -7,11 +7,16 @@ STS2 Mod 项目初始化工具
 from __future__ import annotations
 
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 from app.shared.prompting import PromptLoader
 
 _TEXT_LOADER = PromptLoader()
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_GODOT_DIRNAME = "Godot_v4.5.1-stable_mono_win64"
+_GODOT_EXE_NAME = f"{_GODOT_DIRNAME}.exe"
 
 
 # ── local.props 自动生成 ──────────────────────────────────────────────────────
@@ -51,9 +56,6 @@ def detect_paths() -> dict:
     自动检测 STS2 游戏路径和 Godot 4.5.1 Mono 可执行文件路径。
     返回 {"sts2_path": str|None, "godot_exe_path": str|None, "notes": [str]}
     """
-    import glob as _glob
-    import sys
-
     notes: list[str] = []
     sts2_path: str | None = None
     godot_path: str | None = None
@@ -83,6 +85,24 @@ def detect_paths() -> dict:
     }
 
 
+def pick_path(kind: str, title: str = "", initial_path: str = "", filters: list[list[str]] | None = None) -> dict:
+    """打开本机原生文件/目录选择框，返回 {"path": str|None}。"""
+    normalized_kind = str(kind).strip().lower()
+    if normalized_kind not in {"file", "directory"}:
+        raise ValueError("kind must be 'file' or 'directory'")
+
+    if sys.platform != "win32":
+        return {"path": None}
+
+    selected = _pick_path_windows(
+        kind=normalized_kind,
+        title=str(title).strip(),
+        initial_path=str(initial_path).strip(),
+        filters=filters or [],
+    )
+    return {"path": selected}
+
+
 def _find_sts2_via_registry() -> tuple[str | None, str]:
     """通过 Steam 注册表找 STS2 安装路径（Windows）。"""
     try:
@@ -109,7 +129,11 @@ def _find_sts2_via_registry() -> tuple[str | None, str]:
 def _find_sts2_in_common_paths() -> tuple[str | None, str]:
     """在常见 Steam 路径下搜索 STS2。"""
     import os
+    from config import get_config
+
+    cfg_path = str(get_config().get("sts2_path", "")).strip()
     common_steam_roots = [
+        Path(cfg_path) if cfg_path else None,
         Path("C:/Program Files (x86)/Steam"),
         Path("C:/Program Files/Steam"),
         Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")) / "Steam",
@@ -119,6 +143,13 @@ def _find_sts2_in_common_paths() -> tuple[str | None, str]:
         Path(os.environ.get("USERPROFILE", "")) / ".steam" / "steam",
     ]
     for root in common_steam_roots:
+        if root is None:
+            continue
+        if root.name.lower() == "slay the spire 2" and root.exists():
+            return str(root), _TEXT_LOADER.render(
+                "runtime_system.project_utils_sts2_found_in_common_paths",
+                {"path": root},
+            )
         result = _search_steam_libraries(root)
         if result:
             return str(result), _TEXT_LOADER.render(
@@ -155,15 +186,32 @@ def _search_steam_libraries(steam_root: Path) -> Path | None:
 
 def _find_godot() -> tuple[str | None, str]:
     """搜索 Godot 4.5.1 Mono 可执行文件。"""
-    import os, glob as _glob
+    import glob as _glob
+    import os
+    from config import get_config
+
+    cfg_path = str(get_config().get("godot_exe_path", "")).strip()
+    direct_candidates = [
+        cfg_path,
+        str(_REPO_ROOT / "godot" / _GODOT_DIRNAME / _GODOT_EXE_NAME),
+        f"C:/{_GODOT_DIRNAME}/{_GODOT_EXE_NAME}",
+        f"C:/Program Files/Godot/{_GODOT_EXE_NAME}",
+        str(Path.home() / "Godot" / _GODOT_EXE_NAME),
+    ]
+    for candidate in direct_candidates:
+        resolved = _resolve_godot_candidate(candidate)
+        if resolved is not None:
+            return str(resolved), _TEXT_LOADER.render(
+                "runtime_system.project_utils_godot_found",
+                {"path": resolved},
+            )
 
     search_dirs = [
+        cfg_path,
+        str(_REPO_ROOT / "godot"),
         "C:/Program Files/Godot",
         "C:/Program Files (x86)/Godot",
         "C:/tools",
-        str(Path.home()),
-        str(Path.home() / "Downloads"),
-        str(Path.home() / "Desktop"),
         "D:/tools",
         "E:/tools",
         os.environ.get("LOCALAPPDATA", ""),
@@ -172,7 +220,11 @@ def _find_godot() -> tuple[str | None, str]:
     for d in search_dirs:
         if not d:
             continue
-        matches = _glob.glob(str(Path(d) / "**" / pattern), recursive=True)
+        root = Path(d)
+        if not root.exists():
+            continue
+        search_root = root if root.is_dir() else root.parent
+        matches = _glob.glob(str(search_root / "**" / pattern), recursive=True)
         if matches:
             return matches[0], _TEXT_LOADER.render(
                 "runtime_system.project_utils_godot_found",
@@ -190,6 +242,96 @@ def _find_godot() -> tuple[str | None, str]:
             )
 
     return None, _TEXT_LOADER.load("runtime_system.project_utils_godot_not_found")
+
+
+def _resolve_godot_candidate(candidate: str) -> Path | None:
+    if not candidate:
+        return None
+    path = Path(candidate)
+    if path.is_file():
+        return path
+    if path.is_dir():
+        exe_path = path / _GODOT_EXE_NAME
+        if exe_path.is_file():
+            return exe_path
+    return None
+
+
+def _pick_path_windows(kind: str, title: str, initial_path: str, filters: list[list[str]]) -> str | None:
+    script = _build_windows_picker_script(kind, title, initial_path, filters)
+    completed = subprocess.run(
+        ["powershell", "-NoProfile", "-STA", "-Command", script],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=60,
+        check=False,
+    )
+    if completed.returncode != 0:
+        stderr = completed.stderr.strip()
+        raise RuntimeError(stderr or "打开路径选择器失败")
+    selected = completed.stdout.strip()
+    if not selected:
+        return None
+    return Path(selected).as_posix()
+
+
+def _build_windows_picker_script(kind: str, title: str, initial_path: str, filters: list[list[str]]) -> str:
+    encoded_title = _ps_single_quote(title)
+    encoded_initial_path = _ps_single_quote(initial_path)
+    if kind == "file":
+        filter_items = []
+        for item in filters:
+            if len(item) != 2:
+                continue
+            name, pattern = item
+            filter_items.append(f"{name} ({pattern})|{pattern}")
+        if not filter_items:
+            filter_items.append("All files (*.*)|*.*")
+        encoded_filter = _ps_single_quote("|".join(filter_items))
+        return f"""
+Add-Type -AssemblyName System.Windows.Forms
+[System.Windows.Forms.Application]::EnableVisualStyles()
+$dialog = New-Object System.Windows.Forms.OpenFileDialog
+$dialog.Title = '{encoded_title}'
+$dialog.Filter = '{encoded_filter}'
+$initialPath = '{encoded_initial_path}'
+if ($initialPath -and (Test-Path -LiteralPath $initialPath)) {{
+    $item = Get-Item -LiteralPath $initialPath
+    if ($item.PSIsContainer) {{
+        $dialog.InitialDirectory = $item.FullName
+    }} else {{
+        $dialog.InitialDirectory = $item.DirectoryName
+        $dialog.FileName = $item.Name
+    }}
+}}
+if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {{
+    Write-Output $dialog.FileName
+}}
+"""
+    return f"""
+Add-Type -AssemblyName System.Windows.Forms
+[System.Windows.Forms.Application]::EnableVisualStyles()
+$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+$dialog.Description = '{encoded_title}'
+$dialog.ShowNewFolderButton = $true
+$initialPath = '{encoded_initial_path}'
+if ($initialPath -and (Test-Path -LiteralPath $initialPath)) {{
+    $item = Get-Item -LiteralPath $initialPath
+    if ($item.PSIsContainer) {{
+        $dialog.SelectedPath = $item.FullName
+    }} else {{
+        $dialog.SelectedPath = $item.DirectoryName
+    }}
+}}
+if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {{
+    Write-Output $dialog.SelectedPath
+}}
+"""
+
+
+def _ps_single_quote(value: str) -> str:
+    return value.replace("'", "''")
 
 # ── 模板源 ─────────────────────────────────────────────────────────────────
 

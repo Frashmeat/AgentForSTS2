@@ -8,6 +8,8 @@ export interface WorkflowMigrationFlags {
 
 export interface AppConfig {
   default_project_root?: string;
+  sts2_path?: string;
+  godot_exe_path?: string;
   migration?: Partial<WorkflowMigrationFlags>;
   [key: string]: unknown;
 }
@@ -21,6 +23,17 @@ export interface DetectPathsResult {
 export interface LocalAiCapabilityStatus {
   text_ai_available: boolean;
   image_ai_available: boolean;
+}
+
+export interface PickPathRequest {
+  kind: "file" | "directory";
+  title?: string;
+  initial_path?: string;
+  filters?: string[][];
+}
+
+export interface PickPathResult {
+  path?: string | null;
 }
 
 const DEFAULT_MIGRATION_FLAGS: WorkflowMigrationFlags = {
@@ -53,6 +66,14 @@ export async function updateAppConfig(patch: Partial<AppConfig>): Promise<AppCon
 export async function detectAppPaths(): Promise<DetectPathsResult> {
   return requestJson<DetectPathsResult>("/api/config/detect_paths", {
     backend: "workstation",
+  });
+}
+
+export async function pickAppPath(body: PickPathRequest): Promise<PickPathResult> {
+  return requestJson<PickPathResult>("/api/config/pick_path", {
+    backend: "workstation",
+    method: "POST",
+    body,
   });
 }
 

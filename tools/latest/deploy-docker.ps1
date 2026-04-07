@@ -28,7 +28,7 @@ Web 端口。默认 7870。
 前端静态站端口。默认 8080。
 
 .PARAMETER WebBaseUrl
-前端运行时写入的 Web API 基地址。`hybrid` 目标下用于指向独立部署的 `web-backend`。
+前端运行时写入的 Web API 基地址。`hybrid` 未显式传入时默认使用本机 `http://127.0.0.1:<WebPort>`，并自动联动部署本机 `web-backend`；显式传入后改为指向指定地址。
 
 .PARAMETER PostgresHostPort
 Postgres 暴露到宿主机的端口。默认 5432。
@@ -62,6 +62,9 @@ pwsh -File .\tools\latest\deploy-docker.ps1 workstation
 
 .EXAMPLE
 pwsh -File .\tools\latest\deploy-docker.ps1 hybrid -WebBaseUrl https://your-web-api.example.com
+
+.EXAMPLE
+pwsh -File .\tools\latest\deploy-docker.ps1 hybrid
 
 .EXAMPLE
 pwsh -File .\tools\latest\deploy-docker.ps1 web -ResetDb -dbn agentthespire
@@ -99,7 +102,7 @@ param(
     [Alias("fp")]
     [string]$FrontendPort = "8080",
 
-    [Parameter(HelpMessage = "前端运行时写入的 Web API 基地址。`hybrid` 目标下必填，用于指向独立部署的 `web-backend`。")]
+    [Parameter(HelpMessage = "前端运行时写入的 Web API 基地址。`hybrid` 未显式传入时默认使用本机 http://127.0.0.1:<WebPort>，并自动联动部署本机 web-backend。")]
     [Alias("wb")]
     [string]$WebBaseUrl = "",
 
@@ -173,6 +176,102 @@ function Assert-CommandExists {
 
     if (-not (Get-Command $CommandName -ErrorAction SilentlyContinue)) {
         throw "未找到命令: $CommandName"
+    }
+}
+
+function Test-AbsoluteHttpUrl {
+    param([string]$Value)
+
+    $uri = $null
+    if (-not [Uri]::TryCreate($Value, [UriKind]::Absolute, [ref]$uri)) {
+        return $false
+    }
+
+    return $uri.Scheme -in @("http", "https")
+}
+
+function Get-CurrentPowerShellExecutablePath {
+    return (Get-Process -Id $PID).Path
+}
+
+function Get-DefaultHybridWebReleaseRoot {
+    param([string]$HybridReleaseRoot)
+
+    if (-not [string]::IsNullOrWhiteSpace($HybridReleaseRoot)) {
+        $resolvedHybridRoot = [System.IO.Path]::GetFullPath($HybridReleaseRoot)
+        $parentDir = Split-Path -Path $resolvedHybridRoot -Parent
+        $leafName = Split-Path -Path $resolvedHybridRoot -Leaf
+        if ($leafName -match "hybrid-release$") {
+            return Join-Path $parentDir ($leafName -replace "hybrid-release$", "web-release")
+        }
+        return Join-Path $parentDir "agentthespire-web-release"
+    }
+
+    return Join-Path $PSScriptRoot "artifacts\agentthespire-web-release"
+}
+
+function Get-DefaultHybridWebProjectName {
+    param([string]$HybridProjectName)
+
+    if (-not [string]::IsNullOrWhiteSpace($HybridProjectName)) {
+        if ($HybridProjectName -match "hybrid-release$") {
+            return ($HybridProjectName -replace "hybrid-release$", "web-release")
+        }
+    }
+
+    return "agentthespire-web-release"
+}
+
+function Invoke-HybridLocalWebDeployment {
+    param(
+        [string]$HybridReleaseRoot,
+        [string]$HybridProjectName
+    )
+
+    $webReleaseRoot = Get-DefaultHybridWebReleaseRoot -HybridReleaseRoot $HybridReleaseRoot
+    Assert-PathExists -Path $webReleaseRoot -Label "hybrid 默认本机 web release 目录"
+
+    $shellPath = Get-CurrentPowerShellExecutablePath
+    $invokeArgs = @(
+        "-NoProfile",
+        "-File",
+        $PSCommandPath,
+        "web",
+        "-ReleaseRoot",
+        $webReleaseRoot,
+        "-ProjectName",
+        (Get-DefaultHybridWebProjectName -HybridProjectName $HybridProjectName),
+        "-ConfigPath",
+        $ConfigPath,
+        "-WebPort",
+        $WebPort,
+        "-PostgresHostPort",
+        $PostgresHostPort,
+        "-PostgresDb",
+        $PostgresDb,
+        "-PostgresUser",
+        $PostgresUser,
+        "-PostgresPassword",
+        $PostgresPassword
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($PostgresImage)) {
+        $invokeArgs += @("-PostgresImage", $PostgresImage)
+    }
+    if ($ResetDatabase.IsPresent) {
+        $invokeArgs += "-ResetDatabase"
+    }
+    if ($ReuseImages.IsPresent) {
+        $invokeArgs += "-ReuseImages"
+    }
+    if ($RebuildImages.IsPresent) {
+        $invokeArgs += "-RebuildImages"
+    }
+
+    Write-Host "hybrid 默认使用本机 Web API：先联动部署 web-backend ($webReleaseRoot)..."
+    & $shellPath @invokeArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "hybrid 默认联动部署本机 web-backend 失败，退出码: $LASTEXITCODE"
     }
 }
 
@@ -440,11 +539,27 @@ $effectiveProjectName = if ([string]::IsNullOrWhiteSpace($ProjectName)) {
     $ProjectName
 }
 
-if ($Target -eq "hybrid" -and [string]::IsNullOrWhiteSpace($WebBaseUrl)) {
-    throw "hybrid 部署必须显式传入 -WebBaseUrl，用于把前端平台接口指向独立部署的 web-backend，例如 https://your-web-api.example.com"
+if ($Target -eq "hybrid") {
+    $explicitWebBaseUrlProvided = $PSBoundParameters.ContainsKey("WebBaseUrl")
+
+    if ($explicitWebBaseUrlProvided) {
+        if ([string]::IsNullOrWhiteSpace($WebBaseUrl)) {
+            throw "显式传入 -WebBaseUrl 时不能为空；不传该参数则会默认使用本机 http://127.0.0.1:$WebPort"
+        }
+        if (-not (Test-AbsoluteHttpUrl -Value $WebBaseUrl)) {
+            throw "显式传入的 -WebBaseUrl 必须是完整的 http:// 或 https:// 地址，例如 http://127.0.0.1:$WebPort 或 https://your-web-api.example.com"
+        }
+    } else {
+        $WebBaseUrl = "http://127.0.0.1:{0}" -f $WebPort
+    }
 }
 
 Assert-CommandExists -CommandName "docker"
+
+if ($Target -eq "hybrid" -and (-not $PSBoundParameters.ContainsKey("WebBaseUrl"))) {
+    Invoke-HybridLocalWebDeployment -HybridReleaseRoot $ReleaseRoot -HybridProjectName $ProjectName
+}
+
 Assert-PathExists -Path $effectiveReleaseRoot -Label "release 目录"
 
 $composeFile = Join-Path $effectiveReleaseRoot "docker-compose.yml"

@@ -55,6 +55,21 @@ def detect_paths(request: Request = None):
     return _detect()
 
 
+@router.post("/pick_path")
+def pick_path(body: dict, request: Request = None):
+    facade = _config_facade(request)
+    if facade is not None:
+        return facade.pick_path(body)
+    from project_utils import pick_path as _pick
+
+    return _pick(
+        kind=body.get("kind", ""),
+        title=body.get("title", ""),
+        initial_path=body.get("initial_path", ""),
+        filters=body.get("filters") or [],
+    )
+
+
 @router.get("/local_ai_capability_status")
 def local_ai_capability_status(request: Request = None):
     facade = _config_facade(request)

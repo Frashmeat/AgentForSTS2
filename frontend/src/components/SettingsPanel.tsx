@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { X, FolderOpen, Gamepad2, Cpu, Image, Search } from "lucide-react";
-import { detectAppPaths, loadAppConfig, updateAppConfig } from "../shared/api/index.ts";
+import { detectAppPaths, loadAppConfig, pickAppPath, updateAppConfig } from "../shared/api/index.ts";
+import { createSettingsPickPathRequest, type SettingsPathField } from "./settingsPathPicker.ts";
 
 const inputCls = "w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-100";
 const selectCls = "w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-slate-800 focus:outline-none focus:border-amber-400";
+const readonlyInputCls = `${inputCls} bg-slate-50 text-slate-500`;
 
 const PROVIDER_MODELS: Record<string, string[]> = {
   bfl:         ["flux.2-flex", "flux.2-pro", "flux.2-klein", "flux.2-max", "flux.1.1-pro"],
@@ -47,7 +49,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [cfg, setCfg] = useState<any>(null);
   const [saving, setSaving] = useState(false);
   const [detecting, setDetecting] = useState(false);
-  const [detectNotes, setDetectNotes] = useState<string[]>([]);
+  const [pathNotes, setPathNotes] = useState<string[]>([]);
   const [llmKey, setLlmKey] = useState("");
   const [imgKey, setImgKey] = useState("");
   const [imgSecret, setImgSecret] = useState("");
@@ -80,7 +82,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
   async function detectPaths() {
     setDetecting(true);
-    setDetectNotes([]);
+    setPathNotes([]);
     try {
       const res = await detectAppPaths();
       const notes: string[] = res.notes ?? [];
@@ -92,11 +94,26 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         set(["godot_exe_path"], res.godot_exe_path);
         notes.push(`✓ Godot: ${res.godot_exe_path}`);
       }
-      setDetectNotes(notes);
+      setPathNotes(notes);
     } catch {
-      setDetectNotes(["检测失败，请手动填写路径"]);
+      setPathNotes(["检测失败，请使用右侧选择按钮手动指定路径"]);
     } finally {
       setDetecting(false);
+    }
+  }
+
+  async function choosePath(field: SettingsPathField) {
+    if (!cfg) return;
+    const request = createSettingsPickPathRequest(field, String(cfg[field] ?? ""));
+    try {
+      const result = await pickAppPath(request);
+      if (!result.path) {
+        return;
+      }
+      set([field], result.path);
+      setPathNotes([`✓ ${request.title}: ${result.path}`]);
+    } catch {
+      setPathNotes([`${request.title}失败，请确认本机工作站后端可用后重试`]);
     }
   }
 
@@ -150,9 +167,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   <Search size={12} />
                   {detecting ? "检测中…" : "自动检测路径"}
                 </button>
-                {detectNotes.length > 0 && (
+                {pathNotes.length > 0 && (
                   <div className="space-y-0.5">
-                    {detectNotes.map((n, i) => (
+                    {pathNotes.map((n, i) => (
                       <p key={i} className={`text-xs ${n.startsWith("✓") ? "text-green-600" : "text-slate-400"}`}>{n}</p>
                     ))}
                   </div>
@@ -161,34 +178,61 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   label="默认 Mod 项目目录"
                   hint="新建/修改 Mod 时的默认路径"
                 >
-                  <input
-                    value={cfg.default_project_root || ""}
-                    onChange={e => set(["default_project_root"], e.target.value)}
-                    placeholder="E:/STS2mod/testscenario"
-                    className={inputCls + " font-mono"}
-                  />
+                  <div className="flex gap-2">
+                    <input
+                      value={cfg.default_project_root || ""}
+                      readOnly
+                      placeholder="E:/STS2mod/testscenario"
+                      className={readonlyInputCls + " font-mono"}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => choosePath("default_project_root")}
+                      className="shrink-0 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:border-amber-300 hover:text-amber-600 transition-colors"
+                    >
+                      选择目录
+                    </button>
+                  </div>
                 </Field>
                 <Field
                   label="STS2 游戏根目录"
                   hint="用于一键部署 Mod 文件"
                 >
-                  <input
-                    value={cfg.sts2_path || ""}
-                    onChange={e => set(["sts2_path"], e.target.value)}
-                    placeholder="E:/steam/steamapps/common/Slay the Spire 2"
-                    className={inputCls + " font-mono"}
-                  />
+                  <div className="flex gap-2">
+                    <input
+                      value={cfg.sts2_path || ""}
+                      readOnly
+                      placeholder="E:/steam/steamapps/common/Slay the Spire 2"
+                      className={readonlyInputCls + " font-mono"}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => choosePath("sts2_path")}
+                      className="shrink-0 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:border-amber-300 hover:text-amber-600 transition-colors"
+                    >
+                      选择目录
+                    </button>
+                  </div>
                 </Field>
                 <Field
                   label="Godot 4.5.1 Mono 路径"
                   hint="用于打包 .pck 文件，必须是 4.5.1 Mono 版本"
                 >
-                  <input
-                    value={cfg.godot_exe_path || ""}
-                    onChange={e => set(["godot_exe_path"], e.target.value)}
-                    placeholder="C:/tools/Godot_v4.5.1-stable_mono_win64.exe"
-                    className={inputCls + " font-mono"}
-                  />
+                  <div className="flex gap-2">
+                    <input
+                      value={cfg.godot_exe_path || ""}
+                      readOnly
+                      placeholder="C:/tools/Godot_v4.5.1-stable_mono_win64.exe"
+                      className={readonlyInputCls + " font-mono"}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => choosePath("godot_exe_path")}
+                      className="shrink-0 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:border-amber-300 hover:text-amber-600 transition-colors"
+                    >
+                      选择文件
+                    </button>
+                  </div>
                 </Field>
               </SGroup>
 
