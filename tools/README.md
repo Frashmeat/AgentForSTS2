@@ -84,7 +84,7 @@ tools/
 ├── start/                    # 传统启动脚本
 ├── split-local/              # 独立前端 + 本地 workstation 启停脚本
 ├── dev/                      # 开发辅助脚本
-├── latest/                   # 打包、Docker 部署、安装器脚本
+├── latest/                   # 打包、混合部署、安装器脚本
 └── archive/                  # 已归档历史脚本与产物
 ```
 
@@ -151,14 +151,15 @@ tools/
 
 ### latest
 
-`tools\latest\` 继续保留为发布脚本目录，当前不改名，避免打断现有打包与 Docker 部署链路。
+`tools\latest\` 继续保留为发布脚本目录，当前不改名，避免打断现有打包与发布链路。
 
 - `tools\latest\package-release.ps1`
   按目标打包 release bundle，并可输出 zip。
 - `tools\latest\deploy-docker.ps1`
-  按目标部署 Docker release。
-  默认会基于当前 release 重新 `build` 目标镜像；只有显式传入 `-ReuseImages` 时才会复用已有镜像。
-  `hybrid` 目标默认会把前端平台接口写成本机 `http://127.0.0.1:7870`，并联动部署本机 `web-backend`；只有显式传入 `-WebBaseUrl` 时才覆盖该地址。
+  按目标部署 mixed release。
+  `web` 继续使用 Docker；`workstation` 与 `frontend` 改为本机启动；`full` 会本机启动 `workstation` 并只用 Docker 部署 `web`；`hybrid` 会本机启动 `workstation + frontend`，默认还会联动部署本机 `web-backend`。
+  默认会基于当前 release 重新 `build` 需要 Docker 的目标镜像；只有显式传入 `-ReuseImages` 时才会复用已有镜像。
+  `hybrid` / `frontend` 未显式传入 `-WebBaseUrl` 时会默认写入本机 `http://127.0.0.1:7870`；`hybrid` 此时还会联动部署本机 `web-backend`。
 - `tools\latest\build-workstation-installer.ps1`
   构建 Windows 工作站安装器。
 - `tools\latest\templates\`
@@ -197,8 +198,11 @@ tools/
 - `tools.ps1` 现在默认优先提供菜单式选择，适合日常本地使用；参数直达模式更适合脚本化或熟悉命令后的快速调用。
 - `tools\latest\package-release.ps1 workstation` 仍会把 launcher 脚本复制到 release 目录下的 `launcher/` 中。
 - `tools\latest\package-release.ps1 hybrid` 会同时整理 `frontend` 与 `workstation` 两类用户侧服务，并附带 launcher。
+- `tools\latest\deploy-docker.ps1 workstation` 会在本机拉起 `workstation-backend`，并把配置写到 `services\workstation\config.json` 与 `runtime\workstation.config.json`。
+- `tools\latest\deploy-docker.ps1 frontend` 会在本机拉起静态前端服务，并把 `runtime-config.js` 写入 release 内的前端 `dist/`。
+- `tools\latest\deploy-docker.ps1 full` 会在本机拉起 `workstation-backend`，同时只对 `web` 服务执行 Docker 部署。
 - `tools\latest\deploy-docker.ps1 hybrid` 默认会联动部署本机 `web-backend`，并把前端 `web` 地址写成 `http://127.0.0.1:7870`。
 - `tools\latest\deploy-docker.ps1 hybrid -WebBaseUrl https://your-web-api.example.com` 会改为指向显式传入的地址，此时不再默认覆盖为本机地址。
-- `hybrid` 形态下 `runtime/workstation.config.json` 需要以可写方式挂载到 `workstation-backend`，否则设置页调用 `/api/config` 时无法把本地配置持久化回 release 目录。
+- `hybrid` / `workstation` / `full` 形态下，工作站配置会同时写入 `services\workstation\config.json` 与 `runtime\workstation.config.json`，方便运行时读取和排查。
 - `runtime-config.js` 仍属于部署期配置文件；更换 `workstation` 或 `web` 地址时优先覆盖该文件，不重新构建前端。
 - `workstation` 地址应配置为本机或 LAN 可达地址，不应配置为公网用户本机地址。

@@ -1,9 +1,9 @@
 ﻿<#
 .SYNOPSIS
-按目标启动 AgentTheSpire 的 Docker 部署。
+按目标启动 AgentTheSpire 的混合部署。
 
 .DESCRIPTION
-读取 release bundle、生成运行时配置并执行 docker compose。
+读取 release bundle、生成运行时配置，并按目标在本机或 Docker 中启动对应服务。
 直接执行脚本且不传任何参数时，会默认显示本帮助而不是立即启动部署。
 
 .PARAMETER Target
@@ -28,7 +28,7 @@ Web 端口。默认 7870。
 前端静态站端口。默认 8080。
 
 .PARAMETER WebBaseUrl
-前端运行时写入的 Web API 基地址。`hybrid` 未显式传入时默认使用本机 `http://127.0.0.1:<WebPort>`，并自动联动部署本机 `web-backend`；显式传入后改为指向指定地址。
+前端运行时写入的 Web API 基地址。`hybrid` / `frontend` 未显式传入时默认使用本机 `http://127.0.0.1:<WebPort>`，并可联动部署本机 Docker `web-backend`；显式传入后改为指向指定地址。
 
 .PARAMETER PostgresHostPort
 Postgres 暴露到宿主机的端口。默认 5432。
@@ -177,6 +177,65 @@ function Assert-CommandExists {
     if (-not (Get-Command $CommandName -ErrorAction SilentlyContinue)) {
         throw "未找到命令: $CommandName"
     }
+}
+
+function Resolve-PythonCommand {
+    param([string]$BackendRoot = "")
+
+    if (-not [string]::IsNullOrWhiteSpace($BackendRoot)) {
+        $venvPython = Join-Path $BackendRoot ".venv\Scripts\python.exe"
+        if (Test-Path -LiteralPath $venvPython) {
+            return $venvPython
+        }
+    }
+
+    $globalPython = Get-Command python -ErrorAction SilentlyContinue
+    if ($null -ne $globalPython) {
+        return $globalPython.Source
+    }
+
+    throw "未找到可用的 Python 解释器。"
+}
+
+function Stop-ProcessListeningOnPort {
+    param([int]$Port)
+
+    $pids = @(
+        netstat -ano 2>$null |
+            Select-String ":$Port\s+.*LISTENING" |
+            ForEach-Object { ($_ -split "\s+")[-1] } |
+            Where-Object { $_ -match "^\d+$" } |
+            Select-Object -Unique
+    )
+
+    foreach ($pid in $pids) {
+        try {
+            Stop-Process -Id ([int]$pid) -Force -ErrorAction Stop
+        } catch {
+        }
+    }
+}
+
+function Wait-HttpReady {
+    param(
+        [string]$Url,
+        [int]$MaxAttempts = 30
+    )
+
+    if ([Environment]::GetEnvironmentVariable("ATS_SKIP_LOCAL_READY_CHECK") -eq "1") {
+        return
+    }
+
+    for ($attempt = 0; $attempt -lt $MaxAttempts; $attempt += 1) {
+        try {
+            Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 2 | Out-Null
+            return
+        } catch {
+            Start-Sleep -Seconds 1
+        }
+    }
+
+    throw "等待本地服务就绪超时：$Url"
 }
 
 function Test-AbsoluteHttpUrl {
@@ -359,6 +418,20 @@ function Write-RuntimeConfigFile {
     Set-Content -LiteralPath $OutputPath -Value $json -Encoding UTF8
 }
 
+function Write-LocalServiceConfig {
+    param(
+        [hashtable]$Config,
+        [string]$ServiceConfigPath,
+        [string]$RuntimeMirrorPath = ""
+    )
+
+    Write-RuntimeConfigFile -Config $Config -OutputPath $ServiceConfigPath
+
+    if (-not [string]::IsNullOrWhiteSpace($RuntimeMirrorPath)) {
+        Write-RuntimeConfigFile -Config $Config -OutputPath $RuntimeMirrorPath
+    }
+}
+
 function Write-ComposeEnvFile {
     param(
         [string]$TargetName,
@@ -415,12 +488,13 @@ function Invoke-DockerCompose {
         [string]$ComposeFile,
         [string]$EnvFile,
         [string]$ComposeProjectName,
-        [string[]]$ComposeArgs
+        [string[]]$ComposeArgs,
+        [string[]]$Services = @()
     )
 
     Push-Location $BundleDir
     try {
-        & docker compose --project-name $ComposeProjectName --env-file $EnvFile -f $ComposeFile @ComposeArgs
+        & docker compose --project-name $ComposeProjectName --env-file $EnvFile -f $ComposeFile @ComposeArgs @Services
         if ($LASTEXITCODE -ne 0) {
             throw "docker compose 执行失败，退出码: $LASTEXITCODE"
         }
@@ -456,6 +530,105 @@ window.__AGENT_THE_SPIRE_WS_BASES__ = {
     Set-Content -LiteralPath $OutputPath -Value $content -Encoding UTF8
 }
 
+function Start-LocalWorkstationDeployment {
+    param(
+        [string]$ReleaseRoot,
+        [string]$SourceConfigPath,
+        [int]$ResolvedWorkstationPort,
+        [string]$ResolvedWebBaseUrl
+    )
+
+    $serviceRoot = Join-Path (Join-Path $ReleaseRoot "services") "workstation"
+    $backendRoot = Join-Path $serviceRoot "backend"
+    $frontendDist = Join-Path $serviceRoot "frontend\dist"
+    $serviceConfigPath = Join-Path $serviceRoot "config.json"
+    $runtimeMirrorPath = Join-Path (Join-Path $ReleaseRoot "runtime") "workstation.config.json"
+
+    Assert-PathExists -Path $backendRoot -Label "workstation backend 目录"
+    Assert-PathExists -Path $frontendDist -Label "workstation frontend/dist 目录"
+
+    $workstationConfig = New-RuntimeConfig -SourceConfigPath $SourceConfigPath -Mode "workstation" -DbUser $PostgresUser -DbPassword $PostgresPassword -DbName $PostgresDb
+    Write-LocalServiceConfig -Config $workstationConfig -ServiceConfigPath $serviceConfigPath -RuntimeMirrorPath $runtimeMirrorPath
+    Write-FrontendRuntimeConfig -OutputPath (Join-Path $frontendDist "runtime-config.js") `
+        -ResolvedWorkstationBaseUrl ("http://127.0.0.1:{0}" -f $ResolvedWorkstationPort) `
+        -ResolvedWorkstationWsBaseUrl ("ws://127.0.0.1:{0}" -f $ResolvedWorkstationPort) `
+        -ResolvedWebBaseUrl $ResolvedWebBaseUrl
+
+    Stop-ProcessListeningOnPort -Port $ResolvedWorkstationPort
+    $pythonCommand = Resolve-PythonCommand -BackendRoot $backendRoot
+    $process = Start-Process -FilePath $pythonCommand -ArgumentList @(
+        "-m",
+        "uvicorn",
+        "main_workstation:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "$ResolvedWorkstationPort"
+    ) -WorkingDirectory $backendRoot -PassThru
+
+    if ([Environment]::GetEnvironmentVariable("ATS_SKIP_LOCAL_READY_CHECK") -eq "1") {
+        Start-Sleep -Milliseconds 200
+        return $process
+    }
+
+    try {
+        Wait-HttpReady -Url ("http://127.0.0.1:{0}/api/config" -f $ResolvedWorkstationPort)
+    } catch {
+        try {
+            Stop-Process -Id $process.Id -Force -ErrorAction Stop
+        } catch {
+        }
+        throw
+    }
+
+    return $process
+}
+
+function Start-LocalFrontendDeployment {
+    param(
+        [string]$FrontendDist,
+        [int]$ResolvedFrontendPort,
+        [int]$ResolvedWorkstationPort,
+        [string]$ResolvedWebBaseUrl
+    )
+
+    Assert-PathExists -Path $FrontendDist -Label "frontend/dist 目录"
+
+    Write-FrontendRuntimeConfig -OutputPath (Join-Path $FrontendDist "runtime-config.js") `
+        -ResolvedWorkstationBaseUrl ("http://127.0.0.1:{0}" -f $ResolvedWorkstationPort) `
+        -ResolvedWorkstationWsBaseUrl ("ws://127.0.0.1:{0}" -f $ResolvedWorkstationPort) `
+        -ResolvedWebBaseUrl $ResolvedWebBaseUrl
+
+    Stop-ProcessListeningOnPort -Port $ResolvedFrontendPort
+    $pythonCommand = Resolve-PythonCommand
+    $process = Start-Process -FilePath $pythonCommand -ArgumentList @(
+        "-m",
+        "http.server",
+        "$ResolvedFrontendPort",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        $FrontendDist
+    ) -WorkingDirectory $FrontendDist -PassThru
+
+    if ([Environment]::GetEnvironmentVariable("ATS_SKIP_LOCAL_READY_CHECK") -eq "1") {
+        Wait-Process -Id $process.Id -Timeout 2 -ErrorAction SilentlyContinue
+        return $process
+    }
+
+    try {
+        Wait-HttpReady -Url ("http://127.0.0.1:{0}/runtime-config.js" -f $ResolvedFrontendPort)
+    } catch {
+        try {
+            Stop-Process -Id $process.Id -Force -ErrorAction Stop
+        } catch {
+        }
+        throw
+    }
+
+    return $process
+}
+
 function Get-BuildServices {
     param(
         [ValidateSet("full", "hybrid", "workstation", "frontend", "web")]
@@ -463,10 +636,10 @@ function Get-BuildServices {
     )
 
     switch ($TargetName) {
-        "full" { return @("workstation", "web") }
-        "hybrid" { return @("workstation", "frontend") }
-        "workstation" { return @("workstation") }
-        "frontend" { return @("frontend") }
+        "full" { return @("web") }
+        "hybrid" { return @() }
+        "workstation" { return @() }
+        "frontend" { return @() }
         "web" { return @("web") }
         default { throw "未知 Target: $TargetName" }
     }
@@ -539,7 +712,11 @@ $effectiveProjectName = if ([string]::IsNullOrWhiteSpace($ProjectName)) {
     $ProjectName
 }
 
-if ($Target -eq "hybrid") {
+$resolvedWorkstationPort = [int]$WorkstationPort
+$resolvedWebPort = [int]$WebPort
+$resolvedFrontendPort = [int]$FrontendPort
+
+if ($Target -in @("hybrid", "frontend")) {
     $explicitWebBaseUrlProvided = $PSBoundParameters.ContainsKey("WebBaseUrl")
 
     if ($explicitWebBaseUrlProvided) {
@@ -554,8 +731,6 @@ if ($Target -eq "hybrid") {
     }
 }
 
-Assert-CommandExists -CommandName "docker"
-
 if ($Target -eq "hybrid" -and (-not $PSBoundParameters.ContainsKey("WebBaseUrl"))) {
     Invoke-HybridLocalWebDeployment -HybridReleaseRoot $ReleaseRoot -HybridProjectName $ProjectName
 }
@@ -566,40 +741,44 @@ $composeFile = Join-Path $effectiveReleaseRoot "docker-compose.yml"
 $runtimeDir = Join-Path $effectiveReleaseRoot "runtime"
 $envFile = Join-Path $runtimeDir ".env"
 $targetNeedsPostgres = $Target -in @("full", "web")
+$targetUsesDockerInCurrentRelease = $Target -in @("full", "web")
 $resolvedPostgresImage = if ($targetNeedsPostgres) {
     Resolve-PostgresImage -PreferredImage $PostgresImage
 } else {
     ""
 }
 $shouldResetDatabase = $Target -eq "full" -or $ResetDatabase.IsPresent
-
-Assert-PathExists -Path $composeFile -Label "docker-compose.yml"
 $null = New-Item -ItemType Directory -Path $runtimeDir -Force
-Write-ComposeEnvFile -TargetName $Target -EnvPath $envFile -ResolvedPostgresImage $resolvedPostgresImage
 
-if ($Target -in @("full", "hybrid", "workstation", "web")) {
-    $serviceDir = Join-Path (Join-Path $effectiveReleaseRoot "services") "workstation"
-    if ($Target -eq "web") {
-        $serviceDir = Join-Path (Join-Path $effectiveReleaseRoot "services") "web"
-    }
-    $sourceConfigPath = Get-SourceConfigPath -PreferredPath $ConfigPath -FallbackServiceDir $serviceDir
+if ($targetUsesDockerInCurrentRelease) {
+    Assert-CommandExists -CommandName "docker"
+    Assert-PathExists -Path $composeFile -Label "docker-compose.yml"
+    Write-ComposeEnvFile -TargetName $Target -EnvPath $envFile -ResolvedPostgresImage $resolvedPostgresImage
+}
+
+$workstationServiceDir = Join-Path (Join-Path $effectiveReleaseRoot "services") "workstation"
+$frontendServiceDir = Join-Path (Join-Path $effectiveReleaseRoot "services") "frontend"
+$webServiceDir = Join-Path (Join-Path $effectiveReleaseRoot "services") "web"
+
+if ($Target -in @("full", "hybrid", "workstation")) {
+    $sourceConfigPath = Get-SourceConfigPath -PreferredPath $ConfigPath -FallbackServiceDir $workstationServiceDir
+} elseif ($Target -eq "web") {
+    $sourceConfigPath = Get-SourceConfigPath -PreferredPath $ConfigPath -FallbackServiceDir $webServiceDir
 }
 
 if ($Target -in @("full", "hybrid", "workstation")) {
     $workstationConfig = New-RuntimeConfig -SourceConfigPath $sourceConfigPath -Mode "workstation" -DbUser $PostgresUser -DbPassword $PostgresPassword -DbName $PostgresDb
-    Write-RuntimeConfigFile -Config $workstationConfig -OutputPath (Join-Path $runtimeDir "workstation.config.json")
 }
 
-if ($Target -eq "hybrid") {
-    Write-FrontendRuntimeConfig -OutputPath (Join-Path $runtimeDir "runtime-config.js") `
-        -ResolvedWorkstationBaseUrl ("http://127.0.0.1:{0}" -f $WorkstationPort) `
-        -ResolvedWorkstationWsBaseUrl ("ws://127.0.0.1:{0}" -f $WorkstationPort) `
-        -ResolvedWebBaseUrl $WebBaseUrl
+if ($Target -eq "full") {
+    Write-RuntimeConfigFile -Config $workstationConfig -OutputPath (Join-Path $runtimeDir "workstation.config.json")
+} elseif ($Target -eq "hybrid" -or $Target -eq "workstation") {
+    Write-RuntimeConfigFile -Config $workstationConfig -OutputPath (Join-Path $runtimeDir "workstation.config.json")
 }
 
 if ($Target -eq "full" -or $Target -eq "web") {
     if ($Target -eq "full") {
-        $webSourceConfigPath = Get-SourceConfigPath -PreferredPath $ConfigPath -FallbackServiceDir (Join-Path (Join-Path $effectiveReleaseRoot "services") "web")
+        $webSourceConfigPath = Get-SourceConfigPath -PreferredPath $ConfigPath -FallbackServiceDir $webServiceDir
     } else {
         $webSourceConfigPath = $sourceConfigPath
     }
@@ -608,7 +787,7 @@ if ($Target -eq "full" -or $Target -eq "web") {
 }
 
 if ($shouldResetDatabase) {
-    if ($Target -notin @("full", "web")) {
+    if (-not $targetUsesDockerInCurrentRelease) {
         throw "-ResetDatabase 仅适用于包含 Web 后端数据库的部署目标: full / web"
     }
     # full 目标默认重建数据库，避免同机联调时复用旧卷里的脏迁移状态。
@@ -621,41 +800,65 @@ if ($shouldResetDatabase) {
     Invoke-DockerCompose -BundleDir $effectiveReleaseRoot -ComposeFile $composeFile -EnvFile $envFile -ComposeProjectName $effectiveProjectName -ComposeArgs @("down", "--volumes", "--remove-orphans")
 }
 
-$buildServices = Get-BuildServices -TargetName $Target
-$servicesToBuild = @()
+if ($targetUsesDockerInCurrentRelease) {
+    $buildServices = Get-BuildServices -TargetName $Target
+    $servicesToBuild = @()
 
-foreach ($serviceName in $buildServices) {
-    $imageName = Get-ComposeImageName -ComposeProjectName $effectiveProjectName -ServiceName $serviceName
-    if ($RebuildImages) {
-        Remove-DockerImageIfExists -ImageName $imageName
-        $servicesToBuild += $serviceName
-        continue
-    }
-
-    if ($ReuseImages) {
-        if (-not (Test-DockerImageExists -ImageName $imageName)) {
+    foreach ($serviceName in $buildServices) {
+        $imageName = Get-ComposeImageName -ComposeProjectName $effectiveProjectName -ServiceName $serviceName
+        if ($RebuildImages) {
+            Remove-DockerImageIfExists -ImageName $imageName
             $servicesToBuild += $serviceName
+            continue
         }
-        continue
+
+        if ($ReuseImages) {
+            if (-not (Test-DockerImageExists -ImageName $imageName)) {
+                $servicesToBuild += $serviceName
+            }
+            continue
+        }
+
+        $servicesToBuild += $serviceName
     }
 
-    $servicesToBuild += $serviceName
+    if ($servicesToBuild.Count -gt 0) {
+        # 默认以当前 release 为准重建镜像，避免发布目录更新后仍复用旧镜像。
+        Write-Host "检测到需要构建本地镜像: $($servicesToBuild -join ', ')"
+        Invoke-DockerCompose -BundleDir $effectiveReleaseRoot -ComposeFile $composeFile -EnvFile $envFile -ComposeProjectName $effectiveProjectName -ComposeArgs @("build") -Services $servicesToBuild
+    }
+
+    Write-Host "启动 Docker 部署..."
+    Invoke-DockerCompose -BundleDir $effectiveReleaseRoot -ComposeFile $composeFile -EnvFile $envFile -ComposeProjectName $effectiveProjectName -ComposeArgs @("up", "-d", "--no-build") -Services $buildServices
 }
 
-if ($servicesToBuild.Count -gt 0) {
-    # 默认以当前 release 为准重建镜像，避免发布目录更新后仍复用旧镜像。
-    Write-Host "检测到需要构建本地镜像: $($servicesToBuild -join ', ')"
-    Invoke-DockerCompose -BundleDir $effectiveReleaseRoot -ComposeFile $composeFile -EnvFile $envFile -ComposeProjectName $effectiveProjectName -ComposeArgs @("build")
-}
+$localProcesses = @()
 
-Write-Host "启动 Docker 部署..."
-Invoke-DockerCompose -BundleDir $effectiveReleaseRoot -ComposeFile $composeFile -EnvFile $envFile -ComposeProjectName $effectiveProjectName -ComposeArgs @("up", "-d", "--no-build")
+switch ($Target) {
+    "workstation" {
+        $localProcesses += Start-LocalWorkstationDeployment -ReleaseRoot $effectiveReleaseRoot -SourceConfigPath $sourceConfigPath -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebBaseUrl $WebBaseUrl
+    }
+    "frontend" {
+        $frontendDist = Join-Path $frontendServiceDir "frontend\dist"
+        $localProcesses += Start-LocalFrontendDeployment -FrontendDist $frontendDist -ResolvedFrontendPort $resolvedFrontendPort -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebBaseUrl $WebBaseUrl
+    }
+    "hybrid" {
+        $localProcesses += Start-LocalWorkstationDeployment -ReleaseRoot $effectiveReleaseRoot -SourceConfigPath $sourceConfigPath -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebBaseUrl $WebBaseUrl
+        $frontendDist = Join-Path $frontendServiceDir "frontend\dist"
+        $localProcesses += Start-LocalFrontendDeployment -FrontendDist $frontendDist -ResolvedFrontendPort $resolvedFrontendPort -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebBaseUrl $WebBaseUrl
+    }
+    "full" {
+        $localProcesses += Start-LocalWorkstationDeployment -ReleaseRoot $effectiveReleaseRoot -SourceConfigPath $sourceConfigPath -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebBaseUrl ("http://127.0.0.1:{0}" -f $resolvedWebPort)
+    }
+}
 
 Write-Host ""
 Write-Host "部署完成:"
 Write-Host "  Target       : $Target"
 Write-Host "  Release 目录 : $effectiveReleaseRoot"
-Write-Host "  Compose Env  : $envFile"
+if ($targetUsesDockerInCurrentRelease) {
+    Write-Host "  Compose Env  : $envFile"
+}
 Write-Host "  复用已有镜像 : $($ReuseImages.IsPresent)"
 Write-Host "  强制重建镜像 : $($RebuildImages.IsPresent)"
 Write-Host "  重建数据库   : $shouldResetDatabase"
@@ -674,11 +877,23 @@ switch ($Target) {
     }
     "workstation" {
         Write-Host "  工作站地址   : http://127.0.0.1:$WorkstationPort"
+        if (-not [string]::IsNullOrWhiteSpace($WebBaseUrl)) {
+            Write-Host "  Web API 基址 : $WebBaseUrl"
+        }
     }
     "frontend" {
         Write-Host "  前端地址     : http://127.0.0.1:$FrontendPort"
+        Write-Host "  Web API 基址 : $WebBaseUrl"
     }
     "web" {
         Write-Host "  Web 地址     : http://127.0.0.1:$WebPort"
+    }
+}
+if ($localProcesses.Count -gt 0) {
+    $processSummary = ($localProcesses | Where-Object { $null -ne $_ } | ForEach-Object {
+        "{0} (PID {1})" -f $_.ProcessName, $_.Id
+    }) -join ", "
+    if (-not [string]::IsNullOrWhiteSpace($processSummary)) {
+        Write-Host "  本机进程     : $processSummary"
     }
 }

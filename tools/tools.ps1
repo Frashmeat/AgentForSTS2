@@ -111,7 +111,7 @@ function Show-Help {
     Write-Host "  dev verify-install     校验安装 wrapper"
     Write-Host "  dev decompile          反编译 sts2.dll"
     Write-Host "  latest package <target> 打包 release bundle"
-    Write-Host "  latest deploy <target>  部署 Docker release"
+    Write-Host "  latest deploy <target>  部署 mixed release（web 用 Docker，其余目标按需本机启动）"
     Write-Host "  latest installer       构建 workstation 安装器"
     Write-Host ""
     Write-Host "示例："
@@ -414,20 +414,20 @@ function Get-MenuGroups {
                     (New-MenuProfile -Key "nozip" -Label "打包但不压缩" -Description "保留 release 目录，跳过 zip" -Args @("-NoZip"))
                     (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 package-release.ps1 参数说明" -Args @("-Help"))
                 ))
-                (New-MenuCommand -Key "latest-deploy-workstation" -Label "部署 workstation release" -Description "执行 workstation Docker 部署" -ScriptPath (Join-Path $toolsRoot "latest\deploy-docker.ps1") -InvocationName "latest deploy workstation" -DefaultArgs @("workstation") -Profiles @(
-                    (New-MenuProfile -Key "default" -Label "直接部署" -Description "按默认参数部署 workstation")
+                (New-MenuCommand -Key "latest-deploy-workstation" -Label "部署 workstation release" -Description "在本机启动 workstation-backend" -ScriptPath (Join-Path $toolsRoot "latest\deploy-docker.ps1") -InvocationName "latest deploy workstation" -DefaultArgs @("workstation") -Profiles @(
+                    (New-MenuProfile -Key "default" -Label "直接部署" -Description "按默认参数在本机启动 workstation")
                     (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 deploy-docker.ps1 参数说明" -Args @("-Help"))
                 ))
                 (New-MenuCommand -Key "latest-deploy-hybrid" -Label "部署 hybrid release" -Description "部署正式推荐的 frontend + workstation 用户侧 bundle" -ScriptPath (Join-Path $toolsRoot "latest\deploy-docker.ps1") -InvocationName "latest deploy hybrid" -DefaultArgs @("hybrid") -Profiles @(
-                    (New-MenuProfile -Key "default" -Label "输入 Web API 地址后部署" -Description "部署前先填写独立 web-backend 的访问地址" -PromptHandler "LatestDeployHybrid")
+                    (New-MenuProfile -Key "default" -Label "配置 Web API 后部署" -Description "可留空使用本机 web-backend，也可填写远端地址" -PromptHandler "LatestDeployHybrid")
                     (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 deploy-docker.ps1 参数说明" -Args @("-Help"))
                 ))
-                (New-MenuCommand -Key "latest-deploy-full" -Label "部署 full release" -Description "执行 full Docker 部署" -ScriptPath (Join-Path $toolsRoot "latest\deploy-docker.ps1") -InvocationName "latest deploy full" -DefaultArgs @("full") -Profiles @(
-                    (New-MenuProfile -Key "default" -Label "直接部署" -Description "按默认参数部署 full")
+                (New-MenuCommand -Key "latest-deploy-full" -Label "部署 full release" -Description "本机启动 workstation，并用 Docker 部署 web" -ScriptPath (Join-Path $toolsRoot "latest\deploy-docker.ps1") -InvocationName "latest deploy full" -DefaultArgs @("full") -Profiles @(
+                    (New-MenuProfile -Key "default" -Label "直接部署" -Description "按默认参数部署 full mixed 形态")
                     (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 deploy-docker.ps1 参数说明" -Args @("-Help"))
                 ))
-                (New-MenuCommand -Key "latest-deploy-frontend" -Label "部署 frontend release" -Description "执行前端静态站 Docker 部署" -ScriptPath (Join-Path $toolsRoot "latest\deploy-docker.ps1") -InvocationName "latest deploy frontend" -DefaultArgs @("frontend") -Profiles @(
-                    (New-MenuProfile -Key "default" -Label "直接部署" -Description "按默认参数部署 frontend")
+                (New-MenuCommand -Key "latest-deploy-frontend" -Label "部署 frontend release" -Description "在本机启动前端静态站" -ScriptPath (Join-Path $toolsRoot "latest\deploy-docker.ps1") -InvocationName "latest deploy frontend" -DefaultArgs @("frontend") -Profiles @(
+                    (New-MenuProfile -Key "default" -Label "直接部署" -Description "按默认参数在本机启动 frontend")
                     (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 deploy-docker.ps1 参数说明" -Args @("-Help"))
                 ))
                 (New-MenuCommand -Key "latest-deploy-web" -Label "部署 web release" -Description "执行 web Docker 部署" -ScriptPath (Join-Path $toolsRoot "latest\deploy-docker.ps1") -InvocationName "latest deploy web" -DefaultArgs @("web") -Profiles @(

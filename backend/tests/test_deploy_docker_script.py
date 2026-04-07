@@ -47,16 +47,44 @@ def _write_fake_docker(bin_dir: Path) -> Path:
     return docker_cmd
 
 
+def _write_fake_python(bin_dir: Path) -> Path:
+    python_cmd = bin_dir / "python.cmd"
+    python_cmd.write_text(
+        "@echo off\r\n"
+        "setlocal EnableDelayedExpansion\r\n"
+        "set \"LOG=%MOCK_PYTHON_LOG%\"\r\n"
+        ">>\"%LOG%\" echo python %*\r\n"
+        "exit /b 0\r\n",
+        encoding="utf-8",
+    )
+    return python_cmd
+
+
 def _prepare_release_bundle(release_root: Path, target: str) -> tuple[Path, Path]:
     if target == "hybrid":
-        (release_root / "services" / "workstation").mkdir(parents=True)
-        (release_root / "services" / "frontend").mkdir(parents=True)
+        (release_root / "services" / "workstation" / "backend").mkdir(parents=True)
+        (release_root / "services" / "workstation" / "frontend" / "dist").mkdir(parents=True)
+        (release_root / "services" / "frontend" / "frontend" / "dist").mkdir(parents=True)
+        (release_root / "services" / "workstation" / "config.example.json").write_text("{}", encoding="utf-8")
         compose = "services:\n  workstation:\n    image: fake\n  frontend:\n    image: fake\n"
+    elif target == "full":
+        (release_root / "services" / "workstation" / "backend").mkdir(parents=True)
+        (release_root / "services" / "workstation" / "frontend" / "dist").mkdir(parents=True)
+        (release_root / "services" / "web").mkdir(parents=True)
+        (release_root / "services" / "workstation" / "config.example.json").write_text("{}", encoding="utf-8")
+        (release_root / "services" / "web" / "config.example.json").write_text("{}", encoding="utf-8")
+        compose = "services:\n  workstation:\n    image: fake\n  web:\n    image: fake\n"
+    elif target == "frontend":
+        (release_root / "services" / "frontend" / "frontend" / "dist").mkdir(parents=True)
+        compose = "services:\n  frontend:\n    image: fake\n"
     elif target == "web":
         (release_root / "services" / "web").mkdir(parents=True)
+        (release_root / "services" / "web" / "config.example.json").write_text("{}", encoding="utf-8")
         compose = "services:\n  web:\n    image: fake\n"
     else:
-        (release_root / "services" / "workstation").mkdir(parents=True)
+        (release_root / "services" / "workstation" / "backend").mkdir(parents=True)
+        (release_root / "services" / "workstation" / "frontend" / "dist").mkdir(parents=True)
+        (release_root / "services" / "workstation" / "config.example.json").write_text("{}", encoding="utf-8")
         compose = "services:\n  workstation:\n    image: fake\n"
 
     (release_root / "docker-compose.yml").write_text(compose, encoding="utf-8")
@@ -77,12 +105,16 @@ def _run_deploy(
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     _write_fake_docker(bin_dir)
+    _write_fake_python(bin_dir)
 
     log_path = tmp_path / "docker.log"
+    python_log_path = tmp_path / "python.log"
     env = os.environ.copy()
     env["PATH"] = str(bin_dir) + os.pathsep + env["PATH"]
     env["MOCK_DOCKER_LOG"] = str(log_path)
     env["MOCK_DOCKER_IMAGE_EXISTS"] = "1"
+    env["MOCK_PYTHON_LOG"] = str(python_log_path)
+    env["ATS_SKIP_LOCAL_READY_CHECK"] = "1"
 
     command = [
         "pwsh",
@@ -107,6 +139,7 @@ def _run_deploy(
         check=False,
     )
     completed.docker_log = log_path.read_text(encoding="utf-8") if log_path.exists() else ""  # type: ignore[attr-defined]
+    completed.python_log = python_log_path.read_text(encoding="utf-8") if python_log_path.exists() else ""  # type: ignore[attr-defined]
     return completed
 
 
@@ -114,38 +147,41 @@ def test_deploy_docker_default_builds_even_when_local_image_exists(tmp_path: Pat
     result = _run_deploy(tmp_path)
 
     assert result.returncode == 0, result.stderr
-    assert "compose build" in result.docker_log
-    assert "compose up" in result.docker_log
+    assert result.docker_log == ""
+    assert "-m uvicorn main_workstation:app --host 127.0.0.1 --port 7860" in result.python_log
 
 
 def test_deploy_docker_reuse_images_skips_build_when_local_image_exists(tmp_path: Path):
     result = _run_deploy(tmp_path, "-ReuseImages")
 
     assert result.returncode == 0, result.stderr
-    assert "compose build" not in result.docker_log
-    assert "compose up" in result.docker_log
+    assert result.docker_log == ""
+    assert "-m uvicorn main_workstation:app --host 127.0.0.1 --port 7860" in result.python_log
 
 
 def test_deploy_docker_hybrid_defaults_to_local_web_base_url_and_deploys_web_release(tmp_path: Path):
     result = _run_deploy(tmp_path, "hybrid", prepare_default_web_release=True)
-    runtime_config = tmp_path / "release" / "runtime" / "runtime-config.js"
+    runtime_config = tmp_path / "release" / "services" / "frontend" / "frontend" / "dist" / "runtime-config.js"
 
     assert result.returncode == 0, result.stderr
-    assert "compose build" in result.docker_log
-    assert result.docker_log.count("compose up") == 2
+    assert result.docker_log.count("compose build") == 1
+    assert result.docker_log.count("compose up") == 1
+    assert "-m uvicorn main_workstation:app --host 127.0.0.1 --port 7860" in result.python_log
+    assert "-m http.server 8080 --bind 127.0.0.1 --directory" in result.python_log
     assert runtime_config.exists()
     assert 'web: "http://127.0.0.1:7870"' in runtime_config.read_text(encoding="utf-8")
 
 
-def test_deploy_docker_hybrid_builds_frontend_and_workstation_without_postgres(tmp_path: Path):
+def test_deploy_docker_hybrid_runs_locally_without_current_release_docker_when_web_base_is_remote(tmp_path: Path):
     result = _run_deploy(tmp_path, "hybrid", "-WebBaseUrl", "https://platform.example.com")
 
-    runtime_config = tmp_path / "release" / "runtime" / "runtime-config.js"
+    runtime_config = tmp_path / "release" / "services" / "frontend" / "frontend" / "dist" / "runtime-config.js"
 
     assert result.returncode == 0, result.stderr
     assert "image inspect postgres:16-alpine" not in result.docker_log
-    assert "compose build" in result.docker_log
-    assert "compose up" in result.docker_log
+    assert result.docker_log == ""
+    assert "-m uvicorn main_workstation:app --host 127.0.0.1 --port 7860" in result.python_log
+    assert "-m http.server 8080 --bind 127.0.0.1 --directory" in result.python_log
     assert runtime_config.exists()
     assert 'web: "https://platform.example.com"' in runtime_config.read_text(encoding="utf-8")
 
@@ -155,3 +191,27 @@ def test_deploy_docker_hybrid_rejects_web_base_url_without_http_scheme(tmp_path:
 
     assert result.returncode != 0
     assert "http:// 或 https://" in result.stderr
+
+
+def test_deploy_docker_frontend_runs_local_static_server_without_docker(tmp_path: Path):
+    result = _run_deploy(tmp_path, "frontend", "-WebBaseUrl", "https://platform.example.com")
+
+    runtime_config = tmp_path / "release" / "services" / "frontend" / "frontend" / "dist" / "runtime-config.js"
+
+    assert result.returncode == 0, result.stderr
+    assert result.docker_log == ""
+    assert "-m http.server 8080 --bind 127.0.0.1 --directory" in result.python_log
+    assert runtime_config.exists()
+    assert 'web: "https://platform.example.com"' in runtime_config.read_text(encoding="utf-8")
+
+
+def test_deploy_docker_full_runs_local_workstation_and_only_dockerizes_web(tmp_path: Path):
+    result = _run_deploy(tmp_path, "full")
+
+    workstation_config = tmp_path / "release" / "services" / "workstation" / "config.json"
+
+    assert result.returncode == 0, result.stderr
+    assert result.docker_log.count("compose build") == 1
+    assert result.docker_log.count("compose up") == 1
+    assert "-m uvicorn main_workstation:app --host 127.0.0.1 --port 7860" in result.python_log
+    assert workstation_config.exists()
