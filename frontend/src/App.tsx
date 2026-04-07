@@ -1,13 +1,12 @@
 import { useState, useRef, useEffect, useReducer } from "react";
-import { Settings, Swords } from "lucide-react";
+import { Bug, LayoutDashboard, Sparkles, Wrench } from "lucide-react";
 import { Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import ExecutionModeDialog from "./components/ExecutionModeDialog.tsx";
 import { PlatformAuthUnavailableNotice } from "./components/PlatformAuthUnavailableNotice.tsx";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { UserEntry } from "./components/UserEntry.tsx";
+import { WorkspaceShell } from "./components/workspace/WorkspaceShell.tsx";
 import { approveApproval, executeApproval, rejectApproval, type ApprovalRequest } from "./shared/api/index.ts";
 import { type SingleAssetSocket } from "./lib/single_asset_ws";
-import { cn } from "./lib/utils";
 import { BatchGenerationFeatureView } from "./features/batch-generation/view";
 import { ForgotPasswordPage } from "./features/auth/ForgotPasswordPage.tsx";
 import { LoginPage } from "./features/auth/LoginPage.tsx";
@@ -41,6 +40,36 @@ import { useProjectCreation } from "./shared/useProjectCreation.ts";
 type AppTab = WorkspaceTab;
 
 const PLATFORM_WORKFLOW_VERSION = "2026.04.04";
+const workspaceNavItems = [
+  {
+    id: "single" as const,
+    label: "单资产",
+    shortLabel: "单资产",
+    description: "描述、生成、审批和构建单个资产。",
+    icon: Sparkles,
+  },
+  {
+    id: "batch" as const,
+    label: "Mod 规划",
+    shortLabel: "规划",
+    description: "批量规划多个资产，并跟踪每个条目的执行状态。",
+    icon: LayoutDashboard,
+  },
+  {
+    id: "edit" as const,
+    label: "修改 Mod",
+    shortLabel: "修改",
+    description: "分析现有项目结构，并让 Code Agent 执行改动。",
+    icon: Wrench,
+  },
+  {
+    id: "log" as const,
+    label: "崩溃分析",
+    shortLabel: "日志",
+    description: "读取最近日志并生成故障定位建议。",
+    icon: Bug,
+  },
+];
 
 function resolveAppTab(value: string | null): AppTab {
   switch (value) {
@@ -388,7 +417,7 @@ export default function App() {
     });
   }
 
-  function renderWorkspaceShell() {
+  function renderWorkspaceContent() {
     const singleAssetRequiresImageAi = imageMode === "ai";
     const singleAssetInputSummary = `${assetType}:${assetName.trim() || "未命名资产"}`;
     const singleAssetItem: PlatformJobCreateItem = {
@@ -407,67 +436,20 @@ export default function App() {
 
     return (
       <>
-        <div className="px-6 pt-4 flex gap-1 border-b border-slate-200 bg-white">
-          <button
-            onClick={() => updateActiveTab("single")}
-            className={cn(
-              "px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors",
-              activeTab === "single"
-                ? "border-amber-500 text-amber-600 bg-amber-50"
-                : "border-transparent text-slate-400 hover:text-slate-600"
-            )}
-          >
-            单资产
-          </button>
-          <button
-            onClick={() => updateActiveTab("batch")}
-            className={cn(
-              "px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors",
-              activeTab === "batch"
-                ? "border-amber-500 text-amber-600 bg-amber-50"
-                : "border-transparent text-slate-400 hover:text-slate-600"
-            )}
-          >
-            Mod 规划
-          </button>
-          <button
-            onClick={() => updateActiveTab("edit")}
-            className={cn(
-              "px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors",
-              activeTab === "edit"
-                ? "border-amber-500 text-amber-600 bg-amber-50"
-                : "border-transparent text-slate-400 hover:text-slate-600"
-            )}
-          >
-            修改 Mod
-          </button>
-          <button
-            onClick={() => updateActiveTab("log")}
-            className={cn(
-              "px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors",
-              activeTab === "log"
-                ? "border-amber-500 text-amber-600 bg-amber-50"
-                : "border-transparent text-slate-400 hover:text-slate-600"
-            )}
-          >
-            崩溃分析
-          </button>
-        </div>
-
         {activeTab === "batch" && (
-          <div className="px-6 py-6">
+          <div className="px-4 py-4 sm:px-6 sm:py-6">
             <BatchGenerationFeatureView onRequestExecution={handleExecutionRequest} />
           </div>
         )}
 
         {activeTab === "edit" && (
-          <div className="px-6 py-6">
+          <div className="px-4 py-4 sm:px-6 sm:py-6">
             <ModEditorFeatureView onRequestExecution={handleExecutionRequest} />
           </div>
         )}
 
         {activeTab === "log" && (
-          <div className="px-6 py-6">
+          <div className="px-4 py-4 sm:px-6 sm:py-6">
             <LogAnalysisFeatureView onRequestExecution={handleExecutionRequest} />
           </div>
         )}
@@ -576,25 +558,16 @@ export default function App() {
   const isWorkspaceRoute = location.pathname === "/";
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800">
-      <header className="sticky top-0 z-10 border-b border-slate-200 px-6 py-3 flex items-center justify-between bg-white/80 backdrop-blur-sm shadow-sm">
-        <div className="flex items-center gap-2">
-          <Swords className="text-amber-600" size={22} />
-          <span className="font-bold tracking-wide text-amber-600 text-lg">AgentTheSpire</span>
-        </div>
-        <div className="flex items-center gap-3">
-          <UserEntry />
-          {isWorkspaceRoute && (
-            <button onClick={() => setSettingsOpen(true)} className="flex items-center gap-1.5 py-1.5 px-3 rounded-lg bg-slate-100 hover:bg-amber-50 hover:text-amber-700 text-slate-500 hover:border-amber-300 border border-transparent transition-colors text-sm font-medium">
-              <Settings size={14} />
-              设置
-            </button>
-          )}
-        </div>
-      </header>
-
+    <div className="min-h-screen bg-[var(--workspace-bg)] text-slate-800">
       <Routes>
-        <Route path="/" element={renderWorkspaceShell()} />
+        <Route
+          path="/"
+          element={
+            <WorkspaceShell activeTab={activeTab} navItems={workspaceNavItems} onTabChange={updateActiveTab} onOpenSettings={() => setSettingsOpen(true)}>
+              {renderWorkspaceContent()}
+            </WorkspaceShell>
+          }
+        />
         <Route
           path="/auth/login"
           element={isAuthAvailable ? <div className="px-6 py-10"><LoginPage /></div> : buildPlatformAuthUnavailableElement("当前环境不支持登录", "这是本机工作站模式，未接入独立 Web 平台服务，因此登录与注册入口不可用。")}
