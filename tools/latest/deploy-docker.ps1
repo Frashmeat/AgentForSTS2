@@ -334,6 +334,153 @@ function Get-ProcessLogPaths {
     }
 }
 
+function Get-LocalLogMirrorRegistry {
+    if (-not (Get-Variable -Name ATS_LOCAL_LOG_MIRRORS -Scope Global -ErrorAction SilentlyContinue)) {
+        $global:ATS_LOCAL_LOG_MIRRORS = @{}
+    }
+
+    return $global:ATS_LOCAL_LOG_MIRRORS
+}
+
+function Stop-LocalLogMirroring {
+    param([string]$ServiceName)
+
+    $registry = Get-LocalLogMirrorRegistry
+    if (-not $registry.ContainsKey($ServiceName)) {
+        return
+    }
+
+    $entry = $registry[$ServiceName]
+    foreach ($sourceIdentifier in @($entry.SourceIdentifiers)) {
+        Unregister-Event -SourceIdentifier $sourceIdentifier -ErrorAction SilentlyContinue
+    }
+
+    foreach ($job in @($entry.Jobs)) {
+        if ($null -ne $job) {
+            Remove-Job -Id $job.Id -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    foreach ($writer in @($entry.Writers)) {
+        if ($null -ne $writer) {
+            $writer.Dispose()
+        }
+    }
+
+    $registry.Remove($ServiceName)
+}
+
+function New-ProcessStartInfo {
+    param(
+        [string]$FilePath,
+        [string[]]$ArgumentList,
+        [string]$WorkingDirectory
+    )
+
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.WorkingDirectory = $WorkingDirectory
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.CreateNoWindow = $true
+
+    if ($FilePath -match "\.(cmd|bat)$") {
+        $startInfo.FileName = $env:ComSpec
+        $startInfo.ArgumentList.Add("/d")
+        $startInfo.ArgumentList.Add("/c")
+        $startInfo.ArgumentList.Add($FilePath)
+        foreach ($argument in $ArgumentList) {
+            $startInfo.ArgumentList.Add([string]$argument)
+        }
+        return $startInfo
+    }
+
+    $startInfo.FileName = $FilePath
+    foreach ($argument in $ArgumentList) {
+        $startInfo.ArgumentList.Add([string]$argument)
+    }
+    return $startInfo
+}
+
+function Start-LocalProcessWithMirroredLogs {
+    param(
+        [string]$ServiceName,
+        [string]$FilePath,
+        [string[]]$ArgumentList,
+        [string]$WorkingDirectory,
+        [string]$StdOutPath,
+        [string]$StdErrPath
+    )
+
+    Stop-LocalLogMirroring -ServiceName $ServiceName
+
+    $stdoutDir = Split-Path -Path $StdOutPath -Parent
+    $stderrDir = Split-Path -Path $StdErrPath -Parent
+    if (-not [string]::IsNullOrWhiteSpace($stdoutDir)) {
+        $null = New-Item -ItemType Directory -Path $stdoutDir -Force
+    }
+    if (-not [string]::IsNullOrWhiteSpace($stderrDir)) {
+        $null = New-Item -ItemType Directory -Path $stderrDir -Force
+    }
+
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($StdOutPath, "", $utf8NoBom)
+    [System.IO.File]::WriteAllText($StdErrPath, "", $utf8NoBom)
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = New-ProcessStartInfo -FilePath $FilePath -ArgumentList $ArgumentList -WorkingDirectory $WorkingDirectory
+    $process.EnableRaisingEvents = $true
+
+    $stdoutWriter = New-Object System.IO.StreamWriter($StdOutPath, $false, $utf8NoBom)
+    $stdoutWriter.AutoFlush = $true
+    $stderrWriter = New-Object System.IO.StreamWriter($StdErrPath, $false, $utf8NoBom)
+    $stderrWriter.AutoFlush = $true
+
+    if (-not $process.Start()) {
+        $stdoutWriter.Dispose()
+        $stderrWriter.Dispose()
+        throw "启动本地进程失败：$ServiceName"
+    }
+
+    $stdoutSourceIdentifier = "ATS.LocalLogMirror.$ServiceName.$($process.Id).stdout"
+    $stderrSourceIdentifier = "ATS.LocalLogMirror.$ServiceName.$($process.Id).stderr"
+    $stdoutJob = Register-ObjectEvent -InputObject $process -EventName OutputDataReceived -SourceIdentifier $stdoutSourceIdentifier -MessageData @{
+        Writer = $stdoutWriter
+        ServiceName = $ServiceName
+        StreamName = "stdout"
+    } -Action {
+        $line = $Event.SourceEventArgs.Data
+        if ($null -eq $line) {
+            return
+        }
+
+        $Event.MessageData.Writer.WriteLine($line)
+    }
+    $stderrJob = Register-ObjectEvent -InputObject $process -EventName ErrorDataReceived -SourceIdentifier $stderrSourceIdentifier -MessageData @{
+        Writer = $stderrWriter
+        ServiceName = $ServiceName
+        StreamName = "stderr"
+    } -Action {
+        $line = $Event.SourceEventArgs.Data
+        if ($null -eq $line) {
+            return
+        }
+
+        $Event.MessageData.Writer.WriteLine($line)
+    }
+
+    $registry = Get-LocalLogMirrorRegistry
+    $registry[$ServiceName] = @{
+        SourceIdentifiers = @($stdoutSourceIdentifier, $stderrSourceIdentifier)
+        Jobs = @($stdoutJob, $stderrJob)
+        Writers = @($stdoutWriter, $stderrWriter)
+    }
+
+    $process.BeginOutputReadLine()
+    $process.BeginErrorReadLine()
+    return $process
+}
+
 function Get-LogTail {
     param(
         [string]$Path,
@@ -403,9 +550,9 @@ function Stop-ProcessListeningOnPort {
             Select-Object -Unique
     )
 
-    foreach ($pid in $pids) {
+    foreach ($listeningProcessId in $pids) {
         try {
-            Stop-Process -Id ([int]$pid) -Force -ErrorAction Stop
+            Stop-Process -Id ([int]$listeningProcessId) -Force -ErrorAction Stop
         } catch {
         }
     }
@@ -446,6 +593,161 @@ function Test-AbsoluteHttpUrl {
 
 function Get-CurrentPowerShellExecutablePath {
     return (Get-Process -Id $PID).Path
+}
+
+function Get-LogViewerPidPath {
+    param(
+        [string]$ReleaseRoot,
+        [string]$ServiceName
+    )
+
+    return Join-Path (Join-Path $ReleaseRoot "runtime") ("{0}.log-viewer.pid" -f $ServiceName)
+}
+
+function Stop-LogViewerWindow {
+    param(
+        [string]$ReleaseRoot,
+        [string]$ServiceName
+    )
+
+    $pidPath = Get-LogViewerPidPath -ReleaseRoot $ReleaseRoot -ServiceName $ServiceName
+    if (-not (Test-Path -LiteralPath $pidPath)) {
+        return
+    }
+
+    $viewerProcessId = ""
+    try {
+        $viewerProcessId = (Get-Content -LiteralPath $pidPath -Raw).Trim()
+    } catch {
+        $viewerProcessId = ""
+    }
+
+    if ($viewerProcessId -match "^\d+$") {
+        try {
+            Stop-Process -Id ([int]$viewerProcessId) -Force -ErrorAction Stop
+        } catch {
+        }
+    }
+
+    Remove-Item -LiteralPath $pidPath -Force -ErrorAction SilentlyContinue
+}
+
+function Ensure-LogViewerScript {
+    param([string]$ReleaseRoot)
+
+    $runtimeDir = Join-Path $ReleaseRoot "runtime"
+    $null = New-Item -ItemType Directory -Path $runtimeDir -Force
+    $scriptPath = Join-Path $runtimeDir "watch-service-logs.ps1"
+    $content = @'
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$ServiceName,
+
+    [Parameter(Mandatory = $true)]
+    [string]$StdOutPath,
+
+    [Parameter(Mandatory = $true)]
+    [string]$StdErrPath
+)
+
+$ErrorActionPreference = "Stop"
+
+function Ensure-LogFile {
+    param([string]$Path)
+
+    if (Test-Path -LiteralPath $Path) {
+        return
+    }
+
+    $parent = Split-Path -Path $Path -Parent
+    if (-not [string]::IsNullOrWhiteSpace($parent)) {
+        $null = New-Item -ItemType Directory -Path $parent -Force
+    }
+    $null = New-Item -ItemType File -Path $Path -Force
+}
+
+function Read-NewLogLines {
+    param(
+        [string]$Path,
+        [string]$Label,
+        [hashtable]$Offsets
+    )
+
+    Ensure-LogFile -Path $Path
+
+    $offset = if ($Offsets.ContainsKey($Path)) { [int64]$Offsets[$Path] } else { 0L }
+    $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+    try {
+        $null = $stream.Seek($offset, [System.IO.SeekOrigin]::Begin)
+        $reader = New-Object System.IO.StreamReader($stream)
+        try {
+            while (($line = $reader.ReadLine()) -ne $null) {
+                Write-Host ("[{0}] {1}" -f $Label, $line)
+            }
+            $Offsets[$Path] = $stream.Position
+        }
+        finally {
+            $reader.Dispose()
+        }
+    }
+    finally {
+        $stream.Dispose()
+    }
+}
+
+$Host.UI.RawUI.WindowTitle = "AgentTheSpire - $ServiceName 日志"
+Write-Host "正在跟随 $ServiceName 日志..."
+Write-Host "stdout: $StdOutPath"
+Write-Host "stderr: $StdErrPath"
+Write-Host ""
+
+$offsets = @{}
+while ($true) {
+    Read-NewLogLines -Path $StdOutPath -Label "$ServiceName/stdout" -Offsets $offsets
+    Read-NewLogLines -Path $StdErrPath -Label "$ServiceName/stderr" -Offsets $offsets
+    Start-Sleep -Milliseconds 350
+}
+'@
+    Set-Content -LiteralPath $scriptPath -Value $content -Encoding UTF8
+    return $scriptPath
+}
+
+function Start-LogViewerWindow {
+    param(
+        [string]$ReleaseRoot,
+        [string]$ServiceName,
+        [string]$StdOutPath,
+        [string]$StdErrPath
+    )
+
+    $recordPath = [Environment]::GetEnvironmentVariable("ATS_LOG_VIEWER_RECORD_FILE")
+    if (-not [string]::IsNullOrWhiteSpace($recordPath)) {
+        Add-Content -LiteralPath $recordPath -Value ("{0}|{1}|{2}" -f $ServiceName, $StdOutPath, $StdErrPath) -Encoding UTF8
+        return
+    }
+
+    if ([Environment]::GetEnvironmentVariable("ATS_DISABLE_LOG_WINDOWS") -eq "1") {
+        return
+    }
+
+    Stop-LogViewerWindow -ReleaseRoot $ReleaseRoot -ServiceName $ServiceName
+
+    $shellPath = Get-CurrentPowerShellExecutablePath
+    $viewerScript = Ensure-LogViewerScript -ReleaseRoot $ReleaseRoot
+    $viewerProcess = Start-Process -FilePath $shellPath -ArgumentList @(
+        "-NoExit",
+        "-File",
+        $viewerScript,
+        "-ServiceName",
+        $ServiceName,
+        "-StdOutPath",
+        $StdOutPath,
+        "-StdErrPath",
+        $StdErrPath
+    ) -PassThru
+
+    Set-Content -LiteralPath (Get-LogViewerPidPath -ReleaseRoot $ReleaseRoot -ServiceName $ServiceName) -Value $viewerProcess.Id -Encoding UTF8
 }
 
 function Get-DefaultHybridWebReleaseRoot {
@@ -761,7 +1063,7 @@ function Start-LocalWorkstationDeployment {
     Write-Host "  Python 解释器 : $pythonCommand"
     Write-Host "  stdout 日志   : $($logPaths.StdOut)"
     Write-Host "  stderr 日志   : $($logPaths.StdErr)"
-    $process = Start-Process -FilePath $pythonCommand -ArgumentList @(
+    $process = Start-LocalProcessWithMirroredLogs -ServiceName "workstation" -FilePath $pythonCommand -ArgumentList @(
         "-m",
         "uvicorn",
         "main_workstation:app",
@@ -769,7 +1071,8 @@ function Start-LocalWorkstationDeployment {
         "127.0.0.1",
         "--port",
         "$ResolvedWorkstationPort"
-    ) -WorkingDirectory $backendRoot -RedirectStandardOutput $logPaths.StdOut -RedirectStandardError $logPaths.StdErr -PassThru
+    ) -WorkingDirectory $backendRoot -StdOutPath $logPaths.StdOut -StdErrPath $logPaths.StdErr
+    Start-LogViewerWindow -ReleaseRoot $ReleaseRoot -ServiceName "workstation" -StdOutPath $logPaths.StdOut -StdErrPath $logPaths.StdErr
 
     try {
         Wait-LocalServiceReady -Process $process -ServiceName "workstation-backend" -Url ("http://127.0.0.1:{0}/api/config" -f $ResolvedWorkstationPort) -StdOutPath $logPaths.StdOut -StdErrPath $logPaths.StdErr
@@ -808,7 +1111,7 @@ function Start-LocalFrontendDeployment {
     Write-Host "  Python 解释器 : $pythonCommand"
     Write-Host "  stdout 日志   : $($logPaths.StdOut)"
     Write-Host "  stderr 日志   : $($logPaths.StdErr)"
-    $process = Start-Process -FilePath $pythonCommand -ArgumentList @(
+    $process = Start-LocalProcessWithMirroredLogs -ServiceName "frontend" -FilePath $pythonCommand -ArgumentList @(
         "-m",
         "http.server",
         "$ResolvedFrontendPort",
@@ -816,7 +1119,8 @@ function Start-LocalFrontendDeployment {
         "127.0.0.1",
         "--directory",
         $FrontendDist
-    ) -WorkingDirectory $FrontendDist -RedirectStandardOutput $logPaths.StdOut -RedirectStandardError $logPaths.StdErr -PassThru
+    ) -WorkingDirectory $FrontendDist -StdOutPath $logPaths.StdOut -StdErrPath $logPaths.StdErr
+    Start-LogViewerWindow -ReleaseRoot $ReleaseRoot -ServiceName "frontend" -StdOutPath $logPaths.StdOut -StdErrPath $logPaths.StdErr
 
     try {
         Wait-LocalServiceReady -Process $process -ServiceName "frontend-static" -Url ("http://127.0.0.1:{0}/runtime-config.js" -f $ResolvedFrontendPort) -StdOutPath $logPaths.StdOut -StdErrPath $logPaths.StdErr

@@ -54,6 +54,8 @@ def _write_fake_python(bin_dir: Path) -> Path:
         "setlocal EnableDelayedExpansion\r\n"
         "set \"LOG=%MOCK_PYTHON_LOG%\"\r\n"
         ">>\"%LOG%\" echo python %*\r\n"
+        "echo MOCK-STDOUT %*\r\n"
+        ">&2 echo MOCK-STDERR %*\r\n"
         "exit /b 0\r\n",
         encoding="utf-8",
     )
@@ -98,6 +100,7 @@ def _run_deploy(
     target: str = "workstation",
     *extra_args: str,
     prepare_default_web_release: bool = False,
+    record_log_viewers: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     release_root, config_path = _prepare_release_bundle(tmp_path / "release", target)
     if prepare_default_web_release:
@@ -116,6 +119,9 @@ def _run_deploy(
     env["MOCK_PYTHON_LOG"] = str(python_log_path)
     env["ATS_SKIP_LOCAL_READY_CHECK"] = "1"
     env["ATS_PYTHON_COMMAND"] = str(python_cmd)
+    env["ATS_DISABLE_LOG_WINDOWS"] = "1"
+    if record_log_viewers:
+        env["ATS_LOG_VIEWER_RECORD_FILE"] = str(tmp_path / "log-viewers.txt")
 
     command = [
         "pwsh",
@@ -141,6 +147,8 @@ def _run_deploy(
     )
     completed.docker_log = log_path.read_text(encoding="utf-8") if log_path.exists() else ""  # type: ignore[attr-defined]
     completed.python_log = python_log_path.read_text(encoding="utf-8") if python_log_path.exists() else ""  # type: ignore[attr-defined]
+    record_path = tmp_path / "log-viewers.txt"
+    completed.log_viewers = record_path.read_text(encoding="utf-8") if record_path.exists() else ""  # type: ignore[attr-defined]
     return completed
 
 
@@ -158,6 +166,14 @@ def test_deploy_docker_reuse_images_skips_build_when_local_image_exists(tmp_path
     assert result.returncode == 0, result.stderr
     assert result.docker_log == ""
     assert "-m uvicorn main_workstation:app --host 127.0.0.1 --port 7860" in result.python_log
+
+
+def test_deploy_docker_hybrid_opens_dedicated_log_windows_for_frontend_and_workstation(tmp_path: Path):
+    result = _run_deploy(tmp_path, "hybrid", "-WebBaseUrl", "https://platform.example.com", record_log_viewers=True)
+
+    assert result.returncode == 0, result.stderr
+    assert "workstation|" in result.log_viewers
+    assert "frontend|" in result.log_viewers
 
 
 def test_deploy_docker_hybrid_defaults_to_local_web_base_url_and_deploys_web_release(tmp_path: Path):
