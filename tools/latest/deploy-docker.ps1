@@ -180,12 +180,27 @@ function Assert-CommandExists {
 }
 
 function Resolve-PythonCommand {
-    param([string]$BackendRoot = "")
+    param(
+        [string]$BackendRoot = "",
+        [string]$RepoRoot = ""
+    )
+
+    $explicitPython = [Environment]::GetEnvironmentVariable("ATS_PYTHON_COMMAND")
+    if (-not [string]::IsNullOrWhiteSpace($explicitPython)) {
+        return $explicitPython
+    }
 
     if (-not [string]::IsNullOrWhiteSpace($BackendRoot)) {
         $venvPython = Join-Path $BackendRoot ".venv\Scripts\python.exe"
         if (Test-Path -LiteralPath $venvPython) {
             return $venvPython
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($RepoRoot)) {
+        $repoVenvPython = Join-Path $RepoRoot "backend\.venv\Scripts\python.exe"
+        if (Test-Path -LiteralPath $repoVenvPython) {
+            return $repoVenvPython
         }
     }
 
@@ -195,6 +210,186 @@ function Resolve-PythonCommand {
     }
 
     throw "未找到可用的 Python 解释器。"
+}
+
+function Test-PythonModulesAvailable {
+    param(
+        [string]$PythonExe,
+        [string[]]$Modules
+    )
+
+    if (-not (Test-Path -LiteralPath $PythonExe)) {
+        return $false
+    }
+
+    $script = @"
+import importlib.util
+import sys
+
+missing = [name for name in sys.argv[1:] if importlib.util.find_spec(name) is None]
+if missing:
+    print(",".join(missing))
+    raise SystemExit(1)
+"@
+
+    & $PythonExe -c $script @Modules 1>$null 2>$null
+    return $LASTEXITCODE -eq 0
+}
+
+function Invoke-PipInstallWithFallback {
+    param(
+        [string]$PythonExe,
+        [string]$WorkingDirectory,
+        [string[]]$PipArguments
+    )
+
+    $sources = @()
+    if (-not [string]::IsNullOrWhiteSpace($env:PIP_INDEX_URL)) {
+        $sources += $env:PIP_INDEX_URL
+    } else {
+        $sources += @(
+            "https://pypi.org/simple",
+            "https://pypi.tuna.tsinghua.edu.cn/simple",
+            "https://mirrors.aliyun.com/pypi/simple/",
+            "https://pypi.mirrors.ustc.edu.cn/simple"
+        )
+    }
+
+    foreach ($source in $sources) {
+        Write-Host "  pip 源        : $source"
+        Push-Location $WorkingDirectory
+        try {
+            & $PythonExe -m pip install --disable-pip-version-check --default-timeout 60 --retries 2 --index-url $source @PipArguments | Out-Host
+            $exitCode = $LASTEXITCODE
+        }
+        finally {
+            Pop-Location
+        }
+
+        if ($exitCode -eq 0) {
+            return
+        }
+    }
+
+    throw "所有可用 pip 源都失败，请检查网络或先设置 PIP_INDEX_URL 后重试。"
+}
+
+function Ensure-LocalBackendRuntimePython {
+    param(
+        [string]$BackendRoot,
+        [string]$RepoRoot
+    )
+
+    $requiredModules = @("uvicorn", "fastapi", "sqlalchemy")
+    $releaseVenvPython = Join-Path $BackendRoot ".venv\Scripts\python.exe"
+    if (Test-PythonModulesAvailable -PythonExe $releaseVenvPython -Modules $requiredModules) {
+        return $releaseVenvPython
+    }
+
+    $repoVenvPython = Join-Path $RepoRoot "backend\.venv\Scripts\python.exe"
+    if (Test-PythonModulesAvailable -PythonExe $repoVenvPython -Modules $requiredModules) {
+        return $repoVenvPython
+    }
+
+    $bootstrapPython = Resolve-PythonCommand -RepoRoot $RepoRoot
+    $requirementsPath = Join-Path $BackendRoot "requirements.txt"
+    if (-not (Test-Path -LiteralPath $requirementsPath)) {
+        throw "缺少 backend/requirements.txt，无法准备本地 Python 运行时：$requirementsPath"
+    }
+
+    Write-Host "检测到本地 workstation Python 依赖未就绪，开始准备 release 运行时..."
+    Write-Host "  BackendRoot    : $BackendRoot"
+    Write-Host "  Bootstrap Py   : $bootstrapPython"
+
+    if (-not (Test-Path -LiteralPath $releaseVenvPython)) {
+        & $bootstrapPython -m venv (Join-Path $BackendRoot ".venv") | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            throw "创建 release backend/.venv 失败。"
+        }
+    }
+
+    Write-Host "  升级 pip..."
+    Invoke-PipInstallWithFallback -PythonExe $releaseVenvPython -WorkingDirectory $BackendRoot -PipArguments @("--upgrade", "pip")
+    Write-Host "  安装 requirements.txt..."
+    Invoke-PipInstallWithFallback -PythonExe $releaseVenvPython -WorkingDirectory $BackendRoot -PipArguments @("-r", "requirements.txt")
+
+    if (-not (Test-PythonModulesAvailable -PythonExe $releaseVenvPython -Modules $requiredModules)) {
+        throw "release backend/.venv 依赖安装后仍不完整，请检查 pip 输出。"
+    }
+
+    return $releaseVenvPython
+}
+
+function Get-ProcessLogPaths {
+    param(
+        [string]$ReleaseRoot,
+        [string]$ServiceName
+    )
+
+    $logDir = Join-Path (Join-Path $ReleaseRoot "runtime") "logs"
+    $null = New-Item -ItemType Directory -Path $logDir -Force
+    return @{
+        StdOut = Join-Path $logDir ("{0}.stdout.log" -f $ServiceName)
+        StdErr = Join-Path $logDir ("{0}.stderr.log" -f $ServiceName)
+    }
+}
+
+function Get-LogTail {
+    param(
+        [string]$Path,
+        [int]$Tail = 40
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return ""
+    }
+
+    return (Get-Content -LiteralPath $Path -Tail $Tail -ErrorAction SilentlyContinue) -join [Environment]::NewLine
+}
+
+function Wait-LocalServiceReady {
+    param(
+        [System.Diagnostics.Process]$Process,
+        [string]$ServiceName,
+        [string]$Url,
+        [string]$StdOutPath,
+        [string]$StdErrPath,
+        [int]$MaxAttempts = 30
+    )
+
+    if ([Environment]::GetEnvironmentVariable("ATS_SKIP_LOCAL_READY_CHECK") -eq "1") {
+        Wait-Process -Id $Process.Id -Timeout 2 -ErrorAction SilentlyContinue
+        Start-Sleep -Milliseconds 200
+        return
+    }
+
+    for ($attempt = 0; $attempt -lt $MaxAttempts; $attempt += 1) {
+        if ($Process.HasExited) {
+            $stdoutTail = Get-LogTail -Path $StdOutPath
+            $stderrTail = Get-LogTail -Path $StdErrPath
+            $detail = @(
+                "本地服务启动失败：$ServiceName"
+                "进程已退出，退出码: $($Process.ExitCode)"
+                "stdout: $StdOutPath"
+                "stderr: $StdErrPath"
+            )
+            if (-not [string]::IsNullOrWhiteSpace($stderrTail)) {
+                $detail += "stderr 最近输出:`n$stderrTail"
+            } elseif (-not [string]::IsNullOrWhiteSpace($stdoutTail)) {
+                $detail += "stdout 最近输出:`n$stdoutTail"
+            }
+            throw ($detail -join [Environment]::NewLine)
+        }
+
+        try {
+            Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 2 | Out-Null
+            return
+        } catch {
+            Start-Sleep -Seconds 1
+        }
+    }
+
+    throw "等待本地服务就绪超时：$ServiceName -> $Url`nstdout: $StdOutPath`nstderr: $StdErrPath"
 }
 
 function Stop-ProcessListeningOnPort {
@@ -535,7 +730,8 @@ function Start-LocalWorkstationDeployment {
         [string]$ReleaseRoot,
         [string]$SourceConfigPath,
         [int]$ResolvedWorkstationPort,
-        [string]$ResolvedWebBaseUrl
+        [string]$ResolvedWebBaseUrl,
+        [string]$RepoRoot
     )
 
     $serviceRoot = Join-Path (Join-Path $ReleaseRoot "services") "workstation"
@@ -554,8 +750,17 @@ function Start-LocalWorkstationDeployment {
         -ResolvedWorkstationWsBaseUrl ("ws://127.0.0.1:{0}" -f $ResolvedWorkstationPort) `
         -ResolvedWebBaseUrl $ResolvedWebBaseUrl
 
+    $logPaths = Get-ProcessLogPaths -ReleaseRoot $ReleaseRoot -ServiceName "workstation"
     Stop-ProcessListeningOnPort -Port $ResolvedWorkstationPort
-    $pythonCommand = Resolve-PythonCommand -BackendRoot $backendRoot
+    $pythonCommand = if ([Environment]::GetEnvironmentVariable("ATS_SKIP_LOCAL_READY_CHECK") -eq "1") {
+        Resolve-PythonCommand -BackendRoot $backendRoot -RepoRoot $RepoRoot
+    } else {
+        Ensure-LocalBackendRuntimePython -BackendRoot $backendRoot -RepoRoot $RepoRoot
+    }
+    Write-Host "启动本机 workstation-backend..."
+    Write-Host "  Python 解释器 : $pythonCommand"
+    Write-Host "  stdout 日志   : $($logPaths.StdOut)"
+    Write-Host "  stderr 日志   : $($logPaths.StdErr)"
     $process = Start-Process -FilePath $pythonCommand -ArgumentList @(
         "-m",
         "uvicorn",
@@ -564,15 +769,10 @@ function Start-LocalWorkstationDeployment {
         "127.0.0.1",
         "--port",
         "$ResolvedWorkstationPort"
-    ) -WorkingDirectory $backendRoot -PassThru
-
-    if ([Environment]::GetEnvironmentVariable("ATS_SKIP_LOCAL_READY_CHECK") -eq "1") {
-        Start-Sleep -Milliseconds 200
-        return $process
-    }
+    ) -WorkingDirectory $backendRoot -RedirectStandardOutput $logPaths.StdOut -RedirectStandardError $logPaths.StdErr -PassThru
 
     try {
-        Wait-HttpReady -Url ("http://127.0.0.1:{0}/api/config" -f $ResolvedWorkstationPort)
+        Wait-LocalServiceReady -Process $process -ServiceName "workstation-backend" -Url ("http://127.0.0.1:{0}/api/config" -f $ResolvedWorkstationPort) -StdOutPath $logPaths.StdOut -StdErrPath $logPaths.StdErr
     } catch {
         try {
             Stop-Process -Id $process.Id -Force -ErrorAction Stop
@@ -586,10 +786,12 @@ function Start-LocalWorkstationDeployment {
 
 function Start-LocalFrontendDeployment {
     param(
+        [string]$ReleaseRoot,
         [string]$FrontendDist,
         [int]$ResolvedFrontendPort,
         [int]$ResolvedWorkstationPort,
-        [string]$ResolvedWebBaseUrl
+        [string]$ResolvedWebBaseUrl,
+        [string]$RepoRoot
     )
 
     Assert-PathExists -Path $FrontendDist -Label "frontend/dist 目录"
@@ -599,8 +801,13 @@ function Start-LocalFrontendDeployment {
         -ResolvedWorkstationWsBaseUrl ("ws://127.0.0.1:{0}" -f $ResolvedWorkstationPort) `
         -ResolvedWebBaseUrl $ResolvedWebBaseUrl
 
+    $logPaths = Get-ProcessLogPaths -ReleaseRoot $ReleaseRoot -ServiceName "frontend"
     Stop-ProcessListeningOnPort -Port $ResolvedFrontendPort
-    $pythonCommand = Resolve-PythonCommand
+    $pythonCommand = Resolve-PythonCommand -RepoRoot $RepoRoot
+    Write-Host "启动本机 frontend 静态服务..."
+    Write-Host "  Python 解释器 : $pythonCommand"
+    Write-Host "  stdout 日志   : $($logPaths.StdOut)"
+    Write-Host "  stderr 日志   : $($logPaths.StdErr)"
     $process = Start-Process -FilePath $pythonCommand -ArgumentList @(
         "-m",
         "http.server",
@@ -609,15 +816,10 @@ function Start-LocalFrontendDeployment {
         "127.0.0.1",
         "--directory",
         $FrontendDist
-    ) -WorkingDirectory $FrontendDist -PassThru
-
-    if ([Environment]::GetEnvironmentVariable("ATS_SKIP_LOCAL_READY_CHECK") -eq "1") {
-        Wait-Process -Id $process.Id -Timeout 2 -ErrorAction SilentlyContinue
-        return $process
-    }
+    ) -WorkingDirectory $FrontendDist -RedirectStandardOutput $logPaths.StdOut -RedirectStandardError $logPaths.StdErr -PassThru
 
     try {
-        Wait-HttpReady -Url ("http://127.0.0.1:{0}/runtime-config.js" -f $ResolvedFrontendPort)
+        Wait-LocalServiceReady -Process $process -ServiceName "frontend-static" -Url ("http://127.0.0.1:{0}/runtime-config.js" -f $ResolvedFrontendPort) -StdOutPath $logPaths.StdOut -StdErrPath $logPaths.StdErr
     } catch {
         try {
             Stop-Process -Id $process.Id -Force -ErrorAction Stop
@@ -711,6 +913,7 @@ $effectiveProjectName = if ([string]::IsNullOrWhiteSpace($ProjectName)) {
 } else {
     $ProjectName
 }
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 
 $resolvedWorkstationPort = [int]$WorkstationPort
 $resolvedWebPort = [int]$WebPort
@@ -836,19 +1039,19 @@ $localProcesses = @()
 
 switch ($Target) {
     "workstation" {
-        $localProcesses += Start-LocalWorkstationDeployment -ReleaseRoot $effectiveReleaseRoot -SourceConfigPath $sourceConfigPath -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebBaseUrl $WebBaseUrl
+        $localProcesses += Start-LocalWorkstationDeployment -ReleaseRoot $effectiveReleaseRoot -SourceConfigPath $sourceConfigPath -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebBaseUrl $WebBaseUrl -RepoRoot $repoRoot
     }
     "frontend" {
         $frontendDist = Join-Path $frontendServiceDir "frontend\dist"
-        $localProcesses += Start-LocalFrontendDeployment -FrontendDist $frontendDist -ResolvedFrontendPort $resolvedFrontendPort -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebBaseUrl $WebBaseUrl
+        $localProcesses += Start-LocalFrontendDeployment -ReleaseRoot $effectiveReleaseRoot -FrontendDist $frontendDist -ResolvedFrontendPort $resolvedFrontendPort -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebBaseUrl $WebBaseUrl -RepoRoot $repoRoot
     }
     "hybrid" {
-        $localProcesses += Start-LocalWorkstationDeployment -ReleaseRoot $effectiveReleaseRoot -SourceConfigPath $sourceConfigPath -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebBaseUrl $WebBaseUrl
+        $localProcesses += Start-LocalWorkstationDeployment -ReleaseRoot $effectiveReleaseRoot -SourceConfigPath $sourceConfigPath -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebBaseUrl $WebBaseUrl -RepoRoot $repoRoot
         $frontendDist = Join-Path $frontendServiceDir "frontend\dist"
-        $localProcesses += Start-LocalFrontendDeployment -FrontendDist $frontendDist -ResolvedFrontendPort $resolvedFrontendPort -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebBaseUrl $WebBaseUrl
+        $localProcesses += Start-LocalFrontendDeployment -ReleaseRoot $effectiveReleaseRoot -FrontendDist $frontendDist -ResolvedFrontendPort $resolvedFrontendPort -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebBaseUrl $WebBaseUrl -RepoRoot $repoRoot
     }
     "full" {
-        $localProcesses += Start-LocalWorkstationDeployment -ReleaseRoot $effectiveReleaseRoot -SourceConfigPath $sourceConfigPath -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebBaseUrl ("http://127.0.0.1:{0}" -f $resolvedWebPort)
+        $localProcesses += Start-LocalWorkstationDeployment -ReleaseRoot $effectiveReleaseRoot -SourceConfigPath $sourceConfigPath -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebBaseUrl ("http://127.0.0.1:{0}" -f $resolvedWebPort) -RepoRoot $repoRoot
     }
 }
 

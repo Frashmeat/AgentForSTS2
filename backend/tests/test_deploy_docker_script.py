@@ -105,7 +105,7 @@ def _run_deploy(
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     _write_fake_docker(bin_dir)
-    _write_fake_python(bin_dir)
+    python_cmd = _write_fake_python(bin_dir)
 
     log_path = tmp_path / "docker.log"
     python_log_path = tmp_path / "python.log"
@@ -115,6 +115,7 @@ def _run_deploy(
     env["MOCK_DOCKER_IMAGE_EXISTS"] = "1"
     env["MOCK_PYTHON_LOG"] = str(python_log_path)
     env["ATS_SKIP_LOCAL_READY_CHECK"] = "1"
+    env["ATS_PYTHON_COMMAND"] = str(python_cmd)
 
     command = [
         "pwsh",
