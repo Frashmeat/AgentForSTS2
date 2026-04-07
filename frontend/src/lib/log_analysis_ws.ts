@@ -6,7 +6,7 @@ export type LogAnalysisEvent =
   | { event: "log_info"; stage: "log_info"; lines: number }
   | { event: "stream"; stage: "stream"; chunk: string }
   | { event: "done"; stage: "done"; full: string }
-  | { event: "error"; stage: "error"; message: string };
+  | { event: "error"; stage: "error"; message: string; code?: string; detail?: string; request_id?: string };
 
 export class LogAnalysisSocket extends WorkflowSocketFacade<LogAnalysisEvent> {
   private errorHandler: ((data: LogAnalysisEvent) => void) | null = null;

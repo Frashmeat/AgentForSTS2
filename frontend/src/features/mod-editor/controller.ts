@@ -1,6 +1,6 @@
 import { ModAnalysisSocket, type ModAnalysisEvent } from "../../lib/mod_analysis_ws.ts";
 import { WorkflowSocket, type WsEvent } from "../../lib/ws.ts";
-import { resolveErrorMessage } from "../../shared/error.ts";
+import { resolveErrorMessage, resolveWorkflowErrorMessage } from "../../shared/error.ts";
 
 type ModAnalysisSocketEvent = ModAnalysisEvent["event"];
 type ModModifySocketEvent = Extract<
@@ -99,7 +99,7 @@ export function createModEditorAnalysisController(
       runtime.completeAnalysis();
     });
     socket.on("error", (message) => {
-      runtime.failAnalysis(message.message);
+      runtime.failAnalysis(resolveWorkflowErrorMessage(message));
     });
 
     try {
@@ -158,7 +158,7 @@ export function createModEditorModifyController(
       runtime.completeModify(Boolean(message.success));
     });
     socket.on("error", (message) => {
-      runtime.failModify(message.message);
+      runtime.failModify(resolveWorkflowErrorMessage(message));
     });
 
     try {

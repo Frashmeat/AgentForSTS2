@@ -1,3 +1,5 @@
+import { DEFAULT_ERROR_MESSAGE, resolveErrorMessage } from "../error.ts";
+
 export type BackendTarget = "same-origin" | "workstation" | "web";
 export type WebSocketTarget = "workstation";
 
@@ -32,17 +34,11 @@ function trimTrailingSlash(value: string): string {
 function extractResponseErrorMessage(rawText: string): string {
   const trimmed = rawText.trim();
   if (!trimmed) {
-    return "Request failed";
+    return DEFAULT_ERROR_MESSAGE;
   }
 
   try {
-    const parsed = JSON.parse(trimmed) as { detail?: unknown; message?: unknown };
-    if (typeof parsed.detail === "string" && parsed.detail.trim().length > 0) {
-      return parsed.detail;
-    }
-    if (typeof parsed.message === "string" && parsed.message.trim().length > 0) {
-      return parsed.message;
-    }
+    return resolveErrorMessage(JSON.parse(trimmed));
   } catch {
     // 保持原始文本回退。
   }

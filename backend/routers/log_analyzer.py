@@ -11,6 +11,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, WebSocket
 
+from app.shared.infra.ws_errors import send_ws_error
 from app.shared.prompting import PromptLoader
 from config import get_config
 from llm.stream import stream_analysis
@@ -118,10 +119,13 @@ async def ws_analyze_log(ws: WebSocket):
         await _send_stage(ws, "text", "reading_input", _PROMPT_LOADER.load("analyzer.log_reading_stage").strip())
         log_content, exists = _read_log()
         if not exists:
-            await ws.send_text(json.dumps({
-                "event": "error",
-                "message": _PROMPT_LOADER.render("analyzer.log_missing_message", {"log_path": _LOG_PATH}).strip()
-            }))
+            message = _PROMPT_LOADER.render("analyzer.log_missing_message", {"log_path": _LOG_PATH}).strip()
+            await send_ws_error(
+                ws,
+                code="log_file_missing",
+                message=message,
+                detail=message,
+            )
             return
 
         line_count = log_content.count("\n") + 1
@@ -149,6 +153,11 @@ async def ws_analyze_log(ws: WebSocket):
 
     except Exception as e:
         try:
-            await ws.send_text(json.dumps({"event": "error", "message": str(e)}))
+            await send_ws_error(
+                ws,
+                code="log_analysis_failed",
+                message=str(e),
+                detail=str(e),
+            )
         except Exception:
             pass

@@ -13,6 +13,7 @@ import { StageStatus } from "../../components/StageStatus";
 import { BuildDeploy } from "../../components/BuildDeploy";
 import { cn } from "../../lib/utils";
 import { loadAppConfig } from "../../shared/api/config";
+import { resolveErrorMessage, resolveWorkflowErrorMessage } from "../../shared/error.ts";
 import type { PlatformExecutionRequest } from "../platform-run/types.ts";
 import {
   applyBatchApprovalUpdate,
@@ -277,13 +278,17 @@ function BatchModePage({ onRequestExecution }: { onRequestExecution?: (request: 
       setActiveItemId(prev => pickActiveItemOnDone(prev, d.item_id, itemStatesRef.current));
     });
     ws.on("item_error", (d) => {
-      updateItem(d.item_id, { status: "error", error: d.message, errorTrace: d.traceback ?? null });
+      updateItem(d.item_id, {
+        status: "error",
+        error: resolveWorkflowErrorMessage(d),
+        errorTrace: d.traceback ?? null,
+      });
     });
     ws.on("batch_done", (d) => {
       setBatchResult({ success: d.success_count, error: d.error_count });
       setStage("done");
     });
-    ws.on("error", (d) => { setGlobalError(d.message); setStage("error"); });
+    ws.on("error", (d) => { setGlobalError(resolveWorkflowErrorMessage(d)); setStage("error"); });
   }
 
   async function confirmPlan() {
@@ -365,7 +370,7 @@ function BatchModePage({ onRequestExecution }: { onRequestExecution?: (request: 
       const updated = await action(actionId);
       applyItemStates(prev => applyBatchApprovalUpdate(prev, actionId, updated));
     } catch (error) {
-      setGlobalError(error instanceof Error ? error.message : String(error));
+      setGlobalError(resolveErrorMessage(error));
       setStage("error");
     } finally {
       setApprovalBusyActionId(null);

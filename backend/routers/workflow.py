@@ -22,6 +22,7 @@ from app.modules.codegen.api import create_asset, create_custom_code, build_and_
 from app.modules.workflow.application.engine import WorkflowEngine
 from app.modules.workflow.application.single_asset import SingleAssetWorkflow
 from app.modules.workflow.application.step import WorkflowStep
+from app.shared.infra.ws_errors import build_ws_error_payload, send_ws_error
 from app.shared.prompting import PromptLoader
 from config import get_config
 from project_utils import create_project_from_template
@@ -86,7 +87,17 @@ async def _send_approval_pending(ws: WebSocket, summary: str, requests: list):
 
 async def _publish_standard_event(ws: WebSocket, event) -> None:
     if event.stage == "error":
-        await _send(ws, "error", {"message": event.payload.get("message", _text("workflow_prompt_preview_error").strip())})
+        await _send(
+            ws,
+            "error",
+            build_ws_error_payload(
+                code=str(event.payload.get("code", "workflow_step_failed")),
+                message=event.payload.get("message"),
+                detail=event.payload.get("detail"),
+                traceback=event.payload.get("traceback"),
+                fallback_message=_text("workflow_prompt_preview_error").strip(),
+            ),
+        )
         return
 
     if event.payload.get("status") != "completed":
@@ -349,7 +360,14 @@ async def _handle_legacy_ws_create(ws: WebSocket, *, initial_params: dict | None
         tb = traceback.format_exc()
         logger.error("[ws/create] 未捕获异常 client=%s\n%s", client, tb)
         try:
-            await _send(ws, "error", {"message": msg, "traceback": tb})
+            detail = str(e).strip() or msg
+            await send_ws_error(
+                ws,
+                code="workflow_runtime_error",
+                message=msg,
+                detail=detail,
+                traceback=tb,
+            )
         except Exception:
             pass
 
@@ -426,7 +444,8 @@ async def _ws_run_with_provided_image(ws: WebSocket, params: dict, project_root:
     else:
         image_path = Path(params["provided_image_path"])
         if not image_path.exists():
-            await _send(ws, "error", {"message": _text("workflow_provided_image_missing", image_path=image_path).strip()})
+            message = _text("workflow_provided_image_missing", image_path=image_path).strip()
+            await send_ws_error(ws, code="provided_image_missing", message=message, detail=message)
             return
         img_src = PILImage.open(image_path)
         fname = image_path.name

@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.composition.container import ApplicationContainer
+from app.shared.infra.http_errors import install_http_error_handlers
 from app.shared.infra.config.settings import Settings
 from app.shared.infra.feature_flags import resolve_platform_migration_flags
 from config import get_config
@@ -33,6 +34,7 @@ def _create_base_app(role: AppRole, config: dict) -> FastAPI:
     settings = Settings.from_dict(config)
     runtime_config = settings.get_runtime(role)
     app = FastAPI(title="AgentTheSpire", version="0.1.0")
+    install_http_error_handlers(app)
     app.state.container = ApplicationContainer.from_config(config, runtime_role=role)
     app.state.runtime_role = role
     app.state.runtime_config_errors = settings.validate_for_role(role)

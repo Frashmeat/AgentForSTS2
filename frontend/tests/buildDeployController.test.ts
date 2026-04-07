@@ -233,3 +233,32 @@ test("createBuildDeployController preserves streamed log when deploy emits error
     errorMsg: "deploy failed",
   });
 });
+
+test("createBuildDeployController falls back to workflow detail when error message is empty", async () => {
+  const runtime = createRuntime();
+  const socket = new FakeBuildDeploySocket();
+  const controller = createBuildDeployController(runtime.runtime, {
+    buildProject: async () => ({
+      success: true,
+      output: "",
+    }),
+    packageProject: async () => ({ success: true }),
+    createSocket: () => socket,
+  });
+
+  await controller.run("deploy", "E:/STS2mod/MyMod");
+  socket.emit("error", {
+    message: "",
+    detail: "dotnet publish exited with code 1",
+    code: "build_failed",
+  });
+
+  assert.deepEqual(runtime.getState(), {
+    stage: "error",
+    action: "deploy",
+    log: [],
+    deployedTo: null,
+    summary: null,
+    errorMsg: "dotnet publish exited with code 1",
+  });
+});

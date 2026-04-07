@@ -264,7 +264,12 @@ def test_ws_analyze_mod_emits_reading_stage_before_missing_path_error(monkeypatc
     assert ws.accepted is True
     assert _event_names(ws.messages) == ["stage_update", "error"]
     assert ws.messages[0]["stage"] == "reading_input"
-    assert ws.messages[1] == {"event": "error", "message": f"路径不存在：{project_root}"}
+    assert ws.messages[1] == {
+        "event": "error",
+        "code": "project_root_missing",
+        "message": f"路径不存在：{project_root}",
+        "detail": f"路径不存在：{project_root}",
+    }
 
 
 def test_ws_analyze_mod_falls_back_to_error_when_stream_analysis_raises(monkeypatch):

@@ -3,7 +3,7 @@ import { WorkflowSocketFacade } from "../shared/ws/facade.ts";
 export type BuildDeployEvent =
   | { event: "stream"; stage: "stream"; chunk: string }
   | { event: "done"; stage: "done"; success: boolean; deployed_to?: string | null; files?: string[] }
-  | { event: "error"; stage: "error"; message: string };
+  | { event: "error"; stage: "error"; message: string; code?: string; detail?: string; request_id?: string };
 
 export class BuildDeploySocket extends WorkflowSocketFacade<BuildDeployEvent> {
   private errorHandler: ((data: BuildDeployEvent) => void) | null = null;

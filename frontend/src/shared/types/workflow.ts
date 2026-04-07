@@ -2,6 +2,14 @@ import type { ApprovalRequest } from "../api/approvals";
 
 export type WorkflowScope = "project" | "text" | "image" | "agent" | "build";
 
+export interface WorkflowErrorPayload {
+  message: string;
+  code?: string;
+  detail?: string;
+  request_id?: string;
+  traceback?: string;
+}
+
 export type WorkflowEvent =
   | { event: "planning"; stage: "planning" }
   | { event: "plan_ready"; stage: "plan_ready"; plan: ModPlan }
@@ -21,8 +29,8 @@ export type WorkflowEvent =
   | { event: "done"; stage: "done"; success: boolean; image_paths?: string[]; agent_output?: string }
   | { event: "item_done"; stage: "item_done"; item_id: string; success: boolean }
   | { event: "batch_done"; stage: "batch_done"; success_count: number; error_count: number }
-  | { event: "error"; stage: "error"; message: string; traceback?: string }
-  | { event: "item_error"; stage: "item_error"; item_id: string; message: string; traceback?: string };
+  | ({ event: "error"; stage: "error" } & WorkflowErrorPayload)
+  | ({ event: "item_error"; stage: "item_error"; item_id: string } & WorkflowErrorPayload);
 
 export interface PlanItem {
   id: string;

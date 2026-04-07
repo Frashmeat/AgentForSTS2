@@ -81,6 +81,47 @@ test("requestJson unwraps json detail field on non-ok response", async () => {
   );
 });
 
+test("requestJson unwraps structured error envelope message on non-ok response", async () => {
+  Object.assign(globalThis, {
+    __AGENT_THE_SPIRE_API_BASES__: {
+      workstation: "http://127.0.0.1:7860",
+    },
+  });
+  Object.assign(globalThis, {
+    fetch: async () =>
+      createMockResponse({
+        ok: false,
+        text: JSON.stringify({
+          error: {
+            code: "project_root_missing",
+            message: "请先选择项目目录",
+            detail: "default_project_root is empty",
+          },
+        }),
+      }),
+  });
+
+  await assert.rejects(
+    () => requestJson("/api/project/create", { backend: "workstation" }),
+    /请先选择项目目录/,
+  );
+});
+
+test("requestJson falls back to friendly message when non-ok response text is empty", async () => {
+  Object.assign(globalThis, {
+    fetch: async () =>
+      createMockResponse({
+        ok: false,
+        text: "   ",
+      }),
+  });
+
+  await assert.rejects(
+    () => requestJson("/api/config"),
+    /请求失败，请稍后重试/,
+  );
+});
+
 test("requestJson routes to configured web backend when backend target is set", async () => {
   const calls: Array<{ input: unknown; init?: RequestInit }> = [];
   Object.assign(globalThis, {

@@ -35,4 +35,13 @@ def test_build_deploy_ws_returns_error_when_sts2_path_is_configured_but_missing(
             ws.send_text(json.dumps({"project_root": str(project_root)}))
             payload = ws.receive_json()
 
-    assert payload["event"] == "error"
+    expected_message = build_deploy_router._TEXT_LOADER.render(
+        "runtime_workflow.build_game_path_invalid",
+        {"target_dir": tmp_path / "missing-sts2-root" / "Mods"},
+    ).strip()
+    assert payload == {
+        "event": "error",
+        "code": "sts2_mods_path_invalid",
+        "message": expected_message,
+        "detail": expected_message,
+    }

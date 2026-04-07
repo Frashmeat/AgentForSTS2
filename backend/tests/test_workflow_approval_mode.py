@@ -365,3 +365,42 @@ async def test_single_asset_workflow_uses_engine_and_emits_standard_events():
 
     assert ws.messages[0]["event"] == "prompt_preview"
     assert ws.messages[-1]["event"] == "done"
+
+
+def test_publish_standard_event_preserves_structured_error_fields():
+    async def run():
+        class DummyWs:
+            def __init__(self):
+                self.messages: list[dict] = []
+
+            async def send_text(self, text: str):
+                self.messages.append(json.loads(text))
+
+        ws = DummyWs()
+
+        await workflow._publish_standard_event(
+            ws,
+            types.SimpleNamespace(
+                stage="error",
+                payload={
+                    "code": "workflow_step_failed",
+                    "message": "构建失败",
+                    "detail": "dotnet publish exited with code 1",
+                    "traceback": "stacktrace",
+                },
+            ),
+        )
+
+        assert ws.messages == [
+            {
+                "event": "error",
+                "code": "workflow_step_failed",
+                "message": "构建失败",
+                "detail": "dotnet publish exited with code 1",
+                "traceback": "stacktrace",
+            }
+        ]
+
+    import asyncio
+
+    asyncio.run(run())

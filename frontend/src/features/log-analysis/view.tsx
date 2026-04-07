@@ -3,7 +3,7 @@ import { Bug, Loader2, RotateCcw } from "lucide-react";
 
 import { StageStatus } from "../../components/StageStatus";
 import { LogAnalysisSocket } from "../../lib/log_analysis_ws";
-import { resolveErrorMessage } from "../../shared/error.ts";
+import { resolveErrorMessage, resolveWorkflowErrorMessage } from "../../shared/error.ts";
 import type { PlatformExecutionRequest } from "../platform-run/types.ts";
 
 type Stage = "input" | "analyzing" | "done" | "error";
@@ -59,7 +59,7 @@ export function LogAnalysisFeatureView({
       setStage("done");
     });
     ws.on("error", (message) => {
-      setErrorMsg(message.message);
+      setErrorMsg(resolveWorkflowErrorMessage(message));
       setStage("error");
     });
 

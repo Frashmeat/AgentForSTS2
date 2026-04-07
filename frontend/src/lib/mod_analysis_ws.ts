@@ -6,7 +6,7 @@ export type ModAnalysisEvent =
   | { event: "scan_info"; stage: "scan_info"; files: number }
   | { event: "stream"; stage: "stream"; chunk: string }
   | { event: "done"; stage: "done"; full: string }
-  | { event: "error"; stage: "error"; message: string };
+  | { event: "error"; stage: "error"; message: string; code?: string; detail?: string; request_id?: string };
 
 export class ModAnalysisSocket extends WorkflowSocketFacade<ModAnalysisEvent> {
   private errorHandler: ((data: ModAnalysisEvent) => void) | null = null;

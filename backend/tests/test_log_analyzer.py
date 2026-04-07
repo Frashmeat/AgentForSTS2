@@ -190,7 +190,9 @@ def test_ws_analyze_log_emits_error_when_log_missing(monkeypatch):
     assert ws.messages[0]["stage"] == "reading_input"
     assert ws.messages[1] == {
         "event": "error",
+        "code": "log_file_missing",
         "message": f"游戏日志文件不存在：{module._LOG_PATH}\n请确认游戏已运行过至少一次。",
+        "detail": f"游戏日志文件不存在：{module._LOG_PATH}\n请确认游戏已运行过至少一次。",
     }
 
 

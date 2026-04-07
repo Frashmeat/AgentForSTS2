@@ -8,6 +8,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, WebSocket
 
+from app.shared.infra.ws_errors import send_ws_error
 from app.shared.prompting import PromptLoader
 from config import get_config
 from llm.stream import stream_analysis
@@ -117,19 +118,25 @@ async def ws_analyze_mod(ws: WebSocket):
         await _send_stage(ws, "text", "reading_input", _PROMPT_LOADER.load("analyzer.mod_reading_stage").strip())
 
         if not project_root.exists():
-            await ws.send_text(json.dumps({
-                "event": "error",
-                "message": _PROMPT_LOADER.render("analyzer.mod_path_missing_message", {"project_root": project_root}).strip()
-            }))
+            message = _PROMPT_LOADER.render("analyzer.mod_path_missing_message", {"project_root": project_root}).strip()
+            await send_ws_error(
+                ws,
+                code="project_root_missing",
+                message=message,
+                detail=message,
+            )
             return
 
         file_content, file_count = _scan_mod_files(project_root)
 
         if not file_content.strip():
-            await ws.send_text(json.dumps({
-                "event": "error",
-                "message": _PROMPT_LOADER.render("analyzer.mod_source_missing_message", {"project_root": project_root}).strip()
-            }))
+            message = _PROMPT_LOADER.render("analyzer.mod_source_missing_message", {"project_root": project_root}).strip()
+            await send_ws_error(
+                ws,
+                code="source_files_missing",
+                message=message,
+                detail=message,
+            )
             return
 
         await ws.send_text(json.dumps({"event": "scan_info", "files": file_count}))
@@ -155,6 +162,11 @@ async def ws_analyze_mod(ws: WebSocket):
 
     except Exception as e:
         try:
-            await ws.send_text(json.dumps({"event": "error", "message": str(e)}))
+            await send_ws_error(
+                ws,
+                code="mod_analysis_failed",
+                message=str(e),
+                detail=str(e),
+            )
         except Exception:
             pass

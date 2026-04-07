@@ -644,3 +644,41 @@ def test_batch_workflow_uses_dependency_graph_and_limited_parallelism():
         assert ws.messages[-1]["event"] == "item_done"
 
     asyncio.run(run())
+
+
+def test_publish_batch_standard_event_preserves_structured_error_fields():
+    async def run():
+        class DummyWs:
+            def __init__(self):
+                self.messages: list[dict] = []
+
+            async def send_text(self, text: str):
+                self.messages.append(json.loads(text))
+
+        ws = DummyWs()
+        await batch_workflow._publish_batch_standard_event(
+            ws,
+            types.SimpleNamespace(
+                stage="error",
+                payload={
+                    "item_id": "card_ignite",
+                    "code": "item_codegen_failed",
+                    "message": "生成失败",
+                    "detail": "agent exited with code 1",
+                    "traceback": "stacktrace",
+                },
+            ),
+        )
+
+        assert ws.messages == [
+            {
+                "event": "item_error",
+                "item_id": "card_ignite",
+                "code": "item_codegen_failed",
+                "message": "生成失败",
+                "detail": "agent exited with code 1",
+                "traceback": "stacktrace",
+            }
+        ]
+
+    asyncio.run(run())

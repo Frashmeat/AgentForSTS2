@@ -3,6 +3,7 @@ import {
   type SingleAssetSocket,
 } from "../../lib/single_asset_ws.ts";
 import type { WorkflowMigrationFlags } from "../../shared/api/index.ts";
+import { resolveErrorMessage, resolveWorkflowErrorMessage } from "../../shared/error.ts";
 import type { SingleAssetWorkflowAction } from "./state.ts";
 
 export interface SingleAssetWorkflowSocketLike extends SingleAssetSocket {}
@@ -135,7 +136,7 @@ export function createSingleAssetWorkflowController(
       });
     });
     socket.on("error", (message) => {
-      runtime.reportWorkflowError(message.message, message.traceback || null);
+      runtime.reportWorkflowError(resolveWorkflowErrorMessage(message), message.traceback || null);
     });
     socket.on("approval_pending", (message) => {
       runtime.dispatchWorkflow({
@@ -193,7 +194,7 @@ export function createSingleAssetWorkflowController(
       await socket.waitOpen();
     } catch (error) {
       runtime.setSocket(null);
-      runtime.reportWorkflowError(error instanceof Error ? error.message : String(error), null);
+      runtime.reportWorkflowError(resolveErrorMessage(error), null);
       return;
     }
 

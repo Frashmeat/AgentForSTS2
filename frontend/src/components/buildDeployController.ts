@@ -19,7 +19,7 @@ import {
   type BuildDeployAction,
   type BuildDeployState,
 } from "./buildDeployModel.ts";
-import { resolveErrorMessage } from "../shared/error.ts";
+import { resolveErrorMessage, resolveWorkflowErrorMessage } from "../shared/error.ts";
 
 export interface BuildDeploySocketLike {
   on<T extends BuildDeployEvent["event"]>(
@@ -81,7 +81,7 @@ export function createBuildDeployController(
         runtime.setState((previous) => finalizeDeployResult(previous, message.deployed_to ?? null));
       });
       socket.on("error", (message) => {
-        runtime.setState((previous) => failBuildDeployAction(previous, message.message));
+        runtime.setState((previous) => failBuildDeployAction(previous, resolveWorkflowErrorMessage(message)));
       });
 
       try {

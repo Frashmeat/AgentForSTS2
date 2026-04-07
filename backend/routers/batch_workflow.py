@@ -36,6 +36,7 @@ from app.modules.workflow.application.context import WorkflowContext
 from app.modules.workflow.application.engine import WorkflowEngine
 from app.modules.workflow.application.policies import LimitedParallelPolicy
 from app.modules.workflow.application.step import WorkflowStep
+from app.shared.infra.ws_errors import build_ws_error_payload, send_ws_error
 from app.shared.prompting import PromptLoader
 from config import get_config
 from image.generator import generate_images
@@ -91,7 +92,15 @@ async def _send_item_approval_pending(ws: WebSocket, item_id: str, summary: str,
 
 async def _publish_batch_standard_event(ws: WebSocket, event) -> None:
     if event.stage == "error":
-        await ws.send_text(json.dumps({"event": "item_error", "message": event.payload.get("message", _text("batch_approval_error_default").strip())}))
+        payload = build_ws_error_payload(
+            code=str(event.payload.get("code", "item_workflow_error")),
+            message=event.payload.get("message"),
+            detail=event.payload.get("detail"),
+            traceback=event.payload.get("traceback"),
+            fallback_message=_text("batch_approval_error_default").strip(),
+            extra={"item_id": event.payload.get("item_id")} if event.payload.get("item_id") else None,
+        )
+        await ws.send_text(json.dumps({"event": "item_error", **payload}))
         return
 
     if event.payload.get("status") != "completed":
@@ -389,7 +398,15 @@ async def _handle_legacy_ws_batch(ws: WebSocket, *, initial_params: dict | None 
                     item_image_paths[item.id] = []
             except Exception as e:
                 try:
-                    await send("item_error", item_id=item.id, message=str(e), traceback=tb_module.format_exc())
+                    await send_ws_error(
+                        ws,
+                        event="item_error",
+                        code="item_image_generation_failed",
+                        message=str(e),
+                        detail=str(e),
+                        traceback=tb_module.format_exc(),
+                        extra={"item_id": item.id},
+                    )
                 except Exception:
                     pass
                 error_ids.add(item.id)
@@ -482,7 +499,15 @@ async def _handle_legacy_ws_batch(ws: WebSocket, *, initial_params: dict | None 
                     tb = tb_module.format_exc()
                     for item in group:
                         try:
-                            await send("item_error", item_id=item.id, message=str(e), traceback=tb)
+                            await send_ws_error(
+                                ws,
+                                event="item_error",
+                                code="item_codegen_failed",
+                                message=str(e),
+                                detail=str(e),
+                                traceback=tb,
+                                extra={"item_id": item.id},
+                            )
                         except Exception:
                             pass
                         error_ids.add(item.id)
@@ -604,6 +629,12 @@ async def _handle_legacy_ws_batch(ws: WebSocket, *, initial_params: dict | None 
         pass
     except Exception as e:
         try:
-            await send("error", message=str(e), traceback=tb_module.format_exc())
+            await send_ws_error(
+                ws,
+                code="batch_workflow_failed",
+                message=str(e),
+                detail=str(e),
+                traceback=tb_module.format_exc(),
+            )
         except Exception:
             pass

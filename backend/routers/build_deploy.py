@@ -15,6 +15,7 @@ from pathlib import Path
 from fastapi import APIRouter, WebSocket
 
 from app.modules.codegen.api import build_and_fix
+from app.shared.infra.ws_errors import send_ws_error
 from app.shared.prompting import PromptLoader
 from config import get_config
 
@@ -73,20 +74,16 @@ async def ws_build_deploy(ws: WebSocket):
         project_root = Path(params["project_root"])
 
         if not project_root.exists():
-            await ws.send_text(json.dumps({
-                "event": "error",
-                "message": _TEXT_LOADER.render("runtime_workflow.build_project_root_missing", {"project_root": project_root}),
-            }))
+            message = _TEXT_LOADER.render("runtime_workflow.build_project_root_missing", {"project_root": project_root})
+            await send_ws_error(ws, code="project_root_missing", message=message, detail=message)
             return
 
         cfg = get_config()
         sts2_path_str = cfg.get("sts2_path", "")
         sts2_mods = Path(sts2_path_str) / "Mods" if sts2_path_str else None
         if sts2_mods is not None and not sts2_mods.exists():
-            await ws.send_text(json.dumps({
-                "event": "error",
-                "message": _TEXT_LOADER.render("runtime_workflow.build_game_path_invalid", {"target_dir": sts2_mods}).strip(),
-            }))
+            message = _TEXT_LOADER.render("runtime_workflow.build_game_path_invalid", {"target_dir": sts2_mods}).strip()
+            await send_ws_error(ws, code="sts2_mods_path_invalid", message=message, detail=message)
             return
 
         async def send_chunk(chunk: str):
@@ -97,10 +94,8 @@ async def ws_build_deploy(ws: WebSocket):
         success, _ = await build_and_fix(project_root, stream_callback=send_chunk)
 
         if not success:
-            await ws.send_text(json.dumps({
-                "event": "error",
-                "message": _TEXT_LOADER.load("runtime_workflow.build_build_failed").strip(),
-            }))
+            message = _TEXT_LOADER.load("runtime_workflow.build_build_failed").strip()
+            await send_ws_error(ws, code="build_failed", message=message, detail=message)
             return
 
         await send_chunk(f"\n{_TEXT_LOADER.load('runtime_workflow.build_build_succeeded').strip()}\n")
@@ -152,6 +147,11 @@ async def ws_build_deploy(ws: WebSocket):
 
     except Exception as e:
         try:
-            await ws.send_text(json.dumps({"event": "error", "message": str(e)}))
+            await send_ws_error(
+                ws,
+                code="build_deploy_failed",
+                message=str(e),
+                detail=str(e),
+            )
         except Exception:
             pass
