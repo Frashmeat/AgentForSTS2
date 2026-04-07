@@ -207,32 +207,6 @@ body {
   border-color: transparent;
 }
 
-.workspace-banner {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 14px;
-  padding: 14px 18px;
-  border-radius: 18px;
-  color: #4f456d;
-  background: linear-gradient(90deg, rgba(114, 74, 145, 0.14), rgba(255, 255, 255, 0.45));
-  border: 1px solid rgba(114, 74, 145, 0.16);
-}
-
-.workspace-banner-label {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.6);
-  color: var(--workspace-accent-strong);
-  font-size: 0.7rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
 .workspace-content {
   min-width: 0;
 }
@@ -282,10 +256,6 @@ body {
     justify-content: space-between;
   }
 
-  .workspace-banner {
-    align-items: flex-start;
-    flex-direction: column;
-  }
 }
 
 ::-webkit-scrollbar {

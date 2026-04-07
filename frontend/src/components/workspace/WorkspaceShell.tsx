@@ -93,11 +93,6 @@ export function WorkspaceShell<T extends string>({
           })}
         </div>
 
-        <div className="workspace-banner">
-          <span className="workspace-banner-label">Theme</span>
-          <span>深色功能轨、浅色卡片内容区、紫蓝主强调色。工作区外壳统一，功能流程不变。</span>
-        </div>
-
         <main className="workspace-content">{children}</main>
       </div>
     </div>
