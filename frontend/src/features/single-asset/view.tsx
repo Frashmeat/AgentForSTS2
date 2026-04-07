@@ -151,11 +151,11 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
       <Step num={1} title="描述设计" active={step === 0} done={step > 0}>
         <div className="space-y-4">
           {showRecoveredNotice && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-700 space-y-2">
+            <div className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2.5 text-xs text-violet-700 space-y-2">
               <p>当前展示的是本地恢复的单资产快照。审批状态会同步后端，但 prompt 确认、选图、补图和继续执行需要重新建立工作流连接。</p>
               <button
                 onClick={onRestartWorkflow}
-                className="inline-flex items-center gap-1 rounded-md border border-amber-300 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100 transition-colors"
+                className="inline-flex items-center gap-1 rounded-md border border-violet-300 px-2.5 py-1 text-xs font-medium text-violet-700 hover:bg-violet-100 transition-colors"
               >
                 <RotateCcw size={11} />
                 按当前输入重新开始
@@ -173,8 +173,8 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                   className={cn(
                     "py-1 px-3 rounded-md border text-sm transition-all",
                     assetType === item.value
-                      ? "border-amber-500 bg-amber-50 text-amber-700 font-medium"
-                      : "border-slate-200 hover:border-amber-300 text-slate-500 hover:text-slate-700",
+                      ? "border-violet-500 bg-violet-50 text-violet-700 font-medium"
+                      : "border-slate-200 hover:border-violet-300 text-slate-500 hover:text-slate-700",
                     step > 0 && "opacity-50 cursor-not-allowed"
                   )}
                 >
@@ -193,7 +193,7 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                 disabled={step > 0}
                 onChange={(event) => onAssetNameChange(event.target.value)}
                 placeholder="DarkBlade"
-                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-100 disabled:opacity-50"
+                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-100 disabled:opacity-50"
               />
             </div>
             <ProjectRootField
@@ -218,7 +218,7 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                   <button
                     key={preset.label}
                     onClick={() => onApplyPreset(preset)}
-                    className="px-2.5 py-1 rounded-md border border-slate-200 text-xs text-slate-500 hover:border-amber-300 hover:text-amber-600 transition-colors"
+                    className="px-2.5 py-1 rounded-md border border-slate-200 text-xs text-slate-500 hover:border-violet-300 hover:text-violet-700 transition-colors"
                   >
                     {preset.label}
                   </button>
@@ -235,7 +235,7 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
               onChange={(event) => onDescriptionChange(event.target.value)}
               rows={4}
               placeholder="描述这个资产的外观、效果、数值……"
-              className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-100 resize-none disabled:opacity-50"
+              className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-100 resize-none disabled:opacity-50"
             />
           </div>
 
@@ -251,8 +251,8 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                       className={cn(
                         "flex-1 py-1.5 rounded-lg border text-xs font-medium transition-all",
                         imageMode === mode
-                          ? "border-amber-500 bg-amber-50 text-amber-700"
-                          : "border-slate-200 text-slate-500 hover:border-amber-300"
+                          ? "border-violet-500 bg-violet-50 text-violet-700"
+                          : "border-slate-200 text-slate-500 hover:border-violet-300"
                       )}
                     >
                       {mode === "ai" ? "✦ AI 生图" : "↑ 自定义图片"}
@@ -290,7 +290,7 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                       }}
                       className={cn(
                         "relative rounded-lg border-2 border-dashed cursor-pointer transition-colors overflow-hidden",
-                        dragOver ? "border-amber-400 bg-amber-50" : "border-slate-200 hover:border-amber-300 bg-slate-50",
+                        dragOver ? "border-violet-400 bg-violet-50" : "border-slate-200 hover:border-violet-300 bg-slate-50",
                         uploadedImagePreview ? "h-32" : "h-20"
                       )}
                     >
@@ -316,7 +316,7 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
               <button
                 onClick={onStartWorkflow}
                 disabled={startDisabled}
-                className="w-full py-2.5 rounded-lg bg-amber-500 text-white font-bold text-sm hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="w-full py-2.5 rounded-lg bg-violet-700 text-white font-bold text-sm hover:bg-violet-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 开始生成
               </button>
@@ -327,7 +327,7 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                     onClick={onAutoModeToggle}
                     className={cn(
                       "relative w-8 h-4 rounded-full transition-colors shrink-0",
-                      autoMode ? "bg-amber-500" : "bg-slate-200"
+                      autoMode ? "bg-violet-700" : "bg-slate-200"
                     )}
                   >
                     <span
@@ -344,7 +344,7 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
           ) : (
             <button
               onClick={onReset}
-              className="w-full py-2 rounded-lg border border-slate-200 text-slate-400 hover:text-amber-600 hover:border-amber-300 text-sm transition-colors flex items-center justify-center gap-1.5"
+              className="w-full py-2 rounded-lg border border-slate-200 text-slate-400 hover:text-violet-700 hover:border-violet-300 text-sm transition-colors flex items-center justify-center gap-1.5"
             >
               <RotateCcw size={13} />
               重新开始
@@ -370,7 +370,7 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                 value={promptPreview}
                 onChange={(event) => onPromptPreviewChange(event.target.value)}
                 rows={6}
-                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-100 resize-none font-mono"
+                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-100 resize-none font-mono"
               />
               {negativePrompt && (
                 <>
@@ -379,14 +379,14 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                     value={negativePrompt}
                     onChange={(event) => onNegativePromptChange(event.target.value)}
                     rows={2}
-                    className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:border-amber-400 resize-none font-mono"
+                    className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:border-violet-400 resize-none font-mono"
                   />
                 </>
               )}
               <button
                 onClick={onConfirmPrompt}
                 disabled={!hasLiveSession}
-                className="w-full py-2.5 rounded-lg bg-amber-500 text-white font-bold text-sm hover:bg-amber-600 transition-colors disabled:cursor-not-allowed disabled:bg-slate-400"
+                className="w-full py-2.5 rounded-lg bg-violet-700 text-white font-bold text-sm hover:bg-violet-800 transition-colors disabled:cursor-not-allowed disabled:bg-slate-400"
               >
                 确认，开始生图
               </button>
@@ -400,7 +400,7 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                 <AgentLog lines={genLog} />
               ) : (
                 <div className="flex items-center gap-2.5 py-3">
-                  <Loader2 size={16} className="text-amber-500 animate-spin" />
+                  <Loader2 size={16} className="text-violet-500 animate-spin" />
                   <span className="text-sm text-slate-400">正在生成图像…</span>
                 </div>
               )}
@@ -418,7 +418,7 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                 {images.map((image, index) => (
                   <div
                     key={index}
-                    className="group relative rounded-lg overflow-hidden border border-slate-200 bg-slate-100 hover:border-amber-400 transition-colors"
+                    className="group relative rounded-lg overflow-hidden border border-slate-200 bg-slate-100 hover:border-violet-400 transition-colors"
                     style={{ width: images.length === 1 ? "280px" : "200px" }}
                   >
                     <img src={`data:image/png;base64,${image}`} alt={`生成图 ${index + 1}`} className="w-full h-auto block" />
@@ -426,7 +426,7 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                       <button
                         disabled={!hasLiveSession}
                         onClick={() => onSelectImage(index)}
-                        className="py-1.5 px-4 rounded-lg bg-amber-500 text-white font-bold text-sm hover:bg-amber-400 transition-colors shadow-lg disabled:cursor-not-allowed disabled:bg-slate-400"
+                        className="py-1.5 px-4 rounded-lg bg-violet-700 text-white font-bold text-sm hover:bg-violet-600 transition-colors shadow-lg disabled:cursor-not-allowed disabled:bg-slate-400"
                       >
                         用这张
                       </button>
@@ -442,7 +442,7 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                     className="rounded-lg border-2 border-dashed border-slate-200 bg-slate-50 flex items-center justify-center"
                     style={{ width: "200px", minHeight: "150px" }}
                   >
-                    <Loader2 size={20} className="text-amber-400 animate-spin" />
+                    <Loader2 size={20} className="text-violet-400 animate-spin" />
                   </div>
                 ))}
               </div>
@@ -450,7 +450,7 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
               <div className="space-y-2 pt-2 border-t border-slate-100">
                 <button
                   onClick={onToggleShowMorePrompt}
-                  className="text-xs text-slate-400 hover:text-amber-600 transition-colors flex items-center gap-1"
+                  className="text-xs text-slate-400 hover:text-violet-700 transition-colors flex items-center gap-1"
                 >
                   {showMorePrompt ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
                   {showMorePrompt ? "收起" : "修改提示词"}
@@ -460,13 +460,13 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                     value={currentPrompt}
                     onChange={(event) => onCurrentPromptChange(event.target.value)}
                     rows={4}
-                    className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-100 resize-none font-mono"
+                    className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-100 resize-none font-mono"
                   />
                 )}
                 <button
                   disabled={!hasLiveSession}
                   onClick={onGenerateMore}
-                  className="w-full py-2 rounded-lg border border-amber-400 text-amber-600 font-medium text-sm hover:bg-amber-50 transition-colors disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400 disabled:bg-slate-50"
+                  className="w-full py-2 rounded-lg border border-violet-300 text-violet-700 font-medium text-sm hover:bg-violet-50 transition-colors disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400 disabled:bg-slate-50"
                 >
                   再来一张
                 </button>
@@ -496,7 +496,7 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                     <AgentLog lines={agentLog} />
                   ) : (
                     <div className="flex items-center gap-2.5 py-3">
-                      <Loader2 size={16} className="text-amber-500 animate-spin" />
+                      <Loader2 size={16} className="text-violet-500 animate-spin" />
                       <span className="text-sm text-slate-400">Code Agent 执行中…</span>
                     </div>
                   )}
@@ -516,7 +516,7 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
               <BuildDeploy projectRoot={projectRoot} onOpenSettings={onOpenSettings} />
               <button
                 onClick={onReset}
-                className="py-1.5 px-4 rounded-lg border border-slate-200 hover:border-amber-400 text-slate-500 hover:text-amber-600 transition-colors text-sm flex items-center gap-1.5"
+                className="py-1.5 px-4 rounded-lg border border-slate-200 hover:border-violet-400 text-slate-500 hover:text-violet-700 transition-colors text-sm flex items-center gap-1.5"
               >
                 <RotateCcw size={13} />
                 创建新资产
@@ -535,10 +535,10 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
             </div>
           ) : stage === "approval_pending" ? (
             <div className="space-y-3">
-              <p className="text-sm text-amber-600 font-medium">等待审批通过后继续执行</p>
+              <p className="text-sm text-violet-700 font-medium">等待审批通过后继续执行</p>
               <button
                 onClick={onReset}
-                className="py-1.5 px-4 rounded-lg border border-slate-200 hover:border-amber-300 text-slate-500 hover:text-amber-600 transition-colors text-sm flex items-center gap-1.5"
+                className="py-1.5 px-4 rounded-lg border border-slate-200 hover:border-violet-300 text-slate-500 hover:text-violet-700 transition-colors text-sm flex items-center gap-1.5"
               >
                 <RotateCcw size={13} />
                 重新开始
@@ -629,19 +629,19 @@ function Step({
     <div
       className={cn(
         "rounded-xl border p-5 transition-all",
-        active ? "border-amber-300 bg-white shadow-md" : done ? "border-slate-200 bg-white" : "border-slate-100 bg-slate-50"
+        active ? "border-violet-300 bg-white shadow-md" : done ? "border-slate-200 bg-white" : "border-slate-100 bg-slate-50"
       )}
     >
       <div className="flex items-center gap-3 mb-4">
         <div
           className={cn(
             "w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0",
-            active ? "bg-amber-500 text-white" : done ? "bg-amber-100 text-amber-600" : "bg-slate-200 text-slate-400"
+            active ? "bg-violet-700 text-white" : done ? "bg-violet-100 text-violet-700" : "bg-slate-200 text-slate-400"
           )}
         >
           {done ? "✓" : num}
         </div>
-        <h2 className={cn("font-semibold text-sm", active ? "text-slate-800" : done ? "text-amber-600" : "text-slate-400")}>
+        <h2 className={cn("font-semibold text-sm", active ? "text-slate-800" : done ? "text-violet-700" : "text-slate-400")}>
           {title}
         </h2>
       </div>

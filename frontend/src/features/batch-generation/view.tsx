@@ -82,8 +82,8 @@ const TYPE_LABELS: Record<string, string> = {
 
 const STATUS_ICONS: Record<ItemStatus, React.ReactNode> = {
   pending:            <Clock size={14} className="text-slate-300" />,
-  img_generating:     <Loader2 size={14} className="text-amber-400 animate-spin" />,
-  awaiting_selection: <ImageIcon size={14} className="text-amber-500" />,
+  img_generating:     <Loader2 size={14} className="text-violet-400 animate-spin" />,
+  awaiting_selection: <ImageIcon size={14} className="text-violet-500" />,
   approval_pending:   <Clock size={14} className="text-violet-500" />,
   code_generating:    <Code2 size={14} className="text-blue-400 animate-pulse" />,
   done:               <CheckCircle2 size={14} className="text-green-500" />,
@@ -395,7 +395,7 @@ function BatchModePage({ onRequestExecution }: { onRequestExecution?: (request: 
     <div className="space-y-5">
       {/* 输入阶段 */}
       {stage === "input" && (
-        <div className="rounded-xl border border-amber-300 bg-white shadow-md p-5 space-y-4">
+        <div className="workspace-surface rounded-2xl p-5 space-y-4">
           <h2 className="font-semibold text-slate-800">描述你的 Mod 需求</h2>
           <p className="text-xs text-slate-400">
             用自然语言描述整个 Mod 的内容，AI 会自动规划需要哪些卡牌、遗物、机制，并逐一创建。
@@ -405,7 +405,7 @@ function BatchModePage({ onRequestExecution }: { onRequestExecution?: (request: 
             onChange={e => setRequirements(e.target.value)}
             rows={6}
             placeholder={"例如：\n我想做一个暗法师角色，主题是腐化和献祭。\n包含3张卡牌（攻击、技能、力量各一张），\n2个遗物（战斗开始触发），\n以及一个腐化叠层的 buff 机制。"}
-            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-100 resize-none"
+            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-100 resize-none"
           />
           <ProjectRootField
             value={projectRoot}
@@ -416,7 +416,7 @@ function BatchModePage({ onRequestExecution }: { onRequestExecution?: (request: 
           <button
             onClick={startPlanning}
             disabled={!requirements.trim() || !projectRoot.trim()}
-            className="w-full py-2.5 rounded-lg bg-amber-500 text-white font-bold text-sm hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+            className="w-full py-2.5 rounded-lg bg-violet-700 text-white font-bold text-sm hover:bg-violet-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
           >
             <Sparkles size={15} />
             规划 Mod
@@ -424,7 +424,7 @@ function BatchModePage({ onRequestExecution }: { onRequestExecution?: (request: 
           {plan && (
             <button
               onClick={() => setStage("review_plan")}
-              className="w-full py-2 rounded-lg border border-amber-200 text-amber-600 text-sm hover:bg-amber-50 transition-colors"
+              className="w-full py-2 rounded-lg border border-violet-200 text-violet-700 text-sm hover:bg-violet-50 transition-colors"
             >
               恢复上次规划：{plan.mod_name}
             </button>
@@ -436,7 +436,7 @@ function BatchModePage({ onRequestExecution }: { onRequestExecution?: (request: 
       {stage === "planning" && (
         <div className="rounded-xl border border-slate-200 bg-white p-5 space-y-3">
           <div className="flex items-center gap-2.5">
-            <Loader2 size={16} className="text-amber-500 animate-spin" />
+            <Loader2 size={16} className="text-violet-500 animate-spin" />
             <span className="text-sm font-medium text-slate-600">AI 正在规划 Mod...</span>
           </div>
           {batchLog.length > 0 && <AgentLog lines={batchLog} />}
@@ -584,13 +584,13 @@ function ReviewPlan({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-amber-300 bg-white shadow-md p-5">
+      <div className="workspace-surface rounded-2xl p-5">
         <div className="flex items-start justify-between mb-4">
           <div>
             <h2 className="font-bold text-slate-800">{plan.mod_name}</h2>
             <p className="text-xs text-slate-500 mt-0.5">{plan.summary}</p>
           </div>
-          <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 font-medium">
+          <span className="text-xs text-violet-700 bg-violet-50 border border-violet-200 rounded-full px-2 py-0.5 font-medium">
             {editedItems.length} 个资产
           </span>
         </div>
@@ -622,7 +622,7 @@ function ReviewPlan({
                     <input
                       value={item.name}
                       onChange={e => updateItem(item.id, { name: e.target.value })}
-                      className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm focus:outline-none focus:border-amber-400"
+                      className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm focus:outline-none focus:border-violet-400"
                     />
                   </div>
                   <div className="space-y-1">
@@ -631,7 +631,7 @@ function ReviewPlan({
                       value={item.description}
                       onChange={e => updateItem(item.id, { description: e.target.value })}
                       rows={2}
-                      className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-amber-400"
+                      className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-violet-400"
                     />
                   </div>
                   {item.needs_image && (
@@ -644,7 +644,7 @@ function ReviewPlan({
                           className={cn(
                             "flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors",
                             !item.provided_image_b64
-                              ? "bg-amber-500 text-white"
+                              ? "bg-violet-700 text-white"
                               : "bg-slate-100 text-slate-500 hover:bg-slate-200"
                           )}
                         >
@@ -660,7 +660,7 @@ function ReviewPlan({
                           className={cn(
                             "flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors",
                             item.provided_image_b64
-                              ? "bg-amber-500 text-white"
+                              ? "bg-violet-700 text-white"
                               : "bg-slate-100 text-slate-500 hover:bg-slate-200"
                           )}
                         >
@@ -669,7 +669,7 @@ function ReviewPlan({
                       </div>
                       {/* 上传预览 */}
                       {item.provided_image_b64 && uploadPreviews[item.id] && (
-                        <div className="relative w-24 h-24 rounded-lg overflow-hidden border border-amber-300">
+                        <div className="relative w-24 h-24 rounded-lg overflow-hidden border border-violet-300">
                           <img src={uploadPreviews[item.id]} alt="preview" className="w-full h-full object-cover" />
                           <button
                             onClick={() => {
@@ -688,7 +688,7 @@ function ReviewPlan({
                             value={item.image_description}
                             onChange={e => updateItem(item.id, { image_description: e.target.value })}
                             rows={2}
-                            className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-amber-400"
+                            className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-violet-400"
                           />
                         </div>
                       )}
@@ -700,7 +700,7 @@ function ReviewPlan({
                       value={item.implementation_notes}
                       onChange={e => updateItem(item.id, { implementation_notes: e.target.value })}
                       rows={3}
-                      className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-xs font-mono resize-none focus:outline-none focus:border-amber-400"
+                      className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-xs font-mono resize-none focus:outline-none focus:border-violet-400"
                     />
                   </div>
                 </div>
@@ -712,7 +712,7 @@ function ReviewPlan({
         <div className="flex gap-2 mt-4">
           <button
             onClick={onConfirm}
-            className="flex-1 py-2.5 rounded-lg bg-amber-500 text-white font-bold text-sm hover:bg-amber-600 transition-colors"
+            className="flex-1 py-2.5 rounded-lg bg-violet-700 text-white font-bold text-sm hover:bg-violet-800 transition-colors"
           >
             确认，开始执行
           </button>
@@ -777,7 +777,7 @@ function ExecutionView({
             onClick={onAutoSelectToggle}
             className={cn(
               "flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium transition-colors",
-              autoSelectFirst ? "bg-amber-500 text-white" : "bg-slate-100 text-slate-400 hover:bg-slate-200"
+              autoSelectFirst ? "bg-violet-700 text-white" : "bg-slate-100 text-slate-400 hover:bg-slate-200"
             )}
             title="自动选用第一张生成图，无需手动确认"
           >
@@ -787,7 +787,7 @@ function ExecutionView({
         </div>
 
         {awaitingCount > 0 && !autoSelectFirst && (
-          <div className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mb-2 font-medium">
+          <div className="text-xs text-violet-700 bg-violet-50 border border-violet-200 rounded-lg px-2.5 py-1.5 mb-2 font-medium">
             {awaitingCount} 个图片等待选择
           </div>
         )}
@@ -809,19 +809,19 @@ function ExecutionView({
               onClick={() => setActiveItemId(item.id)}
               className={cn(
                 "w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left transition-colors",
-                isActive ? "bg-amber-50 border border-amber-300" : "hover:bg-slate-50 border border-transparent",
-                needsAction && !isActive && "border-amber-200 bg-amber-50/50",
+                isActive ? "bg-violet-50 border border-violet-300" : "hover:bg-slate-50 border border-transparent",
+                needsAction && !isActive && "border-violet-200 bg-violet-50/70",
               )}
             >
               <span className="shrink-0">{STATUS_ICONS[status]}</span>
               <div className="flex-1 min-w-0">
-                <p className={cn("text-xs font-medium truncate", isActive ? "text-amber-700" : "text-slate-700")}>
+                <p className={cn("text-xs font-medium truncate", isActive ? "text-violet-700" : "text-slate-700")}>
                   {item.name}
                 </p>
                 <p className="text-xs text-slate-400">{TYPE_LABELS[item.type] ?? item.type}</p>
               </div>
               {needsAction && (
-                <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0 animate-pulse" />
+                <span className="w-2 h-2 rounded-full bg-violet-600 shrink-0 animate-pulse" />
               )}
             </button>
           );
@@ -853,7 +853,7 @@ function ExecutionView({
             {approvalCount === 0 && <BuildDeploy projectRoot={projectRoot} />}
             <button
               onClick={onReset}
-              className="w-full py-1.5 rounded-lg border border-slate-200 text-slate-400 hover:text-amber-600 hover:border-amber-300 text-xs transition-colors flex items-center justify-center gap-1"
+              className="w-full py-1.5 rounded-lg border border-slate-200 text-slate-400 hover:text-violet-700 hover:border-violet-300 text-xs transition-colors flex items-center justify-center gap-1"
             >
               <RotateCcw size={11} /> 新建 Mod
             </button>
@@ -927,7 +927,7 @@ function ItemDetailPanel({
           "ml-auto text-xs px-2 py-0.5 rounded-full font-medium",
           state.status === "done"               ? "bg-green-100 text-green-700" :
           state.status === "error"              ? "bg-red-100 text-red-600" :
-          state.status === "awaiting_selection" ? "bg-amber-100 text-amber-700" :
+          state.status === "awaiting_selection" ? "bg-violet-100 text-violet-700" :
           state.status === "approval_pending"   ? "bg-violet-100 text-violet-700" :
           state.status === "code_generating"    ? "bg-blue-100 text-blue-600" :
                                                   "bg-slate-100 text-slate-500"
@@ -965,7 +965,7 @@ function ItemDetailPanel({
             {state.images.map((b64, i) => (
               <div
                 key={i}
-                className="group relative rounded-lg overflow-hidden border border-slate-200 hover:border-amber-400 transition-colors"
+                className="group relative rounded-lg overflow-hidden border border-slate-200 hover:border-violet-400 transition-colors"
                 style={{ width: state.images.length === 1 ? "240px" : "180px" }}
               >
                 <img src={`data:image/png;base64,${b64}`} alt={`图 ${i + 1}`} className="w-full h-auto block" />
@@ -973,7 +973,7 @@ function ItemDetailPanel({
                   <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                     <button
                       onClick={() => onSelectImage(i)}
-                      className="py-1.5 px-4 rounded-lg bg-amber-500 text-white font-bold text-sm hover:bg-amber-400 transition-colors shadow-lg"
+                      className="py-1.5 px-4 rounded-lg bg-violet-700 text-white font-bold text-sm hover:bg-violet-600 transition-colors shadow-lg"
                     >
                       用这张
                     </button>
@@ -991,13 +991,13 @@ function ItemDetailPanel({
             <div className="space-y-2 pt-2 border-t border-slate-100">
               <button
                 onClick={() => onSelectImage(0)}
-                className="w-full py-1.5 rounded-lg bg-amber-500 text-white text-sm font-bold hover:bg-amber-600 transition-colors"
+                className="w-full py-1.5 rounded-lg bg-violet-700 text-white text-sm font-bold hover:bg-violet-800 transition-colors"
               >
                 选第一张
               </button>
               <button
                 onClick={onToggleMorePrompt}
-                className="text-xs text-slate-400 hover:text-amber-600 flex items-center gap-1 transition-colors"
+                className="text-xs text-slate-400 hover:text-violet-700 flex items-center gap-1 transition-colors"
               >
                 {state.showMorePrompt ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                 {state.showMorePrompt ? "收起" : "修改提示词"}
@@ -1007,12 +1007,12 @@ function ItemDetailPanel({
                   value={state.currentPrompt}
                   onChange={e => onUpdatePrompt(e.target.value)}
                   rows={3}
-                  className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono resize-none focus:outline-none focus:border-amber-400"
+                  className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono resize-none focus:outline-none focus:border-violet-400"
                 />
               )}
               <button
                 onClick={onGenerateMore}
-                className="w-full py-1.5 rounded-lg border border-amber-300 text-amber-600 text-sm hover:bg-amber-50 transition-colors"
+                className="w-full py-1.5 rounded-lg border border-violet-300 text-violet-700 text-sm hover:bg-violet-50 transition-colors"
               >
                 再来一张
               </button>

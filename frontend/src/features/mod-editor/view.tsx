@@ -146,8 +146,8 @@ export function ModEditorFeatureView({
   const isModifying = modifyStage === "running";
 
   return (
-    <div className="max-w-2xl mx-auto space-y-5">
-      <div className="rounded-xl border border-amber-300 bg-white shadow-md p-5 space-y-4">
+    <div className="space-y-5">
+      <div className="workspace-surface rounded-2xl p-5 space-y-4">
         <ProjectRootField
           value={projectRoot}
           placeholder="E:/STS2mod/testscenario/MyMod"
@@ -160,11 +160,11 @@ export function ModEditorFeatureView({
         />
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-5 space-y-4">
+      <div className="workspace-surface-strong rounded-2xl p-5 space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Search size={15} className="text-slate-400" />
-            <h3 className="font-semibold text-slate-700 text-sm">分析 Mod 内容</h3>
+            <Search size={15} className="text-[var(--workspace-accent)]" />
+            <h3 className="font-semibold text-[var(--workspace-accent-strong)] text-sm">分析 Mod 内容</h3>
           </div>
           {analyzeStage !== "idle" && (
             <button
@@ -184,7 +184,7 @@ export function ModEditorFeatureView({
               void analysisController.run(projectRoot);
             }}
             disabled={!projectRoot.trim()}
-            className="w-full py-2 rounded-lg border border-amber-400 text-amber-600 font-medium text-sm hover:bg-amber-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+            className="w-full py-2 rounded-lg border border-violet-300 text-violet-700 font-medium text-sm hover:bg-violet-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
           >
             <Search size={14} />
             分析 Mod
@@ -194,7 +194,7 @@ export function ModEditorFeatureView({
         {isAnalyzing && (
           <div className="space-y-3">
             <div className="flex items-center gap-2 py-1">
-              <Loader2 size={14} className="text-amber-500 animate-spin" />
+              <Loader2 size={14} className="text-violet-500 animate-spin" />
               <span className="text-sm text-slate-400">
                 {analyzeStage === "scanning" ? "正在扫描源码文件…" : `已扫描 ${scanFiles} 个文件，AI 分析中…`}
               </span>
@@ -210,17 +210,17 @@ export function ModEditorFeatureView({
             ) : (
               <pre className="text-sm text-slate-700 whitespace-pre-wrap font-sans leading-relaxed max-h-80 overflow-y-auto">
                 {analysisText}
-                {isAnalyzing && <span className="inline-block w-1.5 h-4 bg-amber-400 animate-pulse ml-0.5 align-text-bottom" />}
+                {isAnalyzing && <span className="inline-block w-1.5 h-4 bg-violet-400 animate-pulse ml-0.5 align-text-bottom" />}
               </pre>
             )}
           </div>
         )}
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-5 space-y-4">
+      <div className="workspace-surface-strong rounded-2xl p-5 space-y-4">
         <div className="flex items-center gap-2">
-          <Wrench size={15} className="text-slate-400" />
-          <h3 className="font-semibold text-slate-700 text-sm">修改 Mod</h3>
+          <Wrench size={15} className="text-[var(--workspace-accent)]" />
+          <h3 className="font-semibold text-[var(--workspace-accent-strong)] text-sm">修改 Mod</h3>
         </div>
 
         <div className="space-y-1">
@@ -231,7 +231,7 @@ export function ModEditorFeatureView({
             disabled={isModifying}
             rows={4}
             placeholder={"例如：\n把 DarkBlade 的伤害从 8 改成 12，升级后改成 16\n或者：给 FangedGrimoire 增加一个条件，只有血量低于50%时才触发"}
-            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-100 resize-none disabled:opacity-50"
+            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-100 resize-none disabled:opacity-50"
           />
         </div>
 
@@ -268,7 +268,7 @@ export function ModEditorFeatureView({
                 });
               }}
               disabled={!projectRoot.trim() || !modRequest.trim()}
-              className="flex-1 py-2.5 rounded-lg bg-amber-500 text-white font-bold text-sm hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="flex-1 py-2.5 rounded-lg bg-violet-700 text-white font-bold text-sm hover:bg-violet-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               执行修改
             </button>
@@ -286,7 +286,7 @@ export function ModEditorFeatureView({
         ) : (
           <div className="space-y-3">
             <div className="flex items-center gap-2 py-1">
-              <Loader2 size={14} className="text-amber-500 animate-spin" />
+              <Loader2 size={14} className="text-violet-500 animate-spin" />
               <span className="text-sm text-slate-400">Code Agent 执行中…</span>
             </div>
             <StageStatus current={modifyCurrentStage} history={modifyStageHistory} />
