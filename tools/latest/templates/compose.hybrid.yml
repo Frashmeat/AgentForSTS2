@@ -7,7 +7,7 @@ services:
     ports:
       - "${ATS_WORKSTATION_PORT:-7860}:7860"
     volumes:
-      - ./runtime/workstation.config.json:/app/config.json:ro
+      - ./runtime/workstation.config.json:/app/config.json
 
   frontend:
     build:

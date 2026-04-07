@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { X, FolderOpen, Gamepad2, Cpu, Image, Search } from "lucide-react";
 import { detectAppPaths, loadAppConfig, pickAppPath, updateAppConfig } from "../shared/api/index.ts";
+import { resolveErrorMessage } from "../shared/error.ts";
 import { createSettingsPickPathRequest, type SettingsPathField } from "./settingsPathPicker.ts";
 
 const inputCls = "w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-100";
@@ -48,6 +49,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [cfg, setCfg] = useState<any>(null);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const [detecting, setDetecting] = useState(false);
   const [pathNotes, setPathNotes] = useState<string[]>([]);
   const [llmKey, setLlmKey] = useState("");
@@ -119,13 +121,19 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
   async function save() {
     setSaving(true);
+    setSaveError("");
     const body = structuredClone(cfg);
     if (llmKey.trim()) body.llm.api_key = llmKey.trim();
     if (imgKey.trim()) body.image_gen.api_key = imgKey.trim();
     if (imgSecret.trim()) body.image_gen.api_secret = imgSecret.trim();
-    await updateAppConfig(body);
-    setSaving(false);
-    onClose();
+    try {
+      await updateAppConfig(body);
+      onClose();
+    } catch (error) {
+      setSaveError(resolveErrorMessage(error) || "保存设置失败");
+    } finally {
+      setSaving(false);
+    }
   }
 
   const currentProvider = cfg?.image_gen?.provider ?? "bfl";
@@ -364,6 +372,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 </Field>
               </SGroup>
 
+              {saveError ? <p className="text-sm text-rose-600">{saveError}</p> : null}
               <button
                 onClick={save}
                 disabled={saving}

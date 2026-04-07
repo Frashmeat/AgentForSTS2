@@ -199,5 +199,6 @@ tools/
 - `tools\latest\package-release.ps1 hybrid` 会同时整理 `frontend` 与 `workstation` 两类用户侧服务，并附带 launcher。
 - `tools\latest\deploy-docker.ps1 hybrid` 默认会联动部署本机 `web-backend`，并把前端 `web` 地址写成 `http://127.0.0.1:7870`。
 - `tools\latest\deploy-docker.ps1 hybrid -WebBaseUrl https://your-web-api.example.com` 会改为指向显式传入的地址，此时不再默认覆盖为本机地址。
+- `hybrid` 形态下 `runtime/workstation.config.json` 需要以可写方式挂载到 `workstation-backend`，否则设置页调用 `/api/config` 时无法把本地配置持久化回 release 目录。
 - `runtime-config.js` 仍属于部署期配置文件；更换 `workstation` 或 `web` 地址时优先覆盖该文件，不重新构建前端。
 - `workstation` 地址应配置为本机或 LAN 可达地址，不应配置为公网用户本机地址。
