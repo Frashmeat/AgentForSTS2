@@ -65,6 +65,6 @@ pytest-cache-files-*/
 # Claude Code local settings
 .claude/
 .worktrees/
-
+.superpowers/
 # Godot import metadata (auto-generated, not committed)
 **/*.import
