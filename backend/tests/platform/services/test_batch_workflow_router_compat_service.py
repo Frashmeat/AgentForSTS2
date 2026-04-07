@@ -186,3 +186,49 @@ def test_batch_workflow_router_compat_service_passes_prefetched_payload_to_legac
         )
     ]
     assert ws.sent[-1]["source"] == "legacy"
+
+
+def test_batch_workflow_router_compat_service_emits_structured_error_when_platform_chain_fails():
+    engine, session_factory = _session_factory()
+
+    async def fake_create_custom_code(**_kwargs):
+        raise RuntimeError("platform batch custom code failed")
+
+    service = BatchWorkflowRouterCompatService(
+        session_factory=session_factory,
+        create_custom_code_fn=fake_create_custom_code,
+    )
+    ws = _FakeWebSocket(
+        {
+            "action": "start_with_plan",
+            "project_root": "I:/compat-project",
+            "user_id": 1001,
+            "plan": {
+                "mod_name": "CompatMod",
+                "summary": "最小批量主链闭环",
+                "items": [
+                    {
+                        "id": "custom_a",
+                        "type": "custom_code",
+                        "name": "CustomA",
+                        "description": "第一个自定义代码项",
+                        "implementation_notes": "实现 A",
+                        "needs_image": False,
+                        "depends_on": [],
+                    }
+                ],
+            },
+        }
+    )
+
+    try:
+        asyncio.run(service.handle_ws_batch(ws))
+    finally:
+        engine.dispose()
+
+    assert ws.accepted is True
+    assert ws.sent[-1]["event"] == "error"
+    assert ws.sent[-1]["code"] == "batch_workflow_failed"
+    assert ws.sent[-1]["message"] == "platform batch custom code failed"
+    assert ws.sent[-1]["detail"] == "platform batch custom code failed"
+    assert "traceback" in ws.sent[-1]

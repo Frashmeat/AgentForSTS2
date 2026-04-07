@@ -114,8 +114,8 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
       }
       set([field], result.path);
       setPathNotes([`✓ ${request.title}: ${result.path}`]);
-    } catch {
-      setPathNotes([`${request.title}失败，请确认本机工作站后端可用后重试`]);
+    } catch (error) {
+      setPathNotes([`${request.title}失败：${resolveErrorMessage(error)}`]);
     }
   }
 
@@ -178,7 +178,18 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 {pathNotes.length > 0 && (
                   <div className="space-y-0.5">
                     {pathNotes.map((n, i) => (
-                      <p key={i} className={`text-xs ${n.startsWith("✓") ? "text-green-600" : "text-slate-400"}`}>{n}</p>
+                      <p
+                        key={i}
+                        className={`text-xs ${
+                          n.startsWith("✓")
+                            ? "text-green-600"
+                            : n.includes("失败")
+                              ? "text-red-600"
+                              : "text-slate-400"
+                        }`}
+                      >
+                        {n}
+                      </p>
                     ))}
                   </div>
                 )}

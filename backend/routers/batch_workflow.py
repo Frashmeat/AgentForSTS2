@@ -19,7 +19,7 @@ from pathlib import Path
 
 _log = logging.getLogger("batch")
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
 from approval.action_prompt import build_action_prompt
 from approval.runtime import get_approval_service
@@ -169,7 +169,7 @@ def _legacy_api_plan(body: dict):
     """接收用户需求文本，返回结构化 Mod 计划（JSON）。"""
     requirements: str = body.get("requirements", "")
     if not requirements.strip():
-        return {"error": _text("batch_api_requirements_missing").strip()}
+        raise HTTPException(status_code=400, detail=_text("batch_api_requirements_missing").strip())
     plan = asyncio.run(plan_mod(requirements))
     return plan.to_dict()
 

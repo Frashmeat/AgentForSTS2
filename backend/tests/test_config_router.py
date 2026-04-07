@@ -27,7 +27,14 @@ class _DummyRouter:
         return decorator
 
 
-sys.modules["fastapi"] = types.SimpleNamespace(APIRouter=_DummyRouter)
+class _DummyHttpException(Exception):
+    def __init__(self, status_code, detail):
+        super().__init__(detail)
+        self.status_code = status_code
+        self.detail = detail
+
+
+sys.modules["fastapi"] = types.SimpleNamespace(APIRouter=_DummyRouter, HTTPException=_DummyHttpException)
 config_router = importlib.import_module("routers.config_router")
 from app.shared.prompting import PromptLoader
 
@@ -57,10 +64,30 @@ def test_test_imggen_truncates_generator_errors(monkeypatch):
     fake_module = types.SimpleNamespace(generate_images=fake_generate_images)
     monkeypatch.setitem(sys.modules, "image.generator", fake_module)
 
-    result = asyncio.run(config_router.test_imggen())
+    try:
+        asyncio.run(config_router.test_imggen())
+    except _DummyHttpException as exc:
+        assert exc.status_code == 500
+        assert len(exc.detail) == 300
+    else:
+        raise AssertionError("test_imggen should surface generator failures")
 
-    assert result["ok"] is False
-    assert len(result["error"]) == 300
+
+def test_detect_paths_surfaces_detector_errors(monkeypatch):
+    def fake_detect_paths():
+        raise RuntimeError("detect failed")
+
+    monkeypatch.setattr(config_router, "_config_facade", lambda request: None)
+    fake_module = types.SimpleNamespace(detect_paths=fake_detect_paths)
+    monkeypatch.setitem(sys.modules, "project_utils", fake_module)
+
+    try:
+        config_router.detect_paths()
+    except _DummyHttpException as exc:
+        assert exc.status_code == 500
+        assert exc.detail == "detect failed"
+    else:
+        raise AssertionError("detect_paths should surface detector failures")
 
 
 def test_pick_path_delegates_to_project_utils(monkeypatch):
@@ -95,3 +122,20 @@ def test_pick_path_delegates_to_project_utils(monkeypatch):
         "initial_path": "C:/tools",
         "filters": [["Godot executable", "*.exe"]],
     }
+
+
+def test_pick_path_surfaces_picker_errors(monkeypatch):
+    def fake_pick_path(*, kind, title, initial_path, filters):
+        raise RuntimeError("picker unavailable")
+
+    monkeypatch.setattr(config_router, "_config_facade", lambda request: None)
+    fake_module = types.SimpleNamespace(pick_path=fake_pick_path)
+    monkeypatch.setitem(sys.modules, "project_utils", fake_module)
+
+    try:
+        config_router.pick_path({"kind": "directory", "title": "选择目录"})
+    except _DummyHttpException as exc:
+        assert exc.status_code == 500
+        assert exc.detail == "picker unavailable"
+    else:
+        raise AssertionError("pick_path should surface picker failures")

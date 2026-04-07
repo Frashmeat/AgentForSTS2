@@ -187,6 +187,7 @@ from approval.models import ActionRequest
 from agents.planner import ModPlan, PlanItem
 from app.modules.workflow.application.step import WorkflowStep
 from routers import batch_workflow
+from fastapi import HTTPException
 
 
 @pytest.fixture(autouse=True)
@@ -271,6 +272,14 @@ def test_send_item_approval_pending_emits_expected_event():
         assert ws.messages[-1]["requests"] == []
 
     asyncio.run(run())
+
+
+def test_batch_plan_uses_http_exception_for_missing_requirements():
+    with pytest.raises(HTTPException) as exc_info:
+        batch_workflow._legacy_api_plan({"requirements": "   "})
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail
 
 
 def test_approval_first_pending_group_does_not_emit_batch_done_early(monkeypatch, tmp_path):

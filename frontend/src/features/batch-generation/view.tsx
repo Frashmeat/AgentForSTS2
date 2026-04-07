@@ -11,6 +11,7 @@ import { pickActiveItemOnDone, pickActiveItemOnStart } from "../../lib/batchActi
 import { AgentLog } from "../../components/AgentLog";
 import { StageStatus } from "../../components/StageStatus";
 import { BuildDeploy } from "../../components/BuildDeploy";
+import { ProjectRootField } from "../../components/ProjectRootField";
 import { cn } from "../../lib/utils";
 import { loadAppConfig } from "../../shared/api/config";
 import { resolveErrorMessage, resolveWorkflowErrorMessage } from "../../shared/error.ts";
@@ -406,15 +407,12 @@ function BatchModePage({ onRequestExecution }: { onRequestExecution?: (request: 
             placeholder={"例如：\n我想做一个暗法师角色，主题是腐化和献祭。\n包含3张卡牌（攻击、技能、力量各一张），\n2个遗物（战斗开始触发），\n以及一个腐化叠层的 buff 机制。"}
             className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-100 resize-none"
           />
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-slate-500">Mod 项目路径</label>
-            <input
-              value={projectRoot}
-              onChange={e => setProjectRoot(e.target.value)}
-              placeholder="E:/STS2mod"
-              className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-amber-400 font-mono"
-            />
-          </div>
+          <ProjectRootField
+            value={projectRoot}
+            placeholder="E:/STS2mod"
+            showCreateAction={false}
+            onChange={setProjectRoot}
+          />
           <button
             onClick={startPlanning}
             disabled={!requirements.trim() || !projectRoot.trim()}

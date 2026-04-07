@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from starlette.requests import Request
 from app.shared.prompting import PromptLoader
 from config import get_config, update_config
@@ -47,27 +47,37 @@ def patch_cfg(body: dict, request: Request = None):
 
 @router.get("/detect_paths")
 def detect_paths(request: Request = None):
-    facade = _config_facade(request)
-    if facade is not None:
-        return facade.detect_paths()
-    """自动检测 STS2 和 Godot 路径，返回检测结果供用户确认后填入配置。"""
-    from project_utils import detect_paths as _detect
-    return _detect()
+    try:
+        facade = _config_facade(request)
+        if facade is not None:
+            return facade.detect_paths()
+        """自动检测 STS2 和 Godot 路径，返回检测结果供用户确认后填入配置。"""
+        from project_utils import detect_paths as _detect
+        return _detect()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.post("/pick_path")
 def pick_path(body: dict, request: Request = None):
-    facade = _config_facade(request)
-    if facade is not None:
-        return facade.pick_path(body)
-    from project_utils import pick_path as _pick
+    try:
+        facade = _config_facade(request)
+        if facade is not None:
+            return facade.pick_path(body)
+        from project_utils import pick_path as _pick
 
-    return _pick(
-        kind=body.get("kind", ""),
-        title=body.get("title", ""),
-        initial_path=body.get("initial_path", ""),
-        filters=body.get("filters") or [],
-    )
+        return _pick(
+            kind=body.get("kind", ""),
+            title=body.get("title", ""),
+            initial_path=body.get("initial_path", ""),
+            filters=body.get("filters") or [],
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.get("/local_ai_capability_status")
@@ -91,8 +101,8 @@ async def test_imggen(request: Request = None):
     try:
         imgs = await generate_images(_TEXT_LOADER.load("runtime_system.config_image_test_prompt").strip(), "power", batch_size=1)
         return {"ok": True, "size": list(imgs[0].size)}
-    except Exception as e:
-        return {"ok": False, "error": str(e)[:300]}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)[:300]) from exc
 
 
 def _mask_keys(cfg: dict) -> dict:

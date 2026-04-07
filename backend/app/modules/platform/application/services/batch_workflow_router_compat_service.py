@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import traceback
 from datetime import UTC, datetime
 from importlib import import_module
 from pathlib import Path
@@ -22,6 +23,7 @@ from app.modules.platform.infra.persistence.repositories.job_repository_sqlalche
 from app.modules.platform.runner.step_dispatcher import StepDispatcher
 from app.modules.platform.runner.workflow_registry import PlatformWorkflowRegistry, PlatformWorkflowStep
 from app.modules.platform.runner.workflow_runner import WorkflowRunner
+from app.shared.infra.ws_errors import send_ws_error
 
 
 CodegenFn = Callable[..., Awaitable[str]]
@@ -240,8 +242,17 @@ class BatchWorkflowRouterCompatService:
                     }
                 )
             )
-        except Exception:
+        except Exception as exc:
             session.rollback()
-            raise
+            try:
+                await send_ws_error(
+                    ws,
+                    code="batch_workflow_failed",
+                    message=str(exc),
+                    detail=str(exc),
+                    traceback=traceback.format_exc(),
+                )
+            except Exception:
+                pass
         finally:
             session.close()

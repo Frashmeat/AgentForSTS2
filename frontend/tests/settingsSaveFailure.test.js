@@ -22,3 +22,10 @@ test("settings panel exposes a visible save error message", () => {
   assert.match(source, /setSaveError\(resolveErrorMessage\(error\) \|\| "保存设置失败"\)/);
   assert.match(source, /text-rose-600/);
 });
+
+test("settings panel surfaces path picker failures to the user", () => {
+  const source = readSource("../src/components/SettingsPanel.tsx");
+
+  assert.match(source, /resolveErrorMessage\(error\)/);
+  assert.match(source, /setPathNotes\(/);
+});

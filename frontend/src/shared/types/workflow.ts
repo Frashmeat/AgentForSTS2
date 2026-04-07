@@ -2,13 +2,13 @@ import type { ApprovalRequest } from "../api/approvals";
 
 export type WorkflowScope = "project" | "text" | "image" | "agent" | "build";
 
-export interface WorkflowErrorPayload {
+export type WorkflowErrorPayload = Record<string, unknown> & {
   message: string;
   code?: string;
   detail?: string;
   request_id?: string;
   traceback?: string;
-}
+};
 
 export type WorkflowEvent =
   | { event: "planning"; stage: "planning" }
