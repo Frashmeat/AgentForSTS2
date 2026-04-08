@@ -274,16 +274,119 @@ function Invoke-PipInstallWithFallback {
     throw "所有可用 pip 源都失败，请检查网络或先设置 PIP_INDEX_URL 后重试。"
 }
 
+function Remove-DirectoryIfExists {
+    param([string]$Path)
+
+    if (Test-Path -LiteralPath $Path) {
+        Remove-Item -LiteralPath $Path -Recurse -Force
+    }
+}
+
+function Get-LocalBackendRuntimeCacheRoot {
+    param([string]$ReleaseRoot)
+
+    return Join-Path (Join-Path (Join-Path $ReleaseRoot "runtime") "python-runtime") "workstation"
+}
+
+function Get-LocalBackendRuntimePythonPath {
+    param([string]$ReleaseRoot)
+
+    return Join-Path (Get-LocalBackendRuntimeCacheRoot -ReleaseRoot $ReleaseRoot) ".venv\Scripts\python.exe"
+}
+
+function Get-LocalBackendRuntimeMetadataPath {
+    param([string]$ReleaseRoot)
+
+    return Join-Path (Get-LocalBackendRuntimeCacheRoot -ReleaseRoot $ReleaseRoot) "cache-metadata.json"
+}
+
+function Get-FileSha256 {
+    param([string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return ""
+    }
+
+    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
+}
+
+function Test-LocalBackendRuntimeCacheFresh {
+    param(
+        [string]$ReleaseRoot,
+        [string]$RequirementsPath,
+        [string]$BootstrapPython
+    )
+
+    $metadataPath = Get-LocalBackendRuntimeMetadataPath -ReleaseRoot $ReleaseRoot
+    if (-not (Test-Path -LiteralPath $metadataPath)) {
+        return $false
+    }
+
+    try {
+        $metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json -AsHashtable
+    } catch {
+        return $false
+    }
+
+    if ($null -eq $metadata) {
+        return $false
+    }
+
+    $expectedRequirementsHash = Get-FileSha256 -Path $RequirementsPath
+    $resolvedBootstrapPython = [System.IO.Path]::GetFullPath($BootstrapPython)
+    return (
+        [string]$metadata["requirements_sha256"] -eq $expectedRequirementsHash -and
+        [string]$metadata["bootstrap_python"] -eq $resolvedBootstrapPython
+    )
+}
+
+function Write-LocalBackendRuntimeMetadata {
+    param(
+        [string]$ReleaseRoot,
+        [string]$RequirementsPath,
+        [string]$BootstrapPython
+    )
+
+    $metadataPath = Get-LocalBackendRuntimeMetadataPath -ReleaseRoot $ReleaseRoot
+    $metadataDir = Split-Path -Path $metadataPath -Parent
+    if (-not [string]::IsNullOrWhiteSpace($metadataDir)) {
+        $null = New-Item -ItemType Directory -Path $metadataDir -Force
+    }
+
+    $payload = [ordered]@{
+        requirements_sha256 = Get-FileSha256 -Path $RequirementsPath
+        bootstrap_python = [System.IO.Path]::GetFullPath($BootstrapPython)
+        updated_at = (Get-Date).ToString("o")
+    }
+    $payload | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $metadataPath -Encoding UTF8
+}
+
 function Ensure-LocalBackendRuntimePython {
     param(
         [string]$BackendRoot,
-        [string]$RepoRoot
+        [string]$RepoRoot,
+        [string]$ReleaseRoot
     )
 
     $requiredModules = @("uvicorn", "fastapi", "sqlalchemy")
-    $releaseVenvPython = Join-Path $BackendRoot ".venv\Scripts\python.exe"
-    if (Test-PythonModulesAvailable -PythonExe $releaseVenvPython -Modules $requiredModules) {
-        return $releaseVenvPython
+    $requirementsPath = Join-Path $BackendRoot "requirements.txt"
+    if (-not (Test-Path -LiteralPath $requirementsPath)) {
+        throw "缺少 backend/requirements.txt，无法准备本地 Python 运行时：$requirementsPath"
+    }
+
+    $bootstrapPython = Resolve-PythonCommand -RepoRoot $RepoRoot
+    $runtimeCacheRoot = Get-LocalBackendRuntimeCacheRoot -ReleaseRoot $ReleaseRoot
+    $runtimeVenvPython = Get-LocalBackendRuntimePythonPath -ReleaseRoot $ReleaseRoot
+    if (
+        (Test-PythonModulesAvailable -PythonExe $runtimeVenvPython -Modules $requiredModules) -and
+        (Test-LocalBackendRuntimeCacheFresh -ReleaseRoot $ReleaseRoot -RequirementsPath $requirementsPath -BootstrapPython $bootstrapPython)
+    ) {
+        return $runtimeVenvPython
+    }
+
+    $legacyReleaseVenvPython = Join-Path $BackendRoot ".venv\Scripts\python.exe"
+    if (Test-PythonModulesAvailable -PythonExe $legacyReleaseVenvPython -Modules $requiredModules) {
+        return $legacyReleaseVenvPython
     }
 
     $repoVenvPython = Join-Path $RepoRoot "backend\.venv\Scripts\python.exe"
@@ -291,33 +394,30 @@ function Ensure-LocalBackendRuntimePython {
         return $repoVenvPython
     }
 
-    $bootstrapPython = Resolve-PythonCommand -RepoRoot $RepoRoot
-    $requirementsPath = Join-Path $BackendRoot "requirements.txt"
-    if (-not (Test-Path -LiteralPath $requirementsPath)) {
-        throw "缺少 backend/requirements.txt，无法准备本地 Python 运行时：$requirementsPath"
-    }
-
-    Write-Host "检测到本地 workstation Python 依赖未就绪，开始准备 release 运行时..."
+    Write-Host "检测到本地 workstation Python 依赖未就绪，开始准备 release 运行时缓存..."
     Write-Host "  BackendRoot    : $BackendRoot"
+    Write-Host "  RuntimeCache   : $runtimeCacheRoot"
     Write-Host "  Bootstrap Py   : $bootstrapPython"
 
-    if (-not (Test-Path -LiteralPath $releaseVenvPython)) {
-        & $bootstrapPython -m venv (Join-Path $BackendRoot ".venv") | Out-Host
-        if ($LASTEXITCODE -ne 0) {
-            throw "创建 release backend/.venv 失败。"
-        }
+    Remove-DirectoryIfExists -Path $runtimeCacheRoot
+    $null = New-Item -ItemType Directory -Path $runtimeCacheRoot -Force
+
+    & $bootstrapPython -m venv (Join-Path $runtimeCacheRoot ".venv") | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw "创建 release runtime Python 缓存失败。"
     }
 
     Write-Host "  升级 pip..."
-    Invoke-PipInstallWithFallback -PythonExe $releaseVenvPython -WorkingDirectory $BackendRoot -PipArguments @("--upgrade", "pip")
+    Invoke-PipInstallWithFallback -PythonExe $runtimeVenvPython -WorkingDirectory $BackendRoot -PipArguments @("--upgrade", "pip")
     Write-Host "  安装 requirements.txt..."
-    Invoke-PipInstallWithFallback -PythonExe $releaseVenvPython -WorkingDirectory $BackendRoot -PipArguments @("-r", "requirements.txt")
+    Invoke-PipInstallWithFallback -PythonExe $runtimeVenvPython -WorkingDirectory $BackendRoot -PipArguments @("-r", "requirements.txt")
 
-    if (-not (Test-PythonModulesAvailable -PythonExe $releaseVenvPython -Modules $requiredModules)) {
-        throw "release backend/.venv 依赖安装后仍不完整，请检查 pip 输出。"
+    if (-not (Test-PythonModulesAvailable -PythonExe $runtimeVenvPython -Modules $requiredModules)) {
+        throw "release runtime Python 缓存依赖安装后仍不完整，请检查 pip 输出。"
     }
 
-    return $releaseVenvPython
+    Write-LocalBackendRuntimeMetadata -ReleaseRoot $ReleaseRoot -RequirementsPath $requirementsPath -BootstrapPython $bootstrapPython
+    return $runtimeVenvPython
 }
 
 function Get-ProcessLogPaths {
@@ -1130,7 +1230,7 @@ function Start-LocalWorkstationDeployment {
     $pythonCommand = if ([Environment]::GetEnvironmentVariable("ATS_SKIP_LOCAL_READY_CHECK") -eq "1") {
         Resolve-PythonCommand -BackendRoot $backendRoot -RepoRoot $RepoRoot
     } else {
-        Ensure-LocalBackendRuntimePython -BackendRoot $backendRoot -RepoRoot $RepoRoot
+        Ensure-LocalBackendRuntimePython -BackendRoot $backendRoot -RepoRoot $RepoRoot -ReleaseRoot $ReleaseRoot
     }
     Write-Host "启动本机 workstation-backend..."
     Write-Host "  Python 解释器 : $pythonCommand"

@@ -211,6 +211,7 @@ tools/
 - `tools\latest\deploy-docker.ps1 hybrid -WebBaseUrl https://your-web-api.example.com` 会改为指向显式传入的地址，此时不再默认覆盖为本机地址。
 - `tools\latest\deploy-docker.ps1` 拉起的本地服务 PID 会写入 `runtime\local-deploy-state.json`，供 `tools\latest\stop-deploy.ps1` 读取并停止。
 - `deploy-docker.ps1` 打开的日志终端只是查看窗口；关闭窗口不会自动停止后台服务进程。
+- `workstation` 本地 Python 运行时缓存位于 `runtime\python-runtime\workstation`；只要 `services\workstation\backend\requirements.txt` 与启动所用 Python 没变化，后续部署会优先复用该缓存。
 - `hybrid` / `workstation` / `full` 形态下，工作站配置会同时写入 `services\workstation\config.json` 与 `runtime\workstation.config.json`，方便运行时读取和排查。
 - `runtime-config.js` 仍属于部署期配置文件；更换 `workstation` 或 `web` 地址时优先覆盖该文件，不重新构建前端。
 - `workstation` 地址应配置为本机或 LAN 可达地址，不应配置为公网用户本机地址。

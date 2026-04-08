@@ -246,3 +246,33 @@ def test_package_release_preserves_locked_runtime_logs(tmp_path: Path):
     assert completed.returncode == 0, completed.stderr
     assert locked_log.exists()
     assert not stale_file.exists()
+
+
+def test_package_release_preserves_runtime_python_cache(tmp_path: Path):
+    temp_repo = tmp_path / "repo"
+    _prepare_common_layout(temp_repo)
+    _write_template_files(temp_repo, "workstation")
+
+    backend_dir = temp_repo / "backend"
+    backend_dir.mkdir(parents=True, exist_ok=True)
+    (backend_dir / "main_workstation.py").write_text("print('ok')\n", encoding="utf-8")
+    frontend_dist = temp_repo / "frontend" / "dist"
+    frontend_dist.mkdir(parents=True, exist_ok=True)
+    (frontend_dist / "index.html").write_text("<html></html>\n", encoding="utf-8")
+    mod_template = temp_repo / "mod_template"
+    mod_template.mkdir(parents=True, exist_ok=True)
+    (mod_template / "README.md").write_text("template\n", encoding="utf-8")
+    (temp_repo / "config.example.json").write_text('{"mode":"example"}\n', encoding="utf-8")
+
+    release_dir = temp_repo / "tools" / "latest" / "artifacts" / "agentthespire-workstation-release"
+    runtime_cache_marker = release_dir / "runtime" / "python-runtime" / "workstation" / "cache.marker"
+    runtime_cache_marker.parent.mkdir(parents=True, exist_ok=True)
+    runtime_cache_marker.write_text("cached\n", encoding="utf-8")
+    stale_file = release_dir / "stale.txt"
+    stale_file.write_text("stale\n", encoding="utf-8")
+
+    completed = _run_package_release(temp_repo, "workstation", "-NoFrontend", "-NoZip")
+
+    assert completed.returncode == 0, completed.stderr
+    assert runtime_cache_marker.exists()
+    assert not stale_file.exists()

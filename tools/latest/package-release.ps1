@@ -480,7 +480,7 @@ if ($needsFrontend) {
 }
 
 $null = New-Item -ItemType Directory -Path $OutputRoot -Force
-New-CleanDirectory -Path $releaseDir -PreserveRelativePaths @("runtime\logs")
+New-CleanDirectory -Path $releaseDir -PreserveRelativePaths @("runtime\logs", "runtime\python-runtime")
 $null = New-Item -ItemType Directory -Path (Join-Path $releaseDir "services") -Force
 $null = New-Item -ItemType Directory -Path (Join-Path $releaseDir "runtime") -Force
 

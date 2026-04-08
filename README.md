@@ -197,6 +197,7 @@ pwsh -NoProfile -File .\tools\latest\stop-deploy.ps1 hybrid
 - `deploy-docker.ps1` 在 `hybrid` / `workstation` / `frontend` / `full` 目标下会把本地服务作为后台进程启动，并额外打开日志窗口。
 - 关闭日志窗口只会停止日志查看，不会自动停止后台服务。
 - 如需停止这些本地服务，请执行对应的 `stop-deploy.ps1`；脚本会读取 `release/runtime/local-deploy-state.json` 中记录的 PID。
+- `workstation` 本地 Python 运行时会缓存到 `release/runtime/python-runtime/workstation`；`requirements.txt` 与启动用 Python 未变化时，后续部署会直接复用该缓存，不再重复安装依赖。
 
 默认文件位置：
 
