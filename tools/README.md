@@ -40,6 +40,10 @@ powershell -File .\tools\tools.ps1 split stop
 powershell -File .\tools\tools.ps1 dev verify-install
 powershell -File .\tools\tools.ps1 dev decompile
 
+# 停止本机前端 / workstation / web 本地进程
+powershell -File .\tools\kill-local.ps1
+powershell -File .\tools\kill-local.ps1 -FrontendPort 4173 -WorkstationPort 8860 -WebPort 8870
+
 # latest 打包 / 部署
 powershell -File .\tools\tools.ps1 latest package hybrid
 powershell -File .\tools\tools.ps1 latest package workstation
@@ -82,6 +86,7 @@ pwsh -NoProfile -File .\tools\latest\stop-deploy.ps1 hybrid
 ```text
 tools/
 ├── tools.ps1                 # 统一入口
+├── kill-local.ps1            # 按端口停止 frontend / workstation / web
 ├── README.md                 # 唯一主说明文档
 ├── install/                  # 安装相关真实脚本
 ├── start/                    # 传统启动脚本
@@ -110,6 +115,7 @@ tools/
 - `tools\stop_split_local.ps1`
 - `tools\stop_split_local.bat`
 - `tools\verify-install-bat.ps1`
+- `tools\kill-local.ps1`
 
 后续日常使用建议优先改为 `tools.ps1`，避免直接依赖兼容层。
 
@@ -152,6 +158,13 @@ tools/
 - `tools\dev\verify-install-bat.ps1`
   校验顶层安装 wrapper 与实际 `install\install.ps1` 的关键行为。
 
+### 本地进程停止
+
+- `tools\kill-local.ps1`
+  优先读取 `local-deploy-state.json`、`split-local-state.json`、`runtime/workstation.config.json` 发现端口和 PID，再停止本机 `frontend`、`workstation`、`web` 三类进程；命令行端口参数仅作为显式覆盖，不再依赖固定默认端口。
+  默认端口分别为 `5173`、`7860`、`7870`，也支持通过参数覆盖。
+  注意：该脚本只按监听端口判断进程归属；如果这些端口被其它程序占用，也会被一并停止。
+
 ### latest
 
 `tools\latest\` 继续保留为发布脚本目录，当前不改名，避免打断现有打包与发布链路。
@@ -163,6 +176,8 @@ tools/
   `web` 继续使用 Docker；`workstation` 与 `frontend` 改为本机启动；`full` 会本机启动 `workstation` 并只用 Docker 部署 `web`；`hybrid` 会本机启动 `workstation + frontend`，默认还会联动部署本机 `web-backend`。
   默认会基于当前 release 重新 `build` 需要 Docker 的目标镜像；只有显式传入 `-ReuseImages` 时才会复用已有镜像。
   `hybrid` / `frontend` 未显式传入 `-WebBaseUrl` 时会默认写入本机 `http://127.0.0.1:7870`；`hybrid` 此时还会联动部署本机 `web-backend`。
+  `hybrid` 默认会从当前 hybrid release 的同级目录推导本机 `web release`，并在联动部署前自动刷新该 release，确保跟随当前仓库模板；如目录不在同级，可显式传入 `-WebReleaseRoot`。
+  Docker 构建默认会自动解析 `Python` 基础镜像，优先复用本机已有标签，并默认回退到 `m.daocloud.io/docker.io/library/python:3.11-slim`；如需手工指定，可传 `-PythonBaseImage`。
 - `tools\latest\stop-deploy.ps1`
   停止 `deploy-docker.ps1` 以本机模式拉起的 `workstation` / `frontend` 进程，并关闭对应日志窗口。
   状态文件位于 `release\runtime\local-deploy-state.json`；只关闭日志窗口并不会自动停止服务。
@@ -208,6 +223,9 @@ tools/
 - `tools\latest\deploy-docker.ps1 frontend` 会在本机拉起静态前端服务，并把 `runtime-config.js` 写入 release 内的前端 `dist/`。
 - `tools\latest\deploy-docker.ps1 full` 会在本机拉起 `workstation-backend`，同时只对 `web` 服务执行 Docker 部署。
 - `tools\latest\deploy-docker.ps1 hybrid` 默认会联动部署本机 `web-backend`，并把前端 `web` 地址写成 `http://127.0.0.1:7870`。
+- 默认推导出的本机 `web release` 会在 `deploy-docker.ps1 hybrid` 联动部署前自动调用 `package-release.ps1 web` 刷新，避免继续复用旧 release。
+- `tools\latest\deploy-docker.ps1 hybrid -WebReleaseRoot <path>` 可显式指定要联动部署的本机 `web release` 目录，避免依赖默认同级路径。
+- `tools\latest\deploy-docker.ps1 ... -PythonBaseImage <image>` 可显式指定 Docker 构建使用的 Python 基础镜像；不传时默认优先复用本机已有标签，并回退到 `m.daocloud.io/docker.io/library/python:3.11-slim`。
 - `tools\latest\deploy-docker.ps1 hybrid -WebBaseUrl https://your-web-api.example.com` 会改为指向显式传入的地址，此时不再默认覆盖为本机地址。
 - `tools\latest\deploy-docker.ps1` 拉起的本地服务 PID 会写入 `runtime\local-deploy-state.json`，供 `tools\latest\stop-deploy.ps1` 读取并停止。
 - `deploy-docker.ps1` 打开的日志终端只是查看窗口；关闭窗口不会自动停止后台服务进程。

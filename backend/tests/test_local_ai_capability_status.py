@@ -9,7 +9,7 @@ from app.modules.platform.application.services.config_facade_service import Conf
 from routers import config_router
 
 
-def test_config_facade_returns_boolean_capability_flags(monkeypatch):
+def test_config_facade_returns_capability_flags_with_empty_reasons_when_available(monkeypatch):
     monkeypatch.setattr(
         "app.modules.platform.application.services.config_facade_service.get_config",
         lambda: {
@@ -31,11 +31,15 @@ def test_config_facade_returns_boolean_capability_flags(monkeypatch):
 
     assert result == {
         "text_ai_available": True,
+        "code_agent_available": True,
         "image_ai_available": True,
+        "text_ai_missing_reasons": [],
+        "code_agent_missing_reasons": [],
+        "image_ai_missing_reasons": [],
     }
 
 
-def test_config_router_only_exposes_boolean_capability_status(monkeypatch):
+def test_config_router_exposes_capability_reasons_without_secret_fields(monkeypatch):
     monkeypatch.setattr(
         config_router,
         "get_config",
@@ -59,6 +63,37 @@ def test_config_router_only_exposes_boolean_capability_status(monkeypatch):
 
     assert result == {
         "text_ai_available": True,
+        "code_agent_available": True,
         "image_ai_available": False,
+        "text_ai_missing_reasons": [],
+        "code_agent_missing_reasons": [],
+        "image_ai_missing_reasons": ["请先在设置中填写图像 API Key。"],
     }
     assert "api_key" not in result
+
+
+def test_config_router_marks_code_agent_available_for_openai_compatible_api_mode(monkeypatch):
+    monkeypatch.setattr(
+        config_router,
+        "get_config",
+        lambda: {
+            "llm": {
+                "mode": "api",
+                "provider": "qwen",
+                "model": "qwen-plus",
+                "api_key": "secret-key",
+            },
+            "image_gen": {
+                "mode": "cloud",
+                "provider": "bfl",
+                "model": "flux.2-flex",
+                "api_key": "img-key",
+            },
+        },
+    )
+
+    result = config_router.local_ai_capability_status()
+
+    assert result["text_ai_available"] is True
+    assert result["code_agent_available"] is True
+    assert result["code_agent_missing_reasons"] == []

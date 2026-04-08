@@ -282,6 +282,7 @@ export function ModEditorFeatureView({
                   jobType: "mod_edit",
                   createdFrom: "mod_editor",
                   inputSummary: modRequest.trim(),
+                  requiresCodeAgent: true,
                   requiresImageAi: false,
                   items: [
                     {

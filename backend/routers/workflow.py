@@ -29,6 +29,7 @@ from project_utils import create_project_from_template
 from image.generator import generate_images
 from image.postprocess import PROFILES, process_image
 from image.prompt_adapter import adapt_prompt, ImageProvider
+from llm.agent_runner import resolve_agent_backend
 from llm.text_runner import complete_text
 from llm.stream_metadata import build_stream_chunk_payload, resolve_agent_display_model
 from llm.stage_events import build_stage_event
@@ -166,7 +167,7 @@ async def _plan_approval_requests(description: str, llm_cfg: dict, project_root:
     summary = plan.get("summary", _text("workflow_approval_output_default").strip())
     actions = service.create_requests_from_plan(
         plan,
-        source_backend=llm_cfg.get("agent_backend", "unknown"),
+        source_backend=resolve_agent_backend(llm_cfg),
         source_workflow="single_asset",
     )
     return summary, actions

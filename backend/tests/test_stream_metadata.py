@@ -20,6 +20,10 @@ def test_resolve_agent_display_model_falls_back_to_backend_default_label():
     assert resolve_agent_display_model({"agent_backend": "claude"}) == "Claude CLI 默认模型"
 
 
+def test_resolve_agent_display_model_uses_provider_defaults_in_api_mode():
+    assert resolve_agent_display_model({"mode": "api", "provider": "qwen"}) == "openai/qwen-plus"
+
+
 def test_resolve_text_display_model_uses_provider_defaults():
     assert resolve_text_display_model({"mode": "api", "provider": "openai"}) == "openai/gpt-5"
 

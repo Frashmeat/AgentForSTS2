@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { X, FolderOpen, Gamepad2, Cpu, Image, Search } from "lucide-react";
+import { X, FolderOpen, Cpu, Image, Search } from "lucide-react";
 import {
   cancelDetectAppPathsTask,
   getDetectAppPathsTask,
@@ -53,7 +53,12 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
-export function SettingsPanel({ onClose }: { onClose: () => void }) {
+interface SettingsPanelProps {
+  mode?: "drawer" | "page";
+  onClose?: () => void;
+}
+
+export function SettingsPanel({ mode = "drawer", onClose }: SettingsPanelProps) {
   const [cfg, setCfg] = useState<any>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -199,7 +204,11 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     if (imgSecret.trim()) body.image_gen.api_secret = imgSecret.trim();
     try {
       await updateAppConfig(body);
-      onClose();
+      if (onClose) {
+        onClose();
+      } else {
+        setPathNotes(prev => ["✓ 设置已保存", ...prev.filter(note => note !== "✓ 设置已保存")]);
+      }
     } catch (error) {
       setSaveError(resolveErrorMessage(error) || "保存设置失败");
     } finally {
@@ -212,30 +221,34 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
   const missingPaths = cfg && (!cfg.default_project_root || !cfg.sts2_path);
 
-  return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex justify-end" onClick={onClose}>
-      <div
-        className="w-full max-w-sm bg-white border-l border-slate-200 h-full overflow-y-auto shadow-xl"
-        onClick={e => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between z-10">
-          <div>
-            <h2 className="font-bold text-slate-800">设置</h2>
-            {missingPaths && (
-              <p className="text-xs text-amber-600 mt-0.5">⚠ 请配置项目路径</p>
-            )}
-          </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors p-1 rounded-lg hover:bg-slate-100">
-            <X size={18} />
-          </button>
-        </div>
+  const header = (
+    <div
+      className={`border-b border-slate-200 px-6 py-4 flex items-center z-10 ${
+        mode === "drawer"
+          ? "sticky top-0 bg-white justify-between"
+          : "justify-between gap-4 bg-slate-50/80 backdrop-blur"
+      }`}
+    >
+      <div>
+        <h2 className="font-bold text-slate-800">设置</h2>
+        {missingPaths && (
+          <p className="text-xs text-amber-600 mt-0.5">⚠ 请配置项目路径</p>
+        )}
+      </div>
+      {mode === "drawer" && onClose ? (
+        <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors p-1 rounded-lg hover:bg-slate-100">
+          <X size={18} />
+        </button>
+      ) : null}
+    </div>
+  );
 
-        <div className="p-6 space-y-6">
-          {!cfg ? (
-            <p className="text-slate-400 text-sm">加载中…</p>
-          ) : (
-            <>
+  const content = (
+    <div className="p-6 space-y-6">
+      {!cfg ? (
+        <p className="text-slate-400 text-sm">加载中…</p>
+      ) : (
+        <>
               {/* ── 项目配置（最重要，放最前面）── */}
               <SGroup icon={<FolderOpen size={14} />} title="项目配置">
                 <div className="flex items-center gap-2">
@@ -350,16 +363,26 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     <option value="api">API</option>
                   </select>
                 </Field>
-                <Field label="代码代理后端" hint="代码生成、编译修复、项目修改使用这个代理">
-                  <select
-                    value={cfg.llm?.agent_backend || "claude"}
-                    onChange={e => set(["llm", "agent_backend"], e.target.value)}
-                    className={selectCls}
-                  >
-                    <option value="claude">Claude CLI</option>
-                    <option value="codex">Codex CLI</option>
-                  </select>
-                </Field>
+                {cfg.llm?.mode === "agent_cli" ? (
+                  <Field label="代码代理后端" hint="CLI 模式下，文本任务和代码代理都会走这里选择的后端。">
+                    <select
+                      value={cfg.llm?.agent_backend || "claude"}
+                      onChange={e => set(["llm", "agent_backend"], e.target.value)}
+                      className={selectCls}
+                    >
+                      <option value="claude">Claude CLI</option>
+                      <option value="codex">Codex CLI</option>
+                    </select>
+                  </Field>
+                ) : (
+                  <Field label="代码代理后端" hint="API 模式下会自动与当前文本 API 配置保持一致：Anthropic 走 Claude 兼容链路，其他已支持提供商走 Codex 兼容链路。">
+                    <input
+                      value={cfg.llm?.provider === "anthropic" ? "自动选择：Claude 兼容链路" : "自动选择：Codex 兼容链路"}
+                      readOnly
+                      className={readonlyInputCls}
+                    />
+                  </Field>
+                )}
                 <Field
                   label="代码执行模式"
                   hint="审批模式：执行前展示操作预览，用户确认后再调用代理。推荐在使用 Codex 时开启。"
@@ -374,17 +397,27 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   </select>
                 </Field>
                 {cfg.llm?.mode === "api" && (
-                  <Field label="API 提供商">
-                    <select
-                      value={cfg.llm?.provider || "anthropic"}
-                      onChange={e => set(["llm", "provider"], e.target.value)}
-                      className={selectCls}
-                    >
-                      {TEXT_PROVIDERS.map(provider => (
-                        <option key={provider.value} value={provider.value}>{provider.label}</option>
-                      ))}
-                    </select>
-                  </Field>
+                  <>
+                    <Field label="API 提供商">
+                      <select
+                        value={cfg.llm?.provider || "anthropic"}
+                        onChange={e => set(["llm", "provider"], e.target.value)}
+                        className={selectCls}
+                      >
+                        {TEXT_PROVIDERS.map(provider => (
+                          <option key={provider.value} value={provider.value}>{provider.label}</option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field label="文本模型" hint="用于规划、日志分析、提示词优化等文本任务；必填。">
+                      <input
+                        value={cfg.llm?.model || ""}
+                        onChange={e => set(["llm", "model"], e.target.value)}
+                        placeholder="例如 openai/gpt-5、qwen-plus、deepseek-chat"
+                        className={inputCls}
+                      />
+                    </Field>
+                  </>
                 )}
                 {cfg.llm?.mode === "agent_cli" && (
                   <Field label="CLI 模型（可选）" hint="留空使用 Codex 或 Claude CLI 的默认模型">
@@ -476,9 +509,28 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
               >
                 {saving ? "保存中…" : "保存设置"}
               </button>
-            </>
-          )}
-        </div>
+        </>
+      )}
+    </div>
+  );
+
+  if (mode === "page") {
+    return (
+      <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_30px_80px_rgba(15,23,42,0.08)]">
+        {header}
+        {content}
+      </section>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex justify-end" onClick={onClose}>
+      <div
+        className="w-full max-w-sm bg-white border-l border-slate-200 h-full overflow-y-auto shadow-xl"
+        onClick={e => e.stopPropagation()}
+      >
+        {header}
+        {content}
       </div>
     </div>
   );

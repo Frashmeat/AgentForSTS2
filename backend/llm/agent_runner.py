@@ -46,7 +46,7 @@ def _inject_agents_codex(prompt: str) -> str:
 
 def build_agent_prompt(prompt: str, llm_cfg: dict, use_runtime_config: bool = False) -> str:
     effective_cfg = _with_latest_runtime_custom_prompt(llm_cfg) if use_runtime_config else llm_cfg
-    backend = normalize_llm_config(effective_cfg).get("agent_backend", "claude")
+    backend = resolve_agent_backend_name(normalize_llm_config(effective_cfg))
     if backend == "codex":
         prompt = _inject_agents_codex(prompt)
     return append_global_ai_instructions(prompt, effective_cfg)

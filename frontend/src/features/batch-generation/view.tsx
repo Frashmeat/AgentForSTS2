@@ -496,6 +496,7 @@ function BatchModePage({ onRequestExecution }: { onRequestExecution?: (request: 
               jobType: "batch_generate",
               createdFrom: "batch_generation",
               inputSummary: plan.summary || requirements.trim() || plan.mod_name,
+              requiresCodeAgent: true,
               requiresImageAi: editedItems.some(item => item.needs_image && !item.provided_image_b64),
               items: editedItems.map((item, index) => ({
                 item_type: item.type,

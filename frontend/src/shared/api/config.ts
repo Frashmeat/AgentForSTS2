@@ -35,7 +35,11 @@ export interface DetectPathsTaskResult {
 
 export interface LocalAiCapabilityStatus {
   text_ai_available: boolean;
+  code_agent_available: boolean;
   image_ai_available: boolean;
+  text_ai_missing_reasons?: string[];
+  code_agent_missing_reasons?: string[];
+  image_ai_missing_reasons?: string[];
 }
 
 export interface PickPathRequest {

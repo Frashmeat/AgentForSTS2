@@ -64,10 +64,6 @@ export function WorkspaceShell<T extends string>({
           </div>
           <div className="workspace-topbar-actions">
             <div className="workspace-upgrade-pill">控制台模式</div>
-            <button type="button" onClick={onOpenSettings} className="workspace-action-button">
-              <Settings size={15} />
-              <span>设置</span>
-            </button>
             <div className="workspace-user-entry">
               <UserEntry />
             </div>

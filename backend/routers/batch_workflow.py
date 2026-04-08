@@ -42,6 +42,7 @@ from config import get_config
 from image.generator import generate_images
 from image.postprocess import process_image
 from image.prompt_adapter import adapt_prompt, ImageProvider
+from llm.agent_runner import resolve_agent_backend
 from llm.text_runner import complete_text
 from llm.stream_metadata import build_stream_chunk_payload, resolve_agent_display_model
 from llm.stage_events import build_stage_event
@@ -149,7 +150,7 @@ async def _plan_group_approval_requests(group: list[PlanItem], llm_cfg: dict, pr
     summary = plan.get("summary", _text("batch_approval_summary_default").strip())
     actions = get_approval_service().create_requests_from_plan(
         plan,
-        source_backend=llm_cfg.get("agent_backend", "unknown"),
+        source_backend=resolve_agent_backend(llm_cfg),
         source_workflow="batch",
     )
     return summary, actions

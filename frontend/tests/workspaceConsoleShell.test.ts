@@ -15,6 +15,8 @@ test("workspace root is wrapped by a dedicated WorkspaceShell", () => {
   assert.match(appSource, /<WorkspaceShell[\s\S]*activeTab=\{activeTab\}[\s\S]*>\s*\{renderWorkspaceContent\(\)\}\s*<\/WorkspaceShell>/);
   assert.equal(existsSync(new URL("../src/components/workspace/WorkspaceShell.tsx", import.meta.url)), true);
   assert.doesNotMatch(shellSource, /workspace-banner/);
+  assert.match(shellSource, /workspace-sidebar-footer/);
+  assert.doesNotMatch(shellSource, /workspace-action-button/);
 });
 
 test("workspace theme tokens are defined from the approved purple-blue palette", () => {

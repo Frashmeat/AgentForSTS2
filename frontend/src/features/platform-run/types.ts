@@ -8,6 +8,7 @@ export interface PlatformExecutionRequest {
   jobType: "single_generate" | "batch_generate" | "mod_edit" | "log_analysis";
   createdFrom: "single_asset" | "batch_generation" | "mod_editor" | "log_analysis";
   inputSummary: string;
+  requiresCodeAgent: boolean;
   requiresImageAi: boolean;
   items: PlatformJobCreateItem[];
   runLocal: () => void;

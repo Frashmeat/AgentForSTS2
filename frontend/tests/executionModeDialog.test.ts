@@ -13,4 +13,6 @@ test("execution mode dialog covers local server and login states", () => {
   assert.match(source, /服务器模式/);
   assert.match(source, /onGoLogin/);
   assert.match(source, /用户中心/);
+  assert.match(source, /localUnavailableReasons/);
+  assert.match(source, /localUnavailableReasons\.map/);
 });

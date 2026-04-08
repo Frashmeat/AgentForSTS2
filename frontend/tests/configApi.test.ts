@@ -220,7 +220,7 @@ test("updateAppConfig patches config json body", async () => {
   assert.equal(result.default_project_root, "E:/STS2mod/new");
 });
 
-test("loadLocalAiCapabilityStatus reads boolean-only capability endpoint", async () => {
+test("loadLocalAiCapabilityStatus reads capability endpoint with missing reasons", async () => {
   const calls: Array<{ input: unknown; init?: RequestInit }> = [];
   setWorkstationApiBase();
   Object.assign(globalThis, {
@@ -230,7 +230,11 @@ test("loadLocalAiCapabilityStatus reads boolean-only capability endpoint", async
         ok: true,
         body: {
           text_ai_available: true,
+          code_agent_available: true,
           image_ai_available: false,
+          text_ai_missing_reasons: [],
+          code_agent_missing_reasons: [],
+          image_ai_missing_reasons: ["请先在设置中填写图像 API Key。"],
         },
       });
     },
@@ -241,5 +245,7 @@ test("loadLocalAiCapabilityStatus reads boolean-only capability endpoint", async
   assert.equal(calls[0].input, "http://127.0.0.1:7860/api/config/local_ai_capability_status");
   assert.equal(calls[0].init?.method, "GET");
   assert.equal(result.text_ai_available, true);
+  assert.equal(result.code_agent_available, true);
   assert.equal(result.image_ai_available, false);
+  assert.deepEqual(result.image_ai_missing_reasons, ["请先在设置中填写图像 API Key。"]);
 });

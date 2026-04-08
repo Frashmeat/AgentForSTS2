@@ -4,7 +4,6 @@ import { Link, Navigate, Route, Routes, useLocation, useNavigate, useSearchParam
 import ExecutionModeDialog from "./components/ExecutionModeDialog.tsx";
 import { PlatformAuthUnavailableNotice } from "./components/PlatformAuthUnavailableNotice.tsx";
 import { PlatformPageShell } from "./components/platform/PlatformPageShell.tsx";
-import { SettingsPanel } from "./components/SettingsPanel";
 import { WorkspaceShell } from "./components/workspace/WorkspaceShell.tsx";
 import { approveApproval, executeApproval, rejectApproval, type ApprovalRequest } from "./shared/api/index.ts";
 import { type SingleAssetSocket } from "./lib/single_asset_ws";
@@ -31,12 +30,18 @@ import {
   saveSingleAssetSnapshot,
 } from "./features/single-asset/recovery";
 import { SingleAssetFeatureView } from "./features/single-asset/view";
-import { loadLocalAiCapabilityStatus, resolveMigrationFlags, type WorkflowMigrationFlags } from "./shared/api/index.ts";
+import {
+  loadLocalAiCapabilityStatus,
+  resolveMigrationFlags,
+  type LocalAiCapabilityStatus,
+  type WorkflowMigrationFlags,
+} from "./shared/api/index.ts";
 import type { PlatformJobCreateItem } from "./shared/api/platform.ts";
 import { runApprovalAction } from "./shared/approvalAction.ts";
 import { useSession } from "./shared/session/hooks.ts";
 import { useDefaultProjectRoot } from "./shared/useDefaultProjectRoot.ts";
 import { useProjectCreation } from "./shared/useProjectCreation.ts";
+import { SettingsPage } from "./pages/SettingsPage.tsx";
 
 type AppTab = WorkspaceTab;
 
@@ -87,6 +92,11 @@ function buildWorkspacePath(tab: AppTab): string {
   return tab === "single" ? "/" : `/?tab=${tab}`;
 }
 
+function buildSettingsPath(returnTo: string): string {
+  const nextSearch = new URLSearchParams({ returnTo });
+  return `/settings?${nextSearch.toString()}`;
+}
+
 function buildPlatformAuthUnavailableElement(title: string, description: string) {
   return (
     <PlatformPageShell
@@ -108,6 +118,7 @@ function buildPlatformAuthUnavailableElement(title: string, description: string)
 
 interface PendingExecutionRequest extends PlatformExecutionRequest {
   localAvailable: boolean;
+  localUnavailableReasons: string[];
 }
 
 export default function App() {
@@ -129,7 +140,6 @@ export default function App() {
   );
   const batchOffsetRef = useRef(0);
   const [socket, setSocket] = useState<SingleAssetSocket | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [autoMode, setAutoMode] = useState(() => initialSingleAssetSnapshot?.autoMode ?? false);
   const autoModeRef = useRef(false);
   const [imageMode, setImageMode] = useState<"ai" | "upload">(() => initialSingleAssetSnapshot?.imageMode ?? "ai");
@@ -293,19 +303,37 @@ export default function App() {
   }
 
   async function handleExecutionRequest(request: PlatformExecutionRequest) {
-    let capability;
+    let capability: LocalAiCapabilityStatus;
     try {
       capability = await loadLocalAiCapabilityStatus();
     } catch {
       capability = {
         text_ai_available: false,
+        code_agent_available: false,
         image_ai_available: false,
+        text_ai_missing_reasons: ["无法读取本机配置状态，请检查工作站后端是否正常运行。"],
+        code_agent_missing_reasons: ["无法读取本机代码代理状态，请检查工作站后端是否正常运行。"],
+        image_ai_missing_reasons: [],
       };
     }
 
+    const localUnavailableReasons = [
+      ...(capability.text_ai_available ? [] : capability.text_ai_missing_reasons ?? []),
+      ...(request.requiresCodeAgent && !capability.code_agent_available ? capability.code_agent_missing_reasons ?? [] : []),
+      ...(
+        request.requiresImageAi && !capability.image_ai_available
+          ? capability.image_ai_missing_reasons ?? []
+          : []
+      ),
+    ];
+
     setPendingExecution({
       ...request,
-      localAvailable: capability.text_ai_available && (!request.requiresImageAi || capability.image_ai_available),
+      localAvailable:
+        capability.text_ai_available &&
+        (!request.requiresCodeAgent || capability.code_agent_available) &&
+        (!request.requiresImageAi || capability.image_ai_available),
+      localUnavailableReasons,
     });
   }
 
@@ -430,6 +458,9 @@ export default function App() {
   }
 
   function renderWorkspaceContent() {
+    const openSettingsPage = () => {
+      navigate(buildSettingsPath(buildWorkspacePath(activeTab)));
+    };
     const singleAssetRequiresImageAi = imageMode === "ai";
     const singleAssetInputSummary = `${assetType}:${assetName.trim() || "未命名资产"}`;
     const singleAssetItem: PlatformJobCreateItem = {
@@ -527,6 +558,7 @@ export default function App() {
                 jobType: "single_generate",
                 createdFrom: "single_asset",
                 inputSummary: singleAssetInputSummary,
+                requiresCodeAgent: true,
                 requiresImageAi: singleAssetRequiresImageAi,
                 items: [singleAssetItem],
                 runLocal() {
@@ -562,14 +594,12 @@ export default function App() {
             onProceedApproval={() => {
               singleAssetWorkflowController.proceedApproval();
             }}
-            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenSettings={openSettingsPage}
           />
         )}
       </>
     );
   }
-
-  const isWorkspaceRoute = location.pathname === "/";
 
   return (
     <div className="min-h-screen bg-[var(--workspace-bg)] text-slate-800">
@@ -577,11 +607,17 @@ export default function App() {
         <Route
           path="/"
           element={
-            <WorkspaceShell activeTab={activeTab} navItems={workspaceNavItems} onTabChange={updateActiveTab} onOpenSettings={() => setSettingsOpen(true)}>
+            <WorkspaceShell
+              activeTab={activeTab}
+              navItems={workspaceNavItems}
+              onTabChange={updateActiveTab}
+              onOpenSettings={() => navigate(buildSettingsPath(buildWorkspacePath(activeTab)))}
+            >
               {renderWorkspaceContent()}
             </WorkspaceShell>
           }
         />
+        <Route path="/settings" element={<SettingsPage />} />
         <Route
           path="/auth/login"
           element={isAuthAvailable ? <LoginPage /> : buildPlatformAuthUnavailableElement("当前环境不支持登录", "这是本机工作站模式，未接入独立 Web 平台服务，因此登录与注册入口不可用。")}
@@ -612,12 +648,11 @@ export default function App() {
         />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-
-      {settingsOpen && isWorkspaceRoute && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
       <ExecutionModeDialog
         open={pendingExecution !== null}
         title={pendingExecution?.title ?? "选择执行方式"}
         localAvailable={pendingExecution?.localAvailable ?? false}
+        localUnavailableReasons={pendingExecution?.localUnavailableReasons ?? []}
         isAuthenticated={isAuthenticated}
         onClose={() => setPendingExecution(null)}
         onChooseLocal={handleChooseLocalExecution}

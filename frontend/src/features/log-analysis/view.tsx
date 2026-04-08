@@ -129,6 +129,7 @@ export function LogAnalysisFeatureView({
                   jobType: "log_analysis",
                   createdFrom: "log_analysis",
                   inputSummary: context.trim() || "分析最近一次游戏日志",
+                  requiresCodeAgent: false,
                   requiresImageAi: false,
                   items: [
                     {

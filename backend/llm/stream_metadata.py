@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.shared.infra.llm.agent_backend import resolve_agent_backend_name
 from config import normalize_llm_config
 
 _TEXT_MODEL_MAP = {
@@ -18,7 +19,11 @@ def resolve_agent_display_model(llm_cfg: dict | None) -> str:
     if model:
         return model
 
-    backend = cfg.get("agent_backend", "claude")
+    if cfg.get("mode") == "api":
+        provider = cfg.get("provider", "anthropic")
+        return _TEXT_MODEL_MAP.get(provider, "claude-sonnet-4-6")
+
+    backend = resolve_agent_backend_name(cfg)
     if backend == "codex":
         return "Codex CLI 默认模型"
     return "Claude CLI 默认模型"

@@ -2,6 +2,7 @@ interface ExecutionModeDialogProps {
   open: boolean;
   title: string;
   localAvailable: boolean;
+  localUnavailableReasons?: string[];
   isAuthenticated: boolean;
   onClose: () => void;
   onChooseLocal: () => void;
@@ -13,6 +14,7 @@ export function ExecutionModeDialog({
   open,
   title,
   localAvailable,
+  localUnavailableReasons = [],
   isAuthenticated,
   onClose,
   onChooseLocal,
@@ -44,7 +46,14 @@ export function ExecutionModeDialog({
             </button>
           ) : (
             <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-4 text-sm text-slate-500">
-              未检测到当前任务所需的本机 AI 能力，本次仅建议走服务器模式。
+              <p>未检测到当前任务所需的本机 AI 能力，本次仅建议走服务器模式。</p>
+              {localUnavailableReasons.length > 0 ? (
+                <div className="mt-2 space-y-1 text-xs text-amber-700">
+                  {localUnavailableReasons.map((reason) => (
+                    <p key={reason}>- {reason}</p>
+                  ))}
+                </div>
+              ) : null}
             </div>
           )}
 

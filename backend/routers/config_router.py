@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from starlette.requests import Request
+from app.shared.infra.llm.agent_backend import resolve_agent_backend_name
 from app.shared.prompting import PromptLoader
 from config import get_config, update_config
 
@@ -134,9 +135,16 @@ def local_ai_capability_status(request: Request = None):
     if facade is not None:
         return facade.get_local_ai_capability_status()
     cfg = get_config()
+    text_ai_available, text_ai_missing_reasons = _resolve_text_ai_capability(cfg.get("llm", {}))
+    code_agent_available, code_agent_missing_reasons = _resolve_code_agent_capability(cfg.get("llm", {}))
+    image_ai_available, image_ai_missing_reasons = _resolve_image_ai_capability(cfg.get("image_gen", {}))
     return {
-        "text_ai_available": _has_text_ai(cfg.get("llm", {})),
-        "image_ai_available": _has_image_ai(cfg.get("image_gen", {})),
+        "text_ai_available": text_ai_available,
+        "code_agent_available": code_agent_available,
+        "image_ai_available": image_ai_available,
+        "text_ai_missing_reasons": text_ai_missing_reasons,
+        "code_agent_missing_reasons": code_agent_missing_reasons,
+        "image_ai_missing_reasons": image_ai_missing_reasons,
     }
 
 
@@ -165,24 +173,76 @@ def _mask_keys(cfg: dict) -> dict:
 
 
 def _has_text_ai(llm_cfg: dict) -> bool:
-    mode = str(llm_cfg.get("mode", "")).strip()
-    if mode == "agent_cli":
-        return str(llm_cfg.get("agent_backend", "")).strip() in {"claude", "codex"}
-    return all(str(llm_cfg.get(field, "")).strip() for field in ("provider", "model", "api_key"))
+    available, _ = _resolve_text_ai_capability(llm_cfg)
+    return available
 
 
 def _has_image_ai(image_cfg: dict) -> bool:
+    available, _ = _resolve_image_ai_capability(image_cfg)
+    return available
+
+
+def _resolve_code_agent_capability(llm_cfg: dict) -> tuple[bool, list[str]]:
+    mode = str(llm_cfg.get("mode", "")).strip()
+    reasons: list[str] = []
+
+    if mode == "agent_cli":
+        if str(llm_cfg.get("agent_backend", "")).strip() not in {"claude", "codex"}:
+            reasons.append("请先在设置中选择可用的代码代理后端（Claude CLI 或 Codex CLI）。")
+        return len(reasons) == 0, reasons
+
+    backend = resolve_agent_backend_name(llm_cfg)
+    if not str(llm_cfg.get("provider", "")).strip():
+        reasons.append("请先在设置中填写文本 API 提供商。")
+    if not str(llm_cfg.get("model", "")).strip():
+        reasons.append("请先在设置中填写文本模型。")
+    if not str(llm_cfg.get("api_key", "")).strip():
+        reasons.append("请先在设置中填写文本 API Key。")
+    if backend == "claude" and str(llm_cfg.get("provider", "")).strip() != "anthropic":
+        reasons.append("当前代码代理只会在 Anthropic 提供商下使用 Claude CLI。")
+    return len(reasons) == 0, reasons
+
+
+def _resolve_text_ai_capability(llm_cfg: dict) -> tuple[bool, list[str]]:
+    mode = str(llm_cfg.get("mode", "")).strip()
+    reasons: list[str] = []
+
+    if mode == "agent_cli":
+        if str(llm_cfg.get("agent_backend", "")).strip() not in {"claude", "codex"}:
+            reasons.append("请先在设置中选择可用的代码代理后端（Claude CLI 或 Codex CLI）。")
+        return len(reasons) == 0, reasons
+
+    if not str(llm_cfg.get("provider", "")).strip():
+        reasons.append("请先在设置中填写文本 API 提供商。")
+    if not str(llm_cfg.get("model", "")).strip():
+        reasons.append("请先在设置中填写文本模型。")
+    if not str(llm_cfg.get("api_key", "")).strip():
+        reasons.append("请先在设置中填写文本 API Key。")
+    return len(reasons) == 0, reasons
+
+
+def _resolve_image_ai_capability(image_cfg: dict) -> tuple[bool, list[str]]:
     mode = str(image_cfg.get("mode", "")).strip()
     provider = str(image_cfg.get("provider", "")).strip()
     model = str(image_cfg.get("model", "")).strip()
+    reasons: list[str] = []
 
     if mode == "local":
         local_cfg = image_cfg.get("local", {})
-        return bool(model and str(local_cfg.get("comfyui_url", "")).strip())
+        if not model:
+            reasons.append("请先在设置中填写本地图像模型。")
+        if not str(local_cfg.get("comfyui_url", "")).strip():
+            reasons.append("请先在设置中填写 ComfyUI 地址。")
+        return len(reasons) == 0, reasons
 
-    if not all((provider, model, str(image_cfg.get("api_key", "")).strip())):
-        return False
+    if not provider:
+        reasons.append("请先在设置中填写图像提供商。")
+    if not model:
+        reasons.append("请先在设置中填写图像模型。")
+    if not str(image_cfg.get("api_key", "")).strip():
+        reasons.append("请先在设置中填写图像 API Key。")
     if provider == "volcengine":
-        return bool(str(image_cfg.get("api_secret", "")).strip())
-    return True
+        if not str(image_cfg.get("api_secret", "")).strip():
+            reasons.append("火山引擎模式下请先填写图像 Secret Key。")
+    return len(reasons) == 0, reasons
 

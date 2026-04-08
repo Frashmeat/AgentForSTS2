@@ -76,7 +76,14 @@ def test_config_router_uses_facade_when_service_split_flag_enabled():
 
         def get_local_ai_capability_status(self):
             calls.append("local-ai")
-            return {"text_ai_available": True, "image_ai_available": False}
+            return {
+                "text_ai_available": True,
+                "code_agent_available": True,
+                "image_ai_available": False,
+                "text_ai_missing_reasons": [],
+                "code_agent_missing_reasons": [],
+                "image_ai_missing_reasons": ["请先在设置中填写图像 API Key。"],
+            }
 
     app = FastAPI()
     app.state.container = _FakeContainer(
@@ -96,7 +103,14 @@ def test_config_router_uses_facade_when_service_split_flag_enabled():
         capability = client.get("/api/config/local_ai_capability_status")
 
     assert capability.status_code == 200
-    assert capability.json() == {"text_ai_available": True, "image_ai_available": False}
+    assert capability.json() == {
+        "text_ai_available": True,
+        "code_agent_available": True,
+        "image_ai_available": False,
+        "text_ai_missing_reasons": [],
+        "code_agent_missing_reasons": [],
+        "image_ai_missing_reasons": ["请先在设置中填写图像 API Key。"],
+    }
     assert calls == ["get", "local-ai"]
 
 
