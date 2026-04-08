@@ -52,6 +52,9 @@ def _resolve_claude_launcher() -> list[str]:
     for candidate in ("claude.cmd", "claude.exe", "claude.bat", "claude"):
         claude_exe = shutil.which(candidate)
         if claude_exe:
+            node_launcher = _resolve_windows_node_cli_launcher(claude_exe)
+            if node_launcher:
+                return node_launcher
             return [claude_exe]
 
     script_path = _resolve_claude_powershell_script()
@@ -62,6 +65,46 @@ def _resolve_claude_launcher() -> list[str]:
         return [powershell_exe, "-NoProfile", "-File", script_path]
 
     raise RuntimeError("未找到 Claude CLI，请先安装并确保 claude 可执行文件在 PATH 中")
+
+
+def _resolve_windows_node_cli_launcher(claude_exe: str) -> list[str] | None:
+    if os.name != "nt":
+        return None
+
+    claude_path = Path(claude_exe)
+    if claude_path.suffix.lower() not in {".cmd", ".bat"}:
+        return None
+
+    cli_entry = _resolve_windows_cli_entrypoint(claude_path)
+    if not cli_entry:
+        return None
+
+    node_exe = _resolve_windows_node_executable(claude_path)
+    if not node_exe:
+        return None
+
+    return [node_exe, str(cli_entry)]
+
+
+def _resolve_windows_cli_entrypoint(claude_path: Path) -> Path | None:
+    appdata = os.environ.get("APPDATA", "")
+    candidates = [
+        claude_path.parent / "node_modules" / "@anthropic-ai" / "claude-code" / "cli.js",
+    ]
+    if appdata:
+        candidates.append(Path(appdata) / "npm" / "node_modules" / "@anthropic-ai" / "claude-code" / "cli.js")
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _resolve_windows_node_executable(claude_path: Path) -> str | None:
+    local_node = claude_path.with_name("node.exe")
+    if local_node.exists():
+        return str(local_node)
+    return shutil.which("node")
 
 
 def _resolve_claude_powershell_script() -> str | None:

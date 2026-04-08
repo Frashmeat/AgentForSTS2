@@ -103,3 +103,33 @@ def test_resolve_claude_launcher_wraps_powershell_script(monkeypatch, tmp_path: 
         "-File",
         str(ps1_path),
     ]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="仅在 Windows 上验证 Claude CMD 绕过长度限制")
+def test_resolve_claude_launcher_prefers_node_cli_for_cmd_wrapper(monkeypatch, tmp_path: Path):
+    wrapper_dir = tmp_path / "wrapper"
+    wrapper_dir.mkdir(parents=True, exist_ok=True)
+    wrapper_cmd = wrapper_dir / "claude.cmd"
+    wrapper_cmd.write_text("@ECHO OFF\n", encoding="utf-8")
+
+    appdata_dir = tmp_path / "AppData"
+    cli_entry = appdata_dir / "npm" / "node_modules" / "@anthropic-ai" / "claude-code" / "cli.js"
+    cli_entry.parent.mkdir(parents=True, exist_ok=True)
+    cli_entry.write_text("console.log('fake claude')\n", encoding="utf-8")
+
+    def fake_which(name: str):
+        mapping = {
+            "claude.cmd": str(wrapper_cmd),
+            "node": "C:/Program Files/nodejs/node.exe",
+        }
+        return mapping.get(name)
+
+    monkeypatch.setenv("APPDATA", str(appdata_dir))
+    monkeypatch.setattr(shutil, "which", fake_which)
+
+    launcher = claude_cli._resolve_claude_launcher()
+
+    assert launcher == [
+        "C:/Program Files/nodejs/node.exe",
+        str(cli_entry),
+    ]

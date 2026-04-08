@@ -238,10 +238,12 @@ def test_deploy_docker_frontend_runs_local_static_server_without_docker(tmp_path
 def test_deploy_docker_full_runs_local_workstation_and_only_dockerizes_web(tmp_path: Path):
     result = _run_deploy(tmp_path, "full")
 
-    workstation_config = tmp_path / "release" / "services" / "workstation" / "config.json"
+    workstation_config = tmp_path / "release" / "runtime" / "workstation.config.json"
+    legacy_service_config = tmp_path / "release" / "services" / "workstation" / "config.json"
 
     assert result.returncode == 0, result.stderr
     assert result.docker_log.count("compose build") == 1
     assert result.docker_log.count("compose up") == 1
     assert "-m uvicorn main_workstation:app --host 127.0.0.1 --port 7860" in result.python_log
     assert workstation_config.exists()
+    assert not legacy_service_config.exists()

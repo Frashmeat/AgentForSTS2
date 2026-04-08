@@ -4,7 +4,7 @@
 
 .DESCRIPTION
 根据目标生成可部署的 release 目录，并可选输出 zip 包。
-传入 PowerShell 内建的 `-Debug` 开关时，会在重新打包 `workstation` 相关目标时优先沿用旧 release 中已有的 `services/workstation/config.json`；未传入时默认使用 `config.example.json` 生成新的 `config.json`。
+传入 PowerShell 内建的 `-Debug` 开关时，会在重新打包 `workstation` 相关目标时优先沿用旧 release 中已有的 `runtime/workstation.config.json`；若只检测到旧版 `services/workstation/config.json`，则作为兼容来源迁移；未传入时默认使用 `config.example.json` 生成新的 `runtime/workstation.config.json`。
 直接执行脚本且不传任何参数时，会默认显示本帮助而不是立即开始打包。
 
 .PARAMETER Target
@@ -339,7 +339,7 @@ function Copy-ServiceBundle {
         Copy-Item -LiteralPath (Join-Path $RepoRoot "config.example.json") -Destination (Join-Path $serviceDir "config.example.json") -Force
 
         if ($Service.Name -eq "workstation") {
-            $configTargetPath = Join-Path $serviceDir "config.json"
+            $configTargetPath = Join-Path (Join-Path $ReleaseDir "runtime") "workstation.config.json"
             $configContent = ""
             if ($ReuseExistingSettings.IsPresent -and $PreviousServiceConfigs.ContainsKey($Service.Name)) {
                 $configContent = [string]$PreviousServiceConfigs[$Service.Name]
@@ -409,9 +409,15 @@ function Get-PreviousServiceConfigs {
     param([string]$ExistingReleaseDir)
 
     $configs = @{}
-    $workstationConfigPath = Join-Path $ExistingReleaseDir "services\workstation\config.json"
+    $workstationConfigPath = Join-Path $ExistingReleaseDir "runtime\workstation.config.json"
     if (Test-Path -LiteralPath $workstationConfigPath) {
         $configs["workstation"] = Get-Content -LiteralPath $workstationConfigPath -Raw
+        return $configs
+    }
+
+    $legacyWorkstationConfigPath = Join-Path $ExistingReleaseDir "services\workstation\config.json"
+    if (Test-Path -LiteralPath $legacyWorkstationConfigPath) {
+        $configs["workstation"] = Get-Content -LiteralPath $legacyWorkstationConfigPath -Raw
     }
     return $configs
 }

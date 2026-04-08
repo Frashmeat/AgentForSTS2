@@ -13,7 +13,7 @@
 release 目录。默认使用 tools/latest/artifacts/agentthespire-<target>-release。
 
 .PARAMETER ConfigPath
-运行时配置文件路径。默认读取仓库根目录 config.json。
+输入配置文件路径。未显式传入时优先使用 release 内 `runtime/*.config.json`，再回退到仓库根目录 `config.json`。
 
 .PARAMETER ProjectName
 Compose 项目名。默认按 agentthespire-<target>-release 生成。
@@ -81,7 +81,7 @@ param(
     [Alias("r")]
     [string]$ReleaseRoot = "",
 
-    [Parameter(HelpMessage = "运行时配置文件路径。默认读取仓库根目录 config.json。")]
+    [Parameter(HelpMessage = "输入配置文件路径。未显式传入时优先使用 release 内 runtime 配置，再回退到仓库根目录 config.json。")]
     [Alias("c")]
     [string]$ConfigPath = "",
 
@@ -150,10 +150,6 @@ $ErrorActionPreference = "Stop"
 if ($Help -or $PSBoundParameters.Count -eq 0) {
     Get-Help -Full $PSCommandPath | Out-String | Write-Output
     return
-}
-
-if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
-    $ConfigPath = Join-Path (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path "config.json"
 }
 
 if ($ReuseImages.IsPresent -and $RebuildImages.IsPresent) {
@@ -279,6 +275,14 @@ function Remove-DirectoryIfExists {
 
     if (Test-Path -LiteralPath $Path) {
         Remove-Item -LiteralPath $Path -Recurse -Force
+    }
+}
+
+function Remove-FileIfExists {
+    param([string]$Path)
+
+    if (Test-Path -LiteralPath $Path -PathType Leaf) {
+        Remove-Item -LiteralPath $Path -Force
     }
 }
 
@@ -1007,11 +1011,21 @@ function Invoke-HybridLocalWebDeployment {
 function Get-SourceConfigPath {
     param(
         [string]$PreferredPath,
-        [string]$FallbackServiceDir
+        [string]$RuntimeConfigPath,
+        [string]$FallbackServiceDir,
+        [string]$LegacyInputPath = ""
     )
 
-    if (Test-Path -LiteralPath $PreferredPath) {
+    if ((-not [string]::IsNullOrWhiteSpace($PreferredPath)) -and (Test-Path -LiteralPath $PreferredPath)) {
         return (Resolve-Path $PreferredPath).Path
+    }
+
+    if ((-not [string]::IsNullOrWhiteSpace($RuntimeConfigPath)) -and (Test-Path -LiteralPath $RuntimeConfigPath)) {
+        return (Resolve-Path $RuntimeConfigPath).Path
+    }
+
+    if ((-not [string]::IsNullOrWhiteSpace($LegacyInputPath)) -and (Test-Path -LiteralPath $LegacyInputPath)) {
+        return (Resolve-Path $LegacyInputPath).Path
     }
 
     $fallback = Join-Path $FallbackServiceDir "config.example.json"
@@ -1019,7 +1033,7 @@ function Get-SourceConfigPath {
         return $fallback
     }
 
-    throw "未找到可用配置文件。请提供 config.json，或先执行打包脚本生成 release bundle。"
+    throw "未找到可用配置文件。请显式提供 -ConfigPath，或先准备 release 内的 runtime 配置文件。"
 }
 
 function Ensure-Hashtable {
@@ -1091,15 +1105,10 @@ function Write-RuntimeConfigFile {
 function Write-LocalServiceConfig {
     param(
         [hashtable]$Config,
-        [string]$ServiceConfigPath,
-        [string]$RuntimeMirrorPath = ""
+        [string]$RuntimeMirrorPath
     )
 
-    Write-RuntimeConfigFile -Config $Config -OutputPath $ServiceConfigPath
-
-    if (-not [string]::IsNullOrWhiteSpace($RuntimeMirrorPath)) {
-        Write-RuntimeConfigFile -Config $Config -OutputPath $RuntimeMirrorPath
-    }
+    Write-RuntimeConfigFile -Config $Config -OutputPath $RuntimeMirrorPath
 }
 
 function Write-ComposeEnvFile {
@@ -1212,14 +1221,15 @@ function Start-LocalWorkstationDeployment {
     $serviceRoot = Join-Path (Join-Path $ReleaseRoot "services") "workstation"
     $backendRoot = Join-Path $serviceRoot "backend"
     $frontendDist = Join-Path $serviceRoot "frontend\dist"
-    $serviceConfigPath = Join-Path $serviceRoot "config.json"
     $runtimeMirrorPath = Join-Path (Join-Path $ReleaseRoot "runtime") "workstation.config.json"
+    $legacyServiceConfigPath = Join-Path $serviceRoot "config.json"
 
     Assert-PathExists -Path $backendRoot -Label "workstation backend 目录"
     Assert-PathExists -Path $frontendDist -Label "workstation frontend/dist 目录"
 
     $workstationConfig = New-RuntimeConfig -SourceConfigPath $SourceConfigPath -Mode "workstation" -DbUser $PostgresUser -DbPassword $PostgresPassword -DbName $PostgresDb
-    Write-LocalServiceConfig -Config $workstationConfig -ServiceConfigPath $serviceConfigPath -RuntimeMirrorPath $runtimeMirrorPath
+    Write-LocalServiceConfig -Config $workstationConfig -RuntimeMirrorPath $runtimeMirrorPath
+    Remove-FileIfExists -Path $legacyServiceConfigPath
     Write-FrontendRuntimeConfig -OutputPath (Join-Path $frontendDist "runtime-config.js") `
         -ResolvedWorkstationBaseUrl ("http://127.0.0.1:{0}" -f $ResolvedWorkstationPort) `
         -ResolvedWorkstationWsBaseUrl ("ws://127.0.0.1:{0}" -f $ResolvedWorkstationPort) `
@@ -1391,6 +1401,7 @@ $effectiveProjectName = if ([string]::IsNullOrWhiteSpace($ProjectName)) {
     $ProjectName
 }
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$defaultInputConfigPath = Join-Path $repoRoot "config.json"
 
 $resolvedWorkstationPort = [int]$WorkstationPort
 $resolvedWebPort = [int]$WebPort
@@ -1441,9 +1452,17 @@ $frontendServiceDir = Join-Path (Join-Path $effectiveReleaseRoot "services") "fr
 $webServiceDir = Join-Path (Join-Path $effectiveReleaseRoot "services") "web"
 
 if ($Target -in @("full", "hybrid", "workstation")) {
-    $sourceConfigPath = Get-SourceConfigPath -PreferredPath $ConfigPath -FallbackServiceDir $workstationServiceDir
+    $sourceConfigPath = Get-SourceConfigPath `
+        -PreferredPath $ConfigPath `
+        -RuntimeConfigPath (Join-Path $effectiveReleaseRoot "runtime\workstation.config.json") `
+        -FallbackServiceDir $workstationServiceDir `
+        -LegacyInputPath $defaultInputConfigPath
 } elseif ($Target -eq "web") {
-    $sourceConfigPath = Get-SourceConfigPath -PreferredPath $ConfigPath -FallbackServiceDir $webServiceDir
+    $sourceConfigPath = Get-SourceConfigPath `
+        -PreferredPath $ConfigPath `
+        -RuntimeConfigPath (Join-Path $effectiveReleaseRoot "runtime\web.config.json") `
+        -FallbackServiceDir $webServiceDir `
+        -LegacyInputPath $defaultInputConfigPath
 }
 
 if ($Target -in @("full", "hybrid", "workstation")) {
@@ -1458,7 +1477,11 @@ if ($Target -eq "full") {
 
 if ($Target -eq "full" -or $Target -eq "web") {
     if ($Target -eq "full") {
-        $webSourceConfigPath = Get-SourceConfigPath -PreferredPath $ConfigPath -FallbackServiceDir $webServiceDir
+        $webSourceConfigPath = Get-SourceConfigPath `
+            -PreferredPath $ConfigPath `
+            -RuntimeConfigPath (Join-Path $effectiveReleaseRoot "runtime\web.config.json") `
+            -FallbackServiceDir $webServiceDir `
+            -LegacyInputPath $defaultInputConfigPath
     } else {
         $webSourceConfigPath = $sourceConfigPath
     }

@@ -3,7 +3,10 @@
 """
 from __future__ import annotations
 
+import ctypes
 import io
+import logging
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -16,12 +19,35 @@ from app.modules.image.infra.postprocess import FunctionalImagePostProcessor, Im
 # rembg 懒加载，仅在需要透明处理时导入
 _rembg_session = None
 _rembg_session_model: str | None = None
+logger = logging.getLogger(__name__)
+
+
+def _get_ort_cuda_provider_dll_path(ort_module) -> Path:
+    return Path(ort_module.__file__).resolve().parent / "capi" / "onnxruntime_providers_cuda.dll"
+
+
+def _can_probe_cuda_provider(ort_module) -> bool:
+    if os.name != "nt":
+        return True
+
+    provider_dll = _get_ort_cuda_provider_dll_path(ort_module)
+    if not provider_dll.exists():
+        return False
+
+    try:
+        ctypes.WinDLL(str(provider_dll))
+        return True
+    except OSError as exc:
+        logger.info("ONNX Runtime CUDA provider unavailable, fallback to CPU: %s", exc)
+        return False
 
 
 def _get_gpu_providers() -> list[str]:
     """检测 ONNX Runtime 是否支持 CUDA，有 GPU 则优先用。"""
     try:
         import onnxruntime as ort
+        if not _can_probe_cuda_provider(ort):
+            return ["CPUExecutionProvider"]
         if "CUDAExecutionProvider" in ort.get_available_providers():
             return ["CUDAExecutionProvider", "CPUExecutionProvider"]
     except Exception:

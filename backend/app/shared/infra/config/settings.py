@@ -15,7 +15,19 @@ _ENV_KEYS = {
     "image_gen.api_secret": "SPIREFORGE_IMG_SECRET",
 }
 
-CONFIG_PATH = Path(__file__).resolve().parents[5] / "config.json"
+_CONFIG_PATH_ENV = "SPIREFORGE_CONFIG_PATH"
+_APP_ROOT = Path(__file__).resolve().parents[5]
+
+
+def _resolve_runtime_config_path() -> Path:
+    if _APP_ROOT.name in {"workstation", "web"} and _APP_ROOT.parent.name == "services":
+        return _APP_ROOT.parents[1] / "runtime" / "workstation.config.json"
+    return _APP_ROOT / "runtime" / "workstation.config.json"
+
+
+RUNTIME_CONFIG_PATH = _resolve_runtime_config_path()
+LEGACY_CONFIG_PATH = _APP_ROOT / "config.json"
+CONFIG_PATH = RUNTIME_CONFIG_PATH
 
 DEFAULT_LLM_CONFIG = {
     "mode": "agent_cli",
@@ -172,10 +184,28 @@ def normalize_config(config: Optional[dict[str, Any]]) -> dict[str, Any]:
     return cfg
 
 
+def resolve_config_path(*, for_write: bool = False) -> Path:
+    explicit_path = os.environ.get(_CONFIG_PATH_ENV, "").strip()
+    if explicit_path:
+        return Path(explicit_path).expanduser()
+
+    if for_write:
+        return RUNTIME_CONFIG_PATH
+
+    if RUNTIME_CONFIG_PATH.exists():
+        return RUNTIME_CONFIG_PATH
+
+    if LEGACY_CONFIG_PATH.exists():
+        return LEGACY_CONFIG_PATH
+
+    return RUNTIME_CONFIG_PATH
+
+
 def load_config() -> dict[str, Any]:
-    if CONFIG_PATH.exists():
+    config_path = resolve_config_path(for_write=False)
+    if config_path.exists():
         # tools/install/install.ps1 在 Windows PowerShell 下写 config.json 时可能带 BOM。
-        with open(CONFIG_PATH, "r", encoding="utf-8-sig") as file:
+        with open(config_path, "r", encoding="utf-8-sig") as file:
             saved = json.load(file)
         cfg = normalize_config(saved)
     else:
@@ -192,8 +222,9 @@ def load_config() -> dict[str, Any]:
 
 def save_config(config: dict[str, Any]) -> None:
     normalized = normalize_config(config)
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(CONFIG_PATH, "w", encoding="utf-8") as file:
+    config_path = resolve_config_path(for_write=True)
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(config_path, "w", encoding="utf-8") as file:
         json.dump(normalized, file, indent=2, ensure_ascii=False)
 
     for dotpath, envname in _ENV_KEYS.items():

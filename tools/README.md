@@ -204,7 +204,7 @@ tools/
 - `tools.ps1` 现在默认优先提供菜单式选择，适合日常本地使用；参数直达模式更适合脚本化或熟悉命令后的快速调用。
 - `tools\latest\package-release.ps1 workstation` 仍会把 launcher 脚本复制到 release 目录下的 `launcher/` 中。
 - `tools\latest\package-release.ps1 hybrid` 会同时整理 `frontend` 与 `workstation` 两类用户侧服务，并附带 launcher。
-- `tools\latest\deploy-docker.ps1 workstation` 会在本机拉起 `workstation-backend`，并把配置写到 `services\workstation\config.json` 与 `runtime\workstation.config.json`。
+- `tools\latest\deploy-docker.ps1 workstation` 会在本机拉起 `workstation-backend`，并以 `runtime\workstation.config.json` 作为工作站应用配置真源。
 - `tools\latest\deploy-docker.ps1 frontend` 会在本机拉起静态前端服务，并把 `runtime-config.js` 写入 release 内的前端 `dist/`。
 - `tools\latest\deploy-docker.ps1 full` 会在本机拉起 `workstation-backend`，同时只对 `web` 服务执行 Docker 部署。
 - `tools\latest\deploy-docker.ps1 hybrid` 默认会联动部署本机 `web-backend`，并把前端 `web` 地址写成 `http://127.0.0.1:7870`。
@@ -212,6 +212,6 @@ tools/
 - `tools\latest\deploy-docker.ps1` 拉起的本地服务 PID 会写入 `runtime\local-deploy-state.json`，供 `tools\latest\stop-deploy.ps1` 读取并停止。
 - `deploy-docker.ps1` 打开的日志终端只是查看窗口；关闭窗口不会自动停止后台服务进程。
 - `workstation` 本地 Python 运行时缓存位于 `runtime\python-runtime\workstation`；只要 `services\workstation\backend\requirements.txt` 与启动所用 Python 没变化，后续部署会优先复用该缓存。
-- `hybrid` / `workstation` / `full` 形态下，工作站配置会同时写入 `services\workstation\config.json` 与 `runtime\workstation.config.json`，方便运行时读取和排查。
+- `hybrid` / `workstation` / `full` 形态下，工作站应用配置统一收敛到 `runtime\workstation.config.json`；`services\workstation\config.json` 不再作为独立真源。
 - `runtime-config.js` 仍属于部署期配置文件；更换 `workstation` 或 `web` 地址时优先覆盖该文件，不重新构建前端。
 - `workstation` 地址应配置为本机或 LAN 可达地址，不应配置为公网用户本机地址。

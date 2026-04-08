@@ -44,7 +44,7 @@ function Resolve-LauncherLayout {
                 BackendRoot = Join-Path $repoRootCandidate "backend"
                 FrontendRoot = Join-Path $repoRootCandidate "frontend"
                 FrontendDist = Join-Path $repoRootCandidate "frontend\dist"
-                ConfigPath = Join-Path $repoRootCandidate "config.json"
+                ConfigPath = Join-Path $repoRootCandidate "runtime\workstation.config.json"
                 ConfigExamplePath = Join-Path $repoRootCandidate "config.example.json"
                 RuntimeDir = Join-Path $repoRootCandidate "runtime"
             }
@@ -60,7 +60,7 @@ function Resolve-LauncherLayout {
             BackendRoot = Join-Path $serviceRoot "backend"
             FrontendRoot = Join-Path $serviceRoot "frontend"
             FrontendDist = Join-Path $serviceRoot "frontend\dist"
-            ConfigPath = Join-Path $serviceRoot "config.json"
+            ConfigPath = Join-Path $releaseRootCandidate "runtime\workstation.config.json"
             ConfigExamplePath = Join-Path $serviceRoot "config.example.json"
             RuntimeDir = Join-Path $releaseRootCandidate "runtime"
         }
