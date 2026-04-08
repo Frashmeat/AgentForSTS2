@@ -47,6 +47,9 @@ powershell -File .\tools\tools.ps1 latest deploy hybrid
 powershell -File .\tools\tools.ps1 latest deploy hybrid -WebBaseUrl https://your-web-api.example.com
 powershell -File .\tools\tools.ps1 latest deploy full
 powershell -File .\tools\tools.ps1 latest installer
+
+# 停止 latest deploy 拉起的本地服务
+pwsh -NoProfile -File .\tools\latest\stop-deploy.ps1 hybrid
 ```
 
 ## 菜单结构
@@ -160,6 +163,9 @@ tools/
   `web` 继续使用 Docker；`workstation` 与 `frontend` 改为本机启动；`full` 会本机启动 `workstation` 并只用 Docker 部署 `web`；`hybrid` 会本机启动 `workstation + frontend`，默认还会联动部署本机 `web-backend`。
   默认会基于当前 release 重新 `build` 需要 Docker 的目标镜像；只有显式传入 `-ReuseImages` 时才会复用已有镜像。
   `hybrid` / `frontend` 未显式传入 `-WebBaseUrl` 时会默认写入本机 `http://127.0.0.1:7870`；`hybrid` 此时还会联动部署本机 `web-backend`。
+- `tools\latest\stop-deploy.ps1`
+  停止 `deploy-docker.ps1` 以本机模式拉起的 `workstation` / `frontend` 进程，并关闭对应日志窗口。
+  状态文件位于 `release\runtime\local-deploy-state.json`；只关闭日志窗口并不会自动停止服务。
 - `tools\latest\build-workstation-installer.ps1`
   构建 Windows 工作站安装器。
 - `tools\latest\templates\`
@@ -203,6 +209,8 @@ tools/
 - `tools\latest\deploy-docker.ps1 full` 会在本机拉起 `workstation-backend`，同时只对 `web` 服务执行 Docker 部署。
 - `tools\latest\deploy-docker.ps1 hybrid` 默认会联动部署本机 `web-backend`，并把前端 `web` 地址写成 `http://127.0.0.1:7870`。
 - `tools\latest\deploy-docker.ps1 hybrid -WebBaseUrl https://your-web-api.example.com` 会改为指向显式传入的地址，此时不再默认覆盖为本机地址。
+- `tools\latest\deploy-docker.ps1` 拉起的本地服务 PID 会写入 `runtime\local-deploy-state.json`，供 `tools\latest\stop-deploy.ps1` 读取并停止。
+- `deploy-docker.ps1` 打开的日志终端只是查看窗口；关闭窗口不会自动停止后台服务进程。
 - `hybrid` / `workstation` / `full` 形态下，工作站配置会同时写入 `services\workstation\config.json` 与 `runtime\workstation.config.json`，方便运行时读取和排查。
 - `runtime-config.js` 仍属于部署期配置文件；更换 `workstation` 或 `web` 地址时优先覆盖该文件，不重新构建前端。
 - `workstation` 地址应配置为本机或 LAN 可达地址，不应配置为公网用户本机地址。

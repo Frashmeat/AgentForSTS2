@@ -125,6 +125,20 @@ def test_build_workstation_installer_script_exposes_short_aliases_and_help():
     assert "显示帮助" in params["Help"]["help"]
 
 
+def test_stop_deploy_script_exposes_simplified_parameter_aliases_and_help():
+    params = _load_script_params("tools/latest/stop-deploy.ps1")
+
+    assert params["Target"]["position"] == 0
+    assert "t" in params["Target"]["aliases"]
+    assert "部署目标" in params["Target"]["help"]
+
+    assert "r" in params["ReleaseRoot"]["aliases"]
+    assert "release 目录" in params["ReleaseRoot"]["help"]
+
+    assert "h" in params["Help"]["aliases"]
+    assert "显示帮助" in params["Help"]["help"]
+
+
 def test_package_release_script_prints_help_when_run_without_args():
     completed = _run_script_without_args("tools/latest/package-release.ps1")
 
@@ -150,3 +164,12 @@ def test_build_workstation_installer_script_prints_help_when_run_without_args():
     assert "build-workstation-installer.ps1" in completed.stdout
     assert "PARAMETERS" in completed.stdout
     assert "-PythonVersion" in completed.stdout
+
+
+def test_stop_deploy_script_prints_help_when_run_without_args():
+    completed = _run_script_without_args("tools/latest/stop-deploy.ps1")
+
+    assert completed.returncode == 0
+    assert "stop-deploy.ps1" in completed.stdout
+    assert "PARAMETERS" in completed.stdout
+    assert "-Target" in completed.stdout

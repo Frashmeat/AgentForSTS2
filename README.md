@@ -189,7 +189,14 @@ window.__AGENT_THE_SPIRE_WS_BASES__ = {
 ```powershell
 pwsh -NoProfile -File .\tools\latest\deploy-docker.ps1 hybrid
 pwsh -NoProfile -File .\tools\latest\deploy-docker.ps1 hybrid -WebBaseUrl https://your-web-api.example.com
+pwsh -NoProfile -File .\tools\latest\stop-deploy.ps1 hybrid
 ```
+
+说明：
+
+- `deploy-docker.ps1` 在 `hybrid` / `workstation` / `frontend` / `full` 目标下会把本地服务作为后台进程启动，并额外打开日志窗口。
+- 关闭日志窗口只会停止日志查看，不会自动停止后台服务。
+- 如需停止这些本地服务，请执行对应的 `stop-deploy.ps1`；脚本会读取 `release/runtime/local-deploy-state.json` 中记录的 PID。
 
 默认文件位置：
 

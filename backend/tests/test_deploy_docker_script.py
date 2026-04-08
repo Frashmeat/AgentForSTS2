@@ -176,6 +176,19 @@ def test_deploy_docker_hybrid_opens_dedicated_log_windows_for_frontend_and_works
     assert "frontend|" in result.log_viewers
 
 
+def test_deploy_docker_hybrid_writes_local_process_state_file(tmp_path: Path):
+    result = _run_deploy(tmp_path, "hybrid", "-WebBaseUrl", "https://platform.example.com")
+    state_path = tmp_path / "release" / "runtime" / "local-deploy-state.json"
+
+    assert result.returncode == 0, result.stderr
+    assert state_path.exists()
+
+    payload = json.loads(state_path.read_text(encoding="utf-8"))
+    assert payload["target"] == "hybrid"
+    assert payload["release_root"] == str(tmp_path / "release")
+    assert {entry["service_name"] for entry in payload["processes"]} == {"workstation", "frontend"}
+
+
 def test_deploy_docker_hybrid_defaults_to_local_web_base_url_and_deploys_web_release(tmp_path: Path):
     result = _run_deploy(tmp_path, "hybrid", prepare_default_web_release=True)
     runtime_config = tmp_path / "release" / "services" / "frontend" / "frontend" / "dist" / "runtime-config.js"

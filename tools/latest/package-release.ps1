@@ -115,10 +115,40 @@ function Remove-FileIfExists {
 }
 
 function New-CleanDirectory {
-    param([string]$Path)
+    param(
+        [string]$Path,
+        [string[]]$PreserveRelativePaths = @()
+    )
 
-    Remove-DirectoryIfExists -Path $Path
+    if ($PreserveRelativePaths.Count -eq 0) {
+        Remove-DirectoryIfExists -Path $Path
+        $null = New-Item -ItemType Directory -Path $Path -Force
+        return
+    }
+
     $null = New-Item -ItemType Directory -Path $Path -Force
+
+    foreach ($child in Get-ChildItem -LiteralPath $Path -Force) {
+        $relativePath = [System.IO.Path]::GetRelativePath($Path, $child.FullName)
+        $shouldPreserve = $false
+
+        foreach ($preservedRelativePath in $PreserveRelativePaths) {
+            if (
+                $relativePath -eq $preservedRelativePath -or
+                $relativePath.StartsWith("$preservedRelativePath\") -or
+                $preservedRelativePath.StartsWith("$relativePath\")
+            ) {
+                $shouldPreserve = $true
+                break
+            }
+        }
+
+        if ($shouldPreserve) {
+            continue
+        }
+
+        Remove-Item -LiteralPath $child.FullName -Recurse -Force
+    }
 }
 
 function Test-FrontendDependenciesReady {
@@ -450,7 +480,7 @@ if ($needsFrontend) {
 }
 
 $null = New-Item -ItemType Directory -Path $OutputRoot -Force
-New-CleanDirectory -Path $releaseDir
+New-CleanDirectory -Path $releaseDir -PreserveRelativePaths @("runtime\logs")
 $null = New-Item -ItemType Directory -Path (Join-Path $releaseDir "services") -Force
 $null = New-Item -ItemType Directory -Path (Join-Path $releaseDir "runtime") -Force
 

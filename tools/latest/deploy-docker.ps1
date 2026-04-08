@@ -558,6 +558,79 @@ function Stop-ProcessListeningOnPort {
     }
 }
 
+function Get-LocalDeploymentStatePath {
+    param([string]$ReleaseRoot)
+
+    return Join-Path (Join-Path $ReleaseRoot "runtime") "local-deploy-state.json"
+}
+
+function Clear-LocalDeploymentState {
+    param([string]$ReleaseRoot)
+
+    Remove-Item -LiteralPath (Get-LocalDeploymentStatePath -ReleaseRoot $ReleaseRoot) -Force -ErrorAction SilentlyContinue
+}
+
+function Write-LocalDeploymentState {
+    param(
+        [string]$ReleaseRoot,
+        [string]$TargetName,
+        [object[]]$ProcessEntries
+    )
+
+    $statePath = Get-LocalDeploymentStatePath -ReleaseRoot $ReleaseRoot
+    $runtimeDir = Split-Path -Path $statePath -Parent
+    if (-not [string]::IsNullOrWhiteSpace($runtimeDir)) {
+        $null = New-Item -ItemType Directory -Path $runtimeDir -Force
+    }
+
+    $payload = [ordered]@{
+        target = $TargetName
+        release_root = [System.IO.Path]::GetFullPath($ReleaseRoot)
+        updated_at = (Get-Date).ToString("o")
+        processes = @(
+            $ProcessEntries |
+                Where-Object { $null -ne $_ -and $null -ne $_.Process } |
+                ForEach-Object {
+                    [ordered]@{
+                        service_name = $_.ServiceName
+                        pid = $_.Process.Id
+                        port = $_.Port
+                    }
+                }
+        )
+    }
+
+    $payload | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $statePath -Encoding UTF8
+}
+
+function Stop-TrackedLocalProcesses {
+    param(
+        [string]$ReleaseRoot,
+        [object[]]$ProcessEntries
+    )
+
+    foreach ($entry in @($ProcessEntries)) {
+        if ($null -eq $entry) {
+            continue
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($entry.ServiceName)) {
+            Stop-LogViewerWindow -ReleaseRoot $ReleaseRoot -ServiceName $entry.ServiceName
+        }
+
+        if ($null -eq $entry.Process) {
+            continue
+        }
+
+        try {
+            if (-not $entry.Process.HasExited) {
+                Stop-Process -Id $entry.Process.Id -Force -ErrorAction Stop
+            }
+        } catch {
+        }
+    }
+}
+
 function Wait-HttpReady {
     param(
         [string]$Url,
@@ -1340,23 +1413,72 @@ if ($targetUsesDockerInCurrentRelease) {
 }
 
 $localProcesses = @()
+Clear-LocalDeploymentState -ReleaseRoot $effectiveReleaseRoot
 
-switch ($Target) {
-    "workstation" {
-        $localProcesses += Start-LocalWorkstationDeployment -ReleaseRoot $effectiveReleaseRoot -SourceConfigPath $sourceConfigPath -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebBaseUrl $WebBaseUrl -RepoRoot $repoRoot
+try {
+    switch ($Target) {
+        "workstation" {
+            $process = Start-LocalWorkstationDeployment -ReleaseRoot $effectiveReleaseRoot -SourceConfigPath $sourceConfigPath -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebBaseUrl $WebBaseUrl -RepoRoot $repoRoot
+            if ($null -ne $process) {
+                $localProcesses += [pscustomobject]@{
+                    ServiceName = "workstation"
+                    Process = $process
+                    Port = $resolvedWorkstationPort
+                }
+            }
+        }
+        "frontend" {
+            $frontendDist = Join-Path $frontendServiceDir "frontend\dist"
+            $process = Start-LocalFrontendDeployment -ReleaseRoot $effectiveReleaseRoot -FrontendDist $frontendDist -ResolvedFrontendPort $resolvedFrontendPort -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebBaseUrl $WebBaseUrl -RepoRoot $repoRoot
+            if ($null -ne $process) {
+                $localProcesses += [pscustomobject]@{
+                    ServiceName = "frontend"
+                    Process = $process
+                    Port = $resolvedFrontendPort
+                }
+            }
+        }
+        "hybrid" {
+            $workstationProcess = Start-LocalWorkstationDeployment -ReleaseRoot $effectiveReleaseRoot -SourceConfigPath $sourceConfigPath -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebBaseUrl $WebBaseUrl -RepoRoot $repoRoot
+            if ($null -ne $workstationProcess) {
+                $localProcesses += [pscustomobject]@{
+                    ServiceName = "workstation"
+                    Process = $workstationProcess
+                    Port = $resolvedWorkstationPort
+                }
+            }
+
+            $frontendDist = Join-Path $frontendServiceDir "frontend\dist"
+            $frontendProcess = Start-LocalFrontendDeployment -ReleaseRoot $effectiveReleaseRoot -FrontendDist $frontendDist -ResolvedFrontendPort $resolvedFrontendPort -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebBaseUrl $WebBaseUrl -RepoRoot $repoRoot
+            if ($null -ne $frontendProcess) {
+                $localProcesses += [pscustomobject]@{
+                    ServiceName = "frontend"
+                    Process = $frontendProcess
+                    Port = $resolvedFrontendPort
+                }
+            }
+        }
+        "full" {
+            $process = Start-LocalWorkstationDeployment -ReleaseRoot $effectiveReleaseRoot -SourceConfigPath $sourceConfigPath -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebBaseUrl ("http://127.0.0.1:{0}" -f $resolvedWebPort) -RepoRoot $repoRoot
+            if ($null -ne $process) {
+                $localProcesses += [pscustomobject]@{
+                    ServiceName = "workstation"
+                    Process = $process
+                    Port = $resolvedWorkstationPort
+                }
+            }
+        }
     }
-    "frontend" {
-        $frontendDist = Join-Path $frontendServiceDir "frontend\dist"
-        $localProcesses += Start-LocalFrontendDeployment -ReleaseRoot $effectiveReleaseRoot -FrontendDist $frontendDist -ResolvedFrontendPort $resolvedFrontendPort -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebBaseUrl $WebBaseUrl -RepoRoot $repoRoot
+} catch {
+    if ($localProcesses.Count -gt 0) {
+        Stop-TrackedLocalProcesses -ReleaseRoot $effectiveReleaseRoot -ProcessEntries $localProcesses
     }
-    "hybrid" {
-        $localProcesses += Start-LocalWorkstationDeployment -ReleaseRoot $effectiveReleaseRoot -SourceConfigPath $sourceConfigPath -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebBaseUrl $WebBaseUrl -RepoRoot $repoRoot
-        $frontendDist = Join-Path $frontendServiceDir "frontend\dist"
-        $localProcesses += Start-LocalFrontendDeployment -ReleaseRoot $effectiveReleaseRoot -FrontendDist $frontendDist -ResolvedFrontendPort $resolvedFrontendPort -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebBaseUrl $WebBaseUrl -RepoRoot $repoRoot
-    }
-    "full" {
-        $localProcesses += Start-LocalWorkstationDeployment -ReleaseRoot $effectiveReleaseRoot -SourceConfigPath $sourceConfigPath -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebBaseUrl ("http://127.0.0.1:{0}" -f $resolvedWebPort) -RepoRoot $repoRoot
-    }
+    Clear-LocalDeploymentState -ReleaseRoot $effectiveReleaseRoot
+    throw
+}
+
+if ($localProcesses.Count -gt 0) {
+    Write-LocalDeploymentState -ReleaseRoot $effectiveReleaseRoot -TargetName $Target -ProcessEntries $localProcesses
 }
 
 Write-Host ""
@@ -1398,9 +1520,10 @@ switch ($Target) {
 }
 if ($localProcesses.Count -gt 0) {
     $processSummary = ($localProcesses | Where-Object { $null -ne $_ } | ForEach-Object {
-        "{0} (PID {1})" -f $_.ProcessName, $_.Id
+        "{0} (PID {1})" -f $_.Process.ProcessName, $_.Process.Id
     }) -join ", "
     if (-not [string]::IsNullOrWhiteSpace($processSummary)) {
         Write-Host "  本机进程     : $processSummary"
     }
+    Write-Host "  停止入口     : pwsh -File .\tools\latest\stop-deploy.ps1 $Target"
 }
