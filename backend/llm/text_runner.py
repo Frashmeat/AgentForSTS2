@@ -122,7 +122,7 @@ async def _stream_via_cli_completion(
     if backend == "codex_cli":
         full_text = await _complete_via_codex_cli(full_prompt, llm_cfg, cwd)
     else:
-        full_text = await _complete_via_claude_cli(full_prompt, cwd)
+        full_text = await _complete_via_claude_cli(full_prompt, llm_cfg, cwd)
 
     chunk_size = 80
     for i in range(0, len(full_text), chunk_size):
@@ -131,13 +131,19 @@ async def _stream_via_cli_completion(
     return full_text
 
 
-async def _complete_via_claude_cli(prompt: str, cwd: Optional[Path]) -> str:
+async def _complete_via_claude_cli(prompt: str, llm_cfg: dict, cwd: Optional[Path]) -> str:
+    cmd = ["claude", "--print"]
+    model = normalize_llm_config(llm_cfg).get("model")
+    if model:
+        cmd.extend(["--model", model])
+    cmd.extend(["-p", prompt])
+
     loop = asyncio.get_event_loop()
     result = await asyncio.wait_for(
         loop.run_in_executor(
             None,
             lambda: subprocess.run(
-                ["claude", "--print", "-p", prompt],
+                cmd,
                 capture_output=True,
                 timeout=180,
                 cwd=str(cwd) if cwd else None,
