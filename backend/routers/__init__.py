@@ -4,6 +4,7 @@ from __future__ import annotations
 WORKSTATION_ROUTER_MODULES = (
     "routers.workflow",
     "routers.config_router",
+    "routers.knowledge_router",
     "routers.batch_workflow",
     "routers.log_analyzer",
     "routers.mod_analyzer",
