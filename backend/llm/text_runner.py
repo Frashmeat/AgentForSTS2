@@ -18,14 +18,7 @@ from app.shared.infra.llm.text_backend import (
 from config import get_config, normalize_llm_config
 from llm.prompt_builder import append_global_ai_instructions
 
-_MODEL_MAP = {
-    "anthropic": "claude-sonnet-4-6",
-    "openai": "openai/gpt-5",
-    "moonshot": "moonshot/moonshot-v1-8k",
-    "deepseek": "deepseek/deepseek-chat",
-    "qwen": "openai/qwen-plus",
-    "zhipu": "zhipuai/glm-4-flash",
-}
+DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6"
 
 
 def _decode_output(raw: bytes) -> str:
@@ -41,8 +34,7 @@ def resolve_model(llm_cfg: dict) -> str:
     cfg = normalize_llm_config(llm_cfg)
     if cfg.get("model"):
         return cfg["model"]
-    provider = cfg.get("provider", "anthropic")
-    return _MODEL_MAP.get(provider, "claude-sonnet-4-6")
+    return DEFAULT_CLAUDE_MODEL
 
 
 def resolve_text_backend(llm_cfg: dict) -> str:

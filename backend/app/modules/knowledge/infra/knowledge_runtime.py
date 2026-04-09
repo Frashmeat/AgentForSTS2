@@ -37,6 +37,10 @@ def ensure_knowledge_dirs() -> None:
     BASELIB_DECOMPILED_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _has_ilspycmd() -> bool:
+    return shutil.which("ilspycmd") is not None
+
+
 def load_manifest() -> dict[str, Any] | None:
     if not KNOWLEDGE_MANIFEST_PATH.exists():
         return None
@@ -143,6 +147,15 @@ def get_knowledge_status() -> dict[str, Any]:
     if manifest is None:
         payload = _default_status_payload("missing")
         payload["warnings"].append("知识库 manifest 不存在")
+        configured_path = str(get_config().get("sts2_path", "")).strip()
+        if not configured_path:
+            payload["warnings"].append("未配置 STS2 游戏路径，无法更新知识库")
+        if not _has_ilspycmd():
+            payload["warnings"].append("未检测到 ilspycmd，无法反编译游戏和 BaseLib")
+        if not _directory_has_sources(GAME_DECOMPILED_DIR):
+            payload["warnings"].append("游戏反编译源码目录为空，请先执行“更新知识库”")
+        if not (BASELIB_DECOMPILED_DIR / "BaseLib.decompiled.cs").exists():
+            payload["warnings"].append("BaseLib 反编译结果缺失，请先执行“更新知识库”")
         return payload
 
     payload = _default_status_payload("fresh")
@@ -321,6 +334,8 @@ def _run_refresh_impl(task: _RefreshTask) -> None:
     sts2_path = str(config.get("sts2_path", "")).strip()
     if not sts2_path:
         raise RuntimeError("未配置 STS2 游戏路径，无法更新知识库")
+    if not _has_ilspycmd():
+        raise RuntimeError("未检测到 ilspycmd，请先安装并确保 ilspycmd 在 PATH 中")
 
     task.set_step("读取当前游戏版本")
     game_info = read_current_game_version(sts2_path)

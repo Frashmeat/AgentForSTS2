@@ -161,9 +161,10 @@ tools/
 ### 本地进程停止
 
 - `tools\kill-local.ps1`
-  优先读取 `local-deploy-state.json`、`split-local-state.json`、`runtime/workstation.config.json` 发现端口和 PID，再停止本机 `frontend`、`workstation`、`web` 三类进程；命令行端口参数仅作为显式覆盖，不再依赖固定默认端口。
-  默认端口分别为 `5173`、`7860`、`7870`，也支持通过参数覆盖。
-  注意：该脚本只按监听端口判断进程归属；如果这些端口被其它程序占用，也会被一并停止。
+  优先读取 `local-deploy-state.json`、`split-local-state.json`、`runtime/workstation.config.json` 发现端口和 PID，再停止本机 `frontend`、`workstation`、`web` 三类进程；命令行端口参数仅作为显式覆盖。
+  同时会清理当前 PowerShell 会话中残留的日志镜像事件与 writer 句柄，避免 `runtime/logs/*.log` 被持续占用。
+  如存在 Docker 化 `web` 服务，也会对当前仓库 `tools\latest\artifacts` 下可识别的 release 尝试执行 `docker compose down --remove-orphans`。
+  注意：本机进程部分仍按监听端口判断归属；如果这些端口被其它程序占用，也会被一并停止。Docker 部分默认只处理当前仓库 `artifacts` 下能识别出的 release，不删除卷。
 
 ### latest
 

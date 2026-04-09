@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from fastapi import HTTPException
 
-from app.shared.infra.llm.agent_backend import resolve_agent_backend_name
 from app.shared.prompting import PromptLoader
 from config import get_config, update_config
 
@@ -104,15 +103,10 @@ class ConfigFacadeService:
                 reasons.append("请先在设置中选择可用的代码代理后端（Claude CLI 或 Codex CLI）。")
             return len(reasons) == 0, reasons
 
-        backend = resolve_agent_backend_name(llm_cfg)
-        if not str(llm_cfg.get("provider", "")).strip():
-            reasons.append("请先在设置中填写文本 API 提供商。")
         if not str(llm_cfg.get("model", "")).strip():
-            reasons.append("请先在设置中填写文本模型。")
+            reasons.append("请先在设置中填写 Claude 模型。")
         if not str(llm_cfg.get("api_key", "")).strip():
-            reasons.append("请先在设置中填写文本 API Key。")
-        if backend == "claude" and str(llm_cfg.get("provider", "")).strip() != "anthropic":
-            reasons.append("当前代码代理只会在 Anthropic 提供商下使用 Claude CLI。")
+            reasons.append("请先在设置中填写 Claude API Key。")
         return len(reasons) == 0, reasons
 
     def _resolve_text_ai_capability(self, llm_cfg: dict) -> tuple[bool, list[str]]:
@@ -124,12 +118,10 @@ class ConfigFacadeService:
                 reasons.append("请先在设置中选择可用的代码代理后端（Claude CLI 或 Codex CLI）。")
             return len(reasons) == 0, reasons
 
-        if not str(llm_cfg.get("provider", "")).strip():
-            reasons.append("请先在设置中填写文本 API 提供商。")
         if not str(llm_cfg.get("model", "")).strip():
-            reasons.append("请先在设置中填写文本模型。")
+            reasons.append("请先在设置中填写 Claude 模型。")
         if not str(llm_cfg.get("api_key", "")).strip():
-            reasons.append("请先在设置中填写文本 API Key。")
+            reasons.append("请先在设置中填写 Claude API Key。")
         return len(reasons) == 0, reasons
 
     def _resolve_image_ai_capability(self, image_cfg: dict) -> tuple[bool, list[str]]:

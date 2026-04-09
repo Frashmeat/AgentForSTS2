@@ -18,7 +18,10 @@ class _DummyRouter:
 
 def _load_log_analyzer():
     sys.modules["fastapi"] = types.SimpleNamespace(APIRouter=lambda: _DummyRouter(), WebSocket=object)
-    sys.modules["config"] = types.SimpleNamespace(get_config=lambda: {"llm": {}})
+    sys.modules["config"] = types.SimpleNamespace(
+        get_config=lambda: {"llm": {}},
+        normalize_llm_config=lambda cfg: cfg,
+    )
     sys.modules["llm.stream"] = types.SimpleNamespace(stream_analysis=lambda *args, **kwargs: None)
     sys.modules["llm.stage_events"] = types.SimpleNamespace(build_stage_event=lambda *args, **kwargs: None)
     sys.modules.pop("routers.log_analyzer", None)
@@ -129,7 +132,7 @@ def test_ws_analyze_log_emits_minimal_event_sequence(monkeypatch):
     monkeypatch.setattr(module, "_read_log", lambda: ("line1\nline2", True))
     monkeypatch.setattr(module, "_build_prompt", lambda extra_context: f"prompt:{extra_context}")
     monkeypatch.setattr(module, "_get_system_prompt", lambda: "system-prompt")
-    monkeypatch.setattr(module, "get_config", lambda: {"llm": {"provider": "fake"}})
+    monkeypatch.setattr(module, "get_config", lambda: {"llm": {"mode": "claude_api", "model": "claude-sonnet-4-6"}})
     monkeypatch.setattr(
         module,
         "build_stage_event",
@@ -139,7 +142,7 @@ def test_ws_analyze_log_emits_minimal_event_sequence(monkeypatch):
     async def fake_stream_analysis(system_prompt, prompt, llm_cfg, send_chunk):
         assert system_prompt == "system-prompt"
         assert prompt == "prompt:黑屏了"
-        assert llm_cfg == {"provider": "fake"}
+        assert llm_cfg == {"mode": "claude_api", "model": "claude-sonnet-4-6"}
         await send_chunk("chunk-1")
         await send_chunk("chunk-2")
         return "full-result"
@@ -206,7 +209,7 @@ def test_ws_analyze_log_falls_back_to_error_when_stream_analysis_raises(monkeypa
     monkeypatch.setattr(module, "_read_log", lambda: ("line1\nline2", True))
     monkeypatch.setattr(module, "_build_prompt", lambda extra_context: f"prompt:{extra_context}")
     monkeypatch.setattr(module, "_get_system_prompt", lambda: "system-prompt")
-    monkeypatch.setattr(module, "get_config", lambda: {"llm": {"provider": "fake"}})
+    monkeypatch.setattr(module, "get_config", lambda: {"llm": {"mode": "claude_api", "model": "claude-sonnet-4-6"}})
     monkeypatch.setattr(
         module,
         "build_stage_event",
@@ -216,7 +219,7 @@ def test_ws_analyze_log_falls_back_to_error_when_stream_analysis_raises(monkeypa
     async def fake_stream_analysis(system_prompt, prompt, llm_cfg, send_chunk):
         assert system_prompt == "system-prompt"
         assert prompt == "prompt:黑屏了"
-        assert llm_cfg == {"provider": "fake"}
+        assert llm_cfg == {"mode": "claude_api", "model": "claude-sonnet-4-6"}
         raise RuntimeError("boom-log")
 
     monkeypatch.setattr(module, "stream_analysis", fake_stream_analysis)
@@ -252,7 +255,7 @@ def test_ws_analyze_log_preserves_stream_events_before_error(monkeypatch):
     monkeypatch.setattr(module, "_read_log", lambda: ("line1\nline2", True))
     monkeypatch.setattr(module, "_build_prompt", lambda extra_context: f"prompt:{extra_context}")
     monkeypatch.setattr(module, "_get_system_prompt", lambda: "system-prompt")
-    monkeypatch.setattr(module, "get_config", lambda: {"llm": {"provider": "fake"}})
+    monkeypatch.setattr(module, "get_config", lambda: {"llm": {"mode": "claude_api", "model": "claude-sonnet-4-6"}})
     monkeypatch.setattr(
         module,
         "build_stage_event",
@@ -262,7 +265,7 @@ def test_ws_analyze_log_preserves_stream_events_before_error(monkeypatch):
     async def fake_stream_analysis(system_prompt, prompt, llm_cfg, send_chunk):
         assert system_prompt == "system-prompt"
         assert prompt == "prompt:黑屏了"
-        assert llm_cfg == {"provider": "fake"}
+        assert llm_cfg == {"mode": "claude_api", "model": "claude-sonnet-4-6"}
         await send_chunk("partial-log")
         raise RuntimeError("boom-after-log-stream")
 

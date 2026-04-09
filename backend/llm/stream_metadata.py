@@ -3,14 +3,7 @@ from __future__ import annotations
 from app.shared.infra.llm.agent_backend import resolve_agent_backend_name
 from config import normalize_llm_config
 
-_TEXT_MODEL_MAP = {
-    "anthropic": "claude-sonnet-4-6",
-    "openai": "openai/gpt-5",
-    "moonshot": "moonshot/moonshot-v1-8k",
-    "deepseek": "deepseek/deepseek-chat",
-    "qwen": "openai/qwen-plus",
-    "zhipu": "zhipuai/glm-4-flash",
-}
+DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6"
 
 
 def resolve_agent_display_model(llm_cfg: dict | None) -> str:
@@ -19,9 +12,8 @@ def resolve_agent_display_model(llm_cfg: dict | None) -> str:
     if model:
         return model
 
-    if cfg.get("mode") == "api":
-        provider = cfg.get("provider", "anthropic")
-        return _TEXT_MODEL_MAP.get(provider, "claude-sonnet-4-6")
+    if cfg.get("mode") == "claude_api":
+        return DEFAULT_CLAUDE_MODEL
 
     backend = resolve_agent_backend_name(cfg)
     if backend == "codex":
@@ -34,8 +26,7 @@ def resolve_text_display_model(llm_cfg: dict | None) -> str:
     model = str(cfg.get("model", "")).strip()
     if model:
         return model
-    provider = cfg.get("provider", "anthropic")
-    return _TEXT_MODEL_MAP.get(provider, "claude-sonnet-4-6")
+    return DEFAULT_CLAUDE_MODEL
 
 
 def build_stream_chunk_payload(

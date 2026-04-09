@@ -22,13 +22,8 @@ def test_agent_runner_selects_codex_backend():
 
 
 def test_agent_runner_selects_claude_backend_for_anthropic_api_mode():
-    llm_cfg = {"mode": "api", "provider": "anthropic"}
+    llm_cfg = {"mode": "claude_api", "model": "claude-sonnet-4-6"}
     assert resolve_agent_backend(llm_cfg) == "claude"
-
-
-def test_agent_runner_selects_codex_backend_for_openai_compatible_api_mode():
-    llm_cfg = {"mode": "api", "provider": "qwen"}
-    assert resolve_agent_backend(llm_cfg) == "codex"
 
 
 def test_build_agent_prompt_appends_custom_prompt():
@@ -84,7 +79,7 @@ def test_build_agent_prompt_skips_agents_codex_for_non_codex_backend(monkeypatch
     assert prompt == "fix the project"
 
 
-def test_build_agent_prompt_injects_agents_codex_for_api_mode_resolved_to_codex(monkeypatch, tmp_path):
+def test_build_agent_prompt_skips_agents_codex_for_claude_api_mode(monkeypatch, tmp_path):
     from llm import agent_runner
 
     agents_file = tmp_path / "AGENTS_CODEX.md"
@@ -93,10 +88,10 @@ def test_build_agent_prompt_injects_agents_codex_for_api_mode_resolved_to_codex(
 
     prompt = agent_runner.build_agent_prompt(
         "fix the project",
-        {"mode": "api", "provider": "openai", "custom_prompt": ""},
+        {"mode": "claude_api", "model": "claude-sonnet-4-6", "custom_prompt": ""},
     )
 
-    assert prompt.startswith("codex rules\n\n---\n\nfix the project")
+    assert prompt == "fix the project"
 
 
 def test_build_agent_prompt_uses_shared_bundle_header_when_legacy_path_missing(monkeypatch):

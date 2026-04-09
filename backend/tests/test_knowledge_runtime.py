@@ -88,3 +88,20 @@ def test_refresh_task_preserves_previous_manifest_when_update_fails(monkeypatch,
     assert final_snapshot["status"] == "failed"
     assert "refresh failed" in (final_snapshot["error"] or "")
     assert '"0.2.14"' in manifest_path.read_text(encoding="utf-8")
+
+
+def test_missing_status_surfaces_missing_runtime_requirements(monkeypatch):
+    monkeypatch.setattr(knowledge_runtime, "load_manifest", lambda: None)
+    monkeypatch.setattr(knowledge_runtime, "_has_ilspycmd", lambda: False)
+    monkeypatch.setattr(knowledge_runtime, "_directory_has_sources", lambda _path: False)
+    monkeypatch.setattr(
+        knowledge_runtime,
+        "get_config",
+        lambda: {"sts2_path": ""},
+    )
+
+    status = knowledge_runtime.get_knowledge_status()
+
+    assert status["status"] == "missing"
+    assert "未配置 STS2 游戏路径，无法更新知识库" in status["warnings"]
+    assert "未检测到 ilspycmd，无法反编译游戏和 BaseLib" in status["warnings"]

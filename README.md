@@ -73,17 +73,17 @@ Current product behavior:
 ### Tool Scripts
 
 - Core install/start/dev helpers live in `tools/`.
-- `tools/kill-local.ps1` stops the default local `frontend` / `workstation` / `web` processes by port (`5173 / 7860 / 7870`).
+- `tools/kill-local.ps1` stops local `frontend` / `workstation` / `web` processes by discovered state/config first, with port arguments available as explicit overrides.
 - `tools/latest/` contains the current packaging and Docker deployment scripts.
 - `tools/archive/` stores deprecated historical scripts. The old Windows Sandbox verification chain has been moved there and is no longer part of the primary workflow.
 - `tools/latest/artifacts/` and generated `sandbox_test.wsb` files are local outputs and are ignored by Git.
 
 ### LLM Options
 
-| Mode | Backend / Provider |
-|------|---------------------|
+| Mode | Backend / Route |
+|------|-----------------|
 | `agent_cli` | `claude` or `codex` |
-| `api` | `anthropic` / `openai` / `moonshot` / `deepseek` / `qwen` / `zhipu` |
+| `claude_api` | Claude-compatible API (`model + api_key + base_url`) |
 
 ### Image Generation Options
 
@@ -234,7 +234,7 @@ pwsh -NoProfile -File .\tools\latest\stop-deploy.ps1 hybrid
 ### 工具脚本
 
 - 当前安装、启动、开发辅助脚本统一放在 `tools/`。
-- `tools\kill-local.ps1` 可按默认端口停止本机 `frontend / workstation / web` 进程，默认端口分别为 `5173 / 7860 / 7870`。
+- `tools\kill-local.ps1` 可停止本机 `frontend / workstation / web` 进程，并额外尝试停止当前仓库 `tools/latest/artifacts` 下默认 release 对应的 Docker `web` 服务；默认端口分别为 `5173 / 7860 / 7870`。
 - `tools/latest/` 存放当前推荐使用的打包与 Docker 部署脚本。
 - `tools/archive/` 存放已归档的历史脚本；旧的 Windows Sandbox 验证链路已经迁入该目录，不再作为主流程维护。
 - `tools/latest/artifacts/` 与生成出来的 `sandbox_test.wsb` 都属于本地产物，默认不会提交到 Git。

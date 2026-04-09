@@ -32,7 +32,6 @@ CONFIG_PATH = RUNTIME_CONFIG_PATH
 DEFAULT_LLM_CONFIG = {
     "mode": "agent_cli",
     "agent_backend": "claude",
-    "provider": "anthropic",
     "model": "",
     "api_key": "",
     "base_url": "",
@@ -164,16 +163,14 @@ def normalize_llm_config(llm_cfg: Optional[dict[str, Any]]) -> dict[str, Any]:
     if mode == "claude_subscription":
         cfg["mode"] = "agent_cli"
         cfg["agent_backend"] = "claude"
-    elif mode in {"api_key", "api", "litellm"}:
-        cfg["mode"] = "api"
+    elif mode in {"api_key", "api", "litellm", "claude_api"}:
+        cfg["mode"] = "claude_api"
     elif mode != "agent_cli":
         cfg["mode"] = "agent_cli"
 
     if cfg.get("agent_backend") not in {"claude", "codex"}:
         cfg["agent_backend"] = "claude"
-
-    if not cfg.get("provider"):
-        cfg["provider"] = DEFAULT_LLM_CONFIG["provider"]
+    cfg.pop("provider", None)
 
     return cfg
 

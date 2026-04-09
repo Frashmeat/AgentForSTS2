@@ -23,14 +23,14 @@ def test_text_runner_uses_cli_backend_when_mode_is_agent_cli():
     assert resolve_text_backend(llm_cfg) == "codex_cli"
 
 
-def test_text_runner_uses_litellm_when_mode_is_api():
-    llm_cfg = {"mode": "api", "provider": "openai"}
+def test_text_runner_uses_litellm_when_mode_is_claude_api():
+    llm_cfg = {"mode": "claude_api", "model": "claude-sonnet-4-6"}
     assert resolve_text_backend(llm_cfg) == "litellm"
 
 
-def test_resolve_model_supports_openai_provider():
-    llm_cfg = {"mode": "api", "provider": "openai"}
-    assert resolve_model(llm_cfg).startswith("openai/")
+def test_resolve_model_falls_back_to_default_claude_model():
+    llm_cfg = {"mode": "claude_api"}
+    assert resolve_model(llm_cfg) == "claude-sonnet-4-6"
 
 
 def test_build_text_prompt_appends_custom_prompt():

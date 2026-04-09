@@ -9,17 +9,10 @@ from .contracts import AgentBackend, StreamCallback
 _CLI_AGENT_BACKENDS = {"claude", "codex"}
 
 
-def resolve_api_agent_backend_name(provider: str) -> str:
-    normalized = str(provider).strip().lower()
-    if normalized == "anthropic":
-        return "claude"
-    return "codex"
-
-
 def resolve_agent_backend_name(llm_cfg: dict) -> str:
     mode = str(llm_cfg.get("mode", "")).strip()
-    if mode == "api":
-        return resolve_api_agent_backend_name(llm_cfg.get("provider", ""))
+    if mode == "claude_api":
+        return "claude"
 
     backend = str(llm_cfg.get("agent_backend", "claude")).strip().lower()
     if backend in _CLI_AGENT_BACKENDS:

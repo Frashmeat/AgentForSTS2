@@ -28,15 +28,6 @@ const PROVIDER_MODELS: Record<string, string[]> = {
   wanxiang:    [],
 };
 
-const TEXT_PROVIDERS = [
-  { value: "anthropic", label: "Anthropic" },
-  { value: "openai", label: "OpenAI" },
-  { value: "moonshot", label: "Moonshot" },
-  { value: "deepseek", label: "DeepSeek" },
-  { value: "qwen", label: "Qwen" },
-  { value: "zhipu", label: "Zhipu" },
-];
-
 function SGroup({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
   return (
     <div className="space-y-3">
@@ -506,10 +497,10 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
 
               {/* ── LLM 配置 ── */}
               <SGroup icon={<Cpu size={14} />} title="LLM 配置">
-                <Field label="文本任务模式" hint="规划、日志分析、提示词优化走这里的配置">
+                <Field label="文本任务模式" hint="规划、日志分析、提示词优化以及代码代理都会跟随这里的模式。">
                   <select value={cfg.llm?.mode || ""} onChange={e => set(["llm", "mode"], e.target.value)} className={selectCls}>
                     <option value="agent_cli">Agent CLI</option>
-                    <option value="api">API</option>
+                    <option value="claude_api">Claude API</option>
                   </select>
                 </Field>
                 {cfg.llm?.mode === "agent_cli" ? (
@@ -524,9 +515,9 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
                     </select>
                   </Field>
                 ) : (
-                  <Field label="代码代理后端" hint="API 模式下会自动与当前文本 API 配置保持一致：Anthropic 走 Claude 兼容链路，其他已支持提供商走 Codex 兼容链路。">
+                  <Field label="代码代理后端" hint="Claude API 模式下，文本任务和代码代理都会直接使用同一套 Claude API 配置。">
                     <input
-                      value={cfg.llm?.provider === "anthropic" ? "自动选择：Claude 兼容链路" : "自动选择：Codex 兼容链路"}
+                      value="自动选择：Claude API"
                       readOnly
                       className={readonlyInputCls}
                     />
@@ -545,28 +536,15 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
                     <option value="approval_first">审批后执行</option>
                   </select>
                 </Field>
-                {cfg.llm?.mode === "api" && (
-                  <>
-                    <Field label="API 提供商">
-                      <select
-                        value={cfg.llm?.provider || "anthropic"}
-                        onChange={e => set(["llm", "provider"], e.target.value)}
-                        className={selectCls}
-                      >
-                        {TEXT_PROVIDERS.map(provider => (
-                          <option key={provider.value} value={provider.value}>{provider.label}</option>
-                        ))}
-                      </select>
-                    </Field>
-                    <Field label="文本模型" hint="用于规划、日志分析、提示词优化等文本任务；必填。">
-                      <input
-                        value={cfg.llm?.model || ""}
-                        onChange={e => set(["llm", "model"], e.target.value)}
-                        placeholder="例如 openai/gpt-5、qwen-plus、deepseek-chat"
-                        className={inputCls}
-                      />
-                    </Field>
-                  </>
+                {cfg.llm?.mode === "claude_api" && (
+                  <Field label="Claude 模型" hint="文本任务和代码代理统一使用这个 Claude 模型；必填。">
+                    <input
+                      value={cfg.llm?.model || ""}
+                      onChange={e => set(["llm", "model"], e.target.value)}
+                      placeholder="例如 claude-sonnet-4-6"
+                      className={inputCls}
+                    />
+                  </Field>
                 )}
                 {cfg.llm?.mode === "agent_cli" && (
                   <Field label="CLI 模型（可选）" hint="留空使用 Codex 或 Claude CLI 的默认模型">
@@ -578,10 +556,10 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
                     />
                   </Field>
                 )}
-                <Field label="API Key（留空不修改）">
+                <Field label={cfg.llm?.mode === "claude_api" ? "Claude API Key（留空不修改）" : "API Key（留空不修改）"}>
                   <input value={llmKey} onChange={e => setLlmKey(e.target.value)} placeholder={cfg.llm?.api_key ? "已设置" : "未设置"} className={inputCls} />
                 </Field>
-                <Field label="Base URL（可选）">
+                <Field label={cfg.llm?.mode === "claude_api" ? "Claude Base URL（可选）" : "Base URL（可选）"}>
                   <input value={cfg.llm?.base_url || ""} onChange={e => set(["llm", "base_url"], e.target.value)} placeholder="https://..." className={inputCls} />
                 </Field>
                 <Field label="AI 附加提示词" hint="会追加到全部 AI 调用，包括文本分析、规划、提示词优化和代码代理">

@@ -45,6 +45,72 @@ function Get-ServicePorts {
     return @($servicePorts[$ServiceName])
 }
 
+function Stop-CurrentSessionLogMirroring {
+    param([string[]]$ServiceNames = @())
+
+    $serviceNameSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($serviceName in @($ServiceNames)) {
+        if (-not [string]::IsNullOrWhiteSpace($serviceName)) {
+            $null = $serviceNameSet.Add($serviceName)
+        }
+    }
+
+    $registryVar = Get-Variable -Name ATS_LOCAL_LOG_MIRRORS -Scope Global -ErrorAction SilentlyContinue
+    if ($null -ne $registryVar -and $registryVar.Value -is [hashtable]) {
+        $registry = $registryVar.Value
+        $keys = @($registry.Keys)
+        foreach ($serviceName in $keys) {
+            if ($serviceNameSet.Count -gt 0 -and (-not $serviceNameSet.Contains([string]$serviceName))) {
+                continue
+            }
+
+            $entry = $registry[$serviceName]
+            foreach ($sourceIdentifier in @($entry.SourceIdentifiers)) {
+                Unregister-Event -SourceIdentifier $sourceIdentifier -ErrorAction SilentlyContinue
+            }
+            foreach ($job in @($entry.Jobs)) {
+                if ($null -ne $job) {
+                    Remove-Job -Id $job.Id -Force -ErrorAction SilentlyContinue
+                }
+            }
+            foreach ($writer in @($entry.Writers)) {
+                if ($null -ne $writer) {
+                    try {
+                        $writer.Dispose()
+                    } catch {
+                    }
+                }
+            }
+            $registry.Remove($serviceName)
+            Write-Host "[$serviceName] 已清理当前会话中的日志镜像句柄"
+        }
+    }
+
+    $subscribers = Get-EventSubscriber -ErrorAction SilentlyContinue | Where-Object {
+        $_.SourceIdentifier -like "ATS.LocalLogMirror.*"
+    }
+    foreach ($subscriber in @($subscribers)) {
+        $parts = [string]$subscriber.SourceIdentifier -split "\."
+        $serviceName = if ($parts.Length -ge 4) { $parts[2] } else { "" }
+        if ($serviceNameSet.Count -gt 0 -and (-not $serviceNameSet.Contains($serviceName))) {
+            continue
+        }
+        Unregister-Event -SubscriptionId $subscriber.SubscriptionId -ErrorAction SilentlyContinue
+    }
+
+    $jobs = Get-Job -ErrorAction SilentlyContinue | Where-Object {
+        $_.Name -like "ATS.LocalLogMirror.*"
+    }
+    foreach ($job in @($jobs)) {
+        $parts = [string]$job.Name -split "\."
+        $serviceName = if ($parts.Length -ge 4) { $parts[2] } else { "" }
+        if ($serviceNameSet.Count -gt 0 -and (-not $serviceNameSet.Contains($serviceName))) {
+            continue
+        }
+        Remove-Job -Id $job.Id -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Get-PidsByPort {
     param([int]$Port)
 
@@ -239,6 +305,8 @@ function Stop-ProcessesFromLocalDeployState {
             $serviceName = "local-deploy"
         }
 
+        Stop-CurrentSessionLogMirroring -ServiceNames @($serviceName)
+
         $detail = if ($entry.port) {
             "来自状态文件 $(Split-Path -Leaf $StatePath)，端口 $($entry.port)"
         } else {
@@ -281,7 +349,70 @@ function Stop-ProcessesFromArtifacts {
     }
 }
 
+function Stop-DockerComposeRelease {
+    param([string]$ReleaseRoot)
+
+    $composeFile = Join-Path $ReleaseRoot "docker-compose.yml"
+    $runtimeDir = Join-Path $ReleaseRoot "runtime"
+    $envFile = Join-Path $runtimeDir ".env"
+    $webServiceDir = Join-Path (Join-Path $ReleaseRoot "services") "web"
+
+    if ((-not (Test-Path -LiteralPath $composeFile)) -or (-not (Test-Path -LiteralPath $webServiceDir))) {
+        return $false
+    }
+
+    $projectName = Split-Path -Leaf $ReleaseRoot
+    Write-Host "[docker-web] 停止 compose 项目 $projectName ($ReleaseRoot)"
+
+    Push-Location $ReleaseRoot
+    try {
+        if (Test-Path -LiteralPath $envFile) {
+            & docker compose --project-name $projectName --env-file $envFile -f $composeFile down --remove-orphans
+        } else {
+            & docker compose --project-name $projectName -f $composeFile down --remove-orphans
+        }
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "[docker-web] 停止 compose 项目失败，退出码: $LASTEXITCODE ($ReleaseRoot)"
+            return $false
+        }
+
+        Write-Host "[docker-web] 已停止 compose 项目 $projectName"
+        return $true
+    } finally {
+        Pop-Location
+    }
+}
+
+function Stop-DockerComposeWebServices {
+    $dockerCommand = Get-Command docker -ErrorAction SilentlyContinue
+    if ($null -eq $dockerCommand) {
+        Write-Host "[docker-web] 未找到 docker，跳过 Docker web 服务停止"
+        return
+    }
+
+    $artifactsRoot = Join-Path $PSScriptRoot "latest\artifacts"
+    if (-not (Test-Path -LiteralPath $artifactsRoot)) {
+        return
+    }
+
+    $releaseRoots = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($directory in Get-ChildItem -LiteralPath $artifactsRoot -Directory -ErrorAction SilentlyContinue) {
+        $composeFile = Join-Path $directory.FullName "docker-compose.yml"
+        $webServiceDir = Join-Path (Join-Path $directory.FullName "services") "web"
+        if ((Test-Path -LiteralPath $composeFile) -and (Test-Path -LiteralPath $webServiceDir)) {
+            $null = $releaseRoots.Add($directory.FullName)
+        }
+    }
+
+    foreach ($releaseRoot in $releaseRoots) {
+        $null = Stop-DockerComposeRelease -ReleaseRoot $releaseRoot
+    }
+}
+
 Discover-ServicePorts
+
+Stop-CurrentSessionLogMirroring -ServiceNames @("frontend", "workstation", "web")
 
 foreach ($resolvedFrontendPort in Get-ServicePorts -ServiceName "frontend") {
     Stop-ServiceByPort -Name "frontend" -Port $resolvedFrontendPort
@@ -296,3 +427,4 @@ foreach ($resolvedWebPort in Get-ServicePorts -ServiceName "web") {
 }
 
 Stop-ProcessesFromArtifacts
+Stop-DockerComposeWebServices

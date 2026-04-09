@@ -45,9 +45,8 @@ def test_config_router_exposes_capability_reasons_without_secret_fields(monkeypa
         "get_config",
         lambda: {
             "llm": {
-                "mode": "api",
-                "provider": "openai",
-                "model": "gpt-5.4",
+                "mode": "claude_api",
+                "model": "claude-sonnet-4-6",
                 "api_key": "secret-key",
             },
             "image_gen": {
@@ -72,15 +71,14 @@ def test_config_router_exposes_capability_reasons_without_secret_fields(monkeypa
     assert "api_key" not in result
 
 
-def test_config_router_marks_code_agent_available_for_openai_compatible_api_mode(monkeypatch):
+def test_config_router_marks_code_agent_available_for_claude_api_mode(monkeypatch):
     monkeypatch.setattr(
         config_router,
         "get_config",
         lambda: {
             "llm": {
-                "mode": "api",
-                "provider": "qwen",
-                "model": "qwen-plus",
+                "mode": "claude_api",
+                "model": "claude-sonnet-4-6",
                 "api_key": "secret-key",
             },
             "image_gen": {
