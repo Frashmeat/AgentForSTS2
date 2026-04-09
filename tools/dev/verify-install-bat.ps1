@@ -41,6 +41,18 @@ $checks = @(
         Pattern = 'Ensure-IlspyCmd'
     }
     @{
+        Name = 'powershell entry pins ilspycmd version'
+        Pattern = '9.1.0.7988'
+    }
+    @{
+        Name = 'powershell entry installs ilspycmd into runtime tools'
+        Pattern = 'runtime\tools'
+    }
+    @{
+        Name = 'powershell entry falls back to NuGet package download'
+        Pattern = 'Install-IlspyCmdFromNuGetPackage'
+    }
+    @{
         Name = 'powershell entry writes Godot path into config'
         Pattern = 'Set-GodotPathInConfig'
     }

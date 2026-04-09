@@ -56,6 +56,10 @@ $script:GodotDownloadUrl = "https://github.com/godotengine/godot/releases/downlo
 $script:DotNetInstallDir = Join-Path $env:LOCALAPPDATA "Microsoft\dotnet"
 $script:DotNetUserToolsDir = Join-Path $env:USERPROFILE ".dotnet\tools"
 $script:DotNetInstallScriptUrl = "https://dot.net/v1/dotnet-install.ps1"
+$script:RuntimeToolsDir = Join-Path $script:RootDir "runtime\tools"
+$script:IlspyCmdVersion = "9.1.0.7988"
+$script:IlspyCmdNuGetSource = "https://api.nuget.org/v3/index.json"
+$script:IlspyCmdNuGetPackageUrl = "https://api.nuget.org/v3-flatcontainer/ilspycmd/$($script:IlspyCmdVersion)/ilspycmd.$($script:IlspyCmdVersion).nupkg"
 
 function Write-Section([string]$Title) {
     Write-Host ""
@@ -348,24 +352,123 @@ function Ensure-IlspyCmd {
 
     Write-Section "检查 ilspycmd"
     Add-UserPathEntry -PathEntry $script:DotNetUserToolsDir
+    Ensure-Directory -Path $script:RuntimeToolsDir
 
-    $ilspyExe = Get-CommandSource -Names @("ilspycmd.exe", "ilspycmd")
+    $ilspyExe = Resolve-IlspyCmdCommand
     if ($ilspyExe) {
         Write-Ok "ilspycmd 已安装"
         return $ilspyExe
     }
 
-    Write-Info "通过 dotnet tool 安装 ilspycmd..."
-    Invoke-ExternalCommand -FilePath $DotNetExe -Arguments @("tool", "install", "-g", "ilspycmd") -FailureMessage "安装 ilspycmd 失败"
+    try {
+        Install-IlspyCmdViaDotNetTool -DotNetExe $DotNetExe
+    }
+    catch {
+        Write-Warn ("dotnet tool 安装 ilspycmd 失败，准备清理 NuGet 缓存后重试: {0}" -f $_.Exception.Message)
+        Clear-NuGetCaches -DotNetExe $DotNetExe
+        try {
+            Install-IlspyCmdViaDotNetTool -DotNetExe $DotNetExe
+        }
+        catch {
+            Write-Warn ("dotnet tool 重试仍失败，改为下载官方 NuGet 包: {0}" -f $_.Exception.Message)
+            Install-IlspyCmdFromNuGetPackage
+        }
+    }
 
     Add-UserPathEntry -PathEntry $script:DotNetUserToolsDir
-    $resolved = Get-CommandSource -Names @("ilspycmd.exe", "ilspycmd")
+    $resolved = Resolve-IlspyCmdCommand
     if (-not $resolved) {
-        throw "ilspycmd 安装完成后仍未能解析到命令，请确认 $script:DotNetUserToolsDir 已加入 PATH"
+        throw "ilspycmd 安装完成后仍未能解析到命令，请确认 PATH 或 runtime/tools 下的安装结果"
     }
 
     Write-Ok "ilspycmd 已就绪"
     return $resolved
+}
+
+function Resolve-IlspyCmdCommand {
+    $localCandidates = @(
+        (Join-Path $script:RuntimeToolsDir "ilspycmd.exe"),
+        (Join-Path $script:RuntimeToolsDir "ilspycmd"),
+        (Join-Path $script:RuntimeToolsDir "ILSpyCmd.dll"),
+        (Join-Path $script:RuntimeToolsDir "ilspycmd.dll")
+    )
+    foreach ($candidate in $localCandidates) {
+        if (Test-Path -LiteralPath $candidate) {
+            return (Resolve-Path $candidate).Path
+        }
+    }
+
+    $nestedCandidate = Get-ChildItem -Path $script:RuntimeToolsDir -Recurse -File -Include "ilspycmd.exe", "ilspycmd", "ILSpyCmd.dll", "ilspycmd.dll" -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($nestedCandidate) {
+        return $nestedCandidate.FullName
+    }
+
+    return Get-CommandSource -Names @("ilspycmd.exe", "ilspycmd")
+}
+
+function Remove-IlspyCmdRuntimeArtifacts {
+    if (-not (Test-Path -LiteralPath $script:RuntimeToolsDir)) {
+        return
+    }
+
+    Get-ChildItem -Path $script:RuntimeToolsDir -Force -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.Name -like "ilspycmd*" -or $_.Name -like "ILSpyCmd*"
+        } |
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+function Install-IlspyCmdViaDotNetTool {
+    param([string]$DotNetExe)
+
+    Write-Info "通过 dotnet tool 安装 ilspycmd $($script:IlspyCmdVersion) 到 runtime/tools..."
+    Remove-IlspyCmdRuntimeArtifacts
+    Invoke-ExternalCommand -FilePath $DotNetExe -Arguments @(
+        "tool", "install",
+        "--tool-path", $script:RuntimeToolsDir,
+        "ilspycmd",
+        "--version", $script:IlspyCmdVersion,
+        "--add-source", $script:IlspyCmdNuGetSource,
+        "--ignore-failed-sources"
+    ) -FailureMessage "安装 ilspycmd 失败"
+}
+
+function Clear-NuGetCaches {
+    param([string]$DotNetExe)
+
+    Write-Info "清理 NuGet 缓存..."
+    & $DotNetExe nuget locals all --clear | Out-Null
+}
+
+function Install-IlspyCmdFromNuGetPackage {
+    $packagePath = Join-Path $env:TEMP ("ilspycmd.{0}.nupkg" -f $script:IlspyCmdVersion)
+    $zipPath = Join-Path $env:TEMP ("ilspycmd.{0}.zip" -f $script:IlspyCmdVersion)
+    $extractDir = Join-Path $env:TEMP ("ilspycmd-{0}" -f $script:IlspyCmdVersion)
+
+    Remove-IlspyCmdRuntimeArtifacts
+    if (Test-Path -LiteralPath $packagePath) { Remove-Item -LiteralPath $packagePath -Force -ErrorAction SilentlyContinue }
+    if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue }
+    if (Test-Path -LiteralPath $extractDir) { Remove-Item -LiteralPath $extractDir -Recurse -Force -ErrorAction SilentlyContinue }
+
+    Write-Info "下载官方 NuGet 包: $($script:IlspyCmdNuGetPackageUrl)"
+    Invoke-WebRequest -Uri $script:IlspyCmdNuGetPackageUrl -OutFile $packagePath
+
+    Copy-Item -LiteralPath $packagePath -Destination $zipPath -Force
+    Expand-Archive -LiteralPath $zipPath -DestinationPath $extractDir -Force
+
+    $toolDir = Get-ChildItem -Path $extractDir -Recurse -Directory -ErrorAction SilentlyContinue |
+        Where-Object {
+            (Test-Path -LiteralPath (Join-Path $_.FullName "ilspycmd.dll")) -or
+            (Test-Path -LiteralPath (Join-Path $_.FullName "ILSpyCmd.dll"))
+        } |
+        Select-Object -First 1
+
+    if (-not $toolDir) {
+        throw "下载的 ilspycmd NuGet 包中未找到可执行工具目录"
+    }
+
+    Copy-Item -Path (Join-Path $toolDir.FullName "*") -Destination $script:RuntimeToolsDir -Recurse -Force
 }
 
 function Find-GodotExecutable {

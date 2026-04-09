@@ -27,7 +27,7 @@ Describe your card, relic, or power in plain text — AgentTheSpire generates th
 | Node.js | 18+ | Yes |
 | .NET SDK | 9.x | Yes |
 | Godot Mono | **4.5.1 exactly** | Yes |
-| ilspycmd | latest | Recommended for knowledge refresh / decompile workflows |
+| ilspycmd | 9.1.0.7988 | Recommended for knowledge refresh / decompile workflows |
 | Slay the Spire 2 | latest | Yes |
 | Claude Code CLI / Codex CLI | latest | Optional for `agent_cli` mode |
 | LLM API Key | — | One of two LLM options |
