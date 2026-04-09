@@ -59,6 +59,17 @@ def build_system_prompt(system_prompt: str, llm_cfg: dict, use_runtime_config: b
     return append_global_ai_instructions(system_prompt, effective_cfg)
 
 
+def _build_claude_cli_env(llm_cfg: dict) -> dict[str, str]:
+    env = os.environ.copy()
+    cfg = normalize_llm_config(llm_cfg)
+    if cfg.get("api_key"):
+        env["ANTHROPIC_AUTH_TOKEN"] = cfg["api_key"]
+        env["ANTHROPIC_API_KEY"] = cfg["api_key"]
+    if cfg.get("base_url"):
+        env["ANTHROPIC_BASE_URL"] = cfg["base_url"]
+    return env
+
+
 async def complete_text(
     prompt: str,
     llm_cfg: dict,
@@ -139,6 +150,7 @@ async def _complete_via_claude_cli(prompt: str, llm_cfg: dict, cwd: Optional[Pat
                 capture_output=True,
                 timeout=180,
                 cwd=str(cwd) if cwd else None,
+                env=_build_claude_cli_env(llm_cfg),
             ),
         ),
         timeout=185,

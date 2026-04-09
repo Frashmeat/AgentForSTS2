@@ -46,13 +46,15 @@ TRANSPARENT_CHARACTER_VARIANTS = {"character_icon", "map_marker"}
 
 
 def _workflow_router_service(ws: WebSocket):
-    container = getattr(getattr(ws.app.state, "container", None), "resolve_optional_singleton", None)
+    app = getattr(ws, "app", None)
+    state = getattr(app, "state", None)
+    container = getattr(getattr(state, "container", None), "resolve_optional_singleton", None)
     if container is None:
         return None
-    flags = getattr(ws.app.state.container, "platform_migration_flags", None)
+    flags = getattr(state.container, "platform_migration_flags", None)
     if flags is None or not getattr(flags, "platform_runner_enabled", False):
         return None
-    return ws.app.state.container.resolve_optional_singleton("platform.workflow_router_compat_service")
+    return state.container.resolve_optional_singleton("platform.workflow_router_compat_service")
 
 
 def _needs_transparent(asset_type: AssetType) -> bool:
@@ -367,14 +369,14 @@ async def _handle_legacy_ws_create(ws: WebSocket, *, initial_params: dict | None
         logger.info("[ws/create] 客户端主动断开 client=%s", client)
     except Exception as e:
         import traceback
-        msg = _friendly_error(e)
+        code, msg = _classify_workflow_error(e)
         tb = traceback.format_exc()
-        logger.error("[ws/create] 未捕获异常 client=%s\n%s", client, tb)
+        logger.error("[ws/create] 工作流执行失败 client=%s code=%s\n%s", client, code, tb)
         try:
             detail = str(e).strip() or msg
             await send_ws_error(
                 ws,
-                code="workflow_runtime_error",
+                code=code,
                 message=msg,
                 detail=detail,
                 traceback=tb,
@@ -536,17 +538,17 @@ async def _ws_run_with_provided_image(ws: WebSocket, params: dict, project_root:
     })
 
 
-def _friendly_error(e: Exception) -> str:
+def _classify_workflow_error(e: Exception) -> tuple[str, str]:
     s = str(e)
     if "401" in s:
-        return _text("workflow_api_key_invalid").strip()
+        return "workflow_api_key_invalid", _text("workflow_api_key_invalid").strip()
     if "403" in s:
-        return _text("workflow_api_key_forbidden").strip()
+        return "workflow_api_key_forbidden", _text("workflow_api_key_forbidden").strip()
     if "getaddrinfo" in s or "ConnectError" in type(e).__name__:
-        return _text("workflow_network_error", error_type=type(e).__name__).strip()
+        return "workflow_network_error", _text("workflow_network_error", error_type=type(e).__name__).strip()
     if "timeout" in s.lower() or "Timeout" in type(e).__name__:
-        return _text("workflow_timeout_error").strip()
-    return s
+        return "workflow_timeout_error", _text("workflow_timeout_error").strip()
+    return "workflow_runtime_error", s
 
 
 async def _run_postprocess(img, asset_type, asset_name, project_root):

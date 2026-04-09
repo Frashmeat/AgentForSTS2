@@ -139,6 +139,7 @@ def _resolve_claude_powershell_script() -> str | None:
 async def run(prompt: str, project_root: Path, llm_cfg: dict, stream_callback=None) -> str:
     env = os.environ.copy()
     if llm_cfg.get("api_key"):
+        env["ANTHROPIC_AUTH_TOKEN"] = llm_cfg["api_key"]
         env["ANTHROPIC_API_KEY"] = llm_cfg["api_key"]
     if llm_cfg.get("base_url"):
         env["ANTHROPIC_BASE_URL"] = llm_cfg["base_url"]

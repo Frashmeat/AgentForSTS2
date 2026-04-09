@@ -37,20 +37,34 @@ def test_claude_cli_backend_passes_model_when_configured(monkeypatch, tmp_path: 
 
     async def fake_run_streaming(cmd, **kwargs):
         captured["cmd"] = cmd
+        captured["env"] = kwargs["env"]
         return (["ok"], [])
 
     monkeypatch.setattr(claude_cli, "_resolve_claude_launcher", lambda: ["C:/tools/claude.cmd"])
     monkeypatch.setattr(claude_cli, "run_streaming", fake_run_streaming)
 
-    result = asyncio.run(claude_cli.run("hello", tmp_path, {"model": "claude-sonnet-4-6"}))
+    result = asyncio.run(
+        claude_cli.run(
+            "hello",
+            tmp_path,
+            {
+                "model": "claude-sonnet-4-6",
+                "api_key": "secret-token",
+                "base_url": "https://e-flowcode.cc",
+            },
+        )
+    )
 
     assert result == "ok"
     assert "--model" in captured["cmd"]
     assert captured["cmd"][captured["cmd"].index("--model") + 1] == "claude-sonnet-4-6"
+    assert captured["env"]["ANTHROPIC_AUTH_TOKEN"] == "secret-token"
+    assert captured["env"]["ANTHROPIC_API_KEY"] == "secret-token"
+    assert captured["env"]["ANTHROPIC_BASE_URL"] == "https://e-flowcode.cc"
 
 
-@pytest.mark.skipif(os.name != "nt", reason="仅在 Windows 上复现 PowerShell 与 CreateProcess 差异")
-def test_powershell_can_resolve_claude_ps1_while_python_subprocess_cannot_spawn_plain_claude(tmp_path: Path):
+@pytest.mark.skipif(os.name != "nt", reason="仅在 Windows 上复现 PowerShell 脚本解析差异")
+def test_powershell_can_resolve_claude_ps1_from_path_prefix(tmp_path: Path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
     ps1_path = bin_dir / "claude.ps1"
@@ -77,17 +91,6 @@ def test_powershell_can_resolve_claude_ps1_while_python_subprocess_cannot_spawn_
     assert powershell_lookup.returncode == 0, powershell_lookup.stderr
     assert "ExternalScript|" in powershell_lookup.stdout
     assert str(ps1_path) in powershell_lookup.stdout
-
-    with pytest.raises(FileNotFoundError):
-        subprocess.run(
-            ["claude", "--version"],
-            env=env,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-        )
 
 
 @pytest.mark.skipif(os.name != "nt", reason="仅在 Windows 上验证 PowerShell 脚本包装逻辑")

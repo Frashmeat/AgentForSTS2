@@ -102,6 +102,20 @@ async def test_send_approval_pending_emits_expected_event():
     assert ws.messages[-1]["requests"] == []
 
 
+def test_classify_workflow_error_maps_auth_failures_to_specific_codes():
+    code, message = workflow._classify_workflow_error(
+        RuntimeError("Claude CLI 退出码 1\nFailed to authenticate. API Error: 401 invalid token")
+    )
+    assert code == "workflow_api_key_invalid"
+    assert "API Key 无效" in message
+
+    code, message = workflow._classify_workflow_error(
+        RuntimeError("Claude CLI 退出码 1\nFailed to authenticate. API Error: 403 forbidden")
+    )
+    assert code == "workflow_api_key_forbidden"
+    assert "API Key 无权限" in message
+
+
 @pytest.mark.asyncio
 async def test_maybe_await_approval_continues_main_flow_after_approve_all(monkeypatch, tmp_path):
     class DummyWs:

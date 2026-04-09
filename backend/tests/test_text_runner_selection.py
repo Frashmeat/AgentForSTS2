@@ -77,12 +77,17 @@ def test_complete_via_claude_cli_passes_model_to_subprocess(monkeypatch):
 
     def fake_run(cmd, **kwargs):
         captured["cmd"] = cmd
+        captured["env"] = kwargs["env"]
         return types.SimpleNamespace(stdout=b"ok\n", returncode=0)
 
     async def run_case():
         return await text_runner._complete_via_claude_cli(
             "base prompt",
-            {"model": "claude-sonnet-4-6"},
+            {
+                "model": "claude-sonnet-4-6",
+                "api_key": "secret-token",
+                "base_url": "https://e-flowcode.cc",
+            },
             None,
         )
 
@@ -93,3 +98,6 @@ def test_complete_via_claude_cli_passes_model_to_subprocess(monkeypatch):
     assert result == "ok"
     assert "--model" in captured["cmd"]
     assert captured["cmd"][captured["cmd"].index("--model") + 1] == "claude-sonnet-4-6"
+    assert captured["env"]["ANTHROPIC_AUTH_TOKEN"] == "secret-token"
+    assert captured["env"]["ANTHROPIC_API_KEY"] == "secret-token"
+    assert captured["env"]["ANTHROPIC_BASE_URL"] == "https://e-flowcode.cc"
