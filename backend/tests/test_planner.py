@@ -38,6 +38,46 @@ def test_parse_plan_basic():
     assert item.name == "StrikeCard"
     assert item.needs_image is True
     assert item.depends_on == []
+    assert item.goal == ""
+    assert item.coupling_kind == "unclear"
+    assert item.clarification_questions == []
+
+
+def test_parse_plan_preserves_extended_review_fields():
+    json_str = """{
+      "mod_name": "ExtendedReviewMod",
+      "summary": "",
+      "items": [
+        {
+          "id": "helper_logic",
+          "type": "custom_code",
+          "name": "HelperLogic",
+          "description": "Shared helper",
+          "implementation_notes": "Keep helpers isolated",
+          "needs_image": false,
+          "image_description": "",
+          "depends_on": [],
+          "goal": "Provide common battle helpers.",
+          "detailed_description": "Create helper methods shared by multiple generated assets.",
+          "scope_boundary": "Do not modify unrelated dungeon flow.",
+          "dependency_reason": "",
+          "acceptance_notes": "Helpers are reusable by future assets.",
+          "affected_targets": ["HelperLogic", "BattleState"],
+          "coupling_kind": "shared_logic",
+          "clarification_status": "clear",
+          "clarification_questions": []
+        }
+      ]
+    }"""
+    plan = parse_plan(json_str)
+    item = plan.items[0]
+    assert item.goal == "Provide common battle helpers."
+    assert item.detailed_description == "Create helper methods shared by multiple generated assets."
+    assert item.scope_boundary == "Do not modify unrelated dungeon flow."
+    assert item.acceptance_notes == "Helpers are reusable by future assets."
+    assert item.affected_targets == ["HelperLogic", "BattleState"]
+    assert item.coupling_kind == "shared_logic"
+    assert item.clarification_status == "clear"
 
 
 def test_parse_plan_with_dependencies():

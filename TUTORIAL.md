@@ -215,14 +215,28 @@ tools\start.bat
 ## 6. 提升 AI 代码质量（可选）
 
 默认情况下，Code Agent 通过内置的 API 参考文档生成代码。
-反编译游戏 DLL 后，AI 可以直接查阅原始实现，显著减少错误。
+工作站现在会在启动后检查本地知识库状态；如果游戏版本或 Baselib latest release 变化，设置页会显示 `stale / missing` 提示，并提供手动更新按钮。
+
+知识库来源：
+
+- 游戏侧：当前自动检测到的 `sts2_path`，以及对应 Steam `app manifest / 安装版本文本`
+- Baselib 侧：官方 latest release
+  - https://github.com/Alchyr/BaseLib-StS2/releases
+
+工程内缓存位置：
+
+- `runtime/knowledge/knowledge-manifest.json`
+- `runtime/knowledge/game_decompiled/`
+- `runtime/knowledge/baselib_decompiled/`
+- `runtime/knowledge/cache/`
+
+如果你想手动更新游戏反编译源码，可以继续使用：
 
 ```bash
-python tools/decompile_sts2.py --game-path "C:/Steam/steamapps/common/Slay the Spire 2"
+python tools/dev/decompile_sts2.py --game-path "C:/Steam/steamapps/common/Slay the Spire 2"
 ```
 
-完成后会在仓库外自动创建 `sts2_decompiled/` 目录（22MB，版权内容，不进 git），
-并将路径写入 `config.json`。重启后端后立即生效。
+如果直接从工作站界面更新知识库，则会把结果同步到 `runtime/knowledge/` 下的本地缓存。
 
 依赖 `ilspycmd`，若未安装：
 ```bash

@@ -4,6 +4,7 @@ import { AlertTriangle, ChevronDown, ChevronUp, Loader2, RotateCcw } from "lucid
 import { AgentLog } from "../../components/AgentLog";
 import { ApprovalPanel } from "../../components/ApprovalPanel";
 import { BuildDeploy } from "../../components/BuildDeploy";
+import { type KnowledgeStatus } from "../../shared/api/index.ts";
 import { ProjectRootField } from "../../components/ProjectRootField";
 import { StageStatus } from "../../components/StageStatus";
 import { cn } from "../../lib/utils";
@@ -47,6 +48,7 @@ export interface SingleAssetFeatureViewProps {
   dragOver: boolean;
   hasLiveSession: boolean;
   showRecoveredNotice: boolean;
+  knowledgeStatus: KnowledgeStatus | null;
   onRestartWorkflow: () => void;
   onAssetTypeChange: (value: AssetType) => void;
   onAssetNameChange: (value: string) => void;
@@ -74,6 +76,8 @@ export interface SingleAssetFeatureViewProps {
   onReject: (actionId: string) => void;
   onExecute: (actionId: string) => void;
   onProceedApproval: () => void;
+  onRefreshKnowledge: () => void;
+  onOpenKnowledgeGuide: () => void;
   onOpenSettings: () => void;
 }
 
@@ -113,6 +117,7 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
     dragOver,
     hasLiveSession,
     showRecoveredNotice,
+    knowledgeStatus,
     onRestartWorkflow,
     onAssetTypeChange,
     onAssetNameChange,
@@ -140,11 +145,14 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
     onReject,
     onExecute,
     onProceedApproval,
+    onRefreshKnowledge,
+    onOpenKnowledgeGuide,
     onOpenSettings,
   } = props;
 
   const errorInStep2 = stage === "error" && step <= 2;
   const errorInStep3 = stage === "error" && step > 2;
+  const showKnowledgeNotice = knowledgeStatus?.status === "stale" || knowledgeStatus?.status === "missing";
   const startDisabled =
     !assetName.trim() ||
     !description.trim() ||
@@ -155,6 +163,27 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
     <main className="px-6 py-6 grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)] gap-5 items-start">
       <Step num={1} title="描述设计" active={step === 0} done={step > 0}>
         <div className="space-y-4">
+          {showKnowledgeNotice && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800 space-y-2">
+              <p>当前知识库可能不是最新版本，建议先更新后再生成。</p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={onRefreshKnowledge}
+                  className="rounded-md border border-amber-300 px-2.5 py-1 font-medium text-amber-700 hover:bg-amber-100 transition-colors"
+                >
+                  立即更新
+                </button>
+                <button
+                  type="button"
+                  onClick={onOpenKnowledgeGuide}
+                  className="rounded-md border border-slate-200 px-2.5 py-1 font-medium text-slate-600 hover:border-amber-300 hover:text-amber-700 transition-colors"
+                >
+                  查看说明
+                </button>
+              </div>
+            </div>
+          )}
           {showRecoveredNotice && (
             <div className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2.5 text-xs text-violet-700 space-y-2">
               <p>当前展示的是本地恢复的单资产快照。审批状态会同步后端，但 prompt 确认、选图、补图和继续执行需要重新建立工作流连接。</p>
@@ -496,15 +525,14 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                 />
               ) : (
                 <>
-                  <StageStatus current={agentStageCurrent} history={agentStageHistory} isComplete={stage === "done"} />
-                  {agentLog.length > 0 ? (
-                    <AgentLog lines={agentLog} entries={agentLogEntries} currentModel={currentAgentModel} />
-                  ) : (
-                    <div className="flex items-center gap-2.5 py-3">
-                      <Loader2 size={16} className="text-violet-500 animate-spin" />
-                      <span className="text-sm text-slate-400">Code Agent 执行中…</span>
-                    </div>
-                  )}
+                  <AgentLog
+                    lines={agentLog}
+                    entries={agentLogEntries}
+                    currentModel={currentAgentModel}
+                    currentStage={agentStageCurrent ?? agentStageHistory[agentStageHistory.length - 1] ?? null}
+                    isComplete={stage === "done"}
+                    broadcastKind="codegen"
+                  />
                 </>
               )}
             </div>

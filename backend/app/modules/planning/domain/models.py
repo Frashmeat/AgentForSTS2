@@ -13,10 +13,19 @@ class PlanItem:
     name: str
     name_zhs: str = ""
     description: str = ""
+    goal: str = ""
+    detailed_description: str = ""
     implementation_notes: str = ""
     needs_image: bool = True
     image_description: str = ""
     depends_on: list[str] = field(default_factory=list)
+    scope_boundary: str = ""
+    dependency_reason: str = ""
+    acceptance_notes: str = ""
+    affected_targets: list[str] = field(default_factory=list)
+    coupling_kind: str = "unclear"
+    clarification_status: str = ""
+    clarification_questions: list[str] = field(default_factory=list)
     provided_image_b64: str = ""
 
     def to_dict(self) -> dict:

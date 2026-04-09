@@ -14,7 +14,13 @@ import { BuildDeploy } from "../../components/BuildDeploy";
 import { ProjectRootField } from "../../components/ProjectRootField";
 import { cn } from "../../lib/utils";
 import { loadAppConfig } from "../../shared/api/config";
+import { reviewModPlan } from "../../shared/api/workflow.ts";
 import { resolveErrorMessage, resolveWorkflowErrorMessage } from "../../shared/error.ts";
+import type {
+  ExecutionBundlePreview,
+  PlanItemValidation,
+  PlanReviewPayload,
+} from "../../shared/types/workflow.ts";
 import {
   appendWorkflowLogEntry,
   resolveNextWorkflowModel,
@@ -28,10 +34,11 @@ import {
   resumeBatchApprovalWorkflow,
 } from "./approval";
 import { openBatchPlanningSocket } from "./planningSession";
+import { canProceedFromBundleReview, type ReviewStrictness } from "./state.ts";
 
 // ── 类型 ──────────────────────────────────────────────────────────────────────
 
-type BatchStage = "input" | "planning" | "review_plan" | "executing" | "done" | "error";
+type BatchStage = "input" | "planning" | "review_items" | "review_bundles" | "executing" | "done" | "error";
 
 type ItemStatus =
   | "pending"
@@ -109,6 +116,98 @@ const STATUS_LABELS: Record<ItemStatus, string> = {
   error:              "失败",
 };
 
+const PLAN_STORAGE_KEY = "ats_last_plan";
+const PLAN_ITEMS_STORAGE_KEY = "ats_last_plan_items";
+const PLAN_REVIEW_STORAGE_KEY = "ats_last_plan_review";
+const PLAN_REVIEW_STRICTNESS_STORAGE_KEY = "ats_last_plan_review_strictness";
+
+const REVIEW_STATUS_LABELS: Record<PlanItemValidation["status"], string> = {
+  clear: "可继续",
+  needs_user_input: "待补充",
+  invalid: "存在错误",
+};
+
+const BUNDLE_STATUS_LABELS: Record<ExecutionBundlePreview["status"], string> = {
+  clear: "可执行",
+  needs_confirmation: "需确认",
+  split_recommended: "建议拆分",
+};
+
+const STRICTNESS_OPTIONS: Array<{ value: ReviewStrictness; label: string; description: string }> = [
+  { value: "efficient", label: "高效率", description: "减少拦截，尽快进入执行" },
+  { value: "balanced", label: "平衡", description: "兼顾确认成本和执行安全" },
+  { value: "strict", label: "严格", description: "更细地检查描述和分组风险" },
+];
+
+function normalizeReviewStrictness(value: unknown): ReviewStrictness {
+  return value === "efficient" || value === "strict" ? value : "balanced";
+}
+
+function readJsonStorage<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) as T : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJsonStorage(key: string, value: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+}
+
+function writeTextStorage(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {}
+}
+
+function resolvePlanFieldValue(item: PlanItem, field: string): unknown {
+  return (item as unknown as Record<string, unknown>)[field];
+}
+
+function hasMeaningfulPlanFieldValue(item: PlanItem, field: string): boolean {
+  const value = resolvePlanFieldValue(item, field);
+  if (Array.isArray(value)) {
+    return value.some((entry) => typeof entry === "string" && entry.trim().length > 0);
+  }
+  if (typeof value === "string") {
+    return value.trim().length > 0;
+  }
+  if (typeof value === "boolean") {
+    return value;
+  }
+  return value !== null && value !== undefined;
+}
+
+function canProceedFromEditedItemReview(
+  review: PlanReviewPayload | null,
+  items: PlanItem[],
+): boolean {
+  if (!review) {
+    return true;
+  }
+
+  return review.validation.items.every((reviewItem) => {
+    if (reviewItem.status === "clear") {
+      return true;
+    }
+    if (reviewItem.status === "invalid") {
+      return false;
+    }
+    const item = items.find((candidate) => candidate.id === reviewItem.item_id);
+    if (!item) {
+      return false;
+    }
+    if (reviewItem.missing_fields.some((field) => !hasMeaningfulPlanFieldValue(item, field))) {
+      return false;
+    }
+    return reviewItem.issues.every((issue) => !issue.field || hasMeaningfulPlanFieldValue(item, issue.field));
+  });
+}
+
 // ── 主组件 ────────────────────────────────────────────────────────────────────
 
 function BatchModePage({ onRequestExecution }: { onRequestExecution?: (request: PlatformExecutionRequest) => void }) {
@@ -127,11 +226,23 @@ function BatchModePage({ onRequestExecution }: { onRequestExecution?: (request: 
   }, []);
 
   const [plan, setPlan] = useState<ModPlan | null>(() => {
-    try { const s = localStorage.getItem("ats_last_plan"); return s ? JSON.parse(s) : null; } catch { return null; }
+    return readJsonStorage<ModPlan | null>(PLAN_STORAGE_KEY, null);
   });
   const [editedItems, setEditedItems] = useState<PlanItem[]>(() => {
-    try { const s = localStorage.getItem("ats_last_plan_items"); return s ? JSON.parse(s) : []; } catch { return []; }
+    return readJsonStorage<PlanItem[]>(PLAN_ITEMS_STORAGE_KEY, []);
   });
+  const [planReview, setPlanReview] = useState<PlanReviewPayload | null>(() =>
+    readJsonStorage<PlanReviewPayload | null>(PLAN_REVIEW_STORAGE_KEY, null),
+  );
+  const [reviewStrictness, setReviewStrictness] = useState<ReviewStrictness>(() => {
+    try {
+      return normalizeReviewStrictness(localStorage.getItem(PLAN_REVIEW_STRICTNESS_STORAGE_KEY));
+    } catch {
+      return "balanced";
+    }
+  });
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
   const [itemStates, setItemStates] = useState<Record<string, ItemState>>({});
   const itemStatesRef = useRef<Record<string, ItemState>>({});
@@ -202,6 +313,8 @@ function BatchModePage({ onRequestExecution }: { onRequestExecution?: (request: 
     setStage("planning");
     setBatchLog([]);
     setGlobalError(null);
+    setReviewError(null);
+    setPlanReview(null);
     itemStatesRef.current = {};
     setItemStates({});
     setBatchResult(null);
@@ -232,10 +345,18 @@ function BatchModePage({ onRequestExecution }: { onRequestExecution?: (request: 
     ws.on("plan_ready", (d) => {
       setPlan(d.plan);
       setEditedItems(d.plan.items);
-      setStage("review_plan");
+      setPlanReview(d.review ?? null);
+      setReviewStrictness((current) => normalizeReviewStrictness(d.review?.strictness ?? current));
+      setReviewError(null);
+      setStage("review_items");
       try {
-        localStorage.setItem("ats_last_plan", JSON.stringify(d.plan));
-        localStorage.setItem("ats_last_plan_items", JSON.stringify(d.plan.items));
+        writeJsonStorage(PLAN_STORAGE_KEY, d.plan);
+        writeJsonStorage(PLAN_ITEMS_STORAGE_KEY, d.plan.items);
+        writeJsonStorage(PLAN_REVIEW_STORAGE_KEY, d.review ?? null);
+        writeTextStorage(
+          PLAN_REVIEW_STRICTNESS_STORAGE_KEY,
+          normalizeReviewStrictness(d.review?.strictness ?? reviewStrictness),
+        );
       } catch {}
     });
     ws.on("batch_progress", (d) => setBatchLog(l => [...l, d.message]));
@@ -319,7 +440,9 @@ function BatchModePage({ onRequestExecution }: { onRequestExecution?: (request: 
   async function confirmPlan() {
     if (!plan) return;
     const itemsForStorage = editedItems.map(it => ({ ...it, provided_image_b64: undefined }));
-    try { localStorage.setItem("ats_last_plan_items", JSON.stringify(itemsForStorage)); } catch {}
+    writeJsonStorage(PLAN_ITEMS_STORAGE_KEY, itemsForStorage);
+    writeJsonStorage(PLAN_REVIEW_STORAGE_KEY, planReview);
+    writeTextStorage(PLAN_REVIEW_STRICTNESS_STORAGE_KEY, reviewStrictness);
 
     if (!socketRef.current) {
       // 恢复的规划：重新建连接，直接跳到执行
@@ -327,7 +450,12 @@ function BatchModePage({ onRequestExecution }: { onRequestExecution?: (request: 
       socketRef.current = ws;
       _registerBatchHandlers(ws);
       const started = await openBatchPlanningSocket(ws, {
-        payload: { action: "start_with_plan", project_root: projectRoot, plan: { ...plan, items: editedItems } },
+        payload: {
+          action: "start_with_plan",
+          project_root: projectRoot,
+          plan: { ...plan, items: editedItems },
+          review_strictness: reviewStrictness,
+        },
         onOpenError(message) {
           socketRef.current = null;
           setGlobalError(message);
@@ -340,8 +468,123 @@ function BatchModePage({ onRequestExecution }: { onRequestExecution?: (request: 
       setStage("executing");
     } else {
       setStage("executing");
-      socketRef.current.send({ action: "confirm_plan", plan: { ...plan, items: editedItems } });
+      socketRef.current.send({
+        action: "confirm_plan",
+        plan: { ...plan, items: editedItems },
+        review_strictness: reviewStrictness,
+      });
     }
+  }
+
+  function updateEditedItems(items: PlanItem[]) {
+    setEditedItems(items);
+    writeJsonStorage(PLAN_ITEMS_STORAGE_KEY, items);
+  }
+
+  async function refreshPlanReview(
+    items: PlanItem[] = editedItems,
+    strictness: ReviewStrictness = reviewStrictness,
+  ): Promise<PlanReviewPayload | null> {
+    if (!plan) {
+      return null;
+    }
+    setReviewBusy(true);
+    setReviewError(null);
+    try {
+      const review = await reviewModPlan({
+        plan: { ...plan, items },
+        strictness,
+      });
+      setPlanReview(review);
+      setReviewStrictness(normalizeReviewStrictness(review.strictness));
+      writeJsonStorage(PLAN_REVIEW_STORAGE_KEY, review);
+      writeTextStorage(PLAN_REVIEW_STRICTNESS_STORAGE_KEY, normalizeReviewStrictness(review.strictness));
+      return review;
+    } catch (error) {
+      setReviewError(resolveErrorMessage(error));
+      return null;
+    } finally {
+      setReviewBusy(false);
+    }
+  }
+
+  async function handleConfirmItemsReview() {
+    const review = await refreshPlanReview();
+    if (!review) {
+      return;
+    }
+    if (canProceedFromEditedItemReview(review, editedItems)) {
+      setStage("review_bundles");
+    }
+  }
+
+  async function handleConfirmBundleReview() {
+    const review = await refreshPlanReview();
+    if (!review) {
+      return;
+    }
+    if (!canProceedFromEditedItemReview(review, editedItems)) {
+      setStage("review_items");
+      return;
+    }
+    if (!canProceedFromBundleReview(review)) {
+      setStage("review_bundles");
+      return;
+    }
+    requestExecutionStart();
+  }
+
+  function handleReviewStrictnessChange(nextStrictness: ReviewStrictness) {
+    setReviewStrictness(nextStrictness);
+    writeTextStorage(PLAN_REVIEW_STRICTNESS_STORAGE_KEY, nextStrictness);
+    if (plan) {
+      void refreshPlanReview(editedItems, nextStrictness);
+    }
+  }
+
+  function requestExecutionStart() {
+    if (!plan) {
+      return;
+    }
+
+    const executeLocal = () => {
+      void confirmPlan();
+    };
+    if (!onRequestExecution) {
+      executeLocal();
+      return;
+    }
+    onRequestExecution({
+      title: "执行 Mod 规划",
+      tab: "batch",
+      jobType: "batch_generate",
+      createdFrom: "batch_generation",
+      inputSummary: plan.summary || requirements.trim() || plan.mod_name,
+      requiresCodeAgent: true,
+      requiresImageAi: editedItems.some(item => item.needs_image && !item.provided_image_b64),
+      items: editedItems.map((item, index) => ({
+        item_type: item.type,
+        input_summary: item.description || item.name,
+        input_payload: {
+          item_index: index,
+          name: item.name,
+          description: item.description,
+          goal: item.goal,
+          detailed_description: item.detailed_description,
+          scope_boundary: item.scope_boundary,
+          dependency_reason: item.dependency_reason,
+          acceptance_notes: item.acceptance_notes,
+          affected_targets: item.affected_targets,
+          coupling_kind: item.coupling_kind,
+          needs_image: item.needs_image,
+          has_uploaded_image: Boolean(item.provided_image_b64),
+          image_description: item.image_description,
+          implementation_notes: item.implementation_notes,
+          depends_on: item.depends_on,
+        },
+      })),
+      runLocal: executeLocal,
+    });
   }
 
   function handleSelectImage(itemId: string, index: number) {
@@ -386,6 +629,8 @@ function BatchModePage({ onRequestExecution }: { onRequestExecution?: (request: 
     setStage("input");
     setPlan(null);
     setEditedItems([]);
+    setPlanReview(null);
+    setReviewError(null);
     itemStatesRef.current = {};
     setItemStates({});
     setBatchLog([]);
@@ -456,7 +701,7 @@ function BatchModePage({ onRequestExecution }: { onRequestExecution?: (request: 
           </button>
           {plan && (
             <button
-              onClick={() => setStage("review_plan")}
+              onClick={() => setStage("review_items")}
               className="w-full py-2 rounded-lg border border-violet-200 text-violet-700 text-sm hover:bg-violet-50 transition-colors"
             >
               恢复上次规划：{plan.mod_name}
@@ -476,45 +721,35 @@ function BatchModePage({ onRequestExecution }: { onRequestExecution?: (request: 
         </div>
       )}
 
-      {/* 审阅计划 */}
-      {stage === "review_plan" && plan && (
+      {/* 审阅 Item */}
+      {stage === "review_items" && plan && (
         <ReviewPlan
           plan={plan}
+          review={planReview}
+          reviewStrictness={reviewStrictness}
+          reviewBusy={reviewBusy}
+          reviewError={reviewError}
           editedItems={editedItems}
-          setEditedItems={setEditedItems}
-          onConfirm={() => {
-            const executeLocal = () => {
-              void confirmPlan();
-            };
-            if (!onRequestExecution) {
-              executeLocal();
-              return;
-            }
-            onRequestExecution({
-              title: "执行 Mod 规划",
-              tab: "batch",
-              jobType: "batch_generate",
-              createdFrom: "batch_generation",
-              inputSummary: plan.summary || requirements.trim() || plan.mod_name,
-              requiresCodeAgent: true,
-              requiresImageAi: editedItems.some(item => item.needs_image && !item.provided_image_b64),
-              items: editedItems.map((item, index) => ({
-                item_type: item.type,
-                input_summary: item.description || item.name,
-                input_payload: {
-                  item_index: index,
-                  name: item.name,
-                  description: item.description,
-                  needs_image: item.needs_image,
-                  has_uploaded_image: Boolean(item.provided_image_b64),
-                  image_description: item.image_description,
-                  implementation_notes: item.implementation_notes,
-                  depends_on: item.depends_on,
-                },
-              })),
-              runLocal: executeLocal,
-            });
-          }}
+          setEditedItems={updateEditedItems}
+          onRefreshReview={() => { void refreshPlanReview(); }}
+          onStrictnessChange={handleReviewStrictnessChange}
+          onConfirm={() => { void handleConfirmItemsReview(); }}
+          onReset={reset}
+        />
+      )}
+
+      {/* 审阅执行策略 */}
+      {stage === "review_bundles" && plan && (
+        <ReviewBundles
+          items={editedItems}
+          review={planReview}
+          reviewStrictness={reviewStrictness}
+          reviewBusy={reviewBusy}
+          reviewError={reviewError}
+          onBack={() => setStage("review_items")}
+          onRefreshReview={() => { void refreshPlanReview(); }}
+          onStrictnessChange={handleReviewStrictnessChange}
+          onConfirm={() => { void handleConfirmBundleReview(); }}
           onReset={reset}
         />
       )}
@@ -589,20 +824,115 @@ export default function BatchMode() {
 
 // ── 计划审阅组件 ──────────────────────────────────────────────────────────────
 
+function ReviewStatusBadge({
+  status,
+  kind,
+}: {
+  status: PlanItemValidation["status"] | ExecutionBundlePreview["status"];
+  kind: "item" | "bundle";
+}) {
+  const label = kind === "item"
+    ? REVIEW_STATUS_LABELS[status as PlanItemValidation["status"]]
+    : BUNDLE_STATUS_LABELS[status as ExecutionBundlePreview["status"]];
+  const tone = status === "clear"
+    ? "bg-green-50 text-green-700 border-green-200"
+    : status === "invalid"
+      ? "bg-red-50 text-red-700 border-red-200"
+      : "bg-amber-50 text-amber-700 border-amber-200";
+  return <span className={cn("text-xs rounded-full border px-2 py-0.5 font-medium", tone)}>{label}</span>;
+}
+
+function ReviewStrictnessSelector({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: ReviewStrictness;
+  disabled: boolean;
+  onChange: (value: ReviewStrictness) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <div>
+        <p className="text-sm font-medium text-slate-700">判断严格度</p>
+        <p className="text-xs text-slate-400">控制补充说明的严格程度，以及 bundle 拆分时的谨慎程度。</p>
+      </div>
+      <div className="grid gap-2 md:grid-cols-3">
+        {STRICTNESS_OPTIONS.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            disabled={disabled}
+            onClick={() => onChange(option.value)}
+            className={cn(
+              "rounded-xl border px-3 py-2 text-left transition-colors disabled:opacity-60",
+              value === option.value
+                ? "border-violet-300 bg-violet-50"
+                : "border-slate-200 bg-white hover:border-violet-200 hover:bg-violet-50/60",
+            )}
+          >
+            <p className="text-sm font-semibold text-slate-800">{option.label}</p>
+            <p className="mt-1 text-xs text-slate-500">{option.description}</p>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ReviewNotice({ message }: { message: string | null }) {
+  if (!message) {
+    return null;
+  }
+  return (
+    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+      {message}
+    </div>
+  );
+}
+
 function ReviewPlan({
-  plan, editedItems, setEditedItems, onConfirm, onReset,
+  plan,
+  review,
+  reviewStrictness,
+  reviewBusy,
+  reviewError,
+  editedItems,
+  setEditedItems,
+  onRefreshReview,
+  onStrictnessChange,
+  onConfirm,
+  onReset,
 }: {
   plan: ModPlan;
+  review: PlanReviewPayload | null;
+  reviewStrictness: ReviewStrictness;
+  reviewBusy: boolean;
+  reviewError: string | null;
   editedItems: PlanItem[];
   setEditedItems: (items: PlanItem[]) => void;
+  onRefreshReview: () => void;
+  onStrictnessChange: (value: ReviewStrictness) => void;
   onConfirm: () => void;
   onReset: () => void;
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [uploadPreviews, setUploadPreviews] = useState<Record<string, string>>({});
+  const validationById = new Map((review?.validation.items ?? []).map((item) => [item.item_id, item]));
+  const clearCount = review?.validation.items.filter((item) => item.status === "clear").length ?? 0;
+  const canProceed = canProceedFromEditedItemReview(review, editedItems);
 
   function updateItem(id: string, patch: Partial<PlanItem>) {
     setEditedItems(editedItems.map(it => it.id === id ? { ...it, ...patch } : it));
+  }
+
+  function updateStringList(id: string, field: "depends_on" | "affected_targets", value: string) {
+    updateItem(id, {
+      [field]: value
+        .split(/[\n,]/)
+        .map((entry) => entry.trim())
+        .filter(Boolean),
+    } as Partial<PlanItem>);
   }
 
   function handleImageFile(id: string, file: File) {
@@ -619,20 +949,50 @@ function ReviewPlan({
   return (
     <div className="space-y-4">
       <div className="workspace-surface rounded-2xl p-5">
-        <div className="flex items-start justify-between mb-4">
-          <div>
-            <h2 className="font-bold text-slate-800">{plan.mod_name}</h2>
-            <p className="text-xs text-slate-500 mt-0.5">{plan.summary}</p>
+        <div className="flex flex-col gap-4 mb-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-[0.2em] text-violet-500">Step 1 / 2</p>
+              <h2 className="font-bold text-slate-800">{plan.mod_name}</h2>
+              <p className="text-xs text-slate-500 mt-0.5">{plan.summary}</p>
+            </div>
+            <span className="text-xs text-violet-700 bg-violet-50 border border-violet-200 rounded-full px-2 py-0.5 font-medium">
+              {clearCount}/{editedItems.length} 项可进入下一步
+            </span>
           </div>
-          <span className="text-xs text-violet-700 bg-violet-50 border border-violet-200 rounded-full px-2 py-0.5 font-medium">
-            {editedItems.length} 个资产
-          </span>
+
+          <ReviewStrictnessSelector
+            value={reviewStrictness}
+            disabled={reviewBusy}
+            onChange={onStrictnessChange}
+          />
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <p className="text-sm font-medium text-slate-700">当前阶段：逐项确认计划描述</p>
+            <p className="mt-1 text-xs text-slate-500">
+              先把每个 item 的目标、范围、依赖原因和验收说明确认清楚，再进入执行策略分组确认。
+            </p>
+            {!canProceed && (
+              <p className="mt-2 text-xs font-medium text-amber-700">
+                仍有 item 需要补充说明。修改字段后，点击下方按钮会重新检查当前计划。
+              </p>
+            )}
+          </div>
         </div>
 
+        <ReviewNotice message={reviewError} />
+
         <div className="space-y-2">
-          {editedItems.map(item => (
+          {editedItems.map(item => {
+            const validation = validationById.get(item.id);
+            const missingFields = validation?.missing_fields ?? [];
+            const issues = validation?.issues ?? [];
+            const questions = validation?.clarification_questions ?? [];
+
+            return (
             <div key={item.id} className="rounded-lg border border-slate-200 bg-slate-50 overflow-hidden">
               <button
+                type="button"
                 className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-slate-100 transition-colors"
                 onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
               >
@@ -640,6 +1000,7 @@ function ReviewPlan({
                   {TYPE_LABELS[item.type] ?? item.type}
                 </span>
                 <span className="text-sm font-medium text-slate-700 flex-1">{item.name}</span>
+                {validation && <ReviewStatusBadge status={validation.status} kind="item" />}
                 {item.depends_on.length > 0 && (
                   <span className="text-xs text-slate-400">依赖 {item.depends_on.length}</span>
                 )}
@@ -650,7 +1011,42 @@ function ReviewPlan({
               </button>
 
               {expandedId === item.id && (
-                <div className="px-3 pb-3 space-y-2 border-t border-slate-200 pt-2.5">
+                <div className="px-3 pb-3 space-y-3 border-t border-slate-200 pt-2.5">
+                  {validation && (
+                    <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm font-semibold text-slate-700">当前评审结果</p>
+                        <ReviewStatusBadge status={validation.status} kind="item" />
+                      </div>
+                      {issues.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                          {issues.map((issue) => (
+                            <span key={`${issue.code}-${issue.field ?? "base"}`} className="rounded-full bg-red-50 px-2 py-0.5 text-xs text-red-700">
+                              {issue.message}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {missingFields.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                          {missingFields.map((field) => (
+                            <span key={field} className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700">
+                              待补：{field}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {questions.length > 0 && (
+                        <div className="space-y-1">
+                          {questions.map((question, index) => (
+                            <p key={`${item.id}-question-${index}`} className="text-xs text-slate-600">
+                              {index + 1}. {question}
+                            </p>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <div className="space-y-1">
                     <label className="text-xs text-slate-400">名称（英文）</label>
                     <input
@@ -660,13 +1056,95 @@ function ReviewPlan({
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs text-slate-400">描述</label>
+                    <label className="text-xs text-slate-400">目标</label>
+                    <input
+                      value={item.goal}
+                      onChange={e => updateItem(item.id, { goal: e.target.value })}
+                      className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm focus:outline-none focus:border-violet-400"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-slate-400">详细描述</label>
+                    <textarea
+                      value={item.detailed_description}
+                      onChange={e => updateItem(item.id, { detailed_description: e.target.value })}
+                      rows={3}
+                      className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-violet-400"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-slate-400">用户描述摘要</label>
                     <textarea
                       value={item.description}
                       onChange={e => updateItem(item.id, { description: e.target.value })}
                       rows={2}
                       className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-violet-400"
                     />
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-1">
+                      <label className="text-xs text-slate-400">范围边界</label>
+                      <textarea
+                        value={item.scope_boundary}
+                        onChange={e => updateItem(item.id, { scope_boundary: e.target.value })}
+                        rows={3}
+                        className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-violet-400"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs text-slate-400">依赖原因</label>
+                      <textarea
+                        value={item.dependency_reason}
+                        onChange={e => updateItem(item.id, { dependency_reason: e.target.value })}
+                        rows={3}
+                        className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-violet-400"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-1">
+                      <label className="text-xs text-slate-400">验收说明</label>
+                      <textarea
+                        value={item.acceptance_notes}
+                        onChange={e => updateItem(item.id, { acceptance_notes: e.target.value })}
+                        rows={3}
+                        className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-violet-400"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs text-slate-400">耦合类型</label>
+                      <select
+                        value={item.coupling_kind}
+                        onChange={e => updateItem(item.id, { coupling_kind: e.target.value })}
+                        className="w-full bg-white border border-slate-200 rounded px-2 py-2 text-sm focus:outline-none focus:border-violet-400"
+                      >
+                        <option value="unclear">unclear</option>
+                        <option value="order_only">order_only</option>
+                        <option value="feature_bundle">feature_bundle</option>
+                        <option value="shared_logic">shared_logic</option>
+                        <option value="isolated">isolated</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-1">
+                      <label className="text-xs text-slate-400">依赖项（逗号或换行分隔）</label>
+                      <textarea
+                        value={item.depends_on.join("\n")}
+                        onChange={e => updateStringList(item.id, "depends_on", e.target.value)}
+                        rows={3}
+                        className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-violet-400"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs text-slate-400">影响目标（逗号或换行分隔）</label>
+                      <textarea
+                        value={item.affected_targets.join("\n")}
+                        onChange={e => updateStringList(item.id, "affected_targets", e.target.value)}
+                        rows={3}
+                        className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-violet-400"
+                      />
+                    </div>
                   </div>
                   {item.needs_image && (
                     <div className="space-y-2">
@@ -740,17 +1218,170 @@ function ReviewPlan({
                 </div>
               )}
             </div>
+            );
+          })}
+        </div>
+
+        <div className="flex flex-wrap gap-2 mt-4">
+          <button
+            type="button"
+            onClick={onRefreshReview}
+            disabled={reviewBusy}
+            className="py-2.5 px-4 rounded-lg border border-violet-200 text-violet-700 text-sm hover:bg-violet-50 transition-colors disabled:opacity-60"
+          >
+            {reviewBusy ? "重新检查中..." : "重新检查当前计划"}
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={reviewBusy}
+            className="flex-1 py-2.5 rounded-lg bg-violet-700 text-white font-bold text-sm hover:bg-violet-800 transition-colors disabled:opacity-60"
+          >
+            {canProceed ? "进入执行策略确认" : "保存说明并重新检查"}
+          </button>
+          <button
+            type="button"
+            onClick={onReset}
+            className="py-2.5 px-4 rounded-lg border border-slate-200 text-slate-400 hover:text-slate-600 text-sm transition-colors"
+          >
+            重来
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReviewBundles({
+  items,
+  review,
+  reviewStrictness,
+  reviewBusy,
+  reviewError,
+  onBack,
+  onRefreshReview,
+  onStrictnessChange,
+  onConfirm,
+  onReset,
+}: {
+  items: PlanItem[];
+  review: PlanReviewPayload | null;
+  reviewStrictness: ReviewStrictness;
+  reviewBusy: boolean;
+  reviewError: string | null;
+  onBack: () => void;
+  onRefreshReview: () => void;
+  onStrictnessChange: (value: ReviewStrictness) => void;
+  onConfirm: () => void;
+  onReset: () => void;
+}) {
+  const itemNameMap = new Map(items.map((item) => [item.id, item.name]));
+  const dependencyGroups = review?.execution_plan.dependency_groups ?? [];
+  const executionBundles = review?.execution_plan.execution_bundles ?? [];
+  const clearBundles = executionBundles.filter((bundle) => bundle.status === "clear").length;
+
+  return (
+    <div className="space-y-4">
+      <div className="workspace-surface rounded-2xl p-5 space-y-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase tracking-[0.2em] text-violet-500">Step 2 / 2</p>
+            <h2 className="font-bold text-slate-800">执行策略确认</h2>
+            <p className="text-xs text-slate-500 mt-0.5">确认 item 如何分组执行，再进入真正的代码生成阶段。</p>
+          </div>
+          <span className="text-xs text-violet-700 bg-violet-50 border border-violet-200 rounded-full px-2 py-0.5 font-medium">
+            {clearBundles}/{executionBundles.length || 0} 个 bundle 可直接执行
+          </span>
+        </div>
+
+        <ReviewStrictnessSelector
+          value={reviewStrictness}
+          disabled={reviewBusy}
+          onChange={onStrictnessChange}
+        />
+
+        <ReviewNotice message={reviewError} />
+
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <p className="text-sm font-medium text-slate-700">依赖分组预览</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {dependencyGroups.length === 0 && (
+              <span className="text-xs text-slate-400">暂无分组数据，先重新检查一次。</span>
+            )}
+            {dependencyGroups.map((group, index) => (
+              <span key={`group-${index}`} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-600">
+                G{index + 1}: {group.item_ids.map((itemId) => itemNameMap.get(itemId) ?? itemId).join(" / ")}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          {executionBundles.length === 0 && (
+            <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-400">
+              还没有 bundle 评审结果，点击“重新检查当前计划”即可生成。
+            </div>
+          )}
+          {executionBundles.map((bundle, index) => (
+            <div key={`bundle-${index}`} className="rounded-xl border border-slate-200 bg-white px-4 py-4 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-800">执行 Bundle {index + 1}</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {bundle.item_ids.map((itemId) => itemNameMap.get(itemId) ?? itemId).join(" / ")}
+                  </p>
+                </div>
+                <ReviewStatusBadge status={bundle.status} kind="bundle" />
+              </div>
+              <div className="grid gap-3 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+                <div className="rounded-lg bg-slate-50 px-3 py-3">
+                  <p className="text-xs font-medium text-slate-500">分组理由</p>
+                  <p className="mt-1 text-sm text-slate-700">{bundle.reason}</p>
+                </div>
+                <div className="rounded-lg bg-slate-50 px-3 py-3">
+                  <p className="text-xs font-medium text-slate-500">风险标记</p>
+                  <div className="mt-1 flex flex-wrap gap-2">
+                    {bundle.risk_codes.length === 0 && (
+                      <span className="text-sm text-green-700">无</span>
+                    )}
+                    {bundle.risk_codes.map((riskCode) => (
+                      <span key={riskCode} className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700">
+                        {riskCode}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
           ))}
         </div>
 
-        <div className="flex gap-2 mt-4">
+        <div className="flex flex-wrap gap-2 mt-4">
           <button
-            onClick={onConfirm}
-            className="flex-1 py-2.5 rounded-lg bg-violet-700 text-white font-bold text-sm hover:bg-violet-800 transition-colors"
+            type="button"
+            onClick={onBack}
+            className="py-2.5 px-4 rounded-lg border border-slate-200 text-slate-600 hover:text-slate-800 text-sm transition-colors"
           >
-            确认，开始执行
+            返回 Item 复核
           </button>
           <button
+            type="button"
+            onClick={onRefreshReview}
+            disabled={reviewBusy}
+            className="py-2.5 px-4 rounded-lg border border-violet-200 text-violet-700 text-sm hover:bg-violet-50 transition-colors disabled:opacity-60"
+          >
+            {reviewBusy ? "重新检查中..." : "重新检查当前计划"}
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={reviewBusy}
+            className="flex-1 py-2.5 rounded-lg bg-violet-700 text-white font-bold text-sm hover:bg-violet-800 transition-colors disabled:opacity-60"
+          >
+            {canProceedFromBundleReview(review) ? "确认执行策略，开始执行" : "先处理 bundle 风险后再执行"}
+          </button>
+          <button
+            type="button"
             onClick={onReset}
             className="py-2.5 px-4 rounded-lg border border-slate-200 text-slate-400 hover:text-slate-600 text-sm transition-colors"
           >

@@ -1,4 +1,4 @@
-import type { ModPlan } from "../types/workflow.ts";
+import type { ModPlan, PlanReviewPayload } from "../types/workflow.ts";
 import { requestJson } from "./http.ts";
 
 export interface CreateProjectRequest {
@@ -27,6 +27,11 @@ export interface PackageProjectResponse {
   success: boolean;
 }
 
+export interface ReviewModPlanRequest {
+  plan: ModPlan;
+  strictness?: "efficient" | "balanced" | "strict";
+}
+
 function assertNoBusinessError<T>(value: T | { error: string }): asserts value is T {
   if (
     typeof value === "object" &&
@@ -43,6 +48,16 @@ export async function generateModPlan(requirements: string): Promise<ModPlan> {
     backend: "workstation",
     method: "POST",
     body: { requirements },
+  });
+  assertNoBusinessError(result);
+  return result;
+}
+
+export async function reviewModPlan(request: ReviewModPlanRequest): Promise<PlanReviewPayload> {
+  const result = await requestJson<PlanReviewPayload | { error: string }>("/api/plan/review", {
+    backend: "workstation",
+    method: "POST",
+    body: request,
   });
   assertNoBusinessError(result);
   return result;

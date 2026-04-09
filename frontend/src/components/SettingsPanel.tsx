@@ -1,14 +1,20 @@
 import { useEffect, useState } from "react";
-import { X, FolderOpen, Cpu, Image, Search } from "lucide-react";
+import { X, FolderOpen, Cpu, Gamepad2, Image, Search } from "lucide-react";
 import {
+  checkKnowledgeStatus,
   cancelDetectAppPathsTask,
   getDetectAppPathsTask,
+  getRefreshKnowledgeTask,
   loadAppConfig,
+  loadKnowledgeStatus,
   pickAppPath,
   startDetectAppPaths,
+  startRefreshKnowledgeTask,
+  type KnowledgeStatus,
   updateAppConfig,
 } from "../shared/api/index.ts";
 import { resolveErrorMessage } from "../shared/error.ts";
+import { KnowledgeGuideDialog } from "./KnowledgeGuideDialog.tsx";
 import { createSettingsPickPathRequest, type SettingsPathField } from "./settingsPathPicker.ts";
 
 const inputCls = "w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-100";
@@ -56,9 +62,10 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 interface SettingsPanelProps {
   mode?: "drawer" | "page";
   onClose?: () => void;
+  onKnowledgeStatusChange?: (status: KnowledgeStatus) => void;
 }
 
-export function SettingsPanel({ mode = "drawer", onClose }: SettingsPanelProps) {
+export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChange }: SettingsPanelProps) {
   const [cfg, setCfg] = useState<any>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -66,12 +73,26 @@ export function SettingsPanel({ mode = "drawer", onClose }: SettingsPanelProps) 
   const [detectionTaskId, setDetectionTaskId] = useState("");
   const [detectionStep, setDetectionStep] = useState("");
   const [pathNotes, setPathNotes] = useState<string[]>([]);
+  const [knowledgeStatus, setKnowledgeStatus] = useState<KnowledgeStatus | null>(null);
+  const [knowledgeTaskId, setKnowledgeTaskId] = useState("");
+  const [knowledgeStep, setKnowledgeStep] = useState("");
+  const [knowledgeNotes, setKnowledgeNotes] = useState<string[]>([]);
+  const [knowledgeError, setKnowledgeError] = useState("");
+  const [knowledgeGuideOpen, setKnowledgeGuideOpen] = useState(false);
   const [llmKey, setLlmKey] = useState("");
   const [imgKey, setImgKey] = useState("");
   const [imgSecret, setImgSecret] = useState("");
 
   useEffect(() => {
     loadAppConfig().then(setCfg);
+    loadKnowledgeStatus()
+      .then((status) => {
+        setKnowledgeStatus(status);
+        onKnowledgeStatusChange?.(status);
+      })
+      .catch((error) => {
+        setKnowledgeError(resolveErrorMessage(error));
+      });
   }, []);
 
   useEffect(() => {
@@ -130,6 +151,58 @@ export function SettingsPanel({ mode = "drawer", onClose }: SettingsPanelProps) 
       }
     };
   }, [detectionTaskId]);
+
+  useEffect(() => {
+    if (!knowledgeTaskId) {
+      return;
+    }
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    async function pollRefreshTask() {
+      try {
+        const snapshot = await getRefreshKnowledgeTask(knowledgeTaskId);
+        if (cancelled) {
+          return;
+        }
+
+        setKnowledgeStep(snapshot.current_step || "");
+        setKnowledgeNotes(snapshot.notes ?? []);
+
+        if (snapshot.status === "running" || snapshot.status === "pending") {
+          timer = setTimeout(pollRefreshTask, 800);
+          return;
+        }
+
+        if (snapshot.status === "failed") {
+          setKnowledgeError(snapshot.error?.trim() || "知识库更新失败");
+        }
+
+        const status = await loadKnowledgeStatus();
+        if (!cancelled) {
+          setKnowledgeStatus(status);
+          onKnowledgeStatusChange?.(status);
+        }
+        setKnowledgeTaskId("");
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        setKnowledgeError(resolveErrorMessage(error));
+        setKnowledgeTaskId("");
+      }
+    }
+
+    void pollRefreshTask();
+
+    return () => {
+      cancelled = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
+  }, [knowledgeTaskId]);
 
   function set(path: string[], value: string | number) {
     setCfg((prev: any) => {
@@ -220,6 +293,35 @@ export function SettingsPanel({ mode = "drawer", onClose }: SettingsPanelProps) 
   const models = PROVIDER_MODELS[currentProvider] ?? [];
 
   const missingPaths = cfg && (!cfg.default_project_root || !cfg.sts2_path);
+  const knowledgeBusy = Boolean(knowledgeTaskId);
+
+  async function handleCheckKnowledge() {
+    setKnowledgeError("");
+    setKnowledgeStep("检查知识库状态");
+    setKnowledgeNotes([]);
+    try {
+      const status = await checkKnowledgeStatus();
+      setKnowledgeStatus(status);
+      onKnowledgeStatusChange?.(status);
+      setKnowledgeNotes(status.warnings ?? []);
+    } catch (error) {
+      setKnowledgeError(resolveErrorMessage(error));
+    }
+  }
+
+  async function handleRefreshKnowledge() {
+    setKnowledgeError("");
+    setKnowledgeNotes([]);
+    setKnowledgeStep("准备启动知识库更新任务");
+    try {
+      const task = await startRefreshKnowledgeTask();
+      setKnowledgeTaskId(task.task_id);
+      setKnowledgeStep(task.current_step || "更新中");
+      setKnowledgeNotes(task.notes ?? []);
+    } catch (error) {
+      setKnowledgeError(resolveErrorMessage(error));
+    }
+  }
 
   const header = (
     <div
@@ -351,6 +453,53 @@ export function SettingsPanel({ mode = "drawer", onClose }: SettingsPanelProps) 
                     </button>
                   </div>
                 </Field>
+              </SGroup>
+
+              <div className="border-t border-slate-100" />
+
+              <SGroup icon={<Gamepad2 size={14} />} title="知识库状态">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 space-y-2">
+                  <p className="text-xs text-slate-500">当前状态：<span className="font-semibold text-slate-700">{knowledgeStatus?.status || "loading"}</span></p>
+                  <p className="text-xs text-slate-500">游戏版本：<span className="font-semibold text-slate-700">{knowledgeStatus?.game?.current_version || knowledgeStatus?.game?.version || "未知"}</span></p>
+                  <p className="text-xs text-slate-500">Baselib release：<span className="font-semibold text-slate-700">{knowledgeStatus?.baselib?.latest_release_tag || knowledgeStatus?.baselib?.release_tag || "未知"}</span></p>
+                  {knowledgeStep ? <p className="text-xs text-amber-700">当前进度：{knowledgeStep}</p> : null}
+                  {knowledgeNotes.length > 0 ? (
+                    <div className="space-y-0.5">
+                      {knowledgeNotes.map((note, index) => (
+                        <p key={`${note}-${index}`} className="text-xs text-slate-500">{note}</p>
+                      ))}
+                    </div>
+                  ) : null}
+                  {knowledgeError ? <p className="text-xs text-rose-600">{knowledgeError}</p> : null}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleCheckKnowledge();
+                    }}
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:border-amber-300 hover:text-amber-700 transition-colors"
+                  >
+                    检查更新
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleRefreshKnowledge();
+                    }}
+                    disabled={knowledgeBusy}
+                    className="rounded-lg border border-amber-300 px-3 py-1.5 text-xs text-amber-700 hover:bg-amber-50 disabled:opacity-50 transition-colors"
+                  >
+                    {knowledgeBusy ? "更新中…" : "更新知识库"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setKnowledgeGuideOpen(true)}
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:border-amber-300 hover:text-amber-700 transition-colors"
+                  >
+                    查看知识库说明
+                  </button>
+                </div>
               </SGroup>
 
               <div className="border-t border-slate-100" />
@@ -514,24 +663,34 @@ export function SettingsPanel({ mode = "drawer", onClose }: SettingsPanelProps) 
     </div>
   );
 
+  const guideDialog = (
+    <KnowledgeGuideDialog open={knowledgeGuideOpen} status={knowledgeStatus} onClose={() => setKnowledgeGuideOpen(false)} />
+  );
+
   if (mode === "page") {
     return (
-      <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_30px_80px_rgba(15,23,42,0.08)]">
-        {header}
-        {content}
-      </section>
+      <>
+        <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_30px_80px_rgba(15,23,42,0.08)]">
+          {header}
+          {content}
+        </section>
+        {guideDialog}
+      </>
     );
   }
 
   return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex justify-end" onClick={onClose}>
-      <div
-        className="w-full max-w-sm bg-white border-l border-slate-200 h-full overflow-y-auto shadow-xl"
-        onClick={e => e.stopPropagation()}
-      >
-        {header}
-        {content}
+    <>
+      <div className="fixed inset-0 bg-black/60 z-50 flex justify-end" onClick={onClose}>
+        <div
+          className="w-full max-w-sm bg-white border-l border-slate-200 h-full overflow-y-auto shadow-xl"
+          onClick={e => e.stopPropagation()}
+        >
+          {header}
+          {content}
+        </div>
       </div>
-    </div>
+      {guideDialog}
+    </>
   );
 }

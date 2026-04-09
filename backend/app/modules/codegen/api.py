@@ -9,6 +9,7 @@ from app.modules.codegen.application.prompt_assembler import PromptAssembler
 from app.modules.codegen.application.services import CodegenService
 from app.modules.codegen.domain.models import AssetCodegenRequest, AssetGroupRequest, CustomCodegenRequest, ModProjectRequest
 from app.modules.knowledge.infra.sts2_docs_source import Sts2DocsKnowledgeSource
+from app.modules.knowledge.infra.knowledge_runtime import get_active_baselib_src_path, get_active_game_decompiled_src_path
 from app.shared.prompting import PromptLoader
 from config import get_decompiled_src_path
 from llm.agent_runner import run_agent_task
@@ -26,15 +27,16 @@ async def run_claude_code(prompt: str, project_root: Path, stream_callback=None)
 
 
 def _build_api_lookup_section() -> str:
+    baselib_src_path = get_active_baselib_src_path()
     title = _PROMPT_LOADER.load(_API_LOOKUP_TITLE_KEY).strip()
     baselib_note = _PROMPT_LOADER.render(
         _API_LOOKUP_BASELIB_KEY,
         {
-            "baselib_src_path": f"`{BASELIB_SRC_PATH}`",
+            "baselib_src_path": f"`{baselib_src_path}`",
         },
     ).strip()
 
-    decompiled_path = get_decompiled_src_path()
+    decompiled_path = get_active_game_decompiled_src_path() or get_decompiled_src_path()
     if decompiled_path:
         sts2_note = _PROMPT_LOADER.render(
             _API_LOOKUP_STS2_LOCAL_KEY,

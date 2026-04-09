@@ -1,0 +1,15 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+
+function readSource(path) {
+  return readFileSync(new URL(path, import.meta.url), "utf8");
+}
+
+test("single asset view exposes knowledge stale notice and actions", () => {
+  const source = readSource("../src/features/single-asset/view.tsx");
+
+  assert.match(source, /当前知识库可能不是最新版本/);
+  assert.match(source, /立即更新/);
+  assert.match(source, /查看说明/);
+});

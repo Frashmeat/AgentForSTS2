@@ -30,7 +30,15 @@ from app.modules.codegen.api import (
     create_custom_code,
     create_mod_project,
 )
-from app.modules.planning.api import plan_mod, plan_from_dict, topological_sort, find_groups, PlanItem
+from app.modules.planning.api import (
+    PlanItem,
+    build_execution_plan,
+    find_groups,
+    plan_from_dict,
+    plan_mod,
+    topological_sort,
+    validate_plan,
+)
 from app.modules.workflow.application.batch_asset import BatchAssetWorkflow
 from app.modules.workflow.application.context import WorkflowContext
 from app.modules.workflow.application.engine import WorkflowEngine
@@ -76,6 +84,38 @@ def _text(key: str, **variables: object) -> str:
     if variables:
         return _TEXT_LOADER.render(f"runtime_workflow.{key}", variables)
     return _TEXT_LOADER.load(f"runtime_workflow.{key}")
+
+
+def _normalize_review_strictness(value: object) -> str:
+    if value in {"efficient", "balanced", "strict"}:
+        return str(value)
+    return "balanced"
+
+
+def _build_plan_review_payload(plan, strictness: str = "balanced") -> dict:
+    normalized = _normalize_review_strictness(strictness)
+    validation = validate_plan(plan, normalized).to_dict()
+    execution_plan = build_execution_plan(plan, normalized).to_dict()
+    return {
+        "strictness": normalized,
+        "validation": validation,
+        "execution_plan": execution_plan,
+    }
+
+
+def _ensure_plan_review_passes(plan, strictness: str = "balanced") -> dict:
+    review = _build_plan_review_payload(plan, strictness)
+    validation_items = review["validation"]["items"]
+    bundle_items = review["execution_plan"]["execution_bundles"]
+
+    if any(item["status"] == "invalid" for item in validation_items):
+        raise HTTPException(status_code=400, detail="计划存在错误，无法进入执行")
+    if any(item["status"] == "needs_user_input" for item in validation_items):
+        raise HTTPException(status_code=400, detail="计划仍需补充说明，无法进入执行")
+    if any(bundle["status"] != "clear" for bundle in bundle_items):
+        raise HTTPException(status_code=400, detail="执行策略分组仍需确认，无法进入执行")
+
+    return review
 
 
 async def _run_postprocess(img, asset_type, asset_name, project_root):
@@ -167,6 +207,16 @@ def api_plan(body: dict):
     return _legacy_api_plan(body)
 
 
+@router.post("/plan/review")
+def api_plan_review(body: dict):
+    plan_data = body.get("plan")
+    if not isinstance(plan_data, dict):
+        raise HTTPException(status_code=400, detail="缺少计划数据，无法评审")
+    strictness = _normalize_review_strictness(body.get("strictness"))
+    plan = plan_from_dict(plan_data)
+    return _build_plan_review_payload(plan, strictness)
+
+
 def _legacy_api_plan(body: dict):
     """接收用户需求文本，返回结构化 Mod 计划（JSON）。"""
     requirements: str = body.get("requirements", "")
@@ -231,6 +281,8 @@ async def _handle_legacy_ws_batch(ws: WebSocket, *, initial_params: dict | None 
         else:
             params = initial_params
         action = params.get("action")
+        review_strictness = _normalize_review_strictness(params.get("review_strictness"))
+        review_gate_requested = "review_strictness" in params
 
         project_root = Path(params["project_root"])
         cfg_loaded = get_config()
@@ -240,6 +292,8 @@ async def _handle_legacy_ws_batch(ws: WebSocket, *, initial_params: dict | None 
         if action == "start_with_plan":
             # 直接用已有 plan 执行，跳过规划阶段（恢复上次规划用）
             plan = plan_from_dict(params["plan"])
+            if review_gate_requested:
+                _ensure_plan_review_passes(plan, review_strictness)
         else:
             assert action == "start", _text("batch_start_action_expected").strip()
             requirements: str = params["requirements"]
@@ -248,14 +302,19 @@ async def _handle_legacy_ws_batch(ws: WebSocket, *, initial_params: dict | None 
             await send_stage("text", "planning", _text("batch_planning_stage").strip())
             await send("planning")
             plan = await plan_mod(requirements)
-            await send("plan_ready", plan=plan.to_dict())
+            await send("plan_ready", plan=plan.to_dict(), review=_build_plan_review_payload(plan, review_strictness))
 
             # ── 3. 等待用户确认计划 ───────────────────────────────────────────
             raw = await ws.receive_text()
             confirm = json.loads(raw)
             assert confirm.get("action") == "confirm_plan", _text("batch_confirm_plan_expected").strip()
+            if "review_strictness" in confirm:
+                review_gate_requested = True
+                review_strictness = _normalize_review_strictness(confirm.get("review_strictness", review_strictness))
             if confirm.get("plan"):
                 plan = plan_from_dict(confirm["plan"])
+            if review_gate_requested:
+                _ensure_plan_review_passes(plan, review_strictness)
 
         sorted_items = topological_sort(plan.items)
         groups = find_groups(sorted_items)          # 按依赖关系分组

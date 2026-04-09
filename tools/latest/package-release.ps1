@@ -432,6 +432,61 @@ function Get-PreviousServiceConfigs {
     return $configs
 }
 
+function New-ZipFromDirectory {
+    param(
+        [string]$SourceDir,
+        [string]$DestinationPath,
+        [string[]]$ExcludeRelativePaths = @()
+    )
+
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+    $resolvedSourceDir = (Resolve-Path -LiteralPath $SourceDir).Path
+    $archiveRootName = Split-Path -Leaf $resolvedSourceDir
+    $normalizedExcludes = @(
+        $ExcludeRelativePaths | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object {
+            ($_ -replace "/", "\").TrimEnd("\")
+        }
+    )
+
+    Remove-FileIfExists -Path $DestinationPath
+
+    $zipArchive = [System.IO.Compression.ZipFile]::Open($DestinationPath, [System.IO.Compression.ZipArchiveMode]::Create)
+    try {
+        foreach ($file in Get-ChildItem -LiteralPath $resolvedSourceDir -Recurse -Force -File) {
+            $relativePath = [System.IO.Path]::GetRelativePath($resolvedSourceDir, $file.FullName)
+            $normalizedRelativePath = ($relativePath -replace "/", "\")
+            $shouldSkip = $false
+
+            foreach ($excludedRelativePath in $normalizedExcludes) {
+                if (
+                    $normalizedRelativePath -eq $excludedRelativePath -or
+                    $normalizedRelativePath.StartsWith("$excludedRelativePath\")
+                ) {
+                    $shouldSkip = $true
+                    break
+                }
+            }
+
+            if ($shouldSkip) {
+                continue
+            }
+
+            $entryPath = "{0}/{1}" -f $archiveRootName, ($relativePath -replace "\\", "/")
+            [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                $zipArchive,
+                $file.FullName,
+                $entryPath,
+                [System.IO.Compression.CompressionLevel]::Optimal
+            ) | Out-Null
+        }
+    }
+    finally {
+        $zipArchive.Dispose()
+    }
+}
+
 $repoRoot = Get-RepoRoot
 $frontendDir = Join-Path $repoRoot "frontend"
 $frontendDistDir = Join-Path $frontendDir "dist"
@@ -511,11 +566,10 @@ Copy-Item -LiteralPath (Join-Path $repoRoot "README.md") -Destination (Join-Path
 Write-ReleaseManifest -ReleaseDir $releaseDir -RepoRoot $repoRoot -SelectedTarget $Target -Services $serviceDefinitions
 
 if (-not $SkipZip) {
-    if (Test-Path -LiteralPath $zipPath) {
-        Remove-Item -LiteralPath $zipPath -Force
-    }
     Write-Host "生成 zip 包..."
-    Compress-Archive -Path $releaseDir -DestinationPath $zipPath -Force
+    New-ZipFromDirectory -SourceDir $releaseDir -DestinationPath $zipPath -ExcludeRelativePaths @(
+        "runtime\python-runtime"
+    )
 }
 
 Write-Host ""

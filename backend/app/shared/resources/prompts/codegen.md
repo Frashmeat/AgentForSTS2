@@ -148,7 +148,7 @@ Build and package this STS2 mod completely:
 ## api_lookup_baselib
 BaseLib (Alchyr.Sts2.BaseLib) decompiled source: {{ baselib_src_path }}
 Read this file directly for CustomCardModel, CustomPotionModel, PlaceholderCharacterModel, etc.
-Do NOT curl GitHub for BaseLib — the local decompiled copy is authoritative.
+Do NOT curl GitHub for BaseLib during codegen — prefer the managed local decompiled cache first.
 
 ## api_lookup_sts2_fallback
 sts2.dll decompiled source is NOT available on this machine.

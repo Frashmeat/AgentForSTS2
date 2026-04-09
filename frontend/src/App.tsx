@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useReducer } from "react";
 import { Bug, House, LayoutDashboard, Sparkles, Wrench } from "lucide-react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import ExecutionModeDialog from "./components/ExecutionModeDialog.tsx";
+import { KnowledgeGuideDialog } from "./components/KnowledgeGuideDialog.tsx";
 import { PlatformAuthUnavailableNotice } from "./components/PlatformAuthUnavailableNotice.tsx";
 import { PlatformPageShell } from "./components/platform/PlatformPageShell.tsx";
 import { WorkspaceShell } from "./components/workspace/WorkspaceShell.tsx";
@@ -31,8 +32,12 @@ import {
 } from "./features/single-asset/recovery";
 import { SingleAssetFeatureView } from "./features/single-asset/view";
 import {
+  getRefreshKnowledgeTask,
+  loadKnowledgeStatus,
   loadLocalAiCapabilityStatus,
   resolveMigrationFlags,
+  startRefreshKnowledgeTask,
+  type KnowledgeStatus,
   type LocalAiCapabilityStatus,
   type WorkflowMigrationFlags,
 } from "./shared/api/index.ts";
@@ -153,6 +158,9 @@ export default function App() {
     () => initialSingleAssetSnapshot?.workflowState.stage === "approval_pending",
   );
   const [pendingExecution, setPendingExecution] = useState<PendingExecutionRequest | null>(null);
+  const [knowledgeStatus, setKnowledgeStatus] = useState<KnowledgeStatus | null>(null);
+  const [knowledgeGuideOpen, setKnowledgeGuideOpen] = useState(false);
+  const [knowledgeRefreshTaskId, setKnowledgeRefreshTaskId] = useState("");
   const {
     projectCreateBusy,
     projectCreateMessage,
@@ -174,6 +182,55 @@ export default function App() {
       setMigrationFlags(resolveMigrationFlags(config));
     },
   });
+
+  useEffect(() => {
+    void loadKnowledgeStatus()
+      .then((status) => {
+        setKnowledgeStatus(status);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!knowledgeRefreshTaskId) {
+      return;
+    }
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    async function pollKnowledgeRefresh() {
+      try {
+        const snapshot = await getRefreshKnowledgeTask(knowledgeRefreshTaskId);
+        if (cancelled) {
+          return;
+        }
+        if (snapshot.status === "running" || snapshot.status === "pending") {
+          timer = setTimeout(pollKnowledgeRefresh, 800);
+          return;
+        }
+        const status = await loadKnowledgeStatus();
+        if (!cancelled) {
+          setKnowledgeStatus(status);
+        }
+        setKnowledgeRefreshTaskId("");
+      } catch {
+        if (cancelled) {
+          return;
+        }
+        setKnowledgeRefreshTaskId("");
+      }
+    }
+
+    void pollKnowledgeRefresh();
+
+    return () => {
+      cancelled = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
+  }, [knowledgeRefreshTaskId]);
 
   useEffect(() => {
     const snapshot = {
@@ -457,6 +514,32 @@ export default function App() {
     });
   }
 
+  async function handleRefreshKnowledge() {
+    setKnowledgeStatus((prev) => (
+      prev
+        ? { ...prev, status: "refreshing" }
+        : {
+            status: "refreshing",
+            generated_at: null,
+            checked_at: null,
+            warnings: [],
+            game: {},
+            baselib: {},
+          }
+    ));
+    try {
+      const task = await startRefreshKnowledgeTask();
+      setKnowledgeRefreshTaskId(task.task_id);
+    } catch {
+      try {
+        const status = await loadKnowledgeStatus();
+        setKnowledgeStatus(status);
+      } catch {
+        setKnowledgeStatus((prev) => prev ? { ...prev, status: "error" } : prev);
+      }
+    }
+  }
+
   function renderWorkspaceContent() {
     const openSettingsPage = () => {
       navigate(buildSettingsPath(buildWorkspacePath(activeTab)));
@@ -533,6 +616,7 @@ export default function App() {
             dragOver={dragOver}
             hasLiveSession={Boolean(socket)}
             showRecoveredNotice={restoredSnapshotMode && !socket && workflowState.stage !== "input"}
+            knowledgeStatus={knowledgeStatus}
             onRestartWorkflow={() => {
               void startWorkflow();
             }}
@@ -594,6 +678,10 @@ export default function App() {
             onProceedApproval={() => {
               singleAssetWorkflowController.proceedApproval();
             }}
+            onRefreshKnowledge={() => {
+              void handleRefreshKnowledge();
+            }}
+            onOpenKnowledgeGuide={() => setKnowledgeGuideOpen(true)}
             onOpenSettings={openSettingsPage}
           />
         )}
@@ -648,6 +736,7 @@ export default function App() {
         />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      <KnowledgeGuideDialog open={knowledgeGuideOpen} status={knowledgeStatus} onClose={() => setKnowledgeGuideOpen(false)} />
       <ExecutionModeDialog
         open={pendingExecution !== null}
         title={pendingExecution?.title ?? "选择执行方式"}

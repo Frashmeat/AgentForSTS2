@@ -274,6 +274,75 @@ def test_send_item_approval_pending_emits_expected_event():
     asyncio.run(run())
 
 
+def test_build_plan_review_payload_includes_validation_and_execution_plan():
+    plan = ModPlan(
+        mod_name="ReviewPayloadMod",
+        summary="",
+        items=[
+            PlanItem(
+                id="helper_logic",
+                type="custom_code",
+                name="HelperLogic",
+                description="调整战斗逻辑",
+                needs_image=False,
+            )
+        ],
+    )
+
+    payload = batch_workflow._build_plan_review_payload(plan, strictness="balanced")
+
+    assert payload["strictness"] == "balanced"
+    assert payload["validation"]["strictness"] == "balanced"
+    assert payload["validation"]["items"][0]["status"] == "needs_user_input"
+    assert payload["execution_plan"]["strictness"] == "balanced"
+    assert payload["execution_plan"]["dependency_groups"][0]["item_ids"] == ["helper_logic"]
+
+
+def test_api_plan_review_returns_structured_review_payload():
+    plan = ModPlan(
+        mod_name="ReviewApiMod",
+        summary="",
+        items=[
+            PlanItem(
+                id="helper_logic",
+                type="custom_code",
+                name="HelperLogic",
+                description="调整战斗逻辑",
+                needs_image=False,
+            )
+        ],
+    )
+
+    payload = batch_workflow.api_plan_review({
+        "plan": plan.to_dict(),
+        "strictness": "strict",
+    })
+
+    assert payload["strictness"] == "strict"
+    assert payload["validation"]["strictness"] == "strict"
+    assert payload["validation"]["items"][0]["item_id"] == "helper_logic"
+    assert "execution_bundles" in payload["execution_plan"]
+
+
+def test_ensure_plan_review_passes_rejects_plan_that_needs_user_input():
+    plan = ModPlan(
+        mod_name="BlockedReviewMod",
+        summary="",
+        items=[
+            PlanItem(
+                id="helper_logic",
+                type="custom_code",
+                name="HelperLogic",
+                description="调整战斗逻辑",
+                needs_image=False,
+            )
+        ],
+    )
+
+    with pytest.raises(HTTPException, match="计划仍需补充说明"):
+        batch_workflow._ensure_plan_review_passes(plan, strictness="balanced")
+
+
 def test_batch_plan_uses_http_exception_for_missing_requirements():
     with pytest.raises(HTTPException) as exc_info:
         batch_workflow._legacy_api_plan({"requirements": "   "})

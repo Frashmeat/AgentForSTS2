@@ -142,6 +142,7 @@ async def run(prompt: str, project_root: Path, llm_cfg: dict, stream_callback=No
         env["ANTHROPIC_API_KEY"] = llm_cfg["api_key"]
     if llm_cfg.get("base_url"):
         env["ANTHROPIC_BASE_URL"] = llm_cfg["base_url"]
+    model = str(llm_cfg.get("model", "")).strip()
 
     cmd = [
         *_resolve_claude_launcher(),
@@ -149,8 +150,10 @@ async def run(prompt: str, project_root: Path, llm_cfg: dict, stream_callback=No
         "--verbose",
         "--dangerously-skip-permissions",
         "--output-format", "stream-json",
-        "-p", prompt,
     ]
+    if model:
+        cmd.extend(["--model", model])
+    cmd.extend(["-p", prompt])
 
     output_chunks, _ = await run_streaming(
         cmd,

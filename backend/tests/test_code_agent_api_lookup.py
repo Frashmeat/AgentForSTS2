@@ -41,7 +41,7 @@ def test_api_lookup_section_reads_from_resource_templates(monkeypatch):
     try:
         (resource_root / "codegen.md").write_text(
             """## api_lookup_title
-## Resource Title
+Resource Title
 
 ## api_lookup_baselib
 BaseLib from {{ baselib_src_path }}
@@ -58,7 +58,7 @@ Fallback {{ ilspy_example_dll_path }}
 
         section = codegen_api._build_api_lookup_section()
 
-        assert section == "## Resource Title\nBaseLib from `{}`\n\nLocal src `I:/fake/sts2-decompiled`".format(
+        assert section == "Resource Title\nBaseLib from `{}`\n\nLocal src `I:/fake/sts2-decompiled`".format(
             codegen_api.BASELIB_SRC_PATH
         )
     finally:
@@ -67,3 +67,12 @@ Fallback {{ ilspy_example_dll_path }}
                 path.unlink()
             elif path.is_dir():
                 path.rmdir()
+
+
+def test_api_lookup_section_prefers_runtime_baselib_source(monkeypatch):
+    monkeypatch.setattr(codegen_api, "get_decompiled_src_path", lambda: "I:/fake/sts2-decompiled")
+    monkeypatch.setattr(codegen_api, "get_active_baselib_src_path", lambda: "I:/runtime/knowledge/baselib_decompiled/BaseLib.decompiled.cs")
+
+    section = codegen_api._build_api_lookup_section()
+
+    assert "I:/runtime/knowledge/baselib_decompiled/BaseLib.decompiled.cs" in section

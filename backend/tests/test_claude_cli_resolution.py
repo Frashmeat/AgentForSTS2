@@ -32,6 +32,23 @@ def test_claude_cli_backend_resolves_launcher_before_run_streaming(monkeypatch, 
     assert captured["cwd"] == tmp_path
 
 
+def test_claude_cli_backend_passes_model_when_configured(monkeypatch, tmp_path: Path):
+    captured: dict[str, object] = {}
+
+    async def fake_run_streaming(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return (["ok"], [])
+
+    monkeypatch.setattr(claude_cli, "_resolve_claude_launcher", lambda: ["C:/tools/claude.cmd"])
+    monkeypatch.setattr(claude_cli, "run_streaming", fake_run_streaming)
+
+    result = asyncio.run(claude_cli.run("hello", tmp_path, {"model": "claude-sonnet-4-6"}))
+
+    assert result == "ok"
+    assert "--model" in captured["cmd"]
+    assert captured["cmd"][captured["cmd"].index("--model") + 1] == "claude-sonnet-4-6"
+
+
 @pytest.mark.skipif(os.name != "nt", reason="仅在 Windows 上复现 PowerShell 与 CreateProcess 差异")
 def test_powershell_can_resolve_claude_ps1_while_python_subprocess_cannot_spawn_plain_claude(tmp_path: Path):
     bin_dir = tmp_path / "bin"
