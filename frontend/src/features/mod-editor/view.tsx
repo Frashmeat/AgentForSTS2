@@ -3,8 +3,10 @@ import { Loader2, RotateCcw, Search, Wrench } from "lucide-react";
 
 import { AgentLog } from "../../components/AgentLog";
 import { BuildDeploy } from "../../components/BuildDeploy";
+import { KnowledgeStatusBanner } from "../../components/KnowledgeStatusBanner.tsx";
 import { ProjectRootField } from "../../components/ProjectRootField";
 import { StageStatus } from "../../components/StageStatus";
+import type { KnowledgeStatus } from "../../shared/api/knowledge.ts";
 import { useDefaultProjectRoot } from "../../shared/useDefaultProjectRoot.ts";
 import { useProjectCreation } from "../../shared/useProjectCreation.ts";
 import {
@@ -25,8 +27,14 @@ type ModifyStage = "idle" | "running" | "done" | "error";
 
 export function ModEditorFeatureView({
   onRequestExecution,
+  knowledgeStatus,
+  onOpenKnowledgeGuide,
+  onOpenSettings,
 }: {
   onRequestExecution?: (request: PlatformExecutionRequest) => void;
+  knowledgeStatus: KnowledgeStatus | null;
+  onOpenKnowledgeGuide: () => void;
+  onOpenSettings: () => void;
 }) {
   const [projectRoot, setProjectRoot] = useState("");
   const {
@@ -176,6 +184,12 @@ export function ModEditorFeatureView({
 
   return (
     <div className="space-y-5">
+      <KnowledgeStatusBanner
+        status={knowledgeStatus}
+        impactText="分析与修改结果准确性可能下降"
+        onOpenGuide={onOpenKnowledgeGuide}
+        onOpenSettings={onOpenSettings}
+      />
       <div className="workspace-surface rounded-2xl p-5 space-y-4">
         <ProjectRootField
           value={projectRoot}

@@ -6,10 +6,11 @@ function readSource(path) {
   return readFileSync(new URL(path, import.meta.url), "utf8");
 }
 
-test("single asset view exposes knowledge stale notice and actions", () => {
+test("single asset view exposes knowledge notice entry points", () => {
   const source = readSource("../src/features/single-asset/view.tsx");
 
-  assert.match(source, /当前知识库可能不是最新版本/);
-  assert.match(source, /立即更新/);
-  assert.match(source, /查看说明/);
+  assert.match(source, /KnowledgeStatusBanner/);
+  assert.match(source, /生成结果准确性可能下降/);
+  assert.match(source, /onOpenKnowledgeGuide/);
+  assert.match(source, /onOpenSettings/);
 });

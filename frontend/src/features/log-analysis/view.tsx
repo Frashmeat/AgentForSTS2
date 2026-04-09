@@ -1,9 +1,11 @@
 import { useRef, useState } from "react";
 import { Bug, Loader2, RotateCcw } from "lucide-react";
 
+import { KnowledgeStatusBanner } from "../../components/KnowledgeStatusBanner.tsx";
 import { StageStatus } from "../../components/StageStatus";
 import { AgentLog } from "../../components/AgentLog";
 import { LogAnalysisSocket } from "../../lib/log_analysis_ws";
+import type { KnowledgeStatus } from "../../shared/api/knowledge.ts";
 import { resolveErrorMessage, resolveWorkflowErrorMessage } from "../../shared/error.ts";
 import {
   appendWorkflowLogEntry,
@@ -16,8 +18,14 @@ type Stage = "input" | "analyzing" | "done" | "error";
 
 export function LogAnalysisFeatureView({
   onRequestExecution,
+  knowledgeStatus,
+  onOpenKnowledgeGuide,
+  onOpenSettings,
 }: {
   onRequestExecution?: (request: PlatformExecutionRequest) => void;
+  knowledgeStatus: KnowledgeStatus | null;
+  onOpenKnowledgeGuide: () => void;
+  onOpenSettings: () => void;
 }) {
   const [stage, setStage] = useState<Stage>("input");
   const [context, setContext] = useState("");
@@ -97,6 +105,12 @@ export function LogAnalysisFeatureView({
 
   return (
     <div className="space-y-5">
+      <KnowledgeStatusBanner
+        status={knowledgeStatus}
+        impactText="分析结果准确性可能下降"
+        onOpenGuide={onOpenKnowledgeGuide}
+        onOpenSettings={onOpenSettings}
+      />
       <div className="workspace-surface rounded-2xl p-5 space-y-4">
         <div className="flex items-center gap-2">
           <Bug size={16} className="text-[var(--workspace-accent)]" />

@@ -4,6 +4,7 @@ import { AlertTriangle, ChevronDown, ChevronUp, Loader2, RotateCcw } from "lucid
 import { AgentLog } from "../../components/AgentLog";
 import { ApprovalPanel } from "../../components/ApprovalPanel";
 import { BuildDeploy } from "../../components/BuildDeploy";
+import { KnowledgeStatusBanner } from "../../components/KnowledgeStatusBanner.tsx";
 import { type KnowledgeStatus } from "../../shared/api/index.ts";
 import { ProjectRootField } from "../../components/ProjectRootField";
 import { StageStatus } from "../../components/StageStatus";
@@ -164,25 +165,12 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
       <Step num={1} title="描述设计" active={step === 0} done={step > 0}>
         <div className="space-y-4">
           {showKnowledgeNotice && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800 space-y-2">
-              <p>当前知识库可能不是最新版本，建议先更新后再生成。</p>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={onRefreshKnowledge}
-                  className="rounded-md border border-amber-300 px-2.5 py-1 font-medium text-amber-700 hover:bg-amber-100 transition-colors"
-                >
-                  立即更新
-                </button>
-                <button
-                  type="button"
-                  onClick={onOpenKnowledgeGuide}
-                  className="rounded-md border border-slate-200 px-2.5 py-1 font-medium text-slate-600 hover:border-amber-300 hover:text-amber-700 transition-colors"
-                >
-                  查看说明
-                </button>
-              </div>
-            </div>
+            <KnowledgeStatusBanner
+              status={knowledgeStatus}
+              impactText="生成结果准确性可能下降"
+              onOpenGuide={onOpenKnowledgeGuide}
+              onOpenSettings={onOpenSettings}
+            />
           )}
           {showRecoveredNotice && (
             <div className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2.5 text-xs text-violet-700 space-y-2">

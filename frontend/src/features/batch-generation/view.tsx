@@ -11,9 +11,11 @@ import { pickActiveItemOnDone, pickActiveItemOnStart } from "../../lib/batchActi
 import { AgentLog } from "../../components/AgentLog";
 import { StageStatus } from "../../components/StageStatus";
 import { BuildDeploy } from "../../components/BuildDeploy";
+import { KnowledgeStatusBanner } from "../../components/KnowledgeStatusBanner.tsx";
 import { ProjectRootField } from "../../components/ProjectRootField";
 import { cn } from "../../lib/utils";
 import { loadAppConfig } from "../../shared/api/config";
+import type { KnowledgeStatus } from "../../shared/api/knowledge.ts";
 import { reviewModPlan } from "../../shared/api/workflow.ts";
 import { resolveErrorMessage, resolveWorkflowErrorMessage } from "../../shared/error.ts";
 import type {
@@ -210,7 +212,17 @@ function canProceedFromEditedItemReview(
 
 // ── 主组件 ────────────────────────────────────────────────────────────────────
 
-function BatchModePage({ onRequestExecution }: { onRequestExecution?: (request: PlatformExecutionRequest) => void }) {
+function BatchModePage({
+  onRequestExecution,
+  knowledgeStatus,
+  onOpenKnowledgeGuide,
+  onOpenSettings,
+}: {
+  onRequestExecution?: (request: PlatformExecutionRequest) => void;
+  knowledgeStatus: KnowledgeStatus | null;
+  onOpenKnowledgeGuide: () => void;
+  onOpenSettings: () => void;
+}) {
   const [stage, setStage] = useState<BatchStage>("input");
   const [requirements, setRequirements] = useState("");
   const [projectRoot, setProjectRoot] = useState("");
@@ -671,6 +683,12 @@ function BatchModePage({ onRequestExecution }: { onRequestExecution?: (request: 
 
   return (
     <div className="space-y-5">
+      <KnowledgeStatusBanner
+        status={knowledgeStatus}
+        impactText="规划与生成结果准确性可能下降"
+        onOpenGuide={onOpenKnowledgeGuide}
+        onOpenSettings={onOpenSettings}
+      />
       {/* 输入阶段 */}
       {stage === "input" && (
         <div className="workspace-surface rounded-2xl p-5 space-y-4">
@@ -812,10 +830,23 @@ function BatchModePage({ onRequestExecution }: { onRequestExecution?: (request: 
 
 export function BatchGenerationFeatureView({
   onRequestExecution,
+  knowledgeStatus,
+  onOpenKnowledgeGuide,
+  onOpenSettings,
 }: {
   onRequestExecution?: (request: PlatformExecutionRequest) => void;
+  knowledgeStatus?: KnowledgeStatus | null;
+  onOpenKnowledgeGuide?: () => void;
+  onOpenSettings?: () => void;
 }) {
-  return <BatchModePage onRequestExecution={onRequestExecution} />;
+  return (
+    <BatchModePage
+      onRequestExecution={onRequestExecution}
+      knowledgeStatus={knowledgeStatus ?? null}
+      onOpenKnowledgeGuide={onOpenKnowledgeGuide ?? (() => {})}
+      onOpenSettings={onOpenSettings ?? (() => {})}
+    />
+  );
 }
 
 export default function BatchMode() {
