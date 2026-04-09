@@ -600,7 +600,7 @@ raw = cfg_path.read_text(encoding="utf-8-sig") if cfg_path.exists() else ""
 cfg = json.loads(raw) if raw.strip() else {}
 model = cfg.get("image_gen", {}).get("rembg_model", "birefnet-general")
 print(f"[INFO] rembg model: {model}")
-new_session(model)
+new_session(model, providers=["CPUExecutionProvider"])
 print("[OK] rembg model ready")
 '@ | Set-Content -LiteralPath $tempScript -Encoding UTF8
 

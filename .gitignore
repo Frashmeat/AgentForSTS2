@@ -68,3 +68,5 @@ pytest-cache-files-*/
 .superpowers/
 # Godot import metadata (auto-generated, not committed)
 **/*.import
+
+runtime/

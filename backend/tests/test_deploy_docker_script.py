@@ -189,13 +189,23 @@ def test_deploy_docker_hybrid_writes_local_process_state_file(tmp_path: Path):
     assert {entry["service_name"] for entry in payload["processes"]} == {"workstation", "frontend"}
 
 
-def test_deploy_docker_hybrid_defaults_to_local_web_base_url_and_deploys_web_release(tmp_path: Path):
+def test_deploy_docker_hybrid_requires_explicit_web_base_url_or_local_web_flag(tmp_path: Path):
     result = _run_deploy(tmp_path, "hybrid", prepare_default_web_release=True)
+
+    assert result.returncode != 0
+    assert "hybrid 默认不再自动联动本机 web-backend" in result.stderr
+    assert result.docker_log == ""
+
+
+def test_deploy_docker_hybrid_can_explicitly_deploy_local_web_release(tmp_path: Path):
+    result = _run_deploy(tmp_path, "hybrid", "-DeployLocalWeb", prepare_default_web_release=True)
     runtime_config = tmp_path / "release" / "services" / "frontend" / "frontend" / "dist" / "runtime-config.js"
 
     assert result.returncode == 0, result.stderr
+    assert result.docker_log.count("compose down") == 1
     assert result.docker_log.count("compose build") == 1
     assert result.docker_log.count("compose up") == 1
+    assert result.docker_log.index("compose down") < result.docker_log.index("compose build") < result.docker_log.index("compose up")
     assert "-m uvicorn main_workstation:app --host 127.0.0.1 --port 7860" in result.python_log
     assert "-m http.server 8080 --bind 127.0.0.1 --directory" in result.python_log
     assert runtime_config.exists()
@@ -206,7 +216,7 @@ def test_deploy_docker_hybrid_accepts_explicit_web_release_root(tmp_path: Path):
     custom_web_release_root = tmp_path / "custom-web-release"
     _prepare_release_bundle(custom_web_release_root, "web")
 
-    result = _run_deploy(tmp_path, "hybrid", "-WebReleaseRoot", str(custom_web_release_root))
+    result = _run_deploy(tmp_path, "hybrid", "-DeployLocalWeb", "-WebReleaseRoot", str(custom_web_release_root))
     runtime_config = tmp_path / "release" / "services" / "frontend" / "frontend" / "dist" / "runtime-config.js"
 
     assert result.returncode == 0, result.stderr
@@ -244,6 +254,13 @@ def test_deploy_docker_hybrid_rejects_web_base_url_without_http_scheme(tmp_path:
 
     assert result.returncode != 0
     assert "http:// 或 https://" in result.stderr
+
+
+def test_deploy_docker_hybrid_rejects_web_base_url_with_local_web_flag(tmp_path: Path):
+    result = _run_deploy(tmp_path, "hybrid", "-WebBaseUrl", "https://platform.example.com", "-DeployLocalWeb")
+
+    assert result.returncode != 0
+    assert "-WebBaseUrl 与 -DeployLocalWeb / -WebReleaseRoot 不能同时使用" in result.stderr
 
 
 def test_deploy_docker_frontend_runs_local_static_server_without_docker(tmp_path: Path):

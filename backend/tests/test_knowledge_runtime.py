@@ -91,9 +91,13 @@ def test_refresh_task_preserves_previous_manifest_when_update_fails(monkeypatch,
 
 
 def test_missing_status_surfaces_missing_runtime_requirements(monkeypatch):
+    missing_repo_ref = Path("Z:/missing/sts2_api_reference.md")
+    missing_baselib = Path("Z:/missing/BaseLib.decompiled.cs")
     monkeypatch.setattr(knowledge_runtime, "load_manifest", lambda: None)
     monkeypatch.setattr(knowledge_runtime, "_has_ilspycmd", lambda: False)
     monkeypatch.setattr(knowledge_runtime, "_directory_has_sources", lambda _path: False)
+    monkeypatch.setattr(knowledge_runtime, "API_REF_PATH", missing_repo_ref)
+    monkeypatch.setattr(knowledge_runtime, "BASELIB_FALLBACK_PATH", missing_baselib)
     monkeypatch.setattr(
         knowledge_runtime,
         "get_config",
@@ -105,6 +109,68 @@ def test_missing_status_surfaces_missing_runtime_requirements(monkeypatch):
     assert status["status"] == "missing"
     assert "未配置 STS2 游戏路径，无法更新知识库" in status["warnings"]
     assert "未检测到 ilspycmd，无法反编译游戏和 BaseLib（会先查项目目录，再查 PATH）" in status["warnings"]
+
+
+def test_missing_manifest_falls_back_to_stale_when_repo_sources_exist(monkeypatch, tmp_path: Path):
+    game_dir = tmp_path / "game_decompiled"
+    game_dir.mkdir(parents=True)
+    baselib_dir = tmp_path / "baselib_decompiled"
+    baselib_dir.mkdir(parents=True)
+    repo_ref = tmp_path / "sts2_api_reference.md"
+    repo_ref.write_text("reference", encoding="utf-8")
+    repo_baselib = tmp_path / "BaseLib.decompiled.cs"
+    repo_baselib.write_text("// baselib", encoding="utf-8")
+
+    monkeypatch.setattr(knowledge_runtime, "load_manifest", lambda: None)
+    monkeypatch.setattr(knowledge_runtime, "GAME_DECOMPILED_DIR", game_dir)
+    monkeypatch.setattr(knowledge_runtime, "BASELIB_DECOMPILED_DIR", baselib_dir)
+    monkeypatch.setattr(knowledge_runtime, "API_REF_PATH", repo_ref)
+    monkeypatch.setattr(knowledge_runtime, "BASELIB_FALLBACK_PATH", repo_baselib)
+    monkeypatch.setattr(knowledge_runtime, "_has_ilspycmd", lambda: False)
+    monkeypatch.setattr(knowledge_runtime, "get_config", lambda: {"sts2_path": "E:/steam/steamapps/common/Slay the Spire 2"})
+
+    status = knowledge_runtime.get_knowledge_status()
+
+    assert status["status"] == "stale"
+    assert status["game"]["source_mode"] == "repo_reference"
+    assert status["baselib"]["source_mode"] == "repo_fallback"
+
+
+def test_manifest_runtime_missing_uses_stale_when_repo_fallback_is_available(monkeypatch, tmp_path: Path):
+    game_dir = tmp_path / "game_decompiled"
+    game_dir.mkdir(parents=True)
+    baselib_dir = tmp_path / "baselib_decompiled"
+    baselib_dir.mkdir(parents=True)
+    repo_ref = tmp_path / "sts2_api_reference.md"
+    repo_ref.write_text("reference", encoding="utf-8")
+    repo_baselib = tmp_path / "BaseLib.decompiled.cs"
+    repo_baselib.write_text("// baselib", encoding="utf-8")
+    manifest = {
+        "generated_at": "2026-04-10T00:00:00+0800",
+        "game": {
+            "version": "22340209",
+            "sts2_path": "E:/SteamLibrary/steamapps/common/Slay the Spire 2",
+            "decompiled_src_path": str(game_dir),
+        },
+        "baselib": {
+            "release_tag": "v0.2.7",
+            "decompiled_src_path": str(baselib_dir),
+        },
+    }
+
+    monkeypatch.setattr(knowledge_runtime, "load_manifest", lambda: manifest)
+    monkeypatch.setattr(knowledge_runtime, "GAME_DECOMPILED_DIR", game_dir)
+    monkeypatch.setattr(knowledge_runtime, "BASELIB_DECOMPILED_DIR", baselib_dir)
+    monkeypatch.setattr(knowledge_runtime, "API_REF_PATH", repo_ref)
+    monkeypatch.setattr(knowledge_runtime, "BASELIB_FALLBACK_PATH", repo_baselib)
+    monkeypatch.setattr(knowledge_runtime, "read_current_game_version", lambda _path: {"version": "22340209", "source": "steam_app_manifest"})
+    monkeypatch.setattr(knowledge_runtime, "fetch_latest_baselib_release", lambda: {"tag_name": "v0.2.7"})
+
+    status = knowledge_runtime.get_knowledge_status()
+
+    assert status["status"] == "stale"
+    assert status["game"]["source_mode"] == "repo_reference"
+    assert status["baselib"]["source_mode"] == "repo_fallback"
 
 
 def test_resolve_ilspycmd_command_prefers_project_copy(monkeypatch, tmp_path: Path):

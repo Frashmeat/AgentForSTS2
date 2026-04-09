@@ -225,6 +225,7 @@ tools/
 - `tools\latest\deploy-docker.ps1 full` 会在本机拉起 `workstation-backend`，同时只对 `web` 服务执行 Docker 部署。
 - `tools\latest\deploy-docker.ps1 hybrid` 默认会联动部署本机 `web-backend`，并把前端 `web` 地址写成 `http://127.0.0.1:7870`。
 - 默认推导出的本机 `web release` 会在 `deploy-docker.ps1 hybrid` 联动部署前自动调用 `package-release.ps1 web` 刷新，避免继续复用旧 release。
+- 刷新默认推导出的本机 `web release` 前，脚本会先对固定的 `agentthespire-web-release` Compose 项目执行一次 `docker compose down --remove-orphans`，避免重复执行 `hybrid` 时在仍被 Compose 使用的 release 目录上直接重写文件。
 - `tools\latest\deploy-docker.ps1 hybrid -WebReleaseRoot <path>` 可显式指定要联动部署的本机 `web release` 目录，避免依赖默认同级路径。
 - `tools\latest\deploy-docker.ps1 ... -PythonBaseImage <image>` 可显式指定 Docker 构建使用的 Python 基础镜像；不传时默认优先复用本机已有标签，并回退到 `m.daocloud.io/docker.io/library/python:3.11-slim`。
 - `tools\latest\deploy-docker.ps1 hybrid -WebBaseUrl https://your-web-api.example.com` 会改为指向显式传入的地址，此时不再默认覆盖为本机地址。

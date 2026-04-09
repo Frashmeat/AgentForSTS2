@@ -233,6 +233,8 @@ def get_knowledge_status() -> dict[str, Any]:
             payload["warnings"].append("游戏反编译源码目录为空，请先执行“更新知识库”")
         if not (BASELIB_DECOMPILED_DIR / "BaseLib.decompiled.cs").exists():
             payload["warnings"].append("BaseLib 反编译结果缺失，请先执行“更新知识库”")
+        if payload["game"]["source_mode"] == "repo_reference" or payload["baselib"]["source_mode"] == "repo_fallback":
+            payload["status"] = "stale"
         return payload
 
     payload = _default_status_payload("fresh")
@@ -264,10 +266,13 @@ def get_knowledge_status() -> dict[str, Any]:
         payload["warnings"].append(str(exc))
         payload["baselib"]["matches"] = None
 
-    if not _directory_has_sources(Path(payload["game"]["decompiled_src_path"])) or not Path(
-        str(payload["baselib"]["decompiled_src_path"])
-    ).joinpath("BaseLib.decompiled.cs").exists():
-        payload["status"] = "missing"
+    game_runtime_ready = _directory_has_sources(Path(payload["game"]["decompiled_src_path"]))
+    baselib_runtime_ready = Path(str(payload["baselib"]["decompiled_src_path"])).joinpath("BaseLib.decompiled.cs").exists()
+    if not game_runtime_ready or not baselib_runtime_ready:
+        if payload["game"]["source_mode"] == "repo_reference" or payload["baselib"]["source_mode"] == "repo_fallback":
+            payload["status"] = "stale"
+        else:
+            payload["status"] = "missing"
         return payload
 
     if payload["game"]["matches"] is False or payload["baselib"]["matches"] is False:

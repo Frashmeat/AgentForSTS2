@@ -28,10 +28,13 @@ Web 端口。默认 7870。
 前端静态站端口。默认 8080。
 
 .PARAMETER WebBaseUrl
-前端运行时写入的 Web API 基地址。`hybrid` / `frontend` 未显式传入时默认使用本机 `http://127.0.0.1:<WebPort>`，并可联动部署本机 Docker `web-backend`；显式传入后改为指向指定地址。
+前端运行时写入的 Web API 基地址。`frontend` 未显式传入时默认使用本机 `http://127.0.0.1:<WebPort>`；`hybrid` 目标必须显式传入，除非改用 `-DeployLocalWeb` 联动部署本机 Docker `web-backend`。
 
 .PARAMETER WebReleaseRoot
-`hybrid` 未显式传入 `-WebBaseUrl` 时，联动部署的本机 `web-backend` release 目录。留空时默认按当前 hybrid release 的同级目录推导。
+`hybrid` 联动部署本机 `web-backend` 时使用的 release 目录。留空时默认按当前 hybrid release 的同级目录推导。
+
+.PARAMETER DeployLocalWeb
+仅用于 `hybrid`。显式要求联动部署本机 Docker `web-backend`，并把前端 `web` 地址写为 `http://127.0.0.1:<WebPort>`。
 
 .PARAMETER PostgresHostPort
 Postgres 暴露到宿主机的端口。默认 5432。
@@ -70,10 +73,10 @@ pwsh -File .\tools\latest\deploy-docker.ps1 workstation
 pwsh -File .\tools\latest\deploy-docker.ps1 hybrid -WebBaseUrl https://your-web-api.example.com
 
 .EXAMPLE
-pwsh -File .\tools\latest\deploy-docker.ps1 hybrid
+pwsh -File .\tools\latest\deploy-docker.ps1 web -ResetDb -dbn agentthespire
 
 .EXAMPLE
-pwsh -File .\tools\latest\deploy-docker.ps1 web -ResetDb -dbn agentthespire
+pwsh -File .\tools\latest\deploy-docker.ps1 hybrid -DeployLocalWeb
 #>
 [CmdletBinding()]
 param(
@@ -108,12 +111,15 @@ param(
     [Alias("fp")]
     [string]$FrontendPort = "8080",
 
-    [Parameter(HelpMessage = "前端运行时写入的 Web API 基地址。`hybrid` 未显式传入时默认使用本机 http://127.0.0.1:<WebPort>，并自动联动部署本机 web-backend。")]
+    [Parameter(HelpMessage = "前端运行时写入的 Web API 基地址。`frontend` 未显式传入时默认使用本机 http://127.0.0.1:<WebPort>；`hybrid` 必须显式传入，除非改用 -DeployLocalWeb 联动本机 web-backend。")]
     [Alias("wb")]
     [string]$WebBaseUrl = "",
 
-    [Parameter(HelpMessage = "`hybrid` 默认联动部署的本机 web release 目录。留空时按当前 hybrid release 的同级目录推导。")]
+    [Parameter(HelpMessage = "`hybrid` 联动部署本机 web-backend 时使用的本机 web release 目录。留空时按当前 hybrid release 的同级目录推导。")]
     [string]$WebReleaseRoot = "",
+
+    [Parameter(HelpMessage = "仅用于 hybrid。显式联动部署本机 web-backend，并把前端 Web API 基址写为本机 http://127.0.0.1:<WebPort>。")]
+    [switch]$DeployLocalWeb,
 
     # 数据库参数
     [Parameter(HelpMessage = "Postgres 暴露到宿主机的端口。默认 5432。")]
@@ -167,6 +173,10 @@ if ($Help -or $PSBoundParameters.Count -eq 0) {
 
 if ($ReuseImages.IsPresent -and $RebuildImages.IsPresent) {
     throw "-ReuseImages 与 -RebuildImages 不能同时使用。"
+}
+
+if ($DeployLocalWeb.IsPresent -and $Target -ne "hybrid") {
+    throw "-DeployLocalWeb 仅适用于 hybrid 目标。"
 }
 
 function Assert-PathExists {
@@ -1010,6 +1020,9 @@ function Invoke-HybridLocalWebDeployment {
 
     $webReleaseRoot = Get-DefaultHybridWebReleaseRoot -HybridReleaseRoot $HybridReleaseRoot -ExplicitWebReleaseRoot $ExplicitWebReleaseRoot
     $forceRefreshDefaultWebRelease = [string]::IsNullOrWhiteSpace($ExplicitWebReleaseRoot)
+    if ($forceRefreshDefaultWebRelease) {
+        Stop-ExistingComposeProject -BundleDir $webReleaseRoot -ComposeProjectName (Get-DefaultHybridWebProjectName -HybridProjectName $HybridProjectName)
+    }
     Ensure-HybridLocalWebRelease -WebReleaseRoot $webReleaseRoot -ForceRefresh:$forceRefreshDefaultWebRelease
     Assert-PathExists -Path $webReleaseRoot -Label "hybrid 默认本机 web release 目录"
 
@@ -1231,7 +1244,19 @@ function Invoke-DockerCompose {
 
     Push-Location $BundleDir
     try {
-        & docker compose --project-name $ComposeProjectName --env-file $EnvFile -f $ComposeFile @ComposeArgs @Services
+        $dockerArgs = @(
+            "compose",
+            "--project-name",
+            $ComposeProjectName
+        )
+        if ((-not [string]::IsNullOrWhiteSpace($EnvFile)) -and (Test-Path -LiteralPath $EnvFile)) {
+            $dockerArgs += @("--env-file", $EnvFile)
+        }
+        $dockerArgs += @("-f", $ComposeFile)
+        $dockerArgs += $ComposeArgs
+        $dockerArgs += $Services
+
+        & docker @dockerArgs
         if ($LASTEXITCODE -ne 0) {
             throw "docker compose 执行失败，退出码: $LASTEXITCODE"
         }
@@ -1239,6 +1264,27 @@ function Invoke-DockerCompose {
     finally {
         Pop-Location
     }
+}
+
+function Stop-ExistingComposeProject {
+    param(
+        [string]$BundleDir,
+        [string]$ComposeProjectName
+    )
+
+    if (-not (Test-Path -LiteralPath $BundleDir)) {
+        return
+    }
+
+    $composeFile = Join-Path $BundleDir "docker-compose.yml"
+    if (-not (Test-Path -LiteralPath $composeFile)) {
+        return
+    }
+
+    Assert-CommandExists -CommandName "docker"
+    $envFile = Join-Path (Join-Path $BundleDir "runtime") ".env"
+    Write-Host "检测到将刷新现有 linked web release，先停止旧 Compose 项目: $ComposeProjectName"
+    Invoke-DockerCompose -BundleDir $BundleDir -ComposeFile $composeFile -EnvFile $envFile -ComposeProjectName $ComposeProjectName -ComposeArgs @("down", "--remove-orphans")
 }
 
 function Write-FrontendRuntimeConfig {
@@ -1489,20 +1535,32 @@ $resolvedFrontendPort = [int]$FrontendPort
 
 if ($Target -in @("hybrid", "frontend")) {
     $explicitWebBaseUrlProvided = $PSBoundParameters.ContainsKey("WebBaseUrl")
+    $explicitWebReleaseRootProvided = $PSBoundParameters.ContainsKey("WebReleaseRoot")
+    $shouldDeployHybridLocalWeb = $Target -eq "hybrid" -and ($DeployLocalWeb.IsPresent -or $explicitWebReleaseRootProvided)
+
+    if ($Target -eq "hybrid" -and $explicitWebBaseUrlProvided -and $shouldDeployHybridLocalWeb) {
+        throw "-WebBaseUrl 与 -DeployLocalWeb / -WebReleaseRoot 不能同时使用；请二选一。"
+    }
 
     if ($explicitWebBaseUrlProvided) {
         if ([string]::IsNullOrWhiteSpace($WebBaseUrl)) {
-            throw "显式传入 -WebBaseUrl 时不能为空；不传该参数则会默认使用本机 http://127.0.0.1:$WebPort"
+            throw "显式传入 -WebBaseUrl 时不能为空。"
         }
         if (-not (Test-AbsoluteHttpUrl -Value $WebBaseUrl)) {
             throw "显式传入的 -WebBaseUrl 必须是完整的 http:// 或 https:// 地址，例如 http://127.0.0.1:$WebPort 或 https://your-web-api.example.com"
+        }
+    } elseif ($Target -eq "hybrid") {
+        if ($shouldDeployHybridLocalWeb) {
+            $WebBaseUrl = "http://127.0.0.1:{0}" -f $WebPort
+        } else {
+            throw "hybrid 默认不再自动联动本机 web-backend。请显式传入 -WebBaseUrl，或使用 -DeployLocalWeb（可配合 -WebReleaseRoot）启用本机 web 部署。"
         }
     } else {
         $WebBaseUrl = "http://127.0.0.1:{0}" -f $WebPort
     }
 }
 
-if ($Target -eq "hybrid" -and (-not $PSBoundParameters.ContainsKey("WebBaseUrl"))) {
+if ($Target -eq "hybrid" -and ($DeployLocalWeb.IsPresent -or $PSBoundParameters.ContainsKey("WebReleaseRoot"))) {
     Invoke-HybridLocalWebDeployment -HybridReleaseRoot $effectiveReleaseRoot -HybridProjectName $effectiveProjectName -ExplicitWebReleaseRoot $WebReleaseRoot
 }
 

@@ -52,7 +52,7 @@ cfg_path = root / "config.json"
 cfg = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}
 model = cfg.get("image_gen", {}).get("rembg_model", "birefnet-general")
 print(f"[INFO] rembg model: {model}")
-new_session(model)
+new_session(model, providers=["CPUExecutionProvider"])
 print("[OK] rembg model ready")
 PY
 then
