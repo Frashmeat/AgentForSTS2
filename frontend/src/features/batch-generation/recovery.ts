@@ -1,18 +1,32 @@
 import { getApproval, type ApprovalRequest } from "../../shared/api/index.ts";
+import type {
+  ExecutionBundlePreview,
+  PlanItemValidation,
+  PlanReviewPayload,
+} from "../../shared/types/workflow.ts";
 import {
   createDefaultBatchItemState,
   createInitialBatchRuntimeState,
   updateBatchItemStateRecord,
   type BatchItemState,
   type BatchItemStatus,
-  type BatchRuntimeState,
+   type BatchRuntimeState,
   type BatchStage,
+  type ReviewStrictness,
 } from "./state.ts";
 
 export const BATCH_RUNTIME_SNAPSHOT_KEY = "ats_batch_runtime_v1";
 
 const SNAPSHOT_VERSION = 1;
-const RECOVERABLE_BATCH_STAGES: BatchStage[] = ["input", "planning", "review_plan", "executing", "done", "error"];
+const RECOVERABLE_BATCH_STAGES: BatchStage[] = [
+  "input",
+  "planning",
+  "review_items",
+  "review_bundles",
+  "executing",
+  "done",
+  "error",
+];
 const RECOVERABLE_ITEM_STATUSES: BatchItemStatus[] = [
   "pending",
   "img_generating",
@@ -51,6 +65,8 @@ interface BatchRuntimeSnapshot {
   batchStageHistory: string[];
   batchResult: { success: number; error: number } | null;
   itemStates: Record<string, BatchItemSnapshot>;
+  planReview?: PlanReviewPayload | null;
+  reviewStrictness?: ReviewStrictness;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -74,9 +90,16 @@ function asStringArray(value: unknown, limit?: number): string[] {
 }
 
 function asStage(value: unknown): BatchStage {
+  if (value === "review_plan") {
+    return "review_items";
+  }
   return RECOVERABLE_BATCH_STAGES.includes(value as BatchStage)
     ? (value as BatchStage)
     : "input";
+}
+
+function asReviewStrictness(value: unknown): ReviewStrictness {
+  return value === "efficient" || value === "strict" ? value : "balanced";
 }
 
 function asItemStatus(value: unknown): BatchItemStatus {
@@ -127,6 +150,92 @@ function normalizeApprovalRequests(value: unknown): ApprovalRequest[] {
     .filter((item): item is ApprovalRequest => item !== null);
 }
 
+function normalizePlanValidationItem(value: unknown): PlanItemValidation | null {
+  if (!isRecord(value) || typeof value.item_id !== "string" || typeof value.status !== "string") {
+    return null;
+  }
+
+  const status = value.status;
+  if (status !== "clear" && status !== "needs_user_input" && status !== "invalid") {
+    return null;
+  }
+
+  const issues = Array.isArray(value.issues)
+    ? value.issues
+        .filter((issue): issue is { code: string; message: string; field?: string } =>
+          isRecord(issue) && typeof issue.code === "string" && typeof issue.message === "string",
+        )
+        .map((issue) => ({
+          code: issue.code,
+          message: issue.message,
+          field: typeof issue.field === "string" ? issue.field : undefined,
+        }))
+    : [];
+
+  return {
+    item_id: value.item_id,
+    status,
+    issues,
+    missing_fields: asStringArray(value.missing_fields),
+    clarification_questions: asStringArray(value.clarification_questions),
+  };
+}
+
+function normalizeExecutionBundlePreview(value: unknown): ExecutionBundlePreview | null {
+  if (!isRecord(value) || !Array.isArray(value.item_ids) || typeof value.status !== "string" || typeof value.reason !== "string") {
+    return null;
+  }
+
+  const status = value.status;
+  if (status !== "clear" && status !== "needs_confirmation" && status !== "split_recommended") {
+    return null;
+  }
+
+  return {
+    item_ids: asStringArray(value.item_ids),
+    status,
+    reason: value.reason,
+    risk_codes: asStringArray(value.risk_codes),
+  };
+}
+
+function normalizePlanReviewPayload(value: unknown): PlanReviewPayload | null {
+  if (!isRecord(value) || !isRecord(value.validation) || !isRecord(value.execution_plan)) {
+    return null;
+  }
+
+  const validationItems = Array.isArray(value.validation.items)
+    ? value.validation.items
+        .map((item) => normalizePlanValidationItem(item))
+        .filter((item): item is PlanItemValidation => item !== null)
+    : [];
+
+  const dependencyGroups = Array.isArray(value.execution_plan.dependency_groups)
+    ? value.execution_plan.dependency_groups
+        .filter((group): group is { item_ids: string[] } => isRecord(group) && Array.isArray(group.item_ids))
+        .map((group) => ({ item_ids: asStringArray(group.item_ids) }))
+    : [];
+
+  const executionBundles = Array.isArray(value.execution_plan.execution_bundles)
+    ? value.execution_plan.execution_bundles
+        .map((bundle) => normalizeExecutionBundlePreview(bundle))
+        .filter((bundle): bundle is ExecutionBundlePreview => bundle !== null)
+    : [];
+
+  return {
+    strictness: asReviewStrictness(value.strictness),
+    validation: {
+      strictness: asReviewStrictness(value.validation.strictness),
+      items: validationItems,
+    },
+    execution_plan: {
+      strictness: asReviewStrictness(value.execution_plan.strictness),
+      dependency_groups: dependencyGroups,
+      execution_bundles: executionBundles,
+    },
+  };
+}
+
 function normalizeBatchItemSnapshot(value: unknown): BatchItemState {
   if (!isRecord(value)) {
     return createDefaultBatchItemState();
@@ -168,6 +277,8 @@ export function serializeBatchRuntimeSnapshot(state: BatchRuntimeState): BatchRu
     currentBatchStage: state.currentBatchStage,
     batchStageHistory: state.batchStageHistory,
     batchResult: state.batchResult,
+    planReview: state.planReview,
+    reviewStrictness: state.reviewStrictness,
     itemStates: Object.fromEntries(
       Object.entries(state.itemStates).map(([itemId, itemState]) => [
         itemId,
@@ -203,6 +314,8 @@ export function restoreBatchRuntimeSnapshot(snapshot: unknown): BatchRuntimeStat
     currentBatchStage: asNullableString(snapshot.currentBatchStage),
     batchStageHistory: asStringArray(snapshot.batchStageHistory),
     batchResult: normalizeBatchResult(snapshot.batchResult),
+    planReview: normalizePlanReviewPayload(snapshot.planReview),
+    reviewStrictness: asReviewStrictness(snapshot.reviewStrictness),
     itemStates: Object.fromEntries(
       Object.entries(snapshot.itemStates).map(([itemId, itemState]) => [
         itemId,

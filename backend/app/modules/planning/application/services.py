@@ -6,6 +6,8 @@ from config import get_config
 from llm.text_runner import complete_text
 
 from app.modules.planning.application.dependency_graph import find_groups, topological_sort
+from app.modules.planning.application.execution_bundles import ExecutionPlanPreview, build_execution_plan
+from app.modules.planning.application.plan_validation import PlanValidationResult, ReviewStrictness, validate_plan
 from app.modules.planning.domain.models import AssetItemType, ModPlan, PlanItem
 from app.shared.prompting import PromptLoader
 
@@ -59,10 +61,19 @@ class PlanningService:
                     name=it["name"],
                     name_zhs=it.get("name_zhs", ""),
                     description=it.get("description", ""),
+                    goal=it.get("goal", ""),
+                    detailed_description=it.get("detailed_description", ""),
                     implementation_notes=it.get("implementation_notes", ""),
                     needs_image=needs_image,
                     image_description=it.get("image_description", ""),
                     depends_on=it.get("depends_on", []),
+                    scope_boundary=it.get("scope_boundary", ""),
+                    dependency_reason=it.get("dependency_reason", ""),
+                    acceptance_notes=it.get("acceptance_notes", ""),
+                    affected_targets=it.get("affected_targets", []),
+                    coupling_kind=it.get("coupling_kind", "unclear"),
+                    clarification_status=it.get("clarification_status", ""),
+                    clarification_questions=it.get("clarification_questions", []),
                 )
             )
         return ModPlan(
@@ -79,10 +90,19 @@ class PlanningService:
                 name=it["name"],
                 name_zhs=it.get("name_zhs", ""),
                 description=it.get("description", ""),
+                goal=it.get("goal", ""),
+                detailed_description=it.get("detailed_description", ""),
                 implementation_notes=it.get("implementation_notes", ""),
                 needs_image=it.get("needs_image", True),
                 image_description=it.get("image_description", ""),
                 depends_on=it.get("depends_on", []),
+                scope_boundary=it.get("scope_boundary", ""),
+                dependency_reason=it.get("dependency_reason", ""),
+                acceptance_notes=it.get("acceptance_notes", ""),
+                affected_targets=it.get("affected_targets", []),
+                coupling_kind=it.get("coupling_kind", "unclear"),
+                clarification_status=it.get("clarification_status", ""),
+                clarification_questions=it.get("clarification_questions", []),
                 provided_image_b64=it.get("provided_image_b64", ""),
             )
             for it in data.get("items", [])
@@ -98,3 +118,9 @@ class PlanningService:
 
     def find_groups(self, items: list[PlanItem]) -> list[list[PlanItem]]:
         return find_groups(items)
+
+    def validate_plan(self, plan: ModPlan, strictness: ReviewStrictness = "balanced") -> PlanValidationResult:
+        return validate_plan(plan, strictness)
+
+    def build_execution_plan(self, plan: ModPlan, strictness: str = "balanced") -> ExecutionPlanPreview:
+        return build_execution_plan(plan, strictness)

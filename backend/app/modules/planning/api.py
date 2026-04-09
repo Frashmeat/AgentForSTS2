@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from agents import sts2_docs
+from app.modules.planning.application.execution_bundles import ExecutionPlanPreview
 from app.modules.knowledge.infra.sts2_docs_source import Sts2DocsKnowledgeSource
 from app.modules.planning.application.services import PlanningService
+from app.modules.planning.application.plan_validation import PlanValidationResult, ReviewStrictness
 from app.modules.planning.domain.models import AssetItemType, ModPlan, PlanItem
 
 _knowledge_source = Sts2DocsKnowledgeSource(
@@ -36,14 +38,27 @@ def topological_sort(items: list[PlanItem]) -> list[PlanItem]:
     return _service.topologically_sort_plan_items(items)
 
 
+def validate_plan(plan: ModPlan, strictness: ReviewStrictness = "balanced") -> PlanValidationResult:
+    return _service.validate_plan(plan, strictness)
+
+
+def build_execution_plan(plan: ModPlan, strictness: str = "balanced") -> ExecutionPlanPreview:
+    return _service.build_execution_plan(plan, strictness)
+
+
 __all__ = [
     "AssetItemType",
+    "ExecutionPlanPreview",
     "ModPlan",
     "PlanItem",
+    "PlanValidationResult",
+    "ReviewStrictness",
     "build_planner_prompt",
     "find_groups",
     "parse_plan",
     "plan_from_dict",
     "plan_mod",
     "topological_sort",
+    "build_execution_plan",
+    "validate_plan",
 ]

@@ -1,5 +1,5 @@
 import type { ApprovalRequest } from "../../shared/api/index.ts";
-import type { WorkflowLogChannel } from "../../shared/types/workflow.ts";
+import type { PlanReviewPayload, WorkflowLogChannel } from "../../shared/types/workflow.ts";
 import {
   appendWorkflowLogEntry,
   resolveNextWorkflowModel,
@@ -34,7 +34,15 @@ export interface BatchItemState {
 
 export type BatchItemStateRecord = Record<string, BatchItemState>;
 
-export type BatchStage = "input" | "planning" | "review_plan" | "executing" | "done" | "error";
+export type ReviewStrictness = "efficient" | "balanced" | "strict";
+export type BatchStage =
+  | "input"
+  | "planning"
+  | "review_items"
+  | "review_bundles"
+  | "executing"
+  | "done"
+  | "error";
 
 export interface BatchRuntimeState {
   stage: BatchStage;
@@ -46,12 +54,17 @@ export interface BatchRuntimeState {
   workflowErrorMessage: string | null;
   batchResult: { success: number; error: number } | null;
   approvalBusyActionId: string | null;
+  planReview: PlanReviewPayload | null;
+  reviewStrictness: ReviewStrictness;
 }
 
 export type BatchRuntimeAction =
   | { type: "planning_started" }
   | { type: "stage_set"; stage: BatchStage }
-  | { type: "plan_ready_received" }
+  | { type: "plan_ready_received"; review?: PlanReviewPayload | null }
+  | { type: "review_items_confirmed" }
+  | { type: "review_bundles_confirmed" }
+  | { type: "review_strictness_set"; strictness: ReviewStrictness }
   | { type: "batch_log_appended"; message: string }
   | { type: "batch_stage_message"; message: string }
   | { type: "batch_started"; items: Array<{ id: string }> }
@@ -105,7 +118,23 @@ export function createInitialBatchRuntimeState(): BatchRuntimeState {
     workflowErrorMessage: null,
     batchResult: null,
     approvalBusyActionId: null,
+    planReview: null,
+    reviewStrictness: "balanced",
   };
+}
+
+export function canProceedFromItemReview(review: PlanReviewPayload | null | undefined): boolean {
+  if (!review) {
+    return true;
+  }
+  return review.validation.items.every((item) => item.status === "clear");
+}
+
+export function canProceedFromBundleReview(review: PlanReviewPayload | null | undefined): boolean {
+  if (!review) {
+    return true;
+  }
+  return review.execution_plan.execution_bundles.every((bundle) => bundle.status === "clear");
 }
 
 export function updateBatchItemStateRecord(
@@ -231,7 +260,26 @@ export function batchWorkflowReducer(state: BatchRuntimeState, action: BatchRunt
     case "plan_ready_received":
       return {
         ...state,
-        stage: "review_plan",
+        stage: "review_items",
+        planReview: action.review ?? null,
+        reviewStrictness: action.review?.strictness === "efficient" || action.review?.strictness === "strict"
+          ? action.review.strictness
+          : "balanced",
+      };
+    case "review_items_confirmed":
+      return {
+        ...state,
+        stage: "review_bundles",
+      };
+    case "review_bundles_confirmed":
+      return {
+        ...state,
+        stage: "executing",
+      };
+    case "review_strictness_set":
+      return {
+        ...state,
+        reviewStrictness: action.strictness,
       };
     case "batch_log_appended":
       return {

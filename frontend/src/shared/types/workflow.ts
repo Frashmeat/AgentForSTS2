@@ -11,9 +11,51 @@ export type WorkflowErrorPayload = Record<string, unknown> & {
   traceback?: string;
 };
 
+export interface PlanValidationIssue {
+  code: string;
+  message: string;
+  field?: string;
+}
+
+export interface PlanItemValidation {
+  item_id: string;
+  status: "clear" | "needs_user_input" | "invalid";
+  issues: PlanValidationIssue[];
+  missing_fields: string[];
+  clarification_questions: string[];
+}
+
+export interface PlanValidationResult {
+  strictness: string;
+  items: PlanItemValidation[];
+}
+
+export interface DependencyGroupPreview {
+  item_ids: string[];
+}
+
+export interface ExecutionBundlePreview {
+  item_ids: string[];
+  status: "clear" | "needs_confirmation" | "split_recommended";
+  reason: string;
+  risk_codes: string[];
+}
+
+export interface ExecutionPlanPreview {
+  strictness: string;
+  dependency_groups: DependencyGroupPreview[];
+  execution_bundles: ExecutionBundlePreview[];
+}
+
+export interface PlanReviewPayload {
+  strictness: string;
+  validation: PlanValidationResult;
+  execution_plan: ExecutionPlanPreview;
+}
+
 export type WorkflowEvent =
   | { event: "planning"; stage: "planning" }
-  | { event: "plan_ready"; stage: "plan_ready"; plan: ModPlan }
+  | { event: "plan_ready"; stage: "plan_ready"; plan: ModPlan; review?: PlanReviewPayload }
   | { event: "stage_update"; stage: string; scope: WorkflowScope; message: string; item_id?: string }
   | { event: "progress"; stage: "progress"; message: string }
   | { event: "batch_progress"; stage: "batch_progress"; message: string }
@@ -39,10 +81,19 @@ export interface PlanItem {
   name: string;
   name_zhs: string;
   description: string;
+  goal: string;
+  detailed_description: string;
   implementation_notes: string;
   needs_image: boolean;
   image_description: string;
   depends_on: string[];
+  scope_boundary: string;
+  dependency_reason: string;
+  acceptance_notes: string;
+  affected_targets: string[];
+  coupling_kind: string;
+  clarification_status: string;
+  clarification_questions: string[];
   provided_image_b64?: string;
 }
 

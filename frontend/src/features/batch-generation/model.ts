@@ -1,4 +1,13 @@
-export type BatchStage = "input" | "planning" | "review_plan" | "executing" | "done" | "error";
+export type ReviewStrictness = "efficient" | "balanced" | "strict";
+
+export type BatchStage =
+  | "input"
+  | "planning"
+  | "review_items"
+  | "review_bundles"
+  | "executing"
+  | "done"
+  | "error";
 
 export type ItemStatus =
   | "pending"

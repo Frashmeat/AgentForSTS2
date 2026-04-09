@@ -168,3 +168,283 @@ def test_planning_service_plan_from_dict_preserves_provided_image_payload():
     )
 
     assert plan.items[0].provided_image_b64 == "ZmFrZS1pbWFnZQ=="
+
+
+def test_planning_service_parse_plan_defaults_new_review_fields():
+    service = PlanningService()
+
+    plan = service.parse_plan(
+        """
+        {
+          "mod_name": "ReviewDefaultsMod",
+          "summary": "",
+          "items": [
+            {
+              "id": "card_ignite",
+              "type": "card",
+              "name": "Ignite",
+              "description": "Deal fire damage."
+            }
+          ]
+        }
+        """
+    )
+
+    item = plan.items[0]
+    assert item.goal == ""
+    assert item.detailed_description == ""
+    assert item.scope_boundary == ""
+    assert item.dependency_reason == ""
+    assert item.acceptance_notes == ""
+    assert item.affected_targets == []
+    assert item.coupling_kind == "unclear"
+    assert item.clarification_status == ""
+    assert item.clarification_questions == []
+
+
+def test_planning_service_plan_from_dict_preserves_review_fields():
+    service = PlanningService()
+
+    plan = service.plan_from_dict(
+        {
+            "mod_name": "ReviewFieldsMod",
+            "summary": "",
+            "items": [
+                {
+                    "id": "helper_logic",
+                    "type": "custom_code",
+                    "name": "HelperLogic",
+                    "goal": "Provide shared combat helper behavior.",
+                    "detailed_description": "Add a reusable helper for combat callbacks and state sync.",
+                    "scope_boundary": "Only add helper abstractions, do not patch unrelated rewards flow.",
+                    "dependency_reason": "Needs card items to call into the helper after it exists.",
+                    "acceptance_notes": "Helper API is available to card/relic integrations.",
+                    "affected_targets": ["CombatHooks", "HelperLogic"],
+                    "coupling_kind": "shared_logic",
+                    "clarification_status": "needs_user_input",
+                    "clarification_questions": [
+                        "Should the helper own combat state persistence?"
+                    ],
+                }
+            ],
+        }
+    )
+
+    item = plan.items[0]
+    assert item.goal == "Provide shared combat helper behavior."
+    assert item.detailed_description == "Add a reusable helper for combat callbacks and state sync."
+    assert item.scope_boundary == "Only add helper abstractions, do not patch unrelated rewards flow."
+    assert item.dependency_reason == "Needs card items to call into the helper after it exists."
+    assert item.acceptance_notes == "Helper API is available to card/relic integrations."
+    assert item.affected_targets == ["CombatHooks", "HelperLogic"]
+    assert item.coupling_kind == "shared_logic"
+    assert item.clarification_status == "needs_user_input"
+    assert item.clarification_questions == [
+        "Should the helper own combat state persistence?"
+    ]
+
+
+def test_planning_service_validate_plan_marks_duplicate_ids_invalid():
+    service = PlanningService()
+    plan = service.plan_from_dict(
+        {
+            "mod_name": "DuplicateIdMod",
+            "summary": "",
+            "items": [
+                {"id": "dup", "type": "card", "name": "FirstCard"},
+                {"id": "dup", "type": "relic", "name": "SecondRelic"},
+            ],
+        }
+    )
+
+    result = service.validate_plan(plan, strictness="balanced")
+
+    statuses = {item.item_id: item.status for item in result.items}
+    assert statuses == {"dup": "invalid"}
+    issue_codes = [issue.code for issue in result.items[0].issues]
+    assert "duplicate_id" in issue_codes
+
+
+def test_planning_service_validate_plan_marks_vague_custom_code_for_clarification():
+    service = PlanningService()
+    plan = service.plan_from_dict(
+        {
+            "mod_name": "ClarifyMod",
+            "summary": "",
+            "items": [
+                {
+                    "id": "helper_logic",
+                    "type": "custom_code",
+                    "name": "HelperLogic",
+                    "description": "调整战斗逻辑",
+                }
+            ],
+        }
+    )
+
+    result = service.validate_plan(plan, strictness="balanced")
+
+    assert result.items[0].status == "needs_user_input"
+    assert result.items[0].missing_fields == ["goal", "detailed_description"]
+    assert result.items[0].clarification_questions
+
+
+def test_planning_service_validate_plan_strictness_changes_item_status():
+    service = PlanningService()
+    plan = service.plan_from_dict(
+        {
+            "mod_name": "StrictnessMod",
+            "summary": "",
+            "items": [
+                {
+                    "id": "card_ignite",
+                    "type": "card",
+                    "name": "Ignite",
+                    "description": "Deal 6 damage.",
+                }
+            ],
+        }
+    )
+
+    efficient = service.validate_plan(plan, strictness="efficient")
+    strict = service.validate_plan(plan, strictness="strict")
+
+    assert efficient.items[0].status == "clear"
+    assert strict.items[0].status == "needs_user_input"
+    assert "goal" in strict.items[0].missing_fields
+
+
+def test_planning_service_build_execution_plan_keeps_order_only_items_separate():
+    service = PlanningService()
+    plan = service.plan_from_dict(
+        {
+            "mod_name": "OrderOnlyMod",
+            "summary": "",
+            "items": [
+                {
+                    "id": "power_burn",
+                    "type": "power",
+                    "name": "BurnPower",
+                    "coupling_kind": "order_only",
+                },
+                {
+                    "id": "card_ignite",
+                    "type": "card",
+                    "name": "Ignite",
+                    "depends_on": ["power_burn"],
+                    "coupling_kind": "order_only",
+                },
+            ],
+        }
+    )
+
+    result = service.build_execution_plan(plan, strictness="balanced")
+
+    assert [group.item_ids for group in result.dependency_groups] == [["power_burn", "card_ignite"]]
+    assert [bundle.item_ids for bundle in result.execution_bundles] == [["power_burn"], ["card_ignite"]]
+
+
+def test_planning_service_build_execution_plan_merges_feature_bundle_items():
+    service = PlanningService()
+    plan = service.plan_from_dict(
+        {
+            "mod_name": "FeatureBundleMod",
+            "summary": "",
+            "items": [
+                {
+                    "id": "hero_core",
+                    "type": "character",
+                    "name": "HeroCore",
+                    "coupling_kind": "feature_bundle",
+                    "affected_targets": ["HeroCore"],
+                },
+                {
+                    "id": "hero_relic",
+                    "type": "relic",
+                    "name": "HeroRelic",
+                    "depends_on": ["hero_core"],
+                    "coupling_kind": "feature_bundle",
+                    "affected_targets": ["HeroCore"],
+                },
+            ],
+        }
+    )
+
+    result = service.build_execution_plan(plan, strictness="balanced")
+
+    assert [bundle.item_ids for bundle in result.execution_bundles] == [["hero_core", "hero_relic"]]
+    assert result.execution_bundles[0].status == "clear"
+
+
+def test_planning_service_build_execution_plan_marks_unclear_bundle_for_confirmation():
+    service = PlanningService()
+    plan = service.plan_from_dict(
+        {
+            "mod_name": "UnclearBundleMod",
+            "summary": "",
+            "items": [
+                {
+                    "id": "shared_helper",
+                    "type": "custom_code",
+                    "name": "SharedHelper",
+                    "coupling_kind": "unclear",
+                    "affected_targets": ["SharedLogic"],
+                },
+                {
+                    "id": "shared_card",
+                    "type": "card",
+                    "name": "SharedCard",
+                    "depends_on": ["shared_helper"],
+                    "coupling_kind": "shared_logic",
+                    "affected_targets": ["SharedLogic"],
+                },
+            ],
+        }
+    )
+
+    result = service.build_execution_plan(plan, strictness="balanced")
+
+    assert result.execution_bundles[0].status == "needs_confirmation"
+    assert "unclear_coupling" in result.execution_bundles[0].risk_codes
+
+
+def test_planning_service_build_execution_plan_strict_mode_marks_large_bundle_for_confirmation():
+    service = PlanningService()
+    plan = service.plan_from_dict(
+        {
+            "mod_name": "StrictBundleMod",
+            "summary": "",
+            "items": [
+                {
+                    "id": "feature_a",
+                    "type": "custom_code",
+                    "name": "FeatureA",
+                    "coupling_kind": "feature_bundle",
+                    "affected_targets": ["SharedFeature"],
+                },
+                {
+                    "id": "feature_b",
+                    "type": "card",
+                    "name": "FeatureB",
+                    "depends_on": ["feature_a"],
+                    "coupling_kind": "feature_bundle",
+                    "affected_targets": ["SharedFeature"],
+                },
+                {
+                    "id": "feature_c",
+                    "type": "relic",
+                    "name": "FeatureC",
+                    "depends_on": ["feature_b"],
+                    "coupling_kind": "feature_bundle",
+                    "affected_targets": ["SharedFeature"],
+                },
+            ],
+        }
+    )
+
+    efficient = service.build_execution_plan(plan, strictness="efficient")
+    strict = service.build_execution_plan(plan, strictness="strict")
+
+    assert efficient.execution_bundles[0].status == "clear"
+    assert strict.execution_bundles[0].status == "needs_confirmation"
+    assert "bundle_size_threshold" in strict.execution_bundles[0].risk_codes
