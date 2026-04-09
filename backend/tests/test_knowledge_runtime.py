@@ -104,4 +104,18 @@ def test_missing_status_surfaces_missing_runtime_requirements(monkeypatch):
 
     assert status["status"] == "missing"
     assert "未配置 STS2 游戏路径，无法更新知识库" in status["warnings"]
-    assert "未检测到 ilspycmd，无法反编译游戏和 BaseLib" in status["warnings"]
+    assert "未检测到 ilspycmd，无法反编译游戏和 BaseLib（会先查项目目录，再查 PATH）" in status["warnings"]
+
+
+def test_resolve_ilspycmd_command_prefers_project_copy(monkeypatch, tmp_path: Path):
+    project_copy = tmp_path / "tools" / "ilspycmd.exe"
+    project_copy.parent.mkdir(parents=True, exist_ok=True)
+    project_copy.write_text("stub", encoding="utf-8")
+
+    monkeypatch.setattr(knowledge_runtime, "_ILSPY_SEARCH_ROOTS", (tmp_path,))
+    monkeypatch.setenv(knowledge_runtime._ILSPY_PATH_ENV, "")
+    monkeypatch.setattr(knowledge_runtime.shutil, "which", lambda _name: None)
+
+    command = knowledge_runtime.resolve_ilspycmd_command()
+
+    assert command == [str(project_copy.resolve())]

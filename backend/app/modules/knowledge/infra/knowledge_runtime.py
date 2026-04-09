@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import threading
@@ -28,6 +29,15 @@ BASELIB_RELEASES_API = "https://api.github.com/repos/Alchyr/BaseLib-StS2/release
 
 _REFRESH_TASKS: dict[str, "_RefreshTask"] = {}
 _REFRESH_TASKS_LOCK = threading.Lock()
+_ILSPY_PATH_ENV = "SPIREFORGE_ILSPYCMD_PATH"
+_ILSPY_CANDIDATE_NAMES = ("ilspycmd.exe", "ilspycmd", "ILSpyCmd.dll", "ilspycmd.dll")
+_ILSPY_SEARCH_ROOTS = (
+    REPO_ROOT,
+    REPO_ROOT / "tools",
+    REPO_ROOT / "runtime",
+    REPO_ROOT / "tools" / "latest" / "artifacts",
+)
+_ILSPY_SKIP_DIRS = {".git", ".venv", "node_modules", "__pycache__", ".tmp"}
 
 
 def ensure_knowledge_dirs() -> None:
@@ -37,8 +47,56 @@ def ensure_knowledge_dirs() -> None:
     BASELIB_DECOMPILED_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _walk_candidate_paths(root: Path) -> list[Path]:
+    candidates: list[Path] = []
+    if not root.exists():
+        return candidates
+
+    for current_root, dirnames, filenames in os.walk(root):
+        dirnames[:] = [name for name in dirnames if name not in _ILSPY_SKIP_DIRS]
+        for filename in filenames:
+            if filename in _ILSPY_CANDIDATE_NAMES:
+                candidates.append(Path(current_root) / filename)
+    return candidates
+
+
+def _command_for_ilspy_path(path: Path) -> list[str] | None:
+    suffix = path.suffix.lower()
+    if suffix in {".exe", ""}:
+        return [str(path)]
+    if suffix == ".dll":
+        dotnet_path = shutil.which("dotnet")
+        if dotnet_path:
+            return [dotnet_path, str(path)]
+    return None
+
+
+def resolve_ilspycmd_command() -> list[str] | None:
+    explicit_path = str(os.environ.get(_ILSPY_PATH_ENV, "")).strip()
+    if explicit_path:
+        candidate = Path(explicit_path)
+        if candidate.exists():
+            return _command_for_ilspy_path(candidate)
+
+    seen: set[Path] = set()
+    for root in _ILSPY_SEARCH_ROOTS:
+        for candidate in _walk_candidate_paths(root):
+            resolved = candidate.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            command = _command_for_ilspy_path(resolved)
+            if command is not None:
+                return command
+
+    path_hit = shutil.which("ilspycmd")
+    if path_hit:
+        return [path_hit]
+    return None
+
+
 def _has_ilspycmd() -> bool:
-    return shutil.which("ilspycmd") is not None
+    return resolve_ilspycmd_command() is not None
 
 
 def load_manifest() -> dict[str, Any] | None:
@@ -151,7 +209,7 @@ def get_knowledge_status() -> dict[str, Any]:
         if not configured_path:
             payload["warnings"].append("未配置 STS2 游戏路径，无法更新知识库")
         if not _has_ilspycmd():
-            payload["warnings"].append("未检测到 ilspycmd，无法反编译游戏和 BaseLib")
+            payload["warnings"].append("未检测到 ilspycmd，无法反编译游戏和 BaseLib（会先查项目目录，再查 PATH）")
         if not _directory_has_sources(GAME_DECOMPILED_DIR):
             payload["warnings"].append("游戏反编译源码目录为空，请先执行“更新知识库”")
         if not (BASELIB_DECOMPILED_DIR / "BaseLib.decompiled.cs").exists():
@@ -241,8 +299,11 @@ def _find_game_dll(sts2_path: str) -> Path:
 
 def _run_ilspy_outputdir(dll_path: Path, output_dir: Path) -> None:
     _reset_dir(output_dir)
+    ilspy_command = resolve_ilspycmd_command()
+    if ilspy_command is None:
+        raise RuntimeError("未检测到 ilspycmd，请先放到项目目录或确保 ilspycmd 在 PATH 中")
     result = subprocess.run(
-        ["ilspycmd", str(dll_path), "--outputdir", str(output_dir)],
+        [*ilspy_command, str(dll_path), "--outputdir", str(output_dir)],
         capture_output=True,
         text=True,
         check=False,
@@ -253,8 +314,11 @@ def _run_ilspy_outputdir(dll_path: Path, output_dir: Path) -> None:
 
 def _run_ilspy_to_single_file(dll_path: Path, output_file: Path) -> None:
     output_file.parent.mkdir(parents=True, exist_ok=True)
+    ilspy_command = resolve_ilspycmd_command()
+    if ilspy_command is None:
+        raise RuntimeError("未检测到 ilspycmd，请先放到项目目录或确保 ilspycmd 在 PATH 中")
     result = subprocess.run(
-        ["ilspycmd", str(dll_path)],
+        [*ilspy_command, str(dll_path)],
         capture_output=True,
         text=True,
         check=False,
@@ -335,7 +399,7 @@ def _run_refresh_impl(task: _RefreshTask) -> None:
     if not sts2_path:
         raise RuntimeError("未配置 STS2 游戏路径，无法更新知识库")
     if not _has_ilspycmd():
-        raise RuntimeError("未检测到 ilspycmd，请先安装并确保 ilspycmd 在 PATH 中")
+        raise RuntimeError("未检测到 ilspycmd，请先放到项目目录或确保 ilspycmd 在 PATH 中")
 
     task.set_step("读取当前游戏版本")
     game_info = read_current_game_version(sts2_path)
