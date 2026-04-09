@@ -9,7 +9,16 @@ from app.modules.codegen import api as codegen_api
 
 def test_api_lookup_section_uses_configured_decompiled_source(monkeypatch):
     decompiled_dir = "I:/fake/sts2-decompiled"
-    monkeypatch.setattr(codegen_api, "get_decompiled_src_path", lambda: decompiled_dir)
+    monkeypatch.setattr(
+        codegen_api,
+        "build_api_lookup_context",
+        lambda: {
+            "baselib_src_path": str(codegen_api.API_REF_PATH.parent / "baselib_src" / "BaseLib.decompiled.cs"),
+            "game_source_mode": "runtime_decompiled",
+            "game_path": decompiled_dir,
+            "ilspy_example_dll_path": "<STS2GamePath>/data_sts2_windows_x86_64/sts2.dll",
+        },
+    )
 
     section = codegen_api._build_api_lookup_section()
 
@@ -22,7 +31,16 @@ def test_api_lookup_section_uses_configured_decompiled_source(monkeypatch):
 
 
 def test_api_lookup_section_falls_back_to_ilspy_when_no_decompiled_source(monkeypatch):
-    monkeypatch.setattr(codegen_api, "get_decompiled_src_path", lambda: None)
+    monkeypatch.setattr(
+        codegen_api,
+        "build_api_lookup_context",
+        lambda: {
+            "baselib_src_path": str(codegen_api.API_REF_PATH.parent / "baselib_src" / "BaseLib.decompiled.cs"),
+            "game_source_mode": "repo_reference",
+            "game_path": str(codegen_api.API_REF_PATH),
+            "ilspy_example_dll_path": "<STS2GamePath>/data_sts2_windows_x86_64/sts2.dll",
+        },
+    )
 
     section = codegen_api._build_api_lookup_section()
 
@@ -33,7 +51,16 @@ def test_api_lookup_section_falls_back_to_ilspy_when_no_decompiled_source(monkey
 
 
 def test_api_lookup_section_reads_from_resource_templates(monkeypatch):
-    monkeypatch.setattr(codegen_api, "get_decompiled_src_path", lambda: "I:/fake/sts2-decompiled")
+    monkeypatch.setattr(
+        codegen_api,
+        "build_api_lookup_context",
+        lambda: {
+            "baselib_src_path": str(codegen_api.API_REF_PATH.parent / "baselib_src" / "BaseLib.decompiled.cs"),
+            "game_source_mode": "runtime_decompiled",
+            "game_path": "I:/fake/sts2-decompiled",
+            "ilspy_example_dll_path": "<STS2GamePath>/data_sts2_windows_x86_64/sts2.dll",
+        },
+    )
 
     temp_root = Path(__file__).parent / ".tmp" / f"api-lookup-{uuid.uuid4().hex}"
     resource_root = temp_root / "prompts"
@@ -59,7 +86,7 @@ Fallback {{ ilspy_example_dll_path }}
         section = codegen_api._build_api_lookup_section()
 
         assert section == "Resource Title\nBaseLib from `{}`\n\nLocal src `I:/fake/sts2-decompiled`".format(
-            codegen_api.BASELIB_SRC_PATH
+            codegen_api.API_REF_PATH.parent / "baselib_src" / "BaseLib.decompiled.cs"
         )
     finally:
         for path in sorted(temp_root.rglob("*"), reverse=True):
@@ -70,8 +97,16 @@ Fallback {{ ilspy_example_dll_path }}
 
 
 def test_api_lookup_section_prefers_runtime_baselib_source(monkeypatch):
-    monkeypatch.setattr(codegen_api, "get_decompiled_src_path", lambda: "I:/fake/sts2-decompiled")
-    monkeypatch.setattr(codegen_api, "get_active_baselib_src_path", lambda: "I:/runtime/knowledge/baselib_decompiled/BaseLib.decompiled.cs")
+    monkeypatch.setattr(
+        codegen_api,
+        "build_api_lookup_context",
+        lambda: {
+            "baselib_src_path": "I:/runtime/knowledge/baselib_decompiled/BaseLib.decompiled.cs",
+            "game_source_mode": "runtime_decompiled",
+            "game_path": "I:/fake/sts2-decompiled",
+            "ilspy_example_dll_path": "<STS2GamePath>/data_sts2_windows_x86_64/sts2.dll",
+        },
+    )
 
     section = codegen_api._build_api_lookup_section()
 

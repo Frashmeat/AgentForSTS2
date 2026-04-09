@@ -452,7 +452,9 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
                 <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 space-y-2">
                   <p className="text-xs text-slate-500">当前状态：<span className="font-semibold text-slate-700">{knowledgeStatus?.status || "loading"}</span></p>
                   <p className="text-xs text-slate-500">游戏版本：<span className="font-semibold text-slate-700">{knowledgeStatus?.game?.current_version || knowledgeStatus?.game?.version || "未知"}</span></p>
+                  <p className="text-xs text-slate-500">游戏知识来源：<span className="font-semibold text-slate-700">{knowledgeStatus?.game?.source_mode || "未知"}</span></p>
                   <p className="text-xs text-slate-500">Baselib release：<span className="font-semibold text-slate-700">{knowledgeStatus?.baselib?.latest_release_tag || knowledgeStatus?.baselib?.release_tag || "未知"}</span></p>
+                  <p className="text-xs text-slate-500">Baselib 知识来源：<span className="font-semibold text-slate-700">{knowledgeStatus?.baselib?.source_mode || "未知"}</span></p>
                   {knowledgeStep ? <p className="text-xs text-amber-700">当前进度：{knowledgeStep}</p> : null}
                   {knowledgeNotes.length > 0 ? (
                     <div className="space-y-0.5">

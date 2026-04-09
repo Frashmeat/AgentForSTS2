@@ -13,6 +13,7 @@ from typing import Any
 import httpx
 
 from app.shared.infra.config import settings as settings_module
+from agents.sts2_docs import API_REF_PATH
 from config import get_config, get_decompiled_src_path
 
 BACKEND_ROOT = Path(__file__).resolve().parents[4]
@@ -132,6 +133,7 @@ def _default_status_payload(status: str) -> dict[str, Any]:
             "current_version": None,
             "matches": None,
             "version_source": "steam_app_manifest",
+            "source_mode": _resolve_game_source_mode(),
             "decompiled_src_path": str(GAME_DECOMPILED_DIR),
         },
         "baselib": {
@@ -139,6 +141,7 @@ def _default_status_payload(status: str) -> dict[str, Any]:
             "latest_release_tag": None,
             "matches": None,
             "release_url": BASELIB_RELEASES_URL,
+            "source_mode": _resolve_baselib_source_mode(),
             "decompiled_src_path": str(BASELIB_DECOMPILED_DIR),
         },
     }
@@ -200,6 +203,22 @@ def _directory_has_sources(path: Path) -> bool:
     return path.exists() and any(path.rglob("*.cs"))
 
 
+def _resolve_game_source_mode() -> str:
+    if _directory_has_sources(GAME_DECOMPILED_DIR):
+        return "runtime_decompiled"
+    if API_REF_PATH.exists():
+        return "repo_reference"
+    return "missing"
+
+
+def _resolve_baselib_source_mode() -> str:
+    if (BASELIB_DECOMPILED_DIR / "BaseLib.decompiled.cs").exists():
+        return "runtime_decompiled"
+    if BASELIB_FALLBACK_PATH.exists():
+        return "repo_fallback"
+    return "missing"
+
+
 def get_knowledge_status() -> dict[str, Any]:
     manifest = load_manifest()
     if manifest is None:
@@ -222,6 +241,8 @@ def get_knowledge_status() -> dict[str, Any]:
     payload["game"]["configured_path"] = _manifest_game_dir(manifest)
     payload["game"]["version"] = manifest.get("game", {}).get("version")
     payload["baselib"]["release_tag"] = manifest.get("baselib", {}).get("release_tag")
+    payload["game"]["source_mode"] = _resolve_game_source_mode()
+    payload["baselib"]["source_mode"] = _resolve_baselib_source_mode()
     payload["game"]["decompiled_src_path"] = manifest.get("game", {}).get("decompiled_src_path", str(GAME_DECOMPILED_DIR))
     payload["baselib"]["decompiled_src_path"] = manifest.get("baselib", {}).get("decompiled_src_path", str(BASELIB_DECOMPILED_DIR))
 

@@ -1,6 +1,7 @@
 # STS2 反编译 API 参考
 
 > 自动生成，来源：sts2.dll 反编译（ilspycmd v9.1.0）
+> 基于游戏版本：Slay the Spire 2 Steam build `22340209`
 > 只保留签名，不含方法体实现
 > 游戏路径：见 config.json `sts2_path` 字段
 

@@ -2,16 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agents.sts2_docs import API_REF_PATH, BASELIB_SRC_PATH, get_docs_for_type, get_planner_api_hints
+from agents.sts2_docs import API_REF_PATH, get_docs_for_type, get_planner_api_hints
 from app.modules.codegen.application.artifact_writer import ArtifactWriter
 from app.modules.codegen.application.build_trigger import BuildTrigger
 from app.modules.codegen.application.prompt_assembler import PromptAssembler
 from app.modules.codegen.application.services import CodegenService
 from app.modules.codegen.domain.models import AssetCodegenRequest, AssetGroupRequest, CustomCodegenRequest, ModProjectRequest
+from app.modules.knowledge.application.knowledge_facade import build_api_lookup_context
 from app.modules.knowledge.infra.sts2_docs_source import Sts2DocsKnowledgeSource
-from app.modules.knowledge.infra.knowledge_runtime import get_active_baselib_src_path, get_active_game_decompiled_src_path
 from app.shared.prompting import PromptLoader
-from config import get_decompiled_src_path
 from llm.agent_runner import run_agent_task
 
 _PROMPT_LOADER = PromptLoader()
@@ -19,7 +18,6 @@ _API_LOOKUP_TITLE_KEY = "codegen.api_lookup_title"
 _API_LOOKUP_BASELIB_KEY = "codegen.api_lookup_baselib"
 _API_LOOKUP_STS2_LOCAL_KEY = "codegen.api_lookup_sts2_local"
 _API_LOOKUP_STS2_FALLBACK_KEY = "codegen.api_lookup_sts2_fallback"
-_ILSPY_EXAMPLE_DLL_PATH = "<STS2GamePath>/data_sts2_windows_x86_64/sts2.dll"
 
 
 async def run_claude_code(prompt: str, project_root: Path, stream_callback=None) -> str:
@@ -27,28 +25,27 @@ async def run_claude_code(prompt: str, project_root: Path, stream_callback=None)
 
 
 def _build_api_lookup_section() -> str:
-    baselib_src_path = get_active_baselib_src_path()
+    lookup_context = build_api_lookup_context()
     title = _PROMPT_LOADER.load(_API_LOOKUP_TITLE_KEY).strip()
     baselib_note = _PROMPT_LOADER.render(
         _API_LOOKUP_BASELIB_KEY,
         {
-            "baselib_src_path": f"`{baselib_src_path}`",
+            "baselib_src_path": f"`{lookup_context['baselib_src_path']}`",
         },
     ).strip()
 
-    decompiled_path = get_active_game_decompiled_src_path() or get_decompiled_src_path()
-    if decompiled_path:
+    if lookup_context["game_source_mode"] == "runtime_decompiled":
         sts2_note = _PROMPT_LOADER.render(
             _API_LOOKUP_STS2_LOCAL_KEY,
             {
-                "decompiled_src_path": f"`{decompiled_path}`",
+                "decompiled_src_path": f"`{lookup_context['game_path']}`",
             },
         ).strip()
     else:
         sts2_note = _PROMPT_LOADER.render(
             _API_LOOKUP_STS2_FALLBACK_KEY,
             {
-                "ilspy_example_dll_path": f"`{_ILSPY_EXAMPLE_DLL_PATH}`",
+                "ilspy_example_dll_path": f"`{lookup_context['ilspy_example_dll_path']}`",
             },
         ).strip()
 

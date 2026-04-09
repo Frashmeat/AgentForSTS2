@@ -11,6 +11,19 @@ export function KnowledgeGuideDialog({ open, status, onClose }: KnowledgeGuideDi
     return null;
   }
 
+  const gameSourceLabel =
+    status?.game?.source_mode === "runtime_decompiled"
+      ? "运行时反编译目录"
+      : status?.game?.source_mode === "repo_reference"
+        ? "仓库静态参考"
+        : "缺失";
+  const baselibSourceLabel =
+    status?.baselib?.source_mode === "runtime_decompiled"
+      ? "运行时反编译目录"
+      : status?.baselib?.source_mode === "repo_fallback"
+        ? "仓库内 BaseLib fallback"
+        : "缺失";
+
   return (
     <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center px-4" onClick={onClose}>
       <div
@@ -29,6 +42,8 @@ export function KnowledgeGuideDialog({ open, status, onClose }: KnowledgeGuideDi
             <p className="text-xs text-slate-500">自动检测到的 `sts2_path` 与 Steam `app manifest / 安装版本文本`。</p>
             <p className="text-xs text-slate-600 break-all">当前路径：{status?.game?.configured_path || "未检测到"}</p>
             <p className="text-xs text-slate-600">当前版本：{status?.game?.current_version || status?.game?.version || "未知"}</p>
+            <p className="text-xs text-slate-600">当前实际使用来源：{gameSourceLabel}</p>
+            <p className="text-xs text-slate-600 break-all">当前知识路径：{status?.game?.decompiled_src_path || "未检测到"}</p>
           </section>
 
           <section className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-2">
@@ -43,6 +58,8 @@ export function KnowledgeGuideDialog({ open, status, onClose }: KnowledgeGuideDi
               https://github.com/Alchyr/BaseLib-StS2/releases
             </a>
             <p className="text-xs text-slate-600">当前 release：{status?.baselib?.latest_release_tag || status?.baselib?.release_tag || "未知"}</p>
+            <p className="text-xs text-slate-600">当前实际使用来源：{baselibSourceLabel}</p>
+            <p className="text-xs text-slate-600 break-all">当前知识路径：{status?.baselib?.decompiled_src_path || "未检测到"}</p>
           </section>
         </div>
 
