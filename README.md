@@ -108,6 +108,22 @@ Current product behavior:
 - **同一入口 + 用户中心** — 同一前端入口同时承接本地工作站链路与平台链路，已补登录/注册/用户中心/任务详情页
 - **统一执行分流** — 点击生成后可在“本机执行 / 服务器模式”之间分流；服务器模式先创建平台任务草稿，再确认开始
 
+### 知识库版本检查
+
+- 工作站启动后会检查本地知识库状态，并区分 `fresh / stale / missing`
+- 游戏知识库版本来源于当前自动检测到的 `sts2_path` 对应 Steam 安装版本文本
+- Baselib 知识库版本来源于官方 latest release：
+  <https://github.com/Alchyr/BaseLib-StS2/releases>
+- 设置页现在提供：
+  - `检查更新`
+  - `更新知识库`
+  - `查看知识库说明`
+- 本地知识缓存默认位于：
+  - `runtime/knowledge/knowledge-manifest.json`
+  - `runtime/knowledge/game_decompiled/`
+  - `runtime/knowledge/baselib_decompiled/`
+  - `runtime/knowledge/cache/`
+
 ### 快速开始
 
 ```bash
