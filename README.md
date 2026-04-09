@@ -73,6 +73,7 @@ Current product behavior:
 ### Tool Scripts
 
 - Core install/start/dev helpers live in `tools/`.
+- `tools/kill-local.ps1` stops the default local `frontend` / `workstation` / `web` processes by port (`5173 / 7860 / 7870`).
 - `tools/latest/` contains the current packaging and Docker deployment scripts.
 - `tools/archive/` stores deprecated historical scripts. The old Windows Sandbox verification chain has been moved there and is no longer part of the primary workflow.
 - `tools/latest/artifacts/` and generated `sandbox_test.wsb` files are local outputs and are ignored by Git.
@@ -197,6 +198,8 @@ pwsh -NoProfile -File .\tools\latest\stop-deploy.ps1 hybrid
 - `deploy-docker.ps1` 在 `hybrid` / `workstation` / `frontend` / `full` 目标下会把本地服务作为后台进程启动，并额外打开日志窗口。
 - 关闭日志窗口只会停止日志查看，不会自动停止后台服务。
 - 如需停止这些本地服务，请执行对应的 `stop-deploy.ps1`；脚本会读取 `release/runtime/local-deploy-state.json` 中记录的 PID。
+- `deploy-docker.ps1 hybrid` 默认会从当前 hybrid release 的同级目录推导本机 `web release`，并在联动部署前自动刷新该 release；如实际目录不在同级，可显式传入 `-WebReleaseRoot`。
+- Docker 构建默认会自动解析 `Python` 基础镜像，优先复用本机已有标签，并默认回退到 `m.daocloud.io/docker.io/library/python:3.11-slim`；如需手工指定，可传 `-PythonBaseImage`。
 - `workstation` 本地 Python 运行时会缓存到 `release/runtime/python-runtime/workstation`；`requirements.txt` 与启动用 Python 未变化时，后续部署会直接复用该缓存，不再重复安装依赖。
 
 默认文件位置：
@@ -215,6 +218,7 @@ pwsh -NoProfile -File .\tools\latest\stop-deploy.ps1 hybrid
 ### 工具脚本
 
 - 当前安装、启动、开发辅助脚本统一放在 `tools/`。
+- `tools\kill-local.ps1` 可按默认端口停止本机 `frontend / workstation / web` 进程，默认端口分别为 `5173 / 7860 / 7870`。
 - `tools/latest/` 存放当前推荐使用的打包与 Docker 部署脚本。
 - `tools/archive/` 存放已归档的历史脚本；旧的 Windows Sandbox 验证链路已经迁入该目录，不再作为主流程维护。
 - `tools/latest/artifacts/` 与生成出来的 `sandbox_test.wsb` 都属于本地产物，默认不会提交到 Git。

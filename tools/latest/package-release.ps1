@@ -198,10 +198,20 @@ function Ensure-FrontendDependencies {
     }
 
     Write-Host "检测到前端依赖缺失或锁文件落后，执行 npm install..."
-    & npm install
+    $npmCommand = Resolve-NpmCommand
+    & $npmCommand install
     if ($LASTEXITCODE -ne 0) {
         throw "前端依赖安装失败"
     }
+}
+
+function Resolve-NpmCommand {
+    $npmCmdPath = Join-Path ${env:ProgramFiles} "nodejs\npm.cmd"
+    if (Test-Path -LiteralPath $npmCmdPath) {
+        return $npmCmdPath
+    }
+
+    return "npm"
 }
 
 function Invoke-RobocopySafe {
@@ -464,6 +474,7 @@ if ($needsModTemplate) {
 if ($needsFrontend -and (-not $SkipFrontendBuild)) {
     Assert-CommandExists -CommandName "node"
     Assert-CommandExists -CommandName "npm"
+    $npmCommand = Resolve-NpmCommand
 
     Push-Location $frontendDir
     try {
@@ -471,7 +482,7 @@ if ($needsFrontend -and (-not $SkipFrontendBuild)) {
 
         # 统一在打包阶段产出 dist，避免部署脚本再触发前端构建。
         Write-Host "构建前端产物..."
-        & npm run build
+        & $npmCommand run build
         if ($LASTEXITCODE -ne 0) {
             throw "前端构建失败"
         }

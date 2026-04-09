@@ -3,6 +3,8 @@ services:
     build:
       context: ./services/workstation
       dockerfile: Dockerfile
+      args:
+        PYTHON_BASE_IMAGE: ${ATS_PYTHON_BASE_IMAGE:-python:3.11-slim}
     restart: unless-stopped
     ports:
       - "${ATS_WORKSTATION_PORT:-7860}:7860"

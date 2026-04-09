@@ -20,6 +20,8 @@ services:
     build:
       context: ./services/web
       dockerfile: Dockerfile
+      args:
+        PYTHON_BASE_IMAGE: ${ATS_PYTHON_BASE_IMAGE:-python:3.11-slim}
     restart: unless-stopped
     depends_on:
       postgres:

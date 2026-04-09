@@ -30,6 +30,9 @@ Web 端口。默认 7870。
 .PARAMETER WebBaseUrl
 前端运行时写入的 Web API 基地址。`hybrid` / `frontend` 未显式传入时默认使用本机 `http://127.0.0.1:<WebPort>`，并可联动部署本机 Docker `web-backend`；显式传入后改为指向指定地址。
 
+.PARAMETER WebReleaseRoot
+`hybrid` 未显式传入 `-WebBaseUrl` 时，联动部署的本机 `web-backend` release 目录。留空时默认按当前 hybrid release 的同级目录推导。
+
 .PARAMETER PostgresHostPort
 Postgres 暴露到宿主机的端口。默认 5432。
 
@@ -44,6 +47,9 @@ Postgres 密码。默认 agentthespire。
 
 .PARAMETER PostgresImage
 Postgres 镜像名。留空时自动优先复用本机已有镜像。
+
+.PARAMETER PythonBaseImage
+Python Docker 基础镜像。留空时自动优先复用本机已有标签，并回退到可用镜像源。
 
 .PARAMETER ResetDatabase
 重建数据库。full 默认会执行；web 目标可显式开启。
@@ -106,6 +112,9 @@ param(
     [Alias("wb")]
     [string]$WebBaseUrl = "",
 
+    [Parameter(HelpMessage = "`hybrid` 默认联动部署的本机 web release 目录。留空时按当前 hybrid release 的同级目录推导。")]
+    [string]$WebReleaseRoot = "",
+
     # 数据库参数
     [Parameter(HelpMessage = "Postgres 暴露到宿主机的端口。默认 5432。")]
     [Alias("dbp")]
@@ -126,6 +135,10 @@ param(
     [Parameter(HelpMessage = "Postgres 镜像名。留空时自动优先复用本机已有镜像。")]
     [Alias("pg")]
     [string]$PostgresImage = "",
+
+    [Parameter(HelpMessage = "Python Docker 基础镜像。留空时自动优先复用本机已有标签，并回退到可用镜像源。")]
+    [Alias("pyi")]
+    [string]$PythonBaseImage = "",
 
     # 行为开关
     [Parameter(HelpMessage = "重建数据库。full 默认会执行；web 目标可显式开启。")]
@@ -928,7 +941,14 @@ function Start-LogViewerWindow {
 }
 
 function Get-DefaultHybridWebReleaseRoot {
-    param([string]$HybridReleaseRoot)
+    param(
+        [string]$HybridReleaseRoot,
+        [string]$ExplicitWebReleaseRoot = ""
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($ExplicitWebReleaseRoot)) {
+        return [System.IO.Path]::GetFullPath($ExplicitWebReleaseRoot)
+    }
 
     if (-not [string]::IsNullOrWhiteSpace($HybridReleaseRoot)) {
         $resolvedHybridRoot = [System.IO.Path]::GetFullPath($HybridReleaseRoot)
@@ -955,13 +975,42 @@ function Get-DefaultHybridWebProjectName {
     return "agentthespire-web-release"
 }
 
+function Ensure-HybridLocalWebRelease {
+    param(
+        [string]$WebReleaseRoot,
+        [bool]$ForceRefresh = $false
+    )
+
+    if ((-not $ForceRefresh) -and (Test-Path -LiteralPath $WebReleaseRoot)) {
+        return
+    }
+
+    $shellPath = Get-CurrentPowerShellExecutablePath
+    $packageScriptPath = Join-Path $PSScriptRoot "package-release.ps1"
+    $outputRoot = Split-Path -Path $WebReleaseRoot -Parent
+    $releaseName = Split-Path -Path $WebReleaseRoot -Leaf
+
+    if ($ForceRefresh) {
+        Write-Host "刷新默认本机 web release，使其与当前仓库模板保持一致: $WebReleaseRoot"
+    } else {
+        Write-Host "未找到本机 web release，先自动生成: $WebReleaseRoot"
+    }
+    & $shellPath -NoProfile -File $packageScriptPath web -OutputRoot $outputRoot -ReleaseName $releaseName -SkipZip
+    if ($LASTEXITCODE -ne 0) {
+        throw "自动生成本机 web release 失败，退出码: $LASTEXITCODE"
+    }
+}
+
 function Invoke-HybridLocalWebDeployment {
     param(
         [string]$HybridReleaseRoot,
-        [string]$HybridProjectName
+        [string]$HybridProjectName,
+        [string]$ExplicitWebReleaseRoot = ""
     )
 
-    $webReleaseRoot = Get-DefaultHybridWebReleaseRoot -HybridReleaseRoot $HybridReleaseRoot
+    $webReleaseRoot = Get-DefaultHybridWebReleaseRoot -HybridReleaseRoot $HybridReleaseRoot -ExplicitWebReleaseRoot $ExplicitWebReleaseRoot
+    $forceRefreshDefaultWebRelease = [string]::IsNullOrWhiteSpace($ExplicitWebReleaseRoot)
+    Ensure-HybridLocalWebRelease -WebReleaseRoot $webReleaseRoot -ForceRefresh:$forceRefreshDefaultWebRelease
     Assert-PathExists -Path $webReleaseRoot -Label "hybrid 默认本机 web release 目录"
 
     $shellPath = Get-CurrentPowerShellExecutablePath
@@ -990,6 +1039,9 @@ function Invoke-HybridLocalWebDeployment {
 
     if (-not [string]::IsNullOrWhiteSpace($PostgresImage)) {
         $invokeArgs += @("-PostgresImage", $PostgresImage)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($PythonBaseImage)) {
+        $invokeArgs += @("-PythonBaseImage", $PythonBaseImage)
     }
     if ($ResetDatabase.IsPresent) {
         $invokeArgs += "-ResetDatabase"
@@ -1115,7 +1167,8 @@ function Write-ComposeEnvFile {
     param(
         [string]$TargetName,
         [string]$EnvPath,
-        [string]$ResolvedPostgresImage
+        [string]$ResolvedPostgresImage,
+        [string]$ResolvedPythonBaseImage
     )
 
     # Compose 模板的端口、数据库和镜像选择都从 runtime/.env 注入，bundle 本身保持静态。
@@ -1129,10 +1182,14 @@ function Write-ComposeEnvFile {
                 "ATS_POSTGRES_USER=$PostgresUser"
                 "ATS_POSTGRES_PASSWORD=$PostgresPassword"
                 "ATS_POSTGRES_IMAGE=$ResolvedPostgresImage"
+                "ATS_PYTHON_BASE_IMAGE=$ResolvedPythonBaseImage"
             )
         }
         "workstation" {
-            @("ATS_WORKSTATION_PORT=$WorkstationPort")
+            @(
+                "ATS_WORKSTATION_PORT=$WorkstationPort"
+                "ATS_PYTHON_BASE_IMAGE=$ResolvedPythonBaseImage"
+            )
         }
         "hybrid" {
             @(
@@ -1151,6 +1208,7 @@ function Write-ComposeEnvFile {
                 "ATS_POSTGRES_USER=$PostgresUser"
                 "ATS_POSTGRES_PASSWORD=$PostgresPassword"
                 "ATS_POSTGRES_IMAGE=$ResolvedPostgresImage"
+                "ATS_PYTHON_BASE_IMAGE=$ResolvedPythonBaseImage"
             )
         }
         default {
@@ -1390,6 +1448,28 @@ function Resolve-PostgresImage {
     return "postgres:16-alpine"
 }
 
+function Resolve-PythonBaseImage {
+    param([string]$PreferredImage)
+
+    if (-not [string]::IsNullOrWhiteSpace($PreferredImage)) {
+        return $PreferredImage
+    }
+
+    # 优先复用本机已有镜像，减少首次以外的网络拉取；都不存在时再回退到默认镜像源。
+    $candidates = @(
+        "python:3.11-slim",
+        "m.daocloud.io/docker.io/library/python:3.11-slim"
+    )
+
+    foreach ($candidate in $candidates) {
+        if (Test-DockerImageExists -ImageName $candidate) {
+            return $candidate
+        }
+    }
+
+    return "m.daocloud.io/docker.io/library/python:3.11-slim"
+}
+
 $effectiveReleaseRoot = if ([string]::IsNullOrWhiteSpace($ReleaseRoot)) {
     Join-Path $PSScriptRoot ("artifacts\agentthespire-{0}-release" -f $Target)
 } else {
@@ -1423,7 +1503,7 @@ if ($Target -in @("hybrid", "frontend")) {
 }
 
 if ($Target -eq "hybrid" -and (-not $PSBoundParameters.ContainsKey("WebBaseUrl"))) {
-    Invoke-HybridLocalWebDeployment -HybridReleaseRoot $ReleaseRoot -HybridProjectName $ProjectName
+    Invoke-HybridLocalWebDeployment -HybridReleaseRoot $effectiveReleaseRoot -HybridProjectName $effectiveProjectName -ExplicitWebReleaseRoot $WebReleaseRoot
 }
 
 Assert-PathExists -Path $effectiveReleaseRoot -Label "release 目录"
@@ -1438,13 +1518,18 @@ $resolvedPostgresImage = if ($targetNeedsPostgres) {
 } else {
     ""
 }
+$resolvedPythonBaseImage = if ($targetUsesDockerInCurrentRelease) {
+    Resolve-PythonBaseImage -PreferredImage $PythonBaseImage
+} else {
+    ""
+}
 $shouldResetDatabase = $Target -eq "full" -or $ResetDatabase.IsPresent
 $null = New-Item -ItemType Directory -Path $runtimeDir -Force
 
 if ($targetUsesDockerInCurrentRelease) {
     Assert-CommandExists -CommandName "docker"
     Assert-PathExists -Path $composeFile -Label "docker-compose.yml"
-    Write-ComposeEnvFile -TargetName $Target -EnvPath $envFile -ResolvedPostgresImage $resolvedPostgresImage
+    Write-ComposeEnvFile -TargetName $Target -EnvPath $envFile -ResolvedPostgresImage $resolvedPostgresImage -ResolvedPythonBaseImage $resolvedPythonBaseImage
 }
 
 $workstationServiceDir = Join-Path (Join-Path $effectiveReleaseRoot "services") "workstation"
@@ -1616,6 +1701,9 @@ Write-Host "  强制重建镜像 : $($RebuildImages.IsPresent)"
 Write-Host "  重建数据库   : $shouldResetDatabase"
 if ($targetNeedsPostgres) {
     Write-Host "  Postgres 镜像: $resolvedPostgresImage"
+}
+if ($targetUsesDockerInCurrentRelease) {
+    Write-Host "  Python 基镜像: $resolvedPythonBaseImage"
 }
 switch ($Target) {
     "full" {

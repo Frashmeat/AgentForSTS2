@@ -202,6 +202,29 @@ def test_deploy_docker_hybrid_defaults_to_local_web_base_url_and_deploys_web_rel
     assert 'web: "http://127.0.0.1:7870"' in runtime_config.read_text(encoding="utf-8")
 
 
+def test_deploy_docker_hybrid_accepts_explicit_web_release_root(tmp_path: Path):
+    custom_web_release_root = tmp_path / "custom-web-release"
+    _prepare_release_bundle(custom_web_release_root, "web")
+
+    result = _run_deploy(tmp_path, "hybrid", "-WebReleaseRoot", str(custom_web_release_root))
+    runtime_config = tmp_path / "release" / "services" / "frontend" / "frontend" / "dist" / "runtime-config.js"
+
+    assert result.returncode == 0, result.stderr
+    assert result.docker_log.count("compose build") == 1
+    assert result.docker_log.count("compose up") == 1
+    assert runtime_config.exists()
+    assert 'web: "http://127.0.0.1:7870"' in runtime_config.read_text(encoding="utf-8")
+
+
+def test_deploy_docker_web_writes_python_base_image_to_env_file(tmp_path: Path):
+    result = _run_deploy(tmp_path, "web")
+    env_file = tmp_path / "release" / "runtime" / ".env"
+
+    assert result.returncode == 0, result.stderr
+    assert env_file.exists()
+    assert "ATS_PYTHON_BASE_IMAGE=" in env_file.read_text(encoding="utf-8")
+
+
 def test_deploy_docker_hybrid_runs_locally_without_current_release_docker_when_web_base_is_remote(tmp_path: Path):
     result = _run_deploy(tmp_path, "hybrid", "-WebBaseUrl", "https://platform.example.com")
 
