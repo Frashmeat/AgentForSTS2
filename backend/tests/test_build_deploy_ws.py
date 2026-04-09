@@ -109,3 +109,33 @@ def test_build_deploy_ws_stream_includes_model_metadata(monkeypatch, tmp_path):
         "model": "gpt-5.4",
     }
     assert done_payload["event"] == "done"
+
+
+def test_build_deploy_ws_syncs_local_props_before_build(monkeypatch, tmp_path):
+    called: list[Path] = []
+
+    async def fake_build_and_fix(project_root, stream_callback=None):
+        return True, ""
+
+    monkeypatch.setattr(build_deploy_router, "build_and_fix", fake_build_and_fix)
+    monkeypatch.setattr(build_deploy_router, "ensure_local_props", lambda project_root: called.append(project_root) or True)
+    monkeypatch.setattr(
+        build_deploy_router,
+        "get_config",
+        lambda: {"sts2_path": ""},
+    )
+
+    app = FastAPI()
+    app.include_router(build_deploy_router.router, prefix="/api")
+    project_root = tmp_path / "MyMod"
+    project_root.mkdir()
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/api/ws/build-deploy") as ws:
+            ws.send_text(json.dumps({"project_root": str(project_root)}))
+            while True:
+                payload = ws.receive_json()
+                if payload.get("event") == "done":
+                    break
+
+    assert called == [project_root]

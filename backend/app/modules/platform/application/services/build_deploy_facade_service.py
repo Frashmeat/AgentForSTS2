@@ -8,6 +8,7 @@ from agents.code_agent import build_and_fix
 from app.shared.infra.ws_errors import send_ws_error
 from app.shared.prompting import PromptLoader
 from config import get_config
+from project_utils import ensure_local_props
 
 
 class BuildDeployFacadeService:
@@ -58,6 +59,7 @@ class BuildDeployFacadeService:
             async def send_chunk(chunk: str):
                 await ws.send_text(json.dumps({"event": "stream", "chunk": chunk}))
 
+            ensure_local_props(project_root)
             await send_chunk(f"{self._text_loader.load('runtime_workflow.build_agent_build_start').strip()}\n")
             success, _ = await build_and_fix(project_root, stream_callback=send_chunk)
 

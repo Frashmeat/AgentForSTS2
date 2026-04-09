@@ -4,10 +4,10 @@
 **ALWAYS use `dotnet publish`**, NOT `dotnet build`.
 - `dotnet publish` = compiles DLL + exports Godot PCK + deploys both to the game's mods folder.
 - `dotnet build` = only compiles DLL, no PCK export. Game won't load the mod.
-- Game requires BOTH `.dll` AND `.pck` in `STS2GamePath/mods/<ModName>/`.
+- Game requires BOTH `.dll` AND `.pck` in `<sts2_path>/mods/<ModName>/`.
 
 ## How the Game Loads Mods
-- On startup, the game scans `STS2GamePath/mods/` for subdirectories.
+- On startup, the game scans `<sts2_path>/mods/` for subdirectories.
 - A mod is recognized when the subdirectory contains BOTH `<ModName>.dll` AND `<ModName>.pck`.
 - `.pck` contains `mod_manifest.json` (mod identity) and all image/localization assets.
 - `.pck` format is version-locked to the Godot engine version: must use **Godot 4.5.1 Mono**.
@@ -59,8 +59,8 @@ Images must be placed under `project_root/<ModName>/images/...`, NOT `project_ro
 ```xml
 <Project>
   <PropertyGroup>
-    <STS2GamePath>C:/SteamLibrary/.../Slay the Spire 2</STS2GamePath>
-    <GodotExePath>C:/tools/Godot_v4.5.1-stable_mono_win64.exe</GodotExePath>
+    <SteamLibraryPath>C:/SteamLibrary/steamapps</SteamLibraryPath>
+    <GodotPath>C:/tools/Godot_v4.5.1-stable_mono_win64.exe</GodotPath>
   </PropertyGroup>
 </Project>
 ```

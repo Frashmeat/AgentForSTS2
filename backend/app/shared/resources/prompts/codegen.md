@@ -18,7 +18,8 @@ Class names in this group: {{ class_names }}
 
 ### Project already initialized
 The project at `{{ project_root }}` is set up. Read `MainFile.cs` first to confirm namespace and ModId.
-- `local.props` and `nuget.config` — already correct, do NOT recreate
+- `local.props` — managed by current machine settings; do NOT recreate unless the task explicitly requires fixing project path config
+- `nuget.config` — already correct, do NOT recreate
 - `Extensions/StringExtensions.cs` — image path helpers, already present
 - `{{ mod_name }}/` — Godot resource dir (named after the MOD: "{{ mod_name }}"). All images and localization go here.
 
@@ -62,7 +63,7 @@ Image assets already generated and placed at:
 ### Project already initialized
 The project at `{{ project_root }}` is already set up (copied from a working template).
 - `MainFile.cs` — entry point (read it to confirm the exact namespace and ModId)
-- `local.props` — already correct for this machine (do NOT recreate)
+- `local.props` — managed by current machine settings (do NOT recreate unless the task explicitly requires fixing project path config)
 - `nuget.config` — already correct (do NOT recreate)
 - `Extensions/StringExtensions.cs` — image path helpers, already present
 - `{{ mod_name }}/` — Godot resource dir (named after the MOD, NOT the asset). Images and localization go here.
@@ -125,7 +126,8 @@ Technical implementation notes:
 ### Project already initialized
 The project at `{{ project_root }}` is already set up (copied from a working template).
 - `MainFile.cs` — entry point with `harmony.PatchAll()` already wired up
-- `local.props` and `nuget.config` — already correct, do NOT recreate
+- `local.props` — managed by current machine settings; do NOT recreate unless the task explicitly requires fixing project path config
+- `nuget.config` — already correct, do NOT recreate
 - `{{ mod_name }}/` — Godot resource dir (named after the MOD: "{{ mod_name }}")
 
 DO NOT re-clone from GitHub. DO NOT recreate local.props or nuget.config.

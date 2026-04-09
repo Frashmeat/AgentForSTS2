@@ -127,3 +127,58 @@ def test_detect_paths_task_can_be_cancelled(monkeypatch):
 
     assert snapshot["status"] == "cancelled"
     assert snapshot["can_cancel"] is False
+
+
+def test_ensure_local_props_creates_managed_fields_from_config(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "config.get_config",
+        lambda: {
+            "sts2_path": "E:/SteamLibrary/steamapps/common/Slay the Spire 2",
+            "godot_exe_path": "C:/tools/Godot.exe",
+        },
+    )
+
+    project_root = tmp_path / "MyMod"
+    project_root.mkdir()
+
+    assert project_utils.ensure_local_props(project_root) is True
+
+    props_text = (project_root / "local.props").read_text(encoding="utf-8")
+    assert "<SteamLibraryPath>E:/SteamLibrary/steamapps</SteamLibraryPath>" in props_text
+    assert "<GodotPath>C:/tools/Godot.exe</GodotPath>" in props_text
+    assert "STS2GamePath" not in props_text
+    assert "GodotExePath" not in props_text
+
+
+def test_ensure_local_props_overwrites_existing_project_with_managed_fields(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "config.get_config",
+        lambda: {
+            "sts2_path": "E:/SteamLibrary/steamapps/common/Slay the Spire 2",
+            "godot_exe_path": "F:/tools/Godot.exe",
+        },
+    )
+
+    project_root = tmp_path / "MyMod"
+    project_root.mkdir()
+    props_path = project_root / "local.props"
+    props_path.write_text(
+        """<Project>
+  <PropertyGroup>
+    <SteamLibraryPath>C:/Program Files (x86)/Steam/steamapps</SteamLibraryPath>
+    <GodotPath>C:/tools/OldGodot.exe</GodotPath>
+    <STS2GamePath>legacy-path</STS2GamePath>
+    <CustomFlag>true</CustomFlag>
+  </PropertyGroup>
+</Project>
+""",
+        encoding="utf-8",
+    )
+
+    assert project_utils.ensure_local_props(project_root) is True
+
+    props_text = props_path.read_text(encoding="utf-8")
+    assert "<SteamLibraryPath>E:/SteamLibrary/steamapps</SteamLibraryPath>" in props_text
+    assert "<GodotPath>F:/tools/Godot.exe</GodotPath>" in props_text
+    assert "STS2GamePath" not in props_text
+    assert "<CustomFlag>true</CustomFlag>" not in props_text

@@ -6,7 +6,7 @@ from typing import Any
 from agents.sts2_docs import API_REF_PATH, BASELIB_SRC_PATH
 from app.modules.knowledge.infra import knowledge_runtime
 
-_ILSPY_EXAMPLE_DLL_PATH = "<STS2GamePath>/data_sts2_windows_x86_64/sts2.dll"
+_ILSPY_EXAMPLE_DLL_PATH = "<sts2_path>/data_sts2_windows_x86_64/sts2.dll"
 
 
 def _has_cs_files(path: Path) -> bool:

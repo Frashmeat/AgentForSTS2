@@ -212,30 +212,54 @@ def _detect_godot_with_progress(reporter: _DetectPathsProgressReporter) -> None:
 
 def ensure_local_props(project_root: Path) -> bool:
     """
-    若 project_root 下没有 local.props，根据 config.json 自动生成。
-    返回 True 表示成功生成（或已存在），False 表示配置不完整无法生成。
+    根据当前配置重写 project_root 下的 local.props。
+    返回 True 表示同步成功；False 表示配置不完整无法生成。
     """
     from config import get_config
     props_path = project_root / "local.props"
-    if props_path.exists():
-        return True
-
-    cfg = get_config()
-    sts2_path = cfg.get("sts2_path", "").strip()
-    godot_path = cfg.get("godot_exe_path", "").strip()
-
-    if not sts2_path or not godot_path:
+    managed_values = _resolve_local_props_values(get_config())
+    if not managed_values:
         return False
 
     content = _TEXT_LOADER.render(
         "runtime_system.project_utils_local_props_template",
         {
-            "sts2_path": sts2_path,
-            "godot_path": godot_path,
+            "steam_library_path": managed_values["SteamLibraryPath"],
+            "godot_path": managed_values["GodotPath"],
         },
     )
-    props_path.write_text(content, encoding="utf-8")
+    props_path.write_text(content.strip() + "\n", encoding="utf-8")
     return True
+
+
+def _resolve_local_props_values(cfg: dict) -> dict[str, str]:
+    values: dict[str, str] = {}
+
+    sts2_path = str(cfg.get("sts2_path", "")).strip()
+    steam_library_path = _derive_steam_library_path(sts2_path)
+    if steam_library_path:
+        values["SteamLibraryPath"] = steam_library_path
+
+    godot_path = str(cfg.get("godot_exe_path", "")).strip()
+    if godot_path:
+        values["GodotPath"] = Path(godot_path).as_posix()
+
+    return values
+
+
+def _derive_steam_library_path(sts2_path: str) -> str:
+    raw_path = str(sts2_path).strip()
+    if not raw_path:
+        return ""
+
+    path = Path(raw_path)
+    if path.name.lower() == "steamapps":
+        return path.as_posix()
+
+    if path.name.lower() == "slay the spire 2" and path.parent.name.lower() == "common":
+        return path.parent.parent.as_posix()
+
+    return ""
 
 
 # ── 路径自动检测 ───────────────────────────────────────────────────────────────

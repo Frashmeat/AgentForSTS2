@@ -50,3 +50,32 @@ def test_build_deploy_facade_service_returns_error_when_sts2_path_is_configured_
 
     assert ws.sent == [ws.sent[0]]
     assert ws.sent[0]["event"] == "error"
+
+
+def test_build_deploy_facade_service_syncs_local_props_before_build(monkeypatch, tmp_path):
+    called: list[Path] = []
+
+    async def fake_build_and_fix(project_root, stream_callback=None):
+        return True, ""
+
+    monkeypatch.setattr(
+        "app.modules.platform.application.services.build_deploy_facade_service.build_and_fix",
+        fake_build_and_fix,
+    )
+    monkeypatch.setattr(
+        "app.modules.platform.application.services.build_deploy_facade_service.ensure_local_props",
+        lambda project_root: called.append(project_root) or True,
+    )
+    monkeypatch.setattr(
+        "app.modules.platform.application.services.build_deploy_facade_service.get_config",
+        lambda: {"sts2_path": ""},
+    )
+
+    project_root = tmp_path / "MyMod"
+    project_root.mkdir()
+    ws = _FakeWebSocket({"project_root": str(project_root)})
+    service = BuildDeployFacadeService()
+
+    asyncio.run(service.handle_ws_build_deploy(ws))
+
+    assert called == [project_root]

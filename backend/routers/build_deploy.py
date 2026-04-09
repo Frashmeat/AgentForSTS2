@@ -19,6 +19,7 @@ from app.shared.infra.ws_errors import send_ws_error
 from app.shared.prompting import PromptLoader
 from config import get_config
 from llm.stream_metadata import build_stream_chunk_payload, resolve_agent_display_model
+from project_utils import ensure_local_props
 
 router = APIRouter()
 _TEXT_LOADER = PromptLoader()
@@ -100,6 +101,7 @@ async def ws_build_deploy(ws: WebSocket):
             }))
 
         # ── Step 1: Code Agent 构建（dotnet publish + Godot .pck export）──
+        ensure_local_props(project_root)
         await send_chunk(f"{_TEXT_LOADER.load('runtime_workflow.build_agent_build_start').strip()}\n")
         success, _ = await build_and_fix(project_root, stream_callback=send_chunk)
 

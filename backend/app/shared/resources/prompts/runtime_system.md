@@ -4,8 +4,8 @@ a glowing icon
 ## project_utils_local_props_template
 <Project>
   <PropertyGroup>
-    <STS2GamePath>{{ sts2_path }}</STS2GamePath>
-    <GodotExePath>{{ godot_path }}</GodotExePath>
+    <SteamLibraryPath>{{ steam_library_path }}</SteamLibraryPath>
+    <GodotPath>{{ godot_path }}</GodotPath>
   </PropertyGroup>
 </Project>
 
