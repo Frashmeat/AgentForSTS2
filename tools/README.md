@@ -212,6 +212,7 @@ tools/
 - `tools\latest\deploy-docker.ps1` 拉起的本地服务 PID 会写入 `runtime\local-deploy-state.json`，供 `tools\latest\stop-deploy.ps1` 读取并停止。
 - `deploy-docker.ps1` 打开的日志终端只是查看窗口；关闭窗口不会自动停止后台服务进程。
 - `workstation` 本地 Python 运行时缓存位于 `runtime\python-runtime\workstation`；只要 `services\workstation\backend\requirements.txt` 与启动所用 Python 没变化，后续部署会优先复用该缓存。
+- `package-release.ps1` 生成 zip 时会默认排除 `runtime\python-runtime` 本地缓存，避免把本机 `.venv` 与依赖缓存一并打进发布归档；release 目录本身仍会保留该缓存供本地部署复用。
 - `hybrid` / `workstation` / `full` 形态下，工作站应用配置统一收敛到 `runtime\workstation.config.json`；`services\workstation\config.json` 不再作为独立真源。
 - `runtime-config.js` 仍属于部署期配置文件；更换 `workstation` 或 `web` 地址时优先覆盖该文件，不重新构建前端。
 - `workstation` 地址应配置为本机或 LAN 可达地址，不应配置为公网用户本机地址。
