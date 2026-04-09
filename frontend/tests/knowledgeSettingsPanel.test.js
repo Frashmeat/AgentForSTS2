@@ -22,3 +22,11 @@ test("settings panel uses knowledge status and refresh task APIs", () => {
   assert.match(source, /startRefreshKnowledgeTask/);
   assert.match(source, /getRefreshKnowledgeTask/);
 });
+
+test("settings panel exposes knowledge source labels for game and baselib", () => {
+  const source = readSource("../src/components/SettingsPanel.tsx");
+
+  assert.match(source, /游戏知识来源/);
+  assert.match(source, /Baselib 知识来源/);
+  assert.match(source, /source_mode/);
+});
