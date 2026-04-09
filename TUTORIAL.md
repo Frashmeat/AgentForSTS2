@@ -78,6 +78,7 @@ tools\setup_mod_deps.bat
 自动完成：
 - 检测并安装 .NET 9 SDK（通过 winget）
 - 下载 Godot 4.5.1 Mono（~130MB）并解压到 `godot/` 目录
+- 安装 `ilspycmd`（dotnet global tool）
 - 将 Godot 路径写入 `config.json`
 
 > Linux/macOS 用户：使用 `./tools/install.sh` 和 `./tools/setup_mod_deps.sh`
@@ -238,7 +239,8 @@ python tools/dev/decompile_sts2.py --game-path "C:/Steam/steamapps/common/Slay t
 
 如果直接从工作站界面更新知识库，则会把结果同步到 `runtime/knowledge/` 下的本地缓存。
 
-依赖 `ilspycmd`，若未安装：
+`tools\install.bat` / `tools\setup_mod_deps.bat` 现在会尝试自动安装 `ilspycmd`。
+若自动安装失败，也可以手动执行：
 ```bash
 dotnet tool install -g ilspycmd
 ```

@@ -37,6 +37,10 @@ $checks = @(
         Pattern = 'dotnet-install.ps1'
     }
     @{
+        Name = 'powershell entry installs ilspycmd'
+        Pattern = 'Ensure-IlspyCmd'
+    }
+    @{
         Name = 'powershell entry writes Godot path into config'
         Pattern = 'Set-GodotPathInConfig'
     }

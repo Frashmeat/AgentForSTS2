@@ -27,6 +27,7 @@ Describe your card, relic, or power in plain text — AgentTheSpire generates th
 | Node.js | 18+ | Yes |
 | .NET SDK | 9.x | Yes |
 | Godot Mono | **4.5.1 exactly** | Yes |
+| ilspycmd | latest | Recommended for knowledge refresh / decompile workflows |
 | Slay the Spire 2 | latest | Yes |
 | Claude Code CLI / Codex CLI | latest | Optional for `agent_cli` mode |
 | LLM API Key | — | One of two LLM options |
@@ -38,7 +39,7 @@ Describe your card, relic, or power in plain text — AgentTheSpire generates th
 git clone https://github.com/yourname/AgentTheSpire.git
 cd AgentTheSpire
 
-powershell -ExecutionPolicy Bypass -File .\tools\install.ps1   # Windows 推荐入口：安装 .NET / Godot / Python deps / frontend build
+powershell -ExecutionPolicy Bypass -File .\tools\install.ps1   # Windows 推荐入口：安装 .NET / Godot / ilspycmd / Python deps / frontend build
 tools\install.bat                                           # 兼容入口，内部转发到 install.ps1
 
 # Copy config.example.json → config.json, fill in your API keys and game path
@@ -131,10 +132,10 @@ Current product behavior:
 git clone https://github.com/yourname/AgentTheSpire.git
 cd AgentTheSpire
 
-powershell -ExecutionPolicy Bypass -File .\tools\install.ps1   # Windows 推荐入口：安装 .NET / Godot / Python 依赖 / 前端构建
+powershell -ExecutionPolicy Bypass -File .\tools\install.ps1   # Windows 推荐入口：安装 .NET / Godot / ilspycmd / Python 依赖 / 前端构建
 tools\install.bat                                           # 兼容入口，内部转发到 install.ps1
 
-# 如果只想安装 .NET 9 + Godot 4.5.1：
+# 如果只想安装 .NET 9 + Godot 4.5.1 + ilspycmd：
 powershell -ExecutionPolicy Bypass -File .\tools\install.ps1 -OnlyModDeps
 
 # 复制 config.example.json → config.json，填入 API Key 和游戏路径
@@ -215,6 +216,7 @@ pwsh -NoProfile -File .\tools\latest\stop-deploy.ps1 hybrid
 - 关闭日志窗口只会停止日志查看，不会自动停止后台服务。
 - 如需停止这些本地服务，请执行对应的 `stop-deploy.ps1`；脚本会读取 `release/runtime/local-deploy-state.json` 中记录的 PID。
 - `deploy-docker.ps1 hybrid` 默认会从当前 hybrid release 的同级目录推导本机 `web release`，并在联动部署前自动刷新该 release；如实际目录不在同级，可显式传入 `-WebReleaseRoot`。
+- 刷新默认推导出的本机 `web release` 前，脚本会先对固定的 `agentthespire-web-release` Compose 项目执行一次 `docker compose down --remove-orphans`，避免重复执行 `hybrid` 时直接改写仍被 Docker Compose 使用的 release 目录。
 - Docker 构建默认会自动解析 `Python` 基础镜像，优先复用本机已有标签，并默认回退到 `m.daocloud.io/docker.io/library/python:3.11-slim`；如需手工指定，可传 `-PythonBaseImage`。
 - `workstation` 本地 Python 运行时会缓存到 `release/runtime/python-runtime/workstation`；`requirements.txt` 与启动用 Python 未变化时，后续部署会直接复用该缓存，不再重复安装依赖。
 

@@ -3,11 +3,11 @@
 Windows 安装入口，统一安装 AgentTheSpire 运行与 Mod 开发依赖。
 
 .DESCRIPTION
-默认执行 .NET 9 SDK、Godot 4.5.1 Mono、backend/.venv、后端依赖、rembg 预热、frontend 依赖和前端构建。
-传入 -OnlyModDeps 时，仅安装或配置 .NET 9 SDK 与 Godot 4.5.1 Mono。
+默认执行 .NET 9 SDK、Godot 4.5.1 Mono、ilspycmd、backend/.venv、后端依赖、rembg 预热、frontend 依赖和前端构建。
+传入 -OnlyModDeps 时，仅安装或配置 .NET 9 SDK、Godot 4.5.1 Mono 与 ilspycmd。
 
 .PARAMETER OnlyModDeps
-只安装或配置 .NET 9 SDK 与 Godot 4.5.1 Mono。
+只安装或配置 .NET 9 SDK、Godot 4.5.1 Mono 与 ilspycmd。
 
 .PARAMETER InstallLocalImage
 额外安装 ComfyUI，并把本地图生配置写入 config.json。
@@ -54,6 +54,7 @@ $script:GodotInstallDir = Join-Path $script:RootDir "godot"
 $script:GodotExe = Join-Path $script:GodotInstallDir "Godot_v4.5.1-stable_mono_win64\Godot_v4.5.1-stable_mono_win64.exe"
 $script:GodotDownloadUrl = "https://github.com/godotengine/godot/releases/download/4.5.1-stable/Godot_v4.5.1-stable_mono_win64.zip"
 $script:DotNetInstallDir = Join-Path $env:LOCALAPPDATA "Microsoft\dotnet"
+$script:DotNetUserToolsDir = Join-Path $env:USERPROFILE ".dotnet\tools"
 $script:DotNetInstallScriptUrl = "https://dot.net/v1/dotnet-install.ps1"
 
 function Write-Section([string]$Title) {
@@ -337,8 +338,34 @@ function Ensure-DotNetSdk9 {
         throw "未能完成 .NET 9 SDK 安装，请手动安装后重试"
     }
 
+    Add-UserPathEntry -PathEntry $script:DotNetUserToolsDir
     Write-Ok ".NET SDK $($resolved.Version)"
     return $resolved.Executable
+}
+
+function Ensure-IlspyCmd {
+    param([string]$DotNetExe)
+
+    Write-Section "检查 ilspycmd"
+    Add-UserPathEntry -PathEntry $script:DotNetUserToolsDir
+
+    $ilspyExe = Get-CommandSource -Names @("ilspycmd.exe", "ilspycmd")
+    if ($ilspyExe) {
+        Write-Ok "ilspycmd 已安装"
+        return $ilspyExe
+    }
+
+    Write-Info "通过 dotnet tool 安装 ilspycmd..."
+    Invoke-ExternalCommand -FilePath $DotNetExe -Arguments @("tool", "install", "-g", "ilspycmd") -FailureMessage "安装 ilspycmd 失败"
+
+    Add-UserPathEntry -PathEntry $script:DotNetUserToolsDir
+    $resolved = Get-CommandSource -Names @("ilspycmd.exe", "ilspycmd")
+    if (-not $resolved) {
+        throw "ilspycmd 安装完成后仍未能解析到命令，请确认 $script:DotNetUserToolsDir 已加入 PATH"
+    }
+
+    Write-Ok "ilspycmd 已就绪"
+    return $resolved
 }
 
 function Find-GodotExecutable {
@@ -530,9 +557,9 @@ function Show-Summary {
     Write-Host "  AgentTheSpire 安装完成" -ForegroundColor Green
     Write-Host "  日志文件: $script:LogPath" -ForegroundColor Gray
     if ($OnlyModDeps) {
-        Write-Host "  已完成: .NET 9 SDK / Godot 4.5.1 Mono" -ForegroundColor Gray
+        Write-Host "  已完成: .NET 9 SDK / Godot 4.5.1 Mono / ilspycmd" -ForegroundColor Gray
     } else {
-        Write-Host "  已完成: .NET / Godot / backend/.venv / frontend build" -ForegroundColor Gray
+        Write-Host "  已完成: .NET / Godot / ilspycmd / backend/.venv / frontend build" -ForegroundColor Gray
     }
     Write-Host "==================================" -ForegroundColor White
     Write-Host ""
@@ -560,8 +587,9 @@ try {
         Ensure-ClaudeCli
     }
 
-    $null = Ensure-DotNetSdk9
+    $dotnetExe = Ensure-DotNetSdk9
     $null = Ensure-Godot
+    $null = Ensure-IlspyCmd -DotNetExe $dotnetExe
 
     if (-not $OnlyModDeps) {
         Ensure-BackendDependencies -PythonExe $pythonExe
