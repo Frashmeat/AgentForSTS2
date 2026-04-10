@@ -5,6 +5,7 @@ from pathlib import Path
 # 让 pytest 能找到 backend 模块
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from app.modules.knowledge.infra import knowledge_runtime
 from agents.sts2_docs import (
     get_docs_for_type,
     get_planner_api_hints,
@@ -12,11 +13,11 @@ from agents.sts2_docs import (
     STS2_MOD_DOCS,
 )
 
-RESOURCE_DIR = Path(__file__).parent.parent / "app" / "modules" / "knowledge" / "resources" / "sts2"
+RESOURCE_DIR = knowledge_runtime.RESOURCE_KNOWLEDGE_DIR
 
 
 def test_api_ref_file_exists():
-    """The decompiled API reference markdown must be present."""
+    """The runtime knowledge API reference markdown must be present."""
     assert API_REF_PATH.exists(), f"Missing file: {API_REF_PATH}"
 
 

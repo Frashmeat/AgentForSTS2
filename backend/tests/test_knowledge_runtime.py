@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -29,6 +31,75 @@ def test_select_baselib_asset_prefers_baselib_dll():
 
     assert asset["name"] == "BaseLib.dll"
     assert asset["browser_download_url"].endswith("/BaseLib.dll")
+
+
+def test_select_baselib_asset_reports_friendly_error_when_no_matching_dll():
+    release = {
+        "tag_name": "v0.3.1",
+        "assets": [
+            {"name": "BaseLib-linux-x64.zip", "browser_download_url": "https://example.invalid/BaseLib-linux-x64.zip"},
+            {"name": "BaseLib.pdb", "browser_download_url": "https://example.invalid/BaseLib.pdb"},
+            {"name": "manifest.json", "browser_download_url": "https://example.invalid/manifest.json"},
+        ],
+    }
+
+    try:
+        knowledge_runtime.select_baselib_asset(release)
+    except RuntimeError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+    assert "v0.3.1" in message
+    assert "BaseLib-linux-x64.zip" in message
+    assert "BaseLib.pdb" in message
+    assert "manifest.json" in message
+    assert "只接受 .dll" in message
+    assert "优先 BaseLib.dll" in message
+    assert "其次文件名包含 baselib" in message
+
+
+def test_download_file_follows_github_style_redirect(tmp_path: Path):
+    target = tmp_path / "cache" / "BaseLib.dll"
+    payload = b"baselib-binary"
+
+    class RedirectHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            if self.path == "/releases/download/BaseLib.dll":
+                self.send_response(302)
+                self.send_header("Location", "/github-asset/BaseLib.dll")
+                self.end_headers()
+                return
+
+            if self.path == "/github-asset/BaseLib.dll":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+
+            self.send_response(404)
+            self.end_headers()
+
+        def log_message(self, format: str, *args) -> None:  # noqa: A003
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    try:
+        knowledge_runtime._download_file(
+            f"http://127.0.0.1:{server.server_port}/releases/download/BaseLib.dll",
+            target,
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=3)
+        server.server_close()
+
+    assert target.read_bytes() == payload
 
 
 def test_compute_status_marks_stale_when_versions_change(monkeypatch, tmp_path: Path):
@@ -88,6 +159,83 @@ def test_refresh_task_preserves_previous_manifest_when_update_fails(monkeypatch,
     assert final_snapshot["status"] == "failed"
     assert "refresh failed" in (final_snapshot["error"] or "")
     assert '"0.2.14"' in manifest_path.read_text(encoding="utf-8")
+
+
+def test_runtime_knowledge_seed_initialization_copies_repo_sources(monkeypatch, tmp_path: Path):
+    knowledge_root = tmp_path / "runtime" / "knowledge"
+    game_runtime_dir = knowledge_root / "game"
+    baselib_runtime_dir = knowledge_root / "baselib"
+    resource_runtime_dir = knowledge_root / "resources" / "sts2"
+    cache_dir = knowledge_root / "cache"
+    manifest_path = knowledge_root / "knowledge-manifest.json"
+
+    game_seed_dir = tmp_path / "seed" / "game"
+    game_seed_dir.mkdir(parents=True)
+    (game_seed_dir / "Game.cs").write_text("// runtime game seed", encoding="utf-8")
+    baselib_seed_file = tmp_path / "seed" / "BaseLib.decompiled.cs"
+    baselib_seed_file.parent.mkdir(parents=True, exist_ok=True)
+    baselib_seed_file.write_text("// runtime baselib seed", encoding="utf-8")
+    resource_seed_dir = tmp_path / "seed" / "resources" / "sts2"
+    resource_seed_dir.mkdir(parents=True)
+    (resource_seed_dir / "common.md").write_text("runtime common seed\n", encoding="utf-8")
+
+    monkeypatch.setattr(knowledge_runtime, "KNOWLEDGE_ROOT", knowledge_root)
+    monkeypatch.setattr(knowledge_runtime, "GAME_DECOMPILED_DIR", game_runtime_dir)
+    monkeypatch.setattr(knowledge_runtime, "BASELIB_DECOMPILED_DIR", baselib_runtime_dir)
+    monkeypatch.setattr(knowledge_runtime, "KNOWLEDGE_CACHE_DIR", cache_dir)
+    monkeypatch.setattr(knowledge_runtime, "KNOWLEDGE_MANIFEST_PATH", manifest_path)
+    monkeypatch.setattr(knowledge_runtime, "GAME_KNOWLEDGE_SEED_DIR", game_seed_dir, raising=False)
+    monkeypatch.setattr(knowledge_runtime, "BASELIB_KNOWLEDGE_SEED_FILE", baselib_seed_file, raising=False)
+    monkeypatch.setattr(knowledge_runtime, "RESOURCE_KNOWLEDGE_DIR", resource_runtime_dir, raising=False)
+    monkeypatch.setattr(knowledge_runtime, "RESOURCE_KNOWLEDGE_SEED_DIR", resource_seed_dir, raising=False)
+
+    knowledge_runtime.ensure_runtime_knowledge_seeded()
+
+    assert (game_runtime_dir / "Game.cs").read_text(encoding="utf-8") == "// runtime game seed"
+    assert (baselib_runtime_dir / "BaseLib.decompiled.cs").read_text(encoding="utf-8") == "// runtime baselib seed"
+    assert (resource_runtime_dir / "common.md").read_text(encoding="utf-8") == "runtime common seed\n"
+
+
+def test_runtime_knowledge_seed_initialization_preserves_user_changes(monkeypatch, tmp_path: Path):
+    knowledge_root = tmp_path / "runtime" / "knowledge"
+    game_runtime_dir = knowledge_root / "game"
+    baselib_runtime_dir = knowledge_root / "baselib"
+    resource_runtime_dir = knowledge_root / "resources" / "sts2"
+    cache_dir = knowledge_root / "cache"
+    manifest_path = knowledge_root / "knowledge-manifest.json"
+
+    game_runtime_dir.mkdir(parents=True)
+    (game_runtime_dir / "Game.cs").write_text("// user modified game", encoding="utf-8")
+    baselib_runtime_dir.mkdir(parents=True)
+    (baselib_runtime_dir / "BaseLib.decompiled.cs").write_text("// user modified baselib", encoding="utf-8")
+    resource_runtime_dir.mkdir(parents=True)
+    (resource_runtime_dir / "common.md").write_text("user modified common\n", encoding="utf-8")
+
+    game_seed_dir = tmp_path / "seed" / "game"
+    game_seed_dir.mkdir(parents=True)
+    (game_seed_dir / "Game.cs").write_text("// original game seed", encoding="utf-8")
+    baselib_seed_file = tmp_path / "seed" / "BaseLib.decompiled.cs"
+    baselib_seed_file.parent.mkdir(parents=True, exist_ok=True)
+    baselib_seed_file.write_text("// original baselib seed", encoding="utf-8")
+    resource_seed_dir = tmp_path / "seed" / "resources" / "sts2"
+    resource_seed_dir.mkdir(parents=True)
+    (resource_seed_dir / "common.md").write_text("original common seed\n", encoding="utf-8")
+
+    monkeypatch.setattr(knowledge_runtime, "KNOWLEDGE_ROOT", knowledge_root)
+    monkeypatch.setattr(knowledge_runtime, "GAME_DECOMPILED_DIR", game_runtime_dir)
+    monkeypatch.setattr(knowledge_runtime, "BASELIB_DECOMPILED_DIR", baselib_runtime_dir)
+    monkeypatch.setattr(knowledge_runtime, "KNOWLEDGE_CACHE_DIR", cache_dir)
+    monkeypatch.setattr(knowledge_runtime, "KNOWLEDGE_MANIFEST_PATH", manifest_path)
+    monkeypatch.setattr(knowledge_runtime, "GAME_KNOWLEDGE_SEED_DIR", game_seed_dir, raising=False)
+    monkeypatch.setattr(knowledge_runtime, "BASELIB_KNOWLEDGE_SEED_FILE", baselib_seed_file, raising=False)
+    monkeypatch.setattr(knowledge_runtime, "RESOURCE_KNOWLEDGE_DIR", resource_runtime_dir, raising=False)
+    monkeypatch.setattr(knowledge_runtime, "RESOURCE_KNOWLEDGE_SEED_DIR", resource_seed_dir, raising=False)
+
+    knowledge_runtime.ensure_runtime_knowledge_seeded()
+
+    assert (game_runtime_dir / "Game.cs").read_text(encoding="utf-8") == "// user modified game"
+    assert (baselib_runtime_dir / "BaseLib.decompiled.cs").read_text(encoding="utf-8") == "// user modified baselib"
+    assert (resource_runtime_dir / "common.md").read_text(encoding="utf-8") == "user modified common\n"
 
 
 def test_missing_status_surfaces_missing_runtime_requirements(monkeypatch):

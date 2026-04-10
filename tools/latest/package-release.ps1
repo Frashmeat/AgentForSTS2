@@ -415,6 +415,40 @@ function Write-ReleaseManifest {
     $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
 }
 
+function Copy-KnowledgeSeedBundle {
+    param(
+        [string]$ReleaseDir,
+        [string]$RepoRoot
+    )
+
+    $runtimeKnowledgeDir = Join-Path (Join-Path $ReleaseDir "runtime") "knowledge"
+    $gameKnowledgeDir = Join-Path $runtimeKnowledgeDir "game"
+    $baselibKnowledgeDir = Join-Path $runtimeKnowledgeDir "baselib"
+    $resourceKnowledgeDir = Join-Path $runtimeKnowledgeDir "resources\sts2"
+    $cacheDir = Join-Path $runtimeKnowledgeDir "cache"
+
+    $gameSeedFile = Join-Path $RepoRoot "backend\agents\sts2_api_reference.md"
+    $baselibSeedFile = Join-Path $RepoRoot "backend\agents\baselib_src\BaseLib.decompiled.cs"
+    $resourceSeedDir = Join-Path $RepoRoot "backend\app\modules\knowledge\resources\sts2"
+
+    $null = New-Item -ItemType Directory -Path $gameKnowledgeDir -Force
+    $null = New-Item -ItemType Directory -Path $baselibKnowledgeDir -Force
+    $null = New-Item -ItemType Directory -Path $resourceKnowledgeDir -Force
+    $null = New-Item -ItemType Directory -Path $cacheDir -Force
+
+    if (Test-Path -LiteralPath $gameSeedFile) {
+        Copy-Item -LiteralPath $gameSeedFile -Destination (Join-Path $gameKnowledgeDir "sts2_api_reference.md") -Force
+    }
+
+    if (Test-Path -LiteralPath $baselibSeedFile) {
+        Copy-Item -LiteralPath $baselibSeedFile -Destination (Join-Path $baselibKnowledgeDir "BaseLib.decompiled.cs") -Force
+    }
+
+    if (Test-Path -LiteralPath $resourceSeedDir) {
+        Copy-Item -Path (Join-Path $resourceSeedDir "*") -Destination $resourceKnowledgeDir -Recurse -Force
+    }
+}
+
 function Get-PreviousServiceConfigs {
     param([string]$ExistingReleaseDir)
 
@@ -558,6 +592,9 @@ $null = New-Item -ItemType Directory -Path (Join-Path $releaseDir "runtime") -Fo
 
 foreach ($service in $serviceDefinitions) {
     Copy-ServiceBundle -Service $service -ReleaseDir $releaseDir -RepoRoot $repoRoot -BackendDir $backendDir -FrontendDistDir $frontendDistDir -ModTemplateDir $modTemplateDir -TemplatesDir $templatesDir -PreviousServiceConfigs $previousServiceConfigs -ReuseExistingSettings:$reuseExistingSettings
+}
+if ($needsBackend) {
+    Copy-KnowledgeSeedBundle -ReleaseDir $releaseDir -RepoRoot $repoRoot
 }
 Copy-LauncherBundle -ReleaseDir $releaseDir -RepoRoot $repoRoot -TargetName $Target
 

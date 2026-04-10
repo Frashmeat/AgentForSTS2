@@ -120,11 +120,14 @@ Current product behavior:
   - `检查更新`
   - `更新知识库`
   - `查看知识库说明`
-- 本地知识缓存默认位于：
+- 发行包会直接包含可查看、可编辑的运行时知识目录；应用运行时只读取这份目录，用户修改后会直接生效。
+- 运行时知识目录默认位于：
   - `runtime/knowledge/knowledge-manifest.json`
-  - `runtime/knowledge/game_decompiled/`
-  - `runtime/knowledge/baselib_decompiled/`
+  - `runtime/knowledge/game/`
+  - `runtime/knowledge/baselib/`
+  - `runtime/knowledge/resources/sts2/`
   - `runtime/knowledge/cache/`
+- 仓库内 `backend/agents/*` 与 `backend/app/modules/knowledge/resources/sts2/*` 仅作为开发期/打包期种子来源，不再作为运行时并列真源。
 
 ### 快速开始
 

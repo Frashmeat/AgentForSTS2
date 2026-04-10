@@ -62,6 +62,17 @@ def _write_fake_python(bin_dir: Path) -> Path:
     return python_cmd
 
 
+def _write_fake_netsh(bin_dir: Path, output: str) -> Path:
+    netsh_cmd = bin_dir / "netsh.cmd"
+    netsh_cmd.write_text(
+        "@echo off\r\n"
+        "echo " + output.replace("\n", "\r\n") + "\r\n"
+        "exit /b 0\r\n",
+        encoding="utf-8",
+    )
+    return netsh_cmd
+
+
 def _prepare_release_bundle(release_root: Path, target: str) -> tuple[Path, Path]:
     if target == "hybrid":
         (release_root / "services" / "workstation" / "backend").mkdir(parents=True)
@@ -101,6 +112,7 @@ def _run_deploy(
     *extra_args: str,
     prepare_default_web_release: bool = False,
     record_log_viewers: bool = False,
+    excluded_port_output: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     release_root, config_path = _prepare_release_bundle(tmp_path / "release", target)
     if prepare_default_web_release:
@@ -109,6 +121,8 @@ def _run_deploy(
     bin_dir.mkdir()
     _write_fake_docker(bin_dir)
     python_cmd = _write_fake_python(bin_dir)
+    if excluded_port_output is not None:
+        _write_fake_netsh(bin_dir, excluded_port_output)
 
     log_path = tmp_path / "docker.log"
     python_log_path = tmp_path / "python.log"
@@ -158,6 +172,26 @@ def test_deploy_docker_default_builds_even_when_local_image_exists(tmp_path: Pat
     assert result.returncode == 0, result.stderr
     assert result.docker_log == ""
     assert "-m uvicorn main_workstation:app --host 127.0.0.1 --port 7860" in result.python_log
+
+
+def test_deploy_docker_workstation_falls_back_when_default_port_is_excluded(tmp_path: Path):
+    result = _run_deploy(
+        tmp_path,
+        excluded_port_output=(
+            "Protocol tcp Port Exclusion Ranges\n\n"
+            "Start Port    End Port\n"
+            "----------    --------\n"
+            "      7764        7863\n"
+        ),
+    )
+    runtime_config = tmp_path / "release" / "runtime" / "workstation.config.json"
+
+    assert result.returncode == 0, result.stderr
+    assert "-m uvicorn main_workstation:app --host 127.0.0.1 --port 7864" in result.python_log
+    assert "7860 不可用" in result.stdout
+    assert runtime_config.exists()
+    payload = json.loads(runtime_config.read_text(encoding="utf-8"))
+    assert payload["runtime"]["workstation"]["port"] == 7864
 
 
 def test_deploy_docker_reuse_images_skips_build_when_local_image_exists(tmp_path: Path):

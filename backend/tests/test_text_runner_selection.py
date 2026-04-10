@@ -101,3 +101,37 @@ def test_complete_via_claude_cli_passes_model_to_subprocess(monkeypatch):
     assert captured["env"]["ANTHROPIC_AUTH_TOKEN"] == "secret-token"
     assert captured["env"]["ANTHROPIC_API_KEY"] == "secret-token"
     assert captured["env"]["ANTHROPIC_BASE_URL"] == "https://e-flowcode.cc"
+
+
+def test_complete_via_claude_cli_uses_resolved_launcher(monkeypatch):
+    from llm import text_runner
+
+    captured: dict[str, object] = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return types.SimpleNamespace(stdout=b"ok\n", returncode=0)
+
+    async def run_case():
+        return await text_runner._complete_via_claude_cli(
+            "base prompt",
+            {},
+            None,
+        )
+
+    monkeypatch.setattr(
+        text_runner,
+        "_resolve_claude_launcher",
+        lambda: ["C:/Program Files/nodejs/node.exe", "C:/Users/test/claude-code/cli.js"],
+    )
+    monkeypatch.setattr(text_runner.subprocess, "run", fake_run)
+
+    result = asyncio.run(run_case())
+
+    assert result == "ok"
+    assert captured["cmd"][:2] == [
+        "C:/Program Files/nodejs/node.exe",
+        "C:/Users/test/claude-code/cli.js",
+    ]
+    assert "--print" in captured["cmd"]
+    assert "-p" in captured["cmd"]

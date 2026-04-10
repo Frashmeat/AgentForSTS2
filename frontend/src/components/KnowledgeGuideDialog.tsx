@@ -13,15 +13,15 @@ export function KnowledgeGuideDialog({ open, status, onClose }: KnowledgeGuideDi
 
   const gameSourceLabel =
     status?.game?.source_mode === "runtime_decompiled"
-      ? "运行时反编译目录"
+      ? "运行时知识目录"
       : status?.game?.source_mode === "repo_reference"
-        ? "仓库静态参考"
+        ? "内置初始化种子"
         : "缺失";
   const baselibSourceLabel =
     status?.baselib?.source_mode === "runtime_decompiled"
-      ? "运行时反编译目录"
+      ? "运行时知识目录"
       : status?.baselib?.source_mode === "repo_fallback"
-        ? "仓库内 BaseLib fallback"
+        ? "内置初始化种子"
         : "缺失";
 
   return (
@@ -33,8 +33,18 @@ export function KnowledgeGuideDialog({ open, status, onClose }: KnowledgeGuideDi
         <div className="space-y-1">
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Knowledge Guide</p>
           <h3 className="text-xl font-semibold text-slate-900">知识库说明</h3>
-          <p className="text-sm text-slate-500">这里说明知识库的版本来源，以及本工程里的缓存与反编译位置。</p>
+          <p className="text-sm text-slate-500">这里说明知识库版本来源，以及运行时唯一生效的知识目录位置。</p>
         </div>
+
+        <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-2">
+          <h4 className="text-sm font-semibold text-amber-900">运行时唯一真源</h4>
+          <p className="text-xs text-amber-800">
+            当前应用只读取 <code>runtime/knowledge/</code> 下的知识文件。发行包会自带这份目录，用户可以直接查看和编辑，后续知识读取会按修改后的内容生效。
+          </p>
+          <p className="text-xs text-amber-700">
+            仓库内的静态文件只用于开发期和打包期生成初始化种子，不再作为运行时并列知识来源。
+          </p>
+        </section>
 
         <div className="grid gap-4 md:grid-cols-2">
           <section className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-2">
@@ -67,8 +77,9 @@ export function KnowledgeGuideDialog({ open, status, onClose }: KnowledgeGuideDi
           <h4 className="text-sm font-semibold text-slate-800">本工程内位置</h4>
           <ul className="space-y-1 text-xs text-slate-600 font-mono">
             <li>runtime/knowledge/knowledge-manifest.json</li>
-            <li>runtime/knowledge/game_decompiled/</li>
-            <li>runtime/knowledge/baselib_decompiled/</li>
+            <li>runtime/knowledge/game/</li>
+            <li>runtime/knowledge/baselib/</li>
+            <li>runtime/knowledge/resources/sts2/</li>
             <li>runtime/knowledge/cache/</li>
           </ul>
         </section>
