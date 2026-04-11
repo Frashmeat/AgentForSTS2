@@ -159,10 +159,10 @@ def test_planner_hints_match_resource_file():
     assert hints.strip() == resource_text
 
 
-# ── legacy STS2_MOD_DOCS ──────────────────────────────────────────────────────
+# ── combined STS2_MOD_DOCS ────────────────────────────────────────────────────
 
-def test_legacy_docs_combine_all_types():
-    """STS2_MOD_DOCS should cover all major types for backwards compatibility."""
+def test_combined_docs_cover_all_types():
+    """STS2_MOD_DOCS should cover all major asset types."""
     assert "OnPlay" in STS2_MOD_DOCS
     assert "RelicModel" in STS2_MOD_DOCS
     assert "PowerModel" in STS2_MOD_DOCS

@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import normalize_config
 
 
-def test_approval_mode_defaults_to_legacy_direct():
+def test_approval_mode_defaults_to_direct_execution_value():
     cfg = normalize_config(None)
     assert cfg["llm"]["execution_mode"] == "legacy_direct"
 

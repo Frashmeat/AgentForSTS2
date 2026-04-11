@@ -191,7 +191,7 @@ def test_package_release_without_debug_resets_workstation_config_to_example(tmp_
     assert generated_config.read_text(encoding="utf-8").strip() == '{"mode":"example"}'
 
 
-def test_package_release_debug_no_longer_reuses_legacy_service_level_workstation_config(tmp_path: Path):
+def test_package_release_debug_no_longer_reuses_service_level_workstation_config(tmp_path: Path):
     temp_repo = tmp_path / "repo"
     _prepare_common_layout(temp_repo)
     _write_template_files(temp_repo, "workstation")

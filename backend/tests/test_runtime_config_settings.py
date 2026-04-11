@@ -25,7 +25,7 @@ def test_load_config_prefers_runtime_workstation_config(monkeypatch, tmp_path: P
     assert config["llm"]["agent_backend"] == "codex"
 
 
-def test_load_config_ignores_legacy_root_config_when_runtime_config_is_missing(monkeypatch, tmp_path: Path):
+def test_load_config_ignores_root_config_when_runtime_config_is_missing(monkeypatch, tmp_path: Path):
     runtime_config = tmp_path / "runtime" / "workstation.config.json"
     legacy_config = tmp_path / "config.json"
     legacy_config.write_text('{"llm":{"agent_backend":"codex"}}\n', encoding="utf-8")

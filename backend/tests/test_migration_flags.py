@@ -11,7 +11,7 @@ def _read_router_source(name: str) -> str:
     return (Path(__file__).resolve().parents[1] / "routers" / name).read_text(encoding="utf-8")
 
 
-def test_normalize_config_discards_legacy_migration_flags():
+def test_normalize_config_discards_removed_migration_flags():
     cfg = normalize_config(
         {
             "migration": {

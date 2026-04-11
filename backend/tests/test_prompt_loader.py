@@ -209,7 +209,7 @@ Hello {{ name }}
         shutil.rmtree(root, ignore_errors=True)
 
 
-def test_prompt_loader_rejects_legacy_txt_alias_requests():
+def test_prompt_loader_rejects_removed_txt_alias_requests():
     root = _make_temp_root()
     bundle = root / "planning.md"
     bundle_text = """## planner_prompt
