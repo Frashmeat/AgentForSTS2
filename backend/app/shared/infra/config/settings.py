@@ -26,7 +26,6 @@ def _resolve_runtime_config_path() -> Path:
 
 
 RUNTIME_CONFIG_PATH = _resolve_runtime_config_path()
-LEGACY_CONFIG_PATH = _APP_ROOT / "config.json"
 CONFIG_PATH = RUNTIME_CONFIG_PATH
 
 DEFAULT_LLM_CONFIG = {
@@ -166,22 +165,13 @@ def resolve_config_path(*, for_write: bool = False) -> Path:
     if explicit_path:
         return Path(explicit_path).expanduser()
 
-    if for_write:
-        return RUNTIME_CONFIG_PATH
-
-    if RUNTIME_CONFIG_PATH.exists():
-        return RUNTIME_CONFIG_PATH
-
-    if LEGACY_CONFIG_PATH.exists():
-        return LEGACY_CONFIG_PATH
-
     return RUNTIME_CONFIG_PATH
 
 
 def load_config() -> dict[str, Any]:
     config_path = resolve_config_path(for_write=False)
     if config_path.exists():
-        # tools/install/install.ps1 在 Windows PowerShell 下写 config.json 时可能带 BOM。
+        # Windows PowerShell 写 JSON 时可能带 BOM。
         with open(config_path, "r", encoding="utf-8-sig") as file:
             saved = json.load(file)
         cfg = normalize_config(saved)

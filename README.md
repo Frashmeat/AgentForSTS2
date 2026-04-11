@@ -48,7 +48,7 @@ cd AgentTheSpire
 powershell -ExecutionPolicy Bypass -File .\tools\install.ps1   # Windows 推荐入口：安装 .NET / Godot / ilspycmd / Python deps / frontend build
 tools\install.bat                                           # 兼容入口，内部转发到 install.ps1
 
-# Copy config.example.json → config.json, fill in your API keys and game path
+# Copy config.example.json → runtime/workstation.config.json, fill in your API keys and game path
 
 tools\start.bat             # Opens http://localhost:7860 (default workstation runtime)
 ```
@@ -62,7 +62,7 @@ See [TUTORIAL.md](TUTORIAL.md) for full setup and configuration guide.
 - `tools\start_workstation.bat`
   Starts `workstation-backend` only. This runtime serves the local workstation UI, local workflows, approvals, config, build, and deploy flows.
 - `tools\start_web.bat`
-  Starts `web-backend` only on `http://localhost:7870`. This runtime is for platform/auth/job/quota APIs and requires a valid `database.url`.
+  Starts `web-backend` only on `http://localhost:7870`. This runtime is for platform/auth/job/quota APIs and requires a valid `database.url` in `runtime/web.config.json` or the path pointed to by `SPIREFORGE_CONFIG_PATH`.
 
 Current deployment guidance:
 
@@ -152,7 +152,7 @@ tools\install.bat                                           # 兼容入口，内
 # 如果只想安装 .NET 9 + Godot 4.5.1 + ilspycmd：
 powershell -ExecutionPolicy Bypass -File .\tools\install.ps1 -OnlyModDeps
 
-# 复制 config.example.json → config.json，填入 API Key 和游戏路径
+# 复制 config.example.json → runtime/workstation.config.json，填入 API Key 和游戏路径
 
 tools\start.bat             # 打开 http://localhost:7860（默认 workstation 运行时）
 ```
@@ -168,7 +168,7 @@ tools\start.bat             # 打开 http://localhost:7860（默认 workstation 
 - `tools\start_split_local.bat`
   启动“独立前端 + 本地 workstation”双进程本地形态：前端静态站点由本地轻量服务托管，工作台 HTTP/WS 指向本机 `workstation-backend`，平台接口继续指向 `web-backend`。
 - `tools\start_web.bat`
-  仅启动 `web-backend`，监听 `http://localhost:7870`。该运行时承接平台任务、认证、配额、历史记录等 API，并要求 `config.json` 中存在有效的 `database.url`。
+  仅启动 `web-backend`，监听 `http://localhost:7870`。该运行时承接平台任务、认证、配额、历史记录等 API，并要求 `runtime/web.config.json` 或 `SPIREFORGE_CONFIG_PATH` 指向的配置中存在有效的 `database.url`。
 
 当前部署口径：
 

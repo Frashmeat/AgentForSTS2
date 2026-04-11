@@ -233,5 +233,6 @@ tools/
 - `workstation` 本地 Python 运行时缓存位于 `runtime\python-runtime\workstation`；只要 `services\workstation\backend\requirements.txt` 与启动所用 Python 没变化，后续部署会优先复用该缓存。
 - `package-release.ps1` 生成 zip 时会默认排除 `runtime\python-runtime` 本地缓存，避免把本机 `.venv` 与依赖缓存一并打进发布归档；release 目录本身仍会保留该缓存供本地部署复用。
 - `hybrid` / `workstation` 形态下，工作站应用配置统一收敛到 `runtime\workstation.config.json`；`services\workstation\config.json` 不再作为独立真源。
+- 后端进程直启时，运行时配置默认只读取 `runtime\workstation.config.json` / `runtime\web.config.json`；仓库根 `config.json` 不再作为运行时回退来源，如需自定义路径请显式设置 `SPIREFORGE_CONFIG_PATH`。
 - `runtime-config.js` 仍属于部署期配置文件；更换 `workstation` 或 `web` 地址时优先覆盖该文件，不重新构建前端。
 - `workstation` 地址应配置为本机或 LAN 可达地址，不应配置为公网用户本机地址。
