@@ -9,16 +9,11 @@ from app.modules.auth.infra.persistence.repositories import (
 )
 from app.modules.platform.application.services import (
     AdminQueryService,
-    ApprovalFacadeService,
-    BatchWorkflowRouterCompatService,
-    BuildDeployFacadeService,
-    ConfigFacadeService,
     EventService,
     ExecutionOrchestratorService,
     JobApplicationService,
     JobQueryService,
     QuotaBillingService,
-    WorkflowRouterCompatService,
 )
 from app.modules.platform.runner import (
     ApprovalAdapter,
@@ -42,16 +37,10 @@ from app.modules.platform.infra.persistence.repositories import (
 )
 from app.shared.infra.config.settings import Settings
 from app.shared.infra.db.session import create_session_factory
-from app.shared.infra.feature_flags import (
-    PlatformMigrationFlags,
-    WorkflowMigrationFlags,
-    resolve_platform_migration_flags,
-    resolve_workflow_migration_flags,
-)
 
 from .registry import ProviderRegistry
 
-RuntimeRole = Literal["full", "workstation", "web"]
+RuntimeRole = Literal["workstation", "web"]
 
 
 class ApplicationContainer:
@@ -59,7 +48,7 @@ class ApplicationContainer:
         self,
         settings: Settings,
         registry: Optional[ProviderRegistry] = None,
-        runtime_role: RuntimeRole = "full",
+        runtime_role: RuntimeRole = "workstation",
     ) -> None:
         self.settings = settings
         self.registry = registry or ProviderRegistry()
@@ -71,7 +60,7 @@ class ApplicationContainer:
     def from_config(
         cls,
         config: Optional[dict[str, Any]],
-        runtime_role: RuntimeRole = "full",
+        runtime_role: RuntimeRole = "workstation",
     ) -> "ApplicationContainer":
         return cls(settings=Settings.from_dict(config), runtime_role=runtime_role)
 
@@ -81,14 +70,6 @@ class ApplicationContainer:
 
         self._singletons.setdefault("settings", self.settings)
         self._singletons.setdefault("runtime_role", self.runtime_role)
-        self._singletons.setdefault(
-            "workflow_migration_flags",
-            resolve_workflow_migration_flags(self.settings.to_dict()),
-        )
-        self._singletons.setdefault(
-            "platform_migration_flags",
-            resolve_platform_migration_flags(self.settings.to_dict()),
-        )
         self._singletons.setdefault("platform.db_session_factory", db_session_factory)
         self._singletons.setdefault("auth.db_session_factory", db_session_factory)
         self._bootstrap_platform_defaults(db_session_factory)
@@ -135,11 +116,6 @@ class ApplicationContainer:
 
     def _bootstrap_workstation_bridge_defaults(self, db_session_factory: Any) -> None:
         for key, instance in (
-            ("platform.approval_facade_service_factory", ApprovalFacadeService),
-            ("platform.build_deploy_facade_service_factory", BuildDeployFacadeService),
-            ("platform.config_facade_service_factory", ConfigFacadeService),
-            ("platform.workflow_router_compat_service_factory", WorkflowRouterCompatService),
-            ("platform.batch_workflow_router_compat_service_factory", BatchWorkflowRouterCompatService),
             ("platform.workflow_registry_factory", PlatformWorkflowRegistry),
             ("platform.step_dispatcher_factory", StepDispatcher),
             ("platform.execution_adapter_factory", ExecutionAdapter),
@@ -148,24 +124,6 @@ class ApplicationContainer:
             ("platform.approval_adapter_factory", ApprovalAdapter),
         ):
             self._singletons.setdefault(key, instance)
-        for key, factory_key in (
-            ("platform.approval_facade_service", "platform.approval_facade_service_factory"),
-            ("platform.build_deploy_facade_service", "platform.build_deploy_facade_service_factory"),
-            ("platform.config_facade_service", "platform.config_facade_service_factory"),
-            ("platform.workflow_router_compat_service", "platform.workflow_router_compat_service_factory"),
-            ("platform.batch_workflow_router_compat_service", "platform.batch_workflow_router_compat_service_factory"),
-        ):
-            factory = self._singletons[factory_key]
-            if key in {
-                "platform.workflow_router_compat_service",
-                "platform.batch_workflow_router_compat_service",
-            }:
-                self._singletons.setdefault(
-                    key,
-                    factory(session_factory=db_session_factory),
-                )
-            else:
-                self._singletons.setdefault(key, factory())
 
     def register_singleton(self, key: str, instance: Any) -> None:
         self._singletons[key] = instance
@@ -178,14 +136,6 @@ class ApplicationContainer:
 
     def resolve_optional_singleton(self, key: str, default: Any = None) -> Any:
         return self._singletons.get(key, default)
-
-    @property
-    def workflow_migration_flags(self) -> WorkflowMigrationFlags:
-        return self.resolve_singleton("workflow_migration_flags")
-
-    @property
-    def platform_migration_flags(self) -> PlatformMigrationFlags:
-        return self.resolve_singleton("platform_migration_flags")
 
     def register_provider(self, kind: str, name: str, provider: Any) -> None:
         self.registry.register(kind, name, provider)

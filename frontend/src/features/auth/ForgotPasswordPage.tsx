@@ -19,9 +19,9 @@ export function ForgotPasswordPage() {
     event.preventDefault();
     setFormState(createSubmittingAuthFormState());
     try {
-      const response = await requestPasswordReset(login);
-      setFormState(createSuccessAuthFormState(`重置码：${response.reset_code}`));
-      navigate(`/auth/reset-password?code=${encodeURIComponent(response.reset_code)}`, {
+      await requestPasswordReset(login);
+      setFormState(createSuccessAuthFormState("重置请求已提交，请粘贴收到的重置码继续设置新密码。"));
+      navigate("/auth/reset-password", {
         replace: true,
       });
     } catch (error) {
@@ -33,7 +33,7 @@ export function ForgotPasswordPage() {
     <PlatformPageShell
       kicker="Platform Access"
       title="找回密码"
-      description="输入登录名或邮箱，获取重置密码所需的验证码。"
+      description="输入登录名或邮箱，提交重置请求后再手动输入收到的重置码。"
       actions={<AuthHomeLink />}
       width="narrow"
     >
@@ -57,7 +57,7 @@ export function ForgotPasswordPage() {
             className="platform-page-primary-button w-full"
             disabled={formState.status === "submitting"}
           >
-            获取重置码
+            提交重置请求
           </button>
         </form>
         <Link to="/auth/login" className="mt-5 inline-flex text-sm font-medium text-[var(--workspace-accent)] transition hover:text-[var(--workspace-accent-strong)]">

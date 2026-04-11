@@ -191,6 +191,34 @@ def test_package_release_without_debug_resets_workstation_config_to_example(tmp_
     assert generated_config.read_text(encoding="utf-8").strip() == '{"mode":"example"}'
 
 
+def test_package_release_debug_no_longer_reuses_service_level_workstation_config(tmp_path: Path):
+    temp_repo = tmp_path / "repo"
+    _prepare_common_layout(temp_repo)
+    _write_template_files(temp_repo, "workstation")
+
+    backend_dir = temp_repo / "backend"
+    backend_dir.mkdir(parents=True, exist_ok=True)
+    (backend_dir / "main_workstation.py").write_text("print('ok')\n", encoding="utf-8")
+    frontend_dist = temp_repo / "frontend" / "dist"
+    frontend_dist.mkdir(parents=True, exist_ok=True)
+    (frontend_dist / "index.html").write_text("<html></html>\n", encoding="utf-8")
+    mod_template = temp_repo / "mod_template"
+    mod_template.mkdir(parents=True, exist_ok=True)
+    (mod_template / "README.md").write_text("template\n", encoding="utf-8")
+    (temp_repo / "config.example.json").write_text('{"mode":"example"}\n', encoding="utf-8")
+
+    legacy_service_config = temp_repo / "tools" / "latest" / "artifacts" / "agentthespire-workstation-release" / "services" / "workstation" / "config.json"
+    legacy_service_config.parent.mkdir(parents=True, exist_ok=True)
+    legacy_service_config.write_text('{"mode":"legacy"}\n', encoding="utf-8")
+
+    completed = _run_package_release(temp_repo, "workstation", "-NoFrontend", "-NoZip", "-Debug")
+
+    generated_config = temp_repo / "tools" / "latest" / "artifacts" / "agentthespire-workstation-release" / "runtime" / "workstation.config.json"
+
+    assert completed.returncode == 0, completed.stderr
+    assert generated_config.read_text(encoding="utf-8").strip() == '{"mode":"example"}'
+
+
 def test_package_release_no_longer_writes_service_level_workstation_config(tmp_path: Path):
     temp_repo = tmp_path / "repo"
     _prepare_common_layout(temp_repo)
@@ -215,6 +243,49 @@ def test_package_release_no_longer_writes_service_level_workstation_config(tmp_p
     assert completed.returncode == 0, completed.stderr
     assert runtime_config.exists()
     assert not service_config.exists()
+
+
+def test_package_release_seeds_runtime_knowledge_directory(tmp_path: Path):
+    temp_repo = tmp_path / "repo"
+    _prepare_common_layout(temp_repo)
+    _write_template_files(temp_repo, "workstation")
+
+    backend_dir = temp_repo / "backend"
+    agents_dir = backend_dir / "agents"
+    resources_dir = backend_dir / "app" / "modules" / "knowledge" / "resources" / "sts2"
+    backend_dir.mkdir(parents=True, exist_ok=True)
+    agents_dir.mkdir(parents=True, exist_ok=True)
+    resources_dir.mkdir(parents=True, exist_ok=True)
+    (backend_dir / "main_workstation.py").write_text("print('ok')\n", encoding="utf-8")
+    (agents_dir / "sts2_api_reference.md").write_text("api reference\n", encoding="utf-8")
+    (agents_dir / "baselib_src").mkdir(parents=True, exist_ok=True)
+    (agents_dir / "baselib_src" / "BaseLib.decompiled.cs").write_text("// baselib\n", encoding="utf-8")
+    (resources_dir / "common.md").write_text("runtime common\n", encoding="utf-8")
+    (resources_dir / "card.md").write_text("card\n", encoding="utf-8")
+    (resources_dir / "relic.md").write_text("relic\n", encoding="utf-8")
+    (resources_dir / "power.md").write_text("power\n", encoding="utf-8")
+    (resources_dir / "potion.md").write_text("potion\n", encoding="utf-8")
+    (resources_dir / "character.md").write_text("character\n", encoding="utf-8")
+    (resources_dir / "custom_code.md").write_text("custom\n", encoding="utf-8")
+    (resources_dir / "planner_hints.md").write_text("planner\n", encoding="utf-8")
+
+    frontend_dist = temp_repo / "frontend" / "dist"
+    frontend_dist.mkdir(parents=True, exist_ok=True)
+    (frontend_dist / "index.html").write_text("<html></html>\n", encoding="utf-8")
+    mod_template = temp_repo / "mod_template"
+    mod_template.mkdir(parents=True, exist_ok=True)
+    (mod_template / "README.md").write_text("template\n", encoding="utf-8")
+    (temp_repo / "config.example.json").write_text('{"mode":"example"}\n', encoding="utf-8")
+
+    completed = _run_package_release(temp_repo, "workstation", "-NoFrontend", "-NoZip")
+
+    release_dir = temp_repo / "tools" / "latest" / "artifacts" / "agentthespire-workstation-release"
+    runtime_knowledge_dir = release_dir / "runtime" / "knowledge"
+
+    assert completed.returncode == 0, completed.stderr
+    assert (runtime_knowledge_dir / "game" / "sts2_api_reference.md").exists()
+    assert (runtime_knowledge_dir / "baselib" / "BaseLib.decompiled.cs").exists()
+    assert (runtime_knowledge_dir / "resources" / "sts2" / "common.md").exists()
 
 
 def test_package_release_preserves_locked_runtime_logs(tmp_path: Path):

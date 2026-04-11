@@ -13,17 +13,22 @@ from typing import Any
 import httpx
 
 from app.shared.infra.config import settings as settings_module
-from agents.sts2_docs import API_REF_PATH
 from config import get_config, get_decompiled_src_path
 
 BACKEND_ROOT = Path(__file__).resolve().parents[4]
 REPO_ROOT = BACKEND_ROOT.parent
+API_REF_PATH = BACKEND_ROOT / "agents" / "sts2_api_reference.md"
 KNOWLEDGE_ROOT = settings_module.RUNTIME_CONFIG_PATH.parent / "knowledge"
-GAME_DECOMPILED_DIR = KNOWLEDGE_ROOT / "game_decompiled"
-BASELIB_DECOMPILED_DIR = KNOWLEDGE_ROOT / "baselib_decompiled"
+GAME_DECOMPILED_DIR = KNOWLEDGE_ROOT / "game"
+BASELIB_DECOMPILED_DIR = KNOWLEDGE_ROOT / "baselib"
+RESOURCE_KNOWLEDGE_DIR = KNOWLEDGE_ROOT / "resources" / "sts2"
 KNOWLEDGE_CACHE_DIR = KNOWLEDGE_ROOT / "cache"
 KNOWLEDGE_MANIFEST_PATH = KNOWLEDGE_ROOT / "knowledge-manifest.json"
 BASELIB_FALLBACK_PATH = BACKEND_ROOT / "agents" / "baselib_src" / "BaseLib.decompiled.cs"
+GAME_KNOWLEDGE_SEED_DIR = BACKEND_ROOT / "agents" / "game_seed"
+GAME_KNOWLEDGE_SEED_FILE = API_REF_PATH
+BASELIB_KNOWLEDGE_SEED_FILE = BASELIB_FALLBACK_PATH
+RESOURCE_KNOWLEDGE_SEED_DIR = BACKEND_ROOT / "app" / "modules" / "knowledge" / "resources" / "sts2"
 STS2_DLL_RELATIVE = Path("data_sts2_windows_x86_64") / "sts2.dll"
 BASELIB_RELEASES_URL = "https://github.com/Alchyr/BaseLib-StS2/releases"
 BASELIB_RELEASES_API = "https://api.github.com/repos/Alchyr/BaseLib-StS2/releases/latest"
@@ -46,6 +51,38 @@ def ensure_knowledge_dirs() -> None:
     KNOWLEDGE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     GAME_DECOMPILED_DIR.mkdir(parents=True, exist_ok=True)
     BASELIB_DECOMPILED_DIR.mkdir(parents=True, exist_ok=True)
+    RESOURCE_KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _copy_missing_tree(source_dir: Path, target_dir: Path) -> None:
+    if not source_dir.exists():
+        return
+
+    for item in source_dir.rglob("*"):
+        relative_path = item.relative_to(source_dir)
+        destination = target_dir / relative_path
+        if item.is_dir():
+            destination.mkdir(parents=True, exist_ok=True)
+            continue
+        if destination.exists():
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(item, destination)
+
+
+def _copy_missing_file(source_file: Path, target_file: Path) -> None:
+    if not source_file.exists() or target_file.exists():
+        return
+    target_file.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source_file, target_file)
+
+
+def ensure_runtime_knowledge_seeded() -> None:
+    ensure_knowledge_dirs()
+    _copy_missing_tree(Path(GAME_KNOWLEDGE_SEED_DIR), GAME_DECOMPILED_DIR)
+    _copy_missing_file(Path(GAME_KNOWLEDGE_SEED_FILE), GAME_DECOMPILED_DIR / Path(GAME_KNOWLEDGE_SEED_FILE).name)
+    _copy_missing_file(Path(BASELIB_KNOWLEDGE_SEED_FILE), BASELIB_DECOMPILED_DIR / "BaseLib.decompiled.cs")
+    _copy_missing_tree(Path(RESOURCE_KNOWLEDGE_SEED_DIR), RESOURCE_KNOWLEDGE_DIR)
 
 
 def _walk_candidate_paths(root: Path) -> list[Path]:
@@ -196,7 +233,16 @@ def select_baselib_asset(release: dict[str, Any]) -> dict[str, Any]:
         name = str(asset.get("name", "")).strip().lower()
         if name.endswith(".dll") and "baselib" in name:
             return asset
-    raise RuntimeError("BaseLib latest release does not contain a downloadable DLL asset")
+
+    release_tag = str(release.get("tag_name", "")).strip() or "unknown"
+    asset_names = [str(asset.get("name", "")).strip() for asset in assets if str(asset.get("name", "")).strip()]
+    asset_names_text = ", ".join(asset_names) if asset_names else "无资产"
+    raise RuntimeError(
+        "BaseLib latest release 未找到可下载的 DLL 资产。"
+        f" release={release_tag}。"
+        " 当前只接受 .dll；优先 BaseLib.dll，其次文件名包含 baselib 且后缀为 .dll。"
+        f" 本次 release 资产列表：{asset_names_text}"
+    )
 
 
 def _directory_has_sources(path: Path) -> bool:
@@ -206,16 +252,12 @@ def _directory_has_sources(path: Path) -> bool:
 def _resolve_game_source_mode() -> str:
     if _directory_has_sources(GAME_DECOMPILED_DIR):
         return "runtime_decompiled"
-    if API_REF_PATH.exists():
-        return "repo_reference"
     return "missing"
 
 
 def _resolve_baselib_source_mode() -> str:
     if (BASELIB_DECOMPILED_DIR / "BaseLib.decompiled.cs").exists():
         return "runtime_decompiled"
-    if BASELIB_FALLBACK_PATH.exists():
-        return "repo_fallback"
     return "missing"
 
 
@@ -233,8 +275,6 @@ def get_knowledge_status() -> dict[str, Any]:
             payload["warnings"].append("游戏反编译源码目录为空，请先执行“更新知识库”")
         if not (BASELIB_DECOMPILED_DIR / "BaseLib.decompiled.cs").exists():
             payload["warnings"].append("BaseLib 反编译结果缺失，请先执行“更新知识库”")
-        if payload["game"]["source_mode"] == "repo_reference" or payload["baselib"]["source_mode"] == "repo_fallback":
-            payload["status"] = "stale"
         return payload
 
     payload = _default_status_payload("fresh")
@@ -269,10 +309,7 @@ def get_knowledge_status() -> dict[str, Any]:
     game_runtime_ready = _directory_has_sources(Path(payload["game"]["decompiled_src_path"]))
     baselib_runtime_ready = Path(str(payload["baselib"]["decompiled_src_path"])).joinpath("BaseLib.decompiled.cs").exists()
     if not game_runtime_ready or not baselib_runtime_ready:
-        if payload["game"]["source_mode"] == "repo_reference" or payload["baselib"]["source_mode"] == "repo_fallback":
-            payload["status"] = "stale"
-        else:
-            payload["status"] = "missing"
+        payload["status"] = "missing"
         return payload
 
     if payload["game"]["matches"] is False or payload["baselib"]["matches"] is False:
@@ -297,17 +334,22 @@ def get_active_game_decompiled_src_path() -> str | None:
         candidate = Path(str(manifest.get("game", {}).get("decompiled_src_path", "")).strip())
         if candidate.is_dir():
             return str(candidate)
-    return get_decompiled_src_path()
+    if _directory_has_sources(GAME_DECOMPILED_DIR):
+        return str(GAME_DECOMPILED_DIR)
+    return None
 
 
-def get_active_baselib_src_path() -> str:
+def get_active_baselib_src_path() -> str | None:
     manifest = load_manifest()
     if manifest is not None:
         candidate_root = Path(str(manifest.get("baselib", {}).get("decompiled_src_path", "")).strip())
         candidate_file = candidate_root / "BaseLib.decompiled.cs"
         if candidate_file.exists():
             return str(candidate_file)
-    return str(BASELIB_FALLBACK_PATH)
+    runtime_file = BASELIB_DECOMPILED_DIR / "BaseLib.decompiled.cs"
+    if runtime_file.exists():
+        return str(runtime_file)
+    return None
 
 
 def _reset_dir(path: Path) -> None:
@@ -356,7 +398,13 @@ def _run_ilspy_to_single_file(dll_path: Path, output_file: Path) -> None:
 
 def _download_file(url: str, target: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
-    with httpx.stream("GET", url, headers={"User-Agent": "AgentTheSpire-Codex"}, timeout=60.0) as response:
+    with httpx.stream(
+        "GET",
+        url,
+        headers={"User-Agent": "AgentTheSpire-Codex"},
+        timeout=60.0,
+        follow_redirects=True,
+    ) as response:
         response.raise_for_status()
         with open(target, "wb") as file:
             for chunk in response.iter_bytes():

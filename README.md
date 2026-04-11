@@ -19,6 +19,12 @@ Describe your card, relic, or power in plain text — AgentTheSpire generates th
 - **Batch creation** — describe a full mod theme, AI plans and generates all assets in one go
 - **Hybrid execution routing** — one frontend shell now supports local BYOK flows and platform-mode task creation with auth, user center, and job detail pages
 
+### Runtime Status
+
+- As of April 10, 2026, only two backend roles remain active: `workstation` and `web`.
+- The old integrated `full` runtime, migration flags, and workflow bridge path are retired.
+- If any historical section below still mentions `full`, treat it as archived background rather than the current baseline.
+
 ### Requirements
 
 | Tool | Version | Required |
@@ -39,30 +45,26 @@ Describe your card, relic, or power in plain text — AgentTheSpire generates th
 git clone https://github.com/yourname/AgentTheSpire.git
 cd AgentTheSpire
 
-powershell -ExecutionPolicy Bypass -File .\tools\install.ps1   # Windows 推荐入口：安装 .NET / Godot / ilspycmd / Python deps / frontend build
-tools\install.bat                                           # 兼容入口，内部转发到 install.ps1
+powershell -ExecutionPolicy Bypass -File .\tools\tools.ps1 install   # Windows 推荐入口：安装 .NET / Godot / ilspycmd / Python deps / frontend build
 
-# Copy config.example.json → config.json, fill in your API keys and game path
+# Copy config.example.json → runtime/workstation.config.json, fill in your API keys and game path
 
-tools\start.bat             # Opens http://localhost:7860 (legacy full runtime)
+powershell -ExecutionPolicy Bypass -File .\tools\tools.ps1 start workstation   # Opens http://localhost:7860
 ```
 
 See [TUTORIAL.md](TUTORIAL.md) for full setup and configuration guide.
 
 ### Backend Runtime Modes
 
-- `tools\start.bat`
-  Starts the legacy integrated `full` runtime on `http://localhost:7860`.
-- `tools\start_workstation.bat`
+- `powershell -File .\tools\tools.ps1 start workstation`
   Starts `workstation-backend` only. This runtime serves the local workstation UI, local workflows, approvals, config, build, and deploy flows.
-- `tools\start_web.bat`
-  Starts `web-backend` only on `http://localhost:7870`. This runtime is for platform/auth/job/quota APIs and requires a valid `database.url`.
+- `powershell -File .\tools\tools.ps1 start web`
+  Starts `web-backend` only on `http://localhost:7870`. This runtime is for platform/auth/job/quota APIs and requires a valid `database.url` in `runtime/web.config.json` or the path pointed to by `SPIREFORGE_CONFIG_PATH`.
 
 Current deployment guidance:
 
 - Single-machine local use: prefer `workstation-backend`
 - Server-side platform APIs: prefer `web-backend`
-- `full` remains a compatibility runtime for transition and joint debugging
 
 Current product behavior:
 
@@ -110,6 +112,12 @@ Current product behavior:
 - **同一入口 + 用户中心** — 同一前端入口同时承接本地工作站链路与平台链路，已补登录/注册/用户中心/任务详情页
 - **统一执行分流** — 点击生成后可在“本机执行 / 服务器模式”之间分流；服务器模式先创建平台任务草稿，再确认开始
 
+### 当前运行口径
+
+- 截至 2026-04-10，后端只保留两个有效角色：`workstation` 与 `web`。
+- 历史 `full` 一体化运行时、migration flags、workflow 过渡桥接路径已收口，不再作为当前实现基线。
+- 若下文个别历史段落仍提到 `full`，请按“归档背景信息”理解，不再视为当前推荐方案。
+
 ### 知识库版本检查
 
 - 工作站启动后会检查本地知识库状态，并区分 `fresh / stale / missing`
@@ -120,11 +128,14 @@ Current product behavior:
   - `检查更新`
   - `更新知识库`
   - `查看知识库说明`
-- 本地知识缓存默认位于：
+- 发行包会直接包含可查看、可编辑的运行时知识目录；应用运行时只读取这份目录，用户修改后会直接生效。
+- 运行时知识目录默认位于：
   - `runtime/knowledge/knowledge-manifest.json`
-  - `runtime/knowledge/game_decompiled/`
-  - `runtime/knowledge/baselib_decompiled/`
+  - `runtime/knowledge/game/`
+  - `runtime/knowledge/baselib/`
+  - `runtime/knowledge/resources/sts2/`
   - `runtime/knowledge/cache/`
+- 仓库内 `backend/agents/*` 与 `backend/app/modules/knowledge/resources/sts2/*` 仅作为开发期/打包期种子来源，不再作为运行时并列真源。
 
 ### 快速开始
 
@@ -132,46 +143,41 @@ Current product behavior:
 git clone https://github.com/yourname/AgentTheSpire.git
 cd AgentTheSpire
 
-powershell -ExecutionPolicy Bypass -File .\tools\install.ps1   # Windows 推荐入口：安装 .NET / Godot / ilspycmd / Python 依赖 / 前端构建
-tools\install.bat                                           # 兼容入口，内部转发到 install.ps1
+powershell -ExecutionPolicy Bypass -File .\tools\tools.ps1 install   # Windows 推荐入口：安装 .NET / Godot / ilspycmd / Python 依赖 / 前端构建
 
 # 如果只想安装 .NET 9 + Godot 4.5.1 + ilspycmd：
-powershell -ExecutionPolicy Bypass -File .\tools\install.ps1 -OnlyModDeps
+powershell -ExecutionPolicy Bypass -File .\tools\tools.ps1 install mod
 
-# 复制 config.example.json → config.json，填入 API Key 和游戏路径
+# 复制 config.example.json → runtime/workstation.config.json，填入 API Key 和游戏路径
 
-tools\start.bat             # 打开 http://localhost:7860（兼容态 full 运行时）
+powershell -ExecutionPolicy Bypass -File .\tools\tools.ps1 start workstation   # 打开 http://localhost:7860
 ```
 
 详细配置说明见 [TUTORIAL.md](TUTORIAL.md)。
 
 ### 后端运行形态
 
-- `tools\start.bat`
-  启动历史兼容态 `full` 运行时，监听 `http://localhost:7860`。
-- `tools\start_workstation.bat`
+- `powershell -File .\tools\tools.ps1 start workstation`
   仅启动 `workstation-backend`。该运行时承接本地工作站 UI、本地工作流、审批、配置、构建与部署链路。
-- `tools\start_split_local.bat`
+- `powershell -File .\tools\tools.ps1 split start`
   启动“独立前端 + 本地 workstation”双进程本地形态：前端静态站点由本地轻量服务托管，工作台 HTTP/WS 指向本机 `workstation-backend`，平台接口继续指向 `web-backend`。
-- `tools\start_web.bat`
-  仅启动 `web-backend`，监听 `http://localhost:7870`。该运行时承接平台任务、认证、配额、历史记录等 API，并要求 `config.json` 中存在有效的 `database.url`。
+- `powershell -File .\tools\tools.ps1 start web`
+  仅启动 `web-backend`，监听 `http://localhost:7870`。该运行时承接平台任务、认证、配额、历史记录等 API，并要求 `runtime/web.config.json` 或 `SPIREFORGE_CONFIG_PATH` 指向的配置中存在有效的 `database.url`。
 
 当前部署口径：
 
 - 单机本地使用，优先 `workstation-backend`
 - 服务器平台 API，优先 `web-backend`
 - 用户侧正式推荐打包目标：`hybrid`
-- `full` 继续保留给兼容态与联调态
-- 若要验证“独立前端 + 本地 workstation + 远端/本地 web”形态，优先使用 `tools\start_split_local.bat`
+- 若要验证“独立前端 + 本地 workstation + 远端/本地 web”形态，优先使用 `powershell -File .\tools\tools.ps1 split start`
 
-四种相关形态的差异如下：
+三种当前相关形态的差异如下：
 
 | 形态 | 启动入口 | 谁托管前端 | workstation 接口去向 | web 接口去向 | 适用场景 |
 |------|----------|------------|----------------------|--------------|----------|
-| 兼容态 `full` | `tools\start.bat` | `full` 后端 | 同机 `full` | 同机 `full` 中按兼容开关暴露的平台接口 | 过渡期兼容、联调、历史脚本复用 |
-| 工作站托管态 | `tools\start_workstation.bat` | `workstation-backend` | 本机 `workstation-backend` | 通常不承接；需要平台接口时应另启 `web-backend` | 单机工作站、本地 BYOK、本机构建部署 |
+| 工作站托管态 | `powershell -File .\tools\tools.ps1 start workstation` | `workstation-backend` | 本机 `workstation-backend` | 通常不承接；需要平台接口时应另启 `web-backend` | 单机工作站、本地 BYOK、本机构建部署 |
 | 正式部署目标 `hybrid` | `tools\latest\package-release.ps1 hybrid` | 独立静态前端 | `runtime-config.js` 指向本机或 LAN 可达 `workstation-backend` | 默认指向本机 `http://127.0.0.1:7870`，也可显式改为独立部署的 `web-backend` | 用户侧正式交付、“一个前端入口 + 两类后端能力” |
-| 本地验证形态 `split-local` | `tools\start_split_local.bat` | 独立静态前端 | 指向本机 `workstation-backend` | 指向配置的 `web-backend` | 本地验证 `hybrid` 形态、开发联调 |
+| 本地验证形态 `split-local` | `powershell -File .\tools\tools.ps1 split start` | 独立静态前端 | 指向本机 `workstation-backend` | 指向配置的 `web-backend` | 本地验证 `hybrid` 形态、开发联调 |
 
 当前前后端边界补充：
 
@@ -212,7 +218,7 @@ pwsh -NoProfile -File .\tools\latest\stop-deploy.ps1 hybrid
 
 说明：
 
-- `deploy-docker.ps1` 在 `hybrid` / `workstation` / `frontend` / `full` 目标下会把本地服务作为后台进程启动，并额外打开日志窗口。
+- `deploy-docker.ps1` 在 `hybrid` / `workstation` / `frontend` 目标下会把本地服务作为后台进程启动，并额外打开日志窗口。
 - 关闭日志窗口只会停止日志查看，不会自动停止后台服务。
 - 如需停止这些本地服务，请执行对应的 `stop-deploy.ps1`；脚本会读取 `release/runtime/local-deploy-state.json` 中记录的 PID。
 - `deploy-docker.ps1 hybrid` 默认会从当前 hybrid release 的同级目录推导本机 `web release`，并在联动部署前自动刷新该 release；如实际目录不在同级，可显式传入 `-WebReleaseRoot`。
@@ -274,7 +280,7 @@ AgentTheSpire/
 │   │   ├── shared/prompting/       # PromptLoader and prompt rendering utilities
 │   │   └── shared/resources/
 │   │       └── prompts/            # Unified runtime prompt bundles (*.md)
-│   ├── agents/                     # Legacy-compatible agent entrypoints
+│   ├── agents/                     # Agent entrypoints and packaged prompt sources
 │   ├── approval/                   # Approval flow adapters
 │   ├── image/                      # Image generation pipeline
 │   ├── llm/                        # Unified agent/text runner backends

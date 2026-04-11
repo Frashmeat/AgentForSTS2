@@ -63,7 +63,7 @@ def test_build_text_prompt_uses_latest_runtime_custom_prompt_when_requested(monk
     ) == "base prompt"
 
 
-def test_build_text_prompt_uses_shared_bundle_header_when_legacy_path_missing(monkeypatch):
+def test_build_text_prompt_uses_shared_bundle_header_when_bundle_path_missing(monkeypatch):
     prompt = build_text_prompt("base prompt", {"custom_prompt": "always answer in Chinese"})
     expected_header = PromptLoader().load("runtime_agent.llm_global_prompt_header").strip()
 
@@ -101,3 +101,37 @@ def test_complete_via_claude_cli_passes_model_to_subprocess(monkeypatch):
     assert captured["env"]["ANTHROPIC_AUTH_TOKEN"] == "secret-token"
     assert captured["env"]["ANTHROPIC_API_KEY"] == "secret-token"
     assert captured["env"]["ANTHROPIC_BASE_URL"] == "https://e-flowcode.cc"
+
+
+def test_complete_via_claude_cli_uses_resolved_launcher(monkeypatch):
+    from llm import text_runner
+
+    captured: dict[str, object] = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return types.SimpleNamespace(stdout=b"ok\n", returncode=0)
+
+    async def run_case():
+        return await text_runner._complete_via_claude_cli(
+            "base prompt",
+            {},
+            None,
+        )
+
+    monkeypatch.setattr(
+        text_runner,
+        "_resolve_claude_launcher",
+        lambda: ["C:/Program Files/nodejs/node.exe", "C:/Users/test/claude-code/cli.js"],
+    )
+    monkeypatch.setattr(text_runner.subprocess, "run", fake_run)
+
+    result = asyncio.run(run_case())
+
+    assert result == "ok"
+    assert captured["cmd"][:2] == [
+        "C:/Program Files/nodejs/node.exe",
+        "C:/Users/test/claude-code/cli.js",
+    ]
+    assert "--print" in captured["cmd"]
+    assert "-p" in captured["cmd"]

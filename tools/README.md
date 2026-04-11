@@ -1,6 +1,6 @@
 # tools 目录说明
 
-本目录现在采用“一个统一入口 + 分层数字菜单 + 参数直达 + 顶层兼容 wrapper”的结构。
+本目录现在采用“一个统一入口 + 分层数字菜单 + 参数直达 + 功能子目录真实脚本”的结构。
 
 ## 推荐入口
 
@@ -27,7 +27,6 @@ powershell -File .\tools\tools.ps1 install
 powershell -File .\tools\tools.ps1 install mod
 
 # 启动
-powershell -File .\tools\tools.ps1 start full
 powershell -File .\tools\tools.ps1 start workstation
 powershell -File .\tools\tools.ps1 start web
 powershell -File .\tools\tools.ps1 start dev
@@ -37,7 +36,6 @@ powershell -File .\tools\tools.ps1 split start -DryRun
 powershell -File .\tools\tools.ps1 split stop
 
 # 开发辅助
-powershell -File .\tools\tools.ps1 dev verify-install
 powershell -File .\tools\tools.ps1 dev decompile
 
 # 停止本机前端 / workstation / web 本地进程
@@ -49,7 +47,7 @@ powershell -File .\tools\tools.ps1 latest package hybrid
 powershell -File .\tools\tools.ps1 latest package workstation
 powershell -File .\tools\tools.ps1 latest deploy hybrid
 powershell -File .\tools\tools.ps1 latest deploy hybrid -WebBaseUrl https://your-web-api.example.com
-powershell -File .\tools\tools.ps1 latest deploy full
+powershell -File .\tools\tools.ps1 latest deploy web
 powershell -File .\tools\tools.ps1 latest installer
 
 # 停止 latest deploy 拉起的本地服务
@@ -96,29 +94,6 @@ tools/
 └── archive/                  # 已归档历史脚本与产物
 ```
 
-## 顶层兼容入口
-
-以下顶层脚本仍然保留，但现在只作为兼容 wrapper，内部会转发到对应子目录中的真实脚本：
-
-- `tools\install.ps1`
-- `tools\install.bat`
-- `tools\install.sh`
-- `tools\setup_mod_deps.bat`
-- `tools\setup_mod_deps.sh`
-- `tools\start.bat`
-- `tools\start.sh`
-- `tools\start_dev.bat`
-- `tools\start_web.bat`
-- `tools\start_workstation.bat`
-- `tools\start_split_local.ps1`
-- `tools\start_split_local.bat`
-- `tools\stop_split_local.ps1`
-- `tools\stop_split_local.bat`
-- `tools\verify-install-bat.ps1`
-- `tools\kill-local.ps1`
-
-后续日常使用建议优先改为 `tools.ps1`，避免直接依赖兼容层。
-
 ## 功能分组
 
 ### install
@@ -134,7 +109,7 @@ tools/
 ### start
 
 - `tools\start\start.bat` / `tools\start\start.sh`
-  启动兼容态 `full` 运行时。
+  历史启动包装脚本，日常请优先使用 `tools.ps1 start workstation`、`tools.ps1 start web` 或 `tools.ps1 start dev`。
 - `tools\start\start_workstation.bat`
   启动 `workstation-backend`。
 - `tools\start\start_web.bat`
@@ -155,8 +130,6 @@ tools/
 
 - `tools\dev\decompile_sts2.py`
   反编译 `sts2.dll`，并把输出路径写入 `config.json`。不传参数时会默认读取 `config.json` 中的 `sts2_path`。
-- `tools\dev\verify-install-bat.ps1`
-  校验顶层安装 wrapper 与实际 `install\install.ps1` 的关键行为。
 
 ### 本地进程停止
 
@@ -172,9 +145,11 @@ tools/
 
 - `tools\latest\package-release.ps1`
   按目标打包 release bundle，并可输出 zip。
+  `workstation` 相关目标在传入 `-Debug` 时只会沿用已有 `runtime\workstation.config.json`，不再从旧 `services\workstation\config.json` 迁移设置。
 - `tools\latest\deploy-docker.ps1`
   按目标部署 mixed release。
-  `web` 继续使用 Docker；`workstation` 与 `frontend` 改为本机启动；`full` 会本机启动 `workstation` 并只用 Docker 部署 `web`；`hybrid` 会本机启动 `workstation + frontend`，默认还会联动部署本机 `web-backend`。
+  `web` 继续使用 Docker；`workstation` 与 `frontend` 改为本机启动；`hybrid` 会本机启动 `workstation + frontend`，默认还会联动部署本机 `web-backend`。
+  未显式传入 `-ConfigPath` 时，脚本只会优先读取 release 内 `runtime\*.config.json`，再回退到服务目录内 `config.example.json`。
   默认会基于当前 release 重新 `build` 需要 Docker 的目标镜像；只有显式传入 `-ReuseImages` 时才会复用已有镜像。
   `hybrid` / `frontend` 未显式传入 `-WebBaseUrl` 时会默认写入本机 `http://127.0.0.1:7870`；`hybrid` 此时还会联动部署本机 `web-backend`。
   `hybrid` 默认会从当前 hybrid release 的同级目录推导本机 `web release`，并在联动部署前自动刷新该 release，确保跟随当前仓库模板；如目录不在同级，可显式传入 `-WebReleaseRoot`。
@@ -202,7 +177,6 @@ tools/
 
 | 形态 | 推荐命令 | 前端托管方 | 适合谁 |
 | --- | --- | --- | --- |
-| 兼容态 `full` | `tools.ps1 start full` | `full` 后端 | 保留历史行为或做同机联调 |
 | 工作站托管态 | `tools.ps1 start workstation` | `workstation-backend` | 单机本地创作、BYOK、本机构建部署 |
 | 正式部署目标 `hybrid` | `tools.ps1 latest package hybrid` / `tools.ps1 latest deploy hybrid` | 独立静态前端 | 用户侧正式交付，前端独立发布并接入 `workstation-backend`；默认联动本机 `web-backend`，也可显式改为远端 |
 | 本地验证形态 `split-local` | `tools.ps1 split start` | 独立静态前端 | 本地验证 `hybrid` 形态与开发联调 |
@@ -216,13 +190,12 @@ tools/
 
 ## 其它说明
 
-- 所有真实脚本都已经迁入功能目录，顶层旧脚本只保留兼容层职责。
+- 日常入口统一收敛到 `tools.ps1`；如需绕过菜单，可直接调用功能子目录下的真实脚本。
 - `tools.ps1` 现在默认优先提供菜单式选择，适合日常本地使用；参数直达模式更适合脚本化或熟悉命令后的快速调用。
 - `tools\latest\package-release.ps1 workstation` 仍会把 launcher 脚本复制到 release 目录下的 `launcher/` 中。
 - `tools\latest\package-release.ps1 hybrid` 会同时整理 `frontend` 与 `workstation` 两类用户侧服务，并附带 launcher。
 - `tools\latest\deploy-docker.ps1 workstation` 会在本机拉起 `workstation-backend`，并以 `runtime\workstation.config.json` 作为工作站应用配置真源。
 - `tools\latest\deploy-docker.ps1 frontend` 会在本机拉起静态前端服务，并把 `runtime-config.js` 写入 release 内的前端 `dist/`。
-- `tools\latest\deploy-docker.ps1 full` 会在本机拉起 `workstation-backend`，同时只对 `web` 服务执行 Docker 部署。
 - `tools\latest\deploy-docker.ps1 hybrid` 默认会联动部署本机 `web-backend`，并把前端 `web` 地址写成 `http://127.0.0.1:7870`。
 - 默认推导出的本机 `web release` 会在 `deploy-docker.ps1 hybrid` 联动部署前自动调用 `package-release.ps1 web` 刷新，避免继续复用旧 release。
 - 刷新默认推导出的本机 `web release` 前，脚本会先对固定的 `agentthespire-web-release` Compose 项目执行一次 `docker compose down --remove-orphans`，避免重复执行 `hybrid` 时在仍被 Compose 使用的 release 目录上直接重写文件。
@@ -233,6 +206,7 @@ tools/
 - `deploy-docker.ps1` 打开的日志终端只是查看窗口；关闭窗口不会自动停止后台服务进程。
 - `workstation` 本地 Python 运行时缓存位于 `runtime\python-runtime\workstation`；只要 `services\workstation\backend\requirements.txt` 与启动所用 Python 没变化，后续部署会优先复用该缓存。
 - `package-release.ps1` 生成 zip 时会默认排除 `runtime\python-runtime` 本地缓存，避免把本机 `.venv` 与依赖缓存一并打进发布归档；release 目录本身仍会保留该缓存供本地部署复用。
-- `hybrid` / `workstation` / `full` 形态下，工作站应用配置统一收敛到 `runtime\workstation.config.json`；`services\workstation\config.json` 不再作为独立真源。
+- `hybrid` / `workstation` 形态下，工作站应用配置统一收敛到 `runtime\workstation.config.json`；`services\workstation\config.json` 不再作为独立真源。
+- 后端进程直启时，运行时配置默认只读取 `runtime\workstation.config.json` / `runtime\web.config.json`；仓库根 `config.json` 不再作为运行时回退来源，如需自定义路径请显式设置 `SPIREFORGE_CONFIG_PATH`。
 - `runtime-config.js` 仍属于部署期配置文件；更换 `workstation` 或 `web` 地址时优先覆盖该文件，不重新构建前端。
 - `workstation` 地址应配置为本机或 LAN 可达地址，不应配置为公网用户本机地址。

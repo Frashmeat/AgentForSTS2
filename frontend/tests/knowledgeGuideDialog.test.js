@@ -12,6 +12,6 @@ test("knowledge guide dialog exposes actual source labels and paths", () => {
   assert.match(source, /当前实际使用来源/);
   assert.match(source, /当前知识路径/);
   assert.match(source, /runtime_decompiled/);
-  assert.match(source, /repo_reference/);
-  assert.match(source, /repo_fallback/);
+  assert.doesNotMatch(source, /repo_reference/);
+  assert.doesNotMatch(source, /repo_fallback/);
 });

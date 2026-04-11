@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { PlatformPageShell } from "../../components/platform/PlatformPageShell.tsx";
 import { resetPasswordWithCode } from "../../shared/api/auth.ts";
 import { resolveErrorMessage } from "../../shared/error.ts";
@@ -16,9 +16,12 @@ const SESSION_PERSISTENCE_ERROR =
 
 export function ResetPasswordPage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const location = useLocation();
   const { refreshSession } = useSession();
-  const [code, setCode] = useState(() => searchParams.get("code") ?? "");
+  const [code, setCode] = useState(() => {
+    const routeState = location.state as { code?: string } | null;
+    return typeof routeState?.code === "string" ? routeState.code : "";
+  });
   const [password, setPassword] = useState("");
   const [formState, setFormState] = useState(createIdleAuthFormState);
 

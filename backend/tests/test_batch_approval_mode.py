@@ -131,9 +131,9 @@ except ModuleNotFoundError:
     sys.modules["litellm"] = litellm_stub
 
 try:
-    importlib.import_module("agents.code_agent")
+    importlib.import_module("app.modules.codegen.api")
 except ModuleNotFoundError:
-    code_agent_stub = types.ModuleType("agents.code_agent")
+    code_agent_stub = types.ModuleType("app.modules.codegen.api")
 
     async def _unexpected_code_agent(*_args, **_kwargs):
         raise AssertionError("code agent stub should be monkeypatched in batch approval tests")
@@ -149,7 +149,7 @@ except ModuleNotFoundError:
     code_agent_stub.get_decompiled_src_path = _unexpected_code_agent_sync
     code_agent_stub.package_mod = _unexpected_code_agent
     code_agent_stub.run_claude_code = _unexpected_code_agent
-    sys.modules["agents.code_agent"] = code_agent_stub
+    sys.modules["app.modules.codegen.api"] = code_agent_stub
 
 try:
     importlib.import_module("image.generator")
@@ -345,7 +345,7 @@ def test_ensure_plan_review_passes_rejects_plan_that_needs_user_input():
 
 def test_batch_plan_uses_http_exception_for_missing_requirements():
     with pytest.raises(HTTPException) as exc_info:
-        batch_workflow._legacy_api_plan({"requirements": "   "})
+        batch_workflow._api_plan_impl({"requirements": "   "})
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail

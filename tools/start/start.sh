@@ -13,7 +13,7 @@ if [[ ! -d "$FRONTEND_DIST" ]]; then
     echo "检测到前端构建产物不存在，正在构建 frontend/dist..."
     if [[ ! -d "$FRONTEND_NODE_MODULES" ]]; then
         echo "[ERROR] 缺少前端依赖目录 \"$FRONTEND_NODE_MODULES\"。"
-        echo "请先运行 ./tools/install.sh 安装依赖后再重试。"
+        echo "请先运行 ./tools/install/install.sh 安装依赖后再重试。"
         exit 1
     fi
 
@@ -29,7 +29,7 @@ elif command -v python3 &>/dev/null; then
     PYTHON_BIN="$(command -v python3)"
 else
     echo "[ERROR] 未找到可用的 Python 解释器。"
-    echo "请先运行 ./tools/install.sh 创建 backend/.venv。"
+    echo "请先运行 ./tools/install/install.sh 创建 backend/.venv。"
     exit 1
 fi
 

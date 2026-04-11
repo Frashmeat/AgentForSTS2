@@ -102,13 +102,11 @@ function Show-Help {
     Write-Host "参数直达："
     Write-Host "  install                安装完整运行依赖"
     Write-Host "  install mod            只安装 Mod 开发依赖"
-    Write-Host "  start full             启动兼容态 full"
     Write-Host "  start workstation      启动 workstation-backend"
     Write-Host "  start web              启动 web-backend"
     Write-Host "  start dev              启动开发模式"
     Write-Host "  split start            启动独立前端 + 本地 workstation"
     Write-Host "  split stop             停止 split-local 双进程"
-    Write-Host "  dev verify-install     校验安装 wrapper"
     Write-Host "  dev decompile          反编译 sts2.dll"
     Write-Host "  latest package <target> 打包 release bundle"
     Write-Host "  latest deploy <target>  部署 mixed release（web 用 Docker，其余目标按需本机启动）"
@@ -339,11 +337,8 @@ function Get-MenuGroups {
         [pscustomobject]@{
             Key = "start"
             Label = "启动"
-            Description = "启动 full / workstation / web / dev"
+            Description = "启动 workstation / web / dev"
             Items = @(
-                (New-MenuCommand -Key "start-full" -Label "启动兼容态 full" -Description "通过 full 后端承接前端与接口" -ScriptPath (Join-Path $toolsRoot "start\start.bat") -InvocationName "start full" -Profiles @(
-                    (New-MenuProfile -Key "default" -Label "直接执行" -Description "按默认方式启动 full 运行时")
-                ))
                 (New-MenuCommand -Key "start-workstation" -Label "启动 workstation-backend" -Description "启动本地工作站后端" -ScriptPath (Join-Path $toolsRoot "start\start_workstation.bat") -InvocationName "start workstation" -Profiles @(
                     (New-MenuProfile -Key "default" -Label "直接执行" -Description "按默认方式启动 workstation-backend")
                 ))
@@ -374,11 +369,8 @@ function Get-MenuGroups {
         [pscustomobject]@{
             Key = "dev"
             Label = "开发辅助"
-            Description = "校验安装 wrapper、反编译游戏 DLL"
+            Description = "反编译游戏 DLL 等开发辅助"
             Items = @(
-                (New-MenuCommand -Key "dev-verify-install" -Label "校验安装 wrapper" -Description "检查顶层安装兼容层与真实 install.ps1 的关键行为" -ScriptPath (Join-Path $toolsRoot "dev\verify-install-bat.ps1") -InvocationName "dev verify-install" -Profiles @(
-                    (New-MenuProfile -Key "default" -Label "直接执行" -Description "运行 verify-install-bat.ps1")
-                ))
                 (New-MenuCommand -Key "dev-decompile" -Label "反编译 sts2.dll" -Description "运行 decompile_sts2.py" -ScriptPath (Join-Path $toolsRoot "dev\decompile_sts2.py") -InvocationName "dev decompile" -Profiles @(
                     (New-MenuProfile -Key "default" -Label "直接执行" -Description "按当前配置运行反编译脚本")
                 ))
@@ -399,11 +391,6 @@ function Get-MenuGroups {
                     (New-MenuProfile -Key "nozip" -Label "打包但不压缩" -Description "保留 release 目录，跳过 zip" -Args @("-NoZip"))
                     (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 package-release.ps1 参数说明" -Args @("-Help"))
                 ))
-                (New-MenuCommand -Key "latest-package-full" -Label "打包 full release" -Description "构建 full release bundle" -ScriptPath (Join-Path $toolsRoot "latest\package-release.ps1") -InvocationName "latest package full" -DefaultArgs @("full") -Profiles @(
-                    (New-MenuProfile -Key "default" -Label "直接打包" -Description "按默认参数打包 full")
-                    (New-MenuProfile -Key "nozip" -Label "打包但不压缩" -Description "保留 release 目录，跳过 zip" -Args @("-NoZip"))
-                    (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 package-release.ps1 参数说明" -Args @("-Help"))
-                ))
                 (New-MenuCommand -Key "latest-package-frontend" -Label "打包 frontend release" -Description "只打前端静态站点 release" -ScriptPath (Join-Path $toolsRoot "latest\package-release.ps1") -InvocationName "latest package frontend" -DefaultArgs @("frontend") -Profiles @(
                     (New-MenuProfile -Key "default" -Label "直接打包" -Description "按默认参数打包 frontend")
                     (New-MenuProfile -Key "nozip" -Label "打包但不压缩" -Description "保留 release 目录，跳过 zip" -Args @("-NoZip"))
@@ -420,10 +407,6 @@ function Get-MenuGroups {
                 ))
                 (New-MenuCommand -Key "latest-deploy-hybrid" -Label "部署 hybrid release" -Description "部署正式推荐的 frontend + workstation 用户侧 bundle" -ScriptPath (Join-Path $toolsRoot "latest\deploy-docker.ps1") -InvocationName "latest deploy hybrid" -DefaultArgs @("hybrid") -Profiles @(
                     (New-MenuProfile -Key "default" -Label "配置 Web API 后部署" -Description "可留空使用本机 web-backend，也可填写远端地址" -PromptHandler "LatestDeployHybrid")
-                    (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 deploy-docker.ps1 参数说明" -Args @("-Help"))
-                ))
-                (New-MenuCommand -Key "latest-deploy-full" -Label "部署 full release" -Description "本机启动 workstation，并用 Docker 部署 web" -ScriptPath (Join-Path $toolsRoot "latest\deploy-docker.ps1") -InvocationName "latest deploy full" -DefaultArgs @("full") -Profiles @(
-                    (New-MenuProfile -Key "default" -Label "直接部署" -Description "按默认参数部署 full mixed 形态")
                     (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 deploy-docker.ps1 参数说明" -Args @("-Help"))
                 ))
                 (New-MenuCommand -Key "latest-deploy-frontend" -Label "部署 frontend release" -Description "在本机启动前端静态站" -ScriptPath (Join-Path $toolsRoot "latest\deploy-docker.ps1") -InvocationName "latest deploy frontend" -DefaultArgs @("frontend") -Profiles @(
@@ -507,7 +490,6 @@ function Invoke-Route {
         }
         "start" {
             switch ($actionName) {
-                "full" { Invoke-TargetScript -Path (Join-Path $toolsRoot "start\start.bat") -Arguments $ResolvedArgs; return }
                 "workstation" { Invoke-TargetScript -Path (Join-Path $toolsRoot "start\start_workstation.bat") -Arguments $ResolvedArgs; return }
                 "web" { Invoke-TargetScript -Path (Join-Path $toolsRoot "start\start_web.bat") -Arguments $ResolvedArgs; return }
                 "dev" { Invoke-TargetScript -Path (Join-Path $toolsRoot "start\start_dev.bat") -Arguments $ResolvedArgs; return }
@@ -523,7 +505,6 @@ function Invoke-Route {
         }
         "dev" {
             switch ($actionName) {
-                "verify-install" { Invoke-TargetScript -Path (Join-Path $toolsRoot "dev\verify-install-bat.ps1") -Arguments $ResolvedArgs; return }
                 "decompile" { Invoke-TargetScript -Path (Join-Path $toolsRoot "dev\decompile_sts2.py") -Arguments $ResolvedArgs; return }
                 default { Show-Help; return }
             }

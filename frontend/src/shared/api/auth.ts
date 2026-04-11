@@ -31,7 +31,7 @@ export interface VerifyEmailResponse {
 }
 
 export interface ForgotPasswordResponse {
-  reset_code: string;
+  ok: boolean;
 }
 
 export interface ResendVerificationResponse {

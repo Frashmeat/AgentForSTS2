@@ -94,7 +94,7 @@ def test_build_agent_prompt_skips_agents_codex_for_claude_api_mode(monkeypatch, 
     assert prompt == "fix the project"
 
 
-def test_build_agent_prompt_uses_shared_bundle_header_when_legacy_path_missing(monkeypatch):
+def test_build_agent_prompt_uses_shared_bundle_header_when_bundle_path_missing(monkeypatch):
     prompt = build_agent_prompt("fix the project", {"custom_prompt": "prefer minimal edits"})
     expected_header = PromptLoader().load("runtime_agent.llm_global_prompt_header").strip()
 

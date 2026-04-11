@@ -69,13 +69,6 @@ def _prepare_release_bundle(release_root: Path, target: str) -> tuple[Path, Path
         (release_root / "services" / "frontend" / "frontend" / "dist").mkdir(parents=True)
         (release_root / "services" / "workstation" / "config.example.json").write_text("{}", encoding="utf-8")
         compose = "services:\n  workstation:\n    image: fake\n  frontend:\n    image: fake\n"
-    elif target == "full":
-        (release_root / "services" / "workstation" / "backend").mkdir(parents=True)
-        (release_root / "services" / "workstation" / "frontend" / "dist").mkdir(parents=True)
-        (release_root / "services" / "web").mkdir(parents=True)
-        (release_root / "services" / "workstation" / "config.example.json").write_text("{}", encoding="utf-8")
-        (release_root / "services" / "web" / "config.example.json").write_text("{}", encoding="utf-8")
-        compose = "services:\n  workstation:\n    image: fake\n  web:\n    image: fake\n"
     elif target == "frontend":
         (release_root / "services" / "frontend" / "frontend" / "dist").mkdir(parents=True)
         compose = "services:\n  frontend:\n    image: fake\n"
@@ -275,15 +268,3 @@ def test_deploy_docker_frontend_runs_local_static_server_without_docker(tmp_path
     assert 'web: "https://platform.example.com"' in runtime_config.read_text(encoding="utf-8")
 
 
-def test_deploy_docker_full_runs_local_workstation_and_only_dockerizes_web(tmp_path: Path):
-    result = _run_deploy(tmp_path, "full")
-
-    workstation_config = tmp_path / "release" / "runtime" / "workstation.config.json"
-    legacy_service_config = tmp_path / "release" / "services" / "workstation" / "config.json"
-
-    assert result.returncode == 0, result.stderr
-    assert result.docker_log.count("compose build") == 1
-    assert result.docker_log.count("compose up") == 1
-    assert "-m uvicorn main_workstation:app --host 127.0.0.1 --port 7860" in result.python_log
-    assert workstation_config.exists()
-    assert not legacy_service_config.exists()

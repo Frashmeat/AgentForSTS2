@@ -5,6 +5,7 @@ from pathlib import Path
 # 让 pytest 能找到 backend 模块
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from app.modules.knowledge.infra import knowledge_runtime
 from agents.sts2_docs import (
     get_docs_for_type,
     get_planner_api_hints,
@@ -12,11 +13,11 @@ from agents.sts2_docs import (
     STS2_MOD_DOCS,
 )
 
-RESOURCE_DIR = Path(__file__).parent.parent / "app" / "modules" / "knowledge" / "resources" / "sts2"
+RESOURCE_DIR = knowledge_runtime.RESOURCE_KNOWLEDGE_DIR
 
 
 def test_api_ref_file_exists():
-    """The decompiled API reference markdown must be present."""
+    """The runtime knowledge API reference markdown must be present."""
     assert API_REF_PATH.exists(), f"Missing file: {API_REF_PATH}"
 
 
@@ -158,10 +159,10 @@ def test_planner_hints_match_resource_file():
     assert hints.strip() == resource_text
 
 
-# ── legacy STS2_MOD_DOCS ──────────────────────────────────────────────────────
+# ── combined STS2_MOD_DOCS ────────────────────────────────────────────────────
 
-def test_legacy_docs_combine_all_types():
-    """STS2_MOD_DOCS should cover all major types for backwards compatibility."""
+def test_combined_docs_cover_all_types():
+    """STS2_MOD_DOCS should cover all major asset types."""
     assert "OnPlay" in STS2_MOD_DOCS
     assert "RelicModel" in STS2_MOD_DOCS
     assert "PowerModel" in STS2_MOD_DOCS

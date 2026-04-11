@@ -13,7 +13,7 @@ def test_api_lookup_section_uses_configured_decompiled_source(monkeypatch):
         codegen_api,
         "build_api_lookup_context",
         lambda: {
-            "baselib_src_path": str(codegen_api.API_REF_PATH.parent / "baselib_src" / "BaseLib.decompiled.cs"),
+            "baselib_src_path": "I:/runtime/knowledge/baselib/BaseLib.decompiled.cs",
             "game_source_mode": "runtime_decompiled",
             "game_path": decompiled_dir,
             "ilspy_example_dll_path": "<STS2GamePath>/data_sts2_windows_x86_64/sts2.dll",
@@ -35,9 +35,9 @@ def test_api_lookup_section_falls_back_to_ilspy_when_no_decompiled_source(monkey
         codegen_api,
         "build_api_lookup_context",
         lambda: {
-            "baselib_src_path": str(codegen_api.API_REF_PATH.parent / "baselib_src" / "BaseLib.decompiled.cs"),
-            "game_source_mode": "repo_reference",
-            "game_path": str(codegen_api.API_REF_PATH),
+            "baselib_src_path": "I:/runtime/knowledge/baselib/BaseLib.decompiled.cs",
+            "game_source_mode": "missing",
+            "game_path": "",
             "ilspy_example_dll_path": "<STS2GamePath>/data_sts2_windows_x86_64/sts2.dll",
         },
     )
@@ -55,7 +55,7 @@ def test_api_lookup_section_reads_from_resource_templates(monkeypatch):
         codegen_api,
         "build_api_lookup_context",
         lambda: {
-            "baselib_src_path": str(codegen_api.API_REF_PATH.parent / "baselib_src" / "BaseLib.decompiled.cs"),
+            "baselib_src_path": "I:/runtime/knowledge/baselib/BaseLib.decompiled.cs",
             "game_source_mode": "runtime_decompiled",
             "game_path": "I:/fake/sts2-decompiled",
             "ilspy_example_dll_path": "<STS2GamePath>/data_sts2_windows_x86_64/sts2.dll",
@@ -85,9 +85,7 @@ Fallback {{ ilspy_example_dll_path }}
 
         section = codegen_api._build_api_lookup_section()
 
-        assert section == "Resource Title\nBaseLib from `{}`\n\nLocal src `I:/fake/sts2-decompiled`".format(
-            codegen_api.API_REF_PATH.parent / "baselib_src" / "BaseLib.decompiled.cs"
-        )
+        assert section == "Resource Title\nBaseLib from `I:/runtime/knowledge/baselib/BaseLib.decompiled.cs`\n\nLocal src `I:/fake/sts2-decompiled`"
     finally:
         for path in sorted(temp_root.rglob("*"), reverse=True):
             if path.is_file():

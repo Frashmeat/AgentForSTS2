@@ -35,11 +35,9 @@ import {
   getRefreshKnowledgeTask,
   loadKnowledgeStatus,
   loadLocalAiCapabilityStatus,
-  resolveMigrationFlags,
   startRefreshKnowledgeTask,
   type KnowledgeStatus,
   type LocalAiCapabilityStatus,
-  type WorkflowMigrationFlags,
 } from "./shared/api/index.ts";
 import type { PlatformJobCreateItem } from "./shared/api/platform.ts";
 import { runApprovalAction } from "./shared/approvalAction.ts";
@@ -157,7 +155,6 @@ export default function App() {
   const [uploadedImageName, setUploadedImageName] = useState<string>(() => initialSingleAssetSnapshot?.uploadedImageName ?? "");
   const [uploadedImagePreview, setUploadedImagePreview] = useState<string | null>(() => initialSingleAssetSnapshot?.uploadedImagePreview ?? null);
   const [dragOver, setDragOver] = useState(false);
-  const [migrationFlags, setMigrationFlags] = useState<WorkflowMigrationFlags>(() => resolveMigrationFlags(undefined));
   const [restoredSnapshotMode, setRestoredSnapshotMode] = useState(() => initialSingleAssetSnapshot !== null);
   const [restoredApprovalRefreshPending, setRestoredApprovalRefreshPending] = useState(
     () => initialSingleAssetSnapshot?.workflowState.stage === "approval_pending",
@@ -184,9 +181,6 @@ export default function App() {
 
   useDefaultProjectRoot({
     setProjectRoot,
-    onConfigLoaded(config) {
-      setMigrationFlags(resolveMigrationFlags(config));
-    },
   });
 
   useEffect(() => {
@@ -348,7 +342,6 @@ export default function App() {
       uploadedImageB64,
       uploadedImageName,
       autoMode: autoModeRef.current,
-      migrationFlags,
     });
   }
 

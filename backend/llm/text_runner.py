@@ -16,6 +16,7 @@ from app.shared.infra.llm.text_backend import (
     resolve_text_backend_name,
 )
 from config import get_config, normalize_llm_config
+from llm.agent_backends.claude_cli import _resolve_claude_launcher
 from llm.prompt_builder import append_global_ai_instructions
 
 DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6"
@@ -135,7 +136,7 @@ async def _stream_via_cli_completion(
 
 
 async def _complete_via_claude_cli(prompt: str, llm_cfg: dict, cwd: Optional[Path]) -> str:
-    cmd = ["claude", "--print"]
+    cmd = [*_resolve_claude_launcher(), "--print"]
     model = normalize_llm_config(llm_cfg).get("model")
     if model:
         cmd.extend(["--model", model])

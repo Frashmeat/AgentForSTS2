@@ -43,20 +43,6 @@ AssetType = Literal["card", "card_fullscreen", "relic", "power", "character"]
 # 透明背景资产类型
 TRANSPARENT_TYPES = {"relic", "power"}
 TRANSPARENT_CHARACTER_VARIANTS = {"character_icon", "map_marker"}
-
-
-def _workflow_router_service(ws: WebSocket):
-    app = getattr(ws, "app", None)
-    state = getattr(app, "state", None)
-    container = getattr(getattr(state, "container", None), "resolve_optional_singleton", None)
-    if container is None:
-        return None
-    flags = getattr(state.container, "platform_migration_flags", None)
-    if flags is None or not getattr(flags, "platform_runner_enabled", False):
-        return None
-    return state.container.resolve_optional_singleton("platform.workflow_router_compat_service")
-
-
 def _needs_transparent(asset_type: AssetType) -> bool:
     return asset_type in TRANSPARENT_TYPES
 
@@ -177,14 +163,10 @@ async def _plan_approval_requests(description: str, llm_cfg: dict, project_root:
 
 @router.websocket("/ws/create")
 async def ws_create(ws: WebSocket):
-    service = _workflow_router_service(ws)
-    if service is not None:
-        await service.handle_ws_create(ws)
-        return
-    await _handle_legacy_ws_create(ws)
+    await _handle_ws_create(ws)
 
 
-async def _handle_legacy_ws_create(ws: WebSocket, *, initial_params: dict | None = None):
+async def _handle_ws_create(ws: WebSocket, *, initial_params: dict | None = None):
     """
     WebSocket 端点，驱动完整的创建工作流。
 
@@ -566,10 +548,10 @@ async def _run_postprocess(img, asset_type, asset_name, project_root):
 
 @router.post("/project/create")
 async def api_create_project(body: dict):
-    return await _legacy_api_create_project(body)
+    return await _api_create_project(body)
 
 
-async def _legacy_api_create_project(body: dict):
+async def _api_create_project(body: dict):
     """创建新 mod 项目。"""
     project_name = body["name"]
     target_dir = Path(body["target_dir"])
@@ -579,10 +561,10 @@ async def _legacy_api_create_project(body: dict):
 
 @router.post("/project/build")
 async def api_build(body: dict):
-    return await _legacy_api_build(body)
+    return await _api_build(body)
 
 
-async def _legacy_api_build(body: dict):
+async def _api_build(body: dict):
     """手动触发 build。"""
     project_root = Path(body["project_root"])
     success, output = await build_and_fix(project_root)
@@ -591,10 +573,10 @@ async def _legacy_api_build(body: dict):
 
 @router.post("/project/package")
 async def api_package(body: dict):
-    return await _legacy_api_package(body)
+    return await _api_package(body)
 
 
-async def _legacy_api_package(body: dict):
+async def _api_package(body: dict):
     """打包 mod。"""
     project_root = Path(body["project_root"])
     success = await package_mod(project_root)

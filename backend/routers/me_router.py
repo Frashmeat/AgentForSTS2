@@ -37,6 +37,11 @@ def _build_job_application_service(session, request: Request) -> JobApplicationS
     )
 
 
+def _require_platform_access(user) -> None:
+    if not user.can_use_platform():
+        raise HTTPException(status_code=403, detail="email verification required")
+
+
 @router.get("/profile")
 def get_profile(request: Request):
     with auth_session_scope(request) as session:
@@ -68,6 +73,7 @@ def list_jobs(request: Request):
 def create_job(request: Request, body: dict):
     with auth_session_scope(request) as session:
         user = require_current_user(request, session)
+        _require_platform_access(user)
         service = _build_job_application_service(session, request)
         job = service.create_job(user.user_id, CreateJobCommand.model_validate(body))
         return {
@@ -93,6 +99,7 @@ def get_job_detail(request: Request, job_id: int):
 def start_job(request: Request, job_id: int, body: dict):
     with auth_session_scope(request) as session:
         user = require_current_user(request, session)
+        _require_platform_access(user)
         service = _build_job_application_service(session, request)
         job = service.start_job(
             user.user_id,

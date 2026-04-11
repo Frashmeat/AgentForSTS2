@@ -1,4 +1,4 @@
-"""Tests for LLM config normalization and legacy compatibility."""
+"""Tests for LLM config normalization and old input cleanup."""
 import sys
 from pathlib import Path
 
@@ -7,13 +7,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import normalize_config, normalize_llm_config
 
 
-def test_normalize_legacy_claude_subscription_config():
+def test_normalize_old_claude_subscription_config():
     cfg = normalize_config({"llm": {"mode": "claude_subscription"}})
     assert cfg["llm"]["mode"] == "agent_cli"
     assert cfg["llm"]["agent_backend"] == "claude"
 
 
-def test_normalize_legacy_api_key_config():
+def test_normalize_old_api_key_config():
     cfg = normalize_config({"llm": {"mode": "api_key", "provider": "anthropic"}})
     assert cfg["llm"]["mode"] == "claude_api"
     assert "provider" not in cfg["llm"]

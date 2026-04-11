@@ -23,8 +23,11 @@ export function RegisterPage() {
     try {
       const response = await registerWithPassword({ username, email, password });
       setFormState(createSuccessAuthFormState(`验证码：${response.verification_code}`));
-      navigate(`/auth/verify-email?code=${encodeURIComponent(response.verification_code)}`, {
+      navigate("/auth/verify-email", {
         replace: true,
+        state: {
+          code: response.verification_code,
+        },
       });
     } catch (error) {
       setFormState(createErrorAuthFormState(error instanceof Error ? error.message : "注册失败"));

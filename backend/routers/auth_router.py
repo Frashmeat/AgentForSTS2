@@ -116,8 +116,8 @@ def forgot_password(request: Request, body: dict):
         user = repository.get_by_login(login)
         if user is None:
             raise HTTPException(status_code=404, detail="user not found")
-        ticket = create_email_ticket(user.user_id, user.email, "reset_password", request, session)
-        return {"reset_code": ticket.code}
+        create_email_ticket(user.user_id, user.email, "reset_password", request, session)
+        return {"ok": True}
 
 
 @router.post("/reset-password")

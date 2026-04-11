@@ -26,7 +26,6 @@ def _resolve_runtime_config_path() -> Path:
 
 
 RUNTIME_CONFIG_PATH = _resolve_runtime_config_path()
-LEGACY_CONFIG_PATH = _APP_ROOT / "config.json"
 CONFIG_PATH = RUNTIME_CONFIG_PATH
 
 DEFAULT_LLM_CONFIG = {
@@ -50,22 +49,6 @@ DEFAULT_AUTH_CONFIG = {
 }
 
 DEFAULT_RUNTIME_CONFIG = {
-    "full": {
-        "host": "127.0.0.1",
-        "port": 7860,
-        "cors_origins": [
-            "http://localhost:5173",
-            "http://127.0.0.1:5173",
-            "http://localhost:7860",
-            "http://127.0.0.1:7860",
-            "http://localhost:7870",
-            "http://127.0.0.1:7870",
-            "http://localhost:8080",
-            "http://127.0.0.1:8080",
-        ],
-        "mount_frontend": True,
-        "requires_database": False,
-    },
     "workstation": {
         "host": "127.0.0.1",
         "port": 7860,
@@ -99,16 +82,7 @@ DEFAULT_RUNTIME_CONFIG = {
 DEFAULT_CONFIG = {
     "llm": DEFAULT_LLM_CONFIG,
     "auth": DEFAULT_AUTH_CONFIG,
-    "migration": {
-        "use_modular_single_workflow": False,
-        "use_modular_batch_workflow": False,
-        "use_unified_ws_contract": False,
-        "platform_jobs_api_enabled": False,
-        "platform_service_split_enabled": False,
-        "platform_runner_enabled": False,
-        "platform_events_v1_enabled": False,
-        "platform_step_protocol_enabled": False,
-    },
+    "migration": {},
     "database": {
         "url": "",
         "echo": False,
@@ -178,6 +152,11 @@ def normalize_llm_config(llm_cfg: Optional[dict[str, Any]]) -> dict[str, Any]:
 def normalize_config(config: Optional[dict[str, Any]]) -> dict[str, Any]:
     cfg = _deep_merge(DEFAULT_CONFIG, config or {})
     cfg["llm"] = normalize_llm_config(cfg.get("llm"))
+    cfg["migration"] = {}
+    cfg["runtime"] = {
+        role: _deep_merge(DEFAULT_RUNTIME_CONFIG[role], cfg.get("runtime", {}).get(role, {}))
+        for role in DEFAULT_RUNTIME_CONFIG
+    }
     return cfg
 
 
@@ -186,22 +165,13 @@ def resolve_config_path(*, for_write: bool = False) -> Path:
     if explicit_path:
         return Path(explicit_path).expanduser()
 
-    if for_write:
-        return RUNTIME_CONFIG_PATH
-
-    if RUNTIME_CONFIG_PATH.exists():
-        return RUNTIME_CONFIG_PATH
-
-    if LEGACY_CONFIG_PATH.exists():
-        return LEGACY_CONFIG_PATH
-
     return RUNTIME_CONFIG_PATH
 
 
 def load_config() -> dict[str, Any]:
     config_path = resolve_config_path(for_write=False)
     if config_path.exists():
-        # tools/install/install.ps1 在 Windows PowerShell 下写 config.json 时可能带 BOM。
+        # Windows PowerShell 写 JSON 时可能带 BOM。
         with open(config_path, "r", encoding="utf-8-sig") as file:
             saved = json.load(file)
         cfg = normalize_config(saved)
@@ -287,6 +257,11 @@ class Settings:
         session_cookie_name = str(self.auth.get("session_cookie_name", "")).strip()
         if not session_cookie_name:
             errors.append("auth.session_cookie_name is required")
+
+        if role == "web":
+            session_secret = str(self.auth.get("session_secret", "")).strip()
+            if not session_secret:
+                errors.append("auth.session_secret is required for web runtime")
 
         return errors
 

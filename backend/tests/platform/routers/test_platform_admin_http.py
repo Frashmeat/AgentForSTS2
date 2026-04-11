@@ -32,10 +32,8 @@ def client(tmp_path):
             "database": {
                 "url": f"sqlite+pysqlite:///{db_path.as_posix()}",
             },
-            "migration": {
-                "platform_service_split_enabled": True,
-            },
-        }
+        },
+        runtime_role="web",
     )
     session = container.resolve_singleton("platform.db_session_factory")()
     Base.metadata.create_all(session.bind)

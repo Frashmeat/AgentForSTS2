@@ -4,7 +4,7 @@ import json
 import shutil
 from pathlib import Path
 
-from agents.code_agent import build_and_fix
+from app.modules.codegen.api import build_and_fix
 from app.shared.infra.ws_errors import send_ws_error
 from app.shared.prompting import PromptLoader
 from config import get_config

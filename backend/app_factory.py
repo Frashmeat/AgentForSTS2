@@ -15,7 +15,6 @@ from fastapi.staticfiles import StaticFiles
 from app.composition.container import ApplicationContainer
 from app.shared.infra.http_errors import install_http_error_handlers
 from app.shared.infra.config.settings import Settings
-from app.shared.infra.feature_flags import resolve_platform_migration_flags
 from config import get_config
 from routers import WEB_ROUTER_MODULES, WORKSTATION_ROUTER_MODULES
 
@@ -27,7 +26,7 @@ logging.basicConfig(
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-AppRole = Literal["full", "workstation", "web"]
+AppRole = Literal["workstation", "web"]
 
 
 def _create_base_app(role: AppRole, config: dict) -> FastAPI:
@@ -71,32 +70,14 @@ def _include_web_routers(app: FastAPI) -> None:
         _include_router(app, module_name)
 
 
-def _resolve_platform_router_modules(config: dict) -> tuple[str, ...]:
-    platform_flags = resolve_platform_migration_flags(config)
-    modules: list[str] = [
-        "routers.auth_router",
-        "routers.me_router",
-    ]
-    if platform_flags.platform_jobs_api_enabled:
-        modules.append("routers.platform_jobs")
-    if platform_flags.platform_service_split_enabled:
-        modules.append("routers.platform_admin")
-    return tuple(modules)
-
-
 def get_router_modules_for_role(role: AppRole, config: dict | None = None) -> tuple[str, ...]:
-    resolved_config = config or get_config()
-
     if role == "workstation":
         return WORKSTATION_ROUTER_MODULES
-    if role == "web":
-        return WEB_ROUTER_MODULES
-
-    return WORKSTATION_ROUTER_MODULES + _resolve_platform_router_modules(resolved_config)
+    return WEB_ROUTER_MODULES
 
 
 def should_mount_frontend(role: AppRole) -> bool:
-    return role in {"full", "workstation"}
+    return role == "workstation"
 
 
 def _mount_frontend(app: FastAPI) -> None:

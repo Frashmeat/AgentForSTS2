@@ -19,7 +19,7 @@ if not exist "%FRONTEND_DIST%" (
     echo 检测到前端构建产物不存在，正在构建 frontend/dist...
     if not exist "%FRONTEND_NODE_MODULES%" (
         echo [错误] 缺少前端依赖目录 "%FRONTEND_NODE_MODULES%"。
-        echo 请先运行 tools\install.bat 安装依赖后再重试。
+        echo 请先运行 powershell -File .\tools\tools.ps1 install 安装依赖后再重试。
         exit /b 1
     )
 
