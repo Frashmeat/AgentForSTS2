@@ -259,7 +259,7 @@ def test_missing_status_surfaces_missing_runtime_requirements(monkeypatch):
     assert "未检测到 ilspycmd，无法反编译游戏和 BaseLib（会先查项目目录，再查 PATH）" in status["warnings"]
 
 
-def test_missing_manifest_falls_back_to_stale_when_repo_sources_exist(monkeypatch, tmp_path: Path):
+def test_missing_manifest_stays_missing_when_only_seed_files_exist(monkeypatch, tmp_path: Path):
     game_dir = tmp_path / "game_decompiled"
     game_dir.mkdir(parents=True)
     baselib_dir = tmp_path / "baselib_decompiled"
@@ -279,12 +279,12 @@ def test_missing_manifest_falls_back_to_stale_when_repo_sources_exist(monkeypatc
 
     status = knowledge_runtime.get_knowledge_status()
 
-    assert status["status"] == "stale"
-    assert status["game"]["source_mode"] == "repo_reference"
-    assert status["baselib"]["source_mode"] == "repo_fallback"
+    assert status["status"] == "missing"
+    assert status["game"]["source_mode"] == "missing"
+    assert status["baselib"]["source_mode"] == "missing"
 
 
-def test_manifest_runtime_missing_uses_stale_when_repo_fallback_is_available(monkeypatch, tmp_path: Path):
+def test_manifest_runtime_missing_reports_missing_when_runtime_files_are_absent(monkeypatch, tmp_path: Path):
     game_dir = tmp_path / "game_decompiled"
     game_dir.mkdir(parents=True)
     baselib_dir = tmp_path / "baselib_decompiled"
@@ -316,9 +316,9 @@ def test_manifest_runtime_missing_uses_stale_when_repo_fallback_is_available(mon
 
     status = knowledge_runtime.get_knowledge_status()
 
-    assert status["status"] == "stale"
-    assert status["game"]["source_mode"] == "repo_reference"
-    assert status["baselib"]["source_mode"] == "repo_fallback"
+    assert status["status"] == "missing"
+    assert status["game"]["source_mode"] == "missing"
+    assert status["baselib"]["source_mode"] == "missing"
 
 
 def test_resolve_ilspycmd_command_prefers_project_copy(monkeypatch, tmp_path: Path):

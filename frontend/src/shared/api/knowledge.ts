@@ -14,7 +14,7 @@ export interface KnowledgeStatus {
     current_version?: string | null;
     matches?: boolean | null;
     version_source?: string | null;
-    source_mode?: "runtime_decompiled" | "repo_reference" | "missing";
+    source_mode?: "runtime_decompiled" | "missing";
     decompiled_src_path?: string;
   };
   baselib: {
@@ -22,7 +22,7 @@ export interface KnowledgeStatus {
     latest_release_tag?: string | null;
     matches?: boolean | null;
     release_url?: string;
-    source_mode?: "runtime_decompiled" | "repo_fallback" | "missing";
+    source_mode?: "runtime_decompiled" | "missing";
     decompiled_src_path?: string;
   };
 }

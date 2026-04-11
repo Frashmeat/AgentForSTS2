@@ -252,16 +252,12 @@ def _directory_has_sources(path: Path) -> bool:
 def _resolve_game_source_mode() -> str:
     if _directory_has_sources(GAME_DECOMPILED_DIR):
         return "runtime_decompiled"
-    if API_REF_PATH.exists():
-        return "repo_reference"
     return "missing"
 
 
 def _resolve_baselib_source_mode() -> str:
     if (BASELIB_DECOMPILED_DIR / "BaseLib.decompiled.cs").exists():
         return "runtime_decompiled"
-    if BASELIB_FALLBACK_PATH.exists():
-        return "repo_fallback"
     return "missing"
 
 
@@ -279,8 +275,6 @@ def get_knowledge_status() -> dict[str, Any]:
             payload["warnings"].append("游戏反编译源码目录为空，请先执行“更新知识库”")
         if not (BASELIB_DECOMPILED_DIR / "BaseLib.decompiled.cs").exists():
             payload["warnings"].append("BaseLib 反编译结果缺失，请先执行“更新知识库”")
-        if payload["game"]["source_mode"] == "repo_reference" or payload["baselib"]["source_mode"] == "repo_fallback":
-            payload["status"] = "stale"
         return payload
 
     payload = _default_status_payload("fresh")
@@ -315,10 +309,7 @@ def get_knowledge_status() -> dict[str, Any]:
     game_runtime_ready = _directory_has_sources(Path(payload["game"]["decompiled_src_path"]))
     baselib_runtime_ready = Path(str(payload["baselib"]["decompiled_src_path"])).joinpath("BaseLib.decompiled.cs").exists()
     if not game_runtime_ready or not baselib_runtime_ready:
-        if payload["game"]["source_mode"] == "repo_reference" or payload["baselib"]["source_mode"] == "repo_fallback":
-            payload["status"] = "stale"
-        else:
-            payload["status"] = "missing"
+        payload["status"] = "missing"
         return payload
 
     if payload["game"]["matches"] is False or payload["baselib"]["matches"] is False:
@@ -343,17 +334,22 @@ def get_active_game_decompiled_src_path() -> str | None:
         candidate = Path(str(manifest.get("game", {}).get("decompiled_src_path", "")).strip())
         if candidate.is_dir():
             return str(candidate)
-    return get_decompiled_src_path()
+    if _directory_has_sources(GAME_DECOMPILED_DIR):
+        return str(GAME_DECOMPILED_DIR)
+    return None
 
 
-def get_active_baselib_src_path() -> str:
+def get_active_baselib_src_path() -> str | None:
     manifest = load_manifest()
     if manifest is not None:
         candidate_root = Path(str(manifest.get("baselib", {}).get("decompiled_src_path", "")).strip())
         candidate_file = candidate_root / "BaseLib.decompiled.cs"
         if candidate_file.exists():
             return str(candidate_file)
-    return str(BASELIB_FALLBACK_PATH)
+    runtime_file = BASELIB_DECOMPILED_DIR / "BaseLib.decompiled.cs"
+    if runtime_file.exists():
+        return str(runtime_file)
+    return None
 
 
 def _reset_dir(path: Path) -> None:

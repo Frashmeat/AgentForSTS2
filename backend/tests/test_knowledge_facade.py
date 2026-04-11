@@ -25,7 +25,7 @@ def test_game_source_prefers_runtime_decompiled(monkeypatch, tmp_path: Path):
     }
 
 
-def test_game_source_falls_back_to_repo_reference(monkeypatch, tmp_path: Path):
+def test_game_source_initializes_runtime_reference_file(monkeypatch, tmp_path: Path):
     runtime_dir = tmp_path / "runtime" / "knowledge" / "game"
     runtime_dir.mkdir(parents=True)
     repo_ref = tmp_path / "seed" / "sts2_api_reference.md"

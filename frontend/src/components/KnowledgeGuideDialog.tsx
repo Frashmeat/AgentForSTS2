@@ -14,15 +14,11 @@ export function KnowledgeGuideDialog({ open, status, onClose }: KnowledgeGuideDi
   const gameSourceLabel =
     status?.game?.source_mode === "runtime_decompiled"
       ? "运行时知识目录"
-      : status?.game?.source_mode === "repo_reference"
-        ? "内置初始化种子"
-        : "缺失";
+      : "缺失";
   const baselibSourceLabel =
     status?.baselib?.source_mode === "runtime_decompiled"
       ? "运行时知识目录"
-      : status?.baselib?.source_mode === "repo_fallback"
-        ? "内置初始化种子"
-        : "缺失";
+      : "缺失";
 
   return (
     <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center px-4" onClick={onClose}>
