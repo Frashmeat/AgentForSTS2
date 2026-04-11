@@ -7,13 +7,13 @@
 直接执行脚本且不传任何参数时，会默认显示本帮助而不是立即启动部署。
 
 .PARAMETER Target
-部署目标。可选 full / hybrid / workstation / frontend / web。
+部署目标。可选 hybrid / workstation / frontend / web。
 
 .PARAMETER ReleaseRoot
 release 目录。默认使用 tools/latest/artifacts/agentthespire-<target>-release。
 
 .PARAMETER ConfigPath
-输入配置文件路径。未显式传入时优先使用 release 内 `runtime/*.config.json`，再回退到仓库根目录 `config.json`。
+输入配置文件路径。未显式传入时优先使用 release 内 `runtime/*.config.json`，再回退到服务目录内 `config.example.json`。
 
 .PARAMETER ProjectName
 Compose 项目名。默认按 agentthespire-<target>-release 生成。
@@ -55,7 +55,7 @@ Postgres 镜像名。留空时自动优先复用本机已有镜像。
 Python Docker 基础镜像。留空时自动优先复用本机已有标签，并回退到可用镜像源。
 
 .PARAMETER ResetDatabase
-重建数据库。full 默认会执行；web 目标可显式开启。
+重建数据库。仅适用于 web 目标。
 
 .PARAMETER ReuseImages
 复用已有镜像。仅在镜像缺失时才执行 docker compose build。
@@ -81,16 +81,16 @@ pwsh -File .\tools\latest\deploy-docker.ps1 hybrid -DeployLocalWeb
 [CmdletBinding()]
 param(
     # 基础参数
-    [Parameter(Position = 0, HelpMessage = "部署目标。可选 full / hybrid / workstation / frontend / web。")]
+    [Parameter(Position = 0, HelpMessage = "部署目标。可选 hybrid / workstation / frontend / web。")]
     [Alias("t")]
-    [ValidateSet("full", "hybrid", "workstation", "frontend", "web")]
+    [ValidateSet("hybrid", "workstation", "frontend", "web")]
     [string]$Target = "workstation",
 
     [Parameter(HelpMessage = "release 目录。默认使用 tools/latest/artifacts/agentthespire-<target>-release。")]
     [Alias("r")]
     [string]$ReleaseRoot = "",
 
-    [Parameter(HelpMessage = "输入配置文件路径。未显式传入时优先使用 release 内 runtime 配置，再回退到仓库根目录 config.json。")]
+    [Parameter(HelpMessage = "输入配置文件路径。未显式传入时优先使用 release 内 runtime 配置，再回退到服务目录内 config.example.json。")]
     [Alias("c")]
     [string]$ConfigPath = "",
 
@@ -147,7 +147,7 @@ param(
     [string]$PythonBaseImage = "",
 
     # 行为开关
-    [Parameter(HelpMessage = "重建数据库。full 默认会执行；web 目标可显式开启。")]
+    [Parameter(HelpMessage = "重建数据库。仅适用于 web 目标。")]
     [Alias("ResetDb")]
     [switch]$ResetDatabase,
 
@@ -1077,8 +1077,7 @@ function Get-SourceConfigPath {
     param(
         [string]$PreferredPath,
         [string]$RuntimeConfigPath,
-        [string]$FallbackServiceDir,
-        [string]$LegacyInputPath = ""
+        [string]$FallbackServiceDir
     )
 
     if ((-not [string]::IsNullOrWhiteSpace($PreferredPath)) -and (Test-Path -LiteralPath $PreferredPath)) {
@@ -1087,10 +1086,6 @@ function Get-SourceConfigPath {
 
     if ((-not [string]::IsNullOrWhiteSpace($RuntimeConfigPath)) -and (Test-Path -LiteralPath $RuntimeConfigPath)) {
         return (Resolve-Path $RuntimeConfigPath).Path
-    }
-
-    if ((-not [string]::IsNullOrWhiteSpace($LegacyInputPath)) -and (Test-Path -LiteralPath $LegacyInputPath)) {
-        return (Resolve-Path $LegacyInputPath).Path
     }
 
     $fallback = Join-Path $FallbackServiceDir "config.example.json"
@@ -1139,7 +1134,7 @@ function New-RuntimeConfig {
         $config["migration"]["platform_jobs_api_enabled"] = $true
         $config["migration"]["platform_service_split_enabled"] = $true
     } else {
-        # workstation/full 中的工作站进程不应暴露 web 平台路由。
+        # workstation 中的工作站进程不应暴露 web 平台路由。
         $config["migration"]["platform_jobs_api_enabled"] = $false
         $config["migration"]["platform_service_split_enabled"] = $false
     }
@@ -1186,18 +1181,6 @@ function Write-ComposeEnvFile {
 
     # Compose 模板的端口、数据库和镜像选择都从 runtime/.env 注入，bundle 本身保持静态。
     $lines = switch ($TargetName) {
-        "full" {
-            @(
-                "ATS_WORKSTATION_PORT=$WorkstationPort"
-                "ATS_WEB_PORT=$WebPort"
-                "ATS_POSTGRES_HOST_PORT=$PostgresHostPort"
-                "ATS_POSTGRES_DB=$PostgresDb"
-                "ATS_POSTGRES_USER=$PostgresUser"
-                "ATS_POSTGRES_PASSWORD=$PostgresPassword"
-                "ATS_POSTGRES_IMAGE=$ResolvedPostgresImage"
-                "ATS_PYTHON_BASE_IMAGE=$ResolvedPythonBaseImage"
-            )
-        }
         "workstation" {
             @(
                 "ATS_WORKSTATION_PORT=$WorkstationPort"
@@ -1424,12 +1407,11 @@ function Start-LocalFrontendDeployment {
 
 function Get-BuildServices {
     param(
-        [ValidateSet("full", "hybrid", "workstation", "frontend", "web")]
+        [ValidateSet("hybrid", "workstation", "frontend", "web")]
         [string]$TargetName
     )
 
     switch ($TargetName) {
-        "full" { return @("web") }
         "hybrid" { return @() }
         "workstation" { return @() }
         "frontend" { return @() }
@@ -1527,7 +1509,6 @@ $effectiveProjectName = if ([string]::IsNullOrWhiteSpace($ProjectName)) {
     $ProjectName
 }
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
-$defaultInputConfigPath = Join-Path $repoRoot "config.json"
 
 $resolvedWorkstationPort = [int]$WorkstationPort
 $resolvedWebPort = [int]$WebPort
@@ -1569,8 +1550,8 @@ Assert-PathExists -Path $effectiveReleaseRoot -Label "release 目录"
 $composeFile = Join-Path $effectiveReleaseRoot "docker-compose.yml"
 $runtimeDir = Join-Path $effectiveReleaseRoot "runtime"
 $envFile = Join-Path $runtimeDir ".env"
-$targetNeedsPostgres = $Target -in @("full", "web")
-$targetUsesDockerInCurrentRelease = $Target -in @("full", "web")
+$targetNeedsPostgres = $Target -eq "web"
+$targetUsesDockerInCurrentRelease = $Target -eq "web"
 $resolvedPostgresImage = if ($targetNeedsPostgres) {
     Resolve-PostgresImage -PreferredImage $PostgresImage
 } else {
@@ -1581,7 +1562,7 @@ $resolvedPythonBaseImage = if ($targetUsesDockerInCurrentRelease) {
 } else {
     ""
 }
-$shouldResetDatabase = $Target -eq "full" -or $ResetDatabase.IsPresent
+$shouldResetDatabase = $ResetDatabase.IsPresent
 $null = New-Item -ItemType Directory -Path $runtimeDir -Force
 
 if ($targetUsesDockerInCurrentRelease) {
@@ -1594,54 +1575,37 @@ $workstationServiceDir = Join-Path (Join-Path $effectiveReleaseRoot "services") 
 $frontendServiceDir = Join-Path (Join-Path $effectiveReleaseRoot "services") "frontend"
 $webServiceDir = Join-Path (Join-Path $effectiveReleaseRoot "services") "web"
 
-if ($Target -in @("full", "hybrid", "workstation")) {
+if ($Target -in @("hybrid", "workstation")) {
     $sourceConfigPath = Get-SourceConfigPath `
         -PreferredPath $ConfigPath `
         -RuntimeConfigPath (Join-Path $effectiveReleaseRoot "runtime\workstation.config.json") `
-        -FallbackServiceDir $workstationServiceDir `
-        -LegacyInputPath $defaultInputConfigPath
+        -FallbackServiceDir $workstationServiceDir
 } elseif ($Target -eq "web") {
     $sourceConfigPath = Get-SourceConfigPath `
         -PreferredPath $ConfigPath `
         -RuntimeConfigPath (Join-Path $effectiveReleaseRoot "runtime\web.config.json") `
-        -FallbackServiceDir $webServiceDir `
-        -LegacyInputPath $defaultInputConfigPath
+        -FallbackServiceDir $webServiceDir
 }
 
-if ($Target -in @("full", "hybrid", "workstation")) {
+if ($Target -in @("hybrid", "workstation")) {
     $workstationConfig = New-RuntimeConfig -SourceConfigPath $sourceConfigPath -Mode "workstation" -DbUser $PostgresUser -DbPassword $PostgresPassword -DbName $PostgresDb
 }
 
-if ($Target -eq "full") {
-    Write-RuntimeConfigFile -Config $workstationConfig -OutputPath (Join-Path $runtimeDir "workstation.config.json")
-} elseif ($Target -eq "hybrid" -or $Target -eq "workstation") {
+if ($Target -eq "hybrid" -or $Target -eq "workstation") {
     Write-RuntimeConfigFile -Config $workstationConfig -OutputPath (Join-Path $runtimeDir "workstation.config.json")
 }
 
-if ($Target -eq "full" -or $Target -eq "web") {
-    if ($Target -eq "full") {
-        $webSourceConfigPath = Get-SourceConfigPath `
-            -PreferredPath $ConfigPath `
-            -RuntimeConfigPath (Join-Path $effectiveReleaseRoot "runtime\web.config.json") `
-            -FallbackServiceDir $webServiceDir `
-            -LegacyInputPath $defaultInputConfigPath
-    } else {
-        $webSourceConfigPath = $sourceConfigPath
-    }
+if ($Target -eq "web") {
+    $webSourceConfigPath = $sourceConfigPath
     $webConfig = New-RuntimeConfig -SourceConfigPath $webSourceConfigPath -Mode "web" -DbUser $PostgresUser -DbPassword $PostgresPassword -DbName $PostgresDb
     Write-RuntimeConfigFile -Config $webConfig -OutputPath (Join-Path $runtimeDir "web.config.json")
 }
 
 if ($shouldResetDatabase) {
     if (-not $targetUsesDockerInCurrentRelease) {
-        throw "-ResetDatabase 仅适用于包含 Web 后端数据库的部署目标: full / web"
+        throw "-ResetDatabase 仅适用于 web 部署目标"
     }
-    # full 目标默认重建数据库，避免同机联调时复用旧卷里的脏迁移状态。
-    $resetReason = if ($Target -eq "full" -and (-not $ResetDatabase.IsPresent)) {
-        "检测到 full 目标，默认重建数据库"
-    } else {
-        "检测到 -ResetDatabase，将删除 Docker 卷并重建数据库"
-    }
+    $resetReason = "检测到 -ResetDatabase，将删除 Docker 卷并重建数据库"
     Write-Host "$resetReason..."
     Invoke-DockerCompose -BundleDir $effectiveReleaseRoot -ComposeFile $composeFile -EnvFile $envFile -ComposeProjectName $effectiveProjectName -ComposeArgs @("down", "--volumes", "--remove-orphans")
 }
@@ -1724,16 +1688,6 @@ try {
                 }
             }
         }
-        "full" {
-            $process = Start-LocalWorkstationDeployment -ReleaseRoot $effectiveReleaseRoot -SourceConfigPath $sourceConfigPath -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebBaseUrl ("http://127.0.0.1:{0}" -f $resolvedWebPort) -RepoRoot $repoRoot
-            if ($null -ne $process) {
-                $localProcesses += [pscustomobject]@{
-                    ServiceName = "workstation"
-                    Process = $process
-                    Port = $resolvedWorkstationPort
-                }
-            }
-        }
     }
 } catch {
     if ($localProcesses.Count -gt 0) {
@@ -1764,10 +1718,6 @@ if ($targetUsesDockerInCurrentRelease) {
     Write-Host "  Python 基镜像: $resolvedPythonBaseImage"
 }
 switch ($Target) {
-    "full" {
-        Write-Host "  工作站地址   : http://127.0.0.1:$WorkstationPort"
-        Write-Host "  Web 地址     : http://127.0.0.1:$WebPort"
-    }
     "hybrid" {
         Write-Host "  工作站地址   : http://127.0.0.1:$WorkstationPort"
         Write-Host "  前端地址     : http://127.0.0.1:$FrontendPort"

@@ -57,6 +57,7 @@ def test_package_release_script_exposes_simplified_parameter_aliases_and_help():
     assert params["Target"]["position"] == 0
     assert "t" in params["Target"]["aliases"]
     assert "打包目标" in params["Target"]["help"]
+    assert "full" not in params["Target"]["help"]
 
     assert "o" in params["OutputRoot"]["aliases"]
     assert "输出目录" in params["OutputRoot"]["help"]
@@ -83,12 +84,14 @@ def test_deploy_docker_script_exposes_simplified_parameter_aliases_and_help():
     assert params["Target"]["position"] == 0
     assert "t" in params["Target"]["aliases"]
     assert "部署目标" in params["Target"]["help"]
+    assert "full" not in params["Target"]["help"]
 
     assert "r" in params["ReleaseRoot"]["aliases"]
     assert "release 目录" in params["ReleaseRoot"]["help"]
 
     assert "c" in params["ConfigPath"]["aliases"]
-    assert "运行时配置" in params["ConfigPath"]["help"]
+    assert "输入配置文件路径" in params["ConfigPath"]["help"]
+    assert "根目录 config.json" not in params["ConfigPath"]["help"]
 
     assert "n" in params["ProjectName"]["aliases"]
     assert "Compose 项目名" in params["ProjectName"]["help"]
@@ -98,6 +101,7 @@ def test_deploy_docker_script_exposes_simplified_parameter_aliases_and_help():
 
     assert "ResetDb" in params["ResetDatabase"]["aliases"]
     assert "重建数据库" in params["ResetDatabase"]["help"]
+    assert "full" not in params["ResetDatabase"]["help"]
 
     assert "Rebuild" in params["RebuildImages"]["aliases"]
     assert "重建镜像" in params["RebuildImages"]["help"]
@@ -131,6 +135,7 @@ def test_stop_deploy_script_exposes_simplified_parameter_aliases_and_help():
     assert params["Target"]["position"] == 0
     assert "t" in params["Target"]["aliases"]
     assert "部署目标" in params["Target"]["help"]
+    assert "full" not in params["Target"]["help"]
 
     assert "r" in params["ReleaseRoot"]["aliases"]
     assert "release 目录" in params["ReleaseRoot"]["help"]
@@ -146,6 +151,8 @@ def test_package_release_script_prints_help_when_run_without_args():
     assert "package-release.ps1" in completed.stdout
     assert "PARAMETERS" in completed.stdout
     assert "-Target" in completed.stdout
+    assert "可选 full" not in completed.stdout
+    assert "services/workstation/config.json" not in completed.stdout
 
 
 def test_deploy_docker_script_prints_help_when_run_without_args():
@@ -155,6 +162,8 @@ def test_deploy_docker_script_prints_help_when_run_without_args():
     assert "deploy-docker.ps1" in completed.stdout
     assert "PARAMETERS" in completed.stdout
     assert "-Target" in completed.stdout
+    assert "可选 full" not in completed.stdout
+    assert "根目录 config.json" not in completed.stdout
 
 
 def test_build_workstation_installer_script_prints_help_when_run_without_args():
@@ -173,3 +182,4 @@ def test_stop_deploy_script_prints_help_when_run_without_args():
     assert "stop-deploy.ps1" in completed.stdout
     assert "PARAMETERS" in completed.stdout
     assert "-Target" in completed.stdout
+    assert "可选 full" not in completed.stdout

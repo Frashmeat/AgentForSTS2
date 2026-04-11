@@ -191,6 +191,34 @@ def test_package_release_without_debug_resets_workstation_config_to_example(tmp_
     assert generated_config.read_text(encoding="utf-8").strip() == '{"mode":"example"}'
 
 
+def test_package_release_debug_no_longer_reuses_legacy_service_level_workstation_config(tmp_path: Path):
+    temp_repo = tmp_path / "repo"
+    _prepare_common_layout(temp_repo)
+    _write_template_files(temp_repo, "workstation")
+
+    backend_dir = temp_repo / "backend"
+    backend_dir.mkdir(parents=True, exist_ok=True)
+    (backend_dir / "main_workstation.py").write_text("print('ok')\n", encoding="utf-8")
+    frontend_dist = temp_repo / "frontend" / "dist"
+    frontend_dist.mkdir(parents=True, exist_ok=True)
+    (frontend_dist / "index.html").write_text("<html></html>\n", encoding="utf-8")
+    mod_template = temp_repo / "mod_template"
+    mod_template.mkdir(parents=True, exist_ok=True)
+    (mod_template / "README.md").write_text("template\n", encoding="utf-8")
+    (temp_repo / "config.example.json").write_text('{"mode":"example"}\n', encoding="utf-8")
+
+    legacy_service_config = temp_repo / "tools" / "latest" / "artifacts" / "agentthespire-workstation-release" / "services" / "workstation" / "config.json"
+    legacy_service_config.parent.mkdir(parents=True, exist_ok=True)
+    legacy_service_config.write_text('{"mode":"legacy"}\n', encoding="utf-8")
+
+    completed = _run_package_release(temp_repo, "workstation", "-NoFrontend", "-NoZip", "-Debug")
+
+    generated_config = temp_repo / "tools" / "latest" / "artifacts" / "agentthespire-workstation-release" / "runtime" / "workstation.config.json"
+
+    assert completed.returncode == 0, completed.stderr
+    assert generated_config.read_text(encoding="utf-8").strip() == '{"mode":"example"}'
+
+
 def test_package_release_no_longer_writes_service_level_workstation_config(tmp_path: Path):
     temp_repo = tmp_path / "repo"
     _prepare_common_layout(temp_repo)
