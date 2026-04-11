@@ -122,5 +122,10 @@ class PlanningService:
     def validate_plan(self, plan: ModPlan, strictness: ReviewStrictness = "balanced") -> PlanValidationResult:
         return validate_plan(plan, strictness)
 
-    def build_execution_plan(self, plan: ModPlan, strictness: str = "balanced") -> ExecutionPlanPreview:
-        return build_execution_plan(plan, strictness)
+    def build_execution_plan(
+        self,
+        plan: ModPlan,
+        strictness: str = "balanced",
+        bundle_decisions: dict[str, str] | None = None,
+    ) -> ExecutionPlanPreview:
+        return build_execution_plan(plan, strictness, bundle_decisions)

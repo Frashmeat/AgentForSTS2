@@ -20,6 +20,8 @@ import { reviewModPlan } from "../../shared/api/workflow.ts";
 import { resolveErrorMessage, resolveWorkflowErrorMessage } from "../../shared/error.ts";
 import type {
   ExecutionBundlePreview,
+  ExecutionBundleRecommendedAction,
+  ExecutionBundleRiskDetail,
   PlanItemValidation,
   PlanReviewPayload,
 } from "../../shared/types/workflow.ts";
@@ -36,7 +38,15 @@ import {
   resumeBatchApprovalWorkflow,
 } from "./approval";
 import { openBatchPlanningSocket } from "./planningSession";
-import { canProceedFromBundleReview, type ReviewStrictness } from "./state.ts";
+import {
+  canProceedFromBundleReview,
+  reconcileBundleDecisionRecord,
+  resolveExecutionBundleKey,
+  summarizeBundleDecisionProgress,
+  type BundleDecisionRecord,
+  type BundleDecisionStatus,
+  type ReviewStrictness,
+} from "./state.ts";
 
 // ── 类型 ──────────────────────────────────────────────────────────────────────
 
@@ -147,6 +157,89 @@ const STRICTNESS_OPTIONS: Array<{ value: ReviewStrictness; label: string; descri
   { value: "strict", label: "严格", description: "更细地检查描述和分组风险" },
 ];
 
+const BUNDLE_DECISION_LABELS: Record<BundleDecisionStatus, string> = {
+  unresolved: "待决策",
+  accepted: "已接受当前分组",
+  split_requested: "已要求拆分",
+  needs_item_revision: "待回到 Item 补充说明",
+};
+
+const BUNDLE_DECISION_TONES: Record<BundleDecisionStatus, string> = {
+  unresolved: "bg-amber-50 text-amber-700 border-amber-200",
+  accepted: "bg-green-50 text-green-700 border-green-200",
+  split_requested: "bg-sky-50 text-sky-700 border-sky-200",
+  needs_item_revision: "bg-rose-50 text-rose-700 border-rose-200",
+};
+
+const FALLBACK_BUNDLE_RISK_DETAILS: Record<string, ExecutionBundleRiskDetail> = {
+  unclear_coupling: {
+    code: "unclear_coupling",
+    title: "耦合关系不明确",
+    summary: "系统无法确认这些 item 是否必须绑在一起执行。",
+    recommendation: "如果你确认它们必须一起落地，就接受当前分组；如果只是可能相关，优先返回补充依赖说明或要求拆分。",
+    impact: "错误合并后会放大一次执行的影响范围。",
+  },
+  bundle_size_threshold: {
+    code: "bundle_size_threshold",
+    title: "Bundle 规模偏大",
+    summary: "当前分组包含的 item 偏多，失败后的回滚和定位成本会明显上升。",
+    recommendation: "优先拆分为更小的执行单元；只有在这些 item 明显属于同一功能包时再接受当前分组。",
+    impact: "一次执行覆盖面过大，排错节奏会变慢。",
+  },
+  mixed_item_types: {
+    code: "mixed_item_types",
+    title: "包含多种 item 类型",
+    summary: "同一 bundle 中混入了不同类型的产物，执行节奏和关注点不一致。",
+    recommendation: "若只是共享目标但不是强耦合，建议拆开；若它们围绕同一核心功能联合交付，再接受当前分组。",
+    impact: "混合类型越多，执行和验收口径越容易漂移。",
+  },
+  affected_targets_spread: {
+    code: "affected_targets_spread",
+    title: "影响范围过散",
+    summary: "这组 item 触及的目标点较多，说明分组边界可能过宽。",
+    recommendation: "优先回到 Item 补充范围说明，或要求先拆分后再重算。",
+    impact: "范围过散会增加一次执行失败波及多个模块的概率。",
+  },
+};
+
+const FALLBACK_BUNDLE_ACTIONS: Record<ExecutionBundlePreview["status"], ExecutionBundleRecommendedAction[]> = {
+  clear: [],
+  needs_confirmation: [
+    {
+      action: "accept_bundle",
+      label: "接受当前分组",
+      description: "你确认这些 item 应该作为一个 bundle 联合执行。",
+      emphasis: "primary",
+    },
+    {
+      action: "revise_items",
+      label: "返回补充说明",
+      description: "回到 Item 层补充依赖原因、范围边界或验收说明后重算。",
+      emphasis: "secondary",
+    },
+  ],
+  split_recommended: [
+    {
+      action: "split_bundle",
+      label: "要求拆分",
+      description: "按更保守的口径重算，把该 bundle 拆成更小执行单元。",
+      emphasis: "warning",
+    },
+    {
+      action: "accept_bundle",
+      label: "仍接受当前分组",
+      description: "你确认这些 item 必须一起执行，即使系统建议拆分。",
+      emphasis: "primary",
+    },
+    {
+      action: "revise_items",
+      label: "返回补充说明",
+      description: "回到 Item 层补充依赖说明后再重算，降低误判概率。",
+      emphasis: "secondary",
+    },
+  ],
+};
+
 function normalizeReviewStrictness(value: unknown): ReviewStrictness {
   return value === "efficient" || value === "strict" ? value : "balanced";
 }
@@ -256,6 +349,35 @@ function summarizePlanReview(
   };
 }
 
+function getBundleRiskDetails(bundle: ExecutionBundlePreview): ExecutionBundleRiskDetail[] {
+  if (bundle.risk_details && bundle.risk_details.length > 0) {
+    return bundle.risk_details;
+  }
+  return bundle.risk_codes
+    .map((riskCode) => FALLBACK_BUNDLE_RISK_DETAILS[riskCode])
+    .filter((detail): detail is ExecutionBundleRiskDetail => Boolean(detail));
+}
+
+function getBundleRecommendedActions(bundle: ExecutionBundlePreview): ExecutionBundleRecommendedAction[] {
+  if (bundle.recommended_actions && bundle.recommended_actions.length > 0) {
+    return bundle.recommended_actions;
+  }
+  return FALLBACK_BUNDLE_ACTIONS[bundle.status] ?? [];
+}
+
+function getBundleBlockingReason(bundle: ExecutionBundlePreview): string {
+  if (bundle.blocking_reason?.trim()) {
+    return bundle.blocking_reason;
+  }
+  if (bundle.status === "split_recommended") {
+    return "系统建议先拆分该 bundle，再进入执行阶段。";
+  }
+  if (bundle.status === "needs_confirmation") {
+    return "系统认为该 bundle 可执行，但仍需要你显式确认是否接受当前分组。";
+  }
+  return "当前 bundle 可直接执行。";
+}
+
 // ── 主组件 ────────────────────────────────────────────────────────────────────
 
 function BatchModePage({
@@ -303,6 +425,7 @@ function BatchModePage({
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewFeedback, setReviewFeedback] = useState<ReviewFeedback | null>(null);
   const [reviewFocusItemId, setReviewFocusItemId] = useState<string | null>(null);
+  const [bundleDecisions, setBundleDecisions] = useState<BundleDecisionRecord>({});
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
   const [itemStates, setItemStates] = useState<Record<string, ItemState>>({});
   const itemStatesRef = useRef<Record<string, ItemState>>({});
@@ -376,6 +499,7 @@ function BatchModePage({
     setReviewError(null);
     setReviewFeedback(null);
     setReviewFocusItemId(null);
+    setBundleDecisions({});
     setPlanReview(null);
     itemStatesRef.current = {};
     setItemStates({});
@@ -412,6 +536,7 @@ function BatchModePage({
       setReviewError(null);
       setReviewFeedback(d.review ? summarizePlanReview(d.review, d.plan.items).feedback : null);
       setReviewFocusItemId(d.review ? summarizePlanReview(d.review, d.plan.items).focusItemId : null);
+      setBundleDecisions(reconcileBundleDecisionRecord(d.review ?? null));
       setStage("review_items");
       try {
         writeJsonStorage(PLAN_STORAGE_KEY, d.plan);
@@ -519,6 +644,7 @@ function BatchModePage({
           project_root: projectRoot,
           plan: { ...plan, items: editedItems },
           review_strictness: reviewStrictness,
+          bundle_decisions: bundleDecisions,
         },
         onOpenError(message) {
           socketRef.current = null;
@@ -536,6 +662,7 @@ function BatchModePage({
         action: "confirm_plan",
         plan: { ...plan, items: editedItems },
         review_strictness: reviewStrictness,
+        bundle_decisions: bundleDecisions,
       });
     }
   }
@@ -548,6 +675,7 @@ function BatchModePage({
   async function refreshPlanReview(
     items: PlanItem[] = editedItems,
     strictness: ReviewStrictness = reviewStrictness,
+    decisions: BundleDecisionRecord = bundleDecisions,
   ): Promise<PlanReviewPayload | null> {
     if (!plan) {
       return null;
@@ -559,9 +687,11 @@ function BatchModePage({
       const review = await reviewModPlan({
         plan: { ...plan, items },
         strictness,
+        bundle_decisions: decisions,
       });
       setPlanReview(review);
       setReviewStrictness(normalizeReviewStrictness(review.strictness));
+      setBundleDecisions(reconcileBundleDecisionRecord(review));
       const summary = summarizePlanReview(review, items);
       setReviewFeedback(summary.feedback);
       setReviewFocusItemId(summary.focusItemId);
@@ -589,7 +719,7 @@ function BatchModePage({
   }
 
   async function handleConfirmBundleReview() {
-    const review = await refreshPlanReview();
+    const review = planReview ?? await refreshPlanReview();
     if (!review) {
       return;
     }
@@ -598,8 +728,17 @@ function BatchModePage({
       setStage("review_items");
       return;
     }
-    if (!canProceedFromBundleReview(review)) {
-      setReviewFeedback({ tone: "warning", message: "执行策略仍需确认，请先处理 bundle 风险。" });
+    if (!canProceedFromBundleReview(review, bundleDecisions)) {
+      const progress = summarizeBundleDecisionProgress(review, bundleDecisions);
+      const pendingParts = [
+        progress.unresolved > 0 ? `${progress.unresolved} 个 bundle 待决策` : null,
+        progress.splitRequested > 0 ? `${progress.splitRequested} 个 bundle 已要求拆分但尚未完成重算` : null,
+        progress.needsItemRevision > 0 ? `${progress.needsItemRevision} 个 bundle 仍需回到 Item 复核` : null,
+      ].filter(Boolean);
+      setReviewFeedback({
+        tone: "warning",
+        message: `执行策略仍需处理：${pendingParts.join("，")}。`,
+      });
       setStage("review_bundles");
       return;
     }
@@ -611,8 +750,40 @@ function BatchModePage({
     setReviewStrictness(nextStrictness);
     writeTextStorage(PLAN_REVIEW_STRICTNESS_STORAGE_KEY, nextStrictness);
     if (plan) {
-      void refreshPlanReview(editedItems, nextStrictness);
+      void refreshPlanReview(editedItems, nextStrictness, {});
     }
+  }
+
+  function handleBundleDecisionChange(bundleKey: string, decision: BundleDecisionStatus) {
+    setBundleDecisions((current) => ({ ...current, [bundleKey]: decision }));
+  }
+
+  async function handleBundleSplitRequest(bundleKey: string) {
+    const nextDecisions = { ...bundleDecisions, [bundleKey]: "split_requested" as const };
+    setBundleDecisions(nextDecisions);
+    setReviewFeedback({ tone: "info", message: "已记录拆分请求，正在按更保守口径重算 bundle..." });
+    const review = await refreshPlanReview(editedItems, reviewStrictness, nextDecisions);
+    if (!review) {
+      return;
+    }
+    const progress = summarizeBundleDecisionProgress(review, reconcileBundleDecisionRecord(review));
+    setReviewFeedback({
+      tone: progress.blocking === 0 ? "success" : "warning",
+      message:
+        progress.blocking === 0
+          ? "已按拆分请求重算执行策略，当前可以直接进入执行。"
+          : "已按拆分请求重算执行策略，请继续处理剩余 bundle 决策。",
+    });
+  }
+
+  function handleBundleReturnToItems(bundleKey: string, itemIds: string[]) {
+    setBundleDecisions((current) => ({ ...current, [bundleKey]: "needs_item_revision" }));
+    setReviewFocusItemId(itemIds[0] ?? null);
+    setReviewFeedback({
+      tone: "warning",
+      message: "已返回 Item 复核阶段，请补充依赖原因、范围边界或验收说明后重新检查。",
+    });
+    setStage("review_items");
   }
 
   function requestExecutionStart() {
@@ -703,10 +874,11 @@ function BatchModePage({
     setPlan(null);
     setEditedItems([]);
     setPlanReview(null);
-    setReviewError(null);
-    setReviewFeedback(null);
-    setReviewFocusItemId(null);
-    itemStatesRef.current = {};
+      setReviewError(null);
+      setReviewFeedback(null);
+      setReviewFocusItemId(null);
+      setBundleDecisions({});
+      itemStatesRef.current = {};
     setItemStates({});
     setBatchLog([]);
     setGlobalError(null);
@@ -830,9 +1002,13 @@ function BatchModePage({
           reviewBusy={reviewBusy}
           reviewError={reviewError}
           reviewFeedback={reviewFeedback}
+          bundleDecisions={bundleDecisions}
           onBack={() => setStage("review_items")}
           onRefreshReview={() => { void refreshPlanReview(); }}
           onStrictnessChange={handleReviewStrictnessChange}
+          onBundleDecisionChange={handleBundleDecisionChange}
+          onBundleSplitRequest={(bundleKey) => { void handleBundleSplitRequest(bundleKey); }}
+          onBundleReturnToItems={handleBundleReturnToItems}
           onConfirm={() => { void handleConfirmBundleReview(); }}
           onReset={reset}
         />
@@ -1390,9 +1566,13 @@ function ReviewBundles({
   reviewBusy,
   reviewError,
   reviewFeedback,
+  bundleDecisions,
   onBack,
   onRefreshReview,
   onStrictnessChange,
+  onBundleDecisionChange,
+  onBundleSplitRequest,
+  onBundleReturnToItems,
   onConfirm,
   onReset,
 }: {
@@ -1402,16 +1582,20 @@ function ReviewBundles({
   reviewBusy: boolean;
   reviewError: string | null;
   reviewFeedback: ReviewFeedback | null;
+  bundleDecisions: BundleDecisionRecord;
   onBack: () => void;
   onRefreshReview: () => void;
   onStrictnessChange: (value: ReviewStrictness) => void;
+  onBundleDecisionChange: (bundleKey: string, decision: BundleDecisionStatus) => void;
+  onBundleSplitRequest: (bundleKey: string) => void;
+  onBundleReturnToItems: (bundleKey: string, itemIds: string[]) => void;
   onConfirm: () => void;
   onReset: () => void;
 }) {
   const itemNameMap = new Map(items.map((item) => [item.id, item.name]));
   const dependencyGroups = review?.execution_plan.dependency_groups ?? [];
   const executionBundles = review?.execution_plan.execution_bundles ?? [];
-  const clearBundles = executionBundles.filter((bundle) => bundle.status === "clear").length;
+  const progress = summarizeBundleDecisionProgress(review, bundleDecisions);
 
   return (
     <div className="space-y-4">
@@ -1419,11 +1603,11 @@ function ReviewBundles({
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="text-xs uppercase tracking-[0.2em] text-violet-500">Step 2 / 2</p>
-            <h2 className="font-bold text-slate-800">执行策略确认</h2>
-            <p className="text-xs text-slate-500 mt-0.5">确认 item 如何分组执行，再进入真正的代码生成阶段。</p>
+            <h2 className="font-bold text-slate-800">执行策略决策</h2>
+            <p className="text-xs text-slate-500 mt-0.5">先决定哪些 item 必须一起执行、哪些应拆开执行，处理完待决策 bundle 后再进入真正执行。</p>
           </div>
           <span className="text-xs text-violet-700 bg-violet-50 border border-violet-200 rounded-full px-2 py-0.5 font-medium">
-            {clearBundles}/{executionBundles.length || 0} 个 bundle 可直接执行
+            {(progress.clear + progress.accepted)}/{executionBundles.length || 0} 个 bundle 已具备执行条件
           </span>
         </div>
 
@@ -1436,8 +1620,27 @@ function ReviewBundles({
         <ReviewFeedbackBanner feedback={reviewFeedback} />
         <ReviewNotice message={reviewError} />
 
+        <div className="grid gap-3 md:grid-cols-3">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <p className="text-xs font-medium text-slate-500">待你确认</p>
+            <p className="mt-1 text-2xl font-semibold text-slate-800">{progress.unresolved}</p>
+            <p className="mt-1 text-xs text-slate-500">系统已给出风险判断，但还没有收到你的明确决策。</p>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <p className="text-xs font-medium text-slate-500">已接受当前分组</p>
+            <p className="mt-1 text-2xl font-semibold text-green-700">{progress.accepted}</p>
+            <p className="mt-1 text-xs text-slate-500">这些 bundle 即使带风险，也已经被你显式接受。</p>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <p className="text-xs font-medium text-slate-500">仍阻塞执行</p>
+            <p className="mt-1 text-2xl font-semibold text-amber-700">{progress.blocking}</p>
+            <p className="mt-1 text-xs text-slate-500">包含待决策、待拆分重算或待回到 Item 复核的 bundle。</p>
+          </div>
+        </div>
+
         <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
           <p className="text-sm font-medium text-slate-700">依赖分组预览</p>
+          <p className="mt-1 text-xs text-slate-500">这里展示的是依赖关系视角；下方的执行 Bundle 是系统综合耦合度和风险后给出的执行视角。</p>
           <div className="mt-2 flex flex-wrap gap-2">
             {dependencyGroups.length === 0 && (
               <span className="text-xs text-slate-400">暂无分组数据，先重新检查一次。</span>
@@ -1456,7 +1659,15 @@ function ReviewBundles({
               还没有 bundle 评审结果，点击“重新检查当前计划”即可生成。
             </div>
           )}
-          {executionBundles.map((bundle, index) => (
+          {executionBundles.map((bundle, index) => {
+            const bundleKey = resolveExecutionBundleKey(bundle, index);
+            const decision: BundleDecisionStatus = bundle.status === "clear"
+              ? "accepted"
+              : (bundleDecisions[bundleKey] ?? "unresolved");
+            const riskDetails = getBundleRiskDetails(bundle);
+            const recommendedActions = getBundleRecommendedActions(bundle);
+
+            return (
             <div key={`bundle-${index}`} className="rounded-xl border border-slate-200 bg-white px-4 py-4 space-y-3">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -1465,7 +1676,12 @@ function ReviewBundles({
                     {bundle.item_ids.map((itemId) => itemNameMap.get(itemId) ?? itemId).join(" / ")}
                   </p>
                 </div>
-                <ReviewStatusBadge status={bundle.status} kind="bundle" />
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <ReviewStatusBadge status={bundle.status} kind="bundle" />
+                  <span className={cn("text-xs rounded-full border px-2 py-0.5 font-medium", BUNDLE_DECISION_TONES[decision])}>
+                    {BUNDLE_DECISION_LABELS[decision]}
+                  </span>
+                </div>
               </div>
               <div className="grid gap-3 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
                 <div className="rounded-lg bg-slate-50 px-3 py-3">
@@ -1486,8 +1702,77 @@ function ReviewBundles({
                   </div>
                 </div>
               </div>
+              <div className="rounded-lg bg-slate-50 px-3 py-3 space-y-2">
+                <p className="text-xs font-medium text-slate-500">为什么当前会阻塞</p>
+                <p className="text-sm text-slate-700">{getBundleBlockingReason(bundle)}</p>
+              </div>
+              {riskDetails.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-slate-500">风险解释</p>
+                  {riskDetails.map((detail) => (
+                    <div key={`${bundleKey}-${detail.code}`} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+                      <div className="flex items-center gap-2">
+                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">
+                          {detail.title}
+                        </span>
+                        <span className="text-[11px] text-slate-400">{detail.code}</span>
+                      </div>
+                      <p className="mt-2 text-sm text-slate-700">{detail.summary}</p>
+                      {detail.impact ? <p className="mt-1 text-xs text-slate-500">影响：{detail.impact}</p> : null}
+                      <p className="mt-2 text-xs text-slate-600">建议：{detail.recommendation}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {recommendedActions.length > 0 && (
+                <div className="rounded-lg border border-slate-200 bg-white px-3 py-3 space-y-3">
+                  <div>
+                    <p className="text-xs font-medium text-slate-500">建议动作</p>
+                    <p className="mt-1 text-xs text-slate-500">处理完当前 bundle 的决策后，底部主按钮才会放行。</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {recommendedActions.some((action) => action.action === "accept_bundle") && (
+                      <button
+                        type="button"
+                        onClick={() => onBundleDecisionChange(bundleKey, "accepted")}
+                        className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700 transition-colors"
+                      >
+                        接受当前分组
+                      </button>
+                    )}
+                    {recommendedActions.some((action) => action.action === "split_bundle") && (
+                      <button
+                        type="button"
+                        onClick={() => onBundleSplitRequest(bundleKey)}
+                        disabled={reviewBusy}
+                        className="rounded-lg bg-sky-600 px-3 py-2 text-xs font-medium text-white hover:bg-sky-700 transition-colors disabled:opacity-60"
+                      >
+                        {reviewBusy ? "重算中..." : "要求拆分"}
+                      </button>
+                    )}
+                    {recommendedActions.some((action) => action.action === "revise_items") && (
+                      <button
+                        type="button"
+                        onClick={() => onBundleReturnToItems(bundleKey, bundle.item_ids)}
+                        className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+                      >
+                        返回补充说明
+                      </button>
+                    )}
+                  </div>
+                  <div className="grid gap-2 md:grid-cols-3">
+                    {recommendedActions.map((action) => (
+                      <div key={`${bundleKey}-${action.action}`} className="rounded-lg bg-slate-50 px-3 py-2">
+                        <p className="text-xs font-medium text-slate-700">{action.label}</p>
+                        <p className="mt-1 text-xs text-slate-500">{action.description}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
-          ))}
+            );
+          })}
         </div>
 
         <div className="flex flex-wrap gap-2 mt-4">
@@ -1512,7 +1797,7 @@ function ReviewBundles({
             disabled={reviewBusy}
             className="flex-1 py-2.5 rounded-lg bg-violet-700 text-white font-bold text-sm hover:bg-violet-800 transition-colors disabled:opacity-60"
           >
-            {canProceedFromBundleReview(review) ? "确认执行策略，开始执行" : "先处理 bundle 风险后再执行"}
+            {canProceedFromBundleReview(review, bundleDecisions) ? "确认执行策略，开始执行" : `先处理剩余 ${progress.blocking} 个阻塞 bundle`}
           </button>
           <button
             type="button"

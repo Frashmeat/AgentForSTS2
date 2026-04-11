@@ -1,6 +1,8 @@
 import { getApproval, type ApprovalRequest } from "../../shared/api/index.ts";
 import type {
   ExecutionBundlePreview,
+  ExecutionBundleRecommendedAction,
+  ExecutionBundleRiskDetail,
   PlanItemValidation,
   PlanReviewPayload,
 } from "../../shared/types/workflow.ts";
@@ -191,11 +193,52 @@ function normalizeExecutionBundlePreview(value: unknown): ExecutionBundlePreview
     return null;
   }
 
+  const riskDetails = Array.isArray(value.risk_details)
+    ? value.risk_details
+        .filter((detail): detail is ExecutionBundleRiskDetail =>
+          isRecord(detail)
+            && typeof detail.code === "string"
+            && typeof detail.title === "string"
+            && typeof detail.summary === "string"
+            && typeof detail.recommendation === "string",
+        )
+        .map((detail) => ({
+          code: detail.code,
+          title: detail.title,
+          summary: detail.summary,
+          recommendation: detail.recommendation,
+          impact: typeof detail.impact === "string" ? detail.impact : undefined,
+        }))
+    : undefined;
+
+  const recommendedActions = Array.isArray(value.recommended_actions)
+    ? value.recommended_actions
+        .filter((action): action is ExecutionBundleRecommendedAction =>
+          isRecord(action)
+            && (action.action === "accept_bundle" || action.action === "split_bundle" || action.action === "revise_items")
+            && typeof action.label === "string"
+            && typeof action.description === "string",
+        )
+        .map((action) => ({
+          action: action.action,
+          label: action.label,
+          description: action.description,
+          emphasis:
+            action.emphasis === "primary" || action.emphasis === "secondary" || action.emphasis === "warning"
+              ? action.emphasis
+              : undefined,
+        }))
+    : undefined;
+
   return {
+    bundle_id: typeof value.bundle_id === "string" ? value.bundle_id : undefined,
     item_ids: asStringArray(value.item_ids),
     status,
     reason: value.reason,
     risk_codes: asStringArray(value.risk_codes),
+    risk_details: riskDetails,
+    recommended_actions: recommendedActions,
+    blocking_reason: typeof value.blocking_reason === "string" ? value.blocking_reason : undefined,
   };
 }
 

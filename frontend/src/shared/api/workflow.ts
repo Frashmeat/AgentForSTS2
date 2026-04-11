@@ -30,6 +30,7 @@ export interface PackageProjectResponse {
 export interface ReviewModPlanRequest {
   plan: ModPlan;
   strictness?: "efficient" | "balanced" | "strict";
+  bundle_decisions?: Record<string, "unresolved" | "accepted" | "split_requested" | "needs_item_revision">;
 }
 
 function assertNoBusinessError<T>(value: T | { error: string }): asserts value is T {

@@ -42,8 +42,12 @@ def validate_plan(plan: ModPlan, strictness: ReviewStrictness = "balanced") -> P
     return _service.validate_plan(plan, strictness)
 
 
-def build_execution_plan(plan: ModPlan, strictness: str = "balanced") -> ExecutionPlanPreview:
-    return _service.build_execution_plan(plan, strictness)
+def build_execution_plan(
+    plan: ModPlan,
+    strictness: str = "balanced",
+    bundle_decisions: dict[str, str] | None = None,
+) -> ExecutionPlanPreview:
+    return _service.build_execution_plan(plan, strictness, bundle_decisions)
 
 
 __all__ = [
