@@ -35,6 +35,8 @@ services:
       args:
         PYTHON_BASE_IMAGE: ${ATS_PYTHON_BASE_IMAGE:-python:3.11-slim}
     restart: unless-stopped
+    environment:
+      SPIREFORGE_CONFIG_PATH: /app/config.json
     depends_on:
       postgres:
         condition: service_healthy

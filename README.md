@@ -47,6 +47,8 @@ cd AgentTheSpire
 
 powershell -ExecutionPolicy Bypass -File .\tools\tools.ps1 install   # Windows 推荐入口：安装 .NET / Godot / ilspycmd / Python deps / frontend build
 
+# 安装脚本会把 ~\.dotnet\tools 和项目内 runtime\tools 自动加入当前会话与用户 PATH
+
 # Copy config.example.json → runtime/workstation.config.json, fill in your API keys and game path
 
 powershell -ExecutionPolicy Bypass -File .\tools\tools.ps1 start workstation   # Opens http://localhost:7860
@@ -76,7 +78,7 @@ Current product behavior:
 ### Tool Scripts
 
 - Core install/start/dev helpers live in `tools/`.
-- `tools/kill-local.ps1` stops local `frontend` / `workstation` / `web` processes by discovered state/config first, with port arguments available as explicit overrides.
+- `tools/kill-local.ps1` stops local `frontend` / `workstation` / `web` processes by discovered state/config first, with port arguments available as explicit overrides; Docker Desktop proxy processes on the `web` port are explicitly skipped.
 - `tools/latest/` contains the current packaging and Docker deployment scripts.
 - `tools/archive/` stores deprecated historical scripts. The old Windows Sandbox verification chain has been moved there and is no longer part of the primary workflow.
 - `tools/latest/artifacts/` and generated `sandbox_test.wsb` files are local outputs and are ignored by Git.
@@ -129,12 +131,14 @@ Current product behavior:
   - `更新知识库`
   - `查看知识库说明`
 - 发行包会直接包含可查看、可编辑的运行时知识目录；应用运行时只读取这份目录，用户修改后会直接生效。
+- `workstation` / `hybrid` 发行包也会直接包含当前实例自己的 `runtime/tools/`，用于承载 `ilspycmd` 等知识库更新工具及其完整依赖目录。
 - 运行时知识目录默认位于：
   - `runtime/knowledge/knowledge-manifest.json`
   - `runtime/knowledge/game/`
   - `runtime/knowledge/baselib/`
   - `runtime/knowledge/resources/sts2/`
   - `runtime/knowledge/cache/`
+- 知识库更新所需的 `ilspycmd` 会优先从当前运行实例自己的 `runtime/tools/` 查找；无论是仓库直启还是 release 包运行，都不应再假定只从仓库根目录查工具。
 - 仓库内 `backend/agents/*` 与 `backend/app/modules/knowledge/resources/sts2/*` 仅作为开发期/打包期种子来源，不再作为运行时并列真源。
 
 ### 快速开始
@@ -144,6 +148,8 @@ git clone https://github.com/yourname/AgentTheSpire.git
 cd AgentTheSpire
 
 powershell -ExecutionPolicy Bypass -File .\tools\tools.ps1 install   # Windows 推荐入口：安装 .NET / Godot / ilspycmd / Python 依赖 / 前端构建
+
+# 安装脚本会把 ~\.dotnet\tools 和项目内 runtime\tools 自动加入当前会话与用户 PATH
 
 # 如果只想安装 .NET 9 + Godot 4.5.1 + ilspycmd：
 powershell -ExecutionPolicy Bypass -File .\tools\tools.ps1 install mod
@@ -242,7 +248,7 @@ pwsh -NoProfile -File .\tools\latest\stop-deploy.ps1 hybrid
 ### 工具脚本
 
 - 当前安装、启动、开发辅助脚本统一放在 `tools/`。
-- `tools\kill-local.ps1` 可停止本机 `frontend / workstation / web` 进程，并额外尝试停止当前仓库 `tools/latest/artifacts` 下默认 release 对应的 Docker `web` 服务；默认端口分别为 `5173 / 7860 / 7870`。
+- `tools\kill-local.ps1` 可停止当前仓库识别出的本机 `frontend / workstation / web` 进程，并额外尝试停止当前仓库 `tools/latest/artifacts` 下默认 release 对应的 Docker `web` 服务；对 `7870` 上的 Docker Desktop / WSL 代理进程会显式跳过，避免误杀 Docker 后端链路。
 - `tools/latest/` 存放当前推荐使用的打包与 Docker 部署脚本。
 - `tools/archive/` 存放已归档的历史脚本；旧的 Windows Sandbox 验证链路已经迁入该目录，不再作为主流程维护。
 - `tools/latest/artifacts/` 与生成出来的 `sandbox_test.wsb` 都属于本地产物，默认不会提交到 Git。

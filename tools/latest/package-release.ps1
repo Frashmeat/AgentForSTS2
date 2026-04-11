@@ -443,6 +443,24 @@ function Copy-KnowledgeSeedBundle {
     }
 }
 
+function Copy-RuntimeToolsBundle {
+    param(
+        [string]$ReleaseDir,
+        [string]$RepoRoot
+    )
+
+    $sourceToolsDir = Join-Path (Join-Path $RepoRoot "runtime") "tools"
+    if (-not (Test-Path -LiteralPath $sourceToolsDir)) {
+        return
+    }
+
+    $runtimeDir = Join-Path $ReleaseDir "runtime"
+    $targetToolsDir = Join-Path $runtimeDir "tools"
+    Remove-DirectoryIfExists -Path $targetToolsDir
+    $null = New-Item -ItemType Directory -Path $runtimeDir -Force
+    Copy-Item -LiteralPath $sourceToolsDir -Destination $runtimeDir -Recurse -Force
+}
+
 function Get-PreviousServiceConfigs {
     param([string]$ExistingReleaseDir)
 
@@ -583,6 +601,7 @@ foreach ($service in $serviceDefinitions) {
 }
 if ($needsBackend) {
     Copy-KnowledgeSeedBundle -ReleaseDir $releaseDir -RepoRoot $repoRoot
+    Copy-RuntimeToolsBundle -ReleaseDir $releaseDir -RepoRoot $repoRoot
 }
 Copy-LauncherBundle -ReleaseDir $releaseDir -RepoRoot $repoRoot -TargetName $Target
 
@@ -593,6 +612,7 @@ Write-ReleaseManifest -ReleaseDir $releaseDir -RepoRoot $repoRoot -SelectedTarge
 if (-not $SkipZip) {
     Write-Host "生成 zip 包..."
     New-ZipFromDirectory -SourceDir $releaseDir -DestinationPath $zipPath -ExcludeRelativePaths @(
+        "runtime\logs",
         "runtime\python-runtime"
     )
 }

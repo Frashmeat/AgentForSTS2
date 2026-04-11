@@ -20,9 +20,17 @@ _APP_ROOT = Path(__file__).resolve().parents[5]
 
 
 def _resolve_runtime_config_path() -> Path:
-    if _APP_ROOT.name in {"workstation", "web"} and _APP_ROOT.parent.name == "services":
-        return _APP_ROOT.parents[1] / "runtime" / "workstation.config.json"
-    return _APP_ROOT / "runtime" / "workstation.config.json"
+    # Dockerized release bundles mount the effective runtime config to /app/config.json.
+    docker_mounted_config = _APP_ROOT.parent / "config.json"
+    if docker_mounted_config.exists():
+        return docker_mounted_config
+
+    # Release bundles keep the real configs under <release>/runtime/<role>.config.json.
+    if _APP_ROOT.name == "backend" and _APP_ROOT.parent.name in {"workstation", "web"} and _APP_ROOT.parent.parent.name == "services":
+        role = _APP_ROOT.parent.name
+        return _APP_ROOT.parent.parent.parent / "runtime" / f"{role}.config.json"
+
+    return _APP_ROOT.parent / "runtime" / "workstation.config.json"
 
 
 RUNTIME_CONFIG_PATH = _resolve_runtime_config_path()

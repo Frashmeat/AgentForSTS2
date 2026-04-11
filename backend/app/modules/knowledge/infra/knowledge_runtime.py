@@ -38,6 +38,7 @@ _REFRESH_TASKS_LOCK = threading.Lock()
 _ILSPY_PATH_ENV = "SPIREFORGE_ILSPYCMD_PATH"
 _ILSPY_CANDIDATE_NAMES = ("ilspycmd.exe", "ilspycmd", "ILSpyCmd.dll", "ilspycmd.dll")
 _ILSPY_SEARCH_ROOTS = (
+    settings_module.RUNTIME_CONFIG_PATH.parent / "tools",
     REPO_ROOT,
     REPO_ROOT / "tools",
     REPO_ROOT / "runtime",

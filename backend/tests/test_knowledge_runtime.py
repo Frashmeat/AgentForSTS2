@@ -333,3 +333,7 @@ def test_resolve_ilspycmd_command_prefers_project_copy(monkeypatch, tmp_path: Pa
     command = knowledge_runtime.resolve_ilspycmd_command()
 
     assert command == [str(project_copy.resolve())]
+
+
+def test_ilspy_search_roots_include_runtime_tools_next_to_runtime_config():
+    assert knowledge_runtime.settings_module.RUNTIME_CONFIG_PATH.parent / "tools" in knowledge_runtime._ILSPY_SEARCH_ROOTS

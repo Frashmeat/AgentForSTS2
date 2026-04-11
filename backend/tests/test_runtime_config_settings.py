@@ -72,3 +72,24 @@ def test_save_config_writes_runtime_workstation_config_by_default(monkeypatch, t
 
     assert runtime_config.exists()
     assert '"agent_backend": "codex"' in runtime_config.read_text(encoding="utf-8")
+
+
+def test_resolve_runtime_config_path_prefers_docker_mounted_config(monkeypatch, tmp_path: Path):
+    app_root = tmp_path / "app" / "backend"
+    app_root.mkdir(parents=True, exist_ok=True)
+    docker_config = tmp_path / "app" / "config.json"
+    docker_config.write_text('{"database":{"url":"sqlite+pysqlite:///:memory:"}}\n', encoding="utf-8")
+
+    monkeypatch.setattr(settings_module, "_APP_ROOT", app_root)
+
+    assert settings_module._resolve_runtime_config_path() == docker_config
+
+
+def test_resolve_runtime_config_path_uses_role_specific_release_runtime_config(monkeypatch, tmp_path: Path):
+    backend_root = tmp_path / "release" / "services" / "web" / "backend"
+    backend_root.mkdir(parents=True, exist_ok=True)
+    runtime_config = tmp_path / "release" / "runtime" / "web.config.json"
+
+    monkeypatch.setattr(settings_module, "_APP_ROOT", backend_root)
+
+    assert settings_module._resolve_runtime_config_path() == runtime_config

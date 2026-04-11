@@ -409,3 +409,98 @@ def test_package_release_zip_excludes_runtime_python_cache(tmp_path: Path):
         names = archive.namelist()
 
     assert "agentthespire-workstation-release/runtime/python-runtime/workstation/cache.marker" not in names
+
+
+def test_package_release_zip_excludes_runtime_logs_even_when_locked(tmp_path: Path):
+    temp_repo = tmp_path / "repo"
+    _prepare_common_layout(temp_repo)
+    _write_template_files(temp_repo, "workstation")
+
+    backend_dir = temp_repo / "backend"
+    backend_dir.mkdir(parents=True, exist_ok=True)
+    (backend_dir / "main_workstation.py").write_text("print('ok')\n", encoding="utf-8")
+    frontend_dist = temp_repo / "frontend" / "dist"
+    frontend_dist.mkdir(parents=True, exist_ok=True)
+    (frontend_dist / "index.html").write_text("<html></html>\n", encoding="utf-8")
+    mod_template = temp_repo / "mod_template"
+    mod_template.mkdir(parents=True, exist_ok=True)
+    (mod_template / "README.md").write_text("template\n", encoding="utf-8")
+    (temp_repo / "config.example.json").write_text('{"mode":"example"}\n', encoding="utf-8")
+
+    release_dir = temp_repo / "tools" / "latest" / "artifacts" / "agentthespire-workstation-release"
+    locked_log = release_dir / "runtime" / "logs" / "workstation.stderr.log"
+    locked_log.parent.mkdir(parents=True, exist_ok=True)
+    locked_log.write_text("still in use\n", encoding="utf-8")
+
+    locked_log_ps = str(locked_log).replace("'", "''")
+    locker = subprocess.Popen(
+        [
+            "pwsh",
+            "-NoProfile",
+            "-Command",
+            (
+                f"$fs = [System.IO.File]::Open('{locked_log_ps}', [System.IO.FileMode]::Open, "
+                "[System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None); "
+                "Start-Sleep -Seconds 20; "
+                "$fs.Dispose()"
+            ),
+        ],
+        cwd=temp_repo,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    try:
+        time.sleep(1.5)
+        completed = _run_package_release(temp_repo, "workstation", "-NoFrontend")
+    finally:
+        locker.terminate()
+        try:
+            locker.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            locker.kill()
+            locker.wait(timeout=5)
+
+    zip_path = temp_repo / "tools" / "latest" / "artifacts" / "agentthespire-workstation-release.zip"
+
+    assert completed.returncode == 0, completed.stderr
+    assert zip_path.exists()
+
+    with zipfile.ZipFile(zip_path) as archive:
+        names = archive.namelist()
+
+    assert "agentthespire-workstation-release/runtime/logs/workstation.stderr.log" not in names
+
+
+def test_package_release_copies_runtime_tools_bundle(tmp_path: Path):
+    temp_repo = tmp_path / "repo"
+    _prepare_common_layout(temp_repo)
+    _write_template_files(temp_repo, "workstation")
+
+    backend_dir = temp_repo / "backend"
+    backend_dir.mkdir(parents=True, exist_ok=True)
+    (backend_dir / "main_workstation.py").write_text("print('ok')\n", encoding="utf-8")
+    frontend_dist = temp_repo / "frontend" / "dist"
+    frontend_dist.mkdir(parents=True, exist_ok=True)
+    (frontend_dist / "index.html").write_text("<html></html>\n", encoding="utf-8")
+    mod_template = temp_repo / "mod_template"
+    mod_template.mkdir(parents=True, exist_ok=True)
+    (mod_template / "README.md").write_text("template\n", encoding="utf-8")
+    (temp_repo / "config.example.json").write_text('{"mode":"example"}\n', encoding="utf-8")
+
+    runtime_tools = temp_repo / "runtime" / "tools"
+    nested_tool = runtime_tools / ".store" / "ilspycmd" / "9.1.0.7988" / "ilspycmd" / "9.1.0.7988" / "tools" / "net8.0" / "any"
+    nested_tool.mkdir(parents=True, exist_ok=True)
+    (runtime_tools / "ilspycmd.exe").write_text("shim\n", encoding="utf-8")
+    (nested_tool / "ilspycmd.dll").write_text("dll\n", encoding="utf-8")
+
+    completed = _run_package_release(temp_repo, "workstation", "-NoFrontend", "-NoZip")
+
+    release_dir = temp_repo / "tools" / "latest" / "artifacts" / "agentthespire-workstation-release"
+    copied_exe = release_dir / "runtime" / "tools" / "ilspycmd.exe"
+    copied_dll = release_dir / "runtime" / "tools" / ".store" / "ilspycmd" / "9.1.0.7988" / "ilspycmd" / "9.1.0.7988" / "tools" / "net8.0" / "any" / "ilspycmd.dll"
+
+    assert completed.returncode == 0, completed.stderr
+    assert copied_exe.exists()
+    assert copied_dll.exists()
