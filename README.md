@@ -45,23 +45,20 @@ Describe your card, relic, or power in plain text — AgentTheSpire generates th
 git clone https://github.com/yourname/AgentTheSpire.git
 cd AgentTheSpire
 
-powershell -ExecutionPolicy Bypass -File .\tools\install.ps1   # Windows 推荐入口：安装 .NET / Godot / ilspycmd / Python deps / frontend build
-tools\install.bat                                           # 兼容入口，内部转发到 install.ps1
+powershell -ExecutionPolicy Bypass -File .\tools\tools.ps1 install   # Windows 推荐入口：安装 .NET / Godot / ilspycmd / Python deps / frontend build
 
 # Copy config.example.json → runtime/workstation.config.json, fill in your API keys and game path
 
-tools\start.bat             # Opens http://localhost:7860 (default workstation runtime)
+powershell -ExecutionPolicy Bypass -File .\tools\tools.ps1 start workstation   # Opens http://localhost:7860
 ```
 
 See [TUTORIAL.md](TUTORIAL.md) for full setup and configuration guide.
 
 ### Backend Runtime Modes
 
-- `tools\start.bat`
-  Starts the default `workstation` runtime on `http://localhost:7860`.
-- `tools\start_workstation.bat`
+- `powershell -File .\tools\tools.ps1 start workstation`
   Starts `workstation-backend` only. This runtime serves the local workstation UI, local workflows, approvals, config, build, and deploy flows.
-- `tools\start_web.bat`
+- `powershell -File .\tools\tools.ps1 start web`
   Starts `web-backend` only on `http://localhost:7870`. This runtime is for platform/auth/job/quota APIs and requires a valid `database.url` in `runtime/web.config.json` or the path pointed to by `SPIREFORGE_CONFIG_PATH`.
 
 Current deployment guidance:
@@ -146,28 +143,25 @@ Current product behavior:
 git clone https://github.com/yourname/AgentTheSpire.git
 cd AgentTheSpire
 
-powershell -ExecutionPolicy Bypass -File .\tools\install.ps1   # Windows 推荐入口：安装 .NET / Godot / ilspycmd / Python 依赖 / 前端构建
-tools\install.bat                                           # 兼容入口，内部转发到 install.ps1
+powershell -ExecutionPolicy Bypass -File .\tools\tools.ps1 install   # Windows 推荐入口：安装 .NET / Godot / ilspycmd / Python 依赖 / 前端构建
 
 # 如果只想安装 .NET 9 + Godot 4.5.1 + ilspycmd：
-powershell -ExecutionPolicy Bypass -File .\tools\install.ps1 -OnlyModDeps
+powershell -ExecutionPolicy Bypass -File .\tools\tools.ps1 install mod
 
 # 复制 config.example.json → runtime/workstation.config.json，填入 API Key 和游戏路径
 
-tools\start.bat             # 打开 http://localhost:7860（默认 workstation 运行时）
+powershell -ExecutionPolicy Bypass -File .\tools\tools.ps1 start workstation   # 打开 http://localhost:7860
 ```
 
 详细配置说明见 [TUTORIAL.md](TUTORIAL.md)。
 
 ### 后端运行形态
 
-- `tools\start.bat`
-  启动默认 `workstation` 运行时，监听 `http://localhost:7860`。
-- `tools\start_workstation.bat`
+- `powershell -File .\tools\tools.ps1 start workstation`
   仅启动 `workstation-backend`。该运行时承接本地工作站 UI、本地工作流、审批、配置、构建与部署链路。
-- `tools\start_split_local.bat`
+- `powershell -File .\tools\tools.ps1 split start`
   启动“独立前端 + 本地 workstation”双进程本地形态：前端静态站点由本地轻量服务托管，工作台 HTTP/WS 指向本机 `workstation-backend`，平台接口继续指向 `web-backend`。
-- `tools\start_web.bat`
+- `powershell -File .\tools\tools.ps1 start web`
   仅启动 `web-backend`，监听 `http://localhost:7870`。该运行时承接平台任务、认证、配额、历史记录等 API，并要求 `runtime/web.config.json` 或 `SPIREFORGE_CONFIG_PATH` 指向的配置中存在有效的 `database.url`。
 
 当前部署口径：
@@ -175,15 +169,15 @@ tools\start.bat             # 打开 http://localhost:7860（默认 workstation 
 - 单机本地使用，优先 `workstation-backend`
 - 服务器平台 API，优先 `web-backend`
 - 用户侧正式推荐打包目标：`hybrid`
-- 若要验证“独立前端 + 本地 workstation + 远端/本地 web”形态，优先使用 `tools\start_split_local.bat`
+- 若要验证“独立前端 + 本地 workstation + 远端/本地 web”形态，优先使用 `powershell -File .\tools\tools.ps1 split start`
 
 三种当前相关形态的差异如下：
 
 | 形态 | 启动入口 | 谁托管前端 | workstation 接口去向 | web 接口去向 | 适用场景 |
 |------|----------|------------|----------------------|--------------|----------|
-| 工作站托管态 | `tools\start_workstation.bat` | `workstation-backend` | 本机 `workstation-backend` | 通常不承接；需要平台接口时应另启 `web-backend` | 单机工作站、本地 BYOK、本机构建部署 |
+| 工作站托管态 | `powershell -File .\tools\tools.ps1 start workstation` | `workstation-backend` | 本机 `workstation-backend` | 通常不承接；需要平台接口时应另启 `web-backend` | 单机工作站、本地 BYOK、本机构建部署 |
 | 正式部署目标 `hybrid` | `tools\latest\package-release.ps1 hybrid` | 独立静态前端 | `runtime-config.js` 指向本机或 LAN 可达 `workstation-backend` | 默认指向本机 `http://127.0.0.1:7870`，也可显式改为独立部署的 `web-backend` | 用户侧正式交付、“一个前端入口 + 两类后端能力” |
-| 本地验证形态 `split-local` | `tools\start_split_local.bat` | 独立静态前端 | 指向本机 `workstation-backend` | 指向配置的 `web-backend` | 本地验证 `hybrid` 形态、开发联调 |
+| 本地验证形态 `split-local` | `powershell -File .\tools\tools.ps1 split start` | 独立静态前端 | 指向本机 `workstation-backend` | 指向配置的 `web-backend` | 本地验证 `hybrid` 形态、开发联调 |
 
 当前前后端边界补充：
 

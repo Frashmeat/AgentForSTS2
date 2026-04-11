@@ -92,6 +92,6 @@ fi
 
 echo ""
 echo " =============================="
-echo "   安装完成！运行 ./tools/start.sh 启动"
+echo "   安装完成！运行 ./tools/start/start.sh 启动"
 echo " =============================="
 echo ""

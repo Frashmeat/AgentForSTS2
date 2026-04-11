@@ -107,7 +107,6 @@ function Show-Help {
     Write-Host "  start dev              启动开发模式"
     Write-Host "  split start            启动独立前端 + 本地 workstation"
     Write-Host "  split stop             停止 split-local 双进程"
-    Write-Host "  dev verify-install     校验安装 wrapper"
     Write-Host "  dev decompile          反编译 sts2.dll"
     Write-Host "  latest package <target> 打包 release bundle"
     Write-Host "  latest deploy <target>  部署 mixed release（web 用 Docker，其余目标按需本机启动）"
@@ -370,11 +369,8 @@ function Get-MenuGroups {
         [pscustomobject]@{
             Key = "dev"
             Label = "开发辅助"
-            Description = "校验安装 wrapper、反编译游戏 DLL"
+            Description = "反编译游戏 DLL 等开发辅助"
             Items = @(
-                (New-MenuCommand -Key "dev-verify-install" -Label "校验安装 wrapper" -Description "检查顶层安装兼容层与真实 install.ps1 的关键行为" -ScriptPath (Join-Path $toolsRoot "dev\verify-install-bat.ps1") -InvocationName "dev verify-install" -Profiles @(
-                    (New-MenuProfile -Key "default" -Label "直接执行" -Description "运行 verify-install-bat.ps1")
-                ))
                 (New-MenuCommand -Key "dev-decompile" -Label "反编译 sts2.dll" -Description "运行 decompile_sts2.py" -ScriptPath (Join-Path $toolsRoot "dev\decompile_sts2.py") -InvocationName "dev decompile" -Profiles @(
                     (New-MenuProfile -Key "default" -Label "直接执行" -Description "按当前配置运行反编译脚本")
                 ))
@@ -509,7 +505,6 @@ function Invoke-Route {
         }
         "dev" {
             switch ($actionName) {
-                "verify-install" { Invoke-TargetScript -Path (Join-Path $toolsRoot "dev\verify-install-bat.ps1") -Arguments $ResolvedArgs; return }
                 "decompile" { Invoke-TargetScript -Path (Join-Path $toolsRoot "dev\decompile_sts2.py") -Arguments $ResolvedArgs; return }
                 default { Show-Help; return }
             }

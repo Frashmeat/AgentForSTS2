@@ -1,6 +1,6 @@
 # tools 目录说明
 
-本目录现在采用“一个统一入口 + 分层数字菜单 + 参数直达 + 顶层兼容 wrapper”的结构。
+本目录现在采用“一个统一入口 + 分层数字菜单 + 参数直达 + 功能子目录真实脚本”的结构。
 
 ## 推荐入口
 
@@ -36,7 +36,6 @@ powershell -File .\tools\tools.ps1 split start -DryRun
 powershell -File .\tools\tools.ps1 split stop
 
 # 开发辅助
-powershell -File .\tools\tools.ps1 dev verify-install
 powershell -File .\tools\tools.ps1 dev decompile
 
 # 停止本机前端 / workstation / web 本地进程
@@ -95,29 +94,6 @@ tools/
 └── archive/                  # 已归档历史脚本与产物
 ```
 
-## 顶层兼容入口
-
-以下顶层脚本仍然保留，但现在只作为兼容 wrapper，内部会转发到对应子目录中的真实脚本：
-
-- `tools\install.ps1`
-- `tools\install.bat`
-- `tools\install.sh`
-- `tools\setup_mod_deps.bat`
-- `tools\setup_mod_deps.sh`
-- `tools\start.bat`
-- `tools\start.sh`
-- `tools\start_dev.bat`
-- `tools\start_web.bat`
-- `tools\start_workstation.bat`
-- `tools\start_split_local.ps1`
-- `tools\start_split_local.bat`
-- `tools\stop_split_local.ps1`
-- `tools\stop_split_local.bat`
-- `tools\verify-install-bat.ps1`
-- `tools\kill-local.ps1`
-
-后续日常使用建议优先改为 `tools.ps1`，避免直接依赖兼容层。
-
 ## 功能分组
 
 ### install
@@ -154,8 +130,6 @@ tools/
 
 - `tools\dev\decompile_sts2.py`
   反编译 `sts2.dll`，并把输出路径写入 `config.json`。不传参数时会默认读取 `config.json` 中的 `sts2_path`。
-- `tools\dev\verify-install-bat.ps1`
-  校验顶层安装 wrapper 与实际 `install\install.ps1` 的关键行为。
 
 ### 本地进程停止
 
@@ -216,7 +190,7 @@ tools/
 
 ## 其它说明
 
-- 所有真实脚本都已经迁入功能目录，顶层旧脚本只保留兼容层职责。
+- 日常入口统一收敛到 `tools.ps1`；如需绕过菜单，可直接调用功能子目录下的真实脚本。
 - `tools.ps1` 现在默认优先提供菜单式选择，适合日常本地使用；参数直达模式更适合脚本化或熟悉命令后的快速调用。
 - `tools\latest\package-release.ps1 workstation` 仍会把 launcher 脚本复制到 release 目录下的 `launcher/` 中。
 - `tools\latest\package-release.ps1 hybrid` 会同时整理 `frontend` 与 `workstation` 两类用户侧服务，并附带 launcher。
