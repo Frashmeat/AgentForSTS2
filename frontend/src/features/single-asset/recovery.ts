@@ -175,8 +175,8 @@ function normalizeWorkflowSnapshot(value: unknown): SingleAssetWorkflowState {
     approvalSummary: asString(value.approvalSummary),
     approvalRequests: normalizeApprovalRequests(value.approvalRequests),
     approvalBusyActionId: null,
-    errorMessage: asNullableString(value.errorMessage ?? value.errorMsg),
-    errorTraceback: asNullableString(value.errorTraceback ?? value.errorTrace),
+    errorMessage: asNullableString(value.errorMessage),
+    errorTraceback: asNullableString(value.errorTraceback),
   };
 }
 

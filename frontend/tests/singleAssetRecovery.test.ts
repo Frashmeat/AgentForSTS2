@@ -139,7 +139,7 @@ test("restoreSingleAssetSnapshot rejects invalid payloads safely", () => {
   assert.equal(restoreSingleAssetSnapshot(null), null);
 });
 
-test("restoreSingleAssetSnapshot keeps compatibility with legacy error field names", () => {
+test("restoreSingleAssetSnapshot reads current error field names only", () => {
   const restored = restoreSingleAssetSnapshot({
     version: 1,
     assetType: "relic",
@@ -153,11 +153,11 @@ test("restoreSingleAssetSnapshot keeps compatibility with legacy error field nam
     uploadedImagePreview: null,
     workflowState: {
       stage: "error",
-      errorMsg: "legacy message",
-      errorTrace: "legacy trace",
+      errorMessage: "current message",
+      errorTraceback: "current trace",
     },
   });
 
-  assert.equal(restored?.workflowState.errorMessage, "legacy message");
-  assert.equal(restored?.workflowState.errorTraceback, "legacy trace");
+  assert.equal(restored?.workflowState.errorMessage, "current message");
+  assert.equal(restored?.workflowState.errorTraceback, "current trace");
 });
