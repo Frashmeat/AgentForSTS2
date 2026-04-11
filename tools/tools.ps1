@@ -102,7 +102,6 @@ function Show-Help {
     Write-Host "参数直达："
     Write-Host "  install                安装完整运行依赖"
     Write-Host "  install mod            只安装 Mod 开发依赖"
-    Write-Host "  start full             启动兼容态 full"
     Write-Host "  start workstation      启动 workstation-backend"
     Write-Host "  start web              启动 web-backend"
     Write-Host "  start dev              启动开发模式"
@@ -339,11 +338,8 @@ function Get-MenuGroups {
         [pscustomobject]@{
             Key = "start"
             Label = "启动"
-            Description = "启动 full / workstation / web / dev"
+            Description = "启动 workstation / web / dev"
             Items = @(
-                (New-MenuCommand -Key "start-full" -Label "启动兼容态 full" -Description "通过 full 后端承接前端与接口" -ScriptPath (Join-Path $toolsRoot "start\start.bat") -InvocationName "start full" -Profiles @(
-                    (New-MenuProfile -Key "default" -Label "直接执行" -Description "按默认方式启动 full 运行时")
-                ))
                 (New-MenuCommand -Key "start-workstation" -Label "启动 workstation-backend" -Description "启动本地工作站后端" -ScriptPath (Join-Path $toolsRoot "start\start_workstation.bat") -InvocationName "start workstation" -Profiles @(
                     (New-MenuProfile -Key "default" -Label "直接执行" -Description "按默认方式启动 workstation-backend")
                 ))
@@ -399,11 +395,6 @@ function Get-MenuGroups {
                     (New-MenuProfile -Key "nozip" -Label "打包但不压缩" -Description "保留 release 目录，跳过 zip" -Args @("-NoZip"))
                     (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 package-release.ps1 参数说明" -Args @("-Help"))
                 ))
-                (New-MenuCommand -Key "latest-package-full" -Label "打包 full release" -Description "构建 full release bundle" -ScriptPath (Join-Path $toolsRoot "latest\package-release.ps1") -InvocationName "latest package full" -DefaultArgs @("full") -Profiles @(
-                    (New-MenuProfile -Key "default" -Label "直接打包" -Description "按默认参数打包 full")
-                    (New-MenuProfile -Key "nozip" -Label "打包但不压缩" -Description "保留 release 目录，跳过 zip" -Args @("-NoZip"))
-                    (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 package-release.ps1 参数说明" -Args @("-Help"))
-                ))
                 (New-MenuCommand -Key "latest-package-frontend" -Label "打包 frontend release" -Description "只打前端静态站点 release" -ScriptPath (Join-Path $toolsRoot "latest\package-release.ps1") -InvocationName "latest package frontend" -DefaultArgs @("frontend") -Profiles @(
                     (New-MenuProfile -Key "default" -Label "直接打包" -Description "按默认参数打包 frontend")
                     (New-MenuProfile -Key "nozip" -Label "打包但不压缩" -Description "保留 release 目录，跳过 zip" -Args @("-NoZip"))
@@ -420,10 +411,6 @@ function Get-MenuGroups {
                 ))
                 (New-MenuCommand -Key "latest-deploy-hybrid" -Label "部署 hybrid release" -Description "部署正式推荐的 frontend + workstation 用户侧 bundle" -ScriptPath (Join-Path $toolsRoot "latest\deploy-docker.ps1") -InvocationName "latest deploy hybrid" -DefaultArgs @("hybrid") -Profiles @(
                     (New-MenuProfile -Key "default" -Label "配置 Web API 后部署" -Description "可留空使用本机 web-backend，也可填写远端地址" -PromptHandler "LatestDeployHybrid")
-                    (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 deploy-docker.ps1 参数说明" -Args @("-Help"))
-                ))
-                (New-MenuCommand -Key "latest-deploy-full" -Label "部署 full release" -Description "本机启动 workstation，并用 Docker 部署 web" -ScriptPath (Join-Path $toolsRoot "latest\deploy-docker.ps1") -InvocationName "latest deploy full" -DefaultArgs @("full") -Profiles @(
-                    (New-MenuProfile -Key "default" -Label "直接部署" -Description "按默认参数部署 full mixed 形态")
                     (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 deploy-docker.ps1 参数说明" -Args @("-Help"))
                 ))
                 (New-MenuCommand -Key "latest-deploy-frontend" -Label "部署 frontend release" -Description "在本机启动前端静态站" -ScriptPath (Join-Path $toolsRoot "latest\deploy-docker.ps1") -InvocationName "latest deploy frontend" -DefaultArgs @("frontend") -Profiles @(
@@ -507,7 +494,6 @@ function Invoke-Route {
         }
         "start" {
             switch ($actionName) {
-                "full" { Invoke-TargetScript -Path (Join-Path $toolsRoot "start\start.bat") -Arguments $ResolvedArgs; return }
                 "workstation" { Invoke-TargetScript -Path (Join-Path $toolsRoot "start\start_workstation.bat") -Arguments $ResolvedArgs; return }
                 "web" { Invoke-TargetScript -Path (Join-Path $toolsRoot "start\start_web.bat") -Arguments $ResolvedArgs; return }
                 "dev" { Invoke-TargetScript -Path (Join-Path $toolsRoot "start\start_dev.bat") -Arguments $ResolvedArgs; return }

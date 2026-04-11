@@ -8,7 +8,7 @@
 默认只处理本地服务进程，不额外执行 Docker down。
 
 .PARAMETER Target
-部署目标。可选 full / hybrid / workstation / frontend / web。
+部署目标。可选 hybrid / workstation / frontend / web。
 
 .PARAMETER ReleaseRoot
 release 目录。默认使用 tools/latest/artifacts/agentthespire-<target>-release。
@@ -24,9 +24,9 @@ pwsh -File .\tools\latest\stop-deploy.ps1 workstation -ReleaseRoot .\tools\lates
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Position = 0, HelpMessage = "部署目标。可选 full / hybrid / workstation / frontend / web。")]
+    [Parameter(Position = 0, HelpMessage = "部署目标。可选 hybrid / workstation / frontend / web。")]
     [Alias("t")]
-    [ValidateSet("full", "hybrid", "workstation", "frontend", "web")]
+    [ValidateSet("hybrid", "workstation", "frontend", "web")]
     [string]$Target = "hybrid",
 
     [Parameter(HelpMessage = "release 目录。默认使用 tools/latest/artifacts/agentthespire-<target>-release。")]
