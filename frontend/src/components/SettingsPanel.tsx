@@ -28,6 +28,67 @@ const PROVIDER_MODELS: Record<string, string[]> = {
   wanxiang:    [],
 };
 
+const KNOWLEDGE_UPDATE_STEP_PROGRESS: Array<{ pattern: RegExp; progress: number }> = [
+  { pattern: /初始化更新任务|准备启动知识库更新任务|等待开始/, progress: 8 },
+  { pattern: /读取当前游戏版本/, progress: 18 },
+  { pattern: /反编译游戏源码/, progress: 48 },
+  { pattern: /读取 Baselib latest release/, progress: 62 },
+  { pattern: /下载 Baselib\.dll/, progress: 78 },
+  { pattern: /反编译 Baselib/, progress: 92 },
+  { pattern: /更新完成/, progress: 100 },
+  { pattern: /更新失败/, progress: 100 },
+];
+
+function getKnowledgeUpdateProgress(step: string, busy: boolean) {
+  if (!step.trim()) {
+    return busy ? 8 : 0;
+  }
+
+  for (const item of KNOWLEDGE_UPDATE_STEP_PROGRESS) {
+    if (item.pattern.test(step)) {
+      return item.progress;
+    }
+  }
+
+  return busy ? 24 : 100;
+}
+
+function ProgressBar({
+  label,
+  progress,
+  tone = "amber",
+  indeterminate = false,
+}: {
+  label: string;
+  progress?: number;
+  tone?: "amber" | "sky";
+  indeterminate?: boolean;
+}) {
+  const trackCls = tone === "sky" ? "bg-sky-100" : "bg-amber-100";
+  const fillCls = tone === "sky" ? "bg-sky-500" : "bg-amber-500";
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[11px] font-medium text-slate-600">{label}</p>
+        {!indeterminate && typeof progress === "number" ? (
+          <span className="text-[11px] font-semibold text-slate-500">{Math.round(progress)}%</span>
+        ) : null}
+      </div>
+      <div className={`h-2 overflow-hidden rounded-full ${trackCls}`}>
+        {indeterminate ? (
+          <div className="h-full w-1/3 rounded-full bg-sky-500 animate-[knowledge-progress-indeterminate_1.2s_ease-in-out_infinite]" />
+        ) : (
+          <div
+            className={`h-full rounded-full ${fillCls} transition-[width] duration-300 ease-out`}
+            style={{ width: `${Math.max(0, Math.min(progress ?? 0, 100))}%` }}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SGroup({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
   return (
     <div className="space-y-3">
@@ -66,6 +127,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
   const [pathNotes, setPathNotes] = useState<string[]>([]);
   const [knowledgeStatus, setKnowledgeStatus] = useState<KnowledgeStatus | null>(null);
   const [knowledgeTaskId, setKnowledgeTaskId] = useState("");
+  const [knowledgeChecking, setKnowledgeChecking] = useState(false);
   const [knowledgeStep, setKnowledgeStep] = useState("");
   const [knowledgeNotes, setKnowledgeNotes] = useState<string[]>([]);
   const [knowledgeError, setKnowledgeError] = useState("");
@@ -284,9 +346,16 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
   const models = PROVIDER_MODELS[currentProvider] ?? [];
 
   const missingPaths = cfg && (!cfg.default_project_root || !cfg.sts2_path);
-  const knowledgeBusy = Boolean(knowledgeTaskId);
+  const knowledgeBusy = knowledgeChecking || Boolean(knowledgeTaskId);
+  const knowledgeCheckProgress = knowledgeChecking ? 100 : 0;
+  const knowledgeUpdateProgress = getKnowledgeUpdateProgress(knowledgeStep, Boolean(knowledgeTaskId));
 
   async function handleCheckKnowledge() {
+    if (knowledgeBusy) {
+      return;
+    }
+
+    setKnowledgeChecking(true);
     setKnowledgeError("");
     setKnowledgeStep("检查知识库状态");
     setKnowledgeNotes([]);
@@ -295,12 +364,20 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
       setKnowledgeStatus(status);
       onKnowledgeStatusChange?.(status);
       setKnowledgeNotes(status.warnings ?? []);
+      setKnowledgeStep("");
     } catch (error) {
       setKnowledgeError(resolveErrorMessage(error));
+      setKnowledgeStep("检查失败");
+    } finally {
+      setKnowledgeChecking(false);
     }
   }
 
   async function handleRefreshKnowledge() {
+    if (knowledgeBusy) {
+      return;
+    }
+
     setKnowledgeError("");
     setKnowledgeNotes([]);
     setKnowledgeStep("准备启动知识库更新任务");
@@ -455,6 +532,12 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
                   <p className="text-xs text-slate-500">游戏知识来源：<span className="font-semibold text-slate-700">{knowledgeStatus?.game?.source_mode || "未知"}</span></p>
                   <p className="text-xs text-slate-500">Baselib release：<span className="font-semibold text-slate-700">{knowledgeStatus?.baselib?.latest_release_tag || knowledgeStatus?.baselib?.release_tag || "未知"}</span></p>
                   <p className="text-xs text-slate-500">Baselib 知识来源：<span className="font-semibold text-slate-700">{knowledgeStatus?.baselib?.source_mode || "未知"}</span></p>
+                  {knowledgeChecking ? (
+                    <ProgressBar label="检查进度" tone="sky" indeterminate progress={knowledgeCheckProgress} />
+                  ) : null}
+                  {knowledgeTaskId ? (
+                    <ProgressBar label="更新进度" progress={knowledgeUpdateProgress} />
+                  ) : null}
                   {knowledgeStep ? <p className="text-xs text-amber-700">当前进度：{knowledgeStep}</p> : null}
                   {knowledgeNotes.length > 0 ? (
                     <div className="space-y-0.5">
@@ -471,9 +554,10 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
                     onClick={() => {
                       void handleCheckKnowledge();
                     }}
+                    disabled={knowledgeBusy}
                     className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:border-amber-300 hover:text-amber-700 transition-colors"
                   >
-                    检查更新
+                    {knowledgeChecking ? "检查中…" : "检查更新"}
                   </button>
                   <button
                     type="button"
@@ -647,6 +731,15 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
     <KnowledgeGuideDialog open={knowledgeGuideOpen} status={knowledgeStatus} onClose={() => setKnowledgeGuideOpen(false)} />
   );
 
+  const progressAnimationStyle = (
+    <style>{`
+      @keyframes knowledge-progress-indeterminate {
+        0% { transform: translateX(-120%); }
+        100% { transform: translateX(320%); }
+      }
+    `}</style>
+  );
+
   if (mode === "page") {
     return (
       <>
@@ -654,6 +747,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
           {header}
           {content}
         </section>
+        {progressAnimationStyle}
         {guideDialog}
       </>
     );
@@ -670,6 +764,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
           {content}
         </div>
       </div>
+      {progressAnimationStyle}
       {guideDialog}
     </>
   );

@@ -41,6 +41,12 @@ import { canProceedFromBundleReview, type ReviewStrictness } from "./state.ts";
 // ── 类型 ──────────────────────────────────────────────────────────────────────
 
 type BatchStage = "input" | "planning" | "review_items" | "review_bundles" | "executing" | "done" | "error";
+type ReviewFeedbackTone = "info" | "success" | "warning" | "error";
+
+interface ReviewFeedback {
+  tone: ReviewFeedbackTone;
+  message: string;
+}
 
 type ItemStatus =
   | "pending"
@@ -210,6 +216,46 @@ function canProceedFromEditedItemReview(
   });
 }
 
+function summarizePlanReview(
+  review: PlanReviewPayload,
+  items: PlanItem[],
+): { feedback: ReviewFeedback; focusItemId: string | null } {
+  const totalItems = review.validation.items.length;
+  const clearItems = review.validation.items.filter((item) => item.status === "clear").length;
+  const firstBlockingItem = review.validation.items.find((item) => item.status !== "clear") ?? null;
+
+  if (firstBlockingItem) {
+    const itemName = items.find((item) => item.id === firstBlockingItem.item_id)?.name ?? firstBlockingItem.item_id;
+    return {
+      feedback: {
+        tone: "warning",
+        message: `复核完成：${clearItems}/${totalItems} 项可继续。已定位到 ${itemName}，请继续补充说明后再重新检查。`,
+      },
+      focusItemId: firstBlockingItem.item_id,
+    };
+  }
+
+  const totalBundles = review.execution_plan.execution_bundles.length;
+  const clearBundles = review.execution_plan.execution_bundles.filter((bundle) => bundle.status === "clear").length;
+  if (clearBundles < totalBundles) {
+    return {
+      feedback: {
+        tone: "warning",
+        message: `Item 复核已通过，但执行策略仍有 ${totalBundles - clearBundles} 个 bundle 需要确认。`,
+      },
+      focusItemId: null,
+    };
+  }
+
+  return {
+    feedback: {
+      tone: "success",
+      message: "复核完成：当前计划已通过，可以进入下一步。",
+    },
+    focusItemId: null,
+  };
+}
+
 // ── 主组件 ────────────────────────────────────────────────────────────────────
 
 function BatchModePage({
@@ -255,6 +301,8 @@ function BatchModePage({
   });
   const [reviewBusy, setReviewBusy] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
+  const [reviewFeedback, setReviewFeedback] = useState<ReviewFeedback | null>(null);
+  const [reviewFocusItemId, setReviewFocusItemId] = useState<string | null>(null);
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
   const [itemStates, setItemStates] = useState<Record<string, ItemState>>({});
   const itemStatesRef = useRef<Record<string, ItemState>>({});
@@ -326,6 +374,8 @@ function BatchModePage({
     setBatchLog([]);
     setGlobalError(null);
     setReviewError(null);
+    setReviewFeedback(null);
+    setReviewFocusItemId(null);
     setPlanReview(null);
     itemStatesRef.current = {};
     setItemStates({});
@@ -360,6 +410,8 @@ function BatchModePage({
       setPlanReview(d.review ?? null);
       setReviewStrictness((current) => normalizeReviewStrictness(d.review?.strictness ?? current));
       setReviewError(null);
+      setReviewFeedback(d.review ? summarizePlanReview(d.review, d.plan.items).feedback : null);
+      setReviewFocusItemId(d.review ? summarizePlanReview(d.review, d.plan.items).focusItemId : null);
       setStage("review_items");
       try {
         writeJsonStorage(PLAN_STORAGE_KEY, d.plan);
@@ -502,6 +554,7 @@ function BatchModePage({
     }
     setReviewBusy(true);
     setReviewError(null);
+    setReviewFeedback({ tone: "info", message: "正在重新检查当前计划..." });
     try {
       const review = await reviewModPlan({
         plan: { ...plan, items },
@@ -509,11 +562,15 @@ function BatchModePage({
       });
       setPlanReview(review);
       setReviewStrictness(normalizeReviewStrictness(review.strictness));
+      const summary = summarizePlanReview(review, items);
+      setReviewFeedback(summary.feedback);
+      setReviewFocusItemId(summary.focusItemId);
       writeJsonStorage(PLAN_REVIEW_STORAGE_KEY, review);
       writeTextStorage(PLAN_REVIEW_STRICTNESS_STORAGE_KEY, normalizeReviewStrictness(review.strictness));
       return review;
     } catch (error) {
       setReviewError(resolveErrorMessage(error));
+      setReviewFeedback(null);
       return null;
     } finally {
       setReviewBusy(false);
@@ -526,6 +583,7 @@ function BatchModePage({
       return;
     }
     if (canProceedFromEditedItemReview(review, editedItems)) {
+      setReviewFeedback({ tone: "success", message: "Item 复核已通过，进入执行策略确认。" });
       setStage("review_bundles");
     }
   }
@@ -536,13 +594,16 @@ function BatchModePage({
       return;
     }
     if (!canProceedFromEditedItemReview(review, editedItems)) {
+      setReviewFeedback({ tone: "warning", message: "仍有 item 说明未补齐，已返回 Item 复核阶段。" });
       setStage("review_items");
       return;
     }
     if (!canProceedFromBundleReview(review)) {
+      setReviewFeedback({ tone: "warning", message: "执行策略仍需确认，请先处理 bundle 风险。" });
       setStage("review_bundles");
       return;
     }
+    setReviewFeedback({ tone: "success", message: "执行策略复核通过，开始进入执行阶段。" });
     requestExecutionStart();
   }
 
@@ -643,6 +704,8 @@ function BatchModePage({
     setEditedItems([]);
     setPlanReview(null);
     setReviewError(null);
+    setReviewFeedback(null);
+    setReviewFocusItemId(null);
     itemStatesRef.current = {};
     setItemStates({});
     setBatchLog([]);
@@ -747,6 +810,8 @@ function BatchModePage({
           reviewStrictness={reviewStrictness}
           reviewBusy={reviewBusy}
           reviewError={reviewError}
+          reviewFeedback={reviewFeedback}
+          focusItemId={reviewFocusItemId}
           editedItems={editedItems}
           setEditedItems={updateEditedItems}
           onRefreshReview={() => { void refreshPlanReview(); }}
@@ -764,6 +829,7 @@ function BatchModePage({
           reviewStrictness={reviewStrictness}
           reviewBusy={reviewBusy}
           reviewError={reviewError}
+          reviewFeedback={reviewFeedback}
           onBack={() => setStage("review_items")}
           onRefreshReview={() => { void refreshPlanReview(); }}
           onStrictnessChange={handleReviewStrictnessChange}
@@ -922,12 +988,37 @@ function ReviewNotice({ message }: { message: string | null }) {
   );
 }
 
+function ReviewFeedbackBanner({ feedback }: { feedback: ReviewFeedback | null }) {
+  if (!feedback) {
+    return null;
+  }
+
+  const toneCls = feedback.tone === "success"
+    ? "border-green-200 bg-green-50 text-green-800"
+    : feedback.tone === "warning"
+      ? "border-amber-200 bg-amber-50 text-amber-800"
+      : feedback.tone === "error"
+        ? "border-red-200 bg-red-50 text-red-800"
+        : "border-violet-200 bg-violet-50 text-violet-800";
+
+  return (
+    <div className={cn("rounded-xl border px-4 py-3 text-sm", toneCls)}>
+      <div className="flex items-start gap-2">
+        {feedback.tone === "info" ? <Loader2 size={16} className="mt-0.5 shrink-0 animate-spin" /> : null}
+        <span>{feedback.message}</span>
+      </div>
+    </div>
+  );
+}
+
 function ReviewPlan({
   plan,
   review,
   reviewStrictness,
   reviewBusy,
   reviewError,
+  reviewFeedback,
+  focusItemId,
   editedItems,
   setEditedItems,
   onRefreshReview,
@@ -940,6 +1031,8 @@ function ReviewPlan({
   reviewStrictness: ReviewStrictness;
   reviewBusy: boolean;
   reviewError: string | null;
+  reviewFeedback: ReviewFeedback | null;
+  focusItemId: string | null;
   editedItems: PlanItem[];
   setEditedItems: (items: PlanItem[]) => void;
   onRefreshReview: () => void;
@@ -952,6 +1045,12 @@ function ReviewPlan({
   const validationById = new Map((review?.validation.items ?? []).map((item) => [item.item_id, item]));
   const clearCount = review?.validation.items.filter((item) => item.status === "clear").length ?? 0;
   const canProceed = canProceedFromEditedItemReview(review, editedItems);
+
+  useEffect(() => {
+    if (focusItemId) {
+      setExpandedId(focusItemId);
+    }
+  }, [focusItemId]);
 
   function updateItem(id: string, patch: Partial<PlanItem>) {
     setEditedItems(editedItems.map(it => it.id === id ? { ...it, ...patch } : it));
@@ -1011,6 +1110,7 @@ function ReviewPlan({
           </div>
         </div>
 
+        <ReviewFeedbackBanner feedback={reviewFeedback} />
         <ReviewNotice message={reviewError} />
 
         <div className="space-y-2">
@@ -1289,6 +1389,7 @@ function ReviewBundles({
   reviewStrictness,
   reviewBusy,
   reviewError,
+  reviewFeedback,
   onBack,
   onRefreshReview,
   onStrictnessChange,
@@ -1300,6 +1401,7 @@ function ReviewBundles({
   reviewStrictness: ReviewStrictness;
   reviewBusy: boolean;
   reviewError: string | null;
+  reviewFeedback: ReviewFeedback | null;
   onBack: () => void;
   onRefreshReview: () => void;
   onStrictnessChange: (value: ReviewStrictness) => void;
@@ -1331,6 +1433,7 @@ function ReviewBundles({
           onChange={onStrictnessChange}
         />
 
+        <ReviewFeedbackBanner feedback={reviewFeedback} />
         <ReviewNotice message={reviewError} />
 
         <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
