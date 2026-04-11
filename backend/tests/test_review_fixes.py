@@ -2,17 +2,26 @@
 import asyncio
 import sys
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+if "litellm" not in sys.modules:
+    litellm_stub = ModuleType("litellm")
+
+    async def _unexpected_acompletion(*_args, **_kwargs):
+        raise AssertionError("litellm should not be called in review_fixes tests")
+
+    litellm_stub.acompletion = _unexpected_acompletion
+    sys.modules["litellm"] = litellm_stub
+
 from routers import batch_workflow
 from app.modules.codegen import api as codegen_api
 
 
-@pytest.mark.asyncio
-async def test_create_asset_prompt_uses_mod_localization_root(tmp_path, monkeypatch):
+def test_create_asset_prompt_uses_mod_localization_root(tmp_path, monkeypatch):
     captured: dict[str, str] = {}
 
     async def fake_run(prompt: str, project_root: Path, stream_callback=None) -> str:
@@ -24,12 +33,14 @@ async def test_create_asset_prompt_uses_mod_localization_root(tmp_path, monkeypa
     project_root = tmp_path / "SampleMod"
     project_root.mkdir()
 
-    await codegen_api.create_asset(
-        design_description="测试描述",
-        asset_type="card",
-        asset_name="DarkBlade",
-        image_paths=[],
-        project_root=project_root,
+    asyncio.run(
+        codegen_api.create_asset(
+            design_description="测试描述",
+            asset_type="card",
+            asset_name="DarkBlade",
+            image_paths=[],
+            project_root=project_root,
+        )
     )
 
     prompt = captured["prompt"]
