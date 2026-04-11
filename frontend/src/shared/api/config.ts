@@ -1,16 +1,9 @@
 import { requestJson } from "./http.ts";
 
-export interface WorkflowMigrationFlags {
-  use_modular_single_workflow: boolean;
-  use_modular_batch_workflow: boolean;
-  use_unified_ws_contract: boolean;
-}
-
 export interface AppConfig {
   default_project_root?: string;
   sts2_path?: string;
   godot_exe_path?: string;
-  migration?: Partial<WorkflowMigrationFlags>;
   [key: string]: unknown;
 }
 
@@ -51,19 +44,6 @@ export interface PickPathRequest {
 
 export interface PickPathResult {
   path?: string | null;
-}
-
-const DEFAULT_MIGRATION_FLAGS: WorkflowMigrationFlags = {
-  use_modular_single_workflow: false,
-  use_modular_batch_workflow: false,
-  use_unified_ws_contract: false,
-};
-
-export function resolveMigrationFlags(config?: Pick<AppConfig, "migration"> | null): WorkflowMigrationFlags {
-  return {
-    ...DEFAULT_MIGRATION_FLAGS,
-    ...(config?.migration ?? {}),
-  };
 }
 
 export async function loadAppConfig(): Promise<AppConfig> {

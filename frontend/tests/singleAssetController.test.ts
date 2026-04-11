@@ -96,11 +96,6 @@ test("single asset controller starts workflow and sends start payload", async ()
     uploadedImageB64: "",
     uploadedImageName: "",
     autoMode: false,
-    migrationFlags: {
-      use_modular_single_workflow: false,
-      use_modular_batch_workflow: false,
-      use_unified_ws_contract: true,
-    },
   });
 
   assert.deepEqual(runtime.events.slice(0, 6), [
@@ -139,11 +134,6 @@ test("single asset controller auto mode confirms prompt and selects first image"
     uploadedImageB64: "",
     uploadedImageName: "",
     autoMode: true,
-    migrationFlags: {
-      use_modular_single_workflow: false,
-      use_modular_batch_workflow: false,
-      use_unified_ws_contract: true,
-    },
   });
 
   socket.emit("prompt_preview", {
@@ -181,11 +171,6 @@ test("single asset controller sends upload payload and moves to agent stage imme
     uploadedImageB64: "upload-b64",
     uploadedImageName: "test.png",
     autoMode: false,
-    migrationFlags: {
-      use_modular_single_workflow: false,
-      use_modular_batch_workflow: false,
-      use_unified_ws_contract: true,
-    },
   });
 
   assert.match(runtime.events.join("\n"), /dispatch:type=stage_changed,stage=agent_running/);
@@ -218,11 +203,6 @@ test("single asset controller forwards commands through active socket and resets
     uploadedImageB64: "",
     uploadedImageName: "",
     autoMode: false,
-    migrationFlags: {
-      use_modular_single_workflow: false,
-      use_modular_batch_workflow: false,
-      use_unified_ws_contract: true,
-    },
   });
 
   controller.confirmPrompt("prompt", "negative");

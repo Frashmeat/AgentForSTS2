@@ -1,4 +1,3 @@
-import type { WorkflowMigrationFlags } from "../shared/api/index.ts";
 import { WorkflowSocket, type WsEvent } from "./ws.ts";
 
 export type SingleAssetSocket = {
@@ -13,9 +12,6 @@ export type SingleAssetSocket = {
 
 export class UnifiedWorkflowSocket extends WorkflowSocket {}
 
-export function createSingleAssetSocket(flags: WorkflowMigrationFlags): SingleAssetSocket {
-  if (flags.use_unified_ws_contract) {
-    return new UnifiedWorkflowSocket();
-  }
-  return new WorkflowSocket();
+export function createSingleAssetSocket(): SingleAssetSocket {
+  return new UnifiedWorkflowSocket();
 }

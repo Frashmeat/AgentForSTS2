@@ -48,22 +48,14 @@ test.beforeEach(() => {
   });
 });
 
-test("createSingleAssetSocket uses create websocket endpoint under unified flag", () => {
-  createSingleAssetSocket({
-    use_modular_single_workflow: false,
-    use_modular_batch_workflow: false,
-    use_unified_ws_contract: true,
-  });
+test("createSingleAssetSocket uses create websocket endpoint", () => {
+  createSingleAssetSocket();
 
   assert.equal(MockWebSocket.instances[0]?.url, "ws://localhost:7860/api/ws/create");
 });
 
 test("createSingleAssetSocket reports unexpected close as error event", async () => {
-  const socket = createSingleAssetSocket({
-    use_modular_single_workflow: false,
-    use_modular_batch_workflow: false,
-    use_unified_ws_contract: true,
-  });
+  const socket = createSingleAssetSocket();
   let message = "";
 
   socket.on("error", (data) => {

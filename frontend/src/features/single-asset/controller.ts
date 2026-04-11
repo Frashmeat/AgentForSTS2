@@ -2,7 +2,6 @@ import {
   createSingleAssetSocket,
   type SingleAssetSocket,
 } from "../../lib/single_asset_ws.ts";
-import type { WorkflowMigrationFlags } from "../../shared/api/index.ts";
 import { resolveErrorMessage, resolveWorkflowErrorMessage } from "../../shared/error.ts";
 import type { SingleAssetWorkflowAction } from "./state.ts";
 
@@ -17,7 +16,6 @@ export interface StartSingleAssetWorkflowOptions {
   uploadedImageB64: string;
   uploadedImageName: string;
   autoMode: boolean;
-  migrationFlags: WorkflowMigrationFlags;
 }
 
 export interface SingleAssetWorkflowRuntime {
@@ -32,7 +30,7 @@ export interface SingleAssetWorkflowRuntime {
 }
 
 interface SingleAssetWorkflowDeps {
-  createSocket(flags: WorkflowMigrationFlags): SingleAssetWorkflowSocketLike;
+  createSocket(): SingleAssetWorkflowSocketLike;
 }
 
 export function createSingleAssetWorkflowController(
@@ -99,7 +97,6 @@ export function createSingleAssetWorkflowController(
       uploadedImageB64,
       uploadedImageName,
       autoMode,
-      migrationFlags,
     } = options;
 
     const normalizedProjectRoot = projectRoot.trim();
@@ -115,7 +112,7 @@ export function createSingleAssetWorkflowController(
     runtime.setSocket(null);
     runtime.dispatchWorkflow({ type: "workflow_started", imageMode });
 
-    const socket = createSocket(migrationFlags);
+    const socket = createSocket();
     runtime.setSocket(socket);
     socket.on("stage_update", (message) => {
       runtime.dispatchWorkflow({
