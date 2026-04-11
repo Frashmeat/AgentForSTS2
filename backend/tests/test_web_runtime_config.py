@@ -19,7 +19,10 @@ def test_settings_expose_web_runtime_defaults_and_validation():
     assert runtime["requires_database"] is True
     assert "http://localhost:7870" in runtime["cors_origins"]
     assert "http://127.0.0.1:8080" in runtime["cors_origins"]
-    assert settings.validate_for_role("web") == ["database.url is required for web runtime"]
+    assert settings.validate_for_role("web") == [
+        "database.url is required for web runtime",
+        "auth.session_secret is required for web runtime",
+    ]
 
 
 def test_settings_expose_workstation_runtime_origins_for_independent_frontend():
@@ -32,6 +35,21 @@ def test_settings_expose_workstation_runtime_origins_for_independent_frontend():
     assert runtime["requires_database"] is False
     assert "http://localhost:8080" in runtime["cors_origins"]
     assert "http://127.0.0.1:8080" in runtime["cors_origins"]
+
+
+def test_web_runtime_validation_passes_when_database_and_session_secret_are_configured():
+    settings = Settings.from_dict(
+        {
+            "database": {
+                "url": "sqlite+pysqlite:///:memory:",
+            },
+            "auth": {
+                "session_secret": "test-session-secret",
+            },
+        }
+    )
+
+    assert settings.validate_for_role("web") == []
 
 
 def test_web_runtime_container_skips_workstation_bridge_singletons():

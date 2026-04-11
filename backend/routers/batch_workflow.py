@@ -59,18 +59,6 @@ router = APIRouter()
 _TEXT_LOADER = PromptLoader()
 
 TRANSPARENT_TYPES = {"relic", "power"}
-
-
-def _batch_router_service(ws: WebSocket):
-    container = getattr(getattr(ws.app.state, "container", None), "resolve_optional_singleton", None)
-    if container is None:
-        return None
-    flags = getattr(ws.app.state.container, "platform_migration_flags", None)
-    if flags is None or not getattr(flags, "platform_runner_enabled", False):
-        return None
-    return ws.app.state.container.resolve_optional_singleton("platform.batch_workflow_router_compat_service")
-
-
 def _needs_transparent(asset_type: str) -> bool:
     return asset_type in TRANSPARENT_TYPES
 
@@ -230,10 +218,6 @@ def _legacy_api_plan(body: dict):
 
 @router.websocket("/ws/batch")
 async def ws_batch(ws: WebSocket):
-    service = _batch_router_service(ws)
-    if service is not None:
-        await service.handle_ws_batch(ws)
-        return
     await _handle_legacy_ws_batch(ws)
 
 

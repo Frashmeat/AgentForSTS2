@@ -64,7 +64,9 @@ def _session_cookie_name(request: Request) -> str:
 
 def _session_secret(request: Request) -> str:
     configured = str(_settings(request).auth.get("session_secret", "")).strip()
-    return configured or "agentthespire-dev-session-secret"
+    if not configured:
+        raise HTTPException(status_code=500, detail="auth session secret is not configured")
+    return configured
 
 
 def _session_cookie_secure(request: Request) -> bool:

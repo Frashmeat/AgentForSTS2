@@ -50,22 +50,6 @@ DEFAULT_AUTH_CONFIG = {
 }
 
 DEFAULT_RUNTIME_CONFIG = {
-    "full": {
-        "host": "127.0.0.1",
-        "port": 7860,
-        "cors_origins": [
-            "http://localhost:5173",
-            "http://127.0.0.1:5173",
-            "http://localhost:7860",
-            "http://127.0.0.1:7860",
-            "http://localhost:7870",
-            "http://127.0.0.1:7870",
-            "http://localhost:8080",
-            "http://127.0.0.1:8080",
-        ],
-        "mount_frontend": True,
-        "requires_database": False,
-    },
     "workstation": {
         "host": "127.0.0.1",
         "port": 7860,
@@ -99,16 +83,7 @@ DEFAULT_RUNTIME_CONFIG = {
 DEFAULT_CONFIG = {
     "llm": DEFAULT_LLM_CONFIG,
     "auth": DEFAULT_AUTH_CONFIG,
-    "migration": {
-        "use_modular_single_workflow": False,
-        "use_modular_batch_workflow": False,
-        "use_unified_ws_contract": False,
-        "platform_jobs_api_enabled": False,
-        "platform_service_split_enabled": False,
-        "platform_runner_enabled": False,
-        "platform_events_v1_enabled": False,
-        "platform_step_protocol_enabled": False,
-    },
+    "migration": {},
     "database": {
         "url": "",
         "echo": False,
@@ -178,6 +153,11 @@ def normalize_llm_config(llm_cfg: Optional[dict[str, Any]]) -> dict[str, Any]:
 def normalize_config(config: Optional[dict[str, Any]]) -> dict[str, Any]:
     cfg = _deep_merge(DEFAULT_CONFIG, config or {})
     cfg["llm"] = normalize_llm_config(cfg.get("llm"))
+    cfg["migration"] = {}
+    cfg["runtime"] = {
+        role: _deep_merge(DEFAULT_RUNTIME_CONFIG[role], cfg.get("runtime", {}).get(role, {}))
+        for role in DEFAULT_RUNTIME_CONFIG
+    }
     return cfg
 
 
@@ -287,6 +267,11 @@ class Settings:
         session_cookie_name = str(self.auth.get("session_cookie_name", "")).strip()
         if not session_cookie_name:
             errors.append("auth.session_cookie_name is required")
+
+        if role == "web":
+            session_secret = str(self.auth.get("session_secret", "")).strip()
+            if not session_secret:
+                errors.append("auth.session_secret is required for web runtime")
 
         return errors
 

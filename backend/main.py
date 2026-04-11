@@ -1,7 +1,7 @@
 """AgentTheSpire Backend — FastAPI 主入口"""
 from app_factory import create_app
 
-app = create_app("full")
+app = create_app("workstation")
 
 
 if __name__ == "__main__":

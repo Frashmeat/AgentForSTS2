@@ -4,26 +4,17 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from app.composition.container import ApplicationContainer
-from app.shared.infra.feature_flags import PlatformMigrationFlags, WorkflowMigrationFlags
 
 
-def test_container_bootstraps_platform_placeholders_and_flags():
-    container = ApplicationContainer.from_config(
-        {
-            "migration": {
-                "platform_jobs_api_enabled": True,
-                "platform_events_v1_enabled": True,
-            }
-        }
-    )
+def test_container_bootstraps_platform_placeholders_without_migration_flags():
+    container = ApplicationContainer.from_config(None, runtime_role="workstation")
 
     assert container.has_singleton("settings") is True
     assert container.has_singleton("platform.db_session_factory") is True
     assert container.resolve_optional_singleton("platform.db_session_factory") is None
-    assert isinstance(container.workflow_migration_flags, WorkflowMigrationFlags)
-    assert isinstance(container.platform_migration_flags, PlatformMigrationFlags)
-    assert container.platform_migration_flags.platform_jobs_api_enabled is True
-    assert container.platform_migration_flags.platform_events_v1_enabled is True
+    assert container.resolve_singleton("runtime_role") == "workstation"
+    assert container.has_singleton("platform.workflow_router_compat_service_factory") is False
+    assert container.has_singleton("platform.batch_workflow_router_compat_service_factory") is False
 
 
 def test_container_can_override_platform_placeholder_singletons():

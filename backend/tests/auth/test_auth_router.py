@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 
 from app.composition.container import ApplicationContainer
 from app.modules.auth.infra.persistence import models as _auth_models  # noqa: F401
+from app.modules.auth.infra.persistence.repositories import EmailVerificationRepositorySqlAlchemy
 from app.shared.infra.db.base import Base
 from routers.auth_router import router
 
@@ -27,7 +28,10 @@ def client(tmp_path):
         {
             "database": {
                 "url": f"sqlite+pysqlite:///{db_path.as_posix()}",
-            }
+            },
+            "auth": {
+                "session_secret": "test-session-secret",
+            },
         },
         runtime_role="web",
     )
@@ -50,6 +54,9 @@ def _build_client(tmp_path, config_override: dict | None = None):
             "database": {
                 "url": f"sqlite+pysqlite:///{db_path.as_posix()}",
             },
+            "auth": {
+                "session_secret": "test-session-secret",
+            },
             **(config_override or {}),
         },
         runtime_role="web",
@@ -62,6 +69,25 @@ def _build_client(tmp_path, config_override: dict | None = None):
     app.state.container = container
     app.include_router(router, prefix="/api")
     return TestClient(app)
+
+
+def _latest_ticket_code(client: TestClient, purpose: str) -> str:
+    container = client.app.state.container
+    session = container.resolve_singleton("auth.db_session_factory")()
+    try:
+        record = (
+            session.query(_auth_models.EmailVerificationRecord)
+            .filter(_auth_models.EmailVerificationRecord.purpose == purpose)
+            .order_by(_auth_models.EmailVerificationRecord.id.desc())
+            .first()
+        )
+        assert record is not None
+        repository = EmailVerificationRepositorySqlAlchemy(session)
+        ticket = repository.get_by_code(record.code, purpose)
+        assert ticket is not None
+        return ticket.code
+    finally:
+        session.close()
 
 
 def test_auth_router_register_login_me_verify_and_logout(client: TestClient):
@@ -112,7 +138,8 @@ def test_auth_router_supports_password_reset_round_trip(client: TestClient):
 
     forgot = client.post("/api/auth/forgot-password", json={"login": "luna@example.com"})
     assert forgot.status_code == 200
-    reset_code = forgot.json()["reset_code"]
+    assert forgot.json() == {"ok": True}
+    reset_code = _latest_ticket_code(client, "reset_password")
 
     reset = client.post(
         "/api/auth/reset-password",
@@ -182,7 +209,8 @@ def test_auth_router_rejects_reused_password_reset_code(client: TestClient):
 
     forgot = client.post("/api/auth/forgot-password", json={"login": "luna@example.com"})
     assert forgot.status_code == 200
-    reset_code = forgot.json()["reset_code"]
+    assert forgot.json() == {"ok": True}
+    reset_code = _latest_ticket_code(client, "reset_password")
 
     first_reset = client.post(
         "/api/auth/reset-password",
@@ -208,6 +236,7 @@ def test_auth_router_uses_configured_cookie_attributes(tmp_path):
         tmp_path,
         {
             "auth": {
+                "session_secret": "test-session-secret",
                 "session_cookie_secure": True,
                 "session_cookie_samesite": "none",
                 "session_cookie_domain": ".example.com",

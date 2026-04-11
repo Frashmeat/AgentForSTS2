@@ -27,16 +27,6 @@ _TEXT_LOADER = PromptLoader()
 _SKIP_DIRS = {"obj", "ref", ".godot"}
 
 
-def _build_deploy_facade(ws: WebSocket):
-    container = getattr(getattr(ws.app.state, "container", None), "resolve_optional_singleton", None)
-    if container is None:
-        return None
-    flags = getattr(ws.app.state.container, "platform_migration_flags", None)
-    if flags is None or not getattr(flags, "platform_service_split_enabled", False):
-        return None
-    return ws.app.state.container.resolve_optional_singleton("platform.build_deploy_facade_service")
-
-
 def _find_output_files(project_root: Path) -> list[Path]:
     """在 bin/ 下找最新的 .dll 和 .pck（跳过 obj/ref 中间产物）。"""
     results: dict[str, Path] = {}
@@ -55,10 +45,6 @@ def _find_output_files(project_root: Path) -> list[Path]:
 
 @router.websocket("/ws/build-deploy")
 async def ws_build_deploy(ws: WebSocket):
-    facade = _build_deploy_facade(ws)
-    if facade is not None:
-        await facade.handle_ws_build_deploy(ws)
-        return
     """
     WebSocket：Code Agent 构建 mod，成功后复制产物到 STS2 Mods 文件夹。
 

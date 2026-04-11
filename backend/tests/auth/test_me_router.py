@@ -39,7 +39,10 @@ def client(tmp_path):
         {
             "database": {
                 "url": f"sqlite+pysqlite:///{db_path.as_posix()}",
-            }
+            },
+            "auth": {
+                "session_secret": "test-session-secret",
+            },
         },
         runtime_role="web",
     )
@@ -206,6 +209,7 @@ def test_me_router_can_create_and_start_current_user_job(client: TestClient):
         },
     )
     assert registered.status_code == 200
+    verification_code = registered.json()["verification_code"]
 
     login = client.post(
         "/api/auth/login",
@@ -215,6 +219,9 @@ def test_me_router_can_create_and_start_current_user_job(client: TestClient):
         },
     )
     assert login.status_code == 200
+
+    verified = client.post("/api/auth/verify-email", json={"code": verification_code})
+    assert verified.status_code == 200
 
     created = client.post(
         "/api/me/jobs",
@@ -244,3 +251,43 @@ def test_me_router_can_create_and_start_current_user_job(client: TestClient):
     assert started.status_code == 200
     assert started.json()["id"] == job_id
     assert started.json()["status"] == "queued"
+
+
+def test_me_router_rejects_platform_job_actions_for_unverified_email(client: TestClient):
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "username": "luna",
+            "email": "luna@example.com",
+            "password": "secret-123",
+        },
+    )
+    assert registered.status_code == 200
+
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    created = client.post(
+        "/api/me/jobs",
+        json={
+            "job_type": "single_generate",
+            "workflow_version": "2026.04.04",
+            "input_summary": "Dark Relic",
+            "created_from": "single_asset",
+            "items": [
+                {
+                    "item_type": "relic",
+                    "input_summary": "Dark Relic",
+                    "input_payload": {"asset_name": "DarkRelic"},
+                }
+            ],
+        },
+    )
+    assert created.status_code == 403
+    assert created.json()["detail"] == "email verification required"

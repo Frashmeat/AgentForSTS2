@@ -43,20 +43,6 @@ AssetType = Literal["card", "card_fullscreen", "relic", "power", "character"]
 # 透明背景资产类型
 TRANSPARENT_TYPES = {"relic", "power"}
 TRANSPARENT_CHARACTER_VARIANTS = {"character_icon", "map_marker"}
-
-
-def _workflow_router_service(ws: WebSocket):
-    app = getattr(ws, "app", None)
-    state = getattr(app, "state", None)
-    container = getattr(getattr(state, "container", None), "resolve_optional_singleton", None)
-    if container is None:
-        return None
-    flags = getattr(state.container, "platform_migration_flags", None)
-    if flags is None or not getattr(flags, "platform_runner_enabled", False):
-        return None
-    return state.container.resolve_optional_singleton("platform.workflow_router_compat_service")
-
-
 def _needs_transparent(asset_type: AssetType) -> bool:
     return asset_type in TRANSPARENT_TYPES
 
@@ -177,10 +163,6 @@ async def _plan_approval_requests(description: str, llm_cfg: dict, project_root:
 
 @router.websocket("/ws/create")
 async def ws_create(ws: WebSocket):
-    service = _workflow_router_service(ws)
-    if service is not None:
-        await service.handle_ws_create(ws)
-        return
     await _handle_legacy_ws_create(ws)
 
 
