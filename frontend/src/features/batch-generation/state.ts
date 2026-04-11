@@ -58,6 +58,7 @@ export interface BatchRuntimeState {
   approvalBusyActionId: string | null;
   planReview: PlanReviewPayload | null;
   reviewStrictness: ReviewStrictness;
+  bundleDecisions: BundleDecisionRecord;
 }
 
 export type BatchRuntimeAction =
@@ -122,6 +123,7 @@ export function createInitialBatchRuntimeState(): BatchRuntimeState {
     approvalBusyActionId: null,
     planReview: null,
     reviewStrictness: "balanced",
+    bundleDecisions: {},
   };
 }
 

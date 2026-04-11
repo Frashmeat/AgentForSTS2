@@ -7,9 +7,11 @@ import type {
   PlanReviewPayload,
 } from "../../shared/types/workflow.ts";
 import {
+  reconcileBundleDecisionRecord,
   createDefaultBatchItemState,
   createInitialBatchRuntimeState,
   updateBatchItemStateRecord,
+  type BundleDecisionRecord,
   type BatchItemState,
   type BatchItemStatus,
    type BatchRuntimeState,
@@ -69,6 +71,7 @@ interface BatchRuntimeSnapshot {
   itemStates: Record<string, BatchItemSnapshot>;
   planReview?: PlanReviewPayload | null;
   reviewStrictness?: ReviewStrictness;
+  bundleDecisions?: BundleDecisionRecord;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -322,6 +325,7 @@ export function serializeBatchRuntimeSnapshot(state: BatchRuntimeState): BatchRu
     batchResult: state.batchResult,
     planReview: state.planReview,
     reviewStrictness: state.reviewStrictness,
+    bundleDecisions: state.bundleDecisions,
     itemStates: Object.fromEntries(
       Object.entries(state.itemStates).map(([itemId, itemState]) => [
         itemId,
@@ -349,6 +353,17 @@ export function restoreBatchRuntimeSnapshot(snapshot: unknown): BatchRuntimeStat
     return null;
   }
 
+  const normalizedReview = normalizePlanReviewPayload(snapshot.planReview);
+  const restoredDecisions: BundleDecisionRecord = isRecord(snapshot.bundleDecisions)
+    ? Object.fromEntries(
+        Object.entries(snapshot.bundleDecisions)
+          .filter((entry): entry is [string, string] =>
+            typeof entry[0] === "string"
+              && (entry[1] === "unresolved" || entry[1] === "accepted" || entry[1] === "split_requested" || entry[1] === "needs_item_revision"),
+          ),
+      ) as BundleDecisionRecord
+    : {};
+
   const baseState = createInitialBatchRuntimeState();
   return {
     ...baseState,
@@ -357,8 +372,11 @@ export function restoreBatchRuntimeSnapshot(snapshot: unknown): BatchRuntimeStat
     currentBatchStage: asNullableString(snapshot.currentBatchStage),
     batchStageHistory: asStringArray(snapshot.batchStageHistory),
     batchResult: normalizeBatchResult(snapshot.batchResult),
-    planReview: normalizePlanReviewPayload(snapshot.planReview),
+    planReview: normalizedReview,
     reviewStrictness: asReviewStrictness(snapshot.reviewStrictness),
+    bundleDecisions: normalizedReview
+      ? reconcileBundleDecisionRecord(normalizedReview, restoredDecisions)
+      : restoredDecisions,
     itemStates: Object.fromEntries(
       Object.entries(snapshot.itemStates).map(([itemId, itemState]) => [
         itemId,

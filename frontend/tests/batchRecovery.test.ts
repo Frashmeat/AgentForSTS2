@@ -55,6 +55,7 @@ test("serialize and restore batch snapshot preserves recoverable runtime state",
     batchStageHistory: ["准备", "正在执行"],
     batchResult: { success: 1, error: 0 },
     approvalBusyActionId: "req-1",
+    bundleDecisions: { "bundle:item-1": "accepted" },
     itemStates: {
       "item-1": {
         ...createDefaultBatchItemState(),
@@ -79,6 +80,7 @@ test("serialize and restore batch snapshot preserves recoverable runtime state",
   assert.equal("approvalBusyActionId" in snapshot, false);
   assert.equal(restored?.stage, "executing");
   assert.equal(restored?.activeItemId, "item-1");
+  assert.equal(restored?.bundleDecisions["bundle:item-1"], "accepted");
   assert.equal(restored?.itemStates["item-1"].approvalSummary, "需要审批");
   assert.equal(restored?.itemStates["item-1"].approvalRequests[0].action_id, "req-1");
 });

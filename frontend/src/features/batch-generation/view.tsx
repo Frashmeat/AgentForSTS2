@@ -138,6 +138,7 @@ const PLAN_STORAGE_KEY = "ats_last_plan";
 const PLAN_ITEMS_STORAGE_KEY = "ats_last_plan_items";
 const PLAN_REVIEW_STORAGE_KEY = "ats_last_plan_review";
 const PLAN_REVIEW_STRICTNESS_STORAGE_KEY = "ats_last_plan_review_strictness";
+const PLAN_BUNDLE_DECISIONS_STORAGE_KEY = "ats_last_plan_bundle_decisions";
 
 const REVIEW_STATUS_LABELS: Record<PlanItemValidation["status"], string> = {
   clear: "可继续",
@@ -425,7 +426,9 @@ function BatchModePage({
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewFeedback, setReviewFeedback] = useState<ReviewFeedback | null>(null);
   const [reviewFocusItemId, setReviewFocusItemId] = useState<string | null>(null);
-  const [bundleDecisions, setBundleDecisions] = useState<BundleDecisionRecord>({});
+  const [bundleDecisions, setBundleDecisions] = useState<BundleDecisionRecord>(() =>
+    readJsonStorage<BundleDecisionRecord>(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, {}),
+  );
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
   const [itemStates, setItemStates] = useState<Record<string, ItemState>>({});
   const itemStatesRef = useRef<Record<string, ItemState>>({});
@@ -440,6 +443,16 @@ function BatchModePage({
   const autoSelectRef = useRef(false);
   useEffect(() => { autoSelectRef.current = autoSelectFirst; }, [autoSelectFirst]);
   const socketRef = useRef<BatchSocket | null>(null);
+
+  useEffect(() => {
+    const nextDecisions = reconcileBundleDecisionRecord(planReview, bundleDecisions);
+    const sameKeys = Object.keys(nextDecisions).length === Object.keys(bundleDecisions).length
+      && Object.entries(nextDecisions).every(([key, value]) => bundleDecisions[key] === value);
+    if (!sameKeys) {
+      setBundleDecisions(nextDecisions);
+      writeJsonStorage(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, nextDecisions);
+    }
+  }, [planReview]);
 
   // ── State updater helpers ─────────────────────────────────────────────────
 
@@ -500,6 +513,7 @@ function BatchModePage({
     setReviewFeedback(null);
     setReviewFocusItemId(null);
     setBundleDecisions({});
+    writeJsonStorage(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, {});
     setPlanReview(null);
     itemStatesRef.current = {};
     setItemStates({});
@@ -536,12 +550,14 @@ function BatchModePage({
       setReviewError(null);
       setReviewFeedback(d.review ? summarizePlanReview(d.review, d.plan.items).feedback : null);
       setReviewFocusItemId(d.review ? summarizePlanReview(d.review, d.plan.items).focusItemId : null);
-      setBundleDecisions(reconcileBundleDecisionRecord(d.review ?? null));
+      const nextDecisions = reconcileBundleDecisionRecord(d.review ?? null);
+      setBundleDecisions(nextDecisions);
       setStage("review_items");
       try {
         writeJsonStorage(PLAN_STORAGE_KEY, d.plan);
         writeJsonStorage(PLAN_ITEMS_STORAGE_KEY, d.plan.items);
         writeJsonStorage(PLAN_REVIEW_STORAGE_KEY, d.review ?? null);
+        writeJsonStorage(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, nextDecisions);
         writeTextStorage(
           PLAN_REVIEW_STRICTNESS_STORAGE_KEY,
           normalizeReviewStrictness(d.review?.strictness ?? reviewStrictness),
@@ -631,6 +647,7 @@ function BatchModePage({
     const itemsForStorage = editedItems.map(it => ({ ...it, provided_image_b64: undefined }));
     writeJsonStorage(PLAN_ITEMS_STORAGE_KEY, itemsForStorage);
     writeJsonStorage(PLAN_REVIEW_STORAGE_KEY, planReview);
+    writeJsonStorage(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, bundleDecisions);
     writeTextStorage(PLAN_REVIEW_STRICTNESS_STORAGE_KEY, reviewStrictness);
 
     if (!socketRef.current) {
@@ -691,11 +708,13 @@ function BatchModePage({
       });
       setPlanReview(review);
       setReviewStrictness(normalizeReviewStrictness(review.strictness));
-      setBundleDecisions(reconcileBundleDecisionRecord(review));
+      const nextDecisions = reconcileBundleDecisionRecord(review);
+      setBundleDecisions(nextDecisions);
       const summary = summarizePlanReview(review, items);
       setReviewFeedback(summary.feedback);
       setReviewFocusItemId(summary.focusItemId);
       writeJsonStorage(PLAN_REVIEW_STORAGE_KEY, review);
+      writeJsonStorage(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, nextDecisions);
       writeTextStorage(PLAN_REVIEW_STRICTNESS_STORAGE_KEY, normalizeReviewStrictness(review.strictness));
       return review;
     } catch (error) {
@@ -713,7 +732,7 @@ function BatchModePage({
       return;
     }
     if (canProceedFromEditedItemReview(review, editedItems)) {
-      setReviewFeedback({ tone: "success", message: "Item 复核已通过，进入执行策略确认。" });
+      setReviewFeedback({ tone: "success", message: "Item 复核已通过，进入执行策略决策。" });
       setStage("review_bundles");
     }
   }
@@ -755,12 +774,17 @@ function BatchModePage({
   }
 
   function handleBundleDecisionChange(bundleKey: string, decision: BundleDecisionStatus) {
-    setBundleDecisions((current) => ({ ...current, [bundleKey]: decision }));
+    setBundleDecisions((current) => {
+      const next = { ...current, [bundleKey]: decision };
+      writeJsonStorage(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, next);
+      return next;
+    });
   }
 
   async function handleBundleSplitRequest(bundleKey: string) {
     const nextDecisions = { ...bundleDecisions, [bundleKey]: "split_requested" as const };
     setBundleDecisions(nextDecisions);
+    writeJsonStorage(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, nextDecisions);
     setReviewFeedback({ tone: "info", message: "已记录拆分请求，正在按更保守口径重算 bundle..." });
     const review = await refreshPlanReview(editedItems, reviewStrictness, nextDecisions);
     if (!review) {
@@ -777,7 +801,11 @@ function BatchModePage({
   }
 
   function handleBundleReturnToItems(bundleKey: string, itemIds: string[]) {
-    setBundleDecisions((current) => ({ ...current, [bundleKey]: "needs_item_revision" }));
+    setBundleDecisions((current) => {
+      const next = { ...current, [bundleKey]: "needs_item_revision" as const };
+      writeJsonStorage(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, next);
+      return next;
+    });
     setReviewFocusItemId(itemIds[0] ?? null);
     setReviewFeedback({
       tone: "warning",
@@ -878,6 +906,7 @@ function BatchModePage({
       setReviewFeedback(null);
       setReviewFocusItemId(null);
       setBundleDecisions({});
+      writeJsonStorage(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, {});
       itemStatesRef.current = {};
     setItemStates({});
     setBatchLog([]);
@@ -1544,7 +1573,7 @@ function ReviewPlan({
             disabled={reviewBusy}
             className="flex-1 py-2.5 rounded-lg bg-violet-700 text-white font-bold text-sm hover:bg-violet-800 transition-colors disabled:opacity-60"
           >
-            {canProceed ? "进入执行策略确认" : "保存说明并重新检查"}
+            {canProceed ? "进入执行策略决策" : "保存说明并重新检查"}
           </button>
           <button
             type="button"
