@@ -345,7 +345,7 @@ def test_ensure_plan_review_passes_rejects_plan_that_needs_user_input():
 
 def test_batch_plan_uses_http_exception_for_missing_requirements():
     with pytest.raises(HTTPException) as exc_info:
-        batch_workflow._legacy_api_plan({"requirements": "   "})
+        batch_workflow._api_plan_impl({"requirements": "   "})
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail

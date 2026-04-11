@@ -74,7 +74,7 @@ def get_planner_api_hints() -> str:
     return _KNOWLEDGE_SOURCE.load_context("planner")
 
 
-# Legacy export: full docs for all types combined (kept for compatibility).
+# Aggregated docs export for tooling that needs the full combined reference.
 # Prefer get_docs_for_type(asset_type) in new code.
 STS2_MOD_DOCS = (
     _load_resource_text("common.md")

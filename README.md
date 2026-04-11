@@ -22,7 +22,7 @@ Describe your card, relic, or power in plain text — AgentTheSpire generates th
 ### Runtime Status
 
 - As of April 10, 2026, only two backend roles remain active: `workstation` and `web`.
-- The old integrated `full` runtime, migration flags, and workflow compat bridge are retired.
+- The old integrated `full` runtime, migration flags, and workflow bridge path are retired.
 - If any historical section below still mentions `full`, treat it as archived background rather than the current baseline.
 
 ### Requirements
@@ -115,7 +115,7 @@ Current product behavior:
 ### 当前运行口径
 
 - 截至 2026-04-10，后端只保留两个有效角色：`workstation` 与 `web`。
-- 历史 `full` 一体化运行时、migration flags、workflow compat bridge 已收口，不再作为当前实现基线。
+- 历史 `full` 一体化运行时、migration flags、workflow 过渡桥接路径已收口，不再作为当前实现基线。
 - 若下文个别历史段落仍提到 `full`，请按“归档背景信息”理解，不再视为当前推荐方案。
 
 ### 知识库版本检查
@@ -280,7 +280,7 @@ AgentTheSpire/
 │   │   ├── shared/prompting/       # PromptLoader and prompt rendering utilities
 │   │   └── shared/resources/
 │   │       └── prompts/            # Unified runtime prompt bundles (*.md)
-│   ├── agents/                     # Legacy-compatible agent entrypoints
+│   ├── agents/                     # Agent entrypoints and packaged prompt sources
 │   ├── approval/                   # Approval flow adapters
 │   ├── image/                      # Image generation pipeline
 │   ├── llm/                        # Unified agent/text runner backends

@@ -411,9 +411,9 @@ function Ensure-LocalBackendRuntimePython {
         return $runtimeVenvPython
     }
 
-    $legacyReleaseVenvPython = Join-Path $BackendRoot ".venv\Scripts\python.exe"
-    if (Test-PythonModulesAvailable -PythonExe $legacyReleaseVenvPython -Modules $requiredModules) {
-        return $legacyReleaseVenvPython
+    $serviceVenvPython = Join-Path $BackendRoot ".venv\Scripts\python.exe"
+    if (Test-PythonModulesAvailable -PythonExe $serviceVenvPython -Modules $requiredModules) {
+        return $serviceVenvPython
     }
 
     $repoVenvPython = Join-Path $RepoRoot "backend\.venv\Scripts\python.exe"
@@ -1309,14 +1309,14 @@ function Start-LocalWorkstationDeployment {
     $backendRoot = Join-Path $serviceRoot "backend"
     $frontendDist = Join-Path $serviceRoot "frontend\dist"
     $runtimeMirrorPath = Join-Path (Join-Path $ReleaseRoot "runtime") "workstation.config.json"
-    $legacyServiceConfigPath = Join-Path $serviceRoot "config.json"
+    $serviceConfigPath = Join-Path $serviceRoot "config.json"
 
     Assert-PathExists -Path $backendRoot -Label "workstation backend 目录"
     Assert-PathExists -Path $frontendDist -Label "workstation frontend/dist 目录"
 
     $workstationConfig = New-RuntimeConfig -SourceConfigPath $SourceConfigPath -Mode "workstation" -DbUser $PostgresUser -DbPassword $PostgresPassword -DbName $PostgresDb
     Write-LocalServiceConfig -Config $workstationConfig -RuntimeMirrorPath $runtimeMirrorPath
-    Remove-FileIfExists -Path $legacyServiceConfigPath
+    Remove-FileIfExists -Path $serviceConfigPath
     Write-FrontendRuntimeConfig -OutputPath (Join-Path $frontendDist "runtime-config.js") `
         -ResolvedWorkstationBaseUrl ("http://127.0.0.1:{0}" -f $ResolvedWorkstationPort) `
         -ResolvedWorkstationWsBaseUrl ("ws://127.0.0.1:{0}" -f $ResolvedWorkstationPort) `

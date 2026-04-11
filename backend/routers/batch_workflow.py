@@ -192,7 +192,7 @@ def _group_key(group: list[PlanItem]) -> tuple[str, ...]:
 
 @router.post("/plan")
 def api_plan(body: dict):
-    return _legacy_api_plan(body)
+    return _api_plan_impl(body)
 
 
 @router.post("/plan/review")
@@ -205,7 +205,7 @@ def api_plan_review(body: dict):
     return _build_plan_review_payload(plan, strictness)
 
 
-def _legacy_api_plan(body: dict):
+def _api_plan_impl(body: dict):
     """接收用户需求文本，返回结构化 Mod 计划（JSON）。"""
     requirements: str = body.get("requirements", "")
     if not requirements.strip():
@@ -218,10 +218,10 @@ def _legacy_api_plan(body: dict):
 
 @router.websocket("/ws/batch")
 async def ws_batch(ws: WebSocket):
-    await _handle_legacy_ws_batch(ws)
+    await _handle_ws_batch(ws)
 
 
-async def _handle_legacy_ws_batch(ws: WebSocket, *, initial_params: dict | None = None):
+async def _handle_ws_batch(ws: WebSocket, *, initial_params: dict | None = None):
     """
     批量创建 Mod 资产的 WebSocket 端点。
 
