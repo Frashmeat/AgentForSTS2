@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { PlatformPageShell } from "../../components/platform/PlatformPageShell.tsx";
 import { resendVerification, verifyEmailCode } from "../../shared/api/auth.ts";
 import { AuthHomeLink } from "./AuthHomeLink.tsx";
@@ -11,15 +11,21 @@ import {
 } from "./formModel.ts";
 
 export function VerifyEmailPage() {
-  const [searchParams] = useSearchParams();
-  const [code, setCode] = useState(() => searchParams.get("code") ?? "");
+  const location = useLocation();
+  const [code, setCode] = useState(() => {
+    const routeState = location.state as { code?: string } | null;
+    return typeof routeState?.code === "string" ? routeState.code : "";
+  });
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
   const [formState, setFormState] = useState(createIdleAuthFormState);
 
   useEffect(() => {
-    setCode(searchParams.get("code") ?? "");
-  }, [searchParams]);
+    const routeState = location.state as { code?: string } | null;
+    if (typeof routeState?.code === "string") {
+      setCode(routeState.code);
+    }
+  }, [location.state]);
 
   async function handleVerify(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
