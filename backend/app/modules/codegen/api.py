@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agents.sts2_docs import GAME_API_REFERENCE_PATH, get_docs_for_type, get_planner_api_hints
+from agents.sts2_docs import get_docs_for_type, get_game_api_reference_path, get_planner_api_hints
 from app.modules.codegen.application.artifact_writer import ArtifactWriter
 from app.modules.codegen.application.build_trigger import BuildTrigger
 from app.modules.codegen.application.prompt_assembler import PromptAssembler
@@ -60,7 +60,7 @@ def _build_codegen_service() -> CodegenService:
     assembler = PromptAssembler(
         knowledge_source=knowledge_source,
         api_lookup_provider=_build_api_lookup_section,
-        api_ref_path=GAME_API_REFERENCE_PATH,
+        api_ref_path=get_game_api_reference_path(),
     )
     return CodegenService(
         prompt_assembler=assembler,

@@ -9,7 +9,7 @@ from app.modules.knowledge.infra import knowledge_runtime
 from agents.sts2_docs import (
     get_docs_for_type,
     get_planner_api_hints,
-    GAME_API_REFERENCE_PATH,
+    get_game_api_reference_path,
     get_full_docs_bundle,
 )
 
@@ -23,13 +23,27 @@ def _ensure_runtime_knowledge_available() -> None:
 def test_api_ref_file_exists():
     """The runtime knowledge API reference markdown must be present."""
     _ensure_runtime_knowledge_available()
-    assert GAME_API_REFERENCE_PATH.exists(), f"Missing file: {GAME_API_REFERENCE_PATH}"
+    api_ref_path = get_game_api_reference_path()
+    assert api_ref_path.exists(), f"Missing file: {api_ref_path}"
 
 
 def test_api_ref_file_not_empty():
     _ensure_runtime_knowledge_available()
-    content = GAME_API_REFERENCE_PATH.read_text(encoding="utf-8")
+    content = get_game_api_reference_path().read_text(encoding="utf-8")
     assert len(content) > 1000, "API reference file looks too small"
+
+
+def test_api_ref_path_resolves_from_runtime_knowledge_dir(monkeypatch, tmp_path: Path):
+    runtime_dir = tmp_path / "runtime" / "knowledge" / "game"
+    runtime_dir.mkdir(parents=True)
+    seed_file = tmp_path / "seed" / "sts2_api_reference.md"
+    seed_file.parent.mkdir(parents=True, exist_ok=True)
+    seed_file.write_text("reference", encoding="utf-8")
+
+    monkeypatch.setattr(knowledge_runtime, "GAME_KNOWLEDGE_DIR", runtime_dir)
+    monkeypatch.setattr(knowledge_runtime, "GAME_KNOWLEDGE_SEED_FILE", seed_file, raising=False)
+
+    assert get_game_api_reference_path() == runtime_dir / "sts2_api_reference.md"
 
 
 def test_sts2_resource_files_exist():
