@@ -137,6 +137,8 @@ def test_compute_status_marks_stale_when_versions_change(monkeypatch, tmp_path: 
     assert status["baselib"]["latest_release_tag"] == "v0.2.8"
     assert status["game"]["matches"] is False
     assert status["baselib"]["matches"] is False
+    assert status["game"]["knowledge_path"] == str(game_dir)
+    assert status["baselib"]["knowledge_path"] == str(baselib_dir)
 
 
 def test_refresh_task_preserves_previous_manifest_when_update_fails(monkeypatch, tmp_path: Path):
@@ -271,6 +273,8 @@ def test_missing_manifest_stays_missing_when_only_seed_files_exist(monkeypatch, 
     assert status["status"] == "missing"
     assert status["game"]["source_mode"] == "missing"
     assert status["baselib"]["source_mode"] == "missing"
+    assert status["game"]["knowledge_path"] == str(game_dir)
+    assert status["baselib"]["knowledge_path"] == str(baselib_dir)
 
 
 def test_manifest_runtime_missing_reports_missing_when_runtime_files_are_absent(monkeypatch, tmp_path: Path):
@@ -302,6 +306,8 @@ def test_manifest_runtime_missing_reports_missing_when_runtime_files_are_absent(
     assert status["status"] == "missing"
     assert status["game"]["source_mode"] == "missing"
     assert status["baselib"]["source_mode"] == "missing"
+    assert status["game"]["knowledge_path"] == str(game_dir)
+    assert status["baselib"]["knowledge_path"] == str(baselib_dir)
 
 
 def test_resolve_ilspycmd_command_prefers_project_copy(monkeypatch, tmp_path: Path):

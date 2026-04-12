@@ -174,6 +174,7 @@ def _default_status_payload(status: str) -> dict[str, Any]:
             "matches": None,
             "version_source": "steam_app_manifest",
             "source_mode": _resolve_game_source_mode(),
+            "knowledge_path": str(GAME_KNOWLEDGE_DIR),
             "decompiled_src_path": str(GAME_KNOWLEDGE_DIR),
         },
         "baselib": {
@@ -182,6 +183,7 @@ def _default_status_payload(status: str) -> dict[str, Any]:
             "matches": None,
             "release_url": BASELIB_RELEASES_URL,
             "source_mode": _resolve_baselib_source_mode(),
+            "knowledge_path": str(BASELIB_KNOWLEDGE_DIR),
             "decompiled_src_path": str(BASELIB_KNOWLEDGE_DIR),
         },
     }
@@ -288,6 +290,8 @@ def get_knowledge_status() -> dict[str, Any]:
     payload["baselib"]["release_tag"] = manifest.get("baselib", {}).get("release_tag")
     payload["game"]["source_mode"] = _resolve_game_source_mode()
     payload["baselib"]["source_mode"] = _resolve_baselib_source_mode()
+    payload["game"]["knowledge_path"] = manifest.get("game", {}).get("decompiled_src_path", str(GAME_KNOWLEDGE_DIR))
+    payload["baselib"]["knowledge_path"] = manifest.get("baselib", {}).get("decompiled_src_path", str(BASELIB_KNOWLEDGE_DIR))
     payload["game"]["decompiled_src_path"] = manifest.get("game", {}).get("decompiled_src_path", str(GAME_KNOWLEDGE_DIR))
     payload["baselib"]["decompiled_src_path"] = manifest.get("baselib", {}).get("decompiled_src_path", str(BASELIB_KNOWLEDGE_DIR))
 
@@ -309,8 +313,8 @@ def get_knowledge_status() -> dict[str, Any]:
         payload["warnings"].append(str(exc))
         payload["baselib"]["matches"] = None
 
-    game_runtime_ready = _directory_has_sources(Path(payload["game"]["decompiled_src_path"]))
-    baselib_runtime_ready = Path(str(payload["baselib"]["decompiled_src_path"])).joinpath("BaseLib.decompiled.cs").exists()
+    game_runtime_ready = _directory_has_sources(Path(payload["game"]["knowledge_path"]))
+    baselib_runtime_ready = Path(str(payload["baselib"]["knowledge_path"])).joinpath("BaseLib.decompiled.cs").exists()
     if not game_runtime_ready or not baselib_runtime_ready:
         payload["status"] = "missing"
         return payload
