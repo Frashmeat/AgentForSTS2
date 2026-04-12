@@ -93,3 +93,12 @@ def test_resolve_runtime_config_path_uses_role_specific_release_runtime_config(m
     monkeypatch.setattr(settings_module, "_APP_ROOT", backend_root)
 
     assert settings_module._resolve_runtime_config_path() == runtime_config
+
+
+def test_resolve_runtime_config_path_defaults_to_repo_runtime_config(monkeypatch, tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(settings_module, "_APP_ROOT", repo_root)
+
+    assert settings_module._resolve_runtime_config_path() == repo_root / "runtime" / "workstation.config.json"

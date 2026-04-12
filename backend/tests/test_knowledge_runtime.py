@@ -239,13 +239,9 @@ def test_runtime_knowledge_seed_initialization_preserves_user_changes(monkeypatc
 
 
 def test_missing_status_surfaces_missing_runtime_requirements(monkeypatch):
-    missing_repo_ref = Path("Z:/missing/sts2_api_reference.md")
-    missing_baselib = Path("Z:/missing/BaseLib.decompiled.cs")
     monkeypatch.setattr(knowledge_runtime, "load_manifest", lambda: None)
     monkeypatch.setattr(knowledge_runtime, "_has_ilspycmd", lambda: False)
     monkeypatch.setattr(knowledge_runtime, "_directory_has_sources", lambda _path: False)
-    monkeypatch.setattr(knowledge_runtime, "API_REF_PATH", missing_repo_ref)
-    monkeypatch.setattr(knowledge_runtime, "BASELIB_FALLBACK_PATH", missing_baselib)
     monkeypatch.setattr(
         knowledge_runtime,
         "get_config",
@@ -264,16 +260,9 @@ def test_missing_manifest_stays_missing_when_only_seed_files_exist(monkeypatch, 
     game_dir.mkdir(parents=True)
     baselib_dir = tmp_path / "baselib_decompiled"
     baselib_dir.mkdir(parents=True)
-    repo_ref = tmp_path / "sts2_api_reference.md"
-    repo_ref.write_text("reference", encoding="utf-8")
-    repo_baselib = tmp_path / "BaseLib.decompiled.cs"
-    repo_baselib.write_text("// baselib", encoding="utf-8")
-
     monkeypatch.setattr(knowledge_runtime, "load_manifest", lambda: None)
     monkeypatch.setattr(knowledge_runtime, "GAME_DECOMPILED_DIR", game_dir)
     monkeypatch.setattr(knowledge_runtime, "BASELIB_DECOMPILED_DIR", baselib_dir)
-    monkeypatch.setattr(knowledge_runtime, "API_REF_PATH", repo_ref)
-    monkeypatch.setattr(knowledge_runtime, "BASELIB_FALLBACK_PATH", repo_baselib)
     monkeypatch.setattr(knowledge_runtime, "_has_ilspycmd", lambda: False)
     monkeypatch.setattr(knowledge_runtime, "get_config", lambda: {"sts2_path": "E:/steam/steamapps/common/Slay the Spire 2"})
 
@@ -289,10 +278,6 @@ def test_manifest_runtime_missing_reports_missing_when_runtime_files_are_absent(
     game_dir.mkdir(parents=True)
     baselib_dir = tmp_path / "baselib_decompiled"
     baselib_dir.mkdir(parents=True)
-    repo_ref = tmp_path / "sts2_api_reference.md"
-    repo_ref.write_text("reference", encoding="utf-8")
-    repo_baselib = tmp_path / "BaseLib.decompiled.cs"
-    repo_baselib.write_text("// baselib", encoding="utf-8")
     manifest = {
         "generated_at": "2026-04-10T00:00:00+0800",
         "game": {
@@ -309,8 +294,6 @@ def test_manifest_runtime_missing_reports_missing_when_runtime_files_are_absent(
     monkeypatch.setattr(knowledge_runtime, "load_manifest", lambda: manifest)
     monkeypatch.setattr(knowledge_runtime, "GAME_DECOMPILED_DIR", game_dir)
     monkeypatch.setattr(knowledge_runtime, "BASELIB_DECOMPILED_DIR", baselib_dir)
-    monkeypatch.setattr(knowledge_runtime, "API_REF_PATH", repo_ref)
-    monkeypatch.setattr(knowledge_runtime, "BASELIB_FALLBACK_PATH", repo_baselib)
     monkeypatch.setattr(knowledge_runtime, "read_current_game_version", lambda _path: {"version": "22340209", "source": "steam_app_manifest"})
     monkeypatch.setattr(knowledge_runtime, "fetch_latest_baselib_release", lambda: {"tag_name": "v0.2.7"})
 

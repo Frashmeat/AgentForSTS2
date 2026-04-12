@@ -9,24 +9,31 @@ from app.modules.knowledge.infra import knowledge_runtime
 from agents.sts2_docs import (
     get_docs_for_type,
     get_planner_api_hints,
-    API_REF_PATH,
-    STS2_MOD_DOCS,
+    GAME_API_REFERENCE_PATH,
+    get_full_docs_bundle,
 )
 
 RESOURCE_DIR = knowledge_runtime.RESOURCE_KNOWLEDGE_DIR
 
 
+def _ensure_runtime_knowledge_available() -> None:
+    knowledge_runtime.ensure_runtime_knowledge_seeded()
+
+
 def test_api_ref_file_exists():
     """The runtime knowledge API reference markdown must be present."""
-    assert API_REF_PATH.exists(), f"Missing file: {API_REF_PATH}"
+    _ensure_runtime_knowledge_available()
+    assert GAME_API_REFERENCE_PATH.exists(), f"Missing file: {GAME_API_REFERENCE_PATH}"
 
 
 def test_api_ref_file_not_empty():
-    content = API_REF_PATH.read_text(encoding="utf-8")
+    _ensure_runtime_knowledge_available()
+    content = GAME_API_REFERENCE_PATH.read_text(encoding="utf-8")
     assert len(content) > 1000, "API reference file looks too small"
 
 
 def test_sts2_resource_files_exist():
+    _ensure_runtime_knowledge_available()
     expected_files = [
         "common.md",
         "card.md",
@@ -148,7 +155,7 @@ def test_planner_hints_contain_hook_examples():
 def test_planner_hints_compact_size():
     """Hints should be concise — not the full docs dump."""
     hints = get_planner_api_hints()
-    full_docs = STS2_MOD_DOCS
+    full_docs = get_full_docs_bundle()
     assert len(hints) < len(full_docs) / 2, "planner hints should be much smaller than full docs"
 
 
@@ -159,11 +166,12 @@ def test_planner_hints_match_resource_file():
     assert hints.strip() == resource_text
 
 
-# ── combined STS2_MOD_DOCS ────────────────────────────────────────────────────
+# ── combined full docs bundle ────────────────────────────────────────────────
 
 def test_combined_docs_cover_all_types():
-    """STS2_MOD_DOCS should cover all major asset types."""
-    assert "OnPlay" in STS2_MOD_DOCS
-    assert "RelicModel" in STS2_MOD_DOCS
-    assert "PowerModel" in STS2_MOD_DOCS
-    assert "ShouldReceiveCombatHooks" in STS2_MOD_DOCS
+    """The aggregated docs bundle should cover all major asset types."""
+    full_docs = get_full_docs_bundle()
+    assert "OnPlay" in full_docs
+    assert "RelicModel" in full_docs
+    assert "PowerModel" in full_docs
+    assert "ShouldReceiveCombatHooks" in full_docs

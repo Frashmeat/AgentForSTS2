@@ -13,21 +13,23 @@ from typing import Any
 import httpx
 
 from app.shared.infra.config import settings as settings_module
-from config import get_config, get_decompiled_src_path
+from config import get_config
 
 BACKEND_ROOT = Path(__file__).resolve().parents[4]
 REPO_ROOT = BACKEND_ROOT.parent
-API_REF_PATH = BACKEND_ROOT / "agents" / "sts2_api_reference.md"
+# 仓库内静态知识文件只作为首次初始化 runtime/knowledge 的 seed source，
+# 不是运行时并列真源。
+GAME_REFERENCE_SEED_PATH = BACKEND_ROOT / "agents" / "sts2_api_reference.md"
 KNOWLEDGE_ROOT = settings_module.RUNTIME_CONFIG_PATH.parent / "knowledge"
 GAME_DECOMPILED_DIR = KNOWLEDGE_ROOT / "game"
 BASELIB_DECOMPILED_DIR = KNOWLEDGE_ROOT / "baselib"
 RESOURCE_KNOWLEDGE_DIR = KNOWLEDGE_ROOT / "resources" / "sts2"
 KNOWLEDGE_CACHE_DIR = KNOWLEDGE_ROOT / "cache"
 KNOWLEDGE_MANIFEST_PATH = KNOWLEDGE_ROOT / "knowledge-manifest.json"
-BASELIB_FALLBACK_PATH = BACKEND_ROOT / "agents" / "baselib_src" / "BaseLib.decompiled.cs"
+BASELIB_REFERENCE_SEED_PATH = BACKEND_ROOT / "agents" / "baselib_src" / "BaseLib.decompiled.cs"
 GAME_KNOWLEDGE_SEED_DIR = BACKEND_ROOT / "agents" / "game_seed"
-GAME_KNOWLEDGE_SEED_FILE = API_REF_PATH
-BASELIB_KNOWLEDGE_SEED_FILE = BASELIB_FALLBACK_PATH
+GAME_KNOWLEDGE_SEED_FILE = GAME_REFERENCE_SEED_PATH
+BASELIB_KNOWLEDGE_SEED_FILE = BASELIB_REFERENCE_SEED_PATH
 RESOURCE_KNOWLEDGE_SEED_DIR = BACKEND_ROOT / "app" / "modules" / "knowledge" / "resources" / "sts2"
 STS2_DLL_RELATIVE = Path("data_sts2_windows_x86_64") / "sts2.dll"
 BASELIB_RELEASES_URL = "https://github.com/Alchyr/BaseLib-StS2/releases"

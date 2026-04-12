@@ -12,13 +12,14 @@ Sources:
 """
 from __future__ import annotations
 
+from functools import lru_cache
 from pathlib import Path
 
 from app.modules.knowledge.infra import knowledge_runtime
 from app.modules.knowledge.infra.sts2_docs_source import Sts2DocsKnowledgeSource
 
-API_REF_PATH = knowledge_runtime.GAME_DECOMPILED_DIR / Path(knowledge_runtime.GAME_KNOWLEDGE_SEED_FILE).name
-BASELIB_SRC_PATH = knowledge_runtime.BASELIB_DECOMPILED_DIR / "BaseLib.decompiled.cs"
+GAME_API_REFERENCE_PATH = knowledge_runtime.GAME_DECOMPILED_DIR / Path(knowledge_runtime.GAME_KNOWLEDGE_SEED_FILE).name
+BASELIB_RUNTIME_SOURCE_PATH = knowledge_runtime.BASELIB_DECOMPILED_DIR / "BaseLib.decompiled.cs"
 _RESOURCE_DIR = knowledge_runtime.RESOURCE_KNOWLEDGE_DIR
 
 
@@ -26,7 +27,7 @@ def _load_api_reference() -> str:
     """Load the decompiled API reference markdown. Returns empty string if missing."""
     knowledge_runtime.ensure_runtime_knowledge_seeded()
     try:
-        return API_REF_PATH.read_text(encoding="utf-8")
+        return GAME_API_REFERENCE_PATH.read_text(encoding="utf-8")
     except FileNotFoundError:
         return ""
 
@@ -74,12 +75,13 @@ def get_planner_api_hints() -> str:
     return _KNOWLEDGE_SOURCE.load_context("planner")
 
 
-# Aggregated docs export for tooling that needs the full combined reference.
-# Prefer get_docs_for_type(asset_type) in new code.
-STS2_MOD_DOCS = (
-    _load_resource_text("common.md")
-    + _load_resource_text("card.md")
-    + _load_resource_text("relic.md")
-    + _load_resource_text("power.md")
-    + _load_resource_text("custom_code.md")
-)
+@lru_cache(maxsize=1)
+def get_full_docs_bundle() -> str:
+    """Return the aggregated runtime knowledge bundle lazily."""
+    return (
+        _load_resource_text("common.md")
+        + _load_resource_text("card.md")
+        + _load_resource_text("relic.md")
+        + _load_resource_text("power.md")
+        + _load_resource_text("custom_code.md")
+    )
