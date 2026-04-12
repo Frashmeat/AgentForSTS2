@@ -327,7 +327,7 @@ Expected: PASS
 - Modify: `frontend/src/shared/api/config.ts`
 - Modify: `backend/app/shared/infra/feature_flags.py`
 - Modify: `docs/02-现状/当前项目结构报告.md`
-- Modify: `docs/03-方案/重构/2026-03-24-模块化解耦重构计划书.md`
+- Modify: `docs/03-方案/重构/未开始-2026-03-24-模块化解耦重构计划书.md`
 
 - [ ] **Step 1: 确认前端旧 websocket 路径已不再承担回退职责**
 
@@ -378,3 +378,4 @@ Expected: PASS
 - backend router 不再依赖 `backend/agents/*`
 - 迁移开关已下线
 - 文档结构描述与代码现状一致
+
