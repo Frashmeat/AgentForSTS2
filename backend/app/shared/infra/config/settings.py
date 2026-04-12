@@ -6,7 +6,7 @@ import subprocess
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 
 _ENV_KEYS = {
@@ -294,15 +294,3 @@ def update_config(patch: dict[str, Any]) -> dict[str, Any]:
     _config = normalize_config(_deep_merge(cfg, patch))
     save_config(_config)
     return _config
-
-
-def get_decompiled_src_path() -> Optional[str]:
-    env_value = os.environ.get("SPIREFORGE_DECOMPILED_SRC", "")
-    if env_value and Path(env_value).is_dir():
-        return env_value
-
-    cfg_value = get_config().get("decompiled_src_path", "")
-    if cfg_value and Path(cfg_value).is_dir():
-        return cfg_value
-
-    return None

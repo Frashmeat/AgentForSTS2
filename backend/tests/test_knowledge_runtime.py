@@ -180,8 +180,8 @@ def test_runtime_knowledge_seed_initialization_copies_repo_sources(monkeypatch, 
     (resource_seed_dir / "common.md").write_text("runtime common seed\n", encoding="utf-8")
 
     monkeypatch.setattr(knowledge_runtime, "KNOWLEDGE_ROOT", knowledge_root)
-    monkeypatch.setattr(knowledge_runtime, "GAME_DECOMPILED_DIR", game_runtime_dir)
-    monkeypatch.setattr(knowledge_runtime, "BASELIB_DECOMPILED_DIR", baselib_runtime_dir)
+    monkeypatch.setattr(knowledge_runtime, "GAME_KNOWLEDGE_DIR", game_runtime_dir)
+    monkeypatch.setattr(knowledge_runtime, "BASELIB_KNOWLEDGE_DIR", baselib_runtime_dir)
     monkeypatch.setattr(knowledge_runtime, "KNOWLEDGE_CACHE_DIR", cache_dir)
     monkeypatch.setattr(knowledge_runtime, "KNOWLEDGE_MANIFEST_PATH", manifest_path)
     monkeypatch.setattr(knowledge_runtime, "GAME_KNOWLEDGE_SEED_DIR", game_seed_dir, raising=False)
@@ -222,8 +222,8 @@ def test_runtime_knowledge_seed_initialization_preserves_user_changes(monkeypatc
     (resource_seed_dir / "common.md").write_text("original common seed\n", encoding="utf-8")
 
     monkeypatch.setattr(knowledge_runtime, "KNOWLEDGE_ROOT", knowledge_root)
-    monkeypatch.setattr(knowledge_runtime, "GAME_DECOMPILED_DIR", game_runtime_dir)
-    monkeypatch.setattr(knowledge_runtime, "BASELIB_DECOMPILED_DIR", baselib_runtime_dir)
+    monkeypatch.setattr(knowledge_runtime, "GAME_KNOWLEDGE_DIR", game_runtime_dir)
+    monkeypatch.setattr(knowledge_runtime, "BASELIB_KNOWLEDGE_DIR", baselib_runtime_dir)
     monkeypatch.setattr(knowledge_runtime, "KNOWLEDGE_CACHE_DIR", cache_dir)
     monkeypatch.setattr(knowledge_runtime, "KNOWLEDGE_MANIFEST_PATH", manifest_path)
     monkeypatch.setattr(knowledge_runtime, "GAME_KNOWLEDGE_SEED_DIR", game_seed_dir, raising=False)
@@ -261,8 +261,8 @@ def test_missing_manifest_stays_missing_when_only_seed_files_exist(monkeypatch, 
     baselib_dir = tmp_path / "baselib_decompiled"
     baselib_dir.mkdir(parents=True)
     monkeypatch.setattr(knowledge_runtime, "load_manifest", lambda: None)
-    monkeypatch.setattr(knowledge_runtime, "GAME_DECOMPILED_DIR", game_dir)
-    monkeypatch.setattr(knowledge_runtime, "BASELIB_DECOMPILED_DIR", baselib_dir)
+    monkeypatch.setattr(knowledge_runtime, "GAME_KNOWLEDGE_DIR", game_dir)
+    monkeypatch.setattr(knowledge_runtime, "BASELIB_KNOWLEDGE_DIR", baselib_dir)
     monkeypatch.setattr(knowledge_runtime, "_has_ilspycmd", lambda: False)
     monkeypatch.setattr(knowledge_runtime, "get_config", lambda: {"sts2_path": "E:/steam/steamapps/common/Slay the Spire 2"})
 
@@ -292,8 +292,8 @@ def test_manifest_runtime_missing_reports_missing_when_runtime_files_are_absent(
     }
 
     monkeypatch.setattr(knowledge_runtime, "load_manifest", lambda: manifest)
-    monkeypatch.setattr(knowledge_runtime, "GAME_DECOMPILED_DIR", game_dir)
-    monkeypatch.setattr(knowledge_runtime, "BASELIB_DECOMPILED_DIR", baselib_dir)
+    monkeypatch.setattr(knowledge_runtime, "GAME_KNOWLEDGE_DIR", game_dir)
+    monkeypatch.setattr(knowledge_runtime, "BASELIB_KNOWLEDGE_DIR", baselib_dir)
     monkeypatch.setattr(knowledge_runtime, "read_current_game_version", lambda _path: {"version": "22340209", "source": "steam_app_manifest"})
     monkeypatch.setattr(knowledge_runtime, "fetch_latest_baselib_release", lambda: {"tag_name": "v0.2.7"})
 

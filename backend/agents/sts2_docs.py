@@ -18,8 +18,8 @@ from pathlib import Path
 from app.modules.knowledge.infra import knowledge_runtime
 from app.modules.knowledge.infra.sts2_docs_source import Sts2DocsKnowledgeSource
 
-GAME_API_REFERENCE_PATH = knowledge_runtime.GAME_DECOMPILED_DIR / Path(knowledge_runtime.GAME_KNOWLEDGE_SEED_FILE).name
-BASELIB_RUNTIME_SOURCE_PATH = knowledge_runtime.BASELIB_DECOMPILED_DIR / "BaseLib.decompiled.cs"
+GAME_API_REFERENCE_PATH = knowledge_runtime.GAME_KNOWLEDGE_DIR / Path(knowledge_runtime.GAME_KNOWLEDGE_SEED_FILE).name
+BASELIB_RUNTIME_SOURCE_PATH = knowledge_runtime.BASELIB_KNOWLEDGE_DIR / "BaseLib.decompiled.cs"
 _RESOURCE_DIR = knowledge_runtime.RESOURCE_KNOWLEDGE_DIR
 
 
