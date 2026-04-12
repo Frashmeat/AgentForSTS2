@@ -288,6 +288,46 @@ def test_package_release_seeds_runtime_knowledge_directory(tmp_path: Path):
     assert (runtime_knowledge_dir / "resources" / "sts2" / "common.md").exists()
 
 
+def test_package_release_preserves_existing_runtime_knowledge_files(tmp_path: Path):
+    temp_repo = tmp_path / "repo"
+    _prepare_common_layout(temp_repo)
+    _write_template_files(temp_repo, "workstation")
+
+    backend_dir = temp_repo / "backend"
+    agents_dir = backend_dir / "agents"
+    resources_dir = backend_dir / "app" / "modules" / "knowledge" / "resources" / "sts2"
+    backend_dir.mkdir(parents=True, exist_ok=True)
+    agents_dir.mkdir(parents=True, exist_ok=True)
+    resources_dir.mkdir(parents=True, exist_ok=True)
+    (backend_dir / "main_workstation.py").write_text("print('ok')\n", encoding="utf-8")
+    (agents_dir / "sts2_api_reference.md").write_text("seed api reference\n", encoding="utf-8")
+    (agents_dir / "baselib_src").mkdir(parents=True, exist_ok=True)
+    (agents_dir / "baselib_src" / "BaseLib.decompiled.cs").write_text("// seed baselib\n", encoding="utf-8")
+    (resources_dir / "common.md").write_text("seed common\n", encoding="utf-8")
+
+    frontend_dist = temp_repo / "frontend" / "dist"
+    frontend_dist.mkdir(parents=True, exist_ok=True)
+    (frontend_dist / "index.html").write_text("<html></html>\n", encoding="utf-8")
+    mod_template = temp_repo / "mod_template"
+    mod_template.mkdir(parents=True, exist_ok=True)
+    (mod_template / "README.md").write_text("template\n", encoding="utf-8")
+    (temp_repo / "config.example.json").write_text('{"mode":"example"}\n', encoding="utf-8")
+
+    release_dir = temp_repo / "tools" / "latest" / "artifacts" / "agentthespire-workstation-release"
+    existing_common = release_dir / "runtime" / "knowledge" / "resources" / "sts2" / "common.md"
+    existing_common.parent.mkdir(parents=True, exist_ok=True)
+    existing_common.write_text("user modified common\n", encoding="utf-8")
+    existing_api_ref = release_dir / "runtime" / "knowledge" / "game" / "sts2_api_reference.md"
+    existing_api_ref.parent.mkdir(parents=True, exist_ok=True)
+    existing_api_ref.write_text("user modified api reference\n", encoding="utf-8")
+
+    completed = _run_package_release(temp_repo, "workstation", "-NoFrontend", "-NoZip")
+
+    assert completed.returncode == 0, completed.stderr
+    assert existing_common.read_text(encoding="utf-8") == "user modified common\n"
+    assert existing_api_ref.read_text(encoding="utf-8") == "user modified api reference\n"
+
+
 def test_package_release_preserves_locked_runtime_logs(tmp_path: Path):
     temp_repo = tmp_path / "repo"
     _prepare_common_layout(temp_repo)

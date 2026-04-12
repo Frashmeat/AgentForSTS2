@@ -430,16 +430,27 @@ function Copy-KnowledgeSeedBundle {
     $null = New-Item -ItemType Directory -Path $resourceKnowledgeDir -Force
     $null = New-Item -ItemType Directory -Path $cacheDir -Force
 
-    if (Test-Path -LiteralPath $gameSeedFile) {
-        Copy-Item -LiteralPath $gameSeedFile -Destination (Join-Path $gameKnowledgeDir "sts2_api_reference.md") -Force
+    $gameSeedTarget = Join-Path $gameKnowledgeDir "sts2_api_reference.md"
+    if ((Test-Path -LiteralPath $gameSeedFile) -and (-not (Test-Path -LiteralPath $gameSeedTarget))) {
+        Copy-Item -LiteralPath $gameSeedFile -Destination $gameSeedTarget -Force
     }
 
-    if (Test-Path -LiteralPath $baselibSeedFile) {
-        Copy-Item -LiteralPath $baselibSeedFile -Destination (Join-Path $baselibKnowledgeDir "BaseLib.decompiled.cs") -Force
+    $baselibSeedTarget = Join-Path $baselibKnowledgeDir "BaseLib.decompiled.cs"
+    if ((Test-Path -LiteralPath $baselibSeedFile) -and (-not (Test-Path -LiteralPath $baselibSeedTarget))) {
+        Copy-Item -LiteralPath $baselibSeedFile -Destination $baselibSeedTarget -Force
     }
 
     if (Test-Path -LiteralPath $resourceSeedDir) {
-        Copy-Item -Path (Join-Path $resourceSeedDir "*") -Destination $resourceKnowledgeDir -Recurse -Force
+        foreach ($seedFile in Get-ChildItem -LiteralPath $resourceSeedDir -Recurse -File) {
+            $relativePath = [System.IO.Path]::GetRelativePath($resourceSeedDir, $seedFile.FullName)
+            $targetPath = Join-Path $resourceKnowledgeDir $relativePath
+            if (Test-Path -LiteralPath $targetPath) {
+                continue
+            }
+            $targetParent = Split-Path -Parent $targetPath
+            $null = New-Item -ItemType Directory -Path $targetParent -Force
+            Copy-Item -LiteralPath $seedFile.FullName -Destination $targetPath -Force
+        }
     }
 }
 
@@ -592,7 +603,7 @@ if ($needsFrontend) {
 }
 
 $null = New-Item -ItemType Directory -Path $OutputRoot -Force
-New-CleanDirectory -Path $releaseDir -PreserveRelativePaths @("runtime\logs", "runtime\python-runtime")
+New-CleanDirectory -Path $releaseDir -PreserveRelativePaths @("runtime\logs", "runtime\python-runtime", "runtime\knowledge")
 $null = New-Item -ItemType Directory -Path (Join-Path $releaseDir "services") -Force
 $null = New-Item -ItemType Directory -Path (Join-Path $releaseDir "runtime") -Force
 
