@@ -30,7 +30,7 @@ import {
   resolveNextWorkflowModel,
   type WorkflowLogEntry,
 } from "../../shared/workflowLog.ts";
-import type { PlatformExecutionRequest } from "../platform-run/types.ts";
+import type { WorkspaceFeatureAdapterProps, WorkspaceFeatureProps } from "../workspace/types.ts";
 import {
   applyBatchApprovalUpdate,
   canProceedBatchApproval,
@@ -386,12 +386,7 @@ function BatchModePage({
   knowledgeStatus,
   onOpenKnowledgeGuide,
   onOpenSettings,
-}: {
-  onRequestExecution?: (request: PlatformExecutionRequest) => void;
-  knowledgeStatus: KnowledgeStatus | null;
-  onOpenKnowledgeGuide: () => void;
-  onOpenSettings: () => void;
-}) {
+}: WorkspaceFeatureProps) {
   const [stage, setStage] = useState<BatchStage>("input");
   const [requirements, setRequirements] = useState("");
   const [projectRoot, setProjectRoot] = useState("");
@@ -1103,12 +1098,7 @@ export function BatchGenerationFeatureView({
   knowledgeStatus,
   onOpenKnowledgeGuide,
   onOpenSettings,
-}: {
-  onRequestExecution?: (request: PlatformExecutionRequest) => void;
-  knowledgeStatus?: KnowledgeStatus | null;
-  onOpenKnowledgeGuide?: () => void;
-  onOpenSettings?: () => void;
-}) {
+}: WorkspaceFeatureAdapterProps) {
   return (
     <BatchModePage
       onRequestExecution={onRequestExecution}

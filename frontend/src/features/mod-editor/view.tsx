@@ -6,7 +6,6 @@ import { BuildDeploy } from "../../components/BuildDeploy";
 import { KnowledgeStatusBanner } from "../../components/KnowledgeStatusBanner.tsx";
 import { ProjectRootField } from "../../components/ProjectRootField";
 import { StageStatus } from "../../components/StageStatus";
-import type { KnowledgeStatus } from "../../shared/api/knowledge.ts";
 import { useDefaultProjectRoot } from "../../shared/useDefaultProjectRoot.ts";
 import { useProjectCreation } from "../../shared/useProjectCreation.ts";
 import {
@@ -14,7 +13,7 @@ import {
   resolveNextWorkflowModel,
   type WorkflowLogEntry,
 } from "../../shared/workflowLog.ts";
-import type { PlatformExecutionRequest } from "../platform-run/types.ts";
+import type { WorkspaceFeatureProps } from "../workspace/types.ts";
 import {
   createModEditorAnalysisController,
   createModEditorModifyController,
@@ -30,12 +29,7 @@ export function ModEditorFeatureView({
   knowledgeStatus,
   onOpenKnowledgeGuide,
   onOpenSettings,
-}: {
-  onRequestExecution?: (request: PlatformExecutionRequest) => void;
-  knowledgeStatus: KnowledgeStatus | null;
-  onOpenKnowledgeGuide: () => void;
-  onOpenSettings: () => void;
-}) {
+}: WorkspaceFeatureProps) {
   const [projectRoot, setProjectRoot] = useState("");
   const {
     projectCreateBusy,

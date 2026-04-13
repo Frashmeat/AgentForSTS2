@@ -14,8 +14,8 @@ test("SingleAssetFeatureView exposes create project action", () => {
   assert.match(source, /projectCreateBusy/);
 });
 
-test("App wires single asset create project handler through shared hook", () => {
-  const source = readSource("../src/App.tsx");
+test("single asset workspace container wires create project handler through shared hook", () => {
+  const source = readSource("../src/features/single-asset/SingleAssetWorkspaceContainer.tsx");
 
   assert.match(source, /useProjectCreation/);
   assert.match(source, /createProjectAtRoot/);

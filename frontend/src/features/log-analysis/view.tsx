@@ -5,14 +5,13 @@ import { KnowledgeStatusBanner } from "../../components/KnowledgeStatusBanner.ts
 import { StageStatus } from "../../components/StageStatus";
 import { AgentLog } from "../../components/AgentLog";
 import { LogAnalysisSocket } from "../../lib/log_analysis_ws";
-import type { KnowledgeStatus } from "../../shared/api/knowledge.ts";
 import { resolveErrorMessage, resolveWorkflowErrorMessage } from "../../shared/error.ts";
 import {
   appendWorkflowLogEntry,
   resolveNextWorkflowModel,
   type WorkflowLogEntry,
 } from "../../shared/workflowLog.ts";
-import type { PlatformExecutionRequest } from "../platform-run/types.ts";
+import type { WorkspaceFeatureProps } from "../workspace/types.ts";
 
 type Stage = "input" | "analyzing" | "done" | "error";
 
@@ -21,12 +20,7 @@ export function LogAnalysisFeatureView({
   knowledgeStatus,
   onOpenKnowledgeGuide,
   onOpenSettings,
-}: {
-  onRequestExecution?: (request: PlatformExecutionRequest) => void;
-  knowledgeStatus: KnowledgeStatus | null;
-  onOpenKnowledgeGuide: () => void;
-  onOpenSettings: () => void;
-}) {
+}: WorkspaceFeatureProps) {
   const [stage, setStage] = useState<Stage>("input");
   const [context, setContext] = useState("");
   const [logLines, setLogLines] = useState<number | null>(null);

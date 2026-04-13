@@ -6,10 +6,10 @@ function readSource(path: string) {
   return readFileSync(new URL(path, import.meta.url), "utf8");
 }
 
-test("App renders single asset feature shell from App", () => {
+test("App assembles workspace features through feature containers", () => {
   const appSource = readSource("../src/App.tsx");
 
-  assert.match(appSource, /SingleAssetFeatureView/);
+  assert.match(appSource, /WorkspaceHome/);
   assert.doesNotMatch(appSource, /import BatchMode from "\.\/pages\/BatchMode";/);
   assert.doesNotMatch(appSource, /import LogAnalysis from "\.\/pages\/LogAnalysis";/);
   assert.doesNotMatch(appSource, /import ModEditor from "\.\/pages\/ModEditor";/);
@@ -21,7 +21,7 @@ test("only BatchMode page remains as a temporary shell", () => {
   const batchFeatureSource = readSource("../src/features/batch-generation/view.tsx");
 
   assert.match(batchPageSource, /BatchGenerationFeatureView/);
-  assert.match(batchPageSource, /return <BatchGenerationFeatureView \/>;/);
+  assert.match(batchPageSource, /return <BatchGenerationFeatureView[\s\S]*\/>;/);
   assert.doesNotMatch(batchFeatureSource, /"\.\.\/\.\.\/pages\/BatchMode"/);
   assert.equal(existsSync(new URL("../src/pages/ModEditor.tsx", import.meta.url)), false);
   assert.equal(existsSync(new URL("../src/pages/LogAnalysis.tsx", import.meta.url)), false);
