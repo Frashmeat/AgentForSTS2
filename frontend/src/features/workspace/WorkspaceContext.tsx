@@ -1,7 +1,11 @@
 import { createContext, useContext, type ReactNode } from "react";
 
 import type { KnowledgeStatus } from "../../shared/api/index.ts";
-import type { WorkspaceExecutionRequestHandler } from "./types.ts";
+import type {
+  WorkspaceExecutionRequestHandler,
+  WorkspaceFeatureAdapterProps,
+  WorkspaceFeatureProps,
+} from "./types.ts";
 
 export interface WorkspaceContextValue {
   knowledgeStatus: KnowledgeStatus | null;
@@ -33,4 +37,16 @@ export function useWorkspaceContext() {
 
 export function useOptionalWorkspaceContext() {
   return useContext(WorkspaceContext);
+}
+
+export function useResolvedWorkspaceFeatureProps(
+  props: WorkspaceFeatureAdapterProps,
+): WorkspaceFeatureProps {
+  const workspace = useOptionalWorkspaceContext();
+  return {
+    onRequestExecution: props.onRequestExecution ?? workspace?.onRequestExecution,
+    knowledgeStatus: props.knowledgeStatus ?? workspace?.knowledgeStatus ?? null,
+    onOpenKnowledgeGuide: props.onOpenKnowledgeGuide ?? workspace?.onOpenKnowledgeGuide ?? (() => {}),
+    onOpenSettings: props.onOpenSettings ?? workspace?.onOpenSettings ?? (() => {}),
+  };
 }

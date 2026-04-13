@@ -11,7 +11,7 @@ import {
   resolveNextWorkflowModel,
   type WorkflowLogEntry,
 } from "../../shared/workflowLog.ts";
-import { useOptionalWorkspaceContext } from "../workspace/WorkspaceContext.tsx";
+import { useResolvedWorkspaceFeatureProps } from "../workspace/WorkspaceContext.tsx";
 import type { WorkspaceFeatureAdapterProps } from "../workspace/types.ts";
 
 type Stage = "input" | "analyzing" | "done" | "error";
@@ -22,11 +22,17 @@ export function LogAnalysisFeatureView({
   onOpenKnowledgeGuide,
   onOpenSettings,
 }: WorkspaceFeatureAdapterProps) {
-  const workspace = useOptionalWorkspaceContext();
-  const resolvedKnowledgeStatus = knowledgeStatus ?? workspace?.knowledgeStatus ?? null;
-  const resolvedOpenKnowledgeGuide = onOpenKnowledgeGuide ?? workspace?.onOpenKnowledgeGuide ?? (() => {});
-  const resolvedOpenSettings = onOpenSettings ?? workspace?.onOpenSettings ?? (() => {});
-  const resolvedRequestExecution = onRequestExecution ?? workspace?.onRequestExecution;
+  const {
+    onRequestExecution: resolvedRequestExecution,
+    knowledgeStatus: resolvedKnowledgeStatus,
+    onOpenKnowledgeGuide: resolvedOpenKnowledgeGuide,
+    onOpenSettings: resolvedOpenSettings,
+  } = useResolvedWorkspaceFeatureProps({
+    onRequestExecution,
+    knowledgeStatus,
+    onOpenKnowledgeGuide,
+    onOpenSettings,
+  });
   const [stage, setStage] = useState<Stage>("input");
   const [context, setContext] = useState("");
   const [logLines, setLogLines] = useState<number | null>(null);
