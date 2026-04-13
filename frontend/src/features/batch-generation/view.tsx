@@ -432,7 +432,7 @@ function BatchModePage({
   const [batchLog, setBatchLog] = useState<string[]>([]);
   const [currentBatchStage, setCurrentBatchStage] = useState<string | null>(null);
   const [batchStageHistory, setBatchStageHistory] = useState<string[]>([]);
-  const [globalError, setGlobalError] = useState<string | null>(null);
+  const [workflowErrorMessage, setWorkflowErrorMessage] = useState<string | null>(null);
   const [batchResult, setBatchResult] = useState<{ success: number; error: number } | null>(null);
   const [approvalBusyActionId, setApprovalBusyActionId] = useState<string | null>(null);
 
@@ -505,7 +505,7 @@ function BatchModePage({
     if (!requirements.trim()) return;
     setStage("planning");
     setBatchLog([]);
-    setGlobalError(null);
+    setWorkflowErrorMessage(null);
     setReviewError(null);
     setReviewFeedback(null);
     setReviewFocusItemId(null);
@@ -528,7 +528,7 @@ function BatchModePage({
       projectRoot,
       onOpenError(message) {
         socketRef.current = null;
-        setGlobalError(message);
+        setWorkflowErrorMessage(message);
         setStage("error");
       },
     });
@@ -636,7 +636,7 @@ function BatchModePage({
       setBatchResult({ success: d.success_count, error: d.error_count });
       setStage("done");
     });
-    ws.on("error", (d) => { setGlobalError(resolveWorkflowErrorMessage(d)); setStage("error"); });
+    ws.on("error", (d) => { setWorkflowErrorMessage(resolveWorkflowErrorMessage(d)); setStage("error"); });
   }
 
   async function confirmPlan() {
@@ -662,7 +662,7 @@ function BatchModePage({
         },
         onOpenError(message) {
           socketRef.current = null;
-          setGlobalError(message);
+          setWorkflowErrorMessage(message);
           setStage("error");
         },
       });
@@ -907,7 +907,7 @@ function BatchModePage({
       itemStatesRef.current = {};
     setItemStates({});
     setBatchLog([]);
-    setGlobalError(null);
+    setWorkflowErrorMessage(null);
     setBatchResult(null);
     setActiveItemId(null);
     setApprovalBusyActionId(null);
@@ -925,7 +925,7 @@ function BatchModePage({
         applyItemStates(prev => applyBatchApprovalUpdate(prev, actionId, updated));
       },
       onError(message) {
-        setGlobalError(message);
+        setWorkflowErrorMessage(message);
         setStage("error");
       },
     });
@@ -1048,7 +1048,7 @@ function BatchModePage({
             <AlertTriangle size={16} className="text-red-500 shrink-0 mt-0.5" />
             <div>
               <p className="text-sm font-semibold text-red-700">规划失败</p>
-              {globalError && <pre className="text-xs text-red-600 font-mono mt-1 whitespace-pre-wrap">{globalError}</pre>}
+              {workflowErrorMessage && <pre className="text-xs text-red-600 font-mono mt-1 whitespace-pre-wrap">{workflowErrorMessage}</pre>}
             </div>
           </div>
           <button onClick={reset} className="text-sm text-red-500 hover:text-red-700 flex items-center gap-1">
