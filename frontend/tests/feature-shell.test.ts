@@ -21,7 +21,7 @@ test("only BatchMode page remains as a temporary shell", () => {
   const batchFeatureSource = readSource("../src/features/batch-generation/view.tsx");
 
   assert.match(batchPageSource, /BatchGenerationFeatureView/);
-  assert.match(batchPageSource, /return <BatchGenerationFeatureView[\s\S]*\/>;/);
+  assert.match(batchPageSource, /return <BatchGenerationFeatureView \/>;/);
   assert.doesNotMatch(batchFeatureSource, /"\.\.\/\.\.\/pages\/BatchMode"/);
   assert.equal(existsSync(new URL("../src/pages/ModEditor.tsx", import.meta.url)), false);
   assert.equal(existsSync(new URL("../src/pages/LogAnalysis.tsx", import.meta.url)), false);

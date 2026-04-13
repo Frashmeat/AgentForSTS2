@@ -15,6 +15,7 @@ import { KnowledgeStatusBanner } from "../../components/KnowledgeStatusBanner.ts
 import { ProjectRootField } from "../../components/ProjectRootField";
 import { cn } from "../../lib/utils";
 import { loadAppConfig } from "../../shared/api/config";
+import { runApprovalAction } from "../../shared/approvalAction.ts";
 import type { KnowledgeStatus } from "../../shared/api/knowledge.ts";
 import { reviewModPlan } from "../../shared/api/workflow.ts";
 import { resolveErrorMessage, resolveWorkflowErrorMessage } from "../../shared/error.ts";
@@ -916,16 +917,18 @@ function BatchModePage({
     actionId: string,
     action: (id: string) => Promise<ApprovalRequest>,
   ) {
-    setApprovalBusyActionId(actionId);
-    try {
-      const updated = await action(actionId);
-      applyItemStates(prev => applyBatchApprovalUpdate(prev, actionId, updated));
-    } catch (error) {
-      setGlobalError(resolveErrorMessage(error));
-      setStage("error");
-    } finally {
-      setApprovalBusyActionId(null);
-    }
+    await runApprovalAction({
+      actionId,
+      action,
+      onBusyChange: setApprovalBusyActionId,
+      onSuccess(updated) {
+        applyItemStates(prev => applyBatchApprovalUpdate(prev, actionId, updated));
+      },
+      onError(message) {
+        setGlobalError(message);
+        setStage("error");
+      },
+    });
   }
 
   function handleProceedApproval(itemId: string) {

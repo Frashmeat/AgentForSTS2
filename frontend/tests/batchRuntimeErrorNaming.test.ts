@@ -6,12 +6,12 @@ function readSource(path: string) {
   return readFileSync(new URL(path, import.meta.url), "utf8");
 }
 
-test("batch runtime state and page use explicit workflow error naming", () => {
+test("batch runtime model keeps workflow error naming separate from page-level global error", () => {
   const stateSource = readSource("../src/features/batch-generation/state.ts");
-  const pageSource = readSource("../src/pages/BatchMode.tsx");
+  const pageSource = readSource("../src/features/batch-generation/view.tsx");
 
   assert.match(stateSource, /\bworkflowErrorMessage\b/);
-  assert.match(pageSource, /\bruntimeState\.workflowErrorMessage\b/);
+  assert.match(pageSource, /\bglobalError\b/);
   assert.doesNotMatch(stateSource, /\bglobalError\b/);
   assert.doesNotMatch(pageSource, /\bruntimeState\.globalError\b/);
 });

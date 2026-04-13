@@ -6,10 +6,10 @@ function readSource(path: string) {
   return readFileSync(new URL(path, import.meta.url), "utf8");
 }
 
-test("approval action flow is shared by App and BatchMode", () => {
-  const appSource = readSource("../src/App.tsx");
-  const batchModeSource = readSource("../src/pages/BatchMode.tsx");
+test("approval action flow is shared by single asset and batch features", () => {
+  const singleAssetSource = readSource("../src/features/single-asset/SingleAssetWorkspaceContainer.tsx");
+  const batchModeSource = readSource("../src/features/batch-generation/view.tsx");
 
-  assert.match(appSource, /runApprovalAction/);
+  assert.match(singleAssetSource, /runApprovalAction/);
   assert.match(batchModeSource, /runApprovalAction/);
 });
