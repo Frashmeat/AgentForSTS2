@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Bug, House, LayoutDashboard, Sparkles, Wrench } from "lucide-react";
+import { House } from "lucide-react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import ExecutionModeDialog from "./components/ExecutionModeDialog.tsx";
 import { KnowledgeGuideDialog } from "./components/KnowledgeGuideDialog.tsx";
@@ -14,6 +14,12 @@ import { VerifyEmailPage } from "./features/auth/VerifyEmailPage.tsx";
 import { UserCenterJobDetailPage } from "./features/user-center/job-detail-page.tsx";
 import { UserCenterPage } from "./features/user-center/page.tsx";
 import type { WorkspaceTab } from "./features/platform-run/types.ts";
+import {
+  buildSettingsPath,
+  buildWorkspacePath,
+  resolveWorkspaceTab,
+  workspaceNavItems,
+} from "./features/workspace/config.ts";
 import { WorkspaceProvider } from "./features/workspace/WorkspaceContext.tsx";
 import { useExecutionModeFlow } from "./features/workspace/useExecutionModeFlow.ts";
 import { useKnowledgeStatusFlow } from "./features/workspace/useKnowledgeStatusFlow.ts";
@@ -22,57 +28,6 @@ import { useSession } from "./shared/session/hooks.ts";
 import { SettingsPage } from "./pages/SettingsPage.tsx";
 
 type AppTab = WorkspaceTab;
-
-const workspaceNavItems = [
-  {
-    id: "single" as const,
-    label: "单资产",
-    shortLabel: "单资产",
-    description: "描述、生成、审批和构建单个资产。",
-    icon: Sparkles,
-  },
-  {
-    id: "batch" as const,
-    label: "Mod 规划",
-    shortLabel: "规划",
-    description: "批量规划多个资产，并跟踪每个条目的执行状态。",
-    icon: LayoutDashboard,
-  },
-  {
-    id: "edit" as const,
-    label: "修改 Mod",
-    shortLabel: "修改",
-    description: "分析现有项目结构，并让 Code Agent 执行改动。",
-    icon: Wrench,
-  },
-  {
-    id: "log" as const,
-    label: "崩溃分析",
-    shortLabel: "日志",
-    description: "读取最近日志并生成故障定位建议。",
-    icon: Bug,
-  },
-];
-
-function resolveAppTab(value: string | null): AppTab {
-  switch (value) {
-    case "batch":
-    case "edit":
-    case "log":
-      return value;
-    default:
-      return "single";
-  }
-}
-
-function buildWorkspacePath(tab: AppTab): string {
-  return tab === "single" ? "/" : `/?tab=${tab}`;
-}
-
-function buildSettingsPath(returnTo: string): string {
-  const nextSearch = new URLSearchParams({ returnTo });
-  return `/settings?${nextSearch.toString()}`;
-}
 
 function buildPlatformAuthUnavailableElement(title: string, description: string) {
   return (
@@ -98,7 +53,7 @@ export default function App() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { isAuthAvailable, isAuthenticated } = useSession();
-  const activeTab = resolveAppTab(searchParams.get("tab"));
+  const activeTab: AppTab = resolveWorkspaceTab(searchParams.get("tab"));
   const [knowledgeGuideOpen, setKnowledgeGuideOpen] = useState(false);
   const {
     pendingExecution,

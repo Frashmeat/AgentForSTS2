@@ -7,16 +7,13 @@ import {
 } from "../../shared/api/index.ts";
 import { createAndStartPlatformFlow } from "../platform-run/createAndStartFlow.ts";
 import type { PlatformExecutionRequest, WorkspaceTab } from "../platform-run/types.ts";
+import { buildWorkspacePath } from "./config.ts";
 
 const PLATFORM_WORKFLOW_VERSION = "2026.04.04";
 
 export interface PendingExecutionRequest extends PlatformExecutionRequest {
   localAvailable: boolean;
   localUnavailableReasons: string[];
-}
-
-function buildWorkspacePath(tab: WorkspaceTab): string {
-  return tab === "single" ? "/" : `/?tab=${tab}`;
 }
 
 interface UseExecutionModeFlowOptions {

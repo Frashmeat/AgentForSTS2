@@ -8,9 +8,10 @@ function readSource(path: string) {
 
 test("App exposes a dedicated settings page route instead of workspace drawer state", () => {
   const appSource = readSource("../src/App.tsx");
+  const configSource = readSource("../src/features/workspace/config.ts");
 
   assert.match(appSource, /import\s+\{\s*SettingsPage\s*\}\s+from\s+"\.\/pages\/SettingsPage\.tsx";/);
-  assert.match(appSource, /function\s+buildSettingsPath\(returnTo: string\)/);
+  assert.match(configSource, /export function buildSettingsPath\(returnTo: string\)/);
   assert.match(appSource, /<Route path="\/settings" element=\{<SettingsPage \/>\} \/>/);
   assert.doesNotMatch(appSource, /const\s+\[settingsOpen,\s*setSettingsOpen\]\s*=\s*useState/);
 });
