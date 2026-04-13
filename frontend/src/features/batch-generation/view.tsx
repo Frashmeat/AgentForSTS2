@@ -41,10 +41,14 @@ import {
 } from "./approval";
 import { openBatchPlanningSocket } from "./planningSession";
 import {
+  createDefaultBatchItemState,
   canProceedFromBundleReview,
   reconcileBundleDecisionRecord,
   resolveExecutionBundleKey,
   summarizeBundleDecisionProgress,
+  type BatchItemState as ItemState,
+  type BatchItemStatus as ItemStatus,
+  type BatchStage,
   type BundleDecisionRecord,
   type BundleDecisionStatus,
   type ReviewStrictness,
@@ -52,57 +56,11 @@ import {
 
 // ── 类型 ──────────────────────────────────────────────────────────────────────
 
-type BatchStage = "input" | "planning" | "review_items" | "review_bundles" | "executing" | "done" | "error";
 type ReviewFeedbackTone = "info" | "success" | "warning" | "error";
 
 interface ReviewFeedback {
   tone: ReviewFeedbackTone;
   message: string;
-}
-
-type ItemStatus =
-  | "pending"
-  | "img_generating"
-  | "awaiting_selection"
-  | "approval_pending"
-  | "code_generating"
-  | "done"
-  | "error";
-
-interface ItemState {
-  status: ItemStatus;
-  currentStage: string | null;
-  stageHistory: string[];
-  progress: string[];
-  images: string[];
-  agentLog: string[];
-  agentLogEntries: WorkflowLogEntry[];
-  currentAgentModel: string | null;
-  error: string | null;
-  errorTrace: string | null;
-  currentPrompt: string;
-  showMorePrompt: boolean;
-  approvalSummary: string;
-  approvalRequests: ApprovalRequest[];
-}
-
-function defaultItemState(): ItemState {
-  return {
-    status: "pending",
-    currentStage: null,
-    stageHistory: [],
-    progress: [],
-    images: [],
-    agentLog: [],
-    agentLogEntries: [],
-    currentAgentModel: null,
-    error: null,
-    errorTrace: null,
-    currentPrompt: "",
-    showMorePrompt: false,
-    approvalSummary: "",
-    approvalRequests: [],
-  };
 }
 
 // ── 工具函数 ──────────────────────────────────────────────────────────────────
@@ -462,20 +420,20 @@ function BatchModePage({
   const updateItem = useCallback((id: string, patch: Partial<ItemState>) => {
     applyItemStates(prev => ({
       ...prev,
-      [id]: { ...(prev[id] ?? defaultItemState()), ...patch },
+      [id]: { ...(prev[id] ?? createDefaultBatchItemState()), ...patch },
     }));
   }, [applyItemStates]);
 
   const appendProgress = useCallback((id: string, msg: string) => {
     applyItemStates(prev => {
-      const cur = prev[id] ?? defaultItemState();
+      const cur = prev[id] ?? createDefaultBatchItemState();
       return { ...prev, [id]: { ...cur, progress: [...cur.progress, msg] } };
     });
   }, [applyItemStates]);
 
   const appendAgent = useCallback((id: string, entry: WorkflowLogEntry) => {
     applyItemStates(prev => {
-      const cur = prev[id] ?? defaultItemState();
+      const cur = prev[id] ?? createDefaultBatchItemState();
       return {
         ...prev,
         [id]: {
@@ -490,7 +448,7 @@ function BatchModePage({
 
   const addImage = useCallback((id: string, b64: string, index: number, prompt: string) => {
     applyItemStates(prev => {
-      const cur = prev[id] ?? defaultItemState();
+      const cur = prev[id] ?? createDefaultBatchItemState();
       const images = [...cur.images];
       images[index] = b64;
       return { ...prev, [id]: { ...cur, images, currentPrompt: prompt, status: "awaiting_selection" } };
@@ -565,7 +523,7 @@ function BatchModePage({
     ws.on("stage_update", (d) => {
       if (d.item_id) {
         applyItemStates(prev => {
-          const cur = prev[d.item_id!] ?? defaultItemState();
+          const cur = prev[d.item_id!] ?? createDefaultBatchItemState();
           return {
             ...prev,
             [d.item_id!]: {
@@ -582,7 +540,7 @@ function BatchModePage({
     });
     ws.on("batch_started", (d) => {
       const init: Record<string, ItemState> = {};
-      d.items.forEach(it => { init[it.id] = defaultItemState(); });
+      d.items.forEach(it => { init[it.id] = createDefaultBatchItemState(); });
       itemStatesRef.current = init;
       setItemStates(init);
       setStage("executing");
