@@ -20,9 +20,9 @@ test("App delegates workspace content assembly to WorkspaceHome", () => {
 test("WorkspaceHome owns tab-specific feature composition", () => {
   const source = readSource("../src/features/workspace/WorkspaceHome.tsx");
 
-  assert.match(source, /BatchGenerationFeatureView/);
-  assert.match(source, /ModEditorFeatureView/);
-  assert.match(source, /LogAnalysisFeatureView/);
-  assert.match(source, /SingleAssetWorkspaceContainer/);
+  assert.match(source, /<BatchGenerationFeatureView \/>/);
+  assert.match(source, /<ModEditorFeatureView \/>/);
+  assert.match(source, /<LogAnalysisFeatureView \/>/);
+  assert.match(source, /<SingleAssetWorkspaceContainer \/>/);
   assert.match(source, /activeTab === "single"/);
 });

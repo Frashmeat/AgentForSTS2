@@ -30,6 +30,7 @@ import {
   resolveNextWorkflowModel,
   type WorkflowLogEntry,
 } from "../../shared/workflowLog.ts";
+import { useOptionalWorkspaceContext } from "../workspace/WorkspaceContext.tsx";
 import type { WorkspaceFeatureAdapterProps, WorkspaceFeatureProps } from "../workspace/types.ts";
 import {
   applyBatchApprovalUpdate,
@@ -1099,12 +1100,13 @@ export function BatchGenerationFeatureView({
   onOpenKnowledgeGuide,
   onOpenSettings,
 }: WorkspaceFeatureAdapterProps) {
+  const workspace = useOptionalWorkspaceContext();
   return (
     <BatchModePage
-      onRequestExecution={onRequestExecution}
-      knowledgeStatus={knowledgeStatus ?? null}
-      onOpenKnowledgeGuide={onOpenKnowledgeGuide ?? (() => {})}
-      onOpenSettings={onOpenSettings ?? (() => {})}
+      onRequestExecution={onRequestExecution ?? workspace?.onRequestExecution}
+      knowledgeStatus={knowledgeStatus ?? workspace?.knowledgeStatus ?? null}
+      onOpenKnowledgeGuide={onOpenKnowledgeGuide ?? workspace?.onOpenKnowledgeGuide ?? (() => {})}
+      onOpenSettings={onOpenSettings ?? workspace?.onOpenSettings ?? (() => {})}
     />
   );
 }

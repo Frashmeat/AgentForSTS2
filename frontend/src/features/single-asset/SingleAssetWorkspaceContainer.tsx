@@ -6,13 +6,12 @@ import {
   executeApproval,
   rejectApproval,
   type ApprovalRequest,
-  type KnowledgeStatus,
 } from "../../shared/api/index.ts";
 import type { PlatformJobCreateItem } from "../../shared/api/platform.ts";
 import { runApprovalAction } from "../../shared/approvalAction.ts";
 import { useDefaultProjectRoot } from "../../shared/useDefaultProjectRoot.ts";
 import { useProjectCreation } from "../../shared/useProjectCreation.ts";
-import type { PlatformExecutionRequest } from "../platform-run/types.ts";
+import { useWorkspaceContext } from "../workspace/WorkspaceContext.tsx";
 import { createSingleAssetWorkflowController } from "./controller.ts";
 import { type AssetType, getStageIndex } from "./model.ts";
 import {
@@ -25,21 +24,14 @@ import {
 import { createInitialSingleAssetWorkflowState, singleAssetWorkflowReducer } from "./state.ts";
 import { SingleAssetFeatureView } from "./view.tsx";
 
-interface SingleAssetWorkspaceContainerProps {
-  knowledgeStatus: KnowledgeStatus | null;
-  onOpenKnowledgeGuide: () => void;
-  onOpenSettings: () => void;
-  onRefreshKnowledge: () => void;
-  onRequestExecution: (request: PlatformExecutionRequest) => void | Promise<void>;
-}
-
-export function SingleAssetWorkspaceContainer({
-  knowledgeStatus,
-  onOpenKnowledgeGuide,
-  onOpenSettings,
-  onRefreshKnowledge,
-  onRequestExecution,
-}: SingleAssetWorkspaceContainerProps) {
+export function SingleAssetWorkspaceContainer() {
+  const {
+    knowledgeStatus,
+    onOpenKnowledgeGuide,
+    onOpenSettings,
+    onRefreshKnowledge,
+    onRequestExecution,
+  } = useWorkspaceContext();
   const [initialSingleAssetSnapshot] = useState(() => loadSingleAssetSnapshot());
   const [assetType, setAssetType] = useState<AssetType>(() => initialSingleAssetSnapshot?.assetType ?? "relic");
   const [assetName, setAssetName] = useState(() => initialSingleAssetSnapshot?.assetName ?? "");

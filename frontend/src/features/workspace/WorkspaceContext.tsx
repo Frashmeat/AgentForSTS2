@@ -3,7 +3,7 @@ import { createContext, useContext, type ReactNode } from "react";
 import type { KnowledgeStatus } from "../../shared/api/index.ts";
 import type { WorkspaceExecutionRequestHandler } from "./types.ts";
 
-interface WorkspaceContextValue {
+export interface WorkspaceContextValue {
   knowledgeStatus: KnowledgeStatus | null;
   onRequestExecution: WorkspaceExecutionRequestHandler;
   onOpenKnowledgeGuide: () => void;
@@ -29,4 +29,8 @@ export function useWorkspaceContext() {
     throw new Error("WorkspaceProvider is required");
   }
   return context;
+}
+
+export function useOptionalWorkspaceContext() {
+  return useContext(WorkspaceContext);
 }

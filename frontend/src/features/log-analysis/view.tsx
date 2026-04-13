@@ -11,7 +11,8 @@ import {
   resolveNextWorkflowModel,
   type WorkflowLogEntry,
 } from "../../shared/workflowLog.ts";
-import type { WorkspaceFeatureProps } from "../workspace/types.ts";
+import { useOptionalWorkspaceContext } from "../workspace/WorkspaceContext.tsx";
+import type { WorkspaceFeatureAdapterProps } from "../workspace/types.ts";
 
 type Stage = "input" | "analyzing" | "done" | "error";
 
@@ -20,7 +21,12 @@ export function LogAnalysisFeatureView({
   knowledgeStatus,
   onOpenKnowledgeGuide,
   onOpenSettings,
-}: WorkspaceFeatureProps) {
+}: WorkspaceFeatureAdapterProps) {
+  const workspace = useOptionalWorkspaceContext();
+  const resolvedKnowledgeStatus = knowledgeStatus ?? workspace?.knowledgeStatus ?? null;
+  const resolvedOpenKnowledgeGuide = onOpenKnowledgeGuide ?? workspace?.onOpenKnowledgeGuide ?? (() => {});
+  const resolvedOpenSettings = onOpenSettings ?? workspace?.onOpenSettings ?? (() => {});
+  const resolvedRequestExecution = onRequestExecution ?? workspace?.onRequestExecution;
   const [stage, setStage] = useState<Stage>("input");
   const [context, setContext] = useState("");
   const [logLines, setLogLines] = useState<number | null>(null);
@@ -100,9 +106,9 @@ export function LogAnalysisFeatureView({
   return (
     <div className="space-y-5">
       <KnowledgeStatusBanner
-        status={knowledgeStatus}
-        onOpenGuide={onOpenKnowledgeGuide}
-        onOpenSettings={onOpenSettings}
+        status={resolvedKnowledgeStatus}
+        onOpenGuide={resolvedOpenKnowledgeGuide}
+        onOpenSettings={resolvedOpenSettings}
       />
       <div className="workspace-surface rounded-2xl p-5 space-y-4">
         <div className="flex items-center gap-2">
@@ -126,11 +132,11 @@ export function LogAnalysisFeatureView({
           <div className="flex gap-2">
             <button
               onClick={() => {
-                if (!onRequestExecution) {
+                if (!resolvedRequestExecution) {
                   void analyze();
                   return;
                 }
-                onRequestExecution({
+                resolvedRequestExecution({
                   title: "分析日志",
                   tab: "log",
                   jobType: "log_analysis",

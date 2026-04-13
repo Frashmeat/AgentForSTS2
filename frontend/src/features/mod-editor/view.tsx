@@ -13,7 +13,8 @@ import {
   resolveNextWorkflowModel,
   type WorkflowLogEntry,
 } from "../../shared/workflowLog.ts";
-import type { WorkspaceFeatureProps } from "../workspace/types.ts";
+import { useOptionalWorkspaceContext } from "../workspace/WorkspaceContext.tsx";
+import type { WorkspaceFeatureAdapterProps } from "../workspace/types.ts";
 import {
   createModEditorAnalysisController,
   createModEditorModifyController,
@@ -29,7 +30,12 @@ export function ModEditorFeatureView({
   knowledgeStatus,
   onOpenKnowledgeGuide,
   onOpenSettings,
-}: WorkspaceFeatureProps) {
+}: WorkspaceFeatureAdapterProps) {
+  const workspace = useOptionalWorkspaceContext();
+  const resolvedKnowledgeStatus = knowledgeStatus ?? workspace?.knowledgeStatus ?? null;
+  const resolvedOpenKnowledgeGuide = onOpenKnowledgeGuide ?? workspace?.onOpenKnowledgeGuide ?? (() => {});
+  const resolvedOpenSettings = onOpenSettings ?? workspace?.onOpenSettings ?? (() => {});
+  const resolvedRequestExecution = onRequestExecution ?? workspace?.onRequestExecution;
   const [projectRoot, setProjectRoot] = useState("");
   const {
     projectCreateBusy,
@@ -179,9 +185,9 @@ export function ModEditorFeatureView({
   return (
     <div className="space-y-5">
       <KnowledgeStatusBanner
-        status={knowledgeStatus}
-        onOpenGuide={onOpenKnowledgeGuide}
-        onOpenSettings={onOpenSettings}
+        status={resolvedKnowledgeStatus}
+        onOpenGuide={resolvedOpenKnowledgeGuide}
+        onOpenSettings={resolvedOpenSettings}
       />
       <div className="workspace-surface rounded-2xl p-5 space-y-4">
         <ProjectRootField
@@ -279,11 +285,11 @@ export function ModEditorFeatureView({
                 const executeLocal = () => {
                   void modifyController.run(projectRoot, modRequest, analysisText);
                 };
-                if (!onRequestExecution) {
+                if (!resolvedRequestExecution) {
                   executeLocal();
                   return;
                 }
-                onRequestExecution({
+                resolvedRequestExecution({
                   title: "执行 Mod 修改",
                   tab: "edit",
                   jobType: "mod_edit",
