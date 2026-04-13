@@ -296,6 +296,7 @@ def test_build_plan_review_payload_includes_validation_and_execution_plan():
     assert payload["validation"]["items"][0]["status"] == "needs_user_input"
     assert payload["execution_plan"]["strictness"] == "balanced"
     assert payload["execution_plan"]["dependency_groups"][0]["item_ids"] == ["helper_logic"]
+    assert "bundle_id" in payload["execution_plan"]["execution_bundles"][0]
 
 
 def test_api_plan_review_returns_structured_review_payload():
@@ -324,6 +325,48 @@ def test_api_plan_review_returns_structured_review_payload():
     assert "execution_bundles" in payload["execution_plan"]
 
 
+def test_api_plan_review_applies_split_requested_bundle_decision():
+    plan = ModPlan(
+        mod_name="ReviewSplitApiMod",
+        summary="",
+        items=[
+            PlanItem(
+                id="helper_logic",
+                type="custom_code",
+                name="HelperLogic",
+                description="共享战斗辅助逻辑",
+                goal="Provide helper",
+                detailed_description="Provide shared helper logic",
+                needs_image=False,
+                coupling_kind="shared_logic",
+                affected_targets=["CombatHelper"],
+            ),
+            PlanItem(
+                id="helper_card",
+                type="card",
+                name="HelperCard",
+                description="使用共享逻辑的卡牌",
+                goal="Use helper",
+                detailed_description="Use helper from shared logic",
+                needs_image=False,
+                depends_on=["helper_logic"],
+                coupling_kind="shared_logic",
+                affected_targets=["CombatHelper"],
+            ),
+        ],
+    )
+
+    payload = batch_workflow.api_plan_review({
+        "plan": plan.to_dict(),
+        "strictness": "balanced",
+        "bundle_decisions": {
+            "bundle:helper_logic::helper_card": "split_requested",
+        },
+    })
+
+    assert [bundle["item_ids"] for bundle in payload["execution_plan"]["execution_bundles"]] == [["helper_logic"], ["helper_card"]]
+
+
 def test_ensure_plan_review_passes_rejects_plan_that_needs_user_input():
     plan = ModPlan(
         mod_name="BlockedReviewMod",
@@ -341,6 +384,46 @@ def test_ensure_plan_review_passes_rejects_plan_that_needs_user_input():
 
     with pytest.raises(HTTPException, match="计划仍需补充说明"):
         batch_workflow._ensure_plan_review_passes(plan, strictness="balanced")
+
+
+def test_ensure_plan_review_passes_allows_accepted_bundle_decision():
+    plan = ModPlan(
+        mod_name="AcceptedBundleMod",
+        summary="",
+        items=[
+            PlanItem(
+                id="shared_helper",
+                type="custom_code",
+                name="SharedHelper",
+                description="共享逻辑",
+                goal="Provide helper",
+                detailed_description="Provide helper logic",
+                needs_image=False,
+                coupling_kind="unclear",
+                affected_targets=["SharedLogic"],
+            ),
+            PlanItem(
+                id="shared_card",
+                type="card",
+                name="SharedCard",
+                description="依赖共享逻辑",
+                goal="Use helper",
+                detailed_description="Use helper from shared logic",
+                needs_image=False,
+                depends_on=["shared_helper"],
+                coupling_kind="shared_logic",
+                affected_targets=["SharedLogic"],
+            ),
+        ],
+    )
+
+    review = batch_workflow._ensure_plan_review_passes(
+        plan,
+        strictness="balanced",
+        bundle_decisions={"bundle:shared_helper::shared_card": "accepted"},
+    )
+
+    assert review["execution_plan"]["execution_bundles"][0]["status"] == "needs_confirmation"
 
 
 def test_batch_plan_uses_http_exception_for_missing_requirements():

@@ -24,9 +24,9 @@ def test_api_lookup_section_uses_configured_decompiled_source(monkeypatch):
 
     assert "## API Lookup" in section
     assert "Do NOT curl GitHub for BaseLib" in section
-    assert f"Full decompiled sts2.dll source: `{decompiled_dir}`" in section
+    assert f"Runtime knowledge directory for decompiled sts2.dll source: `{decompiled_dir}`" in section
     assert "Key subdirs:" in section
-    assert "Only fall back to ilspycmd if a specific class is missing from this directory." in section
+    assert "Only fall back to ilspycmd if a specific class is missing from this runtime knowledge directory." in section
     assert "Use `ilspycmd <path_to_sts2.dll>`" not in section
 
 

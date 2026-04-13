@@ -107,7 +107,6 @@ export function LogAnalysisFeatureView({
     <div className="space-y-5">
       <KnowledgeStatusBanner
         status={knowledgeStatus}
-        impactText="分析结果准确性可能下降"
         onOpenGuide={onOpenKnowledgeGuide}
         onOpenSettings={onOpenSettings}
       />

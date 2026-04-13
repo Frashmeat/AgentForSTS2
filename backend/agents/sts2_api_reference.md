@@ -7,10 +7,10 @@
 
 ## ⚡ 完整反编译源码（优先用这里，不要跑 ilspycmd）
 
-反编译目录路径由 `config.json` 的 `decompiled_src_path` 字段配置，已在你的 prompt 的 **API Lookup** 段注入。
-若该段显示"NOT available"，运行 `python tools/dev/decompile_sts2.py --game-path <STS2路径>` 生成。
+运行时知识目录路径会在 prompt 的 **API Lookup** 段注入，当前有效真源是 `runtime/knowledge/game/`。
+若该段显示 "NOT available"，说明当前机器还没有可用的运行时知识目录；需要先执行知识库更新流程生成。
 
-常用子目录（在配置的反编译目录下）：
+常用子目录（在运行时知识目录下）：
 ```
 MegaCrit.Sts2.Core.Commands\      ← DamageCmd, CardCmd, CardSelectCmd, RelicSelectCmd, PowerCmd...
 MegaCrit.Sts2.Core.Models.Cards\  ← StrikeIronclad, 所有原版卡牌完整实现

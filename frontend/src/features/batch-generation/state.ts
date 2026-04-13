@@ -1,5 +1,5 @@
 import type { ApprovalRequest } from "../../shared/api/index.ts";
-import type { PlanReviewPayload, WorkflowLogChannel } from "../../shared/types/workflow.ts";
+import type { ExecutionBundlePreview, PlanReviewPayload, WorkflowLogChannel } from "../../shared/types/workflow.ts";
 import {
   appendWorkflowLogEntry,
   resolveNextWorkflowModel,
@@ -35,6 +35,8 @@ export interface BatchItemState {
 export type BatchItemStateRecord = Record<string, BatchItemState>;
 
 export type ReviewStrictness = "efficient" | "balanced" | "strict";
+export type BundleDecisionStatus = "unresolved" | "accepted" | "split_requested" | "needs_item_revision";
+export type BundleDecisionRecord = Record<string, BundleDecisionStatus>;
 export type BatchStage =
   | "input"
   | "planning"
@@ -56,6 +58,7 @@ export interface BatchRuntimeState {
   approvalBusyActionId: string | null;
   planReview: PlanReviewPayload | null;
   reviewStrictness: ReviewStrictness;
+  bundleDecisions: BundleDecisionRecord;
 }
 
 export type BatchRuntimeAction =
@@ -120,6 +123,7 @@ export function createInitialBatchRuntimeState(): BatchRuntimeState {
     approvalBusyActionId: null,
     planReview: null,
     reviewStrictness: "balanced",
+    bundleDecisions: {},
   };
 }
 
@@ -130,11 +134,106 @@ export function canProceedFromItemReview(review: PlanReviewPayload | null | unde
   return review.validation.items.every((item) => item.status === "clear");
 }
 
-export function canProceedFromBundleReview(review: PlanReviewPayload | null | undefined): boolean {
+export function resolveExecutionBundleKey(bundle: ExecutionBundlePreview, index = 0): string {
+  if (bundle.bundle_id && bundle.bundle_id.trim().length > 0) {
+    return bundle.bundle_id;
+  }
+  if (bundle.item_ids.length > 0) {
+    return `bundle:${bundle.item_ids.join("::")}`;
+  }
+  return `bundle:${index + 1}`;
+}
+
+export function reconcileBundleDecisionRecord(
+  review: PlanReviewPayload | null | undefined,
+  previous: BundleDecisionRecord = {},
+): BundleDecisionRecord {
+  if (!review) {
+    return {};
+  }
+
+  const next: BundleDecisionRecord = {};
+  review.execution_plan.execution_bundles.forEach((bundle, index) => {
+    if (bundle.status === "clear") {
+      return;
+    }
+    const key = resolveExecutionBundleKey(bundle, index);
+    next[key] = previous[key] ?? "unresolved";
+  });
+  return next;
+}
+
+export function canProceedFromBundleReview(
+  review: PlanReviewPayload | null | undefined,
+  decisions: BundleDecisionRecord = {},
+): boolean {
   if (!review) {
     return true;
   }
-  return review.execution_plan.execution_bundles.every((bundle) => bundle.status === "clear");
+  return review.execution_plan.execution_bundles.every((bundle, index) => {
+    if (bundle.status === "clear") {
+      return true;
+    }
+    return decisions[resolveExecutionBundleKey(bundle, index)] === "accepted";
+  });
+}
+
+export function summarizeBundleDecisionProgress(
+  review: PlanReviewPayload | null | undefined,
+  decisions: BundleDecisionRecord = {},
+): {
+  total: number;
+  clear: number;
+  accepted: number;
+  splitRequested: number;
+  needsItemRevision: number;
+  unresolved: number;
+  blocking: number;
+} {
+  if (!review) {
+    return {
+      total: 0,
+      clear: 0,
+      accepted: 0,
+      splitRequested: 0,
+      needsItemRevision: 0,
+      unresolved: 0,
+      blocking: 0,
+    };
+  }
+
+  let clear = 0;
+  let accepted = 0;
+  let splitRequested = 0;
+  let needsItemRevision = 0;
+  let unresolved = 0;
+
+  review.execution_plan.execution_bundles.forEach((bundle, index) => {
+    if (bundle.status === "clear") {
+      clear += 1;
+      return;
+    }
+    const decision = decisions[resolveExecutionBundleKey(bundle, index)] ?? "unresolved";
+    if (decision === "accepted") {
+      accepted += 1;
+    } else if (decision === "split_requested") {
+      splitRequested += 1;
+    } else if (decision === "needs_item_revision") {
+      needsItemRevision += 1;
+    } else {
+      unresolved += 1;
+    }
+  });
+
+  return {
+    total: review.execution_plan.execution_bundles.length,
+    clear,
+    accepted,
+    splitRequested,
+    needsItemRevision,
+    unresolved,
+    blocking: splitRequested + needsItemRevision + unresolved,
+  };
 }
 
 export function updateBatchItemStateRecord(

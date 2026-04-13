@@ -12,10 +12,15 @@ param(
 
 $ErrorActionPreference = "Stop"
 $stoppedProcessIds = [System.Collections.Generic.HashSet[int]]::new()
+$repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $servicePorts = @{
     frontend = [System.Collections.Generic.HashSet[int]]::new()
     workstation = [System.Collections.Generic.HashSet[int]]::new()
     web = [System.Collections.Generic.HashSet[int]]::new()
+}
+$protectedDockerProcessNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+foreach ($processName in @("com.docker.backend", "wslrelay", "vpnkit", "docker")) {
+    $null = $protectedDockerProcessNames.Add($processName)
 }
 
 function Add-ServicePort {
@@ -135,11 +140,151 @@ function Get-PidsByPort {
     return @($resolvedPids)
 }
 
+function Get-ProcessDescriptor {
+    param([int]$ProcessId)
+
+    try {
+        $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+        if ($null -eq $process) {
+            return $null
+        }
+
+        $cimProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction SilentlyContinue
+        return [pscustomobject]@{
+            Process = $process
+            ProcessName = [string]$process.ProcessName
+            ExecutablePath = if ($null -ne $cimProcess) { [string]$cimProcess.ExecutablePath } else { "" }
+            CommandLine = if ($null -ne $cimProcess) { [string]$cimProcess.CommandLine } else { "" }
+        }
+    } catch {
+        return $null
+    }
+}
+
+function Test-TextContains {
+    param(
+        [string]$Text,
+        [string]$Fragment
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Text) -or [string]::IsNullOrWhiteSpace($Fragment)) {
+        return $false
+    }
+
+    return $Text.IndexOf($Fragment, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+}
+
+function Test-TextContainsAny {
+    param(
+        [string]$Text,
+        [string[]]$Fragments
+    )
+
+    foreach ($fragment in @($Fragments)) {
+        if (Test-TextContains -Text $Text -Fragment $fragment) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Test-PathWithinRepo {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return $false
+    }
+
+    try {
+        $fullPath = [System.IO.Path]::GetFullPath($Path)
+        return $fullPath.StartsWith($repoRoot, [System.StringComparison]::OrdinalIgnoreCase)
+    } catch {
+        return $false
+    }
+}
+
+function Test-IsProtectedDockerProcess {
+    param([object]$Descriptor)
+
+    if ($null -eq $Descriptor) {
+        return $false
+    }
+
+    if ($protectedDockerProcessNames.Contains([string]$Descriptor.ProcessName)) {
+        return $true
+    }
+
+    if (Test-TextContainsAny -Text $Descriptor.CommandLine -Fragments @("docker desktop", "com.docker.backend", "dockerbackendapiserver", "dockerdesktoplinuxengine")) {
+        return $true
+    }
+
+    if (Test-TextContainsAny -Text $Descriptor.ExecutablePath -Fragments @("Docker\Docker", "Docker Desktop")) {
+        return $true
+    }
+
+    return $false
+}
+
+function Test-IsExpectedServiceProcess {
+    param(
+        [string]$ServiceName,
+        [object]$Descriptor
+    )
+
+    if ($null -eq $Descriptor) {
+        return $false
+    }
+
+    $serviceKey = [string]$ServiceName
+    $commandLine = [string]$Descriptor.CommandLine
+    $executablePath = [string]$Descriptor.ExecutablePath
+    $processName = [string]$Descriptor.ProcessName
+    $isRepoOwned = (Test-PathWithinRepo -Path $executablePath) -or (Test-TextContains -Text $commandLine -Fragment $repoRoot)
+
+    switch -Regex ($serviceKey) {
+        "^frontend$" {
+            if ($processName -match "^(?i:python|python3|py|node|npm)$" -and $isRepoOwned) {
+                if (Test-TextContainsAny -Text $commandLine -Fragments @("http.server", "vite", "frontend")) {
+                    return $true
+                }
+            }
+            return $false
+        }
+        "^workstation$" {
+            if ($processName -match "^(?i:python|python3|py)$" -and $isRepoOwned) {
+                if (Test-TextContainsAny -Text $commandLine -Fragments @("main_workstation.py", "main_workstation:app", "uvicorn")) {
+                    return $true
+                }
+            }
+            return $false
+        }
+        "^web$" {
+            if (Test-IsProtectedDockerProcess -Descriptor $Descriptor) {
+                return $false
+            }
+            if ($processName -match "^(?i:python|python3|py)$" -and $isRepoOwned) {
+                if (Test-TextContainsAny -Text $commandLine -Fragments @("main_web.py", "main_web:app", "uvicorn")) {
+                    return $true
+                }
+            }
+            return $false
+        }
+        "^log-viewer$" {
+            return $processName -match "^(?i:powershell|pwsh|cmd|WindowsTerminal)$"
+        }
+        default {
+            return $true
+        }
+    }
+}
+
 function Stop-ProcessById {
     param(
         [string]$Name,
         [int]$ProcessId,
-        [string]$Detail = ""
+        [string]$Detail = "",
+        [switch]$SkipServiceValidation
     )
 
     if ($ProcessId -le 0) {
@@ -151,8 +296,8 @@ function Stop-ProcessById {
     }
 
     try {
-        $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
-        if ($null -eq $process) {
+        $descriptor = Get-ProcessDescriptor -ProcessId $ProcessId
+        if ($null -eq $descriptor) {
             if ([string]::IsNullOrWhiteSpace($Detail)) {
                 Write-Host "[$Name] PID $ProcessId 已不存在，无需停止"
             } else {
@@ -160,12 +305,25 @@ function Stop-ProcessById {
             }
             return $false
         }
+
+        if (-not $SkipServiceValidation) {
+            if (Test-IsProtectedDockerProcess -Descriptor $descriptor) {
+                Write-Host "[$Name] 跳过 PID $ProcessId ($($descriptor.ProcessName))，检测为 Docker/WSL 宿主代理进程"
+                return $false
+            }
+
+            if (-not (Test-IsExpectedServiceProcess -ServiceName $Name -Descriptor $descriptor)) {
+                Write-Warning "[$Name] 跳过 PID $ProcessId ($($descriptor.ProcessName))，未识别为当前仓库的本地服务进程"
+                return $false
+            }
+        }
+
         Stop-Process -Id $ProcessId -Force -ErrorAction Stop
         $null = $stoppedProcessIds.Add($ProcessId)
         if ([string]::IsNullOrWhiteSpace($Detail)) {
-            Write-Host "[$Name] 已停止 PID $ProcessId ($($process.ProcessName))"
+            Write-Host "[$Name] 已停止 PID $ProcessId ($($descriptor.ProcessName))"
         } else {
-            Write-Host "[$Name] 已停止 PID $ProcessId ($($process.ProcessName))，$Detail"
+            Write-Host "[$Name] 已停止 PID $ProcessId ($($descriptor.ProcessName))，$Detail"
         }
         return $true
     } catch {
@@ -329,7 +487,7 @@ function Stop-ProcessesFromLocalDeployState {
         try {
             $viewerPid = (Get-Content -LiteralPath $viewerPidPath.FullName -Raw).Trim()
             if ($viewerPid -match "^\d+$") {
-                $null = Stop-ProcessById -Name "log-viewer" -ProcessId ([int]$viewerPid) -Detail "日志窗口"
+                $null = Stop-ProcessById -Name "log-viewer" -ProcessId ([int]$viewerPid) -Detail "日志窗口" -SkipServiceValidation
             }
         } catch {
         }

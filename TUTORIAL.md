@@ -79,6 +79,7 @@ tools\setup_mod_deps.bat
 - 检测并安装 .NET 9 SDK（通过 winget）
 - 下载 Godot 4.5.1 Mono（~130MB）并解压到 `godot/` 目录
 - 安装 `ilspycmd 9.1.0.7988`（优先 `dotnet tool`，失败时回退到 `runtime/tools` 本地副本）
+- 自动把 `~/.dotnet/tools` 和项目内 `runtime/tools` 写入当前会话与用户 `PATH`
 - 将 Godot 路径写入 `config.json`
 
 > Linux/macOS 用户：使用 `./tools/install.sh` 和 `./tools/setup_mod_deps.sh`
@@ -192,7 +193,13 @@ tools\start.bat
 2. 用自然语言描述你的 mod 主题，例如：
    > "一个冰霜法师角色，有 5 张攻击卡（造成伤害+施加冻结）、3 张技能（产生防御/加速）、2 件遗物（强化冻结效果）"
 3. AI 自动生成规划，列出所有素材清单
-4. 确认规划后，批量生成所有素材
+4. 先完成 **Item 复核**：
+   - 补齐目标、范围、依赖原因、验收说明
+   - 处理 `待补充 / 存在错误` 的 item
+5. 再完成 **执行策略决策**：
+   - 查看系统给出的 bundle 分组
+   - 处理风险 bundle 的“接受当前分组 / 要求拆分 / 返回补充说明”
+6. 两道确认都通过后，再批量生成所有素材
 
 ### 修改已有代码
 
@@ -240,6 +247,7 @@ python tools/dev/decompile_sts2.py --game-path "C:/Steam/steamapps/common/Slay t
 如果直接从工作站界面更新知识库，则会把结果同步到 `runtime/knowledge/` 下的本地缓存。
 
 `tools\install.bat` / `tools\setup_mod_deps.bat` 现在会尝试自动安装 `ilspycmd`。
+若安装脚本把工具落到项目内 `runtime/tools`，也会自动加入当前会话与用户 `PATH`。
 若自动安装失败，也可以手动执行：
 ```bash
 dotnet tool install -g ilspycmd --version 9.1.0.7988 --add-source https://api.nuget.org/v3/index.json --ignore-failed-sources

@@ -30,3 +30,12 @@ test("settings panel exposes knowledge source labels for game and baselib", () =
   assert.match(source, /Baselib 知识来源/);
   assert.match(source, /source_mode/);
 });
+
+test("settings panel exposes knowledge progress bars for check and refresh flows", () => {
+  const source = readSource("../src/components/SettingsPanel.tsx");
+
+  assert.match(source, /检查进度/);
+  assert.match(source, /更新进度/);
+  assert.match(source, /ProgressBar/);
+  assert.match(source, /knowledgeChecking/);
+});

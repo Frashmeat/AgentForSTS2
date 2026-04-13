@@ -80,10 +80,22 @@ def _normalize_review_strictness(value: object) -> str:
     return "balanced"
 
 
-def _build_plan_review_payload(plan, strictness: str = "balanced") -> dict:
+def _normalize_bundle_decisions(value: object) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    normalized: dict[str, str] = {}
+    for key, decision in value.items():
+        if not isinstance(key, str):
+            continue
+        if decision in {"unresolved", "accepted", "split_requested", "needs_item_revision"}:
+            normalized[key] = str(decision)
+    return normalized
+
+
+def _build_plan_review_payload(plan, strictness: str = "balanced", bundle_decisions: dict[str, str] | None = None) -> dict:
     normalized = _normalize_review_strictness(strictness)
     validation = validate_plan(plan, normalized).to_dict()
-    execution_plan = build_execution_plan(plan, normalized).to_dict()
+    execution_plan = build_execution_plan(plan, normalized, _normalize_bundle_decisions(bundle_decisions)).to_dict()
     return {
         "strictness": normalized,
         "validation": validation,
@@ -91,8 +103,9 @@ def _build_plan_review_payload(plan, strictness: str = "balanced") -> dict:
     }
 
 
-def _ensure_plan_review_passes(plan, strictness: str = "balanced") -> dict:
-    review = _build_plan_review_payload(plan, strictness)
+def _ensure_plan_review_passes(plan, strictness: str = "balanced", bundle_decisions: dict[str, str] | None = None) -> dict:
+    normalized_decisions = _normalize_bundle_decisions(bundle_decisions)
+    review = _build_plan_review_payload(plan, strictness, normalized_decisions)
     validation_items = review["validation"]["items"]
     bundle_items = review["execution_plan"]["execution_bundles"]
 
@@ -100,7 +113,12 @@ def _ensure_plan_review_passes(plan, strictness: str = "balanced") -> dict:
         raise HTTPException(status_code=400, detail="计划存在错误，无法进入执行")
     if any(item["status"] == "needs_user_input" for item in validation_items):
         raise HTTPException(status_code=400, detail="计划仍需补充说明，无法进入执行")
-    if any(bundle["status"] != "clear" for bundle in bundle_items):
+    unresolved_bundles = [
+        bundle
+        for bundle in bundle_items
+        if bundle["status"] != "clear" and normalized_decisions.get(bundle.get("bundle_id", "")) != "accepted"
+    ]
+    if unresolved_bundles:
         raise HTTPException(status_code=400, detail="执行策略分组仍需确认，无法进入执行")
 
     return review
@@ -201,8 +219,9 @@ def api_plan_review(body: dict):
     if not isinstance(plan_data, dict):
         raise HTTPException(status_code=400, detail="缺少计划数据，无法评审")
     strictness = _normalize_review_strictness(body.get("strictness"))
+    bundle_decisions = _normalize_bundle_decisions(body.get("bundle_decisions"))
     plan = plan_from_dict(plan_data)
-    return _build_plan_review_payload(plan, strictness)
+    return _build_plan_review_payload(plan, strictness, bundle_decisions)
 
 
 def _api_plan_impl(body: dict):
@@ -266,6 +285,7 @@ async def _handle_ws_batch(ws: WebSocket, *, initial_params: dict | None = None)
             params = initial_params
         action = params.get("action")
         review_strictness = _normalize_review_strictness(params.get("review_strictness"))
+        bundle_decisions = _normalize_bundle_decisions(params.get("bundle_decisions"))
         review_gate_requested = "review_strictness" in params
 
         project_root = Path(params["project_root"])
@@ -277,7 +297,7 @@ async def _handle_ws_batch(ws: WebSocket, *, initial_params: dict | None = None)
             # 直接用已有 plan 执行，跳过规划阶段（恢复上次规划用）
             plan = plan_from_dict(params["plan"])
             if review_gate_requested:
-                _ensure_plan_review_passes(plan, review_strictness)
+                _ensure_plan_review_passes(plan, review_strictness, bundle_decisions)
         else:
             assert action == "start", _text("batch_start_action_expected").strip()
             requirements: str = params["requirements"]
@@ -286,7 +306,7 @@ async def _handle_ws_batch(ws: WebSocket, *, initial_params: dict | None = None)
             await send_stage("text", "planning", _text("batch_planning_stage").strip())
             await send("planning")
             plan = await plan_mod(requirements)
-            await send("plan_ready", plan=plan.to_dict(), review=_build_plan_review_payload(plan, review_strictness))
+            await send("plan_ready", plan=plan.to_dict(), review=_build_plan_review_payload(plan, review_strictness, bundle_decisions))
 
             # ── 3. 等待用户确认计划 ───────────────────────────────────────────
             raw = await ws.receive_text()
@@ -295,10 +315,11 @@ async def _handle_ws_batch(ws: WebSocket, *, initial_params: dict | None = None)
             if "review_strictness" in confirm:
                 review_gate_requested = True
                 review_strictness = _normalize_review_strictness(confirm.get("review_strictness", review_strictness))
+            bundle_decisions = _normalize_bundle_decisions(confirm.get("bundle_decisions"))
             if confirm.get("plan"):
                 plan = plan_from_dict(confirm["plan"])
             if review_gate_requested:
-                _ensure_plan_review_passes(plan, review_strictness)
+                _ensure_plan_review_passes(plan, review_strictness, bundle_decisions)
 
         sorted_items = topological_sort(plan.items)
         groups = find_groups(sorted_items)          # 按依赖关系分组

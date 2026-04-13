@@ -13,21 +13,23 @@ from typing import Any
 import httpx
 
 from app.shared.infra.config import settings as settings_module
-from config import get_config, get_decompiled_src_path
+from config import get_config
 
 BACKEND_ROOT = Path(__file__).resolve().parents[4]
 REPO_ROOT = BACKEND_ROOT.parent
-API_REF_PATH = BACKEND_ROOT / "agents" / "sts2_api_reference.md"
+# 仓库内静态知识文件只作为首次初始化 runtime/knowledge 的 seed source，
+# 不是运行时并列真源。
+GAME_REFERENCE_SEED_PATH = BACKEND_ROOT / "agents" / "sts2_api_reference.md"
 KNOWLEDGE_ROOT = settings_module.RUNTIME_CONFIG_PATH.parent / "knowledge"
-GAME_DECOMPILED_DIR = KNOWLEDGE_ROOT / "game"
-BASELIB_DECOMPILED_DIR = KNOWLEDGE_ROOT / "baselib"
+GAME_KNOWLEDGE_DIR = KNOWLEDGE_ROOT / "game"
+BASELIB_KNOWLEDGE_DIR = KNOWLEDGE_ROOT / "baselib"
 RESOURCE_KNOWLEDGE_DIR = KNOWLEDGE_ROOT / "resources" / "sts2"
 KNOWLEDGE_CACHE_DIR = KNOWLEDGE_ROOT / "cache"
 KNOWLEDGE_MANIFEST_PATH = KNOWLEDGE_ROOT / "knowledge-manifest.json"
-BASELIB_FALLBACK_PATH = BACKEND_ROOT / "agents" / "baselib_src" / "BaseLib.decompiled.cs"
+BASELIB_REFERENCE_SEED_PATH = BACKEND_ROOT / "agents" / "baselib_src" / "BaseLib.decompiled.cs"
 GAME_KNOWLEDGE_SEED_DIR = BACKEND_ROOT / "agents" / "game_seed"
-GAME_KNOWLEDGE_SEED_FILE = API_REF_PATH
-BASELIB_KNOWLEDGE_SEED_FILE = BASELIB_FALLBACK_PATH
+GAME_KNOWLEDGE_SEED_FILE = GAME_REFERENCE_SEED_PATH
+BASELIB_KNOWLEDGE_SEED_FILE = BASELIB_REFERENCE_SEED_PATH
 RESOURCE_KNOWLEDGE_SEED_DIR = BACKEND_ROOT / "app" / "modules" / "knowledge" / "resources" / "sts2"
 STS2_DLL_RELATIVE = Path("data_sts2_windows_x86_64") / "sts2.dll"
 BASELIB_RELEASES_URL = "https://github.com/Alchyr/BaseLib-StS2/releases"
@@ -38,6 +40,7 @@ _REFRESH_TASKS_LOCK = threading.Lock()
 _ILSPY_PATH_ENV = "SPIREFORGE_ILSPYCMD_PATH"
 _ILSPY_CANDIDATE_NAMES = ("ilspycmd.exe", "ilspycmd", "ILSpyCmd.dll", "ilspycmd.dll")
 _ILSPY_SEARCH_ROOTS = (
+    settings_module.RUNTIME_CONFIG_PATH.parent / "tools",
     REPO_ROOT,
     REPO_ROOT / "tools",
     REPO_ROOT / "runtime",
@@ -49,8 +52,8 @@ _ILSPY_SKIP_DIRS = {".git", ".venv", "node_modules", "__pycache__", ".tmp"}
 def ensure_knowledge_dirs() -> None:
     KNOWLEDGE_ROOT.mkdir(parents=True, exist_ok=True)
     KNOWLEDGE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    GAME_DECOMPILED_DIR.mkdir(parents=True, exist_ok=True)
-    BASELIB_DECOMPILED_DIR.mkdir(parents=True, exist_ok=True)
+    GAME_KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
+    BASELIB_KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
     RESOURCE_KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -79,9 +82,9 @@ def _copy_missing_file(source_file: Path, target_file: Path) -> None:
 
 def ensure_runtime_knowledge_seeded() -> None:
     ensure_knowledge_dirs()
-    _copy_missing_tree(Path(GAME_KNOWLEDGE_SEED_DIR), GAME_DECOMPILED_DIR)
-    _copy_missing_file(Path(GAME_KNOWLEDGE_SEED_FILE), GAME_DECOMPILED_DIR / Path(GAME_KNOWLEDGE_SEED_FILE).name)
-    _copy_missing_file(Path(BASELIB_KNOWLEDGE_SEED_FILE), BASELIB_DECOMPILED_DIR / "BaseLib.decompiled.cs")
+    _copy_missing_tree(Path(GAME_KNOWLEDGE_SEED_DIR), GAME_KNOWLEDGE_DIR)
+    _copy_missing_file(Path(GAME_KNOWLEDGE_SEED_FILE), GAME_KNOWLEDGE_DIR / Path(GAME_KNOWLEDGE_SEED_FILE).name)
+    _copy_missing_file(Path(BASELIB_KNOWLEDGE_SEED_FILE), BASELIB_KNOWLEDGE_DIR / "BaseLib.decompiled.cs")
     _copy_missing_tree(Path(RESOURCE_KNOWLEDGE_SEED_DIR), RESOURCE_KNOWLEDGE_DIR)
 
 
@@ -171,7 +174,8 @@ def _default_status_payload(status: str) -> dict[str, Any]:
             "matches": None,
             "version_source": "steam_app_manifest",
             "source_mode": _resolve_game_source_mode(),
-            "decompiled_src_path": str(GAME_DECOMPILED_DIR),
+            "knowledge_path": str(GAME_KNOWLEDGE_DIR),
+            "decompiled_src_path": str(GAME_KNOWLEDGE_DIR),
         },
         "baselib": {
             "release_tag": None,
@@ -179,7 +183,8 @@ def _default_status_payload(status: str) -> dict[str, Any]:
             "matches": None,
             "release_url": BASELIB_RELEASES_URL,
             "source_mode": _resolve_baselib_source_mode(),
-            "decompiled_src_path": str(BASELIB_DECOMPILED_DIR),
+            "knowledge_path": str(BASELIB_KNOWLEDGE_DIR),
+            "decompiled_src_path": str(BASELIB_KNOWLEDGE_DIR),
         },
     }
 
@@ -250,13 +255,13 @@ def _directory_has_sources(path: Path) -> bool:
 
 
 def _resolve_game_source_mode() -> str:
-    if _directory_has_sources(GAME_DECOMPILED_DIR):
+    if _directory_has_sources(GAME_KNOWLEDGE_DIR):
         return "runtime_decompiled"
     return "missing"
 
 
 def _resolve_baselib_source_mode() -> str:
-    if (BASELIB_DECOMPILED_DIR / "BaseLib.decompiled.cs").exists():
+    if (BASELIB_KNOWLEDGE_DIR / "BaseLib.decompiled.cs").exists():
         return "runtime_decompiled"
     return "missing"
 
@@ -271,9 +276,9 @@ def get_knowledge_status() -> dict[str, Any]:
             payload["warnings"].append("未配置 STS2 游戏路径，无法更新知识库")
         if not _has_ilspycmd():
             payload["warnings"].append("未检测到 ilspycmd，无法反编译游戏和 BaseLib（会先查项目目录，再查 PATH）")
-        if not _directory_has_sources(GAME_DECOMPILED_DIR):
+        if not _directory_has_sources(GAME_KNOWLEDGE_DIR):
             payload["warnings"].append("游戏反编译源码目录为空，请先执行“更新知识库”")
-        if not (BASELIB_DECOMPILED_DIR / "BaseLib.decompiled.cs").exists():
+        if not (BASELIB_KNOWLEDGE_DIR / "BaseLib.decompiled.cs").exists():
             payload["warnings"].append("BaseLib 反编译结果缺失，请先执行“更新知识库”")
         return payload
 
@@ -285,8 +290,10 @@ def get_knowledge_status() -> dict[str, Any]:
     payload["baselib"]["release_tag"] = manifest.get("baselib", {}).get("release_tag")
     payload["game"]["source_mode"] = _resolve_game_source_mode()
     payload["baselib"]["source_mode"] = _resolve_baselib_source_mode()
-    payload["game"]["decompiled_src_path"] = manifest.get("game", {}).get("decompiled_src_path", str(GAME_DECOMPILED_DIR))
-    payload["baselib"]["decompiled_src_path"] = manifest.get("baselib", {}).get("decompiled_src_path", str(BASELIB_DECOMPILED_DIR))
+    payload["game"]["knowledge_path"] = manifest.get("game", {}).get("decompiled_src_path", str(GAME_KNOWLEDGE_DIR))
+    payload["baselib"]["knowledge_path"] = manifest.get("baselib", {}).get("decompiled_src_path", str(BASELIB_KNOWLEDGE_DIR))
+    payload["game"]["decompiled_src_path"] = manifest.get("game", {}).get("decompiled_src_path", str(GAME_KNOWLEDGE_DIR))
+    payload["baselib"]["decompiled_src_path"] = manifest.get("baselib", {}).get("decompiled_src_path", str(BASELIB_KNOWLEDGE_DIR))
 
     game_path = _manifest_game_dir(manifest)
     try:
@@ -306,8 +313,8 @@ def get_knowledge_status() -> dict[str, Any]:
         payload["warnings"].append(str(exc))
         payload["baselib"]["matches"] = None
 
-    game_runtime_ready = _directory_has_sources(Path(payload["game"]["decompiled_src_path"]))
-    baselib_runtime_ready = Path(str(payload["baselib"]["decompiled_src_path"])).joinpath("BaseLib.decompiled.cs").exists()
+    game_runtime_ready = _directory_has_sources(Path(payload["game"]["knowledge_path"]))
+    baselib_runtime_ready = Path(str(payload["baselib"]["knowledge_path"])).joinpath("BaseLib.decompiled.cs").exists()
     if not game_runtime_ready or not baselib_runtime_ready:
         payload["status"] = "missing"
         return payload
@@ -326,30 +333,6 @@ def get_knowledge_status() -> dict[str, Any]:
 
 def check_knowledge_status() -> dict[str, Any]:
     return get_knowledge_status()
-
-
-def get_active_game_decompiled_src_path() -> str | None:
-    manifest = load_manifest()
-    if manifest is not None:
-        candidate = Path(str(manifest.get("game", {}).get("decompiled_src_path", "")).strip())
-        if candidate.is_dir():
-            return str(candidate)
-    if _directory_has_sources(GAME_DECOMPILED_DIR):
-        return str(GAME_DECOMPILED_DIR)
-    return None
-
-
-def get_active_baselib_src_path() -> str | None:
-    manifest = load_manifest()
-    if manifest is not None:
-        candidate_root = Path(str(manifest.get("baselib", {}).get("decompiled_src_path", "")).strip())
-        candidate_file = candidate_root / "BaseLib.decompiled.cs"
-        if candidate_file.exists():
-            return str(candidate_file)
-    runtime_file = BASELIB_DECOMPILED_DIR / "BaseLib.decompiled.cs"
-    if runtime_file.exists():
-        return str(runtime_file)
-    return None
 
 
 def _reset_dir(path: Path) -> None:
@@ -480,7 +463,7 @@ def _run_refresh_impl(task: _RefreshTask) -> None:
     game_dll = _find_game_dll(sts2_path)
 
     task.set_step("反编译游戏源码")
-    _run_ilspy_outputdir(game_dll, GAME_DECOMPILED_DIR)
+    _run_ilspy_outputdir(game_dll, GAME_KNOWLEDGE_DIR)
 
     task.set_step("读取 Baselib latest release")
     release = fetch_latest_baselib_release()
@@ -491,8 +474,8 @@ def _run_refresh_impl(task: _RefreshTask) -> None:
     _download_file(str(asset["browser_download_url"]).strip(), baselib_dll_path)
 
     task.set_step("反编译 Baselib")
-    _reset_dir(BASELIB_DECOMPILED_DIR)
-    _run_ilspy_to_single_file(baselib_dll_path, BASELIB_DECOMPILED_DIR / "BaseLib.decompiled.cs")
+    _reset_dir(BASELIB_KNOWLEDGE_DIR)
+    _run_ilspy_to_single_file(baselib_dll_path, BASELIB_KNOWLEDGE_DIR / "BaseLib.decompiled.cs")
 
     manifest = {
         "schema_version": 1,
@@ -502,14 +485,14 @@ def _run_refresh_impl(task: _RefreshTask) -> None:
             "sts2_path": sts2_path,
             "version": game_info["version"],
             "version_source": game_info["source"],
-            "decompiled_src_path": str(GAME_DECOMPILED_DIR),
+            "decompiled_src_path": str(GAME_KNOWLEDGE_DIR),
         },
         "baselib": {
             "release_tag": release.get("tag_name"),
             "release_published_at": release.get("published_at"),
             "asset_name": asset.get("name"),
             "downloaded_file_path": str(baselib_dll_path),
-            "decompiled_src_path": str(BASELIB_DECOMPILED_DIR),
+            "decompiled_src_path": str(BASELIB_KNOWLEDGE_DIR),
         },
         "last_check": {
             "checked_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),

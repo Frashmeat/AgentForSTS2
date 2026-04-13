@@ -174,6 +174,21 @@ function Add-UserPathEntry([string]$PathEntry) {
     }
 }
 
+function Sync-ToolCommandPath([string]$ResolvedCommand) {
+    if ([string]::IsNullOrWhiteSpace($ResolvedCommand)) {
+        return
+    }
+
+    try {
+        $resolvedPath = (Resolve-Path -LiteralPath $ResolvedCommand -ErrorAction Stop).Path
+    }
+    catch {
+        return
+    }
+
+    Add-UserPathEntry -PathEntry (Split-Path -Parent $resolvedPath)
+}
+
 function Get-JsonConfigObject {
     if (-not (Test-Path -LiteralPath $script:ConfigPath)) {
         return [pscustomobject]@{}
@@ -353,9 +368,11 @@ function Ensure-IlspyCmd {
     Write-Section "检查 ilspycmd"
     Add-UserPathEntry -PathEntry $script:DotNetUserToolsDir
     Ensure-Directory -Path $script:RuntimeToolsDir
+    Add-UserPathEntry -PathEntry $script:RuntimeToolsDir
 
     $ilspyExe = Resolve-IlspyCmdCommand
     if ($ilspyExe) {
+        Sync-ToolCommandPath -ResolvedCommand $ilspyExe
         Write-Ok "ilspycmd 已安装"
         return $ilspyExe
     }
@@ -380,6 +397,7 @@ function Ensure-IlspyCmd {
     if (-not $resolved) {
         throw "ilspycmd 安装完成后仍未能解析到命令，请确认 PATH 或 runtime/tools 下的安装结果"
     }
+    Sync-ToolCommandPath -ResolvedCommand $resolved
 
     Write-Ok "ilspycmd 已就绪"
     return $resolved

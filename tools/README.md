@@ -99,7 +99,8 @@ tools/
 ### install
 
 - `tools\install\install.ps1`
-  Windows 主安装入口。统一安装或配置 .NET 9 SDK、Godot 4.5.1 Mono、后端依赖、前端依赖与前端构建；支持 `-OnlyModDeps`。
+  Windows 主安装入口。统一安装或配置 .NET 9 SDK、Godot 4.5.1 Mono、ilspycmd、后端依赖、前端依赖与前端构建；支持 `-OnlyModDeps`。
+  安装 `ilspycmd` 时会把 `~\.dotnet\tools` 和项目内 `runtime\tools` 同步加入当前会话与用户 PATH。
 - `tools\install\install.sh`
   Linux / macOS / WSL 安装入口。
 - `tools\install\setup_mod_deps.bat`
@@ -137,7 +138,8 @@ tools/
   优先读取 `local-deploy-state.json`、`split-local-state.json`、`runtime/workstation.config.json` 发现端口和 PID，再停止本机 `frontend`、`workstation`、`web` 三类进程；命令行端口参数仅作为显式覆盖。
   同时会清理当前 PowerShell 会话中残留的日志镜像事件与 writer 句柄，避免 `runtime/logs/*.log` 被持续占用。
   如存在 Docker 化 `web` 服务，也会对当前仓库 `tools\latest\artifacts` 下可识别的 release 尝试执行 `docker compose down --remove-orphans`。
-  注意：本机进程部分仍按监听端口判断归属；如果这些端口被其它程序占用，也会被一并停止。Docker 部分默认只处理当前仓库 `artifacts` 下能识别出的 release，不删除卷。
+  对 `web` 端口会先校验进程归属，显式跳过 `com.docker.backend`、`wslrelay` 等 Docker Desktop / WSL 宿主代理进程，避免误杀后导致 Docker 命名管道失联。
+  注意：`frontend` / `workstation` 的端口清理仍以“当前仓库本地服务进程”识别为前提；Docker 部分默认只处理当前仓库 `artifacts` 下能识别出的 release，不删除卷。
 
 ### latest
 
@@ -145,6 +147,7 @@ tools/
 
 - `tools\latest\package-release.ps1`
   按目标打包 release bundle，并可输出 zip。
+  `workstation` / `hybrid` release 会同步带上 `runtime\tools\`，确保 `ilspycmd` 这类运行时工具及其 `.store` 依赖目录一并进入发布目录。
   `workstation` 相关目标在传入 `-Debug` 时只会沿用已有 `runtime\workstation.config.json`，不再从旧 `services\workstation\config.json` 迁移设置。
 - `tools\latest\deploy-docker.ps1`
   按目标部署 mixed release。
@@ -154,6 +157,7 @@ tools/
   `hybrid` / `frontend` 未显式传入 `-WebBaseUrl` 时会默认写入本机 `http://127.0.0.1:7870`；`hybrid` 此时还会联动部署本机 `web-backend`。
   `hybrid` 默认会从当前 hybrid release 的同级目录推导本机 `web release`，并在联动部署前自动刷新该 release，确保跟随当前仓库模板；如目录不在同级，可显式传入 `-WebReleaseRoot`。
   Docker 构建默认会自动解析 `Python` 基础镜像，优先复用本机已有标签，并默认回退到 `m.daocloud.io/docker.io/library/python:3.11-slim`；如需手工指定，可传 `-PythonBaseImage`。
+  若默认 `runtime\logs\*.log` 正被旧进程占用，脚本会自动回退到带时间戳后缀的新日志文件，避免本机部署直接失败。
 - `tools\latest\stop-deploy.ps1`
   停止 `deploy-docker.ps1` 以本机模式拉起的 `workstation` / `frontend` 进程，并关闭对应日志窗口。
   状态文件位于 `release\runtime\local-deploy-state.json`；只关闭日志窗口并不会自动停止服务。

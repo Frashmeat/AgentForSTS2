@@ -124,11 +124,6 @@ interface PendingExecutionRequest extends PlatformExecutionRequest {
   localUnavailableReasons: string[];
 }
 
-interface PendingKnowledgeConfirmation {
-  request: PlatformExecutionRequest;
-  knowledgeStatus: KnowledgeStatus;
-}
-
 export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -160,7 +155,6 @@ export default function App() {
     () => initialSingleAssetSnapshot?.workflowState.stage === "approval_pending",
   );
   const [pendingExecution, setPendingExecution] = useState<PendingExecutionRequest | null>(null);
-  const [pendingKnowledgeConfirmation, setPendingKnowledgeConfirmation] = useState<PendingKnowledgeConfirmation | null>(null);
   const [knowledgeStatus, setKnowledgeStatus] = useState<KnowledgeStatus | null>(null);
   const [knowledgeGuideOpen, setKnowledgeGuideOpen] = useState(false);
   const [knowledgeRefreshTaskId, setKnowledgeRefreshTaskId] = useState("");
@@ -399,33 +393,7 @@ export default function App() {
     }
     const request = pendingExecution;
     setPendingExecution(null);
-    if (knowledgeStatus?.status === "missing") {
-      setPendingKnowledgeConfirmation({ request, knowledgeStatus });
-      return;
-    }
     request.runLocal();
-  }
-
-  function handleConfirmKnowledgeExecution() {
-    if (pendingKnowledgeConfirmation === null) {
-      return;
-    }
-    const request = pendingKnowledgeConfirmation.request;
-    setPendingKnowledgeConfirmation(null);
-    request.runLocal();
-  }
-
-  function handleOpenKnowledgeSettingsFromConfirmation() {
-    if (pendingKnowledgeConfirmation === null) {
-      return;
-    }
-    const request = pendingKnowledgeConfirmation.request;
-    setPendingKnowledgeConfirmation(null);
-    navigate(buildSettingsPath(buildWorkspacePath(request.tab)));
-  }
-
-  function handleOpenKnowledgeGuideFromConfirmation() {
-    setKnowledgeGuideOpen(true);
   }
 
   function handleGoLoginForServerExecution() {
@@ -777,61 +745,6 @@ export default function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <KnowledgeGuideDialog open={knowledgeGuideOpen} status={knowledgeStatus} onClose={() => setKnowledgeGuideOpen(false)} />
-      {pendingKnowledgeConfirmation && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/40 px-4">
-          <div className="w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl space-y-4">
-            <div className="space-y-2">
-              <p className="text-sm uppercase tracking-[0.24em] text-slate-400">Knowledge Check</p>
-              <h2 className="text-2xl font-semibold text-slate-900">当前知识库缺失</h2>
-              <p className="text-sm text-slate-500">
-                当前未检测到可用知识库，本次将以内置参考继续执行，结果准确性可能下降。是否继续？
-              </p>
-            </div>
-            {pendingKnowledgeConfirmation.knowledgeStatus.warnings.length > 0 && (
-              <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-4 text-sm text-slate-500">
-                {pendingKnowledgeConfirmation.knowledgeStatus.warnings.map((warning) => (
-                  <p key={warning} className="text-xs leading-5">- {warning}</p>
-                ))}
-              </div>
-            )}
-            <div className="grid gap-3">
-              <button
-                type="button"
-                onClick={handleConfirmKnowledgeExecution}
-                className="rounded-2xl border border-violet-300 px-4 py-4 text-left transition hover:border-violet-400 hover:bg-violet-50/40"
-              >
-                <p className="text-sm font-semibold text-slate-900">继续执行</p>
-                <p className="mt-1 text-xs text-slate-500">使用当前内置参考继续执行本机工作流。</p>
-              </button>
-              <button
-                type="button"
-                onClick={handleOpenKnowledgeSettingsFromConfirmation}
-                className="rounded-2xl border border-slate-200 px-4 py-4 text-left transition hover:border-amber-300 hover:bg-amber-50/40"
-              >
-                <p className="text-sm font-semibold text-slate-900">打开设置</p>
-                <p className="mt-1 text-xs text-slate-500">前往设置页检查知识库状态并尝试更新。</p>
-              </button>
-              <button
-                type="button"
-                onClick={handleOpenKnowledgeGuideFromConfirmation}
-                className="rounded-2xl border border-slate-200 px-4 py-4 text-left transition hover:border-slate-300 hover:bg-slate-50/40"
-              >
-                <p className="text-sm font-semibold text-slate-900">查看知识库说明</p>
-                <p className="mt-1 text-xs text-slate-500">查看当前知识来源、缓存目录和更新前提。</p>
-              </button>
-            </div>
-            <div className="flex justify-end">
-              <button
-                type="button"
-                className="rounded-xl px-4 py-2 text-sm text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
-                onClick={() => setPendingKnowledgeConfirmation(null)}
-              >
-                取消
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
       <ExecutionModeDialog
         open={pendingExecution !== null}
         title={pendingExecution?.title ?? "选择执行方式"}

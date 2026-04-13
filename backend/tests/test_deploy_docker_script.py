@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
 
 
@@ -64,21 +65,21 @@ def _write_fake_python(bin_dir: Path) -> Path:
 
 def _prepare_release_bundle(release_root: Path, target: str) -> tuple[Path, Path]:
     if target == "hybrid":
-        (release_root / "services" / "workstation" / "backend").mkdir(parents=True)
-        (release_root / "services" / "workstation" / "frontend" / "dist").mkdir(parents=True)
-        (release_root / "services" / "frontend" / "frontend" / "dist").mkdir(parents=True)
+        (release_root / "services" / "workstation" / "backend").mkdir(parents=True, exist_ok=True)
+        (release_root / "services" / "workstation" / "frontend" / "dist").mkdir(parents=True, exist_ok=True)
+        (release_root / "services" / "frontend" / "frontend" / "dist").mkdir(parents=True, exist_ok=True)
         (release_root / "services" / "workstation" / "config.example.json").write_text("{}", encoding="utf-8")
         compose = "services:\n  workstation:\n    image: fake\n  frontend:\n    image: fake\n"
     elif target == "frontend":
-        (release_root / "services" / "frontend" / "frontend" / "dist").mkdir(parents=True)
+        (release_root / "services" / "frontend" / "frontend" / "dist").mkdir(parents=True, exist_ok=True)
         compose = "services:\n  frontend:\n    image: fake\n"
     elif target == "web":
-        (release_root / "services" / "web").mkdir(parents=True)
+        (release_root / "services" / "web").mkdir(parents=True, exist_ok=True)
         (release_root / "services" / "web" / "config.example.json").write_text("{}", encoding="utf-8")
         compose = "services:\n  web:\n    image: fake\n"
     else:
-        (release_root / "services" / "workstation" / "backend").mkdir(parents=True)
-        (release_root / "services" / "workstation" / "frontend" / "dist").mkdir(parents=True)
+        (release_root / "services" / "workstation" / "backend").mkdir(parents=True, exist_ok=True)
+        (release_root / "services" / "workstation" / "frontend" / "dist").mkdir(parents=True, exist_ok=True)
         (release_root / "services" / "workstation" / "config.example.json").write_text("{}", encoding="utf-8")
         compose = "services:\n  workstation:\n    image: fake\n"
 
@@ -240,6 +241,51 @@ def test_deploy_docker_hybrid_runs_locally_without_current_release_docker_when_w
     assert "-m http.server 8080 --bind 127.0.0.1 --directory" in result.python_log
     assert runtime_config.exists()
     assert 'web: "https://platform.example.com"' in runtime_config.read_text(encoding="utf-8")
+
+
+def test_deploy_docker_workstation_falls_back_when_stdout_log_is_locked(tmp_path: Path):
+    release_root, _ = _prepare_release_bundle(tmp_path / "release", "workstation")
+    locked_log = release_root / "runtime" / "logs" / "workstation.stdout.log"
+    locked_log.parent.mkdir(parents=True, exist_ok=True)
+    locked_log.write_text("still in use\n", encoding="utf-8")
+
+    locked_log_ps = str(locked_log).replace("'", "''")
+    locker = subprocess.Popen(
+        [
+            "pwsh",
+            "-NoProfile",
+            "-Command",
+            (
+                f"$fs = [System.IO.File]::Open('{locked_log_ps}', [System.IO.FileMode]::Open, "
+                "[System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None); "
+                "Start-Sleep -Seconds 20; "
+                "$fs.Dispose()"
+            ),
+        ],
+        cwd=REPO_ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    try:
+        time.sleep(1.5)
+        result = _run_deploy(tmp_path)
+    finally:
+        locker.terminate()
+        try:
+            locker.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            locker.kill()
+            locker.wait(timeout=5)
+
+    log_dir = release_root / "runtime" / "logs"
+    rotated_logs = sorted(log_dir.glob("workstation.stdout.*.log"))
+
+    assert result.returncode == 0, result.stderr
+    assert "日志文件被占用" in result.stdout
+    assert locked_log.read_text(encoding="utf-8") == "still in use\n"
+    assert rotated_logs, "expected deploy-docker to fall back to a rotated stdout log file"
 
 
 def test_deploy_docker_hybrid_rejects_web_base_url_without_http_scheme(tmp_path: Path):

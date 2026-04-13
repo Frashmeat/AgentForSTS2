@@ -186,7 +186,6 @@ export function ModEditorFeatureView({
     <div className="space-y-5">
       <KnowledgeStatusBanner
         status={knowledgeStatus}
-        impactText="分析与修改结果准确性可能下降"
         onOpenGuide={onOpenKnowledgeGuide}
         onOpenSettings={onOpenSettings}
       />

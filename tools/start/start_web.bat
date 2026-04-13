@@ -4,6 +4,7 @@ title AgentTheSpire Web Backend
 
 set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..\..") do set "ROOT_DIR=%%~fI"
+set "SPIREFORGE_CONFIG_PATH=%ROOT_DIR%\runtime\web.config.json"
 
 for /f "tokens=5" %%a in ('netstat -ano 2^>nul ^| findstr ":7870 " ^| findstr "LISTENING"') do (
     echo 清理旧 Web 后端进程 PID %%a...

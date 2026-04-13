@@ -6,7 +6,7 @@ import subprocess
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 
 _ENV_KEYS = {
@@ -20,8 +20,17 @@ _APP_ROOT = Path(__file__).resolve().parents[5]
 
 
 def _resolve_runtime_config_path() -> Path:
-    if _APP_ROOT.name in {"workstation", "web"} and _APP_ROOT.parent.name == "services":
-        return _APP_ROOT.parents[1] / "runtime" / "workstation.config.json"
+    # Dockerized release bundles mount the effective runtime config to /app/config.json.
+    if _APP_ROOT.name == "backend":
+        docker_mounted_config = _APP_ROOT.parent / "config.json"
+        if docker_mounted_config.exists():
+            return docker_mounted_config
+
+    # Release bundles keep the real configs under <release>/runtime/<role>.config.json.
+    if _APP_ROOT.name == "backend" and _APP_ROOT.parent.name in {"workstation", "web"} and _APP_ROOT.parent.parent.name == "services":
+        role = _APP_ROOT.parent.name
+        return _APP_ROOT.parent.parent.parent / "runtime" / f"{role}.config.json"
+
     return _APP_ROOT / "runtime" / "workstation.config.json"
 
 
@@ -285,15 +294,3 @@ def update_config(patch: dict[str, Any]) -> dict[str, Any]:
     _config = normalize_config(_deep_merge(cfg, patch))
     save_config(_config)
     return _config
-
-
-def get_decompiled_src_path() -> Optional[str]:
-    env_value = os.environ.get("SPIREFORGE_DECOMPILED_SRC", "")
-    if env_value and Path(env_value).is_dir():
-        return env_value
-
-    cfg_value = get_config().get("decompiled_src_path", "")
-    if cfg_value and Path(cfg_value).is_dir():
-        return cfg_value
-
-    return None

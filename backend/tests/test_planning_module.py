@@ -405,7 +405,10 @@ def test_planning_service_build_execution_plan_marks_unclear_bundle_for_confirma
     result = service.build_execution_plan(plan, strictness="balanced")
 
     assert result.execution_bundles[0].status == "needs_confirmation"
+    assert result.execution_bundles[0].bundle_id == "bundle:shared_helper::shared_card"
     assert "unclear_coupling" in result.execution_bundles[0].risk_codes
+    assert result.execution_bundles[0].risk_details
+    assert result.execution_bundles[0].recommended_actions
 
 
 def test_planning_service_build_execution_plan_strict_mode_marks_large_bundle_for_confirmation():
@@ -448,3 +451,39 @@ def test_planning_service_build_execution_plan_strict_mode_marks_large_bundle_fo
     assert efficient.execution_bundles[0].status == "clear"
     assert strict.execution_bundles[0].status == "needs_confirmation"
     assert "bundle_size_threshold" in strict.execution_bundles[0].risk_codes
+
+
+def test_planning_service_build_execution_plan_applies_split_requested_decision():
+    service = PlanningService()
+    plan = service.plan_from_dict(
+        {
+            "mod_name": "SplitBundleMod",
+            "summary": "",
+            "items": [
+                {
+                    "id": "feature_a",
+                    "type": "custom_code",
+                    "name": "FeatureA",
+                    "coupling_kind": "shared_logic",
+                    "affected_targets": ["SharedFeature"],
+                },
+                {
+                    "id": "feature_b",
+                    "type": "card",
+                    "name": "FeatureB",
+                    "depends_on": ["feature_a"],
+                    "coupling_kind": "shared_logic",
+                    "affected_targets": ["SharedFeature"],
+                },
+            ],
+        }
+    )
+
+    result = service.build_execution_plan(
+        plan,
+        strictness="balanced",
+        bundle_decisions={"bundle:feature_a::feature_b": "split_requested"},
+    )
+
+    assert [bundle.item_ids for bundle in result.execution_bundles] == [["feature_a"], ["feature_b"]]
+    assert all(bundle.status == "clear" for bundle in result.execution_bundles)

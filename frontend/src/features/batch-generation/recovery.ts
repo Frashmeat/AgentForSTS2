@@ -1,13 +1,17 @@
 import { getApproval, type ApprovalRequest } from "../../shared/api/index.ts";
 import type {
   ExecutionBundlePreview,
+  ExecutionBundleRecommendedAction,
+  ExecutionBundleRiskDetail,
   PlanItemValidation,
   PlanReviewPayload,
 } from "../../shared/types/workflow.ts";
 import {
+  reconcileBundleDecisionRecord,
   createDefaultBatchItemState,
   createInitialBatchRuntimeState,
   updateBatchItemStateRecord,
+  type BundleDecisionRecord,
   type BatchItemState,
   type BatchItemStatus,
    type BatchRuntimeState,
@@ -67,6 +71,7 @@ interface BatchRuntimeSnapshot {
   itemStates: Record<string, BatchItemSnapshot>;
   planReview?: PlanReviewPayload | null;
   reviewStrictness?: ReviewStrictness;
+  bundleDecisions?: BundleDecisionRecord;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -191,11 +196,52 @@ function normalizeExecutionBundlePreview(value: unknown): ExecutionBundlePreview
     return null;
   }
 
+  const riskDetails = Array.isArray(value.risk_details)
+    ? value.risk_details
+        .filter((detail): detail is ExecutionBundleRiskDetail =>
+          isRecord(detail)
+            && typeof detail.code === "string"
+            && typeof detail.title === "string"
+            && typeof detail.summary === "string"
+            && typeof detail.recommendation === "string",
+        )
+        .map((detail) => ({
+          code: detail.code,
+          title: detail.title,
+          summary: detail.summary,
+          recommendation: detail.recommendation,
+          impact: typeof detail.impact === "string" ? detail.impact : undefined,
+        }))
+    : undefined;
+
+  const recommendedActions = Array.isArray(value.recommended_actions)
+    ? value.recommended_actions
+        .filter((action): action is ExecutionBundleRecommendedAction =>
+          isRecord(action)
+            && (action.action === "accept_bundle" || action.action === "split_bundle" || action.action === "revise_items")
+            && typeof action.label === "string"
+            && typeof action.description === "string",
+        )
+        .map((action) => ({
+          action: action.action,
+          label: action.label,
+          description: action.description,
+          emphasis:
+            action.emphasis === "primary" || action.emphasis === "secondary" || action.emphasis === "warning"
+              ? action.emphasis
+              : undefined,
+        }))
+    : undefined;
+
   return {
+    bundle_id: typeof value.bundle_id === "string" ? value.bundle_id : undefined,
     item_ids: asStringArray(value.item_ids),
     status,
     reason: value.reason,
     risk_codes: asStringArray(value.risk_codes),
+    risk_details: riskDetails,
+    recommended_actions: recommendedActions,
+    blocking_reason: typeof value.blocking_reason === "string" ? value.blocking_reason : undefined,
   };
 }
 
@@ -279,6 +325,7 @@ export function serializeBatchRuntimeSnapshot(state: BatchRuntimeState): BatchRu
     batchResult: state.batchResult,
     planReview: state.planReview,
     reviewStrictness: state.reviewStrictness,
+    bundleDecisions: state.bundleDecisions,
     itemStates: Object.fromEntries(
       Object.entries(state.itemStates).map(([itemId, itemState]) => [
         itemId,
@@ -306,6 +353,17 @@ export function restoreBatchRuntimeSnapshot(snapshot: unknown): BatchRuntimeStat
     return null;
   }
 
+  const normalizedReview = normalizePlanReviewPayload(snapshot.planReview);
+  const restoredDecisions: BundleDecisionRecord = isRecord(snapshot.bundleDecisions)
+    ? Object.fromEntries(
+        Object.entries(snapshot.bundleDecisions)
+          .filter((entry): entry is [string, string] =>
+            typeof entry[0] === "string"
+              && (entry[1] === "unresolved" || entry[1] === "accepted" || entry[1] === "split_requested" || entry[1] === "needs_item_revision"),
+          ),
+      ) as BundleDecisionRecord
+    : {};
+
   const baseState = createInitialBatchRuntimeState();
   return {
     ...baseState,
@@ -314,8 +372,11 @@ export function restoreBatchRuntimeSnapshot(snapshot: unknown): BatchRuntimeStat
     currentBatchStage: asNullableString(snapshot.currentBatchStage),
     batchStageHistory: asStringArray(snapshot.batchStageHistory),
     batchResult: normalizeBatchResult(snapshot.batchResult),
-    planReview: normalizePlanReviewPayload(snapshot.planReview),
+    planReview: normalizedReview,
     reviewStrictness: asReviewStrictness(snapshot.reviewStrictness),
+    bundleDecisions: normalizedReview
+      ? reconcileBundleDecisionRecord(normalizedReview, restoredDecisions)
+      : restoredDecisions,
     itemStates: Object.fromEntries(
       Object.entries(snapshot.itemStates).map(([itemId, itemState]) => [
         itemId,

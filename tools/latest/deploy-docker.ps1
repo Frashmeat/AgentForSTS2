@@ -529,6 +529,55 @@ function New-ProcessStartInfo {
     return $startInfo
 }
 
+function New-LogWriter {
+    param(
+        [string]$PreferredPath,
+        [string]$ServiceName,
+        [string]$StreamName,
+        [System.Text.Encoding]$Encoding
+    )
+
+    $parentDir = Split-Path -Path $PreferredPath -Parent
+    if (-not [string]::IsNullOrWhiteSpace($parentDir)) {
+        $null = New-Item -ItemType Directory -Path $parentDir -Force
+    }
+
+    $fileNameWithoutExtension = [System.IO.Path]::GetFileNameWithoutExtension($PreferredPath)
+    $extension = [System.IO.Path]::GetExtension($PreferredPath)
+    $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $candidates = @($PreferredPath)
+    for ($attempt = 1; $attempt -le 8; $attempt += 1) {
+        $candidates += Join-Path $parentDir ("{0}.{1}-{2}{3}" -f $fileNameWithoutExtension, $timestamp, $attempt, $extension)
+    }
+
+    $lastError = ""
+    foreach ($candidate in $candidates) {
+        try {
+            $stream = New-Object System.IO.FileStream(
+                $candidate,
+                [System.IO.FileMode]::Create,
+                [System.IO.FileAccess]::Write,
+                [System.IO.FileShare]::ReadWrite
+            )
+            $writer = New-Object System.IO.StreamWriter($stream, $Encoding)
+            $writer.AutoFlush = $true
+
+            if ($candidate -ne $PreferredPath) {
+                Write-Host ("日志文件被占用，{0}/{1} 改用: {2}" -f $ServiceName, $StreamName, $candidate) -ForegroundColor Yellow
+            }
+
+            return [pscustomobject]@{
+                Path = $candidate
+                Writer = $writer
+            }
+        } catch [System.IO.IOException], [System.UnauthorizedAccessException] {
+            $lastError = $_.Exception.Message
+        }
+    }
+
+    throw "无法为 $ServiceName/$StreamName 创建日志文件。首选路径: $PreferredPath。最后错误: $lastError"
+}
+
 function Start-LocalProcessWithMirroredLogs {
     param(
         [string]$ServiceName,
@@ -551,17 +600,15 @@ function Start-LocalProcessWithMirroredLogs {
     }
 
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-    [System.IO.File]::WriteAllText($StdOutPath, "", $utf8NoBom)
-    [System.IO.File]::WriteAllText($StdErrPath, "", $utf8NoBom)
+    $stdoutLog = New-LogWriter -PreferredPath $StdOutPath -ServiceName $ServiceName -StreamName "stdout" -Encoding $utf8NoBom
+    $stderrLog = New-LogWriter -PreferredPath $StdErrPath -ServiceName $ServiceName -StreamName "stderr" -Encoding $utf8NoBom
 
     $process = New-Object System.Diagnostics.Process
     $process.StartInfo = New-ProcessStartInfo -FilePath $FilePath -ArgumentList $ArgumentList -WorkingDirectory $WorkingDirectory
     $process.EnableRaisingEvents = $true
 
-    $stdoutWriter = New-Object System.IO.StreamWriter($StdOutPath, $false, $utf8NoBom)
-    $stdoutWriter.AutoFlush = $true
-    $stderrWriter = New-Object System.IO.StreamWriter($StdErrPath, $false, $utf8NoBom)
-    $stderrWriter.AutoFlush = $true
+    $stdoutWriter = $stdoutLog.Writer
+    $stderrWriter = $stderrLog.Writer
 
     if (-not $process.Start()) {
         $stdoutWriter.Dispose()
@@ -605,7 +652,11 @@ function Start-LocalProcessWithMirroredLogs {
 
     $process.BeginOutputReadLine()
     $process.BeginErrorReadLine()
-    return $process
+    return [pscustomobject]@{
+        Process = $process
+        StdOutPath = $stdoutLog.Path
+        StdErrPath = $stderrLog.Path
+    }
 }
 
 function Get-LogTail {
@@ -1333,7 +1384,7 @@ function Start-LocalWorkstationDeployment {
     Write-Host "  Python 解释器 : $pythonCommand"
     Write-Host "  stdout 日志   : $($logPaths.StdOut)"
     Write-Host "  stderr 日志   : $($logPaths.StdErr)"
-    $process = Start-LocalProcessWithMirroredLogs -ServiceName "workstation" -FilePath $pythonCommand -ArgumentList @(
+    $processEntry = Start-LocalProcessWithMirroredLogs -ServiceName "workstation" -FilePath $pythonCommand -ArgumentList @(
         "-m",
         "uvicorn",
         "main_workstation:app",
@@ -1342,19 +1393,19 @@ function Start-LocalWorkstationDeployment {
         "--port",
         "$ResolvedWorkstationPort"
     ) -WorkingDirectory $backendRoot -StdOutPath $logPaths.StdOut -StdErrPath $logPaths.StdErr
-    Start-LogViewerWindow -ReleaseRoot $ReleaseRoot -ServiceName "workstation" -StdOutPath $logPaths.StdOut -StdErrPath $logPaths.StdErr
+    Start-LogViewerWindow -ReleaseRoot $ReleaseRoot -ServiceName "workstation" -StdOutPath $processEntry.StdOutPath -StdErrPath $processEntry.StdErrPath
 
     try {
-        Wait-LocalServiceReady -Process $process -ServiceName "workstation-backend" -Url ("http://127.0.0.1:{0}/api/config" -f $ResolvedWorkstationPort) -StdOutPath $logPaths.StdOut -StdErrPath $logPaths.StdErr
+        Wait-LocalServiceReady -Process $processEntry.Process -ServiceName "workstation-backend" -Url ("http://127.0.0.1:{0}/api/config" -f $ResolvedWorkstationPort) -StdOutPath $processEntry.StdOutPath -StdErrPath $processEntry.StdErrPath
     } catch {
         try {
-            Stop-Process -Id $process.Id -Force -ErrorAction Stop
+            Stop-Process -Id $processEntry.Process.Id -Force -ErrorAction Stop
         } catch {
         }
         throw
     }
 
-    return $process
+    return $processEntry.Process
 }
 
 function Start-LocalFrontendDeployment {
@@ -1381,7 +1432,7 @@ function Start-LocalFrontendDeployment {
     Write-Host "  Python 解释器 : $pythonCommand"
     Write-Host "  stdout 日志   : $($logPaths.StdOut)"
     Write-Host "  stderr 日志   : $($logPaths.StdErr)"
-    $process = Start-LocalProcessWithMirroredLogs -ServiceName "frontend" -FilePath $pythonCommand -ArgumentList @(
+    $processEntry = Start-LocalProcessWithMirroredLogs -ServiceName "frontend" -FilePath $pythonCommand -ArgumentList @(
         "-m",
         "http.server",
         "$ResolvedFrontendPort",
@@ -1390,19 +1441,19 @@ function Start-LocalFrontendDeployment {
         "--directory",
         $FrontendDist
     ) -WorkingDirectory $FrontendDist -StdOutPath $logPaths.StdOut -StdErrPath $logPaths.StdErr
-    Start-LogViewerWindow -ReleaseRoot $ReleaseRoot -ServiceName "frontend" -StdOutPath $logPaths.StdOut -StdErrPath $logPaths.StdErr
+    Start-LogViewerWindow -ReleaseRoot $ReleaseRoot -ServiceName "frontend" -StdOutPath $processEntry.StdOutPath -StdErrPath $processEntry.StdErrPath
 
     try {
-        Wait-LocalServiceReady -Process $process -ServiceName "frontend-static" -Url ("http://127.0.0.1:{0}/runtime-config.js" -f $ResolvedFrontendPort) -StdOutPath $logPaths.StdOut -StdErrPath $logPaths.StdErr
+        Wait-LocalServiceReady -Process $processEntry.Process -ServiceName "frontend-static" -Url ("http://127.0.0.1:{0}/runtime-config.js" -f $ResolvedFrontendPort) -StdOutPath $processEntry.StdOutPath -StdErrPath $processEntry.StdErrPath
     } catch {
         try {
-            Stop-Process -Id $process.Id -Force -ErrorAction Stop
+            Stop-Process -Id $processEntry.Process.Id -Force -ErrorAction Stop
         } catch {
         }
         throw
     }
 
-    return $process
+    return $processEntry.Process
 }
 
 function Get-BuildServices {

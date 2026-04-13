@@ -34,11 +34,30 @@ export interface DependencyGroupPreview {
   item_ids: string[];
 }
 
+export interface ExecutionBundleRiskDetail {
+  code: string;
+  title: string;
+  summary: string;
+  recommendation: string;
+  impact?: string;
+}
+
+export interface ExecutionBundleRecommendedAction {
+  action: "accept_bundle" | "split_bundle" | "revise_items";
+  label: string;
+  description: string;
+  emphasis?: "primary" | "secondary" | "warning";
+}
+
 export interface ExecutionBundlePreview {
+  bundle_id?: string;
   item_ids: string[];
   status: "clear" | "needs_confirmation" | "split_recommended";
   reason: string;
   risk_codes: string[];
+  risk_details?: ExecutionBundleRiskDetail[];
+  recommended_actions?: ExecutionBundleRecommendedAction[];
+  blocking_reason?: string;
 }
 
 export interface ExecutionPlanPreview {

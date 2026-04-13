@@ -430,17 +430,46 @@ function Copy-KnowledgeSeedBundle {
     $null = New-Item -ItemType Directory -Path $resourceKnowledgeDir -Force
     $null = New-Item -ItemType Directory -Path $cacheDir -Force
 
-    if (Test-Path -LiteralPath $gameSeedFile) {
-        Copy-Item -LiteralPath $gameSeedFile -Destination (Join-Path $gameKnowledgeDir "sts2_api_reference.md") -Force
+    $gameSeedTarget = Join-Path $gameKnowledgeDir "sts2_api_reference.md"
+    if ((Test-Path -LiteralPath $gameSeedFile) -and (-not (Test-Path -LiteralPath $gameSeedTarget))) {
+        Copy-Item -LiteralPath $gameSeedFile -Destination $gameSeedTarget -Force
     }
 
-    if (Test-Path -LiteralPath $baselibSeedFile) {
-        Copy-Item -LiteralPath $baselibSeedFile -Destination (Join-Path $baselibKnowledgeDir "BaseLib.decompiled.cs") -Force
+    $baselibSeedTarget = Join-Path $baselibKnowledgeDir "BaseLib.decompiled.cs"
+    if ((Test-Path -LiteralPath $baselibSeedFile) -and (-not (Test-Path -LiteralPath $baselibSeedTarget))) {
+        Copy-Item -LiteralPath $baselibSeedFile -Destination $baselibSeedTarget -Force
     }
 
     if (Test-Path -LiteralPath $resourceSeedDir) {
-        Copy-Item -Path (Join-Path $resourceSeedDir "*") -Destination $resourceKnowledgeDir -Recurse -Force
+        foreach ($seedFile in Get-ChildItem -LiteralPath $resourceSeedDir -Recurse -File) {
+            $relativePath = [System.IO.Path]::GetRelativePath($resourceSeedDir, $seedFile.FullName)
+            $targetPath = Join-Path $resourceKnowledgeDir $relativePath
+            if (Test-Path -LiteralPath $targetPath) {
+                continue
+            }
+            $targetParent = Split-Path -Parent $targetPath
+            $null = New-Item -ItemType Directory -Path $targetParent -Force
+            Copy-Item -LiteralPath $seedFile.FullName -Destination $targetPath -Force
+        }
     }
+}
+
+function Copy-RuntimeToolsBundle {
+    param(
+        [string]$ReleaseDir,
+        [string]$RepoRoot
+    )
+
+    $sourceToolsDir = Join-Path (Join-Path $RepoRoot "runtime") "tools"
+    if (-not (Test-Path -LiteralPath $sourceToolsDir)) {
+        return
+    }
+
+    $runtimeDir = Join-Path $ReleaseDir "runtime"
+    $targetToolsDir = Join-Path $runtimeDir "tools"
+    Remove-DirectoryIfExists -Path $targetToolsDir
+    $null = New-Item -ItemType Directory -Path $runtimeDir -Force
+    Copy-Item -LiteralPath $sourceToolsDir -Destination $runtimeDir -Recurse -Force
 }
 
 function Get-PreviousServiceConfigs {
@@ -574,7 +603,7 @@ if ($needsFrontend) {
 }
 
 $null = New-Item -ItemType Directory -Path $OutputRoot -Force
-New-CleanDirectory -Path $releaseDir -PreserveRelativePaths @("runtime\logs", "runtime\python-runtime")
+New-CleanDirectory -Path $releaseDir -PreserveRelativePaths @("runtime\logs", "runtime\python-runtime", "runtime\knowledge")
 $null = New-Item -ItemType Directory -Path (Join-Path $releaseDir "services") -Force
 $null = New-Item -ItemType Directory -Path (Join-Path $releaseDir "runtime") -Force
 
@@ -583,6 +612,7 @@ foreach ($service in $serviceDefinitions) {
 }
 if ($needsBackend) {
     Copy-KnowledgeSeedBundle -ReleaseDir $releaseDir -RepoRoot $repoRoot
+    Copy-RuntimeToolsBundle -ReleaseDir $releaseDir -RepoRoot $repoRoot
 }
 Copy-LauncherBundle -ReleaseDir $releaseDir -RepoRoot $repoRoot -TargetName $Target
 
@@ -593,6 +623,7 @@ Write-ReleaseManifest -ReleaseDir $releaseDir -RepoRoot $repoRoot -SelectedTarge
 if (-not $SkipZip) {
     Write-Host "生成 zip 包..."
     New-ZipFromDirectory -SourceDir $releaseDir -DestinationPath $zipPath -ExcludeRelativePaths @(
+        "runtime\logs",
         "runtime\python-runtime"
     )
 }
