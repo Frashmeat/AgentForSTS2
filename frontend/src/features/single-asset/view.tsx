@@ -167,7 +167,6 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
           {showKnowledgeNotice && (
             <KnowledgeStatusBanner
               status={knowledgeStatus}
-              impactText="生成结果准确性可能下降"
               onOpenGuide={onOpenKnowledgeGuide}
               onOpenSettings={onOpenSettings}
             />

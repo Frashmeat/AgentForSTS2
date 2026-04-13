@@ -15,6 +15,7 @@ export interface KnowledgeStatus {
     matches?: boolean | null;
     version_source?: string | null;
     source_mode?: "runtime_decompiled" | "missing";
+    knowledge_path?: string;
     decompiled_src_path?: string;
   };
   baselib: {
@@ -23,6 +24,7 @@ export interface KnowledgeStatus {
     matches?: boolean | null;
     release_url?: string;
     source_mode?: "runtime_decompiled" | "missing";
+    knowledge_path?: string;
     decompiled_src_path?: string;
   };
 }

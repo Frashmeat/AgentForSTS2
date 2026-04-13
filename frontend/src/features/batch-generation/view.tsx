@@ -949,7 +949,6 @@ function BatchModePage({
     <div className="space-y-5">
       <KnowledgeStatusBanner
         status={knowledgeStatus}
-        impactText="规划与生成结果准确性可能下降"
         onOpenGuide={onOpenKnowledgeGuide}
         onOpenSettings={onOpenSettings}
       />
