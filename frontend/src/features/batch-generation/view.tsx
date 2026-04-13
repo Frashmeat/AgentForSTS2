@@ -366,13 +366,6 @@ function BatchModePage({
   const [planReview, setPlanReview] = useState<PlanReviewPayload | null>(() =>
     readJsonStorage<PlanReviewPayload | null>(PLAN_REVIEW_STORAGE_KEY, null),
   );
-  const [reviewStrictness, setReviewStrictness] = useState<ReviewStrictness>(() => {
-    try {
-      return normalizeReviewStrictness(localStorage.getItem(PLAN_REVIEW_STRICTNESS_STORAGE_KEY));
-    } catch {
-      return "balanced";
-    }
-  });
   const [reviewBusy, setReviewBusy] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewFeedback, setReviewFeedback] = useState<ReviewFeedback | null>(null);
@@ -395,6 +388,7 @@ function BatchModePage({
     workflowErrorMessage,
     batchResult,
     approvalBusyActionId,
+    reviewStrictness,
   } = runtimeState;
   const itemStatesRef = useRef<Record<string, ItemState>>({});
 
@@ -483,7 +477,10 @@ function BatchModePage({
       setPlan(d.plan);
       setEditedItems(d.plan.items);
       setPlanReview(d.review ?? null);
-      setReviewStrictness((current) => normalizeReviewStrictness(d.review?.strictness ?? current));
+      dispatchRuntime({
+        type: "review_strictness_set",
+        strictness: normalizeReviewStrictness(d.review?.strictness ?? reviewStrictness),
+      });
       setReviewError(null);
       setReviewFeedback(d.review ? summarizePlanReview(d.review, d.plan.items).feedback : null);
       setReviewFocusItemId(d.review ? summarizePlanReview(d.review, d.plan.items).focusItemId : null);
@@ -628,7 +625,10 @@ function BatchModePage({
         bundle_decisions: decisions,
       });
       setPlanReview(review);
-      setReviewStrictness(normalizeReviewStrictness(review.strictness));
+      dispatchRuntime({
+        type: "review_strictness_set",
+        strictness: normalizeReviewStrictness(review.strictness),
+      });
       const nextDecisions = reconcileBundleDecisionRecord(review);
       setBundleDecisions(nextDecisions);
       const summary = summarizePlanReview(review, items);
@@ -687,7 +687,7 @@ function BatchModePage({
   }
 
   function handleReviewStrictnessChange(nextStrictness: ReviewStrictness) {
-    setReviewStrictness(nextStrictness);
+    dispatchRuntime({ type: "review_strictness_set", strictness: nextStrictness });
     writeTextStorage(PLAN_REVIEW_STRICTNESS_STORAGE_KEY, nextStrictness);
     if (plan) {
       void refreshPlanReview(editedItems, nextStrictness, {});
