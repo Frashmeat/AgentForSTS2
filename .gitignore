@@ -66,6 +66,8 @@ pytest-cache-files-*/
 .claude/
 .worktrees/
 .superpowers/
+.agents/
+.trellis/
 # Godot import metadata (auto-generated, not committed)
 **/*.import
 
