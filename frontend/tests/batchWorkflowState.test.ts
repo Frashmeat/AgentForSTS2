@@ -32,6 +32,52 @@ test("batch_started initializes items and selects first item", () => {
   assert.equal(Object.keys(next.itemStates).length, 2);
 });
 
+test("plan_ready_received stores review, strictness and bundle decisions", () => {
+  const review = {
+    strictness: "strict",
+    validation: { items: [] },
+    execution_plan: { execution_bundles: [] },
+  } as any;
+
+  const next = batchWorkflowReducer(createInitialBatchRuntimeState(), {
+    type: "plan_ready_received",
+    review,
+    decisions: { "bundle:1": "accepted" },
+  });
+
+  assert.equal(next.stage, "review_items");
+  assert.equal(next.planReview, review);
+  assert.equal(next.reviewStrictness, "strict");
+  assert.deepEqual(next.bundleDecisions, { "bundle:1": "accepted" });
+});
+
+test("review_updated and bundle_decisions_set keep current stage while refreshing review state", () => {
+  const review = {
+    strictness: "efficient",
+    validation: { items: [] },
+    execution_plan: { execution_bundles: [] },
+  } as any;
+
+  const updated = batchWorkflowReducer(
+    { ...createInitialBatchRuntimeState(), stage: "review_bundles" },
+    {
+      type: "review_updated",
+      review,
+      decisions: { "bundle:2": "split_requested" },
+    },
+  );
+  const next = batchWorkflowReducer(updated, {
+    type: "bundle_decisions_set",
+    decisions: { "bundle:2": "accepted" },
+  });
+
+  assert.equal(updated.stage, "review_bundles");
+  assert.equal(updated.reviewStrictness, "efficient");
+  assert.deepEqual(updated.bundleDecisions, { "bundle:2": "split_requested" });
+  assert.equal(next.stage, "review_bundles");
+  assert.deepEqual(next.bundleDecisions, { "bundle:2": "accepted" });
+});
+
 test("item_stage_message updates item stage history", () => {
   const started = batchWorkflowReducer(createInitialBatchRuntimeState(), {
     type: "batch_started",

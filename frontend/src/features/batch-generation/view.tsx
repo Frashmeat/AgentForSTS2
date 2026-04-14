@@ -363,20 +363,18 @@ function BatchModePage({
   const [editedItems, setEditedItems] = useState<PlanItem[]>(() => {
     return readJsonStorage<PlanItem[]>(PLAN_ITEMS_STORAGE_KEY, []);
   });
-  const [planReview, setPlanReview] = useState<PlanReviewPayload | null>(() =>
-    readJsonStorage<PlanReviewPayload | null>(PLAN_REVIEW_STORAGE_KEY, null),
-  );
   const [reviewBusy, setReviewBusy] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewFeedback, setReviewFeedback] = useState<ReviewFeedback | null>(null);
   const [reviewFocusItemId, setReviewFocusItemId] = useState<string | null>(null);
-  const [bundleDecisions, setBundleDecisions] = useState<BundleDecisionRecord>(() =>
-    readJsonStorage<BundleDecisionRecord>(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, {}),
-  );
   const [runtimeState, dispatchRuntime] = useReducer(
     batchWorkflowReducer,
     undefined,
-    createInitialBatchRuntimeState,
+    () => ({
+      ...createInitialBatchRuntimeState(),
+      planReview: readJsonStorage<PlanReviewPayload | null>(PLAN_REVIEW_STORAGE_KEY, null),
+      bundleDecisions: readJsonStorage<BundleDecisionRecord>(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, {}),
+    }),
   );
   const {
     stage,
@@ -388,7 +386,9 @@ function BatchModePage({
     workflowErrorMessage,
     batchResult,
     approvalBusyActionId,
+    planReview,
     reviewStrictness,
+    bundleDecisions,
   } = runtimeState;
   const itemStatesRef = useRef<Record<string, ItemState>>({});
 
@@ -406,10 +406,10 @@ function BatchModePage({
     const sameKeys = Object.keys(nextDecisions).length === Object.keys(bundleDecisions).length
       && Object.entries(nextDecisions).every(([key, value]) => bundleDecisions[key] === value);
     if (!sameKeys) {
-      setBundleDecisions(nextDecisions);
+      dispatchRuntime({ type: "bundle_decisions_set", decisions: nextDecisions });
       writeJsonStorage(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, nextDecisions);
     }
-  }, [planReview]);
+  }, [planReview, bundleDecisions]);
 
   // ── State updater helpers ─────────────────────────────────────────────────
 
@@ -450,9 +450,7 @@ function BatchModePage({
     setReviewError(null);
     setReviewFeedback(null);
     setReviewFocusItemId(null);
-    setBundleDecisions({});
     writeJsonStorage(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, {});
-    setPlanReview(null);
     setPlan(null);
 
     const ws = new BatchSocket();
@@ -476,17 +474,11 @@ function BatchModePage({
     ws.on("plan_ready", (d) => {
       setPlan(d.plan);
       setEditedItems(d.plan.items);
-      setPlanReview(d.review ?? null);
-      dispatchRuntime({
-        type: "review_strictness_set",
-        strictness: normalizeReviewStrictness(d.review?.strictness ?? reviewStrictness),
-      });
       setReviewError(null);
       setReviewFeedback(d.review ? summarizePlanReview(d.review, d.plan.items).feedback : null);
       setReviewFocusItemId(d.review ? summarizePlanReview(d.review, d.plan.items).focusItemId : null);
       const nextDecisions = reconcileBundleDecisionRecord(d.review ?? null);
-      setBundleDecisions(nextDecisions);
-      dispatchRuntime({ type: "plan_ready_received", review: d.review ?? null });
+      dispatchRuntime({ type: "plan_ready_received", review: d.review ?? null, decisions: nextDecisions });
       try {
         writeJsonStorage(PLAN_STORAGE_KEY, d.plan);
         writeJsonStorage(PLAN_ITEMS_STORAGE_KEY, d.plan.items);
@@ -624,13 +616,8 @@ function BatchModePage({
         strictness,
         bundle_decisions: decisions,
       });
-      setPlanReview(review);
-      dispatchRuntime({
-        type: "review_strictness_set",
-        strictness: normalizeReviewStrictness(review.strictness),
-      });
       const nextDecisions = reconcileBundleDecisionRecord(review);
-      setBundleDecisions(nextDecisions);
+      dispatchRuntime({ type: "review_updated", review, decisions: nextDecisions });
       const summary = summarizePlanReview(review, items);
       setReviewFeedback(summary.feedback);
       setReviewFocusItemId(summary.focusItemId);
@@ -695,16 +682,14 @@ function BatchModePage({
   }
 
   function handleBundleDecisionChange(bundleKey: string, decision: BundleDecisionStatus) {
-    setBundleDecisions((current) => {
-      const next = { ...current, [bundleKey]: decision };
-      writeJsonStorage(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, next);
-      return next;
-    });
+    const next = { ...bundleDecisions, [bundleKey]: decision };
+    dispatchRuntime({ type: "bundle_decisions_set", decisions: next });
+    writeJsonStorage(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, next);
   }
 
   async function handleBundleSplitRequest(bundleKey: string) {
     const nextDecisions = { ...bundleDecisions, [bundleKey]: "split_requested" as const };
-    setBundleDecisions(nextDecisions);
+    dispatchRuntime({ type: "bundle_decisions_set", decisions: nextDecisions });
     writeJsonStorage(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, nextDecisions);
     setReviewFeedback({ tone: "info", message: "已记录拆分请求，正在按更保守口径重算 bundle..." });
     const review = await refreshPlanReview(editedItems, reviewStrictness, nextDecisions);
@@ -722,11 +707,9 @@ function BatchModePage({
   }
 
   function handleBundleReturnToItems(bundleKey: string, itemIds: string[]) {
-    setBundleDecisions((current) => {
-      const next = { ...current, [bundleKey]: "needs_item_revision" as const };
-      writeJsonStorage(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, next);
-      return next;
-    });
+    const next = { ...bundleDecisions, [bundleKey]: "needs_item_revision" as const };
+    dispatchRuntime({ type: "bundle_decisions_set", decisions: next });
+    writeJsonStorage(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, next);
     setReviewFocusItemId(itemIds[0] ?? null);
     setReviewFeedback({
       tone: "warning",
@@ -822,12 +805,10 @@ function BatchModePage({
     dispatchRuntime({ type: "workflow_reset" });
     setPlan(null);
     setEditedItems([]);
-    setPlanReview(null);
-      setReviewError(null);
-      setReviewFeedback(null);
-      setReviewFocusItemId(null);
-      setBundleDecisions({});
-      writeJsonStorage(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, {});
+    setReviewError(null);
+    setReviewFeedback(null);
+    setReviewFocusItemId(null);
+    writeJsonStorage(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, {});
   }
 
   async function handleApprovalAction(

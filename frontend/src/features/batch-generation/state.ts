@@ -64,10 +64,12 @@ export interface BatchRuntimeState {
 export type BatchRuntimeAction =
   | { type: "planning_started" }
   | { type: "stage_set"; stage: BatchStage }
-  | { type: "plan_ready_received"; review?: PlanReviewPayload | null }
+  | { type: "plan_ready_received"; review?: PlanReviewPayload | null; decisions?: BundleDecisionRecord }
+  | { type: "review_updated"; review: PlanReviewPayload | null; decisions: BundleDecisionRecord }
   | { type: "review_items_confirmed" }
   | { type: "review_bundles_confirmed" }
   | { type: "review_strictness_set"; strictness: ReviewStrictness }
+  | { type: "bundle_decisions_set"; decisions: BundleDecisionRecord }
   | { type: "batch_log_appended"; message: string }
   | { type: "batch_stage_message"; message: string }
   | { type: "batch_started"; items: Array<{ id: string }> }
@@ -364,6 +366,16 @@ export function batchWorkflowReducer(state: BatchRuntimeState, action: BatchRunt
         reviewStrictness: action.review?.strictness === "efficient" || action.review?.strictness === "strict"
           ? action.review.strictness
           : "balanced",
+        bundleDecisions: action.decisions ?? {},
+      };
+    case "review_updated":
+      return {
+        ...state,
+        planReview: action.review,
+        reviewStrictness: action.review?.strictness === "efficient" || action.review?.strictness === "strict"
+          ? action.review.strictness
+          : "balanced",
+        bundleDecisions: action.decisions,
       };
     case "review_items_confirmed":
       return {
@@ -379,6 +391,11 @@ export function batchWorkflowReducer(state: BatchRuntimeState, action: BatchRunt
       return {
         ...state,
         reviewStrictness: action.strictness,
+      };
+    case "bundle_decisions_set":
+      return {
+        ...state,
+        bundleDecisions: action.decisions,
       };
     case "batch_log_appended":
       return {
