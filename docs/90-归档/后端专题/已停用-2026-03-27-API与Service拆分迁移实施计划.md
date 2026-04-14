@@ -452,5 +452,5 @@
 - `workflow_version`、`step_protocol_version`、`result_schema_version` 的精确持久化位置。
 - phase-two 的 runner 隔离，在 split 稳定后，是继续留在进程内，还是拆成独立 worker 进程。
 
-计划已完成，并保存到 `docs/03-方案/后端专题/未开始-2026-03-27-API与Service拆分迁移实施计划.md`。准备开始执行了吗？
+计划已完成，并归档到 `docs/90-归档/后端专题/已停用-2026-03-27-API与Service拆分迁移实施计划.md`。准备开始执行了吗？
 
