@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.composition.container import ApplicationContainer
+from app.modules.platform.application.services import ServerExecutionService
 from app.shared.infra.http_errors import install_http_error_handlers
 from app.shared.infra.config.settings import Settings
 from config import get_config
@@ -86,12 +87,36 @@ def _mount_frontend(app: FastAPI) -> None:
         app.mount("/", StaticFiles(directory=str(frontend_dist), html=True), name="frontend")
 
 
+def _bootstrap_web_execution_profiles(app: FastAPI) -> None:
+    container = app.state.container
+    session_factory = container.resolve_optional_singleton("platform.db_session_factory")
+    if session_factory is None:
+        return
+    session = session_factory()
+    try:
+        repository = container.resolve_singleton("platform.server_execution_repository_factory")(session)
+        service = container.resolve_singleton("platform.server_execution_service_factory")(
+            server_execution_repository=repository,
+        )
+        if isinstance(service, ServerExecutionService):
+            service.ensure_default_execution_profiles_seeded()
+        session.commit()
+    except Exception:
+        session.rollback()
+        logging.getLogger(__name__).exception("failed to seed default execution profiles")
+    finally:
+        session.close()
+
+
 def create_app(role: AppRole) -> FastAPI:
     config = get_config()
     app = _create_base_app(role, config)
 
     for module_name in get_router_modules_for_role(role, config):
         _include_router(app, module_name)
+
+    if role == "web":
+        _bootstrap_web_execution_profiles(app)
 
     if should_mount_frontend(role):
         _mount_frontend(app)

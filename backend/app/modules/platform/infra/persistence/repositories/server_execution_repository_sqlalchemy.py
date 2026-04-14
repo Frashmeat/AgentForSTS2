@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.modules.platform.contracts.server_execution import ExecutionProfileView, UserServerPreferenceView
@@ -25,8 +26,47 @@ def _to_iso(value: object | None) -> str | None:
 
 
 class ServerExecutionRepositorySqlAlchemy(ServerExecutionRepository):
+    DEFAULT_EXECUTION_PROFILES = (
+        {
+            "code": "codex-gpt-5-4",
+            "display_name": "Codex CLI / gpt-5.4",
+            "agent_backend": "codex",
+            "model": "gpt-5.4",
+            "description": "适合复杂代码修改，默认推荐。",
+            "enabled": True,
+            "recommended": True,
+            "sort_order": 10,
+        },
+        {
+            "code": "claude-cli-claude-sonnet-4-6",
+            "display_name": "Claude CLI / claude-sonnet-4-6",
+            "agent_backend": "claude",
+            "model": "claude-sonnet-4-6",
+            "description": "适合通用代码生成与分析。",
+            "enabled": True,
+            "recommended": False,
+            "sort_order": 20,
+        },
+    )
+
     def __init__(self, session: Session) -> None:
         self.session = session
+
+    def ensure_default_execution_profiles_seeded(self) -> None:
+        bind = self.session.get_bind()
+        if bind is None:
+            return
+        if not inspect(bind).has_table("execution_profiles"):
+            return
+        existing_codes = {
+            row.code
+            for row in self.session.query(ExecutionProfileRecord.code).all()
+        }
+        for payload in self.DEFAULT_EXECUTION_PROFILES:
+            if payload["code"] in existing_codes:
+                continue
+            self.session.add(ExecutionProfileRecord(**payload))
+        self.session.flush()
 
     def list_execution_profiles(self) -> list[ExecutionProfileView]:
         rows = (

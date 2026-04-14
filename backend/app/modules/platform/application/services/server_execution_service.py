@@ -8,6 +8,9 @@ class ServerExecutionService:
     def __init__(self, server_execution_repository: ServerExecutionRepository) -> None:
         self.server_execution_repository = server_execution_repository
 
+    def ensure_default_execution_profiles_seeded(self) -> None:
+        self.server_execution_repository.ensure_default_execution_profiles_seeded()
+
     def list_execution_profiles(self) -> ExecutionProfileListView:
         return ExecutionProfileListView(items=self.server_execution_repository.list_execution_profiles())
 

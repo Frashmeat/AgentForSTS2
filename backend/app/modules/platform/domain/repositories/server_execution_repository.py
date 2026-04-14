@@ -7,6 +7,10 @@ from app.modules.platform.contracts.server_execution import ExecutionProfileView
 
 class ServerExecutionRepository(ABC):
     @abstractmethod
+    def ensure_default_execution_profiles_seeded(self) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
     def list_execution_profiles(self) -> list[ExecutionProfileView]:
         raise NotImplementedError
 

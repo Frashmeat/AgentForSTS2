@@ -33,6 +33,7 @@ def test_get_router_modules_for_workstation_role_excludes_web_routes():
 def test_create_app_for_web_includes_only_web_routes_and_skips_frontend_mount(monkeypatch):
     included_modules: list[str] = []
     frontend_mounted = False
+    execution_profiles_seeded = False
 
     def fake_base_app(role: str, config: dict) -> FastAPI:
         app = FastAPI()
@@ -46,20 +47,27 @@ def test_create_app_for_web_includes_only_web_routes_and_skips_frontend_mount(mo
         nonlocal frontend_mounted
         frontend_mounted = True
 
+    def fake_bootstrap_execution_profiles(app: FastAPI) -> None:
+        nonlocal execution_profiles_seeded
+        execution_profiles_seeded = True
+
     monkeypatch.setattr(app_factory, "_create_base_app", fake_base_app)
     monkeypatch.setattr(app_factory, "_include_router", fake_include_router)
     monkeypatch.setattr(app_factory, "_mount_frontend", fake_mount_frontend)
+    monkeypatch.setattr(app_factory, "_bootstrap_web_execution_profiles", fake_bootstrap_execution_profiles)
     monkeypatch.setattr(app_factory, "get_config", lambda: {})
 
     app_factory.create_app("web")
 
     assert included_modules == list(app_factory.WEB_ROUTER_MODULES)
+    assert execution_profiles_seeded is True
     assert frontend_mounted is False
 
 
 def test_create_app_for_workstation_includes_only_workstation_routes_and_mounts_frontend(monkeypatch):
     included_modules: list[str] = []
     frontend_mounted = False
+    execution_profiles_seeded = False
 
     def fake_base_app(role: str, config: dict) -> FastAPI:
         app = FastAPI()
@@ -73,12 +81,18 @@ def test_create_app_for_workstation_includes_only_workstation_routes_and_mounts_
         nonlocal frontend_mounted
         frontend_mounted = True
 
+    def fake_bootstrap_execution_profiles(app: FastAPI) -> None:
+        nonlocal execution_profiles_seeded
+        execution_profiles_seeded = True
+
     monkeypatch.setattr(app_factory, "_create_base_app", fake_base_app)
     monkeypatch.setattr(app_factory, "_include_router", fake_include_router)
     monkeypatch.setattr(app_factory, "_mount_frontend", fake_mount_frontend)
+    monkeypatch.setattr(app_factory, "_bootstrap_web_execution_profiles", fake_bootstrap_execution_profiles)
     monkeypatch.setattr(app_factory, "get_config", lambda: {})
 
     app_factory.create_app("workstation")
 
     assert included_modules == list(app_factory.WORKSTATION_ROUTER_MODULES)
+    assert execution_profiles_seeded is False
     assert frontend_mounted is True
