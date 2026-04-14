@@ -34,6 +34,9 @@ class AdminQueryRepositoriesSqlAlchemy(AdminQueryRepositories):
                 status=_enum_value(row.status),
                 provider=row.provider,
                 model=row.model,
+                credential_ref=row.credential_ref,
+                retry_attempt=row.retry_attempt,
+                switched_credential=row.switched_credential,
             )
             for row in rows
         ]
@@ -49,6 +52,9 @@ class AdminQueryRepositoriesSqlAlchemy(AdminQueryRepositories):
             status=_enum_value(row.status),
             provider=row.provider,
             model=row.model,
+            credential_ref=row.credential_ref,
+            retry_attempt=row.retry_attempt,
+            switched_credential=row.switched_credential,
             request_idempotency_key=row.request_idempotency_key,
             input_summary=row.input_summary,
             result_summary=row.result_summary,

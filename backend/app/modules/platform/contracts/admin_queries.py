@@ -13,6 +13,9 @@ class AdminExecutionListItem(ModelBase):
     status: str
     provider: str
     model: str
+    credential_ref: str = ""
+    retry_attempt: int = 0
+    switched_credential: bool = False
 
 
 @dataclass(slots=True)
@@ -23,6 +26,9 @@ class AdminExecutionDetailView(ModelBase):
     status: str
     provider: str
     model: str
+    credential_ref: str = ""
+    retry_attempt: int = 0
+    switched_credential: bool = False
     request_idempotency_key: str | None = None
     input_summary: str = ""
     result_summary: str = ""

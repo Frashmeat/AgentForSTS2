@@ -59,6 +59,9 @@ def client(tmp_path):
         status="succeeded",
         provider="openai",
         model="gpt-5.4",
+        credential_ref="cred-a",
+        retry_attempt=1,
+        switched_credential=True,
         request_idempotency_key="idem-admin",
         workflow_version="2026.03.31",
         step_protocol_version="v1",
@@ -136,6 +139,9 @@ def test_platform_admin_router_supports_execution_refund_and_audit_queries(clien
     detail = test_client.get(f"/api/admin/executions/{execution_id}")
     assert detail.status_code == 200
     assert detail.json()["request_idempotency_key"] == "idem-admin"
+    assert detail.json()["credential_ref"] == "cred-a"
+    assert detail.json()["retry_attempt"] == 1
+    assert detail.json()["switched_credential"] is True
 
     refunds = test_client.get("/api/admin/quota/refunds", params={"user_id": 1001})
     assert refunds.status_code == 200

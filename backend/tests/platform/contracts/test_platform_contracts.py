@@ -65,6 +65,9 @@ def test_admin_execution_detail_view_contains_internal_fields():
             "status": "dispatching",
             "provider": "openai",
             "model": "gpt-5.4",
+            "credential_ref": "cred-a",
+            "retry_attempt": 1,
+            "switched_credential": True,
             "request_idempotency_key": "idem-1",
             "step_protocol_version": "v1",
             "result_schema_version": "v1",
@@ -72,6 +75,9 @@ def test_admin_execution_detail_view_contains_internal_fields():
     )
 
     payload = detail.model_dump()
+    assert payload["credential_ref"] == "cred-a"
+    assert payload["retry_attempt"] == 1
+    assert payload["switched_credential"] is True
     assert payload["request_idempotency_key"] == "idem-1"
     assert payload["step_protocol_version"] == "v1"
 

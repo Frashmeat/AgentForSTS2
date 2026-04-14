@@ -76,6 +76,9 @@ def test_execution_orchestrator_service_creates_execution_when_quota_is_availabl
         job_item_id=job.items[0].id,
         provider="openai",
         model="gpt-5.4",
+        credential_ref="cred-a",
+        retry_attempt=1,
+        switched_credential=True,
         workflow_version="2026.03.31",
         step_protocol_version="v1",
         result_schema_version="v1",
@@ -88,6 +91,9 @@ def test_execution_orchestrator_service_creates_execution_when_quota_is_availabl
 
     assert execution is not None
     assert execution.job_id == job.id
+    assert execution.credential_ref == "cred-a"
+    assert execution.retry_attempt == 1
+    assert execution.switched_credential is True
 
 
 def test_execution_orchestrator_service_marks_quota_exhausted_when_reserve_fails(db_session):
