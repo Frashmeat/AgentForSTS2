@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from app.modules.platform.contracts import (
     AdminExecutionDetailView,
     AdminExecutionListItem,
+    AdminExecutionProfileListItem,
     AdminServerCredentialListItem,
     JobEventView,
     RefundRecordView,
@@ -26,3 +27,6 @@ class AdminQueryRepositories(ABC):
 
     @abstractmethod
     def list_server_credentials(self, execution_profile_id: int | None = None) -> list[AdminServerCredentialListItem]: ...
+
+    @abstractmethod
+    def list_execution_profiles(self) -> list[AdminExecutionProfileListItem]: ...

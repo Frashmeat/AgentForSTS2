@@ -191,6 +191,10 @@ def test_platform_admin_router_supports_execution_refund_and_audit_queries(clien
     assert credentials.json()["items"][0]["label"] == "openai-main-a"
     assert credentials.json()["items"][0]["execution_profile_id"] == 1
 
+    profiles = test_client.get("/api/admin/platform/execution-profiles")
+    assert profiles.status_code == 200
+    assert profiles.json()["items"][0]["code"] == "codex-gpt-5-4"
+
 
 def test_platform_admin_router_requires_authenticated_admin_session(client):
     test_client, job_id, _ = client

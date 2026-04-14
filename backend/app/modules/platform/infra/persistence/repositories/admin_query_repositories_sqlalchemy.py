@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.modules.platform.contracts import (
     AdminExecutionDetailView,
     AdminExecutionListItem,
+    AdminExecutionProfileListItem,
     AdminServerCredentialListItem,
     JobEventView,
     RefundRecordView,
@@ -13,6 +14,7 @@ from app.modules.platform.domain.repositories import AdminQueryRepositories
 from app.modules.platform.infra.persistence.models import (
     AIExecutionRecord,
     ChargeStatus,
+    ExecutionProfileRecord,
     ExecutionChargeRecord,
     JobEventRecord,
     ServerCredentialRecord,
@@ -130,6 +132,30 @@ class AdminQueryRepositoriesSqlAlchemy(AdminQueryRepositories):
                 last_checked_at=_to_iso(row.last_checked_at) or None,
                 last_error_code=row.last_error_code,
                 last_error_message=row.last_error_message,
+            )
+            for row in rows
+        ]
+
+    def list_execution_profiles(self) -> list[AdminExecutionProfileListItem]:
+        rows = (
+            self.session.query(ExecutionProfileRecord)
+            .order_by(
+                ExecutionProfileRecord.recommended.desc(),
+                ExecutionProfileRecord.sort_order.asc(),
+                ExecutionProfileRecord.id.asc(),
+            )
+            .all()
+        )
+        return [
+            AdminExecutionProfileListItem(
+                id=row.id,
+                code=row.code,
+                display_name=row.display_name,
+                agent_backend=row.agent_backend,
+                model=row.model,
+                enabled=row.enabled,
+                recommended=row.recommended,
+                sort_order=row.sort_order,
             )
             for row in rows
         ]

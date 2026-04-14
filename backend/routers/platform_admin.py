@@ -80,3 +80,12 @@ def list_server_credentials(request: Request, execution_profile_id: int | None =
     with _session_scope(request) as session:
         service = _build_admin_query_service(session, request)
         return {"items": [item.model_dump() for item in service.list_server_credentials(execution_profile_id=execution_profile_id)]}
+
+
+@router.get("/platform/execution-profiles")
+def list_execution_profiles(request: Request):
+    with auth_session_scope(request) as auth_session:
+        require_admin_user(request, auth_session)
+    with _session_scope(request) as session:
+        service = _build_admin_query_service(session, request)
+        return {"items": [item.model_dump() for item in service.list_execution_profiles()]}

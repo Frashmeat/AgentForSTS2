@@ -58,3 +58,15 @@ class AdminServerCredentialListItem(ModelBase):
     last_checked_at: str | None = None
     last_error_code: str = ""
     last_error_message: str = ""
+
+
+@dataclass(slots=True)
+class AdminExecutionProfileListItem(ModelBase):
+    id: int
+    code: str
+    display_name: str
+    agent_backend: str
+    model: str
+    enabled: bool
+    recommended: bool
+    sort_order: int

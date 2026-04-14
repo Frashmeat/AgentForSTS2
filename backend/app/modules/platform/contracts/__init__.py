@@ -1,4 +1,10 @@
-from .admin_queries import AdminExecutionDetailView, AdminExecutionListItem, AdminServerCredentialListItem, RefundRecordView
+from .admin_queries import (
+    AdminExecutionDetailView,
+    AdminExecutionListItem,
+    AdminExecutionProfileListItem,
+    AdminServerCredentialListItem,
+    RefundRecordView,
+)
 from .events import JobEventView, PlatformEventCursor
 from .job_commands import CancelJobCommand, CreateJobCommand, CreateJobItemInput, StartJobCommand
 from .job_queries import (
@@ -19,6 +25,7 @@ from .server_execution import (
 __all__ = [
     "AdminExecutionDetailView",
     "AdminExecutionListItem",
+    "AdminExecutionProfileListItem",
     "AdminServerCredentialListItem",
     "ArtifactSummary",
     "CancelJobCommand",

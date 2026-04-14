@@ -21,3 +21,6 @@ class AdminQueryService:
 
     def list_server_credentials(self, execution_profile_id: int | None = None):
         return self.admin_query_repositories.list_server_credentials(execution_profile_id=execution_profile_id)
+
+    def list_execution_profiles(self):
+        return self.admin_query_repositories.list_execution_profiles()
