@@ -5,14 +5,14 @@ import { KnowledgeStatusBanner } from "../../components/KnowledgeStatusBanner.ts
 import { StageStatus } from "../../components/StageStatus";
 import { AgentLog } from "../../components/AgentLog";
 import { LogAnalysisSocket } from "../../lib/log_analysis_ws";
-import type { KnowledgeStatus } from "../../shared/api/knowledge.ts";
 import { resolveErrorMessage, resolveWorkflowErrorMessage } from "../../shared/error.ts";
 import {
   appendWorkflowLogEntry,
   resolveNextWorkflowModel,
   type WorkflowLogEntry,
 } from "../../shared/workflowLog.ts";
-import type { PlatformExecutionRequest } from "../platform-run/types.ts";
+import { useResolvedWorkspaceFeatureProps } from "../workspace/WorkspaceContext.tsx";
+import type { WorkspaceFeatureAdapterProps } from "../workspace/types.ts";
 
 type Stage = "input" | "analyzing" | "done" | "error";
 
@@ -21,12 +21,18 @@ export function LogAnalysisFeatureView({
   knowledgeStatus,
   onOpenKnowledgeGuide,
   onOpenSettings,
-}: {
-  onRequestExecution?: (request: PlatformExecutionRequest) => void;
-  knowledgeStatus: KnowledgeStatus | null;
-  onOpenKnowledgeGuide: () => void;
-  onOpenSettings: () => void;
-}) {
+}: WorkspaceFeatureAdapterProps) {
+  const {
+    onRequestExecution: resolvedRequestExecution,
+    knowledgeStatus: resolvedKnowledgeStatus,
+    onOpenKnowledgeGuide: resolvedOpenKnowledgeGuide,
+    onOpenSettings: resolvedOpenSettings,
+  } = useResolvedWorkspaceFeatureProps({
+    onRequestExecution,
+    knowledgeStatus,
+    onOpenKnowledgeGuide,
+    onOpenSettings,
+  });
   const [stage, setStage] = useState<Stage>("input");
   const [context, setContext] = useState("");
   const [logLines, setLogLines] = useState<number | null>(null);
@@ -106,9 +112,9 @@ export function LogAnalysisFeatureView({
   return (
     <div className="space-y-5">
       <KnowledgeStatusBanner
-        status={knowledgeStatus}
-        onOpenGuide={onOpenKnowledgeGuide}
-        onOpenSettings={onOpenSettings}
+        status={resolvedKnowledgeStatus}
+        onOpenGuide={resolvedOpenKnowledgeGuide}
+        onOpenSettings={resolvedOpenSettings}
       />
       <div className="workspace-surface rounded-2xl p-5 space-y-4">
         <div className="flex items-center gap-2">
@@ -132,11 +138,11 @@ export function LogAnalysisFeatureView({
           <div className="flex gap-2">
             <button
               onClick={() => {
-                if (!onRequestExecution) {
+                if (!resolvedRequestExecution) {
                   void analyze();
                   return;
                 }
-                onRequestExecution({
+                resolvedRequestExecution({
                   title: "分析日志",
                   tab: "log",
                   jobType: "log_analysis",

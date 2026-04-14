@@ -6,10 +6,10 @@ function readSource(path: string) {
   return readFileSync(new URL(path, import.meta.url), "utf8");
 }
 
-test("BatchMode wires HTTP planning fallback through shared workflow api", () => {
-  const source = readSource("../src/pages/BatchMode.tsx");
+test("batch feature opens planning through shared planning session helper", () => {
+  const source = readSource("../src/features/batch-generation/view.tsx");
 
-  assert.match(source, /createBatchPlanningController/);
-  assert.match(source, /快速规划（HTTP）/);
-  assert.match(source, /startHttpPlanning/);
+  assert.match(source, /openBatchPlanningSocket/);
+  assert.match(source, /startPlanning/);
+  assert.match(source, /start_with_plan/);
 });

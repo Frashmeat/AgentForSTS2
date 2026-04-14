@@ -6,8 +6,8 @@ function readSource(path: string) {
   return readFileSync(new URL(path, import.meta.url), "utf8");
 }
 
-test("App uses single asset workflow controller for workflow session actions", () => {
-  const source = readSource("../src/App.tsx");
+test("single asset workspace container uses workflow controller for workflow session actions", () => {
+  const source = readSource("../src/features/single-asset/SingleAssetWorkspaceContainer.tsx");
 
   assert.match(source, /createSingleAssetWorkflowController/);
   assert.doesNotMatch(source, /createSingleAssetSocket/);

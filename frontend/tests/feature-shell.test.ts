@@ -6,10 +6,10 @@ function readSource(path: string) {
   return readFileSync(new URL(path, import.meta.url), "utf8");
 }
 
-test("App renders single asset feature shell from App", () => {
+test("App assembles workspace features through feature containers", () => {
   const appSource = readSource("../src/App.tsx");
 
-  assert.match(appSource, /SingleAssetFeatureView/);
+  assert.match(appSource, /WorkspaceHome/);
   assert.doesNotMatch(appSource, /import BatchMode from "\.\/pages\/BatchMode";/);
   assert.doesNotMatch(appSource, /import LogAnalysis from "\.\/pages\/LogAnalysis";/);
   assert.doesNotMatch(appSource, /import ModEditor from "\.\/pages\/ModEditor";/);

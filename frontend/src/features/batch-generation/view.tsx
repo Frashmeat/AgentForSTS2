@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useReducer } from "react";
 import {
   Loader2, ChevronDown, ChevronUp, RotateCcw,
   CheckCircle2, XCircle, Clock, ImageIcon, Code2, Sparkles, AlertTriangle,
@@ -7,7 +7,6 @@ import {
 import { ApprovalPanel } from "../../components/ApprovalPanel";
 import { approveApproval, executeApproval, rejectApproval, type ApprovalRequest } from "../../lib/approvals";
 import { BatchSocket, PlanItem, ModPlan } from "../../lib/batch_ws";
-import { pickActiveItemOnDone, pickActiveItemOnStart } from "../../lib/batchActiveItem";
 import { AgentLog } from "../../components/AgentLog";
 import { StageStatus } from "../../components/StageStatus";
 import { BuildDeploy } from "../../components/BuildDeploy";
@@ -15,6 +14,7 @@ import { KnowledgeStatusBanner } from "../../components/KnowledgeStatusBanner.ts
 import { ProjectRootField } from "../../components/ProjectRootField";
 import { cn } from "../../lib/utils";
 import { loadAppConfig } from "../../shared/api/config";
+import { runApprovalAction } from "../../shared/approvalAction.ts";
 import type { KnowledgeStatus } from "../../shared/api/knowledge.ts";
 import { reviewModPlan } from "../../shared/api/workflow.ts";
 import { resolveErrorMessage, resolveWorkflowErrorMessage } from "../../shared/error.ts";
@@ -25,12 +25,9 @@ import type {
   PlanItemValidation,
   PlanReviewPayload,
 } from "../../shared/types/workflow.ts";
-import {
-  appendWorkflowLogEntry,
-  resolveNextWorkflowModel,
-  type WorkflowLogEntry,
-} from "../../shared/workflowLog.ts";
-import type { PlatformExecutionRequest } from "../platform-run/types.ts";
+import type { WorkflowLogEntry } from "../../shared/workflowLog.ts";
+import { useResolvedWorkspaceFeatureProps } from "../workspace/WorkspaceContext.tsx";
+import type { WorkspaceFeatureAdapterProps, WorkspaceFeatureProps } from "../workspace/types.ts";
 import {
   applyBatchApprovalUpdate,
   canProceedBatchApproval,
@@ -39,10 +36,16 @@ import {
 } from "./approval";
 import { openBatchPlanningSocket } from "./planningSession";
 import {
+  batchWorkflowReducer,
+  createDefaultBatchItemState,
+  createInitialBatchRuntimeState,
   canProceedFromBundleReview,
   reconcileBundleDecisionRecord,
   resolveExecutionBundleKey,
   summarizeBundleDecisionProgress,
+  type BatchItemState as ItemState,
+  type BatchItemStatus as ItemStatus,
+  type BatchStage,
   type BundleDecisionRecord,
   type BundleDecisionStatus,
   type ReviewStrictness,
@@ -50,57 +53,11 @@ import {
 
 // ── 类型 ──────────────────────────────────────────────────────────────────────
 
-type BatchStage = "input" | "planning" | "review_items" | "review_bundles" | "executing" | "done" | "error";
 type ReviewFeedbackTone = "info" | "success" | "warning" | "error";
 
 interface ReviewFeedback {
   tone: ReviewFeedbackTone;
   message: string;
-}
-
-type ItemStatus =
-  | "pending"
-  | "img_generating"
-  | "awaiting_selection"
-  | "approval_pending"
-  | "code_generating"
-  | "done"
-  | "error";
-
-interface ItemState {
-  status: ItemStatus;
-  currentStage: string | null;
-  stageHistory: string[];
-  progress: string[];
-  images: string[];
-  agentLog: string[];
-  agentLogEntries: WorkflowLogEntry[];
-  currentAgentModel: string | null;
-  error: string | null;
-  errorTrace: string | null;
-  currentPrompt: string;
-  showMorePrompt: boolean;
-  approvalSummary: string;
-  approvalRequests: ApprovalRequest[];
-}
-
-function defaultItemState(): ItemState {
-  return {
-    status: "pending",
-    currentStage: null,
-    stageHistory: [],
-    progress: [],
-    images: [],
-    agentLog: [],
-    agentLogEntries: [],
-    currentAgentModel: null,
-    error: null,
-    errorTrace: null,
-    currentPrompt: "",
-    showMorePrompt: false,
-    approvalSummary: "",
-    approvalRequests: [],
-  };
 }
 
 // ── 工具函数 ──────────────────────────────────────────────────────────────────
@@ -386,13 +343,7 @@ function BatchModePage({
   knowledgeStatus,
   onOpenKnowledgeGuide,
   onOpenSettings,
-}: {
-  onRequestExecution?: (request: PlatformExecutionRequest) => void;
-  knowledgeStatus: KnowledgeStatus | null;
-  onOpenKnowledgeGuide: () => void;
-  onOpenSettings: () => void;
-}) {
-  const [stage, setStage] = useState<BatchStage>("input");
+}: WorkspaceFeatureProps) {
   const [requirements, setRequirements] = useState("");
   const [projectRoot, setProjectRoot] = useState("");
 
@@ -415,13 +366,6 @@ function BatchModePage({
   const [planReview, setPlanReview] = useState<PlanReviewPayload | null>(() =>
     readJsonStorage<PlanReviewPayload | null>(PLAN_REVIEW_STORAGE_KEY, null),
   );
-  const [reviewStrictness, setReviewStrictness] = useState<ReviewStrictness>(() => {
-    try {
-      return normalizeReviewStrictness(localStorage.getItem(PLAN_REVIEW_STRICTNESS_STORAGE_KEY));
-    } catch {
-      return "balanced";
-    }
-  });
   const [reviewBusy, setReviewBusy] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewFeedback, setReviewFeedback] = useState<ReviewFeedback | null>(null);
@@ -429,20 +373,33 @@ function BatchModePage({
   const [bundleDecisions, setBundleDecisions] = useState<BundleDecisionRecord>(() =>
     readJsonStorage<BundleDecisionRecord>(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, {}),
   );
-  const [activeItemId, setActiveItemId] = useState<string | null>(null);
-  const [itemStates, setItemStates] = useState<Record<string, ItemState>>({});
+  const [runtimeState, dispatchRuntime] = useReducer(
+    batchWorkflowReducer,
+    undefined,
+    createInitialBatchRuntimeState,
+  );
+  const {
+    stage,
+    activeItemId,
+    itemStates,
+    batchLog,
+    currentBatchStage,
+    batchStageHistory,
+    workflowErrorMessage,
+    batchResult,
+    approvalBusyActionId,
+    reviewStrictness,
+  } = runtimeState;
   const itemStatesRef = useRef<Record<string, ItemState>>({});
-  const [batchLog, setBatchLog] = useState<string[]>([]);
-  const [currentBatchStage, setCurrentBatchStage] = useState<string | null>(null);
-  const [batchStageHistory, setBatchStageHistory] = useState<string[]>([]);
-  const [globalError, setGlobalError] = useState<string | null>(null);
-  const [batchResult, setBatchResult] = useState<{ success: number; error: number } | null>(null);
-  const [approvalBusyActionId, setApprovalBusyActionId] = useState<string | null>(null);
 
   const [autoSelectFirst, setAutoSelectFirst] = useState(false);
   const autoSelectRef = useRef(false);
   useEffect(() => { autoSelectRef.current = autoSelectFirst; }, [autoSelectFirst]);
   const socketRef = useRef<BatchSocket | null>(null);
+
+  useEffect(() => {
+    itemStatesRef.current = itemStates;
+  }, [itemStates]);
 
   useEffect(() => {
     const nextDecisions = reconcileBundleDecisionRecord(planReview, bundleDecisions);
@@ -456,72 +413,47 @@ function BatchModePage({
 
   // ── State updater helpers ─────────────────────────────────────────────────
 
-  const applyItemStates = useCallback((updater: (prev: Record<string, ItemState>) => Record<string, ItemState>) => {
-    const next = updater(itemStatesRef.current);
-    itemStatesRef.current = next;
-    setItemStates(next);
+  const updateItem = useCallback((id: string, patch: Partial<ItemState>) => {
+    dispatchRuntime({ type: "item_state_patched", itemId: id, patch });
   }, []);
 
-  const updateItem = useCallback((id: string, patch: Partial<ItemState>) => {
-    applyItemStates(prev => ({
-      ...prev,
-      [id]: { ...(prev[id] ?? defaultItemState()), ...patch },
-    }));
-  }, [applyItemStates]);
-
   const appendProgress = useCallback((id: string, msg: string) => {
-    applyItemStates(prev => {
-      const cur = prev[id] ?? defaultItemState();
-      return { ...prev, [id]: { ...cur, progress: [...cur.progress, msg] } };
-    });
-  }, [applyItemStates]);
+    dispatchRuntime({ type: "item_progress_received", itemId: id, message: msg });
+  }, []);
 
   const appendAgent = useCallback((id: string, entry: WorkflowLogEntry) => {
-    applyItemStates(prev => {
-      const cur = prev[id] ?? defaultItemState();
-      return {
-        ...prev,
-        [id]: {
-          ...cur,
-          agentLog: [...cur.agentLog, entry.text],
-          agentLogEntries: appendWorkflowLogEntry(cur.agentLogEntries, entry),
-          currentAgentModel: resolveNextWorkflowModel(cur.currentAgentModel, entry),
-        },
-      };
+    dispatchRuntime({
+      type: "item_agent_stream",
+      itemId: id,
+      chunk: entry.text,
+      source: entry.source,
+      channel: entry.channel,
+      model: entry.model,
     });
-  }, [applyItemStates]);
+  }, []);
 
   const addImage = useCallback((id: string, b64: string, index: number, prompt: string) => {
-    applyItemStates(prev => {
-      const cur = prev[id] ?? defaultItemState();
-      const images = [...cur.images];
-      images[index] = b64;
-      return { ...prev, [id]: { ...cur, images, currentPrompt: prompt, status: "awaiting_selection" } };
+    dispatchRuntime({
+      type: "item_image_ready",
+      itemId: id,
+      image: b64,
+      index,
+      prompt,
     });
-    // 如果当前没有 active item，自动跳到这个需要选图的 item
-    setActiveItemId(prev => prev ?? id);
-  }, [applyItemStates]);
+  }, []);
 
   // ── Start ─────────────────────────────────────────────────────────────────
 
   async function startPlanning() {
     if (!requirements.trim()) return;
-    setStage("planning");
-    setBatchLog([]);
-    setGlobalError(null);
+    dispatchRuntime({ type: "planning_started" });
     setReviewError(null);
     setReviewFeedback(null);
     setReviewFocusItemId(null);
     setBundleDecisions({});
     writeJsonStorage(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, {});
     setPlanReview(null);
-    itemStatesRef.current = {};
-    setItemStates({});
-    setBatchResult(null);
-    setCurrentBatchStage(null);
-    setBatchStageHistory([]);
     setPlan(null);
-    setActiveItemId(null);
 
     const ws = new BatchSocket();
     socketRef.current = ws;
@@ -531,8 +463,7 @@ function BatchModePage({
       projectRoot,
       onOpenError(message) {
         socketRef.current = null;
-        setGlobalError(message);
-        setStage("error");
+        dispatchRuntime({ type: "workflow_failed", message });
       },
     });
     if (!started) {
@@ -541,18 +472,21 @@ function BatchModePage({
   }
 
   function _registerBatchHandlers(ws: BatchSocket) {
-    ws.on("planning", () => setBatchLog(l => [...l, "正在规划 Mod..."]));
+    ws.on("planning", () => dispatchRuntime({ type: "batch_log_appended", message: "正在规划 Mod..." }));
     ws.on("plan_ready", (d) => {
       setPlan(d.plan);
       setEditedItems(d.plan.items);
       setPlanReview(d.review ?? null);
-      setReviewStrictness((current) => normalizeReviewStrictness(d.review?.strictness ?? current));
+      dispatchRuntime({
+        type: "review_strictness_set",
+        strictness: normalizeReviewStrictness(d.review?.strictness ?? reviewStrictness),
+      });
       setReviewError(null);
       setReviewFeedback(d.review ? summarizePlanReview(d.review, d.plan.items).feedback : null);
       setReviewFocusItemId(d.review ? summarizePlanReview(d.review, d.plan.items).focusItemId : null);
       const nextDecisions = reconcileBundleDecisionRecord(d.review ?? null);
       setBundleDecisions(nextDecisions);
-      setStage("review_items");
+      dispatchRuntime({ type: "plan_ready_received", review: d.review ?? null });
       try {
         writeJsonStorage(PLAN_STORAGE_KEY, d.plan);
         writeJsonStorage(PLAN_ITEMS_STORAGE_KEY, d.plan.items);
@@ -564,36 +498,19 @@ function BatchModePage({
         );
       } catch {}
     });
-    ws.on("batch_progress", (d) => setBatchLog(l => [...l, d.message]));
+    ws.on("batch_progress", (d) => dispatchRuntime({ type: "batch_log_appended", message: d.message }));
     ws.on("stage_update", (d) => {
       if (d.item_id) {
-        applyItemStates(prev => {
-          const cur = prev[d.item_id!] ?? defaultItemState();
-          return {
-            ...prev,
-            [d.item_id!]: {
-              ...cur,
-              currentStage: d.message,
-              stageHistory: cur.stageHistory[cur.stageHistory.length - 1] === d.message ? cur.stageHistory : [...cur.stageHistory, d.message],
-            },
-          };
-        });
+        dispatchRuntime({ type: "item_stage_message", itemId: d.item_id, message: d.message });
         return;
       }
-      setCurrentBatchStage(d.message);
-      setBatchStageHistory(prev => prev[prev.length - 1] === d.message ? prev : [...prev, d.message]);
+      dispatchRuntime({ type: "batch_stage_message", message: d.message });
     });
     ws.on("batch_started", (d) => {
-      const init: Record<string, ItemState> = {};
-      d.items.forEach(it => { init[it.id] = defaultItemState(); });
-      itemStatesRef.current = init;
-      setItemStates(init);
-      setStage("executing");
-      setActiveItemId(d.items[0]?.id ?? null);
+      dispatchRuntime({ type: "batch_started", items: d.items });
     });
     ws.on("item_started", (d) => {
-      updateItem(d.item_id, { status: "img_generating" });
-      setActiveItemId(prev => pickActiveItemOnStart(prev, itemStatesRef.current, d.item_id));
+      dispatchRuntime({ type: "item_started", itemId: d.item_id });
     });
     ws.on("item_progress", (d) => {
       appendProgress(d.item_id, d.message);
@@ -622,11 +539,12 @@ function BatchModePage({
         approvalSummary: d.summary,
         approvalRequests: d.requests,
       });
-      setActiveItemId(prev => prev ?? d.item_id);
+      if (activeItemId === null) {
+        dispatchRuntime({ type: "active_item_set", itemId: d.item_id });
+      }
     });
     ws.on("item_done", (d) => {
-      updateItem(d.item_id, { status: "done" });
-      setActiveItemId(prev => pickActiveItemOnDone(prev, d.item_id, itemStatesRef.current));
+      dispatchRuntime({ type: "item_done", itemId: d.item_id });
     });
     ws.on("item_error", (d) => {
       updateItem(d.item_id, {
@@ -636,10 +554,11 @@ function BatchModePage({
       });
     });
     ws.on("batch_done", (d) => {
-      setBatchResult({ success: d.success_count, error: d.error_count });
-      setStage("done");
+      dispatchRuntime({ type: "batch_done", success: d.success_count, error: d.error_count });
     });
-    ws.on("error", (d) => { setGlobalError(resolveWorkflowErrorMessage(d)); setStage("error"); });
+    ws.on("error", (d) => {
+      dispatchRuntime({ type: "workflow_failed", message: resolveWorkflowErrorMessage(d) });
+    });
   }
 
   async function confirmPlan() {
@@ -665,16 +584,15 @@ function BatchModePage({
         },
         onOpenError(message) {
           socketRef.current = null;
-          setGlobalError(message);
-          setStage("error");
+          dispatchRuntime({ type: "workflow_failed", message });
         },
       });
       if (!started) {
         return;
       }
-      setStage("executing");
+      dispatchRuntime({ type: "review_bundles_confirmed" });
     } else {
-      setStage("executing");
+      dispatchRuntime({ type: "review_bundles_confirmed" });
       socketRef.current.send({
         action: "confirm_plan",
         plan: { ...plan, items: editedItems },
@@ -707,7 +625,10 @@ function BatchModePage({
         bundle_decisions: decisions,
       });
       setPlanReview(review);
-      setReviewStrictness(normalizeReviewStrictness(review.strictness));
+      dispatchRuntime({
+        type: "review_strictness_set",
+        strictness: normalizeReviewStrictness(review.strictness),
+      });
       const nextDecisions = reconcileBundleDecisionRecord(review);
       setBundleDecisions(nextDecisions);
       const summary = summarizePlanReview(review, items);
@@ -733,7 +654,7 @@ function BatchModePage({
     }
     if (canProceedFromEditedItemReview(review, editedItems)) {
       setReviewFeedback({ tone: "success", message: "Item 复核已通过，进入执行策略决策。" });
-      setStage("review_bundles");
+      dispatchRuntime({ type: "review_items_confirmed" });
     }
   }
 
@@ -744,7 +665,7 @@ function BatchModePage({
     }
     if (!canProceedFromEditedItemReview(review, editedItems)) {
       setReviewFeedback({ tone: "warning", message: "仍有 item 说明未补齐，已返回 Item 复核阶段。" });
-      setStage("review_items");
+      dispatchRuntime({ type: "stage_set", stage: "review_items" });
       return;
     }
     if (!canProceedFromBundleReview(review, bundleDecisions)) {
@@ -758,7 +679,7 @@ function BatchModePage({
         tone: "warning",
         message: `执行策略仍需处理：${pendingParts.join("，")}。`,
       });
-      setStage("review_bundles");
+      dispatchRuntime({ type: "stage_set", stage: "review_bundles" });
       return;
     }
     setReviewFeedback({ tone: "success", message: "执行策略复核通过，开始进入执行阶段。" });
@@ -766,7 +687,7 @@ function BatchModePage({
   }
 
   function handleReviewStrictnessChange(nextStrictness: ReviewStrictness) {
-    setReviewStrictness(nextStrictness);
+    dispatchRuntime({ type: "review_strictness_set", strictness: nextStrictness });
     writeTextStorage(PLAN_REVIEW_STRICTNESS_STORAGE_KEY, nextStrictness);
     if (plan) {
       void refreshPlanReview(editedItems, nextStrictness, {});
@@ -811,7 +732,7 @@ function BatchModePage({
       tone: "warning",
       message: "已返回 Item 复核阶段，请补充依赖原因、范围边界或验收说明后重新检查。",
     });
-    setStage("review_items");
+    dispatchRuntime({ type: "stage_set", stage: "review_items" });
   }
 
   function requestExecutionStart() {
@@ -866,7 +787,7 @@ function BatchModePage({
     const nextAwaiting = editedItems.find(
       it => it.id !== itemId && itemStatesRef.current[it.id]?.status === "awaiting_selection"
     );
-    if (nextAwaiting) setActiveItemId(nextAwaiting.id);
+    if (nextAwaiting) dispatchRuntime({ type: "active_item_set", itemId: nextAwaiting.id });
   }
 
   function handleRetryItem(itemId: string) {
@@ -898,7 +819,7 @@ function BatchModePage({
   function reset() {
     socketRef.current?.close();
     socketRef.current = null;
-    setStage("input");
+    dispatchRuntime({ type: "workflow_reset" });
     setPlan(null);
     setEditedItems([]);
     setPlanReview(null);
@@ -907,29 +828,25 @@ function BatchModePage({
       setReviewFocusItemId(null);
       setBundleDecisions({});
       writeJsonStorage(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, {});
-      itemStatesRef.current = {};
-    setItemStates({});
-    setBatchLog([]);
-    setGlobalError(null);
-    setBatchResult(null);
-    setActiveItemId(null);
-    setApprovalBusyActionId(null);
   }
 
   async function handleApprovalAction(
     actionId: string,
     action: (id: string) => Promise<ApprovalRequest>,
   ) {
-    setApprovalBusyActionId(actionId);
-    try {
-      const updated = await action(actionId);
-      applyItemStates(prev => applyBatchApprovalUpdate(prev, actionId, updated));
-    } catch (error) {
-      setGlobalError(resolveErrorMessage(error));
-      setStage("error");
-    } finally {
-      setApprovalBusyActionId(null);
-    }
+    await runApprovalAction({
+      actionId,
+      action,
+      onBusyChange(actionIdOrNull) {
+        dispatchRuntime({ type: "approval_busy_set", actionId: actionIdOrNull });
+      },
+      onSuccess(updated) {
+        dispatchRuntime({ type: "approval_request_updated", actionId, request: updated });
+      },
+      onError(message) {
+        dispatchRuntime({ type: "workflow_failed", message });
+      },
+    });
   }
 
   function handleProceedApproval(itemId: string) {
@@ -939,7 +856,11 @@ function BatchModePage({
       return;
     }
 
-    applyItemStates(prev => markBatchApprovalResuming(prev, itemId));
+    dispatchRuntime({
+      type: "item_state_patched",
+      itemId,
+      patch: markBatchApprovalResuming({ [itemId]: state }, itemId)[itemId],
+    });
     resumeBatchApprovalWorkflow(socket, itemId);
   }
 
@@ -982,7 +903,7 @@ function BatchModePage({
           </button>
           {plan && (
             <button
-              onClick={() => setStage("review_items")}
+              onClick={() => dispatchRuntime({ type: "stage_set", stage: "review_items" })}
               className="w-full py-2 rounded-lg border border-violet-200 text-violet-700 text-sm hover:bg-violet-50 transition-colors"
             >
               恢复上次规划：{plan.mod_name}
@@ -1031,7 +952,7 @@ function BatchModePage({
           reviewError={reviewError}
           reviewFeedback={reviewFeedback}
           bundleDecisions={bundleDecisions}
-          onBack={() => setStage("review_items")}
+          onBack={() => dispatchRuntime({ type: "stage_set", stage: "review_items" })}
           onRefreshReview={() => { void refreshPlanReview(); }}
           onStrictnessChange={handleReviewStrictnessChange}
           onBundleDecisionChange={handleBundleDecisionChange}
@@ -1049,7 +970,7 @@ function BatchModePage({
             <AlertTriangle size={16} className="text-red-500 shrink-0 mt-0.5" />
             <div>
               <p className="text-sm font-semibold text-red-700">规划失败</p>
-              {globalError && <pre className="text-xs text-red-600 font-mono mt-1 whitespace-pre-wrap">{globalError}</pre>}
+              {workflowErrorMessage && <pre className="text-xs text-red-600 font-mono mt-1 whitespace-pre-wrap">{workflowErrorMessage}</pre>}
             </div>
           </div>
           <button onClick={reset} className="text-sm text-red-500 hover:text-red-700 flex items-center gap-1">
@@ -1064,7 +985,7 @@ function BatchModePage({
           items={editedItems}
           itemStates={itemStates}
           activeItemId={activeItemId}
-          setActiveItemId={setActiveItemId}
+          setActiveItemId={(itemId) => dispatchRuntime({ type: "active_item_set", itemId })}
           batchLog={batchLog}
           currentBatchStage={currentBatchStage}
           batchStageHistory={batchStageHistory}
@@ -1086,10 +1007,7 @@ function BatchModePage({
             updateItem(id, { currentPrompt: prompt })
           }
           onToggleMorePrompt={(id) =>
-            applyItemStates(prev => ({
-              ...prev,
-              [id]: { ...prev[id], showMorePrompt: !prev[id]?.showMorePrompt },
-            }))
+            updateItem(id, { showMorePrompt: !itemStates[id]?.showMorePrompt })
           }
           onReset={reset}
         />
@@ -1103,18 +1021,19 @@ export function BatchGenerationFeatureView({
   knowledgeStatus,
   onOpenKnowledgeGuide,
   onOpenSettings,
-}: {
-  onRequestExecution?: (request: PlatformExecutionRequest) => void;
-  knowledgeStatus?: KnowledgeStatus | null;
-  onOpenKnowledgeGuide?: () => void;
-  onOpenSettings?: () => void;
-}) {
+}: WorkspaceFeatureAdapterProps) {
+  const resolvedProps = useResolvedWorkspaceFeatureProps({
+    onRequestExecution,
+    knowledgeStatus,
+    onOpenKnowledgeGuide,
+    onOpenSettings,
+  });
   return (
     <BatchModePage
-      onRequestExecution={onRequestExecution}
-      knowledgeStatus={knowledgeStatus ?? null}
-      onOpenKnowledgeGuide={onOpenKnowledgeGuide ?? (() => {})}
-      onOpenSettings={onOpenSettings ?? (() => {})}
+      onRequestExecution={resolvedProps.onRequestExecution}
+      knowledgeStatus={resolvedProps.knowledgeStatus}
+      onOpenKnowledgeGuide={resolvedProps.onOpenKnowledgeGuide}
+      onOpenSettings={resolvedProps.onOpenSettings}
     />
   );
 }

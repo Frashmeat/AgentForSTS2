@@ -38,7 +38,7 @@ test("append helpers preserve history and logs", () => {
     "item-1",
     "planning",
   );
-  next = appendBatchItemAgentLog(next, "item-1", "chunk");
+  next = appendBatchItemAgentLog(next, "item-1", { text: "chunk" });
   next = applyBatchItemStageMessage(next, "item-1", "阶段一");
 
   assert.deepEqual(next["item-1"].progress, ["planning"]);

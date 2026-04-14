@@ -6,10 +6,10 @@ function readSource(path: string) {
   return readFileSync(new URL(path, import.meta.url), "utf8");
 }
 
-test("BatchMode uses shared planning controller for websocket and HTTP planning", () => {
-  const source = readSource("../src/pages/BatchMode.tsx");
+test("batch feature uses shared planning session helper for planning websocket lifecycle", () => {
+  const source = readSource("../src/features/batch-generation/view.tsx");
 
-  assert.match(source, /createBatchPlanningController/);
-  assert.match(source, /startSocketPlanning/);
-  assert.match(source, /startHttpPlanning/);
+  assert.match(source, /openBatchPlanningSocket/);
+  assert.match(source, /_registerBatchHandlers/);
+  assert.match(source, /new BatchSocket/);
 });

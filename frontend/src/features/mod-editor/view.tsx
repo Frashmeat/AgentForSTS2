@@ -6,7 +6,6 @@ import { BuildDeploy } from "../../components/BuildDeploy";
 import { KnowledgeStatusBanner } from "../../components/KnowledgeStatusBanner.tsx";
 import { ProjectRootField } from "../../components/ProjectRootField";
 import { StageStatus } from "../../components/StageStatus";
-import type { KnowledgeStatus } from "../../shared/api/knowledge.ts";
 import { useDefaultProjectRoot } from "../../shared/useDefaultProjectRoot.ts";
 import { useProjectCreation } from "../../shared/useProjectCreation.ts";
 import {
@@ -14,7 +13,8 @@ import {
   resolveNextWorkflowModel,
   type WorkflowLogEntry,
 } from "../../shared/workflowLog.ts";
-import type { PlatformExecutionRequest } from "../platform-run/types.ts";
+import { useResolvedWorkspaceFeatureProps } from "../workspace/WorkspaceContext.tsx";
+import type { WorkspaceFeatureAdapterProps } from "../workspace/types.ts";
 import {
   createModEditorAnalysisController,
   createModEditorModifyController,
@@ -30,12 +30,18 @@ export function ModEditorFeatureView({
   knowledgeStatus,
   onOpenKnowledgeGuide,
   onOpenSettings,
-}: {
-  onRequestExecution?: (request: PlatformExecutionRequest) => void;
-  knowledgeStatus: KnowledgeStatus | null;
-  onOpenKnowledgeGuide: () => void;
-  onOpenSettings: () => void;
-}) {
+}: WorkspaceFeatureAdapterProps) {
+  const {
+    onRequestExecution: resolvedRequestExecution,
+    knowledgeStatus: resolvedKnowledgeStatus,
+    onOpenKnowledgeGuide: resolvedOpenKnowledgeGuide,
+    onOpenSettings: resolvedOpenSettings,
+  } = useResolvedWorkspaceFeatureProps({
+    onRequestExecution,
+    knowledgeStatus,
+    onOpenKnowledgeGuide,
+    onOpenSettings,
+  });
   const [projectRoot, setProjectRoot] = useState("");
   const {
     projectCreateBusy,
@@ -185,9 +191,9 @@ export function ModEditorFeatureView({
   return (
     <div className="space-y-5">
       <KnowledgeStatusBanner
-        status={knowledgeStatus}
-        onOpenGuide={onOpenKnowledgeGuide}
-        onOpenSettings={onOpenSettings}
+        status={resolvedKnowledgeStatus}
+        onOpenGuide={resolvedOpenKnowledgeGuide}
+        onOpenSettings={resolvedOpenSettings}
       />
       <div className="workspace-surface rounded-2xl p-5 space-y-4">
         <ProjectRootField
@@ -285,11 +291,11 @@ export function ModEditorFeatureView({
                 const executeLocal = () => {
                   void modifyController.run(projectRoot, modRequest, analysisText);
                 };
-                if (!onRequestExecution) {
+                if (!resolvedRequestExecution) {
                   executeLocal();
                   return;
                 }
-                onRequestExecution({
+                resolvedRequestExecution({
                   title: "执行 Mod 修改",
                   tab: "edit",
                   jobType: "mod_edit",

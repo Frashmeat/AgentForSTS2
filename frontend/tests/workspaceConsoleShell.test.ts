@@ -8,11 +8,13 @@ function readSource(path: string) {
 
 test("workspace root is wrapped by a dedicated WorkspaceShell", () => {
   const appSource = readSource("../src/App.tsx");
+  const configSource = readSource("../src/features/workspace/config.ts");
   const shellSource = readSource("../src/components/workspace/WorkspaceShell.tsx");
 
   assert.match(appSource, /import\s+\{\s*WorkspaceShell\s*\}\s+from\s+"\.\/components\/workspace\/WorkspaceShell\.tsx";/);
-  assert.match(appSource, /const\s+workspaceNavItems\s*=\s*\[/);
-  assert.match(appSource, /<WorkspaceShell[\s\S]*activeTab=\{activeTab\}[\s\S]*>\s*\{renderWorkspaceContent\(\)\}\s*<\/WorkspaceShell>/);
+  assert.match(configSource, /export const workspaceNavItems/);
+  assert.match(appSource, /<WorkspaceShell[\s\S]*activeTab=\{activeTab\}/);
+  assert.match(appSource, /WorkspaceHome/);
   assert.equal(existsSync(new URL("../src/components/workspace/WorkspaceShell.tsx", import.meta.url)), true);
   assert.doesNotMatch(shellSource, /workspace-banner/);
   assert.match(shellSource, /workspace-sidebar-footer/);
