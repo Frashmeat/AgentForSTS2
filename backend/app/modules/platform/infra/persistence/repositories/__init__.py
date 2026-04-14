@@ -8,6 +8,7 @@ from .job_query_repository_sqlalchemy import JobQueryRepositorySqlAlchemy
 from .job_repository_sqlalchemy import JobRepositorySqlAlchemy
 from .quota_account_repository_sqlalchemy import QuotaAccountRepositorySqlAlchemy
 from .quota_query_repository_sqlalchemy import QuotaQueryRepositorySqlAlchemy
+from .server_execution_repository_sqlalchemy import ServerExecutionRepositorySqlAlchemy
 from .usage_ledger_repository_sqlalchemy import UsageLedgerRepositorySqlAlchemy
 
 __all__ = [
@@ -20,5 +21,6 @@ __all__ = [
     "JobRepositorySqlAlchemy",
     "QuotaAccountRepositorySqlAlchemy",
     "QuotaQueryRepositorySqlAlchemy",
+    "ServerExecutionRepositorySqlAlchemy",
     "UsageLedgerRepositorySqlAlchemy",
 ]

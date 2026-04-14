@@ -4,8 +4,9 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Request
 
-from app.modules.platform.application.services import JobApplicationService, JobQueryService, UserCenterService
+from app.modules.platform.application.services import JobApplicationService, JobQueryService, ServerExecutionService, UserCenterService
 from app.modules.platform.contracts.job_commands import CreateJobCommand, StartJobCommand
+from app.modules.platform.contracts.server_execution import UpdateServerPreferenceCommand
 
 from ._auth_support import auth_session_scope, build_auth_service, require_current_user
 
@@ -34,6 +35,14 @@ def _build_job_application_service(session, request: Request) -> JobApplicationS
     return container.resolve_singleton("platform.job_application_service_factory")(
         job_repository=job_repository,
         job_event_repository=job_event_repository,
+    )
+
+
+def _build_server_execution_service(session, request: Request) -> ServerExecutionService:
+    container = request.app.state.container
+    repository = container.resolve_singleton("platform.server_execution_repository_factory")(session)
+    return container.resolve_singleton("platform.server_execution_service_factory")(
+        server_execution_repository=repository,
     )
 
 
@@ -116,3 +125,31 @@ def list_job_items(request: Request, job_id: int):
         user = require_current_user(request, session)
         service = _build_user_center_service(session, request)
         return [item.model_dump() for item in service.list_job_items(user.user_id, job_id)]
+
+
+@router.get("/server-preferences")
+def get_server_preferences(request: Request):
+    with auth_session_scope(request) as session:
+        user = require_current_user(request, session)
+        _require_platform_access(user)
+        service = _build_server_execution_service(session, request)
+        return service.get_user_server_preference(user.user_id).model_dump()
+
+
+@router.put("/server-preferences")
+def update_server_preferences(request: Request, body: dict):
+    command = UpdateServerPreferenceCommand.model_validate(body)
+    with auth_session_scope(request) as session:
+        user = require_current_user(request, session)
+        _require_platform_access(user)
+        service = _build_server_execution_service(session, request)
+        try:
+            view = service.set_user_server_preference(
+                user.user_id,
+                command.default_execution_profile_id,
+            )
+        except LookupError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return view.model_dump()

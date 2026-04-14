@@ -14,6 +14,7 @@ from app.modules.platform.application.services import (
     JobApplicationService,
     JobQueryService,
     QuotaBillingService,
+    ServerExecutionService,
 )
 from app.modules.platform.runner import (
     ApprovalAdapter,
@@ -33,6 +34,7 @@ from app.modules.platform.infra.persistence.repositories import (
     JobRepositorySqlAlchemy,
     QuotaAccountRepositorySqlAlchemy,
     QuotaQueryRepositorySqlAlchemy,
+    ServerExecutionRepositorySqlAlchemy,
     UsageLedgerRepositorySqlAlchemy,
 )
 from app.shared.infra.config.settings import Settings
@@ -96,9 +98,11 @@ class ApplicationContainer:
             ("platform.artifact_repository_factory", ArtifactRepositorySqlAlchemy),
             ("platform.job_event_repository_factory", JobEventRepositorySqlAlchemy),
             ("platform.admin_query_repositories_factory", AdminQueryRepositoriesSqlAlchemy),
+            ("platform.server_execution_repository_factory", ServerExecutionRepositorySqlAlchemy),
             ("platform.job_application_service_factory", JobApplicationService),
             ("platform.job_query_service_factory", JobQueryService),
             ("platform.admin_query_service_factory", AdminQueryService),
+            ("platform.server_execution_service_factory", ServerExecutionService),
             ("platform.execution_orchestrator_service_factory", ExecutionOrchestratorService),
             ("platform.quota_billing_service_factory", QuotaBillingService),
             ("platform.event_service_factory", EventService),

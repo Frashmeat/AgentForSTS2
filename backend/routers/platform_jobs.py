@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Request
 
-from app.modules.platform.application.services import JobApplicationService, JobQueryService
+from app.modules.platform.application.services import JobApplicationService, JobQueryService, ServerExecutionService
 from app.modules.platform.contracts.job_commands import CancelJobCommand, CreateJobCommand, StartJobCommand
 
 from ._auth_support import auth_session_scope, require_current_user
@@ -33,6 +33,14 @@ def _build_job_query_service(session, request: Request) -> JobQueryService:
     return container.resolve_singleton("platform.job_query_service_factory")(
         job_query_repository=job_query_repository,
         quota_query_repository=quota_query_repository,
+    )
+
+
+def _build_server_execution_service(session, request: Request) -> ServerExecutionService:
+    container = _container(request)
+    repository = container.resolve_singleton("platform.server_execution_repository_factory")(session)
+    return container.resolve_singleton("platform.server_execution_service_factory")(
+        server_execution_repository=repository,
     )
 
 
@@ -128,3 +136,11 @@ def get_quota(request: Request):
         if view is None:
             raise HTTPException(status_code=404, detail="quota not found")
         return view.model_dump()
+
+
+@router.get("/execution-profiles")
+def list_execution_profiles(request: Request):
+    with auth_session_scope(request) as session:
+        _require_platform_user(request, session)
+        service = _build_server_execution_service(session, request)
+        return service.list_execution_profiles().model_dump()

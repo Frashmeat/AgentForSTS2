@@ -8,6 +8,7 @@ from .job_query_repository import JobQueryRepository
 from .job_repository import JobRepository
 from .quota_account_repository import QuotaAccountRepository
 from .quota_query_repository import QuotaQueryRepository
+from .server_execution_repository import ServerExecutionRepository
 from .usage_ledger_repository import UsageLedgerRepository
 
 __all__ = [
@@ -20,5 +21,6 @@ __all__ = [
     "JobRepository",
     "QuotaAccountRepository",
     "QuotaQueryRepository",
+    "ServerExecutionRepository",
     "UsageLedgerRepository",
 ]

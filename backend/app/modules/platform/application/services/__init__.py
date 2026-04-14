@@ -9,6 +9,7 @@ from .execution_orchestrator_service import ExecutionOrchestratorService
 from .job_application_service import JobApplicationService
 from .job_query_service import JobQueryService
 from .quota_billing_service import QuotaBillingService
+from .server_execution_service import ServerExecutionService
 from .user_center_service import UserCenterProfileView, UserCenterService
 
 __all__ = [
@@ -21,6 +22,7 @@ __all__ = [
     "JobApplicationService",
     "JobQueryService",
     "QuotaBillingService",
+    "ServerExecutionService",
     "UserCenterProfileView",
     "UserCenterService",
 ]
