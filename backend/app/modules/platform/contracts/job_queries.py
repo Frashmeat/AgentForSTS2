@@ -11,6 +11,9 @@ class JobListItem(ModelBase):
     job_type: str
     status: str
     input_summary: str = ""
+    selected_execution_profile_id: int | None = None
+    selected_agent_backend: str = ""
+    selected_model: str = ""
     result_summary: str = ""
     total_item_count: int = 0
     succeeded_item_count: int = 0
@@ -45,6 +48,9 @@ class JobDetailView(ModelBase):
     job_type: str
     status: str
     input_summary: str = ""
+    selected_execution_profile_id: int | None = None
+    selected_agent_backend: str = ""
+    selected_model: str = ""
     result_summary: str = ""
     error_summary: str = ""
     original_deducted: int = 0

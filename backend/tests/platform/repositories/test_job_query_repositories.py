@@ -34,6 +34,9 @@ def _seed_query_fixture(db_session):
             "job_type": "batch_generate",
             "workflow_version": "2026.03.31",
             "input_summary": "批量任务",
+            "selected_execution_profile_id": 7,
+            "selected_agent_backend": "codex",
+            "selected_model": "gpt-5.4",
             "items": [
                 {"item_type": "card", "input_summary": "卡牌一", "input_payload": {"name": "One"}},
             ],
@@ -127,6 +130,9 @@ def test_job_query_repository_returns_user_scoped_views(db_session):
     assert [entry.id for entry in jobs] == [job.id]
     assert all(entry.id != other_job.id for entry in jobs)
     assert detail is not None
+    assert detail.selected_execution_profile_id == 7
+    assert detail.selected_agent_backend == "codex"
+    assert detail.selected_model == "gpt-5.4"
     assert detail.artifacts[0].file_name == "a.png"
     assert items[0].item_type == "card"
     assert events[0].as_user_payload()["event_type"] == "job.succeeded"

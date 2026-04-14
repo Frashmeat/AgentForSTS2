@@ -120,6 +120,9 @@ def test_platform_jobs_router_supports_create_start_cancel_and_queries_for_curre
         json={
             "job_type": "single_generate",
             "workflow_version": "2026.03.31",
+            "selected_execution_profile_id": 3,
+            "selected_agent_backend": "codex",
+            "selected_model": "gpt-5.4",
             "items": [{"item_type": "card", "input_payload": {"name": "DarkRelic"}}],
         },
     )
@@ -127,6 +130,9 @@ def test_platform_jobs_router_supports_create_start_cancel_and_queries_for_curre
     payload = created.json()
     job_id = payload["id"]
     assert payload["status"] == "draft"
+    assert payload["selected_execution_profile_id"] == 3
+    assert payload["selected_agent_backend"] == "codex"
+    assert payload["selected_model"] == "gpt-5.4"
 
     started = client.post(f"/api/platform/jobs/{job_id}/start", params={"user_id": other_user_id}, json={})
     assert started.status_code == 200
@@ -139,6 +145,9 @@ def test_platform_jobs_router_supports_create_start_cancel_and_queries_for_curre
     detail = client.get(f"/api/platform/jobs/{job_id}", params={"user_id": other_user_id})
     assert detail.status_code == 200
     assert detail.json()["id"] == job_id
+    assert detail.json()["selected_execution_profile_id"] == 3
+    assert detail.json()["selected_agent_backend"] == "codex"
+    assert detail.json()["selected_model"] == "gpt-5.4"
 
     items = client.get(f"/api/platform/jobs/{job_id}/items", params={"user_id": other_user_id})
     assert items.status_code == 200

@@ -90,6 +90,9 @@ def create_job(request: Request, body: dict):
             "job_type": job.job_type,
             "status": job.status.value,
             "workflow_version": job.workflow_version,
+            "selected_execution_profile_id": job.selected_execution_profile_id,
+            "selected_agent_backend": job.selected_agent_backend,
+            "selected_model": job.selected_model,
         }
 
 

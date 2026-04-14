@@ -18,6 +18,9 @@ class CreateJobCommand(ModelBase):
     workflow_version: str
     input_summary: str = ""
     created_from: str = "platform_api"
+    selected_execution_profile_id: int | None = None
+    selected_agent_backend: str = ""
+    selected_model: str = ""
     items: list[CreateJobItemInput] = field(default_factory=list)
 
 

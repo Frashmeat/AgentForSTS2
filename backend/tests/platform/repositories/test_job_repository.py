@@ -19,6 +19,9 @@ def test_job_repository_creates_job_aggregate_with_expanded_items(db_session):
             "job_type": "batch_generate",
             "workflow_version": "2026.03.31",
             "input_summary": "批量生成卡牌",
+            "selected_execution_profile_id": 12,
+            "selected_agent_backend": "codex",
+            "selected_model": "gpt-5.4",
             "items": [
                 {"item_type": "card", "input_summary": "卡牌 A", "input_payload": {"name": "A"}},
                 {"item_type": "card", "input_summary": "卡牌 B", "input_payload": {"name": "B"}},
@@ -41,6 +44,9 @@ def test_job_repository_creates_job_aggregate_with_expanded_items(db_session):
     assert reloaded.status == JobStatus.DRAFT
     assert reloaded.total_item_count == 2
     assert reloaded.pending_item_count == 2
+    assert reloaded.selected_execution_profile_id == 12
+    assert reloaded.selected_agent_backend == "codex"
+    assert reloaded.selected_model == "gpt-5.4"
     assert [item.item_index for item in items] == [0, 1]
     assert items[0].input_payload["name"] == "A"
 

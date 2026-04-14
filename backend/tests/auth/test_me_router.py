@@ -230,6 +230,9 @@ def test_me_router_can_create_and_start_current_user_job(client: TestClient):
             "workflow_version": "2026.04.04",
             "input_summary": "Dark Relic",
             "created_from": "single_asset",
+            "selected_execution_profile_id": 5,
+            "selected_agent_backend": "codex",
+            "selected_model": "gpt-5.4",
             "items": [
                 {
                     "item_type": "relic",
@@ -241,6 +244,9 @@ def test_me_router_can_create_and_start_current_user_job(client: TestClient):
     )
     assert created.status_code == 200
     assert created.json()["status"] == "draft"
+    assert created.json()["selected_execution_profile_id"] == 5
+    assert created.json()["selected_agent_backend"] == "codex"
+    assert created.json()["selected_model"] == "gpt-5.4"
 
     job_id = created.json()["id"]
     started = client.post(
@@ -251,6 +257,12 @@ def test_me_router_can_create_and_start_current_user_job(client: TestClient):
     assert started.status_code == 200
     assert started.json()["id"] == job_id
     assert started.json()["status"] == "queued"
+
+    detail = client.get(f"/api/me/jobs/{job_id}")
+    assert detail.status_code == 200
+    assert detail.json()["selected_execution_profile_id"] == 5
+    assert detail.json()["selected_agent_backend"] == "codex"
+    assert detail.json()["selected_model"] == "gpt-5.4"
 
 
 def test_me_router_rejects_platform_job_actions_for_unverified_email(client: TestClient):
