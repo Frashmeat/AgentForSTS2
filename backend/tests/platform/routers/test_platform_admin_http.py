@@ -21,7 +21,13 @@ from app.modules.auth.infra.persistence import models as _auth_models  # noqa: F
 from app.modules.auth.infra.persistence.models import UserRecord
 from app.modules.platform.contracts.job_commands import CreateJobCommand
 from app.modules.platform.infra.persistence import models as _platform_models  # noqa: F401
-from app.modules.platform.infra.persistence.models import AIExecutionRecord, ExecutionChargeRecord, JobEventRecord
+from app.modules.platform.infra.persistence.models import (
+    AIExecutionRecord,
+    ExecutionChargeRecord,
+    ExecutionProfileRecord,
+    JobEventRecord,
+    ServerCredentialRecord,
+)
 from app.modules.platform.infra.persistence.repositories.job_repository_sqlalchemy import JobRepositorySqlAlchemy
 from app.shared.infra.db.base import Base
 from routers.auth_router import router as auth_router
@@ -90,6 +96,35 @@ def client(tmp_path):
             event_payload={"status": "succeeded"},
         )
     )
+    profile = ExecutionProfileRecord(
+        code="codex-gpt-5-4",
+        display_name="Codex CLI / gpt-5.4",
+        agent_backend="codex",
+        model="gpt-5.4",
+        description="默认推荐",
+        enabled=True,
+        recommended=True,
+        sort_order=10,
+    )
+    session.add(profile)
+    session.flush()
+    session.add(
+        ServerCredentialRecord(
+            execution_profile_id=profile.id,
+            provider="openai",
+            auth_type="api_key",
+            credential_ciphertext="cipher",
+            secret_ciphertext=None,
+            base_url="https://api.openai.com/v1",
+            label="openai-main-a",
+            priority=10,
+            enabled=True,
+            health_status="healthy",
+            last_checked_at=None,
+            last_error_code="",
+            last_error_message="",
+        )
+    )
     session.add(
         UserRecord(
             username="admin",
@@ -150,6 +185,11 @@ def test_platform_admin_router_supports_execution_refund_and_audit_queries(clien
     audit = test_client.get("/api/admin/audit/events", params={"job_id": job_id})
     assert audit.status_code == 200
     assert audit.json()[0]["event_type"] == "ai_execution.finished"
+
+    credentials = test_client.get("/api/admin/platform/server-credentials")
+    assert credentials.status_code == 200
+    assert credentials.json()["items"][0]["label"] == "openai-main-a"
+    assert credentials.json()["items"][0]["execution_profile_id"] == 1
 
 
 def test_platform_admin_router_requires_authenticated_admin_session(client):

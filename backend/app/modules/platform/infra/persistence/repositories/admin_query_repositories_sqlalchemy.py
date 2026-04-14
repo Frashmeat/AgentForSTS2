@@ -2,9 +2,21 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.modules.platform.contracts import AdminExecutionDetailView, AdminExecutionListItem, JobEventView, RefundRecordView
+from app.modules.platform.contracts import (
+    AdminExecutionDetailView,
+    AdminExecutionListItem,
+    AdminServerCredentialListItem,
+    JobEventView,
+    RefundRecordView,
+)
 from app.modules.platform.domain.repositories import AdminQueryRepositories
-from app.modules.platform.infra.persistence.models import AIExecutionRecord, ChargeStatus, ExecutionChargeRecord, JobEventRecord
+from app.modules.platform.infra.persistence.models import (
+    AIExecutionRecord,
+    ChargeStatus,
+    ExecutionChargeRecord,
+    JobEventRecord,
+    ServerCredentialRecord,
+)
 
 
 def _to_iso(value: object | None) -> str:
@@ -91,6 +103,33 @@ class AdminQueryRepositoriesSqlAlchemy(AdminQueryRepositories):
                 ai_execution_id=row.ai_execution_id,
                 occurred_at=_to_iso(row.created_at),
                 payload=dict(row.event_payload),
+            )
+            for row in rows
+        ]
+
+    def list_server_credentials(self, execution_profile_id: int | None = None) -> list[AdminServerCredentialListItem]:
+        query = self.session.query(ServerCredentialRecord)
+        if execution_profile_id is not None:
+            query = query.filter(ServerCredentialRecord.execution_profile_id == execution_profile_id)
+        rows = query.order_by(
+            ServerCredentialRecord.execution_profile_id.asc(),
+            ServerCredentialRecord.priority.asc(),
+            ServerCredentialRecord.id.asc(),
+        ).all()
+        return [
+            AdminServerCredentialListItem(
+                id=row.id,
+                execution_profile_id=row.execution_profile_id,
+                provider=row.provider,
+                auth_type=row.auth_type,
+                label=row.label,
+                base_url=row.base_url,
+                priority=row.priority,
+                enabled=row.enabled,
+                health_status=row.health_status,
+                last_checked_at=_to_iso(row.last_checked_at) or None,
+                last_error_code=row.last_error_code,
+                last_error_message=row.last_error_message,
             )
             for row in rows
         ]

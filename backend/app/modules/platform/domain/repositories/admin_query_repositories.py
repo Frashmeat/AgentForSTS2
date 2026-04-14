@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from app.modules.platform.contracts import AdminExecutionDetailView, AdminExecutionListItem, JobEventView, RefundRecordView
+from app.modules.platform.contracts import (
+    AdminExecutionDetailView,
+    AdminExecutionListItem,
+    AdminServerCredentialListItem,
+    JobEventView,
+    RefundRecordView,
+)
 
 
 class AdminQueryRepositories(ABC):
@@ -17,3 +23,6 @@ class AdminQueryRepositories(ABC):
 
     @abstractmethod
     def list_audit_events(self, job_id: int | None = None) -> list[JobEventView]: ...
+
+    @abstractmethod
+    def list_server_credentials(self, execution_profile_id: int | None = None) -> list[AdminServerCredentialListItem]: ...

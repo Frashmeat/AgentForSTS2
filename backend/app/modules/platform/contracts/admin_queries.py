@@ -42,3 +42,19 @@ class RefundRecordView(ModelBase):
     ai_execution_id: int
     charge_status: str
     refund_reason: str = ""
+
+
+@dataclass(slots=True)
+class AdminServerCredentialListItem(ModelBase):
+    id: int
+    execution_profile_id: int
+    provider: str
+    auth_type: str
+    label: str
+    base_url: str
+    priority: int
+    enabled: bool
+    health_status: str
+    last_checked_at: str | None = None
+    last_error_code: str = ""
+    last_error_message: str = ""
