@@ -16,11 +16,15 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.composition.container import ApplicationContainer
+from app.modules.auth.application.services import PBKDF2PasswordHasher
+from app.modules.auth.infra.persistence import models as _auth_models  # noqa: F401
+from app.modules.auth.infra.persistence.models import UserRecord
 from app.modules.platform.contracts.job_commands import CreateJobCommand
 from app.modules.platform.infra.persistence import models as _platform_models  # noqa: F401
 from app.modules.platform.infra.persistence.models import AIExecutionRecord, ExecutionChargeRecord, JobEventRecord
 from app.modules.platform.infra.persistence.repositories.job_repository_sqlalchemy import JobRepositorySqlAlchemy
 from app.shared.infra.db.base import Base
+from routers.auth_router import router as auth_router
 from routers.platform_admin import router
 
 
@@ -31,6 +35,9 @@ def client(tmp_path):
         {
             "database": {
                 "url": f"sqlite+pysqlite:///{db_path.as_posix()}",
+            },
+            "auth": {
+                "session_secret": "test-session-secret",
             },
         },
         runtime_role="web",
@@ -80,11 +87,30 @@ def client(tmp_path):
             event_payload={"status": "succeeded"},
         )
     )
+    session.add(
+        UserRecord(
+            username="admin",
+            email="admin@example.com",
+            password_hash=PBKDF2PasswordHasher(iterations=1).hash_password("admin-pass"),
+            email_verified=True,
+            is_admin=True,
+        )
+    )
+    session.add(
+        UserRecord(
+            username="user",
+            email="user@example.com",
+            password_hash=PBKDF2PasswordHasher(iterations=1).hash_password("user-pass"),
+            email_verified=True,
+            is_admin=False,
+        )
+    )
     session.commit()
     session.close()
 
     app = FastAPI()
     app.state.container = container
+    app.include_router(auth_router, prefix="/api")
     app.include_router(router, prefix="/api")
 
     with TestClient(app) as test_client:
@@ -93,6 +119,15 @@ def client(tmp_path):
 
 def test_platform_admin_router_supports_execution_refund_and_audit_queries(client):
     test_client, job_id, execution_id = client
+
+    login = test_client.post(
+        "/api/auth/login",
+        json={
+            "login": "admin@example.com",
+            "password": "admin-pass",
+        },
+    )
+    assert login.status_code == 200
 
     executions = test_client.get(f"/api/admin/jobs/{job_id}/executions")
     assert executions.status_code == 200
@@ -109,3 +144,23 @@ def test_platform_admin_router_supports_execution_refund_and_audit_queries(clien
     audit = test_client.get("/api/admin/audit/events", params={"job_id": job_id})
     assert audit.status_code == 200
     assert audit.json()[0]["event_type"] == "ai_execution.finished"
+
+
+def test_platform_admin_router_requires_authenticated_admin_session(client):
+    test_client, job_id, _ = client
+
+    unauthenticated = test_client.get(f"/api/admin/jobs/{job_id}/executions")
+    assert unauthenticated.status_code == 401
+
+    login = test_client.post(
+        "/api/auth/login",
+        json={
+            "login": "user@example.com",
+            "password": "user-pass",
+        },
+    )
+    assert login.status_code == 200
+
+    forbidden = test_client.get(f"/api/admin/jobs/{job_id}/executions")
+    assert forbidden.status_code == 403
+    assert forbidden.json()["detail"] == "admin permission required"

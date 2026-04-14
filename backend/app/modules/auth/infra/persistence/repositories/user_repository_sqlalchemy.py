@@ -26,6 +26,7 @@ def _to_domain(record: UserRecord) -> UserAccount:
         password_hash=record.password_hash,
         email_verified=record.email_verified,
         created_at=_as_utc_datetime(record.created_at),
+        is_admin=record.is_admin,
         email_verified_at=_as_utc_datetime(record.email_verified_at),
     )
 
@@ -40,6 +41,7 @@ class UserRepositorySqlAlchemy(UserRepository):
             email=email.strip().lower(),
             password_hash=password_hash,
             email_verified=False,
+            is_admin=False,
         )
         self.session.add(record)
         self.session.flush()
@@ -71,6 +73,7 @@ class UserRepositorySqlAlchemy(UserRepository):
         record.email = user.email
         record.password_hash = user.password_hash
         record.email_verified = user.email_verified
+        record.is_admin = user.is_admin
         record.email_verified_at = user.email_verified_at
         self.session.flush()
         return _to_domain(record)

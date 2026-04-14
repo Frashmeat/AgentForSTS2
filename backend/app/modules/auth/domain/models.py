@@ -12,6 +12,7 @@ class UserAccount:
     password_hash: str
     email_verified: bool
     created_at: datetime
+    is_admin: bool = False
     email_verified_at: datetime | None = None
 
     def mark_email_verified(self, verified_at: datetime) -> "UserAccount":

@@ -75,6 +75,7 @@ class AuthService:
             password_hash=self.password_hasher.hash_password(password),
             email_verified=user.email_verified,
             created_at=user.created_at,
+            is_admin=user.is_admin,
             email_verified_at=user.email_verified_at,
         )
         return self.user_repository.save(updated)

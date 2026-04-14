@@ -23,6 +23,7 @@ def _user_payload(user) -> dict:
         "username": user.username,
         "email": user.email,
         "email_verified": user.email_verified,
+        "is_admin": user.is_admin,
         "created_at": user.created_at.isoformat(),
         "email_verified_at": user.email_verified_at.isoformat() if user.email_verified_at else None,
     }

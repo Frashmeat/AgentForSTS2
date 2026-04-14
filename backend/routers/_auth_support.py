@@ -152,6 +152,13 @@ def require_current_user(request: Request, session) -> UserAccount:
     return user
 
 
+def require_admin_user(request: Request, session) -> UserAccount:
+    user = require_current_user(request, session)
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="admin permission required")
+    return user
+
+
 def create_verification_code() -> str:
     return secrets.token_urlsafe(16)
 

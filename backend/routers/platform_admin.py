@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from fastapi import APIRouter, HTTPException, Request
 
 from app.modules.platform.application.services import AdminQueryService
+from ._auth_support import auth_session_scope, require_admin_user
 
 router = APIRouter(prefix="/admin")
 
@@ -35,6 +36,8 @@ def _build_admin_query_service(session, request: Request) -> AdminQueryService:
 
 @router.get("/jobs/{job_id}/executions")
 def list_job_executions(request: Request, job_id: int):
+    with auth_session_scope(request) as auth_session:
+        require_admin_user(request, auth_session)
     with _session_scope(request) as session:
         service = _build_admin_query_service(session, request)
         return [item.model_dump() for item in service.list_executions(job_id=job_id)]
@@ -42,6 +45,8 @@ def list_job_executions(request: Request, job_id: int):
 
 @router.get("/executions/{execution_id}")
 def get_execution_detail(request: Request, execution_id: int):
+    with auth_session_scope(request) as auth_session:
+        require_admin_user(request, auth_session)
     with _session_scope(request) as session:
         service = _build_admin_query_service(session, request)
         detail = service.get_execution_detail(execution_id)
@@ -52,6 +57,8 @@ def get_execution_detail(request: Request, execution_id: int):
 
 @router.get("/quota/refunds")
 def list_refunds(request: Request, user_id: int | None = None):
+    with auth_session_scope(request) as auth_session:
+        require_admin_user(request, auth_session)
     with _session_scope(request) as session:
         service = _build_admin_query_service(session, request)
         return [item.model_dump() for item in service.list_refunds(user_id=user_id)]
@@ -59,6 +66,8 @@ def list_refunds(request: Request, user_id: int | None = None):
 
 @router.get("/audit/events")
 def list_audit_events(request: Request, job_id: int | None = None):
+    with auth_session_scope(request) as auth_session:
+        require_admin_user(request, auth_session)
     with _session_scope(request) as session:
         service = _build_admin_query_service(session, request)
         return [item.model_dump() for item in service.list_audit_events(job_id=job_id)]

@@ -44,6 +44,7 @@ def test_user_repository_supports_create_lookup_and_save(session: Session):
     assert loaded_by_id.user_id == created.user_id
     assert loaded_by_username.email == "luna@example.com"
     assert loaded_by_email.email_verified is True
+    assert loaded_by_email.is_admin is False
     assert saved.email_verified is True
 
 

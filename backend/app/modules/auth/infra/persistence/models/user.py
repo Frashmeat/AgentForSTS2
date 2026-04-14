@@ -15,6 +15,7 @@ class UserRecord(TimestampMixin, Base):
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     email_verified_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deleted_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
