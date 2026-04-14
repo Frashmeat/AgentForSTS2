@@ -38,7 +38,7 @@ def _build_api_lookup_section() -> str:
         sts2_note = _PROMPT_LOADER.render(
             _API_LOOKUP_STS2_LOCAL_KEY,
             {
-                "decompiled_src_path": f"`{lookup_context['game_path']}`",
+                "knowledge_path": f"`{lookup_context['game_path']}`",
             },
         ).strip()
     else:

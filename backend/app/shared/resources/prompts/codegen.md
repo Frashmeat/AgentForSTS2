@@ -158,7 +158,7 @@ Use `ilspycmd <path_to_sts2.dll>` to look up specific classes when needed.
 Game DLL is typically at: {{ ilspy_example_dll_path }}
 
 ## api_lookup_sts2_local
-Runtime knowledge directory for decompiled sts2.dll source: {{ decompiled_src_path }} (Read/Grep directly).
+Runtime knowledge directory for sts2.dll source: {{ knowledge_path }} (Read/Grep directly).
 Key subdirs: `MegaCrit.Sts2.Core.Commands\` (DamageCmd, PowerCmd, CreatureCmd…),
 `MegaCrit.Sts2.Core.Models.Cards\` (StrikeIronclad etc.), `MegaCrit.Sts2.Core.Models\`.
 Only fall back to ilspycmd if a specific class is missing from this runtime knowledge directory.

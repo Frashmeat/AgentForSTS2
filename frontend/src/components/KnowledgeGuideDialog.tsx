@@ -49,7 +49,7 @@ export function KnowledgeGuideDialog({ open, status, onClose }: KnowledgeGuideDi
             <p className="text-xs text-slate-600 break-all">当前路径：{status?.game?.configured_path || "未检测到"}</p>
             <p className="text-xs text-slate-600">当前版本：{status?.game?.current_version || status?.game?.version || "未知"}</p>
             <p className="text-xs text-slate-600">当前实际使用来源：{gameSourceLabel}</p>
-            <p className="text-xs text-slate-600 break-all">当前知识路径：{status?.game?.decompiled_src_path || "未检测到"}</p>
+            <p className="text-xs text-slate-600 break-all">当前知识路径：{status?.game?.knowledge_path || "未检测到"}</p>
           </section>
 
           <section className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-2">
@@ -65,7 +65,7 @@ export function KnowledgeGuideDialog({ open, status, onClose }: KnowledgeGuideDi
             </a>
             <p className="text-xs text-slate-600">当前 release：{status?.baselib?.latest_release_tag || status?.baselib?.release_tag || "未知"}</p>
             <p className="text-xs text-slate-600">当前实际使用来源：{baselibSourceLabel}</p>
-            <p className="text-xs text-slate-600 break-all">当前知识路径：{status?.baselib?.decompiled_src_path || "未检测到"}</p>
+            <p className="text-xs text-slate-600 break-all">当前知识路径：{status?.baselib?.knowledge_path || "未检测到"}</p>
           </section>
         </div>
 

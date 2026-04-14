@@ -38,8 +38,8 @@ export function KnowledgeStatusBanner({
     return null;
   }
 
-  const gameKnowledgePath = status.game.knowledge_path || status.game.decompiled_src_path || "未检测到";
-  const baselibKnowledgePath = status.baselib.knowledge_path || status.baselib.decompiled_src_path || "未检测到";
+  const gameKnowledgePath = status.game.knowledge_path || "未检测到";
+  const baselibKnowledgePath = status.baselib.knowledge_path || "未检测到";
 
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-700 space-y-3">
