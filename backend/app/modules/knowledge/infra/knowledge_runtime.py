@@ -161,6 +161,15 @@ def _manifest_game_dir(manifest: dict[str, Any] | None) -> str:
     return str(get_config().get("sts2_path", "")).strip()
 
 
+def _manifest_knowledge_path(manifest: dict[str, Any], section: str, default_path: Path) -> str:
+    section_payload = manifest.get(section, {})
+    return str(
+        section_payload.get("knowledge_path")
+        or section_payload.get("decompiled_src_path")
+        or default_path
+    )
+
+
 def _default_status_payload(status: str) -> dict[str, Any]:
     return {
         "status": status,
@@ -290,10 +299,14 @@ def get_knowledge_status() -> dict[str, Any]:
     payload["baselib"]["release_tag"] = manifest.get("baselib", {}).get("release_tag")
     payload["game"]["source_mode"] = _resolve_game_source_mode()
     payload["baselib"]["source_mode"] = _resolve_baselib_source_mode()
-    payload["game"]["knowledge_path"] = manifest.get("game", {}).get("decompiled_src_path", str(GAME_KNOWLEDGE_DIR))
-    payload["baselib"]["knowledge_path"] = manifest.get("baselib", {}).get("decompiled_src_path", str(BASELIB_KNOWLEDGE_DIR))
-    payload["game"]["decompiled_src_path"] = manifest.get("game", {}).get("decompiled_src_path", str(GAME_KNOWLEDGE_DIR))
-    payload["baselib"]["decompiled_src_path"] = manifest.get("baselib", {}).get("decompiled_src_path", str(BASELIB_KNOWLEDGE_DIR))
+    payload["game"]["knowledge_path"] = _manifest_knowledge_path(manifest, "game", GAME_KNOWLEDGE_DIR)
+    payload["baselib"]["knowledge_path"] = _manifest_knowledge_path(manifest, "baselib", BASELIB_KNOWLEDGE_DIR)
+    payload["game"]["decompiled_src_path"] = str(
+        manifest.get("game", {}).get("decompiled_src_path", payload["game"]["knowledge_path"])
+    )
+    payload["baselib"]["decompiled_src_path"] = str(
+        manifest.get("baselib", {}).get("decompiled_src_path", payload["baselib"]["knowledge_path"])
+    )
 
     game_path = _manifest_game_dir(manifest)
     try:
@@ -485,6 +498,7 @@ def _run_refresh_impl(task: _RefreshTask) -> None:
             "sts2_path": sts2_path,
             "version": game_info["version"],
             "version_source": game_info["source"],
+            "knowledge_path": str(GAME_KNOWLEDGE_DIR),
             "decompiled_src_path": str(GAME_KNOWLEDGE_DIR),
         },
         "baselib": {
@@ -492,6 +506,7 @@ def _run_refresh_impl(task: _RefreshTask) -> None:
             "release_published_at": release.get("published_at"),
             "asset_name": asset.get("name"),
             "downloaded_file_path": str(baselib_dll_path),
+            "knowledge_path": str(BASELIB_KNOWLEDGE_DIR),
             "decompiled_src_path": str(BASELIB_KNOWLEDGE_DIR),
         },
         "last_check": {

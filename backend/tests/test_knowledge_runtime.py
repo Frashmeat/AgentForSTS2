@@ -103,10 +103,10 @@ def test_download_file_follows_github_style_redirect(tmp_path: Path):
 
 
 def test_compute_status_marks_stale_when_versions_change(monkeypatch, tmp_path: Path):
-    game_dir = tmp_path / "game_decompiled"
+    game_dir = tmp_path / "game"
     game_dir.mkdir(parents=True)
     (game_dir / "Game.cs").write_text("// game", encoding="utf-8")
-    baselib_dir = tmp_path / "baselib_decompiled"
+    baselib_dir = tmp_path / "baselib"
     baselib_dir.mkdir(parents=True)
     (baselib_dir / "BaseLib.decompiled.cs").write_text("// baselib", encoding="utf-8")
     manifest = {
@@ -114,9 +114,10 @@ def test_compute_status_marks_stale_when_versions_change(monkeypatch, tmp_path: 
         "game": {
             "version": "0.2.14",
             "sts2_path": "C:/Steam/steamapps/common/Slay the Spire 2",
+            "knowledge_path": str(game_dir),
             "decompiled_src_path": str(game_dir),
         },
-        "baselib": {"release_tag": "v0.2.7", "decompiled_src_path": str(baselib_dir)},
+        "baselib": {"release_tag": "v0.2.7", "knowledge_path": str(baselib_dir), "decompiled_src_path": str(baselib_dir)},
     }
     monkeypatch.setattr(knowledge_runtime, "load_manifest", lambda: manifest)
     monkeypatch.setattr(
@@ -258,9 +259,9 @@ def test_missing_status_surfaces_missing_runtime_requirements(monkeypatch):
 
 
 def test_missing_manifest_stays_missing_when_only_seed_files_exist(monkeypatch, tmp_path: Path):
-    game_dir = tmp_path / "game_decompiled"
+    game_dir = tmp_path / "game"
     game_dir.mkdir(parents=True)
-    baselib_dir = tmp_path / "baselib_decompiled"
+    baselib_dir = tmp_path / "baselib"
     baselib_dir.mkdir(parents=True)
     monkeypatch.setattr(knowledge_runtime, "load_manifest", lambda: None)
     monkeypatch.setattr(knowledge_runtime, "GAME_KNOWLEDGE_DIR", game_dir)
@@ -278,19 +279,21 @@ def test_missing_manifest_stays_missing_when_only_seed_files_exist(monkeypatch, 
 
 
 def test_manifest_runtime_missing_reports_missing_when_runtime_files_are_absent(monkeypatch, tmp_path: Path):
-    game_dir = tmp_path / "game_decompiled"
+    game_dir = tmp_path / "game"
     game_dir.mkdir(parents=True)
-    baselib_dir = tmp_path / "baselib_decompiled"
+    baselib_dir = tmp_path / "baselib"
     baselib_dir.mkdir(parents=True)
     manifest = {
         "generated_at": "2026-04-10T00:00:00+0800",
         "game": {
             "version": "22340209",
             "sts2_path": "E:/SteamLibrary/steamapps/common/Slay the Spire 2",
+            "knowledge_path": str(game_dir),
             "decompiled_src_path": str(game_dir),
         },
         "baselib": {
             "release_tag": "v0.2.7",
+            "knowledge_path": str(baselib_dir),
             "decompiled_src_path": str(baselib_dir),
         },
     }
