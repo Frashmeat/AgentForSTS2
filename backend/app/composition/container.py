@@ -11,6 +11,7 @@ from app.modules.platform.application.services import (
     AdminQueryService,
     EventService,
     ExecutionOrchestratorService,
+    ExecutionRoutingService,
     JobApplicationService,
     JobQueryService,
     QuotaBillingService,
@@ -31,6 +32,7 @@ from app.modules.platform.infra.persistence.repositories import (
     AdminQueryRepositoriesSqlAlchemy,
     AIExecutionRepositorySqlAlchemy,
     ArtifactRepositorySqlAlchemy,
+    ExecutionRoutingRepositorySqlAlchemy,
     ExecutionChargeRepositorySqlAlchemy,
     JobEventRepositorySqlAlchemy,
     JobQueryRepositorySqlAlchemy,
@@ -96,6 +98,7 @@ class ApplicationContainer:
             ("platform.job_query_repository_factory", JobQueryRepositorySqlAlchemy),
             ("platform.quota_query_repository_factory", QuotaQueryRepositorySqlAlchemy),
             ("platform.ai_execution_repository_factory", AIExecutionRepositorySqlAlchemy),
+            ("platform.execution_routing_repository_factory", ExecutionRoutingRepositorySqlAlchemy),
             ("platform.execution_charge_repository_factory", ExecutionChargeRepositorySqlAlchemy),
             ("platform.quota_account_repository_factory", QuotaAccountRepositorySqlAlchemy),
             ("platform.usage_ledger_repository_factory", UsageLedgerRepositorySqlAlchemy),
@@ -114,6 +117,7 @@ class ApplicationContainer:
             ("platform.execution_orchestrator_service_factory", ExecutionOrchestratorService),
             ("platform.quota_billing_service_factory", QuotaBillingService),
             ("platform.event_service_factory", EventService),
+            ("platform.execution_routing_service_factory", ExecutionRoutingService),
         ):
             self._singletons.setdefault(key, instance)
 

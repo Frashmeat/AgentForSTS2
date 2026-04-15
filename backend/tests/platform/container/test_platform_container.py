@@ -43,6 +43,8 @@ def test_container_exposes_platform_repository_factories_when_database_is_config
     assert callable(container.resolve_singleton("platform.admin_query_repositories_factory"))
     assert callable(container.resolve_singleton("platform.job_application_service_factory"))
     assert callable(container.resolve_singleton("platform.execution_orchestrator_service_factory"))
+    assert callable(container.resolve_singleton("platform.execution_routing_repository_factory"))
+    assert callable(container.resolve_singleton("platform.execution_routing_service_factory"))
     assert callable(container.resolve_singleton("platform.job_query_service_factory"))
     assert callable(container.resolve_singleton("platform.workflow_registry_factory"))
     assert callable(container.resolve_singleton("platform.workflow_runner_factory"))

@@ -9,6 +9,7 @@ from app.modules.platform.contracts.job_commands import CreateJobCommand, StartJ
 from app.modules.platform.contracts.server_execution import UpdateServerPreferenceCommand
 
 from ._auth_support import auth_session_scope, build_auth_service, require_current_user
+from ._platform_execution_support import build_execution_orchestrator_service
 
 router = APIRouter(prefix="/me")
 
@@ -35,6 +36,7 @@ def _build_job_application_service(session, request: Request) -> JobApplicationS
     return container.resolve_singleton("platform.job_application_service_factory")(
         job_repository=job_repository,
         job_event_repository=job_event_repository,
+        execution_orchestrator_service=build_execution_orchestrator_service(session, request),
     )
 
 
@@ -139,10 +141,15 @@ def start_job(request: Request, job_id: int, body: dict):
         user = require_current_user(request, session)
         _require_platform_access(user)
         service = _build_job_application_service(session, request)
-        job = service.start_job(
-            user.user_id,
-            StartJobCommand(job_id=job_id, triggered_by=body.get("triggered_by", "user")),
-        )
+        try:
+            job = service.start_job(
+                user.user_id,
+                StartJobCommand(job_id=job_id, triggered_by=body.get("triggered_by", "user")),
+            )
+        except LookupError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
         if job is None:
             raise HTTPException(status_code=404, detail="job not found")
         return {"id": job.id, "status": job.status.value}

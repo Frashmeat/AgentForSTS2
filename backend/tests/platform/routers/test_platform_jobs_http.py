@@ -19,6 +19,7 @@ from app.composition.container import ApplicationContainer
 from app.modules.auth.infra.persistence import models as _auth_models  # noqa: F401
 from app.modules.platform.infra.persistence import models as _platform_models  # noqa: F401
 from app.modules.platform.infra.persistence.models import (
+    AIExecutionRecord,
     ExecutionProfileRecord,
     QuotaAccountRecord,
     QuotaBucketRecord,
@@ -106,90 +107,7 @@ def _register_login_and_verify(client: TestClient, username: str, email: str) ->
     return user_id
 
 
-def test_platform_jobs_router_supports_create_start_cancel_and_queries_for_current_session_user(client: TestClient):
-    current_user_id = _register_login_and_verify(client, "luna", "luna@example.com")
-    other_user_id = _register_login_and_verify(client, "mira", "mira@example.com")
-    assert other_user_id != current_user_id
-
-    login = client.post(
-        "/api/auth/login",
-        json={
-            "login": "luna",
-            "password": "secret-123",
-        },
-    )
-    assert login.status_code == 200
-
-    created = client.post(
-        "/api/platform/jobs",
-        params={"user_id": other_user_id},
-        json={
-            "job_type": "single_generate",
-            "workflow_version": "2026.03.31",
-            "selected_execution_profile_id": 3,
-            "selected_agent_backend": "codex",
-            "selected_model": "gpt-5.4",
-            "items": [{"item_type": "card", "input_payload": {"name": "DarkRelic"}}],
-        },
-    )
-    assert created.status_code == 200
-    payload = created.json()
-    job_id = payload["id"]
-    assert payload["status"] == "draft"
-    assert payload["selected_execution_profile_id"] == 3
-    assert payload["selected_agent_backend"] == "codex"
-    assert payload["selected_model"] == "gpt-5.4"
-
-    started = client.post(f"/api/platform/jobs/{job_id}/start", params={"user_id": other_user_id}, json={})
-    assert started.status_code == 200
-    assert started.json()["status"] == "queued"
-
-    listed = client.get("/api/platform/jobs", params={"user_id": other_user_id})
-    assert listed.status_code == 200
-    assert listed.json()[0]["id"] == job_id
-
-    detail = client.get(f"/api/platform/jobs/{job_id}", params={"user_id": other_user_id})
-    assert detail.status_code == 200
-    assert detail.json()["id"] == job_id
-    assert detail.json()["selected_execution_profile_id"] == 3
-    assert detail.json()["selected_agent_backend"] == "codex"
-    assert detail.json()["selected_model"] == "gpt-5.4"
-
-    items = client.get(f"/api/platform/jobs/{job_id}/items", params={"user_id": other_user_id})
-    assert items.status_code == 200
-    assert items.json()[0]["item_type"] == "card"
-
-    events = client.get(f"/api/platform/jobs/{job_id}/events", params={"user_id": other_user_id})
-    assert events.status_code == 200
-    event_types = [entry["event_type"] for entry in events.json()]
-    assert "job.created" in event_types
-    assert "job.queued" in event_types
-
-    quota = client.get("/api/platform/quota", params={"user_id": other_user_id})
-    assert quota.status_code == 200
-    assert quota.json()["daily_limit"] == 10
-
-    cancelled = client.post(
-        f"/api/platform/jobs/{job_id}/cancel",
-        params={"user_id": other_user_id},
-        json={"reason": "stop"},
-    )
-    assert cancelled.status_code == 200
-    assert cancelled.json()["ok"] is True
-
-
-def test_platform_jobs_router_uses_current_user_default_server_profile_when_request_omits_selection(client: TestClient):
-    user_id = _register_login_and_verify(client, "luna", "luna@example.com")
-
-    login = client.post(
-        "/api/auth/login",
-        json={
-            "login": "luna",
-            "password": "secret-123",
-        },
-    )
-    assert login.status_code == 200
-
+def _seed_execution_profile(client: TestClient) -> int:
     session = client.app.state.container.resolve_singleton("platform.db_session_factory")()
     try:
         profile = ExecutionProfileRecord(
@@ -221,10 +139,118 @@ def test_platform_jobs_router_uses_current_user_default_server_profile_when_requ
                 last_error_message="",
             )
         )
+        session.commit()
+        return profile.id
+    finally:
+        session.close()
+
+
+def test_platform_jobs_router_supports_create_start_cancel_and_queries_for_current_session_user(client: TestClient):
+    current_user_id = _register_login_and_verify(client, "luna", "luna@example.com")
+    other_user_id = _register_login_and_verify(client, "mira", "mira@example.com")
+    assert other_user_id != current_user_id
+    profile_id = _seed_execution_profile(client)
+
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    created = client.post(
+        "/api/platform/jobs",
+        params={"user_id": other_user_id},
+        json={
+            "job_type": "single_generate",
+            "workflow_version": "2026.03.31",
+            "selected_execution_profile_id": profile_id,
+            "selected_agent_backend": "codex",
+            "selected_model": "gpt-5.4",
+            "items": [{"item_type": "card", "input_payload": {"name": "DarkRelic"}}],
+        },
+    )
+    assert created.status_code == 200
+    payload = created.json()
+    job_id = payload["id"]
+    assert payload["status"] == "draft"
+    assert payload["selected_execution_profile_id"] == profile_id
+    assert payload["selected_agent_backend"] == "codex"
+    assert payload["selected_model"] == "gpt-5.4"
+
+    started = client.post(f"/api/platform/jobs/{job_id}/start", params={"user_id": other_user_id}, json={})
+    assert started.status_code == 200
+    assert started.json()["status"] == "running"
+
+    listed = client.get("/api/platform/jobs", params={"user_id": other_user_id})
+    assert listed.status_code == 200
+    assert listed.json()[0]["id"] == job_id
+
+    detail = client.get(f"/api/platform/jobs/{job_id}", params={"user_id": other_user_id})
+    assert detail.status_code == 200
+    assert detail.json()["id"] == job_id
+    assert detail.json()["status"] == "running"
+    assert detail.json()["selected_execution_profile_id"] == profile_id
+    assert detail.json()["selected_agent_backend"] == "codex"
+    assert detail.json()["selected_model"] == "gpt-5.4"
+
+    items = client.get(f"/api/platform/jobs/{job_id}/items", params={"user_id": other_user_id})
+    assert items.status_code == 200
+    assert items.json()[0]["item_type"] == "card"
+    assert items.json()[0]["status"] == "running"
+
+    events = client.get(f"/api/platform/jobs/{job_id}/events", params={"user_id": other_user_id})
+    assert events.status_code == 200
+    event_types = [entry["event_type"] for entry in events.json()]
+    assert "job.created" in event_types
+    assert "job.queued" in event_types
+    assert "ai_execution.started" in event_types
+
+    session = client.app.state.container.resolve_singleton("platform.db_session_factory")()
+    try:
+        execution = session.query(AIExecutionRecord).filter(AIExecutionRecord.job_id == job_id).one()
+        assert execution.status.value == "dispatching"
+        assert execution.provider == "openai"
+        assert execution.model == "gpt-5.4"
+        assert execution.credential_ref == "server-credential:1"
+    finally:
+        session.close()
+
+    quota = client.get("/api/platform/quota", params={"user_id": other_user_id})
+    assert quota.status_code == 200
+    assert quota.json()["daily_limit"] == 10
+
+    cancelled = client.post(
+        f"/api/platform/jobs/{job_id}/cancel",
+        params={"user_id": other_user_id},
+        json={"reason": "stop"},
+    )
+    assert cancelled.status_code == 200
+    assert cancelled.json()["ok"] is True
+
+
+def test_platform_jobs_router_uses_current_user_default_server_profile_when_request_omits_selection(client: TestClient):
+    user_id = _register_login_and_verify(client, "luna", "luna@example.com")
+
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    profile_id = _seed_execution_profile(client)
+
+    session = client.app.state.container.resolve_singleton("platform.db_session_factory")()
+    try:
         session.add(
             UserPlatformPreferenceRecord(
                 user_id=user_id,
-                default_execution_profile_id=profile.id,
+                default_execution_profile_id=profile_id,
             )
         )
         session.commit()
@@ -241,6 +267,6 @@ def test_platform_jobs_router_uses_current_user_default_server_profile_when_requ
     )
 
     assert created.status_code == 200
-    assert created.json()["selected_execution_profile_id"] == 1
+    assert created.json()["selected_execution_profile_id"] == profile_id
     assert created.json()["selected_agent_backend"] == "codex"
     assert created.json()["selected_model"] == "gpt-5.4"

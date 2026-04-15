@@ -19,6 +19,7 @@ from app.composition.container import ApplicationContainer
 from app.modules.auth.infra.persistence import models as _auth_models  # noqa: F401
 from app.modules.platform.infra.persistence import models as _platform_models  # noqa: F401
 from app.modules.platform.infra.persistence.models import (
+    AIExecutionRecord,
     ExecutionProfileRecord,
     JobItemRecord,
     JobRecord,
@@ -226,6 +227,56 @@ def test_me_router_can_create_and_start_current_user_job(client: TestClient):
     verified = client.post("/api/auth/verify-email", json={"code": verification_code})
     assert verified.status_code == 200
 
+    app_container = client.app.state.container
+    session = app_container.resolve_singleton("platform.db_session_factory")()
+    try:
+        account = QuotaAccountRecord(user_id=registered.json()["user"]["user_id"], status=QuotaAccountStatus.ACTIVE)
+        session.add(account)
+        session.flush()
+        session.add(
+            QuotaBucketRecord(
+                quota_account_id=account.id,
+                bucket_type=QuotaBucketType.DAILY,
+                period_start=datetime.now(UTC) - timedelta(hours=1),
+                period_end=datetime.now(UTC) + timedelta(hours=23),
+                quota_limit=10,
+                used_amount=0,
+                refunded_amount=0,
+            )
+        )
+        profile = ExecutionProfileRecord(
+            code="codex-gpt-5-4",
+            display_name="Codex CLI / gpt-5.4",
+            agent_backend="codex",
+            model="gpt-5.4",
+            description="默认推荐",
+            enabled=True,
+            recommended=True,
+            sort_order=10,
+        )
+        session.add(profile)
+        session.flush()
+        session.add(
+            ServerCredentialRecord(
+                execution_profile_id=profile.id,
+                provider="openai",
+                auth_type="api_key",
+                credential_ciphertext="cipher",
+                secret_ciphertext=None,
+                base_url="https://api.openai.com/v1",
+                label="main",
+                priority=1,
+                enabled=True,
+                health_status="healthy",
+                last_checked_at=None,
+                last_error_code="",
+                last_error_message="",
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
     created = client.post(
         "/api/me/jobs",
         json={
@@ -233,7 +284,7 @@ def test_me_router_can_create_and_start_current_user_job(client: TestClient):
             "workflow_version": "2026.04.04",
             "input_summary": "Dark Relic",
             "created_from": "single_asset",
-            "selected_execution_profile_id": 5,
+            "selected_execution_profile_id": 1,
             "selected_agent_backend": "codex",
             "selected_model": "gpt-5.4",
             "items": [
@@ -247,7 +298,7 @@ def test_me_router_can_create_and_start_current_user_job(client: TestClient):
     )
     assert created.status_code == 200
     assert created.json()["status"] == "draft"
-    assert created.json()["selected_execution_profile_id"] == 5
+    assert created.json()["selected_execution_profile_id"] == 1
     assert created.json()["selected_agent_backend"] == "codex"
     assert created.json()["selected_model"] == "gpt-5.4"
 
@@ -259,13 +310,28 @@ def test_me_router_can_create_and_start_current_user_job(client: TestClient):
 
     assert started.status_code == 200
     assert started.json()["id"] == job_id
-    assert started.json()["status"] == "queued"
+    assert started.json()["status"] == "running"
 
     detail = client.get(f"/api/me/jobs/{job_id}")
     assert detail.status_code == 200
-    assert detail.json()["selected_execution_profile_id"] == 5
+    assert detail.json()["status"] == "running"
+    assert detail.json()["selected_execution_profile_id"] == 1
     assert detail.json()["selected_agent_backend"] == "codex"
     assert detail.json()["selected_model"] == "gpt-5.4"
+
+    items = client.get(f"/api/me/jobs/{job_id}/items")
+    assert items.status_code == 200
+    assert items.json()[0]["status"] == "running"
+
+    session = app_container.resolve_singleton("platform.db_session_factory")()
+    try:
+        execution = session.query(AIExecutionRecord).filter(AIExecutionRecord.job_id == job_id).one()
+        assert execution.status.value == "dispatching"
+        assert execution.provider == "openai"
+        assert execution.model == "gpt-5.4"
+        assert execution.credential_ref == "server-credential:1"
+    finally:
+        session.close()
 
 
 def test_me_router_create_job_uses_current_user_default_server_profile_when_request_omits_selection(client: TestClient):

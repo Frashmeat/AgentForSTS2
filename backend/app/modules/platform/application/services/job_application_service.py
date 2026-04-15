@@ -1,15 +1,30 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from app.modules.platform.contracts.job_commands import CancelJobCommand, CreateJobCommand, StartJobCommand
 from app.modules.platform.domain.models.enums import JobItemStatus, JobStatus
 from app.modules.platform.domain.repositories import JobEventRepository, JobRepository
 from app.modules.platform.infra.persistence.models import JobRecord
 
+from .execution_orchestrator_service import ExecutionOrchestratorService
+
+
+_STEP_PROTOCOL_VERSION = "v1"
+_RESULT_SCHEMA_VERSION = "v1"
+_DISPATCH_STEP_TYPE = "workflow.dispatch"
+
 
 class JobApplicationService:
-    def __init__(self, job_repository: JobRepository, job_event_repository: JobEventRepository) -> None:
+    def __init__(
+        self,
+        job_repository: JobRepository,
+        job_event_repository: JobEventRepository,
+        execution_orchestrator_service: ExecutionOrchestratorService | None = None,
+    ) -> None:
         self.job_repository = job_repository
         self.job_event_repository = job_event_repository
+        self.execution_orchestrator_service = execution_orchestrator_service
 
     def create_job(self, user_id: int, command: CreateJobCommand) -> JobRecord:
         job = self.job_repository.create_job_with_items(user_id=user_id, command=command)
@@ -29,6 +44,7 @@ class JobApplicationService:
             if item.status == JobItemStatus.PENDING:
                 item.status = JobItemStatus.READY
         job.status = JobStatus.QUEUED
+        self._sync_job_counters(job)
         self.job_repository.save(job)
         self.job_event_repository.append(
             job_id=job.id,
@@ -36,6 +52,25 @@ class JobApplicationService:
             event_type="job.queued",
             payload={"status": job.status.value, "triggered_by": command.triggered_by},
         )
+        if self.execution_orchestrator_service is not None:
+            ready_items = [item for item in job.items if item.status == JobItemStatus.READY]
+            now = datetime.now(UTC)
+            for item in ready_items:
+                self.execution_orchestrator_service.start_execution(
+                    user_id=user_id,
+                    job_id=job.id,
+                    job_item_id=item.id,
+                    workflow_version=job.workflow_version,
+                    step_protocol_version=_STEP_PROTOCOL_VERSION,
+                    result_schema_version=_RESULT_SCHEMA_VERSION,
+                    step_type=_DISPATCH_STEP_TYPE,
+                    step_id=self._build_dispatch_step_id(item.item_index),
+                    request_idempotency_key=self._build_start_idempotency_key(job.id, item.id),
+                    now=now,
+                )
+            self._sync_job_counters(job)
+            self._sync_started_job_status(job)
+            self.job_repository.save(job)
         return job
 
     def cancel_job(self, user_id: int, command: CancelJobCommand) -> bool:
@@ -51,3 +86,39 @@ class JobApplicationService:
                 payload={"reason": command.reason},
             )
         return changed
+
+    @staticmethod
+    def _build_dispatch_step_id(item_index: int) -> str:
+        return f"{_DISPATCH_STEP_TYPE}.item-{item_index + 1}"
+
+    @staticmethod
+    def _build_start_idempotency_key(job_id: int, job_item_id: int) -> str:
+        return f"job-start:{job_id}:item:{job_item_id}"
+
+    @staticmethod
+    def _sync_job_counters(job: JobRecord) -> None:
+        items = list(job.items)
+        job.total_item_count = len(items)
+        job.pending_item_count = sum(1 for item in items if item.status in {JobItemStatus.PENDING, JobItemStatus.READY})
+        job.running_item_count = sum(1 for item in items if item.status == JobItemStatus.RUNNING)
+        job.succeeded_item_count = sum(1 for item in items if item.status == JobItemStatus.SUCCEEDED)
+        job.failed_business_item_count = sum(1 for item in items if item.status == JobItemStatus.FAILED_BUSINESS)
+        job.failed_system_item_count = sum(1 for item in items if item.status == JobItemStatus.FAILED_SYSTEM)
+        job.quota_skipped_item_count = sum(1 for item in items if item.status == JobItemStatus.QUOTA_SKIPPED)
+        job.cancelled_before_start_item_count = sum(
+            1 for item in items if item.status == JobItemStatus.CANCELLED_BEFORE_START
+        )
+        job.cancelled_after_start_item_count = sum(
+            1 for item in items if item.status == JobItemStatus.CANCELLED_AFTER_START
+        )
+
+    @staticmethod
+    def _sync_started_job_status(job: JobRecord) -> None:
+        if job.running_item_count > 0:
+            job.status = JobStatus.RUNNING
+            return
+        if job.pending_item_count > 0:
+            job.status = JobStatus.QUEUED
+            return
+        if job.total_item_count > 0 and job.quota_skipped_item_count == job.total_item_count:
+            job.status = JobStatus.QUOTA_EXHAUSTED
