@@ -4,6 +4,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from app.modules.platform.contracts.admin_queries import AdminExecutionDetailView
+from app.modules.platform.contracts.admin_commands import CreateServerCredentialCommand, UpdateServerCredentialCommand
+from app.modules.platform.contracts.admin_queries import AdminServerCredentialHealthCheckView
 from app.modules.platform.contracts.events import JobEventView
 from app.modules.platform.contracts.job_commands import CreateJobCommand
 from app.modules.platform.contracts.job_queries import JobDetailView
@@ -117,3 +119,51 @@ def test_step_execution_request_captures_minimal_protocol_fields():
     payload = request.model_dump()
     assert payload["step_protocol_version"] == "v1"
     assert payload["input_payload"]["prompt"] == "dark relic"
+
+
+def test_create_server_credential_command_applies_defaults():
+    command = CreateServerCredentialCommand.model_validate(
+        {
+            "execution_profile_id": 1,
+            "provider": "openai",
+            "auth_type": "api_key",
+            "credential": "sk-live",
+        }
+    )
+
+    payload = command.model_dump()
+    assert payload["secret"] == ""
+    assert payload["base_url"] == ""
+    assert payload["priority"] == 0
+    assert payload["enabled"] is True
+
+
+def test_update_server_credential_command_applies_optional_secret_defaults():
+    command = UpdateServerCredentialCommand.model_validate(
+        {
+            "execution_profile_id": 1,
+            "provider": "openai",
+            "auth_type": "api_key",
+            "label": "main",
+        }
+    )
+
+    payload = command.model_dump()
+    assert payload["credential"] == ""
+    assert payload["secret"] == ""
+    assert payload["enabled"] is True
+
+
+def test_admin_server_credential_health_check_view_serializes_expected_fields():
+    view = AdminServerCredentialHealthCheckView.model_validate(
+        {
+            "credential_id": 1,
+            "health_status": "healthy",
+            "error_code": "",
+            "error_message": "",
+            "checked_at": "2026-04-15T01:02:03Z",
+        }
+    )
+    payload = view.model_dump()
+    assert payload["credential_id"] == 1
+    assert payload["health_status"] == "healthy"

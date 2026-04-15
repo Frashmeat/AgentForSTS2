@@ -61,6 +61,15 @@ class AdminServerCredentialListItem(ModelBase):
 
 
 @dataclass(slots=True)
+class AdminServerCredentialHealthCheckView(ModelBase):
+    credential_id: int
+    health_status: str
+    error_code: str = ""
+    error_message: str = ""
+    checked_at: str | None = None
+
+
+@dataclass(slots=True)
 class AdminExecutionProfileListItem(ModelBase):
     id: int
     code: str

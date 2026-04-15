@@ -66,6 +66,8 @@ def test_web_runtime_container_skips_workstation_bridge_singletons():
     assert container.has_singleton("platform.job_repository_factory") is True
     assert container.has_singleton("platform.job_query_service_factory") is True
     assert container.has_singleton("platform.admin_query_service_factory") is True
+    assert container.has_singleton("platform.server_credential_admin_service_factory") is True
+    assert container.has_singleton("platform.server_credential_cipher_factory") is True
     assert container.has_singleton("platform.config_facade_service_factory") is False
     assert container.has_singleton("platform.workflow_registry_factory") is False
     assert container.has_singleton("platform.approval_adapter_factory") is False

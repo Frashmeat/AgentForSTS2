@@ -10,6 +10,8 @@ from app.modules.platform.infra.persistence.models import AIExecutionRecord
 from app.modules.platform.runner.workflow_registry import PlatformWorkflowRegistry
 from app.modules.platform.runner.workflow_runner import WorkflowRunner
 
+from .execution_routing_service import ExecutionRoutingService
+
 
 class ExecutionOrchestratorService:
     def __init__(
@@ -18,6 +20,7 @@ class ExecutionOrchestratorService:
         ai_execution_repository: AIExecutionRepository,
         quota_billing_service: QuotaBillingService | None,
         job_event_repository: JobEventRepository,
+        execution_routing_service: ExecutionRoutingService | None = None,
         workflow_registry: PlatformWorkflowRegistry | None = None,
         workflow_runner: WorkflowRunner | None = None,
     ) -> None:
@@ -25,6 +28,7 @@ class ExecutionOrchestratorService:
         self.ai_execution_repository = ai_execution_repository
         self.quota_billing_service = quota_billing_service
         self.job_event_repository = job_event_repository
+        self.execution_routing_service = execution_routing_service
         self.workflow_registry = workflow_registry
         self.workflow_runner = workflow_runner
 
@@ -34,8 +38,8 @@ class ExecutionOrchestratorService:
         user_id: int,
         job_id: int,
         job_item_id: int,
-        provider: str,
-        model: str,
+        provider: str = "",
+        model: str = "",
         credential_ref: str = "",
         retry_attempt: int = 0,
         switched_credential: bool = False,
@@ -62,6 +66,16 @@ class ExecutionOrchestratorService:
         item = next((entry for entry in job.items if entry.id == job_item_id), None)
         if item is None:
             return None
+
+        if self.execution_routing_service is not None and not provider.strip() and not model.strip():
+            route = self.execution_routing_service.resolve_for_job(job)
+            provider = route.provider
+            model = route.model
+            credential_ref = route.credential_ref
+            retry_attempt = route.retry_attempt
+            switched_credential = route.switched_credential
+        elif not provider.strip() or not model.strip():
+            raise ValueError("provider and model are required when execution routing service is not configured")
 
         if self.quota_billing_service is None:
             return None

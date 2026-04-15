@@ -4,7 +4,8 @@ from contextlib import contextmanager
 
 from fastapi import APIRouter, HTTPException, Request
 
-from app.modules.platform.application.services import AdminQueryService
+from app.modules.platform.application.services import AdminQueryService, ServerCredentialAdminService
+from app.modules.platform.contracts import CreateServerCredentialCommand, UpdateServerCredentialCommand
 from ._auth_support import auth_session_scope, require_admin_user
 
 router = APIRouter(prefix="/admin")
@@ -22,6 +23,10 @@ def _session_scope(request: Request):
     session = session_factory()
     try:
         yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
     finally:
         session.close()
 
@@ -31,6 +36,23 @@ def _build_admin_query_service(session, request: Request) -> AdminQueryService:
     repositories = container.resolve_singleton("platform.admin_query_repositories_factory")(session)
     return container.resolve_singleton("platform.admin_query_service_factory")(
         admin_query_repositories=repositories,
+    )
+
+
+def _build_server_credential_admin_service(session, request: Request) -> ServerCredentialAdminService:
+    container = _container(request)
+    repository = container.resolve_singleton("platform.server_credential_admin_repository_factory")(session)
+    cipher_factory = container.resolve_singleton("platform.server_credential_cipher_factory")
+    health_checker_factory = container.resolve_singleton("platform.server_credential_health_checker_factory")
+    settings = container.resolve_singleton("settings")
+    try:
+        cipher = cipher_factory.from_settings(settings)
+    except (RuntimeError, ValueError) as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    return container.resolve_singleton("platform.server_credential_admin_service_factory")(
+        server_credential_admin_repository=repository,
+        server_credential_cipher=cipher,
+        server_credential_health_checker=health_checker_factory(),
     )
 
 
@@ -80,6 +102,89 @@ def list_server_credentials(request: Request, execution_profile_id: int | None =
     with _session_scope(request) as session:
         service = _build_admin_query_service(session, request)
         return {"items": [item.model_dump() for item in service.list_server_credentials(execution_profile_id=execution_profile_id)]}
+
+
+@router.post("/platform/server-credentials")
+def create_server_credential(request: Request, body: dict):
+    try:
+        command = CreateServerCredentialCommand.model_validate(body)
+    except KeyError as error:
+        message = error.args[0] if error.args else "invalid request body"
+        raise HTTPException(status_code=400, detail=str(message)) from error
+
+    with auth_session_scope(request) as auth_session:
+        require_admin_user(request, auth_session)
+    with _session_scope(request) as session:
+        service = _build_server_credential_admin_service(session, request)
+        try:
+            item = service.create_server_credential(command)
+        except LookupError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return item.model_dump()
+
+
+@router.put("/platform/server-credentials/{credential_id}")
+def update_server_credential(request: Request, credential_id: int, body: dict):
+    try:
+        command = UpdateServerCredentialCommand.model_validate(body)
+    except KeyError as error:
+        message = error.args[0] if error.args else "invalid request body"
+        raise HTTPException(status_code=400, detail=str(message)) from error
+
+    with auth_session_scope(request) as auth_session:
+        require_admin_user(request, auth_session)
+    with _session_scope(request) as session:
+        service = _build_server_credential_admin_service(session, request)
+        try:
+            item = service.update_server_credential(credential_id, command)
+        except LookupError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return item.model_dump()
+
+
+@router.post("/platform/server-credentials/{credential_id}/enable")
+def enable_server_credential(request: Request, credential_id: int):
+    with auth_session_scope(request) as auth_session:
+        require_admin_user(request, auth_session)
+    with _session_scope(request) as session:
+        service = _build_server_credential_admin_service(session, request)
+        try:
+            item = service.set_server_credential_enabled(credential_id, True)
+        except LookupError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return item.model_dump()
+
+
+@router.post("/platform/server-credentials/{credential_id}/disable")
+def disable_server_credential(request: Request, credential_id: int):
+    with auth_session_scope(request) as auth_session:
+        require_admin_user(request, auth_session)
+    with _session_scope(request) as session:
+        service = _build_server_credential_admin_service(session, request)
+        try:
+            item = service.set_server_credential_enabled(credential_id, False)
+        except LookupError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return item.model_dump()
+
+
+@router.post("/platform/server-credentials/{credential_id}/health-check")
+def run_server_credential_health_check(request: Request, credential_id: int):
+    with auth_session_scope(request) as auth_session:
+        require_admin_user(request, auth_session)
+    with _session_scope(request) as session:
+        service = _build_server_credential_admin_service(session, request)
+        try:
+            item = service.run_health_check(credential_id)
+        except LookupError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return item.model_dump()
 
 
 @router.get("/platform/execution-profiles")

@@ -17,12 +17,15 @@ from fastapi.testclient import TestClient
 
 from app.composition.container import ApplicationContainer
 from app.modules.auth.application.services import PBKDF2PasswordHasher
+from app.modules.platform.application.services.server_credential_health_checker import ServerCredentialHealthCheckResult
+from app.modules.platform.application.services.server_credential_cipher import ServerCredentialCipher
 from app.modules.auth.infra.persistence import models as _auth_models  # noqa: F401
 from app.modules.auth.infra.persistence.models import UserRecord
 from app.modules.platform.contracts.job_commands import CreateJobCommand
 from app.modules.platform.infra.persistence import models as _platform_models  # noqa: F401
 from app.modules.platform.infra.persistence.models import (
     AIExecutionRecord,
+    CredentialHealthCheckRecord,
     ExecutionChargeRecord,
     ExecutionProfileRecord,
     JobEventRecord,
@@ -32,6 +35,16 @@ from app.modules.platform.infra.persistence.repositories.job_repository_sqlalche
 from app.shared.infra.db.base import Base
 from routers.auth_router import router as auth_router
 from routers.platform_admin import router
+
+
+class FakePlatformHealthChecker:
+    def __init__(self, result: ServerCredentialHealthCheckResult | None = None) -> None:
+        self.result = result or ServerCredentialHealthCheckResult(status="healthy", latency_ms=8)
+        self.calls: list[dict] = []
+
+    def check(self, **payload) -> ServerCredentialHealthCheckResult:
+        self.calls.append(payload)
+        return self.result
 
 
 @pytest.fixture()
@@ -48,7 +61,10 @@ def client(tmp_path):
         },
         runtime_role="web",
     )
+    fake_health_checker = FakePlatformHealthChecker()
+    container.register_singleton("platform.server_credential_health_checker_factory", lambda: fake_health_checker)
     session = container.resolve_singleton("platform.db_session_factory")()
+    cipher = ServerCredentialCipher.from_settings(container.resolve_singleton("settings"))
     Base.metadata.create_all(session.bind)
     job_repository = JobRepositorySqlAlchemy(session)
     job = job_repository.create_job_with_items(
@@ -113,7 +129,7 @@ def client(tmp_path):
             execution_profile_id=profile.id,
             provider="openai",
             auth_type="api_key",
-            credential_ciphertext="cipher",
+            credential_ciphertext=cipher.encrypt("seed-openai-main"),
             secret_ciphertext=None,
             base_url="https://api.openai.com/v1",
             label="openai-main-a",
@@ -152,11 +168,11 @@ def client(tmp_path):
     app.include_router(router, prefix="/api")
 
     with TestClient(app) as test_client:
-        yield test_client, job.id, execution.id
+        yield test_client, job.id, execution.id, fake_health_checker
 
 
 def test_platform_admin_router_supports_execution_refund_and_audit_queries(client):
-    test_client, job_id, execution_id = client
+    test_client, job_id, execution_id, _ = client
 
     login = test_client.post(
         "/api/auth/login",
@@ -196,8 +212,129 @@ def test_platform_admin_router_supports_execution_refund_and_audit_queries(clien
     assert profiles.json()["items"][0]["code"] == "codex-gpt-5-4"
 
 
+def test_platform_admin_router_creates_server_credential_with_ciphertext_storage(client):
+    test_client, _, _, _ = client
+
+    login = test_client.post(
+        "/api/auth/login",
+        json={
+            "login": "admin@example.com",
+            "password": "admin-pass",
+        },
+    )
+    assert login.status_code == 200
+
+    created = test_client.post(
+        "/api/admin/platform/server-credentials",
+        json={
+            "execution_profile_id": 1,
+            "provider": "openai",
+            "auth_type": "api_key",
+            "credential": "sk-live-main",
+            "secret": "",
+            "base_url": "https://api.openai.com/v1",
+            "label": "openai-main-b",
+            "priority": 20,
+            "enabled": True,
+        },
+    )
+    assert created.status_code == 200
+    payload = created.json()
+    assert payload["label"] == "openai-main-b"
+    assert payload["provider"] == "openai"
+    assert "credential" not in payload
+    assert "secret" not in payload
+
+    session = test_client.app.state.container.resolve_singleton("platform.db_session_factory")()
+    try:
+        row = session.query(ServerCredentialRecord).filter_by(label="openai-main-b").one()
+        assert row.credential_ciphertext != "sk-live-main"
+        assert row.secret_ciphertext is None
+        cipher = ServerCredentialCipher.from_settings(test_client.app.state.container.resolve_singleton("settings"))
+        assert cipher.decrypt(row.credential_ciphertext) == "sk-live-main"
+    finally:
+        session.close()
+
+
+def test_platform_admin_router_updates_and_toggles_server_credential(client):
+    test_client, _, _, _ = client
+
+    login = test_client.post(
+        "/api/auth/login",
+        json={
+            "login": "admin@example.com",
+            "password": "admin-pass",
+        },
+    )
+    assert login.status_code == 200
+
+    updated = test_client.put(
+        "/api/admin/platform/server-credentials/1",
+        json={
+            "execution_profile_id": 1,
+            "provider": "anthropic",
+            "auth_type": "api_key",
+            "credential": "anthropic-key-1",
+            "base_url": "https://api.anthropic.com",
+            "label": "anthropic-main-a",
+            "priority": 15,
+            "enabled": True,
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["provider"] == "anthropic"
+    assert updated.json()["label"] == "anthropic-main-a"
+
+    disabled = test_client.post("/api/admin/platform/server-credentials/1/disable")
+    assert disabled.status_code == 200
+    assert disabled.json()["enabled"] is False
+    assert disabled.json()["health_status"] == "disabled"
+
+    enabled = test_client.post("/api/admin/platform/server-credentials/1/enable")
+    assert enabled.status_code == 200
+    assert enabled.json()["enabled"] is True
+    assert enabled.json()["health_status"] == "degraded"
+
+
+def test_platform_admin_router_runs_manual_health_check_and_writes_result(client):
+    test_client, _, _, fake_health_checker = client
+
+    fake_health_checker.result = ServerCredentialHealthCheckResult(
+        status="rate_limited",
+        error_code="http_429",
+        error_message="limited",
+        latency_ms=21,
+    )
+    login = test_client.post(
+        "/api/auth/login",
+        json={
+            "login": "admin@example.com",
+            "password": "admin-pass",
+        },
+    )
+    assert login.status_code == 200
+
+    checked = test_client.post("/api/admin/platform/server-credentials/1/health-check")
+    assert checked.status_code == 200
+    payload = checked.json()
+    assert payload["credential_id"] == 1
+    assert payload["health_status"] == "rate_limited"
+    assert payload["error_code"] == "http_429"
+
+    session = test_client.app.state.container.resolve_singleton("platform.db_session_factory")()
+    try:
+        row = session.query(ServerCredentialRecord).filter_by(id=1).one()
+        assert row.health_status == "rate_limited"
+        checks = session.query(CredentialHealthCheckRecord).filter_by(server_credential_id=1).all()
+        assert len(checks) == 1
+        assert checks[0].trigger_source == "manual"
+        assert checks[0].status == "rate_limited"
+    finally:
+        session.close()
+
+
 def test_platform_admin_router_requires_authenticated_admin_session(client):
-    test_client, job_id, _ = client
+    test_client, job_id, _, _ = client
 
     unauthenticated = test_client.get(f"/api/admin/jobs/{job_id}/executions")
     assert unauthenticated.status_code == 401
@@ -214,3 +351,56 @@ def test_platform_admin_router_requires_authenticated_admin_session(client):
     forbidden = test_client.get(f"/api/admin/jobs/{job_id}/executions")
     assert forbidden.status_code == 403
     assert forbidden.json()["detail"] == "admin permission required"
+
+    forbidden_write = test_client.post(
+        "/api/admin/platform/server-credentials",
+        json={
+            "execution_profile_id": 1,
+            "provider": "openai",
+            "auth_type": "api_key",
+            "credential": "sk-denied",
+            "label": "should-fail",
+        },
+    )
+    assert forbidden_write.status_code == 403
+    assert forbidden_write.json()["detail"] == "admin permission required"
+
+
+def test_platform_admin_router_rejects_invalid_server_credential_payload(client):
+    test_client, _, _, _ = client
+
+    login = test_client.post(
+        "/api/auth/login",
+        json={
+            "login": "admin@example.com",
+            "password": "admin-pass",
+        },
+    )
+    assert login.status_code == 200
+
+    response = test_client.post(
+        "/api/admin/platform/server-credentials",
+        json={
+            "execution_profile_id": 1,
+            "provider": "openai",
+            "auth_type": "ak_sk",
+            "credential": "ak-live",
+            "label": "missing-secret",
+        },
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == "secret is required when auth_type is ak_sk"
+
+    missing = test_client.put(
+        "/api/admin/platform/server-credentials/999",
+        json={
+            "execution_profile_id": 1,
+            "provider": "openai",
+            "auth_type": "api_key",
+            "base_url": "https://api.openai.com/v1",
+            "label": "missing",
+            "priority": 1,
+            "enabled": True,
+        },
+    )
+    assert missing.status_code == 404
