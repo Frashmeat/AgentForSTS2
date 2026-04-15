@@ -18,7 +18,13 @@ from fastapi.testclient import TestClient
 from app.composition.container import ApplicationContainer
 from app.modules.auth.infra.persistence import models as _auth_models  # noqa: F401
 from app.modules.platform.infra.persistence import models as _platform_models  # noqa: F401
-from app.modules.platform.infra.persistence.models import QuotaAccountRecord, QuotaBucketRecord
+from app.modules.platform.infra.persistence.models import (
+    ExecutionProfileRecord,
+    QuotaAccountRecord,
+    QuotaBucketRecord,
+    ServerCredentialRecord,
+    UserPlatformPreferenceRecord,
+)
 from app.shared.infra.db.base import Base
 from routers.auth_router import router as auth_router
 from routers.platform_jobs import router as platform_router
@@ -170,3 +176,71 @@ def test_platform_jobs_router_supports_create_start_cancel_and_queries_for_curre
     )
     assert cancelled.status_code == 200
     assert cancelled.json()["ok"] is True
+
+
+def test_platform_jobs_router_uses_current_user_default_server_profile_when_request_omits_selection(client: TestClient):
+    user_id = _register_login_and_verify(client, "luna", "luna@example.com")
+
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    session = client.app.state.container.resolve_singleton("platform.db_session_factory")()
+    try:
+        profile = ExecutionProfileRecord(
+            code="codex-gpt-5-4",
+            display_name="Codex CLI / gpt-5.4",
+            agent_backend="codex",
+            model="gpt-5.4",
+            description="默认推荐",
+            enabled=True,
+            recommended=True,
+            sort_order=10,
+        )
+        session.add(profile)
+        session.flush()
+        session.add(
+            ServerCredentialRecord(
+                execution_profile_id=profile.id,
+                provider="openai",
+                auth_type="api_key",
+                credential_ciphertext="cipher",
+                secret_ciphertext=None,
+                base_url="https://api.openai.com/v1",
+                label="main",
+                priority=1,
+                enabled=True,
+                health_status="healthy",
+                last_checked_at=None,
+                last_error_code="",
+                last_error_message="",
+            )
+        )
+        session.add(
+            UserPlatformPreferenceRecord(
+                user_id=user_id,
+                default_execution_profile_id=profile.id,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    created = client.post(
+        "/api/platform/jobs",
+        json={
+            "job_type": "single_generate",
+            "workflow_version": "2026.03.31",
+            "items": [{"item_type": "card", "input_payload": {"name": "DarkRelic"}}],
+        },
+    )
+
+    assert created.status_code == 200
+    assert created.json()["selected_execution_profile_id"] == 1
+    assert created.json()["selected_agent_backend"] == "codex"
+    assert created.json()["selected_model"] == "gpt-5.4"

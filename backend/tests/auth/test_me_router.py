@@ -19,12 +19,15 @@ from app.composition.container import ApplicationContainer
 from app.modules.auth.infra.persistence import models as _auth_models  # noqa: F401
 from app.modules.platform.infra.persistence import models as _platform_models  # noqa: F401
 from app.modules.platform.infra.persistence.models import (
+    ExecutionProfileRecord,
     JobItemRecord,
     JobRecord,
     QuotaAccountRecord,
     QuotaAccountStatus,
     QuotaBucketRecord,
     QuotaBucketType,
+    ServerCredentialRecord,
+    UserPlatformPreferenceRecord,
 )
 from app.modules.platform.domain.models.enums import JobItemStatus, JobStatus
 from app.shared.infra.db.base import Base
@@ -263,6 +266,96 @@ def test_me_router_can_create_and_start_current_user_job(client: TestClient):
     assert detail.json()["selected_execution_profile_id"] == 5
     assert detail.json()["selected_agent_backend"] == "codex"
     assert detail.json()["selected_model"] == "gpt-5.4"
+
+
+def test_me_router_create_job_uses_current_user_default_server_profile_when_request_omits_selection(client: TestClient):
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "username": "luna",
+            "email": "luna@example.com",
+            "password": "secret-123",
+        },
+    )
+    assert registered.status_code == 200
+    user_id = registered.json()["user"]["user_id"]
+    verification_code = registered.json()["verification_code"]
+
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    verified = client.post("/api/auth/verify-email", json={"code": verification_code})
+    assert verified.status_code == 200
+
+    app_container = client.app.state.container
+    session = app_container.resolve_singleton("platform.db_session_factory")()
+    try:
+        profile = ExecutionProfileRecord(
+            code="codex-gpt-5-4",
+            display_name="Codex CLI / gpt-5.4",
+            agent_backend="codex",
+            model="gpt-5.4",
+            description="默认推荐",
+            enabled=True,
+            recommended=True,
+            sort_order=10,
+        )
+        session.add(profile)
+        session.flush()
+        session.add(
+            ServerCredentialRecord(
+                execution_profile_id=profile.id,
+                provider="openai",
+                auth_type="api_key",
+                credential_ciphertext="cipher",
+                secret_ciphertext=None,
+                base_url="https://api.openai.com/v1",
+                label="main",
+                priority=1,
+                enabled=True,
+                health_status="healthy",
+                last_checked_at=None,
+                last_error_code="",
+                last_error_message="",
+            )
+        )
+        session.add(
+            UserPlatformPreferenceRecord(
+                user_id=user_id,
+                default_execution_profile_id=profile.id,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    created = client.post(
+        "/api/me/jobs",
+        json={
+            "job_type": "single_generate",
+            "workflow_version": "2026.04.04",
+            "input_summary": "Dark Relic",
+            "created_from": "single_asset",
+            "items": [
+                {
+                    "item_type": "relic",
+                    "input_summary": "Dark Relic",
+                    "input_payload": {"asset_name": "DarkRelic"},
+                }
+            ],
+        },
+    )
+
+    assert created.status_code == 200
+    assert created.json()["selected_execution_profile_id"] == 1
+    assert created.json()["selected_agent_backend"] == "codex"
+    assert created.json()["selected_model"] == "gpt-5.4"
 
 
 def test_me_router_rejects_platform_job_actions_for_unverified_email(client: TestClient):

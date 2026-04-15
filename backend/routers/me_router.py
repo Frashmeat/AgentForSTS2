@@ -46,6 +46,26 @@ def _build_server_execution_service(session, request: Request) -> ServerExecutio
     )
 
 
+def _enrich_job_command_with_default_server_profile(
+    command: CreateJobCommand,
+    *,
+    user_id: int,
+    server_execution_service: ServerExecutionService,
+) -> CreateJobCommand:
+    if command.selected_execution_profile_id is not None:
+        return command
+
+    preference = server_execution_service.get_user_server_preference(user_id)
+    if preference.default_execution_profile_id is None or not preference.available:
+        return command
+
+    payload = command.model_dump()
+    payload["selected_execution_profile_id"] = preference.default_execution_profile_id
+    payload["selected_agent_backend"] = preference.agent_backend
+    payload["selected_model"] = preference.model
+    return CreateJobCommand.model_validate(payload)
+
+
 def _require_platform_access(user) -> None:
     if not user.can_use_platform():
         raise HTTPException(status_code=403, detail="email verification required")
@@ -83,8 +103,14 @@ def create_job(request: Request, body: dict):
     with auth_session_scope(request) as session:
         user = require_current_user(request, session)
         _require_platform_access(user)
+        server_execution_service = _build_server_execution_service(session, request)
         service = _build_job_application_service(session, request)
-        job = service.create_job(user.user_id, CreateJobCommand.model_validate(body))
+        command = _enrich_job_command_with_default_server_profile(
+            CreateJobCommand.model_validate(body),
+            user_id=user.user_id,
+            server_execution_service=server_execution_service,
+        )
+        job = service.create_job(user.user_id, command)
         return {
             "id": job.id,
             "job_type": job.job_type,

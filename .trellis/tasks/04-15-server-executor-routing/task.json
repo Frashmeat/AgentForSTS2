@@ -43,12 +43,17 @@
     "backend/app/modules/platform/application/services/execution_routing_service.py",
     "backend/app/modules/platform/domain/repositories/execution_routing_repository.py",
     "backend/app/modules/platform/infra/persistence/repositories/execution_routing_repository_sqlalchemy.py",
+    "backend/routers/me_router.py",
+    "backend/routers/platform_jobs.py",
+    "backend/tests/auth/test_me_router.py",
+    "backend/tests/platform/routers/test_platform_jobs_http.py",
     "backend/tests/platform/repositories/test_execution_routing_repository.py",
     "backend/tests/platform/services/test_execution_orchestrator_service.py",
     "docs/03-方案/后端专题/未开始-2026-04-14-服务器模式CLI模型选择与凭据池实施计划.md",
     "docs/03-方案/后端专题/未开始-2026-04-14-服务器模式CLI模型选择与凭据池接口冻结稿.md",
-    "docs/05-审查与验证/2026-04-15-服务器模式CLI与凭据池阶段总结.md"
+    "docs/05-审查与验证/2026-04-15-服务器模式CLI与凭据池阶段总结.md",
+    "docs/02-现状/当前前后端接口文档.md"
   ],
-  "notes": "2026-04-15 已打通第一版执行期调度真源：可基于 job.selected_execution_profile_id 自动解析同组合下首个 enabled+healthy 凭据，并写回 ai_execution 实际命中快照；真实运行时 caller 仍待后续接入。",
+  "notes": "2026-04-15 已打通第一版执行期调度真源：可基于 job.selected_execution_profile_id 自动解析同组合下首个 enabled+healthy 凭据，并写回 ai_execution 实际命中快照；同日已补真实 caller 前置回填：/api/me/jobs 与 /api/platform/jobs 在未显式传执行配置时，会继承当前用户可用的默认服务器配置；start_job 之后的真实运行时 caller 仍待后续接入。",
   "meta": {}
 }
