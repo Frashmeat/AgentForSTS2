@@ -1,0 +1,54 @@
+{
+  "id": "server-executor-routing",
+  "name": "server-executor-routing",
+  "title": "服务器模式执行器真实调度链路",
+  "description": "",
+  "status": "in_progress",
+  "dev_type": "backend",
+  "scope": "backend+docs",
+  "priority": "P2",
+  "creator": "codex-agent",
+  "assignee": "codex-agent",
+  "createdAt": "2026-04-15",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "current_phase": 1,
+  "next_action": [
+    {
+      "phase": 1,
+      "action": "implement"
+    },
+    {
+      "phase": 2,
+      "action": "check"
+    },
+    {
+      "phase": 3,
+      "action": "finish"
+    },
+    {
+      "phase": 4,
+      "action": "create-pr"
+    }
+  ],
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "backend/app/modules/platform/application/services/execution_orchestrator_service.py",
+    "backend/app/modules/platform/application/services/execution_routing_service.py",
+    "backend/app/modules/platform/domain/repositories/execution_routing_repository.py",
+    "backend/app/modules/platform/infra/persistence/repositories/execution_routing_repository_sqlalchemy.py",
+    "backend/tests/platform/repositories/test_execution_routing_repository.py",
+    "backend/tests/platform/services/test_execution_orchestrator_service.py",
+    "docs/03-方案/后端专题/未开始-2026-04-14-服务器模式CLI模型选择与凭据池实施计划.md",
+    "docs/03-方案/后端专题/未开始-2026-04-14-服务器模式CLI模型选择与凭据池接口冻结稿.md",
+    "docs/05-审查与验证/2026-04-15-服务器模式CLI与凭据池阶段总结.md"
+  ],
+  "notes": "2026-04-15 已打通第一版执行期调度真源：可基于 job.selected_execution_profile_id 自动解析同组合下首个 enabled+healthy 凭据，并写回 ai_execution 实际命中快照；真实运行时 caller 仍待后续接入。",
+  "meta": {}
+}
