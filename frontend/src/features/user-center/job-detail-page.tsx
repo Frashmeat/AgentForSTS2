@@ -10,6 +10,7 @@ import type {
 } from "../../shared/api/platform.ts";
 import { readDeferredExecutionNotice } from "../../shared/deferredExecution.ts";
 import { RefundSummary } from "./refundSummary.tsx";
+import { formatExecutionProfileText } from "./executionProfileText.ts";
 import { renderJobItemStatus, renderJobStatus } from "./statusText.ts";
 import { useSession } from "../../shared/session/hooks.ts";
 
@@ -101,6 +102,7 @@ export function UserCenterJobDetailPage() {
   }
 
   const deferredNotice = readDeferredExecutionNotice(events);
+  const executionProfileText = formatExecutionProfileText(detail);
 
   return (
     <PlatformPageShell
@@ -110,6 +112,18 @@ export function UserCenterJobDetailPage() {
       actions={navigationActions}
     >
       <RefundSummary detail={detail} />
+
+      {executionProfileText ? (
+        <section className="platform-page-card p-6">
+          <h2 className="text-lg font-semibold text-slate-900">执行配置</h2>
+          <div className="mt-4 space-y-2 text-sm text-slate-600">
+            <p>任务选择：<span className="font-medium text-slate-900">{executionProfileText}</span></p>
+            {detail.selected_execution_profile_id ? (
+              <p>执行配置 ID：<span className="font-medium text-slate-900">{detail.selected_execution_profile_id}</span></p>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
 
       {deferredNotice ? (
         <section className="platform-page-card p-6">

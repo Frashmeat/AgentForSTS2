@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import type { UserCenterJobSummary } from "./model.ts";
+import { formatExecutionProfileText } from "./executionProfileText.ts";
 import { renderJobStatus } from "./statusText.ts";
 
 export function HistoryList({ jobs }: { jobs: UserCenterJobSummary[] }) {
@@ -19,32 +20,40 @@ export function HistoryList({ jobs }: { jobs: UserCenterJobSummary[] }) {
             暂无平台任务记录。用户中心不会读取本机恢复记录或 localStorage 快照。
           </div>
         )}
-        {jobs.map(job => (
-          <Link
-            key={job.id}
-            to={`/me/jobs/${job.id}`}
-            className="platform-page-list-link block px-4 py-4"
-          >
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold text-slate-900">{job.input_summary || job.job_type}</p>
-                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                  <span className="text-slate-500">{job.job_type} · {renderJobStatus(job.status)}</span>
-                  {job.deferredSummary ? (
-                    <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-medium text-amber-800">
-                      {job.deferredSummary.shortLabel}
-                    </span>
-                  ) : null}
+        {jobs.map(job => {
+          const executionProfileText = formatExecutionProfileText(job);
+          return (
+            <Link
+              key={job.id}
+              to={`/me/jobs/${job.id}`}
+              className="platform-page-list-link block px-4 py-4"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">{job.input_summary || job.job_type}</p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                    <span className="text-slate-500">{job.job_type} · {renderJobStatus(job.status)}</span>
+                    {executionProfileText ? (
+                      <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 font-medium text-sky-800">
+                        {executionProfileText}
+                      </span>
+                    ) : null}
+                    {job.deferredSummary ? (
+                      <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-medium text-amber-800">
+                        {job.deferredSummary.shortLabel}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="text-right text-xs text-slate-500">
+                  <p>原始扣减 {job.original_deducted ?? 0}</p>
+                  <p>返还 {job.refunded_amount ?? 0}</p>
+                  <p>净消耗 {job.net_consumed ?? 0}</p>
                 </div>
               </div>
-              <div className="text-right text-xs text-slate-500">
-                <p>原始扣减 {job.original_deducted ?? 0}</p>
-                <p>返还 {job.refunded_amount ?? 0}</p>
-                <p>净消耗 {job.net_consumed ?? 0}</p>
-              </div>
-            </div>
-          </Link>
-        ))}
+            </Link>
+          );
+        })}
       </div>
     </section>
   );
