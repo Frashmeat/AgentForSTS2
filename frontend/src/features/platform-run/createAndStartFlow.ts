@@ -1,8 +1,19 @@
 import {
   createMyJob,
+  listMyJobEvents,
   startMyJob,
 } from "../../shared/api/me.ts";
-import type { PlatformJobCreateItem, PlatformJobSummary } from "../../shared/api/platform.ts";
+import type {
+  PlatformJobCreateItem,
+  PlatformJobEventSummary,
+  PlatformJobSummary,
+} from "../../shared/api/platform.ts";
+
+export interface DeferredExecutionNotice {
+  reasonCode: string;
+  reasonMessage: string;
+  event: PlatformJobEventSummary;
+}
 
 export interface CreateAndStartPlatformFlowRequest {
   jobType: string;
@@ -20,7 +31,20 @@ export interface CreateAndStartPlatformFlowResult {
     status?: string;
     ok?: boolean;
   } | null;
+  deferredNotice: DeferredExecutionNotice | null;
   startConfirmed: boolean;
+}
+
+function readDeferredNotice(events: PlatformJobEventSummary[]): DeferredExecutionNotice | null {
+  const deferredEvent = [...events].reverse().find(event => event.event_type === "ai_execution.deferred");
+  if (!deferredEvent) {
+    return null;
+  }
+  return {
+    reasonCode: String(deferredEvent.payload.reason_code ?? ""),
+    reasonMessage: String(deferredEvent.payload.reason_message ?? ""),
+    event: deferredEvent,
+  };
 }
 
 export async function createAndStartPlatformFlow(
@@ -39,6 +63,7 @@ export async function createAndStartPlatformFlow(
     return {
       job,
       started: null,
+      deferredNotice: null,
       startConfirmed: false,
     };
   }
@@ -46,10 +71,14 @@ export async function createAndStartPlatformFlow(
   const started = await startMyJob(job.id, {
     triggered_by: "user",
   });
+  const deferredNotice = started?.status === "running"
+    ? readDeferredNotice(await listMyJobEvents(job.id))
+    : null;
 
   return {
     job,
     started,
+    deferredNotice,
     startConfirmed: true,
   };
 }
