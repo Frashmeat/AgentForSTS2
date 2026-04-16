@@ -76,6 +76,12 @@ class JobApplicationService:
                     job_type=job.job_type,
                     item_type=item.item_type,
                 ):
+                    deferred_payload = self._build_deferred_payload(
+                        execution_id=execution.id,
+                        job_type=job.job_type,
+                        item_type=item.item_type,
+                        input_payload=item.input_payload,
+                    )
                     self.execution_orchestrator_service.refund_deferred_execution(
                         execution_id=execution.id,
                         now=now,
@@ -84,14 +90,17 @@ class JobApplicationService:
                         job_id=job.id,
                         user_id=user_id,
                         event_type="ai_execution.deferred",
-                        payload=self._build_deferred_payload(
-                            execution_id=execution.id,
-                            job_type=job.job_type,
-                            item_type=item.item_type,
-                            input_payload=item.input_payload,
-                        ),
+                        payload=deferred_payload,
                         job_item_id=item.id,
                         ai_execution_id=execution.id,
+                    )
+                    self.execution_orchestrator_service.complete_deferred_execution(
+                        user_id=user_id,
+                        job_id=job.id,
+                        job_item_id=item.id,
+                        execution_id=execution.id,
+                        reason_message=str(deferred_payload.get("reason_message", "")),
+                        now=now,
                     )
                     continue
                 self.execution_orchestrator_service.run_registered_workflow_to_completion(

@@ -15,6 +15,7 @@ from app.modules.platform.contracts.job_commands import CancelJobCommand, Create
 from app.modules.platform.contracts.runner_contracts import StepExecutionResult
 from app.modules.platform.domain.models.enums import JobItemStatus, JobStatus
 from app.modules.platform.infra.persistence.models import (
+    AIExecutionRecord,
     ChargeStatus,
     ExecutionChargeRecord,
     ExecutionProfileRecord,
@@ -307,9 +308,20 @@ def test_job_application_service_appends_deferred_event_for_unsupported_server_j
     assert deferred_event.event_payload["reason_code"] == "local_project_root_required"
     assert "project_root" in deferred_event.event_payload["reason_message"]
 
+    finished_event = (
+        db_session.query(JobEventRecord)
+        .filter(JobEventRecord.job_id == job.id, JobEventRecord.event_type == "ai_execution.finished")
+        .one()
+    )
+    assert finished_event.event_payload["status"] == "completed_with_refund"
+
     charge = db_session.query(ExecutionChargeRecord).one()
     assert charge.charge_status == ChargeStatus.REFUNDED
     assert charge.refund_reason == "execution_deferred"
+
+    execution = db_session.query(AIExecutionRecord).one()
+    assert execution.status.value == "completed_with_refund"
+    assert "project_root" in execution.error_summary
 
     bucket = db_session.query(QuotaBucketRecord).one()
     assert bucket.used_amount == 1

@@ -348,14 +348,17 @@ def test_me_router_can_create_and_start_current_user_job(client: TestClient):
     assert events.status_code == 200
     event_types = [entry["event_type"] for entry in events.json()]
     assert "ai_execution.deferred" in event_types
+    assert "ai_execution.finished" in event_types
     deferred_event = next(entry for entry in events.json() if entry["event_type"] == "ai_execution.deferred")
     assert deferred_event["payload"]["reason_code"] == "workflow_not_registered"
     assert "ai_execution_id" not in deferred_event
+    finished_event = next(entry for entry in events.json() if entry["event_type"] == "ai_execution.finished")
+    assert finished_event["payload"]["status"] == "completed_with_refund"
 
     session = app_container.resolve_singleton("platform.db_session_factory")()
     try:
         execution = session.query(AIExecutionRecord).filter(AIExecutionRecord.job_id == job_id).one()
-        assert execution.status.value == "dispatching"
+        assert execution.status.value == "completed_with_refund"
         assert execution.provider == "openai"
         assert execution.model == "gpt-5.4"
         assert execution.credential_ref == "server-credential:1"

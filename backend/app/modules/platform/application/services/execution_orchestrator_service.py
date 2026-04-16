@@ -263,6 +263,32 @@ class ExecutionOrchestratorService:
             return
         self.quota_billing_service.refund(execution_id, now, reason="execution_deferred")
 
+    def complete_deferred_execution(
+        self,
+        *,
+        user_id: int,
+        job_id: int,
+        job_item_id: int,
+        execution_id: int,
+        reason_message: str,
+        now: datetime,
+    ) -> None:
+        execution = self.ai_execution_repository.find_by_id_for_update(execution_id)
+        if execution is None:
+            raise LookupError(f"ai_execution not found: {execution_id}")
+        execution.status = AIExecutionStatus.COMPLETED_WITH_REFUND
+        execution.error_summary = reason_message
+        execution.finished_at = now
+        self.ai_execution_repository.save(execution)
+        self.job_event_repository.append(
+            job_id=job_id,
+            user_id=user_id,
+            event_type="ai_execution.finished",
+            payload={"execution_id": execution.id, "status": execution.status.value},
+            job_item_id=job_item_id,
+            ai_execution_id=execution.id,
+        )
+
     def _resolve_step_execution_binding(
         self,
         *,
