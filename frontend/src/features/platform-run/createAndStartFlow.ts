@@ -56,7 +56,7 @@ export async function createAndStartPlatformFlow(
   const started = await startMyJob(job.id, {
     triggered_by: "user",
   });
-  const deferredNotice = started?.status === "running"
+  const deferredNotice = started?.status === "deferred"
     ? readDeferredExecutionNotice(await listMyJobEvents(job.id))
     : null;
 

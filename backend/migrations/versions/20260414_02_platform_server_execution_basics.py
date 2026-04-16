@@ -10,7 +10,7 @@ from app.modules.platform.infra.persistence.models import (
 )
 
 
-revision = "20260414_02_platform_server_execution_basics"
+revision = "20260414_02_platform_exec_basics"
 down_revision = "20260414_01_auth_user_admin_flag"
 branch_labels = None
 depends_on = None

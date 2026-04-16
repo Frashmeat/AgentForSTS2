@@ -1,18 +1,6 @@
 import { Link } from "react-router-dom";
 import type { UserCenterJobSummary } from "./model.ts";
-
-function renderStatus(status: string) {
-  switch (status) {
-    case "succeeded":
-      return "已完成";
-    case "running":
-      return "执行中";
-    case "failed":
-      return "失败";
-    default:
-      return status;
-  }
-}
+import { renderJobStatus } from "./statusText.ts";
 
 export function HistoryList({ jobs }: { jobs: UserCenterJobSummary[] }) {
   return (
@@ -41,7 +29,7 @@ export function HistoryList({ jobs }: { jobs: UserCenterJobSummary[] }) {
               <div>
                 <p className="text-sm font-semibold text-slate-900">{job.input_summary || job.job_type}</p>
                 <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                  <span className="text-slate-500">{job.job_type} · {renderStatus(job.status)}</span>
+                  <span className="text-slate-500">{job.job_type} · {renderJobStatus(job.status)}</span>
                   {job.deferredSummary ? (
                     <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-medium text-amber-800">
                       {job.deferredSummary.shortLabel}

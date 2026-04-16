@@ -316,12 +316,12 @@ def test_me_router_can_create_and_start_current_user_job(client: TestClient):
 
     assert started.status_code == 200
     assert started.json()["id"] == job_id
-    assert started.json()["status"] == "running"
+    assert started.json()["status"] == "deferred"
 
     detail = client.get(f"/api/me/jobs/{job_id}")
     jobs = client.get("/api/me/jobs")
     assert detail.status_code == 200
-    assert detail.json()["status"] == "running"
+    assert detail.json()["status"] == "deferred"
     assert detail.json()["selected_execution_profile_id"] == 1
     assert detail.json()["selected_agent_backend"] == "codex"
     assert detail.json()["selected_model"] == "gpt-5.4"
@@ -344,7 +344,7 @@ def test_me_router_can_create_and_start_current_user_job(client: TestClient):
     items = client.get(f"/api/me/jobs/{job_id}/items")
     events = client.get(f"/api/me/jobs/{job_id}/events")
     assert items.status_code == 200
-    assert items.json()[0]["status"] == "running"
+    assert items.json()[0]["status"] == "deferred"
     assert events.status_code == 200
     event_types = [entry["event_type"] for entry in events.json()]
     assert "ai_execution.deferred" in event_types

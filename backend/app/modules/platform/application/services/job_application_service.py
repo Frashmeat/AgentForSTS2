@@ -82,6 +82,8 @@ class JobApplicationService:
                         item_type=item.item_type,
                         input_payload=item.input_payload,
                     )
+                    item.status = JobItemStatus.DEFERRED
+                    item.error_summary = str(deferred_payload.get("reason_message", ""))
                     self.execution_orchestrator_service.refund_deferred_execution(
                         execution_id=execution.id,
                         now=now,
@@ -161,11 +163,17 @@ class JobApplicationService:
 
     @staticmethod
     def _sync_job_status(job: JobRecord) -> None:
+        deferred_item_count = sum(1 for item in job.items if item.status == JobItemStatus.DEFERRED)
         if job.running_item_count > 0:
             job.status = JobStatus.RUNNING
             return
         if job.pending_item_count > 0:
             job.status = JobStatus.QUEUED
+            return
+        if deferred_item_count > 0:
+            job.status = JobStatus.DEFERRED
+            job.result_summary = JobApplicationService._pick_first_non_empty(item.result_summary for item in job.items)
+            job.error_summary = JobApplicationService._pick_first_non_empty(item.error_summary for item in job.items)
             return
         if job.total_item_count == 0:
             job.status = JobStatus.QUEUED

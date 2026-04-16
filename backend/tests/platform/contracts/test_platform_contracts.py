@@ -15,7 +15,9 @@ from app.modules.platform.domain.models.enums import AIExecutionStatus, JobItemS
 
 def test_platform_status_enums_are_frozen_to_fine_grained_values():
     assert JobStatus.DRAFT.value == "draft"
+    assert JobStatus.DEFERRED.value == "deferred"
     assert JobStatus.QUOTA_EXHAUSTED.value == "quota_exhausted"
+    assert JobItemStatus.DEFERRED.value == "deferred"
     assert JobItemStatus.CANCELLED_AFTER_START.value == "cancelled_after_start"
     assert AIExecutionStatus.COMPLETED_WITH_REFUND.value == "completed_with_refund"
 

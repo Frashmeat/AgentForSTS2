@@ -4,8 +4,8 @@ import sqlalchemy as sa
 from alembic import op
 
 
-revision = "20260414_04_ai_execution_server_mode_fact_fields"
-down_revision = "20260414_03_platform_job_selected_execution_profile"
+revision = "20260414_04_ai_exec_mode_facts"
+down_revision = "20260414_03_job_exec_profile"
 branch_labels = None
 depends_on = None
 

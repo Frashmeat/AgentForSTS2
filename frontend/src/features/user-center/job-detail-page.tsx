@@ -10,6 +10,7 @@ import type {
 } from "../../shared/api/platform.ts";
 import { readDeferredExecutionNotice } from "../../shared/deferredExecution.ts";
 import { RefundSummary } from "./refundSummary.tsx";
+import { renderJobItemStatus, renderJobStatus } from "./statusText.ts";
 import { useSession } from "../../shared/session/hooks.ts";
 
 function formatOccurredAt(value: string) {
@@ -105,7 +106,7 @@ export function UserCenterJobDetailPage() {
     <PlatformPageShell
       kicker="User Center"
       title={detail.input_summary || detail.job_type}
-      description={`${detail.job_type} · ${detail.status}`}
+      description={`${detail.job_type} · ${renderJobStatus(detail.status)}`}
       actions={navigationActions}
     >
       <RefundSummary detail={detail} />
@@ -138,7 +139,7 @@ export function UserCenterJobDetailPage() {
                   <p className="text-sm font-semibold text-slate-900">
                     #{item.item_index + 1} · {item.item_type}
                   </p>
-                  <p className="mt-1 text-xs text-slate-500">{item.status}</p>
+                  <p className="mt-1 text-xs text-slate-500">{renderJobItemStatus(item.status)}</p>
                 </div>
                 <div className="max-w-xs text-right text-xs text-slate-500">
                   <p>{item.result_summary || "无结果摘要"}</p>

@@ -297,8 +297,8 @@ def test_job_application_service_appends_deferred_event_for_unsupported_server_j
     started = service.start_job(user_id=1001, command=StartJobCommand(job_id=job.id))
 
     assert started is not None
-    assert started.status == JobStatus.RUNNING
-    assert started.items[0].status == JobItemStatus.RUNNING
+    assert started.status == JobStatus.DEFERRED
+    assert started.items[0].status == JobItemStatus.DEFERRED
 
     deferred_event = (
         db_session.query(JobEventRecord)

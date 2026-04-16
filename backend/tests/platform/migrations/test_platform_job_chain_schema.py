@@ -74,7 +74,9 @@ def test_platform_status_columns_compile_with_frozen_fine_grained_values():
 
     assert "'draft'" in jobs_sql
     assert "'queued'" in jobs_sql
+    assert "'deferred'" in jobs_sql
     assert "'quota_exhausted'" in jobs_sql
+    assert "'deferred'" in job_items_sql
     assert "'cancelled_after_start'" in job_items_sql
     assert "'quota_skipped'" in job_items_sql
     assert "'dispatching'" in ai_executions_sql

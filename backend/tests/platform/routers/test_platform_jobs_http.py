@@ -201,7 +201,7 @@ def test_platform_jobs_router_supports_create_start_cancel_and_queries_for_curre
 
     started = client.post(f"/api/platform/jobs/{job_id}/start", params={"user_id": other_user_id}, json={})
     assert started.status_code == 200
-    assert started.json()["status"] == "running"
+    assert started.json()["status"] == "deferred"
 
     listed = client.get("/api/platform/jobs", params={"user_id": other_user_id})
     assert listed.status_code == 200
@@ -211,7 +211,7 @@ def test_platform_jobs_router_supports_create_start_cancel_and_queries_for_curre
     listed = client.get("/api/platform/jobs", params={"user_id": other_user_id})
     assert detail.status_code == 200
     assert detail.json()["id"] == job_id
-    assert detail.json()["status"] == "running"
+    assert detail.json()["status"] == "deferred"
     assert detail.json()["selected_execution_profile_id"] == profile_id
     assert detail.json()["selected_agent_backend"] == "codex"
     assert detail.json()["selected_model"] == "gpt-5.4"
@@ -230,7 +230,7 @@ def test_platform_jobs_router_supports_create_start_cancel_and_queries_for_curre
     items = client.get(f"/api/platform/jobs/{job_id}/items", params={"user_id": other_user_id})
     assert items.status_code == 200
     assert items.json()[0]["item_type"] == "card"
-    assert items.json()[0]["status"] == "running"
+    assert items.json()[0]["status"] == "deferred"
 
     events = client.get(f"/api/platform/jobs/{job_id}/events", params={"user_id": other_user_id})
     assert events.status_code == 200
