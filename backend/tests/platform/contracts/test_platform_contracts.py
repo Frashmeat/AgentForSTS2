@@ -113,12 +113,23 @@ def test_step_execution_request_captures_minimal_protocol_fields():
             "job_item_id": 2,
             "input_payload": {"prompt": "dark relic"},
             "result_schema_version": "v1",
+            "execution_binding": {
+                "agent_backend": "codex",
+                "provider": "openai",
+                "model": "gpt-5.4",
+                "credential_ref": "server-credential:1",
+                "auth_type": "api_key",
+                "credential": "sk-live",
+                "base_url": "https://api.openai.com/v1",
+            },
         }
     )
 
     payload = request.model_dump()
     assert payload["step_protocol_version"] == "v1"
     assert payload["input_payload"]["prompt"] == "dark relic"
+    assert payload["execution_binding"]["agent_backend"] == "codex"
+    assert payload["execution_binding"]["credential_ref"] == "server-credential:1"
 
 
 def test_create_server_credential_command_applies_defaults():

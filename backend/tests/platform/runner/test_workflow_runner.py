@@ -6,7 +6,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from app.modules.platform.contracts.runner_contracts import StepExecutionRequest, StepExecutionResult
+from app.modules.platform.contracts.runner_contracts import (
+    StepExecutionBinding,
+    StepExecutionRequest,
+    StepExecutionResult,
+)
 from app.modules.platform.runner.step_dispatcher import StepDispatcher
 from app.modules.platform.runner.workflow_registry import PlatformWorkflowStep
 from app.modules.platform.runner.workflow_runner import WorkflowRunner
@@ -15,9 +19,11 @@ from app.modules.platform.runner.workflow_runner import WorkflowRunner
 def test_workflow_runner_executes_steps_in_order_and_publishes_events():
     events: list[tuple[str, str]] = []
     seen_inputs: list[dict[str, object]] = []
+    seen_bindings: list[dict[str, object]] = []
 
     async def execute(request: StepExecutionRequest) -> StepExecutionResult:
         seen_inputs.append(dict(request.input_payload))
+        seen_bindings.append(request.execution_binding.model_dump())
         return StepExecutionResult(
             step_id=request.step_id,
             status="succeeded",
@@ -43,6 +49,13 @@ def test_workflow_runner_executes_steps_in_order_and_publishes_events():
                 job_id=1,
                 job_item_id=2,
                 result_schema_version="v1",
+                execution_binding=StepExecutionBinding(
+                    agent_backend="codex",
+                    provider="openai",
+                    model="gpt-5.4",
+                    credential_ref="server-credential:7",
+                    credential="sk-live",
+                ),
             ),
         )
     )
@@ -50,6 +63,8 @@ def test_workflow_runner_executes_steps_in_order_and_publishes_events():
     assert [result.step_id for result in results] == ["step-1", "step-2"]
     assert seen_inputs[0]["prompt"] == "relic"
     assert seen_inputs[1]["last_step"] == "step-1"
+    assert seen_bindings[0]["credential_ref"] == "server-credential:7"
+    assert seen_bindings[1]["provider"] == "openai"
     assert events == [
         ("step.started", "step-1"),
         ("step.finished", "step-1"),

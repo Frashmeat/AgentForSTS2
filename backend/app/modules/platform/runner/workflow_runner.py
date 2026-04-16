@@ -37,6 +37,7 @@ class WorkflowRunner:
                 job_item_id=base_request.job_item_id,
                 result_schema_version=base_request.result_schema_version,
                 input_payload=merged_payload,
+                execution_binding=base_request.execution_binding,
             )
             if self.event_publisher is not None:
                 self.event_publisher("step.started", step.step_id)

@@ -16,7 +16,7 @@ from .job_queries import (
     JobListItem,
     UserQuotaView,
 )
-from .runner_contracts import StepExecutionRequest, StepExecutionResult
+from .runner_contracts import StepExecutionBinding, StepExecutionRequest, StepExecutionResult
 from .server_execution import (
     ExecutionProfileListView,
     ExecutionProfileView,
@@ -44,6 +44,7 @@ __all__ = [
     "PlatformEventCursor",
     "RefundRecordView",
     "StartJobCommand",
+    "StepExecutionBinding",
     "StepExecutionRequest",
     "StepExecutionResult",
     "UpdateServerCredentialCommand",

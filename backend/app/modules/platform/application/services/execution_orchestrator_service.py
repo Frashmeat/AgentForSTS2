@@ -3,7 +3,11 @@ from __future__ import annotations
 from datetime import datetime
 
 from app.modules.platform.application.services.quota_billing_service import QuotaBillingService
-from app.modules.platform.contracts.runner_contracts import StepExecutionRequest, StepExecutionResult
+from app.modules.platform.contracts.runner_contracts import (
+    StepExecutionBinding,
+    StepExecutionRequest,
+    StepExecutionResult,
+)
 from app.modules.platform.domain.models.enums import AIExecutionStatus, JobItemStatus, JobStatus
 from app.modules.platform.domain.repositories import AIExecutionRepository, JobEventRepository, JobRepository
 from app.modules.platform.infra.persistence.models import AIExecutionRecord
@@ -11,6 +15,7 @@ from app.modules.platform.runner.workflow_registry import PlatformWorkflowRegist
 from app.modules.platform.runner.workflow_runner import WorkflowRunner
 
 from .execution_routing_service import ExecutionRoutingService
+from .server_credential_cipher import ServerCredentialCipher
 
 
 class ExecutionOrchestratorService:
@@ -21,6 +26,7 @@ class ExecutionOrchestratorService:
         quota_billing_service: QuotaBillingService | None,
         job_event_repository: JobEventRepository,
         execution_routing_service: ExecutionRoutingService | None = None,
+        server_credential_cipher: ServerCredentialCipher | None = None,
         workflow_registry: PlatformWorkflowRegistry | None = None,
         workflow_runner: WorkflowRunner | None = None,
     ) -> None:
@@ -29,6 +35,7 @@ class ExecutionOrchestratorService:
         self.quota_billing_service = quota_billing_service
         self.job_event_repository = job_event_repository
         self.execution_routing_service = execution_routing_service
+        self.server_credential_cipher = server_credential_cipher
         self.workflow_registry = workflow_registry
         self.workflow_runner = workflow_runner
 
@@ -137,6 +144,7 @@ class ExecutionOrchestratorService:
     async def run_registered_steps(
         self,
         *,
+        user_id: int | None = None,
         job_type: str,
         item_type: str,
         job_id: int,
@@ -145,9 +153,16 @@ class ExecutionOrchestratorService:
         step_protocol_version: str,
         result_schema_version: str,
         input_payload: dict[str, object] | None = None,
+        execution_binding: StepExecutionBinding | dict[str, object] | None = None,
     ) -> list[StepExecutionResult]:
         if self.workflow_registry is None or self.workflow_runner is None:
             raise RuntimeError("workflow runner is not configured")
+        binding = self._resolve_step_execution_binding(
+            user_id=user_id,
+            job_id=job_id,
+            job_item_id=job_item_id,
+            execution_binding=execution_binding,
+        )
         steps = self.workflow_registry.resolve(job_type, item_type)
         return await self.workflow_runner.run(
             steps=steps,
@@ -160,5 +175,54 @@ class ExecutionOrchestratorService:
                 job_item_id=job_item_id,
                 result_schema_version=result_schema_version,
                 input_payload=dict(input_payload or {}),
+                execution_binding=binding,
+            ),
+        )
+
+    def _resolve_step_execution_binding(
+        self,
+        *,
+        user_id: int | None,
+        job_id: int,
+        job_item_id: int,
+        execution_binding: StepExecutionBinding | dict[str, object] | None,
+    ) -> StepExecutionBinding:
+        if isinstance(execution_binding, dict):
+            return StepExecutionBinding.model_validate(execution_binding)
+        if execution_binding is not None:
+            return execution_binding
+        if user_id is None:
+            raise ValueError("user_id is required when execution_binding is not provided")
+        if self.execution_routing_service is None:
+            raise RuntimeError("execution routing service is not configured")
+        if self.server_credential_cipher is None:
+            raise RuntimeError("server credential cipher is not configured")
+
+        job = self.job_repository.find_by_id_for_user(job_id, user_id)
+        if job is None:
+            raise LookupError(f"job not found for user: {job_id}")
+
+        route = self.execution_routing_service.resolve_for_job(job)
+        latest_execution = self.ai_execution_repository.find_latest_by_job_item(job_item_id)
+        if latest_execution is not None:
+            expected = (route.provider, route.model, route.credential_ref)
+            actual = (latest_execution.provider, latest_execution.model, latest_execution.credential_ref)
+            if actual != expected:
+                raise ValueError(
+                    "latest ai_execution route does not match execution routing result"
+                )
+
+        return StepExecutionBinding(
+            agent_backend=route.agent_backend,
+            provider=route.provider,
+            model=route.model,
+            credential_ref=route.credential_ref,
+            auth_type=route.auth_type,
+            credential=self.server_credential_cipher.decrypt(route.credential_ciphertext),
+            secret=self.server_credential_cipher.decrypt(route.secret_ciphertext) if route.secret_ciphertext else "",
+            base_url=route.base_url,
+            retry_attempt=latest_execution.retry_attempt if latest_execution is not None else route.retry_attempt,
+            switched_credential=(
+                latest_execution.switched_credential if latest_execution is not None else route.switched_credential
             ),
         )

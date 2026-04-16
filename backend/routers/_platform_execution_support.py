@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from fastapi import Request
 
-from app.modules.platform.application.services import ExecutionOrchestratorService, ExecutionRoutingService, QuotaBillingService
+from app.modules.platform.application.services import (
+    ExecutionOrchestratorService,
+    ExecutionRoutingService,
+    QuotaBillingService,
+    ServerCredentialCipher,
+)
 
 
 def build_execution_orchestrator_service(session, request: Request) -> ExecutionOrchestratorService:
@@ -12,12 +17,14 @@ def build_execution_orchestrator_service(session, request: Request) -> Execution
     job_event_repository = container.resolve_singleton("platform.job_event_repository_factory")(session)
     quota_billing_service = _build_quota_billing_service(session, request)
     execution_routing_service = _build_execution_routing_service(session, request)
+    server_credential_cipher = _build_server_credential_cipher(request)
     return container.resolve_singleton("platform.execution_orchestrator_service_factory")(
         job_repository=job_repository,
         ai_execution_repository=ai_execution_repository,
         quota_billing_service=quota_billing_service,
         job_event_repository=job_event_repository,
         execution_routing_service=execution_routing_service,
+        server_credential_cipher=server_credential_cipher,
     )
 
 
@@ -39,3 +46,9 @@ def _build_execution_routing_service(session, request: Request) -> ExecutionRout
     return container.resolve_singleton("platform.execution_routing_service_factory")(
         execution_routing_repository=repository,
     )
+
+
+def _build_server_credential_cipher(request: Request) -> ServerCredentialCipher:
+    container = request.app.state.container
+    settings = container.resolve_singleton("settings")
+    return container.resolve_singleton("platform.server_credential_cipher_factory").from_settings(settings)
