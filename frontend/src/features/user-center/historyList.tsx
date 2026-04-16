@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import type { PlatformJobSummary } from "../../shared/api/platform.ts";
+import type { UserCenterJobSummary } from "./model.ts";
 
 function renderStatus(status: string) {
   switch (status) {
@@ -14,7 +14,7 @@ function renderStatus(status: string) {
   }
 }
 
-export function HistoryList({ jobs }: { jobs: PlatformJobSummary[] }) {
+export function HistoryList({ jobs }: { jobs: UserCenterJobSummary[] }) {
   return (
     <section className="platform-page-card p-6">
       <div className="flex items-center justify-between">
@@ -40,9 +40,14 @@ export function HistoryList({ jobs }: { jobs: PlatformJobSummary[] }) {
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-semibold text-slate-900">{job.input_summary || job.job_type}</p>
-                <p className="mt-1 text-xs text-slate-500">
-                  {job.job_type} · {renderStatus(job.status)}
-                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                  <span className="text-slate-500">{job.job_type} · {renderStatus(job.status)}</span>
+                  {job.deferredSummary ? (
+                    <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-medium text-amber-800">
+                      {job.deferredSummary.shortLabel}
+                    </span>
+                  ) : null}
+                </div>
               </div>
               <div className="text-right text-xs text-slate-500">
                 <p>原始扣减 {job.original_deducted ?? 0}</p>

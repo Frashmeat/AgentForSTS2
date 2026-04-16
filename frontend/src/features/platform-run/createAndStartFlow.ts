@@ -5,15 +5,12 @@ import {
 } from "../../shared/api/me.ts";
 import type {
   PlatformJobCreateItem,
-  PlatformJobEventSummary,
   PlatformJobSummary,
 } from "../../shared/api/platform.ts";
-
-export interface DeferredExecutionNotice {
-  reasonCode: string;
-  reasonMessage: string;
-  event: PlatformJobEventSummary;
-}
+import {
+  readDeferredExecutionNotice,
+  type DeferredExecutionNotice,
+} from "../../shared/deferredExecution.ts";
 
 export interface CreateAndStartPlatformFlowRequest {
   jobType: string;
@@ -33,18 +30,6 @@ export interface CreateAndStartPlatformFlowResult {
   } | null;
   deferredNotice: DeferredExecutionNotice | null;
   startConfirmed: boolean;
-}
-
-function readDeferredNotice(events: PlatformJobEventSummary[]): DeferredExecutionNotice | null {
-  const deferredEvent = [...events].reverse().find(event => event.event_type === "ai_execution.deferred");
-  if (!deferredEvent) {
-    return null;
-  }
-  return {
-    reasonCode: String(deferredEvent.payload.reason_code ?? ""),
-    reasonMessage: String(deferredEvent.payload.reason_message ?? ""),
-    event: deferredEvent,
-  };
 }
 
 export async function createAndStartPlatformFlow(
@@ -72,7 +57,7 @@ export async function createAndStartPlatformFlow(
     triggered_by: "user",
   });
   const deferredNotice = started?.status === "running"
-    ? readDeferredNotice(await listMyJobEvents(job.id))
+    ? readDeferredExecutionNotice(await listMyJobEvents(job.id))
     : null;
 
   return {

@@ -8,6 +8,7 @@ import type {
   PlatformJobEventSummary,
   PlatformJobItemSummary,
 } from "../../shared/api/platform.ts";
+import { readDeferredExecutionNotice } from "../../shared/deferredExecution.ts";
 import { RefundSummary } from "./refundSummary.tsx";
 import { useSession } from "../../shared/session/hooks.ts";
 
@@ -17,35 +18,6 @@ function formatOccurredAt(value: string) {
     return value;
   }
   return parsed.toLocaleString("zh-CN", { hour12: false });
-}
-
-function describeDeferredReason(reasonCode: string, reasonMessage: string) {
-  switch (reasonCode) {
-    case "local_project_root_required":
-      return {
-        title: "当前任务仍依赖本地项目目录",
-        description: "服务器模式暂时还不能直接消费用户本机的 `project_root`，因此这次开始后只创建了执行记录，没有进入真实服务器 runner。",
-        detail: reasonMessage,
-      };
-    case "uploaded_asset_not_persisted":
-      return {
-        title: "当前任务仍依赖本地上传资产",
-        description: "上传图片目前还没有转成服务器可读取的持久化引用，因此平台无法在服务器侧继续执行。",
-        detail: reasonMessage,
-      };
-    case "workflow_not_registered":
-      return {
-        title: "当前任务类型尚未接入服务器执行器",
-        description: "后端已经记录了这次开始请求，但当前 web runtime 还没有为该任务注册可直接执行的服务器 workflow。",
-        detail: reasonMessage,
-      };
-    default:
-      return {
-        title: "当前任务暂未进入服务器执行",
-        description: "后端已记录本次开始请求，但暂时没有进入真实服务器执行链。",
-        detail: reasonMessage,
-      };
-  }
 }
 
 export function UserCenterJobDetailPage() {
@@ -127,10 +99,7 @@ export function UserCenterJobDetailPage() {
     );
   }
 
-  const deferredEvent = [...events].reverse().find(event => event.event_type === "ai_execution.deferred");
-  const deferredReasonCode = String(deferredEvent?.payload?.reason_code ?? "");
-  const deferredReasonMessage = String(deferredEvent?.payload?.reason_message ?? "");
-  const deferredInfo = deferredEvent ? describeDeferredReason(deferredReasonCode, deferredReasonMessage) : null;
+  const deferredNotice = readDeferredExecutionNotice(events);
 
   return (
     <PlatformPageShell
@@ -141,18 +110,18 @@ export function UserCenterJobDetailPage() {
     >
       <RefundSummary detail={detail} />
 
-      {deferredEvent && deferredInfo ? (
+      {deferredNotice ? (
         <section className="platform-page-card p-6">
           <div className="flex items-start gap-3 rounded-[22px] border border-amber-200 bg-amber-50/90 px-4 py-4 text-amber-950">
             <AlertTriangle size={18} className="mt-0.5 shrink-0 text-amber-600" />
             <div className="space-y-2">
               <div>
-                <p className="text-sm font-semibold">{deferredInfo.title}</p>
-                <p className="mt-1 text-sm text-amber-900/80">{deferredInfo.description}</p>
+                <p className="text-sm font-semibold">{deferredNotice.summary.title}</p>
+                <p className="mt-1 text-sm text-amber-900/80">{deferredNotice.summary.description}</p>
               </div>
               <div className="text-xs text-amber-900/70">
-                <p>事件时间：{formatOccurredAt(deferredEvent.occurred_at)}</p>
-                <p>后端说明：{deferredInfo.detail}</p>
+                <p>事件时间：{formatOccurredAt(deferredNotice.event.occurred_at)}</p>
+                <p>后端说明：{deferredNotice.summary.detail}</p>
               </div>
             </div>
           </div>

@@ -5,23 +5,15 @@ import {
   loadLocalAiCapabilityStatus,
   type LocalAiCapabilityStatus,
 } from "../../shared/api/index.ts";
+import { type DeferredExecutionSummary } from "../../shared/deferredExecution.ts";
 import { createAndStartPlatformFlow } from "../platform-run/createAndStartFlow.ts";
 import type { PlatformExecutionRequest, WorkspaceTab } from "../platform-run/types.ts";
 import { buildWorkspacePath } from "./config.ts";
 
 const PLATFORM_WORKFLOW_VERSION = "2026.04.04";
 
-function describeDeferredReason(reasonCode: string, reasonMessage: string) {
-  switch (reasonCode) {
-    case "local_project_root_required":
-      return `任务已创建，但当前仍依赖本地项目目录，服务器还不能直接继续执行。\n${reasonMessage}`;
-    case "uploaded_asset_not_persisted":
-      return `任务已创建，但当前仍依赖本地上传资产，服务器还不能直接继续执行。\n${reasonMessage}`;
-    case "workflow_not_registered":
-      return `任务已创建，但当前任务类型尚未接入服务器执行器。\n${reasonMessage}`;
-    default:
-      return `任务已创建，但当前没有进入真实服务器执行。\n${reasonMessage}`;
-  }
+function describeDeferredReason(summary: DeferredExecutionSummary) {
+  return summary.alertMessage;
 }
 
 export interface PendingExecutionRequest extends PlatformExecutionRequest {
@@ -125,7 +117,7 @@ export function useExecutionModeFlow({ isAuthenticated }: UseExecutionModeFlowOp
         },
       });
       if (result.deferredNotice) {
-        window.alert(describeDeferredReason(result.deferredNotice.reasonCode, result.deferredNotice.reasonMessage));
+        window.alert(describeDeferredReason(result.deferredNotice.summary));
       }
       navigate(`/me/jobs/${result.job.id}`);
     } catch (error) {
