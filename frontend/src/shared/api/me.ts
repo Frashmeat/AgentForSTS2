@@ -1,5 +1,6 @@
 import { buildApiPath, requestJson } from "./http.ts";
 import type {
+  PlatformExecutionProfileListView,
   PlatformJobDetail,
   PlatformJobActionResponse,
   PlatformJobCreateRequest,
@@ -17,6 +18,15 @@ export interface CurrentUserProfile {
   email_verified: boolean;
   created_at: string;
   email_verified_at?: string | null;
+}
+
+export interface MyServerPreferenceView {
+  default_execution_profile_id: number | null;
+  display_name: string;
+  agent_backend: string;
+  model: string;
+  available: boolean;
+  updated_at: string | null;
 }
 
 export function getMyProfile(): Promise<CurrentUserProfile> {
@@ -41,6 +51,28 @@ export function createMyJob(body: PlatformJobCreateRequest): Promise<PlatformJob
   return requestJson<PlatformJobSummary>(buildApiPath("/api/me/jobs", {}), {
     backend: "web",
     method: "POST",
+    body,
+  });
+}
+
+export function listPlatformExecutionProfiles(): Promise<PlatformExecutionProfileListView> {
+  return requestJson<PlatformExecutionProfileListView>(buildApiPath("/api/platform/execution-profiles", {}), {
+    backend: "web",
+  });
+}
+
+export function getMyServerPreferences(): Promise<MyServerPreferenceView> {
+  return requestJson<MyServerPreferenceView>(buildApiPath("/api/me/server-preferences", {}), {
+    backend: "web",
+  });
+}
+
+export function updateMyServerPreferences(body: {
+  default_execution_profile_id: number | null;
+}): Promise<MyServerPreferenceView> {
+  return requestJson<MyServerPreferenceView>(buildApiPath("/api/me/server-preferences", {}), {
+    backend: "web",
+    method: "PUT",
     body,
   });
 }

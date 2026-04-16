@@ -1,19 +1,43 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
+  getMyServerPreferences,
+  listPlatformExecutionProfiles,
   loadLocalAiCapabilityStatus,
+  updateMyServerPreferences,
   type LocalAiCapabilityStatus,
+  type MyServerPreferenceView,
 } from "../../shared/api/index.ts";
+import type { PlatformExecutionProfile } from "../../shared/api/platform.ts";
 import { type DeferredExecutionSummary } from "../../shared/deferredExecution.ts";
 import { createAndStartPlatformFlow } from "../platform-run/createAndStartFlow.ts";
-import type { PlatformExecutionRequest, WorkspaceTab } from "../platform-run/types.ts";
+import type { PlatformExecutionRequest } from "../platform-run/types.ts";
 import { buildWorkspacePath } from "./config.ts";
 
 const PLATFORM_WORKFLOW_VERSION = "2026.04.04";
 
 function describeDeferredReason(summary: DeferredExecutionSummary) {
   return summary.alertMessage;
+}
+
+function pickInitialServerProfileId(
+  profiles: PlatformExecutionProfile[],
+  preference: MyServerPreferenceView | null,
+): number | null {
+  const availableProfiles = profiles.filter((profile) => profile.available);
+  if (availableProfiles.length === 0) {
+    return null;
+  }
+  if (preference?.default_execution_profile_id !== null && typeof preference?.default_execution_profile_id !== "undefined") {
+    const preferredProfile = availableProfiles.find(
+      (profile) => profile.id === preference.default_execution_profile_id,
+    );
+    if (preferredProfile) {
+      return preferredProfile.id;
+    }
+  }
+  return availableProfiles.find((profile) => profile.recommended)?.id ?? availableProfiles[0]?.id ?? null;
 }
 
 export interface PendingExecutionRequest extends PlatformExecutionRequest {
@@ -28,6 +52,58 @@ interface UseExecutionModeFlowOptions {
 export function useExecutionModeFlow({ isAuthenticated }: UseExecutionModeFlowOptions) {
   const navigate = useNavigate();
   const [pendingExecution, setPendingExecution] = useState<PendingExecutionRequest | null>(null);
+  const [serverProfiles, setServerProfiles] = useState<PlatformExecutionProfile[]>([]);
+  const [serverPreference, setServerPreference] = useState<MyServerPreferenceView | null>(null);
+  const [selectedServerProfileId, setSelectedServerProfileId] = useState<number | null>(null);
+  const [rememberServerProfile, setRememberServerProfile] = useState(false);
+  const [serverProfilesLoading, setServerProfilesLoading] = useState(false);
+  const [serverProfilesError, setServerProfilesError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (pendingExecution === null || !isAuthenticated) {
+      setServerProfiles([]);
+      setServerPreference(null);
+      setSelectedServerProfileId(null);
+      setRememberServerProfile(false);
+      setServerProfilesLoading(false);
+      setServerProfilesError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setServerProfilesLoading(true);
+    setServerProfilesError(null);
+
+    void Promise.all([listPlatformExecutionProfiles(), getMyServerPreferences()])
+      .then(([profileView, preference]) => {
+        if (cancelled) {
+          return;
+        }
+        setServerProfiles(profileView.items);
+        setServerPreference(preference);
+        setSelectedServerProfileId(pickInitialServerProfileId(profileView.items, preference));
+        setRememberServerProfile(false);
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+        setServerProfiles([]);
+        setServerPreference(null);
+        setSelectedServerProfileId(null);
+        setRememberServerProfile(false);
+        setServerProfilesError(error instanceof Error ? error.message : "读取服务器执行配置失败");
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setServerProfilesLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, pendingExecution]);
 
   async function handleExecutionRequest(request: PlatformExecutionRequest) {
     let capability: LocalAiCapabilityStatus;
@@ -102,20 +178,41 @@ export function useExecutionModeFlow({ isAuthenticated }: UseExecutionModeFlowOp
       return;
     }
 
-    setPendingExecution(null);
+    const selectedProfile = serverProfiles.find(
+      (profile) => profile.id === selectedServerProfileId && profile.available,
+    );
+    if (!selectedProfile) {
+      window.alert(serverProfilesError ?? "当前没有可用的服务器执行配置");
+      return;
+    }
+
     try {
+      if (
+        rememberServerProfile &&
+        selectedProfile.id !== serverPreference?.default_execution_profile_id
+      ) {
+        const updatedPreference = await updateMyServerPreferences({
+          default_execution_profile_id: selectedProfile.id,
+        });
+        setServerPreference(updatedPreference);
+      }
+
       const result = await createAndStartPlatformFlow({
         jobType: request.jobType,
         workflowVersion: PLATFORM_WORKFLOW_VERSION,
         inputSummary: request.inputSummary,
         createdFrom: request.createdFrom,
         items: request.items,
+        selectedExecutionProfileId: selectedProfile.id,
+        selectedAgentBackend: selectedProfile.agent_backend,
+        selectedModel: selectedProfile.model,
         confirmStart(job) {
           return window.confirm(
             `已创建平台任务 #${job.id}。确认开始后会进入服务器队列，并按平台规则计费。是否继续开始？`,
           );
         },
       });
+      setPendingExecution(null);
       if (result.deferredNotice) {
         window.alert(describeDeferredReason(result.deferredNotice.summary));
       }
@@ -125,12 +222,46 @@ export function useExecutionModeFlow({ isAuthenticated }: UseExecutionModeFlowOp
     }
   }
 
+  async function handleReloadServerProfiles() {
+    if (pendingExecution === null || !isAuthenticated) {
+      return;
+    }
+    setServerProfilesLoading(true);
+    setServerProfilesError(null);
+    try {
+      const [profileView, preference] = await Promise.all([
+        listPlatformExecutionProfiles(),
+        getMyServerPreferences(),
+      ]);
+      setServerProfiles(profileView.items);
+      setServerPreference(preference);
+      setSelectedServerProfileId(pickInitialServerProfileId(profileView.items, preference));
+      setRememberServerProfile(false);
+    } catch (error) {
+      setServerProfiles([]);
+      setServerPreference(null);
+      setSelectedServerProfileId(null);
+      setRememberServerProfile(false);
+      setServerProfilesError(error instanceof Error ? error.message : "读取服务器执行配置失败");
+    } finally {
+      setServerProfilesLoading(false);
+    }
+  }
+
   return {
     pendingExecution,
+    serverProfiles,
+    serverProfilesLoading,
+    serverProfilesError,
+    selectedServerProfileId,
+    rememberServerProfile,
     handleExecutionRequest,
     handleChooseLocalExecution,
     handleChooseServerExecution,
     handleGoLoginForServerExecution,
     closeExecutionDialog,
+    handleReloadServerProfiles,
+    setSelectedServerProfileId,
+    setRememberServerProfile,
   };
 }

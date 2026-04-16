@@ -57,11 +57,19 @@ export default function App() {
   const [knowledgeGuideOpen, setKnowledgeGuideOpen] = useState(false);
   const {
     pendingExecution,
+    serverProfiles,
+    serverProfilesLoading,
+    serverProfilesError,
+    selectedServerProfileId,
+    rememberServerProfile,
     handleExecutionRequest,
     handleChooseLocalExecution,
     handleChooseServerExecution,
     handleGoLoginForServerExecution,
     closeExecutionDialog,
+    handleReloadServerProfiles,
+    setSelectedServerProfileId,
+    setRememberServerProfile,
   } = useExecutionModeFlow({
     isAuthenticated,
   });
@@ -149,12 +157,22 @@ export default function App() {
         localAvailable={pendingExecution?.localAvailable ?? false}
         localUnavailableReasons={pendingExecution?.localUnavailableReasons ?? []}
         isAuthenticated={isAuthenticated}
+        serverProfiles={serverProfiles}
+        serverProfilesLoading={serverProfilesLoading}
+        serverProfilesError={serverProfilesError}
+        selectedServerProfileId={selectedServerProfileId}
+        rememberServerProfile={rememberServerProfile}
         onClose={closeExecutionDialog}
         onChooseLocal={handleChooseLocalExecution}
         onChooseServer={() => {
           void handleChooseServerExecution();
         }}
         onGoLogin={handleGoLoginForServerExecution}
+        onSelectServerProfile={(profileId) => setSelectedServerProfileId(profileId)}
+        onRememberServerProfileChange={(value) => setRememberServerProfile(value)}
+        onReloadServerProfiles={() => {
+          void handleReloadServerProfiles();
+        }}
       />
     </div>
   );

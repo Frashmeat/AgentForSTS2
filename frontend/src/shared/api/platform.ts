@@ -10,6 +10,9 @@ export interface PlatformJobCreateRequest {
   input_summary: string;
   created_from: string;
   items: PlatformJobCreateItem[];
+  selected_execution_profile_id?: number;
+  selected_agent_backend?: string;
+  selected_model?: string;
 }
 
 export interface PlatformJobStartRequest {
@@ -21,6 +24,9 @@ export interface PlatformJobSummary {
   job_type: string;
   status: string;
   workflow_version?: string;
+  selected_execution_profile_id?: number | null;
+  selected_agent_backend?: string;
+  selected_model?: string;
   input_summary?: string;
   result_summary?: string;
   total_item_count?: number;
@@ -78,4 +84,18 @@ export interface PlatformQuotaView {
   weekly_used: number;
   refunded: number;
   next_reset_at: string;
+}
+
+export interface PlatformExecutionProfile {
+  id: number;
+  display_name: string;
+  agent_backend: string;
+  model: string;
+  description: string;
+  recommended: boolean;
+  available: boolean;
+}
+
+export interface PlatformExecutionProfileListView {
+  items: PlatformExecutionProfile[];
 }

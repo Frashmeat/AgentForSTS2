@@ -18,6 +18,9 @@ export interface CreateAndStartPlatformFlowRequest {
   inputSummary: string;
   createdFrom: string;
   items: PlatformJobCreateItem[];
+  selectedExecutionProfileId?: number;
+  selectedAgentBackend?: string;
+  selectedModel?: string;
   confirmStart?: (job: PlatformJobSummary) => boolean | Promise<boolean>;
 }
 
@@ -41,6 +44,9 @@ export async function createAndStartPlatformFlow(
     input_summary: request.inputSummary,
     created_from: request.createdFrom,
     items: request.items,
+    selected_execution_profile_id: request.selectedExecutionProfileId,
+    selected_agent_backend: request.selectedAgentBackend,
+    selected_model: request.selectedModel,
   });
 
   const startConfirmed = (await request.confirmStart?.(job)) ?? true;
