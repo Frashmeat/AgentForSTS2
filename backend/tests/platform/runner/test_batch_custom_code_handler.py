@@ -95,6 +95,59 @@ def test_execute_batch_custom_code_step_requires_descriptive_input():
             )
         )
     except ValueError as error:
-        assert str(error) == "batch_generate/custom_code requires descriptive input"
+        assert str(error) == "custom_code server task requires descriptive input"
     else:
         raise AssertionError("expected ValueError when descriptive input is missing")
+
+
+def test_execute_batch_custom_code_step_supports_single_generate_payload_shape(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _FakePromptLoader:
+        def render(self, template_name: str, variables: dict[str, object]) -> str:
+            captured["variables"] = dict(variables)
+            return f"prompt:{variables['item_name']}"
+
+    async def fake_text_step(request: StepExecutionRequest):
+        captured["request"] = request
+        return {
+            "text": "摘要：先补单资产 custom_code 的核心类骨架",
+            "provider": request.execution_binding.provider,
+            "model": request.execution_binding.model,
+        }
+
+    monkeypatch.setattr(
+        "app.modules.platform.runner.batch_custom_code_handler._PROMPT_LOADER",
+        _FakePromptLoader(),
+    )
+
+    result = asyncio.run(
+        execute_batch_custom_code_step(
+            StepExecutionRequest(
+                workflow_version="2026.03.31",
+                step_protocol_version="v1",
+                step_type="batch.custom_code.plan",
+                step_id="single-custom-code-1",
+                job_id=1,
+                job_item_id=2,
+                result_schema_version="v1",
+                input_payload={
+                    "asset_name": "SingleEffectPatch",
+                    "description": "补一个单资产 custom_code 示例",
+                    "project_root": "E:/Mods/Demo",
+                    "image_mode": "ai",
+                },
+                execution_binding=StepExecutionBinding(
+                    agent_backend="codex",
+                    provider="openai",
+                    model="gpt-5.4",
+                    credential="sk-live-openai",
+                ),
+            ),
+            text_step_executor=fake_text_step,
+        )
+    )
+
+    assert captured["variables"]["item_name"] == "SingleEffectPatch"
+    assert result["item_name"] == "SingleEffectPatch"
+    assert result["text"] == "先补单资产 custom_code 的核心类骨架"

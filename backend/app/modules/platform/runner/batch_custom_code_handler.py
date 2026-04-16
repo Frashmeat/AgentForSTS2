@@ -14,6 +14,14 @@ _PROMPT_LOADER = PromptLoader()
 _BATCH_CUSTOM_CODE_PROMPT_KEY = "runtime_agent.platform_batch_custom_code_server_user"
 
 
+def _resolve_item_name(input_payload: dict[str, object]) -> str:
+    return (
+        str(input_payload.get("name", "")).strip()
+        or str(input_payload.get("asset_name", "")).strip()
+        or "未命名 custom_code"
+    )
+
+
 def _string_list(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -32,7 +40,7 @@ def _render_multiline_list(values: list[str], *, fallback: str = "无") -> str:
 
 
 def _build_prompt(input_payload: dict[str, object]) -> str:
-    item_name = str(input_payload.get("name", "")).strip() or "未命名 custom_code"
+    item_name = _resolve_item_name(input_payload)
     description = str(input_payload.get("description", "")).strip()
     goal = str(input_payload.get("goal", "")).strip()
     detailed_description = str(input_payload.get("detailed_description", "")).strip()
@@ -43,7 +51,7 @@ def _build_prompt(input_payload: dict[str, object]) -> str:
     coupling_kind = str(input_payload.get("coupling_kind", "")).strip() or "unclear"
 
     if not any([description, goal, detailed_description, implementation_notes, acceptance_notes]):
-        raise ValueError("batch_generate/custom_code requires descriptive input")
+        raise ValueError("custom_code server task requires descriptive input")
 
     return _PROMPT_LOADER.render(
         _BATCH_CUSTOM_CODE_PROMPT_KEY,
@@ -82,7 +90,7 @@ async def execute_batch_custom_code_step(
     *,
     text_step_executor: TextStepExecutor | None = None,
 ) -> dict[str, object]:
-    item_name = str(request.input_payload.get("name", "")).strip() or "未命名 custom_code"
+    item_name = _resolve_item_name(request.input_payload)
     prompt = _build_prompt(request.input_payload)
     if text_step_executor is None:
         text_step_executor = execute_text_generate_step

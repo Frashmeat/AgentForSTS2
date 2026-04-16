@@ -73,6 +73,11 @@ def _build_workflow_registry(request: Request) -> PlatformWorkflowRegistry:
         "custom_code",
         [PlatformWorkflowStep(step_type="batch.custom_code.plan", step_id="batch.custom_code.plan")],
     )
+    registry.register(
+        "single_generate",
+        "custom_code",
+        [PlatformWorkflowStep(step_type="batch.custom_code.plan", step_id="single.custom_code.plan")],
+    )
     return registry
 
 
