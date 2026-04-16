@@ -1,19 +1,26 @@
 import { useEffect, useState } from "react";
-import { X, FolderOpen, Cpu, Gamepad2, Image, Search } from "lucide-react";
+import { X, FolderOpen, Cpu, Cloud, Gamepad2, Image, Search } from "lucide-react";
+import { Link } from "react-router-dom";
 import {
   checkKnowledgeStatus,
   cancelDetectAppPathsTask,
+  getMyServerPreferences,
   getDetectAppPathsTask,
   getRefreshKnowledgeTask,
+  listPlatformExecutionProfiles,
   loadAppConfig,
   loadKnowledgeStatus,
   pickAppPath,
   startDetectAppPaths,
   startRefreshKnowledgeTask,
   type KnowledgeStatus,
+  type MyServerPreferenceView,
   updateAppConfig,
+  updateMyServerPreferences,
 } from "../shared/api/index.ts";
 import { resolveErrorMessage } from "../shared/error.ts";
+import type { PlatformExecutionProfile } from "../shared/api/platform.ts";
+import { useSession } from "../shared/session/hooks.ts";
 import { KnowledgeGuideDialog } from "./KnowledgeGuideDialog.tsx";
 import { createSettingsPickPathRequest, type SettingsPathField } from "./settingsPathPicker.ts";
 
@@ -111,6 +118,18 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
+function pickInitialServerProfileId(
+  profiles: PlatformExecutionProfile[],
+  preference: MyServerPreferenceView | null,
+): number | null {
+  if (preference?.default_execution_profile_id !== null && typeof preference?.default_execution_profile_id !== "undefined") {
+    return preference.default_execution_profile_id;
+  }
+  return profiles.find((profile) => profile.available && profile.recommended)?.id
+    ?? profiles.find((profile) => profile.available)?.id
+    ?? null;
+}
+
 interface SettingsPanelProps {
   mode?: "drawer" | "page";
   onClose?: () => void;
@@ -118,6 +137,8 @@ interface SettingsPanelProps {
 }
 
 export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChange }: SettingsPanelProps) {
+  const { isAuthAvailable, isAuthenticated } = useSession();
+  const [activeTab, setActiveTab] = useState<"workspace" | "server">("workspace");
   const [cfg, setCfg] = useState<any>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -135,6 +156,13 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
   const [llmKey, setLlmKey] = useState("");
   const [imgKey, setImgKey] = useState("");
   const [imgSecret, setImgSecret] = useState("");
+  const [serverProfiles, setServerProfiles] = useState<PlatformExecutionProfile[]>([]);
+  const [serverPreference, setServerPreference] = useState<MyServerPreferenceView | null>(null);
+  const [selectedServerProfileId, setSelectedServerProfileId] = useState<number | null>(null);
+  const [serverLoading, setServerLoading] = useState(false);
+  const [serverSaving, setServerSaving] = useState(false);
+  const [serverError, setServerError] = useState("");
+  const [serverNotice, setServerNotice] = useState("");
 
   useEffect(() => {
     loadAppConfig().then(setCfg);
@@ -147,6 +175,51 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
         setKnowledgeError(resolveErrorMessage(error));
       });
   }, []);
+
+  useEffect(() => {
+    if (activeTab !== "server") {
+      return;
+    }
+    if (!isAuthAvailable || !isAuthenticated) {
+      setServerProfiles([]);
+      setServerPreference(null);
+      setSelectedServerProfileId(null);
+      setServerError("");
+      setServerNotice("");
+      return;
+    }
+
+    let cancelled = false;
+    setServerLoading(true);
+    setServerError("");
+    void Promise.all([listPlatformExecutionProfiles(), getMyServerPreferences()])
+      .then(([profileView, preference]) => {
+        if (cancelled) {
+          return;
+        }
+        setServerProfiles(profileView.items);
+        setServerPreference(preference);
+        setSelectedServerProfileId(pickInitialServerProfileId(profileView.items, preference));
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+        setServerProfiles([]);
+        setServerPreference(null);
+        setSelectedServerProfileId(null);
+        setServerError(resolveErrorMessage(error));
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setServerLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, isAuthAvailable, isAuthenticated]);
 
   useEffect(() => {
     if (!detectionTaskId) {
@@ -391,6 +464,27 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
     }
   }
 
+  async function handleSaveServerPreference(profileId: number | null) {
+    if (!isAuthAvailable || !isAuthenticated) {
+      return;
+    }
+    setServerSaving(true);
+    setServerError("");
+    setServerNotice("");
+    try {
+      const updated = await updateMyServerPreferences({
+        default_execution_profile_id: profileId,
+      });
+      setServerPreference(updated);
+      setSelectedServerProfileId(pickInitialServerProfileId(serverProfiles, updated));
+      setServerNotice(profileId === null ? "已清空默认服务器配置" : "默认服务器配置已保存");
+    } catch (error) {
+      setServerError(resolveErrorMessage(error));
+    } finally {
+      setServerSaving(false);
+    }
+  }
+
   const header = (
     <div
       className={`border-b border-slate-200 px-6 py-4 flex items-center z-10 ${
@@ -401,7 +495,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
     >
       <div>
         <h2 className="font-bold text-slate-800">设置</h2>
-        {missingPaths && (
+        {activeTab === "workspace" && missingPaths && (
           <p className="text-xs text-amber-600 mt-0.5">⚠ 请配置项目路径</p>
         )}
       </div>
@@ -413,11 +507,37 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
     </div>
   );
 
+  const selectedServerProfile = serverProfiles.find((profile) => profile.id === selectedServerProfileId) ?? null;
+  const tabBar = (
+    <div className="border-b border-slate-100 px-6 py-3">
+      <div className="flex flex-wrap gap-2">
+        {([
+          { key: "workspace", label: "工作站" },
+          { key: "server", label: "服务器模式" },
+        ] as const).map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            onClick={() => setActiveTab(tab.key)}
+            className={`rounded-full border px-3 py-1.5 text-sm transition-colors ${
+              activeTab === tab.key
+                ? "border-amber-300 bg-amber-50 text-amber-700"
+                : "border-slate-200 text-slate-500 hover:border-amber-200 hover:text-amber-700"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
   const content = (
     <div className="p-6 space-y-6">
       {!cfg ? (
         <p className="text-slate-400 text-sm">加载中…</p>
       ) : (
+        activeTab === "workspace" ? (
         <>
               {/* ── 项目配置（最重要，放最前面）── */}
               <SGroup icon={<FolderOpen size={14} />} title="项目配置">
@@ -723,6 +843,111 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
                 {saving ? "保存中…" : "保存设置"}
               </button>
         </>
+        ) : (
+          <div className="space-y-6">
+            <SGroup icon={<Cloud size={14} />} title="服务器模式">
+              {!isAuthAvailable ? (
+                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
+                  当前环境未接入独立 Web 平台服务，暂时无法管理服务器模式默认配置。
+                </div>
+              ) : !isAuthenticated ? (
+                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
+                  <p>登录后即可查看平台提供的执行配置，并设置默认服务器模式。</p>
+                  <Link
+                    to="/auth/login"
+                    className="mt-3 inline-flex rounded-lg border border-amber-300 px-3 py-1.5 text-xs font-medium text-amber-700 transition hover:bg-amber-50"
+                  >
+                    去登录
+                  </Link>
+                </div>
+              ) : serverLoading ? (
+                <p className="text-sm text-slate-500">正在读取服务器执行配置…</p>
+              ) : (
+                <>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 space-y-2">
+                    <p className="text-xs text-slate-500">
+                      当前默认配置：
+                      <span className="ml-1 font-semibold text-slate-700">
+                        {serverPreference?.default_execution_profile_id
+                          ? serverPreference.display_name || `${serverPreference.agent_backend} / ${serverPreference.model}`
+                          : "未设置"}
+                      </span>
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      可用状态：
+                      <span className={`ml-1 font-semibold ${serverPreference?.available ?? true ? "text-emerald-700" : "text-amber-700"}`}>
+                        {serverPreference?.default_execution_profile_id
+                          ? (serverPreference?.available ? "当前可用" : "当前默认值已不可用")
+                          : "将按运行时选择或后端兜底决定"}
+                      </span>
+                    </p>
+                    <p className="text-xs text-slate-500">运行时执行弹窗会复用这里的默认值，但仍可临时改用其他服务器配置。</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    {serverProfiles.map((profile) => {
+                      const selected = selectedServerProfileId === profile.id;
+                      return (
+                        <button
+                          key={profile.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedServerProfileId(profile.id);
+                            setServerNotice("");
+                          }}
+                          className={`w-full rounded-xl border px-4 py-3 text-left transition ${
+                            selected
+                              ? "border-amber-300 bg-amber-50"
+                              : "border-slate-200 hover:border-amber-200 hover:bg-amber-50/40"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-medium text-slate-900">{profile.display_name}</p>
+                              <p className="mt-1 text-xs text-slate-500">{profile.description}</p>
+                            </div>
+                            <div className="shrink-0 space-y-1 text-right">
+                              {profile.recommended ? <p className="text-[11px] font-medium text-emerald-700">推荐</p> : null}
+                              <p className={`text-[11px] font-medium ${profile.available ? "text-slate-500" : "text-amber-700"}`}>
+                                {profile.available ? "可用" : "当前不可用"}
+                              </p>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {serverError ? <p className="text-sm text-rose-600">{serverError}</p> : null}
+                  {serverNotice ? <p className="text-sm text-emerald-700">{serverNotice}</p> : null}
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleSaveServerPreference(selectedServerProfile?.id ?? null);
+                      }}
+                      disabled={serverSaving || selectedServerProfileId === null}
+                      className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-amber-600 disabled:opacity-40"
+                    >
+                      {serverSaving ? "保存中…" : "保存默认服务器配置"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleSaveServerPreference(null);
+                      }}
+                      disabled={serverSaving || serverPreference?.default_execution_profile_id === null}
+                      className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 transition hover:border-amber-200 hover:text-amber-700 disabled:opacity-40"
+                    >
+                      清空默认配置
+                    </button>
+                  </div>
+                </>
+              )}
+            </SGroup>
+          </div>
+        )
       )}
     </div>
   );
@@ -745,6 +970,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
       <>
         <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_30px_80px_rgba(15,23,42,0.08)]">
           {header}
+          {tabBar}
           {content}
         </section>
         {progressAnimationStyle}
@@ -761,6 +987,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
           onClick={e => e.stopPropagation()}
         >
           {header}
+          {tabBar}
           {content}
         </div>
       </div>
