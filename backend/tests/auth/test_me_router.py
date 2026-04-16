@@ -325,11 +325,21 @@ def test_me_router_can_create_and_start_current_user_job(client: TestClient):
     assert detail.json()["selected_execution_profile_id"] == 1
     assert detail.json()["selected_agent_backend"] == "codex"
     assert detail.json()["selected_model"] == "gpt-5.4"
+    assert detail.json()["original_deducted"] == 1
+    assert detail.json()["refunded_amount"] == 1
+    assert detail.json()["net_consumed"] == 0
     assert detail.json()["deferred_reason_code"] == "workflow_not_registered"
     assert "尚未为 single_generate/relic 注册" in detail.json()["deferred_reason_message"]
     assert jobs.status_code == 200
+    assert jobs.json()[0]["original_deducted"] == 1
+    assert jobs.json()[0]["refunded_amount"] == 1
+    assert jobs.json()[0]["net_consumed"] == 0
     assert jobs.json()[0]["deferred_reason_code"] == "workflow_not_registered"
     assert "尚未为 single_generate/relic 注册" in jobs.json()[0]["deferred_reason_message"]
+
+    quota = client.get("/api/me/quota")
+    assert quota.status_code == 200
+    assert quota.json()["refunded"] == 1
 
     items = client.get(f"/api/me/jobs/{job_id}/items")
     events = client.get(f"/api/me/jobs/{job_id}/events")

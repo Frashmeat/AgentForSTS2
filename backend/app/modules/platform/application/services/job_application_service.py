@@ -76,6 +76,10 @@ class JobApplicationService:
                     job_type=job.job_type,
                     item_type=item.item_type,
                 ):
+                    self.execution_orchestrator_service.refund_deferred_execution(
+                        execution_id=execution.id,
+                        now=now,
+                    )
                     self.job_event_repository.append(
                         job_id=job.id,
                         user_id=user_id,

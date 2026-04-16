@@ -215,9 +215,15 @@ def test_platform_jobs_router_supports_create_start_cancel_and_queries_for_curre
     assert detail.json()["selected_execution_profile_id"] == profile_id
     assert detail.json()["selected_agent_backend"] == "codex"
     assert detail.json()["selected_model"] == "gpt-5.4"
+    assert detail.json()["original_deducted"] == 1
+    assert detail.json()["refunded_amount"] == 1
+    assert detail.json()["net_consumed"] == 0
     assert detail.json()["deferred_reason_code"] == "workflow_not_registered"
     assert "尚未为 single_generate/card 注册" in detail.json()["deferred_reason_message"]
     assert listed.status_code == 200
+    assert listed.json()[0]["original_deducted"] == 1
+    assert listed.json()[0]["refunded_amount"] == 1
+    assert listed.json()[0]["net_consumed"] == 0
     assert listed.json()[0]["deferred_reason_code"] == "workflow_not_registered"
     assert "尚未为 single_generate/card 注册" in listed.json()[0]["deferred_reason_message"]
 
@@ -250,6 +256,7 @@ def test_platform_jobs_router_supports_create_start_cancel_and_queries_for_curre
     quota = client.get("/api/platform/quota", params={"user_id": other_user_id})
     assert quota.status_code == 200
     assert quota.json()["daily_limit"] == 10
+    assert quota.json()["refunded"] == 1
 
     cancelled = client.post(
         f"/api/platform/jobs/{job_id}/cancel",

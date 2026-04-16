@@ -93,6 +93,8 @@ class QuotaBillingService:
         charge = self.execution_charge_repository.find_by_execution_id_for_update(execution_id)
         if charge is None:
             return None
+        if charge.charge_status == ChargeStatus.REFUNDED:
+            return charge
         ledgers = self.usage_ledger_repository.list_by_execution_id(execution_id)
         reserve_entry = ledgers[0] if ledgers else None
         if reserve_entry is not None:

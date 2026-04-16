@@ -258,6 +258,11 @@ class ExecutionOrchestratorService:
         )
         return final_result
 
+    def refund_deferred_execution(self, *, execution_id: int, now: datetime) -> None:
+        if self.quota_billing_service is None:
+            return
+        self.quota_billing_service.refund(execution_id, now, reason="execution_deferred")
+
     def _resolve_step_execution_binding(
         self,
         *,
