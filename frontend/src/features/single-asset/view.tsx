@@ -154,11 +154,12 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
   const errorInStep2 = stage === "error" && step <= 2;
   const errorInStep3 = stage === "error" && step > 2;
   const showKnowledgeNotice = knowledgeStatus?.status === "stale" || knowledgeStatus?.status === "missing";
+  const isCustomCode = assetType === "custom_code";
   const startDisabled =
     !assetName.trim() ||
     !description.trim() ||
     !projectRoot.trim() ||
-    (imageMode === "upload" && !uploadedImageB64);
+    (!isCustomCode && imageMode === "upload" && !uploadedImageB64);
 
   return (
     <main className="px-6 py-6 grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)] gap-5 items-start">
@@ -262,77 +263,85 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
 
           {step === 0 ? (
             <div className="space-y-3">
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-slate-500">图片来源</label>
-                <div className="flex gap-2">
-                  {(["ai", "upload"] as const).map((mode) => (
-                    <button
-                      key={mode}
-                      onClick={() => onImageModeChange(mode)}
-                      className={cn(
-                        "flex-1 py-1.5 rounded-lg border text-xs font-medium transition-all",
-                        imageMode === mode
-                          ? "border-violet-500 bg-violet-50 text-violet-700"
-                          : "border-slate-200 text-slate-500 hover:border-violet-300"
-                      )}
-                    >
-                      {mode === "ai" ? "✦ AI 生图" : "↑ 自定义图片"}
-                    </button>
-                  ))}
-                </div>
+              {!isCustomCode && (
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-slate-500">图片来源</label>
+                  <div className="flex gap-2">
+                    {(["ai", "upload"] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        onClick={() => onImageModeChange(mode)}
+                        className={cn(
+                          "flex-1 py-1.5 rounded-lg border text-xs font-medium transition-all",
+                          imageMode === mode
+                            ? "border-violet-500 bg-violet-50 text-violet-700"
+                            : "border-slate-200 text-slate-500 hover:border-violet-300"
+                        )}
+                      >
+                        {mode === "ai" ? "✦ AI 生图" : "↑ 自定义图片"}
+                      </button>
+                    ))}
+                  </div>
 
-                {imageMode === "upload" && (
-                  <>
-                    <div
-                      onDragOver={(event) => {
-                        event.preventDefault();
-                        onDragOverChange(true);
-                      }}
-                      onDragLeave={() => onDragOverChange(false)}
-                      onDrop={(event) => {
-                        event.preventDefault();
-                        onDragOverChange(false);
-                        const file = event.dataTransfer.files[0];
-                        if (file) {
-                          onHandleImageFile(file);
-                        }
-                      }}
-                      onClick={() => {
-                        const input = document.createElement("input");
-                        input.type = "file";
-                        input.accept = "image/*";
-                        input.onchange = (event) => {
-                          const file = (event.target as HTMLInputElement).files?.[0];
+                  {imageMode === "upload" && (
+                    <>
+                      <div
+                        onDragOver={(event) => {
+                          event.preventDefault();
+                          onDragOverChange(true);
+                        }}
+                        onDragLeave={() => onDragOverChange(false)}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          onDragOverChange(false);
+                          const file = event.dataTransfer.files[0];
                           if (file) {
                             onHandleImageFile(file);
                           }
-                        };
-                        input.click();
-                      }}
-                      className={cn(
-                        "relative rounded-lg border-2 border-dashed cursor-pointer transition-colors overflow-hidden",
-                        dragOver ? "border-violet-400 bg-violet-50" : "border-slate-200 hover:border-violet-300 bg-slate-50",
-                        uploadedImagePreview ? "h-32" : "h-20"
-                      )}
-                    >
-                      {uploadedImagePreview ? (
-                        <>
-                          <img src={uploadedImagePreview} alt="preview" className="w-full h-full object-contain" />
-                          <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
-                            <span className="text-white text-xs font-medium">点击替换</span>
+                        }}
+                        onClick={() => {
+                          const input = document.createElement("input");
+                          input.type = "file";
+                          input.accept = "image/*";
+                          input.onchange = (event) => {
+                            const file = (event.target as HTMLInputElement).files?.[0];
+                            if (file) {
+                              onHandleImageFile(file);
+                            }
+                          };
+                          input.click();
+                        }}
+                        className={cn(
+                          "relative rounded-lg border-2 border-dashed cursor-pointer transition-colors overflow-hidden",
+                          dragOver ? "border-violet-400 bg-violet-50" : "border-slate-200 hover:border-violet-300 bg-slate-50",
+                          uploadedImagePreview ? "h-32" : "h-20"
+                        )}
+                      >
+                        {uploadedImagePreview ? (
+                          <>
+                            <img src={uploadedImagePreview} alt="preview" className="w-full h-full object-contain" />
+                            <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
+                              <span className="text-white text-xs font-medium">点击替换</span>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="flex flex-col items-center justify-center h-full gap-1">
+                            <span className="text-slate-400 text-lg">↑</span>
+                            <span className="text-xs text-slate-400">拖拽或点击选择图片</span>
                           </div>
-                        </>
-                      ) : (
-                        <div className="flex flex-col items-center justify-center h-full gap-1">
-                          <span className="text-slate-400 text-lg">↑</span>
-                          <span className="text-xs text-slate-400">拖拽或点击选择图片</span>
-                        </div>
-                      )}
-                    </div>
-                    {uploadedImageName && <p className="text-xs text-slate-400 truncate">{uploadedImageName}</p>}
-                  </>
-                )}
-              </div>
+                        )}
+                      </div>
+                      {uploadedImageName && <p className="text-xs text-slate-400 truncate">{uploadedImageName}</p>}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {isCustomCode && (
+                <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2.5 text-xs text-sky-700">
+                  当前类型不走图像链，会直接进入 Code Agent；服务器模式下则会直接创建文本实现方案任务。
+                </div>
+              )}
 
               <button
                 onClick={onStartWorkflow}
@@ -342,7 +351,7 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                 开始生成
               </button>
 
-              {imageMode === "ai" && (
+              {!isCustomCode && imageMode === "ai" && (
                 <label className="flex items-center gap-2 cursor-pointer select-none">
                   <div
                     onClick={onAutoModeToggle}

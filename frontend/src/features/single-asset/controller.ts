@@ -3,12 +3,13 @@ import {
   type SingleAssetSocket,
 } from "../../lib/single_asset_ws.ts";
 import { resolveErrorMessage, resolveWorkflowErrorMessage } from "../../shared/error.ts";
+import type { AssetType } from "./model.ts";
 import type { SingleAssetWorkflowAction } from "./state.ts";
 
 export interface SingleAssetWorkflowSocketLike extends SingleAssetSocket {}
 
 export interface StartSingleAssetWorkflowOptions {
-  assetType: string;
+  assetType: AssetType;
   assetName: string;
   description: string;
   projectRoot: string;
@@ -110,7 +111,7 @@ export function createSingleAssetWorkflowController(
     runtime.setRestoredApprovalRefreshPending(false);
     runtime.closeSocket();
     runtime.setSocket(null);
-    runtime.dispatchWorkflow({ type: "workflow_started", imageMode });
+    runtime.dispatchWorkflow({ type: "workflow_started", imageMode, assetType });
 
     const socket = createSocket();
     runtime.setSocket(socket);
@@ -197,6 +198,17 @@ export function createSingleAssetWorkflowController(
     } catch (error) {
       runtime.setSocket(null);
       runtime.reportWorkflowError(resolveErrorMessage(error), null);
+      return;
+    }
+
+    if (assetType === "custom_code") {
+      socket.send({
+        action: "start",
+        asset_type: assetType,
+        asset_name: assetName,
+        description,
+        project_root: normalizedProjectRoot,
+      });
       return;
     }
 

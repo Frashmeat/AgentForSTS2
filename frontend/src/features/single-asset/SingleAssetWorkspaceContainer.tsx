@@ -173,6 +173,16 @@ export function SingleAssetWorkspaceContainer() {
     },
   });
 
+  function applyAssetType(value: AssetType) {
+    setAssetType(value);
+    if (value === "custom_code") {
+      setImageMode("ai");
+      setUploadedImageB64("");
+      setUploadedImageName("");
+      setUploadedImagePreview(null);
+    }
+  }
+
   async function startWorkflow() {
     await singleAssetWorkflowController.start({
       assetType,
@@ -254,8 +264,8 @@ export function SingleAssetWorkspaceContainer() {
     });
   }
 
-  const singleAssetRequiresImageAi = imageMode === "ai";
   const singleAssetInputSummary = `${assetType}:${assetName.trim() || "未命名资产"}`;
+  const singleAssetRequiresImageAi = assetType !== "custom_code" && imageMode === "ai";
   const singleAssetItem: PlatformJobCreateItem = {
     item_type: assetType,
     input_summary: description.trim() || singleAssetInputSummary,
@@ -310,7 +320,7 @@ export function SingleAssetWorkspaceContainer() {
       onRestartWorkflow={() => {
         void startWorkflow();
       }}
-      onAssetTypeChange={setAssetType}
+      onAssetTypeChange={applyAssetType}
       onAssetNameChange={setAssetName}
       onDescriptionChange={setDescription}
       onProjectRootChange={setProjectRoot}
@@ -321,7 +331,7 @@ export function SingleAssetWorkspaceContainer() {
         void createProjectAtRoot(projectRoot).catch(() => {});
       }}
       onApplyPreset={(preset) => {
-        setAssetType(preset.assetType);
+        applyAssetType(preset.assetType);
         setAssetName(preset.assetName);
         setDescription(preset.description);
       }}

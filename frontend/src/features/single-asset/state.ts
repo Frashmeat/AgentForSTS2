@@ -5,7 +5,7 @@ import {
   resolveNextWorkflowModel,
   type WorkflowLogEntry,
 } from "../../shared/workflowLog.ts";
-import type { Stage } from "./model";
+import type { AssetType, Stage } from "./model";
 
 export interface SingleAssetWorkflowState {
   stage: Stage;
@@ -32,7 +32,7 @@ export interface SingleAssetWorkflowState {
 }
 
 export type SingleAssetWorkflowAction =
-  | { type: "workflow_started"; imageMode: "ai" | "upload" }
+  | { type: "workflow_started"; imageMode: "ai" | "upload"; assetType: AssetType }
   | { type: "prompt_preview_received"; prompt: string; negativePrompt: string; fallbackWarning: string | null }
   | { type: "image_ready_received"; index: number; image: string; prompt: string; batchOffset: number }
   | { type: "approval_pending_received"; summary: string; requests: ApprovalRequest[] }
@@ -83,11 +83,11 @@ function pushHistory(history: string[], message: string): string[] {
   return history[history.length - 1] === message ? history : [...history, message];
 }
 
-function createClearedWorkflowState(imageMode: "ai" | "upload"): SingleAssetWorkflowState {
+function createClearedWorkflowState(imageMode: "ai" | "upload", assetType: AssetType): SingleAssetWorkflowState {
   const initial = createInitialSingleAssetWorkflowState();
   return {
     ...initial,
-    stage: imageMode === "upload" ? "input" : "generating_image",
+    stage: assetType === "custom_code" ? "agent_running" : imageMode === "upload" ? "input" : "generating_image",
   };
 }
 
@@ -97,7 +97,7 @@ export function singleAssetWorkflowReducer(
 ): SingleAssetWorkflowState {
   switch (action.type) {
     case "workflow_started":
-      return createClearedWorkflowState(action.imageMode);
+      return createClearedWorkflowState(action.imageMode, action.assetType);
     case "prompt_preview_received":
       return {
         ...state,

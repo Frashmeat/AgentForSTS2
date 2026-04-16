@@ -1,4 +1,4 @@
-export type AssetType = "card" | "card_fullscreen" | "relic" | "power" | "character";
+export type AssetType = "card" | "card_fullscreen" | "relic" | "power" | "character" | "custom_code";
 
 export type Stage =
   | "input"
@@ -30,6 +30,7 @@ export const ASSET_TYPES: AssetTypeOption[] = [
   { value: "relic", label: "遗物", desc: "遗物", imgHint: "方形图，主体居中 → 自动抠图，生成 ×3（图标 94×94 + 描边 + 大图 256×256）" },
   { value: "power", label: "Power", desc: "技能/状态图标", imgHint: "方形图标 → 自动抠图，生成 ×2（64×64 + 256×256）" },
   { value: "character", label: "角色", desc: "角色", imgHint: "人物立绘，方形或竖向 → 自动抠图，生成 ×4（图标 + 选角图 + 锁定版 + 地图标记）" },
+  { value: "custom_code", label: "自定义代码", desc: "纯代码逻辑", imgHint: "无图像阶段，直接进入 Code Agent / 服务器文本方案生成" },
 ];
 
 export const PRESETS: PresetOption[] = [
@@ -56,6 +57,12 @@ export const PRESETS: PresetOption[] = [
     assetType: "power",
     assetName: "CorruptionBuff",
     description: "腐化叠层 buff：每叠加1层，回合结束时额外造成1点伤害，最多叠加10层",
+  },
+  {
+    label: "自定义代码",
+    assetType: "custom_code",
+    assetName: "BattleScriptManager",
+    description: "实现一个战斗阶段脚本管理器，负责监听阶段切换、派发事件，并给后续战斗机制提供统一入口。",
   },
 ];
 
