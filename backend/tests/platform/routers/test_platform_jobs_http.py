@@ -226,6 +226,10 @@ def test_platform_jobs_router_supports_create_start_cancel_and_queries_for_curre
     assert "job.created" in event_types
     assert "job.queued" in event_types
     assert "ai_execution.started" in event_types
+    assert "ai_execution.deferred" in event_types
+
+    deferred_event = next(entry for entry in events.json() if entry["event_type"] == "ai_execution.deferred")
+    assert deferred_event["payload"]["reason_code"] == "workflow_not_registered"
 
     session = client.app.state.container.resolve_singleton("platform.db_session_factory")()
     try:
