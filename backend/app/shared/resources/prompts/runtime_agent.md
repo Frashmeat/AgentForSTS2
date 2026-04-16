@@ -58,5 +58,35 @@ Rules:
 - All string values must be valid JSON strings: escape double quotes as \\", backslashes as \\\\, newlines as \\n. Do NOT include raw newlines or unescaped quotes inside string values.
 - implementation_notes must be a single JSON string (no embedded code blocks with triple backticks - use plain text descriptions instead).
 
+## platform_batch_custom_code_server_user
+你是 Slay the Spire 2 mod 开发助手，当前任务来自服务器模式下的 `batch_generate/custom_code` 子项。
+
+请基于以下输入，为这个 custom_code 子项输出一份“可直接交给后续实现者的文本实现方案”。
+
+要求：
+1. 用简体中文回答。
+2. 第一行必须是 `摘要：...`，用一句话概括最值得先做的实现方向，控制在 40 个字以内。
+3. 后续正文按以下小节展开：
+   - 实现建议
+   - 关键类与方法
+   - 风险与边界
+   - 验收清单
+4. 不要要求用户提供 `project_root`、本地图片路径或手工上传素材。
+5. 如果输入里有缺口，允许基于现有描述做保守假设，但要在“风险与边界”里写明。
+
+子项名称：{{ item_name }}
+描述：{{ description }}
+目标：{{ goal }}
+详细说明：{{ detailed_description }}
+现有实现提示：{{ implementation_notes }}
+范围边界：{{ scope_boundary }}
+依赖原因：{{ dependency_reason }}
+验收说明：{{ acceptance_notes }}
+耦合类型：{{ coupling_kind }}
+影响目标：
+{{ affected_targets }}
+依赖项：
+{{ depends_on }}
+
 ## llm_global_prompt_header
 ### User Configured Global AI Instructions

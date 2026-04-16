@@ -9,6 +9,7 @@ from app.modules.platform.application.services import (
     ServerCredentialCipher,
 )
 from app.modules.platform.runner import ExecutionAdapter, PlatformWorkflowRegistry, PlatformWorkflowStep, StepDispatcher, WorkflowRunner
+from app.modules.platform.runner.batch_custom_code_handler import execute_batch_custom_code_step
 from app.modules.platform.runner.log_analysis_handler import execute_log_analysis_step
 from app.modules.platform.runner.text_generate_handler import execute_text_generate_step
 
@@ -67,6 +68,11 @@ def _build_workflow_registry(request: Request) -> PlatformWorkflowRegistry:
         "log_analysis",
         [PlatformWorkflowStep(step_type="log.analyze", step_id="log.analyze")],
     )
+    registry.register(
+        "batch_generate",
+        "custom_code",
+        [PlatformWorkflowStep(step_type="batch.custom_code.plan", step_id="batch.custom_code.plan")],
+    )
     return registry
 
 
@@ -88,6 +94,7 @@ def _build_execution_adapter(request: Request) -> ExecutionAdapter:
         image_handler=None,
         code_handler=None,
         text_handler=execute_text_generate_step,
+        batch_custom_code_handler=execute_batch_custom_code_step,
         log_handler=execute_log_analysis_step,
         build_handler=None,
         approval_handler=None,
