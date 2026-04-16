@@ -22,6 +22,8 @@ class JobListItem(ModelBase):
     refunded_amount: int = 0
     net_consumed: int = 0
     refund_reason_summary: str = ""
+    deferred_reason_code: str = ""
+    deferred_reason_message: str = ""
 
 
 @dataclass(slots=True)
@@ -57,6 +59,8 @@ class JobDetailView(ModelBase):
     refunded_amount: int = 0
     net_consumed: int = 0
     refund_reason_summary: str = ""
+    deferred_reason_code: str = ""
+    deferred_reason_message: str = ""
     items: list[JobItemListItem] = field(default_factory=list)
     artifacts: list[ArtifactSummary] = field(default_factory=list)
 

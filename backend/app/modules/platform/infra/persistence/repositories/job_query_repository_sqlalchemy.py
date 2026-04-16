@@ -47,6 +47,12 @@ class _RefundSummary:
         self.refund_reasons.append(normalized)
 
 
+@dataclass(slots=True)
+class _DeferredSummary:
+    reason_code: str = ""
+    reason_message: str = ""
+
+
 class JobQueryRepositorySqlAlchemy(JobQueryRepository):
     def __init__(self, session: Session) -> None:
         self.session = session
@@ -59,6 +65,7 @@ class JobQueryRepositorySqlAlchemy(JobQueryRepository):
             .all()
         )
         refund_summaries = self._load_refund_summaries([row.id for row in rows])
+        deferred_summaries = self._load_deferred_summaries([row.id for row in rows])
         return [
             JobListItem(
                 id=row.id,
@@ -76,6 +83,8 @@ class JobQueryRepositorySqlAlchemy(JobQueryRepository):
                 refunded_amount=refund_summaries.get(row.id, _RefundSummary()).refunded_amount,
                 net_consumed=refund_summaries.get(row.id, _RefundSummary()).net_consumed,
                 refund_reason_summary=refund_summaries.get(row.id, _RefundSummary()).refund_reason_summary,
+                deferred_reason_code=deferred_summaries.get(row.id, _DeferredSummary()).reason_code,
+                deferred_reason_message=deferred_summaries.get(row.id, _DeferredSummary()).reason_message,
             )
             for row in rows
         ]
@@ -85,6 +94,7 @@ class JobQueryRepositorySqlAlchemy(JobQueryRepository):
         if row is None:
             return None
         refund_summary = self._load_refund_summaries([row.id]).get(row.id, _RefundSummary())
+        deferred_summary = self._load_deferred_summaries([row.id]).get(row.id, _DeferredSummary())
         return JobDetailView(
             id=row.id,
             job_type=row.job_type,
@@ -99,6 +109,8 @@ class JobQueryRepositorySqlAlchemy(JobQueryRepository):
             refunded_amount=refund_summary.refunded_amount,
             net_consumed=refund_summary.net_consumed,
             refund_reason_summary=refund_summary.refund_reason_summary,
+            deferred_reason_code=deferred_summary.reason_code,
+            deferred_reason_message=deferred_summary.reason_message,
             items=self.list_job_items(user_id, job_id),
             artifacts=self.list_artifact_summaries(user_id, job_id),
         )
@@ -146,6 +158,28 @@ class JobQueryRepositorySqlAlchemy(JobQueryRepository):
             if charge_status == ChargeStatus.REFUNDED:
                 summary.refunded_amount += int(charge_amount or 0)
                 summary.append_reason(str(refund_reason or ""))
+        return summaries
+
+    def _load_deferred_summaries(self, job_ids: list[int]) -> dict[int, _DeferredSummary]:
+        if not job_ids:
+            return {}
+
+        rows = (
+            self.session.query(JobEventRecord)
+            .filter(JobEventRecord.job_id.in_(job_ids), JobEventRecord.event_type == "ai_execution.deferred")
+            .order_by(JobEventRecord.job_id.asc(), JobEventRecord.id.desc())
+            .all()
+        )
+
+        summaries: dict[int, _DeferredSummary] = {}
+        for row in rows:
+            if row.job_id in summaries:
+                continue
+            payload = dict(row.event_payload or {})
+            summaries[row.job_id] = _DeferredSummary(
+                reason_code=str(payload.get("reason_code", "")).strip(),
+                reason_message=str(payload.get("reason_message", "")).strip(),
+            )
         return summaries
 
     def list_visible_events(self, user_id: int, job_id: int, after_id: int | None, limit: int) -> list[JobEventView]:

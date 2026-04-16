@@ -208,12 +208,18 @@ def test_platform_jobs_router_supports_create_start_cancel_and_queries_for_curre
     assert listed.json()[0]["id"] == job_id
 
     detail = client.get(f"/api/platform/jobs/{job_id}", params={"user_id": other_user_id})
+    listed = client.get("/api/platform/jobs", params={"user_id": other_user_id})
     assert detail.status_code == 200
     assert detail.json()["id"] == job_id
     assert detail.json()["status"] == "running"
     assert detail.json()["selected_execution_profile_id"] == profile_id
     assert detail.json()["selected_agent_backend"] == "codex"
     assert detail.json()["selected_model"] == "gpt-5.4"
+    assert detail.json()["deferred_reason_code"] == "workflow_not_registered"
+    assert "尚未为 single_generate/card 注册" in detail.json()["deferred_reason_message"]
+    assert listed.status_code == 200
+    assert listed.json()[0]["deferred_reason_code"] == "workflow_not_registered"
+    assert "尚未为 single_generate/card 注册" in listed.json()[0]["deferred_reason_message"]
 
     items = client.get(f"/api/platform/jobs/{job_id}/items", params={"user_id": other_user_id})
     assert items.status_code == 200

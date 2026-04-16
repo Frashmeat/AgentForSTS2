@@ -23,6 +23,7 @@ from app.modules.platform.infra.persistence import models as _platform_models  #
 from app.modules.platform.infra.persistence.models import (
     AIExecutionRecord,
     ExecutionProfileRecord,
+    JobEventRecord,
     JobItemRecord,
     JobRecord,
     QuotaAccountRecord,
@@ -199,8 +200,10 @@ def test_me_router_exposes_quota_and_platform_jobs(client: TestClient):
     assert quota.json()["daily_limit"] == 10
     assert jobs.status_code == 200
     assert jobs.json()[0]["job_type"] == "single_generate"
+    assert jobs.json()[0]["deferred_reason_code"] == ""
     assert detail.status_code == 200
     assert detail.json()["id"] == job.id
+    assert detail.json()["deferred_reason_code"] == ""
     assert items.status_code == 200
     assert items.json()[0]["item_type"] == "card"
 
@@ -316,11 +319,17 @@ def test_me_router_can_create_and_start_current_user_job(client: TestClient):
     assert started.json()["status"] == "running"
 
     detail = client.get(f"/api/me/jobs/{job_id}")
+    jobs = client.get("/api/me/jobs")
     assert detail.status_code == 200
     assert detail.json()["status"] == "running"
     assert detail.json()["selected_execution_profile_id"] == 1
     assert detail.json()["selected_agent_backend"] == "codex"
     assert detail.json()["selected_model"] == "gpt-5.4"
+    assert detail.json()["deferred_reason_code"] == "workflow_not_registered"
+    assert "尚未为 single_generate/relic 注册" in detail.json()["deferred_reason_message"]
+    assert jobs.status_code == 200
+    assert jobs.json()[0]["deferred_reason_code"] == "workflow_not_registered"
+    assert "尚未为 single_generate/relic 注册" in jobs.json()[0]["deferred_reason_message"]
 
     items = client.get(f"/api/me/jobs/{job_id}/items")
     events = client.get(f"/api/me/jobs/{job_id}/events")
@@ -613,3 +622,77 @@ def test_me_router_can_complete_supported_log_analysis_job(client: TestClient):
         assert execution.result_summary == "日志分析完成"
     finally:
         session.close()
+
+
+def test_me_router_job_summary_uses_latest_deferred_event(client: TestClient):
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "username": "luna",
+            "email": "luna@example.com",
+            "password": "secret-123",
+        },
+    )
+    assert registered.status_code == 200
+    user_id = registered.json()["user"]["user_id"]
+
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    app_container = client.app.state.container
+    session = app_container.resolve_singleton("platform.db_session_factory")()
+    try:
+        job = JobRecord(
+            user_id=user_id,
+            job_type="single_generate",
+            status=JobStatus.RUNNING,
+            workflow_version="2026.04.03",
+            input_summary="Dark Relic",
+            total_item_count=1,
+            pending_item_count=0,
+            running_item_count=1,
+            succeeded_item_count=0,
+            failed_business_item_count=0,
+            failed_system_item_count=0,
+            quota_skipped_item_count=0,
+            cancelled_before_start_item_count=0,
+            cancelled_after_start_item_count=0,
+        )
+        session.add(job)
+        session.flush()
+        session.add(
+            JobEventRecord(
+                job_id=job.id,
+                user_id=user_id,
+                event_type="ai_execution.deferred",
+                event_payload={
+                    "reason_code": "workflow_not_registered",
+                    "reason_message": "older",
+                },
+            )
+        )
+        session.add(
+            JobEventRecord(
+                job_id=job.id,
+                user_id=user_id,
+                event_type="ai_execution.deferred",
+                event_payload={
+                    "reason_code": "local_project_root_required",
+                    "reason_message": "latest",
+                },
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    jobs = client.get("/api/me/jobs")
+    assert jobs.status_code == 200
+    assert jobs.json()[0]["deferred_reason_code"] == "local_project_root_required"
+    assert jobs.json()[0]["deferred_reason_message"] == "latest"

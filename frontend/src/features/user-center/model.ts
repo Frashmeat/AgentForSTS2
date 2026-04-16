@@ -1,8 +1,8 @@
-import { getMyProfile, getMyQuota, listMyJobEvents, listMyJobs } from "../../shared/api/me.ts";
+import { getMyProfile, getMyQuota, listMyJobs } from "../../shared/api/me.ts";
 import type { CurrentUserProfile } from "../../shared/api/me.ts";
 import type { PlatformJobSummary, PlatformQuotaView } from "../../shared/api/platform.ts";
 import {
-  readDeferredExecutionNotice,
+  resolveDeferredExecutionSummary,
   type DeferredExecutionSummary,
 } from "../../shared/deferredExecution.ts";
 
@@ -17,25 +17,14 @@ export interface UserCenterOverview {
 }
 
 async function enrichUserCenterJob(job: PlatformJobSummary): Promise<UserCenterJobSummary> {
-  if (job.status !== "running") {
-    return {
-      ...job,
-      deferredSummary: null,
-    };
-  }
-
-  try {
-    const deferredNotice = readDeferredExecutionNotice(await listMyJobEvents(job.id));
-    return {
-      ...job,
-      deferredSummary: deferredNotice?.summary ?? null,
-    };
-  } catch {
-    return {
-      ...job,
-      deferredSummary: null,
-    };
-  }
+  const deferredReasonCode = String(job.deferred_reason_code ?? "").trim();
+  const deferredReasonMessage = String(job.deferred_reason_message ?? "").trim();
+  return {
+    ...job,
+    deferredSummary: deferredReasonCode
+      ? resolveDeferredExecutionSummary(deferredReasonCode, deferredReasonMessage)
+      : null,
+  };
 }
 
 export async function loadUserCenterOverview(): Promise<UserCenterOverview> {

@@ -30,6 +30,8 @@ export interface PlatformJobSummary {
   refunded_amount?: number;
   net_consumed?: number;
   refund_reason_summary?: string;
+  deferred_reason_code?: string;
+  deferred_reason_message?: string;
 }
 
 export interface PlatformJobActionResponse {
