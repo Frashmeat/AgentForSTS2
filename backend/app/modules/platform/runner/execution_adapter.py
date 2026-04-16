@@ -14,12 +14,14 @@ class ExecutionAdapter:
         *,
         image_handler: StepHandler | None,
         code_handler: StepHandler | None,
+        text_handler: StepHandler | None,
         build_handler: StepHandler | None,
         approval_handler: StepHandler | None,
     ) -> None:
         self._handlers = {
             "image.generate": image_handler,
             "code.generate": code_handler,
+            "text.generate": text_handler,
             "build.project": build_handler,
             "approval.request": approval_handler,
         }
