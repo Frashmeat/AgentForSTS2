@@ -163,6 +163,14 @@ def list_job_items(request: Request, job_id: int):
         return [item.model_dump() for item in service.list_job_items(user.user_id, job_id)]
 
 
+@router.get("/jobs/{job_id}/events")
+def list_job_events(request: Request, job_id: int, after_id: int | None = None, limit: int = 50):
+    with auth_session_scope(request) as session:
+        user = require_current_user(request, session)
+        service = _build_user_center_service(session, request)
+        return [item.as_user_payload() for item in service.list_events(user.user_id, job_id, after_id=after_id, limit=limit)]
+
+
 @router.get("/server-preferences")
 def get_server_preferences(request: Request):
     with auth_session_scope(request) as session:

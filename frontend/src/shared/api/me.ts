@@ -5,6 +5,7 @@ import type {
   PlatformJobCreateRequest,
   PlatformJobSummary,
   PlatformJobItemSummary,
+  PlatformJobEventSummary,
   PlatformQuotaView,
   PlatformJobStartRequest,
 } from "./platform.ts";
@@ -60,6 +61,12 @@ export function startMyJob(jobId: number, body: PlatformJobStartRequest): Promis
 
 export function listMyJobItems(jobId: number): Promise<PlatformJobItemSummary[]> {
   return requestJson<PlatformJobItemSummary[]>(buildApiPath(`/api/me/jobs/${jobId}/items`, {}), {
+    backend: "web",
+  });
+}
+
+export function listMyJobEvents(jobId: number): Promise<PlatformJobEventSummary[]> {
+  return requestJson<PlatformJobEventSummary[]>(buildApiPath(`/api/me/jobs/${jobId}/events`, {}), {
     backend: "web",
   });
 }

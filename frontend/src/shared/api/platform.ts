@@ -47,6 +47,15 @@ export interface PlatformJobItemSummary {
   error_summary: string;
 }
 
+export interface PlatformJobEventSummary {
+  event_id: number;
+  event_type: string;
+  job_id: number;
+  occurred_at: string;
+  payload: Record<string, unknown>;
+  job_item_id?: number;
+}
+
 export interface PlatformArtifactSummary {
   id: number;
   artifact_type: string;

@@ -47,3 +47,6 @@ class UserCenterService:
 
     def list_job_items(self, user_id: int, job_id: int):
         return self.job_query_service.list_job_items(user_id, job_id)
+
+    def list_events(self, user_id: int, job_id: int, after_id: int | None = None, limit: int = 50):
+        return self.job_query_service.list_events(user_id, job_id, after_id=after_id, limit=limit)

@@ -323,8 +323,15 @@ def test_me_router_can_create_and_start_current_user_job(client: TestClient):
     assert detail.json()["selected_model"] == "gpt-5.4"
 
     items = client.get(f"/api/me/jobs/{job_id}/items")
+    events = client.get(f"/api/me/jobs/{job_id}/events")
     assert items.status_code == 200
     assert items.json()[0]["status"] == "running"
+    assert events.status_code == 200
+    event_types = [entry["event_type"] for entry in events.json()]
+    assert "ai_execution.deferred" in event_types
+    deferred_event = next(entry for entry in events.json() if entry["event_type"] == "ai_execution.deferred")
+    assert deferred_event["payload"]["reason_code"] == "workflow_not_registered"
+    assert "ai_execution_id" not in deferred_event
 
     session = app_container.resolve_singleton("platform.db_session_factory")()
     try:
