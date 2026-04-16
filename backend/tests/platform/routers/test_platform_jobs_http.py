@@ -17,6 +17,8 @@ from fastapi.testclient import TestClient
 
 from app.composition.container import ApplicationContainer
 from app.modules.auth.infra.persistence import models as _auth_models  # noqa: F401
+from app.modules.platform.application.services.server_credential_cipher import ServerCredentialCipher
+from app.modules.platform.contracts.runner_contracts import StepExecutionResult
 from app.modules.platform.infra.persistence import models as _platform_models  # noqa: F401
 from app.modules.platform.infra.persistence.models import (
     AIExecutionRecord,
@@ -109,6 +111,8 @@ def _register_login_and_verify(client: TestClient, username: str, email: str) ->
 
 def _seed_execution_profile(client: TestClient) -> int:
     session = client.app.state.container.resolve_singleton("platform.db_session_factory")()
+    settings = client.app.state.container.resolve_singleton("settings")
+    cipher = ServerCredentialCipher.from_settings(settings)
     try:
         profile = ExecutionProfileRecord(
             code="codex-gpt-5-4",
@@ -127,7 +131,7 @@ def _seed_execution_profile(client: TestClient) -> int:
                 execution_profile_id=profile.id,
                 provider="openai",
                 auth_type="api_key",
-                credential_ciphertext="cipher",
+                credential_ciphertext=cipher.encrypt("sk-live-openai"),
                 secret_ciphertext=None,
                 base_url="https://api.openai.com/v1",
                 label="main",
@@ -143,6 +147,21 @@ def _seed_execution_profile(client: TestClient) -> int:
         return profile.id
     finally:
         session.close()
+
+
+class _SucceededWorkflowRunner:
+    def __init__(self, dispatcher=None) -> None:
+        self.dispatcher = dispatcher
+
+    async def run(self, *, steps, base_request):
+        return [
+            StepExecutionResult(
+                step_id=steps[0].step_id,
+                status="succeeded",
+                output_payload={"text": "日志分析完成"},
+                error_summary="",
+            )
+        ]
 
 
 def test_platform_jobs_router_supports_create_start_cancel_and_queries_for_current_session_user(client: TestClient):
@@ -270,3 +289,60 @@ def test_platform_jobs_router_uses_current_user_default_server_profile_when_requ
     assert created.json()["selected_execution_profile_id"] == profile_id
     assert created.json()["selected_agent_backend"] == "codex"
     assert created.json()["selected_model"] == "gpt-5.4"
+
+
+def test_platform_jobs_router_can_complete_supported_log_analysis_job(client: TestClient):
+    _register_login_and_verify(client, "luna", "luna@example.com")
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    profile_id = _seed_execution_profile(client)
+    client.app.state.container.register_singleton("platform.workflow_runner_factory", _SucceededWorkflowRunner)
+
+    created = client.post(
+        "/api/platform/jobs",
+        json={
+            "job_type": "log_analysis",
+            "workflow_version": "2026.03.31",
+            "selected_execution_profile_id": profile_id,
+            "selected_agent_backend": "codex",
+            "selected_model": "gpt-5.4",
+            "items": [
+                {
+                    "item_type": "log_analysis",
+                    "input_summary": "分析日志",
+                    "input_payload": {"context": "黑屏了"},
+                }
+            ],
+        },
+    )
+    assert created.status_code == 200
+
+    job_id = created.json()["id"]
+    started = client.post(f"/api/platform/jobs/{job_id}/start", json={})
+
+    assert started.status_code == 200
+    assert started.json()["status"] == "succeeded"
+
+    detail = client.get(f"/api/platform/jobs/{job_id}")
+    assert detail.status_code == 200
+    assert detail.json()["status"] == "succeeded"
+
+    items = client.get(f"/api/platform/jobs/{job_id}/items")
+    assert items.status_code == 200
+    assert items.json()[0]["status"] == "succeeded"
+    assert items.json()[0]["result_summary"] == "日志分析完成"
+
+    session = client.app.state.container.resolve_singleton("platform.db_session_factory")()
+    try:
+        execution = session.query(AIExecutionRecord).filter(AIExecutionRecord.job_id == job_id).one()
+        assert execution.status.value == "succeeded"
+        assert execution.result_summary == "日志分析完成"
+    finally:
+        session.close()
