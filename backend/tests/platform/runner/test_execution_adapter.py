@@ -26,10 +26,15 @@ def test_execution_adapter_dispatches_to_registered_step_handlers():
         calls.append(f"text:{request.step_id}")
         return {"artifact_type": "text"}
 
+    async def log_handler(request: StepExecutionRequest):
+        calls.append(f"log:{request.step_id}")
+        return {"artifact_type": "log"}
+
     adapter = ExecutionAdapter(
         image_handler=image_handler,
         code_handler=code_handler,
         text_handler=text_handler,
+        log_handler=log_handler,
         build_handler=None,
         approval_handler=None,
     )
@@ -74,11 +79,25 @@ def test_execution_adapter_dispatches_to_registered_step_handlers():
             )
         )
     )
+    log_result = asyncio.run(
+        dispatcher.dispatch(
+            StepExecutionRequest(
+                workflow_version="2026.03.31",
+                step_protocol_version="v1",
+                step_type="log.analyze",
+                step_id="log-1",
+                job_id=1,
+                job_item_id=2,
+                result_schema_version="v1",
+            )
+        )
+    )
 
-    assert calls == ["image:img-1", "code:code-1", "text:text-1"]
+    assert calls == ["image:img-1", "code:code-1", "text:text-1", "log:log-1"]
     assert image_result.output_payload["artifact_type"] == "image"
     assert code_result.output_payload["artifact_type"] == "code"
     assert text_result.output_payload["artifact_type"] == "text"
+    assert log_result.output_payload["artifact_type"] == "log"
 
 
 def test_execution_adapter_classifies_handler_errors_as_failed_system():
@@ -89,6 +108,7 @@ def test_execution_adapter_classifies_handler_errors_as_failed_system():
         image_handler=broken_handler,
         code_handler=None,
         text_handler=None,
+        log_handler=None,
         build_handler=None,
         approval_handler=None,
     )

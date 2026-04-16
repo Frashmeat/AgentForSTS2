@@ -40,10 +40,13 @@ class JobApplicationService:
         job = self.job_repository.find_by_id_for_user(command.job_id, user_id)
         if job is None:
             return None
+        now = datetime.now(UTC)
         for item in job.items:
             if item.status == JobItemStatus.PENDING:
                 item.status = JobItemStatus.READY
         job.status = JobStatus.QUEUED
+        if job.started_at is None:
+            job.started_at = now
         self._sync_job_counters(job)
         self.job_repository.save(job)
         self.job_event_repository.append(
@@ -54,9 +57,8 @@ class JobApplicationService:
         )
         if self.execution_orchestrator_service is not None:
             ready_items = [item for item in job.items if item.status == JobItemStatus.READY]
-            now = datetime.now(UTC)
             for item in ready_items:
-                self.execution_orchestrator_service.start_execution(
+                execution = self.execution_orchestrator_service.start_execution(
                     user_id=user_id,
                     job_id=job.id,
                     job_item_id=item.id,
@@ -68,8 +70,22 @@ class JobApplicationService:
                     request_idempotency_key=self._build_start_idempotency_key(job.id, item.id),
                     now=now,
                 )
+                if execution is None:
+                    continue
+                self.execution_orchestrator_service.run_registered_workflow_to_completion(
+                    user_id=user_id,
+                    job_id=job.id,
+                    job_item_id=item.id,
+                    job_type=job.job_type,
+                    item_type=item.item_type,
+                    workflow_version=job.workflow_version,
+                    step_protocol_version=_STEP_PROTOCOL_VERSION,
+                    result_schema_version=_RESULT_SCHEMA_VERSION,
+                    input_payload=item.input_payload,
+                    now=now,
+                )
             self._sync_job_counters(job)
-            self._sync_started_job_status(job)
+            self._sync_job_status(job)
             self.job_repository.save(job)
         return job
 
@@ -113,12 +129,40 @@ class JobApplicationService:
         )
 
     @staticmethod
-    def _sync_started_job_status(job: JobRecord) -> None:
+    def _sync_job_status(job: JobRecord) -> None:
         if job.running_item_count > 0:
             job.status = JobStatus.RUNNING
             return
         if job.pending_item_count > 0:
             job.status = JobStatus.QUEUED
             return
+        if job.total_item_count == 0:
+            job.status = JobStatus.QUEUED
+            return
+        if job.succeeded_item_count == job.total_item_count:
+            job.status = JobStatus.SUCCEEDED
+            job.result_summary = JobApplicationService._pick_first_non_empty(item.result_summary for item in job.items)
+            job.error_summary = ""
+            return
         if job.total_item_count > 0 and job.quota_skipped_item_count == job.total_item_count:
             job.status = JobStatus.QUOTA_EXHAUSTED
+            job.error_summary = JobApplicationService._pick_first_non_empty(item.error_summary for item in job.items)
+            return
+        if job.failed_business_item_count + job.failed_system_item_count + job.quota_skipped_item_count > 0:
+            if job.succeeded_item_count > 0:
+                job.status = JobStatus.PARTIAL_SUCCEEDED
+                job.result_summary = JobApplicationService._pick_first_non_empty(item.result_summary for item in job.items)
+            else:
+                job.status = JobStatus.FAILED
+                job.result_summary = ""
+            job.error_summary = JobApplicationService._pick_first_non_empty(item.error_summary for item in job.items)
+            return
+        job.status = JobStatus.QUEUED
+
+    @staticmethod
+    def _pick_first_non_empty(values) -> str:
+        for value in values:
+            text = str(value).strip()
+            if text:
+                return text
+        return ""

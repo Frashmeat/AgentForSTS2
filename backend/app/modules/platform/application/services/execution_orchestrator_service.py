@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 
 from app.modules.platform.application.services.quota_billing_service import QuotaBillingService
@@ -179,6 +180,84 @@ class ExecutionOrchestratorService:
             ),
         )
 
+    def has_registered_workflow(self, *, job_type: str, item_type: str) -> bool:
+        if self.workflow_registry is None or self.workflow_runner is None:
+            return False
+        try:
+            self.workflow_registry.resolve(job_type, item_type)
+        except KeyError:
+            return False
+        return True
+
+    def run_registered_workflow_to_completion(
+        self,
+        *,
+        user_id: int,
+        job_id: int,
+        job_item_id: int,
+        job_type: str,
+        item_type: str,
+        workflow_version: str,
+        step_protocol_version: str,
+        result_schema_version: str,
+        input_payload: dict[str, object] | None,
+        now: datetime,
+    ) -> StepExecutionResult | None:
+        if not self.has_registered_workflow(job_type=job_type, item_type=item_type):
+            return None
+
+        job = self.job_repository.find_by_id_for_user(job_id, user_id)
+        if job is None:
+            raise LookupError(f"job not found for user: {job_id}")
+        item = next((entry for entry in job.items if entry.id == job_item_id), None)
+        if item is None:
+            raise LookupError(f"job item not found: {job_item_id}")
+
+        execution = self.ai_execution_repository.find_latest_by_job_item(job_item_id)
+        if execution is None:
+            raise LookupError(f"ai_execution not found for job_item: {job_item_id}")
+
+        execution.status = AIExecutionStatus.RUNNING
+        execution.input_payload = dict(input_payload or {})
+        self.ai_execution_repository.save(execution)
+
+        results = asyncio.run(
+            self.run_registered_steps(
+                user_id=user_id,
+                job_type=job_type,
+                item_type=item_type,
+                job_id=job_id,
+                job_item_id=job_item_id,
+                workflow_version=workflow_version,
+                step_protocol_version=step_protocol_version,
+                result_schema_version=result_schema_version,
+                input_payload=input_payload,
+            )
+        )
+        final_result = results[-1] if results else StepExecutionResult(
+            step_id=execution.step_id,
+            status="failed_system",
+            error_summary="workflow produced no result",
+        )
+        self._apply_result(
+            job=job,
+            item=item,
+            execution=execution,
+            result=final_result,
+            now=now,
+        )
+        self.ai_execution_repository.save(execution)
+        self.job_repository.save(job)
+        self.job_event_repository.append(
+            job_id=job.id,
+            user_id=user_id,
+            event_type="ai_execution.finished",
+            payload={"execution_id": execution.id, "status": execution.status.value},
+            job_item_id=job_item_id,
+            ai_execution_id=execution.id,
+        )
+        return final_result
+
     def _resolve_step_execution_binding(
         self,
         *,
@@ -226,3 +305,53 @@ class ExecutionOrchestratorService:
                 latest_execution.switched_credential if latest_execution is not None else route.switched_credential
             ),
         )
+
+    def _apply_result(
+        self,
+        *,
+        job,
+        item,
+        execution: AIExecutionRecord,
+        result: StepExecutionResult,
+        now: datetime,
+    ) -> None:
+        summary = self._pick_summary(result.output_payload, result.error_summary)
+        if result.status == "succeeded":
+            execution.status = AIExecutionStatus.SUCCEEDED
+            execution.result_summary = summary
+            execution.result_payload = dict(result.output_payload)
+            execution.error_summary = ""
+            execution.error_payload = {}
+            item.status = JobItemStatus.SUCCEEDED
+            item.result_summary = summary
+            item.error_summary = ""
+            if self.quota_billing_service is not None:
+                self.quota_billing_service.capture(execution.id, now)
+        else:
+            execution.status = (
+                AIExecutionStatus.FAILED_BUSINESS if result.status == "failed_business" else AIExecutionStatus.FAILED_SYSTEM
+            )
+            execution.result_summary = ""
+            execution.result_payload = {}
+            execution.error_summary = result.error_summary
+            execution.error_payload = {"step_id": result.step_id}
+            item.status = JobItemStatus.FAILED_BUSINESS if result.status == "failed_business" else JobItemStatus.FAILED_SYSTEM
+            item.result_summary = ""
+            item.error_summary = result.error_summary
+            if self.quota_billing_service is not None:
+                self.quota_billing_service.refund(execution.id, now, reason="execution_failed")
+
+        item.attempt_count += 1
+        if item.started_at is None:
+            item.started_at = execution.started_at
+        item.finished_at = now
+        execution.finished_at = now
+        job.finished_at = now
+
+    @staticmethod
+    def _pick_summary(payload: dict[str, object], fallback: str) -> str:
+        for key in ("text", "summary", "message", "result_summary"):
+            value = str(payload.get(key, "")).strip()
+            if value:
+                return value
+        return fallback.strip()

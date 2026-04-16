@@ -15,6 +15,7 @@ class ExecutionAdapter:
         image_handler: StepHandler | None,
         code_handler: StepHandler | None,
         text_handler: StepHandler | None,
+        log_handler: StepHandler | None,
         build_handler: StepHandler | None,
         approval_handler: StepHandler | None,
     ) -> None:
@@ -22,6 +23,7 @@ class ExecutionAdapter:
             "image.generate": image_handler,
             "code.generate": code_handler,
             "text.generate": text_handler,
+            "log.analyze": log_handler,
             "build.project": build_handler,
             "approval.request": approval_handler,
         }

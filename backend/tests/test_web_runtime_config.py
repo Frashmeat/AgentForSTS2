@@ -52,7 +52,7 @@ def test_web_runtime_validation_passes_when_database_and_session_secret_are_conf
     assert settings.validate_for_role("web") == []
 
 
-def test_web_runtime_container_skips_workstation_bridge_singletons():
+def test_web_runtime_container_exposes_minimal_platform_runner_singletons():
     container = ApplicationContainer.from_config(
         {
             "database": {
@@ -69,5 +69,8 @@ def test_web_runtime_container_skips_workstation_bridge_singletons():
     assert container.has_singleton("platform.server_credential_admin_service_factory") is True
     assert container.has_singleton("platform.server_credential_cipher_factory") is True
     assert container.has_singleton("platform.config_facade_service_factory") is False
-    assert container.has_singleton("platform.workflow_registry_factory") is False
+    assert container.has_singleton("platform.workflow_registry_factory") is True
+    assert container.has_singleton("platform.step_dispatcher_factory") is True
+    assert container.has_singleton("platform.execution_adapter_factory") is True
+    assert container.has_singleton("platform.workflow_runner_factory") is True
     assert container.has_singleton("platform.approval_adapter_factory") is False

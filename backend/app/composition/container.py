@@ -118,6 +118,10 @@ class ApplicationContainer:
             ("platform.quota_billing_service_factory", QuotaBillingService),
             ("platform.event_service_factory", EventService),
             ("platform.execution_routing_service_factory", ExecutionRoutingService),
+            ("platform.workflow_registry_factory", PlatformWorkflowRegistry),
+            ("platform.step_dispatcher_factory", StepDispatcher),
+            ("platform.execution_adapter_factory", ExecutionAdapter),
+            ("platform.workflow_runner_factory", WorkflowRunner),
         ):
             self._singletons.setdefault(key, instance)
 
@@ -132,10 +136,6 @@ class ApplicationContainer:
 
     def _bootstrap_workstation_bridge_defaults(self, db_session_factory: Any) -> None:
         for key, instance in (
-            ("platform.workflow_registry_factory", PlatformWorkflowRegistry),
-            ("platform.step_dispatcher_factory", StepDispatcher),
-            ("platform.execution_adapter_factory", ExecutionAdapter),
-            ("platform.workflow_runner_factory", WorkflowRunner),
             ("platform.build_deploy_adapter_factory", BuildDeployAdapter),
             ("platform.approval_adapter_factory", ApprovalAdapter),
         ):
