@@ -60,6 +60,7 @@ export default function App() {
     serverProfiles,
     serverProfilesLoading,
     serverProfilesError,
+    serverSelectionNotice,
     selectedServerProfileId,
     rememberServerProfile,
     handleExecutionRequest,
@@ -160,6 +161,7 @@ export default function App() {
         serverProfiles={serverProfiles}
         serverProfilesLoading={serverProfilesLoading}
         serverProfilesError={serverProfilesError}
+        serverSelectionNotice={serverSelectionNotice}
         selectedServerProfileId={selectedServerProfileId}
         rememberServerProfile={rememberServerProfile}
         onClose={closeExecutionDialog}

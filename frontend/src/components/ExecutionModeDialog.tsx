@@ -9,6 +9,7 @@ interface ExecutionModeDialogProps {
   serverProfiles: PlatformExecutionProfile[];
   serverProfilesLoading: boolean;
   serverProfilesError: string | null;
+  serverSelectionNotice: string | null;
   selectedServerProfileId: number | null;
   rememberServerProfile: boolean;
   onClose: () => void;
@@ -29,6 +30,7 @@ export function ExecutionModeDialog({
   serverProfiles,
   serverProfilesLoading,
   serverProfilesError,
+  serverSelectionNotice,
   selectedServerProfileId,
   rememberServerProfile,
   onClose,
@@ -108,6 +110,11 @@ export function ExecutionModeDialog({
                   </div>
                 ) : (
                   <>
+                    {serverSelectionNotice ? (
+                      <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                        {serverSelectionNotice}
+                      </div>
+                    ) : null}
                     <div className="mt-3 space-y-2">
                       {serverProfiles.map((profile) => {
                         const selected = selectedServerProfileId === profile.id;

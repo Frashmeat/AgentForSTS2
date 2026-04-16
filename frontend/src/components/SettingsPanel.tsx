@@ -864,6 +864,11 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
                 <p className="text-sm text-slate-500">正在读取服务器执行配置…</p>
               ) : (
                 <>
+                  {serverPreference?.default_execution_profile_id && !serverPreference.available ? (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                      当前默认服务器配置已不可用。你可以改选一个可用配置后重新保存，或直接清空默认值。
+                    </div>
+                  ) : null}
                   <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 space-y-2">
                     <p className="text-xs text-slate-500">
                       当前默认配置：

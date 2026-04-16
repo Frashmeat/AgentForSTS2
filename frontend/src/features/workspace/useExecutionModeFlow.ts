@@ -58,6 +58,7 @@ export function useExecutionModeFlow({ isAuthenticated }: UseExecutionModeFlowOp
   const [rememberServerProfile, setRememberServerProfile] = useState(false);
   const [serverProfilesLoading, setServerProfilesLoading] = useState(false);
   const [serverProfilesError, setServerProfilesError] = useState<string | null>(null);
+  const [serverSelectionNotice, setServerSelectionNotice] = useState<string | null>(null);
 
   useEffect(() => {
     if (pendingExecution === null || !isAuthenticated) {
@@ -67,6 +68,7 @@ export function useExecutionModeFlow({ isAuthenticated }: UseExecutionModeFlowOp
       setRememberServerProfile(false);
       setServerProfilesLoading(false);
       setServerProfilesError(null);
+      setServerSelectionNotice(null);
       return;
     }
 
@@ -81,8 +83,19 @@ export function useExecutionModeFlow({ isAuthenticated }: UseExecutionModeFlowOp
         }
         setServerProfiles(profileView.items);
         setServerPreference(preference);
-        setSelectedServerProfileId(pickInitialServerProfileId(profileView.items, preference));
+        const nextProfileId = pickInitialServerProfileId(profileView.items, preference);
+        setSelectedServerProfileId(nextProfileId);
         setRememberServerProfile(false);
+        if (preference.default_execution_profile_id !== null && !preference.available) {
+          const fallbackProfile = profileView.items.find((profile) => profile.id === nextProfileId);
+          setServerSelectionNotice(
+            fallbackProfile
+              ? `已保存的默认服务器配置当前不可用，本次已自动回退到 ${fallbackProfile.display_name}。`
+              : "已保存的默认服务器配置当前不可用，而且暂时没有健康可用的服务器执行配置。",
+          );
+        } else {
+          setServerSelectionNotice(null);
+        }
       })
       .catch((error) => {
         if (cancelled) {
@@ -93,6 +106,7 @@ export function useExecutionModeFlow({ isAuthenticated }: UseExecutionModeFlowOp
         setSelectedServerProfileId(null);
         setRememberServerProfile(false);
         setServerProfilesError(error instanceof Error ? error.message : "读取服务器执行配置失败");
+        setServerSelectionNotice(null);
       })
       .finally(() => {
         if (!cancelled) {
@@ -195,6 +209,7 @@ export function useExecutionModeFlow({ isAuthenticated }: UseExecutionModeFlowOp
           default_execution_profile_id: selectedProfile.id,
         });
         setServerPreference(updatedPreference);
+        setServerSelectionNotice(null);
       }
 
       const result = await createAndStartPlatformFlow({
@@ -235,14 +250,26 @@ export function useExecutionModeFlow({ isAuthenticated }: UseExecutionModeFlowOp
       ]);
       setServerProfiles(profileView.items);
       setServerPreference(preference);
-      setSelectedServerProfileId(pickInitialServerProfileId(profileView.items, preference));
+      const nextProfileId = pickInitialServerProfileId(profileView.items, preference);
+      setSelectedServerProfileId(nextProfileId);
       setRememberServerProfile(false);
+      if (preference.default_execution_profile_id !== null && !preference.available) {
+        const fallbackProfile = profileView.items.find((profile) => profile.id === nextProfileId);
+        setServerSelectionNotice(
+          fallbackProfile
+            ? `已保存的默认服务器配置当前不可用，本次已自动回退到 ${fallbackProfile.display_name}。`
+            : "已保存的默认服务器配置当前不可用，而且暂时没有健康可用的服务器执行配置。",
+        );
+      } else {
+        setServerSelectionNotice(null);
+      }
     } catch (error) {
       setServerProfiles([]);
       setServerPreference(null);
       setSelectedServerProfileId(null);
       setRememberServerProfile(false);
       setServerProfilesError(error instanceof Error ? error.message : "读取服务器执行配置失败");
+      setServerSelectionNotice(null);
     } finally {
       setServerProfilesLoading(false);
     }
@@ -253,6 +280,7 @@ export function useExecutionModeFlow({ isAuthenticated }: UseExecutionModeFlowOp
     serverProfiles,
     serverProfilesLoading,
     serverProfilesError,
+    serverSelectionNotice,
     selectedServerProfileId,
     rememberServerProfile,
     handleExecutionRequest,
