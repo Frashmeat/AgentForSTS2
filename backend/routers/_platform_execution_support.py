@@ -89,6 +89,11 @@ def _build_workflow_registry(request: Request) -> PlatformWorkflowRegistry:
         "relic",
         [PlatformWorkflowStep(step_type="single.asset.plan", step_id="single.relic.plan")],
     )
+    registry.register(
+        "single_generate",
+        "power",
+        [PlatformWorkflowStep(step_type="single.asset.plan", step_id="single.power.plan")],
+    )
     return registry
 
 

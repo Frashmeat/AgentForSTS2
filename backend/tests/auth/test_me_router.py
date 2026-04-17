@@ -295,7 +295,7 @@ def test_me_router_can_create_and_start_current_user_job(client: TestClient):
             "selected_model": "gpt-5.4",
             "items": [
                 {
-                    "item_type": "power",
+                    "item_type": "character",
                     "input_summary": "Dark Relic",
                     "input_payload": {
                         "asset_name": "DarkRelic",
@@ -332,13 +332,13 @@ def test_me_router_can_create_and_start_current_user_job(client: TestClient):
     assert detail.json()["refunded_amount"] == 1
     assert detail.json()["net_consumed"] == 0
     assert detail.json()["deferred_reason_code"] == "workflow_not_registered"
-    assert "尚未为 single_generate/power 注册" in detail.json()["deferred_reason_message"]
+    assert "尚未为 single_generate/character 注册" in detail.json()["deferred_reason_message"]
     assert jobs.status_code == 200
     assert jobs.json()[0]["original_deducted"] == 1
     assert jobs.json()[0]["refunded_amount"] == 1
     assert jobs.json()[0]["net_consumed"] == 0
     assert jobs.json()[0]["deferred_reason_code"] == "workflow_not_registered"
-    assert "尚未为 single_generate/power 注册" in jobs.json()[0]["deferred_reason_message"]
+    assert "尚未为 single_generate/character 注册" in jobs.json()[0]["deferred_reason_message"]
 
     quota = client.get("/api/me/quota")
     assert quota.status_code == 200
@@ -511,6 +511,8 @@ class _SucceededWorkflowRunner:
             asset_type = str(base_request.input_payload.get("asset_type", "")).strip()
             if asset_type == "card":
                 text = "已生成服务器卡牌实现方案"
+            elif asset_type == "power":
+                text = "已生成服务器 Power 实现方案"
             else:
                 text = "已生成服务器遗物实现方案"
         return [
@@ -1042,6 +1044,139 @@ def test_me_router_can_complete_supported_single_card_job(client: TestClient):
         execution = session.query(AIExecutionRecord).filter(AIExecutionRecord.job_id == job_id).one()
         assert execution.status.value == "succeeded"
         assert execution.result_summary == "已生成服务器卡牌实现方案"
+    finally:
+        session.close()
+
+
+def test_me_router_can_complete_supported_single_power_job(client: TestClient):
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "username": "luna",
+            "email": "luna@example.com",
+            "password": "secret-123",
+        },
+    )
+    assert registered.status_code == 200
+    verification_code = registered.json()["verification_code"]
+    user_id = registered.json()["user"]["user_id"]
+
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    verified = client.post("/api/auth/verify-email", json={"code": verification_code})
+    assert verified.status_code == 200
+
+    app_container = client.app.state.container
+    cipher = ServerCredentialCipher.from_settings(app_container.resolve_singleton("settings"))
+    session = app_container.resolve_singleton("platform.db_session_factory")()
+    try:
+        account = QuotaAccountRecord(user_id=user_id, status=QuotaAccountStatus.ACTIVE)
+        session.add(account)
+        session.flush()
+        session.add(
+            QuotaBucketRecord(
+                quota_account_id=account.id,
+                bucket_type=QuotaBucketType.DAILY,
+                period_start=datetime.now(UTC) - timedelta(hours=1),
+                period_end=datetime.now(UTC) + timedelta(hours=23),
+                quota_limit=10,
+                used_amount=0,
+                refunded_amount=0,
+            )
+        )
+        profile = ExecutionProfileRecord(
+            code="codex-gpt-5-4",
+            display_name="Codex CLI / gpt-5.4",
+            agent_backend="codex",
+            model="gpt-5.4",
+            description="默认推荐",
+            enabled=True,
+            recommended=True,
+            sort_order=10,
+        )
+        session.add(profile)
+        session.flush()
+        session.add(
+            ServerCredentialRecord(
+                execution_profile_id=profile.id,
+                provider="openai",
+                auth_type="api_key",
+                credential_ciphertext=cipher.encrypt("sk-live-openai"),
+                secret_ciphertext=None,
+                base_url="https://api.openai.com/v1",
+                label="main",
+                priority=1,
+                enabled=True,
+                health_status="healthy",
+                last_checked_at=None,
+                last_error_code="",
+                last_error_message="",
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    app_container.register_singleton("platform.workflow_runner_factory", _SucceededWorkflowRunner)
+
+    created = client.post(
+        "/api/me/jobs",
+        json={
+            "job_type": "single_generate",
+            "workflow_version": "2026.03.31",
+            "input_summary": "补一个 Power 实现方案",
+            "created_from": "single_asset",
+            "selected_execution_profile_id": 1,
+            "selected_agent_backend": "codex",
+            "selected_model": "gpt-5.4",
+            "items": [
+                {
+                    "item_type": "power",
+                    "input_summary": "补一个 Power 实现方案",
+                    "input_payload": {
+                        "asset_type": "power",
+                        "asset_name": "CorruptionBuff",
+                        "description": "每层在回合结束时额外造成 1 点伤害，最多叠加 10 层。",
+                        "project_root": "E:/Mods/Demo",
+                        "image_mode": "ai",
+                        "has_uploaded_image": False,
+                    },
+                }
+            ],
+        },
+    )
+    assert created.status_code == 200
+
+    job_id = created.json()["id"]
+    started = client.post(
+        f"/api/me/jobs/{job_id}/start",
+        json={"triggered_by": "user"},
+    )
+
+    assert started.status_code == 200
+    assert started.json()["status"] == "succeeded"
+
+    detail = client.get(f"/api/me/jobs/{job_id}")
+    assert detail.status_code == 200
+    assert detail.json()["status"] == "succeeded"
+
+    items = client.get(f"/api/me/jobs/{job_id}/items")
+    assert items.status_code == 200
+    assert items.json()[0]["status"] == "succeeded"
+    assert items.json()[0]["result_summary"] == "已生成服务器 Power 实现方案"
+
+    session = app_container.resolve_singleton("platform.db_session_factory")()
+    try:
+        execution = session.query(AIExecutionRecord).filter(AIExecutionRecord.job_id == job_id).one()
+        assert execution.status.value == "succeeded"
+        assert execution.result_summary == "已生成服务器 Power 实现方案"
     finally:
         session.close()
 

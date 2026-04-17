@@ -112,6 +112,8 @@ class _SupportedServerRegistry:
             return [PlatformWorkflowStep(step_type="single.asset.plan", step_id="single-card-plan")]
         if (job_type, item_type) == ("single_generate", "relic"):
             return [PlatformWorkflowStep(step_type="single.asset.plan", step_id="single-relic-plan")]
+        if (job_type, item_type) == ("single_generate", "power"):
+            return [PlatformWorkflowStep(step_type="single.asset.plan", step_id="single-power-plan")]
         raise KeyError(f"workflow not found for {job_type}/{item_type}")
 
 
@@ -124,6 +126,8 @@ class _SucceededRunner:
             asset_type = str(base_request.input_payload.get("asset_type", "")).strip()
             if asset_type == "card":
                 text = "已生成服务器卡牌实现方案"
+            elif asset_type == "power":
+                text = "已生成服务器 Power 实现方案"
             else:
                 text = "已生成服务器遗物实现方案"
         return [
@@ -627,6 +631,107 @@ def test_job_application_service_can_complete_supported_single_card_job(db_sessi
     assert started.status == JobStatus.SUCCEEDED
     assert started.items[0].status == JobItemStatus.SUCCEEDED
     assert started.items[0].result_summary == "已生成服务器卡牌实现方案"
+
+
+def test_job_application_service_can_complete_supported_single_power_job(db_session):
+    cipher = ServerCredentialCipher("job-service-test-secret")
+    profile = ExecutionProfileRecord(
+        code="codex-gpt-5-4",
+        display_name="Codex CLI / gpt-5.4",
+        agent_backend="codex",
+        model="gpt-5.4",
+        description="默认推荐",
+        enabled=True,
+        recommended=True,
+        sort_order=10,
+    )
+    db_session.add(profile)
+    db_session.flush()
+    db_session.add(
+        ServerCredentialRecord(
+            execution_profile_id=profile.id,
+            provider="openai",
+            auth_type="api_key",
+            credential_ciphertext=cipher.encrypt("sk-live-openai"),
+            secret_ciphertext=None,
+            base_url="https://api.openai.com/v1",
+            label="main",
+            priority=1,
+            enabled=True,
+            health_status="healthy",
+            last_checked_at=None,
+            last_error_code="",
+            last_error_message="",
+        )
+    )
+    quota_repository = QuotaAccountRepositorySqlAlchemy(db_session)
+    account = quota_repository.create_account(QuotaAccountRecord(user_id=1001, status=QuotaAccountStatus.ACTIVE))
+    quota_repository.create_bucket(
+        QuotaBucketRecord(
+            quota_account_id=account.id,
+            bucket_type=QuotaBucketType.DAILY,
+            period_start=datetime.now(UTC) - timedelta(hours=1),
+            period_end=datetime.now(UTC) + timedelta(hours=23),
+            quota_limit=10,
+            used_amount=0,
+            refunded_amount=0,
+        )
+    )
+
+    orchestrator = ExecutionOrchestratorService(
+        job_repository=JobRepositorySqlAlchemy(db_session),
+        ai_execution_repository=AIExecutionRepositorySqlAlchemy(db_session),
+        quota_billing_service=QuotaBillingService(
+            execution_charge_repository=ExecutionChargeRepositorySqlAlchemy(db_session),
+            quota_account_repository=quota_repository,
+            usage_ledger_repository=UsageLedgerRepositorySqlAlchemy(db_session),
+        ),
+        job_event_repository=JobEventRepositorySqlAlchemy(db_session),
+        execution_routing_service=ExecutionRoutingService(
+            execution_routing_repository=ExecutionRoutingRepositorySqlAlchemy(db_session)
+        ),
+        server_credential_cipher=cipher,
+        workflow_registry=_SupportedServerRegistry(),
+        workflow_runner=_SucceededRunner(),
+    )
+    service = JobApplicationService(
+        job_repository=JobRepositorySqlAlchemy(db_session),
+        job_event_repository=JobEventRepositorySqlAlchemy(db_session),
+        execution_orchestrator_service=orchestrator,
+    )
+    job = service.create_job(
+        user_id=1001,
+        command=CreateJobCommand.model_validate(
+            {
+                "job_type": "single_generate",
+                "workflow_version": "2026.03.31",
+                "selected_execution_profile_id": profile.id,
+                "selected_agent_backend": "codex",
+                "selected_model": "gpt-5.4",
+                "items": [
+                    {
+                        "item_type": "power",
+                        "input_summary": "补一个 Power 实现方案",
+                        "input_payload": {
+                            "asset_type": "power",
+                            "asset_name": "CorruptionBuff",
+                            "description": "每层在回合结束时额外造成 1 点伤害，最多叠加 10 层。",
+                            "project_root": "E:/Mods/Demo",
+                            "image_mode": "ai",
+                            "has_uploaded_image": False,
+                        },
+                    }
+                ],
+            }
+        ),
+    )
+
+    started = service.start_job(user_id=1001, command=StartJobCommand(job_id=job.id))
+
+    assert started is not None
+    assert started.status == JobStatus.SUCCEEDED
+    assert started.items[0].status == JobItemStatus.SUCCEEDED
+    assert started.items[0].result_summary == "已生成服务器 Power 实现方案"
 
 
 def test_job_application_service_appends_deferred_event_when_uploaded_asset_still_requires_persistence(db_session):
