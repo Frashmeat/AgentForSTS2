@@ -161,6 +161,8 @@ class _SucceededWorkflowRunner:
             asset_type = str(base_request.input_payload.get("asset_type", "")).strip()
             if asset_type == "card":
                 text = "已生成服务器卡牌实现方案"
+            elif asset_type == "character":
+                text = "已生成服务器角色实现方案"
             elif asset_type == "power":
                 text = "已生成服务器 Power 实现方案"
             else:
@@ -199,7 +201,7 @@ def test_platform_jobs_router_supports_create_start_cancel_and_queries_for_curre
             "selected_execution_profile_id": profile_id,
             "selected_agent_backend": "codex",
             "selected_model": "gpt-5.4",
-            "items": [{"item_type": "character", "input_payload": {"name": "DarkRelic"}}],
+            "items": [{"item_type": "card_fullscreen", "input_payload": {"name": "DarkRelic"}}],
         },
     )
     assert created.status_code == 200
@@ -230,17 +232,17 @@ def test_platform_jobs_router_supports_create_start_cancel_and_queries_for_curre
     assert detail.json()["refunded_amount"] == 1
     assert detail.json()["net_consumed"] == 0
     assert detail.json()["deferred_reason_code"] == "workflow_not_registered"
-    assert "尚未为 single_generate/character 注册" in detail.json()["deferred_reason_message"]
+    assert "尚未为 single_generate/card_fullscreen 注册" in detail.json()["deferred_reason_message"]
     assert listed.status_code == 200
     assert listed.json()[0]["original_deducted"] == 1
     assert listed.json()[0]["refunded_amount"] == 1
     assert listed.json()[0]["net_consumed"] == 0
     assert listed.json()[0]["deferred_reason_code"] == "workflow_not_registered"
-    assert "尚未为 single_generate/character 注册" in listed.json()[0]["deferred_reason_message"]
+    assert "尚未为 single_generate/card_fullscreen 注册" in listed.json()[0]["deferred_reason_message"]
 
     items = client.get(f"/api/platform/jobs/{job_id}/items", params={"user_id": other_user_id})
     assert items.status_code == 200
-    assert items.json()[0]["item_type"] == "character"
+    assert items.json()[0]["item_type"] == "card_fullscreen"
     assert items.json()[0]["status"] == "deferred"
 
     events = client.get(f"/api/platform/jobs/{job_id}/events", params={"user_id": other_user_id})
@@ -691,5 +693,69 @@ def test_platform_jobs_router_can_complete_supported_single_power_job(client: Te
         execution = session.query(AIExecutionRecord).filter(AIExecutionRecord.job_id == job_id).one()
         assert execution.status.value == "succeeded"
         assert execution.result_summary == "已生成服务器 Power 实现方案"
+    finally:
+        session.close()
+
+
+def test_platform_jobs_router_can_complete_supported_single_character_job(client: TestClient):
+    _register_login_and_verify(client, "luna", "luna@example.com")
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    profile_id = _seed_execution_profile(client)
+    client.app.state.container.register_singleton("platform.workflow_runner_factory", _SucceededWorkflowRunner)
+
+    created = client.post(
+        "/api/platform/jobs",
+        json={
+            "job_type": "single_generate",
+            "workflow_version": "2026.03.31",
+            "selected_execution_profile_id": profile_id,
+            "selected_agent_backend": "codex",
+            "selected_model": "gpt-5.4",
+            "items": [
+                {
+                    "item_type": "character",
+                    "input_summary": "补一个角色实现方案",
+                    "input_payload": {
+                        "asset_type": "character",
+                        "asset_name": "WatcherAlpha",
+                        "description": "一名偏进攻型角色，初始拥有额外 1 点能量。",
+                        "project_root": "E:/Mods/Demo",
+                        "image_mode": "ai",
+                        "has_uploaded_image": False,
+                    },
+                }
+            ],
+        },
+    )
+    assert created.status_code == 200
+
+    job_id = created.json()["id"]
+    started = client.post(f"/api/platform/jobs/{job_id}/start", json={})
+
+    assert started.status_code == 200
+    assert started.json()["status"] == "succeeded"
+
+    detail = client.get(f"/api/platform/jobs/{job_id}")
+    assert detail.status_code == 200
+    assert detail.json()["status"] == "succeeded"
+
+    items = client.get(f"/api/platform/jobs/{job_id}/items")
+    assert items.status_code == 200
+    assert items.json()[0]["status"] == "succeeded"
+    assert items.json()[0]["result_summary"] == "已生成服务器角色实现方案"
+
+    session = client.app.state.container.resolve_singleton("platform.db_session_factory")()
+    try:
+        execution = session.query(AIExecutionRecord).filter(AIExecutionRecord.job_id == job_id).one()
+        assert execution.status.value == "succeeded"
+        assert execution.result_summary == "已生成服务器角色实现方案"
     finally:
         session.close()
