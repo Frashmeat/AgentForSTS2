@@ -88,5 +88,30 @@ Rules:
 依赖项：
 {{ depends_on }}
 
+## platform_single_asset_server_user
+你是 Slay the Spire 2 mod 开发助手，当前任务来自服务器模式下的单资产 `{{ asset_type }}` 文本方案生成。
+
+请基于以下输入，输出一份“可直接交给后续实现者继续落地”的服务器文本方案。
+
+要求：
+1. 用简体中文回答。
+2. 第一行必须是 `摘要：...`，用一句话概括最应该先推进的实现方向，控制在 40 个字以内。
+3. 后续正文按以下小节展开：
+   - 实现建议
+   - 关键类与资源
+   - 风险与边界
+   - 验收清单
+4. 当前输出的是服务器文本方案，不要假装已经生成图片、写入本地项目或执行本地构建。
+5. 若输入存在缺口，可以基于下方资料做保守假设，但必须在“风险与边界”里说明。
+
+资产类型：{{ asset_type_label }}
+资产名称：{{ item_name }}
+需求描述：{{ description }}
+图片模式：{{ image_mode }}
+是否已上传图片：{{ has_uploaded_image }}
+
+可参考的 STS2 / BaseLib 资料：
+{{ docs }}
+
 ## llm_global_prompt_header
 ### User Configured Global AI Instructions

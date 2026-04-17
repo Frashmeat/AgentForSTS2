@@ -30,6 +30,10 @@ def test_execution_adapter_dispatches_to_registered_step_handlers():
         calls.append(f"batch-custom-code:{request.step_id}")
         return {"artifact_type": "batch-custom-code"}
 
+    async def single_asset_plan_handler(request: StepExecutionRequest):
+        calls.append(f"single-asset-plan:{request.step_id}")
+        return {"artifact_type": "single-asset-plan"}
+
     async def log_handler(request: StepExecutionRequest):
         calls.append(f"log:{request.step_id}")
         return {"artifact_type": "log"}
@@ -39,6 +43,7 @@ def test_execution_adapter_dispatches_to_registered_step_handlers():
         code_handler=code_handler,
         text_handler=text_handler,
         batch_custom_code_handler=batch_custom_code_handler,
+        single_asset_plan_handler=single_asset_plan_handler,
         log_handler=log_handler,
         build_handler=None,
         approval_handler=None,
@@ -110,6 +115,19 @@ def test_execution_adapter_dispatches_to_registered_step_handlers():
             )
         )
     )
+    single_asset_plan_result = asyncio.run(
+        dispatcher.dispatch(
+            StepExecutionRequest(
+                workflow_version="2026.03.31",
+                step_protocol_version="v1",
+                step_type="single.asset.plan",
+                step_id="single-asset-plan-1",
+                job_id=1,
+                job_item_id=2,
+                result_schema_version="v1",
+            )
+        )
+    )
 
     assert calls == [
         "image:img-1",
@@ -117,12 +135,14 @@ def test_execution_adapter_dispatches_to_registered_step_handlers():
         "text:text-1",
         "log:log-1",
         "batch-custom-code:batch-custom-code-1",
+        "single-asset-plan:single-asset-plan-1",
     ]
     assert image_result.output_payload["artifact_type"] == "image"
     assert code_result.output_payload["artifact_type"] == "code"
     assert text_result.output_payload["artifact_type"] == "text"
     assert log_result.output_payload["artifact_type"] == "log"
     assert batch_custom_code_result.output_payload["artifact_type"] == "batch-custom-code"
+    assert single_asset_plan_result.output_payload["artifact_type"] == "single-asset-plan"
 
 
 def test_execution_adapter_classifies_handler_errors_as_failed_system():
@@ -134,6 +154,7 @@ def test_execution_adapter_classifies_handler_errors_as_failed_system():
         code_handler=None,
         text_handler=None,
         batch_custom_code_handler=None,
+        single_asset_plan_handler=None,
         log_handler=None,
         build_handler=None,
         approval_handler=None,

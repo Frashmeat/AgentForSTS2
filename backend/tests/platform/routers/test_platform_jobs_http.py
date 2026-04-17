@@ -157,6 +157,8 @@ class _SucceededWorkflowRunner:
         text = "日志分析完成"
         if steps[0].step_type == "batch.custom_code.plan":
             text = "已生成服务器 custom_code 实现方案"
+        if steps[0].step_type == "single.asset.plan":
+            text = "已生成服务器遗物实现方案"
         return [
             StepExecutionResult(
                 step_id=steps[0].step_id,
@@ -491,5 +493,69 @@ def test_platform_jobs_router_can_complete_supported_single_custom_code_job(clie
         execution = session.query(AIExecutionRecord).filter(AIExecutionRecord.job_id == job_id).one()
         assert execution.status.value == "succeeded"
         assert execution.result_summary == "已生成服务器 custom_code 实现方案"
+    finally:
+        session.close()
+
+
+def test_platform_jobs_router_can_complete_supported_single_relic_job(client: TestClient):
+    _register_login_and_verify(client, "luna", "luna@example.com")
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    profile_id = _seed_execution_profile(client)
+    client.app.state.container.register_singleton("platform.workflow_runner_factory", _SucceededWorkflowRunner)
+
+    created = client.post(
+        "/api/platform/jobs",
+        json={
+            "job_type": "single_generate",
+            "workflow_version": "2026.03.31",
+            "selected_execution_profile_id": profile_id,
+            "selected_agent_backend": "codex",
+            "selected_model": "gpt-5.4",
+            "items": [
+                {
+                    "item_type": "relic",
+                    "input_summary": "补一个遗物实现方案",
+                    "input_payload": {
+                        "asset_type": "relic",
+                        "asset_name": "FangedGrimoire",
+                        "description": "每次造成伤害时获得 2 点格挡。",
+                        "project_root": "E:/Mods/Demo",
+                        "image_mode": "ai",
+                        "has_uploaded_image": False,
+                    },
+                }
+            ],
+        },
+    )
+    assert created.status_code == 200
+
+    job_id = created.json()["id"]
+    started = client.post(f"/api/platform/jobs/{job_id}/start", json={})
+
+    assert started.status_code == 200
+    assert started.json()["status"] == "succeeded"
+
+    detail = client.get(f"/api/platform/jobs/{job_id}")
+    assert detail.status_code == 200
+    assert detail.json()["status"] == "succeeded"
+
+    items = client.get(f"/api/platform/jobs/{job_id}/items")
+    assert items.status_code == 200
+    assert items.json()[0]["status"] == "succeeded"
+    assert items.json()[0]["result_summary"] == "已生成服务器遗物实现方案"
+
+    session = client.app.state.container.resolve_singleton("platform.db_session_factory")()
+    try:
+        execution = session.query(AIExecutionRecord).filter(AIExecutionRecord.job_id == job_id).one()
+        assert execution.status.value == "succeeded"
+        assert execution.result_summary == "已生成服务器遗物实现方案"
     finally:
         session.close()
