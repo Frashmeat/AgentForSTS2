@@ -86,6 +86,17 @@ def _build_workflow_registry(request: Request) -> PlatformWorkflowRegistry:
         ],
     )
     registry.register(
+        "batch_generate",
+        "relic",
+        [
+            PlatformWorkflowStep(
+                step_type="single.asset.plan",
+                step_id="batch.relic.plan",
+                input_payload={"asset_type": "relic"},
+            )
+        ],
+    )
+    registry.register(
         "single_generate",
         "custom_code",
         [PlatformWorkflowStep(step_type="batch.custom_code.plan", step_id="single.custom_code.plan")],
