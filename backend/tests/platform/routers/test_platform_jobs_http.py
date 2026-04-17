@@ -158,7 +158,7 @@ class _SucceededWorkflowRunner:
         if steps[0].step_type == "batch.custom_code.plan":
             text = "已生成服务器 custom_code 实现方案"
         if steps[0].step_type == "single.asset.plan":
-            asset_type = str(base_request.input_payload.get("asset_type", "")).strip()
+            asset_type = str(steps[0].input_payload.get("asset_type") or base_request.input_payload.get("asset_type", "")).strip()
             if asset_type == "card":
                 text = "已生成服务器卡牌实现方案"
             elif asset_type == "character":
@@ -439,6 +439,68 @@ def test_platform_jobs_router_can_complete_supported_batch_custom_code_job(clien
         execution = session.query(AIExecutionRecord).filter(AIExecutionRecord.job_id == job_id).one()
         assert execution.status.value == "succeeded"
         assert execution.result_summary == "已生成服务器 custom_code 实现方案"
+    finally:
+        session.close()
+
+
+def test_platform_jobs_router_can_complete_supported_batch_card_job(client: TestClient):
+    _register_login_and_verify(client, "luna", "luna@example.com")
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    profile_id = _seed_execution_profile(client)
+    client.app.state.container.register_singleton("platform.workflow_runner_factory", _SucceededWorkflowRunner)
+
+    created = client.post(
+        "/api/platform/jobs",
+        json={
+            "job_type": "batch_generate",
+            "workflow_version": "2026.03.31",
+            "selected_execution_profile_id": profile_id,
+            "selected_agent_backend": "codex",
+            "selected_model": "gpt-5.4",
+            "items": [
+                {
+                    "item_type": "card",
+                    "input_summary": "补一个批量卡牌实现方案",
+                    "input_payload": {
+                        "name": "DarkBlade",
+                        "description": "1 费攻击牌，造成 8 点伤害，升级后造成 12 点伤害。",
+                        "needs_image": True,
+                        "has_uploaded_image": False,
+                    },
+                }
+            ],
+        },
+    )
+    assert created.status_code == 200
+
+    job_id = created.json()["id"]
+    started = client.post(f"/api/platform/jobs/{job_id}/start", json={})
+
+    assert started.status_code == 200
+    assert started.json()["status"] == "succeeded"
+
+    detail = client.get(f"/api/platform/jobs/{job_id}")
+    assert detail.status_code == 200
+    assert detail.json()["status"] == "succeeded"
+
+    items = client.get(f"/api/platform/jobs/{job_id}/items")
+    assert items.status_code == 200
+    assert items.json()[0]["status"] == "succeeded"
+    assert items.json()[0]["result_summary"] == "已生成服务器卡牌实现方案"
+
+    session = client.app.state.container.resolve_singleton("platform.db_session_factory")()
+    try:
+        execution = session.query(AIExecutionRecord).filter(AIExecutionRecord.job_id == job_id).one()
+        assert execution.status.value == "succeeded"
+        assert execution.result_summary == "已生成服务器卡牌实现方案"
     finally:
         session.close()
 

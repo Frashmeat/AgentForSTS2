@@ -28,7 +28,7 @@ def _resolve_asset_type(input_payload: dict[str, object]) -> str:
 
 
 def _resolve_item_name(input_payload: dict[str, object]) -> str:
-    return str(input_payload.get("asset_name", "")).strip() or "未命名资产"
+    return str(input_payload.get("asset_name", "")).strip() or str(input_payload.get("name", "")).strip() or "未命名资产"
 
 
 def _build_prompt(input_payload: dict[str, object]) -> tuple[str, str, str]:

@@ -75,6 +75,17 @@ def _build_workflow_registry(request: Request) -> PlatformWorkflowRegistry:
         [PlatformWorkflowStep(step_type="batch.custom_code.plan", step_id="batch.custom_code.plan")],
     )
     registry.register(
+        "batch_generate",
+        "card",
+        [
+            PlatformWorkflowStep(
+                step_type="single.asset.plan",
+                step_id="batch.card.plan",
+                input_payload={"asset_type": "card"},
+            )
+        ],
+    )
+    registry.register(
         "single_generate",
         "custom_code",
         [PlatformWorkflowStep(step_type="batch.custom_code.plan", step_id="single.custom_code.plan")],

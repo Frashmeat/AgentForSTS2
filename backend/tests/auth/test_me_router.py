@@ -508,7 +508,7 @@ class _SucceededWorkflowRunner:
         if steps[0].step_type == "batch.custom_code.plan":
             text = "已生成服务器 custom_code 实现方案"
         if steps[0].step_type == "single.asset.plan":
-            asset_type = str(base_request.input_payload.get("asset_type", "")).strip()
+            asset_type = str(steps[0].input_payload.get("asset_type") or base_request.input_payload.get("asset_type", "")).strip()
             if asset_type == "card":
                 text = "已生成服务器卡牌实现方案"
             elif asset_type == "character":
@@ -649,6 +649,137 @@ def test_me_router_can_complete_supported_log_analysis_job(client: TestClient):
         execution = session.query(AIExecutionRecord).filter(AIExecutionRecord.job_id == job_id).one()
         assert execution.status.value == "succeeded"
         assert execution.result_summary == "日志分析完成"
+    finally:
+        session.close()
+
+
+def test_me_router_can_complete_supported_batch_card_job(client: TestClient):
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "username": "luna",
+            "email": "luna@example.com",
+            "password": "secret-123",
+        },
+    )
+    assert registered.status_code == 200
+    verification_code = registered.json()["verification_code"]
+    user_id = registered.json()["user"]["user_id"]
+
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    verified = client.post("/api/auth/verify-email", json={"code": verification_code})
+    assert verified.status_code == 200
+
+    app_container = client.app.state.container
+    cipher = ServerCredentialCipher.from_settings(app_container.resolve_singleton("settings"))
+    session = app_container.resolve_singleton("platform.db_session_factory")()
+    try:
+        account = QuotaAccountRecord(user_id=user_id, status=QuotaAccountStatus.ACTIVE)
+        session.add(account)
+        session.flush()
+        session.add(
+            QuotaBucketRecord(
+                quota_account_id=account.id,
+                bucket_type=QuotaBucketType.DAILY,
+                period_start=datetime.now(UTC) - timedelta(hours=1),
+                period_end=datetime.now(UTC) + timedelta(hours=23),
+                quota_limit=10,
+                used_amount=0,
+                refunded_amount=0,
+            )
+        )
+        profile = ExecutionProfileRecord(
+            code="codex-gpt-5-4",
+            display_name="Codex CLI / gpt-5.4",
+            agent_backend="codex",
+            model="gpt-5.4",
+            description="默认推荐",
+            enabled=True,
+            recommended=True,
+            sort_order=10,
+        )
+        session.add(profile)
+        session.flush()
+        session.add(
+            ServerCredentialRecord(
+                execution_profile_id=profile.id,
+                provider="openai",
+                auth_type="api_key",
+                credential_ciphertext=cipher.encrypt("sk-live-openai"),
+                secret_ciphertext=None,
+                base_url="https://api.openai.com/v1",
+                label="main",
+                priority=1,
+                enabled=True,
+                health_status="healthy",
+                last_checked_at=None,
+                last_error_code="",
+                last_error_message="",
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    app_container.register_singleton("platform.workflow_runner_factory", _SucceededWorkflowRunner)
+
+    created = client.post(
+        "/api/me/jobs",
+        json={
+            "job_type": "batch_generate",
+            "workflow_version": "2026.03.31",
+            "input_summary": "补一个批量卡牌实现方案",
+            "created_from": "batch_generation",
+            "selected_execution_profile_id": 1,
+            "selected_agent_backend": "codex",
+            "selected_model": "gpt-5.4",
+            "items": [
+                {
+                    "item_type": "card",
+                    "input_summary": "补一个批量卡牌实现方案",
+                    "input_payload": {
+                        "name": "DarkBlade",
+                        "description": "1 费攻击牌，造成 8 点伤害，升级后造成 12 点伤害。",
+                        "needs_image": True,
+                        "has_uploaded_image": False,
+                    },
+                }
+            ],
+        },
+    )
+    assert created.status_code == 200
+
+    job_id = created.json()["id"]
+    started = client.post(
+        f"/api/me/jobs/{job_id}/start",
+        json={"triggered_by": "user"},
+    )
+
+    assert started.status_code == 200
+    assert started.json()["status"] == "succeeded"
+
+    detail = client.get(f"/api/me/jobs/{job_id}")
+    assert detail.status_code == 200
+    assert detail.json()["status"] == "succeeded"
+
+    items = client.get(f"/api/me/jobs/{job_id}/items")
+    assert items.status_code == 200
+    assert items.json()[0]["status"] == "succeeded"
+    assert items.json()[0]["result_summary"] == "已生成服务器卡牌实现方案"
+
+    session = app_container.resolve_singleton("platform.db_session_factory")()
+    try:
+        execution = session.query(AIExecutionRecord).filter(AIExecutionRecord.job_id == job_id).one()
+        assert execution.status.value == "succeeded"
+        assert execution.result_summary == "已生成服务器卡牌实现方案"
     finally:
         session.close()
 
