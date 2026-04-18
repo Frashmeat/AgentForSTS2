@@ -73,6 +73,7 @@ Rules:
    - 验收清单
 4. 不要要求用户提供 `project_root`、本地图片路径或手工上传素材。
 5. 如果输入里有缺口，允许基于现有描述做保守假设，但要在“风险与边界”里写明。
+6. 如果给出了“服务器工作区现状”，优先基于这些真实文件事实来组织实现建议，而不是重新假设项目结构。
 
 子项名称：{{ item_name }}
 描述：{{ description }}
@@ -85,6 +86,8 @@ Rules:
 耦合类型：{{ coupling_kind }}
 服务器项目名：{{ server_project_name }}
 服务器工作区：{{ server_workspace_root }}
+服务器工作区现状：
+{{ server_workspace_snapshot }}
 影响目标：
 {{ affected_targets }}
 依赖项：

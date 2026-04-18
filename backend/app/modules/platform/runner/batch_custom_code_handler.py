@@ -5,6 +5,7 @@ from collections.abc import Awaitable, Callable
 from app.modules.platform.contracts.runner_contracts import StepExecutionRequest
 from app.shared.prompting import PromptLoader
 
+from .server_workspace_snapshot import render_server_workspace_snapshot
 from .text_generate_handler import execute_text_generate_step
 
 
@@ -68,6 +69,7 @@ def _build_prompt(input_payload: dict[str, object]) -> str:
             "depends_on": _render_multiline_list(_string_list(input_payload.get("depends_on"))),
             "server_project_name": str(input_payload.get("server_project_name", "")).strip() or "无",
             "server_workspace_root": str(input_payload.get("server_workspace_root", "")).strip() or "无",
+            "server_workspace_snapshot": render_server_workspace_snapshot(input_payload.get("server_workspace_root")),
         },
     )
 

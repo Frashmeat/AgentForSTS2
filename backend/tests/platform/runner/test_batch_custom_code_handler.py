@@ -229,4 +229,72 @@ def test_execute_batch_custom_code_step_includes_server_workspace_metadata(monke
 
     assert captured["variables"]["server_project_name"] == "DarkMod"
     assert "platform-workspaces" in str(captured["variables"]["server_workspace_root"])
+    assert "工作区不存在" in str(captured["variables"]["server_workspace_snapshot"])
     assert result["text"] == "建议先围绕服务器工作区组织 custom_code 实现"
+
+
+def test_execute_batch_custom_code_step_reads_server_workspace_snapshot(monkeypatch, tmp_path):
+    captured: dict[str, object] = {}
+    workspace_root = tmp_path / "DarkMod"
+    workspace_root.mkdir()
+    (workspace_root / "DarkMod.csproj").write_text("<Project />", encoding="utf-8")
+    (workspace_root / "MainFile.cs").write_text("namespace DarkMod;", encoding="utf-8")
+    systems_dir = workspace_root / "Systems"
+    systems_dir.mkdir()
+    (systems_dir / "BattleScriptManager.cs").write_text("public class BattleScriptManager {}", encoding="utf-8")
+    localization_dir = workspace_root / "localization" / "zhs"
+    localization_dir.mkdir(parents=True)
+    (localization_dir / "cards.json").write_text("{}", encoding="utf-8")
+
+    class _FakePromptLoader:
+        def render(self, template_name: str, variables: dict[str, object]) -> str:
+            captured["template_name"] = template_name
+            captured["variables"] = dict(variables)
+            return f"prompt:{variables['item_name']}"
+
+    async def fake_text_step(request: StepExecutionRequest):
+        return {
+            "text": "摘要：建议先对齐服务器工作区里的现有入口与类组织",
+            "provider": request.execution_binding.provider,
+            "model": request.execution_binding.model,
+        }
+
+    monkeypatch.setattr(
+        "app.modules.platform.runner.batch_custom_code_handler._PROMPT_LOADER",
+        _FakePromptLoader(),
+    )
+
+    result = asyncio.run(
+        execute_batch_custom_code_step(
+            StepExecutionRequest(
+                workflow_version="2026.03.31",
+                step_protocol_version="v1",
+                step_type="batch.custom_code.plan",
+                step_id="batch-custom-code-5",
+                job_id=1,
+                job_item_id=2,
+                result_schema_version="v1",
+                input_payload={
+                    "item_name": "BattleScriptManager",
+                    "description": "实现一个战斗阶段脚本管理器",
+                    "server_project_name": "DarkMod",
+                    "server_workspace_root": str(workspace_root),
+                },
+                execution_binding=StepExecutionBinding(
+                    agent_backend="codex",
+                    provider="openai",
+                    model="gpt-5.4",
+                    credential="sk-live-openai",
+                ),
+            ),
+            text_step_executor=fake_text_step,
+        )
+    )
+
+    assert captured["template_name"] == "runtime_agent.platform_batch_custom_code_server_user"
+    snapshot = str(captured["variables"]["server_workspace_snapshot"])
+    assert "DarkMod.csproj" in snapshot
+    assert "MainFile.cs" in snapshot
+    assert "Systems/BattleScriptManager.cs" in snapshot
+    assert "localization/zhs/cards.json" in snapshot
+    assert result["text"] == "建议先对齐服务器工作区里的现有入口与类组织"
