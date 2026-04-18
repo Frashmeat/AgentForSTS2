@@ -87,12 +87,45 @@ def _build_workflow_registry(request: Request) -> PlatformWorkflowRegistry:
     )
     registry.register(
         "batch_generate",
+        "card_fullscreen",
+        [
+            PlatformWorkflowStep(
+                step_type="single.asset.plan",
+                step_id="batch.card_fullscreen.plan",
+                input_payload={"asset_type": "card_fullscreen"},
+            )
+        ],
+    )
+    registry.register(
+        "batch_generate",
         "relic",
         [
             PlatformWorkflowStep(
                 step_type="single.asset.plan",
                 step_id="batch.relic.plan",
                 input_payload={"asset_type": "relic"},
+            )
+        ],
+    )
+    registry.register(
+        "batch_generate",
+        "power",
+        [
+            PlatformWorkflowStep(
+                step_type="single.asset.plan",
+                step_id="batch.power.plan",
+                input_payload={"asset_type": "power"},
+            )
+        ],
+    )
+    registry.register(
+        "batch_generate",
+        "character",
+        [
+            PlatformWorkflowStep(
+                step_type="single.asset.plan",
+                step_id="batch.character.plan",
+                input_payload={"asset_type": "character"},
             )
         ],
     )
@@ -105,6 +138,11 @@ def _build_workflow_registry(request: Request) -> PlatformWorkflowRegistry:
         "single_generate",
         "card",
         [PlatformWorkflowStep(step_type="single.asset.plan", step_id="single.card.plan")],
+    )
+    registry.register(
+        "single_generate",
+        "card_fullscreen",
+        [PlatformWorkflowStep(step_type="single.asset.plan", step_id="single.card_fullscreen.plan")],
     )
     registry.register(
         "single_generate",
