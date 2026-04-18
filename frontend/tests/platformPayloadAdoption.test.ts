@@ -31,7 +31,11 @@ test("batch platform payload uses item_name and excludes local-only fields", () 
 test("execution mode flow can block server mode for unsupported payloads", () => {
   const dialogSource = readSource("../src/components/ExecutionModeDialog.tsx");
   const flowSource = readSource("../src/features/workspace/useExecutionModeFlow.ts");
+  const singleSource = readSource("../src/features/single-asset/SingleAssetWorkspaceContainer.tsx");
+  const batchSource = readSource("../src/features/batch-generation/view.tsx");
 
   assert.match(dialogSource, /serverUnsupportedReasons/);
   assert.match(flowSource, /serverUnsupportedReasons/);
+  assert.match(singleSource, /serverUploads:/);
+  assert.match(batchSource, /serverUploads:/);
 });

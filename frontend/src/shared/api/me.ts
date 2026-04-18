@@ -29,6 +29,14 @@ export interface MyServerPreferenceView {
   updated_at: string | null;
 }
 
+export interface UploadedAssetView {
+  uploaded_asset_ref: string;
+  file_name: string;
+  mime_type: string;
+  size_bytes: number;
+  created_at: string;
+}
+
 export function getMyProfile(): Promise<CurrentUserProfile> {
   return requestJson<CurrentUserProfile>(buildApiPath("/api/me/profile", {}), {
     backend: "web",
@@ -73,6 +81,18 @@ export function updateMyServerPreferences(body: {
   return requestJson<MyServerPreferenceView>(buildApiPath("/api/me/server-preferences", {}), {
     backend: "web",
     method: "PUT",
+    body,
+  });
+}
+
+export function uploadMyServerAsset(body: {
+  file_name: string;
+  content_base64: string;
+  mime_type?: string;
+}): Promise<UploadedAssetView> {
+  return requestJson<UploadedAssetView>(buildApiPath("/api/me/upload-assets", {}), {
+    backend: "web",
+    method: "POST",
     body,
   });
 }

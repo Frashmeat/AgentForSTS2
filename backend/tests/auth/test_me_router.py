@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from app.composition.container import ApplicationContainer
 from app.modules.auth.infra.persistence import models as _auth_models  # noqa: F401
 from app.modules.platform.application.services.server_credential_cipher import ServerCredentialCipher
+from app.modules.platform.application.services.uploaded_asset_service import UploadedAssetService
 from app.modules.platform.contracts.runner_contracts import StepExecutionResult
 from app.modules.platform.infra.persistence import models as _platform_models  # noqa: F401
 from app.modules.platform.infra.persistence.models import (
@@ -59,6 +60,10 @@ def client(tmp_path):
 
     app = FastAPI()
     app.state.container = container
+    container.register_singleton(
+        "platform.uploaded_asset_service_factory",
+        lambda: UploadedAssetService(storage_root=tmp_path / "platform-upload-assets"),
+    )
     app.include_router(auth_router, prefix="/api")
     app.include_router(me_router, prefix="/api")
 
@@ -90,6 +95,45 @@ def test_me_router_returns_current_user_profile(client: TestClient):
     assert profile.status_code == 200
     assert profile.json()["username"] == "luna"
     assert profile.json()["email"] == "luna@example.com"
+
+
+def test_me_router_can_upload_server_asset(client: TestClient):
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "username": "luna",
+            "email": "luna@example.com",
+            "password": "secret-123",
+        },
+    )
+    assert registered.status_code == 200
+    verification_code = registered.json()["verification_code"]
+
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    verified = client.post("/api/auth/verify-email", json={"code": verification_code})
+    assert verified.status_code == 200
+
+    uploaded = client.post(
+        "/api/me/upload-assets",
+        json={
+            "file_name": "dark-blade.png",
+            "content_base64": "ZmFrZS1pbWFnZS1ieXRlcw==",
+            "mime_type": "image/png",
+        },
+    )
+
+    assert uploaded.status_code == 200
+    assert uploaded.json()["uploaded_asset_ref"].startswith("uploaded-asset:")
+    assert uploaded.json()["file_name"] == "dark-blade.png"
+    assert uploaded.json()["mime_type"] == "image/png"
 
 
 def test_me_router_returns_zero_quota_view_for_new_user_without_quota_records(client: TestClient):

@@ -758,9 +758,16 @@ function BatchModePage({
           depends_on: item.depends_on,
         },
       })),
-      serverUnsupportedReasons: editedItems.some((item) => Boolean(item.provided_image_b64))
-        ? ["服务器模式当前不支持直接消费上传图片，请改用本机执行。"]
-        : [],
+      serverUploads: editedItems.flatMap((item, index) => (
+        item.provided_image_b64
+          ? [{
+              itemIndex: index,
+              fileName: `${item.name || "uploaded"}.png`,
+              contentBase64: item.provided_image_b64,
+              mimeType: "image/png",
+            }]
+          : []
+      )),
       runLocal: executeLocal,
     });
   }

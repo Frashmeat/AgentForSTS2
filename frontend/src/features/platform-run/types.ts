@@ -11,6 +11,12 @@ export interface PlatformExecutionRequest {
   requiresCodeAgent: boolean;
   requiresImageAi: boolean;
   serverUnsupportedReasons?: string[];
+  serverUploads?: Array<{
+    itemIndex: number;
+    fileName: string;
+    contentBase64: string;
+    mimeType?: string;
+  }>;
   items: PlatformJobCreateItem[];
   runLocal: () => void;
 }

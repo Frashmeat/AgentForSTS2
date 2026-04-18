@@ -5,8 +5,10 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, HTTPException, Request
 
 from app.modules.platform.application.services import JobApplicationService, JobQueryService, ServerExecutionService, UserCenterService
+from app.modules.platform.application.services.uploaded_asset_service import UploadedAssetService
 from app.modules.platform.contracts.job_commands import CreateJobCommand, StartJobCommand
 from app.modules.platform.contracts.server_execution import UpdateServerPreferenceCommand
+from app.modules.platform.contracts.uploaded_asset import UploadAssetCommand
 
 from ._auth_support import auth_session_scope, build_auth_service, require_current_user
 from ._platform_execution_support import build_execution_orchestrator_service
@@ -37,6 +39,7 @@ def _build_job_application_service(session, request: Request) -> JobApplicationS
         job_repository=job_repository,
         job_event_repository=job_event_repository,
         execution_orchestrator_service=build_execution_orchestrator_service(session, request),
+        uploaded_asset_service=_build_uploaded_asset_service(request),
     )
 
 
@@ -46,6 +49,14 @@ def _build_server_execution_service(session, request: Request) -> ServerExecutio
     return container.resolve_singleton("platform.server_execution_service_factory")(
         server_execution_repository=repository,
     )
+
+
+def _build_uploaded_asset_service(request: Request) -> UploadedAssetService:
+    container = request.app.state.container
+    factory = container.resolve_singleton("platform.uploaded_asset_service_factory")
+    if callable(factory):
+        return factory()
+    return factory
 
 
 def _enrich_job_command_with_default_server_profile(
@@ -200,3 +211,22 @@ def update_server_preferences(request: Request, body: dict):
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
         return view.model_dump()
+
+
+@router.post("/upload-assets")
+def upload_asset(request: Request, body: dict):
+    command = UploadAssetCommand.model_validate(body)
+    with auth_session_scope(request) as session:
+        user = require_current_user(request, session)
+        _require_platform_access(user)
+        service = _build_uploaded_asset_service(request)
+        try:
+            uploaded = service.create_asset(
+                user_id=user.user_id,
+                file_name=command.file_name,
+                content_base64=command.content_base64,
+                mime_type=command.mime_type,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return uploaded.model_dump()

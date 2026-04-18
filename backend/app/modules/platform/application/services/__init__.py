@@ -14,6 +14,7 @@ from .server_credential_admin_service import ServerCredentialAdminService
 from .server_credential_cipher import ServerCredentialCipher
 from .server_credential_health_checker import ServerCredentialHealthChecker, ServerCredentialHealthCheckResult
 from .server_execution_service import ServerExecutionService
+from .uploaded_asset_service import UploadedAssetService
 from .user_center_service import UserCenterProfileView, UserCenterService
 
 __all__ = [
@@ -33,6 +34,7 @@ __all__ = [
     "ServerCredentialHealthChecker",
     "ServerCredentialHealthCheckResult",
     "ServerExecutionService",
+    "UploadedAssetService",
     "UserCenterProfileView",
     "UserCenterService",
 ]

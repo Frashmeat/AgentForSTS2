@@ -23,6 +23,7 @@ from .server_execution import (
     UpdateServerPreferenceCommand,
     UserServerPreferenceView,
 )
+from .uploaded_asset import UploadAssetCommand, UploadedAssetView
 
 __all__ = [
     "AdminExecutionDetailView",
@@ -49,6 +50,8 @@ __all__ = [
     "StepExecutionResult",
     "UpdateServerCredentialCommand",
     "UpdateServerPreferenceCommand",
+    "UploadAssetCommand",
+    "UploadedAssetView",
     "UserQuotaView",
     "UserServerPreferenceView",
 ]

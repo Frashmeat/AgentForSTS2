@@ -2,6 +2,7 @@ import {
   createMyJob,
   listMyJobEvents,
   startMyJob,
+  uploadMyServerAsset,
 } from "../../shared/api/me.ts";
 import type {
   PlatformJobCreateItem,
@@ -38,12 +39,28 @@ export interface CreateAndStartPlatformFlowResult {
 export async function createAndStartPlatformFlow(
   request: CreateAndStartPlatformFlowRequest,
 ): Promise<CreateAndStartPlatformFlowResult> {
+  const items = request.items.map((item) => ({
+    ...item,
+    input_payload: { ...(item.input_payload ?? {}) },
+  }));
+
+  for (const upload of request.serverUploads ?? []) {
+    const uploaded = await uploadMyServerAsset({
+      file_name: upload.fileName,
+      content_base64: upload.contentBase64,
+      mime_type: upload.mimeType,
+    });
+    if (items[upload.itemIndex]) {
+      items[upload.itemIndex].input_payload.uploaded_asset_ref = uploaded.uploaded_asset_ref;
+    }
+  }
+
   const job = await createMyJob({
     job_type: request.jobType,
     workflow_version: request.workflowVersion,
     input_summary: request.inputSummary,
     created_from: request.createdFrom,
-    items: request.items,
+    items,
     selected_execution_profile_id: request.selectedExecutionProfileId,
     selected_agent_backend: request.selectedAgentBackend,
     selected_model: request.selectedModel,

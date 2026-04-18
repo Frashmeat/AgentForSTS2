@@ -341,9 +341,16 @@ export function SingleAssetWorkspaceContainer() {
           inputSummary: singleAssetInputSummary,
           requiresCodeAgent: true,
           requiresImageAi: singleAssetRequiresImageAi,
-          serverUnsupportedReasons:
+          serverUploads:
             imageMode === "upload" && Boolean(uploadedImageB64)
-              ? ["服务器模式当前不支持直接消费上传图片，请改用本机执行。"]
+              ? [
+                  {
+                    itemIndex: 0,
+                    fileName: uploadedImageName || `${assetName.trim() || "uploaded"}.png`,
+                    contentBase64: uploadedImageB64,
+                    mimeType: "image/png",
+                  },
+                ]
               : [],
           items: [singleAssetItem],
           runLocal() {

@@ -11,6 +11,7 @@ from app.modules.platform.application.services.execution_routing_service import 
 from app.modules.platform.application.services.job_application_service import JobApplicationService
 from app.modules.platform.application.services.quota_billing_service import QuotaBillingService
 from app.modules.platform.application.services.server_credential_cipher import ServerCredentialCipher
+from app.modules.platform.application.services.uploaded_asset_service import UploadedAssetService
 from app.modules.platform.contracts.job_commands import CancelJobCommand, CreateJobCommand, StartJobCommand
 from app.modules.platform.contracts.runner_contracts import StepExecutionResult
 from app.modules.platform.domain.models.enums import JobItemStatus, JobStatus
@@ -1523,3 +1524,42 @@ def test_job_application_service_rejects_platform_payload_with_project_root_and_
         )
     else:
         raise AssertionError("expected ValueError when forbidden platform payload fields are present")
+
+
+def test_job_application_service_accepts_uploaded_asset_ref_for_platform_payload(db_session, tmp_path):
+    uploaded_asset_service = UploadedAssetService(storage_root=tmp_path / "platform-upload-assets")
+    uploaded = uploaded_asset_service.create_asset(
+        user_id=1001,
+        file_name="dark-blade.png",
+        content_base64="ZmFrZS1pbWFnZS1ieXRlcw==",
+        mime_type="image/png",
+    )
+    service = JobApplicationService(
+        job_repository=JobRepositorySqlAlchemy(db_session),
+        job_event_repository=JobEventRepositorySqlAlchemy(db_session),
+        uploaded_asset_service=uploaded_asset_service,
+    )
+
+    job = service.create_job(
+        user_id=1001,
+        command=CreateJobCommand.model_validate(
+            {
+                "job_type": "single_generate",
+                "workflow_version": "2026.03.31",
+                "items": [
+                    {
+                        "item_type": "card",
+                        "input_summary": "补一个卡牌实现方案",
+                        "input_payload": {
+                            "asset_type": "card",
+                            "item_name": "DarkBlade",
+                            "description": "1 费攻击牌，造成 8 点伤害，升级后造成 12 点伤害。",
+                            "uploaded_asset_ref": uploaded.uploaded_asset_ref,
+                        },
+                    }
+                ],
+            }
+        ),
+    )
+
+    assert job.status == JobStatus.DRAFT

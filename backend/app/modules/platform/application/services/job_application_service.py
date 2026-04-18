@@ -8,6 +8,7 @@ from app.modules.platform.domain.repositories import JobEventRepository, JobRepo
 from app.modules.platform.infra.persistence.models import JobRecord
 
 from .execution_orchestrator_service import ExecutionOrchestratorService
+from .uploaded_asset_service import UploadedAssetService
 
 
 _STEP_PROTOCOL_VERSION = "v1"
@@ -30,13 +31,15 @@ class JobApplicationService:
         job_repository: JobRepository,
         job_event_repository: JobEventRepository,
         execution_orchestrator_service: ExecutionOrchestratorService | None = None,
+        uploaded_asset_service: UploadedAssetService | None = None,
     ) -> None:
         self.job_repository = job_repository
         self.job_event_repository = job_event_repository
         self.execution_orchestrator_service = execution_orchestrator_service
+        self.uploaded_asset_service = uploaded_asset_service
 
     def create_job(self, user_id: int, command: CreateJobCommand) -> JobRecord:
-        self._validate_platform_payloads(command)
+        self._validate_platform_payloads(user_id=user_id, command=command)
         job = self.job_repository.create_job_with_items(user_id=user_id, command=command)
         self.job_event_repository.append(
             job_id=job.id,
@@ -217,8 +220,7 @@ class JobApplicationService:
                 return text
         return ""
 
-    @staticmethod
-    def _validate_platform_payloads(command: CreateJobCommand) -> None:
+    def _validate_platform_payloads(self, *, user_id: int, command: CreateJobCommand) -> None:
         if command.job_type not in _PLATFORM_SERVER_JOB_TYPES:
             return
 
@@ -235,6 +237,12 @@ class JobApplicationService:
             item_name = str(item.input_payload.get("item_name", "")).strip()
             if not item_name:
                 raise ValueError(f"platform job payload for {command.job_type}/{item.item_type} requires item_name")
+
+            uploaded_asset_ref = str(item.input_payload.get("uploaded_asset_ref", "")).strip()
+            if uploaded_asset_ref:
+                if self.uploaded_asset_service is None:
+                    raise ValueError("uploaded asset service is not configured")
+                self.uploaded_asset_service.ensure_accessible(user_id=user_id, uploaded_asset_ref=uploaded_asset_ref)
 
     @staticmethod
     def _build_deferred_payload(
