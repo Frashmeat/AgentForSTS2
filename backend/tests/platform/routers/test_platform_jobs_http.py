@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from app.composition.container import ApplicationContainer
 from app.modules.auth.infra.persistence import models as _auth_models  # noqa: F401
 from app.modules.platform.application.services.server_credential_cipher import ServerCredentialCipher
+from app.modules.platform.application.services.server_workspace_service import ServerWorkspaceService
 from app.modules.platform.contracts.runner_contracts import StepExecutionResult
 from app.modules.platform.infra.persistence import models as _platform_models  # noqa: F401
 from app.modules.platform.infra.persistence.models import (
@@ -54,6 +55,10 @@ def client(tmp_path):
 
     app = FastAPI()
     app.state.container = container
+    container.register_singleton(
+        "platform.server_workspace_service_factory",
+        lambda: ServerWorkspaceService(storage_root=tmp_path / "platform-workspaces"),
+    )
     app.include_router(auth_router, prefix="/api")
     app.include_router(platform_router, prefix="/api")
 
@@ -363,6 +368,48 @@ def test_platform_jobs_router_rejects_legacy_platform_payload_fields(client: Tes
 
     assert created.status_code == 400
     assert created.json()["detail"] == "platform job payload for single_generate/card contains forbidden fields: asset_name"
+
+
+def test_platform_jobs_router_accepts_server_project_ref(client: TestClient):
+    user_id = _register_login_and_verify(client, "luna", "luna@example.com")
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    profile_id = _seed_execution_profile(client)
+    workspace_service = client.app.state.container.resolve_singleton("platform.server_workspace_service_factory")()
+    workspace = workspace_service.create_workspace(user_id=user_id, project_name="DarkMod")
+
+    created = client.post(
+        "/api/platform/jobs",
+        json={
+            "job_type": "single_generate",
+            "workflow_version": "2026.03.31",
+            "selected_execution_profile_id": profile_id,
+            "selected_agent_backend": "codex",
+            "selected_model": "gpt-5.4",
+            "items": [
+                {
+                    "item_type": "custom_code",
+                    "input_summary": "补一个单资产脚本",
+                    "input_payload": {
+                        "item_name": "SingleEffectPatch",
+                        "description": "补一个单资产 custom_code 示例",
+                        "image_mode": "ai",
+                        "server_project_ref": workspace.server_project_ref,
+                    },
+                }
+            ],
+        },
+    )
+
+    assert created.status_code == 200
+    assert created.json()["status"] == "draft"
 
 
 def test_platform_jobs_router_can_complete_supported_log_analysis_job(client: TestClient):

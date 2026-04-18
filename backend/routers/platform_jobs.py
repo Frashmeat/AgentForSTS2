@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, HTTPException, Request
 
 from app.modules.platform.application.services import JobApplicationService, JobQueryService, ServerExecutionService
+from app.modules.platform.application.services.server_workspace_service import ServerWorkspaceService
 from app.modules.platform.application.services.uploaded_asset_service import UploadedAssetService
 from app.modules.platform.contracts.job_commands import CancelJobCommand, CreateJobCommand, StartJobCommand
 from app.modules.platform.contracts.uploaded_asset import UploadAssetCommand
@@ -27,6 +28,7 @@ def _build_job_application_service(session, request: Request) -> JobApplicationS
         job_repository=job_repository,
         job_event_repository=job_event_repository,
         execution_orchestrator_service=build_execution_orchestrator_service(session, request),
+        server_workspace_service=_build_server_workspace_service(request),
         uploaded_asset_service=_build_uploaded_asset_service(request),
     )
 
@@ -52,6 +54,14 @@ def _build_server_execution_service(session, request: Request) -> ServerExecutio
 def _build_uploaded_asset_service(request: Request) -> UploadedAssetService:
     container = _container(request)
     factory = container.resolve_singleton("platform.uploaded_asset_service_factory")
+    if callable(factory):
+        return factory()
+    return factory
+
+
+def _build_server_workspace_service(request: Request) -> ServerWorkspaceService:
+    container = _container(request)
+    factory = container.resolve_singleton("platform.server_workspace_service_factory")
     if callable(factory):
         return factory()
     return factory

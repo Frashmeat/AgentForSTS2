@@ -11,6 +11,7 @@ from app.modules.platform.application.services.execution_routing_service import 
 from app.modules.platform.application.services.job_application_service import JobApplicationService
 from app.modules.platform.application.services.quota_billing_service import QuotaBillingService
 from app.modules.platform.application.services.server_credential_cipher import ServerCredentialCipher
+from app.modules.platform.application.services.server_workspace_service import ServerWorkspaceService
 from app.modules.platform.application.services.uploaded_asset_service import UploadedAssetService
 from app.modules.platform.contracts.job_commands import CancelJobCommand, CreateJobCommand, StartJobCommand
 from app.modules.platform.contracts.runner_contracts import StepExecutionResult
@@ -1555,6 +1556,39 @@ def test_job_application_service_accepts_uploaded_asset_ref_for_platform_payload
                             "item_name": "DarkBlade",
                             "description": "1 费攻击牌，造成 8 点伤害，升级后造成 12 点伤害。",
                             "uploaded_asset_ref": uploaded.uploaded_asset_ref,
+                        },
+                    }
+                ],
+            }
+        ),
+    )
+
+    assert job.status == JobStatus.DRAFT
+
+
+def test_job_application_service_accepts_server_project_ref_for_platform_payload(db_session, tmp_path):
+    server_workspace_service = ServerWorkspaceService(storage_root=tmp_path / "platform-workspaces")
+    workspace = server_workspace_service.create_workspace(user_id=1001, project_name="DarkMod")
+    service = JobApplicationService(
+        job_repository=JobRepositorySqlAlchemy(db_session),
+        job_event_repository=JobEventRepositorySqlAlchemy(db_session),
+        server_workspace_service=server_workspace_service,
+    )
+
+    job = service.create_job(
+        user_id=1001,
+        command=CreateJobCommand.model_validate(
+            {
+                "job_type": "single_generate",
+                "workflow_version": "2026.03.31",
+                "items": [
+                    {
+                        "item_type": "custom_code",
+                        "input_summary": "补一个单资产脚本",
+                        "input_payload": {
+                            "item_name": "SingleEffectPatch",
+                            "description": "补一个单资产 custom_code 示例",
+                            "server_project_ref": workspace.server_project_ref,
                         },
                     }
                 ],

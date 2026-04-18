@@ -5,9 +5,11 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, HTTPException, Request
 
 from app.modules.platform.application.services import JobApplicationService, JobQueryService, ServerExecutionService, UserCenterService
+from app.modules.platform.application.services.server_workspace_service import ServerWorkspaceService
 from app.modules.platform.application.services.uploaded_asset_service import UploadedAssetService
 from app.modules.platform.contracts.job_commands import CreateJobCommand, StartJobCommand
 from app.modules.platform.contracts.server_execution import UpdateServerPreferenceCommand
+from app.modules.platform.contracts.server_workspace import CreateServerWorkspaceCommand
 from app.modules.platform.contracts.uploaded_asset import UploadAssetCommand
 
 from ._auth_support import auth_session_scope, build_auth_service, require_current_user
@@ -39,6 +41,7 @@ def _build_job_application_service(session, request: Request) -> JobApplicationS
         job_repository=job_repository,
         job_event_repository=job_event_repository,
         execution_orchestrator_service=build_execution_orchestrator_service(session, request),
+        server_workspace_service=_build_server_workspace_service(request),
         uploaded_asset_service=_build_uploaded_asset_service(request),
     )
 
@@ -54,6 +57,14 @@ def _build_server_execution_service(session, request: Request) -> ServerExecutio
 def _build_uploaded_asset_service(request: Request) -> UploadedAssetService:
     container = request.app.state.container
     factory = container.resolve_singleton("platform.uploaded_asset_service_factory")
+    if callable(factory):
+        return factory()
+    return factory
+
+
+def _build_server_workspace_service(request: Request) -> ServerWorkspaceService:
+    container = request.app.state.container
+    factory = container.resolve_singleton("platform.server_workspace_service_factory")
     if callable(factory):
         return factory()
     return factory
@@ -230,3 +241,17 @@ def upload_asset(request: Request, body: dict):
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
         return uploaded.model_dump()
+
+
+@router.post("/server-workspaces")
+def create_server_workspace(request: Request, body: dict):
+    command = CreateServerWorkspaceCommand.model_validate(body)
+    with auth_session_scope(request) as session:
+        user = require_current_user(request, session)
+        _require_platform_access(user)
+        service = _build_server_workspace_service(request)
+        try:
+            workspace = service.create_workspace(user_id=user.user_id, project_name=command.project_name)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return workspace.model_dump()

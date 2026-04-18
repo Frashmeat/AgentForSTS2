@@ -8,6 +8,7 @@ from app.modules.platform.domain.repositories import JobEventRepository, JobRepo
 from app.modules.platform.infra.persistence.models import JobRecord
 
 from .execution_orchestrator_service import ExecutionOrchestratorService
+from .server_workspace_service import ServerWorkspaceService
 from .uploaded_asset_service import UploadedAssetService
 
 
@@ -31,11 +32,13 @@ class JobApplicationService:
         job_repository: JobRepository,
         job_event_repository: JobEventRepository,
         execution_orchestrator_service: ExecutionOrchestratorService | None = None,
+        server_workspace_service: ServerWorkspaceService | None = None,
         uploaded_asset_service: UploadedAssetService | None = None,
     ) -> None:
         self.job_repository = job_repository
         self.job_event_repository = job_event_repository
         self.execution_orchestrator_service = execution_orchestrator_service
+        self.server_workspace_service = server_workspace_service
         self.uploaded_asset_service = uploaded_asset_service
 
     def create_job(self, user_id: int, command: CreateJobCommand) -> JobRecord:
@@ -243,6 +246,12 @@ class JobApplicationService:
                 if self.uploaded_asset_service is None:
                     raise ValueError("uploaded asset service is not configured")
                 self.uploaded_asset_service.ensure_accessible(user_id=user_id, uploaded_asset_ref=uploaded_asset_ref)
+
+            server_project_ref = str(item.input_payload.get("server_project_ref", "")).strip()
+            if server_project_ref:
+                if self.server_workspace_service is None:
+                    raise ValueError("server workspace service is not configured")
+                self.server_workspace_service.ensure_accessible(user_id=user_id, server_project_ref=server_project_ref)
 
     @staticmethod
     def _build_deferred_payload(

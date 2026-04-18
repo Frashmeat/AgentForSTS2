@@ -23,6 +23,7 @@ from .server_execution import (
     UpdateServerPreferenceCommand,
     UserServerPreferenceView,
 )
+from .server_workspace import CreateServerWorkspaceCommand, ServerWorkspaceView
 from .uploaded_asset import UploadAssetCommand, UploadedAssetView
 
 __all__ = [
@@ -34,6 +35,7 @@ __all__ = [
     "ArtifactSummary",
     "CancelJobCommand",
     "CreateServerCredentialCommand",
+    "CreateServerWorkspaceCommand",
     "CreateJobCommand",
     "CreateJobItemInput",
     "ExecutionProfileListView",
@@ -52,6 +54,7 @@ __all__ = [
     "UpdateServerPreferenceCommand",
     "UploadAssetCommand",
     "UploadedAssetView",
+    "ServerWorkspaceView",
     "UserQuotaView",
     "UserServerPreferenceView",
 ]

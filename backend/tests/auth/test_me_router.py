@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from app.composition.container import ApplicationContainer
 from app.modules.auth.infra.persistence import models as _auth_models  # noqa: F401
 from app.modules.platform.application.services.server_credential_cipher import ServerCredentialCipher
+from app.modules.platform.application.services.server_workspace_service import ServerWorkspaceService
 from app.modules.platform.application.services.uploaded_asset_service import UploadedAssetService
 from app.modules.platform.contracts.runner_contracts import StepExecutionResult
 from app.modules.platform.infra.persistence import models as _platform_models  # noqa: F401
@@ -60,6 +61,10 @@ def client(tmp_path):
 
     app = FastAPI()
     app.state.container = container
+    container.register_singleton(
+        "platform.server_workspace_service_factory",
+        lambda: ServerWorkspaceService(storage_root=tmp_path / "platform-workspaces"),
+    )
     container.register_singleton(
         "platform.uploaded_asset_service_factory",
         lambda: UploadedAssetService(storage_root=tmp_path / "platform-upload-assets"),
@@ -134,6 +139,133 @@ def test_me_router_can_upload_server_asset(client: TestClient):
     assert uploaded.json()["uploaded_asset_ref"].startswith("uploaded-asset:")
     assert uploaded.json()["file_name"] == "dark-blade.png"
     assert uploaded.json()["mime_type"] == "image/png"
+
+
+def test_me_router_can_create_server_workspace(client: TestClient):
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "username": "luna",
+            "email": "luna@example.com",
+            "password": "secret-123",
+        },
+    )
+    assert registered.status_code == 200
+    verification_code = registered.json()["verification_code"]
+
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    verified = client.post("/api/auth/verify-email", json={"code": verification_code})
+    assert verified.status_code == 200
+
+    workspace = client.post(
+        "/api/me/server-workspaces",
+        json={"project_name": "DarkMod"},
+    )
+
+    assert workspace.status_code == 200
+    assert workspace.json()["server_project_ref"].startswith("server-workspace:")
+    assert workspace.json()["project_name"] == "DarkMod"
+
+
+def test_me_router_can_create_platform_job_with_server_project_ref(client: TestClient):
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "username": "luna",
+            "email": "luna@example.com",
+            "password": "secret-123",
+        },
+    )
+    assert registered.status_code == 200
+    verification_code = registered.json()["verification_code"]
+    user_id = registered.json()["user"]["user_id"]
+
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    verified = client.post("/api/auth/verify-email", json={"code": verification_code})
+    assert verified.status_code == 200
+
+    app_container = client.app.state.container
+    workspace_service = app_container.resolve_singleton("platform.server_workspace_service_factory")()
+    workspace = workspace_service.create_workspace(user_id=user_id, project_name="DarkMod")
+
+    session = app_container.resolve_singleton("platform.db_session_factory")()
+    try:
+        profile = ExecutionProfileRecord(
+            code="codex-gpt-5-4",
+            display_name="Codex CLI / gpt-5.4",
+            agent_backend="codex",
+            model="gpt-5.4",
+            description="默认推荐",
+            enabled=True,
+            recommended=True,
+            sort_order=10,
+        )
+        session.add(profile)
+        session.flush()
+        session.add(
+            ServerCredentialRecord(
+                execution_profile_id=profile.id,
+                provider="openai",
+                auth_type="api_key",
+                credential_ciphertext="cipher",
+                secret_ciphertext=None,
+                base_url="https://api.openai.com/v1",
+                label="main",
+                priority=1,
+                enabled=True,
+                health_status="healthy",
+                last_checked_at=None,
+                last_error_code="",
+                last_error_message="",
+            )
+        )
+        session.add(QuotaAccountRecord(user_id=user_id, status=QuotaAccountStatus.ACTIVE))
+        session.commit()
+    finally:
+        session.close()
+
+    created = client.post(
+        "/api/me/jobs",
+        json={
+            "job_type": "single_generate",
+            "workflow_version": "2026.03.31",
+            "input_summary": "补一个单资产脚本",
+            "created_from": "single_asset",
+            "selected_execution_profile_id": 1,
+            "selected_agent_backend": "codex",
+            "selected_model": "gpt-5.4",
+            "items": [
+                {
+                    "item_type": "custom_code",
+                    "input_summary": "补一个单资产脚本",
+                    "input_payload": {
+                        "item_name": "SingleEffectPatch",
+                        "description": "补一个单资产 custom_code 示例",
+                        "server_project_ref": workspace.server_project_ref,
+                    },
+                }
+            ],
+        },
+    )
+
+    assert created.status_code == 200
+    assert created.json()["status"] == "draft"
 
 
 def test_me_router_returns_zero_quota_view_for_new_user_without_quota_records(client: TestClient):

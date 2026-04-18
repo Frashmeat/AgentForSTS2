@@ -19,6 +19,7 @@ from app.modules.platform.application.services import (
     ServerCredentialCipher,
     ServerCredentialHealthChecker,
     ServerExecutionService,
+    ServerWorkspaceService,
     UploadedAssetService,
 )
 from app.modules.platform.runner import (
@@ -115,6 +116,7 @@ class ApplicationContainer:
             ("platform.server_credential_cipher_factory", ServerCredentialCipher),
             ("platform.server_credential_health_checker_factory", ServerCredentialHealthChecker),
             ("platform.server_execution_service_factory", ServerExecutionService),
+            ("platform.server_workspace_service_factory", ServerWorkspaceService),
             ("platform.uploaded_asset_service_factory", UploadedAssetService),
             ("platform.execution_orchestrator_service_factory", ExecutionOrchestratorService),
             ("platform.quota_billing_service_factory", QuotaBillingService),
