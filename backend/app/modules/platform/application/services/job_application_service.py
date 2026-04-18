@@ -92,7 +92,7 @@ class JobApplicationService:
                     job_type=job.job_type,
                     item_type=item.item_type,
                 )
-                if not has_registered_workflow or self._requires_uploaded_asset_persistence(item.input_payload):
+                if not has_registered_workflow:
                     deferred_payload = self._build_deferred_payload(
                         execution_id=execution.id,
                         job_type=job.job_type,
@@ -281,13 +281,6 @@ class JobApplicationService:
         item_type: str,
         input_payload: dict[str, object],
     ) -> tuple[str, str]:
-        has_uploaded_image = input_payload.get("has_uploaded_image")
-        if has_uploaded_image is True:
-            return (
-                "uploaded_asset_not_persisted",
-                "上传图片当前只在本地工作流中可用，服务器模式尚未接入持久化后的资产引用。",
-            )
-
         project_root = str(input_payload.get("project_root", "")).strip()
         if project_root:
             return (
@@ -299,7 +292,3 @@ class JobApplicationService:
             "workflow_not_registered",
             f"当前 web runtime 尚未为 {job_type}/{item_type} 注册可直接执行的服务器 workflow。",
         )
-
-    @staticmethod
-    def _requires_uploaded_asset_persistence(input_payload: dict[str, object]) -> bool:
-        return input_payload.get("has_uploaded_image") is True
