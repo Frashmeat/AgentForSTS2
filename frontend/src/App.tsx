@@ -157,6 +157,7 @@ export default function App() {
         title={pendingExecution?.title ?? "选择执行方式"}
         localAvailable={pendingExecution?.localAvailable ?? false}
         localUnavailableReasons={pendingExecution?.localUnavailableReasons ?? []}
+        serverUnsupportedReasons={pendingExecution?.serverUnsupportedReasons ?? []}
         isAuthenticated={isAuthenticated}
         serverProfiles={serverProfiles}
         serverProfilesLoading={serverProfilesLoading}

@@ -5,6 +5,7 @@ interface ExecutionModeDialogProps {
   title: string;
   localAvailable: boolean;
   localUnavailableReasons?: string[];
+  serverUnsupportedReasons?: string[];
   isAuthenticated: boolean;
   serverProfiles: PlatformExecutionProfile[];
   serverProfilesLoading: boolean;
@@ -26,6 +27,7 @@ export function ExecutionModeDialog({
   title,
   localAvailable,
   localUnavailableReasons = [],
+  serverUnsupportedReasons = [],
   isAuthenticated,
   serverProfiles,
   serverProfilesLoading,
@@ -47,6 +49,7 @@ export function ExecutionModeDialog({
 
   const hasAvailableServerProfile = serverProfiles.some((profile) => profile.available);
   const serverActionDisabled = isAuthenticated && (
+    serverUnsupportedReasons.length > 0 ||
     serverProfilesLoading ||
     !hasAvailableServerProfile ||
     selectedServerProfileId === null ||
@@ -95,7 +98,13 @@ export function ExecutionModeDialog({
 
             {isAuthenticated ? (
               <>
-                {serverProfilesLoading ? (
+                {serverUnsupportedReasons.length > 0 ? (
+                  <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    {serverUnsupportedReasons.map((reason) => (
+                      <p key={reason}>- {reason}</p>
+                    ))}
+                  </div>
+                ) : serverProfilesLoading ? (
                   <p className="mt-3 text-xs text-slate-500">正在读取服务器执行配置…</p>
                 ) : serverProfilesError ? (
                   <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">

@@ -298,7 +298,7 @@ def test_me_router_can_create_and_start_current_user_job(client: TestClient):
                     "item_type": "potion",
                     "input_summary": "Dark Relic",
                     "input_payload": {
-                        "asset_name": "DarkPotion",
+                        "item_name": "DarkPotion",
                         "description": "造成 8 点伤害。",
                     },
                 }
@@ -447,7 +447,7 @@ def test_me_router_create_job_uses_current_user_default_server_profile_when_requ
                 {
                     "item_type": "relic",
                     "input_summary": "Dark Relic",
-                    "input_payload": {"asset_name": "DarkRelic"},
+                    "input_payload": {"item_name": "DarkRelic"},
                 }
             ],
         },
@@ -457,6 +457,95 @@ def test_me_router_create_job_uses_current_user_default_server_profile_when_requ
     assert created.json()["selected_execution_profile_id"] == 1
     assert created.json()["selected_agent_backend"] == "codex"
     assert created.json()["selected_model"] == "gpt-5.4"
+
+
+def test_me_router_rejects_legacy_platform_payload_fields(client: TestClient):
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "username": "luna",
+            "email": "luna@example.com",
+            "password": "secret-123",
+        },
+    )
+    assert registered.status_code == 200
+    verification_code = registered.json()["verification_code"]
+
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    verified = client.post("/api/auth/verify-email", json={"code": verification_code})
+    assert verified.status_code == 200
+
+    app_container = client.app.state.container
+    session = app_container.resolve_singleton("platform.db_session_factory")()
+    try:
+        profile = ExecutionProfileRecord(
+            code="codex-gpt-5-4",
+            display_name="Codex CLI / gpt-5.4",
+            agent_backend="codex",
+            model="gpt-5.4",
+            description="默认推荐",
+            enabled=True,
+            recommended=True,
+            sort_order=10,
+        )
+        session.add(profile)
+        session.flush()
+        session.add(
+            ServerCredentialRecord(
+                execution_profile_id=profile.id,
+                provider="openai",
+                auth_type="api_key",
+                credential_ciphertext="cipher",
+                secret_ciphertext=None,
+                base_url="https://api.openai.com/v1",
+                label="main",
+                priority=1,
+                enabled=True,
+                health_status="healthy",
+                last_checked_at=None,
+                last_error_code="",
+                last_error_message="",
+            )
+        )
+        session.add(QuotaAccountRecord(user_id=registered.json()["user"]["user_id"], status=QuotaAccountStatus.ACTIVE))
+        session.commit()
+    finally:
+        session.close()
+
+    created = client.post(
+        "/api/me/jobs",
+        json={
+            "job_type": "single_generate",
+            "workflow_version": "2026.03.31",
+            "input_summary": "补一个卡牌实现方案",
+            "created_from": "single_asset",
+            "selected_execution_profile_id": 1,
+            "selected_agent_backend": "codex",
+            "selected_model": "gpt-5.4",
+            "items": [
+                {
+                    "item_type": "card",
+                    "input_summary": "补一个卡牌实现方案",
+                    "input_payload": {
+                        "asset_type": "card",
+                        "asset_name": "DarkBlade",
+                        "description": "1 费攻击牌，造成 8 点伤害，升级后造成 12 点伤害。",
+                    },
+                }
+            ],
+        },
+    )
+
+    assert created.status_code == 400
+    assert created.json()["detail"] == "platform job payload for single_generate/card contains forbidden fields: asset_name"
 
 
 def test_me_router_rejects_platform_job_actions_for_unverified_email(client: TestClient):
@@ -490,7 +579,7 @@ def test_me_router_rejects_platform_job_actions_for_unverified_email(client: Tes
                 {
                     "item_type": "relic",
                     "input_summary": "Dark Relic",
-                    "input_payload": {"asset_name": "DarkRelic"},
+                    "input_payload": {"item_name": "DarkRelic"},
                 }
             ],
         },
@@ -748,10 +837,8 @@ def test_me_router_can_complete_supported_batch_card_job(client: TestClient):
                     "item_type": "card",
                     "input_summary": "补一个批量卡牌实现方案",
                     "input_payload": {
-                        "name": "DarkBlade",
+                        "item_name": "DarkBlade",
                         "description": "1 费攻击牌，造成 8 点伤害，升级后造成 12 点伤害。",
-                        "needs_image": True,
-                        "has_uploaded_image": False,
                     },
                 }
             ],
@@ -879,10 +966,8 @@ def test_me_router_can_complete_supported_batch_card_fullscreen_job(client: Test
                     "item_type": "card_fullscreen",
                     "input_summary": "补一个批量全画面卡实现方案",
                     "input_payload": {
-                        "name": "DarkBladeFullscreen",
+                        "item_name": "DarkBladeFullscreen",
                         "description": "一张强调暗影剑士出招姿态的全画面卡插图方案。",
-                        "needs_image": True,
-                        "has_uploaded_image": False,
                     },
                 }
             ],
@@ -1010,10 +1095,8 @@ def test_me_router_can_complete_supported_batch_relic_job(client: TestClient):
                     "item_type": "relic",
                     "input_summary": "补一个批量遗物实现方案",
                     "input_payload": {
-                        "name": "FangedGrimoire",
+                        "item_name": "FangedGrimoire",
                         "description": "每次造成伤害时获得 2 点格挡。",
-                        "needs_image": True,
-                        "has_uploaded_image": False,
                     },
                 }
             ],
@@ -1141,10 +1224,8 @@ def test_me_router_can_complete_supported_batch_power_job(client: TestClient):
                     "item_type": "power",
                     "input_summary": "补一个批量 Power 实现方案",
                     "input_payload": {
-                        "name": "CorruptionBuff",
+                        "item_name": "CorruptionBuff",
                         "description": "每层在回合结束时额外造成 1 点伤害，最多叠加 10 层。",
-                        "needs_image": True,
-                        "has_uploaded_image": False,
                     },
                 }
             ],
@@ -1272,10 +1353,8 @@ def test_me_router_can_complete_supported_batch_character_job(client: TestClient
                     "item_type": "character",
                     "input_summary": "补一个批量角色实现方案",
                     "input_payload": {
-                        "name": "WatcherAlpha",
+                        "item_name": "WatcherAlpha",
                         "description": "一名偏进攻型角色，初始拥有额外 1 点能量。",
-                        "needs_image": True,
-                        "has_uploaded_image": False,
                     },
                 }
             ],
@@ -1403,9 +1482,8 @@ def test_me_router_can_complete_supported_single_custom_code_job(client: TestCli
                     "item_type": "custom_code",
                     "input_summary": "补一个单资产脚本",
                     "input_payload": {
-                        "asset_name": "SingleEffectPatch",
+                        "item_name": "SingleEffectPatch",
                         "description": "补一个单资产 custom_code 示例",
-                        "project_root": "E:/Mods/Demo",
                         "image_mode": "ai",
                     },
                 }
@@ -1535,11 +1613,9 @@ def test_me_router_can_complete_supported_single_relic_job(client: TestClient):
                     "input_summary": "补一个遗物实现方案",
                     "input_payload": {
                         "asset_type": "relic",
-                        "asset_name": "FangedGrimoire",
+                        "item_name": "FangedGrimoire",
                         "description": "每次造成伤害时获得 2 点格挡。",
-                        "project_root": "E:/Mods/Demo",
                         "image_mode": "ai",
-                        "has_uploaded_image": False,
                     },
                 }
             ],
@@ -1668,11 +1744,9 @@ def test_me_router_can_complete_supported_single_card_job(client: TestClient):
                     "input_summary": "补一个卡牌实现方案",
                     "input_payload": {
                         "asset_type": "card",
-                        "asset_name": "DarkBlade",
+                        "item_name": "DarkBlade",
                         "description": "1 费攻击牌，造成 8 点伤害，升级后造成 12 点伤害。",
-                        "project_root": "E:/Mods/Demo",
                         "image_mode": "ai",
-                        "has_uploaded_image": False,
                     },
                 }
             ],
@@ -1801,10 +1875,9 @@ def test_me_router_can_complete_supported_single_card_fullscreen_job(client: Tes
                     "input_summary": "补一个全画面卡实现方案",
                     "input_payload": {
                         "asset_type": "card_fullscreen",
-                        "asset_name": "DarkBladeFullscreen",
+                        "item_name": "DarkBladeFullscreen",
                         "description": "一张强调暗影剑士出招姿态的全画面卡插图方案。",
                         "image_mode": "ai",
-                        "has_uploaded_image": False,
                     },
                 }
             ],
@@ -1933,11 +2006,9 @@ def test_me_router_can_complete_supported_single_power_job(client: TestClient):
                     "input_summary": "补一个 Power 实现方案",
                     "input_payload": {
                         "asset_type": "power",
-                        "asset_name": "CorruptionBuff",
+                        "item_name": "CorruptionBuff",
                         "description": "每层在回合结束时额外造成 1 点伤害，最多叠加 10 层。",
-                        "project_root": "E:/Mods/Demo",
                         "image_mode": "ai",
-                        "has_uploaded_image": False,
                     },
                 }
             ],
@@ -2066,11 +2137,9 @@ def test_me_router_can_complete_supported_single_character_job(client: TestClien
                     "input_summary": "补一个角色实现方案",
                     "input_payload": {
                         "asset_type": "character",
-                        "asset_name": "WatcherAlpha",
+                        "item_name": "WatcherAlpha",
                         "description": "一名偏进攻型角色，初始拥有额外 1 点能量。",
-                        "project_root": "E:/Mods/Demo",
                         "image_mode": "ai",
-                        "has_uploaded_image": False,
                     },
                 }
             ],

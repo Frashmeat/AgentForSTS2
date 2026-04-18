@@ -79,12 +79,15 @@ def create_job(request: Request, body: dict):
         user = _require_platform_user(request, session)
         server_execution_service = _build_server_execution_service(session, request)
         service = _build_job_application_service(session, request)
-        command = _enrich_job_command_with_default_server_profile(
-            CreateJobCommand.model_validate(body),
-            user_id=user.user_id,
-            server_execution_service=server_execution_service,
-        )
-        job = service.create_job(user_id=user.user_id, command=command)
+        try:
+            command = _enrich_job_command_with_default_server_profile(
+                CreateJobCommand.model_validate(body),
+                user_id=user.user_id,
+                server_execution_service=server_execution_service,
+            )
+            job = service.create_job(user_id=user.user_id, command=command)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
         return {
             "id": job.id,
             "job_type": job.job_type,

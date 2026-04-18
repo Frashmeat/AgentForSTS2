@@ -15,11 +15,10 @@ _BATCH_CUSTOM_CODE_PROMPT_KEY = "runtime_agent.platform_batch_custom_code_server
 
 
 def _resolve_item_name(input_payload: dict[str, object]) -> str:
-    return (
-        str(input_payload.get("name", "")).strip()
-        or str(input_payload.get("asset_name", "")).strip()
-        or "未命名 custom_code"
-    )
+    item_name = str(input_payload.get("item_name", "")).strip()
+    if not item_name:
+        raise ValueError("custom_code server task requires item_name")
+    return item_name
 
 
 def _string_list(value: object) -> list[str]:

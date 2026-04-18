@@ -10,6 +10,7 @@ export interface PlatformExecutionRequest {
   inputSummary: string;
   requiresCodeAgent: boolean;
   requiresImageAi: boolean;
+  serverUnsupportedReasons?: string[];
   items: PlatformJobCreateItem[];
   runLocal: () => void;
 }

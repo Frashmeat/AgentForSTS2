@@ -28,7 +28,10 @@ def _resolve_asset_type(input_payload: dict[str, object]) -> str:
 
 
 def _resolve_item_name(input_payload: dict[str, object]) -> str:
-    return str(input_payload.get("asset_name", "")).strip() or str(input_payload.get("name", "")).strip() or "未命名资产"
+    item_name = str(input_payload.get("item_name", "")).strip()
+    if not item_name:
+        raise ValueError("single asset server task requires item_name")
+    return item_name
 
 
 def _build_prompt(input_payload: dict[str, object]) -> tuple[str, str, str]:
@@ -48,7 +51,7 @@ def _build_prompt(input_payload: dict[str, object]) -> tuple[str, str, str]:
             "item_name": item_name,
             "description": description,
             "image_mode": str(input_payload.get("image_mode", "")).strip() or "ai",
-            "has_uploaded_image": "是" if input_payload.get("has_uploaded_image") is True else "否",
+            "has_uploaded_image": "是" if str(input_payload.get("uploaded_asset_ref", "")).strip() else "否",
             "docs": docs.strip() or "无",
         },
     )

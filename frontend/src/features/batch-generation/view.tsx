@@ -743,7 +743,8 @@ function BatchModePage({
         input_summary: item.description || item.name,
         input_payload: {
           item_index: index,
-          name: item.name,
+          item_name: item.name,
+          asset_type: item.type,
           description: item.description,
           goal: item.goal,
           detailed_description: item.detailed_description,
@@ -752,13 +753,14 @@ function BatchModePage({
           acceptance_notes: item.acceptance_notes,
           affected_targets: item.affected_targets,
           coupling_kind: item.coupling_kind,
-          needs_image: item.needs_image,
-          has_uploaded_image: Boolean(item.provided_image_b64),
           image_description: item.image_description,
           implementation_notes: item.implementation_notes,
           depends_on: item.depends_on,
         },
       })),
+      serverUnsupportedReasons: editedItems.some((item) => Boolean(item.provided_image_b64))
+        ? ["服务器模式当前不支持直接消费上传图片，请改用本机执行。"]
+        : [],
       runLocal: executeLocal,
     });
   }

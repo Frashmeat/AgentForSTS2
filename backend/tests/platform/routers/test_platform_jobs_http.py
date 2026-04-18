@@ -203,7 +203,7 @@ def test_platform_jobs_router_supports_create_start_cancel_and_queries_for_curre
             "selected_execution_profile_id": profile_id,
             "selected_agent_backend": "codex",
             "selected_model": "gpt-5.4",
-            "items": [{"item_type": "potion", "input_payload": {"name": "DarkPotion"}}],
+            "items": [{"item_type": "potion", "input_payload": {"item_name": "DarkPotion"}}],
         },
     )
     assert created.status_code == 200
@@ -316,7 +316,7 @@ def test_platform_jobs_router_uses_current_user_default_server_profile_when_requ
         json={
             "job_type": "single_generate",
             "workflow_version": "2026.03.31",
-            "items": [{"item_type": "character", "input_payload": {"name": "DarkRelic"}}],
+            "items": [{"item_type": "character", "input_payload": {"item_name": "DarkRelic"}}],
         },
     )
 
@@ -324,6 +324,45 @@ def test_platform_jobs_router_uses_current_user_default_server_profile_when_requ
     assert created.json()["selected_execution_profile_id"] == profile_id
     assert created.json()["selected_agent_backend"] == "codex"
     assert created.json()["selected_model"] == "gpt-5.4"
+
+
+def test_platform_jobs_router_rejects_legacy_platform_payload_fields(client: TestClient):
+    _register_login_and_verify(client, "luna", "luna@example.com")
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    profile_id = _seed_execution_profile(client)
+
+    created = client.post(
+        "/api/platform/jobs",
+        json={
+            "job_type": "single_generate",
+            "workflow_version": "2026.03.31",
+            "selected_execution_profile_id": profile_id,
+            "selected_agent_backend": "codex",
+            "selected_model": "gpt-5.4",
+            "items": [
+                {
+                    "item_type": "card",
+                    "input_summary": "补一个卡牌实现方案",
+                    "input_payload": {
+                        "asset_type": "card",
+                        "asset_name": "DarkBlade",
+                        "description": "1 费攻击牌，造成 8 点伤害，升级后造成 12 点伤害。",
+                    },
+                }
+            ],
+        },
+    )
+
+    assert created.status_code == 400
+    assert created.json()["detail"] == "platform job payload for single_generate/card contains forbidden fields: asset_name"
 
 
 def test_platform_jobs_router_can_complete_supported_log_analysis_job(client: TestClient):
@@ -410,10 +449,9 @@ def test_platform_jobs_router_can_complete_supported_batch_custom_code_job(clien
                     "item_type": "custom_code",
                     "input_summary": "补一个战斗脚本管理器",
                     "input_payload": {
-                        "name": "BattleScriptManager",
+                        "item_name": "BattleScriptManager",
                         "description": "实现一个战斗阶段脚本管理器",
                         "implementation_notes": "维护状态机并派发事件",
-                        "needs_image": False,
                     },
                 }
             ],
@@ -472,10 +510,8 @@ def test_platform_jobs_router_can_complete_supported_batch_card_job(client: Test
                     "item_type": "card",
                     "input_summary": "补一个批量卡牌实现方案",
                     "input_payload": {
-                        "name": "DarkBlade",
+                        "item_name": "DarkBlade",
                         "description": "1 费攻击牌，造成 8 点伤害，升级后造成 12 点伤害。",
-                        "needs_image": True,
-                        "has_uploaded_image": False,
                     },
                 }
             ],
@@ -534,10 +570,8 @@ def test_platform_jobs_router_can_complete_supported_batch_card_fullscreen_job(c
                     "item_type": "card_fullscreen",
                     "input_summary": "补一个批量全画面卡实现方案",
                     "input_payload": {
-                        "name": "DarkBladeFullscreen",
+                        "item_name": "DarkBladeFullscreen",
                         "description": "一张强调暗影剑士出招姿态的全画面卡插图方案。",
-                        "needs_image": True,
-                        "has_uploaded_image": False,
                     },
                 }
             ],
@@ -596,10 +630,8 @@ def test_platform_jobs_router_can_complete_supported_batch_relic_job(client: Tes
                     "item_type": "relic",
                     "input_summary": "补一个批量遗物实现方案",
                     "input_payload": {
-                        "name": "FangedGrimoire",
+                        "item_name": "FangedGrimoire",
                         "description": "每次造成伤害时获得 2 点格挡。",
-                        "needs_image": True,
-                        "has_uploaded_image": False,
                     },
                 }
             ],
@@ -658,10 +690,8 @@ def test_platform_jobs_router_can_complete_supported_batch_power_job(client: Tes
                     "item_type": "power",
                     "input_summary": "补一个批量 Power 实现方案",
                     "input_payload": {
-                        "name": "CorruptionBuff",
+                        "item_name": "CorruptionBuff",
                         "description": "每层在回合结束时额外造成 1 点伤害，最多叠加 10 层。",
-                        "needs_image": True,
-                        "has_uploaded_image": False,
                     },
                 }
             ],
@@ -720,10 +750,8 @@ def test_platform_jobs_router_can_complete_supported_batch_character_job(client:
                     "item_type": "character",
                     "input_summary": "补一个批量角色实现方案",
                     "input_payload": {
-                        "name": "WatcherAlpha",
+                        "item_name": "WatcherAlpha",
                         "description": "一名偏进攻型角色，初始拥有额外 1 点能量。",
-                        "needs_image": True,
-                        "has_uploaded_image": False,
                     },
                 }
             ],
@@ -782,9 +810,8 @@ def test_platform_jobs_router_can_complete_supported_single_custom_code_job(clie
                     "item_type": "custom_code",
                     "input_summary": "补一个单资产脚本",
                     "input_payload": {
-                        "asset_name": "SingleEffectPatch",
+                        "item_name": "SingleEffectPatch",
                         "description": "补一个单资产 custom_code 示例",
-                        "project_root": "E:/Mods/Demo",
                         "image_mode": "ai",
                     },
                 }
@@ -845,11 +872,9 @@ def test_platform_jobs_router_can_complete_supported_single_relic_job(client: Te
                     "input_summary": "补一个遗物实现方案",
                     "input_payload": {
                         "asset_type": "relic",
-                        "asset_name": "FangedGrimoire",
+                        "item_name": "FangedGrimoire",
                         "description": "每次造成伤害时获得 2 点格挡。",
-                        "project_root": "E:/Mods/Demo",
                         "image_mode": "ai",
-                        "has_uploaded_image": False,
                     },
                 }
             ],
@@ -909,11 +934,9 @@ def test_platform_jobs_router_can_complete_supported_single_card_job(client: Tes
                     "input_summary": "补一个卡牌实现方案",
                     "input_payload": {
                         "asset_type": "card",
-                        "asset_name": "DarkBlade",
+                        "item_name": "DarkBlade",
                         "description": "1 费攻击牌，造成 8 点伤害，升级后造成 12 点伤害。",
-                        "project_root": "E:/Mods/Demo",
                         "image_mode": "ai",
-                        "has_uploaded_image": False,
                     },
                 }
             ],
@@ -973,10 +996,9 @@ def test_platform_jobs_router_can_complete_supported_single_card_fullscreen_job(
                     "input_summary": "补一个全画面卡实现方案",
                     "input_payload": {
                         "asset_type": "card_fullscreen",
-                        "asset_name": "DarkBladeFullscreen",
+                        "item_name": "DarkBladeFullscreen",
                         "description": "一张强调暗影剑士出招姿态的全画面卡插图方案。",
                         "image_mode": "ai",
-                        "has_uploaded_image": False,
                     },
                 }
             ],
@@ -1036,11 +1058,9 @@ def test_platform_jobs_router_can_complete_supported_single_power_job(client: Te
                     "input_summary": "补一个 Power 实现方案",
                     "input_payload": {
                         "asset_type": "power",
-                        "asset_name": "CorruptionBuff",
+                        "item_name": "CorruptionBuff",
                         "description": "每层在回合结束时额外造成 1 点伤害，最多叠加 10 层。",
-                        "project_root": "E:/Mods/Demo",
                         "image_mode": "ai",
-                        "has_uploaded_image": False,
                     },
                 }
             ],
@@ -1100,11 +1120,9 @@ def test_platform_jobs_router_can_complete_supported_single_character_job(client
                     "input_summary": "补一个角色实现方案",
                     "input_payload": {
                         "asset_type": "character",
-                        "asset_name": "WatcherAlpha",
+                        "item_name": "WatcherAlpha",
                         "description": "一名偏进攻型角色，初始拥有额外 1 点能量。",
-                        "project_root": "E:/Mods/Demo",
                         "image_mode": "ai",
-                        "has_uploaded_image": False,
                     },
                 }
             ],

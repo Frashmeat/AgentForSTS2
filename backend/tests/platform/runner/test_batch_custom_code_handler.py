@@ -43,7 +43,7 @@ def test_execute_batch_custom_code_step_builds_prompt_and_delegates_to_text_gene
                 job_item_id=2,
                 result_schema_version="v1",
                 input_payload={
-                    "name": "BattleScriptManager",
+                    "item_name": "BattleScriptManager",
                     "description": "实现一个战斗阶段脚本管理器",
                     "implementation_notes": "维护状态机并派发事件",
                     "affected_targets": ["Scripts/BattleScriptManager.cs"],
@@ -84,7 +84,7 @@ def test_execute_batch_custom_code_step_requires_descriptive_input():
                     job_id=1,
                     job_item_id=2,
                     result_schema_version="v1",
-                    input_payload={"name": "EmptyItem"},
+                    input_payload={"item_name": "EmptyItem"},
                     execution_binding=StepExecutionBinding(
                         agent_backend="codex",
                         provider="openai",
@@ -98,6 +98,34 @@ def test_execute_batch_custom_code_step_requires_descriptive_input():
         assert str(error) == "custom_code server task requires descriptive input"
     else:
         raise AssertionError("expected ValueError when descriptive input is missing")
+
+
+def test_execute_batch_custom_code_step_requires_item_name():
+    try:
+        asyncio.run(
+            execute_batch_custom_code_step(
+                StepExecutionRequest(
+                    workflow_version="2026.03.31",
+                    step_protocol_version="v1",
+                    step_type="batch.custom_code.plan",
+                    step_id="batch-custom-code-3",
+                    job_id=1,
+                    job_item_id=2,
+                    result_schema_version="v1",
+                    input_payload={"description": "实现一个战斗阶段脚本管理器"},
+                    execution_binding=StepExecutionBinding(
+                        agent_backend="codex",
+                        provider="openai",
+                        model="gpt-5.4",
+                        credential="sk-live-openai",
+                    ),
+                )
+            )
+        )
+    except ValueError as error:
+        assert str(error) == "custom_code server task requires item_name"
+    else:
+        raise AssertionError("expected ValueError when item_name is missing")
 
 
 def test_execute_batch_custom_code_step_supports_single_generate_payload_shape(monkeypatch):
@@ -132,9 +160,8 @@ def test_execute_batch_custom_code_step_supports_single_generate_payload_shape(m
                 job_item_id=2,
                 result_schema_version="v1",
                 input_payload={
-                    "asset_name": "SingleEffectPatch",
+                    "item_name": "SingleEffectPatch",
                     "description": "补一个单资产 custom_code 示例",
-                    "project_root": "E:/Mods/Demo",
                     "image_mode": "ai",
                 },
                 execution_binding=StepExecutionBinding(

@@ -48,10 +48,9 @@ def test_execute_single_asset_plan_step_builds_prompt_and_delegates_to_text_gene
                 result_schema_version="v1",
                 input_payload={
                     "asset_type": "relic",
-                    "asset_name": "FangedGrimoire",
+                    "item_name": "FangedGrimoire",
                     "description": "每次造成伤害时获得 2 点格挡。",
                     "image_mode": "ai",
-                    "has_uploaded_image": False,
                 },
                 execution_binding=StepExecutionBinding(
                     agent_backend="codex",
@@ -90,7 +89,7 @@ def test_execute_single_asset_plan_step_requires_description():
                     job_id=1,
                     job_item_id=2,
                     result_schema_version="v1",
-                    input_payload={"asset_type": "relic", "asset_name": "EmptyRelic"},
+                    input_payload={"asset_type": "relic", "item_name": "EmptyRelic"},
                     execution_binding=StepExecutionBinding(
                         agent_backend="codex",
                         provider="openai",
@@ -104,6 +103,34 @@ def test_execute_single_asset_plan_step_requires_description():
         assert str(error) == "single asset server task requires description"
     else:
         raise AssertionError("expected ValueError when description is missing")
+
+
+def test_execute_single_asset_plan_step_requires_item_name():
+    try:
+        asyncio.run(
+            execute_single_asset_plan_step(
+                StepExecutionRequest(
+                    workflow_version="2026.03.31",
+                    step_protocol_version="v1",
+                    step_type="single.asset.plan",
+                    step_id="single-relic-3",
+                    job_id=1,
+                    job_item_id=2,
+                    result_schema_version="v1",
+                    input_payload={"asset_type": "relic", "description": "每次造成伤害时获得 2 点格挡。"},
+                    execution_binding=StepExecutionBinding(
+                        agent_backend="codex",
+                        provider="openai",
+                        model="gpt-5.4",
+                        credential="sk-live-openai",
+                    ),
+                )
+            )
+        )
+    except ValueError as error:
+        assert str(error) == "single asset server task requires item_name"
+    else:
+        raise AssertionError("expected ValueError when item_name is missing")
 
 
 def test_execute_single_asset_plan_step_supports_batch_generate_payload_shape(monkeypatch):
@@ -143,10 +170,9 @@ def test_execute_single_asset_plan_step_supports_batch_generate_payload_shape(mo
                 result_schema_version="v1",
                 input_payload={
                     "asset_type": "card",
-                    "name": "DarkBlade",
+                    "item_name": "DarkBlade",
                     "description": "1 费攻击牌，造成 8 点伤害，升级后造成 12 点伤害。",
                     "needs_image": True,
-                    "has_uploaded_image": False,
                 },
                 execution_binding=StepExecutionBinding(
                     agent_backend="codex",

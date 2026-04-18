@@ -146,6 +146,7 @@ export function useExecutionModeFlow({ isAuthenticated }: UseExecutionModeFlowOp
 
     setPendingExecution({
       ...request,
+      serverUnsupportedReasons: request.serverUnsupportedReasons ?? [],
       localAvailable:
         capability.text_ai_available &&
         (!request.requiresCodeAgent || capability.code_agent_available) &&
@@ -189,6 +190,11 @@ export function useExecutionModeFlow({ isAuthenticated }: UseExecutionModeFlowOp
     const request = pendingExecution;
     if (!isAuthenticated) {
       handleGoLoginForServerExecution();
+      return;
+    }
+
+    if ((request.serverUnsupportedReasons ?? []).length > 0) {
+      window.alert(request.serverUnsupportedReasons?.[0] ?? "当前任务暂不支持服务器模式");
       return;
     }
 

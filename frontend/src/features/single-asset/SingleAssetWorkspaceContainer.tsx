@@ -271,12 +271,9 @@ export function SingleAssetWorkspaceContainer() {
     input_summary: description.trim() || singleAssetInputSummary,
     input_payload: {
       asset_type: assetType,
-      asset_name: assetName.trim(),
+      item_name: assetName.trim(),
       description: description.trim(),
-      project_root: projectRoot.trim(),
       image_mode: imageMode,
-      auto_mode: autoMode,
-      has_uploaded_image: Boolean(uploadedImageB64),
     },
   };
 
@@ -344,6 +341,10 @@ export function SingleAssetWorkspaceContainer() {
           inputSummary: singleAssetInputSummary,
           requiresCodeAgent: true,
           requiresImageAi: singleAssetRequiresImageAi,
+          serverUnsupportedReasons:
+            imageMode === "upload" && Boolean(uploadedImageB64)
+              ? ["服务器模式当前不支持直接消费上传图片，请改用本机执行。"]
+              : [],
           items: [singleAssetItem],
           runLocal() {
             void startWorkflow();

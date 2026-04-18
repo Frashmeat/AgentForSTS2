@@ -13,6 +13,15 @@ from .execution_orchestrator_service import ExecutionOrchestratorService
 _STEP_PROTOCOL_VERSION = "v1"
 _RESULT_SCHEMA_VERSION = "v1"
 _DISPATCH_STEP_TYPE = "workflow.dispatch"
+_PLATFORM_SERVER_JOB_TYPES = {"single_generate", "batch_generate"}
+_FORBIDDEN_PLATFORM_PAYLOAD_FIELDS = {
+    "name",
+    "asset_name",
+    "project_root",
+    "has_uploaded_image",
+    "provided_image_b64",
+    "provided_image_name",
+}
 
 
 class JobApplicationService:
@@ -27,6 +36,7 @@ class JobApplicationService:
         self.execution_orchestrator_service = execution_orchestrator_service
 
     def create_job(self, user_id: int, command: CreateJobCommand) -> JobRecord:
+        self._validate_platform_payloads(command)
         job = self.job_repository.create_job_with_items(user_id=user_id, command=command)
         self.job_event_repository.append(
             job_id=job.id,
@@ -206,6 +216,25 @@ class JobApplicationService:
             if text:
                 return text
         return ""
+
+    @staticmethod
+    def _validate_platform_payloads(command: CreateJobCommand) -> None:
+        if command.job_type not in _PLATFORM_SERVER_JOB_TYPES:
+            return
+
+        for item in command.items:
+            forbidden_fields = sorted(
+                field_name for field_name in _FORBIDDEN_PLATFORM_PAYLOAD_FIELDS if field_name in item.input_payload
+            )
+            if forbidden_fields:
+                fields_text = ", ".join(forbidden_fields)
+                raise ValueError(
+                    f"platform job payload for {command.job_type}/{item.item_type} contains forbidden fields: {fields_text}"
+                )
+
+            item_name = str(item.input_payload.get("item_name", "")).strip()
+            if not item_name:
+                raise ValueError(f"platform job payload for {command.job_type}/{item.item_type} requires item_name")
 
     @staticmethod
     def _build_deferred_payload(
