@@ -19,12 +19,10 @@ function fallbackDetail(reasonCode: string) {
   switch (reasonCode) {
     case "local_project_root_required":
       return "当前任务仍依赖本地项目目录，服务器模式暂时还不能直接继续执行。";
-    case "uploaded_asset_not_persisted":
-      return "当前任务仍依赖本地上传资产，服务器模式暂时还不能直接继续执行。";
     case "workflow_not_registered":
       return "当前任务类型尚未接入服务器执行器。";
     default:
-      return "当前任务暂未进入真实服务器执行。";
+        return "当前任务暂未进入真实服务器执行。";
   }
 }
 
@@ -43,16 +41,6 @@ export function resolveDeferredExecutionSummary(
         detail,
         shortLabel: "依赖本地目录",
         alertMessage: `任务已创建，但当前仍依赖本地项目目录，服务器还不能直接继续执行。\n${detail}`,
-      };
-    case "uploaded_asset_not_persisted":
-      return {
-        reasonCode,
-        reasonMessage,
-        title: "当前任务仍依赖本地上传资产",
-        description: "上传图片目前还没有转成服务器可读取的持久化引用，因此平台无法在服务器侧继续执行。",
-        detail,
-        shortLabel: "依赖上传资产",
-        alertMessage: `任务已创建，但当前仍依赖本地上传资产，服务器还不能直接继续执行。\n${detail}`,
       };
     case "workflow_not_registered":
       return {
