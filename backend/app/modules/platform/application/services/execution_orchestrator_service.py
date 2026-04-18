@@ -17,6 +17,7 @@ from app.modules.platform.runner.workflow_runner import WorkflowRunner
 
 from .execution_routing_service import ExecutionRoutingService
 from .server_credential_cipher import ServerCredentialCipher
+from .uploaded_asset_service import UploadedAssetService
 
 
 class ExecutionOrchestratorService:
@@ -28,6 +29,7 @@ class ExecutionOrchestratorService:
         job_event_repository: JobEventRepository,
         execution_routing_service: ExecutionRoutingService | None = None,
         server_credential_cipher: ServerCredentialCipher | None = None,
+        uploaded_asset_service: UploadedAssetService | None = None,
         workflow_registry: PlatformWorkflowRegistry | None = None,
         workflow_runner: WorkflowRunner | None = None,
     ) -> None:
@@ -37,6 +39,7 @@ class ExecutionOrchestratorService:
         self.job_event_repository = job_event_repository
         self.execution_routing_service = execution_routing_service
         self.server_credential_cipher = server_credential_cipher
+        self.uploaded_asset_service = uploaded_asset_service
         self.workflow_registry = workflow_registry
         self.workflow_runner = workflow_runner
 
@@ -164,6 +167,7 @@ class ExecutionOrchestratorService:
             job_item_id=job_item_id,
             execution_binding=execution_binding,
         )
+        payload = self._hydrate_uploaded_asset_metadata(user_id=user_id, input_payload=input_payload)
         steps = self.workflow_registry.resolve(job_type, item_type)
         return await self.workflow_runner.run(
             steps=steps,
@@ -175,10 +179,31 @@ class ExecutionOrchestratorService:
                 job_id=job_id,
                 job_item_id=job_item_id,
                 result_schema_version=result_schema_version,
-                input_payload=dict(input_payload or {}),
+                input_payload=payload,
                 execution_binding=binding,
             ),
         )
+
+    def _hydrate_uploaded_asset_metadata(
+        self,
+        *,
+        user_id: int | None,
+        input_payload: dict[str, object] | None,
+    ) -> dict[str, object]:
+        payload = dict(input_payload or {})
+        uploaded_asset_ref = str(payload.get("uploaded_asset_ref", "")).strip()
+        if not uploaded_asset_ref:
+            return payload
+        if user_id is None:
+            raise ValueError("user_id is required when uploaded_asset_ref is provided")
+        if self.uploaded_asset_service is None:
+            raise RuntimeError("uploaded asset service is not configured")
+
+        uploaded = self.uploaded_asset_service.get_asset(user_id=user_id, uploaded_asset_ref=uploaded_asset_ref)
+        payload["uploaded_asset_file_name"] = uploaded.file_name
+        payload["uploaded_asset_mime_type"] = uploaded.mime_type
+        payload["uploaded_asset_size_bytes"] = uploaded.size_bytes
+        return payload
 
     def has_registered_workflow(self, *, job_type: str, item_type: str) -> bool:
         if self.workflow_registry is None or self.workflow_runner is None:

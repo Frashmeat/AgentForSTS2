@@ -68,10 +68,22 @@ class UploadedAssetService:
         )
 
     def ensure_accessible(self, *, user_id: int, uploaded_asset_ref: str) -> None:
+        self.get_asset(user_id=user_id, uploaded_asset_ref=uploaded_asset_ref)
+
+    def get_asset(self, *, user_id: int, uploaded_asset_ref: str) -> UploadedAssetView:
         token = self._token_from_ref(uploaded_asset_ref)
         metadata_path = self.storage_root / str(user_id) / token / "metadata.json"
         if not metadata_path.exists():
             raise ValueError(f"uploaded asset ref not found for user: {uploaded_asset_ref}")
+
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        return UploadedAssetView(
+            uploaded_asset_ref=str(metadata.get("uploaded_asset_ref", uploaded_asset_ref)),
+            file_name=str(metadata.get("file_name", "")).strip(),
+            mime_type=str(metadata.get("mime_type", "")).strip(),
+            size_bytes=int(metadata.get("size_bytes", 0)),
+            created_at=str(metadata.get("created_at", "")).strip(),
+        )
 
     @staticmethod
     def _token_from_ref(uploaded_asset_ref: str) -> str:

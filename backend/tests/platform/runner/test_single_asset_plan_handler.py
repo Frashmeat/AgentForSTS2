@@ -75,6 +75,7 @@ def test_execute_single_asset_plan_step_builds_prompt_and_delegates_to_text_gene
     assert result["item_name"] == "FangedGrimoire"
     assert result["text"] == "建议先补遗物触发与本地化骨架"
     assert result["analysis"].startswith("摘要：建议先补遗物触发与本地化骨架")
+    assert captured["variables"]["uploaded_asset_file_name"] == "无"
 
 
 def test_execute_single_asset_plan_step_requires_description():
@@ -194,3 +195,65 @@ def test_execute_single_asset_plan_step_supports_batch_generate_payload_shape(mo
     assert result["asset_type"] == "card"
     assert result["item_name"] == "DarkBlade"
     assert result["text"] == "建议先补卡牌骨架与升级分支"
+
+
+def test_execute_single_asset_plan_step_includes_uploaded_asset_metadata(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _FakePromptLoader:
+        def render(self, template_name: str, variables: dict[str, object]) -> str:
+            captured["variables"] = dict(variables)
+            return f"prompt:{variables['item_name']}|{variables['uploaded_asset_file_name']}"
+
+    async def fake_text_step(request: StepExecutionRequest):
+        captured["request"] = request
+        return {
+            "text": "摘要：建议先结合上传卡图细化实现方案",
+            "provider": request.execution_binding.provider,
+            "model": request.execution_binding.model,
+        }
+
+    monkeypatch.setattr(
+        "app.modules.platform.runner.single_asset_plan_handler._PROMPT_LOADER",
+        _FakePromptLoader(),
+    )
+    monkeypatch.setattr(
+        "app.modules.platform.runner.single_asset_plan_handler.get_docs_for_type",
+        lambda asset_type: f"docs:{asset_type}",
+    )
+
+    result = asyncio.run(
+        execute_single_asset_plan_step(
+            StepExecutionRequest(
+                workflow_version="2026.03.31",
+                step_protocol_version="v1",
+                step_type="single.asset.plan",
+                step_id="single-card-asset-1",
+                job_id=1,
+                job_item_id=2,
+                result_schema_version="v1",
+                input_payload={
+                    "asset_type": "card",
+                    "item_name": "DarkBlade",
+                    "description": "1 费攻击牌，造成 8 点伤害，升级后造成 12 点伤害。",
+                    "image_mode": "upload",
+                    "uploaded_asset_ref": "uploaded-asset:abc123",
+                    "uploaded_asset_file_name": "dark-blade.png",
+                    "uploaded_asset_mime_type": "image/png",
+                    "uploaded_asset_size_bytes": 16,
+                },
+                execution_binding=StepExecutionBinding(
+                    agent_backend="codex",
+                    provider="openai",
+                    model="gpt-5.4",
+                    credential="sk-live-openai",
+                ),
+            ),
+            text_step_executor=fake_text_step,
+        )
+    )
+
+    assert captured["variables"]["uploaded_asset_file_name"] == "dark-blade.png"
+    assert captured["variables"]["uploaded_asset_mime_type"] == "image/png"
+    assert captured["variables"]["uploaded_asset_size_bytes"] == "16"
+    assert result["text"] == "建议先结合上传卡图细化实现方案"

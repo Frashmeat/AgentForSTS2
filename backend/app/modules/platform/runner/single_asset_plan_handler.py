@@ -52,6 +52,9 @@ def _build_prompt(input_payload: dict[str, object]) -> tuple[str, str, str]:
             "description": description,
             "image_mode": str(input_payload.get("image_mode", "")).strip() or "ai",
             "has_uploaded_image": "是" if str(input_payload.get("uploaded_asset_ref", "")).strip() else "否",
+            "uploaded_asset_file_name": str(input_payload.get("uploaded_asset_file_name", "")).strip() or "无",
+            "uploaded_asset_mime_type": str(input_payload.get("uploaded_asset_mime_type", "")).strip() or "无",
+            "uploaded_asset_size_bytes": str(input_payload.get("uploaded_asset_size_bytes", "")).strip() or "无",
             "docs": docs.strip() or "无",
         },
     )

@@ -109,6 +109,9 @@ Rules:
 需求描述：{{ description }}
 图片模式：{{ image_mode }}
 是否已上传图片：{{ has_uploaded_image }}
+上传图片文件名：{{ uploaded_asset_file_name }}
+上传图片类型：{{ uploaded_asset_mime_type }}
+上传图片大小：{{ uploaded_asset_size_bytes }}
 
 可参考的 STS2 / BaseLib 资料：
 {{ docs }}

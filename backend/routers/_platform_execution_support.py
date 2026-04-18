@@ -7,6 +7,7 @@ from app.modules.platform.application.services import (
     ExecutionRoutingService,
     QuotaBillingService,
     ServerCredentialCipher,
+    UploadedAssetService,
 )
 from app.modules.platform.runner import ExecutionAdapter, PlatformWorkflowRegistry, PlatformWorkflowStep, StepDispatcher, WorkflowRunner
 from app.modules.platform.runner.batch_custom_code_handler import execute_batch_custom_code_step
@@ -23,6 +24,7 @@ def build_execution_orchestrator_service(session, request: Request) -> Execution
     quota_billing_service = _build_quota_billing_service(session, request)
     execution_routing_service = _build_execution_routing_service(session, request)
     server_credential_cipher = _build_server_credential_cipher(request)
+    uploaded_asset_service = _build_uploaded_asset_service(request)
     return container.resolve_singleton("platform.execution_orchestrator_service_factory")(
         job_repository=job_repository,
         ai_execution_repository=ai_execution_repository,
@@ -30,6 +32,7 @@ def build_execution_orchestrator_service(session, request: Request) -> Execution
         job_event_repository=job_event_repository,
         execution_routing_service=execution_routing_service,
         server_credential_cipher=server_credential_cipher,
+        uploaded_asset_service=uploaded_asset_service,
         workflow_registry=_build_workflow_registry(request),
         workflow_runner=_build_workflow_runner(request),
     )
@@ -59,6 +62,14 @@ def _build_server_credential_cipher(request: Request) -> ServerCredentialCipher:
     container = request.app.state.container
     settings = container.resolve_singleton("settings")
     return container.resolve_singleton("platform.server_credential_cipher_factory").from_settings(settings)
+
+
+def _build_uploaded_asset_service(request: Request) -> UploadedAssetService:
+    container = request.app.state.container
+    factory = container.resolve_singleton("platform.uploaded_asset_service_factory")
+    if callable(factory):
+        return factory()
+    return factory
 
 
 def _build_workflow_registry(request: Request) -> PlatformWorkflowRegistry:

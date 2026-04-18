@@ -63,3 +63,20 @@ def test_uploaded_asset_service_validates_ref_belongs_to_user(tmp_path):
         assert str(error) == f"uploaded asset ref not found for user: {uploaded.uploaded_asset_ref}"
     else:
         raise AssertionError("expected ValueError when uploaded asset ref belongs to another user")
+
+
+def test_uploaded_asset_service_can_read_uploaded_asset_metadata(tmp_path):
+    service = UploadedAssetService(storage_root=tmp_path / "uploads")
+    uploaded = service.create_asset(
+        user_id=1001,
+        file_name="dark-blade.png",
+        content_base64=base64.b64encode(b"fake-image-bytes").decode(),
+        mime_type="image/png",
+    )
+
+    loaded = service.get_asset(user_id=1001, uploaded_asset_ref=uploaded.uploaded_asset_ref)
+
+    assert loaded.uploaded_asset_ref == uploaded.uploaded_asset_ref
+    assert loaded.file_name == "dark-blade.png"
+    assert loaded.mime_type == "image/png"
+    assert loaded.size_bytes == len(b"fake-image-bytes")
