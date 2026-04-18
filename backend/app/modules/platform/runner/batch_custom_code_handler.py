@@ -66,6 +66,8 @@ def _build_prompt(input_payload: dict[str, object]) -> str:
             "coupling_kind": coupling_kind,
             "affected_targets": _render_multiline_list(_string_list(input_payload.get("affected_targets"))),
             "depends_on": _render_multiline_list(_string_list(input_payload.get("depends_on"))),
+            "server_project_name": str(input_payload.get("server_project_name", "")).strip() or "无",
+            "server_workspace_root": str(input_payload.get("server_workspace_root", "")).strip() or "无",
         },
     )
 

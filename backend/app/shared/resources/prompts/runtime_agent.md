@@ -83,6 +83,8 @@ Rules:
 依赖原因：{{ dependency_reason }}
 验收说明：{{ acceptance_notes }}
 耦合类型：{{ coupling_kind }}
+服务器项目名：{{ server_project_name }}
+服务器工作区：{{ server_workspace_root }}
 影响目标：
 {{ affected_targets }}
 依赖项：
@@ -112,6 +114,8 @@ Rules:
 上传图片文件名：{{ uploaded_asset_file_name }}
 上传图片类型：{{ uploaded_asset_mime_type }}
 上传图片大小：{{ uploaded_asset_size_bytes }}
+服务器项目名：{{ server_project_name }}
+服务器工作区：{{ server_workspace_root }}
 
 可参考的 STS2 / BaseLib 资料：
 {{ docs }}

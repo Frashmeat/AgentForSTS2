@@ -55,6 +55,8 @@ def _build_prompt(input_payload: dict[str, object]) -> tuple[str, str, str]:
             "uploaded_asset_file_name": str(input_payload.get("uploaded_asset_file_name", "")).strip() or "无",
             "uploaded_asset_mime_type": str(input_payload.get("uploaded_asset_mime_type", "")).strip() or "无",
             "uploaded_asset_size_bytes": str(input_payload.get("uploaded_asset_size_bytes", "")).strip() or "无",
+            "server_project_name": str(input_payload.get("server_project_name", "")).strip() or "无",
+            "server_workspace_root": str(input_payload.get("server_workspace_root", "")).strip() or "无",
             "docs": docs.strip() or "无",
         },
     )
