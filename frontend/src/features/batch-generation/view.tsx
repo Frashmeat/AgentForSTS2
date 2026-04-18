@@ -347,6 +347,15 @@ function BatchModePage({
   const [requirements, setRequirements] = useState("");
   const [projectRoot, setProjectRoot] = useState("");
 
+  function deriveServerWorkspaceProjectName() {
+    const normalizedProjectRoot = projectRoot.trim().replace(/\\/g, "/");
+    if (!normalizedProjectRoot) {
+      return "";
+    }
+    const segments = normalizedProjectRoot.split("/").filter(Boolean);
+    return segments[segments.length - 1] ?? "";
+  }
+
   useEffect(() => {
     loadAppConfig()
       .then((config) => {
@@ -738,6 +747,7 @@ function BatchModePage({
       inputSummary: plan.summary || requirements.trim() || plan.mod_name,
       requiresCodeAgent: true,
       requiresImageAi: editedItems.some(item => item.needs_image && !item.provided_image_b64),
+      serverWorkspaceProjectName: deriveServerWorkspaceProjectName(),
       items: editedItems.map((item, index) => ({
         item_type: item.type,
         input_summary: item.description || item.name,

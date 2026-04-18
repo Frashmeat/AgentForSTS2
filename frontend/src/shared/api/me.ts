@@ -37,6 +37,13 @@ export interface UploadedAssetView {
   created_at: string;
 }
 
+export interface ServerWorkspaceView {
+  server_project_ref: string;
+  project_name: string;
+  workspace_root: string;
+  created_at: string;
+}
+
 export function getMyProfile(): Promise<CurrentUserProfile> {
   return requestJson<CurrentUserProfile>(buildApiPath("/api/me/profile", {}), {
     backend: "web",
@@ -91,6 +98,16 @@ export function uploadMyServerAsset(body: {
   mime_type?: string;
 }): Promise<UploadedAssetView> {
   return requestJson<UploadedAssetView>(buildApiPath("/api/me/upload-assets", {}), {
+    backend: "web",
+    method: "POST",
+    body,
+  });
+}
+
+export function createMyServerWorkspace(body: {
+  project_name: string;
+}): Promise<ServerWorkspaceView> {
+  return requestJson<ServerWorkspaceView>(buildApiPath("/api/me/server-workspaces", {}), {
     backend: "web",
     method: "POST",
     body,

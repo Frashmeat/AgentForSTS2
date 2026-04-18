@@ -1,4 +1,5 @@
 import {
+  createMyServerWorkspace,
   createMyJob,
   listMyJobEvents,
   startMyJob,
@@ -43,6 +44,15 @@ export async function createAndStartPlatformFlow(
     ...item,
     input_payload: { ...(item.input_payload ?? {}) },
   }));
+
+  if (request.serverWorkspaceProjectName?.trim()) {
+    const workspace = await createMyServerWorkspace({
+      project_name: request.serverWorkspaceProjectName.trim(),
+    });
+    for (const item of items) {
+      item.input_payload.server_project_ref = workspace.server_project_ref;
+    }
+  }
 
   for (const upload of request.serverUploads ?? []) {
     const uploaded = await uploadMyServerAsset({

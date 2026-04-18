@@ -145,3 +145,60 @@ test("platform run flow uploads assets before creating job and injects uploaded_
   assert.equal(result.job.id, 789);
   assert.equal(result.started.status, "queued");
 });
+
+test("platform run flow creates server workspace before creating job and injects server_project_ref", async () => {
+  const calls: Array<{ input: unknown; init?: RequestInit }> = [];
+  Object.assign(globalThis, {
+    fetch: async (input: unknown, init?: RequestInit) => {
+      calls.push({ input, init });
+      if (calls.length === 1) {
+        return createMockResponse({
+          ok: true,
+          body: {
+            server_project_ref: "server-workspace:abc123",
+            project_name: "DarkMod",
+            workspace_root: "F:/runtime/platform-workspaces/1001/abc123/DarkMod",
+            created_at: "2026-04-18T12:00:00+00:00",
+          },
+        });
+      }
+      if (calls.length === 2) {
+        return createMockResponse({
+          ok: true,
+          body: { id: 790, status: "draft", job_type: "single_generate" },
+        });
+      }
+      return createMockResponse({
+        ok: true,
+        body: { id: 790, status: "queued" },
+      });
+    },
+  });
+
+  const result = await createAndStartPlatformFlow({
+    jobType: "single_generate",
+    workflowVersion: "2026.04.04",
+    inputSummary: "Dark Relic",
+    createdFrom: "single_asset",
+    items: [
+      {
+        item_type: "custom_code",
+        input_summary: "Dark Relic",
+        input_payload: {
+          asset_type: "custom_code",
+          item_name: "SingleEffectPatch",
+          description: "补一个单资产 custom_code 示例",
+          image_mode: "ai",
+        },
+      },
+    ],
+    serverWorkspaceProjectName: "DarkMod",
+  });
+
+  assert.equal(calls[0].input, "/api/me/server-workspaces");
+  assert.equal(calls[1].input, "/api/me/jobs");
+  assert.equal(calls[2].input, "/api/me/jobs/790/start");
+  assert.match(String(calls[1].init?.body), /"server_project_ref":"server-workspace:abc123"/);
+  assert.equal(result.job.id, 790);
+  assert.equal(result.started.status, "queued");
+});

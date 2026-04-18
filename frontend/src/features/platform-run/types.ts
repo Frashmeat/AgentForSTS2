@@ -17,6 +17,7 @@ export interface PlatformExecutionRequest {
     contentBase64: string;
     mimeType?: string;
   }>;
+  serverWorkspaceProjectName?: string;
   items: PlatformJobCreateItem[];
   runLocal: () => void;
 }

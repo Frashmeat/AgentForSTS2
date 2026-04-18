@@ -224,6 +224,15 @@ export function SingleAssetWorkspaceContainer() {
     reader.readAsDataURL(file);
   }
 
+  function deriveServerWorkspaceProjectName() {
+    const normalizedProjectRoot = projectRoot.trim().replace(/\\/g, "/");
+    if (!normalizedProjectRoot) {
+      return "";
+    }
+    const segments = normalizedProjectRoot.split("/").filter(Boolean);
+    return segments[segments.length - 1] ?? "";
+  }
+
   function reset() {
     singleAssetWorkflowController.reset();
     clearSingleAssetSnapshot();
@@ -341,6 +350,7 @@ export function SingleAssetWorkspaceContainer() {
           inputSummary: singleAssetInputSummary,
           requiresCodeAgent: true,
           requiresImageAi: singleAssetRequiresImageAi,
+          serverWorkspaceProjectName: deriveServerWorkspaceProjectName(),
           serverUploads:
             imageMode === "upload" && Boolean(uploadedImageB64)
               ? [
