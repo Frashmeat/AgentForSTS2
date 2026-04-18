@@ -6,6 +6,7 @@ from agents.sts2_docs import get_docs_for_type
 from app.modules.platform.contracts.runner_contracts import StepExecutionRequest
 from app.shared.prompting import PromptLoader
 
+from .server_workspace_snapshot import render_server_workspace_snapshot
 from .text_generate_handler import execute_text_generate_step
 
 
@@ -57,6 +58,7 @@ def _build_prompt(input_payload: dict[str, object]) -> tuple[str, str, str]:
             "uploaded_asset_size_bytes": str(input_payload.get("uploaded_asset_size_bytes", "")).strip() or "无",
             "server_project_name": str(input_payload.get("server_project_name", "")).strip() or "无",
             "server_workspace_root": str(input_payload.get("server_workspace_root", "")).strip() or "无",
+            "server_workspace_snapshot": render_server_workspace_snapshot(input_payload.get("server_workspace_root")),
             "docs": docs.strip() or "无",
         },
     )

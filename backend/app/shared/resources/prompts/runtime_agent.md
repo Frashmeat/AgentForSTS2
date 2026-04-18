@@ -108,6 +108,7 @@ Rules:
    - 验收清单
 4. 当前输出的是服务器文本方案，不要假装已经生成图片、写入本地项目或执行本地构建。
 5. 若输入存在缺口，可以基于下方资料做保守假设，但必须在“风险与边界”里说明。
+6. 如果给出了“服务器工作区现状”，优先结合这些真实文件事实来约束类名、资源路径与接线建议，不要重新假设项目骨架。
 
 资产类型：{{ asset_type_label }}
 资产名称：{{ item_name }}
@@ -119,6 +120,8 @@ Rules:
 上传图片大小：{{ uploaded_asset_size_bytes }}
 服务器项目名：{{ server_project_name }}
 服务器工作区：{{ server_workspace_root }}
+服务器工作区现状：
+{{ server_workspace_snapshot }}
 
 可参考的 STS2 / BaseLib 资料：
 {{ docs }}
