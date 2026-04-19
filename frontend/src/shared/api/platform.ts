@@ -23,6 +23,7 @@ export interface PlatformJobSummary {
   id: number;
   job_type: string;
   status: string;
+  delivery_state?: string;
   workflow_version?: string;
   selected_execution_profile_id?: number | null;
   selected_agent_backend?: string;

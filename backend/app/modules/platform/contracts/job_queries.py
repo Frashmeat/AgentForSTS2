@@ -10,6 +10,7 @@ class JobListItem(ModelBase):
     id: int
     job_type: str
     status: str
+    delivery_state: str = ""
     input_summary: str = ""
     selected_execution_profile_id: int | None = None
     selected_agent_backend: str = ""
@@ -51,6 +52,7 @@ class JobDetailView(ModelBase):
     id: int
     job_type: str
     status: str
+    delivery_state: str = ""
     input_summary: str = ""
     selected_execution_profile_id: int | None = None
     selected_agent_backend: str = ""

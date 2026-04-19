@@ -53,6 +53,11 @@ class _DeferredSummary:
     reason_message: str = ""
 
 
+@dataclass(slots=True)
+class _DeliverySummary:
+    state: str = ""
+
+
 class JobQueryRepositorySqlAlchemy(JobQueryRepository):
     def __init__(self, session: Session) -> None:
         self.session = session
@@ -66,11 +71,13 @@ class JobQueryRepositorySqlAlchemy(JobQueryRepository):
         )
         refund_summaries = self._load_refund_summaries([row.id for row in rows])
         deferred_summaries = self._load_deferred_summaries([row.id for row in rows])
+        delivery_summaries = self._load_delivery_summaries([row.id for row in rows])
         return [
             JobListItem(
                 id=row.id,
                 job_type=row.job_type,
                 status=_enum_value(row.status),
+                delivery_state=delivery_summaries.get(row.id, _DeliverySummary()).state,
                 input_summary=row.input_summary,
                 selected_execution_profile_id=row.selected_execution_profile_id,
                 selected_agent_backend=row.selected_agent_backend,
@@ -95,10 +102,12 @@ class JobQueryRepositorySqlAlchemy(JobQueryRepository):
             return None
         refund_summary = self._load_refund_summaries([row.id]).get(row.id, _RefundSummary())
         deferred_summary = self._load_deferred_summaries([row.id]).get(row.id, _DeferredSummary())
+        delivery_summary = self._load_delivery_summaries([row.id]).get(row.id, _DeliverySummary())
         return JobDetailView(
             id=row.id,
             job_type=row.job_type,
             status=_enum_value(row.status),
+            delivery_state=delivery_summary.state,
             input_summary=row.input_summary,
             selected_execution_profile_id=row.selected_execution_profile_id,
             selected_agent_backend=row.selected_agent_backend,
@@ -180,6 +189,26 @@ class JobQueryRepositorySqlAlchemy(JobQueryRepository):
                 reason_code=str(payload.get("reason_code", "")).strip(),
                 reason_message=str(payload.get("reason_message", "")).strip(),
             )
+        return summaries
+
+    def _load_delivery_summaries(self, job_ids: list[int]) -> dict[int, _DeliverySummary]:
+        if not job_ids:
+            return {}
+
+        rows = (
+            self.session.query(ArtifactRecord.job_id, ArtifactRecord.artifact_type)
+            .filter(ArtifactRecord.job_id.in_(job_ids))
+            .order_by(ArtifactRecord.job_id.asc(), ArtifactRecord.id.asc())
+            .all()
+        )
+
+        summaries: dict[int, _DeliverySummary] = {}
+        for job_id, artifact_type in rows:
+            summary = summaries.setdefault(job_id, _DeliverySummary())
+            if artifact_type == "deployed_output":
+                summary.state = "deployed"
+            elif artifact_type == "build_output" and summary.state != "deployed":
+                summary.state = "built"
         return summaries
 
     def list_visible_events(self, user_id: int, job_id: int, after_id: int | None, limit: int) -> list[JobEventView]:

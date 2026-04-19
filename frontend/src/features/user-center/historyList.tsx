@@ -3,11 +3,21 @@ import type { UserCenterJobSummary } from "./model.ts";
 import { formatExecutionProfileText } from "./executionProfileText.ts";
 import { renderJobStatus } from "./statusText.ts";
 
-function resolveDeliveryBadge(resultSummary: string | undefined) {
-  const summary = String(resultSummary ?? "").trim();
-  if (!summary) {
-    return null;
+function resolveDeliveryBadge(deliveryState: string | undefined, resultSummary: string | undefined) {
+  const normalizedState = String(deliveryState ?? "").trim();
+  if (normalizedState === "deployed") {
+    return {
+      label: "已部署",
+      className: "rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-medium text-emerald-800",
+    };
   }
+  if (normalizedState === "built") {
+    return {
+      label: "已构建",
+      className: "rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 font-medium text-slate-700",
+    };
+  }
+  const summary = String(resultSummary ?? "").trim();
   if (summary.includes("部署到")) {
     return {
       label: "已部署",
@@ -42,7 +52,7 @@ export function HistoryList({ jobs }: { jobs: UserCenterJobSummary[] }) {
         )}
         {jobs.map(job => {
           const executionProfileText = formatExecutionProfileText(job);
-          const deliveryBadge = resolveDeliveryBadge(job.result_summary);
+          const deliveryBadge = resolveDeliveryBadge(job.delivery_state, job.result_summary);
           return (
             <Link
               key={job.id}

@@ -72,6 +72,26 @@ def _seed_query_fixture(db_session):
         file_name="a.png",
         result_summary="生成成功",
     )
+    build_artifact = ArtifactRecord(
+        job_id=job.id,
+        job_item_id=item.id,
+        user_id=1001,
+        artifact_type="build_output",
+        storage_provider="server_workspace",
+        object_key="/runtime/MyMod.dll",
+        file_name="MyMod.dll",
+        result_summary="服务器构建产物",
+    )
+    deployed_artifact = ArtifactRecord(
+        job_id=job.id,
+        job_item_id=item.id,
+        user_id=1001,
+        artifact_type="deployed_output",
+        storage_provider="server_deploy",
+        object_key="/game/Mods/MyMod/MyMod.dll",
+        file_name="MyMod.dll",
+        result_summary="服务器部署产物",
+    )
     event = JobEventRecord(
         job_id=job.id,
         job_item_id=item.id,
@@ -88,7 +108,7 @@ def _seed_query_fixture(db_session):
         refund_reason="system_error",
     )
     quota_account = QuotaAccountRecord(user_id=1001, status="active")
-    db_session.add_all([execution, artifact, event, quota_account])
+    db_session.add_all([execution, artifact, build_artifact, deployed_artifact, event, quota_account])
     db_session.flush()
     refund.ai_execution_id = execution.id
     db_session.add(refund)
@@ -133,6 +153,7 @@ def test_job_query_repository_returns_user_scoped_views(db_session):
     assert detail.selected_execution_profile_id == 7
     assert detail.selected_agent_backend == "codex"
     assert detail.selected_model == "gpt-5.4"
+    assert detail.delivery_state == "deployed"
     assert detail.artifacts[0].file_name == "a.png"
     assert detail.artifacts[0].storage_provider == "local"
     assert detail.artifacts[0].object_key == "result/a.png"
