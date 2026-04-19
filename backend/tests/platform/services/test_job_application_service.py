@@ -184,7 +184,9 @@ class _SucceededRunner:
                     "server_workspace_root": str(merged.get("server_workspace_root", "")).strip(),
                 }
             elif step.step_type == "code.generate":
-                output_payload = {"text": "已写入 SingleEffectPatch 的服务器 custom_code 代码"}
+                output_payload = {"text": f"已写入 {str(merged.get('item_name', '')).strip()} 的服务器 custom_code 代码"}
+            elif step.step_type == "build.project":
+                output_payload = {"text": f"已完成 {str(merged.get('item_name', '')).strip()} 的服务器项目构建"}
             elif step.step_type == "single.asset.plan":
                 asset_type = str(step.input_payload.get("asset_type") or base_request.input_payload.get("asset_type", "")).strip()
                 if asset_type == "card":
@@ -414,7 +416,7 @@ def test_job_application_service_can_complete_supported_batch_custom_code_job(db
     assert started is not None
     assert started.status == JobStatus.SUCCEEDED
     assert started.items[0].status == JobItemStatus.SUCCEEDED
-    assert started.items[0].result_summary == "已写入 BattleScriptManager 的服务器 custom_code 代码"
+    assert started.items[0].result_summary == "已完成 BattleScriptManager 的服务器项目构建"
 
 
 def test_job_application_service_can_complete_supported_batch_card_job(db_session):
@@ -1004,7 +1006,7 @@ def test_job_application_service_can_complete_supported_single_custom_code_job(d
     assert started is not None
     assert started.status == JobStatus.SUCCEEDED
     assert started.items[0].status == JobItemStatus.SUCCEEDED
-    assert started.items[0].result_summary == "已写入 SingleEffectPatch 的服务器 custom_code 代码"
+    assert started.items[0].result_summary == "已完成 SingleEffectPatch 的服务器项目构建"
 
 
 def test_job_application_service_can_complete_supported_single_relic_job(db_session):

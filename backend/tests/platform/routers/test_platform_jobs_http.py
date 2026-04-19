@@ -174,7 +174,9 @@ class _SucceededWorkflowRunner:
                     "server_workspace_root": str(merged.get("server_workspace_root", "")).strip(),
                 }
             elif step.step_type == "code.generate":
-                output_payload = {"text": "已写入 SingleEffectPatch 的服务器 custom_code 代码"}
+                output_payload = {"text": f"已写入 {str(merged.get('item_name', '')).strip()} 的服务器 custom_code 代码"}
+            elif step.step_type == "build.project":
+                output_payload = {"text": f"已完成 {str(merged.get('item_name', '')).strip()} 的服务器项目构建"}
             elif step.step_type == "single.asset.plan":
                 asset_type = str(step.input_payload.get("asset_type") or base_request.input_payload.get("asset_type", "")).strip()
                 if asset_type == "card":
@@ -612,13 +614,13 @@ def test_platform_jobs_router_can_complete_supported_batch_custom_code_job(clien
     items = client.get(f"/api/platform/jobs/{job_id}/items")
     assert items.status_code == 200
     assert items.json()[0]["status"] == "succeeded"
-    assert items.json()[0]["result_summary"] == "已写入 BattleScriptManager 的服务器 custom_code 代码"
+    assert items.json()[0]["result_summary"] == "已完成 BattleScriptManager 的服务器项目构建"
 
     session = client.app.state.container.resolve_singleton("platform.db_session_factory")()
     try:
         execution = session.query(AIExecutionRecord).filter(AIExecutionRecord.job_id == job_id).one()
         assert execution.status.value == "succeeded"
-        assert execution.result_summary == "已写入 BattleScriptManager 的服务器 custom_code 代码"
+        assert execution.result_summary == "已完成 BattleScriptManager 的服务器项目构建"
     finally:
         session.close()
 
@@ -978,13 +980,13 @@ def test_platform_jobs_router_can_complete_supported_single_custom_code_job(clie
     items = client.get(f"/api/platform/jobs/{job_id}/items")
     assert items.status_code == 200
     assert items.json()[0]["status"] == "succeeded"
-    assert items.json()[0]["result_summary"] == "已写入 SingleEffectPatch 的服务器 custom_code 代码"
+    assert items.json()[0]["result_summary"] == "已完成 SingleEffectPatch 的服务器项目构建"
 
     session = client.app.state.container.resolve_singleton("platform.db_session_factory")()
     try:
         execution = session.query(AIExecutionRecord).filter(AIExecutionRecord.job_id == job_id).one()
         assert execution.status.value == "succeeded"
-        assert execution.result_summary == "已写入 SingleEffectPatch 的服务器 custom_code 代码"
+        assert execution.result_summary == "已完成 SingleEffectPatch 的服务器项目构建"
     finally:
         session.close()
 

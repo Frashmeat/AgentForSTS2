@@ -12,6 +12,7 @@ from app.modules.platform.application.services import (
 )
 from app.modules.platform.runner import ExecutionAdapter, PlatformWorkflowRegistry, PlatformWorkflowStep, StepDispatcher, WorkflowRunner
 from app.modules.platform.runner.batch_custom_code_handler import execute_batch_custom_code_step
+from app.modules.platform.runner.build_project_handler import execute_build_project_step
 from app.modules.platform.runner.code_generate_handler import execute_code_generate_step
 from app.modules.platform.runner.log_analysis_handler import execute_log_analysis_step
 from app.modules.platform.runner.single_asset_plan_handler import execute_single_asset_plan_step
@@ -98,6 +99,7 @@ def _build_workflow_registry(request: Request) -> PlatformWorkflowRegistry:
         [
             PlatformWorkflowStep(step_type="batch.custom_code.plan", step_id="batch.custom_code.plan"),
             PlatformWorkflowStep(step_type="code.generate", step_id="batch.custom_code.codegen"),
+            PlatformWorkflowStep(step_type="build.project", step_id="batch.custom_code.build"),
         ],
     )
     registry.register(
@@ -161,6 +163,7 @@ def _build_workflow_registry(request: Request) -> PlatformWorkflowRegistry:
         [
             PlatformWorkflowStep(step_type="batch.custom_code.plan", step_id="single.custom_code.plan"),
             PlatformWorkflowStep(step_type="code.generate", step_id="single.custom_code.codegen"),
+            PlatformWorkflowStep(step_type="build.project", step_id="single.custom_code.build"),
         ],
     )
     registry.register(
@@ -212,6 +215,6 @@ def _build_execution_adapter(request: Request) -> ExecutionAdapter:
         batch_custom_code_handler=execute_batch_custom_code_step,
         single_asset_plan_handler=execute_single_asset_plan_step,
         log_handler=execute_log_analysis_step,
-        build_handler=None,
+        build_handler=execute_build_project_step,
         approval_handler=None,
     )
