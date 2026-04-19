@@ -2133,7 +2133,6 @@ def test_me_router_can_complete_supported_single_card_job(client: TestClient):
                     "item_type": "card",
                     "input_summary": "补一个卡牌实现方案",
                     "input_payload": {
-                        "asset_type": "card",
                         "item_name": "DarkBlade",
                         "description": "1 费攻击牌，造成 8 点伤害，升级后造成 12 点伤害。",
                         "image_mode": "ai",
@@ -2264,7 +2263,6 @@ def test_me_router_can_complete_supported_single_card_fullscreen_job(client: Tes
                     "item_type": "card_fullscreen",
                     "input_summary": "补一个全画面卡实现方案",
                     "input_payload": {
-                        "asset_type": "card_fullscreen",
                         "item_name": "DarkBladeFullscreen",
                         "description": "一张强调暗影剑士出招姿态的全画面卡插图方案。",
                         "image_mode": "ai",
@@ -2404,7 +2402,6 @@ def test_me_router_can_complete_batch_card_fullscreen_with_uploaded_asset(client
                     "item_type": "card_fullscreen",
                     "input_summary": "补一个批量全画面卡实现方案",
                     "input_payload": {
-                        "asset_type": "card_fullscreen",
                         "item_name": "DarkBladeFullscreen",
                         "description": "一张强调暗影剑士出招姿态的全画面卡插图方案。",
                         "image_mode": "upload",
@@ -2533,7 +2530,6 @@ def test_me_router_can_complete_single_card_fullscreen_with_uploaded_asset(clien
                     "item_type": "card_fullscreen",
                     "input_summary": "补一个全画面卡实现方案",
                     "input_payload": {
-                        "asset_type": "card_fullscreen",
                         "item_name": "DarkBladeFullscreen",
                         "description": "一张强调暗影剑士出招姿态的全画面卡插图方案。",
                         "image_mode": "upload",

@@ -124,7 +124,11 @@ class _SupportedServerRegistry:
         if (job_type, item_type) == ("batch_generate", "card_fullscreen"):
             if str(payload.get("uploaded_asset_ref", "")).strip() and str(payload.get("server_project_ref", "")).strip():
                 return [
-                    PlatformWorkflowStep(step_type="asset.generate", step_id="batch-card-fullscreen-asset"),
+                    PlatformWorkflowStep(
+                        step_type="asset.generate",
+                        step_id="batch-card-fullscreen-asset",
+                        input_payload={"asset_type": "card_fullscreen"},
+                    ),
                     PlatformWorkflowStep(step_type="build.project", step_id="batch-card-fullscreen-build"),
                 ]
             return [
@@ -164,20 +168,54 @@ class _SupportedServerRegistry:
                 PlatformWorkflowStep(step_type="code.generate", step_id="single-custom-codegen"),
             ]
         if (job_type, item_type) == ("single_generate", "card"):
-            return [PlatformWorkflowStep(step_type="single.asset.plan", step_id="single-card-plan")]
+            return [
+                PlatformWorkflowStep(
+                    step_type="single.asset.plan",
+                    step_id="single-card-plan",
+                    input_payload={"asset_type": "card"},
+                )
+            ]
         if (job_type, item_type) == ("single_generate", "card_fullscreen"):
             if str(payload.get("uploaded_asset_ref", "")).strip() and str(payload.get("server_project_ref", "")).strip():
                 return [
-                    PlatformWorkflowStep(step_type="asset.generate", step_id="single-card-fullscreen-asset"),
+                    PlatformWorkflowStep(
+                        step_type="asset.generate",
+                        step_id="single-card-fullscreen-asset",
+                        input_payload={"asset_type": "card_fullscreen"},
+                    ),
                     PlatformWorkflowStep(step_type="build.project", step_id="single-card-fullscreen-build"),
                 ]
-            return [PlatformWorkflowStep(step_type="single.asset.plan", step_id="single-card-fullscreen-plan")]
+            return [
+                PlatformWorkflowStep(
+                    step_type="single.asset.plan",
+                    step_id="single-card-fullscreen-plan",
+                    input_payload={"asset_type": "card_fullscreen"},
+                )
+            ]
         if (job_type, item_type) == ("single_generate", "relic"):
-            return [PlatformWorkflowStep(step_type="single.asset.plan", step_id="single-relic-plan")]
+            return [
+                PlatformWorkflowStep(
+                    step_type="single.asset.plan",
+                    step_id="single-relic-plan",
+                    input_payload={"asset_type": "relic"},
+                )
+            ]
         if (job_type, item_type) == ("single_generate", "power"):
-            return [PlatformWorkflowStep(step_type="single.asset.plan", step_id="single-power-plan")]
+            return [
+                PlatformWorkflowStep(
+                    step_type="single.asset.plan",
+                    step_id="single-power-plan",
+                    input_payload={"asset_type": "power"},
+                )
+            ]
         if (job_type, item_type) == ("single_generate", "character"):
-            return [PlatformWorkflowStep(step_type="single.asset.plan", step_id="single-character-plan")]
+            return [
+                PlatformWorkflowStep(
+                    step_type="single.asset.plan",
+                    step_id="single-character-plan",
+                    input_payload={"asset_type": "character"},
+                )
+            ]
         raise KeyError(f"workflow not found for {job_type}/{item_type}")
 
 
@@ -737,7 +775,6 @@ def test_job_application_service_can_complete_batch_card_fullscreen_with_uploade
                         "item_type": "card_fullscreen",
                         "input_summary": "补一个批量全画面卡实现方案",
                         "input_payload": {
-                            "asset_type": "card_fullscreen",
                             "item_name": "DarkBladeFullscreen",
                             "description": "一张强调暗影剑士出招姿态的全画面卡插图方案。",
                             "image_mode": "upload",
@@ -1336,7 +1373,6 @@ def test_job_application_service_can_complete_supported_single_card_job(db_sessi
                         "item_type": "card",
                         "input_summary": "补一个卡牌实现方案",
                         "input_payload": {
-                            "asset_type": "card",
                             "item_name": "DarkBlade",
                             "description": "1 费攻击牌，造成 8 点伤害，升级后造成 12 点伤害。",
                             "image_mode": "ai",
@@ -1434,7 +1470,6 @@ def test_job_application_service_can_complete_supported_single_card_fullscreen_j
                         "item_type": "card_fullscreen",
                         "input_summary": "补一个全画面卡实现方案",
                         "input_payload": {
-                            "asset_type": "card_fullscreen",
                             "item_name": "DarkBladeFullscreen",
                             "description": "一张强调暗影剑士出招姿态的全画面卡插图方案。",
                             "image_mode": "ai",
@@ -1547,7 +1582,6 @@ def test_job_application_service_can_complete_single_card_fullscreen_with_upload
                         "item_type": "card_fullscreen",
                         "input_summary": "补一个全画面卡实现方案",
                         "input_payload": {
-                            "asset_type": "card_fullscreen",
                             "item_name": "DarkBladeFullscreen",
                             "description": "一张强调暗影剑士出招姿态的全画面卡插图方案。",
                             "image_mode": "upload",
