@@ -4,6 +4,7 @@ import { AlertTriangle, Clock3, House } from "lucide-react";
 import { PlatformPageShell } from "../../components/platform/PlatformPageShell.tsx";
 import { getMyJob, listMyJobEvents, listMyJobItems } from "../../shared/api/me.ts";
 import type {
+  PlatformArtifactSummary,
   PlatformJobDetail,
   PlatformJobEventSummary,
   PlatformJobItemSummary,
@@ -31,6 +32,13 @@ function renderArtifactTypeLabel(value: string) {
     default:
       return value || "未知产物";
   }
+}
+
+function resolveArtifactLocationLabel(artifact: PlatformArtifactSummary) {
+  if (artifact.artifact_type === "deployed_output") {
+    return "部署位置";
+  }
+  return "产物路径";
 }
 
 export function UserCenterJobDetailPage() {
@@ -191,6 +199,14 @@ export function UserCenterJobDetailPage() {
                   </div>
                   <div className="max-w-xs text-right text-xs text-slate-500">
                     <p>{artifact.result_summary || "无产物摘要"}</p>
+                    {artifact.object_key ? (
+                      <p className="mt-1 break-all">
+                        {resolveArtifactLocationLabel(artifact)}：{artifact.object_key}
+                      </p>
+                    ) : null}
+                    {artifact.storage_provider ? (
+                      <p className="mt-1">来源：{artifact.storage_provider}</p>
+                    ) : null}
                   </div>
                 </div>
               </article>

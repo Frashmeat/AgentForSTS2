@@ -40,6 +40,8 @@ class JobItemListItem(ModelBase):
 class ArtifactSummary(ModelBase):
     id: int
     artifact_type: str
+    storage_provider: str = ""
+    object_key: str = ""
     file_name: str | None = None
     result_summary: str = ""
 

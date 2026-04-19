@@ -134,6 +134,8 @@ def test_job_query_repository_returns_user_scoped_views(db_session):
     assert detail.selected_agent_backend == "codex"
     assert detail.selected_model == "gpt-5.4"
     assert detail.artifacts[0].file_name == "a.png"
+    assert detail.artifacts[0].storage_provider == "local"
+    assert detail.artifacts[0].object_key == "result/a.png"
     assert items[0].item_type == "card"
     assert events[0].as_user_payload()["event_type"] == "job.succeeded"
 

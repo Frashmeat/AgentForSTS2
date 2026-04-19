@@ -67,6 +67,8 @@ export interface PlatformJobEventSummary {
 export interface PlatformArtifactSummary {
   id: number;
   artifact_type: string;
+  storage_provider: string;
+  object_key: string;
   file_name: string;
   result_summary: string;
 }

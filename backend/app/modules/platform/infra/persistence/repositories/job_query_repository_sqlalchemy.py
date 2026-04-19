@@ -214,6 +214,8 @@ class JobQueryRepositorySqlAlchemy(JobQueryRepository):
             ArtifactSummary(
                 id=row.id,
                 artifact_type=row.artifact_type,
+                storage_provider=row.storage_provider,
+                object_key=row.object_key,
                 file_name=row.file_name,
                 result_summary=row.result_summary,
             )
