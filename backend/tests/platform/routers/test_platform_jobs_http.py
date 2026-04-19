@@ -424,6 +424,44 @@ def test_platform_jobs_router_requires_server_project_ref_for_single_custom_code
     assert created.json()["detail"] == "platform job payload for single_generate/custom_code requires server_project_ref"
 
 
+def test_platform_jobs_router_requires_server_project_ref_for_batch_custom_code(client: TestClient):
+    _register_login_and_verify(client, "luna", "luna@example.com")
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    profile_id = _seed_execution_profile(client)
+
+    created = client.post(
+        "/api/platform/jobs",
+        json={
+            "job_type": "batch_generate",
+            "workflow_version": "2026.03.31",
+            "selected_execution_profile_id": profile_id,
+            "selected_agent_backend": "codex",
+            "selected_model": "gpt-5.4",
+            "items": [
+                {
+                    "item_type": "custom_code",
+                    "input_summary": "补一个战斗脚本管理器",
+                    "input_payload": {
+                        "item_name": "BattleScriptManager",
+                        "description": "实现一个战斗阶段脚本管理器",
+                    },
+                }
+            ],
+        },
+    )
+
+    assert created.status_code == 400
+    assert created.json()["detail"] == "platform job payload for batch_generate/custom_code requires server_project_ref"
+
+
 def test_platform_jobs_router_accepts_server_project_ref(client: TestClient):
     user_id = _register_login_and_verify(client, "luna", "luna@example.com")
     login = client.post(
@@ -524,7 +562,7 @@ def test_platform_jobs_router_can_complete_supported_log_analysis_job(client: Te
 
 
 def test_platform_jobs_router_can_complete_supported_batch_custom_code_job(client: TestClient):
-    _register_login_and_verify(client, "luna", "luna@example.com")
+    user_id = _register_login_and_verify(client, "luna", "luna@example.com")
     login = client.post(
         "/api/auth/login",
         json={
@@ -553,6 +591,7 @@ def test_platform_jobs_router_can_complete_supported_batch_custom_code_job(clien
                         "item_name": "BattleScriptManager",
                         "description": "实现一个战斗阶段脚本管理器",
                         "implementation_notes": "维护状态机并派发事件",
+                        "server_project_ref": workspace.server_project_ref,
                     },
                 }
             ],
@@ -573,13 +612,13 @@ def test_platform_jobs_router_can_complete_supported_batch_custom_code_job(clien
     items = client.get(f"/api/platform/jobs/{job_id}/items")
     assert items.status_code == 200
     assert items.json()[0]["status"] == "succeeded"
-    assert items.json()[0]["result_summary"] == "已生成服务器 custom_code 实现方案"
+    assert items.json()[0]["result_summary"] == "已写入 BattleScriptManager 的服务器 custom_code 代码"
 
     session = client.app.state.container.resolve_singleton("platform.db_session_factory")()
     try:
         execution = session.query(AIExecutionRecord).filter(AIExecutionRecord.job_id == job_id).one()
         assert execution.status.value == "succeeded"
-        assert execution.result_summary == "已生成服务器 custom_code 实现方案"
+        assert execution.result_summary == "已写入 BattleScriptManager 的服务器 custom_code 代码"
     finally:
         session.close()
 
@@ -656,6 +695,8 @@ def test_platform_jobs_router_can_complete_supported_batch_card_fullscreen_job(c
     assert login.status_code == 200
 
     profile_id = _seed_execution_profile(client)
+    workspace_service = client.app.state.container.resolve_singleton("platform.server_workspace_service_factory")()
+    workspace = workspace_service.create_workspace(user_id=user_id, project_name="DarkMod")
     client.app.state.container.register_singleton("platform.workflow_runner_factory", _SucceededWorkflowRunner)
 
     created = client.post(

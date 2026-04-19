@@ -248,8 +248,10 @@ class JobApplicationService:
                 self.uploaded_asset_service.ensure_accessible(user_id=user_id, uploaded_asset_ref=uploaded_asset_ref)
 
             server_project_ref = str(item.input_payload.get("server_project_ref", "")).strip()
-            if command.job_type == "single_generate" and item.item_type == "custom_code" and not server_project_ref:
-                raise ValueError("platform job payload for single_generate/custom_code requires server_project_ref")
+            if command.job_type in {"single_generate", "batch_generate"} and item.item_type == "custom_code" and not server_project_ref:
+                raise ValueError(
+                    f"platform job payload for {command.job_type}/custom_code requires server_project_ref"
+                )
             if server_project_ref:
                 if self.server_workspace_service is None:
                     raise ValueError("server workspace service is not configured")

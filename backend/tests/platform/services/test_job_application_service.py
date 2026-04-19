@@ -105,7 +105,10 @@ class _SupportedServerRegistry:
         if (job_type, item_type) == ("log_analysis", "log_analysis"):
             return [PlatformWorkflowStep(step_type="log.analyze", step_id="log-analyze")]
         if (job_type, item_type) == ("batch_generate", "custom_code"):
-            return [PlatformWorkflowStep(step_type="batch.custom_code.plan", step_id="batch-custom-code")]
+            return [
+                PlatformWorkflowStep(step_type="batch.custom_code.plan", step_id="batch-custom-code"),
+                PlatformWorkflowStep(step_type="code.generate", step_id="batch-custom-codegen"),
+            ]
         if (job_type, item_type) == ("batch_generate", "card"):
             return [
                 PlatformWorkflowStep(
@@ -315,7 +318,7 @@ def test_job_application_service_can_complete_supported_log_analysis_job(db_sess
     assert started.items[0].result_summary == "分析完成"
 
 
-def test_job_application_service_can_complete_supported_batch_custom_code_job(db_session):
+def test_job_application_service_can_complete_supported_batch_custom_code_job(db_session, tmp_path):
     cipher = ServerCredentialCipher("job-service-test-secret")
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
@@ -398,6 +401,7 @@ def test_job_application_service_can_complete_supported_batch_custom_code_job(db
                             "item_name": "BattleScriptManager",
                             "description": "实现一个战斗阶段脚本管理器",
                             "implementation_notes": "维护状态机并派发事件",
+                            "server_project_ref": workspace.server_project_ref,
                         },
                     }
                 ],
@@ -410,7 +414,7 @@ def test_job_application_service_can_complete_supported_batch_custom_code_job(db
     assert started is not None
     assert started.status == JobStatus.SUCCEEDED
     assert started.items[0].status == JobItemStatus.SUCCEEDED
-    assert started.items[0].result_summary == "已生成服务器 custom_code 实现方案"
+    assert started.items[0].result_summary == "已写入 BattleScriptManager 的服务器 custom_code 代码"
 
 
 def test_job_application_service_can_complete_supported_batch_card_job(db_session):
@@ -843,6 +847,8 @@ def test_job_application_service_can_complete_supported_batch_character_job(db_s
             refunded_amount=0,
         )
     )
+    workspace_service = ServerWorkspaceService(storage_root=tmp_path / "platform-workspaces")
+    workspace = workspace_service.create_workspace(user_id=1001, project_name="DarkMod")
 
     orchestrator = ExecutionOrchestratorService(
         job_repository=JobRepositorySqlAlchemy(db_session),
@@ -857,6 +863,7 @@ def test_job_application_service_can_complete_supported_batch_character_job(db_s
             execution_routing_repository=ExecutionRoutingRepositorySqlAlchemy(db_session)
         ),
         server_credential_cipher=cipher,
+        server_workspace_service=workspace_service,
         workflow_registry=_SupportedServerRegistry(),
         workflow_runner=_SucceededRunner(),
     )
@@ -864,6 +871,7 @@ def test_job_application_service_can_complete_supported_batch_character_job(db_s
         job_repository=JobRepositorySqlAlchemy(db_session),
         job_event_repository=JobEventRepositorySqlAlchemy(db_session),
         execution_orchestrator_service=orchestrator,
+        server_workspace_service=workspace_service,
     )
     job = service.create_job(
         user_id=1001,
@@ -1593,6 +1601,38 @@ def test_job_application_service_requires_server_project_ref_for_single_custom_c
         assert str(error) == "platform job payload for single_generate/custom_code requires server_project_ref"
     else:
         raise AssertionError("expected ValueError when server_project_ref is missing")
+
+
+def test_job_application_service_requires_server_project_ref_for_batch_custom_code(db_session):
+    service = JobApplicationService(
+        job_repository=JobRepositorySqlAlchemy(db_session),
+        job_event_repository=JobEventRepositorySqlAlchemy(db_session),
+    )
+
+    try:
+        service.create_job(
+            user_id=1001,
+            command=CreateJobCommand.model_validate(
+                {
+                    "job_type": "batch_generate",
+                    "workflow_version": "2026.03.31",
+                    "items": [
+                        {
+                            "item_type": "custom_code",
+                            "input_summary": "补一个战斗脚本管理器",
+                            "input_payload": {
+                                "item_name": "BattleScriptManager",
+                                "description": "实现一个战斗阶段脚本管理器",
+                            },
+                        }
+                    ],
+                }
+            ),
+        )
+    except ValueError as error:
+        assert str(error) == "platform job payload for batch_generate/custom_code requires server_project_ref"
+    else:
+        raise AssertionError("expected ValueError when batch custom_code server_project_ref is missing")
 
 
 def test_job_application_service_accepts_uploaded_asset_ref_for_platform_payload(db_session, tmp_path):
