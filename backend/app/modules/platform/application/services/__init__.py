@@ -9,6 +9,7 @@ from .execution_routing_service import ExecutionRoutingService, ResolvedExecutio
 from .execution_orchestrator_service import ExecutionOrchestratorService
 from .job_application_service import JobApplicationService
 from .job_query_service import JobQueryService
+from .platform_request_rate_limiter import PlatformRequestRateLimiter, PlatformRequestRateLimitExceededError
 from .quota_billing_service import QuotaBillingService
 from .server_credential_admin_service import ServerCredentialAdminService
 from .server_credential_cipher import ServerCredentialCipher
@@ -28,6 +29,8 @@ __all__ = [
     "ExecutionOrchestratorService",
     "JobApplicationService",
     "JobQueryService",
+    "PlatformRequestRateLimiter",
+    "PlatformRequestRateLimitExceededError",
     "QuotaBillingService",
     "ResolvedExecutionRoute",
     "ServerCredentialAdminService",

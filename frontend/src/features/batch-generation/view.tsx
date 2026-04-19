@@ -754,7 +754,6 @@ function BatchModePage({
         input_payload: {
           item_index: index,
           item_name: item.name,
-          asset_type: item.type,
           description: item.description,
           goal: item.goal,
           detailed_description: item.detailed_description,

@@ -16,6 +16,7 @@ _STEP_PROTOCOL_VERSION = "v1"
 _RESULT_SCHEMA_VERSION = "v1"
 _DISPATCH_STEP_TYPE = "workflow.dispatch"
 _PLATFORM_SERVER_JOB_TYPES = {"single_generate", "batch_generate"}
+_MAX_ACTIVE_SERVER_JOBS_PER_USER = 2
 _FORBIDDEN_PLATFORM_PAYLOAD_FIELDS = {
     "name",
     "asset_name",
@@ -56,6 +57,15 @@ class JobApplicationService:
         job = self.job_repository.find_by_id_for_user(command.job_id, user_id)
         if job is None:
             return None
+        if job.selected_execution_profile_id is not None:
+            active_server_job_count = self.job_repository.count_active_server_jobs_for_user(
+                user_id,
+                exclude_job_id=job.id,
+            )
+            if active_server_job_count >= _MAX_ACTIVE_SERVER_JOBS_PER_USER:
+                raise ValueError(
+                    f"too many active server jobs for user: limit {_MAX_ACTIVE_SERVER_JOBS_PER_USER}"
+                )
         now = datetime.now(UTC)
         for item in job.items:
             if item.status == JobItemStatus.PENDING:

@@ -269,12 +269,12 @@ async def test_provided_image_approval_first_defers_agent_events_until_approve_a
     monkeypatch.setattr(workflow, "_run_postprocess", fake_run_postprocess)
     monkeypatch.setattr(workflow, "create_asset", fake_create_asset)
 
-    provided_image = tmp_path / "input.png"
-    provided_image.write_bytes(b"not-a-real-png")
-
-    from PIL import Image as PILImage
-
-    monkeypatch.setattr(PILImage, "open", lambda path: DummyImage())
+    pil_module = types.ModuleType("PIL")
+    image_module = types.ModuleType("PIL.Image")
+    image_module.open = lambda stream: DummyImage()
+    pil_module.Image = image_module
+    monkeypatch.setitem(sys.modules, "PIL", pil_module)
+    monkeypatch.setitem(sys.modules, "PIL.Image", image_module)
 
     await workflow._ws_run_with_provided_image(
         ws,
@@ -282,7 +282,8 @@ async def test_provided_image_approval_first_defers_agent_events_until_approve_a
             "asset_type": "relic",
             "asset_name": "TestRelic",
             "description": "描述一个遗物",
-            "provided_image_path": str(provided_image),
+            "provided_image_b64": "ZmFrZS1pbWFnZS1ieXRlcw==",
+            "provided_image_name": "input.png",
         },
         tmp_path,
     )

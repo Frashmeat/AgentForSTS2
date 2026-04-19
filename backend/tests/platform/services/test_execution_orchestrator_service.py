@@ -9,9 +9,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from app.modules.platform.application.services.execution_routing_service import ExecutionRoutingService
 from app.modules.platform.application.services.execution_orchestrator_service import ExecutionOrchestratorService
 from app.modules.platform.application.services.quota_billing_service import QuotaBillingService
+from app.modules.platform.application.services.server_credential_cipher import ServerCredentialCipher
 from app.modules.platform.contracts.job_commands import CreateJobCommand
-from app.modules.platform.domain.models.enums import JobItemStatus, JobStatus
+from app.modules.platform.contracts.runner_contracts import StepExecutionResult
+from app.modules.platform.domain.models.enums import AIExecutionStatus, JobItemStatus, JobStatus
 from app.modules.platform.infra.persistence.models import (
+    AIExecutionRecord,
+    CredentialHealthCheckRecord,
     ExecutionProfileRecord,
     QuotaAccountRecord,
     QuotaAccountStatus,
@@ -41,6 +45,10 @@ from app.modules.platform.infra.persistence.repositories.quota_account_repositor
 from app.modules.platform.infra.persistence.repositories.usage_ledger_repository_sqlalchemy import (
     UsageLedgerRepositorySqlAlchemy,
 )
+from app.modules.platform.infra.persistence.repositories.server_credential_admin_repository_sqlalchemy import (
+    ServerCredentialAdminRepositorySqlAlchemy,
+)
+from app.modules.platform.runner.workflow_registry import PlatformWorkflowStep
 
 
 def _seed_ready_job(db_session):
@@ -105,6 +113,120 @@ def _seed_ready_job_with_server_profile(db_session):
     job.items[0].status = JobItemStatus.READY
     db_session.flush()
     return job, profile
+
+
+def _seed_ready_job_with_two_server_credentials(db_session, cipher: ServerCredentialCipher):
+    profile = ExecutionProfileRecord(
+        code="codex-gpt-5-4",
+        display_name="Codex CLI / gpt-5.4",
+        agent_backend="codex",
+        model="gpt-5.4",
+        description="默认推荐",
+        enabled=True,
+        recommended=True,
+        sort_order=10,
+    )
+    db_session.add(profile)
+    db_session.flush()
+    credential_a = ServerCredentialRecord(
+        execution_profile_id=profile.id,
+        provider="openai",
+        auth_type="api_key",
+        credential_ciphertext=cipher.encrypt("sk-primary"),
+        secret_ciphertext=None,
+        base_url="https://api-a.example.com/v1",
+        label="primary",
+        priority=5,
+        enabled=True,
+        health_status="healthy",
+        last_checked_at=None,
+        last_error_code="",
+        last_error_message="",
+    )
+    credential_b = ServerCredentialRecord(
+        execution_profile_id=profile.id,
+        provider="openai",
+        auth_type="api_key",
+        credential_ciphertext=cipher.encrypt("sk-secondary"),
+        secret_ciphertext=None,
+        base_url="https://api-b.example.com/v1",
+        label="secondary",
+        priority=10,
+        enabled=True,
+        health_status="healthy",
+        last_checked_at=None,
+        last_error_code="",
+        last_error_message="",
+    )
+    db_session.add_all([credential_a, credential_b])
+    db_session.flush()
+    job = JobRepositorySqlAlchemy(db_session).create_job_with_items(
+        user_id=1001,
+        command=CreateJobCommand.model_validate(
+            {
+                "job_type": "single_generate",
+                "workflow_version": "2026.03.31",
+                "selected_execution_profile_id": profile.id,
+                "selected_agent_backend": "codex",
+                "selected_model": "gpt-5.4",
+                "items": [{"item_type": "card"}],
+            }
+        ),
+    )
+    job.status = JobStatus.RUNNING
+    job.items[0].status = JobItemStatus.RUNNING
+    db_session.flush()
+    execution = AIExecutionRepositorySqlAlchemy(db_session).create(
+        AIExecutionRecord(
+            job_id=job.id,
+            job_item_id=job.items[0].id,
+            user_id=1001,
+            status="running",
+            provider="openai",
+            model="gpt-5.4",
+            credential_ref=f"server-credential:{credential_a.id}",
+            retry_attempt=0,
+            switched_credential=False,
+            request_idempotency_key="idem-retry",
+            workflow_version="2026.03.31",
+            step_protocol_version="v1",
+            result_schema_version="v1",
+            step_type="text.generate",
+            step_id="text.generate",
+        )
+    )
+    db_session.flush()
+    return job, profile, credential_a, credential_b, execution
+
+
+class _SingleStepRegistry:
+    def resolve(self, job_type: str, item_type: str, input_payload: dict[str, object] | None = None):
+        return [PlatformWorkflowStep(step_type="text.generate", step_id="text.generate")]
+
+
+class _RetryOnceRunner:
+    def __init__(self, *, first_error: str, success_text: str = "done") -> None:
+        self.first_error = first_error
+        self.success_text = success_text
+        self.binding_refs: list[str] = []
+
+    async def run(self, *, steps, base_request):
+        self.binding_refs.append(base_request.execution_binding.credential_ref)
+        if len(self.binding_refs) == 1:
+            return [
+                StepExecutionResult(
+                    step_id=steps[-1].step_id,
+                    status="failed_system",
+                    error_summary=self.first_error,
+                )
+            ]
+        return [
+            StepExecutionResult(
+                step_id=steps[-1].step_id,
+                status="succeeded",
+                output_payload={"text": self.success_text},
+            )
+        ]
 
 
 def test_execution_orchestrator_service_creates_execution_when_quota_is_available(db_session):
@@ -351,3 +473,99 @@ def test_execution_orchestrator_service_persists_artifacts_from_succeeded_result
     artifacts = ArtifactRepositorySqlAlchemy(db_session).list_by_execution(execution.id)
     assert artifacts[0].file_name == "SingleEffectPatch.dll"
     assert artifacts[0].artifact_type == "build_output"
+
+
+def test_execution_orchestrator_service_retries_with_alternate_credential_on_retryable_failure(db_session):
+    cipher = ServerCredentialCipher("retry-test-secret")
+    job, profile, credential_a, credential_b, execution = _seed_ready_job_with_two_server_credentials(db_session, cipher)
+    runner = _RetryOnceRunner(first_error="401 invalid token", success_text="retry succeeded")
+    service = ExecutionOrchestratorService(
+        job_repository=JobRepositorySqlAlchemy(db_session),
+        ai_execution_repository=AIExecutionRepositorySqlAlchemy(db_session),
+        quota_billing_service=None,
+        job_event_repository=JobEventRepositorySqlAlchemy(db_session),
+        execution_routing_service=ExecutionRoutingService(
+            execution_routing_repository=ExecutionRoutingRepositorySqlAlchemy(db_session)
+        ),
+        server_credential_cipher=cipher,
+        workflow_registry=_SingleStepRegistry(),
+        workflow_runner=runner,
+        server_credential_admin_repository=ServerCredentialAdminRepositorySqlAlchemy(db_session),
+    )
+
+    result = service.run_registered_workflow_to_completion(
+        user_id=1001,
+        job_id=job.id,
+        job_item_id=job.items[0].id,
+        job_type="single_generate",
+        item_type="card",
+        workflow_version="2026.03.31",
+        step_protocol_version="v1",
+        result_schema_version="v1",
+        input_payload={"item_name": "DarkBlade", "description": "测试"},
+        now=datetime.now(UTC),
+    )
+    db_session.refresh(execution)
+
+    assert result is not None
+    assert result.status == "succeeded"
+    assert runner.binding_refs == [
+        f"server-credential:{credential_a.id}",
+        f"server-credential:{credential_b.id}",
+    ]
+    assert execution.credential_ref == f"server-credential:{credential_b.id}"
+    assert execution.retry_attempt == 1
+    assert execution.switched_credential is True
+    assert execution.result_summary == "retry succeeded"
+    db_session.refresh(credential_a)
+    assert credential_a.health_status == "degraded"
+    health_check = (
+        db_session.query(CredentialHealthCheckRecord)
+        .filter(CredentialHealthCheckRecord.server_credential_id == credential_a.id)
+        .one()
+    )
+    assert health_check.trigger_source == "runtime_retry"
+    assert health_check.status == "degraded"
+    assert health_check.error_code == "http_401"
+    assert profile.id == job.selected_execution_profile_id
+
+
+def test_execution_orchestrator_service_keeps_original_failure_when_no_alternate_credential_exists(db_session):
+    cipher = ServerCredentialCipher("retry-test-secret")
+    job, _, credential_a, credential_b, execution = _seed_ready_job_with_two_server_credentials(db_session, cipher)
+    credential_b.health_status = "rate_limited"
+    db_session.flush()
+    runner = _RetryOnceRunner(first_error="401 invalid token")
+    service = ExecutionOrchestratorService(
+        job_repository=JobRepositorySqlAlchemy(db_session),
+        ai_execution_repository=AIExecutionRepositorySqlAlchemy(db_session),
+        quota_billing_service=None,
+        job_event_repository=JobEventRepositorySqlAlchemy(db_session),
+        execution_routing_service=ExecutionRoutingService(
+            execution_routing_repository=ExecutionRoutingRepositorySqlAlchemy(db_session)
+        ),
+        server_credential_cipher=cipher,
+        workflow_registry=_SingleStepRegistry(),
+        workflow_runner=runner,
+    )
+
+    result = service.run_registered_workflow_to_completion(
+        user_id=1001,
+        job_id=job.id,
+        job_item_id=job.items[0].id,
+        job_type="single_generate",
+        item_type="card",
+        workflow_version="2026.03.31",
+        step_protocol_version="v1",
+        result_schema_version="v1",
+        input_payload={"item_name": "DarkBlade", "description": "测试"},
+        now=datetime.now(UTC),
+    )
+    db_session.refresh(execution)
+
+    assert result is not None
+    assert result.status == "failed_system"
+    assert runner.binding_refs == [f"server-credential:{credential_a.id}"]
+    assert execution.credential_ref == f"server-credential:{credential_a.id}"
+    assert execution.retry_attempt == 0
+    assert execution.switched_credential is False

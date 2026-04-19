@@ -279,7 +279,6 @@ export function SingleAssetWorkspaceContainer() {
     item_type: assetType,
     input_summary: description.trim() || singleAssetInputSummary,
     input_payload: {
-      asset_type: assetType,
       item_name: assetName.trim(),
       description: description.trim(),
       image_mode: imageMode,

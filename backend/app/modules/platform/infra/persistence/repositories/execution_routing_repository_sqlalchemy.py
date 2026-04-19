@@ -27,8 +27,13 @@ class ExecutionRoutingRepositorySqlAlchemy(ExecutionRoutingRepository):
             enabled=row.enabled,
         )
 
-    def find_routable_execution_target(self, execution_profile_id: int) -> ExecutionRoutingTargetRecord | None:
-        row = (
+    def find_routable_execution_target(
+        self,
+        execution_profile_id: int,
+        *,
+        excluded_credential_ids: set[int] | None = None,
+    ) -> ExecutionRoutingTargetRecord | None:
+        query = (
             self.session.query(ExecutionProfileRecord, ServerCredentialRecord)
             .join(
                 ServerCredentialRecord,
@@ -39,12 +44,13 @@ class ExecutionRoutingRepositorySqlAlchemy(ExecutionRoutingRepository):
                 ServerCredentialRecord.enabled.is_(True),
                 ServerCredentialRecord.health_status == "healthy",
             )
-            .order_by(
-                ServerCredentialRecord.priority.asc(),
-                ServerCredentialRecord.id.asc(),
-            )
-            .first()
         )
+        if excluded_credential_ids:
+            query = query.filter(ServerCredentialRecord.id.notin_(excluded_credential_ids))
+        row = query.order_by(
+            ServerCredentialRecord.priority.asc(),
+            ServerCredentialRecord.id.asc(),
+        ).first()
         if row is None:
             return None
         profile, credential = row

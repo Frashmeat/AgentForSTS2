@@ -660,6 +660,7 @@ def test_me_router_rejects_legacy_platform_payload_fields(client: TestClient):
     assert verified.status_code == 200
 
     app_container = client.app.state.container
+    cipher = ServerCredentialCipher.from_settings(app_container.resolve_singleton("settings"))
     session = app_container.resolve_singleton("platform.db_session_factory")()
     try:
         profile = ExecutionProfileRecord(
@@ -679,7 +680,7 @@ def test_me_router_rejects_legacy_platform_payload_fields(client: TestClient):
                 execution_profile_id=profile.id,
                 provider="openai",
                 auth_type="api_key",
-                credential_ciphertext="cipher",
+                credential_ciphertext=cipher.encrypt("sk-live-openai"),
                 secret_ciphertext=None,
                 base_url="https://api.openai.com/v1",
                 label="main",
@@ -749,6 +750,7 @@ def test_me_router_requires_server_project_ref_for_single_custom_code(client: Te
     assert verified.status_code == 200
 
     app_container = client.app.state.container
+    cipher = ServerCredentialCipher.from_settings(app_container.resolve_singleton("settings"))
     session = app_container.resolve_singleton("platform.db_session_factory")()
     try:
         profile = ExecutionProfileRecord(
@@ -768,7 +770,7 @@ def test_me_router_requires_server_project_ref_for_single_custom_code(client: Te
                 execution_profile_id=profile.id,
                 provider="openai",
                 auth_type="api_key",
-                credential_ciphertext="cipher",
+                credential_ciphertext=cipher.encrypt("sk-live-openai"),
                 secret_ciphertext=None,
                 base_url="https://api.openai.com/v1",
                 label="main",
@@ -1002,6 +1004,32 @@ class _SucceededWorkflowRunner:
             )
             payload.update(output_payload)
         return results
+
+
+class _RetryOnceWorkflowRunner:
+    def __init__(self, dispatcher=None) -> None:
+        self.dispatcher = dispatcher
+        self.binding_refs: list[str] = []
+
+    async def run(self, *, steps, base_request):
+        self.binding_refs.append(base_request.execution_binding.credential_ref)
+        if len(self.binding_refs) == 1:
+            return [
+                StepExecutionResult(
+                    step_id=steps[-1].step_id,
+                    status="failed_system",
+                    output_payload={},
+                    error_summary="401 invalid token",
+                )
+            ]
+        return [
+            StepExecutionResult(
+                step_id=steps[-1].step_id,
+                status="succeeded",
+                output_payload={"text": "自动切换后执行成功"},
+                error_summary="",
+            )
+        ]
 
 
 def test_me_router_can_complete_supported_log_analysis_job(client: TestClient):
@@ -2170,6 +2198,149 @@ def test_me_router_can_complete_supported_single_card_job(client: TestClient):
         session.close()
 
 
+def test_me_router_can_retry_with_alternate_credential_after_retryable_failure(client: TestClient):
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "username": "luna",
+            "email": "luna@example.com",
+            "password": "secret-123",
+        },
+    )
+    assert registered.status_code == 200
+    verification_code = registered.json()["verification_code"]
+    user_id = registered.json()["user"]["user_id"]
+
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    verified = client.post("/api/auth/verify-email", json={"code": verification_code})
+    assert verified.status_code == 200
+
+    app_container = client.app.state.container
+    cipher = ServerCredentialCipher.from_settings(app_container.resolve_singleton("settings"))
+    session = app_container.resolve_singleton("platform.db_session_factory")()
+    try:
+        account = QuotaAccountRecord(user_id=user_id, status=QuotaAccountStatus.ACTIVE)
+        session.add(account)
+        session.flush()
+        session.add(
+            QuotaBucketRecord(
+                quota_account_id=account.id,
+                bucket_type=QuotaBucketType.DAILY,
+                period_start=datetime.now(UTC) - timedelta(hours=1),
+                period_end=datetime.now(UTC) + timedelta(hours=23),
+                quota_limit=10,
+                used_amount=0,
+                refunded_amount=0,
+            )
+        )
+        profile = ExecutionProfileRecord(
+            code="codex-gpt-5-4",
+            display_name="Codex CLI / gpt-5.4",
+            agent_backend="codex",
+            model="gpt-5.4",
+            description="默认推荐",
+            enabled=True,
+            recommended=True,
+            sort_order=10,
+        )
+        session.add(profile)
+        session.flush()
+        session.add_all(
+            [
+                ServerCredentialRecord(
+                    execution_profile_id=profile.id,
+                    provider="openai",
+                    auth_type="api_key",
+                    credential_ciphertext=cipher.encrypt("sk-primary"),
+                    secret_ciphertext=None,
+                    base_url="https://api-a.example.com/v1",
+                    label="primary",
+                    priority=1,
+                    enabled=True,
+                    health_status="healthy",
+                    last_checked_at=None,
+                    last_error_code="",
+                    last_error_message="",
+                ),
+                ServerCredentialRecord(
+                    execution_profile_id=profile.id,
+                    provider="openai",
+                    auth_type="api_key",
+                    credential_ciphertext=cipher.encrypt("sk-secondary"),
+                    secret_ciphertext=None,
+                    base_url="https://api-b.example.com/v1",
+                    label="secondary",
+                    priority=2,
+                    enabled=True,
+                    health_status="healthy",
+                    last_checked_at=None,
+                    last_error_code="",
+                    last_error_message="",
+                ),
+            ]
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    retry_runner = _RetryOnceWorkflowRunner()
+    app_container.register_singleton("platform.workflow_runner_factory", lambda dispatcher=None: retry_runner)
+
+    created = client.post(
+        "/api/me/jobs",
+        json={
+            "job_type": "single_generate",
+            "workflow_version": "2026.03.31",
+            "input_summary": "补一个卡牌实现方案",
+            "created_from": "single_asset",
+            "selected_execution_profile_id": 1,
+            "selected_agent_backend": "codex",
+            "selected_model": "gpt-5.4",
+            "items": [
+                {
+                    "item_type": "card",
+                    "input_summary": "补一个卡牌实现方案",
+                    "input_payload": {
+                        "item_name": "DarkBlade",
+                        "description": "1 费攻击牌，造成 8 点伤害，升级后造成 12 点伤害。",
+                        "image_mode": "ai",
+                    },
+                }
+            ],
+        },
+    )
+    assert created.status_code == 200
+
+    job_id = created.json()["id"]
+    started = client.post(
+        f"/api/me/jobs/{job_id}/start",
+        json={"triggered_by": "user"},
+    )
+
+    assert started.status_code == 200
+    assert started.json()["status"] == "succeeded"
+    assert retry_runner.binding_refs == ["server-credential:1", "server-credential:2"]
+
+    session = app_container.resolve_singleton("platform.db_session_factory")()
+    try:
+        execution = session.query(AIExecutionRecord).filter(AIExecutionRecord.job_id == job_id).one()
+        assert execution.status.value == "succeeded"
+        assert execution.result_summary == "自动切换后执行成功"
+        assert execution.credential_ref == "server-credential:2"
+        assert execution.retry_attempt == 1
+        assert execution.switched_credential is True
+    finally:
+        session.close()
+
+
 def test_me_router_can_complete_supported_single_card_fullscreen_job(client: TestClient):
     registered = client.post(
         "/api/auth/register",
@@ -2890,3 +3061,342 @@ def test_me_router_job_summary_uses_latest_deferred_event(client: TestClient):
     assert jobs.status_code == 200
     assert jobs.json()[0]["deferred_reason_code"] == "local_project_root_required"
     assert jobs.json()[0]["deferred_reason_message"] == "latest"
+
+
+def test_me_router_rejects_start_when_active_server_job_limit_is_reached(client: TestClient):
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "username": "luna",
+            "email": "luna@example.com",
+            "password": "secret-123",
+        },
+    )
+    assert registered.status_code == 200
+    verification_code = registered.json()["verification_code"]
+    user_id = registered.json()["user"]["user_id"]
+
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    verified = client.post("/api/auth/verify-email", json={"code": verification_code})
+    assert verified.status_code == 200
+
+    app_container = client.app.state.container
+    session = app_container.resolve_singleton("platform.db_session_factory")()
+    try:
+        profile = ExecutionProfileRecord(
+            code="codex-gpt-5-4",
+            display_name="Codex CLI / gpt-5.4",
+            agent_backend="codex",
+            model="gpt-5.4",
+            description="默认推荐",
+            enabled=True,
+            recommended=True,
+            sort_order=10,
+        )
+        session.add(profile)
+        session.flush()
+        for item_name in ("BusyA", "BusyB", "Target"):
+            job = JobRecord(
+                user_id=user_id,
+                job_type="single_generate",
+                status=JobStatus.RUNNING if item_name != "Target" else JobStatus.DRAFT,
+                workflow_version="2026.03.31",
+                input_summary=item_name,
+                selected_execution_profile_id=profile.id,
+                selected_agent_backend="codex",
+                selected_model="gpt-5.4",
+                total_item_count=1,
+                pending_item_count=1 if item_name == "Target" else 0,
+                running_item_count=1 if item_name != "Target" else 0,
+                succeeded_item_count=0,
+                failed_business_item_count=0,
+                failed_system_item_count=0,
+                quota_skipped_item_count=0,
+                cancelled_before_start_item_count=0,
+                cancelled_after_start_item_count=0,
+                items=[
+                    JobItemRecord(
+                        user_id=user_id,
+                        item_index=0,
+                        item_type="card",
+                        status=JobItemStatus.PENDING if item_name == "Target" else JobItemStatus.RUNNING,
+                        input_summary=item_name,
+                        input_payload={"item_name": item_name},
+                    )
+                ],
+            )
+            session.add(job)
+        session.commit()
+        target_job_id = (
+            session.query(JobRecord.id)
+            .filter(JobRecord.user_id == user_id, JobRecord.status == JobStatus.DRAFT)
+            .scalar()
+        )
+    finally:
+        session.close()
+
+    started = client.post(
+        f"/api/me/jobs/{target_job_id}/start",
+        json={"triggered_by": "user"},
+    )
+
+    assert started.status_code == 400
+    assert started.json()["detail"] == "too many active server jobs for user: limit 2"
+
+
+def test_me_router_rate_limits_create_job_requests(client: TestClient):
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "username": "luna",
+            "email": "luna@example.com",
+            "password": "secret-123",
+        },
+    )
+    assert registered.status_code == 200
+    verification_code = registered.json()["verification_code"]
+
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    verified = client.post("/api/auth/verify-email", json={"code": verification_code})
+    assert verified.status_code == 200
+
+    app_container = client.app.state.container
+    session = app_container.resolve_singleton("platform.db_session_factory")()
+    try:
+        profile = ExecutionProfileRecord(
+            code="codex-gpt-5-4",
+            display_name="Codex CLI / gpt-5.4",
+            agent_backend="codex",
+            model="gpt-5.4",
+            description="默认推荐",
+            enabled=True,
+            recommended=True,
+            sort_order=10,
+        )
+        session.add(profile)
+        session.flush()
+        session.add(
+            ServerCredentialRecord(
+                execution_profile_id=profile.id,
+                provider="openai",
+                auth_type="api_key",
+                credential_ciphertext="cipher",
+                secret_ciphertext=None,
+                base_url="https://api.openai.com/v1",
+                label="main",
+                priority=1,
+                enabled=True,
+                health_status="healthy",
+                last_checked_at=None,
+                last_error_code="",
+                last_error_message="",
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    for index in range(5):
+        created = client.post(
+            "/api/me/jobs",
+            json={
+                "job_type": "single_generate",
+                "workflow_version": "2026.03.31",
+                "input_summary": f"补一个卡牌实现方案-{index}",
+                "created_from": "single_asset",
+                "selected_execution_profile_id": 1,
+                "selected_agent_backend": "codex",
+                "selected_model": "gpt-5.4",
+                "items": [
+                    {
+                        "item_type": "card",
+                        "input_summary": f"补一个卡牌实现方案-{index}",
+                        "input_payload": {
+                            "item_name": f"DarkBlade{index}",
+                            "description": "1 费攻击牌，造成 8 点伤害。",
+                            "image_mode": "ai",
+                        },
+                    }
+                ],
+            },
+        )
+        assert created.status_code == 200
+
+    limited = client.post(
+        "/api/me/jobs",
+        json={
+            "job_type": "single_generate",
+            "workflow_version": "2026.03.31",
+            "input_summary": "补一个卡牌实现方案-limit",
+            "created_from": "single_asset",
+            "selected_execution_profile_id": 1,
+            "selected_agent_backend": "codex",
+            "selected_model": "gpt-5.4",
+            "items": [
+                {
+                    "item_type": "card",
+                    "input_summary": "补一个卡牌实现方案-limit",
+                    "input_payload": {
+                        "item_name": "DarkBladeLimit",
+                        "description": "1 费攻击牌，造成 8 点伤害。",
+                        "image_mode": "ai",
+                    },
+                }
+            ],
+        },
+    )
+
+    assert limited.status_code == 429
+    assert limited.json()["detail"] == "too many platform job create requests for user: limit 5 per 60 seconds"
+
+
+def test_me_router_rate_limits_start_job_requests(client: TestClient):
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "username": "luna",
+            "email": "luna@example.com",
+            "password": "secret-123",
+        },
+    )
+    assert registered.status_code == 200
+    verification_code = registered.json()["verification_code"]
+    user_id = registered.json()["user"]["user_id"]
+
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    verified = client.post("/api/auth/verify-email", json={"code": verification_code})
+    assert verified.status_code == 200
+
+    app_container = client.app.state.container
+    cipher = ServerCredentialCipher.from_settings(app_container.resolve_singleton("settings"))
+    session = app_container.resolve_singleton("platform.db_session_factory")()
+    try:
+        account = QuotaAccountRecord(user_id=user_id, status=QuotaAccountStatus.ACTIVE)
+        session.add(account)
+        session.flush()
+        session.add(
+            QuotaBucketRecord(
+                quota_account_id=account.id,
+                bucket_type=QuotaBucketType.DAILY,
+                period_start=datetime.now(UTC) - timedelta(hours=1),
+                period_end=datetime.now(UTC) + timedelta(hours=23),
+                quota_limit=10,
+                used_amount=0,
+                refunded_amount=0,
+            )
+        )
+        profile = ExecutionProfileRecord(
+            code="codex-gpt-5-4",
+            display_name="Codex CLI / gpt-5.4",
+            agent_backend="codex",
+            model="gpt-5.4",
+            description="默认推荐",
+            enabled=True,
+            recommended=True,
+            sort_order=10,
+        )
+        session.add(profile)
+        session.flush()
+        session.add(
+            ServerCredentialRecord(
+                execution_profile_id=profile.id,
+                provider="openai",
+                auth_type="api_key",
+                credential_ciphertext=cipher.encrypt("sk-live-openai"),
+                secret_ciphertext=None,
+                base_url="https://api.openai.com/v1",
+                label="main",
+                priority=1,
+                enabled=True,
+                health_status="healthy",
+                last_checked_at=None,
+                last_error_code="",
+                last_error_message="",
+            )
+        )
+        for index in range(6):
+            job = JobRecord(
+                user_id=user_id,
+                job_type="single_generate",
+                status=JobStatus.DRAFT,
+                workflow_version="2026.03.31",
+                input_summary=f"Job{index}",
+                selected_execution_profile_id=profile.id,
+                selected_agent_backend="codex",
+                selected_model="gpt-5.4",
+                total_item_count=1,
+                pending_item_count=1,
+                running_item_count=0,
+                succeeded_item_count=0,
+                failed_business_item_count=0,
+                failed_system_item_count=0,
+                quota_skipped_item_count=0,
+                cancelled_before_start_item_count=0,
+                cancelled_after_start_item_count=0,
+                items=[
+                        JobItemRecord(
+                            user_id=user_id,
+                            item_index=0,
+                            item_type="card",
+                            status=JobItemStatus.PENDING,
+                            input_summary=f"Job{index}",
+                            input_payload={
+                                "item_name": f"DarkBlade{index}",
+                                "description": "1 费攻击牌，造成 8 点伤害。",
+                                "image_mode": "ai",
+                            },
+                        )
+                    ],
+                )
+            session.add(job)
+        session.commit()
+        job_ids = [
+            row[0]
+            for row in session.query(JobRecord.id)
+            .filter(JobRecord.user_id == user_id)
+            .order_by(JobRecord.id.asc())
+            .all()
+        ]
+    finally:
+        session.close()
+
+    app_container.register_singleton("platform.workflow_runner_factory", _SucceededWorkflowRunner)
+
+    for job_id in job_ids[:5]:
+        started = client.post(
+            f"/api/me/jobs/{job_id}/start",
+            json={"triggered_by": "user"},
+        )
+        assert started.status_code == 200
+
+    limited = client.post(
+        f"/api/me/jobs/{job_ids[5]}/start",
+        json={"triggered_by": "user"},
+    )
+
+    assert limited.status_code == 429
+    assert limited.json()["detail"] == "too many platform job start requests for user: limit 5 per 60 seconds"

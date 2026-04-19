@@ -734,11 +734,11 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
                   hint="审批模式：执行前展示操作预览，用户确认后再调用代理。推荐在使用 Codex 时开启。"
                 >
                   <select
-                    value={cfg.llm?.execution_mode || "legacy_direct"}
+                    value={cfg.llm?.execution_mode || "direct_execute"}
                     onChange={e => set(["llm", "execution_mode"], e.target.value)}
                     className={selectCls}
                   >
-                    <option value="legacy_direct">直接执行</option>
+                    <option value="direct_execute">直接执行</option>
                     <option value="approval_first">审批后执行</option>
                   </select>
                 </Field>

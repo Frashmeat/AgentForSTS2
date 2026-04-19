@@ -25,11 +25,14 @@ from app.modules.platform.infra.persistence import models as _platform_models  #
 from app.modules.platform.infra.persistence.models import (
     AIExecutionRecord,
     ExecutionProfileRecord,
+    JobItemRecord,
+    JobRecord,
     QuotaAccountRecord,
     QuotaBucketRecord,
     ServerCredentialRecord,
     UserPlatformPreferenceRecord,
 )
+from app.modules.platform.domain.models.enums import JobItemStatus, JobStatus
 from app.shared.infra.db.base import Base
 from routers.auth_router import router as auth_router
 from routers.platform_jobs import router as platform_router
@@ -483,6 +486,139 @@ def test_platform_jobs_router_requires_server_project_ref_for_batch_custom_code(
 
     assert created.status_code == 400
     assert created.json()["detail"] == "platform job payload for batch_generate/custom_code requires server_project_ref"
+
+
+def test_platform_jobs_router_rate_limits_create_job_requests(client: TestClient):
+    _register_login_and_verify(client, "luna", "luna@example.com")
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+    profile_id = _seed_execution_profile(client)
+
+    for index in range(5):
+        created = client.post(
+            "/api/platform/jobs",
+            json={
+                "job_type": "single_generate",
+                "workflow_version": "2026.03.31",
+                "selected_execution_profile_id": profile_id,
+                "selected_agent_backend": "codex",
+                "selected_model": "gpt-5.4",
+                "items": [
+                    {
+                        "item_type": "card",
+                        "input_summary": f"补一个卡牌实现方案-{index}",
+                        "input_payload": {
+                            "item_name": f"DarkBlade{index}",
+                            "description": "1 费攻击牌，造成 8 点伤害，升级后造成 12 点伤害。",
+                            "image_mode": "ai",
+                        },
+                    }
+                ],
+            },
+        )
+        assert created.status_code == 200
+
+    limited = client.post(
+        "/api/platform/jobs",
+        json={
+            "job_type": "single_generate",
+            "workflow_version": "2026.03.31",
+            "selected_execution_profile_id": profile_id,
+            "selected_agent_backend": "codex",
+            "selected_model": "gpt-5.4",
+            "items": [
+                {
+                    "item_type": "card",
+                    "input_summary": "补一个卡牌实现方案-limit",
+                    "input_payload": {
+                        "item_name": "DarkBladeLimit",
+                        "description": "1 费攻击牌，造成 8 点伤害，升级后造成 12 点伤害。",
+                        "image_mode": "ai",
+                    },
+                }
+            ],
+        },
+    )
+
+    assert limited.status_code == 429
+    assert limited.json()["detail"] == "too many platform job create requests for user: limit 5 per 60 seconds"
+
+
+def test_platform_jobs_router_rate_limits_start_job_requests(client: TestClient):
+    user_id = _register_login_and_verify(client, "luna", "luna@example.com")
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    profile_id = _seed_execution_profile(client)
+    client.app.state.container.register_singleton("platform.workflow_runner_factory", _SucceededWorkflowRunner)
+    session = client.app.state.container.resolve_singleton("platform.db_session_factory")()
+    try:
+        for index in range(6):
+            job = JobRecord(
+                user_id=user_id,
+                job_type="single_generate",
+                status=JobStatus.DRAFT,
+                workflow_version="2026.03.31",
+                input_summary=f"Job{index}",
+                selected_execution_profile_id=profile_id,
+                selected_agent_backend="codex",
+                selected_model="gpt-5.4",
+                total_item_count=1,
+                pending_item_count=1,
+                running_item_count=0,
+                succeeded_item_count=0,
+                failed_business_item_count=0,
+                failed_system_item_count=0,
+                quota_skipped_item_count=0,
+                cancelled_before_start_item_count=0,
+                cancelled_after_start_item_count=0,
+                items=[
+                    JobItemRecord(
+                        user_id=user_id,
+                        item_index=0,
+                        item_type="card",
+                        status=JobItemStatus.PENDING,
+                        input_summary=f"Job{index}",
+                        input_payload={
+                            "item_name": f"DarkBlade{index}",
+                            "description": "1 费攻击牌，造成 8 点伤害。",
+                            "image_mode": "ai",
+                        },
+                    )
+                ],
+            )
+            session.add(job)
+        session.commit()
+        job_ids = [
+            row[0]
+            for row in session.query(JobRecord.id)
+            .filter(JobRecord.user_id == user_id)
+            .order_by(JobRecord.id.asc())
+            .all()
+        ]
+    finally:
+        session.close()
+
+    for job_id in job_ids[:5]:
+        started = client.post(f"/api/platform/jobs/{job_id}/start", json={})
+        assert started.status_code == 200
+
+    limited = client.post(f"/api/platform/jobs/{job_ids[5]}/start", json={})
+
+    assert limited.status_code == 429
+    assert limited.json()["detail"] == "too many platform job start requests for user: limit 5 per 60 seconds"
 
 
 def test_platform_jobs_router_accepts_server_project_ref(client: TestClient):

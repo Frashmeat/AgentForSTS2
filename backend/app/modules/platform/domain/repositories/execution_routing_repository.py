@@ -31,5 +31,10 @@ class ExecutionRoutingRepository(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def find_routable_execution_target(self, execution_profile_id: int) -> ExecutionRoutingTargetRecord | None:
+    def find_routable_execution_target(
+        self,
+        execution_profile_id: int,
+        *,
+        excluded_credential_ids: set[int] | None = None,
+    ) -> ExecutionRoutingTargetRecord | None:
         raise NotImplementedError

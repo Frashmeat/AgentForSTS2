@@ -10,7 +10,13 @@ from app.modules.platform.contracts.runner_contracts import (
     StepExecutionResult,
 )
 from app.modules.platform.domain.models.enums import AIExecutionStatus, JobItemStatus, JobStatus
-from app.modules.platform.domain.repositories import AIExecutionRepository, ArtifactRepository, JobEventRepository, JobRepository
+from app.modules.platform.domain.repositories import (
+    AIExecutionRepository,
+    ArtifactRepository,
+    JobEventRepository,
+    JobRepository,
+    ServerCredentialAdminRepository,
+)
 from app.modules.platform.infra.persistence.models import AIExecutionRecord, ArtifactRecord
 from app.modules.platform.runner.workflow_registry import PlatformWorkflowRegistry
 from app.modules.platform.runner.workflow_runner import WorkflowRunner
@@ -35,6 +41,7 @@ class ExecutionOrchestratorService:
         workflow_registry: PlatformWorkflowRegistry | None = None,
         workflow_runner: WorkflowRunner | None = None,
         artifact_repository: ArtifactRepository | None = None,
+        server_credential_admin_repository: ServerCredentialAdminRepository | None = None,
     ) -> None:
         self.job_repository = job_repository
         self.ai_execution_repository = ai_execution_repository
@@ -47,6 +54,7 @@ class ExecutionOrchestratorService:
         self.uploaded_asset_service = uploaded_asset_service
         self.workflow_registry = workflow_registry
         self.workflow_runner = workflow_runner
+        self.server_credential_admin_repository = server_credential_admin_repository
 
     def start_execution(
         self,
@@ -290,6 +298,55 @@ class ExecutionOrchestratorService:
             status="failed_system",
             error_summary="workflow produced no result",
         )
+        retry_binding = self._build_retry_execution_binding(
+            user_id=user_id,
+            job_id=job_id,
+            job_item_id=job_item_id,
+            execution=execution,
+            result=final_result,
+            now=now,
+        )
+        if retry_binding is not None:
+            previous_credential_ref = execution.credential_ref
+            execution.provider = retry_binding.provider
+            execution.model = retry_binding.model
+            execution.credential_ref = retry_binding.credential_ref
+            execution.retry_attempt = retry_binding.retry_attempt
+            execution.switched_credential = retry_binding.switched_credential
+            self.ai_execution_repository.save(execution)
+            self.job_event_repository.append(
+                job_id=job.id,
+                user_id=user_id,
+                event_type="ai_execution.retry_scheduled",
+                payload={
+                    "execution_id": execution.id,
+                    "from_credential_ref": previous_credential_ref,
+                    "to_credential_ref": retry_binding.credential_ref,
+                    "retry_attempt": retry_binding.retry_attempt,
+                    "error_summary": final_result.error_summary,
+                },
+                job_item_id=job_item_id,
+                ai_execution_id=execution.id,
+            )
+            results = asyncio.run(
+                self.run_registered_steps(
+                    user_id=user_id,
+                    job_type=job_type,
+                    item_type=item_type,
+                    job_id=job_id,
+                    job_item_id=job_item_id,
+                    workflow_version=workflow_version,
+                    step_protocol_version=step_protocol_version,
+                    result_schema_version=result_schema_version,
+                    input_payload=input_payload,
+                    execution_binding=retry_binding,
+                )
+            )
+            final_result = results[-1] if results else StepExecutionResult(
+                step_id=execution.step_id,
+                status="failed_system",
+                error_summary="workflow produced no result after retry",
+            )
         self._apply_result(
             job=job,
             item=item,
@@ -308,6 +365,132 @@ class ExecutionOrchestratorService:
             ai_execution_id=execution.id,
         )
         return final_result
+
+    def _build_retry_execution_binding(
+        self,
+        *,
+        user_id: int,
+        job_id: int,
+        job_item_id: int,
+        execution: AIExecutionRecord,
+        result: StepExecutionResult,
+        now: datetime,
+    ) -> StepExecutionBinding | None:
+        if not self._should_retry_with_alternate_credential(execution=execution, result=result):
+            return None
+        self._record_retryable_credential_failure(
+            credential_ref=execution.credential_ref,
+            error_summary=result.error_summary,
+            now=now,
+        )
+        if self.execution_routing_service is None or self.server_credential_cipher is None:
+            return None
+
+        job = self.job_repository.find_by_id_for_user(job_id, user_id)
+        if job is None:
+            raise LookupError(f"job not found for user: {job_id}")
+        try:
+            route = self.execution_routing_service.resolve_retry_for_job(
+                job,
+                failed_credential_ref=execution.credential_ref,
+            )
+        except (LookupError, ValueError):
+            return None
+        return StepExecutionBinding(
+            agent_backend=route.agent_backend,
+            provider=route.provider,
+            model=route.model,
+            credential_ref=route.credential_ref,
+            auth_type=route.auth_type,
+            credential=self.server_credential_cipher.decrypt(route.credential_ciphertext),
+            secret=self.server_credential_cipher.decrypt(route.secret_ciphertext) if route.secret_ciphertext else "",
+            base_url=route.base_url,
+            retry_attempt=route.retry_attempt,
+            switched_credential=route.switched_credential,
+        )
+
+    def _record_retryable_credential_failure(
+        self,
+        *,
+        credential_ref: str,
+        error_summary: str,
+        now: datetime,
+    ) -> None:
+        if self.server_credential_admin_repository is None:
+            return
+        credential_id = self._credential_id_from_ref(credential_ref)
+        status, error_code = self._map_retryable_failure_to_health(error_summary)
+        self.server_credential_admin_repository.record_health_check_result(
+            credential_id=credential_id,
+            trigger_source="runtime_retry",
+            status=status,
+            error_code=error_code,
+            error_message=str(error_summary).strip(),
+            latency_ms=None,
+            checked_at=now,
+        )
+
+    @staticmethod
+    def _should_retry_with_alternate_credential(
+        *,
+        execution: AIExecutionRecord,
+        result: StepExecutionResult,
+    ) -> bool:
+        if result.status != "failed_system":
+            return False
+        if execution.retry_attempt > 0 or execution.switched_credential:
+            return False
+        credential_ref = str(execution.credential_ref or "").strip()
+        if not credential_ref.startswith("server-credential:"):
+            return False
+        error_text = str(result.error_summary or "").lower()
+        if not error_text:
+            return False
+        retryable_markers = (
+            "401",
+            "403",
+            "429",
+            "quota",
+            "rate limit",
+            "rate_limited",
+            "temporarily unavailable",
+            "unavailable",
+            "connecterror",
+            "connection",
+            "timeout",
+            "getaddrinfo",
+        )
+        return any(marker in error_text for marker in retryable_markers)
+
+    @staticmethod
+    def _map_retryable_failure_to_health(error_summary: str) -> tuple[str, str]:
+        text = str(error_summary or "").lower()
+        if "429" in text or "rate limit" in text or "rate_limited" in text:
+            return "rate_limited", "rate_limited"
+        if "quota" in text:
+            return "rate_limited", "quota_exhausted"
+        if "401" in text:
+            return "degraded", "http_401"
+        if "403" in text:
+            return "degraded", "http_403"
+        if "timeout" in text:
+            return "degraded", "timeout"
+        if "getaddrinfo" in text or "connecterror" in text or "connection" in text:
+            return "degraded", "connection_error"
+        if "temporarily unavailable" in text or "unavailable" in text:
+            return "degraded", "temporarily_unavailable"
+        return "degraded", "runtime_retryable_failure"
+
+    @staticmethod
+    def _credential_id_from_ref(credential_ref: str) -> int:
+        prefix = "server-credential:"
+        value = str(credential_ref).strip()
+        if not value.startswith(prefix):
+            raise ValueError(f"credential_ref is invalid: {credential_ref}")
+        raw_id = value[len(prefix):].strip()
+        if not raw_id.isdigit():
+            raise ValueError(f"credential_ref is invalid: {credential_ref}")
+        return int(raw_id)
 
     def refund_deferred_execution(self, *, execution_id: int, now: datetime) -> None:
         if self.quota_billing_service is None:

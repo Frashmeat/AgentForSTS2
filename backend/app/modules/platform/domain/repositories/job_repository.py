@@ -22,3 +22,6 @@ class JobRepository(ABC):
 
     @abstractmethod
     def mark_cancel_requested(self, job_id: int, user_id: int, requested_at: datetime) -> bool: ...
+
+    @abstractmethod
+    def count_active_server_jobs_for_user(self, user_id: int, *, exclude_job_id: int | None = None) -> int: ...

@@ -4,7 +4,13 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Request
 
-from app.modules.platform.application.services import JobApplicationService, JobQueryService, ServerExecutionService
+from app.modules.platform.application.services import (
+    JobApplicationService,
+    JobQueryService,
+    PlatformRequestRateLimitExceededError,
+    PlatformRequestRateLimiter,
+    ServerExecutionService,
+)
 from app.modules.platform.application.services.server_workspace_service import ServerWorkspaceService
 from app.modules.platform.application.services.uploaded_asset_service import UploadedAssetService
 from app.modules.platform.contracts.job_commands import CancelJobCommand, CreateJobCommand, StartJobCommand
@@ -67,6 +73,11 @@ def _build_server_workspace_service(request: Request) -> ServerWorkspaceService:
     return factory
 
 
+def _build_platform_request_rate_limiter(request: Request) -> PlatformRequestRateLimiter:
+    container = _container(request)
+    return container.resolve_singleton("platform.request_rate_limiter")
+
+
 def _enrich_job_command_with_default_server_profile(
     command: CreateJobCommand,
     *,
@@ -100,13 +111,17 @@ def create_job(request: Request, body: dict):
         user = _require_platform_user(request, session)
         server_execution_service = _build_server_execution_service(session, request)
         service = _build_job_application_service(session, request)
+        rate_limiter = _build_platform_request_rate_limiter(request)
         try:
+            rate_limiter.check_and_record(user_id=user.user_id, action="create_job")
             command = _enrich_job_command_with_default_server_profile(
                 CreateJobCommand.model_validate(body),
                 user_id=user.user_id,
                 server_execution_service=server_execution_service,
             )
             job = service.create_job(user_id=user.user_id, command=command)
+        except PlatformRequestRateLimitExceededError as error:
+            raise HTTPException(status_code=429, detail=str(error)) from error
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
         return {
@@ -125,11 +140,15 @@ def start_job(request: Request, job_id: int, body: dict):
     with auth_session_scope(request) as session:
         user = _require_platform_user(request, session)
         service = _build_job_application_service(session, request)
+        rate_limiter = _build_platform_request_rate_limiter(request)
         try:
+            rate_limiter.check_and_record(user_id=user.user_id, action="start_job")
             job = service.start_job(
                 user_id=user.user_id,
                 command=StartJobCommand(job_id=job_id, triggered_by=body.get("triggered_by", "user")),
             )
+        except PlatformRequestRateLimitExceededError as error:
+            raise HTTPException(status_code=429, detail=str(error)) from error
         except LookupError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         except ValueError as error:

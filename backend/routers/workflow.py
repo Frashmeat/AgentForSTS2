@@ -127,12 +127,11 @@ async def _maybe_await_approval(
     llm_cfg: dict,
     project_root: Path,
 ) -> tuple[bool, str | None]:
-    """审批模式下：等待用户确认，并在 approval_first 下返回主执行链。
+    """审批模式下等待用户确认，并在 approval_first 下返回主执行链。
 
     返回值:
     - (True, None): 继续默认执行链
     - (False, None): 用户取消
-    - (False, output): 保留给兼容分支；当前单资产流程不会使用
     """
     if llm_cfg.get("execution_mode") != "approval_first":
         return True, None
@@ -211,8 +210,8 @@ async def _handle_ws_create(ws: WebSocket, *, initial_params: dict | None = None
             await _ws_run_custom_code(ws, params, project_root)
             return
 
-        # 用户提供了图片（路径或 base64）：跳过生图/选图，直接后处理 + code agent
-        if params.get("provided_image_path") or params.get("provided_image_b64"):
+        # 用户提供了上传图片：跳过生图/选图，直接后处理 + code agent
+        if params.get("provided_image_b64"):
             logger.info("[ws/create] 走 provided_image 分支")
             await _ws_run_with_provided_image(ws, params, project_root)
             return
@@ -433,7 +432,7 @@ async def _ws_run_custom_code(ws: WebSocket, params: dict, project_root: Path):
 
 
 async def _ws_run_with_provided_image(ws: WebSocket, params: dict, project_root: Path):
-    """用户自定义图片（base64 或本地路径）→ 后处理 → code agent，跳过生图和选图步骤。"""
+    """用户上传图片（base64）→ 后处理 → code agent，跳过生图和选图步骤。"""
     from PIL import Image as PILImage
 
     asset_type: AssetType = params["asset_type"]
@@ -442,20 +441,15 @@ async def _ws_run_with_provided_image(ws: WebSocket, params: dict, project_root:
     cfg = get_config()
     agent_display_model = resolve_agent_display_model(cfg.get("llm", {}))
 
-    # 优先用 base64（浏览器上传），fallback 到本地路径
-    if params.get("provided_image_b64"):
-        import base64, io as _io
-        raw = base64.b64decode(params["provided_image_b64"])
-        img_src = PILImage.open(_io.BytesIO(raw))
-        fname = params.get("provided_image_name", "uploaded")
-    else:
-        image_path = Path(params["provided_image_path"])
-        if not image_path.exists():
-            message = _text("workflow_provided_image_missing", image_path=image_path).strip()
-            await send_ws_error(ws, code="provided_image_missing", message=message, detail=message)
-            return
-        img_src = PILImage.open(image_path)
-        fname = image_path.name
+    if not params.get("provided_image_b64"):
+        message = "provided_image_b64 is required"
+        await send_ws_error(ws, code="provided_image_b64_required", message=message, detail=message)
+        return
+
+    import base64, io as _io
+    raw = base64.b64decode(params["provided_image_b64"])
+    img_src = PILImage.open(_io.BytesIO(raw))
+    fname = params.get("provided_image_name", "uploaded")
 
     # 初始化项目（如有需要）
     if not list(project_root.glob("*.csproj")):

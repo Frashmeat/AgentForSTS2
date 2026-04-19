@@ -66,3 +66,13 @@ class JobRepositorySqlAlchemy(JobRepository):
         job.cancel_requested_at = requested_at
         self.session.flush()
         return True
+
+    def count_active_server_jobs_for_user(self, user_id: int, *, exclude_job_id: int | None = None) -> int:
+        query = self.session.query(JobRecord).filter(
+            JobRecord.user_id == user_id,
+            JobRecord.selected_execution_profile_id.is_not(None),
+            JobRecord.status.in_([JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.CANCELLING]),
+        )
+        if exclude_job_id is not None:
+            query = query.filter(JobRecord.id != exclude_job_id)
+        return query.count()

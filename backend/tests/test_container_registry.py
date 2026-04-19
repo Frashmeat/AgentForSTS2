@@ -34,4 +34,4 @@ def test_container_builds_settings_and_resolves_singletons():
 def test_normalize_config_keeps_default_execution_mode_value():
     cfg = normalize_config(None)
 
-    assert cfg["llm"]["execution_mode"] == "legacy_direct"
+    assert cfg["llm"]["execution_mode"] == "direct_execute"

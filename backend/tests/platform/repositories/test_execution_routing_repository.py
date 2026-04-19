@@ -139,3 +139,60 @@ def test_execution_routing_repository_returns_none_when_profile_has_no_enabled_h
     route = repository.find_routable_execution_target(profile.id)
 
     assert route is None
+
+
+def test_execution_routing_repository_can_skip_excluded_credential_ids(db_session):
+    repository = ExecutionRoutingRepositorySqlAlchemy(db_session)
+    profile = ExecutionProfileRecord(
+        code="codex-gpt-5-4",
+        display_name="Codex CLI / gpt-5.4",
+        agent_backend="codex",
+        model="gpt-5.4",
+        description="默认推荐",
+        enabled=True,
+        recommended=True,
+        sort_order=10,
+    )
+    db_session.add(profile)
+    db_session.flush()
+    credential_a = ServerCredentialRecord(
+        execution_profile_id=profile.id,
+        provider="openai",
+        auth_type="api_key",
+        credential_ciphertext="cipher-healthy-a",
+        secret_ciphertext=None,
+        base_url="https://healthy-a.example.com/v1",
+        label="healthy-a",
+        priority=5,
+        enabled=True,
+        health_status="healthy",
+        last_checked_at=None,
+        last_error_code="",
+        last_error_message="",
+    )
+    credential_b = ServerCredentialRecord(
+        execution_profile_id=profile.id,
+        provider="openai",
+        auth_type="api_key",
+        credential_ciphertext="cipher-healthy-b",
+        secret_ciphertext=None,
+        base_url="https://healthy-b.example.com/v1",
+        label="healthy-b",
+        priority=10,
+        enabled=True,
+        health_status="healthy",
+        last_checked_at=None,
+        last_error_code="",
+        last_error_message="",
+    )
+    db_session.add_all([credential_a, credential_b])
+    db_session.commit()
+
+    route = repository.find_routable_execution_target(
+        profile.id,
+        excluded_credential_ids={credential_a.id},
+    )
+
+    assert route is not None
+    assert route.credential_id == credential_b.id
+    assert route.base_url == "https://healthy-b.example.com/v1"

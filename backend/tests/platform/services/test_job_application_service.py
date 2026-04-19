@@ -294,6 +294,29 @@ class _CapturingRunner:
         ]
 
 
+class _RetryOnceBindingRunner:
+    def __init__(self) -> None:
+        self.binding_refs: list[str] = []
+
+    async def run(self, *, steps, base_request):
+        self.binding_refs.append(base_request.execution_binding.credential_ref)
+        if len(self.binding_refs) == 1:
+            return [
+                StepExecutionResult(
+                    step_id=steps[-1].step_id,
+                    status="failed_system",
+                    error_summary="401 invalid token",
+                )
+            ]
+        return [
+            StepExecutionResult(
+                step_id=steps[-1].step_id,
+                status="succeeded",
+                output_payload={"text": "自动切换后执行成功"},
+            )
+        ]
+
+
 def test_job_application_service_can_complete_supported_log_analysis_job(db_session):
     cipher = ServerCredentialCipher("job-service-test-secret")
     profile = ExecutionProfileRecord(
@@ -2191,3 +2214,174 @@ def test_execution_orchestrator_service_hydrates_server_workspace_metadata_into_
     assert capturing_runner.last_base_request is not None
     assert capturing_runner.last_base_request.input_payload["server_project_name"] == "DarkMod"
     assert "platform-workspaces" in str(capturing_runner.last_base_request.input_payload["server_workspace_root"])
+
+
+def test_job_application_service_can_retry_with_alternate_credential_after_retryable_failure(db_session):
+    cipher = ServerCredentialCipher("job-service-test-secret")
+    profile = ExecutionProfileRecord(
+        code="codex-gpt-5-4",
+        display_name="Codex CLI / gpt-5.4",
+        agent_backend="codex",
+        model="gpt-5.4",
+        description="默认推荐",
+        enabled=True,
+        recommended=True,
+        sort_order=10,
+    )
+    db_session.add(profile)
+    db_session.flush()
+    credential_a = ServerCredentialRecord(
+        execution_profile_id=profile.id,
+        provider="openai",
+        auth_type="api_key",
+        credential_ciphertext=cipher.encrypt("sk-primary"),
+        secret_ciphertext=None,
+        base_url="https://api-a.example.com/v1",
+        label="primary",
+        priority=5,
+        enabled=True,
+        health_status="healthy",
+        last_checked_at=None,
+        last_error_code="",
+        last_error_message="",
+    )
+    credential_b = ServerCredentialRecord(
+        execution_profile_id=profile.id,
+        provider="openai",
+        auth_type="api_key",
+        credential_ciphertext=cipher.encrypt("sk-secondary"),
+        secret_ciphertext=None,
+        base_url="https://api-b.example.com/v1",
+        label="secondary",
+        priority=10,
+        enabled=True,
+        health_status="healthy",
+        last_checked_at=None,
+        last_error_code="",
+        last_error_message="",
+    )
+    db_session.add_all([credential_a, credential_b])
+    quota_repository = QuotaAccountRepositorySqlAlchemy(db_session)
+    account = quota_repository.create_account(QuotaAccountRecord(user_id=1001, status=QuotaAccountStatus.ACTIVE))
+    quota_repository.create_bucket(
+        QuotaBucketRecord(
+            quota_account_id=account.id,
+            bucket_type=QuotaBucketType.DAILY,
+            period_start=datetime.now(UTC) - timedelta(hours=1),
+            period_end=datetime.now(UTC) + timedelta(hours=23),
+            quota_limit=10,
+            used_amount=0,
+            refunded_amount=0,
+        )
+    )
+    runner = _RetryOnceBindingRunner()
+    orchestrator = ExecutionOrchestratorService(
+        job_repository=JobRepositorySqlAlchemy(db_session),
+        ai_execution_repository=AIExecutionRepositorySqlAlchemy(db_session),
+        quota_billing_service=QuotaBillingService(
+            execution_charge_repository=ExecutionChargeRepositorySqlAlchemy(db_session),
+            quota_account_repository=quota_repository,
+            usage_ledger_repository=UsageLedgerRepositorySqlAlchemy(db_session),
+        ),
+        job_event_repository=JobEventRepositorySqlAlchemy(db_session),
+        execution_routing_service=ExecutionRoutingService(
+            execution_routing_repository=ExecutionRoutingRepositorySqlAlchemy(db_session)
+        ),
+        server_credential_cipher=cipher,
+        workflow_registry=_SupportedServerRegistry(),
+        workflow_runner=runner,
+    )
+    service = JobApplicationService(
+        job_repository=JobRepositorySqlAlchemy(db_session),
+        job_event_repository=JobEventRepositorySqlAlchemy(db_session),
+        execution_orchestrator_service=orchestrator,
+    )
+    job = service.create_job(
+        user_id=1001,
+        command=CreateJobCommand.model_validate(
+            {
+                "job_type": "single_generate",
+                "workflow_version": "2026.03.31",
+                "selected_execution_profile_id": profile.id,
+                "selected_agent_backend": "codex",
+                "selected_model": "gpt-5.4",
+                "items": [
+                    {
+                        "item_type": "card",
+                        "input_summary": "补一个卡牌实现方案",
+                        "input_payload": {
+                            "item_name": "DarkBlade",
+                            "description": "1 费攻击牌，造成 8 点伤害，升级后造成 12 点伤害。",
+                            "image_mode": "ai",
+                        },
+                    }
+                ],
+            }
+        ),
+    )
+
+    started = service.start_job(user_id=1001, command=StartJobCommand(job_id=job.id))
+
+    assert started is not None
+    assert started.status == JobStatus.SUCCEEDED
+    assert started.items[0].status == JobItemStatus.SUCCEEDED
+    assert started.items[0].result_summary == "自动切换后执行成功"
+    assert runner.binding_refs == [
+        f"server-credential:{credential_a.id}",
+        f"server-credential:{credential_b.id}",
+    ]
+
+
+def test_job_application_service_rejects_start_when_active_server_job_limit_is_reached(db_session):
+    profile = ExecutionProfileRecord(
+        code="codex-gpt-5-4",
+        display_name="Codex CLI / gpt-5.4",
+        agent_backend="codex",
+        model="gpt-5.4",
+        description="默认推荐",
+        enabled=True,
+        recommended=True,
+        sort_order=10,
+    )
+    db_session.add(profile)
+    db_session.flush()
+    repository = JobRepositorySqlAlchemy(db_session)
+    for item_name in ("BusyA", "BusyB"):
+        job = repository.create_job_with_items(
+            user_id=1001,
+            command=CreateJobCommand.model_validate(
+                {
+                    "job_type": "single_generate",
+                    "workflow_version": "2026.03.31",
+                    "selected_execution_profile_id": profile.id,
+                    "selected_agent_backend": "codex",
+                    "selected_model": "gpt-5.4",
+                    "items": [{"item_type": "card", "input_payload": {"item_name": item_name}}],
+                }
+            ),
+        )
+        job.status = JobStatus.RUNNING
+    target_job = repository.create_job_with_items(
+        user_id=1001,
+        command=CreateJobCommand.model_validate(
+            {
+                "job_type": "single_generate",
+                "workflow_version": "2026.03.31",
+                "selected_execution_profile_id": profile.id,
+                "selected_agent_backend": "codex",
+                "selected_model": "gpt-5.4",
+                "items": [{"item_type": "card", "input_payload": {"item_name": "Target"}}],
+            }
+        ),
+    )
+    service = JobApplicationService(
+        job_repository=repository,
+        job_event_repository=JobEventRepositorySqlAlchemy(db_session),
+    )
+
+    try:
+        service.start_job(user_id=1001, command=StartJobCommand(job_id=target_job.id))
+    except ValueError as error:
+        assert str(error) == "too many active server jobs for user: limit 2"
+    else:
+        raise AssertionError("expected ValueError when active server job limit is reached")

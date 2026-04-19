@@ -45,7 +45,7 @@ DEFAULT_LLM_CONFIG = {
     "api_key": "",
     "base_url": "",
     "custom_prompt": "",
-    "execution_mode": "legacy_direct",
+    "execution_mode": "direct_execute",
 }
 
 DEFAULT_AUTH_CONFIG = {
@@ -140,6 +140,15 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
     return result
 
 
+def _normalize_execution_mode(value: Any) -> str:
+    normalized = str(value or "").strip()
+    if normalized == "approval_first":
+        return "approval_first"
+    if normalized in {"legacy_direct", "direct_execute", ""}:
+        return "direct_execute"
+    return "direct_execute"
+
+
 def normalize_llm_config(llm_cfg: Optional[dict[str, Any]]) -> dict[str, Any]:
     cfg = _deep_merge(DEFAULT_LLM_CONFIG, llm_cfg or {})
     mode = cfg.get("mode", "agent_cli")
@@ -155,6 +164,7 @@ def normalize_llm_config(llm_cfg: Optional[dict[str, Any]]) -> dict[str, Any]:
     if cfg.get("agent_backend") not in {"claude", "codex"}:
         cfg["agent_backend"] = "claude"
     cfg.pop("provider", None)
+    cfg["execution_mode"] = _normalize_execution_mode(cfg.get("execution_mode"))
 
     return cfg
 

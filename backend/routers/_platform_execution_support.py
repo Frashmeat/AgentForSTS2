@@ -25,6 +25,7 @@ def build_execution_orchestrator_service(session, request: Request) -> Execution
     job_repository = container.resolve_singleton("platform.job_repository_factory")(session)
     ai_execution_repository = container.resolve_singleton("platform.ai_execution_repository_factory")(session)
     artifact_repository = container.resolve_singleton("platform.artifact_repository_factory")(session)
+    server_credential_admin_repository = container.resolve_singleton("platform.server_credential_admin_repository_factory")(session)
     job_event_repository = container.resolve_singleton("platform.job_event_repository_factory")(session)
     quota_billing_service = _build_quota_billing_service(session, request)
     execution_routing_service = _build_execution_routing_service(session, request)
@@ -43,6 +44,7 @@ def build_execution_orchestrator_service(session, request: Request) -> Execution
         uploaded_asset_service=uploaded_asset_service,
         workflow_registry=_build_workflow_registry(request),
         workflow_runner=_build_workflow_runner(request),
+        server_credential_admin_repository=server_credential_admin_repository,
     )
 
 
