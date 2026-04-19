@@ -14,6 +14,10 @@ def test_execute_build_project_step_runs_agent_with_execution_binding(tmp_path):
     captured: dict[str, object] = {}
     workspace_root = tmp_path / "DarkMod"
     workspace_root.mkdir()
+    output_dir = workspace_root / "bin" / "Release"
+    output_dir.mkdir(parents=True)
+    (output_dir / "DarkMod.dll").write_bytes(b"dll")
+    (output_dir / "DarkMod.pck").write_bytes(b"pck")
 
     def fake_prompt_builder(max_attempts: int) -> str:
         captured["max_attempts"] = max_attempts
@@ -58,6 +62,7 @@ def test_execute_build_project_step_runs_agent_with_execution_binding(tmp_path):
     assert captured["llm_cfg"]["agent_backend"] == "codex"
     assert result["text"] == "已完成 BattleScriptManager 的服务器项目构建"
     assert result["item_name"] == "BattleScriptManager"
+    assert [artifact["file_name"] for artifact in result["artifacts"]] == ["DarkMod.dll", "DarkMod.pck"]
 
 
 def test_execute_build_project_step_requires_server_workspace_root():

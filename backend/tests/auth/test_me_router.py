@@ -962,7 +962,21 @@ class _SucceededWorkflowRunner:
             elif step.step_type == "code.generate":
                 output_payload = {"text": f"已写入 {str(merged.get('item_name', '')).strip()} 的服务器 custom_code 代码"}
             elif step.step_type == "build.project":
-                output_payload = {"text": f"已完成 {str(merged.get('item_name', '')).strip()} 的服务器项目构建"}
+                item_name = str(merged.get("item_name", "")).strip()
+                output_payload = {
+                    "text": f"已完成 {item_name} 的服务器项目构建",
+                    "artifacts": [
+                        {
+                            "artifact_type": "build_output",
+                            "storage_provider": "server_workspace",
+                            "object_key": f"/runtime/{item_name}.dll",
+                            "file_name": f"{item_name}.dll",
+                            "mime_type": "application/octet-stream",
+                            "size_bytes": 3,
+                            "result_summary": "服务器构建产物",
+                        }
+                    ],
+                }
             elif step.step_type == "single.asset.plan":
                 asset_type = str(step.input_payload.get("asset_type") or base_request.input_payload.get("asset_type", "")).strip()
                 if asset_type == "card":
@@ -1357,6 +1371,7 @@ def test_me_router_can_complete_supported_batch_card_fullscreen_job(client: Test
     detail = client.get(f"/api/me/jobs/{job_id}")
     assert detail.status_code == 200
     assert detail.json()["status"] == "succeeded"
+    assert detail.json()["artifacts"][0]["file_name"] == "SingleEffectPatch.dll"
 
     items = client.get(f"/api/me/jobs/{job_id}/items")
     assert items.status_code == 200

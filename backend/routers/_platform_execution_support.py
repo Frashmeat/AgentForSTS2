@@ -23,6 +23,7 @@ def build_execution_orchestrator_service(session, request: Request) -> Execution
     container = request.app.state.container
     job_repository = container.resolve_singleton("platform.job_repository_factory")(session)
     ai_execution_repository = container.resolve_singleton("platform.ai_execution_repository_factory")(session)
+    artifact_repository = container.resolve_singleton("platform.artifact_repository_factory")(session)
     job_event_repository = container.resolve_singleton("platform.job_event_repository_factory")(session)
     quota_billing_service = _build_quota_billing_service(session, request)
     execution_routing_service = _build_execution_routing_service(session, request)
@@ -32,6 +33,7 @@ def build_execution_orchestrator_service(session, request: Request) -> Execution
     return container.resolve_singleton("platform.execution_orchestrator_service_factory")(
         job_repository=job_repository,
         ai_execution_repository=ai_execution_repository,
+        artifact_repository=artifact_repository,
         quota_billing_service=quota_billing_service,
         job_event_repository=job_event_repository,
         execution_routing_service=execution_routing_service,

@@ -27,6 +27,9 @@ from app.modules.platform.infra.persistence.models import (
 from app.modules.platform.infra.persistence.repositories.ai_execution_repository_sqlalchemy import (
     AIExecutionRepositorySqlAlchemy,
 )
+from app.modules.platform.infra.persistence.repositories.artifact_repository_sqlalchemy import (
+    ArtifactRepositorySqlAlchemy,
+)
 from app.modules.platform.infra.persistence.repositories.execution_charge_repository_sqlalchemy import (
     ExecutionChargeRepositorySqlAlchemy,
 )
@@ -186,7 +189,21 @@ class _SucceededRunner:
             elif step.step_type == "code.generate":
                 output_payload = {"text": f"已写入 {str(merged.get('item_name', '')).strip()} 的服务器 custom_code 代码"}
             elif step.step_type == "build.project":
-                output_payload = {"text": f"已完成 {str(merged.get('item_name', '')).strip()} 的服务器项目构建"}
+                item_name = str(merged.get("item_name", "")).strip()
+                output_payload = {
+                    "text": f"已完成 {item_name} 的服务器项目构建",
+                    "artifacts": [
+                        {
+                            "artifact_type": "build_output",
+                            "storage_provider": "server_workspace",
+                            "object_key": f"/runtime/{item_name}.dll",
+                            "file_name": f"{item_name}.dll",
+                            "mime_type": "application/octet-stream",
+                            "size_bytes": 3,
+                            "result_summary": "服务器构建产物",
+                        }
+                    ],
+                }
             elif step.step_type == "single.asset.plan":
                 asset_type = str(step.input_payload.get("asset_type") or base_request.input_payload.get("asset_type", "")).strip()
                 if asset_type == "card":
@@ -563,6 +580,7 @@ def test_job_application_service_can_complete_supported_batch_card_fullscreen_jo
     orchestrator = ExecutionOrchestratorService(
         job_repository=JobRepositorySqlAlchemy(db_session),
         ai_execution_repository=AIExecutionRepositorySqlAlchemy(db_session),
+        artifact_repository=ArtifactRepositorySqlAlchemy(db_session),
         quota_billing_service=QuotaBillingService(
             execution_charge_repository=ExecutionChargeRepositorySqlAlchemy(db_session),
             quota_account_repository=quota_repository,
@@ -1007,6 +1025,8 @@ def test_job_application_service_can_complete_supported_single_custom_code_job(d
     assert started.status == JobStatus.SUCCEEDED
     assert started.items[0].status == JobItemStatus.SUCCEEDED
     assert started.items[0].result_summary == "已完成 SingleEffectPatch 的服务器项目构建"
+    artifacts = ArtifactRepositorySqlAlchemy(db_session).list_by_job_item(started.items[0].id)
+    assert artifacts[0].file_name == "SingleEffectPatch.dll"
 
 
 def test_job_application_service_can_complete_supported_single_relic_job(db_session):

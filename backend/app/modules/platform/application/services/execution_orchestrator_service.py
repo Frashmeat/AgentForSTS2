@@ -10,8 +10,8 @@ from app.modules.platform.contracts.runner_contracts import (
     StepExecutionResult,
 )
 from app.modules.platform.domain.models.enums import AIExecutionStatus, JobItemStatus, JobStatus
-from app.modules.platform.domain.repositories import AIExecutionRepository, JobEventRepository, JobRepository
-from app.modules.platform.infra.persistence.models import AIExecutionRecord
+from app.modules.platform.domain.repositories import AIExecutionRepository, ArtifactRepository, JobEventRepository, JobRepository
+from app.modules.platform.infra.persistence.models import AIExecutionRecord, ArtifactRecord
 from app.modules.platform.runner.workflow_registry import PlatformWorkflowRegistry
 from app.modules.platform.runner.workflow_runner import WorkflowRunner
 
@@ -34,9 +34,11 @@ class ExecutionOrchestratorService:
         uploaded_asset_service: UploadedAssetService | None = None,
         workflow_registry: PlatformWorkflowRegistry | None = None,
         workflow_runner: WorkflowRunner | None = None,
+        artifact_repository: ArtifactRepository | None = None,
     ) -> None:
         self.job_repository = job_repository
         self.ai_execution_repository = ai_execution_repository
+        self.artifact_repository = artifact_repository
         self.quota_billing_service = quota_billing_service
         self.job_event_repository = job_event_repository
         self.execution_routing_service = execution_routing_service
@@ -395,6 +397,13 @@ class ExecutionOrchestratorService:
             item.status = JobItemStatus.SUCCEEDED
             item.result_summary = summary
             item.error_summary = ""
+            self._persist_artifacts(
+                user_id=job.user_id,
+                job_id=job.id,
+                job_item_id=item.id,
+                execution_id=execution.id,
+                output_payload=result.output_payload,
+            )
             if self.quota_billing_service is not None:
                 self.quota_billing_service.capture(execution.id, now)
         else:
@@ -417,6 +426,53 @@ class ExecutionOrchestratorService:
         item.finished_at = now
         execution.finished_at = now
         job.finished_at = now
+
+    def _persist_artifacts(
+        self,
+        *,
+        user_id: int,
+        job_id: int,
+        job_item_id: int,
+        execution_id: int,
+        output_payload: dict[str, object],
+    ) -> None:
+        if self.artifact_repository is None:
+            return
+        raw_artifacts = output_payload.get("artifacts")
+        if not isinstance(raw_artifacts, list):
+            return
+
+        existing = {
+            (artifact.storage_provider, artifact.object_key)
+            for artifact in self.artifact_repository.list_by_execution(execution_id)
+        }
+        for raw in raw_artifacts:
+            if not isinstance(raw, dict):
+                continue
+            storage_provider = str(raw.get("storage_provider", "")).strip()
+            object_key = str(raw.get("object_key", "")).strip()
+            artifact_type = str(raw.get("artifact_type", "")).strip() or "build_output"
+            if not storage_provider or not object_key:
+                continue
+            dedupe_key = (storage_provider, object_key)
+            if dedupe_key in existing:
+                continue
+            self.artifact_repository.create(
+                ArtifactRecord(
+                    job_id=job_id,
+                    job_item_id=job_item_id,
+                    ai_execution_id=execution_id,
+                    user_id=user_id,
+                    artifact_type=artifact_type,
+                    storage_provider=storage_provider,
+                    object_key=object_key,
+                    file_name=str(raw.get("file_name", "")).strip() or None,
+                    mime_type=str(raw.get("mime_type", "")).strip() or None,
+                    size_bytes=int(raw.get("size_bytes", 0) or 0) or None,
+                    result_summary=str(raw.get("result_summary", "")).strip(),
+                )
+            )
+            existing.add(dedupe_key)
 
     @staticmethod
     def _pick_summary(payload: dict[str, object], fallback: str) -> str:

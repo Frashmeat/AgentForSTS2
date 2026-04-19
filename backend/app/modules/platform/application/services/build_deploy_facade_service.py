@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 
 from app.modules.codegen.api import build_and_fix
+from app.modules.platform.infra.build_output_files import find_latest_output_files
 from app.shared.infra.ws_errors import send_ws_error
 from app.shared.prompting import PromptLoader
 from config import get_config
@@ -17,18 +18,7 @@ class BuildDeployFacadeService:
         self._skip_dirs = {"obj", "ref", ".godot"}
 
     def _find_output_files(self, project_root: Path) -> list[Path]:
-        results: dict[str, Path] = {}
-        bin_dir = project_root / "bin"
-        if not bin_dir.exists():
-            return []
-        for suffix in (".dll", ".pck"):
-            candidates = [
-                file for file in bin_dir.rglob(f"*{suffix}")
-                if not any(part in self._skip_dirs for part in file.relative_to(bin_dir).parts)
-            ]
-            if candidates:
-                results[suffix] = max(candidates, key=lambda file: file.stat().st_mtime)
-        return list(results.values())
+        return find_latest_output_files(project_root)
 
     async def handle_ws_build_deploy(self, ws) -> None:
         await ws.accept()

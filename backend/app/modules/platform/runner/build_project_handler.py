@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+import mimetypes
 from pathlib import Path
 
 from app.modules.codegen.api import build_codegen_prompt_assembler
+from app.modules.platform.infra.build_output_files import find_latest_output_files
 from app.modules.platform.contracts.runner_contracts import StepExecutionRequest
 from app.shared.prompting import PromptLoader
 from llm.agent_runner import run_agent_task_with_llm_config
@@ -49,6 +51,24 @@ def _build_summary(full_text: str, item_name: str) -> str:
     ).strip() or f"已完成 {item_name} 的服务器项目构建"
 
 
+def _build_artifact_payloads(project_root: Path) -> list[dict[str, object]]:
+    payloads: list[dict[str, object]] = []
+    for file in find_latest_output_files(project_root):
+        mime_type, _ = mimetypes.guess_type(file.name)
+        payloads.append(
+            {
+                "artifact_type": "build_output",
+                "storage_provider": "server_workspace",
+                "object_key": str(file),
+                "file_name": file.name,
+                "mime_type": mime_type or "application/octet-stream",
+                "size_bytes": file.stat().st_size,
+                "result_summary": "服务器构建产物",
+            }
+        )
+    return payloads
+
+
 async def execute_build_project_step(
     request: StepExecutionRequest,
     *,
@@ -65,9 +85,11 @@ async def execute_build_project_step(
     prompt = prompt_builder(max_attempts)
     llm_cfg = build_code_llm_config(request.execution_binding)
     full_text = await build_agent_runner(prompt, project_root, llm_cfg)
+    artifacts = _build_artifact_payloads(project_root)
     return {
         "text": _build_summary(full_text, item_name),
         "analysis": full_text,
         "item_name": item_name,
         "server_workspace_root": str(project_root),
+        "artifacts": artifacts,
     }
