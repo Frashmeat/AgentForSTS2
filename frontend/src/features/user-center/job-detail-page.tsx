@@ -186,7 +186,14 @@ export function UserCenterJobDetailPage() {
                   <p className="text-sm font-semibold text-slate-900">
                     #{item.item_index + 1} · {item.item_type}
                   </p>
-                  <p className="mt-1 text-xs text-slate-500">{renderJobItemStatus(item.status)}</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                    <span className="text-slate-500">{renderJobItemStatus(item.status)}</span>
+                    {item.delivery_state ? (
+                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 font-medium text-slate-700">
+                        {renderDeliveryStateLabel(item.delivery_state)}
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
                 <div className="max-w-xs text-right text-xs text-slate-500">
                   <p>{item.result_summary || "无结果摘要"}</p>

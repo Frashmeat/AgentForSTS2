@@ -23,6 +23,7 @@ test("job detail page loads detail items and refund summary", () => {
   assert.match(pageSource, /交付状态/);
   assert.match(pageSource, /已部署/);
   assert.match(pageSource, /已构建/);
+  assert.match(pageSource, /item\.delivery_state/);
   assert.match(pageSource, /RefundSummary/);
   assert.match(pageSource, /to=\"\/\"/);
   assert.match(pageSource, /返回首页/);

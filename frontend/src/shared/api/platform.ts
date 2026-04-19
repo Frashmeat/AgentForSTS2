@@ -52,6 +52,7 @@ export interface PlatformJobItemSummary {
   item_index: number;
   item_type: string;
   status: string;
+  delivery_state?: string;
   result_summary: string;
   error_summary: string;
 }

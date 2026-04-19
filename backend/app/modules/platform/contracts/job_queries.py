@@ -33,6 +33,7 @@ class JobItemListItem(ModelBase):
     item_index: int
     item_type: str
     status: str
+    delivery_state: str = ""
     result_summary: str = ""
     error_summary: str = ""
 

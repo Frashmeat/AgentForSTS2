@@ -132,12 +132,14 @@ class JobQueryRepositorySqlAlchemy(JobQueryRepository):
             .order_by(JobItemRecord.item_index.asc())
             .all()
         )
+        delivery_summaries = self._load_item_delivery_summaries([row.id for row in rows])
         return [
             JobItemListItem(
                 id=row.id,
                 item_index=row.item_index,
                 item_type=row.item_type,
                 status=_enum_value(row.status),
+                delivery_state=delivery_summaries.get(row.id, _DeliverySummary()).state,
                 result_summary=row.result_summary,
                 error_summary=row.error_summary,
             )
@@ -205,6 +207,28 @@ class JobQueryRepositorySqlAlchemy(JobQueryRepository):
         summaries: dict[int, _DeliverySummary] = {}
         for job_id, artifact_type in rows:
             summary = summaries.setdefault(job_id, _DeliverySummary())
+            if artifact_type == "deployed_output":
+                summary.state = "deployed"
+            elif artifact_type == "build_output" and summary.state != "deployed":
+                summary.state = "built"
+        return summaries
+
+    def _load_item_delivery_summaries(self, job_item_ids: list[int]) -> dict[int, _DeliverySummary]:
+        if not job_item_ids:
+            return {}
+
+        rows = (
+            self.session.query(ArtifactRecord.job_item_id, ArtifactRecord.artifact_type)
+            .filter(ArtifactRecord.job_item_id.in_(job_item_ids))
+            .order_by(ArtifactRecord.job_item_id.asc(), ArtifactRecord.id.asc())
+            .all()
+        )
+
+        summaries: dict[int, _DeliverySummary] = {}
+        for job_item_id, artifact_type in rows:
+            if job_item_id is None:
+                continue
+            summary = summaries.setdefault(job_item_id, _DeliverySummary())
             if artifact_type == "deployed_output":
                 summary.state = "deployed"
             elif artifact_type == "build_output" and summary.state != "deployed":
