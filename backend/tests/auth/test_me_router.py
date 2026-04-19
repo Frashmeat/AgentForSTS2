@@ -724,6 +724,94 @@ def test_me_router_rejects_legacy_platform_payload_fields(client: TestClient):
     assert created.json()["detail"] == "platform job payload for single_generate/card contains forbidden fields: asset_name"
 
 
+def test_me_router_requires_server_project_ref_for_single_custom_code(client: TestClient):
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "username": "luna",
+            "email": "luna@example.com",
+            "password": "secret-123",
+        },
+    )
+    assert registered.status_code == 200
+    verification_code = registered.json()["verification_code"]
+
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    verified = client.post("/api/auth/verify-email", json={"code": verification_code})
+    assert verified.status_code == 200
+
+    app_container = client.app.state.container
+    session = app_container.resolve_singleton("platform.db_session_factory")()
+    try:
+        profile = ExecutionProfileRecord(
+            code="codex-gpt-5-4",
+            display_name="Codex CLI / gpt-5.4",
+            agent_backend="codex",
+            model="gpt-5.4",
+            description="默认推荐",
+            enabled=True,
+            recommended=True,
+            sort_order=10,
+        )
+        session.add(profile)
+        session.flush()
+        session.add(
+            ServerCredentialRecord(
+                execution_profile_id=profile.id,
+                provider="openai",
+                auth_type="api_key",
+                credential_ciphertext="cipher",
+                secret_ciphertext=None,
+                base_url="https://api.openai.com/v1",
+                label="main",
+                priority=1,
+                enabled=True,
+                health_status="healthy",
+                last_checked_at=None,
+                last_error_code="",
+                last_error_message="",
+            )
+        )
+        session.add(QuotaAccountRecord(user_id=registered.json()["user"]["user_id"], status=QuotaAccountStatus.ACTIVE))
+        session.commit()
+    finally:
+        session.close()
+
+    created = client.post(
+        "/api/me/jobs",
+        json={
+            "job_type": "single_generate",
+            "workflow_version": "2026.03.31",
+            "input_summary": "补一个单资产脚本",
+            "created_from": "single_asset",
+            "selected_execution_profile_id": 1,
+            "selected_agent_backend": "codex",
+            "selected_model": "gpt-5.4",
+            "items": [
+                {
+                    "item_type": "custom_code",
+                    "input_summary": "补一个单资产脚本",
+                    "input_payload": {
+                        "item_name": "SingleEffectPatch",
+                        "description": "补一个单资产 custom_code 示例",
+                    },
+                }
+            ],
+        },
+    )
+
+    assert created.status_code == 400
+    assert created.json()["detail"] == "platform job payload for single_generate/custom_code requires server_project_ref"
+
+
 def test_me_router_rejects_platform_job_actions_for_unverified_email(client: TestClient):
     registered = client.post(
         "/api/auth/register",

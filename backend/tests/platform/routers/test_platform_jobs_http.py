@@ -386,6 +386,44 @@ def test_platform_jobs_router_rejects_legacy_platform_payload_fields(client: Tes
     assert created.json()["detail"] == "platform job payload for single_generate/card contains forbidden fields: asset_name"
 
 
+def test_platform_jobs_router_requires_server_project_ref_for_single_custom_code(client: TestClient):
+    _register_login_and_verify(client, "luna", "luna@example.com")
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    profile_id = _seed_execution_profile(client)
+
+    created = client.post(
+        "/api/platform/jobs",
+        json={
+            "job_type": "single_generate",
+            "workflow_version": "2026.03.31",
+            "selected_execution_profile_id": profile_id,
+            "selected_agent_backend": "codex",
+            "selected_model": "gpt-5.4",
+            "items": [
+                {
+                    "item_type": "custom_code",
+                    "input_summary": "补一个单资产脚本",
+                    "input_payload": {
+                        "item_name": "SingleEffectPatch",
+                        "description": "补一个单资产 custom_code 示例",
+                    },
+                }
+            ],
+        },
+    )
+
+    assert created.status_code == 400
+    assert created.json()["detail"] == "platform job payload for single_generate/custom_code requires server_project_ref"
+
+
 def test_platform_jobs_router_accepts_server_project_ref(client: TestClient):
     user_id = _register_login_and_verify(client, "luna", "luna@example.com")
     login = client.post(
