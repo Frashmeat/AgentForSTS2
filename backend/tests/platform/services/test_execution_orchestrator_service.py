@@ -22,6 +22,9 @@ from app.modules.platform.infra.persistence.models import (
 from app.modules.platform.infra.persistence.repositories.ai_execution_repository_sqlalchemy import (
     AIExecutionRepositorySqlAlchemy,
 )
+from app.modules.platform.infra.persistence.repositories.artifact_repository_sqlalchemy import (
+    ArtifactRepositorySqlAlchemy,
+)
 from app.modules.platform.infra.persistence.repositories.execution_routing_repository_sqlalchemy import (
     ExecutionRoutingRepositorySqlAlchemy,
 )
@@ -285,3 +288,66 @@ def test_execution_orchestrator_service_marks_quota_exhausted_when_reserve_fails
     assert execution is None
     assert job.status == JobStatus.QUOTA_EXHAUSTED
     assert job.items[0].status == JobItemStatus.QUOTA_SKIPPED
+
+
+def test_execution_orchestrator_service_persists_artifacts_from_succeeded_result(db_session):
+    job = _seed_ready_job(db_session)
+    job.status = JobStatus.RUNNING
+    job.items[0].status = JobItemStatus.RUNNING
+    execution = AIExecutionRepositorySqlAlchemy(db_session).create(
+        AIExecutionRecord(
+            job_id=job.id,
+            job_item_id=job.items[0].id,
+            user_id=1001,
+            status=AIExecutionStatus.RUNNING,
+            provider="openai",
+            model="gpt-5.4",
+            credential_ref="server-credential:1",
+            retry_attempt=0,
+            switched_credential=False,
+            request_idempotency_key="idem-artifacts",
+            workflow_version="2026.03.31",
+            step_protocol_version="v1",
+            result_schema_version="v1",
+            step_type="build.project",
+            step_id="build.project",
+        )
+    )
+    db_session.flush()
+
+    service = ExecutionOrchestratorService(
+        job_repository=JobRepositorySqlAlchemy(db_session),
+        ai_execution_repository=AIExecutionRepositorySqlAlchemy(db_session),
+        quota_billing_service=None,
+        job_event_repository=JobEventRepositorySqlAlchemy(db_session),
+        artifact_repository=ArtifactRepositorySqlAlchemy(db_session),
+    )
+
+    service._apply_result(
+        job=job,
+        item=job.items[0],
+        execution=execution,
+        result=StepExecutionResult(
+            step_id="build.project",
+            status="succeeded",
+            output_payload={
+                "text": "已完成 SingleEffectPatch 的服务器项目构建",
+                "artifacts": [
+                    {
+                        "artifact_type": "build_output",
+                        "storage_provider": "server_workspace",
+                        "object_key": "/runtime/SingleEffectPatch.dll",
+                        "file_name": "SingleEffectPatch.dll",
+                        "mime_type": "application/octet-stream",
+                        "size_bytes": 3,
+                        "result_summary": "服务器构建产物",
+                    }
+                ],
+            },
+        ),
+        now=datetime.now(UTC),
+    )
+
+    artifacts = ArtifactRepositorySqlAlchemy(db_session).list_by_execution(execution.id)
+    assert artifacts[0].file_name == "SingleEffectPatch.dll"
+    assert artifacts[0].artifact_type == "build_output"
