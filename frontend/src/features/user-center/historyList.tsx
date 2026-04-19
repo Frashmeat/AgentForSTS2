@@ -3,6 +3,26 @@ import type { UserCenterJobSummary } from "./model.ts";
 import { formatExecutionProfileText } from "./executionProfileText.ts";
 import { renderJobStatus } from "./statusText.ts";
 
+function resolveDeliveryBadge(resultSummary: string | undefined) {
+  const summary = String(resultSummary ?? "").trim();
+  if (!summary) {
+    return null;
+  }
+  if (summary.includes("部署到")) {
+    return {
+      label: "已部署",
+      className: "rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-medium text-emerald-800",
+    };
+  }
+  if (summary.includes("项目构建")) {
+    return {
+      label: "已构建",
+      className: "rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 font-medium text-slate-700",
+    };
+  }
+  return null;
+}
+
 export function HistoryList({ jobs }: { jobs: UserCenterJobSummary[] }) {
   return (
     <section className="platform-page-card p-6">
@@ -22,6 +42,7 @@ export function HistoryList({ jobs }: { jobs: UserCenterJobSummary[] }) {
         )}
         {jobs.map(job => {
           const executionProfileText = formatExecutionProfileText(job);
+          const deliveryBadge = resolveDeliveryBadge(job.result_summary);
           return (
             <Link
               key={job.id}
@@ -41,6 +62,11 @@ export function HistoryList({ jobs }: { jobs: UserCenterJobSummary[] }) {
                     {job.deferredSummary ? (
                       <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-medium text-amber-800">
                         {job.deferredSummary.shortLabel}
+                      </span>
+                    ) : null}
+                    {deliveryBadge ? (
+                      <span className={deliveryBadge.className}>
+                        {deliveryBadge.label}
                       </span>
                     ) : null}
                   </div>
