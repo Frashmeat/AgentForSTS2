@@ -41,6 +41,17 @@ function resolveArtifactLocationLabel(artifact: PlatformArtifactSummary) {
   return "产物路径";
 }
 
+function renderDeliveryStateLabel(value: string | undefined) {
+  const normalized = String(value ?? "").trim();
+  if (normalized === "deployed") {
+    return "已部署";
+  }
+  if (normalized === "built") {
+    return "已构建";
+  }
+  return "未标记";
+}
+
 export function UserCenterJobDetailPage() {
   const { jobId } = useParams();
   const { isAuthenticated, isLoading } = useSession();
@@ -139,6 +150,9 @@ export function UserCenterJobDetailPage() {
             <p>任务选择：<span className="font-medium text-slate-900">{executionProfileText}</span></p>
             {detail.selected_execution_profile_id ? (
               <p>执行配置 ID：<span className="font-medium text-slate-900">{detail.selected_execution_profile_id}</span></p>
+            ) : null}
+            {detail.delivery_state ? (
+              <p>交付状态：<span className="font-medium text-slate-900">{renderDeliveryStateLabel(detail.delivery_state)}</span></p>
             ) : null}
           </div>
         </section>
