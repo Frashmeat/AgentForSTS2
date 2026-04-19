@@ -147,7 +147,10 @@ class _SupportedServerRegistry:
                 )
             ]
         if (job_type, item_type) == ("single_generate", "custom_code"):
-            return [PlatformWorkflowStep(step_type="batch.custom_code.plan", step_id="single-custom-code")]
+            return [
+                PlatformWorkflowStep(step_type="batch.custom_code.plan", step_id="single-custom-code"),
+                PlatformWorkflowStep(step_type="code.generate", step_id="single-custom-codegen"),
+            ]
         if (job_type, item_type) == ("single_generate", "card"):
             return [PlatformWorkflowStep(step_type="single.asset.plan", step_id="single-card-plan")]
         if (job_type, item_type) == ("single_generate", "card_fullscreen"):
@@ -163,28 +166,44 @@ class _SupportedServerRegistry:
 
 class _SucceededRunner:
     async def run(self, *, steps, base_request):
-        text = "分析完成"
-        if steps[0].step_type == "batch.custom_code.plan":
-            text = "已生成服务器 custom_code 实现方案"
-        if steps[0].step_type == "single.asset.plan":
-            asset_type = str(steps[0].input_payload.get("asset_type") or base_request.input_payload.get("asset_type", "")).strip()
-            if asset_type == "card":
-                text = "已生成服务器卡牌实现方案"
-            elif asset_type == "card_fullscreen":
-                text = "已生成服务器全画面卡实现方案"
-            elif asset_type == "character":
-                text = "已生成服务器角色实现方案"
-            elif asset_type == "power":
-                text = "已生成服务器 Power 实现方案"
-            else:
-                text = "已生成服务器遗物实现方案"
-        return [
-            StepExecutionResult(
-                step_id=steps[0].step_id,
-                status="succeeded",
-                output_payload={"text": text},
+        results: list[StepExecutionResult] = []
+        payload = dict(base_request.input_payload)
+        for step in steps:
+            merged = dict(payload)
+            merged.update(step.input_payload)
+            text = "分析完成"
+            output_payload: dict[str, object] = {"text": text}
+            if step.step_type == "batch.custom_code.plan":
+                output_payload = {
+                    "text": "已生成服务器 custom_code 实现方案",
+                    "analysis": "摘要：建议先补一个 Harmony Patch 骨架",
+                    "item_name": str(merged.get("item_name", "")).strip(),
+                    "server_workspace_root": str(merged.get("server_workspace_root", "")).strip(),
+                }
+            elif step.step_type == "code.generate":
+                output_payload = {"text": "已写入 SingleEffectPatch 的服务器 custom_code 代码"}
+            elif step.step_type == "single.asset.plan":
+                asset_type = str(step.input_payload.get("asset_type") or base_request.input_payload.get("asset_type", "")).strip()
+                if asset_type == "card":
+                    text = "已生成服务器卡牌实现方案"
+                elif asset_type == "card_fullscreen":
+                    text = "已生成服务器全画面卡实现方案"
+                elif asset_type == "character":
+                    text = "已生成服务器角色实现方案"
+                elif asset_type == "power":
+                    text = "已生成服务器 Power 实现方案"
+                else:
+                    text = "已生成服务器遗物实现方案"
+                output_payload = {"text": text}
+            results.append(
+                StepExecutionResult(
+                    step_id=step.step_id,
+                    status="succeeded",
+                    output_payload=output_payload,
+                )
             )
-        ]
+            payload.update(output_payload)
+        return results
 
 
 class _CapturingRunner:
@@ -535,7 +554,6 @@ def test_job_application_service_can_complete_supported_batch_card_fullscreen_jo
             refunded_amount=0,
         )
     )
-
     orchestrator = ExecutionOrchestratorService(
         job_repository=JobRepositorySqlAlchemy(db_session),
         ai_execution_repository=AIExecutionRepositorySqlAlchemy(db_session),
@@ -729,7 +747,6 @@ def test_job_application_service_can_complete_supported_batch_power_job(db_sessi
             refunded_amount=0,
         )
     )
-
     orchestrator = ExecutionOrchestratorService(
         job_repository=JobRepositorySqlAlchemy(db_session),
         ai_execution_repository=AIExecutionRepositorySqlAlchemy(db_session),
@@ -879,7 +896,7 @@ def test_job_application_service_can_complete_supported_batch_character_job(db_s
     assert started.items[0].result_summary == "已生成服务器角色实现方案"
 
 
-def test_job_application_service_can_complete_supported_single_custom_code_job(db_session):
+def test_job_application_service_can_complete_supported_single_custom_code_job(db_session, tmp_path):
     cipher = ServerCredentialCipher("job-service-test-secret")
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
@@ -923,6 +940,8 @@ def test_job_application_service_can_complete_supported_single_custom_code_job(d
             refunded_amount=0,
         )
     )
+    workspace_service = ServerWorkspaceService(storage_root=tmp_path / "platform-workspaces")
+    workspace = workspace_service.create_workspace(user_id=1001, project_name="DarkMod")
 
     orchestrator = ExecutionOrchestratorService(
         job_repository=JobRepositorySqlAlchemy(db_session),
@@ -937,6 +956,7 @@ def test_job_application_service_can_complete_supported_single_custom_code_job(d
             execution_routing_repository=ExecutionRoutingRepositorySqlAlchemy(db_session)
         ),
         server_credential_cipher=cipher,
+        server_workspace_service=workspace_service,
         workflow_registry=_SupportedServerRegistry(),
         workflow_runner=_SucceededRunner(),
     )
@@ -944,6 +964,7 @@ def test_job_application_service_can_complete_supported_single_custom_code_job(d
         job_repository=JobRepositorySqlAlchemy(db_session),
         job_event_repository=JobEventRepositorySqlAlchemy(db_session),
         execution_orchestrator_service=orchestrator,
+        server_workspace_service=workspace_service,
     )
     job = service.create_job(
         user_id=1001,
@@ -962,6 +983,7 @@ def test_job_application_service_can_complete_supported_single_custom_code_job(d
                             "item_name": "SingleEffectPatch",
                             "description": "补一个单资产 custom_code 示例",
                             "image_mode": "ai",
+                            "server_project_ref": workspace.server_project_ref,
                         },
                     }
                 ],
@@ -974,7 +996,7 @@ def test_job_application_service_can_complete_supported_single_custom_code_job(d
     assert started is not None
     assert started.status == JobStatus.SUCCEEDED
     assert started.items[0].status == JobItemStatus.SUCCEEDED
-    assert started.items[0].result_summary == "已生成服务器 custom_code 实现方案"
+    assert started.items[0].result_summary == "已写入 SingleEffectPatch 的服务器 custom_code 代码"
 
 
 def test_job_application_service_can_complete_supported_single_relic_job(db_session):
@@ -1219,7 +1241,6 @@ def test_job_application_service_can_complete_supported_single_card_fullscreen_j
             refunded_amount=0,
         )
     )
-
     orchestrator = ExecutionOrchestratorService(
         job_repository=JobRepositorySqlAlchemy(db_session),
         ai_execution_repository=AIExecutionRepositorySqlAlchemy(db_session),
@@ -1540,6 +1561,38 @@ def test_job_application_service_rejects_platform_payload_with_project_root_and_
         )
     else:
         raise AssertionError("expected ValueError when forbidden platform payload fields are present")
+
+
+def test_job_application_service_requires_server_project_ref_for_single_custom_code(db_session):
+    service = JobApplicationService(
+        job_repository=JobRepositorySqlAlchemy(db_session),
+        job_event_repository=JobEventRepositorySqlAlchemy(db_session),
+    )
+
+    try:
+        service.create_job(
+            user_id=1001,
+            command=CreateJobCommand.model_validate(
+                {
+                    "job_type": "single_generate",
+                    "workflow_version": "2026.03.31",
+                    "items": [
+                        {
+                            "item_type": "custom_code",
+                            "input_summary": "补一个单资产脚本",
+                            "input_payload": {
+                                "item_name": "SingleEffectPatch",
+                                "description": "补一个单资产 custom_code 示例",
+                            },
+                        }
+                    ],
+                }
+            ),
+        )
+    except ValueError as error:
+        assert str(error) == "platform job payload for single_generate/custom_code requires server_project_ref"
+    else:
+        raise AssertionError("expected ValueError when server_project_ref is missing")
 
 
 def test_job_application_service_accepts_uploaded_asset_ref_for_platform_payload(db_session, tmp_path):

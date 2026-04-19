@@ -159,29 +159,45 @@ class _SucceededWorkflowRunner:
         self.dispatcher = dispatcher
 
     async def run(self, *, steps, base_request):
-        text = "日志分析完成"
-        if steps[0].step_type == "batch.custom_code.plan":
-            text = "已生成服务器 custom_code 实现方案"
-        if steps[0].step_type == "single.asset.plan":
-            asset_type = str(steps[0].input_payload.get("asset_type") or base_request.input_payload.get("asset_type", "")).strip()
-            if asset_type == "card":
-                text = "已生成服务器卡牌实现方案"
-            elif asset_type == "card_fullscreen":
-                text = "已生成服务器全画面卡实现方案"
-            elif asset_type == "character":
-                text = "已生成服务器角色实现方案"
-            elif asset_type == "power":
-                text = "已生成服务器 Power 实现方案"
-            else:
-                text = "已生成服务器遗物实现方案"
-        return [
-            StepExecutionResult(
-                step_id=steps[0].step_id,
-                status="succeeded",
-                output_payload={"text": text},
-                error_summary="",
+        results: list[StepExecutionResult] = []
+        payload = dict(base_request.input_payload)
+        for step in steps:
+            merged = dict(payload)
+            merged.update(step.input_payload)
+            text = "日志分析完成"
+            output_payload: dict[str, object] = {"text": text}
+            if step.step_type == "batch.custom_code.plan":
+                output_payload = {
+                    "text": "已生成服务器 custom_code 实现方案",
+                    "analysis": "摘要：建议先补一个 Harmony Patch 骨架",
+                    "item_name": str(merged.get("item_name", "")).strip(),
+                    "server_workspace_root": str(merged.get("server_workspace_root", "")).strip(),
+                }
+            elif step.step_type == "code.generate":
+                output_payload = {"text": "已写入 SingleEffectPatch 的服务器 custom_code 代码"}
+            elif step.step_type == "single.asset.plan":
+                asset_type = str(step.input_payload.get("asset_type") or base_request.input_payload.get("asset_type", "")).strip()
+                if asset_type == "card":
+                    text = "已生成服务器卡牌实现方案"
+                elif asset_type == "card_fullscreen":
+                    text = "已生成服务器全画面卡实现方案"
+                elif asset_type == "character":
+                    text = "已生成服务器角色实现方案"
+                elif asset_type == "power":
+                    text = "已生成服务器 Power 实现方案"
+                else:
+                    text = "已生成服务器遗物实现方案"
+                output_payload = {"text": text}
+            results.append(
+                StepExecutionResult(
+                    step_id=step.step_id,
+                    status="succeeded",
+                    output_payload=output_payload,
+                    error_summary="",
+                )
             )
-        ]
+            payload.update(output_payload)
+        return results
 
 
 def test_platform_jobs_router_supports_create_start_cancel_and_queries_for_current_session_user(client: TestClient):
@@ -831,7 +847,7 @@ def test_platform_jobs_router_can_complete_supported_batch_character_job(client:
 
 
 def test_platform_jobs_router_can_complete_supported_single_custom_code_job(client: TestClient):
-    _register_login_and_verify(client, "luna", "luna@example.com")
+    user_id = _register_login_and_verify(client, "luna", "luna@example.com")
     login = client.post(
         "/api/auth/login",
         json={
@@ -842,6 +858,8 @@ def test_platform_jobs_router_can_complete_supported_single_custom_code_job(clie
     assert login.status_code == 200
 
     profile_id = _seed_execution_profile(client)
+    workspace_service = client.app.state.container.resolve_singleton("platform.server_workspace_service_factory")()
+    workspace = workspace_service.create_workspace(user_id=user_id, project_name="DarkMod")
     client.app.state.container.register_singleton("platform.workflow_runner_factory", _SucceededWorkflowRunner)
 
     created = client.post(
@@ -860,6 +878,7 @@ def test_platform_jobs_router_can_complete_supported_single_custom_code_job(clie
                         "item_name": "SingleEffectPatch",
                         "description": "补一个单资产 custom_code 示例",
                         "image_mode": "ai",
+                        "server_project_ref": workspace.server_project_ref,
                     },
                 }
             ],
@@ -880,13 +899,13 @@ def test_platform_jobs_router_can_complete_supported_single_custom_code_job(clie
     items = client.get(f"/api/platform/jobs/{job_id}/items")
     assert items.status_code == 200
     assert items.json()[0]["status"] == "succeeded"
-    assert items.json()[0]["result_summary"] == "已生成服务器 custom_code 实现方案"
+    assert items.json()[0]["result_summary"] == "已写入 SingleEffectPatch 的服务器 custom_code 代码"
 
     session = client.app.state.container.resolve_singleton("platform.db_session_factory")()
     try:
         execution = session.query(AIExecutionRecord).filter(AIExecutionRecord.job_id == job_id).one()
         assert execution.status.value == "succeeded"
-        assert execution.result_summary == "已生成服务器 custom_code 实现方案"
+        assert execution.result_summary == "已写入 SingleEffectPatch 的服务器 custom_code 代码"
     finally:
         session.close()
 

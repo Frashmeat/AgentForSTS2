@@ -56,10 +56,27 @@ class AgentRunner(PortAgentRunner):
     pass
 
 
-async def run_agent_task(prompt: str, project_root: Path, stream_callback=None) -> str:
-    llm_cfg = get_config()["llm"]
-    backend = resolve_agent_backend(llm_cfg)
+async def run_agent_task_with_llm_config(
+    prompt: str,
+    project_root: Path,
+    llm_cfg: dict,
+    stream_callback=None,
+    *,
+    use_runtime_custom_prompt: bool = True,
+) -> str:
+    effective_llm_cfg = normalize_llm_config(llm_cfg)
+    backend = resolve_agent_backend(effective_llm_cfg)
     logger.info("run_agent_task backend=%s project=%s prompt_len=%d", backend, project_root, len(prompt))
-    prompt = build_agent_prompt(prompt, llm_cfg, use_runtime_config=True)
+    prompt = build_agent_prompt(prompt, effective_llm_cfg, use_runtime_config=use_runtime_custom_prompt)
     runner = AgentRunner(registry=_build_default_registry())
-    return await runner.run(prompt, project_root, llm_cfg, stream_callback)
+    return await runner.run(prompt, project_root, effective_llm_cfg, stream_callback)
+
+
+async def run_agent_task(prompt: str, project_root: Path, stream_callback=None) -> str:
+    return await run_agent_task_with_llm_config(
+        prompt,
+        project_root,
+        get_config()["llm"],
+        stream_callback,
+        use_runtime_custom_prompt=True,
+    )

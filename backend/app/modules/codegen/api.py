@@ -53,21 +53,29 @@ def _build_api_lookup_section() -> str:
 
 
 def _build_codegen_service() -> CodegenService:
-    knowledge_source = Sts2DocsKnowledgeSource(
-        docs_for_type=get_docs_for_type,
-        planner_hints=get_planner_api_hints,
-    )
-    assembler = PromptAssembler(
-        knowledge_source=knowledge_source,
-        api_lookup_provider=_build_api_lookup_section,
-        api_ref_path=get_game_api_reference_path(),
-    )
+    assembler = build_codegen_prompt_assembler()
     return CodegenService(
         prompt_assembler=assembler,
         agent_runner=run_claude_code,
         artifact_writer=ArtifactWriter(),
         build_trigger=BuildTrigger(run_claude_code),
     )
+
+
+def build_codegen_prompt_assembler() -> PromptAssembler:
+    knowledge_source = Sts2DocsKnowledgeSource(
+        docs_for_type=get_docs_for_type,
+        planner_hints=get_planner_api_hints,
+    )
+    return PromptAssembler(
+        knowledge_source=knowledge_source,
+        api_lookup_provider=_build_api_lookup_section,
+        api_ref_path=get_game_api_reference_path(),
+    )
+
+
+def build_custom_code_prompt(request: CustomCodegenRequest) -> str:
+    return build_codegen_prompt_assembler().assemble_custom_code_prompt(request)
 
 
 async def create_asset(
@@ -159,6 +167,8 @@ async def package_mod(
 
 __all__ = [
     "build_and_fix",
+    "build_codegen_prompt_assembler",
+    "build_custom_code_prompt",
     "create_asset",
     "create_asset_group",
     "create_custom_code",
