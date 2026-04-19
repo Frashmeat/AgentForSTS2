@@ -91,6 +91,7 @@ def _build_server_workspace_service(request: Request) -> ServerWorkspaceService:
 def _build_workflow_registry(request: Request) -> PlatformWorkflowRegistry:
     container = request.app.state.container
     registry = container.resolve_singleton("platform.workflow_registry_factory")()
+
     def resolve_single_card_fullscreen(input_payload: dict[str, object]) -> list[PlatformWorkflowStep]:
         uploaded_asset_ref = str(input_payload.get("uploaded_asset_ref", "")).strip()
         server_project_ref = str(input_payload.get("server_project_ref", "")).strip()
@@ -100,6 +101,22 @@ def _build_workflow_registry(request: Request) -> PlatformWorkflowRegistry:
                 PlatformWorkflowStep(step_type="build.project", step_id="single.card_fullscreen.build"),
             ]
         return [PlatformWorkflowStep(step_type="single.asset.plan", step_id="single.card_fullscreen.plan")]
+
+    def resolve_batch_card_fullscreen(input_payload: dict[str, object]) -> list[PlatformWorkflowStep]:
+        uploaded_asset_ref = str(input_payload.get("uploaded_asset_ref", "")).strip()
+        server_project_ref = str(input_payload.get("server_project_ref", "")).strip()
+        if uploaded_asset_ref and server_project_ref:
+            return [
+                PlatformWorkflowStep(step_type="asset.generate", step_id="batch.card_fullscreen.asset"),
+                PlatformWorkflowStep(step_type="build.project", step_id="batch.card_fullscreen.build"),
+            ]
+        return [
+            PlatformWorkflowStep(
+                step_type="single.asset.plan",
+                step_id="batch.card_fullscreen.plan",
+                input_payload={"asset_type": "card_fullscreen"},
+            )
+        ]
 
     registry.register(
         "log_analysis",
@@ -129,13 +146,7 @@ def _build_workflow_registry(request: Request) -> PlatformWorkflowRegistry:
     registry.register(
         "batch_generate",
         "card_fullscreen",
-        [
-            PlatformWorkflowStep(
-                step_type="single.asset.plan",
-                step_id="batch.card_fullscreen.plan",
-                input_payload={"asset_type": "card_fullscreen"},
-            )
-        ],
+        resolve_batch_card_fullscreen,
     )
     registry.register(
         "batch_generate",

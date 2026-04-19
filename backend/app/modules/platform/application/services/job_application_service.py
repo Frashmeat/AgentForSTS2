@@ -253,12 +253,14 @@ class JobApplicationService:
                     f"platform job payload for {command.job_type}/custom_code requires server_project_ref"
                 )
             if (
-                command.job_type == "single_generate"
+                command.job_type in {"single_generate", "batch_generate"}
                 and item.item_type == "card_fullscreen"
                 and uploaded_asset_ref
                 and not server_project_ref
             ):
-                raise ValueError("platform job payload for single_generate/card_fullscreen requires server_project_ref when uploaded_asset_ref is present")
+                raise ValueError(
+                    f"platform job payload for {command.job_type}/card_fullscreen requires server_project_ref when uploaded_asset_ref is present"
+                )
             if server_project_ref:
                 if self.server_workspace_service is None:
                     raise ValueError("server workspace service is not configured")
