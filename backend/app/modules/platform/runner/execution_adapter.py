@@ -14,6 +14,7 @@ class ExecutionAdapter:
         *,
         image_handler: StepHandler | None,
         code_handler: StepHandler | None,
+        asset_handler: StepHandler | None,
         text_handler: StepHandler | None,
         batch_custom_code_handler: StepHandler | None,
         single_asset_plan_handler: StepHandler | None,
@@ -24,6 +25,7 @@ class ExecutionAdapter:
         self._handlers = {
             "image.generate": image_handler,
             "code.generate": code_handler,
+            "asset.generate": asset_handler,
             "text.generate": text_handler,
             "batch.custom_code.plan": batch_custom_code_handler,
             "single.asset.plan": single_asset_plan_handler,

@@ -173,7 +173,11 @@ class ExecutionOrchestratorService:
             execution_binding=execution_binding,
         )
         payload = self._hydrate_runtime_refs(user_id=user_id, input_payload=input_payload)
-        steps = self.workflow_registry.resolve(job_type, item_type)
+        steps = self._resolve_workflow_steps(
+            job_type=job_type,
+            item_type=item_type,
+            input_payload=payload,
+        )
         return await self.workflow_runner.run(
             steps=steps,
             base_request=StepExecutionRequest(
@@ -210,6 +214,12 @@ class ExecutionOrchestratorService:
             payload["uploaded_asset_file_name"] = uploaded.file_name
             payload["uploaded_asset_mime_type"] = uploaded.mime_type
             payload["uploaded_asset_size_bytes"] = uploaded.size_bytes
+            payload["uploaded_asset_path"] = str(
+                self.uploaded_asset_service.get_asset_content_path(
+                    user_id=user_id,
+                    uploaded_asset_ref=uploaded_asset_ref,
+                )
+            )
 
         server_project_ref = str(payload.get("server_project_ref", "")).strip()
         if server_project_ref:
@@ -225,7 +235,7 @@ class ExecutionOrchestratorService:
         if self.workflow_registry is None or self.workflow_runner is None:
             return False
         try:
-            self.workflow_registry.resolve(job_type, item_type)
+            self._resolve_workflow_steps(job_type=job_type, item_type=item_type, input_payload={})
         except KeyError:
             return False
         return True
@@ -481,3 +491,17 @@ class ExecutionOrchestratorService:
             if value:
                 return value
         return fallback.strip()
+
+    def _resolve_workflow_steps(
+        self,
+        *,
+        job_type: str,
+        item_type: str,
+        input_payload: dict[str, object],
+    ):
+        if self.workflow_registry is None:
+            raise RuntimeError("workflow registry is not configured")
+        try:
+            return self.workflow_registry.resolve(job_type, item_type, input_payload=input_payload)
+        except TypeError:
+            return self.workflow_registry.resolve(job_type, item_type)

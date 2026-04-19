@@ -175,6 +175,8 @@ class _SucceededWorkflowRunner:
                 }
             elif step.step_type == "code.generate":
                 output_payload = {"text": f"已写入 {str(merged.get('item_name', '')).strip()} 的服务器 custom_code 代码"}
+            elif step.step_type == "asset.generate":
+                output_payload = {"text": f"已写入 {str(merged.get('item_name', '')).strip()} 的服务器资产代码"}
             elif step.step_type == "build.project":
                 item_name = str(merged.get("item_name", "")).strip()
                 output_payload = {
@@ -1190,6 +1192,66 @@ def test_platform_jobs_router_can_complete_supported_single_card_fullscreen_job(
         assert execution.result_summary == "已生成服务器全画面卡实现方案"
     finally:
         session.close()
+
+
+def test_platform_jobs_router_can_complete_single_card_fullscreen_with_uploaded_asset(client: TestClient):
+    user_id = _register_login_and_verify(client, "luna", "luna@example.com")
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    profile_id = _seed_execution_profile(client)
+    workspace_service = client.app.state.container.resolve_singleton("platform.server_workspace_service_factory")()
+    workspace = workspace_service.create_workspace(user_id=user_id, project_name="DarkMod")
+    uploaded_asset_service = client.app.state.container.resolve_singleton("platform.uploaded_asset_service_factory")()
+    uploaded = uploaded_asset_service.create_asset(
+        user_id=user_id,
+        file_name="fullscreen.png",
+        content_base64="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+y3ioAAAAASUVORK5CYII=",
+        mime_type="image/png",
+    )
+    client.app.state.container.register_singleton("platform.workflow_runner_factory", _SucceededWorkflowRunner)
+
+    created = client.post(
+        "/api/platform/jobs",
+        json={
+            "job_type": "single_generate",
+            "workflow_version": "2026.03.31",
+            "selected_execution_profile_id": profile_id,
+            "selected_agent_backend": "codex",
+            "selected_model": "gpt-5.4",
+            "items": [
+                {
+                    "item_type": "card_fullscreen",
+                    "input_summary": "补一个全画面卡实现方案",
+                    "input_payload": {
+                        "asset_type": "card_fullscreen",
+                        "item_name": "DarkBladeFullscreen",
+                        "description": "一张强调暗影剑士出招姿态的全画面卡插图方案。",
+                        "image_mode": "upload",
+                        "uploaded_asset_ref": uploaded.uploaded_asset_ref,
+                        "server_project_ref": workspace.server_project_ref,
+                    },
+                }
+            ],
+        },
+    )
+    assert created.status_code == 200
+
+    job_id = created.json()["id"]
+    started = client.post(f"/api/platform/jobs/{job_id}/start", json={})
+
+    assert started.status_code == 200
+    assert started.json()["status"] == "succeeded"
+
+    items = client.get(f"/api/platform/jobs/{job_id}/items")
+    assert items.status_code == 200
+    assert items.json()[0]["result_summary"] == "已完成 DarkBladeFullscreen 的服务器项目构建"
 
 
 def test_platform_jobs_router_can_complete_supported_single_power_job(client: TestClient):

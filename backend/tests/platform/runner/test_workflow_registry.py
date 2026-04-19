@@ -31,3 +31,32 @@ def test_workflow_registry_raises_for_unknown_mapping():
 
     with pytest.raises(KeyError):
         registry.resolve("unknown_job", "unknown_item")
+
+
+def test_workflow_registry_can_resolve_steps_dynamically_from_payload():
+    registry = PlatformWorkflowRegistry(
+        {
+            ("single_generate", "card_fullscreen"): (
+                lambda input_payload: [
+                    PlatformWorkflowStep(step_type="asset.generate", step_id="asset-step"),
+                    PlatformWorkflowStep(step_type="build.project", step_id="build-step"),
+                ]
+                if input_payload.get("uploaded_asset_ref") and input_payload.get("server_project_ref")
+                else [PlatformWorkflowStep(step_type="single.asset.plan", step_id="plan-step")]
+            )
+        }
+    )
+
+    uploaded_steps = registry.resolve(
+        "single_generate",
+        "card_fullscreen",
+        input_payload={"uploaded_asset_ref": "uploaded-asset:abc", "server_project_ref": "server-workspace:abc"},
+    )
+    plain_steps = registry.resolve(
+        "single_generate",
+        "card_fullscreen",
+        input_payload={},
+    )
+
+    assert [step.step_type for step in uploaded_steps] == ["asset.generate", "build.project"]
+    assert [step.step_type for step in plain_steps] == ["single.asset.plan"]

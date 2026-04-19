@@ -70,6 +70,16 @@ class UploadedAssetService:
     def ensure_accessible(self, *, user_id: int, uploaded_asset_ref: str) -> None:
         self.get_asset(user_id=user_id, uploaded_asset_ref=uploaded_asset_ref)
 
+    def get_asset_content_path(self, *, user_id: int, uploaded_asset_ref: str) -> Path:
+        token = self._token_from_ref(uploaded_asset_ref)
+        asset_dir = self.storage_root / str(user_id) / token
+        if not asset_dir.exists():
+            raise ValueError(f"uploaded asset ref not found for user: {uploaded_asset_ref}")
+        candidates = sorted(path for path in asset_dir.iterdir() if path.name.startswith("content"))
+        if not candidates:
+            raise ValueError(f"uploaded asset content missing for ref: {uploaded_asset_ref}")
+        return candidates[0]
+
     def get_asset(self, *, user_id: int, uploaded_asset_ref: str) -> UploadedAssetView:
         token = self._token_from_ref(uploaded_asset_ref)
         metadata_path = self.storage_root / str(user_id) / token / "metadata.json"

@@ -11,6 +11,7 @@ from app.modules.platform.application.services import (
     UploadedAssetService,
 )
 from app.modules.platform.runner import ExecutionAdapter, PlatformWorkflowRegistry, PlatformWorkflowStep, StepDispatcher, WorkflowRunner
+from app.modules.platform.runner.asset_generate_handler import execute_asset_generate_step
 from app.modules.platform.runner.batch_custom_code_handler import execute_batch_custom_code_step
 from app.modules.platform.runner.build_project_handler import execute_build_project_step
 from app.modules.platform.runner.code_generate_handler import execute_code_generate_step
@@ -90,6 +91,16 @@ def _build_server_workspace_service(request: Request) -> ServerWorkspaceService:
 def _build_workflow_registry(request: Request) -> PlatformWorkflowRegistry:
     container = request.app.state.container
     registry = container.resolve_singleton("platform.workflow_registry_factory")()
+    def resolve_single_card_fullscreen(input_payload: dict[str, object]) -> list[PlatformWorkflowStep]:
+        uploaded_asset_ref = str(input_payload.get("uploaded_asset_ref", "")).strip()
+        server_project_ref = str(input_payload.get("server_project_ref", "")).strip()
+        if uploaded_asset_ref and server_project_ref:
+            return [
+                PlatformWorkflowStep(step_type="asset.generate", step_id="single.card_fullscreen.asset"),
+                PlatformWorkflowStep(step_type="build.project", step_id="single.card_fullscreen.build"),
+            ]
+        return [PlatformWorkflowStep(step_type="single.asset.plan", step_id="single.card_fullscreen.plan")]
+
     registry.register(
         "log_analysis",
         "log_analysis",
@@ -176,7 +187,7 @@ def _build_workflow_registry(request: Request) -> PlatformWorkflowRegistry:
     registry.register(
         "single_generate",
         "card_fullscreen",
-        [PlatformWorkflowStep(step_type="single.asset.plan", step_id="single.card_fullscreen.plan")],
+        resolve_single_card_fullscreen,
     )
     registry.register(
         "single_generate",
@@ -213,6 +224,7 @@ def _build_execution_adapter(request: Request) -> ExecutionAdapter:
     return container.resolve_singleton("platform.execution_adapter_factory")(
         image_handler=None,
         code_handler=execute_code_generate_step,
+        asset_handler=execute_asset_generate_step,
         text_handler=execute_text_generate_step,
         batch_custom_code_handler=execute_batch_custom_code_step,
         single_asset_plan_handler=execute_single_asset_plan_step,

@@ -78,6 +78,10 @@ def build_custom_code_prompt(request: CustomCodegenRequest) -> str:
     return build_codegen_prompt_assembler().assemble_custom_code_prompt(request)
 
 
+def build_asset_prompt(request: AssetCodegenRequest) -> str:
+    return build_codegen_prompt_assembler().assemble_asset_prompt(request)
+
+
 async def create_asset(
     design_description: str,
     asset_type: str,
@@ -168,6 +172,7 @@ async def package_mod(
 __all__ = [
     "build_and_fix",
     "build_codegen_prompt_assembler",
+    "build_asset_prompt",
     "build_custom_code_prompt",
     "create_asset",
     "create_asset_group",

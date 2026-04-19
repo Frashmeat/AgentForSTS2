@@ -22,6 +22,10 @@ def test_execution_adapter_dispatches_to_registered_step_handlers():
         calls.append(f"code:{request.step_id}")
         return {"artifact_type": "code"}
 
+    async def asset_handler(request: StepExecutionRequest):
+        calls.append(f"asset:{request.step_id}")
+        return {"artifact_type": "asset"}
+
     async def text_handler(request: StepExecutionRequest):
         calls.append(f"text:{request.step_id}")
         return {"artifact_type": "text"}
@@ -41,6 +45,7 @@ def test_execution_adapter_dispatches_to_registered_step_handlers():
     adapter = ExecutionAdapter(
         image_handler=image_handler,
         code_handler=code_handler,
+        asset_handler=asset_handler,
         text_handler=text_handler,
         batch_custom_code_handler=batch_custom_code_handler,
         single_asset_plan_handler=single_asset_plan_handler,
@@ -83,6 +88,19 @@ def test_execution_adapter_dispatches_to_registered_step_handlers():
                 step_protocol_version="v1",
                 step_type="text.generate",
                 step_id="text-1",
+                job_id=1,
+                job_item_id=2,
+                result_schema_version="v1",
+            )
+        )
+    )
+    asset_result = asyncio.run(
+        dispatcher.dispatch(
+            StepExecutionRequest(
+                workflow_version="2026.03.31",
+                step_protocol_version="v1",
+                step_type="asset.generate",
+                step_id="asset-1",
                 job_id=1,
                 job_item_id=2,
                 result_schema_version="v1",
@@ -133,6 +151,7 @@ def test_execution_adapter_dispatches_to_registered_step_handlers():
         "image:img-1",
         "code:code-1",
         "text:text-1",
+        "asset:asset-1",
         "log:log-1",
         "batch-custom-code:batch-custom-code-1",
         "single-asset-plan:single-asset-plan-1",
@@ -140,6 +159,7 @@ def test_execution_adapter_dispatches_to_registered_step_handlers():
     assert image_result.output_payload["artifact_type"] == "image"
     assert code_result.output_payload["artifact_type"] == "code"
     assert text_result.output_payload["artifact_type"] == "text"
+    assert asset_result.output_payload["artifact_type"] == "asset"
     assert log_result.output_payload["artifact_type"] == "log"
     assert batch_custom_code_result.output_payload["artifact_type"] == "batch-custom-code"
     assert single_asset_plan_result.output_payload["artifact_type"] == "single-asset-plan"
@@ -152,6 +172,7 @@ def test_execution_adapter_classifies_handler_errors_as_failed_system():
     adapter = ExecutionAdapter(
         image_handler=broken_handler,
         code_handler=None,
+        asset_handler=None,
         text_handler=None,
         batch_custom_code_handler=None,
         single_asset_plan_handler=None,

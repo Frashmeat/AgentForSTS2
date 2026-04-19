@@ -961,6 +961,8 @@ class _SucceededWorkflowRunner:
                 }
             elif step.step_type == "code.generate":
                 output_payload = {"text": f"已写入 {str(merged.get('item_name', '')).strip()} 的服务器 custom_code 代码"}
+            elif step.step_type == "asset.generate":
+                output_payload = {"text": f"已写入 {str(merged.get('item_name', '')).strip()} 的服务器资产代码"}
             elif step.step_type == "build.project":
                 item_name = str(merged.get("item_name", "")).strip()
                 output_payload = {
@@ -2298,6 +2300,135 @@ def test_me_router_can_complete_supported_single_card_fullscreen_job(client: Tes
         assert execution.result_summary == "已生成服务器全画面卡实现方案"
     finally:
         session.close()
+
+
+def test_me_router_can_complete_single_card_fullscreen_with_uploaded_asset(client: TestClient):
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "username": "luna",
+            "email": "luna@example.com",
+            "password": "secret-123",
+        },
+    )
+    assert registered.status_code == 200
+    verification_code = registered.json()["verification_code"]
+    user_id = registered.json()["user"]["user_id"]
+
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    verified = client.post("/api/auth/verify-email", json={"code": verification_code})
+    assert verified.status_code == 200
+
+    app_container = client.app.state.container
+    cipher = ServerCredentialCipher.from_settings(app_container.resolve_singleton("settings"))
+    session = app_container.resolve_singleton("platform.db_session_factory")()
+    try:
+        account = QuotaAccountRecord(user_id=user_id, status=QuotaAccountStatus.ACTIVE)
+        session.add(account)
+        session.flush()
+        session.add(
+            QuotaBucketRecord(
+                quota_account_id=account.id,
+                bucket_type=QuotaBucketType.DAILY,
+                period_start=datetime.now(UTC) - timedelta(hours=1),
+                period_end=datetime.now(UTC) + timedelta(hours=23),
+                quota_limit=10,
+                used_amount=0,
+                refunded_amount=0,
+            )
+        )
+        profile = ExecutionProfileRecord(
+            code="codex-gpt-5-4",
+            display_name="Codex CLI / gpt-5.4",
+            agent_backend="codex",
+            model="gpt-5.4",
+            description="默认推荐",
+            enabled=True,
+            recommended=True,
+            sort_order=10,
+        )
+        session.add(profile)
+        session.flush()
+        session.add(
+            ServerCredentialRecord(
+                execution_profile_id=profile.id,
+                provider="openai",
+                auth_type="api_key",
+                credential_ciphertext=cipher.encrypt("sk-live-openai"),
+                secret_ciphertext=None,
+                base_url="https://api.openai.com/v1",
+                label="main",
+                priority=1,
+                enabled=True,
+                health_status="healthy",
+                last_checked_at=None,
+                last_error_code="",
+                last_error_message="",
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    workspace_service = app_container.resolve_singleton("platform.server_workspace_service_factory")()
+    workspace = workspace_service.create_workspace(user_id=user_id, project_name="DarkMod")
+    uploaded_asset_service = app_container.resolve_singleton("platform.uploaded_asset_service_factory")()
+    uploaded = uploaded_asset_service.create_asset(
+        user_id=user_id,
+        file_name="fullscreen.png",
+        content_base64="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+y3ioAAAAASUVORK5CYII=",
+        mime_type="image/png",
+    )
+    app_container.register_singleton("platform.workflow_runner_factory", _SucceededWorkflowRunner)
+
+    created = client.post(
+        "/api/me/jobs",
+        json={
+            "job_type": "single_generate",
+            "workflow_version": "2026.03.31",
+            "input_summary": "补一个全画面卡实现方案",
+            "created_from": "single_asset",
+            "selected_execution_profile_id": 1,
+            "selected_agent_backend": "codex",
+            "selected_model": "gpt-5.4",
+            "items": [
+                {
+                    "item_type": "card_fullscreen",
+                    "input_summary": "补一个全画面卡实现方案",
+                    "input_payload": {
+                        "asset_type": "card_fullscreen",
+                        "item_name": "DarkBladeFullscreen",
+                        "description": "一张强调暗影剑士出招姿态的全画面卡插图方案。",
+                        "image_mode": "upload",
+                        "uploaded_asset_ref": uploaded.uploaded_asset_ref,
+                        "server_project_ref": workspace.server_project_ref,
+                    },
+                }
+            ],
+        },
+    )
+    assert created.status_code == 200
+
+    job_id = created.json()["id"]
+    started = client.post(
+        f"/api/me/jobs/{job_id}/start",
+        json={"triggered_by": "user"},
+    )
+
+    assert started.status_code == 200
+    assert started.json()["status"] == "succeeded"
+
+    items = client.get(f"/api/me/jobs/{job_id}/items")
+    assert items.status_code == 200
+    assert items.json()[0]["result_summary"] == "已完成 DarkBladeFullscreen 的服务器项目构建"
 
 
 def test_me_router_can_complete_supported_single_power_job(client: TestClient):
