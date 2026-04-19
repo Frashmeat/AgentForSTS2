@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import json
-import shutil
 from pathlib import Path
 
 from app.modules.codegen.api import build_and_fix
-from app.modules.platform.infra.build_output_files import find_latest_output_files
+from app.modules.platform.infra.build_output_files import deploy_latest_output_files, find_latest_output_files
 from app.shared.infra.ws_errors import send_ws_error
 from app.shared.prompting import PromptLoader
 from config import get_config
@@ -80,19 +79,17 @@ class BuildDeployFacadeService:
                             )
 
                 if not deployed_to:
-                    output_files = self._find_output_files(project_root)
-                    if output_files:
-                        target_dir.mkdir(parents=True, exist_ok=True)
+                    deployed = deploy_latest_output_files(project_root, sts2_mods)
+                    if deployed.deployed_to:
                         await send_chunk(
                             f"\n{self._text_loader.render('runtime_workflow.build_copying_to_target', {'target_dir': target_dir}).strip()}\n"
                         )
-                        for file in output_files:
-                            shutil.copy2(file, target_dir / file.name)
+                        for file_name in deployed.file_names:
                             await send_chunk(
-                                f"{self._text_loader.render('runtime_workflow.build_file_item', {'file_name': file.name})}\n"
+                                f"{self._text_loader.render('runtime_workflow.build_file_item', {'file_name': file_name})}\n"
                             )
-                        file_names = [file.name for file in output_files]
-                        deployed_to = str(target_dir)
+                        file_names = list(deployed.file_names)
+                        deployed_to = deployed.deployed_to
                         await send_chunk(f"\n{self._text_loader.load('runtime_workflow.build_deploy_finished').strip()}\n")
                     else:
                         await send_chunk(f"\n{self._text_loader.load('runtime_workflow.build_output_missing').strip()}\n")
