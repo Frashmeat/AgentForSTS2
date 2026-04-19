@@ -22,6 +22,17 @@ function formatOccurredAt(value: string) {
   return parsed.toLocaleString("zh-CN", { hour12: false });
 }
 
+function renderArtifactTypeLabel(value: string) {
+  switch (value) {
+    case "build_output":
+      return "构建产物";
+    case "deployed_output":
+      return "部署产物";
+    default:
+      return value || "未知产物";
+  }
+}
+
 export function UserCenterJobDetailPage() {
   const { jobId } = useParams();
   const { isAuthenticated, isLoading } = useSession();
@@ -164,6 +175,29 @@ export function UserCenterJobDetailPage() {
           ))}
         </div>
       </section>
+
+      {detail.artifacts && detail.artifacts.length > 0 ? (
+        <section className="platform-page-card p-6">
+          <h2 className="text-lg font-semibold text-slate-900">构建产物</h2>
+          <div className="mt-6 space-y-3">
+            {detail.artifacts.map((artifact) => (
+              <article key={artifact.id} className="platform-page-subcard px-4 py-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">
+                      {artifact.file_name || "未命名产物"}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">{renderArtifactTypeLabel(artifact.artifact_type)}</p>
+                  </div>
+                  <div className="max-w-xs text-right text-xs text-slate-500">
+                    <p>{artifact.result_summary || "无产物摘要"}</p>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section className="platform-page-card p-6">
         <div className="flex items-center gap-2">
