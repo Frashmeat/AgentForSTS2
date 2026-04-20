@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 
@@ -111,6 +112,8 @@ def test_execute_build_project_step_can_deploy_outputs_when_server_game_path_exi
                 input_payload={
                     "item_name": "BattleScriptManager",
                     "server_workspace_root": str(workspace_root),
+                    "server_project_ref": "server-workspace:abc123",
+                    "runtime_user_id": 1001,
                 },
                 execution_binding=StepExecutionBinding(
                     agent_backend="codex",
@@ -131,6 +134,17 @@ def test_execute_build_project_step_can_deploy_outputs_when_server_game_path_exi
     assert result["text"] == f"已完成 BattleScriptManager 的服务器构建并部署到 {game_root / 'Mods' / 'DarkMod'}"
     artifact_types = [artifact["artifact_type"] for artifact in result["artifacts"]]
     assert artifact_types == ["build_output", "build_output", "deployed_output", "deployed_output"]
+    metadata = json.loads((game_root / "Mods" / "DarkMod" / ".server-deploy.json").read_text(encoding="utf-8"))
+    assert metadata["schema_version"] == "v1"
+    assert metadata["project_name"] == "DarkMod"
+    assert metadata["job_id"] == 1
+    assert metadata["job_item_id"] == 2
+    assert metadata["user_id"] == 1001
+    assert metadata["server_project_ref"] == "server-workspace:abc123"
+    assert metadata["source_workspace_root"] == str(workspace_root)
+    assert metadata["deployed_to"] == str(game_root / "Mods" / "DarkMod")
+    assert metadata["entrypoint"] == "platform.build.project"
+    assert metadata["file_names"] == ["DarkMod.dll", "DarkMod.pck"]
 
 
 def test_execute_build_project_step_overwrites_existing_target_outputs_instead_of_reusing_old_files(tmp_path):

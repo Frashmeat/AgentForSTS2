@@ -20,6 +20,7 @@ from .server_deploy_target_lock_service import (
     ServerDeployTargetLockHolder,
     ServerDeployTargetLockService,
 )
+from .server_deploy_registry_service import ServerDeployRegistration, ServerDeployRegistryService
 from .server_queued_job_worker_service import QueueWorkerTickResult, ServerQueuedJobWorkerService
 from .server_execution_service import ServerExecutionService
 from .server_workspace_lock_service import (
@@ -50,6 +51,8 @@ __all__ = [
     "ServerCredentialCipher",
     "ServerCredentialHealthChecker",
     "ServerCredentialHealthCheckResult",
+    "ServerDeployRegistration",
+    "ServerDeployRegistryService",
     "ServerDeployTargetBusyError",
     "ServerDeployTargetLockHandle",
     "ServerDeployTargetLockHolder",

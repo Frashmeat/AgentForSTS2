@@ -14,6 +14,7 @@ from pathlib import Path
 from fastapi import APIRouter, WebSocket
 
 from app.modules.platform.application.services import (
+    ServerDeployRegistryService,
     ServerDeployTargetBusyError,
     ServerDeployTargetLockService,
 )
@@ -28,6 +29,7 @@ from project_utils import ensure_local_props
 router = APIRouter()
 _TEXT_LOADER = PromptLoader()
 _DEPLOY_TARGET_LOCK_SERVICE = ServerDeployTargetLockService()
+_DEPLOY_REGISTRY_SERVICE = ServerDeployRegistryService()
 
 
 @router.websocket("/ws/build-deploy")
@@ -113,6 +115,18 @@ async def ws_build_deploy(ws: WebSocket):
                 _DEPLOY_TARGET_LOCK_SERVICE.release_write_lock(lock_handle)
 
             if deployed.deployed_to:
+                _DEPLOY_REGISTRY_SERVICE.write_registration(
+                    target_dir=Path(deployed.deployed_to),
+                    project_name=mod_name,
+                    job_id=0,
+                    job_item_id=0,
+                    user_id=0,
+                    server_project_ref="",
+                    source_workspace_root=str(project_root),
+                    deployed_to=deployed.deployed_to,
+                    entrypoint="legacy.ws.build_deploy",
+                    file_names=list(deployed.file_names),
+                )
                 await send_chunk(
                     f"\n{_TEXT_LOADER.render('runtime_workflow.build_copying_to_target', {'target_dir': target_dir}).strip()}\n"
                 )

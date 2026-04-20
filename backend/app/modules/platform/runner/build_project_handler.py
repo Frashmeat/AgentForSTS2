@@ -7,6 +7,7 @@ from pathlib import Path
 from app.modules.platform.application.services.server_deploy_target_lock_service import (
     ServerDeployTargetLockService,
 )
+from app.modules.platform.application.services.server_deploy_registry_service import ServerDeployRegistryService
 from app.modules.codegen.api import build_codegen_prompt_assembler
 from app.modules.platform.infra.build_output_files import deploy_latest_output_files, find_latest_output_files
 from app.modules.platform.contracts.runner_contracts import StepExecutionRequest
@@ -108,6 +109,7 @@ async def execute_build_project_step(
     config_loader: Callable[[], dict[str, object]] = get_config,
     ensure_local_props_fn: Callable[[Path], bool] = ensure_local_props,
     deploy_target_lock_service: ServerDeployTargetLockService | None = None,
+    deploy_registry_service: ServerDeployRegistryService | None = None,
 ) -> dict[str, object]:
     project_root = _resolve_project_root(request.input_payload)
     item_name = _resolve_item_name(request.input_payload)
@@ -124,6 +126,7 @@ async def execute_build_project_step(
     artifacts = _build_artifact_payloads(project_root)
     deployed_to: str | None = None
     deployed_files: list[str] = []
+    registry_service = deploy_registry_service or ServerDeployRegistryService()
     sts2_path = str(config_loader().get("sts2_path", "")).strip()
     if sts2_path:
         mods_root = Path(sts2_path) / "Mods"
@@ -144,6 +147,19 @@ async def execute_build_project_step(
             deployed_to = deployed.deployed_to
             deployed_files = list(deployed.file_names)
             artifacts.extend(_build_deployed_artifact_payloads(deployed.file_paths))
+            if deployed_to:
+                registry_service.write_registration(
+                    target_dir=Path(deployed_to),
+                    project_name=project_name,
+                    job_id=request.job_id,
+                    job_item_id=request.job_item_id,
+                    user_id=int(request.input_payload.get("runtime_user_id", 0) or 0),
+                    server_project_ref=str(request.input_payload.get("server_project_ref", "")).strip(),
+                    source_workspace_root=str(project_root),
+                    deployed_to=deployed_to,
+                    entrypoint="platform.build.project",
+                    file_names=deployed_files,
+                )
         finally:
             if deploy_lock_handle is not None:
                 deploy_target_lock_service.release_write_lock(deploy_lock_handle)

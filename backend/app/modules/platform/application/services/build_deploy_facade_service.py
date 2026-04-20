@@ -7,6 +7,7 @@ from app.modules.platform.application.services.server_deploy_target_lock_service
     ServerDeployTargetBusyError,
     ServerDeployTargetLockService,
 )
+from app.modules.platform.application.services.server_deploy_registry_service import ServerDeployRegistryService
 from app.modules.codegen.api import build_and_fix
 from app.modules.platform.infra.build_output_files import deploy_latest_output_files, find_latest_output_files
 from app.shared.infra.ws_errors import send_ws_error
@@ -19,6 +20,7 @@ class BuildDeployFacadeService:
     def __init__(self) -> None:
         self._text_loader = PromptLoader()
         self._deploy_target_lock_service = ServerDeployTargetLockService()
+        self._deploy_registry_service = ServerDeployRegistryService()
 
     def _find_output_files(self, project_root: Path) -> list[Path]:
         return find_latest_output_files(project_root)
@@ -85,6 +87,18 @@ class BuildDeployFacadeService:
                 finally:
                     self._deploy_target_lock_service.release_write_lock(lock_handle)
                 if deployed.deployed_to:
+                    self._deploy_registry_service.write_registration(
+                        target_dir=Path(deployed.deployed_to),
+                        project_name=mod_name,
+                        job_id=0,
+                        job_item_id=0,
+                        user_id=0,
+                        server_project_ref="",
+                        source_workspace_root=str(project_root),
+                        deployed_to=deployed.deployed_to,
+                        entrypoint="legacy.ws.build_deploy",
+                        file_names=list(deployed.file_names),
+                    )
                     await send_chunk(
                         f"\n{self._text_loader.render('runtime_workflow.build_copying_to_target', {'target_dir': target_dir}).strip()}\n"
                     )
