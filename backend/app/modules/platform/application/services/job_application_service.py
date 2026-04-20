@@ -8,7 +8,7 @@ from app.modules.platform.domain.models.enums import JobItemStatus, JobStatus
 from app.modules.platform.domain.repositories import JobEventRepository, JobRepository
 from app.modules.platform.infra.persistence.models import JobRecord
 
-from .execution_orchestrator_service import ExecutionOrchestratorService
+from .execution_orchestrator_service import ExecutionOrchestratorService, QueuedExecutionReason
 from .server_workspace_lock_service import ServerWorkspaceBusyError
 from .server_workspace_service import ServerWorkspaceService
 from .uploaded_asset_service import UploadedAssetService
@@ -20,6 +20,7 @@ _DISPATCH_STEP_TYPE = "workflow.dispatch"
 _PLATFORM_SERVER_JOB_TYPES = {"single_generate", "batch_generate"}
 _MAX_ACTIVE_SERVER_JOBS_PER_USER = 2
 _QUEUED_REASON_SERVER_WORKSPACE_BUSY = "server_workspace_busy"
+_QUEUED_REASON_SERVER_DEPLOY_TARGET_BUSY = "server_deploy_target_busy"
 _FORBIDDEN_PLATFORM_PAYLOAD_FIELDS = {
     "name",
     "asset_name",
@@ -47,6 +48,7 @@ class JobApplicationService:
 
     def create_job(self, user_id: int, command: CreateJobCommand) -> JobRecord:
         self._validate_platform_payloads(user_id=user_id, command=command)
+        self._hydrate_server_workspace_payloads(user_id=user_id, command=command)
         job = self.job_repository.create_job_with_items(user_id=user_id, command=command)
         self.job_event_repository.append(
             job_id=job.id,
@@ -57,19 +59,21 @@ class JobApplicationService:
         return job
 
     def start_job(self, user_id: int, command: StartJobCommand) -> JobRecord | None:
-        job, released_workspace_refs = self._start_job_internal(user_id=user_id, command=command)
+        job, released_workspace_refs, released_deploy_targets = self._start_job_internal(user_id=user_id, command=command)
         if job is None:
             return None
-        self._drain_queued_jobs_for_workspaces(
-            released_workspace_refs,
+        self._drain_queued_jobs_for_resources(
+            released_workspace_refs=released_workspace_refs,
+            released_deploy_targets=released_deploy_targets,
             attempted_job_ids={job.id},
         )
         return job
 
-    def _start_job_internal(self, *, user_id: int, command: StartJobCommand) -> tuple[JobRecord | None, list[str]]:
+    def _start_job_internal(self, *, user_id: int, command: StartJobCommand) -> tuple[JobRecord | None, list[str], list[str]]:
         job = self.job_repository.find_by_id_for_user(command.job_id, user_id)
         if job is None:
-            return None, []
+            return None, [], []
+        self._hydrate_server_workspace_payloads_for_job(user_id=user_id, job=job)
         if job.selected_execution_profile_id is not None:
             active_server_job_count = self.job_repository.count_active_server_jobs_for_user(
                 user_id,
@@ -95,6 +99,7 @@ class JobApplicationService:
             payload={"status": job.status.value, "triggered_by": command.triggered_by},
         )
         released_workspace_refs: list[str] = []
+        released_deploy_targets: list[str] = []
         if self.execution_orchestrator_service is not None:
             ready_items = [item for item in job.items if item.status == JobItemStatus.READY]
             for item in ready_items:
@@ -163,25 +168,49 @@ class JobApplicationService:
                         now=now,
                     )
                     continue
-                self.execution_orchestrator_service.run_registered_workflow_to_completion(
-                    user_id=user_id,
-                    job_id=job.id,
-                    job_item_id=item.id,
-                    job_type=job.job_type,
-                    item_type=item.item_type,
-                    workflow_version=job.workflow_version,
-                    step_protocol_version=_STEP_PROTOCOL_VERSION,
-                    result_schema_version=_RESULT_SCHEMA_VERSION,
-                    input_payload=item.input_payload,
-                    now=now,
-                )
+                try:
+                    final_result = self.execution_orchestrator_service.run_registered_workflow_to_completion(
+                        user_id=user_id,
+                        job_id=job.id,
+                        job_item_id=item.id,
+                        job_type=job.job_type,
+                        item_type=item.item_type,
+                        workflow_version=job.workflow_version,
+                        step_protocol_version=_STEP_PROTOCOL_VERSION,
+                        result_schema_version=_RESULT_SCHEMA_VERSION,
+                        input_payload=item.input_payload,
+                        now=now,
+                    )
+                except QueuedExecutionReason as reason:
+                    item.status = JobItemStatus.READY
+                    item.error_summary = reason.reason_message
+                    self.job_event_repository.append(
+                        job_id=job.id,
+                        user_id=user_id,
+                        event_type="job.queued",
+                        payload={
+                            "status": JobStatus.QUEUED.value,
+                            "triggered_by": command.triggered_by,
+                            "reason_code": reason.reason_code or _QUEUED_REASON_SERVER_DEPLOY_TARGET_BUSY,
+                            "reason_message": reason.reason_message,
+                            **dict(reason.payload),
+                        },
+                        job_item_id=item.id,
+                    )
+                    continue
                 server_project_ref = str((item.input_payload or {}).get("server_project_ref", "")).strip()
                 if server_project_ref:
                     released_workspace_refs.append(server_project_ref)
+                project_name = str((item.input_payload or {}).get("server_project_name", "")).strip()
+                deployed_to = ""
+                if final_result is not None:
+                    deployed_to = str((final_result.output_payload or {}).get("deployed_to", "")).strip()
+                if project_name and deployed_to:
+                    released_deploy_targets.append(project_name)
             self._sync_job_counters(job)
             self._sync_job_status(job)
             self.job_repository.save(job)
-        return job, released_workspace_refs
+        return job, released_workspace_refs, released_deploy_targets
 
     def cancel_job(self, user_id: int, command: CancelJobCommand) -> bool:
         job = self.job_repository.find_by_id_for_user(command.job_id, user_id)
@@ -314,6 +343,35 @@ class JobApplicationService:
                     raise ValueError("server workspace service is not configured")
                 self.server_workspace_service.ensure_accessible(user_id=user_id, server_project_ref=server_project_ref)
 
+    def _hydrate_server_workspace_payloads(self, *, user_id: int, command: CreateJobCommand) -> None:
+        if self.server_workspace_service is None:
+            return
+        for item in command.items:
+            self._hydrate_server_workspace_payload(
+                user_id=user_id,
+                payload=item.input_payload,
+            )
+
+    def _hydrate_server_workspace_payloads_for_job(self, *, user_id: int, job: JobRecord) -> None:
+        if self.server_workspace_service is None:
+            return
+        changed = False
+        for item in job.items:
+            changed = self._hydrate_server_workspace_payload(user_id=user_id, payload=item.input_payload) or changed
+        if changed:
+            self.job_repository.save(job)
+
+    def _hydrate_server_workspace_payload(self, *, user_id: int, payload: dict[str, object]) -> bool:
+        server_project_ref = str(payload.get("server_project_ref", "")).strip()
+        if not server_project_ref or self.server_workspace_service is None:
+            return False
+        workspace = self.server_workspace_service.get_workspace(user_id=user_id, server_project_ref=server_project_ref)
+        project_name = workspace.project_name
+        if str(payload.get("server_project_name", "")).strip() == project_name:
+            return False
+        payload["server_project_name"] = project_name
+        return True
+
     @staticmethod
     def _build_deferred_payload(
         *,
@@ -354,29 +412,40 @@ class JobApplicationService:
             f"当前 web runtime 尚未为 {job_type}/{item_type} 注册可直接执行的服务器 workflow。",
         )
 
-    def _drain_queued_jobs_for_workspaces(
+    def _drain_queued_jobs_for_resources(
         self,
-        workspace_refs: list[str],
         *,
+        released_workspace_refs: list[str],
+        released_deploy_targets: list[str],
         attempted_job_ids: set[int] | None = None,
     ) -> None:
-        if not workspace_refs:
+        if not released_workspace_refs and not released_deploy_targets:
             return
 
-        pending_refs = deque(ref for ref in dict.fromkeys(str(ref).strip() for ref in workspace_refs) if ref)
+        pending_workspace_refs = deque(
+            ref for ref in dict.fromkeys(str(ref).strip() for ref in released_workspace_refs) if ref
+        )
+        pending_deploy_targets = deque(
+            target for target in dict.fromkeys(str(target).strip() for target in released_deploy_targets) if target
+        )
         attempted = set(attempted_job_ids or set())
 
-        while pending_refs:
-            workspace_ref = pending_refs.popleft()
-            next_job = self.job_repository.find_next_queued_job_for_server_workspace(
-                workspace_ref,
-                exclude_job_ids=attempted,
-            )
+        while pending_workspace_refs or pending_deploy_targets:
+            if pending_workspace_refs:
+                next_job = self.job_repository.find_next_queued_job_for_server_workspace(
+                    pending_workspace_refs.popleft(),
+                    exclude_job_ids=attempted,
+                )
+            else:
+                next_job = self.job_repository.find_next_queued_job_for_server_deploy_target(
+                    pending_deploy_targets.popleft(),
+                    exclude_job_ids=attempted,
+                )
             if next_job is None:
                 continue
 
             attempted.add(next_job.id)
-            resumed_job, released_workspace_refs = self._start_job_internal(
+            resumed_job, resumed_workspace_refs, resumed_deploy_targets = self._start_job_internal(
                 user_id=next_job.user_id,
                 command=StartJobCommand(
                     job_id=next_job.id,
@@ -385,7 +454,11 @@ class JobApplicationService:
             )
             if resumed_job is None:
                 continue
-            for released_ref in released_workspace_refs:
+            for released_ref in resumed_workspace_refs:
                 normalized_ref = str(released_ref).strip()
                 if normalized_ref:
-                    pending_refs.append(normalized_ref)
+                    pending_workspace_refs.append(normalized_ref)
+            for project_name in resumed_deploy_targets:
+                normalized_project_name = str(project_name).strip()
+                if normalized_project_name:
+                    pending_deploy_targets.append(normalized_project_name)

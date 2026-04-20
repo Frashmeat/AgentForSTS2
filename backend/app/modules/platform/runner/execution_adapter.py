@@ -50,8 +50,15 @@ class ExecutionAdapter:
                 output_payload=dict(payload),
             )
         except Exception as exc:
+            error_payload = {}
+            payload_builder = getattr(exc, "to_error_payload", None)
+            if callable(payload_builder):
+                candidate = payload_builder()
+                if isinstance(candidate, dict):
+                    error_payload = dict(candidate)
             return StepExecutionResult(
                 step_id=request.step_id,
                 status="failed_system",
                 error_summary=str(exc),
+                error_payload=error_payload,
             )

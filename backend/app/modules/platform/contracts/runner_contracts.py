@@ -38,3 +38,4 @@ class StepExecutionResult(ModelBase):
     status: str
     output_payload: dict[str, object] = field(default_factory=dict)
     error_summary: str = ""
+    error_payload: dict[str, object] = field(default_factory=dict)

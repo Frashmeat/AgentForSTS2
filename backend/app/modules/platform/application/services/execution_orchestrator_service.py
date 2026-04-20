@@ -23,9 +23,25 @@ from app.modules.platform.runner.workflow_runner import WorkflowRunner
 
 from .execution_routing_service import ExecutionRoutingService
 from .server_credential_cipher import ServerCredentialCipher
+from .server_deploy_target_lock_service import ServerDeployTargetBusyError
 from .server_workspace_lock_service import ServerWorkspaceLockHandle, ServerWorkspaceLockService
 from .server_workspace_service import ServerWorkspaceService
 from .uploaded_asset_service import UploadedAssetService
+
+
+class QueuedExecutionReason(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason_code: str,
+        reason_message: str,
+        payload: dict[str, object] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
+        self.reason_message = reason_message
+        self.payload = dict(payload or {})
 
 
 class ExecutionOrchestratorService:
@@ -242,6 +258,7 @@ class ExecutionOrchestratorService:
             workspace = self.server_workspace_service.get_workspace(user_id=user_id, server_project_ref=server_project_ref)
             payload["server_project_name"] = workspace.project_name
             payload["server_workspace_root"] = workspace.workspace_root
+            payload["runtime_user_id"] = user_id
         return payload
 
     def has_registered_workflow(self, *, job_type: str, item_type: str) -> bool:
@@ -353,6 +370,29 @@ class ExecutionOrchestratorService:
                     status="failed_system",
                     error_summary="workflow produced no result after retry",
                 )
+            queued_reason = self._build_queued_execution_reason(final_result)
+            if queued_reason is not None:
+                self._requeue_execution_after_busy_result(
+                    item=item,
+                    execution=execution,
+                    queued_reason=queued_reason,
+                    now=now,
+                )
+                self.ai_execution_repository.save(execution)
+                self.job_event_repository.append(
+                    job_id=job.id,
+                    user_id=user_id,
+                    event_type="ai_execution.finished",
+                    payload={
+                        "execution_id": execution.id,
+                        "status": execution.status.value,
+                        "reason_code": queued_reason.reason_code,
+                        "reason_message": queued_reason.reason_message,
+                    },
+                    job_item_id=job_item_id,
+                    ai_execution_id=execution.id,
+                )
+                raise queued_reason
             self._apply_result(
                 job=job,
                 item=item,
@@ -614,7 +654,7 @@ class ExecutionOrchestratorService:
             execution.result_summary = ""
             execution.result_payload = {}
             execution.error_summary = result.error_summary
-            execution.error_payload = {"step_id": result.step_id}
+            execution.error_payload = {"step_id": result.step_id, **dict(result.error_payload or {})}
             item.status = JobItemStatus.FAILED_BUSINESS if result.status == "failed_business" else JobItemStatus.FAILED_SYSTEM
             item.result_summary = ""
             item.error_summary = result.error_summary
@@ -682,6 +722,47 @@ class ExecutionOrchestratorService:
             if value:
                 return value
         return fallback.strip()
+
+    @staticmethod
+    def _build_queued_execution_reason(result: StepExecutionResult) -> QueuedExecutionReason | None:
+        if result.status != "failed_system":
+            return None
+        payload = dict(result.error_payload or {})
+        reason_code = str(payload.get("reason_code", "")).strip()
+        reason_message = str(payload.get("reason_message", "")).strip() or result.error_summary
+        if reason_code != ServerDeployTargetBusyError.reason_code:
+            return None
+        return QueuedExecutionReason(
+            reason_message,
+            reason_code=reason_code,
+            reason_message=reason_message,
+            payload=payload,
+        )
+
+    def _requeue_execution_after_busy_result(
+        self,
+        *,
+        item,
+        execution: AIExecutionRecord,
+        queued_reason: QueuedExecutionReason,
+        now: datetime,
+    ) -> None:
+        if self.quota_billing_service is not None:
+            self.quota_billing_service.refund(execution.id, now, reason="execution_requeued")
+        execution.status = AIExecutionStatus.COMPLETED_WITH_REFUND
+        execution.result_summary = ""
+        execution.result_payload = {}
+        execution.error_summary = queued_reason.reason_message
+        execution.error_payload = dict(queued_reason.payload)
+        execution.finished_at = now
+        execution.request_idempotency_key = None
+        item.status = JobItemStatus.READY
+        item.result_summary = ""
+        item.error_summary = queued_reason.reason_message
+        item.attempt_count += 1
+        if item.started_at is None:
+            item.started_at = execution.started_at
+        item.finished_at = None
 
     def _acquire_workspace_write_lock_if_needed(self, *, job, item) -> None:
         if self.server_workspace_lock_service is None:

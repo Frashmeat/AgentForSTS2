@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from functools import partial
+
 from fastapi import Request
 
 from app.modules.platform.application.services import (
@@ -7,6 +9,7 @@ from app.modules.platform.application.services import (
     ExecutionRoutingService,
     QuotaBillingService,
     ServerCredentialCipher,
+    ServerDeployTargetLockService,
     ServerWorkspaceLockService,
     ServerWorkspaceService,
     UploadedAssetService,
@@ -291,6 +294,14 @@ def _build_execution_adapter(request: Request) -> ExecutionAdapter:
         batch_custom_code_handler=execute_batch_custom_code_step,
         single_asset_plan_handler=execute_single_asset_plan_step,
         log_handler=execute_log_analysis_step,
-        build_handler=execute_build_project_step,
+        build_handler=partial(
+            execute_build_project_step,
+            deploy_target_lock_service=_build_server_deploy_target_lock_service(request),
+        ),
         approval_handler=None,
     )
+
+
+def _build_server_deploy_target_lock_service(request: Request) -> ServerDeployTargetLockService:
+    container = request.app.state.container
+    return container.resolve_singleton("platform.server_deploy_target_lock_service_factory")()

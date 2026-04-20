@@ -33,3 +33,11 @@ class JobRepository(ABC):
         *,
         exclude_job_ids: set[int] | None = None,
     ) -> JobRecord | None: ...
+
+    @abstractmethod
+    def find_next_queued_job_for_server_deploy_target(
+        self,
+        project_name: str,
+        *,
+        exclude_job_ids: set[int] | None = None,
+    ) -> JobRecord | None: ...

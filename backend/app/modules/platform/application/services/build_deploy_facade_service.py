@@ -3,6 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from app.modules.platform.application.services.server_deploy_target_lock_service import (
+    ServerDeployTargetBusyError,
+    ServerDeployTargetLockService,
+)
 from app.modules.codegen.api import build_and_fix
 from app.modules.platform.infra.build_output_files import deploy_latest_output_files, find_latest_output_files
 from app.shared.infra.ws_errors import send_ws_error
@@ -14,7 +18,7 @@ from project_utils import ensure_local_props
 class BuildDeployFacadeService:
     def __init__(self) -> None:
         self._text_loader = PromptLoader()
-        self._skip_dirs = {"obj", "ref", ".godot"}
+        self._deploy_target_lock_service = ServerDeployTargetLockService()
 
     def _find_output_files(self, project_root: Path) -> list[Path]:
         return find_latest_output_files(project_root)
@@ -65,34 +69,34 @@ class BuildDeployFacadeService:
 
             if sts2_mods and sts2_mods.exists():
                 target_dir = sts2_mods / mod_name
-                if target_dir.exists():
-                    existing = [file for file in target_dir.iterdir() if file.suffix in (".dll", ".pck")]
-                    if existing:
-                        file_names = [file.name for file in existing]
-                        deployed_to = str(target_dir)
+                try:
+                    lock_handle = self._deploy_target_lock_service.acquire_write_lock(
+                        project_name=mod_name,
+                        job_id=0,
+                        job_item_id=0,
+                        user_id=0,
+                        source_workspace_root=str(project_root),
+                    )
+                except ServerDeployTargetBusyError as error:
+                    await send_ws_error(ws, code="server_deploy_target_busy", message=str(error), detail=str(error))
+                    return
+                try:
+                    deployed = deploy_latest_output_files(project_root, sts2_mods, project_name=mod_name)
+                finally:
+                    self._deploy_target_lock_service.release_write_lock(lock_handle)
+                if deployed.deployed_to:
+                    await send_chunk(
+                        f"\n{self._text_loader.render('runtime_workflow.build_copying_to_target', {'target_dir': target_dir}).strip()}\n"
+                    )
+                    for file_name in deployed.file_names:
                         await send_chunk(
-                            f"\n{self._text_loader.render('runtime_workflow.build_deployed_via_local_props', {'target_dir': target_dir}).strip()}\n"
+                            f"{self._text_loader.render('runtime_workflow.build_file_item', {'file_name': file_name})}\n"
                         )
-                        for file in existing:
-                            await send_chunk(
-                                f"{self._text_loader.render('runtime_workflow.build_file_item', {'file_name': file.name})}\n"
-                            )
-
-                if not deployed_to:
-                    deployed = deploy_latest_output_files(project_root, sts2_mods)
-                    if deployed.deployed_to:
-                        await send_chunk(
-                            f"\n{self._text_loader.render('runtime_workflow.build_copying_to_target', {'target_dir': target_dir}).strip()}\n"
-                        )
-                        for file_name in deployed.file_names:
-                            await send_chunk(
-                                f"{self._text_loader.render('runtime_workflow.build_file_item', {'file_name': file_name})}\n"
-                            )
-                        file_names = list(deployed.file_names)
-                        deployed_to = deployed.deployed_to
-                        await send_chunk(f"\n{self._text_loader.load('runtime_workflow.build_deploy_finished').strip()}\n")
-                    else:
-                        await send_chunk(f"\n{self._text_loader.load('runtime_workflow.build_output_missing').strip()}\n")
+                    file_names = list(deployed.file_names)
+                    deployed_to = deployed.deployed_to
+                    await send_chunk(f"\n{self._text_loader.load('runtime_workflow.build_deploy_finished').strip()}\n")
+                else:
+                    await send_chunk(f"\n{self._text_loader.load('runtime_workflow.build_output_missing').strip()}\n")
             elif not sts2_mods:
                 await send_chunk(f"\n{self._text_loader.load('runtime_workflow.build_game_path_missing').strip()}\n")
 

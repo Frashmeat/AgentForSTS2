@@ -14,6 +14,12 @@ from .quota_billing_service import QuotaBillingService
 from .server_credential_admin_service import ServerCredentialAdminService
 from .server_credential_cipher import ServerCredentialCipher
 from .server_credential_health_checker import ServerCredentialHealthChecker, ServerCredentialHealthCheckResult
+from .server_deploy_target_lock_service import (
+    ServerDeployTargetBusyError,
+    ServerDeployTargetLockHandle,
+    ServerDeployTargetLockHolder,
+    ServerDeployTargetLockService,
+)
 from .server_execution_service import ServerExecutionService
 from .server_workspace_lock_service import (
     ServerWorkspaceBusyError,
@@ -43,6 +49,10 @@ __all__ = [
     "ServerCredentialCipher",
     "ServerCredentialHealthChecker",
     "ServerCredentialHealthCheckResult",
+    "ServerDeployTargetBusyError",
+    "ServerDeployTargetLockHandle",
+    "ServerDeployTargetLockHolder",
+    "ServerDeployTargetLockService",
     "ServerExecutionService",
     "ServerWorkspaceBusyError",
     "ServerWorkspaceLockHandle",

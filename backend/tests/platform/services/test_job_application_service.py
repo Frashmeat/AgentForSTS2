@@ -286,6 +286,87 @@ class _SucceededRunner:
         return results
 
 
+class _SwitchableDeployTargetRunner:
+    def __init__(self) -> None:
+        self.busy_targets: set[str] = set()
+
+    async def run(self, *, steps, base_request):
+        results: list[StepExecutionResult] = []
+        payload = dict(base_request.input_payload)
+        for step in steps:
+            merged = dict(payload)
+            merged.update(step.input_payload)
+            if step.step_type == "batch.custom_code.plan":
+                output_payload = {
+                    "text": "已生成服务器 custom_code 实现方案",
+                    "item_name": str(merged.get("item_name", "")).strip(),
+                    "server_workspace_root": str(merged.get("server_workspace_root", "")).strip(),
+                }
+                results.append(
+                    StepExecutionResult(
+                        step_id=step.step_id,
+                        status="succeeded",
+                        output_payload=output_payload,
+                    )
+                )
+                payload.update(output_payload)
+                continue
+            if step.step_type == "code.generate":
+                output_payload = {"text": f"已写入 {str(merged.get('item_name', '')).strip()} 的服务器 custom_code 代码"}
+                results.append(
+                    StepExecutionResult(
+                        step_id=step.step_id,
+                        status="succeeded",
+                        output_payload=output_payload,
+                    )
+                )
+                payload.update(output_payload)
+                continue
+            if step.step_type == "build.project":
+                project_name = str(merged.get("server_project_name", "")).strip()
+                if project_name in self.busy_targets:
+                    results.append(
+                        StepExecutionResult(
+                            step_id=step.step_id,
+                            status="failed_system",
+                            error_summary="server deploy target is busy",
+                            error_payload={
+                                "reason_code": "server_deploy_target_busy",
+                                "reason_message": "server deploy target is busy",
+                                "resource_type": "server_deploy_target",
+                                "resource_key": project_name,
+                                "project_name": project_name,
+                                "server_project_ref": str(merged.get("server_project_ref", "")).strip(),
+                            },
+                        )
+                    )
+                    break
+                output_payload = {
+                    "text": f"已完成 {str(merged.get('item_name', '')).strip()} 的服务器项目构建",
+                    "deployed_to": f"/Mods/{project_name}",
+                    "artifacts": [
+                        {
+                            "artifact_type": "deployed_output",
+                            "storage_provider": "server_deploy",
+                            "object_key": f"/Mods/{project_name}/{project_name}.dll",
+                            "file_name": f"{project_name}.dll",
+                            "mime_type": "application/octet-stream",
+                            "size_bytes": 3,
+                            "result_summary": "服务器部署产物",
+                        }
+                    ],
+                }
+                results.append(
+                    StepExecutionResult(
+                        step_id=step.step_id,
+                        status="succeeded",
+                        output_payload=output_payload,
+                    )
+                )
+                payload.update(output_payload)
+        return results
+
+
 class _BusyWorkspaceLockService:
     def acquire_write_lock(self, **kwargs):
         raise ServerWorkspaceBusyError(
@@ -1518,6 +1599,264 @@ def test_job_application_service_auto_resumes_next_queued_job_after_workspace_is
     )
     assert resume_event is not None
     assert resume_event.event_payload["triggered_by"] == "system_workspace_resume"
+
+
+def test_job_application_service_keeps_job_queued_when_server_deploy_target_is_busy(db_session, tmp_path):
+    cipher = ServerCredentialCipher("job-service-test-secret")
+    profile = ExecutionProfileRecord(
+        code="codex-gpt-5-4",
+        display_name="Codex CLI / gpt-5.4",
+        agent_backend="codex",
+        model="gpt-5.4",
+        description="默认推荐",
+        enabled=True,
+        recommended=True,
+        sort_order=10,
+    )
+    db_session.add(profile)
+    db_session.flush()
+    db_session.add(
+        ServerCredentialRecord(
+            execution_profile_id=profile.id,
+            provider="openai",
+            auth_type="api_key",
+            credential_ciphertext=cipher.encrypt("sk-live-openai"),
+            secret_ciphertext=None,
+            base_url="https://api.openai.com/v1",
+            label="main",
+            priority=1,
+            enabled=True,
+            health_status="healthy",
+            last_checked_at=None,
+            last_error_code="",
+            last_error_message="",
+        )
+    )
+    quota_repository = QuotaAccountRepositorySqlAlchemy(db_session)
+    account = quota_repository.create_account(QuotaAccountRecord(user_id=1001, status=QuotaAccountStatus.ACTIVE))
+    quota_repository.create_bucket(
+        QuotaBucketRecord(
+            quota_account_id=account.id,
+            bucket_type=QuotaBucketType.DAILY,
+            period_start=datetime.now(UTC) - timedelta(hours=1),
+            period_end=datetime.now(UTC) + timedelta(hours=23),
+            quota_limit=10,
+            used_amount=0,
+            refunded_amount=0,
+        )
+    )
+    workspace_service = ServerWorkspaceService(storage_root=tmp_path / "platform-workspaces")
+    workspace = workspace_service.create_workspace(user_id=1001, project_name="DarkMod")
+    runner = _SwitchableDeployTargetRunner()
+    runner.busy_targets.add("DarkMod")
+
+    orchestrator = ExecutionOrchestratorService(
+        job_repository=JobRepositorySqlAlchemy(db_session),
+        ai_execution_repository=AIExecutionRepositorySqlAlchemy(db_session),
+        artifact_repository=ArtifactRepositorySqlAlchemy(db_session),
+        quota_billing_service=QuotaBillingService(
+            execution_charge_repository=ExecutionChargeRepositorySqlAlchemy(db_session),
+            quota_account_repository=quota_repository,
+            usage_ledger_repository=UsageLedgerRepositorySqlAlchemy(db_session),
+        ),
+        job_event_repository=JobEventRepositorySqlAlchemy(db_session),
+        execution_routing_service=ExecutionRoutingService(
+            execution_routing_repository=ExecutionRoutingRepositorySqlAlchemy(db_session)
+        ),
+        server_credential_cipher=cipher,
+        server_workspace_service=workspace_service,
+        workflow_registry=_SupportedServerRegistry(),
+        workflow_runner=runner,
+    )
+    service = JobApplicationService(
+        job_repository=JobRepositorySqlAlchemy(db_session),
+        job_event_repository=JobEventRepositorySqlAlchemy(db_session),
+        execution_orchestrator_service=orchestrator,
+        server_workspace_service=workspace_service,
+    )
+    job = service.create_job(
+        user_id=1001,
+        command=CreateJobCommand.model_validate(
+            {
+                "job_type": "single_generate",
+                "workflow_version": "2026.03.31",
+                "selected_execution_profile_id": profile.id,
+                "selected_agent_backend": "codex",
+                "selected_model": "gpt-5.4",
+                "items": [
+                    {
+                        "item_type": "custom_code",
+                        "input_summary": "补一个单资产脚本",
+                        "input_payload": {
+                            "item_name": "SingleEffectPatch",
+                            "description": "补一个单资产 custom_code 示例",
+                            "server_project_ref": workspace.server_project_ref,
+                        },
+                    }
+                ],
+            }
+        ),
+    )
+
+    started = service.start_job(user_id=1001, command=StartJobCommand(job_id=job.id))
+
+    assert started is not None
+    assert started.status == JobStatus.QUEUED
+    assert started.items[0].status == JobItemStatus.READY
+    assert started.items[0].error_summary == "server deploy target is busy"
+    assert started.error_summary == "server deploy target is busy"
+
+    queued_event = (
+        db_session.query(JobEventRecord)
+        .filter(JobEventRecord.job_id == job.id, JobEventRecord.event_type == "job.queued")
+        .order_by(JobEventRecord.id.desc())
+        .first()
+    )
+    assert queued_event is not None
+    assert queued_event.job_item_id == started.items[0].id
+    assert queued_event.event_payload["reason_code"] == "server_deploy_target_busy"
+    assert queued_event.event_payload["reason_message"] == "server deploy target is busy"
+    assert queued_event.event_payload["resource_key"] == "DarkMod"
+
+
+def test_job_application_service_auto_resumes_next_queued_job_after_deploy_target_is_released(db_session, tmp_path):
+    cipher = ServerCredentialCipher("job-service-test-secret")
+    profile = ExecutionProfileRecord(
+        code="codex-gpt-5-4",
+        display_name="Codex CLI / gpt-5.4",
+        agent_backend="codex",
+        model="gpt-5.4",
+        description="默认推荐",
+        enabled=True,
+        recommended=True,
+        sort_order=10,
+    )
+    db_session.add(profile)
+    db_session.flush()
+    db_session.add(
+        ServerCredentialRecord(
+            execution_profile_id=profile.id,
+            provider="openai",
+            auth_type="api_key",
+            credential_ciphertext=cipher.encrypt("sk-live-openai"),
+            secret_ciphertext=None,
+            base_url="https://api.openai.com/v1",
+            label="main",
+            priority=1,
+            enabled=True,
+            health_status="healthy",
+            last_checked_at=None,
+            last_error_code="",
+            last_error_message="",
+        )
+    )
+    quota_repository = QuotaAccountRepositorySqlAlchemy(db_session)
+    for user_id in (1001, 1002):
+        account = quota_repository.create_account(QuotaAccountRecord(user_id=user_id, status=QuotaAccountStatus.ACTIVE))
+        quota_repository.create_bucket(
+            QuotaBucketRecord(
+                quota_account_id=account.id,
+                bucket_type=QuotaBucketType.DAILY,
+                period_start=datetime.now(UTC) - timedelta(hours=1),
+                period_end=datetime.now(UTC) + timedelta(hours=23),
+                quota_limit=10,
+                used_amount=0,
+                refunded_amount=0,
+            )
+        )
+    workspace_service = ServerWorkspaceService(storage_root=tmp_path / "platform-workspaces")
+    leader_workspace = workspace_service.create_workspace(user_id=1001, project_name="DarkMod")
+    queued_workspace = workspace_service.create_workspace(user_id=1002, project_name="DarkMod")
+    runner = _SwitchableDeployTargetRunner()
+    runner.busy_targets.add("DarkMod")
+
+    orchestrator = ExecutionOrchestratorService(
+        job_repository=JobRepositorySqlAlchemy(db_session),
+        ai_execution_repository=AIExecutionRepositorySqlAlchemy(db_session),
+        artifact_repository=ArtifactRepositorySqlAlchemy(db_session),
+        quota_billing_service=QuotaBillingService(
+            execution_charge_repository=ExecutionChargeRepositorySqlAlchemy(db_session),
+            quota_account_repository=quota_repository,
+            usage_ledger_repository=UsageLedgerRepositorySqlAlchemy(db_session),
+        ),
+        job_event_repository=JobEventRepositorySqlAlchemy(db_session),
+        execution_routing_service=ExecutionRoutingService(
+            execution_routing_repository=ExecutionRoutingRepositorySqlAlchemy(db_session)
+        ),
+        server_credential_cipher=cipher,
+        server_workspace_service=workspace_service,
+        workflow_registry=_SupportedServerRegistry(),
+        workflow_runner=runner,
+    )
+    service = JobApplicationService(
+        job_repository=JobRepositorySqlAlchemy(db_session),
+        job_event_repository=JobEventRepositorySqlAlchemy(db_session),
+        execution_orchestrator_service=orchestrator,
+        server_workspace_service=workspace_service,
+    )
+
+    queued_job = service.create_job(
+        user_id=1002,
+        command=CreateJobCommand.model_validate(
+            {
+                "job_type": "single_generate",
+                "workflow_version": "2026.03.31",
+                "selected_execution_profile_id": profile.id,
+                "selected_agent_backend": "codex",
+                "selected_model": "gpt-5.4",
+                "items": [
+                    {
+                        "item_type": "custom_code",
+                        "input_summary": "排队等待同名部署目录",
+                        "input_payload": {
+                            "item_name": "QueuedEffectPatch",
+                            "description": "等待同名部署目录释放后再继续",
+                            "server_project_ref": queued_workspace.server_project_ref,
+                        },
+                    }
+                ],
+            }
+        ),
+    )
+    queued_started = service.start_job(user_id=1002, command=StartJobCommand(job_id=queued_job.id))
+    assert queued_started is not None
+    assert queued_started.status == JobStatus.QUEUED
+
+    runner.busy_targets.clear()
+    leader_job = service.create_job(
+        user_id=1001,
+        command=CreateJobCommand.model_validate(
+            {
+                "job_type": "single_generate",
+                "workflow_version": "2026.03.31",
+                "selected_execution_profile_id": profile.id,
+                "selected_agent_backend": "codex",
+                "selected_model": "gpt-5.4",
+                "items": [
+                    {
+                        "item_type": "custom_code",
+                        "input_summary": "先完成当前部署链",
+                        "input_payload": {
+                            "item_name": "LeaderEffectPatch",
+                            "description": "释放同名部署目录占用",
+                            "server_project_ref": leader_workspace.server_project_ref,
+                        },
+                    }
+                ],
+            }
+        ),
+    )
+
+    leader_started = service.start_job(user_id=1001, command=StartJobCommand(job_id=leader_job.id))
+
+    assert leader_started is not None
+    assert leader_started.status == JobStatus.SUCCEEDED
+    db_session.expire_all()
+    resumed_job = JobRepositorySqlAlchemy(db_session).find_by_id_for_user(queued_job.id, 1002)
+    assert resumed_job is not None
+    assert resumed_job.status == JobStatus.SUCCEEDED
+    assert resumed_job.items[0].status == JobItemStatus.SUCCEEDED
+    assert resumed_job.items[0].result_summary == "已完成 QueuedEffectPatch 的服务器项目构建"
 
 
 def test_job_application_service_can_complete_supported_single_relic_job(db_session):

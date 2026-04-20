@@ -30,18 +30,9 @@ class DeployOutputsResult:
     file_paths: list[Path]
 
 
-def deploy_latest_output_files(project_root: Path, mods_root: Path) -> DeployOutputsResult:
-    target_dir = mods_root / project_root.name
-
-    if target_dir.exists():
-        existing = [file for file in target_dir.iterdir() if file.suffix in (".dll", ".pck")]
-        if existing:
-            return DeployOutputsResult(
-                deployed_to=str(target_dir),
-                file_names=[file.name for file in existing],
-                file_paths=list(existing),
-            )
-
+def deploy_latest_output_files(project_root: Path, mods_root: Path, *, project_name: str | None = None) -> DeployOutputsResult:
+    target_name = str(project_name).strip() or project_root.name
+    target_dir = mods_root / target_name
     output_files = find_latest_output_files(project_root)
     if not output_files:
         return DeployOutputsResult(

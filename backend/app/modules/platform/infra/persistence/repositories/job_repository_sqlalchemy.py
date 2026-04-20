@@ -106,3 +106,33 @@ class JobRepositorySqlAlchemy(JobRepository):
                 if str((item.input_payload or {}).get("server_project_ref", "")).strip() == normalized_ref:
                     return job
         return None
+
+    def find_next_queued_job_for_server_deploy_target(
+        self,
+        project_name: str,
+        *,
+        exclude_job_ids: set[int] | None = None,
+    ) -> JobRecord | None:
+        normalized_project_name = str(project_name).strip()
+        if not normalized_project_name:
+            return None
+
+        query = (
+            self.session.query(JobRecord)
+            .options(selectinload(JobRecord.items))
+            .filter(
+                JobRecord.selected_execution_profile_id.is_not(None),
+                JobRecord.status == JobStatus.QUEUED,
+            )
+            .order_by(JobRecord.started_at.asc(), JobRecord.id.asc())
+        )
+        if exclude_job_ids:
+            query = query.filter(JobRecord.id.notin_(exclude_job_ids))
+
+        for job in query.all():
+            for item in job.items:
+                if item.status != JobItemStatus.READY:
+                    continue
+                if str((item.input_payload or {}).get("server_project_name", "")).strip() == normalized_project_name:
+                    return job
+        return None

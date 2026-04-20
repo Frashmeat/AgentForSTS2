@@ -9,11 +9,15 @@ Build & Deploy：通过 Code Agent 运行 dotnet publish（含 Godot .pck 导出
 from __future__ import annotations
 
 import json
-import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, WebSocket
 
+from app.modules.platform.application.services import (
+    ServerDeployTargetBusyError,
+    ServerDeployTargetLockService,
+)
+from app.modules.platform.infra.build_output_files import deploy_latest_output_files
 from app.modules.codegen.api import build_and_fix
 from app.shared.infra.ws_errors import send_ws_error
 from app.shared.prompting import PromptLoader
@@ -23,24 +27,7 @@ from project_utils import ensure_local_props
 
 router = APIRouter()
 _TEXT_LOADER = PromptLoader()
-
-_SKIP_DIRS = {"obj", "ref", ".godot"}
-
-
-def _find_output_files(project_root: Path) -> list[Path]:
-    """在 bin/ 下找最新的 .dll 和 .pck（跳过 obj/ref 中间产物）。"""
-    results: dict[str, Path] = {}
-    bin_dir = project_root / "bin"
-    if not bin_dir.exists():
-        return []
-    for suffix in (".dll", ".pck"):
-        candidates = [
-            f for f in bin_dir.rglob(f"*{suffix}")
-            if not any(p in _SKIP_DIRS for p in f.relative_to(bin_dir).parts)
-        ]
-        if candidates:
-            results[suffix] = max(candidates, key=lambda f: f.stat().st_mtime)
-    return list(results.values())
+_DEPLOY_TARGET_LOCK_SERVICE = ServerDeployTargetLockService()
 
 
 @router.websocket("/ws/build-deploy")
@@ -104,35 +91,38 @@ async def ws_build_deploy(ws: WebSocket):
 
         if sts2_mods and sts2_mods.exists():
             target_dir = sts2_mods / mod_name
-            # local.props 配置了 GameDir 时，dotnet publish 会直接输出到 Mods 文件夹
-            # 检查是否已经自动部署过去了
-            if target_dir.exists():
-                existing = [f for f in target_dir.iterdir() if f.suffix in (".dll", ".pck")]
-                if existing:
-                    file_names = [f.name for f in existing]
-                    deployed_to = str(target_dir)
-                    await send_chunk(
-                        f"\n{_TEXT_LOADER.render('runtime_workflow.build_deployed_via_local_props', {'target_dir': target_dir}).strip()}\n"
-                    )
-                    for f in existing:
-                        await send_chunk(f"{_TEXT_LOADER.render('runtime_workflow.build_file_item', {'file_name': f.name})}\n")
+            try:
+                lock_handle = _DEPLOY_TARGET_LOCK_SERVICE.acquire_write_lock(
+                    project_name=mod_name,
+                    job_id=0,
+                    job_item_id=0,
+                    user_id=0,
+                    source_workspace_root=str(project_root),
+                )
+            except ServerDeployTargetBusyError as error:
+                await send_ws_error(
+                    ws,
+                    code="server_deploy_target_busy",
+                    message=str(error),
+                    detail=str(error),
+                )
+                return
+            try:
+                deployed = deploy_latest_output_files(project_root, sts2_mods, project_name=mod_name)
+            finally:
+                _DEPLOY_TARGET_LOCK_SERVICE.release_write_lock(lock_handle)
 
-            # 如果 Mods 里没有，尝试从 bin/ 复制
-            if not deployed_to:
-                output_files = _find_output_files(project_root)
-                if output_files:
-                    target_dir.mkdir(parents=True, exist_ok=True)
-                    await send_chunk(
-                        f"\n{_TEXT_LOADER.render('runtime_workflow.build_copying_to_target', {'target_dir': target_dir}).strip()}\n"
-                    )
-                    for f in output_files:
-                        shutil.copy2(f, target_dir / f.name)
-                        await send_chunk(f"{_TEXT_LOADER.render('runtime_workflow.build_file_item', {'file_name': f.name})}\n")
-                    file_names = [f.name for f in output_files]
-                    deployed_to = str(target_dir)
-                    await send_chunk(f"\n{_TEXT_LOADER.load('runtime_workflow.build_deploy_finished').strip()}\n")
-                else:
-                    await send_chunk(f"\n{_TEXT_LOADER.load('runtime_workflow.build_output_missing').strip()}\n")
+            if deployed.deployed_to:
+                await send_chunk(
+                    f"\n{_TEXT_LOADER.render('runtime_workflow.build_copying_to_target', {'target_dir': target_dir}).strip()}\n"
+                )
+                for file_name in deployed.file_names:
+                    await send_chunk(f"{_TEXT_LOADER.render('runtime_workflow.build_file_item', {'file_name': file_name})}\n")
+                file_names = list(deployed.file_names)
+                deployed_to = deployed.deployed_to
+                await send_chunk(f"\n{_TEXT_LOADER.load('runtime_workflow.build_deploy_finished').strip()}\n")
+            else:
+                await send_chunk(f"\n{_TEXT_LOADER.load('runtime_workflow.build_output_missing').strip()}\n")
         elif not sts2_mods:
             await send_chunk(f"\n{_TEXT_LOADER.load('runtime_workflow.build_game_path_missing').strip()}\n")
 
