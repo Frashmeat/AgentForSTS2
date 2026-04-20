@@ -76,3 +76,33 @@ class JobRepositorySqlAlchemy(JobRepository):
         if exclude_job_id is not None:
             query = query.filter(JobRecord.id != exclude_job_id)
         return query.count()
+
+    def find_next_queued_job_for_server_workspace(
+        self,
+        server_project_ref: str,
+        *,
+        exclude_job_ids: set[int] | None = None,
+    ) -> JobRecord | None:
+        normalized_ref = str(server_project_ref).strip()
+        if not normalized_ref:
+            return None
+
+        query = (
+            self.session.query(JobRecord)
+            .options(selectinload(JobRecord.items))
+            .filter(
+                JobRecord.selected_execution_profile_id.is_not(None),
+                JobRecord.status == JobStatus.QUEUED,
+            )
+            .order_by(JobRecord.started_at.asc(), JobRecord.id.asc())
+        )
+        if exclude_job_ids:
+            query = query.filter(JobRecord.id.notin_(exclude_job_ids))
+
+        for job in query.all():
+            for item in job.items:
+                if item.status != JobItemStatus.READY:
+                    continue
+                if str((item.input_payload or {}).get("server_project_ref", "")).strip() == normalized_ref:
+                    return job
+        return None

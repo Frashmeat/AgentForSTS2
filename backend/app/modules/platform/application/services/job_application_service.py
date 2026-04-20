@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from collections import deque
 
 from app.modules.platform.contracts.job_commands import CancelJobCommand, CreateJobCommand, StartJobCommand
 from app.modules.platform.domain.models.enums import JobItemStatus, JobStatus
@@ -56,9 +57,19 @@ class JobApplicationService:
         return job
 
     def start_job(self, user_id: int, command: StartJobCommand) -> JobRecord | None:
-        job = self.job_repository.find_by_id_for_user(command.job_id, user_id)
+        job, released_workspace_refs = self._start_job_internal(user_id=user_id, command=command)
         if job is None:
             return None
+        self._drain_queued_jobs_for_workspaces(
+            released_workspace_refs,
+            attempted_job_ids={job.id},
+        )
+        return job
+
+    def _start_job_internal(self, *, user_id: int, command: StartJobCommand) -> tuple[JobRecord | None, list[str]]:
+        job = self.job_repository.find_by_id_for_user(command.job_id, user_id)
+        if job is None:
+            return None, []
         if job.selected_execution_profile_id is not None:
             active_server_job_count = self.job_repository.count_active_server_jobs_for_user(
                 user_id,
@@ -83,6 +94,7 @@ class JobApplicationService:
             event_type="job.queued",
             payload={"status": job.status.value, "triggered_by": command.triggered_by},
         )
+        released_workspace_refs: list[str] = []
         if self.execution_orchestrator_service is not None:
             ready_items = [item for item in job.items if item.status == JobItemStatus.READY]
             for item in ready_items:
@@ -163,10 +175,13 @@ class JobApplicationService:
                     input_payload=item.input_payload,
                     now=now,
                 )
+                server_project_ref = str((item.input_payload or {}).get("server_project_ref", "")).strip()
+                if server_project_ref:
+                    released_workspace_refs.append(server_project_ref)
             self._sync_job_counters(job)
             self._sync_job_status(job)
             self.job_repository.save(job)
-        return job
+        return job, released_workspace_refs
 
     def cancel_job(self, user_id: int, command: CancelJobCommand) -> bool:
         job = self.job_repository.find_by_id_for_user(command.job_id, user_id)
@@ -338,3 +353,39 @@ class JobApplicationService:
             "workflow_not_registered",
             f"当前 web runtime 尚未为 {job_type}/{item_type} 注册可直接执行的服务器 workflow。",
         )
+
+    def _drain_queued_jobs_for_workspaces(
+        self,
+        workspace_refs: list[str],
+        *,
+        attempted_job_ids: set[int] | None = None,
+    ) -> None:
+        if not workspace_refs:
+            return
+
+        pending_refs = deque(ref for ref in dict.fromkeys(str(ref).strip() for ref in workspace_refs) if ref)
+        attempted = set(attempted_job_ids or set())
+
+        while pending_refs:
+            workspace_ref = pending_refs.popleft()
+            next_job = self.job_repository.find_next_queued_job_for_server_workspace(
+                workspace_ref,
+                exclude_job_ids=attempted,
+            )
+            if next_job is None:
+                continue
+
+            attempted.add(next_job.id)
+            resumed_job, released_workspace_refs = self._start_job_internal(
+                user_id=next_job.user_id,
+                command=StartJobCommand(
+                    job_id=next_job.id,
+                    triggered_by="system_workspace_resume",
+                ),
+            )
+            if resumed_job is None:
+                continue
+            for released_ref in released_workspace_refs:
+                normalized_ref = str(released_ref).strip()
+                if normalized_ref:
+                    pending_refs.append(normalized_ref)

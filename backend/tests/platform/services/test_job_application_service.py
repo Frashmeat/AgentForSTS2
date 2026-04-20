@@ -297,6 +297,23 @@ class _BusyWorkspaceLockService:
         raise AssertionError("release_write_lock should not be called when acquire fails")
 
 
+class _SwitchableWorkspaceLockService:
+    def __init__(self) -> None:
+        self.busy_refs: set[str] = set()
+
+    def acquire_write_lock(self, **kwargs):
+        server_project_ref = str(kwargs.get("server_project_ref", "")).strip()
+        if server_project_ref in self.busy_refs:
+            raise ServerWorkspaceBusyError(
+                "server workspace is busy",
+                server_project_ref=server_project_ref,
+            )
+        return object()
+
+    def release_write_lock(self, handle):
+        return None
+
+
 class _CapturingRunner:
     def __init__(self) -> None:
         self.last_base_request = None
@@ -1354,6 +1371,153 @@ def test_job_application_service_keeps_job_queued_when_server_workspace_is_busy(
     assert queued_event.job_item_id == started.items[0].id
     assert queued_event.event_payload["reason_code"] == "server_workspace_busy"
     assert queued_event.event_payload["reason_message"] == "server workspace is busy"
+
+
+def test_job_application_service_auto_resumes_next_queued_job_after_workspace_is_released(db_session, tmp_path):
+    cipher = ServerCredentialCipher("job-service-test-secret")
+    profile = ExecutionProfileRecord(
+        code="codex-gpt-5-4",
+        display_name="Codex CLI / gpt-5.4",
+        agent_backend="codex",
+        model="gpt-5.4",
+        description="默认推荐",
+        enabled=True,
+        recommended=True,
+        sort_order=10,
+    )
+    db_session.add(profile)
+    db_session.flush()
+    db_session.add(
+        ServerCredentialRecord(
+            execution_profile_id=profile.id,
+            provider="openai",
+            auth_type="api_key",
+            credential_ciphertext=cipher.encrypt("sk-live-openai"),
+            secret_ciphertext=None,
+            base_url="https://api.openai.com/v1",
+            label="main",
+            priority=1,
+            enabled=True,
+            health_status="healthy",
+            last_checked_at=None,
+            last_error_code="",
+            last_error_message="",
+        )
+    )
+    quota_repository = QuotaAccountRepositorySqlAlchemy(db_session)
+    account = quota_repository.create_account(QuotaAccountRecord(user_id=1001, status=QuotaAccountStatus.ACTIVE))
+    quota_repository.create_bucket(
+        QuotaBucketRecord(
+            quota_account_id=account.id,
+            bucket_type=QuotaBucketType.DAILY,
+            period_start=datetime.now(UTC) - timedelta(hours=1),
+            period_end=datetime.now(UTC) + timedelta(hours=23),
+            quota_limit=10,
+            used_amount=0,
+            refunded_amount=0,
+        )
+    )
+    workspace_service = ServerWorkspaceService(storage_root=tmp_path / "platform-workspaces")
+    workspace = workspace_service.create_workspace(user_id=1001, project_name="DarkMod")
+    lock_service = _SwitchableWorkspaceLockService()
+    lock_service.busy_refs.add(workspace.server_project_ref)
+
+    orchestrator = ExecutionOrchestratorService(
+        job_repository=JobRepositorySqlAlchemy(db_session),
+        ai_execution_repository=AIExecutionRepositorySqlAlchemy(db_session),
+        artifact_repository=ArtifactRepositorySqlAlchemy(db_session),
+        quota_billing_service=QuotaBillingService(
+            execution_charge_repository=ExecutionChargeRepositorySqlAlchemy(db_session),
+            quota_account_repository=quota_repository,
+            usage_ledger_repository=UsageLedgerRepositorySqlAlchemy(db_session),
+        ),
+        job_event_repository=JobEventRepositorySqlAlchemy(db_session),
+        execution_routing_service=ExecutionRoutingService(
+            execution_routing_repository=ExecutionRoutingRepositorySqlAlchemy(db_session)
+        ),
+        server_credential_cipher=cipher,
+        server_workspace_lock_service=lock_service,
+        server_workspace_service=workspace_service,
+        workflow_registry=_SupportedServerRegistry(),
+        workflow_runner=_SucceededRunner(),
+    )
+    service = JobApplicationService(
+        job_repository=JobRepositorySqlAlchemy(db_session),
+        job_event_repository=JobEventRepositorySqlAlchemy(db_session),
+        execution_orchestrator_service=orchestrator,
+        server_workspace_service=workspace_service,
+    )
+
+    queued_job = service.create_job(
+        user_id=1001,
+        command=CreateJobCommand.model_validate(
+            {
+                "job_type": "single_generate",
+                "workflow_version": "2026.03.31",
+                "selected_execution_profile_id": profile.id,
+                "selected_agent_backend": "codex",
+                "selected_model": "gpt-5.4",
+                "items": [
+                    {
+                        "item_type": "custom_code",
+                        "input_summary": "排队任务",
+                        "input_payload": {
+                            "item_name": "QueuedPatch",
+                            "description": "等待工作区释放",
+                            "server_project_ref": workspace.server_project_ref,
+                        },
+                    }
+                ],
+            }
+        ),
+    )
+    queued_started = service.start_job(user_id=1001, command=StartJobCommand(job_id=queued_job.id))
+    assert queued_started is not None
+    assert queued_started.status == JobStatus.QUEUED
+
+    lock_service.busy_refs.clear()
+
+    active_job = service.create_job(
+        user_id=1001,
+        command=CreateJobCommand.model_validate(
+            {
+                "job_type": "single_generate",
+                "workflow_version": "2026.03.31",
+                "selected_execution_profile_id": profile.id,
+                "selected_agent_backend": "codex",
+                "selected_model": "gpt-5.4",
+                "items": [
+                    {
+                        "item_type": "custom_code",
+                        "input_summary": "当前任务",
+                        "input_payload": {
+                            "item_name": "ActivePatch",
+                            "description": "当前持有工作区锁并完成",
+                            "server_project_ref": workspace.server_project_ref,
+                        },
+                    }
+                ],
+            }
+        ),
+    )
+    active_started = service.start_job(user_id=1001, command=StartJobCommand(job_id=active_job.id))
+    assert active_started is not None
+    assert active_started.status == JobStatus.SUCCEEDED
+
+    reloaded_queued = JobRepositorySqlAlchemy(db_session).find_by_id_for_user(queued_job.id, 1001)
+    assert reloaded_queued is not None
+    assert reloaded_queued.status == JobStatus.SUCCEEDED
+    assert reloaded_queued.items[0].status == JobItemStatus.SUCCEEDED
+    assert reloaded_queued.items[0].result_summary == "已完成 QueuedPatch 的服务器项目构建"
+
+    resume_event = (
+        db_session.query(JobEventRecord)
+        .filter(JobEventRecord.job_id == queued_job.id, JobEventRecord.event_type == "job.queued")
+        .order_by(JobEventRecord.id.desc())
+        .first()
+    )
+    assert resume_event is not None
+    assert resume_event.event_payload["triggered_by"] == "system_workspace_resume"
 
 
 def test_job_application_service_can_complete_supported_single_relic_job(db_session):

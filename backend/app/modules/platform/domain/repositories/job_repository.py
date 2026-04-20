@@ -25,3 +25,11 @@ class JobRepository(ABC):
 
     @abstractmethod
     def count_active_server_jobs_for_user(self, user_id: int, *, exclude_job_id: int | None = None) -> int: ...
+
+    @abstractmethod
+    def find_next_queued_job_for_server_workspace(
+        self,
+        server_project_ref: str,
+        *,
+        exclude_job_ids: set[int] | None = None,
+    ) -> JobRecord | None: ...
