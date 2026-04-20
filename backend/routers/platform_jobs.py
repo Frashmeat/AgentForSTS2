@@ -9,6 +9,7 @@ from app.modules.platform.application.services import (
     JobQueryService,
     PlatformRequestRateLimitExceededError,
     PlatformRequestRateLimiter,
+    ServerWorkspaceBusyError,
     ServerExecutionService,
 )
 from app.modules.platform.application.services.server_workspace_service import ServerWorkspaceService
@@ -151,6 +152,8 @@ def start_job(request: Request, job_id: int, body: dict):
             raise HTTPException(status_code=429, detail=str(error)) from error
         except LookupError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
+        except ServerWorkspaceBusyError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
         if job is None:

@@ -20,6 +20,7 @@ from app.modules.platform.application.services import (
     ServerCredentialCipher,
     ServerCredentialHealthChecker,
     ServerExecutionService,
+    ServerWorkspaceLockService,
     ServerWorkspaceService,
     UploadedAssetService,
 )
@@ -118,6 +119,7 @@ class ApplicationContainer:
             ("platform.server_credential_cipher_factory", ServerCredentialCipher),
             ("platform.server_credential_health_checker_factory", ServerCredentialHealthChecker),
             ("platform.server_execution_service_factory", ServerExecutionService),
+            ("platform.server_workspace_lock_service_factory", ServerWorkspaceLockService),
             ("platform.server_workspace_service_factory", ServerWorkspaceService),
             ("platform.uploaded_asset_service_factory", UploadedAssetService),
             ("platform.execution_orchestrator_service_factory", ExecutionOrchestratorService),

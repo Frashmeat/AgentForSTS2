@@ -18,6 +18,9 @@ from fastapi.testclient import TestClient
 from app.composition.container import ApplicationContainer
 from app.modules.auth.infra.persistence import models as _auth_models  # noqa: F401
 from app.modules.platform.application.services.server_credential_cipher import ServerCredentialCipher
+from app.modules.platform.application.services.server_workspace_lock_service import (
+    ServerWorkspaceBusyError,
+)
 from app.modules.platform.application.services.server_workspace_service import ServerWorkspaceService
 from app.modules.platform.application.services.uploaded_asset_service import UploadedAssetService
 from app.modules.platform.contracts.runner_contracts import StepExecutionResult
@@ -39,6 +42,17 @@ from app.modules.platform.domain.models.enums import JobItemStatus, JobStatus
 from app.shared.infra.db.base import Base
 from routers.auth_router import router as auth_router
 from routers.me_router import router as me_router
+
+
+class _BusyWorkspaceLockService:
+    def acquire_write_lock(self, **kwargs):
+        raise ServerWorkspaceBusyError(
+            "server workspace is busy",
+            server_project_ref=str(kwargs.get("server_project_ref", "")),
+        )
+
+    def release_write_lock(self, handle):
+        raise AssertionError("release_write_lock should not be called when acquire fails")
 
 
 @pytest.fixture()
@@ -1802,6 +1816,120 @@ def test_me_router_can_complete_supported_batch_character_job(client: TestClient
         assert execution.result_summary == "已生成服务器角色实现方案"
     finally:
         session.close()
+
+
+def test_me_router_returns_409_when_server_workspace_is_busy(client: TestClient):
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "username": "luna",
+            "email": "luna@example.com",
+            "password": "secret-123",
+        },
+    )
+    assert registered.status_code == 200
+    verification_code = registered.json()["verification_code"]
+    user_id = registered.json()["user"]["user_id"]
+
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    verified = client.post("/api/auth/verify-email", json={"code": verification_code})
+    assert verified.status_code == 200
+
+    app_container = client.app.state.container
+    app_container.register_singleton("platform.server_workspace_lock_service_factory", _BusyWorkspaceLockService())
+    cipher = ServerCredentialCipher.from_settings(app_container.resolve_singleton("settings"))
+    session = app_container.resolve_singleton("platform.db_session_factory")()
+    try:
+        account = QuotaAccountRecord(user_id=user_id, status=QuotaAccountStatus.ACTIVE)
+        session.add(account)
+        session.flush()
+        session.add(
+            QuotaBucketRecord(
+                quota_account_id=account.id,
+                bucket_type=QuotaBucketType.DAILY,
+                period_start=datetime.now(UTC) - timedelta(hours=1),
+                period_end=datetime.now(UTC) + timedelta(hours=23),
+                quota_limit=10,
+                used_amount=0,
+                refunded_amount=0,
+            )
+        )
+        profile = ExecutionProfileRecord(
+            code="codex-gpt-5-4",
+            display_name="Codex CLI / gpt-5.4",
+            agent_backend="codex",
+            model="gpt-5.4",
+            description="默认推荐",
+            enabled=True,
+            recommended=True,
+            sort_order=10,
+        )
+        session.add(profile)
+        session.flush()
+        session.add(
+            ServerCredentialRecord(
+                execution_profile_id=profile.id,
+                provider="openai",
+                auth_type="api_key",
+                credential_ciphertext=cipher.encrypt("sk-live-openai"),
+                secret_ciphertext=None,
+                base_url="https://api.openai.com/v1",
+                label="main",
+                priority=1,
+                enabled=True,
+                health_status="healthy",
+                last_checked_at=None,
+                last_error_code="",
+                last_error_message="",
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    workspace_service = app_container.resolve_singleton("platform.server_workspace_service_factory")()
+    workspace = workspace_service.create_workspace(user_id=user_id, project_name="DarkMod")
+
+    created = client.post(
+        "/api/me/jobs",
+        json={
+            "job_type": "single_generate",
+            "workflow_version": "2026.03.31",
+            "input_summary": "补一个单资产脚本",
+            "created_from": "single_asset",
+            "selected_execution_profile_id": 1,
+            "selected_agent_backend": "codex",
+            "selected_model": "gpt-5.4",
+            "items": [
+                {
+                    "item_type": "custom_code",
+                    "input_summary": "补一个单资产脚本",
+                    "input_payload": {
+                        "item_name": "SingleEffectPatch",
+                        "description": "补一个单资产 custom_code 示例",
+                        "server_project_ref": workspace.server_project_ref,
+                    },
+                }
+            ],
+        },
+    )
+    assert created.status_code == 200
+
+    started = client.post(
+        f"/api/me/jobs/{created.json()['id']}/start",
+        json={"triggered_by": "user"},
+    )
+
+    assert started.status_code == 409
+    assert started.json()["detail"] == "server workspace is busy"
 
 
 def test_me_router_can_complete_supported_single_custom_code_job(client: TestClient):

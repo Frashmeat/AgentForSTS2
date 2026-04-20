@@ -15,6 +15,12 @@ from .server_credential_admin_service import ServerCredentialAdminService
 from .server_credential_cipher import ServerCredentialCipher
 from .server_credential_health_checker import ServerCredentialHealthChecker, ServerCredentialHealthCheckResult
 from .server_execution_service import ServerExecutionService
+from .server_workspace_lock_service import (
+    ServerWorkspaceBusyError,
+    ServerWorkspaceLockHandle,
+    ServerWorkspaceLockHolder,
+    ServerWorkspaceLockService,
+)
 from .server_workspace_service import ServerWorkspaceService
 from .uploaded_asset_service import UploadedAssetService
 from .user_center_service import UserCenterProfileView, UserCenterService
@@ -38,6 +44,10 @@ __all__ = [
     "ServerCredentialHealthChecker",
     "ServerCredentialHealthCheckResult",
     "ServerExecutionService",
+    "ServerWorkspaceBusyError",
+    "ServerWorkspaceLockHandle",
+    "ServerWorkspaceLockHolder",
+    "ServerWorkspaceLockService",
     "ServerWorkspaceService",
     "UploadedAssetService",
     "UserCenterProfileView",

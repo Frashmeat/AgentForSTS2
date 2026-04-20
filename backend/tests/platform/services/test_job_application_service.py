@@ -112,6 +112,7 @@ class _SupportedServerRegistry:
             return [
                 PlatformWorkflowStep(step_type="batch.custom_code.plan", step_id="batch-custom-code"),
                 PlatformWorkflowStep(step_type="code.generate", step_id="batch-custom-codegen"),
+                PlatformWorkflowStep(step_type="build.project", step_id="batch-custom-code-build"),
             ]
         if (job_type, item_type) == ("batch_generate", "card"):
             return [
@@ -166,6 +167,7 @@ class _SupportedServerRegistry:
             return [
                 PlatformWorkflowStep(step_type="batch.custom_code.plan", step_id="single-custom-code"),
                 PlatformWorkflowStep(step_type="code.generate", step_id="single-custom-codegen"),
+                PlatformWorkflowStep(step_type="build.project", step_id="single-custom-code-build"),
             ]
         if (job_type, item_type) == ("single_generate", "card"):
             return [
@@ -365,6 +367,7 @@ def test_job_application_service_can_complete_supported_log_analysis_job(db_sess
     orchestrator = ExecutionOrchestratorService(
         job_repository=JobRepositorySqlAlchemy(db_session),
         ai_execution_repository=AIExecutionRepositorySqlAlchemy(db_session),
+        artifact_repository=ArtifactRepositorySqlAlchemy(db_session),
         quota_billing_service=QuotaBillingService(
             execution_charge_repository=ExecutionChargeRepositorySqlAlchemy(db_session),
             quota_account_repository=quota_repository,
@@ -459,6 +462,7 @@ def test_job_application_service_can_complete_supported_batch_custom_code_job(db
     orchestrator = ExecutionOrchestratorService(
         job_repository=JobRepositorySqlAlchemy(db_session),
         ai_execution_repository=AIExecutionRepositorySqlAlchemy(db_session),
+        artifact_repository=ArtifactRepositorySqlAlchemy(db_session),
         quota_billing_service=QuotaBillingService(
             execution_charge_repository=ExecutionChargeRepositorySqlAlchemy(db_session),
             quota_account_repository=quota_repository,
@@ -1061,6 +1065,7 @@ def test_job_application_service_can_complete_supported_batch_character_job(db_s
     orchestrator = ExecutionOrchestratorService(
         job_repository=JobRepositorySqlAlchemy(db_session),
         ai_execution_repository=AIExecutionRepositorySqlAlchemy(db_session),
+        artifact_repository=ArtifactRepositorySqlAlchemy(db_session),
         quota_billing_service=QuotaBillingService(
             execution_charge_repository=ExecutionChargeRepositorySqlAlchemy(db_session),
             quota_account_repository=quota_repository,
@@ -1162,6 +1167,7 @@ def test_job_application_service_can_complete_supported_single_custom_code_job(d
     orchestrator = ExecutionOrchestratorService(
         job_repository=JobRepositorySqlAlchemy(db_session),
         ai_execution_repository=AIExecutionRepositorySqlAlchemy(db_session),
+        artifact_repository=ArtifactRepositorySqlAlchemy(db_session),
         quota_billing_service=QuotaBillingService(
             execution_charge_repository=ExecutionChargeRepositorySqlAlchemy(db_session),
             quota_account_repository=quota_repository,

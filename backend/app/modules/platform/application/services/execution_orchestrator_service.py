@@ -23,6 +23,7 @@ from app.modules.platform.runner.workflow_runner import WorkflowRunner
 
 from .execution_routing_service import ExecutionRoutingService
 from .server_credential_cipher import ServerCredentialCipher
+from .server_workspace_lock_service import ServerWorkspaceLockHandle, ServerWorkspaceLockService
 from .server_workspace_service import ServerWorkspaceService
 from .uploaded_asset_service import UploadedAssetService
 
@@ -36,6 +37,7 @@ class ExecutionOrchestratorService:
         job_event_repository: JobEventRepository,
         execution_routing_service: ExecutionRoutingService | None = None,
         server_credential_cipher: ServerCredentialCipher | None = None,
+        server_workspace_lock_service: ServerWorkspaceLockService | None = None,
         server_workspace_service: ServerWorkspaceService | None = None,
         uploaded_asset_service: UploadedAssetService | None = None,
         workflow_registry: PlatformWorkflowRegistry | None = None,
@@ -50,11 +52,13 @@ class ExecutionOrchestratorService:
         self.job_event_repository = job_event_repository
         self.execution_routing_service = execution_routing_service
         self.server_credential_cipher = server_credential_cipher
+        self.server_workspace_lock_service = server_workspace_lock_service
         self.server_workspace_service = server_workspace_service
         self.uploaded_asset_service = uploaded_asset_service
         self.workflow_registry = workflow_registry
         self.workflow_runner = workflow_runner
         self.server_credential_admin_repository = server_credential_admin_repository
+        self._workspace_write_locks: dict[int, ServerWorkspaceLockHandle] = {}
 
     def start_execution(
         self,
@@ -90,6 +94,7 @@ class ExecutionOrchestratorService:
         item = next((entry for entry in job.items if entry.id == job_item_id), None)
         if item is None:
             return None
+        self._acquire_workspace_write_lock_if_needed(job=job, item=item)
 
         if self.execution_routing_service is not None and not provider.strip() and not model.strip():
             route = self.execution_routing_service.resolve_for_job(job)
@@ -262,72 +267,25 @@ class ExecutionOrchestratorService:
         input_payload: dict[str, object] | None,
         now: datetime,
     ) -> StepExecutionResult | None:
-        if not self.has_registered_workflow(job_type=job_type, item_type=item_type):
-            return None
+        try:
+            if not self.has_registered_workflow(job_type=job_type, item_type=item_type):
+                return None
 
-        job = self.job_repository.find_by_id_for_user(job_id, user_id)
-        if job is None:
-            raise LookupError(f"job not found for user: {job_id}")
-        item = next((entry for entry in job.items if entry.id == job_item_id), None)
-        if item is None:
-            raise LookupError(f"job item not found: {job_item_id}")
+            job = self.job_repository.find_by_id_for_user(job_id, user_id)
+            if job is None:
+                raise LookupError(f"job not found for user: {job_id}")
+            item = next((entry for entry in job.items if entry.id == job_item_id), None)
+            if item is None:
+                raise LookupError(f"job item not found: {job_item_id}")
 
-        execution = self.ai_execution_repository.find_latest_by_job_item(job_item_id)
-        if execution is None:
-            raise LookupError(f"ai_execution not found for job_item: {job_item_id}")
+            execution = self.ai_execution_repository.find_latest_by_job_item(job_item_id)
+            if execution is None:
+                raise LookupError(f"ai_execution not found for job_item: {job_item_id}")
 
-        execution.status = AIExecutionStatus.RUNNING
-        execution.input_payload = dict(input_payload or {})
-        self.ai_execution_repository.save(execution)
-
-        results = asyncio.run(
-            self.run_registered_steps(
-                user_id=user_id,
-                job_type=job_type,
-                item_type=item_type,
-                job_id=job_id,
-                job_item_id=job_item_id,
-                workflow_version=workflow_version,
-                step_protocol_version=step_protocol_version,
-                result_schema_version=result_schema_version,
-                input_payload=input_payload,
-            )
-        )
-        final_result = results[-1] if results else StepExecutionResult(
-            step_id=execution.step_id,
-            status="failed_system",
-            error_summary="workflow produced no result",
-        )
-        retry_binding = self._build_retry_execution_binding(
-            user_id=user_id,
-            job_id=job_id,
-            job_item_id=job_item_id,
-            execution=execution,
-            result=final_result,
-            now=now,
-        )
-        if retry_binding is not None:
-            previous_credential_ref = execution.credential_ref
-            execution.provider = retry_binding.provider
-            execution.model = retry_binding.model
-            execution.credential_ref = retry_binding.credential_ref
-            execution.retry_attempt = retry_binding.retry_attempt
-            execution.switched_credential = retry_binding.switched_credential
+            execution.status = AIExecutionStatus.RUNNING
+            execution.input_payload = dict(input_payload or {})
             self.ai_execution_repository.save(execution)
-            self.job_event_repository.append(
-                job_id=job.id,
-                user_id=user_id,
-                event_type="ai_execution.retry_scheduled",
-                payload={
-                    "execution_id": execution.id,
-                    "from_credential_ref": previous_credential_ref,
-                    "to_credential_ref": retry_binding.credential_ref,
-                    "retry_attempt": retry_binding.retry_attempt,
-                    "error_summary": final_result.error_summary,
-                },
-                job_item_id=job_item_id,
-                ai_execution_id=execution.id,
-            )
+
             results = asyncio.run(
                 self.run_registered_steps(
                     user_id=user_id,
@@ -339,32 +297,82 @@ class ExecutionOrchestratorService:
                     step_protocol_version=step_protocol_version,
                     result_schema_version=result_schema_version,
                     input_payload=input_payload,
-                    execution_binding=retry_binding,
                 )
             )
             final_result = results[-1] if results else StepExecutionResult(
                 step_id=execution.step_id,
                 status="failed_system",
-                error_summary="workflow produced no result after retry",
+                error_summary="workflow produced no result",
             )
-        self._apply_result(
-            job=job,
-            item=item,
-            execution=execution,
-            result=final_result,
-            now=now,
-        )
-        self.ai_execution_repository.save(execution)
-        self.job_repository.save(job)
-        self.job_event_repository.append(
-            job_id=job.id,
-            user_id=user_id,
-            event_type="ai_execution.finished",
-            payload={"execution_id": execution.id, "status": execution.status.value},
-            job_item_id=job_item_id,
-            ai_execution_id=execution.id,
-        )
-        return final_result
+            retry_binding = self._build_retry_execution_binding(
+                user_id=user_id,
+                job_id=job_id,
+                job_item_id=job_item_id,
+                execution=execution,
+                result=final_result,
+                now=now,
+            )
+            if retry_binding is not None:
+                previous_credential_ref = execution.credential_ref
+                execution.provider = retry_binding.provider
+                execution.model = retry_binding.model
+                execution.credential_ref = retry_binding.credential_ref
+                execution.retry_attempt = retry_binding.retry_attempt
+                execution.switched_credential = retry_binding.switched_credential
+                self.ai_execution_repository.save(execution)
+                self.job_event_repository.append(
+                    job_id=job.id,
+                    user_id=user_id,
+                    event_type="ai_execution.retry_scheduled",
+                    payload={
+                        "execution_id": execution.id,
+                        "from_credential_ref": previous_credential_ref,
+                        "to_credential_ref": retry_binding.credential_ref,
+                        "retry_attempt": retry_binding.retry_attempt,
+                        "error_summary": final_result.error_summary,
+                    },
+                    job_item_id=job_item_id,
+                    ai_execution_id=execution.id,
+                )
+                results = asyncio.run(
+                    self.run_registered_steps(
+                        user_id=user_id,
+                        job_type=job_type,
+                        item_type=item_type,
+                        job_id=job_id,
+                        job_item_id=job_item_id,
+                        workflow_version=workflow_version,
+                        step_protocol_version=step_protocol_version,
+                        result_schema_version=result_schema_version,
+                        input_payload=input_payload,
+                        execution_binding=retry_binding,
+                    )
+                )
+                final_result = results[-1] if results else StepExecutionResult(
+                    step_id=execution.step_id,
+                    status="failed_system",
+                    error_summary="workflow produced no result after retry",
+                )
+            self._apply_result(
+                job=job,
+                item=item,
+                execution=execution,
+                result=final_result,
+                now=now,
+            )
+            self.ai_execution_repository.save(execution)
+            self.job_repository.save(job)
+            self.job_event_repository.append(
+                job_id=job.id,
+                user_id=user_id,
+                event_type="ai_execution.finished",
+                payload={"execution_id": execution.id, "status": execution.status.value},
+                job_item_id=job_item_id,
+                ai_execution_id=execution.id,
+            )
+            return final_result
+        finally:
+            self._release_workspace_write_lock(job_item_id)
 
     def _build_retry_execution_binding(
         self,
@@ -674,6 +682,38 @@ class ExecutionOrchestratorService:
             if value:
                 return value
         return fallback.strip()
+
+    def _acquire_workspace_write_lock_if_needed(self, *, job, item) -> None:
+        if self.server_workspace_lock_service is None:
+            return
+        if item.id in self._workspace_write_locks:
+            return
+        input_payload = dict(item.input_payload or {})
+        server_project_ref = str(input_payload.get("server_project_ref", "")).strip()
+        if not server_project_ref:
+            return
+        try:
+            steps = self._resolve_workflow_steps(
+                job_type=job.job_type,
+                item_type=item.item_type,
+                input_payload=input_payload,
+            )
+        except (KeyError, RuntimeError):
+            return
+        if not any(step.step_type in {"code.generate", "asset.generate", "build.project"} for step in steps):
+            return
+        self._workspace_write_locks[item.id] = self.server_workspace_lock_service.acquire_write_lock(
+            server_project_ref=server_project_ref,
+            job_id=job.id,
+            job_item_id=item.id,
+            user_id=job.user_id,
+        )
+
+    def _release_workspace_write_lock(self, job_item_id: int) -> None:
+        handle = self._workspace_write_locks.pop(job_item_id, None)
+        if handle is None or self.server_workspace_lock_service is None:
+            return
+        self.server_workspace_lock_service.release_write_lock(handle)
 
     def _resolve_workflow_steps(
         self,

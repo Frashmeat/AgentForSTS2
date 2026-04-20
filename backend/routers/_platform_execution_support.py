@@ -7,6 +7,7 @@ from app.modules.platform.application.services import (
     ExecutionRoutingService,
     QuotaBillingService,
     ServerCredentialCipher,
+    ServerWorkspaceLockService,
     ServerWorkspaceService,
     UploadedAssetService,
 )
@@ -30,6 +31,7 @@ def build_execution_orchestrator_service(session, request: Request) -> Execution
     quota_billing_service = _build_quota_billing_service(session, request)
     execution_routing_service = _build_execution_routing_service(session, request)
     server_credential_cipher = _build_server_credential_cipher(request)
+    server_workspace_lock_service = _build_server_workspace_lock_service(request)
     server_workspace_service = _build_server_workspace_service(request)
     uploaded_asset_service = _build_uploaded_asset_service(request)
     return container.resolve_singleton("platform.execution_orchestrator_service_factory")(
@@ -40,6 +42,7 @@ def build_execution_orchestrator_service(session, request: Request) -> Execution
         job_event_repository=job_event_repository,
         execution_routing_service=execution_routing_service,
         server_credential_cipher=server_credential_cipher,
+        server_workspace_lock_service=server_workspace_lock_service,
         server_workspace_service=server_workspace_service,
         uploaded_asset_service=uploaded_asset_service,
         workflow_registry=_build_workflow_registry(request),
@@ -85,6 +88,14 @@ def _build_uploaded_asset_service(request: Request) -> UploadedAssetService:
 def _build_server_workspace_service(request: Request) -> ServerWorkspaceService:
     container = request.app.state.container
     factory = container.resolve_singleton("platform.server_workspace_service_factory")
+    if callable(factory):
+        return factory()
+    return factory
+
+
+def _build_server_workspace_lock_service(request: Request) -> ServerWorkspaceLockService:
+    container = request.app.state.container
+    factory = container.resolve_singleton("platform.server_workspace_lock_service_factory")
     if callable(factory):
         return factory()
     return factory

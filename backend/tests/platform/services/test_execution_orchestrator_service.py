@@ -7,6 +7,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from app.modules.platform.application.services.execution_routing_service import ExecutionRoutingService
+from app.modules.platform.application.services.server_workspace_lock_service import (
+    ServerWorkspaceBusyError,
+)
 from app.modules.platform.application.services.execution_orchestrator_service import ExecutionOrchestratorService
 from app.modules.platform.application.services.quota_billing_service import QuotaBillingService
 from app.modules.platform.application.services.server_credential_cipher import ServerCredentialCipher
@@ -202,6 +205,22 @@ def _seed_ready_job_with_two_server_credentials(db_session, cipher: ServerCreden
 class _SingleStepRegistry:
     def resolve(self, job_type: str, item_type: str, input_payload: dict[str, object] | None = None):
         return [PlatformWorkflowStep(step_type="text.generate", step_id="text.generate")]
+
+
+class _BusyWorkspaceRegistry:
+    def resolve(self, job_type: str, item_type: str, input_payload: dict[str, object] | None = None):
+        return [PlatformWorkflowStep(step_type="code.generate", step_id="code.generate")]
+
+
+class _BusyWorkspaceLockService:
+    def acquire_write_lock(self, **kwargs):
+        raise ServerWorkspaceBusyError(
+            "server workspace is busy",
+            server_project_ref=str(kwargs.get("server_project_ref", "")),
+        )
+
+    def release_write_lock(self, **kwargs):
+        raise AssertionError("release_write_lock should not be called when acquire fails")
 
 
 class _RetryOnceRunner:
@@ -569,3 +588,64 @@ def test_execution_orchestrator_service_keeps_original_failure_when_no_alternate
     assert execution.credential_ref == f"server-credential:{credential_a.id}"
     assert execution.retry_attempt == 0
     assert execution.switched_credential is False
+
+
+def test_execution_orchestrator_service_rejects_busy_server_workspace_before_running_write_steps(db_session):
+    job, _ = _seed_ready_job_with_server_profile(db_session)
+    job.items[0].input_payload = {
+        "item_name": "DarkBlade",
+        "description": "测试",
+        "server_project_ref": "server-workspace:busy-token",
+    }
+    quota_repository = QuotaAccountRepositorySqlAlchemy(db_session)
+    now = datetime.now(UTC)
+    account = quota_repository.create_account(QuotaAccountRecord(user_id=1001, status=QuotaAccountStatus.ACTIVE))
+    quota_repository.create_bucket(
+        QuotaBucketRecord(
+            quota_account_id=account.id,
+            bucket_type=QuotaBucketType.DAILY,
+            period_start=now - timedelta(hours=1),
+            period_end=now + timedelta(hours=23),
+            quota_limit=10,
+            used_amount=0,
+            refunded_amount=0,
+        )
+    )
+    db_session.flush()
+
+    service = ExecutionOrchestratorService(
+        job_repository=JobRepositorySqlAlchemy(db_session),
+        ai_execution_repository=AIExecutionRepositorySqlAlchemy(db_session),
+        quota_billing_service=QuotaBillingService(
+            execution_charge_repository=ExecutionChargeRepositorySqlAlchemy(db_session),
+            quota_account_repository=quota_repository,
+            usage_ledger_repository=UsageLedgerRepositorySqlAlchemy(db_session),
+        ),
+        job_event_repository=JobEventRepositorySqlAlchemy(db_session),
+        workflow_registry=_BusyWorkspaceRegistry(),
+        workflow_runner=None,
+        server_workspace_lock_service=_BusyWorkspaceLockService(),
+    )
+
+    try:
+        service.start_execution(
+            user_id=1001,
+            job_id=job.id,
+            job_item_id=job.items[0].id,
+            workflow_version="2026.03.31",
+            step_protocol_version="v1",
+            result_schema_version="v1",
+            step_type="workflow.dispatch",
+            step_id="workflow.dispatch",
+            request_idempotency_key="idem-busy-workspace",
+            now=datetime.now(UTC),
+        )
+    except ServerWorkspaceBusyError as error:
+        assert str(error) == "server workspace is busy"
+    else:
+        raise AssertionError("expected ServerWorkspaceBusyError when workspace lock cannot be acquired")
+
+    db_session.refresh(job)
+    assert job.status == JobStatus.QUEUED
+    assert job.items[0].status == JobItemStatus.READY
+    assert db_session.query(AIExecutionRecord).count() == 0
