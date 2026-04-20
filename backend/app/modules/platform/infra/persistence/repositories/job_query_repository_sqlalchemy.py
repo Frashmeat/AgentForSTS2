@@ -54,6 +54,12 @@ class _DeferredSummary:
 
 
 @dataclass(slots=True)
+class _QueuedSummary:
+    reason_code: str = ""
+    reason_message: str = ""
+
+
+@dataclass(slots=True)
 class _DeliverySummary:
     state: str = ""
 
@@ -70,6 +76,7 @@ class JobQueryRepositorySqlAlchemy(JobQueryRepository):
             .all()
         )
         refund_summaries = self._load_refund_summaries([row.id for row in rows])
+        queued_summaries = self._load_queued_summaries([row.id for row in rows])
         deferred_summaries = self._load_deferred_summaries([row.id for row in rows])
         delivery_summaries = self._load_delivery_summaries([row.id for row in rows])
         return [
@@ -90,6 +97,12 @@ class JobQueryRepositorySqlAlchemy(JobQueryRepository):
                 refunded_amount=refund_summaries.get(row.id, _RefundSummary()).refunded_amount,
                 net_consumed=refund_summaries.get(row.id, _RefundSummary()).net_consumed,
                 refund_reason_summary=refund_summaries.get(row.id, _RefundSummary()).refund_reason_summary,
+                queued_reason_code=(
+                    queued_summaries.get(row.id, _QueuedSummary()).reason_code if _enum_value(row.status) == "queued" else ""
+                ),
+                queued_reason_message=(
+                    queued_summaries.get(row.id, _QueuedSummary()).reason_message if _enum_value(row.status) == "queued" else ""
+                ),
                 deferred_reason_code=deferred_summaries.get(row.id, _DeferredSummary()).reason_code,
                 deferred_reason_message=deferred_summaries.get(row.id, _DeferredSummary()).reason_message,
             )
@@ -101,6 +114,7 @@ class JobQueryRepositorySqlAlchemy(JobQueryRepository):
         if row is None:
             return None
         refund_summary = self._load_refund_summaries([row.id]).get(row.id, _RefundSummary())
+        queued_summary = self._load_queued_summaries([row.id]).get(row.id, _QueuedSummary())
         deferred_summary = self._load_deferred_summaries([row.id]).get(row.id, _DeferredSummary())
         delivery_summary = self._load_delivery_summaries([row.id]).get(row.id, _DeliverySummary())
         return JobDetailView(
@@ -118,6 +132,8 @@ class JobQueryRepositorySqlAlchemy(JobQueryRepository):
             refunded_amount=refund_summary.refunded_amount,
             net_consumed=refund_summary.net_consumed,
             refund_reason_summary=refund_summary.refund_reason_summary,
+            queued_reason_code=queued_summary.reason_code if _enum_value(row.status) == "queued" else "",
+            queued_reason_message=queued_summary.reason_message if _enum_value(row.status) == "queued" else "",
             deferred_reason_code=deferred_summary.reason_code,
             deferred_reason_message=deferred_summary.reason_message,
             items=self.list_job_items(user_id, job_id),
@@ -188,6 +204,28 @@ class JobQueryRepositorySqlAlchemy(JobQueryRepository):
                 continue
             payload = dict(row.event_payload or {})
             summaries[row.job_id] = _DeferredSummary(
+                reason_code=str(payload.get("reason_code", "")).strip(),
+                reason_message=str(payload.get("reason_message", "")).strip(),
+            )
+        return summaries
+
+    def _load_queued_summaries(self, job_ids: list[int]) -> dict[int, _QueuedSummary]:
+        if not job_ids:
+            return {}
+
+        rows = (
+            self.session.query(JobEventRecord)
+            .filter(JobEventRecord.job_id.in_(job_ids), JobEventRecord.event_type == "job.queued")
+            .order_by(JobEventRecord.job_id.asc(), JobEventRecord.id.desc())
+            .all()
+        )
+
+        summaries: dict[int, _QueuedSummary] = {}
+        for row in rows:
+            if row.job_id in summaries:
+                continue
+            payload = dict(row.event_payload or {})
+            summaries[row.job_id] = _QueuedSummary(
                 reason_code=str(payload.get("reason_code", "")).strip(),
                 reason_message=str(payload.get("reason_message", "")).strip(),
             )

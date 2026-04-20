@@ -722,8 +722,25 @@ def test_platform_jobs_router_returns_409_when_server_workspace_is_busy(client: 
 
     started = client.post(f"/api/platform/jobs/{created.json()['id']}/start", json={})
 
-    assert started.status_code == 409
-    assert started.json()["detail"] == "server workspace is busy"
+    assert started.status_code == 200
+    assert started.json()["status"] == "queued"
+
+    detail = client.get(f"/api/platform/jobs/{created.json()['id']}")
+    listed = client.get("/api/platform/jobs")
+    events = client.get(f"/api/platform/jobs/{created.json()['id']}/events")
+
+    assert detail.status_code == 200
+    assert detail.json()["status"] == "queued"
+    assert detail.json()["queued_reason_code"] == "server_workspace_busy"
+    assert detail.json()["queued_reason_message"] == "server workspace is busy"
+    assert listed.status_code == 200
+    assert listed.json()[0]["status"] == "queued"
+    assert listed.json()[0]["queued_reason_code"] == "server_workspace_busy"
+    assert listed.json()[0]["queued_reason_message"] == "server workspace is busy"
+    assert events.status_code == 200
+    queued_events = [entry for entry in events.json() if entry["event_type"] == "job.queued"]
+    assert queued_events[-1]["payload"]["reason_code"] == "server_workspace_busy"
+    assert queued_events[-1]["payload"]["reason_message"] == "server workspace is busy"
 
 
 def test_platform_jobs_router_can_complete_supported_log_analysis_job(client: TestClient):

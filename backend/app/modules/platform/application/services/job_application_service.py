@@ -8,6 +8,7 @@ from app.modules.platform.domain.repositories import JobEventRepository, JobRepo
 from app.modules.platform.infra.persistence.models import JobRecord
 
 from .execution_orchestrator_service import ExecutionOrchestratorService
+from .server_workspace_lock_service import ServerWorkspaceBusyError
 from .server_workspace_service import ServerWorkspaceService
 from .uploaded_asset_service import UploadedAssetService
 
@@ -17,6 +18,7 @@ _RESULT_SCHEMA_VERSION = "v1"
 _DISPATCH_STEP_TYPE = "workflow.dispatch"
 _PLATFORM_SERVER_JOB_TYPES = {"single_generate", "batch_generate"}
 _MAX_ACTIVE_SERVER_JOBS_PER_USER = 2
+_QUEUED_REASON_SERVER_WORKSPACE_BUSY = "server_workspace_busy"
 _FORBIDDEN_PLATFORM_PAYLOAD_FIELDS = {
     "name",
     "asset_name",
@@ -84,18 +86,35 @@ class JobApplicationService:
         if self.execution_orchestrator_service is not None:
             ready_items = [item for item in job.items if item.status == JobItemStatus.READY]
             for item in ready_items:
-                execution = self.execution_orchestrator_service.start_execution(
-                    user_id=user_id,
-                    job_id=job.id,
-                    job_item_id=item.id,
-                    workflow_version=job.workflow_version,
-                    step_protocol_version=_STEP_PROTOCOL_VERSION,
-                    result_schema_version=_RESULT_SCHEMA_VERSION,
-                    step_type=_DISPATCH_STEP_TYPE,
-                    step_id=self._build_dispatch_step_id(item.item_index),
-                    request_idempotency_key=self._build_start_idempotency_key(job.id, item.id),
-                    now=now,
-                )
+                try:
+                    execution = self.execution_orchestrator_service.start_execution(
+                        user_id=user_id,
+                        job_id=job.id,
+                        job_item_id=item.id,
+                        workflow_version=job.workflow_version,
+                        step_protocol_version=_STEP_PROTOCOL_VERSION,
+                        result_schema_version=_RESULT_SCHEMA_VERSION,
+                        step_type=_DISPATCH_STEP_TYPE,
+                        step_id=self._build_dispatch_step_id(item.item_index),
+                        request_idempotency_key=self._build_start_idempotency_key(job.id, item.id),
+                        now=now,
+                    )
+                except ServerWorkspaceBusyError as error:
+                    item.status = JobItemStatus.READY
+                    item.error_summary = str(error)
+                    self.job_event_repository.append(
+                        job_id=job.id,
+                        user_id=user_id,
+                        event_type="job.queued",
+                        payload={
+                            "status": JobStatus.QUEUED.value,
+                            "triggered_by": command.triggered_by,
+                            "reason_code": _QUEUED_REASON_SERVER_WORKSPACE_BUSY,
+                            "reason_message": str(error),
+                        },
+                        job_item_id=item.id,
+                    )
+                    continue
                 if execution is None:
                     continue
                 has_registered_workflow = self.execution_orchestrator_service.has_registered_workflow(
@@ -196,6 +215,8 @@ class JobApplicationService:
             return
         if job.pending_item_count > 0:
             job.status = JobStatus.QUEUED
+            job.result_summary = ""
+            job.error_summary = JobApplicationService._pick_first_non_empty(item.error_summary for item in job.items)
             return
         if deferred_item_count > 0:
             job.status = JobStatus.DEFERRED
@@ -224,6 +245,8 @@ class JobApplicationService:
             job.error_summary = JobApplicationService._pick_first_non_empty(item.error_summary for item in job.items)
             return
         job.status = JobStatus.QUEUED
+        job.result_summary = ""
+        job.error_summary = JobApplicationService._pick_first_non_empty(item.error_summary for item in job.items)
 
     @staticmethod
     def _pick_first_non_empty(values) -> str:
