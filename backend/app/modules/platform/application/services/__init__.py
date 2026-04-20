@@ -20,6 +20,7 @@ from .server_deploy_target_lock_service import (
     ServerDeployTargetLockHolder,
     ServerDeployTargetLockService,
 )
+from .server_queued_job_worker_service import QueueWorkerTickResult, ServerQueuedJobWorkerService
 from .server_execution_service import ServerExecutionService
 from .server_workspace_lock_service import (
     ServerWorkspaceBusyError,
@@ -53,6 +54,8 @@ __all__ = [
     "ServerDeployTargetLockHandle",
     "ServerDeployTargetLockHolder",
     "ServerDeployTargetLockService",
+    "QueueWorkerTickResult",
+    "ServerQueuedJobWorkerService",
     "ServerExecutionService",
     "ServerWorkspaceBusyError",
     "ServerWorkspaceLockHandle",

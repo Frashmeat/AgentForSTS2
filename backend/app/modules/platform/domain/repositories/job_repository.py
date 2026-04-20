@@ -41,3 +41,12 @@ class JobRepository(ABC):
         *,
         exclude_job_ids: set[int] | None = None,
     ) -> JobRecord | None: ...
+
+    @abstractmethod
+    def find_next_runnable_queued_job(
+        self,
+        now: datetime,
+        *,
+        cooldown_seconds: int = 0,
+        exclude_job_ids: set[int] | None = None,
+    ) -> JobRecord | None: ...

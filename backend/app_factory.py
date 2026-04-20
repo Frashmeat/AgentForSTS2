@@ -13,7 +13,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.composition.container import ApplicationContainer
-from app.modules.platform.application.services import ServerExecutionService
+from app.modules.platform.application.platform_runtime_builder import build_job_application_service_from_container
+from app.modules.platform.application.services import ServerExecutionService, ServerQueuedJobWorkerService
 from app.shared.infra.http_errors import install_http_error_handlers
 from app.shared.infra.config.settings import Settings
 from config import get_config
@@ -28,6 +29,8 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 AppRole = Literal["workstation", "web"]
+_QUEUE_WORKER_POLL_INTERVAL_SECONDS = 3.0
+_QUEUE_WORKER_RETRY_COOLDOWN_SECONDS = 5
 
 
 def _create_base_app(role: AppRole, config: dict) -> FastAPI:
@@ -108,6 +111,34 @@ def _bootstrap_web_execution_profiles(app: FastAPI) -> None:
         session.close()
 
 
+def _build_web_queue_worker_service(app: FastAPI) -> ServerQueuedJobWorkerService | None:
+    container = app.state.container
+    session_factory = container.resolve_optional_singleton("platform.db_session_factory")
+    if session_factory is None:
+        return None
+    return ServerQueuedJobWorkerService(
+        session_factory=session_factory,
+        job_application_service_builder=lambda session: build_job_application_service_from_container(session, container),
+        poll_interval_seconds=_QUEUE_WORKER_POLL_INTERVAL_SECONDS,
+        retry_cooldown_seconds=_QUEUE_WORKER_RETRY_COOLDOWN_SECONDS,
+    )
+
+
+def _register_web_queue_worker_lifecycle(app: FastAPI) -> None:
+    worker = _build_web_queue_worker_service(app)
+    if worker is None:
+        return
+    app.state.platform_queue_worker_service = worker
+
+    @app.on_event("startup")
+    async def _start_platform_queue_worker() -> None:
+        await worker.start()
+
+    @app.on_event("shutdown")
+    async def _stop_platform_queue_worker() -> None:
+        await worker.stop()
+
+
 def create_app(role: AppRole) -> FastAPI:
     config = get_config()
     app = _create_base_app(role, config)
@@ -117,6 +148,7 @@ def create_app(role: AppRole) -> FastAPI:
 
     if role == "web":
         _bootstrap_web_execution_profiles(app)
+        _register_web_queue_worker_lifecycle(app)
 
     if should_mount_frontend(role):
         _mount_frontend(app)

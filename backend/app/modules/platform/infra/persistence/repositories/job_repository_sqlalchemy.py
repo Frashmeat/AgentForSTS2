@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session, selectinload
 
 from app.modules.platform.contracts.job_commands import CreateJobCommand
 from app.modules.platform.domain.models.enums import JobItemStatus, JobStatus
 from app.modules.platform.domain.repositories import JobRepository
-from app.modules.platform.infra.persistence.models import JobItemRecord, JobRecord
+from app.modules.platform.infra.persistence.models import JobEventRecord, JobItemRecord, JobRecord
 
 
 class JobRepositorySqlAlchemy(JobRepository):
@@ -136,3 +136,67 @@ class JobRepositorySqlAlchemy(JobRepository):
                 if str((item.input_payload or {}).get("server_project_name", "")).strip() == normalized_project_name:
                     return job
         return None
+
+    def find_next_runnable_queued_job(
+        self,
+        now: datetime,
+        *,
+        cooldown_seconds: int = 0,
+        exclude_job_ids: set[int] | None = None,
+    ) -> JobRecord | None:
+        query = (
+            self.session.query(JobRecord)
+            .options(selectinload(JobRecord.items))
+            .filter(
+                JobRecord.selected_execution_profile_id.is_not(None),
+                JobRecord.status == JobStatus.QUEUED,
+            )
+            .order_by(JobRecord.started_at.asc(), JobRecord.id.asc())
+        )
+        if exclude_job_ids:
+            query = query.filter(JobRecord.id.notin_(exclude_job_ids))
+
+        jobs = query.all()
+        if not jobs:
+            return None
+
+        latest_queued_at_by_job_id = self._load_latest_queued_event_times([job.id for job in jobs])
+        cooldown_threshold = now - timedelta(seconds=max(int(cooldown_seconds or 0), 0))
+
+        for job in jobs:
+            if not any(item.status == JobItemStatus.READY for item in job.items):
+                continue
+            latest_queued_at = self._normalize_datetime(latest_queued_at_by_job_id.get(job.id))
+            if latest_queued_at is not None and latest_queued_at > cooldown_threshold:
+                continue
+            return job
+        return None
+
+    def _load_latest_queued_event_times(self, job_ids: list[int]) -> dict[int, datetime]:
+        if not job_ids:
+            return {}
+
+        rows = (
+            self.session.query(JobEventRecord.job_id, JobEventRecord.created_at)
+            .filter(
+                JobEventRecord.job_id.in_(job_ids),
+                JobEventRecord.event_type == "job.queued",
+            )
+            .order_by(JobEventRecord.job_id.asc(), JobEventRecord.created_at.desc(), JobEventRecord.id.desc())
+            .all()
+        )
+
+        latest_by_job_id: dict[int, datetime] = {}
+        for job_id, created_at in rows:
+            if created_at is None or job_id in latest_by_job_id:
+                continue
+            latest_by_job_id[int(job_id)] = created_at
+        return latest_by_job_id
+
+    @staticmethod
+    def _normalize_datetime(value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value
