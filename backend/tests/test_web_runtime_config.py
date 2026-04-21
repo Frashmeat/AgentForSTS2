@@ -52,6 +52,28 @@ def test_web_runtime_validation_passes_when_database_and_session_secret_are_conf
     assert settings.validate_for_role("web") == []
 
 
+def test_web_runtime_validation_accepts_auth_session_secret_env(monkeypatch):
+    monkeypatch.setenv("SPIREFORGE_AUTH_SESSION_SECRET", "env-session-secret")
+    settings = Settings.from_dict(
+        {
+            "database": {
+                "url": "sqlite+pysqlite:///:memory:",
+            }
+        }
+    )
+
+    assert settings.get_auth_session_secret() == "env-session-secret"
+    assert settings.validate_for_role("web") == []
+
+
+def test_server_credential_secret_falls_back_to_auth_session_secret_env(monkeypatch):
+    monkeypatch.setenv("SPIREFORGE_AUTH_SESSION_SECRET", "env-session-secret")
+    monkeypatch.delenv("SPIREFORGE_SERVER_CREDENTIAL_SECRET", raising=False)
+    settings = Settings.from_dict(None)
+
+    assert settings.get_server_credential_secret() == "env-session-secret"
+
+
 def test_web_runtime_container_exposes_minimal_platform_runner_singletons():
     container = ApplicationContainer.from_config(
         {

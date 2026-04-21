@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+
+import pytest
 from fastapi import FastAPI
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -110,3 +112,18 @@ def test_create_app_for_workstation_includes_only_workstation_routes_and_mounts_
     assert execution_profiles_seeded is False
     assert queue_worker_registered is False
     assert frontend_mounted is True
+
+
+def test_create_app_for_web_fails_fast_when_runtime_secret_is_missing(monkeypatch):
+    monkeypatch.setattr(
+        app_factory,
+        "get_config",
+        lambda: {
+            "database": {
+                "url": "sqlite+pysqlite:///:memory:",
+            }
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="auth.session_secret is required for web runtime"):
+        app_factory.create_app("web")
