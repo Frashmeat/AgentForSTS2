@@ -4,6 +4,7 @@
 
 .DESCRIPTION
 读取 release bundle、生成运行时配置，并按目标在本机或 Docker 中启动对应服务。
+`web` 目标会把会话密钥与服务器凭据加密密钥持久化到 release 的 `runtime/.env`，再以环境变量注入 Docker 容器。
 直接执行脚本且不传任何参数时，会默认显示本帮助而不是立即启动部署。
 
 .PARAMETER Target
@@ -337,6 +338,129 @@ function Get-FileSha256 {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
 }
 
+function ConvertTo-HashtableRecursive {
+    param([object]$Value)
+
+    if ($null -eq $Value) {
+        return $null
+    }
+
+    if ($Value -is [System.Collections.IDictionary]) {
+        $result = @{}
+        foreach ($key in $Value.Keys) {
+            $result[[string]$key] = ConvertTo-HashtableRecursive -Value $Value[$key]
+        }
+        return $result
+    }
+
+    if ($Value -is [System.Management.Automation.PSCustomObject]) {
+        $result = @{}
+        foreach ($property in $Value.PSObject.Properties) {
+            $result[$property.Name] = ConvertTo-HashtableRecursive -Value $property.Value
+        }
+        return $result
+    }
+
+    if (($Value -is [System.Collections.IEnumerable]) -and -not ($Value -is [string])) {
+        $items = @()
+        foreach ($item in $Value) {
+            $items += ,(ConvertTo-HashtableRecursive -Value $item)
+        }
+        return $items
+    }
+
+    return $Value
+}
+
+function ConvertFrom-JsonAsHashtableCompat {
+    param([Parameter(Mandatory = $true)][string]$JsonText)
+
+    $convertFromJson = Get-Command ConvertFrom-Json -ErrorAction Stop
+    if ($convertFromJson.Parameters.ContainsKey("AsHashtable")) {
+        return $JsonText | ConvertFrom-Json -AsHashtable
+    }
+
+    return ConvertTo-HashtableRecursive -Value ($JsonText | ConvertFrom-Json)
+}
+
+function Read-JsonHashtableFile {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $jsonRaw = Get-Content -LiteralPath $Path -Raw
+    $parsed = ConvertFrom-JsonAsHashtableCompat -JsonText $jsonRaw
+    if (-not $parsed) {
+        return @{}
+    }
+
+    return $parsed
+}
+
+function Get-NestedStringValue {
+    param(
+        [hashtable]$InputObject,
+        [string[]]$PathSegments
+    )
+
+    if ($null -eq $InputObject -or $null -eq $PathSegments -or $PathSegments.Count -eq 0) {
+        return ""
+    }
+
+    $current = $InputObject
+    foreach ($segment in $PathSegments) {
+        if ($current -isnot [System.Collections.IDictionary] -or -not $current.Contains($segment)) {
+            return ""
+        }
+        $current = $current[$segment]
+    }
+
+    return [string]$current
+}
+
+function New-RandomHexSecret {
+    param([int]$ByteCount = 48)
+
+    $bytes = New-Object byte[] $ByteCount
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $rng.GetBytes($bytes)
+    } finally {
+        if ($null -ne $rng) {
+            $rng.Dispose()
+        }
+    }
+
+    return ([System.BitConverter]::ToString($bytes)).Replace("-", "").ToLowerInvariant()
+}
+
+function Read-KeyValueEnvFile {
+    param([string]$Path)
+
+    $result = @{}
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) {
+        return $result
+    }
+
+    foreach ($line in Get-Content -LiteralPath $Path) {
+        $trimmed = $line.Trim()
+        if ([string]::IsNullOrWhiteSpace($trimmed) -or $trimmed.StartsWith("#")) {
+            continue
+        }
+
+        $separatorIndex = $trimmed.IndexOf("=")
+        if ($separatorIndex -lt 1) {
+            continue
+        }
+
+        $key = $trimmed.Substring(0, $separatorIndex).Trim()
+        $value = $trimmed.Substring($separatorIndex + 1)
+        if (-not [string]::IsNullOrWhiteSpace($key)) {
+            $result[$key] = $value
+        }
+    }
+
+    return $result
+}
+
 function Test-LocalBackendRuntimeCacheFresh {
     param(
         [string]$ReleaseRoot,
@@ -350,7 +474,8 @@ function Test-LocalBackendRuntimeCacheFresh {
     }
 
     try {
-        $metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json -AsHashtable
+        $metadataRaw = Get-Content -LiteralPath $metadataPath -Raw
+        $metadata = ConvertFrom-JsonAsHashtableCompat -JsonText $metadataRaw
     } catch {
         return $false
     }
@@ -1169,13 +1294,10 @@ function New-RuntimeConfig {
         [string]$DbName
     )
 
-    $config = Get-Content -LiteralPath $SourceConfigPath -Raw | ConvertFrom-Json -AsHashtable
-    if (-not $config) {
-        $config = @{}
-    }
-
+    $config = Read-JsonHashtableFile -Path $SourceConfigPath
     $config["migration"] = Ensure-Hashtable -Value $config["migration"]
     $config["database"] = Ensure-Hashtable -Value $config["database"]
+    $config["auth"] = Ensure-Hashtable -Value $config["auth"]
 
     if ($Mode -eq "web") {
         # Web 目标始终接管数据库连接，并强制打开平台 API 相关开关。
@@ -1184,6 +1306,7 @@ function New-RuntimeConfig {
         $config["database"]["pool_pre_ping"] = $true
         $config["migration"]["platform_jobs_api_enabled"] = $true
         $config["migration"]["platform_service_split_enabled"] = $true
+        $config["auth"]["session_secret"] = ""
     } else {
         # workstation 中的工作站进程不应暴露 web 平台路由。
         $config["migration"]["platform_jobs_api_enabled"] = $false
@@ -1227,7 +1350,8 @@ function Write-ComposeEnvFile {
         [string]$TargetName,
         [string]$EnvPath,
         [string]$ResolvedPostgresImage,
-        [string]$ResolvedPythonBaseImage
+        [string]$ResolvedPythonBaseImage,
+        [hashtable]$SourceConfig = @{}
     )
 
     # Compose 模板的端口、数据库和镜像选择都从 runtime/.env 注入，bundle 本身保持静态。
@@ -1248,6 +1372,26 @@ function Write-ComposeEnvFile {
             @("ATS_FRONTEND_PORT=$FrontendPort")
         }
         "web" {
+            $existingEnv = Read-KeyValueEnvFile -Path $EnvPath
+            $legacySessionSecret = (Get-NestedStringValue -InputObject $SourceConfig -PathSegments @("auth", "session_secret")).Trim()
+            $sessionSecret = [string]$existingEnv["SPIREFORGE_AUTH_SESSION_SECRET"]
+            if ([string]::IsNullOrWhiteSpace($sessionSecret)) {
+                if (-not [string]::IsNullOrWhiteSpace($legacySessionSecret)) {
+                    $sessionSecret = $legacySessionSecret
+                } else {
+                    $sessionSecret = New-RandomHexSecret
+                }
+            }
+
+            $credentialSecret = [string]$existingEnv["SPIREFORGE_SERVER_CREDENTIAL_SECRET"]
+            if ([string]::IsNullOrWhiteSpace($credentialSecret)) {
+                if (-not [string]::IsNullOrWhiteSpace($legacySessionSecret)) {
+                    $credentialSecret = $legacySessionSecret
+                } else {
+                    $credentialSecret = New-RandomHexSecret
+                }
+            }
+
             @(
                 "ATS_WEB_PORT=$WebPort"
                 "ATS_POSTGRES_HOST_PORT=$PostgresHostPort"
@@ -1256,6 +1400,8 @@ function Write-ComposeEnvFile {
                 "ATS_POSTGRES_PASSWORD=$PostgresPassword"
                 "ATS_POSTGRES_IMAGE=$ResolvedPostgresImage"
                 "ATS_PYTHON_BASE_IMAGE=$ResolvedPythonBaseImage"
+                "SPIREFORGE_AUTH_SESSION_SECRET=$sessionSecret"
+                "SPIREFORGE_SERVER_CREDENTIAL_SECRET=$credentialSecret"
             )
         }
         default {
@@ -1264,6 +1410,19 @@ function Write-ComposeEnvFile {
     }
 
     Set-Content -LiteralPath $EnvPath -Value ($lines -join [Environment]::NewLine) -Encoding UTF8
+}
+
+function Sync-ReleaseComposeTemplate {
+    param(
+        [string]$TargetName,
+        [string]$ReleaseRoot
+    )
+
+    $templatePath = Join-Path (Join-Path $PSScriptRoot "templates") ("compose.{0}.yml" -f $TargetName)
+    $releaseComposePath = Join-Path $ReleaseRoot "docker-compose.yml"
+    Assert-PathExists -Path $templatePath -Label "compose 模板"
+
+    Copy-Item -LiteralPath $templatePath -Destination $releaseComposePath -Force
 }
 
 function Invoke-DockerCompose {
@@ -1618,8 +1777,8 @@ $null = New-Item -ItemType Directory -Path $runtimeDir -Force
 
 if ($targetUsesDockerInCurrentRelease) {
     Assert-CommandExists -CommandName "docker"
+    Sync-ReleaseComposeTemplate -TargetName $Target -ReleaseRoot $effectiveReleaseRoot
     Assert-PathExists -Path $composeFile -Label "docker-compose.yml"
-    Write-ComposeEnvFile -TargetName $Target -EnvPath $envFile -ResolvedPostgresImage $resolvedPostgresImage -ResolvedPythonBaseImage $resolvedPythonBaseImage
 }
 
 $workstationServiceDir = Join-Path (Join-Path $effectiveReleaseRoot "services") "workstation"
@@ -1648,6 +1807,8 @@ if ($Target -eq "hybrid" -or $Target -eq "workstation") {
 
 if ($Target -eq "web") {
     $webSourceConfigPath = $sourceConfigPath
+    $webSourceConfig = Read-JsonHashtableFile -Path $webSourceConfigPath
+    Write-ComposeEnvFile -TargetName $Target -EnvPath $envFile -ResolvedPostgresImage $resolvedPostgresImage -ResolvedPythonBaseImage $resolvedPythonBaseImage -SourceConfig $webSourceConfig
     $webConfig = New-RuntimeConfig -SourceConfigPath $webSourceConfigPath -Mode "web" -DbUser $PostgresUser -DbPassword $PostgresPassword -DbName $PostgresDb
     Write-RuntimeConfigFile -Config $webConfig -OutputPath (Join-Path $runtimeDir "web.config.json")
 }
