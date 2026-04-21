@@ -140,6 +140,8 @@ body {
 .workspace-topbar-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 12px;
 }
 
@@ -470,7 +472,7 @@ body {
 
   .workspace-topbar-actions {
     width: 100%;
-    justify-content: space-between;
+    justify-content: flex-start;
   }
 
   .platform-page-shell {

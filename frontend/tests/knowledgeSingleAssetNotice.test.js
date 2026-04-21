@@ -6,13 +6,11 @@ function readSource(path) {
   return readFileSync(new URL(path, import.meta.url), "utf8");
 }
 
-test("single asset view exposes knowledge notice entry points", () => {
+test("single asset view no longer renders large knowledge status banner", () => {
   const source = readSource("../src/features/single-asset/view.tsx");
-  const bannerSource = readSource("../src/components/KnowledgeStatusBanner.tsx");
+  const tagSource = readSource("../src/components/KnowledgeStatusTag.tsx");
 
-  assert.match(source, /KnowledgeStatusBanner/);
-  assert.match(source, /onOpenKnowledgeGuide/);
-  assert.match(source, /onOpenSettings/);
-  assert.match(bannerSource, /当前知识库信息/);
-  assert.match(bannerSource, /状态：/);
+  assert.doesNotMatch(source, /KnowledgeStatusBanner/);
+  assert.match(tagSource, /知识库/);
+  assert.match(tagSource, /查看知识库说明/);
 });

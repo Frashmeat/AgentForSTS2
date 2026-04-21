@@ -6,19 +6,20 @@ function readSource(path: string) {
   return readFileSync(new URL(path, import.meta.url), "utf8");
 }
 
-test("workflow pages expose unified knowledge status banner entry points", () => {
+test("workspace topbar exposes compact knowledge status tag", () => {
   const batchSource = readSource("../src/features/batch-generation/view.tsx");
   const modSource = readSource("../src/features/mod-editor/view.tsx");
   const logSource = readSource("../src/features/log-analysis/view.tsx");
-  const bannerSource = readSource("../src/components/KnowledgeStatusBanner.tsx");
+  const shellSource = readSource("../src/components/workspace/WorkspaceShell.tsx");
+  const tagSource = readSource("../src/components/KnowledgeStatusTag.tsx");
 
-  assert.match(batchSource, /KnowledgeStatusBanner/);
-  assert.match(modSource, /KnowledgeStatusBanner/);
-  assert.match(logSource, /KnowledgeStatusBanner/);
-  assert.match(bannerSource, /当前知识库信息/);
-  assert.match(bannerSource, /状态说明/);
-  assert.match(bannerSource, /游戏知识库/);
-  assert.match(bannerSource, /Baselib 知识库/);
+  assert.doesNotMatch(batchSource, /KnowledgeStatusBanner/);
+  assert.doesNotMatch(modSource, /KnowledgeStatusBanner/);
+  assert.doesNotMatch(logSource, /KnowledgeStatusBanner/);
+  assert.match(shellSource, /KnowledgeStatusTag/);
+  assert.match(tagSource, /知识库/);
+  assert.match(tagSource, /游戏/);
+  assert.match(tagSource, /Baselib/);
 });
 
 test("App no longer blocks local execution with a missing-knowledge confirmation dialog", () => {
