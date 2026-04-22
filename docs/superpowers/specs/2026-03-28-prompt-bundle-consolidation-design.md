@@ -1,4 +1,4 @@
-# Prompt Bundle Consolidation Design
+﻿# Prompt Bundle Consolidation Design
 
 ## 背景与问题
 
@@ -81,7 +81,7 @@ backend/app/shared/resources/prompts/llm.md
 ## build_prompt
 ...
 
-## api_lookup_title
+## lookup_title
 ...
 ```
 
@@ -148,7 +148,7 @@ backend/app/shared/resources/prompts/llm.md
 - `backend/app/modules/planning/resources/prompts/planner_prompt.txt` -> `planning.planner_prompt`
 - `backend/approval/resources/prompts/action_prompt.txt` -> `approval.action_prompt`
 - `backend/app/modules/analyzer/resources/prompts/log_analyzer_system.txt` -> `analyzer.log_analyzer_system`
-- `backend/app/modules/codegen/resources/prompts/partials/api_lookup/title.txt` -> `codegen.api_lookup_title`
+- `backend/app/modules/codegen/resources/prompts/partials/api_lookup/title.txt` -> `codegen.lookup_title`
 - `backend/app/modules/image/resources/prompts/guide_flux2_rules.txt` -> `image.guide_flux2_rules`
 
 映射的职责边界也需要明确：

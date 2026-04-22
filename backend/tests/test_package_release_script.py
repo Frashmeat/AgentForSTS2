@@ -267,7 +267,7 @@ def test_package_release_seeds_runtime_knowledge_directory(tmp_path: Path):
     (resources_dir / "potion.md").write_text("potion\n", encoding="utf-8")
     (resources_dir / "character.md").write_text("character\n", encoding="utf-8")
     (resources_dir / "custom_code.md").write_text("custom\n", encoding="utf-8")
-    (resources_dir / "planner_hints.md").write_text("planner\n", encoding="utf-8")
+    (resources_dir / "planner_guidance.md").write_text("planner\n", encoding="utf-8")
 
     frontend_dist = temp_repo / "frontend" / "dist"
     frontend_dist.mkdir(parents=True, exist_ok=True)

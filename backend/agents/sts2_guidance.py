@@ -1,7 +1,7 @@
 """
-STS2 Mod Development Knowledge Base
-------------------------------------
-Based on actual working examples and local documentation.
+STS2 Mod Development Guidance
+-----------------------------
+Based on actual working examples and local guidance resources.
 Used by Code Agent and Planner to avoid looking up basics from scratch.
 
 Sources:
@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from app.modules.knowledge.infra import knowledge_runtime
-from app.modules.knowledge.infra.sts2_docs_source import Sts2DocsKnowledgeSource
+from app.modules.knowledge.infra.sts2_guidance_source import Sts2GuidanceKnowledgeSource
 
 _RESOURCE_DIR = knowledge_runtime.RESOURCE_KNOWLEDGE_DIR
 
@@ -41,14 +41,14 @@ def _load_resource_text(file_name: str) -> str:
     return (_RESOURCE_DIR / file_name).read_text(encoding="utf-8").strip() + "\n"
 
 
-def _get_docs_for_type_raw(asset_type: str) -> str:
+def _get_guidance_for_asset_type_raw(asset_type: str) -> str:
     """
-    Return the combined knowledge base for a specific asset type.
-    Includes: common build/structure docs + type-specific API snippet.
+    Return the combined guidance bundle for a specific asset type.
+    Includes: common build/structure guidance + type-specific API snippets.
     Does NOT include the full decompiled reference (too large for prompt injection).
     """
-    common_docs = _load_resource_text("common.md")
-    type_docs_map = {
+    common_guidance = _load_resource_text("common.md")
+    type_guidance_map = {
         "card": _load_resource_text("card.md"),
         "card_fullscreen": _load_resource_text("card.md"),
         "relic": _load_resource_text("relic.md"),
@@ -57,31 +57,31 @@ def _get_docs_for_type_raw(asset_type: str) -> str:
         "character": _load_resource_text("character.md"),
         "custom_code": _load_resource_text("custom_code.md") + "\n" + _load_resource_text("potion.md") + "\n" + _load_resource_text("character.md"),
     }
-    return common_docs + type_docs_map.get(asset_type, "")
+    return common_guidance + type_guidance_map.get(asset_type, "")
 
 
-def _get_planner_api_hints_raw() -> str:
-    """Return the compact planner hints from the resource bundle."""
-    return _load_resource_text("planner_hints.md")
+def _get_planner_guidance_raw() -> str:
+    """Return the compact planner guidance from the resource bundle."""
+    return _load_resource_text("planner_guidance.md")
 
 
-_KNOWLEDGE_SOURCE = Sts2DocsKnowledgeSource(
-    docs_for_type=_get_docs_for_type_raw,
-    planner_hints=_get_planner_api_hints_raw,
+_GUIDANCE_SOURCE = Sts2GuidanceKnowledgeSource(
+    guidance_for_asset_type=_get_guidance_for_asset_type_raw,
+    planner_guidance=_get_planner_guidance_raw,
 )
 
 
-def get_docs_for_type(asset_type: str) -> str:
-    return _KNOWLEDGE_SOURCE.load_context("asset", asset_type=asset_type)
+def get_guidance_for_asset_type(asset_type: str) -> str:
+    return _GUIDANCE_SOURCE.load_context("asset", asset_type=asset_type)
 
 
-def get_planner_api_hints() -> str:
-    return _KNOWLEDGE_SOURCE.load_context("planner")
+def get_planner_guidance() -> str:
+    return _GUIDANCE_SOURCE.load_context("planner")
 
 
 @lru_cache(maxsize=1)
-def get_full_docs_bundle() -> str:
-    """Return the aggregated runtime knowledge bundle lazily."""
+def get_full_guidance_bundle() -> str:
+    """Return the aggregated runtime guidance bundle lazily."""
     return (
         _load_resource_text("common.md")
         + _load_resource_text("card.md")
