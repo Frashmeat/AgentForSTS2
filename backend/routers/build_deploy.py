@@ -90,6 +90,8 @@ async def ws_build_deploy(ws: WebSocket):
         mod_name = project_root.name
         deployed_to: str | None = None
         file_names: list[str] = []
+        last_successful_deploy: dict[str, object] | None = None
+        deploy_recovery_context: dict[str, object] | None = None
 
         if sts2_mods and sts2_mods.exists():
             target_dir = sts2_mods / mod_name
@@ -102,11 +104,21 @@ async def ws_build_deploy(ws: WebSocket):
                     source_workspace_root=str(project_root),
                 )
             except ServerDeployTargetBusyError as error:
+                registration = _DEPLOY_REGISTRY_SERVICE.read_registration(target_dir)
+                error.last_successful_deploy = _DEPLOY_REGISTRY_SERVICE.build_registration_payload(registration)
+                error.recovery_context = _DEPLOY_REGISTRY_SERVICE.build_recovery_context(
+                    registration,
+                    requested_source_workspace_root=str(project_root),
+                )
                 await send_ws_error(
                     ws,
                     code="server_deploy_target_busy",
                     message=str(error),
                     detail=str(error),
+                    extra={
+                        "last_successful_deploy": error.last_successful_deploy,
+                        "recovery_context": error.recovery_context,
+                    },
                 )
                 return
             try:
@@ -127,6 +139,13 @@ async def ws_build_deploy(ws: WebSocket):
                     entrypoint="legacy.ws.build_deploy",
                     file_names=list(deployed.file_names),
                 )
+                last_successful_deploy = _DEPLOY_REGISTRY_SERVICE.build_registration_payload(
+                    _DEPLOY_REGISTRY_SERVICE.read_registration(Path(deployed.deployed_to))
+                )
+                deploy_recovery_context = _DEPLOY_REGISTRY_SERVICE.build_recovery_context(
+                    _DEPLOY_REGISTRY_SERVICE.read_registration(Path(deployed.deployed_to)),
+                    requested_source_workspace_root=str(project_root),
+                )
                 await send_chunk(
                     f"\n{_TEXT_LOADER.render('runtime_workflow.build_copying_to_target', {'target_dir': target_dir}).strip()}\n"
                 )
@@ -145,6 +164,8 @@ async def ws_build_deploy(ws: WebSocket):
             "success": True,
             "deployed_to": deployed_to,
             "files": file_names,
+            "last_successful_deploy": last_successful_deploy,
+            "deploy_recovery_context": deploy_recovery_context,
         }))
 
     except Exception as e:

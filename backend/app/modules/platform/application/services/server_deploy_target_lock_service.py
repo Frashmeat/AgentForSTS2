@@ -50,6 +50,7 @@ class ServerDeployTargetBusyError(RuntimeError):
         source_workspace_root: str = "",
         current_holder: ServerDeployTargetLockHolder | None = None,
         last_successful_deploy: dict[str, object] | None = None,
+        recovery_context: dict[str, object] | None = None,
     ) -> None:
         super().__init__(message)
         self.project_name = project_name
@@ -57,6 +58,7 @@ class ServerDeployTargetBusyError(RuntimeError):
         self.source_workspace_root = source_workspace_root
         self.current_holder = current_holder
         self.last_successful_deploy = dict(last_successful_deploy or {}) or None
+        self.recovery_context = dict(recovery_context or {}) or None
 
     def to_error_payload(self) -> dict[str, object]:
         payload = {
@@ -84,6 +86,8 @@ class ServerDeployTargetBusyError(RuntimeError):
             }
         if self.last_successful_deploy is not None:
             payload["last_successful_deploy"] = dict(self.last_successful_deploy)
+        if self.recovery_context is not None:
+            payload["recovery_context"] = dict(self.recovery_context)
         return payload
 
 

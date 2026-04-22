@@ -128,6 +128,7 @@ async def execute_build_project_step(
     deployed_to: str | None = None
     deployed_files: list[str] = []
     deploy_registration_payload: dict[str, object] | None = None
+    deploy_recovery_context: dict[str, object] | None = None
     registry_service = deploy_registry_service or ServerDeployRegistryService()
     sts2_path = str(config_loader().get("sts2_path", "")).strip()
     if sts2_path:
@@ -150,6 +151,11 @@ async def execute_build_project_step(
                 except ServerDeployTargetBusyError as error:
                     registration = registry_service.read_registration(target_dir)
                     error.last_successful_deploy = registry_service.build_registration_payload(registration)
+                    error.recovery_context = registry_service.build_recovery_context(
+                        registration,
+                        requested_server_project_ref=str(request.input_payload.get("server_project_ref", "")).strip(),
+                        requested_source_workspace_root=str(project_root),
+                    )
                     raise
             deployed = deploy_latest_output_files(project_root, mods_root, project_name=project_name)
             deployed_to = deployed.deployed_to
@@ -171,6 +177,11 @@ async def execute_build_project_step(
                 deploy_registration_payload = registry_service.build_registration_payload(
                     registry_service.read_registration(Path(deployed_to))
                 )
+                deploy_recovery_context = registry_service.build_recovery_context(
+                    registry_service.read_registration(Path(deployed_to)),
+                    requested_server_project_ref=str(request.input_payload.get("server_project_ref", "")).strip(),
+                    requested_source_workspace_root=str(project_root),
+                )
         finally:
             if deploy_lock_handle is not None:
                 deploy_target_lock_service.release_write_lock(deploy_lock_handle)
@@ -184,4 +195,5 @@ async def execute_build_project_step(
         "deployed_to": deployed_to,
         "files": deployed_files,
         "last_successful_deploy": deploy_registration_payload if deployed_to else None,
+        "deploy_recovery_context": deploy_recovery_context if deployed_to else None,
     }

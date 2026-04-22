@@ -177,6 +177,7 @@ def test_build_deploy_ws_writes_deploy_registry_metadata(monkeypatch, tmp_path):
             while True:
                 payload = ws.receive_json()
                 if payload.get("event") == "done":
+                    done_payload = payload
                     break
 
     metadata = json.loads((game_root / "Mods" / "MyMod" / ".server-deploy.json").read_text(encoding="utf-8"))
@@ -190,3 +191,81 @@ def test_build_deploy_ws_writes_deploy_registry_metadata(monkeypatch, tmp_path):
     assert metadata["deployed_to"] == str(game_root / "Mods" / "MyMod")
     assert metadata["entrypoint"] == "legacy.ws.build_deploy"
     assert metadata["file_names"] == ["MyMod.dll", "MyMod.pck"]
+    assert done_payload["last_successful_deploy"]["project_name"] == "MyMod"
+    assert done_payload["last_successful_deploy"]["entrypoint"] == "legacy.ws.build_deploy"
+    assert done_payload["deploy_recovery_context"]["same_source_workspace_root"] is True
+
+
+def test_build_deploy_ws_returns_last_successful_deploy_when_target_is_busy(monkeypatch, tmp_path):
+    async def fake_build_and_fix(project_root, stream_callback=None):
+        if stream_callback is not None:
+            await stream_callback("build ok")
+        return True, ""
+
+    game_root = tmp_path / "Game"
+    target_dir = game_root / "Mods" / "MyMod"
+    target_dir.mkdir(parents=True)
+    (target_dir / ".server-deploy.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "v1",
+                "project_name": "MyMod",
+                "job_id": 0,
+                "job_item_id": 0,
+                "user_id": 0,
+                "server_project_ref": "",
+                "source_workspace_root": str(tmp_path / "old-project"),
+                "deployed_at": "2026-04-20T10:00:00+00:00",
+                "deployed_to": str(target_dir),
+                "entrypoint": "legacy.ws.build_deploy",
+                "file_names": ["MyMod.dll", "MyMod.pck"],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(build_deploy_router, "build_and_fix", fake_build_and_fix)
+    monkeypatch.setattr(
+        build_deploy_router,
+        "get_config",
+        lambda: {
+            "sts2_path": str(game_root),
+            "llm": {
+                "agent_backend": "codex",
+                "model": "gpt-5.4",
+            },
+        },
+    )
+
+    class _BusyDeployTargetLockService:
+        def acquire_write_lock(self, **kwargs):
+            raise build_deploy_router.ServerDeployTargetBusyError(
+                "server deploy target is busy",
+                project_name="MyMod",
+            )
+
+        def release_write_lock(self, handle):
+            raise AssertionError("release_write_lock should not be called when acquire fails")
+
+    monkeypatch.setattr(build_deploy_router, "_DEPLOY_TARGET_LOCK_SERVICE", _BusyDeployTargetLockService())
+
+    app = FastAPI()
+    app.include_router(build_deploy_router.router, prefix="/api")
+    project_root = tmp_path / "MyMod"
+    project_root.mkdir()
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/api/ws/build-deploy") as ws:
+            ws.send_text(json.dumps({"project_root": str(project_root)}))
+            while True:
+                payload = ws.receive_json()
+                if payload.get("event") == "error":
+                    error_payload = payload
+                    break
+
+    assert error_payload["code"] == "server_deploy_target_busy"
+    assert error_payload["last_successful_deploy"]["project_name"] == "MyMod"
+    assert error_payload["last_successful_deploy"]["entrypoint"] == "legacy.ws.build_deploy"
+    assert error_payload["recovery_context"]["same_source_workspace_root"] is False

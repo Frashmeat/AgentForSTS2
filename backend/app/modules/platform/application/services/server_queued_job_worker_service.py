@@ -6,13 +6,14 @@ import os
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 from uuid import uuid4
 
 from app.modules.platform.contracts.job_commands import StartJobCommand
 
 from .job_application_service import JobApplicationService
+from .platform_runtime_audit_service import PlatformRuntimeAuditService
 from .server_queued_job_scan_claim_service import (
     ServerQueuedJobScanClaimBusyError,
     ServerQueuedJobScanClaimHandle,
@@ -58,15 +59,19 @@ class ServerQueuedJobWorkerService:
         session_factory: SessionFactory,
         job_application_service_builder: JobApplicationServiceBuilder,
         scan_claim_service: ServerQueuedJobScanClaimService | None = None,
+        runtime_audit_service: PlatformRuntimeAuditService | None = None,
         poll_interval_seconds: float = 3.0,
         retry_cooldown_seconds: int = 5,
+        leader_retry_grace_seconds: float = 1.0,
         logger: logging.Logger | None = None,
     ) -> None:
         self.session_factory = session_factory
         self.job_application_service_builder = job_application_service_builder
         self.scan_claim_service = scan_claim_service
+        self.runtime_audit_service = runtime_audit_service
         self.poll_interval_seconds = max(float(poll_interval_seconds), 0.5)
         self.retry_cooldown_seconds = max(int(retry_cooldown_seconds), 0)
+        self.leader_retry_grace_seconds = max(float(leader_retry_grace_seconds), 0.0)
         self.logger = logger or logging.getLogger(__name__)
         self._stop_event = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
@@ -78,6 +83,7 @@ class ServerQueuedJobWorkerService:
         self._last_leader_acquired_at: str = ""
         self._last_leader_lost_at: str = ""
         self._last_observed_leader_owner_id: str = ""
+        self._next_leader_retry_not_before: str = ""
         self._recent_leader_events: deque[QueueWorkerLeaderEvent] = deque(maxlen=_MAX_RECENT_LEADER_EVENTS)
 
     async def start(self) -> None:
@@ -108,6 +114,10 @@ class ServerQueuedJobWorkerService:
 
     def run_once(self) -> QueueWorkerTickResult:
         if self.scan_claim_service is not None:
+            now = datetime.now(UTC)
+            retry_not_before = self._parse_datetime(self._next_leader_retry_not_before)
+            if retry_not_before is not None and now < retry_not_before:
+                return self._remember_tick(QueueWorkerTickResult(reason="leader_retry_backoff"))
             try:
                 previous_owner = self._leader_claim_handle.owner_id if self._leader_claim_handle is not None else ""
                 self._leader_claim_handle = self.scan_claim_service.ensure_leadership(
@@ -123,6 +133,7 @@ class ServerQueuedJobWorkerService:
                         leader_epoch=holder.leader_epoch,
                         detail="queue worker became leader",
                     )
+                self._next_leader_retry_not_before = ""
                 self._last_observed_leader_owner_id = self._leader_owner_id
             except ServerQueuedJobScanClaimBusyError:
                 observed = self.scan_claim_service.get_current_leader() if self.scan_claim_service is not None else None
@@ -141,6 +152,17 @@ class ServerQueuedJobWorkerService:
                         leader_epoch=observed.leader_epoch if observed is not None else None,
                         detail="another worker currently holds leader lease",
                     )
+                if observed is not None:
+                    retry_at = self._parse_datetime(observed.expires_at)
+                    if retry_at is not None:
+                        retry_at = retry_at + timedelta(seconds=self.leader_retry_grace_seconds)
+                        self._next_leader_retry_not_before = retry_at.isoformat()
+                        self._record_leader_event(
+                            event_type="leader_waiting_for_failover",
+                            owner_id=observed.owner_id,
+                            leader_epoch=observed.leader_epoch,
+                            detail=f"retry after {self._next_leader_retry_not_before}",
+                        )
                 self._last_observed_leader_owner_id = observed_owner
                 self._leader_claim_handle = None
                 return self._remember_tick(QueueWorkerTickResult(reason="not_leader"))
@@ -186,6 +208,7 @@ class ServerQueuedJobWorkerService:
         self._leader_claim_handle = None
         self._last_leader_lost_at = datetime.now(UTC).isoformat()
         self._last_observed_leader_owner_id = ""
+        self._next_leader_retry_not_before = ""
         self._record_leader_event(
             event_type="leader_released",
             leader_epoch=holder.leader_epoch,
@@ -220,6 +243,16 @@ class ServerQueuedJobWorkerService:
             event.leader_epoch,
             event.detail,
         )
+        if self.runtime_audit_service is not None:
+            self.runtime_audit_service.append_event(
+                event_type=f"runtime.queue_worker.{event.event_type}",
+                payload={
+                    "owner_id": event.owner_id,
+                    "owner_scope": self._leader_owner_scope,
+                    "leader_epoch": event.leader_epoch,
+                    "detail": event.detail,
+                },
+            )
 
     def get_runtime_status(self) -> dict[str, object]:
         current_leader = None
@@ -244,6 +277,8 @@ class ServerQueuedJobWorkerService:
             "failover_window_seconds": (
                 self.scan_claim_service.get_failover_window_seconds() if self.scan_claim_service is not None else None
             ),
+            "leader_retry_grace_seconds": self.leader_retry_grace_seconds,
+            "next_leader_retry_not_before": self._next_leader_retry_not_before,
             "last_tick_at": self._last_tick_at,
             "last_tick_reason": self._last_tick_reason,
             "last_leader_acquired_at": self._last_leader_acquired_at,
@@ -261,3 +296,16 @@ class ServerQueuedJobWorkerService:
             ],
             "running": self._task is not None and not self._task.done(),
         }
+
+    @staticmethod
+    def _parse_datetime(value: str) -> datetime | None:
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC)

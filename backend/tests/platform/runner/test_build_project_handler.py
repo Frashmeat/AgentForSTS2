@@ -148,6 +148,8 @@ def test_execute_build_project_step_can_deploy_outputs_when_server_game_path_exi
     assert result["last_successful_deploy"]["project_name"] == "DarkMod"
     assert result["last_successful_deploy"]["job_id"] == 1
     assert result["last_successful_deploy"]["entrypoint"] == "platform.build.project"
+    assert result["deploy_recovery_context"]["same_server_project_ref"] is True
+    assert result["deploy_recovery_context"]["same_source_workspace_root"] is True
 
 
 def test_execute_build_project_step_overwrites_existing_target_outputs_instead_of_reusing_old_files(tmp_path):
@@ -273,6 +275,7 @@ def test_execute_build_project_step_raises_when_server_deploy_target_is_busy(tmp
         assert error.to_error_payload()["resource_key"] == "DarkMod"
         assert error.to_error_payload()["last_successful_deploy"]["job_id"] == 99
         assert error.to_error_payload()["last_successful_deploy"]["entrypoint"] == "legacy.ws.build_deploy"
+        assert error.to_error_payload()["recovery_context"]["same_server_project_ref"] is False
     else:
         raise AssertionError("expected ServerDeployTargetBusyError when deploy target lock cannot be acquired")
 

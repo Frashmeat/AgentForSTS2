@@ -73,6 +73,22 @@ class ServerDeployRegistryService:
             payload = json.loads(metadata_path.read_text(encoding="utf-8"))
         except Exception:
             return None
+        try:
+            return ServerDeployRegistration(
+                schema_version=str(payload.get("schema_version", "v1")).strip() or "v1",
+                project_name=str(payload.get("project_name", "")).strip(),
+                job_id=int(payload.get("job_id", 0) or 0),
+                job_item_id=int(payload.get("job_item_id", 0) or 0),
+                user_id=int(payload.get("user_id", 0) or 0),
+                server_project_ref=str(payload.get("server_project_ref", "")).strip(),
+                source_workspace_root=str(payload.get("source_workspace_root", "")).strip(),
+                deployed_at=str(payload.get("deployed_at", "")).strip(),
+                deployed_to=str(payload.get("deployed_to", "")).strip(),
+                entrypoint=str(payload.get("entrypoint", "")).strip(),
+                file_names=[str(name).strip() for name in payload.get("file_names", []) if str(name).strip()],
+            )
+        except Exception:
+            return None
 
     def build_registration_payload(self, registration: ServerDeployRegistration | None) -> dict[str, object] | None:
         if registration is None:
@@ -90,19 +106,30 @@ class ServerDeployRegistryService:
             "entrypoint": registration.entrypoint,
             "file_names": list(registration.file_names),
         }
-        try:
-            return ServerDeployRegistration(
-                schema_version=str(payload.get("schema_version", "v1")).strip() or "v1",
-                project_name=str(payload.get("project_name", "")).strip(),
-                job_id=int(payload.get("job_id", 0) or 0),
-                job_item_id=int(payload.get("job_item_id", 0) or 0),
-                user_id=int(payload.get("user_id", 0) or 0),
-                server_project_ref=str(payload.get("server_project_ref", "")).strip(),
-                source_workspace_root=str(payload.get("source_workspace_root", "")).strip(),
-                deployed_at=str(payload.get("deployed_at", "")).strip(),
-                deployed_to=str(payload.get("deployed_to", "")).strip(),
-                entrypoint=str(payload.get("entrypoint", "")).strip(),
-                file_names=[str(name).strip() for name in payload.get("file_names", []) if str(name).strip()],
-            )
-        except Exception:
+
+    def build_recovery_context(
+        self,
+        registration: ServerDeployRegistration | None,
+        *,
+        requested_server_project_ref: str = "",
+        requested_source_workspace_root: str = "",
+    ) -> dict[str, object] | None:
+        if registration is None:
             return None
+        normalized_requested_ref = str(requested_server_project_ref).strip()
+        normalized_requested_root = str(requested_source_workspace_root).strip()
+        return {
+            "has_last_successful_deploy": True,
+            "same_server_project_ref": bool(
+                normalized_requested_ref and normalized_requested_ref == registration.server_project_ref
+            ),
+            "same_source_workspace_root": bool(
+                normalized_requested_root and normalized_requested_root == registration.source_workspace_root
+            ),
+            "requested_server_project_ref": normalized_requested_ref,
+            "requested_source_workspace_root": normalized_requested_root,
+            "last_successful_server_project_ref": registration.server_project_ref,
+            "last_successful_source_workspace_root": registration.source_workspace_root,
+            "last_successful_deployed_at": registration.deployed_at,
+            "last_successful_entrypoint": registration.entrypoint,
+        }

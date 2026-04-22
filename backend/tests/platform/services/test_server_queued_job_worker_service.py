@@ -660,6 +660,7 @@ def test_server_queued_job_worker_service_records_observed_other_leader_event(db
     assert status["is_leader"] is False
     assert status["recent_leader_events"][-1]["event_type"] == "leader_observed_other"
     assert status["recent_leader_events"][-1]["owner_id"] == "external-web"
+    assert status["next_leader_retry_not_before"]
 
     scan_claim_service.release_leadership(existing_claim)
 
@@ -696,3 +697,42 @@ def test_server_queued_job_worker_service_records_leader_released_event(db_sessi
     assert status["is_leader"] is False
     assert status["last_leader_lost_at"]
     assert status["recent_leader_events"][-1]["event_type"] == "leader_released"
+
+
+def test_server_queued_job_worker_service_uses_backoff_before_retrying_leadership(db_session, tmp_path):
+    profile, cipher = _seed_profile_and_quota(db_session, user_ids=[1001], secret="worker-test-secret")
+    session_factory, builder = _build_job_service_builder(
+        db_session,
+        workflow_runner=_SucceededWorkerRunner(),
+        workflow_registry=_SupportedWorkerRegistry(),
+        cipher=cipher,
+    )
+    _create_queued_job(
+        db_session,
+        user_id=1001,
+        profile_id=profile.id,
+        job_type="single_generate",
+        item_type="card",
+        input_payload={"item_name": "DarkBlade"},
+        queued_at=datetime.now(UTC) - timedelta(seconds=30),
+    )
+    scan_claim_service = ServerQueuedJobScanClaimService(storage_root=tmp_path / "scan-claims", lease_seconds=30)
+    existing_claim = scan_claim_service.ensure_leadership(owner_id="external-web", owner_scope="external-web")
+    worker = ServerQueuedJobWorkerService(
+        session_factory=session_factory,
+        job_application_service_builder=builder,
+        scan_claim_service=scan_claim_service,
+        retry_cooldown_seconds=0,
+        leader_retry_grace_seconds=1,
+    )
+
+    first = worker.run_once()
+    second = worker.run_once()
+    status = worker.get_runtime_status()
+
+    assert first.reason == "not_leader"
+    assert second.reason == "leader_retry_backoff"
+    assert status["next_leader_retry_not_before"]
+    assert status["recent_leader_events"][-1]["event_type"] == "leader_waiting_for_failover"
+
+    scan_claim_service.release_leadership(existing_claim)

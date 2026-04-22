@@ -68,6 +68,8 @@ class BuildDeployFacadeService:
             mod_name = project_root.name
             deployed_to: str | None = None
             file_names: list[str] = []
+            last_successful_deploy: dict[str, object] | None = None
+            deploy_recovery_context: dict[str, object] | None = None
 
             if sts2_mods and sts2_mods.exists():
                 target_dir = sts2_mods / mod_name
@@ -80,7 +82,22 @@ class BuildDeployFacadeService:
                         source_workspace_root=str(project_root),
                     )
                 except ServerDeployTargetBusyError as error:
-                    await send_ws_error(ws, code="server_deploy_target_busy", message=str(error), detail=str(error))
+                    registration = self._deploy_registry_service.read_registration(target_dir)
+                    error.last_successful_deploy = self._deploy_registry_service.build_registration_payload(registration)
+                    error.recovery_context = self._deploy_registry_service.build_recovery_context(
+                        registration,
+                        requested_source_workspace_root=str(project_root),
+                    )
+                    await send_ws_error(
+                        ws,
+                        code="server_deploy_target_busy",
+                        message=str(error),
+                        detail=str(error),
+                        extra={
+                            "last_successful_deploy": error.last_successful_deploy,
+                            "recovery_context": error.recovery_context,
+                        },
+                    )
                     return
                 try:
                     deployed = deploy_latest_output_files(project_root, sts2_mods, project_name=mod_name)
@@ -98,6 +115,13 @@ class BuildDeployFacadeService:
                         deployed_to=deployed.deployed_to,
                         entrypoint="legacy.ws.build_deploy",
                         file_names=list(deployed.file_names),
+                    )
+                    last_successful_deploy = self._deploy_registry_service.build_registration_payload(
+                        self._deploy_registry_service.read_registration(Path(deployed.deployed_to))
+                    )
+                    deploy_recovery_context = self._deploy_registry_service.build_recovery_context(
+                        self._deploy_registry_service.read_registration(Path(deployed.deployed_to)),
+                        requested_source_workspace_root=str(project_root),
                     )
                     await send_chunk(
                         f"\n{self._text_loader.render('runtime_workflow.build_copying_to_target', {'target_dir': target_dir}).strip()}\n"
@@ -119,6 +143,8 @@ class BuildDeployFacadeService:
                 "success": True,
                 "deployed_to": deployed_to,
                 "files": file_names,
+                "last_successful_deploy": last_successful_deploy,
+                "deploy_recovery_context": deploy_recovery_context,
             }))
         except Exception as exc:
             try:
