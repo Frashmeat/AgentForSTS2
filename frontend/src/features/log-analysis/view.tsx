@@ -1,7 +1,6 @@
 import { useRef, useState } from "react";
 import { Bug, Loader2, RotateCcw } from "lucide-react";
 
-import { KnowledgeStatusBanner } from "../../components/KnowledgeStatusBanner.tsx";
 import { StageStatus } from "../../components/StageStatus";
 import { AgentLog } from "../../components/AgentLog";
 import { LogAnalysisSocket } from "../../lib/log_analysis_ws";
@@ -18,20 +17,11 @@ type Stage = "input" | "analyzing" | "done" | "error";
 
 export function LogAnalysisFeatureView({
   onRequestExecution,
-  knowledgeStatus,
-  onOpenKnowledgeGuide,
-  onOpenSettings,
 }: WorkspaceFeatureAdapterProps) {
   const {
     onRequestExecution: resolvedRequestExecution,
-    knowledgeStatus: resolvedKnowledgeStatus,
-    onOpenKnowledgeGuide: resolvedOpenKnowledgeGuide,
-    onOpenSettings: resolvedOpenSettings,
   } = useResolvedWorkspaceFeatureProps({
     onRequestExecution,
-    knowledgeStatus,
-    onOpenKnowledgeGuide,
-    onOpenSettings,
   });
   const [stage, setStage] = useState<Stage>("input");
   const [context, setContext] = useState("");
@@ -111,11 +101,6 @@ export function LogAnalysisFeatureView({
 
   return (
     <div className="space-y-5">
-      <KnowledgeStatusBanner
-        status={resolvedKnowledgeStatus}
-        onOpenGuide={resolvedOpenKnowledgeGuide}
-        onOpenSettings={resolvedOpenSettings}
-      />
       <div className="workspace-surface rounded-2xl p-5 space-y-4">
         <div className="flex items-center gap-2">
           <Bug size={16} className="text-[var(--workspace-accent)]" />

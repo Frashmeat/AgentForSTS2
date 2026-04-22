@@ -118,7 +118,7 @@ function Show-Help {
     Write-Host "  powershell -File .\tools\tools.ps1 split start -DryRun"
     Write-Host "  powershell -File .\tools\tools.ps1 latest package hybrid"
     Write-Host "  powershell -File .\tools\tools.ps1 latest package workstation"
-    Write-Host "  powershell -File .\tools\tools.ps1 latest deploy hybrid"
+    Write-Host "  powershell -File .\tools\tools.ps1 latest deploy hybrid -DeployLocalWeb"
     Write-Host "  powershell -File .\tools\tools.ps1 latest deploy hybrid -WebBaseUrl https://your-web-api.example.com"
     Write-Host ""
 }
@@ -257,12 +257,12 @@ function Get-SplitStartCustomArgs {
 }
 
 function Get-LatestDeployHybridArgs {
-    $webBaseUrl = Read-Host "Web API 基地址（直接回车使用默认 http://127.0.0.1:7870）"
+    $webBaseUrl = Read-Host "Web API 基地址（留空将使用 -DeployLocalWeb 联动本机 web-backend）"
     if (-not [string]::IsNullOrWhiteSpace($webBaseUrl)) {
         return @("-WebBaseUrl", $webBaseUrl.Trim())
     }
 
-    return @()
+    return @("-DeployLocalWeb")
 }
 
 function Resolve-ProfileArgs {
@@ -406,7 +406,7 @@ function Get-MenuGroups {
                     (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 deploy-docker.ps1 参数说明" -Args @("-Help"))
                 ))
                 (New-MenuCommand -Key "latest-deploy-hybrid" -Label "部署 hybrid release" -Description "部署正式推荐的 frontend + workstation 用户侧 bundle" -ScriptPath (Join-Path $toolsRoot "latest\deploy-docker.ps1") -InvocationName "latest deploy hybrid" -DefaultArgs @("hybrid") -Profiles @(
-                    (New-MenuProfile -Key "default" -Label "配置 Web API 后部署" -Description "可留空使用本机 web-backend，也可填写远端地址" -PromptHandler "LatestDeployHybrid")
+                    (New-MenuProfile -Key "default" -Label "配置 Web API 后部署" -Description "填写 WebBaseUrl 或留空后显式使用 -DeployLocalWeb" -PromptHandler "LatestDeployHybrid")
                     (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 deploy-docker.ps1 参数说明" -Args @("-Help"))
                 ))
                 (New-MenuCommand -Key "latest-deploy-frontend" -Label "部署 frontend release" -Description "在本机启动前端静态站" -ScriptPath (Join-Path $toolsRoot "latest\deploy-docker.ps1") -InvocationName "latest deploy frontend" -DefaultArgs @("frontend") -Profiles @(

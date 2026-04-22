@@ -63,7 +63,7 @@ def _session_cookie_name(request: Request) -> str:
 
 
 def _session_secret(request: Request) -> str:
-    configured = str(_settings(request).auth.get("session_secret", "")).strip()
+    configured = _settings(request).get_auth_session_secret()
     if not configured:
         raise HTTPException(status_code=500, detail="auth session secret is not configured")
     return configured

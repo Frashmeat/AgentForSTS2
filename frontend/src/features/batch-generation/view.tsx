@@ -10,7 +10,6 @@ import { BatchSocket, PlanItem, ModPlan } from "../../lib/batch_ws";
 import { AgentLog } from "../../components/AgentLog";
 import { StageStatus } from "../../components/StageStatus";
 import { BuildDeploy } from "../../components/BuildDeploy";
-import { KnowledgeStatusBanner } from "../../components/KnowledgeStatusBanner.tsx";
 import { ProjectRootField } from "../../components/ProjectRootField";
 import { cn } from "../../lib/utils";
 import { loadAppConfig } from "../../shared/api/config";
@@ -867,11 +866,6 @@ function BatchModePage({
 
   return (
     <div className="space-y-5">
-      <KnowledgeStatusBanner
-        status={knowledgeStatus}
-        onOpenGuide={onOpenKnowledgeGuide}
-        onOpenSettings={onOpenSettings}
-      />
       {/* 输入阶段 */}
       {stage === "input" && (
         <div className="workspace-surface rounded-2xl p-5 space-y-4">

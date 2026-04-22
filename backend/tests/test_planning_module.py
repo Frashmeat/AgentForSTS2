@@ -1,4 +1,4 @@
-import sys
+﻿import sys
 import types
 import inspect
 from pathlib import Path
@@ -13,6 +13,7 @@ sys.modules.setdefault(
 
 from app.modules.planning.application.services import PlanningService
 from app.modules.planning.domain.models import PlanItem
+from app.shared.contracts.knowledge import KnowledgePacket, KnowledgeQuery
 from app.shared.prompting import PromptLoader
 
 _PROMPT_LOADER_SUPPORTED = "prompt_loader" in inspect.signature(PlanningService).parameters
@@ -22,15 +23,44 @@ class FakeKnowledgeSource:
     def load_context(self, context_type: str, asset_type: str | None = None) -> str:
         if context_type == "planner":
             return "OnPlay PowerModel ShouldReceiveCombatHooks"
-        return f"docs:{asset_type or ''}"
+        return f"guidance:{asset_type or ''}"
 
 
-def _build_service(knowledge_source=None, prompt_loader=None) -> PlanningService:
+class FakeKnowledgeResolver:
+    def resolve(self, query: KnowledgeQuery) -> KnowledgePacket:
+        return KnowledgePacket(
+            domain=query.domain,
+            scenario=query.scenario,
+            summary="planner-summary",
+        )
+
+
+class FakePromptContextAssembler:
+    def assemble(self, packet: KnowledgePacket) -> dict[str, str]:
+        return {
+            "facts": "FACTS",
+            "guidance": "GUIDANCE",
+            "lookup": "LOOKUP",
+            "knowledge_warnings": "WARNINGS",
+            "summary": packet.summary,
+        }
+
+
+def _build_service(
+    knowledge_source=None,
+    prompt_loader=None,
+    knowledge_resolver=None,
+    prompt_context_assembler=None,
+) -> PlanningService:
     kwargs = {}
     if knowledge_source is not None:
         kwargs["knowledge_source"] = knowledge_source
     if _PROMPT_LOADER_SUPPORTED and prompt_loader is not None:
         kwargs["prompt_loader"] = prompt_loader
+    if knowledge_resolver is not None:
+        kwargs["knowledge_resolver"] = knowledge_resolver
+    if prompt_context_assembler is not None:
+        kwargs["prompt_context_assembler"] = prompt_context_assembler
     return PlanningService(**kwargs)
 
 
@@ -55,8 +85,40 @@ def test_planning_service_uses_knowledge_source_for_prompt():
 
     prompt = service.build_planner_prompt("make a burning card")
 
+    assert "### Planner Guidance" in prompt
     assert "OnPlay" in prompt
     assert "make a burning card" in prompt
+
+
+def test_planning_service_falls_back_to_legacy_planner_guidance_when_resolver_missing():
+    service = _build_service(knowledge_source=FakeKnowledgeSource())
+
+    prompt = service.build_planner_prompt("keep legacy planner guidance")
+
+    assert "Structured planner fact calibration is unavailable in this legacy fallback path." in prompt
+    assert "OnPlay PowerModel ShouldReceiveCombatHooks" in prompt
+    assert "Legacy planner fallback is active." in prompt
+
+
+def test_planning_service_prefers_resolver_when_available():
+    class GuardKnowledgeSource:
+        def load_context(self, context_type: str, asset_type: str | None = None) -> str:
+            raise AssertionError("legacy planner guidance should not be used when resolver is available")
+
+    service = _build_service(
+        knowledge_source=GuardKnowledgeSource(),
+        knowledge_resolver=FakeKnowledgeResolver(),
+        prompt_context_assembler=FakePromptContextAssembler(),
+    )
+
+    prompt = service.build_planner_prompt("plan a calibrated burn package")
+
+    assert "### Planner Guidance" in prompt
+    assert "GUIDANCE" in prompt
+    assert "### Code Facts Check" in prompt
+    assert "FACTS" in prompt
+    assert "### Further Lookup" in prompt
+    assert "LOOKUP" in prompt
 
 
 def test_planning_prompt_template_exists_for_real_loader():
@@ -64,7 +126,10 @@ def test_planning_prompt_template_exists_for_real_loader():
 
     template = loader.load("runtime_agent.planning_planner_prompt")
 
-    assert "{{ api_hints }}" in template
+    assert "{{ guidance }}" in template
+    assert "{{ facts }}" in template
+    assert "{{ lookup }}" in template
+    assert "{{ knowledge_warnings }}" in template
     assert "{{ requirements }}" in template
     assert '"implementation_notes"' in template
     assert '"depends_on"' in template
@@ -88,8 +153,43 @@ def test_planning_service_build_planner_prompt_uses_prompt_loader():
     assert len(loader.calls) == 1
     template_name, variables, fallback_template = loader.calls[0]
     assert template_name == "runtime_agent.planning_planner_prompt"
-    assert variables["api_hints"] == "OnPlay PowerModel ShouldReceiveCombatHooks"
+    assert set(variables) == {"guidance", "facts", "lookup", "knowledge_warnings", "requirements"}
+    assert "Structured planner fact calibration is unavailable" in variables["facts"]
+    assert variables["guidance"] == "OnPlay PowerModel ShouldReceiveCombatHooks"
+    assert "runtime/knowledge/game/" in variables["lookup"]
+    assert "Legacy planner fallback is active." in variables["knowledge_warnings"]
     assert variables["requirements"] == "make a burning card"
+    assert fallback_template == ""
+
+
+def test_planning_service_build_planner_prompt_uses_resolver_context_when_available():
+    class FakePromptLoader:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object], str]] = []
+
+        def render(self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None) -> str:
+            self.calls.append((template_name, variables, fallback_template or ""))
+            return "rendered-planner-prompt"
+
+    loader = FakePromptLoader()
+    service = _build_service(
+        knowledge_source=FakeKnowledgeSource(),
+        prompt_loader=loader,
+        knowledge_resolver=FakeKnowledgeResolver(),
+        prompt_context_assembler=FakePromptContextAssembler(),
+    )
+
+    prompt = service.build_planner_prompt("make a calibrated burn card")
+
+    assert prompt == "rendered-planner-prompt"
+    template_name, variables, fallback_template = loader.calls[0]
+    assert template_name == "runtime_agent.planning_planner_prompt"
+    assert set(variables) == {"guidance", "facts", "lookup", "knowledge_warnings", "requirements"}
+    assert variables["guidance"] == "GUIDANCE"
+    assert variables["facts"] == "FACTS"
+    assert variables["lookup"] == "LOOKUP"
+    assert variables["knowledge_warnings"] == "WARNINGS"
+    assert variables["requirements"] == "make a calibrated burn card"
     assert fallback_template == ""
 
 

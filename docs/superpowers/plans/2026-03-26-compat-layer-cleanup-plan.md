@@ -1,4 +1,4 @@
-# Compatibility Layer Cleanup Implementation Plan
+﻿# Compatibility Layer Cleanup Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -300,7 +300,7 @@ Expected: PASS
 
 - [ ] **Step 1: 搜索 `backend/agents/planner.py` 与 `backend/agents/code_agent.py` 的剩余引用**
 
-Run: `rg -n "agents\\.planner|agents\\.code_agent|from agents import sts2_docs" .\backend`
+Run: `rg -n "agents\\.planner|agents\\.code_agent|from agents import sts2_guidance" .\backend`
 
 Expected: 只剩测试或明确待迁移点。
 

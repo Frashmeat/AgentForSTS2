@@ -1,4 +1,4 @@
-# Prompt Bundle Consolidation 进度说明
+﻿# Prompt Bundle Consolidation 进度说明
 
 更新时间：2026-03-30
 
@@ -85,7 +85,7 @@
 - `test_mod_analyzer.py`
 - `test_log_analyzer.py`
 - `test_codegen_module.py`
-- `test_code_agent_api_lookup.py`
+- `test_code_agent_lookup.py`
 - `test_image_prompt_adapter.py`
 
 最近一次聚合验证结果：`98 passed`
@@ -93,7 +93,7 @@
 本轮收尾阶段补充验证结果：
 
 - `test_codegen_module.py`
-- `test_code_agent_api_lookup.py`
+- `test_code_agent_lookup.py`
 - `test_image_prompt_adapter.py`
 
 定点验证结果：`31 passed in 0.25s`

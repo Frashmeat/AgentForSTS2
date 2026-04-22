@@ -25,6 +25,8 @@ services:
     restart: unless-stopped
     environment:
       SPIREFORGE_CONFIG_PATH: /app/config.json
+      SPIREFORGE_AUTH_SESSION_SECRET: ${SPIREFORGE_AUTH_SESSION_SECRET}
+      SPIREFORGE_SERVER_CREDENTIAL_SECRET: ${SPIREFORGE_SERVER_CREDENTIAL_SECRET}
     depends_on:
       postgres:
         condition: service_healthy

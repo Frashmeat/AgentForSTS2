@@ -2,6 +2,8 @@ import type { ReactNode } from "react";
 import { Settings, Swords, type LucideIcon } from "lucide-react";
 
 import { cn } from "../../lib/utils";
+import type { KnowledgeStatus } from "../../shared/api/knowledge.ts";
+import { KnowledgeStatusTag } from "../KnowledgeStatusTag.tsx";
 import { UserEntry } from "../UserEntry.tsx";
 
 export interface WorkspaceNavItem<T extends string = string> {
@@ -15,12 +17,16 @@ export interface WorkspaceNavItem<T extends string = string> {
 export function WorkspaceShell<T extends string>({
   activeTab,
   navItems,
+  knowledgeStatus,
+  onOpenKnowledgeGuide,
   onTabChange,
   onOpenSettings,
   children,
 }: {
   activeTab: T;
   navItems: WorkspaceNavItem<T>[];
+  knowledgeStatus: KnowledgeStatus | null;
+  onOpenKnowledgeGuide: () => void;
   onTabChange: (tab: T) => void;
   onOpenSettings: () => void;
   children: ReactNode;
@@ -63,6 +69,7 @@ export function WorkspaceShell<T extends string>({
             <p>{activeItem.description}</p>
           </div>
           <div className="workspace-topbar-actions">
+            <KnowledgeStatusTag status={knowledgeStatus} onOpenGuide={onOpenKnowledgeGuide} />
             <div className="workspace-upgrade-pill">控制台模式</div>
             <div className="workspace-user-entry">
               <UserEntry />

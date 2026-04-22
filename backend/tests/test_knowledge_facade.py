@@ -90,7 +90,7 @@ def test_baselib_source_initializes_runtime_from_seed(monkeypatch, tmp_path: Pat
     }
 
 
-def test_build_api_lookup_context_uses_facade_resolution(monkeypatch):
+def test_build_lookup_context_uses_facade_resolution(monkeypatch):
     monkeypatch.setattr(
         knowledge_facade,
         "get_game_source_info",
@@ -102,7 +102,7 @@ def test_build_api_lookup_context_uses_facade_resolution(monkeypatch):
         lambda: {"source_mode": "runtime_decompiled", "path": "I:/release/runtime/knowledge/baselib/BaseLib.decompiled.cs", "exists": True},
     )
 
-    context = knowledge_facade.build_api_lookup_context()
+    context = knowledge_facade.build_lookup_context()
 
     assert context["baselib_src_path"] == "I:/release/runtime/knowledge/baselib/BaseLib.decompiled.cs"
     assert context["game_source_mode"] == "runtime_decompiled"

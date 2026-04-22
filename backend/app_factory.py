@@ -39,12 +39,15 @@ _QUEUE_WORKER_RETRY_COOLDOWN_SECONDS = 5
 
 def _create_base_app(role: AppRole, config: dict) -> FastAPI:
     settings = Settings.from_dict(config)
+    runtime_config_errors = settings.validate_for_role(role)
+    if runtime_config_errors:
+        raise RuntimeError(f"invalid {role} runtime config: {'; '.join(runtime_config_errors)}")
     runtime_config = settings.get_runtime(role)
     app = FastAPI(title="AgentTheSpire", version="0.1.0")
     install_http_error_handlers(app)
     app.state.container = ApplicationContainer.from_config(config, runtime_role=role)
     app.state.runtime_role = role
-    app.state.runtime_config_errors = settings.validate_for_role(role)
+    app.state.runtime_config_errors = runtime_config_errors
 
     app.add_middleware(
         CORSMiddleware,

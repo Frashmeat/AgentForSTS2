@@ -1,4 +1,4 @@
-# Prompt 资源现状总览
+﻿# Prompt 资源现状总览
 
 更新时间：2026-03-30
 
@@ -112,10 +112,10 @@
 - `codegen.build_prompt`
 - `codegen.create_mod_project_prompt`
 - `codegen.package_prompt`
-- `codegen.api_lookup_title`
-- `codegen.api_lookup_baselib`
-- `codegen.api_lookup_sts2_local`
-- `codegen.api_lookup_sts2_fallback`
+- `codegen.lookup_title`
+- `codegen.lookup_baselib`
+- `codegen.lookup_sts2_local`
+- `codegen.lookup_sts2_fallback`
 
 主要调用点：
 

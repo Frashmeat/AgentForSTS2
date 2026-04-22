@@ -1,11 +1,25 @@
 ## asset_group_prompt
 You are an expert STS2 (Slay the Spire 2) mod developer using Godot 4 + C# + BaseLib (Alchyr.Sts2.BaseLib).
 
-{{ combined_docs }}
+Priority rules:
+1. Code Facts are the source of truth.
+2. If Rules And Guidance conflict with Code Facts, follow Code Facts.
+3. Use Further Lookup only for details not already covered.
+
+### Code Facts
+{{ facts }}
 
 ---
 
-{{ api_lookup }}
+### Rules And Guidance
+{{ guidance }}
+
+---
+
+### Further Lookup
+{{ lookup }}
+
+{{ knowledge_warnings }}
 
 ---
 
@@ -44,11 +58,25 @@ Write all assets before running dotnet publish — do not build after each indiv
 ## asset_prompt
 You are an expert STS2 (Slay the Spire 2) mod developer using Godot 4 + C# + BaseLib (Alchyr.Sts2.BaseLib).
 
-{{ docs }}
+Priority rules:
+1. Code Facts are the source of truth.
+2. If Rules And Guidance conflict with Code Facts, follow Code Facts.
+3. Use Further Lookup only for details not already covered.
+
+### Code Facts
+{{ facts }}
 
 ---
 
-{{ api_lookup }}
+### Rules And Guidance
+{{ guidance }}
+
+---
+
+### Further Lookup
+{{ lookup }}
+
+{{ knowledge_warnings }}
 
 ---
 
@@ -107,11 +135,25 @@ Steps:
 ## custom_code_prompt
 You are an expert STS2 (Slay the Spire 2) mod developer using Godot 4 + C# + BaseLib (Alchyr.Sts2.BaseLib).
 
-{{ docs }}
+Priority rules:
+1. Code Facts are the source of truth.
+2. If Rules And Guidance conflict with Code Facts, follow Code Facts.
+3. Use Further Lookup only for details not already covered.
+
+### Code Facts
+{{ facts }}
 
 ---
 
-{{ api_lookup }}
+### Rules And Guidance
+{{ guidance }}
+
+---
+
+### Further Lookup
+{{ lookup }}
+
+{{ knowledge_warnings }}
 
 ---
 
@@ -147,21 +189,21 @@ Build and package this STS2 mod completely:
 2. Verify the .dll and .pck output files exist in the expected output directory.
 3. Report the output file paths.
 
-## api_lookup_baselib
+## lookup_baselib
 BaseLib (Alchyr.Sts2.BaseLib) decompiled source: {{ baselib_src_path }}
 Read this file directly for CustomCardModel, CustomPotionModel, PlaceholderCharacterModel, etc.
 Do NOT curl GitHub for BaseLib during codegen — prefer the managed local decompiled cache first.
 
-## api_lookup_sts2_fallback
+## lookup_sts2_fallback
 sts2.dll decompiled source is NOT available on this machine.
 Use `ilspycmd <path_to_sts2.dll>` to look up specific classes when needed.
 Game DLL is typically at: {{ ilspy_example_dll_path }}
 
-## api_lookup_sts2_local
+## lookup_sts2_local
 Runtime knowledge directory for sts2.dll source: {{ knowledge_path }} (Read/Grep directly).
 Key subdirs: `MegaCrit.Sts2.Core.Commands\` (DamageCmd, PowerCmd, CreatureCmd…),
 `MegaCrit.Sts2.Core.Models.Cards\` (StrikeIronclad etc.), `MegaCrit.Sts2.Core.Models\`.
 Only fall back to ilspycmd if a specific class is missing from this runtime knowledge directory.
 
-## api_lookup_title
+## lookup_title
 ### API Lookup

@@ -20,6 +20,13 @@ export interface CreateAndStartPlatformFlowRequest {
   inputSummary: string;
   createdFrom: string;
   items: PlatformJobCreateItem[];
+  serverUploads?: Array<{
+    itemIndex: number;
+    fileName: string;
+    contentBase64: string;
+    mimeType?: string;
+  }>;
+  serverWorkspaceProjectName?: string;
   selectedExecutionProfileId?: number;
   selectedAgentBackend?: string;
   selectedModel?: string;

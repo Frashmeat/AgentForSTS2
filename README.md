@@ -61,7 +61,7 @@ See [TUTORIAL.md](TUTORIAL.md) for full setup and configuration guide.
 - `powershell -File .\tools\tools.ps1 start workstation`
   Starts `workstation-backend` only. This runtime serves the local workstation UI, local workflows, approvals, config, build, and deploy flows.
 - `powershell -File .\tools\tools.ps1 start web`
-  Starts `web-backend` only on `http://localhost:7870`. This runtime is for platform/auth/job/quota APIs and requires a valid `database.url` in `runtime/web.config.json` or the path pointed to by `SPIREFORGE_CONFIG_PATH`.
+  Starts `web-backend` only on `http://localhost:7870`. This runtime is for platform/auth/job/quota APIs and requires a valid `database.url` plus session secret in `runtime/web.config.json`, or the corresponding env overrides pointed to by `SPIREFORGE_CONFIG_PATH` / `SPIREFORGE_AUTH_SESSION_SECRET`.
 
 Current deployment guidance:
 
@@ -130,7 +130,7 @@ Current product behavior:
   - `检查更新`
   - `更新知识库`
   - `查看知识库说明`
-- 工作流页面顶部改为展示“当前知识库信息”，统一显示状态、来源、版本和运行时路径，不再用风险提醒弹窗阻断本地执行。
+- 工作流头部右上角展示紧凑“知识库”标签，只保留状态、游戏版本和 Baselib 版本；点击标签可查看知识库说明，不再用风险提醒弹窗阻断本地执行。
 - 发行包会直接包含可查看、可编辑的运行时知识目录；应用运行时只读取这份目录，用户修改后会直接生效。
 - `workstation` / `hybrid` 发行包也会直接包含当前实例自己的 `runtime/tools/`，用于承载 `ilspycmd` 等知识库更新工具及其完整依赖目录。
 - 运行时知识目录默认位于：
@@ -169,7 +169,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\tools.ps1 start workstation   #
 - `powershell -File .\tools\tools.ps1 split start`
   启动“独立前端 + 本地 workstation”双进程本地形态：前端静态站点由本地轻量服务托管，工作台 HTTP/WS 指向本机 `workstation-backend`，平台接口继续指向 `web-backend`。
 - `powershell -File .\tools\tools.ps1 start web`
-  仅启动 `web-backend`，监听 `http://localhost:7870`。该运行时承接平台任务、认证、配额、历史记录等 API，并要求 `runtime/web.config.json` 或 `SPIREFORGE_CONFIG_PATH` 指向的配置中存在有效的 `database.url`。
+  仅启动 `web-backend`，监听 `http://localhost:7870`。该运行时承接平台任务、认证、配额、历史记录等 API，并要求 `runtime/web.config.json` 或 `SPIREFORGE_CONFIG_PATH` 指向的配置中存在有效的 `database.url`，且会话密钥需由 `auth.session_secret` 或 `SPIREFORGE_AUTH_SESSION_SECRET` 提供。
 
 当前部署口径：
 
@@ -232,6 +232,8 @@ pwsh -NoProfile -File .\tools\latest\stop-deploy.ps1 hybrid
 - 刷新默认推导出的本机 `web release` 前，脚本会先对固定的 `agentthespire-web-release` Compose 项目执行一次 `docker compose down --remove-orphans`，避免重复执行 `hybrid` 时直接改写仍被 Docker Compose 使用的 release 目录。
 - Docker 构建默认会自动解析 `Python` 基础镜像，优先复用本机已有标签，并默认回退到 `m.daocloud.io/docker.io/library/python:3.11-slim`；如需手工指定，可传 `-PythonBaseImage`。
 - `workstation` 本地 Python 运行时会缓存到 `release/runtime/python-runtime/workstation`；`requirements.txt` 与启动用 Python 未变化时，后续部署会直接复用该缓存，不再重复安装依赖。
+- `deploy-docker.ps1 web` 现会在 `release/runtime/.env` 中持久化 `SPIREFORGE_AUTH_SESSION_SECRET` 与 `SPIREFORGE_SERVER_CREDENTIAL_SECRET`，并以环境变量注入容器；生成后的 `runtime/web.config.json` 不再保留 `auth.session_secret`。
+- 同名 `web release` 重新打包时会保留已有 `runtime/.env`；后续部署前还会把 release 内 `docker-compose.yml` 刷新为当前模板，避免沿用旧 Compose 注入方式。
 
 默认文件位置：
 

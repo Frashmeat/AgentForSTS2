@@ -101,6 +101,8 @@ export default function App() {
             <WorkspaceShell
               activeTab={activeTab}
               navItems={workspaceNavItems}
+              knowledgeStatus={knowledgeStatus}
+              onOpenKnowledgeGuide={() => setKnowledgeGuideOpen(true)}
               onTabChange={updateActiveTab}
               onOpenSettings={() => navigate(buildSettingsPath(buildWorkspacePath(activeTab)))}
             >

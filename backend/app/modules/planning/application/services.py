@@ -9,26 +9,92 @@ from app.modules.planning.application.dependency_graph import find_groups, topol
 from app.modules.planning.application.execution_bundles import ExecutionPlanPreview, build_execution_plan
 from app.modules.planning.application.plan_validation import PlanValidationResult, ReviewStrictness, validate_plan
 from app.modules.planning.domain.models import AssetItemType, ModPlan, PlanItem
-from app.shared.prompting import PromptLoader
+from app.shared.contracts.knowledge import KnowledgeQuery
+from app.shared.prompting import PromptContextAssembler, PromptLoader
 
 _NEEDS_IMAGE_TYPES: set[AssetItemType] = {"card", "card_fullscreen", "relic", "power", "character"}
 _PLANNER_PROMPT_BUNDLE_KEY = "runtime_agent.planning_planner_prompt"
 
 
 class PlanningService:
-    def __init__(self, knowledge_source=None, text_completion=None, prompt_loader: PromptLoader | None = None) -> None:
+    def __init__(
+        self,
+        knowledge_source=None,
+        text_completion=None,
+        prompt_loader: PromptLoader | None = None,
+        knowledge_resolver=None,
+        prompt_context_assembler: PromptContextAssembler | None = None,
+    ) -> None:
         self.knowledge_source = knowledge_source
         self.text_completion = text_completion or complete_text
         self.prompt_loader = prompt_loader or PromptLoader()
+        self.knowledge_resolver = knowledge_resolver
+        self.prompt_context_assembler = prompt_context_assembler or PromptContextAssembler()
+
+    @staticmethod
+    def _build_legacy_planner_knowledge(guidance_text: str) -> dict[str, str]:
+        guidance = guidance_text.strip()
+        facts = (
+            "Structured planner fact calibration is unavailable in this legacy fallback path. "
+            "Treat the planner guidance as summarized conventions and verify exact APIs against runtime knowledge before implementation."
+        )
+        lookup = (
+            "Inspect `runtime/knowledge/game/` and `runtime/knowledge/baselib/BaseLib.decompiled.cs` "
+            "when the plan depends on exact base classes, hooks, or command names."
+        )
+        warnings = (
+            "### Warnings\n"
+            "- Legacy planner fallback is active. Guidance remains primary, but exact code facts still need manual verification."
+        )
+        return {
+            "guidance": guidance,
+            "facts": facts,
+            "lookup": lookup,
+            "knowledge_warnings": warnings,
+            "summary": "legacy planner fallback",
+        }
+
+    def _build_planner_query(self, requirements: str) -> KnowledgeQuery:
+        return KnowledgeQuery(
+            scenario="planner",
+            domain="sts2",
+            requirements=requirements,
+        )
+
+    def _resolve_planner_knowledge(self, requirements: str) -> dict[str, str]:
+        if self.knowledge_resolver is None:
+            return {
+                "guidance": "",
+                "facts": "",
+                "lookup": "",
+                "knowledge_warnings": "",
+                "summary": "",
+            }
+
+        packet = self.knowledge_resolver.resolve(self._build_planner_query(requirements))
+        context = self.prompt_context_assembler.assemble(packet)
+        return {
+            "guidance": context.get("guidance", ""),
+            "facts": context.get("facts", ""),
+            "lookup": context.get("lookup", ""),
+            "knowledge_warnings": context.get("knowledge_warnings", ""),
+            "summary": context.get("summary", ""),
+        }
 
     def build_planner_prompt(self, requirements: str) -> str:
-        api_hints = ""
-        if self.knowledge_source is not None:
-            api_hints = self.knowledge_source.load_context("planner")
+        knowledge = self._resolve_planner_knowledge(requirements)
+        if not any(knowledge[key].strip() for key in ("guidance", "facts", "lookup")):
+            if self.knowledge_source is not None:
+                knowledge = self._build_legacy_planner_knowledge(self.knowledge_source.load_context("planner"))
+        elif not knowledge["guidance"] and self.knowledge_source is not None:
+            knowledge["guidance"] = self.knowledge_source.load_context("planner").strip()
         return self.prompt_loader.render(
             _PLANNER_PROMPT_BUNDLE_KEY,
             {
-                "api_hints": api_hints,
+                "guidance": knowledge["guidance"],
+                "facts": knowledge["facts"],
+                "lookup": knowledge["lookup"],
+                "knowledge_warnings": knowledge["knowledge_warnings"],
                 "requirements": requirements,
             },
         )

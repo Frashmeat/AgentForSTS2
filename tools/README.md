@@ -45,7 +45,7 @@ powershell -File .\tools\kill-local.ps1 -FrontendPort 4173 -WorkstationPort 8860
 # latest 打包 / 部署
 powershell -File .\tools\tools.ps1 latest package hybrid
 powershell -File .\tools\tools.ps1 latest package workstation
-powershell -File .\tools\tools.ps1 latest deploy hybrid
+powershell -File .\tools\tools.ps1 latest deploy hybrid -DeployLocalWeb
 powershell -File .\tools\tools.ps1 latest deploy hybrid -WebBaseUrl https://your-web-api.example.com
 powershell -File .\tools\tools.ps1 latest deploy web
 powershell -File .\tools\tools.ps1 latest installer
@@ -149,15 +149,19 @@ tools/
   按目标打包 release bundle，并可输出 zip。
   `workstation` / `hybrid` release 会同步带上 `runtime\tools\`，确保 `ilspycmd` 这类运行时工具及其 `.store` 依赖目录一并进入发布目录。
   `workstation` 相关目标在传入 `-Debug` 时只会沿用已有 `runtime\workstation.config.json`，不再从旧 `services\workstation\config.json` 迁移设置。
+  当前会保留已有 release 的 `runtime\.env`，避免 `web` 部署已生成的 secret 在重新打包同名 release 时漂移。
 - `tools\latest\deploy-docker.ps1`
   按目标部署 mixed release。
-  `web` 继续使用 Docker；`workstation` 与 `frontend` 改为本机启动；`hybrid` 会本机启动 `workstation + frontend`，默认还会联动部署本机 `web-backend`。
+  `web` 继续使用 Docker；`workstation` 与 `frontend` 改为本机启动；`hybrid` 会本机启动 `workstation + frontend`。
   未显式传入 `-ConfigPath` 时，脚本只会优先读取 release 内 `runtime\*.config.json`，再回退到服务目录内 `config.example.json`。
   默认会基于当前 release 重新 `build` 需要 Docker 的目标镜像；只有显式传入 `-ReuseImages` 时才会复用已有镜像。
-  `hybrid` / `frontend` 未显式传入 `-WebBaseUrl` 时会默认写入本机 `http://127.0.0.1:7870`；`hybrid` 此时还会联动部署本机 `web-backend`。
-  `hybrid` 默认会从当前 hybrid release 的同级目录推导本机 `web release`，并在联动部署前自动刷新该 release，确保跟随当前仓库模板；如目录不在同级，可显式传入 `-WebReleaseRoot`。
+  `web` 目标会在 `runtime\.env` 中自动生成并持久化 `SPIREFORGE_AUTH_SESSION_SECRET` 与 `SPIREFORGE_SERVER_CREDENTIAL_SECRET`，随后以环境变量注入容器；`runtime\web.config.json` 不再继续写入 `auth.session_secret`。
+  `web` 目标部署前还会把 release 内的 `docker-compose.yml` 刷新为仓库模板，避免继续沿用旧 release 遗留的 Compose 环境注入方式。
+  `frontend` 未显式传入 `-WebBaseUrl` 时会默认写入本机 `http://127.0.0.1:7870`；`hybrid` 需显式传入 `-WebBaseUrl`，或改用 `-DeployLocalWeb`。
+  `hybrid` 传入 `-DeployLocalWeb`（可配合 `-WebReleaseRoot`）时，会从当前 hybrid release 的同级目录推导本机 `web release`，并在联动部署前自动刷新该 release，确保跟随当前仓库模板；如目录不在同级，可显式传入 `-WebReleaseRoot`。
   Docker 构建默认会自动解析 `Python` 基础镜像，优先复用本机已有标签，并默认回退到 `m.daocloud.io/docker.io/library/python:3.11-slim`；如需手工指定，可传 `-PythonBaseImage`。
   若默认 `runtime\logs\*.log` 正被旧进程占用，脚本会自动回退到带时间戳后缀的新日志文件，避免本机部署直接失败。
+  `package-release.ps1` 与 `deploy-docker.ps1` 现已兼容 Windows PowerShell 5.1 与 PowerShell 7，不再依赖 `ConvertFrom-Json -AsHashtable`。
 - `tools\latest\stop-deploy.ps1`
   停止 `deploy-docker.ps1` 以本机模式拉起的 `workstation` / `frontend` 进程，并关闭对应日志窗口。
   状态文件位于 `release\runtime\local-deploy-state.json`；只关闭日志窗口并不会自动停止服务。
@@ -182,7 +186,7 @@ tools/
 | 形态 | 推荐命令 | 前端托管方 | 适合谁 |
 | --- | --- | --- | --- |
 | 工作站托管态 | `tools.ps1 start workstation` | `workstation-backend` | 单机本地创作、BYOK、本机构建部署 |
-| 正式部署目标 `hybrid` | `tools.ps1 latest package hybrid` / `tools.ps1 latest deploy hybrid` | 独立静态前端 | 用户侧正式交付，前端独立发布并接入 `workstation-backend`；默认联动本机 `web-backend`，也可显式改为远端 |
+| 正式部署目标 `hybrid` | `tools.ps1 latest package hybrid` / `tools.ps1 latest deploy hybrid` | 独立静态前端 | 用户侧正式交付，前端独立发布并接入 `workstation-backend`；需显式传 `-WebBaseUrl` 或 `-DeployLocalWeb` |
 | 本地验证形态 `split-local` | `tools.ps1 split start` | 独立静态前端 | 本地验证 `hybrid` 形态与开发联调 |
 
 拆分运行时的接口边界：
@@ -200,7 +204,7 @@ tools/
 - `tools\latest\package-release.ps1 hybrid` 会同时整理 `frontend` 与 `workstation` 两类用户侧服务，并附带 launcher。
 - `tools\latest\deploy-docker.ps1 workstation` 会在本机拉起 `workstation-backend`，并以 `runtime\workstation.config.json` 作为工作站应用配置真源。
 - `tools\latest\deploy-docker.ps1 frontend` 会在本机拉起静态前端服务，并把 `runtime-config.js` 写入 release 内的前端 `dist/`。
-- `tools\latest\deploy-docker.ps1 hybrid` 默认会联动部署本机 `web-backend`，并把前端 `web` 地址写成 `http://127.0.0.1:7870`。
+- `tools\latest\deploy-docker.ps1 hybrid -DeployLocalWeb` 会联动部署本机 `web-backend`，并把前端 `web` 地址写成 `http://127.0.0.1:7870`。
 - 默认推导出的本机 `web release` 会在 `deploy-docker.ps1 hybrid` 联动部署前自动调用 `package-release.ps1 web` 刷新，避免继续复用旧 release。
 - 刷新默认推导出的本机 `web release` 前，脚本会先对固定的 `agentthespire-web-release` Compose 项目执行一次 `docker compose down --remove-orphans`，避免重复执行 `hybrid` 时在仍被 Compose 使用的 release 目录上直接重写文件。
 - `tools\latest\deploy-docker.ps1 hybrid -WebReleaseRoot <path>` 可显式指定要联动部署的本机 `web release` 目录，避免依赖默认同级路径。

@@ -7,11 +7,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from app.modules.codegen import api as codegen_api
 
 
-def test_api_lookup_section_uses_configured_runtime_knowledge_path(monkeypatch):
+def test_lookup_section_uses_configured_runtime_knowledge_path(monkeypatch):
     runtime_knowledge_dir = "I:/fake/runtime/knowledge/game"
     monkeypatch.setattr(
         codegen_api,
-        "build_api_lookup_context",
+        "build_lookup_context",
         lambda: {
             "baselib_src_path": "I:/runtime/knowledge/baselib/BaseLib.decompiled.cs",
             "game_source_mode": "runtime_decompiled",
@@ -20,7 +20,7 @@ def test_api_lookup_section_uses_configured_runtime_knowledge_path(monkeypatch):
         },
     )
 
-    section = codegen_api._build_api_lookup_section()
+    section = codegen_api._build_lookup_section()
 
     assert "## API Lookup" in section
     assert "Do NOT curl GitHub for BaseLib" in section
@@ -30,10 +30,10 @@ def test_api_lookup_section_uses_configured_runtime_knowledge_path(monkeypatch):
     assert "Use `ilspycmd <path_to_sts2.dll>`" not in section
 
 
-def test_api_lookup_section_falls_back_to_ilspy_when_no_decompiled_source(monkeypatch):
+def test_lookup_section_falls_back_to_ilspy_when_no_decompiled_source(monkeypatch):
     monkeypatch.setattr(
         codegen_api,
-        "build_api_lookup_context",
+        "build_lookup_context",
         lambda: {
             "baselib_src_path": "I:/runtime/knowledge/baselib/BaseLib.decompiled.cs",
             "game_source_mode": "missing",
@@ -42,7 +42,7 @@ def test_api_lookup_section_falls_back_to_ilspy_when_no_decompiled_source(monkey
         },
     )
 
-    section = codegen_api._build_api_lookup_section()
+    section = codegen_api._build_lookup_section()
 
     assert "BaseLib (Alchyr.Sts2.BaseLib) decompiled source:" in section
     assert "sts2.dll decompiled source is NOT available on this machine." in section
@@ -50,10 +50,10 @@ def test_api_lookup_section_falls_back_to_ilspy_when_no_decompiled_source(monkey
     assert "Game DLL is typically at:" in section
 
 
-def test_api_lookup_section_reads_from_resource_templates(monkeypatch):
+def test_lookup_section_reads_from_resource_templates(monkeypatch):
     monkeypatch.setattr(
         codegen_api,
-        "build_api_lookup_context",
+        "build_lookup_context",
         lambda: {
             "baselib_src_path": "I:/runtime/knowledge/baselib/BaseLib.decompiled.cs",
             "game_source_mode": "runtime_decompiled",
@@ -62,28 +62,28 @@ def test_api_lookup_section_reads_from_resource_templates(monkeypatch):
         },
     )
 
-    temp_root = Path(__file__).parent / ".tmp" / f"api-lookup-{uuid.uuid4().hex}"
+    temp_root = Path(__file__).parent / ".tmp" / f"lookup-{uuid.uuid4().hex}"
     resource_root = temp_root / "prompts"
     resource_root.mkdir(parents=True)
     try:
         (resource_root / "codegen.md").write_text(
-            """## api_lookup_title
+            """## lookup_title
 Resource Title
 
-## api_lookup_baselib
+## lookup_baselib
 BaseLib from {{ baselib_src_path }}
 
-## api_lookup_sts2_local
+## lookup_sts2_local
 Local src {{ knowledge_path }}
 
-## api_lookup_sts2_fallback
+## lookup_sts2_fallback
 Fallback {{ ilspy_example_dll_path }}
 """,
             encoding="utf-8",
         )
         monkeypatch.setattr(codegen_api, "_PROMPT_LOADER", codegen_api.PromptLoader(root=resource_root))
 
-        section = codegen_api._build_api_lookup_section()
+        section = codegen_api._build_lookup_section()
 
         assert section == "Resource Title\nBaseLib from `I:/runtime/knowledge/baselib/BaseLib.decompiled.cs`\n\nLocal src `I:/fake/sts2-decompiled`"
     finally:
@@ -94,10 +94,10 @@ Fallback {{ ilspy_example_dll_path }}
                 path.rmdir()
 
 
-def test_api_lookup_section_prefers_runtime_baselib_source(monkeypatch):
+def test_lookup_section_prefers_runtime_baselib_source(monkeypatch):
     monkeypatch.setattr(
         codegen_api,
-        "build_api_lookup_context",
+        "build_lookup_context",
         lambda: {
             "baselib_src_path": "I:/runtime/knowledge/baselib/BaseLib.decompiled.cs",
             "game_source_mode": "runtime_decompiled",
@@ -106,6 +106,6 @@ def test_api_lookup_section_prefers_runtime_baselib_source(monkeypatch):
         },
     )
 
-    section = codegen_api._build_api_lookup_section()
+    section = codegen_api._build_lookup_section()
 
     assert "I:/runtime/knowledge/baselib/BaseLib.decompiled.cs" in section

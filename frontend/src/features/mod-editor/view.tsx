@@ -3,7 +3,6 @@ import { Loader2, RotateCcw, Search, Wrench } from "lucide-react";
 
 import { AgentLog } from "../../components/AgentLog";
 import { BuildDeploy } from "../../components/BuildDeploy";
-import { KnowledgeStatusBanner } from "../../components/KnowledgeStatusBanner.tsx";
 import { ProjectRootField } from "../../components/ProjectRootField";
 import { StageStatus } from "../../components/StageStatus";
 import { useDefaultProjectRoot } from "../../shared/useDefaultProjectRoot.ts";
@@ -27,20 +26,11 @@ type ModifyStage = "idle" | "running" | "done" | "error";
 
 export function ModEditorFeatureView({
   onRequestExecution,
-  knowledgeStatus,
-  onOpenKnowledgeGuide,
-  onOpenSettings,
 }: WorkspaceFeatureAdapterProps) {
   const {
     onRequestExecution: resolvedRequestExecution,
-    knowledgeStatus: resolvedKnowledgeStatus,
-    onOpenKnowledgeGuide: resolvedOpenKnowledgeGuide,
-    onOpenSettings: resolvedOpenSettings,
   } = useResolvedWorkspaceFeatureProps({
     onRequestExecution,
-    knowledgeStatus,
-    onOpenKnowledgeGuide,
-    onOpenSettings,
   });
   const [projectRoot, setProjectRoot] = useState("");
   const {
@@ -190,11 +180,6 @@ export function ModEditorFeatureView({
 
   return (
     <div className="space-y-5">
-      <KnowledgeStatusBanner
-        status={resolvedKnowledgeStatus}
-        onOpenGuide={resolvedOpenKnowledgeGuide}
-        onOpenSettings={resolvedOpenSettings}
-      />
       <div className="workspace-surface rounded-2xl p-5 space-y-4">
         <ProjectRootField
           value={projectRoot}

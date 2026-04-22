@@ -4,7 +4,6 @@ import { AlertTriangle, ChevronDown, ChevronUp, Loader2, RotateCcw } from "lucid
 import { AgentLog } from "../../components/AgentLog";
 import { ApprovalPanel } from "../../components/ApprovalPanel";
 import { BuildDeploy } from "../../components/BuildDeploy";
-import { KnowledgeStatusBanner } from "../../components/KnowledgeStatusBanner.tsx";
 import { type KnowledgeStatus } from "../../shared/api/index.ts";
 import { ProjectRootField } from "../../components/ProjectRootField";
 import { StageStatus } from "../../components/StageStatus";
@@ -153,7 +152,6 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
 
   const errorInStep2 = stage === "error" && step <= 2;
   const errorInStep3 = stage === "error" && step > 2;
-  const showKnowledgeNotice = knowledgeStatus?.status === "stale" || knowledgeStatus?.status === "missing";
   const isCustomCode = assetType === "custom_code";
   const startDisabled =
     !assetName.trim() ||
@@ -165,13 +163,6 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
     <main className="px-6 py-6 grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)] gap-5 items-start">
       <Step num={1} title="描述设计" active={step === 0} done={step > 0}>
         <div className="space-y-4">
-          {showKnowledgeNotice && (
-            <KnowledgeStatusBanner
-              status={knowledgeStatus}
-              onOpenGuide={onOpenKnowledgeGuide}
-              onOpenSettings={onOpenSettings}
-            />
-          )}
           {showRecoveredNotice && (
             <div className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2.5 text-xs text-violet-700 space-y-2">
               <p>当前展示的是本地恢复的单资产快照。审批状态会同步后端，但 prompt 确认、选图、补图和继续执行需要重新建立工作流连接。</p>

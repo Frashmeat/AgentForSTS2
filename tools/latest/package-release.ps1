@@ -98,6 +98,51 @@ function Assert-CommandExists {
     }
 }
 
+function ConvertTo-HashtableRecursive {
+    param([object]$Value)
+
+    if ($null -eq $Value) {
+        return $null
+    }
+
+    if ($Value -is [System.Collections.IDictionary]) {
+        $result = @{}
+        foreach ($key in $Value.Keys) {
+            $result[[string]$key] = ConvertTo-HashtableRecursive -Value $Value[$key]
+        }
+        return $result
+    }
+
+    if ($Value -is [System.Management.Automation.PSCustomObject]) {
+        $result = @{}
+        foreach ($property in $Value.PSObject.Properties) {
+            $result[$property.Name] = ConvertTo-HashtableRecursive -Value $property.Value
+        }
+        return $result
+    }
+
+    if (($Value -is [System.Collections.IEnumerable]) -and -not ($Value -is [string])) {
+        $items = @()
+        foreach ($item in $Value) {
+            $items += ,(ConvertTo-HashtableRecursive -Value $item)
+        }
+        return $items
+    }
+
+    return $Value
+}
+
+function ConvertFrom-JsonAsHashtableCompat {
+    param([Parameter(Mandatory = $true)][string]$JsonText)
+
+    $convertFromJson = Get-Command ConvertFrom-Json -ErrorAction Stop
+    if ($convertFromJson.Parameters.ContainsKey("AsHashtable")) {
+        return $JsonText | ConvertFrom-Json -AsHashtable
+    }
+
+    return ConvertTo-HashtableRecursive -Value ($JsonText | ConvertFrom-Json)
+}
+
 function Remove-DirectoryIfExists {
     param([string]$Path)
 
@@ -166,7 +211,8 @@ function Test-FrontendDependenciesReady {
         return $false
     }
 
-    $packageJson = Get-Content -LiteralPath $packageJsonPath -Raw | ConvertFrom-Json -AsHashtable
+    $packageJsonRaw = Get-Content -LiteralPath $packageJsonPath -Raw
+    $packageJson = ConvertFrom-JsonAsHashtableCompat -JsonText $packageJsonRaw
     $requiredPackages = @()
 
     if ($packageJson.ContainsKey("dependencies")) {
@@ -603,7 +649,7 @@ if ($needsFrontend) {
 }
 
 $null = New-Item -ItemType Directory -Path $OutputRoot -Force
-New-CleanDirectory -Path $releaseDir -PreserveRelativePaths @("runtime\logs", "runtime\python-runtime", "runtime\knowledge")
+New-CleanDirectory -Path $releaseDir -PreserveRelativePaths @("runtime\logs", "runtime\python-runtime", "runtime\knowledge", "runtime\.env")
 $null = New-Item -ItemType Directory -Path (Join-Path $releaseDir "services") -Force
 $null = New-Item -ItemType Directory -Path (Join-Path $releaseDir "runtime") -Force
 

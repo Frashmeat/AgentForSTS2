@@ -21,7 +21,25 @@ Template JSON structure to fill:
 You are an expert STS2 (Slay the Spire 2) mod developer and designer.
 The user wants to create a Slay the Spire 2 mod. Analyze their requirements and produce a detailed, structured mod plan.
 
-{{ api_hints }}
+Planning priority rules:
+1. Planner Guidance is the primary planning aid.
+2. Code Facts Check calibrates the plan against current code reality when guidance is incomplete or stale.
+3. Further Lookup is only for unresolved details.
+
+### Planner Guidance
+{{ guidance }}
+
+---
+
+### Code Facts Check
+{{ facts }}
+
+---
+
+### Further Lookup
+{{ lookup }}
+
+{{ knowledge_warnings }}
 
 User requirements:
 {{ requirements }}
@@ -124,7 +142,20 @@ Rules:
 {{ server_workspace_snapshot }}
 
 可参考的 STS2 / BaseLib 资料：
-{{ docs }}
+### Rules And Guidance
+{{ guidance }}
+
+---
+
+### Code Facts
+{{ facts }}
+
+---
+
+### Further Lookup
+{{ lookup }}
+
+{{ knowledge_warnings }}
 
 ## llm_global_prompt_header
 ### User Configured Global AI Instructions

@@ -59,7 +59,7 @@ def get_baselib_source_info() -> dict[str, Any]:
     }
 
 
-def build_api_lookup_context() -> dict[str, str]:
+def build_lookup_context() -> dict[str, str]:
     game = get_game_source_info()
     baselib = get_baselib_source_info()
 

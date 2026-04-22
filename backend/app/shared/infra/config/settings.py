@@ -16,6 +16,7 @@ _ENV_KEYS = {
 }
 
 _CONFIG_PATH_ENV = "SPIREFORGE_CONFIG_PATH"
+_AUTH_SESSION_SECRET_ENV = "SPIREFORGE_AUTH_SESSION_SECRET"
 _SERVER_CREDENTIAL_SECRET_ENV = "SPIREFORGE_SERVER_CREDENTIAL_SECRET"
 _APP_ROOT = Path(__file__).resolve().parents[5]
 
@@ -261,11 +262,17 @@ class Settings:
         runtime_cfg = self.raw.get("runtime", {})
         return deepcopy(runtime_cfg.get(role, {}))
 
+    def get_auth_session_secret(self) -> str:
+        configured = os.environ.get(_AUTH_SESSION_SECRET_ENV, "").strip()
+        if configured:
+            return configured
+        return str(self.auth.get("session_secret", "")).strip()
+
     def get_server_credential_secret(self) -> str:
         configured = os.environ.get(_SERVER_CREDENTIAL_SECRET_ENV, "").strip()
         if configured:
             return configured
-        return str(self.auth.get("session_secret", "")).strip()
+        return self.get_auth_session_secret()
 
     def validate_for_role(self, role: str) -> list[str]:
         runtime = self.get_runtime(role)
@@ -285,7 +292,7 @@ class Settings:
             errors.append("auth.session_cookie_name is required")
 
         if role == "web":
-            session_secret = str(self.auth.get("session_secret", "")).strip()
+            session_secret = self.get_auth_session_secret()
             if not session_secret:
                 errors.append("auth.session_secret is required for web runtime")
 

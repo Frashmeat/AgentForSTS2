@@ -2,33 +2,37 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agents.sts2_docs import get_docs_for_type, get_game_api_reference_path, get_planner_api_hints
+from agents.sts2_guidance import get_game_api_reference_path, get_guidance_for_asset_type, get_planner_guidance
 from app.modules.codegen.application.artifact_writer import ArtifactWriter
 from app.modules.codegen.application.build_trigger import BuildTrigger
 from app.modules.codegen.application.prompt_assembler import PromptAssembler
 from app.modules.codegen.application.services import CodegenService
 from app.modules.codegen.domain.models import AssetCodegenRequest, AssetGroupRequest, CustomCodegenRequest, ModProjectRequest
-from app.modules.knowledge.application.knowledge_facade import build_api_lookup_context
-from app.modules.knowledge.infra.sts2_docs_source import Sts2DocsKnowledgeSource
-from app.shared.prompting import PromptLoader
+from app.modules.knowledge.application.knowledge_facade import build_lookup_context
+from app.modules.knowledge.infra.sts2_code_facts_provider import Sts2CodeFactsProvider
+from app.modules.knowledge.infra.sts2_guidance_provider import Sts2GuidanceProvider
+from app.modules.knowledge.infra.sts2_knowledge_resolver import Sts2KnowledgeResolver
+from app.modules.knowledge.infra.sts2_lookup_provider import Sts2LookupProvider
+from app.modules.knowledge.infra.sts2_guidance_source import Sts2GuidanceKnowledgeSource
+from app.shared.prompting import PromptContextAssembler, PromptLoader
 from llm.agent_runner import run_agent_task
 
 _PROMPT_LOADER = PromptLoader()
-_API_LOOKUP_TITLE_KEY = "codegen.api_lookup_title"
-_API_LOOKUP_BASELIB_KEY = "codegen.api_lookup_baselib"
-_API_LOOKUP_STS2_LOCAL_KEY = "codegen.api_lookup_sts2_local"
-_API_LOOKUP_STS2_FALLBACK_KEY = "codegen.api_lookup_sts2_fallback"
+_LOOKUP_TITLE_KEY = "codegen.lookup_title"
+_LOOKUP_BASELIB_KEY = "codegen.lookup_baselib"
+_LOOKUP_STS2_LOCAL_KEY = "codegen.lookup_sts2_local"
+_LOOKUP_STS2_FALLBACK_KEY = "codegen.lookup_sts2_fallback"
 
 
 async def run_claude_code(prompt: str, project_root: Path, stream_callback=None) -> str:
     return await run_agent_task(prompt, project_root, stream_callback)
 
 
-def _build_api_lookup_section() -> str:
-    lookup_context = build_api_lookup_context()
-    title = _PROMPT_LOADER.load(_API_LOOKUP_TITLE_KEY).strip()
+def _build_lookup_section() -> str:
+    lookup_context = build_lookup_context()
+    title = _PROMPT_LOADER.load(_LOOKUP_TITLE_KEY).strip()
     baselib_note = _PROMPT_LOADER.render(
-        _API_LOOKUP_BASELIB_KEY,
+        _LOOKUP_BASELIB_KEY,
         {
             "baselib_src_path": f"`{lookup_context['baselib_src_path']}`",
         },
@@ -36,14 +40,14 @@ def _build_api_lookup_section() -> str:
 
     if lookup_context["game_source_mode"] == "runtime_decompiled":
         sts2_note = _PROMPT_LOADER.render(
-            _API_LOOKUP_STS2_LOCAL_KEY,
+            _LOOKUP_STS2_LOCAL_KEY,
             {
                 "knowledge_path": f"`{lookup_context['game_path']}`",
             },
         ).strip()
     else:
         sts2_note = _PROMPT_LOADER.render(
-            _API_LOOKUP_STS2_FALLBACK_KEY,
+            _LOOKUP_STS2_FALLBACK_KEY,
             {
                 "ilspy_example_dll_path": f"`{lookup_context['ilspy_example_dll_path']}`",
             },
@@ -63,14 +67,21 @@ def _build_codegen_service() -> CodegenService:
 
 
 def build_codegen_prompt_assembler() -> PromptAssembler:
-    knowledge_source = Sts2DocsKnowledgeSource(
-        docs_for_type=get_docs_for_type,
-        planner_hints=get_planner_api_hints,
+    knowledge_source = Sts2GuidanceKnowledgeSource(
+        guidance_for_asset_type=get_guidance_for_asset_type,
+        planner_guidance=get_planner_guidance,
+    )
+    knowledge_resolver = Sts2KnowledgeResolver(
+        code_facts_provider=Sts2CodeFactsProvider(),
+        guidance_provider=Sts2GuidanceProvider(),
+        lookup_provider=Sts2LookupProvider(),
     )
     return PromptAssembler(
         knowledge_source=knowledge_source,
-        api_lookup_provider=_build_api_lookup_section,
+        lookup_provider=_build_lookup_section,
         api_ref_path=get_game_api_reference_path(),
+        knowledge_resolver=knowledge_resolver,
+        prompt_context_assembler=PromptContextAssembler(),
     )
 
 
