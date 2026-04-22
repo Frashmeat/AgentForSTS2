@@ -14,6 +14,7 @@ import { VerifyEmailPage } from "./features/auth/VerifyEmailPage.tsx";
 import { UserCenterJobDetailPage } from "./features/user-center/job-detail-page.tsx";
 import { UserCenterPage } from "./features/user-center/page.tsx";
 import type { WorkspaceTab } from "./features/platform-run/types.ts";
+import { AdminRuntimeAuditPage } from "./pages/AdminRuntimeAuditPage.tsx";
 import {
   buildSettingsPath,
   buildWorkspacePath,
@@ -150,6 +151,10 @@ export default function App() {
         <Route
           path="/me/jobs/:jobId"
           element={isAuthAvailable ? <UserCenterJobDetailPage /> : buildPlatformAuthUnavailableElement("当前环境未启用用户中心", "这是本机工作站模式。只有接入独立 Web 平台服务后，平台任务详情才可用。")}
+        />
+        <Route
+          path="/admin/runtime-audit"
+          element={isAuthAvailable ? <AdminRuntimeAuditPage /> : buildPlatformAuthUnavailableElement("当前环境未启用管理员审计", "这是本机工作站模式。只有接入独立 Web 平台服务后，管理员运行时审计能力才可用。")}
         />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

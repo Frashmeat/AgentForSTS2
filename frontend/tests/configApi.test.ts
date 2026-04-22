@@ -7,6 +7,7 @@ import {
   getDetectAppPathsTask,
   loadLocalAiCapabilityStatus,
   loadAppConfig,
+  loadPlatformQueueWorkerStatus,
   pickAppPath,
   startDetectAppPaths,
   updateAppConfig,
@@ -248,4 +249,33 @@ test("loadLocalAiCapabilityStatus reads capability endpoint with missing reasons
   assert.equal(result.code_agent_available, true);
   assert.equal(result.image_ai_available, false);
   assert.deepEqual(result.image_ai_missing_reasons, ["请先在设置中填写图像 API Key。"]);
+});
+
+test("loadPlatformQueueWorkerStatus reads queue worker status endpoint", async () => {
+  const calls: Array<{ input: unknown; init?: RequestInit }> = [];
+  setWorkstationApiBase();
+  Object.assign(globalThis, {
+    fetch: async (input: unknown, init?: RequestInit) => {
+      calls.push({ input, init });
+      return createMockResponse({
+        ok: true,
+        body: {
+          available: true,
+          owner_id: "queue-worker:123",
+          owner_scope: "system_queue_worker",
+          is_leader: true,
+          leader_epoch: 3,
+          failover_window_seconds: 10,
+          recent_leader_events: [],
+        },
+      });
+    },
+  });
+
+  const result = await loadPlatformQueueWorkerStatus();
+
+  assert.equal(calls[0].input, "http://127.0.0.1:7860/api/config/platform_queue_worker_status");
+  assert.equal(calls[0].init?.method, "GET");
+  assert.equal(result.available, true);
+  assert.equal(result.leader_epoch, 3);
 });

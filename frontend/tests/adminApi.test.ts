@@ -61,11 +61,15 @@ test("admin optional query params are only appended when present", async () => {
   await listAdminQuotaRefunds(7);
   await listAdminAuditEvents();
   await listAdminAuditEvents(123);
+  await listAdminAuditEvents(undefined, "runtime.queue_worker.");
+  await listAdminAuditEvents(undefined, "runtime.queue_worker.", 88, 20);
 
   assert.equal(calls[0].input, "/api/admin/quota/refunds");
   assert.equal(calls[1].input, "/api/admin/quota/refunds?user_id=7");
   assert.equal(calls[2].input, "/api/admin/audit/events");
   assert.equal(calls[3].input, "/api/admin/audit/events?job_id=123");
+  assert.equal(calls[4].input, "/api/admin/audit/events?event_type_prefix=runtime.queue_worker.");
+  assert.equal(calls[5].input, "/api/admin/audit/events?event_type_prefix=runtime.queue_worker.&after_id=88&limit=20");
 });
 
 test("admin endpoints expose typed execution and refund fields", async () => {

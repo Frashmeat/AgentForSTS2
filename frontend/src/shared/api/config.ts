@@ -35,6 +35,41 @@ export interface LocalAiCapabilityStatus {
   image_ai_missing_reasons?: string[];
 }
 
+export interface PlatformQueueWorkerLeaderEvent {
+  event_type: string;
+  occurred_at: string;
+  owner_id: string;
+  leader_epoch?: number | null;
+  detail?: string;
+}
+
+export interface PlatformQueueWorkerLeaderLease {
+  leader_epoch: number | null;
+  owner_id: string;
+  owner_scope: string;
+  claimed_at: string;
+  renewed_at: string;
+  expires_at: string;
+}
+
+export interface PlatformQueueWorkerStatus {
+  available: boolean;
+  reason?: string;
+  owner_id?: string;
+  owner_scope?: string;
+  is_leader?: boolean;
+  leader_epoch?: number | null;
+  failover_window_seconds?: number | null;
+  leader_retry_grace_seconds?: number | null;
+  next_leader_retry_not_before?: string;
+  last_tick_at?: string;
+  last_tick_reason?: string;
+  last_leader_acquired_at?: string;
+  last_leader_lost_at?: string;
+  current_leader?: PlatformQueueWorkerLeaderLease | null;
+  recent_leader_events?: PlatformQueueWorkerLeaderEvent[];
+}
+
 export interface PickPathRequest {
   kind: "file" | "directory";
   title?: string;
@@ -96,6 +131,12 @@ export async function pickAppPath(body: PickPathRequest): Promise<PickPathResult
 
 export async function loadLocalAiCapabilityStatus(): Promise<LocalAiCapabilityStatus> {
   return requestJson<LocalAiCapabilityStatus>("/api/config/local_ai_capability_status", {
+    backend: "workstation",
+  });
+}
+
+export async function loadPlatformQueueWorkerStatus(): Promise<PlatformQueueWorkerStatus> {
+  return requestJson<PlatformQueueWorkerStatus>("/api/config/platform_queue_worker_status", {
     backend: "workstation",
   });
 }

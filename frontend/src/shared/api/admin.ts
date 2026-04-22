@@ -25,9 +25,13 @@ export interface AdminQuotaRefundItem {
 }
 
 export interface AdminAuditEvent {
-  event_id?: number;
-  event_type?: string;
-  [key: string]: unknown;
+  event_id: number;
+  event_type: string;
+  job_id: number;
+  job_item_id?: number | null;
+  ai_execution_id?: number | null;
+  occurred_at: string;
+  payload: Record<string, unknown>;
 }
 
 export function listAdminJobExecutions(jobId: number): Promise<AdminExecutionListItem[]> {
@@ -48,8 +52,21 @@ export function listAdminQuotaRefunds(userId?: number): Promise<AdminQuotaRefund
   });
 }
 
-export function listAdminAuditEvents(jobId?: number): Promise<AdminAuditEvent[]> {
-  return requestJson<AdminAuditEvent[]>(buildApiPath("/api/admin/audit/events", { job_id: jobId }), {
-    backend: "web",
-  });
+export function listAdminAuditEvents(
+  jobId?: number,
+  eventTypePrefix?: string,
+  afterId?: number,
+  limit?: number,
+): Promise<AdminAuditEvent[]> {
+  return requestJson<AdminAuditEvent[]>(
+    buildApiPath("/api/admin/audit/events", {
+      job_id: jobId,
+      event_type_prefix: eventTypePrefix,
+      after_id: afterId,
+      limit,
+    }),
+    {
+      backend: "web",
+    },
+  );
 }
