@@ -1,8 +1,13 @@
 """Tests for planner.py — plan parsing, topological sort, prompt construction."""
 import sys
+import types
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.modules.setdefault(
+    "llm.text_runner",
+    types.SimpleNamespace(complete_text=lambda *args, **kwargs: None),
+)
 
 from app.modules.planning.api import parse_plan, topological_sort, build_planner_prompt, PlanItem
 
@@ -174,8 +179,9 @@ def test_topo_sort_missing_dep_ignored():
 
 # ── _build_planner_prompt ─────────────────────────────────────────────────────
 
-def test_planner_prompt_contains_api_hints():
+def test_planner_prompt_contains_guidance():
     prompt = build_planner_prompt("make a relic that triggers on attack")
+    assert "### Planner Guidance" in prompt
     assert "OnPlay" in prompt
     assert "PowerModel" in prompt
     assert "ShouldReceiveCombatHooks" in prompt
@@ -189,6 +195,8 @@ def test_planner_prompt_contains_user_requirements():
 
 def test_planner_prompt_contains_json_schema():
     prompt = build_planner_prompt("test")
+    assert "### Code Facts Check" in prompt
+    assert "### Further Lookup" in prompt
     assert "implementation_notes" in prompt
     assert "depends_on" in prompt
     assert "needs_image" in prompt

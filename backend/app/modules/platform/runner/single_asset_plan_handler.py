@@ -2,8 +2,13 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 
-from agents.sts2_docs import get_docs_for_type
+from app.modules.knowledge.infra.sts2_code_facts_provider import Sts2CodeFactsProvider
+from app.modules.knowledge.infra.sts2_guidance_provider import Sts2GuidanceProvider
+from app.modules.knowledge.infra.sts2_knowledge_resolver import Sts2KnowledgeResolver
+from app.modules.knowledge.infra.sts2_lookup_provider import Sts2LookupProvider
 from app.modules.platform.contracts.runner_contracts import StepExecutionRequest
+from app.shared.contracts.knowledge import KnowledgeQuery
+from app.shared.prompting import PromptContextAssembler
 from app.shared.prompting import PromptLoader
 
 from .server_workspace_snapshot import render_server_workspace_snapshot
@@ -13,6 +18,12 @@ from .text_generate_handler import execute_text_generate_step
 TextStepExecutor = Callable[[StepExecutionRequest], Awaitable[dict[str, object]]]
 
 _PROMPT_LOADER = PromptLoader()
+_PROMPT_CONTEXT_ASSEMBLER = PromptContextAssembler()
+_KNOWLEDGE_RESOLVER = Sts2KnowledgeResolver(
+    code_facts_provider=Sts2CodeFactsProvider(),
+    guidance_provider=Sts2GuidanceProvider(),
+    lookup_provider=Sts2LookupProvider(),
+)
 _SINGLE_ASSET_PLAN_PROMPT_KEY = "runtime_agent.platform_single_asset_server_user"
 _ASSET_TYPE_LABELS = {
     "card": "卡牌",
@@ -42,7 +53,16 @@ def _build_prompt(input_payload: dict[str, object]) -> tuple[str, str, str]:
     if not description:
         raise ValueError("single asset server task requires description")
 
-    docs = get_docs_for_type(asset_type)
+    packet = _KNOWLEDGE_RESOLVER.resolve(
+        KnowledgeQuery(
+            scenario="asset_codegen",
+            domain="sts2",
+            asset_type=asset_type,
+            requirements=description,
+            item_name=item_name,
+        )
+    )
+    knowledge = _PROMPT_CONTEXT_ASSEMBLER.assemble(packet)
     asset_type_label = _ASSET_TYPE_LABELS.get(asset_type, asset_type or "资产")
     prompt = _PROMPT_LOADER.render(
         _SINGLE_ASSET_PLAN_PROMPT_KEY,
@@ -59,7 +79,10 @@ def _build_prompt(input_payload: dict[str, object]) -> tuple[str, str, str]:
             "server_project_name": str(input_payload.get("server_project_name", "")).strip() or "无",
             "server_workspace_root": str(input_payload.get("server_workspace_root", "")).strip() or "无",
             "server_workspace_snapshot": render_server_workspace_snapshot(input_payload.get("server_workspace_root")),
-            "docs": docs.strip() or "无",
+            "facts": knowledge["facts"] or "无",
+            "guidance": knowledge["guidance"] or "无",
+            "lookup": knowledge["lookup"] or "无",
+            "knowledge_warnings": knowledge["knowledge_warnings"],
         },
     )
     return prompt, asset_type, item_name

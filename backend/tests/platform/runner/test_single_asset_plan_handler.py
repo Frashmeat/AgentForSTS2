@@ -10,6 +10,32 @@ from app.modules.platform.contracts.runner_contracts import StepExecutionBinding
 from app.modules.platform.runner.single_asset_plan_handler import execute_single_asset_plan_step
 
 
+class _FakeKnowledgeResolver:
+    def resolve(self, _query):
+        return object()
+
+
+class _FakePromptContextAssembler:
+    def assemble(self, _packet) -> dict[str, str]:
+        return {
+            "facts": "facts:example",
+            "guidance": "guidance:example",
+            "lookup": "lookup:example",
+            "knowledge_warnings": "warnings:example",
+        }
+
+
+def _patch_structured_knowledge(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.modules.platform.runner.single_asset_plan_handler._KNOWLEDGE_RESOLVER",
+        _FakeKnowledgeResolver(),
+    )
+    monkeypatch.setattr(
+        "app.modules.platform.runner.single_asset_plan_handler._PROMPT_CONTEXT_ASSEMBLER",
+        _FakePromptContextAssembler(),
+    )
+
+
 def test_execute_single_asset_plan_step_builds_prompt_and_delegates_to_text_generation(monkeypatch):
     captured: dict[str, object] = {}
 
@@ -31,10 +57,7 @@ def test_execute_single_asset_plan_step_builds_prompt_and_delegates_to_text_gene
         "app.modules.platform.runner.single_asset_plan_handler._PROMPT_LOADER",
         _FakePromptLoader(),
     )
-    monkeypatch.setattr(
-        "app.modules.platform.runner.single_asset_plan_handler.get_docs_for_type",
-        lambda asset_type: f"docs:{asset_type}",
-    )
+    _patch_structured_knowledge(monkeypatch)
 
     result = asyncio.run(
         execute_single_asset_plan_step(
@@ -68,7 +91,11 @@ def test_execute_single_asset_plan_step_builds_prompt_and_delegates_to_text_gene
     assert captured["template_name"] == "runtime_agent.platform_single_asset_server_user"
     assert captured["variables"]["asset_type"] == "relic"
     assert captured["variables"]["item_name"] == "FangedGrimoire"
-    assert captured["variables"]["docs"] == "docs:relic"
+    assert captured["variables"]["guidance"] == "guidance:example"
+    assert captured["variables"]["facts"] == "facts:example"
+    assert captured["variables"]["lookup"] == "lookup:example"
+    assert captured["variables"]["knowledge_warnings"] == "warnings:example"
+    assert "docs" not in captured["variables"]
     assert forwarded.step_type == "text.generate"
     assert forwarded.input_payload["prompt"] == "prompt:relic|FangedGrimoire"
     assert result["asset_type"] == "relic"
@@ -155,10 +182,7 @@ def test_execute_single_asset_plan_step_supports_batch_generate_payload_shape(mo
         "app.modules.platform.runner.single_asset_plan_handler._PROMPT_LOADER",
         _FakePromptLoader(),
     )
-    monkeypatch.setattr(
-        "app.modules.platform.runner.single_asset_plan_handler.get_docs_for_type",
-        lambda asset_type: f"docs:{asset_type}",
-    )
+    _patch_structured_knowledge(monkeypatch)
 
     result = asyncio.run(
         execute_single_asset_plan_step(
@@ -191,7 +215,9 @@ def test_execute_single_asset_plan_step_supports_batch_generate_payload_shape(mo
     assert isinstance(forwarded, StepExecutionRequest)
     assert captured["variables"]["asset_type"] == "card"
     assert captured["variables"]["item_name"] == "DarkBlade"
-    assert captured["variables"]["docs"] == "docs:card"
+    assert captured["variables"]["guidance"] == "guidance:example"
+    assert captured["variables"]["facts"] == "facts:example"
+    assert captured["variables"]["lookup"] == "lookup:example"
     assert forwarded.input_payload["prompt"] == "prompt:card|DarkBlade"
     assert result["asset_type"] == "card"
     assert result["item_name"] == "DarkBlade"
@@ -218,10 +244,7 @@ def test_execute_single_asset_plan_step_includes_uploaded_asset_metadata(monkeyp
         "app.modules.platform.runner.single_asset_plan_handler._PROMPT_LOADER",
         _FakePromptLoader(),
     )
-    monkeypatch.setattr(
-        "app.modules.platform.runner.single_asset_plan_handler.get_docs_for_type",
-        lambda asset_type: f"docs:{asset_type}",
-    )
+    _patch_structured_knowledge(monkeypatch)
 
     result = asyncio.run(
         execute_single_asset_plan_step(
@@ -279,10 +302,7 @@ def test_execute_single_asset_plan_step_includes_server_workspace_metadata(monke
         "app.modules.platform.runner.single_asset_plan_handler._PROMPT_LOADER",
         _FakePromptLoader(),
     )
-    monkeypatch.setattr(
-        "app.modules.platform.runner.single_asset_plan_handler.get_docs_for_type",
-        lambda asset_type: f"docs:{asset_type}",
-    )
+    _patch_structured_knowledge(monkeypatch)
 
     result = asyncio.run(
         execute_single_asset_plan_step(
@@ -349,10 +369,7 @@ def test_execute_single_asset_plan_step_reads_server_workspace_snapshot(monkeypa
         "app.modules.platform.runner.single_asset_plan_handler._PROMPT_LOADER",
         _FakePromptLoader(),
     )
-    monkeypatch.setattr(
-        "app.modules.platform.runner.single_asset_plan_handler.get_docs_for_type",
-        lambda asset_type: f"docs:{asset_type}",
-    )
+    _patch_structured_knowledge(monkeypatch)
 
     result = asyncio.run(
         execute_single_asset_plan_step(
