@@ -14,7 +14,11 @@ from fastapi.staticfiles import StaticFiles
 
 from app.composition.container import ApplicationContainer
 from app.modules.platform.application.platform_runtime_builder import build_job_application_service_from_container
-from app.modules.platform.application.services import ServerExecutionService, ServerQueuedJobWorkerService
+from app.modules.platform.application.services import (
+    ServerExecutionService,
+    ServerQueuedJobScanClaimService,
+    ServerQueuedJobWorkerService,
+)
 from app.shared.infra.http_errors import install_http_error_handlers
 from app.shared.infra.config.settings import Settings
 from config import get_config
@@ -116,12 +120,22 @@ def _build_web_queue_worker_service(app: FastAPI) -> ServerQueuedJobWorkerServic
     session_factory = container.resolve_optional_singleton("platform.db_session_factory")
     if session_factory is None:
         return None
+    scan_claim_service = _build_server_queued_job_scan_claim_service(app)
     return ServerQueuedJobWorkerService(
         session_factory=session_factory,
         job_application_service_builder=lambda session: build_job_application_service_from_container(session, container),
+        scan_claim_service=scan_claim_service,
         poll_interval_seconds=_QUEUE_WORKER_POLL_INTERVAL_SECONDS,
         retry_cooldown_seconds=_QUEUE_WORKER_RETRY_COOLDOWN_SECONDS,
     )
+
+
+def _build_server_queued_job_scan_claim_service(app: FastAPI) -> ServerQueuedJobScanClaimService:
+    container = app.state.container
+    factory = container.resolve_singleton("platform.server_queued_job_scan_claim_service_factory")
+    if callable(factory):
+        return factory()
+    return factory
 
 
 def _register_web_queue_worker_lifecycle(app: FastAPI) -> None:

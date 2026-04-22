@@ -9,6 +9,7 @@ from app.modules.platform.application.services import (
     JobApplicationService,
     QuotaBillingService,
     ServerCredentialCipher,
+    ServerQueuedJobClaimService,
     ServerDeployTargetLockService,
     ServerWorkspaceLockService,
     ServerWorkspaceService,
@@ -31,6 +32,7 @@ def build_job_application_service_from_container(session, container: Any) -> Job
         job_repository=job_repository,
         job_event_repository=job_event_repository,
         execution_orchestrator_service=build_execution_orchestrator_service_from_container(session, container),
+        server_queued_job_claim_service=_build_server_queued_job_claim_service_from_container(container),
         server_workspace_service=_build_server_workspace_service_from_container(container),
         uploaded_asset_service=_build_uploaded_asset_service_from_container(container),
     )
@@ -104,6 +106,13 @@ def _build_server_workspace_service_from_container(container: Any) -> ServerWork
 
 def _build_server_workspace_lock_service_from_container(container: Any) -> ServerWorkspaceLockService:
     factory = container.resolve_singleton("platform.server_workspace_lock_service_factory")
+    if callable(factory):
+        return factory()
+    return factory
+
+
+def _build_server_queued_job_claim_service_from_container(container: Any) -> ServerQueuedJobClaimService:
+    factory = container.resolve_singleton("platform.server_queued_job_claim_service_factory")
     if callable(factory):
         return factory()
     return factory

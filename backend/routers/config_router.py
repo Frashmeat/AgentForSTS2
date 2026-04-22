@@ -111,6 +111,20 @@ def local_ai_capability_status(request: Request = None):
     }
 
 
+@router.get("/platform_queue_worker_status")
+def platform_queue_worker_status(request: Request = None):
+    worker = getattr(getattr(request, "app", None), "state", None)
+    if worker is None:
+        return {"available": False, "reason": "app_state_missing"}
+    queue_worker = getattr(worker, "platform_queue_worker_service", None)
+    if queue_worker is None:
+        return {"available": False, "reason": "queue_worker_not_registered"}
+    try:
+        return {"available": True, **queue_worker.get_runtime_status()}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @router.get("/test_imggen")
 async def test_imggen(request: Request = None):
     from image.generator import generate_images

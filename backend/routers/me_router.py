@@ -9,6 +9,7 @@ from app.modules.platform.application.services import (
     JobQueryService,
     PlatformRequestRateLimitExceededError,
     PlatformRequestRateLimiter,
+    ServerQueuedJobClaimService,
     ServerExecutionService,
     UserCenterService,
 )
@@ -48,6 +49,7 @@ def _build_job_application_service(session, request: Request) -> JobApplicationS
         job_repository=job_repository,
         job_event_repository=job_event_repository,
         execution_orchestrator_service=build_execution_orchestrator_service(session, request),
+        server_queued_job_claim_service=_build_server_queued_job_claim_service(request),
         server_workspace_service=_build_server_workspace_service(request),
         uploaded_asset_service=_build_uploaded_asset_service(request),
     )
@@ -72,6 +74,14 @@ def _build_uploaded_asset_service(request: Request) -> UploadedAssetService:
 def _build_server_workspace_service(request: Request) -> ServerWorkspaceService:
     container = request.app.state.container
     factory = container.resolve_singleton("platform.server_workspace_service_factory")
+    if callable(factory):
+        return factory()
+    return factory
+
+
+def _build_server_queued_job_claim_service(request: Request) -> ServerQueuedJobClaimService:
+    container = request.app.state.container
+    factory = container.resolve_singleton("platform.server_queued_job_claim_service_factory")
     if callable(factory):
         return factory()
     return factory

@@ -9,6 +9,7 @@ from app.modules.platform.domain.repositories import JobEventRepository, JobRepo
 from app.modules.platform.infra.persistence.models import JobRecord
 
 from .execution_orchestrator_service import ExecutionOrchestratorService, QueuedExecutionReason
+from .server_queued_job_claim_service import ServerQueuedJobClaimBusyError, ServerQueuedJobClaimHandle, ServerQueuedJobClaimService
 from .server_workspace_lock_service import ServerWorkspaceBusyError
 from .server_workspace_service import ServerWorkspaceService
 from .uploaded_asset_service import UploadedAssetService
@@ -37,12 +38,14 @@ class JobApplicationService:
         job_repository: JobRepository,
         job_event_repository: JobEventRepository,
         execution_orchestrator_service: ExecutionOrchestratorService | None = None,
+        server_queued_job_claim_service: ServerQueuedJobClaimService | None = None,
         server_workspace_service: ServerWorkspaceService | None = None,
         uploaded_asset_service: UploadedAssetService | None = None,
     ) -> None:
         self.job_repository = job_repository
         self.job_event_repository = job_event_repository
         self.execution_orchestrator_service = execution_orchestrator_service
+        self.server_queued_job_claim_service = server_queued_job_claim_service
         self.server_workspace_service = server_workspace_service
         self.uploaded_asset_service = uploaded_asset_service
 
@@ -59,15 +62,47 @@ class JobApplicationService:
         return job
 
     def start_job(self, user_id: int, command: StartJobCommand) -> JobRecord | None:
-        job, released_workspace_refs, released_deploy_targets = self._start_job_internal(user_id=user_id, command=command)
-        if job is None:
-            return None
-        self._drain_queued_jobs_for_resources(
-            released_workspace_refs=released_workspace_refs,
-            released_deploy_targets=released_deploy_targets,
-            attempted_job_ids={job.id},
+        job, _, _, _ = self.start_job_attempt(
+            user_id=user_id,
+            command=command,
+            should_drain=True,
         )
         return job
+
+    def start_job_attempt(
+        self,
+        user_id: int,
+        command: StartJobCommand,
+        *,
+        should_drain: bool = True,
+    ) -> tuple[JobRecord | None, bool, list[str], list[str]]:
+        handle: ServerQueuedJobClaimHandle | None = None
+        if self.server_queued_job_claim_service is not None:
+            try:
+                handle = self.server_queued_job_claim_service.acquire_claim(
+                    job_id=command.job_id,
+                    owner_scope=f"job_start:{str(command.triggered_by or 'unknown').strip() or 'unknown'}",
+                )
+            except ServerQueuedJobClaimBusyError:
+                job = self.job_repository.find_by_id_for_user(command.job_id, user_id)
+                return job, False, [], []
+
+        try:
+            job, released_workspace_refs, released_deploy_targets = self._start_job_internal(
+                user_id=user_id,
+                command=command,
+            )
+        finally:
+            if handle is not None and self.server_queued_job_claim_service is not None:
+                self.server_queued_job_claim_service.release_claim(handle)
+
+        if job is not None and should_drain:
+            self._drain_queued_jobs_for_resources(
+                released_workspace_refs=released_workspace_refs,
+                released_deploy_targets=released_deploy_targets,
+                attempted_job_ids={job.id},
+            )
+        return job, True, released_workspace_refs, released_deploy_targets
 
     def _start_job_internal(self, *, user_id: int, command: StartJobCommand) -> tuple[JobRecord | None, list[str], list[str]]:
         job = self.job_repository.find_by_id_for_user(command.job_id, user_id)
@@ -445,14 +480,15 @@ class JobApplicationService:
                 continue
 
             attempted.add(next_job.id)
-            resumed_job, resumed_workspace_refs, resumed_deploy_targets = self._start_job_internal(
+            resumed_job, claimed, resumed_workspace_refs, resumed_deploy_targets = self.start_job_attempt(
                 user_id=next_job.user_id,
                 command=StartJobCommand(
                     job_id=next_job.id,
                     triggered_by="system_workspace_resume",
                 ),
+                should_drain=False,
             )
-            if resumed_job is None:
+            if resumed_job is None or not claimed:
                 continue
             for released_ref in resumed_workspace_refs:
                 normalized_ref = str(released_ref).strip()

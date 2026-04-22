@@ -11,6 +11,7 @@ from app.modules.platform.application.services.execution_routing_service import 
 from app.modules.platform.application.services.job_application_service import JobApplicationService
 from app.modules.platform.application.services.quota_billing_service import QuotaBillingService
 from app.modules.platform.application.services.server_credential_cipher import ServerCredentialCipher
+from app.modules.platform.application.services.server_queued_job_claim_service import ServerQueuedJobClaimService
 from app.modules.platform.application.services.server_workspace_lock_service import (
     ServerWorkspaceBusyError,
 )
@@ -99,6 +100,38 @@ def test_job_application_service_rejects_start_for_other_user(db_session):
     )
 
     assert service.start_job(user_id=2002, command=StartJobCommand(job_id=job.id)) is None
+
+
+def test_job_application_service_returns_existing_job_when_claimed_by_other_consumer(db_session, tmp_path):
+    claim_service = ServerQueuedJobClaimService(storage_root=tmp_path / "queued-job-claims", lease_seconds=120)
+    service = JobApplicationService(
+        job_repository=JobRepositorySqlAlchemy(db_session),
+        job_event_repository=JobEventRepositorySqlAlchemy(db_session),
+        server_queued_job_claim_service=claim_service,
+    )
+    job = service.create_job(
+        user_id=1001,
+        command=CreateJobCommand.model_validate(
+            {
+                "job_type": "single_generate",
+                "workflow_version": "2026.03.31",
+                "items": [{"item_type": "card", "input_payload": {"item_name": "DarkBlade"}}],
+            }
+        ),
+    )
+    existing_claim = claim_service.acquire_claim(job_id=job.id, owner_scope="external-worker")
+
+    started, claimed, _, _ = service.start_job_attempt(
+        user_id=1001,
+        command=StartJobCommand(job_id=job.id, triggered_by="system_queue_worker"),
+    )
+
+    assert started is not None
+    assert started.id == job.id
+    assert started.status == JobStatus.DRAFT
+    assert claimed is False
+
+    claim_service.release_claim(existing_claim)
 
 
 class _LogRegistry:

@@ -21,6 +21,18 @@ from .server_deploy_target_lock_service import (
     ServerDeployTargetLockService,
 )
 from .server_deploy_registry_service import ServerDeployRegistration, ServerDeployRegistryService
+from .server_queued_job_claim_service import (
+    ServerQueuedJobClaimBusyError,
+    ServerQueuedJobClaimHandle,
+    ServerQueuedJobClaimHolder,
+    ServerQueuedJobClaimService,
+)
+from .server_queued_job_scan_claim_service import (
+    ServerQueuedJobScanClaimBusyError,
+    ServerQueuedJobScanClaimHandle,
+    ServerQueuedJobScanClaimHolder,
+    ServerQueuedJobScanClaimService,
+)
 from .server_queued_job_worker_service import QueueWorkerTickResult, ServerQueuedJobWorkerService
 from .server_execution_service import ServerExecutionService
 from .server_workspace_lock_service import (
@@ -57,6 +69,14 @@ __all__ = [
     "ServerDeployTargetLockHandle",
     "ServerDeployTargetLockHolder",
     "ServerDeployTargetLockService",
+    "ServerQueuedJobClaimBusyError",
+    "ServerQueuedJobClaimHandle",
+    "ServerQueuedJobClaimHolder",
+    "ServerQueuedJobClaimService",
+    "ServerQueuedJobScanClaimBusyError",
+    "ServerQueuedJobScanClaimHandle",
+    "ServerQueuedJobScanClaimHolder",
+    "ServerQueuedJobScanClaimService",
     "QueueWorkerTickResult",
     "ServerQueuedJobWorkerService",
     "ServerExecutionService",

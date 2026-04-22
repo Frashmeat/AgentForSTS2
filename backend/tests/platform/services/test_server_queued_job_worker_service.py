@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -13,6 +14,8 @@ from app.modules.platform.application.services.execution_routing_service import 
 from app.modules.platform.application.services.job_application_service import JobApplicationService
 from app.modules.platform.application.services.quota_billing_service import QuotaBillingService
 from app.modules.platform.application.services.server_credential_cipher import ServerCredentialCipher
+from app.modules.platform.application.services.server_queued_job_claim_service import ServerQueuedJobClaimService
+from app.modules.platform.application.services.server_queued_job_scan_claim_service import ServerQueuedJobScanClaimService
 from app.modules.platform.application.services.server_deploy_target_lock_service import ServerDeployTargetBusyError
 from app.modules.platform.application.services.server_queued_job_worker_service import ServerQueuedJobWorkerService
 from app.modules.platform.application.services.server_workspace_lock_service import ServerWorkspaceBusyError
@@ -227,6 +230,7 @@ def _build_job_service_builder(
     cipher: ServerCredentialCipher,
     server_workspace_service: ServerWorkspaceService | None = None,
     server_workspace_lock_service=None,
+    server_queued_job_claim_service: ServerQueuedJobClaimService | None = None,
 ):
     session_factory = sessionmaker(bind=db_session.bind, autoflush=False, autocommit=False, expire_on_commit=False)
 
@@ -253,6 +257,7 @@ def _build_job_service_builder(
                 workflow_registry=workflow_registry,
                 workflow_runner=workflow_runner,
             ),
+            server_queued_job_claim_service=server_queued_job_claim_service,
             server_workspace_service=server_workspace_service,
         )
 
@@ -456,3 +461,238 @@ def test_server_queued_job_worker_service_keeps_deploy_busy_job_queued(db_sessio
     assert reloaded.status == JobStatus.QUEUED
     assert reloaded.items[0].status == JobItemStatus.READY
     assert reloaded.error_summary == "server deploy target is busy"
+
+
+def test_server_queued_job_worker_service_skips_job_claimed_by_other_consumer(db_session, tmp_path):
+    profile, cipher = _seed_profile_and_quota(db_session, user_ids=[1001], secret="worker-test-secret")
+    claim_service = ServerQueuedJobClaimService(storage_root=tmp_path / "queued-job-claims", lease_seconds=120)
+    session_factory, builder = _build_job_service_builder(
+        db_session,
+        workflow_runner=_SucceededWorkerRunner(),
+        workflow_registry=_SupportedWorkerRegistry(),
+        cipher=cipher,
+        server_queued_job_claim_service=claim_service,
+    )
+    job = _create_queued_job(
+        db_session,
+        user_id=1001,
+        profile_id=profile.id,
+        job_type="single_generate",
+        item_type="card",
+        input_payload={"item_name": "DarkBlade"},
+        queued_at=datetime.now(UTC) - timedelta(seconds=30),
+    )
+    existing_claim = claim_service.acquire_claim(job_id=job.id, owner_scope="external-worker")
+    worker = ServerQueuedJobWorkerService(
+        session_factory=session_factory,
+        job_application_service_builder=builder,
+        retry_cooldown_seconds=0,
+    )
+
+    result = worker.run_once()
+
+    db_session.expire_all()
+    reloaded = JobRepositorySqlAlchemy(db_session).find_by_id_for_user(job.id, 1001)
+    assert result.attempted_job_id == job.id
+    assert result.started is False
+    assert result.reason == "job_claimed_by_other_consumer"
+    assert reloaded is not None
+    assert reloaded.status == JobStatus.QUEUED
+    assert reloaded.items[0].status == JobItemStatus.READY
+
+    claim_service.release_claim(existing_claim)
+
+
+def test_server_queued_job_worker_service_skips_scan_when_scan_claim_is_busy(db_session, tmp_path):
+    profile, cipher = _seed_profile_and_quota(db_session, user_ids=[1001], secret="worker-test-secret")
+    session_factory, builder = _build_job_service_builder(
+        db_session,
+        workflow_runner=_SucceededWorkerRunner(),
+        workflow_registry=_SupportedWorkerRegistry(),
+        cipher=cipher,
+    )
+    job = _create_queued_job(
+        db_session,
+        user_id=1001,
+        profile_id=profile.id,
+        job_type="single_generate",
+        item_type="card",
+        input_payload={"item_name": "DarkBlade"},
+        queued_at=datetime.now(UTC) - timedelta(seconds=30),
+    )
+    scan_claim_service = ServerQueuedJobScanClaimService(storage_root=tmp_path / "scan-claims", lease_seconds=30)
+    existing_claim = scan_claim_service.ensure_leadership(owner_id="external-web", owner_scope="external-web")
+    worker = ServerQueuedJobWorkerService(
+        session_factory=session_factory,
+        job_application_service_builder=builder,
+        scan_claim_service=scan_claim_service,
+        retry_cooldown_seconds=0,
+    )
+
+    result = worker.run_once()
+
+    db_session.expire_all()
+    reloaded = JobRepositorySqlAlchemy(db_session).find_by_id_for_user(job.id, 1001)
+    assert result.attempted_job_id is None
+    assert result.started is False
+    assert result.reason == "not_leader"
+    assert reloaded is not None
+    assert reloaded.status == JobStatus.QUEUED
+    assert reloaded.items[0].status == JobItemStatus.READY
+
+    scan_claim_service.release_leadership(existing_claim)
+
+
+def test_server_queued_job_worker_service_renews_leadership_between_ticks(db_session, tmp_path):
+    profile, cipher = _seed_profile_and_quota(db_session, user_ids=[1001], secret="worker-test-secret")
+    session_factory, builder = _build_job_service_builder(
+        db_session,
+        workflow_runner=_SucceededWorkerRunner(),
+        workflow_registry=_SupportedWorkerRegistry(),
+        cipher=cipher,
+    )
+    first_job = _create_queued_job(
+        db_session,
+        user_id=1001,
+        profile_id=profile.id,
+        job_type="single_generate",
+        item_type="card",
+        input_payload={"item_name": "DarkBladeA"},
+        queued_at=datetime.now(UTC) - timedelta(seconds=30),
+    )
+    second_job = _create_queued_job(
+        db_session,
+        user_id=1001,
+        profile_id=profile.id,
+        job_type="single_generate",
+        item_type="card",
+        input_payload={"item_name": "DarkBladeB"},
+        queued_at=datetime.now(UTC) - timedelta(seconds=20),
+    )
+    scan_claim_service = ServerQueuedJobScanClaimService(storage_root=tmp_path / "scan-claims", lease_seconds=30)
+    worker = ServerQueuedJobWorkerService(
+        session_factory=session_factory,
+        job_application_service_builder=builder,
+        scan_claim_service=scan_claim_service,
+        retry_cooldown_seconds=0,
+    )
+
+    first = worker.run_once()
+    claim_after_first = json.loads((scan_claim_service.storage_root / "queue-scan.claim.json").read_text(encoding="utf-8"))
+    second = worker.run_once()
+    claim_after_second = json.loads((scan_claim_service.storage_root / "queue-scan.claim.json").read_text(encoding="utf-8"))
+
+    assert first.attempted_job_id == first_job.id
+    assert second.attempted_job_id == second_job.id
+    assert claim_after_first["leader_epoch"] == claim_after_second["leader_epoch"]
+    assert claim_after_first["owner_id"] == claim_after_second["owner_id"]
+    assert claim_after_second["expires_at"] >= claim_after_first["expires_at"]
+
+    worker._release_leadership()
+
+
+def test_server_queued_job_worker_service_runtime_status_exposes_leader_epoch_and_last_tick(db_session, tmp_path):
+    profile, cipher = _seed_profile_and_quota(db_session, user_ids=[1001], secret="worker-test-secret")
+    session_factory, builder = _build_job_service_builder(
+        db_session,
+        workflow_runner=_SucceededWorkerRunner(),
+        workflow_registry=_SupportedWorkerRegistry(),
+        cipher=cipher,
+    )
+    _create_queued_job(
+        db_session,
+        user_id=1001,
+        profile_id=profile.id,
+        job_type="single_generate",
+        item_type="card",
+        input_payload={"item_name": "DarkBlade"},
+        queued_at=datetime.now(UTC) - timedelta(seconds=30),
+    )
+    scan_claim_service = ServerQueuedJobScanClaimService(storage_root=tmp_path / "scan-claims", lease_seconds=30)
+    worker = ServerQueuedJobWorkerService(
+        session_factory=session_factory,
+        job_application_service_builder=builder,
+        scan_claim_service=scan_claim_service,
+        retry_cooldown_seconds=0,
+    )
+
+    worker.run_once()
+    status = worker.get_runtime_status()
+
+    assert status["is_leader"] is True
+    assert status["leader_epoch"] == 1
+    assert status["failover_window_seconds"] == 30
+    assert status["last_tick_reason"] == "started"
+    assert status["last_leader_acquired_at"]
+    assert status["current_leader"]["leader_epoch"] == 1
+    assert status["recent_leader_events"][-1]["event_type"] == "leader_acquired"
+
+
+def test_server_queued_job_worker_service_records_observed_other_leader_event(db_session, tmp_path):
+    profile, cipher = _seed_profile_and_quota(db_session, user_ids=[1001], secret="worker-test-secret")
+    session_factory, builder = _build_job_service_builder(
+        db_session,
+        workflow_runner=_SucceededWorkerRunner(),
+        workflow_registry=_SupportedWorkerRegistry(),
+        cipher=cipher,
+    )
+    _create_queued_job(
+        db_session,
+        user_id=1001,
+        profile_id=profile.id,
+        job_type="single_generate",
+        item_type="card",
+        input_payload={"item_name": "DarkBlade"},
+        queued_at=datetime.now(UTC) - timedelta(seconds=30),
+    )
+    scan_claim_service = ServerQueuedJobScanClaimService(storage_root=tmp_path / "scan-claims", lease_seconds=30)
+    existing_claim = scan_claim_service.ensure_leadership(owner_id="external-web", owner_scope="external-web")
+    worker = ServerQueuedJobWorkerService(
+        session_factory=session_factory,
+        job_application_service_builder=builder,
+        scan_claim_service=scan_claim_service,
+        retry_cooldown_seconds=0,
+    )
+
+    worker.run_once()
+    status = worker.get_runtime_status()
+
+    assert status["is_leader"] is False
+    assert status["recent_leader_events"][-1]["event_type"] == "leader_observed_other"
+    assert status["recent_leader_events"][-1]["owner_id"] == "external-web"
+
+    scan_claim_service.release_leadership(existing_claim)
+
+
+def test_server_queued_job_worker_service_records_leader_released_event(db_session, tmp_path):
+    profile, cipher = _seed_profile_and_quota(db_session, user_ids=[1001], secret="worker-test-secret")
+    session_factory, builder = _build_job_service_builder(
+        db_session,
+        workflow_runner=_SucceededWorkerRunner(),
+        workflow_registry=_SupportedWorkerRegistry(),
+        cipher=cipher,
+    )
+    _create_queued_job(
+        db_session,
+        user_id=1001,
+        profile_id=profile.id,
+        job_type="single_generate",
+        item_type="card",
+        input_payload={"item_name": "DarkBlade"},
+        queued_at=datetime.now(UTC) - timedelta(seconds=30),
+    )
+    scan_claim_service = ServerQueuedJobScanClaimService(storage_root=tmp_path / "scan-claims", lease_seconds=30)
+    worker = ServerQueuedJobWorkerService(
+        session_factory=session_factory,
+        job_application_service_builder=builder,
+        scan_claim_service=scan_claim_service,
+        retry_cooldown_seconds=0,
+    )
+
+    worker.run_once()
+    worker._release_leadership()
+    status = worker.get_runtime_status()
+
+    assert status["is_leader"] is False
+    assert status["last_leader_lost_at"]
+    assert status["recent_leader_events"][-1]["event_type"] == "leader_released"
