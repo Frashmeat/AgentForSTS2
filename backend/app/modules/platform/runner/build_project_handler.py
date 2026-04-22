@@ -5,6 +5,7 @@ import mimetypes
 from pathlib import Path
 
 from app.modules.platform.application.services.server_deploy_target_lock_service import (
+    ServerDeployTargetBusyError,
     ServerDeployTargetLockService,
 )
 from app.modules.platform.application.services.server_deploy_registry_service import ServerDeployRegistryService
@@ -126,23 +127,30 @@ async def execute_build_project_step(
     artifacts = _build_artifact_payloads(project_root)
     deployed_to: str | None = None
     deployed_files: list[str] = []
+    deploy_registration_payload: dict[str, object] | None = None
     registry_service = deploy_registry_service or ServerDeployRegistryService()
     sts2_path = str(config_loader().get("sts2_path", "")).strip()
     if sts2_path:
         mods_root = Path(sts2_path) / "Mods"
         if not mods_root.exists():
             raise ValueError(f"server sts2 Mods path does not exist: {mods_root}")
+        target_dir = mods_root / project_name
         deploy_lock_handle = None
         try:
             if deploy_target_lock_service is not None:
-                deploy_lock_handle = deploy_target_lock_service.acquire_write_lock(
-                    project_name=project_name,
-                    job_id=request.job_id,
-                    job_item_id=request.job_item_id,
-                    user_id=int(request.input_payload.get("runtime_user_id", 0) or 0),
-                    server_project_ref=str(request.input_payload.get("server_project_ref", "")).strip(),
-                    source_workspace_root=str(project_root),
-                )
+                try:
+                    deploy_lock_handle = deploy_target_lock_service.acquire_write_lock(
+                        project_name=project_name,
+                        job_id=request.job_id,
+                        job_item_id=request.job_item_id,
+                        user_id=int(request.input_payload.get("runtime_user_id", 0) or 0),
+                        server_project_ref=str(request.input_payload.get("server_project_ref", "")).strip(),
+                        source_workspace_root=str(project_root),
+                    )
+                except ServerDeployTargetBusyError as error:
+                    registration = registry_service.read_registration(target_dir)
+                    error.last_successful_deploy = registry_service.build_registration_payload(registration)
+                    raise
             deployed = deploy_latest_output_files(project_root, mods_root, project_name=project_name)
             deployed_to = deployed.deployed_to
             deployed_files = list(deployed.file_names)
@@ -160,6 +168,9 @@ async def execute_build_project_step(
                     entrypoint="platform.build.project",
                     file_names=deployed_files,
                 )
+                deploy_registration_payload = registry_service.build_registration_payload(
+                    registry_service.read_registration(Path(deployed_to))
+                )
         finally:
             if deploy_lock_handle is not None:
                 deploy_target_lock_service.release_write_lock(deploy_lock_handle)
@@ -172,4 +183,5 @@ async def execute_build_project_step(
         "artifacts": artifacts,
         "deployed_to": deployed_to,
         "files": deployed_files,
+        "last_successful_deploy": deploy_registration_payload if deployed_to else None,
     }

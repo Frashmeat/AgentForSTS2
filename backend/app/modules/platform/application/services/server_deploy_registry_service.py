@@ -73,6 +73,23 @@ class ServerDeployRegistryService:
             payload = json.loads(metadata_path.read_text(encoding="utf-8"))
         except Exception:
             return None
+
+    def build_registration_payload(self, registration: ServerDeployRegistration | None) -> dict[str, object] | None:
+        if registration is None:
+            return None
+        return {
+            "schema_version": registration.schema_version,
+            "project_name": registration.project_name,
+            "job_id": registration.job_id,
+            "job_item_id": registration.job_item_id,
+            "user_id": registration.user_id,
+            "server_project_ref": registration.server_project_ref,
+            "source_workspace_root": registration.source_workspace_root,
+            "deployed_at": registration.deployed_at,
+            "deployed_to": registration.deployed_to,
+            "entrypoint": registration.entrypoint,
+            "file_names": list(registration.file_names),
+        }
         try:
             return ServerDeployRegistration(
                 schema_version=str(payload.get("schema_version", "v1")).strip() or "v1",

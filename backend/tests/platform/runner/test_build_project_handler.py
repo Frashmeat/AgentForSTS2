@@ -145,6 +145,9 @@ def test_execute_build_project_step_can_deploy_outputs_when_server_game_path_exi
     assert metadata["deployed_to"] == str(game_root / "Mods" / "DarkMod")
     assert metadata["entrypoint"] == "platform.build.project"
     assert metadata["file_names"] == ["DarkMod.dll", "DarkMod.pck"]
+    assert result["last_successful_deploy"]["project_name"] == "DarkMod"
+    assert result["last_successful_deploy"]["job_id"] == 1
+    assert result["last_successful_deploy"]["entrypoint"] == "platform.build.project"
 
 
 def test_execute_build_project_step_overwrites_existing_target_outputs_instead_of_reusing_old_files(tmp_path):
@@ -206,7 +209,28 @@ def test_execute_build_project_step_raises_when_server_deploy_target_is_busy(tmp
     (output_dir / "DarkMod.dll").write_bytes(b"dll")
     (output_dir / "DarkMod.pck").write_bytes(b"pck")
     game_root = tmp_path / "Game"
-    (game_root / "Mods").mkdir(parents=True)
+    target_dir = game_root / "Mods" / "DarkMod"
+    target_dir.mkdir(parents=True)
+    (target_dir / ".server-deploy.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "v1",
+                "project_name": "DarkMod",
+                "job_id": 99,
+                "job_item_id": 199,
+                "user_id": 1002,
+                "server_project_ref": "server-workspace:old",
+                "source_workspace_root": "I:/runtime/workspaces/old",
+                "deployed_at": "2026-04-20T10:00:00+00:00",
+                "deployed_to": str(target_dir),
+                "entrypoint": "legacy.ws.build_deploy",
+                "file_names": ["DarkMod.dll", "DarkMod.pck"],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
 
     async def fake_build_agent_runner(prompt, project_root, llm_cfg):
         return "Summary: 已完成 BattleScriptManager 的服务器项目构建\nBuild succeeded"
@@ -247,6 +271,8 @@ def test_execute_build_project_step_raises_when_server_deploy_target_is_busy(tmp
         assert str(error) == "server deploy target is busy"
         assert error.to_error_payload()["reason_code"] == "server_deploy_target_busy"
         assert error.to_error_payload()["resource_key"] == "DarkMod"
+        assert error.to_error_payload()["last_successful_deploy"]["job_id"] == 99
+        assert error.to_error_payload()["last_successful_deploy"]["entrypoint"] == "legacy.ws.build_deploy"
     else:
         raise AssertionError("expected ServerDeployTargetBusyError when deploy target lock cannot be acquired")
 
