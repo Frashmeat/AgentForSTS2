@@ -88,7 +88,7 @@ class PlatformRuntimeAuditService:
     ) -> list[JobEventView]:
         if self.session_factory is not None:
             db_events = self._list_events_db(after_id=after_id, limit=limit, event_type_prefix=event_type_prefix)
-            if db_events is not None:
+            if db_events:
                 return db_events
         file_path = self.storage_root / self.file_name
         if not file_path.exists():

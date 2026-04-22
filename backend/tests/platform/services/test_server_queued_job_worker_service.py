@@ -658,7 +658,8 @@ def test_server_queued_job_worker_service_records_observed_other_leader_event(db
     status = worker.get_runtime_status()
 
     assert status["is_leader"] is False
-    assert status["recent_leader_events"][-1]["event_type"] == "leader_observed_other"
+    assert any(event["event_type"] == "leader_observed_other" for event in status["recent_leader_events"])
+    assert status["recent_leader_events"][-1]["event_type"] == "leader_waiting_for_failover"
     assert status["recent_leader_events"][-1]["owner_id"] == "external-web"
     assert status["next_leader_retry_not_before"]
 
