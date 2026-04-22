@@ -23,7 +23,13 @@ class AdminQueryRepositories(ABC):
     def list_refunds(self, user_id: int | None = None) -> list[RefundRecordView]: ...
 
     @abstractmethod
-    def list_audit_events(self, job_id: int | None = None) -> list[JobEventView]: ...
+    def list_audit_events(
+        self,
+        job_id: int | None = None,
+        after_id: int | None = None,
+        limit: int = 50,
+        event_type_prefix: str | None = None,
+    ) -> list[JobEventView]: ...
 
     @abstractmethod
     def list_server_credentials(self, execution_profile_id: int | None = None) -> list[AdminServerCredentialListItem]: ...

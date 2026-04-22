@@ -91,11 +91,21 @@ class AdminQueryRepositoriesSqlAlchemy(AdminQueryRepositories):
             for row in rows
         ]
 
-    def list_audit_events(self, job_id: int | None = None) -> list[JobEventView]:
+    def list_audit_events(
+        self,
+        job_id: int | None = None,
+        after_id: int | None = None,
+        limit: int = 50,
+        event_type_prefix: str | None = None,
+    ) -> list[JobEventView]:
         query = self.session.query(JobEventRecord)
         if job_id is not None:
             query = query.filter(JobEventRecord.job_id == job_id)
-        rows = query.order_by(JobEventRecord.id.asc()).all()
+        if after_id is not None:
+            query = query.filter(JobEventRecord.id > after_id)
+        if str(event_type_prefix or "").strip():
+            query = query.filter(JobEventRecord.event_type.like(f"{str(event_type_prefix).strip()}%"))
+        rows = query.order_by(JobEventRecord.id.asc()).limit(max(int(limit or 0), 1)).all()
         return [
             JobEventView(
                 event_id=row.id,

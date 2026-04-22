@@ -16,6 +16,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.composition.container import ApplicationContainer
+from app.modules.platform.application.services.platform_runtime_audit_service import PlatformRuntimeAuditService
 from app.modules.auth.application.services import PBKDF2PasswordHasher
 from app.modules.platform.application.services.server_credential_health_checker import ServerCredentialHealthCheckResult
 from app.modules.platform.application.services.server_credential_cipher import ServerCredentialCipher
@@ -63,6 +64,19 @@ def client(tmp_path):
     )
     fake_health_checker = FakePlatformHealthChecker()
     container.register_singleton("platform.server_credential_health_checker_factory", lambda: fake_health_checker)
+    runtime_audit_service = PlatformRuntimeAuditService(
+        session_factory=container.resolve_singleton("platform.db_session_factory"),
+        storage_root=tmp_path / "runtime-audit",
+    )
+    runtime_audit_service.append_event(
+        event_type="runtime.queue_worker.leader_acquired",
+        payload={
+            "owner_id": "queue-worker:test",
+            "leader_epoch": 1,
+            "detail": "queue worker became leader",
+        },
+    )
+    container.register_singleton("platform.runtime_audit_service_factory", runtime_audit_service)
     session = container.resolve_singleton("platform.db_session_factory")()
     cipher = ServerCredentialCipher.from_settings(container.resolve_singleton("settings"))
     Base.metadata.create_all(session.bind)
@@ -201,6 +215,25 @@ def test_platform_admin_router_supports_execution_refund_and_audit_queries(clien
     audit = test_client.get("/api/admin/audit/events", params={"job_id": job_id})
     assert audit.status_code == 200
     assert audit.json()[0]["event_type"] == "ai_execution.finished"
+
+    merged_audit = test_client.get("/api/admin/audit/events")
+    assert merged_audit.status_code == 200
+    assert any(item["event_type"] == "runtime.queue_worker.leader_acquired" for item in merged_audit.json())
+
+    filtered_runtime_audit = test_client.get(
+        "/api/admin/audit/events",
+        params={"event_type_prefix": "runtime.queue_worker."},
+    )
+    assert filtered_runtime_audit.status_code == 200
+    assert filtered_runtime_audit.json()
+    assert all(item["event_type"].startswith("runtime.queue_worker.") for item in filtered_runtime_audit.json())
+
+    limited_runtime_audit = test_client.get(
+        "/api/admin/audit/events",
+        params={"event_type_prefix": "runtime.queue_worker.", "after_id": 0, "limit": 1},
+    )
+    assert limited_runtime_audit.status_code == 200
+    assert len(limited_runtime_audit.json()) == 1
 
     credentials = test_client.get("/api/admin/platform/server-credentials")
     assert credentials.status_code == 200

@@ -4,7 +4,7 @@ from contextlib import contextmanager
 
 from fastapi import APIRouter, HTTPException, Request
 
-from app.modules.platform.application.services import AdminQueryService, ServerCredentialAdminService
+from app.modules.platform.application.services import AdminQueryService, PlatformRuntimeAuditService, ServerCredentialAdminService
 from app.modules.platform.contracts import CreateServerCredentialCommand, UpdateServerCredentialCommand
 from ._auth_support import auth_session_scope, require_admin_user
 
@@ -34,9 +34,20 @@ def _session_scope(request: Request):
 def _build_admin_query_service(session, request: Request) -> AdminQueryService:
     container = _container(request)
     repositories = container.resolve_singleton("platform.admin_query_repositories_factory")(session)
+    runtime_audit_service = _build_runtime_audit_service(request)
     return container.resolve_singleton("platform.admin_query_service_factory")(
         admin_query_repositories=repositories,
+        runtime_audit_service=runtime_audit_service,
     )
+
+
+def _build_runtime_audit_service(request: Request) -> PlatformRuntimeAuditService:
+    container = _container(request)
+    factory = container.resolve_singleton("platform.runtime_audit_service_factory")
+    session_factory = container.resolve_optional_singleton("platform.db_session_factory")
+    if callable(factory):
+        return factory(session_factory=session_factory)
+    return factory
 
 
 def _build_server_credential_admin_service(session, request: Request) -> ServerCredentialAdminService:
@@ -87,12 +98,26 @@ def list_refunds(request: Request, user_id: int | None = None):
 
 
 @router.get("/audit/events")
-def list_audit_events(request: Request, job_id: int | None = None):
+def list_audit_events(
+    request: Request,
+    job_id: int | None = None,
+    after_id: int | None = None,
+    limit: int = 50,
+    event_type_prefix: str | None = None,
+):
     with auth_session_scope(request) as auth_session:
         require_admin_user(request, auth_session)
     with _session_scope(request) as session:
         service = _build_admin_query_service(session, request)
-        return [item.model_dump() for item in service.list_audit_events(job_id=job_id)]
+        return [
+            item.model_dump()
+            for item in service.list_audit_events(
+                job_id=job_id,
+                after_id=after_id,
+                limit=limit,
+                event_type_prefix=event_type_prefix,
+            )
+        ]
 
 
 @router.get("/platform/server-credentials")
