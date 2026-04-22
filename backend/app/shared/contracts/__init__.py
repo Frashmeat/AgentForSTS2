@@ -1,4 +1,20 @@
 from .approval import ApprovalDecision
+from .knowledge import (
+    KnowledgeFactItem,
+    KnowledgeGuidanceItem,
+    KnowledgeLookupItem,
+    KnowledgePacket,
+    KnowledgeQuery,
+)
 from .workflow_events import WORKFLOW_EVENT_STAGES, WorkflowEvent
 
-__all__ = ["ApprovalDecision", "WORKFLOW_EVENT_STAGES", "WorkflowEvent"]
+__all__ = [
+    "ApprovalDecision",
+    "KnowledgeFactItem",
+    "KnowledgeGuidanceItem",
+    "KnowledgeLookupItem",
+    "KnowledgePacket",
+    "KnowledgeQuery",
+    "WORKFLOW_EVENT_STAGES",
+    "WorkflowEvent",
+]
