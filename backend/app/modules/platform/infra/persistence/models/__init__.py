@@ -8,6 +8,7 @@ from .execution_charge import ChargeStatus, ExecutionChargeRecord
 from .job import JobRecord
 from .job_event import JobEventRecord
 from .job_item import JobItemRecord
+from .platform_runtime_audit_event import PlatformRuntimeAuditEventRecord
 from .quota_account import QuotaAccountRecord, QuotaAccountStatus
 from .quota_bucket import QuotaBucketRecord, QuotaBucketType
 from .server_credential import ServerCredentialRecord
@@ -31,6 +32,7 @@ def platform_tables():
         UsageLedgerRecord.__table__,
         ArtifactRecord.__table__,
         JobEventRecord.__table__,
+        PlatformRuntimeAuditEventRecord.__table__,
     ]
 
 
@@ -48,6 +50,7 @@ __all__ = [
     "JobRecord",
     "JobStatus",
     "LedgerType",
+    "PlatformRuntimeAuditEventRecord",
     "QuotaAccountRecord",
     "QuotaAccountStatus",
     "QuotaBucketRecord",

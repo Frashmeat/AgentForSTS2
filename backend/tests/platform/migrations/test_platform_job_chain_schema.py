@@ -20,6 +20,7 @@ EXPECTED_TABLES = {
     "usage_ledgers",
     "artifacts",
     "job_events",
+    "platform_runtime_audit_events",
 }
 
 
