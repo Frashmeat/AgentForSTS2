@@ -7,6 +7,11 @@
 - `powershell -File .\tools\tools.ps1`
   默认进入分层数字菜单，可直接用键盘选择分组、脚本和参数模板。
 
+说明：
+
+- 以上示例沿用 `powershell -File` 写法；如果你当前使用的是 `pwsh`，可直接替换为 `pwsh -File`。
+- `tools.ps1` 现在会沿用当前 PowerShell 宿主执行子脚本，不再强制切回 Windows PowerShell 5.1。
+
 菜单特性：
 
 - 直接运行后进入主菜单，不需要手输完整命令
@@ -35,12 +40,12 @@ powershell -File .\tools\tools.ps1 start dev
 powershell -File .\tools\tools.ps1 split start -DryRun
 powershell -File .\tools\tools.ps1 split stop
 
+# 停止 / 清理
+powershell -File .\tools\tools.ps1 stop local
+powershell -File .\tools\tools.ps1 stop deploy hybrid
+
 # 开发辅助
 powershell -File .\tools\tools.ps1 dev decompile
-
-# 停止本机前端 / workstation / web 本地进程
-powershell -File .\tools\kill-local.ps1
-powershell -File .\tools\kill-local.ps1 -FrontendPort 4173 -WorkstationPort 8860 -WebPort 8870
 
 # latest 打包 / 部署
 powershell -File .\tools\tools.ps1 latest package hybrid
@@ -61,8 +66,9 @@ pwsh -NoProfile -File .\tools\latest\stop-deploy.ps1 hybrid
 1. 安装
 2. 启动
 3. 拆分运行时
-4. 开发辅助
-5. 打包 / 部署
+4. 停止 / 清理
+5. 开发辅助
+6. 打包 / 部署
 
 每个脚本项下面还会继续进入“参数模板”菜单，例如：
 
@@ -74,6 +80,9 @@ pwsh -NoProfile -File .\tools\latest\stop-deploy.ps1 hybrid
   - DryRun 预览
   - 启动但不打开浏览器
   - 自定义端口 / Web API 地址
+- 停止 / 清理
+  - 停止本机 frontend/workstation/web
+  - 停止 latest deploy 本地服务
 - latest 打包
   - 直接打包
   - 打包但不压缩
@@ -127,6 +136,13 @@ tools/
 - `tools\split-local\stop_split_local.bat`
   停止 split-local 双进程，并清理 `runtime/split-local-state.json`。
 
+### stop
+
+- `tools.ps1 stop local`
+  统一入口。对应 `tools\kill-local.ps1`，优先按状态文件和配置发现端口并停止当前仓库识别出的本机 `frontend / workstation / web` 进程。
+- `tools.ps1 stop deploy <target>`
+  统一入口。对应 `tools\latest\stop-deploy.ps1`，按 `release\runtime\local-deploy-state.json` 停止 `deploy-docker.ps1` 拉起的本地进程。
+
 ### dev
 
 - `tools\dev\decompile_sts2.py`
@@ -135,6 +151,7 @@ tools/
 ### 本地进程停止
 
 - `tools\kill-local.ps1`
+  真实脚本入口；日常优先使用 `tools.ps1 stop local`。
   优先读取 `local-deploy-state.json`、`split-local-state.json`、`runtime/workstation.config.json` 发现端口和 PID，再停止本机 `frontend`、`workstation`、`web` 三类进程；命令行端口参数仅作为显式覆盖。
   同时会清理当前 PowerShell 会话中残留的日志镜像事件与 writer 句柄，避免 `runtime/logs/*.log` 被持续占用。
   如存在 Docker 化 `web` 服务，也会对当前仓库 `tools\latest\artifacts` 下可识别的 release 尝试执行 `docker compose down --remove-orphans`。
@@ -154,15 +171,24 @@ tools/
   按目标部署 mixed release。
   `web` 继续使用 Docker；`workstation` 与 `frontend` 改为本机启动；`hybrid` 会本机启动 `workstation + frontend`。
   未显式传入 `-ConfigPath` 时，脚本只会优先读取 release 内 `runtime\*.config.json`，再回退到服务目录内 `config.example.json`。
+  `config.example.json` 现仅保留真实配置字段，不再内嵌 `_注释_*` 伪字段；常用可选值说明如下：
+  `llm.mode`：`agent_cli`、`claude_api`
+  `llm.agent_backend`：`claude`、`codex`
+  `image_gen.model`：`flux.2-pro`、`flux.2-flex`、`flux.2-klein`、`flux.2-max`、`flux.2-dev`、`flux.1.1-pro`
+  `image_gen.provider`：`bfl`、`fal`、`volcengine`、`wanxiang`
+  若自动发现的 `runtime\workstation.config.json` / `runtime\web.config.json` 已损坏无法解析，脚本会告警并自动回退到服务目录内的 `config.example.json`，随后重写新的 runtime 配置。
+  当显式传入 `-FrontendPort` 时，脚本会把实际前端端口同步补到 `runtime\workstation.config.json` / linked `web` 的 `runtime\web.config.json` 的 `cors_origins`，避免独立静态前端换端口后被本地 CORS 拦截。
+  本地 `workstation` 与 linked `web` 运行时还会额外开启 loopback origin 兜底，允许 `localhost` / `127.0.0.1` / `::1` 下的任意本地端口访问；该兜底只用于本机部署，不改变正式公网 `web` 的显式白名单口径。
   默认会基于当前 release 重新 `build` 需要 Docker 的目标镜像；只有显式传入 `-ReuseImages` 时才会复用已有镜像。
   `web` 目标会在 `runtime\.env` 中自动生成并持久化 `SPIREFORGE_AUTH_SESSION_SECRET` 与 `SPIREFORGE_SERVER_CREDENTIAL_SECRET`，随后以环境变量注入容器；`runtime\web.config.json` 不再继续写入 `auth.session_secret`。
   `web` 目标部署前还会把 release 内的 `docker-compose.yml` 刷新为仓库模板，避免继续沿用旧 release 遗留的 Compose 环境注入方式。
   `frontend` 未显式传入 `-WebBaseUrl` 时会默认写入本机 `http://127.0.0.1:7870`；`hybrid` 需显式传入 `-WebBaseUrl`，或改用 `-DeployLocalWeb`。
-  `hybrid` 传入 `-DeployLocalWeb`（可配合 `-WebReleaseRoot`）时，会从当前 hybrid release 的同级目录推导本机 `web release`，并在联动部署前自动刷新该 release，确保跟随当前仓库模板；如目录不在同级，可显式传入 `-WebReleaseRoot`。
+  `hybrid` 传入 `-DeployLocalWeb`（可配合 `-WebReleaseRoot`）时，会从当前 hybrid release 的同级目录推导本机 `web release`，并在联动部署前自动刷新该 release，确保跟随当前仓库模板；如目录不在同级，可显式传入 `-WebReleaseRoot`。若未显式传入 `-ConfigPath`，联动部署的 `web` 目标会继续沿用 release 内 `runtime\web.config.json` / `config.example.json` 的默认回退链。
   Docker 构建默认会自动解析 `Python` 基础镜像，优先复用本机已有标签，并默认回退到 `m.daocloud.io/docker.io/library/python:3.11-slim`；如需手工指定，可传 `-PythonBaseImage`。
   若默认 `runtime\logs\*.log` 正被旧进程占用，脚本会自动回退到带时间戳后缀的新日志文件，避免本机部署直接失败。
-  `package-release.ps1` 与 `deploy-docker.ps1` 现已兼容 Windows PowerShell 5.1 与 PowerShell 7，不再依赖 `ConvertFrom-Json -AsHashtable`。
+  `package-release.ps1` 与 `deploy-docker.ps1` 现已兼容 Windows PowerShell 5.1 与 PowerShell 7，不再依赖 `ConvertFrom-Json -AsHashtable`，`package-release.ps1` 的相对路径处理也不再依赖 `System.IO.Path.GetRelativePath`。
 - `tools\latest\stop-deploy.ps1`
+  真实脚本入口；日常优先使用 `tools.ps1 stop deploy <target>`。
   停止 `deploy-docker.ps1` 以本机模式拉起的 `workstation` / `frontend` 进程，并关闭对应日志窗口。
   状态文件位于 `release\runtime\local-deploy-state.json`；只关闭日志窗口并不会自动停止服务。
 - `tools\latest\build-workstation-installer.ps1`

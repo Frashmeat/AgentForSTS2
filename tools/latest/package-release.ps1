@@ -143,6 +143,40 @@ function ConvertFrom-JsonAsHashtableCompat {
     return ConvertTo-HashtableRecursive -Value ($JsonText | ConvertFrom-Json)
 }
 
+function Get-RelativePathFromDirectoryCompat {
+    param(
+        [Parameter(Mandatory = $true)][string]$BaseDirectory,
+        [Parameter(Mandatory = $true)][string]$TargetPath
+    )
+
+    $resolvedBaseDirectory = [System.IO.Path]::GetFullPath($BaseDirectory)
+    $resolvedTargetPath = [System.IO.Path]::GetFullPath($TargetPath)
+    $baseRoot = [System.IO.Path]::GetPathRoot($resolvedBaseDirectory)
+    $targetRoot = [System.IO.Path]::GetPathRoot($resolvedTargetPath)
+
+    if (-not [string]::Equals($baseRoot, $targetRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $resolvedTargetPath
+    }
+
+    $getRelativePathMethod = [System.IO.Path].GetMethod("GetRelativePath", [type[]]@([string], [string]))
+    if ($null -ne $getRelativePathMethod) {
+        return [string]$getRelativePathMethod.Invoke($null, @($resolvedBaseDirectory, $resolvedTargetPath))
+    }
+
+    $baseDirectoryUriPath = $resolvedBaseDirectory
+    if (
+        -not $baseDirectoryUriPath.EndsWith([System.IO.Path]::DirectorySeparatorChar) -and
+        -not $baseDirectoryUriPath.EndsWith([System.IO.Path]::AltDirectorySeparatorChar)
+    ) {
+        $baseDirectoryUriPath += [System.IO.Path]::DirectorySeparatorChar
+    }
+
+    $baseUri = [System.Uri]::new($baseDirectoryUriPath)
+    $targetUri = [System.Uri]::new($resolvedTargetPath)
+    $relativeUri = $baseUri.MakeRelativeUri($targetUri)
+    return ([System.Uri]::UnescapeDataString($relativeUri.ToString()) -replace "/", "\")
+}
+
 function Remove-DirectoryIfExists {
     param([string]$Path)
 
@@ -174,7 +208,7 @@ function New-CleanDirectory {
     $null = New-Item -ItemType Directory -Path $Path -Force
 
     foreach ($child in Get-ChildItem -LiteralPath $Path -Force) {
-        $relativePath = [System.IO.Path]::GetRelativePath($Path, $child.FullName)
+        $relativePath = Get-RelativePathFromDirectoryCompat -BaseDirectory $Path -TargetPath $child.FullName
         $shouldPreserve = $false
 
         foreach ($preservedRelativePath in $PreserveRelativePaths) {
@@ -488,7 +522,7 @@ function Copy-KnowledgeSeedBundle {
 
     if (Test-Path -LiteralPath $resourceSeedDir) {
         foreach ($seedFile in Get-ChildItem -LiteralPath $resourceSeedDir -Recurse -File) {
-            $relativePath = [System.IO.Path]::GetRelativePath($resourceSeedDir, $seedFile.FullName)
+            $relativePath = Get-RelativePathFromDirectoryCompat -BaseDirectory $resourceSeedDir -TargetPath $seedFile.FullName
             $targetPath = Join-Path $resourceKnowledgeDir $relativePath
             if (Test-Path -LiteralPath $targetPath) {
                 continue
@@ -552,7 +586,7 @@ function New-ZipFromDirectory {
     $zipArchive = [System.IO.Compression.ZipFile]::Open($DestinationPath, [System.IO.Compression.ZipArchiveMode]::Create)
     try {
         foreach ($file in Get-ChildItem -LiteralPath $resolvedSourceDir -Recurse -Force -File) {
-            $relativePath = [System.IO.Path]::GetRelativePath($resolvedSourceDir, $file.FullName)
+            $relativePath = Get-RelativePathFromDirectoryCompat -BaseDirectory $resolvedSourceDir -TargetPath $file.FullName
             $normalizedRelativePath = ($relativePath -replace "/", "\")
             $shouldSkip = $false
 

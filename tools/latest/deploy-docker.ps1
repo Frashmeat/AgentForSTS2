@@ -395,6 +395,17 @@ function Read-JsonHashtableFile {
     return $parsed
 }
 
+function Get-JsonHashtableFileError {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    try {
+        $null = Read-JsonHashtableFile -Path $Path
+        return $null
+    } catch {
+        return $_.Exception.Message
+    }
+}
+
 function Get-NestedStringValue {
     param(
         [hashtable]$InputObject,
@@ -1211,9 +1222,19 @@ function Invoke-HybridLocalWebDeployment {
         "-ReleaseRoot",
         $webReleaseRoot,
         "-ProjectName",
-        (Get-DefaultHybridWebProjectName -HybridProjectName $HybridProjectName),
-        "-ConfigPath",
-        $ConfigPath,
+        (Get-DefaultHybridWebProjectName -HybridProjectName $HybridProjectName)
+    )
+    if (-not [string]::IsNullOrWhiteSpace($ConfigPath)) {
+        $invokeArgs += @(
+            "-ConfigPath",
+            $ConfigPath
+        )
+    }
+    $invokeArgs += @(
+        "-WorkstationPort",
+        $WorkstationPort,
+        "-FrontendPort",
+        $FrontendPort,
         "-WebPort",
         $WebPort,
         "-PostgresHostPort",
@@ -1257,15 +1278,28 @@ function Get-SourceConfigPath {
     )
 
     if ((-not [string]::IsNullOrWhiteSpace($PreferredPath)) -and (Test-Path -LiteralPath $PreferredPath)) {
+        $preferredError = Get-JsonHashtableFileError -Path $PreferredPath
+        if (-not [string]::IsNullOrWhiteSpace($preferredError)) {
+            throw "显式提供的配置文件无法解析: $PreferredPath`n$preferredError"
+        }
         return (Resolve-Path $PreferredPath).Path
     }
 
     if ((-not [string]::IsNullOrWhiteSpace($RuntimeConfigPath)) -and (Test-Path -LiteralPath $RuntimeConfigPath)) {
-        return (Resolve-Path $RuntimeConfigPath).Path
+        $runtimeConfigError = Get-JsonHashtableFileError -Path $RuntimeConfigPath
+        if ([string]::IsNullOrWhiteSpace($runtimeConfigError)) {
+            return (Resolve-Path $RuntimeConfigPath).Path
+        }
+
+        Write-Warning ("检测到损坏的 runtime 配置，已回退到模板配置: {0}`n{1}" -f $RuntimeConfigPath, $runtimeConfigError)
     }
 
     $fallback = Join-Path $FallbackServiceDir "config.example.json"
     if (Test-Path -LiteralPath $fallback) {
+        $fallbackError = Get-JsonHashtableFileError -Path $fallback
+        if (-not [string]::IsNullOrWhiteSpace($fallbackError)) {
+            throw "回退模板配置无法解析: $fallback`n$fallbackError"
+        }
         return $fallback
     }
 
@@ -1284,6 +1318,46 @@ function Ensure-Hashtable {
     return @{} + $Value
 }
 
+function Get-LoopbackOriginsForPort {
+    param([int]$Port)
+
+    if ($Port -le 0) {
+        return @()
+    }
+
+    return @(
+        "http://localhost:$Port"
+        "http://127.0.0.1:$Port"
+    )
+}
+
+function Merge-UniqueStringList {
+    param(
+        [object]$Primary,
+        [string[]]$Additional = @()
+    )
+
+    $merged = New-Object System.Collections.Generic.List[string]
+    foreach ($source in @($Primary, $Additional)) {
+        if ($source -is [System.Collections.IEnumerable] -and -not ($source -is [string])) {
+            foreach ($item in $source) {
+                $text = [string]$item
+                if (-not [string]::IsNullOrWhiteSpace($text) -and -not $merged.Contains($text)) {
+                    $merged.Add($text) | Out-Null
+                }
+            }
+            continue
+        }
+
+        $text = [string]$source
+        if (-not [string]::IsNullOrWhiteSpace($text) -and -not $merged.Contains($text)) {
+            $merged.Add($text) | Out-Null
+        }
+    }
+
+    return [string[]]$merged.ToArray()
+}
+
 function New-RuntimeConfig {
     param(
         [string]$SourceConfigPath,
@@ -1291,13 +1365,27 @@ function New-RuntimeConfig {
         [string]$Mode,
         [string]$DbUser,
         [string]$DbPassword,
-        [string]$DbName
+        [string]$DbName,
+        [int]$ResolvedWorkstationPort,
+        [int]$ResolvedWebPort,
+        [int]$ResolvedFrontendPort
     )
 
     $config = Read-JsonHashtableFile -Path $SourceConfigPath
     $config["migration"] = Ensure-Hashtable -Value $config["migration"]
     $config["database"] = Ensure-Hashtable -Value $config["database"]
     $config["auth"] = Ensure-Hashtable -Value $config["auth"]
+    $config["runtime"] = Ensure-Hashtable -Value $config["runtime"]
+    $config["runtime"]["workstation"] = Ensure-Hashtable -Value $config["runtime"]["workstation"]
+    $config["runtime"]["web"] = Ensure-Hashtable -Value $config["runtime"]["web"]
+
+    $sharedLoopbackOrigins = @() +
+        (Get-LoopbackOriginsForPort -Port $ResolvedFrontendPort) +
+        (Get-LoopbackOriginsForPort -Port $ResolvedWorkstationPort) +
+        (Get-LoopbackOriginsForPort -Port $ResolvedWebPort)
+    $config["runtime"]["workstation"]["cors_origins"] = Merge-UniqueStringList -Primary $config["runtime"]["workstation"]["cors_origins"] -Additional $sharedLoopbackOrigins
+    $config["runtime"]["web"]["cors_origins"] = Merge-UniqueStringList -Primary $config["runtime"]["web"]["cors_origins"] -Additional $sharedLoopbackOrigins
+    $config["runtime"]["workstation"]["allow_loopback_origins"] = $true
 
     if ($Mode -eq "web") {
         # Web 目标始终接管数据库连接，并强制打开平台 API 相关开关。
@@ -1307,6 +1395,7 @@ function New-RuntimeConfig {
         $config["migration"]["platform_jobs_api_enabled"] = $true
         $config["migration"]["platform_service_split_enabled"] = $true
         $config["auth"]["session_secret"] = ""
+        $config["runtime"]["web"]["allow_loopback_origins"] = $true
     } else {
         # workstation 中的工作站进程不应暴露 web 平台路由。
         $config["migration"]["platform_jobs_api_enabled"] = $false
@@ -1511,6 +1600,8 @@ function Start-LocalWorkstationDeployment {
         [string]$ReleaseRoot,
         [string]$SourceConfigPath,
         [int]$ResolvedWorkstationPort,
+        [int]$ResolvedWebPort,
+        [int]$ResolvedFrontendPort,
         [string]$ResolvedWebBaseUrl,
         [string]$RepoRoot
     )
@@ -1524,7 +1615,7 @@ function Start-LocalWorkstationDeployment {
     Assert-PathExists -Path $backendRoot -Label "workstation backend 目录"
     Assert-PathExists -Path $frontendDist -Label "workstation frontend/dist 目录"
 
-    $workstationConfig = New-RuntimeConfig -SourceConfigPath $SourceConfigPath -Mode "workstation" -DbUser $PostgresUser -DbPassword $PostgresPassword -DbName $PostgresDb
+    $workstationConfig = New-RuntimeConfig -SourceConfigPath $SourceConfigPath -Mode "workstation" -DbUser $PostgresUser -DbPassword $PostgresPassword -DbName $PostgresDb -ResolvedWorkstationPort $ResolvedWorkstationPort -ResolvedWebPort $ResolvedWebPort -ResolvedFrontendPort $ResolvedFrontendPort
     Write-LocalServiceConfig -Config $workstationConfig -RuntimeMirrorPath $runtimeMirrorPath
     Remove-FileIfExists -Path $serviceConfigPath
     Write-FrontendRuntimeConfig -OutputPath (Join-Path $frontendDist "runtime-config.js") `
@@ -1798,7 +1889,7 @@ if ($Target -in @("hybrid", "workstation")) {
 }
 
 if ($Target -in @("hybrid", "workstation")) {
-    $workstationConfig = New-RuntimeConfig -SourceConfigPath $sourceConfigPath -Mode "workstation" -DbUser $PostgresUser -DbPassword $PostgresPassword -DbName $PostgresDb
+    $workstationConfig = New-RuntimeConfig -SourceConfigPath $sourceConfigPath -Mode "workstation" -DbUser $PostgresUser -DbPassword $PostgresPassword -DbName $PostgresDb -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebPort $resolvedWebPort -ResolvedFrontendPort $resolvedFrontendPort
 }
 
 if ($Target -eq "hybrid" -or $Target -eq "workstation") {
@@ -1809,7 +1900,7 @@ if ($Target -eq "web") {
     $webSourceConfigPath = $sourceConfigPath
     $webSourceConfig = Read-JsonHashtableFile -Path $webSourceConfigPath
     Write-ComposeEnvFile -TargetName $Target -EnvPath $envFile -ResolvedPostgresImage $resolvedPostgresImage -ResolvedPythonBaseImage $resolvedPythonBaseImage -SourceConfig $webSourceConfig
-    $webConfig = New-RuntimeConfig -SourceConfigPath $webSourceConfigPath -Mode "web" -DbUser $PostgresUser -DbPassword $PostgresPassword -DbName $PostgresDb
+    $webConfig = New-RuntimeConfig -SourceConfigPath $webSourceConfigPath -Mode "web" -DbUser $PostgresUser -DbPassword $PostgresPassword -DbName $PostgresDb -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebPort $resolvedWebPort -ResolvedFrontendPort $resolvedFrontendPort
     Write-RuntimeConfigFile -Config $webConfig -OutputPath (Join-Path $runtimeDir "web.config.json")
 }
 
@@ -1860,7 +1951,7 @@ Clear-LocalDeploymentState -ReleaseRoot $effectiveReleaseRoot
 try {
     switch ($Target) {
         "workstation" {
-            $process = Start-LocalWorkstationDeployment -ReleaseRoot $effectiveReleaseRoot -SourceConfigPath $sourceConfigPath -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebBaseUrl $WebBaseUrl -RepoRoot $repoRoot
+            $process = Start-LocalWorkstationDeployment -ReleaseRoot $effectiveReleaseRoot -SourceConfigPath $sourceConfigPath -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebPort $resolvedWebPort -ResolvedFrontendPort $resolvedFrontendPort -ResolvedWebBaseUrl $WebBaseUrl -RepoRoot $repoRoot
             if ($null -ne $process) {
                 $localProcesses += [pscustomobject]@{
                     ServiceName = "workstation"
@@ -1881,7 +1972,7 @@ try {
             }
         }
         "hybrid" {
-            $workstationProcess = Start-LocalWorkstationDeployment -ReleaseRoot $effectiveReleaseRoot -SourceConfigPath $sourceConfigPath -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebBaseUrl $WebBaseUrl -RepoRoot $repoRoot
+            $workstationProcess = Start-LocalWorkstationDeployment -ReleaseRoot $effectiveReleaseRoot -SourceConfigPath $sourceConfigPath -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebPort $resolvedWebPort -ResolvedFrontendPort $resolvedFrontendPort -ResolvedWebBaseUrl $WebBaseUrl -RepoRoot $repoRoot
             if ($null -ne $workstationProcess) {
                 $localProcesses += [pscustomobject]@{
                     ServiceName = "workstation"
