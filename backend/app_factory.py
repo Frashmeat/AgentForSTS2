@@ -36,6 +36,13 @@ if sys.platform == "win32":
 AppRole = Literal["workstation", "web"]
 _QUEUE_WORKER_POLL_INTERVAL_SECONDS = 3.0
 _QUEUE_WORKER_RETRY_COOLDOWN_SECONDS = 5
+_LOOPBACK_CORS_ORIGIN_REGEX = r"^https?://(?:localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::\d+)?$"
+
+
+def _resolve_cors_allow_origin_regex(runtime_config: dict) -> str | None:
+    if runtime_config.get("allow_loopback_origins", False):
+        return _LOOPBACK_CORS_ORIGIN_REGEX
+    return None
 
 
 def _create_base_app(role: AppRole, config: dict) -> FastAPI:
@@ -53,6 +60,7 @@ def _create_base_app(role: AppRole, config: dict) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=runtime_config.get("cors_origins", []),
+        allow_origin_regex=_resolve_cors_allow_origin_regex(runtime_config),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

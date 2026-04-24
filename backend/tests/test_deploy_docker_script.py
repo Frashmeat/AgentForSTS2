@@ -95,6 +95,7 @@ def _run_deploy(
     *extra_args: str,
     prepare_default_web_release: bool = False,
     record_log_viewers: bool = False,
+    pass_config_path: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     release_root, config_path = _prepare_release_bundle(tmp_path / "release", target)
     if prepare_default_web_release:
@@ -125,10 +126,13 @@ def _run_deploy(
         target,
         "-ReleaseRoot",
         str(release_root),
-        "-ConfigPath",
-        str(config_path),
         *extra_args,
     ]
+    if pass_config_path:
+        command.extend([
+            "-ConfigPath",
+            str(config_path),
+        ])
     completed = subprocess.run(
         command,
         cwd=REPO_ROOT,
@@ -204,6 +208,64 @@ def test_deploy_docker_hybrid_can_explicitly_deploy_local_web_release(tmp_path: 
     assert "-m http.server 8080 --bind 127.0.0.1 --directory" in result.python_log
     assert runtime_config.exists()
     assert 'web: "http://127.0.0.1:7870"' in runtime_config.read_text(encoding="utf-8")
+
+
+def test_deploy_docker_hybrid_custom_frontend_port_updates_runtime_cors_origins(tmp_path: Path):
+    result = _run_deploy(tmp_path, "hybrid", "-DeployLocalWeb", "-FrontendPort", "4173", prepare_default_web_release=True)
+    workstation_config_path = tmp_path / "release" / "runtime" / "workstation.config.json"
+    web_config_path = tmp_path / "agentthespire-web-release" / "runtime" / "web.config.json"
+
+    assert result.returncode == 0, result.stderr
+    workstation_config = json.loads(workstation_config_path.read_text(encoding="utf-8"))
+    web_config = json.loads(web_config_path.read_text(encoding="utf-8"))
+    assert "http://localhost:4173" in workstation_config["runtime"]["workstation"]["cors_origins"]
+    assert "http://127.0.0.1:4173" in workstation_config["runtime"]["workstation"]["cors_origins"]
+    assert workstation_config["runtime"]["workstation"]["allow_loopback_origins"] is True
+    assert "http://localhost:4173" in web_config["runtime"]["web"]["cors_origins"]
+    assert "http://127.0.0.1:4173" in web_config["runtime"]["web"]["cors_origins"]
+    assert web_config["runtime"]["web"]["allow_loopback_origins"] is True
+
+
+def test_deploy_docker_hybrid_local_web_can_omit_explicit_config_path(tmp_path: Path):
+    result = _run_deploy(
+        tmp_path,
+        "hybrid",
+        "-DeployLocalWeb",
+        prepare_default_web_release=True,
+        pass_config_path=False,
+    )
+    runtime_config = tmp_path / "release" / "services" / "frontend" / "frontend" / "dist" / "runtime-config.js"
+
+    assert result.returncode == 0, result.stderr
+    assert result.docker_log.count("compose down") == 1
+    assert result.docker_log.count("compose build") == 1
+    assert result.docker_log.count("compose up") == 1
+    assert runtime_config.exists()
+    assert 'web: "http://127.0.0.1:7870"' in runtime_config.read_text(encoding="utf-8")
+
+
+def test_deploy_docker_hybrid_falls_back_when_runtime_workstation_config_is_invalid(tmp_path: Path):
+    release_root, _ = _prepare_release_bundle(tmp_path / "release", "hybrid")
+    runtime_config_path = release_root / "runtime" / "workstation.config.json"
+    runtime_config_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_config_path.write_text('{"runtime":{"bad" a}}\n', encoding="utf-8")
+
+    _prepare_release_bundle(tmp_path / "agentthespire-web-release", "web")
+    result = _run_deploy(
+        tmp_path,
+        "hybrid",
+        "-DeployLocalWeb",
+        prepare_default_web_release=False,
+        pass_config_path=False,
+    )
+    frontend_runtime_config = release_root / "services" / "frontend" / "frontend" / "dist" / "runtime-config.js"
+
+    assert result.returncode == 0, result.stderr
+    assert "检测到损坏的 runtime 配置，已回退到模板配置" in result.stdout
+    assert frontend_runtime_config.exists()
+    rewritten_config = json.loads(runtime_config_path.read_text(encoding="utf-8"))
+    assert rewritten_config["migration"]["platform_jobs_api_enabled"] is False
+    assert rewritten_config["migration"]["platform_service_split_enabled"] is False
 
 
 def test_deploy_docker_hybrid_accepts_explicit_web_release_root(tmp_path: Path):

@@ -127,3 +127,9 @@ def test_create_app_for_web_fails_fast_when_runtime_secret_is_missing(monkeypatc
 
     with pytest.raises(RuntimeError, match="auth.session_secret is required for web runtime"):
         app_factory.create_app("web")
+
+
+def test_resolve_cors_allow_origin_regex_only_enables_loopback_when_requested():
+    assert app_factory._resolve_cors_allow_origin_regex({"allow_loopback_origins": True}) == app_factory._LOOPBACK_CORS_ORIGIN_REGEX
+    assert app_factory._resolve_cors_allow_origin_regex({"allow_loopback_origins": False}) is None
+    assert app_factory._resolve_cors_allow_origin_regex({}) is None

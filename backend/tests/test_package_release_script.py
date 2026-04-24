@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import time
 import zipfile
 from pathlib import Path
+
+import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -77,6 +80,15 @@ def _write_template_files(repo_root: Path, target: str) -> None:
 
 
 def _run_package_release(temp_repo: Path, target: str, *extra_args: str) -> subprocess.CompletedProcess[str]:
+    return _run_package_release_with_shell(temp_repo, "pwsh", target, *extra_args)
+
+
+def _run_package_release_with_shell(
+    temp_repo: Path,
+    shell_command: str,
+    target: str,
+    *extra_args: str,
+) -> subprocess.CompletedProcess[str]:
     bin_dir = temp_repo / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
     _write_fake_git(bin_dir)
@@ -84,11 +96,14 @@ def _run_package_release(temp_repo: Path, target: str, *extra_args: str) -> subp
 
     env = os.environ.copy()
     env["PATH"] = str(bin_dir) + os.pathsep + env["PATH"]
+    shell_path = shutil.which(shell_command) or shell_command
 
     return subprocess.run(
         [
-            "pwsh",
+            shell_path,
             "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
             "-File",
             str(temp_repo / "tools" / "latest" / "package-release.ps1"),
             target,
@@ -102,6 +117,33 @@ def _run_package_release(temp_repo: Path, target: str, *extra_args: str) -> subp
         errors="replace",
         check=False,
     )
+
+
+def test_package_release_runs_under_windows_powershell_without_getrelativepath(tmp_path: Path):
+    powershell_path = shutil.which("powershell")
+    if powershell_path is None:
+        pytest.skip("powershell is not available in this environment")
+
+    temp_repo = tmp_path / "repo"
+    _prepare_common_layout(temp_repo)
+    _write_template_files(temp_repo, "workstation")
+
+    backend_dir = temp_repo / "backend"
+    backend_dir.mkdir(parents=True, exist_ok=True)
+    (backend_dir / "main_workstation.py").write_text("print('ok')\n", encoding="utf-8")
+    frontend_dist = temp_repo / "frontend" / "dist"
+    frontend_dist.mkdir(parents=True, exist_ok=True)
+    (frontend_dist / "index.html").write_text("<html></html>\n", encoding="utf-8")
+    mod_template = temp_repo / "mod_template"
+    mod_template.mkdir(parents=True, exist_ok=True)
+    (mod_template / "README.md").write_text("template\n", encoding="utf-8")
+    (temp_repo / "config.example.json").write_text('{"mode":"example"}\n', encoding="utf-8")
+
+    completed = _run_package_release_with_shell(temp_repo, powershell_path, "workstation", "-NoFrontend", "-NoZip")
+
+    assert completed.returncode == 0, completed.stderr
+    assert "GetRelativePath" not in completed.stderr
+    assert (temp_repo / "tools" / "latest" / "artifacts" / "agentthespire-workstation-release").exists()
 
 
 def test_package_release_frontend_does_not_require_backend_directory(tmp_path: Path):

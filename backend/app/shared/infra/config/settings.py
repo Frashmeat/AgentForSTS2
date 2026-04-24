@@ -63,6 +63,7 @@ DEFAULT_RUNTIME_CONFIG = {
     "workstation": {
         "host": "127.0.0.1",
         "port": 7860,
+        "allow_loopback_origins": True,
         "cors_origins": [
             "http://localhost:5173",
             "http://127.0.0.1:5173",
@@ -77,6 +78,7 @@ DEFAULT_RUNTIME_CONFIG = {
     "web": {
         "host": "127.0.0.1",
         "port": 7870,
+        "allow_loopback_origins": False,
         "cors_origins": [
             "http://localhost:5173",
             "http://127.0.0.1:5173",
@@ -281,6 +283,10 @@ class Settings:
         cors_origins = runtime.get("cors_origins", [])
         if not isinstance(cors_origins, list) or not cors_origins:
             errors.append(f"runtime.{role}.cors_origins must contain at least one origin")
+
+        allow_loopback_origins = runtime.get("allow_loopback_origins", False)
+        if not isinstance(allow_loopback_origins, bool):
+            errors.append(f"runtime.{role}.allow_loopback_origins must be a boolean")
 
         if runtime.get("requires_database", False):
             database_url = str(self.database.get("url", "")).strip()
