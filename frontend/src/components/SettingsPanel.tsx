@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X, FolderOpen, Cpu, Cloud, Gamepad2, Image, Search } from "lucide-react";
 import { Link } from "react-router-dom";
 import {
@@ -24,6 +24,7 @@ import { resolveErrorMessage } from "../shared/error.ts";
 import type { PlatformExecutionProfile } from "../shared/api/platform.ts";
 import { useSession } from "../shared/session/hooks.ts";
 import { KnowledgeGuideDialog } from "./KnowledgeGuideDialog.tsx";
+import { StatusNotice, StatusNoticeStack, type StatusNoticeItem } from "./StatusNotice.tsx";
 import { createSettingsPickPathRequest, type SettingsPathField } from "./settingsPathPicker.ts";
 
 const inputCls = "w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-100";
@@ -234,12 +235,26 @@ interface SettingsPanelProps {
   onKnowledgeStatusChange?: (status: KnowledgeStatus) => void;
 }
 
+function buildConfigSaveBody(cfg: any, llmKey: string, imgKey: string, imgSecret: string) {
+  const body = structuredClone(cfg);
+  if (llmKey.trim()) body.llm.api_key = llmKey.trim();
+  if (imgKey.trim()) body.image_gen.api_key = imgKey.trim();
+  if (imgSecret.trim()) body.image_gen.api_secret = imgSecret.trim();
+  return body;
+}
+
+function buildConfigSaveSignature(cfg: any, llmKey: string, imgKey: string, imgSecret: string) {
+  return JSON.stringify(buildConfigSaveBody(cfg, llmKey, imgKey, imgSecret));
+}
+
 export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChange }: SettingsPanelProps) {
   const { isAuthAvailable, isAuthenticated } = useSession();
   const [activeTab, setActiveTab] = useState<"workspace" | "server">("workspace");
   const [cfg, setCfg] = useState<any>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [saveNotice, setSaveNotice] = useState("");
+  const [hasSavedConfigOnce, setHasSavedConfigOnce] = useState(false);
   const [detecting, setDetecting] = useState(false);
   const [detectionTaskId, setDetectionTaskId] = useState("");
   const [detectionStep, setDetectionStep] = useState("");
@@ -261,12 +276,19 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
   const [serverSaving, setServerSaving] = useState(false);
   const [serverError, setServerError] = useState("");
   const [serverNotice, setServerNotice] = useState("");
+  const [serverSelectionDirty, setServerSelectionDirty] = useState(false);
   const [queueWorkerStatus, setQueueWorkerStatus] = useState<PlatformQueueWorkerStatus | null>(null);
   const [queueWorkerLoading, setQueueWorkerLoading] = useState(false);
   const [queueWorkerError, setQueueWorkerError] = useState("");
+  const lastSavedConfigSignatureRef = useRef("");
+  const configSaveSignature = cfg ? buildConfigSaveSignature(cfg, llmKey, imgKey, imgSecret) : "";
+  const configDirty = Boolean(cfg) && configSaveSignature !== lastSavedConfigSignatureRef.current;
 
   useEffect(() => {
-    loadAppConfig().then(setCfg);
+    loadAppConfig().then((loaded) => {
+      setCfg(loaded);
+      lastSavedConfigSignatureRef.current = buildConfigSaveSignature(loaded, "", "", "");
+    });
     loadKnowledgeStatus()
       .then((status) => {
         setKnowledgeStatus(status);
@@ -287,6 +309,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
       setSelectedServerProfileId(null);
       setServerError("");
       setServerNotice("");
+      setServerSelectionDirty(false);
       return;
     }
 
@@ -301,6 +324,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
         setServerProfiles(profileView.items);
         setServerPreference(preference);
         setSelectedServerProfileId(pickInitialServerProfileId(profileView.items, preference));
+        setServerSelectionDirty(false);
       })
       .catch((error) => {
         if (cancelled) {
@@ -310,6 +334,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
         setServerPreference(null);
         setSelectedServerProfileId(null);
         setServerError(resolveErrorMessage(error));
+        setServerSelectionDirty(false);
       })
       .finally(() => {
         if (!cancelled) {
@@ -321,6 +346,62 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
       cancelled = true;
     };
   }, [activeTab, isAuthAvailable, isAuthenticated]);
+
+  useEffect(() => {
+    if (!cfg || saving || !configDirty || saveError) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      void save();
+    }, 700);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [cfg, saving, configDirty, configSaveSignature, saveError]);
+
+  useEffect(() => {
+    if (!saveNotice) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setSaveNotice("");
+    }, 2600);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [saveNotice]);
+
+  useEffect(() => {
+    if (!serverNotice) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setServerNotice("");
+    }, 2600);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [serverNotice]);
+
+  useEffect(() => {
+    if (activeTab !== "server" || !isAuthAvailable || !isAuthenticated || serverSaving || !serverSelectionDirty) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      void handleSaveServerPreference(selectedServerProfileId ?? null);
+    }, 500);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [activeTab, isAuthAvailable, isAuthenticated, selectedServerProfileId, serverSaving, serverSelectionDirty]);
 
   useEffect(() => {
     if (activeTab !== "server") {
@@ -463,17 +544,64 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
     };
   }, [knowledgeTaskId]);
 
+  useEffect(() => {
+    if (detecting || detectionTaskId || pathNotes.length === 0) {
+      return;
+    }
+
+    const hasFailure = pathNotes.some((note) => note.includes("失败"));
+    if (hasFailure) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setDetectionStep("");
+      setPathNotes([]);
+    }, 3200);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [detecting, detectionTaskId, pathNotes]);
+
+  useEffect(() => {
+    if (knowledgeChecking || knowledgeTaskId || knowledgeError || knowledgeNotes.length === 0) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setKnowledgeStep("");
+      setKnowledgeNotes([]);
+    }, 3200);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [knowledgeChecking, knowledgeTaskId, knowledgeError, knowledgeNotes]);
+
   function set(path: string[], value: string | number) {
+    setSaveError("");
+    setSaveNotice("");
     setCfg((prev: any) => {
-      const next = structuredClone(prev);
-      let cur = next;
+      if (!prev) {
+        return prev;
+      }
+      let cur = prev;
       for (let i = 0; i < path.length - 1; i++) cur = cur[path[i]];
-      cur[path[path.length - 1]] = value;
+      if (cur[path[path.length - 1]] === value) {
+        return prev;
+      }
+      const next = structuredClone(prev);
+      let nextCur = next;
+      for (let i = 0; i < path.length - 1; i++) nextCur = nextCur[path[i]];
+      nextCur[path[path.length - 1]] = value;
       return next;
     });
   }
 
   function handleProviderChange(provider: string) {
+    setSaveError("");
+    setSaveNotice("");
     const models = PROVIDER_MODELS[provider] ?? [];
     setCfg((prev: any) => {
       const next = structuredClone(prev);
@@ -528,19 +656,22 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
   }
 
   async function save() {
+    if (!cfg) {
+      return;
+    }
+    const body = buildConfigSaveBody(cfg, llmKey, imgKey, imgSecret);
+    const signature = JSON.stringify(body);
+    if (signature === lastSavedConfigSignatureRef.current) {
+      return;
+    }
     setSaving(true);
     setSaveError("");
-    const body = structuredClone(cfg);
-    if (llmKey.trim()) body.llm.api_key = llmKey.trim();
-    if (imgKey.trim()) body.image_gen.api_key = imgKey.trim();
-    if (imgSecret.trim()) body.image_gen.api_secret = imgSecret.trim();
+    setSaveNotice("");
     try {
       await updateAppConfig(body);
-      if (onClose) {
-        onClose();
-      } else {
-        setPathNotes(prev => ["✓ 设置已保存", ...prev.filter(note => note !== "✓ 设置已保存")]);
-      }
+      lastSavedConfigSignatureRef.current = signature;
+      setHasSavedConfigOnce(true);
+      setSaveNotice("已自动保存工作区设置");
     } catch (error) {
       setSaveError(resolveErrorMessage(error) || "保存设置失败");
     } finally {
@@ -550,11 +681,82 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
 
   const currentProvider = cfg?.image_gen?.provider ?? "bfl";
   const models = PROVIDER_MODELS[currentProvider] ?? [];
-
+  const workspaceSaveStatus = saveError
+    ? ""
+    : saving
+      ? "正在自动保存工作区设置…"
+      : configDirty
+        ? "检测到修改，停止输入后会自动保存"
+        : saveNotice || (hasSavedConfigOnce ? "工作区设置已自动保存" : "修改后会自动保存");
+  const serverStatusText = serverError
+    ? ""
+    : serverSaving
+      ? "正在自动保存默认服务器配置…"
+      : serverSelectionDirty
+        ? "检测到修改，稍后会自动保存默认服务器配置"
+        : serverNotice;
   const missingPaths = cfg && (!cfg.default_project_root || !cfg.sts2_path);
   const knowledgeBusy = knowledgeChecking || Boolean(knowledgeTaskId);
   const knowledgeCheckProgress = knowledgeChecking ? 100 : 0;
   const knowledgeUpdateProgress = getKnowledgeUpdateProgress(knowledgeStep, Boolean(knowledgeTaskId));
+  const pathFailureNote = pathNotes.find((note) => note.includes("失败")) ?? "";
+  const pathSuccessNotes = pathNotes.filter((note) => note.startsWith("✓"));
+  const pathNoticeMessage = detecting
+    ? detectionStep || "正在自动检测项目路径"
+    : pathFailureNote || pathSuccessNotes[0] || (missingPaths ? "请补充默认项目目录和 STS2 游戏根目录" : "");
+  const knowledgeNoticeMessage = knowledgeError
+    ? knowledgeError
+    : knowledgeStep || (knowledgeNotes[0] ?? "");
+  const floatingNotices = [
+    activeTab === "workspace" && (saveError || configDirty || Boolean(saveNotice))
+      ? {
+          id: "workspace-save",
+          title: "工作区设置自动保存",
+          tone: saveError ? "error" : saving || configDirty ? "info" : "success",
+          message: saveError || workspaceSaveStatus,
+          indeterminate: saving,
+        }
+      : null,
+    activeTab === "workspace" && (detecting || Boolean(pathNoticeMessage))
+      ? {
+          id: "path-detect",
+          title: detecting ? "自动检测路径" : pathFailureNote ? "路径检测失败" : pathSuccessNotes.length > 0 ? "路径已更新" : "项目路径提示",
+          tone: pathFailureNote ? "error" : detecting ? "warning" : pathSuccessNotes.length > 0 ? "success" : "warning",
+          message: pathNoticeMessage,
+          details: detecting ? pathNotes.slice(0, 3) : pathNotes.slice(1, 3),
+          indeterminate: detecting,
+          actions: detecting ? (
+            <button
+              type="button"
+              onClick={cancelDetectPaths}
+              className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-medium text-rose-700 transition hover:bg-rose-100"
+            >
+              中断检测
+            </button>
+          ) : undefined,
+        }
+      : null,
+    activeTab === "workspace" && (knowledgeChecking || Boolean(knowledgeTaskId) || Boolean(knowledgeNoticeMessage))
+      ? {
+          id: "knowledge-status",
+          title: knowledgeError ? "知识库操作失败" : knowledgeTaskId ? "知识库更新中" : knowledgeChecking ? "知识库检查中" : "知识库状态提示",
+          tone: knowledgeError ? "error" : knowledgeTaskId ? "warning" : knowledgeChecking ? "info" : "success",
+          message: knowledgeNoticeMessage || "知识库状态已更新",
+          details: knowledgeNotes.slice(0, 3),
+          progress: knowledgeTaskId ? knowledgeUpdateProgress : undefined,
+          indeterminate: knowledgeChecking,
+        }
+      : null,
+    activeTab === "server" && (serverError || serverSaving || serverSelectionDirty || Boolean(serverNotice))
+      ? {
+          id: "server-save",
+          title: "服务器默认配置",
+          tone: serverError ? "error" : serverSaving || serverSelectionDirty ? "info" : "success",
+          message: serverError || serverStatusText,
+          indeterminate: serverSaving,
+        }
+      : null,
+  ].filter((notice): notice is StatusNoticeItem => notice !== null);
 
   async function handleCheckKnowledge() {
     if (knowledgeBusy) {
@@ -609,10 +811,12 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
         default_execution_profile_id: profileId,
       });
       setServerPreference(updated);
-      setSelectedServerProfileId(pickInitialServerProfileId(serverProfiles, updated));
-      setServerNotice(profileId === null ? "已清空默认服务器配置" : "默认服务器配置已保存");
+      setSelectedServerProfileId(profileId);
+      setServerSelectionDirty(false);
+      setServerNotice(profileId === null ? "已自动清空默认服务器配置" : "已自动保存默认服务器配置");
     } catch (error) {
       setServerError(resolveErrorMessage(error));
+      setServerSelectionDirty(false);
     } finally {
       setServerSaving(false);
     }
@@ -642,9 +846,6 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
     >
       <div>
         <h2 className="font-bold text-slate-800">设置</h2>
-        {activeTab === "workspace" && missingPaths && (
-          <p className="text-xs text-amber-600 mt-0.5">⚠ 请配置项目路径</p>
-        )}
       </div>
       {mode === "drawer" && onClose ? (
         <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors p-1 rounded-lg hover:bg-slate-100">
@@ -654,7 +855,6 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
     </div>
   );
 
-  const selectedServerProfile = serverProfiles.find((profile) => profile.id === selectedServerProfileId) ?? null;
   const tabBar = (
     <div className="border-b border-slate-100 px-6 py-3">
       <div className="flex flex-wrap gap-2">
@@ -707,27 +907,6 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
                     </button>
                   )}
                 </div>
-                {detectionStep && (
-                  <p className="text-xs text-amber-700">当前进度：{detectionStep}</p>
-                )}
-                {pathNotes.length > 0 && (
-                  <div className="space-y-0.5">
-                    {pathNotes.map((n, i) => (
-                      <p
-                        key={i}
-                        className={`text-xs ${
-                          n.startsWith("✓")
-                            ? "text-green-600"
-                            : n.includes("失败")
-                              ? "text-red-600"
-                              : "text-slate-400"
-                        }`}
-                      >
-                        {n}
-                      </p>
-                    ))}
-                  </div>
-                )}
                 <Field
                   label="默认 Mod 项目目录"
                   hint="新建/修改 Mod 时的默认路径"
@@ -805,15 +984,6 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
                   {knowledgeTaskId ? (
                     <ProgressBar label="更新进度" progress={knowledgeUpdateProgress} />
                   ) : null}
-                  {knowledgeStep ? <p className="text-xs text-amber-700">当前进度：{knowledgeStep}</p> : null}
-                  {knowledgeNotes.length > 0 ? (
-                    <div className="space-y-0.5">
-                      {knowledgeNotes.map((note, index) => (
-                        <p key={`${note}-${index}`} className="text-xs text-slate-500">{note}</p>
-                      ))}
-                    </div>
-                  ) : null}
-                  {knowledgeError ? <p className="text-xs text-rose-600">{knowledgeError}</p> : null}
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <button
@@ -910,7 +1080,16 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
                   </Field>
                 )}
                 <Field label={cfg.llm?.mode === "claude_api" ? "Claude API Key（留空不修改）" : "API Key（留空不修改）"}>
-                  <input value={llmKey} onChange={e => setLlmKey(e.target.value)} placeholder={cfg.llm?.api_key ? "已设置" : "未设置"} className={inputCls} />
+                  <input
+                    value={llmKey}
+                    onChange={e => {
+                      setSaveError("");
+                      setSaveNotice("");
+                      setLlmKey(e.target.value);
+                    }}
+                    placeholder={cfg.llm?.api_key ? "已设置" : "未设置"}
+                    className={inputCls}
+                  />
                 </Field>
                 <Field label={cfg.llm?.mode === "claude_api" ? "Claude Base URL（可选）" : "Base URL（可选）"}>
                   <input value={cfg.llm?.base_url || ""} onChange={e => set(["llm", "base_url"], e.target.value)} placeholder="https://..." className={inputCls} />
@@ -948,15 +1127,43 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
                 {currentProvider === "volcengine" ? (
                   <>
                     <Field label="Access Key（AK，留空不修改）">
-                      <input value={imgKey} onChange={e => setImgKey(e.target.value)} placeholder={cfg.image_gen?.api_key ? "已设置" : "未设置"} className={inputCls} />
+                      <input
+                        value={imgKey}
+                        onChange={e => {
+                          setSaveError("");
+                          setSaveNotice("");
+                          setImgKey(e.target.value);
+                        }}
+                        placeholder={cfg.image_gen?.api_key ? "已设置" : "未设置"}
+                        className={inputCls}
+                      />
                     </Field>
                     <Field label="Secret Key（SK，留空不修改）">
-                      <input type="password" value={imgSecret} onChange={e => setImgSecret(e.target.value)} placeholder={cfg.image_gen?.api_secret ? "已设置" : "未设置"} className={inputCls} />
+                      <input
+                        type="password"
+                        value={imgSecret}
+                        onChange={e => {
+                          setSaveError("");
+                          setSaveNotice("");
+                          setImgSecret(e.target.value);
+                        }}
+                        placeholder={cfg.image_gen?.api_secret ? "已设置" : "未设置"}
+                        className={inputCls}
+                      />
                     </Field>
                   </>
                 ) : (
                   <Field label="API Key（留空不修改）">
-                    <input value={imgKey} onChange={e => setImgKey(e.target.value)} placeholder={cfg.image_gen?.api_key ? "已设置" : "未设置"} className={inputCls} />
+                    <input
+                      value={imgKey}
+                      onChange={e => {
+                        setSaveError("");
+                        setSaveNotice("");
+                        setImgKey(e.target.value);
+                      }}
+                      placeholder={cfg.image_gen?.api_key ? "已设置" : "未设置"}
+                      className={inputCls}
+                    />
                   </Field>
                 )}
                 <Field label="背景去除模型" hint="birefnet-general 质量最高但慢；birefnet-lite 快一倍；u2net 最快（适合 CPU）">
@@ -981,40 +1188,40 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
                 </Field>
               </SGroup>
 
-              {saveError ? <p className="text-sm text-rose-600">{saveError}</p> : null}
-              <button
-                onClick={save}
-                disabled={saving}
-                className="w-full py-2.5 rounded-lg bg-amber-500 text-white font-bold text-sm hover:bg-amber-600 disabled:opacity-40 transition-colors"
-              >
-                {saving ? "保存中…" : "保存设置"}
-              </button>
         </>
         ) : (
           <div className="space-y-6">
             <SGroup icon={<Cloud size={14} />} title="服务器模式">
               {!isAuthAvailable ? (
-                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
-                  当前环境未接入独立 Web 平台服务，暂时无法管理服务器模式默认配置。
-                </div>
+                <StatusNotice
+                  title="服务器模式暂不可用"
+                  tone="warning"
+                  message="当前环境未接入独立 Web 平台服务，暂时无法管理服务器模式默认配置。"
+                />
               ) : !isAuthenticated ? (
-                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
-                  <p>登录后即可查看平台提供的执行配置，并设置默认服务器模式。</p>
-                  <Link
-                    to="/auth/login"
-                    className="mt-3 inline-flex rounded-lg border border-amber-300 px-3 py-1.5 text-xs font-medium text-amber-700 transition hover:bg-amber-50"
-                  >
-                    去登录
-                  </Link>
-                </div>
+                <StatusNotice
+                  title="登录后可管理服务器模式"
+                  tone="warning"
+                  message="登录后即可查看平台提供的执行配置，并设置默认服务器模式。"
+                  actions={
+                    <Link
+                      to="/auth/login"
+                      className="inline-flex rounded-lg border border-amber-300 px-3 py-1.5 text-xs font-medium text-amber-700 transition hover:bg-amber-100"
+                    >
+                      去登录
+                    </Link>
+                  }
+                />
               ) : serverLoading ? (
                 <p className="text-sm text-slate-500">正在读取服务器执行配置…</p>
               ) : (
                 <>
                   {serverPreference?.default_execution_profile_id && !serverPreference.available ? (
-                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                      当前默认服务器配置已不可用。你可以改选一个可用配置后重新保存，或直接清空默认值。
-                    </div>
+                    <StatusNotice
+                      title="默认服务器配置已不可用"
+                      tone="warning"
+                      message="你可以改选一个可用配置，系统会自动保存；也可以直接清空默认值。"
+                    />
                   ) : null}
                   <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 space-y-2">
                     <p className="text-xs text-slate-500">
@@ -1045,6 +1252,8 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
                           type="button"
                           onClick={() => {
                             setSelectedServerProfileId(profile.id);
+                            setServerSelectionDirty(true);
+                            setServerError("");
                             setServerNotice("");
                           }}
                           className={`w-full rounded-xl border px-4 py-3 text-left transition ${
@@ -1070,24 +1279,14 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
                     })}
                   </div>
 
-                  {serverError ? <p className="text-sm text-rose-600">{serverError}</p> : null}
-                  {serverNotice ? <p className="text-sm text-emerald-700">{serverNotice}</p> : null}
-
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
                       onClick={() => {
-                        void handleSaveServerPreference(selectedServerProfile?.id ?? null);
-                      }}
-                      disabled={serverSaving || selectedServerProfileId === null}
-                      className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-amber-600 disabled:opacity-40"
-                    >
-                      {serverSaving ? "保存中…" : "保存默认服务器配置"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void handleSaveServerPreference(null);
+                        setSelectedServerProfileId(null);
+                        setServerSelectionDirty(true);
+                        setServerError("");
+                        setServerNotice("");
                       }}
                       disabled={serverSaving || serverPreference?.default_execution_profile_id === null}
                       className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 transition hover:border-amber-200 hover:text-amber-700 disabled:opacity-40"
@@ -1103,11 +1302,9 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
               {queueWorkerLoading ? (
                 <p className="text-sm text-slate-500">正在读取 queue worker 状态…</p>
               ) : queueWorkerError ? (
-                <p className="text-sm text-rose-600">{queueWorkerError}</p>
+                <StatusNotice title="平台队列 Worker 诊断失败" tone="error" message={queueWorkerError} />
               ) : !queueWorkerStatus?.available ? (
-                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
-                  {formatQueueWorkerUnavailableReason(queueWorkerStatus?.reason)}
-                </div>
+                <StatusNotice title="当前未暴露队列 Worker 运行态" tone="warning" message={formatQueueWorkerUnavailableReason(queueWorkerStatus?.reason)} />
               ) : (
                 <div className="space-y-3">
                   <DiagnosticCard title="Leader 概览">
@@ -1245,6 +1442,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
   if (mode === "page") {
     return (
       <>
+        <StatusNoticeStack notices={floatingNotices} />
         <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_30px_80px_rgba(15,23,42,0.08)]">
           {header}
           {tabBar}
@@ -1258,6 +1456,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
 
   return (
     <>
+      <StatusNoticeStack notices={floatingNotices} />
       <div className="fixed inset-0 bg-black/60 z-50 flex justify-end" onClick={onClose}>
         <div
           className="w-full max-w-sm bg-white border-l border-slate-200 h-full overflow-y-auto shadow-xl"
