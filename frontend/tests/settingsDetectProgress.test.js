@@ -22,3 +22,11 @@ test("settings panel exposes detect progress state and cancel action", () => {
   assert.match(source, /中断检测/);
   assert.match(source, /检测中/);
 });
+
+test("settings panel ignores repeated detected path values so auto-save debounce can complete", () => {
+  const source = readSource("../src/components/SettingsPanel.tsx");
+
+  assert.match(source, /if \(cur\[path\[path\.length - 1\]\] === value\) \{\s*return prev;\s*\}/);
+  assert.match(source, /if \(snapshot\.sts2_path\) \{\s*set\(\["sts2_path"\], snapshot\.sts2_path\);\s*\}/);
+  assert.match(source, /if \(snapshot\.godot_exe_path\) \{\s*set\(\["godot_exe_path"\], snapshot\.godot_exe_path\);\s*\}/);
+});

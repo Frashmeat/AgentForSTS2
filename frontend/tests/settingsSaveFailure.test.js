@@ -11,6 +11,7 @@ test("settings panel resets saving state in a finally block when save fails", ()
 
   assert.match(source, /async function save\(\)\s*\{/);
   assert.match(source, /try\s*\{/);
+  assert.match(source, /const signature = JSON\.stringify\(body\);/);
   assert.match(source, /await updateAppConfig\(body\);/);
   assert.match(source, /finally\s*\{\s*setSaving\(false\);/);
 });
@@ -21,6 +22,24 @@ test("settings panel exposes a visible save error message", () => {
   assert.match(source, /const \[saveError, setSaveError\] = useState/);
   assert.match(source, /setSaveError\(resolveErrorMessage\(error\) \|\| "保存设置失败"\)/);
   assert.match(source, /text-rose-600/);
+});
+
+test("settings panel auto-saves workspace changes instead of showing a manual save button", () => {
+  const source = readSource("../src/components/SettingsPanel.tsx");
+
+  assert.match(source, /setTimeout\(\(\) => \{\s*void save\(\);\s*\}, 700\);/);
+  assert.match(source, /已自动保存工作区设置/);
+  assert.match(source, /修改后会自动保存/);
+  assert.doesNotMatch(source, /\{saving \? "保存中…" : "保存设置"\}/);
+});
+
+test("settings panel auto-saves server preference changes", () => {
+  const source = readSource("../src/components/SettingsPanel.tsx");
+
+  assert.match(source, /setServerSelectionDirty\(true\)/);
+  assert.match(source, /setTimeout\(\(\) => \{\s*void handleSaveServerPreference\(selectedServerProfileId \?\? null\);\s*\}, 500\);/);
+  assert.match(source, /已自动保存默认服务器配置/);
+  assert.doesNotMatch(source, /\{serverSaving \? "保存中…" : "保存默认服务器配置"\}/);
 });
 
 test("settings panel surfaces path picker failures to the user", () => {

@@ -130,6 +130,7 @@ Current product behavior:
   - `检查更新`
   - `更新知识库`
   - `查看知识库说明`
+  - 工作区设置与服务器模式默认配置会在修改后自动保存，并通过右上角非阻塞提示显示状态
 - 工作流头部右上角展示紧凑“知识库”标签，只保留状态、游戏版本和 Baselib 版本；点击标签可查看知识库说明，不再用风险提醒弹窗阻断本地执行。
 - 发行包会直接包含可查看、可编辑的运行时知识目录；应用运行时只读取这份目录，用户修改后会直接生效。
 - `workstation` / `hybrid` 发行包也会直接包含当前实例自己的 `runtime/tools/`，用于承载 `ilspycmd` 等知识库更新工具及其完整依赖目录。
@@ -161,6 +162,13 @@ powershell -ExecutionPolicy Bypass -File .\tools\tools.ps1 start workstation   #
 ```
 
 详细配置说明见 [TUTORIAL.md](TUTORIAL.md)。
+
+配置模板里的常用可选值：
+
+- `llm.mode`：`agent_cli`、`claude_api`
+- `llm.agent_backend`：`claude`、`codex`
+- `image_gen.model`：`flux.2-pro`、`flux.2-flex`、`flux.2-klein`、`flux.2-max`、`flux.2-dev`、`flux.1.1-pro`
+- `image_gen.provider`：`bfl`、`fal`、`volcengine`、`wanxiang`
 
 ### 后端运行形态
 
@@ -218,9 +226,9 @@ window.__AGENT_THE_SPIRE_WS_BASES__ = {
 `hybrid` Docker 部署时，默认会联动本机 `web-backend` 并写入本机地址；只有显式传入 `-WebBaseUrl` 时才覆盖为其它地址：
 
 ```powershell
-pwsh -NoProfile -File .\tools\latest\deploy-docker.ps1 hybrid
-pwsh -NoProfile -File .\tools\latest\deploy-docker.ps1 hybrid -WebBaseUrl https://your-web-api.example.com
-pwsh -NoProfile -File .\tools\latest\stop-deploy.ps1 hybrid
+powershell -File .\tools\tools.ps1 latest deploy hybrid -DeployLocalWeb
+powershell -File .\tools\tools.ps1 latest deploy hybrid -WebBaseUrl https://your-web-api.example.com
+powershell -File .\tools\tools.ps1 stop deploy hybrid
 ```
 
 说明：
@@ -251,6 +259,9 @@ pwsh -NoProfile -File .\tools\latest\stop-deploy.ps1 hybrid
 ### 工具脚本
 
 - 当前安装、启动、开发辅助脚本统一放在 `tools/`。
+- 日常统一入口优先使用 `tools.ps1`，例如：
+  - `powershell -File .\tools\tools.ps1 stop local`
+  - `powershell -File .\tools\tools.ps1 stop deploy hybrid`
 - `tools\kill-local.ps1` 可停止当前仓库识别出的本机 `frontend / workstation / web` 进程，并额外尝试停止当前仓库 `tools/latest/artifacts` 下默认 release 对应的 Docker `web` 服务；对 `7870` 上的 Docker Desktop / WSL 代理进程会显式跳过，避免误杀 Docker 后端链路。
 - `tools/latest/` 存放当前推荐使用的打包与 Docker 部署脚本。
 - `tools/archive/` 存放已归档的历史脚本；旧的 Windows Sandbox 验证链路已经迁入该目录，不再作为主流程维护。

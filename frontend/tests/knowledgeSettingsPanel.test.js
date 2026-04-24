@@ -6,6 +6,10 @@ function readSource(path) {
   return readFileSync(new URL(path, import.meta.url), "utf8");
 }
 
+function extractKnowledgeRefreshBlock(source) {
+  return source.match(/useEffect\(\(\) => \{\s*if \(!knowledgeTaskId\) \{[\s\S]*?\}\s*, \[knowledgeTaskId\]\);/)?.[0] ?? "";
+}
+
 test("settings panel exposes knowledge status, update action and knowledge guide action", () => {
   const source = readSource("../src/components/SettingsPanel.tsx");
 
@@ -38,4 +42,16 @@ test("settings panel exposes knowledge progress bars for check and refresh flows
   assert.match(source, /更新进度/);
   assert.match(source, /ProgressBar/);
   assert.match(source, /knowledgeChecking/);
+});
+
+test("knowledge refresh polling does not write workspace config state", () => {
+  const source = readSource("../src/components/SettingsPanel.tsx");
+  const block = extractKnowledgeRefreshBlock(source);
+
+  assert.notEqual(block, "");
+  assert.match(block, /getRefreshKnowledgeTask/);
+  assert.match(block, /loadKnowledgeStatus/);
+  assert.doesNotMatch(block, /set\(\["sts2_path"\]/);
+  assert.doesNotMatch(block, /set\(\["godot_exe_path"\]/);
+  assert.doesNotMatch(block, /setCfg\(/);
 });
