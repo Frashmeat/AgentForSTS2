@@ -119,6 +119,23 @@ def test_platform_migration_script_exists_for_first_job_chain_revision():
     assert "def downgrade()" in source
 
 
+def test_first_platform_revision_freezes_only_initial_job_chain_tables():
+    migration_path = (
+        Path(__file__).resolve().parents[3]
+        / "migrations"
+        / "versions"
+        / "20260331_01_platform_job_chain.py"
+    )
+
+    source = migration_path.read_text(encoding="utf-8")
+
+    assert "platform_tables" not in source
+    assert "UserPlatformPreferenceRecord" not in source
+    assert "ExecutionProfileRecord" not in source
+    assert "PlatformRuntimeAuditEventRecord" not in source
+    assert "_platform_job_chain_tables" in source
+
+
 def test_first_platform_revision_identifier_fits_alembic_version_limit():
     migration_path = (
         Path(__file__).resolve().parents[3]
@@ -151,3 +168,19 @@ def test_all_revision_identifiers_fit_alembic_version_limit():
 
     assert revisions
     assert all(len(revision) <= 32 for revision in revisions), revisions
+
+
+def test_later_column_revisions_guard_against_columns_created_by_current_models():
+    migrations_dir = Path(__file__).resolve().parents[3] / "migrations" / "versions"
+
+    job_profile_source = (migrations_dir / "20260414_03_platform_job_selected_execution_profile.py").read_text(
+        encoding="utf-8"
+    )
+    ai_fact_source = (migrations_dir / "20260414_04_ai_execution_server_mode_fact_fields.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "inspect(op.get_bind()).get_columns(\"jobs\")" in job_profile_source
+    assert "selected_execution_profile_id" in job_profile_source
+    assert "inspect(op.get_bind()).get_columns(\"ai_executions\")" in ai_fact_source
+    assert "credential_ref" in ai_fact_source

@@ -17,3 +17,18 @@ def test_auth_tables_are_registered_in_metadata():
     assert tables["users"].c["username"].unique is True
     assert tables["users"].c["email"].unique is True
     assert tables["email_verifications"].c["code"].unique is True
+
+
+def test_initial_auth_revision_does_not_include_admin_flag():
+    migration_path = (
+        Path(__file__).resolve().parents[2]
+        / "migrations"
+        / "versions"
+        / "20260403_01_auth_user_email_ver.py"
+    )
+
+    source = migration_path.read_text(encoding="utf-8")
+
+    assert "auth_tables" not in source
+    assert "is_admin" not in source
+    assert "op.create_table" in source
