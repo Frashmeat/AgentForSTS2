@@ -95,3 +95,59 @@ def test_tools_entry_latest_package_hybrid_profile_keeps_target_args() -> None:
 
     assert completed.returncode == 0, completed.stderr
     assert completed.stdout.endswith("hybrid")
+
+
+def test_tools_entry_dev_reset_web_db_routes_to_reset_script() -> None:
+    completed = _run_tools_inline(
+        ". .\\tools\\tools.ps1 help *> $null; "
+        "function Invoke-TargetScript { param([string]$Path, [string[]]$Arguments = @()) "
+        "[Console]::Out.Write((Split-Path -Leaf $Path) + '|' + ($Arguments -join ',')) }; "
+        "$catalog = Get-CommandCatalog; "
+        "Invoke-Route -Catalog $catalog -ResolvedGroup 'dev' -ResolvedAction 'reset-web-db'"
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == "reset_web_database_with_test_data.ps1|-Yes"
+
+
+def test_tools_entry_latest_deploy_web_debug_profile_keeps_debug_args() -> None:
+    completed = _run_tools_inline(
+        ". .\\tools\\tools.ps1 help *> $null; "
+        "$catalog = Get-CommandCatalog; "
+        "$command = Find-MenuCommand -Catalog $catalog -GroupKey 'latest' -ActionKey 'deploy'; "
+        "$profile = $command.Profiles | Where-Object { $_.Key -eq 'web-debug' } | Select-Object -First 1; "
+        "$resolved = @(Resolve-ProfileArgs -Profile $profile); "
+        "[Console]::Out.Write(($resolved -join ','))"
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == "web,-Debug"
+
+
+def test_tools_entry_latest_deploy_translates_debug_to_debug_test_data() -> None:
+    completed = _run_tools_inline(
+        ". .\\tools\\tools.ps1 help *> $null; "
+        "function Invoke-TargetScript { param([string]$Path, [string[]]$Arguments = @()) "
+        "[Console]::Out.Write(($Arguments -join ',')) }; "
+        "$catalog = Get-CommandCatalog; "
+        "Invoke-Route -Catalog $catalog -ResolvedGroup 'latest' -ResolvedAction 'deploy' "
+        "-ResolvedArgs @('hybrid', '-DeployLocalWeb', '-Debug')"
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == "hybrid,-DeployLocalWeb,-DebugTestData"
+
+
+def test_tools_entry_latest_deploy_common_debug_enables_debug_test_data() -> None:
+    completed = _run_tools_inline(
+        ". .\\tools\\tools.ps1 help *> $null; "
+        "$DebugPreference = 'Continue'; "
+        "function Invoke-TargetScript { param([string]$Path, [string[]]$Arguments = @()) "
+        "[Console]::Out.Write(($Arguments -join ',')) }; "
+        "$catalog = Get-CommandCatalog; "
+        "Invoke-Route -Catalog $catalog -ResolvedGroup 'latest' -ResolvedAction 'deploy' "
+        "-ResolvedArgs @('hybrid', '-DeployLocalWeb')"
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == "hybrid,-DeployLocalWeb,-DebugTestData"

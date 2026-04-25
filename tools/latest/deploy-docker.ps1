@@ -58,6 +58,9 @@ Python Docker 基础镜像。留空时自动优先复用本机已有标签，并
 .PARAMETER ResetDatabase
 重建数据库。仅适用于 web 目标。
 
+.PARAMETER DebugTestData
+调试测试数据部署。仅适用于 web 目标或 hybrid + DeployLocalWeb，会在 web 容器启动后重置数据库并导入测试数据。
+
 .PARAMETER ReuseImages
 复用已有镜像。仅在镜像缺失时才执行 docker compose build。
 
@@ -79,7 +82,6 @@ pwsh -File .\tools\latest\deploy-docker.ps1 web -ResetDb -dbn agentthespire
 .EXAMPLE
 pwsh -File .\tools\latest\deploy-docker.ps1 hybrid -DeployLocalWeb
 #>
-[CmdletBinding()]
 param(
     # 基础参数
     [Parameter(Position = 0, HelpMessage = "部署目标。可选 hybrid / workstation / frontend / web。")]
@@ -160,6 +162,9 @@ param(
     [Alias("Rebuild")]
     [switch]$RebuildImages,
 
+    [Parameter(HelpMessage = "调试测试数据部署。仅适用于 web 目标或 hybrid -DeployLocalWeb，会在 web 容器启动后重置数据库并导入测试数据。")]
+    [switch]$DebugTestData,
+
     [Parameter(HelpMessage = "显示帮助说明并退出。")]
     [Alias("h")]
     [switch]$Help
@@ -176,8 +181,14 @@ if ($ReuseImages.IsPresent -and $RebuildImages.IsPresent) {
     throw "-ReuseImages 与 -RebuildImages 不能同时使用。"
 }
 
+$debugTestData = $DebugTestData.IsPresent
+
 if ($DeployLocalWeb.IsPresent -and $Target -ne "hybrid") {
     throw "-DeployLocalWeb 仅适用于 hybrid 目标。"
+}
+
+if ($debugTestData -and -not ($Target -eq "web" -or ($Target -eq "hybrid" -and $DeployLocalWeb.IsPresent))) {
+    throw "-Debug 仅适用于 web 目标，或 hybrid -DeployLocalWeb 联动本机 web-backend。"
 }
 
 function Assert-PathExists {
@@ -1256,6 +1267,9 @@ function Invoke-HybridLocalWebDeployment {
     if ($ResetDatabase.IsPresent) {
         $invokeArgs += "-ResetDatabase"
     }
+    if ($debugTestData) {
+        $invokeArgs += "-DebugTestData"
+    }
     if ($ReuseImages.IsPresent) {
         $invokeArgs += "-ReuseImages"
     }
@@ -1545,6 +1559,36 @@ function Invoke-DockerCompose {
     }
     finally {
         Pop-Location
+    }
+}
+
+function Invoke-WebDatabaseDebugReset {
+    param(
+        [string]$WebReleaseRoot,
+        [string]$WebComposeFile,
+        [string]$WebEnvFile,
+        [string]$WebProjectName,
+        [string]$DatabaseName,
+        [string]$DatabaseUser,
+        [string]$DatabasePassword
+    )
+
+    $repoRootForReset = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+    $resetScript = Join-Path $repoRootForReset "backend\tools\reset_web_database_with_test_data.ps1"
+    Assert-PathExists -Path $resetScript -Label "数据库调试重置脚本"
+
+    Write-Host "Debug 模式：重置 web 数据库并导入测试数据..."
+    & (Get-CurrentPowerShellExecutablePath) -NoProfile -ExecutionPolicy Bypass -File $resetScript `
+        -ProjectName $WebProjectName `
+        -ReleaseRoot $WebReleaseRoot `
+        -ComposeFile $WebComposeFile `
+        -EnvFile $WebEnvFile `
+        -DatabaseName $DatabaseName `
+        -DatabaseUser $DatabaseUser `
+        -DatabasePassword $DatabasePassword `
+        -Yes
+    if ($LASTEXITCODE -ne 0) {
+        throw "Debug 数据库重置失败，退出码: $LASTEXITCODE"
     }
 }
 
@@ -1945,6 +1989,17 @@ if ($targetUsesDockerInCurrentRelease) {
     Invoke-DockerCompose -BundleDir $effectiveReleaseRoot -ComposeFile $composeFile -EnvFile $envFile -ComposeProjectName $effectiveProjectName -ComposeArgs @("up", "-d", "--no-build") -Services $buildServices
 }
 
+if ($debugTestData -and $Target -eq "web") {
+    Invoke-WebDatabaseDebugReset `
+        -WebReleaseRoot $effectiveReleaseRoot `
+        -WebComposeFile $composeFile `
+        -WebEnvFile $envFile `
+        -WebProjectName $effectiveProjectName `
+        -DatabaseName $PostgresDb `
+        -DatabaseUser $PostgresUser `
+        -DatabasePassword $PostgresPassword
+}
+
 $localProcesses = @()
 Clear-LocalDeploymentState -ReleaseRoot $effectiveReleaseRoot
 
@@ -2014,6 +2069,7 @@ if ($targetUsesDockerInCurrentRelease) {
 Write-Host "  复用已有镜像 : $($ReuseImages.IsPresent)"
 Write-Host "  强制重建镜像 : $($RebuildImages.IsPresent)"
 Write-Host "  重建数据库   : $shouldResetDatabase"
+Write-Host "  调试测试数据 : $debugTestData"
 if ($targetNeedsPostgres) {
     Write-Host "  Postgres 镜像: $resolvedPostgresImage"
 }
@@ -2049,3 +2105,4 @@ if ($localProcesses.Count -gt 0) {
     }
     Write-Host "  停止入口     : pwsh -File .\tools\latest\stop-deploy.ps1 $Target"
 }
+

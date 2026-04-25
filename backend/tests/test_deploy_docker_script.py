@@ -35,10 +35,24 @@ def _write_fake_docker(bin_dir: Path) -> Path:
         "  if /I \"%~1\"==\"build\" set \"CMD=build\"\r\n"
         "  if /I \"%~1\"==\"up\" set \"CMD=up\"\r\n"
         "  if /I \"%~1\"==\"down\" set \"CMD=down\"\r\n"
+        "  if /I \"%~1\"==\"stop\" set \"CMD=stop\"\r\n"
+        "  if /I \"%~1\"==\"ps\" set \"CMD=ps\"\r\n"
+        "  if /I \"%~1\"==\"exec\" set \"CMD=exec\"\r\n"
+        "  if /I \"%~1\"==\"run\" set \"CMD=run\"\r\n"
         "  shift\r\n"
         "  goto scan\r\n"
         "  :done\r\n"
         "  >>\"%LOG%\" echo compose !CMD! %*\r\n"
+        "  if /I \"!CMD!\"==\"ps\" echo fake-postgres-container\r\n"
+        "  exit /b 0\r\n"
+        ")\r\n"
+        "if \"%~1\"==\"exec\" (\r\n"
+        "  >>\"%LOG%\" echo exec %*\r\n"
+        "  if /I \"%~3\"==\"printenv\" (\r\n"
+        "    if /I \"%~4\"==\"POSTGRES_DB\" echo agentthespire\r\n"
+        "    if /I \"%~4\"==\"POSTGRES_USER\" echo agentthespire\r\n"
+        "    if /I \"%~4\"==\"POSTGRES_PASSWORD\" echo agentthespire\r\n"
+        "  )\r\n"
         "  exit /b 0\r\n"
         ")\r\n"
         ">>\"%LOG%\" echo unexpected %*\r\n"
@@ -210,6 +224,15 @@ def test_deploy_docker_hybrid_can_explicitly_deploy_local_web_release(tmp_path: 
     assert 'web: "http://127.0.0.1:7870"' in runtime_config.read_text(encoding="utf-8")
 
 
+def test_deploy_docker_hybrid_debug_passes_debug_to_local_web_release(tmp_path: Path):
+    result = _run_deploy(tmp_path, "hybrid", "-DeployLocalWeb", "-DebugTestData", prepare_default_web_release=True)
+
+    assert result.returncode == 0, result.stderr
+    assert "Debug 模式：重置 web 数据库并导入测试数据" in result.stdout
+    assert "调试测试数据 : True" in result.stdout
+    assert "compose run" in result.docker_log
+
+
 def test_deploy_docker_hybrid_custom_frontend_port_updates_runtime_cors_origins(tmp_path: Path):
     result = _run_deploy(tmp_path, "hybrid", "-DeployLocalWeb", "-FrontendPort", "4173", prepare_default_web_release=True)
     workstation_config_path = tmp_path / "release" / "runtime" / "workstation.config.json"
@@ -289,6 +312,19 @@ def test_deploy_docker_web_writes_python_base_image_to_env_file(tmp_path: Path):
     assert result.returncode == 0, result.stderr
     assert env_file.exists()
     assert "ATS_PYTHON_BASE_IMAGE=" in env_file.read_text(encoding="utf-8")
+
+
+def test_deploy_docker_web_debug_resets_database_and_imports_test_data(tmp_path: Path):
+    result = _run_deploy(tmp_path, "web", "-DebugTestData")
+
+    assert result.returncode == 0, result.stderr
+    assert "Debug 模式：重置 web 数据库并导入测试数据" in result.stdout
+    assert "compose up" in result.docker_log
+    assert "compose ps" in result.docker_log
+    assert "compose stop" in result.docker_log
+    assert "compose run" in result.docker_log
+    assert "exec fake-postgres-container" in result.docker_log
+    assert "调试测试数据 : True" in result.stdout
 
 
 def test_deploy_docker_hybrid_runs_locally_without_current_release_docker_when_web_base_is_remote(tmp_path: Path):
