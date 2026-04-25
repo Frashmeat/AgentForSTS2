@@ -157,6 +157,12 @@ def get_detect_paths_task(task_id: str) -> dict:
     return task.snapshot()
 
 
+def get_latest_detect_paths_task() -> dict | None:
+    with _DETECT_TASKS_LOCK:
+        task = next(reversed(_DETECT_TASKS.values()), None)
+    return task.snapshot() if task is not None else None
+
+
 def cancel_detect_paths_task(task_id: str) -> dict:
     with _DETECT_TASKS_LOCK:
         task = _DETECT_TASKS.get(task_id)

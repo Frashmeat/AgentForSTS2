@@ -6,6 +6,8 @@ import {
   cancelDetectAppPathsTask,
   getMyServerPreferences,
   getDetectAppPathsTask,
+  getLatestDetectAppPathsTask,
+  getLatestRefreshKnowledgeTask,
   getRefreshKnowledgeTask,
   listPlatformExecutionProfiles,
   loadAppConfig,
@@ -126,7 +128,8 @@ function pickInitialServerProfileId(
   preference: MyServerPreferenceView | null,
 ): number | null {
   if (preference?.default_execution_profile_id !== null && typeof preference?.default_execution_profile_id !== "undefined") {
-    return preference.default_execution_profile_id;
+    const preferredProfile = profiles.find((profile) => profile.id === preference.default_execution_profile_id);
+    return preferredProfile?.available ? preferredProfile.id : null;
   }
   return profiles.find((profile) => profile.available && profile.recommended)?.id
     ?? profiles.find((profile) => profile.available)?.id
@@ -247,6 +250,9 @@ function buildConfigSaveSignature(cfg: any, llmKey: string, imgKey: string, imgS
   return JSON.stringify(buildConfigSaveBody(cfg, llmKey, imgKey, imgSecret));
 }
 
+let retainedDetectionTaskId = "";
+let retainedKnowledgeTaskId = "";
+
 export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChange }: SettingsPanelProps) {
   const { isAuthAvailable, isAuthenticated } = useSession();
   const [activeTab, setActiveTab] = useState<"workspace" | "server">("workspace");
@@ -255,12 +261,12 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
   const [saveError, setSaveError] = useState("");
   const [saveNotice, setSaveNotice] = useState("");
   const [hasSavedConfigOnce, setHasSavedConfigOnce] = useState(false);
-  const [detecting, setDetecting] = useState(false);
-  const [detectionTaskId, setDetectionTaskId] = useState("");
+  const [detecting, setDetecting] = useState(Boolean(retainedDetectionTaskId));
+  const [detectionTaskId, setDetectionTaskIdState] = useState(retainedDetectionTaskId);
   const [detectionStep, setDetectionStep] = useState("");
   const [pathNotes, setPathNotes] = useState<string[]>([]);
   const [knowledgeStatus, setKnowledgeStatus] = useState<KnowledgeStatus | null>(null);
-  const [knowledgeTaskId, setKnowledgeTaskId] = useState("");
+  const [knowledgeTaskId, setKnowledgeTaskIdState] = useState(retainedKnowledgeTaskId);
   const [knowledgeChecking, setKnowledgeChecking] = useState(false);
   const [knowledgeStep, setKnowledgeStep] = useState("");
   const [knowledgeNotes, setKnowledgeNotes] = useState<string[]>([]);
@@ -280,22 +286,83 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
   const [queueWorkerStatus, setQueueWorkerStatus] = useState<PlatformQueueWorkerStatus | null>(null);
   const [queueWorkerLoading, setQueueWorkerLoading] = useState(false);
   const [queueWorkerError, setQueueWorkerError] = useState("");
+  const mountedRef = useRef(false);
   const lastSavedConfigSignatureRef = useRef("");
   const configSaveSignature = cfg ? buildConfigSaveSignature(cfg, llmKey, imgKey, imgSecret) : "";
   const configDirty = Boolean(cfg) && configSaveSignature !== lastSavedConfigSignatureRef.current;
 
+  function setDetectionTaskId(taskId: string) {
+    retainedDetectionTaskId = taskId;
+    if (mountedRef.current) {
+      setDetectionTaskIdState(taskId);
+    }
+  }
+
+  function setKnowledgeTaskId(taskId: string) {
+    retainedKnowledgeTaskId = taskId;
+    if (mountedRef.current) {
+      setKnowledgeTaskIdState(taskId);
+    }
+  }
+
   useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    function isActiveTask(status: string) {
+      return status === "pending" || status === "running";
+    }
+
     loadAppConfig().then((loaded) => {
+      if (!mountedRef.current) {
+        return;
+      }
       setCfg(loaded);
       lastSavedConfigSignatureRef.current = buildConfigSaveSignature(loaded, "", "", "");
     });
     loadKnowledgeStatus()
       .then((status) => {
+        if (!mountedRef.current) {
+          return;
+        }
         setKnowledgeStatus(status);
         onKnowledgeStatusChange?.(status);
       })
       .catch((error) => {
+        if (!mountedRef.current) {
+          return;
+        }
         setKnowledgeError(resolveErrorMessage(error));
+      });
+    getLatestDetectAppPathsTask()
+      .then((task) => {
+        if (!mountedRef.current || !task || retainedDetectionTaskId || !isActiveTask(task.status)) {
+          return;
+        }
+        setDetecting(true);
+        setDetectionStep(task.current_step || "");
+        setPathNotes(task.notes ?? []);
+        setDetectionTaskId(task.task_id);
+      })
+      .catch(() => {
+        // 恢复入口失败不阻塞设置面板初始化。
+      });
+    getLatestRefreshKnowledgeTask()
+      .then((task) => {
+        if (!mountedRef.current || !task || retainedKnowledgeTaskId || !isActiveTask(task.status)) {
+          return;
+        }
+        setKnowledgeError("");
+        setKnowledgeStep(task.current_step || "");
+        setKnowledgeNotes(task.notes ?? []);
+        setKnowledgeTaskId(task.task_id);
+      })
+      .catch(() => {
+        // 恢复入口失败不阻塞设置面板初始化。
       });
   }, []);
 
@@ -318,7 +385,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
     setServerError("");
     void Promise.all([listPlatformExecutionProfiles(), getMyServerPreferences()])
       .then(([profileView, preference]) => {
-        if (cancelled) {
+        if (cancelled || !mountedRef.current) {
           return;
         }
         setServerProfiles(profileView.items);
@@ -327,7 +394,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
         setServerSelectionDirty(false);
       })
       .catch((error) => {
-        if (cancelled) {
+        if (cancelled || !mountedRef.current) {
           return;
         }
         setServerProfiles([]);
@@ -446,7 +513,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
     async function pollTask() {
       try {
         const snapshot = await getDetectAppPathsTask(detectionTaskId);
-        if (cancelled) {
+        if (cancelled || !mountedRef.current) {
           return;
         }
 
@@ -520,13 +587,13 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
         }
 
         const status = await loadKnowledgeStatus();
-        if (!cancelled) {
+        if (!cancelled && mountedRef.current) {
           setKnowledgeStatus(status);
           onKnowledgeStatusChange?.(status);
         }
         setKnowledgeTaskId("");
       } catch (error) {
-        if (cancelled) {
+        if (cancelled || !mountedRef.current) {
           return;
         }
         setKnowledgeError(resolveErrorMessage(error));
@@ -619,10 +686,17 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
     setPathNotes([]);
     try {
       const task = await startDetectAppPaths();
+      if (!mountedRef.current) {
+        retainedDetectionTaskId = task.task_id;
+        return;
+      }
       setDetectionTaskId(task.task_id);
       setDetectionStep(task.current_step || "检测中");
       setPathNotes(task.notes ?? []);
     } catch (error) {
+      if (!mountedRef.current) {
+        return;
+      }
       setDetectionStep("");
       setPathNotes([`检测失败：${resolveErrorMessage(error)}`]);
       setDetecting(false);
@@ -633,9 +707,15 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
     if (!detectionTaskId) return;
     try {
       const snapshot = await cancelDetectAppPathsTask(detectionTaskId);
+      if (!mountedRef.current) {
+        return;
+      }
       setDetectionStep(snapshot.current_step || "检测已取消");
       setPathNotes(snapshot.notes ?? ["检测已取消"]);
     } catch (error) {
+      if (!mountedRef.current) {
+        return;
+      }
       setPathNotes([`取消检测失败：${resolveErrorMessage(error)}`]);
     }
   }
@@ -645,12 +725,18 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
     const request = createSettingsPickPathRequest(field, String(cfg[field] ?? ""));
     try {
       const result = await pickAppPath(request);
+      if (!mountedRef.current) {
+        return;
+      }
       if (!result.path) {
         return;
       }
       set([field], result.path);
       setPathNotes([`✓ ${request.title}: ${result.path}`]);
     } catch (error) {
+      if (!mountedRef.current) {
+        return;
+      }
       setPathNotes([`${request.title}失败：${resolveErrorMessage(error)}`]);
     }
   }
@@ -670,12 +756,21 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
     try {
       await updateAppConfig(body);
       lastSavedConfigSignatureRef.current = signature;
+      if (!mountedRef.current) {
+        return;
+      }
       setHasSavedConfigOnce(true);
       setSaveNotice("已自动保存工作区设置");
     } catch (error) {
-      setSaveError(resolveErrorMessage(error) || "保存设置失败");
+      const message = resolveErrorMessage(error) || "保存设置失败";
+      if (mountedRef.current) {
+        setSaveError(message);
+      }
+      throw error;
     } finally {
-      setSaving(false);
+      if (mountedRef.current) {
+        setSaving(false);
+      }
     }
   }
 
@@ -707,7 +802,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
   const knowledgeNoticeMessage = knowledgeError
     ? knowledgeError
     : knowledgeStep || (knowledgeNotes[0] ?? "");
-  const floatingNotices = [
+  const floatingNoticeItems: Array<StatusNoticeItem | null> = [
     activeTab === "workspace" && (saveError || configDirty || Boolean(saveNotice))
       ? {
           id: "workspace-save",
@@ -756,7 +851,8 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
           indeterminate: serverSaving,
         }
       : null,
-  ].filter((notice): notice is StatusNoticeItem => notice !== null);
+  ];
+  const floatingNotices = floatingNoticeItems.filter((notice): notice is StatusNoticeItem => notice !== null);
 
   async function handleCheckKnowledge() {
     if (knowledgeBusy) {
@@ -769,15 +865,23 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
     setKnowledgeNotes([]);
     try {
       const status = await checkKnowledgeStatus();
+      if (!mountedRef.current) {
+        return;
+      }
       setKnowledgeStatus(status);
       onKnowledgeStatusChange?.(status);
       setKnowledgeNotes(status.warnings ?? []);
       setKnowledgeStep("");
     } catch (error) {
+      if (!mountedRef.current) {
+        return;
+      }
       setKnowledgeError(resolveErrorMessage(error));
       setKnowledgeStep("检查失败");
     } finally {
-      setKnowledgeChecking(false);
+      if (mountedRef.current) {
+        setKnowledgeChecking(false);
+      }
     }
   }
 
@@ -791,10 +895,17 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
     setKnowledgeStep("准备启动知识库更新任务");
     try {
       const task = await startRefreshKnowledgeTask();
+      if (!mountedRef.current) {
+        retainedKnowledgeTaskId = task.task_id;
+        return;
+      }
       setKnowledgeTaskId(task.task_id);
       setKnowledgeStep(task.current_step || "更新中");
       setKnowledgeNotes(task.notes ?? []);
     } catch (error) {
+      if (!mountedRef.current) {
+        return;
+      }
       setKnowledgeError(resolveErrorMessage(error));
     }
   }
@@ -810,15 +921,23 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
       const updated = await updateMyServerPreferences({
         default_execution_profile_id: profileId,
       });
+      if (!mountedRef.current) {
+        return;
+      }
       setServerPreference(updated);
       setSelectedServerProfileId(profileId);
       setServerSelectionDirty(false);
       setServerNotice(profileId === null ? "已自动清空默认服务器配置" : "已自动保存默认服务器配置");
     } catch (error) {
-      setServerError(resolveErrorMessage(error));
-      setServerSelectionDirty(false);
+      if (mountedRef.current) {
+        setServerError(resolveErrorMessage(error));
+        setServerSelectionDirty(false);
+      }
+      throw error;
     } finally {
-      setServerSaving(false);
+      if (mountedRef.current) {
+        setServerSaving(false);
+      }
     }
   }
 
@@ -827,12 +946,37 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
     setQueueWorkerError("");
     try {
       const status = await loadPlatformQueueWorkerStatus();
+      if (!mountedRef.current) {
+        return;
+      }
       setQueueWorkerStatus(status);
     } catch (error) {
+      if (!mountedRef.current) {
+        return;
+      }
       setQueueWorkerStatus(null);
       setQueueWorkerError(resolveErrorMessage(error));
     } finally {
-      setQueueWorkerLoading(false);
+      if (mountedRef.current) {
+        setQueueWorkerLoading(false);
+      }
+    }
+  }
+
+  async function handleCloseSettings() {
+    if (!onClose) {
+      return;
+    }
+    try {
+      if (configDirty) {
+        await save();
+      }
+      if (serverSelectionDirty) {
+        await handleSaveServerPreference(selectedServerProfileId ?? null);
+      }
+      onClose();
+    } catch {
+      // 保存函数已经负责展示错误，失败时保留设置面板让用户处理。
     }
   }
 
@@ -848,7 +992,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
         <h2 className="font-bold text-slate-800">设置</h2>
       </div>
       {mode === "drawer" && onClose ? (
-        <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors p-1 rounded-lg hover:bg-slate-100">
+        <button onClick={() => { void handleCloseSettings(); }} className="text-slate-400 hover:text-slate-600 transition-colors p-1 rounded-lg hover:bg-slate-100">
           <X size={18} />
         </button>
       ) : null}
@@ -1457,7 +1601,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
   return (
     <>
       <StatusNoticeStack notices={floatingNotices} />
-      <div className="fixed inset-0 bg-black/60 z-50 flex justify-end" onClick={onClose}>
+      <div className="fixed inset-0 bg-black/60 z-50 flex justify-end" onClick={() => { void handleCloseSettings(); }}>
         <div
           className="w-full max-w-sm bg-white border-l border-slate-200 h-full overflow-y-auto shadow-xl"
           onClick={e => e.stopPropagation()}

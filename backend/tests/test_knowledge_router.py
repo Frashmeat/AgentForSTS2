@@ -65,6 +65,19 @@ def test_refresh_start_delegates_to_runtime(monkeypatch):
     assert result["status"] == "running"
 
 
+def test_latest_refresh_delegates_to_runtime(monkeypatch):
+    monkeypatch.setattr(
+        knowledge_router,
+        "_runtime",
+        lambda: types.SimpleNamespace(get_latest_refresh_task=lambda: {"task_id": "refresh-latest", "status": "running"}),
+    )
+
+    result = knowledge_router.get_latest_refresh_knowledge()
+
+    assert result["task_id"] == "refresh-latest"
+    assert result["status"] == "running"
+
+
 def test_refresh_task_returns_404_when_missing(monkeypatch):
     def fake_get_refresh_task(task_id):
         raise KeyError(task_id)

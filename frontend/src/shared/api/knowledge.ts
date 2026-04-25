@@ -63,3 +63,9 @@ export async function getRefreshKnowledgeTask(taskId: string): Promise<Knowledge
     backend: "workstation",
   });
 }
+
+export async function getLatestRefreshKnowledgeTask(): Promise<KnowledgeRefreshTask | null> {
+  return requestJson<KnowledgeRefreshTask | null>("/api/knowledge/refresh/latest", {
+    backend: "workstation",
+  });
+}
