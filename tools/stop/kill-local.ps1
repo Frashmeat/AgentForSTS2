@@ -12,7 +12,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 $stoppedProcessIds = [System.Collections.Generic.HashSet[int]]::new()
-$repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
+$toolsRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
+$repoRoot = [System.IO.Path]::GetFullPath((Join-Path $toolsRoot ".."))
+Write-Host "[stop-local] 开始停止当前仓库本机服务"
+Write-Host "[stop-local] Repo root: $repoRoot"
+Write-Host "[stop-local] Tools root: $toolsRoot"
 $servicePorts = @{
     frontend = [System.Collections.Generic.HashSet[int]]::new()
     workstation = [System.Collections.Generic.HashSet[int]]::new()
@@ -413,18 +417,18 @@ function Discover-ServicePorts {
     }
 
     $runtimeConfigPaths = @(
-        (Join-Path $PSScriptRoot "..\runtime\workstation.config.json"),
-        (Join-Path $PSScriptRoot "latest\artifacts\agentthespire-hybrid-release\runtime\workstation.config.json"),
-        (Join-Path $PSScriptRoot "latest\artifacts\agentthespire-workstation-release\runtime\workstation.config.json"),
-        (Join-Path $PSScriptRoot "latest\artifacts\agentthespire-full-release\runtime\workstation.config.json"),
-        (Join-Path $PSScriptRoot "latest\artifacts\agentthespire-web-release\runtime\workstation.config.json")
+        (Join-Path $repoRoot "runtime\workstation.config.json"),
+        (Join-Path $toolsRoot "latest\artifacts\agentthespire-hybrid-release\runtime\workstation.config.json"),
+        (Join-Path $toolsRoot "latest\artifacts\agentthespire-workstation-release\runtime\workstation.config.json"),
+        (Join-Path $toolsRoot "latest\artifacts\agentthespire-full-release\runtime\workstation.config.json"),
+        (Join-Path $toolsRoot "latest\artifacts\agentthespire-web-release\runtime\workstation.config.json")
     ) | Select-Object -Unique
 
     foreach ($runtimeConfigPath in $runtimeConfigPaths) {
         Register-PortsFromRuntimeConfig -ConfigPath $runtimeConfigPath
     }
 
-    $artifactsRoot = Join-Path $PSScriptRoot "latest\artifacts"
+    $artifactsRoot = Join-Path $toolsRoot "latest\artifacts"
     if (Test-Path -LiteralPath $artifactsRoot) {
         foreach ($runtimeConfigPath in Get-ChildItem -LiteralPath $artifactsRoot -Recurse -Filter "workstation.config.json" -ErrorAction SilentlyContinue) {
             Register-PortsFromRuntimeConfig -ConfigPath $runtimeConfigPath.FullName
@@ -434,7 +438,7 @@ function Discover-ServicePorts {
         }
     }
 
-    Register-PortsFromSplitLocalState -StatePath (Join-Path $PSScriptRoot "..\runtime\split-local-state.json")
+    Register-PortsFromSplitLocalState -StatePath (Join-Path $repoRoot "runtime\split-local-state.json")
 }
 
 function Stop-ProcessesFromLocalDeployState {
@@ -496,7 +500,7 @@ function Stop-ProcessesFromLocalDeployState {
 }
 
 function Stop-ProcessesFromArtifacts {
-    $artifactsRoot = Join-Path $PSScriptRoot "latest\artifacts"
+    $artifactsRoot = Join-Path $toolsRoot "latest\artifacts"
     if (-not (Test-Path -LiteralPath $artifactsRoot)) {
         return
     }
@@ -549,7 +553,7 @@ function Stop-DockerComposeWebServices {
         return
     }
 
-    $artifactsRoot = Join-Path $PSScriptRoot "latest\artifacts"
+    $artifactsRoot = Join-Path $toolsRoot "latest\artifacts"
     if (-not (Test-Path -LiteralPath $artifactsRoot)) {
         return
     }

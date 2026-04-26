@@ -262,9 +262,12 @@ powershell -File .\tools\tools.ps1 stop deploy hybrid
 
 - 当前安装、启动、开发辅助脚本统一放在 `tools/`。
 - 日常统一入口优先使用 `tools.ps1`，例如：
+  - `powershell -File .\tools\tools.ps1 stop`
   - `powershell -File .\tools\tools.ps1 stop local`
   - `powershell -File .\tools\tools.ps1 stop deploy hybrid`
+  - `powershell -File .\tools\tools.ps1 test backend/tests/test_tools_entry_script.py -q`
 - `tools\stop\kill-local.ps1` 可停止当前仓库识别出的本机 `frontend / workstation / web` 进程，并额外尝试停止当前仓库 `tools/latest/artifacts` 下默认 release 对应的 Docker `web` 服务；对 `7870` 上的 Docker Desktop / WSL 代理进程会显式跳过，避免误杀 Docker 后端链路。
+- `tools\test\run-pytest.ps1` 是当前推荐 pytest 入口，固定通过唯一项目 Python 环境 `backend\.venv\Scripts\python.exe -m pytest` 运行，避免误用全局 Python。
 - `tools/latest/` 存放当前推荐使用的打包与 Docker 部署脚本。
 - `tools/archive/` 存放已归档的历史脚本；旧的 Windows Sandbox 验证链路已经迁入该目录，不再作为主流程维护。
 - `tools/latest/artifacts/` 与生成出来的 `sandbox_test.wsb` 都属于本地产物，默认不会提交到 Git。

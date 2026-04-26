@@ -42,8 +42,12 @@ powershell -File .\tools\tools.ps1 split start -DryRun
 powershell -File .\tools\tools.ps1 split stop
 
 # 停止 / 清理
+powershell -File .\tools\tools.ps1 stop
 powershell -File .\tools\tools.ps1 stop local
 powershell -File .\tools\tools.ps1 stop deploy hybrid
+
+# 测试
+powershell -File .\tools\tools.ps1 test backend/tests/test_tools_entry_script.py -q
 
 # 开发辅助
 powershell -File .\tools\tools.ps1 dev decompile
@@ -72,8 +76,9 @@ pwsh -NoProfile -File .\tools\latest\stop-deploy.ps1 hybrid
 2. 启动
 3. 拆分运行时
 4. 停止 / 清理
-5. 开发辅助
-6. 打包 / 部署
+5. 测试
+6. 开发辅助
+7. 打包 / 部署
 
 每个脚本项下面还会继续进入“参数模板”菜单，例如：
 
@@ -103,6 +108,7 @@ tools/
 ├── start/                    # 传统启动脚本
 ├── split-local/              # 独立前端 + 本地 workstation 启停脚本
 ├── stop/                     # 停止 / 清理相关真实脚本
+├── test/                     # 测试入口脚本
 ├── dev/                      # 开发辅助脚本
 ├── latest/                   # 打包、混合部署、安装器脚本
 └── archive/                  # 已归档历史脚本与产物
@@ -143,11 +149,19 @@ tools/
 
 ### stop
 
+- `tools.ps1 stop`
+  `stop local` 的默认直达写法；用于停止当前仓库识别出的本机 `frontend / workstation / web` 进程。
 - `tools.ps1 stop local`
   统一入口。对应 `tools\stop\kill-local.ps1`，优先按状态文件和配置发现端口并停止当前仓库识别出的本机 `frontend / workstation / web` 进程。
 - `tools.ps1 stop deploy <target>`
   统一入口。对应 `tools\latest\stop-deploy.ps1`，按 `release\runtime\local-deploy-state.json` 停止 `deploy-docker.ps1` 拉起的本地进程。
   参数直达不传 `<target>` 时默认处理 `hybrid`；菜单模式中选择具体目标时只传所选目标，不再叠加默认目标。
+
+### test
+
+- `tools.ps1 test [pytest 参数...]`
+  统一 pytest 入口。对应 `tools\test\run-pytest.ps1`，固定使用唯一项目 Python 环境 `backend\.venv\Scripts\python.exe -m pytest`，避免误用全局 `pytest` 或系统 Python。
+  示例：`powershell -File .\tools\tools.ps1 test backend/tests/test_tools_entry_script.py -q`。
 
 ### dev
 

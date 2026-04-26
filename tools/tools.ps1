@@ -20,6 +20,9 @@ powershell -File .\tools\tools.ps1 start workstation
 powershell -File .\tools\tools.ps1 stop local
 
 .EXAMPLE
+powershell -File .\tools\tools.ps1 test backend/tests/test_tools_entry_script.py -q
+
+.EXAMPLE
 powershell -File .\tools\tools.ps1 latest package hybrid
 #>
 param(
@@ -91,23 +94,43 @@ function Invoke-TargetScript {
     $extension = [System.IO.Path]::GetExtension($Path).ToLowerInvariant()
     switch ($extension) {
         ".ps1" {
+            Write-Host ("正在执行脚本：{0}" -f $Path)
             & (Get-CurrentPowerShellExecutablePath) -NoProfile -ExecutionPolicy Bypass -File $Path @Arguments
+            if ($LASTEXITCODE -ne 0) {
+                throw "脚本执行失败，退出码：$LASTEXITCODE ($Path)"
+            }
             return
         }
         ".bat" {
+            Write-Host ("正在执行脚本：{0}" -f $Path)
             & $Path @Arguments
+            if ($LASTEXITCODE -ne 0) {
+                throw "脚本执行失败，退出码：$LASTEXITCODE ($Path)"
+            }
             return
         }
         ".cmd" {
+            Write-Host ("正在执行脚本：{0}" -f $Path)
             & $Path @Arguments
+            if ($LASTEXITCODE -ne 0) {
+                throw "脚本执行失败，退出码：$LASTEXITCODE ($Path)"
+            }
             return
         }
         ".sh" {
+            Write-Host ("正在执行脚本：{0}" -f $Path)
             & "bash" $Path @Arguments
+            if ($LASTEXITCODE -ne 0) {
+                throw "脚本执行失败，退出码：$LASTEXITCODE ($Path)"
+            }
             return
         }
         ".py" {
+            Write-Host ("正在执行脚本：{0}" -f $Path)
             & (Get-PythonCommandPath) $Path @Arguments
+            if ($LASTEXITCODE -ne 0) {
+                throw "脚本执行失败，退出码：$LASTEXITCODE ($Path)"
+            }
             return
         }
         default {
@@ -248,7 +271,7 @@ function Get-CommandCatalog {
             ))
         ))
         (New-MenuGroup -Key "stop" -Label "停止 / 清理" -Description "停止本机服务、清理本地状态" -Commands @(
-            (New-MenuCommand -Key "stop-local" -Action "local" -Label "停止本机 frontend/workstation/web" -Description "停止当前仓库识别到的本地服务进程与默认 web compose" -ScriptPath (Join-Path $toolsRoot "stop\kill-local.ps1") -InvocationName "stop local" -Profiles @(
+            (New-MenuCommand -Key "stop-local" -Action "local" -Label "停止本机 frontend/workstation/web" -Description "停止当前仓库识别到的本地服务进程与默认 web compose" -ScriptPath (Join-Path $toolsRoot "stop\kill-local.ps1") -InvocationName "stop local" -IsDefaultAction -Profiles @(
                 (New-MenuProfile -Key "default" -Label "直接执行" -Description "按状态文件和默认端口停止本地服务")
                 (New-MenuProfile -Key "custom" -Label "显式指定端口" -Description "按输入的端口覆盖默认发现逻辑" -Prompts @(
                     (New-MenuPrompt -Key "frontend-port" -Prompt "前端端口（直接回车跳过）" -ArgumentName "-FrontendPort")
@@ -262,6 +285,12 @@ function Get-CommandCatalog {
                 (New-MenuProfile -Key "frontend" -Label "停止 frontend" -Description "停止 frontend release 拉起的本机进程" -ProfileArgs @("frontend"))
                 (New-MenuProfile -Key "web" -Label "停止 web" -Description "清理 web release 本地状态文件" -ProfileArgs @("web"))
                 (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 stop-deploy.ps1 参数说明" -ProfileArgs @("-Help"))
+            ))
+        ))
+        (New-MenuGroup -Key "test" -Label "测试" -Description "使用项目后端虚拟环境运行 pytest" -Commands @(
+            (New-MenuCommand -Key "test-pytest" -Action "" -Label "运行 pytest" -Description "通过 backend/.venv 执行 python -m pytest，并透传后续参数" -ScriptPath (Join-Path $toolsRoot "test\run-pytest.ps1") -InvocationName "test" -IsDefaultAction -Profiles @(
+                (New-MenuProfile -Key "default" -Label "直接执行" -Description "按 pytest 默认收集规则运行")
+                (New-MenuProfile -Key "tools-entry" -Label "验证 tools 入口" -Description "只运行 tools 入口脚本测试" -ProfileArgs @("backend/tests/test_tools_entry_script.py", "-q"))
             ))
         ))
         (New-MenuGroup -Key "dev" -Label "开发辅助" -Description "反编译游戏 DLL 等开发辅助" -Commands @(
@@ -361,6 +390,7 @@ function Show-Help {
         "start workstation",
         "split start -DryRun",
         "stop local",
+        "test backend/tests/test_tools_entry_script.py -q",
         "stop deploy hybrid",
         "latest package hybrid",
         "latest deploy hybrid -DeployLocalWeb",
@@ -617,6 +647,11 @@ $RemainingArgs = @(
         -not [string]::IsNullOrWhiteSpace($_)
     }
 )
+
+if ($Group.Equals("test", [System.StringComparison]::OrdinalIgnoreCase) -and -not [string]::IsNullOrWhiteSpace($Action)) {
+    $RemainingArgs = @($Action) + $RemainingArgs
+    $Action = ""
+}
 
 if ([string]::IsNullOrWhiteSpace($Group)) {
     if (Test-InteractiveConsole) {

@@ -7,6 +7,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "tools" / "tools.ps1"
+KILL_LOCAL_PATH = REPO_ROOT / "tools" / "stop" / "kill-local.ps1"
+RUN_PYTEST_PATH = REPO_ROOT / "tools" / "test" / "run-pytest.ps1"
+GITIGNORE_PATH = REPO_ROOT / ".gitignore"
 
 
 def _run_tools(*args: str) -> subprocess.CompletedProcess[str]:
@@ -75,6 +78,82 @@ def test_tools_entry_stop_local_routes_to_stop_directory_script() -> None:
 
     assert completed.returncode == 0, completed.stderr
     assert completed.stdout == "tools\\stop\\kill-local.ps1"
+
+
+def test_tools_entry_stop_defaults_to_local_kill_script() -> None:
+    completed = _run_tools_inline(
+        ". .\\tools\\tools.ps1 help *> $null; "
+        "function Invoke-TargetScript { param([string]$Path, [string[]]$Arguments = @()) "
+        "$relative = [System.IO.Path]::GetRelativePath((Get-Location).Path, $Path); "
+        "[Console]::Out.Write($relative) }; "
+        "$catalog = Get-CommandCatalog; "
+        "Invoke-Route -Catalog $catalog -ResolvedGroup 'stop' -ResolvedAction ''"
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == "tools\\stop\\kill-local.ps1"
+
+
+def test_kill_local_uses_repo_and_tools_roots_after_stop_directory_move() -> None:
+    source = KILL_LOCAL_PATH.read_text(encoding="utf-8-sig")
+
+    assert '$toolsRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))' in source
+    assert '$repoRoot = [System.IO.Path]::GetFullPath((Join-Path $toolsRoot ".."))' in source
+    assert 'Join-Path $repoRoot "runtime\\workstation.config.json"' in source
+    assert 'Join-Path $repoRoot "runtime\\split-local-state.json"' in source
+    assert 'Join-Path $toolsRoot "latest\\artifacts"' in source
+    assert 'Join-Path $PSScriptRoot "latest\\artifacts"' not in source
+    assert 'Join-Path $PSScriptRoot "..\\runtime' not in source
+
+
+def test_tools_entry_catalog_script_paths_exist() -> None:
+    completed = _run_tools_inline(
+        ". .\\tools\\tools.ps1 help *> $null; "
+        "$catalog = Get-CommandCatalog; "
+        "$missing = foreach ($group in $catalog) { "
+        "foreach ($command in $group.Commands) { "
+        "if (-not (Test-Path -LiteralPath $command.ScriptPath)) { $command.InvocationName + '|' + $command.ScriptPath } "
+        "} }; "
+        "[Console]::Out.Write(($missing -join ';'))"
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == ""
+
+
+def test_tools_entry_test_routes_to_project_pytest_script() -> None:
+    completed = _run_tools_inline(
+        ". .\\tools\\tools.ps1 help *> $null; "
+        "function Invoke-TargetScript { param([string]$Path, [string[]]$Arguments = @()) "
+        "$relative = [System.IO.Path]::GetRelativePath((Get-Location).Path, $Path); "
+        "[Console]::Out.Write($relative + '|' + ($Arguments -join ',')) }; "
+        "$catalog = Get-CommandCatalog; "
+        "Invoke-Route -Catalog $catalog -ResolvedGroup 'test' -ResolvedAction '' "
+        "-ResolvedArgs @('backend/tests/test_tools_entry_script.py', '-q')"
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == "tools\\test\\run-pytest.ps1|backend/tests/test_tools_entry_script.py,-q"
+
+
+def test_run_pytest_uses_backend_virtualenv_python() -> None:
+    source = RUN_PYTEST_PATH.read_text(encoding="utf-8-sig")
+
+    assert 'Join-Path $repoRoot "backend\\.venv\\Scripts\\python.exe"' in source
+    assert "& $backendPython -m pytest @PytestArgs" in source
+    assert "tools.ps1 install" in source
+    assert "repository-root .venv" not in source
+
+
+def test_root_virtualenv_is_ignored_to_keep_backend_venv_as_single_source() -> None:
+    ignored_entries = {
+        line.strip()
+        for line in GITIGNORE_PATH.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+
+    assert ".venv/" in ignored_entries
+    assert "backend/.venv/" in ignored_entries
 
 
 def test_tools_entry_stop_deploy_help_routes_to_stop_deploy_script() -> None:
