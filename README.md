@@ -78,7 +78,7 @@ Current product behavior:
 ### Tool Scripts
 
 - Core install/start/dev helpers live in `tools/`.
-- `tools/kill-local.ps1` stops local `frontend` / `workstation` / `web` processes by discovered state/config first, with port arguments available as explicit overrides; Docker Desktop proxy processes on the `web` port are explicitly skipped.
+- `tools/stop/kill-local.ps1` stops local `frontend` / `workstation` / `web` processes by discovered state/config first, with port arguments available as explicit overrides; Docker Desktop proxy processes on the `web` port are explicitly skipped.
 - `tools/latest/` contains the current packaging and Docker deployment scripts.
 - `tools/archive/` stores deprecated historical scripts. The old Windows Sandbox verification chain has been moved there and is no longer part of the primary workflow.
 - `tools/latest/artifacts/` and generated `sandbox_test.wsb` files are local outputs and are ignored by Git.
@@ -228,6 +228,7 @@ window.__AGENT_THE_SPIRE_WS_BASES__ = {
 ```powershell
 powershell -File .\tools\tools.ps1 latest deploy hybrid -DeployLocalWeb
 powershell -File .\tools\tools.ps1 latest deploy hybrid -WebBaseUrl https://your-web-api.example.com
+powershell -File .\tools\tools.ps1 latest deploy web -ResetDb
 powershell -File .\tools\tools.ps1 stop deploy hybrid
 ```
 
@@ -241,6 +242,7 @@ powershell -File .\tools\tools.ps1 stop deploy hybrid
 - Docker 构建默认会自动解析 `Python` 基础镜像，优先复用本机已有标签，并默认回退到 `m.daocloud.io/docker.io/library/python:3.11-slim`；如需手工指定，可传 `-PythonBaseImage`。
 - `workstation` 本地 Python 运行时会缓存到 `release/runtime/python-runtime/workstation`；`requirements.txt` 与启动用 Python 未变化时，后续部署会直接复用该缓存，不再重复安装依赖。
 - `deploy-docker.ps1 web` 现会在 `release/runtime/.env` 中持久化 `SPIREFORGE_AUTH_SESSION_SECRET` 与 `SPIREFORGE_SERVER_CREDENTIAL_SECRET`，并以环境变量注入容器；生成后的 `runtime/web.config.json` 不再保留 `auth.session_secret`。
+- 如需重置本机 `web` 数据库，可使用 `tools.ps1 latest deploy web -ResetDb`；该操作会删除 Docker 数据卷并重建 Postgres 数据库。
 - 同名 `web release` 重新打包时会保留已有 `runtime/.env`；后续部署前还会把 release 内 `docker-compose.yml` 刷新为当前模板，避免沿用旧 Compose 注入方式。
 
 默认文件位置：
@@ -262,7 +264,7 @@ powershell -File .\tools\tools.ps1 stop deploy hybrid
 - 日常统一入口优先使用 `tools.ps1`，例如：
   - `powershell -File .\tools\tools.ps1 stop local`
   - `powershell -File .\tools\tools.ps1 stop deploy hybrid`
-- `tools\kill-local.ps1` 可停止当前仓库识别出的本机 `frontend / workstation / web` 进程，并额外尝试停止当前仓库 `tools/latest/artifacts` 下默认 release 对应的 Docker `web` 服务；对 `7870` 上的 Docker Desktop / WSL 代理进程会显式跳过，避免误杀 Docker 后端链路。
+- `tools\stop\kill-local.ps1` 可停止当前仓库识别出的本机 `frontend / workstation / web` 进程，并额外尝试停止当前仓库 `tools/latest/artifacts` 下默认 release 对应的 Docker `web` 服务；对 `7870` 上的 Docker Desktop / WSL 代理进程会显式跳过，避免误杀 Docker 后端链路。
 - `tools/latest/` 存放当前推荐使用的打包与 Docker 部署脚本。
 - `tools/archive/` 存放已归档的历史脚本；旧的 Windows Sandbox 验证链路已经迁入该目录，不再作为主流程维护。
 - `tools/latest/artifacts/` 与生成出来的 `sandbox_test.wsb` 都属于本地产物，默认不会提交到 Git。

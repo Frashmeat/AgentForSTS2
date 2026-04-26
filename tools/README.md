@@ -11,6 +11,7 @@
 
 - 以上示例沿用 `powershell -File` 写法；如果你当前使用的是 `pwsh`，可直接替换为 `pwsh -File`。
 - `tools.ps1` 现在会沿用当前 PowerShell 宿主执行子脚本，不再强制切回 Windows PowerShell 5.1。
+- `tools.ps1` 与常用停止脚本按 Windows PowerShell 5.1 / PowerShell 7 都可解析的 UTF-8 BOM 保存；如编辑脚本，需保留该编码，避免中文帮助文本在 Windows PowerShell 5.1 下被错误解析。
 
 菜单特性：
 
@@ -53,6 +54,7 @@ powershell -File .\tools\tools.ps1 latest package workstation
 powershell -File .\tools\tools.ps1 latest deploy hybrid -DeployLocalWeb
 powershell -File .\tools\tools.ps1 latest deploy hybrid -WebBaseUrl https://your-web-api.example.com
 powershell -File .\tools\tools.ps1 latest deploy web
+powershell -File .\tools\tools.ps1 latest deploy web -ResetDb
 powershell -File .\tools\tools.ps1 latest installer
 
 # 停止 latest deploy 拉起的本地服务
@@ -93,11 +95,11 @@ pwsh -NoProfile -File .\tools\latest\stop-deploy.ps1 hybrid
 ```text
 tools/
 ├── tools.ps1                 # 统一入口
-├── kill-local.ps1            # 按端口停止 frontend / workstation / web
 ├── README.md                 # 唯一主说明文档
 ├── install/                  # 安装相关真实脚本
 ├── start/                    # 传统启动脚本
 ├── split-local/              # 独立前端 + 本地 workstation 启停脚本
+├── stop/                     # 停止 / 清理相关真实脚本
 ├── dev/                      # 开发辅助脚本
 ├── latest/                   # 打包、混合部署、安装器脚本
 └── archive/                  # 已归档历史脚本与产物
@@ -139,9 +141,10 @@ tools/
 ### stop
 
 - `tools.ps1 stop local`
-  统一入口。对应 `tools\kill-local.ps1`，优先按状态文件和配置发现端口并停止当前仓库识别出的本机 `frontend / workstation / web` 进程。
+  统一入口。对应 `tools\stop\kill-local.ps1`，优先按状态文件和配置发现端口并停止当前仓库识别出的本机 `frontend / workstation / web` 进程。
 - `tools.ps1 stop deploy <target>`
   统一入口。对应 `tools\latest\stop-deploy.ps1`，按 `release\runtime\local-deploy-state.json` 停止 `deploy-docker.ps1` 拉起的本地进程。
+  参数直达不传 `<target>` 时默认处理 `hybrid`；菜单模式中选择具体目标时只传所选目标，不再叠加默认目标。
 
 ### dev
 
@@ -150,7 +153,7 @@ tools/
 
 ### 本地进程停止
 
-- `tools\kill-local.ps1`
+- `tools\stop\kill-local.ps1`
   真实脚本入口；日常优先使用 `tools.ps1 stop local`。
   优先读取 `local-deploy-state.json`、`split-local-state.json`、`runtime/workstation.config.json` 发现端口和 PID，再停止本机 `frontend`、`workstation`、`web` 三类进程；命令行端口参数仅作为显式覆盖。
   同时会清理当前 PowerShell 会话中残留的日志镜像事件与 writer 句柄，避免 `runtime/logs/*.log` 被持续占用。
@@ -181,6 +184,7 @@ tools/
   本地 `workstation` 与 linked `web` 运行时还会额外开启 loopback origin 兜底，允许 `localhost` / `127.0.0.1` / `::1` 下的任意本地端口访问；该兜底只用于本机部署，不改变正式公网 `web` 的显式白名单口径。
   默认会基于当前 release 重新 `build` 需要 Docker 的目标镜像；只有显式传入 `-ReuseImages` 时才会复用已有镜像。
   `web` 目标会在 `runtime\.env` 中自动生成并持久化 `SPIREFORGE_AUTH_SESSION_SECRET` 与 `SPIREFORGE_SERVER_CREDENTIAL_SECRET`，随后以环境变量注入容器；`runtime\web.config.json` 不再继续写入 `auth.session_secret`。
+  `web -ResetDb` 会在部署前删除 Docker 数据卷并重建 Postgres 数据库；统一入口菜单中以“部署 web（重置数据库）”单独暴露，避免和普通部署混淆。
   `web` 目标部署前还会把 release 内的 `docker-compose.yml` 刷新为仓库模板，避免继续沿用旧 release 遗留的 Compose 环境注入方式。
   `frontend` 未显式传入 `-WebBaseUrl` 时会默认写入本机 `http://127.0.0.1:7870`；`hybrid` 需显式传入 `-WebBaseUrl`，或改用 `-DeployLocalWeb`。
   `hybrid` 传入 `-DeployLocalWeb`（可配合 `-WebReleaseRoot`）时，会从当前 hybrid release 的同级目录推导本机 `web release`，并在联动部署前自动刷新该 release，确保跟随当前仓库模板；如目录不在同级，可显式传入 `-WebReleaseRoot`。若未显式传入 `-ConfigPath`，联动部署的 `web` 目标会继续沿用 release 内 `runtime\web.config.json` / `config.example.json` 的默认回退链。

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 统一的 tools 目录入口。
 
@@ -247,7 +247,7 @@ function Get-CommandCatalog {
             ))
         ))
         (New-MenuGroup -Key "stop" -Label "停止 / 清理" -Description "停止本机服务、清理本地状态" -Commands @(
-            (New-MenuCommand -Key "stop-local" -Action "local" -Label "停止本机 frontend/workstation/web" -Description "停止当前仓库识别到的本地服务进程与默认 web compose" -ScriptPath (Join-Path $toolsRoot "kill-local.ps1") -InvocationName "stop local" -Profiles @(
+            (New-MenuCommand -Key "stop-local" -Action "local" -Label "停止本机 frontend/workstation/web" -Description "停止当前仓库识别到的本地服务进程与默认 web compose" -ScriptPath (Join-Path $toolsRoot "stop\kill-local.ps1") -InvocationName "stop local" -Profiles @(
                 (New-MenuProfile -Key "default" -Label "直接执行" -Description "按状态文件和默认端口停止本地服务")
                 (New-MenuProfile -Key "custom" -Label "显式指定端口" -Description "按输入的端口覆盖默认发现逻辑" -Prompts @(
                     (New-MenuPrompt -Key "frontend-port" -Prompt "前端端口（直接回车跳过）" -ArgumentName "-FrontendPort")
@@ -284,6 +284,7 @@ function Get-CommandCatalog {
                 (New-MenuProfile -Key "workstation" -Label "部署 workstation" -Description "按默认参数在本机启动 workstation" -ProfileArgs @("workstation"))
                 (New-MenuProfile -Key "frontend" -Label "部署 frontend" -Description "按默认参数在本机启动 frontend" -ProfileArgs @("frontend"))
                 (New-MenuProfile -Key "web" -Label "部署 web" -Description "按默认参数部署 web" -ProfileArgs @("web"))
+                (New-MenuProfile -Key "web-reset-db" -Label "部署 web（重置数据库）" -Description "部署 web 前删除 Docker 数据卷并重建 Postgres 数据库" -ProfileArgs @("web", "-ResetDb"))
                 (New-MenuProfile -Key "hybrid-local-web" -Label "部署 hybrid（联动本机 Web）" -Description "显式使用 -DeployLocalWeb 联动部署本机 web-backend" -ProfileArgs @("hybrid", "-DeployLocalWeb"))
                 (New-MenuProfile -Key "hybrid-remote-web" -Label "部署 hybrid（指定 Web API）" -Description "输入远端或本机 Web API 地址后部署 hybrid" -ProfileArgs @("hybrid") -Prompts @(
                     (New-MenuPrompt -Key "web-base-url" -Prompt "Web API 基地址（必填，例如 https://your-web-api.example.com）" -ArgumentName "-WebBaseUrl" -Required)
@@ -356,7 +357,8 @@ function Show-Help {
         "stop deploy hybrid",
         "latest package hybrid",
         "latest deploy hybrid -DeployLocalWeb",
-        "latest deploy hybrid -WebBaseUrl https://your-web-api.example.com"
+        "latest deploy hybrid -WebBaseUrl https://your-web-api.example.com",
+        "latest deploy web -ResetDb"
     )) {
         Write-Host ("  {0} -File .\tools\tools.ps1 {1}" -f $currentPowerShellName, $example)
     }
@@ -455,13 +457,27 @@ function Resolve-ProfileArgs {
     return $resolvedArgs
 }
 
+function Resolve-MenuInvocationArgs {
+    param(
+        $Command,
+        $Profile
+    )
+
+    $profileArgs = @(Resolve-ProfileArgs -Profile $Profile)
+    if ($profileArgs.Count -gt 0) {
+        return $profileArgs
+    }
+
+    return @($Command.DefaultArgs)
+}
+
 function Confirm-And-InvokeMenuCommand {
     param(
         $Command,
         $Profile
     )
 
-    $resolvedArgs = @($Command.DefaultArgs + (Resolve-ProfileArgs -Profile $Profile))
+    $resolvedArgs = @(Resolve-MenuInvocationArgs -Command $Command -Profile $Profile)
     $previewArgs = if ($resolvedArgs.Count -gt 0) { $resolvedArgs -join " " } else { "(无参数)" }
     $currentPowerShellName = Get-CurrentPowerShellCommandName
 
