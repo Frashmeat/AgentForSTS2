@@ -19,7 +19,7 @@ test("settings panel routes dynamic status prompts through the shared notice sta
   const source = readSource("../src/components/SettingsPanel.tsx");
 
   assert.match(source, /import \{ StatusNotice, StatusNoticeStack, type StatusNoticeItem \} from "\.\/StatusNotice\.tsx";/);
-  assert.match(source, /const floatingNotices = \[/);
+  assert.match(source, /const floatingNoticeCandidates: Array<StatusNoticeItem \| null> = \[/);
   assert.match(source, /<StatusNoticeStack notices=\{floatingNotices\} \/>/);
   assert.match(source, /id: "workspace-save"/);
   assert.match(source, /id: "path-detect"/);

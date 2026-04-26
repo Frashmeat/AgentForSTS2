@@ -707,7 +707,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
   const knowledgeNoticeMessage = knowledgeError
     ? knowledgeError
     : knowledgeStep || (knowledgeNotes[0] ?? "");
-  const floatingNotices = [
+  const floatingNoticeCandidates: Array<StatusNoticeItem | null> = [
     activeTab === "workspace" && (saveError || configDirty || Boolean(saveNotice))
       ? {
           id: "workspace-save",
@@ -756,7 +756,8 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
           indeterminate: serverSaving,
         }
       : null,
-  ].filter((notice): notice is StatusNoticeItem => notice !== null);
+  ];
+  const floatingNotices = floatingNoticeCandidates.filter((notice): notice is StatusNoticeItem => notice !== null);
 
   async function handleCheckKnowledge() {
     if (knowledgeBusy) {
