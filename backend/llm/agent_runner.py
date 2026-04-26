@@ -15,8 +15,6 @@ from llm.prompt_builder import append_global_ai_instructions
 
 logger = logging.getLogger(__name__)
 
-_AGENTS_CODEX_PATH = Path(__file__).parent.parent.parent / "AGENTS_CODEX.md"
-
 
 def resolve_agent_backend(llm_cfg: dict) -> str:
     cfg = normalize_llm_config(llm_cfg)
@@ -37,18 +35,8 @@ def _with_latest_runtime_custom_prompt(llm_cfg: dict) -> dict:
     return merged
 
 
-def _inject_agents_codex(prompt: str) -> str:
-    if not _AGENTS_CODEX_PATH.exists():
-        return prompt
-    agents_codex = _AGENTS_CODEX_PATH.read_text(encoding="utf-8").strip()
-    return f"{agents_codex}\n\n---\n\n{prompt}"
-
-
 def build_agent_prompt(prompt: str, llm_cfg: dict, use_runtime_config: bool = False) -> str:
     effective_cfg = _with_latest_runtime_custom_prompt(llm_cfg) if use_runtime_config else llm_cfg
-    backend = resolve_agent_backend_name(normalize_llm_config(effective_cfg))
-    if backend == "codex":
-        prompt = _inject_agents_codex(prompt)
     return append_global_ai_instructions(prompt, effective_cfg)
 
 

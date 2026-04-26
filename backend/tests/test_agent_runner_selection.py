@@ -2,12 +2,9 @@
 import sys
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.shared.prompting import PromptLoader
-from llm import prompt_builder
 from llm.agent_runner import build_agent_prompt, resolve_agent_backend
 
 
@@ -49,49 +46,19 @@ def test_build_agent_prompt_uses_latest_runtime_custom_prompt_when_requested(mon
     ) == "fix the project"
 
 
-def test_build_agent_prompt_injects_agents_codex_for_codex_backend(monkeypatch, tmp_path):
-    from llm import agent_runner
-
-    agents_file = tmp_path / "AGENTS_CODEX.md"
-    agents_file.write_text("codex rules", encoding="utf-8")
-    monkeypatch.setattr(agent_runner, "_AGENTS_CODEX_PATH", agents_file)
-
-    prompt = agent_runner.build_agent_prompt(
-        "fix the project",
-        {"agent_backend": "codex", "custom_prompt": ""},
+def test_build_agent_prompt_does_not_add_backend_specific_rules():
+    assert (
+        build_agent_prompt("fix the project", {"agent_backend": "codex", "custom_prompt": ""})
+        == "fix the project"
     )
-
-    assert prompt.startswith("codex rules\n\n---\n\nfix the project")
-
-
-def test_build_agent_prompt_skips_agents_codex_for_non_codex_backend(monkeypatch, tmp_path):
-    from llm import agent_runner
-
-    agents_file = tmp_path / "AGENTS_CODEX.md"
-    agents_file.write_text("codex rules", encoding="utf-8")
-    monkeypatch.setattr(agent_runner, "_AGENTS_CODEX_PATH", agents_file)
-
-    prompt = agent_runner.build_agent_prompt(
-        "fix the project",
-        {"agent_backend": "claude", "custom_prompt": ""},
+    assert (
+        build_agent_prompt("fix the project", {"agent_backend": "claude", "custom_prompt": ""})
+        == "fix the project"
     )
-
-    assert prompt == "fix the project"
-
-
-def test_build_agent_prompt_skips_agents_codex_for_claude_api_mode(monkeypatch, tmp_path):
-    from llm import agent_runner
-
-    agents_file = tmp_path / "AGENTS_CODEX.md"
-    agents_file.write_text("codex rules", encoding="utf-8")
-    monkeypatch.setattr(agent_runner, "_AGENTS_CODEX_PATH", agents_file)
-
-    prompt = agent_runner.build_agent_prompt(
+    assert build_agent_prompt(
         "fix the project",
         {"mode": "claude_api", "model": "claude-sonnet-4-6", "custom_prompt": ""},
-    )
-
-    assert prompt == "fix the project"
+    ) == "fix the project"
 
 
 def test_build_agent_prompt_uses_shared_bundle_header_when_bundle_path_missing(monkeypatch):
