@@ -119,6 +119,19 @@ def test_get_detect_paths_task_delegates_to_project_utils(monkeypatch):
     assert result["status"] == "completed"
 
 
+def test_get_latest_detect_paths_task_delegates_to_project_utils(monkeypatch):
+    def fake_get_latest_detect_paths_task():
+        return {"task_id": "task-latest", "status": "running", "notes": ["进行中"], "can_cancel": True}
+
+    fake_module = types.SimpleNamespace(get_latest_detect_paths_task=fake_get_latest_detect_paths_task)
+    monkeypatch.setitem(sys.modules, "project_utils", fake_module)
+
+    result = config_router.get_latest_detect_paths_task()
+
+    assert result["task_id"] == "task-latest"
+    assert result["status"] == "running"
+
+
 def test_cancel_detect_paths_task_delegates_to_project_utils(monkeypatch):
     def fake_cancel_detect_paths_task(task_id):
         assert task_id == "task-1"

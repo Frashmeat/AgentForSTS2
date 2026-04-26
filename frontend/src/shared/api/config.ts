@@ -114,6 +114,12 @@ export async function getDetectAppPathsTask(taskId: string): Promise<DetectPaths
   });
 }
 
+export async function getLatestDetectAppPathsTask(): Promise<DetectPathsTaskResult | null> {
+  return requestJson<DetectPathsTaskResult | null>("/api/config/detect_paths/latest", {
+    backend: "workstation",
+  });
+}
+
 export async function cancelDetectAppPathsTask(taskId: string): Promise<DetectPathsTaskResult> {
   return requestJson<DetectPathsTaskResult>(`/api/config/detect_paths/${encodeURIComponent(taskId)}/cancel`, {
     backend: "workstation",

@@ -206,6 +206,7 @@ function New-MenuGroup {
 
 function Get-CommandCatalog {
     $toolsRoot = $PSScriptRoot
+    $repoRoot = Split-Path -Parent $toolsRoot
 
     return @(
         (New-MenuGroup -Key "install" -Label "安装" -Description "安装环境与运行依赖" -Commands @(
@@ -267,6 +268,10 @@ function Get-CommandCatalog {
             (New-MenuCommand -Key "dev-decompile" -Action "decompile" -Label "反编译 sts2.dll" -Description "运行 decompile_sts2.py" -ScriptPath (Join-Path $toolsRoot "dev\decompile_sts2.py") -InvocationName "dev decompile" -Profiles @(
                 (New-MenuProfile -Key "default" -Label "直接执行" -Description "按当前配置运行反编译脚本")
             ))
+            (New-MenuCommand -Key "dev-reset-web-db" -Action "reset-web-db" -Label "重置 web 测试数据库" -Description "删除并重建 Docker web 数据库，执行迁移并导入测试数据" -ScriptPath (Join-Path $repoRoot "backend\tools\reset_web_database_with_test_data.ps1") -InvocationName "dev reset-web-db" -DefaultArgs @("-Yes") -Profiles @(
+                (New-MenuProfile -Key "default" -Label "重置并导入测试数据" -Description "导入包含测试管理员的平台主链测试数据" -ProfileArgs @("-Yes"))
+                (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 reset_web_database_with_test_data.ps1 参数说明" -ProfileArgs @("-Help"))
+            ))
         ))
         (New-MenuGroup -Key "latest" -Label "打包 / 部署" -Description "统一调度 tools/latest 下的发布脚本" -Commands @(
             (New-MenuCommand -Key "latest-package" -Action "package" -Label "打包 release" -Description "打包 release bundle（目标: hybrid / workstation / frontend / web）" -ScriptPath (Join-Path $toolsRoot "latest\package-release.ps1") -InvocationName "latest package" -Profiles @(
@@ -285,7 +290,9 @@ function Get-CommandCatalog {
                 (New-MenuProfile -Key "frontend" -Label "部署 frontend" -Description "按默认参数在本机启动 frontend" -ProfileArgs @("frontend"))
                 (New-MenuProfile -Key "web" -Label "部署 web" -Description "按默认参数部署 web" -ProfileArgs @("web"))
                 (New-MenuProfile -Key "web-reset-db" -Label "部署 web（重置数据库）" -Description "部署 web 前删除 Docker 数据卷并重建 Postgres 数据库" -ProfileArgs @("web", "-ResetDb"))
+                (New-MenuProfile -Key "web-debug" -Label "部署 web（Debug 测试数据）" -Description "部署 web 后重置数据库并导入测试数据" -ProfileArgs @("web", "-Debug"))
                 (New-MenuProfile -Key "hybrid-local-web" -Label "部署 hybrid（联动本机 Web）" -Description "显式使用 -DeployLocalWeb 联动部署本机 web-backend" -ProfileArgs @("hybrid", "-DeployLocalWeb"))
+                (New-MenuProfile -Key "hybrid-local-web-debug" -Label "部署 hybrid（Debug 测试数据）" -Description "联动本机 web-backend，并在 web 启动后重置数据库导入测试数据" -ProfileArgs @("hybrid", "-DeployLocalWeb", "-Debug"))
                 (New-MenuProfile -Key "hybrid-remote-web" -Label "部署 hybrid（指定 Web API）" -Description "输入远端或本机 Web API 地址后部署 hybrid" -ProfileArgs @("hybrid") -Prompts @(
                     (New-MenuPrompt -Key "web-base-url" -Prompt "Web API 基地址（必填，例如 https://your-web-api.example.com）" -ArgumentName "-WebBaseUrl" -Required)
                 ))
@@ -457,6 +464,31 @@ function Resolve-ProfileArgs {
     return $resolvedArgs
 }
 
+function Resolve-CommandArgs {
+    param(
+        $Command,
+        [string[]]$Arguments
+    )
+
+    $resolved = @($Arguments)
+    if ($Command.InvocationName -eq "latest deploy") {
+        if ($DebugPreference -ne "SilentlyContinue" -and "-DebugTestData" -notin $resolved) {
+            $resolved += "-DebugTestData"
+        }
+        $resolved = @(
+            $resolved | ForEach-Object {
+                if ($_ -eq "-Debug") {
+                    "-DebugTestData"
+                } else {
+                    $_
+                }
+            }
+        )
+    }
+
+    return $resolved
+}
+
 function Resolve-MenuInvocationArgs {
     param(
         $Command,
@@ -464,11 +496,13 @@ function Resolve-MenuInvocationArgs {
     )
 
     $profileArgs = @(Resolve-ProfileArgs -Profile $Profile)
-    if ($profileArgs.Count -gt 0) {
-        return $profileArgs
+    $rawArgs = if ($profileArgs.Count -gt 0) {
+        $profileArgs
+    } else {
+        @($Command.DefaultArgs)
     }
 
-    return @($Command.DefaultArgs)
+    return @(Resolve-CommandArgs -Command $Command -Arguments $rawArgs)
 }
 
 function Confirm-And-InvokeMenuCommand {
@@ -562,6 +596,7 @@ function Invoke-Route {
     if ($effectiveArgs.Count -eq 0 -and @($command.DefaultArgs).Count -gt 0) {
         $effectiveArgs = @($command.DefaultArgs)
     }
+    $effectiveArgs = @(Resolve-CommandArgs -Command $command -Arguments $effectiveArgs)
 
     Invoke-TargetScript -Path $command.ScriptPath -Arguments $effectiveArgs
 }

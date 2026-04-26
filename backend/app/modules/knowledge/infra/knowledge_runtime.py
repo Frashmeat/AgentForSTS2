@@ -535,3 +535,9 @@ def get_refresh_task(task_id: str) -> dict[str, Any]:
     if task is None:
         raise KeyError(task_id)
     return task.snapshot()
+
+
+def get_latest_refresh_task() -> dict[str, Any] | None:
+    with _REFRESH_TASKS_LOCK:
+        task = next(reversed(_REFRESH_TASKS.values()), None)
+    return task.snapshot() if task is not None else None

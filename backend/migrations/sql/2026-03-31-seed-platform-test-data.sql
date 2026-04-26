@@ -19,6 +19,35 @@ TRUNCATE TABLE
     quota_accounts
 RESTART IDENTITY CASCADE;
 
+INSERT INTO users (
+    user_id,
+    username,
+    email,
+    password_hash,
+    email_verified,
+    email_verified_at,
+    is_admin,
+    created_at,
+    updated_at
+) VALUES (
+    1001,
+    'admin',
+    'admin@example.com',
+    'pbkdf2_sha256$600000$6167656e747468657370697265746573$bab0b5a74463e1e7acea4cd3b2a443101691bfd771a47f05aac872ca31de34f6',
+    true,
+    TIMESTAMPTZ '2026-03-31 09:00:00+00',
+    true,
+    TIMESTAMPTZ '2026-03-31 09:00:00+00',
+    TIMESTAMPTZ '2026-03-31 09:00:00+00'
+) ON CONFLICT (user_id) DO UPDATE SET
+    username = EXCLUDED.username,
+    email = EXCLUDED.email,
+    password_hash = EXCLUDED.password_hash,
+    email_verified = EXCLUDED.email_verified,
+    email_verified_at = EXCLUDED.email_verified_at,
+    is_admin = EXCLUDED.is_admin,
+    updated_at = EXCLUDED.updated_at;
+
 INSERT INTO quota_accounts (
     id,
     user_id,
@@ -63,6 +92,9 @@ INSERT INTO jobs (
     job_type,
     status,
     workflow_version,
+    selected_execution_profile_id,
+    selected_agent_backend,
+    selected_model,
     input_summary,
     result_summary,
     error_summary,
@@ -88,6 +120,9 @@ INSERT INTO jobs (
     'batch_generate',
     'partial_succeeded',
     '2026.03.31',
+    NULL,
+    'codex',
+    'gpt-5.4',
     '为测试用户生成两张平台资产',
     '1 个子项成功，1 个子项系统失败并退款',
     '',
@@ -181,6 +216,9 @@ INSERT INTO ai_executions (
     result_schema_version,
     step_type,
     step_id,
+    credential_ref,
+    retry_attempt,
+    switched_credential,
     input_summary,
     input_payload,
     result_summary,
@@ -208,6 +246,9 @@ INSERT INTO ai_executions (
     'v1',
     'image.generate',
     'step-card-001',
+    'test-credential-openai',
+    0,
+    false,
     '根据描述生成测试卡牌 A',
     '{"prompt":"generate card A"}'::jsonb,
     '图片与元数据已返回',
@@ -235,6 +276,9 @@ INSERT INTO ai_executions (
     'v1',
     'image.generate',
     'step-relic-001',
+    'test-credential-openai',
+    1,
+    false,
     '根据描述生成测试遗物 B',
     '{"prompt":"generate relic B"}'::jsonb,
     '',
@@ -479,6 +523,7 @@ INSERT INTO job_events (
 );
 
 SELECT setval(pg_get_serial_sequence('quota_accounts', 'id'), COALESCE((SELECT MAX(id) FROM quota_accounts), 1), true);
+SELECT setval(pg_get_serial_sequence('users', 'user_id'), COALESCE((SELECT MAX(user_id) FROM users), 1), true);
 SELECT setval(pg_get_serial_sequence('quota_buckets', 'id'), COALESCE((SELECT MAX(id) FROM quota_buckets), 1), true);
 SELECT setval(pg_get_serial_sequence('jobs', 'id'), COALESCE((SELECT MAX(id) FROM jobs), 1), true);
 SELECT setval(pg_get_serial_sequence('job_items', 'id'), COALESCE((SELECT MAX(id) FROM job_items), 1), true);

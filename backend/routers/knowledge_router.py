@@ -41,6 +41,16 @@ def start_refresh_knowledge():
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@router.get("/refresh/latest")
+def get_latest_refresh_knowledge():
+    try:
+        return _runtime().get_latest_refresh_task()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @router.get("/refresh/{task_id}")
 def get_refresh_knowledge(task_id: str):
     try:

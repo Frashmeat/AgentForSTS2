@@ -50,6 +50,17 @@ def start_detect_paths_task(request: Request = None):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@router.get("/detect_paths/latest")
+def get_latest_detect_paths_task(request: Request = None):
+    try:
+        from project_utils import get_latest_detect_paths_task as _get_latest
+        return _get_latest()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @router.get("/detect_paths/{task_id}")
 def get_detect_paths_task(task_id: str, request: Request = None):
     try:

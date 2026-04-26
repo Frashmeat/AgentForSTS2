@@ -47,11 +47,14 @@ powershell -File .\tools\tools.ps1 stop deploy hybrid
 
 # 开发辅助
 powershell -File .\tools\tools.ps1 dev decompile
+powershell -File .\tools\tools.ps1 dev reset-web-db
 
 # latest 打包 / 部署
 powershell -File .\tools\tools.ps1 latest package hybrid
 powershell -File .\tools\tools.ps1 latest package workstation
 powershell -File .\tools\tools.ps1 latest deploy hybrid -DeployLocalWeb
+powershell -File .\tools\tools.ps1 latest deploy web -Debug
+powershell -File .\tools\tools.ps1 latest deploy hybrid -DeployLocalWeb -Debug
 powershell -File .\tools\tools.ps1 latest deploy hybrid -WebBaseUrl https://your-web-api.example.com
 powershell -File .\tools\tools.ps1 latest deploy web
 powershell -File .\tools\tools.ps1 latest deploy web -ResetDb
@@ -150,6 +153,19 @@ tools/
 
 - `tools\dev\decompile_sts2.py`
   反编译 `sts2.dll`，并把输出路径写入 `config.json`。不传参数时会默认读取 `config.json` 中的 `sts2_path`。
+
+### 平台数据库测试数据
+
+- `backend\tools\reset_web_database_with_test_data.ps1`
+  面向 Docker 化 `web` release 的破坏性联调脚本，默认定位 Compose 项目 `agentthespire-web-release` 的 `postgres` 与 `web` 服务，删除并重建当前 `POSTGRES_DB`，再通过 `web` 容器执行 `alembic upgrade head`，最后导入 `backend\migrations\sql\2026-03-31-seed-platform-test-data.sql`。
+  为避免误删数据，脚本必须显式追加 `-Yes` 才会执行；测试数据 SQL 内固定包含测试管理员 `admin / admin@example.com / admin123456`。
+  日常可通过 `tools.ps1 dev reset-web-db` 触发默认参数；部署联调可通过 `tools.ps1 latest deploy web -Debug` 或 `tools.ps1 latest deploy hybrid -DeployLocalWeb -Debug` 在 web 容器启动后自动重置数据库并导入测试数据。
+
+```powershell
+powershell -File .\backend\tools\reset_web_database_with_test_data.ps1 -Yes
+powershell -File .\tools\tools.ps1 dev reset-web-db
+powershell -File .\tools\tools.ps1 latest deploy web -Debug
+```
 
 ### 本地进程停止
 
