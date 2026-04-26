@@ -1,4 +1,4 @@
-﻿# Compatibility Layer Cleanup Implementation Plan
+# Compatibility Layer Cleanup Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -327,7 +327,7 @@ Expected: PASS
 - Modify: `frontend/src/shared/api/config.ts`
 - Modify: `backend/app/shared/infra/feature_flags.py`
 - Modify: `docs/02-现状/当前项目结构报告.md`
-- Modify: `docs/03-方案/重构/未开始-2026-03-24-模块化解耦重构计划书.md`
+- Modify: `docs/03-方案/重构/未开始/2026-03-24-模块化解耦重构计划书.md`
 
 - [ ] **Step 1: 确认前端旧 websocket 路径已不再承担回退职责**
 
