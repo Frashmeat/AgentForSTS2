@@ -15,6 +15,7 @@ import io
 import json
 import logging
 import traceback as tb_module
+from contextlib import suppress
 from pathlib import Path
 
 _log = logging.getLogger("batch")
@@ -45,6 +46,7 @@ from app.modules.workflow.application.engine import WorkflowEngine
 from app.modules.workflow.application.policies import LimitedParallelPolicy
 from app.modules.workflow.application.step import WorkflowStep
 from app.shared.infra.ws_errors import build_ws_error_payload, send_ws_error
+from app.shared.kernel.errors import CLIENT_DISCONNECTED_CODE, USER_CANCELLED_CODE, WorkflowTermination
 from app.shared.prompting import PromptLoader
 from config import get_config
 from image.generator import generate_images
@@ -267,6 +269,7 @@ async def _handle_ws_batch(ws: WebSocket, *, initial_params: dict | None = None)
     item_done_events: dict[str, asyncio.Event] = {}
     approval_states: dict[tuple[str, ...], dict[str, object]] = {}
     deferred_group_messages: dict[str, list[dict]] = {}
+    tasks: list[asyncio.Task] = []
 
     async def send(event: str, **data):
         await ws.send_text(json.dumps({"event": event, **data}))
@@ -275,6 +278,13 @@ async def _handle_ws_batch(ws: WebSocket, *, initial_params: dict | None = None)
         payload = build_stage_event(scope, stage, message, item_id=item_id)
         if payload:
             await send("stage_update", **payload)
+
+    async def cancel_pending_tasks() -> None:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     try:
         # ── 1. 接收启动参数 ──────────────────────────────────────────────────
@@ -624,6 +634,9 @@ async def _handle_ws_batch(ws: WebSocket, *, initial_params: dict | None = None)
             action = msg.get("action")
             item_id = msg.get("item_id")
 
+            if action == "cancel":
+                raise WorkflowTermination(code=USER_CANCELLED_CODE, message="用户已取消当前批量生成")
+
             if action == "select_image" and item_id in selection_futures:
                 fut = selection_futures.get(item_id)
                 if fut and not fut.done():
@@ -700,9 +713,17 @@ async def _handle_ws_batch(ws: WebSocket, *, initial_params: dict | None = None)
 
         await send("batch_done", success_count=len(sorted_items) - len(error_ids), error_count=len(error_ids))
 
+    except WorkflowTermination as e:
+        await cancel_pending_tasks()
+        _log.info("batch workflow terminated code=%s", e.code)
+        if e.code == USER_CANCELLED_CODE:
+            with suppress(Exception):
+                await send_ws_error(ws, code=e.code, message=e.message, detail=e.message, event="cancelled")
     except WebSocketDisconnect:
-        pass
+        await cancel_pending_tasks()
+        _log.info("batch workflow client disconnected")
     except Exception as e:
+        await cancel_pending_tasks()
         try:
             await send_ws_error(
                 ws,

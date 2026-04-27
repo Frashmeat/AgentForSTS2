@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import subprocess
 import threading
 from collections.abc import Callable
@@ -51,6 +52,7 @@ async def run_streaming(
     """
     loop = asyncio.get_event_loop()
     queue: asyncio.Queue[tuple[str, object]] = asyncio.Queue()
+    proc_holder: dict[str, subprocess.Popen] = {}
 
     def _pump(pipe, tag: str):
         for raw in pipe:
@@ -75,6 +77,7 @@ async def run_streaming(
             loop.call_soon_threadsafe(queue.put_nowait, ("error", str(exc)))
             return
 
+        proc_holder["proc"] = proc
         logger.info("[%s] 进程已启动 pid=%s", name, proc.pid)
         if stdin_data is not None:
             assert proc.stdin is not None
@@ -97,36 +100,58 @@ async def run_streaming(
     output_chunks: list[str] = []
     error_chunks: list[str] = []
 
-    while True:
-        tag, data = await queue.get()
+    def _terminate_process_tree() -> None:
+        proc = proc_holder.get("proc")
+        if proc is None or proc.poll() is not None:
+            return
+        logger.info("[%s] 正在终止进程 pid=%s", name, proc.pid)
+        if os.name == "nt":
+            try:
+                subprocess.run(
+                    ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                    capture_output=True,
+                    check=False,
+                )
+                return
+            except Exception:
+                logger.exception("[%s] taskkill 失败，回退到 terminate", name)
+        proc.terminate()
 
-        if tag == "error":
-            thread.join()
-            logger.error("[%s] 无法启动进程: %s", name, data)
-            raise RuntimeError(f"无法启动 {name}: {data}")
+    try:
+        while True:
+            tag, data = await queue.get()
 
-        if tag == "done":
-            returncode = int(data)  # type: ignore[arg-type]
-            thread.join()
-            if returncode != 0:
-                detail = "".join(error_chunks) or "".join(output_chunks) or "(无输出)"
-                logger.error("[%s] 退出码=%s\n%s", name, returncode, detail[:500])
-                raise RuntimeError(f"{name} 退出码 {returncode}\n{detail}")
-            logger.info("[%s] 执行完成，输出 %d 块", name, len(output_chunks))
-            return output_chunks, error_chunks
+            if tag == "error":
+                thread.join()
+                logger.error("[%s] 无法启动进程: %s", name, data)
+                raise RuntimeError(f"无法启动 {name}: {data}")
 
-        if tag == "stderr":
-            line = str(data)
-            error_chunks.append(line)
-            logger.warning("[%s][stderr] %s", name, line.rstrip())
-            if stream_callback:
-                await stream_callback(f"[stderr] {line}")
-            continue
+            if tag == "done":
+                returncode = int(data)  # type: ignore[arg-type]
+                thread.join()
+                if returncode != 0:
+                    detail = "".join(error_chunks) or "".join(output_chunks) or "(无输出)"
+                    logger.error("[%s] 退出码=%s\n%s", name, returncode, detail[:500])
+                    raise RuntimeError(f"{name} 退出码 {returncode}\n{detail}")
+                logger.info("[%s] 执行完成，输出 %d 块", name, len(output_chunks))
+                return output_chunks, error_chunks
 
-        # stdout
-        raw_line = str(data)
-        text = process_line(raw_line) if process_line else raw_line
-        if text:
-            output_chunks.append(text)
-            if stream_callback:
-                await stream_callback(text)
+            if tag == "stderr":
+                line = str(data)
+                error_chunks.append(line)
+                logger.warning("[%s][stderr] %s", name, line.rstrip())
+                if stream_callback:
+                    await stream_callback(f"[stderr] {line}")
+                continue
+
+            # stdout
+            raw_line = str(data)
+            text = process_line(raw_line) if process_line else raw_line
+            if text:
+                output_chunks.append(text)
+                if stream_callback:
+                    await stream_callback(text)
+    except asyncio.CancelledError:
+        _terminate_process_tree()
+        thread.join(timeout=5)
+        raise

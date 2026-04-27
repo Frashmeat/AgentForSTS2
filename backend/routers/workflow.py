@@ -10,6 +10,7 @@ import io
 import json
 import logging
 import tempfile
+from contextlib import suppress
 from pathlib import Path
 from typing import Literal
 
@@ -23,6 +24,7 @@ from app.modules.workflow.application.engine import WorkflowEngine
 from app.modules.workflow.application.single_asset import SingleAssetWorkflow
 from app.modules.workflow.application.step import WorkflowStep
 from app.shared.infra.ws_errors import build_ws_error_payload, send_ws_error
+from app.shared.kernel.errors import CLIENT_DISCONNECTED_CODE, USER_CANCELLED_CODE, WorkflowTermination
 from app.shared.prompting import PromptLoader
 from config import get_config
 from project_utils import create_project_from_template
@@ -66,6 +68,88 @@ def _text(key: str, **variables: object) -> str:
     if variables:
         return _TEXT_LOADER.render(f"runtime_workflow.{key}", variables)
     return _TEXT_LOADER.load(f"runtime_workflow.{key}")
+
+
+class _WsCancellation:
+    def __init__(self) -> None:
+        self._event = asyncio.Event()
+        self.code = USER_CANCELLED_CODE
+        self.message = "用户已取消当前生成"
+
+    @property
+    def is_cancelled(self) -> bool:
+        return self._event.is_set()
+
+    async def wait(self) -> None:
+        await self._event.wait()
+
+    def cancel(self, *, code: str, message: str) -> None:
+        if self._event.is_set():
+            return
+        self.code = code
+        self.message = message
+        self._event.set()
+
+    def raise_if_cancelled(self) -> None:
+        if self._event.is_set():
+            raise WorkflowTermination(code=self.code, message=self.message)
+
+
+async def _read_ws_controls(
+    ws: WebSocket,
+    queue: asyncio.Queue[dict],
+    cancellation: _WsCancellation,
+) -> None:
+    try:
+        while not cancellation.is_cancelled:
+            raw = await ws.receive_text()
+            message = json.loads(raw)
+            if message.get("action") == "cancel":
+                cancellation.cancel(code=USER_CANCELLED_CODE, message="用户已取消当前生成")
+                return
+            await queue.put(message)
+    except WebSocketDisconnect:
+        cancellation.cancel(code=CLIENT_DISCONNECTED_CODE, message="客户端已断开，当前生成已停止")
+
+
+async def _next_control_message(
+    ws: WebSocket,
+    *,
+    queue: asyncio.Queue[dict] | None,
+    cancellation: _WsCancellation,
+) -> dict:
+    while True:
+        cancellation.raise_if_cancelled()
+        if queue is None:
+            try:
+                message = json.loads(await ws.receive_text())
+            except WebSocketDisconnect:
+                cancellation.cancel(code=CLIENT_DISCONNECTED_CODE, message="客户端已断开，当前生成已停止")
+                cancellation.raise_if_cancelled()
+            if message.get("action") == "cancel":
+                cancellation.cancel(code=USER_CANCELLED_CODE, message="用户已取消当前生成")
+                cancellation.raise_if_cancelled()
+            return message
+        try:
+            return await asyncio.wait_for(queue.get(), timeout=0.2)
+        except asyncio.TimeoutError:
+            continue
+
+
+async def _run_until_cancelled(awaitable, cancellation: _WsCancellation):
+    cancellation.raise_if_cancelled()
+    task = asyncio.ensure_future(awaitable)
+    cancel_task = asyncio.create_task(cancellation.wait())
+    done, _ = await asyncio.wait({task, cancel_task}, return_when=asyncio.FIRST_COMPLETED)
+    if cancel_task in done:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+        cancellation.raise_if_cancelled()
+    cancel_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await cancel_task
+    return await task
 
 
 async def _send_approval_pending(ws: WebSocket, summary: str, requests: list):
@@ -126,6 +210,8 @@ async def _maybe_await_approval(
     description: str,
     llm_cfg: dict,
     project_root: Path,
+    receive_control=None,
+    run_cancellable=None,
 ) -> tuple[bool, str | None]:
     """审批模式下等待用户确认，并在 approval_first 下返回主执行链。
 
@@ -135,9 +221,10 @@ async def _maybe_await_approval(
     """
     if llm_cfg.get("execution_mode") != "approval_first":
         return True, None
-    summary, actions = await _plan_approval_requests(description, llm_cfg, project_root)
+    planner = _plan_approval_requests(description, llm_cfg, project_root)
+    summary, actions = await run_cancellable(planner) if run_cancellable else await planner
     await _send_approval_pending(ws, summary, actions)
-    decision = json.loads(await ws.receive_text())
+    decision = await receive_control() if receive_control else json.loads(await ws.receive_text())
     if decision.get("action") != "approve_all":
         await _send(ws, "done", {"success": False, "image_paths": [], "agent_output": _text("workflow_approval_cancelled_output").strip()})
         return False, None
@@ -189,11 +276,23 @@ async def _handle_ws_create(ws: WebSocket, *, initial_params: dict | None = None
     """
     client = ws.client
     logger.info("[ws/create] 连接建立 client=%s", client)
+    cancellation = _WsCancellation()
+    control_queue: asyncio.Queue[dict] | None = None
+    control_reader: asyncio.Task | None = None
+
+    async def receive_control() -> dict:
+        return await _next_control_message(ws, queue=control_queue, cancellation=cancellation)
+
+    async def run_cancellable(awaitable):
+        return await _run_until_cancelled(awaitable, cancellation)
+
     try:
         if initial_params is None:
             await ws.accept()
             raw = await ws.receive_text()
             params = json.loads(raw)
+            control_queue = asyncio.Queue()
+            control_reader = asyncio.create_task(_read_ws_controls(ws, control_queue, cancellation))
         else:
             params = initial_params
         assert params.get("action") == "start"
@@ -207,13 +306,13 @@ async def _handle_ws_create(ws: WebSocket, *, initial_params: dict | None = None
         # custom_code 类型：跳过图片生成，直接走代码 agent
         if asset_type == "custom_code":
             logger.info("[ws/create] 走 custom_code 分支")
-            await _ws_run_custom_code(ws, params, project_root)
+            await _ws_run_custom_code(ws, params, project_root, cancellation, receive_control, run_cancellable)
             return
 
         # 用户提供了上传图片：跳过生图/选图，直接后处理 + code agent
         if params.get("provided_image_b64"):
             logger.info("[ws/create] 走 provided_image 分支")
-            await _ws_run_with_provided_image(ws, params, project_root)
+            await _ws_run_with_provided_image(ws, params, project_root, cancellation, receive_control, run_cancellable)
             return
 
         cfg = get_config()
@@ -231,29 +330,30 @@ async def _handle_ws_create(ws: WebSocket, *, initial_params: dict | None = None
             await _send_stage(ws, "project", "project_init", _text("workflow_project_init_stage", project_name=project_name).strip())
             await _send(ws, "progress", {"message": _text("workflow_project_init_progress", project_name=project_name).strip()})
             try:
-                project_root = await asyncio.get_event_loop().run_in_executor(
+                project_root = await run_cancellable(asyncio.get_event_loop().run_in_executor(
                     None, create_project_from_template, project_name, parent_dir
-                )
+                ))
             except FileNotFoundError:
                 # 模板不存在时回退到 Claude clone 方式
                 async def _stream_init(chunk: str):
+                    cancellation.raise_if_cancelled()
                     await _send(ws, "agent_stream", build_stream_chunk_payload(
                         chunk,
                         source="project_init",
                         model=agent_display_model,
                     ))
-                project_root = await create_mod_project(project_name, parent_dir, _stream_init)
+                project_root = await run_cancellable(create_mod_project(project_name, parent_dir, _stream_init))
             await _send(ws, "progress", {"message": _text("workflow_project_init_done", project_root=project_root).strip()})
 
         # 2. Prompt Adaptation
         await _send_stage(ws, "text", "prompt_adapting", _text("workflow_prompt_adapting_stage").strip())
         await _send(ws, "progress", {"message": _text("workflow_prompt_adapting_progress").strip()})
-        adapted = await adapt_prompt(
+        adapted = await run_cancellable(adapt_prompt(
             description,
             asset_type,
             img_provider,
             needs_transparent_bg=_needs_transparent(asset_type),
-        )
+        ))
 
         # 2.5 发送 prompt 预览，等待用户确认（可修改 prompt）
         await _send(ws, "prompt_preview", {
@@ -261,8 +361,7 @@ async def _handle_ws_create(ws: WebSocket, *, initial_params: dict | None = None
             "negative_prompt": adapted.get("negative_prompt", ""),
             "fallback_warning": adapted.get("fallback_warning"),
         })
-        raw = await ws.receive_text()
-        confirm = json.loads(raw)
+        confirm = await receive_control()
         assert confirm.get("action") == "confirm"
         # 用户可能修改了 prompt
         if confirm.get("prompt"):
@@ -282,9 +381,10 @@ async def _handle_ws_create(ws: WebSocket, *, initial_params: dict | None = None
             await _send(ws, "progress", {"message": _text("workflow_image_generating_progress", image_number=image_number).strip()})
 
             async def _img_progress(msg: str):
+                cancellation.raise_if_cancelled()
                 await _send(ws, "progress", {"message": msg})
 
-            [img] = await generate_images(current_prompt, asset_type, current_neg, batch_size=1, progress_callback=_img_progress)
+            [img] = await run_cancellable(generate_images(current_prompt, asset_type, current_neg, batch_size=1, progress_callback=_img_progress))
             all_images.append(img)
 
             buf = io.BytesIO()
@@ -293,8 +393,7 @@ async def _handle_ws_create(ws: WebSocket, *, initial_params: dict | None = None
             await _send(ws, "image_ready", {"image": b64, "index": idx, "prompt": current_prompt})
 
             # 等用户决定：select 或 generate_more
-            raw = await ws.receive_text()
-            action_data = json.loads(raw)
+            action_data = await receive_control()
 
             if action_data.get("action") == "select":
                 selected_img = all_images[action_data["index"]]
@@ -313,7 +412,14 @@ async def _handle_ws_create(ws: WebSocket, *, initial_params: dict | None = None
         await _send(ws, "progress", {"message": _text("workflow_image_paths_written", image_paths=[str(p) for p in image_paths]).strip()})
 
         # 6. Code Agent
-        should_continue, approval_output = await _maybe_await_approval(ws, description, cfg["llm"], project_root)
+        should_continue, approval_output = await _maybe_await_approval(
+            ws,
+            description,
+            cfg["llm"],
+            project_root,
+            receive_control=receive_control,
+            run_cancellable=run_cancellable,
+        )
         if approval_output is not None:
             await _send(ws, "done", {
                 "success": True,
@@ -328,16 +434,17 @@ async def _handle_ws_create(ws: WebSocket, *, initial_params: dict | None = None
             await _send(ws, "progress", {"message": _text("workflow_agent_running_progress").strip()})
 
         async def stream_to_ws(chunk: str):
+            cancellation.raise_if_cancelled()
             await _send(ws, "agent_stream", build_stream_chunk_payload(
                 chunk,
                 source="agent",
                 model=agent_display_model,
             ))
 
-        output = await create_asset(
+        output = await run_cancellable(create_asset(
             description, asset_type, asset_name,
             image_paths, project_root, stream_to_ws,
-        )
+        ))
 
         # 7. 完成
         await _send(ws, "done", {
@@ -346,6 +453,11 @@ async def _handle_ws_create(ws: WebSocket, *, initial_params: dict | None = None
             "agent_output": output,
         })
 
+    except WorkflowTermination as e:
+        logger.info("[ws/create] 工作流已终止 client=%s code=%s", client, e.code)
+        if e.code == USER_CANCELLED_CODE:
+            with suppress(Exception):
+                await send_ws_error(ws, code=e.code, message=e.message, detail=e.message, event="cancelled")
     except WebSocketDisconnect:
         logger.info("[ws/create] 客户端主动断开 client=%s", client)
     except Exception as e:
@@ -364,9 +476,21 @@ async def _handle_ws_create(ws: WebSocket, *, initial_params: dict | None = None
             )
         except Exception:
             pass
+    finally:
+        if control_reader is not None:
+            control_reader.cancel()
+            with suppress(asyncio.CancelledError):
+                await control_reader
 
 
-async def _ws_run_custom_code(ws: WebSocket, params: dict, project_root: Path):
+async def _ws_run_custom_code(
+    ws: WebSocket,
+    params: dict,
+    project_root: Path,
+    cancellation: _WsCancellation,
+    receive_control,
+    run_cancellable,
+):
     """custom_code 类型：跳过图片生成，直接调用 create_custom_code agent。"""
     asset_name: str = params["asset_name"]
     description: str = params["description"]
@@ -382,20 +506,28 @@ async def _ws_run_custom_code(ws: WebSocket, params: dict, project_root: Path):
         await _send_stage(ws, "project", "project_init", _text("workflow_project_init_stage", project_name=project_name).strip())
         await _send(ws, "progress", {"message": _text("workflow_project_init_progress", project_name=project_name).strip()})
         try:
-            project_root = await asyncio.get_event_loop().run_in_executor(
+            project_root = await run_cancellable(asyncio.get_event_loop().run_in_executor(
                 None, create_project_from_template, project_name, parent_dir
-            )
+            ))
         except FileNotFoundError:
             async def _stream_init(chunk: str):
+                cancellation.raise_if_cancelled()
                 await _send(ws, "agent_stream", build_stream_chunk_payload(
                     chunk,
                     source="project_init",
                     model=agent_display_model,
                 ))
-            project_root = await create_mod_project(project_name, parent_dir, _stream_init)
+            project_root = await run_cancellable(create_mod_project(project_name, parent_dir, _stream_init))
         await _send(ws, "progress", {"message": _text("workflow_project_init_done", project_root=project_root).strip()})
 
-    should_continue, approval_output = await _maybe_await_approval(ws, description, cfg["llm"], project_root)
+    should_continue, approval_output = await _maybe_await_approval(
+        ws,
+        description,
+        cfg["llm"],
+        project_root,
+        receive_control=receive_control,
+        run_cancellable=run_cancellable,
+    )
     if approval_output is not None:
         await _send(ws, "done", {
             "success": True,
@@ -410,19 +542,20 @@ async def _ws_run_custom_code(ws: WebSocket, params: dict, project_root: Path):
         await _send(ws, "progress", {"message": _text("workflow_custom_code_agent_running_progress").strip()})
 
     async def stream_to_ws(chunk: str):
+        cancellation.raise_if_cancelled()
         await _send(ws, "agent_stream", build_stream_chunk_payload(
             chunk,
             source="agent",
             model=agent_display_model,
         ))
 
-    output = await create_custom_code(
+    output = await run_cancellable(create_custom_code(
         description=description,
         implementation_notes=implementation_notes,
         name=asset_name,
         project_root=project_root,
         stream_callback=stream_to_ws,
-    )
+    ))
 
     await _send(ws, "done", {
         "success": True,
@@ -431,7 +564,14 @@ async def _ws_run_custom_code(ws: WebSocket, params: dict, project_root: Path):
     })
 
 
-async def _ws_run_with_provided_image(ws: WebSocket, params: dict, project_root: Path):
+async def _ws_run_with_provided_image(
+    ws: WebSocket,
+    params: dict,
+    project_root: Path,
+    cancellation: _WsCancellation,
+    receive_control,
+    run_cancellable,
+):
     """用户上传图片（base64）→ 后处理 → code agent，跳过生图和选图步骤。"""
     from PIL import Image as PILImage
 
@@ -458,30 +598,38 @@ async def _ws_run_with_provided_image(ws: WebSocket, params: dict, project_root:
         await _send_stage(ws, "project", "project_init", _text("workflow_project_init_stage", project_name=project_name).strip())
         await _send(ws, "progress", {"message": _text("workflow_project_init_progress", project_name=project_name).strip()})
         try:
-            project_root = await asyncio.get_event_loop().run_in_executor(
+            project_root = await run_cancellable(asyncio.get_event_loop().run_in_executor(
                 None, create_project_from_template, project_name, parent_dir
-            )
+            ))
         except FileNotFoundError:
             async def _stream_init(chunk: str):
+                cancellation.raise_if_cancelled()
                 await _send(ws, "agent_stream", build_stream_chunk_payload(
                     chunk,
                     source="project_init",
                     model=agent_display_model,
                 ))
-            project_root = await create_mod_project(project_name, parent_dir, _stream_init)
+            project_root = await run_cancellable(create_mod_project(project_name, parent_dir, _stream_init))
         await _send(ws, "progress", {"message": _text("workflow_project_init_done", project_root=project_root).strip()})
 
     await _send(ws, "progress", {"message": _text("workflow_provided_image_reading", file_name=fname).strip()})
-    img = await asyncio.get_event_loop().run_in_executor(
+    img = await run_cancellable(asyncio.get_event_loop().run_in_executor(
         None, lambda: img_src.convert("RGBA")
-    )
+    ))
 
     await _send_stage(ws, "image", "postprocess", _text("workflow_image_postprocess_stage").strip())
     await _send(ws, "progress", {"message": _text("workflow_image_postprocess_progress").strip()})
     image_paths = await _run_postprocess(img, asset_type, asset_name, project_root)
     await _send(ws, "progress", {"message": _text("workflow_image_paths_written", image_paths=[str(p) for p in image_paths]).strip()})
 
-    should_continue, approval_output = await _maybe_await_approval(ws, description, cfg["llm"], project_root)
+    should_continue, approval_output = await _maybe_await_approval(
+        ws,
+        description,
+        cfg["llm"],
+        project_root,
+        receive_control=receive_control,
+        run_cancellable=run_cancellable,
+    )
     if approval_output is not None:
         await _send(ws, "done", {
             "success": True,
@@ -496,16 +644,17 @@ async def _ws_run_with_provided_image(ws: WebSocket, params: dict, project_root:
         await _send(ws, "progress", {"message": _text("workflow_agent_running_progress").strip()})
 
     async def stream_to_ws(chunk: str):
+        cancellation.raise_if_cancelled()
         await _send(ws, "agent_stream", build_stream_chunk_payload(
             chunk,
             source="agent",
             model=agent_display_model,
         ))
 
-    output = await create_asset(
+    output = await run_cancellable(create_asset(
         description, asset_type, asset_name,
         image_paths, project_root, stream_to_ws,
-    )
+    ))
 
     await _send(ws, "done", {
         "success": True,
