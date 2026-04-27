@@ -9,6 +9,7 @@ export type WsEvent = Extract<
   | { event: "image_ready" }
   | { event: "agent_stream" }
   | { event: "approval_pending" }
+  | { event: "cancelled" }
   | { event: "done" }
   | { event: "error" }
 >;

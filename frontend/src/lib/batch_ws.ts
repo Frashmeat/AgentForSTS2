@@ -15,6 +15,7 @@ export type BatchEvent = Extract<
   | { event: "item_approval_pending" }
   | { event: "item_done" }
   | { event: "item_error" }
+  | { event: "cancelled" }
   | { event: "batch_done" }
   | { event: "error" }
 >;

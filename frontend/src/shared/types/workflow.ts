@@ -91,6 +91,7 @@ export type WorkflowEvent =
   | { event: "done"; stage: "done"; success: boolean; image_paths?: string[]; agent_output?: string }
   | { event: "item_done"; stage: "item_done"; item_id: string; success: boolean }
   | { event: "batch_done"; stage: "batch_done"; success_count: number; error_count: number }
+  | ({ event: "cancelled"; stage: "cancelled" } & WorkflowErrorPayload)
   | ({ event: "error"; stage: "error" } & WorkflowErrorPayload)
   | ({ event: "item_error"; stage: "item_error"; item_id: string } & WorkflowErrorPayload);
 

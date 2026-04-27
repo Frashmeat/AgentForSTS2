@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { AlertTriangle, ChevronDown, ChevronUp, Loader2, RotateCcw } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronUp, Loader2, RotateCcw, StopCircle } from "lucide-react";
 
 import { AgentLog } from "../../components/AgentLog";
 import { ApprovalPanel } from "../../components/ApprovalPanel";
@@ -10,6 +10,7 @@ import { StageStatus } from "../../components/StageStatus";
 import { cn } from "../../lib/utils";
 import type { ApprovalRequest } from "../../shared/api/index.ts";
 import type { WorkflowLogEntry } from "../../shared/workflowLog.ts";
+import type { WorkspaceStatusNoticeHandler } from "../workspace/types.ts";
 
 import { ASSET_TYPES, PRESETS, type AssetType, type PresetOption, type Stage } from "./model";
 
@@ -55,11 +56,10 @@ export interface SingleAssetFeatureViewProps {
   onDescriptionChange: (value: string) => void;
   onProjectRootChange: (value: string) => void;
   projectCreateBusy: boolean;
-  projectCreateMessage: string | null;
-  projectCreateError: string | null;
   onCreateProject: () => void;
   onApplyPreset: (preset: PresetOption) => void;
   onStartWorkflow: () => void;
+  onCancelWorkflow: () => void;
   onReset: () => void;
   onImageModeChange: (value: "ai" | "upload") => void;
   onAutoModeToggle: () => void;
@@ -79,6 +79,7 @@ export interface SingleAssetFeatureViewProps {
   onRefreshKnowledge: () => void;
   onOpenKnowledgeGuide: () => void;
   onOpenSettings: () => void;
+  onStatusNotice: WorkspaceStatusNoticeHandler;
 }
 
 export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
@@ -124,11 +125,10 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
     onDescriptionChange,
     onProjectRootChange,
     projectCreateBusy,
-    projectCreateMessage,
-    projectCreateError,
     onCreateProject,
     onApplyPreset,
     onStartWorkflow,
+    onCancelWorkflow,
     onReset,
     onImageModeChange,
     onAutoModeToggle,
@@ -148,6 +148,7 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
     onRefreshKnowledge,
     onOpenKnowledgeGuide,
     onOpenSettings,
+    onStatusNotice,
   } = props;
 
   const errorInStep2 = stage === "error" && step <= 2;
@@ -216,8 +217,7 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
               showCreateAction={step === 0}
               createActionLabel="创建项目"
               createBusy={projectCreateBusy}
-              createMessage={projectCreateMessage}
-              createError={projectCreateError}
+              onStatusNotice={onStatusNotice}
               onChange={onProjectRootChange}
               onCreateProject={onCreateProject}
             />
@@ -363,13 +363,24 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
               )}
             </div>
           ) : (
-            <button
-              onClick={onReset}
-              className="w-full py-2 rounded-lg border border-slate-200 text-slate-400 hover:text-violet-700 hover:border-violet-300 text-sm transition-colors flex items-center justify-center gap-1.5"
-            >
-              <RotateCcw size={13} />
-              重新开始
-            </button>
+            <div className="space-y-2">
+              {hasLiveSession && (
+                <button
+                  onClick={onCancelWorkflow}
+                  className="w-full py-2 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 text-sm transition-colors flex items-center justify-center gap-1.5"
+                >
+                  <StopCircle size={13} />
+                  停止生成
+                </button>
+              )}
+              <button
+                onClick={onReset}
+                className="w-full py-2 rounded-lg border border-slate-200 text-slate-400 hover:text-violet-700 hover:border-violet-300 text-sm transition-colors flex items-center justify-center gap-1.5"
+              >
+                <RotateCcw size={13} />
+                重新开始
+              </button>
+            </div>
           )}
         </div>
       </Step>
@@ -529,17 +540,28 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
           {step < 4 && !errorInStep3 && <p className="text-sm text-slate-300">等待选择图片…</p>}
         </Step>
 
-        <Step num={4} title="完成" active={stage === "approval_pending" || stage === "done"} done={false}>
+        <Step num={4} title="完成" active={stage === "approval_pending" || stage === "done" || stage === "cancelled"} done={false}>
           {stage === "done" ? (
             <div className="space-y-3">
               <p className="text-sm text-green-600 font-medium">✓ Code Agent 完成</p>
-              <BuildDeploy projectRoot={projectRoot} onOpenSettings={onOpenSettings} />
+              <BuildDeploy projectRoot={projectRoot} onOpenSettings={onOpenSettings} onStatusNotice={onStatusNotice} />
               <button
                 onClick={onReset}
                 className="py-1.5 px-4 rounded-lg border border-slate-200 hover:border-violet-400 text-slate-500 hover:text-violet-700 transition-colors text-sm flex items-center gap-1.5"
               >
                 <RotateCcw size={13} />
                 创建新资产
+              </button>
+            </div>
+          ) : stage === "cancelled" ? (
+            <div className="space-y-3">
+              <p className="text-sm text-slate-600 font-medium">已取消当前生成</p>
+              <button
+                onClick={onReset}
+                className="py-1.5 px-4 rounded-lg border border-slate-200 hover:border-violet-300 text-slate-500 hover:text-violet-700 transition-colors text-sm flex items-center gap-1.5"
+              >
+                <RotateCcw size={13} />
+                重新开始
               </button>
             </div>
           ) : stage === "error" ? (

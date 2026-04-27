@@ -12,6 +12,7 @@ export type BatchItemStatus =
   | "awaiting_selection"
   | "approval_pending"
   | "code_generating"
+  | "cancelled"
   | "done"
   | "error";
 
@@ -43,6 +44,7 @@ export type BatchStage =
   | "review_items"
   | "review_bundles"
   | "executing"
+  | "cancelled"
   | "done"
   | "error";
 
@@ -81,6 +83,7 @@ export type BatchRuntimeAction =
   | { type: "item_done"; itemId: string }
   | { type: "item_error"; itemId: string; message: string; traceback: string | null }
   | { type: "batch_done"; success: number; error: number }
+  | { type: "workflow_cancelled"; message?: string }
   | { type: "workflow_failed"; message: string }
   | { type: "workflow_reset" }
   | { type: "active_item_set"; itemId: string | null }
@@ -483,6 +486,24 @@ export function batchWorkflowReducer(state: BatchRuntimeState, action: BatchRunt
         ...state,
         stage: "done",
         batchResult: { success: action.success, error: action.error },
+      };
+    case "workflow_cancelled":
+      if (state.stage === "cancelled") {
+        return state;
+      }
+      return {
+        ...state,
+        stage: "cancelled",
+        batchLog: [...state.batchLog, action.message ?? "已取消当前生成"],
+        workflowErrorMessage: null,
+        itemStates: Object.fromEntries(
+          Object.entries(state.itemStates).map(([id, itemState]) => [
+            id,
+            itemState.status === "done" || itemState.status === "error"
+              ? itemState
+              : { ...itemState, status: "cancelled" as const },
+          ]),
+        ) as BatchItemStateRecord,
       };
     case "workflow_failed":
       return {

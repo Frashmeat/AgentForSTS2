@@ -2,7 +2,12 @@ import {
   createSingleAssetSocket,
   type SingleAssetSocket,
 } from "../../lib/single_asset_ws.ts";
-import { resolveErrorMessage, resolveWorkflowErrorMessage } from "../../shared/error.ts";
+import {
+  WORKFLOW_CANCELLED_MESSAGE,
+  isWorkflowCancellation,
+  resolveErrorMessage,
+  resolveWorkflowErrorMessage,
+} from "../../shared/error.ts";
 import type { AssetType } from "./model.ts";
 import type { SingleAssetWorkflowAction } from "./state.ts";
 
@@ -46,6 +51,20 @@ export function createSingleAssetWorkflowController(
     runtime.closeSocket();
     runtime.setSocket(null);
     runtime.dispatchWorkflow({ type: "workflow_reset" });
+  }
+
+  function cancel() {
+    const socket = runtime.getSocket();
+    if (socket) {
+      try {
+        socket.send({ action: "cancel" });
+      } catch {}
+      setTimeout(() => {
+        socket.close();
+      }, 100);
+    }
+    runtime.setSocket(null);
+    runtime.dispatchWorkflow({ type: "workflow_cancelled", message: WORKFLOW_CANCELLED_MESSAGE });
   }
 
   function confirmPrompt(prompt: string, negativePrompt: string) {
@@ -137,7 +156,22 @@ export function createSingleAssetWorkflowController(
       });
     });
     socket.on("error", (message) => {
+      if (isWorkflowCancellation(message)) {
+        runtime.setSocket(null);
+        runtime.dispatchWorkflow({
+          type: "workflow_cancelled",
+          message: resolveWorkflowErrorMessage(message, WORKFLOW_CANCELLED_MESSAGE),
+        });
+        return;
+      }
       runtime.reportWorkflowError(resolveWorkflowErrorMessage(message), message.traceback || null);
+    });
+    socket.on("cancelled", (message) => {
+      runtime.setSocket(null);
+      runtime.dispatchWorkflow({
+        type: "workflow_cancelled",
+        message: resolveWorkflowErrorMessage(message, WORKFLOW_CANCELLED_MESSAGE),
+      });
     });
     socket.on("approval_pending", (message) => {
       runtime.dispatchWorkflow({
@@ -184,6 +218,7 @@ export function createSingleAssetWorkflowController(
       }
     });
     socket.on("done", (message) => {
+      runtime.setSocket(null);
       runtime.dispatchWorkflow({
         type: "agent_log_appended",
         message: message.success ? "✓ 构建成功！" : "✗ 构建失败",
@@ -241,6 +276,7 @@ export function createSingleAssetWorkflowController(
     selectImage,
     generateMore,
     proceedApproval,
+    cancel,
     reset,
   };
 }

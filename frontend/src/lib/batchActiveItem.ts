@@ -4,6 +4,7 @@ export type BatchItemStatus =
   | "awaiting_selection"
   | "approval_pending"
   | "code_generating"
+  | "cancelled"
   | "done"
   | "error";
 

@@ -37,6 +37,7 @@ export type SingleAssetWorkflowAction =
   | { type: "image_ready_received"; index: number; image: string; prompt: string; batchOffset: number }
   | { type: "approval_pending_received"; summary: string; requests: ApprovalRequest[] }
   | { type: "workflow_failed"; message: string; traceback: string | null }
+  | { type: "workflow_cancelled"; message?: string }
   | { type: "workflow_reset" }
   | { type: "stage_changed"; stage: Stage }
   | { type: "gen_log_appended"; message: string }
@@ -139,6 +140,17 @@ export function singleAssetWorkflowReducer(
         stage: "error",
         errorMessage: action.message,
         errorTraceback: action.traceback,
+      };
+    case "workflow_cancelled":
+      if (state.stage === "cancelled") {
+        return state;
+      }
+      return {
+        ...state,
+        stage: "cancelled",
+        genLog: [...state.genLog, action.message ?? "已取消当前生成"],
+        errorMessage: null,
+        errorTraceback: null,
       };
     case "workflow_reset":
       return createInitialSingleAssetWorkflowState();

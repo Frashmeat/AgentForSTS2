@@ -31,6 +31,7 @@ export function SingleAssetWorkspaceContainer() {
     onOpenSettings,
     onRefreshKnowledge,
     onRequestExecution,
+    onStatusNotice,
   } = useWorkspaceContext();
   const [initialSingleAssetSnapshot] = useState(() => loadSingleAssetSnapshot());
   const [assetType, setAssetType] = useState<AssetType>(() => initialSingleAssetSnapshot?.assetType ?? "relic");
@@ -57,13 +58,12 @@ export function SingleAssetWorkspaceContainer() {
   );
   const {
     projectCreateBusy,
-    projectCreateMessage,
-    projectCreateError,
     clearProjectCreationFeedback,
     resetProjectCreationState,
     createProjectAtRoot,
   } = useProjectCreation({
     onProjectCreated: setProjectRoot,
+    onStatusNotice,
   });
 
   useEffect(() => {
@@ -330,8 +330,6 @@ export function SingleAssetWorkspaceContainer() {
       onDescriptionChange={setDescription}
       onProjectRootChange={setProjectRoot}
       projectCreateBusy={projectCreateBusy}
-      projectCreateMessage={projectCreateMessage}
-      projectCreateError={projectCreateError}
       onCreateProject={() => {
         void createProjectAtRoot(projectRoot).catch(() => {});
       }}
@@ -367,6 +365,9 @@ export function SingleAssetWorkspaceContainer() {
           },
         });
       }}
+      onCancelWorkflow={() => {
+        singleAssetWorkflowController.cancel();
+      }}
       onReset={reset}
       onImageModeChange={setImageMode}
       onAutoModeToggle={() => {
@@ -398,6 +399,7 @@ export function SingleAssetWorkspaceContainer() {
       onRefreshKnowledge={onRefreshKnowledge}
       onOpenKnowledgeGuide={onOpenKnowledgeGuide}
       onOpenSettings={onOpenSettings}
+      onStatusNotice={onStatusNotice}
     />
   );
 }

@@ -1,7 +1,11 @@
 export const DEFAULT_ERROR_MESSAGE = "请求失败，请稍后重试";
+export const WORKFLOW_CANCELLED_MESSAGE = "已取消当前生成";
+
+const WORKFLOW_CANCELLATION_CODES = new Set(["user_cancelled", "client_disconnected"]);
 
 type StructuredErrorPayload = {
   error?: unknown;
+  code?: unknown;
   message?: unknown;
   detail?: unknown;
   traceback?: unknown;
@@ -77,4 +81,22 @@ export function resolveErrorMessage(error: unknown, fallback = DEFAULT_ERROR_MES
 
 export function resolveWorkflowErrorMessage(error: unknown, fallback = DEFAULT_ERROR_MESSAGE): string {
   return resolveErrorMessage(error, fallback);
+}
+
+export function resolveErrorCode(error: unknown): string | null {
+  if (typeof error === "object" && error !== null) {
+    const payload = error as StructuredErrorPayload;
+    if (typeof payload.code === "string" && payload.code.trim()) {
+      return payload.code.trim();
+    }
+    if (typeof payload.error === "object" && payload.error !== null) {
+      return resolveErrorCode(payload.error);
+    }
+  }
+  return null;
+}
+
+export function isWorkflowCancellation(error: unknown): boolean {
+  const code = resolveErrorCode(error);
+  return code !== null && WORKFLOW_CANCELLATION_CODES.has(code);
 }

@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect, useReducer } from "react";
 import {
   Loader2, ChevronDown, ChevronUp, RotateCcw,
   CheckCircle2, XCircle, Clock, ImageIcon, Code2, Sparkles, AlertTriangle,
-  Upload, Wand2,
+  Upload, Wand2, StopCircle,
 } from "lucide-react";
 import { ApprovalPanel } from "../../components/ApprovalPanel";
 import { approveApproval, executeApproval, rejectApproval, type ApprovalRequest } from "../../lib/approvals";
@@ -16,7 +16,12 @@ import { loadAppConfig } from "../../shared/api/config";
 import { runApprovalAction } from "../../shared/approvalAction.ts";
 import type { KnowledgeStatus } from "../../shared/api/knowledge.ts";
 import { reviewModPlan } from "../../shared/api/workflow.ts";
-import { resolveErrorMessage, resolveWorkflowErrorMessage } from "../../shared/error.ts";
+import {
+  WORKFLOW_CANCELLED_MESSAGE,
+  isWorkflowCancellation,
+  resolveErrorMessage,
+  resolveWorkflowErrorMessage,
+} from "../../shared/error.ts";
 import type {
   ExecutionBundlePreview,
   ExecutionBundleRecommendedAction,
@@ -76,6 +81,7 @@ const STATUS_ICONS: Record<ItemStatus, React.ReactNode> = {
   awaiting_selection: <ImageIcon size={14} className="text-violet-500" />,
   approval_pending:   <Clock size={14} className="text-violet-500" />,
   code_generating:    <Code2 size={14} className="text-blue-400 animate-pulse" />,
+  cancelled:          <StopCircle size={14} className="text-slate-400" />,
   done:               <CheckCircle2 size={14} className="text-green-500" />,
   error:              <XCircle size={14} className="text-red-500" />,
 };
@@ -86,6 +92,7 @@ const STATUS_LABELS: Record<ItemStatus, string> = {
   awaiting_selection: "等待选图",
   approval_pending:   "等待审批",
   code_generating:    "生成代码",
+  cancelled:          "已取消",
   done:               "完成",
   error:              "失败",
 };
@@ -339,6 +346,7 @@ function getBundleBlockingReason(bundle: ExecutionBundlePreview): string {
 
 function BatchModePage({
   onRequestExecution,
+  onStatusNotice,
   knowledgeStatus,
   onOpenKnowledgeGuide,
   onOpenSettings,
@@ -554,9 +562,25 @@ function BatchModePage({
       });
     });
     ws.on("batch_done", (d) => {
+      socketRef.current = null;
       dispatchRuntime({ type: "batch_done", success: d.success_count, error: d.error_count });
     });
+    ws.on("cancelled", (d) => {
+      socketRef.current = null;
+      dispatchRuntime({
+        type: "workflow_cancelled",
+        message: resolveWorkflowErrorMessage(d, WORKFLOW_CANCELLED_MESSAGE),
+      });
+    });
     ws.on("error", (d) => {
+      socketRef.current = null;
+      if (isWorkflowCancellation(d)) {
+        dispatchRuntime({
+          type: "workflow_cancelled",
+          message: resolveWorkflowErrorMessage(d, WORKFLOW_CANCELLED_MESSAGE),
+        });
+        return;
+      }
       dispatchRuntime({ type: "workflow_failed", message: resolveWorkflowErrorMessage(d) });
     });
   }
@@ -816,6 +840,20 @@ function BatchModePage({
     updateItem(itemId, { status: "img_generating", showMorePrompt: false });
   }
 
+  function cancelBatch() {
+    const socket = socketRef.current;
+    if (socket) {
+      try {
+        socket.send({ action: "cancel" });
+      } catch {}
+      setTimeout(() => {
+        socket.close();
+      }, 100);
+    }
+    socketRef.current = null;
+    dispatchRuntime({ type: "workflow_cancelled", message: WORKFLOW_CANCELLED_MESSAGE });
+  }
+
   function reset() {
     socketRef.current?.close();
     socketRef.current = null;
@@ -884,6 +922,7 @@ function BatchModePage({
             value={projectRoot}
             placeholder="E:/STS2mod"
             showCreateAction={false}
+            onStatusNotice={onStatusNotice}
             onChange={setProjectRoot}
           />
           <button
@@ -913,6 +952,15 @@ function BatchModePage({
             <span className="text-sm font-medium text-slate-600">AI 正在规划 Mod...</span>
           </div>
           {batchLog.length > 0 && <AgentLog lines={batchLog} />}
+          {socketRef.current && (
+            <button
+              onClick={cancelBatch}
+              className="py-1.5 px-3 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 text-sm transition-colors flex items-center gap-1.5"
+            >
+              <StopCircle size={13} />
+              停止规划
+            </button>
+          )}
         </div>
       )}
 
@@ -973,7 +1021,7 @@ function BatchModePage({
       )}
 
       {/* 执行阶段 + 完成 */}
-      {(stage === "executing" || stage === "done") && (
+      {(stage === "executing" || stage === "done" || stage === "cancelled") && (
         <ExecutionView
           items={editedItems}
           itemStates={itemStates}
@@ -985,6 +1033,7 @@ function BatchModePage({
           batchResult={batchResult}
           stage={stage}
           projectRoot={projectRoot}
+          onStatusNotice={onStatusNotice}
           autoSelectFirst={autoSelectFirst}
           onAutoSelectToggle={() => setAutoSelectFirst(v => !v)}
           onSelectImage={handleSelectImage}
@@ -996,6 +1045,7 @@ function BatchModePage({
           onExecuteAction={(actionId) => { void handleApprovalAction(actionId, executeApproval); }}
           onProceedApproval={handleProceedApproval}
           hasLiveSession={socketRef.current !== null}
+          onCancelWorkflow={cancelBatch}
           onUpdatePrompt={(id, prompt) =>
             updateItem(id, { currentPrompt: prompt })
           }
@@ -1011,12 +1061,14 @@ function BatchModePage({
 
 export function BatchGenerationFeatureView({
   onRequestExecution,
+  onStatusNotice,
   knowledgeStatus,
   onOpenKnowledgeGuide,
   onOpenSettings,
 }: WorkspaceFeatureAdapterProps) {
   const resolvedProps = useResolvedWorkspaceFeatureProps({
     onRequestExecution,
+    onStatusNotice,
     knowledgeStatus,
     onOpenKnowledgeGuide,
     onOpenSettings,
@@ -1024,6 +1076,7 @@ export function BatchGenerationFeatureView({
   return (
     <BatchModePage
       onRequestExecution={resolvedProps.onRequestExecution}
+      onStatusNotice={resolvedProps.onStatusNotice}
       knowledgeStatus={resolvedProps.knowledgeStatus}
       onOpenKnowledgeGuide={resolvedProps.onOpenKnowledgeGuide}
       onOpenSettings={resolvedProps.onOpenSettings}
@@ -1757,9 +1810,10 @@ function ReviewBundles({
 function ExecutionView({
   items, itemStates, activeItemId, setActiveItemId,
   batchLog, currentBatchStage, batchStageHistory, batchResult, stage, projectRoot,
+  onStatusNotice,
   autoSelectFirst, onAutoSelectToggle,
   onSelectImage, onGenerateMore, onRetryItem, approvalBusyActionId, onApproveAction, onRejectAction, onExecuteAction,
-  onProceedApproval, hasLiveSession, onUpdatePrompt, onToggleMorePrompt, onReset,
+  onProceedApproval, hasLiveSession, onCancelWorkflow, onUpdatePrompt, onToggleMorePrompt, onReset,
 }: {
   items: PlanItem[];
   itemStates: Record<string, ItemState>;
@@ -1769,8 +1823,9 @@ function ExecutionView({
   currentBatchStage: string | null;
   batchStageHistory: string[];
   batchResult: { success: number; error: number } | null;
-  stage: "executing" | "done";
+  stage: "executing" | "cancelled" | "done";
   projectRoot: string;
+  onStatusNotice: WorkspaceFeatureProps["onStatusNotice"];
   autoSelectFirst: boolean;
   onAutoSelectToggle: () => void;
   onSelectImage: (id: string, idx: number) => void;
@@ -1782,6 +1837,7 @@ function ExecutionView({
   onExecuteAction: (actionId: string) => void;
   onProceedApproval: (itemId: string) => void;
   hasLiveSession: boolean;
+  onCancelWorkflow: () => void;
   onUpdatePrompt: (id: string, prompt: string) => void;
   onToggleMorePrompt: (id: string) => void;
   onReset: () => void;
@@ -1819,6 +1875,15 @@ function ExecutionView({
           <div className="text-xs text-violet-600 bg-violet-50 border border-violet-200 rounded-lg px-2.5 py-1.5 mb-2 font-medium">
             {approvalCount} 个资产等待审批
           </div>
+        )}
+        {hasLiveSession && stage === "executing" && (
+          <button
+            onClick={onCancelWorkflow}
+            className="w-full py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 text-xs transition-colors flex items-center justify-center gap-1 mb-2"
+          >
+            <StopCircle size={11} />
+            停止生成
+          </button>
         )}
 
         {items.map(item => {
@@ -1863,6 +1928,18 @@ function ExecutionView({
           </div>
         )}
 
+        {stage === "cancelled" && (
+          <div className="mt-2 pt-2 border-t border-slate-100 space-y-2">
+            <p className="text-xs text-slate-600 font-medium px-1">已取消当前生成</p>
+            <button
+              onClick={onReset}
+              className="w-full py-1.5 rounded-lg border border-slate-200 text-slate-400 hover:text-violet-700 hover:border-violet-300 text-xs transition-colors flex items-center justify-center gap-1"
+            >
+              <RotateCcw size={11} /> 新建 Mod
+            </button>
+          </div>
+        )}
+
         {stage === "done" && batchResult && (
           <div className="mt-2 pt-2 border-t border-slate-100 space-y-2">
             {approvalCount > 0 ? (
@@ -1874,7 +1951,7 @@ function ExecutionView({
                 {batchResult.success} 成功 / {batchResult.error} 失败
               </p>
             )}
-            {approvalCount === 0 && <BuildDeploy projectRoot={projectRoot} />}
+            {approvalCount === 0 && <BuildDeploy projectRoot={projectRoot} onStatusNotice={onStatusNotice} />}
             <button
               onClick={onReset}
               className="w-full py-1.5 rounded-lg border border-slate-200 text-slate-400 hover:text-violet-700 hover:border-violet-300 text-xs transition-colors flex items-center justify-center gap-1"

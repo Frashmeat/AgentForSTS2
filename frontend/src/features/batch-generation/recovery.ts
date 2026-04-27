@@ -28,6 +28,7 @@ const RECOVERABLE_BATCH_STAGES: BatchStage[] = [
   "review_items",
   "review_bundles",
   "executing",
+  "cancelled",
   "done",
   "error",
 ];
@@ -37,6 +38,7 @@ const RECOVERABLE_ITEM_STATUSES: BatchItemStatus[] = [
   "awaiting_selection",
   "approval_pending",
   "code_generating",
+  "cancelled",
   "done",
   "error",
 ];

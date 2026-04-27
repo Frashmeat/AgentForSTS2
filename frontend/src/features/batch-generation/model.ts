@@ -6,6 +6,7 @@ export type BatchStage =
   | "review_items"
   | "review_bundles"
   | "executing"
+  | "cancelled"
   | "done"
   | "error";
 
@@ -15,5 +16,6 @@ export type ItemStatus =
   | "awaiting_selection"
   | "approval_pending"
   | "code_generating"
+  | "cancelled"
   | "done"
   | "error";

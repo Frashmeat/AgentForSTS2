@@ -8,6 +8,7 @@ export type Stage =
   | "agent_running"
   | "approval_pending"
   | "done"
+  | "cancelled"
   | "error";
 
 export interface AssetTypeOption {
@@ -69,6 +70,9 @@ export const PRESETS: PresetOption[] = [
 const ORDER: Stage[] = ["input", "confirm_prompt", "generating_image", "pick_image", "agent_running", "approval_pending", "done"];
 
 export function getStageIndex(stage: Stage) {
+  if (stage === "cancelled") {
+    return ORDER.indexOf("done");
+  }
   const index = ORDER.indexOf(stage);
   return index === -1 ? ORDER.indexOf("agent_running") : index;
 }
