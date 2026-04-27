@@ -1,12 +1,14 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Hammer, CheckCircle2, Loader2, RotateCcw, Settings } from "lucide-react";
 import { AgentLog } from "./AgentLog";
+import type { StatusNoticeItem } from "./StatusNotice.tsx";
 import {
   createBuildDeployController,
   type BuildDeploySocketLike,
 } from "./buildDeployController.ts";
 import {
   createIdleBuildDeployState,
+  describeBuildDeployAction,
   describeBuildDeployCompletionView,
   describeBuildDeployRunningMessage,
   type BuildDeployState,
@@ -15,12 +17,14 @@ import {
 interface Props {
   projectRoot: string;
   onOpenSettings?: () => void;
+  onStatusNotice?: (notice: Omit<StatusNoticeItem, "id">) => void;
 }
 
-export function BuildDeploy({ projectRoot, onOpenSettings }: Props) {
+export function BuildDeploy({ projectRoot, onOpenSettings, onStatusNotice }: Props) {
   const [state, setState] = useState<BuildDeployState>(() => createIdleBuildDeployState());
   const wsRef = useRef<BuildDeploySocketLike | null>(null);
   const controllerRef = useRef<ReturnType<typeof createBuildDeployController> | null>(null);
+  const lastNoticeKeyRef = useRef<string | null>(null);
   const completionView = describeBuildDeployCompletionView(state);
 
   if (!controllerRef.current) {
@@ -39,6 +43,46 @@ export function BuildDeploy({ projectRoot, onOpenSettings }: Props) {
     });
   }
   const controller = controllerRef.current;
+
+  useEffect(() => {
+    if (!onStatusNotice) {
+      return;
+    }
+
+    if (state.stage === "done") {
+      const title = completionView?.title ?? state.summary ?? "执行成功";
+      const message = completionView?.detail;
+      const key = `done:${state.action ?? ""}:${title}:${message ?? ""}`;
+      if (lastNoticeKeyRef.current !== key) {
+        lastNoticeKeyRef.current = key;
+        onStatusNotice({
+          title,
+          message: message ?? undefined,
+          tone: completionView?.tone === "warning" ? "warning" : "success",
+        });
+      }
+      return;
+    }
+
+    if (state.stage === "error") {
+      const actionText = state.action ? describeBuildDeployAction(state.action) : "执行";
+      const message = state.errorMsg ?? "未收到错误详情";
+      const key = `error:${state.action ?? ""}:${message}`;
+      if (lastNoticeKeyRef.current !== key) {
+        lastNoticeKeyRef.current = key;
+        onStatusNotice({
+          title: `${actionText}失败`,
+          message,
+          tone: "error",
+        });
+      }
+      return;
+    }
+
+    if (state.stage === "running" || state.stage === "idle") {
+      lastNoticeKeyRef.current = null;
+    }
+  }, [completionView, onStatusNotice, state.action, state.errorMsg, state.stage, state.summary]);
 
   return (
     <div className="space-y-3 pt-3 border-t border-slate-100">

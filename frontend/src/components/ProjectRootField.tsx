@@ -1,8 +1,11 @@
 import { useState } from "react";
 import { FolderOpen, Loader2 } from "lucide-react";
 
+import type { StatusNoticeItem } from "./StatusNotice.tsx";
 import { pickAppPath } from "../shared/api/config.ts";
 import { resolveErrorMessage } from "../shared/error.ts";
+
+type StatusNoticeHandler = (notice: Omit<StatusNoticeItem, "id">) => void;
 
 interface ProjectRootFieldProps {
   label?: string;
@@ -12,8 +15,7 @@ interface ProjectRootFieldProps {
   showCreateAction?: boolean;
   createActionLabel?: string;
   createBusy?: boolean;
-  createMessage?: string | null;
-  createError?: string | null;
+  onStatusNotice?: StatusNoticeHandler;
   onChange: (value: string) => void;
   onCreateProject?: () => void;
 }
@@ -26,17 +28,14 @@ export function ProjectRootField({
   showCreateAction = true,
   createActionLabel = "创建项目",
   createBusy = false,
-  createMessage = null,
-  createError = null,
+  onStatusNotice,
   onChange,
   onCreateProject = () => {},
 }: ProjectRootFieldProps) {
   const [pickerBusy, setPickerBusy] = useState(false);
-  const [pickerError, setPickerError] = useState<string | null>(null);
 
   async function handlePickDirectory() {
     setPickerBusy(true);
-    setPickerError(null);
     try {
       const result = await pickAppPath({
         kind: "directory",
@@ -45,9 +44,19 @@ export function ProjectRootField({
       });
       if (result.path) {
         onChange(result.path);
+        onStatusNotice?.({
+          title: "目录已选择",
+          message: result.path,
+          tone: "success",
+        });
       }
     } catch (error) {
-      setPickerError(resolveErrorMessage(error));
+      const message = resolveErrorMessage(error);
+      onStatusNotice?.({
+        title: "选择目录失败",
+        message,
+        tone: "error",
+      });
     } finally {
       setPickerBusy(false);
     }
@@ -61,7 +70,6 @@ export function ProjectRootField({
           value={value}
           disabled={disabled}
           onChange={(event) => {
-            setPickerError(null);
             onChange(event.target.value);
           }}
           placeholder={placeholder}
@@ -79,9 +87,6 @@ export function ProjectRootField({
           选择目录
         </button>
       </div>
-      {pickerError && (
-        <p className="text-xs text-red-600">{pickerError}</p>
-      )}
       {showCreateAction && (
         <button
           onClick={onCreateProject}
@@ -91,12 +96,6 @@ export function ProjectRootField({
           {createBusy ? <Loader2 size={12} className="animate-spin" /> : null}
           {createActionLabel}
         </button>
-      )}
-      {createMessage && (
-        <p className="text-xs text-green-600">{createMessage}</p>
-      )}
-      {createError && (
-        <p className="text-xs text-red-600">{createError}</p>
       )}
     </div>
   );

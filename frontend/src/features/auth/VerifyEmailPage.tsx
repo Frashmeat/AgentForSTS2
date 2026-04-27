@@ -2,15 +2,17 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { PlatformPageShell } from "../../components/platform/PlatformPageShell.tsx";
 import { resendVerification, verifyEmailCode } from "../../shared/api/auth.ts";
+import { resolveErrorMessage } from "../../shared/error.ts";
 import { AuthHomeLink } from "./AuthHomeLink.tsx";
 import {
+  type AuthStatusNoticeHandler,
   createErrorAuthFormState,
   createIdleAuthFormState,
   createSubmittingAuthFormState,
   createSuccessAuthFormState,
 } from "./formModel.ts";
 
-export function VerifyEmailPage() {
+export function VerifyEmailPage({ onStatusNotice }: { onStatusNotice?: AuthStatusNoticeHandler }) {
   const location = useLocation();
   const [code, setCode] = useState(() => {
     const routeState = location.state as { code?: string } | null;
@@ -33,14 +35,31 @@ export function VerifyEmailPage() {
     try {
       await verifyEmailCode(code);
       setFormState(createSuccessAuthFormState("邮箱验证成功，可以直接登录。"));
+      onStatusNotice?.({
+        title: "邮箱验证成功",
+        message: "可以直接登录。",
+        tone: "success",
+      });
     } catch (error) {
-      setFormState(createErrorAuthFormState(error instanceof Error ? error.message : "邮箱验证失败"));
+      const message = resolveErrorMessage(error) || "邮箱验证失败";
+      setFormState(createErrorAuthFormState(message));
+      onStatusNotice?.({
+        title: "邮箱验证失败",
+        message,
+        tone: "error",
+      });
     }
   }
 
   async function handleResend() {
     if (!login.trim() || !password.trim()) {
-      setFormState(createErrorAuthFormState("重发验证码需要输入登录名和密码"));
+      const message = "重发验证码需要输入登录名和密码";
+      setFormState(createErrorAuthFormState(message));
+      onStatusNotice?.({
+        title: "无法重发验证码",
+        message,
+        tone: "warning",
+      });
       return;
     }
     setFormState(createSubmittingAuthFormState());
@@ -48,8 +67,19 @@ export function VerifyEmailPage() {
       const response = await resendVerification({ login, password });
       setCode(response.verification_code);
       setFormState(createSuccessAuthFormState(`新的验证码：${response.verification_code}`));
+      onStatusNotice?.({
+        title: "验证码已重发",
+        message: `新的验证码：${response.verification_code}`,
+        tone: "success",
+      });
     } catch (error) {
-      setFormState(createErrorAuthFormState(error instanceof Error ? error.message : "重发失败"));
+      const message = resolveErrorMessage(error) || "重发失败";
+      setFormState(createErrorAuthFormState(message));
+      onStatusNotice?.({
+        title: "重发失败",
+        message,
+        tone: "error",
+      });
     }
   }
 
@@ -88,11 +118,6 @@ export function VerifyEmailPage() {
               onChange={event => setPassword(event.target.value)}
             />
           </label>
-          {formState.status !== "idle" && formState.message && (
-            <p className={formState.status === "error" ? "text-sm text-rose-600" : "text-sm text-emerald-600"}>
-              {formState.message}
-            </p>
-          )}
           <div className="flex gap-3">
             <button
               type="submit"

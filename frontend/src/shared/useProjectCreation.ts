@@ -1,38 +1,44 @@
 import { useState } from "react";
 
+import type { StatusNoticeItem } from "../components/StatusNotice.tsx";
 import { resolveErrorMessage } from "./error.ts";
 import { createProjectFromRoot } from "./projectCreation.ts";
 
+type StatusNoticeHandler = (notice: Omit<StatusNoticeItem, "id">) => void;
+
 interface UseProjectCreationOptions {
   onProjectCreated?: (projectPath: string) => void;
+  onStatusNotice?: StatusNoticeHandler;
 }
 
 export function useProjectCreation(options: UseProjectCreationOptions = {}) {
-  const { onProjectCreated } = options;
+  const { onProjectCreated, onStatusNotice } = options;
   const [projectCreateBusy, setProjectCreateBusy] = useState(false);
-  const [projectCreateMessage, setProjectCreateMessage] = useState<string | null>(null);
-  const [projectCreateError, setProjectCreateError] = useState<string | null>(null);
 
-  function clearProjectCreationFeedback() {
-    setProjectCreateMessage(null);
-    setProjectCreateError(null);
-  }
+  function clearProjectCreationFeedback() {}
 
   function resetProjectCreationState() {
     setProjectCreateBusy(false);
-    clearProjectCreationFeedback();
   }
 
   async function createProjectAtRoot(projectRoot: string) {
     setProjectCreateBusy(true);
-    clearProjectCreationFeedback();
     try {
       const result = await createProjectFromRoot(projectRoot);
       onProjectCreated?.(result.project_path);
-      setProjectCreateMessage(`项目已创建：${result.project_path}`);
+      onStatusNotice?.({
+        title: "项目已创建",
+        message: result.project_path,
+        tone: "success",
+      });
       return result;
     } catch (error) {
-      setProjectCreateError(resolveErrorMessage(error));
+      const message = resolveErrorMessage(error);
+      onStatusNotice?.({
+        title: "创建项目失败",
+        message,
+        tone: "error",
+      });
       throw error;
     } finally {
       setProjectCreateBusy(false);
@@ -41,8 +47,6 @@ export function useProjectCreation(options: UseProjectCreationOptions = {}) {
 
   return {
     projectCreateBusy,
-    projectCreateMessage,
-    projectCreateError,
     clearProjectCreationFeedback,
     resetProjectCreationState,
     createProjectAtRoot,

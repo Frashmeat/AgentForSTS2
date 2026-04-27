@@ -6,6 +6,7 @@ import { resolveErrorMessage } from "../../shared/error.ts";
 import { useSession } from "../../shared/session/hooks.ts";
 import { AuthHomeLink } from "./AuthHomeLink.tsx";
 import {
+  type AuthStatusNoticeHandler,
   createErrorAuthFormState,
   createIdleAuthFormState,
   createSubmittingAuthFormState,
@@ -19,7 +20,7 @@ function resolveRedirect(location: ReturnType<typeof useLocation>): string {
   return state?.redirectTo ?? "/";
 }
 
-export function LoginPage() {
+export function LoginPage({ onStatusNotice }: { onStatusNotice?: AuthStatusNoticeHandler }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { refreshSession } = useSession();
@@ -36,9 +37,20 @@ export function LoginPage() {
       if (!snapshot?.authenticated || snapshot.user === null) {
         throw new Error(SESSION_PERSISTENCE_ERROR);
       }
+      onStatusNotice?.({
+        title: "登录成功",
+        message: "已恢复平台账号会话。",
+        tone: "success",
+      });
       navigate(resolveRedirect(location), { replace: true });
     } catch (error) {
-      setFormState(createErrorAuthFormState(resolveErrorMessage(error) || "登录失败"));
+      const message = resolveErrorMessage(error) || "登录失败";
+      setFormState(createErrorAuthFormState(message));
+      onStatusNotice?.({
+        title: "登录失败",
+        message,
+        tone: "error",
+      });
     }
   }
 
@@ -69,7 +81,6 @@ export function LoginPage() {
               onChange={event => setPassword(event.target.value)}
             />
           </label>
-          {formState.status === "error" && <p className="text-sm text-rose-600">{formState.message}</p>}
           <button
             type="submit"
             className="platform-page-primary-button w-full"

@@ -2,15 +2,17 @@ import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { PlatformPageShell } from "../../components/platform/PlatformPageShell.tsx";
 import { requestPasswordReset } from "../../shared/api/auth.ts";
+import { resolveErrorMessage } from "../../shared/error.ts";
 import { AuthHomeLink } from "./AuthHomeLink.tsx";
 import {
+  type AuthStatusNoticeHandler,
   createErrorAuthFormState,
   createIdleAuthFormState,
   createSubmittingAuthFormState,
   createSuccessAuthFormState,
 } from "./formModel.ts";
 
-export function ForgotPasswordPage() {
+export function ForgotPasswordPage({ onStatusNotice }: { onStatusNotice?: AuthStatusNoticeHandler }) {
   const navigate = useNavigate();
   const [login, setLogin] = useState("");
   const [formState, setFormState] = useState(createIdleAuthFormState);
@@ -21,11 +23,22 @@ export function ForgotPasswordPage() {
     try {
       await requestPasswordReset(login);
       setFormState(createSuccessAuthFormState("重置请求已提交，请粘贴收到的重置码继续设置新密码。"));
+      onStatusNotice?.({
+        title: "重置请求已提交",
+        message: "请粘贴收到的重置码继续设置新密码。",
+        tone: "success",
+      });
       navigate("/auth/reset-password", {
         replace: true,
       });
     } catch (error) {
-      setFormState(createErrorAuthFormState(error instanceof Error ? error.message : "找回密码失败"));
+      const message = resolveErrorMessage(error) || "找回密码失败";
+      setFormState(createErrorAuthFormState(message));
+      onStatusNotice?.({
+        title: "找回密码失败",
+        message,
+        tone: "error",
+      });
     }
   }
 
@@ -47,11 +60,6 @@ export function ForgotPasswordPage() {
               onChange={event => setLogin(event.target.value)}
             />
           </label>
-          {formState.status !== "idle" && formState.message && (
-            <p className={formState.status === "error" ? "text-sm text-rose-600" : "text-sm text-emerald-600"}>
-              {formState.message}
-            </p>
-          )}
           <button
             type="submit"
             className="platform-page-primary-button w-full"

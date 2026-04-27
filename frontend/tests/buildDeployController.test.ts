@@ -43,6 +43,8 @@ function createRuntime() {
     stage: "idle",
     action: null,
     log: [],
+    logEntries: [],
+    currentModel: null,
     deployedTo: null,
     summary: null,
     errorMsg: null,
@@ -71,6 +73,11 @@ function createRuntime() {
   };
 }
 
+function withoutBuildDeployLogMetadata(state: BuildDeployState) {
+  const { logEntries, currentModel, ...rest } = state;
+  return rest;
+}
+
 test("createBuildDeployController runs build action through shared state flow", async () => {
   const runtime = createRuntime();
   const controller = createBuildDeployController(runtime.runtime, {
@@ -84,7 +91,7 @@ test("createBuildDeployController runs build action through shared state flow", 
 
   await controller.run("build", " E:/STS2mod/MyMod ");
 
-  assert.deepEqual(runtime.getState(), {
+  assert.deepEqual(withoutBuildDeployLogMetadata(runtime.getState()), {
     stage: "done",
     action: "build",
     log: ["Build started", "Build succeeded"],
@@ -113,7 +120,7 @@ test("createBuildDeployController wires deploy socket events into shared state",
 
   assert.equal(socket.waitOpenCalled, 1);
   assert.deepEqual(socket.sentMessages, [{ project_root: "E:/STS2mod/MyMod" }]);
-  assert.deepEqual(runtime.getState(), {
+  assert.deepEqual(withoutBuildDeployLogMetadata(runtime.getState()), {
     stage: "done",
     action: "deploy",
     log: ["building..."],
@@ -140,6 +147,8 @@ test("createBuildDeployController reset closes socket and clears state", () => {
     stage: "error",
     action: "deploy",
     log: ["boom"],
+    logEntries: [],
+    currentModel: null,
     deployedTo: null,
     summary: null,
     errorMsg: "boom",
@@ -148,7 +157,7 @@ test("createBuildDeployController reset closes socket and clears state", () => {
   controller.reset();
 
   assert.equal(socket.closed, true);
-  assert.deepEqual(runtime.getState(), {
+  assert.deepEqual(withoutBuildDeployLogMetadata(runtime.getState()), {
     stage: "idle",
     action: null,
     log: [],
@@ -170,7 +179,7 @@ test("createBuildDeployController surfaces build request failure as error state"
 
   await controller.run("build", "E:/STS2mod/MyMod");
 
-  assert.deepEqual(runtime.getState(), {
+  assert.deepEqual(withoutBuildDeployLogMetadata(runtime.getState()), {
     stage: "error",
     action: "build",
     log: [],
@@ -198,7 +207,7 @@ test("createBuildDeployController surfaces deploy socket open failure as error s
   await controller.run("deploy", "E:/STS2mod/MyMod");
 
   assert.equal(runtime.getSocket(), null);
-  assert.deepEqual(runtime.getState(), {
+  assert.deepEqual(withoutBuildDeployLogMetadata(runtime.getState()), {
     stage: "error",
     action: "deploy",
     log: [],
@@ -224,7 +233,7 @@ test("createBuildDeployController preserves streamed log when deploy emits error
   socket.emit("stream", { chunk: "building..." });
   socket.emit("error", { message: "deploy failed" });
 
-  assert.deepEqual(runtime.getState(), {
+  assert.deepEqual(withoutBuildDeployLogMetadata(runtime.getState()), {
     stage: "error",
     action: "deploy",
     log: ["building..."],
@@ -253,7 +262,7 @@ test("createBuildDeployController falls back to workflow detail when error messa
     code: "build_failed",
   });
 
-  assert.deepEqual(runtime.getState(), {
+  assert.deepEqual(withoutBuildDeployLogMetadata(runtime.getState()), {
     stage: "error",
     action: "deploy",
     log: [],

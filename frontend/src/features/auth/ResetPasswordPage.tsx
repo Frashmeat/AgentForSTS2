@@ -6,6 +6,7 @@ import { resolveErrorMessage } from "../../shared/error.ts";
 import { useSession } from "../../shared/session/hooks.ts";
 import { AuthHomeLink } from "./AuthHomeLink.tsx";
 import {
+  type AuthStatusNoticeHandler,
   createErrorAuthFormState,
   createIdleAuthFormState,
   createSubmittingAuthFormState,
@@ -14,7 +15,7 @@ import {
 const SESSION_PERSISTENCE_ERROR =
   "密码已重置，但服务端会话未建立。若当前是 hybrid / 跨域部署，请检查 Web 后端 Cookie 的 SameSite、Secure 和 HTTPS 配置。";
 
-export function ResetPasswordPage() {
+export function ResetPasswordPage({ onStatusNotice }: { onStatusNotice?: AuthStatusNoticeHandler }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { refreshSession } = useSession();
@@ -34,9 +35,20 @@ export function ResetPasswordPage() {
       if (!snapshot?.authenticated || snapshot.user === null) {
         throw new Error(SESSION_PERSISTENCE_ERROR);
       }
+      onStatusNotice?.({
+        title: "密码已重置",
+        message: "已恢复平台账号会话。",
+        tone: "success",
+      });
       navigate("/", { replace: true });
     } catch (error) {
-      setFormState(createErrorAuthFormState(resolveErrorMessage(error) || "重置密码失败"));
+      const message = resolveErrorMessage(error) || "重置密码失败";
+      setFormState(createErrorAuthFormState(message));
+      onStatusNotice?.({
+        title: "重置密码失败",
+        message,
+        tone: "error",
+      });
     }
   }
 
@@ -67,7 +79,6 @@ export function ResetPasswordPage() {
               onChange={event => setPassword(event.target.value)}
             />
           </label>
-          {formState.status === "error" && <p className="text-sm text-rose-600">{formState.message}</p>}
           <button
             type="submit"
             className="platform-page-primary-button w-full"

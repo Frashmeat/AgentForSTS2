@@ -12,4 +12,6 @@ test("BuildDeploy uses shared controller for action flow", () => {
   assert.match(source, /createBuildDeployController/);
   assert.match(source, /describeBuildDeployRunningMessage/);
   assert.match(source, /describeBuildDeployCompletionView/);
+  assert.match(source, /onStatusNotice/);
+  assert.match(source, /lastNoticeKeyRef/);
 });

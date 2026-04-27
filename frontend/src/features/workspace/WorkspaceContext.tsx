@@ -10,6 +10,7 @@ import type {
 export interface WorkspaceContextValue {
   knowledgeStatus: KnowledgeStatus | null;
   onRequestExecution: WorkspaceExecutionRequestHandler;
+  onStatusNotice: WorkspaceFeatureProps["onStatusNotice"];
   onOpenKnowledgeGuide: () => void;
   onOpenSettings: () => void;
   onRefreshKnowledge: () => void;
@@ -45,6 +46,7 @@ export function useResolvedWorkspaceFeatureProps(
   const workspace = useOptionalWorkspaceContext();
   return {
     onRequestExecution: props.onRequestExecution ?? workspace?.onRequestExecution,
+    onStatusNotice: props.onStatusNotice ?? workspace?.onStatusNotice ?? (() => {}),
     knowledgeStatus: props.knowledgeStatus ?? workspace?.knowledgeStatus ?? null,
     onOpenKnowledgeGuide: props.onOpenKnowledgeGuide ?? workspace?.onOpenKnowledgeGuide ?? (() => {}),
     onOpenSettings: props.onOpenSettings ?? workspace?.onOpenSettings ?? (() => {}),

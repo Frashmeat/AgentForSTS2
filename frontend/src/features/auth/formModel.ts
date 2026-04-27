@@ -1,4 +1,7 @@
+import type { StatusNoticeItem } from "../../components/StatusNotice.tsx";
+
 export type AuthFormStatus = "idle" | "submitting" | "success" | "error";
+export type AuthStatusNoticeHandler = (notice: Omit<StatusNoticeItem, "id">) => void;
 
 export interface AuthFormState {
   status: AuthFormStatus;

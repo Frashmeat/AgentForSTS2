@@ -121,6 +121,7 @@ export default function App() {
                 value={{
                   knowledgeStatus,
                   onRequestExecution: handleExecutionRequest,
+                  onStatusNotice: showStatusNotice,
                   onRefreshKnowledge: () => {
                     void handleRefreshKnowledge();
                   },
@@ -136,23 +137,23 @@ export default function App() {
         <Route path="/settings" element={<SettingsPage />} />
         <Route
           path="/auth/login"
-          element={isAuthAvailable ? <LoginPage /> : buildPlatformAuthUnavailableElement("当前环境不支持登录", "这是本机工作站模式，未接入独立 Web 平台服务，因此登录与注册入口不可用。")}
+          element={isAuthAvailable ? <LoginPage onStatusNotice={showStatusNotice} /> : buildPlatformAuthUnavailableElement("当前环境不支持登录", "这是本机工作站模式，未接入独立 Web 平台服务，因此登录与注册入口不可用。")}
         />
         <Route
           path="/auth/register"
-          element={isAuthAvailable ? <RegisterPage /> : buildPlatformAuthUnavailableElement("当前环境不支持注册", "这是本机工作站模式，未接入独立 Web 平台服务，因此无法创建平台账号。")}
+          element={isAuthAvailable ? <RegisterPage onStatusNotice={showStatusNotice} /> : buildPlatformAuthUnavailableElement("当前环境不支持注册", "这是本机工作站模式，未接入独立 Web 平台服务，因此无法创建平台账号。")}
         />
         <Route
           path="/auth/verify-email"
-          element={isAuthAvailable ? <VerifyEmailPage /> : buildPlatformAuthUnavailableElement("当前环境不支持邮箱验证", "请先接入独立 Web 平台服务，再使用平台账号验证链路。")}
+          element={isAuthAvailable ? <VerifyEmailPage onStatusNotice={showStatusNotice} /> : buildPlatformAuthUnavailableElement("当前环境不支持邮箱验证", "请先接入独立 Web 平台服务，再使用平台账号验证链路。")}
         />
         <Route
           path="/auth/forgot-password"
-          element={isAuthAvailable ? <ForgotPasswordPage /> : buildPlatformAuthUnavailableElement("当前环境不支持密码找回", "请先接入独立 Web 平台服务，再使用平台账号密码找回功能。")}
+          element={isAuthAvailable ? <ForgotPasswordPage onStatusNotice={showStatusNotice} /> : buildPlatformAuthUnavailableElement("当前环境不支持密码找回", "请先接入独立 Web 平台服务，再使用平台账号密码找回功能。")}
         />
         <Route
           path="/auth/reset-password"
-          element={isAuthAvailable ? <ResetPasswordPage /> : buildPlatformAuthUnavailableElement("当前环境不支持密码重置", "请先接入独立 Web 平台服务，再使用平台账号密码重置功能。")}
+          element={isAuthAvailable ? <ResetPasswordPage onStatusNotice={showStatusNotice} /> : buildPlatformAuthUnavailableElement("当前环境不支持密码重置", "请先接入独立 Web 平台服务，再使用平台账号密码重置功能。")}
         />
         <Route
           path="/me"

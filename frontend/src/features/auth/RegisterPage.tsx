@@ -2,15 +2,17 @@ import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { PlatformPageShell } from "../../components/platform/PlatformPageShell.tsx";
 import { registerWithPassword } from "../../shared/api/auth.ts";
+import { resolveErrorMessage } from "../../shared/error.ts";
 import { AuthHomeLink } from "./AuthHomeLink.tsx";
 import {
+  type AuthStatusNoticeHandler,
   createErrorAuthFormState,
   createIdleAuthFormState,
   createSubmittingAuthFormState,
   createSuccessAuthFormState,
 } from "./formModel.ts";
 
-export function RegisterPage() {
+export function RegisterPage({ onStatusNotice }: { onStatusNotice?: AuthStatusNoticeHandler }) {
   const navigate = useNavigate();
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
@@ -23,6 +25,11 @@ export function RegisterPage() {
     try {
       const response = await registerWithPassword({ username, email, password });
       setFormState(createSuccessAuthFormState(`验证码：${response.verification_code}`));
+      onStatusNotice?.({
+        title: "注册成功",
+        message: `验证码：${response.verification_code}`,
+        tone: "success",
+      });
       navigate("/auth/verify-email", {
         replace: true,
         state: {
@@ -30,7 +37,13 @@ export function RegisterPage() {
         },
       });
     } catch (error) {
-      setFormState(createErrorAuthFormState(error instanceof Error ? error.message : "注册失败"));
+      const message = resolveErrorMessage(error) || "注册失败";
+      setFormState(createErrorAuthFormState(message));
+      onStatusNotice?.({
+        title: "注册失败",
+        message,
+        tone: "error",
+      });
     }
   }
 
@@ -69,11 +82,6 @@ export function RegisterPage() {
               onChange={event => setPassword(event.target.value)}
             />
           </label>
-          {formState.status !== "idle" && formState.message && (
-            <p className={formState.status === "error" ? "text-sm text-rose-600" : "text-sm text-emerald-600"}>
-              {formState.message}
-            </p>
-          )}
           <button
             type="submit"
             className="platform-page-primary-button w-full"

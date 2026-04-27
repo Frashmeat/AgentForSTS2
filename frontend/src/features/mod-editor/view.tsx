@@ -29,18 +29,18 @@ export function ModEditorFeatureView({
 }: WorkspaceFeatureAdapterProps) {
   const {
     onRequestExecution: resolvedRequestExecution,
+    onStatusNotice,
   } = useResolvedWorkspaceFeatureProps({
     onRequestExecution,
   });
   const [projectRoot, setProjectRoot] = useState("");
   const {
     projectCreateBusy,
-    projectCreateMessage,
-    projectCreateError,
     clearProjectCreationFeedback,
     createProjectAtRoot,
   } = useProjectCreation({
     onProjectCreated: setProjectRoot,
+    onStatusNotice,
   });
 
   useDefaultProjectRoot({
@@ -186,8 +186,7 @@ export function ModEditorFeatureView({
           placeholder="E:/STS2mod/testscenario/MyMod"
           createActionLabel="创建项目"
           createBusy={projectCreateBusy}
-          createMessage={projectCreateMessage}
-          createError={projectCreateError}
+          onStatusNotice={onStatusNotice}
           onChange={setProjectRoot}
           onCreateProject={() => { void createProjectAtRoot(projectRoot).catch(() => {}); }}
         />
@@ -337,7 +336,7 @@ export function ModEditorFeatureView({
           </div>
         )}
 
-        {modifyStage === "done" && <BuildDeploy projectRoot={projectRoot} />}
+        {modifyStage === "done" && <BuildDeploy projectRoot={projectRoot} onStatusNotice={onStatusNotice} />}
       </div>
     </div>
   );

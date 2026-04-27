@@ -19,6 +19,7 @@ test("auth form model exposes submitting success and error states", () => {
 });
 
 test("auth pages bind to auth api flows", () => {
+  const appSource = readSource("../src/App.tsx");
   const homeLinkSource = readSource("../src/features/auth/AuthHomeLink.tsx");
   const loginPage = readSource("../src/features/auth/LoginPage.tsx");
   const registerPage = readSource("../src/features/auth/RegisterPage.tsx");
@@ -28,25 +29,38 @@ test("auth pages bind to auth api flows", () => {
 
   assert.match(homeLinkSource, /to=\"\/\"/);
   assert.match(homeLinkSource, /返回首页/);
+  assert.match(appSource, /<LoginPage onStatusNotice=\{showStatusNotice\}/);
+  assert.match(appSource, /<RegisterPage onStatusNotice=\{showStatusNotice\}/);
+  assert.match(appSource, /<VerifyEmailPage onStatusNotice=\{showStatusNotice\}/);
+  assert.match(appSource, /<ForgotPasswordPage onStatusNotice=\{showStatusNotice\}/);
+  assert.match(appSource, /<ResetPasswordPage onStatusNotice=\{showStatusNotice\}/);
   assert.match(loginPage, /AuthHomeLink/);
   assert.match(loginPage, /loginWithPassword/);
   assert.match(loginPage, /refreshSession/);
+  assert.match(loginPage, /onStatusNotice/);
   assert.match(registerPage, /AuthHomeLink/);
   assert.match(registerPage, /registerWithPassword/);
+  assert.match(registerPage, /onStatusNotice/);
   assert.doesNotMatch(registerPage, /\?code=/);
   assert.match(registerPage, /state:\s*\{\s*code:/);
   assert.match(verifyPage, /AuthHomeLink/);
   assert.match(verifyPage, /verifyEmailCode/);
   assert.match(verifyPage, /resendVerification/);
+  assert.match(verifyPage, /onStatusNotice/);
   assert.match(verifyPage, /useLocation/);
   assert.doesNotMatch(verifyPage, /useSearchParams/);
   assert.match(verifyPage, /password/);
   assert.match(forgotPage, /AuthHomeLink/);
   assert.match(forgotPage, /requestPasswordReset/);
+  assert.match(forgotPage, /onStatusNotice/);
   assert.doesNotMatch(forgotPage, /\?code=/);
   assert.match(resetPage, /AuthHomeLink/);
   assert.match(resetPage, /resetPasswordWithCode/);
   assert.match(resetPage, /refreshSession/);
+  assert.match(resetPage, /onStatusNotice/);
   assert.match(resetPage, /useLocation/);
   assert.doesNotMatch(resetPage, /useSearchParams/);
+  for (const pageSource of [loginPage, registerPage, verifyPage, forgotPage, resetPage]) {
+    assert.doesNotMatch(pageSource, /text-(rose|emerald)-600/);
+  }
 });
