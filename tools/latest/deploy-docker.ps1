@@ -644,44 +644,11 @@ function Stop-LocalLogMirroring {
     $registry.Remove($ServiceName)
 }
 
-function New-ProcessStartInfo {
-    param(
-        [string]$FilePath,
-        [string[]]$ArgumentList,
-        [string]$WorkingDirectory
-    )
-
-    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
-    $startInfo.WorkingDirectory = $WorkingDirectory
-    $startInfo.UseShellExecute = $false
-    $startInfo.RedirectStandardOutput = $true
-    $startInfo.RedirectStandardError = $true
-    $startInfo.CreateNoWindow = $true
-
-    if ($FilePath -match "\.(cmd|bat)$") {
-        $startInfo.FileName = $env:ComSpec
-        $startInfo.ArgumentList.Add("/d")
-        $startInfo.ArgumentList.Add("/c")
-        $startInfo.ArgumentList.Add($FilePath)
-        foreach ($argument in $ArgumentList) {
-            $startInfo.ArgumentList.Add([string]$argument)
-        }
-        return $startInfo
-    }
-
-    $startInfo.FileName = $FilePath
-    foreach ($argument in $ArgumentList) {
-        $startInfo.ArgumentList.Add([string]$argument)
-    }
-    return $startInfo
-}
-
-function New-LogWriter {
+function New-RedirectLogPath {
     param(
         [string]$PreferredPath,
         [string]$ServiceName,
-        [string]$StreamName,
-        [System.Text.Encoding]$Encoding
+        [string]$StreamName
     )
 
     $parentDir = Split-Path -Path $PreferredPath -Parent
@@ -706,17 +673,13 @@ function New-LogWriter {
                 [System.IO.FileAccess]::Write,
                 [System.IO.FileShare]::ReadWrite
             )
-            $writer = New-Object System.IO.StreamWriter($stream, $Encoding)
-            $writer.AutoFlush = $true
+            $stream.Dispose()
 
             if ($candidate -ne $PreferredPath) {
                 Write-Host ("日志文件被占用，{0}/{1} 改用: {2}" -f $ServiceName, $StreamName, $candidate) -ForegroundColor Yellow
             }
 
-            return [pscustomobject]@{
-                Path = $candidate
-                Writer = $writer
-            }
+            return $candidate
         } catch [System.IO.IOException], [System.UnauthorizedAccessException] {
             $lastError = $_.Exception.Message
         }
@@ -746,63 +709,25 @@ function Start-LocalProcessWithMirroredLogs {
         $null = New-Item -ItemType Directory -Path $stderrDir -Force
     }
 
-    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-    $stdoutLog = New-LogWriter -PreferredPath $StdOutPath -ServiceName $ServiceName -StreamName "stdout" -Encoding $utf8NoBom
-    $stderrLog = New-LogWriter -PreferredPath $StdErrPath -ServiceName $ServiceName -StreamName "stderr" -Encoding $utf8NoBom
+    $stdoutLogPath = New-RedirectLogPath -PreferredPath $StdOutPath -ServiceName $ServiceName -StreamName "stdout"
+    $stderrLogPath = New-RedirectLogPath -PreferredPath $StdErrPath -ServiceName $ServiceName -StreamName "stderr"
+    $process = Start-Process `
+        -FilePath $FilePath `
+        -ArgumentList $ArgumentList `
+        -WorkingDirectory $WorkingDirectory `
+        -RedirectStandardOutput $stdoutLogPath `
+        -RedirectStandardError $stderrLogPath `
+        -WindowStyle Hidden `
+        -PassThru
 
-    $process = New-Object System.Diagnostics.Process
-    $process.StartInfo = New-ProcessStartInfo -FilePath $FilePath -ArgumentList $ArgumentList -WorkingDirectory $WorkingDirectory
-    $process.EnableRaisingEvents = $true
-
-    $stdoutWriter = $stdoutLog.Writer
-    $stderrWriter = $stderrLog.Writer
-
-    if (-not $process.Start()) {
-        $stdoutWriter.Dispose()
-        $stderrWriter.Dispose()
+    if ($null -eq $process) {
         throw "启动本地进程失败：$ServiceName"
     }
 
-    $stdoutSourceIdentifier = "ATS.LocalLogMirror.$ServiceName.$($process.Id).stdout"
-    $stderrSourceIdentifier = "ATS.LocalLogMirror.$ServiceName.$($process.Id).stderr"
-    $stdoutJob = Register-ObjectEvent -InputObject $process -EventName OutputDataReceived -SourceIdentifier $stdoutSourceIdentifier -MessageData @{
-        Writer = $stdoutWriter
-        ServiceName = $ServiceName
-        StreamName = "stdout"
-    } -Action {
-        $line = $Event.SourceEventArgs.Data
-        if ($null -eq $line) {
-            return
-        }
-
-        $Event.MessageData.Writer.WriteLine($line)
-    }
-    $stderrJob = Register-ObjectEvent -InputObject $process -EventName ErrorDataReceived -SourceIdentifier $stderrSourceIdentifier -MessageData @{
-        Writer = $stderrWriter
-        ServiceName = $ServiceName
-        StreamName = "stderr"
-    } -Action {
-        $line = $Event.SourceEventArgs.Data
-        if ($null -eq $line) {
-            return
-        }
-
-        $Event.MessageData.Writer.WriteLine($line)
-    }
-
-    $registry = Get-LocalLogMirrorRegistry
-    $registry[$ServiceName] = @{
-        SourceIdentifiers = @($stdoutSourceIdentifier, $stderrSourceIdentifier)
-        Jobs = @($stdoutJob, $stderrJob)
-        Writers = @($stdoutWriter, $stderrWriter)
-    }
-
-    $process.BeginOutputReadLine()
-    $process.BeginErrorReadLine()
     return [pscustomobject]@{
         Process = $process
-        StdOutPath = $stdoutLog.Path
-        StdErrPath = $stderrLog.Path
+        StdOutPath = $stdoutLogPath
+        StdErrPath = $stderrLogPath
     }
 }
 

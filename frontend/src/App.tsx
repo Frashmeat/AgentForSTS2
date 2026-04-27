@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { House } from "lucide-react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import ExecutionModeDialog from "./components/ExecutionModeDialog.tsx";
 import { KnowledgeGuideDialog } from "./components/KnowledgeGuideDialog.tsx";
 import { PlatformAuthUnavailableNotice } from "./components/PlatformAuthUnavailableNotice.tsx";
+import { StatusNoticeStack, type StatusNoticeItem } from "./components/StatusNotice.tsx";
 import { PlatformPageShell } from "./components/platform/PlatformPageShell.tsx";
 import { WorkspaceShell } from "./components/workspace/WorkspaceShell.tsx";
 import { ForgotPasswordPage } from "./features/auth/ForgotPasswordPage.tsx";
@@ -56,6 +57,14 @@ export default function App() {
   const { isAuthAvailable, isAuthenticated } = useSession();
   const activeTab: AppTab = resolveWorkspaceTab(searchParams.get("tab"));
   const [knowledgeGuideOpen, setKnowledgeGuideOpen] = useState(false);
+  const [statusNotices, setStatusNotices] = useState<StatusNoticeItem[]>([]);
+  const showStatusNotice = useCallback((notice: Omit<StatusNoticeItem, "id">) => {
+    const id = `app-notice-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setStatusNotices((previous) => [...previous.slice(-2), { ...notice, id }]);
+    window.setTimeout(() => {
+      setStatusNotices((previous) => previous.filter((item) => item.id !== id));
+    }, 6000);
+  }, []);
   const {
     pendingExecution,
     serverProfiles,
@@ -74,6 +83,7 @@ export default function App() {
     setRememberServerProfile,
   } = useExecutionModeFlow({
     isAuthenticated,
+    onStatusNotice: showStatusNotice,
   });
   const {
     knowledgeStatus,
@@ -159,6 +169,7 @@ export default function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <KnowledgeGuideDialog open={knowledgeGuideOpen} status={knowledgeStatus} onClose={() => setKnowledgeGuideOpen(false)} />
+      <StatusNoticeStack notices={statusNotices} />
       <ExecutionModeDialog
         open={pendingExecution !== null}
         title={pendingExecution?.title ?? "选择执行方式"}

@@ -133,6 +133,10 @@ export function buildRawWorkflowLogLines(entries: WorkflowLogEntry[]): string[] 
 }
 
 export function buildPrettyWorkflowLogLines(entries: WorkflowLogEntry[]): string[] {
+  if (entries.some((entry) => entry.source === "build")) {
+    return buildPrettyBuildLogLines(entries);
+  }
+
   const lines: string[] = [];
   for (const entry of entries) {
     const rawText = entry.text ?? "";
@@ -148,6 +152,93 @@ export function buildPrettyWorkflowLogLines(entries: WorkflowLogEntry[]): string
     lines.push(text);
   }
   return lines;
+}
+
+function pushUnique(lines: string[], line: string) {
+  if (!line || lines.includes(line)) {
+    return;
+  }
+  lines.push(line);
+}
+
+function stripMarkdownCode(value: string): string {
+  return value.replace(/^`|`$/gu, "");
+}
+
+function pickFirstMatch(text: string, patterns: RegExp[]): string | null {
+  for (const pattern of patterns) {
+    const match = pattern.exec(text);
+    const value = match?.[1]?.trim();
+    if (value) {
+      return stripMarkdownCode(value);
+    }
+  }
+  return null;
+}
+
+function buildPrettyBuildLogLines(entries: WorkflowLogEntry[]): string[] {
+  const rawText = entries
+    .filter((entry) => entry.source === "build")
+    .map((entry) => entry.text ?? "")
+    .join("\n")
+    .trim();
+  if (!rawText) {
+    return [];
+  }
+
+  const lines: string[] = [];
+  if (/成功完成|构建成功|Build succeeded|publish succeeded/iu.test(rawText)) {
+    pushUnique(lines, "构建成功：dotnet publish 已完成。");
+  } else if (/构建失败|Build failed|publish failed|exited with code/iu.test(rawText)) {
+    pushUnique(lines, "构建失败：请切换到原始输出查看完整错误。");
+  } else if (/dotnet publish|构建中|开始构建/iu.test(rawText)) {
+    pushUnique(lines, "正在执行 dotnet publish 构建与导出。");
+  }
+
+  const dllPath = pickFirstMatch(rawText, [
+    /DLL\s*编译成功:\s*`([^`]+)`/iu,
+    /DLL\s*:\s*`([^`]+)`/iu,
+  ]);
+  if (dllPath) {
+    pushUnique(lines, `DLL 编译成功：${dllPath}`);
+  }
+
+  if (/\.pck\s*文件已导出到\s*mods\s*文件夹|Pck\s*文件已复制到\s*mods\s*文件夹|PCK\s*文件已复制到\s*mods\s*文件夹/iu.test(rawText)) {
+    pushUnique(lines, "PCK 文件已导出到 mods 文件夹。");
+  }
+
+  const warningCount = pickFirstMatch(rawText, [
+    /(\d+)\s*个警告/iu,
+    /(\d+)\s*Warning\(s\)/iu,
+  ]);
+  const warningCode = pickFirstMatch(rawText, [
+    /\b(warning\s+[A-Z0-9]+)\b/iu,
+  ]);
+  if (warningCount && warningCode) {
+    pushUnique(lines, `构建警告：${warningCount} 个警告，包含 ${warningCode}。`);
+  } else if (warningCount) {
+    pushUnique(lines, `构建警告：${warningCount} 个警告。`);
+  } else if (warningCode) {
+    pushUnique(lines, `构建警告：包含 ${warningCode}。`);
+  }
+
+  const publishDir = pickFirstMatch(rawText, [
+    /发布目录:\s*`([^`]+)`/iu,
+    /publish(?:ed)?\s*(?:dir|directory):\s*`?([^\n`]+)`?/iu,
+  ]);
+  if (publishDir) {
+    pushUnique(lines, `发布目录：${publishDir}`);
+  }
+
+  if (lines.length > 0) {
+    return lines;
+  }
+
+  return rawText
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line, index, all) => all.indexOf(line) === index);
 }
 
 function resolveCodegenStepIndex(entries: WorkflowLogEntry[], isComplete: boolean): number {

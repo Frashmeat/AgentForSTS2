@@ -1,11 +1,11 @@
 # tools 目录说明
 
-本目录现在采用“一个统一入口 + 分层数字菜单 + 参数直达 + 功能子目录真实脚本”的结构。
+本目录现在采用“一个统一入口 + 五个一级菜单 + 参数直达 + 功能子目录真实脚本”的结构。
 
 ## 推荐入口
 
 - `powershell -File .\tools\tools.ps1`
-  默认进入分层数字菜单，可直接用键盘选择分组、脚本和参数模板。
+  默认进入分层数字菜单，可直接用键盘选择一级菜单、脚本和参数模板。
 
 说明：
 
@@ -41,10 +41,9 @@ powershell -File .\tools\tools.ps1 start dev
 powershell -File .\tools\tools.ps1 split start -DryRun
 powershell -File .\tools\tools.ps1 split stop
 
-# 停止 / 清理
+# Kill / 停止本机服务
 powershell -File .\tools\tools.ps1 stop
 powershell -File .\tools\tools.ps1 stop local
-powershell -File .\tools\tools.ps1 stop deploy hybrid
 
 # 测试
 powershell -File .\tools\tools.ps1 test backend/tests/test_tools_entry_script.py -q
@@ -53,16 +52,19 @@ powershell -File .\tools\tools.ps1 test backend/tests/test_tools_entry_script.py
 powershell -File .\tools\tools.ps1 dev decompile
 powershell -File .\tools\tools.ps1 dev reset-web-db
 
-# latest 打包 / 部署
+# 打包
 powershell -File .\tools\tools.ps1 latest package hybrid
 powershell -File .\tools\tools.ps1 latest package workstation
+powershell -File .\tools\tools.ps1 latest installer
+
+# 部署
 powershell -File .\tools\tools.ps1 latest deploy hybrid -DeployLocalWeb
 powershell -File .\tools\tools.ps1 latest deploy web -Debug
 powershell -File .\tools\tools.ps1 latest deploy hybrid -DeployLocalWeb -Debug
 powershell -File .\tools\tools.ps1 latest deploy hybrid -WebBaseUrl https://your-web-api.example.com
 powershell -File .\tools\tools.ps1 latest deploy web
 powershell -File .\tools\tools.ps1 latest deploy web -ResetDb
-powershell -File .\tools\tools.ps1 latest installer
+powershell -File .\tools\tools.ps1 stop deploy hybrid
 
 # 停止 latest deploy 拉起的本地服务
 pwsh -NoProfile -File .\tools\latest\stop-deploy.ps1 hybrid
@@ -72,28 +74,35 @@ pwsh -NoProfile -File .\tools\latest\stop-deploy.ps1 hybrid
 
 主菜单当前包含：
 
-1. 安装
-2. 启动
-3. 拆分运行时
-4. 停止 / 清理
-5. 测试
-6. 开发辅助
-7. 打包 / 部署
+1. 环境部署
+2. 开发
+3. Kill / 停止本机服务
+4. 打包
+5. 部署
 
 每个脚本项下面还会继续进入“参数模板”菜单，例如：
 
-- 安装
+- 环境部署
   - 直接执行
   - 查看帮助
+- 开发
+  - 启动 workstation / web / dev
+  - split-local 启停
+  - pytest 与开发辅助
+- Kill / 停止本机服务
+  - 停止本机 frontend/workstation/web
+- 打包
+  - release 打包
+  - workstation 安装器
+- 部署
+  - release 部署
+  - 停止 latest deploy 本地服务
 - split-local 启动
   - 默认启动
   - DryRun 预览
   - 启动但不打开浏览器
   - 自定义端口 / Web API 地址
-- 停止 / 清理
-  - 停止本机 frontend/workstation/web
-  - 停止 latest deploy 本地服务
-- latest 打包
+- latest package
   - 直接打包
   - 打包但不压缩
   - 查看帮助
@@ -102,7 +111,7 @@ pwsh -NoProfile -File .\tools\latest\stop-deploy.ps1 hybrid
 
 ```text
 tools/
-├── tools.ps1                 # 统一入口
+├── tools.ps1                 # 统一入口，交互菜单按环境部署 / 开发 / Kill / 打包 / 部署分层
 ├── README.md                 # 唯一主说明文档
 ├── install/                  # 安装相关真实脚本
 ├── start/                    # 传统启动脚本
@@ -121,6 +130,7 @@ tools/
 - `tools\install\install.ps1`
   Windows 主安装入口。统一安装或配置 .NET 9 SDK、Godot 4.5.1 Mono、ilspycmd、后端依赖、前端依赖与前端构建；支持 `-OnlyModDeps`。
   安装 `ilspycmd` 时会把 `~\.dotnet\tools` 和项目内 `runtime\tools` 同步加入当前会话与用户 PATH。
+  设置页的 Godot 自动检测会优先命中安装脚本放置的仓库内 `godot/`，并仅浅层检查 `C:/tools`、`D:/tools`、`E:/tools`，不会递归扫描 `LOCALAPPDATA`。
 - `tools\install\install.sh`
   Linux / macOS / WSL 安装入口。
 - `tools\install\setup_mod_deps.bat`
@@ -150,7 +160,7 @@ tools/
 ### stop
 
 - `tools.ps1 stop`
-  `stop local` 的默认直达写法；用于停止当前仓库识别出的本机 `frontend / workstation / web` 进程。
+  `stop local` 的默认直达写法；用于停止当前仓库识别出的本机 `frontend / workstation / web` 进程。交互菜单中该能力位于一级入口 `Kill / 停止本机服务`。
 - `tools.ps1 stop local`
   统一入口。对应 `tools\stop\kill-local.ps1`，优先按状态文件和配置发现端口并停止当前仓库识别出的本机 `frontend / workstation / web` 进程。
 - `tools.ps1 stop deploy <target>`
@@ -186,14 +196,15 @@ powershell -File .\tools\tools.ps1 latest deploy web -Debug
 - `tools\stop\kill-local.ps1`
   真实脚本入口；日常优先使用 `tools.ps1 stop local`。
   优先读取 `local-deploy-state.json`、`split-local-state.json`、`runtime/workstation.config.json` 发现端口和 PID，再停止本机 `frontend`、`workstation`、`web` 三类进程；命令行端口参数仅作为显式覆盖。
+  当端口已不再监听但仍有常见本地服务、shell 或日志窗口进程的命令行、可执行路径或当前工作目录明确指向当前仓库 `tools\latest\artifacts` 下的 release 目录时，也会作为 release 残留进程清理。
   同时会清理当前 PowerShell 会话中残留的日志镜像事件与 writer 句柄，避免 `runtime/logs/*.log` 被持续占用。
   如存在 Docker 化 `web` 服务，也会对当前仓库 `tools\latest\artifacts` 下可识别的 release 尝试执行 `docker compose down --remove-orphans`。
   对 `web` 端口会先校验进程归属，显式跳过 `com.docker.backend`、`wslrelay` 等 Docker Desktop / WSL 宿主代理进程，避免误杀后导致 Docker 命名管道失联。
-  注意：`frontend` / `workstation` 的端口清理仍以“当前仓库本地服务进程”识别为前提；Docker 部分默认只处理当前仓库 `artifacts` 下能识别出的 release，不删除卷。
+  注意：`frontend` / `workstation` 的端口清理仍以“当前仓库本地服务进程”识别为前提；release 残留进程清理只匹配当前仓库 `artifacts` 路径，不按进程名泛杀；Docker 部分默认只处理当前仓库 `artifacts` 下能识别出的 release，不删除卷。
 
 ### latest
 
-`tools\latest\` 继续保留为发布脚本目录，当前不改名，避免打断现有打包与发布链路。
+`tools\latest\` 继续保留为发布脚本目录，当前不改名，避免打断现有打包与发布链路。交互菜单中打包与部署已经拆成两个一级入口；参数直达仍继续使用 `latest package`、`latest deploy` 与 `latest installer`。
 
 - `tools\latest\package-release.ps1`
   按目标打包 release bundle，并可输出 zip。

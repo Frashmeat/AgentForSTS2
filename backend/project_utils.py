@@ -21,6 +21,7 @@ _TEXT_LOADER = PromptLoader()
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _GODOT_DIRNAME = "Godot_v4.5.1-stable_mono_win64"
 _GODOT_EXE_NAME = f"{_GODOT_DIRNAME}.exe"
+_GODOT_PATTERN = "Godot_v4.5.1*mono*win64.exe"
 _DETECT_TASKS: dict[str, "_DetectPathsTask"] = {}
 _DETECT_TASKS_LOCK = threading.Lock()
 
@@ -430,6 +431,13 @@ def _find_godot(reporter: _DetectPathsProgressReporter | None = None) -> tuple[s
         f"C:/Program Files/Godot/{_GODOT_EXE_NAME}",
         str(Path.home() / "Godot" / _GODOT_EXE_NAME),
     ]
+    for tools_root in _godot_tools_roots():
+        direct_candidates.extend(
+            [
+                str(tools_root / _GODOT_EXE_NAME),
+                str(tools_root / _GODOT_DIRNAME / _GODOT_EXE_NAME),
+            ]
+        )
     for candidate in direct_candidates:
         if reporter is not None and reporter.is_cancelled():
             return None, "检测已取消"
@@ -442,29 +450,13 @@ def _find_godot(reporter: _DetectPathsProgressReporter | None = None) -> tuple[s
                 {"path": resolved},
             )
 
-    search_dirs = [
-        cfg_path,
-        str(_REPO_ROOT / "godot"),
-        "C:/Program Files/Godot",
-        "C:/Program Files (x86)/Godot",
-        "C:/tools",
-        "D:/tools",
-        "E:/tools",
-        os.environ.get("LOCALAPPDATA", ""),
-    ]
-    pattern = "Godot_v4.5.1*mono*win64.exe"
-    for d in search_dirs:
+    for root in _iter_godot_search_dirs(cfg_path):
         if reporter is not None and reporter.is_cancelled():
             return None, "检测已取消"
-        if not d:
-            continue
-        root = Path(d)
-        if not root.exists():
-            continue
         if reporter is not None:
             reporter.add_note(f"扫描 Godot 目录: {root}")
-        search_root = root if root.is_dir() else root.parent
-        matches = _glob.glob(str(search_root / "**" / pattern), recursive=True)
+        matches = _glob.glob(str(root / _GODOT_PATTERN), recursive=False)
+        matches.extend(_glob.glob(str(root / "*" / _GODOT_PATTERN), recursive=False))
         if matches:
             return matches[0], _TEXT_LOADER.render(
                 "runtime_system.project_utils_godot_found",
@@ -484,6 +476,35 @@ def _find_godot(reporter: _DetectPathsProgressReporter | None = None) -> tuple[s
             )
 
     return None, _TEXT_LOADER.load("runtime_system.project_utils_godot_not_found")
+
+
+def _godot_tools_roots() -> list[Path]:
+    return [Path("C:/tools"), Path("D:/tools"), Path("E:/tools")]
+
+
+def _iter_godot_search_dirs(cfg_path: str) -> list[Path]:
+    candidates = [
+        Path(cfg_path) if cfg_path else None,
+        _REPO_ROOT / "godot",
+        Path("C:/Program Files/Godot"),
+        Path("C:/Program Files (x86)/Godot"),
+        *_godot_tools_roots(),
+    ]
+
+    search_dirs: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        root = candidate if candidate.is_dir() else candidate.parent
+        if not root.exists():
+            continue
+        key = str(root.resolve()).casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        search_dirs.append(root)
+    return search_dirs
 
 
 def _resolve_godot_candidate(candidate: str) -> Path | None:

@@ -1390,20 +1390,26 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
                   <div className="space-y-2">
                     {serverProfiles.map((profile) => {
                       const selected = selectedServerProfileId === profile.id;
+                      const disabled = serverSaving || !profile.available;
                       return (
                         <button
                           key={profile.id}
                           type="button"
                           onClick={() => {
+                            if (!profile.available) {
+                              return;
+                            }
                             setSelectedServerProfileId(profile.id);
                             setServerSelectionDirty(true);
                             setServerError("");
                             setServerNotice("");
                           }}
+                          disabled={disabled}
                           className={`w-full rounded-xl border px-4 py-3 text-left transition ${
                             selected
                               ? "border-amber-300 bg-amber-50"
                               : "border-slate-200 hover:border-amber-200 hover:bg-amber-50/40"
+                          } ${disabled ? "cursor-not-allowed opacity-60 hover:border-slate-200 hover:bg-white" : ""
                           }`}
                         >
                           <div className="flex items-start justify-between gap-3">

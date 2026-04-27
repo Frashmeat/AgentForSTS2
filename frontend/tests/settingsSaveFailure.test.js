@@ -13,14 +13,15 @@ test("settings panel resets saving state in a finally block when save fails", ()
   assert.match(source, /try\s*\{/);
   assert.match(source, /const signature = JSON\.stringify\(body\);/);
   assert.match(source, /await updateAppConfig\(body\);/);
-  assert.match(source, /finally\s*\{\s*setSaving\(false\);/);
+  assert.match(source, /finally\s*\{\s*if \(mountedRef\.current\) \{\s*setSaving\(false\);/);
 });
 
 test("settings panel exposes a visible save error message", () => {
   const source = readSource("../src/components/SettingsPanel.tsx");
 
   assert.match(source, /const \[saveError, setSaveError\] = useState/);
-  assert.match(source, /setSaveError\(resolveErrorMessage\(error\) \|\| "保存设置失败"\)/);
+  assert.match(source, /const message = resolveErrorMessage\(error\) \|\| "保存设置失败";/);
+  assert.match(source, /setSaveError\(message\)/);
   assert.match(source, /text-rose-600/);
 });
 
@@ -40,6 +41,15 @@ test("settings panel auto-saves server preference changes", () => {
   assert.match(source, /setTimeout\(\(\) => \{\s*void handleSaveServerPreference\(selectedServerProfileId \?\? null\);\s*\}, 500\);/);
   assert.match(source, /已自动保存默认服务器配置/);
   assert.doesNotMatch(source, /\{serverSaving \? "保存中…" : "保存默认服务器配置"\}/);
+});
+
+test("settings panel does not auto-save unavailable server profiles", () => {
+  const source = readSource("../src/components/SettingsPanel.tsx");
+
+  assert.match(source, /const disabled = serverSaving \|\| !profile\.available;/);
+  assert.match(source, /if \(!profile\.available\) \{\s*return;\s*\}/);
+  assert.match(source, /disabled=\{disabled\}/);
+  assert.match(source, /cursor-not-allowed opacity-60/);
 });
 
 test("settings panel surfaces path picker failures to the user", () => {

@@ -77,6 +77,31 @@ test("buildPrettyWorkflowLogLines highlights stderr and collapses adjacent dupli
   assert.deepEqual(lines, ["阶段一", "[stderr] boom"]);
 });
 
+test("buildPrettyWorkflowLogLines summarizes build deploy output without leaking raw command spam", () => {
+  const lines = buildPrettyWorkflowLogLines([
+    {
+      text:
+        "[Bash] dotnet publish [Glob] **/*.sln [Read] I:\\WebCode\\STS2ModProject\\STS2ModProject.sln 解决方案文件看起来正常。\n" +
+        "让我尝试直接在项目目录中运行 `dotnet publish`: [Bash] dotnet publish STS2ModProject.csproj `dotnet publish` **成功完成**（第 1 次尝试）。\n" +
+        "**构建结果:** - ✅ DLL 编译成功: `.godot/mono/temp/bin/Release/STS2ModProject.dll` - ✅ .pck 文件已导出到 mods 文件夹 - ⚠️ 1 个警告: `FangedGrimoire.cs(13,21): warning STS003 - Model 应继承 BaseLib.Abstracts.CustomRelicModel 或添加接口 ICustomModel`\n" +
+        "**输出位置:** - DLL: `I:\\WebCode\\STS2ModProject\\.godot\\mono\\temp\\bin\\Release\\STS2ModProject.dll` - 发布目录: `I:\\WebCode\\STS2ModProject\\.godot\\mono\\temp\\bin\\Release\\publish\\` - Pck 文件已复制到 mods 文件夹\n" +
+        "`dotnet publish` **成功完成**（第 1 次尝试）。 **构建结果:** - ✅ DLL 编译成功: `.godot/mono/temp/bin/Release/STS2ModProject.dll` - ✅ .pck 文件已导出到 mods 文件夹",
+      source: "build",
+      channel: "raw",
+      model: "Codex CLI 默认模型",
+    },
+  ]);
+
+  assert.deepEqual(lines, [
+    "构建成功：dotnet publish 已完成。",
+    "DLL 编译成功：.godot/mono/temp/bin/Release/STS2ModProject.dll",
+    "PCK 文件已导出到 mods 文件夹。",
+    "构建警告：1 个警告，包含 warning STS003。",
+    "发布目录：I:\\WebCode\\STS2ModProject\\.godot\\mono\\temp\\bin\\Release\\publish\\",
+  ]);
+  assert.equal(lines.some((line) => line.includes("[Bash] dotnet publish")), false);
+});
+
 test("buildCodegenBroadcastView starts from task understanding before agent output arrives", () => {
   const view = buildCodegenBroadcastView([], {
     currentStage: "正在生成代码...",

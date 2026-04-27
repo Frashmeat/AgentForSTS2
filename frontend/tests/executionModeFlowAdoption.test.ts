@@ -24,3 +24,14 @@ test("useExecutionModeFlow owns capability probing and dialog state", () => {
   assert.match(flowSource, /handleExecutionRequest/);
   assert.match(flowSource, /handleChooseServerExecution/);
 });
+
+test("execution mode errors use the shared status notice stack instead of native alerts", () => {
+  const appSource = readSource("../src/App.tsx");
+  const flowSource = readSource("../src/features/workspace/useExecutionModeFlow.ts");
+
+  assert.match(appSource, /StatusNoticeStack/);
+  assert.match(appSource, /showStatusNotice/);
+  assert.match(flowSource, /onStatusNotice/);
+  assert.match(flowSource, /tone:\s*"error"/);
+  assert.doesNotMatch(flowSource, /window\.alert/);
+});

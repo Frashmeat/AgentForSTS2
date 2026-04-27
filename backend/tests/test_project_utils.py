@@ -45,6 +45,55 @@ def test_find_godot_detects_repo_local_install(monkeypatch, tmp_path):
     assert "Godot" in note
 
 
+def test_godot_search_dirs_exclude_wide_local_appdata(monkeypatch, tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_godot = repo_root / "godot"
+    repo_godot.mkdir(parents=True)
+    tools_root = tmp_path / "tools"
+    tools_root.mkdir()
+    local_appdata = tmp_path / "LocalAppData"
+    local_appdata.mkdir()
+
+    monkeypatch.setattr(project_utils, "_REPO_ROOT", repo_root, raising=False)
+    monkeypatch.setattr(project_utils, "_godot_tools_roots", lambda: [tools_root])
+    monkeypatch.setenv("LOCALAPPDATA", str(local_appdata))
+
+    search_dirs = project_utils._iter_godot_search_dirs("")
+
+    assert repo_godot in search_dirs
+    assert tools_root in search_dirs
+    assert local_appdata not in search_dirs
+
+
+def test_find_godot_uses_shallow_search_only(monkeypatch, tmp_path):
+    repo_root = tmp_path / "repo"
+    (repo_root / "godot").mkdir(parents=True)
+    tools_root = tmp_path / "tools"
+    tools_root.mkdir()
+    glob_calls: list[tuple[str, bool]] = []
+
+    monkeypatch.setattr(project_utils, "_REPO_ROOT", repo_root, raising=False)
+    monkeypatch.setattr(project_utils, "_godot_tools_roots", lambda: [tools_root])
+    monkeypatch.setattr(project_utils.Path, "home", lambda: tmp_path / "home")
+    monkeypatch.setattr("config.get_config", lambda: {"godot_exe_path": ""})
+    monkeypatch.setattr(project_utils, "_resolve_godot_candidate", lambda _: None)
+    monkeypatch.setattr(shutil, "which", lambda _: None)
+
+    def fake_glob(pattern, recursive=False):
+        glob_calls.append((pattern, recursive))
+        return []
+
+    monkeypatch.setattr(glob, "glob", fake_glob)
+
+    result, note = project_utils._find_godot()
+
+    assert result is None
+    assert "Godot" in note
+    assert glob_calls
+    assert all(recursive is False for _, recursive in glob_calls)
+    assert all("**" not in pattern for pattern, _ in glob_calls)
+
+
 def test_pick_path_windows_does_not_force_timeout(monkeypatch):
     captured: dict[str, object] = {}
 

@@ -8,6 +8,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "tools" / "tools.ps1"
 KILL_LOCAL_PATH = REPO_ROOT / "tools" / "stop" / "kill-local.ps1"
+PACKAGE_RELEASE_PATH = REPO_ROOT / "tools" / "latest" / "package-release.ps1"
 RUN_PYTEST_PATH = REPO_ROOT / "tools" / "test" / "run-pytest.ps1"
 GITIGNORE_PATH = REPO_ROOT / ".gitignore"
 
@@ -52,6 +53,11 @@ def test_tools_entry_help_lists_stop_commands() -> None:
     completed = _run_tools("help")
 
     assert completed.returncode == 0, completed.stderr
+    assert "环境部署" in completed.stdout
+    assert "开发" in completed.stdout
+    assert "Kill / 停止本机服务" in completed.stdout
+    assert "打包" in completed.stdout
+    assert "部署" in completed.stdout
     assert "stop local" in completed.stdout
     assert "stop deploy" in completed.stdout
 
@@ -104,6 +110,20 @@ def test_kill_local_uses_repo_and_tools_roots_after_stop_directory_move() -> Non
     assert 'Join-Path $toolsRoot "latest\\artifacts"' in source
     assert 'Join-Path $PSScriptRoot "latest\\artifacts"' not in source
     assert 'Join-Path $PSScriptRoot "..\\runtime' not in source
+    assert "function Stop-ArtifactResidentProcesses" in source
+    assert "function Test-IsArtifactResidentProcess" in source
+    assert "function Get-ProcessCurrentDirectory" in source
+    assert "AtsProcessDirectoryReader" in source
+    assert "CurrentDirectory = Get-ProcessCurrentDirectory" in source
+    assert "命令行、可执行路径或当前工作目录指向 tools\\latest\\artifacts" in source
+    assert "Stop-ArtifactResidentProcesses" in source
+
+
+def test_package_release_cleanup_failure_points_to_stop_local() -> None:
+    source = PACKAGE_RELEASE_PATH.read_text(encoding="utf-8-sig")
+
+    assert "清理 release 目录失败" in source
+    assert "powershell -File .\\tools\\tools.ps1 stop local" in source
 
 
 def test_tools_entry_catalog_script_paths_exist() -> None:

@@ -226,7 +226,13 @@ function New-CleanDirectory {
             continue
         }
 
-        Remove-Item -LiteralPath $child.FullName -Recurse -Force
+        try {
+            Remove-Item -LiteralPath $child.FullName -Recurse -Force
+        } catch {
+            Write-Warning ("清理 release 目录失败：{0}" -f $child.FullName)
+            Write-Warning "如该目录被本机服务、日志窗口或当前工作目录占用，请先执行：powershell -File .\tools\tools.ps1 stop local"
+            throw
+        }
     }
 }
 

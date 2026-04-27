@@ -227,6 +227,22 @@ function New-MenuGroup {
     }
 }
 
+function New-MenuSection {
+    param(
+        [string]$Key,
+        [string]$Label,
+        [string]$Description,
+        [object[]]$Commands
+    )
+
+    return [pscustomobject]@{
+        Key = $Key
+        Label = $Label
+        Description = $Description
+        Commands = $Commands
+    }
+}
+
 function Get-CommandCatalog {
     $toolsRoot = $PSScriptRoot
     $repoRoot = Split-Path -Parent $toolsRoot
@@ -336,6 +352,54 @@ function Get-CommandCatalog {
     )
 }
 
+function Get-MenuSections {
+    param([object[]]$Catalog)
+
+    $installFull = Find-MenuCommand -Catalog $Catalog -GroupKey "install" -ActionKey ""
+    $installMod = Find-MenuCommand -Catalog $Catalog -GroupKey "install" -ActionKey "mod"
+    $startWorkstation = Find-MenuCommand -Catalog $Catalog -GroupKey "start" -ActionKey "workstation"
+    $startWeb = Find-MenuCommand -Catalog $Catalog -GroupKey "start" -ActionKey "web"
+    $startDev = Find-MenuCommand -Catalog $Catalog -GroupKey "start" -ActionKey "dev"
+    $splitStart = Find-MenuCommand -Catalog $Catalog -GroupKey "split" -ActionKey "start"
+    $splitStop = Find-MenuCommand -Catalog $Catalog -GroupKey "split" -ActionKey "stop"
+    $stopLocal = Find-MenuCommand -Catalog $Catalog -GroupKey "stop" -ActionKey "local"
+    $stopDeploy = Find-MenuCommand -Catalog $Catalog -GroupKey "stop" -ActionKey "deploy"
+    $testPytest = Find-MenuCommand -Catalog $Catalog -GroupKey "test" -ActionKey ""
+    $devDecompile = Find-MenuCommand -Catalog $Catalog -GroupKey "dev" -ActionKey "decompile"
+    $devResetWebDb = Find-MenuCommand -Catalog $Catalog -GroupKey "dev" -ActionKey "reset-web-db"
+    $latestPackage = Find-MenuCommand -Catalog $Catalog -GroupKey "latest" -ActionKey "package"
+    $latestDeploy = Find-MenuCommand -Catalog $Catalog -GroupKey "latest" -ActionKey "deploy"
+    $latestInstaller = Find-MenuCommand -Catalog $Catalog -GroupKey "latest" -ActionKey "installer"
+
+    return @(
+        (New-MenuSection -Key "environment" -Label "环境部署" -Description "安装环境与运行依赖" -Commands @(
+            $installFull,
+            $installMod
+        ))
+        (New-MenuSection -Key "development" -Label "开发" -Description "本地启动、联调、测试与开发辅助" -Commands @(
+            $startWorkstation,
+            $startWeb,
+            $startDev,
+            $splitStart,
+            $splitStop,
+            $testPytest,
+            $devDecompile,
+            $devResetWebDb
+        ))
+        (New-MenuSection -Key "kill-local" -Label "Kill / 停止本机服务" -Description "停止当前仓库识别出的本机 frontend / workstation / web 进程" -Commands @(
+            $stopLocal
+        ))
+        (New-MenuSection -Key "package" -Label "打包" -Description "打包 release bundle 与构建安装器" -Commands @(
+            $latestPackage,
+            $latestInstaller
+        ))
+        (New-MenuSection -Key "deploy" -Label "部署" -Description "部署 release 或停止 deploy 拉起的本地服务" -Commands @(
+            $latestDeploy,
+            $stopDeploy
+        ))
+    )
+}
+
 function Get-CommandUsage {
     param($Command)
 
@@ -365,18 +429,21 @@ function Show-Help {
     param([object[]]$Catalog)
 
     $currentPowerShellName = Get-CurrentPowerShellCommandName
+    $menuSections = Get-MenuSections -Catalog $Catalog
 
     Write-Host ""
     Write-Host "AgentTheSpire tools 统一入口" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "直接运行："
     Write-Host ("  {0} -File .\tools\tools.ps1" -f $currentPowerShellName)
-    Write-Host "  进入分层数字菜单，可直接用键盘选择功能和参数模板。"
+    Write-Host "  进入分层数字菜单，可直接用键盘选择一级菜单、功能和参数模板。"
     Write-Host ""
     Write-Host "参数直达："
 
-    foreach ($group in $Catalog) {
-        foreach ($command in $group.Commands) {
+    foreach ($section in $menuSections) {
+        Write-Host ""
+        Write-Host ("[{0}]" -f $section.Label) -ForegroundColor Cyan
+        foreach ($command in $section.Commands) {
             $usage = Get-CommandUsage -Command $command
             Write-Host ("  {0,-24} {1}" -f $usage, $command.Description)
         }
@@ -566,14 +633,16 @@ function Confirm-And-InvokeMenuCommand {
 function Invoke-InteractiveMenu {
     param([object[]]$Catalog)
 
+    $menuSections = Get-MenuSections -Catalog $Catalog
+
     while ($true) {
-        $selectedGroup = Read-MenuChoice -Title "主菜单" -Options $Catalog -AllowQuit
-        if ($selectedGroup -eq "__quit__") {
+        $selectedSection = Read-MenuChoice -Title "主菜单" -Options $menuSections -AllowQuit
+        if ($selectedSection -eq "__quit__") {
             return
         }
 
         while ($true) {
-            $selectedCommand = Read-MenuChoice -Title ("{0} 菜单" -f $selectedGroup.Label) -Options $selectedGroup.Commands -AllowBack -AllowQuit
+            $selectedCommand = Read-MenuChoice -Title ("{0} 菜单" -f $selectedSection.Label) -Options $selectedSection.Commands -AllowBack -AllowQuit
             if ($selectedCommand -eq "__quit__") {
                 return
             }

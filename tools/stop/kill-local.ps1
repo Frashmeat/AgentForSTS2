@@ -230,6 +230,192 @@ function Test-IsProtectedDockerProcess {
     return $false
 }
 
+function Initialize-ProcessCurrentDirectoryReader {
+    if ("AtsProcessDirectoryReader" -as [type]) {
+        return
+    }
+
+    Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public static class AtsProcessDirectoryReader
+{
+    private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+    private const uint PROCESS_VM_READ = 0x0010;
+    private const int ProcessBasicInformation = 0;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PROCESS_BASIC_INFORMATION
+    {
+        public IntPtr Reserved1;
+        public IntPtr PebBaseAddress;
+        public IntPtr Reserved2_0;
+        public IntPtr Reserved2_1;
+        public IntPtr UniqueProcessId;
+        public IntPtr Reserved3;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, int dwProcessId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool ReadProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, byte[] lpBuffer, int dwSize, out IntPtr lpNumberOfBytesRead);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr hObject);
+
+    [DllImport("ntdll.dll")]
+    private static extern int NtQueryInformationProcess(
+        IntPtr processHandle,
+        int processInformationClass,
+        ref PROCESS_BASIC_INFORMATION processInformation,
+        int processInformationLength,
+        out int returnLength);
+
+    public static string GetCurrentDirectory(int processId)
+    {
+        IntPtr processHandle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, false, processId);
+        if (processHandle == IntPtr.Zero)
+        {
+            return "";
+        }
+
+        try
+        {
+            PROCESS_BASIC_INFORMATION processInfo = new PROCESS_BASIC_INFORMATION();
+            int returnLength;
+            int status = NtQueryInformationProcess(
+                processHandle,
+                ProcessBasicInformation,
+                ref processInfo,
+                Marshal.SizeOf(typeof(PROCESS_BASIC_INFORMATION)),
+                out returnLength);
+
+            if (status != 0 || processInfo.PebBaseAddress == IntPtr.Zero)
+            {
+                return "";
+            }
+
+            IntPtr processParametersAddress = ReadPointer(processHandle, IntPtr.Add(processInfo.PebBaseAddress, IntPtr.Size == 8 ? 0x20 : 0x10));
+            if (processParametersAddress == IntPtr.Zero)
+            {
+                return "";
+            }
+
+            IntPtr currentDirectoryUnicodeString = IntPtr.Add(processParametersAddress, IntPtr.Size == 8 ? 0x38 : 0x24);
+            ushort byteLength = ReadUInt16(processHandle, currentDirectoryUnicodeString);
+            if (byteLength == 0 || byteLength > 32766)
+            {
+                return "";
+            }
+
+            IntPtr bufferAddress = ReadPointer(processHandle, IntPtr.Add(currentDirectoryUnicodeString, IntPtr.Size == 8 ? 8 : 4));
+            if (bufferAddress == IntPtr.Zero)
+            {
+                return "";
+            }
+
+            byte[] buffer = new byte[byteLength];
+            IntPtr bytesRead;
+            if (!ReadProcessMemory(processHandle, bufferAddress, buffer, buffer.Length, out bytesRead))
+            {
+                return "";
+            }
+
+            return Encoding.Unicode.GetString(buffer).TrimEnd('\0');
+        }
+        catch
+        {
+            return "";
+        }
+        finally
+        {
+            CloseHandle(processHandle);
+        }
+    }
+
+    private static ushort ReadUInt16(IntPtr processHandle, IntPtr address)
+    {
+        byte[] buffer = new byte[2];
+        IntPtr bytesRead;
+        if (!ReadProcessMemory(processHandle, address, buffer, buffer.Length, out bytesRead))
+        {
+            return 0;
+        }
+        return BitConverter.ToUInt16(buffer, 0);
+    }
+
+    private static IntPtr ReadPointer(IntPtr processHandle, IntPtr address)
+    {
+        byte[] buffer = new byte[IntPtr.Size];
+        IntPtr bytesRead;
+        if (!ReadProcessMemory(processHandle, address, buffer, buffer.Length, out bytesRead))
+        {
+            return IntPtr.Zero;
+        }
+
+        if (IntPtr.Size == 8)
+        {
+            return new IntPtr(BitConverter.ToInt64(buffer, 0));
+        }
+        return new IntPtr(BitConverter.ToInt32(buffer, 0));
+    }
+}
+'@
+}
+
+function Get-ProcessCurrentDirectory {
+    param([int]$ProcessId)
+
+    try {
+        Initialize-ProcessCurrentDirectoryReader
+        return [AtsProcessDirectoryReader]::GetCurrentDirectory($ProcessId)
+    } catch {
+        return ""
+    }
+}
+
+function Test-IsArtifactResidentProcess {
+    param(
+        [object]$Descriptor,
+        [string[]]$ArtifactPathFragments
+    )
+
+    if ($null -eq $Descriptor) {
+        return $false
+    }
+
+    if ($Descriptor.Process.Id -eq $PID) {
+        return $false
+    }
+
+    if (Test-IsProtectedDockerProcess -Descriptor $Descriptor) {
+        return $false
+    }
+
+    $processName = [string]$Descriptor.ProcessName
+    if ($processName -notmatch "^(?i:python|python3|py|node|npm|powershell|pwsh|cmd|WindowsTerminal)$") {
+        return $false
+    }
+
+    $commandLine = [string]$Descriptor.CommandLine
+    $executablePath = [string]$Descriptor.ExecutablePath
+    $currentDirectory = [string]$Descriptor.CurrentDirectory
+    foreach ($fragment in @($ArtifactPathFragments)) {
+        if (
+            (Test-TextContains -Text $commandLine -Fragment $fragment) -or
+            (Test-TextContains -Text $executablePath -Fragment $fragment) -or
+            (Test-TextContains -Text $currentDirectory -Fragment $fragment)
+        ) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
 function Test-IsExpectedServiceProcess {
     param(
         [string]$ServiceName,
@@ -511,6 +697,65 @@ function Stop-ProcessesFromArtifacts {
     }
 }
 
+function Stop-ArtifactResidentProcesses {
+    $artifactsRoot = Join-Path $toolsRoot "latest\artifacts"
+    if (-not (Test-Path -LiteralPath $artifactsRoot)) {
+        return
+    }
+
+    $pathFragments = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $artifactRootFullPath = [System.IO.Path]::GetFullPath($artifactsRoot)
+    $null = $pathFragments.Add($artifactRootFullPath)
+    $null = $pathFragments.Add($artifactRootFullPath.Replace("\", "/"))
+
+    foreach ($releaseRoot in Get-ChildItem -LiteralPath $artifactsRoot -Directory -ErrorAction SilentlyContinue) {
+        $releaseFullPath = [System.IO.Path]::GetFullPath($releaseRoot.FullName)
+        $null = $pathFragments.Add($releaseFullPath)
+        $null = $pathFragments.Add($releaseFullPath.Replace("\", "/"))
+    }
+
+    $candidateProcesses = @()
+    try {
+        $candidateProcesses = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+            $_.Name -match "^(?i:python|python3|py|node|npm|powershell|pwsh|cmd|WindowsTerminal)\.exe$"
+        }
+    } catch {
+        Write-Warning "[artifacts] 扫描残留进程失败: $($_.Exception.Message)"
+        return
+    }
+
+    foreach ($cimProcess in @($candidateProcesses)) {
+        if ($null -eq $cimProcess -or $null -eq $cimProcess.ProcessId) {
+            continue
+        }
+
+        $processId = [int]$cimProcess.ProcessId
+        if ($stoppedProcessIds.Contains($processId)) {
+            continue
+        }
+
+        $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
+        if ($null -eq $process) {
+            continue
+        }
+
+        $descriptor = [pscustomobject]@{
+            Process = $process
+            ProcessName = [string]$process.ProcessName
+            ExecutablePath = [string]$cimProcess.ExecutablePath
+            CommandLine = [string]$cimProcess.CommandLine
+            CurrentDirectory = Get-ProcessCurrentDirectory -ProcessId $processId
+        }
+
+        if (-not (Test-IsArtifactResidentProcess -Descriptor $descriptor -ArtifactPathFragments @($pathFragments))) {
+            continue
+        }
+
+        $detail = "命令行、可执行路径或当前工作目录指向 tools\latest\artifacts"
+        $null = Stop-ProcessById -Name "artifacts" -ProcessId $processId -Detail $detail -SkipServiceValidation
+    }
+}
+
 function Stop-DockerComposeRelease {
     param([string]$ReleaseRoot)
 
@@ -589,4 +834,5 @@ foreach ($resolvedWebPort in Get-ServicePorts -ServiceName "web") {
 }
 
 Stop-ProcessesFromArtifacts
+Stop-ArtifactResidentProcesses
 Stop-DockerComposeWebServices

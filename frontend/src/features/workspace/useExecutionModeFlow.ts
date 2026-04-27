@@ -11,6 +11,7 @@ import {
 } from "../../shared/api/index.ts";
 import type { PlatformExecutionProfile } from "../../shared/api/platform.ts";
 import { type DeferredExecutionSummary } from "../../shared/deferredExecution.ts";
+import { resolveErrorMessage } from "../../shared/error.ts";
 import { createAndStartPlatformFlow } from "../platform-run/createAndStartFlow.ts";
 import type { PlatformExecutionRequest } from "../platform-run/types.ts";
 import { buildWorkspacePath } from "./config.ts";
@@ -47,9 +48,14 @@ export interface PendingExecutionRequest extends PlatformExecutionRequest {
 
 interface UseExecutionModeFlowOptions {
   isAuthenticated: boolean;
+  onStatusNotice?: (notice: {
+    title: string;
+    message?: string;
+    tone?: "info" | "success" | "warning" | "error";
+  }) => void;
 }
 
-export function useExecutionModeFlow({ isAuthenticated }: UseExecutionModeFlowOptions) {
+export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExecutionModeFlowOptions) {
   const navigate = useNavigate();
   const [pendingExecution, setPendingExecution] = useState<PendingExecutionRequest | null>(null);
   const [serverProfiles, setServerProfiles] = useState<PlatformExecutionProfile[]>([]);
@@ -59,6 +65,18 @@ export function useExecutionModeFlow({ isAuthenticated }: UseExecutionModeFlowOp
   const [serverProfilesLoading, setServerProfilesLoading] = useState(false);
   const [serverProfilesError, setServerProfilesError] = useState<string | null>(null);
   const [serverSelectionNotice, setServerSelectionNotice] = useState<string | null>(null);
+
+  function showExecutionNotice(
+    title: string,
+    message: string,
+    tone?: "info" | "success" | "warning" | "error",
+  ) {
+    if (tone) {
+      onStatusNotice?.({ title, message, tone });
+      return;
+    }
+    onStatusNotice?.({ title, message, tone: "error" });
+  }
 
   useEffect(() => {
     if (pendingExecution === null || !isAuthenticated) {
@@ -194,7 +212,11 @@ export function useExecutionModeFlow({ isAuthenticated }: UseExecutionModeFlowOp
     }
 
     if ((request.serverUnsupportedReasons ?? []).length > 0) {
-      window.alert(request.serverUnsupportedReasons?.[0] ?? "当前任务暂不支持服务器模式");
+      showExecutionNotice(
+        "服务器模式暂不可用",
+        request.serverUnsupportedReasons?.[0] ?? "当前任务暂不支持服务器模式",
+        "warning",
+      );
       return;
     }
 
@@ -202,7 +224,10 @@ export function useExecutionModeFlow({ isAuthenticated }: UseExecutionModeFlowOp
       (profile) => profile.id === selectedServerProfileId && profile.available,
     );
     if (!selectedProfile) {
-      window.alert(serverProfilesError ?? "当前没有可用的服务器执行配置");
+      showExecutionNotice(
+        "没有可用的服务器配置",
+        serverProfilesError ?? "当前没有可用的服务器执行配置",
+      );
       return;
     }
 
@@ -235,11 +260,15 @@ export function useExecutionModeFlow({ isAuthenticated }: UseExecutionModeFlowOp
       });
       setPendingExecution(null);
       if (result.deferredNotice) {
-        window.alert(describeDeferredReason(result.deferredNotice.summary));
+        showExecutionNotice(
+          result.deferredNotice.summary.title,
+          describeDeferredReason(result.deferredNotice.summary),
+          "warning",
+        );
       }
       navigate(`/me/jobs/${result.job.id}`);
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : "创建平台任务失败");
+      showExecutionNotice("创建平台任务失败", resolveErrorMessage(error, "创建平台任务失败"));
     }
   }
 
