@@ -18,3 +18,10 @@ test("settings panel exposes queue worker diagnostics in server tab", () => {
   assert.match(source, /成为 Leader/);
   assert.match(source, /等待 Failover/);
 });
+
+test("queue worker diagnostics requests the web runtime", () => {
+  const source = readSource("../src/shared/api/config.ts");
+
+  assert.match(source, /\/api\/platform\/queue-worker-status/);
+  assert.match(source, /backend:\s*"web"/);
+});

@@ -125,6 +125,41 @@ def _register_login_and_verify(client: TestClient, username: str, email: str) ->
     return user_id
 
 
+def test_platform_queue_worker_status_reports_registered_web_worker(client: TestClient):
+    _register_login_and_verify(client, "worker-user", "worker@example.com")
+
+    class FakeQueueWorker:
+        def get_runtime_status(self):
+            return {
+                "owner_id": "queue-worker:test",
+                "owner_scope": "system_queue_worker",
+                "is_leader": True,
+                "leader_epoch": 1,
+                "recent_leader_events": [],
+            }
+
+    client.app.state.platform_queue_worker_service = FakeQueueWorker()
+
+    response = client.get("/api/platform/queue-worker-status")
+
+    assert response.status_code == 200
+    assert response.json()["available"] is True
+    assert response.json()["owner_id"] == "queue-worker:test"
+    assert response.json()["is_leader"] is True
+
+
+def test_platform_queue_worker_status_reports_unregistered_worker(client: TestClient):
+    _register_login_and_verify(client, "worker-missing", "worker-missing@example.com")
+
+    response = client.get("/api/platform/queue-worker-status")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "available": False,
+        "reason": "queue_worker_not_registered",
+    }
+
+
 def _seed_execution_profile(client: TestClient) -> int:
     session = client.app.state.container.resolve_singleton("platform.db_session_factory")()
     settings = client.app.state.container.resolve_singleton("settings")
@@ -812,6 +847,8 @@ def test_platform_jobs_router_can_complete_supported_batch_custom_code_job(clien
     assert login.status_code == 200
 
     profile_id = _seed_execution_profile(client)
+    workspace_service = client.app.state.container.resolve_singleton("platform.server_workspace_service_factory")()
+    workspace = workspace_service.create_workspace(user_id=user_id, project_name="DarkMod")
     client.app.state.container.register_singleton("platform.workflow_runner_factory", _SucceededWorkflowRunner)
 
     created = client.post(

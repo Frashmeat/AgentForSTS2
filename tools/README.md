@@ -225,6 +225,7 @@ powershell -File .\tools\tools.ps1 latest deploy web -Debug
   本地 `workstation` 与 linked `web` 运行时还会额外开启 loopback origin 兜底，允许 `localhost` / `127.0.0.1` / `::1` 下的任意本地端口访问；该兜底只用于本机部署，不改变正式公网 `web` 的显式白名单口径。
   默认会基于当前 release 重新 `build` 需要 Docker 的目标镜像；只有显式传入 `-ReuseImages` 时才会复用已有镜像。
   `web` 目标会在 `runtime\.env` 中自动生成并持久化 `SPIREFORGE_AUTH_SESSION_SECRET` 与 `SPIREFORGE_SERVER_CREDENTIAL_SECRET`，随后以环境变量注入容器；`runtime\web.config.json` 不再继续写入 `auth.session_secret`。
+  `web` / `full` Docker Compose 模板默认把 Postgres 暴露到宿主机 `55432`，避免与本机 PostgreSQL 或受限 `5432` 端口冲突；如需指定端口，可传 `-PostgresHostPort <port>`。
   `web -ResetDb` 会在部署前删除 Docker 数据卷并重建 Postgres 数据库；统一入口菜单中以“部署 web（重置数据库）”单独暴露，避免和普通部署混淆。
   `web` 目标部署前还会把 release 内的 `docker-compose.yml` 刷新为仓库模板，避免继续沿用旧 release 遗留的 Compose 环境注入方式。
   `frontend` 未显式传入 `-WebBaseUrl` 时会默认写入本机 `http://127.0.0.1:7870`；`hybrid` 需显式传入 `-WebBaseUrl`，或改用 `-DeployLocalWeb`。

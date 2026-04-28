@@ -38,7 +38,7 @@ Web 端口。默认 7870。
 仅用于 `hybrid`。显式要求联动部署本机 Docker `web-backend`，并把前端 `web` 地址写为 `http://127.0.0.1:<WebPort>`。
 
 .PARAMETER PostgresHostPort
-Postgres 暴露到宿主机的端口。默认 5432。
+Postgres 暴露到宿主机的端口。默认 55432，避免与本机已有 PostgreSQL 或受限 5432 端口冲突。
 
 .PARAMETER PostgresDb
 Postgres 数据库名。默认 agentthespire。
@@ -125,9 +125,9 @@ param(
     [switch]$DeployLocalWeb,
 
     # 数据库参数
-    [Parameter(HelpMessage = "Postgres 暴露到宿主机的端口。默认 5432。")]
+    [Parameter(HelpMessage = "Postgres 暴露到宿主机的端口。默认 55432，避免与本机已有 PostgreSQL 或受限 5432 端口冲突。")]
     [Alias("dbp")]
-    [string]$PostgresHostPort = "5432",
+    [string]$PostgresHostPort = "55432",
 
     [Parameter(HelpMessage = "Postgres 数据库名。默认 agentthespire。")]
     [Alias("dbn")]

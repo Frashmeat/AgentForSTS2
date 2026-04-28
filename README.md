@@ -242,6 +242,7 @@ powershell -File .\tools\tools.ps1 stop deploy hybrid
 - `deploy-docker.ps1 hybrid` 默认会从当前 hybrid release 的同级目录推导本机 `web release`，并在联动部署前自动刷新该 release；如实际目录不在同级，可显式传入 `-WebReleaseRoot`。
 - 刷新默认推导出的本机 `web release` 前，脚本会先对固定的 `agentthespire-web-release` Compose 项目执行一次 `docker compose down --remove-orphans`，避免重复执行 `hybrid` 时直接改写仍被 Docker Compose 使用的 release 目录。
 - Docker 构建默认会自动解析 `Python` 基础镜像，优先复用本机已有标签，并默认回退到 `m.daocloud.io/docker.io/library/python:3.11-slim`；如需手工指定，可传 `-PythonBaseImage`。
+- 本机 Docker `web-backend` 默认把 Postgres 暴露到宿主机 `55432`，避免与本机 PostgreSQL 或受限 `5432` 端口冲突；如需覆盖，可传 `-PostgresHostPort <port>`。
 - `workstation` 本地 Python 运行时会缓存到 `release/runtime/python-runtime/workstation`；`requirements.txt` 与启动用 Python 未变化时，后续部署会直接复用该缓存，不再重复安装依赖。
 - `deploy-docker.ps1 web` 现会在 `release/runtime/.env` 中持久化 `SPIREFORGE_AUTH_SESSION_SECRET` 与 `SPIREFORGE_SERVER_CREDENTIAL_SECRET`，并以环境变量注入容器；生成后的 `runtime/web.config.json` 不再保留 `auth.session_secret`。
 - 如需重置本机 `web` 数据库，可使用 `tools.ps1 latest deploy web -ResetDb`；该操作会删除 Docker 数据卷并重建 Postgres 数据库。

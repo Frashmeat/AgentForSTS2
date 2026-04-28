@@ -234,6 +234,20 @@ def list_execution_profiles(request: Request):
         return service.list_execution_profiles().model_dump()
 
 
+@router.get("/queue-worker-status")
+def get_queue_worker_status(request: Request):
+    with auth_session_scope(request) as session:
+        _require_platform_user(request, session)
+
+    queue_worker = getattr(request.app.state, "platform_queue_worker_service", None)
+    if queue_worker is None:
+        return {"available": False, "reason": "queue_worker_not_registered"}
+    try:
+        return {"available": True, **queue_worker.get_runtime_status()}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @router.post("/upload-assets")
 def upload_asset(request: Request, body: dict):
     with auth_session_scope(request) as session:

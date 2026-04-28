@@ -142,7 +142,7 @@ export async function loadLocalAiCapabilityStatus(): Promise<LocalAiCapabilitySt
 }
 
 export async function loadPlatformQueueWorkerStatus(): Promise<PlatformQueueWorkerStatus> {
-  return requestJson<PlatformQueueWorkerStatus>("/api/config/platform_queue_worker_status", {
-    backend: "workstation",
+  return requestJson<PlatformQueueWorkerStatus>("/api/platform/queue-worker-status", {
+    backend: "web",
   });
 }
