@@ -22,6 +22,32 @@ class AdminQueryService:
     def list_refunds(self, user_id: int | None = None):
         return self.admin_query_repositories.list_refunds(user_id=user_id)
 
+    def list_users(
+        self,
+        query: str = "",
+        email_verified: bool | None = None,
+        is_admin: bool | None = None,
+        quota_status: str = "",
+        anomaly: str = "",
+        limit: int = 50,
+        offset: int = 0,
+    ):
+        return self.admin_query_repositories.list_users(
+            query=query,
+            email_verified=email_verified,
+            is_admin=is_admin,
+            quota_status=quota_status,
+            anomaly=anomaly,
+            limit=limit,
+            offset=offset,
+        )
+
+    def get_user_detail(self, user_id: int):
+        return self.admin_query_repositories.get_user_detail(user_id)
+
+    def list_user_quota_ledgers(self, user_id: int, after_id: int | None = None, limit: int = 50):
+        return self.admin_query_repositories.list_user_quota_ledgers(user_id=user_id, after_id=after_id, limit=limit)
+
     def list_audit_events(
         self,
         job_id: int | None = None,

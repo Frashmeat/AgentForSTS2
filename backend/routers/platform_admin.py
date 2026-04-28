@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Request
 
-from app.modules.platform.application.services import AdminQueryService, PlatformRuntimeAuditService, ServerCredentialAdminService
-from app.modules.platform.contracts import CreateServerCredentialCommand, UpdateServerCredentialCommand
+from app.modules.platform.application.services import (
+    AdminQueryService,
+    AdminQuotaCommandService,
+    PlatformRuntimeAuditService,
+    ServerCredentialAdminService,
+)
+from app.modules.platform.contracts import AdjustUserQuotaCommand, CreateServerCredentialCommand, UpdateServerCredentialCommand
 from ._auth_support import auth_session_scope, require_admin_user
 
 router = APIRouter(prefix="/admin")
@@ -67,6 +73,15 @@ def _build_server_credential_admin_service(session, request: Request) -> ServerC
     )
 
 
+def _build_admin_quota_command_service(session, request: Request) -> AdminQuotaCommandService:
+    container = _container(request)
+    return container.resolve_singleton("platform.admin_quota_command_service_factory")(
+        quota_account_repository=container.resolve_singleton("platform.quota_account_repository_factory")(session),
+        quota_balance_repository=container.resolve_singleton("platform.quota_balance_repository_factory")(session),
+        usage_ledger_repository=container.resolve_singleton("platform.usage_ledger_repository_factory")(session),
+    )
+
+
 @router.get("/jobs/{job_id}/executions")
 def list_job_executions(request: Request, job_id: int):
     with auth_session_scope(request) as auth_session:
@@ -95,6 +110,99 @@ def list_refunds(request: Request, user_id: int | None = None):
     with _session_scope(request) as session:
         service = _build_admin_query_service(session, request)
         return [item.model_dump() for item in service.list_refunds(user_id=user_id)]
+
+
+@router.get("/users")
+def list_users(
+    request: Request,
+    query: str = "",
+    email_verified: bool | None = None,
+    is_admin: bool | None = None,
+    quota_status: str = "",
+    anomaly: str = "",
+    limit: int = 50,
+    offset: int = 0,
+):
+    with auth_session_scope(request) as auth_session:
+        require_admin_user(request, auth_session)
+    with _session_scope(request) as session:
+        service = _build_admin_query_service(session, request)
+        return service.list_users(
+            query=query,
+            email_verified=email_verified,
+            is_admin=is_admin,
+            quota_status=quota_status,
+            anomaly=anomaly,
+            limit=limit,
+            offset=offset,
+        ).model_dump()
+
+
+@router.get("/users/{user_id}")
+def get_user_detail(request: Request, user_id: int):
+    with auth_session_scope(request) as auth_session:
+        require_admin_user(request, auth_session)
+    with _session_scope(request) as session:
+        service = _build_admin_query_service(session, request)
+        detail = service.get_user_detail(user_id)
+        if detail is None:
+            raise HTTPException(status_code=404, detail="user not found")
+        return detail.model_dump()
+
+
+@router.get("/users/{user_id}/quota")
+def get_user_quota(request: Request, user_id: int):
+    with auth_session_scope(request) as auth_session:
+        require_admin_user(request, auth_session)
+    with _session_scope(request) as session:
+        service = _build_admin_query_service(session, request)
+        detail = service.get_user_detail(user_id)
+        if detail is None:
+            raise HTTPException(status_code=404, detail="user not found")
+        return detail.quota.model_dump()
+
+
+@router.get("/users/{user_id}/quota/ledger")
+def list_user_quota_ledger(request: Request, user_id: int, after_id: int | None = None, limit: int = 50):
+    with auth_session_scope(request) as auth_session:
+        require_admin_user(request, auth_session)
+    with _session_scope(request) as session:
+        service = _build_admin_query_service(session, request)
+        if service.get_user_detail(user_id) is None:
+            raise HTTPException(status_code=404, detail="user not found")
+        return service.list_user_quota_ledgers(user_id, after_id=after_id, limit=limit).model_dump()
+
+
+@router.post("/users/{user_id}/quota/adjust")
+def adjust_user_quota(request: Request, user_id: int, body: dict):
+    try:
+        command = AdjustUserQuotaCommand.model_validate(body)
+    except KeyError as error:
+        message = error.args[0] if error.args else "invalid request body"
+        raise HTTPException(status_code=400, detail=str(message)) from error
+
+    with auth_session_scope(request) as auth_session:
+        admin_user = require_admin_user(request, auth_session)
+    with _session_scope(request) as session:
+        query_service = _build_admin_query_service(session, request)
+        if query_service.get_user_detail(user_id) is None:
+            raise HTTPException(status_code=404, detail="user not found")
+        service = _build_admin_quota_command_service(session, request)
+        try:
+            view = service.adjust_user_quota(user_id, command, admin_user_id=admin_user.user_id, now=datetime.now(UTC))
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        _build_runtime_audit_service(request).append_event(
+            event_type="admin.quota.adjusted",
+            payload={
+                "admin_user_id": admin_user.user_id,
+                "target_user_id": user_id,
+                "direction": command.direction,
+                "amount": command.amount,
+                "reason": command.reason,
+            },
+        )
+        return view.model_dump()
 
 
 @router.get("/audit/events")

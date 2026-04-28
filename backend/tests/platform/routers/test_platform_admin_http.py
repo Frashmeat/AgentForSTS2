@@ -30,6 +30,9 @@ from app.modules.platform.infra.persistence.models import (
     ExecutionChargeRecord,
     ExecutionProfileRecord,
     JobEventRecord,
+    QuotaAccountRecord,
+    QuotaAccountStatus,
+    QuotaBalanceRecord,
     ServerCredentialRecord,
 )
 from app.modules.platform.infra.persistence.repositories.job_repository_sqlalchemy import JobRepositorySqlAlchemy
@@ -173,6 +176,30 @@ def client(tmp_path):
             is_admin=False,
         )
     )
+    session.add(
+        UserRecord(
+            user_id=1001,
+            username="quota-user",
+            email="quota-user@example.com",
+            password_hash=PBKDF2PasswordHasher(iterations=1).hash_password("quota-pass"),
+            email_verified=True,
+            is_admin=False,
+        )
+    )
+    account = QuotaAccountRecord(user_id=1001, status=QuotaAccountStatus.ACTIVE)
+    session.add(account)
+    session.flush()
+    session.add(
+        QuotaBalanceRecord(
+            user_id=1001,
+            quota_account_id=account.id,
+            total_limit=10,
+            used_amount=2,
+            refunded_amount=1,
+            adjusted_amount=0,
+            status=QuotaAccountStatus.ACTIVE,
+        )
+    )
     session.commit()
     session.close()
 
@@ -243,6 +270,45 @@ def test_platform_admin_router_supports_execution_refund_and_audit_queries(clien
     profiles = test_client.get("/api/admin/platform/execution-profiles")
     assert profiles.status_code == 200
     assert profiles.json()["items"][0]["code"] == "codex-gpt-5-4"
+
+
+def test_platform_admin_router_supports_user_quota_management(client):
+    test_client, _, _, _ = client
+
+    login = test_client.post(
+        "/api/auth/login",
+        json={
+            "login": "admin@example.com",
+            "password": "admin-pass",
+        },
+    )
+    assert login.status_code == 200
+
+    users = test_client.get("/api/admin/users")
+    assert users.status_code == 200
+    assert any(item["user_id"] == 1001 for item in users.json()["items"])
+
+    quota = test_client.get("/api/admin/users/1001/quota")
+    assert quota.status_code == 200
+    assert quota.json()["remaining"] == 9
+
+    adjusted = test_client.post(
+        "/api/admin/users/1001/quota/adjust",
+        json={"direction": "grant", "amount": 5, "reason": "补偿测试额度"},
+    )
+    assert adjusted.status_code == 200
+    assert adjusted.json()["adjusted_amount"] == 5
+    assert adjusted.json()["remaining"] == 14
+
+    ledger = test_client.get("/api/admin/users/1001/quota/ledger")
+    assert ledger.status_code == 200
+    assert ledger.json()["items"][0]["ledger_type"] == "admin_grant"
+
+    rejected = test_client.post(
+        "/api/admin/users/1001/quota/adjust",
+        json={"direction": "deduct", "amount": 99, "reason": "too much"},
+    )
+    assert rejected.status_code == 400
 
 
 def test_platform_admin_router_creates_server_credential_with_ciphertext_storage(client):

@@ -305,11 +305,10 @@ def test_me_router_returns_zero_quota_view_for_new_user_without_quota_records(cl
     quota = client.get("/api/me/quota")
 
     assert quota.status_code == 200
-    assert quota.json()["daily_limit"] == 0
-    assert quota.json()["daily_used"] == 0
-    assert quota.json()["weekly_limit"] == 0
-    assert quota.json()["weekly_used"] == 0
-    assert quota.json()["refunded"] == 0
+    assert quota.json()["total_limit"] == 0
+    assert quota.json()["used_amount"] == 0
+    assert quota.json()["refunded_amount"] == 0
+    assert quota.json()["remaining"] == 0
 
 
 def test_me_router_exposes_quota_and_platform_jobs(client: TestClient):
@@ -387,7 +386,8 @@ def test_me_router_exposes_quota_and_platform_jobs(client: TestClient):
     items = client.get(f"/api/me/jobs/{job.id}/items")
 
     assert quota.status_code == 200
-    assert quota.json()["daily_limit"] == 10
+    assert quota.json()["total_limit"] == 10
+    assert quota.json()["remaining"] == 9
     assert jobs.status_code == 200
     assert jobs.json()[0]["job_type"] == "single_generate"
     assert jobs.json()[0]["deferred_reason_code"] == ""
@@ -532,7 +532,7 @@ def test_me_router_can_create_and_start_current_user_job(client: TestClient):
 
     quota = client.get("/api/me/quota")
     assert quota.status_code == 200
-    assert quota.json()["refunded"] == 1
+    assert quota.json()["refunded_amount"] == 1
 
     items = client.get(f"/api/me/jobs/{job_id}/items")
     events = client.get(f"/api/me/jobs/{job_id}/events")

@@ -12,6 +12,7 @@ from .job_event_repository import JobEventRepository
 from .job_query_repository import JobQueryRepository
 from .job_repository import JobRepository
 from .quota_account_repository import QuotaAccountRepository
+from .quota_balance_repository import QuotaBalanceRepository
 from .quota_query_repository import QuotaQueryRepository
 from .server_credential_admin_repository import ServerCredentialAdminRecord, ServerCredentialAdminRepository
 from .server_execution_repository import ServerExecutionRepository
@@ -29,6 +30,7 @@ __all__ = [
     "JobQueryRepository",
     "JobRepository",
     "QuotaAccountRepository",
+    "QuotaBalanceRepository",
     "QuotaQueryRepository",
     "ServerCredentialAdminRecord",
     "ServerCredentialAdminRepository",

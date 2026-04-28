@@ -10,6 +10,7 @@ from .job_event import JobEventRecord
 from .job_item import JobItemRecord
 from .platform_runtime_audit_event import PlatformRuntimeAuditEventRecord
 from .quota_account import QuotaAccountRecord, QuotaAccountStatus
+from .quota_balance import QuotaBalanceRecord
 from .quota_bucket import QuotaBucketRecord, QuotaBucketType
 from .server_credential import ServerCredentialRecord
 from .user_platform_preference import UserPlatformPreferenceRecord
@@ -28,6 +29,7 @@ def platform_tables():
         UserPlatformPreferenceRecord.__table__,
         ExecutionChargeRecord.__table__,
         QuotaAccountRecord.__table__,
+        QuotaBalanceRecord.__table__,
         QuotaBucketRecord.__table__,
         UsageLedgerRecord.__table__,
         ArtifactRecord.__table__,
@@ -53,6 +55,7 @@ __all__ = [
     "PlatformRuntimeAuditEventRecord",
     "QuotaAccountRecord",
     "QuotaAccountStatus",
+    "QuotaBalanceRecord",
     "QuotaBucketRecord",
     "QuotaBucketType",
     "ServerCredentialRecord",

@@ -8,6 +8,7 @@ from .job_event_repository_sqlalchemy import JobEventRepositorySqlAlchemy
 from .job_query_repository_sqlalchemy import JobQueryRepositorySqlAlchemy
 from .job_repository_sqlalchemy import JobRepositorySqlAlchemy
 from .quota_account_repository_sqlalchemy import QuotaAccountRepositorySqlAlchemy
+from .quota_balance_repository_sqlalchemy import QuotaBalanceRepositorySqlAlchemy
 from .quota_query_repository_sqlalchemy import QuotaQueryRepositorySqlAlchemy
 from .server_credential_admin_repository_sqlalchemy import ServerCredentialAdminRepositorySqlAlchemy
 from .server_execution_repository_sqlalchemy import ServerExecutionRepositorySqlAlchemy
@@ -23,6 +24,7 @@ __all__ = [
     "JobQueryRepositorySqlAlchemy",
     "JobRepositorySqlAlchemy",
     "QuotaAccountRepositorySqlAlchemy",
+    "QuotaBalanceRepositorySqlAlchemy",
     "QuotaQueryRepositorySqlAlchemy",
     "ServerCredentialAdminRepositorySqlAlchemy",
     "ServerExecutionRepositorySqlAlchemy",

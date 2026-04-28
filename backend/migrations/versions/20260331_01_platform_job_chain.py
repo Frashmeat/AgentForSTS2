@@ -10,6 +10,7 @@ from app.modules.platform.infra.persistence.models import (
     JobItemRecord,
     JobRecord,
     QuotaAccountRecord,
+    QuotaBalanceRecord,
     QuotaBucketRecord,
     UsageLedgerRecord,
 )
@@ -28,6 +29,7 @@ def _platform_job_chain_tables():
         AIExecutionRecord.__table__,
         ExecutionChargeRecord.__table__,
         QuotaAccountRecord.__table__,
+        QuotaBalanceRecord.__table__,
         QuotaBucketRecord.__table__,
         UsageLedgerRecord.__table__,
         ArtifactRecord.__table__,

@@ -29,3 +29,10 @@ class UpdateServerCredentialCommand(ModelBase):
     label: str = ""
     priority: int = 0
     enabled: bool = True
+
+
+@dataclass(slots=True)
+class AdjustUserQuotaCommand(ModelBase):
+    direction: str
+    amount: int
+    reason: str

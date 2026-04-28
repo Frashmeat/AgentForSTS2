@@ -1,14 +1,22 @@
 from __future__ import annotations
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from app.modules.auth.infra.persistence.models import UserRecord
 from app.modules.platform.contracts import (
     AdminExecutionDetailView,
     AdminExecutionListItem,
     AdminExecutionProfileListItem,
+    AdminQuotaLedgerItem,
+    AdminQuotaLedgerListView,
     AdminServerCredentialListItem,
+    AdminUserDetailView,
+    AdminUserListItem,
+    AdminUserListView,
     JobEventView,
     RefundRecordView,
+    UserQuotaView,
 )
 from app.modules.platform.domain.repositories import AdminQueryRepositories
 from app.modules.platform.infra.persistence.models import (
@@ -17,6 +25,8 @@ from app.modules.platform.infra.persistence.models import (
     ExecutionProfileRecord,
     ExecutionChargeRecord,
     JobEventRecord,
+    QuotaBalanceRecord,
+    UsageLedgerRecord,
     ServerCredentialRecord,
 )
 
@@ -29,6 +39,40 @@ def _to_iso(value: object | None) -> str:
 
 def _enum_value(value: object) -> str:
     return value.value if hasattr(value, "value") else str(value)
+
+
+def _quota_view(balance: QuotaBalanceRecord | None) -> UserQuotaView:
+    if balance is None:
+        return UserQuotaView()
+    remaining = max(balance.total_limit + balance.adjusted_amount - balance.used_amount + balance.refunded_amount, 0)
+    return UserQuotaView(
+        total_limit=balance.total_limit,
+        used_amount=balance.used_amount,
+        refunded_amount=balance.refunded_amount,
+        adjusted_amount=balance.adjusted_amount,
+        remaining=remaining,
+        status=_enum_value(balance.status),
+    )
+
+
+def _anomaly_flags(user: UserRecord, quota: UserQuotaView) -> list[str]:
+    flags: list[str] = []
+    if quota.remaining <= 0:
+        flags.append("quota_exhausted")
+    if not user.email_verified:
+        flags.append("email_unverified")
+    if quota.status == "suspended":
+        flags.append("quota_suspended")
+    if quota.status == "closed":
+        flags.append("quota_closed")
+    return flags
+
+
+def _ledger_reason(reason_code: str) -> str:
+    parts = str(reason_code or "").split(":", 2)
+    if len(parts) == 3 and parts[0] == "admin":
+        return parts[2]
+    return str(reason_code or "")
 
 
 class AdminQueryRepositoriesSqlAlchemy(AdminQueryRepositories):
@@ -90,6 +134,106 @@ class AdminQueryRepositoriesSqlAlchemy(AdminQueryRepositories):
             )
             for row in rows
         ]
+
+    def list_users(
+        self,
+        query: str = "",
+        email_verified: bool | None = None,
+        is_admin: bool | None = None,
+        quota_status: str = "",
+        anomaly: str = "",
+        limit: int = 50,
+        offset: int = 0,
+    ) -> AdminUserListView:
+        normalized_query = str(query or "").strip().lower()
+        normalized_status = str(quota_status or "").strip()
+        normalized_anomaly = str(anomaly or "").strip()
+        limit = min(max(int(limit or 50), 1), 100)
+        offset = max(int(offset or 0), 0)
+
+        query_obj = self.session.query(UserRecord)
+        if normalized_query:
+            like = f"%{normalized_query}%"
+            predicates = [UserRecord.username.ilike(like), UserRecord.email.ilike(like)]
+            if normalized_query.isdigit():
+                predicates.append(UserRecord.user_id == int(normalized_query))
+            query_obj = query_obj.filter(
+                or_(*predicates)
+            )
+        if email_verified is not None:
+            query_obj = query_obj.filter(UserRecord.email_verified == email_verified)
+        if is_admin is not None:
+            query_obj = query_obj.filter(UserRecord.is_admin == is_admin)
+
+        rows = query_obj.order_by(UserRecord.user_id.asc()).all()
+        balances = {
+            balance.user_id: balance
+            for balance in self.session.query(QuotaBalanceRecord)
+            .filter(QuotaBalanceRecord.user_id.in_([row.user_id for row in rows] or [-1]))
+            .all()
+        }
+
+        items: list[AdminUserListItem] = []
+        for row in rows:
+            quota = _quota_view(balances.get(row.user_id))
+            flags = _anomaly_flags(row, quota)
+            if normalized_status and quota.status != normalized_status:
+                continue
+            if normalized_anomaly and normalized_anomaly not in flags:
+                continue
+            items.append(
+                AdminUserListItem(
+                    user_id=row.user_id,
+                    username=row.username,
+                    email=row.email,
+                    email_verified=row.email_verified,
+                    is_admin=row.is_admin,
+                    created_at=_to_iso(row.created_at),
+                    quota=quota,
+                    anomaly_flags=flags,
+                )
+            )
+
+        total = len(items)
+        return AdminUserListView(items=items[offset : offset + limit], total=total, limit=limit, offset=offset)
+
+    def get_user_detail(self, user_id: int) -> AdminUserDetailView | None:
+        user = self.session.query(UserRecord).filter(UserRecord.user_id == user_id).one_or_none()
+        if user is None:
+            return None
+        quota = _quota_view(self.session.query(QuotaBalanceRecord).filter(QuotaBalanceRecord.user_id == user_id).one_or_none())
+        return AdminUserDetailView(
+            user_id=user.user_id,
+            username=user.username,
+            email=user.email,
+            email_verified=user.email_verified,
+            is_admin=user.is_admin,
+            created_at=_to_iso(user.created_at),
+            email_verified_at=None if user.email_verified_at is None else _to_iso(user.email_verified_at),
+            quota=quota,
+            anomaly_flags=_anomaly_flags(user, quota),
+        )
+
+    def list_user_quota_ledgers(self, user_id: int, after_id: int | None = None, limit: int = 50) -> AdminQuotaLedgerListView:
+        query = self.session.query(UsageLedgerRecord).filter(UsageLedgerRecord.user_id == user_id)
+        if after_id is not None:
+            query = query.filter(UsageLedgerRecord.id > after_id)
+        rows = query.order_by(UsageLedgerRecord.id.desc()).limit(min(max(int(limit or 50), 1), 100)).all()
+        return AdminQuotaLedgerListView(
+            items=[
+                AdminQuotaLedgerItem(
+                    ledger_id=row.id,
+                    ledger_type=_enum_value(row.ledger_type),
+                    amount=row.amount,
+                    balance_after=row.balance_after,
+                    reason_code=row.reason_code,
+                    reason=_ledger_reason(row.reason_code),
+                    ai_execution_id=row.ai_execution_id,
+                    created_at=_to_iso(row.created_at),
+                )
+                for row in rows
+            ]
+        )
 
     def list_audit_events(
         self,

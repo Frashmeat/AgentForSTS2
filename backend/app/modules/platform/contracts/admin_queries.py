@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ._model import ModelBase
+from .job_queries import UserQuotaView
 
 
 @dataclass(slots=True)
@@ -42,6 +43,56 @@ class RefundRecordView(ModelBase):
     ai_execution_id: int
     charge_status: str
     refund_reason: str = ""
+
+
+@dataclass(slots=True)
+class AdminUserListItem(ModelBase):
+    user_id: int
+    username: str
+    email: str
+    email_verified: bool
+    is_admin: bool
+    created_at: str
+    quota: UserQuotaView
+    anomaly_flags: list[str]
+
+
+@dataclass(slots=True)
+class AdminUserListView(ModelBase):
+    items: list[AdminUserListItem]
+    total: int
+    limit: int
+    offset: int
+
+
+@dataclass(slots=True)
+class AdminUserDetailView(ModelBase):
+    user_id: int
+    username: str
+    email: str
+    email_verified: bool
+    is_admin: bool
+    created_at: str
+    email_verified_at: str | None
+    quota: UserQuotaView
+    anomaly_flags: list[str]
+
+
+@dataclass(slots=True)
+class AdminQuotaLedgerItem(ModelBase):
+    ledger_id: int
+    ledger_type: str
+    amount: int
+    balance_after: int
+    reason_code: str
+    reason: str = ""
+    ai_execution_id: int | None = None
+    created_at: str = ""
+
+
+@dataclass(slots=True)
+class AdminQuotaLedgerListView(ModelBase):
+    items: list[AdminQuotaLedgerItem]
 
 
 @dataclass(slots=True)

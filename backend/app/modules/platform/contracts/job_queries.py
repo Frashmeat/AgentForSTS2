@@ -76,9 +76,9 @@ class JobDetailView(ModelBase):
 
 @dataclass(slots=True)
 class UserQuotaView(ModelBase):
-    daily_limit: int = 0
-    daily_used: int = 0
-    weekly_limit: int = 0
-    weekly_used: int = 0
-    refunded: int = 0
-    next_reset_at: str | None = None
+    total_limit: int = 0
+    used_amount: int = 0
+    refunded_amount: int = 0
+    adjusted_amount: int = 0
+    remaining: int = 0
+    status: str = "inactive"

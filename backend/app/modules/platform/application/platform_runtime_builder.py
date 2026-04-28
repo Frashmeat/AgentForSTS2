@@ -70,11 +70,13 @@ def build_execution_orchestrator_service_from_container(session, container: Any)
 def _build_quota_billing_service_from_container(session, container: Any) -> QuotaBillingService:
     execution_charge_repository = container.resolve_singleton("platform.execution_charge_repository_factory")(session)
     quota_account_repository = container.resolve_singleton("platform.quota_account_repository_factory")(session)
+    quota_balance_repository = container.resolve_singleton("platform.quota_balance_repository_factory")(session)
     usage_ledger_repository = container.resolve_singleton("platform.usage_ledger_repository_factory")(session)
     return container.resolve_singleton("platform.quota_billing_service_factory")(
         execution_charge_repository=execution_charge_repository,
         quota_account_repository=quota_account_repository,
         usage_ledger_repository=usage_ledger_repository,
+        quota_balance_repository=quota_balance_repository,
     )
 
 

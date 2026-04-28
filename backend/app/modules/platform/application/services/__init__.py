@@ -1,6 +1,7 @@
 """平台模式服务层。"""
 
 from .admin_query_service import AdminQueryService
+from .admin_quota_command_service import AdminQuotaCommandService
 from .approval_facade_service import ApprovalFacadeService
 from .build_deploy_facade_service import BuildDeployFacadeService
 from .config_facade_service import ConfigFacadeService
@@ -48,6 +49,7 @@ from .user_center_service import UserCenterProfileView, UserCenterService
 
 __all__ = [
     "AdminQueryService",
+    "AdminQuotaCommandService",
     "ApprovalFacadeService",
     "BuildDeployFacadeService",
     "ConfigFacadeService",

@@ -14,6 +14,8 @@ class LedgerType(StrEnum):
     RESERVE = "reserve"
     CAPTURE = "capture"
     REFUND = "refund"
+    ADMIN_GRANT = "admin_grant"
+    ADMIN_DEDUCT = "admin_deduct"
 
 
 class UsageLedgerRecord(TimestampMixin, Base):
@@ -22,6 +24,7 @@ class UsageLedgerRecord(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(bigint_type(), primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(bigint_type(), nullable=False)
     quota_account_id: Mapped[int] = mapped_column(ForeignKey("quota_accounts.id"), nullable=False)
+    quota_balance_id: Mapped[int | None] = mapped_column(ForeignKey("quota_balances.id"), nullable=True)
     quota_bucket_id: Mapped[int | None] = mapped_column(ForeignKey("quota_buckets.id"), nullable=True)
     ai_execution_id: Mapped[int | None] = mapped_column(ForeignKey("ai_executions.id"), nullable=True)
     ledger_type: Mapped[LedgerType] = mapped_column(

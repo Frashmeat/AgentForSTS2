@@ -9,6 +9,7 @@ from app.modules.auth.infra.persistence.repositories import (
 )
 from app.modules.platform.application.services import (
     AdminQueryService,
+    AdminQuotaCommandService,
     EventService,
     ExecutionOrchestratorService,
     ExecutionRoutingService,
@@ -46,6 +47,7 @@ from app.modules.platform.infra.persistence.repositories import (
     JobQueryRepositorySqlAlchemy,
     JobRepositorySqlAlchemy,
     QuotaAccountRepositorySqlAlchemy,
+    QuotaBalanceRepositorySqlAlchemy,
     QuotaQueryRepositorySqlAlchemy,
     ServerCredentialAdminRepositorySqlAlchemy,
     ServerExecutionRepositorySqlAlchemy,
@@ -109,6 +111,7 @@ class ApplicationContainer:
             ("platform.execution_routing_repository_factory", ExecutionRoutingRepositorySqlAlchemy),
             ("platform.execution_charge_repository_factory", ExecutionChargeRepositorySqlAlchemy),
             ("platform.quota_account_repository_factory", QuotaAccountRepositorySqlAlchemy),
+            ("platform.quota_balance_repository_factory", QuotaBalanceRepositorySqlAlchemy),
             ("platform.usage_ledger_repository_factory", UsageLedgerRepositorySqlAlchemy),
             ("platform.artifact_repository_factory", ArtifactRepositorySqlAlchemy),
             ("platform.job_event_repository_factory", JobEventRepositorySqlAlchemy),
@@ -119,6 +122,7 @@ class ApplicationContainer:
             ("platform.job_query_service_factory", JobQueryService),
             ("platform.request_rate_limiter", PlatformRequestRateLimiter()),
             ("platform.admin_query_service_factory", AdminQueryService),
+            ("platform.admin_quota_command_service_factory", AdminQuotaCommandService),
             ("platform.runtime_audit_service_factory", PlatformRuntimeAuditService),
             ("platform.server_credential_admin_service_factory", ServerCredentialAdminService),
             ("platform.server_credential_cipher_factory", ServerCredentialCipher),

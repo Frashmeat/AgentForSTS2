@@ -16,6 +16,7 @@ EXPECTED_TABLES = {
     "ai_executions",
     "execution_charges",
     "quota_accounts",
+    "quota_balances",
     "quota_buckets",
     "usage_ledgers",
     "artifacts",
@@ -52,6 +53,7 @@ def test_job_chain_tables_freeze_version_fields_and_integer_quota_columns():
     ai_executions = Base.metadata.tables["ai_executions"]
     execution_charges = Base.metadata.tables["execution_charges"]
     quota_buckets = Base.metadata.tables["quota_buckets"]
+    quota_balances = Base.metadata.tables["quota_balances"]
     usage_ledgers = Base.metadata.tables["usage_ledgers"]
 
     assert "workflow_version" in jobs.c
@@ -62,6 +64,10 @@ def test_job_chain_tables_freeze_version_fields_and_integer_quota_columns():
     assert quota_buckets.c["quota_limit"].type.python_type is int
     assert quota_buckets.c["used_amount"].type.python_type is int
     assert quota_buckets.c["refunded_amount"].type.python_type is int
+    assert quota_balances.c["total_limit"].type.python_type is int
+    assert quota_balances.c["used_amount"].type.python_type is int
+    assert quota_balances.c["refunded_amount"].type.python_type is int
+    assert quota_balances.c["adjusted_amount"].type.python_type is int
     assert usage_ledgers.c["amount"].type.python_type is int
     assert usage_ledgers.c["balance_after"].type.python_type is int
 
@@ -133,6 +139,7 @@ def test_first_platform_revision_freezes_only_initial_job_chain_tables():
     assert "UserPlatformPreferenceRecord" not in source
     assert "ExecutionProfileRecord" not in source
     assert "PlatformRuntimeAuditEventRecord" not in source
+    assert "QuotaBalanceRecord" in source
     assert "_platform_job_chain_tables" in source
 
 
