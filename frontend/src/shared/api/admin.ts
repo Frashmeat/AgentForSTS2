@@ -27,6 +27,58 @@ export interface AdminQuotaRefundItem {
   created_at?: string;
 }
 
+export interface AdminUserQuotaView {
+  total_limit: number;
+  used_amount: number;
+  refunded_amount: number;
+  adjusted_amount: number;
+  remaining: number;
+  status: string;
+}
+
+export interface AdminUserListItem {
+  user_id: number;
+  username: string;
+  email: string;
+  email_verified: boolean;
+  is_admin: boolean;
+  created_at: string;
+  quota: AdminUserQuotaView;
+  anomaly_flags: string[];
+}
+
+export interface AdminUserListView {
+  items: AdminUserListItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface AdminUserDetail extends AdminUserListItem {
+  email_verified_at?: string | null;
+}
+
+export interface AdminQuotaLedgerItem {
+  ledger_id: number;
+  ledger_type: string;
+  amount: number;
+  balance_after: number;
+  reason_code: string;
+  reason: string;
+  ai_execution_id?: number | null;
+  created_at: string;
+}
+
+export interface AdminQuotaLedgerListView {
+  items: AdminQuotaLedgerItem[];
+}
+
+export interface AdjustAdminUserQuotaRequest {
+  direction: "grant" | "deduct";
+  amount: number;
+  reason: string;
+}
+
 export interface AdminExecutionProfileListItem {
   id: number;
   code: string;
@@ -118,6 +170,56 @@ export function getAdminExecution(executionId: number): Promise<AdminExecutionDe
 export function listAdminQuotaRefunds(userId?: number): Promise<AdminQuotaRefundItem[]> {
   return requestJson<AdminQuotaRefundItem[]>(buildApiPath("/api/admin/quota/refunds", { user_id: userId }), {
     backend: "web",
+  });
+}
+
+export function listAdminUsers(params: {
+  query?: string;
+  email_verified?: boolean;
+  is_admin?: boolean;
+  quota_status?: string;
+  anomaly?: string;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<AdminUserListView> {
+  return requestJson<AdminUserListView>(
+    buildApiPath("/api/admin/users", {
+      query: params.query,
+      email_verified: typeof params.email_verified === "boolean" ? String(params.email_verified) : undefined,
+      is_admin: typeof params.is_admin === "boolean" ? String(params.is_admin) : undefined,
+      quota_status: params.quota_status,
+      anomaly: params.anomaly,
+      limit: params.limit,
+      offset: params.offset,
+    }),
+    { backend: "web" },
+  );
+}
+
+export function getAdminUser(userId: number): Promise<AdminUserDetail> {
+  return requestJson<AdminUserDetail>(`/api/admin/users/${userId}`, {
+    backend: "web",
+  });
+}
+
+export function getAdminUserQuota(userId: number): Promise<AdminUserQuotaView> {
+  return requestJson<AdminUserQuotaView>(`/api/admin/users/${userId}/quota`, {
+    backend: "web",
+  });
+}
+
+export function listAdminUserQuotaLedger(userId: number, afterId?: number, limit?: number): Promise<AdminQuotaLedgerListView> {
+  return requestJson<AdminQuotaLedgerListView>(
+    buildApiPath(`/api/admin/users/${userId}/quota/ledger`, { after_id: afterId, limit }),
+    { backend: "web" },
+  );
+}
+
+export function adjustAdminUserQuota(userId: number, body: AdjustAdminUserQuotaRequest): Promise<AdminUserQuotaView> {
+  return requestJson<AdminUserQuotaView>(`/api/admin/users/${userId}/quota/adjust`, {
+    backend: "web",
+    method: "POST",
+    body,
   });
 }
 

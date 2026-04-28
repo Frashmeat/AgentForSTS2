@@ -6,10 +6,15 @@ import {
   disableAdminServerCredential,
   enableAdminServerCredential,
   getAdminExecution,
+  adjustAdminUserQuota,
+  getAdminUser,
+  getAdminUserQuota,
   listAdminAuditEvents,
   listAdminExecutionProfiles,
   listAdminJobExecutions,
   listAdminQuotaRefunds,
+  listAdminUsers,
+  listAdminUserQuotaLedger,
   listAdminServerCredentials,
   runAdminServerCredentialHealthCheck,
   updateAdminServerCredential,
@@ -70,6 +75,7 @@ test("admin optional query params are only appended when present", async () => {
   await listAdminAuditEvents(123);
   await listAdminAuditEvents(undefined, "runtime.queue_worker.");
   await listAdminAuditEvents(undefined, "runtime.queue_worker.", 88, 20);
+  await listAdminUsers({ query: "alice", anomaly: "quota_exhausted", limit: 25 });
 
   assert.equal(calls[0].input, "/api/admin/quota/refunds");
   assert.equal(calls[1].input, "/api/admin/quota/refunds?user_id=7");
@@ -77,6 +83,31 @@ test("admin optional query params are only appended when present", async () => {
   assert.equal(calls[3].input, "/api/admin/audit/events?job_id=123");
   assert.equal(calls[4].input, "/api/admin/audit/events?event_type_prefix=runtime.queue_worker.");
   assert.equal(calls[5].input, "/api/admin/audit/events?event_type_prefix=runtime.queue_worker.&after_id=88&limit=20");
+  assert.equal(calls[6].input, "/api/admin/users?query=alice&anomaly=quota_exhausted&limit=25");
+});
+
+test("admin user quota endpoints compose resource paths and methods", async () => {
+  const calls: Array<{ input: unknown; init?: RequestInit }> = [];
+  Object.assign(globalThis, {
+    fetch: async (input: unknown, init?: RequestInit) => {
+      calls.push({ input, init });
+      return createMockResponse({
+        ok: true,
+        body: { items: [] },
+      });
+    },
+  });
+
+  await getAdminUser(7);
+  await getAdminUserQuota(7);
+  await listAdminUserQuotaLedger(7, 10, 30);
+  await adjustAdminUserQuota(7, { direction: "grant", amount: 20, reason: "补偿测试额度" });
+
+  assert.equal(calls[0].input, "/api/admin/users/7");
+  assert.equal(calls[1].input, "/api/admin/users/7/quota");
+  assert.equal(calls[2].input, "/api/admin/users/7/quota/ledger?after_id=10&limit=30");
+  assert.equal(calls[3].input, "/api/admin/users/7/quota/adjust");
+  assert.equal(calls[3].init?.method, "POST");
 });
 
 test("admin server credential endpoints compose resource paths and methods", async () => {

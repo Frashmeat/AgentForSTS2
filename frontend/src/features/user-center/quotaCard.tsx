@@ -1,9 +1,7 @@
 import type { PlatformQuotaView } from "../../shared/api/platform.ts";
 
 function resolveRemainingQuota(quota: PlatformQuotaView): number {
-  const dailyRemaining = quota.daily_limit - quota.daily_used + quota.refunded;
-  const weeklyRemaining = quota.weekly_limit - quota.weekly_used + quota.refunded;
-  return Math.max(dailyRemaining, weeklyRemaining, 0);
+  return Math.max(quota.remaining, 0);
 }
 
 export function QuotaCard({ quota }: { quota: PlatformQuotaView }) {
@@ -18,7 +16,7 @@ export function QuotaCard({ quota }: { quota: PlatformQuotaView }) {
         </div>
       </div>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-2">
+      <div className="mt-6 grid gap-4 md:grid-cols-4">
         <article className="platform-page-subcard p-4">
           <p className="text-sm text-slate-500">剩余次数</p>
           <p className="mt-2 text-2xl font-semibold text-slate-900">
@@ -26,8 +24,16 @@ export function QuotaCard({ quota }: { quota: PlatformQuotaView }) {
           </p>
         </article>
         <article className="platform-page-subcard p-4">
+          <p className="text-sm text-slate-500">总次数</p>
+          <p className="mt-2 text-2xl font-semibold text-slate-900">{quota.total_limit + quota.adjusted_amount}</p>
+        </article>
+        <article className="platform-page-subcard p-4">
+          <p className="text-sm text-slate-500">已使用</p>
+          <p className="mt-2 text-2xl font-semibold text-slate-900">{quota.used_amount}</p>
+        </article>
+        <article className="platform-page-subcard p-4">
           <p className="text-sm text-slate-500">已返还</p>
-          <p className="mt-2 text-2xl font-semibold text-emerald-700">{quota.refunded}</p>
+          <p className="mt-2 text-2xl font-semibold text-emerald-700">{quota.refunded_amount}</p>
         </article>
       </div>
     </section>

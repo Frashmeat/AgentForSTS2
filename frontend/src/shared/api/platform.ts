@@ -82,12 +82,12 @@ export interface PlatformJobDetail extends PlatformJobSummary {
 }
 
 export interface PlatformQuotaView {
-  daily_limit: number;
-  daily_used: number;
-  weekly_limit: number;
-  weekly_used: number;
-  refunded: number;
-  next_reset_at: string;
+  total_limit: number;
+  used_amount: number;
+  refunded_amount: number;
+  adjusted_amount: number;
+  remaining: number;
+  status: string;
 }
 
 export interface PlatformExecutionProfile {
