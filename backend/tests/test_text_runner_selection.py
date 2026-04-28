@@ -15,7 +15,7 @@ sys.modules.pop("llm.text_runner", None)
 
 from app.shared.prompting import PromptLoader
 from llm import prompt_builder
-from llm.text_runner import build_text_prompt, build_system_prompt, resolve_text_backend, resolve_model
+from llm.text_runner import TextRunner, build_text_prompt, build_system_prompt, resolve_text_backend, resolve_model
 
 
 def test_text_runner_uses_cli_backend_when_mode_is_agent_cli():
@@ -31,6 +31,37 @@ def test_text_runner_uses_litellm_when_mode_is_claude_api():
 def test_resolve_model_falls_back_to_default_claude_model():
     llm_cfg = {"mode": "claude_api"}
     assert resolve_model(llm_cfg) == "claude-sonnet-4-6"
+
+
+def test_litellm_backend_accepts_text_backend_cwd_argument(monkeypatch, tmp_path):
+    from llm import text_runner
+
+    captured: dict[str, object] = {}
+
+    async def fake_acompletion(**kwargs):
+        captured.update(kwargs)
+        return types.SimpleNamespace(
+            choices=[
+                types.SimpleNamespace(
+                    message=types.SimpleNamespace(content="ok"),
+                )
+            ]
+        )
+
+    monkeypatch.setattr(text_runner.litellm, "acompletion", fake_acompletion)
+    monkeypatch.setattr(text_runner, "get_config", lambda: {"llm": {"custom_prompt": ""}})
+
+    result = asyncio.run(
+        TextRunner(registry=text_runner._build_default_registry()).complete(
+            "base prompt",
+            {"mode": "claude_api", "model": "gpt-5.4", "api_key": "sk-test"},
+            tmp_path,
+        )
+    )
+
+    assert result == "ok"
+    assert captured["model"] == "gpt-5.4"
+    assert captured["api_key"] == "sk-test"
 
 
 def test_build_text_prompt_appends_custom_prompt():

@@ -29,6 +29,8 @@
 - `WorkflowTermination` 应转换为 `cancelled` 事件，不应落入通用 `error` 事件或错误日志告警。
 - 普通异常仍转换为 `error` 事件，并尽量携带 `code/message/traceback` 以便前端统一解析。
 - 前端识别 `user_cancelled` 与 `client_disconnected` 时，应进入取消态，不展示为“执行失败”。
+- Web 服务器模式调用外部模型时，上游内容安全或网关阻断应归类为明确错误码，例如 `upstream_request_blocked`，不要把 `litellm.APIError` / SDK 原始异常直接展示为最终用户错误。
+- 面向游戏 Mod 生成的 Prompt 若包含“伤害 / 攻击 / 毒”等游戏机制词，应明确这些词属于虚构电子游戏内的数值规则，降低上游网关误判概率。
 
 ---
 
@@ -79,3 +81,4 @@ WebSocket 当前公共事件：
 - 只关闭 WebSocket，不取消后端协程或 CLI 子进程，导致 key 仍被后台请求使用。
 - 在长耗时步骤外层缺少取消检查，导致收到取消后仍继续执行后续生成、构建或审批步骤。
 - HTTP 与 WebSocket 错误载荷字段不一致，前端只能靠字符串解析错误原因。
+- 外部 AI 网关阻断时只记录原始 SDK 异常，导致用户看到不可行动的 `Your request was blocked`，也无法区分配置错误、内容误判和系统异常。

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime
 
 from app.modules.platform.application.services.quota_billing_service import QuotaBillingService
@@ -27,6 +28,16 @@ from .server_deploy_target_lock_service import ServerDeployTargetBusyError
 from .server_workspace_lock_service import ServerWorkspaceLockHandle, ServerWorkspaceLockService
 from .server_workspace_service import ServerWorkspaceService
 from .uploaded_asset_service import UploadedAssetService
+
+
+logger = logging.getLogger(__name__)
+
+
+def _short_text(value: object, limit: int = 300) -> str:
+    text = str(value or "").replace("\n", "\\n").strip()
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}..."
 
 
 class QueuedExecutionReason(RuntimeError):
@@ -102,13 +113,29 @@ class ExecutionOrchestratorService:
                 request_idempotency_key=request_idempotency_key,
             )
             if existing is not None:
+                logger.info(
+                    "platform execution idempotency hit user_id=%s job_id=%s job_item_id=%s execution_id=%s "
+                    "status=%s",
+                    user_id,
+                    job_id,
+                    job_item_id,
+                    existing.id,
+                    existing.status,
+                )
                 return existing
 
         job = self.job_repository.find_by_id_for_user(job_id, user_id)
         if job is None:
+            logger.warning("platform execution start skipped job not found user_id=%s job_id=%s", user_id, job_id)
             return None
         item = next((entry for entry in job.items if entry.id == job_item_id), None)
         if item is None:
+            logger.warning(
+                "platform execution start skipped item not found user_id=%s job_id=%s job_item_id=%s",
+                user_id,
+                job_id,
+                job_item_id,
+            )
             return None
         self._acquire_workspace_write_lock_if_needed(job=job, item=item)
 
@@ -119,12 +146,49 @@ class ExecutionOrchestratorService:
             credential_ref = route.credential_ref
             retry_attempt = route.retry_attempt
             switched_credential = route.switched_credential
+            logger.info(
+                "platform execution route resolved user_id=%s job_id=%s job_item_id=%s provider=%s model=%s "
+                "credential_ref=%s retry_attempt=%s switched=%s",
+                user_id,
+                job_id,
+                job_item_id,
+                provider,
+                model,
+                credential_ref,
+                retry_attempt,
+                switched_credential,
+            )
         elif not provider.strip() or not model.strip():
             raise ValueError("provider and model are required when execution routing service is not configured")
+        else:
+            logger.info(
+                "platform execution route provided user_id=%s job_id=%s job_item_id=%s provider=%s model=%s "
+                "credential_ref=%s retry_attempt=%s switched=%s",
+                user_id,
+                job_id,
+                job_item_id,
+                provider,
+                model,
+                credential_ref,
+                retry_attempt,
+                switched_credential,
+            )
 
         if self.quota_billing_service is None:
+            logger.warning(
+                "platform execution start skipped quota billing unavailable user_id=%s job_id=%s job_item_id=%s",
+                user_id,
+                job_id,
+                job_item_id,
+            )
             return None
         if not self.quota_billing_service.has_available_quota(user_id=user_id, now=now, amount=1):
+            logger.info(
+                "platform execution start blocked by quota user_id=%s job_id=%s job_item_id=%s",
+                user_id,
+                job_id,
+                job_item_id,
+            )
             item.status = JobItemStatus.QUOTA_SKIPPED
             job.status = JobStatus.QUOTA_EXHAUSTED
             self.job_repository.save(job)
@@ -159,11 +223,29 @@ class ExecutionOrchestratorService:
         )
         reserved = self.quota_billing_service.reserve(user_id=user_id, execution_id=execution.id, now=now, amount=1)
         if reserved is None:
+            logger.info(
+                "platform execution quota reserve failed user_id=%s job_id=%s job_item_id=%s execution_id=%s",
+                user_id,
+                job.id,
+                job_item_id,
+                execution.id,
+            )
             item.status = JobItemStatus.QUOTA_SKIPPED
             job.status = JobStatus.QUOTA_EXHAUSTED
             self.job_repository.save(job)
             return None
 
+        logger.info(
+            "platform execution quota reserved user_id=%s job_id=%s job_item_id=%s execution_id=%s provider=%s "
+            "model=%s credential_ref=%s",
+            user_id,
+            job.id,
+            job_item_id,
+            execution.id,
+            provider,
+            model,
+            credential_ref,
+        )
         execution.status = AIExecutionStatus.DISPATCHING
         item.status = JobItemStatus.RUNNING
         job.status = JobStatus.RUNNING
@@ -176,6 +258,16 @@ class ExecutionOrchestratorService:
             payload={"execution_id": execution.id, "status": execution.status.value},
             job_item_id=job_item_id,
             ai_execution_id=execution.id,
+        )
+        logger.info(
+            "platform execution dispatching user_id=%s job_id=%s job_item_id=%s execution_id=%s step_type=%s "
+            "step_id=%s",
+            user_id,
+            job.id,
+            job_item_id,
+            execution.id,
+            step_type,
+            step_id,
         )
         return execution
 
@@ -206,6 +298,14 @@ class ExecutionOrchestratorService:
             job_type=job_type,
             item_type=item_type,
             input_payload=payload,
+        )
+        logger.info(
+            "platform workflow steps resolved job_id=%s job_item_id=%s job_type=%s item_type=%s steps=%s",
+            job_id,
+            job_item_id,
+            job_type,
+            item_type,
+            [f"{step.step_type}:{step.step_id}" for step in steps],
         )
         return await self.workflow_runner.run(
             steps=steps,
@@ -286,6 +386,15 @@ class ExecutionOrchestratorService:
     ) -> StepExecutionResult | None:
         try:
             if not self.has_registered_workflow(job_type=job_type, item_type=item_type):
+                logger.info(
+                    "platform workflow skipped no registered workflow user_id=%s job_id=%s job_item_id=%s "
+                    "job_type=%s item_type=%s",
+                    user_id,
+                    job_id,
+                    job_item_id,
+                    job_type,
+                    item_type,
+                )
                 return None
 
             job = self.job_repository.find_by_id_for_user(job_id, user_id)
@@ -299,6 +408,17 @@ class ExecutionOrchestratorService:
             if execution is None:
                 raise LookupError(f"ai_execution not found for job_item: {job_item_id}")
 
+            logger.info(
+                "platform workflow start user_id=%s job_id=%s job_item_id=%s execution_id=%s job_type=%s "
+                "item_type=%s workflow_version=%s",
+                user_id,
+                job_id,
+                job_item_id,
+                execution.id,
+                job_type,
+                item_type,
+                workflow_version,
+            )
             execution.status = AIExecutionStatus.RUNNING
             execution.input_payload = dict(input_payload or {})
             self.ai_execution_repository.save(execution)
@@ -331,6 +451,18 @@ class ExecutionOrchestratorService:
             )
             if retry_binding is not None:
                 previous_credential_ref = execution.credential_ref
+                logger.info(
+                    "platform workflow retry scheduled user_id=%s job_id=%s job_item_id=%s execution_id=%s "
+                    "from_credential_ref=%s to_credential_ref=%s retry_attempt=%s error=%s",
+                    user_id,
+                    job.id,
+                    job_item_id,
+                    execution.id,
+                    previous_credential_ref,
+                    retry_binding.credential_ref,
+                    retry_binding.retry_attempt,
+                    _short_text(final_result.error_summary),
+                )
                 execution.provider = retry_binding.provider
                 execution.model = retry_binding.model
                 execution.credential_ref = retry_binding.credential_ref
@@ -372,6 +504,16 @@ class ExecutionOrchestratorService:
                 )
             queued_reason = self._build_queued_execution_reason(final_result)
             if queued_reason is not None:
+                logger.info(
+                    "platform workflow requeued user_id=%s job_id=%s job_item_id=%s execution_id=%s "
+                    "reason_code=%s reason=%s",
+                    user_id,
+                    job.id,
+                    job_item_id,
+                    execution.id,
+                    queued_reason.reason_code,
+                    _short_text(queued_reason.reason_message),
+                )
                 self._requeue_execution_after_busy_result(
                     item=item,
                     execution=execution,
@@ -409,6 +551,18 @@ class ExecutionOrchestratorService:
                 payload={"execution_id": execution.id, "status": execution.status.value},
                 job_item_id=job_item_id,
                 ai_execution_id=execution.id,
+            )
+            logger.info(
+                "platform workflow finished user_id=%s job_id=%s job_item_id=%s execution_id=%s "
+                "execution_status=%s result_status=%s reason_code=%s error=%s",
+                user_id,
+                job.id,
+                job_item_id,
+                execution.id,
+                execution.status,
+                final_result.status,
+                str(final_result.error_payload.get("reason_code", "")).strip(),
+                _short_text(final_result.error_summary),
             )
             return final_result
         finally:
@@ -542,8 +696,10 @@ class ExecutionOrchestratorService:
 
     def refund_deferred_execution(self, *, execution_id: int, now: datetime) -> None:
         if self.quota_billing_service is None:
+            logger.warning("platform deferred execution refund skipped quota billing unavailable execution_id=%s", execution_id)
             return
         self.quota_billing_service.refund(execution_id, now, reason="execution_deferred")
+        logger.info("platform deferred execution refunded execution_id=%s reason=%s", execution_id, "execution_deferred")
 
     def complete_deferred_execution(
         self,
@@ -570,6 +726,14 @@ class ExecutionOrchestratorService:
             job_item_id=job_item_id,
             ai_execution_id=execution.id,
         )
+        logger.info(
+            "platform deferred execution completed user_id=%s job_id=%s job_item_id=%s execution_id=%s reason=%s",
+            user_id,
+            job_id,
+            job_item_id,
+            execution.id,
+            _short_text(reason_message),
+        )
 
     def _resolve_step_execution_binding(
         self,
@@ -580,8 +744,31 @@ class ExecutionOrchestratorService:
         execution_binding: StepExecutionBinding | dict[str, object] | None,
     ) -> StepExecutionBinding:
         if isinstance(execution_binding, dict):
-            return StepExecutionBinding.model_validate(execution_binding)
+            binding = StepExecutionBinding.model_validate(execution_binding)
+            logger.info(
+                "platform step binding provided job_id=%s job_item_id=%s provider=%s model=%s "
+                "credential_ref=%s retry_attempt=%s switched=%s",
+                job_id,
+                job_item_id,
+                binding.provider,
+                binding.model,
+                binding.credential_ref,
+                binding.retry_attempt,
+                binding.switched_credential,
+            )
+            return binding
         if execution_binding is not None:
+            logger.info(
+                "platform step binding provided job_id=%s job_item_id=%s provider=%s model=%s "
+                "credential_ref=%s retry_attempt=%s switched=%s",
+                job_id,
+                job_item_id,
+                execution_binding.provider,
+                execution_binding.model,
+                execution_binding.credential_ref,
+                execution_binding.retry_attempt,
+                execution_binding.switched_credential,
+            )
             return execution_binding
         if user_id is None:
             raise ValueError("user_id is required when execution_binding is not provided")
@@ -604,7 +791,7 @@ class ExecutionOrchestratorService:
                     "latest ai_execution route does not match execution routing result"
                 )
 
-        return StepExecutionBinding(
+        binding = StepExecutionBinding(
             agent_backend=route.agent_backend,
             provider=route.provider,
             model=route.model,
@@ -618,6 +805,19 @@ class ExecutionOrchestratorService:
                 latest_execution.switched_credential if latest_execution is not None else route.switched_credential
             ),
         )
+        logger.info(
+            "platform step binding resolved user_id=%s job_id=%s job_item_id=%s provider=%s model=%s "
+            "credential_ref=%s retry_attempt=%s switched=%s",
+            user_id,
+            job_id,
+            job_item_id,
+            binding.provider,
+            binding.model,
+            binding.credential_ref,
+            binding.retry_attempt,
+            binding.switched_credential,
+        )
+        return binding
 
     def _apply_result(
         self,
@@ -647,6 +847,13 @@ class ExecutionOrchestratorService:
             )
             if self.quota_billing_service is not None:
                 self.quota_billing_service.capture(execution.id, now)
+                logger.info(
+                    "platform execution quota captured user_id=%s job_id=%s job_item_id=%s execution_id=%s",
+                    job.user_id,
+                    job.id,
+                    item.id,
+                    execution.id,
+                )
         else:
             execution.status = (
                 AIExecutionStatus.FAILED_BUSINESS if result.status == "failed_business" else AIExecutionStatus.FAILED_SYSTEM
@@ -660,6 +867,18 @@ class ExecutionOrchestratorService:
             item.error_summary = result.error_summary
             if self.quota_billing_service is not None:
                 self.quota_billing_service.refund(execution.id, now, reason="execution_failed")
+                logger.info(
+                    "platform execution quota refunded user_id=%s job_id=%s job_item_id=%s execution_id=%s "
+                    "reason=%s result_status=%s reason_code=%s error=%s",
+                    job.user_id,
+                    job.id,
+                    item.id,
+                    execution.id,
+                    "execution_failed",
+                    result.status,
+                    str(result.error_payload.get("reason_code", "")).strip(),
+                    _short_text(result.error_summary),
+                )
 
         item.attempt_count += 1
         if item.started_at is None:
@@ -749,6 +968,13 @@ class ExecutionOrchestratorService:
     ) -> None:
         if self.quota_billing_service is not None:
             self.quota_billing_service.refund(execution.id, now, reason="execution_requeued")
+            logger.info(
+                "platform execution quota refunded job_item_id=%s execution_id=%s reason=%s reason_code=%s",
+                item.id,
+                execution.id,
+                "execution_requeued",
+                queued_reason.reason_code,
+            )
         execution.status = AIExecutionStatus.COMPLETED_WITH_REFUND
         execution.result_summary = ""
         execution.result_payload = {}

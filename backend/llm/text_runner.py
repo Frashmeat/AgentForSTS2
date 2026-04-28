@@ -198,7 +198,8 @@ async def _complete_via_codex_cli(prompt: str, llm_cfg: dict, cwd: Optional[Path
     return _decode_output(result.stdout).strip()
 
 
-async def _complete_via_litellm(prompt: str, llm_cfg: dict) -> str:
+async def _complete_via_litellm(prompt: str, llm_cfg: dict, cwd: Optional[Path] = None) -> str:
+    _ = cwd
     response = await litellm.acompletion(
         model=resolve_model(llm_cfg),
         messages=[{"role": "user", "content": prompt}],
@@ -215,7 +216,9 @@ async def _stream_via_litellm(
     user_prompt: str,
     llm_cfg: dict,
     on_chunk: Callable[[str], Awaitable[None]],
+    cwd: Optional[Path] = None,
 ) -> str:
+    _ = cwd
     stream = await litellm.acompletion(
         model=resolve_model(llm_cfg),
         messages=[
