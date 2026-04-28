@@ -16,6 +16,7 @@ import {
   pickAppPath,
   startDetectAppPaths,
   startRefreshKnowledgeTask,
+  testImageGenerationConfig,
   type KnowledgeStatus,
   type MyServerPreferenceView,
   type PlatformQueueWorkerStatus,
@@ -275,6 +276,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
   const [llmKey, setLlmKey] = useState("");
   const [imgKey, setImgKey] = useState("");
   const [imgSecret, setImgSecret] = useState("");
+  const [imageTestLoading, setImageTestLoading] = useState(false);
   const [serverProfiles, setServerProfiles] = useState<PlatformExecutionProfile[]>([]);
   const [serverPreference, setServerPreference] = useState<MyServerPreferenceView | null>(null);
   const [selectedServerProfileId, setSelectedServerProfileId] = useState<number | null>(null);
@@ -770,6 +772,33 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
     } finally {
       if (mountedRef.current) {
         setSaving(false);
+      }
+    }
+  }
+
+  async function handleTestImageGenerationConfig() {
+    if (imageTestLoading) {
+      return;
+    }
+
+    setImageTestLoading(true);
+    setSaveError("");
+    setSaveNotice("");
+
+    try {
+      const result = await testImageGenerationConfig();
+      if (!mountedRef.current) {
+        return;
+      }
+      const sizeText = result.size ? `（${result.size[0]} x ${result.size[1]}）` : "";
+      setSaveNotice(`生图配置测试成功${sizeText}`);
+    } catch (error) {
+      if (mountedRef.current) {
+        setSaveError(resolveErrorMessage(error) || "生图配置测试失败");
+      }
+    } finally {
+      if (mountedRef.current) {
+        setImageTestLoading(false);
       }
     }
   }
@@ -1330,6 +1359,16 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
                     className={inputCls}
                   />
                 </Field>
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => void handleTestImageGenerationConfig()}
+                    disabled={imageTestLoading}
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:border-amber-300 hover:text-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {imageTestLoading ? "测试中…" : "测试生图配置"}
+                  </button>
+                </div>
               </SGroup>
 
         </>
@@ -1443,6 +1482,12 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
                     >
                       清空默认配置
                     </button>
+                    <Link
+                      to="/admin/server-credentials"
+                      className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 transition hover:border-amber-200 hover:text-amber-700"
+                    >
+                      服务器凭据管理
+                    </Link>
                   </div>
                 </>
               )}

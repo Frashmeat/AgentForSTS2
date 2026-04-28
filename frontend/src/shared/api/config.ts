@@ -35,6 +35,11 @@ export interface LocalAiCapabilityStatus {
   image_ai_missing_reasons?: string[];
 }
 
+export interface ImageGenerationTestResult {
+  ok: boolean;
+  size?: [number, number];
+}
+
 export interface PlatformQueueWorkerLeaderEvent {
   event_type: string;
   occurred_at: string;
@@ -137,6 +142,12 @@ export async function pickAppPath(body: PickPathRequest): Promise<PickPathResult
 
 export async function loadLocalAiCapabilityStatus(): Promise<LocalAiCapabilityStatus> {
   return requestJson<LocalAiCapabilityStatus>("/api/config/local_ai_capability_status", {
+    backend: "workstation",
+  });
+}
+
+export async function testImageGenerationConfig(): Promise<ImageGenerationTestResult> {
+  return requestJson<ImageGenerationTestResult>("/api/config/test_imggen", {
     backend: "workstation",
   });
 }

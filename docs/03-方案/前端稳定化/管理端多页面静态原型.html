@@ -1,0 +1,596 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SpireForge 管理端多页面静态原型</title>
+  <style>
+    :root {
+      --bg: #eef2fa;
+      --panel: rgba(255, 255, 255, 0.9);
+      --soft: rgba(245, 247, 255, 0.96);
+      --line: rgba(98, 107, 150, 0.18);
+      --text: #1e293b;
+      --muted: #626b96;
+      --nav: #13132b;
+      --nav-active: #1b1553;
+      --accent-strong: #241953;
+      --accent: #724a91;
+      --shadow: 0 18px 44px rgba(36, 25, 83, 0.12);
+      --green: #15803d;
+      --green-soft: #ecfdf5;
+      --yellow: #a16207;
+      --yellow-soft: #fefce8;
+      --red: #b91c1c;
+      --red-soft: #fef2f2;
+      --blue: #0369a1;
+      --blue-soft: #f0f9ff;
+      font-family: Inter, "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(114, 74, 145, 0.12), transparent 24%),
+        linear-gradient(180deg, #f7f9fe 0%, var(--bg) 100%);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at top left, rgba(114, 74, 145, 0.12), transparent 24%),
+        linear-gradient(180deg, #f7f9fe 0%, var(--bg) 100%);
+    }
+    button, input, select { font: inherit; }
+
+    .shell {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 248px minmax(0, 1fr);
+    }
+
+    .sidebar {
+      background:
+        radial-gradient(circle at top, rgba(255, 255, 255, 0.16), transparent 24%),
+        linear-gradient(180deg, var(--nav), var(--nav-active));
+      color: #e5e7eb;
+      padding: 20px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .brand {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      padding: 6px 8px 16px;
+      border-bottom: 1px solid rgba(255,255,255,.06);
+    }
+
+    .brand-mark {
+      width: 34px;
+      height: 34px;
+      border-radius: 16px;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(145deg, #ffffff, #cfd5f1);
+      color: var(--accent-strong);
+      font-weight: 800;
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.25);
+    }
+
+    .brand-title { font-size: 15px; font-weight: 800; }
+    .brand-subtitle { margin-top: 2px; color: #9ca3af; font-size: 12px; }
+
+    .nav { display: grid; gap: 6px; }
+    .nav-label { padding: 0 8px; margin: 10px 0 2px; color: #9ca3af; font-size: 11px; }
+    .nav-item {
+      min-height: 38px;
+      border: 1px solid transparent;
+      border-radius: 14px;
+      padding: 0 10px;
+      background: transparent;
+      color: #d1d5db;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-align: left;
+      cursor: pointer;
+    }
+    .nav-item:hover { background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.08); }
+    .nav-item.active {
+      background: linear-gradient(180deg, rgba(114, 74, 145, 0.48), rgba(114, 74, 145, 0.22));
+      color: #fff;
+      font-weight: 800;
+      border-color: rgba(202, 198, 248, 0.32);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+    }
+    .nav-icon { width: 20px; text-align: center; font-size: 14px; }
+
+    .side-note {
+      margin-top: auto;
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 18px;
+      padding: 12px;
+      background: rgba(255,255,255,.04);
+      color: #9ca3af;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    .side-note strong { display: block; color: #f9fafb; margin-bottom: 4px; }
+
+    .main { min-width: 0; display: flex; flex-direction: column; }
+    .topbar {
+      min-height: 64px;
+      margin: 18px 18px 0;
+      border-radius: 24px;
+      background: rgba(255,255,255,.78);
+      border: 1px solid var(--line);
+      box-shadow: 0 12px 30px rgba(19, 19, 43, 0.06);
+      backdrop-filter: blur(18px);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 18px 22px;
+      position: sticky;
+      top: 18px;
+      z-index: 3;
+    }
+    .breadcrumb { color: var(--muted); font-size: 13px; display: flex; gap: 8px; align-items: center; }
+    .top-actions { display: flex; gap: 10px; align-items: center; }
+
+    .btn {
+      height: 34px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      padding: 0 12px;
+      font-size: 13px;
+    }
+    .btn.primary {
+      border-color: transparent;
+      background: linear-gradient(135deg, var(--accent-strong), var(--accent));
+      color: #fff;
+      font-weight: 800;
+    }
+    .btn.danger { border-color: #fecaca; color: var(--red); background: var(--red-soft); }
+
+    .content { padding: 18px 28px 28px; display: grid; gap: 14px; }
+    .page-head { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; }
+    h1 { margin: 0; font-size: 24px; line-height: 1.25; letter-spacing: 0; }
+    .lead { display: none; }
+
+    .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    .metric, .panel, .module {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(18px);
+    }
+    .metric { padding: 14px; }
+    .metric-top { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 12px; }
+    .metric-value { margin-top: 10px; font-size: 24px; font-weight: 900; }
+    .metric-note { margin-top: 6px; color: var(--muted); font-size: 12px; }
+
+    .panel { overflow: hidden; }
+    .panel-head {
+      min-height: 54px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      align-items: center;
+    }
+    .panel-title { font-weight: 900; font-size: 15px; }
+    .panel-subtitle { color: var(--muted); font-size: 12px; margin-top: 3px; }
+
+    .grid-2 { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(340px, .9fr); gap: 18px; align-items: start; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+
+    .filters {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(245, 247, 255, 0.96), rgba(238, 242, 250, 0.9));
+      display: grid;
+      grid-template-columns: 1fr 160px 150px auto;
+      gap: 10px;
+      align-items: center;
+    }
+    .input, .select {
+      height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: #fff;
+      color: var(--text);
+      padding: 0 10px;
+      min-width: 0;
+      font-size: 13px;
+    }
+
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { height: 38px; padding: 0 14px; color: var(--muted); background: var(--soft); text-align: left; font-size: 12px; border-bottom: 1px solid var(--line); }
+    td { padding: 12px 14px; border-bottom: 1px solid #edf2f7; vertical-align: middle; }
+    tr.selected td { background: rgba(114, 74, 145, 0.06); }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      border-radius: 999px;
+      padding: 0 9px;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .good { color: var(--green); background: var(--green-soft); }
+    .warn { color: var(--yellow); background: var(--yellow-soft); }
+    .bad { color: var(--red); background: var(--red-soft); }
+    .info { color: var(--blue); background: var(--blue-soft); }
+    .muted { color: var(--muted); }
+    .mono { font-family: "Cascadia Mono", Consolas, monospace; font-size: 12px; }
+
+    .detail { padding: 16px; display: grid; gap: 14px; }
+    .detail-card { border: 1px solid var(--line); border-radius: 18px; padding: 14px; background: rgba(255, 255, 255, 0.72); }
+    .detail-card h3 { margin: 0 0 12px; font-size: 14px; }
+    .kv { display: grid; grid-template-columns: 128px minmax(0,1fr); gap: 8px 10px; font-size: 13px; }
+    .kv dt { color: var(--muted); }
+    .kv dd { margin: 0; min-width: 0; }
+    .notice { padding: 10px 12px; border: 1px solid rgba(114, 74, 145, 0.16); background: rgba(114, 74, 145, 0.08); color: var(--accent-strong); border-radius: 14px; font-size: 12px; line-height: 1.4; }
+    .module { padding: 14px; }
+    .module strong { display: block; font-size: 14px; margin-bottom: 6px; }
+    .module p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+
+    .timeline { padding: 16px; display: grid; gap: 12px; }
+    .event {
+      display: grid;
+      grid-template-columns: 150px minmax(0,1fr) auto;
+      gap: 12px;
+      align-items: start;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #edf2f7;
+      font-size: 13px;
+    }
+    .bar { height: 8px; background: #e5e7eb; border-radius: 999px; overflow: hidden; }
+    .bar span { display: block; height: 100%; background: linear-gradient(135deg, var(--accent-strong), var(--accent)); border-radius: 999px; }
+
+    @media (max-width: 1120px) {
+      .shell { grid-template-columns: 1fr; }
+      .nav { grid-template-columns: repeat(2, minmax(0,1fr)); }
+      .metrics, .grid-2, .grid-3 { grid-template-columns: 1fr; }
+      .filters { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 720px) {
+      .topbar, .page-head { height: auto; flex-direction: column; align-items: stretch; }
+      .topbar { padding: 14px 18px; }
+      .content { padding: 18px; }
+      .nav, .filters { grid-template-columns: 1fr; }
+      table { display: block; overflow-x: auto; }
+      .event { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">SF</div>
+        <div>
+          <div class="brand-title">SpireForge 管理台</div>
+          <div class="brand-subtitle">平台运行与服务器能力管理</div>
+        </div>
+      </div>
+
+      <nav class="nav" aria-label="管理端导航">
+        <div class="nav-label">总览</div>
+        <button class="nav-item active" data-page="overview"><span class="nav-icon">▣</span>管理台首页</button>
+
+        <div class="nav-label">运行与审计</div>
+        <button class="nav-item" data-page="runtime"><span class="nav-icon">◷</span>运行状态</button>
+        <button class="nav-item" data-page="executions"><span class="nav-icon">⌕</span>执行记录</button>
+        <button class="nav-item" data-page="audit"><span class="nav-icon">≋</span>审计事件</button>
+
+        <div class="nav-label">服务器能力</div>
+        <button class="nav-item" data-page="profiles"><span class="nav-icon">⌘</span>执行配置</button>
+        <button class="nav-item" data-page="credentials"><span class="nav-icon">⚿</span>服务器凭据</button>
+        <button class="nav-item" data-page="health"><span class="nav-icon">✓</span>健康检查</button>
+
+        <div class="nav-label">用户与额度</div>
+        <button class="nav-item" data-page="refunds"><span class="nav-icon">◇</span>退款记录</button>
+        <button class="nav-item" data-page="users"><span class="nav-icon">◎</span>用户与额度</button>
+      </nav>
+
+      <div class="side-note">
+        <strong>环境</strong>
+        生产环境 · 节点 01 · 管理员
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="breadcrumb"><span>管理端</span><span>/</span><strong id="crumb">管理台首页</strong></div>
+        <div class="top-actions" id="topActions"></div>
+      </header>
+      <section class="content" id="content"></section>
+    </main>
+  </div>
+
+  <script>
+    const baseActions = `<button class="btn">返回工作台</button><button class="btn">刷新</button>`;
+
+    const pages = {
+      overview: {
+        title: "管理台首页",
+        actions: `${baseActions}<button class="btn primary">运行健康检查</button>`,
+        html: `
+          <div class="page-head">
+            <div>
+              <h1>管理员控制台</h1>
+            </div>
+            <button class="btn primary">新增服务器凭据</button>
+          </div>
+          <section class="metrics">
+            ${metric("队列调度器", "1", "当前节点持有调度权", "运行正常", "good")}
+            ${metric("健康凭据", "5 / 7", "2 个凭据需要复检或修复", "可调度", "good")}
+            ${metric("今日执行", "128", "失败 6 次，已退款 4 次", "最近 24h", "info")}
+            ${metric("待处理风险", "3", "包含限流、认证失败、队列延迟", "需要关注", "warn")}
+          </section>
+          <section class="grid-2">
+            <article class="panel">
+              ${panelHead("待处理事项")}
+              ${table(["级别","对象","原因","负责人","时长"], [
+                [pill("P1","bad"),"旧 OpenAI 凭据","认证失败","管理员","34 分钟"],
+                [pill("P2","warn"),"任务 126","工作区占用","调度器","18 分钟"],
+                [pill("P2","warn"),"Claude 备用凭据","调用限流","管理员","11 分钟"],
+                [pill("P3","info"),"退款 299","等待确认","财务","7 分钟"]
+              ])}
+            </article>
+            <article class="panel">
+              ${panelHead("服务器能力矩阵")}
+              ${table(["执行配置","可用凭据","异常凭据","停用凭据","用户可选"], [
+                ["OpenAI GPT-5","3","0","1",pill("可选","good")],
+                ["Claude Sonnet","1","1","0",pill("可选","good")],
+                ["Seedream","0","1","1",pill("不可选","warn")]
+              ])}
+            </article>
+          </section>
+          ${recentExecutionsPanel()}
+        `
+      },
+      runtime: {
+        title: "运行状态",
+        actions: `${baseActions}<button class="btn primary">重新检测 Worker</button>`,
+        html: `
+          ${head("运行状态", "")}
+          <section class="metrics">
+            ${metric("调度任期", "42", "节点 01 持有", "有效", "good")}
+            ${metric("租约剩余", "26s", "failover window: 45s", "稳定", "good")}
+            ${metric("队列积压", "9", "其中 2 个等待同工作区锁", "轻微", "warn")}
+            ${metric("最近心跳", "3s", "last_tick_reason: poll", "正常", "good")}
+          </section>
+          <section class="grid-2">
+            <article class="panel">
+              ${panelHead("调度事件")}
+              <div class="timeline">
+                ${event("11:42:08", "调度权续租", "节点 01 续租成功", "good")}
+                ${event("11:41:37", "领取任务", "任务 127 进入执行", "info")}
+                ${event("11:40:18", "工作区占用", "任务 126 等待同工作区任务完成", "warn")}
+                ${event("11:38:02", "获得调度权", "节点 01 开始负责队列调度", "good")}
+              </div>
+            </article>
+            <article class="panel">
+              ${panelHead("队列状态", "按状态分布查看阻塞来源")}
+              <div class="detail">
+                <div class="detail-card"><h3>等待调度</h3><div class="bar"><span style="width: 42%"></span></div><p class="muted">9 个任务</p></div>
+                <div class="detail-card"><h3>执行中</h3><div class="bar"><span style="width: 24%"></span></div><p class="muted">5 个任务</p></div>
+                <div class="detail-card"><h3>资源阻塞</h3><div class="bar"><span style="width: 10%"></span></div><p class="muted">2 个任务等待工作区</p></div>
+              </div>
+            </article>
+          </section>
+        `
+      },
+      executions: {
+        title: "执行记录",
+        actions: `${baseActions}<button class="btn primary">查询执行</button>`,
+        html: `
+          ${head("执行记录", "")}
+          <section class="grid-2">
+            <article class="panel">
+              ${panelHead("执行列表", "从平台任务追踪到底层 AI 调用")}
+              <div class="filters"><input class="input" value="任务 127"><select class="select"><option>全部状态</option><option>已成功</option><option>已失败</option></select><select class="select"><option>全部服务商</option><option>OpenAI</option><option>Anthropic</option></select><button class="btn">筛选</button></div>
+              ${table(["执行编号","任务","服务商","模型","状态","重试"], [
+                ["#8842","任务 127","OpenAI","GPT-5",pill("已成功","good"),"0"],
+                ["#8841","任务 126","Anthropic","Claude Sonnet",pill("已失败","bad"),"1"],
+                ["#8839","任务 125","OpenAI","GPT-5",pill("重试中","warn"),"2"]
+              ], true)}
+            </article>
+            ${detailPanel("执行详情", [
+              ["执行编号", "#8842"], ["使用凭据", "OpenAI 主凭据"], ["请求标识", "任务 127 / 子项 1 / v1"], ["输入摘要", "创建卡牌脚本"], ["结果摘要", "成功创建并写入工作区"], ["切换凭据", "否"]
+            ], "这里是排障页，不做凭据编辑，只提供从任务到 AI 调用的事实链。")}
+          </section>
+        `
+      },
+      audit: {
+        title: "审计事件",
+        actions: `${baseActions}<button class="btn primary">导出审计</button>`,
+        html: `
+          ${head("审计事件", "")}
+          <article class="panel">
+            ${panelHead("事件流")}
+            <div class="filters"><input class="input" placeholder="任务编号，可留空"><input class="input" value="调度事件"><input class="input" value="起始事件：0"><button class="btn">查询</button></div>
+            <div class="timeline">
+              ${event("11:42:08", "调度权续租", "节点 01 · 任期 42", "good")}
+              ${event("11:41:39", "AI 执行开始", "执行 #8842 · OpenAI 主凭据", "info")}
+              ${event("11:41:37", "任务子项开始", "任务 127 · 子项 1", "info")}
+              ${event("11:40:18", "工作区占用", "服务器工作区 72", "warn")}
+              ${event("11:39:02", "额度返还", "执行 #8841 · 执行失败", "bad")}
+            </div>
+          </article>
+        `
+      },
+      profiles: {
+        title: "执行配置",
+        actions: `${baseActions}<button class="btn primary">新增配置</button>`,
+        html: `
+          ${head("执行配置", "")}
+          <section class="grid-2">
+            <article class="panel">
+              ${panelHead("执行配置列表")}
+              ${table(["编号","名称","服务商","模型","可用凭据","状态"], [
+                ["1","OpenAI GPT-5","OpenAI","GPT-5","3",pill("已启用","good")],
+                ["2","Claude Sonnet","Anthropic","Claude Sonnet 4","1",pill("已启用","good")],
+                ["3","Seedream","火山引擎","豆包 Seedream","0",pill("已隐藏","warn")]
+              ], true)}
+            </article>
+            ${detailPanel("配置详情", [
+              ["配置编号", "1"], ["显示名称", "OpenAI GPT-5"], ["服务商", "OpenAI"], ["模型", "GPT-5"], ["状态", "已启用"], ["普通用户可见", "是，存在健康凭据"]
+            ], "执行配置页只管模型组合和可见性判断；凭据密钥仍在服务器凭据页维护。")}
+          </section>
+        `
+      },
+      credentials: {
+        title: "服务器凭据",
+        actions: `${baseActions}<button class="btn primary">新增凭据</button>`,
+        html: `
+          ${head("服务器凭据", "")}
+          <section class="grid-2">
+            <article class="panel">
+              ${panelHead("凭据列表")}
+              <div class="filters"><input class="input" value="OpenAI 主凭据"><select class="select"><option>全部执行配置</option></select><select class="select"><option>全部状态</option></select><button class="btn">筛选</button></div>
+              ${table(["凭据","执行配置","服务商 / 认证","优先级","状态","操作"], [
+                ["OpenAI 主凭据<br><span class='muted mono'>官方接口</span>","OpenAI GPT-5","OpenAI / 密钥","10",pill("健康","good"),"<button class='btn'>查看</button>"],
+                ["Claude 备用凭据<br><span class='muted mono'>官方接口</span>","Claude Sonnet","Anthropic / 密钥","20",pill("需复检","warn"),"<button class='btn'>查看</button>"],
+                ["火山测试凭据<br><span class='muted mono'>密钥不回显</span>","Seedream","火山引擎 / 访问密钥","30",pill("已停用","bad"),"<button class='btn'>查看</button>"]
+              ], true)}
+            </article>
+            ${detailPanel("凭据详情", [
+              ["凭据编号", "101"], ["名称", "OpenAI 主凭据"], ["执行配置", "OpenAI GPT-5"], ["认证方式", "密钥"], ["最近检查", "2026-04-28 11:24"], ["问题", "无"]
+            ], "")}
+          </section>
+        `
+      },
+      health: {
+        title: "健康检查",
+        actions: `${baseActions}<button class="btn primary">批量检测</button>`,
+        html: `
+          ${head("健康检查", "")}
+          <section class="metrics">
+            ${metric("健康", "5", "可直接调度", "正常", "good")}
+            ${metric("需复检", "1", "访问密钥需人工确认", "需确认", "warn")}
+            ${metric("认证失败", "1", "密钥已失效", "阻断", "bad")}
+            ${metric("调用限流", "2", "建议降优先级", "观察", "warn")}
+          </section>
+          <article class="panel">
+            ${panelHead("检查结果", "健康检查结果会回写凭据状态")}
+            ${table(["凭据","服务商","检查结果","问题","建议动作","最近检查"], [
+              ["OpenAI 主凭据","OpenAI",pill("健康","good"),"","保持启用","11:24"],
+              ["Claude 备用凭据","Anthropic",pill("调用限流","warn"),"限流","降低优先级或等待恢复","11:20"],
+              ["OpenAI 旧凭据","OpenAI",pill("认证失败","bad"),"密钥无效","禁用并替换密钥","10:58"],
+              ["火山测试凭据","火山引擎",pill("需复检","warn"),"认证方式待支持","人工确认","10:32"]
+            ])}
+          </article>
+        `
+      },
+      refunds: {
+        title: "退款记录",
+        actions: `${baseActions}<button class="btn primary">导出退款</button>`,
+        html: `
+          ${head("退款记录", "")}
+          <article class="panel">
+            ${panelHead("退款列表")}
+            <div class="filters"><input class="input" value="用户 42"><select class="select"><option>全部原因</option><option>执行失败</option></select><select class="select"><option>全部状态</option><option>已返还</option></select><button class="btn">查询</button></div>
+            ${table(["退款编号","用户","执行编号","状态","原因","额度","时间"], [
+              ["#301","用户 42","#8841",pill("已返还","good"),"执行失败","1 点","11:39"],
+              ["#300","用户 58","#8833",pill("已返还","good"),"凭据失败","1 点","10:12"],
+              ["#299","用户 42","#8829",pill("待确认","warn"),"执行超时","1 点","09:46"]
+            ], true)}
+          </article>
+        `
+      },
+      users: {
+        title: "用户与额度",
+        actions: `${baseActions}<button class="btn primary">调整额度</button>`,
+        html: `
+          ${head("用户与额度", "")}
+          <section class="grid-2">
+            <article class="panel">
+              ${panelHead("用户列表", "按邮箱、角色、额度状态筛选")}
+              <div class="filters"><input class="input" value="search@example.com"><select class="select"><option>全部角色</option><option>admin</option><option>user</option></select><select class="select"><option>全部状态</option></select><button class="btn">筛选</button></div>
+              ${table(["用户","角色","剩余额度","任务数","状态","操作"], [
+                ["管理员账号","管理员","999","18",pill("正常","good"),"<button class='btn'>查看</button>"],
+                ["普通用户 A","用户","12","7",pill("正常","good"),"<button class='btn'>查看</button>"],
+                ["受限用户","用户","0","3",pill("受限","warn"),"<button class='btn'>查看</button>"]
+              ], true)}
+            </article>
+            ${detailPanel("额度详情", [
+              ["用户编号", "42"], ["账号", "普通用户 A"], ["剩余额度", "12"], ["本月消耗", "38"], ["最近退款", "#301"], ["异常标记", "无"]
+            ], "这一页不必第一阶段实现完整功能，但应该作为管理端 IA 的明确扩展位置。")}
+          </section>
+        `
+      }
+    };
+
+    function metric(label, value, note, tag, tone) {
+      return `<article class="metric"><div class="metric-top"><span>${label}</span><span class="pill ${tone}">${tag}</span></div><div class="metric-value">${value}</div><div class="metric-note">${note}</div></article>`;
+    }
+
+    function module(title, text) {
+      return `<article class="module"><strong>${title}</strong><p>${text}</p></article>`;
+    }
+
+    function head(title) {
+      return `<div class="page-head"><div><h1>${title}</h1></div></div>`;
+    }
+
+    function panelHead(title) {
+      return `<div class="panel-head"><div><div class="panel-title">${title}</div></div></div>`;
+    }
+
+    function pill(text, tone) {
+      return `<span class="pill ${tone}">${text}</span>`;
+    }
+
+    function table(headers, rows, selectedFirst = false) {
+      return `<table><thead><tr>${headers.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.map((row, i) => `<tr class="${selectedFirst && i === 0 ? "selected" : ""}">${row.map(cell => `<td>${cell}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+    }
+
+    function detailPanel(title, pairs, note) {
+      return `<aside class="panel">${panelHead(title)}` +
+        `<div class="detail"><div class="detail-card"><h3>字段详情</h3><dl class="kv">` +
+        pairs.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("") +
+        `</dl></div><div class="detail-card"><h3>操作区</h3><div class="top-actions"><button class="btn primary">保存</button><button class="btn">重新检查</button><button class="btn danger">禁用</button></div></div></div></aside>`;
+    }
+
+    function event(time, type, text, tone) {
+      return `<div class="event"><div class="mono muted">${time}</div><div><strong>${type}</strong><br><span class="muted">${text}</span></div><span class="pill ${tone}">event</span></div>`;
+    }
+
+    function recentExecutionsPanel() {
+      return `<article class="panel">${panelHead("最近执行与退款")}` +
+        table(["执行编号","任务","模型","结果","额度","摘要"], [
+          ["#8842","任务 127","GPT-5",pill("已成功","good"),"已扣费","生成卡牌脚本并提交工作区"],
+          ["#8841","任务 126","Claude Sonnet",pill("已失败","bad"),"已退款","凭据认证失败，自动返还额度"],
+          ["#8839","任务 125","GPT-5",pill("重试中","warn"),"预占中","主凭据限流，切换备用凭据"]
+        ]) + `</article>`;
+    }
+
+    function render(pageId) {
+      const page = pages[pageId] || pages.overview;
+      document.getElementById("crumb").textContent = page.title;
+      document.getElementById("topActions").innerHTML = page.actions;
+      document.getElementById("content").innerHTML = page.html;
+      document.querySelectorAll(".nav-item").forEach(button => {
+        button.classList.toggle("active", button.dataset.page === pageId);
+      });
+    }
+
+    document.querySelectorAll(".nav-item").forEach(button => {
+      button.addEventListener("click", () => render(button.dataset.page));
+    });
+
+    render("overview");
+  </script>
+</body>
+</html>

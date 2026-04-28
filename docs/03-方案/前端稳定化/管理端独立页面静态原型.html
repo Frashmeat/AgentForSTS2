@@ -1,0 +1,829 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SpireForge 管理端静态原型</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --panel-soft: #f9fafb;
+      --border: #e2e8f0;
+      --text: #172033;
+      --muted: #697386;
+      --muted-2: #94a3b8;
+      --accent: #b45309;
+      --accent-soft: #fff7ed;
+      --good: #15803d;
+      --good-soft: #ecfdf5;
+      --warn: #a16207;
+      --warn-soft: #fefce8;
+      --bad: #b91c1c;
+      --bad-soft: #fef2f2;
+      --info: #0369a1;
+      --info-soft: #f0f9ff;
+      font-family: Inter, "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+      color: var(--text);
+      background: var(--bg);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
+    .shell {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 248px minmax(0, 1fr);
+    }
+
+    .sidebar {
+      background: #111827;
+      color: #e5e7eb;
+      padding: 20px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 8px 16px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .brand-mark {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      background: #f59e0b;
+      color: #111827;
+      font-weight: 800;
+    }
+
+    .brand-title {
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .brand-subtitle {
+      margin-top: 2px;
+      font-size: 12px;
+      color: #9ca3af;
+    }
+
+    .nav-section {
+      display: grid;
+      gap: 6px;
+    }
+
+    .nav-label {
+      padding: 0 8px;
+      margin: 10px 0 2px;
+      font-size: 11px;
+      color: #9ca3af;
+    }
+
+    .nav-item {
+      width: 100%;
+      min-height: 38px;
+      border: 0;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 10px;
+      color: #d1d5db;
+      background: transparent;
+      text-align: left;
+      cursor: default;
+    }
+
+    .nav-item.active {
+      color: #111827;
+      background: #fbbf24;
+      font-weight: 700;
+    }
+
+    .nav-item:not(.active) {
+      border: 1px solid transparent;
+    }
+
+    .nav-item:not(.active):hover {
+      background: rgba(255, 255, 255, 0.06);
+      border-color: rgba(255, 255, 255, 0.08);
+    }
+
+    .nav-icon {
+      width: 20px;
+      text-align: center;
+      font-size: 14px;
+    }
+
+    .sidebar-footer {
+      margin-top: auto;
+      padding: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .sidebar-footer strong {
+      display: block;
+      font-size: 12px;
+      margin-bottom: 5px;
+    }
+
+    .sidebar-footer p {
+      margin: 0;
+      color: #9ca3af;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .main {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .topbar {
+      height: 64px;
+      background: rgba(255, 255, 255, 0.82);
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(12px);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 28px;
+      position: sticky;
+      top: 0;
+      z-index: 5;
+    }
+
+    .breadcrumb {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .top-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .ghost-button,
+    .primary-button,
+    .danger-button {
+      height: 34px;
+      border-radius: 8px;
+      padding: 0 12px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+      font-size: 13px;
+    }
+
+    .primary-button {
+      border-color: #d97706;
+      background: #d97706;
+      color: white;
+      font-weight: 700;
+    }
+
+    .danger-button {
+      border-color: #fecaca;
+      color: var(--bad);
+      background: var(--bad-soft);
+    }
+
+    .content {
+      padding: 26px 28px 34px;
+      display: grid;
+      gap: 20px;
+    }
+
+    .page-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      align-items: flex-start;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    .page-head p {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      max-width: 760px;
+      line-height: 1.6;
+    }
+
+    .status-row {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .metric {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+    }
+
+    .metric-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .metric-value {
+      margin-top: 10px;
+      font-size: 24px;
+      font-weight: 800;
+    }
+
+    .metric-note {
+      margin-top: 6px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.42fr) minmax(360px, 0.9fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .panel-head {
+      min-height: 54px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+    }
+
+    .panel-title {
+      font-size: 15px;
+      font-weight: 800;
+    }
+
+    .panel-subtitle {
+      margin-top: 3px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .filters {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel-soft);
+      display: grid;
+      grid-template-columns: 1fr 160px 150px auto;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .input,
+    .select {
+      height: 34px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: white;
+      padding: 0 10px;
+      color: var(--text);
+      min-width: 0;
+      font-size: 13px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th {
+      height: 38px;
+      padding: 0 14px;
+      color: var(--muted);
+      background: var(--panel-soft);
+      text-align: left;
+      font-size: 12px;
+      font-weight: 700;
+      border-bottom: 1px solid var(--border);
+    }
+
+    td {
+      min-height: 48px;
+      padding: 12px 14px;
+      border-bottom: 1px solid #edf2f7;
+      vertical-align: middle;
+    }
+
+    tr.selected td {
+      background: var(--accent-soft);
+    }
+
+    .mono {
+      font-family: "Cascadia Mono", Consolas, monospace;
+      font-size: 12px;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      border-radius: 999px;
+      padding: 0 9px;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .pill.good {
+      color: var(--good);
+      background: var(--good-soft);
+    }
+
+    .pill.warn {
+      color: var(--warn);
+      background: var(--warn-soft);
+    }
+
+    .pill.bad {
+      color: var(--bad);
+      background: var(--bad-soft);
+    }
+
+    .pill.info {
+      color: var(--info);
+      background: var(--info-soft);
+    }
+
+    .detail {
+      padding: 16px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .detail-card {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+      background: white;
+    }
+
+    .detail-card h3 {
+      margin: 0 0 12px;
+      font-size: 14px;
+    }
+
+    .kv {
+      display: grid;
+      grid-template-columns: 120px minmax(0, 1fr);
+      gap: 8px 10px;
+      font-size: 13px;
+    }
+
+    .kv dt {
+      color: var(--muted);
+    }
+
+    .kv dd {
+      margin: 0;
+      min-width: 0;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .field {
+      display: grid;
+      gap: 5px;
+    }
+
+    .field.full {
+      grid-column: 1 / -1;
+    }
+
+    .field label {
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .notice {
+      padding: 12px 14px;
+      border-radius: 8px;
+      border: 1px solid #bae6fd;
+      background: var(--info-soft);
+      color: #075985;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .module-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .module {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: white;
+      padding: 14px;
+    }
+
+    .module strong {
+      display: block;
+      font-size: 14px;
+      margin-bottom: 6px;
+    }
+
+    .module p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    @media (max-width: 1120px) {
+      .shell {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        position: static;
+      }
+
+      .nav-section {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .grid,
+      .status-row {
+        grid-template-columns: 1fr;
+      }
+
+      .filters {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .topbar,
+      .page-head {
+        flex-direction: column;
+        height: auto;
+        align-items: stretch;
+      }
+
+      .topbar {
+        padding: 14px 18px;
+      }
+
+      .content {
+        padding: 18px;
+      }
+
+      .nav-section,
+      .filters,
+      .form-grid,
+      .module-grid {
+        grid-template-columns: 1fr;
+      }
+
+      table {
+        display: block;
+        overflow-x: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">SF</div>
+        <div>
+          <div class="brand-title">SpireForge 管理台</div>
+          <div class="brand-subtitle">平台运行与服务器能力管理</div>
+        </div>
+      </div>
+
+      <nav class="nav-section" aria-label="管理端导航">
+        <div class="nav-label">总览</div>
+        <button class="nav-item active"><span class="nav-icon">▣</span>管理台首页</button>
+
+        <div class="nav-label">运行与审计</div>
+        <button class="nav-item"><span class="nav-icon">◷</span>运行状态</button>
+        <button class="nav-item"><span class="nav-icon">⌕</span>执行记录</button>
+        <button class="nav-item"><span class="nav-icon">≋</span>审计事件</button>
+
+        <div class="nav-label">服务器能力</div>
+        <button class="nav-item"><span class="nav-icon">⌘</span>执行配置</button>
+        <button class="nav-item"><span class="nav-icon">⚿</span>服务器凭据</button>
+        <button class="nav-item"><span class="nav-icon">✓</span>健康检查</button>
+
+        <div class="nav-label">用户与额度</div>
+        <button class="nav-item"><span class="nav-icon">◇</span>退款记录</button>
+        <button class="nav-item"><span class="nav-icon">◎</span>用户与配额</button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <strong>定位调整</strong>
+        <p>设置页只保留普通用户配置。管理员功能统一进入独立管理台，不再散落在设置面板里。</p>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="breadcrumb">
+          <span>管理端</span>
+          <span>/</span>
+          <strong>服务器能力</strong>
+        </div>
+        <div class="top-actions">
+          <button class="ghost-button">返回工作台</button>
+          <button class="ghost-button">刷新</button>
+          <button class="primary-button">新增服务器凭据</button>
+        </div>
+      </header>
+
+      <section class="content">
+        <div class="page-head">
+          <div>
+            <h1>管理员控制台</h1>
+            <p>把运行审计、执行记录、服务器凭据、退款记录集中到独立后台。设置页不再承载管理员配置，只从用户视角显示服务器模式是否可用。</p>
+          </div>
+          <div class="actions">
+            <button class="ghost-button">导出审计</button>
+            <button class="primary-button">运行健康检查</button>
+          </div>
+        </div>
+
+        <section class="status-row" aria-label="管理端关键状态">
+          <article class="metric">
+            <div class="metric-label"><span>Queue Worker</span><span class="pill good">Leader 正常</span></div>
+            <div class="metric-value">1</div>
+            <div class="metric-note">当前 web runtime 持有租约</div>
+          </article>
+          <article class="metric">
+            <div class="metric-label"><span>健康凭据</span><span class="pill good">可调度</span></div>
+            <div class="metric-value">5 / 7</div>
+            <div class="metric-note">2 个凭据需要复检或修复</div>
+          </article>
+          <article class="metric">
+            <div class="metric-label"><span>今日执行</span><span class="pill info">最近 24h</span></div>
+            <div class="metric-value">128</div>
+            <div class="metric-note">失败 6 次，已退款 4 次</div>
+          </article>
+          <article class="metric">
+            <div class="metric-label"><span>待处理风险</span><span class="pill warn">需要关注</span></div>
+            <div class="metric-value">3</div>
+            <div class="metric-note">包含限流、认证失败、队列延迟</div>
+          </article>
+        </section>
+
+        <section class="module-grid" aria-label="功能分组">
+          <article class="module">
+            <strong>运行与审计</strong>
+            <p>统一查看 Queue Worker、运行时事件、任务执行详情，不再把运行审计页当作管理端首页。</p>
+          </article>
+          <article class="module">
+            <strong>服务器能力</strong>
+            <p>集中维护执行配置、服务器凭据和健康检查，是服务器模式可用性的核心入口。</p>
+          </article>
+          <article class="module">
+            <strong>用户与额度</strong>
+            <p>退款记录先落地；后续用户列表、配额调整、异常账号可以继续扩展到这一组。</p>
+          </article>
+        </section>
+
+        <section class="grid">
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <div class="panel-title">服务器凭据</div>
+                <div class="panel-subtitle">按执行配置筛选，维护 provider、优先级、启用状态和健康状态</div>
+              </div>
+              <button class="primary-button">新增凭据</button>
+            </div>
+            <div class="filters">
+              <input class="input" value="openai-main" aria-label="搜索凭据" />
+              <select class="select" aria-label="执行配置">
+                <option>全部执行配置</option>
+                <option>OpenAI GPT-5</option>
+                <option>Anthropic Sonnet</option>
+              </select>
+              <select class="select" aria-label="健康状态">
+                <option>全部状态</option>
+                <option>healthy</option>
+                <option>degraded</option>
+                <option>disabled</option>
+              </select>
+              <button class="ghost-button">筛选</button>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>凭据</th>
+                  <th>Profile</th>
+                  <th>Provider</th>
+                  <th>优先级</th>
+                  <th>状态</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="selected">
+                  <td><strong>openai-main-a</strong><br><span class="muted mono">base_url: api.openai.com</span></td>
+                  <td>OpenAI GPT-5</td>
+                  <td>openai / api_key</td>
+                  <td>10</td>
+                  <td><span class="pill good">healthy</span></td>
+                  <td><button class="ghost-button">查看</button></td>
+                </tr>
+                <tr>
+                  <td><strong>anthropic-backup</strong><br><span class="muted mono">base_url: api.anthropic.com</span></td>
+                  <td>Claude Sonnet</td>
+                  <td>anthropic / api_key</td>
+                  <td>20</td>
+                  <td><span class="pill warn">degraded</span></td>
+                  <td><button class="ghost-button">查看</button></td>
+                </tr>
+                <tr>
+                  <td><strong>volc-aksk-test</strong><br><span class="muted mono">ak/sk 不回显</span></td>
+                  <td>Seedream</td>
+                  <td>volcengine / ak_sk</td>
+                  <td>30</td>
+                  <td><span class="pill bad">disabled</span></td>
+                  <td><button class="ghost-button">查看</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </article>
+
+          <aside class="panel">
+            <div class="panel-head">
+              <div>
+                <div class="panel-title">凭据详情</div>
+                <div class="panel-subtitle">敏感字段只允许写入，不在页面回显</div>
+              </div>
+              <span class="pill good">healthy</span>
+            </div>
+            <div class="detail">
+              <div class="notice">
+                当前选中凭据可用于服务器模式调度。健康检查成功后，普通用户设置页只需要展示该 profile 可选，不再暴露管理入口。
+              </div>
+
+              <div class="detail-card">
+                <h3>基础信息</h3>
+                <dl class="kv">
+                  <dt>凭据 ID</dt><dd class="mono">101</dd>
+                  <dt>标签</dt><dd>openai-main-a</dd>
+                  <dt>执行配置</dt><dd>OpenAI GPT-5</dd>
+                  <dt>认证方式</dt><dd>api_key</dd>
+                  <dt>最近检查</dt><dd>2026-04-28 11:24</dd>
+                  <dt>错误码</dt><dd class="muted">无</dd>
+                </dl>
+              </div>
+
+              <div class="detail-card">
+                <h3>编辑凭据</h3>
+                <div class="form-grid">
+                  <div class="field">
+                    <label>Provider</label>
+                    <select class="select"><option>openai</option><option>anthropic</option></select>
+                  </div>
+                  <div class="field">
+                    <label>优先级</label>
+                    <input class="input" value="10" />
+                  </div>
+                  <div class="field full">
+                    <label>API Key</label>
+                    <input class="input" value="" placeholder="留空表示保留原密文" />
+                  </div>
+                  <div class="field full">
+                    <label>Base URL</label>
+                    <input class="input" value="https://api.openai.com/v1" />
+                  </div>
+                </div>
+                <div class="actions" style="margin-top: 12px;">
+                  <button class="primary-button">保存</button>
+                  <button class="ghost-button">健康检查</button>
+                  <button class="danger-button">禁用</button>
+                </div>
+              </div>
+            </div>
+          </aside>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <div class="panel-title">最近执行与退款</div>
+              <div class="panel-subtitle">管理员排障入口，和服务器凭据维护属于同一管理台，但页面职责分开</div>
+            </div>
+            <div class="actions">
+              <button class="ghost-button">查看执行记录</button>
+              <button class="ghost-button">查看退款记录</button>
+            </div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>执行 ID</th>
+                <th>任务</th>
+                <th>模型</th>
+                <th>结果</th>
+                <th>额度</th>
+                <th>摘要</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="mono">#8842</td>
+                <td class="mono">job_127</td>
+                <td>gpt-5</td>
+                <td><span class="pill good">succeeded</span></td>
+                <td>已扣费</td>
+                <td class="muted">生成卡牌脚本并提交工作区</td>
+              </tr>
+              <tr>
+                <td class="mono">#8841</td>
+                <td class="mono">job_126</td>
+                <td>claude-sonnet</td>
+                <td><span class="pill bad">failed</span></td>
+                <td>已退款</td>
+                <td class="muted">凭据认证失败，自动返还额度</td>
+              </tr>
+              <tr>
+                <td class="mono">#8839</td>
+                <td class="mono">job_125</td>
+                <td>gpt-5</td>
+                <td><span class="pill warn">retrying</span></td>
+                <td>预占中</td>
+                <td class="muted">主凭据限流，切换备用凭据</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

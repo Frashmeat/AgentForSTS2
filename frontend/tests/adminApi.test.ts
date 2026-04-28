@@ -2,10 +2,17 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  createAdminServerCredential,
+  disableAdminServerCredential,
+  enableAdminServerCredential,
   getAdminExecution,
   listAdminAuditEvents,
+  listAdminExecutionProfiles,
   listAdminJobExecutions,
   listAdminQuotaRefunds,
+  listAdminServerCredentials,
+  runAdminServerCredentialHealthCheck,
+  updateAdminServerCredential,
 } from "../src/shared/api/index.ts";
 
 interface MockResponseInit {
@@ -70,6 +77,62 @@ test("admin optional query params are only appended when present", async () => {
   assert.equal(calls[3].input, "/api/admin/audit/events?job_id=123");
   assert.equal(calls[4].input, "/api/admin/audit/events?event_type_prefix=runtime.queue_worker.");
   assert.equal(calls[5].input, "/api/admin/audit/events?event_type_prefix=runtime.queue_worker.&after_id=88&limit=20");
+});
+
+test("admin server credential endpoints compose resource paths and methods", async () => {
+  const calls: Array<{ input: unknown; init?: RequestInit }> = [];
+  Object.assign(globalThis, {
+    fetch: async (input: unknown, init?: RequestInit) => {
+      calls.push({ input, init });
+      return createMockResponse({
+        ok: true,
+        body: { items: [] },
+      });
+    },
+  });
+
+  await listAdminExecutionProfiles();
+  await listAdminServerCredentials();
+  await listAdminServerCredentials(2);
+  await createAdminServerCredential({
+    execution_profile_id: 1,
+    provider: "openai",
+    auth_type: "api_key",
+    credential: "sk-test",
+    secret: "",
+    base_url: "https://api.openai.com/v1",
+    label: "openai-main",
+    priority: 10,
+    enabled: true,
+  });
+  await updateAdminServerCredential(5, {
+    execution_profile_id: 1,
+    provider: "anthropic",
+    auth_type: "api_key",
+    credential: "",
+    secret: "",
+    base_url: "https://api.anthropic.com",
+    label: "anthropic-main",
+    priority: 20,
+    enabled: true,
+  });
+  await enableAdminServerCredential(5);
+  await disableAdminServerCredential(5);
+  await runAdminServerCredentialHealthCheck(5);
+
+  assert.equal(calls[0].input, "/api/admin/platform/execution-profiles");
+  assert.equal(calls[1].input, "/api/admin/platform/server-credentials");
+  assert.equal(calls[2].input, "/api/admin/platform/server-credentials?execution_profile_id=2");
+  assert.equal(calls[3].input, "/api/admin/platform/server-credentials");
+  assert.equal(calls[3].init?.method, "POST");
+  assert.equal(calls[4].input, "/api/admin/platform/server-credentials/5");
+  assert.equal(calls[4].init?.method, "PUT");
+  assert.equal(calls[5].input, "/api/admin/platform/server-credentials/5/enable");
+  assert.equal(calls[5].init?.method, "POST");
+  assert.equal(calls[6].input, "/api/admin/platform/server-credentials/5/disable");
+  assert.equal(calls[6].init?.method, "POST");
+  assert.equal(calls[7].input, "/api/admin/platform/server-credentials/5/health-check");
+  assert.equal(calls[7].init?.method, "POST");
 });
 
 test("admin endpoints expose typed execution and refund fields", async () => {

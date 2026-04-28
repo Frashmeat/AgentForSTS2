@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, RefreshCcw, ShieldAlert } from "lucide-react";
+import { ArrowLeft, FileSearch, KeyRound, ReceiptText, RefreshCcw, ShieldAlert } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { PlatformPageShell } from "../components/platform/PlatformPageShell.tsx";
@@ -98,6 +98,24 @@ export function AdminRuntimeAuditPage() {
       <span>返回设置</span>
     </Link>
   );
+  const credentialsAction = (
+    <Link to="/admin/server-credentials" className="platform-page-action-link">
+      <KeyRound size={16} />
+      <span>凭据管理</span>
+    </Link>
+  );
+  const executionsAction = (
+    <Link to="/admin/executions" className="platform-page-action-link">
+      <FileSearch size={16} />
+      <span>执行记录</span>
+    </Link>
+  );
+  const refundsAction = (
+    <Link to="/admin/refunds" className="platform-page-action-link">
+      <ReceiptText size={16} />
+      <span>退款记录</span>
+    </Link>
+  );
 
   const filteredEvents = events;
 
@@ -151,6 +169,9 @@ export function AdminRuntimeAuditPage() {
       actions={
         <div className="flex flex-wrap gap-2">
           {backAction}
+          {credentialsAction}
+          {executionsAction}
+          {refundsAction}
           <button
             type="button"
             onClick={() => {

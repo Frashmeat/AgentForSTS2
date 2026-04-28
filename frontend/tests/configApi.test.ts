@@ -10,6 +10,7 @@ import {
   loadPlatformQueueWorkerStatus,
   pickAppPath,
   startDetectAppPaths,
+  testImageGenerationConfig,
   updateAppConfig,
 } from "../src/shared/api/index.ts";
 
@@ -35,6 +36,7 @@ function setWorkstationApiBase() {
   Object.assign(globalThis, {
     __AGENT_THE_SPIRE_API_BASES__: {
       workstation: "http://127.0.0.1:7860",
+      web: "http://127.0.0.1:7870",
     },
   });
 }
@@ -274,8 +276,32 @@ test("loadPlatformQueueWorkerStatus reads queue worker status endpoint", async (
 
   const result = await loadPlatformQueueWorkerStatus();
 
-  assert.equal(calls[0].input, "http://127.0.0.1:7860/api/config/platform_queue_worker_status");
+  assert.equal(calls[0].input, "http://127.0.0.1:7870/api/platform/queue-worker-status");
   assert.equal(calls[0].init?.method, "GET");
   assert.equal(result.available, true);
   assert.equal(result.leader_epoch, 3);
+});
+
+test("testImageGenerationConfig reads image generation smoke test endpoint", async () => {
+  const calls: Array<{ input: unknown; init?: RequestInit }> = [];
+  setWorkstationApiBase();
+  Object.assign(globalThis, {
+    fetch: async (input: unknown, init?: RequestInit) => {
+      calls.push({ input, init });
+      return createMockResponse({
+        ok: true,
+        body: {
+          ok: true,
+          size: [1024, 1024],
+        },
+      });
+    },
+  });
+
+  const result = await testImageGenerationConfig();
+
+  assert.equal(calls[0].input, "http://127.0.0.1:7860/api/config/test_imggen");
+  assert.equal(calls[0].init?.method, "GET");
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.size, [1024, 1024]);
 });
