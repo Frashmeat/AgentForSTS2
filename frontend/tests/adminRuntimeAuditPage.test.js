@@ -7,16 +7,18 @@ function readSource(path) {
 }
 
 test("admin runtime audit page uses admin audit api and exposes runtime event copy", () => {
-  const pageSource = readSource("../src/pages/AdminRuntimeAuditPage.tsx");
+  const auditSource = readSource("../src/pages/admin/AdminAuditPage.tsx");
+  const runtimeSource = readSource("../src/pages/admin/AdminRuntimePage.tsx");
   const appSource = readSource("../src/App.tsx");
-  const settingsSource = readSource("../src/components/SettingsPanel.tsx");
 
-  assert.match(pageSource, /listAdminAuditEvents/);
-  assert.match(pageSource, /job_id = 0/);
-  assert.match(pageSource, /运行时审计/);
-  assert.match(pageSource, /仅 queue worker/);
-  assert.match(pageSource, /事件类型统计/);
-  assert.match(pageSource, /DEFAULT_AUDIT_LIMIT/);
+  assert.match(auditSource, /listAdminAuditEvents/);
+  assert.match(auditSource, /审计事件/);
+  assert.match(auditSource, /仅队列 Worker/);
+  assert.match(auditSource, /DEFAULT_AUDIT_LIMIT/);
+  assert.match(runtimeSource, /loadPlatformQueueWorkerStatus/);
+  assert.match(runtimeSource, /运行状态/);
+  assert.match(appSource, /path="runtime"/);
+  assert.match(appSource, /path="audit"/);
   assert.match(appSource, /path="\/admin\/runtime-audit"/);
-  assert.match(settingsSource, /打开管理员审计页/);
+  assert.match(appSource, /to="\/admin\/audit"/);
 });

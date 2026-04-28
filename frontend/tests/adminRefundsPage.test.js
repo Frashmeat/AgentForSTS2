@@ -8,19 +8,24 @@ function readSource(path) {
 
 test("admin refunds page is routed and linked from admin audit page", () => {
   const appSource = readSource("../src/App.tsx");
-  const auditSource = readSource("../src/pages/AdminRuntimeAuditPage.tsx");
+  const layoutSource = readSource("../src/pages/admin/AdminLayout.tsx");
 
-  assert.equal(existsSync(new URL("../src/pages/AdminRefundsPage.tsx", import.meta.url)), true);
+  assert.equal(existsSync(new URL("../src/pages/admin/AdminRefundsPage.tsx", import.meta.url)), true);
   assert.match(appSource, /AdminRefundsPage/);
-  assert.match(appSource, /path="\/admin\/refunds"/);
-  assert.match(auditSource, /\/admin\/refunds/);
+  assert.match(appSource, /path="refunds"/);
+  assert.match(layoutSource, /\/admin\/refunds/);
 });
 
-test("admin refunds page uses refund API and user_id filter", () => {
-  const pageSource = readSource("../src/pages/AdminRefundsPage.tsx");
+test("admin refunds page uses refund API and business field labels", () => {
+  const pageSource = readSource("../src/pages/admin/AdminRefundsPage.tsx");
 
   assert.match(pageSource, /listAdminQuotaRefunds/);
-  assert.match(pageSource, /user_id/);
-  assert.match(pageSource, /refund_reason/);
-  assert.match(pageSource, /charge_status/);
+  assert.match(pageSource, /用户编号/);
+  assert.match(pageSource, /用户/);
+  assert.match(pageSource, /执行编号/);
+  assert.match(pageSource, /状态/);
+  assert.match(pageSource, /原因/);
+  assert.match(pageSource, /额度/);
+  assert.match(pageSource, /时间/);
+  assert.match(pageSource, /formatAdminRefundReason/);
 });

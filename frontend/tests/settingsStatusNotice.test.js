@@ -32,7 +32,7 @@ test("settings panel replaces inline warning blocks with shared status notices",
   assert.match(source, /<StatusNotice\s+title="服务器模式暂不可用"/);
   assert.match(source, /<StatusNotice\s+title="登录后可管理服务器模式"/);
   assert.match(source, /<StatusNotice\s+title="默认服务器配置已不可用"/);
-  assert.match(source, /<StatusNotice title="平台队列 Worker 诊断失败"/);
+  assert.doesNotMatch(source, /平台队列 Worker 诊断失败/);
   assert.doesNotMatch(source, /pathNotes\.map/);
   assert.doesNotMatch(source, /knowledgeNotes\.map/);
 });

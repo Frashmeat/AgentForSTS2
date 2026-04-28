@@ -15,10 +15,16 @@ import { VerifyEmailPage } from "./features/auth/VerifyEmailPage.tsx";
 import { UserCenterJobDetailPage } from "./features/user-center/job-detail-page.tsx";
 import { UserCenterPage } from "./features/user-center/page.tsx";
 import type { WorkspaceTab } from "./features/platform-run/types.ts";
-import { AdminRuntimeAuditPage } from "./pages/AdminRuntimeAuditPage.tsx";
-import { AdminExecutionsPage } from "./pages/AdminExecutionsPage.tsx";
-import { AdminRefundsPage } from "./pages/AdminRefundsPage.tsx";
-import { AdminServerCredentialsPage } from "./pages/AdminServerCredentialsPage.tsx";
+import { AdminCredentialHealthPage } from "./pages/admin/AdminCredentialHealthPage.tsx";
+import { AdminAuditPage } from "./pages/admin/AdminAuditPage.tsx";
+import { AdminExecutionsPage } from "./pages/admin/AdminExecutionsPage.tsx";
+import { AdminExecutionProfilesPage } from "./pages/admin/AdminExecutionProfilesPage.tsx";
+import { AdminLayout } from "./pages/admin/AdminLayout.tsx";
+import { AdminOverviewPage } from "./pages/admin/AdminOverviewPage.tsx";
+import { AdminRefundsPage } from "./pages/admin/AdminRefundsPage.tsx";
+import { AdminRuntimePage } from "./pages/admin/AdminRuntimePage.tsx";
+import { AdminServerCredentialsPage } from "./pages/admin/AdminServerCredentialsPage.tsx";
+import { AdminUsersPage } from "./pages/admin/AdminUsersPage.tsx";
 import {
   buildSettingsPath,
   buildWorkspacePath,
@@ -167,20 +173,22 @@ export default function App() {
           element={isAuthAvailable ? <UserCenterJobDetailPage /> : buildPlatformAuthUnavailableElement("当前环境未启用用户中心", "这是本机工作站模式。只有接入独立 Web 平台服务后，平台任务详情才可用。")}
         />
         <Route
+          path="/admin"
+          element={isAuthAvailable ? <AdminLayout /> : buildPlatformAuthUnavailableElement("当前环境未启用管理台", "这是本机工作站模式。只有接入独立 Web 平台服务后，统一管理台才可用。")}
+        >
+          <Route index element={<AdminOverviewPage />} />
+          <Route path="runtime" element={<AdminRuntimePage />} />
+          <Route path="executions" element={<AdminExecutionsPage />} />
+          <Route path="audit" element={<AdminAuditPage />} />
+          <Route path="execution-profiles" element={<AdminExecutionProfilesPage />} />
+          <Route path="server-credentials" element={<AdminServerCredentialsPage />} />
+          <Route path="credential-health" element={<AdminCredentialHealthPage />} />
+          <Route path="refunds" element={<AdminRefundsPage />} />
+          <Route path="users" element={<AdminUsersPage />} />
+        </Route>
+        <Route
           path="/admin/runtime-audit"
-          element={isAuthAvailable ? <AdminRuntimeAuditPage /> : buildPlatformAuthUnavailableElement("当前环境未启用管理员审计", "这是本机工作站模式。只有接入独立 Web 平台服务后，管理员运行时审计能力才可用。")}
-        />
-        <Route
-          path="/admin/server-credentials"
-          element={isAuthAvailable ? <AdminServerCredentialsPage /> : buildPlatformAuthUnavailableElement("当前环境未启用服务器凭据管理", "这是本机工作站模式。只有接入独立 Web 平台服务后，管理员服务器凭据管理才可用。")}
-        />
-        <Route
-          path="/admin/executions"
-          element={isAuthAvailable ? <AdminExecutionsPage /> : buildPlatformAuthUnavailableElement("当前环境未启用执行记录", "这是本机工作站模式。只有接入独立 Web 平台服务后，管理员执行记录才可用。")}
-        />
-        <Route
-          path="/admin/refunds"
-          element={isAuthAvailable ? <AdminRefundsPage /> : buildPlatformAuthUnavailableElement("当前环境未启用退款记录", "这是本机工作站模式。只有接入独立 Web 平台服务后，管理员退款记录才可用。")}
+          element={<Navigate to="/admin/audit" replace />}
         />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

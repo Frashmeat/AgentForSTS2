@@ -12,14 +12,12 @@ import {
   listPlatformExecutionProfiles,
   loadAppConfig,
   loadKnowledgeStatus,
-  loadPlatformQueueWorkerStatus,
   pickAppPath,
   startDetectAppPaths,
   startRefreshKnowledgeTask,
   testImageGenerationConfig,
   type KnowledgeStatus,
   type MyServerPreferenceView,
-  type PlatformQueueWorkerStatus,
   updateAppConfig,
   updateMyServerPreferences,
 } from "../shared/api/index.ts";
@@ -137,102 +135,6 @@ function pickInitialServerProfileId(
     ?? null;
 }
 
-function formatDiagnosticTime(value?: string | null): string {
-  const text = String(value ?? "").trim();
-  if (!text) {
-    return "—";
-  }
-  const date = new Date(text);
-  if (Number.isNaN(date.getTime())) {
-    return text;
-  }
-  return date.toLocaleString("zh-CN", { hour12: false });
-}
-
-function formatQueueWorkerUnavailableReason(reason?: string): string {
-  switch (String(reason ?? "").trim()) {
-    case "app_state_missing":
-      return "当前窗口未挂上应用状态，无法读取 queue worker。";
-    case "queue_worker_not_registered":
-      return "当前运行角色未注册平台 queue worker。";
-    default:
-      return "当前未暴露 queue worker 运行态。";
-  }
-}
-
-function formatLeaderEventLabel(eventType?: string): string {
-  switch (String(eventType ?? "").trim()) {
-    case "leader_acquired":
-      return "成为 Leader";
-    case "leader_taken_over":
-      return "接管 Leader";
-    case "leader_observed_other":
-      return "观察到其他 Leader";
-    case "leader_lost":
-      return "失去 Leader";
-    case "leader_released":
-      return "主动释放 Leader";
-    case "leader_waiting_for_failover":
-      return "等待 Failover";
-    default:
-      return String(eventType ?? "").trim() || "未知事件";
-  }
-}
-
-function getLeaderEventTone(eventType?: string): "default" | "good" | "warn" {
-  switch (String(eventType ?? "").trim()) {
-    case "leader_acquired":
-    case "leader_taken_over":
-      return "good";
-    case "leader_lost":
-    case "leader_waiting_for_failover":
-    case "leader_observed_other":
-      return "warn";
-    default:
-      return "default";
-  }
-}
-
-function DiagnosticField({
-  label,
-  value,
-  tone = "default",
-  breakAll = false,
-}: {
-  label: string;
-  value: React.ReactNode;
-  tone?: "default" | "good" | "warn";
-  breakAll?: boolean;
-}) {
-  const valueCls =
-    tone === "good"
-      ? "text-emerald-700"
-      : tone === "warn"
-        ? "text-amber-700"
-        : "text-slate-700";
-  return (
-    <p className="text-xs text-slate-500">
-      {label}：
-      <span className={`ml-1 font-semibold ${valueCls} ${breakAll ? "break-all" : ""}`}>{value}</span>
-    </p>
-  );
-}
-
-function DiagnosticCard({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 space-y-2">
-      <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">{title}</p>
-      {children}
-    </div>
-  );
-}
-
 interface SettingsPanelProps {
   mode?: "drawer" | "page";
   onClose?: () => void;
@@ -285,9 +187,6 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
   const [serverError, setServerError] = useState("");
   const [serverNotice, setServerNotice] = useState("");
   const [serverSelectionDirty, setServerSelectionDirty] = useState(false);
-  const [queueWorkerStatus, setQueueWorkerStatus] = useState<PlatformQueueWorkerStatus | null>(null);
-  const [queueWorkerLoading, setQueueWorkerLoading] = useState(false);
-  const [queueWorkerError, setQueueWorkerError] = useState("");
   const mountedRef = useRef(false);
   const lastSavedConfigSignatureRef = useRef("");
   const configSaveSignature = cfg ? buildConfigSaveSignature(cfg, llmKey, imgKey, imgSecret) : "";
@@ -471,38 +370,6 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
       clearTimeout(timer);
     };
   }, [activeTab, isAuthAvailable, isAuthenticated, selectedServerProfileId, serverSaving, serverSelectionDirty]);
-
-  useEffect(() => {
-    if (activeTab !== "server") {
-      return;
-    }
-
-    let cancelled = false;
-    setQueueWorkerLoading(true);
-    setQueueWorkerError("");
-
-    void loadPlatformQueueWorkerStatus()
-      .then((status) => {
-        if (!cancelled) {
-          setQueueWorkerStatus(status);
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setQueueWorkerStatus(null);
-          setQueueWorkerError(resolveErrorMessage(error));
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setQueueWorkerLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [activeTab]);
 
   useEffect(() => {
     if (!detectionTaskId) {
@@ -966,28 +833,6 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
     } finally {
       if (mountedRef.current) {
         setServerSaving(false);
-      }
-    }
-  }
-
-  async function refreshQueueWorkerStatus() {
-    setQueueWorkerLoading(true);
-    setQueueWorkerError("");
-    try {
-      const status = await loadPlatformQueueWorkerStatus();
-      if (!mountedRef.current) {
-        return;
-      }
-      setQueueWorkerStatus(status);
-    } catch (error) {
-      if (!mountedRef.current) {
-        return;
-      }
-      setQueueWorkerStatus(null);
-      setQueueWorkerError(resolveErrorMessage(error));
-    } finally {
-      if (mountedRef.current) {
-        setQueueWorkerLoading(false);
       }
     }
   }
@@ -1482,137 +1327,8 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
                     >
                       清空默认配置
                     </button>
-                    <Link
-                      to="/admin/server-credentials"
-                      className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 transition hover:border-amber-200 hover:text-amber-700"
-                    >
-                      服务器凭据管理
-                    </Link>
                   </div>
                 </>
-              )}
-            </SGroup>
-
-            <SGroup icon={<Search size={14} />} title="平台队列 Worker 诊断">
-              {queueWorkerLoading ? (
-                <p className="text-sm text-slate-500">正在读取 queue worker 状态…</p>
-              ) : queueWorkerError ? (
-                <StatusNotice title="平台队列 Worker 诊断失败" tone="error" message={queueWorkerError} />
-              ) : !queueWorkerStatus?.available ? (
-                <StatusNotice title="当前未暴露队列 Worker 运行态" tone="warning" message={formatQueueWorkerUnavailableReason(queueWorkerStatus?.reason)} />
-              ) : (
-                <div className="space-y-3">
-                  <DiagnosticCard title="Leader 概览">
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      <DiagnosticField label="当前实例" value={queueWorkerStatus.owner_id || "—"} breakAll />
-                      <DiagnosticField label="当前角色" value={queueWorkerStatus.owner_scope || "—"} />
-                      <DiagnosticField
-                        label="Leader 状态"
-                        value={queueWorkerStatus.is_leader ? "当前实例是 leader" : "当前实例不是 leader"}
-                        tone={queueWorkerStatus.is_leader ? "good" : "default"}
-                      />
-                      <DiagnosticField label="Leader Epoch" value={queueWorkerStatus.leader_epoch ?? "—"} />
-                      <DiagnosticField label="最近 Tick" value={queueWorkerStatus.last_tick_reason || "—"} />
-                      <DiagnosticField label="最近 Tick 时间" value={formatDiagnosticTime(queueWorkerStatus.last_tick_at)} />
-                      <DiagnosticField label="最近获得 Leader" value={formatDiagnosticTime(queueWorkerStatus.last_leader_acquired_at)} />
-                      <DiagnosticField label="最近失去 Leader" value={formatDiagnosticTime(queueWorkerStatus.last_leader_lost_at)} />
-                    </div>
-                  </DiagnosticCard>
-
-                  <DiagnosticCard title="切换窗口">
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      <DiagnosticField
-                        label="Failover 窗口"
-                        value={typeof queueWorkerStatus.failover_window_seconds === "number" ? `${queueWorkerStatus.failover_window_seconds}s` : "—"}
-                      />
-                      <DiagnosticField
-                        label="Retry Grace"
-                        value={typeof queueWorkerStatus.leader_retry_grace_seconds === "number" ? `${queueWorkerStatus.leader_retry_grace_seconds}s` : "—"}
-                      />
-                      <DiagnosticField
-                        label="下次重试不早于"
-                        value={formatDiagnosticTime(queueWorkerStatus.next_leader_retry_not_before)}
-                        tone={queueWorkerStatus.next_leader_retry_not_before ? "warn" : "default"}
-                      />
-                    </div>
-                    <div className="border-t border-slate-100 pt-2">
-                      <p className="text-[11px] leading-5 text-slate-500">
-                        当前实例如果不是 leader，会根据 leader lease 的过期时间进入短退避窗口，避免每个 tick 都去竞争租约。
-                      </p>
-                    </div>
-                  </DiagnosticCard>
-
-                  <DiagnosticCard title="当前有效 Leader">
-                    {queueWorkerStatus.current_leader ? (
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        <DiagnosticField label="Owner" value={queueWorkerStatus.current_leader.owner_id} breakAll />
-                        <DiagnosticField label="Epoch" value={queueWorkerStatus.current_leader.leader_epoch ?? "—"} />
-                        <DiagnosticField label="Claimed At" value={formatDiagnosticTime(queueWorkerStatus.current_leader.claimed_at)} />
-                        <DiagnosticField label="Renewed At" value={formatDiagnosticTime(queueWorkerStatus.current_leader.renewed_at)} />
-                        <div className="sm:col-span-2">
-                          <DiagnosticField label="Expires At" value={formatDiagnosticTime(queueWorkerStatus.current_leader.expires_at)} />
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="text-sm text-slate-500">当前没有读取到有效的 leader lease。</p>
-                    )}
-                  </DiagnosticCard>
-
-                  <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 space-y-2">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">最近 Leader 事件</p>
-                      <div className="flex flex-wrap gap-2">
-                        <Link
-                          to="/admin/runtime-audit"
-                          className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 transition hover:border-amber-200 hover:text-amber-700"
-                        >
-                          打开管理员审计页
-                        </Link>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            void refreshQueueWorkerStatus();
-                          }}
-                          className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 transition hover:border-amber-200 hover:text-amber-700"
-                        >
-                          刷新诊断
-                        </button>
-                      </div>
-                    </div>
-                    {queueWorkerStatus.recent_leader_events?.length ? (
-                      <div className="space-y-2">
-                        {[...queueWorkerStatus.recent_leader_events]
-                          .sort((left, right) => {
-                            const leftTime = new Date(left.occurred_at).getTime();
-                            const rightTime = new Date(right.occurred_at).getTime();
-                            return rightTime - leftTime;
-                          })
-                          .map((event, index) => {
-                            const tone = getLeaderEventTone(event.event_type);
-                            const titleCls =
-                              tone === "good"
-                                ? "text-emerald-700"
-                                : tone === "warn"
-                                  ? "text-amber-700"
-                                  : "text-slate-700";
-                            return (
-                          <div key={`${event.occurred_at}-${event.event_type}-${index}`} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-                              <span className={`font-semibold ${titleCls}`}>{formatLeaderEventLabel(event.event_type)}</span>
-                              <span className="text-slate-500">{formatDiagnosticTime(event.occurred_at)}</span>
-                              <span className="text-slate-500">epoch {event.leader_epoch ?? "—"}</span>
-                            </div>
-                            <p className="mt-1 break-all text-xs text-slate-500">{event.owner_id}</p>
-                            {event.detail ? <p className="mt-1 text-xs text-slate-500">{event.detail}</p> : null}
-                          </div>
-                            );
-                          })}
-                      </div>
-                    ) : (
-                      <p className="text-sm text-slate-500">当前还没有记录到 leader 切换事件。</p>
-                    )}
-                  </div>
-                </div>
               )}
             </SGroup>
           </div>

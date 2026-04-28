@@ -19,9 +19,12 @@ export interface AdminExecutionDetail extends AdminExecutionListItem {
 }
 
 export interface AdminQuotaRefundItem {
+  user_id?: number;
   ai_execution_id: number;
   charge_status: string;
   refund_reason: string;
+  quota_amount?: number;
+  created_at?: string;
 }
 
 export interface AdminExecutionProfileListItem {
