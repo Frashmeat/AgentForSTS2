@@ -87,6 +87,7 @@ def _dispatch_payload() -> dict:
 
 def test_workstation_platform_router_is_registered_for_workstation_role():
     assert "routers.workstation_platform" in WORKSTATION_ROUTER_MODULES
+    assert "routers.workstation_capabilities" in WORKSTATION_ROUTER_MODULES
 
 
 def test_workstation_execution_dispatch_requires_control_token(client: TestClient):

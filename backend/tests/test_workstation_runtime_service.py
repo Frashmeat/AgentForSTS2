@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import json
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -28,6 +29,20 @@ class FakeProcess:
         return 0
 
 
+class FakeResponse:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self._payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def read(self) -> bytes:
+        return json.dumps(self._payload).encode("utf-8")
+
+
 def _settings(**platform_execution) -> Settings:
     return Settings.from_dict({"platform_execution": platform_execution})
 
@@ -50,6 +65,7 @@ def test_workstation_runtime_manager_starts_with_generated_control_token(monkeyp
         cwd=tmp_path,
         popen_factory=fake_popen,
         token_factory=lambda: "generated-token",
+        urlopen=lambda *args, **kwargs: FakeResponse({"generation": {"text_generation_available": True}}),
     )
 
     status = manager.ensure_started().model_dump()
@@ -62,6 +78,8 @@ def test_workstation_runtime_manager_starts_with_generated_control_token(monkeyp
     assert status["managed"] is True
     assert status["running"] is True
     assert status["pid"] == 4321
+    assert status["capabilities"]["available"] is True
+    assert status["capabilities"]["generation"]["text_generation_available"] is True
 
 
 def test_workstation_runtime_manager_reuses_running_process(tmp_path):

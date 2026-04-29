@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import secrets
 import subprocess
 import sys
@@ -8,6 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 from urllib.parse import urlparse
+import urllib.error
+import urllib.request
 
 from app.shared.infra.config.settings import Settings
 
@@ -24,6 +27,7 @@ class WorkstationRuntimeStatus:
     control_token_env: str
     pid: int | None = None
     last_error: str = ""
+    capabilities: dict[str, object] | None = None
 
     def model_dump(self) -> dict[str, object]:
         return {
@@ -35,6 +39,7 @@ class WorkstationRuntimeStatus:
             "control_token_env": self.control_token_env,
             "pid": self.pid,
             "last_error": self.last_error,
+            "capabilities": self.capabilities,
         }
 
 
@@ -46,11 +51,13 @@ class WorkstationRuntimeManager:
         cwd: Path,
         popen_factory: Callable[..., subprocess.Popen] = subprocess.Popen,
         token_factory: Callable[[], str] | None = None,
+        urlopen: Callable[..., object] = urllib.request.urlopen,
     ) -> None:
         self._settings = settings
         self._cwd = cwd
         self._popen_factory = popen_factory
         self._token_factory = token_factory or (lambda: secrets.token_urlsafe(32))
+        self._urlopen = urlopen
         self._process: subprocess.Popen | None = None
         self._last_error = ""
 
@@ -103,6 +110,7 @@ class WorkstationRuntimeManager:
             control_token_env=self._control_token_env(),
             pid=getattr(self._process, "pid", None) if self._process is not None else None,
             last_error=self._last_error,
+            capabilities=self._fetch_capabilities() if running else None,
         )
 
     def _is_process_running(self) -> bool:
@@ -140,3 +148,28 @@ class WorkstationRuntimeManager:
             "--port",
             str(port),
         ]
+
+    def _fetch_capabilities(self) -> dict[str, object]:
+        token = os.environ.get(self._control_token_env(), "").strip()
+        if not token:
+            return {"available": False, "reason": "workstation_control_token_missing"}
+        request = urllib.request.Request(
+            url=f"{str(self.config.get('workstation_url', 'http://127.0.0.1:7860')).rstrip('/')}/api/workstation/capabilities",
+            method="GET",
+            headers={"X-ATS-Workstation-Token": token},
+        )
+        try:
+            response = self._urlopen(
+                request,
+                timeout=int(self.config.get("dispatch_timeout_seconds", 10)),
+            )
+            with response:
+                raw = response.read()
+            payload = json.loads(raw.decode("utf-8") if raw else "{}")
+            if isinstance(payload, dict):
+                return {"available": True, **payload}
+            return {"available": False, "reason": "invalid_capabilities_payload"}
+        except urllib.error.HTTPError as exc:
+            return {"available": False, "reason": f"http_{exc.code}"}
+        except Exception as exc:
+            return {"available": False, "reason": str(exc)[:120]}
