@@ -26,11 +26,15 @@ class WorkstationExecutionStore:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._results: dict[str, WorkstationExecutionPollResult] = {}
+        self._text_semaphore: threading.Semaphore | None = None
+        self._code_semaphore: threading.Semaphore | None = None
+        self._workspace_locks: dict[str, threading.Lock] = {}
 
     def submit(
         self,
         request: WorkstationExecutionDispatchRequest,
         executor: WorkstationPlatformExecutor,
+        settings: Settings,
     ) -> WorkstationExecutionDispatchAccepted:
         workstation_execution_id = f"ws-exec-{request.execution_id}"
         result = WorkstationExecutionPollResult(
@@ -42,7 +46,7 @@ class WorkstationExecutionStore:
             self._results[workstation_execution_id] = result
         thread = threading.Thread(
             target=self._execute,
-            args=(request, executor),
+            args=(request, executor, settings),
             name=f"workstation-platform-{workstation_execution_id}",
             daemon=True,
         )
@@ -60,6 +64,7 @@ class WorkstationExecutionStore:
         self,
         request: WorkstationExecutionDispatchRequest,
         executor: WorkstationPlatformExecutor,
+        settings: Settings,
     ) -> None:
         workstation_execution_id = f"ws-exec-{request.execution_id}"
         with self._lock:
@@ -68,9 +73,45 @@ class WorkstationExecutionStore:
                 status="running",
                 step_id="workflow.dispatch",
             )
-        result = executor.execute(request)
+        semaphore = self._semaphore_for(request, settings)
+        workspace_lock = self._workspace_lock_for(request)
+        with semaphore:
+            if workspace_lock is None:
+                result = executor.execute(request)
+            else:
+                with workspace_lock:
+                    result = executor.execute(request)
         with self._lock:
             self._results[workstation_execution_id] = result
+
+    def _semaphore_for(
+        self,
+        request: WorkstationExecutionDispatchRequest,
+        settings: Settings,
+    ) -> threading.Semaphore:
+        platform_execution = settings.platform_execution
+        if _is_code_execution(request):
+            with self._lock:
+                if self._code_semaphore is None:
+                    self._code_semaphore = threading.Semaphore(
+                        max(1, int(platform_execution.get("max_concurrent_code", 2)))
+                    )
+                return self._code_semaphore
+        with self._lock:
+            if self._text_semaphore is None:
+                self._text_semaphore = threading.Semaphore(
+                    max(1, int(platform_execution.get("max_concurrent_text", 2)))
+                )
+            return self._text_semaphore
+
+    def _workspace_lock_for(self, request: WorkstationExecutionDispatchRequest) -> threading.Lock | None:
+        server_project_ref = str(request.input_payload.get("server_project_ref", "")).strip()
+        if not server_project_ref:
+            return None
+        with self._lock:
+            if server_project_ref not in self._workspace_locks:
+                self._workspace_locks[server_project_ref] = threading.Lock()
+            return self._workspace_locks[server_project_ref]
 
 
 def _settings(request: Request) -> Settings:
@@ -124,6 +165,15 @@ def _executor(request: Request) -> WorkstationPlatformExecutor:
     return executor
 
 
+def _is_code_execution(request: WorkstationExecutionDispatchRequest) -> bool:
+    if request.item_type == "custom_code":
+        return True
+    return any(
+        str(request.input_payload.get(key, "")).strip()
+        for key in ("server_project_ref", "server_workspace_root", "deploy_target")
+    )
+
+
 @router.post("/executions")
 def dispatch_execution(
     request: Request,
@@ -132,7 +182,7 @@ def dispatch_execution(
 ):
     _require_control_token(request, x_ats_workstation_token)
     dispatch_request = WorkstationExecutionDispatchRequest.model_validate(body)
-    return _store(request).submit(dispatch_request, _executor(request)).model_dump()
+    return _store(request).submit(dispatch_request, _executor(request), _settings(request)).model_dump()
 
 
 @router.get("/executions/{workstation_execution_id}")
