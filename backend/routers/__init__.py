@@ -10,6 +10,7 @@ WORKSTATION_ROUTER_MODULES = (
     "routers.mod_analyzer",
     "routers.build_deploy",
     "routers.approval_router",
+    "routers.workstation_platform",
 )
 
 WEB_ROUTER_MODULES = (
