@@ -10,6 +10,7 @@ import io
 import json
 import logging
 import tempfile
+import zipfile
 from contextlib import suppress
 from pathlib import Path
 from typing import Literal
@@ -700,6 +701,57 @@ async def _api_create_project(body: dict):
     target_dir = Path(body["target_dir"])
     project_path = await create_mod_project(project_name, target_dir)
     return {"project_path": str(project_path)}
+
+
+@router.post("/project/import-package")
+async def api_import_project_package(body: dict):
+    return await _api_import_project_package(body)
+
+
+async def _api_import_project_package(body: dict):
+    package_base64 = str(body.get("package_base64", "")).strip()
+    file_name = Path(str(body.get("file_name", "server-project.zip")).strip() or "server-project.zip").name
+    target_dir = Path(str(body.get("target_dir", "")).strip())
+    project_name = str(body.get("project_name", "")).strip() or Path(file_name).stem.replace(".source", "")
+    if not package_base64:
+        return {"error": "package_base64 is required"}
+    if not target_dir:
+        return {"error": "target_dir is required"}
+    if not project_name:
+        return {"error": "project_name is required"}
+    project_root = target_dir / project_name
+    if project_root.exists():
+        return {"error": f"project already exists: {project_root}"}
+
+    try:
+        package_bytes = base64.b64decode(package_base64, validate=True)
+        _extract_project_zip(package_bytes, project_root)
+    except ValueError as exc:
+        return {"error": str(exc)}
+    except zipfile.BadZipFile:
+        return {"error": "project package must be a zip file"}
+    return {"project_path": str(project_root)}
+
+
+def _extract_project_zip(package_bytes: bytes, project_root: Path) -> None:
+    project_root.mkdir(parents=True, exist_ok=False)
+    try:
+        with zipfile.ZipFile(io.BytesIO(package_bytes)) as archive:
+            for member in archive.infolist():
+                relative = Path(member.filename)
+                if relative.is_absolute() or ".." in relative.parts:
+                    raise ValueError(f"unsafe package path: {member.filename}")
+                if member.is_dir():
+                    continue
+                target = project_root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(member) as source, open(target, "wb") as destination:
+                    destination.write(source.read())
+    except Exception:
+        import shutil
+
+        shutil.rmtree(project_root, ignore_errors=True)
+        raise
 
 
 @router.post("/project/build")
