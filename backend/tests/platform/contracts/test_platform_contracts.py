@@ -10,6 +10,12 @@ from app.modules.platform.contracts.events import JobEventView
 from app.modules.platform.contracts.job_commands import CreateJobCommand
 from app.modules.platform.contracts.job_queries import JobDetailView
 from app.modules.platform.contracts.runner_contracts import StepExecutionRequest
+from app.modules.platform.contracts.workstation_execution import (
+    WorkstationArtifactPayload,
+    WorkstationCallbackConfig,
+    WorkstationExecutionDispatchRequest,
+    WorkstationExecutionPollResult,
+)
 from app.modules.platform.domain.models.enums import AIExecutionStatus, JobItemStatus, JobStatus
 
 
@@ -132,6 +138,112 @@ def test_step_execution_request_captures_minimal_protocol_fields():
     assert payload["input_payload"]["prompt"] == "dark relic"
     assert payload["execution_binding"]["agent_backend"] == "codex"
     assert payload["execution_binding"]["credential_ref"] == "server-credential:1"
+
+
+def test_workstation_dispatch_request_serializes_execution_binding_without_callback_enabled():
+    request = WorkstationExecutionDispatchRequest.model_validate(
+        {
+            "execution_id": 2203,
+            "job_id": 2002,
+            "job_item_id": 2103,
+            "job_type": "single_generate",
+            "item_type": "relic",
+            "workflow_version": "2026.03.31",
+            "step_protocol_version": "v1",
+            "result_schema_version": "v1",
+            "input_payload": {
+                "item_name": "FangedGrimoire",
+                "description": "每次造成伤害时获得 2 点格挡。",
+            },
+            "execution_binding": {
+                "agent_backend": "codex",
+                "provider": "openai",
+                "model": "gpt-5.4",
+                "credential_ref": "server-credential:1",
+                "auth_type": "api_key",
+                "credential": "sk-live",
+                "base_url": "https://api.openai.com/v1",
+            },
+        }
+    )
+
+    payload = request.model_dump()
+    assert payload["execution_id"] == 2203
+    assert payload["input_payload"]["item_name"] == "FangedGrimoire"
+    assert payload["execution_binding"]["credential"] == "sk-live"
+    assert payload["callback"] == {
+        "enabled": False,
+        "url": "",
+        "token_ref": "",
+        "auth": "none",
+        "signature_version": "",
+    }
+
+
+def test_workstation_poll_result_serializes_artifact_contract():
+    result = WorkstationExecutionPollResult.model_validate(
+        {
+            "workstation_execution_id": "ws-exec-2203",
+            "status": "succeeded",
+            "step_id": "build.project",
+            "output_payload": {
+                "text": "构建成功",
+                "artifacts": [
+                    {
+                        "artifact_type": "build_output",
+                        "storage_provider": "server_workspace",
+                        "object_key": "server-workspace:abc/build/mod.pck",
+                        "file_name": "mod.pck",
+                        "mime_type": "application/octet-stream",
+                        "size_bytes": 12345,
+                        "result_summary": "构建产物",
+                    }
+                ],
+            },
+        }
+    )
+
+    payload = result.model_dump()
+    assert payload["status"] == "succeeded"
+    assert payload["output_payload"]["artifacts"][0] == {
+        "artifact_type": "build_output",
+        "storage_provider": "server_workspace",
+        "object_key": "server-workspace:abc/build/mod.pck",
+        "file_name": "mod.pck",
+        "mime_type": "application/octet-stream",
+        "size_bytes": 12345,
+        "result_summary": "构建产物",
+    }
+    assert payload["error_payload"] == {}
+
+
+def test_workstation_callback_config_defaults_to_disabled():
+    callback = WorkstationCallbackConfig.model_validate({})
+
+    assert callback.model_dump() == {
+        "enabled": False,
+        "url": "",
+        "token_ref": "",
+        "auth": "none",
+        "signature_version": "",
+    }
+
+
+def test_workstation_artifact_payload_supports_uploaded_asset_provider():
+    artifact = WorkstationArtifactPayload.model_validate(
+        {
+            "artifact_type": "source_image",
+            "storage_provider": "uploaded_asset",
+            "object_key": "uploaded-asset:abc",
+        }
+    )
+
+    payload = artifact.model_dump()
+    assert payload["artifact_type"] == "source_image"
+    assert payload["storage_provider"] == "uploaded_asset"
+    assert payload["object_key"] == "uploaded-asset:abc"
+    assert payload["file_name"] == ""
+    assert payload["size_bytes"] == 0
 
 
 def test_create_server_credential_command_applies_defaults():

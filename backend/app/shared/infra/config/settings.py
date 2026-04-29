@@ -92,6 +92,19 @@ DEFAULT_RUNTIME_CONFIG = {
     },
 }
 
+DEFAULT_PLATFORM_EXECUTION_CONFIG = {
+    "workstation_url": "http://127.0.0.1:7860",
+    "auto_start": True,
+    "control_token_env": "ATS_WORKSTATION_CONTROL_TOKEN",
+    "dispatch_timeout_seconds": 10,
+    "poll_interval_seconds": 2,
+    "execution_timeout_seconds": 180,
+    "max_concurrent_text": 2,
+    "max_concurrent_code": 2,
+    "max_concurrent_workspace_writes_per_ref": 1,
+    "max_concurrent_deploy_per_target": 1,
+}
+
 DEFAULT_CONFIG = {
     "llm": DEFAULT_LLM_CONFIG,
     "auth": DEFAULT_AUTH_CONFIG,
@@ -107,6 +120,7 @@ DEFAULT_CONFIG = {
         "allowed_commands": [],
         "allowed_roots": [],
     },
+    "platform_execution": DEFAULT_PLATFORM_EXECUTION_CONFIG,
     "image_gen": {
         "mode": "cloud",
         "provider": "bfl",
@@ -180,6 +194,7 @@ def normalize_config(config: Optional[dict[str, Any]]) -> dict[str, Any]:
         role: _deep_merge(DEFAULT_RUNTIME_CONFIG[role], cfg.get("runtime", {}).get(role, {}))
         for role in DEFAULT_RUNTIME_CONFIG
     }
+    cfg["platform_execution"] = _deep_merge(DEFAULT_PLATFORM_EXECUTION_CONFIG, cfg.get("platform_execution", {}))
     return cfg
 
 
@@ -259,6 +274,10 @@ class Settings:
     @property
     def image_gen(self) -> dict[str, Any]:
         return self.raw["image_gen"]
+
+    @property
+    def platform_execution(self) -> dict[str, Any]:
+        return deepcopy(self.raw["platform_execution"])
 
     def get_runtime(self, role: str) -> dict[str, Any]:
         runtime_cfg = self.raw.get("runtime", {})
