@@ -16,6 +16,17 @@ from fastapi.testclient import TestClient
 from app.shared.infra.config.settings import Settings
 from routers import WORKSTATION_ROUTER_MODULES
 from routers.workstation_platform import router
+from app.modules.platform.contracts.workstation_execution import WorkstationExecutionPollResult
+
+
+class _FakeWorkstationExecutor:
+    def execute(self, request):
+        return WorkstationExecutionPollResult(
+            workstation_execution_id=f"ws-exec-{request.execution_id}",
+            status="succeeded",
+            step_id="single.relic.plan",
+            output_payload={"text": "ok"},
+        )
 
 
 class _FakeContainer:
@@ -41,6 +52,7 @@ def client(monkeypatch):
             }
         )
     )
+    app.state.workstation_platform_executor = _FakeWorkstationExecutor()
     app.include_router(router, prefix="/api")
 
     with TestClient(app) as test_client:
@@ -118,7 +130,7 @@ def test_workstation_execution_dispatch_accepts_and_poll_hides_credentials(clien
     assert polled.status_code == 200
     poll_payload = polled.json()
     assert poll_payload["workstation_execution_id"] == "ws-exec-2203"
-    assert poll_payload["status"] == "accepted"
+    assert poll_payload["status"] in {"accepted", "running", "succeeded"}
     assert "credential" not in str(poll_payload)
 
 

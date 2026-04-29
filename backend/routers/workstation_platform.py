@@ -6,6 +6,10 @@ import threading
 
 from fastapi import APIRouter, Header, HTTPException, Request
 
+from app.modules.platform.application.workstation_platform_executor import (
+    WorkstationPlatformExecutor,
+    build_default_workstation_platform_executor,
+)
 from app.modules.platform.contracts.workstation_execution import (
     WorkstationExecutionDispatchAccepted,
     WorkstationExecutionDispatchRequest,
@@ -23,7 +27,11 @@ class WorkstationExecutionStore:
         self._lock = threading.Lock()
         self._results: dict[str, WorkstationExecutionPollResult] = {}
 
-    def submit(self, request: WorkstationExecutionDispatchRequest) -> WorkstationExecutionDispatchAccepted:
+    def submit(
+        self,
+        request: WorkstationExecutionDispatchRequest,
+        executor: WorkstationPlatformExecutor,
+    ) -> WorkstationExecutionDispatchAccepted:
         workstation_execution_id = f"ws-exec-{request.execution_id}"
         result = WorkstationExecutionPollResult(
             workstation_execution_id=workstation_execution_id,
@@ -32,6 +40,13 @@ class WorkstationExecutionStore:
         )
         with self._lock:
             self._results[workstation_execution_id] = result
+        thread = threading.Thread(
+            target=self._execute,
+            args=(request, executor),
+            name=f"workstation-platform-{workstation_execution_id}",
+            daemon=True,
+        )
+        thread.start()
         return WorkstationExecutionDispatchAccepted(
             workstation_execution_id=workstation_execution_id,
             poll_url=f"/api/workstation/platform/executions/{workstation_execution_id}",
@@ -40,6 +55,22 @@ class WorkstationExecutionStore:
     def get(self, workstation_execution_id: str) -> WorkstationExecutionPollResult | None:
         with self._lock:
             return self._results.get(workstation_execution_id)
+
+    def _execute(
+        self,
+        request: WorkstationExecutionDispatchRequest,
+        executor: WorkstationPlatformExecutor,
+    ) -> None:
+        workstation_execution_id = f"ws-exec-{request.execution_id}"
+        with self._lock:
+            self._results[workstation_execution_id] = WorkstationExecutionPollResult(
+                workstation_execution_id=workstation_execution_id,
+                status="running",
+                step_id="workflow.dispatch",
+            )
+        result = executor.execute(request)
+        with self._lock:
+            self._results[workstation_execution_id] = result
 
 
 def _settings(request: Request) -> Settings:
@@ -81,6 +112,18 @@ def _store(request: Request) -> WorkstationExecutionStore:
     return store
 
 
+def _executor(request: Request) -> WorkstationPlatformExecutor:
+    existing = getattr(request.app.state, "workstation_platform_executor", None)
+    if existing is not None and callable(getattr(existing, "execute", None)):
+        return existing
+    container = getattr(request.app.state, "container", None)
+    if container is None:
+        raise HTTPException(status_code=503, detail="workstation container is not configured")
+    executor = build_default_workstation_platform_executor(container)
+    request.app.state.workstation_platform_executor = executor
+    return executor
+
+
 @router.post("/executions")
 def dispatch_execution(
     request: Request,
@@ -89,7 +132,7 @@ def dispatch_execution(
 ):
     _require_control_token(request, x_ats_workstation_token)
     dispatch_request = WorkstationExecutionDispatchRequest.model_validate(body)
-    return _store(request).submit(dispatch_request).model_dump()
+    return _store(request).submit(dispatch_request, _executor(request)).model_dump()
 
 
 @router.get("/executions/{workstation_execution_id}")
