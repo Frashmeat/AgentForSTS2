@@ -11,6 +11,7 @@ def test_normalize_config_adds_platform_execution_defaults():
 
     assert cfg["platform_execution"] == {
         "workstation_url": "http://127.0.0.1:7860",
+        "workstation_config_path": "runtime/workstation.config.json",
         "auto_start": True,
         "control_token_env": "ATS_WORKSTATION_CONTROL_TOKEN",
         "dispatch_timeout_seconds": 10,

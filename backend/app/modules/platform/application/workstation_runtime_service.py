@@ -11,6 +11,8 @@ from urllib.parse import urlparse
 
 from app.shared.infra.config.settings import Settings
 
+_CONFIG_PATH_ENV = "SPIREFORGE_CONFIG_PATH"
+
 
 @dataclass(slots=True)
 class WorkstationRuntimeStatus:
@@ -66,6 +68,7 @@ class WorkstationRuntimeManager:
             env = os.environ.copy()
             token_env = self._control_token_env()
             env[token_env] = env.get(token_env, "").strip() or self._token_factory()
+            env[_CONFIG_PATH_ENV] = str(self._workstation_config_path())
             os.environ[token_env] = env[token_env]
             self._process = self._popen_factory(
                 self._build_command(),
@@ -107,6 +110,20 @@ class WorkstationRuntimeManager:
 
     def _control_token_env(self) -> str:
         return str(self.config.get("control_token_env", "ATS_WORKSTATION_CONTROL_TOKEN")).strip()
+
+    def _workstation_config_path(self) -> Path:
+        configured = str(self.config.get("workstation_config_path", "runtime/workstation.config.json")).strip()
+        path = Path(configured or "runtime/workstation.config.json")
+        if path.is_absolute():
+            return path
+        return self._runtime_root() / path
+
+    def _runtime_root(self) -> Path:
+        if self._cwd.name == "backend" and self._cwd.parent.name in {"web", "workstation"} and self._cwd.parent.parent.name == "services":
+            return self._cwd.parent.parent.parent
+        if self._cwd.name == "backend":
+            return self._cwd.parent
+        return self._cwd
 
     def _build_command(self) -> list[str]:
         url = str(self.config.get("workstation_url", "http://127.0.0.1:7860"))

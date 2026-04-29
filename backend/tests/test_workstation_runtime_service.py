@@ -44,6 +44,7 @@ def test_workstation_runtime_manager_starts_with_generated_control_token(monkeyp
     manager = WorkstationRuntimeManager(
         settings=_settings(
             workstation_url="http://127.0.0.1:7865",
+            workstation_config_path="runtime/workstation.config.json",
             control_token_env="TEST_WORKSTATION_TOKEN",
         ),
         cwd=tmp_path,
@@ -57,6 +58,7 @@ def test_workstation_runtime_manager_starts_with_generated_control_token(monkeyp
     command = calls[0][0][0]
     assert command[-4:] == ["--host", "127.0.0.1", "--port", "7865"]
     assert calls[0][1]["env"]["TEST_WORKSTATION_TOKEN"] == "generated-token"
+    assert calls[0][1]["env"]["SPIREFORGE_CONFIG_PATH"] == str(tmp_path / "runtime" / "workstation.config.json")
     assert status["managed"] is True
     assert status["running"] is True
     assert status["pid"] == 4321
@@ -113,3 +115,31 @@ def test_workstation_runtime_manager_respects_auto_start_false(tmp_path):
     assert status["auto_start"] is False
     assert status["managed"] is False
     assert status["running"] is False
+
+
+def test_workstation_runtime_manager_resolves_release_relative_config_path(tmp_path):
+    calls = []
+    process = FakeProcess()
+    release_root = tmp_path / "release"
+    cwd = release_root / "services" / "web" / "backend"
+    cwd.mkdir(parents=True)
+
+    def fake_popen(*args, **kwargs):
+        calls.append((args, kwargs))
+        return process
+
+    manager = WorkstationRuntimeManager(
+        settings=_settings(
+            workstation_config_path="runtime/workstation.config.json",
+            control_token_env="TEST_WORKSTATION_TOKEN",
+        ),
+        cwd=cwd,
+        popen_factory=fake_popen,
+        token_factory=lambda: "generated-token",
+    )
+
+    manager.ensure_started()
+
+    assert calls[0][1]["env"]["SPIREFORGE_CONFIG_PATH"] == str(
+        release_root / "runtime" / "workstation.config.json"
+    )

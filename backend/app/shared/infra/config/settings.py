@@ -94,6 +94,7 @@ DEFAULT_RUNTIME_CONFIG = {
 
 DEFAULT_PLATFORM_EXECUTION_CONFIG = {
     "workstation_url": "http://127.0.0.1:7860",
+    "workstation_config_path": "runtime/workstation.config.json",
     "auto_start": True,
     "control_token_env": "ATS_WORKSTATION_CONTROL_TOKEN",
     "dispatch_timeout_seconds": 10,
