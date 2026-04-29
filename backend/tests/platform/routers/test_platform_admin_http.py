@@ -51,6 +51,47 @@ class FakePlatformHealthChecker:
         return self.result
 
 
+class FakeWorkstationRuntimeStatus:
+    def model_dump(self):
+        return {
+            "available": True,
+            "auto_start": True,
+            "managed": True,
+            "running": True,
+            "workstation_url": "http://127.0.0.1:7860",
+            "control_token_env": "ATS_WORKSTATION_CONTROL_TOKEN",
+            "pid": 12345,
+            "last_error": "",
+            "capabilities": {"available": True},
+            "stdout_log_path": "runtime/logs/web-workstation.stdout.log",
+            "stderr_log_path": "runtime/logs/web-workstation.stderr.log",
+        }
+
+
+class FakeWorkstationRuntimeManager:
+    def get_runtime_status(self):
+        return FakeWorkstationRuntimeStatus()
+
+    def read_runtime_log_tail(self, stream: str, tail_bytes: int = 65_536):
+        if stream not in {"stdout", "stderr"}:
+            raise ValueError("stream must be stdout or stderr")
+        return type(
+            "FakeWorkstationRuntimeLogTail",
+            (),
+            {
+                "model_dump": lambda _self: {
+                    "stream": stream,
+                    "path": f"runtime/logs/web-workstation.{stream}.log",
+                    "exists": True,
+                    "size_bytes": 21,
+                    "tail_bytes": tail_bytes,
+                    "truncated": False,
+                    "content": f"{stream} log tail raw_error=blocked",
+                }
+            },
+        )()
+
+
 @pytest.fixture()
 def client(tmp_path):
     db_path = tmp_path / "platform-admin.sqlite3"
@@ -272,6 +313,63 @@ def test_platform_admin_router_supports_execution_refund_and_audit_queries(clien
     assert profiles.json()["items"][0]["code"] == "codex-gpt-5-4"
 
 
+def test_platform_admin_router_returns_workstation_runtime_status(client):
+    test_client, _, _, _ = client
+
+    login = test_client.post(
+        "/api/auth/login",
+        json={
+            "login": "admin@example.com",
+            "password": "admin-pass",
+        },
+    )
+    assert login.status_code == 200
+
+    missing = test_client.get("/api/admin/platform/workstation-runtime-status")
+    assert missing.status_code == 200
+    assert missing.json() == {"available": False, "reason": "workstation_runtime_manager_not_registered"}
+
+    test_client.app.state.workstation_runtime_manager = FakeWorkstationRuntimeManager()
+    response = test_client.get("/api/admin/platform/workstation-runtime-status")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["available"] is True
+    assert payload["running"] is True
+    assert payload["stdout_log_path"] == "runtime/logs/web-workstation.stdout.log"
+    assert payload["stderr_log_path"] == "runtime/logs/web-workstation.stderr.log"
+
+
+def test_platform_admin_router_returns_workstation_runtime_logs(client):
+    test_client, _, _, _ = client
+
+    login = test_client.post(
+        "/api/auth/login",
+        json={
+            "login": "admin@example.com",
+            "password": "admin-pass",
+        },
+    )
+    assert login.status_code == 200
+
+    missing = test_client.get("/api/admin/platform/workstation-runtime-logs")
+    assert missing.status_code == 503
+
+    test_client.app.state.workstation_runtime_manager = FakeWorkstationRuntimeManager()
+    response = test_client.get(
+        "/api/admin/platform/workstation-runtime-logs",
+        params={"stream": "stderr", "tail_bytes": 4096},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["stream"] == "stderr"
+    assert payload["path"] == "runtime/logs/web-workstation.stderr.log"
+    assert payload["tail_bytes"] == 4096
+    assert "raw_error=blocked" in payload["content"]
+
+    rejected = test_client.get("/api/admin/platform/workstation-runtime-logs", params={"stream": "../config"})
+    assert rejected.status_code == 400
+
+
 def test_platform_admin_router_supports_user_quota_management(client):
     test_client, _, _, _ = client
 
@@ -393,6 +491,26 @@ def test_platform_admin_router_updates_and_toggles_server_credential(client):
     assert enabled.status_code == 200
     assert enabled.json()["enabled"] is True
     assert enabled.json()["health_status"] == "degraded"
+
+
+def test_platform_admin_router_does_not_delete_server_credential(client):
+    test_client, _, _, _ = client
+
+    login = test_client.post(
+        "/api/auth/login",
+        json={
+            "login": "admin@example.com",
+            "password": "admin-pass",
+        },
+    )
+    assert login.status_code == 200
+
+    deleted = test_client.delete("/api/admin/platform/server-credentials/1")
+    assert deleted.status_code == 405
+
+    credentials = test_client.get("/api/admin/platform/server-credentials")
+    assert credentials.status_code == 200
+    assert credentials.json()["items"][0]["id"] == 1
 
 
 def test_platform_admin_router_runs_manual_health_check_and_writes_result(client):

@@ -32,4 +32,17 @@ test("admin server credentials page uses credential APIs and hides raw secret va
   assert.match(pageSource, /formatAdminStatus/);
   assert.doesNotMatch(pageSource, /credential_ciphertext/);
   assert.doesNotMatch(pageSource, /secret_ciphertext/);
+  assert.doesNotMatch(pageSource, /deleteAdminServerCredential/);
+});
+
+test("admin server credentials page keeps credentials non-deletable and uses denser layout", () => {
+  const pageSource = readSource("../src/pages/admin/AdminServerCredentialsPage.tsx");
+
+  assert.match(pageSource, /max-w-7xl/);
+  assert.match(pageSource, /xl:grid-cols-\[420px_minmax\(0,1fr\)\]/);
+  assert.match(pageSource, /当前筛选条件下没有服务器凭据/);
+  assert.doesNotMatch(pageSource, /确认删除服务器凭据/);
+  assert.doesNotMatch(pageSource, /确认删除/);
+  assert.doesNotMatch(pageSource, /Trash2/);
+  assert.doesNotMatch(pageSource, /window\.confirm/);
 });

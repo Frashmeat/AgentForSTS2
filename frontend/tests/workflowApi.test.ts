@@ -5,6 +5,7 @@ import {
   buildProject,
   createProject,
   generateModPlan,
+  importProjectPackage,
   packageProject,
 } from "../src/shared/api/index.ts";
 
@@ -95,6 +96,38 @@ test("createProject posts name and target dir", async () => {
   assert.equal(calls[0].input, "http://127.0.0.1:7860/api/project/create");
   assert.equal(calls[0].init?.method, "POST");
   assert.equal(result.project_path, "E:/STS2mod/MyMod");
+});
+
+test("importProjectPackage posts package payload to workstation", async () => {
+  const calls: Array<{ input: unknown; init?: RequestInit }> = [];
+  setWorkstationApiBase();
+  Object.assign(globalThis, {
+    fetch: async (input: unknown, init?: RequestInit) => {
+      calls.push({ input, init });
+      return createMockResponse({
+        ok: true,
+        body: { project_path: "E:/STS2mod/GeneratedMod" },
+      });
+    },
+  });
+
+  const result = await importProjectPackage({
+    package_base64: "UEsDBAo=",
+    file_name: "GeneratedMod.source.zip",
+    target_dir: "E:/STS2mod",
+  });
+
+  assert.equal(calls[0].input, "http://127.0.0.1:7860/api/project/import-package");
+  assert.equal(calls[0].init?.method, "POST");
+  assert.equal(
+    calls[0].init?.body,
+    JSON.stringify({
+      package_base64: "UEsDBAo=",
+      file_name: "GeneratedMod.source.zip",
+      target_dir: "E:/STS2mod",
+    }),
+  );
+  assert.equal(result.project_path, "E:/STS2mod/GeneratedMod");
 });
 
 test("buildProject posts project root", async () => {

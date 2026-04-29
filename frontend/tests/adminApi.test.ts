@@ -6,16 +6,21 @@ import {
   disableAdminServerCredential,
   enableAdminServerCredential,
   getAdminExecution,
+  getAdminWorkstationRuntimeLogs,
+  getAdminWorkstationRuntimeStatus,
   adjustAdminUserQuota,
+  activateAdminKnowledgePack,
   getAdminUser,
   getAdminUserQuota,
   listAdminAuditEvents,
   listAdminExecutionProfiles,
+  listAdminKnowledgePacks,
   listAdminJobExecutions,
   listAdminQuotaRefunds,
   listAdminUsers,
   listAdminUserQuotaLedger,
   listAdminServerCredentials,
+  rollbackAdminKnowledgePack,
   runAdminServerCredentialHealthCheck,
   updateAdminServerCredential,
 } from "../src/shared/api/index.ts";
@@ -76,6 +81,11 @@ test("admin optional query params are only appended when present", async () => {
   await listAdminAuditEvents(undefined, "runtime.queue_worker.");
   await listAdminAuditEvents(undefined, "runtime.queue_worker.", 88, 20);
   await listAdminUsers({ query: "alice", anomaly: "quota_exhausted", limit: 25 });
+  await getAdminWorkstationRuntimeStatus();
+  await getAdminWorkstationRuntimeLogs("stderr", 4096);
+  await listAdminKnowledgePacks();
+  await activateAdminKnowledgePack("pack-a");
+  await rollbackAdminKnowledgePack();
 
   assert.equal(calls[0].input, "/api/admin/quota/refunds");
   assert.equal(calls[1].input, "/api/admin/quota/refunds?user_id=7");
@@ -84,6 +94,13 @@ test("admin optional query params are only appended when present", async () => {
   assert.equal(calls[4].input, "/api/admin/audit/events?event_type_prefix=runtime.queue_worker.");
   assert.equal(calls[5].input, "/api/admin/audit/events?event_type_prefix=runtime.queue_worker.&after_id=88&limit=20");
   assert.equal(calls[6].input, "/api/admin/users?query=alice&anomaly=quota_exhausted&limit=25");
+  assert.equal(calls[7].input, "/api/admin/platform/workstation-runtime-status");
+  assert.equal(calls[8].input, "/api/admin/platform/workstation-runtime-logs?stream=stderr&tail_bytes=4096");
+  assert.equal(calls[9].input, "/api/admin/platform/knowledge-packs");
+  assert.equal(calls[10].input, "/api/admin/platform/knowledge-packs/pack-a/activate");
+  assert.equal(calls[10].init?.method, "POST");
+  assert.equal(calls[11].input, "/api/admin/platform/knowledge-packs/rollback");
+  assert.equal(calls[11].init?.method, "POST");
 });
 
 test("admin user quota endpoints compose resource paths and methods", async () => {

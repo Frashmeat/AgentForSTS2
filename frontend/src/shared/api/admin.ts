@@ -1,4 +1,4 @@
-import { buildApiPath, requestJson } from "./http.ts";
+import { buildApiPath, buildBackendUrl, requestJson } from "./http.ts";
 
 export interface AdminExecutionListItem {
   id: number;
@@ -155,6 +155,77 @@ export interface AdminAuditEvent {
   payload: Record<string, unknown>;
 }
 
+export interface AdminWorkstationCapabilities {
+  available?: boolean;
+  reason?: string;
+  knowledge?: {
+    embedded_sts2_guidance?: boolean;
+    knowledge_pack_active?: boolean;
+    active_knowledge_pack_id?: string;
+    sts2_path_configured?: boolean;
+    sts2_game_available?: boolean;
+  };
+  generation?: {
+    text_generation_available?: boolean;
+    code_generation_available?: boolean;
+  };
+  build?: {
+    server_build_supported?: boolean;
+    dotnet_available?: boolean;
+    godot_configured?: boolean;
+    godot_executable_available?: boolean;
+  };
+  deploy?: {
+    server_deploy_supported?: boolean;
+    sts2_mods_path_available?: boolean;
+  };
+}
+
+export interface AdminWorkstationRuntimeStatus {
+  available: boolean;
+  auto_start?: boolean;
+  managed?: boolean;
+  running?: boolean;
+  workstation_url?: string;
+  control_token_env?: string;
+  pid?: number | null;
+  last_error?: string;
+  capabilities?: AdminWorkstationCapabilities | null;
+  reason?: string;
+  stdout_log_path?: string;
+  stderr_log_path?: string;
+}
+
+export interface AdminWorkstationRuntimeLogTail {
+  stream: "stdout" | "stderr";
+  path: string;
+  exists: boolean;
+  size_bytes: number;
+  tail_bytes: number;
+  truncated: boolean;
+  content: string;
+}
+
+export interface AdminKnowledgePackItem {
+  pack_id: string;
+  label: string;
+  file_name?: string;
+  file_count?: number;
+  files?: string[];
+  has_resources?: boolean;
+  has_game?: boolean;
+  has_baselib?: boolean;
+  active?: boolean;
+  created_at?: string;
+  uploaded_at?: string;
+}
+
+export interface AdminKnowledgePackListView {
+  active_pack_id: string;
+  active_pack?: AdminKnowledgePackItem | null;
+  items: AdminKnowledgePackItem[];
+}
+
 export function listAdminJobExecutions(jobId: number): Promise<AdminExecutionListItem[]> {
   return requestJson<AdminExecutionListItem[]>(`/api/admin/jobs/${jobId}/executions`, {
     backend: "web",
@@ -302,4 +373,66 @@ export function listAdminAuditEvents(
       backend: "web",
     },
   );
+}
+
+export function getAdminWorkstationRuntimeStatus(): Promise<AdminWorkstationRuntimeStatus> {
+  return requestJson<AdminWorkstationRuntimeStatus>("/api/admin/platform/workstation-runtime-status", {
+    backend: "web",
+  });
+}
+
+export function getAdminWorkstationRuntimeLogs(
+  stream: "stdout" | "stderr",
+  tailBytes = 65_536,
+): Promise<AdminWorkstationRuntimeLogTail> {
+  return requestJson<AdminWorkstationRuntimeLogTail>(
+    buildApiPath("/api/admin/platform/workstation-runtime-logs", { stream, tail_bytes: tailBytes }),
+    {
+      backend: "web",
+    },
+  );
+}
+
+export function listAdminKnowledgePacks(): Promise<AdminKnowledgePackListView> {
+  return requestJson<AdminKnowledgePackListView>("/api/admin/platform/knowledge-packs", {
+    backend: "web",
+  });
+}
+
+export async function uploadAdminKnowledgePack(
+  file: Blob,
+  label: string,
+  fileName?: string,
+): Promise<AdminKnowledgePackItem> {
+  const formData = new FormData();
+  const effectiveFileName =
+    fileName || (typeof File !== "undefined" && file instanceof File ? file.name : "knowledge-pack.zip");
+  formData.set("file", file, effectiveFileName);
+  formData.set("label", label);
+  const response = await fetch(buildBackendUrl("/api/admin/platform/knowledge-packs", "web"), {
+    method: "POST",
+    credentials: "include",
+    body: formData,
+  });
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+  return response.json();
+}
+
+export function activateAdminKnowledgePack(packId: string): Promise<AdminKnowledgePackItem> {
+  return requestJson<AdminKnowledgePackItem>(
+    `/api/admin/platform/knowledge-packs/${encodeURIComponent(packId)}/activate`,
+    {
+      backend: "web",
+      method: "POST",
+    },
+  );
+}
+
+export function rollbackAdminKnowledgePack(): Promise<Record<string, unknown>> {
+  return requestJson<Record<string, unknown>>("/api/admin/platform/knowledge-packs/rollback", {
+    backend: "web",
+    method: "POST",
+  });
 }

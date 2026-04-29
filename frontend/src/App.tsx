@@ -20,6 +20,7 @@ import { AdminCredentialHealthPage } from "./pages/admin/AdminCredentialHealthPa
 import { AdminAuditPage } from "./pages/admin/AdminAuditPage.tsx";
 import { AdminExecutionsPage } from "./pages/admin/AdminExecutionsPage.tsx";
 import { AdminExecutionProfilesPage } from "./pages/admin/AdminExecutionProfilesPage.tsx";
+import { AdminKnowledgePacksPage } from "./pages/admin/AdminKnowledgePacksPage.tsx";
 import { AdminLayout } from "./pages/admin/AdminLayout.tsx";
 import { AdminOverviewPage } from "./pages/admin/AdminOverviewPage.tsx";
 import { AdminRefundsPage } from "./pages/admin/AdminRefundsPage.tsx";
@@ -187,6 +188,7 @@ export default function App() {
           <Route path="execution-profiles" element={<AdminExecutionProfilesPage />} />
           <Route path="server-credentials" element={<AdminServerCredentialsPage />} />
           <Route path="credential-health" element={<AdminCredentialHealthPage />} />
+          <Route path="knowledge-packs" element={<AdminKnowledgePacksPage />} />
           <Route path="refunds" element={<AdminRefundsPage />} />
           <Route path="users" element={<AdminUsersPage />} />
         </Route>

@@ -28,7 +28,14 @@ class _DummyHttpException(Exception):
         self.detail = detail
 
 
-sys.modules["fastapi"] = types.SimpleNamespace(APIRouter=_DummyRouter, HTTPException=_DummyHttpException)
+class _DummyResponse:
+    def __init__(self, content=b"", media_type="", headers=None):
+        self.content = content
+        self.media_type = media_type
+        self.headers = headers or {}
+
+
+sys.modules["fastapi"] = types.SimpleNamespace(APIRouter=_DummyRouter, HTTPException=_DummyHttpException, Response=_DummyResponse)
 knowledge_router = importlib.import_module("routers.knowledge_router")
 
 
@@ -76,6 +83,27 @@ def test_latest_refresh_delegates_to_runtime(monkeypatch):
 
     assert result["task_id"] == "refresh-latest"
     assert result["status"] == "running"
+
+
+def test_export_pack_delegates_to_runtime(monkeypatch):
+    monkeypatch.setattr(
+        knowledge_router,
+        "_runtime",
+        lambda: types.SimpleNamespace(
+            export_current_knowledge_pack_zip=lambda: {
+                "content": b"zip-bytes",
+                "file_name": "current.zip",
+                "file_count": 2,
+            }
+        ),
+    )
+
+    response = knowledge_router.export_current_knowledge_pack()
+
+    assert response.content == b"zip-bytes"
+    assert response.media_type == "application/zip"
+    assert response.headers["Content-Disposition"] == 'attachment; filename="current.zip"'
+    assert response.headers["X-ATS-Knowledge-Pack-File-Count"] == "2"
 
 
 def test_refresh_task_returns_404_when_missing(monkeypatch):

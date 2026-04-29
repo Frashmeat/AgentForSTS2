@@ -23,6 +23,8 @@ services:
       args:
         PYTHON_BASE_IMAGE: ${ATS_PYTHON_BASE_IMAGE:-python:3.11-slim}
     restart: unless-stopped
+    environment:
+      ATS_WORKSTATION_CONTROL_TOKEN: ${ATS_WORKSTATION_CONTROL_TOKEN}
     ports:
       - "${ATS_WORKSTATION_PORT:-7860}:7860"
     volumes:
@@ -37,6 +39,7 @@ services:
     restart: unless-stopped
     environment:
       SPIREFORGE_CONFIG_PATH: /app/config.json
+      ATS_WORKSTATION_CONTROL_TOKEN: ${ATS_WORKSTATION_CONTROL_TOKEN}
     depends_on:
       postgres:
         condition: service_healthy

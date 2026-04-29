@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from app.modules.platform.contracts.runner_contracts import StepExecutionBinding, StepExecutionRequest
 from app.modules.platform.runner.text_generate_handler import (
     UpstreamTextGenerationBlockedError,
+    UpstreamTextGenerationError,
     build_text_llm_config,
     execute_text_generate_step,
 )
@@ -102,7 +103,7 @@ def test_execute_text_generate_step_requires_prompt():
         raise AssertionError("expected ValueError when prompt is missing")
 
 
-def test_execute_text_generate_step_classifies_upstream_request_blocked(caplog):
+def test_execute_text_generate_step_classifies_generic_request_blocked_as_gateway(caplog):
     async def blocked_complete_text(prompt: str, llm_cfg: dict, cwd=None) -> str:
         raise RuntimeError("litellm.APIError: APIError: OpenAIException - Your request was blocked.")
 
@@ -131,16 +132,94 @@ def test_execute_text_generate_step_classifies_upstream_request_blocked(caplog):
         )
     except UpstreamTextGenerationBlockedError as error:
         payload = error.to_error_payload()
-        assert payload["reason_code"] == "upstream_request_blocked"
-        assert "上游模型拒绝" in str(error)
+        assert payload["reason_code"] == "upstream_gateway_blocked"
+        assert payload["upstream_category"] == "gateway_blocked"
+        assert payload["retryable"] is False
+        assert "上游网关拒绝" in str(error)
         assert "Your request was blocked" in payload["raw_error"]
         assert any(
             record.levelno == logging.WARNING
-            and "platform text generation blocked" in record.message
-            and "reason_code=upstream_request_blocked" in record.message
+            and "platform text generation upstream failed" in record.message
+            and "reason_code=upstream_gateway_blocked" in record.message
             and "job_id=1" in record.message
             and "job_item_id=2" in record.message
             for record in caplog.records
         )
     else:
         raise AssertionError("expected UpstreamTextGenerationBlockedError")
+
+
+def test_execute_text_generate_step_classifies_content_filter():
+    async def blocked_complete_text(prompt: str, llm_cfg: dict, cwd=None) -> str:
+        raise RuntimeError("OpenAIException: content_filter policy triggered")
+
+    try:
+        asyncio.run(
+            execute_text_generate_step(
+                StepExecutionRequest(
+                    workflow_version="2026.03.31",
+                    step_protocol_version="v1",
+                    step_type="text.generate",
+                    step_id="text-4",
+                    job_id=1,
+                    job_item_id=2,
+                    result_schema_version="v1",
+                    input_payload={"prompt": "虚构游戏机制：造成伤害。"},
+                    execution_binding=StepExecutionBinding(
+                        agent_backend="codex",
+                        provider="openai",
+                        model="gpt-5.4",
+                        credential="sk-live-openai",
+                    ),
+                ),
+                complete_text_fn=blocked_complete_text,
+            )
+        )
+    except UpstreamTextGenerationError as error:
+        payload = error.to_error_payload()
+        assert payload["reason_code"] == "upstream_content_policy_blocked"
+        assert payload["upstream_category"] == "content_policy"
+        assert payload["provider_error_code"] == "content_filter"
+    else:
+        raise AssertionError("expected UpstreamTextGenerationError")
+
+
+def test_execute_text_generate_step_classifies_auth_and_rate_limit():
+    async def auth_complete_text(prompt: str, llm_cfg: dict, cwd=None) -> str:
+        raise RuntimeError("HTTP status 403 permission denied for model")
+
+    async def rate_limited_complete_text(prompt: str, llm_cfg: dict, cwd=None) -> str:
+        raise RuntimeError("HTTP status 429 rate limit exceeded")
+
+    for complete_text, expected_code, expected_retryable in (
+        (auth_complete_text, "upstream_auth_or_region_blocked", False),
+        (rate_limited_complete_text, "upstream_rate_limited", True),
+    ):
+        try:
+            asyncio.run(
+                execute_text_generate_step(
+                    StepExecutionRequest(
+                        workflow_version="2026.03.31",
+                        step_protocol_version="v1",
+                        step_type="text.generate",
+                        step_id="text-5",
+                        job_id=1,
+                        job_item_id=2,
+                        result_schema_version="v1",
+                        input_payload={"prompt": "虚构游戏机制：造成伤害。"},
+                        execution_binding=StepExecutionBinding(
+                            agent_backend="codex",
+                            provider="openai",
+                            model="gpt-5.4",
+                            credential="sk-live-openai",
+                        ),
+                    ),
+                    complete_text_fn=complete_text,
+                )
+            )
+        except UpstreamTextGenerationError as error:
+            payload = error.to_error_payload()
+            assert payload["reason_code"] == expected_code
+            assert payload["retryable"] is expected_retryable
+        else:
+            raise AssertionError("expected UpstreamTextGenerationError")

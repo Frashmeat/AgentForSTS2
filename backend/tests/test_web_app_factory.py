@@ -37,6 +37,7 @@ def test_create_app_for_web_includes_only_web_routes_and_skips_frontend_mount(mo
     frontend_mounted = False
     execution_profiles_seeded = False
     queue_worker_registered = False
+    workstation_runtime_registered = False
 
     def fake_base_app(role: str, config: dict) -> FastAPI:
         app = FastAPI()
@@ -58,10 +59,15 @@ def test_create_app_for_web_includes_only_web_routes_and_skips_frontend_mount(mo
         nonlocal queue_worker_registered
         queue_worker_registered = True
 
+    def fake_register_web_workstation_runtime_lifecycle(app: FastAPI) -> None:
+        nonlocal workstation_runtime_registered
+        workstation_runtime_registered = True
+
     monkeypatch.setattr(app_factory, "_create_base_app", fake_base_app)
     monkeypatch.setattr(app_factory, "_include_router", fake_include_router)
     monkeypatch.setattr(app_factory, "_mount_frontend", fake_mount_frontend)
     monkeypatch.setattr(app_factory, "_bootstrap_web_execution_profiles", fake_bootstrap_execution_profiles)
+    monkeypatch.setattr(app_factory, "_register_web_workstation_runtime_lifecycle", fake_register_web_workstation_runtime_lifecycle)
     monkeypatch.setattr(app_factory, "_register_web_queue_worker_lifecycle", fake_register_web_queue_worker_lifecycle)
     monkeypatch.setattr(app_factory, "get_config", lambda: {})
 
@@ -69,6 +75,7 @@ def test_create_app_for_web_includes_only_web_routes_and_skips_frontend_mount(mo
 
     assert included_modules == list(app_factory.WEB_ROUTER_MODULES)
     assert execution_profiles_seeded is True
+    assert workstation_runtime_registered is True
     assert queue_worker_registered is True
     assert frontend_mounted is False
 
@@ -78,6 +85,7 @@ def test_create_app_for_workstation_includes_only_workstation_routes_and_mounts_
     frontend_mounted = False
     execution_profiles_seeded = False
     queue_worker_registered = False
+    workstation_runtime_registered = False
 
     def fake_base_app(role: str, config: dict) -> FastAPI:
         app = FastAPI()
@@ -99,10 +107,15 @@ def test_create_app_for_workstation_includes_only_workstation_routes_and_mounts_
         nonlocal queue_worker_registered
         queue_worker_registered = True
 
+    def fake_register_web_workstation_runtime_lifecycle(app: FastAPI) -> None:
+        nonlocal workstation_runtime_registered
+        workstation_runtime_registered = True
+
     monkeypatch.setattr(app_factory, "_create_base_app", fake_base_app)
     monkeypatch.setattr(app_factory, "_include_router", fake_include_router)
     monkeypatch.setattr(app_factory, "_mount_frontend", fake_mount_frontend)
     monkeypatch.setattr(app_factory, "_bootstrap_web_execution_profiles", fake_bootstrap_execution_profiles)
+    monkeypatch.setattr(app_factory, "_register_web_workstation_runtime_lifecycle", fake_register_web_workstation_runtime_lifecycle)
     monkeypatch.setattr(app_factory, "_register_web_queue_worker_lifecycle", fake_register_web_queue_worker_lifecycle)
     monkeypatch.setattr(app_factory, "get_config", lambda: {})
 
@@ -110,6 +123,7 @@ def test_create_app_for_workstation_includes_only_workstation_routes_and_mounts_
 
     assert included_modules == list(app_factory.WORKSTATION_ROUTER_MODULES)
     assert execution_profiles_seeded is False
+    assert workstation_runtime_registered is False
     assert queue_worker_registered is False
     assert frontend_mounted is True
 
@@ -127,6 +141,41 @@ def test_create_app_for_web_fails_fast_when_runtime_secret_is_missing(monkeypatc
 
     with pytest.raises(RuntimeError, match="auth.session_secret is required for web runtime"):
         app_factory.create_app("web")
+
+
+def test_register_web_workstation_runtime_lifecycle_stores_manager_in_app_and_container(monkeypatch):
+    registered: dict[str, object] = {}
+
+    class FakeContainer:
+        def resolve_singleton(self, name: str):
+            assert name == "settings"
+            return object()
+
+        def register_singleton(self, name: str, value: object) -> None:
+            registered[name] = value
+
+    class FakeRuntimeManager:
+        def __init__(self, *, settings, cwd):
+            self.settings = settings
+            self.cwd = cwd
+            self.started = False
+            self.stopped = False
+
+        def ensure_started(self):
+            self.started = True
+
+        def stop(self):
+            self.stopped = True
+
+    monkeypatch.setattr(app_factory, "WorkstationRuntimeManager", FakeRuntimeManager)
+    app = FastAPI()
+    app.state.container = FakeContainer()
+
+    app_factory._register_web_workstation_runtime_lifecycle(app)
+
+    manager = app.state.workstation_runtime_manager
+    assert isinstance(manager, FakeRuntimeManager)
+    assert registered["platform.workstation_runtime_manager"] is manager
 
 
 def test_resolve_cors_allow_origin_regex_only_enables_loopback_when_requested():

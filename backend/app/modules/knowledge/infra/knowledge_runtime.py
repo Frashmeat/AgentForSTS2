@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import shutil
@@ -274,6 +275,7 @@ def upload_knowledge_pack_zip(content: bytes, *, file_name: str = "", label: str
         shutil.rmtree(pack_root, ignore_errors=True)
         raise
 
+    file_list = sorted(dict.fromkeys(extracted_files))
     meta = {
         "pack_id": pack_id,
         "label": label.strip() or Path(file_name).stem or pack_id,
@@ -281,7 +283,8 @@ def upload_knowledge_pack_zip(content: bytes, *, file_name: str = "", label: str
         "created_at": _now_text(),
         "storage_path": str(pack_root),
         "content_path": str(content_dir),
-        "file_count": len(extracted_files),
+        "file_count": len(file_list),
+        "files": file_list,
         "has_resources": (content_dir / "resources" / "sts2").exists(),
         "has_game": (content_dir / "game").exists(),
         "has_baselib": (content_dir / "baselib" / "BaseLib.decompiled.cs").exists(),
@@ -289,6 +292,62 @@ def upload_knowledge_pack_zip(content: bytes, *, file_name: str = "", label: str
     with open(_pack_meta_path(pack_id), "w", encoding="utf-8") as file:
         json.dump(meta, file, indent=2, ensure_ascii=False)
     return meta
+
+
+def _write_knowledge_tree_to_zip(
+    archive: zipfile.ZipFile,
+    *,
+    source_dir: Path,
+    archive_root: Path,
+) -> list[str]:
+    if not source_dir.exists():
+        return []
+
+    archived_files: list[str] = []
+    for path in sorted(item for item in source_dir.rglob("*") if item.is_file()):
+        relative = path.relative_to(source_dir)
+        archive_name = str(archive_root / relative).replace("\\", "/")
+        archive.write(path, archive_name)
+        archived_files.append(archive_name)
+    return archived_files
+
+
+def export_current_knowledge_pack_zip() -> dict[str, Any]:
+    ensure_runtime_knowledge_seeded()
+    buffer = io.BytesIO()
+    files: list[str] = []
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        files.extend(
+            _write_knowledge_tree_to_zip(
+                archive,
+                source_dir=active_resource_knowledge_dir(),
+                archive_root=Path("resources") / "sts2",
+            )
+        )
+        files.extend(
+            _write_knowledge_tree_to_zip(
+                archive,
+                source_dir=active_game_knowledge_dir(),
+                archive_root=Path("game"),
+            )
+        )
+        files.extend(
+            _write_knowledge_tree_to_zip(
+                archive,
+                source_dir=active_baselib_knowledge_dir(),
+                archive_root=Path("baselib"),
+            )
+        )
+
+    file_list = sorted(dict.fromkeys(files))
+    if not file_list:
+        raise ValueError("current knowledge pack has no files to export")
+    return {
+        "content": buffer.getvalue(),
+        "file_name": "workstation-current-knowledge-pack.zip",
+        "file_count": len(file_list),
+        "files": file_list,
+    }
 
 
 def activate_knowledge_pack(pack_id: str) -> dict[str, Any]:

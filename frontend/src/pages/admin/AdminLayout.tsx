@@ -5,6 +5,7 @@ import {
   HeartPulse,
   Home,
   KeyRound,
+  Library,
   ReceiptText,
   ServerCog,
   UsersRound,
@@ -34,6 +35,7 @@ const adminNavGroups: Array<{ label: string; items: AdminNavItem[] }> = [
       { label: "执行配置", path: "/admin/execution-profiles", icon: ServerCog },
       { label: "服务器凭据", path: "/admin/server-credentials", icon: KeyRound },
       { label: "健康检查", path: "/admin/credential-health", icon: HeartPulse },
+      { label: "知识库包", path: "/admin/knowledge-packs", icon: Library },
     ],
   },
   {

@@ -4,7 +4,7 @@ import zipfile
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 
 from app.modules.knowledge.infra import knowledge_runtime
 from app.modules.platform.application.services import (
@@ -247,6 +247,23 @@ def get_workstation_runtime_status(request: Request):
     if manager is None:
         return {"available": False, "reason": "workstation_runtime_manager_not_registered"}
     return manager.get_runtime_status().model_dump()
+
+
+@router.get("/platform/workstation-runtime-logs")
+def get_workstation_runtime_logs(
+    request: Request,
+    stream: str = Query(default="stderr"),
+    tail_bytes: int = Query(default=65_536, ge=1, le=262_144),
+):
+    with auth_session_scope(request) as auth_session:
+        require_admin_user(request, auth_session)
+    manager = getattr(request.app.state, "workstation_runtime_manager", None)
+    if manager is None:
+        raise HTTPException(status_code=503, detail="workstation runtime manager is not registered")
+    try:
+        return manager.read_runtime_log_tail(stream=stream, tail_bytes=tail_bytes).model_dump()
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 @router.get("/platform/knowledge-packs")

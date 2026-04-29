@@ -88,7 +88,13 @@ def _prepare_release_bundle(release_root: Path, target: str) -> tuple[Path, Path
         (release_root / "services" / "frontend" / "frontend" / "dist").mkdir(parents=True, exist_ok=True)
         compose = "services:\n  frontend:\n    image: fake\n"
     elif target == "web":
-        (release_root / "services" / "web").mkdir(parents=True, exist_ok=True)
+        web_backend = release_root / "services" / "web" / "backend"
+        web_routers = web_backend / "routers"
+        web_routers.mkdir(parents=True, exist_ok=True)
+        (web_backend / "main_web.py").write_text("print('web')\n", encoding="utf-8")
+        (web_backend / "main_workstation.py").write_text("print('workstation')\n", encoding="utf-8")
+        (web_routers / "workstation_capabilities.py").write_text("router = object()\n", encoding="utf-8")
+        (web_routers / "workstation_platform.py").write_text("router = object()\n", encoding="utf-8")
         (release_root / "services" / "web" / "config.example.json").write_text("{}", encoding="utf-8")
         compose = "services:\n  web:\n    image: fake\n"
     else:
@@ -110,8 +116,16 @@ def _run_deploy(
     prepare_default_web_release: bool = False,
     record_log_viewers: bool = False,
     pass_config_path: bool = True,
+    prepare_release_bundle: bool = True,
 ) -> subprocess.CompletedProcess[str]:
-    release_root, config_path = _prepare_release_bundle(tmp_path / "release", target)
+    if prepare_release_bundle:
+        release_root, config_path = _prepare_release_bundle(tmp_path / "release", target)
+    else:
+        release_root = tmp_path / "release"
+        config_path = release_root / "input-config.json"
+        release_root.mkdir(parents=True, exist_ok=True)
+        if not config_path.exists():
+            config_path.write_text(json.dumps({"migration": {}, "database": {}}), encoding="utf-8")
     if prepare_default_web_release:
         _prepare_release_bundle(tmp_path / "agentthespire-web-release", "web")
     bin_dir = tmp_path / "bin"
@@ -308,10 +322,35 @@ def test_deploy_docker_hybrid_accepts_explicit_web_release_root(tmp_path: Path):
 def test_deploy_docker_web_writes_python_base_image_to_env_file(tmp_path: Path):
     result = _run_deploy(tmp_path, "web")
     env_file = tmp_path / "release" / "runtime" / ".env"
+    web_config_path = tmp_path / "release" / "runtime" / "web.config.json"
+    workstation_config_path = tmp_path / "release" / "runtime" / "workstation.config.json"
+    compose_path = tmp_path / "release" / "docker-compose.yml"
 
     assert result.returncode == 0, result.stderr
     assert env_file.exists()
-    assert "ATS_PYTHON_BASE_IMAGE=" in env_file.read_text(encoding="utf-8")
+    env_content = env_file.read_text(encoding="utf-8")
+    assert "ATS_PYTHON_BASE_IMAGE=" in env_content
+    assert "ATS_WORKSTATION_CONTROL_TOKEN=" in env_content
+    assert workstation_config_path.exists()
+    web_config = json.loads(web_config_path.read_text(encoding="utf-8"))
+    assert web_config["platform_execution"]["workstation_url"] == "http://127.0.0.1:7860"
+    assert web_config["platform_execution"]["workstation_config_path"] == "runtime/workstation.config.json"
+    assert web_config["platform_execution"]["auto_start"] is True
+    assert web_config["platform_execution"]["control_token_env"] == "ATS_WORKSTATION_CONTROL_TOKEN"
+    compose_content = compose_path.read_text(encoding="utf-8")
+    assert "ATS_WORKSTATION_CONTROL_TOKEN" in compose_content
+    assert "./runtime:/app/runtime" in compose_content
+
+
+def test_deploy_docker_web_rejects_release_without_managed_workstation_entrypoint(tmp_path: Path):
+    release_root, _ = _prepare_release_bundle(tmp_path / "release", "web")
+    (release_root / "services" / "web" / "backend" / "main_workstation.py").unlink()
+
+    result = _run_deploy(tmp_path, "web", prepare_release_bundle=False)
+
+    assert result.returncode != 0
+    assert "web release 缺少托管 Workstation 必需文件" in result.stderr
+    assert "package-release.ps1 web" in result.stderr
 
 
 def test_deploy_docker_web_debug_resets_database_and_imports_test_data(tmp_path: Path):

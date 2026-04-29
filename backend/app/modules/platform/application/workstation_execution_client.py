@@ -6,7 +6,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Protocol
 from urllib.parse import urljoin
 
 from app.modules.platform.contracts.runner_contracts import StepExecutionResult
@@ -26,12 +26,18 @@ class WorkstationExecutionClientError(RuntimeError):
 WorkstationEventHandler = Callable[[list[WorkstationExecutionEvent]], None]
 
 
+class WorkstationRuntimeController(Protocol):
+    def ensure_started(self):
+        ...
+
+
 @dataclass(slots=True)
 class WorkstationExecutionClient:
     settings: Settings
     urlopen: Callable[..., object] = urllib.request.urlopen
     sleep: Callable[[float], None] = time.sleep
     monotonic: Callable[[], float] = time.monotonic
+    runtime_controller: WorkstationRuntimeController | None = None
 
     def dispatch_and_poll(
         self,
@@ -49,6 +55,7 @@ class WorkstationExecutionClient:
         )
 
     def dispatch(self, request: WorkstationExecutionDispatchRequest) -> WorkstationExecutionDispatchAccepted:
+        self._ensure_runtime_ready()
         payload = self._request_json(
             "POST",
             "/api/workstation/platform/executions",
@@ -104,8 +111,9 @@ class WorkstationExecutionClient:
         timeout_seconds: int,
     ) -> dict[str, object]:
         data = None if body is None else json.dumps(body).encode("utf-8")
+        url = urljoin(str(self.config.get("workstation_url", "http://127.0.0.1:7860")), path)
         request = urllib.request.Request(
-            urljoin(str(self.config.get("workstation_url", "http://127.0.0.1:7860")), path),
+            url,
             data=data,
             method=method,
             headers={
@@ -118,9 +126,9 @@ class WorkstationExecutionClient:
             with response:
                 raw = response.read()
         except urllib.error.HTTPError as exc:
-            raise WorkstationExecutionClientError(f"workstation request failed: HTTP {exc.code}") from exc
+            raise WorkstationExecutionClientError(f"workstation request failed: url={url} HTTP {exc.code}") from exc
         except OSError as exc:
-            raise WorkstationExecutionClientError(f"workstation request failed: {exc}") from exc
+            raise WorkstationExecutionClientError(f"workstation request failed: url={url} error={exc}") from exc
 
         decoded = json.loads(raw.decode("utf-8") if raw else "{}")
         if not isinstance(decoded, dict):
@@ -133,3 +141,21 @@ class WorkstationExecutionClient:
         if not token:
             raise WorkstationExecutionClientError("workstation control token is not configured")
         return token
+
+    def _ensure_runtime_ready(self) -> None:
+        if self.runtime_controller is None:
+            return
+        status = self.runtime_controller.ensure_started()
+        status_payload = status.model_dump() if hasattr(status, "model_dump") else {}
+        if status_payload.get("running") is True:
+            capabilities = status_payload.get("capabilities")
+            if isinstance(capabilities, dict) and capabilities.get("available") is True:
+                return
+        reason = str(status_payload.get("last_error") or "")
+        capabilities = status_payload.get("capabilities")
+        if not reason and isinstance(capabilities, dict):
+            reason = str(capabilities.get("reason") or "")
+        workstation_url = str(status_payload.get("workstation_url") or self.config.get("workstation_url", ""))
+        raise WorkstationExecutionClientError(
+            f"workstation runtime unavailable before dispatch: url={workstation_url} reason={reason or 'not running'}"
+        )

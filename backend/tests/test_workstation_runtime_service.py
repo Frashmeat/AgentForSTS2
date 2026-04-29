@@ -47,9 +47,16 @@ def _settings(**platform_execution) -> Settings:
     return Settings.from_dict({"platform_execution": platform_execution})
 
 
+def _write_workstation_config(root: Path) -> None:
+    config_path = root / "runtime" / "workstation.config.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("{}", encoding="utf-8")
+
+
 def test_workstation_runtime_manager_starts_with_generated_control_token(monkeypatch, tmp_path):
     calls = []
     process = FakeProcess()
+    _write_workstation_config(tmp_path)
 
     def fake_popen(*args, **kwargs):
         calls.append((args, kwargs))
@@ -80,10 +87,13 @@ def test_workstation_runtime_manager_starts_with_generated_control_token(monkeyp
     assert status["pid"] == 4321
     assert status["capabilities"]["available"] is True
     assert status["capabilities"]["generation"]["text_generation_available"] is True
+    assert status["stdout_log_path"].replace("\\", "/").endswith("runtime/logs/web-workstation.stdout.log")
+    assert status["stderr_log_path"].replace("\\", "/").endswith("runtime/logs/web-workstation.stderr.log")
 
 
 def test_workstation_runtime_manager_reuses_running_process(tmp_path):
     calls = []
+    _write_workstation_config(tmp_path)
 
     def fake_popen(*args, **kwargs):
         calls.append((args, kwargs))
@@ -94,6 +104,7 @@ def test_workstation_runtime_manager_reuses_running_process(tmp_path):
         cwd=tmp_path,
         popen_factory=fake_popen,
         token_factory=lambda: "generated-token",
+        urlopen=lambda *args, **kwargs: FakeResponse({"generation": {"text_generation_available": True}}),
     )
 
     manager.ensure_started()
@@ -104,11 +115,13 @@ def test_workstation_runtime_manager_reuses_running_process(tmp_path):
 
 def test_workstation_runtime_manager_stops_managed_process(tmp_path):
     process = FakeProcess()
+    _write_workstation_config(tmp_path)
     manager = WorkstationRuntimeManager(
         settings=_settings(control_token_env="TEST_WORKSTATION_TOKEN"),
         cwd=tmp_path,
         popen_factory=lambda *args, **kwargs: process,
         token_factory=lambda: "generated-token",
+        urlopen=lambda *args, **kwargs: FakeResponse({"generation": {"text_generation_available": True}}),
     )
 
     manager.ensure_started()
@@ -141,6 +154,7 @@ def test_workstation_runtime_manager_resolves_release_relative_config_path(tmp_p
     release_root = tmp_path / "release"
     cwd = release_root / "services" / "web" / "backend"
     cwd.mkdir(parents=True)
+    _write_workstation_config(release_root)
 
     def fake_popen(*args, **kwargs):
         calls.append((args, kwargs))
@@ -154,6 +168,7 @@ def test_workstation_runtime_manager_resolves_release_relative_config_path(tmp_p
         cwd=cwd,
         popen_factory=fake_popen,
         token_factory=lambda: "generated-token",
+        urlopen=lambda *args, **kwargs: FakeResponse({"generation": {"text_generation_available": True}}),
     )
 
     manager.ensure_started()
@@ -161,3 +176,97 @@ def test_workstation_runtime_manager_resolves_release_relative_config_path(tmp_p
     assert calls[0][1]["env"]["SPIREFORGE_CONFIG_PATH"] == str(
         release_root / "runtime" / "workstation.config.json"
     )
+
+
+def test_workstation_runtime_manager_fails_fast_when_config_is_missing(tmp_path):
+    calls = []
+    manager = WorkstationRuntimeManager(
+        settings=_settings(control_token_env="TEST_WORKSTATION_TOKEN"),
+        cwd=tmp_path,
+        popen_factory=lambda *args, **kwargs: calls.append((args, kwargs)),
+        token_factory=lambda: "generated-token",
+    )
+
+    status = manager.ensure_started().model_dump()
+
+    assert calls == []
+    assert status["running"] is False
+    assert "workstation config file not found" in status["last_error"]
+
+
+def test_workstation_runtime_manager_reports_process_exit_with_log_tail(tmp_path):
+    _write_workstation_config(tmp_path)
+    process = FakeProcess()
+    process.terminated = True
+
+    def fake_popen(*args, **kwargs):
+        kwargs["stderr"].write(b"fatal boot error\n")
+        return process
+
+    manager = WorkstationRuntimeManager(
+        settings=_settings(
+            control_token_env="TEST_WORKSTATION_TOKEN",
+            startup_timeout_seconds=1,
+        ),
+        cwd=tmp_path,
+        popen_factory=fake_popen,
+        token_factory=lambda: "generated-token",
+        sleep=lambda seconds: None,
+    )
+
+    status = manager.ensure_started().model_dump()
+
+    assert status["running"] is False
+    assert "workstation process exited with code 0" in status["last_error"]
+    assert "fatal boot error" in status["last_error"]
+
+
+def test_workstation_runtime_manager_reads_fixed_log_tail(tmp_path):
+    manager = WorkstationRuntimeManager(
+        settings=_settings(control_token_env="TEST_WORKSTATION_TOKEN"),
+        cwd=tmp_path,
+    )
+    log_dir = tmp_path / "runtime" / "logs"
+    log_dir.mkdir(parents=True)
+    log_content = "line-1\nline-2\nline-3"
+    log_path = log_dir / "web-workstation.stderr.log"
+    log_path.write_text(log_content, encoding="utf-8")
+
+    result = manager.read_runtime_log_tail("stderr", tail_bytes=12).model_dump()
+
+    assert result["stream"] == "stderr"
+    assert result["exists"] is True
+    assert result["size_bytes"] == log_path.stat().st_size
+    assert result["tail_bytes"] == 12
+    assert result["truncated"] is True
+    assert str(result["content"]).endswith("line-3")
+    assert str(result["path"]).replace("\\", "/").endswith("runtime/logs/web-workstation.stderr.log")
+
+
+def test_workstation_runtime_manager_reports_missing_log_file(tmp_path):
+    manager = WorkstationRuntimeManager(
+        settings=_settings(control_token_env="TEST_WORKSTATION_TOKEN"),
+        cwd=tmp_path,
+    )
+
+    result = manager.read_runtime_log_tail("stdout").model_dump()
+
+    assert result["stream"] == "stdout"
+    assert result["exists"] is False
+    assert result["size_bytes"] == 0
+    assert result["truncated"] is False
+    assert result["content"] == ""
+
+
+def test_workstation_runtime_manager_rejects_unknown_log_stream(tmp_path):
+    manager = WorkstationRuntimeManager(
+        settings=_settings(control_token_env="TEST_WORKSTATION_TOKEN"),
+        cwd=tmp_path,
+    )
+
+    try:
+        manager.read_runtime_log_tail("../config")
+    except ValueError as error:
+        assert str(error) == "stream must be stdout or stderr"
+    else:
+        raise AssertionError("expected ValueError for invalid stream")

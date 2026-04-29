@@ -169,7 +169,13 @@ def test_package_release_web_does_not_require_frontend_directory(tmp_path: Path)
 
     backend_dir = temp_repo / "backend"
     backend_dir.mkdir(parents=True, exist_ok=True)
+    routers_dir = backend_dir / "routers"
+    routers_dir.mkdir(parents=True, exist_ok=True)
     (backend_dir / "main.py").write_text("print('ok')\n", encoding="utf-8")
+    (backend_dir / "main_web.py").write_text("print('web')\n", encoding="utf-8")
+    (backend_dir / "main_workstation.py").write_text("print('workstation')\n", encoding="utf-8")
+    (routers_dir / "workstation_capabilities.py").write_text("router = object()\n", encoding="utf-8")
+    (routers_dir / "workstation_platform.py").write_text("router = object()\n", encoding="utf-8")
     (temp_repo / "config.example.json").write_text("{}\n", encoding="utf-8")
 
     completed = _run_package_release(temp_repo, "web", "-NoZip")
@@ -177,6 +183,17 @@ def test_package_release_web_does_not_require_frontend_directory(tmp_path: Path)
     assert completed.returncode == 0, completed.stderr
     assert "缺少frontend 目录" not in completed.stderr
     assert (temp_repo / "tools" / "latest" / "artifacts" / "agentthespire-web-release").exists()
+
+
+def test_package_release_web_keeps_managed_workstation_entrypoint_and_internal_routes():
+    script = SCRIPT_SOURCE.read_text(encoding="utf-8")
+    web_case = script.split('"web" {', 1)[1].split("default {", 1)[0]
+
+    assert 'Name = "web"' in web_case
+    assert "RemovePaths = @()" in web_case
+    assert "main_workstation.py" not in web_case
+    assert "routers/workstation_capabilities.py" not in web_case
+    assert "routers/workstation_platform.py" not in web_case
 
 
 def test_package_release_debug_reuses_previous_workstation_config(tmp_path: Path):

@@ -154,7 +154,10 @@ export function AdminServerCredentialsPage() {
         setMessage("服务器凭据已保存。");
       }
       await loadData();
-      startCreate();
+      setForm({
+        ...emptyForm,
+        execution_profile_id: selectedProfileId ?? profiles[0]?.id ?? 0,
+      });
     } catch (submitError) {
       setError(resolveErrorMessage(submitError) || "服务器凭据保存失败");
     } finally {
@@ -178,7 +181,7 @@ export function AdminServerCredentialsPage() {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="mx-auto max-w-7xl space-y-5">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-slate-950">服务器凭据</h1>
@@ -193,16 +196,19 @@ export function AdminServerCredentialsPage() {
       {error ? <section className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</section> : null}
       {message ? <section className="rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{message}</section> : null}
 
-      <section className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+      <section className="grid items-start gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
         <div className="rounded-lg border border-white bg-white/85 p-4 shadow-sm">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <h2 className="text-base font-semibold text-slate-900">凭据表单</h2>
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-slate-900">凭据表单</h2>
+              <p className="mt-1 text-xs text-slate-500">{form.id === null ? "新增服务器模型凭据" : `正在编辑 #${form.id}`}</p>
+            </div>
             <button type="button" onClick={startCreate} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 transition hover:border-violet-200 hover:text-violet-700">
               <Plus size={14} />
               <span>新增</span>
             </button>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3">
             <label className="space-y-1 text-sm text-slate-600">
               <span>执行配置</span>
               <select value={form.execution_profile_id || ""} onChange={(event) => patchForm({ execution_profile_id: Number(event.target.value) })} className="w-full rounded-lg border border-slate-200 px-3 py-2">
@@ -214,20 +220,22 @@ export function AdminServerCredentialsPage() {
               <span>名称</span>
               <input value={form.label} onChange={(event) => patchForm({ label: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2" />
             </label>
-            <label className="space-y-1 text-sm text-slate-600">
-              <span>服务商</span>
-              <select value={form.provider} onChange={(event) => patchForm({ provider: event.target.value === "anthropic" ? "anthropic" : "openai" })} className="w-full rounded-lg border border-slate-200 px-3 py-2">
-                <option value="openai">{formatAdminProvider("openai")}</option>
-                <option value="anthropic">{formatAdminProvider("anthropic")}</option>
-              </select>
-            </label>
-            <label className="space-y-1 text-sm text-slate-600">
-              <span>认证方式</span>
-              <select value={form.auth_type} onChange={(event) => patchForm({ auth_type: event.target.value === "ak_sk" ? "ak_sk" : "api_key" })} className="w-full rounded-lg border border-slate-200 px-3 py-2">
-                <option value="api_key">{formatAdminAuthType("api_key")}</option>
-                <option value="ak_sk">{formatAdminAuthType("ak_sk")}</option>
-              </select>
-            </label>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+              <label className="space-y-1 text-sm text-slate-600">
+                <span>服务商</span>
+                <select value={form.provider} onChange={(event) => patchForm({ provider: event.target.value === "anthropic" ? "anthropic" : "openai" })} className="w-full rounded-lg border border-slate-200 px-3 py-2">
+                  <option value="openai">{formatAdminProvider("openai")}</option>
+                  <option value="anthropic">{formatAdminProvider("anthropic")}</option>
+                </select>
+              </label>
+              <label className="space-y-1 text-sm text-slate-600">
+                <span>认证方式</span>
+                <select value={form.auth_type} onChange={(event) => patchForm({ auth_type: event.target.value === "ak_sk" ? "ak_sk" : "api_key" })} className="w-full rounded-lg border border-slate-200 px-3 py-2">
+                  <option value="api_key">{formatAdminAuthType("api_key")}</option>
+                  <option value="ak_sk">{formatAdminAuthType("ak_sk")}</option>
+                </select>
+              </label>
+            </div>
             <label className="space-y-1 text-sm text-slate-600">
               <span>密钥</span>
               <input value={form.credential} onChange={(event) => patchForm({ credential: event.target.value })} placeholder={form.id ? "留空表示保留原值" : "输入 API Key / AK"} className="w-full rounded-lg border border-slate-200 px-3 py-2" />
@@ -249,13 +257,18 @@ export function AdminServerCredentialsPage() {
             <input type="checkbox" checked={form.enabled} onChange={(event) => patchForm({ enabled: event.target.checked })} />
             <span>启用凭据</span>
           </label>
-          <button type="button" onClick={() => void submitForm()} disabled={saving || !form.execution_profile_id} className="mt-4 inline-flex items-center gap-2 rounded-lg bg-violet-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-violet-800 disabled:opacity-50">
-            <Save size={16} />
-            <span>{form.id === null ? "新增服务器凭据" : "保存服务器凭据"}</span>
-          </button>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <button type="button" onClick={() => void submitForm()} disabled={saving || !form.execution_profile_id} className="inline-flex items-center gap-2 rounded-lg bg-violet-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-violet-800 disabled:opacity-50">
+              <Save size={16} />
+              <span>{form.id === null ? "新增服务器凭据" : "保存服务器凭据"}</span>
+            </button>
+            <button type="button" onClick={startCreate} className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 transition hover:border-violet-200 hover:text-violet-700">
+              清空表单
+            </button>
+          </div>
         </div>
 
-        <div className="rounded-lg border border-white bg-white/85 p-4 shadow-sm">
+        <div className="min-w-0 rounded-lg border border-white bg-white/85 p-4 shadow-sm">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-base font-semibold text-slate-900">凭据列表</h2>
             <select value={selectedProfileId ?? ""} onChange={(event) => { const value = event.target.value ? Number(event.target.value) : null; setSelectedProfileId(value); void loadData(value); }} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
@@ -263,16 +276,22 @@ export function AdminServerCredentialsPage() {
               {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.display_name}</option>)}
             </select>
           </div>
-          <div className="space-y-3">
-            {credentials.map((credential) => {
-              const status = formatAdminStatus(credential.health_status);
-              return (
-                <article key={credential.id} className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3">
+          {credentials.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-slate-200 px-4 py-6 text-sm text-slate-500">
+              当前筛选条件下没有服务器凭据。
+            </p>
+          ) : (
+            <div className="grid gap-3 2xl:grid-cols-2">
+              {credentials.map((credential) => {
+                const status = formatAdminStatus(credential.health_status);
+                return (
+                  <article key={credential.id} className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3">
                   <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-sm font-semibold text-slate-900">{credential.label || `凭据 ${credential.id}`}</p>
                       <p className="mt-1 text-xs text-slate-500">{profileById.get(credential.execution_profile_id)?.display_name ?? "未知配置"}</p>
                       <p className="mt-1 text-xs text-slate-500">{formatAdminProvider(credential.provider)} / {formatAdminAuthType(credential.auth_type)} / 优先级 {credential.priority}</p>
+                      <p className="mt-1 break-all text-xs text-slate-500">{credential.base_url || "未配置 Base URL"}</p>
                       {credential.last_error_message ? <p className="mt-1 text-xs text-rose-600">{credential.last_error_message}</p> : null}
                     </div>
                     <div className="text-right text-xs">
@@ -290,10 +309,11 @@ export function AdminServerCredentialsPage() {
                     )}
                     <button type="button" onClick={() => void runCredentialAction(() => runAdminServerCredentialHealthCheck(credential.id), "服务器凭据健康检查已完成。")} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 transition hover:border-violet-200 hover:text-violet-700 disabled:opacity-50" disabled={saving || !credential.enabled}>健康检查</button>
                   </div>
-                </article>
-              );
-            })}
-          </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
         </div>
       </section>
     </div>

@@ -27,6 +27,7 @@ services:
       SPIREFORGE_CONFIG_PATH: /app/config.json
       SPIREFORGE_AUTH_SESSION_SECRET: ${SPIREFORGE_AUTH_SESSION_SECRET}
       SPIREFORGE_SERVER_CREDENTIAL_SECRET: ${SPIREFORGE_SERVER_CREDENTIAL_SECRET}
+      ATS_WORKSTATION_CONTROL_TOKEN: ${ATS_WORKSTATION_CONTROL_TOKEN}
     depends_on:
       postgres:
         condition: service_healthy
@@ -34,6 +35,7 @@ services:
       - "${ATS_WEB_PORT:-7870}:7870"
     volumes:
       - ./runtime/web.config.json:/app/config.json:ro
+      - ./runtime:/app/runtime
 
 volumes:
   ats_postgres_data:

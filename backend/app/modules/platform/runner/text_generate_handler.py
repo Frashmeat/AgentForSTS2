@@ -5,6 +5,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from app.modules.platform.contracts.runner_contracts import StepExecutionBinding, StepExecutionRequest
+from .upstream_error_classifier import UpstreamErrorClassification, classify_upstream_error
 
 
 CompleteTextFn = Callable[[str, dict[str, object], Path | None], Awaitable[str]]
@@ -18,35 +19,27 @@ def _short_text(value: object, limit: int = 300) -> str:
     return f"{text[:limit]}..."
 
 
-class UpstreamTextGenerationBlockedError(RuntimeError):
-    reason_code = "upstream_request_blocked"
-
-    def __init__(self, raw_error: str) -> None:
-        super().__init__(
-            "上游模型拒绝了这次请求。该描述可能触发内容安全策略；请改写描述或切换可用的执行配置后重试。"
-        )
-        self.raw_error = raw_error
+class UpstreamTextGenerationError(RuntimeError):
+    def __init__(self, classification: UpstreamErrorClassification) -> None:
+        super().__init__(classification.reason_message)
+        self.classification = classification
+        self.raw_error = classification.raw_error
+        self.reason_code = classification.reason_code
 
     def to_error_payload(self) -> dict[str, object]:
         return {
             "reason_code": self.reason_code,
             "reason_message": str(self),
+            "upstream_category": self.classification.upstream_category,
+            "retryable": self.classification.retryable,
+            "http_status": self.classification.http_status,
+            "provider_error_code": self.classification.provider_error_code,
             "raw_error": self.raw_error,
         }
 
 
-def _is_upstream_request_blocked(error: Exception) -> bool:
-    text = str(error).lower()
-    return any(
-        marker in text
-        for marker in (
-            "request was blocked",
-            "content policy",
-            "safety policy",
-            "content_filter",
-            "content filter",
-        )
-    )
+class UpstreamTextGenerationBlockedError(UpstreamTextGenerationError):
+    pass
 
 
 def build_text_llm_config(binding: StepExecutionBinding) -> dict[str, object]:
@@ -92,19 +85,24 @@ async def execute_text_generate_step(
     try:
         output = await complete_text_fn(prompt, llm_cfg, None)
     except Exception as error:
-        if _is_upstream_request_blocked(error):
+        classification = classify_upstream_error(error)
+        if classification.reason_code != "upstream_unclassified_error":
             logger.warning(
-                "platform text generation blocked job_id=%s job_item_id=%s step_id=%s provider=%s model=%s "
-                "reason_code=%s raw_error=%s",
+                "platform text generation upstream failed job_id=%s job_item_id=%s step_id=%s provider=%s model=%s "
+                "reason_code=%s upstream_category=%s retryable=%s http_status=%s provider_error_code=%s raw_error=%s",
                 request.job_id,
                 request.job_item_id,
                 request.step_id,
                 request.execution_binding.provider,
                 request.execution_binding.model,
-                UpstreamTextGenerationBlockedError.reason_code,
+                classification.reason_code,
+                classification.upstream_category,
+                classification.retryable,
+                classification.http_status,
+                classification.provider_error_code,
                 _short_text(error),
             )
-            raise UpstreamTextGenerationBlockedError(str(error)) from error
+            raise UpstreamTextGenerationBlockedError(classification) from error
         logger.exception(
             "platform text generation failed job_id=%s job_item_id=%s step_id=%s provider=%s model=%s error=%s",
             request.job_id,

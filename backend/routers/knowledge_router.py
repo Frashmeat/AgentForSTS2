@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 
 from app.modules.knowledge.infra import knowledge_runtime
 
@@ -49,6 +49,28 @@ def get_latest_refresh_knowledge():
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/export-pack")
+def export_current_knowledge_pack():
+    try:
+        package = _runtime().export_current_knowledge_pack_zip()
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    file_name = str(package.get("file_name", "workstation-current-knowledge-pack.zip"))
+    return Response(
+        content=package["content"],
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{file_name}"',
+            "X-ATS-Knowledge-Pack-File-Count": str(package.get("file_count", "")),
+        },
+    )
 
 
 @router.get("/refresh/{task_id}")

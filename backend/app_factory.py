@@ -185,6 +185,7 @@ def _register_web_workstation_runtime_lifecycle(app: FastAPI) -> None:
         cwd=Path(__file__).resolve().parent,
     )
     app.state.workstation_runtime_manager = manager
+    container.register_singleton("platform.workstation_runtime_manager", manager)
 
     @app.on_event("startup")
     async def _start_managed_workstation() -> None:

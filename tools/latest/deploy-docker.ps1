@@ -210,6 +210,25 @@ function Assert-CommandExists {
     }
 }
 
+function Assert-WebReleaseSupportsManagedWorkstation {
+    param([string]$ReleaseRoot)
+
+    $webBackendRoot = Join-Path (Join-Path (Join-Path $ReleaseRoot "services") "web") "backend"
+    $requiredRelativePaths = @(
+        "main_web.py",
+        "main_workstation.py",
+        "routers\workstation_capabilities.py",
+        "routers\workstation_platform.py"
+    )
+
+    foreach ($relativePath in $requiredRelativePaths) {
+        $path = Join-Path $webBackendRoot $relativePath
+        if (-not (Test-Path -LiteralPath $path)) {
+            throw "web release 缺少托管 Workstation 必需文件: $path。请先重新执行 tools\latest\package-release.ps1 web 生成新版 release，再部署。"
+        }
+    }
+}
+
 function Resolve-PythonCommand {
     param(
         [string]$BackendRoot = "",
@@ -1314,6 +1333,7 @@ function New-RuntimeConfig {
     $config["migration"] = Ensure-Hashtable -Value $config["migration"]
     $config["database"] = Ensure-Hashtable -Value $config["database"]
     $config["auth"] = Ensure-Hashtable -Value $config["auth"]
+    $config["platform_execution"] = Ensure-Hashtable -Value $config["platform_execution"]
     $config["runtime"] = Ensure-Hashtable -Value $config["runtime"]
     $config["runtime"]["workstation"] = Ensure-Hashtable -Value $config["runtime"]["workstation"]
     $config["runtime"]["web"] = Ensure-Hashtable -Value $config["runtime"]["web"]
@@ -1325,6 +1345,8 @@ function New-RuntimeConfig {
     $config["runtime"]["workstation"]["cors_origins"] = Merge-UniqueStringList -Primary $config["runtime"]["workstation"]["cors_origins"] -Additional $sharedLoopbackOrigins
     $config["runtime"]["web"]["cors_origins"] = Merge-UniqueStringList -Primary $config["runtime"]["web"]["cors_origins"] -Additional $sharedLoopbackOrigins
     $config["runtime"]["workstation"]["allow_loopback_origins"] = $true
+    $config["platform_execution"]["control_token_env"] = "ATS_WORKSTATION_CONTROL_TOKEN"
+    $config["platform_execution"]["workstation_config_path"] = "runtime/workstation.config.json"
 
     if ($Mode -eq "web") {
         # Web 目标始终接管数据库连接，并强制打开平台 API 相关开关。
@@ -1335,10 +1357,14 @@ function New-RuntimeConfig {
         $config["migration"]["platform_service_split_enabled"] = $true
         $config["auth"]["session_secret"] = ""
         $config["runtime"]["web"]["allow_loopback_origins"] = $true
+        $config["platform_execution"]["auto_start"] = $true
+        $config["platform_execution"]["workstation_url"] = "http://127.0.0.1:{0}" -f $ResolvedWorkstationPort
     } else {
         # workstation 中的工作站进程不应暴露 web 平台路由。
         $config["migration"]["platform_jobs_api_enabled"] = $false
         $config["migration"]["platform_service_split_enabled"] = $false
+        $config["platform_execution"]["auto_start"] = $false
+        $config["platform_execution"]["workstation_url"] = "http://127.0.0.1:{0}" -f $ResolvedWorkstationPort
     }
 
     return $config
@@ -1420,6 +1446,11 @@ function Write-ComposeEnvFile {
                 }
             }
 
+            $workstationControlToken = [string]$existingEnv["ATS_WORKSTATION_CONTROL_TOKEN"]
+            if ([string]::IsNullOrWhiteSpace($workstationControlToken)) {
+                $workstationControlToken = New-RandomHexSecret
+            }
+
             @(
                 "ATS_WEB_PORT=$WebPort"
                 "ATS_POSTGRES_HOST_PORT=$PostgresHostPort"
@@ -1430,6 +1461,7 @@ function Write-ComposeEnvFile {
                 "ATS_PYTHON_BASE_IMAGE=$ResolvedPythonBaseImage"
                 "SPIREFORGE_AUTH_SESSION_SECRET=$sessionSecret"
                 "SPIREFORGE_SERVER_CREDENTIAL_SECRET=$credentialSecret"
+                "ATS_WORKSTATION_CONTROL_TOKEN=$workstationControlToken"
             )
         }
         default {
@@ -1603,6 +1635,9 @@ function Start-LocalWorkstationDeployment {
     Write-Host "  Python 解释器 : $pythonCommand"
     Write-Host "  stdout 日志   : $($logPaths.StdOut)"
     Write-Host "  stderr 日志   : $($logPaths.StdErr)"
+    if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable("ATS_WORKSTATION_CONTROL_TOKEN"))) {
+        [Environment]::SetEnvironmentVariable("ATS_WORKSTATION_CONTROL_TOKEN", (New-RandomHexSecret), "Process")
+    }
     $processEntry = Start-LocalProcessWithMirroredLogs -ServiceName "workstation" -FilePath $pythonCommand -ArgumentList @(
         "-m",
         "uvicorn",
@@ -1839,6 +1874,7 @@ if ($targetUsesDockerInCurrentRelease) {
     Assert-CommandExists -CommandName "docker"
     Sync-ReleaseComposeTemplate -TargetName $Target -ReleaseRoot $effectiveReleaseRoot
     Assert-PathExists -Path $composeFile -Label "docker-compose.yml"
+    Assert-WebReleaseSupportsManagedWorkstation -ReleaseRoot $effectiveReleaseRoot
 }
 
 $workstationServiceDir = Join-Path (Join-Path $effectiveReleaseRoot "services") "workstation"
@@ -1869,6 +1905,8 @@ if ($Target -eq "web") {
     $webSourceConfigPath = $sourceConfigPath
     $webSourceConfig = Read-JsonHashtableFile -Path $webSourceConfigPath
     Write-ComposeEnvFile -TargetName $Target -EnvPath $envFile -ResolvedPostgresImage $resolvedPostgresImage -ResolvedPythonBaseImage $resolvedPythonBaseImage -SourceConfig $webSourceConfig
+    $workstationConfig = New-RuntimeConfig -SourceConfigPath $webSourceConfigPath -Mode "workstation" -DbUser $PostgresUser -DbPassword $PostgresPassword -DbName $PostgresDb -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebPort $resolvedWebPort -ResolvedFrontendPort $resolvedFrontendPort
+    Write-RuntimeConfigFile -Config $workstationConfig -OutputPath (Join-Path $runtimeDir "workstation.config.json")
     $webConfig = New-RuntimeConfig -SourceConfigPath $webSourceConfigPath -Mode "web" -DbUser $PostgresUser -DbPassword $PostgresPassword -DbName $PostgresDb -ResolvedWorkstationPort $resolvedWorkstationPort -ResolvedWebPort $resolvedWebPort -ResolvedFrontendPort $resolvedFrontendPort
     Write-RuntimeConfigFile -Config $webConfig -OutputPath (Join-Path $runtimeDir "web.config.json")
 }

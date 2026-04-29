@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import threading
+import io
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -358,7 +359,14 @@ def test_knowledge_pack_upload_activate_and_rollback(monkeypatch, tmp_path: Path
     pack = knowledge_runtime.upload_knowledge_pack_zip(archive_path.read_bytes(), file_name="sts2-pack.zip", label="STS2 Pack")
     activated = knowledge_runtime.activate_knowledge_pack(pack["pack_id"])
 
+    assert pack["file_count"] == 3
+    assert pack["files"] == [
+        "baselib/BaseLib.decompiled.cs",
+        "game/Game.cs",
+        "resources/sts2/common.md",
+    ]
     assert activated["active"] is True
+    assert activated["files"] == pack["files"]
     assert (knowledge_runtime.active_resource_knowledge_dir() / "common.md").read_text(encoding="utf-8") == "active common\n"
     assert (knowledge_runtime.active_game_knowledge_dir() / "Game.cs").exists()
     assert (knowledge_runtime.active_baselib_knowledge_dir() / "BaseLib.decompiled.cs").exists()
@@ -366,7 +374,50 @@ def test_knowledge_pack_upload_activate_and_rollback(monkeypatch, tmp_path: Path
     listed = knowledge_runtime.list_knowledge_packs()
     assert listed["active_pack_id"] == pack["pack_id"]
     assert listed["items"][0]["active"] is True
+    assert listed["items"][0]["files"] == pack["files"]
+    assert listed["active_pack"]["files"] == pack["files"]
 
     rolled_back = knowledge_runtime.rollback_knowledge_pack()
     assert rolled_back["active_pack"] is None
     assert knowledge_runtime.get_active_knowledge_pack() is None
+
+
+def test_export_current_knowledge_pack_zip_uses_effective_runtime_dirs(monkeypatch, tmp_path: Path):
+    knowledge_root = tmp_path / "runtime" / "knowledge"
+    packs_dir = knowledge_root / "packs"
+    active_path = knowledge_root / "active-knowledge-pack.json"
+    resource_runtime_dir = knowledge_root / "resources" / "sts2"
+    game_runtime_dir = knowledge_root / "game"
+    baselib_runtime_dir = knowledge_root / "baselib"
+    cache_dir = knowledge_root / "cache"
+
+    resource_runtime_dir.mkdir(parents=True)
+    game_runtime_dir.mkdir(parents=True)
+    baselib_runtime_dir.mkdir(parents=True)
+    (resource_runtime_dir / "common.md").write_text("current common\n", encoding="utf-8", newline="\n")
+    (game_runtime_dir / "Game.cs").write_text("// current game\n", encoding="utf-8", newline="\n")
+    (baselib_runtime_dir / "BaseLib.decompiled.cs").write_text("// current baselib\n", encoding="utf-8", newline="\n")
+
+    monkeypatch.setattr(knowledge_runtime, "KNOWLEDGE_ROOT", knowledge_root)
+    monkeypatch.setattr(knowledge_runtime, "KNOWLEDGE_PACKS_DIR", packs_dir)
+    monkeypatch.setattr(knowledge_runtime, "ACTIVE_KNOWLEDGE_PACK_PATH", active_path)
+    monkeypatch.setattr(knowledge_runtime, "RESOURCE_KNOWLEDGE_DIR", resource_runtime_dir)
+    monkeypatch.setattr(knowledge_runtime, "GAME_KNOWLEDGE_DIR", game_runtime_dir)
+    monkeypatch.setattr(knowledge_runtime, "BASELIB_KNOWLEDGE_DIR", baselib_runtime_dir)
+    monkeypatch.setattr(knowledge_runtime, "KNOWLEDGE_CACHE_DIR", cache_dir)
+    monkeypatch.setattr(knowledge_runtime, "GAME_KNOWLEDGE_SEED_DIR", tmp_path / "missing-game-seed", raising=False)
+    monkeypatch.setattr(knowledge_runtime, "GAME_KNOWLEDGE_SEED_FILE", tmp_path / "missing-game.md", raising=False)
+    monkeypatch.setattr(knowledge_runtime, "BASELIB_KNOWLEDGE_SEED_FILE", tmp_path / "missing-baselib.cs", raising=False)
+    monkeypatch.setattr(knowledge_runtime, "RESOURCE_KNOWLEDGE_SEED_DIR", tmp_path / "missing-resource-seed", raising=False)
+
+    package = knowledge_runtime.export_current_knowledge_pack_zip()
+
+    assert package["file_count"] == 3
+    assert package["files"] == [
+        "baselib/BaseLib.decompiled.cs",
+        "game/Game.cs",
+        "resources/sts2/common.md",
+    ]
+    with zipfile.ZipFile(io.BytesIO(package["content"])) as archive:
+        assert sorted(archive.namelist()) == package["files"]
+        assert archive.read("resources/sts2/common.md").decode("utf-8") == "current common\n"

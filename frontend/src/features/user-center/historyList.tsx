@@ -5,6 +5,13 @@ import { renderJobStatus } from "./statusText.ts";
 
 function resolveDeliveryBadge(deliveryState: string | undefined, resultSummary: string | undefined) {
   const normalizedState = String(deliveryState ?? "").trim();
+  const summary = String(resultSummary ?? "").trim();
+  if (summary.includes("服务器生成项目包") || summary.includes("项目包已生成")) {
+    return {
+      label: "项目包已生成",
+      className: "rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 font-medium text-sky-800",
+    };
+  }
   if (normalizedState === "deployed") {
     return {
       label: "已部署",
@@ -17,7 +24,6 @@ function resolveDeliveryBadge(deliveryState: string | undefined, resultSummary: 
       className: "rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 font-medium text-slate-700",
     };
   }
-  const summary = String(resultSummary ?? "").trim();
   if (summary.includes("部署到")) {
     return {
       label: "已部署",
@@ -47,7 +53,7 @@ export function HistoryList({ jobs }: { jobs: UserCenterJobSummary[] }) {
       <div className="mt-6 space-y-3">
         {jobs.length === 0 && (
           <div className="platform-page-empty px-4 py-6 text-sm text-slate-500">
-            暂无平台任务记录。用户中心不会读取本机恢复记录或 localStorage 快照。
+            暂无平台任务记录。用户中心不会读取本机恢复记录或浏览器本地快照。
           </div>
         )}
         {jobs.map(job => {

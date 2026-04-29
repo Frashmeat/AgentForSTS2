@@ -126,7 +126,10 @@ def _build_workstation_execution_client_from_container(container: Any) -> Workst
     if container.resolve_optional_singleton("runtime_role") != "web":
         return None
     settings = container.resolve_singleton("settings")
-    return WorkstationExecutionClient(settings=settings)
+    return WorkstationExecutionClient(
+        settings=settings,
+        runtime_controller=container.resolve_optional_singleton("platform.workstation_runtime_manager"),
+    )
 
 
 def _build_server_deploy_target_lock_service_from_container(container: Any) -> ServerDeployTargetLockService:

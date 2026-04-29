@@ -17,6 +17,8 @@ test("user center history stays isolated from local recovery sources", () => {
   assert.match(historySource, /平台任务/);
   assert.match(historySource, /resolveDeliveryBadge/);
   assert.match(historySource, /delivery_state/);
+  assert.match(historySource, /服务器生成项目包/);
+  assert.match(historySource, /项目包已生成/);
   assert.match(historySource, /已部署/);
   assert.match(historySource, /已构建/);
 });

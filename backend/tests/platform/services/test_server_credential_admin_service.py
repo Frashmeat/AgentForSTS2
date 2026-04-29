@@ -146,6 +146,11 @@ class FakeServerCredentialAdminRepository:
             last_error_message=current.last_error_message,
         )
 
+    def delete_server_credential(self, credential_id: int) -> None:
+        if credential_id not in self.entries:
+            raise LookupError(f"server credential not found: {credential_id}")
+        del self.entries[credential_id]
+
     def record_health_check_result(self, **payload) -> AdminServerCredentialHealthCheckView:
         current = self.entries[payload["credential_id"]]
         self.last_health_payload = payload
@@ -290,6 +295,20 @@ def test_server_credential_admin_service_disables_credential_without_running_hea
     assert item.enabled is False
     assert item.health_status == "disabled"
     assert checker.calls == []
+
+
+def test_server_credential_admin_service_does_not_expose_delete_operation():
+    repository = FakeServerCredentialAdminRepository()
+    cipher = ServerCredentialCipher("test-server-credential-secret")
+    checker = FakeServerCredentialHealthChecker()
+    service = ServerCredentialAdminService(
+        server_credential_admin_repository=repository,
+        server_credential_cipher=cipher,
+        server_credential_health_checker=checker,
+    )
+
+    assert not hasattr(service, "delete_server_credential")
+    assert repository.get_server_credential(1) is not None
 
 
 def test_server_credential_admin_service_runs_health_check_and_records_result():
