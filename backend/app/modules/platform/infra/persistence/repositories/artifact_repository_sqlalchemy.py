@@ -33,3 +33,14 @@ class ArtifactRepositorySqlAlchemy(ArtifactRepository):
             .order_by(ArtifactRecord.id.asc())
             .all()
         )
+
+    def find_by_id_for_user(self, artifact_id: int, user_id: int) -> ArtifactRecord | None:
+        return (
+            self.session.query(ArtifactRecord)
+            .filter(
+                ArtifactRecord.id == artifact_id,
+                ArtifactRecord.user_id == user_id,
+                ArtifactRecord.deleted_at.is_(None),
+            )
+            .one_or_none()
+        )

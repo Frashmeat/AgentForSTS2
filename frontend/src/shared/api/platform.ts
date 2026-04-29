@@ -72,6 +72,8 @@ export interface PlatformArtifactSummary {
   storage_provider: string;
   object_key: string;
   file_name: string;
+  mime_type?: string;
+  size_bytes?: number;
   result_summary: string;
 }
 

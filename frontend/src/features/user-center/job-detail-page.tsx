@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { AlertTriangle, Clock3, House } from "lucide-react";
+import { AlertTriangle, Clock3, Download, House } from "lucide-react";
 import { PlatformPageShell } from "../../components/platform/PlatformPageShell.tsx";
-import { getMyJob, listMyJobEvents, listMyJobItems } from "../../shared/api/me.ts";
+import { getMyArtifactDownloadUrl, getMyJob, listMyJobEvents, listMyJobItems } from "../../shared/api/me.ts";
 import type {
   PlatformArtifactSummary,
   PlatformJobDetail,
@@ -29,6 +29,8 @@ function renderArtifactTypeLabel(value: string) {
       return "构建产物";
     case "deployed_output":
       return "部署产物";
+    case "source_project":
+      return "项目源码包";
     default:
       return value || "未知产物";
   }
@@ -39,6 +41,10 @@ function resolveArtifactLocationLabel(artifact: PlatformArtifactSummary) {
     return "部署位置";
   }
   return "产物路径";
+}
+
+function isDownloadableArtifact(artifact: PlatformArtifactSummary) {
+  return artifact.storage_provider === "server_workspace" && artifact.artifact_type === "source_project";
 }
 
 function renderDeliveryStateLabel(value: string | undefined) {
@@ -207,7 +213,7 @@ export function UserCenterJobDetailPage() {
 
       {detail.artifacts && detail.artifacts.length > 0 ? (
         <section className="platform-page-card p-6">
-          <h2 className="text-lg font-semibold text-slate-900">构建产物</h2>
+          <h2 className="text-lg font-semibold text-slate-900">交付产物</h2>
           <div className="mt-6 space-y-3">
             {detail.artifacts.map((artifact) => (
               <article key={artifact.id} className="platform-page-subcard px-4 py-4">
@@ -227,6 +233,15 @@ export function UserCenterJobDetailPage() {
                     ) : null}
                     {artifact.storage_provider ? (
                       <p className="mt-1">来源：{artifact.storage_provider}</p>
+                    ) : null}
+                    {isDownloadableArtifact(artifact) ? (
+                      <a
+                        className="mt-3 inline-flex items-center justify-center gap-2 rounded-md bg-[var(--workspace-accent)] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[var(--workspace-accent-strong)]"
+                        href={getMyArtifactDownloadUrl(artifact.id)}
+                      >
+                        <Download size={14} />
+                        <span>下载项目包</span>
+                      </a>
                     ) : null}
                   </div>
                 </div>

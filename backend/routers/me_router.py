@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse
 
 from app.modules.platform.application.services import (
     JobApplicationService,
@@ -90,6 +92,11 @@ def _build_server_queued_job_claim_service(request: Request) -> ServerQueuedJobC
 def _build_platform_request_rate_limiter(request: Request) -> PlatformRequestRateLimiter:
     container = request.app.state.container
     return container.resolve_singleton("platform.request_rate_limiter")
+
+
+def _artifact_repository(session, request: Request):
+    container = request.app.state.container
+    return container.resolve_singleton("platform.artifact_repository_factory")(session)
 
 
 def _enrich_job_command_with_default_server_profile(
@@ -224,6 +231,25 @@ def list_job_events(request: Request, job_id: int, after_id: int | None = None, 
         user = require_current_user(request, session)
         service = _build_user_center_service(session, request)
         return [item.as_user_payload() for item in service.list_events(user.user_id, job_id, after_id=after_id, limit=limit)]
+
+
+@router.get("/artifacts/{artifact_id}/download")
+def download_artifact(request: Request, artifact_id: int):
+    with auth_session_scope(request) as session:
+        user = require_current_user(request, session)
+        artifact = _artifact_repository(session, request).find_by_id_for_user(artifact_id, user.user_id)
+        if artifact is None:
+            raise HTTPException(status_code=404, detail="artifact not found")
+        if artifact.storage_provider != "server_workspace":
+            raise HTTPException(status_code=400, detail="artifact is not downloadable")
+        path = Path(artifact.object_key).expanduser().resolve()
+        if not path.exists() or not path.is_file():
+            raise HTTPException(status_code=404, detail="artifact file not found")
+        return FileResponse(
+            path,
+            media_type=artifact.mime_type or "application/octet-stream",
+            filename=artifact.file_name or path.name,
+        )
 
 
 @router.get("/server-preferences")

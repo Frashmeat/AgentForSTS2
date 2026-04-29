@@ -17,3 +17,6 @@ class ArtifactRepository(ABC):
 
     @abstractmethod
     def list_by_execution(self, execution_id: int) -> list[ArtifactRecord]: ...
+
+    @abstractmethod
+    def find_by_id_for_user(self, artifact_id: int, user_id: int) -> ArtifactRecord | None: ...

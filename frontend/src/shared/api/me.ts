@@ -1,4 +1,4 @@
-import { buildApiPath, requestJson } from "./http.ts";
+import { buildApiPath, buildBackendUrl, requestJson } from "./http.ts";
 import type {
   PlatformExecutionProfileListView,
   PlatformJobDetail,
@@ -138,4 +138,8 @@ export function listMyJobEvents(jobId: number): Promise<PlatformJobEventSummary[
   return requestJson<PlatformJobEventSummary[]>(buildApiPath(`/api/me/jobs/${jobId}/events`, {}), {
     backend: "web",
   });
+}
+
+export function getMyArtifactDownloadUrl(artifactId: number): string {
+  return buildBackendUrl(buildApiPath(`/api/me/artifacts/${artifactId}/download`, {}), "web");
 }
