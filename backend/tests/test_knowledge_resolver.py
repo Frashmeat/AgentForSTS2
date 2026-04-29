@@ -84,3 +84,31 @@ def test_sts2_knowledge_resolver_group_codegen_deduplicates_asset_type_facts():
     assert "sts2.card.base_class" in keys
     assert "sts2.relic.base_class" in keys
     assert list(keys).count("sts2.card.base_class") <= 1
+
+
+def test_sts2_knowledge_resolver_prefers_active_knowledge_pack(monkeypatch, tmp_path: Path):
+    from app.modules.knowledge.infra import knowledge_runtime
+
+    active_root = tmp_path / "pack" / "content"
+    resource_root = active_root / "resources" / "sts2"
+    game_root = active_root / "game"
+    baselib_root = active_root / "baselib"
+    resource_root.mkdir(parents=True)
+    game_root.mkdir(parents=True)
+    baselib_root.mkdir(parents=True)
+    (resource_root / "common.md").write_text("active common guidance\n", encoding="utf-8")
+    (resource_root / "card.md").write_text("active card guidance\n", encoding="utf-8")
+    (game_root / "Game.cs").write_text("// active game\n", encoding="utf-8")
+    (baselib_root / "BaseLib.decompiled.cs").write_text("// active baselib\n", encoding="utf-8")
+
+    monkeypatch.setattr(knowledge_runtime, "active_resource_knowledge_dir", lambda: resource_root)
+    monkeypatch.setattr(knowledge_runtime, "active_game_knowledge_dir", lambda: game_root)
+    monkeypatch.setattr(knowledge_runtime, "active_baselib_knowledge_dir", lambda: baselib_root)
+
+    packet = Sts2KnowledgeResolver().resolve(
+        KnowledgeQuery(scenario="asset_codegen", domain="sts2", asset_type="card")
+    )
+
+    assert any(item.body == "active card guidance" for item in packet.guidance)
+    assert any(str(game_root) in item.body for item in packet.facts)
+    assert any(item.path == str(game_root) for item in packet.lookup)

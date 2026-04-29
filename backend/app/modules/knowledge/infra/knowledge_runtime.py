@@ -7,6 +7,7 @@ import subprocess
 import threading
 import time
 import uuid
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +26,9 @@ GAME_KNOWLEDGE_DIR = KNOWLEDGE_ROOT / "game"
 BASELIB_KNOWLEDGE_DIR = KNOWLEDGE_ROOT / "baselib"
 RESOURCE_KNOWLEDGE_DIR = KNOWLEDGE_ROOT / "resources" / "sts2"
 KNOWLEDGE_CACHE_DIR = KNOWLEDGE_ROOT / "cache"
+KNOWLEDGE_PACKS_DIR = KNOWLEDGE_ROOT / "packs"
 KNOWLEDGE_MANIFEST_PATH = KNOWLEDGE_ROOT / "knowledge-manifest.json"
+ACTIVE_KNOWLEDGE_PACK_PATH = KNOWLEDGE_ROOT / "active-knowledge-pack.json"
 BASELIB_REFERENCE_SEED_PATH = BACKEND_ROOT / "agents" / "baselib_src" / "BaseLib.decompiled.cs"
 GAME_KNOWLEDGE_SEED_DIR = BACKEND_ROOT / "agents" / "game_seed"
 GAME_KNOWLEDGE_SEED_FILE = GAME_REFERENCE_SEED_PATH
@@ -52,6 +55,7 @@ _ILSPY_SKIP_DIRS = {".git", ".venv", "node_modules", "__pycache__", ".tmp"}
 def ensure_knowledge_dirs() -> None:
     KNOWLEDGE_ROOT.mkdir(parents=True, exist_ok=True)
     KNOWLEDGE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    KNOWLEDGE_PACKS_DIR.mkdir(parents=True, exist_ok=True)
     GAME_KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
     BASELIB_KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
     RESOURCE_KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
@@ -155,6 +159,168 @@ def save_manifest(payload: dict[str, Any]) -> None:
     tmp_path.replace(KNOWLEDGE_MANIFEST_PATH)
 
 
+def _now_text() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%S%z")
+
+
+def _pack_meta_path(pack_id: str) -> Path:
+    return KNOWLEDGE_PACKS_DIR / pack_id / "pack-meta.json"
+
+
+def _pack_content_dir(pack_id: str) -> Path:
+    return KNOWLEDGE_PACKS_DIR / pack_id / "content"
+
+
+def _safe_pack_id(value: str) -> str:
+    text = str(value or "").strip()
+    if not text or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" for char in text):
+        raise ValueError("invalid knowledge pack id")
+    return text
+
+
+def _read_json_file(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    with open(path, "r", encoding="utf-8") as file:
+        payload = json.load(file)
+    return payload if isinstance(payload, dict) else None
+
+
+def get_active_knowledge_pack() -> dict[str, Any] | None:
+    active = _read_json_file(ACTIVE_KNOWLEDGE_PACK_PATH)
+    if not active:
+        return None
+    pack_id = str(active.get("pack_id", "")).strip()
+    if not pack_id:
+        return None
+    meta = _read_json_file(_pack_meta_path(pack_id))
+    if meta is None:
+        return None
+    return {**meta, "active": True, "activated_at": active.get("activated_at"), "previous_pack_id": active.get("previous_pack_id", "")}
+
+
+def _active_content_dir() -> Path | None:
+    active = get_active_knowledge_pack()
+    if not active:
+        return None
+    content_dir = _pack_content_dir(str(active["pack_id"]))
+    return content_dir if content_dir.exists() else None
+
+
+def active_resource_knowledge_dir() -> Path:
+    content_dir = _active_content_dir()
+    if content_dir is not None and (content_dir / "resources" / "sts2").exists():
+        return content_dir / "resources" / "sts2"
+    return RESOURCE_KNOWLEDGE_DIR
+
+
+def active_game_knowledge_dir() -> Path:
+    content_dir = _active_content_dir()
+    if content_dir is not None and (content_dir / "game").exists():
+        return content_dir / "game"
+    return GAME_KNOWLEDGE_DIR
+
+
+def active_baselib_knowledge_dir() -> Path:
+    content_dir = _active_content_dir()
+    if content_dir is not None and (content_dir / "baselib").exists():
+        return content_dir / "baselib"
+    return BASELIB_KNOWLEDGE_DIR
+
+
+def list_knowledge_packs() -> dict[str, Any]:
+    ensure_knowledge_dirs()
+    active = get_active_knowledge_pack()
+    active_pack_id = str(active.get("pack_id", "")) if active else ""
+    items: list[dict[str, Any]] = []
+    for meta_path in sorted(KNOWLEDGE_PACKS_DIR.glob("*/pack-meta.json")):
+        meta = _read_json_file(meta_path)
+        if meta is None:
+            continue
+        pack_id = str(meta.get("pack_id", "")).strip()
+        items.append({**meta, "active": pack_id == active_pack_id})
+    return {"active_pack_id": active_pack_id, "active_pack": active, "items": items}
+
+
+def _validate_zip_member(member_name: str) -> Path:
+    normalized = Path(member_name)
+    if normalized.is_absolute() or ".." in normalized.parts:
+        raise ValueError(f"unsafe knowledge pack path: {member_name}")
+    return normalized
+
+
+def upload_knowledge_pack_zip(content: bytes, *, file_name: str = "", label: str = "") -> dict[str, Any]:
+    ensure_knowledge_dirs()
+    pack_id = uuid.uuid4().hex
+    pack_root = KNOWLEDGE_PACKS_DIR / pack_id
+    content_dir = _pack_content_dir(pack_id)
+    content_dir.mkdir(parents=True, exist_ok=False)
+    zip_path = pack_root / (Path(file_name).name or "knowledge-pack.zip")
+    zip_path.write_bytes(content)
+
+    extracted_files: list[str] = []
+    try:
+        with zipfile.ZipFile(zip_path) as archive:
+            for member in archive.infolist():
+                relative = _validate_zip_member(member.filename)
+                if member.is_dir():
+                    continue
+                target = content_dir / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(member) as source, open(target, "wb") as destination:
+                    shutil.copyfileobj(source, destination)
+                extracted_files.append(str(relative).replace("\\", "/"))
+    except Exception:
+        shutil.rmtree(pack_root, ignore_errors=True)
+        raise
+
+    meta = {
+        "pack_id": pack_id,
+        "label": label.strip() or Path(file_name).stem or pack_id,
+        "file_name": Path(file_name).name,
+        "created_at": _now_text(),
+        "storage_path": str(pack_root),
+        "content_path": str(content_dir),
+        "file_count": len(extracted_files),
+        "has_resources": (content_dir / "resources" / "sts2").exists(),
+        "has_game": (content_dir / "game").exists(),
+        "has_baselib": (content_dir / "baselib" / "BaseLib.decompiled.cs").exists(),
+    }
+    with open(_pack_meta_path(pack_id), "w", encoding="utf-8") as file:
+        json.dump(meta, file, indent=2, ensure_ascii=False)
+    return meta
+
+
+def activate_knowledge_pack(pack_id: str) -> dict[str, Any]:
+    safe_pack_id = _safe_pack_id(pack_id)
+    meta = _read_json_file(_pack_meta_path(safe_pack_id))
+    if meta is None:
+        raise KeyError(safe_pack_id)
+    active = _read_json_file(ACTIVE_KNOWLEDGE_PACK_PATH) or {}
+    previous_pack_id = str(active.get("pack_id", "")).strip()
+    payload = {
+        "pack_id": safe_pack_id,
+        "activated_at": _now_text(),
+        "previous_pack_id": previous_pack_id if previous_pack_id != safe_pack_id else str(active.get("previous_pack_id", "")),
+    }
+    ACTIVE_KNOWLEDGE_PACK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = ACTIVE_KNOWLEDGE_PACK_PATH.with_suffix(".tmp")
+    with open(tmp_path, "w", encoding="utf-8") as file:
+        json.dump(payload, file, indent=2, ensure_ascii=False)
+    tmp_path.replace(ACTIVE_KNOWLEDGE_PACK_PATH)
+    return get_active_knowledge_pack() or {**meta, "active": True}
+
+
+def rollback_knowledge_pack() -> dict[str, Any]:
+    active = _read_json_file(ACTIVE_KNOWLEDGE_PACK_PATH) or {}
+    previous_pack_id = str(active.get("previous_pack_id", "")).strip()
+    if previous_pack_id:
+        return activate_knowledge_pack(previous_pack_id)
+    if ACTIVE_KNOWLEDGE_PACK_PATH.exists():
+        ACTIVE_KNOWLEDGE_PACK_PATH.unlink()
+    return {"active_pack_id": "", "active_pack": None}
+
+
 def _manifest_game_dir(manifest: dict[str, Any] | None) -> str:
     if manifest:
         return str(manifest.get("game", {}).get("sts2_path", "")).strip()
@@ -183,8 +349,8 @@ def _default_status_payload(status: str) -> dict[str, Any]:
             "matches": None,
             "version_source": "steam_app_manifest",
             "source_mode": _resolve_game_source_mode(),
-            "knowledge_path": str(GAME_KNOWLEDGE_DIR),
-            "decompiled_src_path": str(GAME_KNOWLEDGE_DIR),
+            "knowledge_path": str(active_game_knowledge_dir()),
+            "decompiled_src_path": str(active_game_knowledge_dir()),
         },
         "baselib": {
             "release_tag": None,
@@ -192,8 +358,8 @@ def _default_status_payload(status: str) -> dict[str, Any]:
             "matches": None,
             "release_url": BASELIB_RELEASES_URL,
             "source_mode": _resolve_baselib_source_mode(),
-            "knowledge_path": str(BASELIB_KNOWLEDGE_DIR),
-            "decompiled_src_path": str(BASELIB_KNOWLEDGE_DIR),
+            "knowledge_path": str(active_baselib_knowledge_dir()),
+            "decompiled_src_path": str(active_baselib_knowledge_dir()),
         },
     }
 
@@ -264,13 +430,13 @@ def _directory_has_sources(path: Path) -> bool:
 
 
 def _resolve_game_source_mode() -> str:
-    if _directory_has_sources(GAME_KNOWLEDGE_DIR):
+    if _directory_has_sources(active_game_knowledge_dir()):
         return "runtime_decompiled"
     return "missing"
 
 
 def _resolve_baselib_source_mode() -> str:
-    if (BASELIB_KNOWLEDGE_DIR / "BaseLib.decompiled.cs").exists():
+    if (active_baselib_knowledge_dir() / "BaseLib.decompiled.cs").exists():
         return "runtime_decompiled"
     return "missing"
 
@@ -285,9 +451,9 @@ def get_knowledge_status() -> dict[str, Any]:
             payload["warnings"].append("未配置 STS2 游戏路径，无法更新知识库")
         if not _has_ilspycmd():
             payload["warnings"].append("未检测到 ilspycmd，无法反编译游戏和 BaseLib（会先查项目目录，再查 PATH）")
-        if not _directory_has_sources(GAME_KNOWLEDGE_DIR):
+        if not _directory_has_sources(active_game_knowledge_dir()):
             payload["warnings"].append("游戏反编译源码目录为空，请先执行“更新知识库”")
-        if not (BASELIB_KNOWLEDGE_DIR / "BaseLib.decompiled.cs").exists():
+        if not (active_baselib_knowledge_dir() / "BaseLib.decompiled.cs").exists():
             payload["warnings"].append("BaseLib 反编译结果缺失，请先执行“更新知识库”")
         return payload
 
@@ -299,8 +465,8 @@ def get_knowledge_status() -> dict[str, Any]:
     payload["baselib"]["release_tag"] = manifest.get("baselib", {}).get("release_tag")
     payload["game"]["source_mode"] = _resolve_game_source_mode()
     payload["baselib"]["source_mode"] = _resolve_baselib_source_mode()
-    payload["game"]["knowledge_path"] = _manifest_knowledge_path(manifest, "game", GAME_KNOWLEDGE_DIR)
-    payload["baselib"]["knowledge_path"] = _manifest_knowledge_path(manifest, "baselib", BASELIB_KNOWLEDGE_DIR)
+    payload["game"]["knowledge_path"] = _manifest_knowledge_path(manifest, "game", active_game_knowledge_dir())
+    payload["baselib"]["knowledge_path"] = _manifest_knowledge_path(manifest, "baselib", active_baselib_knowledge_dir())
     payload["game"]["decompiled_src_path"] = str(
         manifest.get("game", {}).get("decompiled_src_path", payload["game"]["knowledge_path"])
     )
@@ -498,16 +664,16 @@ def _run_refresh_impl(task: _RefreshTask) -> None:
             "sts2_path": sts2_path,
             "version": game_info["version"],
             "version_source": game_info["source"],
-            "knowledge_path": str(GAME_KNOWLEDGE_DIR),
-            "decompiled_src_path": str(GAME_KNOWLEDGE_DIR),
+        "knowledge_path": str(active_game_knowledge_dir()),
+        "decompiled_src_path": str(active_game_knowledge_dir()),
         },
         "baselib": {
             "release_tag": release.get("tag_name"),
             "release_published_at": release.get("published_at"),
             "asset_name": asset.get("name"),
             "downloaded_file_path": str(baselib_dll_path),
-            "knowledge_path": str(BASELIB_KNOWLEDGE_DIR),
-            "decompiled_src_path": str(BASELIB_KNOWLEDGE_DIR),
+            "knowledge_path": str(active_baselib_knowledge_dir()),
+            "decompiled_src_path": str(active_baselib_knowledge_dir()),
         },
         "last_check": {
             "checked_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),

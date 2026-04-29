@@ -14,12 +14,12 @@ def _has_cs_files(path: Path) -> bool:
 
 def _runtime_game_reference_path() -> Path:
     seed_file_name = Path(getattr(knowledge_runtime, "GAME_KNOWLEDGE_SEED_FILE", "sts2_api_reference.md")).name
-    return knowledge_runtime.GAME_KNOWLEDGE_DIR / seed_file_name
+    return knowledge_runtime.active_game_knowledge_dir() / seed_file_name
 
 
 def get_game_source_info() -> dict[str, Any]:
     knowledge_runtime.ensure_runtime_knowledge_seeded()
-    runtime_dir = knowledge_runtime.GAME_KNOWLEDGE_DIR
+    runtime_dir = knowledge_runtime.active_game_knowledge_dir()
     if _has_cs_files(runtime_dir):
         return {
             "source_mode": "runtime_decompiled",
@@ -44,7 +44,7 @@ def get_game_source_info() -> dict[str, Any]:
 
 def get_baselib_source_info() -> dict[str, Any]:
     knowledge_runtime.ensure_runtime_knowledge_seeded()
-    runtime_file = knowledge_runtime.BASELIB_KNOWLEDGE_DIR / "BaseLib.decompiled.cs"
+    runtime_file = knowledge_runtime.active_baselib_knowledge_dir() / "BaseLib.decompiled.cs"
     if runtime_file.exists():
         return {
             "source_mode": "runtime_decompiled",

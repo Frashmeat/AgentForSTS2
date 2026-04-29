@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.shared.infra.config.settings import Settings
+from app.modules.knowledge.infra import knowledge_runtime
 from routers.workstation_capabilities import router
 
 
@@ -30,6 +31,7 @@ class _FakeContainer:
 @pytest.fixture()
 def client(monkeypatch):
     monkeypatch.setenv("TEST_WORKSTATION_TOKEN", "secret-token")
+    monkeypatch.setattr(knowledge_runtime, "get_active_knowledge_pack", lambda: None)
     app = FastAPI()
     app.state.container = _FakeContainer(
         Settings.from_dict(
@@ -60,6 +62,8 @@ def test_workstation_capabilities_reports_linux_server_generation_boundary(clien
     assert response.status_code == 200
     payload = response.json()
     assert payload["knowledge"]["embedded_sts2_guidance"] is True
+    assert payload["knowledge"]["knowledge_pack_active"] is False
+    assert payload["knowledge"]["active_knowledge_pack_id"] == ""
     assert payload["knowledge"]["sts2_path_configured"] is False
     assert payload["generation"]["text_generation_available"] is True
     assert payload["generation"]["code_generation_available"] is True

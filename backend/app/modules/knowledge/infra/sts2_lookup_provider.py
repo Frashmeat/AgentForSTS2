@@ -13,7 +13,7 @@ class Sts2LookupProvider:
             KnowledgeLookupItem(
                 key="sts2.lookup.baselib",
                 title="BaseLib local source",
-                path=lookup_context["baselib_src_path"] or str(knowledge_runtime.BASELIB_KNOWLEDGE_DIR / "BaseLib.decompiled.cs"),
+                path=lookup_context["baselib_src_path"] or str(knowledge_runtime.active_baselib_knowledge_dir() / "BaseLib.decompiled.cs"),
                 note="Read this local decompiled source for `CustomCardModel`, `CustomPotionModel`, `PlaceholderCharacterModel`, and related BaseLib wrappers.",
                 keywords=["BaseLib", "CustomCardModel", "CustomPotionModel", "PlaceholderCharacterModel"],
             )
@@ -48,7 +48,7 @@ class Sts2LookupProvider:
             KnowledgeLookupItem(
                 key="sts2.lookup.guidance_resources",
                 title="STS2 guidance resources",
-                path=str(knowledge_runtime.RESOURCE_KNOWLEDGE_DIR),
+                path=str(knowledge_runtime.active_resource_knowledge_dir()),
                 note="Use these Markdown resources for conventions, common pitfalls, and summarized examples.",
                 keywords=["guidance", "common.md", "card.md", "power.md", "relic.md", "custom_code.md"],
             )

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import zipfile
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
+from app.modules.knowledge.infra import knowledge_runtime
 from app.modules.platform.application.services import (
     AdminQueryService,
     AdminQuotaCommandService,
@@ -245,6 +247,73 @@ def get_workstation_runtime_status(request: Request):
     if manager is None:
         return {"available": False, "reason": "workstation_runtime_manager_not_registered"}
     return manager.get_runtime_status().model_dump()
+
+
+@router.get("/platform/knowledge-packs")
+def list_knowledge_packs(request: Request):
+    with auth_session_scope(request) as auth_session:
+        require_admin_user(request, auth_session)
+    return knowledge_runtime.list_knowledge_packs()
+
+
+@router.post("/platform/knowledge-packs")
+async def upload_knowledge_pack(
+    request: Request,
+    file: UploadFile = File(...),
+    label: str = Form(default=""),
+):
+    with auth_session_scope(request) as auth_session:
+        admin_user = require_admin_user(request, auth_session)
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="knowledge pack file is empty")
+    try:
+        pack = knowledge_runtime.upload_knowledge_pack_zip(
+            content,
+            file_name=file.filename or "",
+            label=label,
+        )
+    except zipfile.BadZipFile as error:
+        raise HTTPException(status_code=400, detail="knowledge pack must be a zip file") from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    _build_runtime_audit_service(request).append_event(
+        event_type="admin.knowledge_pack.uploaded",
+        payload={
+            "admin_user_id": admin_user.user_id,
+            "pack_id": pack["pack_id"],
+            "label": pack["label"],
+            "file_count": pack["file_count"],
+        },
+    )
+    return pack
+
+
+@router.post("/platform/knowledge-packs/rollback")
+def rollback_knowledge_pack(request: Request):
+    with auth_session_scope(request) as auth_session:
+        admin_user = require_admin_user(request, auth_session)
+    result = knowledge_runtime.rollback_knowledge_pack()
+    _build_runtime_audit_service(request).append_event(
+        event_type="admin.knowledge_pack.rolled_back",
+        payload={"admin_user_id": admin_user.user_id, "active_pack_id": result.get("active_pack_id", "")},
+    )
+    return result
+
+
+@router.post("/platform/knowledge-packs/{pack_id}/activate")
+def activate_knowledge_pack(request: Request, pack_id: str):
+    with auth_session_scope(request) as auth_session:
+        admin_user = require_admin_user(request, auth_session)
+    try:
+        pack = knowledge_runtime.activate_knowledge_pack(pack_id)
+    except (KeyError, ValueError) as error:
+        raise HTTPException(status_code=404, detail="knowledge pack not found") from error
+    _build_runtime_audit_service(request).append_event(
+        event_type="admin.knowledge_pack.activated",
+        payload={"admin_user_id": admin_user.user_id, "pack_id": pack["pack_id"], "label": pack.get("label", "")},
+    )
+    return pack
 
 
 @router.post("/platform/server-credentials")

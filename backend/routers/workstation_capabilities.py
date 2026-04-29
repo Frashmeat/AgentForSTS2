@@ -5,6 +5,7 @@ import secrets
 
 from fastapi import APIRouter, Header, HTTPException, Request
 
+from app.modules.knowledge.infra import knowledge_runtime
 from app.shared.infra.config.settings import Settings
 from config import get_config
 
@@ -46,10 +47,12 @@ def get_workstation_capabilities(
     _require_control_token(request, x_ats_workstation_token)
     cfg = _settings(request).to_dict()
     sts2_path = str(cfg.get("sts2_path", "")).strip()
+    active_pack = knowledge_runtime.get_active_knowledge_pack()
     return {
         "knowledge": {
             "embedded_sts2_guidance": True,
-            "knowledge_pack_active": False,
+            "knowledge_pack_active": active_pack is not None,
+            "active_knowledge_pack_id": str(active_pack.get("pack_id", "")) if active_pack else "",
             "sts2_path_configured": bool(sts2_path),
             "sts2_game_available": False,
         },
