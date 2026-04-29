@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -14,6 +15,24 @@ from app.modules.platform.contracts.workstation_execution import WorkstationExec
 
 
 class FakeRunner:
+    def __init__(self, output_payload: dict[str, object] | None = None) -> None:
+        self._output_payload = output_payload or {"text": "ok"}
+        self.steps = []
+        self.base_request = None
+
+    async def run(self, *, steps, base_request):
+        self.steps = steps
+        self.base_request = base_request
+        return [
+            StepExecutionResult(
+                step_id=steps[-1].step_id,
+                status="succeeded",
+                output_payload=dict(self._output_payload),
+            )
+        ]
+
+
+class LegacyFakeRunner:
     def __init__(self) -> None:
         self.steps = []
         self.base_request = None
@@ -53,7 +72,7 @@ def _dispatch_request(job_type: str = "single_generate", item_type: str = "relic
 
 
 def test_workstation_platform_executor_runs_text_workflow_and_returns_poll_result():
-    runner = FakeRunner()
+    runner = LegacyFakeRunner()
     executor = WorkstationPlatformExecutor(
         registry=build_workstation_workflow_registry(),
         runner=runner,
@@ -73,7 +92,7 @@ def test_workstation_platform_executor_runs_text_workflow_and_returns_poll_resul
 
 
 def test_workstation_platform_executor_runs_code_workflow_steps():
-    runner = FakeRunner()
+    runner = LegacyFakeRunner()
     executor = WorkstationPlatformExecutor(
         registry=build_workstation_workflow_registry(),
         runner=runner,
@@ -89,7 +108,7 @@ def test_workstation_platform_executor_runs_code_workflow_steps():
 
 
 def test_workstation_platform_executor_does_not_build_card_fullscreen_on_server():
-    runner = FakeRunner()
+    runner = LegacyFakeRunner()
     executor = WorkstationPlatformExecutor(
         registry=build_workstation_workflow_registry(),
         runner=runner,
@@ -102,3 +121,28 @@ def test_workstation_platform_executor_does_not_build_card_fullscreen_on_server(
 
     assert [step.step_type for step in runner.steps] == ["asset.generate"]
     assert result["status"] == "succeeded"
+
+
+def test_workstation_platform_executor_adds_source_project_artifact(tmp_path):
+    project_root = tmp_path / "GeneratedMod"
+    project_root.mkdir()
+    (project_root / "GeneratedMod.csproj").write_text("<Project />\n", encoding="utf-8")
+    (project_root / "bin").mkdir()
+    (project_root / "bin" / "ignored.dll").write_text("binary\n", encoding="utf-8")
+    runner = FakeRunner({"text": "ok", "server_workspace_root": str(project_root)})
+    executor = WorkstationPlatformExecutor(
+        registry=build_workstation_workflow_registry(),
+        runner=runner,
+    )
+
+    result = executor.execute(_dispatch_request("single_generate", "custom_code")).model_dump()
+
+    artifact = result["output_payload"]["artifacts"][0]
+    assert artifact["artifact_type"] == "source_project"
+    assert artifact["storage_provider"] == "server_workspace"
+    assert artifact["file_name"] == "GeneratedMod.source.zip"
+    zip_path = Path(str(artifact["object_key"]))
+    assert zip_path.exists()
+    with zipfile.ZipFile(zip_path) as archive:
+        assert "GeneratedMod.csproj" in archive.namelist()
+        assert "bin/ignored.dll" not in archive.namelist()

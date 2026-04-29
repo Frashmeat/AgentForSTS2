@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import zipfile
+from pathlib import Path
 from typing import Any
 
 from app.modules.platform.contracts.runner_contracts import StepExecutionRequest, StepExecutionResult
@@ -16,6 +18,7 @@ from app.modules.platform.runner.workflow_runner import WorkflowRunner
 
 
 logger = logging.getLogger(__name__)
+_SOURCE_PACKAGE_SKIP_DIRS = {"bin", "obj", ".godot", ".git"}
 
 
 class WorkstationPlatformExecutor:
@@ -47,11 +50,14 @@ class WorkstationPlatformExecutor:
                 status="failed_system",
                 error_summary="workflow produced no result",
             )
+            output_payload = dict(final_result.output_payload)
+            if final_result.status == "succeeded":
+                self._append_source_project_artifact(output_payload)
             return WorkstationExecutionPollResult(
                 workstation_execution_id=f"ws-exec-{request.execution_id}",
                 status=final_result.status,
                 step_id=final_result.step_id,
-                output_payload=final_result.output_payload,
+                output_payload=output_payload,
                 error_summary=final_result.error_summary,
                 error_payload=final_result.error_payload,
             )
@@ -71,6 +77,30 @@ class WorkstationPlatformExecutor:
                 error_summary=str(exc),
                 error_payload={"reason_code": "workstation_execution_failed"},
             )
+
+    def _append_source_project_artifact(self, output_payload: dict[str, object]) -> None:
+        root_text = str(output_payload.get("server_workspace_root", "")).strip()
+        if not root_text:
+            return
+        project_root = Path(root_text)
+        if not project_root.exists() or not project_root.is_dir():
+            return
+        package_path = _create_source_project_package(project_root)
+        artifacts = output_payload.get("artifacts")
+        if not isinstance(artifacts, list):
+            artifacts = []
+        artifacts.append(
+            {
+                "artifact_type": "source_project",
+                "storage_provider": "server_workspace",
+                "object_key": str(package_path),
+                "file_name": package_path.name,
+                "mime_type": "application/zip",
+                "size_bytes": package_path.stat().st_size,
+                "result_summary": "服务器生成项目包",
+            }
+        )
+        output_payload["artifacts"] = artifacts
 
 
 def build_default_workstation_platform_executor(container: Any) -> WorkstationPlatformExecutor:
@@ -147,3 +177,20 @@ def build_workstation_workflow_registry() -> PlatformWorkflowRegistry:
     registry.register("batch_generate", "card_fullscreen", resolve_batch_card_fullscreen)
     registry.register("single_generate", "card_fullscreen", resolve_single_card_fullscreen)
     return registry
+
+
+def _create_source_project_package(project_root: Path) -> Path:
+    artifact_dir = project_root.parent / "_source_artifacts"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    package_path = artifact_dir / f"{project_root.name}.source.zip"
+    if package_path.exists():
+        package_path.unlink()
+    with zipfile.ZipFile(package_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for path in sorted(project_root.rglob("*")):
+            if path.is_dir():
+                continue
+            relative = path.relative_to(project_root)
+            if any(part in _SOURCE_PACKAGE_SKIP_DIRS for part in relative.parts):
+                continue
+            archive.write(path, arcname=str(relative).replace("\\", "/"))
+    return package_path
