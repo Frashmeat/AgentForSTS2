@@ -10,6 +10,7 @@ from app.modules.platform.contracts.runner_contracts import (
     StepExecutionRequest,
     StepExecutionResult,
 )
+from app.modules.platform.contracts.workstation_execution import WorkstationExecutionDispatchRequest
 from app.modules.platform.domain.models.enums import AIExecutionStatus, JobItemStatus, JobStatus
 from app.modules.platform.domain.repositories import (
     AIExecutionRepository,
@@ -71,6 +72,7 @@ class ExecutionOrchestratorService:
         workflow_runner: WorkflowRunner | None = None,
         artifact_repository: ArtifactRepository | None = None,
         server_credential_admin_repository: ServerCredentialAdminRepository | None = None,
+        workstation_execution_client=None,
     ) -> None:
         self.job_repository = job_repository
         self.ai_execution_repository = ai_execution_repository
@@ -85,6 +87,7 @@ class ExecutionOrchestratorService:
         self.workflow_registry = workflow_registry
         self.workflow_runner = workflow_runner
         self.server_credential_admin_repository = server_credential_admin_repository
+        self.workstation_execution_client = workstation_execution_client
         self._workspace_write_locks: dict[int, ServerWorkspaceLockHandle] = {}
 
     def start_execution(
@@ -423,23 +426,17 @@ class ExecutionOrchestratorService:
             execution.input_payload = dict(input_payload or {})
             self.ai_execution_repository.save(execution)
 
-            results = asyncio.run(
-                self.run_registered_steps(
-                    user_id=user_id,
-                    job_type=job_type,
-                    item_type=item_type,
-                    job_id=job_id,
-                    job_item_id=job_item_id,
-                    workflow_version=workflow_version,
-                    step_protocol_version=step_protocol_version,
-                    result_schema_version=result_schema_version,
-                    input_payload=input_payload,
-                )
-            )
-            final_result = results[-1] if results else StepExecutionResult(
-                step_id=execution.step_id,
-                status="failed_system",
-                error_summary="workflow produced no result",
+            final_result = self._run_workflow_once(
+                user_id=user_id,
+                job_type=job_type,
+                item_type=item_type,
+                job_id=job_id,
+                job_item_id=job_item_id,
+                execution=execution,
+                workflow_version=workflow_version,
+                step_protocol_version=step_protocol_version,
+                result_schema_version=result_schema_version,
+                input_payload=input_payload,
             )
             retry_binding = self._build_retry_execution_binding(
                 user_id=user_id,
@@ -483,24 +480,18 @@ class ExecutionOrchestratorService:
                     job_item_id=job_item_id,
                     ai_execution_id=execution.id,
                 )
-                results = asyncio.run(
-                    self.run_registered_steps(
-                        user_id=user_id,
-                        job_type=job_type,
-                        item_type=item_type,
-                        job_id=job_id,
-                        job_item_id=job_item_id,
-                        workflow_version=workflow_version,
-                        step_protocol_version=step_protocol_version,
-                        result_schema_version=result_schema_version,
-                        input_payload=input_payload,
-                        execution_binding=retry_binding,
-                    )
-                )
-                final_result = results[-1] if results else StepExecutionResult(
-                    step_id=execution.step_id,
-                    status="failed_system",
-                    error_summary="workflow produced no result after retry",
+                final_result = self._run_workflow_once(
+                    user_id=user_id,
+                    job_type=job_type,
+                    item_type=item_type,
+                    job_id=job_id,
+                    job_item_id=job_item_id,
+                    execution=execution,
+                    workflow_version=workflow_version,
+                    step_protocol_version=step_protocol_version,
+                    result_schema_version=result_schema_version,
+                    input_payload=input_payload,
+                    execution_binding=retry_binding,
                 )
             queued_reason = self._build_queued_execution_reason(final_result)
             if queued_reason is not None:
@@ -818,6 +809,79 @@ class ExecutionOrchestratorService:
             binding.switched_credential,
         )
         return binding
+
+    def _run_workflow_once(
+        self,
+        *,
+        user_id: int,
+        job_type: str,
+        item_type: str,
+        job_id: int,
+        job_item_id: int,
+        execution: AIExecutionRecord,
+        workflow_version: str,
+        step_protocol_version: str,
+        result_schema_version: str,
+        input_payload: dict[str, object] | None,
+        execution_binding: StepExecutionBinding | dict[str, object] | None = None,
+    ) -> StepExecutionResult:
+        if self.workstation_execution_client is not None:
+            try:
+                binding = self._resolve_step_execution_binding(
+                    user_id=user_id,
+                    job_id=job_id,
+                    job_item_id=job_item_id,
+                    execution_binding=execution_binding,
+                )
+                payload = self._hydrate_runtime_refs(user_id=user_id, input_payload=input_payload)
+                return self.workstation_execution_client.dispatch_and_poll(
+                    WorkstationExecutionDispatchRequest(
+                        execution_id=execution.id,
+                        job_id=job_id,
+                        job_item_id=job_item_id,
+                        job_type=job_type,
+                        item_type=item_type,
+                        workflow_version=workflow_version,
+                        step_protocol_version=step_protocol_version,
+                        result_schema_version=result_schema_version,
+                        input_payload=payload,
+                        execution_binding=binding,
+                    )
+                )
+            except Exception as exc:
+                logger.warning(
+                    "platform workstation execution failed job_id=%s job_item_id=%s execution_id=%s error=%s",
+                    job_id,
+                    job_item_id,
+                    execution.id,
+                    _short_text(exc),
+                )
+                return StepExecutionResult(
+                    step_id=execution.step_id,
+                    status="failed_system",
+                    error_summary=str(exc),
+                    error_payload={"reason_code": "workstation_dispatch_failed"},
+                )
+
+        results = asyncio.run(
+            self.run_registered_steps(
+                user_id=user_id,
+                job_type=job_type,
+                item_type=item_type,
+                job_id=job_id,
+                job_item_id=job_item_id,
+                workflow_version=workflow_version,
+                step_protocol_version=step_protocol_version,
+                result_schema_version=result_schema_version,
+                input_payload=input_payload,
+                execution_binding=execution_binding,
+            )
+        )
+        return results[-1] if results else StepExecutionResult(
+            step_id=execution.step_id,
+            status="failed_system",
+            error_summary="workflow produced no result",
+        )
 
     def _apply_result(
         self,

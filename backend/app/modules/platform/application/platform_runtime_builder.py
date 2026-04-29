@@ -15,6 +15,7 @@ from app.modules.platform.application.services import (
     ServerWorkspaceService,
     UploadedAssetService,
 )
+from app.modules.platform.application.workstation_execution_client import WorkstationExecutionClient
 from app.modules.platform.runner import ExecutionAdapter, PlatformWorkflowRegistry, PlatformWorkflowStep, StepDispatcher, WorkflowRunner
 from app.modules.platform.runner.asset_generate_handler import execute_asset_generate_step
 from app.modules.platform.runner.batch_custom_code_handler import execute_batch_custom_code_step
@@ -64,6 +65,7 @@ def build_execution_orchestrator_service_from_container(session, container: Any)
         workflow_registry=_build_workflow_registry_from_container(container),
         workflow_runner=_build_workflow_runner_from_container(container),
         server_credential_admin_repository=server_credential_admin_repository,
+        workstation_execution_client=_build_workstation_execution_client_from_container(container),
     )
 
 
@@ -118,6 +120,13 @@ def _build_server_queued_job_claim_service_from_container(container: Any) -> Ser
     if callable(factory):
         return factory()
     return factory
+
+
+def _build_workstation_execution_client_from_container(container: Any) -> WorkstationExecutionClient | None:
+    if container.resolve_optional_singleton("runtime_role") != "web":
+        return None
+    settings = container.resolve_singleton("settings")
+    return WorkstationExecutionClient(settings=settings)
 
 
 def _build_server_deploy_target_lock_service_from_container(container: Any) -> ServerDeployTargetLockService:
