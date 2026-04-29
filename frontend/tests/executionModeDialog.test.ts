@@ -16,3 +16,9 @@ test("execution mode dialog covers local server and login states", () => {
   assert.match(source, /localUnavailableReasons/);
   assert.match(source, /localUnavailableReasons\.map/);
 });
+
+test("execution flow does not use native browser confirm", () => {
+  const source = readSource("../src/features/workspace/useExecutionModeFlow.ts");
+
+  assert.doesNotMatch(source, /window\.confirm/);
+});

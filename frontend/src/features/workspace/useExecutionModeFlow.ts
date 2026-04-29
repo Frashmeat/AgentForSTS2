@@ -9,7 +9,7 @@ import {
   type LocalAiCapabilityStatus,
   type MyServerPreferenceView,
 } from "../../shared/api/index.ts";
-import type { PlatformExecutionProfile } from "../../shared/api/platform.ts";
+import type { PlatformExecutionProfile, PlatformJobSummary } from "../../shared/api/platform.ts";
 import { type DeferredExecutionSummary } from "../../shared/deferredExecution.ts";
 import { resolveErrorMessage } from "../../shared/error.ts";
 import { createAndStartPlatformFlow } from "../platform-run/createAndStartFlow.ts";
@@ -46,6 +46,11 @@ export interface PendingExecutionRequest extends PlatformExecutionRequest {
   localUnavailableReasons: string[];
 }
 
+interface PendingStartConfirmation {
+  message: string;
+  resolve: (confirmed: boolean) => void;
+}
+
 interface UseExecutionModeFlowOptions {
   isAuthenticated: boolean;
   onStatusNotice?: (notice: {
@@ -65,6 +70,7 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
   const [serverProfilesLoading, setServerProfilesLoading] = useState(false);
   const [serverProfilesError, setServerProfilesError] = useState<string | null>(null);
   const [serverSelectionNotice, setServerSelectionNotice] = useState<string | null>(null);
+  const [pendingStartConfirmation, setPendingStartConfirmation] = useState<PendingStartConfirmation | null>(null);
 
   function showExecutionNotice(
     title: string,
@@ -174,7 +180,26 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
   }
 
   function closeExecutionDialog() {
+    pendingStartConfirmation?.resolve(false);
+    setPendingStartConfirmation(null);
     setPendingExecution(null);
+  }
+
+  function requestStartConfirmation(job: PlatformJobSummary) {
+    return new Promise<boolean>((resolve) => {
+      setPendingStartConfirmation({
+        message: `已创建平台任务 #${job.id}。\n确认开始后会进入服务器队列，并按平台规则计费。是否继续开始？`,
+        resolve,
+      });
+    });
+  }
+
+  function resolveStartConfirmation(confirmed: boolean) {
+    if (!pendingStartConfirmation) {
+      return;
+    }
+    pendingStartConfirmation.resolve(confirmed);
+    setPendingStartConfirmation(null);
   }
 
   function handleChooseLocalExecution() {
@@ -252,11 +277,7 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
         selectedExecutionProfileId: selectedProfile.id,
         selectedAgentBackend: selectedProfile.agent_backend,
         selectedModel: selectedProfile.model,
-        confirmStart(job) {
-          return window.confirm(
-            `已创建平台任务 #${job.id}。确认开始后会进入服务器队列，并按平台规则计费。是否继续开始？`,
-          );
-        },
+        confirmStart: requestStartConfirmation,
       });
       setPendingExecution(null);
       if (result.deferredNotice) {
@@ -312,6 +333,7 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
 
   return {
     pendingExecution,
+    pendingStartConfirmation,
     serverProfiles,
     serverProfilesLoading,
     serverProfilesError,
@@ -323,6 +345,8 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
     handleChooseServerExecution,
     handleGoLoginForServerExecution,
     closeExecutionDialog,
+    confirmStartExecution: () => resolveStartConfirmation(true),
+    cancelStartExecution: () => resolveStartConfirmation(false),
     handleReloadServerProfiles,
     setSelectedServerProfileId,
     setRememberServerProfile,

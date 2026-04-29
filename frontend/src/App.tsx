@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { House } from "lucide-react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import ConfirmDialog from "./components/ConfirmDialog.tsx";
 import ExecutionModeDialog from "./components/ExecutionModeDialog.tsx";
 import { KnowledgeGuideDialog } from "./components/KnowledgeGuideDialog.tsx";
 import { PlatformAuthUnavailableNotice } from "./components/PlatformAuthUnavailableNotice.tsx";
@@ -76,6 +77,7 @@ export default function App() {
   }, []);
   const {
     pendingExecution,
+    pendingStartConfirmation,
     serverProfiles,
     serverProfilesLoading,
     serverProfilesError,
@@ -85,6 +87,8 @@ export default function App() {
     handleExecutionRequest,
     handleChooseLocalExecution,
     handleChooseServerExecution,
+    confirmStartExecution,
+    cancelStartExecution,
     handleGoLoginForServerExecution,
     closeExecutionDialog,
     handleReloadServerProfiles,
@@ -194,6 +198,16 @@ export default function App() {
       </Routes>
       <KnowledgeGuideDialog open={knowledgeGuideOpen} status={knowledgeStatus} onClose={() => setKnowledgeGuideOpen(false)} />
       <StatusNoticeStack notices={statusNotices} />
+      <ConfirmDialog
+        open={pendingStartConfirmation !== null}
+        title="确认开始服务器任务"
+        message={pendingStartConfirmation?.message ?? ""}
+        confirmLabel="确认开始"
+        cancelLabel="暂不开始"
+        tone="warning"
+        onConfirm={confirmStartExecution}
+        onCancel={cancelStartExecution}
+      />
       <ExecutionModeDialog
         open={pendingExecution !== null}
         title={pendingExecution?.title ?? "选择执行方式"}
