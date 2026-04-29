@@ -84,6 +84,21 @@ def test_workstation_platform_executor_runs_code_workflow_steps():
     assert [step.step_type for step in runner.steps] == [
         "batch.custom_code.plan",
         "code.generate",
-        "build.project",
     ]
+    assert result["status"] == "succeeded"
+
+
+def test_workstation_platform_executor_does_not_build_card_fullscreen_on_server():
+    runner = FakeRunner()
+    executor = WorkstationPlatformExecutor(
+        registry=build_workstation_workflow_registry(),
+        runner=runner,
+    )
+    request = _dispatch_request("single_generate", "card_fullscreen")
+    request.input_payload["uploaded_asset_ref"] = "uploaded-asset:a"
+    request.input_payload["server_project_ref"] = "server-workspace:a"
+
+    result = executor.execute(request).model_dump()
+
+    assert [step.step_type for step in runner.steps] == ["asset.generate"]
     assert result["status"] == "succeeded"

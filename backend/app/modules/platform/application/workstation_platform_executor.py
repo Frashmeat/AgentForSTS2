@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from functools import partial
 from typing import Any
 
 from app.modules.platform.contracts.runner_contracts import StepExecutionRequest, StepExecutionResult
@@ -77,7 +76,6 @@ class WorkstationPlatformExecutor:
 def build_default_workstation_platform_executor(container: Any) -> WorkstationPlatformExecutor:
     from app.modules.platform.runner.asset_generate_handler import execute_asset_generate_step
     from app.modules.platform.runner.batch_custom_code_handler import execute_batch_custom_code_step
-    from app.modules.platform.runner.build_project_handler import execute_build_project_step
     from app.modules.platform.runner.code_generate_handler import execute_code_generate_step
     from app.modules.platform.runner.log_analysis_handler import execute_log_analysis_step
     from app.modules.platform.runner.single_asset_plan_handler import execute_single_asset_plan_step
@@ -91,10 +89,7 @@ def build_default_workstation_platform_executor(container: Any) -> WorkstationPl
         batch_custom_code_handler=execute_batch_custom_code_step,
         single_asset_plan_handler=execute_single_asset_plan_step,
         log_handler=execute_log_analysis_step,
-        build_handler=partial(
-            execute_build_project_step,
-            deploy_target_lock_service=_build_server_deploy_target_lock_service(container),
-        ),
+        build_handler=None,
         approval_handler=None,
     )
     return WorkstationPlatformExecutor(
@@ -112,7 +107,6 @@ def build_workstation_workflow_registry() -> PlatformWorkflowRegistry:
         if uploaded_asset_ref and server_project_ref:
             return [
                 PlatformWorkflowStep("asset.generate", "single.card_fullscreen.asset", {"asset_type": "card_fullscreen"}),
-                PlatformWorkflowStep("build.project", "single.card_fullscreen.build"),
             ]
         return [PlatformWorkflowStep("single.asset.plan", "single.card_fullscreen.plan", {"asset_type": "card_fullscreen"})]
 
@@ -122,7 +116,6 @@ def build_workstation_workflow_registry() -> PlatformWorkflowRegistry:
         if uploaded_asset_ref and server_project_ref:
             return [
                 PlatformWorkflowStep("asset.generate", "batch.card_fullscreen.asset", {"asset_type": "card_fullscreen"}),
-                PlatformWorkflowStep("build.project", "batch.card_fullscreen.build"),
             ]
         return [PlatformWorkflowStep("single.asset.plan", "batch.card_fullscreen.plan", {"asset_type": "card_fullscreen"})]
 
@@ -133,7 +126,6 @@ def build_workstation_workflow_registry() -> PlatformWorkflowRegistry:
         [
             PlatformWorkflowStep("batch.custom_code.plan", "batch.custom_code.plan"),
             PlatformWorkflowStep("code.generate", "batch.custom_code.codegen"),
-            PlatformWorkflowStep("build.project", "batch.custom_code.build"),
         ],
     )
     registry.register(
@@ -142,7 +134,6 @@ def build_workstation_workflow_registry() -> PlatformWorkflowRegistry:
         [
             PlatformWorkflowStep("batch.custom_code.plan", "single.custom_code.plan"),
             PlatformWorkflowStep("code.generate", "single.custom_code.codegen"),
-            PlatformWorkflowStep("build.project", "single.custom_code.build"),
         ],
     )
     for job_type in ("batch_generate", "single_generate"):
@@ -156,10 +147,3 @@ def build_workstation_workflow_registry() -> PlatformWorkflowRegistry:
     registry.register("batch_generate", "card_fullscreen", resolve_batch_card_fullscreen)
     registry.register("single_generate", "card_fullscreen", resolve_single_card_fullscreen)
     return registry
-
-
-def _build_server_deploy_target_lock_service(container: Any) -> Any:
-    factory = container.resolve_singleton("platform.server_deploy_target_lock_service_factory")
-    if callable(factory):
-        return factory()
-    return factory
