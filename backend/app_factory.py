@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.composition.container import ApplicationContainer
 from app.modules.platform.application.platform_runtime_builder import build_job_application_service_from_container
+from app.modules.platform.application.workstation_runtime_service import WorkstationRuntimeManager
 from app.modules.platform.application.services import (
     PlatformRuntimeAuditService,
     ServerExecutionService,
@@ -176,6 +177,24 @@ def _register_web_queue_worker_lifecycle(app: FastAPI) -> None:
         await worker.stop()
 
 
+def _register_web_workstation_runtime_lifecycle(app: FastAPI) -> None:
+    container = app.state.container
+    settings = container.resolve_singleton("settings")
+    manager = WorkstationRuntimeManager(
+        settings=settings,
+        cwd=Path(__file__).resolve().parent,
+    )
+    app.state.workstation_runtime_manager = manager
+
+    @app.on_event("startup")
+    async def _start_managed_workstation() -> None:
+        manager.ensure_started()
+
+    @app.on_event("shutdown")
+    async def _stop_managed_workstation() -> None:
+        manager.stop()
+
+
 def create_app(role: AppRole) -> FastAPI:
     config = get_config()
     app = _create_base_app(role, config)
@@ -185,6 +204,7 @@ def create_app(role: AppRole) -> FastAPI:
 
     if role == "web":
         _bootstrap_web_execution_profiles(app)
+        _register_web_workstation_runtime_lifecycle(app)
         _register_web_queue_worker_lifecycle(app)
 
     if should_mount_frontend(role):

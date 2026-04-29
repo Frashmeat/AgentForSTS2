@@ -237,6 +237,16 @@ def list_server_credentials(request: Request, execution_profile_id: int | None =
         return {"items": [item.model_dump() for item in service.list_server_credentials(execution_profile_id=execution_profile_id)]}
 
 
+@router.get("/platform/workstation-runtime-status")
+def get_workstation_runtime_status(request: Request):
+    with auth_session_scope(request) as auth_session:
+        require_admin_user(request, auth_session)
+    manager = getattr(request.app.state, "workstation_runtime_manager", None)
+    if manager is None:
+        return {"available": False, "reason": "workstation_runtime_manager_not_registered"}
+    return manager.get_runtime_status().model_dump()
+
+
 @router.post("/platform/server-credentials")
 def create_server_credential(request: Request, body: dict):
     try:
