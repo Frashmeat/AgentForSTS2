@@ -49,6 +49,14 @@ class WorkstationExecutionDispatchAccepted(ModelBase):
 
 
 @dataclass(slots=True)
+class WorkstationExecutionEvent(ModelBase):
+    sequence: int
+    event_type: str
+    occurred_at: str
+    payload: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class WorkstationExecutionPollResult(ModelBase):
     workstation_execution_id: str
     status: str
@@ -56,3 +64,4 @@ class WorkstationExecutionPollResult(ModelBase):
     output_payload: dict[str, object] = field(default_factory=dict)
     error_summary: str = ""
     error_payload: dict[str, object] = field(default_factory=dict)
+    events: list[WorkstationExecutionEvent] = field(default_factory=list)

@@ -13,6 +13,7 @@ from app.modules.platform.contracts.runner_contracts import StepExecutionResult
 from app.modules.platform.contracts.workstation_execution import (
     WorkstationExecutionDispatchAccepted,
     WorkstationExecutionDispatchRequest,
+    WorkstationExecutionEvent,
     WorkstationExecutionPollResult,
 )
 from app.shared.infra.config.settings import Settings
@@ -22,6 +23,9 @@ class WorkstationExecutionClientError(RuntimeError):
     pass
 
 
+WorkstationEventHandler = Callable[[list[WorkstationExecutionEvent]], None]
+
+
 @dataclass(slots=True)
 class WorkstationExecutionClient:
     settings: Settings
@@ -29,9 +33,13 @@ class WorkstationExecutionClient:
     sleep: Callable[[float], None] = time.sleep
     monotonic: Callable[[], float] = time.monotonic
 
-    def dispatch_and_poll(self, request: WorkstationExecutionDispatchRequest) -> StepExecutionResult:
+    def dispatch_and_poll(
+        self,
+        request: WorkstationExecutionDispatchRequest,
+        on_events: WorkstationEventHandler | None = None,
+    ) -> StepExecutionResult:
         accepted = self.dispatch(request)
-        result = self.poll_until_finished(accepted.workstation_execution_id)
+        result = self.poll_until_finished(accepted.workstation_execution_id, on_events=on_events)
         return StepExecutionResult(
             step_id=result.step_id,
             status=result.status,
@@ -49,10 +57,15 @@ class WorkstationExecutionClient:
         )
         return WorkstationExecutionDispatchAccepted.model_validate(payload)
 
-    def poll_until_finished(self, workstation_execution_id: str) -> WorkstationExecutionPollResult:
+    def poll_until_finished(
+        self,
+        workstation_execution_id: str,
+        on_events: WorkstationEventHandler | None = None,
+    ) -> WorkstationExecutionPollResult:
         timeout_seconds = float(self.config.get("execution_timeout_seconds", 180))
         poll_interval_seconds = float(self.config.get("poll_interval_seconds", 2))
         deadline = self.monotonic() + timeout_seconds
+        last_event_sequence = 0
 
         while True:
             payload = self._request_json(
@@ -61,6 +74,15 @@ class WorkstationExecutionClient:
                 timeout_seconds=int(self.config.get("dispatch_timeout_seconds", 10)),
             )
             result = WorkstationExecutionPollResult.model_validate(payload)
+            new_events = [
+                event
+                for event in sorted(result.events, key=lambda item: item.sequence)
+                if event.sequence > last_event_sequence
+            ]
+            if new_events:
+                last_event_sequence = max(event.sequence for event in new_events)
+                if on_events is not None:
+                    on_events(new_events)
             if result.status not in {"accepted", "running"}:
                 return result
             if self.monotonic() >= deadline:

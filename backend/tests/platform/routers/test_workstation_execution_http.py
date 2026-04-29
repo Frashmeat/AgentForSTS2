@@ -16,11 +16,20 @@ from fastapi.testclient import TestClient
 from app.shared.infra.config.settings import Settings
 from routers import WORKSTATION_ROUTER_MODULES
 from routers.workstation_platform import router
-from app.modules.platform.contracts.workstation_execution import WorkstationExecutionPollResult
+from app.modules.platform.contracts.workstation_execution import WorkstationExecutionEvent, WorkstationExecutionPollResult
 
 
 class _FakeWorkstationExecutor:
-    def execute(self, request):
+    def execute(self, request, event_sink=None):
+        if event_sink is not None:
+            event_sink(
+                WorkstationExecutionEvent(
+                    sequence=1,
+                    event_type="workstation.step.started",
+                    occurred_at="2026-04-29T10:00:00+00:00",
+                    payload={"step_id": "single.relic.plan", "step_type": "single.asset.plan"},
+                )
+            )
         return WorkstationExecutionPollResult(
             workstation_execution_id=f"ws-exec-{request.execution_id}",
             status="succeeded",
@@ -132,6 +141,8 @@ def test_workstation_execution_dispatch_accepts_and_poll_hides_credentials(clien
     poll_payload = polled.json()
     assert poll_payload["workstation_execution_id"] == "ws-exec-2203"
     assert poll_payload["status"] in {"accepted", "running", "succeeded"}
+    if poll_payload["status"] == "succeeded":
+        assert poll_payload["events"][0]["event_type"] == "workstation.step.started"
     assert "credential" not in str(poll_payload)
 
 

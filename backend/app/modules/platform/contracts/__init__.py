@@ -35,6 +35,7 @@ from .workstation_execution import (
     WorkstationCallbackConfig,
     WorkstationExecutionDispatchAccepted,
     WorkstationExecutionDispatchRequest,
+    WorkstationExecutionEvent,
     WorkstationExecutionPollResult,
 )
 
@@ -76,6 +77,7 @@ __all__ = [
     "WorkstationCallbackConfig",
     "WorkstationExecutionDispatchAccepted",
     "WorkstationExecutionDispatchRequest",
+    "WorkstationExecutionEvent",
     "WorkstationExecutionPollResult",
     "ServerWorkspaceView",
     "UserQuotaView",

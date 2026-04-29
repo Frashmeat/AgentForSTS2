@@ -20,9 +20,16 @@ class FakeRunner:
         self.steps = []
         self.base_request = None
 
-    async def run(self, *, steps, base_request):
+    async def run(self, *, steps, base_request, event_publisher=None):
         self.steps = steps
         self.base_request = base_request
+        for step in steps[:-1]:
+            if event_publisher is not None:
+                event_publisher("step.started", step.step_id)
+                event_publisher("step.finished", step.step_id)
+        if event_publisher is not None:
+            event_publisher("step.started", steps[-1].step_id)
+            event_publisher("step.finished", steps[-1].step_id)
         return [
             StepExecutionResult(
                 step_id=steps[-1].step_id,
@@ -37,9 +44,13 @@ class LegacyFakeRunner:
         self.steps = []
         self.base_request = None
 
-    async def run(self, *, steps, base_request):
+    async def run(self, *, steps, base_request, event_publisher=None):
         self.steps = steps
         self.base_request = base_request
+        for step in steps:
+            if event_publisher is not None:
+                event_publisher("step.started", step.step_id)
+                event_publisher("step.finished", step.step_id)
         return [
             StepExecutionResult(
                 step_id=steps[-1].step_id,
@@ -88,6 +99,30 @@ def test_workstation_platform_executor_runs_text_workflow_and_returns_poll_resul
         "output_payload": {"text": "ok"},
         "error_summary": "",
         "error_payload": {},
+        "events": [
+            {
+                "sequence": 1,
+                "event_type": "workstation.step.started",
+                "occurred_at": result["events"][0]["occurred_at"],
+                "payload": {
+                    "phase": "planning",
+                    "step_id": "single.relic.plan",
+                    "step_type": "single.asset.plan",
+                    "message": "正在生成方案",
+                },
+            },
+            {
+                "sequence": 2,
+                "event_type": "workstation.step.finished",
+                "occurred_at": result["events"][1]["occurred_at"],
+                "payload": {
+                    "phase": "planning",
+                    "step_id": "single.relic.plan",
+                    "step_type": "single.asset.plan",
+                    "message": "已完成当前步骤",
+                },
+            },
+        ],
     }
 
 
@@ -105,6 +140,12 @@ def test_workstation_platform_executor_runs_code_workflow_steps():
         "code.generate",
     ]
     assert result["status"] == "succeeded"
+    assert [event["event_type"] for event in result["events"]] == [
+        "workstation.step.started",
+        "workstation.step.finished",
+        "workstation.step.started",
+        "workstation.step.finished",
+    ]
 
 
 def test_workstation_platform_executor_does_not_build_card_fullscreen_on_server():

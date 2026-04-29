@@ -10,7 +10,10 @@ from app.modules.platform.contracts.runner_contracts import (
     StepExecutionRequest,
     StepExecutionResult,
 )
-from app.modules.platform.contracts.workstation_execution import WorkstationExecutionDispatchRequest
+from app.modules.platform.contracts.workstation_execution import (
+    WorkstationExecutionDispatchRequest,
+    WorkstationExecutionEvent,
+)
 from app.modules.platform.domain.models.enums import AIExecutionStatus, JobItemStatus, JobStatus
 from app.modules.platform.domain.repositories import (
     AIExecutionRepository,
@@ -834,6 +837,24 @@ class ExecutionOrchestratorService:
                     execution_binding=execution_binding,
                 )
                 payload = self._hydrate_runtime_refs(user_id=user_id, input_payload=input_payload)
+                workstation_execution_id = f"ws-exec-{execution.id}"
+
+                def record_workstation_events(events: list[WorkstationExecutionEvent]) -> None:
+                    for event in events:
+                        self.job_event_repository.append(
+                            job_id=job_id,
+                            user_id=user_id,
+                            event_type=event.event_type,
+                            payload={
+                                **event.payload,
+                                "workstation_execution_id": workstation_execution_id,
+                                "sequence": event.sequence,
+                                "occurred_at": event.occurred_at,
+                            },
+                            job_item_id=job_item_id,
+                            ai_execution_id=execution.id,
+                        )
+
                 return self.workstation_execution_client.dispatch_and_poll(
                     WorkstationExecutionDispatchRequest(
                         execution_id=execution.id,
@@ -846,7 +867,8 @@ class ExecutionOrchestratorService:
                         result_schema_version=result_schema_version,
                         input_payload=payload,
                         execution_binding=binding,
-                    )
+                    ),
+                    on_events=record_workstation_events,
                 )
             except Exception as exc:
                 logger.warning(

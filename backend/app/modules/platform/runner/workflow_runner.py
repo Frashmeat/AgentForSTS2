@@ -21,9 +21,11 @@ class WorkflowRunner:
         *,
         steps: list[PlatformWorkflowStep],
         base_request: StepExecutionRequest,
+        event_publisher: EventPublisher | None = None,
     ) -> list[StepExecutionResult]:
         results: list[StepExecutionResult] = []
         payload: dict[str, object] = dict(base_request.input_payload)
+        publisher = event_publisher or self.event_publisher
 
         for step in steps:
             merged_payload = dict(payload)
@@ -39,12 +41,12 @@ class WorkflowRunner:
                 input_payload=merged_payload,
                 execution_binding=base_request.execution_binding,
             )
-            if self.event_publisher is not None:
-                self.event_publisher("step.started", step.step_id)
+            if publisher is not None:
+                publisher("step.started", step.step_id)
             result = await self.dispatcher.dispatch(request)
             results.append(result)
-            if self.event_publisher is not None:
-                self.event_publisher("step.finished", step.step_id)
+            if publisher is not None:
+                publisher("step.finished", step.step_id)
             if result.status != "succeeded":
                 break
             payload.update(result.output_payload)

@@ -13,6 +13,7 @@ from app.modules.platform.application.workstation_platform_executor import (
 from app.modules.platform.contracts.workstation_execution import (
     WorkstationExecutionDispatchAccepted,
     WorkstationExecutionDispatchRequest,
+    WorkstationExecutionEvent,
     WorkstationExecutionPollResult,
 )
 from app.shared.infra.config.settings import Settings
@@ -73,16 +74,49 @@ class WorkstationExecutionStore:
                 status="running",
                 step_id="workflow.dispatch",
             )
+        event_sink = self._event_sink(workstation_execution_id)
         semaphore = self._semaphore_for(request, settings)
         workspace_lock = self._workspace_lock_for(request)
         with semaphore:
             if workspace_lock is None:
-                result = executor.execute(request)
+                result = executor.execute(request, event_sink=event_sink)
             else:
                 with workspace_lock:
-                    result = executor.execute(request)
+                    result = executor.execute(request, event_sink=event_sink)
         with self._lock:
+            current = self._results.get(workstation_execution_id)
+            if current is not None and current.events:
+                merged_events = _merge_events_by_sequence(current.events, result.events)
+                result = WorkstationExecutionPollResult(
+                    workstation_execution_id=result.workstation_execution_id,
+                    status=result.status,
+                    step_id=result.step_id,
+                    output_payload=result.output_payload,
+                    error_summary=result.error_summary,
+                    error_payload=result.error_payload,
+                    events=merged_events,
+                )
             self._results[workstation_execution_id] = result
+
+    def _event_sink(self, workstation_execution_id: str):
+        def sink(event: WorkstationExecutionEvent) -> None:
+            with self._lock:
+                current = self._results.get(workstation_execution_id)
+                if current is None:
+                    return
+                events = [*current.events, event]
+                current_step_id = str(event.payload.get("step_id") or current.step_id)
+                self._results[workstation_execution_id] = WorkstationExecutionPollResult(
+                    workstation_execution_id=current.workstation_execution_id,
+                    status=current.status,
+                    step_id=current_step_id,
+                    output_payload=current.output_payload,
+                    error_summary=current.error_summary,
+                    error_payload=current.error_payload,
+                    events=events,
+                )
+
+        return sink
 
     def _semaphore_for(
         self,
@@ -172,6 +206,16 @@ def _is_code_execution(request: WorkstationExecutionDispatchRequest) -> bool:
         str(request.input_payload.get(key, "")).strip()
         for key in ("server_project_ref", "server_workspace_root", "deploy_target")
     )
+
+
+def _merge_events_by_sequence(
+    left: list[WorkstationExecutionEvent],
+    right: list[WorkstationExecutionEvent],
+) -> list[WorkstationExecutionEvent]:
+    merged: dict[int, WorkstationExecutionEvent] = {}
+    for event in [*left, *right]:
+        merged[event.sequence] = event
+    return [merged[sequence] for sequence in sorted(merged)]
 
 
 @router.post("/executions")

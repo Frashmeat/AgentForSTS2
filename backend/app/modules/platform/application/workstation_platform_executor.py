@@ -3,12 +3,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import zipfile
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from app.modules.platform.contracts.runner_contracts import StepExecutionRequest, StepExecutionResult
 from app.modules.platform.contracts.workstation_execution import (
     WorkstationExecutionDispatchRequest,
+    WorkstationExecutionEvent,
     WorkstationExecutionPollResult,
 )
 from app.modules.platform.runner.execution_adapter import ExecutionAdapter
@@ -19,6 +22,7 @@ from app.modules.platform.runner.workflow_runner import WorkflowRunner
 
 logger = logging.getLogger(__name__)
 _SOURCE_PACKAGE_SKIP_DIRS = {"bin", "obj", ".godot", ".git"}
+WorkstationEventSink = Callable[[WorkstationExecutionEvent], None]
 
 
 class WorkstationPlatformExecutor:
@@ -26,9 +30,34 @@ class WorkstationPlatformExecutor:
         self._registry = registry
         self._runner = runner
 
-    def execute(self, request: WorkstationExecutionDispatchRequest) -> WorkstationExecutionPollResult:
+    def execute(
+        self,
+        request: WorkstationExecutionDispatchRequest,
+        event_sink: WorkstationEventSink | None = None,
+    ) -> WorkstationExecutionPollResult:
+        events: list[WorkstationExecutionEvent] = []
+        event_sequence = 0
+
+        def publish_event(event_type: str, step_id: str) -> None:
+            nonlocal event_sequence
+            event_sequence += 1
+            event = WorkstationExecutionEvent(
+                sequence=event_sequence,
+                event_type=f"workstation.{event_type}",
+                occurred_at=datetime.now(UTC).isoformat(),
+                payload=_step_event_payload(
+                    event_type=event_type,
+                    step_id=step_id,
+                    step_type=step_types_by_id.get(step_id, ""),
+                ),
+            )
+            events.append(event)
+            if event_sink is not None:
+                event_sink(event)
+
         try:
             steps = self._registry.resolve(request.job_type, request.item_type, request.input_payload)
+            step_types_by_id = {step.step_id: step.step_type for step in steps}
             results = asyncio.run(
                 self._runner.run(
                     steps=steps,
@@ -43,6 +72,7 @@ class WorkstationPlatformExecutor:
                         input_payload=request.input_payload,
                         execution_binding=request.execution_binding,
                     ),
+                    event_publisher=publish_event,
                 )
             )
             final_result = results[-1] if results else StepExecutionResult(
@@ -60,6 +90,7 @@ class WorkstationPlatformExecutor:
                 output_payload=output_payload,
                 error_summary=final_result.error_summary,
                 error_payload=final_result.error_payload,
+                events=events,
             )
         except Exception as exc:
             logger.exception(
@@ -76,6 +107,7 @@ class WorkstationPlatformExecutor:
                 step_id="workflow.dispatch",
                 error_summary=str(exc),
                 error_payload={"reason_code": "workstation_execution_failed"},
+                events=events,
             )
 
     def _append_source_project_artifact(self, output_payload: dict[str, object]) -> None:
@@ -194,3 +226,34 @@ def _create_source_project_package(project_root: Path) -> Path:
                 continue
             archive.write(path, arcname=str(relative).replace("\\", "/"))
     return package_path
+
+
+def _step_event_payload(*, event_type: str, step_id: str, step_type: str) -> dict[str, object]:
+    return {
+        "phase": _phase_for_step_type(step_type),
+        "step_id": step_id,
+        "step_type": step_type,
+        "message": _message_for_step_event(event_type=event_type, step_type=step_type),
+    }
+
+
+def _phase_for_step_type(step_type: str) -> str:
+    if step_type in {"batch.custom_code.plan", "single.asset.plan", "log.analyze"}:
+        return "planning"
+    if step_type == "code.generate":
+        return "code_generation"
+    if step_type == "asset.generate":
+        return "asset_generation"
+    return "execution"
+
+
+def _message_for_step_event(*, event_type: str, step_type: str) -> str:
+    if event_type == "step.finished":
+        return "已完成当前步骤"
+    if step_type == "code.generate":
+        return "正在生成代码"
+    if step_type == "asset.generate":
+        return "正在生成资产"
+    if step_type == "log.analyze":
+        return "正在分析日志"
+    return "正在生成方案"

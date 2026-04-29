@@ -23,7 +23,7 @@ class BlockingExecutor:
         self._lock = threading.Lock()
         self.release = threading.Event()
 
-    def execute(self, request):
+    def execute(self, request, event_sink=None):
         with self._lock:
             self.started += 1
             self._active += 1

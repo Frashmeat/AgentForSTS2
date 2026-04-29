@@ -78,12 +78,34 @@ def test_workstation_execution_client_dispatches_with_control_token_and_polls_re
             "workstation_execution_id": "ws-exec-2203",
             "status": "running",
             "step_id": "single.relic.plan",
+            "events": [
+                {
+                    "sequence": 1,
+                    "event_type": "workstation.step.started",
+                    "occurred_at": "2026-04-29T10:00:00+00:00",
+                    "payload": {"step_id": "single.relic.plan"},
+                }
+            ],
         },
         {
             "workstation_execution_id": "ws-exec-2203",
             "status": "succeeded",
             "step_id": "single.relic.plan",
             "output_payload": {"text": "ok"},
+            "events": [
+                {
+                    "sequence": 1,
+                    "event_type": "workstation.step.started",
+                    "occurred_at": "2026-04-29T10:00:00+00:00",
+                    "payload": {"step_id": "single.relic.plan"},
+                },
+                {
+                    "sequence": 2,
+                    "event_type": "workstation.step.finished",
+                    "occurred_at": "2026-04-29T10:00:01+00:00",
+                    "payload": {"step_id": "single.relic.plan"},
+                },
+            ],
         },
     ]
 
@@ -96,8 +118,9 @@ def test_workstation_execution_client_dispatches_with_control_token_and_polls_re
         urlopen=fake_urlopen,
         sleep=lambda seconds: None,
     )
+    seen_events = []
 
-    result = client.dispatch_and_poll(_request())
+    result = client.dispatch_and_poll(_request(), on_events=lambda events: seen_events.extend(events))
 
     assert result.model_dump() == {
         "step_id": "single.relic.plan",
@@ -109,6 +132,7 @@ def test_workstation_execution_client_dispatches_with_control_token_and_polls_re
     assert [call[0].method for call in calls] == ["POST", "GET", "GET"]
     assert calls[0][0].headers["X-ats-workstation-token"] == "secret-token"
     assert b"sk-live" in calls[0][0].data
+    assert [event.sequence for event in seen_events] == [1, 2]
 
 
 def test_workstation_execution_client_fails_when_control_token_missing(monkeypatch):

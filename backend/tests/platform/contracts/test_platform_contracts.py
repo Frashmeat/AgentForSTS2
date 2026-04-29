@@ -14,6 +14,7 @@ from app.modules.platform.contracts.workstation_execution import (
     WorkstationArtifactPayload,
     WorkstationCallbackConfig,
     WorkstationExecutionDispatchRequest,
+    WorkstationExecutionEvent,
     WorkstationExecutionPollResult,
 )
 from app.modules.platform.domain.models.enums import AIExecutionStatus, JobItemStatus, JobStatus
@@ -215,6 +216,55 @@ def test_workstation_poll_result_serializes_artifact_contract():
         "result_summary": "构建产物",
     }
     assert payload["error_payload"] == {}
+    assert payload["events"] == []
+
+
+def test_workstation_poll_result_serializes_step_events():
+    result = WorkstationExecutionPollResult.model_validate(
+        {
+            "workstation_execution_id": "ws-exec-2203",
+            "status": "running",
+            "step_id": "single.custom_code.codegen",
+            "events": [
+                {
+                    "sequence": 1,
+                    "event_type": "workstation.step.started",
+                    "occurred_at": "2026-04-29T10:00:00+00:00",
+                    "payload": {
+                        "phase": "code_generation",
+                        "step_id": "single.custom_code.codegen",
+                        "step_type": "code.generate",
+                        "message": "正在生成代码",
+                    },
+                }
+            ],
+        }
+    )
+
+    payload = result.model_dump()
+    assert payload["events"][0] == {
+        "sequence": 1,
+        "event_type": "workstation.step.started",
+        "occurred_at": "2026-04-29T10:00:00+00:00",
+        "payload": {
+            "phase": "code_generation",
+            "step_id": "single.custom_code.codegen",
+            "step_type": "code.generate",
+            "message": "正在生成代码",
+        },
+    }
+
+
+def test_workstation_execution_event_defaults_payload_to_empty():
+    event = WorkstationExecutionEvent.model_validate(
+        {
+            "sequence": 1,
+            "event_type": "workstation.step.finished",
+            "occurred_at": "2026-04-29T10:00:01+00:00",
+        }
+    )
+
+    assert event.model_dump()["payload"] == {}
 
 
 def test_workstation_callback_config_defaults_to_disabled():
