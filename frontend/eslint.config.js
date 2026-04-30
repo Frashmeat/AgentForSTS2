@@ -71,7 +71,7 @@ export default [
       "react/prop-types": "off",
 
       // 类型严格化（先 warn 收集 baseline）
-      "@typescript-eslint/no-explicit-any": "warn",
+      "@typescript-eslint/no-explicit-any": "error",
       "@typescript-eslint/no-unused-vars": [
         "warn",
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrorsIgnorePattern: "^_" },

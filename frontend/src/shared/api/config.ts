@@ -1,9 +1,32 @@
 import { requestJson } from "./http.ts";
 
+export interface AppConfigLlm {
+  mode?: string;
+  agent_backend?: string;
+  api_key?: string;
+  base_url?: string;
+  custom_prompt?: string;
+  [key: string]: unknown;
+}
+
+export interface AppConfigImageGen {
+  mode?: string;
+  provider?: string;
+  model?: string;
+  api_key?: string;
+  api_secret?: string;
+  batch_size?: number;
+  concurrency?: number;
+  rembg_model?: string;
+  [key: string]: unknown;
+}
+
 export interface AppConfig {
   default_project_root?: string;
   sts2_path?: string;
   godot_exe_path?: string;
+  llm?: AppConfigLlm;
+  image_gen?: AppConfigImageGen;
   [key: string]: unknown;
 }
 

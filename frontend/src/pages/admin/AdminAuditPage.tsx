@@ -64,6 +64,8 @@ export function AdminAuditPage() {
 
   useEffect(() => {
     void loadEvents();
+    // loadEvents 是组件内闭包；deps 只列驱动刷新的 state，避免 callback 引用变化触发死循环。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, filterMode]);
 
   const eventTypeSummary = useMemo(() => {

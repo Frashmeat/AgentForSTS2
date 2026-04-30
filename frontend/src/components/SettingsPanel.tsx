@@ -148,6 +148,9 @@ interface SettingsPanelProps {
   onKnowledgeStatusChange?: (status: KnowledgeStatus) => void;
 }
 
+// SettingsPanel 内 cfg 是后端 config.json 的镜像，结构嵌套且 schema 在后端松散维护。
+// 严格化需要先把 AppConfig 子结构补齐（审查 #8 前端拆分时一起做），本轮先承认债务保留 any。
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildConfigSaveBody(cfg: any, llmKey: string, imgKey: string, imgSecret: string) {
   const body = structuredClone(cfg);
   if (llmKey.trim()) body.llm.api_key = llmKey.trim();
@@ -156,6 +159,7 @@ function buildConfigSaveBody(cfg: any, llmKey: string, imgKey: string, imgSecret
   return body;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildConfigSaveSignature(cfg: any, llmKey: string, imgKey: string, imgSecret: string) {
   return JSON.stringify(buildConfigSaveBody(cfg, llmKey, imgKey, imgSecret));
 }
@@ -166,6 +170,8 @@ let retainedKnowledgeTaskId = "";
 export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChange }: SettingsPanelProps) {
   const { isAuthAvailable, isAuthenticated } = useSession();
   const [activeTab, setActiveTab] = useState<"workspace" | "server">("workspace");
+  // 同上，cfg 留作 any（审查 #8 前端拆分时严格化）
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [cfg, setCfg] = useState<any>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -272,6 +278,9 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
       .catch(() => {
         // 恢复入口失败不阻塞设置面板初始化。
       });
+    // mount-only：仅初始化时尝试恢复最近一次任务，onKnowledgeStatusChange 故意不进 deps，
+    // 否则父级 callback 引用变化会触发重复恢复。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -334,6 +343,9 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
     return () => {
       clearTimeout(timer);
     };
+    // save 是组件内闭包函数，每次 render 都重新创建；放进 deps 会让 debounce 永远重置。
+    // 这里依赖 state 而非 callback —— 真正影响是否触发 save 的是 cfg/saving/configDirty 等。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cfg, saving, configDirty, configSaveSignature, saveError]);
 
   useEffect(() => {
@@ -376,6 +388,8 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
     return () => {
       clearTimeout(timer);
     };
+    // 同上：handleSaveServerPreference 是组件内闭包，依赖列表里的 state 已能覆盖触发条件。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, isAuthAvailable, isAuthenticated, selectedServerProfileId, serverSaving, serverSelectionDirty]);
 
   useEffect(() => {
@@ -485,6 +499,8 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
         clearTimeout(timer);
       }
     };
+    // 仅由 knowledgeTaskId 驱动轮询；onKnowledgeStatusChange 是父级 callback，故意省略避免重复触发。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [knowledgeTaskId]);
 
   useEffect(() => {
@@ -525,6 +541,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
   function set(path: string[], value: string | number) {
     setSaveError("");
     setSaveNotice("");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     setCfg((prev: any) => {
       if (!prev) {
         return prev;
@@ -546,6 +563,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
     setSaveError("");
     setSaveNotice("");
     const models = PROVIDER_MODELS[provider] ?? [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     setCfg((prev: any) => {
       const next = structuredClone(prev);
       next.image_gen.provider = provider;

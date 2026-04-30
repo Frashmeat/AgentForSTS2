@@ -25,7 +25,6 @@ import { ProjectRootField } from "../../components/ProjectRootField";
 import { cn } from "../../lib/utils";
 import { loadAppConfig } from "../../shared/api/config";
 import { runApprovalAction } from "../../shared/approvalAction.ts";
-import type { KnowledgeStatus } from "../../shared/api/knowledge.ts";
 import { reviewModPlan } from "../../shared/api/workflow.ts";
 import {
   WORKFLOW_CANCELLED_MESSAGE,
@@ -43,16 +42,10 @@ import type {
 import type { WorkflowLogEntry } from "../../shared/workflowLog.ts";
 import { useResolvedWorkspaceFeatureProps } from "../workspace/WorkspaceContext.tsx";
 import type { WorkspaceFeatureAdapterProps, WorkspaceFeatureProps } from "../workspace/types.ts";
-import {
-  applyBatchApprovalUpdate,
-  canProceedBatchApproval,
-  markBatchApprovalResuming,
-  resumeBatchApprovalWorkflow,
-} from "./approval";
+import { canProceedBatchApproval, markBatchApprovalResuming, resumeBatchApprovalWorkflow } from "./approval";
 import { openBatchPlanningSocket } from "./planningSession";
 import {
   batchWorkflowReducer,
-  createDefaultBatchItemState,
   createInitialBatchRuntimeState,
   canProceedFromBundleReview,
   reconcileBundleDecisionRecord,
@@ -60,7 +53,6 @@ import {
   summarizeBundleDecisionProgress,
   type BatchItemState as ItemState,
   type BatchItemStatus as ItemStatus,
-  type BatchStage,
   type BundleDecisionRecord,
   type BundleDecisionStatus,
   type ReviewStrictness,
@@ -355,9 +347,9 @@ function getBundleBlockingReason(bundle: ExecutionBundlePreview): string {
 function BatchModePage({
   onRequestExecution,
   onStatusNotice,
-  knowledgeStatus,
-  onOpenKnowledgeGuide,
-  onOpenSettings,
+  knowledgeStatus: _knowledgeStatus,
+  onOpenKnowledgeGuide: _onOpenKnowledgeGuide,
+  onOpenSettings: _onOpenSettings,
 }: WorkspaceFeatureProps) {
   const [requirements, setRequirements] = useState("");
   const [projectRoot, setProjectRoot] = useState("");

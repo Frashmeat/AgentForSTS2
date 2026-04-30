@@ -80,6 +80,8 @@ export function AdminOverviewPage() {
 
   useEffect(() => {
     void loadOverview();
+    // loadOverview 是组件内闭包；仅在登录状态变化时拉取一次。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
 
   const enabledProfiles = useMemo(

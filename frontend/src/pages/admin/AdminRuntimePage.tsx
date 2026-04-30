@@ -153,6 +153,8 @@ function WorkstationRuntimeLogPanel() {
 
   useEffect(() => {
     void loadLog("stderr");
+    // mount-only：仅初次进入页面时拉一次日志，loadLog 是组件内闭包不进 deps。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const emptyMessage = log?.exists === false ? "日志文件尚未生成。" : "日志为空。";

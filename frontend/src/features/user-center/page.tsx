@@ -50,6 +50,8 @@ export function UserCenterPage() {
     return () => {
       cancelled = true;
     };
+    // refreshSession 由 session store 提供且每次 render 引用变化；仅在 isAuthenticated 变化时拉取。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
 
   if (isLoading) {

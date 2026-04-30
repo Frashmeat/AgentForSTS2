@@ -90,6 +90,8 @@ export function AdminRuntimeAuditPage() {
       return;
     }
     void loadEvents();
+    // loadEvents 是组件内闭包，每次 render 引用变化；deps 只列触发刷新的 state。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, filterMode]);
 
   const backAction = (

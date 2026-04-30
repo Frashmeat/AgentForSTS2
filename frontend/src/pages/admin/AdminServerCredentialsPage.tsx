@@ -102,6 +102,8 @@ export function AdminServerCredentialsPage() {
 
   useEffect(() => {
     void loadData();
+    // mount-only：进入页面时拉一次数据，loadData 是组件内闭包不进 deps。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function startCreate() {
