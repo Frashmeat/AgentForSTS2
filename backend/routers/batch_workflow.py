@@ -152,6 +152,42 @@ async def _init_batch_project(ws: WebSocket, project_root: Path, send, send_stag
     return project_root
 
 
+async def _resolve_group_approval(
+    *,
+    group,
+    group_key,
+    approval_states: dict,
+    cfg: dict,
+    project_root: Path,
+    ws: WebSocket,
+    replay_deferred,
+    execute_actions,
+) -> bool:
+    """approval_first 分支：推进审批状态机。返回 True 表示可继续到代码生成，False 表示需要等审批/恢复。"""
+    state = approval_states.get(group_key)
+    if state is None:
+        # 第一次进入：生成审批计划 → 发 pending → 重放被搁置的控制消息
+        summary, actions = await _plan_group_approval_requests(group, cfg["llm"], project_root)
+        approval_states[group_key] = {
+            "summary": summary,
+            "actions": actions,
+            "approved": False,
+            "actions_executed": False,
+            "resume_requested": False,
+        }
+        for item in group:
+            await _send_item_approval_pending(ws, item.id, summary, actions)
+        await replay_deferred(group)
+        return False
+
+    if not state["approved"]:
+        return False
+
+    if not state["actions_executed"]:
+        await execute_actions(group)
+    return True
+
+
 async def _generate_image_with_retry(
     *,
     item,
@@ -581,28 +617,19 @@ async def _handle_ws_batch(ws: WebSocket, *, initial_params: dict | None = None)
                 approval_pending = False
                 try:
                     if cfg_loaded["llm"].get("execution_mode") == "approval_first":
-                        approval_state = approval_states.get(group_key)
-                        if approval_state is None:
-                            summary, actions = await _plan_group_approval_requests(group, cfg_loaded["llm"], project_root)
-                            approval_states[group_key] = {
-                                "summary": summary,
-                                "actions": actions,
-                                "approved": False,
-                                "actions_executed": False,
-                                "resume_requested": False,
-                            }
-                            for item in group:
-                                await _send_item_approval_pending(ws, item.id, summary, actions)
-                            approval_pending = True
-                            await replay_deferred_group_messages(group)
-                            return
-
-                        if not approval_state["approved"]:
+                        can_continue = await _resolve_group_approval(
+                            group=group,
+                            group_key=group_key,
+                            approval_states=approval_states,
+                            cfg=cfg_loaded,
+                            project_root=project_root,
+                            ws=ws,
+                            replay_deferred=replay_deferred_group_messages,
+                            execute_actions=execute_group_actions,
+                        )
+                        if not can_continue:
                             approval_pending = True
                             return
-
-                        if not approval_state["actions_executed"]:
-                            await execute_group_actions(group)
 
                     if len(group) == 1:
                         item = group[0]

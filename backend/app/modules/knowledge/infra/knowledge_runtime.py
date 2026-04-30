@@ -716,42 +716,76 @@ class _RefreshTask:
 
 def _run_refresh_impl(task: _RefreshTask) -> None:
     ensure_knowledge_dirs()
-    config = get_config()
-    sts2_path = str(config.get("sts2_path", "")).strip()
-    if not sts2_path:
-        raise RuntimeError("未配置 STS2 游戏路径，无法更新知识库")
-    if not _has_ilspycmd():
-        raise RuntimeError("未检测到 ilspycmd，请先放到项目目录或确保 ilspycmd 在 PATH 中")
+    sts2_path = _validate_refresh_prereqs(get_config())
 
     task.set_step("读取当前游戏版本")
     game_info = read_current_game_version(sts2_path)
-    game_dll = _find_game_dll(sts2_path)
 
     task.set_step("反编译游戏源码")
-    _run_ilspy_outputdir(game_dll, GAME_KNOWLEDGE_DIR)
+    _decompile_game_dll(sts2_path)
 
     task.set_step("读取 Baselib latest release")
     release = fetch_latest_baselib_release()
     asset = select_baselib_asset(release)
 
     task.set_step("下载 Baselib.dll")
-    baselib_dll_path = KNOWLEDGE_CACHE_DIR / str(asset["name"]).strip()
-    _download_file(str(asset["browser_download_url"]).strip(), baselib_dll_path)
+    baselib_dll_path = _download_baselib(asset)
 
     task.set_step("反编译 Baselib")
+    _decompile_baselib(baselib_dll_path)
+
+    save_manifest(_build_refresh_manifest(
+        sts2_path=sts2_path,
+        game_info=game_info,
+        release=release,
+        asset=asset,
+        baselib_dll_path=baselib_dll_path,
+    ))
+
+
+def _validate_refresh_prereqs(config: dict[str, Any]) -> str:
+    sts2_path = str(config.get("sts2_path", "")).strip()
+    if not sts2_path:
+        raise RuntimeError("未配置 STS2 游戏路径，无法更新知识库")
+    if not _has_ilspycmd():
+        raise RuntimeError("未检测到 ilspycmd，请先放到项目目录或确保 ilspycmd 在 PATH 中")
+    return sts2_path
+
+
+def _decompile_game_dll(sts2_path: str) -> None:
+    _run_ilspy_outputdir(_find_game_dll(sts2_path), GAME_KNOWLEDGE_DIR)
+
+
+def _download_baselib(asset: dict[str, Any]) -> Path:
+    target = KNOWLEDGE_CACHE_DIR / str(asset["name"]).strip()
+    _download_file(str(asset["browser_download_url"]).strip(), target)
+    return target
+
+
+def _decompile_baselib(baselib_dll_path: Path) -> None:
     _reset_dir(BASELIB_KNOWLEDGE_DIR)
     _run_ilspy_to_single_file(baselib_dll_path, BASELIB_KNOWLEDGE_DIR / "BaseLib.decompiled.cs")
 
-    manifest = {
+
+def _build_refresh_manifest(
+    *,
+    sts2_path: str,
+    game_info: dict[str, Any],
+    release: dict[str, Any],
+    asset: dict[str, Any],
+    baselib_dll_path: Path,
+) -> dict[str, Any]:
+    timestamp = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    return {
         "schema_version": 1,
         "status": "fresh",
-        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "generated_at": timestamp,
         "game": {
             "sts2_path": sts2_path,
             "version": game_info["version"],
             "version_source": game_info["source"],
-        "knowledge_path": str(active_game_knowledge_dir()),
-        "decompiled_src_path": str(active_game_knowledge_dir()),
+            "knowledge_path": str(active_game_knowledge_dir()),
+            "decompiled_src_path": str(active_game_knowledge_dir()),
         },
         "baselib": {
             "release_tag": release.get("tag_name"),
@@ -762,13 +796,12 @@ def _run_refresh_impl(task: _RefreshTask) -> None:
             "decompiled_src_path": str(active_baselib_knowledge_dir()),
         },
         "last_check": {
-            "checked_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "checked_at": timestamp,
             "game_matches": True,
             "baselib_matches": True,
             "warnings": [],
         },
     }
-    save_manifest(manifest)
 
 
 def start_refresh_task() -> dict[str, Any]:
