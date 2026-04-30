@@ -1,4 +1,5 @@
 """Tests for batch approval-first helpers."""
+
 import asyncio
 import importlib
 import json
@@ -182,12 +183,13 @@ except (ModuleNotFoundError, ImportError):
     prompt_adapter_stub.ImageProvider = str
     sys.modules["image.prompt_adapter"] = prompt_adapter_stub
 
-from app.modules.approval.runtime import reset_approval_runtime
-from app.modules.approval.domain.models import ActionRequest
+from fastapi import HTTPException
+
 from agents.planner import ModPlan, PlanItem
+from app.modules.approval.domain.models import ActionRequest
+from app.modules.approval.runtime import reset_approval_runtime
 from app.modules.workflow.application.step import WorkflowStep
 from routers import batch_workflow
-from fastapi import HTTPException
 
 
 @pytest.fixture(autouse=True)
@@ -314,10 +316,12 @@ def test_api_plan_review_returns_structured_review_payload():
         ],
     )
 
-    payload = batch_workflow.api_plan_review({
-        "plan": plan.to_dict(),
-        "strictness": "strict",
-    })
+    payload = batch_workflow.api_plan_review(
+        {
+            "plan": plan.to_dict(),
+            "strictness": "strict",
+        }
+    )
 
     assert payload["strictness"] == "strict"
     assert payload["validation"]["strictness"] == "strict"
@@ -356,15 +360,20 @@ def test_api_plan_review_applies_split_requested_bundle_decision():
         ],
     )
 
-    payload = batch_workflow.api_plan_review({
-        "plan": plan.to_dict(),
-        "strictness": "balanced",
-        "bundle_decisions": {
-            "bundle:helper_logic::helper_card": "split_requested",
-        },
-    })
+    payload = batch_workflow.api_plan_review(
+        {
+            "plan": plan.to_dict(),
+            "strictness": "balanced",
+            "bundle_decisions": {
+                "bundle:helper_logic::helper_card": "split_requested",
+            },
+        }
+    )
 
-    assert [bundle["item_ids"] for bundle in payload["execution_plan"]["execution_bundles"]] == [["helper_logic"], ["helper_card"]]
+    assert [bundle["item_ids"] for bundle in payload["execution_plan"]["execution_bundles"]] == [
+        ["helper_logic"],
+        ["helper_card"],
+    ]
 
 
 def test_ensure_plan_review_passes_rejects_plan_that_needs_user_input():
@@ -600,7 +609,9 @@ def test_approval_first_group_can_resume_after_approve_all(monkeypatch, tmp_path
             assert project_root == tmp_path
             return "Need approval", [request]
 
-        async def fake_create_custom_code(description, implementation_notes, name, project_root, stream_callback, skip_build=True):
+        async def fake_create_custom_code(
+            description, implementation_notes, name, project_root, stream_callback, skip_build=True
+        ):
             create_calls.append((name, implementation_notes))
             return "generated custom code"
 
@@ -726,7 +737,9 @@ def test_approval_first_resume_does_not_reapprove_succeeded_actions(monkeypatch,
             assert project_root == tmp_path
             return "Need approval", [request]
 
-        async def fake_create_custom_code(description, implementation_notes, name, project_root, stream_callback, skip_build=True):
+        async def fake_create_custom_code(
+            description, implementation_notes, name, project_root, stream_callback, skip_build=True
+        ):
             create_calls.append((name, implementation_notes))
             return "generated custom code"
 

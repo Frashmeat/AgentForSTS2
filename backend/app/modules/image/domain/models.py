@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 
 @dataclass(slots=True)
@@ -11,7 +11,7 @@ class ImageGenerationRequest:
     prompt: str
     asset_type: str
     batch_size: int = 1
-    negative_prompt: Optional[str] = None
+    negative_prompt: str | None = None
     options: dict[str, Any] = field(default_factory=dict)
 
 

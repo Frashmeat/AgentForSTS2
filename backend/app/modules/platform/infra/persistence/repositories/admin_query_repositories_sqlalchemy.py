@@ -22,12 +22,12 @@ from app.modules.platform.domain.repositories import AdminQueryRepositories
 from app.modules.platform.infra.persistence.models import (
     AIExecutionRecord,
     ChargeStatus,
-    ExecutionProfileRecord,
     ExecutionChargeRecord,
+    ExecutionProfileRecord,
     JobEventRecord,
     QuotaBalanceRecord,
-    UsageLedgerRecord,
     ServerCredentialRecord,
+    UsageLedgerRecord,
 )
 
 
@@ -122,7 +122,9 @@ class AdminQueryRepositoriesSqlAlchemy(AdminQueryRepositories):
         )
 
     def list_refunds(self, user_id: int | None = None) -> list[RefundRecordView]:
-        query = self.session.query(ExecutionChargeRecord).filter(ExecutionChargeRecord.charge_status == ChargeStatus.REFUNDED)
+        query = self.session.query(ExecutionChargeRecord).filter(
+            ExecutionChargeRecord.charge_status == ChargeStatus.REFUNDED
+        )
         if user_id is not None:
             query = query.filter(ExecutionChargeRecord.user_id == user_id)
         rows = query.order_by(ExecutionChargeRecord.id.asc()).all()
@@ -157,9 +159,7 @@ class AdminQueryRepositoriesSqlAlchemy(AdminQueryRepositories):
             predicates = [UserRecord.username.ilike(like), UserRecord.email.ilike(like)]
             if normalized_query.isdigit():
                 predicates.append(UserRecord.user_id == int(normalized_query))
-            query_obj = query_obj.filter(
-                or_(*predicates)
-            )
+            query_obj = query_obj.filter(or_(*predicates))
         if email_verified is not None:
             query_obj = query_obj.filter(UserRecord.email_verified == email_verified)
         if is_admin is not None:
@@ -201,7 +201,9 @@ class AdminQueryRepositoriesSqlAlchemy(AdminQueryRepositories):
         user = self.session.query(UserRecord).filter(UserRecord.user_id == user_id).one_or_none()
         if user is None:
             return None
-        quota = _quota_view(self.session.query(QuotaBalanceRecord).filter(QuotaBalanceRecord.user_id == user_id).one_or_none())
+        quota = _quota_view(
+            self.session.query(QuotaBalanceRecord).filter(QuotaBalanceRecord.user_id == user_id).one_or_none()
+        )
         return AdminUserDetailView(
             user_id=user.user_id,
             username=user.username,
@@ -214,7 +216,9 @@ class AdminQueryRepositoriesSqlAlchemy(AdminQueryRepositories):
             anomaly_flags=_anomaly_flags(user, quota),
         )
 
-    def list_user_quota_ledgers(self, user_id: int, after_id: int | None = None, limit: int = 50) -> AdminQuotaLedgerListView:
+    def list_user_quota_ledgers(
+        self, user_id: int, after_id: int | None = None, limit: int = 50
+    ) -> AdminQuotaLedgerListView:
         query = self.session.query(UsageLedgerRecord).filter(UsageLedgerRecord.user_id == user_id)
         if after_id is not None:
             query = query.filter(UsageLedgerRecord.id > after_id)

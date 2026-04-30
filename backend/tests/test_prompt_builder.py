@@ -1,4 +1,5 @@
 """Tests for prompt builder resource loading."""
+
 import sys
 from pathlib import Path
 

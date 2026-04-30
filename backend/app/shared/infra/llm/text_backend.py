@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 from .contracts import StreamCallback, TextBackend
 
@@ -21,7 +20,7 @@ class FunctionTextBackend:
         self,
         prompt: str,
         llm_cfg: dict,
-        cwd: Optional[Path] = None,
+        cwd: Path | None = None,
     ) -> str:
         return await self._complete_fn(prompt, llm_cfg, cwd)
 
@@ -31,7 +30,7 @@ class FunctionTextBackend:
         user_prompt: str,
         llm_cfg: dict,
         on_chunk: StreamCallback,
-        cwd: Optional[Path] = None,
+        cwd: Path | None = None,
     ) -> str:
         return await self._stream_fn(system_prompt, user_prompt, llm_cfg, on_chunk, cwd)
 
@@ -61,7 +60,7 @@ class TextRunner:
         self,
         prompt: str,
         llm_cfg: dict,
-        cwd: Optional[Path] = None,
+        cwd: Path | None = None,
     ) -> str:
         return await self._resolve_backend(llm_cfg).complete(prompt, llm_cfg, cwd)
 
@@ -71,6 +70,6 @@ class TextRunner:
         user_prompt: str,
         llm_cfg: dict,
         on_chunk: StreamCallback,
-        cwd: Optional[Path] = None,
+        cwd: Path | None = None,
     ) -> str:
         return await self._resolve_backend(llm_cfg).stream(system_prompt, user_prompt, llm_cfg, on_chunk, cwd)

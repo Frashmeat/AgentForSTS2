@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Awaitable, Callable, Optional, Protocol
-
+from typing import Protocol
 
 StreamCallback = Callable[[str], Awaitable[None]]
 
@@ -13,7 +13,7 @@ class AgentBackend(Protocol):
         prompt: str,
         project_root: Path,
         llm_cfg: dict,
-        stream_callback: Optional[StreamCallback] = None,
+        stream_callback: StreamCallback | None = None,
     ) -> str: ...
 
     async def stream(
@@ -21,7 +21,7 @@ class AgentBackend(Protocol):
         prompt: str,
         project_root: Path,
         llm_cfg: dict,
-        stream_callback: Optional[StreamCallback] = None,
+        stream_callback: StreamCallback | None = None,
     ) -> str: ...
 
 
@@ -30,7 +30,7 @@ class TextBackend(Protocol):
         self,
         prompt: str,
         llm_cfg: dict,
-        cwd: Optional[Path] = None,
+        cwd: Path | None = None,
     ) -> str: ...
 
     async def stream(
@@ -39,5 +39,5 @@ class TextBackend(Protocol):
         user_prompt: str,
         llm_cfg: dict,
         on_chunk: StreamCallback,
-        cwd: Optional[Path] = None,
+        cwd: Path | None = None,
     ) -> str: ...

@@ -10,7 +10,6 @@ from pathlib import Path
 
 import pytest
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_SOURCE = REPO_ROOT / "tools" / "latest" / "package-release.ps1"
 
@@ -18,9 +17,9 @@ SCRIPT_SOURCE = REPO_ROOT / "tools" / "latest" / "package-release.ps1"
 def _write_fake_git(bin_dir: Path) -> None:
     (bin_dir / "git.cmd").write_text(
         "@echo off\r\n"
-        "if \"%~1\"==\"-C\" shift\r\n"
-        "if \"%~1\"==\"%CD%\" shift\r\n"
-        "if \"%~1\"==\"rev-parse\" (\r\n"
+        'if "%~1"=="-C" shift\r\n'
+        'if "%~1"=="%CD%" shift\r\n'
+        'if "%~1"=="rev-parse" (\r\n'
         "  echo abc1234\r\n"
         "  exit /b 0\r\n"
         ")\r\n"
@@ -32,8 +31,7 @@ def _write_fake_git(bin_dir: Path) -> None:
 
 def _write_fake_robocopy(bin_dir: Path) -> None:
     (bin_dir / "robocopy.cmd").write_text(
-        "@echo off\r\n"
-        "exit /b 1\r\n",
+        "@echo off\r\n" "exit /b 1\r\n",
         encoding="utf-8",
     )
 
@@ -212,7 +210,15 @@ def test_package_release_debug_reuses_previous_workstation_config(tmp_path: Path
     (mod_template / "README.md").write_text("template\n", encoding="utf-8")
     (temp_repo / "config.example.json").write_text('{"mode":"example"}\n', encoding="utf-8")
 
-    previous_config = temp_repo / "tools" / "latest" / "artifacts" / "agentthespire-workstation-release" / "runtime" / "workstation.config.json"
+    previous_config = (
+        temp_repo
+        / "tools"
+        / "latest"
+        / "artifacts"
+        / "agentthespire-workstation-release"
+        / "runtime"
+        / "workstation.config.json"
+    )
     previous_config.parent.mkdir(parents=True, exist_ok=True)
     previous_config.write_text('{"mode":"debug"}\n', encoding="utf-8")
 
@@ -239,7 +245,15 @@ def test_package_release_without_debug_resets_workstation_config_to_example(tmp_
     (mod_template / "README.md").write_text("template\n", encoding="utf-8")
     (temp_repo / "config.example.json").write_text('{"mode":"example"}\n', encoding="utf-8")
 
-    previous_config = temp_repo / "tools" / "latest" / "artifacts" / "agentthespire-workstation-release" / "runtime" / "workstation.config.json"
+    previous_config = (
+        temp_repo
+        / "tools"
+        / "latest"
+        / "artifacts"
+        / "agentthespire-workstation-release"
+        / "runtime"
+        / "workstation.config.json"
+    )
     previous_config.parent.mkdir(parents=True, exist_ok=True)
     previous_config.write_text('{"mode":"debug"}\n', encoding="utf-8")
 
@@ -266,13 +280,30 @@ def test_package_release_debug_no_longer_reuses_service_level_workstation_config
     (mod_template / "README.md").write_text("template\n", encoding="utf-8")
     (temp_repo / "config.example.json").write_text('{"mode":"example"}\n', encoding="utf-8")
 
-    legacy_service_config = temp_repo / "tools" / "latest" / "artifacts" / "agentthespire-workstation-release" / "services" / "workstation" / "config.json"
+    legacy_service_config = (
+        temp_repo
+        / "tools"
+        / "latest"
+        / "artifacts"
+        / "agentthespire-workstation-release"
+        / "services"
+        / "workstation"
+        / "config.json"
+    )
     legacy_service_config.parent.mkdir(parents=True, exist_ok=True)
     legacy_service_config.write_text('{"mode":"legacy"}\n', encoding="utf-8")
 
     completed = _run_package_release(temp_repo, "workstation", "-NoFrontend", "-NoZip", "-Debug")
 
-    generated_config = temp_repo / "tools" / "latest" / "artifacts" / "agentthespire-workstation-release" / "runtime" / "workstation.config.json"
+    generated_config = (
+        temp_repo
+        / "tools"
+        / "latest"
+        / "artifacts"
+        / "agentthespire-workstation-release"
+        / "runtime"
+        / "workstation.config.json"
+    )
 
     assert completed.returncode == 0, completed.stderr
     assert generated_config.read_text(encoding="utf-8").strip() == '{"mode":"example"}'
@@ -296,8 +327,25 @@ def test_package_release_no_longer_writes_service_level_workstation_config(tmp_p
 
     completed = _run_package_release(temp_repo, "workstation", "-NoFrontend", "-NoZip")
 
-    runtime_config = temp_repo / "tools" / "latest" / "artifacts" / "agentthespire-workstation-release" / "runtime" / "workstation.config.json"
-    service_config = temp_repo / "tools" / "latest" / "artifacts" / "agentthespire-workstation-release" / "services" / "workstation" / "config.json"
+    runtime_config = (
+        temp_repo
+        / "tools"
+        / "latest"
+        / "artifacts"
+        / "agentthespire-workstation-release"
+        / "runtime"
+        / "workstation.config.json"
+    )
+    service_config = (
+        temp_repo
+        / "tools"
+        / "latest"
+        / "artifacts"
+        / "agentthespire-workstation-release"
+        / "services"
+        / "workstation"
+        / "config.json"
+    )
 
     assert completed.returncode == 0, completed.stderr
     assert runtime_config.exists()
@@ -589,7 +637,9 @@ def test_package_release_copies_runtime_tools_bundle(tmp_path: Path):
     (temp_repo / "config.example.json").write_text('{"mode":"example"}\n', encoding="utf-8")
 
     runtime_tools = temp_repo / "runtime" / "tools"
-    nested_tool = runtime_tools / ".store" / "ilspycmd" / "9.1.0.7988" / "ilspycmd" / "9.1.0.7988" / "tools" / "net8.0" / "any"
+    nested_tool = (
+        runtime_tools / ".store" / "ilspycmd" / "9.1.0.7988" / "ilspycmd" / "9.1.0.7988" / "tools" / "net8.0" / "any"
+    )
     nested_tool.mkdir(parents=True, exist_ok=True)
     (runtime_tools / "ilspycmd.exe").write_text("shim\n", encoding="utf-8")
     (nested_tool / "ilspycmd.dll").write_text("dll\n", encoding="utf-8")
@@ -598,7 +648,20 @@ def test_package_release_copies_runtime_tools_bundle(tmp_path: Path):
 
     release_dir = temp_repo / "tools" / "latest" / "artifacts" / "agentthespire-workstation-release"
     copied_exe = release_dir / "runtime" / "tools" / "ilspycmd.exe"
-    copied_dll = release_dir / "runtime" / "tools" / ".store" / "ilspycmd" / "9.1.0.7988" / "ilspycmd" / "9.1.0.7988" / "tools" / "net8.0" / "any" / "ilspycmd.dll"
+    copied_dll = (
+        release_dir
+        / "runtime"
+        / "tools"
+        / ".store"
+        / "ilspycmd"
+        / "9.1.0.7988"
+        / "ilspycmd"
+        / "9.1.0.7988"
+        / "tools"
+        / "net8.0"
+        / "any"
+        / "ilspycmd.dll"
+    )
 
     assert completed.returncode == 0, completed.stderr
     assert copied_exe.exists()

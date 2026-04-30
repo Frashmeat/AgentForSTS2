@@ -45,6 +45,7 @@ RUN pip install --upgrade pip \
 
 COPY backend /app/backend
 COPY config.example.json /app/config.example.json
+COPY pyproject.toml /app/pyproject.toml
 
 WORKDIR /app/backend
 

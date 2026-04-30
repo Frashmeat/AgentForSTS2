@@ -1,6 +1,7 @@
 """
 图片后处理：抠图、缩放、生成 variant、特效
 """
+
 from __future__ import annotations
 
 import ctypes
@@ -46,6 +47,7 @@ def _get_gpu_providers() -> list[str]:
     """检测 ONNX Runtime 是否支持 CUDA，有 GPU 则优先用。"""
     try:
         import onnxruntime as ort
+
         if not _can_probe_cuda_provider(ort):
             return ["CPUExecutionProvider"]
         if "CUDAExecutionProvider" in ort.get_available_providers():
@@ -58,9 +60,11 @@ def _get_gpu_providers() -> list[str]:
 def _get_rembg_session():
     global _rembg_session, _rembg_session_model
     from config import get_config
+
     model = get_config().get("image_gen", {}).get("rembg_model", "birefnet-general")
     if _rembg_session is None or _rembg_session_model != model:
         from rembg import new_session
+
         _rembg_session = new_session(model, providers=_get_gpu_providers())
         _rembg_session_model = model
     return _rembg_session
@@ -74,38 +78,43 @@ PROFILES: dict[AssetType, dict] = {
     "card": {
         "bg": "opaque",
         "variants": [
-            {"rel_path": "images/card_portraits/{name}.png",     "size": (250, 190)},
+            {"rel_path": "images/card_portraits/{name}.png", "size": (250, 190)},
             {"rel_path": "images/card_portraits/big/{name}.png", "size": (1000, 760)},
         ],
     },
     "card_fullscreen": {
         "bg": "opaque",
         "variants": [
-            {"rel_path": "images/card_portraits/{name}.png",     "size": (250, 350)},
+            {"rel_path": "images/card_portraits/{name}.png", "size": (250, 350)},
             {"rel_path": "images/card_portraits/big/{name}.png", "size": (606, 852)},
         ],
     },
     "relic": {
         "bg": "transparent",
         "variants": [
-            {"rel_path": "images/relics/{name}.png",         "size": (94, 94)},
-            {"rel_path": "images/relics/{name}_outline.png", "size": (94, 94),  "effect": "outline"},
-            {"rel_path": "images/relics/big/{name}.png",     "size": (256, 256)},
+            {"rel_path": "images/relics/{name}.png", "size": (94, 94)},
+            {"rel_path": "images/relics/{name}_outline.png", "size": (94, 94), "effect": "outline"},
+            {"rel_path": "images/relics/big/{name}.png", "size": (256, 256)},
         ],
     },
     "power": {
         "bg": "transparent",
         "variants": [
-            {"rel_path": "images/powers/{name}.png",         "size": (64, 64)},
-            {"rel_path": "images/powers/big/{name}.png",     "size": (256, 256)},
+            {"rel_path": "images/powers/{name}.png", "size": (64, 64)},
+            {"rel_path": "images/powers/big/{name}.png", "size": (256, 256)},
         ],
     },
     "character": {
         "variants": [
-            {"rel_path": "images/charui/character_icon_{name}.png",    "size": (128, 128), "bg": "transparent"},
-            {"rel_path": "images/charui/char_select_{name}.png",       "size": (132, 195), "bg": "opaque"},
-            {"rel_path": "images/charui/char_select_{name}_locked.png","size": (132, 195), "bg": "opaque", "effect": "locked"},
-            {"rel_path": "images/charui/map_marker_{name}.png",        "size": (128, 128), "bg": "transparent"},
+            {"rel_path": "images/charui/character_icon_{name}.png", "size": (128, 128), "bg": "transparent"},
+            {"rel_path": "images/charui/char_select_{name}.png", "size": (132, 195), "bg": "opaque"},
+            {
+                "rel_path": "images/charui/char_select_{name}_locked.png",
+                "size": (132, 195),
+                "bg": "opaque",
+                "effect": "locked",
+            },
+            {"rel_path": "images/charui/map_marker_{name}.png", "size": (128, 128), "bg": "transparent"},
         ],
     },
 }
@@ -113,9 +122,11 @@ PROFILES: dict[AssetType, dict] = {
 
 # ── 核心处理函数 ─────────────────────────────────────────────────────────────
 
+
 def remove_background(img: Image.Image) -> Image.Image:
     """使用 rembg BiRefNet 抠图，返回 RGBA。"""
     from rembg import remove
+
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     result_bytes = remove(buf.getvalue(), session=_get_rembg_session())
@@ -129,7 +140,6 @@ def make_outline(img_rgba: Image.Image, outline_px: int = 3) -> Image.Image:
     """
     alpha = np.array(img_rgba.split()[-1])
     # 膨胀
-    from PIL import ImageFilter
     alpha_img = Image.fromarray(alpha)
     dilated = alpha_img.filter(ImageFilter.MaxFilter(outline_px * 2 + 1))
     dilated_arr = np.array(dilated)
@@ -227,7 +237,7 @@ def _run_pipeline_sync(coro):
     import asyncio
 
     try:
-        loop = asyncio.get_running_loop()
+        asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(coro)
 

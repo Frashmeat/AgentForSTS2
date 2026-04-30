@@ -78,7 +78,10 @@ def test_baselib_source_initializes_runtime_from_seed(monkeypatch, tmp_path: Pat
     monkeypatch.setattr(
         knowledge_facade.knowledge_runtime,
         "ensure_runtime_knowledge_seeded",
-        lambda: (runtime_dir.mkdir(parents=True, exist_ok=True), (runtime_dir / "BaseLib.decompiled.cs").write_text("// repo baselib", encoding="utf-8")),
+        lambda: (
+            runtime_dir.mkdir(parents=True, exist_ok=True),
+            (runtime_dir / "BaseLib.decompiled.cs").write_text("// repo baselib", encoding="utf-8"),
+        ),
     )
 
     result = knowledge_facade.get_baselib_source_info()
@@ -94,12 +97,20 @@ def test_build_lookup_context_uses_facade_resolution(monkeypatch):
     monkeypatch.setattr(
         knowledge_facade,
         "get_game_source_info",
-        lambda: {"source_mode": "runtime_decompiled", "path": "I:/release/runtime/knowledge/game/sts2_api_reference.md", "exists": True},
+        lambda: {
+            "source_mode": "runtime_decompiled",
+            "path": "I:/release/runtime/knowledge/game/sts2_api_reference.md",
+            "exists": True,
+        },
     )
     monkeypatch.setattr(
         knowledge_facade,
         "get_baselib_source_info",
-        lambda: {"source_mode": "runtime_decompiled", "path": "I:/release/runtime/knowledge/baselib/BaseLib.decompiled.cs", "exists": True},
+        lambda: {
+            "source_mode": "runtime_decompiled",
+            "path": "I:/release/runtime/knowledge/baselib/BaseLib.decompiled.cs",
+            "exists": True,
+        },
     )
 
     context = knowledge_facade.build_lookup_context()

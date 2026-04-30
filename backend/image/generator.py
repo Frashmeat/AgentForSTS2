@@ -2,6 +2,7 @@
 图像生成：调用各云端 API，支持 FLUX.2 / 即梦 / 通义万相。
 返回图片字节流列表（每次 batch_size 张）。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -9,7 +10,6 @@ import base64
 import io
 import logging
 import threading
-from typing import AsyncIterator
 
 import httpx
 from PIL import Image
@@ -29,20 +29,20 @@ logger = logging.getLogger(__name__)
 # ── FLUX.2 via BFL 官方 API ─────────────────────────────────────────────────
 
 BFL_MODELS = {
-    "flux.2-pro":   "flux_2/flux2_text_to_image",
-    "flux.2-flex":  "flux_2/flux2_text_to_image",   # flex 通过 model 参数区分
+    "flux.2-pro": "flux_2/flux2_text_to_image",
+    "flux.2-flex": "flux_2/flux2_text_to_image",  # flex 通过 model 参数区分
     "flux.2-klein": "flux_2/flux2_text_to_image",
-    "flux.2-max":   "flux_2/flux2_text_to_image",
-    "flux.2-dev":   "flux_2/flux2_text_to_image",
-    "flux.1.1-pro": "flux/flux_text_to_image",       # fallback
+    "flux.2-max": "flux_2/flux2_text_to_image",
+    "flux.2-dev": "flux_2/flux2_text_to_image",
+    "flux.1.1-pro": "flux/flux_text_to_image",  # fallback
 }
 
 BFL_MODEL_IDS = {
-    "flux.2-pro":   "flux.2-pro",
-    "flux.2-flex":  "flux.2-flex",
+    "flux.2-pro": "flux.2-pro",
+    "flux.2-flex": "flux.2-flex",
     "flux.2-klein": "flux.2-klein",
-    "flux.2-max":   "flux.2-max",
-    "flux.2-dev":   "flux.2-dev",
+    "flux.2-max": "flux.2-max",
+    "flux.2-dev": "flux.2-dev",
     "flux.1.1-pro": "flux1.1-pro",
 }
 
@@ -128,13 +128,13 @@ JIMENG_REQ_KEY = "high_aes_general_v30l_zt2i"
 # 推荐 1.3K 分辨率
 _JIMENG_ASPECT = {
     # (target_w, target_h): (jimeng_w, jimeng_h)
-    "1:1":  (1328, 1328),
-    "4:3":  (1472, 1104),
-    "3:4":  (1104, 1472),
+    "1:1": (1328, 1328),
+    "4:3": (1472, 1104),
+    "3:4": (1104, 1472),
     "16:9": (1664, 936),
     "9:16": (936, 1664),
-    "3:2":  (1584, 1056),
-    "2:3":  (1056, 1584),
+    "3:2": (1584, 1056),
+    "2:3": (1056, 1584),
 }
 
 
@@ -154,6 +154,7 @@ def _run_jimeng_sync(ak: str, sk: str, body: dict) -> dict:
     """在线程中运行同步 volcengine SDK 调用。每次持锁完整执行，避免单例竞态。"""
     import requests as _requests
     from volcengine.visual.VisualService import VisualService
+
     with _jimeng_lock:
         svc = VisualService()
         # 每次刷新凭据和 session，避免过期连接和竞态导致的签名失败
@@ -179,6 +180,7 @@ async def _generate_volcengine(
     progress_callback=None,
 ) -> list[Image.Image]:
     import json as _json
+
     loop = asyncio.get_running_loop()
     w, h = _snap_jimeng_size(width, height)
     logger.info("[即梦] 提交 %d 张 %dx%d (snap from %dx%d)", batch_size, w, h, width, height)
@@ -204,10 +206,10 @@ async def _generate_volcengine(
             }
             res = await loop.run_in_executor(None, _run_jimeng_sync, ak, sk, submit_body)
             if res.get("code") != 10000:
-                logger.error("[即梦] 第%d张提交失败: %s", i+1, res)
+                logger.error("[即梦] 第%d张提交失败: %s", i + 1, res)
                 raise RuntimeError(f"即梦提交任务失败 (第{i+1}张): {res}")
             task_id = res["data"]["task_id"]
-            logger.info("[即梦] 第%d张 task_id=%s", i+1, task_id)
+            logger.info("[即梦] 第%d张 task_id=%s", i + 1, task_id)
 
             # 轮询直到完成
             for attempt in range(60):
@@ -227,7 +229,7 @@ async def _generate_volcengine(
                 status = data.get("status", "")
                 if status in ("done", "success", 2, "2"):
                     await _progress(f"第 {i+1} 张生成完成，正在下载…")
-                    logger.info("[即梦] 第%d张完成 task_id=%s", i+1, task_id)
+                    logger.info("[即梦] 第%d张完成 task_id=%s", i + 1, task_id)
                     urls = data.get("image_urls") or []
                     if not urls and data.get("binary_data_base64"):
                         for b64 in data["binary_data_base64"]:
@@ -238,15 +240,16 @@ async def _generate_volcengine(
                             images.append(Image.open(io.BytesIO(resp.content)))
                     break
                 if status in ("failed", "error", 3, "3"):
-                    logger.error("[即梦] 第%d张任务失败 task_id=%s: %s", i+1, task_id, result)
+                    logger.error("[即梦] 第%d张任务失败 task_id=%s: %s", i + 1, task_id, result)
                     raise RuntimeError(f"即梦任务失败 (第{i+1}张): {result}")
             else:
-                logger.error("[即梦] 第%d张超时 task_id=%s", i+1, task_id)
+                logger.error("[即梦] 第%d张超时 task_id=%s", i + 1, task_id)
                 raise TimeoutError(f"即梦任务 {task_id} 超时 (第{i+1}张)")
     return images
 
 
 # ── 通义万相 ─────────────────────────────────────────────────────────────────
+
 
 async def _generate_wanxiang(
     prompt: str,
@@ -303,6 +306,7 @@ async def _generate_wanxiang(
 
 # ── 本地 ComfyUI ─────────────────────────────────────────────────────────────
 
+
 async def _generate_comfyui(
     prompt: str,
     comfyui_url: str,
@@ -337,7 +341,11 @@ async def _generate_comfyui(
             async with httpx.AsyncClient(timeout=30) as client:
                 img_resp = await client.get(
                     f"{comfyui_url}/view",
-                    params={"filename": img_info["filename"], "subfolder": img_info.get("subfolder", ""), "type": img_info["type"]},
+                    params={
+                        "filename": img_info["filename"],
+                        "subfolder": img_info.get("subfolder", ""),
+                        "type": img_info["type"],
+                    },
                 )
                 images.append(Image.open(io.BytesIO(img_resp.content)))
     return images
@@ -347,19 +355,30 @@ def _build_flux2_workflow(prompt: str, model: str, width: int, height: int, batc
     """构建 ComfyUI FLUX.2 workflow JSON。"""
     return {
         "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": f"{model}.safetensors"}},
-        "2": {"class_type": "CLIPTextEncode",          "inputs": {"clip": ["1", 1], "text": prompt}},
-        "3": {"class_type": "EmptyLatentImage",        "inputs": {"width": width, "height": height, "batch_size": batch_size}},
-        "4": {"class_type": "KSampler",                "inputs": {
-            "model": ["1", 0], "positive": ["2", 0], "negative": ["2", 0],
-            "latent_image": ["3", 0], "seed": 0, "steps": 20, "cfg": 3.5,
-            "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0,
-        }},
-        "5": {"class_type": "VAEDecode",       "inputs": {"samples": ["4", 0], "vae": ["1", 2]}},
-        "6": {"class_type": "SaveImage",       "inputs": {"images": ["5", 0], "filename_prefix": "spireforge"}},
+        "2": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["1", 1], "text": prompt}},
+        "3": {"class_type": "EmptyLatentImage", "inputs": {"width": width, "height": height, "batch_size": batch_size}},
+        "4": {
+            "class_type": "KSampler",
+            "inputs": {
+                "model": ["1", 0],
+                "positive": ["2", 0],
+                "negative": ["2", 0],
+                "latent_image": ["3", 0],
+                "seed": 0,
+                "steps": 20,
+                "cfg": 3.5,
+                "sampler_name": "euler",
+                "scheduler": "simple",
+                "denoise": 1.0,
+            },
+        },
+        "5": {"class_type": "VAEDecode", "inputs": {"samples": ["4", 0], "vae": ["1", 2]}},
+        "6": {"class_type": "SaveImage", "inputs": {"images": ["5", 0], "filename_prefix": "spireforge"}},
     }
 
 
 # ── 公共入口 ─────────────────────────────────────────────────────────────────
+
 
 async def generate_images(
     prompt: str,
@@ -393,11 +412,11 @@ async def generate_images(
 def _resolve_gen_size(asset_type: str) -> tuple[int, int]:
     """根据资产类型返回合适的生成分辨率（略大于最终尺寸）。"""
     sizes = {
-        "card":            (1024, 800),
+        "card": (1024, 800),
         "card_fullscreen": (640, 900),
-        "relic":           (512, 512),
-        "power":           (512, 512),
-        "character":       (512, 760),
+        "relic": (512, 512),
+        "power": (512, 512),
+        "character": (512, 760),
     }
     return sizes.get(asset_type, (512, 512))
 

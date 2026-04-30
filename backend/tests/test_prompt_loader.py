@@ -1,4 +1,5 @@
 """Tests for shared prompt loading utilities."""
+
 import importlib.util
 import shutil
 import sys

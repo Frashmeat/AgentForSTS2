@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from collections import deque
+from datetime import UTC, datetime
 
 from app.modules.platform.contracts.job_commands import CancelJobCommand, CreateJobCommand, StartJobCommand
 from app.modules.platform.domain.models.enums import JobItemStatus, JobStatus
@@ -9,11 +9,14 @@ from app.modules.platform.domain.repositories import JobEventRepository, JobRepo
 from app.modules.platform.infra.persistence.models import JobRecord
 
 from .execution_orchestrator_service import ExecutionOrchestratorService, QueuedExecutionReason
-from .server_queued_job_claim_service import ServerQueuedJobClaimBusyError, ServerQueuedJobClaimHandle, ServerQueuedJobClaimService
+from .server_queued_job_claim_service import (
+    ServerQueuedJobClaimBusyError,
+    ServerQueuedJobClaimHandle,
+    ServerQueuedJobClaimService,
+)
 from .server_workspace_lock_service import ServerWorkspaceBusyError
 from .server_workspace_service import ServerWorkspaceService
 from .uploaded_asset_service import UploadedAssetService
-
 
 _STEP_PROTOCOL_VERSION = "v1"
 _RESULT_SCHEMA_VERSION = "v1"
@@ -104,7 +107,9 @@ class JobApplicationService:
             )
         return job, True, released_workspace_refs, released_deploy_targets
 
-    def _start_job_internal(self, *, user_id: int, command: StartJobCommand) -> tuple[JobRecord | None, list[str], list[str]]:
+    def _start_job_internal(
+        self, *, user_id: int, command: StartJobCommand
+    ) -> tuple[JobRecord | None, list[str], list[str]]:
         job = self.job_repository.find_by_id_for_user(command.job_id, user_id)
         if job is None:
             return None, [], []
@@ -115,9 +120,7 @@ class JobApplicationService:
                 exclude_job_id=job.id,
             )
             if active_server_job_count >= _MAX_ACTIVE_SERVER_JOBS_PER_USER:
-                raise ValueError(
-                    f"too many active server jobs for user: limit {_MAX_ACTIVE_SERVER_JOBS_PER_USER}"
-                )
+                raise ValueError(f"too many active server jobs for user: limit {_MAX_ACTIVE_SERVER_JOBS_PER_USER}")
         now = datetime.now(UTC)
         for item in job.items:
             if item.status == JobItemStatus.PENDING:
@@ -317,7 +320,9 @@ class JobApplicationService:
         if job.failed_business_item_count + job.failed_system_item_count + job.quota_skipped_item_count > 0:
             if job.succeeded_item_count > 0:
                 job.status = JobStatus.PARTIAL_SUCCEEDED
-                job.result_summary = JobApplicationService._pick_first_non_empty(item.result_summary for item in job.items)
+                job.result_summary = JobApplicationService._pick_first_non_empty(
+                    item.result_summary for item in job.items
+                )
             else:
                 job.status = JobStatus.FAILED
                 job.result_summary = ""
@@ -360,10 +365,12 @@ class JobApplicationService:
                 self.uploaded_asset_service.ensure_accessible(user_id=user_id, uploaded_asset_ref=uploaded_asset_ref)
 
             server_project_ref = str(item.input_payload.get("server_project_ref", "")).strip()
-            if command.job_type in {"single_generate", "batch_generate"} and item.item_type == "custom_code" and not server_project_ref:
-                raise ValueError(
-                    f"platform job payload for {command.job_type}/custom_code requires server_project_ref"
-                )
+            if (
+                command.job_type in {"single_generate", "batch_generate"}
+                and item.item_type == "custom_code"
+                and not server_project_ref
+            ):
+                raise ValueError(f"platform job payload for {command.job_type}/custom_code requires server_project_ref")
             if (
                 command.job_type in {"single_generate", "batch_generate"}
                 and item.item_type == "card_fullscreen"

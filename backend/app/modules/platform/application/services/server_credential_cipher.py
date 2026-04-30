@@ -36,7 +36,7 @@ class ServerCredentialCipher:
             self._fernet = Fernet(base64.urlsafe_b64encode(derived_key))
 
     @classmethod
-    def from_settings(cls, settings: Settings) -> "ServerCredentialCipher":
+    def from_settings(cls, settings: Settings) -> ServerCredentialCipher:
         return cls(settings.get_server_credential_secret())
 
     def encrypt(self, plaintext: str) -> str:
@@ -53,7 +53,7 @@ class ServerCredentialCipher:
         raw_value = str(ciphertext)
         try:
             if raw_value.startswith(self._FALLBACK_PREFIX):
-                return self._decrypt_fallback(raw_value[len(self._FALLBACK_PREFIX):])
+                return self._decrypt_fallback(raw_value[len(self._FALLBACK_PREFIX) :])
             if self._fernet is None:
                 raise ValueError("fernet backend is unavailable for this ciphertext")
             return self._fernet.decrypt(raw_value.encode("utf-8")).decode("utf-8")
@@ -78,9 +78,7 @@ class ServerCredentialCipher:
         counter = 0
         while len(stream) < len(data):
             stream.extend(
-                hashlib.sha256(
-                    self._secret_bytes + self._KDF_SALT + nonce + counter.to_bytes(4, "big")
-                ).digest()
+                hashlib.sha256(self._secret_bytes + self._KDF_SALT + nonce + counter.to_bytes(4, "big")).digest()
             )
             counter += 1
-        return bytes(left ^ right for left, right in zip(data, stream))
+        return bytes(left ^ right for left, right in zip(data, stream, strict=False))

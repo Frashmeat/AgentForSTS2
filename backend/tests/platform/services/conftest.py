@@ -10,9 +10,9 @@ pytest.importorskip("sqlalchemy")
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.modules.auth.infra.persistence import models as _auth_models  # noqa: F401
+from app.modules.auth.infra.persistence import models as _auth_models
 from app.modules.auth.infra.persistence.models import auth_tables
-from app.modules.platform.infra.persistence import models as _platform_models  # noqa: F401
+from app.modules.platform.infra.persistence import models as _platform_models
 from app.modules.platform.infra.persistence.models import platform_tables
 from app.shared.infra.db.base import Base
 

@@ -1,4 +1,5 @@
 """Tests for approval request store lifecycle."""
+
 import sys
 from pathlib import Path
 

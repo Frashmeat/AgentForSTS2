@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.composition.container import ApplicationContainer
-from app.modules.auth.infra.persistence import models as _auth_models  # noqa: F401
+from app.modules.auth.infra.persistence import models as _auth_models
 from app.modules.platform.application.services.server_credential_cipher import ServerCredentialCipher
 from app.modules.platform.application.services.server_workspace_lock_service import (
     ServerWorkspaceBusyError,
@@ -24,7 +24,8 @@ from app.modules.platform.application.services.server_workspace_lock_service imp
 from app.modules.platform.application.services.server_workspace_service import ServerWorkspaceService
 from app.modules.platform.application.services.uploaded_asset_service import UploadedAssetService
 from app.modules.platform.contracts.runner_contracts import StepExecutionResult
-from app.modules.platform.infra.persistence import models as _platform_models  # noqa: F401
+from app.modules.platform.domain.models.enums import JobItemStatus, JobStatus
+from app.modules.platform.infra.persistence import models as _platform_models
 from app.modules.platform.infra.persistence.models import (
     AIExecutionRecord,
     ExecutionProfileRecord,
@@ -35,7 +36,6 @@ from app.modules.platform.infra.persistence.models import (
     ServerCredentialRecord,
     UserPlatformPreferenceRecord,
 )
-from app.modules.platform.domain.models.enums import JobItemStatus, JobStatus
 from app.shared.infra.db.base import Base
 from routers.auth_router import router as auth_router
 from routers.platform_jobs import router as platform_router
@@ -220,7 +220,9 @@ class _SucceededWorkflowRunner:
                     "server_workspace_root": str(merged.get("server_workspace_root", "")).strip(),
                 }
             elif step.step_type == "code.generate":
-                output_payload = {"text": f"已写入 {str(merged.get('item_name', '')).strip()} 的服务器 custom_code 代码"}
+                output_payload = {
+                    "text": f"已写入 {str(merged.get('item_name', '')).strip()} 的服务器 custom_code 代码"
+                }
             elif step.step_type == "asset.generate":
                 output_payload = {"text": f"已写入 {str(merged.get('item_name', '')).strip()} 的服务器资产代码"}
             elif step.step_type == "build.project":
@@ -240,7 +242,9 @@ class _SucceededWorkflowRunner:
                     ],
                 }
             elif step.step_type == "single.asset.plan":
-                asset_type = str(step.input_payload.get("asset_type") or base_request.input_payload.get("asset_type", "")).strip()
+                asset_type = str(
+                    step.input_payload.get("asset_type") or base_request.input_payload.get("asset_type", "")
+                ).strip()
                 if asset_type == "card":
                     text = "已生成服务器卡牌实现方案"
                 elif asset_type == "card_fullscreen":
@@ -458,7 +462,10 @@ def test_platform_jobs_router_rejects_legacy_platform_payload_fields(client: Tes
     )
 
     assert created.status_code == 400
-    assert created.json()["detail"] == "platform job payload for single_generate/card contains forbidden fields: asset_name"
+    assert (
+        created.json()["detail"]
+        == "platform job payload for single_generate/card contains forbidden fields: asset_name"
+    )
 
 
 def test_platform_jobs_router_requires_server_project_ref_for_single_custom_code(client: TestClient):
@@ -496,7 +503,9 @@ def test_platform_jobs_router_requires_server_project_ref_for_single_custom_code
     )
 
     assert created.status_code == 400
-    assert created.json()["detail"] == "platform job payload for single_generate/custom_code requires server_project_ref"
+    assert (
+        created.json()["detail"] == "platform job payload for single_generate/custom_code requires server_project_ref"
+    )
 
 
 def test_platform_jobs_router_requires_server_project_ref_for_batch_custom_code(client: TestClient):

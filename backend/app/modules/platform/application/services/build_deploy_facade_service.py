@@ -3,17 +3,18 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from project_utils import ensure_local_props
+
+from app.modules.codegen.api import build_and_fix
+from app.modules.platform.application.services.server_deploy_registry_service import ServerDeployRegistryService
 from app.modules.platform.application.services.server_deploy_target_lock_service import (
     ServerDeployTargetBusyError,
     ServerDeployTargetLockService,
 )
-from app.modules.platform.application.services.server_deploy_registry_service import ServerDeployRegistryService
-from app.modules.codegen.api import build_and_fix
 from app.modules.platform.infra.build_output_files import deploy_latest_output_files, find_latest_output_files
 from app.shared.infra.ws_errors import send_ws_error
 from app.shared.prompting import PromptLoader
 from config import get_config
-from project_utils import ensure_local_props
 
 
 class BuildDeployFacadeService:
@@ -83,7 +84,9 @@ class BuildDeployFacadeService:
                     )
                 except ServerDeployTargetBusyError as error:
                     registration = self._deploy_registry_service.read_registration(target_dir)
-                    error.last_successful_deploy = self._deploy_registry_service.build_registration_payload(registration)
+                    error.last_successful_deploy = self._deploy_registry_service.build_registration_payload(
+                        registration
+                    )
                     error.recovery_context = self._deploy_registry_service.build_recovery_context(
                         registration,
                         requested_source_workspace_root=str(project_root),
@@ -138,14 +141,18 @@ class BuildDeployFacadeService:
             elif not sts2_mods:
                 await send_chunk(f"\n{self._text_loader.load('runtime_workflow.build_game_path_missing').strip()}\n")
 
-            await ws.send_text(json.dumps({
-                "event": "done",
-                "success": True,
-                "deployed_to": deployed_to,
-                "files": file_names,
-                "last_successful_deploy": last_successful_deploy,
-                "deploy_recovery_context": deploy_recovery_context,
-            }))
+            await ws.send_text(
+                json.dumps(
+                    {
+                        "event": "done",
+                        "success": True,
+                        "deployed_to": deployed_to,
+                        "files": file_names,
+                        "last_successful_deploy": last_successful_deploy,
+                        "deploy_recovery_context": deploy_recovery_context,
+                    }
+                )
+            )
         except Exception as exc:
             try:
                 await send_ws_error(

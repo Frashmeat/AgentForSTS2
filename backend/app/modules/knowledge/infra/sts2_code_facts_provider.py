@@ -28,7 +28,9 @@ class Sts2CodeFactsProvider:
     def _runtime_knowledge_fact(self) -> KnowledgeFactItem:
         lookup = build_lookup_context()
         game_path = lookup["game_path"] or str(knowledge_runtime.active_game_knowledge_dir())
-        baselib_path = lookup["baselib_src_path"] or str(knowledge_runtime.active_baselib_knowledge_dir() / "BaseLib.decompiled.cs")
+        baselib_path = lookup["baselib_src_path"] or str(
+            knowledge_runtime.active_baselib_knowledge_dir() / "BaseLib.decompiled.cs"
+        )
         if lookup["game_source_mode"] == "runtime_decompiled":
             body = (
                 "Use runtime knowledge as the source of truth. "
@@ -326,7 +328,10 @@ class Sts2CodeFactsProvider:
                         "If the feature targets an existing event or lifecycle hook, prefer a focused `HarmonyPatch` on the concrete method."
                     ),
                     priority=57,
-                    evidence_paths=[custom_doc, str(knowledge_runtime.active_baselib_knowledge_dir() / "BaseLib.decompiled.cs")],
+                    evidence_paths=[
+                        custom_doc,
+                        str(knowledge_runtime.active_baselib_knowledge_dir() / "BaseLib.decompiled.cs"),
+                    ],
                     keywords=["HarmonyPatch", "PatchAll"],
                     asset_types=["custom_code"],
                 ),

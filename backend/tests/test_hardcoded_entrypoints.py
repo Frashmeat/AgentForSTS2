@@ -17,4 +17,7 @@ def test_config_router_keeps_image_test_entrypoint():
 
     assert '@router.get("/test_imggen")' in source
     assert "from image.generator import generate_images" in source
-    assert 'imgs = await generate_images(_TEXT_LOADER.load("runtime_system.config_image_test_prompt").strip(), "power", batch_size=1)' in source
+    assert (
+        'imgs = await generate_images(_TEXT_LOADER.load("runtime_system.config_image_test_prompt").strip(), "power", batch_size=1)'
+        in source
+    )

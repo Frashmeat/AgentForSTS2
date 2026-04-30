@@ -51,9 +51,7 @@ class PlanValidationResult:
 
 def validate_plan(plan: ModPlan, strictness: ReviewStrictness = "balanced") -> PlanValidationResult:
     duplicate_ids = {
-        item.id
-        for item in plan.items
-        if item.id and sum(1 for candidate in plan.items if candidate.id == item.id) > 1
+        item.id for item in plan.items if item.id and sum(1 for candidate in plan.items if candidate.id == item.id) > 1
     }
     known_ids = {item.id for item in plan.items}
 

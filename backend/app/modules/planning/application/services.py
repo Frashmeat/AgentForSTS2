@@ -2,15 +2,14 @@ from __future__ import annotations
 
 import json
 
-from config import get_config
-from llm.text_runner import complete_text
-
 from app.modules.planning.application.dependency_graph import find_groups, topological_sort
 from app.modules.planning.application.execution_bundles import ExecutionPlanPreview, build_execution_plan
 from app.modules.planning.application.plan_validation import PlanValidationResult, ReviewStrictness, validate_plan
 from app.modules.planning.domain.models import AssetItemType, ModPlan, PlanItem
 from app.shared.contracts.knowledge import KnowledgeQuery
 from app.shared.prompting import PromptContextAssembler, PromptLoader
+from config import get_config
+from llm.text_runner import complete_text
 
 _NEEDS_IMAGE_TYPES: set[AssetItemType] = {"card", "card_fullscreen", "relic", "power", "character"}
 _PLANNER_PROMPT_BUNDLE_KEY = "runtime_agent.planning_planner_prompt"
@@ -114,6 +113,7 @@ class PlanningService:
             data = json.loads(raw_json)
         except json.JSONDecodeError:
             from json_repair import repair_json
+
             data = json.loads(repair_json(raw_json))
 
         items = []

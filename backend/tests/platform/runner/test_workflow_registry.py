@@ -37,12 +37,14 @@ def test_workflow_registry_can_resolve_steps_dynamically_from_payload():
     registry = PlatformWorkflowRegistry(
         {
             ("single_generate", "card_fullscreen"): (
-                lambda input_payload: [
-                    PlatformWorkflowStep(step_type="asset.generate", step_id="asset-step"),
-                    PlatformWorkflowStep(step_type="build.project", step_id="build-step"),
-                ]
-                if input_payload.get("uploaded_asset_ref") and input_payload.get("server_project_ref")
-                else [PlatformWorkflowStep(step_type="single.asset.plan", step_id="plan-step")]
+                lambda input_payload: (
+                    [
+                        PlatformWorkflowStep(step_type="asset.generate", step_id="asset-step"),
+                        PlatformWorkflowStep(step_type="build.project", step_id="build-step"),
+                    ]
+                    if input_payload.get("uploaded_asset_ref") and input_payload.get("server_project_ref")
+                    else [PlatformWorkflowStep(step_type="single.asset.plan", step_id="plan-step")]
+                )
             )
         }
     )

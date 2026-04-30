@@ -2,13 +2,12 @@ import importlib
 import sys
 from pathlib import Path
 
-from sqlalchemy.schema import CreateIndex, CreateTable
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.schema import CreateIndex, CreateTable
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from app.shared.infra.db.base import Base
-
 
 EXPECTED_TABLES = {
     "jobs",
@@ -112,10 +111,7 @@ def test_platform_indexes_compile_expected_query_and_idempotency_guards():
 
 def test_platform_migration_script_exists_for_first_job_chain_revision():
     migration_path = (
-        Path(__file__).resolve().parents[3]
-        / "migrations"
-        / "versions"
-        / "20260331_01_platform_job_chain.py"
+        Path(__file__).resolve().parents[3] / "migrations" / "versions" / "20260331_01_platform_job_chain.py"
     )
 
     assert migration_path.exists()
@@ -127,10 +123,7 @@ def test_platform_migration_script_exists_for_first_job_chain_revision():
 
 def test_first_platform_revision_freezes_only_initial_job_chain_tables():
     migration_path = (
-        Path(__file__).resolve().parents[3]
-        / "migrations"
-        / "versions"
-        / "20260331_01_platform_job_chain.py"
+        Path(__file__).resolve().parents[3] / "migrations" / "versions" / "20260331_01_platform_job_chain.py"
     )
 
     source = migration_path.read_text(encoding="utf-8")
@@ -145,10 +138,7 @@ def test_first_platform_revision_freezes_only_initial_job_chain_tables():
 
 def test_first_platform_revision_identifier_fits_alembic_version_limit():
     migration_path = (
-        Path(__file__).resolve().parents[3]
-        / "migrations"
-        / "versions"
-        / "20260331_01_platform_job_chain.py"
+        Path(__file__).resolve().parents[3] / "migrations" / "versions" / "20260331_01_platform_job_chain.py"
     )
 
     source = migration_path.read_text(encoding="utf-8")
@@ -168,9 +158,7 @@ def test_all_revision_identifiers_fit_alembic_version_limit():
             continue
 
         source = migration_path.read_text(encoding="utf-8")
-        revision_line = next(
-            line for line in source.splitlines() if line.startswith(revision_prefix)
-        )
+        revision_line = next(line for line in source.splitlines() if line.startswith(revision_prefix))
         revisions.append(revision_line.split('"')[1])
 
     assert revisions
@@ -187,7 +175,7 @@ def test_later_column_revisions_guard_against_columns_created_by_current_models(
         encoding="utf-8"
     )
 
-    assert "inspect(op.get_bind()).get_columns(\"jobs\")" in job_profile_source
+    assert 'inspect(op.get_bind()).get_columns("jobs")' in job_profile_source
     assert "selected_execution_profile_id" in job_profile_source
-    assert "inspect(op.get_bind()).get_columns(\"ai_executions\")" in ai_fact_source
+    assert 'inspect(op.get_bind()).get_columns("ai_executions")' in ai_fact_source
     assert "credential_ref" in ai_fact_source

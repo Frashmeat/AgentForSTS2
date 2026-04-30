@@ -320,7 +320,9 @@ def test_server_credential_admin_service_runs_health_check_and_records_result():
         last_checked_at=datetime.now(UTC),
     )
     checker = FakeServerCredentialHealthChecker(
-        ServerCredentialHealthCheckResult(status="rate_limited", error_code="http_429", error_message="limited", latency_ms=55)
+        ServerCredentialHealthCheckResult(
+            status="rate_limited", error_code="http_429", error_message="limited", latency_ms=55
+        )
     )
     service = ServerCredentialAdminService(
         server_credential_admin_repository=repository,

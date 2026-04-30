@@ -1,4 +1,5 @@
 """Tests for text runner backend resolution."""
+
 import asyncio
 import sys
 import types
@@ -15,7 +16,7 @@ sys.modules.pop("llm.text_runner", None)
 
 from app.shared.prompting import PromptLoader
 from llm import prompt_builder
-from llm.text_runner import TextRunner, build_text_prompt, build_system_prompt, resolve_text_backend, resolve_model
+from llm.text_runner import TextRunner, build_system_prompt, build_text_prompt, resolve_model, resolve_text_backend
 
 
 def test_text_runner_uses_cli_backend_when_mode_is_agent_cli():
@@ -203,11 +204,14 @@ def test_build_text_prompt_uses_latest_runtime_custom_prompt_when_requested(monk
     from llm import text_runner
 
     monkeypatch.setattr(text_runner, "get_config", lambda: {"llm": {"custom_prompt": ""}})
-    assert text_runner.build_text_prompt(
-        "base prompt",
-        {"custom_prompt": "stale prompt"},
-        use_runtime_config=True,
-    ) == "base prompt"
+    assert (
+        text_runner.build_text_prompt(
+            "base prompt",
+            {"custom_prompt": "stale prompt"},
+            use_runtime_config=True,
+        )
+        == "base prompt"
+    )
 
 
 def test_build_text_prompt_uses_shared_bundle_header_when_bundle_path_missing(monkeypatch):

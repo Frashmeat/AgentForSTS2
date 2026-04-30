@@ -119,9 +119,7 @@ def test_charge_quota_ledger_and_event_repositories_persist_auditable_chain(db_s
             step_id="step-billing",
         )
     )
-    account = quota_repository.create_account(
-        QuotaAccountRecord(user_id=1001, status=QuotaAccountStatus.ACTIVE)
-    )
+    account = quota_repository.create_account(QuotaAccountRecord(user_id=1001, status=QuotaAccountStatus.ACTIVE))
     daily_bucket = quota_repository.create_bucket(
         QuotaBucketRecord(
             quota_account_id=account.id,

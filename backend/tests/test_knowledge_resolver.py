@@ -14,9 +14,7 @@ def _fact_keys(packet) -> set[str]:
 def test_sts2_knowledge_resolver_returns_public_facts_for_asset_codegen():
     resolver = Sts2KnowledgeResolver()
 
-    packet = resolver.resolve(
-        KnowledgeQuery(scenario="asset_codegen", domain="sts2", asset_type="card")
-    )
+    packet = resolver.resolve(KnowledgeQuery(scenario="asset_codegen", domain="sts2", asset_type="card"))
 
     assert packet.domain == "sts2"
     assert packet.scenario == "asset_codegen"
@@ -26,9 +24,7 @@ def test_sts2_knowledge_resolver_returns_public_facts_for_asset_codegen():
 def test_sts2_knowledge_resolver_merges_type_specific_facts_for_card():
     resolver = Sts2KnowledgeResolver()
 
-    packet = resolver.resolve(
-        KnowledgeQuery(scenario="asset_codegen", domain="sts2", asset_type="card")
-    )
+    packet = resolver.resolve(KnowledgeQuery(scenario="asset_codegen", domain="sts2", asset_type="card"))
 
     assert "sts2.card.base_class" in _fact_keys(packet)
     assert packet.guidance
@@ -105,9 +101,7 @@ def test_sts2_knowledge_resolver_prefers_active_knowledge_pack(monkeypatch, tmp_
     monkeypatch.setattr(knowledge_runtime, "active_game_knowledge_dir", lambda: game_root)
     monkeypatch.setattr(knowledge_runtime, "active_baselib_knowledge_dir", lambda: baselib_root)
 
-    packet = Sts2KnowledgeResolver().resolve(
-        KnowledgeQuery(scenario="asset_codegen", domain="sts2", asset_type="card")
-    )
+    packet = Sts2KnowledgeResolver().resolve(KnowledgeQuery(scenario="asset_codegen", domain="sts2", asset_type="card"))
 
     assert any(item.body == "active card guidance" for item in packet.guidance)
     assert any(str(game_root) in item.body for item in packet.facts)
@@ -130,11 +124,11 @@ def test_sts2_knowledge_resolver_labels_reference_only_game_lookup(monkeypatch, 
     monkeypatch.setattr(knowledge_runtime, "active_game_knowledge_dir", lambda: game_root)
     monkeypatch.setattr(knowledge_runtime, "active_resource_knowledge_dir", lambda: resource_root)
     monkeypatch.setattr(knowledge_runtime, "active_baselib_knowledge_dir", lambda: baselib_root)
-    monkeypatch.setattr(knowledge_runtime, "GAME_KNOWLEDGE_SEED_FILE", game_root / "sts2_api_reference.md", raising=False)
-
-    packet = Sts2KnowledgeResolver().resolve(
-        KnowledgeQuery(scenario="asset_codegen", domain="sts2", asset_type="card")
+    monkeypatch.setattr(
+        knowledge_runtime, "GAME_KNOWLEDGE_SEED_FILE", game_root / "sts2_api_reference.md", raising=False
     )
+
+    packet = Sts2KnowledgeResolver().resolve(KnowledgeQuery(scenario="asset_codegen", domain="sts2", asset_type="card"))
 
     assert any(item.title == "STS2 API reference summary" for item in packet.lookup)
     assert not any(item.title == "STS2 runtime knowledge directory" for item in packet.lookup)

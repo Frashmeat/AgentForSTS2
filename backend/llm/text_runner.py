@@ -4,16 +4,18 @@ import asyncio
 import os
 import shutil
 import subprocess
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Awaitable, Callable, Optional
 
 import litellm
 
 from app.shared.infra.llm.text_backend import (
     FunctionTextBackend,
     TextBackendRegistry,
-    TextRunner as PortTextRunner,
     resolve_text_backend_name,
+)
+from app.shared.infra.llm.text_backend import (
+    TextRunner as PortTextRunner,
 )
 from config import get_config, normalize_llm_config
 from llm.agent_backends.claude_cli import _resolve_claude_launcher
@@ -93,7 +95,7 @@ def _build_claude_cli_env(llm_cfg: dict) -> dict[str, str]:
 async def complete_text(
     prompt: str,
     llm_cfg: dict,
-    cwd: Optional[Path] = None,
+    cwd: Path | None = None,
 ) -> str:
     prompt = build_text_prompt(prompt, llm_cfg, use_runtime_config=True)
     runner = TextRunner(registry=_build_default_registry())
@@ -105,7 +107,7 @@ async def stream_text(
     user_prompt: str,
     llm_cfg: dict,
     on_chunk: Callable[[str], Awaitable[None]],
-    cwd: Optional[Path] = None,
+    cwd: Path | None = None,
 ) -> str:
     system_prompt = build_system_prompt(system_prompt, llm_cfg, use_runtime_config=True)
     runner = TextRunner(registry=_build_default_registry())
@@ -138,7 +140,7 @@ async def _stream_via_cli_completion(
     user_prompt: str,
     llm_cfg: dict,
     on_chunk: Callable[[str], Awaitable[None]],
-    cwd: Optional[Path] = None,
+    cwd: Path | None = None,
 ) -> str:
     backend = resolve_text_backend(llm_cfg)
     full_prompt = f"{system_prompt}\n\n{user_prompt}"
@@ -149,12 +151,12 @@ async def _stream_via_cli_completion(
 
     chunk_size = 80
     for i in range(0, len(full_text), chunk_size):
-        await on_chunk(full_text[i:i + chunk_size])
+        await on_chunk(full_text[i : i + chunk_size])
         await asyncio.sleep(0)
     return full_text
 
 
-async def _complete_via_claude_cli(prompt: str, llm_cfg: dict, cwd: Optional[Path]) -> str:
+async def _complete_via_claude_cli(prompt: str, llm_cfg: dict, cwd: Path | None) -> str:
     cmd = [*_resolve_claude_launcher(), "--print"]
     model = normalize_llm_config(llm_cfg).get("model")
     if model:
@@ -178,7 +180,7 @@ async def _complete_via_claude_cli(prompt: str, llm_cfg: dict, cwd: Optional[Pat
     return result.stdout.decode("utf-8", errors="replace").strip()
 
 
-async def _complete_via_codex_cli(prompt: str, llm_cfg: dict, cwd: Optional[Path]) -> str:
+async def _complete_via_codex_cli(prompt: str, llm_cfg: dict, cwd: Path | None) -> str:
     env = os.environ.copy()
     if llm_cfg.get("api_key"):
         env["OPENAI_API_KEY"] = str(llm_cfg["api_key"])
@@ -193,7 +195,8 @@ async def _complete_via_codex_cli(prompt: str, llm_cfg: dict, cwd: Optional[Path
         codex_exe,
         "exec",
         "--full-auto",
-        "--color", "never",
+        "--color",
+        "never",
         "--skip-git-repo-check",
         "-",
     ]
@@ -224,7 +227,7 @@ async def _complete_via_codex_cli(prompt: str, llm_cfg: dict, cwd: Optional[Path
     return _decode_output(result.stdout).strip()
 
 
-async def _complete_via_litellm(prompt: str, llm_cfg: dict, cwd: Optional[Path] = None) -> str:
+async def _complete_via_litellm(prompt: str, llm_cfg: dict, cwd: Path | None = None) -> str:
     _ = cwd
     response = await litellm.acompletion(
         model=resolve_litellm_model(llm_cfg),
@@ -243,7 +246,7 @@ async def _stream_via_litellm(
     user_prompt: str,
     llm_cfg: dict,
     on_chunk: Callable[[str], Awaitable[None]],
-    cwd: Optional[Path] = None,
+    cwd: Path | None = None,
 ) -> str:
     _ = cwd
     stream = await litellm.acompletion(

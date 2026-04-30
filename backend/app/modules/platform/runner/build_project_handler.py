@@ -1,24 +1,24 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 import mimetypes
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
+from project_utils import ensure_local_props
+
+from app.modules.codegen.api import build_codegen_prompt_assembler
+from app.modules.platform.application.services.server_deploy_registry_service import ServerDeployRegistryService
 from app.modules.platform.application.services.server_deploy_target_lock_service import (
     ServerDeployTargetBusyError,
     ServerDeployTargetLockService,
 )
-from app.modules.platform.application.services.server_deploy_registry_service import ServerDeployRegistryService
-from app.modules.codegen.api import build_codegen_prompt_assembler
-from app.modules.platform.infra.build_output_files import deploy_latest_output_files, find_latest_output_files
 from app.modules.platform.contracts.runner_contracts import StepExecutionRequest
+from app.modules.platform.infra.build_output_files import deploy_latest_output_files, find_latest_output_files
 from app.shared.prompting import PromptLoader
 from config import get_config
 from llm.agent_runner import run_agent_task_with_llm_config
-from project_utils import ensure_local_props
 
 from .code_generate_handler import build_code_llm_config
-
 
 BuildAgentRunner = Callable[[str, Path, dict[str, object]], Awaitable[str]]
 
@@ -56,10 +56,13 @@ def _build_summary(full_text: str, item_name: str) -> str:
             summary = line[3:].strip()
             if summary:
                 return summary[:120]
-    return _TEXT_LOADER.render(
-        "runtime_workflow.build_build_succeeded",
-        {},
-    ).strip() or f"已完成 {item_name} 的服务器项目构建"
+    return (
+        _TEXT_LOADER.render(
+            "runtime_workflow.build_build_succeeded",
+            {},
+        ).strip()
+        or f"已完成 {item_name} 的服务器项目构建"
+    )
 
 
 def _build_deploy_summary(item_name: str, deployed_to: str) -> str:

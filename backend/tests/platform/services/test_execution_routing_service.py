@@ -78,9 +78,7 @@ def _seed_job_and_profile(db_session):
 
 def test_execution_routing_service_can_resolve_retry_route_with_alternate_credential(db_session):
     job, profile, credential_a, credential_b = _seed_job_and_profile(db_session)
-    service = ExecutionRoutingService(
-        execution_routing_repository=ExecutionRoutingRepositorySqlAlchemy(db_session)
-    )
+    service = ExecutionRoutingService(execution_routing_repository=ExecutionRoutingRepositorySqlAlchemy(db_session))
 
     route = service.resolve_retry_for_job(
         job,
@@ -96,9 +94,7 @@ def test_execution_routing_service_can_resolve_retry_route_with_alternate_creden
 
 def test_execution_routing_service_raises_when_retry_ref_is_invalid(db_session):
     job, _, _, _ = _seed_job_and_profile(db_session)
-    service = ExecutionRoutingService(
-        execution_routing_repository=ExecutionRoutingRepositorySqlAlchemy(db_session)
-    )
+    service = ExecutionRoutingService(execution_routing_repository=ExecutionRoutingRepositorySqlAlchemy(db_session))
 
     try:
         service.resolve_retry_for_job(job, failed_credential_ref="cred-a")
@@ -112,9 +108,7 @@ def test_execution_routing_service_raises_when_no_alternate_credential_exists(db
     job, profile, credential_a, credential_b = _seed_job_and_profile(db_session)
     credential_b.health_status = "rate_limited"
     db_session.flush()
-    service = ExecutionRoutingService(
-        execution_routing_repository=ExecutionRoutingRepositorySqlAlchemy(db_session)
-    )
+    service = ExecutionRoutingService(execution_routing_repository=ExecutionRoutingRepositorySqlAlchemy(db_session))
 
     try:
         service.resolve_retry_for_job(

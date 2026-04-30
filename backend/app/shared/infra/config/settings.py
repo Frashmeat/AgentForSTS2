@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-
 _ENV_KEYS = {
     "llm.api_key": "SPIREFORGE_LLM_KEY",
     "image_gen.api_key": "SPIREFORGE_IMG_KEY",
@@ -30,7 +29,11 @@ def _resolve_runtime_config_path() -> Path:
             return docker_mounted_config
 
     # Release bundles keep the real configs under <release>/runtime/<role>.config.json.
-    if _APP_ROOT.name == "backend" and _APP_ROOT.parent.name in {"workstation", "web"} and _APP_ROOT.parent.parent.name == "services":
+    if (
+        _APP_ROOT.name == "backend"
+        and _APP_ROOT.parent.name in {"workstation", "web"}
+        and _APP_ROOT.parent.parent.name == "services"
+    ):
         role = _APP_ROOT.parent.name
         return _APP_ROOT.parent.parent.parent / "runtime" / f"{role}.config.json"
 
@@ -169,7 +172,7 @@ def _normalize_execution_mode(value: Any) -> str:
     return "direct_execute"
 
 
-def normalize_llm_config(llm_cfg: Optional[dict[str, Any]]) -> dict[str, Any]:
+def normalize_llm_config(llm_cfg: dict[str, Any] | None) -> dict[str, Any]:
     cfg = _deep_merge(DEFAULT_LLM_CONFIG, llm_cfg or {})
     mode = cfg.get("mode", "agent_cli")
 
@@ -189,7 +192,7 @@ def normalize_llm_config(llm_cfg: Optional[dict[str, Any]]) -> dict[str, Any]:
     return cfg
 
 
-def normalize_config(config: Optional[dict[str, Any]]) -> dict[str, Any]:
+def normalize_config(config: dict[str, Any] | None) -> dict[str, Any]:
     cfg = _deep_merge(DEFAULT_CONFIG, config or {})
     cfg["llm"] = normalize_llm_config(cfg.get("llm"))
     cfg["migration"] = {}
@@ -213,7 +216,7 @@ def load_config() -> dict[str, Any]:
     config_path = resolve_config_path(for_write=False)
     if config_path.exists():
         # Windows PowerShell 写 JSON 时可能带 BOM。
-        with open(config_path, "r", encoding="utf-8-sig") as file:
+        with open(config_path, encoding="utf-8-sig") as file:
             saved = json.load(file)
         cfg = normalize_config(saved)
     else:
@@ -254,7 +257,7 @@ class Settings:
     raw: dict[str, Any]
 
     @classmethod
-    def from_dict(cls, config: Optional[dict[str, Any]]) -> "Settings":
+    def from_dict(cls, config: dict[str, Any] | None) -> Settings:
         return cls(raw=normalize_config(config))
 
     @property
@@ -333,7 +336,7 @@ class Settings:
         return deepcopy(self.raw)
 
 
-_config: Optional[dict[str, Any]] = None
+_config: dict[str, Any] | None = None
 
 
 def get_config() -> dict[str, Any]:

@@ -1,4 +1,5 @@
 """Router registration groups for each backend runtime role."""
+
 from __future__ import annotations
 
 WORKSTATION_ROUTER_MODULES = (

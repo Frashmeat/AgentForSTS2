@@ -39,7 +39,7 @@ STS2_DLL_RELATIVE = Path("data_sts2_windows_x86_64") / "sts2.dll"
 BASELIB_RELEASES_URL = "https://github.com/Alchyr/BaseLib-StS2/releases"
 BASELIB_RELEASES_API = "https://api.github.com/repos/Alchyr/BaseLib-StS2/releases/latest"
 
-_REFRESH_TASKS: dict[str, "_RefreshTask"] = {}
+_REFRESH_TASKS: dict[str, _RefreshTask] = {}
 _REFRESH_TASKS_LOCK = threading.Lock()
 _MAX_RETAINED_REFRESH_TASKS = 10
 _REFRESH_TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
@@ -47,15 +47,13 @@ _REFRESH_TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
 
 def _prune_refresh_tasks_locked() -> None:
     """剔除过量的已结束知识库刷新任务，避免 _REFRESH_TASKS 无界增长。调用方须持有 _REFRESH_TASKS_LOCK。"""
-    terminal_ids = [
-        task_id
-        for task_id, task in _REFRESH_TASKS.items()
-        if task.status in _REFRESH_TERMINAL_STATUSES
-    ]
+    terminal_ids = [task_id for task_id, task in _REFRESH_TASKS.items() if task.status in _REFRESH_TERMINAL_STATUSES]
     excess = len(terminal_ids) - _MAX_RETAINED_REFRESH_TASKS
     if excess > 0:
         for stale_id in terminal_ids[:excess]:
             _REFRESH_TASKS.pop(stale_id, None)
+
+
 _ILSPY_PATH_ENV = "SPIREFORGE_ILSPYCMD_PATH"
 _ILSPY_CANDIDATE_NAMES = ("ilspycmd.exe", "ilspycmd", "ILSpyCmd.dll", "ilspycmd.dll")
 _ILSPY_SEARCH_ROOTS = (
@@ -163,7 +161,7 @@ def _has_ilspycmd() -> bool:
 def load_manifest() -> dict[str, Any] | None:
     if not KNOWLEDGE_MANIFEST_PATH.exists():
         return None
-    with open(KNOWLEDGE_MANIFEST_PATH, "r", encoding="utf-8") as file:
+    with open(KNOWLEDGE_MANIFEST_PATH, encoding="utf-8") as file:
         return json.load(file)
 
 
@@ -189,7 +187,9 @@ def _pack_content_dir(pack_id: str) -> Path:
 
 def _safe_pack_id(value: str) -> str:
     text = str(value or "").strip()
-    if not text or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" for char in text):
+    if not text or any(
+        char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" for char in text
+    ):
         raise ValueError("invalid knowledge pack id")
     return text
 
@@ -197,7 +197,7 @@ def _safe_pack_id(value: str) -> str:
 def _read_json_file(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
-    with open(path, "r", encoding="utf-8") as file:
+    with open(path, encoding="utf-8") as file:
         payload = json.load(file)
     return payload if isinstance(payload, dict) else None
 
@@ -212,7 +212,12 @@ def get_active_knowledge_pack() -> dict[str, Any] | None:
     meta = _read_json_file(_pack_meta_path(pack_id))
     if meta is None:
         return None
-    return {**meta, "active": True, "activated_at": active.get("activated_at"), "previous_pack_id": active.get("previous_pack_id", "")}
+    return {
+        **meta,
+        "active": True,
+        "activated_at": active.get("activated_at"),
+        "previous_pack_id": active.get("previous_pack_id", ""),
+    }
 
 
 def _active_content_dir() -> Path | None:
@@ -267,7 +272,9 @@ def _validate_zip_member(member_name: str) -> Path:
 
 def _knowledge_pack_file_stats(files: list[str]) -> dict[str, int]:
     return {
-        "resource_md_count": sum(1 for path in files if path.startswith("resources/sts2/") and path.lower().endswith(".md")),
+        "resource_md_count": sum(
+            1 for path in files if path.startswith("resources/sts2/") and path.lower().endswith(".md")
+        ),
         "game_cs_count": sum(1 for path in files if path.startswith("game/") and path.lower().endswith(".cs")),
         "baselib_cs_count": sum(1 for path in files if path.startswith("baselib/") and path.lower().endswith(".cs")),
     }
@@ -387,7 +394,9 @@ def activate_knowledge_pack(pack_id: str) -> dict[str, Any]:
     payload = {
         "pack_id": safe_pack_id,
         "activated_at": _now_text(),
-        "previous_pack_id": previous_pack_id if previous_pack_id != safe_pack_id else str(active.get("previous_pack_id", "")),
+        "previous_pack_id": (
+            previous_pack_id if previous_pack_id != safe_pack_id else str(active.get("previous_pack_id", ""))
+        ),
     }
     ACTIVE_KNOWLEDGE_PACK_PATH.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = ACTIVE_KNOWLEDGE_PACK_PATH.with_suffix(".tmp")
@@ -415,11 +424,7 @@ def _manifest_game_dir(manifest: dict[str, Any] | None) -> str:
 
 def _manifest_knowledge_path(manifest: dict[str, Any], section: str, default_path: Path) -> str:
     section_payload = manifest.get(section, {})
-    return str(
-        section_payload.get("knowledge_path")
-        or section_payload.get("decompiled_src_path")
-        or default_path
-    )
+    return str(section_payload.get("knowledge_path") or section_payload.get("decompiled_src_path") or default_path)
 
 
 def _default_status_payload(status: str) -> dict[str, Any]:
@@ -734,13 +739,15 @@ def _run_refresh_impl(task: _RefreshTask) -> None:
     task.set_step("反编译 Baselib")
     _decompile_baselib(baselib_dll_path)
 
-    save_manifest(_build_refresh_manifest(
-        sts2_path=sts2_path,
-        game_info=game_info,
-        release=release,
-        asset=asset,
-        baselib_dll_path=baselib_dll_path,
-    ))
+    save_manifest(
+        _build_refresh_manifest(
+            sts2_path=sts2_path,
+            game_info=game_info,
+            release=release,
+            asset=asset,
+            baselib_dll_path=baselib_dll_path,
+        )
+    )
 
 
 def _validate_refresh_prereqs(config: dict[str, Any]) -> str:

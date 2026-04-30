@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from app.modules.auth.application import AuthService, PBKDF2PasswordHasher
 from app.modules.auth.infra.persistence.repositories import (
@@ -21,28 +21,20 @@ from app.modules.platform.application.services import (
     ServerCredentialAdminService,
     ServerCredentialCipher,
     ServerCredentialHealthChecker,
-    ServerQueuedJobClaimService,
-    ServerQueuedJobScanClaimService,
     ServerDeployTargetLockService,
     ServerExecutionService,
+    ServerQueuedJobClaimService,
+    ServerQueuedJobScanClaimService,
     ServerWorkspaceLockService,
     ServerWorkspaceService,
     UploadedAssetService,
-)
-from app.modules.platform.runner import (
-    ApprovalAdapter,
-    BuildDeployAdapter,
-    ExecutionAdapter,
-    PlatformWorkflowRegistry,
-    StepDispatcher,
-    WorkflowRunner,
 )
 from app.modules.platform.infra.persistence.repositories import (
     AdminQueryRepositoriesSqlAlchemy,
     AIExecutionRepositorySqlAlchemy,
     ArtifactRepositorySqlAlchemy,
-    ExecutionRoutingRepositorySqlAlchemy,
     ExecutionChargeRepositorySqlAlchemy,
+    ExecutionRoutingRepositorySqlAlchemy,
     JobEventRepositorySqlAlchemy,
     JobQueryRepositorySqlAlchemy,
     JobRepositorySqlAlchemy,
@@ -52,6 +44,14 @@ from app.modules.platform.infra.persistence.repositories import (
     ServerCredentialAdminRepositorySqlAlchemy,
     ServerExecutionRepositorySqlAlchemy,
     UsageLedgerRepositorySqlAlchemy,
+)
+from app.modules.platform.runner import (
+    ApprovalAdapter,
+    BuildDeployAdapter,
+    ExecutionAdapter,
+    PlatformWorkflowRegistry,
+    StepDispatcher,
+    WorkflowRunner,
 )
 from app.shared.infra.config.settings import Settings
 from app.shared.infra.db.session import create_session_factory
@@ -65,7 +65,7 @@ class ApplicationContainer:
     def __init__(
         self,
         settings: Settings,
-        registry: Optional[ProviderRegistry] = None,
+        registry: ProviderRegistry | None = None,
         runtime_role: RuntimeRole = "workstation",
     ) -> None:
         self.settings = settings
@@ -77,9 +77,9 @@ class ApplicationContainer:
     @classmethod
     def from_config(
         cls,
-        config: Optional[dict[str, Any]],
+        config: dict[str, Any] | None,
         runtime_role: RuntimeRole = "workstation",
-    ) -> "ApplicationContainer":
+    ) -> ApplicationContainer:
         return cls(settings=Settings.from_dict(config), runtime_role=runtime_role)
 
     def _bootstrap_defaults(self) -> None:

@@ -1,4 +1,5 @@
 """Tests for agent runner backend resolution."""
+
 import sys
 from pathlib import Path
 
@@ -39,26 +40,26 @@ def test_build_agent_prompt_uses_latest_runtime_custom_prompt_when_requested(mon
     from llm import agent_runner
 
     monkeypatch.setattr(agent_runner, "get_config", lambda: {"llm": {"custom_prompt": ""}})
-    assert agent_runner.build_agent_prompt(
-        "fix the project",
-        {"custom_prompt": "stale prompt"},
-        use_runtime_config=True,
-    ) == "fix the project"
+    assert (
+        agent_runner.build_agent_prompt(
+            "fix the project",
+            {"custom_prompt": "stale prompt"},
+            use_runtime_config=True,
+        )
+        == "fix the project"
+    )
 
 
 def test_build_agent_prompt_does_not_add_backend_specific_rules():
+    assert build_agent_prompt("fix the project", {"agent_backend": "codex", "custom_prompt": ""}) == "fix the project"
+    assert build_agent_prompt("fix the project", {"agent_backend": "claude", "custom_prompt": ""}) == "fix the project"
     assert (
-        build_agent_prompt("fix the project", {"agent_backend": "codex", "custom_prompt": ""})
+        build_agent_prompt(
+            "fix the project",
+            {"mode": "claude_api", "model": "claude-sonnet-4-6", "custom_prompt": ""},
+        )
         == "fix the project"
     )
-    assert (
-        build_agent_prompt("fix the project", {"agent_backend": "claude", "custom_prompt": ""})
-        == "fix the project"
-    )
-    assert build_agent_prompt(
-        "fix the project",
-        {"mode": "claude_api", "model": "claude-sonnet-4-6", "custom_prompt": ""},
-    ) == "fix the project"
 
 
 def test_build_agent_prompt_uses_shared_bundle_header_when_bundle_path_missing(monkeypatch):

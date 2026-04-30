@@ -13,7 +13,8 @@ class Sts2LookupProvider:
             KnowledgeLookupItem(
                 key="sts2.lookup.baselib",
                 title="BaseLib local source",
-                path=lookup_context["baselib_src_path"] or str(knowledge_runtime.active_baselib_knowledge_dir() / "BaseLib.decompiled.cs"),
+                path=lookup_context["baselib_src_path"]
+                or str(knowledge_runtime.active_baselib_knowledge_dir() / "BaseLib.decompiled.cs"),
                 note="Read this local decompiled source for `CustomCardModel`, `CustomPotionModel`, `PlaceholderCharacterModel`, and related BaseLib wrappers.",
                 keywords=["BaseLib", "CustomCardModel", "CustomPotionModel", "PlaceholderCharacterModel"],
             )

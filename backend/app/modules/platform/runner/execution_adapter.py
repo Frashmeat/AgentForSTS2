@@ -5,7 +5,6 @@ from collections.abc import Awaitable, Callable
 
 from app.modules.platform.contracts.runner_contracts import StepExecutionRequest, StepExecutionResult
 
-
 StepHandler = Callable[[StepExecutionRequest], Awaitable[dict[str, object]]]
 logger = logging.getLogger(__name__)
 
@@ -73,7 +72,7 @@ class ExecutionAdapter:
                 request.job_item_id,
                 request.step_type,
                 request.step_id,
-                sorted(str(key) for key in payload.keys()),
+                sorted(str(key) for key in payload),
             )
             return StepExecutionResult(
                 step_id=request.step_id,

@@ -22,4 +22,9 @@ class ExecutionProfileRecord(TimestampMixin, Base):
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
-Index("ix_execution_profiles_enabled_sort_order", ExecutionProfileRecord.enabled, ExecutionProfileRecord.sort_order, ExecutionProfileRecord.id)
+Index(
+    "ix_execution_profiles_enabled_sort_order",
+    ExecutionProfileRecord.enabled,
+    ExecutionProfileRecord.sort_order,
+    ExecutionProfileRecord.id,
+)

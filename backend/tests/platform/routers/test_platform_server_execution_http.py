@@ -15,8 +15,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.composition.container import ApplicationContainer
-from app.modules.auth.infra.persistence import models as _auth_models  # noqa: F401
-from app.modules.platform.infra.persistence import models as _platform_models  # noqa: F401
+from app.modules.auth.infra.persistence import models as _auth_models
+from app.modules.platform.infra.persistence import models as _platform_models
 from app.modules.platform.infra.persistence.models import (
     ExecutionProfileRecord,
     ServerCredentialRecord,

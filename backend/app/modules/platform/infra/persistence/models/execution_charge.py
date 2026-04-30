@@ -18,9 +18,7 @@ class ChargeStatus(StrEnum):
 
 class ExecutionChargeRecord(TimestampMixin, Base):
     __tablename__ = "execution_charges"
-    __table_args__ = (
-        UniqueConstraint("ai_execution_id", name="uq_execution_charges_ai_execution_id"),
-    )
+    __table_args__ = (UniqueConstraint("ai_execution_id", name="uq_execution_charges_ai_execution_id"),)
 
     id: Mapped[int] = mapped_column(bigint_type(), primary_key=True, autoincrement=True)
     ai_execution_id: Mapped[int] = mapped_column(ForeignKey("ai_executions.id"), nullable=False)

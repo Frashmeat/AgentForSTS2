@@ -14,9 +14,7 @@ def _keys(items) -> set[str]:
 def test_sts2_code_facts_provider_returns_card_base_class_fact():
     provider = Sts2CodeFactsProvider()
 
-    facts, warnings = provider.build_facts(
-        KnowledgeQuery(scenario="asset_codegen", domain="sts2", asset_type="card")
-    )
+    facts, warnings = provider.build_facts(KnowledgeQuery(scenario="asset_codegen", domain="sts2", asset_type="card"))
 
     assert "sts2.card.base_class" in _keys(facts)
     assert isinstance(warnings, list)
@@ -25,9 +23,7 @@ def test_sts2_code_facts_provider_returns_card_base_class_fact():
 def test_sts2_code_facts_provider_returns_power_base_class_fact():
     provider = Sts2CodeFactsProvider()
 
-    facts, _warnings = provider.build_facts(
-        KnowledgeQuery(scenario="asset_codegen", domain="sts2", asset_type="power")
-    )
+    facts, _warnings = provider.build_facts(KnowledgeQuery(scenario="asset_codegen", domain="sts2", asset_type="power"))
 
     assert "sts2.power.base_class" in _keys(facts)
 
@@ -35,9 +31,7 @@ def test_sts2_code_facts_provider_returns_power_base_class_fact():
 def test_sts2_code_facts_provider_returns_relic_base_class_fact():
     provider = Sts2CodeFactsProvider()
 
-    facts, _warnings = provider.build_facts(
-        KnowledgeQuery(scenario="asset_codegen", domain="sts2", asset_type="relic")
-    )
+    facts, _warnings = provider.build_facts(KnowledgeQuery(scenario="asset_codegen", domain="sts2", asset_type="relic"))
 
     assert "sts2.relic.base_class" in _keys(facts)
 

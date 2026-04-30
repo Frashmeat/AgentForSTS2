@@ -30,15 +30,20 @@ pwsh -File .\tools\docker\workstation.ps1 test tests/platform/services/test_exec
 
 .EXAMPLE
 pwsh -File .\tools\docker\workstation.ps1 exec -- python --version
+
+.EXAMPLE
+pwsh -File .\tools\docker\workstation.ps1 lint        # ruff check + black --check
+pwsh -File .\tools\docker\workstation.ps1 lint -Fix   # ruff 自动修 + black 重排
 #>
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet("up", "down", "restart", "build", "rebuild", "logs", "ps", "shell", "config", "test", "exec")]
+    [ValidateSet("up", "down", "restart", "build", "rebuild", "logs", "ps", "shell", "config", "test", "exec", "lint")]
     [string]$Action = "up",
 
     [switch]$Detach = $true,
     [switch]$Follow,
+    [switch]$Fix,
 
     # 透传给 test / exec 的剩余参数（pytest 路径与开关、自定义命令等）
     [Parameter(ValueFromRemainingArguments = $true)]
@@ -144,5 +149,30 @@ switch ($Action) {
         }
         $extra = @("run", "--rm", "--no-deps", "--entrypoint", "", "workstation") + $Rest
         Invoke-Compose $extra
+    }
+    "lint" {
+        # 直接用 docker run + bind mount，让 ruff/black 修宿主机源码（compose run 默认不挂源码）。
+        $install = "pip install --quiet --no-cache-dir 'ruff==0.8.6' 'black==24.10.0'"
+        if ($Fix) {
+            # 用 ; 而非 && —— ruff 仍有 unfixed errors 时退出非 0，但仍想继续跑 black format
+            $bashLine = "$install ; cd /app && ruff check --fix backend ; black backend"
+        } else {
+            $bashLine = "$install && cd /app && ruff check backend && black --check backend"
+        }
+        $env:MSYS_NO_PATHCONV = "1"
+        $imageTag = if ($env:ATS_WORKSTATION_IMAGE) { $env:ATS_WORKSTATION_IMAGE } else { "agentthespire/workstation:local" }
+        $backendMount = "$($repoRoot.Path)/backend:/app/backend"
+        $configMount = "$($repoRoot.Path)/pyproject.toml:/app/pyproject.toml:ro"
+        $dockerArgs = @(
+            "run", "--rm", "--entrypoint", "",
+            "-v", $backendMount,
+            "-v", $configMount,
+            $imageTag,
+            "bash", "-c", $bashLine
+        )
+        Write-Host "docker $($dockerArgs -join ' ')" -ForegroundColor Cyan
+        & docker @dockerArgs
+        $env:MSYS_NO_PATHCONV = $null
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
 }

@@ -62,7 +62,9 @@ def test_build_prompt_uses_prompt_loader_for_user_and_extra_context(monkeypatch)
         def __init__(self) -> None:
             self.render_calls: list[tuple[str, dict[str, object], str]] = []
 
-        def render(self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None) -> str:
+        def render(
+            self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None
+        ) -> str:
             self.render_calls.append((template_name, variables, fallback_template or ""))
             return f"rendered:{template_name}"
 
@@ -164,7 +166,10 @@ def test_ws_analyze_log_emits_minimal_event_sequence(monkeypatch):
         "done",
     ]
     assert [message["chunk"] for message in ws.messages if message["event"] == "stream"] == ["chunk-1", "chunk-2"]
-    assert [message["model"] for message in ws.messages if message["event"] == "stream"] == ["claude-sonnet-4-6", "claude-sonnet-4-6"]
+    assert [message["model"] for message in ws.messages if message["event"] == "stream"] == [
+        "claude-sonnet-4-6",
+        "claude-sonnet-4-6",
+    ]
     assert [message["source"] for message in ws.messages if message["event"] == "stream"] == ["analysis", "analysis"]
     assert [message["channel"] for message in ws.messages if message["event"] == "stream"] == ["raw", "raw"]
     assert ws.messages[1] == {"event": "log_info", "lines": 2}

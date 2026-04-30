@@ -16,7 +16,12 @@ class ArtifactRepositorySqlAlchemy(ArtifactRepository):
         return artifact
 
     def list_by_job(self, job_id: int) -> list[ArtifactRecord]:
-        return self.session.query(ArtifactRecord).filter(ArtifactRecord.job_id == job_id).order_by(ArtifactRecord.id.asc()).all()
+        return (
+            self.session.query(ArtifactRecord)
+            .filter(ArtifactRecord.job_id == job_id)
+            .order_by(ArtifactRecord.id.asc())
+            .all()
+        )
 
     def list_by_job_item(self, job_item_id: int) -> list[ArtifactRecord]:
         return (

@@ -8,10 +8,10 @@ from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from app.modules.auth.infra.persistence import models as _auth_models  # noqa: F401
+from app.modules.auth.infra.persistence import models as _auth_models
 from app.modules.auth.infra.persistence.models import auth_tables
 from app.modules.platform.application.services.platform_runtime_audit_service import PlatformRuntimeAuditService
-from app.modules.platform.infra.persistence import models as _platform_models  # noqa: F401
+from app.modules.platform.infra.persistence import models as _platform_models
 from app.modules.platform.infra.persistence.models import platform_tables
 from app.shared.infra.db.base import Base
 

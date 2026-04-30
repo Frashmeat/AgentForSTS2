@@ -1,4 +1,5 @@
 """Tests for approval-related config defaults."""
+
 import sys
 from pathlib import Path
 

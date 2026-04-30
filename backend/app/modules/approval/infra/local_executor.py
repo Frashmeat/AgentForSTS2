@@ -33,7 +33,7 @@ class LocalApprovalExecutor(ApprovalExecutor):
     def _ensure_command_allowed(self, command: list[str]) -> None:
         if not self.allowed_commands:
             return
-        if not any(command[:len(prefix)] == prefix for prefix in self.allowed_commands):
+        if not any(command[: len(prefix)] == prefix for prefix in self.allowed_commands):
             raise PermissionError(f"command not allowed: {' '.join(command)}")
 
     async def execute_action(self, action: ActionRequest) -> ActionResult:

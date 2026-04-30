@@ -4,7 +4,6 @@ from collections.abc import Awaitable, Callable
 
 from app.modules.platform.contracts.runner_contracts import StepExecutionRequest, StepExecutionResult
 
-
 ExecuteHandler = Callable[[StepExecutionRequest], Awaitable[StepExecutionResult]]
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.modules.platform.domain.repositories import AdminQueryRepositories
+
 from .platform_runtime_audit_service import PlatformRuntimeAuditService
 
 

@@ -101,4 +101,4 @@ class UploadedAssetService:
         value = str(uploaded_asset_ref).strip()
         if not value.startswith(prefix) or len(value) <= len(prefix):
             raise ValueError(f"uploaded asset ref is invalid: {uploaded_asset_ref}")
-        return value[len(prefix):]
+        return value[len(prefix) :]

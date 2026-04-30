@@ -7,6 +7,7 @@
 - 代码生成：串行（code_gen_lock）
 - 依赖管理：item_done_events，被依赖的 item 完成后其他 item 才能继续
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -17,8 +18,6 @@ import logging
 import traceback as tb_module
 from contextlib import suppress
 from pathlib import Path
-
-_log = logging.getLogger("batch")
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
@@ -46,21 +45,24 @@ from app.modules.workflow.application.engine import WorkflowEngine
 from app.modules.workflow.application.policies import LimitedParallelPolicy
 from app.modules.workflow.application.step import WorkflowStep
 from app.shared.infra.ws_errors import build_ws_error_payload, send_ws_error
-from app.shared.kernel.errors import CLIENT_DISCONNECTED_CODE, USER_CANCELLED_CODE, WorkflowTermination
+from app.shared.kernel.errors import USER_CANCELLED_CODE, WorkflowTermination
 from app.shared.prompting import PromptLoader
 from config import get_config
 from image.generator import generate_images
 from image.postprocess import process_image
-from image.prompt_adapter import adapt_prompt, ImageProvider
+from image.prompt_adapter import ImageProvider, adapt_prompt
 from llm.agent_runner import resolve_agent_backend
-from llm.text_runner import complete_text
-from llm.stream_metadata import build_stream_chunk_payload, resolve_agent_display_model
 from llm.stage_events import build_stage_event
+from llm.stream_metadata import build_stream_chunk_payload, resolve_agent_display_model
+from llm.text_runner import complete_text
 
+_log = logging.getLogger("batch")
 router = APIRouter()
 _TEXT_LOADER = PromptLoader()
 
 TRANSPARENT_TYPES = {"relic", "power"}
+
+
 def _needs_transparent(asset_type: str) -> bool:
     return asset_type in TRANSPARENT_TYPES
 
@@ -94,7 +96,9 @@ def _normalize_bundle_decisions(value: object) -> dict[str, str]:
     return normalized
 
 
-def _build_plan_review_payload(plan, strictness: str = "balanced", bundle_decisions: dict[str, str] | None = None) -> dict:
+def _build_plan_review_payload(
+    plan, strictness: str = "balanced", bundle_decisions: dict[str, str] | None = None
+) -> dict:
     normalized = _normalize_review_strictness(strictness)
     validation = validate_plan(plan, normalized).to_dict()
     execution_plan = build_execution_plan(plan, normalized, _normalize_bundle_decisions(bundle_decisions)).to_dict()
@@ -105,7 +109,9 @@ def _build_plan_review_payload(plan, strictness: str = "balanced", bundle_decisi
     }
 
 
-def _ensure_plan_review_passes(plan, strictness: str = "balanced", bundle_decisions: dict[str, str] | None = None) -> dict:
+def _ensure_plan_review_passes(
+    plan, strictness: str = "balanced", bundle_decisions: dict[str, str] | None = None
+) -> dict:
     normalized_decisions = _normalize_bundle_decisions(bundle_decisions)
     review = _build_plan_review_payload(plan, strictness, normalized_decisions)
     validation_items = review["validation"]["items"]
@@ -139,7 +145,8 @@ async def _init_batch_project(ws: WebSocket, project_root: Path, send, send_stag
     project_name = project_root.name
     parent_dir = project_root.parent
     await send_stage(
-        "project", "project_init",
+        "project",
+        "project_init",
         _text("batch_project_init_stage", project_name=project_name).strip(),
     )
     await send("batch_progress", message=_text("batch_project_init_progress", project_name=project_name).strip())
@@ -214,6 +221,7 @@ async def _generate_item_images(
     if item.provided_image_b64:
         await send("item_progress", item_id=item.id, message=_text("batch_provided_image_progress").strip())
         from PIL import Image as PilImage
+
         img_data = base64.b64decode(item.provided_image_b64)
         selected_img = PilImage.open(io.BytesIO(img_data)).convert("RGBA")
     else:
@@ -248,7 +256,9 @@ async def _run_image_selection_loop(
         await send_stage("text", "prompt_adapting", _text("batch_prompt_adapting_stage").strip(), item.id)
         await send("item_progress", item_id=item.id, message=_text("batch_prompt_adapting_progress").strip())
         adapted = await adapt_prompt(
-            img_desc, item.type, img_provider,
+            img_desc,
+            item.type,
+            img_provider,
             needs_transparent_bg=_needs_transparent(item.type),
         )
     current_prompt = adapted["prompt"]
@@ -260,7 +270,8 @@ async def _run_image_selection_loop(
             idx = len(all_images)
             image_number = idx + 1
             await send_stage(
-                "image", "image_generating",
+                "image",
+                "image_generating",
                 _text("batch_image_generating_stage", image_number=image_number).strip(),
                 item.id,
             )
@@ -318,24 +329,28 @@ async def _generate_group_code(
         item = group[0]
         if item.needs_image:
             await create_asset(
-                item.description, item.type, item.name,
-                item_image_paths[item.id], project_root, stream,
+                item.description,
+                item.type,
+                item.name,
+                item_image_paths[item.id],
+                project_root,
+                stream,
                 name_zhs=item.name_zhs,
                 skip_build=True,
             )
         else:
             await create_custom_code(
-                item.description, item.implementation_notes,
-                item.name, project_root, stream,
+                item.description,
+                item.implementation_notes,
+                item.name,
+                project_root,
+                stream,
                 skip_build=True,
             )
         return
 
     # 多资产合并生成
-    assets_spec = [
-        {"item": it, "image_paths": item_image_paths.get(it.id, [])}
-        for it in group
-    ]
+    assets_spec = [{"item": it, "image_paths": item_image_paths.get(it.id, [])} for it in group]
     await create_asset_group(assets_spec, project_root, stream)
 
 
@@ -388,8 +403,11 @@ async def _generate_image_with_retry(
     for attempt in range(max_attempts):
         try:
             [img] = await generate_images(
-                prompt, item.type, negative_prompt,
-                batch_size=1, progress_callback=image_progress,
+                prompt,
+                item.type,
+                negative_prompt,
+                batch_size=1,
+                progress_callback=image_progress,
             )
             return img
         except asyncio.CancelledError:
@@ -397,7 +415,9 @@ async def _generate_image_with_retry(
         except Exception as exc:
             _log.warning(
                 "image gen attempt %s failed for item %s: %s",
-                attempt + 1, item.id, exc,
+                attempt + 1,
+                item.id,
+                exc,
             )
             if attempt == max_attempts - 1:
                 raise
@@ -408,12 +428,16 @@ async def _generate_image_with_retry(
 
 
 async def _send_item_approval_pending(ws: WebSocket, item_id: str, summary: str, requests: list):
-    await ws.send_text(json.dumps({
-        "event": "item_approval_pending",
-        "item_id": item_id,
-        "summary": summary,
-        "requests": [request.to_dict() for request in requests],
-    }))
+    await ws.send_text(
+        json.dumps(
+            {
+                "event": "item_approval_pending",
+                "item_id": item_id,
+                "summary": summary,
+                "requests": [request.to_dict() for request in requests],
+            }
+        )
+    )
 
 
 async def _publish_batch_standard_event(ws: WebSocket, event) -> None:
@@ -465,8 +489,7 @@ def _batch_workflow_mode(config: dict | None = None) -> str:
 
 async def _plan_group_approval_requests(group: list[PlanItem], llm_cfg: dict, project_root: Path):
     requirements = "\n".join(
-        f"- [{item.type}] {item.name}: {item.description or item.implementation_notes}"
-        for item in group
+        f"- [{item.type}] {item.name}: {item.description or item.implementation_notes}" for item in group
     )
     prompt = build_action_prompt(requirements)
     raw = await complete_text(prompt, llm_cfg, cwd=project_root)
@@ -485,6 +508,7 @@ def _group_key(group: list[PlanItem]) -> tuple[str, ...]:
 
 
 # ── HTTP 端点：规划 ────────────────────────────────────────────────────────────
+
 
 @router.post("/plan")
 def api_plan(body: dict):
@@ -512,6 +536,7 @@ def _api_plan_impl(body: dict):
 
 
 # ── WebSocket：批量执行 ────────────────────────────────────────────────────────
+
 
 @router.websocket("/ws/batch")
 async def ws_batch(ws: WebSocket):
@@ -579,7 +604,7 @@ async def _handle_ws_batch(ws: WebSocket, *, initial_params: dict | None = None)
         plan = await _obtain_batch_plan(ws, params, send=send, send_stage=send_stage)
 
         sorted_items = topological_sort(plan.items)
-        groups = find_groups(sorted_items)          # 按依赖关系分组
+        groups = find_groups(sorted_items)  # 按依赖关系分组
         item_done_events = {item.id: asyncio.Event() for item in sorted_items}
         item_image_events: dict[str, asyncio.Event] = {item.id: asyncio.Event() for item in sorted_items}
         item_image_paths: dict[str, list[Path]] = {}
@@ -588,11 +613,7 @@ async def _handle_ws_batch(ws: WebSocket, *, initial_params: dict | None = None)
         # ── 4. 检查/初始化项目 ────────────────────────────────────────────────
         project_root = await _init_batch_project(ws, project_root, send, send_stage)
 
-        group_by_item = {
-            item.id: group
-            for group in groups
-            for item in group
-        }
+        group_by_item = {item.id: group for group in groups for item in group}
 
         async def approve_group_actions(group: list[PlanItem]) -> None:
             state = approval_states.get(_group_key(group))
@@ -634,13 +655,17 @@ async def _handle_ws_batch(ws: WebSocket, *, initial_params: dict | None = None)
 
             for msg in queued:
                 await handle_control_message(msg, defer_if_unready=False)
+
         if any(len(g) > 1 for g in groups):
             multi = [g for g in groups if len(g) > 1]
             await send("batch_progress", message=_text("batch_multi_group_detected", group_count=len(multi)).strip())
 
-        _log.info("batch_started: %d items, %d groups: %s",
-                  len(sorted_items), len(groups),
-                  [(it.id, it.type) for it in sorted_items])
+        _log.info(
+            "batch_started: %d items, %d groups: %s",
+            len(sorted_items),
+            len(groups),
+            [(it.id, it.type) for it in sorted_items],
+        )
         await send("batch_started", items=[it.to_dict() for it in sorted_items])
 
         # ── 5a. 图片阶段协程（每个 item 独立运行）────────────────────────────
@@ -691,8 +716,11 @@ async def _handle_ws_batch(ws: WebSocket, *, initial_params: dict | None = None)
             if failed:
                 for item in group:
                     if item.id not in error_ids:
-                        await send("item_error", item_id=item.id,
-                                   message=_text("batch_group_image_failure_skip", failed_items=failed).strip())
+                        await send(
+                            "item_error",
+                            item_id=item.id,
+                            message=_text("batch_group_image_failure_skip", failed_items=failed).strip(),
+                        )
                         error_ids.add(item.id)
                         item_done_events[item.id].set()
                 return
@@ -812,11 +840,13 @@ async def _handle_ws_batch(ws: WebSocket, *, initial_params: dict | None = None)
             if action == "generate_more" and item_id in selection_futures:
                 fut = selection_futures.get(item_id)
                 if fut and not fut.done():
-                    fut.set_result({
-                        "action": "generate_more",
-                        "prompt": msg.get("prompt"),
-                        "negative_prompt": msg.get("negative_prompt"),
-                    })
+                    fut.set_result(
+                        {
+                            "action": "generate_more",
+                            "prompt": msg.get("prompt"),
+                            "negative_prompt": msg.get("negative_prompt"),
+                        }
+                    )
                 return
 
             if action == "approve_all" and item_id in items_by_id:
@@ -856,7 +886,7 @@ async def _handle_ws_batch(ws: WebSocket, *, initial_params: dict | None = None)
                 msg = json.loads(raw)
                 await handle_control_message(msg)
 
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
 
             done_now = {item.id for item in sorted_items if item_done_events[item.id].is_set()}
@@ -869,8 +899,10 @@ async def _handle_ws_batch(ws: WebSocket, *, initial_params: dict | None = None)
         if len(error_ids) < len(sorted_items) and cfg_loaded["llm"].get("execution_mode") != "approval_first":
             await send_stage("build", "build_running", _text("batch_build_running_stage").strip())
             await send("batch_progress", message=_text("batch_build_running_progress").strip())
+
             async def _build_stream(chunk: str):
                 await send("batch_progress", message=chunk)
+
             success, _ = await build_and_fix(project_root, _build_stream)
             if success:
                 await send("batch_progress", message=_text("batch_build_success_progress").strip())

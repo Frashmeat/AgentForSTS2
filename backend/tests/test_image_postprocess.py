@@ -16,12 +16,15 @@ def test_get_gpu_providers_returns_cpu_when_windows_cuda_dll_load_fails(monkeypa
 
     fake_ort = SimpleNamespace(
         __file__=str(tmp_path / "onnxruntime" / "__init__.py"),
-        get_available_providers=lambda: calls.__setitem__("providers", calls["providers"] + 1) or ["CUDAExecutionProvider", "CPUExecutionProvider"],
+        get_available_providers=lambda: calls.__setitem__("providers", calls["providers"] + 1)
+        or ["CUDAExecutionProvider", "CPUExecutionProvider"],
     )
 
     monkeypatch.setitem(sys.modules, "onnxruntime", fake_ort)
     monkeypatch.setattr(postprocess.os, "name", "nt", raising=False)
-    monkeypatch.setattr(postprocess.ctypes, "WinDLL", lambda _path: (_ for _ in ()).throw(OSError("missing cublasLt64_12.dll")))
+    monkeypatch.setattr(
+        postprocess.ctypes, "WinDLL", lambda _path: (_ for _ in ()).throw(OSError("missing cublasLt64_12.dll"))
+    )
 
     providers = postprocess._get_gpu_providers()
 

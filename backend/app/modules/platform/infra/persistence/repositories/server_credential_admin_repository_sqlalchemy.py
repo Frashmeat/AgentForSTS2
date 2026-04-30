@@ -4,7 +4,11 @@ from datetime import UTC, datetime
 
 from app.modules.platform.contracts import AdminServerCredentialHealthCheckView, AdminServerCredentialListItem
 from app.modules.platform.domain.repositories import ServerCredentialAdminRecord, ServerCredentialAdminRepository
-from app.modules.platform.infra.persistence.models import CredentialHealthCheckRecord, ExecutionProfileRecord, ServerCredentialRecord
+from app.modules.platform.infra.persistence.models import (
+    CredentialHealthCheckRecord,
+    ExecutionProfileRecord,
+    ServerCredentialRecord,
+)
 
 
 class ServerCredentialAdminRepositorySqlAlchemy(ServerCredentialAdminRepository):
@@ -85,9 +89,7 @@ class ServerCredentialAdminRepositorySqlAlchemy(ServerCredentialAdminRepository)
 
     def get_server_credential(self, credential_id: int) -> ServerCredentialAdminRecord | None:
         row = (
-            self.session.query(ServerCredentialRecord)
-            .filter(ServerCredentialRecord.id == credential_id)
-            .one_or_none()
+            self.session.query(ServerCredentialRecord).filter(ServerCredentialRecord.id == credential_id).one_or_none()
         )
         if row is None:
             return None
@@ -124,9 +126,7 @@ class ServerCredentialAdminRepositorySqlAlchemy(ServerCredentialAdminRepository)
     ) -> AdminServerCredentialListItem:
         self._ensure_execution_profile_exists(execution_profile_id)
         row = (
-            self.session.query(ServerCredentialRecord)
-            .filter(ServerCredentialRecord.id == credential_id)
-            .one_or_none()
+            self.session.query(ServerCredentialRecord).filter(ServerCredentialRecord.id == credential_id).one_or_none()
         )
         if row is None:
             raise LookupError(f"server credential not found: {credential_id}")
@@ -149,9 +149,7 @@ class ServerCredentialAdminRepositorySqlAlchemy(ServerCredentialAdminRepository)
 
     def set_server_credential_enabled(self, credential_id: int, enabled: bool) -> AdminServerCredentialListItem:
         row = (
-            self.session.query(ServerCredentialRecord)
-            .filter(ServerCredentialRecord.id == credential_id)
-            .one_or_none()
+            self.session.query(ServerCredentialRecord).filter(ServerCredentialRecord.id == credential_id).one_or_none()
         )
         if row is None:
             raise LookupError(f"server credential not found: {credential_id}")
@@ -176,9 +174,7 @@ class ServerCredentialAdminRepositorySqlAlchemy(ServerCredentialAdminRepository)
         checked_at: datetime,
     ) -> AdminServerCredentialHealthCheckView:
         row = (
-            self.session.query(ServerCredentialRecord)
-            .filter(ServerCredentialRecord.id == credential_id)
-            .one_or_none()
+            self.session.query(ServerCredentialRecord).filter(ServerCredentialRecord.id == credential_id).one_or_none()
         )
         if row is None:
             raise LookupError(f"server credential not found: {credential_id}")

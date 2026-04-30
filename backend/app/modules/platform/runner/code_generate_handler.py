@@ -8,7 +8,6 @@ from app.modules.codegen.domain.models import CustomCodegenRequest
 from app.modules.platform.contracts.runner_contracts import StepExecutionBinding, StepExecutionRequest
 from llm.agent_runner import run_agent_task_with_llm_config
 
-
 CodeAgentRunner = Callable[[str, Path, dict[str, object]], Awaitable[str]]
 
 

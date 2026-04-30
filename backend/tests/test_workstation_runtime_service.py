@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import sys
 import json
+import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -173,9 +173,7 @@ def test_workstation_runtime_manager_resolves_release_relative_config_path(tmp_p
 
     manager.ensure_started()
 
-    assert calls[0][1]["env"]["SPIREFORGE_CONFIG_PATH"] == str(
-        release_root / "runtime" / "workstation.config.json"
-    )
+    assert calls[0][1]["env"]["SPIREFORGE_CONFIG_PATH"] == str(release_root / "runtime" / "workstation.config.json")
 
 
 def test_workstation_runtime_manager_fails_fast_when_config_is_missing(tmp_path):

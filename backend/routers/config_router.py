@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from starlette.requests import Request
+
 from app.shared.prompting import PromptLoader
 from config import get_config, update_config
 
@@ -32,6 +33,7 @@ def detect_paths(request: Request = None):
     try:
         """自动检测 STS2 和 Godot 路径，返回检测结果供用户确认后填入配置。"""
         from project_utils import detect_paths as _detect
+
         return _detect()
     except HTTPException:
         raise
@@ -43,6 +45,7 @@ def detect_paths(request: Request = None):
 def start_detect_paths_task(request: Request = None):
     try:
         from project_utils import start_detect_paths_task as _start
+
         return _start()
     except HTTPException:
         raise
@@ -54,6 +57,7 @@ def start_detect_paths_task(request: Request = None):
 def get_latest_detect_paths_task(request: Request = None):
     try:
         from project_utils import get_latest_detect_paths_task as _get_latest
+
         return _get_latest()
     except HTTPException:
         raise
@@ -65,6 +69,7 @@ def get_latest_detect_paths_task(request: Request = None):
 def get_detect_paths_task(task_id: str, request: Request = None):
     try:
         from project_utils import get_detect_paths_task as _get
+
         return _get(task_id)
     except HTTPException:
         raise
@@ -79,6 +84,7 @@ def get_detect_paths_task(task_id: str, request: Request = None):
 def cancel_detect_paths_task(task_id: str, request: Request = None):
     try:
         from project_utils import cancel_detect_paths_task as _cancel
+
         return _cancel(task_id)
     except HTTPException:
         raise
@@ -139,8 +145,11 @@ def platform_queue_worker_status(request: Request = None):
 @router.get("/test_imggen")
 async def test_imggen(request: Request = None):
     from image.generator import generate_images
+
     try:
-        imgs = await generate_images(_TEXT_LOADER.load("runtime_system.config_image_test_prompt").strip(), "power", batch_size=1)
+        imgs = await generate_images(
+            _TEXT_LOADER.load("runtime_system.config_image_test_prompt").strip(), "power", batch_size=1
+        )
         return {"ok": True, "size": list(imgs[0].size)}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)[:300]) from exc
@@ -148,6 +157,7 @@ async def test_imggen(request: Request = None):
 
 def _mask_keys(cfg: dict) -> dict:
     import copy
+
     c = copy.deepcopy(cfg)
     for section in (c.get("llm", {}), c.get("image_gen", {})):
         for field in ("api_key", "api_secret"):
@@ -219,8 +229,6 @@ def _resolve_image_ai_capability(image_cfg: dict) -> tuple[bool, list[str]]:
         reasons.append("请先在设置中填写图像模型。")
     if not str(image_cfg.get("api_key", "")).strip():
         reasons.append("请先在设置中填写图像 API Key。")
-    if provider == "volcengine":
-        if not str(image_cfg.get("api_secret", "")).strip():
-            reasons.append("火山引擎模式下请先填写图像 Secret Key。")
+    if provider == "volcengine" and not str(image_cfg.get("api_secret", "")).strip():
+        reasons.append("火山引擎模式下请先填写图像 Secret Key。")
     return len(reasons) == 0, reasons
-

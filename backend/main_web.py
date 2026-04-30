@@ -1,4 +1,5 @@
 """AgentTheSpire Web Backend entrypoint."""
+
 from app_factory import create_app
 
 APP_ROLE = "web"

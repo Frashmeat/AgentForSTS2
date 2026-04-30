@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 TOOLS_DIR = Path(__file__).resolve().parents[3] / "tools"
 
 

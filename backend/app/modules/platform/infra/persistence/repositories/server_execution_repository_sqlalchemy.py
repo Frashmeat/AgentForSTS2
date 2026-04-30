@@ -65,10 +65,7 @@ class ServerExecutionRepositorySqlAlchemy(ServerExecutionRepository):
             return
         if not inspect(bind).has_table("execution_profiles"):
             return
-        existing_codes = {
-            row.code
-            for row in self.session.query(ExecutionProfileRecord.code).all()
-        }
+        existing_codes = {row.code for row in self.session.query(ExecutionProfileRecord.code).all()}
         for payload in self.DEFAULT_EXECUTION_PROFILES:
             if payload["code"] in existing_codes:
                 continue
@@ -279,9 +276,7 @@ class ServerExecutionRepositorySqlAlchemy(ServerExecutionRepository):
         ):
             return True
         return (
-            self.session.query(JobRecord.id)
-            .filter(JobRecord.selected_execution_profile_id == profile_id)
-            .first()
+            self.session.query(JobRecord.id).filter(JobRecord.selected_execution_profile_id == profile_id).first()
             is not None
         )
 

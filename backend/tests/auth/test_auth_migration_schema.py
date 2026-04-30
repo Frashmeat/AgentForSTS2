@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from app.modules.auth.infra.persistence import models as _auth_models  # noqa: F401
+from app.modules.auth.infra.persistence import models as _auth_models
 from app.shared.infra.db.base import Base
 
 
@@ -21,10 +21,7 @@ def test_auth_tables_are_registered_in_metadata():
 
 def test_initial_auth_revision_does_not_include_admin_flag():
     migration_path = (
-        Path(__file__).resolve().parents[2]
-        / "migrations"
-        / "versions"
-        / "20260403_01_auth_user_email_ver.py"
+        Path(__file__).resolve().parents[2] / "migrations" / "versions" / "20260403_01_auth_user_email_ver.py"
     )
 
     source = migration_path.read_text(encoding="utf-8")

@@ -14,7 +14,14 @@ class Sts2GuidanceProvider:
             planner_path = resource_root / "planner_guidance.md"
             return [self._item("sts2.guidance.planner", "Planner hints", planner_path, ["planner"])]
 
-        files = [("sts2.guidance.common", "Common guidance", resource_root / "common.md", ["card", "power", "relic", "custom_code", "character"])]
+        files = [
+            (
+                "sts2.guidance.common",
+                "Common guidance",
+                resource_root / "common.md",
+                ["card", "power", "relic", "custom_code", "character"],
+            )
+        ]
         for asset_type in self._iter_asset_types(query):
             for key, title, path, asset_types in self._files_for_asset_type(asset_type, resource_root):
                 files.append((key, title, path, asset_types))
@@ -55,14 +62,28 @@ class Sts2GuidanceProvider:
     def _files_for_asset_type(asset_type: str, resource_root: Path) -> list[tuple[str, str, Path, list[str]]]:
         mapping = {
             "card": [("sts2.guidance.card", "Card guidance", resource_root / "card.md", ["card", "card_fullscreen"])],
-            "card_fullscreen": [("sts2.guidance.card", "Card guidance", resource_root / "card.md", ["card", "card_fullscreen"])],
+            "card_fullscreen": [
+                ("sts2.guidance.card", "Card guidance", resource_root / "card.md", ["card", "card_fullscreen"])
+            ],
             "power": [("sts2.guidance.power", "Power guidance", resource_root / "power.md", ["power"])],
             "relic": [("sts2.guidance.relic", "Relic guidance", resource_root / "relic.md", ["relic"])],
-            "character": [("sts2.guidance.character", "Character guidance", resource_root / "character.md", ["character"])],
+            "character": [
+                ("sts2.guidance.character", "Character guidance", resource_root / "character.md", ["character"])
+            ],
             "custom_code": [
-                ("sts2.guidance.custom_code", "Custom code guidance", resource_root / "custom_code.md", ["custom_code"]),
+                (
+                    "sts2.guidance.custom_code",
+                    "Custom code guidance",
+                    resource_root / "custom_code.md",
+                    ["custom_code"],
+                ),
                 ("sts2.guidance.potion", "Potion guidance", resource_root / "potion.md", ["custom_code"]),
-                ("sts2.guidance.character", "Character guidance", resource_root / "character.md", ["custom_code", "character"]),
+                (
+                    "sts2.guidance.character",
+                    "Character guidance",
+                    resource_root / "character.md",
+                    ["custom_code", "character"],
+                ),
             ],
         }
         return mapping.get(asset_type, [])

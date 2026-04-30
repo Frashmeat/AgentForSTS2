@@ -28,4 +28,3 @@ class QuotaBalanceRecord(TimestampMixin, Base):
         nullable=False,
         default=QuotaAccountStatus.ACTIVE,
     )
-

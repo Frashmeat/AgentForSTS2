@@ -1,6 +1,6 @@
-﻿import sys
+﻿import inspect
+import sys
 import types
-import inspect
 from pathlib import Path
 
 import pytest
@@ -140,7 +140,9 @@ def test_planning_service_build_planner_prompt_uses_prompt_loader():
         def __init__(self) -> None:
             self.calls: list[tuple[str, dict[str, object], str]] = []
 
-        def render(self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None) -> str:
+        def render(
+            self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None
+        ) -> str:
             self.calls.append((template_name, variables, fallback_template or ""))
             return "rendered-planner-prompt"
 
@@ -167,7 +169,9 @@ def test_planning_service_build_planner_prompt_uses_resolver_context_when_availa
         def __init__(self) -> None:
             self.calls: list[tuple[str, dict[str, object], str]] = []
 
-        def render(self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None) -> str:
+        def render(
+            self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None
+        ) -> str:
             self.calls.append((template_name, variables, fallback_template or ""))
             return "rendered-planner-prompt"
 
@@ -322,9 +326,7 @@ def test_planning_service_plan_from_dict_preserves_review_fields():
                     "affected_targets": ["CombatHooks", "HelperLogic"],
                     "coupling_kind": "shared_logic",
                     "clarification_status": "needs_user_input",
-                    "clarification_questions": [
-                        "Should the helper own combat state persistence?"
-                    ],
+                    "clarification_questions": ["Should the helper own combat state persistence?"],
                 }
             ],
         }
@@ -339,9 +341,7 @@ def test_planning_service_plan_from_dict_preserves_review_fields():
     assert item.affected_targets == ["CombatHooks", "HelperLogic"]
     assert item.coupling_kind == "shared_logic"
     assert item.clarification_status == "needs_user_input"
-    assert item.clarification_questions == [
-        "Should the helper own combat state persistence?"
-    ]
+    assert item.clarification_questions == ["Should the helper own combat state persistence?"]
 
 
 def test_planning_service_validate_plan_marks_duplicate_ids_invalid():

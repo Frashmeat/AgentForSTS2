@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 from .contracts import AgentBackend, StreamCallback
-
 
 _CLI_AGENT_BACKENDS = {"claude", "codex"}
 
@@ -30,7 +28,7 @@ class FunctionAgentBackend:
         prompt: str,
         project_root: Path,
         llm_cfg: dict,
-        stream_callback: Optional[StreamCallback] = None,
+        stream_callback: StreamCallback | None = None,
     ) -> str:
         return await self._plan_fn(prompt, project_root, llm_cfg, stream_callback)
 
@@ -39,7 +37,7 @@ class FunctionAgentBackend:
         prompt: str,
         project_root: Path,
         llm_cfg: dict,
-        stream_callback: Optional[StreamCallback] = None,
+        stream_callback: StreamCallback | None = None,
     ) -> str:
         return await self._stream_fn(prompt, project_root, llm_cfg, stream_callback)
 
@@ -70,6 +68,6 @@ class AgentRunner:
         prompt: str,
         project_root: Path,
         llm_cfg: dict,
-        stream_callback: Optional[StreamCallback] = None,
+        stream_callback: StreamCallback | None = None,
     ) -> str:
         return await self._resolve_backend(llm_cfg).stream(prompt, project_root, llm_cfg, stream_callback)

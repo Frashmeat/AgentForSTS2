@@ -15,7 +15,9 @@ from app.modules.platform.infra.persistence.models import (
     QuotaAccountRecord,
     QuotaBucketRecord,
 )
-from app.modules.platform.infra.persistence.repositories.job_query_repository_sqlalchemy import JobQueryRepositorySqlAlchemy
+from app.modules.platform.infra.persistence.repositories.job_query_repository_sqlalchemy import (
+    JobQueryRepositorySqlAlchemy,
+)
 from app.modules.platform.infra.persistence.repositories.job_repository_sqlalchemy import JobRepositorySqlAlchemy
 from app.modules.platform.infra.persistence.repositories.quota_query_repository_sqlalchemy import (
     QuotaQueryRepositorySqlAlchemy,

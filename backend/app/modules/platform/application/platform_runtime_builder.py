@@ -9,14 +9,20 @@ from app.modules.platform.application.services import (
     JobApplicationService,
     QuotaBillingService,
     ServerCredentialCipher,
-    ServerQueuedJobClaimService,
     ServerDeployTargetLockService,
+    ServerQueuedJobClaimService,
     ServerWorkspaceLockService,
     ServerWorkspaceService,
     UploadedAssetService,
 )
 from app.modules.platform.application.workstation_execution_client import WorkstationExecutionClient
-from app.modules.platform.runner import ExecutionAdapter, PlatformWorkflowRegistry, PlatformWorkflowStep, StepDispatcher, WorkflowRunner
+from app.modules.platform.runner import (
+    ExecutionAdapter,
+    PlatformWorkflowRegistry,
+    PlatformWorkflowStep,
+    StepDispatcher,
+    WorkflowRunner,
+)
 from app.modules.platform.runner.asset_generate_handler import execute_asset_generate_step
 from app.modules.platform.runner.batch_custom_code_handler import execute_batch_custom_code_step
 from app.modules.platform.runner.build_project_handler import execute_build_project_step
@@ -43,7 +49,9 @@ def build_execution_orchestrator_service_from_container(session, container: Any)
     job_repository = container.resolve_singleton("platform.job_repository_factory")(session)
     ai_execution_repository = container.resolve_singleton("platform.ai_execution_repository_factory")(session)
     artifact_repository = container.resolve_singleton("platform.artifact_repository_factory")(session)
-    server_credential_admin_repository = container.resolve_singleton("platform.server_credential_admin_repository_factory")(session)
+    server_credential_admin_repository = container.resolve_singleton(
+        "platform.server_credential_admin_repository_factory"
+    )(session)
     job_event_repository = container.resolve_singleton("platform.job_event_repository_factory")(session)
     quota_billing_service = _build_quota_billing_service_from_container(session, container)
     execution_routing_service = _build_execution_routing_service_from_container(session, container)

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable, Protocol
+from collections.abc import Awaitable, Callable
+from typing import Any, Protocol
 
 from app.modules.image.domain.models import ImageGenerationRequest, ImagePostProcessRequest
-
 
 ImageProgressCallback = Callable[[str], Awaitable[None]]
 

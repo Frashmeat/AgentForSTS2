@@ -1,7 +1,8 @@
 """LLM 流式调用封装。"""
+
 from __future__ import annotations
 
-from typing import Callable, Awaitable
+from collections.abc import Awaitable, Callable
 
 from llm.text_runner import stream_text
 

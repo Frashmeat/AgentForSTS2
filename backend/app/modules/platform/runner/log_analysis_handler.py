@@ -10,7 +10,6 @@ from app.shared.prompting import PromptLoader
 
 from .text_generate_handler import execute_text_generate_step
 
-
 TextStepExecutor = Callable[[StepExecutionRequest], Awaitable[dict[str, object]]]
 
 _LOG_PATH = Path(os.environ.get("APPDATA", "")) / "SlayTheSpire2" / "logs" / "godot.log"

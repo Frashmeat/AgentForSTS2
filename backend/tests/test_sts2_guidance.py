@@ -1,17 +1,18 @@
 """Tests for sts2_guidance.py — runtime guidance accessors."""
+
 import sys
 from pathlib import Path
 
 # 让 pytest 能找到 backend 模块
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from app.modules.knowledge.infra import knowledge_runtime
 from agents.sts2_guidance import (
+    get_full_guidance_bundle,
+    get_game_api_reference_path,
     get_guidance_for_asset_type,
     get_planner_guidance,
-    get_game_api_reference_path,
-    get_full_guidance_bundle,
 )
+from app.modules.knowledge.infra import knowledge_runtime
 
 RESOURCE_DIR = knowledge_runtime.RESOURCE_KNOWLEDGE_DIR
 
@@ -64,6 +65,7 @@ def test_sts2_resource_files_exist():
 
 
 # ── get_guidance_for_asset_type ───────────────────────────────────────────────
+
 
 def test_card_guidance_contains_onplay():
     guidance = get_guidance_for_asset_type("card")
@@ -142,6 +144,7 @@ def test_card_guidance_includes_resource_backed_common_and_type_sections():
 
 # ── get_planner_guidance ──────────────────────────────────────────────────────
 
+
 def test_planner_guidance_contains_onplay():
     guidance = get_planner_guidance()
     assert "OnPlay" in guidance
@@ -181,6 +184,7 @@ def test_planner_guidance_matches_resource_file():
 
 
 # ── combined full guidance bundle ────────────────────────────────────────────
+
 
 def test_full_guidance_bundle_covers_all_types():
     """The aggregated guidance bundle should cover all major asset types."""

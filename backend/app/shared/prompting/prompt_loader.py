@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from pathlib import Path
 import re
-from typing import Any, Mapping
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
 
 _TEMPLATE_PATTERN = re.compile(r"{{\s*(\w+)\s*}}")
 _BUNDLE_KEY_PATTERN = re.compile(r"^[a-z0-9_]+$")

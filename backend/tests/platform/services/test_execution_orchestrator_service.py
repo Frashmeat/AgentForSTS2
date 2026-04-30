@@ -6,13 +6,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
+from app.modules.platform.application.services.execution_orchestrator_service import ExecutionOrchestratorService
 from app.modules.platform.application.services.execution_routing_service import ExecutionRoutingService
+from app.modules.platform.application.services.quota_billing_service import QuotaBillingService
+from app.modules.platform.application.services.server_credential_cipher import ServerCredentialCipher
 from app.modules.platform.application.services.server_workspace_lock_service import (
     ServerWorkspaceBusyError,
 )
-from app.modules.platform.application.services.execution_orchestrator_service import ExecutionOrchestratorService
-from app.modules.platform.application.services.quota_billing_service import QuotaBillingService
-from app.modules.platform.application.services.server_credential_cipher import ServerCredentialCipher
 from app.modules.platform.contracts.job_commands import CreateJobCommand
 from app.modules.platform.contracts.runner_contracts import StepExecutionResult
 from app.modules.platform.domain.models.enums import AIExecutionStatus, JobItemStatus, JobStatus
@@ -32,11 +32,11 @@ from app.modules.platform.infra.persistence.repositories.ai_execution_repository
 from app.modules.platform.infra.persistence.repositories.artifact_repository_sqlalchemy import (
     ArtifactRepositorySqlAlchemy,
 )
-from app.modules.platform.infra.persistence.repositories.execution_routing_repository_sqlalchemy import (
-    ExecutionRoutingRepositorySqlAlchemy,
-)
 from app.modules.platform.infra.persistence.repositories.execution_charge_repository_sqlalchemy import (
     ExecutionChargeRepositorySqlAlchemy,
+)
+from app.modules.platform.infra.persistence.repositories.execution_routing_repository_sqlalchemy import (
+    ExecutionRoutingRepositorySqlAlchemy,
 )
 from app.modules.platform.infra.persistence.repositories.job_event_repository_sqlalchemy import (
     JobEventRepositorySqlAlchemy,
@@ -45,11 +45,11 @@ from app.modules.platform.infra.persistence.repositories.job_repository_sqlalche
 from app.modules.platform.infra.persistence.repositories.quota_account_repository_sqlalchemy import (
     QuotaAccountRepositorySqlAlchemy,
 )
-from app.modules.platform.infra.persistence.repositories.usage_ledger_repository_sqlalchemy import (
-    UsageLedgerRepositorySqlAlchemy,
-)
 from app.modules.platform.infra.persistence.repositories.server_credential_admin_repository_sqlalchemy import (
     ServerCredentialAdminRepositorySqlAlchemy,
+)
+from app.modules.platform.infra.persistence.repositories.usage_ledger_repository_sqlalchemy import (
+    UsageLedgerRepositorySqlAlchemy,
 )
 from app.modules.platform.runner.workflow_registry import PlatformWorkflowStep
 
@@ -358,9 +358,7 @@ def test_execution_orchestrator_service_resolves_execution_route_from_selected_p
 def test_execution_orchestrator_service_raises_when_selected_profile_has_no_routable_credential(db_session):
     job, profile = _seed_ready_job_with_server_profile(db_session)
     credential = (
-        db_session.query(ServerCredentialRecord)
-        .filter(ServerCredentialRecord.execution_profile_id == profile.id)
-        .one()
+        db_session.query(ServerCredentialRecord).filter(ServerCredentialRecord.execution_profile_id == profile.id).one()
     )
     credential.health_status = "rate_limited"
     db_session.flush()
@@ -496,7 +494,9 @@ def test_execution_orchestrator_service_persists_artifacts_from_succeeded_result
 
 def test_execution_orchestrator_service_retries_with_alternate_credential_on_retryable_failure(db_session):
     cipher = ServerCredentialCipher("retry-test-secret")
-    job, profile, credential_a, credential_b, execution = _seed_ready_job_with_two_server_credentials(db_session, cipher)
+    job, profile, credential_a, credential_b, execution = _seed_ready_job_with_two_server_credentials(
+        db_session, cipher
+    )
     runner = _RetryOnceRunner(first_error="401 invalid token", success_text="retry succeeded")
     service = ExecutionOrchestratorService(
         job_repository=JobRepositorySqlAlchemy(db_session),

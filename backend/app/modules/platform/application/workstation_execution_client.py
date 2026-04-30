@@ -5,8 +5,9 @@ import os
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Protocol
+from typing import Protocol
 from urllib.parse import urljoin
 
 from app.modules.platform.contracts.runner_contracts import StepExecutionResult
@@ -27,8 +28,7 @@ WorkstationEventHandler = Callable[[list[WorkstationExecutionEvent]], None]
 
 
 class WorkstationRuntimeController(Protocol):
-    def ensure_started(self):
-        ...
+    def ensure_started(self): ...
 
 
 @dataclass(slots=True)
@@ -93,9 +93,7 @@ class WorkstationExecutionClient:
             if result.status not in {"accepted", "running"}:
                 return result
             if self.monotonic() >= deadline:
-                raise WorkstationExecutionClientError(
-                    f"workstation execution timed out: {workstation_execution_id}"
-                )
+                raise WorkstationExecutionClientError(f"workstation execution timed out: {workstation_execution_id}")
             self.sleep(poll_interval_seconds)
 
     @property

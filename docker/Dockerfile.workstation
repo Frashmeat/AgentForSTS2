@@ -66,6 +66,8 @@ RUN pip install --upgrade pip \
 COPY backend /app/backend
 COPY mod_template /app/mod_template
 COPY config.example.json /app/config.example.json
+# pyproject.toml 让容器内 ruff/black 等工具能找到工程级配置
+COPY pyproject.toml /app/pyproject.toml
 
 # 拷贝前端 dist（后端 StaticFiles 会从 ../frontend/dist 挂载）
 COPY --from=frontend-build /build/frontend/dist /app/frontend/dist

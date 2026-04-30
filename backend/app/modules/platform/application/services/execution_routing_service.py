@@ -71,7 +71,9 @@ class ExecutionRoutingService:
             excluded_credential_ids={failed_credential_id},
         )
         if target is None:
-            raise LookupError(f"no alternate enabled healthy server credential for execution profile: {execution_profile_id}")
+            raise LookupError(
+                f"no alternate enabled healthy server credential for execution profile: {execution_profile_id}"
+            )
 
         return ResolvedExecutionRoute(
             execution_profile_id=execution_profile_id,
@@ -93,7 +95,7 @@ class ExecutionRoutingService:
         value = str(credential_ref).strip()
         if not value.startswith(prefix):
             raise ValueError(f"credential_ref is invalid for retry routing: {credential_ref}")
-        raw_id = value[len(prefix):].strip()
+        raw_id = value[len(prefix) :].strip()
         if not raw_id.isdigit():
             raise ValueError(f"credential_ref is invalid for retry routing: {credential_ref}")
         return int(raw_id)

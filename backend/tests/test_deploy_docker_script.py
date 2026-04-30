@@ -6,7 +6,6 @@ import subprocess
 import time
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "tools" / "latest" / "deploy-docker.ps1"
 
@@ -16,46 +15,46 @@ def _write_fake_docker(bin_dir: Path) -> Path:
     docker_cmd.write_text(
         "@echo off\r\n"
         "setlocal EnableDelayedExpansion\r\n"
-        "set \"LOG=%MOCK_DOCKER_LOG%\"\r\n"
-        "if \"%~1\"==\"image\" (\r\n"
-        "  if \"%~2\"==\"inspect\" (\r\n"
-        "    >>\"%LOG%\" echo image inspect %~3\r\n"
-        "    if /I \"%MOCK_DOCKER_IMAGE_EXISTS%\"==\"1\" exit /b 0\r\n"
+        'set "LOG=%MOCK_DOCKER_LOG%"\r\n'
+        'if "%~1"=="image" (\r\n'
+        '  if "%~2"=="inspect" (\r\n'
+        '    >>"%LOG%" echo image inspect %~3\r\n'
+        '    if /I "%MOCK_DOCKER_IMAGE_EXISTS%"=="1" exit /b 0\r\n'
         "    exit /b 1\r\n"
         "  )\r\n"
-        "  if \"%~2\"==\"rm\" (\r\n"
-        "    >>\"%LOG%\" echo image rm %~4\r\n"
+        '  if "%~2"=="rm" (\r\n'
+        '    >>"%LOG%" echo image rm %~4\r\n'
         "    exit /b 0\r\n"
         "  )\r\n"
         ")\r\n"
-        "if \"%~1\"==\"compose\" (\r\n"
-        "  set \"CMD=\"\r\n"
+        'if "%~1"=="compose" (\r\n'
+        '  set "CMD="\r\n'
         "  :scan\r\n"
-        "  if \"%~1\"==\"\" goto done\r\n"
-        "  if /I \"%~1\"==\"build\" set \"CMD=build\"\r\n"
-        "  if /I \"%~1\"==\"up\" set \"CMD=up\"\r\n"
-        "  if /I \"%~1\"==\"down\" set \"CMD=down\"\r\n"
-        "  if /I \"%~1\"==\"stop\" set \"CMD=stop\"\r\n"
-        "  if /I \"%~1\"==\"ps\" set \"CMD=ps\"\r\n"
-        "  if /I \"%~1\"==\"exec\" set \"CMD=exec\"\r\n"
-        "  if /I \"%~1\"==\"run\" set \"CMD=run\"\r\n"
+        '  if "%~1"=="" goto done\r\n'
+        '  if /I "%~1"=="build" set "CMD=build"\r\n'
+        '  if /I "%~1"=="up" set "CMD=up"\r\n'
+        '  if /I "%~1"=="down" set "CMD=down"\r\n'
+        '  if /I "%~1"=="stop" set "CMD=stop"\r\n'
+        '  if /I "%~1"=="ps" set "CMD=ps"\r\n'
+        '  if /I "%~1"=="exec" set "CMD=exec"\r\n'
+        '  if /I "%~1"=="run" set "CMD=run"\r\n'
         "  shift\r\n"
         "  goto scan\r\n"
         "  :done\r\n"
-        "  >>\"%LOG%\" echo compose !CMD! %*\r\n"
-        "  if /I \"!CMD!\"==\"ps\" echo fake-postgres-container\r\n"
+        '  >>"%LOG%" echo compose !CMD! %*\r\n'
+        '  if /I "!CMD!"=="ps" echo fake-postgres-container\r\n'
         "  exit /b 0\r\n"
         ")\r\n"
-        "if \"%~1\"==\"exec\" (\r\n"
-        "  >>\"%LOG%\" echo exec %*\r\n"
-        "  if /I \"%~3\"==\"printenv\" (\r\n"
-        "    if /I \"%~4\"==\"POSTGRES_DB\" echo agentthespire\r\n"
-        "    if /I \"%~4\"==\"POSTGRES_USER\" echo agentthespire\r\n"
-        "    if /I \"%~4\"==\"POSTGRES_PASSWORD\" echo agentthespire\r\n"
+        'if "%~1"=="exec" (\r\n'
+        '  >>"%LOG%" echo exec %*\r\n'
+        '  if /I "%~3"=="printenv" (\r\n'
+        '    if /I "%~4"=="POSTGRES_DB" echo agentthespire\r\n'
+        '    if /I "%~4"=="POSTGRES_USER" echo agentthespire\r\n'
+        '    if /I "%~4"=="POSTGRES_PASSWORD" echo agentthespire\r\n'
         "  )\r\n"
         "  exit /b 0\r\n"
         ")\r\n"
-        ">>\"%LOG%\" echo unexpected %*\r\n"
+        '>>"%LOG%" echo unexpected %*\r\n'
         "exit /b 0\r\n",
         encoding="utf-8",
     )
@@ -67,8 +66,8 @@ def _write_fake_python(bin_dir: Path) -> Path:
     python_cmd.write_text(
         "@echo off\r\n"
         "setlocal EnableDelayedExpansion\r\n"
-        "set \"LOG=%MOCK_PYTHON_LOG%\"\r\n"
-        ">>\"%LOG%\" echo python %*\r\n"
+        'set "LOG=%MOCK_PYTHON_LOG%"\r\n'
+        '>>"%LOG%" echo python %*\r\n'
         "echo MOCK-STDOUT %*\r\n"
         ">&2 echo MOCK-STDERR %*\r\n"
         "exit /b 0\r\n",
@@ -157,10 +156,12 @@ def _run_deploy(
         *extra_args,
     ]
     if pass_config_path:
-        command.extend([
-            "-ConfigPath",
-            str(config_path),
-        ])
+        command.extend(
+            [
+                "-ConfigPath",
+                str(config_path),
+            ]
+        )
     completed = subprocess.run(
         command,
         cwd=REPO_ROOT,
@@ -231,7 +232,11 @@ def test_deploy_docker_hybrid_can_explicitly_deploy_local_web_release(tmp_path: 
     assert result.docker_log.count("compose down") == 1
     assert result.docker_log.count("compose build") == 1
     assert result.docker_log.count("compose up") == 1
-    assert result.docker_log.index("compose down") < result.docker_log.index("compose build") < result.docker_log.index("compose up")
+    assert (
+        result.docker_log.index("compose down")
+        < result.docker_log.index("compose build")
+        < result.docker_log.index("compose up")
+    )
     assert "-m uvicorn main_workstation:app --host 127.0.0.1 --port 7860" in result.python_log
     assert "-m http.server 8080 --bind 127.0.0.1 --directory" in result.python_log
     assert runtime_config.exists()
@@ -248,7 +253,9 @@ def test_deploy_docker_hybrid_debug_passes_debug_to_local_web_release(tmp_path: 
 
 
 def test_deploy_docker_hybrid_custom_frontend_port_updates_runtime_cors_origins(tmp_path: Path):
-    result = _run_deploy(tmp_path, "hybrid", "-DeployLocalWeb", "-FrontendPort", "4173", prepare_default_web_release=True)
+    result = _run_deploy(
+        tmp_path, "hybrid", "-DeployLocalWeb", "-FrontendPort", "4173", prepare_default_web_release=True
+    )
     workstation_config_path = tmp_path / "release" / "runtime" / "workstation.config.json"
     web_config_path = tmp_path / "agentthespire-web-release" / "runtime" / "web.config.json"
 
@@ -449,5 +456,3 @@ def test_deploy_docker_frontend_runs_local_static_server_without_docker(tmp_path
     assert "-m http.server 8080 --bind 127.0.0.1 --directory" in result.python_log
     assert runtime_config.exists()
     assert 'web: "https://platform.example.com"' in runtime_config.read_text(encoding="utf-8")
-
-

@@ -19,4 +19,3 @@ class UploadedAssetView(ModelBase):
     mime_type: str
     size_bytes: int
     created_at: str
-

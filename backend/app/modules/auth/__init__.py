@@ -7,8 +7,8 @@ __all__ = [
     "AuthService",
     "EmailVerificationRepository",
     "EmailVerificationTicket",
-    "PasswordHasher",
     "PBKDF2PasswordHasher",
+    "PasswordHasher",
     "UserAccount",
     "UserRepository",
 ]

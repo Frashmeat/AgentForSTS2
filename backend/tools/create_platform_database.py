@@ -5,8 +5,7 @@ from dataclasses import dataclass
 
 import psycopg
 from psycopg.rows import tuple_row
-from psycopg.sql import Identifier, SQL
-
+from psycopg.sql import SQL, Identifier
 
 DEFAULT_ADMIN_URL = "postgresql://postgres:postgres@127.0.0.1:5432/postgres"
 DEFAULT_DATABASE_NAME = "agent_the_spire_platform"
@@ -25,12 +24,14 @@ def build_application_url(admin_url: str, database_name: str) -> str:
 
 
 def create_database_if_missing(admin_url: str, database_name: str) -> BootstrapResult:
-    with psycopg.connect(admin_url, autocommit=True, row_factory=tuple_row) as conn:
-        with conn.cursor() as cur:
-            cur.execute("select 1 from pg_database where datname = %s", (database_name,))
-            existed = cur.fetchone() is not None
-            if not existed:
-                cur.execute(SQL("create database {}").format(Identifier(database_name)))
+    with (
+        psycopg.connect(admin_url, autocommit=True, row_factory=tuple_row) as conn,
+        conn.cursor() as cur,
+    ):
+        cur.execute("select 1 from pg_database where datname = %s", (database_name,))
+        existed = cur.fetchone() is not None
+        if not existed:
+            cur.execute(SQL("create database {}").format(Identifier(database_name)))
 
     return BootstrapResult(
         existed=existed,

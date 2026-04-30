@@ -165,7 +165,9 @@ def create_verification_code() -> str:
 
 def create_email_ticket(user_id: int, email: str, purpose: str, request: Request, session) -> EmailVerificationTicket:
     auth_settings = _settings(request).auth
-    ttl_key = "password_reset_code_ttl_seconds" if purpose == "reset_password" else "email_verification_code_ttl_seconds"
+    ttl_key = (
+        "password_reset_code_ttl_seconds" if purpose == "reset_password" else "email_verification_code_ttl_seconds"
+    )
     ttl_seconds = int(auth_settings.get(ttl_key, 1800))
     repository = build_email_verification_repository(session, request)
     return repository.create_ticket(

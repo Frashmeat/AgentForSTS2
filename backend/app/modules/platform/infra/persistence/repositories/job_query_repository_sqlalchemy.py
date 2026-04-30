@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from sqlalchemy import case, func
+from sqlalchemy.orm import Session
+
 from app.modules.platform.contracts import ArtifactSummary, JobDetailView, JobEventView, JobItemListItem, JobListItem
 from app.modules.platform.domain.repositories import JobQueryRepository
 from app.modules.platform.infra.persistence.models import (
@@ -13,8 +16,6 @@ from app.modules.platform.infra.persistence.models import (
     JobItemRecord,
     JobRecord,
 )
-from sqlalchemy import case, func
-from sqlalchemy.orm import Session
 
 
 def _to_iso(value: object | None) -> str:
@@ -99,10 +100,14 @@ class JobQueryRepositorySqlAlchemy(JobQueryRepository):
                 net_consumed=refund_summaries.get(row.id, _RefundSummary()).net_consumed,
                 refund_reason_summary=refund_summaries.get(row.id, _RefundSummary()).refund_reason_summary,
                 queued_reason_code=(
-                    queued_summaries.get(row.id, _QueuedSummary()).reason_code if _enum_value(row.status) == "queued" else ""
+                    queued_summaries.get(row.id, _QueuedSummary()).reason_code
+                    if _enum_value(row.status) == "queued"
+                    else ""
                 ),
                 queued_reason_message=(
-                    queued_summaries.get(row.id, _QueuedSummary()).reason_message if _enum_value(row.status) == "queued" else ""
+                    queued_summaries.get(row.id, _QueuedSummary()).reason_message
+                    if _enum_value(row.status) == "queued"
+                    else ""
                 ),
                 deferred_reason_code=deferred_summaries.get(row.id, _DeferredSummary()).reason_code,
                 deferred_reason_message=deferred_summaries.get(row.id, _DeferredSummary()).reason_message,
@@ -295,9 +300,8 @@ class JobQueryRepositorySqlAlchemy(JobQueryRepository):
         return summaries
 
     def list_visible_events(self, user_id: int, job_id: int, after_id: int | None, limit: int) -> list[JobEventView]:
-        query = (
-            self.session.query(JobEventRecord)
-            .filter(JobEventRecord.user_id == user_id, JobEventRecord.job_id == job_id)
+        query = self.session.query(JobEventRecord).filter(
+            JobEventRecord.user_id == user_id, JobEventRecord.job_id == job_id
         )
         if after_id is not None:
             query = query.filter(JobEventRecord.id > after_id)

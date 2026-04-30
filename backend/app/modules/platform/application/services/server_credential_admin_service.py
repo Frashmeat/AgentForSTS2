@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import ClassVar
 from urllib.parse import urlparse
 
 from app.modules.platform.contracts import (
@@ -16,8 +17,8 @@ from .server_credential_health_checker import ServerCredentialHealthChecker
 
 
 class ServerCredentialAdminService:
-    ALLOWED_PROVIDERS = {"openai", "anthropic"}
-    ALLOWED_AUTH_TYPES = {"api_key", "ak_sk"}
+    ALLOWED_PROVIDERS: ClassVar[set[str]] = {"openai", "anthropic"}
+    ALLOWED_AUTH_TYPES: ClassVar[set[str]] = {"api_key", "ak_sk"}
 
     def __init__(
         self,

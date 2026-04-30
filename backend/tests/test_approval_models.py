@@ -1,4 +1,5 @@
 """Tests for approval action models and policy defaults."""
+
 import sys
 from pathlib import Path
 

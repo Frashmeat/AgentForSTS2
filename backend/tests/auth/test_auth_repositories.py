@@ -13,7 +13,7 @@ pytest.importorskip("sqlalchemy")
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app.modules.auth.infra.persistence import models as _auth_models  # noqa: F401
+from app.modules.auth.infra.persistence import models as _auth_models
 from app.modules.auth.infra.persistence.repositories import (
     EmailVerificationRepositorySqlAlchemy,
     UserRepositorySqlAlchemy,
@@ -61,9 +61,7 @@ def test_email_verification_repository_supports_ticket_lifecycle(session: Sessio
         expires_at=datetime(2026, 4, 3, 10, 0, tzinfo=UTC) + timedelta(minutes=30),
     )
     loaded_before_consumed = verification_repository.get_by_code("code-123", "verify_email")
-    consumed = verification_repository.save(
-        ticket.mark_consumed(datetime(2026, 4, 3, 10, 15, tzinfo=UTC))
-    )
+    consumed = verification_repository.save(ticket.mark_consumed(datetime(2026, 4, 3, 10, 15, tzinfo=UTC)))
     loaded = verification_repository.get_by_code("code-123", "verify_email")
 
     assert loaded_before_consumed is not None

@@ -1,4 +1,5 @@
 """Tests for approval executor behavior."""
+
 import sys
 from pathlib import Path
 

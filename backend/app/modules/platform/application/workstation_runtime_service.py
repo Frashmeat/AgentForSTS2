@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-import os
 import json
+import os
 import secrets
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Callable
-from urllib.parse import urlparse
 import urllib.error
 import urllib.request
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+from urllib.parse import urlparse
 
 from app.shared.infra.config.settings import Settings
 
@@ -216,7 +216,11 @@ class WorkstationRuntimeManager:
         return self._runtime_root() / path
 
     def _runtime_root(self) -> Path:
-        if self._cwd.name == "backend" and self._cwd.parent.name in {"web", "workstation"} and self._cwd.parent.parent.name == "services":
+        if (
+            self._cwd.name == "backend"
+            and self._cwd.parent.name in {"web", "workstation"}
+            and self._cwd.parent.parent.name == "services"
+        ):
             return self._cwd.parent.parent.parent
         if self._cwd.name == "backend":
             return self._cwd.parent

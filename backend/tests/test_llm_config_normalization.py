@@ -1,4 +1,5 @@
 """Tests for LLM config normalization and old input cleanup."""
+
 import sys
 from pathlib import Path
 

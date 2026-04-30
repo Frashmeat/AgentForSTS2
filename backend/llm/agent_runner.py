@@ -5,9 +5,11 @@ from pathlib import Path
 
 from app.shared.infra.llm.agent_backend import (
     AgentBackendRegistry,
-    AgentRunner as PortAgentRunner,
     FunctionAgentBackend,
     resolve_agent_backend_name,
+)
+from app.shared.infra.llm.agent_backend import (
+    AgentRunner as PortAgentRunner,
 )
 from config import get_config, normalize_llm_config
 from llm.agent_backends import run_claude_cli, run_codex_cli

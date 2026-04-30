@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 _SKIP_DIRS = {"bin", "obj", ".godot", ".git"}
 _MAX_SOURCE_SAMPLES = 8
 _MAX_LOCALIZATION_SAMPLES = 4

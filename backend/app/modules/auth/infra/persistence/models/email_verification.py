@@ -3,8 +3,8 @@ from __future__ import annotations
 from sqlalchemy import DateTime, ForeignKey, Index, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.shared.infra.db.base import Base
 from app.modules.platform.infra.persistence.models._common import TimestampMixin, bigint_type
+from app.shared.infra.db.base import Base
 
 
 class EmailVerificationRecord(TimestampMixin, Base):

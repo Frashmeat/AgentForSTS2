@@ -16,14 +16,14 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.composition.container import ApplicationContainer
-from app.modules.platform.application.services.platform_runtime_audit_service import PlatformRuntimeAuditService
 from app.modules.auth.application.services import PBKDF2PasswordHasher
-from app.modules.platform.application.services.server_credential_health_checker import ServerCredentialHealthCheckResult
-from app.modules.platform.application.services.server_credential_cipher import ServerCredentialCipher
-from app.modules.auth.infra.persistence import models as _auth_models  # noqa: F401
+from app.modules.auth.infra.persistence import models as _auth_models
 from app.modules.auth.infra.persistence.models import UserRecord
+from app.modules.platform.application.services.platform_runtime_audit_service import PlatformRuntimeAuditService
+from app.modules.platform.application.services.server_credential_cipher import ServerCredentialCipher
+from app.modules.platform.application.services.server_credential_health_checker import ServerCredentialHealthCheckResult
 from app.modules.platform.contracts.job_commands import CreateJobCommand
-from app.modules.platform.infra.persistence import models as _platform_models  # noqa: F401
+from app.modules.platform.infra.persistence import models as _platform_models
 from app.modules.platform.infra.persistence.models import (
     AIExecutionRecord,
     CredentialHealthCheckRecord,
@@ -33,8 +33,8 @@ from app.modules.platform.infra.persistence.models import (
     QuotaAccountRecord,
     QuotaAccountStatus,
     QuotaBalanceRecord,
-    UserPlatformPreferenceRecord,
     ServerCredentialRecord,
+    UserPlatformPreferenceRecord,
 )
 from app.modules.platform.infra.persistence.repositories.job_repository_sqlalchemy import JobRepositorySqlAlchemy
 from app.shared.infra.db.base import Base

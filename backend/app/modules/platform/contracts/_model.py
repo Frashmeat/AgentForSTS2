@@ -21,7 +21,7 @@ def _convert_value(value: Any, annotation: Any) -> Any:
 
 class ModelBase:
     @classmethod
-    def model_validate(cls, payload: dict[str, Any]) -> "ModelBase":
+    def model_validate(cls, payload: dict[str, Any]) -> ModelBase:
         hints = get_type_hints(cls)
         kwargs: dict[str, Any] = {}
 

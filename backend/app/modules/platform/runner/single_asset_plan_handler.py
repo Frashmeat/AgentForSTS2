@@ -8,12 +8,10 @@ from app.modules.knowledge.infra.sts2_knowledge_resolver import Sts2KnowledgeRes
 from app.modules.knowledge.infra.sts2_lookup_provider import Sts2LookupProvider
 from app.modules.platform.contracts.runner_contracts import StepExecutionRequest
 from app.shared.contracts.knowledge import KnowledgeQuery
-from app.shared.prompting import PromptContextAssembler
-from app.shared.prompting import PromptLoader
+from app.shared.prompting import PromptContextAssembler, PromptLoader
 
 from .server_workspace_snapshot import render_server_workspace_snapshot
 from .text_generate_handler import execute_text_generate_step
-
 
 TextStepExecutor = Callable[[StepExecutionRequest], Awaitable[dict[str, object]]]
 

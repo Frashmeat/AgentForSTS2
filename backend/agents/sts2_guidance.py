@@ -10,9 +10,11 @@ Sources:
 - https://github.com/Alchyr/BaseLib-StS2
 - sts2_api_reference.md (decompiled from sts2.dll, ilspycmd v9.1.0)
 """
+
 from __future__ import annotations
 
 from functools import lru_cache
+
 from app.modules.knowledge.infra import knowledge_runtime
 from app.modules.knowledge.infra.sts2_guidance_source import Sts2GuidanceKnowledgeSource
 
@@ -55,7 +57,11 @@ def _get_guidance_for_asset_type_raw(asset_type: str) -> str:
         "power": _load_resource_text("power.md"),
         "potion": _load_resource_text("potion.md"),
         "character": _load_resource_text("character.md"),
-        "custom_code": _load_resource_text("custom_code.md") + "\n" + _load_resource_text("potion.md") + "\n" + _load_resource_text("character.md"),
+        "custom_code": _load_resource_text("custom_code.md")
+        + "\n"
+        + _load_resource_text("potion.md")
+        + "\n"
+        + _load_resource_text("character.md"),
     }
     return common_guidance + type_guidance_map.get(asset_type, "")
 

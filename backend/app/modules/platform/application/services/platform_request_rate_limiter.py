@@ -5,6 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from threading import Lock
+from typing import ClassVar
 
 
 @dataclass(slots=True)
@@ -19,7 +20,7 @@ class PlatformRequestRateLimitExceededError(ValueError):
 
 
 class PlatformRequestRateLimiter:
-    _RULES: dict[str, _RateLimitRule] = {
+    _RULES: ClassVar[dict[str, _RateLimitRule]] = {
         "create_job": _RateLimitRule(
             limit=5,
             window_seconds=60,

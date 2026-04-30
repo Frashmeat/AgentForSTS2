@@ -3,9 +3,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from app.modules.platform.contracts.admin_queries import AdminExecutionDetailView
 from app.modules.platform.contracts.admin_commands import CreateServerCredentialCommand, UpdateServerCredentialCommand
-from app.modules.platform.contracts.admin_queries import AdminServerCredentialHealthCheckView
+from app.modules.platform.contracts.admin_queries import AdminExecutionDetailView, AdminServerCredentialHealthCheckView
 from app.modules.platform.contracts.events import JobEventView
 from app.modules.platform.contracts.job_commands import CreateJobCommand
 from app.modules.platform.contracts.job_queries import JobDetailView

@@ -2,6 +2,7 @@
 游戏日志分析器：读取 STS2 的 godot.log，提取报错信息，交给 LLM 分析。
 支持 WebSocket 流式返回分析结果。
 """
+
 from __future__ import annotations
 
 import json
@@ -14,9 +15,9 @@ from fastapi import APIRouter, WebSocket
 from app.shared.infra.ws_errors import send_ws_error
 from app.shared.prompting import PromptLoader
 from config import get_config
+from llm.stage_events import build_stage_event
 from llm.stream import stream_analysis
 from llm.stream_metadata import build_stream_chunk_payload, resolve_text_display_model
-from llm.stage_events import build_stage_event
 
 router = APIRouter()
 
@@ -54,12 +55,12 @@ def _read_log() -> tuple[str, bool]:
 
     # 额外捞出全文中的 ERROR/Exception/CRITICAL 行（可能在 tail 之前）
     error_pattern = re.compile(r"error|exception|critical|crash|fail", re.IGNORECASE)
-    extra = [l for l in lines[:-_MAX_LINES] if error_pattern.search(l)]
+    extra = [line for line in lines[:-_MAX_LINES] if error_pattern.search(line)]
 
     combined = []
     if extra:
         combined.append(_PROMPT_LOADER.load("analyzer.log_excerpt_header").strip())
-        combined.extend(extra[-100:])   # 最多 100 条
+        combined.extend(extra[-100:])  # 最多 100 条
         combined.append(_PROMPT_LOADER.load("analyzer.log_tail_header").strip())
     combined.extend(tail)
 
@@ -145,15 +146,21 @@ async def ws_analyze_log(ws: WebSocket):
             nonlocal streamed
             if not streamed:
                 streamed = True
-                await _send_stage(ws, "text", "ai_streaming", _PROMPT_LOADER.load("analyzer.log_streaming_stage").strip())
-            await ws.send_text(json.dumps({
-                "event": "stream",
-                **build_stream_chunk_payload(
-                    chunk,
-                    source="analysis",
-                    model=display_model,
-                ),
-            }))
+                await _send_stage(
+                    ws, "text", "ai_streaming", _PROMPT_LOADER.load("analyzer.log_streaming_stage").strip()
+                )
+            await ws.send_text(
+                json.dumps(
+                    {
+                        "event": "stream",
+                        **build_stream_chunk_payload(
+                            chunk,
+                            source="analysis",
+                            model=display_model,
+                        ),
+                    }
+                )
+            )
 
         await _send_stage(ws, "text", "ai_running", _PROMPT_LOADER.load("analyzer.log_running_stage").strip())
         full_text = await stream_analysis(_get_system_prompt(), prompt, llm_cfg, send_chunk)

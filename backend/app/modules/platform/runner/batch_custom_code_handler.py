@@ -8,7 +8,6 @@ from app.shared.prompting import PromptLoader
 from .server_workspace_snapshot import render_server_workspace_snapshot
 from .text_generate_handler import execute_text_generate_step
 
-
 TextStepExecutor = Callable[[StepExecutionRequest], Awaitable[dict[str, object]]]
 
 _PROMPT_LOADER = PromptLoader()

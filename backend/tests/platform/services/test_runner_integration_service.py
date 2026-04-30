@@ -12,12 +12,16 @@ from app.modules.platform.application.services.server_credential_cipher import S
 from app.modules.platform.contracts.job_commands import CreateJobCommand
 from app.modules.platform.contracts.runner_contracts import StepExecutionBinding, StepExecutionResult
 from app.modules.platform.domain.models.enums import AIExecutionStatus, JobItemStatus, JobStatus
-from app.modules.platform.infra.persistence.models import AIExecutionRecord, ExecutionProfileRecord, ServerCredentialRecord
-from app.modules.platform.infra.persistence.repositories.execution_routing_repository_sqlalchemy import (
-    ExecutionRoutingRepositorySqlAlchemy,
+from app.modules.platform.infra.persistence.models import (
+    AIExecutionRecord,
+    ExecutionProfileRecord,
+    ServerCredentialRecord,
 )
 from app.modules.platform.infra.persistence.repositories.ai_execution_repository_sqlalchemy import (
     AIExecutionRepositorySqlAlchemy,
+)
+from app.modules.platform.infra.persistence.repositories.execution_routing_repository_sqlalchemy import (
+    ExecutionRoutingRepositorySqlAlchemy,
 )
 from app.modules.platform.infra.persistence.repositories.job_event_repository_sqlalchemy import (
     JobEventRepositorySqlAlchemy,

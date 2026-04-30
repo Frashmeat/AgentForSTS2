@@ -48,7 +48,9 @@ def test_latest_refresh_delegates_to_runtime(monkeypatch):
     monkeypatch.setattr(
         knowledge_router,
         "_runtime",
-        lambda: types.SimpleNamespace(get_latest_refresh_task=lambda: {"task_id": "refresh-latest", "status": "running"}),
+        lambda: types.SimpleNamespace(
+            get_latest_refresh_task=lambda: {"task_id": "refresh-latest", "status": "running"}
+        ),
     )
 
     result = knowledge_router.get_latest_refresh_knowledge()

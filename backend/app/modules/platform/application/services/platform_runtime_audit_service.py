@@ -103,9 +103,10 @@ class PlatformRuntimeAuditService:
                     payload = json.loads(text)
                 except Exception:
                     continue
-                if str(event_type_prefix or "").strip():
-                    if not str(payload.get("event_type", "")).strip().startswith(str(event_type_prefix).strip()):
-                        continue
+                if str(event_type_prefix or "").strip() and not str(payload.get("event_type", "")).strip().startswith(
+                    str(event_type_prefix).strip()
+                ):
+                    continue
                 try:
                     event_id = int(payload.get("event_id", 0) or 0)
                     if after_id is not None and event_id <= after_id:
@@ -186,7 +187,9 @@ class PlatformRuntimeAuditService:
                     PlatformRuntimeAuditEventRecord.event_type.like(f"{str(event_type_prefix).strip()}%")
                 )
             rows = (
-                query.order_by(PlatformRuntimeAuditEventRecord.created_at.desc(), PlatformRuntimeAuditEventRecord.id.desc())
+                query.order_by(
+                    PlatformRuntimeAuditEventRecord.created_at.desc(), PlatformRuntimeAuditEventRecord.id.desc()
+                )
                 .limit(min(limit or self.max_returned_events, self.max_returned_events))
                 .all()
             )

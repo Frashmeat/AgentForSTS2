@@ -1,5 +1,5 @@
-import importlib
 import asyncio
+import importlib
 import sys
 import types
 from pathlib import Path
@@ -121,7 +121,9 @@ def test_image_prompt_adapter_uses_bundle_keys_for_prompt_resources(monkeypatch)
             self.load_calls.append((template_name, fallback_template or ""))
             return fallback_template or template_name
 
-        def render(self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None) -> str:
+        def render(
+            self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None
+        ) -> str:
             self.render_calls.append((template_name, variables, fallback_template or ""))
             return '{"prompt":"ok"}'
 
@@ -175,11 +177,7 @@ def test_adapt_prompt_includes_provider_guide_resources(monkeypatch, provider, r
 
     formula = PROMPT_LOADER.load(f"image.guide_{provider}_formula").strip()
     example = PROMPT_LOADER.load(f"image.guide_{provider}_example").strip()
-    rules = [
-        line.strip()[2:]
-        for line in PROMPT_LOADER.load(rules_key).splitlines()
-        if line.strip()
-    ]
+    rules = [line.strip()[2:] for line in PROMPT_LOADER.load(rules_key).splitlines() if line.strip()]
 
     assert f"Formula: {formula}" in captured["prompt"]
     assert f"Example output: {example}" in captured["prompt"]

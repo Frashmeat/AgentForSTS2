@@ -109,7 +109,7 @@ class ServerQueuedJobWorkerService:
             self.run_once()
             try:
                 await asyncio.wait_for(self._stop_event.wait(), timeout=self.poll_interval_seconds)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
 
     def run_once(self) -> QueueWorkerTickResult:
@@ -270,9 +270,7 @@ class ServerQueuedJobWorkerService:
         return {
             "owner_id": self._leader_owner_id,
             "owner_scope": self._leader_owner_scope,
-            "is_leader": (
-                current_leader is not None and current_leader.get("owner_id") == self._leader_owner_id
-            ),
+            "is_leader": (current_leader is not None and current_leader.get("owner_id") == self._leader_owner_id),
             "leader_epoch": current_leader.get("leader_epoch") if current_leader is not None else None,
             "failover_window_seconds": (
                 self.scan_claim_service.get_failover_window_seconds() if self.scan_claim_service is not None else None

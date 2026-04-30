@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.modules.platform.domain.models.enums import JobItemStatus
@@ -45,7 +45,7 @@ class JobItemRecord(TimestampMixin, Base):
     finished_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deleted_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
     archived_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    job: Mapped["JobRecord"] = relationship("JobRecord", back_populates="items")
+    job: Mapped[JobRecord] = relationship("JobRecord", back_populates="items")
 
 
 Index("ix_job_items_job_id_item_index", JobItemRecord.job_id, JobItemRecord.item_index)

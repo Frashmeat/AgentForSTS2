@@ -6,25 +6,26 @@ Build & Deploy：通过 Code Agent 运行 dotnet publish（含 Godot .pck 导出
 - dotnet publish 只产出 .dll
 - .pck 需要 Godot headless export，Code Agent 的 prompt 里有完整流程
 """
+
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
 from fastapi import APIRouter, WebSocket
+from project_utils import ensure_local_props
 
+from app.modules.codegen.api import build_and_fix
 from app.modules.platform.application.services import (
     ServerDeployRegistryService,
     ServerDeployTargetBusyError,
     ServerDeployTargetLockService,
 )
 from app.modules.platform.infra.build_output_files import deploy_latest_output_files
-from app.modules.codegen.api import build_and_fix
 from app.shared.infra.ws_errors import send_ws_error
 from app.shared.prompting import PromptLoader
 from config import get_config
 from llm.stream_metadata import build_stream_chunk_payload, resolve_agent_display_model
-from project_utils import ensure_local_props
 
 router = APIRouter()
 _TEXT_LOADER = PromptLoader()
@@ -66,14 +67,18 @@ async def ws_build_deploy(ws: WebSocket):
             return
 
         async def send_chunk(chunk: str):
-            await ws.send_text(json.dumps({
-                "event": "stream",
-                **build_stream_chunk_payload(
-                    chunk,
-                    source="build",
-                    model=display_model,
-                ),
-            }))
+            await ws.send_text(
+                json.dumps(
+                    {
+                        "event": "stream",
+                        **build_stream_chunk_payload(
+                            chunk,
+                            source="build",
+                            model=display_model,
+                        ),
+                    }
+                )
+            )
 
         # ── Step 1: Code Agent 构建（dotnet publish + Godot .pck export）──
         ensure_local_props(project_root)
@@ -150,7 +155,9 @@ async def ws_build_deploy(ws: WebSocket):
                     f"\n{_TEXT_LOADER.render('runtime_workflow.build_copying_to_target', {'target_dir': target_dir}).strip()}\n"
                 )
                 for file_name in deployed.file_names:
-                    await send_chunk(f"{_TEXT_LOADER.render('runtime_workflow.build_file_item', {'file_name': file_name})}\n")
+                    await send_chunk(
+                        f"{_TEXT_LOADER.render('runtime_workflow.build_file_item', {'file_name': file_name})}\n"
+                    )
                 file_names = list(deployed.file_names)
                 deployed_to = deployed.deployed_to
                 await send_chunk(f"\n{_TEXT_LOADER.load('runtime_workflow.build_deploy_finished').strip()}\n")
@@ -159,14 +166,18 @@ async def ws_build_deploy(ws: WebSocket):
         elif not sts2_mods:
             await send_chunk(f"\n{_TEXT_LOADER.load('runtime_workflow.build_game_path_missing').strip()}\n")
 
-        await ws.send_text(json.dumps({
-            "event": "done",
-            "success": True,
-            "deployed_to": deployed_to,
-            "files": file_names,
-            "last_successful_deploy": last_successful_deploy,
-            "deploy_recovery_context": deploy_recovery_context,
-        }))
+        await ws.send_text(
+            json.dumps(
+                {
+                    "event": "done",
+                    "success": True,
+                    "deployed_to": deployed_to,
+                    "files": file_names,
+                    "last_successful_deploy": last_successful_deploy,
+                    "deploy_recovery_context": deploy_recovery_context,
+                }
+            )
+        )
 
     except Exception as e:
         try:

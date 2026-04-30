@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from sqlalchemy import JSON, BigInteger, DateTime, Enum as SqlEnum, Integer, func
+from sqlalchemy import JSON, BigInteger, DateTime, Integer, func
+from sqlalchemy import Enum as SqlEnum
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 

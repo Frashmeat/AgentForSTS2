@@ -1,0 +1,61 @@
+# 仓库级工具配置：ruff + black。
+# 当前不发布 wheel，[project] 段省略；只用 [tool.*] 给 lint/format 工具。
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = [
+    "backend/migrations/versions",  # alembic 自动生成的 schema 迁移脚本
+    "frontend",
+    "tools/latest/artifacts",
+    "**/__pycache__",
+    ".venv",
+    ".tmp",
+]
+
+[tool.ruff.lint]
+# 保守规则集：先开核心组让基线干净，避开过于侵入性的（D/ANN/PTH 等）
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade（建议 Python 3.11+ 写法）
+    "SIM",  # flake8-simplify
+    "RUF",  # ruff 专属
+]
+ignore = [
+    "E501",   # line-too-long：line-length 已设 120，剩余超长由 black 处置
+    "B008",   # FastAPI 常用 Depends() in default arg
+    "SIM108", # 三元 vs if-else，code-style 偏好不一
+    "RUF001", # Chinese 全角标点：项目大量中文注释，误报率高
+    "RUF002",
+    "RUF003",
+    "SIM105", # try/except/pass → contextlib.suppress：风格偏好，不强制
+    "SIM108", # 三元表达式 vs if/else：风格偏好
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 测试允许更宽松：未使用 fixture 参数、sys.path.insert 后置 import 等是常态
+"backend/tests/**" = ["F401", "F811", "B011", "SIM117", "SIM118", "E402", "F821", "F841"]
+# alembic env.py 标准模板：sys.path.insert 后再 import metadata
+"backend/migrations/env.py" = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "agents", "approval", "config", "image", "llm", "routers", "tools"]
+
+[tool.black]
+line-length = 120
+target-version = ["py311"]
+extend-exclude = '''
+(
+  /(
+      \.venv
+    | \.tmp
+    | backend/migrations/versions
+    | frontend
+    | tools/latest/artifacts
+  )/
+)
+'''

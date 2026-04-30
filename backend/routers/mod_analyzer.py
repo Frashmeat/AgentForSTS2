@@ -1,6 +1,7 @@
 """
 Mod 分析器：扫描 mod 项目 .cs 源码和 localization 文件，交给 LLM 分析内容。
 """
+
 from __future__ import annotations
 
 import json
@@ -11,9 +12,9 @@ from fastapi import APIRouter, WebSocket
 from app.shared.infra.ws_errors import send_ws_error
 from app.shared.prompting import PromptLoader
 from config import get_config
+from llm.stage_events import build_stage_event
 from llm.stream import stream_analysis
 from llm.stream_metadata import build_stream_chunk_payload, resolve_text_display_model
-from llm.stage_events import build_stage_event
 
 router = APIRouter()
 
@@ -53,12 +54,8 @@ def _scan_mod_files(project_root: Path) -> tuple[str, int]:
 
     # .cs 文件（按路径排序，Cards/Relics/Powers 优先）
     cs_files = sorted(
-        (f for f in project_root.rglob("*.cs")
-         if not any(p in _SKIP_DIRS for p in f.parts)),
-        key=lambda f: (
-            0 if any(p in {"Cards", "Relics", "Powers", "Patches"} for p in f.parts) else 1,
-            str(f)
-        )
+        (f for f in project_root.rglob("*.cs") if not any(p in _SKIP_DIRS for p in f.parts)),
+        key=lambda f: (0 if any(p in {"Cards", "Relics", "Powers", "Patches"} for p in f.parts) else 1, str(f)),
     )
 
     for f in cs_files:
@@ -131,7 +128,9 @@ async def ws_analyze_mod(ws: WebSocket):
         file_content, file_count = _scan_mod_files(project_root)
 
         if not file_content.strip():
-            message = _PROMPT_LOADER.render("analyzer.mod_source_missing_message", {"project_root": project_root}).strip()
+            message = _PROMPT_LOADER.render(
+                "analyzer.mod_source_missing_message", {"project_root": project_root}
+            ).strip()
             await send_ws_error(
                 ws,
                 code="source_files_missing",
@@ -154,15 +153,21 @@ async def ws_analyze_mod(ws: WebSocket):
             nonlocal streamed
             if not streamed:
                 streamed = True
-                await _send_stage(ws, "text", "ai_streaming", _PROMPT_LOADER.load("analyzer.mod_streaming_stage").strip())
-            await ws.send_text(json.dumps({
-                "event": "stream",
-                **build_stream_chunk_payload(
-                    chunk,
-                    source="analysis",
-                    model=display_model,
-                ),
-            }))
+                await _send_stage(
+                    ws, "text", "ai_streaming", _PROMPT_LOADER.load("analyzer.mod_streaming_stage").strip()
+                )
+            await ws.send_text(
+                json.dumps(
+                    {
+                        "event": "stream",
+                        **build_stream_chunk_payload(
+                            chunk,
+                            source="analysis",
+                            model=display_model,
+                        ),
+                    }
+                )
+            )
 
         await _send_stage(ws, "text", "ai_running", _PROMPT_LOADER.load("analyzer.mod_running_stage").strip())
         full_text = await stream_analysis(_get_system_prompt(), prompt, llm_cfg, send_chunk)

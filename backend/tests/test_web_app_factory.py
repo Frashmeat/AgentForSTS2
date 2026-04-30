@@ -67,7 +67,9 @@ def test_create_app_for_web_includes_only_web_routes_and_skips_frontend_mount(mo
     monkeypatch.setattr(app_factory, "_include_router", fake_include_router)
     monkeypatch.setattr(app_factory, "_mount_frontend", fake_mount_frontend)
     monkeypatch.setattr(app_factory, "_bootstrap_web_execution_profiles", fake_bootstrap_execution_profiles)
-    monkeypatch.setattr(app_factory, "_register_web_workstation_runtime_lifecycle", fake_register_web_workstation_runtime_lifecycle)
+    monkeypatch.setattr(
+        app_factory, "_register_web_workstation_runtime_lifecycle", fake_register_web_workstation_runtime_lifecycle
+    )
     monkeypatch.setattr(app_factory, "_register_web_queue_worker_lifecycle", fake_register_web_queue_worker_lifecycle)
     monkeypatch.setattr(app_factory, "get_config", lambda: {})
 
@@ -115,7 +117,9 @@ def test_create_app_for_workstation_includes_only_workstation_routes_and_mounts_
     monkeypatch.setattr(app_factory, "_include_router", fake_include_router)
     monkeypatch.setattr(app_factory, "_mount_frontend", fake_mount_frontend)
     monkeypatch.setattr(app_factory, "_bootstrap_web_execution_profiles", fake_bootstrap_execution_profiles)
-    monkeypatch.setattr(app_factory, "_register_web_workstation_runtime_lifecycle", fake_register_web_workstation_runtime_lifecycle)
+    monkeypatch.setattr(
+        app_factory, "_register_web_workstation_runtime_lifecycle", fake_register_web_workstation_runtime_lifecycle
+    )
     monkeypatch.setattr(app_factory, "_register_web_queue_worker_lifecycle", fake_register_web_queue_worker_lifecycle)
     monkeypatch.setattr(app_factory, "get_config", lambda: {})
 
@@ -179,6 +183,9 @@ def test_register_web_workstation_runtime_lifecycle_stores_manager_in_app_and_co
 
 
 def test_resolve_cors_allow_origin_regex_only_enables_loopback_when_requested():
-    assert app_factory._resolve_cors_allow_origin_regex({"allow_loopback_origins": True}) == app_factory._LOOPBACK_CORS_ORIGIN_REGEX
+    assert (
+        app_factory._resolve_cors_allow_origin_regex({"allow_loopback_origins": True})
+        == app_factory._LOOPBACK_CORS_ORIGIN_REGEX
+    )
     assert app_factory._resolve_cors_allow_origin_regex({"allow_loopback_origins": False}) is None
     assert app_factory._resolve_cors_allow_origin_regex({}) is None

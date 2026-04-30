@@ -8,7 +8,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
-
 _LOCK_VERSION = "v2"
 _DEFAULT_DEPLOY_LOCK_LEASE_SECONDS = 300
 _DEFAULT_RECOVERY_CLAIM_LEASE_SECONDS = 30

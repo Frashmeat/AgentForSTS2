@@ -1,4 +1,5 @@
 """Regression tests for review findings fixed on 2026-03-24."""
+
 import asyncio
 import sys
 from pathlib import Path
@@ -17,8 +18,8 @@ if "litellm" not in sys.modules:
     litellm_stub.acompletion = _unexpected_acompletion
     sys.modules["litellm"] = litellm_stub
 
-from routers import batch_workflow
 from app.modules.codegen import api as codegen_api
+from routers import batch_workflow
 
 
 def test_create_asset_prompt_uses_mod_localization_root(tmp_path, monkeypatch):

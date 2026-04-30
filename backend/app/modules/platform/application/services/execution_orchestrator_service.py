@@ -35,7 +35,6 @@ from .server_workspace_lock_service import ServerWorkspaceLockHandle, ServerWork
 from .server_workspace_service import ServerWorkspaceService
 from .uploaded_asset_service import UploadedAssetService
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -362,7 +361,10 @@ class ExecutionOrchestratorService:
             )
         )
         reserved = self.quota_billing_service.reserve(
-            user_id=user_id, execution_id=execution.id, now=now, amount=1,
+            user_id=user_id,
+            execution_id=execution.id,
+            now=now,
+            amount=1,
         )
         if reserved is None:
             logger.info(
@@ -508,7 +510,9 @@ class ExecutionOrchestratorService:
             if self.server_workspace_service is None:
                 raise RuntimeError("server workspace service is not configured")
 
-            workspace = self.server_workspace_service.get_workspace(user_id=user_id, server_project_ref=server_project_ref)
+            workspace = self.server_workspace_service.get_workspace(
+                user_id=user_id, server_project_ref=server_project_ref
+            )
             payload["server_project_name"] = workspace.project_name
             payload["server_workspace_root"] = workspace.workspace_root
             payload["runtime_user_id"] = user_id
@@ -830,17 +834,21 @@ class ExecutionOrchestratorService:
         value = str(credential_ref).strip()
         if not value.startswith(prefix):
             raise ValueError(f"credential_ref is invalid: {credential_ref}")
-        raw_id = value[len(prefix):].strip()
+        raw_id = value[len(prefix) :].strip()
         if not raw_id.isdigit():
             raise ValueError(f"credential_ref is invalid: {credential_ref}")
         return int(raw_id)
 
     def refund_deferred_execution(self, *, execution_id: int, now: datetime) -> None:
         if self.quota_billing_service is None:
-            logger.warning("platform deferred execution refund skipped quota billing unavailable execution_id=%s", execution_id)
+            logger.warning(
+                "platform deferred execution refund skipped quota billing unavailable execution_id=%s", execution_id
+            )
             return
         self.quota_billing_service.refund(execution_id, now, reason="execution_deferred")
-        logger.info("platform deferred execution refunded execution_id=%s reason=%s", execution_id, "execution_deferred")
+        logger.info(
+            "platform deferred execution refunded execution_id=%s reason=%s", execution_id, "execution_deferred"
+        )
 
     def complete_deferred_execution(
         self,
@@ -928,9 +936,7 @@ class ExecutionOrchestratorService:
             expected = (route.provider, route.model, route.credential_ref)
             actual = (latest_execution.provider, latest_execution.model, latest_execution.credential_ref)
             if actual != expected:
-                raise ValueError(
-                    "latest ai_execution route does not match execution routing result"
-                )
+                raise ValueError("latest ai_execution route does not match execution routing result")
 
         binding = StepExecutionBinding(
             agent_backend=route.agent_backend,
@@ -1055,10 +1061,14 @@ class ExecutionOrchestratorService:
                 execution_binding=execution_binding,
             )
         )
-        return results[-1] if results else StepExecutionResult(
-            step_id=execution.step_id,
-            status="failed_system",
-            error_summary="workflow produced no result",
+        return (
+            results[-1]
+            if results
+            else StepExecutionResult(
+                step_id=execution.step_id,
+                status="failed_system",
+                error_summary="workflow produced no result",
+            )
         )
 
     def _apply_result(
@@ -1098,13 +1108,17 @@ class ExecutionOrchestratorService:
                 )
         else:
             execution.status = (
-                AIExecutionStatus.FAILED_BUSINESS if result.status == "failed_business" else AIExecutionStatus.FAILED_SYSTEM
+                AIExecutionStatus.FAILED_BUSINESS
+                if result.status == "failed_business"
+                else AIExecutionStatus.FAILED_SYSTEM
             )
             execution.result_summary = ""
             execution.result_payload = {}
             execution.error_summary = result.error_summary
             execution.error_payload = {"step_id": result.step_id, **dict(result.error_payload or {})}
-            item.status = JobItemStatus.FAILED_BUSINESS if result.status == "failed_business" else JobItemStatus.FAILED_SYSTEM
+            item.status = (
+                JobItemStatus.FAILED_BUSINESS if result.status == "failed_business" else JobItemStatus.FAILED_SYSTEM
+            )
             item.result_summary = ""
             item.error_summary = result.error_summary
             if self.quota_billing_service is not None:

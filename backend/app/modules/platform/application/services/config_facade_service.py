@@ -144,7 +144,6 @@ class ConfigFacadeService:
             reasons.append("请先在设置中填写图像模型。")
         if not str(image_cfg.get("api_key", "")).strip():
             reasons.append("请先在设置中填写图像 API Key。")
-        if provider == "volcengine":
-            if not str(image_cfg.get("api_secret", "")).strip():
-                reasons.append("火山引擎模式下请先填写图像 Secret Key。")
+        if provider == "volcengine" and not str(image_cfg.get("api_secret", "")).strip():
+            reasons.append("火山引擎模式下请先填写图像 Secret Key。")
         return len(reasons) == 0, reasons

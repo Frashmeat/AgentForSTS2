@@ -3,12 +3,12 @@ from __future__ import annotations
 from agents import sts2_guidance
 from app.modules.knowledge.infra.sts2_code_facts_provider import Sts2CodeFactsProvider
 from app.modules.knowledge.infra.sts2_guidance_provider import Sts2GuidanceProvider
+from app.modules.knowledge.infra.sts2_guidance_source import Sts2GuidanceKnowledgeSource
 from app.modules.knowledge.infra.sts2_knowledge_resolver import Sts2KnowledgeResolver
 from app.modules.knowledge.infra.sts2_lookup_provider import Sts2LookupProvider
 from app.modules.planning.application.execution_bundles import ExecutionPlanPreview
-from app.modules.knowledge.infra.sts2_guidance_source import Sts2GuidanceKnowledgeSource
-from app.modules.planning.application.services import PlanningService
 from app.modules.planning.application.plan_validation import PlanValidationResult, ReviewStrictness
+from app.modules.planning.application.services import PlanningService
 from app.modules.planning.domain.models import AssetItemType, ModPlan, PlanItem
 from app.shared.prompting import PromptContextAssembler
 
@@ -71,12 +71,12 @@ __all__ = [
     "PlanItem",
     "PlanValidationResult",
     "ReviewStrictness",
+    "build_execution_plan",
     "build_planner_prompt",
     "find_groups",
     "parse_plan",
     "plan_from_dict",
     "plan_mod",
     "topological_sort",
-    "build_execution_plan",
     "validate_plan",
 ]

@@ -7,7 +7,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from app.modules.platform.contracts.job_commands import CreateJobCommand
 from app.modules.platform.infra.persistence.models import AIExecutionRecord, ChargeStatus, ExecutionChargeRecord
-from app.modules.platform.infra.persistence.repositories.job_query_repository_sqlalchemy import JobQueryRepositorySqlAlchemy
+from app.modules.platform.infra.persistence.repositories.job_query_repository_sqlalchemy import (
+    JobQueryRepositorySqlAlchemy,
+)
 from app.modules.platform.infra.persistence.repositories.job_repository_sqlalchemy import JobRepositorySqlAlchemy
 
 

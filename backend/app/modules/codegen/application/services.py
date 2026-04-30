@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from app.modules.codegen.domain.models import AssetCodegenRequest, AssetGroupRequest, CustomCodegenRequest, ModProjectRequest
+from app.modules.codegen.domain.models import (
+    AssetCodegenRequest,
+    AssetGroupRequest,
+    CustomCodegenRequest,
+    ModProjectRequest,
+)
 
 
 class CodegenService:

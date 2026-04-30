@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.modules.codegen.domain.models import AssetCodegenRequest, AssetGroupRequest, CustomCodegenRequest, ModProjectRequest
+from app.modules.codegen.domain.models import (
+    AssetCodegenRequest,
+    AssetGroupRequest,
+    CustomCodegenRequest,
+    ModProjectRequest,
+)
 from app.shared.contracts.knowledge import KnowledgeQuery
-from app.shared.prompting import PromptContextAssembler
-from app.shared.prompting import PromptLoader
+from app.shared.prompting import PromptContextAssembler, PromptLoader
 
 _ASSET_PROMPT_KEY = "codegen.asset_prompt"
 _CUSTOM_CODE_PROMPT_KEY = "codegen.custom_code_prompt"
@@ -217,7 +221,7 @@ class PromptAssembler:
             else:
                 common_guidance = self.knowledge_source.load_context("asset", asset_type="unknown_future_type")
                 type_guidance_parts.append(
-                    guidance[len(common_guidance):] if guidance.startswith(common_guidance) else guidance
+                    guidance[len(common_guidance) :] if guidance.startswith(common_guidance) else guidance
                 )
         return "\n\n".join(type_guidance_parts)
 

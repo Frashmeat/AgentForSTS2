@@ -7,13 +7,18 @@ from app.modules.codegen.application.artifact_writer import ArtifactWriter
 from app.modules.codegen.application.build_trigger import BuildTrigger
 from app.modules.codegen.application.prompt_assembler import PromptAssembler
 from app.modules.codegen.application.services import CodegenService
-from app.modules.codegen.domain.models import AssetCodegenRequest, AssetGroupRequest, CustomCodegenRequest, ModProjectRequest
+from app.modules.codegen.domain.models import (
+    AssetCodegenRequest,
+    AssetGroupRequest,
+    CustomCodegenRequest,
+    ModProjectRequest,
+)
 from app.modules.knowledge.application.knowledge_facade import build_lookup_context
 from app.modules.knowledge.infra.sts2_code_facts_provider import Sts2CodeFactsProvider
 from app.modules.knowledge.infra.sts2_guidance_provider import Sts2GuidanceProvider
+from app.modules.knowledge.infra.sts2_guidance_source import Sts2GuidanceKnowledgeSource
 from app.modules.knowledge.infra.sts2_knowledge_resolver import Sts2KnowledgeResolver
 from app.modules.knowledge.infra.sts2_lookup_provider import Sts2LookupProvider
-from app.modules.knowledge.infra.sts2_guidance_source import Sts2GuidanceKnowledgeSource
 from app.shared.prompting import PromptContextAssembler, PromptLoader
 from llm.agent_runner import run_agent_task
 
@@ -182,8 +187,8 @@ async def package_mod(
 
 __all__ = [
     "build_and_fix",
-    "build_codegen_prompt_assembler",
     "build_asset_prompt",
+    "build_codegen_prompt_assembler",
     "build_custom_code_prompt",
     "create_asset",
     "create_asset_group",

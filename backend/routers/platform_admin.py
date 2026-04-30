@@ -23,6 +23,7 @@ from app.modules.platform.contracts import (
 from app.modules.platform.infra.persistence.repositories.server_execution_repository_sqlalchemy import (
     ExecutionProfileInUseError,
 )
+
 from ._auth_support import auth_session_scope, require_admin_user
 
 router = APIRouter(prefix="/admin")
@@ -249,7 +250,11 @@ def list_server_credentials(request: Request, execution_profile_id: int | None =
         require_admin_user(request, auth_session)
     with _session_scope(request) as session:
         service = _build_admin_query_service(session, request)
-        return {"items": [item.model_dump() for item in service.list_server_credentials(execution_profile_id=execution_profile_id)]}
+        return {
+            "items": [
+                item.model_dump() for item in service.list_server_credentials(execution_profile_id=execution_profile_id)
+            ]
+        }
 
 
 @router.post("/platform/execution-profiles")

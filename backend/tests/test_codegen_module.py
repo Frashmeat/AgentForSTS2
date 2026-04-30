@@ -10,11 +10,15 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from app.modules.codegen.application.build_trigger import BuildTrigger
 from app.modules.codegen.application.prompt_assembler import PromptAssembler
 from app.modules.codegen.application.services import CodegenService
-from app.modules.codegen.domain.models import AssetCodegenRequest, AssetGroupRequest, CustomCodegenRequest, ModProjectRequest
-from app.shared.contracts.knowledge import KnowledgePacket, KnowledgeQuery
+from app.modules.codegen.domain.models import (
+    AssetCodegenRequest,
+    AssetGroupRequest,
+    CustomCodegenRequest,
+    ModProjectRequest,
+)
 from app.modules.planning.domain.models import PlanItem
-from app.shared.prompting import PromptContextAssembler
-from app.shared.prompting import PromptLoader
+from app.shared.contracts.knowledge import KnowledgePacket, KnowledgeQuery
+from app.shared.prompting import PromptContextAssembler, PromptLoader
 
 _PROMPT_LOADER_SUPPORTED = "prompt_loader" in inspect.signature(PromptAssembler).parameters
 
@@ -142,7 +146,7 @@ def test_custom_code_prompt_keeps_notes_and_skip_build_guidance():
     assert "Use Harmony prefix patch on combat start." in prompt
     assert "Do NOT run dotnet publish" in prompt
     assert "Do not create any image assets." in prompt
-    assert f'`{project_root.name}/` — Godot resource dir' in prompt
+    assert f"`{project_root.name}/` — Godot resource dir" in prompt
 
 
 def test_asset_group_prompt_deduplicates_common_docs_and_keeps_dependency_details():
@@ -283,7 +287,9 @@ def test_asset_prompt_renders_codegen_template_with_runtime_variables():
         def __init__(self) -> None:
             self.calls: list[tuple[str, dict[str, object], str]] = []
 
-        def render(self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None) -> str:
+        def render(
+            self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None
+        ) -> str:
             self.calls.append((template_name, variables, fallback_template or ""))
             return "rendered-asset-prompt"
 
@@ -312,7 +318,10 @@ def test_asset_prompt_renders_codegen_template_with_runtime_variables():
     assert "Legacy knowledge fallback is active in this prompt." in variables["knowledge_warnings"]
     assert variables["zhs_hint"] == "\nSimplified Chinese display name (name_zhs): 燃烧遗物"
     assert variables["img_list"] == "  - images/burn.png"
-    assert variables["build_step"] == "6. Do NOT run dotnet publish — the build will be done later after all assets are created."
+    assert (
+        variables["build_step"]
+        == "6. Do NOT run dotnet publish — the build will be done later after all assets are created."
+    )
     assert fallback_template == ""
 
 
@@ -325,7 +334,9 @@ def test_prompt_assembler_passes_structured_knowledge_without_compat_docs():
         def __init__(self) -> None:
             self.calls: list[tuple[str, dict[str, object], str]] = []
 
-        def render(self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None) -> str:
+        def render(
+            self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None
+        ) -> str:
             self.calls.append((template_name, variables, fallback_template or ""))
             return "rendered-asset-prompt"
 
@@ -359,7 +370,9 @@ def test_prompt_assembler_passes_lookup_without_legacy_lookup_name():
         def __init__(self) -> None:
             self.calls: list[tuple[str, dict[str, object], str]] = []
 
-        def render(self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None) -> str:
+        def render(
+            self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None
+        ) -> str:
             self.calls.append((template_name, variables, fallback_template or ""))
             return "rendered-asset-prompt"
 
@@ -392,7 +405,9 @@ def test_asset_group_prompt_renders_codegen_template_with_prepared_sections():
         def __init__(self) -> None:
             self.calls: list[tuple[str, dict[str, object], str]] = []
 
-        def render(self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None) -> str:
+        def render(
+            self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None
+        ) -> str:
             self.calls.append((template_name, variables, fallback_template or ""))
             return "rendered-group-prompt"
 
@@ -462,7 +477,9 @@ def test_asset_group_prompt_uses_resolver_result_when_available():
         def __init__(self) -> None:
             self.calls: list[tuple[str, dict[str, object], str]] = []
 
-        def render(self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None) -> str:
+        def render(
+            self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None
+        ) -> str:
             self.calls.append((template_name, variables, fallback_template or ""))
             return "rendered-group-prompt"
 
@@ -509,7 +526,9 @@ def test_build_prompt_renders_codegen_template_with_attempt_limit():
         def __init__(self) -> None:
             self.calls: list[tuple[str, dict[str, object], str]] = []
 
-        def render(self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None) -> str:
+        def render(
+            self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None
+        ) -> str:
             self.calls.append((template_name, variables, fallback_template or ""))
             return "rendered-build-prompt"
 
@@ -533,7 +552,9 @@ def test_create_mod_project_prompt_renders_codegen_template_with_project_variabl
         def __init__(self) -> None:
             self.calls: list[tuple[str, dict[str, object], str]] = []
 
-        def render(self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None) -> str:
+        def render(
+            self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None
+        ) -> str:
             self.calls.append((template_name, variables, fallback_template or ""))
             return "rendered-project-prompt"
 
@@ -559,7 +580,9 @@ def test_package_prompt_renders_codegen_template():
         def __init__(self) -> None:
             self.calls: list[tuple[str, dict[str, object], str]] = []
 
-        def render(self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None) -> str:
+        def render(
+            self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None
+        ) -> str:
             self.calls.append((template_name, variables, fallback_template or ""))
             return "rendered-package-prompt"
 
@@ -603,7 +626,9 @@ def test_codegen_service_build_and_fix_uses_template_backed_build_prompt():
         def __init__(self) -> None:
             self.calls: list[tuple[str, dict[str, object], str]] = []
 
-        def render(self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None) -> str:
+        def render(
+            self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None
+        ) -> str:
             self.calls.append((template_name, variables, fallback_template or ""))
             return f"rendered-build:{variables['max_attempts']}"
 
@@ -643,7 +668,9 @@ def test_codegen_service_create_mod_project_uses_template_backed_project_prompt(
         def __init__(self) -> None:
             self.calls: list[tuple[str, dict[str, object], str]] = []
 
-        def render(self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None) -> str:
+        def render(
+            self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None
+        ) -> str:
             self.calls.append((template_name, variables, fallback_template or ""))
             return f"rendered-project:{variables['project_name']}"
 
@@ -684,7 +711,9 @@ def test_codegen_service_package_mod_uses_template_backed_package_prompt():
         def __init__(self) -> None:
             self.calls: list[tuple[str, dict[str, object], str]] = []
 
-        def render(self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None) -> str:
+        def render(
+            self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None
+        ) -> str:
             self.calls.append((template_name, variables, fallback_template or ""))
             return "rendered-package"
 

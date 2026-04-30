@@ -117,11 +117,7 @@ def _collect_component(start_id: str, neighbors: dict[str, set[str]], visited: s
 def _review_bundle(items: list[PlanItem], *, strictness: str, bundle_id: str) -> ExecutionBundle:
     risk_codes: list[str] = []
     coupling_kinds = {item.coupling_kind for item in items}
-    affected_targets = {
-        target
-        for item in items
-        for target in item.affected_targets
-    }
+    affected_targets = {target for item in items for target in item.affected_targets}
     item_types = {item.type for item in items}
     size_threshold = {"efficient": 4, "balanced": 3, "strict": 2}.get(strictness, 3)
 

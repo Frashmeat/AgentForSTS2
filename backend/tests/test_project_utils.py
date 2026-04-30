@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import glob
 import importlib
-import subprocess
 import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -16,12 +16,7 @@ project_utils = importlib.import_module("project_utils")
 
 def test_find_godot_detects_repo_local_install(monkeypatch, tmp_path):
     repo_root = tmp_path
-    exe_path = (
-        repo_root
-        / "godot"
-        / "Godot_v4.5.1-stable_mono_win64"
-        / "Godot_v4.5.1-stable_mono_win64.exe"
-    )
+    exe_path = repo_root / "godot" / "Godot_v4.5.1-stable_mono_win64" / "Godot_v4.5.1-stable_mono_win64.exe"
     exe_path.parent.mkdir(parents=True)
     exe_path.write_text("", encoding="utf-8")
 

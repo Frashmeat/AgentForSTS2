@@ -9,10 +9,10 @@ from fastapi.responses import FileResponse
 from app.modules.platform.application.services import (
     JobApplicationService,
     JobQueryService,
-    PlatformRequestRateLimitExceededError,
     PlatformRequestRateLimiter,
-    ServerQueuedJobClaimService,
+    PlatformRequestRateLimitExceededError,
     ServerExecutionService,
+    ServerQueuedJobClaimService,
     UserCenterService,
 )
 from app.modules.platform.application.services.server_workspace_service import ServerWorkspaceService
@@ -230,7 +230,9 @@ def list_job_events(request: Request, job_id: int, after_id: int | None = None, 
     with auth_session_scope(request) as session:
         user = require_current_user(request, session)
         service = _build_user_center_service(session, request)
-        return [item.as_user_payload() for item in service.list_events(user.user_id, job_id, after_id=after_id, limit=limit)]
+        return [
+            item.as_user_payload() for item in service.list_events(user.user_id, job_id, after_id=after_id, limit=limit)
+        ]
 
 
 @router.get("/artifacts/{artifact_id}/download")

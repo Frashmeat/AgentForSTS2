@@ -24,4 +24,3 @@ class QuotaBalanceRepositorySqlAlchemy(QuotaBalanceRepository):
     def save_balance(self, balance: QuotaBalanceRecord) -> None:
         self.session.add(balance)
         self.session.flush()
-

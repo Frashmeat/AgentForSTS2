@@ -14,9 +14,11 @@ from app.modules.platform.application.services.execution_routing_service import 
 from app.modules.platform.application.services.job_application_service import JobApplicationService
 from app.modules.platform.application.services.quota_billing_service import QuotaBillingService
 from app.modules.platform.application.services.server_credential_cipher import ServerCredentialCipher
-from app.modules.platform.application.services.server_queued_job_claim_service import ServerQueuedJobClaimService
-from app.modules.platform.application.services.server_queued_job_scan_claim_service import ServerQueuedJobScanClaimService
 from app.modules.platform.application.services.server_deploy_target_lock_service import ServerDeployTargetBusyError
+from app.modules.platform.application.services.server_queued_job_claim_service import ServerQueuedJobClaimService
+from app.modules.platform.application.services.server_queued_job_scan_claim_service import (
+    ServerQueuedJobScanClaimService,
+)
 from app.modules.platform.application.services.server_queued_job_worker_service import ServerQueuedJobWorkerService
 from app.modules.platform.application.services.server_workspace_lock_service import ServerWorkspaceBusyError
 from app.modules.platform.application.services.server_workspace_service import ServerWorkspaceService
@@ -91,7 +93,9 @@ class _SucceededWorkerRunner:
                     "server_workspace_root": str(merged.get("server_workspace_root", "")).strip(),
                 }
             elif step.step_type == "code.generate":
-                output_payload = {"text": f"已写入 {str(merged.get('item_name', '')).strip()} 的服务器 custom_code 代码"}
+                output_payload = {
+                    "text": f"已写入 {str(merged.get('item_name', '')).strip()} 的服务器 custom_code 代码"
+                }
             else:
                 item_name = str(merged.get("item_name", "")).strip()
                 project_name = str(merged.get("server_project_name", "")).strip()
@@ -133,7 +137,9 @@ class _DeployBusyWorkerRunner:
                 payload.update(output_payload)
                 continue
             if step.step_type == "code.generate":
-                output_payload = {"text": f"已写入 {str(merged.get('item_name', '')).strip()} 的服务器 custom_code 代码"}
+                output_payload = {
+                    "text": f"已写入 {str(merged.get('item_name', '')).strip()} 的服务器 custom_code 代码"
+                }
                 results.append(
                     StepExecutionResult(
                         step_id=step.step_id,
@@ -173,7 +179,9 @@ class _BusyWorkspaceLockService:
         raise AssertionError("release_write_lock should not be called when acquire fails")
 
 
-def _seed_profile_and_quota(db_session, *, user_ids: list[int], secret: str) -> tuple[ExecutionProfileRecord, ServerCredentialCipher]:
+def _seed_profile_and_quota(
+    db_session, *, user_ids: list[int], secret: str
+) -> tuple[ExecutionProfileRecord, ServerCredentialCipher]:
     cipher = ServerCredentialCipher(secret)
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
@@ -578,9 +586,13 @@ def test_server_queued_job_worker_service_renews_leadership_between_ticks(db_ses
     )
 
     first = worker.run_once()
-    claim_after_first = json.loads((scan_claim_service.storage_root / "queue-scan.claim.json").read_text(encoding="utf-8"))
+    claim_after_first = json.loads(
+        (scan_claim_service.storage_root / "queue-scan.claim.json").read_text(encoding="utf-8")
+    )
     second = worker.run_once()
-    claim_after_second = json.loads((scan_claim_service.storage_root / "queue-scan.claim.json").read_text(encoding="utf-8"))
+    claim_after_second = json.loads(
+        (scan_claim_service.storage_root / "queue-scan.claim.json").read_text(encoding="utf-8")
+    )
 
     assert first.attempted_job_id == first_job.id
     assert second.attempted_job_id == second_job.id

@@ -5,8 +5,9 @@ import secrets
 from datetime import UTC, datetime
 from pathlib import Path
 
-from app.modules.platform.contracts.server_workspace import ServerWorkspaceView
 from project_utils import create_project_from_template
+
+from app.modules.platform.contracts.server_workspace import ServerWorkspaceView
 
 
 class ServerWorkspaceService:
@@ -71,4 +72,4 @@ class ServerWorkspaceService:
         value = str(server_project_ref).strip()
         if not value.startswith(prefix) or len(value) <= len(prefix):
             raise ValueError(f"server workspace ref is invalid: {server_project_ref}")
-        return value[len(prefix):]
+        return value[len(prefix) :]

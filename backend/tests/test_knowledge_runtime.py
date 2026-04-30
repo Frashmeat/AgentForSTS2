@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import io
 import sys
 import threading
-import io
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -66,7 +66,7 @@ def test_download_file_follows_github_style_redirect(tmp_path: Path):
     payload = b"baselib-binary"
 
     class RedirectHandler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:  # noqa: N802
+        def do_GET(self) -> None:
             if self.path == "/releases/download/BaseLib.dll":
                 self.send_response(302)
                 self.send_header("Location", "/github-asset/BaseLib.dll")
@@ -84,7 +84,7 @@ def test_download_file_follows_github_style_redirect(tmp_path: Path):
             self.send_response(404)
             self.end_headers()
 
-        def log_message(self, format: str, *args) -> None:  # noqa: A003
+        def log_message(self, format: str, *args) -> None:
             return
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
@@ -119,7 +119,11 @@ def test_compute_status_marks_stale_when_versions_change(monkeypatch, tmp_path: 
             "knowledge_path": str(game_dir),
             "decompiled_src_path": str(game_dir),
         },
-        "baselib": {"release_tag": "v0.2.7", "knowledge_path": str(baselib_dir), "decompiled_src_path": str(baselib_dir)},
+        "baselib": {
+            "release_tag": "v0.2.7",
+            "knowledge_path": str(baselib_dir),
+            "decompiled_src_path": str(baselib_dir),
+        },
     }
     monkeypatch.setattr(knowledge_runtime, "load_manifest", lambda: manifest)
     monkeypatch.setattr(
@@ -151,7 +155,11 @@ def test_refresh_task_preserves_previous_manifest_when_update_fails(monkeypatch,
         encoding="utf-8",
     )
     monkeypatch.setattr(knowledge_runtime, "KNOWLEDGE_MANIFEST_PATH", manifest_path)
-    monkeypatch.setattr(knowledge_runtime, "load_manifest", lambda: {"game": {"version": "0.2.14"}, "baselib": {"release_tag": "v0.2.7"}})
+    monkeypatch.setattr(
+        knowledge_runtime,
+        "load_manifest",
+        lambda: {"game": {"version": "0.2.14"}, "baselib": {"release_tag": "v0.2.7"}},
+    )
     monkeypatch.setattr(
         knowledge_runtime,
         "_run_refresh_impl",
@@ -269,7 +277,9 @@ def test_missing_manifest_stays_missing_when_only_seed_files_exist(monkeypatch, 
     monkeypatch.setattr(knowledge_runtime, "GAME_KNOWLEDGE_DIR", game_dir)
     monkeypatch.setattr(knowledge_runtime, "BASELIB_KNOWLEDGE_DIR", baselib_dir)
     monkeypatch.setattr(knowledge_runtime, "_has_ilspycmd", lambda: False)
-    monkeypatch.setattr(knowledge_runtime, "get_config", lambda: {"sts2_path": "E:/steam/steamapps/common/Slay the Spire 2"})
+    monkeypatch.setattr(
+        knowledge_runtime, "get_config", lambda: {"sts2_path": "E:/steam/steamapps/common/Slay the Spire 2"}
+    )
 
     status = knowledge_runtime.get_knowledge_status()
 
@@ -303,7 +313,11 @@ def test_manifest_runtime_missing_reports_missing_when_runtime_files_are_absent(
     monkeypatch.setattr(knowledge_runtime, "load_manifest", lambda: manifest)
     monkeypatch.setattr(knowledge_runtime, "GAME_KNOWLEDGE_DIR", game_dir)
     monkeypatch.setattr(knowledge_runtime, "BASELIB_KNOWLEDGE_DIR", baselib_dir)
-    monkeypatch.setattr(knowledge_runtime, "read_current_game_version", lambda _path: {"version": "22340209", "source": "steam_app_manifest"})
+    monkeypatch.setattr(
+        knowledge_runtime,
+        "read_current_game_version",
+        lambda _path: {"version": "22340209", "source": "steam_app_manifest"},
+    )
     monkeypatch.setattr(knowledge_runtime, "fetch_latest_baselib_release", lambda: {"tag_name": "v0.2.7"})
 
     status = knowledge_runtime.get_knowledge_status()
@@ -330,7 +344,9 @@ def test_resolve_ilspycmd_command_prefers_project_copy(monkeypatch, tmp_path: Pa
 
 
 def test_ilspy_search_roots_include_runtime_tools_next_to_runtime_config():
-    assert knowledge_runtime.settings_module.RUNTIME_CONFIG_PATH.parent / "tools" in knowledge_runtime._ILSPY_SEARCH_ROOTS
+    assert (
+        knowledge_runtime.settings_module.RUNTIME_CONFIG_PATH.parent / "tools" in knowledge_runtime._ILSPY_SEARCH_ROOTS
+    )
 
 
 def test_knowledge_pack_upload_activate_and_rollback(monkeypatch, tmp_path: Path):
@@ -356,7 +372,9 @@ def test_knowledge_pack_upload_activate_and_rollback(monkeypatch, tmp_path: Path
         archive.writestr("game/Game.cs", "// active game\n")
         archive.writestr("baselib/BaseLib.decompiled.cs", "// active baselib\n")
 
-    pack = knowledge_runtime.upload_knowledge_pack_zip(archive_path.read_bytes(), file_name="sts2-pack.zip", label="STS2 Pack")
+    pack = knowledge_runtime.upload_knowledge_pack_zip(
+        archive_path.read_bytes(), file_name="sts2-pack.zip", label="STS2 Pack"
+    )
     activated = knowledge_runtime.activate_knowledge_pack(pack["pack_id"])
 
     assert pack["file_count"] == 3
@@ -370,7 +388,9 @@ def test_knowledge_pack_upload_activate_and_rollback(monkeypatch, tmp_path: Path
     ]
     assert activated["active"] is True
     assert activated["files"] == pack["files"]
-    assert (knowledge_runtime.active_resource_knowledge_dir() / "common.md").read_text(encoding="utf-8") == "active common\n"
+    assert (knowledge_runtime.active_resource_knowledge_dir() / "common.md").read_text(
+        encoding="utf-8"
+    ) == "active common\n"
     assert (knowledge_runtime.active_game_knowledge_dir() / "Game.cs").exists()
     assert (knowledge_runtime.active_baselib_knowledge_dir() / "BaseLib.decompiled.cs").exists()
 
@@ -410,8 +430,12 @@ def test_export_current_knowledge_pack_zip_uses_effective_runtime_dirs(monkeypat
     monkeypatch.setattr(knowledge_runtime, "KNOWLEDGE_CACHE_DIR", cache_dir)
     monkeypatch.setattr(knowledge_runtime, "GAME_KNOWLEDGE_SEED_DIR", tmp_path / "missing-game-seed", raising=False)
     monkeypatch.setattr(knowledge_runtime, "GAME_KNOWLEDGE_SEED_FILE", tmp_path / "missing-game.md", raising=False)
-    monkeypatch.setattr(knowledge_runtime, "BASELIB_KNOWLEDGE_SEED_FILE", tmp_path / "missing-baselib.cs", raising=False)
-    monkeypatch.setattr(knowledge_runtime, "RESOURCE_KNOWLEDGE_SEED_DIR", tmp_path / "missing-resource-seed", raising=False)
+    monkeypatch.setattr(
+        knowledge_runtime, "BASELIB_KNOWLEDGE_SEED_FILE", tmp_path / "missing-baselib.cs", raising=False
+    )
+    monkeypatch.setattr(
+        knowledge_runtime, "RESOURCE_KNOWLEDGE_SEED_DIR", tmp_path / "missing-resource-seed", raising=False
+    )
 
     package = knowledge_runtime.export_current_knowledge_pack_zip()
 

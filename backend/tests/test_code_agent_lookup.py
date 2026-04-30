@@ -85,7 +85,10 @@ Fallback {{ ilspy_example_dll_path }}
 
         section = codegen_api._build_lookup_section()
 
-        assert section == "Resource Title\nBaseLib from `I:/runtime/knowledge/baselib/BaseLib.decompiled.cs`\n\nLocal src `I:/fake/sts2-decompiled`"
+        assert (
+            section
+            == "Resource Title\nBaseLib from `I:/runtime/knowledge/baselib/BaseLib.decompiled.cs`\n\nLocal src `I:/fake/sts2-decompiled`"
+        )
     finally:
         for path in sorted(temp_root.rglob("*"), reverse=True):
             if path.is_file():

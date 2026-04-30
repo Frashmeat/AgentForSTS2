@@ -3,8 +3,18 @@ from __future__ import annotations
 from datetime import datetime
 
 from app.modules.platform.contracts import AdjustUserQuotaCommand, UserQuotaView
-from app.modules.platform.domain.repositories import QuotaAccountRepository, QuotaBalanceRepository, UsageLedgerRepository
-from app.modules.platform.infra.persistence.models import LedgerType, QuotaAccountRecord, QuotaAccountStatus, QuotaBalanceRecord, UsageLedgerRecord
+from app.modules.platform.domain.repositories import (
+    QuotaAccountRepository,
+    QuotaBalanceRepository,
+    UsageLedgerRepository,
+)
+from app.modules.platform.infra.persistence.models import (
+    LedgerType,
+    QuotaAccountRecord,
+    QuotaAccountStatus,
+    QuotaBalanceRecord,
+    UsageLedgerRecord,
+)
 
 
 class AdminQuotaCommandService:
@@ -97,4 +107,3 @@ class AdminQuotaCommandService:
             )
         )
         return self._view(balance)
-

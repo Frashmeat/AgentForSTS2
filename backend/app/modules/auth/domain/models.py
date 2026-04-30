@@ -15,7 +15,7 @@ class UserAccount:
     is_admin: bool = False
     email_verified_at: datetime | None = None
 
-    def mark_email_verified(self, verified_at: datetime) -> "UserAccount":
+    def mark_email_verified(self, verified_at: datetime) -> UserAccount:
         return replace(
             self,
             email_verified=True,
@@ -40,5 +40,5 @@ class EmailVerificationTicket:
     def is_expired(self, now: datetime) -> bool:
         return now >= self.expires_at
 
-    def mark_consumed(self, consumed_at: datetime) -> "EmailVerificationTicket":
+    def mark_consumed(self, consumed_at: datetime) -> EmailVerificationTicket:
         return replace(self, consumed_at=consumed_at)

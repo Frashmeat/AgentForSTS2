@@ -21,13 +21,7 @@ def _extract_text(event: dict) -> str:
             elif block.get("type") == "tool_use":
                 name = block.get("name", "Tool")
                 inp = block.get("input", {})
-                detail = (
-                    inp.get("command")
-                    or inp.get("file_path")
-                    or inp.get("pattern")
-                    or inp.get("prompt")
-                    or ""
-                )
+                detail = inp.get("command") or inp.get("file_path") or inp.get("pattern") or inp.get("prompt") or ""
                 parts.append(f"[{name}] {detail}\n" if detail else f"[{name}]\n")
         return "".join(parts)
     if event.get("type") == "result":
@@ -150,7 +144,8 @@ async def run(prompt: str, project_root: Path, llm_cfg: dict, stream_callback=No
         "--print",
         "--verbose",
         "--dangerously-skip-permissions",
-        "--output-format", "stream-json",
+        "--output-format",
+        "stream-json",
     ]
     if model:
         cmd.extend(["--model", model])

@@ -49,7 +49,9 @@ from app.modules.platform.infra.persistence.repositories.job_repository_sqlalche
 from app.modules.platform.infra.persistence.repositories.quota_account_repository_sqlalchemy import (
     QuotaAccountRepositorySqlAlchemy,
 )
-from app.modules.platform.infra.persistence.repositories.usage_ledger_repository_sqlalchemy import UsageLedgerRepositorySqlAlchemy
+from app.modules.platform.infra.persistence.repositories.usage_ledger_repository_sqlalchemy import (
+    UsageLedgerRepositorySqlAlchemy,
+)
 from app.modules.platform.runner.workflow_registry import PlatformWorkflowStep
 
 
@@ -161,7 +163,10 @@ class _SupportedServerRegistry:
                 )
             ]
         if (job_type, item_type) == ("batch_generate", "card_fullscreen"):
-            if str(payload.get("uploaded_asset_ref", "")).strip() and str(payload.get("server_project_ref", "")).strip():
+            if (
+                str(payload.get("uploaded_asset_ref", "")).strip()
+                and str(payload.get("server_project_ref", "")).strip()
+            ):
                 return [
                     PlatformWorkflowStep(
                         step_type="asset.generate",
@@ -216,7 +221,10 @@ class _SupportedServerRegistry:
                 )
             ]
         if (job_type, item_type) == ("single_generate", "card_fullscreen"):
-            if str(payload.get("uploaded_asset_ref", "")).strip() and str(payload.get("server_project_ref", "")).strip():
+            if (
+                str(payload.get("uploaded_asset_ref", "")).strip()
+                and str(payload.get("server_project_ref", "")).strip()
+            ):
                 return [
                     PlatformWorkflowStep(
                         step_type="asset.generate",
@@ -276,7 +284,9 @@ class _SucceededRunner:
                     "server_workspace_root": str(merged.get("server_workspace_root", "")).strip(),
                 }
             elif step.step_type == "code.generate":
-                output_payload = {"text": f"已写入 {str(merged.get('item_name', '')).strip()} 的服务器 custom_code 代码"}
+                output_payload = {
+                    "text": f"已写入 {str(merged.get('item_name', '')).strip()} 的服务器 custom_code 代码"
+                }
             elif step.step_type == "asset.generate":
                 output_payload = {"text": f"已写入 {str(merged.get('item_name', '')).strip()} 的服务器资产代码"}
             elif step.step_type == "build.project":
@@ -296,7 +306,9 @@ class _SucceededRunner:
                     ],
                 }
             elif step.step_type == "single.asset.plan":
-                asset_type = str(step.input_payload.get("asset_type") or base_request.input_payload.get("asset_type", "")).strip()
+                asset_type = str(
+                    step.input_payload.get("asset_type") or base_request.input_payload.get("asset_type", "")
+                ).strip()
                 if asset_type == "card":
                     text = "已生成服务器卡牌实现方案"
                 elif asset_type == "card_fullscreen":
@@ -345,7 +357,9 @@ class _SwitchableDeployTargetRunner:
                 payload.update(output_payload)
                 continue
             if step.step_type == "code.generate":
-                output_payload = {"text": f"已写入 {str(merged.get('item_name', '')).strip()} 的服务器 custom_code 代码"}
+                output_payload = {
+                    "text": f"已写入 {str(merged.get('item_name', '')).strip()} 的服务器 custom_code 代码"
+                }
                 results.append(
                     StepExecutionResult(
                         step_id=step.step_id,
@@ -2633,7 +2647,9 @@ def test_job_application_service_requires_server_project_ref_for_batch_custom_co
 
 
 def test_job_application_service_requires_server_project_ref_for_single_card_fullscreen_with_uploaded_asset(db_session):
-    uploaded_asset_service = UploadedAssetService(storage_root=Path(db_session.bind.url.database).parent / "platform-upload-assets")
+    uploaded_asset_service = UploadedAssetService(
+        storage_root=Path(db_session.bind.url.database).parent / "platform-upload-assets"
+    )
     uploaded = uploaded_asset_service.create_asset(
         user_id=1001,
         file_name="fullscreen.png",
@@ -2669,13 +2685,18 @@ def test_job_application_service_requires_server_project_ref_for_single_card_ful
             ),
         )
     except ValueError as error:
-        assert str(error) == "platform job payload for single_generate/card_fullscreen requires server_project_ref when uploaded_asset_ref is present"
+        assert (
+            str(error)
+            == "platform job payload for single_generate/card_fullscreen requires server_project_ref when uploaded_asset_ref is present"
+        )
     else:
         raise AssertionError("expected ValueError when card_fullscreen uploaded asset has no server_project_ref")
 
 
 def test_job_application_service_requires_server_project_ref_for_batch_card_fullscreen_with_uploaded_asset(db_session):
-    uploaded_asset_service = UploadedAssetService(storage_root=Path(db_session.bind.url.database).parent / "platform-upload-assets")
+    uploaded_asset_service = UploadedAssetService(
+        storage_root=Path(db_session.bind.url.database).parent / "platform-upload-assets"
+    )
     uploaded = uploaded_asset_service.create_asset(
         user_id=1001,
         file_name="fullscreen.png",
@@ -2711,7 +2732,10 @@ def test_job_application_service_requires_server_project_ref_for_batch_card_full
             ),
         )
     except ValueError as error:
-        assert str(error) == "platform job payload for batch_generate/card_fullscreen requires server_project_ref when uploaded_asset_ref is present"
+        assert (
+            str(error)
+            == "platform job payload for batch_generate/card_fullscreen requires server_project_ref when uploaded_asset_ref is present"
+        )
     else:
         raise AssertionError("expected ValueError when batch card_fullscreen uploaded asset has no server_project_ref")
 

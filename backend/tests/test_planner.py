@@ -1,4 +1,5 @@
 """Tests for planner.py — plan parsing, topological sort, prompt construction."""
+
 import sys
 import types
 from pathlib import Path
@@ -9,8 +10,7 @@ sys.modules.setdefault(
     types.SimpleNamespace(complete_text=lambda *args, **kwargs: None),
 )
 
-from app.modules.planning.api import parse_plan, topological_sort, build_planner_prompt, PlanItem
-
+from app.modules.planning.api import PlanItem, build_planner_prompt, parse_plan, topological_sort
 
 # ── _parse_plan ───────────────────────────────────────────────────────────────
 
@@ -137,10 +137,17 @@ def test_parse_plan_defaults_gracefully():
 
 # ── topological_sort ──────────────────────────────────────────────────────────
 
+
 def _make_item(id_, depends_on=None):
     return PlanItem(
-        id=id_, type="card", name=id_, description="", implementation_notes="",
-        needs_image=False, image_description="", depends_on=depends_on or [],
+        id=id_,
+        type="card",
+        name=id_,
+        description="",
+        implementation_notes="",
+        needs_image=False,
+        image_description="",
+        depends_on=depends_on or [],
     )
 
 
@@ -178,6 +185,7 @@ def test_topo_sort_missing_dep_ignored():
 
 
 # ── _build_planner_prompt ─────────────────────────────────────────────────────
+
 
 def test_planner_prompt_contains_guidance():
     prompt = build_planner_prompt("make a relic that triggers on attack")

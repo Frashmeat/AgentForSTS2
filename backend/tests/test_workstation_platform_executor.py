@@ -60,7 +60,9 @@ class LegacyFakeRunner:
         ]
 
 
-def _dispatch_request(job_type: str = "single_generate", item_type: str = "relic") -> WorkstationExecutionDispatchRequest:
+def _dispatch_request(
+    job_type: str = "single_generate", item_type: str = "relic"
+) -> WorkstationExecutionDispatchRequest:
     return WorkstationExecutionDispatchRequest.model_validate(
         {
             "execution_id": 2203,

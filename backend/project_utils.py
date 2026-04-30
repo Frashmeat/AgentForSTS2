@@ -4,6 +4,7 @@ STS2 Mod 项目初始化工具
 用 S01_IronStrike 作为模板，纯 Python 复制 + 重命名，不需要 Claude。
 每个新项目节省 3-7 分钟初始化时间。
 """
+
 from __future__ import annotations
 
 import concurrent.futures
@@ -22,7 +23,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 _GODOT_DIRNAME = "Godot_v4.5.1-stable_mono_win64"
 _GODOT_EXE_NAME = f"{_GODOT_DIRNAME}.exe"
 _GODOT_PATTERN = "Godot_v4.5.1*mono*win64.exe"
-_DETECT_TASKS: dict[str, "_DetectPathsTask"] = {}
+_DETECT_TASKS: dict[str, _DetectPathsTask] = {}
 _DETECT_TASKS_LOCK = threading.Lock()
 _MAX_RETAINED_DETECT_TASKS = 10
 _DETECT_TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
@@ -30,11 +31,7 @@ _DETECT_TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
 
 def _prune_detect_tasks_locked() -> None:
     """剔除过量的已结束任务，避免 _DETECT_TASKS 无界增长。调用方必须持有 _DETECT_TASKS_LOCK。"""
-    terminal_ids = [
-        task_id
-        for task_id, task in _DETECT_TASKS.items()
-        if task.status in _DETECT_TERMINAL_STATUSES
-    ]
+    terminal_ids = [task_id for task_id, task in _DETECT_TASKS.items() if task.status in _DETECT_TERMINAL_STATUSES]
     excess = len(terminal_ids) - _MAX_RETAINED_DETECT_TASKS
     if excess > 0:
         # dict 保持插入顺序；最早的 terminal task 先剔除
@@ -43,7 +40,7 @@ def _prune_detect_tasks_locked() -> None:
 
 
 class _DetectPathsProgressReporter:
-    def __init__(self, task: "_DetectPathsTask"):
+    def __init__(self, task: _DetectPathsTask):
         self._task = task
 
     def set_step(self, step: str) -> None:
@@ -234,12 +231,14 @@ def _detect_godot_with_progress(reporter: _DetectPathsProgressReporter) -> None:
 
 # ── local.props 自动生成 ──────────────────────────────────────────────────────
 
+
 def ensure_local_props(project_root: Path) -> bool:
     """
     根据当前配置重写 project_root 下的 local.props。
     返回 True 表示同步成功；False 表示配置不完整无法生成。
     """
     from config import get_config
+
     props_path = project_root / "local.props"
     managed_values = _resolve_local_props_values(get_config())
     if not managed_values:
@@ -287,6 +286,7 @@ def _derive_steam_library_path(sts2_path: str) -> str:
 
 
 # ── 路径自动检测 ───────────────────────────────────────────────────────────────
+
 
 def detect_paths() -> dict:
     """
@@ -344,6 +344,7 @@ def _find_sts2_via_registry(reporter: _DetectPathsProgressReporter | None = None
     """通过 Steam 注册表找 STS2 安装路径（Windows）。"""
     try:
         import winreg
+
         # 找 Steam 安装路径
         for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
             for sub in (r"SOFTWARE\Valve\Steam", r"SOFTWARE\WOW6432Node\Valve\Steam"):
@@ -376,7 +377,7 @@ def _find_sts2_in_common_paths(reporter: _DetectPathsProgressReporter | None = N
         Path(cfg_path) if cfg_path else None,
         Path("C:/Program Files (x86)/Steam"),
         Path("C:/Program Files/Steam"),
-        Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")) / "Steam",
+        Path(os.environ.get("PROGRAMFILES(X86)", "C:/Program Files (x86)")) / "Steam",
         Path("D:/Steam"),
         Path("E:/Steam"),
         Path("E:/steam"),
@@ -406,6 +407,7 @@ def _find_sts2_in_common_paths(reporter: _DetectPathsProgressReporter | None = N
 def _search_steam_libraries(steam_root: Path, reporter: _DetectPathsProgressReporter | None = None) -> Path | None:
     """在 Steam 安装目录及其所有库路径中搜索 STS2。"""
     import re
+
     target = "Slay the Spire 2"
 
     if reporter is not None and reporter.is_cancelled():
@@ -438,6 +440,7 @@ def _search_steam_libraries(steam_root: Path, reporter: _DetectPathsProgressRepo
 def _find_godot(reporter: _DetectPathsProgressReporter | None = None) -> tuple[str | None, str]:
     """搜索 Godot 4.5.1 Mono 可执行文件。"""
     import glob as _glob
+
     from config import get_config
 
     cfg_path = str(get_config().get("godot_exe_path", "")).strip()
@@ -482,6 +485,7 @@ def _find_godot(reporter: _DetectPathsProgressReporter | None = None) -> tuple[s
 
     # 也搜索 PATH
     import shutil as _shutil
+
     for name in ("godot", "Godot"):
         if reporter is not None and reporter.is_cancelled():
             return None, "检测已取消"
@@ -612,6 +616,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {{
 def _ps_single_quote(value: str) -> str:
     return value.replace("'", "''")
 
+
 # ── 模板源 ─────────────────────────────────────────────────────────────────
 
 # 默认模板位于仓库内 mod_template/ 目录，可通过 config.json 的 mod_template_path 覆盖
@@ -622,6 +627,7 @@ TEMPLATE_NAME = "ModTemplate"
 def _get_template_source() -> Path:
     """返回模板路径：优先 config 里的自定义路径，其次仓库内默认路径。"""
     from config import get_config
+
     cfg_path = get_config().get("mod_template_path", "")
     if cfg_path:
         p = Path(cfg_path)
@@ -629,10 +635,19 @@ def _get_template_source() -> Path:
             return p
     return _DEFAULT_TEMPLATE
 
+
 # 复制时跳过的目录/文件（在相对路径的任意层级出现即跳过）
 _SKIP_DIRS = {
-    ".git", "packages", "content", "bin", "obj", ".godot",
-    "Cards", "Relics", "Powers", "Patches",   # 资产源码，每项目不同
+    ".git",
+    "packages",
+    "content",
+    "bin",
+    "obj",
+    ".godot",
+    "Cards",
+    "Relics",
+    "Powers",
+    "Patches",  # 资产源码，每项目不同
 }
 _SKIP_SUFFIXES = {".log", ".uid", ".import"}
 _SKIP_EXACT_FILES = {"Alchyr.Sts2.Templates.csproj", "README.md"}
@@ -651,9 +666,7 @@ def _should_skip(rel: Path) -> bool:
     if "images" in parts_list and len(parts_list) > parts_list.index("images") + 1:
         return True
     # 跳过 localization/ 下的 .json（由 Agent 生成）
-    if "localization" in parts_list and rel.suffix == ".json":
-        return True
-    return False
+    return "localization" in parts_list and rel.suffix == ".json"
 
 
 def create_project_from_template(project_name: str, target_dir: Path) -> Path:

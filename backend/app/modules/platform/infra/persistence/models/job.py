@@ -46,7 +46,7 @@ class JobRecord(TimestampMixin, Base):
     cancel_requested_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deleted_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
     archived_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    items: Mapped[list["JobItemRecord"]] = relationship(
+    items: Mapped[list[JobItemRecord]] = relationship(
         "JobItemRecord",
         back_populates="job",
         cascade="all, delete-orphan",

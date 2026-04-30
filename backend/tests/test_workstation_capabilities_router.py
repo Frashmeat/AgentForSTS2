@@ -13,8 +13,8 @@ pytest.importorskip("fastapi.testclient")
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.shared.infra.config.settings import Settings
 from app.modules.knowledge.infra import knowledge_runtime
+from app.shared.infra.config.settings import Settings
 from routers.workstation_capabilities import router
 
 

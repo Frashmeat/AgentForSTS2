@@ -13,10 +13,13 @@ pytest.importorskip("fastapi.testclient")
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.modules.platform.contracts.workstation_execution import (
+    WorkstationExecutionEvent,
+    WorkstationExecutionPollResult,
+)
 from app.shared.infra.config.settings import Settings
 from routers import WORKSTATION_ROUTER_MODULES
 from routers.workstation_platform import router
-from app.modules.platform.contracts.workstation_execution import WorkstationExecutionEvent, WorkstationExecutionPollResult
 
 
 class _FakeWorkstationExecutor:

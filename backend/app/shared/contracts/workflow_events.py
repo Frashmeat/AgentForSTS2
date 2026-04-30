@@ -1,6 +1,5 @@
 from ..kernel.events import WorkflowEvent
 
-
 WORKFLOW_EVENT_STAGES = (
     "prompt_preview",
     "image_ready",

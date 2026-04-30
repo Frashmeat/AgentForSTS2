@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 
-
 USER_CANCELLED_CODE = "user_cancelled"
 CLIENT_DISCONNECTED_CODE = "client_disconnected"
 

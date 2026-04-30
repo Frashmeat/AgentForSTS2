@@ -6,7 +6,12 @@ from sqlalchemy.orm import Session
 
 from app.modules.platform.contracts import UserQuotaView
 from app.modules.platform.domain.repositories import QuotaQueryRepository
-from app.modules.platform.infra.persistence.models import QuotaAccountRecord, QuotaBalanceRecord, QuotaBucketRecord, QuotaBucketType
+from app.modules.platform.infra.persistence.models import (
+    QuotaAccountRecord,
+    QuotaBalanceRecord,
+    QuotaBucketRecord,
+    QuotaBucketType,
+)
 
 
 def _remaining(total_limit: int, used_amount: int, refunded_amount: int, adjusted_amount: int) -> int:
@@ -48,7 +53,9 @@ class QuotaQueryRepositorySqlAlchemy(QuotaQueryRepository):
         daily = next((bucket for bucket in buckets if bucket.bucket_type == QuotaBucketType.DAILY), None)
         legacy = daily or next((bucket for bucket in buckets if bucket.bucket_type == QuotaBucketType.WEEKLY), None)
         if legacy is None:
-            return UserQuotaView(status=account.status.value if hasattr(account.status, "value") else str(account.status))
+            return UserQuotaView(
+                status=account.status.value if hasattr(account.status, "value") else str(account.status)
+            )
         return UserQuotaView(
             total_limit=legacy.quota_limit,
             used_amount=legacy.used_amount,

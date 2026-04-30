@@ -23,4 +23,7 @@ class UserPlatformPreferenceRecord(TimestampMixin, Base):
     )
 
 
-Index("ix_user_platform_preferences_default_execution_profile_id", UserPlatformPreferenceRecord.default_execution_profile_id)
+Index(
+    "ix_user_platform_preferences_default_execution_profile_id",
+    UserPlatformPreferenceRecord.default_execution_profile_id,
+)

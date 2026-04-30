@@ -4,7 +4,6 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-
 _SKIP_DIRS = {"obj", "ref", ".godot"}
 
 
@@ -15,7 +14,8 @@ def find_latest_output_files(project_root: Path) -> list[Path]:
         return []
     for suffix in (".dll", ".pck"):
         candidates = [
-            file for file in bin_dir.rglob(f"*{suffix}")
+            file
+            for file in bin_dir.rglob(f"*{suffix}")
             if not any(part in _SKIP_DIRS for part in file.relative_to(bin_dir).parts)
         ]
         if candidates:
@@ -30,7 +30,9 @@ class DeployOutputsResult:
     file_paths: list[Path]
 
 
-def deploy_latest_output_files(project_root: Path, mods_root: Path, *, project_name: str | None = None) -> DeployOutputsResult:
+def deploy_latest_output_files(
+    project_root: Path, mods_root: Path, *, project_name: str | None = None
+) -> DeployOutputsResult:
     target_name = str(project_name).strip() or project_root.name
     target_dir = mods_root / target_name
     output_files = find_latest_output_files(project_root)

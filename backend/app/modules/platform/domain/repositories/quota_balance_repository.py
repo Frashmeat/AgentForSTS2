@@ -17,4 +17,3 @@ class QuotaBalanceRepository(ABC):
 
     @abstractmethod
     def save_balance(self, balance: QuotaBalanceRecord) -> None: ...
-

@@ -1,0 +1,7 @@
+# 开发期工具：lint / format。
+# 不进生产镜像，仅在容器里通过 tools/docker/workstation.ps1 lint 调用。
+# 主依赖见 requirements.txt。
+-r requirements.txt
+
+ruff==0.8.6
+black==24.10.0

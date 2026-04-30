@@ -8,7 +8,6 @@ from .context import WorkflowContext
 from .policies import LinearExecutionPolicy
 from .step import WorkflowStep
 
-
 EventPublisher = Callable[[WorkflowEvent], Awaitable[None]]
 
 
@@ -35,7 +34,9 @@ class WorkflowEngine:
                     result = await step.handler(context)
                 context.set(step.name, result)
                 if self.publisher is not None:
-                    await self.publisher(WorkflowEvent(stage=step.name, payload={"status": "completed", "result": result}))
+                    await self.publisher(
+                        WorkflowEvent(stage=step.name, payload={"status": "completed", "result": result})
+                    )
             except Exception as exc:
                 if self.publisher is not None:
                     await self.publisher(WorkflowEvent(stage="error", payload={"step": step.name, "message": str(exc)}))

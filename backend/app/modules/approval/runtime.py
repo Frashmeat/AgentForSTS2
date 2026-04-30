@@ -42,7 +42,7 @@ def _configured_allowed_commands() -> list[list[str]]:
             if raw_command:
                 normalized.append([raw_command])
             continue
-        if isinstance(raw_command, (list, tuple)):
+        if isinstance(raw_command, list | tuple):
             command = [str(part) for part in raw_command if str(part)]
             if command:
                 normalized.append(command)

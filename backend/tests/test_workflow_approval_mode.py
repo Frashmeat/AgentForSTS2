@@ -1,4 +1,5 @@
 """Tests for single-asset approval-first workflow helpers."""
+
 import json
 import sys
 import types
@@ -13,15 +14,19 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # litellm 等保留 stub 是为了避免真发外部请求；这些 setdefault 只在真模块未安装时才占位。
 sys.modules.setdefault("litellm", types.SimpleNamespace(acompletion=None))
 sys.modules.setdefault("image.generator", types.SimpleNamespace(generate_images=lambda *args, **kwargs: None))
-sys.modules.setdefault("image.postprocess", types.SimpleNamespace(PROFILES={}, process_image=lambda *_args, **_kwargs: []))
-sys.modules.setdefault("image.prompt_adapter", types.SimpleNamespace(adapt_prompt=lambda *args, **kwargs: None, ImageProvider=str))
+sys.modules.setdefault(
+    "image.postprocess", types.SimpleNamespace(PROFILES={}, process_image=lambda *_args, **_kwargs: [])
+)
+sys.modules.setdefault(
+    "image.prompt_adapter", types.SimpleNamespace(adapt_prompt=lambda *args, **kwargs: None, ImageProvider=str)
+)
 
 from app.modules.approval.application.ports import ActionResult
-from app.modules.approval.runtime import reset_approval_runtime
 from app.modules.approval.application.services import ApprovalService
 from app.modules.approval.infra.in_memory_store import InMemoryApprovalStore
-from routers import workflow
+from app.modules.approval.runtime import reset_approval_runtime
 from app.modules.workflow.application.step import WorkflowStep
+from routers import workflow
 
 
 @pytest.fixture(autouse=True)
@@ -171,9 +176,7 @@ class SequencedWs:
 
 
 def _assert_approval_precedes_agent_start(messages: list[dict]) -> None:
-    approval_index = next(
-        idx for idx, message in enumerate(messages) if message["event"] == "approval_pending"
-    )
+    approval_index = next(idx for idx, message in enumerate(messages) if message["event"] == "approval_pending")
     agent_stage_index = next(
         idx
         for idx, message in enumerate(messages)
@@ -194,7 +197,9 @@ def _assert_approval_precedes_agent_start(messages: list[dict]) -> None:
 async def test_custom_code_approval_first_defers_agent_events_until_approve_all(monkeypatch, tmp_path):
     ws = SequencedWs([{"action": "approve_all"}])
 
-    monkeypatch.setattr(workflow, "get_config", lambda: {"llm": {"agent_backend": "codex", "execution_mode": "approval_first"}})
+    monkeypatch.setattr(
+        workflow, "get_config", lambda: {"llm": {"agent_backend": "codex", "execution_mode": "approval_first"}}
+    )
 
     async def fake_plan_approval_requests(description: str, llm_cfg: dict, project_root: Path):
         assert description == "描述一个遗物"
@@ -230,7 +235,9 @@ async def test_provided_image_approval_first_defers_agent_events_until_approve_a
 
     ws = SequencedWs([{"action": "approve_all"}])
 
-    monkeypatch.setattr(workflow, "get_config", lambda: {"llm": {"agent_backend": "codex", "execution_mode": "approval_first"}})
+    monkeypatch.setattr(
+        workflow, "get_config", lambda: {"llm": {"agent_backend": "codex", "execution_mode": "approval_first"}}
+    )
 
     async def fake_plan_approval_requests(description: str, llm_cfg: dict, project_root: Path):
         assert description == "描述一个遗物"

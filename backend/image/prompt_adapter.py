@@ -2,9 +2,9 @@
 Prompt Adapter：将用户的卡牌/遗物设计描述翻译为各图生模型专用 prompt。
 通过 LLM 调用实现，不硬编码翻译规则。
 """
+
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Literal
 
 import litellm
@@ -23,15 +23,15 @@ _ADAPT_PROMPT_KEY = "image.adapt_prompt"
 # 内容审核敏感词替换表（针对即梦/火山引擎等国内 API 的限制）
 _CONTENT_SAFE_REPLACEMENTS: list[tuple[str, str]] = [
     # 爆炸物相关
-    (r'\bbomb\b', 'orb'),
-    (r'\bexplosive\b', 'charged'),
-    (r'\bexplosion\b', 'burst'),
-    (r'\bdetonate\b', 'release'),
-    (r'\bblast\b', 'surge'),
+    (r"\bbomb\b", "orb"),
+    (r"\bexplosive\b", "charged"),
+    (r"\bexplosion\b", "burst"),
+    (r"\bdetonate\b", "release"),
+    (r"\bblast\b", "surge"),
     # 武器相关（部分 API 限制）
-    (r'\bgun\b', 'wand'),
-    (r'\bpistol\b', 'rod'),
-    (r'\brifle\b', 'staff'),
+    (r"\bgun\b", "wand"),
+    (r"\bpistol\b", "rod"),
+    (r"\brifle\b", "staff"),
 ]
 
 
@@ -77,6 +77,7 @@ STYLE_GUIDES: dict[ImageProvider, dict] = _build_style_guides()
 def _sanitize_for_content_policy(text: str) -> str:
     """替换可能触发内容审核的词汇（主要针对国内图生 API）。"""
     import re
+
     result = text
     for pattern, replacement in _CONTENT_SAFE_REPLACEMENTS:
         result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
@@ -182,27 +183,41 @@ async def _adapt_via_litellm(
 def _fallback_prompt(description: str, provider: ImageProvider, needs_transparent_bg: bool) -> dict:
     """LLM 不可用时的模板回退：只取外观关键词，去掉数值/机制。"""
     import re
-    # 粗略去掉数字相关的游戏机制描述（"8点伤害"、"deal 8 damage" 等）
-    visual = re.sub(r'[\d]+\s*[点块次张回]?[\w]*(?:伤害|攻击|防御|血|费|damage|block|cost|hp)\w*', '', description, flags=re.IGNORECASE)
-    visual = re.sub(r'(?:造成|deal|gain|lose|add|remove)\s+[\d\w]+', '', visual, flags=re.IGNORECASE)
-    # 清理第一步去掉数字后残留的孤立动词（如 "造成，" "获得，"）
-    visual = re.sub(r'(?:造成|获得|失去|消耗|附加|增加|减少)[，,。\s]*', '', visual)
-    visual = re.sub(r'升级后[\w，。,. ]+', '', visual)
-    visual = re.sub(r'[，,]{2,}', '，', visual)  # 多余连续逗号
-    visual = re.sub(r'\s{2,}', ' ', visual).strip(' ，,.')
 
-    bg_suffix = _load_prompt_resource(
-        "image.fallback_prompt_en_transparent_suffix",
+    # 粗略去掉数字相关的游戏机制描述（"8点伤害"、"deal 8 damage" 等）
+    visual = re.sub(
+        r"[\d]+\s*[点块次张回]?[\w]*(?:伤害|攻击|防御|血|费|damage|block|cost|hp)\w*",
         "",
-    ) if needs_transparent_bg else ""
+        description,
+        flags=re.IGNORECASE,
+    )
+    visual = re.sub(r"(?:造成|deal|gain|lose|add|remove)\s+[\d\w]+", "", visual, flags=re.IGNORECASE)
+    # 清理第一步去掉数字后残留的孤立动词（如 "造成，" "获得，"）
+    visual = re.sub(r"(?:造成|获得|失去|消耗|附加|增加|减少)[，,。\s]*", "", visual)
+    visual = re.sub(r"升级后[\w，。,. ]+", "", visual)
+    visual = re.sub(r"[，,]{2,}", "，", visual)  # 多余连续逗号
+    visual = re.sub(r"\s{2,}", " ", visual).strip(" ，,.")
+
+    bg_suffix = (
+        _load_prompt_resource(
+            "image.fallback_prompt_en_transparent_suffix",
+            "",
+        )
+        if needs_transparent_bg
+        else ""
+    )
     if provider in ("flux2", "sdxl"):
         prompt = f"{visual}{_load_prompt_resource('image.fallback_prompt_en_suffix', '')}{bg_suffix}"
         neg = _load_prompt_resource("image.fallback_sdxl_negative_prompt", "") if provider == "sdxl" else None
     else:
-        bg_cn = _load_prompt_resource(
-            "image.fallback_prompt_cn_transparent_suffix",
-            "",
-        ) if needs_transparent_bg else ""
+        bg_cn = (
+            _load_prompt_resource(
+                "image.fallback_prompt_cn_transparent_suffix",
+                "",
+            )
+            if needs_transparent_bg
+            else ""
+        )
         prompt = f"{visual}{_load_prompt_resource('image.fallback_prompt_cn_suffix', '')}{bg_cn}"
         neg = None
     return {"prompt": prompt, "negative_prompt": neg}

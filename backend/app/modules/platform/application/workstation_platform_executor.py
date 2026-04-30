@@ -19,7 +19,6 @@ from app.modules.platform.runner.step_dispatcher import StepDispatcher
 from app.modules.platform.runner.workflow_registry import PlatformWorkflowRegistry, PlatformWorkflowStep
 from app.modules.platform.runner.workflow_runner import WorkflowRunner
 
-
 logger = logging.getLogger(__name__)
 _SOURCE_PACKAGE_SKIP_DIRS = {"bin", "obj", ".godot", ".git"}
 WorkstationEventSink = Callable[[WorkstationExecutionEvent], None]
@@ -75,10 +74,14 @@ class WorkstationPlatformExecutor:
                     event_publisher=publish_event,
                 )
             )
-            final_result = results[-1] if results else StepExecutionResult(
-                step_id="workflow.dispatch",
-                status="failed_system",
-                error_summary="workflow produced no result",
+            final_result = (
+                results[-1]
+                if results
+                else StepExecutionResult(
+                    step_id="workflow.dispatch",
+                    status="failed_system",
+                    error_summary="workflow produced no result",
+                )
             )
             output_payload = dict(final_result.output_payload)
             if final_result.status == "succeeded":
@@ -168,18 +171,26 @@ def build_workstation_workflow_registry() -> PlatformWorkflowRegistry:
         server_project_ref = str(input_payload.get("server_project_ref", "")).strip()
         if uploaded_asset_ref and server_project_ref:
             return [
-                PlatformWorkflowStep("asset.generate", "single.card_fullscreen.asset", {"asset_type": "card_fullscreen"}),
+                PlatformWorkflowStep(
+                    "asset.generate", "single.card_fullscreen.asset", {"asset_type": "card_fullscreen"}
+                ),
             ]
-        return [PlatformWorkflowStep("single.asset.plan", "single.card_fullscreen.plan", {"asset_type": "card_fullscreen"})]
+        return [
+            PlatformWorkflowStep("single.asset.plan", "single.card_fullscreen.plan", {"asset_type": "card_fullscreen"})
+        ]
 
     def resolve_batch_card_fullscreen(input_payload: dict[str, object]) -> list[PlatformWorkflowStep]:
         uploaded_asset_ref = str(input_payload.get("uploaded_asset_ref", "")).strip()
         server_project_ref = str(input_payload.get("server_project_ref", "")).strip()
         if uploaded_asset_ref and server_project_ref:
             return [
-                PlatformWorkflowStep("asset.generate", "batch.card_fullscreen.asset", {"asset_type": "card_fullscreen"}),
+                PlatformWorkflowStep(
+                    "asset.generate", "batch.card_fullscreen.asset", {"asset_type": "card_fullscreen"}
+                ),
             ]
-        return [PlatformWorkflowStep("single.asset.plan", "batch.card_fullscreen.plan", {"asset_type": "card_fullscreen"})]
+        return [
+            PlatformWorkflowStep("single.asset.plan", "batch.card_fullscreen.plan", {"asset_type": "card_fullscreen"})
+        ]
 
     registry.register("log_analysis", "log_analysis", [PlatformWorkflowStep("log.analyze", "log.analyze")])
     registry.register(

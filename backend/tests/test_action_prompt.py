@@ -1,4 +1,5 @@
 """Tests for the action prompt builder."""
+
 import sys
 from pathlib import Path
 
@@ -6,9 +7,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from app.shared.prompting import PromptLoader
 from app.modules.approval.application import action_prompt as action_prompt_module
 from app.modules.approval.application.action_prompt import build_action_prompt
+from app.shared.prompting import PromptLoader
 
 
 def test_action_prompt_includes_required_keywords():
@@ -46,7 +47,9 @@ def test_action_prompt_uses_prompt_loader_with_trimmed_requirements(monkeypatch)
         def __init__(self) -> None:
             self.calls: list[tuple[str, dict[str, object], str]] = []
 
-        def render(self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None) -> str:
+        def render(
+            self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None
+        ) -> str:
             self.calls.append((template_name, variables, fallback_template or ""))
             return "rendered-from-loader"
 
@@ -74,7 +77,9 @@ def test_action_prompt_uses_default_requirements_when_input_empty(monkeypatch):
             assert template_name == "runtime_agent.approval_default_requirements_line"
             return "请提供必须满足的输入信息。"
 
-        def render(self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None) -> str:
+        def render(
+            self, template_name: str, variables: dict[str, object], *, fallback_template: str | None = None
+        ) -> str:
             self.calls.append((template_name, variables, fallback_template or ""))
             return "rendered-default"
 

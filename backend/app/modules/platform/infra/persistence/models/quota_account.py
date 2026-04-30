@@ -18,9 +18,7 @@ class QuotaAccountStatus(StrEnum):
 
 class QuotaAccountRecord(TimestampMixin, Base):
     __tablename__ = "quota_accounts"
-    __table_args__ = (
-        UniqueConstraint("user_id", name="uq_quota_accounts_user_id"),
-    )
+    __table_args__ = (UniqueConstraint("user_id", name="uq_quota_accounts_user_id"),)
 
     id: Mapped[int] = mapped_column(bigint_type(), primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(bigint_type(), nullable=False)

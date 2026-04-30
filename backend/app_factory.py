@@ -1,4 +1,5 @@
 """AgentTheSpire Backend app factory."""
+
 from __future__ import annotations
 
 import asyncio
@@ -14,15 +15,15 @@ from fastapi.staticfiles import StaticFiles
 
 from app.composition.container import ApplicationContainer
 from app.modules.platform.application.platform_runtime_builder import build_job_application_service_from_container
-from app.modules.platform.application.workstation_runtime_service import WorkstationRuntimeManager
 from app.modules.platform.application.services import (
     PlatformRuntimeAuditService,
     ServerExecutionService,
     ServerQueuedJobScanClaimService,
     ServerQueuedJobWorkerService,
 )
-from app.shared.infra.http_errors import install_http_error_handlers
+from app.modules.platform.application.workstation_runtime_service import WorkstationRuntimeManager
 from app.shared.infra.config.settings import Settings
+from app.shared.infra.http_errors import install_http_error_handlers
 from config import get_config
 from routers import WEB_ROUTER_MODULES, WORKSTATION_ROUTER_MODULES
 
@@ -137,7 +138,9 @@ def _build_web_queue_worker_service(app: FastAPI) -> ServerQueuedJobWorkerServic
     runtime_audit_service = _build_platform_runtime_audit_service(app)
     return ServerQueuedJobWorkerService(
         session_factory=session_factory,
-        job_application_service_builder=lambda session: build_job_application_service_from_container(session, container),
+        job_application_service_builder=lambda session: build_job_application_service_from_container(
+            session, container
+        ),
         scan_claim_service=scan_claim_service,
         runtime_audit_service=runtime_audit_service,
         poll_interval_seconds=_QUEUE_WORKER_POLL_INTERVAL_SECONDS,

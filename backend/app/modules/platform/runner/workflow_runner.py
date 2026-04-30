@@ -7,7 +7,6 @@ from app.modules.platform.contracts.runner_contracts import StepExecutionRequest
 from .step_dispatcher import StepDispatcher
 from .workflow_registry import PlatformWorkflowStep
 
-
 EventPublisher = Callable[[str, str], None]
 
 

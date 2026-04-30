@@ -7,7 +7,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
-
 _CLAIM_VERSION = "v1"
 _DEFAULT_SCAN_CLAIM_LEASE_SECONDS = 10
 _DEFAULT_RECOVERY_CLAIM_LEASE_SECONDS = 5
@@ -51,7 +50,9 @@ class ServerQueuedJobScanClaimService:
         recovery_claim_lease_seconds: int = _DEFAULT_RECOVERY_CLAIM_LEASE_SECONDS,
         claim_file_name: str = "queue-scan.claim.json",
     ) -> None:
-        self.storage_root = storage_root or Path(__file__).resolve().parents[6] / "runtime" / "platform-queued-job-scan-claims"
+        self.storage_root = (
+            storage_root or Path(__file__).resolve().parents[6] / "runtime" / "platform-queued-job-scan-claims"
+        )
         self.lease_seconds = max(int(lease_seconds or 0), 1)
         self.recovery_claim_lease_seconds = max(int(recovery_claim_lease_seconds or 0), 1)
         self.claim_file_name = str(claim_file_name).strip() or "queue-scan.claim.json"

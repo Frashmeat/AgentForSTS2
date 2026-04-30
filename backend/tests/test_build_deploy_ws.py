@@ -118,7 +118,9 @@ def test_build_deploy_ws_syncs_local_props_before_build(monkeypatch, tmp_path):
         return True, ""
 
     monkeypatch.setattr(build_deploy_router, "build_and_fix", fake_build_and_fix)
-    monkeypatch.setattr(build_deploy_router, "ensure_local_props", lambda project_root: called.append(project_root) or True)
+    monkeypatch.setattr(
+        build_deploy_router, "ensure_local_props", lambda project_root: called.append(project_root) or True
+    )
     monkeypatch.setattr(
         build_deploy_router,
         "get_config",

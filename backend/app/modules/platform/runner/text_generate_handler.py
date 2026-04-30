@@ -5,8 +5,8 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from app.modules.platform.contracts.runner_contracts import StepExecutionBinding, StepExecutionRequest
-from .upstream_error_classifier import UpstreamErrorClassification, classify_upstream_error
 
+from .upstream_error_classifier import UpstreamErrorClassification, classify_upstream_error
 
 CompleteTextFn = Callable[[str, dict[str, object], Path | None], Awaitable[str]]
 logger = logging.getLogger(__name__)

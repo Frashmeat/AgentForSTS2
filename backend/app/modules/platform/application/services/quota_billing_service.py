@@ -138,7 +138,9 @@ class QuotaBillingService:
         )
         return charge
 
-    def capture(self, execution_id: int, now: datetime, reason_code: str = "execution_finish") -> ExecutionChargeRecord | None:
+    def capture(
+        self, execution_id: int, now: datetime, reason_code: str = "execution_finish"
+    ) -> ExecutionChargeRecord | None:
         charge = self.execution_charge_repository.find_by_execution_id_for_update(execution_id)
         if charge is None:
             return None
@@ -173,7 +175,11 @@ class QuotaBillingService:
         ledgers = self.usage_ledger_repository.list_by_execution_id(execution_id)
         reserve_entry = ledgers[0] if ledgers else None
         if reserve_entry is not None:
-            balance = self.quota_balance_repository.find_by_user_id_for_update(charge.user_id) if self.quota_balance_repository is not None else None
+            balance = (
+                self.quota_balance_repository.find_by_user_id_for_update(charge.user_id)
+                if self.quota_balance_repository is not None
+                else None
+            )
             if balance is not None:
                 balance.refunded_amount += charge.charge_amount
                 self.quota_balance_repository.save_balance(balance)
@@ -191,7 +197,9 @@ class QuotaBillingService:
                     )
                 )
             elif reserve_entry.quota_bucket_id is not None:
-                bucket = self.quota_account_repository.find_active_bucket_for_update(reserve_entry.quota_account_id, now)
+                bucket = self.quota_account_repository.find_active_bucket_for_update(
+                    reserve_entry.quota_account_id, now
+                )
                 if bucket is not None:
                     bucket.refunded_amount += charge.charge_amount
                     self.quota_account_repository.save_bucket(bucket)

@@ -1,4 +1,5 @@
 """Tests for approval runtime configuration wiring."""
+
 import sys
 from pathlib import Path
 
@@ -45,7 +46,9 @@ def test_runtime_uses_configured_allowed_roots_and_commands(monkeypatch: pytest.
     assert executor.allowed_commands == [["dotnet"], ["python", "-m"]]
 
 
-def test_runtime_falls_back_to_repo_root_when_allowed_roots_not_configured(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_runtime_falls_back_to_repo_root_when_allowed_roots_not_configured(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
     from app.modules.approval import runtime
 
     repo_root = tmp_path / "repo"

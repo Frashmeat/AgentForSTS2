@@ -7,7 +7,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
-
 _LOCK_VERSION = "v2"
 _DEFAULT_WORKSPACE_LOCK_LEASE_SECONDS = 1800
 _DEFAULT_RECOVERY_CLAIM_LEASE_SECONDS = 30
@@ -252,7 +251,7 @@ class ServerWorkspaceLockService:
         value = str(server_project_ref).strip()
         if not value.startswith(prefix) or len(value) <= len(prefix):
             raise ValueError(f"server workspace ref is invalid: {server_project_ref}")
-        return value[len(prefix):]
+        return value[len(prefix) :]
 
     @staticmethod
     def _read_holder(lock_path: Path, server_project_ref: str) -> ServerWorkspaceLockHolder | None:

@@ -40,10 +40,13 @@ async def run(prompt: str, project_root: Path, llm_cfg: dict, stream_callback=No
         codex_exe,
         "exec",
         auto_flag,
-        "--color", "never",
+        "--color",
+        "never",
         "--skip-git-repo-check",
-        "-C", str(project_root),
-        "-o", str(output_file),
+        "-C",
+        str(project_root),
+        "-o",
+        str(output_file),
         "-",
     ]
     if model:

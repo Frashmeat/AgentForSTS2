@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from typing import Any
 
-
 DEFAULT_WS_ERROR_MESSAGE = "请求失败，请稍后重试"
 
 

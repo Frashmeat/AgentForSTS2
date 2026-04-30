@@ -1,4 +1,5 @@
 """Tests for approval service orchestration."""
+
 import sys
 from pathlib import Path
 

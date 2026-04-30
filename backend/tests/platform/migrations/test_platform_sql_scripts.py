@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 SQL_DIR = Path(__file__).resolve().parents[3] / "migrations" / "sql"
 
 
