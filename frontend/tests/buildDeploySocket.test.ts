@@ -66,7 +66,12 @@ test("BuildDeploySocket dispatches build-deploy events", () => {
     channel: "raw",
     model: "gpt-5.4",
   });
-  MockWebSocket.instances[0].emitMessage({ event: "done", success: true, deployed_to: "E:/Mods/MyMod", files: ["MyMod.dll"] });
+  MockWebSocket.instances[0].emitMessage({
+    event: "done",
+    success: true,
+    deployed_to: "E:/Mods/MyMod",
+    files: ["MyMod.dll"],
+  });
 
   assert.deepEqual(received, [
     { event: "stream", stage: "stream", chunk: "building...", source: "build", channel: "raw", model: "gpt-5.4" },

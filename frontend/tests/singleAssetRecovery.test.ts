@@ -109,24 +109,25 @@ test("saveSingleAssetSnapshot and loadSingleAssetSnapshot round-trip storage", (
 });
 
 test("refreshRecoveredSingleAssetApprovals replaces stale approval requests from backend", async () => {
-  const refreshed = await refreshRecoveredSingleAssetApprovals({
-    assetType: "relic",
-    assetName: "DarkRelic",
-    description: "desc",
-    projectRoot: "E:/STS2mod",
-    imageMode: "ai",
-    autoMode: false,
-    uploadedImageB64: "",
-    uploadedImageName: "",
-    uploadedImagePreview: null,
-    workflowState: {
-      ...createInitialSingleAssetWorkflowState(),
-      stage: "approval_pending",
-      approvalSummary: "等待审批",
-      approvalRequests: [createApproval()],
+  const refreshed = await refreshRecoveredSingleAssetApprovals(
+    {
+      assetType: "relic",
+      assetName: "DarkRelic",
+      description: "desc",
+      projectRoot: "E:/STS2mod",
+      imageMode: "ai",
+      autoMode: false,
+      uploadedImageB64: "",
+      uploadedImageName: "",
+      uploadedImagePreview: null,
+      workflowState: {
+        ...createInitialSingleAssetWorkflowState(),
+        stage: "approval_pending",
+        approvalSummary: "等待审批",
+        approvalRequests: [createApproval()],
+      },
     },
-  }, async (actionId) =>
-    createApproval({ action_id: actionId, status: "approved", source_backend: "codex" }),
+    async (actionId) => createApproval({ action_id: actionId, status: "approved", source_backend: "codex" }),
   );
 
   assert.equal(refreshed.workflowState.stage, "approval_pending");

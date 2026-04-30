@@ -26,27 +26,12 @@ export interface CodegenBroadcastView {
   steps: CodegenBroadcastStep[];
 }
 
-const CODEGEN_STEP_LABELS = [
-  "理解任务",
-  "扫描项目",
-  "定位改动点",
-  "生成修改方案",
-  "写入代码",
-  "自检收尾",
-] as const;
+const CODEGEN_STEP_LABELS = ["理解任务", "扫描项目", "定位改动点", "生成修改方案", "写入代码", "自检收尾"] as const;
 
 const CODEGEN_STEP_PATTERNS: Array<{ index: number; patterns: RegExp[] }> = [
   {
     index: 6,
-    patterns: [
-      /自检/u,
-      /验证/u,
-      /收尾/u,
-      /测试/u,
-      /构建成功/u,
-      /构建失败/u,
-      /完成代码生成/u,
-    ],
+    patterns: [/自检/u, /验证/u, /收尾/u, /测试/u, /构建成功/u, /构建失败/u, /完成代码生成/u],
   },
   {
     index: 5,
@@ -63,46 +48,19 @@ const CODEGEN_STEP_PATTERNS: Array<{ index: number; patterns: RegExp[] }> = [
   },
   {
     index: 4,
-    patterns: [
-      /修改方案/u,
-      /整理方案/u,
-      /整理本轮修改/u,
-      /整理补丁/u,
-      /补丁/u,
-      /方案/u,
-      /计划/u,
-    ],
+    patterns: [/修改方案/u, /整理方案/u, /整理本轮修改/u, /整理补丁/u, /补丁/u, /方案/u, /计划/u],
   },
   {
     index: 3,
-    patterns: [
-      /定位/u,
-      /锁定/u,
-      /改动点/u,
-      /入口/u,
-      /目标文件/u,
-      /关键位置/u,
-    ],
+    patterns: [/定位/u, /锁定/u, /改动点/u, /入口/u, /目标文件/u, /关键位置/u],
   },
   {
     index: 2,
-    patterns: [
-      /扫描/u,
-      /项目结构/u,
-      /关键文件/u,
-      /读取/u,
-      /查看/u,
-      /检查/u,
-      /工作区/u,
-      /workspace/u,
-    ],
+    patterns: [/扫描/u, /项目结构/u, /关键文件/u, /读取/u, /查看/u, /检查/u, /工作区/u, /workspace/u],
   },
 ];
 
-export function appendWorkflowLogEntry(
-  entries: WorkflowLogEntry[],
-  entry: WorkflowLogEntry,
-): WorkflowLogEntry[] {
+export function appendWorkflowLogEntry(entries: WorkflowLogEntry[], entry: WorkflowLogEntry): WorkflowLogEntry[] {
   const previous = entries[entries.length - 1];
   if (
     previous &&
@@ -121,10 +79,7 @@ export function appendWorkflowLogEntry(
   return [...entries, entry];
 }
 
-export function resolveNextWorkflowModel(
-  currentModel: string | null,
-  entry: WorkflowLogEntry,
-): string | null {
+export function resolveNextWorkflowModel(currentModel: string | null, entry: WorkflowLogEntry): string | null {
   return entry.model?.trim() ? entry.model : currentModel;
 }
 
@@ -143,9 +98,7 @@ export function buildPrettyWorkflowLogLines(entries: WorkflowLogEntry[]): string
     if (!rawText.trim()) {
       continue;
     }
-    const text = entry.channel === "stderr" && !rawText.startsWith("[stderr]")
-      ? `[stderr] ${rawText}`
-      : rawText;
+    const text = entry.channel === "stderr" && !rawText.startsWith("[stderr]") ? `[stderr] ${rawText}` : rawText;
     if (lines[lines.length - 1] === text) {
       continue;
     }
@@ -195,25 +148,21 @@ function buildPrettyBuildLogLines(entries: WorkflowLogEntry[]): string[] {
     pushUnique(lines, "正在执行 dotnet publish 构建与导出。");
   }
 
-  const dllPath = pickFirstMatch(rawText, [
-    /DLL\s*编译成功:\s*`([^`]+)`/iu,
-    /DLL\s*:\s*`([^`]+)`/iu,
-  ]);
+  const dllPath = pickFirstMatch(rawText, [/DLL\s*编译成功:\s*`([^`]+)`/iu, /DLL\s*:\s*`([^`]+)`/iu]);
   if (dllPath) {
     pushUnique(lines, `DLL 编译成功：${dllPath}`);
   }
 
-  if (/\.pck\s*文件已导出到\s*mods\s*文件夹|Pck\s*文件已复制到\s*mods\s*文件夹|PCK\s*文件已复制到\s*mods\s*文件夹/iu.test(rawText)) {
+  if (
+    /\.pck\s*文件已导出到\s*mods\s*文件夹|Pck\s*文件已复制到\s*mods\s*文件夹|PCK\s*文件已复制到\s*mods\s*文件夹/iu.test(
+      rawText,
+    )
+  ) {
     pushUnique(lines, "PCK 文件已导出到 mods 文件夹。");
   }
 
-  const warningCount = pickFirstMatch(rawText, [
-    /(\d+)\s*个警告/iu,
-    /(\d+)\s*Warning\(s\)/iu,
-  ]);
-  const warningCode = pickFirstMatch(rawText, [
-    /\b(warning\s+[A-Z0-9]+)\b/iu,
-  ]);
+  const warningCount = pickFirstMatch(rawText, [/(\d+)\s*个警告/iu, /(\d+)\s*Warning\(s\)/iu]);
+  const warningCode = pickFirstMatch(rawText, [/\b(warning\s+[A-Z0-9]+)\b/iu]);
   if (warningCount && warningCode) {
     pushUnique(lines, `构建警告：${warningCount} 个警告，包含 ${warningCode}。`);
   } else if (warningCount) {
@@ -296,17 +245,9 @@ function buildCodegenSummaryLines(currentStepIndex: number, isComplete: boolean)
 
   switch (currentStepIndex) {
     case 1:
-      return [
-        "已接收本轮代码生成任务。",
-        "当前正结合上下文理解需求与约束。",
-        "暂未进入项目扫描与改动点定位阶段。",
-      ];
+      return ["已接收本轮代码生成任务。", "当前正结合上下文理解需求与约束。", "暂未进入项目扫描与改动点定位阶段。"];
     case 2:
-      return [
-        "已完成任务接收与上下文准备。",
-        "当前正扫描项目结构与关键文件。",
-        "暂未进入改动点定位与方案整理阶段。",
-      ];
+      return ["已完成任务接收与上下文准备。", "当前正扫描项目结构与关键文件。", "暂未进入改动点定位与方案整理阶段。"];
     case 3:
       return [
         "已完成任务理解与项目扫描。",
@@ -332,11 +273,7 @@ function buildCodegenSummaryLines(currentStepIndex: number, isComplete: boolean)
         "完成后即可切换到原始输出查看完整技术细节。",
       ];
     default:
-      return [
-        "已接收本轮代码生成任务。",
-        "当前正结合上下文理解需求与约束。",
-        "暂未进入项目扫描与改动点定位阶段。",
-      ];
+      return ["已接收本轮代码生成任务。", "当前正结合上下文理解需求与约束。", "暂未进入项目扫描与改动点定位阶段。"];
   }
 }
 

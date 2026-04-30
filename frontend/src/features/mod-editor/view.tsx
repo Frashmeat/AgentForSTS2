@@ -7,11 +7,7 @@ import { ProjectRootField } from "../../components/ProjectRootField";
 import { StageStatus } from "../../components/StageStatus";
 import { useDefaultProjectRoot } from "../../shared/useDefaultProjectRoot.ts";
 import { useProjectCreation } from "../../shared/useProjectCreation.ts";
-import {
-  appendWorkflowLogEntry,
-  resolveNextWorkflowModel,
-  type WorkflowLogEntry,
-} from "../../shared/workflowLog.ts";
+import { appendWorkflowLogEntry, resolveNextWorkflowModel, type WorkflowLogEntry } from "../../shared/workflowLog.ts";
 import { useResolvedWorkspaceFeatureProps } from "../workspace/WorkspaceContext.tsx";
 import type { WorkspaceFeatureAdapterProps } from "../workspace/types.ts";
 import {
@@ -24,21 +20,12 @@ import {
 type AnalyzeStage = "idle" | "scanning" | "streaming" | "done" | "error";
 type ModifyStage = "idle" | "running" | "done" | "error";
 
-export function ModEditorFeatureView({
-  onRequestExecution,
-}: WorkspaceFeatureAdapterProps) {
-  const {
-    onRequestExecution: resolvedRequestExecution,
-    onStatusNotice,
-  } = useResolvedWorkspaceFeatureProps({
+export function ModEditorFeatureView({ onRequestExecution }: WorkspaceFeatureAdapterProps) {
+  const { onRequestExecution: resolvedRequestExecution, onStatusNotice } = useResolvedWorkspaceFeatureProps({
     onRequestExecution,
   });
   const [projectRoot, setProjectRoot] = useState("");
-  const {
-    projectCreateBusy,
-    clearProjectCreationFeedback,
-    createProjectAtRoot,
-  } = useProjectCreation({
+  const { projectCreateBusy, clearProjectCreationFeedback, createProjectAtRoot } = useProjectCreation({
     onProjectCreated: setProjectRoot,
     onStatusNotice,
   });
@@ -88,7 +75,7 @@ export function ModEditorFeatureView({
     applyAnalysisStageMessage(message) {
       setAnalysisCurrentStage(message);
       setAnalysisStageHistory((previous) =>
-        previous[previous.length - 1] === message ? previous : [...previous, message]
+        previous[previous.length - 1] === message ? previous : [...previous, message],
       );
     },
     applyAnalysisScanInfo(files) {
@@ -140,7 +127,7 @@ export function ModEditorFeatureView({
     applyModifyStageMessage(message) {
       setModifyCurrentStage(message);
       setModifyStageHistory((previous) =>
-        previous[previous.length - 1] === message ? previous : [...previous, message]
+        previous[previous.length - 1] === message ? previous : [...previous, message],
       );
     },
     appendModifyLog(line, source, channel, model) {
@@ -188,7 +175,9 @@ export function ModEditorFeatureView({
           createBusy={projectCreateBusy}
           onStatusNotice={onStatusNotice}
           onChange={setProjectRoot}
-          onCreateProject={() => { void createProjectAtRoot(projectRoot).catch(() => {}); }}
+          onCreateProject={() => {
+            void createProjectAtRoot(projectRoot).catch(() => {});
+          }}
         />
       </div>
 
@@ -240,11 +229,7 @@ export function ModEditorFeatureView({
             {analysisErrorMessage ? (
               <pre className="text-xs text-red-600 font-mono whitespace-pre-wrap">{analysisErrorMessage}</pre>
             ) : (
-              <AgentLog
-                lines={analysisChunks}
-                entries={analysisEntries}
-                currentModel={analysisCurrentModel}
-              />
+              <AgentLog lines={analysisChunks} entries={analysisEntries} currentModel={analysisCurrentModel} />
             )}
           </div>
         )}
@@ -263,7 +248,9 @@ export function ModEditorFeatureView({
             onChange={(event) => setModRequest(event.target.value)}
             disabled={isModifying}
             rows={4}
-            placeholder={"例如：\n把 DarkBlade 的伤害从 8 改成 12，升级后改成 16\n或者：给 FangedGrimoire 增加一个条件，只有血量低于50%时才触发"}
+            placeholder={
+              "例如：\n把 DarkBlade 的伤害从 8 改成 12，升级后改成 16\n或者：给 FangedGrimoire 增加一个条件，只有血量低于50%时才触发"
+            }
             className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-100 resize-none disabled:opacity-50"
           />
         </div>
@@ -329,7 +316,9 @@ export function ModEditorFeatureView({
 
         {(agentLog.length > 0 || modifyErrorMessage) && (
           <div className="space-y-2">
-            {modifyErrorMessage && <pre className="text-xs text-red-600 font-mono whitespace-pre-wrap">{modifyErrorMessage}</pre>}
+            {modifyErrorMessage && (
+              <pre className="text-xs text-red-600 font-mono whitespace-pre-wrap">{modifyErrorMessage}</pre>
+            )}
             {agentLog.length > 0 && (
               <AgentLog lines={agentLog} entries={modifyEntries} currentModel={modifyCurrentModel} />
             )}

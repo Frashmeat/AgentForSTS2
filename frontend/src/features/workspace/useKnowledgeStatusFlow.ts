@@ -83,7 +83,7 @@ export function useKnowledgeStatusFlow() {
         const status = await loadKnowledgeStatus();
         setKnowledgeStatus(status);
       } catch {
-        setKnowledgeStatus((previous) => previous ? { ...previous, status: "error" } : previous);
+        setKnowledgeStatus((previous) => (previous ? { ...previous, status: "error" } : previous));
       }
     }
   }

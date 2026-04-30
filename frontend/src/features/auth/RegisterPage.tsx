@@ -62,7 +62,7 @@ export function RegisterPage({ onStatusNotice }: { onStatusNotice?: AuthStatusNo
             <input
               className="platform-page-input mt-1"
               value={username}
-              onChange={event => setUsername(event.target.value)}
+              onChange={(event) => setUsername(event.target.value)}
             />
           </label>
           <label className="block text-sm font-medium text-slate-700">
@@ -70,7 +70,7 @@ export function RegisterPage({ onStatusNotice }: { onStatusNotice?: AuthStatusNo
             <input
               className="platform-page-input mt-1"
               value={email}
-              onChange={event => setEmail(event.target.value)}
+              onChange={(event) => setEmail(event.target.value)}
             />
           </label>
           <label className="block text-sm font-medium text-slate-700">
@@ -79,7 +79,7 @@ export function RegisterPage({ onStatusNotice }: { onStatusNotice?: AuthStatusNo
               type="password"
               className="platform-page-input mt-1"
               value={password}
-              onChange={event => setPassword(event.target.value)}
+              onChange={(event) => setPassword(event.target.value)}
             />
           </label>
           <button
@@ -92,7 +92,10 @@ export function RegisterPage({ onStatusNotice }: { onStatusNotice?: AuthStatusNo
         </form>
         <p className="mt-5 text-sm text-slate-500">
           已有账号？
-          <Link to="/auth/login" className="ml-1 font-medium text-[var(--workspace-accent)] transition hover:text-[var(--workspace-accent-strong)]">
+          <Link
+            to="/auth/login"
+            className="ml-1 font-medium text-[var(--workspace-accent)] transition hover:text-[var(--workspace-accent-strong)]"
+          >
             去登录
           </Link>
         </p>

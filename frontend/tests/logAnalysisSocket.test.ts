@@ -62,7 +62,12 @@ test("LogAnalysisSocket dispatches log analysis events", () => {
     received.push(data as Record<string, unknown>);
   });
 
-  MockWebSocket.instances[0].emitMessage({ event: "stage_update", scope: "text", stage: "reading_input", message: "正在读取日志" });
+  MockWebSocket.instances[0].emitMessage({
+    event: "stage_update",
+    scope: "text",
+    stage: "reading_input",
+    message: "正在读取日志",
+  });
   MockWebSocket.instances[0].emitMessage({ event: "log_info", lines: 120 });
   MockWebSocket.instances[0].emitMessage({ event: "done", full: "分析完成" });
 

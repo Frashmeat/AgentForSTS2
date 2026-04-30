@@ -5,14 +5,8 @@ import {
   startMyJob,
   uploadMyServerAsset,
 } from "../../shared/api/me.ts";
-import type {
-  PlatformJobCreateItem,
-  PlatformJobSummary,
-} from "../../shared/api/platform.ts";
-import {
-  readDeferredExecutionNotice,
-  type DeferredExecutionNotice,
-} from "../../shared/deferredExecution.ts";
+import type { PlatformJobCreateItem, PlatformJobSummary } from "../../shared/api/platform.ts";
+import { readDeferredExecutionNotice, type DeferredExecutionNotice } from "../../shared/deferredExecution.ts";
 
 export interface CreateAndStartPlatformFlowRequest {
   jobType: string;
@@ -96,9 +90,8 @@ export async function createAndStartPlatformFlow(
   const started = await startMyJob(job.id, {
     triggered_by: "user",
   });
-  const deferredNotice = started?.status === "deferred"
-    ? readDeferredExecutionNotice(await listMyJobEvents(job.id))
-    : null;
+  const deferredNotice =
+    started?.status === "deferred" ? readDeferredExecutionNotice(await listMyJobEvents(job.id)) : null;
 
   return {
     job,

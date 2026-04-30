@@ -1,10 +1,6 @@
 import type { ApprovalRequest } from "../../shared/api/index.ts";
 import type { ExecutionBundlePreview, PlanReviewPayload, WorkflowLogChannel } from "../../shared/types/workflow.ts";
-import {
-  appendWorkflowLogEntry,
-  resolveNextWorkflowModel,
-  type WorkflowLogEntry,
-} from "../../shared/workflowLog.ts";
+import { appendWorkflowLogEntry, resolveNextWorkflowModel, type WorkflowLogEntry } from "../../shared/workflowLog.ts";
 
 export type BatchItemStatus =
   | "pending"
@@ -78,7 +74,14 @@ export type BatchRuntimeAction =
   | { type: "item_started"; itemId: string }
   | { type: "item_progress_received"; itemId: string; message: string }
   | { type: "item_image_ready"; itemId: string; image: string; index: number; prompt: string }
-  | { type: "item_agent_stream"; itemId: string; chunk: string; source?: string; channel?: WorkflowLogChannel; model?: string }
+  | {
+      type: "item_agent_stream";
+      itemId: string;
+      chunk: string;
+      source?: string;
+      channel?: WorkflowLogChannel;
+      model?: string;
+    }
   | { type: "item_approval_pending"; itemId: string; summary: string; requests: ApprovalRequest[] }
   | { type: "item_done"; itemId: string }
   | { type: "item_error"; itemId: string; message: string; traceback: string | null }
@@ -295,9 +298,10 @@ export function applyBatchItemStageMessage(
     [id]: {
       ...current,
       currentStage: message,
-      stageHistory: current.stageHistory[current.stageHistory.length - 1] === message
-        ? current.stageHistory
-        : [...current.stageHistory, message],
+      stageHistory:
+        current.stageHistory[current.stageHistory.length - 1] === message
+          ? current.stageHistory
+          : [...current.stageHistory, message],
     },
   };
 }
@@ -328,10 +332,19 @@ function pushHistory(history: string[], message: string): string[] {
 }
 
 function needsAttention(status?: BatchItemStatus): boolean {
-  return status === "awaiting_selection" || status === "approval_pending" || status === "img_generating" || status === "code_generating";
+  return (
+    status === "awaiting_selection" ||
+    status === "approval_pending" ||
+    status === "img_generating" ||
+    status === "code_generating"
+  );
 }
 
-function pickNextActiveOnStart(currentActiveId: string | null, itemStates: BatchItemStateRecord, startedItemId: string): string {
+function pickNextActiveOnStart(
+  currentActiveId: string | null,
+  itemStates: BatchItemStateRecord,
+  startedItemId: string,
+): string {
   if (!currentActiveId) return startedItemId;
 
   const currentStatus = itemStates[currentActiveId]?.status;
@@ -340,12 +353,14 @@ function pickNextActiveOnStart(currentActiveId: string | null, itemStates: Batch
   return currentActiveId;
 }
 
-function pickNextActiveOnDone(currentActiveId: string | null, doneItemId: string, itemStates: BatchItemStateRecord): string | null {
+function pickNextActiveOnDone(
+  currentActiveId: string | null,
+  doneItemId: string,
+  itemStates: BatchItemStateRecord,
+): string | null {
   if (currentActiveId !== doneItemId) return currentActiveId;
 
-  const next = Object.entries(itemStates).find(
-    ([id, state]) => id !== doneItemId && needsAttention(state.status),
-  );
+  const next = Object.entries(itemStates).find(([id, state]) => id !== doneItemId && needsAttention(state.status));
   return next ? next[0] : currentActiveId;
 }
 
@@ -366,18 +381,20 @@ export function batchWorkflowReducer(state: BatchRuntimeState, action: BatchRunt
         ...state,
         stage: "review_items",
         planReview: action.review ?? null,
-        reviewStrictness: action.review?.strictness === "efficient" || action.review?.strictness === "strict"
-          ? action.review.strictness
-          : "balanced",
+        reviewStrictness:
+          action.review?.strictness === "efficient" || action.review?.strictness === "strict"
+            ? action.review.strictness
+            : "balanced",
         bundleDecisions: action.decisions ?? {},
       };
     case "review_updated":
       return {
         ...state,
         planReview: action.review,
-        reviewStrictness: action.review?.strictness === "efficient" || action.review?.strictness === "strict"
-          ? action.review.strictness
-          : "balanced",
+        reviewStrictness:
+          action.review?.strictness === "efficient" || action.review?.strictness === "strict"
+            ? action.review.strictness
+            : "balanced",
         bundleDecisions: action.decisions,
       };
     case "review_items_confirmed":

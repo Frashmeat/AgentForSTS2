@@ -29,10 +29,7 @@ export class BatchSocket extends WorkflowSocketFacade<BatchEvent> {
     super("/api/ws/batch");
   }
 
-  override on<T extends BatchEvent["event"]>(
-    event: T,
-    handler: (data: Extract<BatchEvent, { event: T }>) => void
-  ) {
+  override on<T extends BatchEvent["event"]>(event: T, handler: (data: Extract<BatchEvent, { event: T }>) => void) {
     super.on(event, handler);
     if (event === "error") {
       this.errorHandler = handler as (data: BatchEvent) => void;

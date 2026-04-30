@@ -28,9 +28,7 @@ export function deriveCreateProjectRequest(projectRoot: string): CreateProjectRe
   };
 }
 
-export type CreateProjectRequester = (
-  request: CreateProjectRequest,
-) => Promise<CreateProjectResponse>;
+export type CreateProjectRequester = (request: CreateProjectRequest) => Promise<CreateProjectResponse>;
 
 export async function createProjectFromRoot(
   projectRoot: string,

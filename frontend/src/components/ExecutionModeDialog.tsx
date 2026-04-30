@@ -48,13 +48,13 @@ export function ExecutionModeDialog({
   }
 
   const hasAvailableServerProfile = serverProfiles.some((profile) => profile.available);
-  const serverActionDisabled = isAuthenticated && (
-    serverUnsupportedReasons.length > 0 ||
-    serverProfilesLoading ||
-    !hasAvailableServerProfile ||
-    selectedServerProfileId === null ||
-    serverProfiles.every((profile) => profile.id !== selectedServerProfileId || !profile.available)
-  );
+  const serverActionDisabled =
+    isAuthenticated &&
+    (serverUnsupportedReasons.length > 0 ||
+      serverProfilesLoading ||
+      !hasAvailableServerProfile ||
+      selectedServerProfileId === null ||
+      serverProfiles.every((profile) => profile.id !== selectedServerProfileId || !profile.available));
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/35 px-4">
@@ -62,7 +62,8 @@ export function ExecutionModeDialog({
         <p className="text-sm uppercase tracking-[0.24em] text-slate-400">Execution Mode</p>
         <h2 className="mt-2 text-2xl font-semibold text-slate-900">{title}</h2>
         <p className="mt-3 text-sm text-slate-500">
-          检测到本机配置后，可以继续走本机 BYOK；也可以切到服务器模式，先选平台提供的执行配置，再把任务写入平台记录并进入用户中心。
+          检测到本机配置后，可以继续走本机
+          BYOK；也可以切到服务器模式，先选平台提供的执行配置，再把任务写入平台记录并进入用户中心。
         </p>
 
         <div className="mt-6 grid gap-3">
@@ -150,7 +151,9 @@ export function ExecutionModeDialog({
                                 {profile.recommended ? (
                                   <p className="text-[11px] font-medium text-emerald-700">推荐</p>
                                 ) : null}
-                                <p className={`text-[11px] font-medium ${profile.available ? "text-slate-500" : "text-amber-700"}`}>
+                                <p
+                                  className={`text-[11px] font-medium ${profile.available ? "text-slate-500" : "text-amber-700"}`}
+                                >
                                   {profile.available ? "可用" : "当前不可用"}
                                 </p>
                               </div>
@@ -170,7 +173,9 @@ export function ExecutionModeDialog({
                         将本次选择设为默认服务器配置
                       </label>
                     ) : (
-                      <p className="mt-3 text-xs text-amber-700">当前没有健康可用的服务器执行配置，暂时无法开始服务器任务。</p>
+                      <p className="mt-3 text-xs text-amber-700">
+                        当前没有健康可用的服务器执行配置，暂时无法开始服务器任务。
+                      </p>
                     )}
                   </>
                 )}

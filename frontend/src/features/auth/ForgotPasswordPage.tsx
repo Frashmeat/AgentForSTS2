@@ -57,7 +57,7 @@ export function ForgotPasswordPage({ onStatusNotice }: { onStatusNotice?: AuthSt
             <input
               className="platform-page-input mt-1"
               value={login}
-              onChange={event => setLogin(event.target.value)}
+              onChange={(event) => setLogin(event.target.value)}
             />
           </label>
           <button
@@ -68,7 +68,10 @@ export function ForgotPasswordPage({ onStatusNotice }: { onStatusNotice?: AuthSt
             提交重置请求
           </button>
         </form>
-        <Link to="/auth/login" className="mt-5 inline-flex text-sm font-medium text-[var(--workspace-accent)] transition hover:text-[var(--workspace-accent-strong)]">
+        <Link
+          to="/auth/login"
+          className="mt-5 inline-flex text-sm font-medium text-[var(--workspace-accent)] transition hover:text-[var(--workspace-accent-strong)]"
+        >
           返回登录
         </Link>
       </section>

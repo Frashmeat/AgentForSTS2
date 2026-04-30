@@ -15,7 +15,7 @@ export class BuildDeploySocket extends WorkflowSocketFacade<BuildDeployEvent> {
 
   override on<T extends BuildDeployEvent["event"]>(
     event: T,
-    handler: (data: Extract<BuildDeployEvent, { event: T }>) => void
+    handler: (data: Extract<BuildDeployEvent, { event: T }>) => void,
   ) {
     super.on(event, handler);
     if (event === "error") {

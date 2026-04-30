@@ -17,7 +17,7 @@ export class ModAnalysisSocket extends WorkflowSocketFacade<ModAnalysisEvent> {
 
   override on<T extends ModAnalysisEvent["event"]>(
     event: T,
-    handler: (data: Extract<ModAnalysisEvent, { event: T }>) => void
+    handler: (data: Extract<ModAnalysisEvent, { event: T }>) => void,
   ) {
     super.on(event, handler);
     if (event === "error") {

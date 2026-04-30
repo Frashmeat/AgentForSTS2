@@ -69,10 +69,7 @@ test("waitOpen 在连接错误时 reject", async () => {
 
   MockWebSocket.instances[0].emitError();
 
-  await assert.rejects(
-    rejectIfPending(pending, "waitOpen rejection on error"),
-    /WebSocket connection failed/
-  );
+  await assert.rejects(rejectIfPending(pending, "waitOpen rejection on error"), /WebSocket connection failed/);
 });
 
 test("waitOpen 在连接提前关闭时 reject", async () => {
@@ -81,10 +78,7 @@ test("waitOpen 在连接提前关闭时 reject", async () => {
 
   MockWebSocket.instances[0].emitClose();
 
-  await assert.rejects(
-    rejectIfPending(pending, "waitOpen rejection on close"),
-    /WebSocket connection closed/
-  );
+  await assert.rejects(rejectIfPending(pending, "waitOpen rejection on close"), /WebSocket connection closed/);
 });
 
 test("waitOpen 在连接成功时 resolve", async () => {
@@ -120,10 +114,7 @@ test("workstation websocket clients fail loudly without workstation config on in
     location: { host: "127.0.0.1:8080", href: "http://127.0.0.1:8080/" },
   });
 
-  assert.throws(
-    () => new BuildDeploySocket(),
-    /workstation websocket endpoint is not configured/i,
-  );
+  assert.throws(() => new BuildDeploySocket(), /workstation websocket endpoint is not configured/i);
 
   if (typeof originalLocation === "undefined") {
     delete runtimeGlobals.location;

@@ -1,7 +1,4 @@
-import {
-  createSingleAssetSocket,
-  type SingleAssetSocket,
-} from "../../lib/single_asset_ws.ts";
+import { createSingleAssetSocket, type SingleAssetSocket } from "../../lib/single_asset_ws.ts";
 import {
   WORKFLOW_CANCELLED_MESSAGE,
   isWorkflowCancellation,
@@ -108,16 +105,8 @@ export function createSingleAssetWorkflowController(
   }
 
   async function start(options: StartSingleAssetWorkflowOptions) {
-    const {
-      assetType,
-      assetName,
-      description,
-      projectRoot,
-      imageMode,
-      uploadedImageB64,
-      uploadedImageName,
-      autoMode,
-    } = options;
+    const { assetType, assetName, description, projectRoot, imageMode, uploadedImageB64, uploadedImageName, autoMode } =
+      options;
 
     const normalizedProjectRoot = projectRoot.trim();
     if (!assetName.trim() || !description.trim() || !normalizedProjectRoot) {

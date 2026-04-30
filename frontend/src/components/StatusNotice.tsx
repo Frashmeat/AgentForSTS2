@@ -104,7 +104,9 @@ export function StatusNotice({
           {typeof progress === "number" || indeterminate ? (
             <div className={`h-1.5 overflow-hidden rounded-full ${toneCls.track}`}>
               {indeterminate ? (
-                <div className={`h-full w-1/3 rounded-full ${toneCls.fill} animate-[knowledge-progress-indeterminate_1.2s_ease-in-out_infinite]`} />
+                <div
+                  className={`h-full w-1/3 rounded-full ${toneCls.fill} animate-[knowledge-progress-indeterminate_1.2s_ease-in-out_infinite]`}
+                />
               ) : (
                 <div
                   className={`h-full rounded-full transition-[width] duration-300 ease-out ${toneCls.fill}`}

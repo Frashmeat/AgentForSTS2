@@ -109,8 +109,16 @@ export function AdminCredentialHealthPage() {
         </button>
       </header>
 
-      {error ? <section className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</section> : null}
-      {message ? <section className="rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{message}</section> : null}
+      {error ? (
+        <section className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {error}
+        </section>
+      ) : null}
+      {message ? (
+        <section className="rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          {message}
+        </section>
+      ) : null}
 
       <section className="grid gap-3 md:grid-cols-6">
         {[
@@ -151,10 +159,20 @@ export function AdminCredentialHealthPage() {
                 const status = formatAdminStatus(credential.health_status);
                 return (
                   <tr key={credential.id}>
-                    <td className="px-3 py-2 font-medium text-slate-900">{credential.label || `凭据 ${credential.id}`}</td>
-                    <td className="px-3 py-2 text-slate-600">{profileById.get(credential.execution_profile_id)?.display_name ?? "未知配置"}</td>
+                    <td className="px-3 py-2 font-medium text-slate-900">
+                      {credential.label || `凭据 ${credential.id}`}
+                    </td>
+                    <td className="px-3 py-2 text-slate-600">
+                      {profileById.get(credential.execution_profile_id)?.display_name ?? "未知配置"}
+                    </td>
                     <td className="px-3 py-2 text-slate-600">{formatAdminProvider(credential.provider)}</td>
-                    <td className="px-3 py-2"><span className={`rounded-md border px-2 py-1 text-xs font-medium ${statusClass(credential.health_status)}`}>{status.label}</span></td>
+                    <td className="px-3 py-2">
+                      <span
+                        className={`rounded-md border px-2 py-1 text-xs font-medium ${statusClass(credential.health_status)}`}
+                      >
+                        {status.label}
+                      </span>
+                    </td>
                     <td className="px-3 py-2 text-slate-600">{formatTime(credential.last_checked_at)}</td>
                     <td className="px-3 py-2 text-slate-600">{credential.last_error_message || "无"}</td>
                     <td className="px-3 py-2">

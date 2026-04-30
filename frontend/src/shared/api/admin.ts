@@ -270,15 +270,17 @@ export function listAdminQuotaRefunds(userId?: number): Promise<AdminQuotaRefund
   });
 }
 
-export function listAdminUsers(params: {
-  query?: string;
-  email_verified?: boolean;
-  is_admin?: boolean;
-  quota_status?: string;
-  anomaly?: string;
-  limit?: number;
-  offset?: number;
-} = {}): Promise<AdminUserListView> {
+export function listAdminUsers(
+  params: {
+    query?: string;
+    email_verified?: boolean;
+    is_admin?: boolean;
+    quota_status?: string;
+    anomaly?: string;
+    limit?: number;
+    offset?: number;
+  } = {},
+): Promise<AdminUserListView> {
   return requestJson<AdminUserListView>(
     buildApiPath("/api/admin/users", {
       query: params.query,
@@ -305,7 +307,11 @@ export function getAdminUserQuota(userId: number): Promise<AdminUserQuotaView> {
   });
 }
 
-export function listAdminUserQuotaLedger(userId: number, afterId?: number, limit?: number): Promise<AdminQuotaLedgerListView> {
+export function listAdminUserQuotaLedger(
+  userId: number,
+  afterId?: number,
+  limit?: number,
+): Promise<AdminQuotaLedgerListView> {
   return requestJson<AdminQuotaLedgerListView>(
     buildApiPath(`/api/admin/users/${userId}/quota/ledger`, { after_id: afterId, limit }),
     { backend: "web" },

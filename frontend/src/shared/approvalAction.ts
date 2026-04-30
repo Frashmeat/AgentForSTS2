@@ -11,13 +11,7 @@ interface RunApprovalActionOptions<TResult> {
 export async function runApprovalAction<TResult>(
   options: RunApprovalActionOptions<TResult>,
 ): Promise<TResult | undefined> {
-  const {
-    actionId,
-    action,
-    onBusyChange,
-    onSuccess,
-    onError,
-  } = options;
+  const { actionId, action, onBusyChange, onSuccess, onError } = options;
 
   onBusyChange(actionId);
   try {

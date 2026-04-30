@@ -29,9 +29,7 @@ export function ApprovalPanel({
     <div className="space-y-3">
       <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
         <p className="text-sm font-semibold text-amber-700">等待审批</p>
-        <p className="mt-1 text-xs text-amber-700/80">
-          {summarizeApprovalPending(summary, requests)}
-        </p>
+        <p className="mt-1 text-xs text-amber-700/80">{summarizeApprovalPending(summary, requests)}</p>
       </div>
 
       <div className="space-y-2">
@@ -45,9 +43,7 @@ export function ApprovalPanel({
                   {riskLabel(request.risk_level)}
                 </span>
               </div>
-              {request.reason && (
-                <p className="text-xs text-slate-500">{request.reason}</p>
-              )}
+              {request.reason && <p className="text-xs text-slate-500">{request.reason}</p>}
               {detail && (
                 <pre className="rounded bg-slate-50 px-2.5 py-2 text-xs text-slate-500 font-mono whitespace-pre-wrap break-all">
                   {detail}
@@ -73,15 +69,16 @@ export function ApprovalPanel({
                     拒绝
                   </button>
                 )}
-                {(request.status === "approved" || (!request.requires_approval && request.status === "pending")) && onExecute && (
-                  <button
-                    onClick={() => onExecute(request.action_id)}
-                    disabled={busyActionId === request.action_id}
-                    className="rounded-md bg-slate-700 px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50"
-                  >
-                    执行
-                  </button>
-                )}
+                {(request.status === "approved" || (!request.requires_approval && request.status === "pending")) &&
+                  onExecute && (
+                    <button
+                      onClick={() => onExecute(request.action_id)}
+                      disabled={busyActionId === request.action_id}
+                      className="rounded-md bg-slate-700 px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50"
+                    >
+                      执行
+                    </button>
+                  )}
               </div>
             </div>
           );

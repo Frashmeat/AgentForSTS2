@@ -2,10 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Hammer, CheckCircle2, Loader2, RotateCcw, Settings } from "lucide-react";
 import { AgentLog } from "./AgentLog";
 import type { StatusNoticeItem } from "./StatusNotice.tsx";
-import {
-  createBuildDeployController,
-  type BuildDeploySocketLike,
-} from "./buildDeployController.ts";
+import { createBuildDeployController, type BuildDeploySocketLike } from "./buildDeployController.ts";
 import {
   createIdleBuildDeployState,
   describeBuildDeployAction,
@@ -36,9 +33,7 @@ export function BuildDeploy({ projectRoot, onOpenSettings, onStatusNotice }: Pro
         wsRef.current = socket;
       },
       setState(nextState) {
-        setState((previous) =>
-          typeof nextState === "function" ? nextState(previous) : nextState,
-        );
+        setState((previous) => (typeof nextState === "function" ? nextState(previous) : nextState));
       },
     });
   }
@@ -135,9 +130,7 @@ export function BuildDeploy({ projectRoot, onOpenSettings, onStatusNotice }: Pro
           >
             <CheckCircle2
               size={15}
-              className={`shrink-0 mt-0.5 ${
-                completionView.tone === "warning" ? "text-amber-500" : "text-emerald-500"
-              }`}
+              className={`shrink-0 mt-0.5 ${completionView.tone === "warning" ? "text-amber-500" : "text-emerald-500"}`}
             />
             <div className="flex-1">
               <p

@@ -26,10 +26,7 @@ interface BatchPlanningDeps {
   generateModPlan(requirements: string): Promise<ModPlan>;
 }
 
-export function createBatchPlanningController(
-  runtime: BatchPlanningRuntime,
-  deps: Partial<BatchPlanningDeps> = {},
-) {
+export function createBatchPlanningController(runtime: BatchPlanningRuntime, deps: Partial<BatchPlanningDeps> = {}) {
   const createSocket = deps.createSocket ?? (() => new BatchSocket());
   const requestGenerateModPlan = deps.generateModPlan ?? generateModPlan;
 

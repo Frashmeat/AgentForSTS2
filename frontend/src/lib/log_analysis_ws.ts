@@ -17,7 +17,7 @@ export class LogAnalysisSocket extends WorkflowSocketFacade<LogAnalysisEvent> {
 
   override on<T extends LogAnalysisEvent["event"]>(
     event: T,
-    handler: (data: Extract<LogAnalysisEvent, { event: T }>) => void
+    handler: (data: Extract<LogAnalysisEvent, { event: T }>) => void,
   ) {
     super.on(event, handler);
     if (event === "error") {

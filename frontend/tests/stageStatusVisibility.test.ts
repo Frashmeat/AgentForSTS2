@@ -10,7 +10,7 @@ test("完成后不再显示阶段状态标签", () => {
       history: ["开始生成", "正在生成代码..."],
       isComplete: true,
     }),
-    false
+    false,
   );
 });
 
@@ -21,6 +21,6 @@ test("执行中有当前阶段时显示阶段状态标签", () => {
       history: [],
       isComplete: false,
     }),
-    true
+    true,
   );
 });

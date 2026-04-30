@@ -56,20 +56,18 @@ export function HistoryList({ jobs }: { jobs: UserCenterJobSummary[] }) {
             暂无平台任务记录。用户中心不会读取本机恢复记录或浏览器本地快照。
           </div>
         )}
-        {jobs.map(job => {
+        {jobs.map((job) => {
           const executionProfileText = formatExecutionProfileText(job);
           const deliveryBadge = resolveDeliveryBadge(job.delivery_state, job.result_summary);
           return (
-            <Link
-              key={job.id}
-              to={`/me/jobs/${job.id}`}
-              className="platform-page-list-link block px-4 py-4"
-            >
+            <Link key={job.id} to={`/me/jobs/${job.id}`} className="platform-page-list-link block px-4 py-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-semibold text-slate-900">{job.input_summary || job.job_type}</p>
                   <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                    <span className="text-slate-500">{job.job_type} · {renderJobStatus(job.status)}</span>
+                    <span className="text-slate-500">
+                      {job.job_type} · {renderJobStatus(job.status)}
+                    </span>
                     {executionProfileText ? (
                       <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 font-medium text-sky-800">
                         {executionProfileText}
@@ -80,11 +78,7 @@ export function HistoryList({ jobs }: { jobs: UserCenterJobSummary[] }) {
                         {job.deferredSummary.shortLabel}
                       </span>
                     ) : null}
-                    {deliveryBadge ? (
-                      <span className={deliveryBadge.className}>
-                        {deliveryBadge.label}
-                      </span>
-                    ) : null}
+                    {deliveryBadge ? <span className={deliveryBadge.className}>{deliveryBadge.label}</span> : null}
                   </div>
                 </div>
                 <div className="text-right text-xs text-slate-500">

@@ -1,10 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import {
-  batchWorkflowReducer,
-  createInitialBatchRuntimeState,
-} from "../src/features/batch-generation/state.ts";
+import { batchWorkflowReducer, createInitialBatchRuntimeState } from "../src/features/batch-generation/state.ts";
 
 test("planning_started resets runtime and enters planning stage", () => {
   const dirty = {

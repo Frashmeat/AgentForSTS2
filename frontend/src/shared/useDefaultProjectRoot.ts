@@ -3,10 +3,7 @@ import { useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 import type { AppConfig } from "./api/config.ts";
 import { loadAppConfig } from "./api/index.ts";
 
-export function resolveDefaultProjectRootValue(
-  currentValue: string,
-  defaultProjectRoot?: string,
-): string {
+export function resolveDefaultProjectRootValue(currentValue: string, defaultProjectRoot?: string): string {
   return currentValue || defaultProjectRoot || "";
 }
 
@@ -28,12 +25,8 @@ export function useDefaultProjectRoot(options: UseDefaultProjectRootOptions) {
       .then((config) => {
         onConfigLoadedRef.current?.(config);
         const defaultProjectRoot =
-          typeof config?.default_project_root === "string"
-            ? config.default_project_root
-            : undefined;
-        setProjectRoot((currentValue) =>
-          resolveDefaultProjectRootValue(currentValue, defaultProjectRoot),
-        );
+          typeof config?.default_project_root === "string" ? config.default_project_root : undefined;
+        setProjectRoot((currentValue) => resolveDefaultProjectRootValue(currentValue, defaultProjectRoot));
       })
       .catch(() => {});
   }, [setProjectRoot]);

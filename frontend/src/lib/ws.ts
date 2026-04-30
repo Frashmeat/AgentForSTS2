@@ -21,10 +21,7 @@ export class WorkflowSocket extends WorkflowSocketFacade<WsEvent> {
     super("/api/ws/create");
   }
 
-  override on<T extends WsEvent["event"]>(
-    event: T,
-    handler: (data: Extract<WsEvent, { event: T }>) => void
-  ) {
+  override on<T extends WsEvent["event"]>(event: T, handler: (data: Extract<WsEvent, { event: T }>) => void) {
     super.on(event, handler);
     if (event === "error") {
       this.errorHandler = handler as (data: WsEvent) => void;

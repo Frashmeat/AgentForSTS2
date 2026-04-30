@@ -8,10 +8,7 @@ export class WorkflowSocketFacade<TEvent extends SocketEvent> {
     this.client = new WorkflowClient<TEvent>(path);
   }
 
-  on<T extends TEvent["event"]>(
-    event: T,
-    handler: (data: Extract<TEvent, { event: T }>) => void
-  ) {
+  on<T extends TEvent["event"]>(event: T, handler: (data: Extract<TEvent, { event: T }>) => void) {
     this.client.on(event, handler);
     return this;
   }

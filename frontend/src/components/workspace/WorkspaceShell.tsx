@@ -56,7 +56,13 @@ export function WorkspaceShell<T extends string>({
             );
           })}
         </div>
-        <button type="button" onClick={onOpenSettings} className="workspace-sidebar-button workspace-sidebar-footer" aria-label="打开设置" title="打开设置">
+        <button
+          type="button"
+          onClick={onOpenSettings}
+          className="workspace-sidebar-button workspace-sidebar-footer"
+          aria-label="打开设置"
+          title="打开设置"
+        >
           <Settings size={18} />
         </button>
       </aside>

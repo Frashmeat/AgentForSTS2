@@ -151,28 +151,50 @@ switch ($Action) {
         Invoke-Compose $extra
     }
     "lint" {
-        # 直接用 docker run + bind mount，让 ruff/black 修宿主机源码（compose run 默认不挂源码）。
-        $install = "pip install --quiet --no-cache-dir 'ruff==0.8.6' 'black==24.10.0'"
-        if ($Fix) {
-            # 用 ; 而非 && —— ruff 仍有 unfixed errors 时退出非 0，但仍想继续跑 black format
-            $bashLine = "$install ; cd /app && ruff check --fix backend ; black backend"
-        } else {
-            $bashLine = "$install && cd /app && ruff check backend && black --check backend"
-        }
+        # 后端 lint：ruff + black，docker run + bind mount 让工具修宿主源码。
         $env:MSYS_NO_PATHCONV = "1"
         $imageTag = if ($env:ATS_WORKSTATION_IMAGE) { $env:ATS_WORKSTATION_IMAGE } else { "agentthespire/workstation:local" }
-        $backendMount = "$($repoRoot.Path)/backend:/app/backend"
-        $configMount = "$($repoRoot.Path)/pyproject.toml:/app/pyproject.toml:ro"
-        $dockerArgs = @(
+
+        $install = "pip install --quiet --no-cache-dir 'ruff==0.8.6' 'black==24.10.0'"
+        if ($Fix) {
+            # 用 ; 让 ruff 仍有 unfixed errors 时也继续跑 black format
+            $backendBash = "$install ; cd /app && ruff check --fix backend ; black backend"
+        } else {
+            $backendBash = "$install && cd /app && ruff check backend && black --check backend"
+        }
+        $backendArgs = @(
             "run", "--rm", "--entrypoint", "",
-            "-v", $backendMount,
-            "-v", $configMount,
+            "-v", "$($repoRoot.Path)/backend:/app/backend",
+            "-v", "$($repoRoot.Path)/pyproject.toml:/app/pyproject.toml:ro",
             $imageTag,
-            "bash", "-c", $bashLine
+            "bash", "-c", $backendBash
         )
-        Write-Host "docker $($dockerArgs -join ' ')" -ForegroundColor Cyan
-        & docker @dockerArgs
+        Write-Host "[lint backend] docker $($backendArgs -join ' ')" -ForegroundColor Cyan
+        & docker @backendArgs
+        $backendExit = $LASTEXITCODE
+
+        # 前端 lint：node:20-alpine + bind mount，npm install (cache) → ESLint + Prettier
+        # 容器内 npm install 会在宿主 frontend/node_modules 留下 Linux 版本依赖；这是 dev 期望
+        $nodeImage = if ($env:ATS_NODE_BASE_IMAGE) { $env:ATS_NODE_BASE_IMAGE } else { "node:20-alpine" }
+        if ($Fix) {
+            $frontendSh = "npm install --prefer-offline --no-audit --silent && npx eslint --fix . ; npx prettier --write ."
+        } else {
+            $frontendSh = "npm install --prefer-offline --no-audit --silent && npm run lint && npx prettier --check ."
+        }
+        $frontendArgs = @(
+            "run", "--rm", "--entrypoint", "",
+            "-v", "$($repoRoot.Path)/frontend:/work",
+            "-w", "/work",
+            $nodeImage,
+            "sh", "-c", $frontendSh
+        )
+        Write-Host "[lint frontend] docker $($frontendArgs -join ' ')" -ForegroundColor Cyan
+        & docker @frontendArgs
+        $frontendExit = $LASTEXITCODE
+
         $env:MSYS_NO_PATHCONV = $null
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        if ($backendExit -ne 0 -or $frontendExit -ne 0) {
+            exit ($backendExit -bor $frontendExit)
+        }
     }
 }

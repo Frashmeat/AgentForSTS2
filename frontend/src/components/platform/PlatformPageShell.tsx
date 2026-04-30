@@ -19,7 +19,12 @@ export function PlatformPageShell({
 }) {
   return (
     <div className="platform-page-shell">
-      <div className={cn("platform-page-frame", width === "narrow" ? "platform-page-frame-narrow" : "platform-page-frame-wide")}>
+      <div
+        className={cn(
+          "platform-page-frame",
+          width === "narrow" ? "platform-page-frame-narrow" : "platform-page-frame-wide",
+        )}
+      >
         <header className="platform-page-hero">
           <div className="platform-page-hero-copy">
             <p className="platform-page-kicker">{kicker}</p>

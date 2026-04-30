@@ -93,7 +93,11 @@ export function AdminOverviewPage() {
   const disabledCredentials = countCredentials(overview.credentials, "disabled");
 
   if (isLoading) {
-    return <section className="rounded-lg border border-white bg-white/80 p-6 text-sm text-slate-500">正在恢复管理员会话...</section>;
+    return (
+      <section className="rounded-lg border border-white bg-white/80 p-6 text-sm text-slate-500">
+        正在恢复管理员会话...
+      </section>
+    );
   }
 
   if (!isAuthenticated) {
@@ -126,7 +130,9 @@ export function AdminOverviewPage() {
       </header>
 
       {error ? (
-        <section className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</section>
+        <section className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {error}
+        </section>
       ) : null}
 
       <section className="grid gap-3 md:grid-cols-4">

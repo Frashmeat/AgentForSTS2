@@ -1,11 +1,7 @@
 import { createContext, useContext, type ReactNode } from "react";
 
 import type { KnowledgeStatus } from "../../shared/api/index.ts";
-import type {
-  WorkspaceExecutionRequestHandler,
-  WorkspaceFeatureAdapterProps,
-  WorkspaceFeatureProps,
-} from "./types.ts";
+import type { WorkspaceExecutionRequestHandler, WorkspaceFeatureAdapterProps, WorkspaceFeatureProps } from "./types.ts";
 
 export interface WorkspaceContextValue {
   knowledgeStatus: KnowledgeStatus | null;
@@ -18,13 +14,7 @@ export interface WorkspaceContextValue {
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
-export function WorkspaceProvider({
-  value,
-  children,
-}: {
-  value: WorkspaceContextValue;
-  children: ReactNode;
-}) {
+export function WorkspaceProvider({ value, children }: { value: WorkspaceContextValue; children: ReactNode }) {
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }
 
@@ -40,9 +30,7 @@ export function useOptionalWorkspaceContext() {
   return useContext(WorkspaceContext);
 }
 
-export function useResolvedWorkspaceFeatureProps(
-  props: WorkspaceFeatureAdapterProps,
-): WorkspaceFeatureProps {
+export function useResolvedWorkspaceFeatureProps(props: WorkspaceFeatureAdapterProps): WorkspaceFeatureProps {
   const workspace = useOptionalWorkspaceContext();
   return {
     onRequestExecution: props.onRequestExecution ?? workspace?.onRequestExecution,

@@ -11,14 +11,8 @@ export function KnowledgeGuideDialog({ open, status, onClose }: KnowledgeGuideDi
     return null;
   }
 
-  const gameSourceLabel =
-    status?.game?.source_mode === "runtime_decompiled"
-      ? "运行时知识目录"
-      : "缺失";
-  const baselibSourceLabel =
-    status?.baselib?.source_mode === "runtime_decompiled"
-      ? "运行时知识目录"
-      : "缺失";
+  const gameSourceLabel = status?.game?.source_mode === "runtime_decompiled" ? "运行时知识目录" : "缺失";
+  const baselibSourceLabel = status?.baselib?.source_mode === "runtime_decompiled" ? "运行时知识目录" : "缺失";
 
   return (
     <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center px-4" onClick={onClose}>
@@ -35,7 +29,8 @@ export function KnowledgeGuideDialog({ open, status, onClose }: KnowledgeGuideDi
         <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-2">
           <h4 className="text-sm font-semibold text-amber-900">运行时唯一真源</h4>
           <p className="text-xs text-amber-800">
-            当前应用只读取 <code>runtime/knowledge/</code> 下的知识文件。发行包会自带这份目录，用户可以直接查看和编辑，后续知识读取会按修改后的内容生效。
+            当前应用只读取 <code>runtime/knowledge/</code>{" "}
+            下的知识文件。发行包会自带这份目录，用户可以直接查看和编辑，后续知识读取会按修改后的内容生效。
           </p>
           <p className="text-xs text-amber-700">
             仓库内的静态文件只用于开发期和打包期生成初始化种子，不再作为运行时并列知识来源。
@@ -47,9 +42,13 @@ export function KnowledgeGuideDialog({ open, status, onClose }: KnowledgeGuideDi
             <h4 className="text-sm font-semibold text-slate-800">游戏知识库来源</h4>
             <p className="text-xs text-slate-500">自动检测到的 `sts2_path` 与 Steam `app manifest / 安装版本文本`。</p>
             <p className="text-xs text-slate-600 break-all">当前路径：{status?.game?.configured_path || "未检测到"}</p>
-            <p className="text-xs text-slate-600">当前版本：{status?.game?.current_version || status?.game?.version || "未知"}</p>
+            <p className="text-xs text-slate-600">
+              当前版本：{status?.game?.current_version || status?.game?.version || "未知"}
+            </p>
             <p className="text-xs text-slate-600">当前实际使用来源：{gameSourceLabel}</p>
-            <p className="text-xs text-slate-600 break-all">当前知识路径：{status?.game?.knowledge_path || "未检测到"}</p>
+            <p className="text-xs text-slate-600 break-all">
+              当前知识路径：{status?.game?.knowledge_path || "未检测到"}
+            </p>
           </section>
 
           <section className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-2">
@@ -63,9 +62,13 @@ export function KnowledgeGuideDialog({ open, status, onClose }: KnowledgeGuideDi
             >
               https://github.com/Alchyr/BaseLib-StS2/releases
             </a>
-            <p className="text-xs text-slate-600">当前 release：{status?.baselib?.latest_release_tag || status?.baselib?.release_tag || "未知"}</p>
+            <p className="text-xs text-slate-600">
+              当前 release：{status?.baselib?.latest_release_tag || status?.baselib?.release_tag || "未知"}
+            </p>
             <p className="text-xs text-slate-600">当前实际使用来源：{baselibSourceLabel}</p>
-            <p className="text-xs text-slate-600 break-all">当前知识路径：{status?.baselib?.knowledge_path || "未检测到"}</p>
+            <p className="text-xs text-slate-600 break-all">
+              当前知识路径：{status?.baselib?.knowledge_path || "未检测到"}
+            </p>
           </section>
         </div>
 

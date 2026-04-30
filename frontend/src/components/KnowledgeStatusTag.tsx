@@ -42,10 +42,7 @@ function resolveStatusDotTone(status: KnowledgeStatus["status"] | undefined) {
   }
 }
 
-export function KnowledgeStatusTag({
-  status,
-  onOpenGuide,
-}: KnowledgeStatusTagProps) {
+export function KnowledgeStatusTag({ status, onOpenGuide }: KnowledgeStatusTagProps) {
   const statusLabel = resolveStatusLabel(status?.status);
   const gameVersion = status?.game.current_version || status?.game.version || "未知";
   const baselibVersion = status?.baselib.latest_release_tag || status?.baselib.release_tag || "未知";

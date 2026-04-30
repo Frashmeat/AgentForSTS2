@@ -47,7 +47,11 @@ export function AdminRefundsPage() {
         <ReceiptText className="text-violet-700" size={22} />
       </header>
 
-      {error ? <section className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</section> : null}
+      {error ? (
+        <section className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {error}
+        </section>
+      ) : null}
 
       <section className="rounded-lg border border-white bg-white/85 p-4 shadow-sm">
         <div className="flex flex-wrap gap-2">
@@ -57,7 +61,12 @@ export function AdminRefundsPage() {
             placeholder="用户编号"
             className="min-w-48 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
           />
-          <button type="button" onClick={() => void loadRefunds()} className="inline-flex items-center gap-2 rounded-lg bg-violet-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-violet-800" disabled={loading}>
+          <button
+            type="button"
+            onClick={() => void loadRefunds()}
+            className="inline-flex items-center gap-2 rounded-lg bg-violet-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-violet-800"
+            disabled={loading}
+          >
             <Search size={16} />
             <span>查询退款记录</span>
           </button>

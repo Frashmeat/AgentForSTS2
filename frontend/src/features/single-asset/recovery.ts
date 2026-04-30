@@ -1,9 +1,6 @@
 import { getApproval, type ApprovalRequest } from "../../shared/api/index.ts";
 import type { AssetType, Stage } from "./model.ts";
-import {
-  createInitialSingleAssetWorkflowState,
-  type SingleAssetWorkflowState,
-} from "./state.ts";
+import { createInitialSingleAssetWorkflowState, type SingleAssetWorkflowState } from "./state.ts";
 
 export const SINGLE_ASSET_SNAPSHOT_KEY = "ats_single_asset_v1";
 
@@ -144,9 +141,7 @@ function normalizeApprovalRequests(value: unknown): ApprovalRequest[] {
   if (!Array.isArray(value)) {
     return [];
   }
-  return value
-    .map((item) => normalizeApprovalRequest(item))
-    .filter((item): item is ApprovalRequest => item !== null);
+  return value.map((item) => normalizeApprovalRequest(item)).filter((item): item is ApprovalRequest => item !== null);
 }
 
 function normalizeWorkflowSnapshot(value: unknown): SingleAssetWorkflowState {
@@ -247,10 +242,7 @@ export function loadSingleAssetSnapshot(storage: StorageLike = localStorage): Si
   }
 }
 
-export function saveSingleAssetSnapshot(
-  storage: StorageLike = localStorage,
-  state: SingleAssetRecoveryState,
-): void {
+export function saveSingleAssetSnapshot(storage: StorageLike = localStorage, state: SingleAssetRecoveryState): void {
   try {
     storage.setItem(SINGLE_ASSET_SNAPSHOT_KEY, JSON.stringify(serializeSingleAssetSnapshot(state)));
   } catch {}
@@ -266,10 +258,7 @@ export async function refreshRecoveredSingleAssetApprovals(
   state: SingleAssetRecoveryState,
   fetchApproval: (actionId: string) => Promise<ApprovalRequest> = getApproval,
 ): Promise<SingleAssetRecoveryState> {
-  if (
-    state.workflowState.stage !== "approval_pending" ||
-    state.workflowState.approvalRequests.length === 0
-  ) {
+  if (state.workflowState.stage !== "approval_pending" || state.workflowState.approvalRequests.length === 0) {
     return state;
   }
 

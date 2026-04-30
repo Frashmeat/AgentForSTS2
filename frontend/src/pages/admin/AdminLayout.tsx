@@ -50,9 +50,7 @@ const adminNavGroups: Array<{ label: string; items: AdminNavItem[] }> = [
 function adminLinkClass({ isActive }: { isActive: boolean }) {
   return [
     "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition",
-    isActive
-      ? "bg-white text-violet-950 shadow-sm"
-      : "text-violet-100/80 hover:bg-white/10 hover:text-white",
+    isActive ? "bg-white text-violet-950 shadow-sm" : "text-violet-100/80 hover:bg-white/10 hover:text-white",
   ].join(" ");
 }
 
@@ -77,12 +75,7 @@ export function AdminLayout() {
                 <p className="px-3 text-[11px] font-semibold uppercase text-violet-100/50">{group.label}</p>
                 <div className="space-y-1">
                   {group.items.map((item) => (
-                    <NavLink
-                      key={item.path}
-                      to={item.path}
-                      end={item.path === "/admin"}
-                      className={adminLinkClass}
-                    >
+                    <NavLink key={item.path} to={item.path} end={item.path === "/admin"} className={adminLinkClass}>
                       <item.icon size={16} aria-hidden="true" />
                       <span>{item.label}</span>
                     </NavLink>

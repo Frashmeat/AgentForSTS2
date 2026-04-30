@@ -1,10 +1,6 @@
 import type { ApprovalRequest } from "../../shared/api/index.ts";
 import type { WorkflowLogChannel } from "../../shared/types/workflow.ts";
-import {
-  appendWorkflowLogEntry,
-  resolveNextWorkflowModel,
-  type WorkflowLogEntry,
-} from "../../shared/workflowLog.ts";
+import { appendWorkflowLogEntry, resolveNextWorkflowModel, type WorkflowLogEntry } from "../../shared/workflowLog.ts";
 import type { AssetType, Stage } from "./model";
 
 export interface SingleAssetWorkflowState {
@@ -120,7 +116,7 @@ export function singleAssetWorkflowReducer(
         showMorePrompt: false,
       };
     }
-    case "approval_pending_received":
+    case "approval_pending_received": {
       const approvalEntry: WorkflowLogEntry = {
         text: "已生成待审批动作，等待用户审批后继续执行。",
         source: "workflow",
@@ -134,6 +130,7 @@ export function singleAssetWorkflowReducer(
         agentLog: [...state.agentLog, approvalEntry.text],
         agentLogEntries: appendWorkflowLogEntry(state.agentLogEntries, approvalEntry),
       };
+    }
     case "workflow_failed":
       return {
         ...state,
@@ -164,7 +161,7 @@ export function singleAssetWorkflowReducer(
         ...state,
         genLog: [...state.genLog, action.message],
       };
-    case "agent_log_appended":
+    case "agent_log_appended": {
       const entry: WorkflowLogEntry = {
         text: action.message,
         source: action.source,
@@ -177,6 +174,7 @@ export function singleAssetWorkflowReducer(
         agentLogEntries: appendWorkflowLogEntry(state.agentLogEntries, entry),
         currentAgentModel: resolveNextWorkflowModel(state.currentAgentModel, entry),
       };
+    }
     case "flow_stage_pushed":
       return {
         ...state,

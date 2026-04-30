@@ -88,7 +88,11 @@ export function AdminExecutionsPage() {
         <FileSearch className="text-violet-700" size={22} />
       </header>
 
-      {error ? <section className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</section> : null}
+      {error ? (
+        <section className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {error}
+        </section>
+      ) : null}
 
       <section className="rounded-lg border border-white bg-white/85 p-4 shadow-sm">
         <div className="flex flex-wrap gap-2">
@@ -141,9 +145,15 @@ export function AdminExecutionsPage() {
                         <td className="px-3 py-2 font-medium text-slate-900">{execution.id}</td>
                         <td className="px-3 py-2 text-slate-600">{execution.job_id}</td>
                         <td className="px-3 py-2 text-slate-600">{execution.job_item_id}</td>
-                        <td className="px-3 py-2 text-slate-600">{formatAdminProvider(execution.provider)} / {execution.model}</td>
+                        <td className="px-3 py-2 text-slate-600">
+                          {formatAdminProvider(execution.provider)} / {execution.model}
+                        </td>
                         <td className="px-3 py-2">
-                          <span className={`rounded-md border px-2 py-1 text-xs font-medium ${statusClass(execution.status)}`}>{status.label}</span>
+                          <span
+                            className={`rounded-md border px-2 py-1 text-xs font-medium ${statusClass(execution.status)}`}
+                          >
+                            {status.label}
+                          </span>
                         </td>
                       </tr>
                     );
@@ -171,11 +181,15 @@ export function AdminExecutionsPage() {
                 <div className="mt-2 grid gap-2 sm:grid-cols-2">
                   <div className="rounded-lg border border-slate-100 bg-white px-3 py-2">
                     <p className="text-[11px] font-semibold text-slate-400">step_protocol_version</p>
-                    <p className="mt-1 break-all text-xs text-slate-600">{selectedExecution.step_protocol_version || "未记录"}</p>
+                    <p className="mt-1 break-all text-xs text-slate-600">
+                      {selectedExecution.step_protocol_version || "未记录"}
+                    </p>
                   </div>
                   <div className="rounded-lg border border-slate-100 bg-white px-3 py-2">
                     <p className="text-[11px] font-semibold text-slate-400">result_schema_version</p>
-                    <p className="mt-1 break-all text-xs text-slate-600">{selectedExecution.result_schema_version || "未记录"}</p>
+                    <p className="mt-1 break-all text-xs text-slate-600">
+                      {selectedExecution.result_schema_version || "未记录"}
+                    </p>
                   </div>
                 </div>
               </details>

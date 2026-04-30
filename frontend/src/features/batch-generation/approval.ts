@@ -41,10 +41,7 @@ export function applyBatchApprovalUpdate(
   return changed ? next : itemStates;
 }
 
-export function markBatchApprovalResuming(
-  itemStates: BatchItemStateRecord,
-  itemId: string,
-): BatchItemStateRecord {
+export function markBatchApprovalResuming(itemStates: BatchItemStateRecord, itemId: string): BatchItemStateRecord {
   const actionIds = new Set((itemStates[itemId]?.approvalRequests ?? []).map((request) => request.action_id));
   if (actionIds.size === 0) {
     return itemStates;

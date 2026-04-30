@@ -19,9 +19,7 @@ export function QuotaCard({ quota }: { quota: PlatformQuotaView }) {
       <div className="mt-6 grid gap-4 md:grid-cols-4">
         <article className="platform-page-subcard p-4">
           <p className="text-sm text-slate-500">剩余次数</p>
-          <p className="mt-2 text-2xl font-semibold text-slate-900">
-            {remaining}
-          </p>
+          <p className="mt-2 text-2xl font-semibold text-slate-900">{remaining}</p>
         </article>
         <article className="platform-page-subcard p-4">
           <p className="text-sm text-slate-500">总次数</p>

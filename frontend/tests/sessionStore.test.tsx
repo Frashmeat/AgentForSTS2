@@ -2,11 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import {
-  createInitialSessionState,
-  resolveSessionState,
-  sessionReducer,
-} from "../src/shared/session/store.tsx";
+import { createInitialSessionState, resolveSessionState, sessionReducer } from "../src/shared/session/store.tsx";
 
 function readSource(path: string) {
   return readFileSync(new URL(path, import.meta.url), "utf8");

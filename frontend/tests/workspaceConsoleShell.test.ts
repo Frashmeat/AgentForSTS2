@@ -11,7 +11,10 @@ test("workspace root is wrapped by a dedicated WorkspaceShell", () => {
   const configSource = readSource("../src/features/workspace/config.ts");
   const shellSource = readSource("../src/components/workspace/WorkspaceShell.tsx");
 
-  assert.match(appSource, /import\s+\{\s*WorkspaceShell\s*\}\s+from\s+"\.\/components\/workspace\/WorkspaceShell\.tsx";/);
+  assert.match(
+    appSource,
+    /import\s+\{\s*WorkspaceShell\s*\}\s+from\s+"\.\/components\/workspace\/WorkspaceShell\.tsx";/,
+  );
   assert.match(configSource, /export const workspaceNavItems/);
   assert.match(appSource, /<WorkspaceShell[\s\S]*activeTab=\{activeTab\}/);
   assert.match(appSource, /WorkspaceHome/);

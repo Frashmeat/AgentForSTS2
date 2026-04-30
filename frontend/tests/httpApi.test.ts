@@ -1,13 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import {
-  buildApiPath,
-  buildBackendUrl,
-  requestJson,
-  loadAppConfig,
-  generateModPlan,
-} from "../src/shared/api/index.ts";
+import { buildApiPath, buildBackendUrl, requestJson, loadAppConfig, generateModPlan } from "../src/shared/api/index.ts";
 
 interface MockResponseInit {
   ok: boolean;
@@ -56,14 +50,11 @@ test("requestJson throws response text on non-ok response", async () => {
     fetch: async () =>
       createMockResponse({
         ok: false,
-        text: "{\"detail\":\"boom\"}",
+        text: '{"detail":"boom"}',
       }),
   });
 
-  await assert.rejects(
-    () => requestJson("/api/config"),
-    /boom/,
-  );
+  await assert.rejects(() => requestJson("/api/config"), /boom/);
 });
 
 test("requestJson unwraps json detail field on non-ok response", async () => {
@@ -71,14 +62,11 @@ test("requestJson unwraps json detail field on non-ok response", async () => {
     fetch: async () =>
       createMockResponse({
         ok: false,
-        text: "{\"detail\":\"authentication required\"}",
+        text: '{"detail":"authentication required"}',
       }),
   });
 
-  await assert.rejects(
-    () => requestJson("/api/me/profile", { backend: "web" }),
-    /authentication required/,
-  );
+  await assert.rejects(() => requestJson("/api/me/profile", { backend: "web" }), /authentication required/);
 });
 
 test("requestJson unwraps structured error envelope message on non-ok response", async () => {
@@ -101,10 +89,7 @@ test("requestJson unwraps structured error envelope message on non-ok response",
       }),
   });
 
-  await assert.rejects(
-    () => requestJson("/api/project/create", { backend: "workstation" }),
-    /请先选择项目目录/,
-  );
+  await assert.rejects(() => requestJson("/api/project/create", { backend: "workstation" }), /请先选择项目目录/);
 });
 
 test("requestJson falls back to friendly message when non-ok response text is empty", async () => {
@@ -116,10 +101,7 @@ test("requestJson falls back to friendly message when non-ok response text is em
       }),
   });
 
-  await assert.rejects(
-    () => requestJson("/api/config"),
-    /请求失败，请稍后重试/,
-  );
+  await assert.rejects(() => requestJson("/api/config"), /请求失败，请稍后重试/);
 });
 
 test("requestJson routes to configured web backend when backend target is set", async () => {
@@ -180,10 +162,7 @@ test("buildApiPath appends only defined query params", () => {
     "/api/platform/jobs/123/events?user_id=7&after_id=9",
   );
 
-  assert.equal(
-    buildApiPath("/api/admin/quota/refunds", {}),
-    "/api/admin/quota/refunds",
-  );
+  assert.equal(buildApiPath("/api/admin/quota/refunds", {}), "/api/admin/quota/refunds");
 });
 
 test("buildBackendUrl keeps same-origin by default and applies configured workstation base", () => {
@@ -232,10 +211,7 @@ test("independent frontend without workstation endpoint fails loudly", async () 
   });
 
   try {
-    await assert.rejects(
-      () => loadAppConfig(),
-      /workstation backend endpoint is not configured/i,
-    );
+    await assert.rejects(() => loadAppConfig(), /workstation backend endpoint is not configured/i);
   } finally {
     if (typeof originalLocation === "undefined") {
       delete runtimeGlobals.location;

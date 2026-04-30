@@ -26,7 +26,7 @@ function pickText(...values: unknown[]): string | null {
 
 function maybeParseJsonString(value: string): unknown | null {
   const trimmed = value.trim();
-  if (!trimmed || !["{", "[", "\""].includes(trimmed[0] ?? "")) {
+  if (!trimmed || !["{", "[", '"'].includes(trimmed[0] ?? "")) {
     return null;
   }
   try {

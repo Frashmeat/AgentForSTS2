@@ -1,12 +1,5 @@
-import type {
-  BuildProjectResponse,
-  PackageProjectResponse,
-} from "../shared/api/workflow.ts";
-import {
-  appendWorkflowLogEntry,
-  resolveNextWorkflowModel,
-  type WorkflowLogEntry,
-} from "../shared/workflowLog.ts";
+import type { BuildProjectResponse, PackageProjectResponse } from "../shared/api/workflow.ts";
+import { appendWorkflowLogEntry, resolveNextWorkflowModel, type WorkflowLogEntry } from "../shared/workflowLog.ts";
 
 export type BuildDeployAction = "deploy" | "build" | "package";
 export type BuildDeployStage = "idle" | "running" | "done" | "error";
@@ -63,10 +56,7 @@ export function startBuildDeployAction(action: BuildDeployAction): BuildDeploySt
   };
 }
 
-export function appendBuildDeployLog(
-  state: BuildDeployState,
-  entry: WorkflowLogEntry,
-): BuildDeployState {
+export function appendBuildDeployLog(state: BuildDeployState, entry: WorkflowLogEntry): BuildDeployState {
   return {
     ...state,
     log: [...state.log, entry.text],
@@ -82,9 +72,7 @@ export function normalizeBuildOutputLines(output: string): string[] {
     .filter(Boolean);
 }
 
-export function finalizeBuildProjectResult(
-  response: BuildProjectResponse,
-): BuildDeployActionResult {
+export function finalizeBuildProjectResult(response: BuildProjectResponse): BuildDeployActionResult {
   const log = normalizeBuildOutputLines(response.output);
   if (response.success) {
     return {
@@ -102,9 +90,7 @@ export function finalizeBuildProjectResult(
   };
 }
 
-export function finalizePackageProjectResult(
-  response: PackageProjectResponse,
-): BuildDeployActionResult {
+export function finalizePackageProjectResult(response: PackageProjectResponse): BuildDeployActionResult {
   if (response.success) {
     return {
       stage: "done",
@@ -121,10 +107,7 @@ export function finalizePackageProjectResult(
   };
 }
 
-export function finalizeDeployResult(
-  state: BuildDeployState,
-  deployedTo: string | null,
-): BuildDeployState {
+export function finalizeDeployResult(state: BuildDeployState, deployedTo: string | null): BuildDeployState {
   return {
     ...state,
     stage: "done",
@@ -134,10 +117,7 @@ export function finalizeDeployResult(
   };
 }
 
-export function failBuildDeployAction(
-  state: BuildDeployState,
-  errorMsg: string,
-): BuildDeployState {
+export function failBuildDeployAction(state: BuildDeployState, errorMsg: string): BuildDeployState {
   return {
     ...state,
     stage: "error",
@@ -170,9 +150,7 @@ export function describeBuildDeployRunningMessage(action: BuildDeployAction): st
   return `${describeBuildDeployAction(action)}中…`;
 }
 
-export function describeBuildDeployCompletionView(
-  state: BuildDeployState,
-): BuildDeployCompletionView | null {
+export function describeBuildDeployCompletionView(state: BuildDeployState): BuildDeployCompletionView | null {
   if (state.stage !== "done" || !state.action) {
     return null;
   }
@@ -200,10 +178,7 @@ export function describeBuildDeployCompletionView(
   return {
     tone: "success",
     title: state.summary ?? "执行成功",
-    detail:
-      state.action === "build"
-        ? "已完成项目构建，可继续部署或排查构建输出。"
-        : "已完成项目打包。",
+    detail: state.action === "build" ? "已完成项目构建，可继续部署或排查构建输出。" : "已完成项目打包。",
     detailMonospace: false,
     showOpenSettings: false,
   };

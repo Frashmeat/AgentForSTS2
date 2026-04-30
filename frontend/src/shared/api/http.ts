@@ -47,9 +47,11 @@ function extractResponseErrorMessage(rawText: string): string {
 }
 
 function readLocationUrl(): URL | null {
-  const locationLike = (globalThis as typeof globalThis & {
-    location?: Partial<Location> | URL;
-  }).location;
+  const locationLike = (
+    globalThis as typeof globalThis & {
+      location?: Partial<Location> | URL;
+    }
+  ).location;
 
   if (typeof locationLike === "undefined") {
     return null;
@@ -65,7 +67,8 @@ function readLocationUrl(): URL | null {
 
   if (typeof locationLike.host === "string" && locationLike.host.length > 0) {
     const protocol = typeof locationLike.protocol === "string" ? locationLike.protocol : DEFAULT_FRONTEND_HTTP_PROTOCOL;
-    const pathname = typeof locationLike.pathname === "string" && locationLike.pathname.length > 0 ? locationLike.pathname : "/";
+    const pathname =
+      typeof locationLike.pathname === "string" && locationLike.pathname.length > 0 ? locationLike.pathname : "/";
     try {
       return new URL(`${protocol}//${locationLike.host}${pathname}`);
     } catch {
@@ -190,14 +193,7 @@ export function buildWorkstationWebSocketUrl(path: string): string {
 }
 
 export async function requestJson<T>(path: string, options: RequestJsonOptions = {}): Promise<T> {
-  const {
-    body,
-    headers,
-    method = "GET",
-    backend = "same-origin",
-    credentials,
-    ...rest
-  } = options;
+  const { body, headers, method = "GET", backend = "same-origin", credentials, ...rest } = options;
   const hasBody = typeof body !== "undefined";
   const response = await fetch(buildBackendUrl(path, backend), {
     ...rest,

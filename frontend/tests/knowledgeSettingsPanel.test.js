@@ -7,7 +7,9 @@ function readSource(path) {
 }
 
 function extractKnowledgeRefreshBlock(source) {
-  return source.match(/useEffect\(\(\) => \{\s*if \(!knowledgeTaskId\) \{[\s\S]*?\}\s*, \[knowledgeTaskId\]\);/)?.[0] ?? "";
+  return (
+    source.match(/useEffect\(\(\) => \{\s*if \(!knowledgeTaskId\) \{[\s\S]*?\}\s*, \[knowledgeTaskId\]\);/)?.[0] ?? ""
+  );
 }
 
 test("settings panel exposes knowledge status, update action and knowledge guide action", () => {

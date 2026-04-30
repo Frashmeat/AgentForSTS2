@@ -28,5 +28,8 @@ test("settings panel ignores repeated detected path values so auto-save debounce
 
   assert.match(source, /if \(cur\[path\[path\.length - 1\]\] === value\) \{\s*return prev;\s*\}/);
   assert.match(source, /if \(snapshot\.sts2_path\) \{\s*set\(\["sts2_path"\], snapshot\.sts2_path\);\s*\}/);
-  assert.match(source, /if \(snapshot\.godot_exe_path\) \{\s*set\(\["godot_exe_path"\], snapshot\.godot_exe_path\);\s*\}/);
+  assert.match(
+    source,
+    /if \(snapshot\.godot_exe_path\) \{\s*set\(\["godot_exe_path"\], snapshot\.godot_exe_path\);\s*\}/,
+  );
 });

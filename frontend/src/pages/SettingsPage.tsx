@@ -26,10 +26,14 @@ export function SettingsPage() {
             <span>返回工作区</span>
           </Link>
           <div className="space-y-2">
-            <p className="text-xs uppercase tracking-[0.24em] text-[color:var(--workspace-text-muted)]">Workspace Settings</p>
+            <p className="text-xs uppercase tracking-[0.24em] text-[color:var(--workspace-text-muted)]">
+              Workspace Settings
+            </p>
             <div className="space-y-1">
               <h1 className="text-3xl font-semibold text-slate-900">工作区设置</h1>
-              <p className="max-w-2xl text-sm text-slate-500">统一管理项目路径、Code Agent 执行方式、图像生成配置与服务器模式默认执行配置。</p>
+              <p className="max-w-2xl text-sm text-slate-500">
+                统一管理项目路径、Code Agent 执行方式、图像生成配置与服务器模式默认执行配置。
+              </p>
             </div>
           </div>
         </div>

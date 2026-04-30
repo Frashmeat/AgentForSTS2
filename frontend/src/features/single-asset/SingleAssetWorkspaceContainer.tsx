@@ -1,12 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 
 import { type SingleAssetSocket } from "../../lib/single_asset_ws.ts";
-import {
-  approveApproval,
-  executeApproval,
-  rejectApproval,
-  type ApprovalRequest,
-} from "../../shared/api/index.ts";
+import { approveApproval, executeApproval, rejectApproval, type ApprovalRequest } from "../../shared/api/index.ts";
 import type { PlatformJobCreateItem } from "../../shared/api/platform.ts";
 import { runApprovalAction } from "../../shared/approvalAction.ts";
 import { useDefaultProjectRoot } from "../../shared/useDefaultProjectRoot.ts";
@@ -48,23 +43,25 @@ export function SingleAssetWorkspaceContainer() {
   const [autoMode, setAutoMode] = useState(() => initialSingleAssetSnapshot?.autoMode ?? false);
   const autoModeRef = useRef(false);
   const [imageMode, setImageMode] = useState<"ai" | "upload">(() => initialSingleAssetSnapshot?.imageMode ?? "ai");
-  const [uploadedImageB64, setUploadedImageB64] = useState<string>(() => initialSingleAssetSnapshot?.uploadedImageB64 ?? "");
-  const [uploadedImageName, setUploadedImageName] = useState<string>(() => initialSingleAssetSnapshot?.uploadedImageName ?? "");
-  const [uploadedImagePreview, setUploadedImagePreview] = useState<string | null>(() => initialSingleAssetSnapshot?.uploadedImagePreview ?? null);
+  const [uploadedImageB64, setUploadedImageB64] = useState<string>(
+    () => initialSingleAssetSnapshot?.uploadedImageB64 ?? "",
+  );
+  const [uploadedImageName, setUploadedImageName] = useState<string>(
+    () => initialSingleAssetSnapshot?.uploadedImageName ?? "",
+  );
+  const [uploadedImagePreview, setUploadedImagePreview] = useState<string | null>(
+    () => initialSingleAssetSnapshot?.uploadedImagePreview ?? null,
+  );
   const [dragOver, setDragOver] = useState(false);
   const [restoredSnapshotMode, setRestoredSnapshotMode] = useState(() => initialSingleAssetSnapshot !== null);
   const [restoredApprovalRefreshPending, setRestoredApprovalRefreshPending] = useState(
     () => initialSingleAssetSnapshot?.workflowState.stage === "approval_pending",
   );
-  const {
-    projectCreateBusy,
-    clearProjectCreationFeedback,
-    resetProjectCreationState,
-    createProjectAtRoot,
-  } = useProjectCreation({
-    onProjectCreated: setProjectRoot,
-    onStatusNotice,
-  });
+  const { projectCreateBusy, clearProjectCreationFeedback, resetProjectCreationState, createProjectAtRoot } =
+    useProjectCreation({
+      onProjectCreated: setProjectRoot,
+      onStatusNotice,
+    });
 
   useEffect(() => {
     autoModeRef.current = autoMode;
@@ -245,10 +242,7 @@ export function SingleAssetWorkspaceContainer() {
     batchOffsetRef.current = 0;
   }
 
-  async function handleApprovalAction(
-    actionId: string,
-    action: (id: string) => Promise<ApprovalRequest>,
-  ) {
+  async function handleApprovalAction(actionId: string, action: (id: string) => Promise<ApprovalRequest>) {
     await runApprovalAction({
       actionId,
       action,
@@ -258,9 +252,9 @@ export function SingleAssetWorkspaceContainer() {
       onSuccess(updated) {
         dispatchWorkflow({
           type: "approval_requests_updated",
-          requests: workflowState.approvalRequests.map((request) => (
-            request.action_id === actionId ? updated : request
-          )),
+          requests: workflowState.approvalRequests.map((request) =>
+            request.action_id === actionId ? updated : request,
+          ),
         });
       },
       onError(message) {

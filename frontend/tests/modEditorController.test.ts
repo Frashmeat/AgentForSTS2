@@ -282,9 +282,5 @@ test("mod editor controllers reset sockets and state through runtime helpers", (
     "setAnalysisSocket:null",
     "resetAnalysis",
   ]);
-  assert.deepEqual(modifyRuntime.events.slice(-3), [
-    "closeModifySocket",
-    "setModifySocket:null",
-    "resetModify",
-  ]);
+  assert.deepEqual(modifyRuntime.events.slice(-3), ["closeModifySocket", "setModifySocket:null", "resetModify"]);
 });

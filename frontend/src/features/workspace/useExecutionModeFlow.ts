@@ -30,7 +30,10 @@ function pickInitialServerProfileId(
   if (availableProfiles.length === 0) {
     return null;
   }
-  if (preference?.default_execution_profile_id !== null && typeof preference?.default_execution_profile_id !== "undefined") {
+  if (
+    preference?.default_execution_profile_id !== null &&
+    typeof preference?.default_execution_profile_id !== "undefined"
+  ) {
     const preferredProfile = availableProfiles.find(
       (profile) => profile.id === preference.default_execution_profile_id,
     );
@@ -72,11 +75,7 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
   const [serverSelectionNotice, setServerSelectionNotice] = useState<string | null>(null);
   const [pendingStartConfirmation, setPendingStartConfirmation] = useState<PendingStartConfirmation | null>(null);
 
-  function showExecutionNotice(
-    title: string,
-    message: string,
-    tone?: "info" | "success" | "warning" | "error",
-  ) {
+  function showExecutionNotice(title: string, message: string, tone?: "info" | "success" | "warning" | "error") {
     if (tone) {
       onStatusNotice?.({ title, message, tone });
       return;
@@ -159,13 +158,11 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
     }
 
     const localUnavailableReasons = [
-      ...(capability.text_ai_available ? [] : capability.text_ai_missing_reasons ?? []),
-      ...(request.requiresCodeAgent && !capability.code_agent_available ? capability.code_agent_missing_reasons ?? [] : []),
-      ...(
-        request.requiresImageAi && !capability.image_ai_available
-          ? capability.image_ai_missing_reasons ?? []
-          : []
-      ),
+      ...(capability.text_ai_available ? [] : (capability.text_ai_missing_reasons ?? [])),
+      ...(request.requiresCodeAgent && !capability.code_agent_available
+        ? (capability.code_agent_missing_reasons ?? [])
+        : []),
+      ...(request.requiresImageAi && !capability.image_ai_available ? (capability.image_ai_missing_reasons ?? []) : []),
     ];
 
     setPendingExecution({
@@ -249,18 +246,12 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
       (profile) => profile.id === selectedServerProfileId && profile.available,
     );
     if (!selectedProfile) {
-      showExecutionNotice(
-        "没有可用的服务器配置",
-        serverProfilesError ?? "当前没有可用的服务器执行配置",
-      );
+      showExecutionNotice("没有可用的服务器配置", serverProfilesError ?? "当前没有可用的服务器执行配置");
       return;
     }
 
     try {
-      if (
-        rememberServerProfile &&
-        selectedProfile.id !== serverPreference?.default_execution_profile_id
-      ) {
+      if (rememberServerProfile && selectedProfile.id !== serverPreference?.default_execution_profile_id) {
         const updatedPreference = await updateMyServerPreferences({
           default_execution_profile_id: selectedProfile.id,
         });
@@ -300,10 +291,7 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
     setServerProfilesLoading(true);
     setServerProfilesError(null);
     try {
-      const [profileView, preference] = await Promise.all([
-        listPlatformExecutionProfiles(),
-        getMyServerPreferences(),
-      ]);
+      const [profileView, preference] = await Promise.all([listPlatformExecutionProfiles(), getMyServerPreferences()]);
       setServerProfiles(profileView.items);
       setServerPreference(preference);
       const nextProfileId = pickInitialServerProfileId(profileView.items, preference);

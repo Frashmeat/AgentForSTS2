@@ -1,8 +1,19 @@
 import { useState, useCallback, useRef, useEffect, useReducer } from "react";
 import {
-  Loader2, ChevronDown, ChevronUp, RotateCcw,
-  CheckCircle2, XCircle, Clock, ImageIcon, Code2, Sparkles, AlertTriangle,
-  Upload, Wand2, StopCircle,
+  Loader2,
+  ChevronDown,
+  ChevronUp,
+  RotateCcw,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  ImageIcon,
+  Code2,
+  Sparkles,
+  AlertTriangle,
+  Upload,
+  Wand2,
+  StopCircle,
 } from "lucide-react";
 import { ApprovalPanel } from "../../components/ApprovalPanel";
 import { approveApproval, executeApproval, rejectApproval, type ApprovalRequest } from "../../lib/approvals";
@@ -76,25 +87,25 @@ const TYPE_LABELS: Record<string, string> = {
 };
 
 const STATUS_ICONS: Record<ItemStatus, React.ReactNode> = {
-  pending:            <Clock size={14} className="text-slate-300" />,
-  img_generating:     <Loader2 size={14} className="text-violet-400 animate-spin" />,
+  pending: <Clock size={14} className="text-slate-300" />,
+  img_generating: <Loader2 size={14} className="text-violet-400 animate-spin" />,
   awaiting_selection: <ImageIcon size={14} className="text-violet-500" />,
-  approval_pending:   <Clock size={14} className="text-violet-500" />,
-  code_generating:    <Code2 size={14} className="text-blue-400 animate-pulse" />,
-  cancelled:          <StopCircle size={14} className="text-slate-400" />,
-  done:               <CheckCircle2 size={14} className="text-green-500" />,
-  error:              <XCircle size={14} className="text-red-500" />,
+  approval_pending: <Clock size={14} className="text-violet-500" />,
+  code_generating: <Code2 size={14} className="text-blue-400 animate-pulse" />,
+  cancelled: <StopCircle size={14} className="text-slate-400" />,
+  done: <CheckCircle2 size={14} className="text-green-500" />,
+  error: <XCircle size={14} className="text-red-500" />,
 };
 
 const STATUS_LABELS: Record<ItemStatus, string> = {
-  pending:            "等待中",
-  img_generating:     "生成图像",
+  pending: "等待中",
+  img_generating: "生成图像",
   awaiting_selection: "等待选图",
-  approval_pending:   "等待审批",
-  code_generating:    "生成代码",
-  cancelled:          "已取消",
-  done:               "完成",
-  error:              "失败",
+  approval_pending: "等待审批",
+  code_generating: "生成代码",
+  cancelled: "已取消",
+  done: "完成",
+  error: "失败",
 };
 
 const PLAN_STORAGE_KEY = "ats_last_plan";
@@ -211,7 +222,7 @@ function normalizeReviewStrictness(value: unknown): ReviewStrictness {
 function readJsonStorage<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) as T : fallback;
+    return raw ? (JSON.parse(raw) as T) : fallback;
   } catch {
     return fallback;
   }
@@ -247,10 +258,7 @@ function hasMeaningfulPlanFieldValue(item: PlanItem, field: string): boolean {
   return value !== null && value !== undefined;
 }
 
-function canProceedFromEditedItemReview(
-  review: PlanReviewPayload | null,
-  items: PlanItem[],
-): boolean {
+function canProceedFromEditedItemReview(review: PlanReviewPayload | null, items: PlanItem[]): boolean {
   if (!review) {
     return true;
   }
@@ -383,15 +391,11 @@ function BatchModePage({
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewFeedback, setReviewFeedback] = useState<ReviewFeedback | null>(null);
   const [reviewFocusItemId, setReviewFocusItemId] = useState<string | null>(null);
-  const [runtimeState, dispatchRuntime] = useReducer(
-    batchWorkflowReducer,
-    undefined,
-    () => ({
-      ...createInitialBatchRuntimeState(),
-      planReview: readJsonStorage<PlanReviewPayload | null>(PLAN_REVIEW_STORAGE_KEY, null),
-      bundleDecisions: readJsonStorage<BundleDecisionRecord>(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, {}),
-    }),
-  );
+  const [runtimeState, dispatchRuntime] = useReducer(batchWorkflowReducer, undefined, () => ({
+    ...createInitialBatchRuntimeState(),
+    planReview: readJsonStorage<PlanReviewPayload | null>(PLAN_REVIEW_STORAGE_KEY, null),
+    bundleDecisions: readJsonStorage<BundleDecisionRecord>(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, {}),
+  }));
   const {
     stage,
     activeItemId,
@@ -410,7 +414,9 @@ function BatchModePage({
 
   const [autoSelectFirst, setAutoSelectFirst] = useState(false);
   const autoSelectRef = useRef(false);
-  useEffect(() => { autoSelectRef.current = autoSelectFirst; }, [autoSelectFirst]);
+  useEffect(() => {
+    autoSelectRef.current = autoSelectFirst;
+  }, [autoSelectFirst]);
   const socketRef = useRef<BatchSocket | null>(null);
 
   useEffect(() => {
@@ -419,8 +425,9 @@ function BatchModePage({
 
   useEffect(() => {
     const nextDecisions = reconcileBundleDecisionRecord(planReview, bundleDecisions);
-    const sameKeys = Object.keys(nextDecisions).length === Object.keys(bundleDecisions).length
-      && Object.entries(nextDecisions).every(([key, value]) => bundleDecisions[key] === value);
+    const sameKeys =
+      Object.keys(nextDecisions).length === Object.keys(bundleDecisions).length &&
+      Object.entries(nextDecisions).every(([key, value]) => bundleDecisions[key] === value);
     if (!sameKeys) {
       dispatchRuntime({ type: "bundle_decisions_set", decisions: nextDecisions });
       writeJsonStorage(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, nextDecisions);
@@ -587,7 +594,7 @@ function BatchModePage({
 
   async function confirmPlan() {
     if (!plan) return;
-    const itemsForStorage = editedItems.map(it => ({ ...it, provided_image_b64: undefined }));
+    const itemsForStorage = editedItems.map((it) => ({ ...it, provided_image_b64: undefined }));
     writeJsonStorage(PLAN_ITEMS_STORAGE_KEY, itemsForStorage);
     writeJsonStorage(PLAN_REVIEW_STORAGE_KEY, planReview);
     writeJsonStorage(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, bundleDecisions);
@@ -678,7 +685,7 @@ function BatchModePage({
   }
 
   async function handleConfirmBundleReview() {
-    const review = planReview ?? await refreshPlanReview();
+    const review = planReview ?? (await refreshPlanReview());
     if (!review) {
       return;
     }
@@ -769,7 +776,7 @@ function BatchModePage({
       createdFrom: "batch_generation",
       inputSummary: plan.summary || requirements.trim() || plan.mod_name,
       requiresCodeAgent: true,
-      requiresImageAi: editedItems.some(item => item.needs_image && !item.provided_image_b64),
+      requiresImageAi: editedItems.some((item) => item.needs_image && !item.provided_image_b64),
       serverWorkspaceProjectName: deriveServerWorkspaceProjectName(),
       items: editedItems.map((item, index) => ({
         item_type: item.type,
@@ -790,16 +797,18 @@ function BatchModePage({
           depends_on: item.depends_on,
         },
       })),
-      serverUploads: editedItems.flatMap((item, index) => (
+      serverUploads: editedItems.flatMap((item, index) =>
         item.provided_image_b64
-          ? [{
-              itemIndex: index,
-              fileName: `${item.name || "uploaded"}.png`,
-              contentBase64: item.provided_image_b64,
-              mimeType: "image/png",
-            }]
-          : []
-      )),
+          ? [
+              {
+                itemIndex: index,
+                fileName: `${item.name || "uploaded"}.png`,
+                contentBase64: item.provided_image_b64,
+                mimeType: "image/png",
+              },
+            ]
+          : [],
+      ),
       runLocal: executeLocal,
     });
   }
@@ -809,7 +818,7 @@ function BatchModePage({
     socketRef.current.send({ action: "select_image", item_id: itemId, index });
     updateItem(itemId, { status: "code_generating" });
     const nextAwaiting = editedItems.find(
-      it => it.id !== itemId && itemStatesRef.current[it.id]?.status === "awaiting_selection"
+      (it) => it.id !== itemId && itemStatesRef.current[it.id]?.status === "awaiting_selection",
     );
     if (nextAwaiting) dispatchRuntime({ type: "active_item_set", itemId: nextAwaiting.id });
   }
@@ -866,10 +875,7 @@ function BatchModePage({
     writeJsonStorage(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, {});
   }
 
-  async function handleApprovalAction(
-    actionId: string,
-    action: (id: string) => Promise<ApprovalRequest>,
-  ) {
+  async function handleApprovalAction(actionId: string, action: (id: string) => Promise<ApprovalRequest>) {
     await runApprovalAction({
       actionId,
       action,
@@ -913,9 +919,11 @@ function BatchModePage({
           </p>
           <textarea
             value={requirements}
-            onChange={e => setRequirements(e.target.value)}
+            onChange={(e) => setRequirements(e.target.value)}
             rows={6}
-            placeholder={"例如：\n我想做一个暗法师角色，主题是腐化和献祭。\n包含3张卡牌（攻击、技能、力量各一张），\n2个遗物（战斗开始触发），\n以及一个腐化叠层的 buff 机制。"}
+            placeholder={
+              "例如：\n我想做一个暗法师角色，主题是腐化和献祭。\n包含3张卡牌（攻击、技能、力量各一张），\n2个遗物（战斗开始触发），\n以及一个腐化叠层的 buff 机制。"
+            }
             className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-100 resize-none"
           />
           <ProjectRootField
@@ -976,9 +984,13 @@ function BatchModePage({
           focusItemId={reviewFocusItemId}
           editedItems={editedItems}
           setEditedItems={updateEditedItems}
-          onRefreshReview={() => { void refreshPlanReview(); }}
+          onRefreshReview={() => {
+            void refreshPlanReview();
+          }}
           onStrictnessChange={handleReviewStrictnessChange}
-          onConfirm={() => { void handleConfirmItemsReview(); }}
+          onConfirm={() => {
+            void handleConfirmItemsReview();
+          }}
           onReset={reset}
         />
       )}
@@ -994,12 +1006,18 @@ function BatchModePage({
           reviewFeedback={reviewFeedback}
           bundleDecisions={bundleDecisions}
           onBack={() => dispatchRuntime({ type: "stage_set", stage: "review_items" })}
-          onRefreshReview={() => { void refreshPlanReview(); }}
+          onRefreshReview={() => {
+            void refreshPlanReview();
+          }}
           onStrictnessChange={handleReviewStrictnessChange}
           onBundleDecisionChange={handleBundleDecisionChange}
-          onBundleSplitRequest={(bundleKey) => { void handleBundleSplitRequest(bundleKey); }}
+          onBundleSplitRequest={(bundleKey) => {
+            void handleBundleSplitRequest(bundleKey);
+          }}
           onBundleReturnToItems={handleBundleReturnToItems}
-          onConfirm={() => { void handleConfirmBundleReview(); }}
+          onConfirm={() => {
+            void handleConfirmBundleReview();
+          }}
           onReset={reset}
         />
       )}
@@ -1011,7 +1029,9 @@ function BatchModePage({
             <AlertTriangle size={16} className="text-red-500 shrink-0 mt-0.5" />
             <div>
               <p className="text-sm font-semibold text-red-700">规划失败</p>
-              {workflowErrorMessage && <pre className="text-xs text-red-600 font-mono mt-1 whitespace-pre-wrap">{workflowErrorMessage}</pre>}
+              {workflowErrorMessage && (
+                <pre className="text-xs text-red-600 font-mono mt-1 whitespace-pre-wrap">{workflowErrorMessage}</pre>
+              )}
             </div>
           </div>
           <button onClick={reset} className="text-sm text-red-500 hover:text-red-700 flex items-center gap-1">
@@ -1035,23 +1055,25 @@ function BatchModePage({
           projectRoot={projectRoot}
           onStatusNotice={onStatusNotice}
           autoSelectFirst={autoSelectFirst}
-          onAutoSelectToggle={() => setAutoSelectFirst(v => !v)}
+          onAutoSelectToggle={() => setAutoSelectFirst((v) => !v)}
           onSelectImage={handleSelectImage}
           onGenerateMore={handleGenerateMore}
           onRetryItem={handleRetryItem}
           approvalBusyActionId={approvalBusyActionId}
-          onApproveAction={(actionId) => { void handleApprovalAction(actionId, approveApproval); }}
-          onRejectAction={(actionId) => { void handleApprovalAction(actionId, (id) => rejectApproval(id)); }}
-          onExecuteAction={(actionId) => { void handleApprovalAction(actionId, executeApproval); }}
+          onApproveAction={(actionId) => {
+            void handleApprovalAction(actionId, approveApproval);
+          }}
+          onRejectAction={(actionId) => {
+            void handleApprovalAction(actionId, (id) => rejectApproval(id));
+          }}
+          onExecuteAction={(actionId) => {
+            void handleApprovalAction(actionId, executeApproval);
+          }}
           onProceedApproval={handleProceedApproval}
           hasLiveSession={socketRef.current !== null}
           onCancelWorkflow={cancelBatch}
-          onUpdatePrompt={(id, prompt) =>
-            updateItem(id, { currentPrompt: prompt })
-          }
-          onToggleMorePrompt={(id) =>
-            updateItem(id, { showMorePrompt: !itemStates[id]?.showMorePrompt })
-          }
+          onUpdatePrompt={(id, prompt) => updateItem(id, { currentPrompt: prompt })}
+          onToggleMorePrompt={(id) => updateItem(id, { showMorePrompt: !itemStates[id]?.showMorePrompt })}
           onReset={reset}
         />
       )}
@@ -1097,14 +1119,16 @@ function ReviewStatusBadge({
   status: PlanItemValidation["status"] | ExecutionBundlePreview["status"];
   kind: "item" | "bundle";
 }) {
-  const label = kind === "item"
-    ? REVIEW_STATUS_LABELS[status as PlanItemValidation["status"]]
-    : BUNDLE_STATUS_LABELS[status as ExecutionBundlePreview["status"]];
-  const tone = status === "clear"
-    ? "bg-green-50 text-green-700 border-green-200"
-    : status === "invalid"
-      ? "bg-red-50 text-red-700 border-red-200"
-      : "bg-amber-50 text-amber-700 border-amber-200";
+  const label =
+    kind === "item"
+      ? REVIEW_STATUS_LABELS[status as PlanItemValidation["status"]]
+      : BUNDLE_STATUS_LABELS[status as ExecutionBundlePreview["status"]];
+  const tone =
+    status === "clear"
+      ? "bg-green-50 text-green-700 border-green-200"
+      : status === "invalid"
+        ? "bg-red-50 text-red-700 border-red-200"
+        : "bg-amber-50 text-amber-700 border-amber-200";
   return <span className={cn("text-xs rounded-full border px-2 py-0.5 font-medium", tone)}>{label}</span>;
 }
 
@@ -1151,9 +1175,7 @@ function ReviewNotice({ message }: { message: string | null }) {
     return null;
   }
   return (
-    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-      {message}
-    </div>
+    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{message}</div>
   );
 }
 
@@ -1162,13 +1184,14 @@ function ReviewFeedbackBanner({ feedback }: { feedback: ReviewFeedback | null })
     return null;
   }
 
-  const toneCls = feedback.tone === "success"
-    ? "border-green-200 bg-green-50 text-green-800"
-    : feedback.tone === "warning"
-      ? "border-amber-200 bg-amber-50 text-amber-800"
-      : feedback.tone === "error"
-        ? "border-red-200 bg-red-50 text-red-800"
-        : "border-violet-200 bg-violet-50 text-violet-800";
+  const toneCls =
+    feedback.tone === "success"
+      ? "border-green-200 bg-green-50 text-green-800"
+      : feedback.tone === "warning"
+        ? "border-amber-200 bg-amber-50 text-amber-800"
+        : feedback.tone === "error"
+          ? "border-red-200 bg-red-50 text-red-800"
+          : "border-violet-200 bg-violet-50 text-violet-800";
 
   return (
     <div className={cn("rounded-xl border px-4 py-3 text-sm", toneCls)}>
@@ -1222,7 +1245,7 @@ function ReviewPlan({
   }, [focusItemId]);
 
   function updateItem(id: string, patch: Partial<PlanItem>) {
-    setEditedItems(editedItems.map(it => it.id === id ? { ...it, ...patch } : it));
+    setEditedItems(editedItems.map((it) => (it.id === id ? { ...it, ...patch } : it)));
   }
 
   function updateStringList(id: string, field: "depends_on" | "affected_targets", value: string) {
@@ -1239,7 +1262,7 @@ function ReviewPlan({
     reader.onload = (e) => {
       const dataUrl = e.target?.result as string;
       const b64 = dataUrl.split(",")[1];
-      setUploadPreviews(p => ({ ...p, [id]: dataUrl }));
+      setUploadPreviews((p) => ({ ...p, [id]: dataUrl }));
       updateItem(id, { provided_image_b64: b64 });
     };
     reader.readAsDataURL(file);
@@ -1260,11 +1283,7 @@ function ReviewPlan({
             </span>
           </div>
 
-          <ReviewStrictnessSelector
-            value={reviewStrictness}
-            disabled={reviewBusy}
-            onChange={onStrictnessChange}
-          />
+          <ReviewStrictnessSelector value={reviewStrictness} disabled={reviewBusy} onChange={onStrictnessChange} />
 
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
             <p className="text-sm font-medium text-slate-700">当前阶段：逐项确认计划描述</p>
@@ -1283,241 +1302,254 @@ function ReviewPlan({
         <ReviewNotice message={reviewError} />
 
         <div className="space-y-2">
-          {editedItems.map(item => {
+          {editedItems.map((item) => {
             const validation = validationById.get(item.id);
             const missingFields = validation?.missing_fields ?? [];
             const issues = validation?.issues ?? [];
             const questions = validation?.clarification_questions ?? [];
 
             return (
-            <div key={item.id} className="rounded-lg border border-slate-200 bg-slate-50 overflow-hidden">
-              <button
-                type="button"
-                className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-slate-100 transition-colors"
-                onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
-              >
-                <span className="text-xs font-medium text-slate-400 bg-slate-200 rounded px-1.5 py-0.5 shrink-0">
-                  {TYPE_LABELS[item.type] ?? item.type}
-                </span>
-                <span className="text-sm font-medium text-slate-700 flex-1">{item.name}</span>
-                {validation && <ReviewStatusBadge status={validation.status} kind="item" />}
-                {item.depends_on.length > 0 && (
-                  <span className="text-xs text-slate-400">依赖 {item.depends_on.length}</span>
-                )}
-                {expandedId === item.id
-                  ? <ChevronUp size={13} className="text-slate-400 shrink-0" />
-                  : <ChevronDown size={13} className="text-slate-400 shrink-0" />
-                }
-              </button>
-
-              {expandedId === item.id && (
-                <div className="px-3 pb-3 space-y-3 border-t border-slate-200 pt-2.5">
-                  {validation && (
-                    <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 space-y-2">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-sm font-semibold text-slate-700">当前评审结果</p>
-                        <ReviewStatusBadge status={validation.status} kind="item" />
-                      </div>
-                      {issues.length > 0 && (
-                        <div className="flex flex-wrap gap-2">
-                          {issues.map((issue) => (
-                            <span key={`${issue.code}-${issue.field ?? "base"}`} className="rounded-full bg-red-50 px-2 py-0.5 text-xs text-red-700">
-                              {issue.message}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                      {missingFields.length > 0 && (
-                        <div className="flex flex-wrap gap-2">
-                          {missingFields.map((field) => (
-                            <span key={field} className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700">
-                              待补：{field}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                      {questions.length > 0 && (
-                        <div className="space-y-1">
-                          {questions.map((question, index) => (
-                            <p key={`${item.id}-question-${index}`} className="text-xs text-slate-600">
-                              {index + 1}. {question}
-                            </p>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+              <div key={item.id} className="rounded-lg border border-slate-200 bg-slate-50 overflow-hidden">
+                <button
+                  type="button"
+                  className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-slate-100 transition-colors"
+                  onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
+                >
+                  <span className="text-xs font-medium text-slate-400 bg-slate-200 rounded px-1.5 py-0.5 shrink-0">
+                    {TYPE_LABELS[item.type] ?? item.type}
+                  </span>
+                  <span className="text-sm font-medium text-slate-700 flex-1">{item.name}</span>
+                  {validation && <ReviewStatusBadge status={validation.status} kind="item" />}
+                  {item.depends_on.length > 0 && (
+                    <span className="text-xs text-slate-400">依赖 {item.depends_on.length}</span>
                   )}
-                  <div className="space-y-1">
-                    <label className="text-xs text-slate-400">名称（英文）</label>
-                    <input
-                      value={item.name}
-                      onChange={e => updateItem(item.id, { name: e.target.value })}
-                      className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm focus:outline-none focus:border-violet-400"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs text-slate-400">目标</label>
-                    <input
-                      value={item.goal}
-                      onChange={e => updateItem(item.id, { goal: e.target.value })}
-                      className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm focus:outline-none focus:border-violet-400"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs text-slate-400">详细描述</label>
-                    <textarea
-                      value={item.detailed_description}
-                      onChange={e => updateItem(item.id, { detailed_description: e.target.value })}
-                      rows={3}
-                      className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-violet-400"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs text-slate-400">用户描述摘要</label>
-                    <textarea
-                      value={item.description}
-                      onChange={e => updateItem(item.id, { description: e.target.value })}
-                      rows={2}
-                      className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-violet-400"
-                    />
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="space-y-1">
-                      <label className="text-xs text-slate-400">范围边界</label>
-                      <textarea
-                        value={item.scope_boundary}
-                        onChange={e => updateItem(item.id, { scope_boundary: e.target.value })}
-                        rows={3}
-                        className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-violet-400"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs text-slate-400">依赖原因</label>
-                      <textarea
-                        value={item.dependency_reason}
-                        onChange={e => updateItem(item.id, { dependency_reason: e.target.value })}
-                        rows={3}
-                        className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-violet-400"
-                      />
-                    </div>
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="space-y-1">
-                      <label className="text-xs text-slate-400">验收说明</label>
-                      <textarea
-                        value={item.acceptance_notes}
-                        onChange={e => updateItem(item.id, { acceptance_notes: e.target.value })}
-                        rows={3}
-                        className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-violet-400"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs text-slate-400">耦合类型</label>
-                      <select
-                        value={item.coupling_kind}
-                        onChange={e => updateItem(item.id, { coupling_kind: e.target.value })}
-                        className="w-full bg-white border border-slate-200 rounded px-2 py-2 text-sm focus:outline-none focus:border-violet-400"
-                      >
-                        <option value="unclear">unclear</option>
-                        <option value="order_only">order_only</option>
-                        <option value="feature_bundle">feature_bundle</option>
-                        <option value="shared_logic">shared_logic</option>
-                        <option value="isolated">isolated</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="space-y-1">
-                      <label className="text-xs text-slate-400">依赖项（逗号或换行分隔）</label>
-                      <textarea
-                        value={item.depends_on.join("\n")}
-                        onChange={e => updateStringList(item.id, "depends_on", e.target.value)}
-                        rows={3}
-                        className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-violet-400"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs text-slate-400">影响目标（逗号或换行分隔）</label>
-                      <textarea
-                        value={item.affected_targets.join("\n")}
-                        onChange={e => updateStringList(item.id, "affected_targets", e.target.value)}
-                        rows={3}
-                        className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-violet-400"
-                      />
-                    </div>
-                  </div>
-                  {item.needs_image && (
-                    <div className="space-y-2">
-                      {/* 图片模式切换 */}
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs text-slate-400">图片来源：</span>
-                        <button
-                          onClick={() => updateItem(item.id, { provided_image_b64: undefined })}
-                          className={cn(
-                            "flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors",
-                            !item.provided_image_b64
-                              ? "bg-violet-700 text-white"
-                              : "bg-slate-100 text-slate-500 hover:bg-slate-200"
-                          )}
-                        >
-                          <Wand2 size={11} /> AI 生成
-                        </button>
-                        <button
-                          onClick={() => {
-                            const input = document.createElement("input");
-                            input.type = "file"; input.accept = "image/*";
-                            input.onchange = () => { if (input.files?.[0]) handleImageFile(item.id, input.files[0]); };
-                            input.click();
-                          }}
-                          className={cn(
-                            "flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors",
-                            item.provided_image_b64
-                              ? "bg-violet-700 text-white"
-                              : "bg-slate-100 text-slate-500 hover:bg-slate-200"
-                          )}
-                        >
-                          <Upload size={11} /> 上传图片
-                        </button>
+                  {expandedId === item.id ? (
+                    <ChevronUp size={13} className="text-slate-400 shrink-0" />
+                  ) : (
+                    <ChevronDown size={13} className="text-slate-400 shrink-0" />
+                  )}
+                </button>
+
+                {expandedId === item.id && (
+                  <div className="px-3 pb-3 space-y-3 border-t border-slate-200 pt-2.5">
+                    {validation && (
+                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 space-y-2">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-sm font-semibold text-slate-700">当前评审结果</p>
+                          <ReviewStatusBadge status={validation.status} kind="item" />
+                        </div>
+                        {issues.length > 0 && (
+                          <div className="flex flex-wrap gap-2">
+                            {issues.map((issue) => (
+                              <span
+                                key={`${issue.code}-${issue.field ?? "base"}`}
+                                className="rounded-full bg-red-50 px-2 py-0.5 text-xs text-red-700"
+                              >
+                                {issue.message}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {missingFields.length > 0 && (
+                          <div className="flex flex-wrap gap-2">
+                            {missingFields.map((field) => (
+                              <span key={field} className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700">
+                                待补：{field}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {questions.length > 0 && (
+                          <div className="space-y-1">
+                            {questions.map((question, index) => (
+                              <p key={`${item.id}-question-${index}`} className="text-xs text-slate-600">
+                                {index + 1}. {question}
+                              </p>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                      {/* 上传预览 */}
-                      {item.provided_image_b64 && uploadPreviews[item.id] && (
-                        <div className="relative w-24 h-24 rounded-lg overflow-hidden border border-violet-300">
-                          <img src={uploadPreviews[item.id]} alt="preview" className="w-full h-full object-cover" />
+                    )}
+                    <div className="space-y-1">
+                      <label className="text-xs text-slate-400">名称（英文）</label>
+                      <input
+                        value={item.name}
+                        onChange={(e) => updateItem(item.id, { name: e.target.value })}
+                        className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm focus:outline-none focus:border-violet-400"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs text-slate-400">目标</label>
+                      <input
+                        value={item.goal}
+                        onChange={(e) => updateItem(item.id, { goal: e.target.value })}
+                        className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm focus:outline-none focus:border-violet-400"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs text-slate-400">详细描述</label>
+                      <textarea
+                        value={item.detailed_description}
+                        onChange={(e) => updateItem(item.id, { detailed_description: e.target.value })}
+                        rows={3}
+                        className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-violet-400"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs text-slate-400">用户描述摘要</label>
+                      <textarea
+                        value={item.description}
+                        onChange={(e) => updateItem(item.id, { description: e.target.value })}
+                        rows={2}
+                        className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-violet-400"
+                      />
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="space-y-1">
+                        <label className="text-xs text-slate-400">范围边界</label>
+                        <textarea
+                          value={item.scope_boundary}
+                          onChange={(e) => updateItem(item.id, { scope_boundary: e.target.value })}
+                          rows={3}
+                          className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-violet-400"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-slate-400">依赖原因</label>
+                        <textarea
+                          value={item.dependency_reason}
+                          onChange={(e) => updateItem(item.id, { dependency_reason: e.target.value })}
+                          rows={3}
+                          className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-violet-400"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="space-y-1">
+                        <label className="text-xs text-slate-400">验收说明</label>
+                        <textarea
+                          value={item.acceptance_notes}
+                          onChange={(e) => updateItem(item.id, { acceptance_notes: e.target.value })}
+                          rows={3}
+                          className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-violet-400"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-slate-400">耦合类型</label>
+                        <select
+                          value={item.coupling_kind}
+                          onChange={(e) => updateItem(item.id, { coupling_kind: e.target.value })}
+                          className="w-full bg-white border border-slate-200 rounded px-2 py-2 text-sm focus:outline-none focus:border-violet-400"
+                        >
+                          <option value="unclear">unclear</option>
+                          <option value="order_only">order_only</option>
+                          <option value="feature_bundle">feature_bundle</option>
+                          <option value="shared_logic">shared_logic</option>
+                          <option value="isolated">isolated</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="space-y-1">
+                        <label className="text-xs text-slate-400">依赖项（逗号或换行分隔）</label>
+                        <textarea
+                          value={item.depends_on.join("\n")}
+                          onChange={(e) => updateStringList(item.id, "depends_on", e.target.value)}
+                          rows={3}
+                          className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-violet-400"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-slate-400">影响目标（逗号或换行分隔）</label>
+                        <textarea
+                          value={item.affected_targets.join("\n")}
+                          onChange={(e) => updateStringList(item.id, "affected_targets", e.target.value)}
+                          rows={3}
+                          className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-violet-400"
+                        />
+                      </div>
+                    </div>
+                    {item.needs_image && (
+                      <div className="space-y-2">
+                        {/* 图片模式切换 */}
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs text-slate-400">图片来源：</span>
+                          <button
+                            onClick={() => updateItem(item.id, { provided_image_b64: undefined })}
+                            className={cn(
+                              "flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors",
+                              !item.provided_image_b64
+                                ? "bg-violet-700 text-white"
+                                : "bg-slate-100 text-slate-500 hover:bg-slate-200",
+                            )}
+                          >
+                            <Wand2 size={11} /> AI 生成
+                          </button>
                           <button
                             onClick={() => {
-                              updateItem(item.id, { provided_image_b64: undefined });
-                              setUploadPreviews(p => { const n = { ...p }; delete n[item.id]; return n; });
+                              const input = document.createElement("input");
+                              input.type = "file";
+                              input.accept = "image/*";
+                              input.onchange = () => {
+                                if (input.files?.[0]) handleImageFile(item.id, input.files[0]);
+                              };
+                              input.click();
                             }}
-                            className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 text-white text-xs flex items-center justify-center hover:bg-red-500"
-                          >×</button>
+                            className={cn(
+                              "flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors",
+                              item.provided_image_b64
+                                ? "bg-violet-700 text-white"
+                                : "bg-slate-100 text-slate-500 hover:bg-slate-200",
+                            )}
+                          >
+                            <Upload size={11} /> 上传图片
+                          </button>
                         </div>
-                      )}
-                      {/* AI 生成时显示图像描述 */}
-                      {!item.provided_image_b64 && (
-                        <div className="space-y-1">
-                          <label className="text-xs text-slate-400">图像描述（AI 生图用）</label>
-                          <textarea
-                            value={item.image_description}
-                            onChange={e => updateItem(item.id, { image_description: e.target.value })}
-                            rows={2}
-                            className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-violet-400"
-                          />
-                        </div>
-                      )}
+                        {/* 上传预览 */}
+                        {item.provided_image_b64 && uploadPreviews[item.id] && (
+                          <div className="relative w-24 h-24 rounded-lg overflow-hidden border border-violet-300">
+                            <img src={uploadPreviews[item.id]} alt="preview" className="w-full h-full object-cover" />
+                            <button
+                              onClick={() => {
+                                updateItem(item.id, { provided_image_b64: undefined });
+                                setUploadPreviews((p) => {
+                                  const n = { ...p };
+                                  delete n[item.id];
+                                  return n;
+                                });
+                              }}
+                              className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 text-white text-xs flex items-center justify-center hover:bg-red-500"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        )}
+                        {/* AI 生成时显示图像描述 */}
+                        {!item.provided_image_b64 && (
+                          <div className="space-y-1">
+                            <label className="text-xs text-slate-400">图像描述（AI 生图用）</label>
+                            <textarea
+                              value={item.image_description}
+                              onChange={(e) => updateItem(item.id, { image_description: e.target.value })}
+                              rows={2}
+                              className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-violet-400"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <div className="space-y-1">
+                      <label className="text-xs text-slate-400">技术实现说明（给 Code Agent）</label>
+                      <textarea
+                        value={item.implementation_notes}
+                        onChange={(e) => updateItem(item.id, { implementation_notes: e.target.value })}
+                        rows={3}
+                        className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-xs font-mono resize-none focus:outline-none focus:border-violet-400"
+                      />
                     </div>
-                  )}
-                  <div className="space-y-1">
-                    <label className="text-xs text-slate-400">技术实现说明（给 Code Agent）</label>
-                    <textarea
-                      value={item.implementation_notes}
-                      onChange={e => updateItem(item.id, { implementation_notes: e.target.value })}
-                      rows={3}
-                      className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-xs font-mono resize-none focus:outline-none focus:border-violet-400"
-                    />
                   </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
             );
           })}
         </div>
@@ -1597,18 +1629,16 @@ function ReviewBundles({
           <div>
             <p className="text-xs uppercase tracking-[0.2em] text-violet-500">Step 2 / 2</p>
             <h2 className="font-bold text-slate-800">执行策略决策</h2>
-            <p className="text-xs text-slate-500 mt-0.5">先决定哪些 item 必须一起执行、哪些应拆开执行，处理完待决策 bundle 后再进入真正执行。</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              先决定哪些 item 必须一起执行、哪些应拆开执行，处理完待决策 bundle 后再进入真正执行。
+            </p>
           </div>
           <span className="text-xs text-violet-700 bg-violet-50 border border-violet-200 rounded-full px-2 py-0.5 font-medium">
-            {(progress.clear + progress.accepted)}/{executionBundles.length || 0} 个 bundle 已具备执行条件
+            {progress.clear + progress.accepted}/{executionBundles.length || 0} 个 bundle 已具备执行条件
           </span>
         </div>
 
-        <ReviewStrictnessSelector
-          value={reviewStrictness}
-          disabled={reviewBusy}
-          onChange={onStrictnessChange}
-        />
+        <ReviewStrictnessSelector value={reviewStrictness} disabled={reviewBusy} onChange={onStrictnessChange} />
 
         <ReviewFeedbackBanner feedback={reviewFeedback} />
         <ReviewNotice message={reviewError} />
@@ -1633,13 +1663,18 @@ function ReviewBundles({
 
         <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
           <p className="text-sm font-medium text-slate-700">依赖分组预览</p>
-          <p className="mt-1 text-xs text-slate-500">这里展示的是依赖关系视角；下方的执行 Bundle 是系统综合耦合度和风险后给出的执行视角。</p>
+          <p className="mt-1 text-xs text-slate-500">
+            这里展示的是依赖关系视角；下方的执行 Bundle 是系统综合耦合度和风险后给出的执行视角。
+          </p>
           <div className="mt-2 flex flex-wrap gap-2">
             {dependencyGroups.length === 0 && (
               <span className="text-xs text-slate-400">暂无分组数据，先重新检查一次。</span>
             )}
             {dependencyGroups.map((group, index) => (
-              <span key={`group-${index}`} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-600">
+              <span
+                key={`group-${index}`}
+                className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-600"
+              >
                 G{index + 1}: {group.item_ids.map((itemId) => itemNameMap.get(itemId) ?? itemId).join(" / ")}
               </span>
             ))}
@@ -1654,116 +1689,121 @@ function ReviewBundles({
           )}
           {executionBundles.map((bundle, index) => {
             const bundleKey = resolveExecutionBundleKey(bundle, index);
-            const decision: BundleDecisionStatus = bundle.status === "clear"
-              ? "accepted"
-              : (bundleDecisions[bundleKey] ?? "unresolved");
+            const decision: BundleDecisionStatus =
+              bundle.status === "clear" ? "accepted" : (bundleDecisions[bundleKey] ?? "unresolved");
             const riskDetails = getBundleRiskDetails(bundle);
             const recommendedActions = getBundleRecommendedActions(bundle);
 
             return (
-            <div key={`bundle-${index}`} className="rounded-xl border border-slate-200 bg-white px-4 py-4 space-y-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold text-slate-800">执行 Bundle {index + 1}</p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    {bundle.item_ids.map((itemId) => itemNameMap.get(itemId) ?? itemId).join(" / ")}
-                  </p>
-                </div>
-                <div className="flex flex-wrap items-center justify-end gap-2">
-                  <ReviewStatusBadge status={bundle.status} kind="bundle" />
-                  <span className={cn("text-xs rounded-full border px-2 py-0.5 font-medium", BUNDLE_DECISION_TONES[decision])}>
-                    {BUNDLE_DECISION_LABELS[decision]}
-                  </span>
-                </div>
-              </div>
-              <div className="grid gap-3 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-                <div className="rounded-lg bg-slate-50 px-3 py-3">
-                  <p className="text-xs font-medium text-slate-500">分组理由</p>
-                  <p className="mt-1 text-sm text-slate-700">{bundle.reason}</p>
-                </div>
-                <div className="rounded-lg bg-slate-50 px-3 py-3">
-                  <p className="text-xs font-medium text-slate-500">风险标记</p>
-                  <div className="mt-1 flex flex-wrap gap-2">
-                    {bundle.risk_codes.length === 0 && (
-                      <span className="text-sm text-green-700">无</span>
-                    )}
-                    {bundle.risk_codes.map((riskCode) => (
-                      <span key={riskCode} className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700">
-                        {riskCode}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div className="rounded-lg bg-slate-50 px-3 py-3 space-y-2">
-                <p className="text-xs font-medium text-slate-500">为什么当前会阻塞</p>
-                <p className="text-sm text-slate-700">{getBundleBlockingReason(bundle)}</p>
-              </div>
-              {riskDetails.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-xs font-medium text-slate-500">风险解释</p>
-                  {riskDetails.map((detail) => (
-                    <div key={`${bundleKey}-${detail.code}`} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
-                      <div className="flex items-center gap-2">
-                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">
-                          {detail.title}
-                        </span>
-                        <span className="text-[11px] text-slate-400">{detail.code}</span>
-                      </div>
-                      <p className="mt-2 text-sm text-slate-700">{detail.summary}</p>
-                      {detail.impact ? <p className="mt-1 text-xs text-slate-500">影响：{detail.impact}</p> : null}
-                      <p className="mt-2 text-xs text-slate-600">建议：{detail.recommendation}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {recommendedActions.length > 0 && (
-                <div className="rounded-lg border border-slate-200 bg-white px-3 py-3 space-y-3">
+              <div key={`bundle-${index}`} className="rounded-xl border border-slate-200 bg-white px-4 py-4 space-y-3">
+                <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-xs font-medium text-slate-500">建议动作</p>
-                    <p className="mt-1 text-xs text-slate-500">处理完当前 bundle 的决策后，底部主按钮才会放行。</p>
+                    <p className="text-sm font-semibold text-slate-800">执行 Bundle {index + 1}</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {bundle.item_ids.map((itemId) => itemNameMap.get(itemId) ?? itemId).join(" / ")}
+                    </p>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    {recommendedActions.some((action) => action.action === "accept_bundle") && (
-                      <button
-                        type="button"
-                        onClick={() => onBundleDecisionChange(bundleKey, "accepted")}
-                        className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700 transition-colors"
-                      >
-                        接受当前分组
-                      </button>
-                    )}
-                    {recommendedActions.some((action) => action.action === "split_bundle") && (
-                      <button
-                        type="button"
-                        onClick={() => onBundleSplitRequest(bundleKey)}
-                        disabled={reviewBusy}
-                        className="rounded-lg bg-sky-600 px-3 py-2 text-xs font-medium text-white hover:bg-sky-700 transition-colors disabled:opacity-60"
-                      >
-                        {reviewBusy ? "重算中..." : "要求拆分"}
-                      </button>
-                    )}
-                    {recommendedActions.some((action) => action.action === "revise_items") && (
-                      <button
-                        type="button"
-                        onClick={() => onBundleReturnToItems(bundleKey, bundle.item_ids)}
-                        className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors"
-                      >
-                        返回补充说明
-                      </button>
-                    )}
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <ReviewStatusBadge status={bundle.status} kind="bundle" />
+                    <span
+                      className={cn(
+                        "text-xs rounded-full border px-2 py-0.5 font-medium",
+                        BUNDLE_DECISION_TONES[decision],
+                      )}
+                    >
+                      {BUNDLE_DECISION_LABELS[decision]}
+                    </span>
                   </div>
-                  <div className="grid gap-2 md:grid-cols-3">
-                    {recommendedActions.map((action) => (
-                      <div key={`${bundleKey}-${action.action}`} className="rounded-lg bg-slate-50 px-3 py-2">
-                        <p className="text-xs font-medium text-slate-700">{action.label}</p>
-                        <p className="mt-1 text-xs text-slate-500">{action.description}</p>
+                </div>
+                <div className="grid gap-3 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+                  <div className="rounded-lg bg-slate-50 px-3 py-3">
+                    <p className="text-xs font-medium text-slate-500">分组理由</p>
+                    <p className="mt-1 text-sm text-slate-700">{bundle.reason}</p>
+                  </div>
+                  <div className="rounded-lg bg-slate-50 px-3 py-3">
+                    <p className="text-xs font-medium text-slate-500">风险标记</p>
+                    <div className="mt-1 flex flex-wrap gap-2">
+                      {bundle.risk_codes.length === 0 && <span className="text-sm text-green-700">无</span>}
+                      {bundle.risk_codes.map((riskCode) => (
+                        <span key={riskCode} className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700">
+                          {riskCode}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="rounded-lg bg-slate-50 px-3 py-3 space-y-2">
+                  <p className="text-xs font-medium text-slate-500">为什么当前会阻塞</p>
+                  <p className="text-sm text-slate-700">{getBundleBlockingReason(bundle)}</p>
+                </div>
+                {riskDetails.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-slate-500">风险解释</p>
+                    {riskDetails.map((detail) => (
+                      <div
+                        key={`${bundleKey}-${detail.code}`}
+                        className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">
+                            {detail.title}
+                          </span>
+                          <span className="text-[11px] text-slate-400">{detail.code}</span>
+                        </div>
+                        <p className="mt-2 text-sm text-slate-700">{detail.summary}</p>
+                        {detail.impact ? <p className="mt-1 text-xs text-slate-500">影响：{detail.impact}</p> : null}
+                        <p className="mt-2 text-xs text-slate-600">建议：{detail.recommendation}</p>
                       </div>
                     ))}
                   </div>
-                </div>
-              )}
-            </div>
+                )}
+                {recommendedActions.length > 0 && (
+                  <div className="rounded-lg border border-slate-200 bg-white px-3 py-3 space-y-3">
+                    <div>
+                      <p className="text-xs font-medium text-slate-500">建议动作</p>
+                      <p className="mt-1 text-xs text-slate-500">处理完当前 bundle 的决策后，底部主按钮才会放行。</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {recommendedActions.some((action) => action.action === "accept_bundle") && (
+                        <button
+                          type="button"
+                          onClick={() => onBundleDecisionChange(bundleKey, "accepted")}
+                          className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700 transition-colors"
+                        >
+                          接受当前分组
+                        </button>
+                      )}
+                      {recommendedActions.some((action) => action.action === "split_bundle") && (
+                        <button
+                          type="button"
+                          onClick={() => onBundleSplitRequest(bundleKey)}
+                          disabled={reviewBusy}
+                          className="rounded-lg bg-sky-600 px-3 py-2 text-xs font-medium text-white hover:bg-sky-700 transition-colors disabled:opacity-60"
+                        >
+                          {reviewBusy ? "重算中..." : "要求拆分"}
+                        </button>
+                      )}
+                      {recommendedActions.some((action) => action.action === "revise_items") && (
+                        <button
+                          type="button"
+                          onClick={() => onBundleReturnToItems(bundleKey, bundle.item_ids)}
+                          className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+                        >
+                          返回补充说明
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid gap-2 md:grid-cols-3">
+                      {recommendedActions.map((action) => (
+                        <div key={`${bundleKey}-${action.action}`} className="rounded-lg bg-slate-50 px-3 py-2">
+                          <p className="text-xs font-medium text-slate-700">{action.label}</p>
+                          <p className="mt-1 text-xs text-slate-500">{action.description}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             );
           })}
         </div>
@@ -1790,7 +1830,9 @@ function ReviewBundles({
             disabled={reviewBusy}
             className="flex-1 py-2.5 rounded-lg bg-violet-700 text-white font-bold text-sm hover:bg-violet-800 transition-colors disabled:opacity-60"
           >
-            {canProceedFromBundleReview(review, bundleDecisions) ? "确认执行策略，开始执行" : `先处理剩余 ${progress.blocking} 个阻塞 bundle`}
+            {canProceedFromBundleReview(review, bundleDecisions)
+              ? "确认执行策略，开始执行"
+              : `先处理剩余 ${progress.blocking} 个阻塞 bundle`}
           </button>
           <button
             type="button"
@@ -1808,12 +1850,32 @@ function ReviewBundles({
 // ── 执行视图 ──────────────────────────────────────────────────────────────────
 
 function ExecutionView({
-  items, itemStates, activeItemId, setActiveItemId,
-  batchLog, currentBatchStage, batchStageHistory, batchResult, stage, projectRoot,
+  items,
+  itemStates,
+  activeItemId,
+  setActiveItemId,
+  batchLog,
+  currentBatchStage,
+  batchStageHistory,
+  batchResult,
+  stage,
+  projectRoot,
   onStatusNotice,
-  autoSelectFirst, onAutoSelectToggle,
-  onSelectImage, onGenerateMore, onRetryItem, approvalBusyActionId, onApproveAction, onRejectAction, onExecuteAction,
-  onProceedApproval, hasLiveSession, onCancelWorkflow, onUpdatePrompt, onToggleMorePrompt, onReset,
+  autoSelectFirst,
+  onAutoSelectToggle,
+  onSelectImage,
+  onGenerateMore,
+  onRetryItem,
+  approvalBusyActionId,
+  onApproveAction,
+  onRejectAction,
+  onExecuteAction,
+  onProceedApproval,
+  hasLiveSession,
+  onCancelWorkflow,
+  onUpdatePrompt,
+  onToggleMorePrompt,
+  onReset,
 }: {
   items: PlanItem[];
   itemStates: Record<string, ItemState>;
@@ -1842,9 +1904,9 @@ function ExecutionView({
   onToggleMorePrompt: (id: string) => void;
   onReset: () => void;
 }) {
-  const awaitingCount = items.filter(it => itemStates[it.id]?.status === "awaiting_selection").length;
-  const approvalCount = items.filter(it => itemStates[it.id]?.status === "approval_pending").length;
-  const activeItem = items.find(it => it.id === activeItemId);
+  const awaitingCount = items.filter((it) => itemStates[it.id]?.status === "awaiting_selection").length;
+  const approvalCount = items.filter((it) => itemStates[it.id]?.status === "approval_pending").length;
+  const activeItem = items.find((it) => it.id === activeItemId);
   const activeState = activeItemId ? itemStates[activeItemId] : null;
 
   return (
@@ -1857,7 +1919,7 @@ function ExecutionView({
             onClick={onAutoSelectToggle}
             className={cn(
               "flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium transition-colors",
-              autoSelectFirst ? "bg-violet-700 text-white" : "bg-slate-100 text-slate-400 hover:bg-slate-200"
+              autoSelectFirst ? "bg-violet-700 text-white" : "bg-slate-100 text-slate-400 hover:bg-slate-200",
             )}
             title="自动选用第一张生成图，无需手动确认"
           >
@@ -1886,7 +1948,7 @@ function ExecutionView({
           </button>
         )}
 
-        {items.map(item => {
+        {items.map((item) => {
           const state = itemStates[item.id];
           const status: ItemStatus = state?.status ?? "pending";
           const isActive = item.id === activeItemId;
@@ -1909,9 +1971,7 @@ function ExecutionView({
                 </p>
                 <p className="text-xs text-slate-400">{TYPE_LABELS[item.type] ?? item.type}</p>
               </div>
-              {needsAction && (
-                <span className="w-2 h-2 rounded-full bg-violet-600 shrink-0 animate-pulse" />
-              )}
+              {needsAction && <span className="w-2 h-2 rounded-full bg-violet-600 shrink-0 animate-pulse" />}
             </button>
           );
         })}
@@ -1922,7 +1982,9 @@ function ExecutionView({
             <StageStatus current={currentBatchStage} history={batchStageHistory} />
             <div className="max-h-28 overflow-y-auto space-y-0.5">
               {batchLog.slice(-8).map((line, i) => (
-                <p key={i} className="text-xs text-slate-400 font-mono leading-relaxed truncate">{line}</p>
+                <p key={i} className="text-xs text-slate-400 font-mono leading-relaxed truncate">
+                  {line}
+                </p>
               ))}
             </div>
           </div>
@@ -1966,10 +2028,13 @@ function ExecutionView({
       <div className="rounded-xl border border-slate-200 bg-white p-5 min-h-[300px]">
         {!activeItem || !activeState ? (
           <div className="space-y-3">
-            {batchLog.length > 0
-              ? <AgentLog lines={batchLog} />
-              : <div className="flex items-center justify-center h-48 text-slate-300 text-sm">从左侧选择一个资产查看详情</div>
-            }
+            {batchLog.length > 0 ? (
+              <AgentLog lines={batchLog} />
+            ) : (
+              <div className="flex items-center justify-center h-48 text-slate-300 text-sm">
+                从左侧选择一个资产查看详情
+              </div>
+            )}
           </div>
         ) : (
           <ItemDetailPanel
@@ -1996,9 +2061,19 @@ function ExecutionView({
 // ── 单个资产详情面板 ──────────────────────────────────────────────────────────
 
 function ItemDetailPanel({
-  item, state,
-  onSelectImage, onGenerateMore, onRetryItem, approvalBusyActionId, onApproveAction, onRejectAction, onExecuteAction,
-  onProceedApproval, proceedApprovalDisabled, onUpdatePrompt, onToggleMorePrompt,
+  item,
+  state,
+  onSelectImage,
+  onGenerateMore,
+  onRetryItem,
+  approvalBusyActionId,
+  onApproveAction,
+  onRejectAction,
+  onExecuteAction,
+  onProceedApproval,
+  proceedApprovalDisabled,
+  onUpdatePrompt,
+  onToggleMorePrompt,
 }: {
   item: PlanItem;
   state: ItemState;
@@ -2024,24 +2099,29 @@ function ItemDetailPanel({
           {TYPE_LABELS[item.type] ?? item.type}
         </span>
         <h3 className="font-bold text-slate-800">{item.name}</h3>
-        <span className={cn(
-          "ml-auto text-xs px-2 py-0.5 rounded-full font-medium",
-          state.status === "done"               ? "bg-green-100 text-green-700" :
-          state.status === "error"              ? "bg-red-100 text-red-600" :
-          state.status === "awaiting_selection" ? "bg-violet-100 text-violet-700" :
-          state.status === "approval_pending"   ? "bg-violet-100 text-violet-700" :
-          state.status === "code_generating"    ? "bg-blue-100 text-blue-600" :
-                                                  "bg-slate-100 text-slate-500"
-        )}>
+        <span
+          className={cn(
+            "ml-auto text-xs px-2 py-0.5 rounded-full font-medium",
+            state.status === "done"
+              ? "bg-green-100 text-green-700"
+              : state.status === "error"
+                ? "bg-red-100 text-red-600"
+                : state.status === "awaiting_selection"
+                  ? "bg-violet-100 text-violet-700"
+                  : state.status === "approval_pending"
+                    ? "bg-violet-100 text-violet-700"
+                    : state.status === "code_generating"
+                      ? "bg-blue-100 text-blue-600"
+                      : "bg-slate-100 text-slate-500",
+          )}
+        >
           {STATUS_LABELS[state.status]}
         </span>
       </div>
 
       {/* 进度日志 */}
       <StageStatus current={state.currentStage} history={state.stageHistory} isComplete={state.status === "done"} />
-      {state.progress.length > 0 && (
-        <AgentLog lines={state.progress} />
-      )}
+      {state.progress.length > 0 && <AgentLog lines={state.progress} />}
 
       {state.status === "approval_pending" && (
         <ApprovalPanel
@@ -2106,7 +2186,7 @@ function ItemDetailPanel({
               {state.showMorePrompt && (
                 <textarea
                   value={state.currentPrompt}
-                  onChange={e => onUpdatePrompt(e.target.value)}
+                  onChange={(e) => onUpdatePrompt(e.target.value)}
                   rows={3}
                   className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono resize-none focus:outline-none focus:border-violet-400"
                 />
@@ -2123,21 +2203,15 @@ function ItemDetailPanel({
       )}
 
       {/* Code Agent 日志 */}
-            {state.agentLog.length > 0 && (
-              <div className="space-y-1">
-                <p className="text-xs font-medium text-slate-500">Code Agent</p>
-                <AgentLog
-                  lines={state.agentLog}
-                  entries={state.agentLogEntries}
-                  currentModel={state.currentAgentModel}
-                />
-              </div>
-            )}
+      {state.agentLog.length > 0 && (
+        <div className="space-y-1">
+          <p className="text-xs font-medium text-slate-500">Code Agent</p>
+          <AgentLog lines={state.agentLog} entries={state.agentLogEntries} currentModel={state.currentAgentModel} />
+        </div>
+      )}
 
       {/* 完成提示 */}
-      {state.status === "done" && (
-        <p className="text-sm text-green-600 font-medium">✓ {item.name} 创建完成</p>
-      )}
+      {state.status === "done" && <p className="text-sm text-green-600 font-medium">✓ {item.name} 创建完成</p>}
 
       {/* 错误 */}
       {state.status === "error" && state.error && (
@@ -2158,7 +2232,7 @@ function ItemDetailPanel({
           {state.errorTrace && (
             <>
               <button
-                onClick={() => setShowTrace(v => !v)}
+                onClick={() => setShowTrace((v) => !v)}
                 className="text-xs text-red-400 hover:text-red-600 flex items-center gap-1"
               >
                 {showTrace ? <ChevronUp size={11} /> : <ChevronDown size={11} />}

@@ -29,11 +29,7 @@ function resolveSourceLabel(sourceMode: string | undefined) {
   return sourceMode === "runtime_decompiled" ? "运行时知识目录" : "缺失";
 }
 
-export function KnowledgeStatusBanner({
-  status,
-  onOpenGuide,
-  onOpenSettings,
-}: KnowledgeStatusBannerProps) {
+export function KnowledgeStatusBanner({ status, onOpenGuide, onOpenSettings }: KnowledgeStatusBannerProps) {
   if (status === null) {
     return null;
   }
@@ -68,7 +64,9 @@ export function KnowledgeStatusBanner({
           <p className="font-medium text-slate-700">状态说明</p>
           <div className="mt-1 space-y-1">
             {status.warnings.map((warning) => (
-              <p key={warning} className="leading-5">- {warning}</p>
+              <p key={warning} className="leading-5">
+                - {warning}
+              </p>
             ))}
           </div>
         </div>

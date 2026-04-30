@@ -8,9 +8,7 @@ interface WorkspaceHomeProps {
   activeTab: WorkspaceTab;
 }
 
-export function WorkspaceHome({
-  activeTab,
-}: WorkspaceHomeProps) {
+export function WorkspaceHome({ activeTab }: WorkspaceHomeProps) {
   return (
     <>
       {activeTab === "batch" && (
@@ -31,9 +29,7 @@ export function WorkspaceHome({
         </div>
       )}
 
-      {activeTab === "single" && (
-        <SingleAssetWorkspaceContainer />
-      )}
+      {activeTab === "single" && <SingleAssetWorkspaceContainer />}
     </>
   );
 }

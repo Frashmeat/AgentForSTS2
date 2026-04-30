@@ -26,12 +26,37 @@ export interface PresetOption {
 }
 
 export const ASSET_TYPES: AssetTypeOption[] = [
-  { value: "card", label: "卡牌", desc: "普通卡牌", imgHint: "横向图，建议 250×190 或更大 → 自动生成 ×2（小图 + 大图）" },
-  { value: "card_fullscreen", label: "全画面卡", desc: "全画面卡牌", imgHint: "竖向图，建议 250×350 或更大 → 自动生成 ×2（小图 + 大图）" },
-  { value: "relic", label: "遗物", desc: "遗物", imgHint: "方形图，主体居中 → 自动抠图，生成 ×3（图标 94×94 + 描边 + 大图 256×256）" },
+  {
+    value: "card",
+    label: "卡牌",
+    desc: "普通卡牌",
+    imgHint: "横向图，建议 250×190 或更大 → 自动生成 ×2（小图 + 大图）",
+  },
+  {
+    value: "card_fullscreen",
+    label: "全画面卡",
+    desc: "全画面卡牌",
+    imgHint: "竖向图，建议 250×350 或更大 → 自动生成 ×2（小图 + 大图）",
+  },
+  {
+    value: "relic",
+    label: "遗物",
+    desc: "遗物",
+    imgHint: "方形图，主体居中 → 自动抠图，生成 ×3（图标 94×94 + 描边 + 大图 256×256）",
+  },
   { value: "power", label: "Power", desc: "技能/状态图标", imgHint: "方形图标 → 自动抠图，生成 ×2（64×64 + 256×256）" },
-  { value: "character", label: "角色", desc: "角色", imgHint: "人物立绘，方形或竖向 → 自动抠图，生成 ×4（图标 + 选角图 + 锁定版 + 地图标记）" },
-  { value: "custom_code", label: "自定义代码", desc: "纯代码逻辑", imgHint: "无图像阶段，直接进入 Code Agent / 服务器文本方案生成" },
+  {
+    value: "character",
+    label: "角色",
+    desc: "角色",
+    imgHint: "人物立绘，方形或竖向 → 自动抠图，生成 ×4（图标 + 选角图 + 锁定版 + 地图标记）",
+  },
+  {
+    value: "custom_code",
+    label: "自定义代码",
+    desc: "纯代码逻辑",
+    imgHint: "无图像阶段，直接进入 Code Agent / 服务器文本方案生成",
+  },
 ];
 
 export const PRESETS: PresetOption[] = [
@@ -39,7 +64,8 @@ export const PRESETS: PresetOption[] = [
     label: "BloodLance",
     assetType: "card",
     assetName: "BloodLance",
-    description: "攻击牌，费用1，造成7点伤害；如果目标身上有中毒层数，额外造成等于中毒层数的伤害。升级后基础伤害提升到10。",
+    description:
+      "攻击牌，费用1，造成7点伤害；如果目标身上有中毒层数，额外造成等于中毒层数的伤害。升级后基础伤害提升到10。",
   },
   {
     label: "攻击卡",
@@ -67,7 +93,15 @@ export const PRESETS: PresetOption[] = [
   },
 ];
 
-const ORDER: Stage[] = ["input", "confirm_prompt", "generating_image", "pick_image", "agent_running", "approval_pending", "done"];
+const ORDER: Stage[] = [
+  "input",
+  "confirm_prompt",
+  "generating_image",
+  "pick_image",
+  "agent_running",
+  "approval_pending",
+  "done",
+];
 
 export function getStageIndex(stage: Stage) {
   if (stage === "cancelled") {

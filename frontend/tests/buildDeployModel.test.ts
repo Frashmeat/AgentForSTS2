@@ -27,24 +27,21 @@ test("createIdleBuildDeployState returns cleared idle state", () => {
 });
 
 test("startBuildDeployAction resets previous feedback and enters running state", () => {
-  assert.deepEqual(
-    startBuildDeployAction("build"),
-    {
-      stage: "running",
-      action: "build",
-      log: [],
-      deployedTo: null,
-      summary: null,
-      errorMsg: null,
-    },
-  );
+  assert.deepEqual(startBuildDeployAction("build"), {
+    stage: "running",
+    action: "build",
+    log: [],
+    deployedTo: null,
+    summary: null,
+    errorMsg: null,
+  });
 });
 
 test("normalizeBuildOutputLines trims empty lines and preserves meaningful output", () => {
-  assert.deepEqual(
-    normalizeBuildOutputLines("\nBuild started\n\nBuild succeeded\n"),
-    ["Build started", "Build succeeded"],
-  );
+  assert.deepEqual(normalizeBuildOutputLines("\nBuild started\n\nBuild succeeded\n"), [
+    "Build started",
+    "Build succeeded",
+  ]);
 });
 
 test("finalizeBuildProjectResult returns done state for successful build", () => {
@@ -106,25 +103,19 @@ test("finalizePackageProjectResult returns error state for failed package", () =
 });
 
 test("appendBuildDeployLog appends stream output to current state", () => {
-  assert.deepEqual(
-    appendBuildDeployLog(startBuildDeployAction("deploy"), "packing assets"),
-    {
-      stage: "running",
-      action: "deploy",
-      log: ["packing assets"],
-      deployedTo: null,
-      summary: null,
-      errorMsg: null,
-    },
-  );
+  assert.deepEqual(appendBuildDeployLog(startBuildDeployAction("deploy"), "packing assets"), {
+    stage: "running",
+    action: "deploy",
+    log: ["packing assets"],
+    deployedTo: null,
+    summary: null,
+    errorMsg: null,
+  });
 });
 
 test("finalizeDeployResult marks deploy success with deployed path", () => {
   assert.deepEqual(
-    finalizeDeployResult(
-      appendBuildDeployLog(startBuildDeployAction("deploy"), "done"),
-      "E:/Mods/MyMod",
-    ),
+    finalizeDeployResult(appendBuildDeployLog(startBuildDeployAction("deploy"), "done"), "E:/Mods/MyMod"),
     {
       stage: "done",
       action: "deploy",
@@ -138,10 +129,7 @@ test("finalizeDeployResult marks deploy success with deployed path", () => {
 
 test("applyBuildDeployActionResult merges HTTP action result into state", () => {
   assert.deepEqual(
-    applyBuildDeployActionResult(
-      startBuildDeployAction("package"),
-      finalizePackageProjectResult({ success: true }),
-    ),
+    applyBuildDeployActionResult(startBuildDeployAction("package"), finalizePackageProjectResult({ success: true })),
     {
       stage: "done",
       action: "package",
@@ -154,21 +142,13 @@ test("applyBuildDeployActionResult merges HTTP action result into state", () => 
 });
 
 test("describeBuildDeployRunningMessage returns dedicated deploy text", () => {
-  assert.equal(
-    describeBuildDeployRunningMessage("deploy"),
-    "Code Agent 构建中（含 .pck 导出）…",
-  );
-  assert.equal(
-    describeBuildDeployRunningMessage("build"),
-    "仅构建中…",
-  );
+  assert.equal(describeBuildDeployRunningMessage("deploy"), "Code Agent 构建中（含 .pck 导出）…");
+  assert.equal(describeBuildDeployRunningMessage("build"), "仅构建中…");
 });
 
 test("describeBuildDeployCompletionView returns deployed card metadata", () => {
   assert.deepEqual(
-    describeBuildDeployCompletionView(
-      finalizeDeployResult(startBuildDeployAction("deploy"), "E:/Mods/MyMod"),
-    ),
+    describeBuildDeployCompletionView(finalizeDeployResult(startBuildDeployAction("deploy"), "E:/Mods/MyMod")),
     {
       tone: "success",
       title: "已部署",
@@ -180,18 +160,13 @@ test("describeBuildDeployCompletionView returns deployed card metadata", () => {
 });
 
 test("describeBuildDeployCompletionView returns deploy warning metadata when auto deploy is missing", () => {
-  assert.deepEqual(
-    describeBuildDeployCompletionView(
-      finalizeDeployResult(startBuildDeployAction("deploy"), null),
-    ),
-    {
-      tone: "warning",
-      title: "构建成功，未自动部署",
-      detail: "在设置中配置 STS2 游戏路径后可自动复制到 Mods 文件夹",
-      detailMonospace: false,
-      showOpenSettings: true,
-    },
-  );
+  assert.deepEqual(describeBuildDeployCompletionView(finalizeDeployResult(startBuildDeployAction("deploy"), null)), {
+    tone: "warning",
+    title: "构建成功，未自动部署",
+    detail: "在设置中配置 STS2 游戏路径后可自动复制到 Mods 文件夹",
+    detailMonospace: false,
+    showOpenSettings: true,
+  });
 });
 
 test("describeBuildDeployCompletionView returns build success metadata", () => {

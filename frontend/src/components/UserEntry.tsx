@@ -54,7 +54,10 @@ export function UserEntry() {
       >
         管理台
       </Link>
-      <Link to="/me" className="flex items-center gap-2 rounded-full border border-[var(--workspace-panel-border)] bg-white/75 px-2 py-1 pr-3 transition hover:border-[rgba(114,74,145,0.35)]">
+      <Link
+        to="/me"
+        className="flex items-center gap-2 rounded-full border border-[var(--workspace-panel-border)] bg-white/75 px-2 py-1 pr-3 transition hover:border-[rgba(114,74,145,0.35)]"
+      >
         <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[rgba(114,74,145,0.12)] text-sm font-semibold text-[var(--workspace-accent-strong)]">
           {renderAvatar(currentUser.username)}
         </span>

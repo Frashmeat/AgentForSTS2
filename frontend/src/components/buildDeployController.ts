@@ -31,9 +31,7 @@ export interface BuildDeploySocketLike {
   close(): void;
 }
 
-export type BuildDeployStateUpdate =
-  | BuildDeployState
-  | ((previous: BuildDeployState) => BuildDeployState);
+export type BuildDeployStateUpdate = BuildDeployState | ((previous: BuildDeployState) => BuildDeployState);
 
 export interface BuildDeployControllerRuntime {
   closeSocket(): void;
@@ -75,12 +73,14 @@ export function createBuildDeployController(
       const socket = createSocket();
       runtime.setSocket(socket);
       socket.on("stream", (message) => {
-        runtime.setState((previous) => appendBuildDeployLog(previous, {
-          text: message.chunk,
-          source: message.source,
-          channel: message.channel,
-          model: message.model,
-        }));
+        runtime.setState((previous) =>
+          appendBuildDeployLog(previous, {
+            text: message.chunk,
+            source: message.source,
+            channel: message.channel,
+            model: message.model,
+          }),
+        );
       });
       socket.on("done", (message) => {
         runtime.setState((previous) => finalizeDeployResult(previous, message.deployed_to ?? null));
@@ -104,12 +104,8 @@ export function createBuildDeployController(
     try {
       const result =
         action === "build"
-          ? finalizeBuildProjectResult(
-              await requestBuildProject({ project_root: normalizedProjectRoot }),
-            )
-          : finalizePackageProjectResult(
-              await requestPackageProject({ project_root: normalizedProjectRoot }),
-            );
+          ? finalizeBuildProjectResult(await requestBuildProject({ project_root: normalizedProjectRoot }))
+          : finalizePackageProjectResult(await requestPackageProject({ project_root: normalizedProjectRoot }));
       runtime.setState((previous) => applyBuildDeployActionResult(previous, result));
     } catch (error) {
       runtime.setState((previous) => failBuildDeployAction(previous, resolveErrorMessage(error)));

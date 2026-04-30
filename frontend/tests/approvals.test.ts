@@ -51,10 +51,7 @@ function setWorkstationApiBase() {
 }
 
 test("summarizeApprovalPending prefers backend summary", () => {
-  assert.equal(
-    summarizeApprovalPending("需要先审批", [createApproval()]),
-    "需要先审批",
-  );
+  assert.equal(summarizeApprovalPending("需要先审批", [createApproval()]), "需要先审批");
 });
 
 test("summarizeApprovalPending falls back to request count", () => {
@@ -146,12 +143,9 @@ test("approveApproval throws response text when request fails", async () => {
     fetch: async () =>
       createMockResponse({
         ok: false,
-        text: "{\"detail\":\"Approval request not found\"}",
+        text: '{"detail":"Approval request not found"}',
       }),
   });
 
-  await assert.rejects(
-    () => approveApproval("missing-id"),
-    /Approval request not found/,
-  );
+  await assert.rejects(() => approveApproval("missing-id"), /Approval request not found/);
 });

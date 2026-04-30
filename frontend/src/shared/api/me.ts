@@ -104,9 +104,7 @@ export function uploadMyServerAsset(body: {
   });
 }
 
-export function createMyServerWorkspace(body: {
-  project_name: string;
-}): Promise<ServerWorkspaceView> {
+export function createMyServerWorkspace(body: { project_name: string }): Promise<ServerWorkspaceView> {
   return requestJson<ServerWorkspaceView>(buildApiPath("/api/me/server-workspaces", {}), {
     backend: "web",
     method: "POST",

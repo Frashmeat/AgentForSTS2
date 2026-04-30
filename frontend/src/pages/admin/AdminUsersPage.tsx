@@ -86,7 +86,10 @@ export function AdminUsersPage() {
     setLoading(true);
     setError("");
     try {
-      const [detail, ledgerView] = await Promise.all([getAdminUser(userId), listAdminUserQuotaLedger(userId, undefined, 50)]);
+      const [detail, ledgerView] = await Promise.all([
+        getAdminUser(userId),
+        listAdminUserQuotaLedger(userId, undefined, 50),
+      ]);
       setSelectedUser(detail);
       setLedger(ledgerView.items);
     } catch (loadError) {
@@ -144,7 +147,11 @@ export function AdminUsersPage() {
         <UsersRound className="text-violet-700" size={22} />
       </header>
 
-      {error ? <section className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</section> : null}
+      {error ? (
+        <section className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {error}
+        </section>
+      ) : null}
 
       <section className="rounded-lg border border-white bg-white/85 p-4 shadow-sm">
         <div className="flex flex-wrap items-center gap-2">
@@ -165,11 +172,21 @@ export function AdminUsersPage() {
             <option value="quota_suspended">额度暂停</option>
             <option value="quota_closed">额度关闭</option>
           </select>
-          <button type="button" onClick={() => void loadUsers()} className="inline-flex items-center gap-2 rounded-lg bg-violet-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-violet-800" disabled={loading}>
+          <button
+            type="button"
+            onClick={() => void loadUsers()}
+            className="inline-flex items-center gap-2 rounded-lg bg-violet-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-violet-800"
+            disabled={loading}
+          >
             <Search size={16} />
             <span>查询用户</span>
           </button>
-          <button type="button" onClick={() => void loadUsers()} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50" disabled={loading}>
+          <button
+            type="button"
+            onClick={() => void loadUsers()}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+            disabled={loading}
+          >
             <RefreshCw size={16} />
             <span>刷新</span>
           </button>
@@ -197,9 +214,15 @@ export function AdminUsersPage() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {users.map((user) => (
-                    <tr key={user.user_id} className="cursor-pointer hover:bg-violet-50/60" onClick={() => void selectUser(user.user_id)}>
+                    <tr
+                      key={user.user_id}
+                      className="cursor-pointer hover:bg-violet-50/60"
+                      onClick={() => void selectUser(user.user_id)}
+                    >
                       <td className="px-3 py-2">
-                        <p className="font-medium text-slate-900">#{user.user_id} {user.username}</p>
+                        <p className="font-medium text-slate-900">
+                          #{user.user_id} {user.username}
+                        </p>
                         <p className="text-xs text-slate-500">{user.email}</p>
                       </td>
                       <td className="px-3 py-2 text-slate-600">{user.email_verified ? "已验证" : "未验证"}</td>
@@ -222,7 +245,9 @@ export function AdminUsersPage() {
             {selectedUser ? (
               <div className="mt-3 space-y-3">
                 <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-                  <p className="text-sm font-medium text-slate-900">#{selectedUser.user_id} {selectedUser.username}</p>
+                  <p className="text-sm font-medium text-slate-900">
+                    #{selectedUser.user_id} {selectedUser.username}
+                  </p>
                   <p className="mt-1 text-xs text-slate-500">{selectedUser.email}</p>
                   <p className="mt-1 text-xs text-slate-500">创建时间：{formatTime(selectedUser.created_at)}</p>
                 </div>
@@ -244,18 +269,41 @@ export function AdminUsersPage() {
             <h2 className="text-base font-semibold text-slate-900">人工调整</h2>
             <div className="mt-3 grid gap-2">
               <div className="inline-flex w-fit rounded-lg border border-slate-200 bg-white p-1">
-                <button type="button" onClick={() => setDirection("grant")} className={`inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-sm ${direction === "grant" ? "bg-emerald-50 text-emerald-700" : "text-slate-600"}`}>
+                <button
+                  type="button"
+                  onClick={() => setDirection("grant")}
+                  className={`inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-sm ${direction === "grant" ? "bg-emerald-50 text-emerald-700" : "text-slate-600"}`}
+                >
                   <PlusCircle size={15} />
                   <span>增加</span>
                 </button>
-                <button type="button" onClick={() => setDirection("deduct")} className={`inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-sm ${direction === "deduct" ? "bg-rose-50 text-rose-700" : "text-slate-600"}`}>
+                <button
+                  type="button"
+                  onClick={() => setDirection("deduct")}
+                  className={`inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-sm ${direction === "deduct" ? "bg-rose-50 text-rose-700" : "text-slate-600"}`}
+                >
                   <MinusCircle size={15} />
                   <span>扣减</span>
                 </button>
               </div>
-              <input value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="次数" className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700" />
-              <textarea value={reason} onChange={(event) => setReason(event.target.value)} placeholder="调整原因" className="min-h-20 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700" />
-              <button type="button" onClick={() => void submitAdjustment()} disabled={adjusting || selectedUser === null} className="rounded-lg bg-violet-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-violet-800 disabled:cursor-not-allowed disabled:bg-slate-300">
+              <input
+                value={amount}
+                onChange={(event) => setAmount(event.target.value)}
+                placeholder="次数"
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+              />
+              <textarea
+                value={reason}
+                onChange={(event) => setReason(event.target.value)}
+                placeholder="调整原因"
+                className="min-h-20 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+              />
+              <button
+                type="button"
+                onClick={() => void submitAdjustment()}
+                disabled={adjusting || selectedUser === null}
+                className="rounded-lg bg-violet-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-violet-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
                 提交调整
               </button>
             </div>

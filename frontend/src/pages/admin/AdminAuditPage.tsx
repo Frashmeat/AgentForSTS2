@@ -48,7 +48,9 @@ export function AdminAuditPage() {
         undefined,
         DEFAULT_AUDIT_LIMIT,
       );
-      setEvents([...result].sort((left, right) => new Date(right.occurred_at).getTime() - new Date(left.occurred_at).getTime()));
+      setEvents(
+        [...result].sort((left, right) => new Date(right.occurred_at).getTime() - new Date(left.occurred_at).getTime()),
+      );
     } catch (loadError) {
       const message = toFriendlyAuditError(loadError);
       if (message.includes("重新登录")) {
@@ -74,7 +76,11 @@ export function AdminAuditPage() {
   }, [events]);
 
   if (isLoading) {
-    return <section className="rounded-lg border border-white bg-white/80 p-6 text-sm text-slate-500">正在恢复管理员会话...</section>;
+    return (
+      <section className="rounded-lg border border-white bg-white/80 p-6 text-sm text-slate-500">
+        正在恢复管理员会话...
+      </section>
+    );
   }
 
   if (!isAuthenticated) {
@@ -106,7 +112,11 @@ export function AdminAuditPage() {
         </button>
       </header>
 
-      {error ? <section className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</section> : null}
+      {error ? (
+        <section className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {error}
+        </section>
+      ) : null}
 
       <section className="rounded-lg border border-white bg-white/85 p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -143,7 +153,10 @@ export function AdminAuditPage() {
         {eventTypeSummary.length > 0 ? (
           <div className="mt-4 flex flex-wrap gap-2">
             {eventTypeSummary.map(([label, count]) => (
-              <span key={label} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-1.5 text-xs text-slate-600">
+              <span
+                key={label}
+                className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-1.5 text-xs text-slate-600"
+              >
                 {label} · {count}
               </span>
             ))}
@@ -159,7 +172,10 @@ export function AdminAuditPage() {
         ) : (
           <div className="space-y-3">
             {events.map((event) => (
-              <article key={`${event.event_id}-${event.occurred_at}`} className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3">
+              <article
+                key={`${event.event_id}-${event.occurred_at}`}
+                className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3"
+              >
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                   <span className="rounded-md bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">
                     {formatAdminEventType(event.event_type)}
@@ -167,7 +183,9 @@ export function AdminAuditPage() {
                   <span className="text-xs text-slate-500">{formatTime(event.occurred_at)}</span>
                   <span className="text-xs text-slate-500">事件编号 {event.event_id}</span>
                   <span className="text-xs text-slate-500">任务编号 {event.job_id}</span>
-                  {typeof event.job_item_id === "number" ? <span className="text-xs text-slate-500">子任务 {event.job_item_id}</span> : null}
+                  {typeof event.job_item_id === "number" ? (
+                    <span className="text-xs text-slate-500">子任务 {event.job_item_id}</span>
+                  ) : null}
                 </div>
                 <details className="mt-3">
                   <summary className="cursor-pointer text-xs font-medium text-slate-500">技术信息</summary>

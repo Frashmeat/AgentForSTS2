@@ -69,7 +69,7 @@ export function LoginPage({ onStatusNotice }: { onStatusNotice?: AuthStatusNotic
             <input
               className="platform-page-input mt-1"
               value={login}
-              onChange={event => setLogin(event.target.value)}
+              onChange={(event) => setLogin(event.target.value)}
             />
           </label>
           <label className="block text-sm font-medium text-slate-700">
@@ -78,7 +78,7 @@ export function LoginPage({ onStatusNotice }: { onStatusNotice?: AuthStatusNotic
               type="password"
               className="platform-page-input mt-1"
               value={password}
-              onChange={event => setPassword(event.target.value)}
+              onChange={(event) => setPassword(event.target.value)}
             />
           </label>
           <button
@@ -90,7 +90,10 @@ export function LoginPage({ onStatusNotice }: { onStatusNotice?: AuthStatusNotic
           </button>
         </form>
         <div className="mt-5 flex items-center justify-between text-sm text-slate-500">
-          <Link to="/auth/register" className="font-medium text-[var(--workspace-accent)] transition hover:text-[var(--workspace-accent-strong)]">
+          <Link
+            to="/auth/register"
+            className="font-medium text-[var(--workspace-accent)] transition hover:text-[var(--workspace-accent-strong)]"
+          >
             注册账号
           </Link>
           <Link to="/auth/forgot-password" className="transition hover:text-[var(--workspace-accent-strong)]">

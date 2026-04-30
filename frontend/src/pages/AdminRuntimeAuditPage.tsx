@@ -69,10 +69,10 @@ export function AdminRuntimeAuditPage() {
         DEFAULT_AUDIT_LIMIT,
       );
       const merged = [...result].sort((left, right) => {
-          const leftTime = new Date(left.occurred_at).getTime();
-          const rightTime = new Date(right.occurred_at).getTime();
-          return rightTime - leftTime;
-        });
+        const leftTime = new Date(left.occurred_at).getTime();
+        const rightTime = new Date(right.occurred_at).getTime();
+        return rightTime - leftTime;
+      });
       setEvents(merged);
     } catch (loadError) {
       const message = toFriendlyAuditError(loadError);
@@ -150,10 +150,7 @@ export function AdminRuntimeAuditPage() {
       >
         <section className="platform-page-card p-8 space-y-4">
           <p className="text-sm text-slate-500">当前未登录，无法读取管理员审计事件。</p>
-          <Link
-            to="/auth/login"
-            className="platform-page-primary-button inline-flex"
-          >
+          <Link to="/auth/login" className="platform-page-primary-button inline-flex">
             去登录
           </Link>
         </section>
@@ -185,15 +182,15 @@ export function AdminRuntimeAuditPage() {
         </div>
       }
     >
-      {error ? (
-        <section className="platform-page-card p-6 text-sm text-rose-600">{error}</section>
-      ) : null}
+      {error ? <section className="platform-page-card p-6 text-sm text-rose-600">{error}</section> : null}
 
       <section className="platform-page-card p-6 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-slate-900">最近审计事件</h2>
-            <p className="text-sm text-slate-500">优先展示最新事件；`job_id = 0` 的事件表示运行时系统事件，而不是具体平台任务。</p>
+            <p className="text-sm text-slate-500">
+              优先展示最新事件；`job_id = 0` 的事件表示运行时系统事件，而不是具体平台任务。
+            </p>
           </div>
           <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600">
             <ShieldAlert size={14} />
@@ -231,7 +228,10 @@ export function AdminRuntimeAuditPage() {
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">事件类型统计</p>
             <div className="mt-3 flex flex-wrap gap-2">
               {eventTypeSummary.map(([label, count]) => (
-                <div key={label} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600">
+                <div
+                  key={label}
+                  className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600"
+                >
                   <span>{label}</span>
                   <span className="font-semibold text-slate-900">{count}</span>
                 </div>
@@ -247,7 +247,10 @@ export function AdminRuntimeAuditPage() {
         ) : (
           <div className="space-y-3">
             {filteredEvents.map((event) => (
-              <article key={`${event.event_id}-${event.occurred_at}`} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <article
+                key={`${event.event_id}-${event.occurred_at}`}
+                className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+              >
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                   <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">
                     {formatAuditLabel(event.event_type)}
@@ -255,7 +258,9 @@ export function AdminRuntimeAuditPage() {
                   <span className="text-xs text-slate-500">{formatAuditTime(event.occurred_at)}</span>
                   <span className="text-xs text-slate-500">event #{event.event_id}</span>
                   <span className="text-xs text-slate-500">job #{event.job_id}</span>
-                  {typeof event.job_item_id === "number" ? <span className="text-xs text-slate-500">item #{event.job_item_id}</span> : null}
+                  {typeof event.job_item_id === "number" ? (
+                    <span className="text-xs text-slate-500">item #{event.job_item_id}</span>
+                  ) : null}
                 </div>
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
                   {Object.entries(event.payload ?? {}).map(([key, value]) => (

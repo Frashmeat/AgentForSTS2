@@ -166,7 +166,10 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
         <div className="space-y-4">
           {showRecoveredNotice && (
             <div className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2.5 text-xs text-violet-700 space-y-2">
-              <p>当前展示的是本地恢复的单资产快照。审批状态会同步后端，但 prompt 确认、选图、补图和继续执行需要重新建立工作流连接。</p>
+              <p>
+                当前展示的是本地恢复的单资产快照。审批状态会同步后端，但 prompt
+                确认、选图、补图和继续执行需要重新建立工作流连接。
+              </p>
               <button
                 onClick={onRestartWorkflow}
                 className="inline-flex items-center gap-1 rounded-md border border-violet-300 px-2.5 py-1 text-xs font-medium text-violet-700 hover:bg-violet-100 transition-colors"
@@ -189,7 +192,7 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                     assetType === item.value
                       ? "border-violet-500 bg-violet-50 text-violet-700 font-medium"
                       : "border-slate-200 hover:border-violet-300 text-slate-500 hover:text-slate-700",
-                    step > 0 && "opacity-50 cursor-not-allowed"
+                    step > 0 && "opacity-50 cursor-not-allowed",
                   )}
                 >
                   {item.label}
@@ -266,7 +269,7 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                           "flex-1 py-1.5 rounded-lg border text-xs font-medium transition-all",
                           imageMode === mode
                             ? "border-violet-500 bg-violet-50 text-violet-700"
-                            : "border-slate-200 text-slate-500 hover:border-violet-300"
+                            : "border-slate-200 text-slate-500 hover:border-violet-300",
                         )}
                       >
                         {mode === "ai" ? "✦ AI 生图" : "↑ 自定义图片"}
@@ -304,8 +307,10 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                         }}
                         className={cn(
                           "relative rounded-lg border-2 border-dashed cursor-pointer transition-colors overflow-hidden",
-                          dragOver ? "border-violet-400 bg-violet-50" : "border-slate-200 hover:border-violet-300 bg-slate-50",
-                          uploadedImagePreview ? "h-32" : "h-20"
+                          dragOver
+                            ? "border-violet-400 bg-violet-50"
+                            : "border-slate-200 hover:border-violet-300 bg-slate-50",
+                          uploadedImagePreview ? "h-32" : "h-20",
                         )}
                       >
                         {uploadedImagePreview ? (
@@ -348,13 +353,13 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                     onClick={onAutoModeToggle}
                     className={cn(
                       "relative w-8 h-4 rounded-full transition-colors shrink-0",
-                      autoMode ? "bg-violet-700" : "bg-slate-200"
+                      autoMode ? "bg-violet-700" : "bg-slate-200",
                     )}
                   >
                     <span
                       className={cn(
                         "absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform",
-                        autoMode ? "translate-x-4" : "translate-x-0.5"
+                        autoMode ? "translate-x-4" : "translate-x-0.5",
                       )}
                     />
                   </div>
@@ -439,7 +444,9 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
             </div>
           )}
 
-          {errorInStep2 && <ErrorBlock message={errorMessage} traceback={errorTraceback} log={genLog} onReset={onReset} />}
+          {errorInStep2 && (
+            <ErrorBlock message={errorMessage} traceback={errorTraceback} log={genLog} onReset={onReset} />
+          )}
 
           {step === 3 && (
             <div className="space-y-4">
@@ -453,7 +460,11 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
                     className="group relative rounded-lg overflow-hidden border border-slate-200 bg-slate-100 hover:border-violet-400 transition-colors"
                     style={{ width: images.length === 1 ? "280px" : "200px" }}
                   >
-                    <img src={`data:image/png;base64,${image}`} alt={`生成图 ${index + 1}`} className="w-full h-auto block" />
+                    <img
+                      src={`data:image/png;base64,${image}`}
+                      alt={`生成图 ${index + 1}`}
+                      className="w-full h-auto block"
+                    />
                     <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                       <button
                         disabled={!hasLiveSession}
@@ -507,7 +518,12 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
           )}
         </Step>
 
-        <Step num={3} title="Code Agent / 审批" active={(step >= 4 && step <= 5) || errorInStep3} done={stage === "done" && !errorInStep3}>
+        <Step
+          num={3}
+          title="Code Agent / 审批"
+          active={(step >= 4 && step <= 5) || errorInStep3}
+          done={stage === "done" && !errorInStep3}
+        >
           {step >= 4 && !errorInStep3 && (
             <div className="space-y-3">
               {stage === "approval_pending" ? (
@@ -536,11 +552,18 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
             </div>
           )}
 
-          {errorInStep3 && <ErrorBlock message={errorMessage} traceback={errorTraceback} log={agentLog} onReset={onReset} />}
+          {errorInStep3 && (
+            <ErrorBlock message={errorMessage} traceback={errorTraceback} log={agentLog} onReset={onReset} />
+          )}
           {step < 4 && !errorInStep3 && <p className="text-sm text-slate-300">等待选择图片…</p>}
         </Step>
 
-        <Step num={4} title="完成" active={stage === "approval_pending" || stage === "done" || stage === "cancelled"} done={false}>
+        <Step
+          num={4}
+          title="完成"
+          active={stage === "approval_pending" || stage === "done" || stage === "cancelled"}
+          done={false}
+        >
           {stage === "done" ? (
             <div className="space-y-3">
               <p className="text-sm text-green-600 font-medium">✓ Code Agent 完成</p>
@@ -671,19 +694,32 @@ function Step({
     <div
       className={cn(
         "rounded-xl border p-5 transition-all",
-        active ? "border-violet-300 bg-white shadow-md" : done ? "border-slate-200 bg-white" : "border-slate-100 bg-slate-50"
+        active
+          ? "border-violet-300 bg-white shadow-md"
+          : done
+            ? "border-slate-200 bg-white"
+            : "border-slate-100 bg-slate-50",
       )}
     >
       <div className="flex items-center gap-3 mb-4">
         <div
           className={cn(
             "w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0",
-            active ? "bg-violet-700 text-white" : done ? "bg-violet-100 text-violet-700" : "bg-slate-200 text-slate-400"
+            active
+              ? "bg-violet-700 text-white"
+              : done
+                ? "bg-violet-100 text-violet-700"
+                : "bg-slate-200 text-slate-400",
           )}
         >
           {done ? "✓" : num}
         </div>
-        <h2 className={cn("font-semibold text-sm", active ? "text-slate-800" : done ? "text-violet-700" : "text-slate-400")}>
+        <h2
+          className={cn(
+            "font-semibold text-sm",
+            active ? "text-slate-800" : done ? "text-violet-700" : "text-slate-400",
+          )}
+        >
           {title}
         </h2>
       </div>

@@ -67,7 +67,7 @@ export function ResetPasswordPage({ onStatusNotice }: { onStatusNotice?: AuthSta
             <input
               className="platform-page-input mt-1"
               value={code}
-              onChange={event => setCode(event.target.value)}
+              onChange={(event) => setCode(event.target.value)}
             />
           </label>
           <label className="block text-sm font-medium text-slate-700">
@@ -76,7 +76,7 @@ export function ResetPasswordPage({ onStatusNotice }: { onStatusNotice?: AuthSta
               type="password"
               className="platform-page-input mt-1"
               value={password}
-              onChange={event => setPassword(event.target.value)}
+              onChange={(event) => setPassword(event.target.value)}
             />
           </label>
           <button
@@ -87,7 +87,10 @@ export function ResetPasswordPage({ onStatusNotice }: { onStatusNotice?: AuthSta
             {formState.status === "submitting" ? "提交中..." : "重置密码"}
           </button>
         </form>
-        <Link to="/auth/login" className="mt-5 inline-flex text-sm font-medium text-[var(--workspace-accent)] transition hover:text-[var(--workspace-accent-strong)]">
+        <Link
+          to="/auth/login"
+          className="mt-5 inline-flex text-sm font-medium text-[var(--workspace-accent)] transition hover:text-[var(--workspace-accent-strong)]"
+        >
           返回登录
         </Link>
       </section>

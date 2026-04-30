@@ -5,22 +5,14 @@ import { StageStatus } from "../../components/StageStatus";
 import { AgentLog } from "../../components/AgentLog";
 import { LogAnalysisSocket } from "../../lib/log_analysis_ws";
 import { resolveErrorMessage, resolveWorkflowErrorMessage } from "../../shared/error.ts";
-import {
-  appendWorkflowLogEntry,
-  resolveNextWorkflowModel,
-  type WorkflowLogEntry,
-} from "../../shared/workflowLog.ts";
+import { appendWorkflowLogEntry, resolveNextWorkflowModel, type WorkflowLogEntry } from "../../shared/workflowLog.ts";
 import { useResolvedWorkspaceFeatureProps } from "../workspace/WorkspaceContext.tsx";
 import type { WorkspaceFeatureAdapterProps } from "../workspace/types.ts";
 
 type Stage = "input" | "analyzing" | "done" | "error";
 
-export function LogAnalysisFeatureView({
-  onRequestExecution,
-}: WorkspaceFeatureAdapterProps) {
-  const {
-    onRequestExecution: resolvedRequestExecution,
-  } = useResolvedWorkspaceFeatureProps({
+export function LogAnalysisFeatureView({ onRequestExecution }: WorkspaceFeatureAdapterProps) {
+  const { onRequestExecution: resolvedRequestExecution } = useResolvedWorkspaceFeatureProps({
     onRequestExecution,
   });
   const [stage, setStage] = useState<Stage>("input");
@@ -62,7 +54,7 @@ export function LogAnalysisFeatureView({
     ws.on("stage_update", (message) => {
       setCurrentStage(message.message);
       setStageHistory((previous) =>
-        previous[previous.length - 1] === message.message ? previous : [...previous, message.message]
+        previous[previous.length - 1] === message.message ? previous : [...previous, message.message],
       );
     });
     ws.on("log_info", (message) => {

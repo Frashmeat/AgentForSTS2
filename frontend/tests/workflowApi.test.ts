@@ -72,10 +72,7 @@ test("generateModPlan throws when backend returns 200 plus business error", asyn
       }),
   });
 
-  await assert.rejects(
-    () => generateModPlan(""),
-    /requirements 不能为空/,
-  );
+  await assert.rejects(() => generateModPlan(""), /requirements 不能为空/);
 });
 
 test("createProject posts name and target dir", async () => {

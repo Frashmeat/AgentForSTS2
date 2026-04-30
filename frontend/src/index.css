@@ -7,11 +7,11 @@
   --workspace-surface: rgba(255, 255, 255, 0.9);
   --workspace-surface-strong: #ffffff;
   --workspace-panel-border: rgba(98, 107, 150, 0.18);
-  --workspace-nav-bg: #13132B;
-  --workspace-nav-active: #1B1553;
+  --workspace-nav-bg: #13132b;
+  --workspace-nav-active: #1b1553;
   --workspace-accent-strong: #241953;
-  --workspace-accent: #724A91;
-  --workspace-text-muted: #626B96;
+  --workspace-accent: #724a91;
+  --workspace-text-muted: #626b96;
   --workspace-shadow: 0 18px 44px rgba(36, 25, 83, 0.12);
 }
 
@@ -489,7 +489,6 @@ body {
     width: 100%;
     justify-content: flex-start;
   }
-
 }
 
 ::-webkit-scrollbar {

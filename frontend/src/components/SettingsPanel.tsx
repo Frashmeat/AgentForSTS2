@@ -28,15 +28,17 @@ import { KnowledgeGuideDialog } from "./KnowledgeGuideDialog.tsx";
 import { StatusNotice, StatusNoticeStack, type StatusNoticeItem } from "./StatusNotice.tsx";
 import { createSettingsPickPathRequest, type SettingsPathField } from "./settingsPathPicker.ts";
 
-const inputCls = "w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-100";
-const selectCls = "w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-slate-800 focus:outline-none focus:border-amber-400";
+const inputCls =
+  "w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-100";
+const selectCls =
+  "w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-slate-800 focus:outline-none focus:border-amber-400";
 const readonlyInputCls = `${inputCls} bg-slate-50 text-slate-500`;
 
 const PROVIDER_MODELS: Record<string, string[]> = {
-  bfl:         ["flux.2-flex", "flux.2-pro", "flux.2-klein", "flux.2-max", "flux.1.1-pro"],
-  fal:         ["flux.2-flex", "flux.2-pro", "flux.2-dev", "flux.2-schnell"],
-  volcengine:  ["doubao-seedream-3-0-t2i-250415", "doubao-seedream-3-0-1-5b-t2i-250616"],
-  wanxiang:    [],
+  bfl: ["flux.2-flex", "flux.2-pro", "flux.2-klein", "flux.2-max", "flux.1.1-pro"],
+  fal: ["flux.2-flex", "flux.2-pro", "flux.2-dev", "flux.2-schnell"],
+  volcengine: ["doubao-seedream-3-0-t2i-250415", "doubao-seedream-3-0-1-5b-t2i-250616"],
+  wanxiang: [],
 };
 
 const KNOWLEDGE_UPDATE_STEP_PROGRESS: Array<{ pattern: RegExp; progress: number }> = [
@@ -126,13 +128,18 @@ function pickInitialServerProfileId(
   profiles: PlatformExecutionProfile[],
   preference: MyServerPreferenceView | null,
 ): number | null {
-  if (preference?.default_execution_profile_id !== null && typeof preference?.default_execution_profile_id !== "undefined") {
+  if (
+    preference?.default_execution_profile_id !== null &&
+    typeof preference?.default_execution_profile_id !== "undefined"
+  ) {
     const preferredProfile = profiles.find((profile) => profile.id === preference.default_execution_profile_id);
     return preferredProfile?.available ? preferredProfile.id : null;
   }
-  return profiles.find((profile) => profile.available && profile.recommended)?.id
-    ?? profiles.find((profile) => profile.available)?.id
-    ?? null;
+  return (
+    profiles.find((profile) => profile.available && profile.recommended)?.id ??
+    profiles.find((profile) => profile.available)?.id ??
+    null
+  );
 }
 
 interface SettingsPanelProps {
@@ -402,7 +409,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
 
         if (snapshot.status === "failed") {
           const message = snapshot.error?.trim() || "检测失败，请使用右侧选择按钮手动指定路径";
-          setPathNotes(prev => [...(snapshot.notes ?? prev), `检测失败：${message}`]);
+          setPathNotes((prev) => [...(snapshot.notes ?? prev), `检测失败：${message}`]);
         }
 
         setDetecting(false);
@@ -695,9 +702,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
   const pathNoticeMessage = detecting
     ? detectionStep || "正在自动检测项目路径"
     : pathFailureNote || pathSuccessNotes[0] || (missingPaths ? "请补充默认项目目录和 STS2 游戏根目录" : "");
-  const knowledgeNoticeMessage = knowledgeError
-    ? knowledgeError
-    : knowledgeStep || (knowledgeNotes[0] ?? "");
+  const knowledgeNoticeMessage = knowledgeError ? knowledgeError : knowledgeStep || (knowledgeNotes[0] ?? "");
   const floatingNoticeCandidates: Array<StatusNoticeItem | null> = [
     activeTab === "workspace" && (saveError || configDirty || Boolean(saveNotice))
       ? {
@@ -711,7 +716,13 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
     activeTab === "workspace" && (detecting || Boolean(pathNoticeMessage))
       ? {
           id: "path-detect",
-          title: detecting ? "自动检测路径" : pathFailureNote ? "路径检测失败" : pathSuccessNotes.length > 0 ? "路径已更新" : "项目路径提示",
+          title: detecting
+            ? "自动检测路径"
+            : pathFailureNote
+              ? "路径检测失败"
+              : pathSuccessNotes.length > 0
+                ? "路径已更新"
+                : "项目路径提示",
           tone: pathFailureNote ? "error" : detecting ? "warning" : pathSuccessNotes.length > 0 ? "success" : "warning",
           message: pathNoticeMessage,
           details: detecting ? pathNotes.slice(0, 3) : pathNotes.slice(1, 3),
@@ -730,7 +741,13 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
     activeTab === "workspace" && (knowledgeChecking || Boolean(knowledgeTaskId) || Boolean(knowledgeNoticeMessage))
       ? {
           id: "knowledge-status",
-          title: knowledgeError ? "知识库操作失败" : knowledgeTaskId ? "知识库更新中" : knowledgeChecking ? "知识库检查中" : "知识库状态提示",
+          title: knowledgeError
+            ? "知识库操作失败"
+            : knowledgeTaskId
+              ? "知识库更新中"
+              : knowledgeChecking
+                ? "知识库检查中"
+                : "知识库状态提示",
           tone: knowledgeError ? "error" : knowledgeTaskId ? "warning" : knowledgeChecking ? "info" : "success",
           message: knowledgeNoticeMessage || "知识库状态已更新",
           details: knowledgeNotes.slice(0, 3),
@@ -866,7 +883,12 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
         <h2 className="font-bold text-slate-800">设置</h2>
       </div>
       {mode === "drawer" && onClose ? (
-        <button onClick={() => { void handleCloseSettings(); }} className="text-slate-400 hover:text-slate-600 transition-colors p-1 rounded-lg hover:bg-slate-100">
+        <button
+          onClick={() => {
+            void handleCloseSettings();
+          }}
+          className="text-slate-400 hover:text-slate-600 transition-colors p-1 rounded-lg hover:bg-slate-100"
+        >
           <X size={18} />
         </button>
       ) : null}
@@ -876,10 +898,12 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
   const tabBar = (
     <div className="border-b border-slate-100 px-6 py-3">
       <div className="flex flex-wrap gap-2">
-        {([
-          { key: "workspace", label: "工作站" },
-          { key: "server", label: "服务器模式" },
-        ] as const).map((tab) => (
+        {(
+          [
+            { key: "workspace", label: "工作站" },
+            { key: "server", label: "服务器模式" },
+          ] as const
+        ).map((tab) => (
           <button
             key={tab.key}
             type="button"
@@ -901,444 +925,487 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
     <div className="p-6 space-y-6">
       {!cfg ? (
         <p className="text-slate-400 text-sm">加载中…</p>
-      ) : (
-        activeTab === "workspace" ? (
+      ) : activeTab === "workspace" ? (
         <>
-              {/* ── 项目配置（最重要，放最前面）── */}
-              <SGroup icon={<FolderOpen size={14} />} title="项目配置">
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={detectPaths}
-                    disabled={detecting}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 text-xs hover:border-amber-300 hover:text-amber-600 disabled:opacity-40 transition-colors"
+          {/* ── 项目配置（最重要，放最前面）── */}
+          <SGroup icon={<FolderOpen size={14} />} title="项目配置">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={detectPaths}
+                disabled={detecting}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 text-xs hover:border-amber-300 hover:text-amber-600 disabled:opacity-40 transition-colors"
+              >
+                <Search size={12} />
+                {detecting ? "检测中…" : "自动检测路径"}
+              </button>
+              {detecting && (
+                <button
+                  type="button"
+                  onClick={cancelDetectPaths}
+                  className="px-3 py-1.5 rounded-lg border border-rose-200 text-rose-600 text-xs hover:bg-rose-50 transition-colors"
+                >
+                  中断检测
+                </button>
+              )}
+            </div>
+            <Field label="默认 Mod 项目目录" hint="新建/修改 Mod 时的默认路径">
+              <div className="flex gap-2">
+                <input
+                  value={cfg.default_project_root || ""}
+                  readOnly
+                  placeholder="E:/STS2mod/testscenario"
+                  className={readonlyInputCls + " font-mono"}
+                />
+                <button
+                  type="button"
+                  onClick={() => choosePath("default_project_root")}
+                  className="shrink-0 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:border-amber-300 hover:text-amber-600 transition-colors"
+                >
+                  选择目录
+                </button>
+              </div>
+            </Field>
+            <Field label="STS2 游戏根目录" hint="用于一键部署 Mod 文件">
+              <div className="flex gap-2">
+                <input
+                  value={cfg.sts2_path || ""}
+                  readOnly
+                  placeholder="E:/steam/steamapps/common/Slay the Spire 2"
+                  className={readonlyInputCls + " font-mono"}
+                />
+                <button
+                  type="button"
+                  onClick={() => choosePath("sts2_path")}
+                  className="shrink-0 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:border-amber-300 hover:text-amber-600 transition-colors"
+                >
+                  选择目录
+                </button>
+              </div>
+            </Field>
+            <Field label="Godot 4.5.1 Mono 路径" hint="用于打包 .pck 文件，必须是 4.5.1 Mono 版本">
+              <div className="flex gap-2">
+                <input
+                  value={cfg.godot_exe_path || ""}
+                  readOnly
+                  placeholder="C:/tools/Godot_v4.5.1-stable_mono_win64.exe"
+                  className={readonlyInputCls + " font-mono"}
+                />
+                <button
+                  type="button"
+                  onClick={() => choosePath("godot_exe_path")}
+                  className="shrink-0 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:border-amber-300 hover:text-amber-600 transition-colors"
+                >
+                  选择文件
+                </button>
+              </div>
+            </Field>
+          </SGroup>
+
+          <div className="border-t border-slate-100" />
+
+          <SGroup icon={<Gamepad2 size={14} />} title="知识库状态">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 space-y-2">
+              <p className="text-xs text-slate-500">
+                当前状态：<span className="font-semibold text-slate-700">{knowledgeStatus?.status || "loading"}</span>
+              </p>
+              <p className="text-xs text-slate-500">
+                游戏版本：
+                <span className="font-semibold text-slate-700">
+                  {knowledgeStatus?.game?.current_version || knowledgeStatus?.game?.version || "未知"}
+                </span>
+              </p>
+              <p className="text-xs text-slate-500">
+                游戏知识来源：
+                <span className="font-semibold text-slate-700">{knowledgeStatus?.game?.source_mode || "未知"}</span>
+              </p>
+              <p className="text-xs text-slate-500">
+                Baselib release：
+                <span className="font-semibold text-slate-700">
+                  {knowledgeStatus?.baselib?.latest_release_tag || knowledgeStatus?.baselib?.release_tag || "未知"}
+                </span>
+              </p>
+              <p className="text-xs text-slate-500">
+                Baselib 知识来源：
+                <span className="font-semibold text-slate-700">{knowledgeStatus?.baselib?.source_mode || "未知"}</span>
+              </p>
+              {knowledgeChecking ? (
+                <ProgressBar label="检查进度" tone="sky" indeterminate progress={knowledgeCheckProgress} />
+              ) : null}
+              {knowledgeTaskId ? <ProgressBar label="更新进度" progress={knowledgeUpdateProgress} /> : null}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  void handleCheckKnowledge();
+                }}
+                disabled={knowledgeBusy}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:border-amber-300 hover:text-amber-700 transition-colors"
+              >
+                {knowledgeChecking ? "检查中…" : "检查更新"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleRefreshKnowledge();
+                }}
+                disabled={knowledgeBusy}
+                className="rounded-lg border border-amber-300 px-3 py-1.5 text-xs text-amber-700 hover:bg-amber-50 disabled:opacity-50 transition-colors"
+              >
+                {knowledgeBusy ? "更新中…" : "更新知识库"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setKnowledgeGuideOpen(true)}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:border-amber-300 hover:text-amber-700 transition-colors"
+              >
+                查看知识库说明
+              </button>
+            </div>
+          </SGroup>
+
+          <div className="border-t border-slate-100" />
+
+          {/* ── LLM 配置 ── */}
+          <SGroup icon={<Cpu size={14} />} title="LLM 配置">
+            <Field label="文本任务模式" hint="规划、日志分析、提示词优化以及代码代理都会跟随这里的模式。">
+              <select
+                value={cfg.llm?.mode || ""}
+                onChange={(e) => set(["llm", "mode"], e.target.value)}
+                className={selectCls}
+              >
+                <option value="agent_cli">Agent CLI</option>
+                <option value="claude_api">Claude API</option>
+              </select>
+            </Field>
+            {cfg.llm?.mode === "agent_cli" ? (
+              <Field label="代码代理后端" hint="CLI 模式下，文本任务和代码代理都会走这里选择的后端。">
+                <select
+                  value={cfg.llm?.agent_backend || "claude"}
+                  onChange={(e) => set(["llm", "agent_backend"], e.target.value)}
+                  className={selectCls}
+                >
+                  <option value="claude">Claude CLI</option>
+                  <option value="codex">Codex CLI</option>
+                </select>
+              </Field>
+            ) : (
+              <Field
+                label="代码代理后端"
+                hint="Claude API 模式下，文本任务和代码代理都会直接使用同一套 Claude API 配置。"
+              >
+                <input value="自动选择：Claude API" readOnly className={readonlyInputCls} />
+              </Field>
+            )}
+            <Field
+              label="代码执行模式"
+              hint="审批模式：执行前展示操作预览，用户确认后再调用代理。推荐在使用 Codex 时开启。"
+            >
+              <select
+                value={cfg.llm?.execution_mode || "direct_execute"}
+                onChange={(e) => set(["llm", "execution_mode"], e.target.value)}
+                className={selectCls}
+              >
+                <option value="direct_execute">直接执行</option>
+                <option value="approval_first">审批后执行</option>
+              </select>
+            </Field>
+            {cfg.llm?.mode === "claude_api" && (
+              <Field label="Claude 模型" hint="文本任务和代码代理统一使用这个 Claude 模型；必填。">
+                <input
+                  value={cfg.llm?.model || ""}
+                  onChange={(e) => set(["llm", "model"], e.target.value)}
+                  placeholder="例如 claude-sonnet-4-6"
+                  className={inputCls}
+                />
+              </Field>
+            )}
+            {cfg.llm?.mode === "agent_cli" && (
+              <Field label="CLI 模型（可选）" hint="留空使用 Codex 或 Claude CLI 的默认模型">
+                <input
+                  value={cfg.llm?.model || ""}
+                  onChange={(e) => set(["llm", "model"], e.target.value)}
+                  placeholder="例如 gpt-5-codex / opus / sonnet"
+                  className={inputCls}
+                />
+              </Field>
+            )}
+            <Field label={cfg.llm?.mode === "claude_api" ? "Claude API Key（留空不修改）" : "API Key（留空不修改）"}>
+              <input
+                value={llmKey}
+                onChange={(e) => {
+                  setSaveError("");
+                  setSaveNotice("");
+                  setLlmKey(e.target.value);
+                }}
+                placeholder={cfg.llm?.api_key ? "已设置" : "未设置"}
+                className={inputCls}
+              />
+            </Field>
+            <Field label={cfg.llm?.mode === "claude_api" ? "Claude Base URL（可选）" : "Base URL（可选）"}>
+              <input
+                value={cfg.llm?.base_url || ""}
+                onChange={(e) => set(["llm", "base_url"], e.target.value)}
+                placeholder="https://..."
+                className={inputCls}
+              />
+            </Field>
+            <Field label="AI 附加提示词" hint="会追加到全部 AI 调用，包括文本分析、规划、提示词优化和代码代理">
+              <textarea
+                value={cfg.llm?.custom_prompt || ""}
+                onChange={(e) => set(["llm", "custom_prompt"], e.target.value)}
+                placeholder="例如：始终用简体中文回答；优先最小改动；输出先给结论后给细节"
+                rows={5}
+                className={inputCls + " min-h-28 resize-y"}
+              />
+            </Field>
+          </SGroup>
+
+          <div className="border-t border-slate-100" />
+
+          {/* ── 图像生成 ── */}
+          <SGroup icon={<Image size={14} />} title="图像生成">
+            <Field label="提供商">
+              <select
+                value={currentProvider}
+                onChange={(e) => handleProviderChange(e.target.value)}
+                className={selectCls}
+              >
+                <option value="bfl">BFL (FLUX.2)</option>
+                <option value="fal">fal.ai</option>
+                <option value="volcengine">火山引擎 (即梦 Seedream)</option>
+                <option value="wanxiang">通义万相</option>
+              </select>
+            </Field>
+            {models.length > 0 && (
+              <Field label="模型">
+                <select
+                  value={cfg.image_gen?.model || ""}
+                  onChange={(e) => set(["image_gen", "model"], e.target.value)}
+                  className={selectCls}
+                >
+                  {models.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
+            {currentProvider === "volcengine" ? (
+              <>
+                <Field label="Access Key（AK，留空不修改）">
+                  <input
+                    value={imgKey}
+                    onChange={(e) => {
+                      setSaveError("");
+                      setSaveNotice("");
+                      setImgKey(e.target.value);
+                    }}
+                    placeholder={cfg.image_gen?.api_key ? "已设置" : "未设置"}
+                    className={inputCls}
+                  />
+                </Field>
+                <Field label="Secret Key（SK，留空不修改）">
+                  <input
+                    type="password"
+                    value={imgSecret}
+                    onChange={(e) => {
+                      setSaveError("");
+                      setSaveNotice("");
+                      setImgSecret(e.target.value);
+                    }}
+                    placeholder={cfg.image_gen?.api_secret ? "已设置" : "未设置"}
+                    className={inputCls}
+                  />
+                </Field>
+              </>
+            ) : (
+              <Field label="API Key（留空不修改）">
+                <input
+                  value={imgKey}
+                  onChange={(e) => {
+                    setSaveError("");
+                    setSaveNotice("");
+                    setImgKey(e.target.value);
+                  }}
+                  placeholder={cfg.image_gen?.api_key ? "已设置" : "未设置"}
+                  className={inputCls}
+                />
+              </Field>
+            )}
+            <Field
+              label="背景去除模型"
+              hint="birefnet-general 质量最高但慢；birefnet-lite 快一倍；u2net 最快（适合 CPU）"
+            >
+              <select
+                value={cfg.image_gen?.rembg_model || "birefnet-general"}
+                onChange={(e) => set(["image_gen", "rembg_model"], e.target.value)}
+                className={selectCls}
+              >
+                <option value="birefnet-general">birefnet-general（最高质量）</option>
+                <option value="birefnet-general-lite">birefnet-general-lite（质量/速度均衡）</option>
+                <option value="isnet-general-use">isnet-general-use（通用）</option>
+                <option value="u2net">u2net（最快，适合无 GPU）</option>
+              </select>
+            </Field>
+            <Field label="并发生图数量" hint="1=串行（推荐，避免 API 限流）；提高可加速但易触发并发限制">
+              <input
+                type="number"
+                min={1}
+                max={4}
+                value={cfg.image_gen?.concurrency ?? 1}
+                onChange={(e) => set(["image_gen", "concurrency"], parseInt(e.target.value) || 1)}
+                className={inputCls}
+              />
+            </Field>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => void handleTestImageGenerationConfig()}
+                disabled={imageTestLoading}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:border-amber-300 hover:text-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {imageTestLoading ? "测试中…" : "测试生图配置"}
+              </button>
+            </div>
+          </SGroup>
+        </>
+      ) : (
+        <div className="space-y-6">
+          <SGroup icon={<Cloud size={14} />} title="服务器模式">
+            {!isAuthAvailable ? (
+              <StatusNotice
+                title="服务器模式暂不可用"
+                tone="warning"
+                message="当前环境未接入独立 Web 平台服务，暂时无法管理服务器模式默认配置。"
+              />
+            ) : !isAuthenticated ? (
+              <StatusNotice
+                title="登录后可管理服务器模式"
+                tone="warning"
+                message="登录后即可查看平台提供的执行配置，并设置默认服务器模式。"
+                actions={
+                  <Link
+                    to="/auth/login"
+                    className="inline-flex rounded-lg border border-amber-300 px-3 py-1.5 text-xs font-medium text-amber-700 transition hover:bg-amber-100"
                   >
-                    <Search size={12} />
-                    {detecting ? "检测中…" : "自动检测路径"}
-                  </button>
-                  {detecting && (
-                    <button
-                      type="button"
-                      onClick={cancelDetectPaths}
-                      className="px-3 py-1.5 rounded-lg border border-rose-200 text-rose-600 text-xs hover:bg-rose-50 transition-colors"
-                    >
-                      中断检测
-                    </button>
-                  )}
-                </div>
-                <Field
-                  label="默认 Mod 项目目录"
-                  hint="新建/修改 Mod 时的默认路径"
-                >
-                  <div className="flex gap-2">
-                    <input
-                      value={cfg.default_project_root || ""}
-                      readOnly
-                      placeholder="E:/STS2mod/testscenario"
-                      className={readonlyInputCls + " font-mono"}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => choosePath("default_project_root")}
-                      className="shrink-0 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:border-amber-300 hover:text-amber-600 transition-colors"
-                    >
-                      选择目录
-                    </button>
-                  </div>
-                </Field>
-                <Field
-                  label="STS2 游戏根目录"
-                  hint="用于一键部署 Mod 文件"
-                >
-                  <div className="flex gap-2">
-                    <input
-                      value={cfg.sts2_path || ""}
-                      readOnly
-                      placeholder="E:/steam/steamapps/common/Slay the Spire 2"
-                      className={readonlyInputCls + " font-mono"}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => choosePath("sts2_path")}
-                      className="shrink-0 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:border-amber-300 hover:text-amber-600 transition-colors"
-                    >
-                      选择目录
-                    </button>
-                  </div>
-                </Field>
-                <Field
-                  label="Godot 4.5.1 Mono 路径"
-                  hint="用于打包 .pck 文件，必须是 4.5.1 Mono 版本"
-                >
-                  <div className="flex gap-2">
-                    <input
-                      value={cfg.godot_exe_path || ""}
-                      readOnly
-                      placeholder="C:/tools/Godot_v4.5.1-stable_mono_win64.exe"
-                      className={readonlyInputCls + " font-mono"}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => choosePath("godot_exe_path")}
-                      className="shrink-0 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:border-amber-300 hover:text-amber-600 transition-colors"
-                    >
-                      选择文件
-                    </button>
-                  </div>
-                </Field>
-              </SGroup>
-
-              <div className="border-t border-slate-100" />
-
-              <SGroup icon={<Gamepad2 size={14} />} title="知识库状态">
+                    去登录
+                  </Link>
+                }
+              />
+            ) : serverLoading ? (
+              <p className="text-sm text-slate-500">正在读取服务器执行配置…</p>
+            ) : (
+              <>
+                {serverPreference?.default_execution_profile_id && !serverPreference.available ? (
+                  <StatusNotice
+                    title="默认服务器配置已不可用"
+                    tone="warning"
+                    message="你可以改选一个可用配置，系统会自动保存；也可以直接清空默认值。"
+                  />
+                ) : null}
                 <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 space-y-2">
-                  <p className="text-xs text-slate-500">当前状态：<span className="font-semibold text-slate-700">{knowledgeStatus?.status || "loading"}</span></p>
-                  <p className="text-xs text-slate-500">游戏版本：<span className="font-semibold text-slate-700">{knowledgeStatus?.game?.current_version || knowledgeStatus?.game?.version || "未知"}</span></p>
-                  <p className="text-xs text-slate-500">游戏知识来源：<span className="font-semibold text-slate-700">{knowledgeStatus?.game?.source_mode || "未知"}</span></p>
-                  <p className="text-xs text-slate-500">Baselib release：<span className="font-semibold text-slate-700">{knowledgeStatus?.baselib?.latest_release_tag || knowledgeStatus?.baselib?.release_tag || "未知"}</span></p>
-                  <p className="text-xs text-slate-500">Baselib 知识来源：<span className="font-semibold text-slate-700">{knowledgeStatus?.baselib?.source_mode || "未知"}</span></p>
-                  {knowledgeChecking ? (
-                    <ProgressBar label="检查进度" tone="sky" indeterminate progress={knowledgeCheckProgress} />
-                  ) : null}
-                  {knowledgeTaskId ? (
-                    <ProgressBar label="更新进度" progress={knowledgeUpdateProgress} />
-                  ) : null}
+                  <p className="text-xs text-slate-500">
+                    当前默认配置：
+                    <span className="ml-1 font-semibold text-slate-700">
+                      {serverPreference?.default_execution_profile_id
+                        ? serverPreference.display_name ||
+                          `${serverPreference.agent_backend} / ${serverPreference.model}`
+                        : "未设置"}
+                    </span>
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    可用状态：
+                    <span
+                      className={`ml-1 font-semibold ${(serverPreference?.available ?? true) ? "text-emerald-700" : "text-amber-700"}`}
+                    >
+                      {serverPreference?.default_execution_profile_id
+                        ? serverPreference?.available
+                          ? "当前可用"
+                          : "当前默认值已不可用"
+                        : "将按运行时选择或后端兜底决定"}
+                    </span>
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    运行时执行弹窗会复用这里的默认值，但仍可临时改用其他服务器配置。
+                  </p>
                 </div>
+
+                <div className="space-y-2">
+                  {serverProfiles.map((profile) => {
+                    const selected = selectedServerProfileId === profile.id;
+                    const disabled = serverSaving || !profile.available;
+                    return (
+                      <button
+                        key={profile.id}
+                        type="button"
+                        onClick={() => {
+                          if (!profile.available) {
+                            return;
+                          }
+                          setSelectedServerProfileId(profile.id);
+                          setServerSelectionDirty(true);
+                          setServerError("");
+                          setServerNotice("");
+                        }}
+                        disabled={disabled}
+                        className={`w-full rounded-xl border px-4 py-3 text-left transition ${
+                          selected
+                            ? "border-amber-300 bg-amber-50"
+                            : "border-slate-200 hover:border-amber-200 hover:bg-amber-50/40"
+                        } ${disabled ? "cursor-not-allowed opacity-60 hover:border-slate-200 hover:bg-white" : ""}`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-medium text-slate-900">{profile.display_name}</p>
+                            <p className="mt-1 text-xs text-slate-500">{profile.description}</p>
+                          </div>
+                          <div className="shrink-0 space-y-1 text-right">
+                            {profile.recommended ? (
+                              <p className="text-[11px] font-medium text-emerald-700">推荐</p>
+                            ) : null}
+                            <p
+                              className={`text-[11px] font-medium ${profile.available ? "text-slate-500" : "text-amber-700"}`}
+                            >
+                              {profile.available ? "可用" : "当前不可用"}
+                            </p>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
                     onClick={() => {
-                      void handleCheckKnowledge();
+                      setSelectedServerProfileId(null);
+                      setServerSelectionDirty(true);
+                      setServerError("");
+                      setServerNotice("");
                     }}
-                    disabled={knowledgeBusy}
-                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:border-amber-300 hover:text-amber-700 transition-colors"
+                    disabled={serverSaving || serverPreference?.default_execution_profile_id === null}
+                    className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 transition hover:border-amber-200 hover:text-amber-700 disabled:opacity-40"
                   >
-                    {knowledgeChecking ? "检查中…" : "检查更新"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void handleRefreshKnowledge();
-                    }}
-                    disabled={knowledgeBusy}
-                    className="rounded-lg border border-amber-300 px-3 py-1.5 text-xs text-amber-700 hover:bg-amber-50 disabled:opacity-50 transition-colors"
-                  >
-                    {knowledgeBusy ? "更新中…" : "更新知识库"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setKnowledgeGuideOpen(true)}
-                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:border-amber-300 hover:text-amber-700 transition-colors"
-                  >
-                    查看知识库说明
+                    清空默认配置
                   </button>
                 </div>
-              </SGroup>
-
-              <div className="border-t border-slate-100" />
-
-              {/* ── LLM 配置 ── */}
-              <SGroup icon={<Cpu size={14} />} title="LLM 配置">
-                <Field label="文本任务模式" hint="规划、日志分析、提示词优化以及代码代理都会跟随这里的模式。">
-                  <select value={cfg.llm?.mode || ""} onChange={e => set(["llm", "mode"], e.target.value)} className={selectCls}>
-                    <option value="agent_cli">Agent CLI</option>
-                    <option value="claude_api">Claude API</option>
-                  </select>
-                </Field>
-                {cfg.llm?.mode === "agent_cli" ? (
-                  <Field label="代码代理后端" hint="CLI 模式下，文本任务和代码代理都会走这里选择的后端。">
-                    <select
-                      value={cfg.llm?.agent_backend || "claude"}
-                      onChange={e => set(["llm", "agent_backend"], e.target.value)}
-                      className={selectCls}
-                    >
-                      <option value="claude">Claude CLI</option>
-                      <option value="codex">Codex CLI</option>
-                    </select>
-                  </Field>
-                ) : (
-                  <Field label="代码代理后端" hint="Claude API 模式下，文本任务和代码代理都会直接使用同一套 Claude API 配置。">
-                    <input
-                      value="自动选择：Claude API"
-                      readOnly
-                      className={readonlyInputCls}
-                    />
-                  </Field>
-                )}
-                <Field
-                  label="代码执行模式"
-                  hint="审批模式：执行前展示操作预览，用户确认后再调用代理。推荐在使用 Codex 时开启。"
-                >
-                  <select
-                    value={cfg.llm?.execution_mode || "direct_execute"}
-                    onChange={e => set(["llm", "execution_mode"], e.target.value)}
-                    className={selectCls}
-                  >
-                    <option value="direct_execute">直接执行</option>
-                    <option value="approval_first">审批后执行</option>
-                  </select>
-                </Field>
-                {cfg.llm?.mode === "claude_api" && (
-                  <Field label="Claude 模型" hint="文本任务和代码代理统一使用这个 Claude 模型；必填。">
-                    <input
-                      value={cfg.llm?.model || ""}
-                      onChange={e => set(["llm", "model"], e.target.value)}
-                      placeholder="例如 claude-sonnet-4-6"
-                      className={inputCls}
-                    />
-                  </Field>
-                )}
-                {cfg.llm?.mode === "agent_cli" && (
-                  <Field label="CLI 模型（可选）" hint="留空使用 Codex 或 Claude CLI 的默认模型">
-                    <input
-                      value={cfg.llm?.model || ""}
-                      onChange={e => set(["llm", "model"], e.target.value)}
-                      placeholder="例如 gpt-5-codex / opus / sonnet"
-                      className={inputCls}
-                    />
-                  </Field>
-                )}
-                <Field label={cfg.llm?.mode === "claude_api" ? "Claude API Key（留空不修改）" : "API Key（留空不修改）"}>
-                  <input
-                    value={llmKey}
-                    onChange={e => {
-                      setSaveError("");
-                      setSaveNotice("");
-                      setLlmKey(e.target.value);
-                    }}
-                    placeholder={cfg.llm?.api_key ? "已设置" : "未设置"}
-                    className={inputCls}
-                  />
-                </Field>
-                <Field label={cfg.llm?.mode === "claude_api" ? "Claude Base URL（可选）" : "Base URL（可选）"}>
-                  <input value={cfg.llm?.base_url || ""} onChange={e => set(["llm", "base_url"], e.target.value)} placeholder="https://..." className={inputCls} />
-                </Field>
-                <Field label="AI 附加提示词" hint="会追加到全部 AI 调用，包括文本分析、规划、提示词优化和代码代理">
-                  <textarea
-                    value={cfg.llm?.custom_prompt || ""}
-                    onChange={e => set(["llm", "custom_prompt"], e.target.value)}
-                    placeholder="例如：始终用简体中文回答；优先最小改动；输出先给结论后给细节"
-                    rows={5}
-                    className={inputCls + " min-h-28 resize-y"}
-                  />
-                </Field>
-              </SGroup>
-
-              <div className="border-t border-slate-100" />
-
-              {/* ── 图像生成 ── */}
-              <SGroup icon={<Image size={14} />} title="图像生成">
-                <Field label="提供商">
-                  <select value={currentProvider} onChange={e => handleProviderChange(e.target.value)} className={selectCls}>
-                    <option value="bfl">BFL (FLUX.2)</option>
-                    <option value="fal">fal.ai</option>
-                    <option value="volcengine">火山引擎 (即梦 Seedream)</option>
-                    <option value="wanxiang">通义万相</option>
-                  </select>
-                </Field>
-                {models.length > 0 && (
-                  <Field label="模型">
-                    <select value={cfg.image_gen?.model || ""} onChange={e => set(["image_gen", "model"], e.target.value)} className={selectCls}>
-                      {models.map(m => <option key={m} value={m}>{m}</option>)}
-                    </select>
-                  </Field>
-                )}
-                {currentProvider === "volcengine" ? (
-                  <>
-                    <Field label="Access Key（AK，留空不修改）">
-                      <input
-                        value={imgKey}
-                        onChange={e => {
-                          setSaveError("");
-                          setSaveNotice("");
-                          setImgKey(e.target.value);
-                        }}
-                        placeholder={cfg.image_gen?.api_key ? "已设置" : "未设置"}
-                        className={inputCls}
-                      />
-                    </Field>
-                    <Field label="Secret Key（SK，留空不修改）">
-                      <input
-                        type="password"
-                        value={imgSecret}
-                        onChange={e => {
-                          setSaveError("");
-                          setSaveNotice("");
-                          setImgSecret(e.target.value);
-                        }}
-                        placeholder={cfg.image_gen?.api_secret ? "已设置" : "未设置"}
-                        className={inputCls}
-                      />
-                    </Field>
-                  </>
-                ) : (
-                  <Field label="API Key（留空不修改）">
-                    <input
-                      value={imgKey}
-                      onChange={e => {
-                        setSaveError("");
-                        setSaveNotice("");
-                        setImgKey(e.target.value);
-                      }}
-                      placeholder={cfg.image_gen?.api_key ? "已设置" : "未设置"}
-                      className={inputCls}
-                    />
-                  </Field>
-                )}
-                <Field label="背景去除模型" hint="birefnet-general 质量最高但慢；birefnet-lite 快一倍；u2net 最快（适合 CPU）">
-                  <select
-                    value={cfg.image_gen?.rembg_model || "birefnet-general"}
-                    onChange={e => set(["image_gen", "rembg_model"], e.target.value)}
-                    className={selectCls}
-                  >
-                    <option value="birefnet-general">birefnet-general（最高质量）</option>
-                    <option value="birefnet-general-lite">birefnet-general-lite（质量/速度均衡）</option>
-                    <option value="isnet-general-use">isnet-general-use（通用）</option>
-                    <option value="u2net">u2net（最快，适合无 GPU）</option>
-                  </select>
-                </Field>
-                <Field label="并发生图数量" hint="1=串行（推荐，避免 API 限流）；提高可加速但易触发并发限制">
-                  <input
-                    type="number" min={1} max={4}
-                    value={cfg.image_gen?.concurrency ?? 1}
-                    onChange={e => set(["image_gen", "concurrency"], parseInt(e.target.value) || 1)}
-                    className={inputCls}
-                  />
-                </Field>
-                <div className="flex justify-end">
-                  <button
-                    type="button"
-                    onClick={() => void handleTestImageGenerationConfig()}
-                    disabled={imageTestLoading}
-                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:border-amber-300 hover:text-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {imageTestLoading ? "测试中…" : "测试生图配置"}
-                  </button>
-                </div>
-              </SGroup>
-
-        </>
-        ) : (
-          <div className="space-y-6">
-            <SGroup icon={<Cloud size={14} />} title="服务器模式">
-              {!isAuthAvailable ? (
-                <StatusNotice
-                  title="服务器模式暂不可用"
-                  tone="warning"
-                  message="当前环境未接入独立 Web 平台服务，暂时无法管理服务器模式默认配置。"
-                />
-              ) : !isAuthenticated ? (
-                <StatusNotice
-                  title="登录后可管理服务器模式"
-                  tone="warning"
-                  message="登录后即可查看平台提供的执行配置，并设置默认服务器模式。"
-                  actions={
-                    <Link
-                      to="/auth/login"
-                      className="inline-flex rounded-lg border border-amber-300 px-3 py-1.5 text-xs font-medium text-amber-700 transition hover:bg-amber-100"
-                    >
-                      去登录
-                    </Link>
-                  }
-                />
-              ) : serverLoading ? (
-                <p className="text-sm text-slate-500">正在读取服务器执行配置…</p>
-              ) : (
-                <>
-                  {serverPreference?.default_execution_profile_id && !serverPreference.available ? (
-                    <StatusNotice
-                      title="默认服务器配置已不可用"
-                      tone="warning"
-                      message="你可以改选一个可用配置，系统会自动保存；也可以直接清空默认值。"
-                    />
-                  ) : null}
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 space-y-2">
-                    <p className="text-xs text-slate-500">
-                      当前默认配置：
-                      <span className="ml-1 font-semibold text-slate-700">
-                        {serverPreference?.default_execution_profile_id
-                          ? serverPreference.display_name || `${serverPreference.agent_backend} / ${serverPreference.model}`
-                          : "未设置"}
-                      </span>
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      可用状态：
-                      <span className={`ml-1 font-semibold ${serverPreference?.available ?? true ? "text-emerald-700" : "text-amber-700"}`}>
-                        {serverPreference?.default_execution_profile_id
-                          ? (serverPreference?.available ? "当前可用" : "当前默认值已不可用")
-                          : "将按运行时选择或后端兜底决定"}
-                      </span>
-                    </p>
-                    <p className="text-xs text-slate-500">运行时执行弹窗会复用这里的默认值，但仍可临时改用其他服务器配置。</p>
-                  </div>
-
-                  <div className="space-y-2">
-                    {serverProfiles.map((profile) => {
-                      const selected = selectedServerProfileId === profile.id;
-                      const disabled = serverSaving || !profile.available;
-                      return (
-                        <button
-                          key={profile.id}
-                          type="button"
-                          onClick={() => {
-                            if (!profile.available) {
-                              return;
-                            }
-                            setSelectedServerProfileId(profile.id);
-                            setServerSelectionDirty(true);
-                            setServerError("");
-                            setServerNotice("");
-                          }}
-                          disabled={disabled}
-                          className={`w-full rounded-xl border px-4 py-3 text-left transition ${
-                            selected
-                              ? "border-amber-300 bg-amber-50"
-                              : "border-slate-200 hover:border-amber-200 hover:bg-amber-50/40"
-                          } ${disabled ? "cursor-not-allowed opacity-60 hover:border-slate-200 hover:bg-white" : ""
-                          }`}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <p className="text-sm font-medium text-slate-900">{profile.display_name}</p>
-                              <p className="mt-1 text-xs text-slate-500">{profile.description}</p>
-                            </div>
-                            <div className="shrink-0 space-y-1 text-right">
-                              {profile.recommended ? <p className="text-[11px] font-medium text-emerald-700">推荐</p> : null}
-                              <p className={`text-[11px] font-medium ${profile.available ? "text-slate-500" : "text-amber-700"}`}>
-                                {profile.available ? "可用" : "当前不可用"}
-                              </p>
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedServerProfileId(null);
-                        setServerSelectionDirty(true);
-                        setServerError("");
-                        setServerNotice("");
-                      }}
-                      disabled={serverSaving || serverPreference?.default_execution_profile_id === null}
-                      className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 transition hover:border-amber-200 hover:text-amber-700 disabled:opacity-40"
-                    >
-                      清空默认配置
-                    </button>
-                  </div>
-                </>
-              )}
-            </SGroup>
-          </div>
-        )
+              </>
+            )}
+          </SGroup>
+        </div>
       )}
     </div>
   );
 
   const guideDialog = (
-    <KnowledgeGuideDialog open={knowledgeGuideOpen} status={knowledgeStatus} onClose={() => setKnowledgeGuideOpen(false)} />
+    <KnowledgeGuideDialog
+      open={knowledgeGuideOpen}
+      status={knowledgeStatus}
+      onClose={() => setKnowledgeGuideOpen(false)}
+    />
   );
 
   const progressAnimationStyle = (
@@ -1368,10 +1435,15 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
   return (
     <>
       <StatusNoticeStack notices={floatingNotices} />
-      <div className="fixed inset-0 bg-black/60 z-50 flex justify-end" onClick={() => { void handleCloseSettings(); }}>
+      <div
+        className="fixed inset-0 bg-black/60 z-50 flex justify-end"
+        onClick={() => {
+          void handleCloseSettings();
+        }}
+      >
         <div
           className="w-full max-w-sm bg-white border-l border-slate-200 h-full overflow-y-auto shadow-xl"
-          onClick={e => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
         >
           {header}
           {tabBar}

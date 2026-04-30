@@ -11,7 +11,12 @@ export type BatchItemStatus =
 export type BatchItemStateSnapshot = Record<string, { status?: BatchItemStatus }>;
 
 function needsAttention(status?: BatchItemStatus): boolean {
-  return status === "awaiting_selection" || status === "approval_pending" || status === "img_generating" || status === "code_generating";
+  return (
+    status === "awaiting_selection" ||
+    status === "approval_pending" ||
+    status === "img_generating" ||
+    status === "code_generating"
+  );
 }
 
 export function pickActiveItemOnStart(
@@ -34,8 +39,6 @@ export function pickActiveItemOnDone(
 ): string | null {
   if (currentActiveId !== doneItemId) return currentActiveId;
 
-  const next = Object.entries(itemStates).find(
-    ([id, state]) => id !== doneItemId && needsAttention(state.status),
-  );
+  const next = Object.entries(itemStates).find(([id, state]) => id !== doneItemId && needsAttention(state.status));
   return next ? next[0] : currentActiveId;
 }

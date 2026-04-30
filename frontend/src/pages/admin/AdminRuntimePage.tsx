@@ -166,7 +166,7 @@ function WorkstationRuntimeLogPanel() {
         </div>
         <div className="flex items-center gap-2">
           <div className="inline-flex overflow-hidden rounded-lg border border-slate-200 bg-slate-50 p-1">
-            {(["stderr", "stdout"] as RuntimeLogStream[]).map(option => (
+            {(["stderr", "stdout"] as RuntimeLogStream[]).map((option) => (
               <button
                 key={option}
                 type="button"
@@ -176,7 +176,9 @@ function WorkstationRuntimeLogPanel() {
                 }}
                 className={[
                   "px-3 py-1.5 text-xs font-medium transition",
-                  stream === option ? "rounded-md bg-white text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-900",
+                  stream === option
+                    ? "rounded-md bg-white text-slate-950 shadow-sm"
+                    : "text-slate-500 hover:text-slate-900",
                 ].join(" ")}
               >
                 {option}
@@ -197,7 +199,9 @@ function WorkstationRuntimeLogPanel() {
         </div>
       </div>
 
-      {error ? <div className="mt-3 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
+      {error ? (
+        <div className="mt-3 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>
+      ) : null}
 
       {log ? (
         <div className="mt-3 grid gap-2 text-xs text-slate-500 sm:grid-cols-3">
@@ -239,7 +243,9 @@ export function AdminRuntimePage() {
       setWorkstationStatus(workstationResult.value);
     } else {
       setWorkstationStatus(null);
-      setError(previous => previous || resolveErrorMessage(workstationResult.reason) || "读取 Workstation 运行状态失败");
+      setError(
+        (previous) => previous || resolveErrorMessage(workstationResult.reason) || "读取 Workstation 运行状态失败",
+      );
     }
 
     setLoading(false);
@@ -269,7 +275,11 @@ export function AdminRuntimePage() {
         </button>
       </header>
 
-      {error ? <section className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</section> : null}
+      {error ? (
+        <section className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {error}
+        </section>
+      ) : null}
 
       {!status?.available ? (
         <section className="rounded-lg border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-700">
@@ -334,7 +344,10 @@ export function AdminRuntimePage() {
           {status?.recent_leader_events?.length ? (
             <div className="mt-3 space-y-2">
               {[...status.recent_leader_events].slice(0, 8).map((event, index) => (
-                <article key={`${event.event_type}-${event.occurred_at}-${index}`} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                <article
+                  key={`${event.event_type}-${event.occurred_at}-${index}`}
+                  className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2"
+                >
                   <div className="flex flex-wrap items-center gap-2 text-sm">
                     <span className="font-medium text-slate-900">{formatAdminEventType(event.event_type)}</span>
                     <span className="text-xs text-slate-500">{formatTime(event.occurred_at)}</span>

@@ -22,14 +22,11 @@ function fallbackDetail(reasonCode: string) {
     case "workflow_not_registered":
       return "当前任务类型尚未接入服务器执行器。";
     default:
-        return "当前任务暂未进入真实服务器执行。";
+      return "当前任务暂未进入真实服务器执行。";
   }
 }
 
-export function resolveDeferredExecutionSummary(
-  reasonCode: string,
-  reasonMessage: string,
-): DeferredExecutionSummary {
+export function resolveDeferredExecutionSummary(reasonCode: string, reasonMessage: string): DeferredExecutionSummary {
   const detail = reasonMessage || fallbackDetail(reasonCode);
   switch (reasonCode) {
     case "local_project_root_required":
@@ -37,7 +34,8 @@ export function resolveDeferredExecutionSummary(
         reasonCode,
         reasonMessage,
         title: "当前任务仍依赖本地项目目录",
-        description: "服务器模式暂时还不能直接消费用户本机的 `project_root`，因此这次开始后只创建了执行记录，没有进入真实服务器 runner。",
+        description:
+          "服务器模式暂时还不能直接消费用户本机的 `project_root`，因此这次开始后只创建了执行记录，没有进入真实服务器 runner。",
         detail,
         shortLabel: "依赖本地目录",
         alertMessage: `任务已创建，但当前仍依赖本地项目目录，服务器还不能直接继续执行。\n${detail}`,
@@ -65,10 +63,8 @@ export function resolveDeferredExecutionSummary(
   }
 }
 
-export function readDeferredExecutionNotice(
-  events: PlatformJobEventSummary[],
-): DeferredExecutionNotice | null {
-  const deferredEvent = [...events].reverse().find(event => event.event_type === "ai_execution.deferred");
+export function readDeferredExecutionNotice(events: PlatformJobEventSummary[]): DeferredExecutionNotice | null {
+  const deferredEvent = [...events].reverse().find((event) => event.event_type === "ai_execution.deferred");
   if (!deferredEvent) {
     return null;
   }

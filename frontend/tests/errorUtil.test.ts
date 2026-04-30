@@ -26,10 +26,7 @@ test("resolveErrorMessage prefers structured envelope message", () => {
 });
 
 test("resolveErrorMessage avoids exposing raw object strings for unknown values", () => {
-  assert.equal(
-    resolveErrorMessage({ foo: "bar" }),
-    "请求失败，请稍后重试",
-  );
+  assert.equal(resolveErrorMessage({ foo: "bar" }), "请求失败，请稍后重试");
 });
 
 test("resolveWorkflowErrorMessage prefers shared workflow fields", () => {

@@ -29,19 +29,22 @@ test("appendWorkflowLogEntry keeps original text and metadata", () => {
 });
 
 test("appendWorkflowLogEntry merges adjacent chunks from the same stream", () => {
-  const next = appendWorkflowLogEntry([
+  const next = appendWorkflowLogEntry(
+    [
+      {
+        text: "chunk-1",
+        source: "agent",
+        channel: "raw",
+        model: "gpt-5.4",
+      },
+    ],
     {
-      text: "chunk-1",
+      text: "chunk-2",
       source: "agent",
       channel: "raw",
       model: "gpt-5.4",
     },
-  ], {
-    text: "chunk-2",
-    source: "agent",
-    channel: "raw",
-    model: "gpt-5.4",
-  });
+  );
 
   assert.deepEqual(next, [
     {
@@ -99,7 +102,10 @@ test("buildPrettyWorkflowLogLines summarizes build deploy output without leaking
     "构建警告：1 个警告，包含 warning STS003。",
     "发布目录：I:\\WebCode\\STS2ModProject\\.godot\\mono\\temp\\bin\\Release\\publish\\",
   ]);
-  assert.equal(lines.some((line) => line.includes("[Bash] dotnet publish")), false);
+  assert.equal(
+    lines.some((line) => line.includes("[Bash] dotnet publish")),
+    false,
+  );
 });
 
 test("buildCodegenBroadcastView starts from task understanding before agent output arrives", () => {
@@ -119,36 +125,37 @@ test("buildCodegenBroadcastView starts from task understanding before agent outp
 });
 
 test("buildCodegenBroadcastView derives codegen summary from structured progress hints", () => {
-  const view = buildCodegenBroadcastView([
-    { text: "我先扫描项目结构和关键文件。", source: "agent", channel: "raw", model: "gpt-5" },
-    { text: "已定位到主要改动点，准备整理修改方案。", source: "agent", channel: "raw", model: "gpt-5" },
-  ], {
-    currentStage: "正在生成代码...",
-    isComplete: false,
-  });
+  const view = buildCodegenBroadcastView(
+    [
+      { text: "我先扫描项目结构和关键文件。", source: "agent", channel: "raw", model: "gpt-5" },
+      { text: "已定位到主要改动点，准备整理修改方案。", source: "agent", channel: "raw", model: "gpt-5" },
+    ],
+    {
+      currentStage: "正在生成代码...",
+      isComplete: false,
+    },
+  );
 
   assert.equal(view.currentStep.index, 4);
   assert.equal(view.completedCount, 3);
   assert.equal(view.progressLabel, "3 / 6 已完成");
   assert.match(view.currentStatus, /当前进入修改方案整理阶段/);
-  assert.deepEqual(
-    view.summaryLines,
-    [
-      "已完成任务理解、项目扫描与改动点定位。",
-      "当前正根据上下文整理本轮修改方案。",
-      "暂未进入代码写入与自检收尾阶段。",
-    ],
-  );
+  assert.deepEqual(view.summaryLines, [
+    "已完成任务理解、项目扫描与改动点定位。",
+    "当前正根据上下文整理本轮修改方案。",
+    "暂未进入代码写入与自检收尾阶段。",
+  ]);
   assert.deepEqual(view.detailLines, ["我先扫描项目结构和关键文件。", "已定位到主要改动点，准备整理修改方案。"]);
 });
 
 test("buildCodegenBroadcastView marks all steps complete when agent run is finished", () => {
-  const view = buildCodegenBroadcastView([
-    { text: "已完成代码写入，开始自检。", source: "agent", channel: "raw", model: "gpt-5" },
-  ], {
-    currentStage: "构建完成",
-    isComplete: true,
-  });
+  const view = buildCodegenBroadcastView(
+    [{ text: "已完成代码写入，开始自检。", source: "agent", channel: "raw", model: "gpt-5" }],
+    {
+      currentStage: "构建完成",
+      isComplete: true,
+    },
+  );
 
   assert.equal(view.currentStep.index, 6);
   assert.equal(view.completedCount, 6);

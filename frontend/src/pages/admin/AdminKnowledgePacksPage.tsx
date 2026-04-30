@@ -64,8 +64,8 @@ function PackSourceStats({ pack }: { pack?: AdminKnowledgePackItem | null }) {
   return (
     <div className="space-y-1 text-xs text-slate-500">
       <p>
-        源码统计：resources md {formatStat(pack.resource_md_count)} / game cs {formatStat(pack.game_cs_count)} / baselib cs{" "}
-        {formatStat(pack.baselib_cs_count)}
+        源码统计：resources md {formatStat(pack.resource_md_count)} / game cs {formatStat(pack.game_cs_count)} / baselib
+        cs {formatStat(pack.baselib_cs_count)}
       </p>
       {hasKnownMissingGameSource ? (
         <p className="text-amber-700">缺少游戏反编译源码，请在工作站更新知识库后重新上传。</p>
@@ -237,8 +237,16 @@ export function AdminKnowledgePacksPage() {
         </button>
       </header>
 
-      {error ? <section className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</section> : null}
-      {message ? <section className="rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{message}</section> : null}
+      {error ? (
+        <section className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {error}
+        </section>
+      ) : null}
+      {message ? (
+        <section className="rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          {message}
+        </section>
+      ) : null}
 
       <section className="grid gap-4 xl:grid-cols-[0.85fr_1.15fr]">
         <div className="space-y-4">
@@ -319,7 +327,9 @@ export function AdminKnowledgePacksPage() {
           </div>
 
           {items.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-slate-200 px-4 py-6 text-sm text-slate-500">当前还没有上传知识库包。</p>
+            <p className="rounded-lg border border-dashed border-slate-200 px-4 py-6 text-sm text-slate-500">
+              当前还没有上传知识库包。
+            </p>
           ) : (
             <div className="overflow-x-auto">
               <table className="min-w-full text-left text-sm">
@@ -358,7 +368,9 @@ export function AdminKnowledgePacksPage() {
                       <td className="px-3 py-2">
                         <button
                           type="button"
-                          onClick={() => void runAction(() => activateAdminKnowledgePack(pack.pack_id), "知识库包已激活。")}
+                          onClick={() =>
+                            void runAction(() => activateAdminKnowledgePack(pack.pack_id), "知识库包已激活。")
+                          }
                           disabled={saving || pack.active}
                           className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 transition hover:border-violet-200 hover:text-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
                         >

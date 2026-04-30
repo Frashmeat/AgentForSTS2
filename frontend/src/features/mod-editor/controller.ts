@@ -4,10 +4,7 @@ import { resolveErrorMessage, resolveWorkflowErrorMessage } from "../../shared/e
 import type { WorkflowLogChannel } from "../../shared/types/workflow.ts";
 
 type ModAnalysisSocketEvent = ModAnalysisEvent["event"];
-type ModModifySocketEvent = Extract<
-  WsEvent["event"],
-  "stage_update" | "progress" | "agent_stream" | "done" | "error"
->;
+type ModModifySocketEvent = Extract<WsEvent["event"], "stage_update" | "progress" | "agent_stream" | "done" | "error">;
 
 export interface ModEditorAnalysisSocketLike {
   on<T extends ModAnalysisSocketEvent>(
@@ -20,10 +17,7 @@ export interface ModEditorAnalysisSocketLike {
 }
 
 export interface ModEditorModifySocketLike {
-  on<T extends ModModifySocketEvent>(
-    event: T,
-    handler: (data: Extract<WsEvent, { event: T }>) => void,
-  ): this;
+  on<T extends ModModifySocketEvent>(event: T, handler: (data: Extract<WsEvent, { event: T }>) => void): this;
   waitOpen(): Promise<void>;
   send(data: object): void;
   close(): void;
@@ -171,9 +165,7 @@ export function createModEditorModifyController(
     }
 
     const normalizedAnalysisText = analysisText.trim();
-    const analysisContext = normalizedAnalysisText
-      ? `当前 mod 分析概况：\n${normalizedAnalysisText}\n\n`
-      : "";
+    const analysisContext = normalizedAnalysisText ? `当前 mod 分析概况：\n${normalizedAnalysisText}\n\n` : "";
 
     socket.send({
       action: "start",

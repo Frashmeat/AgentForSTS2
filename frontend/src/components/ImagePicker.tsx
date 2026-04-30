@@ -3,7 +3,7 @@ import { CheckCircle } from "lucide-react";
 import { cn } from "../lib/utils";
 
 interface Props {
-  images: string[];          // base64 PNG strings
+  images: string[]; // base64 PNG strings
   onSelect: (index: number) => void;
   disabled?: boolean;
 }
@@ -31,7 +31,7 @@ export function ImagePicker({ images, onSelect, disabled }: Props) {
               selected === i
                 ? "border-spire-accent shadow-lg shadow-spire-accent/30"
                 : "border-spire-border hover:border-spire-purple",
-              disabled && "opacity-50 cursor-not-allowed"
+              disabled && "opacity-50 cursor-not-allowed",
             )}
           >
             <img

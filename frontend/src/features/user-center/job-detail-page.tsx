@@ -54,7 +54,7 @@ function isDownloadableArtifact(artifact: PlatformArtifactSummary) {
 }
 
 function hasSourceProjectArtifact(artifacts: PlatformArtifactSummary[] | undefined) {
-  return (artifacts ?? []).some(artifact => artifact.artifact_type === "source_project");
+  return (artifacts ?? []).some((artifact) => artifact.artifact_type === "source_project");
 }
 
 function renderArtifactLocationValue(artifact: PlatformArtifactSummary) {
@@ -178,7 +178,7 @@ export function UserCenterJobDetailPage() {
           setEvents(eventResults);
         }
       })
-      .catch(err => {
+      .catch((err) => {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : "加载任务详情失败");
         }
@@ -219,7 +219,12 @@ export function UserCenterJobDetailPage() {
 
   if (isLoading) {
     return (
-      <PlatformPageShell kicker="User Center" title="任务详情" description="正在恢复会话并读取平台任务详情。" actions={navigationActions}>
+      <PlatformPageShell
+        kicker="User Center"
+        title="任务详情"
+        description="正在恢复会话并读取平台任务详情。"
+        actions={navigationActions}
+      >
         <section className="platform-page-card p-8 text-sm text-slate-500">正在恢复会话...</section>
       </PlatformPageShell>
     );
@@ -227,9 +232,17 @@ export function UserCenterJobDetailPage() {
 
   if (!isAuthenticated) {
     return (
-      <PlatformPageShell kicker="User Center" title="任务详情" description="登录后可查看服务器模式任务的执行结果与返还信息。" actions={navigationActions}>
+      <PlatformPageShell
+        kicker="User Center"
+        title="任务详情"
+        description="登录后可查看服务器模式任务的执行结果与返还信息。"
+        actions={navigationActions}
+      >
         <section className="platform-page-card p-8">
-          <Link to="/auth/login" className="text-sm font-medium text-[var(--workspace-accent)] transition hover:text-[var(--workspace-accent-strong)]">
+          <Link
+            to="/auth/login"
+            className="text-sm font-medium text-[var(--workspace-accent)] transition hover:text-[var(--workspace-accent-strong)]"
+          >
             登录后查看任务详情
           </Link>
         </section>
@@ -239,7 +252,12 @@ export function UserCenterJobDetailPage() {
 
   if (error) {
     return (
-      <PlatformPageShell kicker="User Center" title="任务详情" description="平台任务详情加载失败。" actions={navigationActions}>
+      <PlatformPageShell
+        kicker="User Center"
+        title="任务详情"
+        description="平台任务详情加载失败。"
+        actions={navigationActions}
+      >
         <section className="platform-page-card p-8 text-sm text-rose-600">{error}</section>
       </PlatformPageShell>
     );
@@ -247,7 +265,12 @@ export function UserCenterJobDetailPage() {
 
   if (detail === null) {
     return (
-      <PlatformPageShell kicker="User Center" title="任务详情" description="正在读取任务状态、返还摘要与子项列表。" actions={navigationActions}>
+      <PlatformPageShell
+        kicker="User Center"
+        title="任务详情"
+        description="正在读取任务状态、返还摘要与子项列表。"
+        actions={navigationActions}
+      >
         <section className="platform-page-card p-8 text-sm text-slate-500">任务详情加载中...</section>
       </PlatformPageShell>
     );
@@ -266,22 +289,41 @@ export function UserCenterJobDetailPage() {
     >
       <RefundSummary detail={detail} />
 
-      {actionError ? <section className="platform-page-card border-rose-100 bg-rose-50 p-4 text-sm text-rose-700">{actionError}</section> : null}
-      {actionMessage ? <section className="platform-page-card border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-700">{actionMessage}</section> : null}
+      {actionError ? (
+        <section className="platform-page-card border-rose-100 bg-rose-50 p-4 text-sm text-rose-700">
+          {actionError}
+        </section>
+      ) : null}
+      {actionMessage ? (
+        <section className="platform-page-card border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-700">
+          {actionMessage}
+        </section>
+      ) : null}
 
       {executionProfileText ? (
         <section className="platform-page-card p-6">
           <h2 className="text-lg font-semibold text-slate-900">执行配置</h2>
           <div className="mt-4 space-y-2 text-sm text-slate-600">
-            <p>任务选择：<span className="font-medium text-slate-900">{executionProfileText}</span></p>
+            <p>
+              任务选择：<span className="font-medium text-slate-900">{executionProfileText}</span>
+            </p>
             {detail.selected_execution_profile_id ? (
-              <p>执行配置 ID：<span className="font-medium text-slate-900">{detail.selected_execution_profile_id}</span></p>
+              <p>
+                执行配置 ID：<span className="font-medium text-slate-900">{detail.selected_execution_profile_id}</span>
+              </p>
             ) : null}
             {detail.delivery_state ? (
-              <p>交付状态：<span className="font-medium text-slate-900">{renderDeliveryStateLabel(detail.delivery_state, sourcePackageGenerated)}</span></p>
+              <p>
+                交付状态：
+                <span className="font-medium text-slate-900">
+                  {renderDeliveryStateLabel(detail.delivery_state, sourcePackageGenerated)}
+                </span>
+              </p>
             ) : null}
             {sourcePackageGenerated ? (
-              <p>后续操作：<span className="font-medium text-slate-900">下载项目包后在本机工作站构建和部署</span></p>
+              <p>
+                后续操作：<span className="font-medium text-slate-900">下载项目包后在本机工作站构建和部署</span>
+              </p>
             ) : null}
           </div>
         </section>
@@ -308,7 +350,7 @@ export function UserCenterJobDetailPage() {
       <section className="platform-page-card p-6">
         <h2 className="text-lg font-semibold text-slate-900">子项列表</h2>
         <div className="mt-6 space-y-3">
-          {items.map(item => (
+          {items.map((item) => (
             <article key={item.id} className="platform-page-subcard px-4 py-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -342,9 +384,7 @@ export function UserCenterJobDetailPage() {
               <article key={artifact.id} className="platform-page-subcard px-4 py-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-sm font-semibold text-slate-900">
-                      {artifact.file_name || "未命名产物"}
-                    </p>
+                    <p className="text-sm font-semibold text-slate-900">{artifact.file_name || "未命名产物"}</p>
                     <p className="mt-1 text-xs text-slate-500">{renderArtifactTypeLabel(artifact.artifact_type)}</p>
                   </div>
                   <div className="max-w-xs text-right text-xs text-slate-500">
@@ -354,9 +394,7 @@ export function UserCenterJobDetailPage() {
                         {resolveArtifactLocationLabel(artifact)}：{renderArtifactLocationValue(artifact)}
                       </p>
                     ) : null}
-                    {artifact.storage_provider ? (
-                      <p className="mt-1">来源：{artifact.storage_provider}</p>
-                    ) : null}
+                    {artifact.storage_provider ? <p className="mt-1">来源：{artifact.storage_provider}</p> : null}
                     {isDownloadableArtifact(artifact) ? (
                       <div className="mt-3 flex flex-wrap justify-end gap-2">
                         <a
@@ -396,7 +434,7 @@ export function UserCenterJobDetailPage() {
           {events.length === 0 ? (
             <div className="platform-page-empty px-4 py-6 text-sm text-slate-500">当前任务还没有可展示的执行事件。</div>
           ) : (
-            events.map(event => (
+            events.map((event) => (
               <article key={event.event_id} className="platform-page-subcard px-4 py-4">
                 <div className="flex items-start justify-between gap-4">
                   <div>

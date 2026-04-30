@@ -22,12 +22,7 @@ test("runApprovalAction toggles busy state and forwards success result", async (
     },
   });
 
-  assert.deepEqual(events, [
-    "busy:approve-1",
-    "action:approve-1",
-    "success:approved",
-    "busy:null",
-  ]);
+  assert.deepEqual(events, ["busy:approve-1", "action:approve-1", "success:approved", "busy:null"]);
   assert.deepEqual(result, { action_id: "approve-1", status: "approved" });
 });
 
@@ -51,9 +46,5 @@ test("runApprovalAction toggles busy state and forwards normalized error", async
   });
 
   assert.equal(result, undefined);
-  assert.deepEqual(events, [
-    "busy:reject-1",
-    "error:approval failed",
-    "busy:null",
-  ]);
+  assert.deepEqual(events, ["busy:reject-1", "error:approval failed", "busy:null"]);
 });

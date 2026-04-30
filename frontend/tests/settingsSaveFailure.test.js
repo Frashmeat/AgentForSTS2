@@ -38,7 +38,10 @@ test("settings panel auto-saves server preference changes", () => {
   const source = readSource("../src/components/SettingsPanel.tsx");
 
   assert.match(source, /setServerSelectionDirty\(true\)/);
-  assert.match(source, /setTimeout\(\(\) => \{\s*void handleSaveServerPreference\(selectedServerProfileId \?\? null\);\s*\}, 500\);/);
+  assert.match(
+    source,
+    /setTimeout\(\(\) => \{\s*void handleSaveServerPreference\(selectedServerProfileId \?\? null\);\s*\}, 500\);/,
+  );
   assert.match(source, /已自动保存默认服务器配置/);
   assert.doesNotMatch(source, /\{serverSaving \? "保存中…" : "保存默认服务器配置"\}/);
 });

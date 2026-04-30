@@ -30,20 +30,17 @@ export function AgentLog({
   const bottomRef = useRef<HTMLDivElement>(null);
   const [activeView, setActiveView] = useState<"pretty" | "raw">("pretty");
   const [detailExpanded, setDetailExpanded] = useState(false);
-  const normalizedEntries = useMemo(
-    () => entries ?? lines.map((line) => ({ text: line })),
-    [entries, lines],
-  );
+  const normalizedEntries = useMemo(() => entries ?? lines.map((line) => ({ text: line })), [entries, lines]);
   const codegenBroadcast = useMemo(
-    () => broadcastKind === "codegen"
-      ? buildCodegenBroadcastView(normalizedEntries, { currentStage, isComplete })
-      : null,
+    () =>
+      broadcastKind === "codegen" ? buildCodegenBroadcastView(normalizedEntries, { currentStage, isComplete }) : null,
     [broadcastKind, currentStage, isComplete, normalizedEntries],
   );
   const renderedLines = useMemo(
-    () => activeView === "pretty"
-      ? buildPrettyWorkflowLogLines(normalizedEntries)
-      : buildRawWorkflowLogLines(normalizedEntries),
+    () =>
+      activeView === "pretty"
+        ? buildPrettyWorkflowLogLines(normalizedEntries)
+        : buildRawWorkflowLogLines(normalizedEntries),
     [activeView, normalizedEntries],
   );
 
@@ -52,16 +49,13 @@ export function AgentLog({
   }, [activeView, codegenBroadcast, renderedLines]);
 
   return (
-    <div
-      className={cn(
-        "bg-slate-50 border border-slate-200 rounded-lg overflow-hidden",
-        className
-      )}
-    >
+    <div className={cn("bg-slate-50 border border-slate-200 rounded-lg overflow-hidden", className)}>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-3 py-2">
         <div className="min-w-0">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">当前模型</p>
-          <p className="truncate font-mono text-[11px] text-slate-600">{currentModel?.trim() || "当前阶段未调用模型"}</p>
+          <p className="truncate font-mono text-[11px] text-slate-600">
+            {currentModel?.trim() || "当前阶段未调用模型"}
+          </p>
         </div>
         <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-[11px]">
           <button
@@ -119,12 +113,7 @@ export function AgentLog({
                     >
                       {step.status === "done" ? "✓" : step.status === "current" ? "●" : "○"}
                     </span>
-                    <p
-                      className={cn(
-                        "text-sm",
-                        step.status === "pending" ? "text-slate-400" : "text-slate-700",
-                      )}
-                    >
+                    <p className={cn("text-sm", step.status === "pending" ? "text-slate-400" : "text-slate-700")}>
                       {step.index}. {step.label}
                     </p>
                   </div>
@@ -154,8 +143,13 @@ export function AgentLog({
               </button>
               {detailExpanded && (
                 <div className="mt-3 space-y-2 rounded-lg bg-slate-50 p-3 font-mono text-xs text-slate-600">
-                  {(codegenBroadcast.detailLines.length > 0 ? codegenBroadcast.detailLines : ["当前阶段暂无额外技术细节。"]).map((line, index) => (
-                    <div key={index} className="whitespace-pre-wrap leading-5">{line}</div>
+                  {(codegenBroadcast.detailLines.length > 0
+                    ? codegenBroadcast.detailLines
+                    : ["当前阶段暂无额外技术细节。"]
+                  ).map((line, index) => (
+                    <div key={index} className="whitespace-pre-wrap leading-5">
+                      {line}
+                    </div>
                   ))}
                 </div>
               )}
@@ -166,7 +160,9 @@ export function AgentLog({
       ) : (
         <div className="max-h-64 overflow-y-auto p-3 font-mono text-xs text-slate-600">
           {renderedLines.map((line, i) => (
-            <div key={`${activeView}-${i}`} className="whitespace-pre-wrap leading-5">{line}</div>
+            <div key={`${activeView}-${i}`} className="whitespace-pre-wrap leading-5">
+              {line}
+            </div>
           ))}
           <div ref={bottomRef} />
         </div>

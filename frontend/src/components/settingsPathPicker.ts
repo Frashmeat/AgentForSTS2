@@ -2,10 +2,7 @@ import type { PickPathRequest } from "../shared/api/config.ts";
 
 export type SettingsPathField = "default_project_root" | "sts2_path" | "godot_exe_path";
 
-export function createSettingsPickPathRequest(
-  field: SettingsPathField,
-  currentValue?: string,
-): PickPathRequest {
+export function createSettingsPickPathRequest(field: SettingsPathField, currentValue?: string): PickPathRequest {
   const initial_path = currentValue?.trim() || undefined;
 
   if (field === "default_project_root") {

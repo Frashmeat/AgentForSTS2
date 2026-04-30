@@ -14,7 +14,7 @@ import {
   type BundleDecisionRecord,
   type BatchItemState,
   type BatchItemStatus,
-   type BatchRuntimeState,
+  type BatchRuntimeState,
   type BatchStage,
   type ReviewStrictness,
 } from "./state.ts";
@@ -100,9 +100,7 @@ function asStage(value: unknown): BatchStage {
   if (value === "review_plan") {
     return "review_items";
   }
-  return RECOVERABLE_BATCH_STAGES.includes(value as BatchStage)
-    ? (value as BatchStage)
-    : "input";
+  return RECOVERABLE_BATCH_STAGES.includes(value as BatchStage) ? (value as BatchStage) : "input";
 }
 
 function asReviewStrictness(value: unknown): ReviewStrictness {
@@ -110,9 +108,7 @@ function asReviewStrictness(value: unknown): ReviewStrictness {
 }
 
 function asItemStatus(value: unknown): BatchItemStatus {
-  return RECOVERABLE_ITEM_STATUSES.includes(value as BatchItemStatus)
-    ? (value as BatchItemStatus)
-    : "pending";
+  return RECOVERABLE_ITEM_STATUSES.includes(value as BatchItemStatus) ? (value as BatchItemStatus) : "pending";
 }
 
 function normalizeApprovalRequest(value: unknown): ApprovalRequest | null {
@@ -152,9 +148,7 @@ function normalizeApprovalRequests(value: unknown): ApprovalRequest[] {
   if (!Array.isArray(value)) {
     return [];
   }
-  return value
-    .map((item) => normalizeApprovalRequest(item))
-    .filter((item): item is ApprovalRequest => item !== null);
+  return value.map((item) => normalizeApprovalRequest(item)).filter((item): item is ApprovalRequest => item !== null);
 }
 
 function normalizePlanValidationItem(value: unknown): PlanItemValidation | null {
@@ -169,8 +163,9 @@ function normalizePlanValidationItem(value: unknown): PlanItemValidation | null 
 
   const issues = Array.isArray(value.issues)
     ? value.issues
-        .filter((issue): issue is { code: string; message: string; field?: string } =>
-          isRecord(issue) && typeof issue.code === "string" && typeof issue.message === "string",
+        .filter(
+          (issue): issue is { code: string; message: string; field?: string } =>
+            isRecord(issue) && typeof issue.code === "string" && typeof issue.message === "string",
         )
         .map((issue) => ({
           code: issue.code,
@@ -189,7 +184,12 @@ function normalizePlanValidationItem(value: unknown): PlanItemValidation | null 
 }
 
 function normalizeExecutionBundlePreview(value: unknown): ExecutionBundlePreview | null {
-  if (!isRecord(value) || !Array.isArray(value.item_ids) || typeof value.status !== "string" || typeof value.reason !== "string") {
+  if (
+    !isRecord(value) ||
+    !Array.isArray(value.item_ids) ||
+    typeof value.status !== "string" ||
+    typeof value.reason !== "string"
+  ) {
     return null;
   }
 
@@ -200,12 +200,13 @@ function normalizeExecutionBundlePreview(value: unknown): ExecutionBundlePreview
 
   const riskDetails = Array.isArray(value.risk_details)
     ? value.risk_details
-        .filter((detail): detail is ExecutionBundleRiskDetail =>
-          isRecord(detail)
-            && typeof detail.code === "string"
-            && typeof detail.title === "string"
-            && typeof detail.summary === "string"
-            && typeof detail.recommendation === "string",
+        .filter(
+          (detail): detail is ExecutionBundleRiskDetail =>
+            isRecord(detail) &&
+            typeof detail.code === "string" &&
+            typeof detail.title === "string" &&
+            typeof detail.summary === "string" &&
+            typeof detail.recommendation === "string",
         )
         .map((detail) => ({
           code: detail.code,
@@ -218,11 +219,14 @@ function normalizeExecutionBundlePreview(value: unknown): ExecutionBundlePreview
 
   const recommendedActions = Array.isArray(value.recommended_actions)
     ? value.recommended_actions
-        .filter((action): action is ExecutionBundleRecommendedAction =>
-          isRecord(action)
-            && (action.action === "accept_bundle" || action.action === "split_bundle" || action.action === "revise_items")
-            && typeof action.label === "string"
-            && typeof action.description === "string",
+        .filter(
+          (action): action is ExecutionBundleRecommendedAction =>
+            isRecord(action) &&
+            (action.action === "accept_bundle" ||
+              action.action === "split_bundle" ||
+              action.action === "revise_items") &&
+            typeof action.label === "string" &&
+            typeof action.description === "string",
         )
         .map((action) => ({
           action: action.action,
@@ -357,13 +361,16 @@ export function restoreBatchRuntimeSnapshot(snapshot: unknown): BatchRuntimeStat
 
   const normalizedReview = normalizePlanReviewPayload(snapshot.planReview);
   const restoredDecisions: BundleDecisionRecord = isRecord(snapshot.bundleDecisions)
-    ? Object.fromEntries(
-        Object.entries(snapshot.bundleDecisions)
-          .filter((entry): entry is [string, string] =>
-            typeof entry[0] === "string"
-              && (entry[1] === "unresolved" || entry[1] === "accepted" || entry[1] === "split_requested" || entry[1] === "needs_item_revision"),
-          ),
-      ) as BundleDecisionRecord
+    ? (Object.fromEntries(
+        Object.entries(snapshot.bundleDecisions).filter(
+          (entry): entry is [string, string] =>
+            typeof entry[0] === "string" &&
+            (entry[1] === "unresolved" ||
+              entry[1] === "accepted" ||
+              entry[1] === "split_requested" ||
+              entry[1] === "needs_item_revision"),
+        ),
+      ) as BundleDecisionRecord)
     : {};
 
   const baseState = createInitialBatchRuntimeState();
@@ -380,10 +387,7 @@ export function restoreBatchRuntimeSnapshot(snapshot: unknown): BatchRuntimeStat
       ? reconcileBundleDecisionRecord(normalizedReview, restoredDecisions)
       : restoredDecisions,
     itemStates: Object.fromEntries(
-      Object.entries(snapshot.itemStates).map(([itemId, itemState]) => [
-        itemId,
-        normalizeBatchItemSnapshot(itemState),
-      ]),
+      Object.entries(snapshot.itemStates).map(([itemId, itemState]) => [itemId, normalizeBatchItemSnapshot(itemState)]),
     ),
   };
 }
@@ -400,10 +404,7 @@ export function loadBatchRuntimeSnapshot(storage: StorageLike = localStorage): B
   }
 }
 
-export function saveBatchRuntimeSnapshot(
-  storage: StorageLike = localStorage,
-  state: BatchRuntimeState,
-): void {
+export function saveBatchRuntimeSnapshot(storage: StorageLike = localStorage, state: BatchRuntimeState): void {
   try {
     storage.setItem(BATCH_RUNTIME_SNAPSHOT_KEY, JSON.stringify(serializeBatchRuntimeSnapshot(state)));
   } catch {}
