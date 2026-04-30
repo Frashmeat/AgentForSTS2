@@ -131,6 +131,59 @@ async def _run_postprocess(img, asset_type, asset_name, project_root):
     return await loop.run_in_executor(None, process_image, img, asset_type, asset_name, project_root)
 
 
+async def _init_batch_project(ws: WebSocket, project_root: Path, send, send_stage) -> Path:
+    """缺失 *.csproj 时通过 LLM clone 出一个新 mod 工程；返回（可能更新过的）project_root。"""
+    if list(project_root.glob("*.csproj")):
+        return project_root
+
+    project_name = project_root.name
+    parent_dir = project_root.parent
+    await send_stage(
+        "project", "project_init",
+        _text("batch_project_init_stage", project_name=project_name).strip(),
+    )
+    await send("batch_progress", message=_text("batch_project_init_progress", project_name=project_name).strip())
+
+    async def _init_stream(chunk: str):
+        await send("batch_progress", message=chunk)
+
+    project_root = await create_mod_project(project_name, parent_dir, _init_stream)
+    await send("batch_progress", message=_text("batch_project_init_done", project_root=project_root).strip())
+    return project_root
+
+
+async def _generate_image_with_retry(
+    *,
+    item,
+    prompt: str,
+    negative_prompt,
+    image_progress,
+    notify_retry,
+    max_attempts: int = 3,
+):
+    """生成 1 张图，最多重试 max_attempts 次；CancelledError 透传，最后一次失败后重抛原异常。"""
+    for attempt in range(max_attempts):
+        try:
+            [img] = await generate_images(
+                prompt, item.type, negative_prompt,
+                batch_size=1, progress_callback=image_progress,
+            )
+            return img
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            _log.warning(
+                "image gen attempt %s failed for item %s: %s",
+                attempt + 1, item.id, exc,
+            )
+            if attempt == max_attempts - 1:
+                raise
+            await notify_retry(attempt + 2)
+            await asyncio.sleep(2)
+    # max_attempts >= 1 时上面 for 至少 raise 一次或 return；保险兜底
+    raise RuntimeError("unreachable: image retry loop exited without result")
+
+
 async def _send_item_approval_pending(ws: WebSocket, item_id: str, summary: str, requests: list):
     await ws.send_text(json.dumps({
         "event": "item_approval_pending",
@@ -339,17 +392,7 @@ async def _handle_ws_batch(ws: WebSocket, *, initial_params: dict | None = None)
         error_ids: set[str] = set()
 
         # ── 4. 检查/初始化项目 ────────────────────────────────────────────────
-        if not list(project_root.glob("*.csproj")):
-            project_name = project_root.name
-            parent_dir = project_root.parent
-            await send_stage("project", "project_init", _text("batch_project_init_stage", project_name=project_name).strip())
-            await send("batch_progress", message=_text("batch_project_init_progress", project_name=project_name).strip())
-
-            async def _init_stream(chunk: str):
-                await send("batch_progress", message=chunk)
-
-            project_root = await create_mod_project(project_name, parent_dir, _init_stream)
-            await send("batch_progress", message=_text("batch_project_init_done", project_root=project_root).strip())
+        project_root = await _init_batch_project(ws, project_root, send, send_stage)
 
         group_by_item = {
             item.id: group
@@ -437,24 +480,21 @@ async def _handle_ws_batch(ws: WebSocket, *, initial_params: dict | None = None)
                                 await send("item_progress", item_id=item.id, message=_text("batch_image_generating_progress", image_number=image_number).strip())
                                 async def _img_progress(msg: str, _id=item.id):
                                     await send("item_progress", item_id=_id, message=msg)
-                                for _attempt in range(3):
-                                    try:
-                                        [img] = await generate_images(
-                                            current_prompt, item.type, current_neg,
-                                            batch_size=1, progress_callback=_img_progress,
-                                        )
-                                        break
-                                    except asyncio.CancelledError:
-                                        raise
-                                    except Exception as _e:
-                                        _log.warning(
-                                            "image gen attempt %s failed for item %s: %s",
-                                            _attempt + 1, item.id, _e,
-                                        )
-                                        if _attempt == 2:
-                                            raise
-                                        await send("item_progress", item_id=item.id, message=_text("batch_image_generating_retry", retry_number=_attempt + 2).strip())
-                                        await asyncio.sleep(2)
+
+                                async def _notify_retry(retry_number: int, _id=item.id):
+                                    await send(
+                                        "item_progress",
+                                        item_id=_id,
+                                        message=_text("batch_image_generating_retry", retry_number=retry_number).strip(),
+                                    )
+
+                                img = await _generate_image_with_retry(
+                                    item=item,
+                                    prompt=current_prompt,
+                                    negative_prompt=current_neg,
+                                    image_progress=_img_progress,
+                                    notify_retry=_notify_retry,
+                                )
                                 all_images.append(img)
                             buf = io.BytesIO()
                             img.save(buf, format="PNG")
