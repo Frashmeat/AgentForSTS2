@@ -11,6 +11,10 @@ from app.modules.platform.infra.persistence.models import JobEventRecord, JobIte
 
 
 class JobRepositorySqlAlchemy(JobRepository):
+    """事务边界约定：repository 内的写操作只 flush，不 commit；
+    commit 由调用方决定（HTTP 路由用 routers/_auth_support.auth_session_scope，
+    后台 service 用 app.shared.infra.db.session_scope.session_scope）。"""
+
     def __init__(self, session: Session) -> None:
         self.session = session
 

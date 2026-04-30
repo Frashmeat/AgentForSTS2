@@ -11,6 +11,7 @@ from typing import Protocol
 from uuid import uuid4
 
 from app.modules.platform.contracts.job_commands import StartJobCommand
+from app.shared.infra.db.session_scope import session_scope
 
 from .job_application_service import JobApplicationService
 from .platform_runtime_audit_service import PlatformRuntimeAuditService
@@ -166,39 +167,34 @@ class ServerQueuedJobWorkerService:
                 self._last_observed_leader_owner_id = observed_owner
                 self._leader_claim_handle = None
                 return self._remember_tick(QueueWorkerTickResult(reason="not_leader"))
-        session = self.session_factory()
         try:
-            service = self.job_application_service_builder(session)
-            job = service.job_repository.find_next_runnable_queued_job(
-                datetime.now(UTC),
-                cooldown_seconds=self.retry_cooldown_seconds,
-            )
-            if job is None:
-                session.rollback()
-                return self._remember_tick(QueueWorkerTickResult(reason="no_runnable_queued_job"))
-
-            started_job, claimed, _, _ = service.start_job_attempt(
-                user_id=job.user_id,
-                command=StartJobCommand(job_id=job.id, triggered_by="system_queue_worker"),
-            )
-            session.commit()
-            return self._remember_tick(
-                QueueWorkerTickResult(
-                    attempted_job_id=job.id,
-                    started=claimed and started_job is not None,
-                    reason=(
-                        "started"
-                        if claimed and started_job is not None
-                        else "job_claimed_by_other_consumer" if not claimed else "job_not_found"
-                    ),
+            with session_scope(self.session_factory) as session:
+                service = self.job_application_service_builder(session)
+                job = service.job_repository.find_next_runnable_queued_job(
+                    datetime.now(UTC),
+                    cooldown_seconds=self.retry_cooldown_seconds,
                 )
-            )
+                if job is None:
+                    return self._remember_tick(QueueWorkerTickResult(reason="no_runnable_queued_job"))
+
+                started_job, claimed, _, _ = service.start_job_attempt(
+                    user_id=job.user_id,
+                    command=StartJobCommand(job_id=job.id, triggered_by="system_queue_worker"),
+                )
+                return self._remember_tick(
+                    QueueWorkerTickResult(
+                        attempted_job_id=job.id,
+                        started=claimed and started_job is not None,
+                        reason=(
+                            "started"
+                            if claimed and started_job is not None
+                            else "job_claimed_by_other_consumer" if not claimed else "job_not_found"
+                        ),
+                    )
+                )
         except Exception:
-            session.rollback()
             self.logger.exception("server queued job worker tick failed")
             return self._remember_tick(QueueWorkerTickResult(reason="error"))
-        finally:
-            session.close()
 
     def _release_leadership(self) -> None:
         if self._leader_claim_handle is None or self.scan_claim_service is None:

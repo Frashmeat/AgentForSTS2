@@ -8,6 +8,7 @@ from typing import Protocol
 
 from app.modules.platform.contracts import JobEventView
 from app.modules.platform.infra.persistence.models import PlatformRuntimeAuditEventRecord
+from app.shared.infra.db.session_scope import session_scope
 
 
 class _Session(Protocol):
@@ -148,27 +149,23 @@ class PlatformRuntimeAuditService:
         event_type: str,
         payload: dict[str, object],
     ) -> RuntimeAuditRecord | None:
-        session: _Session = self.session_factory()
         try:
-            row = PlatformRuntimeAuditEventRecord(
-                event_type=str(event_type).strip(),
-                event_payload=dict(payload),
-            )
-            session.add(row)
-            session.flush()
-            session.refresh(row)
-            session.commit()
-            return RuntimeAuditRecord(
-                event_id=row.id,
-                event_type=row.event_type,
-                occurred_at=row.created_at.isoformat() if getattr(row, "created_at", None) is not None else "",
-                payload=dict(row.event_payload or {}),
-            )
+            with session_scope(self.session_factory) as session:
+                row = PlatformRuntimeAuditEventRecord(
+                    event_type=str(event_type).strip(),
+                    event_payload=dict(payload),
+                )
+                session.add(row)
+                session.flush()
+                session.refresh(row)
+                return RuntimeAuditRecord(
+                    event_id=row.id,
+                    event_type=row.event_type,
+                    occurred_at=row.created_at.isoformat() if getattr(row, "created_at", None) is not None else "",
+                    payload=dict(row.event_payload or {}),
+                )
         except Exception:
-            session.rollback()
             return None
-        finally:
-            session.close()
 
     def _list_events_db(
         self,
@@ -177,39 +174,37 @@ class PlatformRuntimeAuditService:
         limit: int | None = None,
         event_type_prefix: str | None = None,
     ) -> list[JobEventView] | None:
-        session: _Session = self.session_factory()
         try:
-            query = session.query(PlatformRuntimeAuditEventRecord)
-            if after_id is not None:
-                query = query.filter(PlatformRuntimeAuditEventRecord.id > after_id)
-            if str(event_type_prefix or "").strip():
-                query = query.filter(
-                    PlatformRuntimeAuditEventRecord.event_type.like(f"{str(event_type_prefix).strip()}%")
+            with session_scope(self.session_factory) as session:
+                query = session.query(PlatformRuntimeAuditEventRecord)
+                if after_id is not None:
+                    query = query.filter(PlatformRuntimeAuditEventRecord.id > after_id)
+                if str(event_type_prefix or "").strip():
+                    query = query.filter(
+                        PlatformRuntimeAuditEventRecord.event_type.like(f"{str(event_type_prefix).strip()}%")
+                    )
+                rows = (
+                    query.order_by(
+                        PlatformRuntimeAuditEventRecord.created_at.desc(), PlatformRuntimeAuditEventRecord.id.desc()
+                    )
+                    .limit(min(limit or self.max_returned_events, self.max_returned_events))
+                    .all()
                 )
-            rows = (
-                query.order_by(
-                    PlatformRuntimeAuditEventRecord.created_at.desc(), PlatformRuntimeAuditEventRecord.id.desc()
-                )
-                .limit(min(limit or self.max_returned_events, self.max_returned_events))
-                .all()
-            )
-            rows.reverse()
-            return [
-                JobEventView(
-                    event_id=row.id,
-                    event_type=row.event_type,
-                    job_id=0,
-                    job_item_id=None,
-                    ai_execution_id=None,
-                    occurred_at=row.created_at.isoformat() if getattr(row, "created_at", None) is not None else "",
-                    payload=dict(row.event_payload or {}),
-                )
-                for row in rows
-            ]
+                rows.reverse()
+                return [
+                    JobEventView(
+                        event_id=row.id,
+                        event_type=row.event_type,
+                        job_id=0,
+                        job_item_id=None,
+                        ai_execution_id=None,
+                        occurred_at=row.created_at.isoformat() if getattr(row, "created_at", None) is not None else "",
+                        payload=dict(row.event_payload or {}),
+                    )
+                    for row in rows
+                ]
         except Exception:
             return None
-        finally:
-            session.close()
 
     @staticmethod
     def _record_payload(record: RuntimeAuditRecord) -> dict[str, object]:

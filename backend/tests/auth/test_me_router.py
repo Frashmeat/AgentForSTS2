@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 
 from app.composition.container import ApplicationContainer
 from app.modules.auth.infra.persistence import models as _auth_models
+from app.modules.platform.application import platform_runtime_builder
 from app.modules.platform.application.services.server_credential_cipher import ServerCredentialCipher
 from app.modules.platform.application.services.server_workspace_lock_service import (
     ServerWorkspaceBusyError,
@@ -39,7 +40,6 @@ from app.modules.platform.infra.persistence.models import (
     ServerCredentialRecord,
     UserPlatformPreferenceRecord,
 )
-from app.modules.platform.application import platform_runtime_builder
 from app.shared.infra.db.base import Base
 from routers.auth_router import router as auth_router
 from routers.me_router import router as me_router
