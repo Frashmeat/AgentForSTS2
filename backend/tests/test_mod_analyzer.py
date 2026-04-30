@@ -10,16 +10,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
-class _DummyRouter:
-    def websocket(self, _path):
-        def decorator(func):
-            return func
-
-        return decorator
-
-
 def _load_mod_analyzer():
-    sys.modules["fastapi"] = types.SimpleNamespace(APIRouter=lambda: _DummyRouter(), WebSocket=object)
+    # fastapi 不再 stub —— 真 fastapi 在测试容器里可用，避免污染 sys.modules['fastapi'] 影响其他测试模块。
     sys.modules["config"] = types.SimpleNamespace(
         get_config=lambda: {"llm": {}},
         normalize_llm_config=lambda cfg: cfg,

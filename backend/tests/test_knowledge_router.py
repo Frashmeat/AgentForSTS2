@@ -3,39 +3,11 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
+from fastapi import HTTPException
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-
-class _DummyRouter:
-    def __init__(self, prefix=""):
-        self.prefix = prefix
-
-    def get(self, _path):
-        def decorator(func):
-            return func
-        return decorator
-
-    def post(self, _path):
-        def decorator(func):
-            return func
-        return decorator
-
-
-class _DummyHttpException(Exception):
-    def __init__(self, status_code, detail):
-        super().__init__(detail)
-        self.status_code = status_code
-        self.detail = detail
-
-
-class _DummyResponse:
-    def __init__(self, content=b"", media_type="", headers=None):
-        self.content = content
-        self.media_type = media_type
-        self.headers = headers or {}
-
-
-sys.modules["fastapi"] = types.SimpleNamespace(APIRouter=_DummyRouter, HTTPException=_DummyHttpException, Response=_DummyResponse)
 knowledge_router = importlib.import_module("routers.knowledge_router")
 
 
@@ -118,7 +90,7 @@ def test_refresh_task_returns_404_when_missing(monkeypatch):
 
     try:
         knowledge_router.get_refresh_knowledge("missing-task")
-    except _DummyHttpException as exc:
+    except HTTPException as exc:
         assert exc.status_code == 404
         assert "missing-task" in exc.detail
     else:

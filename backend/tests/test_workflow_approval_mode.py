@@ -9,25 +9,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
-class _DummyRouter:
-    def __init__(self, prefix=""):
-        self.prefix = prefix
-
-    def post(self, _path):
-        def decorator(func):
-            return func
-        return decorator
-
-    def websocket(self, _path):
-        def decorator(func):
-            return func
-        return decorator
-
-
-sys.modules.setdefault(
-    "fastapi",
-    types.SimpleNamespace(APIRouter=_DummyRouter, WebSocket=object, WebSocketDisconnect=Exception),
-)
+# fastapi 不再 stub —— 真 fastapi 在测试容器里可用，避免污染 sys.modules['fastapi'] 影响其他测试模块。
+# litellm 等保留 stub 是为了避免真发外部请求；这些 setdefault 只在真模块未安装时才占位。
 sys.modules.setdefault("litellm", types.SimpleNamespace(acompletion=None))
 sys.modules.setdefault("image.generator", types.SimpleNamespace(generate_images=lambda *args, **kwargs: None))
 sys.modules.setdefault("image.postprocess", types.SimpleNamespace(PROFILES={}, process_image=lambda *_args, **_kwargs: []))

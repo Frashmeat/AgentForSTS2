@@ -4,37 +4,10 @@ import sys
 import types
 from pathlib import Path
 
+from fastapi import HTTPException
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-
-class _DummyRouter:
-    def __init__(self, prefix=""):
-        self.prefix = prefix
-
-    def get(self, _path):
-        def decorator(func):
-            return func
-        return decorator
-
-    def patch(self, _path):
-        def decorator(func):
-            return func
-        return decorator
-
-    def post(self, _path):
-        def decorator(func):
-            return func
-        return decorator
-
-
-class _DummyHttpException(Exception):
-    def __init__(self, status_code, detail):
-        super().__init__(detail)
-        self.status_code = status_code
-        self.detail = detail
-
-
-sys.modules["fastapi"] = types.SimpleNamespace(APIRouter=_DummyRouter, HTTPException=_DummyHttpException)
 config_router = importlib.import_module("routers.config_router")
 from app.shared.prompting import PromptLoader
 
@@ -66,7 +39,7 @@ def test_test_imggen_truncates_generator_errors(monkeypatch):
 
     try:
         asyncio.run(config_router.test_imggen())
-    except _DummyHttpException as exc:
+    except HTTPException as exc:
         assert exc.status_code == 500
         assert len(exc.detail) == 300
     else:
@@ -83,7 +56,7 @@ def test_detect_paths_surfaces_detector_errors(monkeypatch):
 
     try:
         config_router.detect_paths()
-    except _DummyHttpException as exc:
+    except HTTPException as exc:
         assert exc.status_code == 500
         assert exc.detail == "detect failed"
     else:
@@ -157,7 +130,7 @@ def test_get_detect_paths_task_returns_404_when_task_missing(monkeypatch):
 
     try:
         config_router.get_detect_paths_task("missing")
-    except _DummyHttpException as exc:
+    except HTTPException as exc:
         assert exc.status_code == 404
         assert "missing" in exc.detail
     else:
@@ -208,7 +181,7 @@ def test_pick_path_surfaces_picker_errors(monkeypatch):
 
     try:
         config_router.pick_path({"kind": "directory", "title": "选择目录"})
-    except _DummyHttpException as exc:
+    except HTTPException as exc:
         assert exc.status_code == 500
         assert exc.detail == "picker unavailable"
     else:

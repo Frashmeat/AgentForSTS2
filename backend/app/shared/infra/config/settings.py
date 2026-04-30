@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -239,10 +240,13 @@ def save_config(config: dict[str, Any]) -> None:
         value = normalized.get(section, {}).get(key, "")
         if value and not value.startswith("****"):
             os.environ[envname] = value
-            try:
-                subprocess.run(["setx", envname, value], capture_output=True, check=False)
-            except Exception:
-                pass
+            # setx 仅 Windows 存在；用于把环境变量持久化到用户级别注册表，让其他进程能读到。
+            # 容器/Linux/Mac 没有等价物，且容器场景里 env 由编排层管理，无需持久化。
+            if sys.platform == "win32":
+                try:
+                    subprocess.run(["setx", envname, value], capture_output=True, check=False)
+                except Exception:
+                    pass
 
 
 @dataclass(slots=True)
