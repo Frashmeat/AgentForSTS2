@@ -2,54 +2,35 @@ import { useState, useCallback, useRef, useEffect, useReducer } from "react";
 import { AlertTriangle, Loader2, RotateCcw, Sparkles, StopCircle } from "lucide-react";
 
 import { approveApproval, executeApproval, rejectApproval, type ApprovalRequest } from "../../lib/approvals";
-import { BatchSocket, PlanItem, ModPlan } from "../../lib/batch_ws";
+import { PlanItem, ModPlan } from "../../lib/batch_ws";
 import { AgentLog } from "../../components/AgentLog";
 import { ProjectRootField } from "../../components/ProjectRootField";
 import { loadAppConfig } from "../../shared/api/config";
 import { runApprovalAction } from "../../shared/approvalAction.ts";
-import { reviewModPlan } from "../../shared/api/workflow.ts";
-import {
-  WORKFLOW_CANCELLED_MESSAGE,
-  isWorkflowCancellation,
-  resolveErrorMessage,
-  resolveWorkflowErrorMessage,
-} from "../../shared/error.ts";
 import type { PlanReviewPayload } from "../../shared/types/workflow.ts";
 import type { WorkflowLogEntry } from "../../shared/workflowLog.ts";
 import { useResolvedWorkspaceFeatureProps } from "../workspace/WorkspaceContext.tsx";
 import type { WorkspaceFeatureAdapterProps, WorkspaceFeatureProps } from "../workspace/types.ts";
 import { canProceedBatchApproval, markBatchApprovalResuming, resumeBatchApprovalWorkflow } from "./approval";
 import { ExecutionView } from "./ExecutionView.tsx";
-import { openBatchPlanningSocket } from "./planningSession";
 import { ReviewBundles } from "./ReviewBundles.tsx";
 import { ReviewPlan } from "./ReviewPlan.tsx";
 import {
   batchWorkflowReducer,
   createInitialBatchRuntimeState,
-  canProceedFromBundleReview,
   reconcileBundleDecisionRecord,
-  summarizeBundleDecisionProgress,
   type BatchItemState as ItemState,
   type BundleDecisionRecord,
-  type BundleDecisionStatus,
-  type ReviewStrictness,
 } from "./state.ts";
+import { useBatchPlanningSession } from "./useBatchPlanningSession.ts";
+import { useBatchPlanReview } from "./useBatchPlanReview.ts";
 import {
   PLAN_BUNDLE_DECISIONS_STORAGE_KEY,
   PLAN_ITEMS_STORAGE_KEY,
   PLAN_REVIEW_STORAGE_KEY,
-  PLAN_REVIEW_STRICTNESS_STORAGE_KEY,
   PLAN_STORAGE_KEY,
-  type ReviewFeedback,
 } from "./view-constants.ts";
-import {
-  canProceedFromEditedItemReview,
-  normalizeReviewStrictness,
-  readJsonStorage,
-  summarizePlanReview,
-  writeJsonStorage,
-  writeTextStorage,
-} from "./view-helpers.ts";
+import { readJsonStorage, writeJsonStorage } from "./view-helpers.ts";
 
 // ── 主组件 ────────────────────────────────────────────────────────────────────
 
@@ -88,10 +69,6 @@ function BatchModePage({
   const [editedItems, setEditedItems] = useState<PlanItem[]>(() => {
     return readJsonStorage<PlanItem[]>(PLAN_ITEMS_STORAGE_KEY, []);
   });
-  const [reviewBusy, setReviewBusy] = useState(false);
-  const [reviewError, setReviewError] = useState<string | null>(null);
-  const [reviewFeedback, setReviewFeedback] = useState<ReviewFeedback | null>(null);
-  const [reviewFocusItemId, setReviewFocusItemId] = useState<string | null>(null);
   const [runtimeState, dispatchRuntime] = useReducer(batchWorkflowReducer, undefined, () => ({
     ...createInitialBatchRuntimeState(),
     planReview: readJsonStorage<PlanReviewPayload | null>(PLAN_REVIEW_STORAGE_KEY, null),
@@ -118,7 +95,6 @@ function BatchModePage({
   useEffect(() => {
     autoSelectRef.current = autoSelectFirst;
   }, [autoSelectFirst]);
-  const socketRef = useRef<BatchSocket | null>(null);
 
   useEffect(() => {
     itemStatesRef.current = itemStates;
@@ -134,6 +110,31 @@ function BatchModePage({
       writeJsonStorage(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, nextDecisions);
     }
   }, [planReview, bundleDecisions]);
+
+  const {
+    reviewBusy,
+    reviewError,
+    reviewFeedback,
+    reviewFocusItemId,
+    setReviewError,
+    setReviewFeedback,
+    setReviewFocusItemId,
+    refreshPlanReview,
+    handleConfirmItemsReview,
+    handleConfirmBundleReview,
+    handleReviewStrictnessChange,
+    handleBundleDecisionChange,
+    handleBundleSplitRequest,
+    handleBundleReturnToItems,
+  } = useBatchPlanReview({
+    plan,
+    editedItems,
+    planReview,
+    bundleDecisions,
+    reviewStrictness,
+    dispatchRuntime,
+    onProceedToExecution: () => requestExecutionStart(),
+  });
 
   // ── State updater helpers ─────────────────────────────────────────────────
 
@@ -166,296 +167,40 @@ function BatchModePage({
     });
   }, []);
 
-  // ── Start ─────────────────────────────────────────────────────────────────
+  const planningSession = useBatchPlanningSession({
+    dispatchRuntime,
+    setReviewError,
+    setReviewFeedback,
+    setReviewFocusItemId,
+    setPlan,
+    setEditedItems,
+    updateItem,
+    appendProgress,
+    appendAgent,
+    addImage,
+    autoSelectRef,
+  });
+  const { socketRef } = planningSession;
 
   async function startPlanning() {
-    if (!requirements.trim()) return;
-    dispatchRuntime({ type: "planning_started" });
-    setReviewError(null);
-    setReviewFeedback(null);
-    setReviewFocusItemId(null);
-    writeJsonStorage(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, {});
-    setPlan(null);
-
-    const ws = new BatchSocket();
-    socketRef.current = ws;
-    _registerBatchHandlers(ws);
-    const started = await openBatchPlanningSocket(ws, {
-      requirements,
-      projectRoot,
-      onOpenError(message) {
-        socketRef.current = null;
-        dispatchRuntime({ type: "workflow_failed", message });
-      },
-    });
-    if (!started) {
-      return;
-    }
-  }
-
-  function _registerBatchHandlers(ws: BatchSocket) {
-    ws.on("planning", () => dispatchRuntime({ type: "batch_log_appended", message: "正在规划 Mod..." }));
-    ws.on("plan_ready", (d) => {
-      setPlan(d.plan);
-      setEditedItems(d.plan.items);
-      setReviewError(null);
-      setReviewFeedback(d.review ? summarizePlanReview(d.review, d.plan.items).feedback : null);
-      setReviewFocusItemId(d.review ? summarizePlanReview(d.review, d.plan.items).focusItemId : null);
-      const nextDecisions = reconcileBundleDecisionRecord(d.review ?? null);
-      dispatchRuntime({ type: "plan_ready_received", review: d.review ?? null, decisions: nextDecisions });
-      try {
-        writeJsonStorage(PLAN_STORAGE_KEY, d.plan);
-        writeJsonStorage(PLAN_ITEMS_STORAGE_KEY, d.plan.items);
-        writeJsonStorage(PLAN_REVIEW_STORAGE_KEY, d.review ?? null);
-        writeJsonStorage(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, nextDecisions);
-        writeTextStorage(
-          PLAN_REVIEW_STRICTNESS_STORAGE_KEY,
-          normalizeReviewStrictness(d.review?.strictness ?? reviewStrictness),
-        );
-      } catch {}
-    });
-    ws.on("batch_progress", (d) => dispatchRuntime({ type: "batch_log_appended", message: d.message }));
-    ws.on("stage_update", (d) => {
-      if (d.item_id) {
-        dispatchRuntime({ type: "item_stage_message", itemId: d.item_id, message: d.message });
-        return;
-      }
-      dispatchRuntime({ type: "batch_stage_message", message: d.message });
-    });
-    ws.on("batch_started", (d) => {
-      dispatchRuntime({ type: "batch_started", items: d.items });
-    });
-    ws.on("item_started", (d) => {
-      dispatchRuntime({ type: "item_started", itemId: d.item_id });
-    });
-    ws.on("item_progress", (d) => {
-      appendProgress(d.item_id, d.message);
-      if (d.message.includes("Code Agent")) {
-        updateItem(d.item_id, { status: "code_generating" });
-      }
-    });
-    ws.on("item_image_ready", (d) => {
-      addImage(d.item_id, d.image, d.index, d.prompt);
-      if (autoSelectRef.current) {
-        ws.send({ action: "select_image", item_id: d.item_id, index: 0 });
-        updateItem(d.item_id, { status: "code_generating" });
-      }
-    });
-    ws.on("item_agent_stream", (d) => {
-      appendAgent(d.item_id, {
-        text: d.chunk,
-        source: d.source,
-        channel: d.channel,
-        model: d.model,
-      });
-    });
-    ws.on("item_approval_pending", (d) => {
-      updateItem(d.item_id, {
-        status: "approval_pending",
-        approvalSummary: d.summary,
-        approvalRequests: d.requests,
-      });
-      if (activeItemId === null) {
-        dispatchRuntime({ type: "active_item_set", itemId: d.item_id });
-      }
-    });
-    ws.on("item_done", (d) => {
-      dispatchRuntime({ type: "item_done", itemId: d.item_id });
-    });
-    ws.on("item_error", (d) => {
-      updateItem(d.item_id, {
-        status: "error",
-        error: resolveWorkflowErrorMessage(d),
-        errorTrace: d.traceback ?? null,
-      });
-    });
-    ws.on("batch_done", (d) => {
-      socketRef.current = null;
-      dispatchRuntime({ type: "batch_done", success: d.success_count, error: d.error_count });
-    });
-    ws.on("cancelled", (d) => {
-      socketRef.current = null;
-      dispatchRuntime({
-        type: "workflow_cancelled",
-        message: resolveWorkflowErrorMessage(d, WORKFLOW_CANCELLED_MESSAGE),
-      });
-    });
-    ws.on("error", (d) => {
-      socketRef.current = null;
-      if (isWorkflowCancellation(d)) {
-        dispatchRuntime({
-          type: "workflow_cancelled",
-          message: resolveWorkflowErrorMessage(d, WORKFLOW_CANCELLED_MESSAGE),
-        });
-        return;
-      }
-      dispatchRuntime({ type: "workflow_failed", message: resolveWorkflowErrorMessage(d) });
-    });
+    await planningSession.startPlanning({ requirements, projectRoot, reviewStrictness, activeItemId });
   }
 
   async function confirmPlan() {
     if (!plan) return;
-    const itemsForStorage = editedItems.map((it) => ({ ...it, provided_image_b64: undefined }));
-    writeJsonStorage(PLAN_ITEMS_STORAGE_KEY, itemsForStorage);
-    writeJsonStorage(PLAN_REVIEW_STORAGE_KEY, planReview);
-    writeJsonStorage(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, bundleDecisions);
-    writeTextStorage(PLAN_REVIEW_STRICTNESS_STORAGE_KEY, reviewStrictness);
-
-    if (!socketRef.current) {
-      // 恢复的规划：重新建连接，直接跳到执行
-      const ws = new BatchSocket();
-      socketRef.current = ws;
-      _registerBatchHandlers(ws);
-      const started = await openBatchPlanningSocket(ws, {
-        payload: {
-          action: "start_with_plan",
-          project_root: projectRoot,
-          plan: { ...plan, items: editedItems },
-          review_strictness: reviewStrictness,
-          bundle_decisions: bundleDecisions,
-        },
-        onOpenError(message) {
-          socketRef.current = null;
-          dispatchRuntime({ type: "workflow_failed", message });
-        },
-      });
-      if (!started) {
-        return;
-      }
-      dispatchRuntime({ type: "review_bundles_confirmed" });
-    } else {
-      dispatchRuntime({ type: "review_bundles_confirmed" });
-      socketRef.current.send({
-        action: "confirm_plan",
-        plan: { ...plan, items: editedItems },
-        review_strictness: reviewStrictness,
-        bundle_decisions: bundleDecisions,
-      });
-    }
+    await planningSession.confirmPlan({
+      plan,
+      editedItems,
+      projectRoot,
+      reviewStrictness,
+      planReview,
+      bundleDecisions,
+    });
   }
 
   function updateEditedItems(items: PlanItem[]) {
     setEditedItems(items);
     writeJsonStorage(PLAN_ITEMS_STORAGE_KEY, items);
-  }
-
-  async function refreshPlanReview(
-    items: PlanItem[] = editedItems,
-    strictness: ReviewStrictness = reviewStrictness,
-    decisions: BundleDecisionRecord = bundleDecisions,
-  ): Promise<PlanReviewPayload | null> {
-    if (!plan) {
-      return null;
-    }
-    setReviewBusy(true);
-    setReviewError(null);
-    setReviewFeedback({ tone: "info", message: "正在重新检查当前计划..." });
-    try {
-      const review = await reviewModPlan({
-        plan: { ...plan, items },
-        strictness,
-        bundle_decisions: decisions,
-      });
-      const nextDecisions = reconcileBundleDecisionRecord(review);
-      dispatchRuntime({ type: "review_updated", review, decisions: nextDecisions });
-      const summary = summarizePlanReview(review, items);
-      setReviewFeedback(summary.feedback);
-      setReviewFocusItemId(summary.focusItemId);
-      writeJsonStorage(PLAN_REVIEW_STORAGE_KEY, review);
-      writeJsonStorage(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, nextDecisions);
-      writeTextStorage(PLAN_REVIEW_STRICTNESS_STORAGE_KEY, normalizeReviewStrictness(review.strictness));
-      return review;
-    } catch (error) {
-      setReviewError(resolveErrorMessage(error));
-      setReviewFeedback(null);
-      return null;
-    } finally {
-      setReviewBusy(false);
-    }
-  }
-
-  async function handleConfirmItemsReview() {
-    const review = await refreshPlanReview();
-    if (!review) {
-      return;
-    }
-    if (canProceedFromEditedItemReview(review, editedItems)) {
-      setReviewFeedback({ tone: "success", message: "Item 复核已通过，进入执行策略决策。" });
-      dispatchRuntime({ type: "review_items_confirmed" });
-    }
-  }
-
-  async function handleConfirmBundleReview() {
-    const review = planReview ?? (await refreshPlanReview());
-    if (!review) {
-      return;
-    }
-    if (!canProceedFromEditedItemReview(review, editedItems)) {
-      setReviewFeedback({ tone: "warning", message: "仍有 item 说明未补齐，已返回 Item 复核阶段。" });
-      dispatchRuntime({ type: "stage_set", stage: "review_items" });
-      return;
-    }
-    if (!canProceedFromBundleReview(review, bundleDecisions)) {
-      const progress = summarizeBundleDecisionProgress(review, bundleDecisions);
-      const pendingParts = [
-        progress.unresolved > 0 ? `${progress.unresolved} 个 bundle 待决策` : null,
-        progress.splitRequested > 0 ? `${progress.splitRequested} 个 bundle 已要求拆分但尚未完成重算` : null,
-        progress.needsItemRevision > 0 ? `${progress.needsItemRevision} 个 bundle 仍需回到 Item 复核` : null,
-      ].filter(Boolean);
-      setReviewFeedback({
-        tone: "warning",
-        message: `执行策略仍需处理：${pendingParts.join("，")}。`,
-      });
-      dispatchRuntime({ type: "stage_set", stage: "review_bundles" });
-      return;
-    }
-    setReviewFeedback({ tone: "success", message: "执行策略复核通过，开始进入执行阶段。" });
-    requestExecutionStart();
-  }
-
-  function handleReviewStrictnessChange(nextStrictness: ReviewStrictness) {
-    dispatchRuntime({ type: "review_strictness_set", strictness: nextStrictness });
-    writeTextStorage(PLAN_REVIEW_STRICTNESS_STORAGE_KEY, nextStrictness);
-    if (plan) {
-      void refreshPlanReview(editedItems, nextStrictness, {});
-    }
-  }
-
-  function handleBundleDecisionChange(bundleKey: string, decision: BundleDecisionStatus) {
-    const next = { ...bundleDecisions, [bundleKey]: decision };
-    dispatchRuntime({ type: "bundle_decisions_set", decisions: next });
-    writeJsonStorage(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, next);
-  }
-
-  async function handleBundleSplitRequest(bundleKey: string) {
-    const nextDecisions = { ...bundleDecisions, [bundleKey]: "split_requested" as const };
-    dispatchRuntime({ type: "bundle_decisions_set", decisions: nextDecisions });
-    writeJsonStorage(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, nextDecisions);
-    setReviewFeedback({ tone: "info", message: "已记录拆分请求，正在按更保守口径重算 bundle..." });
-    const review = await refreshPlanReview(editedItems, reviewStrictness, nextDecisions);
-    if (!review) {
-      return;
-    }
-    const progress = summarizeBundleDecisionProgress(review, reconcileBundleDecisionRecord(review));
-    setReviewFeedback({
-      tone: progress.blocking === 0 ? "success" : "warning",
-      message:
-        progress.blocking === 0
-          ? "已按拆分请求重算执行策略，当前可以直接进入执行。"
-          : "已按拆分请求重算执行策略，请继续处理剩余 bundle 决策。",
-    });
-  }
-
-  function handleBundleReturnToItems(bundleKey: string, itemIds: string[]) {
-    const next = { ...bundleDecisions, [bundleKey]: "needs_item_revision" as const };
-    dispatchRuntime({ type: "bundle_decisions_set", decisions: next });
-    writeJsonStorage(PLAN_BUNDLE_DECISIONS_STORAGE_KEY, next);
-    setReviewFocusItemId(itemIds[0] ?? null);
-    setReviewFeedback({
-      tone: "warning",
-      message: "已返回 Item 复核阶段，请补充依赖原因、范围边界或验收说明后重新检查。",
-    });
-    dispatchRuntime({ type: "stage_set", stage: "review_items" });
   }
 
   function requestExecutionStart() {
@@ -550,23 +295,8 @@ function BatchModePage({
     updateItem(itemId, { status: "img_generating", showMorePrompt: false });
   }
 
-  function cancelBatch() {
-    const socket = socketRef.current;
-    if (socket) {
-      try {
-        socket.send({ action: "cancel" });
-      } catch {}
-      setTimeout(() => {
-        socket.close();
-      }, 100);
-    }
-    socketRef.current = null;
-    dispatchRuntime({ type: "workflow_cancelled", message: WORKFLOW_CANCELLED_MESSAGE });
-  }
-
   function reset() {
-    socketRef.current?.close();
-    socketRef.current = null;
+    planningSession.closeSocket();
     dispatchRuntime({ type: "workflow_reset" });
     setPlan(null);
     setEditedItems([]);
@@ -663,7 +393,7 @@ function BatchModePage({
           {batchLog.length > 0 && <AgentLog lines={batchLog} />}
           {socketRef.current && (
             <button
-              onClick={cancelBatch}
+              onClick={planningSession.cancelBatch}
               className="py-1.5 px-3 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 text-sm transition-colors flex items-center gap-1.5"
             >
               <StopCircle size={13} />
@@ -772,7 +502,7 @@ function BatchModePage({
           }}
           onProceedApproval={handleProceedApproval}
           hasLiveSession={socketRef.current !== null}
-          onCancelWorkflow={cancelBatch}
+          onCancelWorkflow={planningSession.cancelBatch}
           onUpdatePrompt={(id, prompt) => updateItem(id, { currentPrompt: prompt })}
           onToggleMorePrompt={(id) => updateItem(id, { showMorePrompt: !itemStates[id]?.showMorePrompt })}
           onReset={reset}
