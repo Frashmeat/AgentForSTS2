@@ -2,18 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { X, FolderOpen, Cpu, Cloud, Gamepad2, Image, Search } from "lucide-react";
 import { Link } from "react-router-dom";
 import {
-  getMyServerPreferences,
-  listPlatformExecutionProfiles,
   loadAppConfig,
   pickAppPath,
   testImageGenerationConfig,
   type KnowledgeStatus,
-  type MyServerPreferenceView,
   updateAppConfig,
-  updateMyServerPreferences,
 } from "../shared/api/index.ts";
 import { resolveErrorMessage } from "../shared/error.ts";
-import type { PlatformExecutionProfile } from "../shared/api/platform.ts";
 import { useSession } from "../shared/session/hooks.ts";
 import { KnowledgeGuideDialog } from "./KnowledgeGuideDialog.tsx";
 import { StatusNotice, StatusNoticeStack, type StatusNoticeItem } from "./StatusNotice.tsx";
@@ -23,12 +18,12 @@ import {
   PROVIDER_MODELS,
   getKnowledgeUpdateProgress,
   inputCls,
-  pickInitialServerProfileId,
   readonlyInputCls,
   selectCls,
 } from "./settings-panel-helpers.ts";
 import { useDetectAppPathsTask } from "./useDetectAppPathsTask.ts";
 import { useRefreshKnowledgeTask } from "./useRefreshKnowledgeTask.ts";
+import { useServerPreferences } from "./useServerPreferences.ts";
 
 interface SettingsPanelProps {
   mode?: "drawer" | "page";
@@ -67,14 +62,6 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
   const [imgKey, setImgKey] = useState("");
   const [imgSecret, setImgSecret] = useState("");
   const [imageTestLoading, setImageTestLoading] = useState(false);
-  const [serverProfiles, setServerProfiles] = useState<PlatformExecutionProfile[]>([]);
-  const [serverPreference, setServerPreference] = useState<MyServerPreferenceView | null>(null);
-  const [selectedServerProfileId, setSelectedServerProfileId] = useState<number | null>(null);
-  const [serverLoading, setServerLoading] = useState(false);
-  const [serverSaving, setServerSaving] = useState(false);
-  const [serverError, setServerError] = useState("");
-  const [serverNotice, setServerNotice] = useState("");
-  const [serverSelectionDirty, setServerSelectionDirty] = useState(false);
   const mountedRef = useRef(false);
   const lastSavedConfigSignatureRef = useRef("");
   const configSaveSignature = cfg ? buildConfigSaveSignature(cfg, llmKey, imgKey, imgSecret) : "";
@@ -130,53 +117,24 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
     handleRefresh: handleRefreshKnowledge,
   } = knowledge;
 
-  useEffect(() => {
-    if (activeTab !== "server") {
-      return;
-    }
-    if (!isAuthAvailable || !isAuthenticated) {
-      setServerProfiles([]);
-      setServerPreference(null);
-      setSelectedServerProfileId(null);
-      setServerError("");
-      setServerNotice("");
-      setServerSelectionDirty(false);
-      return;
-    }
-
-    let cancelled = false;
-    setServerLoading(true);
-    setServerError("");
-    void Promise.all([listPlatformExecutionProfiles(), getMyServerPreferences()])
-      .then(([profileView, preference]) => {
-        if (cancelled || !mountedRef.current) {
-          return;
-        }
-        setServerProfiles(profileView.items);
-        setServerPreference(preference);
-        setSelectedServerProfileId(pickInitialServerProfileId(profileView.items, preference));
-        setServerSelectionDirty(false);
-      })
-      .catch((error) => {
-        if (cancelled || !mountedRef.current) {
-          return;
-        }
-        setServerProfiles([]);
-        setServerPreference(null);
-        setSelectedServerProfileId(null);
-        setServerError(resolveErrorMessage(error));
-        setServerSelectionDirty(false);
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setServerLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [activeTab, isAuthAvailable, isAuthenticated]);
+  const serverPrefs = useServerPreferences({
+    mountedRef,
+    activeTab,
+    isAuthAvailable,
+    isAuthenticated,
+  });
+  const {
+    serverProfiles,
+    serverPreference,
+    selectedServerProfileId,
+    serverLoading,
+    serverSaving,
+    serverError,
+    serverNotice,
+    serverSelectionDirty,
+    selectProfile: selectServerProfile,
+    saveServerPreference: handleSaveServerPreference,
+  } = serverPrefs;
 
   useEffect(() => {
     if (!cfg || saving || !configDirty || saveError) {
@@ -208,36 +166,6 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
       clearTimeout(timer);
     };
   }, [saveNotice]);
-
-  useEffect(() => {
-    if (!serverNotice) {
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      setServerNotice("");
-    }, 2600);
-
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [serverNotice]);
-
-  useEffect(() => {
-    if (activeTab !== "server" || !isAuthAvailable || !isAuthenticated || serverSaving || !serverSelectionDirty) {
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      void handleSaveServerPreference(selectedServerProfileId ?? null);
-    }, 500);
-
-    return () => {
-      clearTimeout(timer);
-    };
-    // 同上：handleSaveServerPreference 是组件内闭包，依赖列表里的 state 已能覆盖触发条件。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, isAuthAvailable, isAuthenticated, selectedServerProfileId, serverSaving, serverSelectionDirty]);
 
   function set(path: string[], value: string | number) {
     setSaveError("");
@@ -444,37 +372,6 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
       : null,
   ];
   const floatingNotices = floatingNoticeCandidates.filter((notice): notice is StatusNoticeItem => notice !== null);
-
-  async function handleSaveServerPreference(profileId: number | null) {
-    if (!isAuthAvailable || !isAuthenticated) {
-      return;
-    }
-    setServerSaving(true);
-    setServerError("");
-    setServerNotice("");
-    try {
-      const updated = await updateMyServerPreferences({
-        default_execution_profile_id: profileId,
-      });
-      if (!mountedRef.current) {
-        return;
-      }
-      setServerPreference(updated);
-      setSelectedServerProfileId(profileId);
-      setServerSelectionDirty(false);
-      setServerNotice(profileId === null ? "已自动清空默认服务器配置" : "已自动保存默认服务器配置");
-    } catch (error) {
-      if (mountedRef.current) {
-        setServerError(resolveErrorMessage(error));
-        setServerSelectionDirty(false);
-      }
-      throw error;
-    } finally {
-      if (mountedRef.current) {
-        setServerSaving(false);
-      }
-    }
-  }
 
   async function handleCloseSettings() {
     if (!onClose) {
@@ -966,10 +863,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
                           if (!profile.available) {
                             return;
                           }
-                          setSelectedServerProfileId(profile.id);
-                          setServerSelectionDirty(true);
-                          setServerError("");
-                          setServerNotice("");
+                          selectServerProfile(profile.id);
                         }}
                         disabled={disabled}
                         className={`w-full rounded-xl border px-4 py-3 text-left transition ${
@@ -1003,10 +897,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
                   <button
                     type="button"
                     onClick={() => {
-                      setSelectedServerProfileId(null);
-                      setServerSelectionDirty(true);
-                      setServerError("");
-                      setServerNotice("");
+                      selectServerProfile(null);
                     }}
                     disabled={serverSaving || serverPreference?.default_execution_profile_id === null}
                     className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 transition hover:border-amber-200 hover:text-amber-700 disabled:opacity-40"
