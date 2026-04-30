@@ -206,6 +206,46 @@ def _single_workflow_mode(config: dict | None = None) -> str:
     return "modular"
 
 
+async def _ensure_project_initialized(
+    ws: WebSocket,
+    project_root: Path,
+    *,
+    cancellation: "_WsCancellation",
+    run_cancellable,
+    agent_display_model: str,
+) -> Path:
+    """如果 project_root 不含 *.csproj 则从模板初始化（FileNotFoundError 时回退到 LLM clone），返回可能更新的 project_root。"""
+    if list(project_root.glob("*.csproj")):
+        return project_root
+
+    project_name = project_root.name
+    parent_dir = project_root.parent
+    await _send_stage(
+        ws, "project", "project_init",
+        _text("workflow_project_init_stage", project_name=project_name).strip(),
+    )
+    await _send(ws, "progress", {
+        "message": _text("workflow_project_init_progress", project_name=project_name).strip(),
+    })
+    try:
+        project_root = await run_cancellable(asyncio.get_event_loop().run_in_executor(
+            None, create_project_from_template, project_name, parent_dir,
+        ))
+    except FileNotFoundError:
+        async def _stream_init(chunk: str):
+            cancellation.raise_if_cancelled()
+            await _send(ws, "agent_stream", build_stream_chunk_payload(
+                chunk,
+                source="project_init",
+                model=agent_display_model,
+            ))
+        project_root = await run_cancellable(create_mod_project(project_name, parent_dir, _stream_init))
+    await _send(ws, "progress", {
+        "message": _text("workflow_project_init_done", project_root=project_root).strip(),
+    })
+    return project_root
+
+
 async def _maybe_await_approval(
     ws: WebSocket,
     description: str,
@@ -325,26 +365,12 @@ async def _handle_ws_create(ws: WebSocket, *, initial_params: dict | None = None
         img_provider = _img_provider_to_adapter(cfg["image_gen"]["provider"])
 
         # 1.5 检测项目是否存在，不存在则从本地模板（S01_IronStrike）复制
-        if not list(project_root.glob("*.csproj")):
-            project_name = project_root.name
-            parent_dir = project_root.parent
-            await _send_stage(ws, "project", "project_init", _text("workflow_project_init_stage", project_name=project_name).strip())
-            await _send(ws, "progress", {"message": _text("workflow_project_init_progress", project_name=project_name).strip()})
-            try:
-                project_root = await run_cancellable(asyncio.get_event_loop().run_in_executor(
-                    None, create_project_from_template, project_name, parent_dir
-                ))
-            except FileNotFoundError:
-                # 模板不存在时回退到 Claude clone 方式
-                async def _stream_init(chunk: str):
-                    cancellation.raise_if_cancelled()
-                    await _send(ws, "agent_stream", build_stream_chunk_payload(
-                        chunk,
-                        source="project_init",
-                        model=agent_display_model,
-                    ))
-                project_root = await run_cancellable(create_mod_project(project_name, parent_dir, _stream_init))
-            await _send(ws, "progress", {"message": _text("workflow_project_init_done", project_root=project_root).strip()})
+        project_root = await _ensure_project_initialized(
+            ws, project_root,
+            cancellation=cancellation,
+            run_cancellable=run_cancellable,
+            agent_display_model=agent_display_model,
+        )
 
         # 2. Prompt Adaptation
         await _send_stage(ws, "text", "prompt_adapting", _text("workflow_prompt_adapting_stage").strip())
@@ -501,25 +527,12 @@ async def _ws_run_custom_code(
     agent_display_model = resolve_agent_display_model(cfg.get("llm", {}))
 
     # 1.5 建立项目（如果不存在），从本地模板复制
-    if not list(project_root.glob("*.csproj")):
-        project_name = project_root.name
-        parent_dir = project_root.parent
-        await _send_stage(ws, "project", "project_init", _text("workflow_project_init_stage", project_name=project_name).strip())
-        await _send(ws, "progress", {"message": _text("workflow_project_init_progress", project_name=project_name).strip()})
-        try:
-            project_root = await run_cancellable(asyncio.get_event_loop().run_in_executor(
-                None, create_project_from_template, project_name, parent_dir
-            ))
-        except FileNotFoundError:
-            async def _stream_init(chunk: str):
-                cancellation.raise_if_cancelled()
-                await _send(ws, "agent_stream", build_stream_chunk_payload(
-                    chunk,
-                    source="project_init",
-                    model=agent_display_model,
-                ))
-            project_root = await run_cancellable(create_mod_project(project_name, parent_dir, _stream_init))
-        await _send(ws, "progress", {"message": _text("workflow_project_init_done", project_root=project_root).strip()})
+    project_root = await _ensure_project_initialized(
+        ws, project_root,
+        cancellation=cancellation,
+        run_cancellable=run_cancellable,
+        agent_display_model=agent_display_model,
+    )
 
     should_continue, approval_output = await _maybe_await_approval(
         ws,
@@ -593,25 +606,12 @@ async def _ws_run_with_provided_image(
     fname = params.get("provided_image_name", "uploaded")
 
     # 初始化项目（如有需要）
-    if not list(project_root.glob("*.csproj")):
-        project_name = project_root.name
-        parent_dir = project_root.parent
-        await _send_stage(ws, "project", "project_init", _text("workflow_project_init_stage", project_name=project_name).strip())
-        await _send(ws, "progress", {"message": _text("workflow_project_init_progress", project_name=project_name).strip()})
-        try:
-            project_root = await run_cancellable(asyncio.get_event_loop().run_in_executor(
-                None, create_project_from_template, project_name, parent_dir
-            ))
-        except FileNotFoundError:
-            async def _stream_init(chunk: str):
-                cancellation.raise_if_cancelled()
-                await _send(ws, "agent_stream", build_stream_chunk_payload(
-                    chunk,
-                    source="project_init",
-                    model=agent_display_model,
-                ))
-            project_root = await run_cancellable(create_mod_project(project_name, parent_dir, _stream_init))
-        await _send(ws, "progress", {"message": _text("workflow_project_init_done", project_root=project_root).strip()})
+    project_root = await _ensure_project_initialized(
+        ws, project_root,
+        cancellation=cancellation,
+        run_cancellable=run_cancellable,
+        agent_display_model=agent_display_model,
+    )
 
     await _send(ws, "progress", {"message": _text("workflow_provided_image_reading", file_name=fname).strip()})
     img = await run_cancellable(asyncio.get_event_loop().run_in_executor(
