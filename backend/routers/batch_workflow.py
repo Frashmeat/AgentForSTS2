@@ -152,6 +152,193 @@ async def _init_batch_project(ws: WebSocket, project_root: Path, send, send_stag
     return project_root
 
 
+async def _obtain_batch_plan(
+    ws: WebSocket,
+    params: dict,
+    *,
+    send,
+    send_stage,
+):
+    """根据 action 取得执行计划：start_with_plan 直接读 params；start 走规划 + 等用户确认。"""
+    review_strictness = _normalize_review_strictness(params.get("review_strictness"))
+    bundle_decisions = _normalize_bundle_decisions(params.get("bundle_decisions"))
+    review_gate_requested = "review_strictness" in params
+
+    action = params.get("action")
+    if action == "start_with_plan":
+        plan = plan_from_dict(params["plan"])
+        if review_gate_requested:
+            _ensure_plan_review_passes(plan, review_strictness, bundle_decisions)
+        return plan
+
+    assert action == "start", _text("batch_start_action_expected").strip()
+    requirements: str = params["requirements"]
+
+    await send_stage("text", "planning", _text("batch_planning_stage").strip())
+    await send("planning")
+    plan = await plan_mod(requirements)
+    await send(
+        "plan_ready",
+        plan=plan.to_dict(),
+        review=_build_plan_review_payload(plan, review_strictness, bundle_decisions),
+    )
+
+    raw = await ws.receive_text()
+    confirm = json.loads(raw)
+    assert confirm.get("action") == "confirm_plan", _text("batch_confirm_plan_expected").strip()
+    if "review_strictness" in confirm:
+        review_gate_requested = True
+        review_strictness = _normalize_review_strictness(confirm.get("review_strictness", review_strictness))
+    bundle_decisions = _normalize_bundle_decisions(confirm.get("bundle_decisions"))
+    if confirm.get("plan"):
+        plan = plan_from_dict(confirm["plan"])
+    if review_gate_requested:
+        _ensure_plan_review_passes(plan, review_strictness, bundle_decisions)
+    return plan
+
+
+async def _generate_item_images(
+    item: PlanItem,
+    *,
+    project_root: Path,
+    img_provider: ImageProvider,
+    image_gen_sem: asyncio.Semaphore,
+    selection_futures: dict,
+    send,
+    send_stage,
+) -> list[Path]:
+    """单个 item 的图片阶段：上传图直通；否则 prompt adapt + 生成-选择循环 + 后处理。返回处理后的图片路径列表。"""
+    if not item.needs_image:
+        return []
+
+    if item.provided_image_b64:
+        await send("item_progress", item_id=item.id, message=_text("batch_provided_image_progress").strip())
+        from PIL import Image as PilImage
+        img_data = base64.b64decode(item.provided_image_b64)
+        selected_img = PilImage.open(io.BytesIO(img_data)).convert("RGBA")
+    else:
+        selected_img = await _run_image_selection_loop(
+            item=item,
+            img_provider=img_provider,
+            image_gen_sem=image_gen_sem,
+            selection_futures=selection_futures,
+            send=send,
+            send_stage=send_stage,
+        )
+
+    await send_stage("image", "postprocess", _text("batch_image_postprocess_stage").strip(), item.id)
+    await send("item_progress", item_id=item.id, message=_text("batch_image_postprocess_progress").strip())
+    paths = await _run_postprocess(selected_img, item.type, item.name, project_root)
+    await send("item_progress", item_id=item.id, message=_text("batch_image_postprocess_done").strip())
+    return paths
+
+
+async def _run_image_selection_loop(
+    *,
+    item: PlanItem,
+    img_provider: ImageProvider,
+    image_gen_sem: asyncio.Semaphore,
+    selection_futures: dict,
+    send,
+    send_stage,
+):
+    """prompt adapt → 多轮"生成 → 用户选择 / 修改 prompt 重生" 循环；返回选中的 PIL Image。"""
+    img_desc = item.image_description or item.description
+    async with image_gen_sem:
+        await send_stage("text", "prompt_adapting", _text("batch_prompt_adapting_stage").strip(), item.id)
+        await send("item_progress", item_id=item.id, message=_text("batch_prompt_adapting_progress").strip())
+        adapted = await adapt_prompt(
+            img_desc, item.type, img_provider,
+            needs_transparent_bg=_needs_transparent(item.type),
+        )
+    current_prompt = adapted["prompt"]
+    current_neg = adapted.get("negative_prompt")
+    all_images: list = []
+
+    while True:
+        async with image_gen_sem:
+            idx = len(all_images)
+            image_number = idx + 1
+            await send_stage(
+                "image", "image_generating",
+                _text("batch_image_generating_stage", image_number=image_number).strip(),
+                item.id,
+            )
+            await send(
+                "item_progress",
+                item_id=item.id,
+                message=_text("batch_image_generating_progress", image_number=image_number).strip(),
+            )
+
+            async def _img_progress(msg: str, _id=item.id):
+                await send("item_progress", item_id=_id, message=msg)
+
+            async def _notify_retry(retry_number: int, _id=item.id):
+                await send(
+                    "item_progress",
+                    item_id=_id,
+                    message=_text("batch_image_generating_retry", retry_number=retry_number).strip(),
+                )
+
+            img = await _generate_image_with_retry(
+                item=item,
+                prompt=current_prompt,
+                negative_prompt=current_neg,
+                image_progress=_img_progress,
+                notify_retry=_notify_retry,
+            )
+            all_images.append(img)
+
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        b64 = base64.b64encode(buf.getvalue()).decode()
+        await send("item_image_ready", item_id=item.id, image=b64, index=idx, prompt=current_prompt)
+
+        fut: asyncio.Future = asyncio.get_running_loop().create_future()
+        selection_futures[item.id] = fut
+        result = await fut
+        selection_futures.pop(item.id, None)
+        if result["action"] == "select":
+            return all_images[result["index"]]
+        if result.get("prompt"):
+            current_prompt = result["prompt"]
+        if result.get("negative_prompt") is not None:
+            current_neg = result["negative_prompt"]
+
+
+async def _generate_group_code(
+    group: list[PlanItem],
+    *,
+    item_image_paths: dict[str, list[Path]],
+    project_root: Path,
+    stream,
+) -> None:
+    """根据 group 大小分流到 create_asset / create_custom_code / create_asset_group。纯生成动作，不发 ws 事件。"""
+    if len(group) == 1:
+        item = group[0]
+        if item.needs_image:
+            await create_asset(
+                item.description, item.type, item.name,
+                item_image_paths[item.id], project_root, stream,
+                name_zhs=item.name_zhs,
+                skip_build=True,
+            )
+        else:
+            await create_custom_code(
+                item.description, item.implementation_notes,
+                item.name, project_root, stream,
+                skip_build=True,
+            )
+        return
+
+    # 多资产合并生成
+    assets_spec = [
+        {"item": it, "image_paths": item_image_paths.get(it.id, [])}
+        for it in group
+    ]
+    await create_asset_group(assets_spec, project_root, stream)
+
+
 async def _resolve_group_approval(
     *,
     group,
@@ -382,43 +569,14 @@ async def _handle_ws_batch(ws: WebSocket, *, initial_params: dict | None = None)
             params = json.loads(raw)
         else:
             params = initial_params
-        action = params.get("action")
-        review_strictness = _normalize_review_strictness(params.get("review_strictness"))
-        bundle_decisions = _normalize_bundle_decisions(params.get("bundle_decisions"))
-        review_gate_requested = "review_strictness" in params
 
         project_root = Path(params["project_root"])
         cfg_loaded = get_config()
         agent_display_model = resolve_agent_display_model(cfg_loaded.get("llm", {}))
         img_provider = _img_provider_to_adapter(cfg_loaded["image_gen"]["provider"])
 
-        if action == "start_with_plan":
-            # 直接用已有 plan 执行，跳过规划阶段（恢复上次规划用）
-            plan = plan_from_dict(params["plan"])
-            if review_gate_requested:
-                _ensure_plan_review_passes(plan, review_strictness, bundle_decisions)
-        else:
-            assert action == "start", _text("batch_start_action_expected").strip()
-            requirements: str = params["requirements"]
-
-            # ── 2. 规划 ──────────────────────────────────────────────────────
-            await send_stage("text", "planning", _text("batch_planning_stage").strip())
-            await send("planning")
-            plan = await plan_mod(requirements)
-            await send("plan_ready", plan=plan.to_dict(), review=_build_plan_review_payload(plan, review_strictness, bundle_decisions))
-
-            # ── 3. 等待用户确认计划 ───────────────────────────────────────────
-            raw = await ws.receive_text()
-            confirm = json.loads(raw)
-            assert confirm.get("action") == "confirm_plan", _text("batch_confirm_plan_expected").strip()
-            if "review_strictness" in confirm:
-                review_gate_requested = True
-                review_strictness = _normalize_review_strictness(confirm.get("review_strictness", review_strictness))
-            bundle_decisions = _normalize_bundle_decisions(confirm.get("bundle_decisions"))
-            if confirm.get("plan"):
-                plan = plan_from_dict(confirm["plan"])
-            if review_gate_requested:
-                _ensure_plan_review_passes(plan, review_strictness, bundle_decisions)
+        # ── 2-3. 取得执行计划（含 review gate / start_with_plan / 等用户确认）
+        plan = await _obtain_batch_plan(ws, params, send=send, send_stage=send_stage)
 
         sorted_items = topological_sort(plan.items)
         groups = find_groups(sorted_items)          # 按依赖关系分组
@@ -490,71 +648,15 @@ async def _handle_ws_batch(ws: WebSocket, *, initial_params: dict | None = None)
             _log.info("[%s] image task started (needs_image=%s)", item.id, item.needs_image)
             await send("item_started", item_id=item.id, name=item.name, type=item.type)
             try:
-                if item.needs_image:
-                    if item.provided_image_b64:
-                        await send("item_progress", item_id=item.id, message=_text("batch_provided_image_progress").strip())
-                        from PIL import Image as PilImage
-                        img_data = base64.b64decode(item.provided_image_b64)
-                        selected_img = PilImage.open(io.BytesIO(img_data)).convert("RGBA")
-                    else:
-                        img_desc = item.image_description or item.description
-                        async with image_gen_sem:
-                            await send_stage("text", "prompt_adapting", _text("batch_prompt_adapting_stage").strip(), item.id)
-                            await send("item_progress", item_id=item.id, message=_text("batch_prompt_adapting_progress").strip())
-                            adapted = await adapt_prompt(
-                                img_desc, item.type, img_provider,
-                                needs_transparent_bg=_needs_transparent(item.type),
-                            )
-                        current_prompt = adapted["prompt"]
-                        current_neg = adapted.get("negative_prompt")
-                        all_images: list = []
-                        while True:
-                            async with image_gen_sem:
-                                idx = len(all_images)
-                                image_number = idx + 1
-                                await send_stage("image", "image_generating", _text("batch_image_generating_stage", image_number=image_number).strip(), item.id)
-                                await send("item_progress", item_id=item.id, message=_text("batch_image_generating_progress", image_number=image_number).strip())
-                                async def _img_progress(msg: str, _id=item.id):
-                                    await send("item_progress", item_id=_id, message=msg)
-
-                                async def _notify_retry(retry_number: int, _id=item.id):
-                                    await send(
-                                        "item_progress",
-                                        item_id=_id,
-                                        message=_text("batch_image_generating_retry", retry_number=retry_number).strip(),
-                                    )
-
-                                img = await _generate_image_with_retry(
-                                    item=item,
-                                    prompt=current_prompt,
-                                    negative_prompt=current_neg,
-                                    image_progress=_img_progress,
-                                    notify_retry=_notify_retry,
-                                )
-                                all_images.append(img)
-                            buf = io.BytesIO()
-                            img.save(buf, format="PNG")
-                            b64 = base64.b64encode(buf.getvalue()).decode()
-                            await send("item_image_ready", item_id=item.id, image=b64, index=idx, prompt=current_prompt)
-                            fut: asyncio.Future = asyncio.get_running_loop().create_future()
-                            selection_futures[item.id] = fut
-                            result = await fut
-                            selection_futures.pop(item.id, None)
-                            if result["action"] == "select":
-                                selected_img = all_images[result["index"]]
-                                break
-                            if result.get("prompt"):
-                                current_prompt = result["prompt"]
-                            if result.get("negative_prompt") is not None:
-                                current_neg = result["negative_prompt"]
-
-                    await send_stage("image", "postprocess", _text("batch_image_postprocess_stage").strip(), item.id)
-                    await send("item_progress", item_id=item.id, message=_text("batch_image_postprocess_progress").strip())
-                    paths = await _run_postprocess(selected_img, item.type, item.name, project_root)
-                    item_image_paths[item.id] = paths
-                    await send("item_progress", item_id=item.id, message=_text("batch_image_postprocess_done").strip())
-                else:
-                    item_image_paths[item.id] = []
+                item_image_paths[item.id] = await _generate_item_images(
+                    item,
+                    project_root=project_root,
+                    img_provider=img_provider,
+                    image_gen_sem=image_gen_sem,
+                    selection_futures=selection_futures,
+                    send=send,
+                    send_stage=send_stage,
+                )
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -631,28 +733,12 @@ async def _handle_ws_batch(ws: WebSocket, *, initial_params: dict | None = None)
                             approval_pending = True
                             return
 
-                    if len(group) == 1:
-                        item = group[0]
-                        if item.needs_image:
-                            await create_asset(
-                                item.description, item.type, item.name,
-                                item_image_paths[item.id], project_root, _stream,
-                                name_zhs=item.name_zhs,
-                                skip_build=True,
-                            )
-                        else:
-                            await create_custom_code(
-                                item.description, item.implementation_notes,
-                                item.name, project_root, _stream,
-                                skip_build=True,
-                            )
-                    else:
-                        # 多资产合并生成
-                        assets_spec = [
-                            {"item": it, "image_paths": item_image_paths.get(it.id, [])}
-                            for it in group
-                        ]
-                        await create_asset_group(assets_spec, project_root, _stream)
+                    await _generate_group_code(
+                        group,
+                        item_image_paths=item_image_paths,
+                        project_root=project_root,
+                        stream=_stream,
+                    )
 
                     for item in group:
                         await send("item_done", item_id=item.id, success=True)
