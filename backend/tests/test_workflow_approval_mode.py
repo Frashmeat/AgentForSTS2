@@ -1,5 +1,6 @@
 """Tests for single-asset approval-first workflow helpers."""
 
+import asyncio
 import json
 import sys
 import types
@@ -172,7 +173,23 @@ class SequencedWs:
         self.messages.append(json.loads(text))
 
     async def receive_text(self) -> str:
+        if not self._incoming:
+            # 队列耗尽时永远挂起；让主流程结束时主动 cancel _read_ws_controls 后台 task
+            await asyncio.Event().wait()
         return self._incoming.pop(0)
+
+
+def _make_helper_args(ws):
+    """生成 _ws_run_custom_code / _ws_run_with_provided_image 需要的 cancellation / receive_control / run_cancellable。"""
+    cancellation = workflow._WsCancellation()
+
+    async def receive_control() -> dict:
+        return json.loads(await ws.receive_text())
+
+    async def run_cancellable(awaitable):
+        return await awaitable
+
+    return cancellation, receive_control, run_cancellable
 
 
 def _assert_approval_precedes_agent_start(messages: list[dict]) -> None:
@@ -213,6 +230,7 @@ async def test_custom_code_approval_first_defers_agent_events_until_approve_all(
     monkeypatch.setattr(workflow, "_plan_approval_requests", fake_plan_approval_requests)
     monkeypatch.setattr(workflow, "create_custom_code", fake_create_custom_code)
 
+    cancellation, receive_control, run_cancellable = _make_helper_args(ws)
     await workflow._ws_run_custom_code(
         ws,
         {
@@ -221,6 +239,9 @@ async def test_custom_code_approval_first_defers_agent_events_until_approve_all(
             "implementation_notes": "",
         },
         tmp_path,
+        cancellation,
+        receive_control,
+        run_cancellable,
     )
 
     _assert_approval_precedes_agent_start(ws.messages)
@@ -266,6 +287,7 @@ async def test_provided_image_approval_first_defers_agent_events_until_approve_a
     monkeypatch.setitem(sys.modules, "PIL", pil_module)
     monkeypatch.setitem(sys.modules, "PIL.Image", image_module)
 
+    cancellation, receive_control, run_cancellable = _make_helper_args(ws)
     await workflow._ws_run_with_provided_image(
         ws,
         {
@@ -276,6 +298,9 @@ async def test_provided_image_approval_first_defers_agent_events_until_approve_a
             "provided_image_name": "input.png",
         },
         tmp_path,
+        cancellation,
+        receive_control,
+        run_cancellable,
     )
 
     _assert_approval_precedes_agent_start(ws.messages)

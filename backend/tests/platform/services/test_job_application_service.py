@@ -619,6 +619,8 @@ def test_job_application_service_can_complete_supported_batch_custom_code_job(db
             refunded_amount=0,
         )
     )
+    workspace_service = ServerWorkspaceService(storage_root=tmp_path / "platform-workspaces")
+    workspace = workspace_service.create_workspace(user_id=1001, project_name="DarkMod")
 
     orchestrator = ExecutionOrchestratorService(
         job_repository=JobRepositorySqlAlchemy(db_session),
@@ -634,6 +636,7 @@ def test_job_application_service_can_complete_supported_batch_custom_code_job(db
             execution_routing_repository=ExecutionRoutingRepositorySqlAlchemy(db_session)
         ),
         server_credential_cipher=cipher,
+        server_workspace_service=workspace_service,
         workflow_registry=_SupportedServerRegistry(),
         workflow_runner=_SucceededRunner(),
     )
@@ -641,6 +644,7 @@ def test_job_application_service_can_complete_supported_batch_custom_code_job(db
         job_repository=JobRepositorySqlAlchemy(db_session),
         job_event_repository=JobEventRepositorySqlAlchemy(db_session),
         execution_orchestrator_service=orchestrator,
+        server_workspace_service=workspace_service,
     )
     job = service.create_job(
         user_id=1001,
@@ -1176,7 +1180,7 @@ def test_job_application_service_can_complete_supported_batch_power_job(db_sessi
     assert started.items[0].result_summary == "已生成服务器 Power 实现方案"
 
 
-def test_job_application_service_can_complete_supported_batch_character_job(db_session):
+def test_job_application_service_can_complete_supported_batch_character_job(db_session, tmp_path):
     cipher = ServerCredentialCipher("job-service-test-secret")
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",

@@ -36,13 +36,22 @@ from app.modules.platform.infra.persistence.models import (
     ServerCredentialRecord,
     UserPlatformPreferenceRecord,
 )
+from app.modules.platform.application import platform_runtime_builder
 from app.shared.infra.db.base import Base
 from routers.auth_router import router as auth_router
 from routers.platform_jobs import router as platform_router
 
 
 @pytest.fixture()
-def client(tmp_path):
+def client(tmp_path, monkeypatch):
+    # 同 test_me_router：让 ExecutionOrchestratorService 走 in-process workflow runner，
+    # 避免在测试环境下尝试调用真实 workstation HTTP。
+    monkeypatch.setattr(
+        platform_runtime_builder,
+        "_build_workstation_execution_client_from_container",
+        lambda container: None,
+    )
+
     db_path = tmp_path / "platform-jobs.sqlite3"
     container = ApplicationContainer.from_config(
         {
@@ -373,8 +382,8 @@ def test_platform_jobs_router_supports_create_start_cancel_and_queries_for_curre
 
     quota = client.get("/api/platform/quota", params={"user_id": other_user_id})
     assert quota.status_code == 200
-    assert quota.json()["daily_limit"] == 10
-    assert quota.json()["refunded"] == 1
+    assert quota.json()["total_limit"] == 10
+    assert quota.json()["refunded_amount"] == 1
 
     cancelled = client.post(
         f"/api/platform/jobs/{job_id}/cancel",

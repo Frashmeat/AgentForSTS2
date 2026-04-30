@@ -54,12 +54,12 @@ def test_user_center_service_exposes_profile_quota_and_job_views():
         auth_service=FakeAuthService(user),
         job_query_service=FakeJobQueryService(
             quota=UserQuotaView(
-                daily_limit=10,
-                daily_used=3,
-                weekly_limit=20,
-                weekly_used=5,
-                refunded=1,
-                next_reset_at="2026-04-04T00:00:00+00:00",
+                total_limit=10,
+                used_amount=3,
+                refunded_amount=1,
+                adjusted_amount=0,
+                remaining=7,
+                status="active",
             ),
             jobs=[
                 JobListItem(
@@ -90,7 +90,7 @@ def test_user_center_service_exposes_profile_quota_and_job_views():
     profile = service.get_profile(1001)
 
     assert profile.username == "luna"
-    assert service.get_quota(1001, datetime(2026, 4, 3, 9, 0, tzinfo=UTC)).daily_used == 3
+    assert service.get_quota(1001, datetime(2026, 4, 3, 9, 0, tzinfo=UTC)).used_amount == 3
     assert service.list_jobs(1001)[0].job_type == "single_generate"
     assert service.get_job_detail(1001, 101).id == 101
     assert service.list_job_items(1001, 101)[0].item_type == "card"

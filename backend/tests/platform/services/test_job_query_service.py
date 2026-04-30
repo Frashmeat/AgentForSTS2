@@ -97,6 +97,6 @@ def test_query_services_wrap_user_and_admin_views(db_session):
 
     assert job_query_service.list_jobs(1001)[0].id == job.id
     assert job_query_service.get_job_detail(1001, job.id).id == job.id
-    assert job_query_service.get_quota_view(1001, datetime.now(UTC)).daily_used == 2
+    assert job_query_service.get_quota_view(1001, datetime.now(UTC)).used_amount == 2
     assert admin_query_service.list_executions(job.id)[0].id == execution.id
     assert admin_query_service.list_refunds(1001)[0].refund_reason == "system_error"

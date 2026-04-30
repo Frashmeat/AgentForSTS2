@@ -171,7 +171,8 @@ class ServerQueuedJobScanClaimService:
         leader_epoch: int = 1,
         claimed_at: str | None = None,
     ) -> ServerQueuedJobScanClaimHolder:
-        claimed_at_value = str(claimed_at).strip() or now.isoformat()
+        # 注意 str(None) == "None" 是真值，不会触发 or 的 fallback；用显式 None 判断
+        claimed_at_value = (claimed_at or "").strip() or now.isoformat()
         renewed_at = now.isoformat()
         expires_at = datetime.fromtimestamp(now.timestamp() + self.lease_seconds, tz=UTC).isoformat()
         return ServerQueuedJobScanClaimHolder(

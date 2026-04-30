@@ -39,6 +39,7 @@ from app.modules.platform.infra.persistence.models import (
     ServerCredentialRecord,
     UserPlatformPreferenceRecord,
 )
+from app.modules.platform.application import platform_runtime_builder
 from app.shared.infra.db.base import Base
 from routers.auth_router import router as auth_router
 from routers.me_router import router as me_router
@@ -56,7 +57,15 @@ class _BusyWorkspaceLockService:
 
 
 @pytest.fixture()
-def client(tmp_path):
+def client(tmp_path, monkeypatch):
+    # me_router 测试依赖 in-process workflow runner 完成 job，而非真去调 workstation HTTP；
+    # 把 _build_workstation_execution_client_from_container 强制返回 None 让 ExecutionOrchestratorService 走 in-process 路径。
+    monkeypatch.setattr(
+        platform_runtime_builder,
+        "_build_workstation_execution_client_from_container",
+        lambda container: None,
+    )
+
     db_path = tmp_path / "me-router.sqlite3"
     container = ApplicationContainer.from_config(
         {

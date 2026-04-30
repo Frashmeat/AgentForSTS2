@@ -173,9 +173,10 @@ def test_quota_and_admin_query_repositories_return_split_views(db_session):
     refunds = admin_repository.list_refunds(user_id=1001)
     audit_events = admin_repository.list_audit_events(job_id=job.id)
 
-    assert quota.daily_limit == 10
-    assert quota.weekly_used == 8
-    assert quota.refunded == 2
+    assert quota.total_limit == 10
+    # quota view 来自 daily bucket（used=3, refunded=1），不是 weekly（used=8）
+    assert quota.used_amount == 3
+    assert quota.refunded_amount == 1
     assert executions[0].job_id == job.id
     assert execution_detail.request_idempotency_key == "idem-admin"
     assert refunds[0].refund_reason == "system_error"
