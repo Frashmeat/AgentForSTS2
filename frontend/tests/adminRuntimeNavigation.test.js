@@ -39,5 +39,7 @@ test("admin runtime and audit routes are split under admin layout", () => {
   assert.match(knowledgePacksSource, /rollbackAdminKnowledgePack/);
   assert.match(knowledgePacksSource, /从本机工作站上传/);
   assert.match(knowledgePacksSource, /文件列表/);
+  assert.match(knowledgePacksSource, /源码统计/);
+  assert.match(knowledgePacksSource, /game_cs_count/);
   assert.match(knowledgePacksSource, /pack\?\.files/);
 });

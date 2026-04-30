@@ -30,7 +30,7 @@ def get_game_source_info() -> dict[str, Any]:
     runtime_reference = _runtime_game_reference_path()
     if runtime_reference.exists():
         return {
-            "source_mode": "runtime_decompiled",
+            "source_mode": "reference_only",
             "path": str(runtime_reference),
             "exists": True,
         }

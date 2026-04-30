@@ -33,6 +33,20 @@ class Sts2LookupProvider:
                     keywords=["runtime", "knowledge", "DamageCmd", "PowerCmd", "CardSelectorPrefs"],
                 )
             )
+        elif lookup_context["game_source_mode"] == "reference_only":
+            items.append(
+                KnowledgeLookupItem(
+                    key="sts2.lookup.game_reference",
+                    title="STS2 API reference summary",
+                    path=lookup_context["game_path"],
+                    note=(
+                        "Read this Markdown reference for summarized STS2 API facts. "
+                        "It is not a full game decompile; run the workstation knowledge refresh with ilspycmd "
+                        "when exact game source lookup is required."
+                    ),
+                    keywords=["reference", "sts2_api_reference.md", "DamageCmd", "PowerCmd", "CardSelectorPrefs"],
+                )
+            )
         else:
             items.append(
                 KnowledgeLookupItem(

@@ -112,3 +112,32 @@ def test_sts2_knowledge_resolver_prefers_active_knowledge_pack(monkeypatch, tmp_
     assert any(item.body == "active card guidance" for item in packet.guidance)
     assert any(str(game_root) in item.body for item in packet.facts)
     assert any(item.path == str(game_root) for item in packet.lookup)
+
+
+def test_sts2_knowledge_resolver_labels_reference_only_game_lookup(monkeypatch, tmp_path: Path):
+    from app.modules.knowledge.infra import knowledge_runtime
+
+    game_root = tmp_path / "runtime" / "knowledge" / "game"
+    resource_root = tmp_path / "runtime" / "knowledge" / "resources" / "sts2"
+    baselib_root = tmp_path / "runtime" / "knowledge" / "baselib"
+    game_root.mkdir(parents=True)
+    resource_root.mkdir(parents=True)
+    baselib_root.mkdir(parents=True)
+    (game_root / "sts2_api_reference.md").write_text("reference only\n", encoding="utf-8")
+    (resource_root / "card.md").write_text("card guidance\n", encoding="utf-8")
+    (baselib_root / "BaseLib.decompiled.cs").write_text("// baselib\n", encoding="utf-8")
+
+    monkeypatch.setattr(knowledge_runtime, "active_game_knowledge_dir", lambda: game_root)
+    monkeypatch.setattr(knowledge_runtime, "active_resource_knowledge_dir", lambda: resource_root)
+    monkeypatch.setattr(knowledge_runtime, "active_baselib_knowledge_dir", lambda: baselib_root)
+    monkeypatch.setattr(knowledge_runtime, "GAME_KNOWLEDGE_SEED_FILE", game_root / "sts2_api_reference.md", raising=False)
+
+    packet = Sts2KnowledgeResolver().resolve(
+        KnowledgeQuery(scenario="asset_codegen", domain="sts2", asset_type="card")
+    )
+
+    assert any(item.title == "STS2 API reference summary" for item in packet.lookup)
+    assert not any(item.title == "STS2 runtime knowledge directory" for item in packet.lookup)
+    runtime_fact = next(item for item in packet.facts if item.key == "sts2.runtime.knowledge_paths")
+    assert "Only a summarized STS2 API reference is available" in runtime_fact.body
+    assert "source of truth" not in runtime_fact.body

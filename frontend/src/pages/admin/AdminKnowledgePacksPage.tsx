@@ -37,6 +37,10 @@ function formatFileCount(pack?: AdminKnowledgePackItem | null): string | number 
   return files.length > 0 ? files.length : "未记录";
 }
 
+function formatStat(value?: number): string | number {
+  return typeof value === "number" ? value : "未记录";
+}
+
 function PackCapabilityBadge({ label, value }: { label: string; value?: boolean }) {
   return (
     <span
@@ -47,6 +51,26 @@ function PackCapabilityBadge({ label, value }: { label: string; value?: boolean 
     >
       {label}：{formatEnabled(value)}
     </span>
+  );
+}
+
+function PackSourceStats({ pack }: { pack?: AdminKnowledgePackItem | null }) {
+  if (!pack) {
+    return null;
+  }
+  const gameCsCount = pack.game_cs_count;
+  const hasKnownMissingGameSource = typeof gameCsCount === "number" && gameCsCount === 0;
+
+  return (
+    <div className="space-y-1 text-xs text-slate-500">
+      <p>
+        源码统计：resources md {formatStat(pack.resource_md_count)} / game cs {formatStat(pack.game_cs_count)} / baselib cs{" "}
+        {formatStat(pack.baselib_cs_count)}
+      </p>
+      {hasKnownMissingGameSource ? (
+        <p className="text-amber-700">缺少游戏反编译源码，请在工作站更新知识库后重新上传。</p>
+      ) : null}
+    </div>
   );
 }
 
@@ -100,6 +124,7 @@ function ActivePackSummary({ view }: { view: AdminKnowledgePackListView | null }
             <PackCapabilityBadge label="baselib" value={activePack.has_baselib} />
           </div>
           <p className="text-xs text-slate-500">文件数：{formatFileCount(activePack)}</p>
+          <PackSourceStats pack={activePack} />
           <PackFileList pack={activePack} />
         </div>
       ) : (
@@ -325,6 +350,7 @@ export function AdminKnowledgePacksPage() {
                       <td className="px-3 py-2 text-slate-600">
                         <div className="space-y-2">
                           <p>{formatFileCount(pack)}</p>
+                          <PackSourceStats pack={pack} />
                           <PackFileList pack={pack} compact />
                         </div>
                       </td>

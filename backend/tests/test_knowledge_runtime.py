@@ -360,6 +360,9 @@ def test_knowledge_pack_upload_activate_and_rollback(monkeypatch, tmp_path: Path
     activated = knowledge_runtime.activate_knowledge_pack(pack["pack_id"])
 
     assert pack["file_count"] == 3
+    assert pack["resource_md_count"] == 1
+    assert pack["game_cs_count"] == 1
+    assert pack["baselib_cs_count"] == 1
     assert pack["files"] == [
         "baselib/BaseLib.decompiled.cs",
         "game/Game.cs",
@@ -413,6 +416,9 @@ def test_export_current_knowledge_pack_zip_uses_effective_runtime_dirs(monkeypat
     package = knowledge_runtime.export_current_knowledge_pack_zip()
 
     assert package["file_count"] == 3
+    assert package["resource_md_count"] == 1
+    assert package["game_cs_count"] == 1
+    assert package["baselib_cs_count"] == 1
     assert package["files"] == [
         "baselib/BaseLib.decompiled.cs",
         "game/Game.cs",

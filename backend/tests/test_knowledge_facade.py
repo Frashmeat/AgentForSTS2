@@ -25,7 +25,7 @@ def test_game_source_prefers_runtime_decompiled(monkeypatch, tmp_path: Path):
     }
 
 
-def test_game_source_initializes_runtime_reference_file(monkeypatch, tmp_path: Path):
+def test_game_source_reports_reference_only_when_only_runtime_reference_exists(monkeypatch, tmp_path: Path):
     runtime_dir = tmp_path / "runtime" / "knowledge" / "game"
     runtime_dir.mkdir(parents=True)
     repo_ref = tmp_path / "seed" / "sts2_api_reference.md"
@@ -43,7 +43,7 @@ def test_game_source_initializes_runtime_reference_file(monkeypatch, tmp_path: P
     result = knowledge_facade.get_game_source_info()
 
     assert result == {
-        "source_mode": "runtime_decompiled",
+        "source_mode": "reference_only",
         "path": str(runtime_dir / repo_ref.name),
         "exists": True,
     }

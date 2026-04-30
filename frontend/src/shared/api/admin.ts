@@ -212,6 +212,9 @@ export interface AdminKnowledgePackItem {
   file_name?: string;
   file_count?: number;
   files?: string[];
+  resource_md_count?: number;
+  game_cs_count?: number;
+  baselib_cs_count?: number;
   has_resources?: boolean;
   has_game?: boolean;
   has_baselib?: boolean;

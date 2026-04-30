@@ -27,11 +27,26 @@ class Sts2CodeFactsProvider:
 
     def _runtime_knowledge_fact(self) -> KnowledgeFactItem:
         lookup = build_lookup_context()
-        body = (
-            f"Use runtime knowledge as the source of truth. "
-            f"Game path: `{lookup['game_path'] or knowledge_runtime.active_game_knowledge_dir()}`. "
-            f"BaseLib path: `{lookup['baselib_src_path'] or (knowledge_runtime.active_baselib_knowledge_dir() / 'BaseLib.decompiled.cs')}`."
-        )
+        game_path = lookup["game_path"] or str(knowledge_runtime.active_game_knowledge_dir())
+        baselib_path = lookup["baselib_src_path"] or str(knowledge_runtime.active_baselib_knowledge_dir() / "BaseLib.decompiled.cs")
+        if lookup["game_source_mode"] == "runtime_decompiled":
+            body = (
+                "Use runtime knowledge as the source of truth. "
+                f"Game path: `{game_path}`. "
+                f"BaseLib path: `{baselib_path}`."
+            )
+        elif lookup["game_source_mode"] == "reference_only":
+            body = (
+                "Only a summarized STS2 API reference is available for game APIs; it is not a full game decompile. "
+                f"Game reference path: `{game_path}`. "
+                f"BaseLib path: `{baselib_path}`."
+            )
+        else:
+            body = (
+                "Runtime-decompiled STS2 game sources are missing. "
+                f"Fallback game lookup: `{lookup['ilspy_example_dll_path']}`. "
+                f"BaseLib path: `{baselib_path}`."
+            )
         return KnowledgeFactItem(
             key="sts2.runtime.knowledge_paths",
             title="Runtime knowledge source",

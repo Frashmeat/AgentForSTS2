@@ -250,6 +250,14 @@ def _validate_zip_member(member_name: str) -> Path:
     return normalized
 
 
+def _knowledge_pack_file_stats(files: list[str]) -> dict[str, int]:
+    return {
+        "resource_md_count": sum(1 for path in files if path.startswith("resources/sts2/") and path.lower().endswith(".md")),
+        "game_cs_count": sum(1 for path in files if path.startswith("game/") and path.lower().endswith(".cs")),
+        "baselib_cs_count": sum(1 for path in files if path.startswith("baselib/") and path.lower().endswith(".cs")),
+    }
+
+
 def upload_knowledge_pack_zip(content: bytes, *, file_name: str = "", label: str = "") -> dict[str, Any]:
     ensure_knowledge_dirs()
     pack_id = uuid.uuid4().hex
@@ -276,6 +284,7 @@ def upload_knowledge_pack_zip(content: bytes, *, file_name: str = "", label: str
         raise
 
     file_list = sorted(dict.fromkeys(extracted_files))
+    file_stats = _knowledge_pack_file_stats(file_list)
     meta = {
         "pack_id": pack_id,
         "label": label.strip() or Path(file_name).stem or pack_id,
@@ -285,6 +294,7 @@ def upload_knowledge_pack_zip(content: bytes, *, file_name: str = "", label: str
         "content_path": str(content_dir),
         "file_count": len(file_list),
         "files": file_list,
+        **file_stats,
         "has_resources": (content_dir / "resources" / "sts2").exists(),
         "has_game": (content_dir / "game").exists(),
         "has_baselib": (content_dir / "baselib" / "BaseLib.decompiled.cs").exists(),
@@ -342,11 +352,13 @@ def export_current_knowledge_pack_zip() -> dict[str, Any]:
     file_list = sorted(dict.fromkeys(files))
     if not file_list:
         raise ValueError("current knowledge pack has no files to export")
+    file_stats = _knowledge_pack_file_stats(file_list)
     return {
         "content": buffer.getvalue(),
         "file_name": "workstation-current-knowledge-pack.zip",
         "file_count": len(file_list),
         "files": file_list,
+        **file_stats,
     }
 
 
