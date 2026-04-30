@@ -2,19 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { X, FolderOpen, Cpu, Cloud, Gamepad2, Image, Search } from "lucide-react";
 import { Link } from "react-router-dom";
 import {
-  checkKnowledgeStatus,
-  cancelDetectAppPathsTask,
   getMyServerPreferences,
-  getDetectAppPathsTask,
-  getLatestDetectAppPathsTask,
-  getLatestRefreshKnowledgeTask,
-  getRefreshKnowledgeTask,
   listPlatformExecutionProfiles,
   loadAppConfig,
-  loadKnowledgeStatus,
   pickAppPath,
-  startDetectAppPaths,
-  startRefreshKnowledgeTask,
   testImageGenerationConfig,
   type KnowledgeStatus,
   type MyServerPreferenceView,
@@ -36,6 +27,8 @@ import {
   readonlyInputCls,
   selectCls,
 } from "./settings-panel-helpers.ts";
+import { useDetectAppPathsTask } from "./useDetectAppPathsTask.ts";
+import { useRefreshKnowledgeTask } from "./useRefreshKnowledgeTask.ts";
 
 interface SettingsPanelProps {
   mode?: "drawer" | "page";
@@ -59,9 +52,6 @@ function buildConfigSaveSignature(cfg: any, llmKey: string, imgKey: string, imgS
   return JSON.stringify(buildConfigSaveBody(cfg, llmKey, imgKey, imgSecret));
 }
 
-let retainedDetectionTaskId = "";
-let retainedKnowledgeTaskId = "";
-
 export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChange }: SettingsPanelProps) {
   const { isAuthAvailable, isAuthenticated } = useSession();
   const [activeTab, setActiveTab] = useState<"workspace" | "server">("workspace");
@@ -72,16 +62,6 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
   const [saveError, setSaveError] = useState("");
   const [saveNotice, setSaveNotice] = useState("");
   const [hasSavedConfigOnce, setHasSavedConfigOnce] = useState(false);
-  const [detecting, setDetecting] = useState(Boolean(retainedDetectionTaskId));
-  const [detectionTaskId, setDetectionTaskIdState] = useState(retainedDetectionTaskId);
-  const [detectionStep, setDetectionStep] = useState("");
-  const [pathNotes, setPathNotes] = useState<string[]>([]);
-  const [knowledgeStatus, setKnowledgeStatus] = useState<KnowledgeStatus | null>(null);
-  const [knowledgeTaskId, setKnowledgeTaskIdState] = useState(retainedKnowledgeTaskId);
-  const [knowledgeChecking, setKnowledgeChecking] = useState(false);
-  const [knowledgeStep, setKnowledgeStep] = useState("");
-  const [knowledgeNotes, setKnowledgeNotes] = useState<string[]>([]);
-  const [knowledgeError, setKnowledgeError] = useState("");
   const [knowledgeGuideOpen, setKnowledgeGuideOpen] = useState(false);
   const [llmKey, setLlmKey] = useState("");
   const [imgKey, setImgKey] = useState("");
@@ -100,20 +80,6 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
   const configSaveSignature = cfg ? buildConfigSaveSignature(cfg, llmKey, imgKey, imgSecret) : "";
   const configDirty = Boolean(cfg) && configSaveSignature !== lastSavedConfigSignatureRef.current;
 
-  function setDetectionTaskId(taskId: string) {
-    retainedDetectionTaskId = taskId;
-    if (mountedRef.current) {
-      setDetectionTaskIdState(taskId);
-    }
-  }
-
-  function setKnowledgeTaskId(taskId: string) {
-    retainedKnowledgeTaskId = taskId;
-    if (mountedRef.current) {
-      setKnowledgeTaskIdState(taskId);
-    }
-  }
-
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -122,10 +88,6 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
   }, []);
 
   useEffect(() => {
-    function isActiveTask(status: string) {
-      return status === "pending" || status === "running";
-    }
-
     loadAppConfig().then((loaded) => {
       if (!mountedRef.current) {
         return;
@@ -133,50 +95,40 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
       setCfg(loaded);
       lastSavedConfigSignatureRef.current = buildConfigSaveSignature(loaded, "", "", "");
     });
-    loadKnowledgeStatus()
-      .then((status) => {
-        if (!mountedRef.current) {
-          return;
-        }
-        setKnowledgeStatus(status);
-        onKnowledgeStatusChange?.(status);
-      })
-      .catch((error) => {
-        if (!mountedRef.current) {
-          return;
-        }
-        setKnowledgeError(resolveErrorMessage(error));
-      });
-    getLatestDetectAppPathsTask()
-      .then((task) => {
-        if (!mountedRef.current || !task || retainedDetectionTaskId || !isActiveTask(task.status)) {
-          return;
-        }
-        setDetecting(true);
-        setDetectionStep(task.current_step || "");
-        setPathNotes(task.notes ?? []);
-        setDetectionTaskId(task.task_id);
-      })
-      .catch(() => {
-        // 恢复入口失败不阻塞设置面板初始化。
-      });
-    getLatestRefreshKnowledgeTask()
-      .then((task) => {
-        if (!mountedRef.current || !task || retainedKnowledgeTaskId || !isActiveTask(task.status)) {
-          return;
-        }
-        setKnowledgeError("");
-        setKnowledgeStep(task.current_step || "");
-        setKnowledgeNotes(task.notes ?? []);
-        setKnowledgeTaskId(task.task_id);
-      })
-      .catch(() => {
-        // 恢复入口失败不阻塞设置面板初始化。
-      });
-    // mount-only：仅初始化时尝试恢复最近一次任务，onKnowledgeStatusChange 故意不进 deps，
-    // 否则父级 callback 引用变化会触发重复恢复。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const detection = useDetectAppPathsTask({
+    mountedRef,
+    onSnapshot: (snapshot) => {
+      if (snapshot.sts2_path) {
+        set(["sts2_path"], snapshot.sts2_path);
+      }
+      if (snapshot.godot_exe_path) {
+        set(["godot_exe_path"], snapshot.godot_exe_path);
+      }
+    },
+  });
+  const {
+    detecting,
+    step: detectionStep,
+    notes: pathNotes,
+    setNotes: setPathNotes,
+    start: detectPaths,
+    cancel: cancelDetectPaths,
+  } = detection;
+
+  const knowledge = useRefreshKnowledgeTask({ mountedRef, onKnowledgeStatusChange });
+  const {
+    knowledgeStatus,
+    knowledgeChecking,
+    knowledgeBusy,
+    knowledgeTaskId,
+    knowledgeStep,
+    knowledgeNotes,
+    knowledgeError,
+    handleCheck: handleCheckKnowledge,
+    handleRefresh: handleRefreshKnowledge,
+  } = knowledge;
 
   useEffect(() => {
     if (activeTab !== "server") {
@@ -287,152 +239,6 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, isAuthAvailable, isAuthenticated, selectedServerProfileId, serverSaving, serverSelectionDirty]);
 
-  useEffect(() => {
-    if (!detectionTaskId) {
-      return;
-    }
-
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-
-    async function pollTask() {
-      try {
-        const snapshot = await getDetectAppPathsTask(detectionTaskId);
-        if (cancelled || !mountedRef.current) {
-          return;
-        }
-
-        setDetectionStep(snapshot.current_step || "");
-        setPathNotes(snapshot.notes ?? []);
-        if (snapshot.sts2_path) {
-          set(["sts2_path"], snapshot.sts2_path);
-        }
-        if (snapshot.godot_exe_path) {
-          set(["godot_exe_path"], snapshot.godot_exe_path);
-        }
-
-        if (snapshot.status === "running" || snapshot.status === "pending") {
-          timer = setTimeout(pollTask, 500);
-          return;
-        }
-
-        if (snapshot.status === "failed") {
-          const message = snapshot.error?.trim() || "检测失败，请使用右侧选择按钮手动指定路径";
-          setPathNotes((prev) => [...(snapshot.notes ?? prev), `检测失败：${message}`]);
-        }
-
-        setDetecting(false);
-        setDetectionTaskId("");
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-        setDetecting(false);
-        setDetectionTaskId("");
-        setDetectionStep("");
-        setPathNotes([`检测失败：${resolveErrorMessage(error)}`]);
-      }
-    }
-
-    void pollTask();
-
-    return () => {
-      cancelled = true;
-      if (timer) {
-        clearTimeout(timer);
-      }
-    };
-  }, [detectionTaskId]);
-
-  useEffect(() => {
-    if (!knowledgeTaskId) {
-      return;
-    }
-
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-
-    async function pollRefreshTask() {
-      try {
-        const snapshot = await getRefreshKnowledgeTask(knowledgeTaskId);
-        if (cancelled) {
-          return;
-        }
-
-        setKnowledgeStep(snapshot.current_step || "");
-        setKnowledgeNotes(snapshot.notes ?? []);
-
-        if (snapshot.status === "running" || snapshot.status === "pending") {
-          timer = setTimeout(pollRefreshTask, 800);
-          return;
-        }
-
-        if (snapshot.status === "failed") {
-          setKnowledgeError(snapshot.error?.trim() || "知识库更新失败");
-        }
-
-        const status = await loadKnowledgeStatus();
-        if (!cancelled && mountedRef.current) {
-          setKnowledgeStatus(status);
-          onKnowledgeStatusChange?.(status);
-        }
-        setKnowledgeTaskId("");
-      } catch (error) {
-        if (cancelled || !mountedRef.current) {
-          return;
-        }
-        setKnowledgeError(resolveErrorMessage(error));
-        setKnowledgeTaskId("");
-      }
-    }
-
-    void pollRefreshTask();
-
-    return () => {
-      cancelled = true;
-      if (timer) {
-        clearTimeout(timer);
-      }
-    };
-    // 仅由 knowledgeTaskId 驱动轮询；onKnowledgeStatusChange 是父级 callback，故意省略避免重复触发。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [knowledgeTaskId]);
-
-  useEffect(() => {
-    if (detecting || detectionTaskId || pathNotes.length === 0) {
-      return;
-    }
-
-    const hasFailure = pathNotes.some((note) => note.includes("失败"));
-    if (hasFailure) {
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      setDetectionStep("");
-      setPathNotes([]);
-    }, 3200);
-
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [detecting, detectionTaskId, pathNotes]);
-
-  useEffect(() => {
-    if (knowledgeChecking || knowledgeTaskId || knowledgeError || knowledgeNotes.length === 0) {
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      setKnowledgeStep("");
-      setKnowledgeNotes([]);
-    }, 3200);
-
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [knowledgeChecking, knowledgeTaskId, knowledgeError, knowledgeNotes]);
-
   function set(path: string[], value: string | number) {
     setSaveError("");
     setSaveNotice("");
@@ -467,46 +273,6 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
       }
       return next;
     });
-  }
-
-  async function detectPaths() {
-    setDetecting(true);
-    setDetectionStep("准备启动检测任务");
-    setPathNotes([]);
-    try {
-      const task = await startDetectAppPaths();
-      if (!mountedRef.current) {
-        retainedDetectionTaskId = task.task_id;
-        return;
-      }
-      setDetectionTaskId(task.task_id);
-      setDetectionStep(task.current_step || "检测中");
-      setPathNotes(task.notes ?? []);
-    } catch (error) {
-      if (!mountedRef.current) {
-        return;
-      }
-      setDetectionStep("");
-      setPathNotes([`检测失败：${resolveErrorMessage(error)}`]);
-      setDetecting(false);
-    }
-  }
-
-  async function cancelDetectPaths() {
-    if (!detectionTaskId) return;
-    try {
-      const snapshot = await cancelDetectAppPathsTask(detectionTaskId);
-      if (!mountedRef.current) {
-        return;
-      }
-      setDetectionStep(snapshot.current_step || "检测已取消");
-      setPathNotes(snapshot.notes ?? ["检测已取消"]);
-    } catch (error) {
-      if (!mountedRef.current) {
-        return;
-      }
-      setPathNotes([`取消检测失败：${resolveErrorMessage(error)}`]);
-    }
   }
 
   async function choosePath(field: SettingsPathField) {
@@ -607,7 +373,6 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
         ? "检测到修改，稍后会自动保存默认服务器配置"
         : serverNotice;
   const missingPaths = cfg && (!cfg.default_project_root || !cfg.sts2_path);
-  const knowledgeBusy = knowledgeChecking || Boolean(knowledgeTaskId);
   const knowledgeCheckProgress = knowledgeChecking ? 100 : 0;
   const knowledgeUpdateProgress = getKnowledgeUpdateProgress(knowledgeStep, Boolean(knowledgeTaskId));
   const pathFailureNote = pathNotes.find((note) => note.includes("失败")) ?? "";
@@ -679,62 +444,6 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
       : null,
   ];
   const floatingNotices = floatingNoticeCandidates.filter((notice): notice is StatusNoticeItem => notice !== null);
-
-  async function handleCheckKnowledge() {
-    if (knowledgeBusy) {
-      return;
-    }
-
-    setKnowledgeChecking(true);
-    setKnowledgeError("");
-    setKnowledgeStep("检查知识库状态");
-    setKnowledgeNotes([]);
-    try {
-      const status = await checkKnowledgeStatus();
-      if (!mountedRef.current) {
-        return;
-      }
-      setKnowledgeStatus(status);
-      onKnowledgeStatusChange?.(status);
-      setKnowledgeNotes(status.warnings ?? []);
-      setKnowledgeStep("");
-    } catch (error) {
-      if (!mountedRef.current) {
-        return;
-      }
-      setKnowledgeError(resolveErrorMessage(error));
-      setKnowledgeStep("检查失败");
-    } finally {
-      if (mountedRef.current) {
-        setKnowledgeChecking(false);
-      }
-    }
-  }
-
-  async function handleRefreshKnowledge() {
-    if (knowledgeBusy) {
-      return;
-    }
-
-    setKnowledgeError("");
-    setKnowledgeNotes([]);
-    setKnowledgeStep("准备启动知识库更新任务");
-    try {
-      const task = await startRefreshKnowledgeTask();
-      if (!mountedRef.current) {
-        retainedKnowledgeTaskId = task.task_id;
-        return;
-      }
-      setKnowledgeTaskId(task.task_id);
-      setKnowledgeStep(task.current_step || "更新中");
-      setKnowledgeNotes(task.notes ?? []);
-    } catch (error) {
-      if (!mountedRef.current) {
-        return;
-      }
-      setKnowledgeError(resolveErrorMessage(error));
-    }
-  }
 
   async function handleSaveServerPreference(profileId: number | null) {
     if (!isAuthAvailable || !isAuthenticated) {
