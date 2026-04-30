@@ -1,0 +1,72 @@
+# AgentTheSpire Web 端部署（web 后端 + Postgres + 前端 SPA）
+# 启动: docker compose --env-file .env.web -f docker-compose.web.yml up -d --build
+# 停止: docker compose --env-file .env.web -f docker-compose.web.yml down
+# 推荐用 tools/docker/web.ps1 脚手架，免敲长命令。
+
+name: ${ATS_PROJECT_NAME:-agentthespire-web}
+
+services:
+  postgres:
+    image: ${ATS_POSTGRES_IMAGE:-postgres:16-alpine}
+    container_name: ${ATS_POSTGRES_CONTAINER:-ats-postgres}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${ATS_POSTGRES_DB:-agentthespire}
+      POSTGRES_USER: ${ATS_POSTGRES_USER:-agentthespire}
+      POSTGRES_PASSWORD: ${ATS_POSTGRES_PASSWORD:-agentthespire}
+    ports:
+      - "${ATS_POSTGRES_HOST_PORT:-55432}:5432"
+    volumes:
+      - ats_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  web:
+    image: ${ATS_WEB_IMAGE:-agentthespire/web:local}
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+      args:
+        PYTHON_BASE_IMAGE: ${ATS_PYTHON_BASE_IMAGE:-python:3.11-slim}
+    container_name: ${ATS_WEB_CONTAINER:-ats-web}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPIREFORGE_CONFIG_PATH: /app/config.json
+      SPIREFORGE_AUTH_SESSION_SECRET: ${SPIREFORGE_AUTH_SESSION_SECRET:?session secret required}
+      SPIREFORGE_SERVER_CREDENTIAL_SECRET: ${SPIREFORGE_SERVER_CREDENTIAL_SECRET:-}
+      ATS_WORKSTATION_CONTROL_TOKEN: ${ATS_WORKSTATION_CONTROL_TOKEN:-}
+    ports:
+      - "${ATS_WEB_PORT:-7870}:7870"
+    volumes:
+      - ./runtime/web.config.json:/app/config.json:ro
+      - ats_web_runtime:/app/backend/runtime
+
+  frontend:
+    image: ${ATS_FRONTEND_IMAGE:-agentthespire/frontend:local}
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+      args:
+        NODE_BASE_IMAGE: ${ATS_NODE_BASE_IMAGE:-node:20-alpine}
+        NGINX_BASE_IMAGE: ${ATS_NGINX_BASE_IMAGE:-nginx:1.27-alpine}
+    container_name: ${ATS_FRONTEND_CONTAINER:-ats-frontend}
+    restart: unless-stopped
+    depends_on:
+      - web
+    environment:
+      WEB_BASE_URL: ${ATS_FRONTEND_WEB_BASE_URL:-http://127.0.0.1:${ATS_WEB_PORT:-7870}}
+      WEB_WS_BASE_URL: ${ATS_FRONTEND_WEB_WS_BASE_URL:-}
+      WORKSTATION_BASE_URL: ${ATS_FRONTEND_WORKSTATION_BASE_URL:-}
+      WORKSTATION_WS_BASE_URL: ${ATS_FRONTEND_WORKSTATION_WS_BASE_URL:-}
+    ports:
+      - "${ATS_FRONTEND_PORT:-8080}:80"
+
+volumes:
+  ats_postgres_data:
+  ats_web_runtime:

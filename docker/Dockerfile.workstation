@@ -1,0 +1,78 @@
+# syntax=docker/dockerfile:1.6
+# AgentTheSpire 工作站后端镜像（桌面端）
+# 构建上下文：仓库根目录
+
+ARG PYTHON_BASE_IMAGE=python:3.11-slim
+ARG NODE_BASE_IMAGE=node:20-alpine
+
+# ---------- Stage 1: build frontend ----------
+FROM ${NODE_BASE_IMAGE} AS frontend-build
+
+WORKDIR /build/frontend
+
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+
+COPY frontend/ ./
+RUN npm run build
+
+# ---------- Stage 2: backend runtime ----------
+FROM ${PYTHON_BASE_IMAGE} AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /app
+
+# 系统依赖：Pillow / rembg 需要的本地库；Node 用于 claude/codex CLI
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        nodejs \
+        npm \
+        libgl1 \
+        libglib2.0-0 \
+        ca-certificates \
+        curl \
+    && npm install -g --omit=dev @openai/codex @anthropic-ai/claude-code \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# rembg[gpu] 需要 onnxruntime-gpu + CUDA，桌面镜像默认走 CPU
+COPY backend/requirements.txt /tmp/requirements.txt
+RUN python - <<'PY'
+from pathlib import Path
+
+src = Path("/tmp/requirements.txt")
+dst = Path("/tmp/requirements.docker.txt")
+needs_onnx = False
+out = []
+for line in src.read_text(encoding="utf-8").splitlines():
+    if line.startswith("rembg[gpu]"):
+        out.append(line.replace("rembg[gpu]", "rembg", 1))
+        needs_onnx = True
+    else:
+        out.append(line)
+if needs_onnx and not any(l.startswith("onnxruntime") for l in out):
+    out.append("onnxruntime>=1.18,<2.0")
+dst.write_text("\n".join(out) + "\n", encoding="utf-8")
+PY
+
+RUN pip install --upgrade pip \
+    && pip install -r /tmp/requirements.docker.txt
+
+# 拷贝后端、模板、示例配置
+COPY backend /app/backend
+COPY mod_template /app/mod_template
+COPY config.example.json /app/config.example.json
+
+# 拷贝前端 dist（后端 StaticFiles 会从 ../frontend/dist 挂载）
+COPY --from=frontend-build /build/frontend/dist /app/frontend/dist
+
+WORKDIR /app/backend
+
+EXPOSE 7860
+
+# 监听 0.0.0.0 才能从容器外访问
+CMD ["uvicorn", "main_workstation:app", "--host", "0.0.0.0", "--port", "7860"]

@@ -1,0 +1,43 @@
+# AgentTheSpire 桌面端工作站（workstation）单服务部署
+# 启动: docker compose --env-file .env.workstation -f docker-compose.workstation.yml up -d --build
+# 停止: docker compose --env-file .env.workstation -f docker-compose.workstation.yml down
+# 推荐用 tools/docker/workstation.ps1 脚手架，免敲长命令。
+
+name: ${ATS_PROJECT_NAME:-agentthespire-workstation}
+
+services:
+  workstation:
+    image: ${ATS_WORKSTATION_IMAGE:-agentthespire/workstation:local}
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.workstation
+      args:
+        PYTHON_BASE_IMAGE: ${ATS_PYTHON_BASE_IMAGE:-python:3.11-slim}
+        NODE_BASE_IMAGE: ${ATS_NODE_BASE_IMAGE:-node:20-alpine}
+    container_name: ${ATS_WORKSTATION_CONTAINER:-ats-workstation}
+    restart: unless-stopped
+    environment:
+      SPIREFORGE_CONFIG_PATH: /app/config.json
+      SPIREFORGE_AUTH_SESSION_SECRET: ${SPIREFORGE_AUTH_SESSION_SECRET:-}
+      SPIREFORGE_SERVER_CREDENTIAL_SECRET: ${SPIREFORGE_SERVER_CREDENTIAL_SECRET:-}
+      ATS_WORKSTATION_CONTROL_TOKEN: ${ATS_WORKSTATION_CONTROL_TOKEN:-}
+      SPIREFORGE_LLM_KEY: ${SPIREFORGE_LLM_KEY:-}
+      SPIREFORGE_IMG_KEY: ${SPIREFORGE_IMG_KEY:-}
+      SPIREFORGE_IMG_SECRET: ${SPIREFORGE_IMG_SECRET:-}
+    ports:
+      - "${ATS_WORKSTATION_PORT:-7860}:7860"
+    volumes:
+      # 配置文件：从 runtime/workstation.config.json 注入到 /app/config.json
+      - ./runtime/workstation.config.json:/app/config.json:ro
+      # 持久化生成物（mod 工程、知识库、artifacts 等）
+      - ats_workstation_runtime:/app/backend/runtime
+    healthcheck:
+      # 任意 HTTP 响应（含 404）都视为存活；只要 TCP 能连上即可
+      test: ["CMD-SHELL", "curl -sS -o /dev/null --max-time 5 http://127.0.0.1:7860/ || exit 1"]
+      interval: 30s
+      timeout: 8s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  ats_workstation_runtime:

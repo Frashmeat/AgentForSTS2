@@ -1,0 +1,54 @@
+# syntax=docker/dockerfile:1.6
+# AgentTheSpire Web 后端镜像
+# 构建上下文：仓库根目录
+
+ARG PYTHON_BASE_IMAGE=python:3.11-slim
+FROM ${PYTHON_BASE_IMAGE} AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libgl1 \
+        libglib2.0-0 \
+        ca-certificates \
+        curl \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY backend/requirements.txt /tmp/requirements.txt
+RUN python - <<'PY'
+from pathlib import Path
+
+src = Path("/tmp/requirements.txt")
+dst = Path("/tmp/requirements.docker.txt")
+needs_onnx = False
+out = []
+for line in src.read_text(encoding="utf-8").splitlines():
+    if line.startswith("rembg[gpu]"):
+        out.append(line.replace("rembg[gpu]", "rembg", 1))
+        needs_onnx = True
+    else:
+        out.append(line)
+if needs_onnx and not any(l.startswith("onnxruntime") for l in out):
+    out.append("onnxruntime>=1.18,<2.0")
+dst.write_text("\n".join(out) + "\n", encoding="utf-8")
+PY
+
+RUN pip install --upgrade pip \
+    && pip install -r /tmp/requirements.docker.txt
+
+COPY backend /app/backend
+COPY config.example.json /app/config.example.json
+
+WORKDIR /app/backend
+
+EXPOSE 7870
+
+# 启动前先跑数据库迁移
+CMD ["sh", "-c", "alembic upgrade head && uvicorn main_web:app --host 0.0.0.0 --port 7870"]

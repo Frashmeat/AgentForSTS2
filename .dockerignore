@@ -1,0 +1,53 @@
+# 仅保留构建镜像所需的源码 + 配置示例
+
+# Python 运行/缓存
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.pytest_cache
+**/*.egg-info
+.venv
+backend/.venv
+backend/.pytest_cache
+backend/tests/_tmp
+
+# Node 产物
+**/node_modules
+frontend/dist
+frontend/.env
+
+# Git / 编辑器 / OS
+.git
+.gitignore
+.gitattributes
+.idea
+.vscode
+.DS_Store
+Thumbs.db
+
+# 工具与本地配置
+.tmp
+.claude
+.agents
+.trellis
+.spec-workflow
+.superpowers
+.worktrees
+runtime
+sts2_decompiled
+godot
+FangedGrimoire
+local.props
+install.log
+install-*.log
+
+# 文档与发行物（不参与镜像构建）
+docs
+openspec
+tools/latest/artifacts
+tools/archive
+**/*.import
+
+# 构建产物
+*.log
+pytest-cache-files-*

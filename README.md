@@ -56,6 +56,54 @@ powershell -ExecutionPolicy Bypass -File .\tools\tools.ps1 start workstation   #
 
 See [TUTORIAL.md](TUTORIAL.md) for full setup and configuration guide.
 
+### Docker 部署（两套独立工作站）
+
+仓库根目录附带两套互不依赖的 Docker 部署链路：桌面端工作站（`workstation`，单容器）与 Web 端（`web` + `frontend` + `postgres`）。两套各自有独立的 compose 文件、env 文件和 PowerShell 脚手架。
+
+**桌面端（一键起单容器，端口 7860）：**
+
+```powershell
+# 1) 准备配置：脚本会在缺失时自动从模板复制并退出，编辑后再次运行
+pwsh -File .\tools\docker\workstation.ps1 up
+
+# 2) 复制完成后填好 runtime/workstation.config.json 与 .env.workstation，再次运行：
+pwsh -File .\tools\docker\workstation.ps1 up
+
+# 其它常用动作
+pwsh -File .\tools\docker\workstation.ps1 logs -Follow
+pwsh -File .\tools\docker\workstation.ps1 down
+pwsh -File .\tools\docker\workstation.ps1 rebuild
+```
+
+**Web 端（web 后端 + Postgres + 前端 SPA，默认端口 7870 / 8080 / 55432）：**
+
+```powershell
+pwsh -File .\tools\docker\web.ps1 up
+
+# 必须在 .env.web 里填好 SPIREFORGE_AUTH_SESSION_SECRET；
+# 在 runtime/web.config.json 里至少配置 database.url（指向 docker compose 里的 postgres 服务，例如
+#   "url": "postgresql+psycopg://agentthespire:agentthespire@postgres:5432/agentthespire"
+# ）与 auth.session_secret。
+
+pwsh -File .\tools\docker\web.ps1 logs -Service postgres -Follow
+pwsh -File .\tools\docker\web.ps1 migrate          # 手动跑一次 alembic upgrade head
+pwsh -File .\tools\docker\web.ps1 reset-db         # 销毁并重建 Postgres 卷
+```
+
+**镜像与变量：**
+
+- compose 文件：`docker-compose.workstation.yml` / `docker-compose.web.yml`
+- Dockerfile：`docker/Dockerfile.workstation` / `docker/Dockerfile.web` / `docker/Dockerfile.frontend`
+- 环境变量模板：`.env.workstation.example` / `.env.web.example`
+- 运行时配置：`runtime/workstation.config.json` / `runtime/web.config.json`（自 `config.example.json` 复制）
+
+注意事项：
+
+- Dockerfile 会把 `rembg[gpu]` 自动改写为 CPU 版 + `onnxruntime`，不依赖宿主 GPU。
+- Workstation 镜像内置 `@anthropic-ai/claude-code` 与 `@openai/codex` CLI，`agent_cli` 模式开箱可用；首次拉取较慢。
+- Web 镜像启动时自动 `alembic upgrade head`，无需手工迁移。
+- 桌面端容器不挂源码，修改后端代码需 `rebuild`。
+
 ### Backend Runtime Modes
 
 - `powershell -File .\tools\tools.ps1 start workstation`
