@@ -32,18 +32,13 @@ import {
   resolveErrorMessage,
   resolveWorkflowErrorMessage,
 } from "../../shared/error.ts";
-import type {
-  ExecutionBundlePreview,
-  ExecutionBundleRecommendedAction,
-  ExecutionBundleRiskDetail,
-  PlanItemValidation,
-  PlanReviewPayload,
-} from "../../shared/types/workflow.ts";
+import type { PlanReviewPayload } from "../../shared/types/workflow.ts";
 import type { WorkflowLogEntry } from "../../shared/workflowLog.ts";
 import { useResolvedWorkspaceFeatureProps } from "../workspace/WorkspaceContext.tsx";
 import type { WorkspaceFeatureAdapterProps, WorkspaceFeatureProps } from "../workspace/types.ts";
 import { canProceedBatchApproval, markBatchApprovalResuming, resumeBatchApprovalWorkflow } from "./approval";
 import { openBatchPlanningSocket } from "./planningSession";
+import { ReviewFeedbackBanner, ReviewNotice, ReviewStatusBadge, ReviewStrictnessSelector } from "./ReviewBadges.tsx";
 import {
   batchWorkflowReducer,
   createInitialBatchRuntimeState,
@@ -57,26 +52,31 @@ import {
   type BundleDecisionStatus,
   type ReviewStrictness,
 } from "./state.ts";
+import {
+  BUNDLE_DECISION_LABELS,
+  BUNDLE_DECISION_TONES,
+  PLAN_BUNDLE_DECISIONS_STORAGE_KEY,
+  PLAN_ITEMS_STORAGE_KEY,
+  PLAN_REVIEW_STORAGE_KEY,
+  PLAN_REVIEW_STRICTNESS_STORAGE_KEY,
+  PLAN_STORAGE_KEY,
+  STATUS_LABELS,
+  TYPE_LABELS,
+  type ReviewFeedback,
+} from "./view-constants.ts";
+import {
+  canProceedFromEditedItemReview,
+  getBundleBlockingReason,
+  getBundleRecommendedActions,
+  getBundleRiskDetails,
+  normalizeReviewStrictness,
+  readJsonStorage,
+  summarizePlanReview,
+  writeJsonStorage,
+  writeTextStorage,
+} from "./view-helpers.ts";
 
-// ── 类型 ──────────────────────────────────────────────────────────────────────
-
-type ReviewFeedbackTone = "info" | "success" | "warning" | "error";
-
-interface ReviewFeedback {
-  tone: ReviewFeedbackTone;
-  message: string;
-}
-
-// ── 工具函数 ──────────────────────────────────────────────────────────────────
-
-const TYPE_LABELS: Record<string, string> = {
-  card: "卡牌",
-  card_fullscreen: "全画面卡",
-  relic: "遗物",
-  power: "Power",
-  character: "角色",
-  custom_code: "代码",
-};
+// ── STATUS_ICONS（含 JSX，留在本文件）──────────────────────────────────────────
 
 const STATUS_ICONS: Record<ItemStatus, React.ReactNode> = {
   pending: <Clock size={14} className="text-slate-300" />,
@@ -88,259 +88,6 @@ const STATUS_ICONS: Record<ItemStatus, React.ReactNode> = {
   done: <CheckCircle2 size={14} className="text-green-500" />,
   error: <XCircle size={14} className="text-red-500" />,
 };
-
-const STATUS_LABELS: Record<ItemStatus, string> = {
-  pending: "等待中",
-  img_generating: "生成图像",
-  awaiting_selection: "等待选图",
-  approval_pending: "等待审批",
-  code_generating: "生成代码",
-  cancelled: "已取消",
-  done: "完成",
-  error: "失败",
-};
-
-const PLAN_STORAGE_KEY = "ats_last_plan";
-const PLAN_ITEMS_STORAGE_KEY = "ats_last_plan_items";
-const PLAN_REVIEW_STORAGE_KEY = "ats_last_plan_review";
-const PLAN_REVIEW_STRICTNESS_STORAGE_KEY = "ats_last_plan_review_strictness";
-const PLAN_BUNDLE_DECISIONS_STORAGE_KEY = "ats_last_plan_bundle_decisions";
-
-const REVIEW_STATUS_LABELS: Record<PlanItemValidation["status"], string> = {
-  clear: "可继续",
-  needs_user_input: "待补充",
-  invalid: "存在错误",
-};
-
-const BUNDLE_STATUS_LABELS: Record<ExecutionBundlePreview["status"], string> = {
-  clear: "可执行",
-  needs_confirmation: "需确认",
-  split_recommended: "建议拆分",
-};
-
-const STRICTNESS_OPTIONS: Array<{ value: ReviewStrictness; label: string; description: string }> = [
-  { value: "efficient", label: "高效率", description: "减少拦截，尽快进入执行" },
-  { value: "balanced", label: "平衡", description: "兼顾确认成本和执行安全" },
-  { value: "strict", label: "严格", description: "更细地检查描述和分组风险" },
-];
-
-const BUNDLE_DECISION_LABELS: Record<BundleDecisionStatus, string> = {
-  unresolved: "待决策",
-  accepted: "已接受当前分组",
-  split_requested: "已要求拆分",
-  needs_item_revision: "待回到 Item 补充说明",
-};
-
-const BUNDLE_DECISION_TONES: Record<BundleDecisionStatus, string> = {
-  unresolved: "bg-amber-50 text-amber-700 border-amber-200",
-  accepted: "bg-green-50 text-green-700 border-green-200",
-  split_requested: "bg-sky-50 text-sky-700 border-sky-200",
-  needs_item_revision: "bg-rose-50 text-rose-700 border-rose-200",
-};
-
-const FALLBACK_BUNDLE_RISK_DETAILS: Record<string, ExecutionBundleRiskDetail> = {
-  unclear_coupling: {
-    code: "unclear_coupling",
-    title: "耦合关系不明确",
-    summary: "系统无法确认这些 item 是否必须绑在一起执行。",
-    recommendation: "如果你确认它们必须一起落地，就接受当前分组；如果只是可能相关，优先返回补充依赖说明或要求拆分。",
-    impact: "错误合并后会放大一次执行的影响范围。",
-  },
-  bundle_size_threshold: {
-    code: "bundle_size_threshold",
-    title: "Bundle 规模偏大",
-    summary: "当前分组包含的 item 偏多，失败后的回滚和定位成本会明显上升。",
-    recommendation: "优先拆分为更小的执行单元；只有在这些 item 明显属于同一功能包时再接受当前分组。",
-    impact: "一次执行覆盖面过大，排错节奏会变慢。",
-  },
-  mixed_item_types: {
-    code: "mixed_item_types",
-    title: "包含多种 item 类型",
-    summary: "同一 bundle 中混入了不同类型的产物，执行节奏和关注点不一致。",
-    recommendation: "若只是共享目标但不是强耦合，建议拆开；若它们围绕同一核心功能联合交付，再接受当前分组。",
-    impact: "混合类型越多，执行和验收口径越容易漂移。",
-  },
-  affected_targets_spread: {
-    code: "affected_targets_spread",
-    title: "影响范围过散",
-    summary: "这组 item 触及的目标点较多，说明分组边界可能过宽。",
-    recommendation: "优先回到 Item 补充范围说明，或要求先拆分后再重算。",
-    impact: "范围过散会增加一次执行失败波及多个模块的概率。",
-  },
-};
-
-const FALLBACK_BUNDLE_ACTIONS: Record<ExecutionBundlePreview["status"], ExecutionBundleRecommendedAction[]> = {
-  clear: [],
-  needs_confirmation: [
-    {
-      action: "accept_bundle",
-      label: "接受当前分组",
-      description: "你确认这些 item 应该作为一个 bundle 联合执行。",
-      emphasis: "primary",
-    },
-    {
-      action: "revise_items",
-      label: "返回补充说明",
-      description: "回到 Item 层补充依赖原因、范围边界或验收说明后重算。",
-      emphasis: "secondary",
-    },
-  ],
-  split_recommended: [
-    {
-      action: "split_bundle",
-      label: "要求拆分",
-      description: "按更保守的口径重算，把该 bundle 拆成更小执行单元。",
-      emphasis: "warning",
-    },
-    {
-      action: "accept_bundle",
-      label: "仍接受当前分组",
-      description: "你确认这些 item 必须一起执行，即使系统建议拆分。",
-      emphasis: "primary",
-    },
-    {
-      action: "revise_items",
-      label: "返回补充说明",
-      description: "回到 Item 层补充依赖说明后再重算，降低误判概率。",
-      emphasis: "secondary",
-    },
-  ],
-};
-
-function normalizeReviewStrictness(value: unknown): ReviewStrictness {
-  return value === "efficient" || value === "strict" ? value : "balanced";
-}
-
-function readJsonStorage<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function writeJsonStorage(key: string, value: unknown) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {}
-}
-
-function writeTextStorage(key: string, value: string) {
-  try {
-    localStorage.setItem(key, value);
-  } catch {}
-}
-
-function resolvePlanFieldValue(item: PlanItem, field: string): unknown {
-  return (item as unknown as Record<string, unknown>)[field];
-}
-
-function hasMeaningfulPlanFieldValue(item: PlanItem, field: string): boolean {
-  const value = resolvePlanFieldValue(item, field);
-  if (Array.isArray(value)) {
-    return value.some((entry) => typeof entry === "string" && entry.trim().length > 0);
-  }
-  if (typeof value === "string") {
-    return value.trim().length > 0;
-  }
-  if (typeof value === "boolean") {
-    return value;
-  }
-  return value !== null && value !== undefined;
-}
-
-function canProceedFromEditedItemReview(review: PlanReviewPayload | null, items: PlanItem[]): boolean {
-  if (!review) {
-    return true;
-  }
-
-  return review.validation.items.every((reviewItem) => {
-    if (reviewItem.status === "clear") {
-      return true;
-    }
-    if (reviewItem.status === "invalid") {
-      return false;
-    }
-    const item = items.find((candidate) => candidate.id === reviewItem.item_id);
-    if (!item) {
-      return false;
-    }
-    if (reviewItem.missing_fields.some((field) => !hasMeaningfulPlanFieldValue(item, field))) {
-      return false;
-    }
-    return reviewItem.issues.every((issue) => !issue.field || hasMeaningfulPlanFieldValue(item, issue.field));
-  });
-}
-
-function summarizePlanReview(
-  review: PlanReviewPayload,
-  items: PlanItem[],
-): { feedback: ReviewFeedback; focusItemId: string | null } {
-  const totalItems = review.validation.items.length;
-  const clearItems = review.validation.items.filter((item) => item.status === "clear").length;
-  const firstBlockingItem = review.validation.items.find((item) => item.status !== "clear") ?? null;
-
-  if (firstBlockingItem) {
-    const itemName = items.find((item) => item.id === firstBlockingItem.item_id)?.name ?? firstBlockingItem.item_id;
-    return {
-      feedback: {
-        tone: "warning",
-        message: `复核完成：${clearItems}/${totalItems} 项可继续。已定位到 ${itemName}，请继续补充说明后再重新检查。`,
-      },
-      focusItemId: firstBlockingItem.item_id,
-    };
-  }
-
-  const totalBundles = review.execution_plan.execution_bundles.length;
-  const clearBundles = review.execution_plan.execution_bundles.filter((bundle) => bundle.status === "clear").length;
-  if (clearBundles < totalBundles) {
-    return {
-      feedback: {
-        tone: "warning",
-        message: `Item 复核已通过，但执行策略仍有 ${totalBundles - clearBundles} 个 bundle 需要确认。`,
-      },
-      focusItemId: null,
-    };
-  }
-
-  return {
-    feedback: {
-      tone: "success",
-      message: "复核完成：当前计划已通过，可以进入下一步。",
-    },
-    focusItemId: null,
-  };
-}
-
-function getBundleRiskDetails(bundle: ExecutionBundlePreview): ExecutionBundleRiskDetail[] {
-  if (bundle.risk_details && bundle.risk_details.length > 0) {
-    return bundle.risk_details;
-  }
-  return bundle.risk_codes
-    .map((riskCode) => FALLBACK_BUNDLE_RISK_DETAILS[riskCode])
-    .filter((detail): detail is ExecutionBundleRiskDetail => Boolean(detail));
-}
-
-function getBundleRecommendedActions(bundle: ExecutionBundlePreview): ExecutionBundleRecommendedAction[] {
-  if (bundle.recommended_actions && bundle.recommended_actions.length > 0) {
-    return bundle.recommended_actions;
-  }
-  return FALLBACK_BUNDLE_ACTIONS[bundle.status] ?? [];
-}
-
-function getBundleBlockingReason(bundle: ExecutionBundlePreview): string {
-  if (bundle.blocking_reason?.trim()) {
-    return bundle.blocking_reason;
-  }
-  if (bundle.status === "split_recommended") {
-    return "系统建议先拆分该 bundle，再进入执行阶段。";
-  }
-  if (bundle.status === "needs_confirmation") {
-    return "系统认为该 bundle 可执行，但仍需要你显式确认是否接受当前分组。";
-  }
-  return "当前 bundle 可直接执行。";
-}
 
 // ── 主组件 ────────────────────────────────────────────────────────────────────
 
@@ -1103,97 +850,6 @@ export default function BatchMode() {
 }
 
 // ── 计划审阅组件 ──────────────────────────────────────────────────────────────
-
-function ReviewStatusBadge({
-  status,
-  kind,
-}: {
-  status: PlanItemValidation["status"] | ExecutionBundlePreview["status"];
-  kind: "item" | "bundle";
-}) {
-  const label =
-    kind === "item"
-      ? REVIEW_STATUS_LABELS[status as PlanItemValidation["status"]]
-      : BUNDLE_STATUS_LABELS[status as ExecutionBundlePreview["status"]];
-  const tone =
-    status === "clear"
-      ? "bg-green-50 text-green-700 border-green-200"
-      : status === "invalid"
-        ? "bg-red-50 text-red-700 border-red-200"
-        : "bg-amber-50 text-amber-700 border-amber-200";
-  return <span className={cn("text-xs rounded-full border px-2 py-0.5 font-medium", tone)}>{label}</span>;
-}
-
-function ReviewStrictnessSelector({
-  value,
-  disabled,
-  onChange,
-}: {
-  value: ReviewStrictness;
-  disabled: boolean;
-  onChange: (value: ReviewStrictness) => void;
-}) {
-  return (
-    <div className="space-y-2">
-      <div>
-        <p className="text-sm font-medium text-slate-700">判断严格度</p>
-        <p className="text-xs text-slate-400">控制补充说明的严格程度，以及 bundle 拆分时的谨慎程度。</p>
-      </div>
-      <div className="grid gap-2 md:grid-cols-3">
-        {STRICTNESS_OPTIONS.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            disabled={disabled}
-            onClick={() => onChange(option.value)}
-            className={cn(
-              "rounded-xl border px-3 py-2 text-left transition-colors disabled:opacity-60",
-              value === option.value
-                ? "border-violet-300 bg-violet-50"
-                : "border-slate-200 bg-white hover:border-violet-200 hover:bg-violet-50/60",
-            )}
-          >
-            <p className="text-sm font-semibold text-slate-800">{option.label}</p>
-            <p className="mt-1 text-xs text-slate-500">{option.description}</p>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ReviewNotice({ message }: { message: string | null }) {
-  if (!message) {
-    return null;
-  }
-  return (
-    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{message}</div>
-  );
-}
-
-function ReviewFeedbackBanner({ feedback }: { feedback: ReviewFeedback | null }) {
-  if (!feedback) {
-    return null;
-  }
-
-  const toneCls =
-    feedback.tone === "success"
-      ? "border-green-200 bg-green-50 text-green-800"
-      : feedback.tone === "warning"
-        ? "border-amber-200 bg-amber-50 text-amber-800"
-        : feedback.tone === "error"
-          ? "border-red-200 bg-red-50 text-red-800"
-          : "border-violet-200 bg-violet-50 text-violet-800";
-
-  return (
-    <div className={cn("rounded-xl border px-4 py-3 text-sm", toneCls)}>
-      <div className="flex items-start gap-2">
-        {feedback.tone === "info" ? <Loader2 size={16} className="mt-0.5 shrink-0 animate-spin" /> : null}
-        <span>{feedback.message}</span>
-      </div>
-    </div>
-  );
-}
 
 function ReviewPlan({
   plan,
