@@ -27,120 +27,15 @@ import { useSession } from "../shared/session/hooks.ts";
 import { KnowledgeGuideDialog } from "./KnowledgeGuideDialog.tsx";
 import { StatusNotice, StatusNoticeStack, type StatusNoticeItem } from "./StatusNotice.tsx";
 import { createSettingsPickPathRequest, type SettingsPathField } from "./settingsPathPicker.ts";
-
-const inputCls =
-  "w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-100";
-const selectCls =
-  "w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-slate-800 focus:outline-none focus:border-amber-400";
-const readonlyInputCls = `${inputCls} bg-slate-50 text-slate-500`;
-
-const PROVIDER_MODELS: Record<string, string[]> = {
-  bfl: ["flux.2-flex", "flux.2-pro", "flux.2-klein", "flux.2-max", "flux.1.1-pro"],
-  fal: ["flux.2-flex", "flux.2-pro", "flux.2-dev", "flux.2-schnell"],
-  volcengine: ["doubao-seedream-3-0-t2i-250415", "doubao-seedream-3-0-1-5b-t2i-250616"],
-  wanxiang: [],
-};
-
-const KNOWLEDGE_UPDATE_STEP_PROGRESS: Array<{ pattern: RegExp; progress: number }> = [
-  { pattern: /初始化更新任务|准备启动知识库更新任务|等待开始/, progress: 8 },
-  { pattern: /读取当前游戏版本/, progress: 18 },
-  { pattern: /反编译游戏源码/, progress: 48 },
-  { pattern: /读取 Baselib latest release/, progress: 62 },
-  { pattern: /下载 Baselib\.dll/, progress: 78 },
-  { pattern: /反编译 Baselib/, progress: 92 },
-  { pattern: /更新完成/, progress: 100 },
-  { pattern: /更新失败/, progress: 100 },
-];
-
-function getKnowledgeUpdateProgress(step: string, busy: boolean) {
-  if (!step.trim()) {
-    return busy ? 8 : 0;
-  }
-
-  for (const item of KNOWLEDGE_UPDATE_STEP_PROGRESS) {
-    if (item.pattern.test(step)) {
-      return item.progress;
-    }
-  }
-
-  return busy ? 24 : 100;
-}
-
-function ProgressBar({
-  label,
-  progress,
-  tone = "amber",
-  indeterminate = false,
-}: {
-  label: string;
-  progress?: number;
-  tone?: "amber" | "sky";
-  indeterminate?: boolean;
-}) {
-  const trackCls = tone === "sky" ? "bg-sky-100" : "bg-amber-100";
-  const fillCls = tone === "sky" ? "bg-sky-500" : "bg-amber-500";
-
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-[11px] font-medium text-slate-600">{label}</p>
-        {!indeterminate && typeof progress === "number" ? (
-          <span className="text-[11px] font-semibold text-slate-500">{Math.round(progress)}%</span>
-        ) : null}
-      </div>
-      <div className={`h-2 overflow-hidden rounded-full ${trackCls}`}>
-        {indeterminate ? (
-          <div className="h-full w-1/3 rounded-full bg-sky-500 animate-[knowledge-progress-indeterminate_1.2s_ease-in-out_infinite]" />
-        ) : (
-          <div
-            className={`h-full rounded-full ${fillCls} transition-[width] duration-300 ease-out`}
-            style={{ width: `${Math.max(0, Math.min(progress ?? 0, 100))}%` }}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
-
-function SGroup({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <span className="text-slate-400">{icon}</span>
-        <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{title}</h3>
-      </div>
-      <div className="space-y-2.5 pl-1">{children}</div>
-    </div>
-  );
-}
-
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-1">
-      <label className="text-xs font-medium text-slate-500">{label}</label>
-      {children}
-      {hint && <p className="text-xs text-slate-400">{hint}</p>}
-    </div>
-  );
-}
-
-function pickInitialServerProfileId(
-  profiles: PlatformExecutionProfile[],
-  preference: MyServerPreferenceView | null,
-): number | null {
-  if (
-    preference?.default_execution_profile_id !== null &&
-    typeof preference?.default_execution_profile_id !== "undefined"
-  ) {
-    const preferredProfile = profiles.find((profile) => profile.id === preference.default_execution_profile_id);
-    return preferredProfile?.available ? preferredProfile.id : null;
-  }
-  return (
-    profiles.find((profile) => profile.available && profile.recommended)?.id ??
-    profiles.find((profile) => profile.available)?.id ??
-    null
-  );
-}
+import { Field, ProgressBar, SGroup } from "./SettingsLayout.tsx";
+import {
+  PROVIDER_MODELS,
+  getKnowledgeUpdateProgress,
+  inputCls,
+  pickInitialServerProfileId,
+  readonlyInputCls,
+  selectCls,
+} from "./settings-panel-helpers.ts";
 
 interface SettingsPanelProps {
   mode?: "drawer" | "page";
