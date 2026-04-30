@@ -134,14 +134,25 @@ switch ($Action) {
         Invoke-Compose @("config")
     }
     "test" {
-        # 在镜像里跑 pytest；不依赖容器是否在 up 状态
+        # 在镜像里跑 pytest，bind mount 让测试反映宿主源码（与 lint action 一致）。
         # 默认跑全量 backend tests；通过位置参数透传 pytest 路径与开关
+        $env:MSYS_NO_PATHCONV = "1"
+        $imageTag = if ($env:ATS_WORKSTATION_IMAGE) { $env:ATS_WORKSTATION_IMAGE } else { "agentthespire/workstation:local" }
         $pytestArgs = @("tests")
         if ($Rest -and $Rest.Count -gt 0) {
             $pytestArgs = $Rest
         }
-        $extra = @("run", "--rm", "--no-deps", "--entrypoint", "", "workstation", "pytest") + $pytestArgs
-        Invoke-Compose $extra
+        $testArgs = @(
+            "run", "--rm", "--entrypoint", "",
+            "-v", "$($repoRoot.Path)/backend:/app/backend",
+            "-v", "$($repoRoot.Path)/pyproject.toml:/app/pyproject.toml:ro",
+            "-w", "/app/backend",
+            $imageTag, "pytest"
+        ) + $pytestArgs
+        Write-Host "[test] docker $($testArgs -join ' ')" -ForegroundColor Cyan
+        & docker @testArgs
+        $env:MSYS_NO_PATHCONV = $null
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
     "exec" {
         if (-not $Rest -or $Rest.Count -eq 0) {
