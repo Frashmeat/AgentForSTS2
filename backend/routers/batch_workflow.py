@@ -444,7 +444,13 @@ async def _handle_ws_batch(ws: WebSocket, *, initial_params: dict | None = None)
                                             batch_size=1, progress_callback=_img_progress,
                                         )
                                         break
+                                    except asyncio.CancelledError:
+                                        raise
                                     except Exception as _e:
+                                        _log.warning(
+                                            "image gen attempt %s failed for item %s: %s",
+                                            _attempt + 1, item.id, _e,
+                                        )
                                         if _attempt == 2:
                                             raise
                                         await send("item_progress", item_id=item.id, message=_text("batch_image_generating_retry", retry_number=_attempt + 2).strip())
@@ -473,7 +479,10 @@ async def _handle_ws_batch(ws: WebSocket, *, initial_params: dict | None = None)
                     await send("item_progress", item_id=item.id, message=_text("batch_image_postprocess_done").strip())
                 else:
                     item_image_paths[item.id] = []
+            except asyncio.CancelledError:
+                raise
             except Exception as e:
+                _log.exception("item %s image stage failed", item.id)
                 try:
                     await send_ws_error(
                         ws,
@@ -484,8 +493,9 @@ async def _handle_ws_batch(ws: WebSocket, *, initial_params: dict | None = None)
                         traceback=tb_module.format_exc(),
                         extra={"item_id": item.id},
                     )
-                except Exception:
-                    pass
+                except (WebSocketDisconnect, RuntimeError) as send_err:
+                    # WebSocket 已断开是预期路径；其余 RuntimeError（loop closed 等）也只能放弃推送
+                    _log.warning("item %s image error notify skipped: %s", item.id, send_err)
                 error_ids.add(item.id)
             finally:
                 item_image_events[item.id].set()
@@ -580,8 +590,11 @@ async def _handle_ws_batch(ws: WebSocket, *, initial_params: dict | None = None)
                     for item in group:
                         await send("item_done", item_id=item.id, success=True)
 
+                except asyncio.CancelledError:
+                    raise
                 except Exception as e:
                     tb = tb_module.format_exc()
+                    _log.exception("group %s codegen failed", [it.id for it in group])
                     for item in group:
                         try:
                             await send_ws_error(
@@ -593,8 +606,8 @@ async def _handle_ws_batch(ws: WebSocket, *, initial_params: dict | None = None)
                                 traceback=tb,
                                 extra={"item_id": item.id},
                             )
-                        except Exception:
-                            pass
+                        except (WebSocketDisconnect, RuntimeError) as send_err:
+                            _log.warning("item %s codegen error notify skipped: %s", item.id, send_err)
                         error_ids.add(item.id)
                 finally:
                     if not approval_pending:

@@ -16,6 +16,11 @@ frontend/node_modules/
 frontend/dist/
 frontend/.env
 
+# Docker 本地实例化的 env 文件（含密钥）
+.env
+.env.workstation
+.env.web
+
 # Local machine paths (mod dev)
 local.props
 

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import logging
+import traceback
 from datetime import datetime
 
 from app.modules.platform.application.services.quota_billing_service import QuotaBillingService
@@ -42,6 +44,22 @@ def _short_text(value: object, limit: int = 300) -> str:
     if len(text) <= limit:
         return text
     return f"{text[:limit]}..."
+
+
+def _run_coroutine_blocking(coro):
+    """从同步代码完整跑一段协程，不论调用栈是否已在事件循环里。
+
+    - 没有运行中的 loop：直接 asyncio.run。
+    - 已在 loop 中（例如被 FastAPI/WebSocket 处理器调用）：丢到独立线程跑新 loop，
+      避免 "asyncio.run() cannot be called from a running event loop" 死锁。
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
 
 
 class QueuedExecutionReason(RuntimeError):
@@ -870,8 +888,13 @@ class ExecutionOrchestratorService:
                     ),
                     on_events=record_workstation_events,
                 )
+            except asyncio.CancelledError:
+                # 外层任务被取消时不应吞掉 —— 让上游协调者继续传播
+                raise
             except Exception as exc:
-                logger.warning(
+                # 工作站派发失败属于系统级错误，但需要保留 traceback 才能排障
+                tb_text = traceback.format_exc()
+                logger.exception(
                     "platform workstation execution failed job_id=%s job_item_id=%s execution_id=%s error=%s",
                     job_id,
                     job_item_id,
@@ -882,10 +905,14 @@ class ExecutionOrchestratorService:
                     step_id=execution.step_id,
                     status="failed_system",
                     error_summary=str(exc),
-                    error_payload={"reason_code": "workstation_dispatch_failed"},
+                    error_payload={
+                        "reason_code": "workstation_dispatch_failed",
+                        "exception_type": type(exc).__name__,
+                        "traceback": tb_text,
+                    },
                 )
 
-        results = asyncio.run(
+        results = _run_coroutine_blocking(
             self.run_registered_steps(
                 user_id=user_id,
                 job_type=job_type,

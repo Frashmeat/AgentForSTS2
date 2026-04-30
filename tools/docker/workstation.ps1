@@ -23,15 +23,26 @@ pwsh -File .\tools\docker\workstation.ps1 logs -Follow
 
 .EXAMPLE
 pwsh -File .\tools\docker\workstation.ps1 rebuild
+
+.EXAMPLE
+pwsh -File .\tools\docker\workstation.ps1 test
+pwsh -File .\tools\docker\workstation.ps1 test tests/platform/services/test_execution_orchestrator_service.py -- -x -k start_execution
+
+.EXAMPLE
+pwsh -File .\tools\docker\workstation.ps1 exec -- python --version
 #>
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet("up", "down", "restart", "build", "rebuild", "logs", "ps", "shell", "config")]
+    [ValidateSet("up", "down", "restart", "build", "rebuild", "logs", "ps", "shell", "config", "test", "exec")]
     [string]$Action = "up",
 
     [switch]$Detach = $true,
-    [switch]$Follow
+    [switch]$Follow,
+
+    # 透传给 test / exec 的剩余参数（pytest 路径与开关、自定义命令等）
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$Rest
 )
 
 $ErrorActionPreference = "Stop"
@@ -116,5 +127,22 @@ switch ($Action) {
     }
     "config" {
         Invoke-Compose @("config")
+    }
+    "test" {
+        # 在镜像里跑 pytest；不依赖容器是否在 up 状态
+        # 默认跑全量 backend tests；通过位置参数透传 pytest 路径与开关
+        $pytestArgs = @("tests")
+        if ($Rest -and $Rest.Count -gt 0) {
+            $pytestArgs = $Rest
+        }
+        $extra = @("run", "--rm", "--no-deps", "--entrypoint", "", "workstation", "pytest") + $pytestArgs
+        Invoke-Compose $extra
+    }
+    "exec" {
+        if (-not $Rest -or $Rest.Count -eq 0) {
+            throw "exec 需要透传命令，例如: ... exec -- python --version"
+        }
+        $extra = @("run", "--rm", "--no-deps", "--entrypoint", "", "workstation") + $Rest
+        Invoke-Compose $extra
     }
 }
