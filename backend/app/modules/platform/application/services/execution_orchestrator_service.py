@@ -130,28 +130,108 @@ class ExecutionOrchestratorService:
         request_idempotency_key: str | None,
         now: datetime,
     ) -> AIExecutionRecord | None:
-        if request_idempotency_key:
-            existing = self.ai_execution_repository.find_by_scoped_idempotency(
-                user_id=user_id,
-                job_item_id=job_item_id,
-                request_idempotency_key=request_idempotency_key,
-            )
-            if existing is not None:
-                logger.info(
-                    "platform execution idempotency hit user_id=%s job_id=%s job_item_id=%s execution_id=%s "
-                    "status=%s",
-                    user_id,
-                    job_id,
-                    job_item_id,
-                    existing.id,
-                    existing.status,
-                )
-                return existing
+        # 流水线：幂等命中 → 锁定 job/item → 解析路由 → 配额预检 → 创建+预占 → 标记派发
+        existing = self._find_existing_idempotent_execution(
+            user_id=user_id,
+            job_id=job_id,
+            job_item_id=job_item_id,
+            request_idempotency_key=request_idempotency_key,
+        )
+        if existing is not None:
+            return existing
 
+        job, item = self._fetch_job_and_item(user_id=user_id, job_id=job_id, job_item_id=job_item_id)
+        if job is None or item is None:
+            return None
+        self._acquire_workspace_write_lock_if_needed(job=job, item=item)
+
+        provider, model, credential_ref, retry_attempt, switched_credential = self._resolve_execution_route(
+            job=job,
+            user_id=user_id,
+            job_id=job_id,
+            job_item_id=job_item_id,
+            provider=provider,
+            model=model,
+            credential_ref=credential_ref,
+            retry_attempt=retry_attempt,
+            switched_credential=switched_credential,
+        )
+
+        if not self._ensure_quota_available_or_mark_skipped(
+            user_id=user_id,
+            job=job,
+            item=item,
+            job_item_id=job_item_id,
+            now=now,
+        ):
+            return None
+
+        execution = self._create_execution_and_reserve_quota(
+            user_id=user_id,
+            job=job,
+            item=item,
+            job_item_id=job_item_id,
+            now=now,
+            provider=provider,
+            model=model,
+            credential_ref=credential_ref,
+            retry_attempt=retry_attempt,
+            switched_credential=switched_credential,
+            workflow_version=workflow_version,
+            step_protocol_version=step_protocol_version,
+            result_schema_version=result_schema_version,
+            step_type=step_type,
+            step_id=step_id,
+            request_idempotency_key=request_idempotency_key,
+        )
+        if execution is None:
+            return None
+
+        self._mark_execution_dispatching(
+            user_id=user_id,
+            job=job,
+            item=item,
+            job_item_id=job_item_id,
+            execution=execution,
+            step_type=step_type,
+            step_id=step_id,
+        )
+        return execution
+
+    # ── start_execution 流水线分段 ──────────────────────────────────────────
+
+    def _find_existing_idempotent_execution(
+        self,
+        *,
+        user_id: int,
+        job_id: int,
+        job_item_id: int,
+        request_idempotency_key: str | None,
+    ) -> AIExecutionRecord | None:
+        if not request_idempotency_key:
+            return None
+        existing = self.ai_execution_repository.find_by_scoped_idempotency(
+            user_id=user_id,
+            job_item_id=job_item_id,
+            request_idempotency_key=request_idempotency_key,
+        )
+        if existing is None:
+            return None
+        logger.info(
+            "platform execution idempotency hit user_id=%s job_id=%s job_item_id=%s execution_id=%s status=%s",
+            user_id,
+            job_id,
+            job_item_id,
+            existing.id,
+            existing.status,
+        )
+        return existing
+
+    def _fetch_job_and_item(self, *, user_id: int, job_id: int, job_item_id: int):
         job = self.job_repository.find_by_id_for_user(job_id, user_id)
         if job is None:
             logger.warning("platform execution start skipped job not found user_id=%s job_id=%s", user_id, job_id)
-            return None
+            return None, None
         item = next((entry for entry in job.items if entry.id == job_item_id), None)
         if item is None:
             logger.warning(
@@ -160,9 +240,22 @@ class ExecutionOrchestratorService:
                 job_id,
                 job_item_id,
             )
-            return None
-        self._acquire_workspace_write_lock_if_needed(job=job, item=item)
+            return job, None
+        return job, item
 
+    def _resolve_execution_route(
+        self,
+        *,
+        job,
+        user_id: int,
+        job_id: int,
+        job_item_id: int,
+        provider: str,
+        model: str,
+        credential_ref: str,
+        retry_attempt: int,
+        switched_credential: bool,
+    ) -> tuple[str, str, str, int, bool]:
         if self.execution_routing_service is not None and not provider.strip() and not model.strip():
             route = self.execution_routing_service.resolve_for_job(job)
             provider = route.provider
@@ -170,47 +263,49 @@ class ExecutionOrchestratorService:
             credential_ref = route.credential_ref
             retry_attempt = route.retry_attempt
             switched_credential = route.switched_credential
-            logger.info(
-                "platform execution route resolved user_id=%s job_id=%s job_item_id=%s provider=%s model=%s "
-                "credential_ref=%s retry_attempt=%s switched=%s",
-                user_id,
-                job_id,
-                job_item_id,
-                provider,
-                model,
-                credential_ref,
-                retry_attempt,
-                switched_credential,
-            )
+            log_kind = "resolved"
         elif not provider.strip() or not model.strip():
             raise ValueError("provider and model are required when execution routing service is not configured")
         else:
-            logger.info(
-                "platform execution route provided user_id=%s job_id=%s job_item_id=%s provider=%s model=%s "
-                "credential_ref=%s retry_attempt=%s switched=%s",
-                user_id,
-                job_id,
-                job_item_id,
-                provider,
-                model,
-                credential_ref,
-                retry_attempt,
-                switched_credential,
-            )
+            log_kind = "provided"
 
+        logger.info(
+            "platform execution route %s user_id=%s job_id=%s job_item_id=%s provider=%s model=%s "
+            "credential_ref=%s retry_attempt=%s switched=%s",
+            log_kind,
+            user_id,
+            job_id,
+            job_item_id,
+            provider,
+            model,
+            credential_ref,
+            retry_attempt,
+            switched_credential,
+        )
+        return provider, model, credential_ref, retry_attempt, switched_credential
+
+    def _ensure_quota_available_or_mark_skipped(
+        self,
+        *,
+        user_id: int,
+        job,
+        item,
+        job_item_id: int,
+        now: datetime,
+    ) -> bool:
         if self.quota_billing_service is None:
             logger.warning(
                 "platform execution start skipped quota billing unavailable user_id=%s job_id=%s job_item_id=%s",
                 user_id,
-                job_id,
+                job.id,
                 job_item_id,
             )
-            return None
+            return False
         if not self.quota_billing_service.has_available_quota(user_id=user_id, now=now, amount=1):
             logger.info(
                 "platform execution start blocked by quota user_id=%s job_id=%s job_item_id=%s",
                 user_id,
-                job_id,
+                job.id,
                 job_item_id,
             )
             item.status = JobItemStatus.QUOTA_SKIPPED
@@ -223,8 +318,29 @@ class ExecutionOrchestratorService:
                 payload={"job_item_id": job_item_id},
                 job_item_id=job_item_id,
             )
-            return None
+            return False
+        return True
 
+    def _create_execution_and_reserve_quota(
+        self,
+        *,
+        user_id: int,
+        job,
+        item,
+        job_item_id: int,
+        now: datetime,
+        provider: str,
+        model: str,
+        credential_ref: str,
+        retry_attempt: int,
+        switched_credential: bool,
+        workflow_version: str,
+        step_protocol_version: str,
+        result_schema_version: str,
+        step_type: str,
+        step_id: str,
+        request_idempotency_key: str | None,
+    ) -> AIExecutionRecord | None:
         execution = self.ai_execution_repository.create(
             AIExecutionRecord(
                 job_id=job.id,
@@ -245,7 +361,9 @@ class ExecutionOrchestratorService:
                 started_at=now,
             )
         )
-        reserved = self.quota_billing_service.reserve(user_id=user_id, execution_id=execution.id, now=now, amount=1)
+        reserved = self.quota_billing_service.reserve(
+            user_id=user_id, execution_id=execution.id, now=now, amount=1,
+        )
         if reserved is None:
             logger.info(
                 "platform execution quota reserve failed user_id=%s job_id=%s job_item_id=%s execution_id=%s",
@@ -270,6 +388,19 @@ class ExecutionOrchestratorService:
             model,
             credential_ref,
         )
+        return execution
+
+    def _mark_execution_dispatching(
+        self,
+        *,
+        user_id: int,
+        job,
+        item,
+        job_item_id: int,
+        execution: AIExecutionRecord,
+        step_type: str,
+        step_id: str,
+    ) -> None:
         execution.status = AIExecutionStatus.DISPATCHING
         item.status = JobItemStatus.RUNNING
         job.status = JobStatus.RUNNING
@@ -284,8 +415,7 @@ class ExecutionOrchestratorService:
             ai_execution_id=execution.id,
         )
         logger.info(
-            "platform execution dispatching user_id=%s job_id=%s job_item_id=%s execution_id=%s step_type=%s "
-            "step_id=%s",
+            "platform execution dispatching user_id=%s job_id=%s job_item_id=%s execution_id=%s step_type=%s step_id=%s",
             user_id,
             job.id,
             job_item_id,
@@ -293,7 +423,6 @@ class ExecutionOrchestratorService:
             step_type,
             step_id,
         )
-        return execution
 
     async def run_registered_steps(
         self,
