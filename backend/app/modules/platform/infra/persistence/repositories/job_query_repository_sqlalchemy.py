@@ -13,6 +13,7 @@ from app.modules.platform.infra.persistence.models import (
     JobItemRecord,
     JobRecord,
 )
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 
@@ -166,25 +167,45 @@ class JobQueryRepositorySqlAlchemy(JobQueryRepository):
         if not job_ids:
             return {}
 
-        rows = (
+        # 把累加聚合下沉到 SQL：避免把大量 charge 行拉到 Python 后再做 sum
+        refunded_case = case(
+            (ExecutionChargeRecord.charge_status == ChargeStatus.REFUNDED, ExecutionChargeRecord.charge_amount),
+            else_=0,
+        )
+        aggregate_rows = (
             self.session.query(
                 AIExecutionRecord.job_id,
-                ExecutionChargeRecord.charge_amount,
-                ExecutionChargeRecord.charge_status,
-                ExecutionChargeRecord.refund_reason,
+                func.coalesce(func.sum(ExecutionChargeRecord.charge_amount), 0).label("original_deducted"),
+                func.coalesce(func.sum(refunded_case), 0).label("refunded_amount"),
             )
             .join(ExecutionChargeRecord, ExecutionChargeRecord.ai_execution_id == AIExecutionRecord.id)
             .filter(AIExecutionRecord.job_id.in_(job_ids))
+            .group_by(AIExecutionRecord.job_id)
             .all()
         )
 
-        summaries: dict[int, _RefundSummary] = {}
-        for job_id, charge_amount, charge_status, refund_reason in rows:
+        summaries: dict[int, _RefundSummary] = {
+            job_id: _RefundSummary(
+                original_deducted=int(original or 0),
+                refunded_amount=int(refunded or 0),
+            )
+            for job_id, original, refunded in aggregate_rows
+        }
+
+        # refund_reasons 仍按 charge id 顺序去重；只取已退款条目
+        reason_rows = (
+            self.session.query(AIExecutionRecord.job_id, ExecutionChargeRecord.refund_reason)
+            .join(ExecutionChargeRecord, ExecutionChargeRecord.ai_execution_id == AIExecutionRecord.id)
+            .filter(
+                AIExecutionRecord.job_id.in_(job_ids),
+                ExecutionChargeRecord.charge_status == ChargeStatus.REFUNDED,
+            )
+            .order_by(ExecutionChargeRecord.id.asc())
+            .all()
+        )
+        for job_id, refund_reason in reason_rows:
             summary = summaries.setdefault(job_id, _RefundSummary())
-            summary.original_deducted += int(charge_amount or 0)
-            if charge_status == ChargeStatus.REFUNDED:
-                summary.refunded_amount += int(charge_amount or 0)
-                summary.append_reason(str(refund_reason or ""))
+            summary.append_reason(str(refund_reason or ""))
         return summaries
 
     def _load_deferred_summaries(self, job_ids: list[int]) -> dict[int, _DeferredSummary]:

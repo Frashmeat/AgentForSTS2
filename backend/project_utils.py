@@ -24,6 +24,22 @@ _GODOT_EXE_NAME = f"{_GODOT_DIRNAME}.exe"
 _GODOT_PATTERN = "Godot_v4.5.1*mono*win64.exe"
 _DETECT_TASKS: dict[str, "_DetectPathsTask"] = {}
 _DETECT_TASKS_LOCK = threading.Lock()
+_MAX_RETAINED_DETECT_TASKS = 10
+_DETECT_TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
+
+
+def _prune_detect_tasks_locked() -> None:
+    """剔除过量的已结束任务，避免 _DETECT_TASKS 无界增长。调用方必须持有 _DETECT_TASKS_LOCK。"""
+    terminal_ids = [
+        task_id
+        for task_id, task in _DETECT_TASKS.items()
+        if task.status in _DETECT_TERMINAL_STATUSES
+    ]
+    excess = len(terminal_ids) - _MAX_RETAINED_DETECT_TASKS
+    if excess > 0:
+        # dict 保持插入顺序；最早的 terminal task 先剔除
+        for stale_id in terminal_ids[:excess]:
+            _DETECT_TASKS.pop(stale_id, None)
 
 
 class _DetectPathsProgressReporter:
@@ -146,6 +162,7 @@ def start_detect_paths_task() -> dict:
     task = _DetectPathsTask(task_id)
     with _DETECT_TASKS_LOCK:
         _DETECT_TASKS[task_id] = task
+        _prune_detect_tasks_locked()
     task.start()
     return task.snapshot()
 

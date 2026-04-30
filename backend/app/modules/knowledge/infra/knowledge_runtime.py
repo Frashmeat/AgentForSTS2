@@ -41,6 +41,21 @@ BASELIB_RELEASES_API = "https://api.github.com/repos/Alchyr/BaseLib-StS2/release
 
 _REFRESH_TASKS: dict[str, "_RefreshTask"] = {}
 _REFRESH_TASKS_LOCK = threading.Lock()
+_MAX_RETAINED_REFRESH_TASKS = 10
+_REFRESH_TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
+
+
+def _prune_refresh_tasks_locked() -> None:
+    """剔除过量的已结束知识库刷新任务，避免 _REFRESH_TASKS 无界增长。调用方须持有 _REFRESH_TASKS_LOCK。"""
+    terminal_ids = [
+        task_id
+        for task_id, task in _REFRESH_TASKS.items()
+        if task.status in _REFRESH_TERMINAL_STATUSES
+    ]
+    excess = len(terminal_ids) - _MAX_RETAINED_REFRESH_TASKS
+    if excess > 0:
+        for stale_id in terminal_ids[:excess]:
+            _REFRESH_TASKS.pop(stale_id, None)
 _ILSPY_PATH_ENV = "SPIREFORGE_ILSPYCMD_PATH"
 _ILSPY_CANDIDATE_NAMES = ("ilspycmd.exe", "ilspycmd", "ILSpyCmd.dll", "ilspycmd.dll")
 _ILSPY_SEARCH_ROOTS = (
@@ -761,6 +776,7 @@ def start_refresh_task() -> dict[str, Any]:
     task = _RefreshTask(task_id)
     with _REFRESH_TASKS_LOCK:
         _REFRESH_TASKS[task_id] = task
+        _prune_refresh_tasks_locked()
     task.start()
     time.sleep(0.01)
     return task.snapshot()
