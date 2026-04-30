@@ -18,6 +18,7 @@
   - `web` 后端平台任务当前已通过 `WorkstationExecutionClient` 派发给 workstation，并通过轮询回收结果。
   - `single_generate/relic` 在 web 角色下当前走 Workstation 派发路径；Web 侧派发失败会记录 `workstation_dispatch_failed`，不会自动 fallback 到 Web runner。
   - Workstation 当前执行文本规划、日志分析、custom_code 代码生成和 card_fullscreen 资产生成；Linux 第一版不执行 `build.project`。
+  - `agent_backend=codex` 的文本规划步骤走 `agent_cli -> codex_cli`，并通过 `OPENAI_API_KEY` / `OPENAI_BASE_URL` 使用 Web 下发的执行期凭据；Web / Workstation 容器镜像必须内置 Codex CLI 与 Claude Code CLI，缺 CLI 属于部署依赖错误，不回退到 `litellm -> OpenAI-compatible completion`。
 - 当前问题：
   - 文档原稿仍把已落地能力写成“建议新增”或“未开始”，需要按代码事实更新。
   - Workstation 托管启动当前能启动并停止当前 Web 托管的子进程，但还没有完整的“外部已有 Workstation 进程健康探测、token 匹配后复用、token 不匹配拒绝复用”闭环。
@@ -660,6 +661,7 @@ GET /api/workstation/internal/health（尚未落地；当前用 capabilities 兼
 
 - `single.asset.plan`、`batch.custom_code.plan`、`log.analyze` 在 Workstation 内执行。
 - Web 不再拼接 `platform_single_asset_server_user`。
+- `agent_backend=codex` 的文本步骤使用 Codex CLI 路径；Web / Workstation 容器镜像内置 Codex CLI 与 Claude Code CLI，缺 CLI 不回退到 LiteLLM OpenAI-compatible completion。
 
 范围：
 

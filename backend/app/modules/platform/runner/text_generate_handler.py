@@ -48,9 +48,11 @@ def build_text_llm_config(binding: StepExecutionBinding) -> dict[str, object]:
     if not str(binding.credential).strip():
         raise ValueError("execution_binding.credential is required")
 
+    agent_backend = str(binding.agent_backend).strip() or "claude"
     return {
-        "mode": "claude_api",
-        "agent_backend": str(binding.agent_backend).strip() or "claude",
+        "mode": "agent_cli" if agent_backend == "codex" else "claude_api",
+        "agent_backend": agent_backend,
+        "provider": str(binding.provider).strip(),
         "model": str(binding.model).strip(),
         "api_key": str(binding.credential).strip(),
         "base_url": str(binding.base_url).strip(),

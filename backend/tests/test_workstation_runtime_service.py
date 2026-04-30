@@ -221,6 +221,43 @@ def test_workstation_runtime_manager_reports_process_exit_with_log_tail(tmp_path
     assert "fatal boot error" in status["last_error"]
 
 
+def test_workstation_runtime_manager_clears_startup_timeout_after_capabilities_recover(tmp_path):
+    _write_workstation_config(tmp_path)
+    responses = iter(
+        [
+            Exception("connection refused"),
+            {"generation": {"text_generation_available": True}},
+        ]
+    )
+
+    def fake_urlopen(*args, **kwargs):
+        response = next(responses)
+        if isinstance(response, Exception):
+            raise response
+        return FakeResponse(response)
+
+    manager = WorkstationRuntimeManager(
+        settings=_settings(
+            control_token_env="TEST_WORKSTATION_TOKEN",
+            startup_timeout_seconds=-1,
+        ),
+        cwd=tmp_path,
+        popen_factory=lambda *args, **kwargs: FakeProcess(),
+        token_factory=lambda: "generated-token",
+        sleep=lambda seconds: None,
+        urlopen=fake_urlopen,
+    )
+
+    first_status = manager.ensure_started().model_dump()
+    recovered_status = manager.get_runtime_status().model_dump()
+
+    assert "workstation did not become ready before timeout" in first_status["last_error"]
+    assert recovered_status["running"] is True
+    assert recovered_status["available"] is True
+    assert recovered_status["last_error"] == ""
+    assert recovered_status["capabilities"]["available"] is True
+
+
 def test_workstation_runtime_manager_reads_fixed_log_tail(tmp_path):
     manager = WorkstationRuntimeManager(
         settings=_settings(control_token_env="TEST_WORKSTATION_TOKEN"),

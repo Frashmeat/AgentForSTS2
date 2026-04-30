@@ -20,6 +20,7 @@ from llm.agent_backends.claude_cli import _resolve_claude_launcher
 from llm.prompt_builder import append_global_ai_instructions
 
 DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6"
+DEFAULT_LITELLM_USER_AGENT = "AgentTheSpire/0.1.0"
 
 
 def _decode_output(raw: bytes) -> str:
@@ -36,6 +37,24 @@ def resolve_model(llm_cfg: dict) -> str:
     if cfg.get("model"):
         return cfg["model"]
     return DEFAULT_CLAUDE_MODEL
+
+
+def resolve_litellm_model(llm_cfg: dict) -> str:
+    cfg = normalize_llm_config(llm_cfg)
+    model = resolve_model(cfg)
+    provider = str(cfg.get("provider", "")).strip().lower()
+    base_url = str(cfg.get("base_url", "")).strip()
+    if provider == "openai" and base_url and "/" not in model:
+        return f"openai/{model}"
+    return model
+
+
+def build_litellm_extra_headers(llm_cfg: dict) -> dict[str, str]:
+    raw_headers = llm_cfg.get("extra_headers")
+    headers = dict(raw_headers) if isinstance(raw_headers, dict) else {}
+    if not any(str(key).lower() == "user-agent" for key in headers):
+        headers["User-Agent"] = DEFAULT_LITELLM_USER_AGENT
+    return {str(key): str(value) for key, value in headers.items()}
 
 
 def resolve_text_backend(llm_cfg: dict) -> str:
@@ -160,6 +179,12 @@ async def _complete_via_claude_cli(prompt: str, llm_cfg: dict, cwd: Optional[Pat
 
 
 async def _complete_via_codex_cli(prompt: str, llm_cfg: dict, cwd: Optional[Path]) -> str:
+    env = os.environ.copy()
+    if llm_cfg.get("api_key"):
+        env["OPENAI_API_KEY"] = str(llm_cfg["api_key"])
+    if llm_cfg.get("base_url"):
+        env["OPENAI_BASE_URL"] = str(llm_cfg["base_url"])
+
     codex_exe = shutil.which("codex.cmd" if os.name == "nt" else "codex") or shutil.which("codex")
     if not codex_exe:
         raise RuntimeError("未找到 Codex CLI，请先安装并确保 codex 可执行文件在 PATH 中")
@@ -188,6 +213,7 @@ async def _complete_via_codex_cli(prompt: str, llm_cfg: dict, cwd: Optional[Path
                 capture_output=True,
                 timeout=180,
                 cwd=str(cwd) if cwd else None,
+                env=env,
             ),
         ),
         timeout=185,
@@ -201,10 +227,11 @@ async def _complete_via_codex_cli(prompt: str, llm_cfg: dict, cwd: Optional[Path
 async def _complete_via_litellm(prompt: str, llm_cfg: dict, cwd: Optional[Path] = None) -> str:
     _ = cwd
     response = await litellm.acompletion(
-        model=resolve_model(llm_cfg),
+        model=resolve_litellm_model(llm_cfg),
         messages=[{"role": "user", "content": prompt}],
         api_key=llm_cfg.get("api_key") or None,
         api_base=llm_cfg.get("base_url") or None,
+        extra_headers=build_litellm_extra_headers(llm_cfg),
         temperature=0.2,
         max_tokens=2048,
     )
@@ -220,13 +247,14 @@ async def _stream_via_litellm(
 ) -> str:
     _ = cwd
     stream = await litellm.acompletion(
-        model=resolve_model(llm_cfg),
+        model=resolve_litellm_model(llm_cfg),
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
         api_key=llm_cfg.get("api_key") or None,
         api_base=llm_cfg.get("base_url") or None,
+        extra_headers=build_litellm_extra_headers(llm_cfg),
         temperature=0.2,
         max_tokens=2048,
         stream=True,

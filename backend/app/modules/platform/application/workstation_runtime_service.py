@@ -149,6 +149,8 @@ class WorkstationRuntimeManager:
         capabilities = self._fetch_capabilities() if process_running or not managed else None
         reachable = isinstance(capabilities, dict) and capabilities.get("available") is True
         running = process_running or (not managed and reachable)
+        if reachable and self._last_error.startswith("workstation did not become ready before timeout"):
+            self._last_error = ""
         return WorkstationRuntimeStatus(
             available=not bool(self._last_error),
             auto_start=bool(self.config.get("auto_start", True)),

@@ -42,6 +42,7 @@ CONFIG_PATH = RUNTIME_CONFIG_PATH
 DEFAULT_LLM_CONFIG = {
     "mode": "agent_cli",
     "agent_backend": "claude",
+    "provider": "",
     "model": "",
     "api_key": "",
     "base_url": "",
@@ -181,7 +182,7 @@ def normalize_llm_config(llm_cfg: Optional[dict[str, Any]]) -> dict[str, Any]:
 
     if cfg.get("agent_backend") not in {"claude", "codex"}:
         cfg["agent_backend"] = "claude"
-    cfg.pop("provider", None)
+    cfg["provider"] = str(cfg.get("provider", "")).strip().lower()
     cfg["execution_mode"] = _normalize_execution_mode(cfg.get("execution_mode"))
 
     return cfg

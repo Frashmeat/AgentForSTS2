@@ -16,7 +16,7 @@ from app.modules.platform.runner.text_generate_handler import (
 )
 
 
-def test_build_text_llm_config_uses_execution_binding_values():
+def test_build_text_llm_config_uses_codex_cli_mode_for_codex_binding():
     llm_cfg = build_text_llm_config(
         StepExecutionBinding(
             agent_backend="codex",
@@ -27,8 +27,9 @@ def test_build_text_llm_config_uses_execution_binding_values():
         )
     )
 
-    assert llm_cfg["mode"] == "claude_api"
+    assert llm_cfg["mode"] == "agent_cli"
     assert llm_cfg["agent_backend"] == "codex"
+    assert llm_cfg["provider"] == "openai"
     assert llm_cfg["model"] == "gpt-5.4"
     assert llm_cfg["api_key"] == "sk-live-openai"
     assert llm_cfg["base_url"] == "https://api.openai.com/v1"
@@ -72,6 +73,7 @@ def test_execute_text_generate_step_uses_execution_binding_to_call_text_runner()
         "model": "gpt-5.4",
     }
     assert captured["prompt"] == "请分析这段日志"
+    assert captured["llm_cfg"]["provider"] == "openai"
     assert captured["llm_cfg"]["api_key"] == "sk-live-openai"
     assert captured["llm_cfg"]["model"] == "gpt-5.4"
 

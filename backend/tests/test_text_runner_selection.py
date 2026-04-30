@@ -64,6 +64,122 @@ def test_litellm_backend_accepts_text_backend_cwd_argument(monkeypatch, tmp_path
     assert captured["api_key"] == "sk-test"
 
 
+def test_litellm_openai_compatible_base_url_prefixes_bare_model(monkeypatch):
+    from llm import text_runner
+
+    captured: dict[str, object] = {}
+
+    async def fake_acompletion(**kwargs):
+        captured.update(kwargs)
+        return types.SimpleNamespace(
+            choices=[
+                types.SimpleNamespace(
+                    message=types.SimpleNamespace(content="ok"),
+                )
+            ]
+        )
+
+    monkeypatch.setattr(text_runner.litellm, "acompletion", fake_acompletion)
+
+    result = asyncio.run(
+        text_runner._complete_via_litellm(
+            "base prompt",
+            {
+                "provider": "openai",
+                "mode": "claude_api",
+                "model": "deepseek-v3.2",
+                "api_key": "sk-test",
+                "base_url": "https://e-flowcode.cc/v1",
+            },
+            None,
+        )
+    )
+
+    assert result == "ok"
+    assert captured["model"] == "openai/deepseek-v3.2"
+    assert captured["api_base"] == "https://e-flowcode.cc/v1"
+    assert captured["extra_headers"]["User-Agent"] == "AgentTheSpire/0.1.0"
+
+
+def test_litellm_openai_compatible_base_url_keeps_prefixed_model(monkeypatch):
+    from llm import text_runner
+
+    captured: dict[str, object] = {}
+
+    async def fake_acompletion(**kwargs):
+        captured.update(kwargs)
+        return types.SimpleNamespace(
+            choices=[
+                types.SimpleNamespace(
+                    message=types.SimpleNamespace(content="ok"),
+                )
+            ]
+        )
+
+    monkeypatch.setattr(text_runner.litellm, "acompletion", fake_acompletion)
+
+    result = asyncio.run(
+        text_runner._complete_via_litellm(
+            "base prompt",
+            {
+                "provider": "openai",
+                "mode": "claude_api",
+                "model": "openai/deepseek-v3.2",
+                "api_key": "sk-test",
+                "base_url": "https://e-flowcode.cc/v1",
+            },
+            None,
+        )
+    )
+
+    assert result == "ok"
+    assert captured["model"] == "openai/deepseek-v3.2"
+    assert captured["extra_headers"]["User-Agent"] == "AgentTheSpire/0.1.0"
+
+
+def test_litellm_stream_passes_user_agent_header(monkeypatch):
+    from llm import text_runner
+
+    captured: dict[str, object] = {}
+
+    class FakeStream:
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise StopAsyncIteration
+
+    async def fake_acompletion(**kwargs):
+        captured.update(kwargs)
+        return FakeStream()
+
+    async def collect_chunk(_chunk: str) -> None:
+        raise AssertionError("no chunks expected")
+
+    monkeypatch.setattr(text_runner.litellm, "acompletion", fake_acompletion)
+
+    result = asyncio.run(
+        text_runner._stream_via_litellm(
+            "system prompt",
+            "user prompt",
+            {
+                "provider": "openai",
+                "mode": "claude_api",
+                "model": "deepseek-v3.2",
+                "api_key": "sk-test",
+                "base_url": "https://e-flowcode.cc/v1",
+            },
+            collect_chunk,
+            None,
+        )
+    )
+
+    assert result == ""
+    assert captured["model"] == "openai/deepseek-v3.2"
+    assert captured["stream"] is True
+    assert captured["extra_headers"]["User-Agent"] == "AgentTheSpire/0.1.0"
+
+
 def test_build_text_prompt_appends_custom_prompt():
     llm_cfg = {"custom_prompt": "always answer in Chinese"}
     prompt = build_text_prompt("base prompt", llm_cfg)
@@ -166,3 +282,35 @@ def test_complete_via_claude_cli_uses_resolved_launcher(monkeypatch):
     ]
     assert "--print" in captured["cmd"]
     assert "-p" in captured["cmd"]
+
+
+def test_complete_via_codex_cli_passes_execution_credentials_to_subprocess(monkeypatch):
+    from llm import text_runner
+
+    captured: dict[str, object] = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["env"] = kwargs["env"]
+        return types.SimpleNamespace(stdout=b"ok\n", stderr=b"", returncode=0)
+
+    async def run_case():
+        return await text_runner._complete_via_codex_cli(
+            "base prompt",
+            {
+                "model": "gpt-5.4",
+                "api_key": "sk-live-openai",
+                "base_url": "https://api.openai.com/v1",
+            },
+            None,
+        )
+
+    monkeypatch.setattr(text_runner.shutil, "which", lambda _name: "C:/Tools/codex.cmd")
+    monkeypatch.setattr(text_runner.subprocess, "run", fake_run)
+
+    result = asyncio.run(run_case())
+
+    assert result == "ok"
+    assert captured["cmd"][0] == "C:/Tools/codex.cmd"
+    assert captured["env"]["OPENAI_API_KEY"] == "sk-live-openai"
+    assert captured["env"]["OPENAI_BASE_URL"] == "https://api.openai.com/v1"

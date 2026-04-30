@@ -9,6 +9,12 @@ WORKDIR /app
 
 COPY backend/requirements.txt /tmp/requirements.txt
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends nodejs npm \
+    && npm install -g @openai/codex @anthropic-ai/claude-code \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN python - <<'PY'
 from pathlib import Path
 
