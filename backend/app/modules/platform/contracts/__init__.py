@@ -23,8 +23,11 @@ from .job_queries import (
 )
 from .runner_contracts import StepExecutionBinding, StepExecutionRequest, StepExecutionResult
 from .server_execution import (
+    CreateExecutionProfileCommand,
+    ExecutionProfileAdminView,
     ExecutionProfileListView,
     ExecutionProfileView,
+    UpdateExecutionProfileCommand,
     UpdateServerPreferenceCommand,
     UserServerPreferenceView,
 )
@@ -54,9 +57,11 @@ __all__ = [
     "ArtifactSummary",
     "CancelJobCommand",
     "CreateServerCredentialCommand",
+    "CreateExecutionProfileCommand",
     "CreateServerWorkspaceCommand",
     "CreateJobCommand",
     "CreateJobItemInput",
+    "ExecutionProfileAdminView",
     "ExecutionProfileListView",
     "ExecutionProfileView",
     "JobDetailView",
@@ -70,6 +75,7 @@ __all__ = [
     "StepExecutionRequest",
     "StepExecutionResult",
     "UpdateServerCredentialCommand",
+    "UpdateExecutionProfileCommand",
     "UpdateServerPreferenceCommand",
     "UploadAssetCommand",
     "UploadedAssetView",

@@ -13,7 +13,16 @@ from app.modules.platform.application.services import (
     PlatformRuntimeAuditService,
     ServerCredentialAdminService,
 )
-from app.modules.platform.contracts import AdjustUserQuotaCommand, CreateServerCredentialCommand, UpdateServerCredentialCommand
+from app.modules.platform.contracts import (
+    AdjustUserQuotaCommand,
+    CreateExecutionProfileCommand,
+    CreateServerCredentialCommand,
+    UpdateExecutionProfileCommand,
+    UpdateServerCredentialCommand,
+)
+from app.modules.platform.infra.persistence.repositories.server_execution_repository_sqlalchemy import (
+    ExecutionProfileInUseError,
+)
 from ._auth_support import auth_session_scope, require_admin_user
 
 router = APIRouter(prefix="/admin")
@@ -73,6 +82,10 @@ def _build_server_credential_admin_service(session, request: Request) -> ServerC
         server_credential_cipher=cipher,
         server_credential_health_checker=health_checker_factory(),
     )
+
+
+def _build_server_execution_repository(session, request: Request):
+    return _container(request).resolve_singleton("platform.server_execution_repository_factory")(session)
 
 
 def _build_admin_quota_command_service(session, request: Request) -> AdminQuotaCommandService:
@@ -237,6 +250,83 @@ def list_server_credentials(request: Request, execution_profile_id: int | None =
     with _session_scope(request) as session:
         service = _build_admin_query_service(session, request)
         return {"items": [item.model_dump() for item in service.list_server_credentials(execution_profile_id=execution_profile_id)]}
+
+
+@router.post("/platform/execution-profiles")
+def create_execution_profile(request: Request, body: dict):
+    try:
+        command = CreateExecutionProfileCommand.model_validate(body)
+    except KeyError as error:
+        message = error.args[0] if error.args else "invalid request body"
+        raise HTTPException(status_code=400, detail=str(message)) from error
+
+    with auth_session_scope(request) as auth_session:
+        require_admin_user(request, auth_session)
+    with _session_scope(request) as session:
+        repository = _build_server_execution_repository(session, request)
+        try:
+            return repository.create_execution_profile(command).model_dump()
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.put("/platform/execution-profiles/{profile_id}")
+def update_execution_profile(request: Request, profile_id: int, body: dict):
+    try:
+        command = UpdateExecutionProfileCommand.model_validate(body)
+    except KeyError as error:
+        message = error.args[0] if error.args else "invalid request body"
+        raise HTTPException(status_code=400, detail=str(message)) from error
+
+    with auth_session_scope(request) as auth_session:
+        require_admin_user(request, auth_session)
+    with _session_scope(request) as session:
+        repository = _build_server_execution_repository(session, request)
+        try:
+            return repository.update_execution_profile(profile_id, command).model_dump()
+        except LookupError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.post("/platform/execution-profiles/{profile_id}/enable")
+def enable_execution_profile(request: Request, profile_id: int):
+    with auth_session_scope(request) as auth_session:
+        require_admin_user(request, auth_session)
+    with _session_scope(request) as session:
+        repository = _build_server_execution_repository(session, request)
+        try:
+            return repository.set_execution_profile_enabled(profile_id, True).model_dump()
+        except LookupError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.post("/platform/execution-profiles/{profile_id}/disable")
+def disable_execution_profile(request: Request, profile_id: int):
+    with auth_session_scope(request) as auth_session:
+        require_admin_user(request, auth_session)
+    with _session_scope(request) as session:
+        repository = _build_server_execution_repository(session, request)
+        try:
+            return repository.set_execution_profile_enabled(profile_id, False).model_dump()
+        except LookupError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.delete("/platform/execution-profiles/{profile_id}")
+def delete_execution_profile(request: Request, profile_id: int):
+    with auth_session_scope(request) as auth_session:
+        require_admin_user(request, auth_session)
+    with _session_scope(request) as session:
+        repository = _build_server_execution_repository(session, request)
+        try:
+            repository.delete_execution_profile(profile_id)
+        except LookupError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ExecutionProfileInUseError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return {"deleted": True}
 
 
 @router.get("/platform/workstation-runtime-status")

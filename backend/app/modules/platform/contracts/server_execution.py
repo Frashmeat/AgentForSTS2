@@ -17,6 +17,43 @@ class ExecutionProfileView(ModelBase):
 
 
 @dataclass(slots=True)
+class ExecutionProfileAdminView(ModelBase):
+    id: int
+    code: str
+    display_name: str
+    agent_backend: str
+    model: str
+    description: str
+    enabled: bool
+    recommended: bool
+    sort_order: int
+
+
+@dataclass(slots=True)
+class CreateExecutionProfileCommand(ModelBase):
+    code: str
+    display_name: str
+    agent_backend: str
+    model: str
+    description: str = ""
+    enabled: bool = True
+    recommended: bool = False
+    sort_order: int = 0
+
+
+@dataclass(slots=True)
+class UpdateExecutionProfileCommand(ModelBase):
+    code: str
+    display_name: str
+    agent_backend: str
+    model: str
+    description: str = ""
+    enabled: bool = True
+    recommended: bool = False
+    sort_order: int = 0
+
+
+@dataclass(slots=True)
 class ExecutionProfileListView(ModelBase):
     items: list[ExecutionProfileView] = field(default_factory=list)
 

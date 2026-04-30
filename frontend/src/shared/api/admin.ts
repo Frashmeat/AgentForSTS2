@@ -85,6 +85,7 @@ export interface AdminExecutionProfileListItem {
   display_name: string;
   agent_backend: string;
   model: string;
+  description?: string;
   enabled: boolean;
   recommended: boolean;
   sort_order: number;
@@ -92,6 +93,28 @@ export interface AdminExecutionProfileListItem {
 
 export interface AdminExecutionProfileListView {
   items: AdminExecutionProfileListItem[];
+}
+
+export interface CreateAdminExecutionProfileRequest {
+  code: string;
+  display_name: string;
+  agent_backend: string;
+  model: string;
+  description?: string;
+  enabled?: boolean;
+  recommended?: boolean;
+  sort_order?: number;
+}
+
+export interface UpdateAdminExecutionProfileRequest {
+  code: string;
+  display_name: string;
+  agent_backend: string;
+  model: string;
+  description?: string;
+  enabled?: boolean;
+  recommended?: boolean;
+  sort_order?: number;
 }
 
 export interface AdminServerCredentialListItem {
@@ -300,6 +323,48 @@ export function adjustAdminUserQuota(userId: number, body: AdjustAdminUserQuotaR
 export function listAdminExecutionProfiles(): Promise<AdminExecutionProfileListView> {
   return requestJson<AdminExecutionProfileListView>("/api/admin/platform/execution-profiles", {
     backend: "web",
+  });
+}
+
+export function createAdminExecutionProfile(
+  body: CreateAdminExecutionProfileRequest,
+): Promise<AdminExecutionProfileListItem> {
+  return requestJson<AdminExecutionProfileListItem>("/api/admin/platform/execution-profiles", {
+    backend: "web",
+    method: "POST",
+    body,
+  });
+}
+
+export function updateAdminExecutionProfile(
+  profileId: number,
+  body: UpdateAdminExecutionProfileRequest,
+): Promise<AdminExecutionProfileListItem> {
+  return requestJson<AdminExecutionProfileListItem>(`/api/admin/platform/execution-profiles/${profileId}`, {
+    backend: "web",
+    method: "PUT",
+    body,
+  });
+}
+
+export function enableAdminExecutionProfile(profileId: number): Promise<AdminExecutionProfileListItem> {
+  return requestJson<AdminExecutionProfileListItem>(`/api/admin/platform/execution-profiles/${profileId}/enable`, {
+    backend: "web",
+    method: "POST",
+  });
+}
+
+export function disableAdminExecutionProfile(profileId: number): Promise<AdminExecutionProfileListItem> {
+  return requestJson<AdminExecutionProfileListItem>(`/api/admin/platform/execution-profiles/${profileId}/disable`, {
+    backend: "web",
+    method: "POST",
+  });
+}
+
+export function deleteAdminExecutionProfile(profileId: number): Promise<{ deleted: boolean }> {
+  return requestJson<{ deleted: boolean }>(`/api/admin/platform/execution-profiles/${profileId}`, {
+    backend: "web",
+    method: "DELETE",
   });
 }
 

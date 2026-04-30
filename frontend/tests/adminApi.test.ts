@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 
 import {
   createAdminServerCredential,
+  createAdminExecutionProfile,
+  deleteAdminExecutionProfile,
   disableAdminServerCredential,
+  disableAdminExecutionProfile,
+  enableAdminExecutionProfile,
   enableAdminServerCredential,
   getAdminExecution,
   getAdminWorkstationRuntimeLogs,
@@ -22,6 +26,7 @@ import {
   listAdminServerCredentials,
   rollbackAdminKnowledgePack,
   runAdminServerCredentialHealthCheck,
+  updateAdminExecutionProfile,
   updateAdminServerCredential,
 } from "../src/shared/api/index.ts";
 
@@ -140,6 +145,29 @@ test("admin server credential endpoints compose resource paths and methods", asy
   });
 
   await listAdminExecutionProfiles();
+  await createAdminExecutionProfile({
+    code: "codex-gpt-5-5",
+    display_name: "Codex CLI / gpt-5.5",
+    agent_backend: "codex",
+    model: "gpt-5.5",
+    description: "新模型配置",
+    enabled: true,
+    recommended: false,
+    sort_order: 30,
+  });
+  await updateAdminExecutionProfile(3, {
+    code: "codex-gpt-5-5-latest",
+    display_name: "Codex CLI / gpt-5.5 latest",
+    agent_backend: "codex",
+    model: "gpt-5.5",
+    description: "更新后的配置",
+    enabled: true,
+    recommended: true,
+    sort_order: 5,
+  });
+  await enableAdminExecutionProfile(3);
+  await disableAdminExecutionProfile(3);
+  await deleteAdminExecutionProfile(3);
   await listAdminServerCredentials();
   await listAdminServerCredentials(2);
   await createAdminServerCredential({
@@ -169,18 +197,28 @@ test("admin server credential endpoints compose resource paths and methods", asy
   await runAdminServerCredentialHealthCheck(5);
 
   assert.equal(calls[0].input, "/api/admin/platform/execution-profiles");
-  assert.equal(calls[1].input, "/api/admin/platform/server-credentials");
-  assert.equal(calls[2].input, "/api/admin/platform/server-credentials?execution_profile_id=2");
-  assert.equal(calls[3].input, "/api/admin/platform/server-credentials");
+  assert.equal(calls[1].input, "/api/admin/platform/execution-profiles");
+  assert.equal(calls[1].init?.method, "POST");
+  assert.equal(calls[2].input, "/api/admin/platform/execution-profiles/3");
+  assert.equal(calls[2].init?.method, "PUT");
+  assert.equal(calls[3].input, "/api/admin/platform/execution-profiles/3/enable");
   assert.equal(calls[3].init?.method, "POST");
-  assert.equal(calls[4].input, "/api/admin/platform/server-credentials/5");
-  assert.equal(calls[4].init?.method, "PUT");
-  assert.equal(calls[5].input, "/api/admin/platform/server-credentials/5/enable");
-  assert.equal(calls[5].init?.method, "POST");
-  assert.equal(calls[6].input, "/api/admin/platform/server-credentials/5/disable");
-  assert.equal(calls[6].init?.method, "POST");
-  assert.equal(calls[7].input, "/api/admin/platform/server-credentials/5/health-check");
-  assert.equal(calls[7].init?.method, "POST");
+  assert.equal(calls[4].input, "/api/admin/platform/execution-profiles/3/disable");
+  assert.equal(calls[4].init?.method, "POST");
+  assert.equal(calls[5].input, "/api/admin/platform/execution-profiles/3");
+  assert.equal(calls[5].init?.method, "DELETE");
+  assert.equal(calls[6].input, "/api/admin/platform/server-credentials");
+  assert.equal(calls[7].input, "/api/admin/platform/server-credentials?execution_profile_id=2");
+  assert.equal(calls[8].input, "/api/admin/platform/server-credentials");
+  assert.equal(calls[8].init?.method, "POST");
+  assert.equal(calls[9].input, "/api/admin/platform/server-credentials/5");
+  assert.equal(calls[9].init?.method, "PUT");
+  assert.equal(calls[10].input, "/api/admin/platform/server-credentials/5/enable");
+  assert.equal(calls[10].init?.method, "POST");
+  assert.equal(calls[11].input, "/api/admin/platform/server-credentials/5/disable");
+  assert.equal(calls[11].init?.method, "POST");
+  assert.equal(calls[12].input, "/api/admin/platform/server-credentials/5/health-check");
+  assert.equal(calls[12].init?.method, "POST");
 });
 
 test("admin endpoints expose typed execution and refund fields", async () => {

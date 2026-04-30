@@ -307,6 +307,7 @@ class AdminQueryRepositoriesSqlAlchemy(AdminQueryRepositories):
                 display_name=row.display_name,
                 agent_backend=row.agent_backend,
                 model=row.model,
+                description=row.description,
                 enabled=row.enabled,
                 recommended=row.recommended,
                 sort_order=row.sort_order,

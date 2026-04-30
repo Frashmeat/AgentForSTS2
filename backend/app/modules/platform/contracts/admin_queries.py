@@ -127,6 +127,7 @@ class AdminExecutionProfileListItem(ModelBase):
     display_name: str
     agent_backend: str
     model: str
+    description: str
     enabled: bool
     recommended: bool
     sort_order: int

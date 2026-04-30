@@ -33,6 +33,7 @@ from app.modules.platform.infra.persistence.models import (
     QuotaAccountRecord,
     QuotaAccountStatus,
     QuotaBalanceRecord,
+    UserPlatformPreferenceRecord,
     ServerCredentialRecord,
 )
 from app.modules.platform.infra.persistence.repositories.job_repository_sqlalchemy import JobRepositorySqlAlchemy
@@ -311,6 +312,7 @@ def test_platform_admin_router_supports_execution_refund_and_audit_queries(clien
     profiles = test_client.get("/api/admin/platform/execution-profiles")
     assert profiles.status_code == 200
     assert profiles.json()["items"][0]["code"] == "codex-gpt-5-4"
+    assert profiles.json()["items"][0]["description"] == "默认推荐"
 
 
 def test_platform_admin_router_returns_workstation_runtime_status(client):
@@ -368,6 +370,119 @@ def test_platform_admin_router_returns_workstation_runtime_logs(client):
 
     rejected = test_client.get("/api/admin/platform/workstation-runtime-logs", params={"stream": "../config"})
     assert rejected.status_code == 400
+
+
+def test_platform_admin_router_manages_execution_profiles(client):
+    test_client, _, _, _ = client
+
+    login = test_client.post(
+        "/api/auth/login",
+        json={
+            "login": "admin@example.com",
+            "password": "admin-pass",
+        },
+    )
+    assert login.status_code == 200
+
+    created = test_client.post(
+        "/api/admin/platform/execution-profiles",
+        json={
+            "code": "codex-gpt-5-5",
+            "display_name": "Codex CLI / gpt-5.5",
+            "agent_backend": "codex",
+            "model": "gpt-5.5",
+            "description": "新模型配置",
+            "enabled": True,
+            "recommended": False,
+            "sort_order": 30,
+        },
+    )
+    assert created.status_code == 200
+    created_payload = created.json()
+    assert created_payload["code"] == "codex-gpt-5-5"
+    assert created_payload["model"] == "gpt-5.5"
+    assert created_payload["enabled"] is True
+
+    duplicate = test_client.post(
+        "/api/admin/platform/execution-profiles",
+        json={
+            "code": "codex-gpt-5-5",
+            "display_name": "Duplicate",
+            "agent_backend": "codex",
+            "model": "gpt-5.5",
+        },
+    )
+    assert duplicate.status_code == 400
+
+    updated = test_client.put(
+        f"/api/admin/platform/execution-profiles/{created_payload['id']}",
+        json={
+            "code": "codex-gpt-5-5-latest",
+            "display_name": "Codex CLI / gpt-5.5 latest",
+            "agent_backend": "codex",
+            "model": "gpt-5.5",
+            "description": "更新后的配置",
+            "enabled": True,
+            "recommended": True,
+            "sort_order": 5,
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["code"] == "codex-gpt-5-5-latest"
+    assert updated.json()["recommended"] is True
+
+    disabled = test_client.post(f"/api/admin/platform/execution-profiles/{created_payload['id']}/disable")
+    assert disabled.status_code == 200
+    assert disabled.json()["enabled"] is False
+
+    enabled = test_client.post(f"/api/admin/platform/execution-profiles/{created_payload['id']}/enable")
+    assert enabled.status_code == 200
+    assert enabled.json()["enabled"] is True
+
+    deleted = test_client.delete(f"/api/admin/platform/execution-profiles/{created_payload['id']}")
+    assert deleted.status_code == 200
+    assert deleted.json()["deleted"] is True
+
+
+def test_platform_admin_router_rejects_deleting_referenced_execution_profile(client):
+    test_client, _, _, _ = client
+
+    login = test_client.post(
+        "/api/auth/login",
+        json={
+            "login": "admin@example.com",
+            "password": "admin-pass",
+        },
+    )
+    assert login.status_code == 200
+
+    referenced = test_client.delete("/api/admin/platform/execution-profiles/1")
+    assert referenced.status_code == 409
+    assert "referenced" in referenced.json()["detail"]
+
+    session = test_client.app.state.container.resolve_singleton("platform.db_session_factory")()
+    try:
+        profile = ExecutionProfileRecord(
+            code="claude-extra",
+            display_name="Claude extra",
+            agent_backend="claude",
+            model="claude-sonnet-4-6",
+            description="",
+            enabled=True,
+            recommended=False,
+            sort_order=40,
+        )
+        session.add(profile)
+        session.flush()
+        session.add(UserPlatformPreferenceRecord(user_id=1001, default_execution_profile_id=profile.id))
+        profile_id = profile.id
+        session.commit()
+    finally:
+        session.close()
+
+    preferred = test_client.delete(f"/api/admin/platform/execution-profiles/{profile_id}")
+    assert preferred.status_code == 409
+    assert "referenced" in preferred.json()["detail"]
 
 
 def test_platform_admin_router_supports_user_quota_management(client):
