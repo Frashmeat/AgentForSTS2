@@ -22,8 +22,8 @@ _log = logging.getLogger("batch")
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
-from approval.action_prompt import build_action_prompt
-from approval.runtime import get_approval_service
+from app.modules.approval.application.action_prompt import build_action_prompt
+from app.modules.approval.runtime import get_approval_service
 from app.modules.codegen.api import (
     build_and_fix,
     create_asset,

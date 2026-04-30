@@ -17,8 +17,8 @@ from typing import Literal
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from approval.action_prompt import build_action_prompt
-from approval.runtime import get_approval_service
+from app.modules.approval.application.action_prompt import build_action_prompt
+from app.modules.approval.runtime import get_approval_service
 from app.modules.workflow.application.context import WorkflowContext
 from app.modules.codegen.api import create_asset, create_custom_code, build_and_fix, create_mod_project, package_mod
 from app.modules.workflow.application.engine import WorkflowEngine

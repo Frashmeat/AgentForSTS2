@@ -5,9 +5,9 @@ import subprocess
 from pathlib import Path
 
 from app.modules.approval.application.ports import ActionResult
+from app.modules.approval.domain.models import ActionRequest
 from app.modules.build.application.ports import BuildRequest
 from app.modules.build.infra.dotnet_builder import DotnetBuildBackend
-from approval.models import ActionRequest
 
 
 class ApprovalExecutor:

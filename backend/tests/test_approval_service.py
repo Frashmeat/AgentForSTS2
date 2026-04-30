@@ -6,8 +6,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from approval.service import ApprovalService
-from approval.store import InMemoryApprovalStore
+from app.modules.approval.application.services import ApprovalService
+from app.modules.approval.infra.in_memory_store import InMemoryApprovalStore
 
 
 def test_service_converts_ai_plan_into_pending_requests():

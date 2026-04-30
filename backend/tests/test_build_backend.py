@@ -8,8 +8,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from app.modules.approval.application.ports import ActionResult
 from app.modules.build.application.ports import BuildRequest, BuildResult
 from app.modules.build.infra.dotnet_builder import DotnetBuildBackend
-from approval.service import ApprovalService
-from approval.store import InMemoryApprovalStore
+from app.modules.approval.application.services import ApprovalService
+from app.modules.approval.infra.in_memory_store import InMemoryApprovalStore
 
 
 class FakeExecutor:

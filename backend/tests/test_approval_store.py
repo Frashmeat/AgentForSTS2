@@ -4,8 +4,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from approval.models import ActionRequest
-from approval.store import InMemoryApprovalStore
+from app.modules.approval.domain.models import ActionRequest
+from app.modules.approval.infra.in_memory_store import InMemoryApprovalStore
 
 
 def _make_action(title: str = "Write file") -> ActionRequest:

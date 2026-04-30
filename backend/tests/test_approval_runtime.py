@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from approval.runtime import get_approval_executor, reset_approval_runtime
+from app.modules.approval.runtime import get_approval_executor, reset_approval_runtime
 
 
 @pytest.fixture(autouse=True)
@@ -19,7 +19,7 @@ def approval_runtime_isolation():
 
 
 def test_runtime_uses_configured_allowed_roots_and_commands(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    from approval import runtime
+    from app.modules.approval import runtime
 
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
@@ -46,7 +46,7 @@ def test_runtime_uses_configured_allowed_roots_and_commands(monkeypatch: pytest.
 
 
 def test_runtime_falls_back_to_repo_root_when_allowed_roots_not_configured(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    from approval import runtime
+    from app.modules.approval import runtime
 
     repo_root = tmp_path / "repo"
     repo_root.mkdir()

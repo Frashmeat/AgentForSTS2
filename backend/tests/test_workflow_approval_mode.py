@@ -34,9 +34,9 @@ sys.modules.setdefault("image.postprocess", types.SimpleNamespace(PROFILES={}, p
 sys.modules.setdefault("image.prompt_adapter", types.SimpleNamespace(adapt_prompt=lambda *args, **kwargs: None, ImageProvider=str))
 
 from app.modules.approval.application.ports import ActionResult
-from approval.runtime import reset_approval_runtime
-from approval.service import ApprovalService
-from approval.store import InMemoryApprovalStore
+from app.modules.approval.runtime import reset_approval_runtime
+from app.modules.approval.application.services import ApprovalService
+from app.modules.approval.infra.in_memory_store import InMemoryApprovalStore
 from routers import workflow
 from app.modules.workflow.application.step import WorkflowStep
 

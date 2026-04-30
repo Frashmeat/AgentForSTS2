@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from approval.models import RiskLevel
+from app.modules.approval.domain.models import RiskLevel
 
 _DEFAULT_RISK_BY_KIND: dict[str, RiskLevel] = {
     "read_file": "low",

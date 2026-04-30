@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from approval.models import ActionRequest
+from app.modules.approval.domain.models import ActionRequest
 
 
 class InMemoryApprovalStore:

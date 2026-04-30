@@ -182,8 +182,8 @@ except (ModuleNotFoundError, ImportError):
     prompt_adapter_stub.ImageProvider = str
     sys.modules["image.prompt_adapter"] = prompt_adapter_stub
 
-from approval.runtime import reset_approval_runtime
-from approval.models import ActionRequest
+from app.modules.approval.runtime import reset_approval_runtime
+from app.modules.approval.domain.models import ActionRequest
 from agents.planner import ModPlan, PlanItem
 from app.modules.workflow.application.step import WorkflowStep
 from routers import batch_workflow

@@ -6,8 +6,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from approval.executor import ActionResult, ApprovalExecutor, LocalApprovalExecutor
-from approval.models import ActionRequest
+from app.modules.approval.application.ports import ActionResult
+from app.modules.approval.domain.models import ActionRequest
+from app.modules.approval.infra.local_executor import ApprovalExecutor, LocalApprovalExecutor
 
 
 def _make_action() -> ActionRequest:

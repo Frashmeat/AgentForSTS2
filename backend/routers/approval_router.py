@@ -4,7 +4,7 @@ import asyncio
 
 from fastapi import APIRouter, HTTPException, Request
 
-from approval.runtime import get_approval_service, get_approval_store
+from app.modules.approval.runtime import get_approval_service, get_approval_store
 
 router = APIRouter(prefix="/approvals")
 

@@ -8,8 +8,8 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from approval.models import ActionRequest
-from approval.runtime import get_approval_store, get_approval_executor, reset_approval_runtime
+from app.modules.approval.domain.models import ActionRequest
+from app.modules.approval.runtime import get_approval_store, get_approval_executor, reset_approval_runtime
 from routers.approval_router import router
 
 

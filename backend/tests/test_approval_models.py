@@ -4,8 +4,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from approval.models import ActionRequest
-from approval.policies import infer_risk_level, should_require_approval
+from app.modules.approval.domain.models import ActionRequest
+from app.modules.approval.domain.policies import infer_risk_level, should_require_approval
 
 
 def test_action_request_serializes_minimum_fields():

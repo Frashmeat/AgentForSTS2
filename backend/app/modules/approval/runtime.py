@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from approval.executor import LocalApprovalExecutor
-from approval.service import ApprovalService
-from approval.store import InMemoryApprovalStore
+from app.modules.approval.application.services import ApprovalService
+from app.modules.approval.infra.in_memory_store import InMemoryApprovalStore
+from app.modules.approval.infra.local_executor import LocalApprovalExecutor
 from config import get_config
 
 _store: InMemoryApprovalStore | None = None
@@ -13,7 +13,8 @@ _executor: LocalApprovalExecutor | None = None
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    # backend/app/modules/approval/runtime.py -> backend -> repo root
+    return Path(__file__).resolve().parents[4]
 
 
 def _configured_allowed_roots() -> list[Path]:

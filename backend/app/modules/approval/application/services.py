@@ -17,7 +17,7 @@ class ApprovalService:
         source_backend: str,
         source_workflow: str,
     ) -> ActionRequest:
-        from approval.policies import infer_risk_level, should_require_approval
+        from app.modules.approval.domain.policies import infer_risk_level, should_require_approval
 
         if "kind" not in raw_action:
             raise ValueError("Action plan item is missing required field: kind")

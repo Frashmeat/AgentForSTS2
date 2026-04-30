@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from approval.runtime import get_approval_service, get_approval_store
+from app.modules.approval.runtime import get_approval_service, get_approval_store
 
 
 class ApprovalFacadeService:

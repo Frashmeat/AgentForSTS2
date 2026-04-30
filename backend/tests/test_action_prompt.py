@@ -7,8 +7,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.shared.prompting import PromptLoader
-from approval import action_prompt as action_prompt_module
-from approval.action_prompt import build_action_prompt
+from app.modules.approval.application import action_prompt as action_prompt_module
+from app.modules.approval.application.action_prompt import build_action_prompt
 
 
 def test_action_prompt_includes_required_keywords():
