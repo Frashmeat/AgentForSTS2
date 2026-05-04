@@ -94,6 +94,7 @@ powershell -File .\tools\tools.ps1 stop app
   Starts `web-backend` only for platform/auth/job/quota APIs.
 - `powershell -File .\tools\tools.ps1 deploy app`
   Starts the final local + Docker topology from `runtime/agentthespire.config.json`: local `frontend + local-workstation`, plus Docker `postgres + web-workstation + web`. Deployment fails if any Docker service is missing or not running after compose up.
+  After compose up, deployment runs Alembic and reconciles the default admin account to `admin / admin@example.com / admin123456`.
 
 Current product behavior:
 
@@ -218,6 +219,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\tools.ps1 start workstation   #
 - 生成物位于 `runtime/generated/*`，可删除重建。
 - 前端只连接本机 `local-workstation` 与 `web`。
 - `web` 只通过 Docker 内网连接 `web-workstation`。
+- 直接部署会在 Docker `web` 容器内执行 Alembic 迁移，并把默认管理员账号收敛为 `admin / admin@example.com / admin123456`；普通部署不清空业务数据，`-ResetDb` 才会删除 Docker Postgres 卷并重建。
 
 固定拓扑如下：
 

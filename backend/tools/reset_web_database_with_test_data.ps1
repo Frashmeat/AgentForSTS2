@@ -1,5 +1,5 @@
 ﻿param(
-    [string]$ProjectName = "agentthespire-web-release",
+    [string]$ProjectName = "agentthespire-app",
     [string]$ReleaseRoot = "",
     [string]$ComposeFile = "",
     [string]$EnvFile = "",

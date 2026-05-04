@@ -128,6 +128,19 @@ powershell -File .\tools\tools.ps1 package app -NoZip
 
 默认“直接部署”会执行 Docker compose build/up，并校验 `postgres`、`web-workstation`、`web` 三个服务都已处于 `running`；任一服务缺失或未运行会直接报错，不继续伪装部署成功。
 
+直接部署还会在 Docker `web` 容器内执行：
+
+- `alembic upgrade head`
+- `python tools/bootstrap_web_runtime.py --ensure-default-admin`
+
+默认管理员会被收敛为：
+
+```text
+admin / admin@example.com / admin123456
+```
+
+这条初始化逻辑由 `backend/tools/bootstrap_web_runtime.py` 统一实现，部署脚本只负责编排，避免 PowerShell 和后端认证逻辑各维护一份密码真源。`-ResetDb` 仍用于删除 Docker Postgres 卷并重建；普通部署不会清空业务数据。
+
 轻量预览：
 
 ```powershell

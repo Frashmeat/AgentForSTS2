@@ -246,9 +246,13 @@ def test_deploy_app_verifies_docker_web_stack_after_compose_up() -> None:
     source = DEPLOY_APP_PATH.read_text(encoding="utf-8-sig")
 
     assert "function Assert-DockerComposeServicesRunning" in source
+    assert "function Invoke-WebRuntimeBootstrap" in source
     assert '$expectedServices = @("postgres", "web-workstation", "web")' in source
     assert "[string[]]$ComposeArgs" in source
     assert 'Invoke-DockerCompose -AppConfig $appConfig -Layout $layout -EnvFile $paths.DockerEnv -ComposeArgs @("up", "-d", "--no-build")' in source
     assert "[string[]]$Args" not in source
     assert "Assert-DockerComposeServicesRunning -AppConfig $appConfig -Layout $layout -EnvFile $paths.DockerEnv" in source
+    assert 'Invoke-DockerComposeExec -AppConfig $AppConfig -Layout $Layout -EnvFile $EnvFile -ExecArgs @("web", "alembic", "upgrade", "head")' in source
+    assert 'Invoke-DockerComposeExec -AppConfig $AppConfig -Layout $Layout -EnvFile $EnvFile -ExecArgs @("web", "python", "tools/bootstrap_web_runtime.py", "--ensure-default-admin")' in source
     assert "Docker web 栈: postgres / web-workstation / web 已启动" in source
+    assert "默认管理员   : admin / admin@example.com / admin123456（每次部署收敛）" in source

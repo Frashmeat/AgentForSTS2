@@ -51,5 +51,5 @@ WORKDIR /app/backend
 
 EXPOSE 7870
 
-# 启动前先跑数据库迁移
-CMD ["sh", "-c", "alembic upgrade head && uvicorn main_web:app --host 0.0.0.0 --port 7870"]
+# 启动前先跑数据库迁移，并收敛默认管理员
+CMD ["sh", "-c", "alembic upgrade head && python tools/bootstrap_web_runtime.py --ensure-default-admin && uvicorn main_web:app --host 0.0.0.0 --port 7870"]

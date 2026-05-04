@@ -22,7 +22,7 @@ def test_web_database_reset_script_rebuilds_current_compose_database() -> None:
     assert script_path.exists()
 
     content = script_path.read_text(encoding="utf-8")
-    assert "agentthespire-web-release" in content
+    assert "agentthespire-app" in content
     assert '"compose", "--project-name"' in content
     assert "ReleaseRoot" in content
     assert "DROP DATABASE IF EXISTS" in content

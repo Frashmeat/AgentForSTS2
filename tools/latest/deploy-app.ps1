@@ -22,6 +22,9 @@ release 目录。留空时优先识别当前仓库，否则使用 tools/latest/a
 .PARAMETER ResetDatabase
 删除 Docker Postgres 卷并重建。
 
+.PARAMETER SkipBootstrap
+跳过 Web 数据库迁移和默认管理员初始化。仅用于调试部署脚本。
+
 .PARAMETER DryRun
 只生成配置并打印将执行的动作。
 
@@ -53,6 +56,8 @@ param(
 
     [Alias("ResetDb")]
     [switch]$ResetDatabase,
+
+    [switch]$SkipBootstrap,
 
     [switch]$DryRun,
 
@@ -578,6 +583,33 @@ function Assert-DockerComposeServicesRunning {
     }
 }
 
+function Invoke-DockerComposeExec {
+    param([hashtable]$AppConfig, [hashtable]$Layout, [string]$EnvFile, [string[]]$ExecArgs)
+    $projectName = [string](Ensure-Hashtable -Value $AppConfig.docker).project_name
+    Push-Location $Layout.Root
+    try {
+        $dockerArgs = @("compose", "--project-name", $projectName, "--env-file", $EnvFile, "-f", $Layout.ComposeFile, "exec", "-T") + $ExecArgs
+        Write-Host ("Docker compose exec: docker {0}" -f ($dockerArgs -join " "))
+        & docker @dockerArgs
+        if ($LASTEXITCODE -ne 0) {
+            throw "docker compose exec 执行失败，退出码: $LASTEXITCODE"
+        }
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+function Invoke-WebRuntimeBootstrap {
+    param([hashtable]$AppConfig, [hashtable]$Layout, [string]$EnvFile)
+
+    Write-Host "执行 Web 数据库迁移"
+    Invoke-DockerComposeExec -AppConfig $AppConfig -Layout $Layout -EnvFile $EnvFile -ExecArgs @("web", "alembic", "upgrade", "head")
+
+    Write-Host "确保默认管理员账号存在"
+    Invoke-DockerComposeExec -AppConfig $AppConfig -Layout $Layout -EnvFile $EnvFile -ExecArgs @("web", "python", "tools/bootstrap_web_runtime.py", "--ensure-default-admin")
+}
+
 $layout = Resolve-AppLayout -PreferredReleaseRoot $ReleaseRoot
 $script:ActiveLayout = $layout
 Assert-PathExists -Path $layout.ComposeFile -Label "app compose 模板"
@@ -645,6 +677,9 @@ if ($RebuildImages) {
 }
 Invoke-DockerCompose -AppConfig $appConfig -Layout $layout -EnvFile $paths.DockerEnv -ComposeArgs @("up", "-d", "--no-build")
 Assert-DockerComposeServicesRunning -AppConfig $appConfig -Layout $layout -EnvFile $paths.DockerEnv
+if (-not $SkipBootstrap) {
+    Invoke-WebRuntimeBootstrap -AppConfig $appConfig -Layout $layout -EnvFile $paths.DockerEnv
+}
 
 Stop-ProcessListeningOnPort -Port $localWorkstationPort
 Stop-ProcessListeningOnPort -Port $frontendPort
@@ -670,6 +705,9 @@ Write-Host "  前端地址     : http://127.0.0.1:$frontendPort"
 Write-Host "  工作站地址   : http://127.0.0.1:$localWorkstationPort"
 Write-Host "  Web 地址     : http://127.0.0.1:$webPort"
 Write-Host "  Docker web 栈: postgres / web-workstation / web 已启动"
+if (-not $SkipBootstrap) {
+    Write-Host "  默认管理员   : admin / admin@example.com / admin123456（每次部署收敛）"
+}
 Write-Host "  停止入口     : powershell -File .\tools\tools.ps1 stop app"
 
 if (-not $NoBrowser) {
