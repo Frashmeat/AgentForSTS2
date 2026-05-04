@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 from app.shared.infra.config.settings import Settings
 
 _CONFIG_PATH_ENV = "SPIREFORGE_CONFIG_PATH"
+_RUNTIME_DIR_ENV = "SPIREFORGE_RUNTIME_DIR"
 
 
 @dataclass(slots=True)
@@ -31,6 +32,8 @@ class WorkstationRuntimeStatus:
     capabilities: dict[str, object] | None = None
     stdout_log_path: str = ""
     stderr_log_path: str = ""
+    workstation_config_path: str = ""
+    runtime_root: str = ""
 
     def model_dump(self) -> dict[str, object]:
         return {
@@ -45,6 +48,8 @@ class WorkstationRuntimeStatus:
             "capabilities": self.capabilities,
             "stdout_log_path": self.stdout_log_path,
             "stderr_log_path": self.stderr_log_path,
+            "workstation_config_path": self.workstation_config_path,
+            "runtime_root": self.runtime_root,
         }
 
 
@@ -112,6 +117,7 @@ class WorkstationRuntimeManager:
             token_env = self._control_token_env()
             env[token_env] = env.get(token_env, "").strip() or self._token_factory()
             env[_CONFIG_PATH_ENV] = str(self._workstation_config_path())
+            env[_RUNTIME_DIR_ENV] = str(self._runtime_dir_path())
             os.environ[token_env] = env[token_env]
             stdout_handle, stderr_handle = self._open_log_handles()
             self._close_log_handles()
@@ -163,6 +169,8 @@ class WorkstationRuntimeManager:
             capabilities=capabilities,
             stdout_log_path=str(self._stdout_log_path()),
             stderr_log_path=str(self._stderr_log_path()),
+            workstation_config_path=str(self._workstation_config_path()),
+            runtime_root=str(self._runtime_dir_path()),
         )
 
     def read_runtime_log_tail(self, stream: str, tail_bytes: int = 65_536) -> WorkstationRuntimeLogTail:
@@ -227,7 +235,10 @@ class WorkstationRuntimeManager:
         return self._cwd
 
     def _log_dir(self) -> Path:
-        return self._runtime_root() / "runtime" / "logs"
+        return self._runtime_dir_path() / "logs"
+
+    def _runtime_dir_path(self) -> Path:
+        return self._runtime_root() / "runtime"
 
     def _stdout_log_path(self) -> Path:
         return self._log_dir() / "web-workstation.stdout.log"

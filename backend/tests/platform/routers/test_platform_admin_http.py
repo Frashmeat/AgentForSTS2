@@ -60,6 +60,9 @@ class FakePlatformHealthChecker:
 
 
 class FakeWorkstationRuntimeStatus:
+    def __init__(self, capabilities: dict[str, object] | None = None) -> None:
+        self._capabilities = capabilities
+
     def model_dump(self):
         return {
             "available": True,
@@ -70,15 +73,20 @@ class FakeWorkstationRuntimeStatus:
             "control_token_env": "ATS_WORKSTATION_CONTROL_TOKEN",
             "pid": 12345,
             "last_error": "",
-            "capabilities": {"available": True},
+            "capabilities": self._capabilities,
             "stdout_log_path": "runtime/logs/web-workstation.stdout.log",
             "stderr_log_path": "runtime/logs/web-workstation.stderr.log",
+            "workstation_config_path": "runtime/workstation.config.json",
+            "runtime_root": "runtime",
         }
 
 
 class FakeWorkstationRuntimeManager:
+    def __init__(self, capabilities: dict[str, object] | None) -> None:
+        self._status = FakeWorkstationRuntimeStatus(capabilities)
+
     def get_runtime_status(self):
-        return FakeWorkstationRuntimeStatus()
+        return self._status
 
     def read_runtime_log_tail(self, stream: str, tail_bytes: int = 65_536):
         if stream not in {"stdout", "stderr"}:
@@ -322,8 +330,17 @@ def test_platform_admin_router_supports_execution_refund_and_audit_queries(clien
     assert profiles.json()["items"][0]["description"] == "默认推荐"
 
 
-def test_platform_admin_router_returns_workstation_runtime_status(client):
+def test_platform_admin_router_returns_workstation_runtime_status(client, monkeypatch, tmp_path: Path):
     test_client, _, _, _ = client
+    runtime_root = tmp_path / "runtime"
+    knowledge_root = runtime_root / "knowledge"
+    monkeypatch.setattr(knowledge_runtime, "RUNTIME_ROOT", runtime_root)
+    monkeypatch.setattr(knowledge_runtime, "KNOWLEDGE_ROOT", knowledge_root)
+    monkeypatch.setattr(
+        knowledge_runtime,
+        "get_active_knowledge_pack",
+        lambda: {"pack_id": "pack-web", "label": "Web Knowledge"},
+    )
 
     login = test_client.post(
         "/api/auth/login",
@@ -336,9 +353,20 @@ def test_platform_admin_router_returns_workstation_runtime_status(client):
 
     missing = test_client.get("/api/admin/platform/workstation-runtime-status")
     assert missing.status_code == 200
-    assert missing.json() == {"available": False, "reason": "workstation_runtime_manager_not_registered"}
+    missing_payload = missing.json()
+    assert missing_payload["available"] is False
+    assert missing_payload["reason"] == "workstation_runtime_manager_not_registered"
+    assert missing_payload["web_knowledge"]["active_pack_id"] == "pack-web"
+    assert missing_payload["knowledge_runtime_consistent"] is False
 
-    test_client.app.state.workstation_runtime_manager = FakeWorkstationRuntimeManager()
+    test_client.app.state.workstation_runtime_manager = FakeWorkstationRuntimeManager(
+        {
+            "available": True,
+            "runtime_root": str(runtime_root),
+            "knowledge_root": str(knowledge_root),
+            "knowledge": {"active_knowledge_pack_id": "pack-web"},
+        }
+    )
     response = test_client.get("/api/admin/platform/workstation-runtime-status")
     assert response.status_code == 200
     payload = response.json()
@@ -346,6 +374,24 @@ def test_platform_admin_router_returns_workstation_runtime_status(client):
     assert payload["running"] is True
     assert payload["stdout_log_path"] == "runtime/logs/web-workstation.stdout.log"
     assert payload["stderr_log_path"] == "runtime/logs/web-workstation.stderr.log"
+    assert payload["web_knowledge"]["active_pack_id"] == "pack-web"
+    assert payload["web_knowledge"]["active_pack_label"] == "Web Knowledge"
+    assert payload["knowledge_runtime_consistent"] is True
+    assert payload["knowledge_runtime_mismatch_reason"] == ""
+
+    test_client.app.state.workstation_runtime_manager = FakeWorkstationRuntimeManager(
+        {
+            "available": True,
+            "runtime_root": str(runtime_root / "other"),
+            "knowledge_root": str(knowledge_root),
+            "knowledge": {"active_knowledge_pack_id": "pack-web"},
+        }
+    )
+    mismatch = test_client.get("/api/admin/platform/workstation-runtime-status")
+    assert mismatch.status_code == 200
+    mismatch_payload = mismatch.json()
+    assert mismatch_payload["knowledge_runtime_consistent"] is False
+    assert "runtime root mismatch" in mismatch_payload["knowledge_runtime_mismatch_reason"]
 
 
 def test_platform_admin_router_returns_workstation_runtime_logs(client):
@@ -363,7 +409,14 @@ def test_platform_admin_router_returns_workstation_runtime_logs(client):
     missing = test_client.get("/api/admin/platform/workstation-runtime-logs")
     assert missing.status_code == 503
 
-    test_client.app.state.workstation_runtime_manager = FakeWorkstationRuntimeManager()
+    test_client.app.state.workstation_runtime_manager = FakeWorkstationRuntimeManager(
+        {
+            "available": True,
+            "runtime_root": "runtime",
+            "knowledge_root": "runtime/knowledge",
+            "knowledge": {"active_knowledge_pack_id": ""},
+        }
+    )
     response = test_client.get(
         "/api/admin/platform/workstation-runtime-logs",
         params={"stream": "stderr", "tail_bytes": 4096},

@@ -49,6 +49,8 @@ def get_workstation_capabilities(
     sts2_path = str(cfg.get("sts2_path", "")).strip()
     active_pack = knowledge_runtime.get_active_knowledge_pack()
     return {
+        "runtime_root": str(knowledge_runtime.RUNTIME_ROOT),
+        "knowledge_root": str(knowledge_runtime.KNOWLEDGE_ROOT),
         "knowledge": {
             "embedded_sts2_guidance": True,
             "knowledge_pack_active": active_pack is not None,

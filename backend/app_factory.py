@@ -12,6 +12,8 @@ from typing import Literal
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import Response
 
 from app.composition.container import ApplicationContainer
 from app.modules.platform.application.platform_runtime_builder import build_job_application_service_from_container
@@ -39,6 +41,25 @@ AppRole = Literal["workstation", "web"]
 _QUEUE_WORKER_POLL_INTERVAL_SECONDS = 3.0
 _QUEUE_WORKER_RETRY_COOLDOWN_SECONDS = 5
 _LOOPBACK_CORS_ORIGIN_REGEX = r"^https?://(?:localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::\d+)?$"
+
+
+class SpaStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope) -> Response:
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as error:
+            if error.status_code == 404 and self._should_fallback_to_index(path, scope):
+                return await super().get_response("index.html", scope)
+            raise error
+
+    def _should_fallback_to_index(self, path: str, scope) -> bool:
+        if scope.get("method") not in {"GET", "HEAD"}:
+            return False
+        request_path = str(scope.get("path", "")).lstrip("/")
+        relative_path = path.lstrip("/")
+        if request_path.startswith(("api/", "ws/")) or relative_path.startswith(("api/", "ws/")):
+            return False
+        return Path(path).suffix == ""
 
 
 def _resolve_cors_allow_origin_regex(runtime_config: dict) -> str | None:
@@ -105,7 +126,7 @@ def should_mount_frontend(role: AppRole) -> bool:
 def _mount_frontend(app: FastAPI) -> None:
     frontend_dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
     if frontend_dist.exists():
-        app.mount("/", StaticFiles(directory=str(frontend_dist), html=True), name="frontend")
+        app.mount("/", SpaStaticFiles(directory=str(frontend_dist), html=True), name="frontend")
 
 
 def _bootstrap_web_execution_profiles(app: FastAPI) -> None:

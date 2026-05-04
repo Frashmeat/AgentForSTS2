@@ -82,11 +82,14 @@ def test_workstation_runtime_manager_starts_with_generated_control_token(monkeyp
     assert command[-4:] == ["--host", "127.0.0.1", "--port", "7865"]
     assert calls[0][1]["env"]["TEST_WORKSTATION_TOKEN"] == "generated-token"
     assert calls[0][1]["env"]["SPIREFORGE_CONFIG_PATH"] == str(tmp_path / "runtime" / "workstation.config.json")
+    assert calls[0][1]["env"]["SPIREFORGE_RUNTIME_DIR"] == str(tmp_path / "runtime")
     assert status["managed"] is True
     assert status["running"] is True
     assert status["pid"] == 4321
     assert status["capabilities"]["available"] is True
     assert status["capabilities"]["generation"]["text_generation_available"] is True
+    assert status["workstation_config_path"] == str(tmp_path / "runtime" / "workstation.config.json")
+    assert status["runtime_root"] == str(tmp_path / "runtime")
     assert status["stdout_log_path"].replace("\\", "/").endswith("runtime/logs/web-workstation.stdout.log")
     assert status["stderr_log_path"].replace("\\", "/").endswith("runtime/logs/web-workstation.stderr.log")
 
@@ -174,6 +177,7 @@ def test_workstation_runtime_manager_resolves_release_relative_config_path(tmp_p
     manager.ensure_started()
 
     assert calls[0][1]["env"]["SPIREFORGE_CONFIG_PATH"] == str(release_root / "runtime" / "workstation.config.json")
+    assert calls[0][1]["env"]["SPIREFORGE_RUNTIME_DIR"] == str(release_root / "runtime")
 
 
 def test_workstation_runtime_manager_fails_fast_when_config_is_missing(tmp_path):

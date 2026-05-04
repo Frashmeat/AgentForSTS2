@@ -61,6 +61,8 @@ def test_workstation_capabilities_reports_linux_server_generation_boundary(clien
 
     assert response.status_code == 200
     payload = response.json()
+    assert "runtime_root" in payload
+    assert "knowledge_root" in payload
     assert payload["knowledge"]["embedded_sts2_guidance"] is True
     assert payload["knowledge"]["knowledge_pack_active"] is False
     assert payload["knowledge"]["active_knowledge_pack_id"] == ""

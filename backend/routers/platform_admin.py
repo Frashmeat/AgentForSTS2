@@ -98,6 +98,103 @@ def _build_admin_quota_command_service(session, request: Request) -> AdminQuotaC
     )
 
 
+def _web_knowledge_status() -> dict[str, object]:
+    active_pack = knowledge_runtime.get_active_knowledge_pack()
+    return {
+        "active": active_pack is not None,
+        "active_pack_id": str(active_pack.get("pack_id", "")) if active_pack else "",
+        "active_pack_label": str(active_pack.get("label", "")) if active_pack else "",
+        "knowledge_root": str(knowledge_runtime.KNOWLEDGE_ROOT),
+        "runtime_root": str(knowledge_runtime.RUNTIME_ROOT),
+    }
+
+
+def _knowledge_runtime_consistency(
+    *,
+    web_knowledge: dict[str, object],
+    capabilities: dict[str, object] | None,
+    unavailable_reason: str = "",
+) -> dict[str, object]:
+    if not isinstance(capabilities, dict) or capabilities.get("available") is not True:
+        reason = (
+            str(capabilities.get("reason", "workstation capabilities unavailable"))
+            if isinstance(capabilities, dict)
+            else unavailable_reason or "workstation capabilities unavailable"
+        )
+        return {
+            "knowledge_runtime_consistent": False,
+            "knowledge_runtime_mismatch_reason": reason,
+        }
+
+    workstation_runtime_root = str(capabilities.get("runtime_root", "")).strip()
+    web_runtime_root = str(web_knowledge.get("runtime_root", "")).strip()
+    if not workstation_runtime_root:
+        return {
+            "knowledge_runtime_consistent": False,
+            "knowledge_runtime_mismatch_reason": "workstation runtime_root missing",
+        }
+    if workstation_runtime_root != web_runtime_root:
+        return {
+            "knowledge_runtime_consistent": False,
+            "knowledge_runtime_mismatch_reason": (
+                f"runtime root mismatch: web={web_runtime_root}; workstation={workstation_runtime_root}"
+            ),
+        }
+
+    workstation_knowledge_root = str(capabilities.get("knowledge_root", "")).strip()
+    web_knowledge_root = str(web_knowledge.get("knowledge_root", "")).strip()
+    if not workstation_knowledge_root:
+        return {
+            "knowledge_runtime_consistent": False,
+            "knowledge_runtime_mismatch_reason": "workstation knowledge_root missing",
+        }
+    if workstation_knowledge_root != web_knowledge_root:
+        return {
+            "knowledge_runtime_consistent": False,
+            "knowledge_runtime_mismatch_reason": (
+                f"knowledge root mismatch: web={web_knowledge_root}; workstation={workstation_knowledge_root}"
+            ),
+        }
+
+    workstation_knowledge = capabilities.get("knowledge")
+    if not isinstance(workstation_knowledge, dict):
+        return {
+            "knowledge_runtime_consistent": False,
+            "knowledge_runtime_mismatch_reason": "workstation knowledge status missing",
+        }
+    workstation_pack_id = (
+        str(workstation_knowledge.get("active_knowledge_pack_id", "")).strip()
+    )
+    web_pack_id = str(web_knowledge.get("active_pack_id", "")).strip()
+    if workstation_pack_id != web_pack_id:
+        return {
+            "knowledge_runtime_consistent": False,
+            "knowledge_runtime_mismatch_reason": (
+                f"active pack mismatch: web={web_pack_id or '<none>'}; workstation={workstation_pack_id or '<none>'}"
+            ),
+        }
+
+    return {
+        "knowledge_runtime_consistent": True,
+        "knowledge_runtime_mismatch_reason": "",
+    }
+
+
+def _enrich_workstation_runtime_status(payload: dict[str, object]) -> dict[str, object]:
+    web_knowledge = _web_knowledge_status()
+    capabilities = payload.get("capabilities")
+    consistency = _knowledge_runtime_consistency(
+        web_knowledge=web_knowledge,
+        capabilities=capabilities if isinstance(capabilities, dict) else None,
+        unavailable_reason=str(payload.get("reason", "")).strip(),
+    )
+    return {
+        **payload,
+        "web_knowledge": web_knowledge,
+        **consistency,
+    }
+
+
 @router.get("/jobs/{job_id}/executions")
 def list_job_executions(request: Request, job_id: int):
     with auth_session_scope(request) as auth_session:
@@ -340,8 +437,10 @@ def get_workstation_runtime_status(request: Request):
         require_admin_user(request, auth_session)
     manager = getattr(request.app.state, "workstation_runtime_manager", None)
     if manager is None:
-        return {"available": False, "reason": "workstation_runtime_manager_not_registered"}
-    return manager.get_runtime_status().model_dump()
+        return _enrich_workstation_runtime_status(
+            {"available": False, "reason": "workstation_runtime_manager_not_registered", "capabilities": None}
+        )
+    return _enrich_workstation_runtime_status(manager.get_runtime_status().model_dump())
 
 
 @router.get("/platform/workstation-runtime-logs")

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -130,6 +131,33 @@ def test_create_app_for_workstation_includes_only_workstation_routes_and_mounts_
     assert workstation_runtime_registered is False
     assert queue_worker_registered is False
     assert frontend_mounted is True
+
+
+def test_spa_static_files_serves_index_for_frontend_deep_links(tmp_path):
+    frontend_dist = tmp_path / "dist"
+    frontend_dist.mkdir()
+    (frontend_dist / "index.html").write_text("<html>app shell</html>", encoding="utf-8")
+    assets_dir = frontend_dist / "assets"
+    assets_dir.mkdir()
+    (assets_dir / "app.js").write_text("console.log('ok');", encoding="utf-8")
+
+    app = FastAPI()
+    app.mount("/", app_factory.SpaStaticFiles(directory=str(frontend_dist), html=True), name="frontend")
+    client = TestClient(app)
+
+    admin_response = client.get("/admin/runtime")
+    assert admin_response.status_code == 200
+    assert "app shell" in admin_response.text
+
+    asset_response = client.get("/assets/app.js")
+    assert asset_response.status_code == 200
+    assert "console.log" in asset_response.text
+
+    missing_asset_response = client.get("/assets/missing.js")
+    assert missing_asset_response.status_code == 404
+
+    api_response = client.get("/api/admin/platform/workstation-runtime-status")
+    assert api_response.status_code == 404
 
 
 def test_create_app_for_web_fails_fast_when_runtime_secret_is_missing(monkeypatch):
