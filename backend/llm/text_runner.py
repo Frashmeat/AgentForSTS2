@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import shutil
 import subprocess
+import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
@@ -23,6 +25,10 @@ from llm.prompt_builder import append_global_ai_instructions
 
 DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6"
 DEFAULT_LITELLM_USER_AGENT = "AgentTheSpire/0.1.0"
+CLI_COMPLETION_TIMEOUT_SECONDS = 180
+CLI_WAIT_TIMEOUT_SECONDS = CLI_COMPLETION_TIMEOUT_SECONDS + 5
+_LOG_TAIL_LIMIT = 1200
+logger = logging.getLogger(__name__)
 
 
 def _decode_output(raw: bytes) -> str:
@@ -32,6 +38,18 @@ def _decode_output(raw: bytes) -> str:
         except UnicodeDecodeError:
             continue
     return raw.decode("utf-8", errors="replace")
+
+
+def _tail_text(raw: bytes | str | None, limit: int = _LOG_TAIL_LIMIT) -> str:
+    if raw is None:
+        return ""
+    text = _decode_output(raw) if isinstance(raw, bytes) else str(raw)
+    text = text.replace("\r", "\\r").replace("\n", "\\n").strip()
+    return text[-limit:] if len(text) > limit else text
+
+
+def _safe_base_url_state(llm_cfg: dict) -> str:
+    return "configured" if str(llm_cfg.get("base_url") or "").strip() else "empty"
 
 
 def resolve_model(llm_cfg: dict) -> str:
@@ -164,20 +182,58 @@ async def _complete_via_claude_cli(prompt: str, llm_cfg: dict, cwd: Path | None)
     cmd.extend(["-p", prompt])
 
     loop = asyncio.get_event_loop()
-    result = await asyncio.wait_for(
-        loop.run_in_executor(
-            None,
-            lambda: subprocess.run(
-                cmd,
-                capture_output=True,
-                timeout=180,
-                cwd=str(cwd) if cwd else None,
-                env=_build_claude_cli_env(llm_cfg),
-            ),
-        ),
-        timeout=185,
+    started_at = time.monotonic()
+    logger.info(
+        "text cli start backend=claude_cli model=%s base_url=%s cwd=%s prompt_len=%d timeout_seconds=%d",
+        model or "",
+        _safe_base_url_state(llm_cfg),
+        str(cwd) if cwd else "",
+        len(prompt),
+        CLI_COMPLETION_TIMEOUT_SECONDS,
     )
-    return result.stdout.decode("utf-8", errors="replace").strip()
+    try:
+        result = await asyncio.wait_for(
+            loop.run_in_executor(
+                None,
+                lambda: subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    timeout=CLI_COMPLETION_TIMEOUT_SECONDS,
+                    cwd=str(cwd) if cwd else None,
+                    env=_build_claude_cli_env(llm_cfg),
+                ),
+            ),
+            timeout=CLI_WAIT_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as error:
+        elapsed_ms = int((time.monotonic() - started_at) * 1000)
+        logger.warning(
+            "text cli timeout backend=claude_cli model=%s base_url=%s cwd=%s prompt_len=%d timeout_seconds=%d "
+            "elapsed_ms=%d stdout_tail=%s stderr_tail=%s",
+            model or "",
+            _safe_base_url_state(llm_cfg),
+            str(cwd) if cwd else "",
+            len(prompt),
+            CLI_COMPLETION_TIMEOUT_SECONDS,
+            elapsed_ms,
+            _tail_text(error.stdout),
+            _tail_text(error.stderr),
+        )
+        raise
+    elapsed_ms = int((time.monotonic() - started_at) * 1000)
+    stdout = getattr(result, "stdout", b"") or b""
+    stderr = getattr(result, "stderr", b"") or b""
+    returncode = getattr(result, "returncode", None)
+    logger.info(
+        "text cli finished backend=claude_cli model=%s returncode=%s elapsed_ms=%d stdout_len=%d stderr_len=%d stderr_tail=%s",
+        model or "",
+        returncode,
+        elapsed_ms,
+        len(stdout),
+        len(stderr),
+        _tail_text(stderr),
+    )
+    return stdout.decode("utf-8", errors="replace").strip()
 
 
 async def _complete_via_codex_cli(prompt: str, llm_cfg: dict, cwd: Path | None) -> str:
@@ -207,24 +263,64 @@ async def _complete_via_codex_cli(prompt: str, llm_cfg: dict, cwd: Path | None) 
         cmd[2:2] = ["-m", model]
 
     loop = asyncio.get_event_loop()
-    result = await asyncio.wait_for(
-        loop.run_in_executor(
-            None,
-            lambda: subprocess.run(
-                cmd,
-                input=prompt.encode("utf-8", errors="replace"),
-                capture_output=True,
-                timeout=180,
-                cwd=str(cwd) if cwd else None,
-                env=env,
-            ),
-        ),
-        timeout=185,
+    started_at = time.monotonic()
+    logger.info(
+        "text cli start backend=codex_cli model=%s base_url=%s cwd=%s prompt_len=%d timeout_seconds=%d codex_path=%s",
+        model or "",
+        _safe_base_url_state(llm_cfg),
+        str(cwd) if cwd else "",
+        len(prompt),
+        CLI_COMPLETION_TIMEOUT_SECONDS,
+        codex_exe,
     )
-    if result.returncode != 0:
-        detail = _decode_output(result.stderr).strip()
-        raise RuntimeError(f"Codex CLI 退出码 {result.returncode}\n{detail}")
-    return _decode_output(result.stdout).strip()
+    try:
+        result = await asyncio.wait_for(
+            loop.run_in_executor(
+                None,
+                lambda: subprocess.run(
+                    cmd,
+                    input=prompt.encode("utf-8", errors="replace"),
+                    capture_output=True,
+                    timeout=CLI_COMPLETION_TIMEOUT_SECONDS,
+                    cwd=str(cwd) if cwd else None,
+                    env=env,
+                ),
+            ),
+            timeout=CLI_WAIT_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as error:
+        elapsed_ms = int((time.monotonic() - started_at) * 1000)
+        logger.warning(
+            "text cli timeout backend=codex_cli model=%s base_url=%s cwd=%s prompt_len=%d timeout_seconds=%d "
+            "elapsed_ms=%d codex_path=%s stdout_tail=%s stderr_tail=%s",
+            model or "",
+            _safe_base_url_state(llm_cfg),
+            str(cwd) if cwd else "",
+            len(prompt),
+            CLI_COMPLETION_TIMEOUT_SECONDS,
+            elapsed_ms,
+            codex_exe,
+            _tail_text(error.stdout),
+            _tail_text(error.stderr),
+        )
+        raise
+    elapsed_ms = int((time.monotonic() - started_at) * 1000)
+    stdout = getattr(result, "stdout", b"") or b""
+    stderr = getattr(result, "stderr", b"") or b""
+    returncode = getattr(result, "returncode", None)
+    logger.info(
+        "text cli finished backend=codex_cli model=%s returncode=%s elapsed_ms=%d stdout_len=%d stderr_len=%d stderr_tail=%s",
+        model or "",
+        returncode,
+        elapsed_ms,
+        len(stdout),
+        len(stderr),
+        _tail_text(stderr),
+    )
+    if returncode != 0:
+        detail = _decode_output(stderr).strip()
+        raise RuntimeError(f"Codex CLI 退出码 {returncode}\n{detail}")
+    return _decode_output(stdout).strip()
 
 
 async def _complete_via_litellm(prompt: str, llm_cfg: dict, cwd: Path | None = None) -> str:

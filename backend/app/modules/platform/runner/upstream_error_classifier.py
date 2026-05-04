@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from dataclasses import dataclass
 
 
@@ -16,6 +17,38 @@ class UpstreamErrorClassification:
 
 
 _STATUS_PATTERN = re.compile(r"\b(?:status(?: code)?|http(?: status)?)[=: ]+(\d{3})\b", re.IGNORECASE)
+_TAIL_LIMIT = 1200
+
+
+def _decode_process_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        for encoding in ("utf-8", "gbk", "cp936"):
+            try:
+                return value.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+def _tail_process_text(value: object) -> str:
+    text = _decode_process_text(value).replace("\r", "\\r").replace("\n", "\\n").strip()
+    return text[-_TAIL_LIMIT:] if len(text) > _TAIL_LIMIT else text
+
+
+def _format_timeout_expired(error: subprocess.TimeoutExpired) -> str:
+    stdout = getattr(error, "stdout", None)
+    if stdout is None:
+        stdout = getattr(error, "output", None)
+    stderr = getattr(error, "stderr", None)
+    return (
+        f"command timed out after {error.timeout} seconds; "
+        f"cmd={error.cmd!r}; "
+        f"stdout_tail={_tail_process_text(stdout)}; "
+        f"stderr_tail={_tail_process_text(stderr)}"
+    )
 
 
 def _extract_http_status(text: str) -> int | None:
@@ -33,6 +66,17 @@ def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
 
 
 def classify_upstream_error(error: Exception) -> UpstreamErrorClassification:
+    if isinstance(error, subprocess.TimeoutExpired):
+        return UpstreamErrorClassification(
+            reason_code="llm_cli_timeout",
+            upstream_category="timeout",
+            reason_message="本地 LLM CLI 调用超过超时时间未返回，可能是上游响应慢、网络卡住、CLI 卡住或 prompt 过大，请管理员查看诊断日志。",
+            retryable=True,
+            http_status=None,
+            provider_error_code="timeout",
+            raw_error=_format_timeout_expired(error),
+        )
+
     raw_error = str(error)
     text = raw_error.lower()
     http_status = _extract_http_status(text)

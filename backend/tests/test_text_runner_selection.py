@@ -1,6 +1,7 @@
 """Tests for text runner backend resolution."""
 
 import asyncio
+import subprocess
 import sys
 import types
 from pathlib import Path
@@ -318,3 +319,72 @@ def test_complete_via_codex_cli_passes_execution_credentials_to_subprocess(monke
     assert captured["cmd"][0] == "C:/Tools/codex.cmd"
     assert captured["env"]["OPENAI_API_KEY"] == "sk-live-openai"
     assert captured["env"]["OPENAI_BASE_URL"] == "https://api.openai.com/v1"
+
+
+def test_complete_via_codex_cli_logs_start_and_finish_without_secret(monkeypatch, caplog):
+    from llm import text_runner
+
+    def fake_run(cmd, **kwargs):
+        return types.SimpleNamespace(stdout=b"ok\n", stderr=b"diagnostic\n", returncode=0)
+
+    async def run_case():
+        return await text_runner._complete_via_codex_cli(
+            "base prompt",
+            {
+                "model": "gpt-5.2",
+                "api_key": "sk-secret-should-not-log",
+                "base_url": "https://api.openai.com/v1",
+            },
+            None,
+        )
+
+    monkeypatch.setattr(text_runner.shutil, "which", lambda _name: "/usr/local/bin/codex")
+    monkeypatch.setattr(text_runner.subprocess, "run", fake_run)
+
+    with caplog.at_level("INFO", logger="llm.text_runner"):
+        result = asyncio.run(run_case())
+
+    log_text = "\n".join(record.getMessage() for record in caplog.records)
+    assert result == "ok"
+    assert "text cli start backend=codex_cli" in log_text
+    assert "text cli finished backend=codex_cli" in log_text
+    assert "prompt_len=11" in log_text
+    assert "timeout_seconds=180" in log_text
+    assert "base_url=configured" in log_text
+    assert "sk-secret-should-not-log" not in log_text
+
+
+def test_complete_via_codex_cli_logs_timeout_diagnostics_without_secret(monkeypatch, caplog):
+    from llm import text_runner
+
+    def fake_run(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=180, output=b"partial stdout", stderr=b"partial stderr")
+
+    async def run_case():
+        return await text_runner._complete_via_codex_cli(
+            "base prompt",
+            {
+                "model": "gpt-5.2",
+                "api_key": "sk-timeout-secret",
+                "base_url": "https://api.openai.com/v1",
+            },
+            None,
+        )
+
+    monkeypatch.setattr(text_runner.shutil, "which", lambda _name: "/usr/local/bin/codex")
+    monkeypatch.setattr(text_runner.subprocess, "run", fake_run)
+
+    with caplog.at_level("WARNING", logger="llm.text_runner"):
+        try:
+            asyncio.run(run_case())
+        except subprocess.TimeoutExpired:
+            pass
+        else:
+            raise AssertionError("expected TimeoutExpired")
+
+    log_text = "\n".join(record.getMessage() for record in caplog.records)
+    assert "text cli timeout backend=codex_cli" in log_text
+    assert "stdout_tail=partial stdout" in log_text
+    assert "stderr_tail=partial stderr" in log_text
+    assert "timeout_seconds=180" in log_text
+    assert "sk-timeout-secret" not in log_text

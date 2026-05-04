@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import subprocess
 import sys
 from pathlib import Path
 
@@ -225,3 +226,56 @@ def test_execute_text_generate_step_classifies_auth_and_rate_limit():
             assert payload["retryable"] is expected_retryable
         else:
             raise AssertionError("expected UpstreamTextGenerationError")
+
+
+def test_execute_text_generate_step_classifies_cli_timeout_with_diagnostics(caplog):
+    async def timeout_complete_text(prompt: str, llm_cfg: dict, cwd=None) -> str:
+        raise subprocess.TimeoutExpired(
+            cmd=["/usr/local/bin/codex", "exec", "-"],
+            timeout=180,
+            output=b"partial stdout",
+            stderr=b"partial stderr",
+        )
+
+    caplog.set_level(logging.WARNING)
+    try:
+        asyncio.run(
+            execute_text_generate_step(
+                StepExecutionRequest(
+                    workflow_version="2026.03.31",
+                    step_protocol_version="v1",
+                    step_type="text.generate",
+                    step_id="text-timeout",
+                    job_id=10,
+                    job_item_id=20,
+                    result_schema_version="v1",
+                    input_payload={"prompt": "虚构游戏机制：造成伤害。"},
+                    execution_binding=StepExecutionBinding(
+                        agent_backend="codex",
+                        provider="openai",
+                        model="gpt-5.2",
+                        credential="sk-live-openai",
+                    ),
+                ),
+                complete_text_fn=timeout_complete_text,
+            )
+        )
+    except UpstreamTextGenerationBlockedError as error:
+        payload = error.to_error_payload()
+        assert payload["reason_code"] == "llm_cli_timeout"
+        assert payload["upstream_category"] == "timeout"
+        assert payload["provider_error_code"] == "timeout"
+        assert payload["retryable"] is True
+        assert "超过超时时间" in str(error)
+        assert "partial stdout" in payload["raw_error"]
+        assert "partial stderr" in payload["raw_error"]
+        assert any(
+            record.levelno == logging.WARNING
+            and "platform text generation upstream failed" in record.message
+            and "reason_code=llm_cli_timeout" in record.message
+            and "job_id=10" in record.message
+            and "job_item_id=20" in record.message
+            for record in caplog.records
+        )
+    else:
+        raise AssertionError("expected UpstreamTextGenerationBlockedError")
