@@ -124,6 +124,15 @@ def test_tools_entry_stop_app_routes_to_app_stop_script() -> None:
     assert completed.stdout == "tools\\latest\\stop-app.ps1|-Help"
 
 
+def test_kill_local_script_includes_current_app_stop_flow() -> None:
+    source = KILL_LOCAL_PATH.read_text(encoding="utf-8")
+
+    assert 'Join-Path $repoRoot "runtime\\app-deploy-state.json"' in source
+    assert 'Join-Path $toolsRoot "latest\\stop-app.ps1"' in source
+    assert "Invoke-CurrentAppStopScript" in source
+    assert "Register-PortsFromAppDeployState" in source
+
+
 def test_tools_entry_package_app_routes_to_app_package_script() -> None:
     completed = _run_tools_inline(
         ". .\\tools\\tools.ps1 help *> $null; "

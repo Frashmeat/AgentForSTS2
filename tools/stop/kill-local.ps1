@@ -591,6 +591,42 @@ function Register-PortsFromSplitLocalState {
     }
 }
 
+function Register-PortsFromAppDeployState {
+    param([string]$StatePath)
+
+    if (-not (Test-Path -LiteralPath $StatePath)) {
+        return
+    }
+
+    $state = Read-JsonFile -Path $StatePath
+    if ($null -eq $state) {
+        return
+    }
+
+    foreach ($entry in @($state.processes)) {
+        if ($null -eq $entry -or -not $entry.port) {
+            continue
+        }
+
+        $serviceName = [string]$entry.service_name
+        if ([string]::IsNullOrWhiteSpace($serviceName)) {
+            continue
+        }
+
+        switch -Regex ($serviceName) {
+            "^frontend$" {
+                Add-ServicePort -ServiceName "frontend" -Port ([int]$entry.port)
+            }
+            "^(local-)?workstation$" {
+                Add-ServicePort -ServiceName "workstation" -Port ([int]$entry.port)
+            }
+            "^web$" {
+                Add-ServicePort -ServiceName "web" -Port ([int]$entry.port)
+            }
+        }
+    }
+}
+
 function Discover-ServicePorts {
     if ($FrontendPort -gt 0) {
         Add-ServicePort -ServiceName "frontend" -Port $FrontendPort
@@ -625,6 +661,7 @@ function Discover-ServicePorts {
     }
 
     Register-PortsFromSplitLocalState -StatePath (Join-Path $repoRoot "runtime\split-local-state.json")
+    Register-PortsFromAppDeployState -StatePath (Join-Path $repoRoot "runtime\app-deploy-state.json")
 }
 
 function Stop-ProcessesFromLocalDeployState {
@@ -817,7 +854,26 @@ function Stop-DockerComposeWebServices {
     }
 }
 
+function Invoke-CurrentAppStopScript {
+    $stopAppScript = Join-Path $toolsRoot "latest\stop-app.ps1"
+    if (-not (Test-Path -LiteralPath $stopAppScript)) {
+        return
+    }
+
+    Write-Host "[app] 调用当前主线停止脚本: $stopAppScript"
+    try {
+        & $stopAppScript
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "[app] stop-app.ps1 退出码: $LASTEXITCODE；继续执行 kill-local 兜底清理"
+        }
+    } catch {
+        Write-Warning "[app] stop-app.ps1 执行失败: $($_.Exception.Message)；继续执行 kill-local 兜底清理"
+    }
+}
+
 Discover-ServicePorts
+
+Invoke-CurrentAppStopScript
 
 Stop-CurrentSessionLogMirroring -ServiceNames @("frontend", "workstation", "web")
 

@@ -181,6 +181,8 @@ powershell -File .\tools\tools.ps1 logs app -Service web -Follow
 
 停止 `deploy app` 拉起的本机进程，并对当前 app compose 项目执行 `docker compose down --remove-orphans`。
 
+`stop local` 是兜底清理入口，会先调用当前主线 `stop app`，再继续清理旧状态文件、历史 artifacts 与端口残留；日常停止当前部署优先使用 `stop app`。
+
 ## 目录结构
 
 ```text
