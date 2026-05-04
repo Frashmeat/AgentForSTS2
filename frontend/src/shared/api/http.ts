@@ -12,6 +12,15 @@ export interface RequestFormDataOptions extends Omit<RequestInit, "body"> {
   backend?: BackendTarget;
 }
 
+export interface RequestBlobOptions extends Omit<RequestInit, "body"> {
+  backend?: BackendTarget;
+}
+
+export interface RequestBlobResult {
+  blob: Blob;
+  headers: Headers;
+}
+
 type RuntimeApiBases = Partial<Record<Exclude<BackendTarget, "same-origin">, string>>;
 type RuntimeWsBases = Partial<Record<WebSocketTarget, string>>;
 
@@ -285,4 +294,29 @@ export async function requestFormData<T>(
   }
 
   return response.json();
+}
+
+export async function requestBlob(path: string, options: RequestBlobOptions = {}): Promise<RequestBlobResult> {
+  const { headers, method = "GET", backend = "same-origin", credentials, ...rest } = options;
+  const url = buildBackendUrl(path, backend);
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...rest,
+      method,
+      credentials: credentials ?? (backend === "same-origin" ? undefined : "include"),
+      headers,
+    });
+  } catch (error) {
+    throw createNetworkError(backend, url, error);
+  }
+
+  if (!response.ok) {
+    throw createHttpError(response, await response.text());
+  }
+
+  return {
+    blob: await response.blob(),
+    headers: response.headers,
+  };
 }

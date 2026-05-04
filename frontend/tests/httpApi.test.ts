@@ -1,22 +1,39 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildApiPath, buildBackendUrl, requestJson, loadAppConfig, generateModPlan } from "../src/shared/api/index.ts";
+import {
+  buildApiPath,
+  buildBackendUrl,
+  requestBlob,
+  requestJson,
+  loadAppConfig,
+  generateModPlan,
+} from "../src/shared/api/index.ts";
 
 interface MockResponseInit {
   ok: boolean;
   body?: unknown;
   text?: string;
+  blob?: Blob;
+  headers?: HeadersInit;
+  status?: number;
+  statusText?: string;
 }
 
 function createMockResponse(init: MockResponseInit) {
   return {
     ok: init.ok,
+    status: init.status ?? (init.ok ? 200 : 500),
+    statusText: init.statusText ?? "",
+    headers: new Headers(init.headers),
     async json() {
       return init.body;
     },
     async text() {
       return init.text ?? JSON.stringify(init.body ?? {});
+    },
+    async blob() {
+      return init.blob ?? new Blob([]);
     },
   };
 }
@@ -92,6 +109,42 @@ test("requestJson unwraps structured error envelope message on non-ok response",
   await assert.rejects(() => requestJson("/api/project/create", { backend: "workstation" }), /请先选择项目目录/);
 });
 
+test("requestBlob unwraps plain text response errors without json parse leakage", async () => {
+  Object.assign(globalThis, {
+    fetch: async () =>
+      createMockResponse({
+        ok: false,
+        status: 400,
+        text: "知识库包不完整",
+      }),
+  });
+
+  try {
+    await requestBlob("/api/knowledge/export-pack");
+  } catch (error) {
+    assert.match(error instanceof Error ? error.message : String(error), /知识库包不完整/);
+    assert.doesNotMatch(error instanceof Error ? error.message : String(error), /JSON|SyntaxError/i);
+    return;
+  }
+  assert.fail("requestBlob should reject non-ok plain text responses");
+});
+
+test("requestBlob wraps network errors with backend target and url", async () => {
+  Object.assign(globalThis, {
+    __AGENT_THE_SPIRE_API_BASES__: {
+      web: "http://127.0.0.1:7870",
+    },
+    fetch: async () => {
+      throw new TypeError("Failed to fetch");
+    },
+  });
+
+  await assert.rejects(
+    () => requestBlob("/api/platform/artifacts/1/download", { backend: "web" }),
+    /无法连接Web 后端（http:\/\/127\.0\.0\.1:7870\/api\/platform\/artifacts\/1\/download）/,
+  );
+});
+
 test("requestJson falls back to friendly message when non-ok response text is empty", async () => {
   Object.assign(globalThis, {
     fetch: async () =>
@@ -101,7 +154,7 @@ test("requestJson falls back to friendly message when non-ok response text is em
       }),
   });
 
-  await assert.rejects(() => requestJson("/api/config"), /请求失败，请稍后重试/);
+  await assert.rejects(() => requestJson("/api/config"), /请求失败（HTTP 500）/);
 });
 
 test("requestJson routes to configured web backend when backend target is set", async () => {
@@ -211,7 +264,7 @@ test("independent frontend without workstation endpoint fails loudly", async () 
   });
 
   try {
-    await assert.rejects(() => loadAppConfig(), /workstation backend endpoint is not configured/i);
+    await assert.rejects(() => loadAppConfig(), /当前前端没有配置 Workstation 后端地址/);
   } finally {
     if (typeof originalLocation === "undefined") {
       delete runtimeGlobals.location;

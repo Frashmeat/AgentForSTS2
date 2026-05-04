@@ -242,10 +242,7 @@ def get_queue_worker_status(request: Request):
     queue_worker = getattr(request.app.state, "platform_queue_worker_service", None)
     if queue_worker is None:
         return {"available": False, "reason": "queue_worker_not_registered"}
-    try:
-        return {"available": True, **queue_worker.get_runtime_status()}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return {"available": True, **queue_worker.get_runtime_status()}
 
 
 @router.post("/upload-assets")

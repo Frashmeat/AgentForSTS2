@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { AlertTriangle, Clock3, Download, House, Upload } from "lucide-react";
 import { PlatformPageShell } from "../../components/platform/PlatformPageShell.tsx";
 import { pickAppPath } from "../../shared/api/config.ts";
+import { requestBlob } from "../../shared/api/http.ts";
 import { getMyArtifactDownloadUrl, getMyJob, listMyJobEvents, listMyJobItems } from "../../shared/api/me.ts";
 import { importProjectPackage } from "../../shared/api/workflow.ts";
 import type {
@@ -134,13 +135,10 @@ function blobToBase64(blob: Blob): Promise<string> {
 }
 
 async function downloadArtifactAsBase64(artifactId: number): Promise<string> {
-  const response = await fetch(getMyArtifactDownloadUrl(artifactId), {
-    credentials: "include",
+  const response = await requestBlob(getMyArtifactDownloadUrl(artifactId), {
+    backend: "web",
   });
-  if (!response.ok) {
-    throw new Error(await response.text());
-  }
-  return blobToBase64(await response.blob());
+  return blobToBase64(response.blob);
 }
 
 export function UserCenterJobDetailPage() {

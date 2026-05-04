@@ -74,7 +74,7 @@ def test_export_pack_delegates_to_runtime(monkeypatch):
 
     response = knowledge_router.export_current_knowledge_pack()
 
-    assert response.content == b"zip-bytes"
+    assert response.body == b"zip-bytes"
     assert response.media_type == "application/zip"
     assert response.headers["Content-Disposition"] == 'attachment; filename="current.zip"'
     assert response.headers["X-ATS-Knowledge-Pack-File-Count"] == "2"
@@ -97,3 +97,34 @@ def test_refresh_task_returns_404_when_missing(monkeypatch):
         assert "missing-task" in exc.detail
     else:
         raise AssertionError("missing refresh task should return 404")
+
+
+def test_status_leaves_unexpected_runtime_errors_to_global_handler(monkeypatch):
+    def fake_status():
+        raise RuntimeError("internal runtime path leaked")
+
+    monkeypatch.setattr(
+        knowledge_router,
+        "_runtime",
+        lambda: types.SimpleNamespace(get_knowledge_status=fake_status),
+    )
+
+    with pytest.raises(RuntimeError, match="internal runtime path leaked"):
+        knowledge_router.get_knowledge_status()
+
+
+def test_export_pack_keeps_expected_value_error_as_404(monkeypatch):
+    def fake_export():
+        raise ValueError("知识库包不完整")
+
+    monkeypatch.setattr(
+        knowledge_router,
+        "_runtime",
+        lambda: types.SimpleNamespace(export_current_knowledge_pack_zip=fake_export),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        knowledge_router.export_current_knowledge_pack()
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "知识库包不完整"

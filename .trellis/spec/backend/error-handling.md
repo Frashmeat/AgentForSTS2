@@ -6,7 +6,7 @@
 
 ## Overview
 
-本项目目前没有全局统一的 REST 响应包裹层。HTTP 接口仍以 FastAPI 原生返回为主；WebSocket 工作流使用事件流表达进度、完成、失败和取消。
+本项目已经通过 `app.shared.infra.http_errors.install_http_error_handlers()` 安装 HTTP 错误处理器。HTTP 成功响应仍以 FastAPI 原生返回为主；HTTP 失败响应由全局 handler 统一为 `{"error": {"code": "...", "message": "...", "detail": ...}}`。WebSocket 工作流使用事件流表达进度、完成、失败和取消。
 
 取消不是系统失败。工作站 WebSocket 与 Web 端平台任务都应把用户主动取消归入可预期终止，避免继续占用本地 CLI 进程、外部 AI key 或平台任务额度。
 
@@ -29,6 +29,8 @@
 - `WorkflowTermination` 应转换为 `cancelled` 事件，不应落入通用 `error` 事件或错误日志告警。
 - 普通异常仍转换为 `error` 事件，并尽量携带 `code/message/traceback` 以便前端统一解析。
 - 前端识别 `user_cancelled` 与 `client_disconnected` 时，应进入取消态，不展示为“执行失败”。
+- HTTP 路由只捕获可预期业务异常并转换为明确 4xx / 409 / 429；未知异常应继续抛出，交给全局 handler 记录日志并返回安全的 `internal_server_error`。
+- 禁止在路由或 HTTP facade 中用 `except Exception` 包一层 `HTTPException(status_code=500, detail=str(exc))`，避免把内部路径、密钥提示、上游 SDK 原始文本暴露给前端。
 - Web 服务器模式调用外部模型时，上游内容安全或网关阻断应归类为明确错误码，例如 `upstream_request_blocked`，不要把 `litellm.APIError` / SDK 原始异常直接展示为最终用户错误。
 - 面向游戏 Mod 生成的 Prompt 若包含“伤害 / 攻击 / 毒”等游戏机制词，应明确这些词属于虚构电子游戏内的数值规则，降低上游网关误判概率。
 
@@ -39,7 +41,8 @@
 HTTP 当前返回风格：
 
 - 成功：直接返回 JSON 对象或数组。
-- 常见失败：FastAPI `HTTPException`，形如 `{"detail": "..."}`。
+- 可预期失败：路由抛出 FastAPI `HTTPException`，全局 handler 返回 `{"error":{"code":"http_<status>","message":"...","detail":"..."}}`。
+- 未处理异常：全局 handler 记录异常日志，并返回 `{"error":{"code":"internal_server_error","message":"服务端发生异常，请稍后重试","detail":null}}`。
 - 少数旧接口：可能返回 `200 + {"error": "..."}`，后续新接口不应继续扩散这种模式。
 
 WebSocket 当前公共事件：
@@ -81,4 +84,5 @@ WebSocket 当前公共事件：
 - 只关闭 WebSocket，不取消后端协程或 CLI 子进程，导致 key 仍被后台请求使用。
 - 在长耗时步骤外层缺少取消检查，导致收到取消后仍继续执行后续生成、构建或审批步骤。
 - HTTP 与 WebSocket 错误载荷字段不一致，前端只能靠字符串解析错误原因。
+- 捕获所有 `Exception` 后手动返回 `500 detail=str(exc)`，导致未知内部异常绕过全局安全错误处理。
 - 外部 AI 网关阻断时只记录原始 SDK 异常，导致用户看到不可行动的 `Your request was blocked`，也无法区分配置错误、内容误判和系统异常。

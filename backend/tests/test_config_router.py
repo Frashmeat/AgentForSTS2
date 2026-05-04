@@ -30,7 +30,7 @@ def test_test_imggen_returns_generated_image_size(monkeypatch):
     assert result == {"ok": True, "size": [512, 512]}
 
 
-def test_test_imggen_truncates_generator_errors(monkeypatch):
+def test_test_imggen_leaves_unexpected_generator_errors_to_global_handler(monkeypatch):
     async def fake_generate_images(prompt, asset_type, batch_size=1):
         raise RuntimeError("x" * 400)
 
@@ -39,35 +39,31 @@ def test_test_imggen_truncates_generator_errors(monkeypatch):
 
     try:
         asyncio.run(config_router.test_imggen())
-    except HTTPException as exc:
-        assert exc.status_code == 500
-        assert len(exc.detail) == 300
+    except RuntimeError as exc:
+        assert str(exc) == "x" * 400
     else:
-        raise AssertionError("test_imggen should surface generator failures")
+        raise AssertionError("test_imggen should leave unexpected failures to the global handler")
 
 
-def test_detect_paths_surfaces_detector_errors(monkeypatch):
+def test_detect_paths_leaves_unexpected_detector_errors_to_global_handler(monkeypatch):
     def fake_detect_paths():
         raise RuntimeError("detect failed")
 
-    monkeypatch.setattr(config_router, "_config_facade", lambda request: None)
     fake_module = types.SimpleNamespace(detect_paths=fake_detect_paths)
     monkeypatch.setitem(sys.modules, "project_utils", fake_module)
 
     try:
         config_router.detect_paths()
-    except HTTPException as exc:
-        assert exc.status_code == 500
-        assert exc.detail == "detect failed"
+    except RuntimeError as exc:
+        assert str(exc) == "detect failed"
     else:
-        raise AssertionError("detect_paths should surface detector failures")
+        raise AssertionError("detect_paths should leave unexpected failures to the global handler")
 
 
 def test_start_detect_paths_task_delegates_to_project_utils(monkeypatch):
     def fake_start_detect_paths_task():
         return {"task_id": "task-1", "status": "running", "notes": ["开始检测"], "can_cancel": True}
 
-    monkeypatch.setattr(config_router, "_config_facade", lambda request: None)
     fake_module = types.SimpleNamespace(start_detect_paths_task=fake_start_detect_paths_task)
     monkeypatch.setitem(sys.modules, "project_utils", fake_module)
 
@@ -82,7 +78,6 @@ def test_get_detect_paths_task_delegates_to_project_utils(monkeypatch):
         assert task_id == "task-1"
         return {"task_id": task_id, "status": "completed", "notes": ["已完成"], "can_cancel": False}
 
-    monkeypatch.setattr(config_router, "_config_facade", lambda request: None)
     fake_module = types.SimpleNamespace(get_detect_paths_task=fake_get_detect_paths_task)
     monkeypatch.setitem(sys.modules, "project_utils", fake_module)
 
@@ -110,7 +105,6 @@ def test_cancel_detect_paths_task_delegates_to_project_utils(monkeypatch):
         assert task_id == "task-1"
         return {"task_id": task_id, "status": "cancelled", "notes": ["已取消"], "can_cancel": False}
 
-    monkeypatch.setattr(config_router, "_config_facade", lambda request: None)
     fake_module = types.SimpleNamespace(cancel_detect_paths_task=fake_cancel_detect_paths_task)
     monkeypatch.setitem(sys.modules, "project_utils", fake_module)
 
@@ -124,7 +118,6 @@ def test_get_detect_paths_task_returns_404_when_task_missing(monkeypatch):
     def fake_get_detect_paths_task(task_id):
         raise KeyError(task_id)
 
-    monkeypatch.setattr(config_router, "_config_facade", lambda request: None)
     fake_module = types.SimpleNamespace(get_detect_paths_task=fake_get_detect_paths_task)
     monkeypatch.setitem(sys.modules, "project_utils", fake_module)
 
@@ -149,7 +142,6 @@ def test_pick_path_delegates_to_project_utils(monkeypatch):
         }
         return {"path": "C:/tools/Godot_v4.5.1-stable_mono_win64.exe"}
 
-    monkeypatch.setattr(config_router, "_config_facade", lambda request: None)
     fake_module = types.SimpleNamespace(pick_path=fake_pick_path)
     monkeypatch.setitem(sys.modules, "project_utils", fake_module)
 
@@ -171,18 +163,16 @@ def test_pick_path_delegates_to_project_utils(monkeypatch):
     }
 
 
-def test_pick_path_surfaces_picker_errors(monkeypatch):
+def test_pick_path_leaves_unexpected_picker_errors_to_global_handler(monkeypatch):
     def fake_pick_path(*, kind, title, initial_path, filters):
         raise RuntimeError("picker unavailable")
 
-    monkeypatch.setattr(config_router, "_config_facade", lambda request: None)
     fake_module = types.SimpleNamespace(pick_path=fake_pick_path)
     monkeypatch.setitem(sys.modules, "project_utils", fake_module)
 
     try:
         config_router.pick_path({"kind": "directory", "title": "选择目录"})
-    except HTTPException as exc:
-        assert exc.status_code == 500
-        assert exc.detail == "picker unavailable"
+    except RuntimeError as exc:
+        assert str(exc) == "picker unavailable"
     else:
-        raise AssertionError("pick_path should surface picker failures")
+        raise AssertionError("pick_path should leave unexpected failures to the global handler")

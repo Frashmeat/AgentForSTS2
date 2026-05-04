@@ -1,4 +1,4 @@
-import { buildBackendUrl, requestJson } from "./http.ts";
+import { requestBlob, requestJson } from "./http.ts";
 
 export type KnowledgeStatusKind = "checking" | "fresh" | "stale" | "missing" | "refreshing" | "error";
 export type KnowledgeRefreshTaskStatus = "pending" | "running" | "completed" | "failed";
@@ -86,27 +86,13 @@ export async function getLatestRefreshKnowledgeTask(): Promise<KnowledgeRefreshT
 }
 
 export async function exportCurrentKnowledgePack(): Promise<KnowledgePackExport> {
-  const response = await fetch(buildBackendUrl("/api/knowledge/export-pack", "workstation"), {
-    credentials: "include",
+  const response = await requestBlob("/api/knowledge/export-pack", {
+    backend: "workstation",
   });
-  if (!response.ok) {
-    const text = await response.text();
-    try {
-      const payload = JSON.parse(text) as { detail?: unknown };
-      if (typeof payload.detail === "string" && payload.detail.trim()) {
-        throw new Error(payload.detail);
-      }
-    } catch (error) {
-      if (error instanceof Error && error.message !== text) {
-        throw error;
-      }
-    }
-    throw new Error(text);
-  }
   const fileCountText = response.headers.get("X-ATS-Knowledge-Pack-File-Count");
   const fileCount = fileCountText ? Number.parseInt(fileCountText, 10) : undefined;
   return {
-    blob: await response.blob(),
+    blob: response.blob,
     fileName: parseContentDispositionFileName(response.headers.get("Content-Disposition")),
     fileCount: Number.isFinite(fileCount) ? fileCount : undefined,
   };

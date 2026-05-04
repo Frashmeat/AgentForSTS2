@@ -30,39 +30,24 @@ def patch_cfg(body: dict, request: Request = None):
 
 @router.get("/detect_paths")
 def detect_paths(request: Request = None):
-    try:
-        """自动检测 STS2 和 Godot 路径，返回检测结果供用户确认后填入配置。"""
-        from project_utils import detect_paths as _detect
+    """自动检测 STS2 和 Godot 路径，返回检测结果供用户确认后填入配置。"""
+    from project_utils import detect_paths as _detect
 
-        return _detect()
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return _detect()
 
 
 @router.post("/detect_paths/start")
 def start_detect_paths_task(request: Request = None):
-    try:
-        from project_utils import start_detect_paths_task as _start
+    from project_utils import start_detect_paths_task as _start
 
-        return _start()
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return _start()
 
 
 @router.get("/detect_paths/latest")
 def get_latest_detect_paths_task(request: Request = None):
-    try:
-        from project_utils import get_latest_detect_paths_task as _get_latest
+    from project_utils import get_latest_detect_paths_task as _get_latest
 
-        return _get_latest()
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return _get_latest()
 
 
 @router.get("/detect_paths/{task_id}")
@@ -71,13 +56,9 @@ def get_detect_paths_task(task_id: str, request: Request = None):
         from project_utils import get_detect_paths_task as _get
 
         return _get(task_id)
-    except HTTPException:
-        raise
     except KeyError as exc:
         missing_task_id = exc.args[0] if exc.args else task_id
         raise HTTPException(status_code=404, detail=f"未找到检测任务: {missing_task_id}") from exc
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.post("/detect_paths/{task_id}/cancel")
@@ -86,30 +67,21 @@ def cancel_detect_paths_task(task_id: str, request: Request = None):
         from project_utils import cancel_detect_paths_task as _cancel
 
         return _cancel(task_id)
-    except HTTPException:
-        raise
     except KeyError as exc:
         missing_task_id = exc.args[0] if exc.args else task_id
         raise HTTPException(status_code=404, detail=f"未找到检测任务: {missing_task_id}") from exc
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.post("/pick_path")
 def pick_path(body: dict, request: Request = None):
-    try:
-        from project_utils import pick_path as _pick
+    from project_utils import pick_path as _pick
 
-        return _pick(
-            kind=body.get("kind", ""),
-            title=body.get("title", ""),
-            initial_path=body.get("initial_path", ""),
-            filters=body.get("filters") or [],
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return _pick(
+        kind=body.get("kind", ""),
+        title=body.get("title", ""),
+        initial_path=body.get("initial_path", ""),
+        filters=body.get("filters") or [],
+    )
 
 
 @router.get("/local_ai_capability_status")
@@ -136,23 +108,17 @@ def platform_queue_worker_status(request: Request = None):
     queue_worker = getattr(worker, "platform_queue_worker_service", None)
     if queue_worker is None:
         return {"available": False, "reason": "queue_worker_not_registered"}
-    try:
-        return {"available": True, **queue_worker.get_runtime_status()}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return {"available": True, **queue_worker.get_runtime_status()}
 
 
 @router.get("/test_imggen")
 async def test_imggen(request: Request = None):
     from image.generator import generate_images
 
-    try:
-        imgs = await generate_images(
-            _TEXT_LOADER.load("runtime_system.config_image_test_prompt").strip(), "power", batch_size=1
-        )
-        return {"ok": True, "size": list(imgs[0].size)}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)[:300]) from exc
+    imgs = await generate_images(
+        _TEXT_LOADER.load("runtime_system.config_image_test_prompt").strip(), "power", batch_size=1
+    )
+    return {"ok": True, "size": list(imgs[0].size)}
 
 
 def _mask_keys(cfg: dict) -> dict:

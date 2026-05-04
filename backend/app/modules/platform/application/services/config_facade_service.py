@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from fastapi import HTTPException
-
 from app.shared.prompting import PromptLoader
 from config import get_config, update_config
 
@@ -29,27 +27,17 @@ class ConfigFacadeService:
     def detect_paths(self):
         from project_utils import detect_paths as _detect
 
-        try:
-            return _detect()
-        except HTTPException:
-            raise
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return _detect()
 
     def pick_path(self, body: dict) -> dict:
         from project_utils import pick_path as _pick
 
-        try:
-            return _pick(
-                kind=body.get("kind", ""),
-                title=body.get("title", ""),
-                initial_path=body.get("initial_path", ""),
-                filters=body.get("filters") or [],
-            )
-        except HTTPException:
-            raise
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return _pick(
+            kind=body.get("kind", ""),
+            title=body.get("title", ""),
+            initial_path=body.get("initial_path", ""),
+            filters=body.get("filters") or [],
+        )
 
     def get_local_ai_capability_status(self) -> dict:
         config = get_config()
@@ -68,12 +56,9 @@ class ConfigFacadeService:
     async def test_imggen(self):
         from image.generator import generate_images
 
-        try:
-            prompt = self._text_loader.load("runtime_system.config_image_test_prompt").strip()
-            imgs = await generate_images(prompt, "power", batch_size=1)
-            return {"ok": True, "size": list(imgs[0].size)}
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=str(exc)[:300]) from exc
+        prompt = self._text_loader.load("runtime_system.config_image_test_prompt").strip()
+        imgs = await generate_images(prompt, "power", batch_size=1)
+        return {"ok": True, "size": list(imgs[0].size)}
 
     def _mask_keys(self, cfg: dict) -> dict:
         import copy
