@@ -137,6 +137,20 @@ def classify_upstream_error(error: Exception) -> UpstreamErrorClassification:
             raw_error=raw_error,
         )
 
+    if _looks_like_protocol_mismatch(text):
+        return UpstreamErrorClassification(
+            reason_code="upstream_protocol_mismatch",
+            upstream_category="invalid_response",
+            reason_message=(
+                "上游返回了网页或非 API 响应，请管理员检查 api_protocol 与 api_base_url 是否匹配，"
+                "api_base_url 必须指向协议 API 入口而不是网页入口。"
+            ),
+            retryable=False,
+            http_status=http_status,
+            provider_error_code="api_protocol_mismatch",
+            raw_error=raw_error,
+        )
+
     if "openai-compatible direct response was not valid json" in text:
         return UpstreamErrorClassification(
             reason_code="upstream_invalid_response",
@@ -168,3 +182,11 @@ def classify_upstream_error(error: Exception) -> UpstreamErrorClassification:
         provider_error_code="",
         raw_error=raw_error,
     )
+
+
+def _looks_like_protocol_mismatch(text: str) -> bool:
+    if "content_type=text/html" in text or "content-type=text/html" in text:
+        return True
+    if "body_tail=" not in text:
+        return False
+    return _contains_any(text, ("<html", "<!doctype html", "<title>", "<meta", "<body"))

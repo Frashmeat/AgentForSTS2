@@ -33,6 +33,34 @@ _LOG_TAIL_LIMIT = 1200
 logger = logging.getLogger(__name__)
 
 
+class OpenAICompatibleFallbackError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        initial_error: Exception,
+        final_error: Exception,
+        endpoint: str,
+    ) -> None:
+        super().__init__(message)
+        self.initial_error = initial_error
+        self.final_error = final_error
+        self.endpoint = endpoint
+        self.upstream_attempts = [
+            {
+                "stage": "litellm",
+                "error": str(initial_error),
+                "exception_type": type(initial_error).__name__,
+            },
+            {
+                "stage": "openai_compatible_direct",
+                "endpoint": endpoint,
+                "error": str(final_error),
+                "exception_type": type(final_error).__name__,
+            },
+        ]
+
+
 def _decode_output(raw: bytes) -> str:
     for encoding in ("utf-8", "gbk", "cp936"):
         try:
@@ -413,7 +441,19 @@ async def _complete_via_litellm(prompt: str, llm_cfg: dict, cwd: Path | None = N
             _safe_base_url_state(llm_cfg),
             str(error)[:160],
         )
-        return await _complete_openai_compatible_direct(prompt, llm_cfg)
+        try:
+            return await _complete_openai_compatible_direct(prompt, llm_cfg)
+        except Exception as fallback_error:
+            endpoint = _openai_compatible_chat_completions_url(str(llm_cfg.get("base_url") or "").strip())
+            raise OpenAICompatibleFallbackError(
+                (
+                    "OpenAI-compatible fallback failed after LiteLLM response parsing error; "
+                    f"initial_error={error}; final_error={fallback_error}"
+                ),
+                initial_error=error,
+                final_error=fallback_error,
+                endpoint=endpoint,
+            ) from fallback_error
     return response.choices[0].message.content.strip()
 
 

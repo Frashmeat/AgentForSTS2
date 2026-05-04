@@ -21,6 +21,21 @@ def _short_text(value: object, limit: int = 300) -> str:
     return f"{text[:limit]}..."
 
 
+def _upstream_diagnostic(error: Exception, classification: UpstreamErrorClassification) -> dict[str, object]:
+    diagnostic: dict[str, object] = {
+        "raw_error": classification.raw_error,
+        "upstream_category": classification.upstream_category,
+    }
+    for attr in ("initial_error", "final_error", "endpoint"):
+        value = getattr(error, attr, None)
+        if value:
+            diagnostic[attr] = str(value)
+    attempts = getattr(error, "upstream_attempts", None)
+    if isinstance(attempts, list):
+        diagnostic["upstream_attempts"] = attempts
+    return diagnostic
+
+
 class UpstreamTextGenerationError(RuntimeError):
     def __init__(
         self,
@@ -59,10 +74,7 @@ class UpstreamTextGenerationError(RuntimeError):
                 "primary": f"{self.runtime_surface}_log",
                 "secondary": "web_backend_log",
             },
-            diagnostic={
-                "raw_error": self.raw_error,
-                "upstream_category": self.classification.upstream_category,
-            },
+            diagnostic=_upstream_diagnostic(self.__cause__ or self, self.classification),
         ).to_payload()
 
 

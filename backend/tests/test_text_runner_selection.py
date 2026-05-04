@@ -304,10 +304,15 @@ def test_litellm_openai_compatible_direct_fallback_reports_non_json_response(mon
         )
     except RuntimeError as error:
         message = str(error)
+        assert hasattr(error, "upstream_attempts")
         assert "OpenAI-compatible direct response was not valid JSON" in message
+        assert "model_dump" in message
         assert "HTTP status 200" in message
         assert "content_type=text/plain" in message
         assert "body_tail=upstream gateway returned empty page" in message
+        assert error.upstream_attempts[0]["stage"] == "litellm"
+        assert error.upstream_attempts[1]["stage"] == "openai_compatible_direct"
+        assert error.upstream_attempts[1]["endpoint"] == "https://e-flowcode.cc/chat/completions"
         assert "sk-test" not in message
         assert "base prompt" not in message
     else:

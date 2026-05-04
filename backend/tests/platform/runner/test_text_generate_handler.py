@@ -235,6 +235,72 @@ def test_execute_text_generate_step_classifies_invalid_openai_compatible_respons
         raise AssertionError("expected UpstreamTextGenerationError")
 
 
+def test_execute_text_generate_step_preserves_upstream_attempt_chain_for_protocol_mismatch():
+    class FallbackError(RuntimeError):
+        def __init__(self) -> None:
+            super().__init__(
+                "OpenAI-compatible fallback failed after LiteLLM response parsing error; "
+                "initial_error=litellm.APIError: 'str' object has no attribute 'model_dump'; "
+                "final_error=OpenAI-compatible direct response was not valid JSON HTTP status 200 "
+                "content_type=text/html; charset=utf-8 body_tail=<title>New API</title><meta name=\"title\""
+            )
+            self.initial_error = RuntimeError("litellm.APIError: 'str' object has no attribute 'model_dump'")
+            self.final_error = RuntimeError(
+                "OpenAI-compatible direct response was not valid JSON HTTP status 200 "
+                "content_type=text/html; charset=utf-8 body_tail=<title>New API</title>"
+            )
+            self.endpoint = "https://e-flowcode.cc/chat/completions"
+            self.upstream_attempts = [
+                {"stage": "litellm", "error": str(self.initial_error), "exception_type": "RuntimeError"},
+                {
+                    "stage": "openai_compatible_direct",
+                    "endpoint": self.endpoint,
+                    "error": str(self.final_error),
+                    "exception_type": "RuntimeError",
+                },
+            ]
+
+    async def mismatch_complete_text(prompt: str, llm_cfg: dict, cwd=None) -> str:
+        raise FallbackError()
+
+    try:
+        asyncio.run(
+            execute_text_generate_step(
+                StepExecutionRequest(
+                    workflow_version="2026.03.31",
+                    step_protocol_version="v1",
+                    step_type="text.generate",
+                    step_id="text-protocol-mismatch",
+                    job_id=1,
+                    job_item_id=2,
+                    result_schema_version="v1",
+                    input_payload={"prompt": "虚构游戏机制：造成伤害。"},
+                    execution_binding=StepExecutionBinding(
+                        runner_type="api",
+                        api_protocol="openai_compatible",
+                        model="deepseek-v4-pro",
+                        credential="sk-live-openai",
+                        api_base_url="https://e-flowcode.cc",
+                    ),
+                ),
+                complete_text_fn=mismatch_complete_text,
+            )
+        )
+    except UpstreamTextGenerationError as error:
+        payload = error.to_error_payload()
+        diagnostic = payload["diagnostic"]
+        assert payload["reason_code"] == "upstream_protocol_mismatch"
+        assert payload["provider_error_code"] == "api_protocol_mismatch"
+        assert payload["retryable"] is False
+        assert diagnostic["endpoint"] == "https://e-flowcode.cc/chat/completions"
+        assert "model_dump" in diagnostic["initial_error"]
+        assert "content_type=text/html" in diagnostic["final_error"]
+        assert diagnostic["upstream_attempts"][0]["stage"] == "litellm"
+        assert diagnostic["upstream_attempts"][1]["stage"] == "openai_compatible_direct"
+    else:
+        raise AssertionError("expected UpstreamTextGenerationError")
+
+
 def test_execute_text_generate_step_keeps_web_workstation_surface_for_upstream_errors():
     async def rate_limited_complete_text(prompt: str, llm_cfg: dict, cwd=None) -> str:
         raise RuntimeError("HTTP status 429 rate limit exceeded")
