@@ -19,6 +19,8 @@ import {
 import { resolveErrorMessage } from "../shared/error.ts";
 
 let retainedDetectionTaskId = "";
+const PATHS_NOT_FOUND_NOTE =
+  "未找到可用路径。Docker Workstation 只能检测容器内或已挂载到容器的路径；请手动填写输入框，或把宿主机 STS2/Godot 目录挂载进容器后再检测。";
 
 function isActiveTask(status: string): boolean {
   return status === "pending" || status === "running";
@@ -102,6 +104,8 @@ export function useDetectAppPathsTask({
         if (snapshot.status === "failed") {
           const message = snapshot.error?.trim() || "检测失败，请使用右侧选择按钮手动指定路径";
           setNotes((prev) => [...(snapshot.notes ?? prev), `检测失败：${message}`]);
+        } else if (snapshot.status === "completed" && !snapshot.sts2_path && !snapshot.godot_exe_path) {
+          setNotes((prev) => [...(snapshot.notes ?? prev), PATHS_NOT_FOUND_NOTE]);
         }
 
         setDetecting(false);

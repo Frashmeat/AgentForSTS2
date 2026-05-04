@@ -74,6 +74,8 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
   const [serverProfilesError, setServerProfilesError] = useState<string | null>(null);
   const [serverSelectionNotice, setServerSelectionNotice] = useState<string | null>(null);
   const [pendingStartConfirmation, setPendingStartConfirmation] = useState<PendingStartConfirmation | null>(null);
+  const [serverActionBusy, setServerActionBusy] = useState(false);
+  const [serverActionMessage, setServerActionMessage] = useState<string | null>(null);
 
   function showExecutionNotice(title: string, message: string, tone?: "info" | "success" | "warning" | "error") {
     if (tone) {
@@ -92,6 +94,8 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
       setServerProfilesLoading(false);
       setServerProfilesError(null);
       setServerSelectionNotice(null);
+      setServerActionBusy(false);
+      setServerActionMessage(null);
       return;
     }
 
@@ -177,6 +181,9 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
   }
 
   function closeExecutionDialog() {
+    if (serverActionBusy) {
+      return;
+    }
     pendingStartConfirmation?.resolve(false);
     setPendingStartConfirmation(null);
     setPendingExecution(null);
@@ -223,7 +230,7 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
   }
 
   async function handleChooseServerExecution() {
-    if (pendingExecution === null) {
+    if (pendingExecution === null || serverActionBusy) {
       return;
     }
 
@@ -251,7 +258,10 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
     }
 
     try {
+      setServerActionBusy(true);
+      showExecutionNotice("正在创建平台任务", "已开始提交服务器任务，请不要重复点击。", "info");
       if (rememberServerProfile && selectedProfile.id !== serverPreference?.default_execution_profile_id) {
+        setServerActionMessage("正在保存默认服务器配置...");
         const updatedPreference = await updateMyServerPreferences({
           default_execution_profile_id: selectedProfile.id,
         });
@@ -269,8 +279,10 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
         selectedAgentBackend: selectedProfile.agent_backend,
         selectedModel: selectedProfile.model,
         confirmStart: requestStartConfirmation,
+        onProgress: setServerActionMessage,
       });
       setPendingExecution(null);
+      setServerActionMessage(null);
       if (result.deferredNotice) {
         showExecutionNotice(
           result.deferredNotice.summary.title,
@@ -278,9 +290,15 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
           "warning",
         );
       }
+      if (!result.startConfirmed) {
+        showExecutionNotice("平台任务已创建", `任务 #${result.job.id} 已创建，暂未启动。`, "info");
+      }
       navigate(`/me/jobs/${result.job.id}`);
     } catch (error) {
       showExecutionNotice("创建平台任务失败", resolveErrorMessage(error, "创建平台任务失败"));
+    } finally {
+      setServerActionBusy(false);
+      setServerActionMessage(null);
     }
   }
 
@@ -326,6 +344,8 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
     serverProfilesLoading,
     serverProfilesError,
     serverSelectionNotice,
+    serverActionBusy,
+    serverActionMessage,
     selectedServerProfileId,
     rememberServerProfile,
     handleExecutionRequest,

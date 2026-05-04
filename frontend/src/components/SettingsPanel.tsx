@@ -54,6 +54,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
     hasSavedConfigOnce,
     configDirty,
     imageTestLoading,
+    clearSaveStatus,
     set,
     handleProviderChange,
     save,
@@ -121,6 +122,12 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
         return;
       }
       if (!result.path) {
+        setPathNotes([
+          `${request.title}未选择路径。${
+            result.message ||
+            "Docker 或无桌面环境下无法打开宿主机文件选择框，请直接在输入框里填写容器可访问的路径。"
+          }`,
+        ]);
         return;
       }
       set([field], result.path);
@@ -153,10 +160,14 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
   const knowledgeCheckProgress = knowledgeChecking ? 100 : 0;
   const knowledgeUpdateProgress = getKnowledgeUpdateProgress(knowledgeStep, Boolean(knowledgeTaskId));
   const pathFailureNote = pathNotes.find((note) => note.includes("失败")) ?? "";
+  const pathWarningNote = pathNotes.find((note) => note.includes("无法打开") || note.includes("未找到")) ?? "";
   const pathSuccessNotes = pathNotes.filter((note) => note.startsWith("✓"));
   const pathNoticeMessage = detecting
     ? detectionStep || "正在自动检测项目路径"
-    : pathFailureNote || pathSuccessNotes[0] || (missingPaths ? "请补充默认项目目录和 STS2 游戏根目录" : "");
+    : pathFailureNote ||
+      pathWarningNote ||
+      pathSuccessNotes[0] ||
+      (missingPaths ? "请补充默认项目目录和 STS2 游戏根目录" : "");
   const knowledgeNoticeMessage = knowledgeError ? knowledgeError : knowledgeStep || (knowledgeNotes[0] ?? "");
   const floatingNoticeCandidates: Array<StatusNoticeItem | null> = [
     activeTab === "workspace" && (saveError || configDirty || Boolean(saveNotice))
@@ -175,6 +186,8 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
             ? "自动检测路径"
             : pathFailureNote
               ? "路径检测失败"
+              : pathWarningNote
+                ? "路径需要手动填写"
               : pathSuccessNotes.length > 0
                 ? "路径已更新"
                 : "项目路径提示",
@@ -320,9 +333,9 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
               <div className="flex gap-2">
                 <input
                   value={cfg.default_project_root || ""}
-                  readOnly
+                  onChange={(e) => set(["default_project_root"], e.target.value)}
                   placeholder="E:/STS2mod/testscenario"
-                  className={readonlyInputCls + " font-mono"}
+                  className={inputCls + " font-mono"}
                 />
                 <button
                   type="button"
@@ -337,9 +350,9 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
               <div className="flex gap-2">
                 <input
                   value={cfg.sts2_path || ""}
-                  readOnly
+                  onChange={(e) => set(["sts2_path"], e.target.value)}
                   placeholder="E:/steam/steamapps/common/Slay the Spire 2"
-                  className={readonlyInputCls + " font-mono"}
+                  className={inputCls + " font-mono"}
                 />
                 <button
                   type="button"
@@ -354,9 +367,9 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
               <div className="flex gap-2">
                 <input
                   value={cfg.godot_exe_path || ""}
-                  readOnly
+                  onChange={(e) => set(["godot_exe_path"], e.target.value)}
                   placeholder="C:/tools/Godot_v4.5.1-stable_mono_win64.exe"
-                  className={readonlyInputCls + " font-mono"}
+                  className={inputCls + " font-mono"}
                 />
                 <button
                   type="button"
@@ -502,8 +515,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
               <input
                 value={llmKey}
                 onChange={(e) => {
-                  setSaveError("");
-                  setSaveNotice("");
+                  clearSaveStatus();
                   setLlmKey(e.target.value);
                 }}
                 placeholder={cfg.llm?.api_key ? "已设置" : "未设置"}
@@ -566,8 +578,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
                   <input
                     value={imgKey}
                     onChange={(e) => {
-                      setSaveError("");
-                      setSaveNotice("");
+                      clearSaveStatus();
                       setImgKey(e.target.value);
                     }}
                     placeholder={cfg.image_gen?.api_key ? "已设置" : "未设置"}
@@ -579,8 +590,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
                     type="password"
                     value={imgSecret}
                     onChange={(e) => {
-                      setSaveError("");
-                      setSaveNotice("");
+                      clearSaveStatus();
                       setImgSecret(e.target.value);
                     }}
                     placeholder={cfg.image_gen?.api_secret ? "已设置" : "未设置"}
@@ -593,8 +603,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
                 <input
                   value={imgKey}
                   onChange={(e) => {
-                    setSaveError("");
-                    setSaveNotice("");
+                    clearSaveStatus();
                     setImgKey(e.target.value);
                   }}
                   placeholder={cfg.image_gen?.api_key ? "已设置" : "未设置"}

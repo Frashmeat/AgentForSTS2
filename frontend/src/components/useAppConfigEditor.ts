@@ -42,6 +42,7 @@ export interface UseAppConfigEditorResult {
   hasSavedConfigOnce: boolean;
   configDirty: boolean;
   imageTestLoading: boolean;
+  clearSaveStatus: () => void;
   set: (path: string[], value: string | number) => void;
   handleProviderChange: (provider: string) => void;
   save: () => Promise<void>;
@@ -107,9 +108,13 @@ export function useAppConfigEditor({ mountedRef }: UseAppConfigEditorOptions): U
     };
   }, [saveNotice]);
 
-  function set(path: string[], value: string | number) {
+  function clearSaveStatus() {
     setSaveError("");
     setSaveNotice("");
+  }
+
+  function set(path: string[], value: string | number) {
+    clearSaveStatus();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     setCfg((prev: any) => {
       if (!prev) {
@@ -129,8 +134,7 @@ export function useAppConfigEditor({ mountedRef }: UseAppConfigEditorOptions): U
   }
 
   function handleProviderChange(provider: string) {
-    setSaveError("");
-    setSaveNotice("");
+    clearSaveStatus();
     const models = PROVIDER_MODELS[provider] ?? [];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     setCfg((prev: any) => {
@@ -217,6 +221,7 @@ export function useAppConfigEditor({ mountedRef }: UseAppConfigEditorOptions): U
     hasSavedConfigOnce,
     configDirty,
     imageTestLoading,
+    clearSaveStatus,
     set,
     handleProviderChange,
     save,

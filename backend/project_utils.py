@@ -329,7 +329,10 @@ def pick_path(kind: str, title: str = "", initial_path: str = "", filters: list[
         raise ValueError("kind must be 'file' or 'directory'")
 
     if sys.platform != "win32":
-        return {"path": None}
+        return {
+            "path": None,
+            "message": "当前 Workstation 运行环境不支持原生文件选择框，请手动填写容器可访问的路径。",
+        }
 
     selected = _pick_path_windows(
         kind=normalized_kind,

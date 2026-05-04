@@ -107,6 +107,7 @@ export interface PickPathRequest {
 
 export interface PickPathResult {
   path?: string | null;
+  message?: string | null;
 }
 
 export async function loadAppConfig(): Promise<AppConfig> {

@@ -13,6 +13,8 @@ interface ExecutionModeDialogProps {
   serverSelectionNotice: string | null;
   selectedServerProfileId: number | null;
   rememberServerProfile: boolean;
+  serverActionBusy?: boolean;
+  serverActionMessage?: string | null;
   onClose: () => void;
   onChooseLocal: () => void;
   onChooseServer: () => void;
@@ -35,6 +37,8 @@ export function ExecutionModeDialog({
   serverSelectionNotice,
   selectedServerProfileId,
   rememberServerProfile,
+  serverActionBusy = false,
+  serverActionMessage = null,
   onClose,
   onChooseLocal,
   onChooseServer,
@@ -50,7 +54,8 @@ export function ExecutionModeDialog({
   const hasAvailableServerProfile = serverProfiles.some((profile) => profile.available);
   const serverActionDisabled =
     isAuthenticated &&
-    (serverUnsupportedReasons.length > 0 ||
+    (serverActionBusy ||
+      serverUnsupportedReasons.length > 0 ||
       serverProfilesLoading ||
       !hasAvailableServerProfile ||
       selectedServerProfileId === null ||
@@ -120,6 +125,11 @@ export function ExecutionModeDialog({
                   </div>
                 ) : (
                   <>
+                    {serverActionMessage ? (
+                      <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                        {serverActionMessage}
+                      </div>
+                    ) : null}
                     {serverSelectionNotice ? (
                       <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                         {serverSelectionNotice}
@@ -186,7 +196,7 @@ export function ExecutionModeDialog({
                   disabled={serverActionDisabled}
                   onClick={onChooseServer}
                 >
-                  创建服务器任务
+                  {serverActionBusy ? (serverActionMessage || "正在创建服务器任务...") : "创建服务器任务"}
                 </button>
               </>
             ) : (
@@ -205,6 +215,7 @@ export function ExecutionModeDialog({
           <button
             type="button"
             className="rounded-xl px-4 py-2 text-sm text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+            disabled={serverActionBusy}
             onClick={onClose}
           >
             取消
