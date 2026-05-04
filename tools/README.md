@@ -14,6 +14,7 @@
 powershell -File .\tools\tools.ps1 package app
 powershell -File .\tools\tools.ps1 deploy app
 powershell -File .\tools\tools.ps1 deploy app -DryRun
+powershell -File .\tools\tools.ps1 logs app
 powershell -File .\tools\tools.ps1 stop app
 ```
 
@@ -64,6 +65,7 @@ runtime/generated/docker.env
 | --- | --- |
 | `tools.ps1 package app` | `tools/latest/package-app.ps1` |
 | `tools.ps1 deploy app` | `tools/latest/deploy-app.ps1` |
+| `tools.ps1 logs app` | `tools/latest/logs-app.ps1` |
 | `tools.ps1 stop app` | `tools/latest/stop-app.ps1` |
 | `tools.ps1 stop local` | `tools/stop/kill-local.ps1` |
 | `tools.ps1 test ...` | `tools/test/run-pytest.ps1` |
@@ -93,6 +95,8 @@ powershell -File .\tools\tools.ps1 test backend/tests/test_tools_entry_script.py
 powershell -File .\tools\tools.ps1 package app
 powershell -File .\tools\tools.ps1 deploy app -DryRun
 powershell -File .\tools\tools.ps1 deploy app
+powershell -File .\tools\tools.ps1 logs app
+powershell -File .\tools\tools.ps1 logs app -Service web -Follow
 powershell -File .\tools\tools.ps1 stop app
 ```
 
@@ -148,6 +152,30 @@ powershell -File .\tools\tools.ps1 deploy app -DryRun
 ```
 
 `-DryRun` 只生成配置并打印拓扑，不启动进程或 Docker，也不要求 `frontend/dist` 已存在。
+
+### `logs app`
+
+统一查看 app 主线部署日志：
+
+```powershell
+powershell -File .\tools\tools.ps1 logs app
+powershell -File .\tools\tools.ps1 logs app -Service local-workstation
+powershell -File .\tools\tools.ps1 logs app -Service frontend
+powershell -File .\tools\tools.ps1 logs app -Service web -Follow
+```
+
+日志来源：
+
+- 本机 `frontend` / `local-workstation`：`runtime/logs/*.stdout.log` 与 `runtime/logs/*.stderr.log`
+- Docker `postgres` / `web-workstation` / `web`：`docker compose logs`
+
+常用参数：
+
+- `-Service frontend|local-workstation|postgres|web-workstation|web`
+- `-Tail 200`
+- `-Follow`
+- `-LocalOnly`
+- `-DockerOnly`
 
 ### `stop app`
 

@@ -11,6 +11,7 @@ RUN_PYTEST_PATH = REPO_ROOT / "tools" / "test" / "run-pytest.ps1"
 GITIGNORE_PATH = REPO_ROOT / ".gitignore"
 COMPOSE_APP_PATH = REPO_ROOT / "tools" / "latest" / "templates" / "compose.app.yml"
 DEPLOY_APP_PATH = REPO_ROOT / "tools" / "latest" / "deploy-app.ps1"
+LOGS_APP_PATH = REPO_ROOT / "tools" / "latest" / "logs-app.ps1"
 
 
 def _run_tools(*args: str) -> subprocess.CompletedProcess[str]:
@@ -60,6 +61,7 @@ def test_tools_entry_help_lists_app_mainline_commands() -> None:
     assert "部署" in completed.stdout
     assert "stop local" in completed.stdout
     assert "stop app" in completed.stdout
+    assert "logs app" in completed.stdout
     assert "package app" in completed.stdout
     assert "deploy app" in completed.stdout
     assert "latest package" not in completed.stdout
@@ -148,6 +150,20 @@ def test_tools_entry_deploy_app_routes_to_app_deploy_script() -> None:
 
     assert completed.returncode == 0, completed.stderr
     assert completed.stdout == "tools\\latest\\deploy-app.ps1|-DryRun"
+
+
+def test_tools_entry_logs_app_routes_to_app_logs_script() -> None:
+    completed = _run_tools_inline(
+        ". .\\tools\\tools.ps1 help *> $null; "
+        "function Invoke-TargetScript { param([string]$Path, [string[]]$Arguments = @()) "
+        "$relative = [System.IO.Path]::GetRelativePath((Get-Location).Path, $Path); "
+        "[Console]::Out.Write($relative + '|' + ($Arguments -join ',')) }; "
+        "$catalog = Get-CommandCatalog; "
+        "Invoke-Route -Catalog $catalog -ResolvedGroup 'logs' -ResolvedAction 'app' -ResolvedArgs @('-Service', 'web')"
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == "tools\\latest\\logs-app.ps1|-Service,web"
 
 
 def test_tools_entry_catalog_script_paths_exist() -> None:
@@ -256,3 +272,17 @@ def test_deploy_app_verifies_docker_web_stack_after_compose_up() -> None:
     assert 'Invoke-DockerComposeExec -AppConfig $AppConfig -Layout $Layout -EnvFile $EnvFile -ExecArgs @("web", "python", "tools/bootstrap_web_runtime.py", "--ensure-default-admin")' in source
     assert "Docker web 栈: postgres / web-workstation / web 已启动" in source
     assert "默认管理员   : admin / admin@example.com / admin123456（每次部署收敛）" in source
+    assert "日志入口     : powershell -File .\\tools\\tools.ps1 logs app" in source
+    assert "日志目录     : $logRoot" in source
+
+
+def test_logs_app_exposes_local_and_docker_log_sources() -> None:
+    source = LOGS_APP_PATH.read_text(encoding="utf-8-sig")
+
+    assert 'Join-Path $Layout.ConfigRoot "logs"' in source
+    assert '"frontend"' in source
+    assert '"local-workstation"' in source
+    assert '"postgres", "web-workstation", "web"' in source
+    assert '"logs"' in source
+    assert '"--tail", [string]$LineCount' in source
+    assert '$dockerArgs += "-f"' in source

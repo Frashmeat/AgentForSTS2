@@ -708,6 +708,8 @@ Write-Host "  Docker web 栈: postgres / web-workstation / web 已启动"
 if (-not $SkipBootstrap) {
     Write-Host "  默认管理员   : admin / admin@example.com / admin123456（每次部署收敛）"
 }
+Write-Host "  日志入口     : powershell -File .\tools\tools.ps1 logs app"
+Write-Host "  日志目录     : $logRoot"
 Write-Host "  停止入口     : powershell -File .\tools\tools.ps1 stop app"
 
 if (-not $NoBrowser) {

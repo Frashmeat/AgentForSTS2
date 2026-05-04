@@ -81,10 +81,12 @@ Recommended commands:
 powershell -File .\tools\tools.ps1 package app
 powershell -File .\tools\tools.ps1 deploy app -DryRun
 powershell -File .\tools\tools.ps1 deploy app
+powershell -File .\tools\tools.ps1 logs app
 powershell -File .\tools\tools.ps1 stop app
 ```
 
 `deploy app -DryRun` generates `runtime/generated/*` and prints the topology without starting local processes or Docker.
+`logs app` shows local `frontend` / `local-workstation` log files and Docker `postgres` / `web-workstation` / `web` logs.
 
 ### Backend Runtime Modes
 
@@ -267,6 +269,7 @@ App 主线命令：
 powershell -File .\tools\tools.ps1 package app
 powershell -File .\tools\tools.ps1 deploy app -DryRun
 powershell -File .\tools\tools.ps1 deploy app
+powershell -File .\tools\tools.ps1 logs app
 powershell -File .\tools\tools.ps1 stop app
 ```
 

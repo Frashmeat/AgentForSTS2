@@ -20,6 +20,9 @@ powershell -File .\tools\tools.ps1 start workstation
 powershell -File .\tools\tools.ps1 stop local
 
 .EXAMPLE
+powershell -File .\tools\tools.ps1 logs app
+
+.EXAMPLE
 powershell -File .\tools\tools.ps1 test backend/tests/test_tools_entry_script.py -q
 
 .EXAMPLE
@@ -300,6 +303,16 @@ function Get-CommandCatalog {
                 (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 stop-app.ps1 参数说明" -ProfileArgs @("-Help"))
             ))
         ))
+        (New-MenuGroup -Key "logs" -Label "日志" -Description "查看 app 主线部署日志" -Commands @(
+            (New-MenuCommand -Key "logs-app" -Action "app" -Label "查看 app 日志" -Description "查看本机 frontend/local-workstation 与 Docker web 栈日志" -ScriptPath (Join-Path $toolsRoot "latest\logs-app.ps1") -InvocationName "logs app" -IsDefaultAction -Profiles @(
+                (New-MenuProfile -Key "default" -Label "查看最近日志" -Description "显示本机日志文件路径和 Docker 最近日志")
+                (New-MenuProfile -Key "follow" -Label "持续跟随 Docker 日志" -Description "跟随 Docker postgres/web-workstation/web 日志" -ProfileArgs @("-DockerOnly", "-Follow"))
+                (New-MenuProfile -Key "web" -Label "查看 web 日志" -Description "只查看 Docker web 日志" -ProfileArgs @("-Service", "web"))
+                (New-MenuProfile -Key "workstation" -Label "查看工作站日志" -Description "只查看本机 local-workstation 日志" -ProfileArgs @("-Service", "local-workstation"))
+                (New-MenuProfile -Key "frontend" -Label "查看前端日志" -Description "只查看本机 frontend 日志" -ProfileArgs @("-Service", "frontend"))
+                (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 logs-app.ps1 参数说明" -ProfileArgs @("-Help"))
+            ))
+        ))
         (New-MenuGroup -Key "test" -Label "测试" -Description "使用项目后端虚拟环境运行 pytest" -Commands @(
             (New-MenuCommand -Key "test-pytest" -Action "" -Label "运行 pytest" -Description "通过 backend/.venv 执行 python -m pytest，并透传后续参数" -ScriptPath (Join-Path $toolsRoot "test\run-pytest.ps1") -InvocationName "test" -IsDefaultAction -Profiles @(
                 (New-MenuProfile -Key "default" -Label "直接执行" -Description "按 pytest 默认收集规则运行")
@@ -346,6 +359,7 @@ function Get-MenuSections {
     $splitStop = Find-MenuCommand -Catalog $Catalog -GroupKey "split" -ActionKey "stop"
     $stopLocal = Find-MenuCommand -Catalog $Catalog -GroupKey "stop" -ActionKey "local"
     $stopApp = Find-MenuCommand -Catalog $Catalog -GroupKey "stop" -ActionKey "app"
+    $logsApp = Find-MenuCommand -Catalog $Catalog -GroupKey "logs" -ActionKey "app"
     $testPytest = Find-MenuCommand -Catalog $Catalog -GroupKey "test" -ActionKey ""
     $devDecompile = Find-MenuCommand -Catalog $Catalog -GroupKey "dev" -ActionKey "decompile"
     $devResetWebDb = Find-MenuCommand -Catalog $Catalog -GroupKey "dev" -ActionKey "reset-web-db"
@@ -370,6 +384,9 @@ function Get-MenuSections {
         (New-MenuSection -Key "kill-local" -Label "Kill / 停止本机服务" -Description "停止当前仓库识别出的本机 frontend / workstation / web 进程" -Commands @(
             $stopLocal,
             $stopApp
+        ))
+        (New-MenuSection -Key "logs" -Label "日志" -Description "查看 app 主线部署日志" -Commands @(
+            $logsApp
         ))
         (New-MenuSection -Key "package" -Label "打包" -Description "打包唯一主线 app release" -Commands @(
             $packageApp
@@ -438,6 +455,8 @@ function Show-Help {
         "split start -DryRun",
         "stop local",
         "stop app",
+        "logs app",
+        "logs app -Service web -Follow",
         "test backend/tests/test_tools_entry_script.py -q",
         "package app",
         "package app -NoZip",
