@@ -1,0 +1,61 @@
+{
+  "deployment": {
+    "frontend_port": 8080,
+    "local_workstation_port": 7860,
+    "web_port": 7870,
+    "postgres_host_port": 55432,
+    "web_base_url": "http://127.0.0.1:7870"
+  },
+  "local_workstation": {
+    "config": {
+      "llm": {
+        "mode": "agent_cli",
+        "agent_backend": "claude",
+        "model": "",
+        "api_key": "",
+        "base_url": "",
+        "custom_prompt": ""
+      },
+      "image_gen": {
+        "mode": "cloud",
+        "provider": "volcengine",
+        "model": "doubao-seedream-3-0-t2i-250415",
+        "api_key": "",
+        "api_secret": "",
+        "batch_size": 3
+      },
+      "godot_exe_path": "",
+      "dotnet_path": "dotnet",
+      "sts2_path": "",
+      "default_project_root": "",
+      "mod_template_path": "",
+      "mod_projects": [],
+      "active_project": "",
+      "decompiled_src_path": ""
+    }
+  },
+  "web": {
+    "database": {
+      "name": "agentthespire",
+      "user": "agentthespire",
+      "password": "agentthespire"
+    },
+    "auth": {
+      "session_secret": "",
+      "credential_secret": ""
+    },
+    "config": {}
+  },
+  "web_workstation": {
+    "internal_url": "http://web-workstation:7860",
+    "control_token": "",
+    "config": {}
+  },
+  "docker": {
+    "project_name": "agentthespire-app",
+    "network": "agentthespire-app",
+    "python_base_image": "python:3.11-slim",
+    "node_base_image": "node:20-alpine",
+    "postgres_image": "postgres:16-alpine"
+  }
+}

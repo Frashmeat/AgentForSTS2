@@ -16,26 +16,54 @@ services:
       timeout: 5s
       retries: 20
 
+  web-workstation:
+    build:
+      context: ${ATS_WEB_WORKSTATION_CONTEXT}
+      dockerfile: ${ATS_WEB_WORKSTATION_DOCKERFILE}
+      args:
+        PYTHON_BASE_IMAGE: ${ATS_PYTHON_BASE_IMAGE:-python:3.11-slim}
+        NODE_BASE_IMAGE: ${ATS_NODE_BASE_IMAGE:-node:20-alpine}
+    restart: unless-stopped
+    environment:
+      SPIREFORGE_CONFIG_PATH: /app/config.json
+      SPIREFORGE_RUNTIME_DIR: /app/runtime
+      ATS_WORKSTATION_CONTROL_TOKEN: ${ATS_WORKSTATION_CONTROL_TOKEN}
+      SPIREFORGE_LLM_KEY: ${SPIREFORGE_LLM_KEY:-}
+      SPIREFORGE_IMG_KEY: ${SPIREFORGE_IMG_KEY:-}
+      SPIREFORGE_IMG_SECRET: ${SPIREFORGE_IMG_SECRET:-}
+    expose:
+      - "7860"
+    volumes:
+      - ${ATS_WEB_WORKSTATION_CONFIG_PATH}:/app/config.json:ro
+      - ${ATS_WEB_WORKSTATION_RUNTIME_DIR}:/app/runtime
+
   web:
     build:
-      context: ./services/web
-      dockerfile: Dockerfile
+      context: ${ATS_WEB_CONTEXT}
+      dockerfile: ${ATS_WEB_DOCKERFILE}
       args:
         PYTHON_BASE_IMAGE: ${ATS_PYTHON_BASE_IMAGE:-python:3.11-slim}
     restart: unless-stopped
     environment:
       SPIREFORGE_CONFIG_PATH: /app/config.json
+      SPIREFORGE_RUNTIME_DIR: /app/runtime
       SPIREFORGE_AUTH_SESSION_SECRET: ${SPIREFORGE_AUTH_SESSION_SECRET}
       SPIREFORGE_SERVER_CREDENTIAL_SECRET: ${SPIREFORGE_SERVER_CREDENTIAL_SECRET}
       ATS_WORKSTATION_CONTROL_TOKEN: ${ATS_WORKSTATION_CONTROL_TOKEN}
     depends_on:
       postgres:
         condition: service_healthy
+      web-workstation:
+        condition: service_started
     ports:
       - "${ATS_WEB_PORT:-7870}:7870"
     volumes:
-      - ./runtime/web.config.json:/app/config.json:ro
-      - ./runtime:/app/runtime
+      - ${ATS_WEB_CONFIG_PATH}:/app/config.json:ro
+      - ${ATS_WEB_RUNTIME_DIR}:/app/runtime
 
 volumes:
   ats_postgres_data:
+
+networks:
+  default:
+    name: ${ATS_DOCKER_NETWORK:-agentthespire-app}

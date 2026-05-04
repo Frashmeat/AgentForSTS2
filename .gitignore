@@ -18,8 +18,8 @@ frontend/.env
 
 # Docker 本地实例化的 env 文件（含密钥）
 .env
-.env.workstation
 .env.web
+.env.workstation
 
 # Local machine paths (mod dev)
 local.props
@@ -82,3 +82,4 @@ pytest-cache-files-*/
 
 runtime/*
 !runtime/README.md
+!runtime/agentthespire.config.example.json

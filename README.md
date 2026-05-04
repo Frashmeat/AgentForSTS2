@@ -49,72 +49,51 @@ powershell -ExecutionPolicy Bypass -File .\tools\tools.ps1 install   # Windows �
 
 # 安装脚本会把 ~\.dotnet\tools 和项目内 runtime\tools 自动加入当前会话与用户 PATH
 
-# Copy config.example.json → runtime/workstation.config.json, fill in your API keys and game path
+# Copy runtime/agentthespire.config.example.json → runtime/agentthespire.config.json, fill in your API keys and game path
 
 powershell -ExecutionPolicy Bypass -File .\tools\tools.ps1 start workstation   # Opens http://localhost:7860
 ```
 
 See [TUTORIAL.md](TUTORIAL.md) for full setup and configuration guide.
 
-### Docker 部署（两套独立工作站）
+### App Deployment
 
-仓库根目录附带两套互不依赖的 Docker 部署链路：桌面端工作站（`workstation`，单容器）与 Web 端（`web` + `frontend` + `postgres`）。两套各自有独立的 compose 文件、env 文件和 PowerShell 脚手架。
+The current deployment line is fixed:
 
-**桌面端（一键起单容器，端口 7860）：**
+- Local machine: `frontend` + `local-workstation`
+- Docker: `web` + `web-workstation` + `postgres`
 
-```powershell
-# 1) 准备配置：脚本会在缺失时自动从模板复制并退出，编辑后再次运行
-pwsh -File .\tools\docker\workstation.ps1 up
+There is only one human-edited deployment config:
 
-# 2) 复制完成后填好 runtime/workstation.config.json 与 .env.workstation，再次运行：
-pwsh -File .\tools\docker\workstation.ps1 up
-
-# 其它常用动作
-pwsh -File .\tools\docker\workstation.ps1 logs -Follow
-pwsh -File .\tools\docker\workstation.ps1 down
-pwsh -File .\tools\docker\workstation.ps1 rebuild
+```text
+runtime/agentthespire.config.json
 ```
 
-**Web 端（web 后端 + Postgres + 前端 SPA，默认端口 7870 / 8080 / 55432）：**
+Create it from:
 
 ```powershell
-pwsh -File .\tools\docker\web.ps1 up
-
-# 必须在 .env.web 里填好 SPIREFORGE_AUTH_SESSION_SECRET；
-# 在 runtime/web.config.json 里至少配置 database.url（指向 docker compose 里的 postgres 服务，例如
-#   "url": "postgresql+psycopg://agentthespire:agentthespire@postgres:5432/agentthespire"
-# ）与 auth.session_secret。
-
-pwsh -File .\tools\docker\web.ps1 logs -Service postgres -Follow
-pwsh -File .\tools\docker\web.ps1 migrate          # 手动跑一次 alembic upgrade head
-pwsh -File .\tools\docker\web.ps1 reset-db         # 销毁并重建 Postgres 卷
+Copy-Item .\runtime\agentthespire.config.example.json .\runtime\agentthespire.config.json
 ```
 
-**镜像与变量：**
+Recommended commands:
 
-- compose 文件：`docker-compose.workstation.yml` / `docker-compose.web.yml`
-- Dockerfile：`docker/Dockerfile.workstation` / `docker/Dockerfile.web` / `docker/Dockerfile.frontend`
-- 环境变量模板：`.env.workstation.example` / `.env.web.example`
-- 运行时配置：`runtime/workstation.config.json` / `runtime/web.config.json`（自 `config.example.json` 复制）
+```powershell
+powershell -File .\tools\tools.ps1 package app
+powershell -File .\tools\tools.ps1 deploy app -DryRun
+powershell -File .\tools\tools.ps1 deploy app
+powershell -File .\tools\tools.ps1 stop app
+```
 
-注意事项：
-
-- Dockerfile 会把 `rembg[gpu]` 自动改写为 CPU 版 + `onnxruntime`，不依赖宿主 GPU。
-- Workstation 镜像内置 `@anthropic-ai/claude-code` 与 `@openai/codex` CLI，`agent_cli` 模式开箱可用；首次拉取较慢。
-- Web 镜像启动时自动 `alembic upgrade head`，无需手工迁移。
-- 桌面端容器不挂源码，修改后端代码需 `rebuild`。
+`deploy app -DryRun` generates `runtime/generated/*` and prints the topology without starting local processes or Docker.
 
 ### Backend Runtime Modes
 
 - `powershell -File .\tools\tools.ps1 start workstation`
-  Starts `workstation-backend` only. This runtime serves the local workstation UI, local workflows, approvals, config, build, and deploy flows.
+  Starts `workstation-backend` only for local workstation workflows.
 - `powershell -File .\tools\tools.ps1 start web`
-  Starts `web-backend` only on `http://localhost:7870`. This runtime is for platform/auth/job/quota APIs and requires a valid `database.url` plus session secret in `runtime/web.config.json`, or the corresponding env overrides pointed to by `SPIREFORGE_CONFIG_PATH` / `SPIREFORGE_AUTH_SESSION_SECRET`.
-
-Current deployment guidance:
-
-- Single-machine local use: prefer `workstation-backend`
-- Server-side platform APIs: prefer `web-backend`
+  Starts `web-backend` only for platform/auth/job/quota APIs.
+- `powershell -File .\tools\tools.ps1 deploy app`
+  Starts the final local + Docker topology from `runtime/agentthespire.config.json`.
 
 Current product behavior:
 
@@ -180,7 +159,7 @@ Current product behavior:
   - `查看知识库说明`
   - 工作区设置与服务器模式默认配置会在修改后自动保存，并通过右上角非阻塞提示显示状态；当前不可用的服务器执行配置只展示状态，不允许选为默认值
 - 工作流头部右上角展示紧凑“知识库”标签，只保留状态、游戏版本和 Baselib 版本；点击标签可查看知识库说明，不再用风险提醒弹窗阻断本地执行。
-- 发行包会直接包含可查看、可编辑的运行时知识目录；应用运行时只读取这份目录，用户修改后会直接生效。
+- 发行包只初始化可查看、可编辑的运行时知识目录；不会再复制旧 seed 文件。应用运行时只读取这份目录，用户修改后会直接生效。
 - `workstation` / `hybrid` 发行包也会直接包含当前实例自己的 `runtime/tools/`，用于承载 `ilspycmd` 等知识库更新工具及其完整依赖目录。
 - 运行时知识目录默认位于：
   - `runtime/knowledge/knowledge-manifest.json`
@@ -189,7 +168,11 @@ Current product behavior:
   - `runtime/knowledge/resources/sts2/`
   - `runtime/knowledge/cache/`
 - 知识库更新所需的 `ilspycmd` 会优先从当前运行实例自己的 `runtime/tools/` 查找；无论是仓库直启还是 release 包运行，都不应再假定只从仓库根目录查工具。
-- 仓库内 `backend/agents/*` 与 `backend/app/modules/knowledge/resources/sts2/*` 仅作为开发期/打包期种子来源，不再作为运行时并列真源。
+- 游戏反编译必须使用 `ilspycmd --project --outputdir` 生成源码树；旧式单文件 `sts2.decompiled.cs` 不算完整游戏知识库。
+- 平台知识库包是完整 `runtime/knowledge` 迁移包，必须同时包含 `game/**/*.cs` 游戏反编译源码、`baselib/BaseLib.decompiled.cs` 和必需的 `resources/sts2/*.md` 规则文档；任一部分缺失时，导出、上传或激活都会被拒绝。执行 Workstation “更新知识库”会把规则文档模板写入当前 runtime。Docker Workstation 场景下请先确保容器能访问 STS2 安装目录并成功执行“更新知识库”，再从本机工作站上传知识库包。
+- Web 管理端可上传、激活、回滚和删除知识库包；删除当前激活包时会优先回退到上一个仍存在的知识库包，否则清空激活状态。
+- Web 管理端激活知识库包时，会把包内容安装到当前 Web 实例自己的 `runtime/knowledge/`；上传包仓库 `runtime/knowledge/packs/` 只保留包文件与元数据，不作为运行时第二真源。
+- 仓库内旧 seed 已删除，不再保留 `backend/agents/sts2_api_reference.md`、`backend/agents/baselib_src/` 或 `backend/app/modules/knowledge/resources/sts2/` 作为运行时来源；没有完整反编译结果时状态应为 `missing`。
 
 ### 快速开始
 
@@ -204,7 +187,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\tools.ps1 install   # Windows �
 # 如果只想安装 .NET 9 + Godot 4.5.1 + ilspycmd：
 powershell -ExecutionPolicy Bypass -File .\tools\tools.ps1 install mod
 
-# 复制 config.example.json → runtime/workstation.config.json，填入 API Key 和游戏路径
+# 复制 runtime/agentthespire.config.example.json → runtime/agentthespire.config.json，填入 API Key 和游戏路径
 # 设置页“自动检测路径”只检查显式配置、仓库内 godot/、常见 Godot 安装目录、C/D/E:/tools 的固定文件或一级子目录，以及 PATH；不会递归扫描 LOCALAPPDATA 等用户目录。
 
 powershell -ExecutionPolicy Bypass -File .\tools\tools.ps1 start workstation   # 打开 http://localhost:7860
@@ -222,26 +205,29 @@ powershell -ExecutionPolicy Bypass -File .\tools\tools.ps1 start workstation   #
 ### 后端运行形态
 
 - `powershell -File .\tools\tools.ps1 start workstation`
-  仅启动 `workstation-backend`。该运行时承接本地工作站 UI、本地工作流、审批、配置、构建与部署链路。
-- `powershell -File .\tools\tools.ps1 split start`
-  启动“独立前端 + 本地 workstation”双进程本地形态：前端静态站点由本地轻量服务托管，工作台 HTTP/WS 指向本机 `workstation-backend`，平台接口继续指向 `web-backend`。
+  仅启动 `workstation-backend`，用于本机工作流、配置、知识库、构建与部署链路。
 - `powershell -File .\tools\tools.ps1 start web`
-  仅启动 `web-backend`，监听 `http://localhost:7870`。该运行时承接平台任务、认证、配额、历史记录等 API，并要求 `runtime/web.config.json` 或 `SPIREFORGE_CONFIG_PATH` 指向的配置中存在有效的 `database.url`，且会话密钥需由 `auth.session_secret` 或 `SPIREFORGE_AUTH_SESSION_SECRET` 提供。
+  仅启动 `web-backend`，用于平台任务、认证、配额、历史记录等 API。
+- `powershell -File .\tools\tools.ps1 deploy app`
+  启动最终拓扑：本机 `frontend + local-workstation`，Docker `web + web-workstation + postgres`。
 
 当前部署口径：
 
-- 单机本地使用，优先 `workstation-backend`
-- 服务器平台 API，优先 `web-backend`
-- 用户侧正式推荐打包目标：`hybrid`
-- 若要验证“独立前端 + 本地 workstation + 远端/本地 web”形态，优先使用 `powershell -File .\tools\tools.ps1 split start`
+- 开发状态和最终部署状态使用同一拓扑。
+- 人工配置唯一真实源是 `runtime/agentthespire.config.json`。
+- 生成物位于 `runtime/generated/*`，可删除重建。
+- 前端只连接本机 `local-workstation` 与 `web`。
+- `web` 只通过 Docker 内网连接 `web-workstation`。
 
-三种当前相关形态的差异如下：
+固定拓扑如下：
 
-| 形态 | 启动入口 | 谁托管前端 | workstation 接口去向 | web 接口去向 | 适用场景 |
-|------|----------|------------|----------------------|--------------|----------|
-| 工作站托管态 | `powershell -File .\tools\tools.ps1 start workstation` | `workstation-backend` | 本机 `workstation-backend` | 通常不承接；需要平台接口时应另启 `web-backend` | 单机工作站、本地 BYOK、本机构建部署 |
-| 正式部署目标 `hybrid` | `tools\latest\package-release.ps1 hybrid` | 独立静态前端 | `runtime-config.js` 指向本机或 LAN 可达 `workstation-backend` | 默认指向本机 `http://127.0.0.1:7870`，也可显式改为独立部署的 `web-backend` | 用户侧正式交付、“一个前端入口 + 两类后端能力” |
-| 本地验证形态 `split-local` | `powershell -File .\tools\tools.ps1 split start` | 独立静态前端 | 指向本机 `workstation-backend` | 指向配置的 `web-backend` | 本地验证 `hybrid` 形态、开发联调 |
+| 组件 | 运行位置 | 默认地址 | 职责 |
+|------|----------|----------|------|
+| `frontend` | 本机进程 | `http://127.0.0.1:8080` | 静态前端入口 |
+| `local-workstation` | 本机进程 | `http://127.0.0.1:7860` | 本机 STS2、Godot、Mods、CLI、本地工作流 |
+| `web` | Docker | `http://127.0.0.1:7870` | 平台 API、用户、任务、配额、管理端 |
+| `web-workstation` | Docker 内网 | `http://web-workstation:7860` | Web 服务器执行面 |
+| `postgres` | Docker | 宿主默认 `55432` | 平台数据库 |
 
 当前前后端边界补充：
 
@@ -273,28 +259,14 @@ window.__AGENT_THE_SPIRE_WS_BASES__ = {
 };
 ```
 
-`hybrid` Docker 部署时，默认会联动本机 `web-backend` 并写入本机地址；只有显式传入 `-WebBaseUrl` 时才覆盖为其它地址：
+App 主线命令：
 
 ```powershell
-powershell -File .\tools\tools.ps1 latest deploy hybrid -DeployLocalWeb
-powershell -File .\tools\tools.ps1 latest deploy hybrid -WebBaseUrl https://your-web-api.example.com
-powershell -File .\tools\tools.ps1 latest deploy web -ResetDb
-powershell -File .\tools\tools.ps1 stop deploy hybrid
+powershell -File .\tools\tools.ps1 package app
+powershell -File .\tools\tools.ps1 deploy app -DryRun
+powershell -File .\tools\tools.ps1 deploy app
+powershell -File .\tools\tools.ps1 stop app
 ```
-
-说明：
-
-- `deploy-docker.ps1` 在 `hybrid` / `workstation` / `frontend` 目标下会把本地服务作为后台进程启动，并额外打开日志窗口。
-- 关闭日志窗口只会停止日志查看，不会自动停止后台服务。
-- 如需停止这些本地服务，请执行对应的 `stop-deploy.ps1`；脚本会读取 `release/runtime/local-deploy-state.json` 中记录的 PID。
-- `deploy-docker.ps1 hybrid` 默认会从当前 hybrid release 的同级目录推导本机 `web release`，并在联动部署前自动刷新该 release；如实际目录不在同级，可显式传入 `-WebReleaseRoot`。
-- 刷新默认推导出的本机 `web release` 前，脚本会先对固定的 `agentthespire-web-release` Compose 项目执行一次 `docker compose down --remove-orphans`，避免重复执行 `hybrid` 时直接改写仍被 Docker Compose 使用的 release 目录。
-- Docker 构建默认会自动解析 `Python` 基础镜像，优先复用本机已有标签，并默认回退到 `m.daocloud.io/docker.io/library/python:3.11-slim`；如需手工指定，可传 `-PythonBaseImage`。
-- 本机 Docker `web-backend` 默认把 Postgres 暴露到宿主机 `55432`，避免与本机 PostgreSQL 或受限 `5432` 端口冲突；如需覆盖，可传 `-PostgresHostPort <port>`。
-- `workstation` 本地 Python 运行时会缓存到 `release/runtime/python-runtime/workstation`；`requirements.txt` 与启动用 Python 未变化时，后续部署会直接复用该缓存，不再重复安装依赖。
-- `deploy-docker.ps1 web` 现会在 `release/runtime/.env` 中持久化 `SPIREFORGE_AUTH_SESSION_SECRET` 与 `SPIREFORGE_SERVER_CREDENTIAL_SECRET`，并以环境变量注入容器；生成后的 `runtime/web.config.json` 不再保留 `auth.session_secret`。
-- 如需重置本机 `web` 数据库，可使用 `tools.ps1 latest deploy web -ResetDb`；该操作会删除 Docker 数据卷并重建 Postgres 数据库。
-- 同名 `web release` 重新打包时会保留已有 `runtime/.env`；后续部署前还会把 release 内 `docker-compose.yml` 刷新为当前模板，避免沿用旧 Compose 注入方式。
 
 默认文件位置：
 
@@ -304,25 +276,25 @@ powershell -File .\tools\tools.ps1 stop deploy hybrid
 
 当前约束：
 
-- 第一版只支持本机或 LAN 可达的 `workstation-backend`
-- 不支持公网静态前端直接连接任意用户本机 workstation
-- `hybrid` 用户侧发放内容推荐为“独立静态前端 + workstation-backend + launcher”
-- `web-backend` 仍不打进 `hybrid` 用户包；默认 Docker 部署会按约定联动本机 `agentthespire-web-release`
+- 前端 runtime config 不写入 `web-workstation` 地址。
+- Docker `web-workstation` 不暴露宿主端口。
+- `web` 的 `platform_execution.workstation_url` 由部署脚本生成到 `http://web-workstation:7860`。
+- 旧 `hybrid`、根目录双 compose、`.env.web/.env.workstation` 和 `tools/docker/*` 不再作为当前部署主线。
 
 ### 工具脚本
 
 - 当前安装、启动、开发辅助、打包和部署脚本统一放在 `tools/`。
 - 日常统一入口优先使用 `tools.ps1`。直接运行会进入五个一级菜单：环境部署、开发、Kill / 停止本机服务、打包、部署。
-- 参数直达入口保持兼容，例如：
+- 参数直达入口示例：
   - `powershell -File .\tools\tools.ps1 stop`
   - `powershell -File .\tools\tools.ps1 stop local`
-  - `powershell -File .\tools\tools.ps1 latest package hybrid`
-  - `powershell -File .\tools\tools.ps1 latest deploy web -ResetDb`
-  - `powershell -File .\tools\tools.ps1 stop deploy hybrid`
+  - `powershell -File .\tools\tools.ps1 stop app`
+  - `powershell -File .\tools\tools.ps1 package app`
+  - `powershell -File .\tools\tools.ps1 deploy app -DryRun`
   - `powershell -File .\tools\tools.ps1 test backend/tests/test_tools_entry_script.py -q`
 - `tools\stop\kill-local.ps1` 位于交互菜单一级入口 `Kill / 停止本机服务`，可停止当前仓库识别出的本机 `frontend / workstation / web` 进程，并额外清理命令行、可执行路径或当前工作目录明确指向当前仓库 `tools/latest/artifacts` 的常见 release 残留进程，同时尝试停止该目录下默认 release 对应的 Docker `web` 服务；对 `7870` 上的 Docker Desktop / WSL 代理进程会显式跳过，避免误杀 Docker 后端链路。
 - `tools\test\run-pytest.ps1` 是当前推荐 pytest 入口，固定通过唯一项目 Python 环境 `backend\.venv\Scripts\python.exe -m pytest` 运行，避免误用全局 Python。
-- `tools/latest/` 存放当前推荐使用的打包与 Docker 部署脚本；交互菜单中打包和部署已经拆成两个一级入口。
+- `tools/latest/` 存放当前 app 主线打包、部署与停止脚本；交互菜单中打包和部署已经拆成两个一级入口。
 - `tools/archive/` 存放已归档的历史脚本；旧的 Windows Sandbox 验证链路已经迁入该目录，不再作为主流程维护。
 - `tools/latest/artifacts/` 与生成出来的 `sandbox_test.wsb` 都属于本地产物，默认不会提交到 Git。
 

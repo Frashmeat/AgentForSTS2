@@ -5,7 +5,7 @@
 .DESCRIPTION
 支持两种使用方式：
 1. 直接运行脚本，进入分层数字菜单，使用键盘选择要执行的脚本和参数模板
-2. 通过参数直达具体脚本，例如 install / start / split / stop / dev / latest
+2. 通过参数直达具体脚本，例如 install / start / split / stop / dev / package / deploy
 
 .EXAMPLE
 powershell -File .\tools\tools.ps1
@@ -23,7 +23,7 @@ powershell -File .\tools\tools.ps1 stop local
 powershell -File .\tools\tools.ps1 test backend/tests/test_tools_entry_script.py -q
 
 .EXAMPLE
-powershell -File .\tools\tools.ps1 latest package hybrid
+powershell -File .\tools\tools.ps1 package app
 #>
 param(
     [Parameter(Position = 0)]
@@ -295,12 +295,9 @@ function Get-CommandCatalog {
                     (New-MenuPrompt -Key "web-port" -Prompt "Web 端口（直接回车跳过）" -ArgumentName "-WebPort")
                 ))
             ))
-            (New-MenuCommand -Key "stop-deploy" -Action "deploy" -Label "停止 latest deploy 本地服务" -Description "读取 local-deploy-state.json 停止 release 本机进程" -ScriptPath (Join-Path $toolsRoot "latest\stop-deploy.ps1") -InvocationName "stop deploy" -DefaultArgs @("hybrid") -Profiles @(
-                (New-MenuProfile -Key "hybrid" -Label "停止 hybrid" -Description "停止 hybrid release 拉起的本机进程" -ProfileArgs @("hybrid"))
-                (New-MenuProfile -Key "workstation" -Label "停止 workstation" -Description "停止 workstation release 拉起的本机进程" -ProfileArgs @("workstation"))
-                (New-MenuProfile -Key "frontend" -Label "停止 frontend" -Description "停止 frontend release 拉起的本机进程" -ProfileArgs @("frontend"))
-                (New-MenuProfile -Key "web" -Label "停止 web" -Description "清理 web release 本地状态文件" -ProfileArgs @("web"))
-                (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 stop-deploy.ps1 参数说明" -ProfileArgs @("-Help"))
+            (New-MenuCommand -Key "stop-app" -Action "app" -Label "停止 app 主线部署" -Description "停止本机 frontend/local-workstation 与 Docker web 栈" -ScriptPath (Join-Path $toolsRoot "latest\stop-app.ps1") -InvocationName "stop app" -Profiles @(
+                (New-MenuProfile -Key "default" -Label "直接执行" -Description "停止 app 主线部署")
+                (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 stop-app.ps1 参数说明" -ProfileArgs @("-Help"))
             ))
         ))
         (New-MenuGroup -Key "test" -Label "测试" -Description "使用项目后端虚拟环境运行 pytest" -Commands @(
@@ -318,35 +315,20 @@ function Get-CommandCatalog {
                 (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 reset_web_database_with_test_data.ps1 参数说明" -ProfileArgs @("-Help"))
             ))
         ))
-        (New-MenuGroup -Key "latest" -Label "打包 / 部署" -Description "统一调度 tools/latest 下的发布脚本" -Commands @(
-            (New-MenuCommand -Key "latest-package" -Action "package" -Label "打包 release" -Description "打包 release bundle（目标: hybrid / workstation / frontend / web）" -ScriptPath (Join-Path $toolsRoot "latest\package-release.ps1") -InvocationName "latest package" -Profiles @(
-                (New-MenuProfile -Key "hybrid" -Label "打包 hybrid" -Description "构建正式推荐的 frontend + workstation 用户侧 bundle" -ProfileArgs @("hybrid"))
-                (New-MenuProfile -Key "workstation" -Label "打包 workstation" -Description "构建前端 + workstation release bundle" -ProfileArgs @("workstation"))
-                (New-MenuProfile -Key "frontend" -Label "打包 frontend" -Description "只打前端静态站点 release" -ProfileArgs @("frontend"))
-                (New-MenuProfile -Key "web" -Label "打包 web" -Description "只打 Web API release" -ProfileArgs @("web"))
-                (New-MenuProfile -Key "hybrid-nozip" -Label "打包 hybrid（不压缩）" -Description "保留 release 目录，跳过 zip" -ProfileArgs @("hybrid", "-NoZip"))
-                (New-MenuProfile -Key "workstation-nozip" -Label "打包 workstation（不压缩）" -Description "保留 release 目录，跳过 zip" -ProfileArgs @("workstation", "-NoZip"))
-                (New-MenuProfile -Key "frontend-nozip" -Label "打包 frontend（不压缩）" -Description "保留 release 目录，跳过 zip" -ProfileArgs @("frontend", "-NoZip"))
-                (New-MenuProfile -Key "web-nozip" -Label "打包 web（不压缩）" -Description "保留 release 目录，跳过 zip" -ProfileArgs @("web", "-NoZip"))
-                (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 package-release.ps1 参数说明" -ProfileArgs @("-Help"))
+        (New-MenuGroup -Key "package" -Label "打包" -Description "打包唯一主线 app release" -Commands @(
+            (New-MenuCommand -Key "package-app" -Action "app" -Label "打包 app release" -Description "打包本机 frontend/local-workstation + Docker web 栈 release" -ScriptPath (Join-Path $toolsRoot "latest\package-app.ps1") -InvocationName "package app" -IsDefaultAction -Profiles @(
+                (New-MenuProfile -Key "default" -Label "直接打包" -Description "按默认参数打包 app release")
+                (New-MenuProfile -Key "nozip" -Label "不压缩" -Description "保留 release 目录，跳过 zip" -ProfileArgs @("-NoZip"))
+                (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 package-app.ps1 参数说明" -ProfileArgs @("-Help"))
             ))
-            (New-MenuCommand -Key "latest-deploy" -Action "deploy" -Label "部署 release" -Description "部署 release（目标: hybrid / workstation / frontend / web）" -ScriptPath (Join-Path $toolsRoot "latest\deploy-docker.ps1") -InvocationName "latest deploy" -Profiles @(
-                (New-MenuProfile -Key "workstation" -Label "部署 workstation" -Description "按默认参数在本机启动 workstation" -ProfileArgs @("workstation"))
-                (New-MenuProfile -Key "frontend" -Label "部署 frontend" -Description "按默认参数在本机启动 frontend" -ProfileArgs @("frontend"))
-                (New-MenuProfile -Key "web" -Label "部署 web" -Description "按默认参数部署 web" -ProfileArgs @("web"))
-                (New-MenuProfile -Key "web-reset-db" -Label "部署 web（重置数据库）" -Description "部署 web 前删除 Docker 数据卷并重建 Postgres 数据库" -ProfileArgs @("web", "-ResetDb"))
-                (New-MenuProfile -Key "web-debug" -Label "部署 web（Debug 测试数据）" -Description "部署 web 后重置数据库并导入测试数据" -ProfileArgs @("web", "-Debug"))
-                (New-MenuProfile -Key "hybrid-local-web" -Label "部署 hybrid（联动本机 Web）" -Description "显式使用 -DeployLocalWeb 联动部署本机 web-backend" -ProfileArgs @("hybrid", "-DeployLocalWeb"))
-                (New-MenuProfile -Key "hybrid-local-web-debug" -Label "部署 hybrid（Debug 测试数据）" -Description "联动本机 web-backend，并在 web 启动后重置数据库导入测试数据" -ProfileArgs @("hybrid", "-DeployLocalWeb", "-Debug"))
-                (New-MenuProfile -Key "hybrid-remote-web" -Label "部署 hybrid（指定 Web API）" -Description "输入远端或本机 Web API 地址后部署 hybrid" -ProfileArgs @("hybrid") -Prompts @(
-                    (New-MenuPrompt -Key "web-base-url" -Prompt "Web API 基地址（必填，例如 https://your-web-api.example.com）" -ArgumentName "-WebBaseUrl" -Required)
-                ))
-                (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 deploy-docker.ps1 参数说明" -ProfileArgs @("-Help"))
-            ))
-            (New-MenuCommand -Key "latest-installer" -Action "installer" -Label "构建 workstation 安装器" -Description "执行 build-workstation-installer.ps1" -ScriptPath (Join-Path $toolsRoot "latest\build-workstation-installer.ps1") -InvocationName "latest installer" -Profiles @(
-                (New-MenuProfile -Key "default" -Label "直接构建" -Description "按默认参数构建安装器")
-                (New-MenuProfile -Key "noexe" -Label "只准备中间产物" -Description "跳过安装器 EXE 生成" -ProfileArgs @("-NoExe"))
-                (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 build-workstation-installer.ps1 参数说明" -ProfileArgs @("-Help"))
+        ))
+        (New-MenuGroup -Key "deploy" -Label "部署" -Description "部署唯一主线 app" -Commands @(
+            (New-MenuCommand -Key "deploy-app" -Action "app" -Label "部署 app" -Description "部署本机 frontend/local-workstation 与 Docker web 栈" -ScriptPath (Join-Path $toolsRoot "latest\deploy-app.ps1") -InvocationName "deploy app" -IsDefaultAction -Profiles @(
+                (New-MenuProfile -Key "default" -Label "直接部署" -Description "按统一配置部署 app")
+                (New-MenuProfile -Key "dryrun" -Label "DryRun" -Description "生成配置并打印拓扑，不启动服务" -ProfileArgs @("-DryRun"))
+                (New-MenuProfile -Key "reset-db" -Label "重置数据库" -Description "部署前删除 Docker Postgres 卷" -ProfileArgs @("-ResetDb"))
+                (New-MenuProfile -Key "rebuild" -Label "强制重建镜像" -Description "强制重建 Docker web 栈镜像" -ProfileArgs @("-Rebuild"))
+                (New-MenuProfile -Key "help" -Label "查看帮助" -Description "查看 deploy-app.ps1 参数说明" -ProfileArgs @("-Help"))
             ))
         ))
     )
@@ -363,13 +345,12 @@ function Get-MenuSections {
     $splitStart = Find-MenuCommand -Catalog $Catalog -GroupKey "split" -ActionKey "start"
     $splitStop = Find-MenuCommand -Catalog $Catalog -GroupKey "split" -ActionKey "stop"
     $stopLocal = Find-MenuCommand -Catalog $Catalog -GroupKey "stop" -ActionKey "local"
-    $stopDeploy = Find-MenuCommand -Catalog $Catalog -GroupKey "stop" -ActionKey "deploy"
+    $stopApp = Find-MenuCommand -Catalog $Catalog -GroupKey "stop" -ActionKey "app"
     $testPytest = Find-MenuCommand -Catalog $Catalog -GroupKey "test" -ActionKey ""
     $devDecompile = Find-MenuCommand -Catalog $Catalog -GroupKey "dev" -ActionKey "decompile"
     $devResetWebDb = Find-MenuCommand -Catalog $Catalog -GroupKey "dev" -ActionKey "reset-web-db"
-    $latestPackage = Find-MenuCommand -Catalog $Catalog -GroupKey "latest" -ActionKey "package"
-    $latestDeploy = Find-MenuCommand -Catalog $Catalog -GroupKey "latest" -ActionKey "deploy"
-    $latestInstaller = Find-MenuCommand -Catalog $Catalog -GroupKey "latest" -ActionKey "installer"
+    $packageApp = Find-MenuCommand -Catalog $Catalog -GroupKey "package" -ActionKey "app"
+    $deployApp = Find-MenuCommand -Catalog $Catalog -GroupKey "deploy" -ActionKey "app"
 
     return @(
         (New-MenuSection -Key "environment" -Label "环境部署" -Description "安装环境与运行依赖" -Commands @(
@@ -387,15 +368,14 @@ function Get-MenuSections {
             $devResetWebDb
         ))
         (New-MenuSection -Key "kill-local" -Label "Kill / 停止本机服务" -Description "停止当前仓库识别出的本机 frontend / workstation / web 进程" -Commands @(
-            $stopLocal
+            $stopLocal,
+            $stopApp
         ))
-        (New-MenuSection -Key "package" -Label "打包" -Description "打包 release bundle 与构建安装器" -Commands @(
-            $latestPackage,
-            $latestInstaller
+        (New-MenuSection -Key "package" -Label "打包" -Description "打包唯一主线 app release" -Commands @(
+            $packageApp
         ))
-        (New-MenuSection -Key "deploy" -Label "部署" -Description "部署 release 或停止 deploy 拉起的本地服务" -Commands @(
-            $latestDeploy,
-            $stopDeploy
+        (New-MenuSection -Key "deploy" -Label "部署" -Description "部署唯一主线 app" -Commands @(
+            $deployApp
         ))
     )
 }
@@ -457,12 +437,13 @@ function Show-Help {
         "start workstation",
         "split start -DryRun",
         "stop local",
+        "stop app",
         "test backend/tests/test_tools_entry_script.py -q",
-        "stop deploy hybrid",
-        "latest package hybrid",
-        "latest deploy hybrid -DeployLocalWeb",
-        "latest deploy hybrid -WebBaseUrl https://your-web-api.example.com",
-        "latest deploy web -ResetDb"
+        "package app",
+        "package app -NoZip",
+        "deploy app -DryRun",
+        "deploy app",
+        "deploy app -ResetDb"
     )) {
         Write-Host ("  {0} -File .\tools\tools.ps1 {1}" -f $currentPowerShellName, $example)
     }
@@ -568,21 +549,6 @@ function Resolve-CommandArgs {
     )
 
     $resolved = @($Arguments)
-    if ($Command.InvocationName -eq "latest deploy") {
-        if ($DebugPreference -ne "SilentlyContinue" -and "-DebugTestData" -notin $resolved) {
-            $resolved += "-DebugTestData"
-        }
-        $resolved = @(
-            $resolved | ForEach-Object {
-                if ($_ -eq "-Debug") {
-                    "-DebugTestData"
-                } else {
-                    $_
-                }
-            }
-        )
-    }
-
     return $resolved
 }
 
