@@ -14,7 +14,7 @@ export function PlatformErrorDiagnostics({ error }: PlatformErrorDiagnosticsProp
     ["诊断码", error.reasonCode],
     ["是否可重试", error.retryable === null ? "" : error.retryable ? "是" : "否"],
     ["失败步骤", [error.stepId, error.stepType].filter(Boolean).join(" / ")],
-    ["模型", [error.provider, error.model].filter(Boolean).join(" / ")],
+    ["模型", [error.apiProtocol, error.model].filter(Boolean).join(" / ")],
     ["HTTP 状态", error.httpStatus === null ? "" : String(error.httpStatus)],
     ["建议查看", [logHintLabel(error.logHint.primary), logHintLabel(error.logHint.secondary)].filter(Boolean).join(" / ")],
   ].filter(([, value]) => String(value || "").trim().length > 0);

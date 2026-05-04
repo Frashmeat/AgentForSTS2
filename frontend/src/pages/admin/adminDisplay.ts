@@ -46,9 +46,15 @@ const authTypeLabels: Record<string, string> = {
   ak_sk: "访问密钥",
 };
 
-const providerLabels: Record<string, string> = {
-  openai: "OpenAI",
-  anthropic: "Anthropic",
+const apiProtocolLabels: Record<string, string> = {
+  openai_compatible: "OpenAI-compatible",
+  anthropic_compatible: "Anthropic-compatible",
+};
+
+const runnerTypeLabels: Record<string, string> = {
+  codex_cli: "Codex CLI",
+  claude_cli: "Claude CLI",
+  api: "API",
 };
 
 const refundReasonLabels: Record<string, string> = {
@@ -82,12 +88,20 @@ export function formatAdminAuthType(authType?: string | null): string {
   return authTypeLabels[key] ?? key;
 }
 
-export function formatAdminProvider(provider?: string | null): string {
-  const key = String(provider ?? "").trim();
+export function formatAdminApiProtocol(apiProtocol?: string | null): string {
+  const key = String(apiProtocol ?? "").trim();
   if (!key) {
-    return "未知服务商";
+    return "未知协议";
   }
-  return providerLabels[key] ?? key;
+  return apiProtocolLabels[key] ?? key;
+}
+
+export function formatAdminRunnerType(runnerType?: string | null): string {
+  const key = String(runnerType ?? "").trim();
+  if (!key) {
+    return "未知运行器";
+  }
+  return runnerTypeLabels[key] ?? key;
 }
 
 export function formatAdminRefundReason(reason?: string | null): string {

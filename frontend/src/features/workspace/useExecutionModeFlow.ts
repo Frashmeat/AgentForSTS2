@@ -276,7 +276,7 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
         createdFrom: request.createdFrom,
         items: request.items,
         selectedExecutionProfileId: selectedProfile.id,
-        selectedAgentBackend: selectedProfile.agent_backend,
+        selectedRunnerType: selectedProfile.runner_type,
         selectedModel: selectedProfile.model,
         confirmStart: requestStartConfirmation,
         onProgress: setServerActionMessage,

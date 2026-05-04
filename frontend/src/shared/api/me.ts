@@ -23,7 +23,7 @@ export interface CurrentUserProfile {
 export interface MyServerPreferenceView {
   default_execution_profile_id: number | null;
   display_name: string;
-  agent_backend: string;
+  runner_type: string;
   model: string;
   available: boolean;
   updated_at: string | null;

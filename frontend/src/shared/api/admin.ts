@@ -5,7 +5,7 @@ export interface AdminExecutionListItem {
   job_id: number;
   job_item_id: number;
   status: string;
-  provider: string;
+  api_protocol: string;
   model: string;
 }
 
@@ -84,7 +84,7 @@ export interface AdminExecutionProfileListItem {
   id: number;
   code: string;
   display_name: string;
-  agent_backend: string;
+  runner_type: string;
   model: string;
   description?: string;
   enabled: boolean;
@@ -99,7 +99,7 @@ export interface AdminExecutionProfileListView {
 export interface CreateAdminExecutionProfileRequest {
   code: string;
   display_name: string;
-  agent_backend: string;
+  runner_type: string;
   model: string;
   description?: string;
   enabled?: boolean;
@@ -110,7 +110,7 @@ export interface CreateAdminExecutionProfileRequest {
 export interface UpdateAdminExecutionProfileRequest {
   code: string;
   display_name: string;
-  agent_backend: string;
+  runner_type: string;
   model: string;
   description?: string;
   enabled?: boolean;
@@ -121,10 +121,10 @@ export interface UpdateAdminExecutionProfileRequest {
 export interface AdminServerCredentialListItem {
   id: number;
   execution_profile_id: number;
-  provider: string;
+  api_protocol: string;
   auth_type: string;
   label: string;
-  base_url: string;
+  api_base_url: string;
   priority: number;
   enabled: boolean;
   health_status: string;
@@ -139,11 +139,11 @@ export interface AdminServerCredentialListView {
 
 export interface CreateAdminServerCredentialRequest {
   execution_profile_id: number;
-  provider: string;
+  api_protocol: string;
   auth_type: string;
   credential: string;
   secret?: string;
-  base_url?: string;
+  api_base_url?: string;
   label?: string;
   priority?: number;
   enabled?: boolean;
@@ -151,11 +151,11 @@ export interface CreateAdminServerCredentialRequest {
 
 export interface UpdateAdminServerCredentialRequest {
   execution_profile_id: number;
-  provider: string;
+  api_protocol: string;
   auth_type: string;
   credential?: string;
   secret?: string;
-  base_url?: string;
+  api_base_url?: string;
   label?: string;
   priority?: number;
   enabled?: boolean;

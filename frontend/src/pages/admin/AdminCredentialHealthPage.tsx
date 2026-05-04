@@ -9,7 +9,7 @@ import {
   type AdminServerCredentialListItem,
 } from "../../shared/api/index.ts";
 import { resolveErrorMessage } from "../../shared/error.ts";
-import { formatAdminProvider, formatAdminStatus } from "./adminDisplay.ts";
+import { formatAdminApiProtocol, formatAdminStatus } from "./adminDisplay.ts";
 import { useAdminLayoutContext } from "./AdminLayout.tsx";
 
 function formatTime(value?: string | null): string {
@@ -137,7 +137,7 @@ export function AdminCredentialHealthPage() {
               <tr>
                 <th className="px-3 py-2 font-semibold">凭据</th>
                 <th className="px-3 py-2 font-semibold">执行配置</th>
-                <th className="px-3 py-2 font-semibold">服务商</th>
+                <th className="px-3 py-2 font-semibold">API 协议</th>
                 <th className="px-3 py-2 font-semibold">状态</th>
                 <th className="px-3 py-2 font-semibold">最近检查</th>
                 <th className="px-3 py-2 font-semibold">问题</th>
@@ -155,7 +155,7 @@ export function AdminCredentialHealthPage() {
                     <td className="px-3 py-2 text-slate-600">
                       {profileById.get(credential.execution_profile_id)?.display_name ?? "未知配置"}
                     </td>
-                    <td className="px-3 py-2 text-slate-600">{formatAdminProvider(credential.provider)}</td>
+                    <td className="px-3 py-2 text-slate-600">{formatAdminApiProtocol(credential.api_protocol)}</td>
                     <td className="px-3 py-2">
                       <span
                         className={`rounded-md border px-2 py-1 text-xs font-medium ${statusClass(credential.health_status)}`}

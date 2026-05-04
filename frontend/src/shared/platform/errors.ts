@@ -17,7 +17,7 @@ export interface PlatformErrorView {
   retryable: boolean | null;
   stepId: string;
   stepType: string;
-  provider: string;
+  apiProtocol: string;
   model: string;
   httpStatus: number | null;
   logHint: {
@@ -38,6 +38,10 @@ const DIAGNOSTIC_LABELS: Record<string, string> = {
   traceback: "Traceback",
   stdout_tail: "stdout 尾部",
   stderr_tail: "stderr 尾部",
+  initial_error: "初始上游错误",
+  final_error: "最终上游错误",
+  endpoint: "请求端点",
+  upstream_attempts: "上游尝试链",
 };
 
 export function toPlatformErrorView(errorPayload: unknown, errorSummary = ""): PlatformErrorView {
@@ -64,7 +68,7 @@ export function toPlatformErrorView(errorPayload: unknown, errorSummary = ""): P
     retryable: typeof payload.retryable === "boolean" ? payload.retryable : null,
     stepId: readString(payload.step_id),
     stepType: readString(payload.step_type),
-    provider: readString(payload.provider),
+    apiProtocol: readString(payload.api_protocol),
     model: readString(payload.model),
     httpStatus: readNumber(payload.http_status),
     logHint: readLogHint(payload.log_hint),
@@ -146,6 +150,9 @@ function readString(value: unknown): string {
   }
   if (typeof value === "number" || typeof value === "boolean") {
     return String(value);
+  }
+  if (Array.isArray(value) || isRecord(value)) {
+    return JSON.stringify(value);
   }
   return "";
 }

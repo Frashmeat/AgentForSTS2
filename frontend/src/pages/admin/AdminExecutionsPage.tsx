@@ -9,7 +9,7 @@ import {
 } from "../../shared/api/index.ts";
 import { resolveErrorMessage } from "../../shared/error.ts";
 import { PlatformErrorDiagnostics, hasPlatformErrorPayload, toPlatformErrorView } from "../../shared/platform/index.ts";
-import { formatAdminProvider, formatAdminStatus } from "./adminDisplay.ts";
+import { formatAdminApiProtocol, formatAdminStatus } from "./adminDisplay.ts";
 import { useAdminLayoutContext } from "./AdminLayout.tsx";
 
 function detailRows(execution: AdminExecutionDetail) {
@@ -17,7 +17,7 @@ function detailRows(execution: AdminExecutionDetail) {
     ["执行编号", execution.id],
     ["任务编号", execution.job_id],
     ["子任务", execution.job_item_id],
-    ["服务商", formatAdminProvider(execution.provider)],
+    ["API 协议", formatAdminApiProtocol(execution.api_protocol)],
     ["模型", execution.model],
     ["状态", formatAdminStatus(execution.status).label],
     ["请求标识", execution.request_idempotency_key],
@@ -127,7 +127,7 @@ export function AdminExecutionsPage() {
                     <th className="px-3 py-2 font-semibold">执行编号</th>
                     <th className="px-3 py-2 font-semibold">任务编号</th>
                     <th className="px-3 py-2 font-semibold">子任务</th>
-                    <th className="px-3 py-2 font-semibold">服务商</th>
+                    <th className="px-3 py-2 font-semibold">API 协议</th>
                     <th className="px-3 py-2 font-semibold">状态</th>
                   </tr>
                 </thead>
@@ -144,7 +144,7 @@ export function AdminExecutionsPage() {
                         <td className="px-3 py-2 text-slate-600">{execution.job_id}</td>
                         <td className="px-3 py-2 text-slate-600">{execution.job_item_id}</td>
                         <td className="px-3 py-2 text-slate-600">
-                          {formatAdminProvider(execution.provider)} / {execution.model}
+                          {formatAdminApiProtocol(execution.api_protocol)} / {execution.model}
                         </td>
                         <td className="px-3 py-2">
                           <span

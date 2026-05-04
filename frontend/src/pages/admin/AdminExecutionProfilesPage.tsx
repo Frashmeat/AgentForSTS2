@@ -13,14 +13,14 @@ import {
   type AdminServerCredentialListItem,
 } from "../../shared/api/index.ts";
 import { resolveErrorMessage } from "../../shared/error.ts";
-import { formatAdminProvider, formatAdminStatus } from "./adminDisplay.ts";
+import { formatAdminApiProtocol, formatAdminRunnerType, formatAdminStatus } from "./adminDisplay.ts";
 import { useAdminLayoutContext } from "./AdminLayout.tsx";
 
 type ExecutionProfileFormState = {
   id: number | null;
   code: string;
   display_name: string;
-  agent_backend: "codex" | "claude";
+  runner_type: "codex_cli" | "claude_cli" | "api";
   model: string;
   description: string;
   enabled: boolean;
@@ -32,7 +32,7 @@ const emptyForm: ExecutionProfileFormState = {
   id: null,
   code: "",
   display_name: "",
-  agent_backend: "codex",
+  runner_type: "codex_cli",
   model: "",
   description: "",
   enabled: true,
@@ -45,7 +45,8 @@ function toForm(profile: AdminExecutionProfileListItem): ExecutionProfileFormSta
     id: profile.id,
     code: profile.code,
     display_name: profile.display_name,
-    agent_backend: profile.agent_backend === "claude" ? "claude" : "codex",
+    runner_type:
+      profile.runner_type === "claude_cli" || profile.runner_type === "api" ? profile.runner_type : "codex_cli",
     model: profile.model,
     description: profile.description ?? "",
     enabled: profile.enabled,
@@ -114,7 +115,7 @@ export function AdminExecutionProfilesPage() {
       const payload = {
         code: form.code,
         display_name: form.display_name,
-        agent_backend: form.agent_backend,
+        runner_type: form.runner_type,
         model: form.model,
         description: form.description,
         enabled: form.enabled,
@@ -173,7 +174,7 @@ export function AdminExecutionProfilesPage() {
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-slate-950">执行配置</h1>
-          <p className="mt-1 text-sm text-slate-500">模型组合、服务商和可用凭据。</p>
+          <p className="mt-1 text-sm text-slate-500">运行器、模型组合、API 协议和可用凭据。</p>
         </div>
         <button
           type="button"
@@ -227,16 +228,22 @@ export function AdminExecutionProfilesPage() {
             </label>
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
               <label className="space-y-1 text-sm text-slate-600">
-                <span>Agent 后端</span>
+                <span>运行器类型</span>
                 <select
-                  value={form.agent_backend}
+                  value={form.runner_type}
                   onChange={(event) =>
-                    patchForm({ agent_backend: event.target.value === "claude" ? "claude" : "codex" })
+                    patchForm({
+                      runner_type:
+                        event.target.value === "claude_cli" || event.target.value === "api"
+                          ? event.target.value
+                          : "codex_cli",
+                    })
                   }
                   className="w-full rounded-lg border border-slate-200 px-3 py-2"
                 >
-                  <option value="codex">Codex</option>
-                  <option value="claude">Claude</option>
+                  <option value="codex_cli">{formatAdminRunnerType("codex_cli")}</option>
+                  <option value="claude_cli">{formatAdminRunnerType("claude_cli")}</option>
+                  <option value="api">{formatAdminRunnerType("api")}</option>
                 </select>
               </label>
               <label className="space-y-1 text-sm text-slate-600">
@@ -316,7 +323,8 @@ export function AdminExecutionProfilesPage() {
                 <tr>
                   <th className="px-3 py-2 font-semibold">编号</th>
                   <th className="px-3 py-2 font-semibold">名称</th>
-                  <th className="px-3 py-2 font-semibold">服务商</th>
+                  <th className="px-3 py-2 font-semibold">运行器</th>
+                  <th className="px-3 py-2 font-semibold">API 协议</th>
                   <th className="px-3 py-2 font-semibold">模型</th>
                   <th className="px-3 py-2 font-semibold">可用凭据</th>
                   <th className="px-3 py-2 font-semibold">用户可选状态</th>
@@ -327,8 +335,8 @@ export function AdminExecutionProfilesPage() {
                 {profiles.map((profile) => {
                   const profileCredentials = credentialsByProfile.get(profile.id) ?? [];
                   const enabledCredentials = profileCredentials.filter((credential) => credential.enabled);
-                  const providers = [
-                    ...new Set(profileCredentials.map((credential) => formatAdminProvider(credential.provider))),
+                  const apiProtocols = [
+                    ...new Set(profileCredentials.map((credential) => formatAdminApiProtocol(credential.api_protocol))),
                   ];
                   return (
                     <tr key={profile.id}>
@@ -337,8 +345,9 @@ export function AdminExecutionProfilesPage() {
                         <div className="font-medium">{profile.display_name}</div>
                         <div className="text-xs text-slate-400">{profile.code}</div>
                       </td>
+                      <td className="px-3 py-2 text-slate-600">{formatAdminRunnerType(profile.runner_type)}</td>
                       <td className="px-3 py-2 text-slate-600">
-                        {providers.length ? providers.join(" / ") : formatAdminProvider(profile.agent_backend)}
+                        {apiProtocols.length ? apiProtocols.join(" / ") : "未绑定"}
                       </td>
                       <td className="px-3 py-2 text-slate-600">{profile.model}</td>
                       <td className="px-3 py-2 text-slate-600">

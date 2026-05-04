@@ -11,7 +11,7 @@ export interface PlatformJobCreateRequest {
   created_from: string;
   items: PlatformJobCreateItem[];
   selected_execution_profile_id?: number;
-  selected_agent_backend?: string;
+  selected_runner_type?: string;
   selected_model?: string;
 }
 
@@ -26,7 +26,7 @@ export interface PlatformJobSummary {
   delivery_state?: string;
   workflow_version?: string;
   selected_execution_profile_id?: number | null;
-  selected_agent_backend?: string;
+  selected_runner_type?: string;
   selected_model?: string;
   input_summary?: string;
   result_summary?: string;
@@ -96,7 +96,7 @@ export interface PlatformQuotaView {
 export interface PlatformExecutionProfile {
   id: number;
   display_name: string;
-  agent_backend: string;
+  runner_type: string;
   model: string;
   description: string;
   recommended: boolean;

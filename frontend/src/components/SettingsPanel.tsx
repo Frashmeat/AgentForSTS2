@@ -688,7 +688,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
                     <span className="ml-1 font-semibold text-slate-700">
                       {serverPreference?.default_execution_profile_id
                         ? serverPreference.display_name ||
-                          `${serverPreference.agent_backend} / ${serverPreference.model}`
+                          `${serverPreference.runner_type} / ${serverPreference.model}`
                         : "未设置"}
                     </span>
                   </p>

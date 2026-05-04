@@ -1,21 +1,24 @@
 interface ExecutionProfileLike {
-  selected_agent_backend?: string;
+  selected_runner_type?: string;
   selected_model?: string;
 }
 
-function formatAgentBackendLabel(value: string): string {
+function formatRunnerTypeLabel(value: string): string {
   const normalized = value.trim().toLowerCase();
-  if (normalized === "codex") {
+  if (normalized === "codex_cli") {
     return "Codex CLI";
   }
-  if (normalized === "claude") {
+  if (normalized === "claude_cli") {
     return "Claude CLI";
+  }
+  if (normalized === "api") {
+    return "API";
   }
   return value.trim();
 }
 
 export function formatExecutionProfileText(job: ExecutionProfileLike): string | null {
-  const backend = formatAgentBackendLabel(String(job.selected_agent_backend ?? ""));
+  const backend = formatRunnerTypeLabel(String(job.selected_runner_type ?? ""));
   const model = String(job.selected_model ?? "").trim();
   if (!backend && !model) {
     return null;

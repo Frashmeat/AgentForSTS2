@@ -22,7 +22,7 @@ export interface CreateAndStartPlatformFlowRequest {
   }>;
   serverWorkspaceProjectName?: string;
   selectedExecutionProfileId?: number;
-  selectedAgentBackend?: string;
+  selectedRunnerType?: string;
   selectedModel?: string;
   confirmStart?: (job: PlatformJobSummary) => boolean | Promise<boolean>;
   onProgress?: (message: string) => void;
@@ -77,7 +77,7 @@ export async function createAndStartPlatformFlow(
     created_from: request.createdFrom,
     items,
     selected_execution_profile_id: request.selectedExecutionProfileId,
-    selected_agent_backend: request.selectedAgentBackend,
+    selected_runner_type: request.selectedRunnerType,
     selected_model: request.selectedModel,
   });
 

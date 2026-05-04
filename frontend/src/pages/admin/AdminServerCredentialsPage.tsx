@@ -13,17 +13,17 @@ import {
   type AdminServerCredentialListItem,
 } from "../../shared/api/index.ts";
 import { resolveErrorMessage } from "../../shared/error.ts";
-import { formatAdminAuthType, formatAdminProvider, formatAdminStatus } from "./adminDisplay.ts";
+import { formatAdminApiProtocol, formatAdminAuthType, formatAdminStatus } from "./adminDisplay.ts";
 import { useAdminLayoutContext } from "./AdminLayout.tsx";
 
 type CredentialFormState = {
   id: number | null;
   execution_profile_id: number;
-  provider: "openai" | "anthropic";
+  api_protocol: "openai_compatible" | "anthropic_compatible";
   auth_type: "api_key" | "ak_sk";
   credential: string;
   secret: string;
-  base_url: string;
+  api_base_url: string;
   label: string;
   priority: number;
   enabled: boolean;
@@ -32,11 +32,11 @@ type CredentialFormState = {
 const emptyForm: CredentialFormState = {
   id: null,
   execution_profile_id: 0,
-  provider: "openai",
+  api_protocol: "openai_compatible",
   auth_type: "api_key",
   credential: "",
   secret: "",
-  base_url: "",
+  api_base_url: "",
   label: "",
   priority: 0,
   enabled: true,
@@ -120,11 +120,11 @@ export function AdminServerCredentialsPage() {
     setForm({
       id: credential.id,
       execution_profile_id: credential.execution_profile_id,
-      provider: credential.provider === "anthropic" ? "anthropic" : "openai",
+      api_protocol: credential.api_protocol === "anthropic_compatible" ? "anthropic_compatible" : "openai_compatible",
       auth_type: credential.auth_type === "ak_sk" ? "ak_sk" : "api_key",
       credential: "",
       secret: "",
-      base_url: credential.base_url,
+      api_base_url: credential.api_base_url,
       label: credential.label,
       priority: credential.priority,
       enabled: credential.enabled,
@@ -136,11 +136,11 @@ export function AdminServerCredentialsPage() {
     try {
       const payload = {
         execution_profile_id: Number(form.execution_profile_id),
-        provider: form.provider,
+        api_protocol: form.api_protocol,
         auth_type: form.auth_type,
         credential: form.credential,
         secret: form.secret,
-        base_url: form.base_url,
+        api_base_url: form.api_base_url,
         label: form.label,
         priority: Number(form.priority) || 0,
         enabled: form.enabled,
@@ -239,16 +239,19 @@ export function AdminServerCredentialsPage() {
             </label>
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
               <label className="space-y-1 text-sm text-slate-600">
-                <span>服务商</span>
+                <span>API 协议</span>
                 <select
-                  value={form.provider}
+                  value={form.api_protocol}
                   onChange={(event) =>
-                    patchForm({ provider: event.target.value === "anthropic" ? "anthropic" : "openai" })
+                    patchForm({
+                      api_protocol:
+                        event.target.value === "anthropic_compatible" ? "anthropic_compatible" : "openai_compatible",
+                    })
                   }
                   className="w-full rounded-lg border border-slate-200 px-3 py-2"
                 >
-                  <option value="openai">{formatAdminProvider("openai")}</option>
-                  <option value="anthropic">{formatAdminProvider("anthropic")}</option>
+                  <option value="openai_compatible">{formatAdminApiProtocol("openai_compatible")}</option>
+                  <option value="anthropic_compatible">{formatAdminApiProtocol("anthropic_compatible")}</option>
                 </select>
               </label>
               <label className="space-y-1 text-sm text-slate-600">
@@ -282,10 +285,10 @@ export function AdminServerCredentialsPage() {
               />
             </label>
             <label className="space-y-1 text-sm text-slate-600">
-              <span>Base URL</span>
+              <span>API Base URL</span>
               <input
-                value={form.base_url}
-                onChange={(event) => patchForm({ base_url: event.target.value })}
+                value={form.api_base_url}
+                onChange={(event) => patchForm({ api_base_url: event.target.value })}
                 className="w-full rounded-lg border border-slate-200 px-3 py-2"
               />
             </label>
@@ -366,11 +369,11 @@ export function AdminServerCredentialsPage() {
                           {profileById.get(credential.execution_profile_id)?.display_name ?? "未知配置"}
                         </p>
                         <p className="mt-1 text-xs text-slate-500">
-                          {formatAdminProvider(credential.provider)} / {formatAdminAuthType(credential.auth_type)} /
+                          {formatAdminApiProtocol(credential.api_protocol)} / {formatAdminAuthType(credential.auth_type)} /
                           优先级 {credential.priority}
                         </p>
                         <p className="mt-1 break-all text-xs text-slate-500">
-                          {credential.base_url || "未配置 Base URL"}
+                          {credential.api_base_url || "未配置 API Base URL"}
                         </p>
                         {credential.last_error_message ? (
                           <p className="mt-1 text-xs text-rose-600">{credential.last_error_message}</p>
