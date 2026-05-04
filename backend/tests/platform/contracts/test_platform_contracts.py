@@ -73,7 +73,7 @@ def test_admin_execution_detail_view_contains_internal_fields():
             "job_id": 1,
             "job_item_id": 2,
             "status": "dispatching",
-            "provider": "openai",
+            "api_protocol": "openai_compatible",
             "model": "gpt-5.4",
             "credential_ref": "cred-a",
             "retry_attempt": 1,
@@ -122,13 +122,13 @@ def test_step_execution_request_captures_minimal_protocol_fields():
             "input_payload": {"prompt": "dark relic"},
             "result_schema_version": "v1",
             "execution_binding": {
-                "agent_backend": "codex",
-                "provider": "openai",
+                "runner_type": "codex_cli",
+                "api_protocol": "openai_compatible",
                 "model": "gpt-5.4",
                 "credential_ref": "server-credential:1",
                 "auth_type": "api_key",
                 "credential": "sk-live",
-                "base_url": "https://api.openai.com/v1",
+                "api_base_url": "https://api.openai.com/v1",
             },
         }
     )
@@ -136,7 +136,7 @@ def test_step_execution_request_captures_minimal_protocol_fields():
     payload = request.model_dump()
     assert payload["step_protocol_version"] == "v1"
     assert payload["input_payload"]["prompt"] == "dark relic"
-    assert payload["execution_binding"]["agent_backend"] == "codex"
+    assert payload["execution_binding"]["runner_type"] == "codex_cli"
     assert payload["execution_binding"]["credential_ref"] == "server-credential:1"
 
 
@@ -156,13 +156,13 @@ def test_workstation_dispatch_request_serializes_execution_binding_without_callb
                 "description": "每次造成伤害时获得 2 点格挡。",
             },
             "execution_binding": {
-                "agent_backend": "codex",
-                "provider": "openai",
+                "runner_type": "codex_cli",
+                "api_protocol": "openai_compatible",
                 "model": "gpt-5.4",
                 "credential_ref": "server-credential:1",
                 "auth_type": "api_key",
                 "credential": "sk-live",
-                "base_url": "https://api.openai.com/v1",
+                "api_base_url": "https://api.openai.com/v1",
             },
         }
     )
@@ -299,7 +299,7 @@ def test_create_server_credential_command_applies_defaults():
     command = CreateServerCredentialCommand.model_validate(
         {
             "execution_profile_id": 1,
-            "provider": "openai",
+            "api_protocol": "openai_compatible",
             "auth_type": "api_key",
             "credential": "sk-live",
         }
@@ -307,7 +307,7 @@ def test_create_server_credential_command_applies_defaults():
 
     payload = command.model_dump()
     assert payload["secret"] == ""
-    assert payload["base_url"] == ""
+    assert payload["api_base_url"] == ""
     assert payload["priority"] == 0
     assert payload["enabled"] is True
 
@@ -316,7 +316,7 @@ def test_update_server_credential_command_applies_optional_secret_defaults():
     command = UpdateServerCredentialCommand.model_validate(
         {
             "execution_profile_id": 1,
-            "provider": "openai",
+            "api_protocol": "openai_compatible",
             "auth_type": "api_key",
             "label": "main",
         }

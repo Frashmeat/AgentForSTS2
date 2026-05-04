@@ -16,7 +16,7 @@ def test_execution_routing_repository_returns_first_enabled_healthy_credential_b
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
         display_name="Codex CLI / gpt-5.4",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="默认推荐",
         enabled=True,
@@ -29,11 +29,11 @@ def test_execution_routing_repository_returns_first_enabled_healthy_credential_b
         [
             ServerCredentialRecord(
                 execution_profile_id=profile.id,
-                provider="openai",
+                api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext="cipher-disabled",
                 secret_ciphertext=None,
-                base_url="https://disabled.example.com/v1",
+                api_base_url="https://disabled.example.com/v1",
                 label="disabled",
                 priority=1,
                 enabled=False,
@@ -44,11 +44,11 @@ def test_execution_routing_repository_returns_first_enabled_healthy_credential_b
             ),
             ServerCredentialRecord(
                 execution_profile_id=profile.id,
-                provider="openai",
+                api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext="cipher-degraded",
                 secret_ciphertext=None,
-                base_url="https://degraded.example.com/v1",
+                api_base_url="https://degraded.example.com/v1",
                 label="degraded",
                 priority=2,
                 enabled=True,
@@ -59,11 +59,11 @@ def test_execution_routing_repository_returns_first_enabled_healthy_credential_b
             ),
             ServerCredentialRecord(
                 execution_profile_id=profile.id,
-                provider="openai",
+                api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext="cipher-healthy-high-priority",
                 secret_ciphertext=None,
-                base_url="https://healthy-a.example.com/v1",
+                api_base_url="https://healthy-a.example.com/v1",
                 label="healthy-a",
                 priority=5,
                 enabled=True,
@@ -74,11 +74,11 @@ def test_execution_routing_repository_returns_first_enabled_healthy_credential_b
             ),
             ServerCredentialRecord(
                 execution_profile_id=profile.id,
-                provider="openai",
+                api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext="cipher-healthy-low-priority",
                 secret_ciphertext=None,
-                base_url="https://healthy-b.example.com/v1",
+                api_base_url="https://healthy-b.example.com/v1",
                 label="healthy-b",
                 priority=10,
                 enabled=True,
@@ -95,11 +95,11 @@ def test_execution_routing_repository_returns_first_enabled_healthy_credential_b
 
     assert route is not None
     assert route.execution_profile_id == profile.id
-    assert route.agent_backend == "codex"
+    assert route.runner_type == "codex_cli"
     assert route.model == "gpt-5.4"
-    assert route.provider == "openai"
+    assert route.api_protocol == "openai_compatible"
     assert route.credential_id > 0
-    assert route.base_url == "https://healthy-a.example.com/v1"
+    assert route.api_base_url == "https://healthy-a.example.com/v1"
     assert route.credential_ciphertext == "cipher-healthy-high-priority"
 
 
@@ -108,7 +108,7 @@ def test_execution_routing_repository_returns_none_when_profile_has_no_enabled_h
     profile = ExecutionProfileRecord(
         code="claude-sonnet-4-6",
         display_name="Claude CLI / claude-sonnet-4-6",
-        agent_backend="claude",
+        runner_type="claude_cli",
         model="claude-sonnet-4-6",
         description="备用组合",
         enabled=True,
@@ -120,11 +120,11 @@ def test_execution_routing_repository_returns_none_when_profile_has_no_enabled_h
     db_session.add(
         ServerCredentialRecord(
             execution_profile_id=profile.id,
-            provider="anthropic",
+            api_protocol="anthropic_compatible",
             auth_type="api_key",
             credential_ciphertext="cipher-rate-limited",
             secret_ciphertext=None,
-            base_url="https://api.anthropic.com",
+            api_base_url="https://api.anthropic.com",
             label="limited",
             priority=1,
             enabled=True,
@@ -146,7 +146,7 @@ def test_execution_routing_repository_can_skip_excluded_credential_ids(db_sessio
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
         display_name="Codex CLI / gpt-5.4",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="默认推荐",
         enabled=True,
@@ -157,11 +157,11 @@ def test_execution_routing_repository_can_skip_excluded_credential_ids(db_sessio
     db_session.flush()
     credential_a = ServerCredentialRecord(
         execution_profile_id=profile.id,
-        provider="openai",
+        api_protocol="openai_compatible",
         auth_type="api_key",
         credential_ciphertext="cipher-healthy-a",
         secret_ciphertext=None,
-        base_url="https://healthy-a.example.com/v1",
+        api_base_url="https://healthy-a.example.com/v1",
         label="healthy-a",
         priority=5,
         enabled=True,
@@ -172,11 +172,11 @@ def test_execution_routing_repository_can_skip_excluded_credential_ids(db_sessio
     )
     credential_b = ServerCredentialRecord(
         execution_profile_id=profile.id,
-        provider="openai",
+        api_protocol="openai_compatible",
         auth_type="api_key",
         credential_ciphertext="cipher-healthy-b",
         secret_ciphertext=None,
-        base_url="https://healthy-b.example.com/v1",
+        api_base_url="https://healthy-b.example.com/v1",
         label="healthy-b",
         priority=10,
         enabled=True,
@@ -195,4 +195,4 @@ def test_execution_routing_repository_can_skip_excluded_credential_ids(db_sessio
 
     assert route is not None
     assert route.credential_id == credential_b.id
-    assert route.base_url == "https://healthy-b.example.com/v1"
+    assert route.api_base_url == "https://healthy-b.example.com/v1"

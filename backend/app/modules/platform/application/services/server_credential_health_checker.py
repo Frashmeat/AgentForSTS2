@@ -21,11 +21,11 @@ class ServerCredentialHealthChecker:
     def check(
         self,
         *,
-        provider: str,
+        api_protocol: str,
         auth_type: str,
         credential: str,
         secret: str | None,
-        base_url: str,
+        api_base_url: str,
     ) -> ServerCredentialHealthCheckResult:
         if auth_type == "ak_sk":
             return ServerCredentialHealthCheckResult(
@@ -35,11 +35,11 @@ class ServerCredentialHealthChecker:
             )
 
         started = perf_counter()
-        if provider == "openai":
-            url = f"{base_url.rstrip('/')}/models" if base_url else "https://api.openai.com/v1/models"
+        if api_protocol == "openai_compatible":
+            url = f"{api_base_url.rstrip('/')}/models" if api_base_url else "https://api.openai.com/v1/models"
             headers = {"Authorization": f"Bearer {credential}"}
-        elif provider == "anthropic":
-            base = base_url.rstrip("/") if base_url else "https://api.anthropic.com"
+        elif api_protocol == "anthropic_compatible":
+            base = api_base_url.rstrip("/") if api_base_url else "https://api.anthropic.com"
             url = f"{base}/v1/models"
             headers = {
                 "x-api-key": credential,
@@ -48,8 +48,8 @@ class ServerCredentialHealthChecker:
         else:
             return ServerCredentialHealthCheckResult(
                 status="degraded",
-                error_code="unsupported_provider",
-                error_message=f"manual health check does not support provider: {provider}",
+                error_code="unsupported_api_protocol",
+                error_message=f"manual health check does not support api_protocol: {api_protocol}",
             )
 
         try:
@@ -70,6 +70,14 @@ class ServerCredentialHealthChecker:
             )
 
         latency_ms = int((perf_counter() - started) * 1000)
+        content_type = response.headers.get("content-type", "")
+        if "text/html" in content_type.lower():
+            return ServerCredentialHealthCheckResult(
+                status="degraded",
+                error_code="api_protocol_mismatch",
+                error_message="upstream returned HTML; api_base_url should point to the protocol API endpoint",
+                latency_ms=latency_ms,
+            )
         if response.status_code == 200:
             return ServerCredentialHealthCheckResult(status="healthy", latency_ms=latency_ms)
         if response.status_code in {401, 403}:

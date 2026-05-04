@@ -28,7 +28,7 @@ class JobRecord(TimestampMixin, Base):
     workflow_version: Mapped[str] = mapped_column(String(32), nullable=False)
     input_summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
     selected_execution_profile_id: Mapped[int | None] = mapped_column(bigint_type(), nullable=True)
-    selected_agent_backend: Mapped[str] = mapped_column(String(32), nullable=False, default="")
+    selected_runner_type: Mapped[str] = mapped_column(String(32), nullable=False, default="")
     selected_model: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     result_summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
     error_summary: Mapped[str] = mapped_column(Text, nullable=False, default="")

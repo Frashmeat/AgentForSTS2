@@ -86,13 +86,13 @@ def _dispatch_payload() -> dict:
             "description": "每次造成伤害时获得 2 点格挡。",
         },
         "execution_binding": {
-            "agent_backend": "codex",
-            "provider": "openai",
+            "runner_type": "codex_cli",
+            "api_protocol": "openai_compatible",
             "model": "gpt-5.4",
             "credential_ref": "server-credential:1",
             "auth_type": "api_key",
             "credential": "sk-live",
-            "base_url": "https://api.openai.com/v1",
+            "api_base_url": "https://api.openai.com/v1",
         },
     }
 

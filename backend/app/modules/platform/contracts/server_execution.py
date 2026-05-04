@@ -9,7 +9,7 @@ from ._model import ModelBase
 class ExecutionProfileView(ModelBase):
     id: int
     display_name: str
-    agent_backend: str
+    runner_type: str
     model: str
     description: str
     recommended: bool
@@ -21,7 +21,7 @@ class ExecutionProfileAdminView(ModelBase):
     id: int
     code: str
     display_name: str
-    agent_backend: str
+    runner_type: str
     model: str
     description: str
     enabled: bool
@@ -33,7 +33,7 @@ class ExecutionProfileAdminView(ModelBase):
 class CreateExecutionProfileCommand(ModelBase):
     code: str
     display_name: str
-    agent_backend: str
+    runner_type: str
     model: str
     description: str = ""
     enabled: bool = True
@@ -45,7 +45,7 @@ class CreateExecutionProfileCommand(ModelBase):
 class UpdateExecutionProfileCommand(ModelBase):
     code: str
     display_name: str
-    agent_backend: str
+    runner_type: str
     model: str
     description: str = ""
     enabled: bool = True
@@ -62,7 +62,7 @@ class ExecutionProfileListView(ModelBase):
 class UserServerPreferenceView(ModelBase):
     default_execution_profile_id: int | None
     display_name: str
-    agent_backend: str
+    runner_type: str
     model: str
     available: bool
     updated_at: str | None

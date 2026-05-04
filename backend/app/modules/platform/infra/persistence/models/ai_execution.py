@@ -33,7 +33,7 @@ class AIExecutionRecord(TimestampMixin, Base):
         nullable=False,
         default=AIExecutionStatus.CREATED,
     )
-    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    api_protocol: Mapped[str] = mapped_column(String(64), nullable=False)
     model: Mapped[str] = mapped_column(String(128), nullable=False)
     credential_ref: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     retry_attempt: Mapped[int] = mapped_column(bigint_type(), nullable=False, default=0)

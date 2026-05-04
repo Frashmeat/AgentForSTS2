@@ -23,7 +23,7 @@ def test_execute_batch_custom_code_step_builds_prompt_and_delegates_to_text_gene
         captured["request"] = request
         return {
             "text": "摘要：建议先实现 BattleScriptManager\n1. 增加战斗入口监听。",
-            "provider": request.execution_binding.provider,
+            "api_protocol": request.execution_binding.api_protocol,
             "model": request.execution_binding.model,
         }
 
@@ -50,8 +50,8 @@ def test_execute_batch_custom_code_step_builds_prompt_and_delegates_to_text_gene
                     "depends_on": ["battle_bootstrap"],
                 },
                 execution_binding=StepExecutionBinding(
-                    agent_backend="codex",
-                    provider="openai",
+                    runner_type="codex_cli",
+                    api_protocol="openai_compatible",
                     model="gpt-5.4",
                     credential="sk-live-openai",
                 ),
@@ -86,8 +86,8 @@ def test_execute_batch_custom_code_step_requires_descriptive_input():
                     result_schema_version="v1",
                     input_payload={"item_name": "EmptyItem"},
                     execution_binding=StepExecutionBinding(
-                        agent_backend="codex",
-                        provider="openai",
+                        runner_type="codex_cli",
+                        api_protocol="openai_compatible",
                         model="gpt-5.4",
                         credential="sk-live-openai",
                     ),
@@ -114,8 +114,8 @@ def test_execute_batch_custom_code_step_requires_item_name():
                     result_schema_version="v1",
                     input_payload={"description": "实现一个战斗阶段脚本管理器"},
                     execution_binding=StepExecutionBinding(
-                        agent_backend="codex",
-                        provider="openai",
+                        runner_type="codex_cli",
+                        api_protocol="openai_compatible",
                         model="gpt-5.4",
                         credential="sk-live-openai",
                     ),
@@ -140,7 +140,7 @@ def test_execute_batch_custom_code_step_supports_single_generate_payload_shape(m
         captured["request"] = request
         return {
             "text": "摘要：先补单资产 custom_code 的核心类骨架",
-            "provider": request.execution_binding.provider,
+            "api_protocol": request.execution_binding.api_protocol,
             "model": request.execution_binding.model,
         }
 
@@ -165,8 +165,8 @@ def test_execute_batch_custom_code_step_supports_single_generate_payload_shape(m
                     "image_mode": "ai",
                 },
                 execution_binding=StepExecutionBinding(
-                    agent_backend="codex",
-                    provider="openai",
+                    runner_type="codex_cli",
+                    api_protocol="openai_compatible",
                     model="gpt-5.4",
                     credential="sk-live-openai",
                 ),
@@ -191,7 +191,7 @@ def test_execute_batch_custom_code_step_includes_server_workspace_metadata(monke
     async def fake_text_step(request: StepExecutionRequest):
         return {
             "text": "摘要：建议先围绕服务器工作区组织 custom_code 实现",
-            "provider": request.execution_binding.provider,
+            "api_protocol": request.execution_binding.api_protocol,
             "model": request.execution_binding.model,
         }
 
@@ -217,8 +217,8 @@ def test_execute_batch_custom_code_step_includes_server_workspace_metadata(monke
                     "server_workspace_root": "F:/Runtime/platform-workspaces/1001/abc123/DarkMod",
                 },
                 execution_binding=StepExecutionBinding(
-                    agent_backend="codex",
-                    provider="openai",
+                    runner_type="codex_cli",
+                    api_protocol="openai_compatible",
                     model="gpt-5.4",
                     credential="sk-live-openai",
                 ),
@@ -255,7 +255,7 @@ def test_execute_batch_custom_code_step_reads_server_workspace_snapshot(monkeypa
     async def fake_text_step(request: StepExecutionRequest):
         return {
             "text": "摘要：建议先对齐服务器工作区里的现有入口与类组织",
-            "provider": request.execution_binding.provider,
+            "api_protocol": request.execution_binding.api_protocol,
             "model": request.execution_binding.model,
         }
 
@@ -281,8 +281,8 @@ def test_execute_batch_custom_code_step_reads_server_workspace_snapshot(monkeypa
                     "server_workspace_root": str(workspace_root),
                 },
                 execution_binding=StepExecutionBinding(
-                    agent_backend="codex",
-                    provider="openai",
+                    runner_type="codex_cli",
+                    api_protocol="openai_compatible",
                     model="gpt-5.4",
                     credential="sk-live-openai",
                 ),

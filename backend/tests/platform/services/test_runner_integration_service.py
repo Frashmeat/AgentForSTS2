@@ -66,8 +66,8 @@ def test_execution_orchestrator_service_can_delegate_to_runner_without_http_laye
             result_schema_version="v1",
             input_payload={"prompt": "dark relic"},
             execution_binding=StepExecutionBinding(
-                agent_backend="codex",
-                provider="openai",
+                runner_type="codex_cli",
+                api_protocol="openai_compatible",
                 model="gpt-5.4",
                 credential_ref="server-credential:3",
                 credential="sk-live",
@@ -86,7 +86,7 @@ def test_execution_orchestrator_service_can_resolve_server_execution_binding_for
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
         display_name="Codex CLI / gpt-5.4",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="默认推荐",
         enabled=True,
@@ -97,11 +97,11 @@ def test_execution_orchestrator_service_can_resolve_server_execution_binding_for
     db_session.flush()
     credential = ServerCredentialRecord(
         execution_profile_id=profile.id,
-        provider="openai",
+        api_protocol="openai_compatible",
         auth_type="api_key",
         credential_ciphertext=cipher.encrypt("sk-live-openai"),
         secret_ciphertext=None,
-        base_url="https://api.openai.com/v1",
+        api_base_url="https://api.openai.com/v1",
         label="primary",
         priority=1,
         enabled=True,
@@ -119,7 +119,7 @@ def test_execution_orchestrator_service_can_resolve_server_execution_binding_for
                 "job_type": "single_generate",
                 "workflow_version": "2026.03.31",
                 "selected_execution_profile_id": profile.id,
-                "selected_agent_backend": "codex",
+                "selected_runner_type": "codex_cli",
                 "selected_model": "gpt-5.4",
                 "items": [{"item_type": "card"}],
             }
@@ -134,7 +134,7 @@ def test_execution_orchestrator_service_can_resolve_server_execution_binding_for
             job_item_id=job.items[0].id,
             user_id=1001,
             status=AIExecutionStatus.DISPATCHING,
-            provider="openai",
+            api_protocol="openai_compatible",
             model="gpt-5.4",
             credential_ref=f"server-credential:{credential.id}",
             retry_attempt=0,

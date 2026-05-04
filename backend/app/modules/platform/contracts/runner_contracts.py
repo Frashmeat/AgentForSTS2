@@ -7,14 +7,14 @@ from ._model import ModelBase
 
 @dataclass(slots=True)
 class StepExecutionBinding(ModelBase):
-    agent_backend: str = ""
-    provider: str = ""
+    runner_type: str = ""
+    api_protocol: str = ""
     model: str = ""
     credential_ref: str = ""
     auth_type: str = ""
     credential: str = ""
     secret: str = ""
-    base_url: str = ""
+    api_base_url: str = ""
     retry_attempt: int = 0
     switched_credential: bool = False
 

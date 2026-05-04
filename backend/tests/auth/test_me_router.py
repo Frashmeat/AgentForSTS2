@@ -232,7 +232,7 @@ def test_me_router_can_create_platform_job_with_server_project_ref(client: TestC
         profile = ExecutionProfileRecord(
             code="codex-gpt-5-4",
             display_name="Codex CLI / gpt-5.4",
-            agent_backend="codex",
+            runner_type="codex_cli",
             model="gpt-5.4",
             description="默认推荐",
             enabled=True,
@@ -244,11 +244,11 @@ def test_me_router_can_create_platform_job_with_server_project_ref(client: TestC
         session.add(
             ServerCredentialRecord(
                 execution_profile_id=profile.id,
-                provider="openai",
+                api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext="cipher",
                 secret_ciphertext=None,
-                base_url="https://api.openai.com/v1",
+                api_base_url="https://api.openai.com/v1",
                 label="main",
                 priority=1,
                 enabled=True,
@@ -271,7 +271,7 @@ def test_me_router_can_create_platform_job_with_server_project_ref(client: TestC
             "input_summary": "补一个单资产脚本",
             "created_from": "single_asset",
             "selected_execution_profile_id": 1,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -452,7 +452,7 @@ def test_me_router_can_create_and_start_current_user_job(client: TestClient):
         profile = ExecutionProfileRecord(
             code="codex-gpt-5-4",
             display_name="Codex CLI / gpt-5.4",
-            agent_backend="codex",
+            runner_type="codex_cli",
             model="gpt-5.4",
             description="默认推荐",
             enabled=True,
@@ -464,11 +464,11 @@ def test_me_router_can_create_and_start_current_user_job(client: TestClient):
         session.add(
             ServerCredentialRecord(
                 execution_profile_id=profile.id,
-                provider="openai",
+                api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext=cipher.encrypt("sk-live-openai"),
                 secret_ciphertext=None,
-                base_url="https://api.openai.com/v1",
+                api_base_url="https://api.openai.com/v1",
                 label="main",
                 priority=1,
                 enabled=True,
@@ -490,7 +490,7 @@ def test_me_router_can_create_and_start_current_user_job(client: TestClient):
             "input_summary": "Dark Relic",
             "created_from": "single_asset",
             "selected_execution_profile_id": 1,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -507,7 +507,7 @@ def test_me_router_can_create_and_start_current_user_job(client: TestClient):
     assert created.status_code == 200
     assert created.json()["status"] == "draft"
     assert created.json()["selected_execution_profile_id"] == 1
-    assert created.json()["selected_agent_backend"] == "codex"
+    assert created.json()["selected_runner_type"] == "codex_cli"
     assert created.json()["selected_model"] == "gpt-5.4"
 
     job_id = created.json()["id"]
@@ -525,7 +525,7 @@ def test_me_router_can_create_and_start_current_user_job(client: TestClient):
     assert detail.status_code == 200
     assert detail.json()["status"] == "deferred"
     assert detail.json()["selected_execution_profile_id"] == 1
-    assert detail.json()["selected_agent_backend"] == "codex"
+    assert detail.json()["selected_runner_type"] == "codex_cli"
     assert detail.json()["selected_model"] == "gpt-5.4"
     assert detail.json()["original_deducted"] == 1
     assert detail.json()["refunded_amount"] == 1
@@ -561,7 +561,7 @@ def test_me_router_can_create_and_start_current_user_job(client: TestClient):
     try:
         execution = session.query(AIExecutionRecord).filter(AIExecutionRecord.job_id == job_id).one()
         assert execution.status.value == "completed_with_refund"
-        assert execution.provider == "openai"
+        assert execution.api_protocol == "openai_compatible"
         assert execution.model == "gpt-5.4"
         assert execution.credential_ref == "server-credential:1"
     finally:
@@ -599,7 +599,7 @@ def test_me_router_create_job_uses_current_user_default_server_profile_when_requ
         profile = ExecutionProfileRecord(
             code="codex-gpt-5-4",
             display_name="Codex CLI / gpt-5.4",
-            agent_backend="codex",
+            runner_type="codex_cli",
             model="gpt-5.4",
             description="默认推荐",
             enabled=True,
@@ -611,11 +611,11 @@ def test_me_router_create_job_uses_current_user_default_server_profile_when_requ
         session.add(
             ServerCredentialRecord(
                 execution_profile_id=profile.id,
-                provider="openai",
+                api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext="cipher",
                 secret_ciphertext=None,
-                base_url="https://api.openai.com/v1",
+                api_base_url="https://api.openai.com/v1",
                 label="main",
                 priority=1,
                 enabled=True,
@@ -654,7 +654,7 @@ def test_me_router_create_job_uses_current_user_default_server_profile_when_requ
 
     assert created.status_code == 200
     assert created.json()["selected_execution_profile_id"] == 1
-    assert created.json()["selected_agent_backend"] == "codex"
+    assert created.json()["selected_runner_type"] == "codex_cli"
     assert created.json()["selected_model"] == "gpt-5.4"
 
 
@@ -689,7 +689,7 @@ def test_me_router_rejects_legacy_platform_payload_fields(client: TestClient):
         profile = ExecutionProfileRecord(
             code="codex-gpt-5-4",
             display_name="Codex CLI / gpt-5.4",
-            agent_backend="codex",
+            runner_type="codex_cli",
             model="gpt-5.4",
             description="默认推荐",
             enabled=True,
@@ -701,11 +701,11 @@ def test_me_router_rejects_legacy_platform_payload_fields(client: TestClient):
         session.add(
             ServerCredentialRecord(
                 execution_profile_id=profile.id,
-                provider="openai",
+                api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext=cipher.encrypt("sk-live-openai"),
                 secret_ciphertext=None,
-                base_url="https://api.openai.com/v1",
+                api_base_url="https://api.openai.com/v1",
                 label="main",
                 priority=1,
                 enabled=True,
@@ -728,7 +728,7 @@ def test_me_router_rejects_legacy_platform_payload_fields(client: TestClient):
             "input_summary": "补一个卡牌实现方案",
             "created_from": "single_asset",
             "selected_execution_profile_id": 1,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -782,7 +782,7 @@ def test_me_router_requires_server_project_ref_for_single_custom_code(client: Te
         profile = ExecutionProfileRecord(
             code="codex-gpt-5-4",
             display_name="Codex CLI / gpt-5.4",
-            agent_backend="codex",
+            runner_type="codex_cli",
             model="gpt-5.4",
             description="默认推荐",
             enabled=True,
@@ -794,11 +794,11 @@ def test_me_router_requires_server_project_ref_for_single_custom_code(client: Te
         session.add(
             ServerCredentialRecord(
                 execution_profile_id=profile.id,
-                provider="openai",
+                api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext=cipher.encrypt("sk-live-openai"),
                 secret_ciphertext=None,
-                base_url="https://api.openai.com/v1",
+                api_base_url="https://api.openai.com/v1",
                 label="main",
                 priority=1,
                 enabled=True,
@@ -821,7 +821,7 @@ def test_me_router_requires_server_project_ref_for_single_custom_code(client: Te
             "input_summary": "补一个单资产脚本",
             "created_from": "single_asset",
             "selected_execution_profile_id": 1,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -872,7 +872,7 @@ def test_me_router_requires_server_project_ref_for_batch_custom_code(client: Tes
         profile = ExecutionProfileRecord(
             code="codex-gpt-5-4",
             display_name="Codex CLI / gpt-5.4",
-            agent_backend="codex",
+            runner_type="codex_cli",
             model="gpt-5.4",
             description="默认推荐",
             enabled=True,
@@ -884,11 +884,11 @@ def test_me_router_requires_server_project_ref_for_batch_custom_code(client: Tes
         session.add(
             ServerCredentialRecord(
                 execution_profile_id=profile.id,
-                provider="openai",
+                api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext="cipher",
                 secret_ciphertext=None,
-                base_url="https://api.openai.com/v1",
+                api_base_url="https://api.openai.com/v1",
                 label="main",
                 priority=1,
                 enabled=True,
@@ -911,7 +911,7 @@ def test_me_router_requires_server_project_ref_for_batch_custom_code(client: Tes
             "input_summary": "补一个战斗脚本管理器",
             "created_from": "batch_generation",
             "selected_execution_profile_id": 1,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -1110,7 +1110,7 @@ def test_me_router_can_complete_supported_log_analysis_job(client: TestClient):
         profile = ExecutionProfileRecord(
             code="codex-gpt-5-4",
             display_name="Codex CLI / gpt-5.4",
-            agent_backend="codex",
+            runner_type="codex_cli",
             model="gpt-5.4",
             description="默认推荐",
             enabled=True,
@@ -1122,11 +1122,11 @@ def test_me_router_can_complete_supported_log_analysis_job(client: TestClient):
         session.add(
             ServerCredentialRecord(
                 execution_profile_id=profile.id,
-                provider="openai",
+                api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext=cipher.encrypt("sk-live-openai"),
                 secret_ciphertext=None,
-                base_url="https://api.openai.com/v1",
+                api_base_url="https://api.openai.com/v1",
                 label="main",
                 priority=1,
                 enabled=True,
@@ -1150,7 +1150,7 @@ def test_me_router_can_complete_supported_log_analysis_job(client: TestClient):
             "input_summary": "分析日志",
             "created_from": "log_analysis",
             "selected_execution_profile_id": 1,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -1236,7 +1236,7 @@ def test_me_router_can_complete_supported_batch_card_job(client: TestClient):
         profile = ExecutionProfileRecord(
             code="codex-gpt-5-4",
             display_name="Codex CLI / gpt-5.4",
-            agent_backend="codex",
+            runner_type="codex_cli",
             model="gpt-5.4",
             description="默认推荐",
             enabled=True,
@@ -1248,11 +1248,11 @@ def test_me_router_can_complete_supported_batch_card_job(client: TestClient):
         session.add(
             ServerCredentialRecord(
                 execution_profile_id=profile.id,
-                provider="openai",
+                api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext=cipher.encrypt("sk-live-openai"),
                 secret_ciphertext=None,
-                base_url="https://api.openai.com/v1",
+                api_base_url="https://api.openai.com/v1",
                 label="main",
                 priority=1,
                 enabled=True,
@@ -1276,7 +1276,7 @@ def test_me_router_can_complete_supported_batch_card_job(client: TestClient):
             "input_summary": "补一个批量卡牌实现方案",
             "created_from": "batch_generation",
             "selected_execution_profile_id": 1,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -1365,7 +1365,7 @@ def test_me_router_can_complete_supported_batch_card_fullscreen_job(client: Test
         profile = ExecutionProfileRecord(
             code="codex-gpt-5-4",
             display_name="Codex CLI / gpt-5.4",
-            agent_backend="codex",
+            runner_type="codex_cli",
             model="gpt-5.4",
             description="默认推荐",
             enabled=True,
@@ -1377,11 +1377,11 @@ def test_me_router_can_complete_supported_batch_card_fullscreen_job(client: Test
         session.add(
             ServerCredentialRecord(
                 execution_profile_id=profile.id,
-                provider="openai",
+                api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext=cipher.encrypt("sk-live-openai"),
                 secret_ciphertext=None,
-                base_url="https://api.openai.com/v1",
+                api_base_url="https://api.openai.com/v1",
                 label="main",
                 priority=1,
                 enabled=True,
@@ -1405,7 +1405,7 @@ def test_me_router_can_complete_supported_batch_card_fullscreen_job(client: Test
             "input_summary": "补一个批量全画面卡实现方案",
             "created_from": "batch_generation",
             "selected_execution_profile_id": 1,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -1495,7 +1495,7 @@ def test_me_router_can_complete_supported_batch_relic_job(client: TestClient):
         profile = ExecutionProfileRecord(
             code="codex-gpt-5-4",
             display_name="Codex CLI / gpt-5.4",
-            agent_backend="codex",
+            runner_type="codex_cli",
             model="gpt-5.4",
             description="默认推荐",
             enabled=True,
@@ -1507,11 +1507,11 @@ def test_me_router_can_complete_supported_batch_relic_job(client: TestClient):
         session.add(
             ServerCredentialRecord(
                 execution_profile_id=profile.id,
-                provider="openai",
+                api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext=cipher.encrypt("sk-live-openai"),
                 secret_ciphertext=None,
-                base_url="https://api.openai.com/v1",
+                api_base_url="https://api.openai.com/v1",
                 label="main",
                 priority=1,
                 enabled=True,
@@ -1535,7 +1535,7 @@ def test_me_router_can_complete_supported_batch_relic_job(client: TestClient):
             "input_summary": "补一个批量遗物实现方案",
             "created_from": "batch_generation",
             "selected_execution_profile_id": 1,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -1624,7 +1624,7 @@ def test_me_router_can_complete_supported_batch_power_job(client: TestClient):
         profile = ExecutionProfileRecord(
             code="codex-gpt-5-4",
             display_name="Codex CLI / gpt-5.4",
-            agent_backend="codex",
+            runner_type="codex_cli",
             model="gpt-5.4",
             description="默认推荐",
             enabled=True,
@@ -1636,11 +1636,11 @@ def test_me_router_can_complete_supported_batch_power_job(client: TestClient):
         session.add(
             ServerCredentialRecord(
                 execution_profile_id=profile.id,
-                provider="openai",
+                api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext=cipher.encrypt("sk-live-openai"),
                 secret_ciphertext=None,
-                base_url="https://api.openai.com/v1",
+                api_base_url="https://api.openai.com/v1",
                 label="main",
                 priority=1,
                 enabled=True,
@@ -1664,7 +1664,7 @@ def test_me_router_can_complete_supported_batch_power_job(client: TestClient):
             "input_summary": "补一个批量 Power 实现方案",
             "created_from": "batch_generation",
             "selected_execution_profile_id": 1,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -1753,7 +1753,7 @@ def test_me_router_can_complete_supported_batch_character_job(client: TestClient
         profile = ExecutionProfileRecord(
             code="codex-gpt-5-4",
             display_name="Codex CLI / gpt-5.4",
-            agent_backend="codex",
+            runner_type="codex_cli",
             model="gpt-5.4",
             description="默认推荐",
             enabled=True,
@@ -1765,11 +1765,11 @@ def test_me_router_can_complete_supported_batch_character_job(client: TestClient
         session.add(
             ServerCredentialRecord(
                 execution_profile_id=profile.id,
-                provider="openai",
+                api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext=cipher.encrypt("sk-live-openai"),
                 secret_ciphertext=None,
-                base_url="https://api.openai.com/v1",
+                api_base_url="https://api.openai.com/v1",
                 label="main",
                 priority=1,
                 enabled=True,
@@ -1793,7 +1793,7 @@ def test_me_router_can_complete_supported_batch_character_job(client: TestClient
             "input_summary": "补一个批量角色实现方案",
             "created_from": "batch_generation",
             "selected_execution_profile_id": 1,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -1883,7 +1883,7 @@ def test_me_router_returns_409_when_server_workspace_is_busy(client: TestClient)
         profile = ExecutionProfileRecord(
             code="codex-gpt-5-4",
             display_name="Codex CLI / gpt-5.4",
-            agent_backend="codex",
+            runner_type="codex_cli",
             model="gpt-5.4",
             description="默认推荐",
             enabled=True,
@@ -1895,11 +1895,11 @@ def test_me_router_returns_409_when_server_workspace_is_busy(client: TestClient)
         session.add(
             ServerCredentialRecord(
                 execution_profile_id=profile.id,
-                provider="openai",
+                api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext=cipher.encrypt("sk-live-openai"),
                 secret_ciphertext=None,
-                base_url="https://api.openai.com/v1",
+                api_base_url="https://api.openai.com/v1",
                 label="main",
                 priority=1,
                 enabled=True,
@@ -1924,7 +1924,7 @@ def test_me_router_returns_409_when_server_workspace_is_busy(client: TestClient)
             "input_summary": "补一个单资产脚本",
             "created_from": "single_asset",
             "selected_execution_profile_id": 1,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -2013,7 +2013,7 @@ def test_me_router_can_complete_supported_single_custom_code_job(client: TestCli
         profile = ExecutionProfileRecord(
             code="codex-gpt-5-4",
             display_name="Codex CLI / gpt-5.4",
-            agent_backend="codex",
+            runner_type="codex_cli",
             model="gpt-5.4",
             description="默认推荐",
             enabled=True,
@@ -2025,11 +2025,11 @@ def test_me_router_can_complete_supported_single_custom_code_job(client: TestCli
         session.add(
             ServerCredentialRecord(
                 execution_profile_id=profile.id,
-                provider="openai",
+                api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext=cipher.encrypt("sk-live-openai"),
                 secret_ciphertext=None,
-                base_url="https://api.openai.com/v1",
+                api_base_url="https://api.openai.com/v1",
                 label="main",
                 priority=1,
                 enabled=True,
@@ -2055,7 +2055,7 @@ def test_me_router_can_complete_supported_single_custom_code_job(client: TestCli
             "input_summary": "补一个单资产脚本",
             "created_from": "single_asset",
             "selected_execution_profile_id": 1,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -2146,7 +2146,7 @@ def test_me_router_can_complete_supported_single_relic_job(client: TestClient):
         profile = ExecutionProfileRecord(
             code="codex-gpt-5-4",
             display_name="Codex CLI / gpt-5.4",
-            agent_backend="codex",
+            runner_type="codex_cli",
             model="gpt-5.4",
             description="默认推荐",
             enabled=True,
@@ -2158,11 +2158,11 @@ def test_me_router_can_complete_supported_single_relic_job(client: TestClient):
         session.add(
             ServerCredentialRecord(
                 execution_profile_id=profile.id,
-                provider="openai",
+                api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext=cipher.encrypt("sk-live-openai"),
                 secret_ciphertext=None,
-                base_url="https://api.openai.com/v1",
+                api_base_url="https://api.openai.com/v1",
                 label="main",
                 priority=1,
                 enabled=True,
@@ -2186,7 +2186,7 @@ def test_me_router_can_complete_supported_single_relic_job(client: TestClient):
             "input_summary": "补一个遗物实现方案",
             "created_from": "single_asset",
             "selected_execution_profile_id": 1,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -2277,7 +2277,7 @@ def test_me_router_can_complete_supported_single_card_job(client: TestClient):
         profile = ExecutionProfileRecord(
             code="codex-gpt-5-4",
             display_name="Codex CLI / gpt-5.4",
-            agent_backend="codex",
+            runner_type="codex_cli",
             model="gpt-5.4",
             description="默认推荐",
             enabled=True,
@@ -2289,11 +2289,11 @@ def test_me_router_can_complete_supported_single_card_job(client: TestClient):
         session.add(
             ServerCredentialRecord(
                 execution_profile_id=profile.id,
-                provider="openai",
+                api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext=cipher.encrypt("sk-live-openai"),
                 secret_ciphertext=None,
-                base_url="https://api.openai.com/v1",
+                api_base_url="https://api.openai.com/v1",
                 label="main",
                 priority=1,
                 enabled=True,
@@ -2317,7 +2317,7 @@ def test_me_router_can_complete_supported_single_card_job(client: TestClient):
             "input_summary": "补一个卡牌实现方案",
             "created_from": "single_asset",
             "selected_execution_profile_id": 1,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -2407,7 +2407,7 @@ def test_me_router_can_retry_with_alternate_credential_after_retryable_failure(c
         profile = ExecutionProfileRecord(
             code="codex-gpt-5-4",
             display_name="Codex CLI / gpt-5.4",
-            agent_backend="codex",
+            runner_type="codex_cli",
             model="gpt-5.4",
             description="默认推荐",
             enabled=True,
@@ -2420,11 +2420,11 @@ def test_me_router_can_retry_with_alternate_credential_after_retryable_failure(c
             [
                 ServerCredentialRecord(
                     execution_profile_id=profile.id,
-                    provider="openai",
+                    api_protocol="openai_compatible",
                     auth_type="api_key",
                     credential_ciphertext=cipher.encrypt("sk-primary"),
                     secret_ciphertext=None,
-                    base_url="https://api-a.example.com/v1",
+                    api_base_url="https://api-a.example.com/v1",
                     label="primary",
                     priority=1,
                     enabled=True,
@@ -2435,11 +2435,11 @@ def test_me_router_can_retry_with_alternate_credential_after_retryable_failure(c
                 ),
                 ServerCredentialRecord(
                     execution_profile_id=profile.id,
-                    provider="openai",
+                    api_protocol="openai_compatible",
                     auth_type="api_key",
                     credential_ciphertext=cipher.encrypt("sk-secondary"),
                     secret_ciphertext=None,
-                    base_url="https://api-b.example.com/v1",
+                    api_base_url="https://api-b.example.com/v1",
                     label="secondary",
                     priority=2,
                     enabled=True,
@@ -2465,7 +2465,7 @@ def test_me_router_can_retry_with_alternate_credential_after_retryable_failure(c
             "input_summary": "补一个卡牌实现方案",
             "created_from": "single_asset",
             "selected_execution_profile_id": 1,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -2550,7 +2550,7 @@ def test_me_router_can_complete_supported_single_card_fullscreen_job(client: Tes
         profile = ExecutionProfileRecord(
             code="codex-gpt-5-4",
             display_name="Codex CLI / gpt-5.4",
-            agent_backend="codex",
+            runner_type="codex_cli",
             model="gpt-5.4",
             description="默认推荐",
             enabled=True,
@@ -2562,11 +2562,11 @@ def test_me_router_can_complete_supported_single_card_fullscreen_job(client: Tes
         session.add(
             ServerCredentialRecord(
                 execution_profile_id=profile.id,
-                provider="openai",
+                api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext=cipher.encrypt("sk-live-openai"),
                 secret_ciphertext=None,
-                base_url="https://api.openai.com/v1",
+                api_base_url="https://api.openai.com/v1",
                 label="main",
                 priority=1,
                 enabled=True,
@@ -2590,7 +2590,7 @@ def test_me_router_can_complete_supported_single_card_fullscreen_job(client: Tes
             "input_summary": "补一个全画面卡实现方案",
             "created_from": "single_asset",
             "selected_execution_profile_id": 1,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -2680,7 +2680,7 @@ def test_me_router_can_complete_batch_card_fullscreen_with_uploaded_asset(client
         profile = ExecutionProfileRecord(
             code="codex-gpt-5-4",
             display_name="Codex CLI / gpt-5.4",
-            agent_backend="codex",
+            runner_type="codex_cli",
             model="gpt-5.4",
             description="默认推荐",
             enabled=True,
@@ -2692,11 +2692,11 @@ def test_me_router_can_complete_batch_card_fullscreen_with_uploaded_asset(client
         session.add(
             ServerCredentialRecord(
                 execution_profile_id=profile.id,
-                provider="openai",
+                api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext=cipher.encrypt("sk-live-openai"),
                 secret_ciphertext=None,
-                base_url="https://api.openai.com/v1",
+                api_base_url="https://api.openai.com/v1",
                 label="main",
                 priority=1,
                 enabled=True,
@@ -2729,7 +2729,7 @@ def test_me_router_can_complete_batch_card_fullscreen_with_uploaded_asset(client
             "input_summary": "补一个批量全画面卡实现方案",
             "created_from": "batch_generation",
             "selected_execution_profile_id": 1,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -2808,7 +2808,7 @@ def test_me_router_can_complete_single_card_fullscreen_with_uploaded_asset(clien
         profile = ExecutionProfileRecord(
             code="codex-gpt-5-4",
             display_name="Codex CLI / gpt-5.4",
-            agent_backend="codex",
+            runner_type="codex_cli",
             model="gpt-5.4",
             description="默认推荐",
             enabled=True,
@@ -2820,11 +2820,11 @@ def test_me_router_can_complete_single_card_fullscreen_with_uploaded_asset(clien
         session.add(
             ServerCredentialRecord(
                 execution_profile_id=profile.id,
-                provider="openai",
+                api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext=cipher.encrypt("sk-live-openai"),
                 secret_ciphertext=None,
-                base_url="https://api.openai.com/v1",
+                api_base_url="https://api.openai.com/v1",
                 label="main",
                 priority=1,
                 enabled=True,
@@ -2857,7 +2857,7 @@ def test_me_router_can_complete_single_card_fullscreen_with_uploaded_asset(clien
             "input_summary": "补一个全画面卡实现方案",
             "created_from": "single_asset",
             "selected_execution_profile_id": 1,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -2936,7 +2936,7 @@ def test_me_router_can_complete_supported_single_power_job(client: TestClient):
         profile = ExecutionProfileRecord(
             code="codex-gpt-5-4",
             display_name="Codex CLI / gpt-5.4",
-            agent_backend="codex",
+            runner_type="codex_cli",
             model="gpt-5.4",
             description="默认推荐",
             enabled=True,
@@ -2948,11 +2948,11 @@ def test_me_router_can_complete_supported_single_power_job(client: TestClient):
         session.add(
             ServerCredentialRecord(
                 execution_profile_id=profile.id,
-                provider="openai",
+                api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext=cipher.encrypt("sk-live-openai"),
                 secret_ciphertext=None,
-                base_url="https://api.openai.com/v1",
+                api_base_url="https://api.openai.com/v1",
                 label="main",
                 priority=1,
                 enabled=True,
@@ -2976,7 +2976,7 @@ def test_me_router_can_complete_supported_single_power_job(client: TestClient):
             "input_summary": "补一个 Power 实现方案",
             "created_from": "single_asset",
             "selected_execution_profile_id": 1,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -3067,7 +3067,7 @@ def test_me_router_can_complete_supported_single_character_job(client: TestClien
         profile = ExecutionProfileRecord(
             code="codex-gpt-5-4",
             display_name="Codex CLI / gpt-5.4",
-            agent_backend="codex",
+            runner_type="codex_cli",
             model="gpt-5.4",
             description="默认推荐",
             enabled=True,
@@ -3079,11 +3079,11 @@ def test_me_router_can_complete_supported_single_character_job(client: TestClien
         session.add(
             ServerCredentialRecord(
                 execution_profile_id=profile.id,
-                provider="openai",
+                api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext=cipher.encrypt("sk-live-openai"),
                 secret_ciphertext=None,
-                base_url="https://api.openai.com/v1",
+                api_base_url="https://api.openai.com/v1",
                 label="main",
                 priority=1,
                 enabled=True,
@@ -3107,7 +3107,7 @@ def test_me_router_can_complete_supported_single_character_job(client: TestClien
             "input_summary": "补一个角色实现方案",
             "created_from": "single_asset",
             "selected_execution_profile_id": 1,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -3257,7 +3257,7 @@ def test_me_router_rejects_start_when_active_server_job_limit_is_reached(client:
         profile = ExecutionProfileRecord(
             code="codex-gpt-5-4",
             display_name="Codex CLI / gpt-5.4",
-            agent_backend="codex",
+            runner_type="codex_cli",
             model="gpt-5.4",
             description="默认推荐",
             enabled=True,
@@ -3274,7 +3274,7 @@ def test_me_router_rejects_start_when_active_server_job_limit_is_reached(client:
                 workflow_version="2026.03.31",
                 input_summary=item_name,
                 selected_execution_profile_id=profile.id,
-                selected_agent_backend="codex",
+                selected_runner_type="codex_cli",
                 selected_model="gpt-5.4",
                 total_item_count=1,
                 pending_item_count=1 if item_name == "Target" else 0,
@@ -3345,7 +3345,7 @@ def test_me_router_rate_limits_create_job_requests(client: TestClient):
         profile = ExecutionProfileRecord(
             code="codex-gpt-5-4",
             display_name="Codex CLI / gpt-5.4",
-            agent_backend="codex",
+            runner_type="codex_cli",
             model="gpt-5.4",
             description="默认推荐",
             enabled=True,
@@ -3357,11 +3357,11 @@ def test_me_router_rate_limits_create_job_requests(client: TestClient):
         session.add(
             ServerCredentialRecord(
                 execution_profile_id=profile.id,
-                provider="openai",
+                api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext="cipher",
                 secret_ciphertext=None,
-                base_url="https://api.openai.com/v1",
+                api_base_url="https://api.openai.com/v1",
                 label="main",
                 priority=1,
                 enabled=True,
@@ -3384,7 +3384,7 @@ def test_me_router_rate_limits_create_job_requests(client: TestClient):
                 "input_summary": f"补一个卡牌实现方案-{index}",
                 "created_from": "single_asset",
                 "selected_execution_profile_id": 1,
-                "selected_agent_backend": "codex",
+                "selected_runner_type": "codex_cli",
                 "selected_model": "gpt-5.4",
                 "items": [
                     {
@@ -3409,7 +3409,7 @@ def test_me_router_rate_limits_create_job_requests(client: TestClient):
             "input_summary": "补一个卡牌实现方案-limit",
             "created_from": "single_asset",
             "selected_execution_profile_id": 1,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -3475,7 +3475,7 @@ def test_me_router_rate_limits_start_job_requests(client: TestClient):
         profile = ExecutionProfileRecord(
             code="codex-gpt-5-4",
             display_name="Codex CLI / gpt-5.4",
-            agent_backend="codex",
+            runner_type="codex_cli",
             model="gpt-5.4",
             description="默认推荐",
             enabled=True,
@@ -3487,11 +3487,11 @@ def test_me_router_rate_limits_start_job_requests(client: TestClient):
         session.add(
             ServerCredentialRecord(
                 execution_profile_id=profile.id,
-                provider="openai",
+                api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext=cipher.encrypt("sk-live-openai"),
                 secret_ciphertext=None,
-                base_url="https://api.openai.com/v1",
+                api_base_url="https://api.openai.com/v1",
                 label="main",
                 priority=1,
                 enabled=True,
@@ -3509,7 +3509,7 @@ def test_me_router_rate_limits_start_job_requests(client: TestClient):
                 workflow_version="2026.03.31",
                 input_summary=f"Job{index}",
                 selected_execution_profile_id=profile.id,
-                selected_agent_backend="codex",
+                selected_runner_type="codex_cli",
                 selected_model="gpt-5.4",
                 total_item_count=1,
                 pending_item_count=1,

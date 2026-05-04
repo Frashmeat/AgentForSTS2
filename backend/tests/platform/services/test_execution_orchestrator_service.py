@@ -72,7 +72,7 @@ def _seed_ready_job_with_server_profile(db_session):
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
         display_name="Codex CLI / gpt-5.4",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="默认推荐",
         enabled=True,
@@ -84,11 +84,11 @@ def _seed_ready_job_with_server_profile(db_session):
     db_session.add(
         ServerCredentialRecord(
             execution_profile_id=profile.id,
-            provider="openai",
+            api_protocol="openai_compatible",
             auth_type="api_key",
             credential_ciphertext="cipher-primary",
             secret_ciphertext=None,
-            base_url="https://api.openai.com/v1",
+            api_base_url="https://api.openai.com/v1",
             label="primary",
             priority=5,
             enabled=True,
@@ -106,7 +106,7 @@ def _seed_ready_job_with_server_profile(db_session):
                 "job_type": "single_generate",
                 "workflow_version": "2026.03.31",
                 "selected_execution_profile_id": profile.id,
-                "selected_agent_backend": "codex",
+                "selected_runner_type": "codex_cli",
                 "selected_model": "gpt-5.4",
                 "items": [{"item_type": "card"}],
             }
@@ -122,7 +122,7 @@ def _seed_ready_job_with_two_server_credentials(db_session, cipher: ServerCreden
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
         display_name="Codex CLI / gpt-5.4",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="默认推荐",
         enabled=True,
@@ -133,11 +133,11 @@ def _seed_ready_job_with_two_server_credentials(db_session, cipher: ServerCreden
     db_session.flush()
     credential_a = ServerCredentialRecord(
         execution_profile_id=profile.id,
-        provider="openai",
+        api_protocol="openai_compatible",
         auth_type="api_key",
         credential_ciphertext=cipher.encrypt("sk-primary"),
         secret_ciphertext=None,
-        base_url="https://api-a.example.com/v1",
+        api_base_url="https://api-a.example.com/v1",
         label="primary",
         priority=5,
         enabled=True,
@@ -148,11 +148,11 @@ def _seed_ready_job_with_two_server_credentials(db_session, cipher: ServerCreden
     )
     credential_b = ServerCredentialRecord(
         execution_profile_id=profile.id,
-        provider="openai",
+        api_protocol="openai_compatible",
         auth_type="api_key",
         credential_ciphertext=cipher.encrypt("sk-secondary"),
         secret_ciphertext=None,
-        base_url="https://api-b.example.com/v1",
+        api_base_url="https://api-b.example.com/v1",
         label="secondary",
         priority=10,
         enabled=True,
@@ -170,7 +170,7 @@ def _seed_ready_job_with_two_server_credentials(db_session, cipher: ServerCreden
                 "job_type": "single_generate",
                 "workflow_version": "2026.03.31",
                 "selected_execution_profile_id": profile.id,
-                "selected_agent_backend": "codex",
+                "selected_runner_type": "codex_cli",
                 "selected_model": "gpt-5.4",
                 "items": [{"item_type": "card"}],
             }
@@ -185,7 +185,7 @@ def _seed_ready_job_with_two_server_credentials(db_session, cipher: ServerCreden
             job_item_id=job.items[0].id,
             user_id=1001,
             status="running",
-            provider="openai",
+            api_protocol="openai_compatible",
             model="gpt-5.4",
             credential_ref=f"server-credential:{credential_a.id}",
             retry_attempt=0,
@@ -279,7 +279,7 @@ def test_execution_orchestrator_service_creates_execution_when_quota_is_availabl
         user_id=1001,
         job_id=job.id,
         job_item_id=job.items[0].id,
-        provider="openai",
+        api_protocol="openai_compatible",
         model="gpt-5.4",
         credential_ref="cred-a",
         retry_attempt=1,
@@ -346,7 +346,7 @@ def test_execution_orchestrator_service_resolves_execution_route_from_selected_p
     db_session.commit()
 
     assert execution is not None
-    assert execution.provider == "openai"
+    assert execution.api_protocol == "openai_compatible"
     assert execution.model == "gpt-5.4"
     assert execution.credential_ref == "server-credential:1"
     assert execution.retry_attempt == 0
@@ -412,7 +412,7 @@ def test_execution_orchestrator_service_marks_quota_exhausted_when_reserve_fails
         user_id=1001,
         job_id=job.id,
         job_item_id=job.items[0].id,
-        provider="openai",
+        api_protocol="openai_compatible",
         model="gpt-5.4",
         workflow_version="2026.03.31",
         step_protocol_version="v1",
@@ -439,7 +439,7 @@ def test_execution_orchestrator_service_persists_artifacts_from_succeeded_result
             job_item_id=job.items[0].id,
             user_id=1001,
             status=AIExecutionStatus.RUNNING,
-            provider="openai",
+            api_protocol="openai_compatible",
             model="gpt-5.4",
             credential_ref="server-credential:1",
             retry_attempt=0,

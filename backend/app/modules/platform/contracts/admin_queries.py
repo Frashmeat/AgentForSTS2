@@ -12,7 +12,7 @@ class AdminExecutionListItem(ModelBase):
     job_id: int
     job_item_id: int
     status: str
-    provider: str
+    api_protocol: str
     model: str
     credential_ref: str = ""
     retry_attempt: int = 0
@@ -25,7 +25,7 @@ class AdminExecutionDetailView(ModelBase):
     job_id: int
     job_item_id: int
     status: str
-    provider: str
+    api_protocol: str
     model: str
     credential_ref: str = ""
     retry_attempt: int = 0
@@ -100,10 +100,10 @@ class AdminQuotaLedgerListView(ModelBase):
 class AdminServerCredentialListItem(ModelBase):
     id: int
     execution_profile_id: int
-    provider: str
+    api_protocol: str
     auth_type: str
     label: str
-    base_url: str
+    api_base_url: str
     priority: int
     enabled: bool
     health_status: str
@@ -126,7 +126,7 @@ class AdminExecutionProfileListItem(ModelBase):
     id: int
     code: str
     display_name: str
-    agent_backend: str
+    runner_type: str
     model: str
     description: str
     enabled: bool

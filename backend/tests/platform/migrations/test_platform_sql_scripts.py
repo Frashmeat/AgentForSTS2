@@ -30,7 +30,7 @@ def test_platform_seed_sql_exists_and_contains_minimal_end_to_end_fixture() -> N
     assert "true" in content
     assert "INSERT INTO quota_accounts" in content
     assert "INSERT INTO jobs" in content
-    assert "selected_agent_backend" in content
+    assert "selected_runner_type" in content
     assert "selected_model" in content
     assert "INSERT INTO job_items" in content
     assert "INSERT INTO ai_executions" in content

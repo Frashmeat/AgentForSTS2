@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS ai_executions (
     job_item_id BIGINT NOT NULL,
     user_id BIGINT NOT NULL,
     status VARCHAR(21) NOT NULL,
-    provider VARCHAR(64) NOT NULL,
+    api_protocol VARCHAR(64) NOT NULL,
     model VARCHAR(128) NOT NULL,
     request_idempotency_key VARCHAR(128),
     workflow_version VARCHAR(32) NOT NULL,

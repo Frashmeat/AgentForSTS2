@@ -59,8 +59,8 @@ def test_execute_asset_generate_step_runs_postprocess_and_agent(tmp_path):
                         "uploaded_asset_path": str(uploaded_asset_path),
                     },
                     execution_binding=StepExecutionBinding(
-                        agent_backend="codex",
-                        provider="openai",
+                        runner_type="codex_cli",
+                        api_protocol="openai_compatible",
                         model="gpt-5.4",
                         credential="sk-live-openai",
                     ),
@@ -101,8 +101,8 @@ def test_execute_asset_generate_step_requires_uploaded_asset_path():
                         "server_workspace_root": "F:/runtime/platform-workspaces/1001/abc123/DarkMod",
                     },
                     execution_binding=StepExecutionBinding(
-                        agent_backend="codex",
-                        provider="openai",
+                        runner_type="codex_cli",
+                        api_protocol="openai_compatible",
                         model="gpt-5.4",
                         credential="sk-live-openai",
                     ),

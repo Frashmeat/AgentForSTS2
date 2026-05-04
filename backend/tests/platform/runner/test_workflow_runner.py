@@ -50,8 +50,8 @@ def test_workflow_runner_executes_steps_in_order_and_publishes_events():
                 job_item_id=2,
                 result_schema_version="v1",
                 execution_binding=StepExecutionBinding(
-                    agent_backend="codex",
-                    provider="openai",
+                    runner_type="codex_cli",
+                    api_protocol="openai_compatible",
                     model="gpt-5.4",
                     credential_ref="server-credential:7",
                     credential="sk-live",
@@ -64,7 +64,7 @@ def test_workflow_runner_executes_steps_in_order_and_publishes_events():
     assert seen_inputs[0]["prompt"] == "relic"
     assert seen_inputs[1]["last_step"] == "step-1"
     assert seen_bindings[0]["credential_ref"] == "server-credential:7"
-    assert seen_bindings[1]["provider"] == "openai"
+    assert seen_bindings[1]["api_protocol"] == "openai_compatible"
     assert events == [
         ("step.started", "step-1"),
         ("step.finished", "step-1"),

@@ -26,11 +26,11 @@ class FakeServerCredentialAdminRepository:
             1: ServerCredentialAdminRecord(
                 id=1,
                 execution_profile_id=1,
-                provider="openai",
+                api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext="",
                 secret_ciphertext=None,
-                base_url="https://api.openai.com/v1",
+                api_base_url="https://api.openai.com/v1",
                 label="openai-main-a",
                 priority=10,
                 enabled=True,
@@ -47,11 +47,11 @@ class FakeServerCredentialAdminRepository:
         self.entries[1] = ServerCredentialAdminRecord(
             id=1,
             execution_profile_id=payload["execution_profile_id"],
-            provider=payload["provider"],
+            api_protocol=payload["api_protocol"],
             auth_type=payload["auth_type"],
             credential_ciphertext=payload["credential_ciphertext"],
             secret_ciphertext=payload["secret_ciphertext"],
-            base_url=payload["base_url"],
+            api_base_url=payload["api_base_url"],
             label=payload["label"],
             priority=payload["priority"],
             enabled=payload["enabled"],
@@ -63,10 +63,10 @@ class FakeServerCredentialAdminRepository:
         return AdminServerCredentialListItem(
             id=101,
             execution_profile_id=payload["execution_profile_id"],
-            provider=payload["provider"],
+            api_protocol=payload["api_protocol"],
             auth_type=payload["auth_type"],
             label=payload["label"],
-            base_url=payload["base_url"],
+            api_base_url=payload["api_base_url"],
             priority=payload["priority"],
             enabled=payload["enabled"],
             health_status="healthy" if payload["enabled"] else "disabled",
@@ -83,11 +83,11 @@ class FakeServerCredentialAdminRepository:
         updated = ServerCredentialAdminRecord(
             id=current.id,
             execution_profile_id=payload["execution_profile_id"],
-            provider=payload["provider"],
+            api_protocol=payload["api_protocol"],
             auth_type=payload["auth_type"],
             credential_ciphertext=payload["credential_ciphertext"],
             secret_ciphertext=payload["secret_ciphertext"],
-            base_url=payload["base_url"],
+            api_base_url=payload["api_base_url"],
             label=payload["label"],
             priority=payload["priority"],
             enabled=payload["enabled"],
@@ -100,10 +100,10 @@ class FakeServerCredentialAdminRepository:
         return AdminServerCredentialListItem(
             id=updated.id,
             execution_profile_id=updated.execution_profile_id,
-            provider=updated.provider,
+            api_protocol=updated.api_protocol,
             auth_type=updated.auth_type,
             label=updated.label,
-            base_url=updated.base_url,
+            api_base_url=updated.api_base_url,
             priority=updated.priority,
             enabled=updated.enabled,
             health_status=updated.health_status,
@@ -118,11 +118,11 @@ class FakeServerCredentialAdminRepository:
         self.entries[credential_id] = ServerCredentialAdminRecord(
             id=current.id,
             execution_profile_id=current.execution_profile_id,
-            provider=current.provider,
+            api_protocol=current.api_protocol,
             auth_type=current.auth_type,
             credential_ciphertext=current.credential_ciphertext,
             secret_ciphertext=current.secret_ciphertext,
-            base_url=current.base_url,
+            api_base_url=current.api_base_url,
             label=current.label,
             priority=current.priority,
             enabled=enabled,
@@ -134,10 +134,10 @@ class FakeServerCredentialAdminRepository:
         return AdminServerCredentialListItem(
             id=current.id,
             execution_profile_id=current.execution_profile_id,
-            provider=current.provider,
+            api_protocol=current.api_protocol,
             auth_type=current.auth_type,
             label=current.label,
-            base_url=current.base_url,
+            api_base_url=current.api_base_url,
             priority=current.priority,
             enabled=enabled,
             health_status=health_status,
@@ -157,11 +157,11 @@ class FakeServerCredentialAdminRepository:
         self.entries[payload["credential_id"]] = ServerCredentialAdminRecord(
             id=current.id,
             execution_profile_id=current.execution_profile_id,
-            provider=current.provider,
+            api_protocol=current.api_protocol,
             auth_type=current.auth_type,
             credential_ciphertext=current.credential_ciphertext,
             secret_ciphertext=current.secret_ciphertext,
-            base_url=current.base_url,
+            api_base_url=current.api_base_url,
             label=current.label,
             priority=current.priority,
             enabled=current.enabled,
@@ -203,10 +203,10 @@ def test_server_credential_admin_service_encrypts_plaintext_before_persisting():
         CreateServerCredentialCommand.model_validate(
             {
                 "execution_profile_id": 1,
-                "provider": "OpenAI",
+                "api_protocol": "openai_compatible",
                 "auth_type": "api_key",
                 "credential": "sk-live-credential",
-                "base_url": "https://api.openai.com/v1",
+                "api_base_url": "https://api.openai.com/v1",
                 "label": "openai-main-a",
                 "priority": 10,
                 "enabled": True,
@@ -214,7 +214,7 @@ def test_server_credential_admin_service_encrypts_plaintext_before_persisting():
         )
     )
 
-    assert item.provider == "openai"
+    assert item.api_protocol == "openai_compatible"
     assert repository.payload is not None
     assert repository.payload["credential_ciphertext"] != "sk-live-credential"
     assert cipher.decrypt(repository.payload["credential_ciphertext"]) == "sk-live-credential"
@@ -236,7 +236,7 @@ def test_server_credential_admin_service_requires_secret_for_ak_sk_mode():
             CreateServerCredentialCommand.model_validate(
                 {
                     "execution_profile_id": 1,
-                    "provider": "openai",
+                    "api_protocol": "openai_compatible",
                     "auth_type": "ak_sk",
                     "credential": "ak-live",
                     "label": "openai-aksk",
@@ -265,10 +265,10 @@ def test_server_credential_admin_service_updates_existing_ciphertext_when_new_va
         UpdateServerCredentialCommand.model_validate(
             {
                 "execution_profile_id": 1,
-                "provider": "openai",
+                "api_protocol": "openai_compatible",
                 "auth_type": "api_key",
                 "credential": "new-secret",
-                "base_url": "https://api.openai.com/v1",
+                "api_base_url": "https://api.openai.com/v1",
                 "label": "openai-main-a",
                 "priority": 11,
                 "enabled": True,

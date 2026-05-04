@@ -41,10 +41,10 @@ class ServerCredentialAdminRepositorySqlAlchemy(ServerCredentialAdminRepository)
         return AdminServerCredentialListItem(
             id=row.id,
             execution_profile_id=row.execution_profile_id,
-            provider=row.provider,
+            api_protocol=row.api_protocol,
             auth_type=row.auth_type,
             label=row.label,
-            base_url=row.base_url,
+            api_base_url=row.api_base_url,
             priority=row.priority,
             enabled=row.enabled,
             health_status=row.health_status,
@@ -57,11 +57,11 @@ class ServerCredentialAdminRepositorySqlAlchemy(ServerCredentialAdminRepository)
         self,
         *,
         execution_profile_id: int,
-        provider: str,
+        api_protocol: str,
         auth_type: str,
         credential_ciphertext: str,
         secret_ciphertext: str | None,
-        base_url: str,
+        api_base_url: str,
         label: str,
         priority: int,
         enabled: bool,
@@ -70,11 +70,11 @@ class ServerCredentialAdminRepositorySqlAlchemy(ServerCredentialAdminRepository)
 
         row = ServerCredentialRecord(
             execution_profile_id=execution_profile_id,
-            provider=provider,
+            api_protocol=api_protocol,
             auth_type=auth_type,
             credential_ciphertext=credential_ciphertext,
             secret_ciphertext=secret_ciphertext,
-            base_url=base_url,
+            api_base_url=api_base_url,
             label=label,
             priority=priority,
             enabled=enabled,
@@ -96,11 +96,11 @@ class ServerCredentialAdminRepositorySqlAlchemy(ServerCredentialAdminRepository)
         return ServerCredentialAdminRecord(
             id=row.id,
             execution_profile_id=row.execution_profile_id,
-            provider=row.provider,
+            api_protocol=row.api_protocol,
             auth_type=row.auth_type,
             credential_ciphertext=row.credential_ciphertext,
             secret_ciphertext=row.secret_ciphertext,
-            base_url=row.base_url,
+            api_base_url=row.api_base_url,
             label=row.label,
             priority=row.priority,
             enabled=row.enabled,
@@ -115,11 +115,11 @@ class ServerCredentialAdminRepositorySqlAlchemy(ServerCredentialAdminRepository)
         *,
         credential_id: int,
         execution_profile_id: int,
-        provider: str,
+        api_protocol: str,
         auth_type: str,
         credential_ciphertext: str,
         secret_ciphertext: str | None,
-        base_url: str,
+        api_base_url: str,
         label: str,
         priority: int,
         enabled: bool,
@@ -132,11 +132,11 @@ class ServerCredentialAdminRepositorySqlAlchemy(ServerCredentialAdminRepository)
             raise LookupError(f"server credential not found: {credential_id}")
 
         row.execution_profile_id = execution_profile_id
-        row.provider = provider
+        row.api_protocol = api_protocol
         row.auth_type = auth_type
         row.credential_ciphertext = credential_ciphertext
         row.secret_ciphertext = secret_ciphertext
-        row.base_url = base_url
+        row.api_base_url = api_base_url
         row.label = label
         row.priority = priority
         row.enabled = enabled

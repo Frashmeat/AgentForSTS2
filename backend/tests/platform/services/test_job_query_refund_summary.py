@@ -38,7 +38,7 @@ def test_job_query_service_exposes_refund_summary_to_user_views(db_session):
         job_item_id=job.items[0].id,
         user_id=1001,
         status="completed_with_refund",
-        provider="openai",
+        api_protocol="openai_compatible",
         model="gpt-5.4",
         request_idempotency_key="idem-refund-service",
         workflow_version="2026.04.03",

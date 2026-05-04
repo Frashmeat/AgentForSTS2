@@ -13,7 +13,7 @@ class JobListItem(ModelBase):
     delivery_state: str = ""
     input_summary: str = ""
     selected_execution_profile_id: int | None = None
-    selected_agent_backend: str = ""
+    selected_runner_type: str = ""
     selected_model: str = ""
     result_summary: str = ""
     total_item_count: int = 0
@@ -59,7 +59,7 @@ class JobDetailView(ModelBase):
     delivery_state: str = ""
     input_summary: str = ""
     selected_execution_profile_id: int | None = None
-    selected_agent_backend: str = ""
+    selected_runner_type: str = ""
     selected_model: str = ""
     result_summary: str = ""
     error_summary: str = ""

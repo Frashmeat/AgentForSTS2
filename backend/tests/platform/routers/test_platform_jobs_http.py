@@ -177,7 +177,7 @@ def _seed_execution_profile(client: TestClient) -> int:
         profile = ExecutionProfileRecord(
             code="codex-gpt-5-4",
             display_name="Codex CLI / gpt-5.4",
-            agent_backend="codex",
+            runner_type="codex_cli",
             model="gpt-5.4",
             description="默认推荐",
             enabled=True,
@@ -189,11 +189,11 @@ def _seed_execution_profile(client: TestClient) -> int:
         session.add(
             ServerCredentialRecord(
                 execution_profile_id=profile.id,
-                provider="openai",
+                api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext=cipher.encrypt("sk-live-openai"),
                 secret_ciphertext=None,
-                base_url="https://api.openai.com/v1",
+                api_base_url="https://api.openai.com/v1",
                 label="main",
                 priority=1,
                 enabled=True,
@@ -310,7 +310,7 @@ def test_platform_jobs_router_supports_create_start_cancel_and_queries_for_curre
             "job_type": "single_generate",
             "workflow_version": "2026.03.31",
             "selected_execution_profile_id": profile_id,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [{"item_type": "potion", "input_payload": {"item_name": "DarkPotion"}}],
         },
@@ -320,7 +320,7 @@ def test_platform_jobs_router_supports_create_start_cancel_and_queries_for_curre
     job_id = payload["id"]
     assert payload["status"] == "draft"
     assert payload["selected_execution_profile_id"] == profile_id
-    assert payload["selected_agent_backend"] == "codex"
+    assert payload["selected_runner_type"] == "codex_cli"
     assert payload["selected_model"] == "gpt-5.4"
 
     started = client.post(f"/api/platform/jobs/{job_id}/start", params={"user_id": other_user_id}, json={})
@@ -337,7 +337,7 @@ def test_platform_jobs_router_supports_create_start_cancel_and_queries_for_curre
     assert detail.json()["id"] == job_id
     assert detail.json()["status"] == "deferred"
     assert detail.json()["selected_execution_profile_id"] == profile_id
-    assert detail.json()["selected_agent_backend"] == "codex"
+    assert detail.json()["selected_runner_type"] == "codex_cli"
     assert detail.json()["selected_model"] == "gpt-5.4"
     assert detail.json()["original_deducted"] == 1
     assert detail.json()["refunded_amount"] == 1
@@ -374,7 +374,7 @@ def test_platform_jobs_router_supports_create_start_cancel_and_queries_for_curre
     try:
         execution = session.query(AIExecutionRecord).filter(AIExecutionRecord.job_id == job_id).one()
         assert execution.status.value == "completed_with_refund"
-        assert execution.provider == "openai"
+        assert execution.api_protocol == "openai_compatible"
         assert execution.model == "gpt-5.4"
         assert execution.credential_ref == "server-credential:1"
     finally:
@@ -431,7 +431,7 @@ def test_platform_jobs_router_uses_current_user_default_server_profile_when_requ
 
     assert created.status_code == 200
     assert created.json()["selected_execution_profile_id"] == profile_id
-    assert created.json()["selected_agent_backend"] == "codex"
+    assert created.json()["selected_runner_type"] == "codex_cli"
     assert created.json()["selected_model"] == "gpt-5.4"
 
 
@@ -454,7 +454,7 @@ def test_platform_jobs_router_rejects_legacy_platform_payload_fields(client: Tes
             "job_type": "single_generate",
             "workflow_version": "2026.03.31",
             "selected_execution_profile_id": profile_id,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -496,7 +496,7 @@ def test_platform_jobs_router_requires_server_project_ref_for_single_custom_code
             "job_type": "single_generate",
             "workflow_version": "2026.03.31",
             "selected_execution_profile_id": profile_id,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -536,7 +536,7 @@ def test_platform_jobs_router_requires_server_project_ref_for_batch_custom_code(
             "job_type": "batch_generate",
             "workflow_version": "2026.03.31",
             "selected_execution_profile_id": profile_id,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -574,7 +574,7 @@ def test_platform_jobs_router_rate_limits_create_job_requests(client: TestClient
                 "job_type": "single_generate",
                 "workflow_version": "2026.03.31",
                 "selected_execution_profile_id": profile_id,
-                "selected_agent_backend": "codex",
+                "selected_runner_type": "codex_cli",
                 "selected_model": "gpt-5.4",
                 "items": [
                     {
@@ -597,7 +597,7 @@ def test_platform_jobs_router_rate_limits_create_job_requests(client: TestClient
             "job_type": "single_generate",
             "workflow_version": "2026.03.31",
             "selected_execution_profile_id": profile_id,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -640,7 +640,7 @@ def test_platform_jobs_router_rate_limits_start_job_requests(client: TestClient)
                 workflow_version="2026.03.31",
                 input_summary=f"Job{index}",
                 selected_execution_profile_id=profile_id,
-                selected_agent_backend="codex",
+                selected_runner_type="codex_cli",
                 selected_model="gpt-5.4",
                 total_item_count=1,
                 pending_item_count=1,
@@ -709,7 +709,7 @@ def test_platform_jobs_router_accepts_server_project_ref(client: TestClient):
             "job_type": "single_generate",
             "workflow_version": "2026.03.31",
             "selected_execution_profile_id": profile_id,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -755,7 +755,7 @@ def test_platform_jobs_router_returns_409_when_server_workspace_is_busy(client: 
             "job_type": "single_generate",
             "workflow_version": "2026.03.31",
             "selected_execution_profile_id": profile_id,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -816,7 +816,7 @@ def test_platform_jobs_router_can_complete_supported_log_analysis_job(client: Te
             "job_type": "log_analysis",
             "workflow_version": "2026.03.31",
             "selected_execution_profile_id": profile_id,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -875,7 +875,7 @@ def test_platform_jobs_router_can_complete_supported_batch_custom_code_job(clien
             "job_type": "batch_generate",
             "workflow_version": "2026.03.31",
             "selected_execution_profile_id": profile_id,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -937,7 +937,7 @@ def test_platform_jobs_router_can_complete_supported_batch_card_job(client: Test
             "job_type": "batch_generate",
             "workflow_version": "2026.03.31",
             "selected_execution_profile_id": profile_id,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -997,7 +997,7 @@ def test_platform_jobs_router_can_complete_supported_batch_card_fullscreen_job(c
             "job_type": "batch_generate",
             "workflow_version": "2026.03.31",
             "selected_execution_profile_id": profile_id,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -1058,7 +1058,7 @@ def test_platform_jobs_router_can_complete_supported_batch_relic_job(client: Tes
             "job_type": "batch_generate",
             "workflow_version": "2026.03.31",
             "selected_execution_profile_id": profile_id,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -1118,7 +1118,7 @@ def test_platform_jobs_router_can_complete_supported_batch_power_job(client: Tes
             "job_type": "batch_generate",
             "workflow_version": "2026.03.31",
             "selected_execution_profile_id": profile_id,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -1178,7 +1178,7 @@ def test_platform_jobs_router_can_complete_supported_batch_character_job(client:
             "job_type": "batch_generate",
             "workflow_version": "2026.03.31",
             "selected_execution_profile_id": profile_id,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -1240,7 +1240,7 @@ def test_platform_jobs_router_can_complete_supported_single_custom_code_job(clie
             "job_type": "single_generate",
             "workflow_version": "2026.03.31",
             "selected_execution_profile_id": profile_id,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -1302,7 +1302,7 @@ def test_platform_jobs_router_can_complete_supported_single_relic_job(client: Te
             "job_type": "single_generate",
             "workflow_version": "2026.03.31",
             "selected_execution_profile_id": profile_id,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -1364,7 +1364,7 @@ def test_platform_jobs_router_can_complete_supported_single_card_job(client: Tes
             "job_type": "single_generate",
             "workflow_version": "2026.03.31",
             "selected_execution_profile_id": profile_id,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -1425,7 +1425,7 @@ def test_platform_jobs_router_can_complete_supported_single_card_fullscreen_job(
             "job_type": "single_generate",
             "workflow_version": "2026.03.31",
             "selected_execution_profile_id": profile_id,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -1495,7 +1495,7 @@ def test_platform_jobs_router_can_complete_batch_card_fullscreen_with_uploaded_a
             "job_type": "batch_generate",
             "workflow_version": "2026.03.31",
             "selected_execution_profile_id": profile_id,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -1554,7 +1554,7 @@ def test_platform_jobs_router_can_complete_single_card_fullscreen_with_uploaded_
             "job_type": "single_generate",
             "workflow_version": "2026.03.31",
             "selected_execution_profile_id": profile_id,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -1604,7 +1604,7 @@ def test_platform_jobs_router_can_complete_supported_single_power_job(client: Te
             "job_type": "single_generate",
             "workflow_version": "2026.03.31",
             "selected_execution_profile_id": profile_id,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {
@@ -1666,7 +1666,7 @@ def test_platform_jobs_router_can_complete_supported_single_character_job(client
             "job_type": "single_generate",
             "workflow_version": "2026.03.31",
             "selected_execution_profile_id": profile_id,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {

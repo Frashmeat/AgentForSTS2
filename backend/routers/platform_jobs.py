@@ -103,7 +103,7 @@ def _enrich_job_command_with_default_server_profile(
 
     payload = command.model_dump()
     payload["selected_execution_profile_id"] = preference.default_execution_profile_id
-    payload["selected_agent_backend"] = preference.agent_backend
+    payload["selected_runner_type"] = preference.runner_type
     payload["selected_model"] = preference.model
     return CreateJobCommand.model_validate(payload)
 
@@ -140,7 +140,7 @@ def create_job(request: Request, body: dict):
             "status": job.status.value,
             "workflow_version": job.workflow_version,
             "selected_execution_profile_id": job.selected_execution_profile_id,
-            "selected_agent_backend": job.selected_agent_backend,
+            "selected_runner_type": job.selected_runner_type,
             "selected_model": job.selected_model,
         }
 

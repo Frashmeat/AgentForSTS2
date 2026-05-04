@@ -91,7 +91,7 @@ def test_platform_execution_profiles_lists_enabled_profiles_and_availability(cli
         codex = ExecutionProfileRecord(
             code="codex-gpt-5-4",
             display_name="Codex CLI / gpt-5.4",
-            agent_backend="codex",
+            runner_type="codex_cli",
             model="gpt-5.4",
             description="默认推荐",
             enabled=True,
@@ -101,7 +101,7 @@ def test_platform_execution_profiles_lists_enabled_profiles_and_availability(cli
         claude = ExecutionProfileRecord(
             code="claude-sonnet-4-6",
             display_name="Claude CLI / claude-sonnet-4-6",
-            agent_backend="claude",
+            runner_type="claude_cli",
             model="claude-sonnet-4-6",
             description="备用组合",
             enabled=True,
@@ -111,7 +111,7 @@ def test_platform_execution_profiles_lists_enabled_profiles_and_availability(cli
         disabled = ExecutionProfileRecord(
             code="disabled-profile",
             display_name="Disabled",
-            agent_backend="codex",
+            runner_type="codex_cli",
             model="gpt-x",
             description="不展示",
             enabled=False,
@@ -123,11 +123,11 @@ def test_platform_execution_profiles_lists_enabled_profiles_and_availability(cli
         session.add(
             ServerCredentialRecord(
                 execution_profile_id=codex.id,
-                provider="openai",
+                api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext="cipher",
                 secret_ciphertext=None,
-                base_url="https://api.openai.com/v1",
+                api_base_url="https://api.openai.com/v1",
                 label="main",
                 priority=1,
                 enabled=True,
@@ -140,11 +140,11 @@ def test_platform_execution_profiles_lists_enabled_profiles_and_availability(cli
         session.add(
             ServerCredentialRecord(
                 execution_profile_id=claude.id,
-                provider="anthropic",
+                api_protocol="anthropic_compatible",
                 auth_type="api_key",
                 credential_ciphertext="cipher-2",
                 secret_ciphertext=None,
-                base_url="https://api.anthropic.com",
+                api_base_url="https://api.anthropic.com",
                 label="backup",
                 priority=1,
                 enabled=True,
@@ -182,7 +182,7 @@ def test_me_server_preferences_reads_and_updates_current_user_default_profile(cl
         profile = ExecutionProfileRecord(
             code="codex-gpt-5-4",
             display_name="Codex CLI / gpt-5.4",
-            agent_backend="codex",
+            runner_type="codex_cli",
             model="gpt-5.4",
             description="默认推荐",
             enabled=True,
@@ -194,11 +194,11 @@ def test_me_server_preferences_reads_and_updates_current_user_default_profile(cl
         session.add(
             ServerCredentialRecord(
                 execution_profile_id=profile.id,
-                provider="openai",
+                api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext="cipher",
                 secret_ciphertext=None,
-                base_url="https://api.openai.com/v1",
+                api_base_url="https://api.openai.com/v1",
                 label="main",
                 priority=1,
                 enabled=True,
@@ -247,7 +247,7 @@ def test_me_server_preferences_rejects_unavailable_profile_as_default(client: Te
         profile = ExecutionProfileRecord(
             code="claude-sonnet-4-6",
             display_name="Claude CLI / claude-sonnet-4-6",
-            agent_backend="claude",
+            runner_type="claude_cli",
             model="claude-sonnet-4-6",
             description="当前不可用",
             enabled=True,

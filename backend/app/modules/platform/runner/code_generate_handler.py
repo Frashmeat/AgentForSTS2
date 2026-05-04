@@ -19,12 +19,15 @@ def build_code_llm_config(binding: StepExecutionBinding) -> dict[str, object]:
     if not credential:
         raise ValueError("execution_binding.credential is required")
 
+    runner_type = str(binding.runner_type).strip() or "claude_cli"
+    if runner_type not in {"codex_cli", "claude_cli"}:
+        raise ValueError("code.generate requires runner_type codex_cli or claude_cli")
     return {
         "mode": "agent_cli",
-        "agent_backend": str(binding.agent_backend).strip() or "claude",
+        "agent_backend": "codex" if runner_type == "codex_cli" else "claude",
         "model": model,
         "api_key": credential,
-        "base_url": str(binding.base_url).strip(),
+        "base_url": str(binding.api_base_url).strip(),
     }
 
 

@@ -17,11 +17,11 @@ class ServerCredentialRecord(TimestampMixin, Base):
         ForeignKey("execution_profiles.id", ondelete="CASCADE"),
         nullable=False,
     )
-    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    api_protocol: Mapped[str] = mapped_column(String(64), nullable=False)
     auth_type: Mapped[str] = mapped_column(String(32), nullable=False)
     credential_ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
     secret_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
-    base_url: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    api_base_url: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     label: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

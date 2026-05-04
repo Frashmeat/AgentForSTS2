@@ -16,11 +16,11 @@ from app.modules.platform.runner.code_generate_handler import (
 def test_build_code_llm_config_uses_execution_binding():
     llm_cfg = build_code_llm_config(
         StepExecutionBinding(
-            agent_backend="codex",
-            provider="openai",
+            runner_type="codex_cli",
+            api_protocol="openai_compatible",
             model="gpt-5.4",
             credential="sk-live-openai",
-            base_url="https://api.openai.com/v1",
+            api_base_url="https://api.openai.com/v1",
         )
     )
 
@@ -64,11 +64,11 @@ def test_execute_code_generate_step_builds_prompt_and_runs_agent(monkeypatch, tm
                     "server_workspace_root": str(workspace_root),
                 },
                 execution_binding=StepExecutionBinding(
-                    agent_backend="codex",
-                    provider="openai",
+                    runner_type="codex_cli",
+                    api_protocol="openai_compatible",
                     model="gpt-5.4",
                     credential="sk-live-openai",
-                    base_url="https://api.openai.com/v1",
+                    api_base_url="https://api.openai.com/v1",
                 ),
             ),
             prompt_builder=fake_prompt_builder,
@@ -108,8 +108,8 @@ def test_execute_code_generate_step_requires_server_workspace_root():
                         "analysis": "摘要：建议先补一个 Harmony Patch 骨架",
                     },
                     execution_binding=StepExecutionBinding(
-                        agent_backend="codex",
-                        provider="openai",
+                        runner_type="codex_cli",
+                        api_protocol="openai_compatible",
                         model="gpt-5.4",
                         credential="sk-live-openai",
                     ),

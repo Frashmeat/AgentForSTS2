@@ -37,7 +37,7 @@ class ServerExecutionRepositorySqlAlchemy(ServerExecutionRepository):
         {
             "code": "codex-gpt-5-4",
             "display_name": "Codex CLI / gpt-5.4",
-            "agent_backend": "codex",
+            "runner_type": "codex_cli",
             "model": "gpt-5.4",
             "description": "适合复杂代码修改，默认推荐。",
             "enabled": True,
@@ -47,7 +47,7 @@ class ServerExecutionRepositorySqlAlchemy(ServerExecutionRepository):
         {
             "code": "claude-cli-claude-sonnet-4-6",
             "display_name": "Claude CLI / claude-sonnet-4-6",
-            "agent_backend": "claude",
+            "runner_type": "claude_cli",
             "model": "claude-sonnet-4-6",
             "description": "适合通用代码生成与分析。",
             "enabled": True,
@@ -91,7 +91,7 @@ class ServerExecutionRepositorySqlAlchemy(ServerExecutionRepository):
         row = ExecutionProfileRecord(
             code=code,
             display_name=self._required_text(command.display_name, "display_name"),
-            agent_backend=self._validate_agent_backend(command.agent_backend),
+            runner_type=self._validate_runner_type(command.runner_type),
             model=self._required_text(command.model, "model"),
             description=str(command.description or "").strip(),
             enabled=bool(command.enabled),
@@ -112,7 +112,7 @@ class ServerExecutionRepositorySqlAlchemy(ServerExecutionRepository):
         self._validate_code_available(code, current_id=row.id)
         row.code = code
         row.display_name = self._required_text(command.display_name, "display_name")
-        row.agent_backend = self._validate_agent_backend(command.agent_backend)
+        row.runner_type = self._validate_runner_type(command.runner_type)
         row.model = self._required_text(command.model, "model")
         row.description = str(command.description or "").strip()
         row.enabled = bool(command.enabled)
@@ -145,7 +145,7 @@ class ServerExecutionRepositorySqlAlchemy(ServerExecutionRepository):
             return UserServerPreferenceView(
                 default_execution_profile_id=None,
                 display_name="",
-                agent_backend="",
+                runner_type="",
                 model="",
                 available=False,
                 updated_at=None,
@@ -160,7 +160,7 @@ class ServerExecutionRepositorySqlAlchemy(ServerExecutionRepository):
             return UserServerPreferenceView(
                 default_execution_profile_id=preference.default_execution_profile_id,
                 display_name="",
-                agent_backend="",
+                runner_type="",
                 model="",
                 available=False,
                 updated_at=_to_iso(preference.updated_at),
@@ -169,7 +169,7 @@ class ServerExecutionRepositorySqlAlchemy(ServerExecutionRepository):
         return UserServerPreferenceView(
             default_execution_profile_id=profile.id,
             display_name=profile.display_name,
-            agent_backend=profile.agent_backend,
+            runner_type=profile.runner_type,
             model=profile.model,
             available=self._is_profile_available(profile.id),
             updated_at=_to_iso(preference.updated_at),
@@ -214,7 +214,7 @@ class ServerExecutionRepositorySqlAlchemy(ServerExecutionRepository):
         return ExecutionProfileView(
             id=row.id,
             display_name=row.display_name,
-            agent_backend=row.agent_backend,
+            runner_type=row.runner_type,
             model=row.model,
             description=row.description,
             recommended=row.recommended,
@@ -227,7 +227,7 @@ class ServerExecutionRepositorySqlAlchemy(ServerExecutionRepository):
             id=row.id,
             code=row.code,
             display_name=row.display_name,
-            agent_backend=row.agent_backend,
+            runner_type=row.runner_type,
             model=row.model,
             description=row.description,
             enabled=row.enabled,
@@ -254,11 +254,11 @@ class ServerExecutionRepositorySqlAlchemy(ServerExecutionRepository):
         return text
 
     @staticmethod
-    def _validate_agent_backend(value: object) -> str:
-        backend = str(value or "").strip()
-        if backend not in {"codex", "claude"}:
-            raise ValueError("agent_backend must be codex or claude")
-        return backend
+    def _validate_runner_type(value: object) -> str:
+        runner_type = str(value or "").strip()
+        if runner_type not in {"codex_cli", "claude_cli", "api"}:
+            raise ValueError("runner_type must be codex_cli, claude_cli or api")
+        return runner_type
 
     def _is_execution_profile_referenced(self, profile_id: int) -> bool:
         if (

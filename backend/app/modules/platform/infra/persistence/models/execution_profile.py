@@ -14,7 +14,7 @@ class ExecutionProfileRecord(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(bigint_type(), primary_key=True, autoincrement=True)
     code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     display_name: Mapped[str] = mapped_column(String(128), nullable=False)
-    agent_backend: Mapped[str] = mapped_column(String(32), nullable=False)
+    runner_type: Mapped[str] = mapped_column(String(32), nullable=False)
     model: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

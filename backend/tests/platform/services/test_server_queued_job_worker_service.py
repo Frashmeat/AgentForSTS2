@@ -186,7 +186,7 @@ def _seed_profile_and_quota(
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
         display_name="Codex CLI / gpt-5.4",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="默认推荐",
         enabled=True,
@@ -198,11 +198,11 @@ def _seed_profile_and_quota(
     db_session.add(
         ServerCredentialRecord(
             execution_profile_id=profile.id,
-            provider="openai",
+            api_protocol="openai_compatible",
             auth_type="api_key",
             credential_ciphertext=cipher.encrypt("sk-live-openai"),
             secret_ciphertext=None,
-            base_url="https://api.openai.com/v1",
+            api_base_url="https://api.openai.com/v1",
             label="main",
             priority=1,
             enabled=True,
@@ -291,7 +291,7 @@ def _create_queued_job(
                 "job_type": job_type,
                 "workflow_version": "2026.03.31",
                 "selected_execution_profile_id": profile_id,
-                "selected_agent_backend": "codex",
+                "selected_runner_type": "codex_cli",
                 "selected_model": "gpt-5.4",
                 "items": [
                     {

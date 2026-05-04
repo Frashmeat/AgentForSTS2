@@ -35,7 +35,7 @@ def _seed_query_fixture(db_session):
             "workflow_version": "2026.03.31",
             "input_summary": "批量任务",
             "selected_execution_profile_id": 7,
-            "selected_agent_backend": "codex",
+            "selected_runner_type": "codex_cli",
             "selected_model": "gpt-5.4",
             "items": [
                 {"item_type": "card", "input_summary": "卡牌一", "input_payload": {"name": "One"}},
@@ -52,7 +52,7 @@ def _seed_query_fixture(db_session):
         job_item_id=item.id,
         user_id=1001,
         status="succeeded",
-        provider="openai",
+        api_protocol="openai_compatible",
         model="gpt-5.4",
         request_idempotency_key="idem-admin",
         workflow_version="2026.03.31",
@@ -151,7 +151,7 @@ def test_job_query_repository_returns_user_scoped_views(db_session):
     assert all(entry.id != other_job.id for entry in jobs)
     assert detail is not None
     assert detail.selected_execution_profile_id == 7
-    assert detail.selected_agent_backend == "codex"
+    assert detail.selected_runner_type == "codex_cli"
     assert detail.selected_model == "gpt-5.4"
     assert detail.delivery_state == "deployed"
     assert detail.items[0].delivery_state == "deployed"

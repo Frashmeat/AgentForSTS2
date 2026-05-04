@@ -8,11 +8,11 @@ from ._model import ModelBase
 @dataclass(slots=True)
 class CreateServerCredentialCommand(ModelBase):
     execution_profile_id: int
-    provider: str
+    api_protocol: str
     auth_type: str
     credential: str
     secret: str = ""
-    base_url: str = ""
+    api_base_url: str = ""
     label: str = ""
     priority: int = 0
     enabled: bool = True
@@ -21,11 +21,11 @@ class CreateServerCredentialCommand(ModelBase):
 @dataclass(slots=True)
 class UpdateServerCredentialCommand(ModelBase):
     execution_profile_id: int
-    provider: str
+    api_protocol: str
     auth_type: str
     credential: str = ""
     secret: str = ""
-    base_url: str = ""
+    api_base_url: str = ""
     label: str = ""
     priority: int = 0
     enabled: bool = True

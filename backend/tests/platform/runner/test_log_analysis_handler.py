@@ -17,7 +17,7 @@ def test_execute_log_analysis_step_reads_log_and_delegates_to_text_generation(mo
         captured["request"] = request
         return {
             "text": "分析完成",
-            "provider": request.execution_binding.provider,
+            "api_protocol": request.execution_binding.api_protocol,
             "model": request.execution_binding.model,
         }
 
@@ -42,8 +42,8 @@ def test_execute_log_analysis_step_reads_log_and_delegates_to_text_generation(mo
                 result_schema_version="v1",
                 input_payload={"context": "黑屏了"},
                 execution_binding=StepExecutionBinding(
-                    agent_backend="codex",
-                    provider="openai",
+                    runner_type="codex_cli",
+                    api_protocol="openai_compatible",
                     model="gpt-5.4",
                     credential="sk-live-openai",
                 ),
@@ -78,8 +78,8 @@ def test_execute_log_analysis_step_fails_when_log_missing(monkeypatch):
                     job_item_id=2,
                     result_schema_version="v1",
                     execution_binding=StepExecutionBinding(
-                        agent_backend="codex",
-                        provider="openai",
+                        runner_type="codex_cli",
+                        api_protocol="openai_compatible",
                         model="gpt-5.4",
                         credential="sk-live-openai",
                     ),

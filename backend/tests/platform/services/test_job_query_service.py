@@ -42,7 +42,7 @@ def test_query_services_wrap_user_and_admin_views(db_session):
         job_item_id=job.items[0].id,
         user_id=1001,
         status="succeeded",
-        provider="openai",
+        api_protocol="openai_compatible",
         model="gpt-5.4",
         request_idempotency_key="idem-query",
         workflow_version="2026.03.31",

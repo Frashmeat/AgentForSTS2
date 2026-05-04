@@ -20,11 +20,11 @@ from app.modules.platform.runner.text_generate_handler import (
 def test_build_text_llm_config_uses_codex_cli_mode_for_codex_binding():
     llm_cfg = build_text_llm_config(
         StepExecutionBinding(
-            agent_backend="codex",
-            provider="openai",
+            runner_type="codex_cli",
+            api_protocol="openai_compatible",
             model="gpt-5.4",
             credential="sk-live-openai",
-            base_url="https://api.openai.com/v1",
+            api_base_url="https://api.openai.com/v1",
         )
     )
 
@@ -57,11 +57,11 @@ def test_execute_text_generate_step_uses_execution_binding_to_call_text_runner()
                 result_schema_version="v1",
                 input_payload={"prompt": "请分析这段日志"},
                 execution_binding=StepExecutionBinding(
-                    agent_backend="codex",
-                    provider="openai",
+                    runner_type="codex_cli",
+                    api_protocol="openai_compatible",
                     model="gpt-5.4",
                     credential="sk-live-openai",
-                    base_url="https://api.openai.com/v1",
+                    api_base_url="https://api.openai.com/v1",
                 ),
             ),
             complete_text_fn=fake_complete_text,
@@ -70,7 +70,7 @@ def test_execute_text_generate_step_uses_execution_binding_to_call_text_runner()
 
     assert result == {
         "text": "analysis result",
-        "provider": "openai",
+        "api_protocol": "openai_compatible",
         "model": "gpt-5.4",
     }
     assert captured["prompt"] == "请分析这段日志"
@@ -92,8 +92,8 @@ def test_execute_text_generate_step_requires_prompt():
                     job_item_id=2,
                     result_schema_version="v1",
                     execution_binding=StepExecutionBinding(
-                        agent_backend="codex",
-                        provider="openai",
+                        runner_type="codex_cli",
+                        api_protocol="openai_compatible",
                         model="gpt-5.4",
                         credential="sk-live-openai",
                     ),
@@ -124,8 +124,8 @@ def test_execute_text_generate_step_classifies_generic_request_blocked_as_gatewa
                     result_schema_version="v1",
                     input_payload={"prompt": "虚构游戏机制：造成伤害。"},
                     execution_binding=StepExecutionBinding(
-                        agent_backend="codex",
-                        provider="openai",
+                        runner_type="codex_cli",
+                        api_protocol="openai_compatible",
                         model="gpt-5.4",
                         credential="sk-live-openai",
                     ),
@@ -172,8 +172,8 @@ def test_execute_text_generate_step_classifies_content_filter():
                     result_schema_version="v1",
                     input_payload={"prompt": "虚构游戏机制：造成伤害。"},
                     execution_binding=StepExecutionBinding(
-                        agent_backend="codex",
-                        provider="openai",
+                        runner_type="codex_cli",
+                        api_protocol="openai_compatible",
                         model="gpt-5.4",
                         credential="sk-live-openai",
                     ),
@@ -212,11 +212,11 @@ def test_execute_text_generate_step_classifies_invalid_openai_compatible_respons
                     result_schema_version="v1",
                     input_payload={"prompt": "虚构游戏机制：造成伤害。"},
                     execution_binding=StepExecutionBinding(
-                        agent_backend="claude",
-                        provider="openai",
+                        runner_type="claude_cli",
+                        api_protocol="openai_compatible",
                         model="deepseek-v4-pro",
                         credential="sk-live-openai",
-                        base_url="https://e-flowcode.cc",
+                        api_base_url="https://e-flowcode.cc",
                     ),
                 ),
                 complete_text_fn=invalid_response_complete_text,
@@ -255,11 +255,11 @@ def test_execute_text_generate_step_keeps_web_workstation_surface_for_upstream_e
                         "__runtime_surface": "web_workstation",
                     },
                     execution_binding=StepExecutionBinding(
-                        agent_backend="claude",
-                        provider="openai",
+                        runner_type="claude_cli",
+                        api_protocol="openai_compatible",
                         model="deepseek-v4-pro",
                         credential="sk-live-openai",
-                        base_url="https://e-flowcode.cc",
+                        api_base_url="https://e-flowcode.cc",
                     ),
                 ),
                 complete_text_fn=rate_limited_complete_text,
@@ -298,8 +298,8 @@ def test_execute_text_generate_step_classifies_auth_and_rate_limit():
                         result_schema_version="v1",
                         input_payload={"prompt": "虚构游戏机制：造成伤害。"},
                         execution_binding=StepExecutionBinding(
-                            agent_backend="codex",
-                            provider="openai",
+                            runner_type="codex_cli",
+                            api_protocol="openai_compatible",
                             model="gpt-5.4",
                             credential="sk-live-openai",
                         ),
@@ -338,8 +338,8 @@ def test_execute_text_generate_step_classifies_cli_timeout_with_diagnostics(capl
                     result_schema_version="v1",
                     input_payload={"prompt": "虚构游戏机制：造成伤害。"},
                     execution_binding=StepExecutionBinding(
-                        agent_backend="codex",
-                        provider="openai",
+                        runner_type="codex_cli",
+                        api_protocol="openai_compatible",
                         model="gpt-5.2",
                         credential="sk-live-openai",
                     ),

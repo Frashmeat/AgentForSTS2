@@ -49,7 +49,7 @@ def test_execute_single_asset_plan_step_builds_prompt_and_delegates_to_text_gene
         captured["request"] = request
         return {
             "text": "摘要：建议先补遗物触发与本地化骨架\n- 再补资源路径。",
-            "provider": request.execution_binding.provider,
+            "api_protocol": request.execution_binding.api_protocol,
             "model": request.execution_binding.model,
         }
 
@@ -76,8 +76,8 @@ def test_execute_single_asset_plan_step_builds_prompt_and_delegates_to_text_gene
                     "image_mode": "ai",
                 },
                 execution_binding=StepExecutionBinding(
-                    agent_backend="codex",
-                    provider="openai",
+                    runner_type="codex_cli",
+                    api_protocol="openai_compatible",
                     model="gpt-5.4",
                     credential="sk-live-openai",
                 ),
@@ -120,8 +120,8 @@ def test_execute_single_asset_plan_step_requires_description():
                     result_schema_version="v1",
                     input_payload={"asset_type": "relic", "item_name": "EmptyRelic"},
                     execution_binding=StepExecutionBinding(
-                        agent_backend="codex",
-                        provider="openai",
+                        runner_type="codex_cli",
+                        api_protocol="openai_compatible",
                         model="gpt-5.4",
                         credential="sk-live-openai",
                     ),
@@ -148,8 +148,8 @@ def test_execute_single_asset_plan_step_requires_item_name():
                     result_schema_version="v1",
                     input_payload={"asset_type": "relic", "description": "每次造成伤害时获得 2 点格挡。"},
                     execution_binding=StepExecutionBinding(
-                        agent_backend="codex",
-                        provider="openai",
+                        runner_type="codex_cli",
+                        api_protocol="openai_compatible",
                         model="gpt-5.4",
                         credential="sk-live-openai",
                     ),
@@ -174,7 +174,7 @@ def test_execute_single_asset_plan_step_supports_batch_generate_payload_shape(mo
         captured["request"] = request
         return {
             "text": "摘要：建议先补卡牌骨架与升级分支",
-            "provider": request.execution_binding.provider,
+            "api_protocol": request.execution_binding.api_protocol,
             "model": request.execution_binding.model,
         }
 
@@ -201,8 +201,8 @@ def test_execute_single_asset_plan_step_supports_batch_generate_payload_shape(mo
                     "needs_image": True,
                 },
                 execution_binding=StepExecutionBinding(
-                    agent_backend="codex",
-                    provider="openai",
+                    runner_type="codex_cli",
+                    api_protocol="openai_compatible",
                     model="gpt-5.4",
                     credential="sk-live-openai",
                 ),
@@ -236,7 +236,7 @@ def test_execute_single_asset_plan_step_includes_uploaded_asset_metadata(monkeyp
         captured["request"] = request
         return {
             "text": "摘要：建议先结合上传卡图细化实现方案",
-            "provider": request.execution_binding.provider,
+            "api_protocol": request.execution_binding.api_protocol,
             "model": request.execution_binding.model,
         }
 
@@ -267,8 +267,8 @@ def test_execute_single_asset_plan_step_includes_uploaded_asset_metadata(monkeyp
                     "uploaded_asset_size_bytes": 16,
                 },
                 execution_binding=StepExecutionBinding(
-                    agent_backend="codex",
-                    provider="openai",
+                    runner_type="codex_cli",
+                    api_protocol="openai_compatible",
                     model="gpt-5.4",
                     credential="sk-live-openai",
                 ),
@@ -294,7 +294,7 @@ def test_execute_single_asset_plan_step_includes_server_workspace_metadata(monke
     async def fake_text_step(request: StepExecutionRequest):
         return {
             "text": "摘要：建议先围绕服务器工作区落实现方案",
-            "provider": request.execution_binding.provider,
+            "api_protocol": request.execution_binding.api_protocol,
             "model": request.execution_binding.model,
         }
 
@@ -323,8 +323,8 @@ def test_execute_single_asset_plan_step_includes_server_workspace_metadata(monke
                     "server_workspace_root": "F:/Runtime/platform-workspaces/1001/abc123/DarkMod",
                 },
                 execution_binding=StepExecutionBinding(
-                    agent_backend="codex",
-                    provider="openai",
+                    runner_type="codex_cli",
+                    api_protocol="openai_compatible",
                     model="gpt-5.4",
                     credential="sk-live-openai",
                 ),
@@ -361,7 +361,7 @@ def test_execute_single_asset_plan_step_reads_server_workspace_snapshot(monkeypa
     async def fake_text_step(request: StepExecutionRequest):
         return {
             "text": "摘要：建议先复用服务器工作区里的项目骨架来补卡牌方案",
-            "provider": request.execution_binding.provider,
+            "api_protocol": request.execution_binding.api_protocol,
             "model": request.execution_binding.model,
         }
 
@@ -389,8 +389,8 @@ def test_execute_single_asset_plan_step_reads_server_workspace_snapshot(monkeypa
                     "server_workspace_root": str(workspace_root),
                 },
                 execution_binding=StepExecutionBinding(
-                    agent_backend="codex",
-                    provider="openai",
+                    runner_type="codex_cli",
+                    api_protocol="openai_compatible",
                     model="gpt-5.4",
                     credential="sk-live-openai",
                 ),

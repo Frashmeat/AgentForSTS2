@@ -46,7 +46,7 @@ def test_server_execution_repository_manages_execution_profiles(db_session):
             {
                 "code": "codex-gpt-5-5",
                 "display_name": "Codex CLI / gpt-5.5",
-                "agent_backend": "codex",
+                "runner_type": "codex_cli",
                 "model": "gpt-5.5",
                 "description": "新模型配置",
                 "enabled": True,
@@ -65,7 +65,7 @@ def test_server_execution_repository_manages_execution_profiles(db_session):
                 {
                     "code": "codex-gpt-5-5",
                     "display_name": "Duplicate",
-                    "agent_backend": "codex",
+                    "runner_type": "codex_cli",
                     "model": "gpt-5.5",
                 }
             )
@@ -77,7 +77,7 @@ def test_server_execution_repository_manages_execution_profiles(db_session):
             {
                 "code": "codex-gpt-5-5-latest",
                 "display_name": "Codex CLI / gpt-5.5 latest",
-                "agent_backend": "codex",
+                "runner_type": "codex_cli",
                 "model": "gpt-5.5",
                 "description": "更新后的配置",
                 "enabled": True,
@@ -105,7 +105,7 @@ def test_server_execution_repository_rejects_deleting_referenced_execution_profi
     profile = ExecutionProfileRecord(
         code="codex-referenced",
         display_name="Codex referenced",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="",
         enabled=True,
@@ -117,11 +117,11 @@ def test_server_execution_repository_rejects_deleting_referenced_execution_profi
     db_session.add(
         ServerCredentialRecord(
             execution_profile_id=profile.id,
-            provider="openai",
+            api_protocol="openai_compatible",
             auth_type="api_key",
             credential_ciphertext="cipher",
             secret_ciphertext=None,
-            base_url="",
+            api_base_url="",
             label="referenced",
             priority=1,
             enabled=True,
@@ -136,7 +136,7 @@ def test_server_execution_repository_rejects_deleting_referenced_execution_profi
     preferred = ExecutionProfileRecord(
         code="codex-preferred",
         display_name="Codex preferred",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="",
         enabled=True,

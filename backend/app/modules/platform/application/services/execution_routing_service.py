@@ -9,16 +9,16 @@ from app.modules.platform.infra.persistence.models import JobRecord
 @dataclass(slots=True)
 class ResolvedExecutionRoute:
     execution_profile_id: int
-    agent_backend: str
+    runner_type: str
     model: str
-    provider: str
+    api_protocol: str
     credential_ref: str
     retry_attempt: int
     switched_credential: bool
     auth_type: str
     credential_ciphertext: str
     secret_ciphertext: str | None
-    base_url: str
+    api_base_url: str
 
 
 class ExecutionRoutingService:
@@ -42,16 +42,16 @@ class ExecutionRoutingService:
 
         return ResolvedExecutionRoute(
             execution_profile_id=execution_profile_id,
-            agent_backend=target.agent_backend,
+            runner_type=target.runner_type,
             model=target.model,
-            provider=target.provider,
+            api_protocol=target.api_protocol,
             credential_ref=f"server-credential:{target.credential_id}",
             retry_attempt=0,
             switched_credential=False,
             auth_type=target.auth_type,
             credential_ciphertext=target.credential_ciphertext,
             secret_ciphertext=target.secret_ciphertext,
-            base_url=target.base_url,
+            api_base_url=target.api_base_url,
         )
 
     def resolve_retry_for_job(self, job: JobRecord, *, failed_credential_ref: str) -> ResolvedExecutionRoute:
@@ -77,16 +77,16 @@ class ExecutionRoutingService:
 
         return ResolvedExecutionRoute(
             execution_profile_id=execution_profile_id,
-            agent_backend=target.agent_backend,
+            runner_type=target.runner_type,
             model=target.model,
-            provider=target.provider,
+            api_protocol=target.api_protocol,
             credential_ref=f"server-credential:{target.credential_id}",
             retry_attempt=1,
             switched_credential=True,
             auth_type=target.auth_type,
             credential_ciphertext=target.credential_ciphertext,
             secret_ciphertext=target.secret_ciphertext,
-            base_url=target.base_url,
+            api_base_url=target.api_base_url,
         )
 
     @staticmethod

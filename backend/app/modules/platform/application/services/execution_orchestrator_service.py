@@ -119,7 +119,7 @@ class ExecutionOrchestratorService:
         user_id: int,
         job_id: int,
         job_item_id: int,
-        provider: str = "",
+        api_protocol: str = "",
         model: str = "",
         credential_ref: str = "",
         retry_attempt: int = 0,
@@ -147,12 +147,12 @@ class ExecutionOrchestratorService:
             return None
         self._acquire_workspace_write_lock_if_needed(job=job, item=item)
 
-        provider, model, credential_ref, retry_attempt, switched_credential = self._resolve_execution_route(
+        api_protocol, model, credential_ref, retry_attempt, switched_credential = self._resolve_execution_route(
             job=job,
             user_id=user_id,
             job_id=job_id,
             job_item_id=job_item_id,
-            provider=provider,
+            api_protocol=api_protocol,
             model=model,
             credential_ref=credential_ref,
             retry_attempt=retry_attempt,
@@ -174,7 +174,7 @@ class ExecutionOrchestratorService:
             item=item,
             job_item_id=job_item_id,
             now=now,
-            provider=provider,
+            api_protocol=api_protocol,
             model=model,
             credential_ref=credential_ref,
             retry_attempt=retry_attempt,
@@ -252,39 +252,39 @@ class ExecutionOrchestratorService:
         user_id: int,
         job_id: int,
         job_item_id: int,
-        provider: str,
+        api_protocol: str,
         model: str,
         credential_ref: str,
         retry_attempt: int,
         switched_credential: bool,
     ) -> tuple[str, str, str, int, bool]:
-        if self.execution_routing_service is not None and not provider.strip() and not model.strip():
+        if self.execution_routing_service is not None and not api_protocol.strip() and not model.strip():
             route = self.execution_routing_service.resolve_for_job(job)
-            provider = route.provider
+            api_protocol = route.api_protocol
             model = route.model
             credential_ref = route.credential_ref
             retry_attempt = route.retry_attempt
             switched_credential = route.switched_credential
             log_kind = "resolved"
-        elif not provider.strip() or not model.strip():
-            raise ValueError("provider and model are required when execution routing service is not configured")
+        elif not api_protocol.strip() or not model.strip():
+            raise ValueError("api_protocol and model are required when execution routing service is not configured")
         else:
             log_kind = "provided"
 
         logger.info(
-            "platform execution route %s user_id=%s job_id=%s job_item_id=%s provider=%s model=%s "
+            "platform execution route %s user_id=%s job_id=%s job_item_id=%s api_protocol=%s model=%s "
             "credential_ref=%s retry_attempt=%s switched=%s",
             log_kind,
             user_id,
             job_id,
             job_item_id,
-            provider,
+            api_protocol,
             model,
             credential_ref,
             retry_attempt,
             switched_credential,
         )
-        return provider, model, credential_ref, retry_attempt, switched_credential
+        return api_protocol, model, credential_ref, retry_attempt, switched_credential
 
     def _ensure_quota_available_or_mark_skipped(
         self,
@@ -331,7 +331,7 @@ class ExecutionOrchestratorService:
         item,
         job_item_id: int,
         now: datetime,
-        provider: str,
+        api_protocol: str,
         model: str,
         credential_ref: str,
         retry_attempt: int,
@@ -349,7 +349,7 @@ class ExecutionOrchestratorService:
                 job_item_id=job_item_id,
                 user_id=user_id,
                 status=AIExecutionStatus.CREATED,
-                provider=provider,
+                api_protocol=api_protocol,
                 model=model,
                 credential_ref=credential_ref,
                 retry_attempt=retry_attempt,
@@ -383,13 +383,13 @@ class ExecutionOrchestratorService:
             return None
 
         logger.info(
-            "platform execution quota reserved user_id=%s job_id=%s job_item_id=%s execution_id=%s provider=%s "
+            "platform execution quota reserved user_id=%s job_id=%s job_item_id=%s execution_id=%s api_protocol=%s "
             "model=%s credential_ref=%s",
             user_id,
             job.id,
             job_item_id,
             execution.id,
-            provider,
+            api_protocol,
             model,
             credential_ref,
         )
@@ -617,7 +617,7 @@ class ExecutionOrchestratorService:
                     retry_binding.retry_attempt,
                     _short_text(final_result.error_summary),
                 )
-                execution.provider = retry_binding.provider
+                execution.api_protocol = retry_binding.api_protocol
                 execution.model = retry_binding.model
                 execution.credential_ref = retry_binding.credential_ref
                 execution.retry_attempt = retry_binding.retry_attempt
@@ -747,14 +747,14 @@ class ExecutionOrchestratorService:
         except (LookupError, ValueError):
             return None
         return StepExecutionBinding(
-            agent_backend=route.agent_backend,
-            provider=route.provider,
+            runner_type=route.runner_type,
+            api_protocol=route.api_protocol,
             model=route.model,
             credential_ref=route.credential_ref,
             auth_type=route.auth_type,
             credential=self.server_credential_cipher.decrypt(route.credential_ciphertext),
             secret=self.server_credential_cipher.decrypt(route.secret_ciphertext) if route.secret_ciphertext else "",
-            base_url=route.base_url,
+            api_base_url=route.api_base_url,
             retry_attempt=route.retry_attempt,
             switched_credential=route.switched_credential,
         )
@@ -898,11 +898,11 @@ class ExecutionOrchestratorService:
         if isinstance(execution_binding, dict):
             binding = StepExecutionBinding.model_validate(execution_binding)
             logger.info(
-                "platform step binding provided job_id=%s job_item_id=%s provider=%s model=%s "
+                "platform step binding provided job_id=%s job_item_id=%s api_protocol=%s model=%s "
                 "credential_ref=%s retry_attempt=%s switched=%s",
                 job_id,
                 job_item_id,
-                binding.provider,
+                binding.api_protocol,
                 binding.model,
                 binding.credential_ref,
                 binding.retry_attempt,
@@ -911,11 +911,11 @@ class ExecutionOrchestratorService:
             return binding
         if execution_binding is not None:
             logger.info(
-                "platform step binding provided job_id=%s job_item_id=%s provider=%s model=%s "
+                "platform step binding provided job_id=%s job_item_id=%s api_protocol=%s model=%s "
                 "credential_ref=%s retry_attempt=%s switched=%s",
                 job_id,
                 job_item_id,
-                execution_binding.provider,
+                execution_binding.api_protocol,
                 execution_binding.model,
                 execution_binding.credential_ref,
                 execution_binding.retry_attempt,
@@ -936,32 +936,32 @@ class ExecutionOrchestratorService:
         route = self.execution_routing_service.resolve_for_job(job)
         latest_execution = self.ai_execution_repository.find_latest_by_job_item(job_item_id)
         if latest_execution is not None:
-            expected = (route.provider, route.model, route.credential_ref)
-            actual = (latest_execution.provider, latest_execution.model, latest_execution.credential_ref)
+            expected = (route.api_protocol, route.model, route.credential_ref)
+            actual = (latest_execution.api_protocol, latest_execution.model, latest_execution.credential_ref)
             if actual != expected:
                 raise ValueError("latest ai_execution route does not match execution routing result")
 
         binding = StepExecutionBinding(
-            agent_backend=route.agent_backend,
-            provider=route.provider,
+            runner_type=route.runner_type,
+            api_protocol=route.api_protocol,
             model=route.model,
             credential_ref=route.credential_ref,
             auth_type=route.auth_type,
             credential=self.server_credential_cipher.decrypt(route.credential_ciphertext),
             secret=self.server_credential_cipher.decrypt(route.secret_ciphertext) if route.secret_ciphertext else "",
-            base_url=route.base_url,
+            api_base_url=route.api_base_url,
             retry_attempt=latest_execution.retry_attempt if latest_execution is not None else route.retry_attempt,
             switched_credential=(
                 latest_execution.switched_credential if latest_execution is not None else route.switched_credential
             ),
         )
         logger.info(
-            "platform step binding resolved user_id=%s job_id=%s job_item_id=%s provider=%s model=%s "
+            "platform step binding resolved user_id=%s job_id=%s job_item_id=%s api_protocol=%s model=%s "
             "credential_ref=%s retry_attempt=%s switched=%s",
             user_id,
             job_id,
             job_item_id,
-            binding.provider,
+            binding.api_protocol,
             binding.model,
             binding.credential_ref,
             binding.retry_attempt,

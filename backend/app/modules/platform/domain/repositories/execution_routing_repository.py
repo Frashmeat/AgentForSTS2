@@ -7,7 +7,7 @@ from dataclasses import dataclass
 @dataclass(slots=True)
 class ExecutionProfileRoutingRecord:
     id: int
-    agent_backend: str
+    runner_type: str
     model: str
     enabled: bool
 
@@ -15,14 +15,14 @@ class ExecutionProfileRoutingRecord:
 @dataclass(slots=True)
 class ExecutionRoutingTargetRecord:
     execution_profile_id: int
-    agent_backend: str
+    runner_type: str
     model: str
-    provider: str
+    api_protocol: str
     credential_id: int
     auth_type: str
     credential_ciphertext: str
     secret_ciphertext: str | None
-    base_url: str
+    api_base_url: str
 
 
 class ExecutionRoutingRepository(ABC):

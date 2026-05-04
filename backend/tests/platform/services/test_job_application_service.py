@@ -485,7 +485,7 @@ def test_job_application_service_can_complete_supported_log_analysis_job(db_sess
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
         display_name="Codex CLI / gpt-5.4",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="默认推荐",
         enabled=True,
@@ -497,11 +497,11 @@ def test_job_application_service_can_complete_supported_log_analysis_job(db_sess
     db_session.add(
         ServerCredentialRecord(
             execution_profile_id=profile.id,
-            provider="openai",
+            api_protocol="openai_compatible",
             auth_type="api_key",
             credential_ciphertext=cipher.encrypt("sk-live-openai"),
             secret_ciphertext=None,
-            base_url="https://api.openai.com/v1",
+            api_base_url="https://api.openai.com/v1",
             label="main",
             priority=1,
             enabled=True,
@@ -554,7 +554,7 @@ def test_job_application_service_can_complete_supported_log_analysis_job(db_sess
                 "job_type": "log_analysis",
                 "workflow_version": "2026.03.31",
                 "selected_execution_profile_id": profile.id,
-                "selected_agent_backend": "codex",
+                "selected_runner_type": "codex_cli",
                 "selected_model": "gpt-5.4",
                 "items": [
                     {
@@ -580,7 +580,7 @@ def test_job_application_service_can_complete_supported_batch_custom_code_job(db
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
         display_name="Codex CLI / gpt-5.4",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="默认推荐",
         enabled=True,
@@ -592,11 +592,11 @@ def test_job_application_service_can_complete_supported_batch_custom_code_job(db
     db_session.add(
         ServerCredentialRecord(
             execution_profile_id=profile.id,
-            provider="openai",
+            api_protocol="openai_compatible",
             auth_type="api_key",
             credential_ciphertext=cipher.encrypt("sk-live-openai"),
             secret_ciphertext=None,
-            base_url="https://api.openai.com/v1",
+            api_base_url="https://api.openai.com/v1",
             label="main",
             priority=1,
             enabled=True,
@@ -653,7 +653,7 @@ def test_job_application_service_can_complete_supported_batch_custom_code_job(db
                 "job_type": "batch_generate",
                 "workflow_version": "2026.03.31",
                 "selected_execution_profile_id": profile.id,
-                "selected_agent_backend": "codex",
+                "selected_runner_type": "codex_cli",
                 "selected_model": "gpt-5.4",
                 "items": [
                     {
@@ -684,7 +684,7 @@ def test_job_application_service_can_complete_supported_batch_card_job(db_sessio
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
         display_name="Codex CLI / gpt-5.4",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="默认推荐",
         enabled=True,
@@ -696,11 +696,11 @@ def test_job_application_service_can_complete_supported_batch_card_job(db_sessio
     db_session.add(
         ServerCredentialRecord(
             execution_profile_id=profile.id,
-            provider="openai",
+            api_protocol="openai_compatible",
             auth_type="api_key",
             credential_ciphertext=cipher.encrypt("sk-live-openai"),
             secret_ciphertext=None,
-            base_url="https://api.openai.com/v1",
+            api_base_url="https://api.openai.com/v1",
             label="main",
             priority=1,
             enabled=True,
@@ -752,7 +752,7 @@ def test_job_application_service_can_complete_supported_batch_card_job(db_sessio
                 "job_type": "batch_generate",
                 "workflow_version": "2026.03.31",
                 "selected_execution_profile_id": profile.id,
-                "selected_agent_backend": "codex",
+                "selected_runner_type": "codex_cli",
                 "selected_model": "gpt-5.4",
                 "items": [
                     {
@@ -781,7 +781,7 @@ def test_job_application_service_can_complete_supported_batch_card_fullscreen_jo
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
         display_name="Codex CLI / gpt-5.4",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="默认推荐",
         enabled=True,
@@ -793,11 +793,11 @@ def test_job_application_service_can_complete_supported_batch_card_fullscreen_jo
     db_session.add(
         ServerCredentialRecord(
             execution_profile_id=profile.id,
-            provider="openai",
+            api_protocol="openai_compatible",
             auth_type="api_key",
             credential_ciphertext=cipher.encrypt("sk-live-openai"),
             secret_ciphertext=None,
-            base_url="https://api.openai.com/v1",
+            api_base_url="https://api.openai.com/v1",
             label="main",
             priority=1,
             enabled=True,
@@ -849,7 +849,7 @@ def test_job_application_service_can_complete_supported_batch_card_fullscreen_jo
                 "job_type": "batch_generate",
                 "workflow_version": "2026.03.31",
                 "selected_execution_profile_id": profile.id,
-                "selected_agent_backend": "codex",
+                "selected_runner_type": "codex_cli",
                 "selected_model": "gpt-5.4",
                 "items": [
                     {
@@ -878,7 +878,7 @@ def test_job_application_service_can_complete_batch_card_fullscreen_with_uploade
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
         display_name="Codex CLI / gpt-5.4",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="默认推荐",
         enabled=True,
@@ -890,11 +890,11 @@ def test_job_application_service_can_complete_batch_card_fullscreen_with_uploade
     db_session.add(
         ServerCredentialRecord(
             execution_profile_id=profile.id,
-            provider="openai",
+            api_protocol="openai_compatible",
             auth_type="api_key",
             credential_ciphertext=cipher.encrypt("sk-live-openai"),
             secret_ciphertext=None,
-            base_url="https://api.openai.com/v1",
+            api_base_url="https://api.openai.com/v1",
             label="main",
             priority=1,
             enabled=True,
@@ -960,7 +960,7 @@ def test_job_application_service_can_complete_batch_card_fullscreen_with_uploade
                 "job_type": "batch_generate",
                 "workflow_version": "2026.03.31",
                 "selected_execution_profile_id": profile.id,
-                "selected_agent_backend": "codex",
+                "selected_runner_type": "codex_cli",
                 "selected_model": "gpt-5.4",
                 "items": [
                     {
@@ -992,7 +992,7 @@ def test_job_application_service_can_complete_supported_batch_relic_job(db_sessi
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
         display_name="Codex CLI / gpt-5.4",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="默认推荐",
         enabled=True,
@@ -1004,11 +1004,11 @@ def test_job_application_service_can_complete_supported_batch_relic_job(db_sessi
     db_session.add(
         ServerCredentialRecord(
             execution_profile_id=profile.id,
-            provider="openai",
+            api_protocol="openai_compatible",
             auth_type="api_key",
             credential_ciphertext=cipher.encrypt("sk-live-openai"),
             secret_ciphertext=None,
-            base_url="https://api.openai.com/v1",
+            api_base_url="https://api.openai.com/v1",
             label="main",
             priority=1,
             enabled=True,
@@ -1060,7 +1060,7 @@ def test_job_application_service_can_complete_supported_batch_relic_job(db_sessi
                 "job_type": "batch_generate",
                 "workflow_version": "2026.03.31",
                 "selected_execution_profile_id": profile.id,
-                "selected_agent_backend": "codex",
+                "selected_runner_type": "codex_cli",
                 "selected_model": "gpt-5.4",
                 "items": [
                     {
@@ -1089,7 +1089,7 @@ def test_job_application_service_can_complete_supported_batch_power_job(db_sessi
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
         display_name="Codex CLI / gpt-5.4",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="默认推荐",
         enabled=True,
@@ -1101,11 +1101,11 @@ def test_job_application_service_can_complete_supported_batch_power_job(db_sessi
     db_session.add(
         ServerCredentialRecord(
             execution_profile_id=profile.id,
-            provider="openai",
+            api_protocol="openai_compatible",
             auth_type="api_key",
             credential_ciphertext=cipher.encrypt("sk-live-openai"),
             secret_ciphertext=None,
-            base_url="https://api.openai.com/v1",
+            api_base_url="https://api.openai.com/v1",
             label="main",
             priority=1,
             enabled=True,
@@ -1156,7 +1156,7 @@ def test_job_application_service_can_complete_supported_batch_power_job(db_sessi
                 "job_type": "batch_generate",
                 "workflow_version": "2026.03.31",
                 "selected_execution_profile_id": profile.id,
-                "selected_agent_backend": "codex",
+                "selected_runner_type": "codex_cli",
                 "selected_model": "gpt-5.4",
                 "items": [
                     {
@@ -1185,7 +1185,7 @@ def test_job_application_service_can_complete_supported_batch_character_job(db_s
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
         display_name="Codex CLI / gpt-5.4",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="默认推荐",
         enabled=True,
@@ -1197,11 +1197,11 @@ def test_job_application_service_can_complete_supported_batch_character_job(db_s
     db_session.add(
         ServerCredentialRecord(
             execution_profile_id=profile.id,
-            provider="openai",
+            api_protocol="openai_compatible",
             auth_type="api_key",
             credential_ciphertext=cipher.encrypt("sk-live-openai"),
             secret_ciphertext=None,
-            base_url="https://api.openai.com/v1",
+            api_base_url="https://api.openai.com/v1",
             label="main",
             priority=1,
             enabled=True,
@@ -1258,7 +1258,7 @@ def test_job_application_service_can_complete_supported_batch_character_job(db_s
                 "job_type": "batch_generate",
                 "workflow_version": "2026.03.31",
                 "selected_execution_profile_id": profile.id,
-                "selected_agent_backend": "codex",
+                "selected_runner_type": "codex_cli",
                 "selected_model": "gpt-5.4",
                 "items": [
                     {
@@ -1287,7 +1287,7 @@ def test_job_application_service_can_complete_supported_single_custom_code_job(d
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
         display_name="Codex CLI / gpt-5.4",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="默认推荐",
         enabled=True,
@@ -1299,11 +1299,11 @@ def test_job_application_service_can_complete_supported_single_custom_code_job(d
     db_session.add(
         ServerCredentialRecord(
             execution_profile_id=profile.id,
-            provider="openai",
+            api_protocol="openai_compatible",
             auth_type="api_key",
             credential_ciphertext=cipher.encrypt("sk-live-openai"),
             secret_ciphertext=None,
-            base_url="https://api.openai.com/v1",
+            api_base_url="https://api.openai.com/v1",
             label="main",
             priority=1,
             enabled=True,
@@ -1360,7 +1360,7 @@ def test_job_application_service_can_complete_supported_single_custom_code_job(d
                 "job_type": "single_generate",
                 "workflow_version": "2026.03.31",
                 "selected_execution_profile_id": profile.id,
-                "selected_agent_backend": "codex",
+                "selected_runner_type": "codex_cli",
                 "selected_model": "gpt-5.4",
                 "items": [
                     {
@@ -1393,7 +1393,7 @@ def test_job_application_service_keeps_job_queued_when_server_workspace_is_busy(
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
         display_name="Codex CLI / gpt-5.4",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="默认推荐",
         enabled=True,
@@ -1405,11 +1405,11 @@ def test_job_application_service_keeps_job_queued_when_server_workspace_is_busy(
     db_session.add(
         ServerCredentialRecord(
             execution_profile_id=profile.id,
-            provider="openai",
+            api_protocol="openai_compatible",
             auth_type="api_key",
             credential_ciphertext=cipher.encrypt("sk-live-openai"),
             secret_ciphertext=None,
-            base_url="https://api.openai.com/v1",
+            api_base_url="https://api.openai.com/v1",
             label="main",
             priority=1,
             enabled=True,
@@ -1466,7 +1466,7 @@ def test_job_application_service_keeps_job_queued_when_server_workspace_is_busy(
                 "job_type": "single_generate",
                 "workflow_version": "2026.03.31",
                 "selected_execution_profile_id": profile.id,
-                "selected_agent_backend": "codex",
+                "selected_runner_type": "codex_cli",
                 "selected_model": "gpt-5.4",
                 "items": [
                     {
@@ -1510,7 +1510,7 @@ def test_job_application_service_auto_resumes_next_queued_job_after_workspace_is
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
         display_name="Codex CLI / gpt-5.4",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="默认推荐",
         enabled=True,
@@ -1522,11 +1522,11 @@ def test_job_application_service_auto_resumes_next_queued_job_after_workspace_is
     db_session.add(
         ServerCredentialRecord(
             execution_profile_id=profile.id,
-            provider="openai",
+            api_protocol="openai_compatible",
             auth_type="api_key",
             credential_ciphertext=cipher.encrypt("sk-live-openai"),
             secret_ciphertext=None,
-            base_url="https://api.openai.com/v1",
+            api_base_url="https://api.openai.com/v1",
             label="main",
             priority=1,
             enabled=True,
@@ -1587,7 +1587,7 @@ def test_job_application_service_auto_resumes_next_queued_job_after_workspace_is
                 "job_type": "single_generate",
                 "workflow_version": "2026.03.31",
                 "selected_execution_profile_id": profile.id,
-                "selected_agent_backend": "codex",
+                "selected_runner_type": "codex_cli",
                 "selected_model": "gpt-5.4",
                 "items": [
                     {
@@ -1616,7 +1616,7 @@ def test_job_application_service_auto_resumes_next_queued_job_after_workspace_is
                 "job_type": "single_generate",
                 "workflow_version": "2026.03.31",
                 "selected_execution_profile_id": profile.id,
-                "selected_agent_backend": "codex",
+                "selected_runner_type": "codex_cli",
                 "selected_model": "gpt-5.4",
                 "items": [
                     {
@@ -1657,7 +1657,7 @@ def test_job_application_service_keeps_job_queued_when_server_deploy_target_is_b
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
         display_name="Codex CLI / gpt-5.4",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="默认推荐",
         enabled=True,
@@ -1669,11 +1669,11 @@ def test_job_application_service_keeps_job_queued_when_server_deploy_target_is_b
     db_session.add(
         ServerCredentialRecord(
             execution_profile_id=profile.id,
-            provider="openai",
+            api_protocol="openai_compatible",
             auth_type="api_key",
             credential_ciphertext=cipher.encrypt("sk-live-openai"),
             secret_ciphertext=None,
-            base_url="https://api.openai.com/v1",
+            api_base_url="https://api.openai.com/v1",
             label="main",
             priority=1,
             enabled=True,
@@ -1732,7 +1732,7 @@ def test_job_application_service_keeps_job_queued_when_server_deploy_target_is_b
                 "job_type": "single_generate",
                 "workflow_version": "2026.03.31",
                 "selected_execution_profile_id": profile.id,
-                "selected_agent_backend": "codex",
+                "selected_runner_type": "codex_cli",
                 "selected_model": "gpt-5.4",
                 "items": [
                     {
@@ -1775,7 +1775,7 @@ def test_job_application_service_auto_resumes_next_queued_job_after_deploy_targe
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
         display_name="Codex CLI / gpt-5.4",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="默认推荐",
         enabled=True,
@@ -1787,11 +1787,11 @@ def test_job_application_service_auto_resumes_next_queued_job_after_deploy_targe
     db_session.add(
         ServerCredentialRecord(
             execution_profile_id=profile.id,
-            provider="openai",
+            api_protocol="openai_compatible",
             auth_type="api_key",
             credential_ciphertext=cipher.encrypt("sk-live-openai"),
             secret_ciphertext=None,
-            base_url="https://api.openai.com/v1",
+            api_base_url="https://api.openai.com/v1",
             label="main",
             priority=1,
             enabled=True,
@@ -1853,7 +1853,7 @@ def test_job_application_service_auto_resumes_next_queued_job_after_deploy_targe
                 "job_type": "single_generate",
                 "workflow_version": "2026.03.31",
                 "selected_execution_profile_id": profile.id,
-                "selected_agent_backend": "codex",
+                "selected_runner_type": "codex_cli",
                 "selected_model": "gpt-5.4",
                 "items": [
                     {
@@ -1881,7 +1881,7 @@ def test_job_application_service_auto_resumes_next_queued_job_after_deploy_targe
                 "job_type": "single_generate",
                 "workflow_version": "2026.03.31",
                 "selected_execution_profile_id": profile.id,
-                "selected_agent_backend": "codex",
+                "selected_runner_type": "codex_cli",
                 "selected_model": "gpt-5.4",
                 "items": [
                     {
@@ -1915,7 +1915,7 @@ def test_job_application_service_can_complete_supported_single_relic_job(db_sess
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
         display_name="Codex CLI / gpt-5.4",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="默认推荐",
         enabled=True,
@@ -1927,11 +1927,11 @@ def test_job_application_service_can_complete_supported_single_relic_job(db_sess
     db_session.add(
         ServerCredentialRecord(
             execution_profile_id=profile.id,
-            provider="openai",
+            api_protocol="openai_compatible",
             auth_type="api_key",
             credential_ciphertext=cipher.encrypt("sk-live-openai"),
             secret_ciphertext=None,
-            base_url="https://api.openai.com/v1",
+            api_base_url="https://api.openai.com/v1",
             label="main",
             priority=1,
             enabled=True,
@@ -1983,7 +1983,7 @@ def test_job_application_service_can_complete_supported_single_relic_job(db_sess
                 "job_type": "single_generate",
                 "workflow_version": "2026.03.31",
                 "selected_execution_profile_id": profile.id,
-                "selected_agent_backend": "codex",
+                "selected_runner_type": "codex_cli",
                 "selected_model": "gpt-5.4",
                 "items": [
                     {
@@ -2014,7 +2014,7 @@ def test_job_application_service_can_complete_supported_single_card_job(db_sessi
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
         display_name="Codex CLI / gpt-5.4",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="默认推荐",
         enabled=True,
@@ -2026,11 +2026,11 @@ def test_job_application_service_can_complete_supported_single_card_job(db_sessi
     db_session.add(
         ServerCredentialRecord(
             execution_profile_id=profile.id,
-            provider="openai",
+            api_protocol="openai_compatible",
             auth_type="api_key",
             credential_ciphertext=cipher.encrypt("sk-live-openai"),
             secret_ciphertext=None,
-            base_url="https://api.openai.com/v1",
+            api_base_url="https://api.openai.com/v1",
             label="main",
             priority=1,
             enabled=True,
@@ -2082,7 +2082,7 @@ def test_job_application_service_can_complete_supported_single_card_job(db_sessi
                 "job_type": "single_generate",
                 "workflow_version": "2026.03.31",
                 "selected_execution_profile_id": profile.id,
-                "selected_agent_backend": "codex",
+                "selected_runner_type": "codex_cli",
                 "selected_model": "gpt-5.4",
                 "items": [
                     {
@@ -2112,7 +2112,7 @@ def test_job_application_service_can_complete_supported_single_card_fullscreen_j
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
         display_name="Codex CLI / gpt-5.4",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="默认推荐",
         enabled=True,
@@ -2124,11 +2124,11 @@ def test_job_application_service_can_complete_supported_single_card_fullscreen_j
     db_session.add(
         ServerCredentialRecord(
             execution_profile_id=profile.id,
-            provider="openai",
+            api_protocol="openai_compatible",
             auth_type="api_key",
             credential_ciphertext=cipher.encrypt("sk-live-openai"),
             secret_ciphertext=None,
-            base_url="https://api.openai.com/v1",
+            api_base_url="https://api.openai.com/v1",
             label="main",
             priority=1,
             enabled=True,
@@ -2179,7 +2179,7 @@ def test_job_application_service_can_complete_supported_single_card_fullscreen_j
                 "job_type": "single_generate",
                 "workflow_version": "2026.03.31",
                 "selected_execution_profile_id": profile.id,
-                "selected_agent_backend": "codex",
+                "selected_runner_type": "codex_cli",
                 "selected_model": "gpt-5.4",
                 "items": [
                     {
@@ -2209,7 +2209,7 @@ def test_job_application_service_can_complete_single_card_fullscreen_with_upload
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
         display_name="Codex CLI / gpt-5.4",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="默认推荐",
         enabled=True,
@@ -2221,11 +2221,11 @@ def test_job_application_service_can_complete_single_card_fullscreen_with_upload
     db_session.add(
         ServerCredentialRecord(
             execution_profile_id=profile.id,
-            provider="openai",
+            api_protocol="openai_compatible",
             auth_type="api_key",
             credential_ciphertext=cipher.encrypt("sk-live-openai"),
             secret_ciphertext=None,
-            base_url="https://api.openai.com/v1",
+            api_base_url="https://api.openai.com/v1",
             label="main",
             priority=1,
             enabled=True,
@@ -2291,7 +2291,7 @@ def test_job_application_service_can_complete_single_card_fullscreen_with_upload
                 "job_type": "single_generate",
                 "workflow_version": "2026.03.31",
                 "selected_execution_profile_id": profile.id,
-                "selected_agent_backend": "codex",
+                "selected_runner_type": "codex_cli",
                 "selected_model": "gpt-5.4",
                 "items": [
                     {
@@ -2323,7 +2323,7 @@ def test_job_application_service_can_complete_supported_single_power_job(db_sess
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
         display_name="Codex CLI / gpt-5.4",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="默认推荐",
         enabled=True,
@@ -2335,11 +2335,11 @@ def test_job_application_service_can_complete_supported_single_power_job(db_sess
     db_session.add(
         ServerCredentialRecord(
             execution_profile_id=profile.id,
-            provider="openai",
+            api_protocol="openai_compatible",
             auth_type="api_key",
             credential_ciphertext=cipher.encrypt("sk-live-openai"),
             secret_ciphertext=None,
-            base_url="https://api.openai.com/v1",
+            api_base_url="https://api.openai.com/v1",
             label="main",
             priority=1,
             enabled=True,
@@ -2391,7 +2391,7 @@ def test_job_application_service_can_complete_supported_single_power_job(db_sess
                 "job_type": "single_generate",
                 "workflow_version": "2026.03.31",
                 "selected_execution_profile_id": profile.id,
-                "selected_agent_backend": "codex",
+                "selected_runner_type": "codex_cli",
                 "selected_model": "gpt-5.4",
                 "items": [
                     {
@@ -2422,7 +2422,7 @@ def test_job_application_service_can_complete_supported_single_character_job(db_
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
         display_name="Codex CLI / gpt-5.4",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="默认推荐",
         enabled=True,
@@ -2434,11 +2434,11 @@ def test_job_application_service_can_complete_supported_single_character_job(db_
     db_session.add(
         ServerCredentialRecord(
             execution_profile_id=profile.id,
-            provider="openai",
+            api_protocol="openai_compatible",
             auth_type="api_key",
             credential_ciphertext=cipher.encrypt("sk-live-openai"),
             secret_ciphertext=None,
-            base_url="https://api.openai.com/v1",
+            api_base_url="https://api.openai.com/v1",
             label="main",
             priority=1,
             enabled=True,
@@ -2490,7 +2490,7 @@ def test_job_application_service_can_complete_supported_single_character_job(db_
                 "job_type": "single_generate",
                 "workflow_version": "2026.03.31",
                 "selected_execution_profile_id": profile.id,
-                "selected_agent_backend": "codex",
+                "selected_runner_type": "codex_cli",
                 "selected_model": "gpt-5.4",
                 "items": [
                     {
@@ -2821,7 +2821,7 @@ def test_execution_orchestrator_service_hydrates_server_workspace_metadata_into_
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
         display_name="Codex CLI / gpt-5.4",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="默认推荐",
         enabled=True,
@@ -2833,11 +2833,11 @@ def test_execution_orchestrator_service_hydrates_server_workspace_metadata_into_
     db_session.add(
         ServerCredentialRecord(
             execution_profile_id=profile.id,
-            provider="openai",
+            api_protocol="openai_compatible",
             auth_type="api_key",
             credential_ciphertext=cipher.encrypt("sk-live-openai"),
             secret_ciphertext=None,
-            base_url="https://api.openai.com/v1",
+            api_base_url="https://api.openai.com/v1",
             label="main",
             priority=1,
             enabled=True,
@@ -2894,7 +2894,7 @@ def test_execution_orchestrator_service_hydrates_server_workspace_metadata_into_
                 "job_type": "single_generate",
                 "workflow_version": "2026.03.31",
                 "selected_execution_profile_id": profile.id,
-                "selected_agent_backend": "codex",
+                "selected_runner_type": "codex_cli",
                 "selected_model": "gpt-5.4",
                 "items": [
                     {
@@ -2924,7 +2924,7 @@ def test_job_application_service_can_retry_with_alternate_credential_after_retry
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
         display_name="Codex CLI / gpt-5.4",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="默认推荐",
         enabled=True,
@@ -2935,11 +2935,11 @@ def test_job_application_service_can_retry_with_alternate_credential_after_retry
     db_session.flush()
     credential_a = ServerCredentialRecord(
         execution_profile_id=profile.id,
-        provider="openai",
+        api_protocol="openai_compatible",
         auth_type="api_key",
         credential_ciphertext=cipher.encrypt("sk-primary"),
         secret_ciphertext=None,
-        base_url="https://api-a.example.com/v1",
+        api_base_url="https://api-a.example.com/v1",
         label="primary",
         priority=5,
         enabled=True,
@@ -2950,11 +2950,11 @@ def test_job_application_service_can_retry_with_alternate_credential_after_retry
     )
     credential_b = ServerCredentialRecord(
         execution_profile_id=profile.id,
-        provider="openai",
+        api_protocol="openai_compatible",
         auth_type="api_key",
         credential_ciphertext=cipher.encrypt("sk-secondary"),
         secret_ciphertext=None,
-        base_url="https://api-b.example.com/v1",
+        api_base_url="https://api-b.example.com/v1",
         label="secondary",
         priority=10,
         enabled=True,
@@ -3006,7 +3006,7 @@ def test_job_application_service_can_retry_with_alternate_credential_after_retry
                 "job_type": "single_generate",
                 "workflow_version": "2026.03.31",
                 "selected_execution_profile_id": profile.id,
-                "selected_agent_backend": "codex",
+                "selected_runner_type": "codex_cli",
                 "selected_model": "gpt-5.4",
                 "items": [
                     {
@@ -3039,7 +3039,7 @@ def test_job_application_service_rejects_start_when_active_server_job_limit_is_r
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
         display_name="Codex CLI / gpt-5.4",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="默认推荐",
         enabled=True,
@@ -3057,7 +3057,7 @@ def test_job_application_service_rejects_start_when_active_server_job_limit_is_r
                     "job_type": "single_generate",
                     "workflow_version": "2026.03.31",
                     "selected_execution_profile_id": profile.id,
-                    "selected_agent_backend": "codex",
+                    "selected_runner_type": "codex_cli",
                     "selected_model": "gpt-5.4",
                     "items": [{"item_type": "card", "input_payload": {"item_name": item_name}}],
                 }
@@ -3071,7 +3071,7 @@ def test_job_application_service_rejects_start_when_active_server_job_limit_is_r
                 "job_type": "single_generate",
                 "workflow_version": "2026.03.31",
                 "selected_execution_profile_id": profile.id,
-                "selected_agent_backend": "codex",
+                "selected_runner_type": "codex_cli",
                 "selected_model": "gpt-5.4",
                 "items": [{"item_type": "card", "input_payload": {"item_name": "Target"}}],
             }

@@ -22,7 +22,7 @@ class ExecutionRoutingRepositorySqlAlchemy(ExecutionRoutingRepository):
             return None
         return ExecutionProfileRoutingRecord(
             id=row.id,
-            agent_backend=row.agent_backend,
+            runner_type=row.runner_type,
             model=row.model,
             enabled=row.enabled,
         )
@@ -56,12 +56,12 @@ class ExecutionRoutingRepositorySqlAlchemy(ExecutionRoutingRepository):
         profile, credential = row
         return ExecutionRoutingTargetRecord(
             execution_profile_id=profile.id,
-            agent_backend=profile.agent_backend,
+            runner_type=profile.runner_type,
             model=profile.model,
-            provider=credential.provider,
+            api_protocol=credential.api_protocol,
             credential_id=credential.id,
             auth_type=credential.auth_type,
             credential_ciphertext=credential.credential_ciphertext,
             secret_ciphertext=credential.secret_ciphertext,
-            base_url=credential.base_url,
+            api_base_url=credential.api_base_url,
         )

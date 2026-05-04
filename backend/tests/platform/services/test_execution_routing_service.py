@@ -18,7 +18,7 @@ def _seed_job_and_profile(db_session):
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
         display_name="Codex CLI / gpt-5.4",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="默认推荐",
         enabled=True,
@@ -29,11 +29,11 @@ def _seed_job_and_profile(db_session):
     db_session.flush()
     credential_a = ServerCredentialRecord(
         execution_profile_id=profile.id,
-        provider="openai",
+        api_protocol="openai_compatible",
         auth_type="api_key",
         credential_ciphertext="cipher-primary",
         secret_ciphertext=None,
-        base_url="https://api-a.example.com/v1",
+        api_base_url="https://api-a.example.com/v1",
         label="primary",
         priority=5,
         enabled=True,
@@ -44,11 +44,11 @@ def _seed_job_and_profile(db_session):
     )
     credential_b = ServerCredentialRecord(
         execution_profile_id=profile.id,
-        provider="openai",
+        api_protocol="openai_compatible",
         auth_type="api_key",
         credential_ciphertext="cipher-secondary",
         secret_ciphertext=None,
-        base_url="https://api-b.example.com/v1",
+        api_base_url="https://api-b.example.com/v1",
         label="secondary",
         priority=10,
         enabled=True,
@@ -66,7 +66,7 @@ def _seed_job_and_profile(db_session):
                 "job_type": "single_generate",
                 "workflow_version": "2026.03.31",
                 "selected_execution_profile_id": profile.id,
-                "selected_agent_backend": "codex",
+                "selected_runner_type": "codex_cli",
                 "selected_model": "gpt-5.4",
                 "items": [{"item_type": "card"}],
             }
@@ -87,7 +87,7 @@ def test_execution_routing_service_can_resolve_retry_route_with_alternate_creden
 
     assert route.execution_profile_id == profile.id
     assert route.credential_ref == f"server-credential:{credential_b.id}"
-    assert route.base_url == "https://api-b.example.com/v1"
+    assert route.api_base_url == "https://api-b.example.com/v1"
     assert route.retry_attempt == 1
     assert route.switched_credential is True
 

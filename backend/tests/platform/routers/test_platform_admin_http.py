@@ -153,7 +153,7 @@ def client(tmp_path):
         job_item_id=job.items[0].id,
         user_id=1001,
         status="succeeded",
-        provider="openai",
+        api_protocol="openai_compatible",
         model="gpt-5.4",
         credential_ref="cred-a",
         retry_attempt=1,
@@ -189,7 +189,7 @@ def client(tmp_path):
     profile = ExecutionProfileRecord(
         code="codex-gpt-5-4",
         display_name="Codex CLI / gpt-5.4",
-        agent_backend="codex",
+        runner_type="codex_cli",
         model="gpt-5.4",
         description="默认推荐",
         enabled=True,
@@ -201,11 +201,11 @@ def client(tmp_path):
     session.add(
         ServerCredentialRecord(
             execution_profile_id=profile.id,
-            provider="openai",
+            api_protocol="openai_compatible",
             auth_type="api_key",
             credential_ciphertext=cipher.encrypt("seed-openai-main"),
             secret_ciphertext=None,
-            base_url="https://api.openai.com/v1",
+            api_base_url="https://api.openai.com/v1",
             label="openai-main-a",
             priority=10,
             enabled=True,
@@ -502,7 +502,7 @@ def test_platform_admin_router_manages_execution_profiles(client):
         json={
             "code": "codex-gpt-5-5",
             "display_name": "Codex CLI / gpt-5.5",
-            "agent_backend": "codex",
+            "runner_type": "codex_cli",
             "model": "gpt-5.5",
             "description": "新模型配置",
             "enabled": True,
@@ -521,7 +521,7 @@ def test_platform_admin_router_manages_execution_profiles(client):
         json={
             "code": "codex-gpt-5-5",
             "display_name": "Duplicate",
-            "agent_backend": "codex",
+            "runner_type": "codex_cli",
             "model": "gpt-5.5",
         },
     )
@@ -532,7 +532,7 @@ def test_platform_admin_router_manages_execution_profiles(client):
         json={
             "code": "codex-gpt-5-5-latest",
             "display_name": "Codex CLI / gpt-5.5 latest",
-            "agent_backend": "codex",
+            "runner_type": "codex_cli",
             "model": "gpt-5.5",
             "description": "更新后的配置",
             "enabled": True,
@@ -578,7 +578,7 @@ def test_platform_admin_router_rejects_deleting_referenced_execution_profile(cli
         profile = ExecutionProfileRecord(
             code="claude-extra",
             display_name="Claude extra",
-            agent_backend="claude",
+            runner_type="claude_cli",
             model="claude-sonnet-4-6",
             description="",
             enabled=True,
@@ -653,11 +653,11 @@ def test_platform_admin_router_creates_server_credential_with_ciphertext_storage
         "/api/admin/platform/server-credentials",
         json={
             "execution_profile_id": 1,
-            "provider": "openai",
+            "api_protocol": "openai_compatible",
             "auth_type": "api_key",
             "credential": "sk-live-main",
             "secret": "",
-            "base_url": "https://api.openai.com/v1",
+            "api_base_url": "https://api.openai.com/v1",
             "label": "openai-main-b",
             "priority": 20,
             "enabled": True,
@@ -666,7 +666,7 @@ def test_platform_admin_router_creates_server_credential_with_ciphertext_storage
     assert created.status_code == 200
     payload = created.json()
     assert payload["label"] == "openai-main-b"
-    assert payload["provider"] == "openai"
+    assert payload["api_protocol"] == "openai_compatible"
     assert "credential" not in payload
     assert "secret" not in payload
 
@@ -697,17 +697,17 @@ def test_platform_admin_router_updates_and_toggles_server_credential(client):
         "/api/admin/platform/server-credentials/1",
         json={
             "execution_profile_id": 1,
-            "provider": "anthropic",
+            "api_protocol": "anthropic_compatible",
             "auth_type": "api_key",
             "credential": "anthropic-key-1",
-            "base_url": "https://api.anthropic.com",
+            "api_base_url": "https://api.anthropic.com",
             "label": "anthropic-main-a",
             "priority": 15,
             "enabled": True,
         },
     )
     assert updated.status_code == 200
-    assert updated.json()["provider"] == "anthropic"
+    assert updated.json()["api_protocol"] == "anthropic_compatible"
     assert updated.json()["label"] == "anthropic-main-a"
 
     disabled = test_client.post("/api/admin/platform/server-credentials/1/disable")
@@ -801,7 +801,7 @@ def test_platform_admin_router_requires_authenticated_admin_session(client):
         "/api/admin/platform/server-credentials",
         json={
             "execution_profile_id": 1,
-            "provider": "openai",
+            "api_protocol": "openai_compatible",
             "auth_type": "api_key",
             "credential": "sk-denied",
             "label": "should-fail",
@@ -827,7 +827,7 @@ def test_platform_admin_router_rejects_invalid_server_credential_payload(client)
         "/api/admin/platform/server-credentials",
         json={
             "execution_profile_id": 1,
-            "provider": "openai",
+            "api_protocol": "openai_compatible",
             "auth_type": "ak_sk",
             "credential": "ak-live",
             "label": "missing-secret",
@@ -840,9 +840,9 @@ def test_platform_admin_router_rejects_invalid_server_credential_payload(client)
         "/api/admin/platform/server-credentials/999",
         json={
             "execution_profile_id": 1,
-            "provider": "openai",
+            "api_protocol": "openai_compatible",
             "auth_type": "api_key",
-            "base_url": "https://api.openai.com/v1",
+            "api_base_url": "https://api.openai.com/v1",
             "label": "missing",
             "priority": 1,
             "enabled": True,

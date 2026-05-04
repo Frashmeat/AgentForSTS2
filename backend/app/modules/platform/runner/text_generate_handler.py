@@ -51,7 +51,7 @@ class UpstreamTextGenerationError(RuntimeError):
             step_type=self.request.step_type,
             job_id=self.request.job_id,
             job_item_id=self.request.job_item_id,
-            provider=self.request.execution_binding.provider,
+            api_protocol=self.request.execution_binding.api_protocol,
             model=self.request.execution_binding.model,
             http_status=self.classification.http_status,
             provider_error_code=self.classification.provider_error_code,
@@ -76,15 +76,30 @@ def build_text_llm_config(binding: StepExecutionBinding) -> dict[str, object]:
     if not str(binding.credential).strip():
         raise ValueError("execution_binding.credential is required")
 
-    agent_backend = str(binding.agent_backend).strip() or "claude"
+    runner_type = str(binding.runner_type).strip() or "claude_cli"
+    if runner_type not in {"codex_cli", "claude_cli", "api"}:
+        raise ValueError("execution_binding.runner_type must be codex_cli, claude_cli or api")
+    api_protocol = str(binding.api_protocol).strip()
+    provider = _api_protocol_to_litellm_provider(api_protocol)
+    agent_backend = "codex" if runner_type == "codex_cli" else "claude"
     return {
-        "mode": "agent_cli" if agent_backend == "codex" else "claude_api",
+        "mode": "agent_cli" if runner_type in {"codex_cli", "claude_cli"} else "api",
         "agent_backend": agent_backend,
-        "provider": str(binding.provider).strip(),
+        "provider": provider,
         "model": str(binding.model).strip(),
         "api_key": str(binding.credential).strip(),
-        "base_url": str(binding.base_url).strip(),
+        "base_url": str(binding.api_base_url).strip(),
     }
+
+
+def _api_protocol_to_litellm_provider(api_protocol: str) -> str:
+    if api_protocol == "openai_compatible":
+        return "openai"
+    if api_protocol == "anthropic_compatible":
+        return "anthropic"
+    if api_protocol:
+        raise ValueError("execution_binding.api_protocol must be openai_compatible or anthropic_compatible")
+    return ""
 
 
 async def execute_text_generate_step(
@@ -103,14 +118,14 @@ async def execute_text_generate_step(
     llm_cfg = build_text_llm_config(request.execution_binding)
     runtime_surface = _resolve_runtime_surface(request)
     logger.info(
-        "platform text generation start job_id=%s job_item_id=%s step_id=%s provider=%s model=%s "
+        "platform text generation start job_id=%s job_item_id=%s step_id=%s api_protocol=%s model=%s "
         "base_url_configured=%s prompt_len=%d",
         request.job_id,
         request.job_item_id,
         request.step_id,
-        request.execution_binding.provider,
+        request.execution_binding.api_protocol,
         request.execution_binding.model,
-        bool(str(request.execution_binding.base_url).strip()),
+        bool(str(request.execution_binding.api_base_url).strip()),
         len(prompt),
     )
     try:
@@ -119,12 +134,12 @@ async def execute_text_generate_step(
         classification = classify_upstream_error(error)
         if classification.reason_code != "upstream_unclassified_error":
             logger.warning(
-                "platform text generation upstream failed job_id=%s job_item_id=%s step_id=%s provider=%s model=%s "
+                "platform text generation upstream failed job_id=%s job_item_id=%s step_id=%s api_protocol=%s model=%s "
                 "reason_code=%s upstream_category=%s retryable=%s http_status=%s provider_error_code=%s raw_error=%s",
                 request.job_id,
                 request.job_item_id,
                 request.step_id,
-                request.execution_binding.provider,
+                request.execution_binding.api_protocol,
                 request.execution_binding.model,
                 classification.reason_code,
                 classification.upstream_category,
@@ -139,27 +154,27 @@ async def execute_text_generate_step(
                 request=request,
             ) from error
         logger.exception(
-            "platform text generation failed job_id=%s job_item_id=%s step_id=%s provider=%s model=%s error=%s",
+            "platform text generation failed job_id=%s job_item_id=%s step_id=%s api_protocol=%s model=%s error=%s",
             request.job_id,
             request.job_item_id,
             request.step_id,
-            request.execution_binding.provider,
+            request.execution_binding.api_protocol,
             request.execution_binding.model,
             _short_text(error),
         )
         raise
     logger.info(
-        "platform text generation succeeded job_id=%s job_item_id=%s step_id=%s provider=%s model=%s output_len=%d",
+        "platform text generation succeeded job_id=%s job_item_id=%s step_id=%s api_protocol=%s model=%s output_len=%d",
         request.job_id,
         request.job_item_id,
         request.step_id,
-        request.execution_binding.provider,
+        request.execution_binding.api_protocol,
         request.execution_binding.model,
         len(output),
     )
     return {
         "text": output,
-        "provider": request.execution_binding.provider,
+        "api_protocol": request.execution_binding.api_protocol,
         "model": request.execution_binding.model,
     }
 

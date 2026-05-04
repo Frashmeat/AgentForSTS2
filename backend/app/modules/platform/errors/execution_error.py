@@ -30,7 +30,7 @@ class PlatformErrorEnvelope:
     job_id: int | None = None
     job_item_id: int | None = None
     execution_id: int | None = None
-    provider: str = ""
+    api_protocol: str = ""
     model: str = ""
     http_status: int | None = None
     provider_error_code: str = ""
@@ -51,7 +51,7 @@ class PlatformErrorEnvelope:
             "retryable": self.retryable,
             "step_id": self.step_id,
             "step_type": self.step_type,
-            "provider": self.provider,
+            "api_protocol": self.api_protocol,
             "model": self.model,
             "provider_error_code": self.provider_error_code,
             "log_hint": dict(self.log_hint),
@@ -92,7 +92,7 @@ class PlatformErrorEnvelope:
             job_id=job_id if job_id is not None else self.job_id,
             job_item_id=job_item_id if job_item_id is not None else self.job_item_id,
             execution_id=execution_id if execution_id is not None else self.execution_id,
-            provider=self.provider,
+            api_protocol=self.api_protocol,
             model=self.model,
             http_status=self.http_status,
             provider_error_code=self.provider_error_code,
@@ -133,7 +133,7 @@ def build_platform_error(
     job_id: int | None = None,
     job_item_id: int | None = None,
     execution_id: int | None = None,
-    provider: str = "",
+    api_protocol: str = "",
     model: str = "",
     http_status: int | None = None,
     provider_error_code: str = "",
@@ -159,7 +159,7 @@ def build_platform_error(
         job_id=job_id,
         job_item_id=job_item_id,
         execution_id=execution_id,
-        provider=provider,
+        api_protocol=api_protocol,
         model=model,
         http_status=http_status,
         provider_error_code=provider_error_code,
@@ -186,7 +186,7 @@ def platform_error_from_payload(payload: dict[str, object]) -> PlatformErrorEnve
         job_id=_optional_int(payload.get("job_id")),
         job_item_id=_optional_int(payload.get("job_item_id")),
         execution_id=_optional_int(payload.get("execution_id")),
-        provider=str(payload.get("provider") or ""),
+        api_protocol=str(payload.get("api_protocol") or ""),
         model=str(payload.get("model") or ""),
         http_status=_optional_int(payload.get("http_status")),
         provider_error_code=str(payload.get("provider_error_code") or ""),

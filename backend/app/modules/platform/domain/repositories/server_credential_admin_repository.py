@@ -11,11 +11,11 @@ from app.modules.platform.contracts import AdminServerCredentialHealthCheckView,
 class ServerCredentialAdminRecord:
     id: int
     execution_profile_id: int
-    provider: str
+    api_protocol: str
     auth_type: str
     credential_ciphertext: str
     secret_ciphertext: str | None
-    base_url: str
+    api_base_url: str
     label: str
     priority: int
     enabled: bool
@@ -31,11 +31,11 @@ class ServerCredentialAdminRepository(ABC):
         self,
         *,
         execution_profile_id: int,
-        provider: str,
+        api_protocol: str,
         auth_type: str,
         credential_ciphertext: str,
         secret_ciphertext: str | None,
-        base_url: str,
+        api_base_url: str,
         label: str,
         priority: int,
         enabled: bool,
@@ -52,11 +52,11 @@ class ServerCredentialAdminRepository(ABC):
         *,
         credential_id: int,
         execution_profile_id: int,
-        provider: str,
+        api_protocol: str,
         auth_type: str,
         credential_ciphertext: str,
         secret_ciphertext: str | None,
-        base_url: str,
+        api_base_url: str,
         label: str,
         priority: int,
         enabled: bool,
