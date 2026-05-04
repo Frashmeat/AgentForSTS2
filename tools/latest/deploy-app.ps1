@@ -531,11 +531,11 @@ function Write-LocalState {
 }
 
 function Invoke-DockerCompose {
-    param([hashtable]$AppConfig, [hashtable]$Layout, [string]$EnvFile, [string[]]$Args)
+    param([hashtable]$AppConfig, [hashtable]$Layout, [string]$EnvFile, [string[]]$ComposeArgs)
     $projectName = [string](Ensure-Hashtable -Value $AppConfig.docker).project_name
     Push-Location $Layout.Root
     try {
-        $dockerArgs = @("compose", "--project-name", $projectName, "--env-file", $EnvFile, "-f", $Layout.ComposeFile) + $Args
+        $dockerArgs = @("compose", "--project-name", $projectName, "--env-file", $EnvFile, "-f", $Layout.ComposeFile) + $ComposeArgs
         Write-Host ("Docker compose: docker {0}" -f ($dockerArgs -join " "))
         & docker @dockerArgs
         if ($LASTEXITCODE -ne 0) {
@@ -635,15 +635,15 @@ $logRoot = Join-Path $layout.ConfigRoot "logs"
 $processes = @()
 
 if ($ResetDatabase) {
-    Invoke-DockerCompose -AppConfig $appConfig -Layout $layout -EnvFile $paths.DockerEnv -Args @("down", "--volumes", "--remove-orphans")
+    Invoke-DockerCompose -AppConfig $appConfig -Layout $layout -EnvFile $paths.DockerEnv -ComposeArgs @("down", "--volumes", "--remove-orphans")
 }
 
 if ($RebuildImages) {
-    Invoke-DockerCompose -AppConfig $appConfig -Layout $layout -EnvFile $paths.DockerEnv -Args @("build", "--no-cache")
+    Invoke-DockerCompose -AppConfig $appConfig -Layout $layout -EnvFile $paths.DockerEnv -ComposeArgs @("build", "--no-cache")
 } elseif (-not $ReuseImages) {
-    Invoke-DockerCompose -AppConfig $appConfig -Layout $layout -EnvFile $paths.DockerEnv -Args @("build")
+    Invoke-DockerCompose -AppConfig $appConfig -Layout $layout -EnvFile $paths.DockerEnv -ComposeArgs @("build")
 }
-Invoke-DockerCompose -AppConfig $appConfig -Layout $layout -EnvFile $paths.DockerEnv -Args @("up", "-d", "--no-build")
+Invoke-DockerCompose -AppConfig $appConfig -Layout $layout -EnvFile $paths.DockerEnv -ComposeArgs @("up", "-d", "--no-build")
 Assert-DockerComposeServicesRunning -AppConfig $appConfig -Layout $layout -EnvFile $paths.DockerEnv
 
 Stop-ProcessListeningOnPort -Port $localWorkstationPort

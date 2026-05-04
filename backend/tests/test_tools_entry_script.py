@@ -247,6 +247,8 @@ def test_deploy_app_verifies_docker_web_stack_after_compose_up() -> None:
 
     assert "function Assert-DockerComposeServicesRunning" in source
     assert '$expectedServices = @("postgres", "web-workstation", "web")' in source
-    assert 'Invoke-DockerCompose -AppConfig $appConfig -Layout $layout -EnvFile $paths.DockerEnv -Args @("up", "-d", "--no-build")' in source
+    assert "[string[]]$ComposeArgs" in source
+    assert 'Invoke-DockerCompose -AppConfig $appConfig -Layout $layout -EnvFile $paths.DockerEnv -ComposeArgs @("up", "-d", "--no-build")' in source
+    assert "[string[]]$Args" not in source
     assert "Assert-DockerComposeServicesRunning -AppConfig $appConfig -Layout $layout -EnvFile $paths.DockerEnv" in source
     assert "Docker web 栈: postgres / web-workstation / web 已启动" in source
