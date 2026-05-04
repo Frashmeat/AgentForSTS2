@@ -1,4 +1,4 @@
-import { buildApiPath, buildBackendUrl, requestJson } from "./http.ts";
+import { buildApiPath, requestFormData, requestJson } from "./http.ts";
 
 export interface AdminExecutionListItem {
   id: number;
@@ -238,6 +238,11 @@ export interface AdminKnowledgePackItem {
   resource_md_count?: number;
   game_cs_count?: number;
   baselib_cs_count?: number;
+  required_resource_count?: number;
+  required_resource_total?: number;
+  missing_resource_files?: string[];
+  has_required_resources?: boolean;
+  has_baselib_file?: boolean;
   has_resources?: boolean;
   has_game?: boolean;
   has_baselib?: boolean;
@@ -483,15 +488,9 @@ export async function uploadAdminKnowledgePack(
     fileName || (typeof File !== "undefined" && file instanceof File ? file.name : "knowledge-pack.zip");
   formData.set("file", file, effectiveFileName);
   formData.set("label", label);
-  const response = await fetch(buildBackendUrl("/api/admin/platform/knowledge-packs", "web"), {
-    method: "POST",
-    credentials: "include",
-    body: formData,
+  return requestFormData<AdminKnowledgePackItem>("/api/admin/platform/knowledge-packs", formData, {
+    backend: "web",
   });
-  if (!response.ok) {
-    throw new Error(await response.text());
-  }
-  return response.json();
 }
 
 export function activateAdminKnowledgePack(packId: string): Promise<AdminKnowledgePackItem> {
@@ -502,6 +501,13 @@ export function activateAdminKnowledgePack(packId: string): Promise<AdminKnowled
       method: "POST",
     },
   );
+}
+
+export function deleteAdminKnowledgePack(packId: string): Promise<Record<string, unknown>> {
+  return requestJson<Record<string, unknown>>(`/api/admin/platform/knowledge-packs/${encodeURIComponent(packId)}`, {
+    backend: "web",
+    method: "DELETE",
+  });
 }
 
 export function rollbackAdminKnowledgePack(): Promise<Record<string, unknown>> {

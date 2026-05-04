@@ -14,6 +14,7 @@ import {
 } from "../../shared/api/index.ts";
 import { resolveErrorMessage } from "../../shared/error.ts";
 import { formatAdminProvider, formatAdminStatus } from "./adminDisplay.ts";
+import { useAdminLayoutContext } from "./AdminLayout.tsx";
 
 type ExecutionProfileFormState = {
   id: number | null;
@@ -54,17 +55,19 @@ function toForm(profile: AdminExecutionProfileListItem): ExecutionProfileFormSta
 }
 
 export function AdminExecutionProfilesPage() {
+  const { onStatusNotice, onConfirm } = useAdminLayoutContext();
   const [profiles, setProfiles] = useState<AdminExecutionProfileListItem[]>([]);
   const [credentials, setCredentials] = useState<AdminServerCredentialListItem[]>([]);
   const [form, setForm] = useState<ExecutionProfileFormState>(emptyForm);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
+
+  function showNotice(title: string, message: string, tone: "success" | "warning" | "error" = "success") {
+    onStatusNotice?.({ title, message, tone });
+  }
 
   async function loadData() {
     setLoading(true);
-    setError("");
     try {
       const [profileView, credentialView] = await Promise.all([
         listAdminExecutionProfiles(),
@@ -73,7 +76,7 @@ export function AdminExecutionProfilesPage() {
       setProfiles(profileView.items);
       setCredentials(credentialView.items);
     } catch (loadError) {
-      setError(resolveErrorMessage(loadError) || "读取执行配置失败");
+      showNotice("读取执行配置失败", resolveErrorMessage(loadError, "读取执行配置失败"), "error");
     } finally {
       setLoading(false);
     }
@@ -98,21 +101,15 @@ export function AdminExecutionProfilesPage() {
   }
 
   function startCreate() {
-    setMessage("");
-    setError("");
     setForm(emptyForm);
   }
 
   function startEdit(profile: AdminExecutionProfileListItem) {
-    setMessage("");
-    setError("");
     setForm(toForm(profile));
   }
 
   async function submitForm() {
     setSaving(true);
-    setError("");
-    setMessage("");
     try {
       const payload = {
         code: form.code,
@@ -126,15 +123,15 @@ export function AdminExecutionProfilesPage() {
       };
       if (form.id === null) {
         await createAdminExecutionProfile(payload);
-        setMessage("执行配置已新增。");
+        showNotice("执行配置已新增", "执行配置已新增。");
       } else {
         await updateAdminExecutionProfile(form.id, payload);
-        setMessage("执行配置已保存。");
+        showNotice("执行配置已保存", "执行配置已保存。");
       }
       await loadData();
       setForm(emptyForm);
     } catch (submitError) {
-      setError(resolveErrorMessage(submitError) || "执行配置保存失败");
+      showNotice("执行配置保存失败", resolveErrorMessage(submitError, "执行配置保存失败"), "error");
     } finally {
       setSaving(false);
     }
@@ -142,17 +139,33 @@ export function AdminExecutionProfilesPage() {
 
   async function runProfileAction(action: () => Promise<unknown>, successMessage: string) {
     setSaving(true);
-    setError("");
-    setMessage("");
     try {
       await action();
-      setMessage(successMessage);
+      showNotice("执行配置操作完成", successMessage);
       await loadData();
     } catch (actionError) {
-      setError(resolveErrorMessage(actionError) || "执行配置操作失败");
+      showNotice("执行配置操作失败", resolveErrorMessage(actionError, "执行配置操作失败"), "error");
     } finally {
       setSaving(false);
     }
+  }
+
+  function confirmDeleteProfile(profile: AdminExecutionProfileListItem) {
+    const action = () => {
+      void runProfileAction(() => deleteAdminExecutionProfile(profile.id), "执行配置已删除。");
+    };
+    if (!onConfirm) {
+      action();
+      return;
+    }
+    onConfirm({
+      title: "删除执行配置",
+      message: `确定删除执行配置“${profile.display_name}”吗？关联凭据和历史记录可能会影响后续管理排查。`,
+      confirmLabel: "删除",
+      cancelLabel: "取消",
+      tone: "warning",
+      onConfirm: action,
+    });
   }
 
   return (
@@ -174,17 +187,6 @@ export function AdminExecutionProfilesPage() {
           <span>{loading ? "刷新中" : "刷新配置"}</span>
         </button>
       </header>
-
-      {error ? (
-        <section className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          {error}
-        </section>
-      ) : null}
-      {message ? (
-        <section className="rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-          {message}
-        </section>
-      ) : null}
 
       <section className="grid items-start gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
         <div className="rounded-lg border border-white bg-white/85 p-4 shadow-sm">
@@ -386,9 +388,7 @@ export function AdminExecutionProfilesPage() {
                           )}
                           <button
                             type="button"
-                            onClick={() =>
-                              void runProfileAction(() => deleteAdminExecutionProfile(profile.id), "执行配置已删除。")
-                            }
+                            onClick={() => confirmDeleteProfile(profile)}
                             className="inline-flex items-center gap-1 rounded-lg border border-rose-100 px-2.5 py-1.5 text-xs text-rose-600 transition hover:border-rose-200 hover:bg-rose-50"
                             disabled={saving}
                           >

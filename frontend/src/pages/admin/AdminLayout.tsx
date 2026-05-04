@@ -11,13 +11,35 @@ import {
   UsersRound,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useOutletContext } from "react-router-dom";
+import type { StatusNoticeItem } from "../../components/StatusNotice.tsx";
 
 type AdminNavItem = {
   label: string;
   path: string;
   icon: LucideIcon;
 };
+
+export type AdminStatusNoticeHandler = (notice: Omit<StatusNoticeItem, "id">) => void;
+
+export interface AdminConfirmRequest {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  tone?: "default" | "warning";
+  onConfirm: () => void;
+}
+
+export interface AdminLayoutContext {
+  onStatusNotice?: AdminStatusNoticeHandler;
+  onConfirm?: (request: AdminConfirmRequest) => void;
+}
+
+interface AdminLayoutProps {
+  onStatusNotice?: AdminStatusNoticeHandler;
+  onConfirm?: (request: AdminConfirmRequest) => void;
+}
 
 const adminNavGroups: Array<{ label: string; items: AdminNavItem[] }> = [
   {
@@ -54,7 +76,11 @@ function adminLinkClass({ isActive }: { isActive: boolean }) {
   ].join(" ");
 }
 
-export function AdminLayout() {
+export function useAdminLayoutContext(): AdminLayoutContext {
+  return useOutletContext<AdminLayoutContext | undefined>() ?? {};
+}
+
+export function AdminLayout({ onStatusNotice, onConfirm }: AdminLayoutProps) {
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900">
       <div className="grid min-h-screen lg:grid-cols-[256px_1fr]">
@@ -87,7 +113,7 @@ export function AdminLayout() {
         </aside>
 
         <main className="min-w-0 px-4 py-5 sm:px-6 lg:px-8">
-          <Outlet />
+          <Outlet context={{ onStatusNotice, onConfirm } satisfies AdminLayoutContext} />
         </main>
       </div>
     </div>

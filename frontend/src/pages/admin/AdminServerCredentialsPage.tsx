@@ -14,6 +14,7 @@ import {
 } from "../../shared/api/index.ts";
 import { resolveErrorMessage } from "../../shared/error.ts";
 import { formatAdminAuthType, formatAdminProvider, formatAdminStatus } from "./adminDisplay.ts";
+import { useAdminLayoutContext } from "./AdminLayout.tsx";
 
 type CredentialFormState = {
   id: number | null;
@@ -65,16 +66,19 @@ function statusClass(status: string): string {
 }
 
 export function AdminServerCredentialsPage() {
+  const { onStatusNotice } = useAdminLayoutContext();
   const [profiles, setProfiles] = useState<AdminExecutionProfileListItem[]>([]);
   const [credentials, setCredentials] = useState<AdminServerCredentialListItem[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
   const [form, setForm] = useState<CredentialFormState>(emptyForm);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
 
   const profileById = useMemo(() => new Map(profiles.map((profile) => [profile.id, profile])), [profiles]);
+
+  function showNotice(title: string, message: string, tone: "success" | "error" = "success") {
+    onStatusNotice?.({ title, message, tone });
+  }
 
   function patchForm(patch: Partial<CredentialFormState>) {
     setForm((current) => ({ ...current, ...patch }));
@@ -82,7 +86,6 @@ export function AdminServerCredentialsPage() {
 
   async function loadData(profileId = selectedProfileId) {
     setLoading(true);
-    setError("");
     try {
       const [profileView, credentialView] = await Promise.all([
         listAdminExecutionProfiles(),
@@ -94,7 +97,7 @@ export function AdminServerCredentialsPage() {
         patchForm({ execution_profile_id: profileView.items[0].id });
       }
     } catch (loadError) {
-      setError(resolveErrorMessage(loadError) || "读取服务器凭据失败");
+      showNotice("读取服务器凭据失败", resolveErrorMessage(loadError, "读取服务器凭据失败"), "error");
     } finally {
       setLoading(false);
     }
@@ -107,8 +110,6 @@ export function AdminServerCredentialsPage() {
   }, []);
 
   function startCreate() {
-    setMessage("");
-    setError("");
     setForm({
       ...emptyForm,
       execution_profile_id: selectedProfileId ?? profiles[0]?.id ?? 0,
@@ -116,8 +117,6 @@ export function AdminServerCredentialsPage() {
   }
 
   function startEdit(credential: AdminServerCredentialListItem) {
-    setMessage("");
-    setError("");
     setForm({
       id: credential.id,
       execution_profile_id: credential.execution_profile_id,
@@ -134,8 +133,6 @@ export function AdminServerCredentialsPage() {
 
   async function submitForm() {
     setSaving(true);
-    setError("");
-    setMessage("");
     try {
       const payload = {
         execution_profile_id: Number(form.execution_profile_id),
@@ -150,10 +147,10 @@ export function AdminServerCredentialsPage() {
       };
       if (form.id === null) {
         await createAdminServerCredential(payload);
-        setMessage("服务器凭据已新增。");
+        showNotice("服务器凭据已新增", "服务器凭据已新增。");
       } else {
         await updateAdminServerCredential(form.id, payload);
-        setMessage("服务器凭据已保存。");
+        showNotice("服务器凭据已保存", "服务器凭据已保存。");
       }
       await loadData();
       setForm({
@@ -161,7 +158,7 @@ export function AdminServerCredentialsPage() {
         execution_profile_id: selectedProfileId ?? profiles[0]?.id ?? 0,
       });
     } catch (submitError) {
-      setError(resolveErrorMessage(submitError) || "服务器凭据保存失败");
+      showNotice("服务器凭据保存失败", resolveErrorMessage(submitError, "服务器凭据保存失败"), "error");
     } finally {
       setSaving(false);
     }
@@ -169,14 +166,12 @@ export function AdminServerCredentialsPage() {
 
   async function runCredentialAction(action: () => Promise<unknown>, successMessage: string) {
     setSaving(true);
-    setError("");
-    setMessage("");
     try {
       await action();
-      setMessage(successMessage);
+      showNotice("服务器凭据操作完成", successMessage);
       await loadData();
     } catch (actionError) {
-      setError(resolveErrorMessage(actionError) || "服务器凭据操作失败");
+      showNotice("服务器凭据操作失败", resolveErrorMessage(actionError, "服务器凭据操作失败"), "error");
     } finally {
       setSaving(false);
     }
@@ -199,17 +194,6 @@ export function AdminServerCredentialsPage() {
           <span>{loading ? "刷新中" : "刷新凭据"}</span>
         </button>
       </header>
-
-      {error ? (
-        <section className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          {error}
-        </section>
-      ) : null}
-      {message ? (
-        <section className="rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-          {message}
-        </section>
-      ) : null}
 
       <section className="grid items-start gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
         <div className="rounded-lg border border-white bg-white/85 p-4 shadow-sm">

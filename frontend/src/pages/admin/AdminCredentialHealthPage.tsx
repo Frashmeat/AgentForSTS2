@@ -10,6 +10,7 @@ import {
 } from "../../shared/api/index.ts";
 import { resolveErrorMessage } from "../../shared/error.ts";
 import { formatAdminProvider, formatAdminStatus } from "./adminDisplay.ts";
+import { useAdminLayoutContext } from "./AdminLayout.tsx";
 
 function formatTime(value?: string | null): string {
   const text = String(value ?? "").trim();
@@ -35,18 +36,20 @@ function statusClass(status: string): string {
 }
 
 export function AdminCredentialHealthPage() {
+  const { onStatusNotice } = useAdminLayoutContext();
   const [profiles, setProfiles] = useState<AdminExecutionProfileListItem[]>([]);
   const [credentials, setCredentials] = useState<AdminServerCredentialListItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
 
   const profileById = useMemo(() => new Map(profiles.map((profile) => [profile.id, profile])), [profiles]);
 
+  function showNotice(title: string, message: string, tone: "success" | "error" = "success") {
+    onStatusNotice?.({ title, message, tone });
+  }
+
   async function loadData() {
     setLoading(true);
-    setError("");
     try {
       const [profileView, credentialView] = await Promise.all([
         listAdminExecutionProfiles(),
@@ -55,7 +58,7 @@ export function AdminCredentialHealthPage() {
       setProfiles(profileView.items);
       setCredentials(credentialView.items);
     } catch (loadError) {
-      setError(resolveErrorMessage(loadError) || "读取健康检查数据失败");
+      showNotice("读取健康检查数据失败", resolveErrorMessage(loadError, "读取健康检查数据失败"), "error");
     } finally {
       setLoading(false);
     }
@@ -63,14 +66,12 @@ export function AdminCredentialHealthPage() {
 
   async function runHealthCheck(credentialId: number) {
     setSaving(true);
-    setMessage("");
-    setError("");
     try {
       await runAdminServerCredentialHealthCheck(credentialId);
-      setMessage("健康检查已完成。");
+      showNotice("健康检查已完成", "服务器凭据健康检查已完成。");
       await loadData();
     } catch (checkError) {
-      setError(resolveErrorMessage(checkError) || "健康检查失败");
+      showNotice("健康检查失败", resolveErrorMessage(checkError, "健康检查失败"), "error");
     } finally {
       setSaving(false);
     }
@@ -108,17 +109,6 @@ export function AdminCredentialHealthPage() {
           <span>{loading ? "刷新中" : "刷新"}</span>
         </button>
       </header>
-
-      {error ? (
-        <section className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          {error}
-        </section>
-      ) : null}
-      {message ? (
-        <section className="rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-          {message}
-        </section>
-      ) : null}
 
       <section className="grid gap-3 md:grid-cols-6">
         {[

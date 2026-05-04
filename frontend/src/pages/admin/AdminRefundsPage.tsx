@@ -4,6 +4,7 @@ import { ReceiptText, Search } from "lucide-react";
 import { listAdminQuotaRefunds, type AdminQuotaRefundItem } from "../../shared/api/index.ts";
 import { resolveErrorMessage } from "../../shared/error.ts";
 import { formatAdminRefundReason, formatAdminStatus } from "./adminDisplay.ts";
+import { useAdminLayoutContext } from "./AdminLayout.tsx";
 
 function formatTime(value?: string | null): string {
   const text = String(value ?? "").trim();
@@ -15,23 +16,26 @@ function formatTime(value?: string | null): string {
 }
 
 export function AdminRefundsPage() {
+  const { onStatusNotice } = useAdminLayoutContext();
   const [userId, setUserId] = useState("");
   const [refunds, setRefunds] = useState<AdminQuotaRefundItem[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+
+  function showNotice(title: string, message: string, tone: "warning" | "error" = "error") {
+    onStatusNotice?.({ title, message, tone });
+  }
 
   async function loadRefunds() {
     const normalizedUserId = userId.trim() ? Number(userId) : undefined;
     if (userId.trim() && !normalizedUserId) {
-      setError("请输入有效的用户编号。");
+      showNotice("用户编号无效", "请输入有效的用户编号。", "warning");
       return;
     }
     setLoading(true);
-    setError("");
     try {
       setRefunds(await listAdminQuotaRefunds(normalizedUserId));
     } catch (loadError) {
-      setError(resolveErrorMessage(loadError) || "读取退款记录失败");
+      showNotice("读取退款记录失败", resolveErrorMessage(loadError, "读取退款记录失败"));
     } finally {
       setLoading(false);
     }
@@ -46,12 +50,6 @@ export function AdminRefundsPage() {
         </div>
         <ReceiptText className="text-violet-700" size={22} />
       </header>
-
-      {error ? (
-        <section className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          {error}
-        </section>
-      ) : null}
 
       <section className="rounded-lg border border-white bg-white/85 p-4 shadow-sm">
         <div className="flex flex-wrap gap-2">

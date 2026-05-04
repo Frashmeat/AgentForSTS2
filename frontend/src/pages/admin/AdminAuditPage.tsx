@@ -5,6 +5,7 @@ import { listAdminAuditEvents, type AdminAuditEvent } from "../../shared/api/ind
 import { resolveErrorMessage } from "../../shared/error.ts";
 import { useSession } from "../../shared/session/hooks.ts";
 import { formatAdminEventType } from "./adminDisplay.ts";
+import { useAdminLayoutContext } from "./AdminLayout.tsx";
 
 const DEFAULT_AUDIT_LIMIT = 50;
 
@@ -30,17 +31,20 @@ function toFriendlyAuditError(error: unknown): string {
 
 export function AdminAuditPage() {
   const { isAuthenticated, isLoading, refreshSession } = useSession();
+  const { onStatusNotice } = useAdminLayoutContext();
   const [events, setEvents] = useState<AdminAuditEvent[]>([]);
   const [filterMode, setFilterMode] = useState<"all" | "queue_worker">("queue_worker");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+
+  function showError(message: string) {
+    onStatusNotice?.({ title: "读取审计事件失败", message, tone: "error" });
+  }
 
   async function loadEvents() {
     if (!isAuthenticated) {
       return;
     }
     setLoading(true);
-    setError("");
     try {
       const result = await listAdminAuditEvents(
         undefined,
@@ -56,7 +60,7 @@ export function AdminAuditPage() {
       if (message.includes("重新登录")) {
         void refreshSession();
       }
-      setError(message);
+      showError(message);
     } finally {
       setLoading(false);
     }
@@ -113,12 +117,6 @@ export function AdminAuditPage() {
           <span>{loading ? "刷新中" : "刷新事件"}</span>
         </button>
       </header>
-
-      {error ? (
-        <section className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          {error}
-        </section>
-      ) : null}
 
       <section className="rounded-lg border border-white bg-white/85 p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">

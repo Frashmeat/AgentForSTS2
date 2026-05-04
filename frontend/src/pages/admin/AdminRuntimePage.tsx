@@ -12,6 +12,7 @@ import {
 } from "../../shared/api/index.ts";
 import { resolveErrorMessage } from "../../shared/error.ts";
 import { formatAdminEventType } from "./adminDisplay.ts";
+import { useAdminLayoutContext } from "./AdminLayout.tsx";
 
 function formatTime(value?: string | null): string {
   const text = String(value ?? "").trim();
@@ -133,19 +134,22 @@ function formatBytes(value?: number): string {
 }
 
 function WorkstationRuntimeLogPanel() {
+  const { onStatusNotice } = useAdminLayoutContext();
   const [stream, setStream] = useState<RuntimeLogStream>("stderr");
   const [log, setLog] = useState<AdminWorkstationRuntimeLogTail | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
 
   async function loadLog(nextStream = stream) {
     setLoading(true);
-    setError("");
     try {
       setLog(await getAdminWorkstationRuntimeLogs(nextStream));
     } catch (reason) {
       setLog(null);
-      setError(resolveErrorMessage(reason) || "读取 Web Workstation 日志失败");
+      onStatusNotice?.({
+        title: "读取 Web Workstation 日志失败",
+        message: resolveErrorMessage(reason, "读取 Web Workstation 日志失败"),
+        tone: "error",
+      });
     } finally {
       setLoading(false);
     }
@@ -201,10 +205,6 @@ function WorkstationRuntimeLogPanel() {
         </div>
       </div>
 
-      {error ? (
-        <div className="mt-3 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>
-      ) : null}
-
       {log ? (
         <div className="mt-3 grid gap-2 text-xs text-slate-500 sm:grid-cols-3">
           <span className="break-all">路径：{log.path || "未记录"}</span>
@@ -221,14 +221,13 @@ function WorkstationRuntimeLogPanel() {
 }
 
 export function AdminRuntimePage() {
+  const { onStatusNotice } = useAdminLayoutContext();
   const [status, setStatus] = useState<PlatformQueueWorkerStatus | null>(null);
   const [workstationStatus, setWorkstationStatus] = useState<AdminWorkstationRuntimeStatus | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
 
   async function loadStatus() {
     setLoading(true);
-    setError("");
     const [queueResult, workstationResult] = await Promise.allSettled([
       loadPlatformQueueWorkerStatus(),
       getAdminWorkstationRuntimeStatus(),
@@ -238,16 +237,22 @@ export function AdminRuntimePage() {
       setStatus(queueResult.value);
     } else {
       setStatus(null);
-      setError(resolveErrorMessage(queueResult.reason) || "读取队列运行状态失败");
+      onStatusNotice?.({
+        title: "读取队列运行状态失败",
+        message: resolveErrorMessage(queueResult.reason, "读取队列运行状态失败"),
+        tone: "error",
+      });
     }
 
     if (workstationResult.status === "fulfilled") {
       setWorkstationStatus(workstationResult.value);
     } else {
       setWorkstationStatus(null);
-      setError(
-        (previous) => previous || resolveErrorMessage(workstationResult.reason) || "读取 Workstation 运行状态失败",
-      );
+      onStatusNotice?.({
+        title: "读取 Workstation 运行状态失败",
+        message: resolveErrorMessage(workstationResult.reason, "读取 Workstation 运行状态失败"),
+        tone: "error",
+      });
     }
 
     setLoading(false);
@@ -276,12 +281,6 @@ export function AdminRuntimePage() {
           <span>{loading ? "刷新中" : "刷新状态"}</span>
         </button>
       </header>
-
-      {error ? (
-        <section className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          {error}
-        </section>
-      ) : null}
 
       {!status?.available ? (
         <section className="rounded-lg border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-700">

@@ -58,6 +58,9 @@ export function resolveErrorMessage(error: unknown, fallback = DEFAULT_ERROR_MES
   }
 
   if (typeof error === "string") {
+    if (/failed to fetch|load failed|networkerror/i.test(error.trim())) {
+      return "网络请求失败，请确认后端服务已启动且前端运行时地址配置正确。";
+    }
     const parsed = maybeParseJsonString(error);
     if (parsed !== null) {
       return resolveErrorMessage(parsed, fallback);

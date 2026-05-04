@@ -21,7 +21,7 @@ import { AdminAuditPage } from "./pages/admin/AdminAuditPage.tsx";
 import { AdminExecutionsPage } from "./pages/admin/AdminExecutionsPage.tsx";
 import { AdminExecutionProfilesPage } from "./pages/admin/AdminExecutionProfilesPage.tsx";
 import { AdminKnowledgePacksPage } from "./pages/admin/AdminKnowledgePacksPage.tsx";
-import { AdminLayout } from "./pages/admin/AdminLayout.tsx";
+import { AdminLayout, type AdminConfirmRequest } from "./pages/admin/AdminLayout.tsx";
 import { AdminOverviewPage } from "./pages/admin/AdminOverviewPage.tsx";
 import { AdminRefundsPage } from "./pages/admin/AdminRefundsPage.tsx";
 import { AdminRuntimePage } from "./pages/admin/AdminRuntimePage.tsx";
@@ -69,6 +69,7 @@ export default function App() {
   const activeTab: AppTab = resolveWorkspaceTab(searchParams.get("tab"));
   const [knowledgeGuideOpen, setKnowledgeGuideOpen] = useState(false);
   const [statusNotices, setStatusNotices] = useState<StatusNoticeItem[]>([]);
+  const [adminConfirmRequest, setAdminConfirmRequest] = useState<AdminConfirmRequest | null>(null);
   const showStatusNotice = useCallback((notice: Omit<StatusNoticeItem, "id">) => {
     const id = `app-notice-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     setStatusNotices((previous) => [...previous.slice(-2), { ...notice, id }]);
@@ -241,7 +242,10 @@ export default function App() {
           path="/admin"
           element={
             isAuthAvailable ? (
-              <AdminLayout />
+              <AdminLayout
+                onStatusNotice={showStatusNotice}
+                onConfirm={(request) => setAdminConfirmRequest(request)}
+              />
             ) : (
               buildPlatformAuthUnavailableElement(
                 "当前环境未启用管理台",
@@ -279,6 +283,20 @@ export default function App() {
         tone="warning"
         onConfirm={confirmStartExecution}
         onCancel={cancelStartExecution}
+      />
+      <ConfirmDialog
+        open={adminConfirmRequest !== null}
+        title={adminConfirmRequest?.title ?? ""}
+        message={adminConfirmRequest?.message ?? ""}
+        confirmLabel={adminConfirmRequest?.confirmLabel}
+        cancelLabel={adminConfirmRequest?.cancelLabel}
+        tone={adminConfirmRequest?.tone}
+        onConfirm={() => {
+          const request = adminConfirmRequest;
+          setAdminConfirmRequest(null);
+          request?.onConfirm();
+        }}
+        onCancel={() => setAdminConfirmRequest(null)}
       />
       <ExecutionModeDialog
         open={pendingExecution !== null}

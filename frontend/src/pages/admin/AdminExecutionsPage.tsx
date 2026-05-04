@@ -9,6 +9,7 @@ import {
 } from "../../shared/api/index.ts";
 import { resolveErrorMessage } from "../../shared/error.ts";
 import { formatAdminProvider, formatAdminStatus } from "./adminDisplay.ts";
+import { useAdminLayoutContext } from "./AdminLayout.tsx";
 
 function detailRows(execution: AdminExecutionDetail) {
   return [
@@ -42,25 +43,28 @@ function statusClass(status: string): string {
 }
 
 export function AdminExecutionsPage() {
+  const { onStatusNotice } = useAdminLayoutContext();
   const [jobId, setJobId] = useState("");
   const [executions, setExecutions] = useState<AdminExecutionListItem[]>([]);
   const [selectedExecution, setSelectedExecution] = useState<AdminExecutionDetail | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+
+  function showNotice(title: string, message: string, tone: "warning" | "error" = "error") {
+    onStatusNotice?.({ title, message, tone });
+  }
 
   async function loadExecutions() {
     const numericJobId = Number(jobId);
     if (!numericJobId) {
-      setError("请先输入有效的任务编号。");
+      showNotice("任务编号无效", "请先输入有效的任务编号。", "warning");
       return;
     }
     setLoading(true);
-    setError("");
     setSelectedExecution(null);
     try {
       setExecutions(await listAdminJobExecutions(numericJobId));
     } catch (loadError) {
-      setError(resolveErrorMessage(loadError) || "读取执行记录失败");
+      showNotice("读取执行记录失败", resolveErrorMessage(loadError, "读取执行记录失败"));
     } finally {
       setLoading(false);
     }
@@ -68,11 +72,10 @@ export function AdminExecutionsPage() {
 
   async function loadExecutionDetail(executionId: number) {
     setLoading(true);
-    setError("");
     try {
       setSelectedExecution(await getAdminExecution(executionId));
     } catch (loadError) {
-      setError(resolveErrorMessage(loadError) || "读取执行详情失败");
+      showNotice("读取执行详情失败", resolveErrorMessage(loadError, "读取执行详情失败"));
     } finally {
       setLoading(false);
     }
@@ -87,12 +90,6 @@ export function AdminExecutionsPage() {
         </div>
         <FileSearch className="text-violet-700" size={22} />
       </header>
-
-      {error ? (
-        <section className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          {error}
-        </section>
-      ) : null}
 
       <section className="rounded-lg border border-white bg-white/85 p-4 shadow-sm">
         <div className="flex flex-wrap gap-2">

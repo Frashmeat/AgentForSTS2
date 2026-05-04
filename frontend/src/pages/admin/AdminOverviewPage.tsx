@@ -13,6 +13,7 @@ import {
 } from "../../shared/api/index.ts";
 import { resolveErrorMessage } from "../../shared/error.ts";
 import { useSession } from "../../shared/session/hooks.ts";
+import { useAdminLayoutContext } from "./AdminLayout.tsx";
 
 type OverviewState = {
   profiles: AdminExecutionProfileListItem[];
@@ -44,16 +45,15 @@ function metricClass(tone: "violet" | "emerald" | "amber" | "rose") {
 
 export function AdminOverviewPage() {
   const { isAuthenticated, isLoading, refreshSession } = useSession();
+  const { onStatusNotice } = useAdminLayoutContext();
   const [overview, setOverview] = useState<OverviewState>(emptyOverview);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
 
   async function loadOverview() {
     if (!isAuthenticated) {
       return;
     }
     setLoading(true);
-    setError("");
     try {
       const [profileView, credentialView, auditEvents, refunds] = await Promise.all([
         listAdminExecutionProfiles(),
@@ -72,7 +72,11 @@ export function AdminOverviewPage() {
       if (message.includes("authentication required")) {
         void refreshSession();
       }
-      setError(message || "读取管理台概览失败");
+      onStatusNotice?.({
+        title: "读取管理台概览失败",
+        message: message || "读取管理台概览失败",
+        tone: "error",
+      });
     } finally {
       setLoading(false);
     }
@@ -130,12 +134,6 @@ export function AdminOverviewPage() {
           <span>{loading ? "刷新中" : "刷新"}</span>
         </button>
       </header>
-
-      {error ? (
-        <section className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          {error}
-        </section>
-      ) : null}
 
       <section className="grid gap-3 md:grid-cols-4">
         <div className={metricClass("violet")}>

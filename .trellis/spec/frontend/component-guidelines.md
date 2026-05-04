@@ -24,7 +24,12 @@ Questions to answer:
 
 <!-- Standard structure of a component file -->
 
-(To be filled by the team)
+管理端页面的成功、失败、警告提示统一通过 `frontend/src/pages/admin/AdminLayout.tsx` 注入的 `useAdminLayoutContext()` 触发：
+
+- `onStatusNotice` 是管理端通知的唯一入口，对应应用根部的 `StatusNoticeStack`。
+- `onConfirm` 是管理端二次确认的唯一入口，对应应用根部的 `ConfirmDialog`。
+- 管理端页面不要再维护一次性 `error/message` 状态条，也不要直接调用 `window.confirm`。
+- 页面内的业务状态展示可以保留，例如健康状态徽标、不可用原因提示、接口返回的最后错误字段；这些是数据展示，不是操作通知。
 
 ---
 

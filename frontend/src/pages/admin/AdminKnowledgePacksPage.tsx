@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { ArchiveRestore, CheckCircle2, CloudUpload, FileText, RefreshCcw, Upload } from "lucide-react";
+import { ArchiveRestore, CheckCircle2, CloudUpload, FileText, RefreshCcw, Trash2, Upload } from "lucide-react";
 
 import {
   activateAdminKnowledgePack,
+  deleteAdminKnowledgePack,
   exportCurrentKnowledgePack,
   listAdminKnowledgePacks,
   rollbackAdminKnowledgePack,
@@ -11,6 +12,7 @@ import {
   type AdminKnowledgePackListView,
 } from "../../shared/api/index.ts";
 import { resolveErrorMessage } from "../../shared/error.ts";
+import { useAdminLayoutContext } from "./AdminLayout.tsx";
 
 function formatEnabled(value?: boolean): string {
   return value ? "有" : "无";
@@ -60,6 +62,9 @@ function PackSourceStats({ pack }: { pack?: AdminKnowledgePackItem | null }) {
   }
   const gameCsCount = pack.game_cs_count;
   const hasKnownMissingGameSource = typeof gameCsCount === "number" && gameCsCount === 0;
+  const missingResourceFiles = Array.isArray(pack.missing_resource_files) ? pack.missing_resource_files : [];
+  const hasKnownMissingBaselib = pack.has_baselib_file === false || pack.has_baselib === false;
+  const hasKnownMissingRequiredResources = pack.has_required_resources === false || missingResourceFiles.length > 0;
 
   return (
     <div className="space-y-1 text-xs text-slate-500">
@@ -67,8 +72,21 @@ function PackSourceStats({ pack }: { pack?: AdminKnowledgePackItem | null }) {
         源码统计：resources md {formatStat(pack.resource_md_count)} / game cs {formatStat(pack.game_cs_count)} / baselib
         cs {formatStat(pack.baselib_cs_count)}
       </p>
+      {typeof pack.required_resource_count === "number" && typeof pack.required_resource_total === "number" ? (
+        <p>
+          必需文档：{pack.required_resource_count}/{pack.required_resource_total}
+        </p>
+      ) : null}
       {hasKnownMissingGameSource ? (
-        <p className="text-amber-700">缺少游戏反编译源码，请在工作站更新知识库后重新上传。</p>
+        <p className="text-amber-700">缺少完整游戏反编译源码，服务器会拒绝上传或激活此类知识库包。</p>
+      ) : null}
+      {hasKnownMissingBaselib ? (
+        <p className="text-amber-700">缺少 BaseLib 反编译源码：baselib/BaseLib.decompiled.cs。</p>
+      ) : null}
+      {hasKnownMissingRequiredResources ? (
+        <p className="break-all text-amber-700">
+          缺少必需资源文档{missingResourceFiles.length > 0 ? `：${missingResourceFiles.join("，")}` : "。"}
+        </p>
       ) : null}
     </div>
   );
@@ -104,6 +122,11 @@ function PackFileList({ pack, compact = false }: { pack?: AdminKnowledgePackItem
   );
 }
 
+function isIncompleteKnowledgePackError(error: unknown): boolean {
+  const message = resolveErrorMessage(error, "");
+  return message.includes("知识库包不完整") || message.includes("知识库包缺少");
+}
+
 function ActivePackSummary({ view }: { view: AdminKnowledgePackListView | null }) {
   const activePack = view?.active_pack;
   return (
@@ -119,38 +142,48 @@ function ActivePackSummary({ view }: { view: AdminKnowledgePackListView | null }
             <p className="mt-1 break-all text-xs text-slate-500">{activePack.pack_id}</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <PackCapabilityBadge label="resources" value={activePack.has_resources} />
+            <PackCapabilityBadge label="resources" value={activePack.has_required_resources ?? activePack.has_resources} />
             <PackCapabilityBadge label="game" value={activePack.has_game} />
-            <PackCapabilityBadge label="baselib" value={activePack.has_baselib} />
+            <PackCapabilityBadge label="baselib" value={activePack.has_baselib_file ?? activePack.has_baselib} />
           </div>
           <p className="text-xs text-slate-500">文件数：{formatFileCount(activePack)}</p>
           <PackSourceStats pack={activePack} />
           <PackFileList pack={activePack} />
         </div>
       ) : (
-        <p className="mt-4 text-sm text-slate-500">当前未激活知识库包，运行时会回退到 runtime/内置知识库。</p>
+        <p className="mt-4 text-sm text-slate-500">当前 Web runtime 没有激活完整知识库包。</p>
       )}
     </section>
   );
 }
 
 export function AdminKnowledgePacksPage() {
+  const { onStatusNotice, onConfirm } = useAdminLayoutContext();
   const [view, setView] = useState<AdminKnowledgePackListView | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [label, setLabel] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
   const [activateAfterLocalUpload, setActivateAfterLocalUpload] = useState(false);
+
+  function showNotice(title: string, message: string, tone: "info" | "success" | "warning" | "error" = "info") {
+    onStatusNotice?.({ title, message, tone });
+  }
+
+  function resolveKnowledgePackError(error: unknown, fallback: string): string {
+    const message = resolveErrorMessage(error, fallback);
+    if (isIncompleteKnowledgePackError(error)) {
+      return `${message} 请先在本机 Workstation 设置页执行“更新知识库”，确认 runtime/knowledge 同时包含 game/**/*.cs、baselib/BaseLib.decompiled.cs 和 resources/sts2/*.md 后再上传。`;
+    }
+    return message;
+  }
 
   async function loadData() {
     setLoading(true);
-    setError("");
     try {
       setView(await listAdminKnowledgePacks());
     } catch (loadError) {
-      setError(resolveErrorMessage(loadError) || "读取知识库包失败");
+      showNotice("读取知识库包失败", resolveErrorMessage(loadError, "读取知识库包失败"), "error");
     } finally {
       setLoading(false);
     }
@@ -162,20 +195,18 @@ export function AdminKnowledgePacksPage() {
 
   async function submitUpload() {
     if (file === null) {
-      setError("请选择知识库 zip 包。");
+      showNotice("请选择文件", "请选择要上传的知识库 zip 包。", "warning");
       return;
     }
     setSaving(true);
-    setError("");
-    setMessage("");
     try {
       await uploadAdminKnowledgePack(file, label.trim());
-      setMessage("知识库包已上传。");
+      showNotice("知识库包已上传", "服务器已收到知识库包，请在列表中确认完整性后激活。", "success");
       setFile(null);
       setLabel("");
       await loadData();
     } catch (uploadError) {
-      setError(resolveErrorMessage(uploadError) || "上传知识库包失败");
+      showNotice("上传知识库包失败", resolveKnowledgePackError(uploadError, "上传知识库包失败"), "error");
     } finally {
       setSaving(false);
     }
@@ -183,8 +214,6 @@ export function AdminKnowledgePacksPage() {
 
   async function uploadFromLocalWorkstation() {
     setSaving(true);
-    setError("");
-    setMessage("");
     try {
       const exported = await exportCurrentKnowledgePack();
       const displayLabel = label.trim() || `本机知识库 ${new Date().toLocaleString("zh-CN", { hour12: false })}`;
@@ -192,11 +221,21 @@ export function AdminKnowledgePacksPage() {
       if (activateAfterLocalUpload) {
         await activateAdminKnowledgePack(pack.pack_id);
       }
-      setMessage(activateAfterLocalUpload ? "本机工作站知识库已上传并激活。" : "本机工作站知识库已上传。");
+      showNotice(
+        activateAfterLocalUpload ? "本机知识库已上传并激活" : "本机知识库已上传",
+        activateAfterLocalUpload
+          ? "服务器已使用刚上传的知识库包作为当前激活包。"
+          : "服务器已保存本机工作站导出的知识库包。",
+        "success",
+      );
       setLabel("");
       await loadData();
     } catch (uploadError) {
-      setError(resolveErrorMessage(uploadError) || "从本机工作站上传知识库失败");
+      showNotice(
+        "从本机工作站上传失败",
+        resolveKnowledgePackError(uploadError, "从本机工作站上传知识库失败"),
+        "error",
+      );
     } finally {
       setSaving(false);
     }
@@ -204,17 +243,36 @@ export function AdminKnowledgePacksPage() {
 
   async function runAction(action: () => Promise<unknown>, successMessage: string) {
     setSaving(true);
-    setError("");
-    setMessage("");
     try {
       await action();
-      setMessage(successMessage);
+      showNotice("知识库包操作完成", successMessage, "success");
       await loadData();
     } catch (actionError) {
-      setError(resolveErrorMessage(actionError) || "知识库包操作失败");
+      showNotice("知识库包操作失败", resolveErrorMessage(actionError, "知识库包操作失败"), "error");
     } finally {
       setSaving(false);
     }
+  }
+
+  async function deletePack(pack: AdminKnowledgePackItem) {
+    const labelText = pack.label || pack.pack_id;
+    const message = `确定删除知识库包“${labelText}”吗？${
+      pack.active ? " 当前激活包删除后会自动回退或清空激活状态。" : ""
+    }`;
+    if (!onConfirm) {
+      await runAction(() => deleteAdminKnowledgePack(pack.pack_id), "知识库包已删除。");
+      return;
+    }
+    onConfirm({
+      title: "删除知识库包",
+      message,
+      confirmLabel: "删除",
+      cancelLabel: "取消",
+      tone: "warning",
+      onConfirm: () => {
+        void runAction(() => deleteAdminKnowledgePack(pack.pack_id), "知识库包已删除。");
+      },
+    });
   }
 
   const items: AdminKnowledgePackItem[] = view?.items ?? [];
@@ -236,17 +294,6 @@ export function AdminKnowledgePacksPage() {
           <span>{loading ? "刷新中" : "刷新知识库"}</span>
         </button>
       </header>
-
-      {error ? (
-        <section className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          {error}
-        </section>
-      ) : null}
-      {message ? (
-        <section className="rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-          {message}
-        </section>
-      ) : null}
 
       <section className="grid gap-4 xl:grid-cols-[0.85fr_1.15fr]">
         <div className="space-y-4">
@@ -306,7 +353,8 @@ export function AdminKnowledgePacksPage() {
                 </button>
               </div>
               <p className="text-xs leading-5 text-slate-500">
-                本机上传会先连接管理员电脑上的 Workstation，导出当前 runtime/knowledge，再上传到服务器。
+                本机上传会先连接管理员电脑上的 Workstation，导出当前 runtime/knowledge，再上传到服务器；导出包必须包含完整
+                game/**/*.cs、baselib/BaseLib.decompiled.cs 和 resources/sts2/*.md，请先在 Workstation 更新并补齐知识库。
               </p>
             </div>
           </section>
@@ -352,9 +400,9 @@ export function AdminKnowledgePacksPage() {
                       </td>
                       <td className="px-3 py-2">
                         <div className="flex flex-wrap gap-1">
-                          <PackCapabilityBadge label="resources" value={pack.has_resources} />
+                          <PackCapabilityBadge label="resources" value={pack.has_required_resources ?? pack.has_resources} />
                           <PackCapabilityBadge label="game" value={pack.has_game} />
-                          <PackCapabilityBadge label="baselib" value={pack.has_baselib} />
+                          <PackCapabilityBadge label="baselib" value={pack.has_baselib_file ?? pack.has_baselib} />
                         </div>
                       </td>
                       <td className="px-3 py-2 text-slate-600">
@@ -375,6 +423,15 @@ export function AdminKnowledgePacksPage() {
                           className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 transition hover:border-violet-200 hover:text-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           激活
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void deletePack(pack)}
+                          disabled={saving}
+                          className="ml-2 inline-flex items-center gap-1 rounded-lg border border-rose-200 px-3 py-1.5 text-xs text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Trash2 size={13} />
+                          删除
                         </button>
                       </td>
                     </tr>

@@ -11,6 +11,7 @@ import {
   type AdminUserListItem,
 } from "../../shared/api/index.ts";
 import { resolveErrorMessage } from "../../shared/error.ts";
+import { useAdminLayoutContext } from "./AdminLayout.tsx";
 
 function formatTime(value?: string | null): string {
   const text = String(value ?? "").trim();
@@ -54,6 +55,7 @@ function quotaRows(user: AdminUserDetail) {
 }
 
 export function AdminUsersPage() {
+  const { onStatusNotice } = useAdminLayoutContext();
   const [query, setQuery] = useState("");
   const [anomaly, setAnomaly] = useState("");
   const [users, setUsers] = useState<AdminUserListItem[]>([]);
@@ -64,11 +66,13 @@ export function AdminUsersPage() {
   const [reason, setReason] = useState("");
   const [loading, setLoading] = useState(false);
   const [adjusting, setAdjusting] = useState(false);
-  const [error, setError] = useState("");
+
+  function showNotice(title: string, message: string, tone: "success" | "warning" | "error" = "error") {
+    onStatusNotice?.({ title, message, tone });
+  }
 
   async function loadUsers() {
     setLoading(true);
-    setError("");
     try {
       const view = await listAdminUsers({ query: query.trim() || undefined, anomaly: anomaly || undefined, limit: 50 });
       setUsers(view.items);
@@ -76,7 +80,7 @@ export function AdminUsersPage() {
         await selectUser(view.items[0].user_id);
       }
     } catch (loadError) {
-      setError(resolveErrorMessage(loadError) || "读取用户列表失败");
+      showNotice("读取用户列表失败", resolveErrorMessage(loadError, "读取用户列表失败"));
     } finally {
       setLoading(false);
     }
@@ -84,7 +88,6 @@ export function AdminUsersPage() {
 
   async function selectUser(userId: number) {
     setLoading(true);
-    setError("");
     try {
       const [detail, ledgerView] = await Promise.all([
         getAdminUser(userId),
@@ -93,7 +96,7 @@ export function AdminUsersPage() {
       setSelectedUser(detail);
       setLedger(ledgerView.items);
     } catch (loadError) {
-      setError(resolveErrorMessage(loadError) || "读取用户详情失败");
+      showNotice("读取用户详情失败", resolveErrorMessage(loadError, "读取用户详情失败"));
     } finally {
       setLoading(false);
     }
@@ -101,20 +104,19 @@ export function AdminUsersPage() {
 
   async function submitAdjustment() {
     if (selectedUser === null) {
-      setError("请先选择用户。");
+      showNotice("未选择用户", "请先选择用户。", "warning");
       return;
     }
     const numericAmount = Number(amount);
     if (!Number.isInteger(numericAmount) || numericAmount <= 0) {
-      setError("请输入正整数次数。");
+      showNotice("次数无效", "请输入正整数次数。", "warning");
       return;
     }
     if (!reason.trim()) {
-      setError("请填写调整原因。");
+      showNotice("缺少调整原因", "请填写调整原因。", "warning");
       return;
     }
     setAdjusting(true);
-    setError("");
     try {
       await adjustAdminUserQuota(selectedUser.user_id, {
         direction,
@@ -125,8 +127,9 @@ export function AdminUsersPage() {
       setReason("");
       await selectUser(selectedUser.user_id);
       await loadUsers();
+      showNotice("额度已调整", "用户额度已调整。", "success");
     } catch (adjustError) {
-      setError(resolveErrorMessage(adjustError) || "调整额度失败");
+      showNotice("调整额度失败", resolveErrorMessage(adjustError, "调整额度失败"));
     } finally {
       setAdjusting(false);
     }
@@ -146,12 +149,6 @@ export function AdminUsersPage() {
         </div>
         <UsersRound className="text-violet-700" size={22} />
       </header>
-
-      {error ? (
-        <section className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          {error}
-        </section>
-      ) : null}
 
       <section className="rounded-lg border border-white bg-white/85 p-4 shadow-sm">
         <div className="flex flex-wrap items-center gap-2">

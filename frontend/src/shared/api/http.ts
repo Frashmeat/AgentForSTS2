@@ -8,6 +8,10 @@ export interface RequestJsonOptions extends Omit<RequestInit, "body"> {
   backend?: BackendTarget;
 }
 
+export interface RequestFormDataOptions extends Omit<RequestInit, "body"> {
+  backend?: BackendTarget;
+}
+
 type RuntimeApiBases = Partial<Record<Exclude<BackendTarget, "same-origin">, string>>;
 type RuntimeWsBases = Partial<Record<WebSocketTarget, string>>;
 
@@ -89,9 +93,44 @@ function isImplicitWorkstationOrigin(url: URL | null): boolean {
 
 function getMissingBackendErrorMessage(target: BackendTarget): string {
   if (target === "workstation") {
-    return "Workstation backend endpoint is not configured for the current frontend origin.";
+    return "当前前端没有配置 Workstation 后端地址。请检查 runtime-config.js 中的 workstation 地址。";
   }
-  return "Web backend endpoint is not configured for the current frontend origin.";
+  return "当前前端没有配置 Web 后端地址。请检查 runtime-config.js 中的 web 地址。";
+}
+
+function getBackendTargetLabel(target: BackendTarget): string {
+  if (target === "workstation") {
+    return "Workstation 后端";
+  }
+  if (target === "web") {
+    return "Web 后端";
+  }
+  return "当前后端";
+}
+
+function getBackendTargetHint(target: BackendTarget): string {
+  if (target === "web") {
+    return "请确认 Docker web 服务已启动，且前端 runtime-config.js 中的 web 地址正确。";
+  }
+  if (target === "workstation") {
+    return "请确认本机 local-workstation 已启动，且前端 runtime-config.js 中的 workstation 地址正确。";
+  }
+  return "请确认后端服务已启动且当前页面地址可访问。";
+}
+
+function createNetworkError(target: BackendTarget, url: string, error: unknown): Error {
+  const rawMessage = resolveErrorMessage(error, "");
+  const suffix = rawMessage ? ` 原始错误：${rawMessage}` : "";
+  return new Error(`无法连接${getBackendTargetLabel(target)}（${url}）。${getBackendTargetHint(target)}${suffix}`);
+}
+
+function createHttpError(response: Response, rawText: string): Error {
+  const message = extractResponseErrorMessage(rawText);
+  const statusText = response.statusText ? ` ${response.statusText}` : "";
+  if (!message || message === DEFAULT_ERROR_MESSAGE) {
+    return new Error(`请求失败（HTTP ${response.status}${statusText}）`);
+  }
+  return new Error(`请求失败（HTTP ${response.status}${statusText}）：${message}`);
 }
 
 function inferBackendBaseFromLocation(target: BackendTarget): string {
@@ -195,21 +234,54 @@ export function buildWorkstationWebSocketUrl(path: string): string {
 export async function requestJson<T>(path: string, options: RequestJsonOptions = {}): Promise<T> {
   const { body, headers, method = "GET", backend = "same-origin", credentials, ...rest } = options;
   const hasBody = typeof body !== "undefined";
-  const response = await fetch(buildBackendUrl(path, backend), {
-    ...rest,
-    method,
-    credentials: credentials ?? (backend === "same-origin" ? undefined : "include"),
-    headers: hasBody
-      ? {
-          "Content-Type": "application/json",
-          ...(headers ?? {}),
-        }
-      : headers,
-    body: hasBody ? JSON.stringify(body) : undefined,
-  });
+  const url = buildBackendUrl(path, backend);
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...rest,
+      method,
+      credentials: credentials ?? (backend === "same-origin" ? undefined : "include"),
+      headers: hasBody
+        ? {
+            "Content-Type": "application/json",
+            ...(headers ?? {}),
+          }
+        : headers,
+      body: hasBody ? JSON.stringify(body) : undefined,
+    });
+  } catch (error) {
+    throw createNetworkError(backend, url, error);
+  }
 
   if (!response.ok) {
-    throw new Error(extractResponseErrorMessage(await response.text()));
+    throw createHttpError(response, await response.text());
+  }
+
+  return response.json();
+}
+
+export async function requestFormData<T>(
+  path: string,
+  formData: FormData,
+  options: RequestFormDataOptions = {},
+): Promise<T> {
+  const { headers, method = "POST", backend = "same-origin", credentials, ...rest } = options;
+  const url = buildBackendUrl(path, backend);
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...rest,
+      method,
+      credentials: credentials ?? (backend === "same-origin" ? undefined : "include"),
+      headers,
+      body: formData,
+    });
+  } catch (error) {
+    throw createNetworkError(backend, url, error);
+  }
+
+  if (!response.ok) {
+    throw createHttpError(response, await response.text());
   }
 
   return response.json();
