@@ -240,3 +240,13 @@ def test_deploy_app_dry_run_does_not_require_frontend_dist() -> None:
     assert 'if (-not $DryRun) {' in source
     assert 'Assert-PathExists -Path $layout.LocalFrontendDist -Label "frontend/dist"' in source
     assert 'Copy-Item -LiteralPath $paths.RuntimeConfig -Destination' in source
+
+
+def test_deploy_app_verifies_docker_web_stack_after_compose_up() -> None:
+    source = DEPLOY_APP_PATH.read_text(encoding="utf-8-sig")
+
+    assert "function Assert-DockerComposeServicesRunning" in source
+    assert '$expectedServices = @("postgres", "web-workstation", "web")' in source
+    assert 'Invoke-DockerCompose -AppConfig $appConfig -Layout $layout -EnvFile $paths.DockerEnv -Args @("up", "-d", "--no-build")' in source
+    assert "Assert-DockerComposeServicesRunning -AppConfig $appConfig -Layout $layout -EnvFile $paths.DockerEnv" in source
+    assert "Docker web 栈: postgres / web-workstation / web 已启动" in source

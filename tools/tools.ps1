@@ -324,7 +324,7 @@ function Get-CommandCatalog {
         ))
         (New-MenuGroup -Key "deploy" -Label "部署" -Description "部署唯一主线 app" -Commands @(
             (New-MenuCommand -Key "deploy-app" -Action "app" -Label "部署 app" -Description "部署本机 frontend/local-workstation 与 Docker web 栈" -ScriptPath (Join-Path $toolsRoot "latest\deploy-app.ps1") -InvocationName "deploy app" -IsDefaultAction -Profiles @(
-                (New-MenuProfile -Key "default" -Label "直接部署" -Description "按统一配置部署 app")
+                (New-MenuProfile -Key "default" -Label "直接部署" -Description "部署本机 frontend/local-workstation，并启动 Docker postgres/web-workstation/web")
                 (New-MenuProfile -Key "dryrun" -Label "DryRun" -Description "生成配置并打印拓扑，不启动服务" -ProfileArgs @("-DryRun"))
                 (New-MenuProfile -Key "reset-db" -Label "重置数据库" -Description "部署前删除 Docker Postgres 卷" -ProfileArgs @("-ResetDb"))
                 (New-MenuProfile -Key "rebuild" -Label "强制重建镜像" -Description "强制重建 Docker web 栈镜像" -ProfileArgs @("-Rebuild"))

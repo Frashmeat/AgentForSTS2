@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 按唯一主线部署 AgentTheSpire app。
 
@@ -536,9 +536,41 @@ function Invoke-DockerCompose {
     Push-Location $Layout.Root
     try {
         $dockerArgs = @("compose", "--project-name", $projectName, "--env-file", $EnvFile, "-f", $Layout.ComposeFile) + $Args
+        Write-Host ("Docker compose: docker {0}" -f ($dockerArgs -join " "))
         & docker @dockerArgs
         if ($LASTEXITCODE -ne 0) {
             throw "docker compose 执行失败，退出码: $LASTEXITCODE"
+        }
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+function Assert-DockerComposeServicesRunning {
+    param([hashtable]$AppConfig, [hashtable]$Layout, [string]$EnvFile)
+
+    $projectName = [string](Ensure-Hashtable -Value $AppConfig.docker).project_name
+    $expectedServices = @("postgres", "web-workstation", "web")
+    Push-Location $Layout.Root
+    try {
+        foreach ($service in $expectedServices) {
+            $containerId = (& docker compose --project-name $projectName --env-file $EnvFile -f $Layout.ComposeFile ps -q $service).Trim()
+            if ($LASTEXITCODE -ne 0) {
+                throw "docker compose ps $service 执行失败，退出码: $LASTEXITCODE"
+            }
+            if ([string]::IsNullOrWhiteSpace($containerId)) {
+                throw "Docker web 栈未部署完整：缺少服务 $service。请检查 docker compose 输出。"
+            }
+
+            $state = (& docker inspect -f "{{.State.Status}}" $containerId).Trim()
+            if ($LASTEXITCODE -ne 0) {
+                throw "docker inspect $service 执行失败，退出码: $LASTEXITCODE"
+            }
+            if ($state -ne "running") {
+                $logsCommand = "docker compose --project-name $projectName --env-file $EnvFile -f $($Layout.ComposeFile) logs $service"
+                throw "Docker web 栈服务 $service 当前状态为 $state，未成功运行。请执行 $logsCommand 查看日志。"
+            }
         }
     }
     finally {
@@ -612,6 +644,7 @@ if ($RebuildImages) {
     Invoke-DockerCompose -AppConfig $appConfig -Layout $layout -EnvFile $paths.DockerEnv -Args @("build")
 }
 Invoke-DockerCompose -AppConfig $appConfig -Layout $layout -EnvFile $paths.DockerEnv -Args @("up", "-d", "--no-build")
+Assert-DockerComposeServicesRunning -AppConfig $appConfig -Layout $layout -EnvFile $paths.DockerEnv
 
 Stop-ProcessListeningOnPort -Port $localWorkstationPort
 Stop-ProcessListeningOnPort -Port $frontendPort
@@ -636,6 +669,7 @@ Write-Host "部署完成:"
 Write-Host "  前端地址     : http://127.0.0.1:$frontendPort"
 Write-Host "  工作站地址   : http://127.0.0.1:$localWorkstationPort"
 Write-Host "  Web 地址     : http://127.0.0.1:$webPort"
+Write-Host "  Docker web 栈: postgres / web-workstation / web 已启动"
 Write-Host "  停止入口     : powershell -File .\tools\tools.ps1 stop app"
 
 if (-not $NoBrowser) {

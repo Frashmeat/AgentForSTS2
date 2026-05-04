@@ -126,6 +126,8 @@ powershell -File .\tools\tools.ps1 package app -NoZip
 - 本机 `frontend`
 - Docker `postgres + web-workstation + web`
 
+默认“直接部署”会执行 Docker compose build/up，并校验 `postgres`、`web-workstation`、`web` 三个服务都已处于 `running`；任一服务缺失或未运行会直接报错，不继续伪装部署成功。
+
 轻量预览：
 
 ```powershell

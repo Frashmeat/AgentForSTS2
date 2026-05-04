@@ -93,7 +93,7 @@ powershell -File .\tools\tools.ps1 stop app
 - `powershell -File .\tools\tools.ps1 start web`
   Starts `web-backend` only for platform/auth/job/quota APIs.
 - `powershell -File .\tools\tools.ps1 deploy app`
-  Starts the final local + Docker topology from `runtime/agentthespire.config.json`.
+  Starts the final local + Docker topology from `runtime/agentthespire.config.json`: local `frontend + local-workstation`, plus Docker `postgres + web-workstation + web`. Deployment fails if any Docker service is missing or not running after compose up.
 
 Current product behavior:
 
