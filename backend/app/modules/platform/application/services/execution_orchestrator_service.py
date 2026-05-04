@@ -16,6 +16,9 @@ from app.modules.platform.contracts.workstation_execution import (
     WorkstationExecutionDispatchRequest,
     WorkstationExecutionEvent,
 )
+from app.modules.platform.application.workstation_execution_client import (
+    workstation_dispatch_error_to_platform_error,
+)
 from app.modules.platform.domain.models.enums import AIExecutionStatus, JobItemStatus, JobStatus
 from app.modules.platform.domain.repositories import (
     AIExecutionRepository,
@@ -1036,14 +1039,17 @@ class ExecutionOrchestratorService:
                     execution.id,
                     _short_text(exc),
                 )
+                platform_error = workstation_dispatch_error_to_platform_error(exc).envelope
                 return StepExecutionResult(
                     step_id=execution.step_id,
                     status="failed_system",
-                    error_summary=str(exc),
+                    error_summary=platform_error.message,
                     error_payload={
-                        "reason_code": "workstation_dispatch_failed",
-                        "exception_type": type(exc).__name__,
-                        "traceback": tb_text,
+                        **platform_error.to_payload(),
+                        "diagnostic": {
+                            **dict(platform_error.diagnostic),
+                            "traceback": tb_text,
+                        },
                     },
                 )
 

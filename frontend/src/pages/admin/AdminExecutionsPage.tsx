@@ -8,6 +8,7 @@ import {
   type AdminExecutionListItem,
 } from "../../shared/api/index.ts";
 import { resolveErrorMessage } from "../../shared/error.ts";
+import { PlatformErrorDiagnostics, hasPlatformErrorPayload, toPlatformErrorView } from "../../shared/platform/index.ts";
 import { formatAdminProvider, formatAdminStatus } from "./adminDisplay.ts";
 import { useAdminLayoutContext } from "./AdminLayout.tsx";
 
@@ -190,6 +191,11 @@ export function AdminExecutionsPage() {
                   </div>
                 </div>
               </details>
+              {hasPlatformErrorPayload(selectedExecution.error_payload) ? (
+                <PlatformErrorDiagnostics
+                  error={toPlatformErrorView(selectedExecution.error_payload, selectedExecution.error_summary)}
+                />
+              ) : null}
             </div>
           ) : (
             <p className="mt-3 text-sm text-slate-500">选择一条执行记录后查看详情。</p>

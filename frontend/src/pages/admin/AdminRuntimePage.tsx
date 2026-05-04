@@ -5,7 +5,6 @@ import {
   getAdminWorkstationRuntimeLogs,
   getAdminWorkstationRuntimeStatus,
   loadPlatformQueueWorkerStatus,
-  type AdminWorkstationCapabilities,
   type AdminWorkstationRuntimeLogTail,
   type AdminWorkstationRuntimeStatus,
   type PlatformQueueWorkerStatus,
@@ -98,7 +97,13 @@ function CapabilityMetric({ label, value }: { label: string; value?: boolean }) 
   );
 }
 
-function WorkstationCapabilitiesPanel({ capabilities }: { capabilities?: AdminWorkstationCapabilities | null }) {
+function WorkstationCapabilitiesPanel({ status }: { status: AdminWorkstationRuntimeStatus | null }) {
+  const capabilities = status?.capabilities;
+  const webKnowledge = status?.web_knowledge;
+  const webActivePackId = webKnowledge?.active_pack_id?.trim() || "";
+  const webActivePackLabel = webKnowledge?.active_pack_label?.trim() || "";
+  const consistent = status?.knowledge_runtime_consistent === true;
+  const mismatchReason = status?.knowledge_runtime_mismatch_reason?.trim() || "";
   return (
     <div className="rounded-lg border border-white bg-white/85 p-4 shadow-sm">
       <h2 className="text-base font-semibold text-slate-900">服务器生成能力</h2>
@@ -108,13 +113,21 @@ function WorkstationCapabilitiesPanel({ capabilities }: { capabilities?: AdminWo
         <CapabilityMetric label="服务器构建" value={capabilities?.build?.server_build_supported} />
         <CapabilityMetric label="服务器部署" value={capabilities?.deploy?.server_deploy_supported} />
         <CapabilityMetric label="内置 STS2 知识" value={capabilities?.knowledge?.embedded_sts2_guidance} />
-        <CapabilityMetric label="激活知识库包" value={capabilities?.knowledge?.knowledge_pack_active} />
+        <CapabilityMetric label="服务器知识库包" value={webKnowledge?.active} />
       </div>
-      {capabilities?.knowledge?.active_knowledge_pack_id ? (
+      {webActivePackId ? (
         <p className="mt-3 break-all text-xs text-slate-500">
-          当前知识库包：{capabilities.knowledge.active_knowledge_pack_id}
+          当前 Web 知识库包：{webActivePackLabel ? `${webActivePackLabel} / ` : ""}
+          {webActivePackId}
         </p>
       ) : null}
+      <div className="mt-3 space-y-1 text-xs text-slate-500">
+        <p className="break-all">Web runtime：{webKnowledge?.runtime_root || "未记录"}</p>
+        <p className="break-all">Workstation runtime：{status?.runtime_root || capabilities?.runtime_root || "未记录"}</p>
+        <p className={consistent ? "text-emerald-700" : "text-amber-700"}>
+          知识库一致性：{consistent ? "一致" : mismatchReason || "未确认"}
+        </p>
+      </div>
       {capabilities?.reason ? <p className="mt-3 text-xs text-amber-700">{capabilities.reason}</p> : null}
     </div>
   );
@@ -297,6 +310,9 @@ export function AdminRuntimePage() {
 
       {!workstationStatus?.available ? (
         <section className="rounded-lg border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          <span className="mr-2 rounded-md border border-amber-200 bg-white/60 px-2 py-0.5 text-xs font-semibold">
+            Web 工作站错误
+          </span>
           {formatWorkstationUnavailableReason(workstationStatus)}
         </section>
       ) : null}
@@ -319,7 +335,7 @@ export function AdminRuntimePage() {
           ) : null}
         </div>
 
-        <WorkstationCapabilitiesPanel capabilities={workstationStatus?.capabilities} />
+        <WorkstationCapabilitiesPanel status={workstationStatus} />
       </section>
 
       <WorkstationRuntimeLogPanel />

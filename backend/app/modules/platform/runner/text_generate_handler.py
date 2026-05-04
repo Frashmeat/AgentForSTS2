@@ -5,11 +5,13 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from app.modules.platform.contracts.runner_contracts import StepExecutionBinding, StepExecutionRequest
+from app.modules.platform.errors import build_platform_error
 
 from .upstream_error_classifier import UpstreamErrorClassification, classify_upstream_error
 
 CompleteTextFn = Callable[[str, dict[str, object], Path | None], Awaitable[str]]
 logger = logging.getLogger(__name__)
+_RUNTIME_SURFACE_PAYLOAD_KEY = "__runtime_surface"
 
 
 def _short_text(value: object, limit: int = 300) -> str:
@@ -20,22 +22,48 @@ def _short_text(value: object, limit: int = 300) -> str:
 
 
 class UpstreamTextGenerationError(RuntimeError):
-    def __init__(self, classification: UpstreamErrorClassification) -> None:
+    def __init__(
+        self,
+        classification: UpstreamErrorClassification,
+        *,
+        runtime_surface: str,
+        request: StepExecutionRequest,
+    ) -> None:
         super().__init__(classification.reason_message)
         self.classification = classification
         self.raw_error = classification.raw_error
         self.reason_code = classification.reason_code
+        self.runtime_surface = runtime_surface
+        self.request = request
 
     def to_error_payload(self) -> dict[str, object]:
-        return {
-            "reason_code": self.reason_code,
-            "reason_message": str(self),
-            "upstream_category": self.classification.upstream_category,
-            "retryable": self.classification.retryable,
-            "http_status": self.classification.http_status,
-            "provider_error_code": self.classification.provider_error_code,
-            "raw_error": self.raw_error,
-        }
+        return build_platform_error(
+            origin="upstream",
+            runtime_surface=self.runtime_surface,
+            component="text_generate",
+            operation="complete_text",
+            category=self.classification.upstream_category,
+            reason_code=self.reason_code,
+            message=str(self),
+            developer_message=self.raw_error,
+            retryable=self.classification.retryable,
+            step_id=self.request.step_id,
+            step_type=self.request.step_type,
+            job_id=self.request.job_id,
+            job_item_id=self.request.job_item_id,
+            provider=self.request.execution_binding.provider,
+            model=self.request.execution_binding.model,
+            http_status=self.classification.http_status,
+            provider_error_code=self.classification.provider_error_code,
+            log_hint={
+                "primary": f"{self.runtime_surface}_log",
+                "secondary": "web_backend_log",
+            },
+            diagnostic={
+                "raw_error": self.raw_error,
+                "upstream_category": self.classification.upstream_category,
+            },
+        ).to_payload()
 
 
 class UpstreamTextGenerationBlockedError(UpstreamTextGenerationError):
@@ -73,6 +101,7 @@ async def execute_text_generate_step(
         complete_text_fn = default_complete_text
 
     llm_cfg = build_text_llm_config(request.execution_binding)
+    runtime_surface = _resolve_runtime_surface(request)
     logger.info(
         "platform text generation start job_id=%s job_item_id=%s step_id=%s provider=%s model=%s "
         "base_url_configured=%s prompt_len=%d",
@@ -104,7 +133,11 @@ async def execute_text_generate_step(
                 classification.provider_error_code,
                 _short_text(error),
             )
-            raise UpstreamTextGenerationBlockedError(classification) from error
+            raise UpstreamTextGenerationBlockedError(
+                classification,
+                runtime_surface=runtime_surface,
+                request=request,
+            ) from error
         logger.exception(
             "platform text generation failed job_id=%s job_item_id=%s step_id=%s provider=%s model=%s error=%s",
             request.job_id,
@@ -129,3 +162,10 @@ async def execute_text_generate_step(
         "provider": request.execution_binding.provider,
         "model": request.execution_binding.model,
     }
+
+
+def _resolve_runtime_surface(request: StepExecutionRequest) -> str:
+    value = str(request.input_payload.get(_RUNTIME_SURFACE_PAYLOAD_KEY) or "").strip()
+    if value in {"web", "web_workstation", "local_workstation"}:
+        return value
+    return "web"

@@ -137,6 +137,17 @@ def classify_upstream_error(error: Exception) -> UpstreamErrorClassification:
             raw_error=raw_error,
         )
 
+    if "openai-compatible direct response was not valid json" in text:
+        return UpstreamErrorClassification(
+            reason_code="upstream_invalid_response",
+            upstream_category="invalid_response",
+            reason_message="上游 OpenAI-compatible 网关返回了非 JSON 响应，请管理员检查 base_url、网关状态或模型兼容配置。",
+            retryable=True,
+            http_status=http_status,
+            provider_error_code="invalid_json_response",
+            raw_error=raw_error,
+        )
+
     if "request was blocked" in text or "blocked" in text:
         return UpstreamErrorClassification(
             reason_code="upstream_gateway_blocked",

@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.modules.platform.application.workstation_execution_client import (
     WorkstationExecutionClient,
     WorkstationExecutionClientError,
+    workstation_dispatch_error_to_platform_error,
 )
 from app.modules.platform.contracts.workstation_execution import WorkstationExecutionDispatchRequest
 from app.shared.infra.config.settings import Settings
@@ -159,6 +160,15 @@ def test_workstation_execution_client_fails_when_control_token_missing(monkeypat
 
     with pytest.raises(WorkstationExecutionClientError, match="control token"):
         client.dispatch(_request())
+    try:
+        client.dispatch(_request())
+    except WorkstationExecutionClientError as error:
+        payload = workstation_dispatch_error_to_platform_error(error).to_error_payload()
+        assert payload["schema_version"] == "platform_error.v1"
+        assert payload["origin"] == "web_workstation"
+        assert payload["runtime_surface"] == "web"
+        assert payload["reason_code"] == "web_workstation_control_token_missing"
+        assert payload["category"] == "config_error"
 
 
 def test_workstation_execution_client_times_out_while_execution_is_running(monkeypatch):

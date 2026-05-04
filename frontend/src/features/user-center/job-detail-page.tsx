@@ -14,6 +14,7 @@ import type {
 } from "../../shared/api/platform.ts";
 import { readDeferredExecutionNotice } from "../../shared/deferredExecution.ts";
 import { resolveErrorMessage } from "../../shared/error.ts";
+import { PlatformErrorSummary, hasPlatformErrorPayload, toPlatformErrorView } from "../../shared/platform/index.ts";
 import { RefundSummary } from "./refundSummary.tsx";
 import { formatExecutionProfileText } from "./executionProfileText.ts";
 import { renderJobItemStatus, renderJobStatus } from "./statusText.ts";
@@ -366,7 +367,13 @@ export function UserCenterJobDetailPage() {
                 </div>
                 <div className="max-w-xs text-right text-xs text-slate-500">
                   <p>{item.result_summary || "无结果摘要"}</p>
-                  <p>{item.error_summary || "无错误信息"}</p>
+                  {hasPlatformErrorPayload(item.error_payload) ? (
+                    <div className="mt-2 text-left">
+                      <PlatformErrorSummary error={toPlatformErrorView(item.error_payload, item.error_summary)} />
+                    </div>
+                  ) : (
+                    <p>{item.error_summary || "无错误信息"}</p>
+                  )}
                 </div>
               </div>
             </article>

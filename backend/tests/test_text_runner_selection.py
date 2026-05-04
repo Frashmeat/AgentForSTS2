@@ -1,6 +1,7 @@
 """Tests for text runner backend resolution."""
 
 import asyncio
+import json
 import subprocess
 import sys
 import types
@@ -17,7 +18,13 @@ sys.modules.pop("llm.text_runner", None)
 
 from app.shared.prompting import PromptLoader
 from llm import prompt_builder
-from llm.text_runner import TextRunner, build_system_prompt, build_text_prompt, resolve_model, resolve_text_backend
+from llm.text_runner import (
+    TextRunner,
+    build_system_prompt,
+    build_text_prompt,
+    resolve_model,
+    resolve_text_backend,
+)
 
 
 def test_text_runner_uses_cli_backend_when_mode_is_agent_cli():
@@ -137,6 +144,207 @@ def test_litellm_openai_compatible_base_url_keeps_prefixed_model(monkeypatch):
     assert result == "ok"
     assert captured["model"] == "openai/deepseek-v3.2"
     assert captured["extra_headers"]["User-Agent"] == "AgentTheSpire/0.1.0"
+
+
+def test_litellm_openai_compatible_model_dump_error_falls_back_to_direct_http(monkeypatch):
+    from llm import text_runner
+
+    captured: dict[str, object] = {}
+
+    async def broken_acompletion(**_kwargs):
+        raise RuntimeError("litellm.APIError: OpenAIException - 'str' object has no attribute 'model_dump'")
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            captured["raise_for_status"] = True
+
+        def json(self) -> dict[str, object]:
+            return {"choices": [{"message": {"content": " direct ok "}}]}
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs):
+            captured["client_kwargs"] = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url, **kwargs):
+            captured["url"] = url
+            captured["post_kwargs"] = kwargs
+            return FakeResponse()
+
+    monkeypatch.setattr(text_runner.litellm, "acompletion", broken_acompletion)
+    monkeypatch.setattr(text_runner.httpx, "AsyncClient", FakeAsyncClient)
+
+    result = asyncio.run(
+        text_runner._complete_via_litellm(
+            "base prompt",
+            {
+                "provider": "openai",
+                "mode": "claude_api",
+                "model": "openai/deepseek-v4-pro",
+                "api_key": "sk-test",
+                "base_url": "https://e-flowcode.cc",
+            },
+            None,
+        )
+    )
+
+    assert result == "direct ok"
+    assert captured["url"] == "https://e-flowcode.cc/chat/completions"
+    assert captured["raise_for_status"] is True
+    post_kwargs = captured["post_kwargs"]
+    assert post_kwargs["json"]["model"] == "deepseek-v4-pro"
+    assert post_kwargs["json"]["messages"] == [{"role": "user", "content": "base prompt"}]
+    assert post_kwargs["headers"]["Authorization"] == "Bearer sk-test"
+    assert post_kwargs["headers"]["User-Agent"] == "AgentTheSpire/0.1.0"
+
+
+def test_litellm_openai_compatible_model_dump_fallback_uses_error_protocol_not_provider(monkeypatch):
+    from llm import text_runner
+
+    captured: dict[str, object] = {}
+
+    async def broken_acompletion(**_kwargs):
+        raise RuntimeError("litellm.APIError: APIError: OpenAIException - 'str' object has no attribute 'model_dump'")
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict[str, object]:
+            return {"choices": [{"message": {"content": "third party ok"}}]}
+
+    class FakeAsyncClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url, **kwargs):
+            captured["url"] = url
+            captured["post_kwargs"] = kwargs
+            return FakeResponse()
+
+    monkeypatch.setattr(text_runner.litellm, "acompletion", broken_acompletion)
+    monkeypatch.setattr(text_runner.httpx, "AsyncClient", FakeAsyncClient)
+
+    result = asyncio.run(
+        text_runner._complete_via_litellm(
+            "base prompt",
+            {
+                "provider": "third-party",
+                "mode": "claude_api",
+                "model": "deepseek-v4-pro",
+                "api_key": "sk-test",
+                "base_url": "https://third-party.example/v1",
+            },
+            None,
+        )
+    )
+
+    assert result == "third party ok"
+    assert captured["url"] == "https://third-party.example/v1/chat/completions"
+    assert captured["post_kwargs"]["json"]["model"] == "deepseek-v4-pro"
+
+
+def test_litellm_openai_compatible_direct_fallback_reports_non_json_response(monkeypatch):
+    from llm import text_runner
+
+    async def broken_acompletion(**_kwargs):
+        raise RuntimeError("litellm.APIError: APIError: OpenAIException - 'str' object has no attribute 'model_dump'")
+
+    class FakeResponse:
+        status_code = 200
+        headers = {"content-type": "text/plain"}
+        content = b"upstream gateway returned empty page"
+
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict[str, object]:
+            raise json.JSONDecodeError("Expecting value", "", 0)
+
+    class FakeAsyncClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, _url, **_kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr(text_runner.litellm, "acompletion", broken_acompletion)
+    monkeypatch.setattr(text_runner.httpx, "AsyncClient", FakeAsyncClient)
+
+    try:
+        asyncio.run(
+            text_runner._complete_via_litellm(
+                "base prompt",
+                {
+                    "provider": "openai",
+                    "mode": "claude_api",
+                    "model": "openai/deepseek-v4-pro",
+                    "api_key": "sk-test",
+                    "base_url": "https://e-flowcode.cc",
+                },
+                None,
+            )
+        )
+    except RuntimeError as error:
+        message = str(error)
+        assert "OpenAI-compatible direct response was not valid JSON" in message
+        assert "HTTP status 200" in message
+        assert "content_type=text/plain" in message
+        assert "body_tail=upstream gateway returned empty page" in message
+        assert "sk-test" not in message
+        assert "base prompt" not in message
+    else:
+        raise AssertionError("expected invalid JSON response to be reported")
+
+
+def test_litellm_anthropic_model_dump_error_without_openai_protocol_does_not_fallback(monkeypatch):
+    from llm import text_runner
+
+    async def broken_acompletion(**_kwargs):
+        raise RuntimeError("AnthropicError: 'str' object has no attribute 'model_dump'")
+
+    class UnexpectedAsyncClient:
+        def __init__(self, **_kwargs):
+            raise AssertionError("native Anthropic errors must not call OpenAI-compatible fallback")
+
+    monkeypatch.setattr(text_runner.litellm, "acompletion", broken_acompletion)
+    monkeypatch.setattr(text_runner.httpx, "AsyncClient", UnexpectedAsyncClient)
+
+    try:
+        asyncio.run(
+            text_runner._complete_via_litellm(
+                "base prompt",
+                {
+                    "provider": "anthropic",
+                    "mode": "claude_api",
+                    "model": "claude-sonnet-4-6",
+                    "api_key": "sk-test",
+                    "base_url": "https://api.anthropic.com",
+                },
+                None,
+            )
+        )
+    except RuntimeError as error:
+        assert "AnthropicError" in str(error)
+    else:
+        raise AssertionError("expected AnthropicError to be raised without direct fallback")
 
 
 def test_litellm_stream_passes_user_agent_header(monkeypatch):

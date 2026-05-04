@@ -18,6 +18,7 @@ from app.modules.platform.runner.execution_adapter import ExecutionAdapter
 from app.modules.platform.runner.step_dispatcher import StepDispatcher
 from app.modules.platform.runner.workflow_registry import PlatformWorkflowRegistry, PlatformWorkflowStep
 from app.modules.platform.runner.workflow_runner import WorkflowRunner
+from app.modules.platform.errors import PlatformExecutionError, build_platform_error
 
 logger = logging.getLogger(__name__)
 _SOURCE_PACKAGE_SKIP_DIRS = {"bin", "obj", ".godot", ".git"}
@@ -68,7 +69,7 @@ class WorkstationPlatformExecutor:
                         job_id=request.job_id,
                         job_item_id=request.job_item_id,
                         result_schema_version=request.result_schema_version,
-                        input_payload=request.input_payload,
+                        input_payload={**request.input_payload, "__runtime_surface": "web_workstation"},
                         execution_binding=request.execution_binding,
                     ),
                     event_publisher=publish_event,
@@ -108,8 +109,27 @@ class WorkstationPlatformExecutor:
                 workstation_execution_id=f"ws-exec-{request.execution_id}",
                 status="failed_system",
                 step_id="workflow.dispatch",
-                error_summary=str(exc),
-                error_payload={"reason_code": "workstation_execution_failed"},
+                error_summary="Web 托管 Workstation 执行失败，请管理员查看托管工作站日志。",
+                error_payload=PlatformExecutionError(
+                    build_platform_error(
+                        origin="web_workstation",
+                        runtime_surface="web_workstation",
+                        component="workstation_platform_executor",
+                        operation="execute",
+                        category="internal_error",
+                        reason_code="web_workstation_execution_failed",
+                        message="Web 托管 Workstation 执行失败，请管理员查看托管工作站日志。",
+                        developer_message=str(exc),
+                        retryable=True,
+                        step_id="workflow.dispatch",
+                        step_type="workflow.dispatch",
+                        job_id=request.job_id,
+                        job_item_id=request.job_item_id,
+                        execution_id=request.execution_id,
+                        log_hint={"primary": "web_workstation_stderr", "secondary": "web_backend_log"},
+                        diagnostic={"exception_type": type(exc).__name__},
+                    )
+                ).to_error_payload(),
                 events=events,
             )
 

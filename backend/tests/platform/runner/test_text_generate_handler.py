@@ -135,11 +135,14 @@ def test_execute_text_generate_step_classifies_generic_request_blocked_as_gatewa
         )
     except UpstreamTextGenerationBlockedError as error:
         payload = error.to_error_payload()
+        assert payload["schema_version"] == "platform_error.v1"
+        assert payload["origin"] == "upstream"
+        assert payload["runtime_surface"] == "web"
         assert payload["reason_code"] == "upstream_gateway_blocked"
-        assert payload["upstream_category"] == "gateway_blocked"
+        assert payload["category"] == "gateway_blocked"
         assert payload["retryable"] is False
         assert "上游网关拒绝" in str(error)
-        assert "Your request was blocked" in payload["raw_error"]
+        assert "Your request was blocked" in payload["developer_message"]
         assert any(
             record.levelno == logging.WARNING
             and "platform text generation upstream failed" in record.message
@@ -180,9 +183,93 @@ def test_execute_text_generate_step_classifies_content_filter():
         )
     except UpstreamTextGenerationError as error:
         payload = error.to_error_payload()
+        assert payload["schema_version"] == "platform_error.v1"
+        assert payload["origin"] == "upstream"
         assert payload["reason_code"] == "upstream_content_policy_blocked"
-        assert payload["upstream_category"] == "content_policy"
+        assert payload["category"] == "content_policy"
         assert payload["provider_error_code"] == "content_filter"
+    else:
+        raise AssertionError("expected UpstreamTextGenerationError")
+
+
+def test_execute_text_generate_step_classifies_invalid_openai_compatible_response():
+    async def invalid_response_complete_text(prompt: str, llm_cfg: dict, cwd=None) -> str:
+        raise RuntimeError(
+            "OpenAI-compatible direct response was not valid JSON HTTP status 200 "
+            "content_type=text/plain body_tail=upstream gateway returned empty page"
+        )
+
+    try:
+        asyncio.run(
+            execute_text_generate_step(
+                StepExecutionRequest(
+                    workflow_version="2026.03.31",
+                    step_protocol_version="v1",
+                    step_type="text.generate",
+                    step_id="text-invalid-json",
+                    job_id=1,
+                    job_item_id=2,
+                    result_schema_version="v1",
+                    input_payload={"prompt": "虚构游戏机制：造成伤害。"},
+                    execution_binding=StepExecutionBinding(
+                        agent_backend="claude",
+                        provider="openai",
+                        model="deepseek-v4-pro",
+                        credential="sk-live-openai",
+                        base_url="https://e-flowcode.cc",
+                    ),
+                ),
+                complete_text_fn=invalid_response_complete_text,
+            )
+        )
+    except UpstreamTextGenerationError as error:
+        payload = error.to_error_payload()
+        assert payload["schema_version"] == "platform_error.v1"
+        assert payload["origin"] == "upstream"
+        assert payload["reason_code"] == "upstream_invalid_response"
+        assert payload["category"] == "invalid_response"
+        assert payload["retryable"] is True
+        assert payload["http_status"] == 200
+        assert payload["provider_error_code"] == "invalid_json_response"
+    else:
+        raise AssertionError("expected UpstreamTextGenerationError")
+
+
+def test_execute_text_generate_step_keeps_web_workstation_surface_for_upstream_errors():
+    async def rate_limited_complete_text(prompt: str, llm_cfg: dict, cwd=None) -> str:
+        raise RuntimeError("HTTP status 429 rate limit exceeded")
+
+    try:
+        asyncio.run(
+            execute_text_generate_step(
+                StepExecutionRequest(
+                    workflow_version="2026.03.31",
+                    step_protocol_version="v1",
+                    step_type="text.generate",
+                    step_id="text-web-workstation",
+                    job_id=1,
+                    job_item_id=2,
+                    result_schema_version="v1",
+                    input_payload={
+                        "prompt": "虚构游戏机制：造成伤害。",
+                        "__runtime_surface": "web_workstation",
+                    },
+                    execution_binding=StepExecutionBinding(
+                        agent_backend="claude",
+                        provider="openai",
+                        model="deepseek-v4-pro",
+                        credential="sk-live-openai",
+                        base_url="https://e-flowcode.cc",
+                    ),
+                ),
+                complete_text_fn=rate_limited_complete_text,
+            )
+        )
+    except UpstreamTextGenerationError as error:
+        payload = error.to_error_payload()
+        assert payload["origin"] == "upstream"
+        assert payload["runtime_surface"] == "web_workstation"
+        assert payload["reason_code"] == "upstream_rate_limited"
     else:
         raise AssertionError("expected UpstreamTextGenerationError")
 
@@ -262,13 +349,15 @@ def test_execute_text_generate_step_classifies_cli_timeout_with_diagnostics(capl
         )
     except UpstreamTextGenerationBlockedError as error:
         payload = error.to_error_payload()
+        assert payload["schema_version"] == "platform_error.v1"
+        assert payload["origin"] == "upstream"
         assert payload["reason_code"] == "llm_cli_timeout"
-        assert payload["upstream_category"] == "timeout"
+        assert payload["category"] == "timeout"
         assert payload["provider_error_code"] == "timeout"
         assert payload["retryable"] is True
         assert "超过超时时间" in str(error)
-        assert "partial stdout" in payload["raw_error"]
-        assert "partial stderr" in payload["raw_error"]
+        assert "partial stdout" in payload["developer_message"]
+        assert "partial stderr" in payload["developer_message"]
         assert any(
             record.levelno == logging.WARNING
             and "platform text generation upstream failed" in record.message

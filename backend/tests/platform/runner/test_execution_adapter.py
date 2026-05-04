@@ -196,4 +196,11 @@ def test_execution_adapter_classifies_handler_errors_as_failed_system():
     )
 
     assert result.status == "failed_system"
-    assert "network down" in result.error_summary
+    assert result.error_summary == "任务执行失败，请管理员查看诊断日志。"
+    assert result.error_payload["schema_version"] == "platform_error.v1"
+    assert result.error_payload["origin"] == "web"
+    assert result.error_payload["runtime_surface"] == "web"
+    assert result.error_payload["component"] == "image.generate"
+    assert result.error_payload["reason_code"] == "web_internal_error"
+    assert result.error_payload["step_id"] == "img-fail"
+    assert "network down" in result.error_payload["developer_message"]

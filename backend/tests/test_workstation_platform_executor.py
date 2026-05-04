@@ -94,6 +94,7 @@ def test_workstation_platform_executor_runs_text_workflow_and_returns_poll_resul
     result = executor.execute(_dispatch_request("single_generate", "relic")).model_dump()
 
     assert [step.step_type for step in runner.steps] == ["single.asset.plan"]
+    assert runner.base_request.input_payload["__runtime_surface"] == "web_workstation"
     assert result == {
         "workstation_execution_id": "ws-exec-2203",
         "status": "succeeded",

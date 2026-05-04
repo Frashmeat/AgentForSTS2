@@ -55,6 +55,7 @@ export interface PlatformJobItemSummary {
   delivery_state?: string;
   result_summary: string;
   error_summary: string;
+  error_payload?: Record<string, unknown>;
 }
 
 export interface PlatformJobEventSummary {

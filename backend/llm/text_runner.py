@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import shutil
@@ -9,6 +10,7 @@ import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
+import httpx
 import litellm
 
 from app.shared.infra.llm.text_backend import (
@@ -75,6 +77,73 @@ def build_litellm_extra_headers(llm_cfg: dict) -> dict[str, str]:
     if not any(str(key).lower() == "user-agent" for key in headers):
         headers["User-Agent"] = DEFAULT_LITELLM_USER_AGENT
     return {str(key): str(value) for key, value in headers.items()}
+
+
+def _should_use_openai_compatible_direct_fallback(llm_cfg: dict, error: Exception) -> bool:
+    cfg = normalize_llm_config(llm_cfg)
+    if not str(cfg.get("base_url", "")).strip():
+        return False
+    message = str(error)
+    lower_message = message.lower()
+    has_model_dump_error = "model_dump" in lower_message and "str" in lower_message
+    if not has_model_dump_error:
+        return False
+
+    provider = str(cfg.get("provider", "")).strip().lower()
+    model = resolve_litellm_model(cfg)
+    return "openai" in lower_message or provider == "openai" or model.startswith("openai/")
+
+
+def _openai_compatible_chat_completions_url(base_url: str) -> str:
+    normalized = base_url.rstrip("/")
+    if normalized.endswith("/chat/completions"):
+        return normalized
+    return f"{normalized}/chat/completions"
+
+
+def _direct_openai_compatible_model(llm_cfg: dict) -> str:
+    model = resolve_model(llm_cfg)
+    if model.startswith("openai/"):
+        return model[len("openai/") :]
+    return model
+
+
+def _extract_openai_compatible_content(payload: object) -> str:
+    if not isinstance(payload, dict):
+        raise RuntimeError("OpenAI-compatible response must be a JSON object")
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise RuntimeError("OpenAI-compatible response missing choices")
+    first_choice = choices[0]
+    if not isinstance(first_choice, dict):
+        raise RuntimeError("OpenAI-compatible response choice must be an object")
+    message = first_choice.get("message")
+    if not isinstance(message, dict):
+        raise RuntimeError("OpenAI-compatible response choice missing message")
+    content = message.get("content")
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for part in content:
+            if isinstance(part, dict) and isinstance(part.get("text"), str):
+                parts.append(part["text"])
+            elif isinstance(part, str):
+                parts.append(part)
+        return "".join(parts).strip()
+    raise RuntimeError("OpenAI-compatible response message content must be text")
+
+
+def _parse_openai_compatible_json_response(response: httpx.Response) -> object:
+    try:
+        return response.json()
+    except json.JSONDecodeError as error:
+        content_type = response.headers.get("content-type", "")
+        raise RuntimeError(
+            "OpenAI-compatible direct response was not valid JSON "
+            f"HTTP status {response.status_code} content_type={content_type or 'empty'} "
+            f"body_tail={_tail_text(response.content)}"
+        ) from error
 
 
 def resolve_text_backend(llm_cfg: dict) -> str:
@@ -325,16 +394,52 @@ async def _complete_via_codex_cli(prompt: str, llm_cfg: dict, cwd: Path | None) 
 
 async def _complete_via_litellm(prompt: str, llm_cfg: dict, cwd: Path | None = None) -> str:
     _ = cwd
-    response = await litellm.acompletion(
-        model=resolve_litellm_model(llm_cfg),
-        messages=[{"role": "user", "content": prompt}],
-        api_key=llm_cfg.get("api_key") or None,
-        api_base=llm_cfg.get("base_url") or None,
-        extra_headers=build_litellm_extra_headers(llm_cfg),
-        temperature=0.2,
-        max_tokens=2048,
-    )
+    try:
+        response = await litellm.acompletion(
+            model=resolve_litellm_model(llm_cfg),
+            messages=[{"role": "user", "content": prompt}],
+            api_key=llm_cfg.get("api_key") or None,
+            api_base=llm_cfg.get("base_url") or None,
+            extra_headers=build_litellm_extra_headers(llm_cfg),
+            temperature=0.2,
+            max_tokens=2048,
+        )
+    except Exception as error:
+        if not _should_use_openai_compatible_direct_fallback(llm_cfg, error):
+            raise
+        logger.warning(
+            "litellm openai-compatible response parsing failed; retrying direct http model=%s base_url=%s error=%s",
+            resolve_model(llm_cfg),
+            _safe_base_url_state(llm_cfg),
+            str(error)[:160],
+        )
+        return await _complete_openai_compatible_direct(prompt, llm_cfg)
     return response.choices[0].message.content.strip()
+
+
+async def _complete_openai_compatible_direct(prompt: str, llm_cfg: dict) -> str:
+    base_url = str(llm_cfg.get("base_url") or "").strip()
+    if not base_url:
+        raise RuntimeError("OpenAI-compatible base_url is required for direct fallback")
+
+    headers = build_litellm_extra_headers(llm_cfg)
+    api_key = str(llm_cfg.get("api_key") or "").strip()
+    if api_key and not any(str(key).lower() == "authorization" for key in headers):
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    async with httpx.AsyncClient(timeout=180) as client:
+        response = await client.post(
+            _openai_compatible_chat_completions_url(base_url),
+            headers=headers,
+            json={
+                "model": _direct_openai_compatible_model(llm_cfg),
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.2,
+                "max_tokens": 2048,
+            },
+        )
+        response.raise_for_status()
+        return _extract_openai_compatible_content(_parse_openai_compatible_json_response(response))
 
 
 async def _stream_via_litellm(

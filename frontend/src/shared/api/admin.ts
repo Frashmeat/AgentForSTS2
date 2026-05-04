@@ -14,6 +14,7 @@ export interface AdminExecutionDetail extends AdminExecutionListItem {
   input_summary: string;
   result_summary: string;
   error_summary: string;
+  error_payload?: Record<string, unknown>;
   step_protocol_version: string;
   result_schema_version: string;
 }
@@ -181,6 +182,8 @@ export interface AdminAuditEvent {
 export interface AdminWorkstationCapabilities {
   available?: boolean;
   reason?: string;
+  runtime_root?: string;
+  knowledge_root?: string;
   knowledge?: {
     embedded_sts2_guidance?: boolean;
     knowledge_pack_active?: boolean;
@@ -214,9 +217,20 @@ export interface AdminWorkstationRuntimeStatus {
   pid?: number | null;
   last_error?: string;
   capabilities?: AdminWorkstationCapabilities | null;
+  web_knowledge?: {
+    active?: boolean;
+    active_pack_id?: string;
+    active_pack_label?: string;
+    knowledge_root?: string;
+    runtime_root?: string;
+  };
+  knowledge_runtime_consistent?: boolean;
+  knowledge_runtime_mismatch_reason?: string;
   reason?: string;
   stdout_log_path?: string;
   stderr_log_path?: string;
+  workstation_config_path?: string;
+  runtime_root?: string;
 }
 
 export interface AdminWorkstationRuntimeLogTail {

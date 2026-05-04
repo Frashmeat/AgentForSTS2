@@ -117,6 +117,7 @@ class AdminQueryRepositoriesSqlAlchemy(AdminQueryRepositories):
             input_summary=row.input_summary,
             result_summary=row.result_summary,
             error_summary=row.error_summary,
+            error_payload=dict(row.error_payload or {}),
             step_protocol_version=row.step_protocol_version,
             result_schema_version=row.result_schema_version,
         )

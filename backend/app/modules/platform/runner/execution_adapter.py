@@ -4,9 +4,11 @@ import logging
 from collections.abc import Awaitable, Callable
 
 from app.modules.platform.contracts.runner_contracts import StepExecutionRequest, StepExecutionResult
+from app.modules.platform.errors import error_payload_from_exception
 
 StepHandler = Callable[[StepExecutionRequest], Awaitable[dict[str, object]]]
 logger = logging.getLogger(__name__)
+_RUNTIME_SURFACE_PAYLOAD_KEY = "__runtime_surface"
 
 
 def _short_text(value: object, limit: int = 300) -> str:
@@ -80,12 +82,17 @@ class ExecutionAdapter:
                 output_payload=dict(payload),
             )
         except Exception as exc:
-            error_payload = {}
-            payload_builder = getattr(exc, "to_error_payload", None)
-            if callable(payload_builder):
-                candidate = payload_builder()
-                if isinstance(candidate, dict):
-                    error_payload = dict(candidate)
+            runtime_surface = _resolve_runtime_surface(request)
+            error_payload = error_payload_from_exception(
+                exc,
+                runtime_surface=runtime_surface,
+                component=request.step_type,
+                operation=request.step_id,
+                step_id=request.step_id,
+                step_type=request.step_type,
+                job_id=request.job_id,
+                job_item_id=request.job_item_id,
+            )
             reason_code = str(error_payload.get("reason_code", "")).strip()
             if reason_code:
                 logger.warning(
@@ -109,6 +116,13 @@ class ExecutionAdapter:
             return StepExecutionResult(
                 step_id=request.step_id,
                 status="failed_system",
-                error_summary=str(exc),
+                error_summary=str(error_payload.get("message") or exc),
                 error_payload=error_payload,
             )
+
+
+def _resolve_runtime_surface(request: StepExecutionRequest) -> str:
+    value = str(request.input_payload.get(_RUNTIME_SURFACE_PAYLOAD_KEY) or "").strip()
+    if value in {"web", "web_workstation", "local_workstation"}:
+        return value
+    return "web"

@@ -17,11 +17,16 @@ from app.modules.platform.contracts.workstation_execution import (
     WorkstationExecutionEvent,
     WorkstationExecutionPollResult,
 )
+from app.modules.platform.errors import PlatformExecutionError, build_platform_error
 from app.shared.infra.config.settings import Settings
 
 
 class WorkstationExecutionClientError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, reason_code: str, category: str, retryable: bool = True) -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
+        self.category = category
+        self.retryable = retryable
 
 
 WorkstationEventHandler = Callable[[list[WorkstationExecutionEvent]], None]
@@ -93,7 +98,12 @@ class WorkstationExecutionClient:
             if result.status not in {"accepted", "running"}:
                 return result
             if self.monotonic() >= deadline:
-                raise WorkstationExecutionClientError(f"workstation execution timed out: {workstation_execution_id}")
+                raise WorkstationExecutionClientError(
+                    f"workstation execution timed out: {workstation_execution_id}",
+                    reason_code="web_workstation_dispatch_timeout",
+                    category="timeout",
+                    retryable=True,
+                )
             self.sleep(poll_interval_seconds)
 
     @property
@@ -124,20 +134,56 @@ class WorkstationExecutionClient:
             with response:
                 raw = response.read()
         except urllib.error.HTTPError as exc:
-            raise WorkstationExecutionClientError(f"workstation request failed: url={url} HTTP {exc.code}") from exc
+            if exc.code in {401, 403}:
+                reason_code = "web_workstation_control_token_invalid"
+                category = "auth_error"
+                retryable = False
+            else:
+                reason_code = "web_workstation_request_failed"
+                category = "network_error"
+                retryable = True
+            raise WorkstationExecutionClientError(
+                f"workstation request failed: url={url} HTTP {exc.code}",
+                reason_code=reason_code,
+                category=category,
+                retryable=retryable,
+            ) from exc
         except OSError as exc:
-            raise WorkstationExecutionClientError(f"workstation request failed: url={url} error={exc}") from exc
+            raise WorkstationExecutionClientError(
+                f"workstation request failed: url={url} error={exc}",
+                reason_code="web_workstation_unreachable",
+                category="network_error",
+                retryable=True,
+            ) from exc
 
-        decoded = json.loads(raw.decode("utf-8") if raw else "{}")
+        try:
+            decoded = json.loads(raw.decode("utf-8") if raw else "{}")
+        except json.JSONDecodeError as exc:
+            raise WorkstationExecutionClientError(
+                f"workstation response must be JSON: url={url}",
+                reason_code="web_workstation_invalid_response",
+                category="invalid_response",
+                retryable=True,
+            ) from exc
         if not isinstance(decoded, dict):
-            raise WorkstationExecutionClientError("workstation response must be a JSON object")
+            raise WorkstationExecutionClientError(
+                "workstation response must be a JSON object",
+                reason_code="web_workstation_invalid_response",
+                category="invalid_response",
+                retryable=True,
+            )
         return decoded
 
     def _control_token(self) -> str:
         token_env = str(self.config.get("control_token_env", "ATS_WORKSTATION_CONTROL_TOKEN")).strip()
         token = os.environ.get(token_env, "").strip()
         if not token:
-            raise WorkstationExecutionClientError("workstation control token is not configured")
+            raise WorkstationExecutionClientError(
+                "workstation control token is not configured",
+                reason_code="web_workstation_control_token_missing",
+                category="config_error",
+                retryable=False,
+            )
         return token
 
     def _ensure_runtime_ready(self) -> None:
@@ -155,5 +201,29 @@ class WorkstationExecutionClient:
             reason = str(capabilities.get("reason") or "")
         workstation_url = str(status_payload.get("workstation_url") or self.config.get("workstation_url", ""))
         raise WorkstationExecutionClientError(
-            f"workstation runtime unavailable before dispatch: url={workstation_url} reason={reason or 'not running'}"
+            f"workstation runtime unavailable before dispatch: url={workstation_url} reason={reason or 'not running'}",
+            reason_code="web_workstation_unreachable",
+            category="network_error",
+            retryable=True,
         )
+
+
+def workstation_dispatch_error_to_platform_error(error: Exception) -> PlatformExecutionError:
+    reason_code = getattr(error, "reason_code", "web_workstation_dispatch_failed")
+    category = getattr(error, "category", "network_error")
+    retryable = bool(getattr(error, "retryable", True))
+    return PlatformExecutionError(
+        build_platform_error(
+            origin="web_workstation",
+            runtime_surface="web",
+            component="workstation_dispatch_client",
+            operation="dispatch_and_poll",
+            category=str(category),
+            reason_code=str(reason_code),
+            message="Web 托管 Workstation 不可用，请管理员检查托管工作站运行状态。",
+            developer_message=str(error),
+            retryable=retryable,
+            log_hint={"primary": "web_backend_log", "secondary": "web_workstation_stderr"},
+            diagnostic={"exception_type": type(error).__name__},
+        )
+    )

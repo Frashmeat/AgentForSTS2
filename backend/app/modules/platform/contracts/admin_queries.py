@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ._model import ModelBase
 from .job_queries import UserQuotaView
@@ -34,6 +34,7 @@ class AdminExecutionDetailView(ModelBase):
     input_summary: str = ""
     result_summary: str = ""
     error_summary: str = ""
+    error_payload: dict[str, object] = field(default_factory=dict)
     step_protocol_version: str | None = None
     result_schema_version: str | None = None
 

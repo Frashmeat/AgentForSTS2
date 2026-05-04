@@ -12,6 +12,11 @@ import {
   type AdminKnowledgePackListView,
 } from "../../shared/api/index.ts";
 import { resolveErrorMessage } from "../../shared/error.ts";
+import {
+  platformErrorNoticeDetails,
+  platformErrorNoticeTitle,
+  toPlatformErrorView,
+} from "../../shared/platform/index.ts";
 import { useAdminLayoutContext } from "./AdminLayout.tsx";
 
 function formatEnabled(value?: boolean): string {
@@ -127,6 +132,8 @@ function isIncompleteKnowledgePackError(error: unknown): boolean {
   return message.includes("知识库包不完整") || message.includes("知识库包缺少");
 }
 
+type KnowledgePackOperation = "manual-upload" | "local-upload" | "activate" | "rollback" | "delete";
+
 function ActivePackSummary({ view }: { view: AdminKnowledgePackListView | null }) {
   const activePack = view?.active_pack;
   return (
@@ -163,8 +170,10 @@ export function AdminKnowledgePacksPage() {
   const [file, setFile] = useState<File | null>(null);
   const [label, setLabel] = useState("");
   const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [activeOperation, setActiveOperation] = useState<KnowledgePackOperation | null>(null);
+  const [operationStage, setOperationStage] = useState("");
   const [activateAfterLocalUpload, setActivateAfterLocalUpload] = useState(false);
+  const saving = activeOperation !== null;
 
   function showNotice(title: string, message: string, tone: "info" | "success" | "warning" | "error" = "info") {
     onStatusNotice?.({ title, message, tone });
@@ -176,6 +185,38 @@ export function AdminKnowledgePacksPage() {
       return `${message} 请先在本机 Workstation 设置页执行“更新知识库”，确认 runtime/knowledge 同时包含 game/**/*.cs、baselib/BaseLib.decompiled.cs 和 resources/sts2/*.md 后再上传。`;
     }
     return message;
+  }
+
+  function showLocalWorkstationError(error: unknown) {
+    const message = resolveKnowledgePackError(error, "从本机工作站上传知识库失败");
+    const view = toPlatformErrorView(
+      {
+        schema_version: "platform_error.v1",
+        origin: "local_workstation",
+        runtime_surface: "browser",
+        component: "knowledge_pack",
+        operation: "export_current_knowledge_pack",
+        category: "network_error",
+        reason_code: "local_workstation_export_failed",
+        message,
+        developer_message: message,
+        retryable: true,
+        log_hint: {
+          primary: "local_workstation_log",
+          secondary: "web_backend_log",
+        },
+        diagnostic: {
+          raw_error: message,
+        },
+      },
+      message,
+    );
+    onStatusNotice?.({
+      title: platformErrorNoticeTitle(view),
+      message: view.message,
+      details: platformErrorNoticeDetails(view),
+      tone: "error",
+    });
   }
 
   async function loadData() {
@@ -198,9 +239,12 @@ export function AdminKnowledgePacksPage() {
       showNotice("请选择文件", "请选择要上传的知识库 zip 包。", "warning");
       return;
     }
-    setSaving(true);
+    setActiveOperation("manual-upload");
+    setOperationStage("上传到 Web");
+    showNotice("正在上传知识库包", "正在上传 zip 包到 Web 后端，请等待上传和完整性校验完成。", "info");
     try {
       await uploadAdminKnowledgePack(file, label.trim());
+      setOperationStage("刷新服务器状态");
       showNotice("知识库包已上传", "服务器已收到知识库包，请在列表中确认完整性后激活。", "success");
       setFile(null);
       setLabel("");
@@ -208,19 +252,27 @@ export function AdminKnowledgePacksPage() {
     } catch (uploadError) {
       showNotice("上传知识库包失败", resolveKnowledgePackError(uploadError, "上传知识库包失败"), "error");
     } finally {
-      setSaving(false);
+      setActiveOperation(null);
+      setOperationStage("");
     }
   }
 
   async function uploadFromLocalWorkstation() {
-    setSaving(true);
+    setActiveOperation("local-upload");
+    setOperationStage("导出本机知识库");
+    showNotice("正在导出本机知识库", "正在连接本机 Workstation 并导出当前 runtime/knowledge。", "info");
     try {
       const exported = await exportCurrentKnowledgePack();
+      setOperationStage("上传到 Web");
+      showNotice("正在上传本机知识库", "本机知识库已导出，正在上传到 Web 后端。", "info");
       const displayLabel = label.trim() || `本机知识库 ${new Date().toLocaleString("zh-CN", { hour12: false })}`;
       const pack = await uploadAdminKnowledgePack(exported.blob, displayLabel, exported.fileName);
       if (activateAfterLocalUpload) {
+        setOperationStage("安装并激活");
+        showNotice("正在激活知识库包", "Web 后端正在安装刚上传的知识库包，并切换服务器知识库真源。", "info");
         await activateAdminKnowledgePack(pack.pack_id);
       }
+      setOperationStage("刷新服务器状态");
       showNotice(
         activateAfterLocalUpload ? "本机知识库已上传并激活" : "本机知识库已上传",
         activateAfterLocalUpload
@@ -231,26 +283,32 @@ export function AdminKnowledgePacksPage() {
       setLabel("");
       await loadData();
     } catch (uploadError) {
-      showNotice(
-        "从本机工作站上传失败",
-        resolveKnowledgePackError(uploadError, "从本机工作站上传知识库失败"),
-        "error",
-      );
+      showLocalWorkstationError(uploadError);
     } finally {
-      setSaving(false);
+      setActiveOperation(null);
+      setOperationStage("");
     }
   }
 
-  async function runAction(action: () => Promise<unknown>, successMessage: string) {
-    setSaving(true);
+  async function runAction(
+    action: () => Promise<unknown>,
+    successMessage: string,
+    stage = "执行操作",
+    operation: KnowledgePackOperation = "activate",
+  ) {
+    setActiveOperation(operation);
+    setOperationStage(stage);
+    showNotice("正在处理知识库包", stage, "info");
     try {
       await action();
+      setOperationStage("刷新服务器状态");
       showNotice("知识库包操作完成", successMessage, "success");
       await loadData();
     } catch (actionError) {
       showNotice("知识库包操作失败", resolveErrorMessage(actionError, "知识库包操作失败"), "error");
     } finally {
-      setSaving(false);
+      setActiveOperation(null);
+      setOperationStage("");
     }
   }
 
@@ -260,7 +318,7 @@ export function AdminKnowledgePacksPage() {
       pack.active ? " 当前激活包删除后会自动回退或清空激活状态。" : ""
     }`;
     if (!onConfirm) {
-      await runAction(() => deleteAdminKnowledgePack(pack.pack_id), "知识库包已删除。");
+      await runAction(() => deleteAdminKnowledgePack(pack.pack_id), "知识库包已删除。", "删除知识库包", "delete");
       return;
     }
     onConfirm({
@@ -270,7 +328,7 @@ export function AdminKnowledgePacksPage() {
       cancelLabel: "取消",
       tone: "warning",
       onConfirm: () => {
-        void runAction(() => deleteAdminKnowledgePack(pack.pack_id), "知识库包已删除。");
+        void runAction(() => deleteAdminKnowledgePack(pack.pack_id), "知识库包已删除。", "删除知识库包", "delete");
       },
     });
   }
@@ -340,7 +398,7 @@ export function AdminKnowledgePacksPage() {
                   className="inline-flex items-center gap-2 rounded-lg bg-violet-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-violet-800 disabled:cursor-not-allowed disabled:bg-slate-300"
                 >
                   <Upload size={16} />
-                  <span>{saving ? "处理中" : "上传知识库包"}</span>
+                  <span>{activeOperation === "manual-upload" && operationStage ? operationStage : "上传知识库包"}</span>
                 </button>
                 <button
                   type="button"
@@ -349,7 +407,9 @@ export function AdminKnowledgePacksPage() {
                   className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:border-violet-200 hover:text-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <CloudUpload size={16} />
-                  <span>{saving ? "处理中" : "从本机工作站上传"}</span>
+                  <span>
+                    {activeOperation === "local-upload" && operationStage ? operationStage : "从本机工作站上传"}
+                  </span>
                 </button>
               </div>
               <p className="text-xs leading-5 text-slate-500">
@@ -365,7 +425,7 @@ export function AdminKnowledgePacksPage() {
             <h2 className="text-base font-semibold text-slate-900">已上传包</h2>
             <button
               type="button"
-              onClick={() => void runAction(rollbackAdminKnowledgePack, "知识库包已回滚。")}
+              onClick={() => void runAction(rollbackAdminKnowledgePack, "知识库包已回滚。", "回滚知识库包", "rollback")}
               className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800 transition hover:bg-amber-100 disabled:opacity-50"
               disabled={saving}
             >
@@ -417,7 +477,12 @@ export function AdminKnowledgePacksPage() {
                         <button
                           type="button"
                           onClick={() =>
-                            void runAction(() => activateAdminKnowledgePack(pack.pack_id), "知识库包已激活。")
+                            void runAction(
+                              () => activateAdminKnowledgePack(pack.pack_id),
+                              "知识库包已激活。",
+                              "安装并激活",
+                              "activate",
+                            )
                           }
                           disabled={saving || pack.active}
                           className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 transition hover:border-violet-200 hover:text-violet-700 disabled:cursor-not-allowed disabled:opacity-50"

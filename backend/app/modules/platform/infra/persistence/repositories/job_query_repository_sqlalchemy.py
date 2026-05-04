@@ -155,6 +155,7 @@ class JobQueryRepositorySqlAlchemy(JobQueryRepository):
             .all()
         )
         delivery_summaries = self._load_item_delivery_summaries([row.id for row in rows])
+        latest_execution_payloads = self._load_latest_item_execution_payloads([row.id for row in rows])
         return [
             JobItemListItem(
                 id=row.id,
@@ -164,9 +165,25 @@ class JobQueryRepositorySqlAlchemy(JobQueryRepository):
                 delivery_state=delivery_summaries.get(row.id, _DeliverySummary()).state,
                 result_summary=row.result_summary,
                 error_summary=row.error_summary,
+                error_payload=latest_execution_payloads.get(row.id, {}),
             )
             for row in rows
         ]
+
+    def _load_latest_item_execution_payloads(self, job_item_ids: list[int]) -> dict[int, dict[str, object]]:
+        if not job_item_ids:
+            return {}
+        rows = (
+            self.session.query(AIExecutionRecord)
+            .filter(AIExecutionRecord.job_item_id.in_(job_item_ids))
+            .order_by(AIExecutionRecord.job_item_id.asc(), AIExecutionRecord.created_at.desc(), AIExecutionRecord.id.desc())
+            .all()
+        )
+        payloads: dict[int, dict[str, object]] = {}
+        for row in rows:
+            if row.job_item_id not in payloads:
+                payloads[row.job_item_id] = dict(row.error_payload or {})
+        return payloads
 
     def _load_refund_summaries(self, job_ids: list[int]) -> dict[int, _RefundSummary]:
         if not job_ids:

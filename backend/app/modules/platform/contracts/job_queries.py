@@ -38,6 +38,7 @@ class JobItemListItem(ModelBase):
     delivery_state: str = ""
     result_summary: str = ""
     error_summary: str = ""
+    error_payload: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
