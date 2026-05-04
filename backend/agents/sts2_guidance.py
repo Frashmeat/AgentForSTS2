@@ -22,7 +22,7 @@ _RESOURCE_DIR = knowledge_runtime.RESOURCE_KNOWLEDGE_DIR
 
 
 def get_game_api_reference_path():
-    return knowledge_runtime.GAME_KNOWLEDGE_DIR / knowledge_runtime.GAME_KNOWLEDGE_SEED_FILE.name
+    return knowledge_runtime.GAME_KNOWLEDGE_DIR / knowledge_runtime.GAME_API_REFERENCE_FILE_NAME
 
 
 def get_baselib_runtime_source_path():

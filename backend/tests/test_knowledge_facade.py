@@ -25,27 +25,20 @@ def test_game_source_prefers_runtime_decompiled(monkeypatch, tmp_path: Path):
     }
 
 
-def test_game_source_reports_reference_only_when_only_runtime_reference_exists(monkeypatch, tmp_path: Path):
+def test_game_source_reports_missing_when_only_runtime_reference_exists(monkeypatch, tmp_path: Path):
     runtime_dir = tmp_path / "runtime" / "knowledge" / "game"
     runtime_dir.mkdir(parents=True)
-    repo_ref = tmp_path / "seed" / "sts2_api_reference.md"
-    repo_ref.parent.mkdir(parents=True, exist_ok=True)
-    repo_ref.write_text("reference", encoding="utf-8")
+    (runtime_dir / "sts2_api_reference.md").write_text("reference", encoding="utf-8")
 
     monkeypatch.setattr(knowledge_facade.knowledge_runtime, "GAME_KNOWLEDGE_DIR", runtime_dir)
-    monkeypatch.setattr(knowledge_facade.knowledge_runtime, "GAME_KNOWLEDGE_SEED_FILE", repo_ref, raising=False)
-    monkeypatch.setattr(
-        knowledge_facade.knowledge_runtime,
-        "ensure_runtime_knowledge_seeded",
-        lambda: (runtime_dir / repo_ref.name).write_text("reference", encoding="utf-8"),
-    )
+    monkeypatch.setattr(knowledge_facade.knowledge_runtime, "ensure_runtime_knowledge_seeded", lambda: None)
 
     result = knowledge_facade.get_game_source_info()
 
     assert result == {
-        "source_mode": "reference_only",
-        "path": str(runtime_dir / repo_ref.name),
-        "exists": True,
+        "source_mode": "missing",
+        "path": "",
+        "exists": False,
     }
 
 
@@ -67,29 +60,22 @@ def test_baselib_source_prefers_runtime_decompiled(monkeypatch, tmp_path: Path):
     }
 
 
-def test_baselib_source_initializes_runtime_from_seed(monkeypatch, tmp_path: Path):
+def test_baselib_source_stays_missing_without_runtime_file(monkeypatch, tmp_path: Path):
     runtime_dir = tmp_path / "runtime" / "knowledge" / "baselib"
-    seed_file = tmp_path / "seed" / "BaseLib.decompiled.cs"
-    seed_file.parent.mkdir(parents=True, exist_ok=True)
-    seed_file.write_text("// repo baselib", encoding="utf-8")
 
     monkeypatch.setattr(knowledge_facade.knowledge_runtime, "BASELIB_KNOWLEDGE_DIR", runtime_dir)
-    monkeypatch.setattr(knowledge_facade.knowledge_runtime, "BASELIB_KNOWLEDGE_SEED_FILE", seed_file, raising=False)
     monkeypatch.setattr(
         knowledge_facade.knowledge_runtime,
         "ensure_runtime_knowledge_seeded",
-        lambda: (
-            runtime_dir.mkdir(parents=True, exist_ok=True),
-            (runtime_dir / "BaseLib.decompiled.cs").write_text("// repo baselib", encoding="utf-8"),
-        ),
+        lambda: runtime_dir.mkdir(parents=True, exist_ok=True),
     )
 
     result = knowledge_facade.get_baselib_source_info()
 
     assert result == {
-        "source_mode": "runtime_decompiled",
-        "path": str(runtime_dir / "BaseLib.decompiled.cs"),
-        "exists": True,
+        "source_mode": "missing",
+        "path": "",
+        "exists": False,
     }
 
 

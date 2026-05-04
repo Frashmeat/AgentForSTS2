@@ -14,7 +14,7 @@ class Sts2LookupProvider:
                 key="sts2.lookup.baselib",
                 title="BaseLib local source",
                 path=lookup_context["baselib_src_path"]
-                or str(knowledge_runtime.active_baselib_knowledge_dir() / "BaseLib.decompiled.cs"),
+                or str(knowledge_runtime.BASELIB_KNOWLEDGE_DIR / "BaseLib.decompiled.cs"),
                 note="Read this local decompiled source for `CustomCardModel`, `CustomPotionModel`, `PlaceholderCharacterModel`, and related BaseLib wrappers.",
                 keywords=["BaseLib", "CustomCardModel", "CustomPotionModel", "PlaceholderCharacterModel"],
             )
@@ -34,20 +34,6 @@ class Sts2LookupProvider:
                     keywords=["runtime", "knowledge", "DamageCmd", "PowerCmd", "CardSelectorPrefs"],
                 )
             )
-        elif lookup_context["game_source_mode"] == "reference_only":
-            items.append(
-                KnowledgeLookupItem(
-                    key="sts2.lookup.game_reference",
-                    title="STS2 API reference summary",
-                    path=lookup_context["game_path"],
-                    note=(
-                        "Read this Markdown reference for summarized STS2 API facts. "
-                        "It is not a full game decompile; run the workstation knowledge refresh with ilspycmd "
-                        "when exact game source lookup is required."
-                    ),
-                    keywords=["reference", "sts2_api_reference.md", "DamageCmd", "PowerCmd", "CardSelectorPrefs"],
-                )
-            )
         else:
             items.append(
                 KnowledgeLookupItem(
@@ -63,7 +49,7 @@ class Sts2LookupProvider:
             KnowledgeLookupItem(
                 key="sts2.lookup.guidance_resources",
                 title="STS2 guidance resources",
-                path=str(knowledge_runtime.active_resource_knowledge_dir()),
+                path=str(knowledge_runtime.RESOURCE_KNOWLEDGE_DIR),
                 note="Use these Markdown resources for conventions, common pitfalls, and summarized examples.",
                 keywords=["guidance", "common.md", "card.md", "power.md", "relic.md", "custom_code.md"],
             )

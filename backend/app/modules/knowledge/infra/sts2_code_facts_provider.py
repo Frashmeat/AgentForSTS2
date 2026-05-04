@@ -27,20 +27,14 @@ class Sts2CodeFactsProvider:
 
     def _runtime_knowledge_fact(self) -> KnowledgeFactItem:
         lookup = build_lookup_context()
-        game_path = lookup["game_path"] or str(knowledge_runtime.active_game_knowledge_dir())
+        game_path = lookup["game_path"] or str(knowledge_runtime.GAME_KNOWLEDGE_DIR)
         baselib_path = lookup["baselib_src_path"] or str(
-            knowledge_runtime.active_baselib_knowledge_dir() / "BaseLib.decompiled.cs"
+            knowledge_runtime.BASELIB_KNOWLEDGE_DIR / "BaseLib.decompiled.cs"
         )
         if lookup["game_source_mode"] == "runtime_decompiled":
             body = (
                 "Use runtime knowledge as the source of truth. "
                 f"Game path: `{game_path}`. "
-                f"BaseLib path: `{baselib_path}`."
-            )
-        elif lookup["game_source_mode"] == "reference_only":
-            body = (
-                "Only a summarized STS2 API reference is available for game APIs; it is not a full game decompile. "
-                f"Game reference path: `{game_path}`. "
                 f"BaseLib path: `{baselib_path}`."
             )
         else:
@@ -55,8 +49,8 @@ class Sts2CodeFactsProvider:
             body=body,
             priority=10,
             evidence_paths=[
-                str(knowledge_runtime.active_game_knowledge_dir()),
-                str(knowledge_runtime.active_baselib_knowledge_dir() / "BaseLib.decompiled.cs"),
+                str(knowledge_runtime.GAME_KNOWLEDGE_DIR),
+                str(knowledge_runtime.BASELIB_KNOWLEDGE_DIR / "BaseLib.decompiled.cs"),
             ],
             keywords=["runtime", "knowledge", "baselib", "sts2"],
             asset_types=["card", "power", "relic", "custom_code", "character"],
@@ -144,10 +138,10 @@ class Sts2CodeFactsProvider:
         }
 
     def _card_facts(self) -> list[KnowledgeFactItem]:
-        resource_root = knowledge_runtime.active_resource_knowledge_dir()
+        resource_root = knowledge_runtime.RESOURCE_KNOWLEDGE_DIR
         card_doc = str(resource_root / "card.md")
-        baselib = str(knowledge_runtime.active_baselib_knowledge_dir() / "BaseLib.decompiled.cs")
-        api_ref = str(knowledge_runtime.active_game_knowledge_dir() / knowledge_runtime.GAME_KNOWLEDGE_SEED_FILE.name)
+        baselib = str(knowledge_runtime.BASELIB_KNOWLEDGE_DIR / "BaseLib.decompiled.cs")
+        api_ref = str(knowledge_runtime.GAME_KNOWLEDGE_DIR / knowledge_runtime.GAME_API_REFERENCE_FILE_NAME)
         return [
             KnowledgeFactItem(
                 key="sts2.card.base_class",
@@ -176,9 +170,9 @@ class Sts2CodeFactsProvider:
         ]
 
     def _power_facts(self) -> list[KnowledgeFactItem]:
-        resource_root = knowledge_runtime.active_resource_knowledge_dir()
+        resource_root = knowledge_runtime.RESOURCE_KNOWLEDGE_DIR
         power_doc = str(resource_root / "power.md")
-        api_ref = str(knowledge_runtime.active_game_knowledge_dir() / knowledge_runtime.GAME_KNOWLEDGE_SEED_FILE.name)
+        api_ref = str(knowledge_runtime.GAME_KNOWLEDGE_DIR / knowledge_runtime.GAME_API_REFERENCE_FILE_NAME)
         return [
             KnowledgeFactItem(
                 key="sts2.power.base_class",
@@ -206,7 +200,7 @@ class Sts2CodeFactsProvider:
         ]
 
     def _relic_facts(self) -> list[KnowledgeFactItem]:
-        relic_doc = str(knowledge_runtime.active_resource_knowledge_dir() / "relic.md")
+        relic_doc = str(knowledge_runtime.RESOURCE_KNOWLEDGE_DIR / "relic.md")
         return [
             KnowledgeFactItem(
                 key="sts2.relic.base_class",
@@ -223,10 +217,10 @@ class Sts2CodeFactsProvider:
         ]
 
     def _custom_code_facts(self) -> list[KnowledgeFactItem]:
-        resource_root = knowledge_runtime.active_resource_knowledge_dir()
+        resource_root = knowledge_runtime.RESOURCE_KNOWLEDGE_DIR
         custom_doc = str(resource_root / "custom_code.md")
-        baselib = str(knowledge_runtime.active_baselib_knowledge_dir() / "BaseLib.decompiled.cs")
-        api_ref = str(knowledge_runtime.active_game_knowledge_dir() / knowledge_runtime.GAME_KNOWLEDGE_SEED_FILE.name)
+        baselib = str(knowledge_runtime.BASELIB_KNOWLEDGE_DIR / "BaseLib.decompiled.cs")
+        api_ref = str(knowledge_runtime.GAME_KNOWLEDGE_DIR / knowledge_runtime.GAME_API_REFERENCE_FILE_NAME)
         return [
             KnowledgeFactItem(
                 key="sts2.custom_code.patching",
@@ -255,10 +249,10 @@ class Sts2CodeFactsProvider:
         ]
 
     def _character_facts(self) -> list[KnowledgeFactItem]:
-        resource_root = knowledge_runtime.active_resource_knowledge_dir()
+        resource_root = knowledge_runtime.RESOURCE_KNOWLEDGE_DIR
         character_doc = str(resource_root / "character.md")
-        baselib = str(knowledge_runtime.active_baselib_knowledge_dir() / "BaseLib.decompiled.cs")
-        api_ref = str(knowledge_runtime.active_game_knowledge_dir() / knowledge_runtime.GAME_KNOWLEDGE_SEED_FILE.name)
+        baselib = str(knowledge_runtime.BASELIB_KNOWLEDGE_DIR / "BaseLib.decompiled.cs")
+        api_ref = str(knowledge_runtime.GAME_KNOWLEDGE_DIR / knowledge_runtime.GAME_API_REFERENCE_FILE_NAME)
         return [
             KnowledgeFactItem(
                 key="sts2.character.base_class",
@@ -277,8 +271,8 @@ class Sts2CodeFactsProvider:
     def _requirement_facts(self, requirements: str) -> list[KnowledgeFactItem]:
         text = requirements.lower()
         facts: list[KnowledgeFactItem] = []
-        resource_root = knowledge_runtime.active_resource_knowledge_dir()
-        api_ref = str(knowledge_runtime.active_game_knowledge_dir() / knowledge_runtime.GAME_KNOWLEDGE_SEED_FILE.name)
+        resource_root = knowledge_runtime.RESOURCE_KNOWLEDGE_DIR
+        api_ref = str(knowledge_runtime.GAME_KNOWLEDGE_DIR / knowledge_runtime.GAME_API_REFERENCE_FILE_NAME)
         custom_doc = str(resource_root / "custom_code.md")
         triggers = [
             (
@@ -330,7 +324,7 @@ class Sts2CodeFactsProvider:
                     priority=57,
                     evidence_paths=[
                         custom_doc,
-                        str(knowledge_runtime.active_baselib_knowledge_dir() / "BaseLib.decompiled.cs"),
+                        str(knowledge_runtime.BASELIB_KNOWLEDGE_DIR / "BaseLib.decompiled.cs"),
                     ],
                     keywords=["HarmonyPatch", "PatchAll"],
                     asset_types=["custom_code"],

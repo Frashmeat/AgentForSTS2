@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+import zipfile
 
 import pytest
 
@@ -40,6 +41,12 @@ from app.modules.platform.infra.persistence.repositories.job_repository_sqlalche
 from app.shared.infra.db.base import Base
 from routers.auth_router import router as auth_router
 from routers.platform_admin import router
+from app.modules.knowledge.infra import knowledge_runtime
+
+
+def _write_required_resource_docs_to_zip(archive: zipfile.ZipFile, text_prefix: str = "resource") -> None:
+    for resource_path in knowledge_runtime.REQUIRED_RESOURCE_FILES:
+        archive.writestr(resource_path, f"{text_prefix} {resource_path}\n")
 
 
 class FakePlatformHealthChecker:
@@ -370,6 +377,59 @@ def test_platform_admin_router_returns_workstation_runtime_logs(client):
 
     rejected = test_client.get("/api/admin/platform/workstation-runtime-logs", params={"stream": "../config"})
     assert rejected.status_code == 400
+
+
+def test_platform_admin_router_deletes_knowledge_pack(client, monkeypatch, tmp_path: Path):
+    test_client, _, _, _ = client
+    knowledge_root = tmp_path / "runtime" / "knowledge"
+    packs_dir = knowledge_root / "packs"
+    active_path = knowledge_root / "active-knowledge-pack.json"
+    resource_runtime_dir = knowledge_root / "resources" / "sts2"
+    game_runtime_dir = knowledge_root / "game"
+    baselib_runtime_dir = knowledge_root / "baselib"
+    archive_path = tmp_path / "pack.zip"
+
+    monkeypatch.setattr(knowledge_runtime, "KNOWLEDGE_ROOT", knowledge_root)
+    monkeypatch.setattr(knowledge_runtime, "KNOWLEDGE_PACKS_DIR", packs_dir)
+    monkeypatch.setattr(knowledge_runtime, "ACTIVE_KNOWLEDGE_PACK_PATH", active_path)
+    monkeypatch.setattr(knowledge_runtime, "RESOURCE_KNOWLEDGE_DIR", resource_runtime_dir)
+    monkeypatch.setattr(knowledge_runtime, "GAME_KNOWLEDGE_DIR", game_runtime_dir)
+    monkeypatch.setattr(knowledge_runtime, "BASELIB_KNOWLEDGE_DIR", baselib_runtime_dir)
+
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        _write_required_resource_docs_to_zip(archive, "common")
+        for index in range(knowledge_runtime.MIN_COMPLETE_GAME_CS_COUNT):
+            archive.writestr(f"game/Game{index}.cs", "// game\n")
+        archive.writestr("baselib/BaseLib.decompiled.cs", "// baselib\n")
+
+    login = test_client.post(
+        "/api/auth/login",
+        json={
+            "login": "admin@example.com",
+            "password": "admin-pass",
+        },
+    )
+    assert login.status_code == 200
+
+    uploaded = test_client.post(
+        "/api/admin/platform/knowledge-packs",
+        files={"file": ("pack.zip", archive_path.read_bytes(), "application/zip")},
+    )
+    assert uploaded.status_code == 200
+    pack_id = uploaded.json()["pack_id"]
+
+    activated = test_client.post(f"/api/admin/platform/knowledge-packs/{pack_id}/activate")
+    assert activated.status_code == 200
+
+    deleted = test_client.delete(f"/api/admin/platform/knowledge-packs/{pack_id}")
+    assert deleted.status_code == 200
+    assert deleted.json()["deleted"] is True
+    assert deleted.json()["was_active"] is True
+    assert deleted.json()["active_pack_id"] == ""
+
+    listed = test_client.get("/api/admin/platform/knowledge-packs")
+    assert listed.status_code == 200
+    assert listed.json()["items"] == []
 
 
 def test_platform_admin_router_manages_execution_profiles(client):

@@ -9,7 +9,7 @@ from app.shared.contracts.knowledge import KnowledgeGuidanceItem, KnowledgeQuery
 class Sts2GuidanceProvider:
     def build_guidance(self, query: KnowledgeQuery) -> list[KnowledgeGuidanceItem]:
         knowledge_runtime.ensure_runtime_knowledge_seeded()
-        resource_root = knowledge_runtime.active_resource_knowledge_dir()
+        resource_root = knowledge_runtime.RESOURCE_KNOWLEDGE_DIR
         if query.scenario == "planner":
             planner_path = resource_root / "planner_guidance.md"
             return [self._item("sts2.guidance.planner", "Planner hints", planner_path, ["planner"])]

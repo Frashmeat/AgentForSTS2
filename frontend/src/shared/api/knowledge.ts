@@ -90,7 +90,18 @@ export async function exportCurrentKnowledgePack(): Promise<KnowledgePackExport>
     credentials: "include",
   });
   if (!response.ok) {
-    throw new Error(await response.text());
+    const text = await response.text();
+    try {
+      const payload = JSON.parse(text) as { detail?: unknown };
+      if (typeof payload.detail === "string" && payload.detail.trim()) {
+        throw new Error(payload.detail);
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message !== text) {
+        throw error;
+      }
+    }
+    throw new Error(text);
   }
   const fileCountText = response.headers.get("X-ATS-Knowledge-Pack-File-Count");
   const fileCount = fileCountText ? Number.parseInt(fileCountText, 10) : undefined;

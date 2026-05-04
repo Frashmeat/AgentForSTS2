@@ -7,11 +7,32 @@ from app.modules.knowledge.infra.sts2_knowledge_resolver import Sts2KnowledgeRes
 from app.shared.contracts.knowledge import KnowledgeQuery
 
 
+def _prepare_runtime_knowledge(monkeypatch, tmp_path: Path):
+    from app.modules.knowledge.infra import knowledge_runtime
+
+    runtime_root = tmp_path / "runtime" / "knowledge"
+    resource_root = runtime_root / "resources" / "sts2"
+    game_root = runtime_root / "game"
+    baselib_root = runtime_root / "baselib"
+    resource_root.mkdir(parents=True)
+    game_root.mkdir(parents=True)
+    baselib_root.mkdir(parents=True)
+    for name in ("common.md", "card.md", "relic.md", "power.md", "custom_code.md"):
+        (resource_root / name).write_text(f"{name} guidance\n", encoding="utf-8")
+    (game_root / "Game.cs").write_text("// runtime game\n", encoding="utf-8")
+    (baselib_root / "BaseLib.decompiled.cs").write_text("// runtime baselib\n", encoding="utf-8")
+    monkeypatch.setattr(knowledge_runtime, "RESOURCE_KNOWLEDGE_DIR", resource_root)
+    monkeypatch.setattr(knowledge_runtime, "GAME_KNOWLEDGE_DIR", game_root)
+    monkeypatch.setattr(knowledge_runtime, "BASELIB_KNOWLEDGE_DIR", baselib_root)
+    return resource_root, game_root, baselib_root
+
+
 def _fact_keys(packet) -> set[str]:
     return {item.key for item in packet.facts}
 
 
-def test_sts2_knowledge_resolver_returns_public_facts_for_asset_codegen():
+def test_sts2_knowledge_resolver_returns_public_facts_for_asset_codegen(monkeypatch, tmp_path: Path):
+    _prepare_runtime_knowledge(monkeypatch, tmp_path)
     resolver = Sts2KnowledgeResolver()
 
     packet = resolver.resolve(KnowledgeQuery(scenario="asset_codegen", domain="sts2", asset_type="card"))
@@ -21,7 +42,8 @@ def test_sts2_knowledge_resolver_returns_public_facts_for_asset_codegen():
     assert "sts2.runtime.knowledge_paths" in _fact_keys(packet)
 
 
-def test_sts2_knowledge_resolver_merges_type_specific_facts_for_card():
+def test_sts2_knowledge_resolver_merges_type_specific_facts_for_card(monkeypatch, tmp_path: Path):
+    _prepare_runtime_knowledge(monkeypatch, tmp_path)
     resolver = Sts2KnowledgeResolver()
 
     packet = resolver.resolve(KnowledgeQuery(scenario="asset_codegen", domain="sts2", asset_type="card"))
@@ -31,7 +53,8 @@ def test_sts2_knowledge_resolver_merges_type_specific_facts_for_card():
     assert packet.lookup
 
 
-def test_sts2_knowledge_resolver_adds_requirement_triggered_facts():
+def test_sts2_knowledge_resolver_adds_requirement_triggered_facts(monkeypatch, tmp_path: Path):
+    _prepare_runtime_knowledge(monkeypatch, tmp_path)
     resolver = Sts2KnowledgeResolver()
 
     packet = resolver.resolve(
@@ -48,7 +71,8 @@ def test_sts2_knowledge_resolver_adds_requirement_triggered_facts():
     assert "sts2.damage.damage_cmd" in keys
 
 
-def test_sts2_knowledge_resolver_returns_lookup_and_warnings_fields():
+def test_sts2_knowledge_resolver_returns_lookup_and_warnings_fields(monkeypatch, tmp_path: Path):
+    _prepare_runtime_knowledge(monkeypatch, tmp_path)
     resolver = Sts2KnowledgeResolver()
 
     packet = resolver.resolve(
@@ -64,7 +88,8 @@ def test_sts2_knowledge_resolver_returns_lookup_and_warnings_fields():
     assert isinstance(packet.warnings, list)
 
 
-def test_sts2_knowledge_resolver_group_codegen_deduplicates_asset_type_facts():
+def test_sts2_knowledge_resolver_group_codegen_deduplicates_asset_type_facts(monkeypatch, tmp_path: Path):
+    _prepare_runtime_knowledge(monkeypatch, tmp_path)
     resolver = Sts2KnowledgeResolver()
 
     packet = resolver.resolve(
@@ -82,33 +107,18 @@ def test_sts2_knowledge_resolver_group_codegen_deduplicates_asset_type_facts():
     assert list(keys).count("sts2.card.base_class") <= 1
 
 
-def test_sts2_knowledge_resolver_prefers_active_knowledge_pack(monkeypatch, tmp_path: Path):
-    from app.modules.knowledge.infra import knowledge_runtime
-
-    active_root = tmp_path / "pack" / "content"
-    resource_root = active_root / "resources" / "sts2"
-    game_root = active_root / "game"
-    baselib_root = active_root / "baselib"
-    resource_root.mkdir(parents=True)
-    game_root.mkdir(parents=True)
-    baselib_root.mkdir(parents=True)
-    (resource_root / "common.md").write_text("active common guidance\n", encoding="utf-8")
-    (resource_root / "card.md").write_text("active card guidance\n", encoding="utf-8")
-    (game_root / "Game.cs").write_text("// active game\n", encoding="utf-8")
-    (baselib_root / "BaseLib.decompiled.cs").write_text("// active baselib\n", encoding="utf-8")
-
-    monkeypatch.setattr(knowledge_runtime, "active_resource_knowledge_dir", lambda: resource_root)
-    monkeypatch.setattr(knowledge_runtime, "active_game_knowledge_dir", lambda: game_root)
-    monkeypatch.setattr(knowledge_runtime, "active_baselib_knowledge_dir", lambda: baselib_root)
+def test_sts2_knowledge_resolver_uses_runtime_knowledge_dirs(monkeypatch, tmp_path: Path):
+    resource_root, game_root, _baselib_root = _prepare_runtime_knowledge(monkeypatch, tmp_path)
+    (resource_root / "card.md").write_text("runtime card guidance\n", encoding="utf-8")
 
     packet = Sts2KnowledgeResolver().resolve(KnowledgeQuery(scenario="asset_codegen", domain="sts2", asset_type="card"))
 
-    assert any(item.body == "active card guidance" for item in packet.guidance)
+    assert any(item.body == "runtime card guidance" for item in packet.guidance)
     assert any(str(game_root) in item.body for item in packet.facts)
     assert any(item.path == str(game_root) for item in packet.lookup)
 
 
-def test_sts2_knowledge_resolver_labels_reference_only_game_lookup(monkeypatch, tmp_path: Path):
+def test_sts2_knowledge_resolver_treats_api_reference_only_game_as_missing(monkeypatch, tmp_path: Path):
     from app.modules.knowledge.infra import knowledge_runtime
 
     game_root = tmp_path / "runtime" / "knowledge" / "game"
@@ -121,17 +131,14 @@ def test_sts2_knowledge_resolver_labels_reference_only_game_lookup(monkeypatch, 
     (resource_root / "card.md").write_text("card guidance\n", encoding="utf-8")
     (baselib_root / "BaseLib.decompiled.cs").write_text("// baselib\n", encoding="utf-8")
 
-    monkeypatch.setattr(knowledge_runtime, "active_game_knowledge_dir", lambda: game_root)
-    monkeypatch.setattr(knowledge_runtime, "active_resource_knowledge_dir", lambda: resource_root)
-    monkeypatch.setattr(knowledge_runtime, "active_baselib_knowledge_dir", lambda: baselib_root)
-    monkeypatch.setattr(
-        knowledge_runtime, "GAME_KNOWLEDGE_SEED_FILE", game_root / "sts2_api_reference.md", raising=False
-    )
+    monkeypatch.setattr(knowledge_runtime, "GAME_KNOWLEDGE_DIR", game_root)
+    monkeypatch.setattr(knowledge_runtime, "RESOURCE_KNOWLEDGE_DIR", resource_root)
+    monkeypatch.setattr(knowledge_runtime, "BASELIB_KNOWLEDGE_DIR", baselib_root)
 
     packet = Sts2KnowledgeResolver().resolve(KnowledgeQuery(scenario="asset_codegen", domain="sts2", asset_type="card"))
 
-    assert any(item.title == "STS2 API reference summary" for item in packet.lookup)
+    assert any(item.title == "STS2 ilspy fallback" for item in packet.lookup)
     assert not any(item.title == "STS2 runtime knowledge directory" for item in packet.lookup)
     runtime_fact = next(item for item in packet.facts if item.key == "sts2.runtime.knowledge_paths")
-    assert "Only a summarized STS2 API reference is available" in runtime_fact.body
+    assert "Runtime-decompiled STS2 game sources are missing" in runtime_fact.body
     assert "source of truth" not in runtime_fact.body

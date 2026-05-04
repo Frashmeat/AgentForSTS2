@@ -419,13 +419,35 @@ def activate_knowledge_pack(request: Request, pack_id: str):
         admin_user = require_admin_user(request, auth_session)
     try:
         pack = knowledge_runtime.activate_knowledge_pack(pack_id)
-    except (KeyError, ValueError) as error:
+    except KeyError as error:
         raise HTTPException(status_code=404, detail="knowledge pack not found") from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     _build_runtime_audit_service(request).append_event(
         event_type="admin.knowledge_pack.activated",
         payload={"admin_user_id": admin_user.user_id, "pack_id": pack["pack_id"], "label": pack.get("label", "")},
     )
     return pack
+
+
+@router.delete("/platform/knowledge-packs/{pack_id}")
+def delete_knowledge_pack(request: Request, pack_id: str):
+    with auth_session_scope(request) as auth_session:
+        admin_user = require_admin_user(request, auth_session)
+    try:
+        result = knowledge_runtime.delete_knowledge_pack(pack_id)
+    except (KeyError, ValueError) as error:
+        raise HTTPException(status_code=404, detail="knowledge pack not found") from error
+    _build_runtime_audit_service(request).append_event(
+        event_type="admin.knowledge_pack.deleted",
+        payload={
+            "admin_user_id": admin_user.user_id,
+            "pack_id": result["pack_id"],
+            "was_active": result["was_active"],
+            "active_pack_id": result.get("active_pack_id", ""),
+        },
+    )
+    return result
 
 
 @router.post("/platform/server-credentials")

@@ -3,9 +3,12 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 # 让 pytest 能找到 backend 模块
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import agents.sts2_guidance as sts2_guidance_module
 from agents.sts2_guidance import (
     get_full_guidance_bundle,
     get_game_api_reference_path,
@@ -15,6 +18,59 @@ from agents.sts2_guidance import (
 from app.modules.knowledge.infra import knowledge_runtime
 
 RESOURCE_DIR = knowledge_runtime.RESOURCE_KNOWLEDGE_DIR
+
+
+@pytest.fixture(autouse=True)
+def runtime_knowledge_fixture(monkeypatch, tmp_path: Path):
+    runtime_root = tmp_path / "runtime" / "knowledge"
+    game_dir = runtime_root / "game"
+    resource_dir = runtime_root / "resources" / "sts2"
+    baselib_dir = runtime_root / "baselib"
+    game_dir.mkdir(parents=True)
+    resource_dir.mkdir(parents=True)
+    baselib_dir.mkdir(parents=True)
+
+    resource_docs = {
+        "common.md": (
+            "dotnet publish\n"
+            "Common guidance for runtime knowledge tests.\n"
+            "Keep project structure stable and verify generated assets before deploy.\n"
+            "Use the runtime knowledge directory as the only source of truth.\n"
+        ),
+        "card.md": "OnPlay\n[Pool(typeof(CardPool))]\nCardType\n",
+        "relic.md": "RelicModel\nShouldReceiveCombatHooks\nRelicRarity\nFlash()\n",
+        "power.md": "PowerModel\nPowerType\nPowerStackType\nclass MyBuff : PowerModel\n",
+        "potion.md": "dotnet publish\nPotion guidance\n",
+        "character.md": "dotnet publish\nCharacter guidance\n",
+        "custom_code.md": (
+            "dotnet publish\n"
+            "Custom code guidance with Harmony hooks and command routing.\n"
+            "Prefer focused patches and keep generated code easy to inspect.\n"
+        ),
+        "planner_guidance.md": (
+            "OnPlay\n"
+            "ShouldReceiveCombatHooks\n"
+            "CustomCardModel\n"
+            "RelicModel\n"
+            "PowerModel\n"
+            "AfterDamageGiven\n"
+            "AfterCardPlayed\n"
+            "AfterPlayerTurnStart\n"
+        ),
+    }
+    for file_name, content in resource_docs.items():
+        (resource_dir / file_name).write_text(content, encoding="utf-8")
+
+    (game_dir / "sts2_api_reference.md").write_text("runtime api reference\n" * 100, encoding="utf-8")
+    (baselib_dir / "BaseLib.decompiled.cs").write_text("// runtime baselib\n", encoding="utf-8")
+
+    monkeypatch.setattr(knowledge_runtime, "GAME_KNOWLEDGE_DIR", game_dir)
+    monkeypatch.setattr(knowledge_runtime, "RESOURCE_KNOWLEDGE_DIR", resource_dir)
+    monkeypatch.setattr(knowledge_runtime, "BASELIB_KNOWLEDGE_DIR", baselib_dir)
+    monkeypatch.setattr(sts2_guidance_module, "_RESOURCE_DIR", resource_dir)
+    get_full_guidance_bundle.cache_clear()
+    yield resource_dir
+    get_full_guidance_bundle.cache_clear()
 
 
 def _ensure_runtime_knowledge_available() -> None:
@@ -36,19 +92,16 @@ def test_api_ref_file_not_empty():
 
 def test_api_ref_path_resolves_from_runtime_knowledge_dir(monkeypatch, tmp_path: Path):
     runtime_dir = tmp_path / "runtime" / "knowledge" / "game"
-    runtime_dir.mkdir(parents=True)
-    seed_file = tmp_path / "seed" / "sts2_api_reference.md"
-    seed_file.parent.mkdir(parents=True, exist_ok=True)
-    seed_file.write_text("reference", encoding="utf-8")
+    runtime_dir.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setattr(knowledge_runtime, "GAME_KNOWLEDGE_DIR", runtime_dir)
-    monkeypatch.setattr(knowledge_runtime, "GAME_KNOWLEDGE_SEED_FILE", seed_file, raising=False)
 
     assert get_game_api_reference_path() == runtime_dir / "sts2_api_reference.md"
 
 
 def test_sts2_resource_files_exist():
     _ensure_runtime_knowledge_available()
+    resource_dir = knowledge_runtime.RESOURCE_KNOWLEDGE_DIR
     expected_files = [
         "common.md",
         "card.md",
@@ -61,7 +114,7 @@ def test_sts2_resource_files_exist():
     ]
 
     for file_name in expected_files:
-        assert (RESOURCE_DIR / file_name).exists(), f"Missing resource file: {file_name}"
+        assert (resource_dir / file_name).exists(), f"Missing resource file: {file_name}"
 
 
 # ── get_guidance_for_asset_type ───────────────────────────────────────────────
@@ -135,8 +188,9 @@ def test_unknown_type_returns_common_guidance():
 
 def test_card_guidance_includes_resource_backed_common_and_type_sections():
     guidance = get_guidance_for_asset_type("card")
-    common_text = (RESOURCE_DIR / "common.md").read_text(encoding="utf-8").strip()
-    card_text = (RESOURCE_DIR / "card.md").read_text(encoding="utf-8").strip()
+    resource_dir = knowledge_runtime.RESOURCE_KNOWLEDGE_DIR
+    common_text = (resource_dir / "common.md").read_text(encoding="utf-8").strip()
+    card_text = (resource_dir / "card.md").read_text(encoding="utf-8").strip()
 
     assert common_text in guidance
     assert card_text in guidance
@@ -178,7 +232,9 @@ def test_planner_guidance_compact_size():
 
 def test_planner_guidance_matches_resource_file():
     guidance = get_planner_guidance()
-    resource_text = (RESOURCE_DIR / "planner_guidance.md").read_text(encoding="utf-8").strip()
+    resource_text = (knowledge_runtime.RESOURCE_KNOWLEDGE_DIR / "planner_guidance.md").read_text(
+        encoding="utf-8"
+    ).strip()
 
     assert guidance.strip() == resource_text
 
