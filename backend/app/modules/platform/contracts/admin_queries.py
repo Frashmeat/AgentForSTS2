@@ -8,12 +8,19 @@ from .job_queries import UserQuotaView
 
 @dataclass(slots=True)
 class AdminExecutionListItem(ModelBase):
-    id: int
+    id: int | None
     job_id: int
     job_item_id: int
     status: str
     api_protocol: str
     model: str
+    record_kind: str = "ai_execution"
+    execution_id: int | None = None
+    item_index: int | None = None
+    item_type: str = ""
+    input_summary: str = ""
+    result_summary: str = ""
+    error_summary: str = ""
     credential_ref: str = ""
     retry_attempt: int = 0
     switched_credential: bool = False

@@ -31,6 +31,7 @@ from app.modules.platform.infra.persistence.models import (
     ExecutionChargeRecord,
     ExecutionProfileRecord,
     JobEventRecord,
+    JobItemRecord,
     QuotaAccountRecord,
     QuotaAccountStatus,
     QuotaBalanceRecord,
@@ -348,6 +349,54 @@ def test_platform_admin_router_supports_execution_refund_and_audit_queries(clien
     assert profiles.status_code == 200
     assert profiles.json()["items"][0]["code"] == "codex-gpt-5-4"
     assert profiles.json()["items"][0]["description"] == "默认推荐"
+
+
+def test_platform_admin_router_lists_failed_job_items_without_execution_detail(client):
+    test_client, _, _, _, _ = client
+
+    login = test_client.post(
+        "/api/auth/login",
+        json={
+            "login": "admin@example.com",
+            "password": "admin-pass",
+        },
+    )
+    assert login.status_code == 200
+
+    session = test_client.app.state.container.resolve_singleton("platform.db_session_factory")()
+    try:
+        job_repository = JobRepositorySqlAlchemy(session)
+        job = job_repository.create_job_with_items(
+            user_id=1001,
+            command=CreateJobCommand.model_validate(
+                {
+                    "job_type": "batch_generate",
+                    "workflow_version": "2026.03.31",
+                    "items": [{"item_type": "card", "input_summary": "预检查失败"}],
+                }
+            ),
+        )
+        session.flush()
+        failed_item = session.query(JobItemRecord).filter(JobItemRecord.job_id == job.id).one()
+        failed_item.status = "failed_system"
+        failed_item.error_summary = "创建 AI 执行前失败"
+        failed_job_id = job.id
+        failed_job_item_id = failed_item.id
+        session.commit()
+    finally:
+        session.close()
+
+    executions = test_client.get(f"/api/admin/jobs/{failed_job_id}/executions")
+
+    assert executions.status_code == 200
+    payload = executions.json()
+    assert len(payload) == 1
+    assert payload[0]["record_kind"] == "job_item"
+    assert payload[0]["id"] is None
+    assert payload[0]["execution_id"] is None
+    assert payload[0]["job_item_id"] == failed_job_item_id
+    assert payload[0]["status"] == "failed_system"
+    assert payload[0]["error_summary"] == "创建 AI 执行前失败"
 
 
 def test_platform_admin_router_returns_workstation_runtime_status(client, monkeypatch, tmp_path: Path):

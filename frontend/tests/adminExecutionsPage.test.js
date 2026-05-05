@@ -23,8 +23,11 @@ test("admin executions page uses execution list and detail APIs", () => {
   assert.match(pageSource, /getAdminExecution/);
   assert.match(pageSource, /任务编号/);
   assert.match(pageSource, /执行编号/);
-  assert.match(pageSource, /服务商/);
+  assert.match(pageSource, /API 协议/);
   assert.match(pageSource, /请求标识/);
   assert.match(pageSource, /技术信息/);
   assert.match(pageSource, /执行详情/);
+  assert.match(pageSource, /未生成/);
+  assert.match(pageSource, /创建 AI 执行记录前/);
+  assert.match(pageSource, /record_kind/);
 });

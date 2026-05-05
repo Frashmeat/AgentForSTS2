@@ -12,6 +12,10 @@ import { PlatformErrorDiagnostics, hasPlatformErrorPayload, toPlatformErrorView 
 import { formatAdminApiProtocol, formatAdminStatus } from "./adminDisplay.ts";
 import { useAdminLayoutContext } from "./AdminLayout.tsx";
 
+function isExecutionRecord(execution: AdminExecutionListItem): boolean {
+  return (execution.record_kind ?? "ai_execution") === "ai_execution" && typeof execution.execution_id === "number";
+}
+
 function detailRows(execution: AdminExecutionDetail) {
   return [
     ["执行编号", execution.id],
@@ -48,6 +52,7 @@ export function AdminExecutionsPage() {
   const [jobId, setJobId] = useState("");
   const [executions, setExecutions] = useState<AdminExecutionListItem[]>([]);
   const [selectedExecution, setSelectedExecution] = useState<AdminExecutionDetail | null>(null);
+  const [selectedItemFailure, setSelectedItemFailure] = useState<AdminExecutionListItem | null>(null);
   const [loading, setLoading] = useState(false);
 
   function showNotice(title: string, message: string, tone: "warning" | "error" = "error") {
@@ -62,6 +67,7 @@ export function AdminExecutionsPage() {
     }
     setLoading(true);
     setSelectedExecution(null);
+    setSelectedItemFailure(null);
     try {
       setExecutions(await listAdminJobExecutions(numericJobId));
     } catch (loadError) {
@@ -73,6 +79,7 @@ export function AdminExecutionsPage() {
 
   async function loadExecutionDetail(executionId: number) {
     setLoading(true);
+    setSelectedItemFailure(null);
     try {
       setSelectedExecution(await getAdminExecution(executionId));
     } catch (loadError) {
@@ -80,6 +87,15 @@ export function AdminExecutionsPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  function selectExecution(execution: AdminExecutionListItem) {
+    if (isExecutionRecord(execution)) {
+      void loadExecutionDetail(Number(execution.execution_id));
+      return;
+    }
+    setSelectedExecution(null);
+    setSelectedItemFailure(execution);
   }
 
   return (
@@ -129,28 +145,40 @@ export function AdminExecutionsPage() {
                     <th className="px-3 py-2 font-semibold">子任务</th>
                     <th className="px-3 py-2 font-semibold">API 协议</th>
                     <th className="px-3 py-2 font-semibold">状态</th>
+                    <th className="px-3 py-2 font-semibold">摘要</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {executions.map((execution) => {
                     const status = formatAdminStatus(execution.status);
+                    const canLoadDetail = isExecutionRecord(execution);
+                    const rowKey = canLoadDetail ? `execution-${execution.execution_id}` : `job-item-${execution.job_item_id}`;
                     return (
                       <tr
-                        key={execution.id}
+                        key={rowKey}
                         className="cursor-pointer hover:bg-violet-50/60"
-                        onClick={() => void loadExecutionDetail(execution.id)}
+                        onClick={() => selectExecution(execution)}
                       >
-                        <td className="px-3 py-2 font-medium text-slate-900">{execution.id}</td>
+                        <td className="px-3 py-2 font-medium text-slate-900">
+                          {canLoadDetail ? execution.execution_id : "未生成"}
+                        </td>
                         <td className="px-3 py-2 text-slate-600">{execution.job_id}</td>
-                        <td className="px-3 py-2 text-slate-600">{execution.job_item_id}</td>
                         <td className="px-3 py-2 text-slate-600">
-                          {formatAdminApiProtocol(execution.api_protocol)} / {execution.model}
+                          {execution.item_index != null ? `#${execution.item_index}` : execution.job_item_id}
+                        </td>
+                        <td className="px-3 py-2 text-slate-600">
+                          {canLoadDetail ? `${formatAdminApiProtocol(execution.api_protocol)} / ${execution.model}` : "创建执行前"}
                         </td>
                         <td className="px-3 py-2">
                           <span
                             className={`rounded-md border px-2 py-1 text-xs font-medium ${statusClass(execution.status)}`}
                           >
                             {status.label}
+                          </span>
+                        </td>
+                        <td className="max-w-64 px-3 py-2 text-xs text-slate-500">
+                          <span className="line-clamp-2">
+                            {execution.error_summary || execution.result_summary || execution.input_summary || "未记录"}
                           </span>
                         </td>
                       </tr>
@@ -196,6 +224,29 @@ export function AdminExecutionsPage() {
                   error={toPlatformErrorView(selectedExecution.error_payload, selectedExecution.error_summary)}
                 />
               ) : null}
+            </div>
+          ) : selectedItemFailure ? (
+            <div className="mt-3 space-y-3">
+              <p className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                该失败发生在创建 AI 执行记录前，因此没有可下钻的单次执行详情。
+              </p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {[
+                  ["任务编号", selectedItemFailure.job_id],
+                  ["子任务", selectedItemFailure.job_item_id],
+                  ["子任务顺序", selectedItemFailure.item_index ?? "未记录"],
+                  ["类型", selectedItemFailure.item_type || "未记录"],
+                  ["状态", formatAdminStatus(selectedItemFailure.status).label],
+                  ["输入摘要", selectedItemFailure.input_summary || "未记录"],
+                  ["结果摘要", selectedItemFailure.result_summary || "未记录"],
+                  ["错误摘要", selectedItemFailure.error_summary || "未记录"],
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                    <p className="text-[11px] font-semibold text-slate-400">{label}</p>
+                    <p className="mt-1 break-all text-xs text-slate-700">{String(value)}</p>
+                  </div>
+                ))}
+              </div>
             </div>
           ) : (
             <p className="mt-3 text-sm text-slate-500">选择一条执行记录后查看详情。</p>

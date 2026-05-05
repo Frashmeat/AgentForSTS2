@@ -12,6 +12,7 @@ from app.modules.platform.infra.persistence.models import (
     ArtifactRecord,
     ExecutionChargeRecord,
     JobEventRecord,
+    JobItemRecord,
     QuotaAccountRecord,
     QuotaBucketRecord,
 )
@@ -181,3 +182,39 @@ def test_quota_and_admin_query_repositories_return_split_views(db_session):
     assert execution_detail.request_idempotency_key == "idem-admin"
     assert refunds[0].refund_reason == "system_error"
     assert audit_events[0].event_type == "job.succeeded"
+
+
+def test_admin_execution_list_includes_failed_job_items_without_ai_execution(db_session):
+    job_repository = JobRepositorySqlAlchemy(db_session)
+    job = job_repository.create_job_with_items(
+        user_id=1001,
+        command=CreateJobCommand.model_validate(
+            {
+                "job_type": "batch_generate",
+                "workflow_version": "2026.03.31",
+                "items": [
+                    {"item_type": "card", "input_summary": "正常子任务"},
+                    {"item_type": "card", "input_summary": "失败子任务"},
+                ],
+            }
+        ),
+    )
+    db_session.flush()
+    failed_item = (
+        db_session.query(JobItemRecord)
+        .filter(JobItemRecord.job_id == job.id, JobItemRecord.item_index == 1)
+        .one()
+    )
+    failed_item.status = "failed_system"
+    failed_item.error_summary = "创建 AI 执行前失败"
+    db_session.commit()
+
+    executions = AdminQueryRepositoriesSqlAlchemy(db_session).list_executions(job_id=job.id)
+
+    assert len(executions) == 1
+    assert executions[0].record_kind == "job_item"
+    assert executions[0].id is None
+    assert executions[0].execution_id is None
+    assert executions[0].job_item_id == failed_item.id
+    assert executions[0].status == "failed_system"
+    assert executions[0].error_summary == "创建 AI 执行前失败"

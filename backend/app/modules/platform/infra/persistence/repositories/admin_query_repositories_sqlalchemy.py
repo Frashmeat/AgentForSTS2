@@ -25,6 +25,7 @@ from app.modules.platform.infra.persistence.models import (
     ExecutionChargeRecord,
     ExecutionProfileRecord,
     JobEventRecord,
+    JobItemRecord,
     QuotaBalanceRecord,
     ServerCredentialRecord,
     UsageLedgerRecord,
@@ -75,6 +76,15 @@ def _ledger_reason(reason_code: str) -> str:
     return str(reason_code or "")
 
 
+_ITEM_TERMINAL_FAILURE_STATUSES = {
+    "failed_business",
+    "failed_system",
+    "quota_skipped",
+    "cancelled_before_start",
+    "cancelled_after_start",
+}
+
+
 class AdminQueryRepositoriesSqlAlchemy(AdminQueryRepositories):
     def __init__(self, session: Session) -> None:
         self.session = session
@@ -84,20 +94,57 @@ class AdminQueryRepositoriesSqlAlchemy(AdminQueryRepositories):
         if job_id is not None:
             query = query.filter(AIExecutionRecord.job_id == job_id)
         rows = query.order_by(AIExecutionRecord.created_at.desc(), AIExecutionRecord.id.desc()).all()
-        return [
+        items = [
             AdminExecutionListItem(
                 id=row.id,
+                execution_id=row.id,
                 job_id=row.job_id,
                 job_item_id=row.job_item_id,
                 status=_enum_value(row.status),
                 api_protocol=row.api_protocol,
                 model=row.model,
+                record_kind="ai_execution",
+                result_summary=row.result_summary,
+                error_summary=row.error_summary,
                 credential_ref=row.credential_ref,
                 retry_attempt=row.retry_attempt,
                 switched_credential=row.switched_credential,
             )
             for row in rows
         ]
+        if job_id is None:
+            return items
+
+        execution_item_ids = {row.job_item_id for row in rows}
+        failed_item_rows = (
+            self.session.query(JobItemRecord)
+            .filter(
+                JobItemRecord.job_id == job_id,
+                JobItemRecord.status.in_(_ITEM_TERMINAL_FAILURE_STATUSES),
+            )
+            .order_by(JobItemRecord.updated_at.desc(), JobItemRecord.id.desc())
+            .all()
+        )
+        items.extend(
+            AdminExecutionListItem(
+                id=None,
+                execution_id=None,
+                job_id=row.job_id,
+                job_item_id=row.id,
+                status=_enum_value(row.status),
+                api_protocol="",
+                model="",
+                record_kind="job_item",
+                item_index=row.item_index,
+                item_type=row.item_type,
+                input_summary=row.input_summary,
+                result_summary=row.result_summary,
+                error_summary=row.error_summary,
+            )
+            for row in failed_item_rows
+            if row.id not in execution_item_ids
+        )
+        return items
 
     def get_execution_detail(self, execution_id: int) -> AdminExecutionDetailView | None:
         row = self.session.query(AIExecutionRecord).filter(AIExecutionRecord.id == execution_id).one_or_none()

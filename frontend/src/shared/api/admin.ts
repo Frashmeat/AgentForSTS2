@@ -1,15 +1,23 @@
 import { buildApiPath, requestFormData, requestJson } from "./http.ts";
 
 export interface AdminExecutionListItem {
-  id: number;
+  id: number | null;
+  execution_id?: number | null;
   job_id: number;
   job_item_id: number;
   status: string;
   api_protocol: string;
   model: string;
+  record_kind?: "ai_execution" | "job_item";
+  item_index?: number | null;
+  item_type?: string;
+  input_summary?: string;
+  result_summary?: string;
+  error_summary?: string;
 }
 
 export interface AdminExecutionDetail extends AdminExecutionListItem {
+  id: number;
   request_idempotency_key: string;
   input_summary: string;
   result_summary: string;
