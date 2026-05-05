@@ -2679,6 +2679,38 @@ def test_job_application_service_requires_server_project_ref_for_single_custom_c
         raise AssertionError("expected ValueError when server_project_ref is missing")
 
 
+def test_job_application_service_requires_server_project_ref_for_single_asset_generate(db_session):
+    service = JobApplicationService(
+        job_repository=JobRepositorySqlAlchemy(db_session),
+        job_event_repository=JobEventRepositorySqlAlchemy(db_session),
+    )
+
+    try:
+        service.create_job(
+            user_id=1001,
+            command=CreateJobCommand.model_validate(
+                {
+                    "job_type": "single_generate",
+                    "workflow_version": "2026.03.31",
+                    "items": [
+                        {
+                            "item_type": "relic",
+                            "input_summary": "补一个遗物",
+                            "input_payload": {
+                                "item_name": "FangedGrimoire",
+                                "description": "每次造成伤害时获得 2 点格挡。",
+                            },
+                        }
+                    ],
+                }
+            ),
+        )
+    except ValueError as error:
+        assert str(error) == "platform job payload for single_generate/relic requires server_project_ref"
+    else:
+        raise AssertionError("expected ValueError when single asset server_project_ref is missing")
+
+
 def test_job_application_service_requires_server_project_ref_for_batch_custom_code(db_session):
     service = JobApplicationService(
         job_repository=JobRepositorySqlAlchemy(db_session),
@@ -2709,6 +2741,38 @@ def test_job_application_service_requires_server_project_ref_for_batch_custom_co
         assert str(error) == "platform job payload for batch_generate/custom_code requires server_project_ref"
     else:
         raise AssertionError("expected ValueError when batch custom_code server_project_ref is missing")
+
+
+def test_job_application_service_requires_server_project_ref_for_batch_asset_generate(db_session):
+    service = JobApplicationService(
+        job_repository=JobRepositorySqlAlchemy(db_session),
+        job_event_repository=JobEventRepositorySqlAlchemy(db_session),
+    )
+
+    try:
+        service.create_job(
+            user_id=1001,
+            command=CreateJobCommand.model_validate(
+                {
+                    "job_type": "batch_generate",
+                    "workflow_version": "2026.03.31",
+                    "items": [
+                        {
+                            "item_type": "card",
+                            "input_summary": "补一个卡牌",
+                            "input_payload": {
+                                "item_name": "DarkBlade",
+                                "description": "1 费攻击牌，造成 8 点伤害。",
+                            },
+                        }
+                    ],
+                }
+            ),
+        )
+    except ValueError as error:
+        assert str(error) == "platform job payload for batch_generate/card requires server_project_ref"
+    else:
+        raise AssertionError("expected ValueError when batch asset server_project_ref is missing")
 
 
 def test_job_application_service_requires_server_project_ref_for_single_card_fullscreen_with_uploaded_asset(db_session):
@@ -2752,7 +2816,7 @@ def test_job_application_service_requires_server_project_ref_for_single_card_ful
     except ValueError as error:
         assert (
             str(error)
-            == "platform job payload for single_generate/card_fullscreen requires server_project_ref when uploaded_asset_ref is present"
+            == "platform job payload for single_generate/card_fullscreen requires server_project_ref"
         )
     else:
         raise AssertionError("expected ValueError when card_fullscreen uploaded asset has no server_project_ref")
@@ -2799,7 +2863,7 @@ def test_job_application_service_requires_server_project_ref_for_batch_card_full
     except ValueError as error:
         assert (
             str(error)
-            == "platform job payload for batch_generate/card_fullscreen requires server_project_ref when uploaded_asset_ref is present"
+            == "platform job payload for batch_generate/card_fullscreen requires server_project_ref"
         )
     else:
         raise AssertionError("expected ValueError when batch card_fullscreen uploaded asset has no server_project_ref")
