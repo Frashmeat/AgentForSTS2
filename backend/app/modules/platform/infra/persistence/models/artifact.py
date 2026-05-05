@@ -31,7 +31,7 @@ class ArtifactRecord(TimestampMixin, Base):
     user_id: Mapped[int] = mapped_column(bigint_type(), nullable=False)
     artifact_type: Mapped[str] = mapped_column(String(64), nullable=False)
     storage_provider: Mapped[str] = mapped_column(String(64), nullable=False)
-    object_key: Mapped[str] = mapped_column(String(256), nullable=False)
+    object_key: Mapped[str] = mapped_column(String(512), nullable=False)
     file_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
     mime_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
     size_bytes: Mapped[int | None] = mapped_column(bigint_type(), nullable=True)

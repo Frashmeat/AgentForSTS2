@@ -68,7 +68,9 @@ def _build_prompt(input_payload: dict[str, object]) -> str:
             "depends_on_item_ids": _render_multiline_list(_string_list(input_payload.get("depends_on_item_ids"))),
             "server_project_name": str(input_payload.get("server_project_name", "")).strip() or "无",
             "server_workspace_root": str(input_payload.get("server_workspace_root", "")).strip() or "无",
-            "server_workspace_snapshot": render_server_workspace_snapshot(input_payload.get("server_workspace_root")),
+            "server_workspace_snapshot": render_server_workspace_snapshot(
+                input_payload.get("server_workspace_root") or input_payload.get("server_workspace_object_key")
+            ),
         },
     )
 

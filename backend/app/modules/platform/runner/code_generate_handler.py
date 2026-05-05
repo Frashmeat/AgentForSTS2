@@ -9,6 +9,8 @@ from app.modules.platform.contracts.runner_contracts import StepExecutionBinding
 from app.modules.platform.domain.execution_compatibility import require_api_protocol_compatible_with_runner_type
 from llm.agent_runner import run_agent_task_with_llm_config
 
+from .platform_paths import resolve_server_workspace_root
+
 CodeAgentRunner = Callable[[str, Path, dict[str, object]], Awaitable[str]]
 
 
@@ -44,13 +46,7 @@ def _resolve_item_name(input_payload: dict[str, object]) -> str:
 
 
 def _resolve_project_root(input_payload: dict[str, object]) -> Path:
-    root_text = str(input_payload.get("server_workspace_root", "")).strip()
-    if not root_text:
-        raise ValueError("code.generate requires server_workspace_root")
-    project_root = Path(root_text)
-    if not project_root.exists():
-        raise ValueError(f"server workspace root does not exist: {project_root}")
-    return project_root
+    return resolve_server_workspace_root(input_payload, step_type="code.generate")
 
 
 def _resolve_implementation_notes(input_payload: dict[str, object]) -> str:

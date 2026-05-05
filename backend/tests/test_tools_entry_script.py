@@ -266,6 +266,8 @@ def test_app_compose_mounts_shared_web_knowledge_after_service_runtime_dirs() ->
 
     assert "${ATS_WEB_KNOWLEDGE_DIR}:/app/runtime/knowledge" in web_workstation_block
     assert "${ATS_WEB_KNOWLEDGE_DIR}:/app/runtime/knowledge" in web_block
+    assert "${ATS_PLATFORM_RUNTIME_DIR}:/app/runtime/platform" in web_workstation_block
+    assert "${ATS_PLATFORM_RUNTIME_DIR}:/app/runtime/platform" in web_block
     assert web_workstation_block.index("${ATS_WEB_WORKSTATION_RUNTIME_DIR}:/app/runtime") < web_workstation_block.index(
         "${ATS_WEB_KNOWLEDGE_DIR}:/app/runtime/knowledge"
     )
@@ -304,6 +306,7 @@ def test_deploy_app_writes_shared_web_knowledge_dir_env() -> None:
     source = DEPLOY_APP_PATH.read_text(encoding="utf-8-sig")
 
     assert '"ATS_WEB_KNOWLEDGE_DIR=$(Convert-PathForComposeEnv -Path (Join-Path $Layout.ConfigRoot \'knowledge\'))"' in source
+    assert '"ATS_PLATFORM_RUNTIME_DIR=$(Convert-PathForComposeEnv -Path (Join-Path $Layout.ConfigRoot \'platform\'))"' in source
     assert '"ATS_WEB_RUNTIME_DIR=$(Convert-PathForComposeEnv -Path (Join-Path $Layout.ConfigRoot \'web\'))"' in source
     assert (
         '"ATS_WEB_WORKSTATION_RUNTIME_DIR=$(Convert-PathForComposeEnv -Path (Join-Path $Layout.ConfigRoot \'web-workstation\'))"'

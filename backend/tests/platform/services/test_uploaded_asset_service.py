@@ -7,6 +7,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from app.modules.platform.application.services.uploaded_asset_service import UploadedAssetService
+from app.modules.platform.infra.persistence.models import UploadedAssetRecord
+from app.modules.platform.infra.persistence.repositories import UploadedAssetRepositorySqlAlchemy
 
 
 def test_uploaded_asset_service_creates_persisted_reference(tmp_path):
@@ -25,7 +27,7 @@ def test_uploaded_asset_service_creates_persisted_reference(tmp_path):
     assert uploaded.size_bytes == len(b"fake-image-bytes")
 
     token = uploaded.uploaded_asset_ref.split(":", 1)[1]
-    asset_dir = tmp_path / "uploads" / "1001" / token
+    asset_dir = tmp_path / "uploads" / "uploads" / "1001" / token
     assert (asset_dir / "metadata.json").exists() is True
     assert list(asset_dir.glob("content.*"))
 
@@ -80,3 +82,31 @@ def test_uploaded_asset_service_can_read_uploaded_asset_metadata(tmp_path):
     assert loaded.file_name == "dark-blade.png"
     assert loaded.mime_type == "image/png"
     assert loaded.size_bytes == len(b"fake-image-bytes")
+
+
+def test_uploaded_asset_service_records_database_index(db_session, tmp_path):
+    service = UploadedAssetService(
+        storage_root=tmp_path / "platform",
+        uploaded_asset_repository=UploadedAssetRepositorySqlAlchemy(db_session),
+    )
+
+    uploaded = service.create_asset(
+        user_id=1001,
+        file_name="dark-blade.png",
+        content_base64=base64.b64encode(b"fake-image-bytes").decode(),
+        mime_type="image/png",
+    )
+
+    record = db_session.query(UploadedAssetRecord).one()
+    assert record.user_id == 1001
+    assert record.uploaded_asset_ref == uploaded.uploaded_asset_ref
+    assert record.storage_provider == "platform_fs"
+    assert record.object_key.startswith("uploads/1001/")
+    assert service.get_asset_content_path(user_id=1001, uploaded_asset_ref=uploaded.uploaded_asset_ref).exists()
+
+    try:
+        service.ensure_accessible(user_id=1002, uploaded_asset_ref=uploaded.uploaded_asset_ref)
+    except ValueError as error:
+        assert str(error) == f"uploaded asset ref not found for user: {uploaded.uploaded_asset_ref}"
+    else:
+        raise AssertionError("expected ValueError when uploaded asset ref belongs to another user")

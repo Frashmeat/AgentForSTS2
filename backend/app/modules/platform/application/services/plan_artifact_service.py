@@ -6,11 +6,18 @@ from pathlib import Path
 from app.modules.platform.domain.repositories import AIExecutionRepository, ArtifactRepository
 from app.modules.platform.infra.persistence.models import ArtifactRecord
 
+from .platform_file_storage import (
+    PLATFORM_FS_PROVIDER,
+    default_platform_storage_root,
+    normalize_object_key,
+    resolve_platform_storage_path,
+)
+
 _SAFE_NAME_PATTERN = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 def runtime_artifact_root() -> Path:
-    return Path(__file__).resolve().parents[6] / "runtime" / "platform-artifacts"
+    return default_platform_storage_root() / "artifacts"
 
 
 def safe_artifact_stem(value: object, fallback: str = "result") -> str:
@@ -35,13 +42,12 @@ def create_plan_markdown_artifact(
         return None
 
     root = artifact_root or runtime_artifact_root()
-    artifact_dir = root / "jobs" / str(job_id) / "items" / str(job_item_id)
-    artifact_dir.mkdir(parents=True, exist_ok=True)
-
     item_stem = safe_artifact_stem(item_name, fallback=f"item-{job_item_id}")
     type_stem = safe_artifact_stem(asset_type, fallback="asset")
     file_name = f"{item_stem}.{type_stem}.plan.md"
-    path = artifact_dir / file_name
+    object_key = normalize_object_key("artifacts", user_id, "jobs", job_id, "items", job_item_id, file_name)
+    path = resolve_platform_storage_path(object_key, storage_root=root.parent)
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(_render_markdown(asset_type=asset_type, item_name=item_name, summary=summary, analysis=content), encoding="utf-8")
 
     return ArtifactRecord(
@@ -50,8 +56,8 @@ def create_plan_markdown_artifact(
         ai_execution_id=ai_execution_id,
         user_id=user_id,
         artifact_type="plan_markdown",
-        storage_provider="server_workspace",
-        object_key=str(path),
+        storage_provider=PLATFORM_FS_PROVIDER,
+        object_key=object_key,
         file_name=file_name,
         mime_type="text/markdown; charset=utf-8",
         size_bytes=path.stat().st_size,

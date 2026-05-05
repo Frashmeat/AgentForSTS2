@@ -42,7 +42,7 @@ def build_job_application_service_from_container(session, container: Any) -> Job
         execution_orchestrator_service=build_execution_orchestrator_service_from_container(session, container),
         server_queued_job_claim_service=_build_server_queued_job_claim_service_from_container(container),
         server_workspace_service=_build_server_workspace_service_from_container(container),
-        uploaded_asset_service=_build_uploaded_asset_service_from_container(container),
+        uploaded_asset_service=_build_uploaded_asset_service_from_container(container, session=session),
     )
 
 
@@ -59,7 +59,7 @@ def build_execution_orchestrator_service_from_container(session, container: Any)
     server_credential_cipher = _build_server_credential_cipher_from_container(container)
     server_workspace_lock_service = _build_server_workspace_lock_service_from_container(container)
     server_workspace_service = _build_server_workspace_service_from_container(container)
-    uploaded_asset_service = _build_uploaded_asset_service_from_container(container)
+    uploaded_asset_service = _build_uploaded_asset_service_from_container(container, session=session)
     return container.resolve_singleton("platform.execution_orchestrator_service_factory")(
         job_repository=job_repository,
         ai_execution_repository=ai_execution_repository,
@@ -103,9 +103,15 @@ def _build_server_credential_cipher_from_container(container: Any) -> ServerCred
     return container.resolve_singleton("platform.server_credential_cipher_factory").from_settings(settings)
 
 
-def _build_uploaded_asset_service_from_container(container: Any) -> UploadedAssetService:
+def _build_uploaded_asset_service_from_container(container: Any, session: Any | None = None) -> UploadedAssetService:
     factory = container.resolve_singleton("platform.uploaded_asset_service_factory")
     if callable(factory):
+        if session is not None and container.has_singleton("platform.uploaded_asset_repository_factory"):
+            repository = container.resolve_singleton("platform.uploaded_asset_repository_factory")(session)
+            try:
+                return factory(uploaded_asset_repository=repository)
+            except TypeError:
+                return factory()
         return factory()
     return factory
 

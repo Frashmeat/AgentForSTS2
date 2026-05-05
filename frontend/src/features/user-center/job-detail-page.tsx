@@ -54,7 +54,7 @@ function resolveArtifactLocationLabel(artifact: PlatformArtifactSummary) {
 }
 
 function isDownloadableArtifact(artifact: PlatformArtifactSummary) {
-  return artifact.storage_provider === "server_workspace" && ["source_project", "plan_markdown"].includes(artifact.artifact_type);
+  return ["server_workspace", "platform_fs"].includes(artifact.storage_provider) && ["source_project", "plan_markdown"].includes(artifact.artifact_type);
 }
 
 function hasSourceProjectArtifact(artifacts: PlatformArtifactSummary[] | undefined) {

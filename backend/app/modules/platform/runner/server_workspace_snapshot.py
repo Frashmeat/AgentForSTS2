@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .platform_paths import resolve_server_workspace_root
+
 _SKIP_DIRS = {"bin", "obj", ".godot", ".git"}
 _MAX_SOURCE_SAMPLES = 8
 _MAX_LOCALIZATION_SAMPLES = 4
@@ -12,7 +14,17 @@ def render_server_workspace_snapshot(workspace_root: object) -> str:
     if not root_text:
         return "无"
 
-    root = Path(root_text)
+    try:
+        if root_text.startswith("workspaces/"):
+            root = resolve_server_workspace_root(
+                {"server_workspace_object_key": root_text}, step_type="server_workspace_snapshot"
+            )
+        else:
+            root = resolve_server_workspace_root(
+                {"server_workspace_root": root_text}, step_type="server_workspace_snapshot"
+            )
+    except ValueError:
+        root = Path(root_text)
     if not root.exists():
         return f"工作区不存在：{root}"
     if not root.is_dir():

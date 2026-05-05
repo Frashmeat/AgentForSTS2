@@ -182,7 +182,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
     user_id BIGINT NOT NULL,
     artifact_type VARCHAR(64) NOT NULL,
     storage_provider VARCHAR(64) NOT NULL,
-    object_key VARCHAR(256) NOT NULL,
+    object_key VARCHAR(512) NOT NULL,
     file_name VARCHAR(256),
     mime_type VARCHAR(128),
     size_bytes BIGINT,
@@ -196,6 +196,23 @@ CREATE TABLE IF NOT EXISTS artifacts (
     CONSTRAINT fk_artifacts_job_id_jobs FOREIGN KEY (job_id) REFERENCES jobs (id),
     CONSTRAINT fk_artifacts_job_item_chain FOREIGN KEY (job_item_id, job_id) REFERENCES job_items (id, job_id),
     CONSTRAINT fk_artifacts_ai_execution_id_ai_executions FOREIGN KEY (ai_execution_id) REFERENCES ai_executions (id)
+);
+
+CREATE TABLE IF NOT EXISTS uploaded_assets (
+    id BIGSERIAL NOT NULL,
+    uploaded_asset_ref VARCHAR(128) NOT NULL,
+    user_id BIGINT NOT NULL,
+    file_name VARCHAR(256) NOT NULL,
+    mime_type VARCHAR(128) NOT NULL,
+    size_bytes BIGINT NOT NULL,
+    storage_provider VARCHAR(64) NOT NULL,
+    object_key VARCHAR(512) NOT NULL,
+    sha256 VARCHAR(64) NOT NULL,
+    deleted_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    CONSTRAINT pk_uploaded_assets PRIMARY KEY (id),
+    CONSTRAINT uq_uploaded_assets_uploaded_asset_ref UNIQUE (uploaded_asset_ref)
 );
 
 CREATE TABLE IF NOT EXISTS job_events (
@@ -237,6 +254,9 @@ CREATE INDEX IF NOT EXISTS ix_usage_ledgers_user_id_created_at_desc
 
 CREATE INDEX IF NOT EXISTS ix_artifacts_job_item_id_created_at
     ON artifacts (job_item_id, created_at);
+
+CREATE INDEX IF NOT EXISTS ix_uploaded_assets_user_ref
+    ON uploaded_assets (user_id, uploaded_asset_ref);
 
 CREATE INDEX IF NOT EXISTS ix_job_events_job_id_created_at
     ON job_events (job_id, created_at);

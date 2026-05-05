@@ -60,7 +60,7 @@ def _build_job_application_service(session, request: Request) -> JobApplicationS
         execution_orchestrator_service=build_execution_orchestrator_service(session, request),
         server_queued_job_claim_service=_build_server_queued_job_claim_service(request),
         server_workspace_service=_build_server_workspace_service(request),
-        uploaded_asset_service=_build_uploaded_asset_service(request),
+        uploaded_asset_service=_build_uploaded_asset_service_for_session(session, request),
     )
 
 
@@ -76,6 +76,20 @@ def _build_uploaded_asset_service(request: Request) -> UploadedAssetService:
     container = request.app.state.container
     factory = container.resolve_singleton("platform.uploaded_asset_service_factory")
     if callable(factory):
+        return factory()
+    return factory
+
+
+def _build_uploaded_asset_service_for_session(session, request: Request) -> UploadedAssetService:
+    container = request.app.state.container
+    factory = container.resolve_singleton("platform.uploaded_asset_service_factory")
+    if callable(factory):
+        repository_factory = container.resolve_optional_singleton("platform.uploaded_asset_repository_factory")
+        if callable(repository_factory):
+            try:
+                return factory(uploaded_asset_repository=repository_factory(session))
+            except TypeError:
+                return factory()
         return factory()
     return factory
 
@@ -264,7 +278,7 @@ def download_artifact(request: Request, artifact_id: int):
                     "artifact_id": artifact_id,
                 },
             )
-        if artifact.storage_provider != "server_workspace":
+        if artifact.storage_provider not in {"server_workspace", "platform_fs"}:
             raise HTTPException(
                 status_code=400,
                 detail={
@@ -275,11 +289,21 @@ def download_artifact(request: Request, artifact_id: int):
                     "storage_provider": artifact.storage_provider,
                 },
             )
-        path = Path(artifact.object_key).expanduser().resolve()
+        if artifact.storage_provider == "platform_fs":
+            from app.modules.platform.application.services.platform_file_storage import resolve_platform_storage_path
+
+            path = resolve_platform_storage_path(artifact.object_key)
+        else:
+            path = Path(artifact.object_key).expanduser().resolve()
         if not path.exists() or not path.is_file():
             repaired = _plan_artifact_backfill_service(session, request).repair_plan_markdown_file(artifact)
             if repaired is not None:
-                path = Path(repaired.object_key).expanduser().resolve()
+                if repaired.storage_provider == "platform_fs":
+                    from app.modules.platform.application.services.platform_file_storage import resolve_platform_storage_path
+
+                    path = resolve_platform_storage_path(repaired.object_key)
+                else:
+                    path = Path(repaired.object_key).expanduser().resolve()
         if not path.exists() or not path.is_file():
             raise HTTPException(
                 status_code=404,
@@ -334,7 +358,7 @@ def upload_asset(request: Request, body: dict):
     with auth_session_scope(request) as session:
         user = require_current_user(request, session)
         _require_platform_access(user)
-        service = _build_uploaded_asset_service(request)
+        service = _build_uploaded_asset_service_for_session(session, request)
         try:
             uploaded = service.create_asset(
                 user_id=user.user_id,

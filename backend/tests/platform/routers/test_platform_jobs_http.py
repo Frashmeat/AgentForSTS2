@@ -19,6 +19,11 @@ from fastapi.testclient import TestClient
 from app.composition.container import ApplicationContainer
 from app.modules.auth.infra.persistence import models as _auth_models
 from app.modules.platform.application import platform_runtime_builder
+from app.modules.platform.application.services.platform_file_storage import (
+    PLATFORM_FS_PROVIDER,
+    resolve_platform_storage_path,
+    try_object_key_from_platform_path,
+)
 from app.modules.platform.application.services.server_credential_cipher import ServerCredentialCipher
 from app.modules.platform.application.services.server_workspace_lock_service import (
     ServerWorkspaceBusyError,
@@ -26,7 +31,7 @@ from app.modules.platform.application.services.server_workspace_lock_service imp
 from app.modules.platform.application.services.server_workspace_service import ServerWorkspaceService
 from app.modules.platform.application.services.uploaded_asset_service import UploadedAssetService
 from app.modules.platform.contracts.runner_contracts import StepExecutionResult
-from app.modules.platform.domain.models.enums import JobItemStatus, JobStatus
+from app.modules.platform.domain.models.enums import AIExecutionStatus, JobItemStatus, JobStatus
 from app.modules.platform.infra.persistence import models as _platform_models
 from app.modules.platform.infra.persistence.models import (
     AIExecutionRecord,
@@ -74,13 +79,22 @@ def client(tmp_path, monkeypatch):
 
     app = FastAPI()
     app.state.container = container
+    platform_root = tmp_path / "platform"
+    monkeypatch.setattr(
+        "app.modules.platform.application.services.platform_file_storage.default_platform_storage_root",
+        lambda: platform_root,
+    )
+    monkeypatch.setattr(
+        "app.modules.platform.application.services.plan_artifact_service.default_platform_storage_root",
+        lambda: platform_root,
+    )
     container.register_singleton(
         "platform.server_workspace_service_factory",
-        lambda: ServerWorkspaceService(storage_root=tmp_path / "platform-workspaces"),
+        lambda: ServerWorkspaceService(storage_root=platform_root / "workspaces"),
     )
     container.register_singleton(
         "platform.uploaded_asset_service_factory",
-        lambda: UploadedAssetService(storage_root=tmp_path / "platform-upload-assets"),
+        lambda: UploadedAssetService(storage_root=platform_root),
     )
     app.include_router(auth_router, prefix="/api")
     app.include_router(me_router, prefix="/api")
@@ -233,7 +247,7 @@ class _SucceededWorkflowRunner:
                     "server_workspace_root": str(merged.get("server_workspace_root", "")).strip(),
                 }
             elif step.step_type == "code.generate":
-                project_root = Path(str(merged.get("server_workspace_root", "")).strip())
+                project_root = _resolve_test_workspace_root(merged)
                 if project_root:
                     (project_root / f"{str(merged.get('item_name', '')).strip()}.cs").write_text(
                         "// generated custom code\n",
@@ -243,7 +257,7 @@ class _SucceededWorkflowRunner:
                     "text": f"已写入 {str(merged.get('item_name', '')).strip()} 的服务器 custom_code 代码"
                 }
             elif step.step_type == "asset.generate":
-                project_root = Path(str(merged.get("server_workspace_root", "")).strip())
+                project_root = _resolve_test_workspace_root(merged)
                 if project_root:
                     (project_root / f"{str(merged.get('item_name', '')).strip()}.asset.cs").write_text(
                         "// generated asset code\n",
@@ -268,7 +282,7 @@ class _SucceededWorkflowRunner:
                 }
             elif step.step_type == "package.project":
                 item_name = str(merged.get("item_name", "")).strip()
-                project_root = Path(str(merged.get("server_workspace_root", "")).strip())
+                project_root = _resolve_test_workspace_root(merged)
                 artifact_dir = project_root.parent / "_source_artifacts"
                 artifact_dir.mkdir(parents=True, exist_ok=True)
                 package_path = artifact_dir / f"{project_root.name}.source.zip"
@@ -283,8 +297,8 @@ class _SucceededWorkflowRunner:
                     "artifacts": [
                         {
                             "artifact_type": "source_project",
-                            "storage_provider": "server_workspace",
-                            "object_key": str(package_path),
+                            "storage_provider": PLATFORM_FS_PROVIDER,
+                            "object_key": try_object_key_from_platform_path(package_path) or str(package_path),
                             "file_name": package_path.name,
                             "mime_type": "application/zip",
                             "size_bytes": package_path.stat().st_size,
@@ -322,6 +336,19 @@ class _SucceededWorkflowRunner:
             )
             payload.update(output_payload)
         return results
+
+
+def _resolve_test_workspace_root(payload: dict[str, object]) -> Path:
+    object_key = str(payload.get("server_workspace_object_key", "")).strip()
+    if object_key:
+        return resolve_platform_storage_path(object_key)
+    return Path(str(payload.get("server_workspace_root", "")).strip())
+
+
+def _resolve_test_artifact_path(artifact: dict[str, object]) -> Path:
+    if str(artifact.get("storage_provider", "")).strip() == PLATFORM_FS_PROVIDER:
+        return resolve_platform_storage_path(str(artifact["object_key"]))
+    return Path(str(artifact["object_key"]))
 
 
 class _BusyWorkspaceLockService:
@@ -1038,7 +1065,7 @@ def test_platform_jobs_router_can_complete_supported_batch_custom_code_job(clien
     downloaded = client.get(f"/api/me/artifacts/{artifacts[0]['id']}/download")
     assert downloaded.status_code == 200
     assert downloaded.headers["content-type"] == "application/zip"
-    with zipfile.ZipFile(Path(artifacts[0]["object_key"])) as archive:
+    with zipfile.ZipFile(_resolve_test_artifact_path(artifacts[0])) as archive:
         assert "BattleScriptManager.cs" in archive.namelist()
 
     session = client.app.state.container.resolve_singleton("platform.db_session_factory")()
@@ -1232,7 +1259,7 @@ def test_platform_jobs_router_can_complete_supported_batch_relic_job(client: Tes
 
 
 def test_me_job_detail_backfills_downloadable_plan_artifact_for_historical_execution(client: TestClient):
-    _register_login_and_verify(client, "luna", "luna@example.com")
+    user_id = _register_login_and_verify(client, "luna", "luna@example.com")
     login = client.post(
         "/api/auth/login",
         json={
@@ -1242,40 +1269,66 @@ def test_me_job_detail_backfills_downloadable_plan_artifact_for_historical_execu
     )
     assert login.status_code == 200
 
-    profile_id = _seed_execution_profile(client)
-    client.app.state.container.register_singleton("platform.workflow_runner_factory", _SucceededWorkflowRunner)
-
-    created = client.post(
-        "/api/platform/jobs",
-        json={
-            "job_type": "single_generate",
-            "workflow_version": "2026.03.31",
-            "selected_execution_profile_id": profile_id,
-            "selected_runner_type": "codex_cli",
-            "selected_model": "gpt-5.4",
-            "items": [
-                {
-                    "item_type": "relic",
-                    "input_summary": "补一个遗物实现方案",
-                    "input_payload": {
-                        "asset_type": "relic",
-                        "item_name": "FangedGrimoire",
-                        "description": "每次造成伤害时获得 2 点格挡。",
-                        "image_mode": "ai",
-                    },
-                }
-            ],
-        },
-    )
-    assert created.status_code == 200
-    job_id = created.json()["id"]
-    started = client.post(f"/api/platform/jobs/{job_id}/start", json={})
-    assert started.status_code == 200
-
     session = client.app.state.container.resolve_singleton("platform.db_session_factory")()
     try:
-        session.query(ArtifactRecord).filter(ArtifactRecord.job_id == job_id).delete()
+        now = datetime.now(UTC)
+        job = JobRecord(
+            user_id=user_id,
+            job_type="single_generate",
+            status=JobStatus.SUCCEEDED,
+            workflow_version="2026.03.31",
+            input_summary="历史遗物实现方案",
+            total_item_count=1,
+            succeeded_item_count=1,
+            finished_at=now,
+        )
+        session.add(job)
+        session.flush()
+        item = JobItemRecord(
+            job_id=job.id,
+            user_id=user_id,
+            item_index=0,
+            item_type="relic",
+            status=JobItemStatus.SUCCEEDED,
+            input_summary="补一个遗物实现方案",
+            input_payload={
+                "asset_type": "relic",
+                "item_name": "FangedGrimoire",
+                "description": "每次造成伤害时获得 2 点格挡。",
+            },
+            result_summary="已生成服务器遗物实现方案",
+            finished_at=now,
+        )
+        session.add(item)
+        session.flush()
+        session.add(
+            AIExecutionRecord(
+                job_id=job.id,
+                job_item_id=item.id,
+                user_id=user_id,
+                status=AIExecutionStatus.SUCCEEDED,
+                api_protocol="openai_compatible",
+                model="gpt-5.4",
+                credential_ref="server-credential:1",
+                workflow_version="2026.03.31",
+                step_protocol_version="v1",
+                result_schema_version="v1",
+                step_type="single.asset.plan",
+                step_id="single.relic.plan",
+                input_summary="补一个遗物实现方案",
+                input_payload=item.input_payload,
+                result_summary="已生成服务器遗物实现方案",
+                result_payload={
+                    "asset_type": "relic",
+                    "item_name": "FangedGrimoire",
+                    "analysis": "摘要：已生成服务器遗物实现方案\n\n## 实现建议\n- 先补 relic 代码骨架。",
+                },
+                started_at=now,
+                finished_at=now,
+            )
+        )
         session.commit()
+        job_id = job.id
     finally:
         session.close()
 
@@ -1472,7 +1525,7 @@ def test_platform_jobs_router_can_complete_supported_single_custom_code_job(clie
     downloaded = client.get(f"/api/me/artifacts/{artifacts[0]['id']}/download")
     assert downloaded.status_code == 200
     assert downloaded.headers["content-type"] == "application/zip"
-    with zipfile.ZipFile(Path(artifacts[0]["object_key"])) as archive:
+    with zipfile.ZipFile(_resolve_test_artifact_path(artifacts[0])) as archive:
         assert "SingleEffectPatch.cs" in archive.namelist()
 
     session = client.app.state.container.resolve_singleton("platform.db_session_factory")()
@@ -1544,13 +1597,13 @@ def test_platform_jobs_router_can_complete_supported_single_relic_job(client: Te
     assert downloaded.status_code == 200
     assert downloaded.headers["content-disposition"].endswith('filename="DarkMod.source.zip"')
     assert downloaded.headers["content-type"] == "application/zip"
-    with zipfile.ZipFile(Path(artifacts[0]["object_key"])) as archive:
+    with zipfile.ZipFile(_resolve_test_artifact_path(artifacts[0])) as archive:
         assert "FangedGrimoire.asset.cs" in archive.namelist()
 
     session = client.app.state.container.resolve_singleton("platform.db_session_factory")()
     try:
         artifact = session.query(ArtifactRecord).filter(ArtifactRecord.id == artifacts[0]["id"]).one()
-        Path(artifact.object_key).unlink()
+        resolve_platform_storage_path(artifact.object_key).unlink()
         session.commit()
     finally:
         session.close()
@@ -1757,7 +1810,7 @@ def test_platform_jobs_router_can_complete_batch_card_fullscreen_with_uploaded_a
     assert artifacts[0]["artifact_type"] == "source_project"
     downloaded = client.get(f"/api/me/artifacts/{artifacts[0]['id']}/download")
     assert downloaded.status_code == 200
-    with zipfile.ZipFile(Path(artifacts[0]["object_key"])) as archive:
+    with zipfile.ZipFile(_resolve_test_artifact_path(artifacts[0])) as archive:
         assert "DarkBladeFullscreen.asset.cs" in archive.namelist()
 
 
@@ -1824,7 +1877,7 @@ def test_platform_jobs_router_can_complete_single_card_fullscreen_with_uploaded_
     assert artifacts[0]["artifact_type"] == "source_project"
     downloaded = client.get(f"/api/me/artifacts/{artifacts[0]['id']}/download")
     assert downloaded.status_code == 200
-    with zipfile.ZipFile(Path(artifacts[0]["object_key"])) as archive:
+    with zipfile.ZipFile(_resolve_test_artifact_path(artifacts[0])) as archive:
         assert "DarkBladeFullscreen.asset.cs" in archive.namelist()
 
 

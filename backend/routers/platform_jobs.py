@@ -37,7 +37,7 @@ def _build_job_application_service(session, request: Request) -> JobApplicationS
         execution_orchestrator_service=build_execution_orchestrator_service(session, request),
         server_queued_job_claim_service=_build_server_queued_job_claim_service(request),
         server_workspace_service=_build_server_workspace_service(request),
-        uploaded_asset_service=_build_uploaded_asset_service(request),
+        uploaded_asset_service=_build_uploaded_asset_service_for_session(session, request),
     )
 
 
@@ -63,6 +63,20 @@ def _build_uploaded_asset_service(request: Request) -> UploadedAssetService:
     container = _container(request)
     factory = container.resolve_singleton("platform.uploaded_asset_service_factory")
     if callable(factory):
+        return factory()
+    return factory
+
+
+def _build_uploaded_asset_service_for_session(session, request: Request) -> UploadedAssetService:
+    container = _container(request)
+    factory = container.resolve_singleton("platform.uploaded_asset_service_factory")
+    if callable(factory):
+        repository_factory = container.resolve_optional_singleton("platform.uploaded_asset_repository_factory")
+        if callable(repository_factory):
+            try:
+                return factory(uploaded_asset_repository=repository_factory(session))
+            except TypeError:
+                return factory()
         return factory()
     return factory
 
@@ -250,7 +264,7 @@ def upload_asset(request: Request, body: dict):
     with auth_session_scope(request) as session:
         user = _require_platform_user(request, session)
         command = UploadAssetCommand.model_validate(body)
-        service = _build_uploaded_asset_service(request)
+        service = _build_uploaded_asset_service_for_session(session, request)
         try:
             uploaded = service.create_asset(
                 user_id=user.user_id,

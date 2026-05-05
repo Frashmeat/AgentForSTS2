@@ -6,6 +6,10 @@ from pathlib import Path
 
 from project_utils import ensure_local_props
 
+from app.modules.platform.application.services.platform_file_storage import (
+    PLATFORM_FS_PROVIDER,
+    try_object_key_from_platform_path,
+)
 from app.modules.codegen.api import build_codegen_prompt_assembler
 from app.modules.platform.application.services.server_deploy_registry_service import ServerDeployRegistryService
 from app.modules.platform.application.services.server_deploy_target_lock_service import (
@@ -19,6 +23,7 @@ from config import get_config
 from llm.agent_runner import run_agent_task_with_llm_config
 
 from .code_generate_handler import build_code_llm_config
+from .platform_paths import resolve_server_workspace_root
 
 BuildAgentRunner = Callable[[str, Path, dict[str, object]], Awaitable[str]]
 
@@ -26,13 +31,7 @@ _TEXT_LOADER = PromptLoader()
 
 
 def _resolve_project_root(input_payload: dict[str, object]) -> Path:
-    root_text = str(input_payload.get("server_workspace_root", "")).strip()
-    if not root_text:
-        raise ValueError("build.project requires server_workspace_root")
-    project_root = Path(root_text)
-    if not project_root.exists():
-        raise ValueError(f"server workspace root does not exist: {project_root}")
-    return project_root
+    return resolve_server_workspace_root(input_payload, step_type="build.project")
 
 
 def _resolve_item_name(input_payload: dict[str, object]) -> str:
@@ -73,11 +72,12 @@ def _build_artifact_payloads(project_root: Path) -> list[dict[str, object]]:
     payloads: list[dict[str, object]] = []
     for file in find_latest_output_files(project_root):
         mime_type, _ = mimetypes.guess_type(file.name)
+        object_key = try_object_key_from_platform_path(file)
         payloads.append(
             {
                 "artifact_type": "build_output",
-                "storage_provider": "server_workspace",
-                "object_key": str(file),
+                "storage_provider": PLATFORM_FS_PROVIDER if object_key is not None else "server_workspace",
+                "object_key": object_key or str(file),
                 "file_name": file.name,
                 "mime_type": mime_type or "application/octet-stream",
                 "size_bytes": file.stat().st_size,

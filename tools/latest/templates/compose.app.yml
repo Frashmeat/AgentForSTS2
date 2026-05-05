@@ -36,6 +36,7 @@ services:
     volumes:
       - ${ATS_WEB_WORKSTATION_CONFIG_PATH}:/app/config.json:ro
       - ${ATS_WEB_WORKSTATION_RUNTIME_DIR}:/app/runtime
+      - ${ATS_PLATFORM_RUNTIME_DIR}:/app/runtime/platform
       - ${ATS_WEB_KNOWLEDGE_DIR}:/app/runtime/knowledge
 
   web:
@@ -61,6 +62,7 @@ services:
     volumes:
       - ${ATS_WEB_CONFIG_PATH}:/app/config.json:ro
       - ${ATS_WEB_RUNTIME_DIR}:/app/runtime
+      - ${ATS_PLATFORM_RUNTIME_DIR}:/app/runtime/platform
       - ${ATS_WEB_KNOWLEDGE_DIR}:/app/runtime/knowledge
 
 volumes:

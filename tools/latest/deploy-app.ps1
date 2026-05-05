@@ -465,6 +465,7 @@ function Write-DockerEnv {
         "ATS_WEB_WORKSTATION_DOCKERFILE=$($Layout.WebWorkstationDockerfile)"
         "ATS_WEB_CONFIG_PATH=$(Convert-PathForComposeEnv -Path $GeneratedPaths.WebConfig)"
         "ATS_WEB_RUNTIME_DIR=$(Convert-PathForComposeEnv -Path (Join-Path $Layout.ConfigRoot 'web'))"
+        "ATS_PLATFORM_RUNTIME_DIR=$(Convert-PathForComposeEnv -Path (Join-Path $Layout.ConfigRoot 'platform'))"
         "ATS_WEB_KNOWLEDGE_DIR=$(Convert-PathForComposeEnv -Path (Join-Path $Layout.ConfigRoot 'knowledge'))"
         "ATS_WEB_WORKSTATION_CONFIG_PATH=$(Convert-PathForComposeEnv -Path $GeneratedPaths.WebWorkstationConfig)"
         "ATS_WEB_WORKSTATION_RUNTIME_DIR=$(Convert-PathForComposeEnv -Path (Join-Path $Layout.ConfigRoot 'web-workstation'))"

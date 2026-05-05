@@ -16,6 +16,7 @@ from .quota_balance import QuotaBalanceRecord
 from .quota_bucket import QuotaBucketRecord, QuotaBucketType
 from .server_credential import ServerCredentialRecord
 from .usage_ledger import LedgerType, UsageLedgerRecord
+from .uploaded_asset import UploadedAssetRecord
 from .user_platform_preference import UserPlatformPreferenceRecord
 
 
@@ -34,6 +35,7 @@ def platform_tables():
         QuotaBucketRecord.__table__,
         UsageLedgerRecord.__table__,
         ArtifactRecord.__table__,
+        UploadedAssetRecord.__table__,
         JobEventRecord.__table__,
         PlatformRuntimeAuditEventRecord.__table__,
     ]
@@ -61,6 +63,7 @@ __all__ = [
     "QuotaBucketType",
     "ServerCredentialRecord",
     "UsageLedgerRecord",
+    "UploadedAssetRecord",
     "UserPlatformPreferenceRecord",
     "platform_tables",
 ]

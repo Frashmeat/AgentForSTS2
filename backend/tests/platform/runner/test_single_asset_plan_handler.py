@@ -6,6 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
+from app.modules.platform.application.services.platform_file_storage import resolve_platform_storage_path
 from app.modules.platform.contracts.runner_contracts import StepExecutionBinding, StepExecutionRequest
 from app.modules.platform.runner.single_asset_plan_handler import execute_single_asset_plan_step
 
@@ -104,11 +105,13 @@ def test_execute_single_asset_plan_step_builds_prompt_and_delegates_to_text_gene
     assert result["analysis"].startswith("摘要：建议先补遗物触发与本地化骨架")
     artifact = result["artifacts"][0]
     assert artifact["artifact_type"] == "plan_markdown"
-    assert artifact["storage_provider"] == "server_workspace"
+    assert artifact["storage_provider"] == "platform_fs"
     assert artifact["file_name"] == "FangedGrimoire.relic.plan.md"
     assert artifact["mime_type"] == "text/markdown; charset=utf-8"
     assert artifact["result_summary"] == "服务器生成方案文档"
-    assert Path(str(artifact["object_key"])).read_text(encoding="utf-8").startswith("# FangedGrimoire")
+    assert resolve_platform_storage_path(str(artifact["object_key"])).read_text(encoding="utf-8").startswith(
+        "# FangedGrimoire"
+    )
     assert captured["variables"]["uploaded_asset_file_name"] == "无"
     assert captured["variables"]["server_project_name"] == "无"
 

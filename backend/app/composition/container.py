@@ -44,6 +44,7 @@ from app.modules.platform.infra.persistence.repositories import (
     ServerCredentialAdminRepositorySqlAlchemy,
     ServerExecutionRepositorySqlAlchemy,
     UsageLedgerRepositorySqlAlchemy,
+    UploadedAssetRepositorySqlAlchemy,
 )
 from app.modules.platform.runner import (
     ApprovalAdapter,
@@ -113,6 +114,7 @@ class ApplicationContainer:
             ("platform.quota_account_repository_factory", QuotaAccountRepositorySqlAlchemy),
             ("platform.quota_balance_repository_factory", QuotaBalanceRepositorySqlAlchemy),
             ("platform.usage_ledger_repository_factory", UsageLedgerRepositorySqlAlchemy),
+            ("platform.uploaded_asset_repository_factory", UploadedAssetRepositorySqlAlchemy),
             ("platform.artifact_repository_factory", ArtifactRepositorySqlAlchemy),
             ("platform.job_event_repository_factory", JobEventRepositorySqlAlchemy),
             ("platform.admin_query_repositories_factory", AdminQueryRepositoriesSqlAlchemy),

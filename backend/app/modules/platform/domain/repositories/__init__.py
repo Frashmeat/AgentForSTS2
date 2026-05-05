@@ -18,6 +18,7 @@ from .quota_query_repository import QuotaQueryRepository
 from .server_credential_admin_repository import ServerCredentialAdminRecord, ServerCredentialAdminRepository
 from .server_execution_repository import ServerExecutionRepository
 from .usage_ledger_repository import UsageLedgerRepository
+from .uploaded_asset_repository import UploadedAssetRepository
 
 __all__ = [
     "AIExecutionRepository",
@@ -37,4 +38,5 @@ __all__ = [
     "ServerCredentialAdminRepository",
     "ServerExecutionRepository",
     "UsageLedgerRepository",
+    "UploadedAssetRepository",
 ]

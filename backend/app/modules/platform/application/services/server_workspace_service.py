@@ -9,10 +9,12 @@ from project_utils import create_project_from_template
 
 from app.modules.platform.contracts.server_workspace import ServerWorkspaceView
 
+from .platform_file_storage import default_platform_storage_root, normalize_object_key
+
 
 class ServerWorkspaceService:
     def __init__(self, storage_root: Path | None = None) -> None:
-        self.storage_root = storage_root or Path(__file__).resolve().parents[6] / "runtime" / "platform-workspaces"
+        self.storage_root = storage_root or default_platform_storage_root() / "workspaces"
 
     def create_workspace(self, *, user_id: int, project_name: str) -> ServerWorkspaceView:
         normalized_project_name = str(project_name).strip()
@@ -34,6 +36,11 @@ class ServerWorkspaceService:
                     "user_id": user_id,
                     "project_name": normalized_project_name,
                     "workspace_root": str(project_root),
+                    "workspace_object_key": self._object_key_for_project(
+                        user_id=user_id,
+                        token=token,
+                        project_name=normalized_project_name,
+                    ),
                     "created_at": created_at,
                 },
                 ensure_ascii=False,
@@ -65,6 +72,10 @@ class ServerWorkspaceService:
             workspace_root=str(metadata.get("workspace_root", "")).strip(),
             created_at=str(metadata.get("created_at", "")).strip(),
         )
+
+    @staticmethod
+    def _object_key_for_project(*, user_id: int, token: str, project_name: str) -> str:
+        return normalize_object_key("workspaces", user_id, token, project_name)
 
     @staticmethod
     def _token_from_ref(server_project_ref: str) -> str:

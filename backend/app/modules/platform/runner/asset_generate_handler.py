@@ -13,6 +13,7 @@ from image.postprocess import process_image
 from llm.agent_runner import run_agent_task_with_llm_config
 
 from .code_generate_handler import build_code_llm_config
+from .platform_paths import resolve_optional_uploaded_asset_path, resolve_server_workspace_root
 
 AssetAgentRunner = Callable[[str, Path, dict[str, object]], Awaitable[str]]
 
@@ -42,11 +43,6 @@ async def _run_postprocess_in_worker(
     )
 
 
-def _resolve_optional_uploaded_asset_path(input_payload: dict[str, object]) -> Path | None:
-    value = str(input_payload.get("uploaded_asset_path", "")).strip()
-    return Path(value) if value else None
-
-
 def _build_summary(full_text: str, item_name: str) -> str:
     for raw_line in full_text.splitlines():
         line = raw_line.strip()
@@ -73,8 +69,8 @@ async def execute_asset_generate_step(
     asset_type = _resolve_required_text(input_payload, "asset_type")
     item_name = _resolve_required_text(input_payload, "item_name")
     description = _resolve_required_text(input_payload, "description")
-    project_root = Path(_resolve_required_text(input_payload, "server_workspace_root"))
-    uploaded_asset_path = _resolve_optional_uploaded_asset_path(input_payload)
+    project_root = resolve_server_workspace_root(input_payload, step_type="asset.generate")
+    uploaded_asset_path = resolve_optional_uploaded_asset_path(input_payload)
     image_paths = (
         await _run_postprocess_in_worker(
             uploaded_asset_path=uploaded_asset_path,

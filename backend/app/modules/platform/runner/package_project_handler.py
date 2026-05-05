@@ -3,19 +3,19 @@ from __future__ import annotations
 import zipfile
 from pathlib import Path
 
+from app.modules.platform.application.services.platform_file_storage import (
+    PLATFORM_FS_PROVIDER,
+    try_object_key_from_platform_path,
+)
 from app.modules.platform.contracts.runner_contracts import StepExecutionRequest
+
+from .platform_paths import resolve_server_workspace_root
 
 _SOURCE_PACKAGE_SKIP_DIRS = {"bin", "obj", ".godot", ".git", "_source_artifacts"}
 
 
 def _resolve_project_root(input_payload: dict[str, object]) -> Path:
-    root_text = str(input_payload.get("server_workspace_root", "")).strip()
-    if not root_text:
-        raise ValueError("package.project requires server_workspace_root")
-    project_root = Path(root_text)
-    if not project_root.exists() or not project_root.is_dir():
-        raise ValueError(f"server workspace root does not exist: {project_root}")
-    return project_root
+    return resolve_server_workspace_root(input_payload, step_type="package.project")
 
 
 def _create_source_project_package(project_root: Path) -> Path:
@@ -39,6 +39,7 @@ async def execute_package_project_step(request: StepExecutionRequest) -> dict[st
     project_root = _resolve_project_root(request.input_payload)
     item_name = str(request.input_payload.get("item_name", "")).strip() or project_root.name
     package_path = _create_source_project_package(project_root)
+    object_key = try_object_key_from_platform_path(package_path)
     return {
         "text": f"已打包 {item_name} 的服务器项目源码",
         "item_name": item_name,
@@ -46,8 +47,8 @@ async def execute_package_project_step(request: StepExecutionRequest) -> dict[st
         "artifacts": [
             {
                 "artifact_type": "source_project",
-                "storage_provider": "server_workspace",
-                "object_key": str(package_path),
+                "storage_provider": PLATFORM_FS_PROVIDER if object_key is not None else "server_workspace",
+                "object_key": object_key or str(package_path),
                 "file_name": package_path.name,
                 "mime_type": "application/zip",
                 "size_bytes": package_path.stat().st_size,

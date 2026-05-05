@@ -77,7 +77,9 @@ def _build_prompt(input_payload: dict[str, object]) -> tuple[str, str, str]:
             "uploaded_asset_size_bytes": str(input_payload.get("uploaded_asset_size_bytes", "")).strip() or "无",
             "server_project_name": str(input_payload.get("server_project_name", "")).strip() or "无",
             "server_workspace_root": str(input_payload.get("server_workspace_root", "")).strip() or "无",
-            "server_workspace_snapshot": render_server_workspace_snapshot(input_payload.get("server_workspace_root")),
+            "server_workspace_snapshot": render_server_workspace_snapshot(
+                input_payload.get("server_workspace_root") or input_payload.get("server_workspace_object_key")
+            ),
             "facts": knowledge["facts"] or "无",
             "guidance": knowledge["guidance"] or "无",
             "lookup": knowledge["lookup"] or "无",

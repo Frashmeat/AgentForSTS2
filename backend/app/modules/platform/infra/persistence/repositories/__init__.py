@@ -14,6 +14,7 @@ from .quota_query_repository_sqlalchemy import QuotaQueryRepositorySqlAlchemy
 from .server_credential_admin_repository_sqlalchemy import ServerCredentialAdminRepositorySqlAlchemy
 from .server_execution_repository_sqlalchemy import ServerExecutionRepositorySqlAlchemy
 from .usage_ledger_repository_sqlalchemy import UsageLedgerRepositorySqlAlchemy
+from .uploaded_asset_repository_sqlalchemy import UploadedAssetRepositorySqlAlchemy
 
 __all__ = [
     "AIExecutionRepositorySqlAlchemy",
@@ -30,4 +31,5 @@ __all__ = [
     "ServerCredentialAdminRepositorySqlAlchemy",
     "ServerExecutionRepositorySqlAlchemy",
     "UsageLedgerRepositorySqlAlchemy",
+    "UploadedAssetRepositorySqlAlchemy",
 ]

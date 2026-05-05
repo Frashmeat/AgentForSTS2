@@ -37,6 +37,7 @@ from .server_deploy_target_lock_service import ServerDeployTargetBusyError
 from .server_workspace_lock_service import ServerWorkspaceLockHandle, ServerWorkspaceLockService
 from .server_workspace_service import ServerWorkspaceService
 from .uploaded_asset_service import UploadedAssetService
+from .platform_file_storage import normalize_object_key
 
 logger = logging.getLogger(__name__)
 
@@ -501,11 +502,10 @@ class ExecutionOrchestratorService:
             payload["uploaded_asset_file_name"] = uploaded.file_name
             payload["uploaded_asset_mime_type"] = uploaded.mime_type
             payload["uploaded_asset_size_bytes"] = uploaded.size_bytes
-            payload["uploaded_asset_path"] = str(
-                self.uploaded_asset_service.get_asset_content_path(
-                    user_id=user_id,
-                    uploaded_asset_ref=uploaded_asset_ref,
-                )
+            payload.pop("uploaded_asset_path", None)
+            payload["uploaded_asset_object_key"] = self.uploaded_asset_service.get_asset_object_key(
+                user_id=user_id,
+                uploaded_asset_ref=uploaded_asset_ref,
             )
 
         server_project_ref = str(payload.get("server_project_ref", "")).strip()
@@ -517,7 +517,13 @@ class ExecutionOrchestratorService:
                 user_id=user_id, server_project_ref=server_project_ref
             )
             payload["server_project_name"] = workspace.project_name
-            payload["server_workspace_root"] = workspace.workspace_root
+            payload.pop("server_workspace_root", None)
+            payload["server_workspace_object_key"] = normalize_object_key(
+                "workspaces",
+                user_id,
+                server_project_ref.split(":", 1)[1],
+                workspace.project_name,
+            )
             payload["runtime_user_id"] = user_id
         return payload
 
