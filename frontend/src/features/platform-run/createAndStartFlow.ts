@@ -54,6 +54,26 @@ export interface CreateAndStartPlatformFlowResult {
   startConfirmed: boolean;
 }
 
+const SERVER_WORKSPACE_JOB_TYPES = new Set(["single_generate", "batch_generate"]);
+
+function normalizeProjectName(value: string) {
+  const normalized = value.trim().replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "");
+  return normalized || "GeneratedMod";
+}
+
+function inferServerWorkspaceProjectName(request: CreateAndStartPlatformFlowRequest) {
+  const explicitName = request.serverWorkspaceProjectName?.trim();
+  if (explicitName) {
+    return explicitName;
+  }
+  const firstItem = request.items[0];
+  const itemName = String(firstItem?.input_payload?.item_name ?? "").trim();
+  if (itemName) {
+    return normalizeProjectName(itemName);
+  }
+  return normalizeProjectName(request.inputSummary);
+}
+
 export async function createAndStartPlatformFlow(
   request: CreateAndStartPlatformFlowRequest,
 ): Promise<CreateAndStartPlatformFlowResult> {
@@ -62,10 +82,13 @@ export async function createAndStartPlatformFlow(
     input_payload: { ...(item.input_payload ?? {}) },
   }));
 
-  if (request.serverWorkspaceProjectName?.trim()) {
+  const serverWorkspaceProjectName = SERVER_WORKSPACE_JOB_TYPES.has(request.jobType)
+    ? inferServerWorkspaceProjectName(request)
+    : "";
+  if (serverWorkspaceProjectName) {
     request.onProgress?.({ stage: "preparing_workspace", message: "正在创建服务器工作区" });
     const workspace = await createMyServerWorkspace({
-      project_name: request.serverWorkspaceProjectName.trim(),
+      project_name: serverWorkspaceProjectName,
     });
     for (const item of items) {
       item.input_payload.server_project_ref = workspace.server_project_ref;

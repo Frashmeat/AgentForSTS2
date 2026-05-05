@@ -20,7 +20,7 @@ function createMockResponse(init: MockResponseInit) {
   };
 }
 
-test("platform run flow creates job before confirming start", async () => {
+test("platform run flow creates non-generation job before confirming start", async () => {
   const calls: Array<{ input: unknown; init?: RequestInit }> = [];
   const progress: string[] = [];
   Object.assign(globalThis, {
@@ -40,10 +40,10 @@ test("platform run flow creates job before confirming start", async () => {
   });
 
   const result = await createAndStartPlatformFlow({
-    jobType: "single_generate",
+    jobType: "log_analysis",
     workflowVersion: "2026.04.04",
-    inputSummary: "Dark Relic",
-    createdFrom: "single_asset",
+    inputSummary: "analyze latest crash",
+    createdFrom: "log_analysis",
     items: [],
     onProgress: (update) => progress.push(update.stage),
   });
@@ -54,6 +54,60 @@ test("platform run flow creates job before confirming start", async () => {
   assert.equal(result.started.status, "queued");
   assert.equal(result.startConfirmed, true);
   assert.deepEqual(progress, ["creating_job", "job_created", "starting_job", "queued"]);
+});
+
+test("platform run flow creates server workspace for generation jobs without explicit project root", async () => {
+  const calls: Array<{ input: unknown; init?: RequestInit }> = [];
+  Object.assign(globalThis, {
+    fetch: async (input: unknown, init?: RequestInit) => {
+      calls.push({ input, init });
+      if (calls.length === 1) {
+        return createMockResponse({
+          ok: true,
+          body: {
+            server_project_ref: "server-workspace:relic123",
+            project_name: "FangedGrimoire",
+            workspace_root: "F:/runtime/platform-workspaces/1001/relic123/FangedGrimoire",
+            created_at: "2026-05-05T12:00:00+00:00",
+          },
+        });
+      }
+      if (calls.length === 2) {
+        return createMockResponse({
+          ok: true,
+          body: { id: 124, status: "draft", job_type: "single_generate" },
+        });
+      }
+      return createMockResponse({
+        ok: true,
+        body: { id: 124, status: "queued" },
+      });
+    },
+  });
+
+  await createAndStartPlatformFlow({
+    jobType: "single_generate",
+    workflowVersion: "2026.04.04",
+    inputSummary: "relic:FangedGrimoire",
+    createdFrom: "single_asset",
+    items: [
+      {
+        item_type: "relic",
+        input_summary: "FangedGrimoire",
+        input_payload: {
+          item_name: "FangedGrimoire",
+          description: "每次造成伤害时获得 2 点格挡。",
+          image_mode: "ai",
+        },
+      },
+    ],
+  });
+
+  assert.equal(calls[0].input, "/api/me/server-workspaces");
+  assert.match(String(calls[0].init?.body), /"project_name":"FangedGrimoire"/);
+  assert.equal(calls[1].input, "/api/me/jobs");
+  assert.match(String(calls[1].init?.body), /"server_project_ref":"server-workspace:relic123"/);
+  assert.equal(calls[2].input, "/api/me/jobs/124/start");
 });
 
 test("platform run flow can stop after draft creation before start confirmation", async () => {
@@ -93,6 +147,17 @@ test("platform run flow uploads assets before creating job and injects uploaded_
         return createMockResponse({
           ok: true,
           body: {
+            server_project_ref: "server-workspace:upload123",
+            project_name: "DarkBlade",
+            workspace_root: "F:/runtime/platform-workspaces/1001/upload123/DarkBlade",
+            created_at: "2026-05-05T12:00:00+00:00",
+          },
+        });
+      }
+      if (calls.length === 2) {
+        return createMockResponse({
+          ok: true,
+          body: {
             uploaded_asset_ref: "uploaded-asset:abc123",
             file_name: "dark-blade.png",
             mime_type: "image/png",
@@ -101,7 +166,7 @@ test("platform run flow uploads assets before creating job and injects uploaded_
           },
         });
       }
-      if (calls.length === 2) {
+      if (calls.length === 3) {
         return createMockResponse({
           ok: true,
           body: { id: 789, status: "draft", job_type: "single_generate" },
@@ -141,10 +206,12 @@ test("platform run flow uploads assets before creating job and injects uploaded_
     ],
   });
 
-  assert.equal(calls[0].input, "/api/me/upload-assets");
-  assert.equal(calls[1].input, "/api/me/jobs");
-  assert.equal(calls[2].input, "/api/me/jobs/789/start");
-  assert.match(String(calls[1].init?.body), /"uploaded_asset_ref":"uploaded-asset:abc123"/);
+  assert.equal(calls[0].input, "/api/me/server-workspaces");
+  assert.equal(calls[1].input, "/api/me/upload-assets");
+  assert.equal(calls[2].input, "/api/me/jobs");
+  assert.equal(calls[3].input, "/api/me/jobs/789/start");
+  assert.match(String(calls[2].init?.body), /"server_project_ref":"server-workspace:upload123"/);
+  assert.match(String(calls[2].init?.body), /"uploaded_asset_ref":"uploaded-asset:abc123"/);
   assert.equal(result.job.id, 789);
   assert.equal(result.started.status, "queued");
 });
