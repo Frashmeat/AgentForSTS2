@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
+from app.modules.platform.domain.execution_compatibility import allowed_api_protocols_for_runner_type
 from app.modules.platform.contracts.server_execution import (
     CreateExecutionProfileCommand,
     ExecutionProfileAdminView,
@@ -281,12 +282,23 @@ class ServerExecutionRepositorySqlAlchemy(ServerExecutionRepository):
         )
 
     def _is_profile_available(self, execution_profile_id: int) -> bool:
+        profile = (
+            self.session.query(ExecutionProfileRecord)
+            .filter(ExecutionProfileRecord.id == execution_profile_id)
+            .one_or_none()
+        )
+        if profile is None:
+            return False
+        allowed_protocols = allowed_api_protocols_for_runner_type(profile.runner_type)
+        if not allowed_protocols:
+            return False
         return (
             self.session.query(ServerCredentialRecord)
             .filter(
                 ServerCredentialRecord.execution_profile_id == execution_profile_id,
                 ServerCredentialRecord.enabled.is_(True),
                 ServerCredentialRecord.health_status == "healthy",
+                ServerCredentialRecord.api_protocol.in_(allowed_protocols),
             )
             .first()
             is not None

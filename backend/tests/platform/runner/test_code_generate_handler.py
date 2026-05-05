@@ -31,6 +31,23 @@ def test_build_code_llm_config_uses_execution_binding():
     assert llm_cfg["base_url"] == "https://api.openai.com/v1"
 
 
+def test_build_code_llm_config_rejects_cli_protocol_mismatch():
+    try:
+        build_code_llm_config(
+            StepExecutionBinding(
+                runner_type="codex_cli",
+                api_protocol="anthropic_compatible",
+                model="gpt-5.4",
+                credential="anthropic-token",
+                api_base_url="https://api.anthropic.com",
+            )
+        )
+    except ValueError as error:
+        assert "api_protocol must be one of openai_compatible" in str(error)
+    else:
+        raise AssertionError("expected ValueError for codex_cli with anthropic_compatible")
+
+
 def test_execute_code_generate_step_builds_prompt_and_runs_agent(monkeypatch, tmp_path):
     captured: dict[str, object] = {}
     workspace_root = tmp_path / "DarkMod"

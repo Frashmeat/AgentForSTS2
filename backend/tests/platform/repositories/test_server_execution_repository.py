@@ -150,3 +150,64 @@ def test_server_execution_repository_rejects_deleting_referenced_execution_profi
 
     with pytest.raises(ExecutionProfileInUseError, match="execution profile is referenced"):
         repository.delete_execution_profile(preferred.id)
+
+
+def test_server_execution_repository_available_requires_cli_compatible_healthy_credential(db_session):
+    repository = ServerExecutionRepositorySqlAlchemy(db_session)
+    codex = ExecutionProfileRecord(
+        code="codex-only-anthropic",
+        display_name="Codex with wrong credential",
+        runner_type="codex_cli",
+        model="gpt-5.4",
+        description="",
+        enabled=True,
+        recommended=True,
+        sort_order=10,
+    )
+    claude = ExecutionProfileRecord(
+        code="claude-anthropic",
+        display_name="Claude with anthropic credential",
+        runner_type="claude_cli",
+        model="claude-sonnet-4-6",
+        description="",
+        enabled=True,
+        recommended=False,
+        sort_order=20,
+    )
+    db_session.add_all([codex, claude])
+    db_session.flush()
+    db_session.add_all(
+        [
+            ServerCredentialRecord(
+                execution_profile_id=codex.id,
+                api_protocol="anthropic_compatible",
+                auth_type="api_key",
+                credential_ciphertext="cipher-wrong",
+                secret_ciphertext=None,
+                api_base_url="https://api.anthropic.com",
+                label="wrong",
+                priority=1,
+                enabled=True,
+                health_status="healthy",
+            ),
+            ServerCredentialRecord(
+                execution_profile_id=claude.id,
+                api_protocol="anthropic_compatible",
+                auth_type="api_key",
+                credential_ciphertext="cipher-right",
+                secret_ciphertext=None,
+                api_base_url="https://api.anthropic.com",
+                label="right",
+                priority=1,
+                enabled=True,
+                health_status="healthy",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    profiles = repository.list_execution_profiles()
+
+    by_code = {item.display_name: item for item in profiles}
+    assert by_code["Codex with wrong credential"].available is False
+    assert by_code["Claude with anthropic credential"].available is True

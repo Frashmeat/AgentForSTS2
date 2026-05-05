@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from app.modules.platform.contracts import AdminServerCredentialHealthCheckView, AdminServerCredentialListItem
+from app.modules.platform.domain.execution_compatibility import require_api_protocol_compatible_with_runner_type
 from app.modules.platform.domain.repositories import ServerCredentialAdminRecord, ServerCredentialAdminRepository
 from app.modules.platform.infra.persistence.models import (
     CredentialHealthCheckRecord,
@@ -15,15 +16,22 @@ class ServerCredentialAdminRepositorySqlAlchemy(ServerCredentialAdminRepository)
     def __init__(self, session) -> None:
         self.session = session
 
-    def _ensure_execution_profile_exists(self, execution_profile_id: int) -> None:
-        profile_exists = (
-            self.session.query(ExecutionProfileRecord.id)
+    def _get_execution_profile(self, execution_profile_id: int) -> ExecutionProfileRecord:
+        profile = (
+            self.session.query(ExecutionProfileRecord)
             .filter(ExecutionProfileRecord.id == execution_profile_id)
-            .first()
-            is not None
+            .one_or_none()
         )
-        if not profile_exists:
+        if profile is None:
             raise LookupError(f"execution profile not found: {execution_profile_id}")
+        return profile
+
+    def _ensure_execution_profile_accepts_api_protocol(self, execution_profile_id: int, api_protocol: str) -> None:
+        profile = self._get_execution_profile(execution_profile_id)
+        require_api_protocol_compatible_with_runner_type(
+            runner_type=profile.runner_type,
+            api_protocol=api_protocol,
+        )
 
     @staticmethod
     def _to_iso(value: object | None) -> str | None:
@@ -66,7 +74,7 @@ class ServerCredentialAdminRepositorySqlAlchemy(ServerCredentialAdminRepository)
         priority: int,
         enabled: bool,
     ) -> AdminServerCredentialListItem:
-        self._ensure_execution_profile_exists(execution_profile_id)
+        self._ensure_execution_profile_accepts_api_protocol(execution_profile_id, api_protocol)
 
         row = ServerCredentialRecord(
             execution_profile_id=execution_profile_id,
@@ -124,7 +132,7 @@ class ServerCredentialAdminRepositorySqlAlchemy(ServerCredentialAdminRepository)
         priority: int,
         enabled: bool,
     ) -> AdminServerCredentialListItem:
-        self._ensure_execution_profile_exists(execution_profile_id)
+        self._ensure_execution_profile_accepts_api_protocol(execution_profile_id, api_protocol)
         row = (
             self.session.query(ServerCredentialRecord).filter(ServerCredentialRecord.id == credential_id).one_or_none()
         )
@@ -153,6 +161,8 @@ class ServerCredentialAdminRepositorySqlAlchemy(ServerCredentialAdminRepository)
         )
         if row is None:
             raise LookupError(f"server credential not found: {credential_id}")
+        if enabled:
+            self._ensure_execution_profile_accepts_api_protocol(row.execution_profile_id, row.api_protocol)
         row.enabled = enabled
         if enabled:
             if row.health_status == "disabled":

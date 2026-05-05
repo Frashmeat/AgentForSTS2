@@ -36,6 +36,23 @@ def test_build_text_llm_config_uses_codex_cli_mode_for_codex_binding():
     assert llm_cfg["base_url"] == "https://api.openai.com/v1"
 
 
+def test_build_text_llm_config_rejects_cli_protocol_mismatch():
+    try:
+        build_text_llm_config(
+            StepExecutionBinding(
+                runner_type="claude_cli",
+                api_protocol="openai_compatible",
+                model="deepseek-v4-pro",
+                credential="sk-live-openai",
+                api_base_url="https://api.openai.com/v1",
+            )
+        )
+    except ValueError as error:
+        assert "api_protocol must be one of anthropic_compatible" in str(error)
+    else:
+        raise AssertionError("expected ValueError for claude_cli with openai_compatible")
+
+
 def test_execute_text_generate_step_uses_execution_binding_to_call_text_runner():
     captured: dict[str, object] = {}
 
@@ -212,7 +229,7 @@ def test_execute_text_generate_step_classifies_invalid_openai_compatible_respons
                     result_schema_version="v1",
                     input_payload={"prompt": "虚构游戏机制：造成伤害。"},
                     execution_binding=StepExecutionBinding(
-                        runner_type="claude_cli",
+                        runner_type="api",
                         api_protocol="openai_compatible",
                         model="deepseek-v4-pro",
                         credential="sk-live-openai",
@@ -321,7 +338,7 @@ def test_execute_text_generate_step_keeps_web_workstation_surface_for_upstream_e
                         "__runtime_surface": "web_workstation",
                     },
                     execution_binding=StepExecutionBinding(
-                        runner_type="claude_cli",
+                        runner_type="api",
                         api_protocol="openai_compatible",
                         model="deepseek-v4-pro",
                         credential="sk-live-openai",

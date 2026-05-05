@@ -6,6 +6,7 @@ from pathlib import Path
 from app.modules.codegen.api import build_custom_code_prompt
 from app.modules.codegen.domain.models import CustomCodegenRequest
 from app.modules.platform.contracts.runner_contracts import StepExecutionBinding, StepExecutionRequest
+from app.modules.platform.domain.execution_compatibility import require_api_protocol_compatible_with_runner_type
 from llm.agent_runner import run_agent_task_with_llm_config
 
 CodeAgentRunner = Callable[[str, Path, dict[str, object]], Awaitable[str]]
@@ -19,9 +20,13 @@ def build_code_llm_config(binding: StepExecutionBinding) -> dict[str, object]:
     if not credential:
         raise ValueError("execution_binding.credential is required")
 
-    runner_type = str(binding.runner_type).strip() or "claude_cli"
+    runner_type = str(binding.runner_type).strip()
     if runner_type not in {"codex_cli", "claude_cli"}:
         raise ValueError("code.generate requires runner_type codex_cli or claude_cli")
+    require_api_protocol_compatible_with_runner_type(
+        runner_type=runner_type,
+        api_protocol=str(binding.api_protocol).strip(),
+    )
     return {
         "mode": "agent_cli",
         "agent_backend": "codex" if runner_type == "codex_cli" else "claude",

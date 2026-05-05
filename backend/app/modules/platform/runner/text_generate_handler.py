@@ -5,6 +5,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from app.modules.platform.contracts.runner_contracts import StepExecutionBinding, StepExecutionRequest
+from app.modules.platform.domain.execution_compatibility import require_api_protocol_compatible_with_runner_type
 from app.modules.platform.errors import build_platform_error
 
 from .upstream_error_classifier import UpstreamErrorClassification, classify_upstream_error
@@ -88,10 +89,11 @@ def build_text_llm_config(binding: StepExecutionBinding) -> dict[str, object]:
     if not str(binding.credential).strip():
         raise ValueError("execution_binding.credential is required")
 
-    runner_type = str(binding.runner_type).strip() or "claude_cli"
+    runner_type = str(binding.runner_type).strip()
     if runner_type not in {"codex_cli", "claude_cli", "api"}:
         raise ValueError("execution_binding.runner_type must be codex_cli, claude_cli or api")
     api_protocol = str(binding.api_protocol).strip()
+    require_api_protocol_compatible_with_runner_type(runner_type=runner_type, api_protocol=api_protocol)
     provider = _api_protocol_to_litellm_provider(api_protocol)
     agent_backend = "codex" if runner_type == "codex_cli" else "claude"
     return {

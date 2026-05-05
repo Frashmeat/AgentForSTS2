@@ -196,3 +196,95 @@ def test_execution_routing_repository_can_skip_excluded_credential_ids(db_sessio
     assert route is not None
     assert route.credential_id == credential_b.id
     assert route.api_base_url == "https://healthy-b.example.com/v1"
+
+
+def test_execution_routing_repository_skips_protocols_incompatible_with_cli_runner(db_session):
+    repository = ExecutionRoutingRepositorySqlAlchemy(db_session)
+    profile = ExecutionProfileRecord(
+        code="codex-gpt-5-4",
+        display_name="Codex CLI / gpt-5.4",
+        runner_type="codex_cli",
+        model="gpt-5.4",
+        description="默认推荐",
+        enabled=True,
+        recommended=True,
+        sort_order=10,
+    )
+    db_session.add(profile)
+    db_session.flush()
+    anthropic_credential = ServerCredentialRecord(
+        execution_profile_id=profile.id,
+        api_protocol="anthropic_compatible",
+        auth_type="api_key",
+        credential_ciphertext="cipher-anthropic",
+        secret_ciphertext=None,
+        api_base_url="https://api.anthropic.com",
+        label="anthropic",
+        priority=1,
+        enabled=True,
+        health_status="healthy",
+        last_checked_at=None,
+        last_error_code="",
+        last_error_message="",
+    )
+    openai_credential = ServerCredentialRecord(
+        execution_profile_id=profile.id,
+        api_protocol="openai_compatible",
+        auth_type="api_key",
+        credential_ciphertext="cipher-openai",
+        secret_ciphertext=None,
+        api_base_url="https://api.openai.com/v1",
+        label="openai",
+        priority=10,
+        enabled=True,
+        health_status="healthy",
+        last_checked_at=None,
+        last_error_code="",
+        last_error_message="",
+    )
+    db_session.add_all([anthropic_credential, openai_credential])
+    db_session.commit()
+
+    route = repository.find_routable_execution_target(profile.id)
+
+    assert route is not None
+    assert route.credential_id == openai_credential.id
+    assert route.api_protocol == "openai_compatible"
+
+
+def test_execution_routing_repository_returns_none_when_no_compatible_healthy_credential(db_session):
+    repository = ExecutionRoutingRepositorySqlAlchemy(db_session)
+    profile = ExecutionProfileRecord(
+        code="claude-sonnet-4-6",
+        display_name="Claude CLI / claude-sonnet-4-6",
+        runner_type="claude_cli",
+        model="claude-sonnet-4-6",
+        description="备用组合",
+        enabled=True,
+        recommended=False,
+        sort_order=20,
+    )
+    db_session.add(profile)
+    db_session.flush()
+    db_session.add(
+        ServerCredentialRecord(
+            execution_profile_id=profile.id,
+            api_protocol="openai_compatible",
+            auth_type="api_key",
+            credential_ciphertext="cipher-openai",
+            secret_ciphertext=None,
+            api_base_url="https://api.openai.com/v1",
+            label="openai",
+            priority=1,
+            enabled=True,
+            health_status="healthy",
+            last_checked_at=None,
+            last_error_code="",
+            last_error_message="",
+        )
+    )
+    db_session.commit()
+
+    route = repository.find_routable_execution_target(profile.id)
+
+    assert route is None

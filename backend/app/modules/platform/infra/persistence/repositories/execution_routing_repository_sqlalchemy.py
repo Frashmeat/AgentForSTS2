@@ -5,6 +5,7 @@ from app.modules.platform.domain.repositories import (
     ExecutionRoutingRepository,
     ExecutionRoutingTargetRecord,
 )
+from app.modules.platform.domain.execution_compatibility import allowed_api_protocols_for_runner_type
 from app.modules.platform.infra.persistence.models import ExecutionProfileRecord, ServerCredentialRecord
 
 
@@ -45,6 +46,13 @@ class ExecutionRoutingRepositorySqlAlchemy(ExecutionRoutingRepository):
                 ServerCredentialRecord.health_status == "healthy",
             )
         )
+        profile = self.get_execution_profile(execution_profile_id)
+        if profile is None:
+            return None
+        allowed_protocols = allowed_api_protocols_for_runner_type(profile.runner_type)
+        if not allowed_protocols:
+            return None
+        query = query.filter(ServerCredentialRecord.api_protocol.in_(allowed_protocols))
         if excluded_credential_ids:
             query = query.filter(ServerCredentialRecord.id.notin_(excluded_credential_ids))
         row = query.order_by(

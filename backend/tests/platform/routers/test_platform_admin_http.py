@@ -697,18 +697,18 @@ def test_platform_admin_router_updates_and_toggles_server_credential(client):
         "/api/admin/platform/server-credentials/1",
         json={
             "execution_profile_id": 1,
-            "api_protocol": "anthropic_compatible",
+            "api_protocol": "openai_compatible",
             "auth_type": "api_key",
-            "credential": "anthropic-key-1",
-            "api_base_url": "https://api.anthropic.com",
-            "label": "anthropic-main-a",
+            "credential": "openai-key-1",
+            "api_base_url": "https://api.openai.com/v1",
+            "label": "openai-main-a-updated",
             "priority": 15,
             "enabled": True,
         },
     )
     assert updated.status_code == 200
-    assert updated.json()["api_protocol"] == "anthropic_compatible"
-    assert updated.json()["label"] == "anthropic-main-a"
+    assert updated.json()["api_protocol"] == "openai_compatible"
+    assert updated.json()["label"] == "openai-main-a-updated"
 
     disabled = test_client.post("/api/admin/platform/server-credentials/1/disable")
     assert disabled.status_code == 200
@@ -719,6 +719,36 @@ def test_platform_admin_router_updates_and_toggles_server_credential(client):
     assert enabled.status_code == 200
     assert enabled.json()["enabled"] is True
     assert enabled.json()["health_status"] == "degraded"
+
+
+def test_platform_admin_router_rejects_server_credential_incompatible_with_execution_profile(client):
+    test_client, _, _, _ = client
+
+    login = test_client.post(
+        "/api/auth/login",
+        json={
+            "login": "admin@example.com",
+            "password": "admin-pass",
+        },
+    )
+    assert login.status_code == 200
+
+    created = test_client.post(
+        "/api/admin/platform/server-credentials",
+        json={
+            "execution_profile_id": 1,
+            "api_protocol": "anthropic_compatible",
+            "auth_type": "api_key",
+            "credential": "anthropic-key",
+            "api_base_url": "https://api.anthropic.com",
+            "label": "anthropic-wrong-profile",
+            "priority": 20,
+            "enabled": True,
+        },
+    )
+
+    assert created.status_code == 400
+    assert "api_protocol must be one of openai_compatible" in created.json()["detail"]
 
 
 def test_platform_admin_router_does_not_delete_server_credential(client):
