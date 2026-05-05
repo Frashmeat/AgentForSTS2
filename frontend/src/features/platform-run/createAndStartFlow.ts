@@ -9,6 +9,7 @@ import type { PlatformJobCreateItem, PlatformJobSummary } from "../../shared/api
 import { readDeferredExecutionNotice, type DeferredExecutionNotice } from "../../shared/deferredExecution.ts";
 
 export type PlatformRunProgressStage =
+  | "checking_server"
   | "preparing_workspace"
   | "uploading_asset"
   | "creating_job"

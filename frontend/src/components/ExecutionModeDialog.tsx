@@ -59,6 +59,7 @@ export function ExecutionModeDialog({
     (serverActionBusy ||
       serverUnsupportedReasons.length > 0 ||
       serverProfilesLoading ||
+      serverProfilesError !== null ||
       !hasAvailableServerProfile ||
       selectedServerProfileId === null ||
       serverProfiles.every((profile) => profile.id !== selectedServerProfileId || !profile.available));
@@ -244,6 +245,8 @@ export function ExecutionModeDialog({
 
 function progressPercentForStage(stage: PlatformRunProgressUpdate["stage"] | undefined) {
   switch (stage) {
+    case "checking_server":
+      return 14;
     case "preparing_workspace":
       return 18;
     case "uploading_asset":

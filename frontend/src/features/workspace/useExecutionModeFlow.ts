@@ -47,6 +47,42 @@ function pickInitialServerProfileId(
   return availableProfiles.find((profile) => profile.recommended)?.id ?? availableProfiles[0]?.id ?? null;
 }
 
+interface ServerExecutionOptionsSnapshot {
+  profiles: PlatformExecutionProfile[];
+  preference: MyServerPreferenceView;
+}
+
+async function fetchServerExecutionOptions(): Promise<ServerExecutionOptionsSnapshot> {
+  const [profileView, preference] = await Promise.all([listPlatformExecutionProfiles(), getMyServerPreferences()]);
+  return {
+    profiles: profileView.items,
+    preference,
+  };
+}
+
+function resolveServerSelectionNotice(
+  profiles: PlatformExecutionProfile[],
+  preference: MyServerPreferenceView,
+  selectedProfileId: number | null,
+): string | null {
+  if (preference.default_execution_profile_id === null || preference.available) {
+    return null;
+  }
+
+  const fallbackProfile = profiles.find((profile) => profile.id === selectedProfileId);
+  return fallbackProfile
+    ? `已保存的默认 Web 托管工作站配置当前不可用，本次已自动回退到 ${fallbackProfile.display_name}。`
+    : "已保存的默认 Web 托管工作站配置当前不可用，而且暂时没有健康可用的平台执行配置。";
+}
+
+function resolveServerOptionsError(error: unknown) {
+  return resolveErrorMessage(error, "读取平台执行配置失败");
+}
+
+function isWebBackendConnectionError(message: string) {
+  return message.includes("无法连接Web 后端") || message.includes("无法连接 Web 后端");
+}
+
 export interface PendingExecutionRequest extends PlatformExecutionRequest {
   localAvailable: boolean;
   localUnavailableReasons: string[];
@@ -88,6 +124,29 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
     onStatusNotice?.({ title, message, tone: "error" });
   }
 
+  function applyServerExecutionOptions(
+    snapshot: ServerExecutionOptionsSnapshot,
+    options: { preserveSelectedProfile?: boolean } = {},
+  ) {
+    const preservedProfileId =
+      options.preserveSelectedProfile &&
+      selectedServerProfileId !== null &&
+      snapshot.profiles.some((profile) => profile.id === selectedServerProfileId && profile.available)
+        ? selectedServerProfileId
+        : null;
+    const nextProfileId = preservedProfileId ?? pickInitialServerProfileId(snapshot.profiles, snapshot.preference);
+    setServerProfiles(snapshot.profiles);
+    setServerPreference(snapshot.preference);
+    setSelectedServerProfileId(nextProfileId);
+    setRememberServerProfile(false);
+    setServerProfilesError(null);
+    setServerSelectionNotice(resolveServerSelectionNotice(snapshot.profiles, snapshot.preference, nextProfileId));
+    return {
+      ...snapshot,
+      selectedProfileId: nextProfileId,
+    };
+  }
+
   useEffect(() => {
     if (pendingExecution === null || !isAuthenticated) {
       setServerProfiles([]);
@@ -106,26 +165,12 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
     setServerProfilesLoading(true);
     setServerProfilesError(null);
 
-    void Promise.all([listPlatformExecutionProfiles(), getMyServerPreferences()])
-      .then(([profileView, preference]) => {
+    void fetchServerExecutionOptions()
+      .then((snapshot) => {
         if (cancelled) {
           return;
         }
-        setServerProfiles(profileView.items);
-        setServerPreference(preference);
-        const nextProfileId = pickInitialServerProfileId(profileView.items, preference);
-        setSelectedServerProfileId(nextProfileId);
-        setRememberServerProfile(false);
-        if (preference.default_execution_profile_id !== null && !preference.available) {
-          const fallbackProfile = profileView.items.find((profile) => profile.id === nextProfileId);
-          setServerSelectionNotice(
-            fallbackProfile
-              ? `已保存的默认 Web 托管工作站配置当前不可用，本次已自动回退到 ${fallbackProfile.display_name}。`
-              : "已保存的默认 Web 托管工作站配置当前不可用，而且暂时没有健康可用的平台执行配置。",
-          );
-        } else {
-          setServerSelectionNotice(null);
-        }
+        applyServerExecutionOptions(snapshot);
       })
       .catch((error) => {
         if (cancelled) {
@@ -135,7 +180,7 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
         setServerPreference(null);
         setSelectedServerProfileId(null);
         setRememberServerProfile(false);
-        setServerProfilesError(error instanceof Error ? error.message : "读取平台执行配置失败");
+        setServerProfilesError(resolveServerOptionsError(error));
         setServerSelectionNotice(null);
       })
       .finally(() => {
@@ -252,18 +297,34 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
       return;
     }
 
-    const selectedProfile = serverProfiles.find(
-      (profile) => profile.id === selectedServerProfileId && profile.available,
-    );
-    if (!selectedProfile) {
-      showExecutionNotice("没有可用的平台执行配置", serverProfilesError ?? "当前没有可用的平台执行配置");
-      return;
-    }
-
     try {
       setServerActionBusy(true);
+      setServerActionProgress({ stage: "checking_server", message: "正在确认 Web 后端和平台执行配置可用" });
+      let refreshedOptions: ServerExecutionOptionsSnapshot & { selectedProfileId: number | null };
+      try {
+        refreshedOptions = applyServerExecutionOptions(await fetchServerExecutionOptions(), {
+          preserveSelectedProfile: true,
+        });
+      } catch (error) {
+        const message = resolveServerOptionsError(error);
+        setServerProfiles([]);
+        setServerPreference(null);
+        setSelectedServerProfileId(null);
+        setRememberServerProfile(false);
+        setServerProfilesError(message);
+        setServerSelectionNotice(null);
+        showExecutionNotice("Web 后端不可用", message);
+        return;
+      }
+      const selectedProfile = refreshedOptions.profiles.find(
+        (profile) => profile.id === refreshedOptions.selectedProfileId && profile.available,
+      );
+      if (!selectedProfile) {
+        showExecutionNotice("没有可用的平台执行配置", "当前没有健康可用的平台执行配置。请先检查服务器凭据和执行配置。", "warning");
+        return;
+      }
       showExecutionNotice("正在创建平台任务", "已开始提交 Web 托管工作站任务，请不要重复点击。", "info");
-      if (rememberServerProfile && selectedProfile.id !== serverPreference?.default_execution_profile_id) {
+      if (rememberServerProfile && selectedProfile.id !== refreshedOptions.preference.default_execution_profile_id) {
         setServerActionProgress({ stage: "creating_job", message: "正在保存默认 Web 托管工作站配置" });
         const updatedPreference = await updateMyServerPreferences({
           default_execution_profile_id: selectedProfile.id,
@@ -300,7 +361,11 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
       }
       navigate(`/me/jobs/${result.job.id}`);
     } catch (error) {
-      showExecutionNotice("创建平台任务失败", resolveErrorMessage(error, "创建平台任务失败"));
+      const message = resolveErrorMessage(error, "创建平台任务失败");
+      if (isWebBackendConnectionError(message)) {
+        setServerProfilesError(message);
+      }
+      showExecutionNotice("创建平台任务失败", message);
     } finally {
       setServerActionBusy(false);
       setServerActionProgress(null);
@@ -314,28 +379,13 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
     setServerProfilesLoading(true);
     setServerProfilesError(null);
     try {
-      const [profileView, preference] = await Promise.all([listPlatformExecutionProfiles(), getMyServerPreferences()]);
-      setServerProfiles(profileView.items);
-      setServerPreference(preference);
-      const nextProfileId = pickInitialServerProfileId(profileView.items, preference);
-      setSelectedServerProfileId(nextProfileId);
-      setRememberServerProfile(false);
-      if (preference.default_execution_profile_id !== null && !preference.available) {
-        const fallbackProfile = profileView.items.find((profile) => profile.id === nextProfileId);
-        setServerSelectionNotice(
-          fallbackProfile
-            ? `已保存的默认 Web 托管工作站配置当前不可用，本次已自动回退到 ${fallbackProfile.display_name}。`
-            : "已保存的默认 Web 托管工作站配置当前不可用，而且暂时没有健康可用的平台执行配置。",
-        );
-      } else {
-        setServerSelectionNotice(null);
-      }
+      applyServerExecutionOptions(await fetchServerExecutionOptions());
     } catch (error) {
       setServerProfiles([]);
       setServerPreference(null);
       setSelectedServerProfileId(null);
       setRememberServerProfile(false);
-      setServerProfilesError(error instanceof Error ? error.message : "读取平台执行配置失败");
+      setServerProfilesError(resolveServerOptionsError(error));
       setServerSelectionNotice(null);
     } finally {
       setServerProfilesLoading(false);
