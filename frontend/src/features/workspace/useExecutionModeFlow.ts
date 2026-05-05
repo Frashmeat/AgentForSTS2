@@ -278,6 +278,8 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
         inputSummary: request.inputSummary,
         createdFrom: request.createdFrom,
         items: request.items,
+        serverUploads: request.serverUploads,
+        serverWorkspaceProjectName: request.serverWorkspaceProjectName,
         selectedExecutionProfileId: selectedProfile.id,
         selectedRunnerType: selectedProfile.runner_type,
         selectedModel: selectedProfile.model,

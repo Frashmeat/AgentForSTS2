@@ -27,6 +27,13 @@ test("useExecutionModeFlow owns capability probing and dialog state", () => {
   assert.match(flowSource, /setServerActionProgress/);
 });
 
+test("useExecutionModeFlow forwards workspace and upload context into server flow", () => {
+  const flowSource = readSource("../src/features/workspace/useExecutionModeFlow.ts");
+
+  assert.match(flowSource, /serverWorkspaceProjectName:\s*request\.serverWorkspaceProjectName/);
+  assert.match(flowSource, /serverUploads:\s*request\.serverUploads/);
+});
+
 test("execution mode errors use the shared status notice stack instead of native alerts", () => {
   const appSource = readSource("../src/App.tsx");
   const flowSource = readSource("../src/features/workspace/useExecutionModeFlow.ts");
