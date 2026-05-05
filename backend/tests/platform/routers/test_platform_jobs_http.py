@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import zipfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -232,10 +233,22 @@ class _SucceededWorkflowRunner:
                     "server_workspace_root": str(merged.get("server_workspace_root", "")).strip(),
                 }
             elif step.step_type == "code.generate":
+                project_root = Path(str(merged.get("server_workspace_root", "")).strip())
+                if project_root:
+                    (project_root / f"{str(merged.get('item_name', '')).strip()}.cs").write_text(
+                        "// generated custom code\n",
+                        encoding="utf-8",
+                    )
                 output_payload = {
                     "text": f"已写入 {str(merged.get('item_name', '')).strip()} 的服务器 custom_code 代码"
                 }
             elif step.step_type == "asset.generate":
+                project_root = Path(str(merged.get("server_workspace_root", "")).strip())
+                if project_root:
+                    (project_root / f"{str(merged.get('item_name', '')).strip()}.asset.cs").write_text(
+                        "// generated asset code\n",
+                        encoding="utf-8",
+                    )
                 output_payload = {"text": f"已写入 {str(merged.get('item_name', '')).strip()} 的服务器资产代码"}
             elif step.step_type == "build.project":
                 item_name = str(merged.get("item_name", "")).strip()
@@ -250,6 +263,32 @@ class _SucceededWorkflowRunner:
                             "mime_type": "application/octet-stream",
                             "size_bytes": 3,
                             "result_summary": "服务器构建产物",
+                        }
+                    ],
+                }
+            elif step.step_type == "package.project":
+                item_name = str(merged.get("item_name", "")).strip()
+                project_root = Path(str(merged.get("server_workspace_root", "")).strip())
+                artifact_dir = project_root.parent / "_source_artifacts"
+                artifact_dir.mkdir(parents=True, exist_ok=True)
+                package_path = artifact_dir / f"{project_root.name}.source.zip"
+                with zipfile.ZipFile(package_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                    for path in sorted(project_root.rglob("*")):
+                        if path.is_file() and not any(part in {"bin", "obj", ".godot", ".git"} for part in path.relative_to(project_root).parts):
+                            archive.write(path, path.relative_to(project_root).as_posix())
+                output_payload = {
+                    "text": f"已打包 {item_name} 的服务器项目源码",
+                    "item_name": item_name,
+                    "server_workspace_root": str(project_root),
+                    "artifacts": [
+                        {
+                            "artifact_type": "source_project",
+                            "storage_provider": "server_workspace",
+                            "object_key": str(package_path),
+                            "file_name": package_path.name,
+                            "mime_type": "application/zip",
+                            "size_bytes": package_path.stat().st_size,
+                            "result_summary": "服务器生成项目包",
                         }
                     ],
                 }
@@ -914,13 +953,23 @@ def test_platform_jobs_router_can_complete_supported_batch_custom_code_job(clien
     items = client.get(f"/api/platform/jobs/{job_id}/items")
     assert items.status_code == 200
     assert items.json()[0]["status"] == "succeeded"
-    assert items.json()[0]["result_summary"] == "已完成 BattleScriptManager 的服务器项目构建"
+    assert items.json()[0]["result_summary"] == "已打包 BattleScriptManager 的服务器项目源码"
+    me_detail = client.get(f"/api/me/jobs/{job_id}")
+    assert me_detail.status_code == 200
+    artifacts = me_detail.json()["artifacts"]
+    assert artifacts[0]["artifact_type"] == "source_project"
+    assert artifacts[0]["file_name"] == "DarkMod.source.zip"
+    downloaded = client.get(f"/api/me/artifacts/{artifacts[0]['id']}/download")
+    assert downloaded.status_code == 200
+    assert downloaded.headers["content-type"] == "application/zip"
+    with zipfile.ZipFile(Path(artifacts[0]["object_key"])) as archive:
+        assert "BattleScriptManager.cs" in archive.namelist()
 
     session = client.app.state.container.resolve_singleton("platform.db_session_factory")()
     try:
         execution = session.query(AIExecutionRecord).filter(AIExecutionRecord.job_id == job_id).one()
         assert execution.status.value == "succeeded"
-        assert execution.result_summary == "已完成 BattleScriptManager 的服务器项目构建"
+        assert execution.result_summary == "已打包 BattleScriptManager 的服务器项目源码"
     finally:
         session.close()
 
@@ -1338,19 +1387,29 @@ def test_platform_jobs_router_can_complete_supported_single_custom_code_job(clie
     items = client.get(f"/api/platform/jobs/{job_id}/items")
     assert items.status_code == 200
     assert items.json()[0]["status"] == "succeeded"
-    assert items.json()[0]["result_summary"] == "已完成 SingleEffectPatch 的服务器项目构建"
+    assert items.json()[0]["result_summary"] == "已打包 SingleEffectPatch 的服务器项目源码"
+    me_detail = client.get(f"/api/me/jobs/{job_id}")
+    assert me_detail.status_code == 200
+    artifacts = me_detail.json()["artifacts"]
+    assert artifacts[0]["artifact_type"] == "source_project"
+    assert artifacts[0]["file_name"] == "DarkMod.source.zip"
+    downloaded = client.get(f"/api/me/artifacts/{artifacts[0]['id']}/download")
+    assert downloaded.status_code == 200
+    assert downloaded.headers["content-type"] == "application/zip"
+    with zipfile.ZipFile(Path(artifacts[0]["object_key"])) as archive:
+        assert "SingleEffectPatch.cs" in archive.namelist()
 
     session = client.app.state.container.resolve_singleton("platform.db_session_factory")()
     try:
         execution = session.query(AIExecutionRecord).filter(AIExecutionRecord.job_id == job_id).one()
         assert execution.status.value == "succeeded"
-        assert execution.result_summary == "已完成 SingleEffectPatch 的服务器项目构建"
+        assert execution.result_summary == "已打包 SingleEffectPatch 的服务器项目源码"
     finally:
         session.close()
 
 
 def test_platform_jobs_router_can_complete_supported_single_relic_job(client: TestClient):
-    _register_login_and_verify(client, "luna", "luna@example.com")
+    user_id = _register_login_and_verify(client, "luna", "luna@example.com")
     login = client.post(
         "/api/auth/login",
         json={
@@ -1361,6 +1420,8 @@ def test_platform_jobs_router_can_complete_supported_single_relic_job(client: Te
     assert login.status_code == 200
 
     profile_id = _seed_execution_profile(client)
+    workspace_service = client.app.state.container.resolve_singleton("platform.server_workspace_service_factory")()
+    workspace = workspace_service.create_workspace(user_id=user_id, project_name="DarkMod")
     client.app.state.container.register_singleton("platform.workflow_runner_factory", _SucceededWorkflowRunner)
 
     created = client.post(
@@ -1380,6 +1441,7 @@ def test_platform_jobs_router_can_complete_supported_single_relic_job(client: Te
                         "item_name": "FangedGrimoire",
                         "description": "每次造成伤害时获得 2 点格挡。",
                         "image_mode": "ai",
+                        "server_project_ref": workspace.server_project_ref,
                     },
                 }
             ],
@@ -1399,13 +1461,15 @@ def test_platform_jobs_router_can_complete_supported_single_relic_job(client: Te
     me_detail = client.get(f"/api/me/jobs/{job_id}")
     assert me_detail.status_code == 200
     artifacts = me_detail.json()["artifacts"]
-    assert artifacts[0]["artifact_type"] == "plan_markdown"
-    assert artifacts[0]["file_name"] == "FangedGrimoire.relic.plan.md"
+    assert artifacts[0]["artifact_type"] == "source_project"
+    assert artifacts[0]["file_name"] == "DarkMod.source.zip"
 
     downloaded = client.get(f"/api/me/artifacts/{artifacts[0]['id']}/download")
     assert downloaded.status_code == 200
-    assert downloaded.headers["content-disposition"].endswith('filename="FangedGrimoire.relic.plan.md"')
-    assert "# FangedGrimoire" in downloaded.text
+    assert downloaded.headers["content-disposition"].endswith('filename="DarkMod.source.zip"')
+    assert downloaded.headers["content-type"] == "application/zip"
+    with zipfile.ZipFile(Path(artifacts[0]["object_key"])) as archive:
+        assert "FangedGrimoire.asset.cs" in archive.namelist()
 
     session = client.app.state.container.resolve_singleton("platform.db_session_factory")()
     try:
@@ -1416,19 +1480,18 @@ def test_platform_jobs_router_can_complete_supported_single_relic_job(client: Te
         session.close()
 
     repaired_download = client.get(f"/api/me/artifacts/{artifacts[0]['id']}/download")
-    assert repaired_download.status_code == 200
-    assert "# FangedGrimoire" in repaired_download.text
+    assert repaired_download.status_code == 404
 
     items = client.get(f"/api/platform/jobs/{job_id}/items")
     assert items.status_code == 200
     assert items.json()[0]["status"] == "succeeded"
-    assert items.json()[0]["result_summary"] == "已生成服务器遗物实现方案"
+    assert items.json()[0]["result_summary"] == "已打包 FangedGrimoire 的服务器项目源码"
 
     session = client.app.state.container.resolve_singleton("platform.db_session_factory")()
     try:
         execution = session.query(AIExecutionRecord).filter(AIExecutionRecord.job_id == job_id).one()
         assert execution.status.value == "succeeded"
-        assert execution.result_summary == "已生成服务器遗物实现方案"
+        assert execution.result_summary == "已打包 FangedGrimoire 的服务器项目源码"
     finally:
         session.close()
 
@@ -1611,7 +1674,15 @@ def test_platform_jobs_router_can_complete_batch_card_fullscreen_with_uploaded_a
 
     items = client.get(f"/api/platform/jobs/{job_id}/items")
     assert items.status_code == 200
-    assert items.json()[0]["result_summary"] == "已完成 DarkBladeFullscreen 的服务器项目构建"
+    assert items.json()[0]["result_summary"] == "已打包 DarkBladeFullscreen 的服务器项目源码"
+    me_detail = client.get(f"/api/me/jobs/{job_id}")
+    assert me_detail.status_code == 200
+    artifacts = me_detail.json()["artifacts"]
+    assert artifacts[0]["artifact_type"] == "source_project"
+    downloaded = client.get(f"/api/me/artifacts/{artifacts[0]['id']}/download")
+    assert downloaded.status_code == 200
+    with zipfile.ZipFile(Path(artifacts[0]["object_key"])) as archive:
+        assert "DarkBladeFullscreen.asset.cs" in archive.namelist()
 
 
 def test_platform_jobs_router_can_complete_single_card_fullscreen_with_uploaded_asset(client: TestClient):
@@ -1670,7 +1741,15 @@ def test_platform_jobs_router_can_complete_single_card_fullscreen_with_uploaded_
 
     items = client.get(f"/api/platform/jobs/{job_id}/items")
     assert items.status_code == 200
-    assert items.json()[0]["result_summary"] == "已完成 DarkBladeFullscreen 的服务器项目构建"
+    assert items.json()[0]["result_summary"] == "已打包 DarkBladeFullscreen 的服务器项目源码"
+    me_detail = client.get(f"/api/me/jobs/{job_id}")
+    assert me_detail.status_code == 200
+    artifacts = me_detail.json()["artifacts"]
+    assert artifacts[0]["artifact_type"] == "source_project"
+    downloaded = client.get(f"/api/me/artifacts/{artifacts[0]['id']}/download")
+    assert downloaded.status_code == 200
+    with zipfile.ZipFile(Path(artifacts[0]["object_key"])) as archive:
+        assert "DarkBladeFullscreen.asset.cs" in archive.namelist()
 
 
 def test_platform_jobs_router_can_complete_supported_single_power_job(client: TestClient):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import zipfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -990,10 +991,22 @@ class _SucceededWorkflowRunner:
                     "server_workspace_root": str(merged.get("server_workspace_root", "")).strip(),
                 }
             elif step.step_type == "code.generate":
+                project_root = Path(str(merged.get("server_workspace_root", "")).strip())
+                if project_root:
+                    (project_root / f"{str(merged.get('item_name', '')).strip()}.cs").write_text(
+                        "// generated custom code\n",
+                        encoding="utf-8",
+                    )
                 output_payload = {
                     "text": f"已写入 {str(merged.get('item_name', '')).strip()} 的服务器 custom_code 代码"
                 }
             elif step.step_type == "asset.generate":
+                project_root = Path(str(merged.get("server_workspace_root", "")).strip())
+                if project_root:
+                    (project_root / f"{str(merged.get('item_name', '')).strip()}.asset.cs").write_text(
+                        "// generated asset code\n",
+                        encoding="utf-8",
+                    )
                 output_payload = {"text": f"已写入 {str(merged.get('item_name', '')).strip()} 的服务器资产代码"}
             elif step.step_type == "build.project":
                 item_name = str(merged.get("item_name", "")).strip()
@@ -1008,6 +1021,30 @@ class _SucceededWorkflowRunner:
                             "mime_type": "application/octet-stream",
                             "size_bytes": 3,
                             "result_summary": "服务器构建产物",
+                        }
+                    ],
+                }
+            elif step.step_type == "package.project":
+                item_name = str(merged.get("item_name", "")).strip()
+                project_root = Path(str(merged.get("server_workspace_root", "")).strip())
+                artifact_dir = project_root.parent / "_source_artifacts"
+                artifact_dir.mkdir(parents=True, exist_ok=True)
+                package_path = artifact_dir / f"{project_root.name}.source.zip"
+                with zipfile.ZipFile(package_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                    for path in sorted(project_root.rglob("*")):
+                        if path.is_file() and not any(part in {"bin", "obj", ".godot", ".git"} for part in path.relative_to(project_root).parts):
+                            archive.write(path, path.relative_to(project_root).as_posix())
+                output_payload = {
+                    "text": f"已打包 {item_name} 的服务器项目源码",
+                    "artifacts": [
+                        {
+                            "artifact_type": "source_project",
+                            "storage_provider": "server_workspace",
+                            "object_key": str(package_path),
+                            "file_name": package_path.name,
+                            "mime_type": "application/zip",
+                            "size_bytes": package_path.stat().st_size,
+                            "result_summary": "服务器生成项目包",
                         }
                     ],
                 }
@@ -2089,13 +2126,13 @@ def test_me_router_can_complete_supported_single_custom_code_job(client: TestCli
     items = client.get(f"/api/me/jobs/{job_id}/items")
     assert items.status_code == 200
     assert items.json()[0]["status"] == "succeeded"
-    assert items.json()[0]["result_summary"] == "已完成 SingleEffectPatch 的服务器项目构建"
+    assert items.json()[0]["result_summary"] == "已打包 SingleEffectPatch 的服务器项目源码"
 
     session = app_container.resolve_singleton("platform.db_session_factory")()
     try:
         execution = session.query(AIExecutionRecord).filter(AIExecutionRecord.job_id == job_id).one()
         assert execution.status.value == "succeeded"
-        assert execution.result_summary == "已完成 SingleEffectPatch 的服务器项目构建"
+        assert execution.result_summary == "已打包 SingleEffectPatch 的服务器项目源码"
     finally:
         session.close()
 
@@ -2759,7 +2796,7 @@ def test_me_router_can_complete_batch_card_fullscreen_with_uploaded_asset(client
 
     items = client.get(f"/api/me/jobs/{job_id}/items")
     assert items.status_code == 200
-    assert items.json()[0]["result_summary"] == "已完成 DarkBladeFullscreen 的服务器项目构建"
+    assert items.json()[0]["result_summary"] == "已打包 DarkBladeFullscreen 的服务器项目源码"
 
 
 def test_me_router_can_complete_single_card_fullscreen_with_uploaded_asset(client: TestClient):
@@ -2887,7 +2924,7 @@ def test_me_router_can_complete_single_card_fullscreen_with_uploaded_asset(clien
 
     items = client.get(f"/api/me/jobs/{job_id}/items")
     assert items.status_code == 200
-    assert items.json()[0]["result_summary"] == "已完成 DarkBladeFullscreen 的服务器项目构建"
+    assert items.json()[0]["result_summary"] == "已打包 DarkBladeFullscreen 的服务器项目源码"
 
 
 def test_me_router_can_complete_supported_single_power_job(client: TestClient):

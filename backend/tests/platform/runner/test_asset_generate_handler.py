@@ -82,34 +82,53 @@ def test_execute_asset_generate_step_runs_postprocess_and_agent(tmp_path):
     assert result["generated_image_paths"][0].endswith("DarkBladeFullscreen.png")
 
 
-def test_execute_asset_generate_step_requires_uploaded_asset_path():
-    try:
-        asyncio.run(
-            execute_asset_generate_step(
-                StepExecutionRequest(
-                    workflow_version="2026.03.31",
-                    step_protocol_version="v1",
-                    step_type="asset.generate",
-                    step_id="single.card_fullscreen.asset",
-                    job_id=1,
-                    job_item_id=2,
-                    result_schema_version="v1",
-                    input_payload={
-                        "asset_type": "card_fullscreen",
-                        "item_name": "DarkBladeFullscreen",
-                        "description": "一张强调暗影剑士出招姿态的全画面卡插图方案。",
-                        "server_workspace_root": "F:/runtime/platform-workspaces/1001/abc123/DarkMod",
-                    },
-                    execution_binding=StepExecutionBinding(
-                        runner_type="codex_cli",
-                        api_protocol="openai_compatible",
-                        model="gpt-5.4",
-                        credential="sk-live-openai",
-                    ),
-                )
-            )
+def test_execute_asset_generate_step_allows_text_only_generation_without_uploaded_asset(tmp_path):
+    captured: dict[str, object] = {}
+    workspace_root = tmp_path / "DarkMod"
+    workspace_root.mkdir()
+
+    def fake_prompt_builder(request):
+        captured["prompt_request"] = request
+        return f"prompt:{request.asset_type}|{request.asset_name}|{len(request.image_paths)}"
+
+    async def fake_asset_agent_runner(prompt, project_root, llm_cfg):
+        captured["prompt"] = prompt
+        captured["project_root"] = project_root
+        return "Summary: 已写入 FangedGrimoire 的服务器资产代码\nDone"
+
+    result = asyncio.run(
+        execute_asset_generate_step(
+            StepExecutionRequest(
+                workflow_version="2026.03.31",
+                step_protocol_version="v1",
+                step_type="asset.generate",
+                step_id="single.relic.asset",
+                job_id=1,
+                job_item_id=2,
+                result_schema_version="v1",
+                input_payload={
+                    "asset_type": "relic",
+                    "item_name": "FangedGrimoire",
+                    "description": "每次造成伤害时获得 2 点格挡。",
+                    "server_workspace_root": str(workspace_root),
+                },
+                execution_binding=StepExecutionBinding(
+                    runner_type="codex_cli",
+                    api_protocol="openai_compatible",
+                    model="gpt-5.4",
+                    credential="sk-live-openai",
+                ),
+            ),
+            prompt_builder=fake_prompt_builder,
+            asset_agent_runner=fake_asset_agent_runner,
         )
-    except ValueError as error:
-        assert str(error) == "asset.generate requires uploaded_asset_path"
-    else:
-        raise AssertionError("expected ValueError when uploaded_asset_path is missing")
+    )
+
+    prompt_request = captured["prompt_request"]
+    assert prompt_request.asset_type == "relic"
+    assert prompt_request.asset_name == "FangedGrimoire"
+    assert prompt_request.image_paths == []
+    assert captured["prompt"] == "prompt:relic|FangedGrimoire|0"
+    assert captured["project_root"] == workspace_root
+    assert result["text"] == "已写入 FangedGrimoire 的服务器资产代码"
+    assert result["generated_image_paths"] == []

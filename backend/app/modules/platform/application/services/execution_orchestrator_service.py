@@ -1269,7 +1269,7 @@ class ExecutionOrchestratorService:
             )
         except (KeyError, RuntimeError):
             return
-        if not any(step.step_type in {"code.generate", "asset.generate", "build.project"} for step in steps):
+        if not any(step.step_type in {"code.generate", "asset.generate", "build.project", "package.project"} for step in steps):
             return
         self._workspace_write_locks[item.id] = self.server_workspace_lock_service.acquire_write_lock(
             server_project_ref=server_project_ref,

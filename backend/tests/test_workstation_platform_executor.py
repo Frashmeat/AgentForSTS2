@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sys
-import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -141,6 +140,7 @@ def test_workstation_platform_executor_runs_code_workflow_steps():
     assert [step.step_type for step in runner.steps] == [
         "batch.custom_code.plan",
         "code.generate",
+        "package.project",
     ]
     assert result["status"] == "succeeded"
     assert [event["event_type"] for event in result["events"]] == [
@@ -148,10 +148,12 @@ def test_workstation_platform_executor_runs_code_workflow_steps():
         "workstation.step.finished",
         "workstation.step.started",
         "workstation.step.finished",
+        "workstation.step.started",
+        "workstation.step.finished",
     ]
 
 
-def test_workstation_platform_executor_does_not_build_card_fullscreen_on_server():
+def test_workstation_platform_executor_packages_card_fullscreen_without_building_on_server():
     runner = LegacyFakeRunner()
     executor = WorkstationPlatformExecutor(
         registry=build_workstation_workflow_registry(),
@@ -163,17 +165,32 @@ def test_workstation_platform_executor_does_not_build_card_fullscreen_on_server(
 
     result = executor.execute(request).model_dump()
 
-    assert [step.step_type for step in runner.steps] == ["asset.generate"]
+    assert [step.step_type for step in runner.steps] == ["asset.generate", "package.project"]
     assert result["status"] == "succeeded"
 
 
-def test_workstation_platform_executor_adds_source_project_artifact(tmp_path):
+def test_workstation_platform_executor_returns_source_project_artifact_from_package_step(tmp_path):
     project_root = tmp_path / "GeneratedMod"
     project_root.mkdir()
-    (project_root / "GeneratedMod.csproj").write_text("<Project />\n", encoding="utf-8")
-    (project_root / "bin").mkdir()
-    (project_root / "bin" / "ignored.dll").write_text("binary\n", encoding="utf-8")
-    runner = FakeRunner({"text": "ok", "server_workspace_root": str(project_root)})
+    package_path = tmp_path / "GeneratedMod.source.zip"
+    package_path.write_bytes(b"zip")
+    runner = FakeRunner(
+        {
+            "text": "已打包 GeneratedMod 的服务器项目源码",
+            "server_workspace_root": str(project_root),
+            "artifacts": [
+                {
+                    "artifact_type": "source_project",
+                    "storage_provider": "server_workspace",
+                    "object_key": str(package_path),
+                    "file_name": package_path.name,
+                    "mime_type": "application/zip",
+                    "size_bytes": package_path.stat().st_size,
+                    "result_summary": "服务器生成项目包",
+                }
+            ],
+        }
+    )
     executor = WorkstationPlatformExecutor(
         registry=build_workstation_workflow_registry(),
         runner=runner,
@@ -181,12 +198,13 @@ def test_workstation_platform_executor_adds_source_project_artifact(tmp_path):
 
     result = executor.execute(_dispatch_request("single_generate", "custom_code")).model_dump()
 
+    assert [step.step_type for step in runner.steps] == [
+        "batch.custom_code.plan",
+        "code.generate",
+        "package.project",
+    ]
     artifact = result["output_payload"]["artifacts"][0]
     assert artifact["artifact_type"] == "source_project"
     assert artifact["storage_provider"] == "server_workspace"
     assert artifact["file_name"] == "GeneratedMod.source.zip"
-    zip_path = Path(str(artifact["object_key"]))
-    assert zip_path.exists()
-    with zipfile.ZipFile(zip_path) as archive:
-        assert "GeneratedMod.csproj" in archive.namelist()
-        assert "bin/ignored.dll" not in archive.namelist()
+    assert Path(str(artifact["object_key"])).exists()

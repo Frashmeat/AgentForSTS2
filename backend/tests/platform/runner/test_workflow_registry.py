@@ -40,7 +40,7 @@ def test_workflow_registry_can_resolve_steps_dynamically_from_payload():
                 lambda input_payload: (
                     [
                         PlatformWorkflowStep(step_type="asset.generate", step_id="asset-step"),
-                        PlatformWorkflowStep(step_type="build.project", step_id="build-step"),
+                        PlatformWorkflowStep(step_type="package.project", step_id="package-step"),
                     ]
                     if input_payload.get("uploaded_asset_ref") and input_payload.get("server_project_ref")
                     else [PlatformWorkflowStep(step_type="single.asset.plan", step_id="plan-step")]
@@ -60,5 +60,5 @@ def test_workflow_registry_can_resolve_steps_dynamically_from_payload():
         input_payload={},
     )
 
-    assert [step.step_type for step in uploaded_steps] == ["asset.generate", "build.project"]
+    assert [step.step_type for step in uploaded_steps] == ["asset.generate", "package.project"]
     assert [step.step_type for step in plain_steps] == ["single.asset.plan"]

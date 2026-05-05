@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import zipfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -152,7 +153,7 @@ class _SupportedServerRegistry:
             return [
                 PlatformWorkflowStep(step_type="batch.custom_code.plan", step_id="batch-custom-code"),
                 PlatformWorkflowStep(step_type="code.generate", step_id="batch-custom-codegen"),
-                PlatformWorkflowStep(step_type="build.project", step_id="batch-custom-code-build"),
+                PlatformWorkflowStep(step_type="package.project", step_id="batch-custom-code-package"),
             ]
         if (job_type, item_type) == ("batch_generate", "card"):
             return [
@@ -173,7 +174,7 @@ class _SupportedServerRegistry:
                         step_id="batch-card-fullscreen-asset",
                         input_payload={"asset_type": "card_fullscreen"},
                     ),
-                    PlatformWorkflowStep(step_type="build.project", step_id="batch-card-fullscreen-build"),
+                    PlatformWorkflowStep(step_type="package.project", step_id="batch-card-fullscreen-package"),
                 ]
             return [
                 PlatformWorkflowStep(
@@ -210,7 +211,7 @@ class _SupportedServerRegistry:
             return [
                 PlatformWorkflowStep(step_type="batch.custom_code.plan", step_id="single-custom-code"),
                 PlatformWorkflowStep(step_type="code.generate", step_id="single-custom-codegen"),
-                PlatformWorkflowStep(step_type="build.project", step_id="single-custom-code-build"),
+                PlatformWorkflowStep(step_type="package.project", step_id="single-custom-code-package"),
             ]
         if (job_type, item_type) == ("single_generate", "card"):
             return [
@@ -231,7 +232,7 @@ class _SupportedServerRegistry:
                         step_id="single-card-fullscreen-asset",
                         input_payload={"asset_type": "card_fullscreen"},
                     ),
-                    PlatformWorkflowStep(step_type="build.project", step_id="single-card-fullscreen-build"),
+                    PlatformWorkflowStep(step_type="package.project", step_id="single-card-fullscreen-package"),
                 ]
             return [
                 PlatformWorkflowStep(
@@ -284,10 +285,22 @@ class _SucceededRunner:
                     "server_workspace_root": str(merged.get("server_workspace_root", "")).strip(),
                 }
             elif step.step_type == "code.generate":
+                project_root = Path(str(merged.get("server_workspace_root", "")).strip())
+                if project_root:
+                    (project_root / f"{str(merged.get('item_name', '')).strip()}.cs").write_text(
+                        "// generated custom code\n",
+                        encoding="utf-8",
+                    )
                 output_payload = {
                     "text": f"已写入 {str(merged.get('item_name', '')).strip()} 的服务器 custom_code 代码"
                 }
             elif step.step_type == "asset.generate":
+                project_root = Path(str(merged.get("server_workspace_root", "")).strip())
+                if project_root:
+                    (project_root / f"{str(merged.get('item_name', '')).strip()}.asset.cs").write_text(
+                        "// generated asset code\n",
+                        encoding="utf-8",
+                    )
                 output_payload = {"text": f"已写入 {str(merged.get('item_name', '')).strip()} 的服务器资产代码"}
             elif step.step_type == "build.project":
                 item_name = str(merged.get("item_name", "")).strip()
@@ -302,6 +315,30 @@ class _SucceededRunner:
                             "mime_type": "application/octet-stream",
                             "size_bytes": 3,
                             "result_summary": "服务器构建产物",
+                        }
+                    ],
+                }
+            elif step.step_type == "package.project":
+                item_name = str(merged.get("item_name", "")).strip()
+                project_root = Path(str(merged.get("server_workspace_root", "")).strip())
+                artifact_dir = project_root.parent / "_source_artifacts"
+                artifact_dir.mkdir(parents=True, exist_ok=True)
+                package_path = artifact_dir / f"{project_root.name}.source.zip"
+                with zipfile.ZipFile(package_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                    for path in sorted(project_root.rglob("*")):
+                        if path.is_file() and not any(part in {"bin", "obj", ".godot", ".git"} for part in path.relative_to(project_root).parts):
+                            archive.write(path, path.relative_to(project_root).as_posix())
+                output_payload = {
+                    "text": f"已打包 {item_name} 的服务器项目源码",
+                    "artifacts": [
+                        {
+                            "artifact_type": "source_project",
+                            "storage_provider": "server_workspace",
+                            "object_key": str(package_path),
+                            "file_name": package_path.name,
+                            "mime_type": "application/zip",
+                            "size_bytes": package_path.stat().st_size,
+                            "result_summary": "服务器生成项目包",
                         }
                     ],
                 }
@@ -412,6 +449,17 @@ class _SwitchableDeployTargetRunner:
                 )
                 payload.update(output_payload)
         return results
+
+
+class _BuildProjectRegistry:
+    def resolve(self, job_type: str, item_type: str, input_payload: dict[str, object] | None = None):
+        if (job_type, item_type) == ("single_generate", "custom_code"):
+            return [
+                PlatformWorkflowStep(step_type="batch.custom_code.plan", step_id="single-custom-code"),
+                PlatformWorkflowStep(step_type="code.generate", step_id="single-custom-codegen"),
+                PlatformWorkflowStep(step_type="build.project", step_id="single-custom-code-build"),
+            ]
+        raise KeyError(f"workflow not found for {job_type}/{item_type}")
 
 
 class _BusyWorkspaceLockService:
@@ -676,7 +724,12 @@ def test_job_application_service_can_complete_supported_batch_custom_code_job(db
     assert started is not None
     assert started.status == JobStatus.SUCCEEDED
     assert started.items[0].status == JobItemStatus.SUCCEEDED
-    assert started.items[0].result_summary == "已完成 BattleScriptManager 的服务器项目构建"
+    assert started.items[0].result_summary == "已打包 BattleScriptManager 的服务器项目源码"
+    artifacts = ArtifactRepositorySqlAlchemy(db_session).list_by_job_item(started.items[0].id)
+    assert artifacts[0].artifact_type == "source_project"
+    assert artifacts[0].file_name == "DarkMod.source.zip"
+    with zipfile.ZipFile(str(artifacts[0].object_key)) as archive:
+        assert "BattleScriptManager.cs" in archive.namelist()
 
 
 def test_job_application_service_can_complete_supported_batch_card_job(db_session):
@@ -984,7 +1037,12 @@ def test_job_application_service_can_complete_batch_card_fullscreen_with_uploade
     assert started is not None
     assert started.status == JobStatus.SUCCEEDED
     assert started.items[0].status == JobItemStatus.SUCCEEDED
-    assert started.items[0].result_summary == "已完成 DarkBladeFullscreen 的服务器项目构建"
+    assert started.items[0].result_summary == "已打包 DarkBladeFullscreen 的服务器项目源码"
+    artifacts = ArtifactRepositorySqlAlchemy(db_session).list_by_job_item(started.items[0].id)
+    assert artifacts[0].artifact_type == "source_project"
+    assert artifacts[0].file_name == "DarkMod.source.zip"
+    with zipfile.ZipFile(str(artifacts[0].object_key)) as archive:
+        assert "DarkBladeFullscreen.asset.cs" in archive.namelist()
 
 
 def test_job_application_service_can_complete_supported_batch_relic_job(db_session):
@@ -1383,9 +1441,12 @@ def test_job_application_service_can_complete_supported_single_custom_code_job(d
     assert started is not None
     assert started.status == JobStatus.SUCCEEDED
     assert started.items[0].status == JobItemStatus.SUCCEEDED
-    assert started.items[0].result_summary == "已完成 SingleEffectPatch 的服务器项目构建"
+    assert started.items[0].result_summary == "已打包 SingleEffectPatch 的服务器项目源码"
     artifacts = ArtifactRepositorySqlAlchemy(db_session).list_by_job_item(started.items[0].id)
-    assert artifacts[0].file_name == "SingleEffectPatch.dll"
+    assert artifacts[0].artifact_type == "source_project"
+    assert artifacts[0].file_name == "DarkMod.source.zip"
+    with zipfile.ZipFile(str(artifacts[0].object_key)) as archive:
+        assert "SingleEffectPatch.cs" in archive.namelist()
 
 
 def test_job_application_service_keeps_job_queued_when_server_workspace_is_busy(db_session, tmp_path):
@@ -1640,7 +1701,7 @@ def test_job_application_service_auto_resumes_next_queued_job_after_workspace_is
     assert reloaded_queued is not None
     assert reloaded_queued.status == JobStatus.SUCCEEDED
     assert reloaded_queued.items[0].status == JobItemStatus.SUCCEEDED
-    assert reloaded_queued.items[0].result_summary == "已完成 QueuedPatch 的服务器项目构建"
+    assert reloaded_queued.items[0].result_summary == "已打包 QueuedPatch 的服务器项目源码"
 
     resume_event = (
         db_session.query(JobEventRecord)
@@ -1716,7 +1777,7 @@ def test_job_application_service_keeps_job_queued_when_server_deploy_target_is_b
         ),
         server_credential_cipher=cipher,
         server_workspace_service=workspace_service,
-        workflow_registry=_SupportedServerRegistry(),
+        workflow_registry=_BuildProjectRegistry(),
         workflow_runner=runner,
     )
     service = JobApplicationService(
@@ -1836,7 +1897,7 @@ def test_job_application_service_auto_resumes_next_queued_job_after_deploy_targe
         ),
         server_credential_cipher=cipher,
         server_workspace_service=workspace_service,
-        workflow_registry=_SupportedServerRegistry(),
+        workflow_registry=_BuildProjectRegistry(),
         workflow_runner=runner,
     )
     service = JobApplicationService(
@@ -2315,7 +2376,7 @@ def test_job_application_service_can_complete_single_card_fullscreen_with_upload
     assert started is not None
     assert started.status == JobStatus.SUCCEEDED
     assert started.items[0].status == JobItemStatus.SUCCEEDED
-    assert started.items[0].result_summary == "已完成 DarkBladeFullscreen 的服务器项目构建"
+    assert started.items[0].result_summary == "已打包 DarkBladeFullscreen 的服务器项目源码"
 
 
 def test_job_application_service_can_complete_supported_single_power_job(db_session):

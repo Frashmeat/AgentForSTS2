@@ -42,6 +42,10 @@ def test_execution_adapter_dispatches_to_registered_step_handlers():
         calls.append(f"log:{request.step_id}")
         return {"artifact_type": "log"}
 
+    async def package_handler(request: StepExecutionRequest):
+        calls.append(f"package:{request.step_id}")
+        return {"artifact_type": "source_project"}
+
     adapter = ExecutionAdapter(
         image_handler=image_handler,
         code_handler=code_handler,
@@ -51,6 +55,7 @@ def test_execution_adapter_dispatches_to_registered_step_handlers():
         single_asset_plan_handler=single_asset_plan_handler,
         log_handler=log_handler,
         build_handler=None,
+        package_handler=package_handler,
         approval_handler=None,
     )
     dispatcher = StepDispatcher(execute_handler=adapter.execute)
@@ -146,6 +151,19 @@ def test_execution_adapter_dispatches_to_registered_step_handlers():
             )
         )
     )
+    package_result = asyncio.run(
+        dispatcher.dispatch(
+            StepExecutionRequest(
+                workflow_version="2026.03.31",
+                step_protocol_version="v1",
+                step_type="package.project",
+                step_id="package-1",
+                job_id=1,
+                job_item_id=2,
+                result_schema_version="v1",
+            )
+        )
+    )
 
     assert calls == [
         "image:img-1",
@@ -155,6 +173,7 @@ def test_execution_adapter_dispatches_to_registered_step_handlers():
         "log:log-1",
         "batch-custom-code:batch-custom-code-1",
         "single-asset-plan:single-asset-plan-1",
+        "package:package-1",
     ]
     assert image_result.output_payload["artifact_type"] == "image"
     assert code_result.output_payload["artifact_type"] == "code"
@@ -163,6 +182,7 @@ def test_execution_adapter_dispatches_to_registered_step_handlers():
     assert log_result.output_payload["artifact_type"] == "log"
     assert batch_custom_code_result.output_payload["artifact_type"] == "batch-custom-code"
     assert single_asset_plan_result.output_payload["artifact_type"] == "single-asset-plan"
+    assert package_result.output_payload["artifact_type"] == "source_project"
 
 
 def test_execution_adapter_classifies_handler_errors_as_failed_system():
@@ -178,6 +198,7 @@ def test_execution_adapter_classifies_handler_errors_as_failed_system():
         single_asset_plan_handler=None,
         log_handler=None,
         build_handler=None,
+        package_handler=None,
         approval_handler=None,
     )
 

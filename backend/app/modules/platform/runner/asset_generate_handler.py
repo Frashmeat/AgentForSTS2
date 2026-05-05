@@ -42,6 +42,11 @@ async def _run_postprocess_in_worker(
     )
 
 
+def _resolve_optional_uploaded_asset_path(input_payload: dict[str, object]) -> Path | None:
+    value = str(input_payload.get("uploaded_asset_path", "")).strip()
+    return Path(value) if value else None
+
+
 def _build_summary(full_text: str, item_name: str) -> str:
     for raw_line in full_text.splitlines():
         line = raw_line.strip()
@@ -69,13 +74,16 @@ async def execute_asset_generate_step(
     item_name = _resolve_required_text(input_payload, "item_name")
     description = _resolve_required_text(input_payload, "description")
     project_root = Path(_resolve_required_text(input_payload, "server_workspace_root"))
-    uploaded_asset_path = Path(_resolve_required_text(input_payload, "uploaded_asset_path"))
-
-    image_paths = await _run_postprocess_in_worker(
-        uploaded_asset_path=uploaded_asset_path,
-        asset_type=asset_type,
-        item_name=item_name,
-        project_root=project_root,
+    uploaded_asset_path = _resolve_optional_uploaded_asset_path(input_payload)
+    image_paths = (
+        await _run_postprocess_in_worker(
+            uploaded_asset_path=uploaded_asset_path,
+            asset_type=asset_type,
+            item_name=item_name,
+            project_root=project_root,
+        )
+        if uploaded_asset_path is not None
+        else []
     )
     prompt = prompt_builder(
         AssetCodegenRequest(

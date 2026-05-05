@@ -28,6 +28,7 @@ from app.modules.platform.runner.batch_custom_code_handler import execute_batch_
 from app.modules.platform.runner.build_project_handler import execute_build_project_step
 from app.modules.platform.runner.code_generate_handler import execute_code_generate_step
 from app.modules.platform.runner.log_analysis_handler import execute_log_analysis_step
+from app.modules.platform.runner.package_project_handler import execute_package_project_step
 from app.modules.platform.runner.single_asset_plan_handler import execute_single_asset_plan_step
 from app.modules.platform.runner.text_generate_handler import execute_text_generate_step
 
@@ -150,6 +151,35 @@ def _build_server_deploy_target_lock_service_from_container(container: Any) -> S
 def _build_workflow_registry_from_container(container: Any) -> PlatformWorkflowRegistry:
     registry = container.resolve_singleton("platform.workflow_registry_factory")()
 
+    def resolve_asset_generate_steps(
+        *,
+        prefix: str,
+        asset_type: str,
+        input_payload: dict[str, object],
+    ) -> list[PlatformWorkflowStep]:
+        server_project_ref = str(input_payload.get("server_project_ref", "")).strip()
+        if server_project_ref:
+            return [
+                PlatformWorkflowStep(
+                    step_type="single.asset.plan",
+                    step_id=f"{prefix}.{asset_type}.plan",
+                    input_payload={"asset_type": asset_type},
+                ),
+                PlatformWorkflowStep(
+                    step_type="asset.generate",
+                    step_id=f"{prefix}.{asset_type}.asset",
+                    input_payload={"asset_type": asset_type},
+                ),
+                PlatformWorkflowStep(step_type="package.project", step_id=f"{prefix}.{asset_type}.package"),
+            ]
+        return [
+            PlatformWorkflowStep(
+                step_type="single.asset.plan",
+                step_id=f"{prefix}.{asset_type}.plan",
+                input_payload={"asset_type": asset_type},
+            )
+        ]
+
     def resolve_single_card_fullscreen(input_payload: dict[str, object]) -> list[PlatformWorkflowStep]:
         uploaded_asset_ref = str(input_payload.get("uploaded_asset_ref", "")).strip()
         server_project_ref = str(input_payload.get("server_project_ref", "")).strip()
@@ -160,7 +190,7 @@ def _build_workflow_registry_from_container(container: Any) -> PlatformWorkflowR
                     step_id="single.card_fullscreen.asset",
                     input_payload={"asset_type": "card_fullscreen"},
                 ),
-                PlatformWorkflowStep(step_type="build.project", step_id="single.card_fullscreen.build"),
+                PlatformWorkflowStep(step_type="package.project", step_id="single.card_fullscreen.package"),
             ]
         return [
             PlatformWorkflowStep(
@@ -180,7 +210,7 @@ def _build_workflow_registry_from_container(container: Any) -> PlatformWorkflowR
                     step_id="batch.card_fullscreen.asset",
                     input_payload={"asset_type": "card_fullscreen"},
                 ),
-                PlatformWorkflowStep(step_type="build.project", step_id="batch.card_fullscreen.build"),
+                PlatformWorkflowStep(step_type="package.project", step_id="batch.card_fullscreen.package"),
             ]
         return [
             PlatformWorkflowStep(
@@ -201,53 +231,29 @@ def _build_workflow_registry_from_container(container: Any) -> PlatformWorkflowR
         [
             PlatformWorkflowStep(step_type="batch.custom_code.plan", step_id="batch.custom_code.plan"),
             PlatformWorkflowStep(step_type="code.generate", step_id="batch.custom_code.codegen"),
-            PlatformWorkflowStep(step_type="build.project", step_id="batch.custom_code.build"),
+            PlatformWorkflowStep(step_type="package.project", step_id="batch.custom_code.package"),
         ],
     )
     registry.register(
         "batch_generate",
         "card",
-        [
-            PlatformWorkflowStep(
-                step_type="single.asset.plan",
-                step_id="batch.card.plan",
-                input_payload={"asset_type": "card"},
-            )
-        ],
+        lambda input_payload: resolve_asset_generate_steps(prefix="batch", asset_type="card", input_payload=input_payload),
     )
     registry.register("batch_generate", "card_fullscreen", resolve_batch_card_fullscreen)
     registry.register(
         "batch_generate",
         "relic",
-        [
-            PlatformWorkflowStep(
-                step_type="single.asset.plan",
-                step_id="batch.relic.plan",
-                input_payload={"asset_type": "relic"},
-            )
-        ],
+        lambda input_payload: resolve_asset_generate_steps(prefix="batch", asset_type="relic", input_payload=input_payload),
     )
     registry.register(
         "batch_generate",
         "power",
-        [
-            PlatformWorkflowStep(
-                step_type="single.asset.plan",
-                step_id="batch.power.plan",
-                input_payload={"asset_type": "power"},
-            )
-        ],
+        lambda input_payload: resolve_asset_generate_steps(prefix="batch", asset_type="power", input_payload=input_payload),
     )
     registry.register(
         "batch_generate",
         "character",
-        [
-            PlatformWorkflowStep(
-                step_type="single.asset.plan",
-                step_id="batch.character.plan",
-                input_payload={"asset_type": "character"},
-            )
-        ],
+        lambda input_payload: resolve_asset_generate_steps(prefix="batch", asset_type="character", input_payload=input_payload),
     )
     registry.register(
         "single_generate",
@@ -255,53 +261,29 @@ def _build_workflow_registry_from_container(container: Any) -> PlatformWorkflowR
         [
             PlatformWorkflowStep(step_type="batch.custom_code.plan", step_id="single.custom_code.plan"),
             PlatformWorkflowStep(step_type="code.generate", step_id="single.custom_code.codegen"),
-            PlatformWorkflowStep(step_type="build.project", step_id="single.custom_code.build"),
+            PlatformWorkflowStep(step_type="package.project", step_id="single.custom_code.package"),
         ],
     )
     registry.register(
         "single_generate",
         "card",
-        [
-            PlatformWorkflowStep(
-                step_type="single.asset.plan",
-                step_id="single.card.plan",
-                input_payload={"asset_type": "card"},
-            )
-        ],
+        lambda input_payload: resolve_asset_generate_steps(prefix="single", asset_type="card", input_payload=input_payload),
     )
     registry.register("single_generate", "card_fullscreen", resolve_single_card_fullscreen)
     registry.register(
         "single_generate",
         "relic",
-        [
-            PlatformWorkflowStep(
-                step_type="single.asset.plan",
-                step_id="single.relic.plan",
-                input_payload={"asset_type": "relic"},
-            )
-        ],
+        lambda input_payload: resolve_asset_generate_steps(prefix="single", asset_type="relic", input_payload=input_payload),
     )
     registry.register(
         "single_generate",
         "power",
-        [
-            PlatformWorkflowStep(
-                step_type="single.asset.plan",
-                step_id="single.power.plan",
-                input_payload={"asset_type": "power"},
-            )
-        ],
+        lambda input_payload: resolve_asset_generate_steps(prefix="single", asset_type="power", input_payload=input_payload),
     )
     registry.register(
         "single_generate",
         "character",
-        [
-            PlatformWorkflowStep(
-                step_type="single.asset.plan",
-                step_id="single.character.plan",
-                input_payload={"asset_type": "character"},
-            )
-        ],
+        lambda input_payload: resolve_asset_generate_steps(prefix="single", asset_type="character", input_payload=input_payload),
     )
     return registry
 
@@ -329,5 +311,6 @@ def _build_execution_adapter_from_container(container: Any) -> ExecutionAdapter:
             execute_build_project_step,
             deploy_target_lock_service=_build_server_deploy_target_lock_service_from_container(container),
         ),
+        package_handler=execute_package_project_step,
         approval_handler=None,
     )

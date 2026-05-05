@@ -30,6 +30,7 @@ class ExecutionAdapter:
         single_asset_plan_handler: StepHandler | None,
         log_handler: StepHandler | None,
         build_handler: StepHandler | None,
+        package_handler: StepHandler | None,
         approval_handler: StepHandler | None,
     ) -> None:
         self._handlers = {
@@ -41,6 +42,7 @@ class ExecutionAdapter:
             "single.asset.plan": single_asset_plan_handler,
             "log.analyze": log_handler,
             "build.project": build_handler,
+            "package.project": package_handler,
             "approval.request": approval_handler,
         }
 
