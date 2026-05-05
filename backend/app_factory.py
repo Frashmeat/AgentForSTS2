@@ -27,6 +27,7 @@ from app.modules.platform.application.workstation_runtime_service import Worksta
 from app.shared.infra.config.settings import Settings
 from app.shared.infra.http_errors import install_http_error_handlers
 from config import get_config
+from image.postprocess import prewarm_rembg_session
 from routers import WEB_ROUTER_MODULES, WORKSTATION_ROUTER_MODULES
 
 logging.basicConfig(
@@ -220,6 +221,24 @@ def _register_web_workstation_runtime_lifecycle(app: FastAPI) -> None:
         manager.stop()
 
 
+def _register_workstation_image_postprocess_lifecycle(app: FastAPI) -> None:
+    app.state.image_postprocess_prewarm_status = "pending"
+    app.state.image_postprocess_prewarm_error = ""
+
+    @app.on_event("startup")
+    async def _prewarm_image_postprocess() -> None:
+        app.state.image_postprocess_prewarm_status = "running"
+        app.state.image_postprocess_prewarm_error = ""
+        try:
+            await asyncio.to_thread(prewarm_rembg_session)
+        except Exception as exc:
+            app.state.image_postprocess_prewarm_status = "failed"
+            app.state.image_postprocess_prewarm_error = str(exc)[:300]
+            logging.getLogger(__name__).exception("image postprocess rembg prewarm failed")
+            return
+        app.state.image_postprocess_prewarm_status = "ready"
+
+
 def create_app(role: AppRole) -> FastAPI:
     config = get_config()
     app = _create_base_app(role, config)
@@ -231,6 +250,9 @@ def create_app(role: AppRole) -> FastAPI:
         _bootstrap_web_execution_profiles(app)
         _register_web_workstation_runtime_lifecycle(app)
         _register_web_queue_worker_lifecycle(app)
+
+    if role == "workstation":
+        _register_workstation_image_postprocess_lifecycle(app)
 
     if should_mount_frontend(role):
         _mount_frontend(app)

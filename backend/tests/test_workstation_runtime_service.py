@@ -260,6 +260,35 @@ def test_workstation_runtime_manager_clears_startup_timeout_after_capabilities_r
     assert recovered_status["capabilities"]["available"] is True
 
 
+def test_workstation_runtime_manager_waits_for_capabilities_available(tmp_path):
+    _write_workstation_config(tmp_path)
+    responses = iter(
+        [
+            {"available": False, "reason": "image_postprocess_prewarm_running"},
+            {"available": True, "generation": {"text_generation_available": True}},
+            {"available": True, "generation": {"text_generation_available": True}},
+        ]
+    )
+
+    manager = WorkstationRuntimeManager(
+        settings=_settings(
+            control_token_env="TEST_WORKSTATION_TOKEN",
+            startup_timeout_seconds=1,
+        ),
+        cwd=tmp_path,
+        popen_factory=lambda *args, **kwargs: FakeProcess(),
+        token_factory=lambda: "generated-token",
+        sleep=lambda seconds: None,
+        urlopen=lambda *args, **kwargs: FakeResponse(next(responses)),
+    )
+
+    status = manager.ensure_started().model_dump()
+
+    assert status["running"] is True
+    assert status["last_error"] == ""
+    assert status["capabilities"]["available"] is True
+
+
 def test_workstation_runtime_manager_reads_fixed_log_tail(tmp_path):
     manager = WorkstationRuntimeManager(
         settings=_settings(control_token_env="TEST_WORKSTATION_TOKEN"),

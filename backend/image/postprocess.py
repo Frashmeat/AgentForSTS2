@@ -70,6 +70,16 @@ def _get_rembg_session():
     return _rembg_session
 
 
+def prewarm_rembg_session() -> None:
+    """Preload the rembg session so first asset generation does not download the model."""
+    from config import get_config
+
+    model = get_config().get("image_gen", {}).get("rembg_model", "birefnet-general")
+    logger.info("image postprocess rembg prewarm start model=%s", model)
+    _get_rembg_session()
+    logger.info("image postprocess rembg prewarm finished model=%s", model)
+
+
 # ── 规格定义 ────────────────────────────────────────────────────────────────
 
 AssetType = Literal["card", "card_fullscreen", "relic", "power", "character"]

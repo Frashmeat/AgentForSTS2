@@ -15,6 +15,7 @@ def test_normalize_config_adds_platform_execution_defaults():
         "auto_start": True,
         "control_token_env": "ATS_WORKSTATION_CONTROL_TOKEN",
         "dispatch_timeout_seconds": 10,
+        "startup_timeout_seconds": 600,
         "poll_interval_seconds": 2,
         "execution_timeout_seconds": 180,
         "max_concurrent_text": 2,

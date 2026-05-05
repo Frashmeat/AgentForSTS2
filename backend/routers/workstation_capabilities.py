@@ -48,7 +48,12 @@ def get_workstation_capabilities(
     cfg = _settings(request).to_dict()
     sts2_path = str(cfg.get("sts2_path", "")).strip()
     active_pack = knowledge_runtime.get_active_knowledge_pack()
+    image_postprocess = _image_postprocess_status(request)
+    ready = image_postprocess["status"] == "ready"
+    reason = "" if ready else f"image_postprocess_prewarm_{image_postprocess['status']}"
     return {
+        "available": ready,
+        "reason": reason,
         "runtime_root": str(knowledge_runtime.RUNTIME_ROOT),
         "knowledge_root": str(knowledge_runtime.KNOWLEDGE_ROOT),
         "knowledge": {
@@ -61,6 +66,7 @@ def get_workstation_capabilities(
         "generation": {
             "text_generation_available": True,
             "code_generation_available": True,
+            "image_postprocess": image_postprocess,
         },
         "build": {
             "server_build_supported": False,
@@ -73,3 +79,11 @@ def get_workstation_capabilities(
             "sts2_mods_path_available": False,
         },
     }
+
+
+def _image_postprocess_status(request: Request) -> dict[str, str]:
+    status = str(getattr(request.app.state, "image_postprocess_prewarm_status", "ready") or "ready")
+    if status not in {"pending", "running", "ready", "failed"}:
+        status = "failed"
+    error = str(getattr(request.app.state, "image_postprocess_prewarm_error", "") or "")
+    return {"status": status, "error": error[:300]}

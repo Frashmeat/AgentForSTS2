@@ -89,6 +89,7 @@ def test_create_app_for_workstation_includes_only_workstation_routes_and_mounts_
     execution_profiles_seeded = False
     queue_worker_registered = False
     workstation_runtime_registered = False
+    workstation_image_postprocess_registered = False
 
     def fake_base_app(role: str, config: dict) -> FastAPI:
         app = FastAPI()
@@ -114,12 +115,21 @@ def test_create_app_for_workstation_includes_only_workstation_routes_and_mounts_
         nonlocal workstation_runtime_registered
         workstation_runtime_registered = True
 
+    def fake_register_workstation_image_postprocess_lifecycle(app: FastAPI) -> None:
+        nonlocal workstation_image_postprocess_registered
+        workstation_image_postprocess_registered = True
+
     monkeypatch.setattr(app_factory, "_create_base_app", fake_base_app)
     monkeypatch.setattr(app_factory, "_include_router", fake_include_router)
     monkeypatch.setattr(app_factory, "_mount_frontend", fake_mount_frontend)
     monkeypatch.setattr(app_factory, "_bootstrap_web_execution_profiles", fake_bootstrap_execution_profiles)
     monkeypatch.setattr(
         app_factory, "_register_web_workstation_runtime_lifecycle", fake_register_web_workstation_runtime_lifecycle
+    )
+    monkeypatch.setattr(
+        app_factory,
+        "_register_workstation_image_postprocess_lifecycle",
+        fake_register_workstation_image_postprocess_lifecycle,
     )
     monkeypatch.setattr(app_factory, "_register_web_queue_worker_lifecycle", fake_register_web_queue_worker_lifecycle)
     monkeypatch.setattr(app_factory, "get_config", lambda: {})
@@ -129,6 +139,7 @@ def test_create_app_for_workstation_includes_only_workstation_routes_and_mounts_
     assert included_modules == list(app_factory.WORKSTATION_ROUTER_MODULES)
     assert execution_profiles_seeded is False
     assert workstation_runtime_registered is False
+    assert workstation_image_postprocess_registered is True
     assert queue_worker_registered is False
     assert frontend_mounted is True
 
@@ -208,6 +219,39 @@ def test_register_web_workstation_runtime_lifecycle_stores_manager_in_app_and_co
     manager = app.state.workstation_runtime_manager
     assert isinstance(manager, FakeRuntimeManager)
     assert registered["platform.workstation_runtime_manager"] is manager
+
+
+def test_register_workstation_image_postprocess_lifecycle_prewarms_on_startup(monkeypatch):
+    calls = []
+
+    def fake_prewarm_rembg_session() -> None:
+        calls.append("prewarmed")
+
+    monkeypatch.setattr(app_factory, "prewarm_rembg_session", fake_prewarm_rembg_session)
+    app = FastAPI()
+    app_factory._register_workstation_image_postprocess_lifecycle(app)
+
+    with TestClient(app):
+        pass
+
+    assert calls == ["prewarmed"]
+    assert app.state.image_postprocess_prewarm_status == "ready"
+    assert app.state.image_postprocess_prewarm_error == ""
+
+
+def test_register_workstation_image_postprocess_lifecycle_records_failure(monkeypatch):
+    def fake_prewarm_rembg_session() -> None:
+        raise RuntimeError("download failed")
+
+    monkeypatch.setattr(app_factory, "prewarm_rembg_session", fake_prewarm_rembg_session)
+    app = FastAPI()
+    app_factory._register_workstation_image_postprocess_lifecycle(app)
+
+    with TestClient(app):
+        pass
+
+    assert app.state.image_postprocess_prewarm_status == "failed"
+    assert app.state.image_postprocess_prewarm_error == "download failed"
 
 
 def test_resolve_cors_allow_origin_regex_only_enables_loopback_when_requested():

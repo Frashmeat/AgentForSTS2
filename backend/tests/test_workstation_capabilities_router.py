@@ -61,6 +61,8 @@ def test_workstation_capabilities_reports_linux_server_generation_boundary(clien
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["available"] is True
+    assert payload["reason"] == ""
     assert "runtime_root" in payload
     assert "knowledge_root" in payload
     assert payload["knowledge"]["embedded_sts2_guidance"] is True
@@ -69,5 +71,38 @@ def test_workstation_capabilities_reports_linux_server_generation_boundary(clien
     assert payload["knowledge"]["sts2_path_configured"] is False
     assert payload["generation"]["text_generation_available"] is True
     assert payload["generation"]["code_generation_available"] is True
+    assert payload["generation"]["image_postprocess"] == {"status": "ready", "error": ""}
     assert payload["build"]["server_build_supported"] is False
     assert payload["deploy"]["server_deploy_supported"] is False
+
+
+def test_workstation_capabilities_waits_for_image_postprocess_prewarm(client: TestClient):
+    client.app.state.image_postprocess_prewarm_status = "running"
+    client.app.state.image_postprocess_prewarm_error = ""
+
+    response = client.get(
+        "/api/workstation/capabilities",
+        headers={"X-ATS-Workstation-Token": "secret-token"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["available"] is False
+    assert payload["reason"] == "image_postprocess_prewarm_running"
+    assert payload["generation"]["image_postprocess"] == {"status": "running", "error": ""}
+
+
+def test_workstation_capabilities_reports_image_postprocess_prewarm_failure(client: TestClient):
+    client.app.state.image_postprocess_prewarm_status = "failed"
+    client.app.state.image_postprocess_prewarm_error = "download failed"
+
+    response = client.get(
+        "/api/workstation/capabilities",
+        headers={"X-ATS-Workstation-Token": "secret-token"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["available"] is False
+    assert payload["reason"] == "image_postprocess_prewarm_failed"
+    assert payload["generation"]["image_postprocess"] == {"status": "failed", "error": "download failed"}

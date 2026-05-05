@@ -63,3 +63,21 @@ def test_get_gpu_providers_returns_cpu_when_cuda_provider_not_available(monkeypa
     providers = postprocess._get_gpu_providers()
 
     assert providers == ["CPUExecutionProvider"]
+
+
+def test_prewarm_rembg_session_initializes_configured_model(monkeypatch):
+    created: list[tuple[str, list[str]]] = []
+    fake_config = SimpleNamespace(get_config=lambda: {"image_gen": {"rembg_model": "test-model"}})
+    fake_rembg = SimpleNamespace(
+        new_session=lambda model, providers: created.append((model, providers)) or object(),
+    )
+
+    monkeypatch.setitem(sys.modules, "config", fake_config)
+    monkeypatch.setitem(sys.modules, "rembg", fake_rembg)
+    monkeypatch.setattr(postprocess, "_get_gpu_providers", lambda: ["CPUExecutionProvider"])
+    monkeypatch.setattr(postprocess, "_rembg_session", None)
+    monkeypatch.setattr(postprocess, "_rembg_session_model", None)
+
+    postprocess.prewarm_rembg_session()
+
+    assert created == [("test-model", ["CPUExecutionProvider"])]
