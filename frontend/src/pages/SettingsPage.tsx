@@ -32,7 +32,7 @@ export function SettingsPage() {
             <div className="space-y-1">
               <h1 className="text-3xl font-semibold text-slate-900">工作区设置</h1>
               <p className="max-w-2xl text-sm text-slate-500">
-                统一管理项目路径、Code Agent 执行方式、图像生成配置与服务器模式默认执行配置。
+                统一管理项目路径、Code Agent 执行方式、图像生成配置与 Web 托管工作站默认执行配置。
               </p>
             </div>
           </div>

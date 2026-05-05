@@ -92,7 +92,7 @@ function readPayloadText(payload: Record<string, unknown>, key: string) {
 
 function renderEventMessage(event: PlatformJobEventSummary) {
   if (event.event_type === "ai_execution.deferred") {
-    return String(event.payload.reason_message ?? "当前任务尚未进入真实服务器执行。");
+      return String(event.payload.reason_message ?? "当前任务尚未进入真实 Web 托管工作站执行。");
   }
   if (event.event_type === "workstation.step.started" || event.event_type === "workstation.step.finished") {
     const message = readPayloadText(event.payload, "message");
@@ -104,21 +104,21 @@ function renderEventMessage(event: PlatformJobEventSummary) {
       stepType ? `步骤：${stepType}` : "",
       typeof sequence === "number" ? `序号：${sequence}` : "",
     ].filter(Boolean);
-    return [message || "服务器生成步骤已更新", detailParts.join(" · ")].filter(Boolean).join("。");
+    return [message || "Web 托管工作站生成步骤已更新", detailParts.join(" · ")].filter(Boolean).join("。");
   }
   switch (event.event_type) {
     case "job.created":
       return "平台任务已创建。";
     case "job.queued":
-      return "平台任务已进入服务器队列。";
+      return "平台任务已进入 Web 托管工作站队列。";
     case "job.cancel_requested":
       return "已请求取消任务。";
     case "ai_execution.started":
-      return "服务器执行已开始。";
+      return "Web 托管工作站执行已开始。";
     case "ai_execution.finished":
-      return "服务器执行已结束。";
+      return "Web 托管工作站执行已结束。";
     case "ai_execution.retry_scheduled":
-      return "服务器执行已安排重试。";
+      return "Web 托管工作站执行已安排重试。";
     case "job.partial_blocked_by_quota":
       return "部分任务因额度不足未执行。";
     default:
@@ -239,7 +239,7 @@ export function UserCenterJobDetailPage() {
       <PlatformPageShell
         kicker="User Center"
         title="任务详情"
-        description="登录后可查看服务器模式任务的执行结果与返还信息。"
+        description="登录后可查看 Web 托管工作站任务的执行结果与返还信息。"
         actions={navigationActions}
       >
         <section className="platform-page-card p-8">

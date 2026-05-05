@@ -4,7 +4,7 @@ export function RefundSummary({ detail }: { detail: PlatformJobDetail }) {
   return (
     <section className="platform-page-card p-6">
       <h2 className="text-lg font-semibold text-slate-900">返还摘要</h2>
-      <p className="mt-1 text-sm text-slate-500">展示服务器模式下本次任务的原始扣减、返还次数和净消耗。</p>
+      <p className="mt-1 text-sm text-slate-500">展示平台任务的原始扣减、返还次数和净消耗。</p>
       <div className="mt-6 grid gap-4 md:grid-cols-4">
         <article className="platform-page-subcard p-4">
           <p className="text-sm text-slate-500">原始扣减</p>

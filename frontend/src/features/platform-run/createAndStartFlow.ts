@@ -86,7 +86,7 @@ export async function createAndStartPlatformFlow(
     ? inferServerWorkspaceProjectName(request)
     : "";
   if (serverWorkspaceProjectName) {
-    request.onProgress?.({ stage: "preparing_workspace", message: "正在创建服务器工作区" });
+    request.onProgress?.({ stage: "preparing_workspace", message: "正在创建 Web 托管工作站项目区" });
     const workspace = await createMyServerWorkspace({
       project_name: serverWorkspaceProjectName,
     });
@@ -96,7 +96,7 @@ export async function createAndStartPlatformFlow(
   }
 
   for (const upload of request.serverUploads ?? []) {
-    request.onProgress?.({ stage: "uploading_asset", message: `正在上传服务器资产：${upload.fileName}` });
+    request.onProgress?.({ stage: "uploading_asset", message: `正在上传托管资产：${upload.fileName}` });
     const uploaded = await uploadMyServerAsset({
       file_name: upload.fileName,
       content_base64: upload.contentBase64,
@@ -134,7 +134,7 @@ export async function createAndStartPlatformFlow(
   const started = await startMyJob(job.id, {
     triggered_by: "user",
   });
-  request.onProgress?.({ stage: "queued", message: `平台任务 #${job.id} 已提交到服务器队列`, jobId: job.id });
+  request.onProgress?.({ stage: "queued", message: `平台任务 #${job.id} 已提交到 Web 托管工作站队列`, jobId: job.id });
   const deferredNotice =
     started?.status === "deferred" ? readDeferredExecutionNotice(await listMyJobEvents(job.id)) : null;
 

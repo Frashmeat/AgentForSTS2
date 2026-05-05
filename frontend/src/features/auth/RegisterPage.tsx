@@ -51,7 +51,7 @@ export function RegisterPage({ onStatusNotice }: { onStatusNotice?: AuthStatusNo
     <PlatformPageShell
       kicker="Platform Access"
       title="注册"
-      description="创建平台账号后，可通过用户中心查看服务器任务记录。"
+      description="创建平台账号后，可通过用户中心查看平台任务记录。"
       actions={<AuthHomeLink />}
       width="narrow"
     >

@@ -1,4 +1,4 @@
-// SettingsPanel 的"服务器执行配置偏好"状态机封装。
+// SettingsPanel 的"Web 托管工作站执行配置偏好"状态机封装。
 // 只在 activeTab === "server" 且已登录时拉取与自动保存。
 // 与 useDetectAppPathsTask / useRefreshKnowledgeTask 同模式：mountedRef 保护跨实例 + 自动淡出 notice。
 
@@ -150,7 +150,9 @@ export function useServerPreferences({
       setServerPreference(updated);
       setSelectedServerProfileId(profileId);
       setServerSelectionDirty(false);
-      setServerNotice(profileId === null ? "已自动清空默认服务器配置" : "已自动保存默认服务器配置");
+      setServerNotice(
+        profileId === null ? "已自动清空默认 Web 托管工作站配置" : "已自动保存默认 Web 托管工作站配置",
+      );
     } catch (error) {
       if (mountedRef.current) {
         setServerError(resolveErrorMessage(error));

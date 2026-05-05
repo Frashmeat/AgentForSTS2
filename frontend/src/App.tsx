@@ -278,7 +278,7 @@ export default function App() {
       <StatusNoticeStack notices={statusNotices} />
       <ConfirmDialog
         open={pendingStartConfirmation !== null}
-        title="确认开始服务器任务"
+        title="确认开始平台任务"
         message={pendingStartConfirmation?.message ?? ""}
         confirmLabel="确认开始"
         cancelLabel="暂不开始"

@@ -69,8 +69,7 @@ export function ExecutionModeDialog({
         <p className="text-sm uppercase tracking-[0.24em] text-slate-400">Execution Mode</p>
         <h2 className="mt-2 text-2xl font-semibold text-slate-900">{title}</h2>
         <p className="mt-3 text-sm text-slate-500">
-          检测到本机配置后，可以继续走本机
-          BYOK；也可以切到服务器模式，先选平台提供的执行配置，再把任务写入平台记录并进入用户中心。
+          检测到本机配置后，可以继续走本机 Workstation；也可以切到 Web 托管工作站，先选平台执行配置，再把任务写入平台记录并进入用户中心。
         </p>
 
         <div className="mt-6 grid gap-3">
@@ -80,12 +79,12 @@ export function ExecutionModeDialog({
               className="rounded-2xl border border-slate-200 px-4 py-4 text-left transition hover:border-amber-300 hover:bg-amber-50/40"
               onClick={onChooseLocal}
             >
-              <p className="text-sm font-semibold text-slate-900">本机执行</p>
-              <p className="mt-1 text-xs text-slate-500">继续走工作站链路，BYOK / 本地执行不会进入服务器历史。</p>
+              <p className="text-sm font-semibold text-slate-900">本机 Workstation 执行</p>
+              <p className="mt-1 text-xs text-slate-500">继续走本机 Workstation 链路，BYOK / 本机执行不会进入平台任务历史。</p>
             </button>
           ) : (
             <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-4 text-sm text-slate-500">
-              <p>未检测到当前任务所需的本机 AI 能力，本次仅建议走服务器模式。</p>
+              <p>未检测到当前任务所需的本机 AI 能力，本次仅建议走 Web 托管工作站。</p>
               {localUnavailableReasons.length > 0 ? (
                 <div className="mt-2 space-y-1 text-xs text-amber-700">
                   {localUnavailableReasons.map((reason) => (
@@ -97,11 +96,11 @@ export function ExecutionModeDialog({
           )}
 
           <div className="rounded-2xl border border-slate-200 px-4 py-4 text-left">
-            <p className="text-sm font-semibold text-slate-900">服务器模式</p>
+            <p className="text-sm font-semibold text-slate-900">Web 托管工作站</p>
             <p className="mt-1 text-xs text-slate-500">
               {isAuthenticated
-                ? "先选择一个可用的服务器执行配置，再创建平台任务。"
-                : "服务器模式需要登录，点击后会先跳转到登录页。"}
+                ? "先选择一个可用的平台执行配置，再创建平台任务。"
+                : "Web 托管工作站需要登录，点击后会先跳转到登录页。"}
             </p>
 
             {isAuthenticated ? (
@@ -113,7 +112,7 @@ export function ExecutionModeDialog({
                     ))}
                   </div>
                 ) : serverProfilesLoading ? (
-                  <p className="mt-3 text-xs text-slate-500">正在读取服务器执行配置…</p>
+                  <p className="mt-3 text-xs text-slate-500">正在读取平台执行配置…</p>
                 ) : serverProfilesError ? (
                   <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                     <p>{serverProfilesError}</p>
@@ -194,11 +193,11 @@ export function ExecutionModeDialog({
                           checked={rememberServerProfile}
                           onChange={(event) => onRememberServerProfileChange(event.target.checked)}
                         />
-                        将本次选择设为默认服务器配置
+                        将本次选择设为默认 Web 托管工作站配置
                       </label>
                     ) : (
                       <p className="mt-3 text-xs text-amber-700">
-                        当前没有健康可用的服务器执行配置，暂时无法开始服务器任务。
+                        当前没有健康可用的平台执行配置，暂时无法开始 Web 托管工作站任务。
                       </p>
                     )}
                   </>
@@ -210,7 +209,7 @@ export function ExecutionModeDialog({
                   disabled={serverActionDisabled}
                   onClick={onChooseServer}
                 >
-                  {serverActionBusy ? (serverActionMessage || "正在创建服务器任务...") : "创建服务器任务"}
+                  {serverActionBusy ? (serverActionMessage || "正在创建平台任务...") : "创建平台任务"}
                 </button>
                 <p className="mt-2 text-xs text-slate-500">
                   创建后会进入用户中心任务历史。任务完成时，打开任务详情，在交付产物区下载方案文档或项目包。

@@ -152,9 +152,9 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
   const serverStatusText = serverError
     ? ""
     : serverSaving
-      ? "正在自动保存默认服务器配置…"
+      ? "正在自动保存默认 Web 托管工作站配置…"
       : serverSelectionDirty
-        ? "检测到修改，稍后会自动保存默认服务器配置"
+        ? "检测到修改，稍后会自动保存默认 Web 托管工作站配置"
         : serverNotice;
   const missingPaths = cfg && (!cfg.default_project_root || !cfg.sts2_path);
   const knowledgeCheckProgress = knowledgeChecking ? 100 : 0;
@@ -226,7 +226,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
     activeTab === "server" && (serverError || serverSaving || serverSelectionDirty || Boolean(serverNotice))
       ? {
           id: "server-save",
-          title: "服务器默认配置",
+          title: "默认 Web 托管工作站配置",
           tone: serverError ? "error" : serverSaving || serverSelectionDirty ? "info" : "success",
           message: serverError || serverStatusText,
           indeterminate: serverSaving,
@@ -282,7 +282,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
         {(
           [
             { key: "workspace", label: "工作站" },
-            { key: "server", label: "服务器模式" },
+            { key: "server", label: "Web 托管" },
           ] as const
         ).map((tab) => (
           <button
@@ -650,18 +650,18 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
         </>
       ) : (
         <div className="space-y-6">
-          <SGroup icon={<Cloud size={14} />} title="服务器模式">
+          <SGroup icon={<Cloud size={14} />} title="Web 托管工作站">
             {!isAuthAvailable ? (
               <StatusNotice
-                title="服务器模式暂不可用"
+                title="Web 托管工作站暂不可用"
                 tone="warning"
-                message="当前环境未接入独立 Web 平台服务，暂时无法管理服务器模式默认配置。"
+                message="当前环境未接入独立 Web 平台服务，暂时无法管理 Web 托管工作站默认配置。"
               />
             ) : !isAuthenticated ? (
               <StatusNotice
-                title="登录后可管理服务器模式"
+                title="登录后可管理 Web 托管工作站"
                 tone="warning"
-                message="登录后即可查看平台提供的执行配置，并设置默认服务器模式。"
+                message="登录后即可查看平台提供的执行配置，并设置默认 Web 托管工作站。"
                 actions={
                   <Link
                     to="/auth/login"
@@ -672,12 +672,12 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
                 }
               />
             ) : serverLoading ? (
-              <p className="text-sm text-slate-500">正在读取服务器执行配置…</p>
+              <p className="text-sm text-slate-500">正在读取平台执行配置…</p>
             ) : (
               <>
                 {serverPreference?.default_execution_profile_id && !serverPreference.available ? (
                   <StatusNotice
-                    title="默认服务器配置已不可用"
+                    title="默认 Web 托管工作站配置已不可用"
                     tone="warning"
                     message="你可以改选一个可用配置，系统会自动保存；也可以直接清空默认值。"
                   />
@@ -705,7 +705,7 @@ export function SettingsPanel({ mode = "drawer", onClose, onKnowledgeStatusChang
                     </span>
                   </p>
                   <p className="text-xs text-slate-500">
-                    运行时执行弹窗会复用这里的默认值，但仍可临时改用其他服务器配置。
+                    运行时执行弹窗会复用这里的默认值，但仍可临时改用其他平台执行配置。
                   </p>
                 </div>
 

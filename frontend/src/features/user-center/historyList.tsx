@@ -45,7 +45,9 @@ export function HistoryList({ jobs }: { jobs: UserCenterJobSummary[] }) {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold text-slate-900">平台任务历史</h2>
-          <p className="mt-1 text-sm text-slate-500">这里只展示服务器模式创建的任务，不读取本机恢复快照。</p>
+          <p className="mt-1 text-sm text-slate-500">
+            这里只展示 Web 托管工作站创建的平台任务，不读取本机执行记录或本机恢复快照。
+          </p>
         </div>
         <span className="text-sm text-slate-400">{jobs.length} 条</span>
       </div>

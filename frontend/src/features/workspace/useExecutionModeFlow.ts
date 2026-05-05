@@ -120,8 +120,8 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
           const fallbackProfile = profileView.items.find((profile) => profile.id === nextProfileId);
           setServerSelectionNotice(
             fallbackProfile
-              ? `已保存的默认服务器配置当前不可用，本次已自动回退到 ${fallbackProfile.display_name}。`
-              : "已保存的默认服务器配置当前不可用，而且暂时没有健康可用的服务器执行配置。",
+              ? `已保存的默认 Web 托管工作站配置当前不可用，本次已自动回退到 ${fallbackProfile.display_name}。`
+              : "已保存的默认 Web 托管工作站配置当前不可用，而且暂时没有健康可用的平台执行配置。",
           );
         } else {
           setServerSelectionNotice(null);
@@ -135,7 +135,7 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
         setServerPreference(null);
         setSelectedServerProfileId(null);
         setRememberServerProfile(false);
-        setServerProfilesError(error instanceof Error ? error.message : "读取服务器执行配置失败");
+        setServerProfilesError(error instanceof Error ? error.message : "读取平台执行配置失败");
         setServerSelectionNotice(null);
       })
       .finally(() => {
@@ -195,7 +195,7 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
   function requestStartConfirmation(job: PlatformJobSummary) {
     return new Promise<boolean>((resolve) => {
       setPendingStartConfirmation({
-        message: `已创建平台任务 #${job.id}。\n确认开始后会进入服务器队列，并按平台规则计费。是否继续开始？`,
+        message: `已创建平台任务 #${job.id}。\n确认开始后会进入 Web 托管工作站队列，并按平台规则计费。是否继续开始？`,
         resolve,
       });
     });
@@ -245,8 +245,8 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
 
     if ((request.serverUnsupportedReasons ?? []).length > 0) {
       showExecutionNotice(
-        "服务器模式暂不可用",
-        request.serverUnsupportedReasons?.[0] ?? "当前任务暂不支持服务器模式",
+        "Web 托管工作站暂不可用",
+        request.serverUnsupportedReasons?.[0] ?? "当前任务暂不支持 Web 托管工作站",
         "warning",
       );
       return;
@@ -256,15 +256,15 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
       (profile) => profile.id === selectedServerProfileId && profile.available,
     );
     if (!selectedProfile) {
-      showExecutionNotice("没有可用的服务器配置", serverProfilesError ?? "当前没有可用的服务器执行配置");
+      showExecutionNotice("没有可用的平台执行配置", serverProfilesError ?? "当前没有可用的平台执行配置");
       return;
     }
 
     try {
       setServerActionBusy(true);
-      showExecutionNotice("正在创建平台任务", "已开始提交服务器任务，请不要重复点击。", "info");
+      showExecutionNotice("正在创建平台任务", "已开始提交 Web 托管工作站任务，请不要重复点击。", "info");
       if (rememberServerProfile && selectedProfile.id !== serverPreference?.default_execution_profile_id) {
-        setServerActionProgress({ stage: "creating_job", message: "正在保存默认服务器配置" });
+        setServerActionProgress({ stage: "creating_job", message: "正在保存默认 Web 托管工作站配置" });
         const updatedPreference = await updateMyServerPreferences({
           default_execution_profile_id: selectedProfile.id,
         });
@@ -324,8 +324,8 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
         const fallbackProfile = profileView.items.find((profile) => profile.id === nextProfileId);
         setServerSelectionNotice(
           fallbackProfile
-            ? `已保存的默认服务器配置当前不可用，本次已自动回退到 ${fallbackProfile.display_name}。`
-            : "已保存的默认服务器配置当前不可用，而且暂时没有健康可用的服务器执行配置。",
+            ? `已保存的默认 Web 托管工作站配置当前不可用，本次已自动回退到 ${fallbackProfile.display_name}。`
+            : "已保存的默认 Web 托管工作站配置当前不可用，而且暂时没有健康可用的平台执行配置。",
         );
       } else {
         setServerSelectionNotice(null);
@@ -335,7 +335,7 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
       setServerPreference(null);
       setSelectedServerProfileId(null);
       setRememberServerProfile(false);
-      setServerProfilesError(error instanceof Error ? error.message : "读取服务器执行配置失败");
+      setServerProfilesError(error instanceof Error ? error.message : "读取平台执行配置失败");
       setServerSelectionNotice(null);
     } finally {
       setServerProfilesLoading(false);

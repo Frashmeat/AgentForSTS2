@@ -335,7 +335,7 @@ export function SingleAssetFeatureView(props: SingleAssetFeatureViewProps) {
 
               {isCustomCode && (
                 <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2.5 text-xs text-sky-700">
-                  当前类型不走图像链，会直接进入 Code Agent；服务器模式下则会直接创建文本实现方案任务。
+                  当前类型不走图像链，会直接进入 Code Agent；Web 托管工作站下则会直接创建文本实现方案任务。
                 </div>
               )}
 

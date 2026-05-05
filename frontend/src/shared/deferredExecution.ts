@@ -18,11 +18,11 @@ export interface DeferredExecutionNotice {
 function fallbackDetail(reasonCode: string) {
   switch (reasonCode) {
     case "local_project_root_required":
-      return "当前任务仍依赖本地项目目录，服务器模式暂时还不能直接继续执行。";
+      return "当前任务仍依赖本地项目目录，Web 托管工作站暂时还不能直接继续执行。";
     case "workflow_not_registered":
-      return "当前任务类型尚未接入服务器执行器。";
+      return "当前任务类型尚未接入 Web 托管工作站执行器。";
     default:
-      return "当前任务暂未进入真实服务器执行。";
+      return "当前任务暂未进入真实 Web 托管工作站执行。";
   }
 }
 
@@ -35,30 +35,30 @@ export function resolveDeferredExecutionSummary(reasonCode: string, reasonMessag
         reasonMessage,
         title: "当前任务仍依赖本地项目目录",
         description:
-          "服务器模式暂时还不能直接消费用户本机的 `project_root`，因此这次开始后只创建了执行记录，没有进入真实服务器 runner。",
+          "Web 托管工作站暂时还不能直接消费用户本机的 `project_root`，因此这次开始后只创建了执行记录，没有进入真实托管 runner。",
         detail,
         shortLabel: "依赖本地目录",
-        alertMessage: `任务已创建，但当前仍依赖本地项目目录，服务器还不能直接继续执行。\n${detail}`,
+        alertMessage: `任务已创建，但当前仍依赖本地项目目录，Web 托管工作站还不能直接继续执行。\n${detail}`,
       };
     case "workflow_not_registered":
       return {
         reasonCode,
         reasonMessage,
-        title: "当前任务类型尚未接入服务器执行器",
-        description: "后端已经记录了这次开始请求，但当前 web runtime 还没有为该任务注册可直接执行的服务器 workflow。",
+        title: "当前任务类型尚未接入 Web 托管工作站执行器",
+        description: "后端已经记录了这次开始请求，但当前 web runtime 还没有为该任务注册可直接执行的托管 workflow。",
         detail,
-        shortLabel: "等待服务器接入",
-        alertMessage: `任务已创建，但当前任务类型尚未接入服务器执行器。\n${detail}`,
+        shortLabel: "等待托管执行接入",
+        alertMessage: `任务已创建，但当前任务类型尚未接入 Web 托管工作站执行器。\n${detail}`,
       };
     default:
       return {
         reasonCode,
         reasonMessage,
-        title: "当前任务暂未进入服务器执行",
-        description: "后端已记录本次开始请求，但暂时没有进入真实服务器执行链。",
+        title: "当前任务暂未进入 Web 托管工作站执行",
+        description: "后端已记录本次开始请求，但暂时没有进入真实 Web 托管工作站执行链。",
         detail,
         shortLabel: "暂未进入执行",
-        alertMessage: `任务已创建，但当前没有进入真实服务器执行。\n${detail}`,
+        alertMessage: `任务已创建，但当前没有进入真实 Web 托管工作站执行。\n${detail}`,
       };
   }
 }
