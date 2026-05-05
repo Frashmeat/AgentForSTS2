@@ -140,12 +140,12 @@ export interface PlanItem {
   implementation_notes: string;
   needs_image: boolean;
   image_description: string;
-  depends_on: string[];
+  depends_on_item_ids: string[];
   scope_boundary: string;
-  dependency_reason: string;
+  relationship_reason: string;
   acceptance_notes: string;
   affected_targets: string[];
-  coupling_kind: string;
+  relationship_type: string;
   clarification_status: string;
   clarification_questions: string[];
   provided_image_b64?: string;

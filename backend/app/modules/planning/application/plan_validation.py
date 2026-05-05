@@ -80,16 +80,16 @@ def _validate_item(
         issues.append(PlanValidationIssue(code="missing_name", message="item 缺少 name", field="name"))
     if item.id in duplicate_ids:
         issues.append(PlanValidationIssue(code="duplicate_id", message="item id 重复", field="id"))
-    if item.id in item.depends_on:
-        issues.append(PlanValidationIssue(code="self_dependency", message="item 不能依赖自己", field="depends_on"))
+    if item.id in item.depends_on_item_ids:
+        issues.append(PlanValidationIssue(code="self_dependency", message="item 不能依赖自己", field="depends_on_item_ids"))
 
-    for dep in item.depends_on:
+    for dep in item.depends_on_item_ids:
         if dep not in known_ids:
             issues.append(
                 PlanValidationIssue(
                     code="missing_dependency",
                     message=f"依赖项不存在: {dep}",
-                    field="depends_on",
+                    field="depends_on_item_ids",
                 )
             )
 
@@ -102,8 +102,8 @@ def _validate_item(
         if not item.goal.strip():
             missing_fields.append("goal")
 
-    if strictness == "strict" and item.depends_on and not item.dependency_reason.strip():
-        missing_fields.append("dependency_reason")
+    if strictness == "strict" and item.depends_on_item_ids and not item.relationship_reason.strip():
+        missing_fields.append("relationship_reason")
 
     if issues:
         return PlanItemValidation(item_id=item.id, status="invalid", issues=issues)
@@ -129,6 +129,6 @@ def _question_for_field(field_name: str) -> str:
     mapping = {
         "goal": "这个 item 在整个 Mod 中的目标是什么？",
         "detailed_description": "请补充这个 item 的详细行为说明。",
-        "dependency_reason": "请说明它为什么依赖这些 item。",
+        "relationship_reason": "请说明它为什么依赖这些 item。",
     }
     return mapping.get(field_name, f"请补充字段：{field_name}")

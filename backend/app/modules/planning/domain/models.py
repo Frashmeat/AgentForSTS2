@@ -18,12 +18,12 @@ class PlanItem:
     implementation_notes: str = ""
     needs_image: bool = True
     image_description: str = ""
-    depends_on: list[str] = field(default_factory=list)
+    depends_on_item_ids: list[str] = field(default_factory=list)
     scope_boundary: str = ""
-    dependency_reason: str = ""
+    relationship_reason: str = ""
     acceptance_notes: str = ""
     affected_targets: list[str] = field(default_factory=list)
-    coupling_kind: str = "unclear"
+    relationship_type: str = "unknown"
     clarification_status: str = ""
     clarification_questions: list[str] = field(default_factory=list)
     provided_image_b64: str = ""

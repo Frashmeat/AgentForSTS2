@@ -1,4 +1,4 @@
-﻿import inspect
+import inspect
 import sys
 import types
 from pathlib import Path
@@ -71,7 +71,7 @@ def test_planning_service_accepts_prompt_loader_dependency():
 def test_planning_service_topologically_sorts_plan_items():
     service = PlanningService(knowledge_source=FakeKnowledgeSource())
     items = [
-        PlanItem(id="card_ignite", type="card", name="Ignite", depends_on=["power_burn"]),
+        PlanItem(id="card_ignite", type="card", name="Ignite", depends_on_item_ids=["power_burn"]),
         PlanItem(id="power_burn", type="power", name="BurnPower"),
     ]
 
@@ -132,7 +132,7 @@ def test_planning_prompt_template_exists_for_real_loader():
     assert "{{ knowledge_warnings }}" in template
     assert "{{ requirements }}" in template
     assert '"implementation_notes"' in template
-    assert '"depends_on"' in template
+    assert '"depends_on_item_ids"' in template
 
 
 def test_planning_service_build_planner_prompt_uses_prompt_loader():
@@ -241,7 +241,7 @@ def test_planning_service_find_groups_clusters_connected_items():
     service = PlanningService()
     items = [
         PlanItem(id="power_burn", type="power", name="BurnPower"),
-        PlanItem(id="card_ignite", type="card", name="Ignite", depends_on=["power_burn"]),
+        PlanItem(id="card_ignite", type="card", name="Ignite", depends_on_item_ids=["power_burn"]),
         PlanItem(id="relic_ember", type="relic", name="EmberRelic"),
     ]
 
@@ -298,10 +298,10 @@ def test_planning_service_parse_plan_defaults_new_review_fields():
     assert item.goal == ""
     assert item.detailed_description == ""
     assert item.scope_boundary == ""
-    assert item.dependency_reason == ""
+    assert item.relationship_reason == ""
     assert item.acceptance_notes == ""
     assert item.affected_targets == []
-    assert item.coupling_kind == "unclear"
+    assert item.relationship_type == "unknown"
     assert item.clarification_status == ""
     assert item.clarification_questions == []
 
@@ -321,10 +321,10 @@ def test_planning_service_plan_from_dict_preserves_review_fields():
                     "goal": "Provide shared combat helper behavior.",
                     "detailed_description": "Add a reusable helper for combat callbacks and state sync.",
                     "scope_boundary": "Only add helper abstractions, do not patch unrelated rewards flow.",
-                    "dependency_reason": "Needs card items to call into the helper after it exists.",
+                    "relationship_reason": "Needs card items to call into the helper after it exists.",
                     "acceptance_notes": "Helper API is available to card/relic integrations.",
                     "affected_targets": ["CombatHooks", "HelperLogic"],
-                    "coupling_kind": "shared_logic",
+                    "relationship_type": "shared_mechanism",
                     "clarification_status": "needs_user_input",
                     "clarification_questions": ["Should the helper own combat state persistence?"],
                 }
@@ -336,10 +336,10 @@ def test_planning_service_plan_from_dict_preserves_review_fields():
     assert item.goal == "Provide shared combat helper behavior."
     assert item.detailed_description == "Add a reusable helper for combat callbacks and state sync."
     assert item.scope_boundary == "Only add helper abstractions, do not patch unrelated rewards flow."
-    assert item.dependency_reason == "Needs card items to call into the helper after it exists."
+    assert item.relationship_reason == "Needs card items to call into the helper after it exists."
     assert item.acceptance_notes == "Helper API is available to card/relic integrations."
     assert item.affected_targets == ["CombatHooks", "HelperLogic"]
-    assert item.coupling_kind == "shared_logic"
+    assert item.relationship_type == "shared_mechanism"
     assert item.clarification_status == "needs_user_input"
     assert item.clarification_questions == ["Should the helper own combat state persistence?"]
 
@@ -414,7 +414,7 @@ def test_planning_service_validate_plan_strictness_changes_item_status():
     assert "goal" in strict.items[0].missing_fields
 
 
-def test_planning_service_build_execution_plan_keeps_order_only_items_separate():
+def test_planning_service_build_execution_plan_keeps_ordered_dependency_items_separate():
     service = PlanningService()
     plan = service.plan_from_dict(
         {
@@ -425,14 +425,14 @@ def test_planning_service_build_execution_plan_keeps_order_only_items_separate()
                     "id": "power_burn",
                     "type": "power",
                     "name": "BurnPower",
-                    "coupling_kind": "order_only",
+                    "relationship_type": "ordered_dependency",
                 },
                 {
                     "id": "card_ignite",
                     "type": "card",
                     "name": "Ignite",
-                    "depends_on": ["power_burn"],
-                    "coupling_kind": "order_only",
+                    "depends_on_item_ids": ["power_burn"],
+                    "relationship_type": "ordered_dependency",
                 },
             ],
         }
@@ -444,7 +444,7 @@ def test_planning_service_build_execution_plan_keeps_order_only_items_separate()
     assert [bundle.item_ids for bundle in result.execution_bundles] == [["power_burn"], ["card_ignite"]]
 
 
-def test_planning_service_build_execution_plan_merges_feature_bundle_items():
+def test_planning_service_build_execution_plan_merges_same_feature_items():
     service = PlanningService()
     plan = service.plan_from_dict(
         {
@@ -455,15 +455,15 @@ def test_planning_service_build_execution_plan_merges_feature_bundle_items():
                     "id": "hero_core",
                     "type": "character",
                     "name": "HeroCore",
-                    "coupling_kind": "feature_bundle",
+                    "relationship_type": "same_feature",
                     "affected_targets": ["HeroCore"],
                 },
                 {
                     "id": "hero_relic",
                     "type": "relic",
                     "name": "HeroRelic",
-                    "depends_on": ["hero_core"],
-                    "coupling_kind": "feature_bundle",
+                    "depends_on_item_ids": ["hero_core"],
+                    "relationship_type": "same_feature",
                     "affected_targets": ["HeroCore"],
                 },
             ],
@@ -487,15 +487,15 @@ def test_planning_service_build_execution_plan_marks_unclear_bundle_for_confirma
                     "id": "shared_helper",
                     "type": "custom_code",
                     "name": "SharedHelper",
-                    "coupling_kind": "unclear",
+                    "relationship_type": "unknown",
                     "affected_targets": ["SharedLogic"],
                 },
                 {
                     "id": "shared_card",
                     "type": "card",
                     "name": "SharedCard",
-                    "depends_on": ["shared_helper"],
-                    "coupling_kind": "shared_logic",
+                    "depends_on_item_ids": ["shared_helper"],
+                    "relationship_type": "shared_mechanism",
                     "affected_targets": ["SharedLogic"],
                 },
             ],
@@ -522,23 +522,23 @@ def test_planning_service_build_execution_plan_strict_mode_marks_large_bundle_fo
                     "id": "feature_a",
                     "type": "custom_code",
                     "name": "FeatureA",
-                    "coupling_kind": "feature_bundle",
+                    "relationship_type": "same_feature",
                     "affected_targets": ["SharedFeature"],
                 },
                 {
                     "id": "feature_b",
                     "type": "card",
                     "name": "FeatureB",
-                    "depends_on": ["feature_a"],
-                    "coupling_kind": "feature_bundle",
+                    "depends_on_item_ids": ["feature_a"],
+                    "relationship_type": "same_feature",
                     "affected_targets": ["SharedFeature"],
                 },
                 {
                     "id": "feature_c",
                     "type": "relic",
                     "name": "FeatureC",
-                    "depends_on": ["feature_b"],
-                    "coupling_kind": "feature_bundle",
+                    "depends_on_item_ids": ["feature_b"],
+                    "relationship_type": "same_feature",
                     "affected_targets": ["SharedFeature"],
                 },
             ],
@@ -564,15 +564,15 @@ def test_planning_service_build_execution_plan_applies_split_requested_decision(
                     "id": "feature_a",
                     "type": "custom_code",
                     "name": "FeatureA",
-                    "coupling_kind": "shared_logic",
+                    "relationship_type": "shared_mechanism",
                     "affected_targets": ["SharedFeature"],
                 },
                 {
                     "id": "feature_b",
                     "type": "card",
                     "name": "FeatureB",
-                    "depends_on": ["feature_a"],
-                    "coupling_kind": "shared_logic",
+                    "depends_on_item_ids": ["feature_a"],
+                    "relationship_type": "shared_mechanism",
                     "affected_targets": ["SharedFeature"],
                 },
             ],

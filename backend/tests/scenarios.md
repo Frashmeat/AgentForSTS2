@@ -15,7 +15,7 @@
 | S04 | X 费全体攻击卡 | 单资产 | 英文 | ⭐⭐ | `HasEnergyCostX`、`TargetType.AllEnemies`、`CapturedXValue` |
 | S05 | 计数遗物（ShowCounter） | 单资产 | 中文 | ⭐⭐ | `ShowCounter`、`DisplayAmount`、计数 + 奖励 |
 | S06 | 无图自定义机制 | 单资产 | 英文 | ⭐⭐ | `custom_code`、Harmony 补丁、无图像流程 |
-| S07 | 批量：卡牌 + Power（带依赖） | Mod 规划 | 中文 | ⭐⭐⭐ | `depends_on`、拓扑排序、Power 先于卡牌 |
+| S07 | 批量：卡牌 + Power（带依赖） | Mod 规划 | 中文 | ⭐⭐⭐ | `depends_on_item_ids`、拓扑排序、Power 先于卡牌 |
 | S08 | 留手回合末卡 | 单资产 | 英文 | ⭐⭐⭐ | `HasTurnEndInHandEffect`、`OnTurnEndInHand` |
 | S09 | 5 资产完整小 Mod | Mod 规划 | 中文 | ⭐⭐⭐⭐ | 批量全流程、混合类型、并发图像生成 |
 | S10 | 4 资产英文主题包（三级依赖） | Mod 规划 | 英文 | ⭐⭐⭐⭐⭐ | 依赖链、Power 被多项引用、复杂 batch |
@@ -328,13 +328,13 @@ No visual power icon needed. Implement as a relic or Harmony hook.
       "id": "power_infection_mark",
       "type": "power",
       "name": "InfectionMark",
-      "depends_on": []
+      "depends_on_item_ids": []
     },
     {
       "id": "card_spread_infection",
       "type": "card",
       "name": "SpreadInfection",
-      "depends_on": ["power_infection_mark"]
+      "depends_on_item_ids": ["power_infection_mark"]
     }
   ]
 }
@@ -345,11 +345,11 @@ No visual power icon needed. Implement as a relic or Harmony hook.
 - 拓扑排序后 InfectionMark 在 SpreadInfection 之前执行
 - `InfectionMark.cs`：`PowerType.Debuff`、`AfterTurnEnd` 中 `Owner.Creature.LoseHpInternal(Amount, ...)`
 - `SpreadInfection.cs`：`OnPlay` 中引用 `InfectionMark`（通过 `ModelDb.Power<InfectionMark>()` 或等效）
-- `depends_on` 确保代码生成顺序正确
+- `depends_on_item_ids` 确保代码生成顺序正确
 
 ### 风险点
 
-- Planner 可能不生成 `depends_on`，导致 Code Agent 写 SpreadInfection 时 InfectionMark 类还不存在 → 编译失败
+- Planner 可能不生成 `depends_on_item_ids`，导致 Code Agent 写 SpreadInfection 时 InfectionMark 类还不存在 → 编译失败
 - 这是测试依赖管理最核心的场景
 
 ---
@@ -427,7 +427,7 @@ This card uses the HasTurnEndInHandEffect mechanic.
 
 ### 预期 Planner 输出摘要
 
-5个 items，全部 `needs_image: true`，`depends_on: []`（无依赖），拓扑排序后顺序任意。
+5个 items，全部 `needs_image: true`，`depends_on_item_ids: []`（无依赖），拓扑排序后顺序任意。
 
 ### 代码断言
 
@@ -484,10 +484,10 @@ Dependency summary:
 {
   "mod_name": "SoulHarvester",
   "items": [
-    { "id": "power_soul_mark",       "depends_on": [] },
-    { "id": "relic_harvester_scythe","depends_on": ["power_soul_mark"] },
-    { "id": "relic_soul_chalice",    "depends_on": ["power_soul_mark"] },
-    { "id": "card_soul_rend",        "depends_on": ["power_soul_mark"] }
+    { "id": "power_soul_mark",       "depends_on_item_ids": [] },
+    { "id": "relic_harvester_scythe","depends_on_item_ids": ["power_soul_mark"] },
+    { "id": "relic_soul_chalice",    "depends_on_item_ids": ["power_soul_mark"] },
+    { "id": "card_soul_rend",        "depends_on_item_ids": ["power_soul_mark"] }
   ]
 }
 ```
@@ -539,7 +539,7 @@ Dependency summary:
 2. 粘贴对应的"用户输入"文本
 3. 在"审阅计划"阶段检查：
    - `implementation_notes` 是否包含真实 API 名（`OnPlay`、`PowerModel` 等）
-   - `depends_on` 是否正确
+   - `depends_on_item_ids` 是否正确
 4. 确认后执行，对照"代码断言"检查
 
 ### 快速冒烟测试顺序
@@ -555,7 +555,7 @@ Dependency summary:
 | `needs_image=false` 的资产直接进代码生成，跳过图像环节 | S06 | 不出现 prompt_preview 事件 |
 | 所有依赖同一 Power 的三个资产并发等待 | S10 | SoulMark done event 广播，三者同时解锁 |
 | 批量中有一项失败，其余继续 | S09（注入错误测试） | `item_error` 事件，其他 item 不受影响，`error_count` = 1 |
-| Planner 输出缺少 `depends_on` | S07（负面测试） | Code Agent 遇到编译错误，`dotnet publish` 失败后报错 |
+| Planner 输出缺少 `depends_on_item_ids` | S07（负面测试） | Code Agent 遇到编译错误，`dotnet publish` 失败后报错 |
 
 ---
 
@@ -583,7 +583,7 @@ Dependency summary:
 - 任一组被拒绝时，仅该组终止，`batch_done` 仍能汇总 `success_count` / `error_count`
 
 **检查点：**
-- `depends_on` 排序稳定
+- `depends_on_item_ids` 排序稳定
 - `item_approval_pending` 带 `item_id`
 - `batch_done` 统计与实际成功/失败数一致
 

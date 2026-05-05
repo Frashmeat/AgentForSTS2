@@ -219,7 +219,7 @@ def test_plan_group_approval_requests_creates_pending_actions(monkeypatch, tmp_p
                 description="引用 BurnPower 的卡牌",
                 implementation_notes="调用 BurnPower",
                 needs_image=False,
-                depends_on=["power_burn"],
+                depends_on_item_ids=["power_burn"],
             ),
         ]
 
@@ -342,7 +342,7 @@ def test_api_plan_review_applies_split_requested_bundle_decision():
                 goal="Provide helper",
                 detailed_description="Provide shared helper logic",
                 needs_image=False,
-                coupling_kind="shared_logic",
+                relationship_type="shared_mechanism",
                 affected_targets=["CombatHelper"],
             ),
             PlanItem(
@@ -353,8 +353,8 @@ def test_api_plan_review_applies_split_requested_bundle_decision():
                 goal="Use helper",
                 detailed_description="Use helper from shared logic",
                 needs_image=False,
-                depends_on=["helper_logic"],
-                coupling_kind="shared_logic",
+                depends_on_item_ids=["helper_logic"],
+                relationship_type="shared_mechanism",
                 affected_targets=["CombatHelper"],
             ),
         ],
@@ -408,7 +408,7 @@ def test_ensure_plan_review_passes_allows_accepted_bundle_decision():
                 goal="Provide helper",
                 detailed_description="Provide helper logic",
                 needs_image=False,
-                coupling_kind="unclear",
+                relationship_type="unknown",
                 affected_targets=["SharedLogic"],
             ),
             PlanItem(
@@ -419,8 +419,8 @@ def test_ensure_plan_review_passes_allows_accepted_bundle_decision():
                 goal="Use helper",
                 detailed_description="Use helper from shared logic",
                 needs_image=False,
-                depends_on=["shared_helper"],
-                coupling_kind="shared_logic",
+                depends_on_item_ids=["shared_helper"],
+                relationship_type="shared_mechanism",
                 affected_targets=["SharedLogic"],
             ),
         ],
@@ -512,7 +512,7 @@ def test_approval_first_pending_group_does_not_emit_batch_done_early(monkeypatch
                     description="引用 BurnPower 的卡牌",
                     implementation_notes="调用 BurnPower",
                     needs_image=False,
-                    depends_on=["power_burn"],
+                    depends_on_item_ids=["power_burn"],
                 ),
             ],
         )

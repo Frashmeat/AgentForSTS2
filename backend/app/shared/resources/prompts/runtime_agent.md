@@ -58,7 +58,12 @@ Output a JSON object with this exact structure:
       "implementation_notes": "Technical C# implementation guidance: which base class to inherit, key methods to override, fields to set, interactions with other items in this mod. Be specific and technical.",
       "needs_image": true | false,
       "image_description": "中文视觉描述：画面主体、外观风格、颜色、氛围（不含游戏机制数值）",
-      "depends_on": ["id_of_item_this_depends_on"]
+      "depends_on_item_ids": ["id_of_related_or_prior_item"],
+      "scope_boundary": "中文说明：这个 item 的范围边界，不要包含什么",
+      "relationship_reason": "中文说明：为什么与 depends_on_item_ids 里的 item 有关系，没有则为空字符串",
+      "acceptance_notes": "中文说明：用户和执行者如何判断这个 item 已完成",
+      "affected_targets": ["可能影响的类、文件、机制或资源名"],
+      "relationship_type": "unknown" | "independent" | "ordered_dependency" | "same_feature" | "shared_mechanism"
     }
   ]
 }
@@ -68,7 +73,14 @@ Rules:
 - type "power": buff/debuff icons shown during battle. needs_image = true (needs a small icon).
 - type "character": full player character. needs_image = true.
 - For items with no visual asset (custom_code): image_description = "".
-- depends_on: list IDs of items whose C# code must exist first (e.g. a card that uses a custom power depends on that power).
+- depends_on_item_ids: list IDs of related or prior items. For "ordered_dependency", these are items whose C# code must exist first. For "same_feature" or "shared_mechanism", these are items that should be considered together.
+- relationship_type values:
+  - "unknown": current information is not enough to decide the relationship.
+  - "independent": this item can be implemented independently.
+  - "ordered_dependency": selected items should be implemented first, but this item should stay in a separate execution bundle by default.
+  - "same_feature": selected items are part of the same feature and usually should be planned together.
+  - "shared_mechanism": selected items share code, state, registration, image/resource context, or another mechanism.
+- relationship_reason must explain the user-facing reason for the relationship when depends_on_item_ids is not empty.
 - implementation_notes must be detailed enough that a developer can write the C# without looking anything up. Include: base class, constructor params, methods to override, logic description, references to other items by their C# class name.
 - name_zhs: the in-game display name for Simplified Chinese players. For custom_code items with no display name, use "".
 - Create ONLY what the user asked for. Do not add extra items unless they are clearly implied by the requirements.
@@ -99,17 +111,17 @@ Rules:
 详细说明：{{ detailed_description }}
 现有实现提示：{{ implementation_notes }}
 范围边界：{{ scope_boundary }}
-依赖原因：{{ dependency_reason }}
+关系说明：{{ relationship_reason }}
 验收说明：{{ acceptance_notes }}
-耦合类型：{{ coupling_kind }}
+Item 关系：{{ relationship_type }}
 服务器项目名：{{ server_project_name }}
 服务器工作区：{{ server_workspace_root }}
 服务器工作区现状：
 {{ server_workspace_snapshot }}
 影响目标：
 {{ affected_targets }}
-依赖项：
-{{ depends_on }}
+相关 Item：
+{{ depends_on_item_ids }}
 
 ## platform_single_asset_server_user
 你是 Slay the Spire 2 mod 开发助手，当前任务来自服务器模式下的单资产 `{{ asset_type }}` 文本方案生成。

@@ -399,30 +399,24 @@ export function ReviewBundles({
           </div>
         </details>
 
-        <div className="mt-4 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={onBack}
-            className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm text-slate-600 transition-colors hover:text-slate-800"
-          >
-            返回 Item 复核
-          </button>
-          <button
-            type="button"
-            onClick={onRefreshReview}
-            disabled={reviewBusy}
-            className="rounded-lg border border-violet-200 px-4 py-2.5 text-sm text-violet-700 transition-colors hover:bg-violet-50 disabled:opacity-60"
-          >
-            {reviewBusy ? "重新检查中..." : "重新检查当前计划"}
-          </button>
-          <button
-            type="button"
-            onClick={runFocusAction}
-            disabled={reviewBusy || focusAction.action === "none"}
-            className="flex-1 rounded-lg bg-violet-700 py-2.5 text-sm font-bold text-white transition-colors hover:bg-violet-800 disabled:opacity-60"
-          >
-            {reviewBusy ? "处理中..." : focusAction.label}
-          </button>
+        <div className="mt-4 flex flex-wrap justify-between gap-2">
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={onBack}
+              className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm text-slate-600 transition-colors hover:text-slate-800"
+            >
+              返回 Item 复核
+            </button>
+            <button
+              type="button"
+              onClick={onRefreshReview}
+              disabled={reviewBusy}
+              className="rounded-lg border border-violet-200 px-4 py-2.5 text-sm text-violet-700 transition-colors hover:bg-violet-50 disabled:opacity-60"
+            >
+              {reviewBusy ? "重新检查中..." : "重新检查当前计划"}
+            </button>
+          </div>
           <button
             type="button"
             onClick={onReset}

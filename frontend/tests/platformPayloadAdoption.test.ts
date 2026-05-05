@@ -19,13 +19,13 @@ test("single asset platform payload uses item_name and excludes local-only field
 test("batch platform payload uses item_name and excludes local-only fields", () => {
   const source = readSource("../src/features/batch-generation/view.tsx");
   const batchPayloadBuilderMatch = source.match(
-    /input_payload:\s*\{[\s\S]*?depends_on: item\.depends_on,[\s\S]*?\},\s*\}\)\)/,
+    /input_payload:\s*\{[\s\S]*?depends_on_item_ids: item\.depends_on_item_ids,[\s\S]*?\},\s*\}\)\)/,
   );
 
   assert.ok(batchPayloadBuilderMatch);
   const batchPayloadBuilder = batchPayloadBuilderMatch[0];
   assert.match(source, /item_name: item\.name/);
-  assert.match(source, /asset_type: item\.type/);
+  assert.match(source, /item_type: item\.type/);
   assert.doesNotMatch(batchPayloadBuilder, /(?:^|\s)name: item\.name/);
   assert.doesNotMatch(batchPayloadBuilder, /has_uploaded_image:/);
 });

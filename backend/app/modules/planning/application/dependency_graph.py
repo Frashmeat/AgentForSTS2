@@ -12,7 +12,7 @@ def topological_sort(items: list[PlanItem]) -> list[PlanItem]:
         if item_id in visited or item_id not in id_map:
             return
         visited.add(item_id)
-        for dep in id_map[item_id].depends_on:
+        for dep in id_map[item_id].depends_on_item_ids:
             visit(dep)
         result.append(id_map[item_id])
 
@@ -25,7 +25,7 @@ def find_groups(items: list[PlanItem]) -> list[list[PlanItem]]:
     id_to_item = {it.id: it for it in items}
     neighbors: dict[str, set[str]] = {it.id: set() for it in items}
     for it in items:
-        for dep in it.depends_on:
+        for dep in it.depends_on_item_ids:
             if dep in id_to_item:
                 neighbors[it.id].add(dep)
                 neighbors[dep].add(it.id)

@@ -45,9 +45,9 @@ def _build_prompt(input_payload: dict[str, object]) -> str:
     detailed_description = str(input_payload.get("detailed_description", "")).strip()
     implementation_notes = str(input_payload.get("implementation_notes", "")).strip()
     scope_boundary = str(input_payload.get("scope_boundary", "")).strip()
-    dependency_reason = str(input_payload.get("dependency_reason", "")).strip()
+    relationship_reason = str(input_payload.get("relationship_reason", "")).strip()
     acceptance_notes = str(input_payload.get("acceptance_notes", "")).strip()
-    coupling_kind = str(input_payload.get("coupling_kind", "")).strip() or "unclear"
+    relationship_type = str(input_payload.get("relationship_type", "")).strip() or "unknown"
 
     if not any([description, goal, detailed_description, implementation_notes, acceptance_notes]):
         raise ValueError("custom_code server task requires descriptive input")
@@ -61,11 +61,11 @@ def _build_prompt(input_payload: dict[str, object]) -> str:
             "detailed_description": detailed_description or "无",
             "implementation_notes": implementation_notes or "无",
             "scope_boundary": scope_boundary or "无",
-            "dependency_reason": dependency_reason or "无",
+            "relationship_reason": relationship_reason or "无",
             "acceptance_notes": acceptance_notes or "无",
-            "coupling_kind": coupling_kind,
+            "relationship_type": relationship_type,
             "affected_targets": _render_multiline_list(_string_list(input_payload.get("affected_targets"))),
-            "depends_on": _render_multiline_list(_string_list(input_payload.get("depends_on"))),
+            "depends_on_item_ids": _render_multiline_list(_string_list(input_payload.get("depends_on_item_ids"))),
             "server_project_name": str(input_payload.get("server_project_name", "")).strip() or "无",
             "server_workspace_root": str(input_payload.get("server_workspace_root", "")).strip() or "无",
             "server_workspace_snapshot": render_server_workspace_snapshot(input_payload.get("server_workspace_root")),

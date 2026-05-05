@@ -77,9 +77,9 @@ def _build_group_bundles(
     neighbors: dict[str, set[str]] = {item.id: set() for item in group}
 
     for item in group:
-        if item.coupling_kind == "order_only":
+        if item.relationship_type in {"ordered_dependency", "independent"}:
             continue
-        for dep in item.depends_on:
+        for dep in item.depends_on_item_ids:
             if dep in neighbors:
                 neighbors[item.id].add(dep)
                 neighbors[dep].add(item.id)
@@ -116,16 +116,16 @@ def _collect_component(start_id: str, neighbors: dict[str, set[str]], visited: s
 
 def _review_bundle(items: list[PlanItem], *, strictness: str, bundle_id: str) -> ExecutionBundle:
     risk_codes: list[str] = []
-    coupling_kinds = {item.coupling_kind for item in items}
+    relationship_types = {item.relationship_type for item in items}
     affected_targets = {target for item in items for target in item.affected_targets}
     item_types = {item.type for item in items}
     size_threshold = {"efficient": 4, "balanced": 3, "strict": 2}.get(strictness, 3)
 
-    if "unclear" in coupling_kinds:
+    if "unknown" in relationship_types:
         risk_codes.append("unclear_coupling")
     if len(items) > size_threshold:
         risk_codes.append("bundle_size_threshold")
-    if len(item_types) > 2 and "feature_bundle" not in coupling_kinds:
+    if len(item_types) > 2 and "same_feature" not in relationship_types:
         risk_codes.append("mixed_item_types")
     if len(affected_targets) > 3:
         risk_codes.append("affected_targets_spread")
@@ -136,7 +136,7 @@ def _review_bundle(items: list[PlanItem], *, strictness: str, bundle_id: str) ->
     elif risk_codes:
         status = "needs_confirmation"
 
-    reason = _bundle_reason(coupling_kinds)
+    reason = _bundle_reason(relationship_types)
     return ExecutionBundle(
         bundle_id=bundle_id,
         item_ids=[item.id for item in items],
@@ -167,18 +167,16 @@ def _build_split_bundles(items: list[PlanItem]) -> list[ExecutionBundle]:
     return bundles
 
 
-def _bundle_reason(coupling_kinds: set[str]) -> str:
-    if "feature_bundle" in coupling_kinds:
-        return "items 属于同一功能包，建议联合执行"
-    if "shared_logic" in coupling_kinds:
-        return "items 共享核心逻辑改动点，建议联合执行"
-    if "shared_registration" in coupling_kinds:
-        return "items 共享注册入口，建议联合执行"
-    if "shared_resource" in coupling_kinds:
-        return "items 共享资源上下文，建议联合确认是否合并"
-    if "order_only" in coupling_kinds and len(coupling_kinds) == 1:
-        return "items 只存在顺序依赖，应保持独立执行"
-    return "items 的执行耦合关系仍需确认"
+def _bundle_reason(relationship_types: set[str]) -> str:
+    if "same_feature" in relationship_types:
+        return "items 属于同一功能组，建议联合执行"
+    if "shared_mechanism" in relationship_types:
+        return "items 共享机制、代码入口或资源上下文，建议联合确认是否合并"
+    if "ordered_dependency" in relationship_types and len(relationship_types) == 1:
+        return "items 只存在先后顺序，应保持独立执行"
+    if "independent" in relationship_types and len(relationship_types) == 1:
+        return "items 已标记为独立执行"
+    return "items 的关系仍需确认"
 
 
 def _bundle_id(item_ids: list[str]) -> str:
@@ -189,9 +187,9 @@ def _risk_detail(code: str) -> dict:
     mapping = {
         "unclear_coupling": {
             "code": "unclear_coupling",
-            "title": "耦合关系不明确",
+            "title": "Item 关系不明确",
             "summary": "系统无法确认这些 item 是否必须绑在一起执行。",
-            "recommendation": "若你确认它们必须一起落地，可接受当前分组；否则优先补充依赖说明或要求拆分。",
+            "recommendation": "若你确认它们必须一起落地，可接受当前分组；否则优先补充关系说明或要求拆分。",
             "impact": "错误合并后会扩大一次执行失败的影响范围。",
         },
         "bundle_size_threshold": {
@@ -247,7 +245,7 @@ def _recommended_actions(status: BundleReviewStatus) -> list[dict]:
             {
                 "action": "revise_items",
                 "label": "返回补充说明",
-                "description": "回到 Item 层补充依赖原因、范围边界或验收说明后再重算。",
+                "description": "回到 Item 层补充关系说明、范围边界或验收说明后再重算。",
                 "emphasis": "secondary",
             },
         ]
@@ -261,7 +259,7 @@ def _recommended_actions(status: BundleReviewStatus) -> list[dict]:
         {
             "action": "revise_items",
             "label": "返回补充说明",
-            "description": "回到 Item 层补充依赖原因、范围边界或验收说明后重算。",
+            "description": "回到 Item 层补充关系说明、范围边界或验收说明后重算。",
             "emphasis": "secondary",
         },
     ]
@@ -273,5 +271,5 @@ def _blocking_reason(status: BundleReviewStatus, risk_codes: list[str]) -> str:
     if status == "split_recommended":
         return "系统建议先拆分该 bundle，再进入执行阶段。"
     if "unclear_coupling" in risk_codes:
-        return "系统认为该 bundle 可能可执行，但耦合关系仍需你显式确认。"
+        return "系统认为该 bundle 可能可执行，但 Item 关系仍需你显式确认。"
     return "系统仍需要你确认该 bundle 是否接受当前分组。"

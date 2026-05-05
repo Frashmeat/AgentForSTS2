@@ -256,7 +256,7 @@ class PromptAssembler:
   - Implementation notes: {item.implementation_notes}
   - Image files:
 {img_list}
-  - Depends on: {', '.join(item.depends_on) if item.depends_on else 'none'}
+  - Depends on: {', '.join(item.depends_on_item_ids) if item.depends_on_item_ids else 'none'}
 """
 
         mod_name = request.project_root.name

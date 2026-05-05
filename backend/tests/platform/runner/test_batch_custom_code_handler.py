@@ -47,7 +47,7 @@ def test_execute_batch_custom_code_step_builds_prompt_and_delegates_to_text_gene
                     "description": "实现一个战斗阶段脚本管理器",
                     "implementation_notes": "维护状态机并派发事件",
                     "affected_targets": ["Scripts/BattleScriptManager.cs"],
-                    "depends_on": ["battle_bootstrap"],
+                    "depends_on_item_ids": ["battle_bootstrap"],
                 },
                 execution_binding=StepExecutionBinding(
                     runner_type="codex_cli",

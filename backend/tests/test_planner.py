@@ -26,7 +26,7 @@ MINIMAL_PLAN_JSON = """{
       "implementation_notes": "Inherit CustomCardModel, override OnPlay to deal 6 damage.",
       "needs_image": true,
       "image_description": "A glowing sword",
-      "depends_on": []
+      "depends_on_item_ids": []
     }
   ]
 }"""
@@ -42,9 +42,9 @@ def test_parse_plan_basic():
     assert item.type == "card"
     assert item.name == "StrikeCard"
     assert item.needs_image is True
-    assert item.depends_on == []
+    assert item.depends_on_item_ids == []
     assert item.goal == ""
-    assert item.coupling_kind == "unclear"
+    assert item.relationship_type == "unknown"
     assert item.clarification_questions == []
 
 
@@ -61,14 +61,14 @@ def test_parse_plan_preserves_extended_review_fields():
           "implementation_notes": "Keep helpers isolated",
           "needs_image": false,
           "image_description": "",
-          "depends_on": [],
+          "depends_on_item_ids": [],
           "goal": "Provide common battle helpers.",
           "detailed_description": "Create helper methods shared by multiple generated assets.",
           "scope_boundary": "Do not modify unrelated dungeon flow.",
-          "dependency_reason": "",
+          "relationship_reason": "",
           "acceptance_notes": "Helpers are reusable by future assets.",
           "affected_targets": ["HelperLogic", "BattleState"],
-          "coupling_kind": "shared_logic",
+          "relationship_type": "shared_mechanism",
           "clarification_status": "clear",
           "clarification_questions": []
         }
@@ -81,7 +81,7 @@ def test_parse_plan_preserves_extended_review_fields():
     assert item.scope_boundary == "Do not modify unrelated dungeon flow."
     assert item.acceptance_notes == "Helpers are reusable by future assets."
     assert item.affected_targets == ["HelperLogic", "BattleState"]
-    assert item.coupling_kind == "shared_logic"
+    assert item.relationship_type == "shared_mechanism"
     assert item.clarification_status == "clear"
 
 
@@ -92,16 +92,16 @@ def test_parse_plan_with_dependencies():
       "items": [
         {"id": "power_burn", "type": "power", "name": "BurnPower",
          "description": "", "implementation_notes": "", "needs_image": true,
-         "image_description": "", "depends_on": []},
+         "image_description": "", "depends_on_item_ids": []},
         {"id": "card_ignite", "type": "card", "name": "IgniteCard",
          "description": "", "implementation_notes": "", "needs_image": true,
-         "image_description": "", "depends_on": ["power_burn"]}
+         "image_description": "", "depends_on_item_ids": ["power_burn"]}
       ]
     }"""
     plan = parse_plan(json_str)
     assert len(plan.items) == 2
     card_item = next(it for it in plan.items if it.id == "card_ignite")
-    assert "power_burn" in card_item.depends_on
+    assert "power_burn" in card_item.depends_on_item_ids
 
 
 def test_parse_plan_custom_code_no_image():
@@ -111,7 +111,7 @@ def test_parse_plan_custom_code_no_image():
       "items": [
         {"id": "mech_passive", "type": "custom_code", "name": "SoulMechanic",
          "description": "Passive soul counter", "implementation_notes": "Harmony patch",
-         "needs_image": false, "image_description": "", "depends_on": []}
+         "needs_image": false, "image_description": "", "depends_on_item_ids": []}
       ]
     }"""
     plan = parse_plan(json_str)
@@ -127,7 +127,7 @@ def test_parse_plan_defaults_gracefully():
       "items": [
         {"id": "x", "type": "relic", "name": "MyRelic",
          "description": "desc", "implementation_notes": "notes",
-         "needs_image": true, "image_description": "", "depends_on": []}
+         "needs_image": true, "image_description": "", "depends_on_item_ids": []}
       ]
     }"""
     plan = parse_plan(json_str)
@@ -138,7 +138,7 @@ def test_parse_plan_defaults_gracefully():
 # ── topological_sort ──────────────────────────────────────────────────────────
 
 
-def _make_item(id_, depends_on=None):
+def _make_item(id_, depends_on_item_ids=None):
     return PlanItem(
         id=id_,
         type="card",
@@ -147,7 +147,7 @@ def _make_item(id_, depends_on=None):
         implementation_notes="",
         needs_image=False,
         image_description="",
-        depends_on=depends_on or [],
+        depends_on_item_ids=depends_on_item_ids or [],
     )
 
 
@@ -159,7 +159,7 @@ def test_topo_sort_independent_items_all_present():
 
 def test_topo_sort_respects_dependency():
     # b depends on a → a must come before b
-    items = [_make_item("b", depends_on=["a"]), _make_item("a")]
+    items = [_make_item("b", depends_on_item_ids=["a"]), _make_item("a")]
     result = topological_sort(items)
     ids = [it.id for it in result]
     assert ids.index("a") < ids.index("b")
@@ -168,8 +168,8 @@ def test_topo_sort_respects_dependency():
 def test_topo_sort_chain():
     # c → b → a
     items = [
-        _make_item("c", depends_on=["b"]),
-        _make_item("b", depends_on=["a"]),
+        _make_item("c", depends_on_item_ids=["b"]),
+        _make_item("b", depends_on_item_ids=["a"]),
         _make_item("a"),
     ]
     result = topological_sort(items)
@@ -179,7 +179,7 @@ def test_topo_sort_chain():
 
 def test_topo_sort_missing_dep_ignored():
     """Dependency on a non-existent item should not crash."""
-    items = [_make_item("b", depends_on=["ghost_id"]), _make_item("a")]
+    items = [_make_item("b", depends_on_item_ids=["ghost_id"]), _make_item("a")]
     result = topological_sort(items)
     assert len(result) == 2
 
@@ -206,5 +206,5 @@ def test_planner_prompt_contains_json_schema():
     assert "### Code Facts Check" in prompt
     assert "### Further Lookup" in prompt
     assert "implementation_notes" in prompt
-    assert "depends_on" in prompt
+    assert "depends_on_item_ids" in prompt
     assert "needs_image" in prompt

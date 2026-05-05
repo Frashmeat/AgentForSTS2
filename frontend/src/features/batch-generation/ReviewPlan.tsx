@@ -1,8 +1,8 @@
-// 计划复核第一步：逐项确认 item 描述、依赖、影响、图片来源等。
+// 计划复核第一步：逐项确认 item 描述、关系、影响、图片来源等。
 // 从 view.tsx 抽出，本地状态：expandedId / uploadPreviews。
 
-import { useEffect, useState } from "react";
-import { ChevronDown, ChevronUp, Upload, Wand2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ChevronDown, ChevronUp, Copy, Plus, Trash2, Upload, Wand2 } from "lucide-react";
 
 import type { ModPlan, PlanItem } from "../../lib/batch_ws";
 import { cn } from "../../lib/utils";
@@ -11,6 +11,115 @@ import { ReviewFeedbackBanner, ReviewNotice, ReviewStatusBadge, ReviewStrictness
 import type { ReviewStrictness } from "./state.ts";
 import { TYPE_LABELS, type ReviewFeedback } from "./view-constants.ts";
 import { canProceedFromEditedItemReview } from "./view-helpers.ts";
+
+const RELATIONSHIP_OPTIONS = [
+  {
+    value: "unknown",
+    label: "不确定关系",
+    helper: "暂时拿不准是否要合并或保持顺序，让 AI 重新审查。",
+  },
+  {
+    value: "independent",
+    label: "独立执行",
+    helper: "这个 item 可以单独完成，不需要等待或合并其他 item。",
+  },
+  {
+    value: "ordered_dependency",
+    label: "有先后顺序",
+    helper: "只要求选中的 item 先完成，但不默认合并执行。",
+  },
+  {
+    value: "same_feature",
+    label: "同一功能组",
+    helper: "这些 item 是同一玩法或功能的一部分，通常适合一起执行。",
+  },
+  {
+    value: "shared_mechanism",
+    label: "共享机制或资源",
+    helper: "这些 item 共享代码机制、注册入口、状态、图片或资源上下文。",
+  },
+] as const;
+
+type RelationshipType = (typeof RELATIONSHIP_OPTIONS)[number]["value"];
+
+const ITEM_TYPE_OPTIONS = [
+  "card",
+  "card_fullscreen",
+  "relic",
+  "power",
+  "character",
+  "custom_code",
+] as const;
+
+const DEFAULT_RELATIONSHIP_TYPE: RelationshipType = "unknown";
+
+function createItemId(existingIds: Set<string>) {
+  let index = existingIds.size + 1;
+  let candidate = `custom_item_${index}`;
+  while (existingIds.has(candidate)) {
+    index += 1;
+    candidate = `custom_item_${index}`;
+  }
+  return candidate;
+}
+
+function createNewItem(existingIds: Set<string>): PlanItem {
+  const id = createItemId(existingIds);
+  return {
+    id,
+    type: "custom_code",
+    name: "NewCustomItem",
+    name_zhs: "",
+    description: "",
+    goal: "",
+    detailed_description: "",
+    implementation_notes: "",
+    needs_image: false,
+    image_description: "",
+    depends_on_item_ids: [],
+    scope_boundary: "",
+    relationship_reason: "",
+    acceptance_notes: "",
+    affected_targets: [],
+    relationship_type: DEFAULT_RELATIONSHIP_TYPE,
+    clarification_status: "",
+    clarification_questions: [],
+  };
+}
+
+function normalizeRelationshipType(value: string): RelationshipType {
+  return RELATIONSHIP_OPTIONS.some((option) => option.value === value)
+    ? (value as RelationshipType)
+    : DEFAULT_RELATIONSHIP_TYPE;
+}
+
+function relationLabel(value: string) {
+  return RELATIONSHIP_OPTIONS.find((option) => option.value === value)?.label ?? "不确定关系";
+}
+
+function relationSummary(item: PlanItem) {
+  const count = item.depends_on_item_ids.length;
+  switch (normalizeRelationshipType(item.relationship_type)) {
+    case "independent":
+      return "独立执行";
+    case "ordered_dependency":
+      return count > 0 ? `先做 ${count} 项` : "待选择前置项";
+    case "same_feature":
+      return count > 0 ? `同组 ${count} 项` : "同一功能组";
+    case "shared_mechanism":
+      return count > 0 ? `共享 ${count} 项` : "共享机制或资源";
+    case "unknown":
+    default:
+      return "待 AI 判断";
+  }
+}
+
+function sanitizeItemsAfterDelete(items: PlanItem[], deletedId: string) {
+  return items.map((item) => ({
+    ...item,
+    depends_on_item_ids: item.depends_on_item_ids.filter((id) => id !== deletedId),
+  }));
+}
 
 export function ReviewPlan({
   plan,
@@ -46,6 +155,7 @@ export function ReviewPlan({
   const validationById = new Map((review?.validation.items ?? []).map((item) => [item.item_id, item]));
   const clearCount = review?.validation.items.filter((item) => item.status === "clear").length ?? 0;
   const canProceed = canProceedFromEditedItemReview(review, editedItems);
+  const existingIds = useMemo(() => new Set(editedItems.map((item) => item.id)), [editedItems]);
 
   useEffect(() => {
     if (focusItemId) {
@@ -57,13 +167,83 @@ export function ReviewPlan({
     setEditedItems(editedItems.map((it) => (it.id === id ? { ...it, ...patch } : it)));
   }
 
-  function updateStringList(id: string, field: "depends_on" | "affected_targets", value: string) {
+  function updateItemId(previousId: string, nextId: string) {
+    const normalizedId = nextId.trim();
+    setEditedItems(
+      editedItems.map((item) => {
+        if (item.id === previousId) {
+          return { ...item, id: normalizedId };
+        }
+        return {
+          ...item,
+          depends_on_item_ids: item.depends_on_item_ids.map((id) => (id === previousId ? normalizedId : id)),
+        };
+      }),
+    );
+    setExpandedId(normalizedId);
+  }
+
+  function updateStringList(id: string, field: "affected_targets", value: string) {
     updateItem(id, {
       [field]: value
         .split(/[\n,]/)
         .map((entry) => entry.trim())
         .filter(Boolean),
     } as Partial<PlanItem>);
+  }
+
+  function addItem() {
+    const item = createNewItem(existingIds);
+    setEditedItems([...editedItems, item]);
+    setExpandedId(item.id);
+  }
+
+  function copyItem(source: PlanItem) {
+    const id = createItemId(existingIds);
+    const item = {
+      ...source,
+      id,
+      name: `${source.name || "CopiedItem"}Copy`,
+      name_zhs: source.name_zhs ? `${source.name_zhs}副本` : source.name_zhs,
+      depends_on_item_ids: source.depends_on_item_ids.filter((depId) => depId !== source.id),
+      clarification_status: "",
+      clarification_questions: [],
+      provided_image_b64: undefined,
+    };
+    setEditedItems([...editedItems, item]);
+    setExpandedId(id);
+  }
+
+  function deleteItem(id: string) {
+    const nextItems = sanitizeItemsAfterDelete(
+      editedItems.filter((item) => item.id !== id),
+      id,
+    );
+    setEditedItems(nextItems);
+    setExpandedId((current) => (current === id ? nextItems[0]?.id ?? null : current));
+    setUploadPreviews((previews) => {
+      const next = { ...previews };
+      delete next[id];
+      return next;
+    });
+  }
+
+  function updateRelationshipType(item: PlanItem, relationshipType: RelationshipType) {
+    updateItem(item.id, {
+      relationship_type: relationshipType,
+      depends_on_item_ids:
+        relationshipType === "independent" || relationshipType === "unknown" ? [] : item.depends_on_item_ids,
+    });
+  }
+
+  function toggleRelatedItem(item: PlanItem, relatedId: string) {
+    const selected = new Set(item.depends_on_item_ids);
+    if (selected.has(relatedId)) {
+      selected.delete(relatedId);
+    } else {
+      selected.add(relatedId);
+    }
+    updateItem(item.id, { depends_on_item_ids: Array.from(selected) });
   }
 
   function handleImageFile(id: string, file: File) {
@@ -94,16 +274,37 @@ export function ReviewPlan({
 
           <ReviewStrictnessSelector value={reviewStrictness} disabled={reviewBusy} onChange={onStrictnessChange} />
 
-          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-            <p className="text-sm font-medium text-slate-700">当前阶段：逐项确认计划描述</p>
-            <p className="mt-1 text-xs text-slate-500">
-              先把每个 item 的目标、范围、依赖原因和验收说明确认清楚，再进入执行策略分组确认。
-            </p>
-            {!canProceed && (
-              <p className="mt-2 text-xs font-medium text-amber-700">
-                仍有 item 需要补充说明。修改字段后，点击下方按钮会重新检查当前计划。
+          <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-sm font-medium text-slate-700">当前阶段：逐项确认 Item</p>
+              <p className="mt-1 text-xs text-slate-500">
+                你可以手动新增、复制、删除 item；修改目标、范围和关系后，再让 AI 重新审查是否能进入执行策略。
               </p>
-            )}
+              {!canProceed && (
+                <p className="mt-2 text-xs font-medium text-amber-700">
+                  仍有 item 需要补充说明。点击右侧按钮后，AI 会基于当前清单重新判断。
+                </p>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={addItem}
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-100"
+              >
+                <Plus size={14} />
+                新增 Item
+              </button>
+              <button
+                type="button"
+                onClick={onRefreshReview}
+                disabled={reviewBusy}
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-violet-700 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-violet-800 disabled:opacity-60"
+              >
+                <Wand2 size={14} />
+                {reviewBusy ? "AI 审查中..." : "让 AI 重新审查 Item"}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -111,33 +312,57 @@ export function ReviewPlan({
         <ReviewNotice message={reviewError} />
 
         <div className="space-y-2">
-          {editedItems.map((item) => {
+          {editedItems.map((item, index) => {
             const validation = validationById.get(item.id);
             const missingFields = validation?.missing_fields ?? [];
             const issues = validation?.issues ?? [];
             const questions = validation?.clarification_questions ?? [];
+            const normalizedRelationshipType = normalizeRelationshipType(item.relationship_type);
+            const relatedOptions = editedItems.filter((candidate) => candidate.id !== item.id);
+            const showRelatedPicker =
+              normalizedRelationshipType === "ordered_dependency" ||
+              normalizedRelationshipType === "same_feature" ||
+              normalizedRelationshipType === "shared_mechanism";
 
             return (
-              <div key={item.id} className="rounded-lg border border-slate-200 bg-slate-50 overflow-hidden">
-                <button
-                  type="button"
-                  className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-slate-100 transition-colors"
-                  onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
-                >
-                  <span className="text-xs font-medium text-slate-400 bg-slate-200 rounded px-1.5 py-0.5 shrink-0">
-                    {TYPE_LABELS[item.type] ?? item.type}
-                  </span>
-                  <span className="text-sm font-medium text-slate-700 flex-1">{item.name}</span>
-                  {validation && <ReviewStatusBadge status={validation.status} kind="item" />}
-                  {item.depends_on.length > 0 && (
-                    <span className="text-xs text-slate-400">依赖 {item.depends_on.length}</span>
-                  )}
-                  {expandedId === item.id ? (
-                    <ChevronUp size={13} className="text-slate-400 shrink-0" />
-                  ) : (
-                    <ChevronDown size={13} className="text-slate-400 shrink-0" />
-                  )}
-                </button>
+              <div key={index} className="rounded-lg border border-slate-200 bg-slate-50 overflow-hidden">
+                <div className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-100 transition-colors">
+                  <button
+                    type="button"
+                    className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                    onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
+                  >
+                    <span className="text-xs font-medium text-slate-500 bg-slate-200 rounded px-1.5 py-0.5 shrink-0">
+                      {TYPE_LABELS[item.type] ?? item.type}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700">{item.name}</span>
+                    <span className="hidden text-xs text-slate-400 sm:inline">{relationSummary(item)}</span>
+                    {validation && <ReviewStatusBadge status={validation.status} kind="item" />}
+                    {expandedId === item.id ? (
+                      <ChevronUp size={13} className="text-slate-400 shrink-0" />
+                    ) : (
+                      <ChevronDown size={13} className="text-slate-400 shrink-0" />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => copyItem(item)}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-white hover:text-slate-700"
+                    aria-label="复制 Item"
+                    title="复制 Item"
+                  >
+                    <Copy size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteItem(item.id)}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600"
+                    aria-label="删除 Item"
+                    title="删除 Item"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
 
                 {expandedId === item.id && (
                   <div className="px-3 pb-3 space-y-3 border-t border-slate-200 pt-2.5">
@@ -179,14 +404,57 @@ export function ReviewPlan({
                         )}
                       </div>
                     )}
-                    <div className="space-y-1">
-                      <label className="text-xs text-slate-400">名称（英文）</label>
-                      <input
-                        value={item.name}
-                        onChange={(e) => updateItem(item.id, { name: e.target.value })}
-                        className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm focus:outline-none focus:border-violet-400"
-                      />
+
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="space-y-1">
+                        <label className="text-xs text-slate-400">Item ID</label>
+                        <input
+                          value={item.id}
+                          onChange={(e) => updateItemId(item.id, e.target.value)}
+                          className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm font-mono focus:outline-none focus:border-violet-400"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-slate-400">类型</label>
+                        <select
+                          value={item.type}
+                          onChange={(e) => {
+                            const nextType = e.target.value;
+                            updateItem(item.id, {
+                              type: nextType,
+                              needs_image: nextType !== "custom_code",
+                            });
+                          }}
+                          className="w-full bg-white border border-slate-200 rounded px-2 py-2 text-sm focus:outline-none focus:border-violet-400"
+                        >
+                          {ITEM_TYPE_OPTIONS.map((type) => (
+                            <option key={type} value={type}>
+                              {TYPE_LABELS[type] ?? type}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
+
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="space-y-1">
+                        <label className="text-xs text-slate-400">名称（英文）</label>
+                        <input
+                          value={item.name}
+                          onChange={(e) => updateItem(item.id, { name: e.target.value })}
+                          className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm focus:outline-none focus:border-violet-400"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-slate-400">中文名</label>
+                        <input
+                          value={item.name_zhs}
+                          onChange={(e) => updateItem(item.id, { name_zhs: e.target.value })}
+                          className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm focus:outline-none focus:border-violet-400"
+                        />
+                      </div>
+                    </div>
+
                     <div className="space-y-1">
                       <label className="text-xs text-slate-400">目标</label>
                       <input
@@ -224,11 +492,12 @@ export function ReviewPlan({
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-xs text-slate-400">依赖原因</label>
+                        <label className="text-xs text-slate-400">关系说明</label>
                         <textarea
-                          value={item.dependency_reason}
-                          onChange={(e) => updateItem(item.id, { dependency_reason: e.target.value })}
+                          value={item.relationship_reason}
+                          onChange={(e) => updateItem(item.id, { relationship_reason: e.target.value })}
                           rows={3}
+                          placeholder="说明为什么要先后执行、同组执行，或共享机制/资源。"
                           className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-violet-400"
                         />
                       </div>
@@ -243,47 +512,78 @@ export function ReviewPlan({
                           className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-violet-400"
                         />
                       </div>
-                      <div className="space-y-1">
-                        <label className="text-xs text-slate-400">耦合类型</label>
+                      <div className="space-y-2">
+                        <label className="text-xs text-slate-400">Item 关系</label>
                         <select
-                          value={item.coupling_kind}
-                          onChange={(e) => updateItem(item.id, { coupling_kind: e.target.value })}
+                          value={normalizedRelationshipType}
+                          onChange={(e) => updateRelationshipType(item, e.target.value as RelationshipType)}
                           className="w-full bg-white border border-slate-200 rounded px-2 py-2 text-sm focus:outline-none focus:border-violet-400"
                         >
-                          <option value="unclear">unclear</option>
-                          <option value="order_only">order_only</option>
-                          <option value="feature_bundle">feature_bundle</option>
-                          <option value="shared_logic">shared_logic</option>
-                          <option value="isolated">isolated</option>
+                          {RELATIONSHIP_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
                         </select>
+                        <p className="text-xs text-slate-500">
+                          {RELATIONSHIP_OPTIONS.find((option) => option.value === normalizedRelationshipType)?.helper}
+                        </p>
                       </div>
                     </div>
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <div className="space-y-1">
-                        <label className="text-xs text-slate-400">依赖项（逗号或换行分隔）</label>
-                        <textarea
-                          value={item.depends_on.join("\n")}
-                          onChange={(e) => updateStringList(item.id, "depends_on", e.target.value)}
-                          rows={3}
-                          className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-violet-400"
-                        />
+
+                    {showRelatedPicker && (
+                      <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <label className="text-xs font-medium text-slate-500">
+                            {normalizedRelationshipType === "ordered_dependency"
+                              ? "需要先完成的 Item"
+                              : `${relationLabel(normalizedRelationshipType)}相关 Item`}
+                          </label>
+                          <span className="text-xs text-slate-400">{item.depends_on_item_ids.length} 项已选</span>
+                        </div>
+                        {relatedOptions.length === 0 ? (
+                          <p className="text-xs text-slate-400">当前没有其他 item 可选择。</p>
+                        ) : (
+                          <div className="flex flex-wrap gap-2">
+                            {relatedOptions.map((candidate) => {
+                              const selected = item.depends_on_item_ids.includes(candidate.id);
+                              return (
+                                <button
+                                  key={candidate.id}
+                                  type="button"
+                                  onClick={() => toggleRelatedItem(item, candidate.id)}
+                                  className={cn(
+                                    "rounded-full border px-3 py-1 text-xs transition-colors",
+                                    selected
+                                      ? "border-violet-300 bg-violet-50 text-violet-700"
+                                      : "border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100",
+                                  )}
+                                >
+                                  {candidate.name || candidate.id}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
-                      <div className="space-y-1">
-                        <label className="text-xs text-slate-400">影响目标（逗号或换行分隔）</label>
-                        <textarea
-                          value={item.affected_targets.join("\n")}
-                          onChange={(e) => updateStringList(item.id, "affected_targets", e.target.value)}
-                          rows={3}
-                          className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-violet-400"
-                        />
-                      </div>
+                    )}
+
+                    <div className="space-y-1">
+                      <label className="text-xs text-slate-400">影响目标（逗号或换行分隔）</label>
+                      <textarea
+                        value={item.affected_targets.join("\n")}
+                        onChange={(e) => updateStringList(item.id, "affected_targets", e.target.value)}
+                        rows={3}
+                        className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:border-violet-400"
+                      />
                     </div>
+
                     {item.needs_image && (
                       <div className="space-y-2">
-                        {/* 图片模式切换 */}
                         <div className="flex items-center gap-1.5">
                           <span className="text-xs text-slate-400">图片来源：</span>
                           <button
+                            type="button"
                             onClick={() => updateItem(item.id, { provided_image_b64: undefined })}
                             className={cn(
                               "flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors",
@@ -295,6 +595,7 @@ export function ReviewPlan({
                             <Wand2 size={11} /> AI 生成
                           </button>
                           <button
+                            type="button"
                             onClick={() => {
                               const input = document.createElement("input");
                               input.type = "file";
@@ -314,11 +615,11 @@ export function ReviewPlan({
                             <Upload size={11} /> 上传图片
                           </button>
                         </div>
-                        {/* 上传预览 */}
                         {item.provided_image_b64 && uploadPreviews[item.id] && (
                           <div className="relative w-24 h-24 rounded-lg overflow-hidden border border-violet-300">
                             <img src={uploadPreviews[item.id]} alt="preview" className="w-full h-full object-cover" />
                             <button
+                              type="button"
                               onClick={() => {
                                 updateItem(item.id, { provided_image_b64: undefined });
                                 setUploadPreviews((p) => {
@@ -329,11 +630,10 @@ export function ReviewPlan({
                               }}
                               className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 text-white text-xs flex items-center justify-center hover:bg-red-500"
                             >
-                              ×
+                              x
                             </button>
                           </div>
                         )}
-                        {/* AI 生成时显示图像描述 */}
                         {!item.provided_image_b64 && (
                           <div className="space-y-1">
                             <label className="text-xs text-slate-400">图像描述（AI 生图用）</label>
@@ -366,19 +666,11 @@ export function ReviewPlan({
         <div className="flex flex-wrap gap-2 mt-4">
           <button
             type="button"
-            onClick={onRefreshReview}
-            disabled={reviewBusy}
-            className="py-2.5 px-4 rounded-lg border border-violet-200 text-violet-700 text-sm hover:bg-violet-50 transition-colors disabled:opacity-60"
-          >
-            {reviewBusy ? "重新检查中..." : "重新检查当前计划"}
-          </button>
-          <button
-            type="button"
             onClick={onConfirm}
             disabled={reviewBusy}
             className="flex-1 py-2.5 rounded-lg bg-violet-700 text-white font-bold text-sm hover:bg-violet-800 transition-colors disabled:opacity-60"
           >
-            {canProceed ? "进入执行策略决策" : "保存说明并重新检查"}
+            {canProceed ? "进入执行策略决策" : "先让 AI 审查 Item"}
           </button>
           <button
             type="button"
