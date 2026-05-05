@@ -23,6 +23,8 @@ test("useExecutionModeFlow owns capability probing and dialog state", () => {
   assert.match(flowSource, /pendingExecution/);
   assert.match(flowSource, /handleExecutionRequest/);
   assert.match(flowSource, /handleChooseServerExecution/);
+  assert.match(flowSource, /serverActionProgress/);
+  assert.match(flowSource, /setServerActionProgress/);
 });
 
 test("execution mode errors use the shared status notice stack instead of native alerts", () => {

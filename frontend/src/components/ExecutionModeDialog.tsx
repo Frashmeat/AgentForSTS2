@@ -1,4 +1,5 @@
 import type { PlatformExecutionProfile } from "../shared/api/platform.ts";
+import type { PlatformRunProgressUpdate } from "../features/platform-run/createAndStartFlow.ts";
 
 interface ExecutionModeDialogProps {
   open: boolean;
@@ -14,7 +15,7 @@ interface ExecutionModeDialogProps {
   selectedServerProfileId: number | null;
   rememberServerProfile: boolean;
   serverActionBusy?: boolean;
-  serverActionMessage?: string | null;
+  serverActionProgress?: PlatformRunProgressUpdate | null;
   onClose: () => void;
   onChooseLocal: () => void;
   onChooseServer: () => void;
@@ -38,7 +39,7 @@ export function ExecutionModeDialog({
   selectedServerProfileId,
   rememberServerProfile,
   serverActionBusy = false,
-  serverActionMessage = null,
+  serverActionProgress = null,
   onClose,
   onChooseLocal,
   onChooseServer,
@@ -52,6 +53,7 @@ export function ExecutionModeDialog({
   }
 
   const hasAvailableServerProfile = serverProfiles.some((profile) => profile.available);
+  const serverActionMessage = serverActionProgress?.message ?? null;
   const serverActionDisabled =
     isAuthenticated &&
     (serverActionBusy ||
@@ -126,8 +128,20 @@ export function ExecutionModeDialog({
                 ) : (
                   <>
                     {serverActionMessage ? (
-                      <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-                        {serverActionMessage}
+                      <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-xs text-emerald-800">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="font-medium">{serverActionMessage}</span>
+                          {serverActionProgress?.jobId ? <span>#{serverActionProgress.jobId}</span> : null}
+                        </div>
+                        <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-emerald-100">
+                          <div
+                            className="h-full rounded-full bg-emerald-500 transition-all"
+                            style={{ width: `${progressPercentForStage(serverActionProgress?.stage)}%` }}
+                          />
+                        </div>
+                        <p className="mt-2 text-emerald-700">
+                          弹窗在提交阶段会保持打开，任务创建后会进入用户中心任务历史；完成后可在任务详情的交付产物区下载。
+                        </p>
                       </div>
                     ) : null}
                     {serverSelectionNotice ? (
@@ -198,6 +212,9 @@ export function ExecutionModeDialog({
                 >
                   {serverActionBusy ? (serverActionMessage || "正在创建服务器任务...") : "创建服务器任务"}
                 </button>
+                <p className="mt-2 text-xs text-slate-500">
+                  创建后会进入用户中心任务历史。任务完成时，打开任务详情，在交付产物区下载方案文档或项目包。
+                </p>
               </>
             ) : (
               <button
@@ -218,12 +235,32 @@ export function ExecutionModeDialog({
             disabled={serverActionBusy}
             onClick={onClose}
           >
-            取消
+            {serverActionBusy ? "提交中不可关闭" : "取消"}
           </button>
         </div>
       </div>
     </div>
   );
+}
+
+function progressPercentForStage(stage: PlatformRunProgressUpdate["stage"] | undefined) {
+  switch (stage) {
+    case "preparing_workspace":
+      return 18;
+    case "uploading_asset":
+      return 32;
+    case "creating_job":
+      return 50;
+    case "job_created":
+      return 66;
+    case "starting_job":
+      return 82;
+    case "queued":
+    case "completed":
+      return 100;
+    default:
+      return 12;
+  }
 }
 
 export default ExecutionModeDialog;

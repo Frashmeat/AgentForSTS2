@@ -18,6 +18,9 @@ class AIExecutionRepository(ABC):
     def create(self, execution: AIExecutionRecord) -> AIExecutionRecord: ...
 
     @abstractmethod
+    def find_by_id(self, execution_id: int) -> AIExecutionRecord | None: ...
+
+    @abstractmethod
     def find_by_id_for_update(self, execution_id: int) -> AIExecutionRecord | None: ...
 
     @abstractmethod

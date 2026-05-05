@@ -12,7 +12,10 @@ import {
 import type { PlatformExecutionProfile, PlatformJobSummary } from "../../shared/api/platform.ts";
 import { type DeferredExecutionSummary } from "../../shared/deferredExecution.ts";
 import { resolveErrorMessage } from "../../shared/error.ts";
-import { createAndStartPlatformFlow } from "../platform-run/createAndStartFlow.ts";
+import {
+  createAndStartPlatformFlow,
+  type PlatformRunProgressUpdate,
+} from "../platform-run/createAndStartFlow.ts";
 import type { PlatformExecutionRequest } from "../platform-run/types.ts";
 import { buildWorkspacePath } from "./config.ts";
 
@@ -75,7 +78,7 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
   const [serverSelectionNotice, setServerSelectionNotice] = useState<string | null>(null);
   const [pendingStartConfirmation, setPendingStartConfirmation] = useState<PendingStartConfirmation | null>(null);
   const [serverActionBusy, setServerActionBusy] = useState(false);
-  const [serverActionMessage, setServerActionMessage] = useState<string | null>(null);
+  const [serverActionProgress, setServerActionProgress] = useState<PlatformRunProgressUpdate | null>(null);
 
   function showExecutionNotice(title: string, message: string, tone?: "info" | "success" | "warning" | "error") {
     if (tone) {
@@ -95,7 +98,7 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
       setServerProfilesError(null);
       setServerSelectionNotice(null);
       setServerActionBusy(false);
-      setServerActionMessage(null);
+      setServerActionProgress(null);
       return;
     }
 
@@ -261,7 +264,7 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
       setServerActionBusy(true);
       showExecutionNotice("正在创建平台任务", "已开始提交服务器任务，请不要重复点击。", "info");
       if (rememberServerProfile && selectedProfile.id !== serverPreference?.default_execution_profile_id) {
-        setServerActionMessage("正在保存默认服务器配置...");
+        setServerActionProgress({ stage: "creating_job", message: "正在保存默认服务器配置" });
         const updatedPreference = await updateMyServerPreferences({
           default_execution_profile_id: selectedProfile.id,
         });
@@ -279,10 +282,10 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
         selectedRunnerType: selectedProfile.runner_type,
         selectedModel: selectedProfile.model,
         confirmStart: requestStartConfirmation,
-        onProgress: setServerActionMessage,
+        onProgress: setServerActionProgress,
       });
       setPendingExecution(null);
-      setServerActionMessage(null);
+      setServerActionProgress(null);
       if (result.deferredNotice) {
         showExecutionNotice(
           result.deferredNotice.summary.title,
@@ -298,7 +301,7 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
       showExecutionNotice("创建平台任务失败", resolveErrorMessage(error, "创建平台任务失败"));
     } finally {
       setServerActionBusy(false);
-      setServerActionMessage(null);
+      setServerActionProgress(null);
     }
   }
 
@@ -345,7 +348,7 @@ export function useExecutionModeFlow({ isAuthenticated, onStatusNotice }: UseExe
     serverProfilesError,
     serverSelectionNotice,
     serverActionBusy,
-    serverActionMessage,
+    serverActionProgress,
     selectedServerProfileId,
     rememberServerProfile,
     handleExecutionRequest,

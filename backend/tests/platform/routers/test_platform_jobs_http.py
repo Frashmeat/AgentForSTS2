@@ -1407,6 +1407,18 @@ def test_platform_jobs_router_can_complete_supported_single_relic_job(client: Te
     assert downloaded.headers["content-disposition"].endswith('filename="FangedGrimoire.relic.plan.md"')
     assert "# FangedGrimoire" in downloaded.text
 
+    session = client.app.state.container.resolve_singleton("platform.db_session_factory")()
+    try:
+        artifact = session.query(ArtifactRecord).filter(ArtifactRecord.id == artifacts[0]["id"]).one()
+        Path(artifact.object_key).unlink()
+        session.commit()
+    finally:
+        session.close()
+
+    repaired_download = client.get(f"/api/me/artifacts/{artifacts[0]['id']}/download")
+    assert repaired_download.status_code == 200
+    assert "# FangedGrimoire" in repaired_download.text
+
     items = client.get(f"/api/platform/jobs/{job_id}/items")
     assert items.status_code == 200
     assert items.json()[0]["status"] == "succeeded"

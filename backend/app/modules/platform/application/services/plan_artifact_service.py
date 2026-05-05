@@ -92,6 +92,47 @@ class PlanArtifactBackfillService:
             return None
         return self.artifact_repository.create(artifact)
 
+    def repair_plan_markdown_file(self, artifact: ArtifactRecord) -> ArtifactRecord | None:
+        if artifact.artifact_type != "plan_markdown":
+            return None
+        if artifact.deleted_at is not None:
+            return None
+
+        execution = None
+        if artifact.ai_execution_id is not None:
+            candidate = self.ai_execution_repository.find_by_id(int(artifact.ai_execution_id))
+            if candidate is not None and candidate.user_id == artifact.user_id and candidate.job_id == artifact.job_id:
+                execution = candidate
+        if execution is None:
+            execution = self.ai_execution_repository.find_latest_succeeded_by_job(artifact.user_id, artifact.job_id)
+        if execution is None:
+            return None
+
+        payload = dict(execution.result_payload or {})
+        repaired = create_plan_markdown_artifact(
+            job_id=artifact.job_id,
+            job_item_id=int(artifact.job_item_id or execution.job_item_id or 0),
+            user_id=artifact.user_id,
+            ai_execution_id=execution.id,
+            asset_type=str(payload.get("asset_type", "")).strip(),
+            item_name=str(payload.get("item_name", "")).strip() or str(artifact.file_name or "").removesuffix(".plan.md"),
+            summary=execution.result_summary,
+            analysis=str(payload.get("analysis", "")).strip(),
+        )
+        if repaired is None:
+            return None
+
+        artifact.job_item_id = repaired.job_item_id
+        artifact.ai_execution_id = repaired.ai_execution_id
+        artifact.storage_provider = repaired.storage_provider
+        artifact.object_key = repaired.object_key
+        artifact.file_name = repaired.file_name
+        artifact.mime_type = repaired.mime_type
+        artifact.size_bytes = repaired.size_bytes
+        artifact.result_summary = repaired.result_summary
+        self.artifact_repository.save(artifact)
+        return artifact
+
 
 def _render_markdown(*, asset_type: str, item_name: str, summary: str, analysis: str) -> str:
     lines = [

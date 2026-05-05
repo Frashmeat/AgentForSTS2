@@ -15,6 +15,10 @@ class ArtifactRepositorySqlAlchemy(ArtifactRepository):
         self.session.flush()
         return artifact
 
+    def save(self, artifact: ArtifactRecord) -> None:
+        self.session.add(artifact)
+        self.session.flush()
+
     def list_by_job(self, job_id: int) -> list[ArtifactRecord]:
         return (
             self.session.query(ArtifactRecord)

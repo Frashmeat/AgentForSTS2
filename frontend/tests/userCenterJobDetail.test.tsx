@@ -19,6 +19,8 @@ test("job detail page loads detail items and refund summary", () => {
   assert.match(pageSource, /artifact\.object_key/);
   assert.match(pageSource, /renderArtifactLocationValue/);
   assert.match(pageSource, /服务器生成项目包/);
+  assert.match(pageSource, /方案文档/);
+  assert.match(pageSource, /下载方案文档/);
   assert.match(pageSource, /部署位置/);
   assert.match(pageSource, /来源：/);
   assert.match(pageSource, /renderEventMessage/);

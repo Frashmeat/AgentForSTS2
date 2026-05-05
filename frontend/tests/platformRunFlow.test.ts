@@ -22,6 +22,7 @@ function createMockResponse(init: MockResponseInit) {
 
 test("platform run flow creates job before confirming start", async () => {
   const calls: Array<{ input: unknown; init?: RequestInit }> = [];
+  const progress: string[] = [];
   Object.assign(globalThis, {
     fetch: async (input: unknown, init?: RequestInit) => {
       calls.push({ input, init });
@@ -44,6 +45,7 @@ test("platform run flow creates job before confirming start", async () => {
     inputSummary: "Dark Relic",
     createdFrom: "single_asset",
     items: [],
+    onProgress: (update) => progress.push(update.stage),
   });
 
   assert.equal(calls[0].input, "/api/me/jobs");
@@ -51,6 +53,7 @@ test("platform run flow creates job before confirming start", async () => {
   assert.equal(result.job.id, 123);
   assert.equal(result.started.status, "queued");
   assert.equal(result.startConfirmed, true);
+  assert.deepEqual(progress, ["creating_job", "job_created", "starting_job", "queued"]);
 });
 
 test("platform run flow can stop after draft creation before start confirmation", async () => {

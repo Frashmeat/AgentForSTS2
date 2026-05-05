@@ -31,6 +31,9 @@ class AIExecutionRepositorySqlAlchemy(AIExecutionRepository):
         self.session.flush()
         return execution
 
+    def find_by_id(self, execution_id: int) -> AIExecutionRecord | None:
+        return self.session.query(AIExecutionRecord).filter(AIExecutionRecord.id == execution_id).one_or_none()
+
     def find_by_id_for_update(self, execution_id: int) -> AIExecutionRecord | None:
         return self.session.query(AIExecutionRecord).filter(AIExecutionRecord.id == execution_id).one_or_none()
 

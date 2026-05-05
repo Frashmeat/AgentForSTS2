@@ -10,6 +10,9 @@ class ArtifactRepository(ABC):
     def create(self, artifact: ArtifactRecord) -> ArtifactRecord: ...
 
     @abstractmethod
+    def save(self, artifact: ArtifactRecord) -> None: ...
+
+    @abstractmethod
     def list_by_job(self, job_id: int) -> list[ArtifactRecord]: ...
 
     @abstractmethod

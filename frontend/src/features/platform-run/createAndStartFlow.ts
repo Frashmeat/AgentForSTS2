@@ -8,6 +8,21 @@ import {
 import type { PlatformJobCreateItem, PlatformJobSummary } from "../../shared/api/platform.ts";
 import { readDeferredExecutionNotice, type DeferredExecutionNotice } from "../../shared/deferredExecution.ts";
 
+export type PlatformRunProgressStage =
+  | "preparing_workspace"
+  | "uploading_asset"
+  | "creating_job"
+  | "job_created"
+  | "starting_job"
+  | "queued"
+  | "completed";
+
+export interface PlatformRunProgressUpdate {
+  stage: PlatformRunProgressStage;
+  message: string;
+  jobId?: number;
+}
+
 export interface CreateAndStartPlatformFlowRequest {
   jobType: string;
   workflowVersion: string;
@@ -25,7 +40,7 @@ export interface CreateAndStartPlatformFlowRequest {
   selectedRunnerType?: string;
   selectedModel?: string;
   confirmStart?: (job: PlatformJobSummary) => boolean | Promise<boolean>;
-  onProgress?: (message: string) => void;
+  onProgress?: (update: PlatformRunProgressUpdate) => void;
 }
 
 export interface CreateAndStartPlatformFlowResult {
@@ -48,7 +63,7 @@ export async function createAndStartPlatformFlow(
   }));
 
   if (request.serverWorkspaceProjectName?.trim()) {
-    request.onProgress?.("正在创建服务器工作区...");
+    request.onProgress?.({ stage: "preparing_workspace", message: "正在创建服务器工作区" });
     const workspace = await createMyServerWorkspace({
       project_name: request.serverWorkspaceProjectName.trim(),
     });
@@ -58,7 +73,7 @@ export async function createAndStartPlatformFlow(
   }
 
   for (const upload of request.serverUploads ?? []) {
-    request.onProgress?.(`正在上传服务器资产：${upload.fileName}`);
+    request.onProgress?.({ stage: "uploading_asset", message: `正在上传服务器资产：${upload.fileName}` });
     const uploaded = await uploadMyServerAsset({
       file_name: upload.fileName,
       content_base64: upload.contentBase64,
@@ -69,7 +84,7 @@ export async function createAndStartPlatformFlow(
     }
   }
 
-  request.onProgress?.("正在创建平台任务...");
+  request.onProgress?.({ stage: "creating_job", message: "正在创建平台任务" });
   const job = await createMyJob({
     job_type: request.jobType,
     workflow_version: request.workflowVersion,
@@ -81,7 +96,7 @@ export async function createAndStartPlatformFlow(
     selected_model: request.selectedModel,
   });
 
-  request.onProgress?.(`平台任务 #${job.id} 已创建，等待开始确认...`);
+  request.onProgress?.({ stage: "job_created", message: `平台任务 #${job.id} 已创建，等待开始确认`, jobId: job.id });
   const startConfirmed = (await request.confirmStart?.(job)) ?? true;
   if (!startConfirmed) {
     return {
@@ -92,11 +107,11 @@ export async function createAndStartPlatformFlow(
     };
   }
 
-  request.onProgress?.(`正在启动平台任务 #${job.id}...`);
+  request.onProgress?.({ stage: "starting_job", message: `正在启动平台任务 #${job.id}`, jobId: job.id });
   const started = await startMyJob(job.id, {
     triggered_by: "user",
   });
-  request.onProgress?.(`平台任务 #${job.id} 已提交到服务器队列。`);
+  request.onProgress?.({ stage: "queued", message: `平台任务 #${job.id} 已提交到服务器队列`, jobId: job.id });
   const deferredNotice =
     started?.status === "deferred" ? readDeferredExecutionNotice(await listMyJobEvents(job.id)) : null;
 

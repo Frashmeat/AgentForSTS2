@@ -85,7 +85,7 @@ export default function App() {
     serverProfilesError,
     serverSelectionNotice,
     serverActionBusy,
-    serverActionMessage,
+    serverActionProgress,
     selectedServerProfileId,
     rememberServerProfile,
     handleExecutionRequest,
@@ -312,7 +312,7 @@ export default function App() {
         serverProfilesError={serverProfilesError}
         serverSelectionNotice={serverSelectionNotice}
         serverActionBusy={serverActionBusy}
-        serverActionMessage={serverActionMessage}
+        serverActionProgress={serverActionProgress}
         selectedServerProfileId={selectedServerProfileId}
         rememberServerProfile={rememberServerProfile}
         onClose={closeExecutionDialog}

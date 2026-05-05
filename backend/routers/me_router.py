@@ -106,6 +106,14 @@ def _artifact_repository(session, request: Request):
     return container.resolve_singleton("platform.artifact_repository_factory")(session)
 
 
+def _plan_artifact_backfill_service(session, request: Request) -> PlanArtifactBackfillService:
+    container = request.app.state.container
+    return PlanArtifactBackfillService(
+        artifact_repository=container.resolve_singleton("platform.artifact_repository_factory")(session),
+        ai_execution_repository=container.resolve_singleton("platform.ai_execution_repository_factory")(session),
+    )
+
+
 def _enrich_job_command_with_default_server_profile(
     command: CreateJobCommand,
     *,
@@ -252,6 +260,10 @@ def download_artifact(request: Request, artifact_id: int):
         if artifact.storage_provider != "server_workspace":
             raise HTTPException(status_code=400, detail="artifact is not downloadable")
         path = Path(artifact.object_key).expanduser().resolve()
+        if not path.exists() or not path.is_file():
+            repaired = _plan_artifact_backfill_service(session, request).repair_plan_markdown_file(artifact)
+            if repaired is not None:
+                path = Path(repaired.object_key).expanduser().resolve()
         if not path.exists() or not path.is_file():
             raise HTTPException(status_code=404, detail="artifact file not found")
         return FileResponse(
