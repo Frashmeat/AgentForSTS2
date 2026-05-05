@@ -36,6 +36,8 @@ function renderArtifactTypeLabel(value: string) {
       return "部署产物";
     case "source_project":
       return "项目源码包";
+    case "plan_markdown":
+      return "方案文档";
     default:
       return value || "未知产物";
   }
@@ -52,7 +54,7 @@ function resolveArtifactLocationLabel(artifact: PlatformArtifactSummary) {
 }
 
 function isDownloadableArtifact(artifact: PlatformArtifactSummary) {
-  return artifact.storage_provider === "server_workspace" && artifact.artifact_type === "source_project";
+  return artifact.storage_provider === "server_workspace" && ["source_project", "plan_markdown"].includes(artifact.artifact_type);
 }
 
 function hasSourceProjectArtifact(artifacts: PlatformArtifactSummary[] | undefined) {
@@ -62,6 +64,9 @@ function hasSourceProjectArtifact(artifacts: PlatformArtifactSummary[] | undefin
 function renderArtifactLocationValue(artifact: PlatformArtifactSummary) {
   if (artifact.artifact_type === "source_project") {
     return "服务器生成项目包";
+  }
+  if (artifact.artifact_type === "plan_markdown") {
+    return "服务器生成方案文档";
   }
   return artifact.object_key;
 }
@@ -407,19 +412,21 @@ export function UserCenterJobDetailPage() {
                           href={getMyArtifactDownloadUrl(artifact.id)}
                         >
                           <Download size={14} />
-                          <span>下载项目包</span>
+                          <span>{artifact.artifact_type === "plan_markdown" ? "下载方案文档" : "下载项目包"}</span>
                         </a>
-                        <button
-                          type="button"
-                          className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-[var(--workspace-accent)] hover:text-[var(--workspace-accent-strong)] disabled:cursor-not-allowed disabled:opacity-50"
-                          disabled={importingArtifactId === artifact.id}
-                          onClick={() => {
-                            void importArtifactToLocalWorkstation(artifact);
-                          }}
-                        >
-                          <Upload size={14} />
-                          <span>{importingArtifactId === artifact.id ? "导入中" : "导入本机工作站"}</span>
-                        </button>
+                        {artifact.artifact_type === "source_project" ? (
+                          <button
+                            type="button"
+                            className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-[var(--workspace-accent)] hover:text-[var(--workspace-accent-strong)] disabled:cursor-not-allowed disabled:opacity-50"
+                            disabled={importingArtifactId === artifact.id}
+                            onClick={() => {
+                              void importArtifactToLocalWorkstation(artifact);
+                            }}
+                          >
+                            <Upload size={14} />
+                            <span>{importingArtifactId === artifact.id ? "导入中" : "导入本机工作站"}</span>
+                          </button>
+                        ) : null}
                       </div>
                     ) : null}
                   </div>

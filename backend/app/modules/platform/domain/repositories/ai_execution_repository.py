@@ -25,3 +25,6 @@ class AIExecutionRepository(ABC):
 
     @abstractmethod
     def find_latest_by_job_item(self, job_item_id: int) -> AIExecutionRecord | None: ...
+
+    @abstractmethod
+    def find_latest_succeeded_by_job(self, user_id: int, job_id: int) -> AIExecutionRecord | None: ...

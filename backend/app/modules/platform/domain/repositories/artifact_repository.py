@@ -20,3 +20,6 @@ class ArtifactRepository(ABC):
 
     @abstractmethod
     def find_by_id_for_user(self, artifact_id: int, user_id: int) -> ArtifactRecord | None: ...
+
+    @abstractmethod
+    def exists_by_job_type_for_user(self, user_id: int, job_id: int, artifact_type: str) -> bool: ...

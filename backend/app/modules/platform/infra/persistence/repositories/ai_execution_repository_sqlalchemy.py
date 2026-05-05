@@ -45,3 +45,15 @@ class AIExecutionRepositorySqlAlchemy(AIExecutionRepository):
             .order_by(AIExecutionRecord.created_at.desc(), AIExecutionRecord.id.desc())
             .first()
         )
+
+    def find_latest_succeeded_by_job(self, user_id: int, job_id: int) -> AIExecutionRecord | None:
+        return (
+            self.session.query(AIExecutionRecord)
+            .filter(
+                AIExecutionRecord.user_id == user_id,
+                AIExecutionRecord.job_id == job_id,
+                AIExecutionRecord.status == "succeeded",
+            )
+            .order_by(AIExecutionRecord.finished_at.desc(), AIExecutionRecord.id.desc())
+            .first()
+        )

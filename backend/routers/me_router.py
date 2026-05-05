@@ -11,6 +11,7 @@ from app.modules.platform.application.services import (
     JobQueryService,
     PlatformRequestRateLimiter,
     PlatformRequestRateLimitExceededError,
+    PlanArtifactBackfillService,
     ServerExecutionService,
     ServerQueuedJobClaimService,
     UserCenterService,
@@ -32,6 +33,8 @@ def _build_user_center_service(session, request: Request) -> UserCenterService:
     container = request.app.state.container
     job_query_repository = container.resolve_singleton("platform.job_query_repository_factory")(session)
     quota_query_repository = container.resolve_singleton("platform.quota_query_repository_factory")(session)
+    artifact_repository = container.resolve_singleton("platform.artifact_repository_factory")(session)
+    ai_execution_repository = container.resolve_singleton("platform.ai_execution_repository_factory")(session)
     job_query_service = JobQueryService(
         job_query_repository=job_query_repository,
         quota_query_repository=quota_query_repository,
@@ -40,6 +43,10 @@ def _build_user_center_service(session, request: Request) -> UserCenterService:
     return UserCenterService(
         auth_service=auth_service,
         job_query_service=job_query_service,
+        plan_artifact_backfill_service=PlanArtifactBackfillService(
+            artifact_repository=artifact_repository,
+            ai_execution_repository=ai_execution_repository,
+        ),
     )
 
 

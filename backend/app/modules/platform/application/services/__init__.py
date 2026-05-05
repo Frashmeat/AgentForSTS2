@@ -11,6 +11,7 @@ from .execution_routing_service import ExecutionRoutingService, ResolvedExecutio
 from .job_application_service import JobApplicationService
 from .job_query_service import JobQueryService
 from .platform_request_rate_limiter import PlatformRequestRateLimiter, PlatformRequestRateLimitExceededError
+from .plan_artifact_service import PlanArtifactBackfillService
 from .platform_runtime_audit_service import PlatformRuntimeAuditService
 from .quota_billing_service import QuotaBillingService
 from .server_credential_admin_service import ServerCredentialAdminService
@@ -60,6 +61,7 @@ __all__ = [
     "JobQueryService",
     "PlatformRequestRateLimitExceededError",
     "PlatformRequestRateLimiter",
+    "PlanArtifactBackfillService",
     "PlatformRuntimeAuditService",
     "QueueWorkerTickResult",
     "QuotaBillingService",

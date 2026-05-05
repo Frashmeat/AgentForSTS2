@@ -5,6 +5,7 @@ from datetime import datetime
 
 from app.modules.auth.application import AuthService
 from app.modules.platform.application.services.job_query_service import JobQueryService
+from app.modules.platform.application.services.plan_artifact_service import PlanArtifactBackfillService
 from app.modules.platform.contracts._model import ModelBase
 
 
@@ -19,9 +20,15 @@ class UserCenterProfileView(ModelBase):
 
 
 class UserCenterService:
-    def __init__(self, auth_service: AuthService, job_query_service: JobQueryService) -> None:
+    def __init__(
+        self,
+        auth_service: AuthService,
+        job_query_service: JobQueryService,
+        plan_artifact_backfill_service: PlanArtifactBackfillService | None = None,
+    ) -> None:
         self.auth_service = auth_service
         self.job_query_service = job_query_service
+        self.plan_artifact_backfill_service = plan_artifact_backfill_service
 
     def get_profile(self, user_id: int) -> UserCenterProfileView:
         user = self.auth_service.get_user_by_id(user_id)
@@ -43,6 +50,8 @@ class UserCenterService:
         return self.job_query_service.list_jobs(user_id)
 
     def get_job_detail(self, user_id: int, job_id: int):
+        if self.plan_artifact_backfill_service is not None:
+            self.plan_artifact_backfill_service.backfill_latest_plan_markdown(user_id=user_id, job_id=job_id)
         return self.job_query_service.get_job_detail(user_id, job_id)
 
     def list_job_items(self, user_id: int, job_id: int):

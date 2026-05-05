@@ -29,6 +29,7 @@ from app.modules.platform.domain.models.enums import JobItemStatus, JobStatus
 from app.modules.platform.infra.persistence import models as _platform_models
 from app.modules.platform.infra.persistence.models import (
     AIExecutionRecord,
+    ArtifactRecord,
     ExecutionProfileRecord,
     JobItemRecord,
     JobRecord,
@@ -39,6 +40,7 @@ from app.modules.platform.infra.persistence.models import (
 )
 from app.shared.infra.db.base import Base
 from routers.auth_router import router as auth_router
+from routers.me_router import router as me_router
 from routers.platform_jobs import router as platform_router
 
 
@@ -80,6 +82,7 @@ def client(tmp_path, monkeypatch):
         lambda: UploadedAssetService(storage_root=tmp_path / "platform-upload-assets"),
     )
     app.include_router(auth_router, prefix="/api")
+    app.include_router(me_router, prefix="/api")
     app.include_router(platform_router, prefix="/api")
 
     with TestClient(app) as test_client:
@@ -264,7 +267,12 @@ class _SucceededWorkflowRunner:
                     text = "已生成服务器 Power 实现方案"
                 else:
                     text = "已生成服务器遗物实现方案"
-                output_payload = {"text": text}
+                output_payload = {
+                    "text": text,
+                    "analysis": f"摘要：{text}\n\n## 实现建议\n- 先补 {asset_type or 'asset'} 代码骨架。",
+                    "asset_type": asset_type or "relic",
+                    "item_name": str(base_request.input_payload.get("item_name", "")).strip(),
+                }
             results.append(
                 StepExecutionResult(
                     step_id=step.step_id,
@@ -1098,6 +1106,65 @@ def test_platform_jobs_router_can_complete_supported_batch_relic_job(client: Tes
         session.close()
 
 
+def test_me_job_detail_backfills_downloadable_plan_artifact_for_historical_execution(client: TestClient):
+    _register_login_and_verify(client, "luna", "luna@example.com")
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    profile_id = _seed_execution_profile(client)
+    client.app.state.container.register_singleton("platform.workflow_runner_factory", _SucceededWorkflowRunner)
+
+    created = client.post(
+        "/api/platform/jobs",
+        json={
+            "job_type": "single_generate",
+            "workflow_version": "2026.03.31",
+            "selected_execution_profile_id": profile_id,
+            "selected_runner_type": "codex_cli",
+            "selected_model": "gpt-5.4",
+            "items": [
+                {
+                    "item_type": "relic",
+                    "input_summary": "补一个遗物实现方案",
+                    "input_payload": {
+                        "asset_type": "relic",
+                        "item_name": "FangedGrimoire",
+                        "description": "每次造成伤害时获得 2 点格挡。",
+                        "image_mode": "ai",
+                    },
+                }
+            ],
+        },
+    )
+    assert created.status_code == 200
+    job_id = created.json()["id"]
+    started = client.post(f"/api/platform/jobs/{job_id}/start", json={})
+    assert started.status_code == 200
+
+    session = client.app.state.container.resolve_singleton("platform.db_session_factory")()
+    try:
+        session.query(ArtifactRecord).filter(ArtifactRecord.job_id == job_id).delete()
+        session.commit()
+    finally:
+        session.close()
+
+    detail = client.get(f"/api/me/jobs/{job_id}")
+
+    assert detail.status_code == 200
+    artifacts = detail.json()["artifacts"]
+    assert len(artifacts) == 1
+    assert artifacts[0]["artifact_type"] == "plan_markdown"
+    downloaded = client.get(f"/api/me/artifacts/{artifacts[0]['id']}/download")
+    assert downloaded.status_code == 200
+    assert downloaded.content.startswith(b"# FangedGrimoire")
+
+
 def test_platform_jobs_router_can_complete_supported_batch_power_job(client: TestClient):
     _register_login_and_verify(client, "luna", "luna@example.com")
     login = client.post(
@@ -1329,6 +1396,16 @@ def test_platform_jobs_router_can_complete_supported_single_relic_job(client: Te
     detail = client.get(f"/api/platform/jobs/{job_id}")
     assert detail.status_code == 200
     assert detail.json()["status"] == "succeeded"
+    me_detail = client.get(f"/api/me/jobs/{job_id}")
+    assert me_detail.status_code == 200
+    artifacts = me_detail.json()["artifacts"]
+    assert artifacts[0]["artifact_type"] == "plan_markdown"
+    assert artifacts[0]["file_name"] == "FangedGrimoire.relic.plan.md"
+
+    downloaded = client.get(f"/api/me/artifacts/{artifacts[0]['id']}/download")
+    assert downloaded.status_code == 200
+    assert downloaded.headers["content-disposition"].endswith('filename="FangedGrimoire.relic.plan.md"')
+    assert "# FangedGrimoire" in downloaded.text
 
     items = client.get(f"/api/platform/jobs/{job_id}/items")
     assert items.status_code == 200

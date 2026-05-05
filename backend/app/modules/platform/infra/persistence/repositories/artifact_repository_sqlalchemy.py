@@ -49,3 +49,16 @@ class ArtifactRepositorySqlAlchemy(ArtifactRepository):
             )
             .one_or_none()
         )
+
+    def exists_by_job_type_for_user(self, user_id: int, job_id: int, artifact_type: str) -> bool:
+        return (
+            self.session.query(ArtifactRecord.id)
+            .filter(
+                ArtifactRecord.user_id == user_id,
+                ArtifactRecord.job_id == job_id,
+                ArtifactRecord.artifact_type == artifact_type,
+                ArtifactRecord.deleted_at.is_(None),
+            )
+            .first()
+            is not None
+        )

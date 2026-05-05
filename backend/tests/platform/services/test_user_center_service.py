@@ -40,6 +40,14 @@ class FakeJobQueryService:
         return self.items
 
 
+class FakePlanArtifactBackfillService:
+    def __init__(self) -> None:
+        self.calls: list[tuple[int, int]] = []
+
+    def backfill_latest_plan_markdown(self, *, user_id: int, job_id: int) -> None:
+        self.calls.append((user_id, job_id))
+
+
 def test_user_center_service_exposes_profile_quota_and_job_views():
     user = UserAccount(
         user_id=1001,
@@ -94,3 +102,30 @@ def test_user_center_service_exposes_profile_quota_and_job_views():
     assert service.list_jobs(1001)[0].job_type == "single_generate"
     assert service.get_job_detail(1001, 101).id == 101
     assert service.list_job_items(1001, 101)[0].item_type == "card"
+
+
+def test_user_center_service_backfills_plan_artifact_before_loading_detail():
+    user = UserAccount(
+        user_id=1001,
+        username="luna",
+        email="luna@example.com",
+        password_hash="hashed::secret",
+        email_verified=True,
+        created_at=datetime(2026, 4, 3, 8, 0, tzinfo=UTC),
+    )
+    backfill = FakePlanArtifactBackfillService()
+    service = UserCenterService(
+        auth_service=FakeAuthService(user),
+        job_query_service=FakeJobQueryService(
+            quota=UserQuotaView(total_limit=10, used_amount=0, refunded_amount=0, adjusted_amount=0, remaining=10),
+            jobs=[],
+            detail=JobDetailView(id=101, job_type="single_generate", status="succeeded", items=[], artifacts=[]),
+            items=[],
+        ),
+        plan_artifact_backfill_service=backfill,
+    )
+
+    detail = service.get_job_detail(1001, 101)
+
+    assert detail.id == 101
+    assert backfill.calls == [(1001, 101)]

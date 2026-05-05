@@ -7,6 +7,7 @@ from app.modules.knowledge.infra.sts2_guidance_provider import Sts2GuidanceProvi
 from app.modules.knowledge.infra.sts2_knowledge_resolver import Sts2KnowledgeResolver
 from app.modules.knowledge.infra.sts2_lookup_provider import Sts2LookupProvider
 from app.modules.platform.contracts.runner_contracts import StepExecutionRequest
+from app.modules.platform.application.services.plan_artifact_service import create_plan_markdown_artifact
 from app.shared.contracts.knowledge import KnowledgeQuery
 from app.shared.prompting import PromptContextAssembler, PromptLoader
 
@@ -128,4 +129,26 @@ async def execute_single_asset_plan_step(
     payload["text"] = _build_summary(full_text, asset_type, item_name)
     payload["asset_type"] = asset_type
     payload["item_name"] = item_name
+    artifact = create_plan_markdown_artifact(
+        job_id=request.job_id,
+        job_item_id=request.job_item_id,
+        user_id=int(request.input_payload.get("runtime_user_id") or 0),
+        ai_execution_id=None,
+        asset_type=asset_type,
+        item_name=item_name,
+        summary=str(payload["text"]),
+        analysis=full_text,
+    )
+    if artifact is not None:
+        payload["artifacts"] = [
+            {
+                "artifact_type": artifact.artifact_type,
+                "storage_provider": artifact.storage_provider,
+                "object_key": artifact.object_key,
+                "file_name": artifact.file_name,
+                "mime_type": artifact.mime_type,
+                "size_bytes": artifact.size_bytes,
+                "result_summary": artifact.result_summary,
+            }
+        ]
     return payload
