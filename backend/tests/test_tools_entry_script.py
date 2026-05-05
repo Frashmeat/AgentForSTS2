@@ -259,6 +259,21 @@ def test_app_compose_contains_single_docker_topology() -> None:
     assert "ports:" not in web_workstation_block
 
 
+def test_app_compose_mounts_shared_web_knowledge_after_service_runtime_dirs() -> None:
+    source = COMPOSE_APP_PATH.read_text(encoding="utf-8")
+    web_workstation_block = source.split("web-workstation:", 1)[1].split("  web:", 1)[0]
+    web_block = source.split("  web:", 1)[1].split("\nvolumes:", 1)[0]
+
+    assert "${ATS_WEB_KNOWLEDGE_DIR}:/app/runtime/knowledge" in web_workstation_block
+    assert "${ATS_WEB_KNOWLEDGE_DIR}:/app/runtime/knowledge" in web_block
+    assert web_workstation_block.index("${ATS_WEB_WORKSTATION_RUNTIME_DIR}:/app/runtime") < web_workstation_block.index(
+        "${ATS_WEB_KNOWLEDGE_DIR}:/app/runtime/knowledge"
+    )
+    assert web_block.index("${ATS_WEB_RUNTIME_DIR}:/app/runtime") < web_block.index(
+        "${ATS_WEB_KNOWLEDGE_DIR}:/app/runtime/knowledge"
+    )
+
+
 def test_deploy_app_dry_run_does_not_require_frontend_dist() -> None:
     source = DEPLOY_APP_PATH.read_text(encoding="utf-8-sig")
 
@@ -283,6 +298,30 @@ def test_deploy_app_verifies_docker_web_stack_after_compose_up() -> None:
     assert "默认管理员   : admin / admin@example.com / admin123456（每次部署收敛）" in source
     assert "日志入口     : powershell -File .\\tools\\tools.ps1 logs app" in source
     assert "日志目录     : $logRoot" in source
+
+
+def test_deploy_app_writes_shared_web_knowledge_dir_env() -> None:
+    source = DEPLOY_APP_PATH.read_text(encoding="utf-8-sig")
+
+    assert '"ATS_WEB_KNOWLEDGE_DIR=$(Convert-PathForComposeEnv -Path (Join-Path $Layout.ConfigRoot \'knowledge\'))"' in source
+    assert '"ATS_WEB_RUNTIME_DIR=$(Convert-PathForComposeEnv -Path (Join-Path $Layout.ConfigRoot \'web\'))"' in source
+    assert (
+        '"ATS_WEB_WORKSTATION_RUNTIME_DIR=$(Convert-PathForComposeEnv -Path (Join-Path $Layout.ConfigRoot \'web-workstation\'))"'
+        in source
+    )
+
+
+def test_deploy_app_merges_legacy_web_knowledge_before_generating_env() -> None:
+    source = DEPLOY_APP_PATH.read_text(encoding="utf-8-sig")
+
+    assert "function Merge-LegacyWebKnowledgeRuntime" in source
+    assert 'Join-Path (Join-Path $Layout.ConfigRoot "web") "knowledge"' in source
+    assert 'Join-Path $knowledgeDir "active-knowledge-pack.json"' in source
+    assert 'Join-Path $legacyWebKnowledgeDir "active-knowledge-pack.json"' in source
+    assert 'Copy-Item -Path (Join-Path $legacyWebKnowledgeDir "*") -Destination $knowledgeDir -Recurse -Force' in source
+    assert source.index("Merge-LegacyWebKnowledgeRuntime -Layout $layout") < source.index(
+        "Write-DockerEnv -AppConfig $appConfig"
+    )
 
 
 def test_logs_app_exposes_local_and_docker_log_sources() -> None:

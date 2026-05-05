@@ -465,6 +465,7 @@ function Write-DockerEnv {
         "ATS_WEB_WORKSTATION_DOCKERFILE=$($Layout.WebWorkstationDockerfile)"
         "ATS_WEB_CONFIG_PATH=$(Convert-PathForComposeEnv -Path $GeneratedPaths.WebConfig)"
         "ATS_WEB_RUNTIME_DIR=$(Convert-PathForComposeEnv -Path (Join-Path $Layout.ConfigRoot 'web'))"
+        "ATS_WEB_KNOWLEDGE_DIR=$(Convert-PathForComposeEnv -Path (Join-Path $Layout.ConfigRoot 'knowledge'))"
         "ATS_WEB_WORKSTATION_CONFIG_PATH=$(Convert-PathForComposeEnv -Path $GeneratedPaths.WebWorkstationConfig)"
         "ATS_WEB_WORKSTATION_RUNTIME_DIR=$(Convert-PathForComposeEnv -Path (Join-Path $Layout.ConfigRoot 'web-workstation'))"
     )
@@ -610,6 +611,26 @@ function Invoke-WebRuntimeBootstrap {
     Invoke-DockerComposeExec -AppConfig $AppConfig -Layout $Layout -EnvFile $EnvFile -ExecArgs @("web", "python", "tools/bootstrap_web_runtime.py", "--ensure-default-admin")
 }
 
+function Merge-LegacyWebKnowledgeRuntime {
+    param([hashtable]$Layout)
+
+    $knowledgeDir = Join-Path $Layout.ConfigRoot "knowledge"
+    $legacyWebKnowledgeDir = Join-Path (Join-Path $Layout.ConfigRoot "web") "knowledge"
+    $null = New-Item -ItemType Directory -Path $knowledgeDir -Force
+    if (-not (Test-Path -LiteralPath $legacyWebKnowledgeDir)) {
+        return
+    }
+    if (Test-Path -LiteralPath (Join-Path $knowledgeDir "active-knowledge-pack.json")) {
+        return
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $legacyWebKnowledgeDir "active-knowledge-pack.json"))) {
+        return
+    }
+
+    Write-Host "迁移旧 Web 知识库目录到共享 runtime/knowledge"
+    Copy-Item -Path (Join-Path $legacyWebKnowledgeDir "*") -Destination $knowledgeDir -Recurse -Force
+}
+
 $layout = Resolve-AppLayout -PreferredReleaseRoot $ReleaseRoot
 $script:ActiveLayout = $layout
 Assert-PathExists -Path $layout.ComposeFile -Label "app compose 模板"
@@ -620,6 +641,7 @@ if (-not $DryRun) {
 
 $effectiveConfigPath = Get-ConfigPath -Layout $layout -PreferredPath $ConfigPath
 $null = New-Item -ItemType Directory -Path $layout.ConfigRoot -Force
+Merge-LegacyWebKnowledgeRuntime -Layout $layout
 $appConfig = Normalize-AppConfig -Config (Ensure-AppConfig -Path $effectiveConfigPath)
 $appConfig = Ensure-AppSecrets -Config $appConfig -Path $effectiveConfigPath
 
