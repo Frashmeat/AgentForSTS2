@@ -23,6 +23,7 @@ from app.modules.platform.application.services.server_credential_cipher import S
 from app.modules.platform.application.services.server_workspace_lock_service import (
     ServerWorkspaceBusyError,
 )
+from app.modules.platform.application.services import server_workspace_service as server_workspace_service_module
 from app.modules.platform.application.services.server_workspace_service import ServerWorkspaceService
 from app.modules.platform.application.services.uploaded_asset_service import UploadedAssetService
 from app.modules.platform.contracts.runner_contracts import StepExecutionResult
@@ -238,6 +239,44 @@ def test_me_router_can_create_server_workspace(client: TestClient):
     assert workspace.status_code == 200
     assert workspace.json()["server_project_ref"].startswith("server-workspace:")
     assert workspace.json()["project_name"] == "DarkMod"
+
+
+def test_me_router_reports_missing_mod_template_for_server_workspace(client: TestClient, monkeypatch):
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "username": "luna",
+            "email": "luna@example.com",
+            "password": "secret-123",
+        },
+    )
+    assert registered.status_code == 200
+    verification_code = registered.json()["verification_code"]
+
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "login": "luna",
+            "password": "secret-123",
+        },
+    )
+    assert login.status_code == 200
+
+    verified = client.post("/api/auth/verify-email", json={"code": verification_code})
+    assert verified.status_code == 200
+
+    def raise_missing_template(project_name, target_dir):
+        raise FileNotFoundError("Mod 模板目录不存在: /app/mod_template")
+
+    monkeypatch.setattr(server_workspace_service_module, "create_project_from_template", raise_missing_template)
+
+    workspace = client.post(
+        "/api/me/server-workspaces",
+        json={"project_name": "DarkMod"},
+    )
+
+    assert workspace.status_code == 503
+    assert "Mod 模板目录不存在" in workspace.json()["detail"]
 
 
 def test_me_router_can_create_platform_job_with_server_project_ref(client: TestClient):

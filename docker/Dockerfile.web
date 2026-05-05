@@ -44,6 +44,7 @@ RUN pip install --upgrade pip \
     && pip install -r /tmp/requirements.docker.txt
 
 COPY backend /app/backend
+COPY mod_template /app/mod_template
 COPY config.example.json /app/config.example.json
 COPY pyproject.toml /app/pyproject.toml
 

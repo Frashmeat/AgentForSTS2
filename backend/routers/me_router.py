@@ -356,6 +356,8 @@ def create_server_workspace(request: Request, body: dict):
         service = _build_server_workspace_service(request)
         try:
             workspace = service.create_workspace(user_id=user.user_id, project_name=command.project_name)
+        except FileNotFoundError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
         return workspace.model_dump()
