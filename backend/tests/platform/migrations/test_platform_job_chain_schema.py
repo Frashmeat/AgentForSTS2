@@ -179,3 +179,26 @@ def test_later_column_revisions_guard_against_columns_created_by_current_models(
     assert "selected_execution_profile_id" in job_profile_source
     assert 'inspect(op.get_bind()).get_columns("ai_executions")' in ai_fact_source
     assert "credential_ref" in ai_fact_source
+
+
+def test_execution_config_field_rename_revision_is_idempotent_and_maps_values():
+    migration_path = (
+        Path(__file__).resolve().parents[3]
+        / "migrations"
+        / "versions"
+        / "20260505_01_execution_config_field_names.py"
+    )
+
+    assert migration_path.exists()
+
+    source = migration_path.read_text(encoding="utf-8")
+    assert 'down_revision = "20260428_01_quota_balances"' in source
+    assert "_rename_or_add" in source
+    assert "selected_agent_backend" in source
+    assert "selected_runner_type" in source
+    assert "agent_backend" in source
+    assert "runner_type" in source
+    assert "api_protocol" in source
+    assert "api_base_url" in source
+    assert "openai_compatible" in source
+    assert "anthropic_compatible" in source
