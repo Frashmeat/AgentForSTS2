@@ -632,6 +632,19 @@ def run_server_credential_health_check(request: Request, credential_id: int):
         return item.model_dump()
 
 
+@router.post("/platform/server-credentials/{credential_id}/cli-health-check")
+async def run_server_credential_cli_health_check(request: Request, credential_id: int):
+    with auth_session_scope(request) as auth_session:
+        require_admin_user(request, auth_session)
+    with _session_scope(request) as session:
+        service = _build_server_credential_admin_service(session, request)
+        try:
+            item = await service.run_cli_health_check(credential_id)
+        except LookupError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return item.model_dump()
+
+
 @router.get("/platform/execution-profiles")
 def list_execution_profiles(request: Request):
     with auth_session_scope(request) as auth_session:

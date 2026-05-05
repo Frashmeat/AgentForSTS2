@@ -7,9 +7,11 @@ import {
   enableAdminServerCredential,
   listAdminExecutionProfiles,
   listAdminServerCredentials,
+  runAdminServerCredentialCliHealthCheck,
   runAdminServerCredentialHealthCheck,
   updateAdminServerCredential,
   type AdminExecutionProfileListItem,
+  type AdminServerCredentialCliHealthCheckView,
   type AdminServerCredentialListItem,
 } from "../../shared/api/index.ts";
 import { resolveErrorMessage } from "../../shared/error.ts";
@@ -71,6 +73,7 @@ export function AdminServerCredentialsPage() {
   const [credentials, setCredentials] = useState<AdminServerCredentialListItem[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
   const [form, setForm] = useState<CredentialFormState>(emptyForm);
+  const [cliHealthResults, setCliHealthResults] = useState<Record<number, AdminServerCredentialCliHealthCheckView>>({});
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -172,6 +175,24 @@ export function AdminServerCredentialsPage() {
       await loadData();
     } catch (actionError) {
       showNotice("服务器凭据操作失败", resolveErrorMessage(actionError, "服务器凭据操作失败"), "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function runCliHealthCheck(credential: AdminServerCredentialListItem) {
+    setSaving(true);
+    try {
+      const result = await runAdminServerCredentialCliHealthCheck(credential.id);
+      setCliHealthResults((current) => ({ ...current, [credential.id]: result }));
+      const status = formatAdminStatus(result.cli_health_status);
+      showNotice(
+        "CLI 实测完成",
+        result.error_message || `CLI 实测结果：${status.label}，模型 ${result.model}。`,
+        result.cli_health_status === "healthy" ? "success" : "error",
+      );
+    } catch (actionError) {
+      showNotice("CLI 实测失败", resolveErrorMessage(actionError, "CLI 实测失败"), "error");
     } finally {
       setSaving(false);
     }
@@ -358,6 +379,8 @@ export function AdminServerCredentialsPage() {
             <div className="grid gap-3 2xl:grid-cols-2">
               {credentials.map((credential) => {
                 const status = formatAdminStatus(credential.health_status);
+                const cliHealthResult = cliHealthResults[credential.id];
+                const cliStatus = cliHealthResult ? formatAdminStatus(cliHealthResult.cli_health_status) : null;
                 return (
                   <article key={credential.id} className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3">
                     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -377,6 +400,19 @@ export function AdminServerCredentialsPage() {
                         </p>
                         {credential.last_error_message ? (
                           <p className="mt-1 text-xs text-rose-600">{credential.last_error_message}</p>
+                        ) : null}
+                        {cliHealthResult ? (
+                          <p
+                            className={`mt-2 rounded-md border px-2 py-1 text-xs ${
+                              cliHealthResult.cli_health_status === "healthy"
+                                ? "border-emerald-100 bg-emerald-50 text-emerald-700"
+                                : "border-rose-100 bg-rose-50 text-rose-700"
+                            }`}
+                          >
+                            CLI 实测：{cliStatus?.label ?? cliHealthResult.cli_health_status}
+                            {cliHealthResult.latency_ms ? ` / ${cliHealthResult.latency_ms}ms` : ""}
+                            {cliHealthResult.error_message ? ` / ${cliHealthResult.error_message}` : ""}
+                          </p>
                         ) : null}
                       </div>
                       <div className="text-right text-xs">
@@ -438,6 +474,14 @@ export function AdminServerCredentialsPage() {
                         disabled={saving || !credential.enabled}
                       >
                         健康检查
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void runCliHealthCheck(credential)}
+                        className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 transition hover:border-violet-200 hover:text-violet-700 disabled:opacity-50"
+                        disabled={saving || !credential.enabled}
+                      >
+                        CLI 实测
                       </button>
                     </div>
                   </article>

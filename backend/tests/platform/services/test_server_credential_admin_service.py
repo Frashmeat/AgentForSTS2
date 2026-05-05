@@ -5,12 +5,15 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from app.modules.platform.application.services.server_credential_admin_service import ServerCredentialAdminService
 from app.modules.platform.application.services.server_credential_cipher import ServerCredentialCipher
 from app.modules.platform.application.services.server_credential_health_checker import ServerCredentialHealthCheckResult
 from app.modules.platform.contracts import (
+    AdminServerCredentialCliHealthCheckView,
     AdminServerCredentialHealthCheckView,
     AdminServerCredentialListItem,
     CreateServerCredentialCommand,
@@ -26,6 +29,8 @@ class FakeServerCredentialAdminRepository:
             1: ServerCredentialAdminRecord(
                 id=1,
                 execution_profile_id=1,
+                execution_profile_runner_type="codex_cli",
+                execution_profile_model="gpt-5.4",
                 api_protocol="openai_compatible",
                 auth_type="api_key",
                 credential_ciphertext="",
@@ -47,6 +52,8 @@ class FakeServerCredentialAdminRepository:
         self.entries[1] = ServerCredentialAdminRecord(
             id=1,
             execution_profile_id=payload["execution_profile_id"],
+            execution_profile_runner_type="codex_cli",
+            execution_profile_model="gpt-5.4",
             api_protocol=payload["api_protocol"],
             auth_type=payload["auth_type"],
             credential_ciphertext=payload["credential_ciphertext"],
@@ -83,6 +90,8 @@ class FakeServerCredentialAdminRepository:
         updated = ServerCredentialAdminRecord(
             id=current.id,
             execution_profile_id=payload["execution_profile_id"],
+            execution_profile_runner_type=current.execution_profile_runner_type,
+            execution_profile_model=current.execution_profile_model,
             api_protocol=payload["api_protocol"],
             auth_type=payload["auth_type"],
             credential_ciphertext=payload["credential_ciphertext"],
@@ -118,6 +127,8 @@ class FakeServerCredentialAdminRepository:
         self.entries[credential_id] = ServerCredentialAdminRecord(
             id=current.id,
             execution_profile_id=current.execution_profile_id,
+            execution_profile_runner_type=current.execution_profile_runner_type,
+            execution_profile_model=current.execution_profile_model,
             api_protocol=current.api_protocol,
             auth_type=current.auth_type,
             credential_ciphertext=current.credential_ciphertext,
@@ -157,6 +168,8 @@ class FakeServerCredentialAdminRepository:
         self.entries[payload["credential_id"]] = ServerCredentialAdminRecord(
             id=current.id,
             execution_profile_id=current.execution_profile_id,
+            execution_profile_runner_type=current.execution_profile_runner_type,
+            execution_profile_model=current.execution_profile_model,
             api_protocol=current.api_protocol,
             auth_type=current.auth_type,
             credential_ciphertext=current.credential_ciphertext,
@@ -186,6 +199,18 @@ class FakeServerCredentialHealthChecker:
 
     def check(self, **payload) -> ServerCredentialHealthCheckResult:
         self.calls.append(payload)
+        return self.result
+
+
+class FakeCliHealthCheckRunner:
+    def __init__(self, result: str | Exception = "OK") -> None:
+        self.result = result
+        self.calls: list[tuple[str, dict, object | None]] = []
+
+    async def __call__(self, prompt: str, llm_cfg: dict, cwd: object | None = None) -> str:
+        self.calls.append((prompt, llm_cfg, cwd))
+        if isinstance(self.result, Exception):
+            raise self.result
         return self.result
 
 
@@ -337,3 +362,50 @@ def test_server_credential_admin_service_runs_health_check_and_records_result():
     assert repository.last_health_payload is not None
     assert repository.last_health_payload["status"] == "rate_limited"
     assert checker.calls[0]["credential"] == "live-token"
+
+
+@pytest.mark.asyncio
+async def test_server_credential_admin_service_runs_cli_health_check_with_bound_profile():
+    repository = FakeServerCredentialAdminRepository()
+    cipher = ServerCredentialCipher("test-server-credential-secret")
+    repository.entries[1] = replace(repository.entries[1], credential_ciphertext=cipher.encrypt("live-token"))
+    checker = FakeServerCredentialHealthChecker()
+    cli_runner = FakeCliHealthCheckRunner()
+    service = ServerCredentialAdminService(
+        server_credential_admin_repository=repository,
+        server_credential_cipher=cipher,
+        server_credential_health_checker=checker,
+        cli_health_check_runner=cli_runner,
+    )
+
+    result = await service.run_cli_health_check(1)
+
+    assert isinstance(result, AdminServerCredentialCliHealthCheckView)
+    assert result.cli_health_status == "healthy"
+    assert result.runner_type == "codex_cli"
+    assert result.model == "gpt-5.4"
+    assert cli_runner.calls[0][1]["mode"] == "agent_cli"
+    assert cli_runner.calls[0][1]["agent_backend"] == "codex"
+    assert cli_runner.calls[0][1]["provider"] == "openai"
+    assert cli_runner.calls[0][1]["api_key"] == "live-token"
+
+
+@pytest.mark.asyncio
+async def test_server_credential_admin_service_reports_cli_health_check_failure_detail():
+    repository = FakeServerCredentialAdminRepository()
+    cipher = ServerCredentialCipher("test-server-credential-secret")
+    repository.entries[1] = replace(repository.entries[1], credential_ciphertext=cipher.encrypt("bad-token"))
+    checker = FakeServerCredentialHealthChecker()
+    cli_runner = FakeCliHealthCheckRunner(RuntimeError("Codex CLI 退出码 1\n401 Unauthorized"))
+    service = ServerCredentialAdminService(
+        server_credential_admin_repository=repository,
+        server_credential_cipher=cipher,
+        server_credential_health_checker=checker,
+        cli_health_check_runner=cli_runner,
+    )
+
+    result = await service.run_cli_health_check(1)
+
+    assert result.cli_health_status == "degraded"
+    assert result.error_code == "cli_execution_failed"
+    assert "401 Unauthorized" in result.error_message

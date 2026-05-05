@@ -59,6 +59,15 @@ class FakePlatformHealthChecker:
         return self.result
 
 
+class FakeCliHealthCheckRunner:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict, object | None]] = []
+
+    async def __call__(self, prompt: str, llm_cfg: dict, cwd: object | None = None) -> str:
+        self.calls.append((prompt, llm_cfg, cwd))
+        return "OK"
+
+
 class FakeWorkstationRuntimeStatus:
     def __init__(self, capabilities: dict[str, object] | None = None) -> None:
         self._capabilities = capabilities
@@ -123,7 +132,18 @@ def client(tmp_path):
         runtime_role="web",
     )
     fake_health_checker = FakePlatformHealthChecker()
+    fake_cli_health_runner = FakeCliHealthCheckRunner()
     container.register_singleton("platform.server_credential_health_checker_factory", lambda: fake_health_checker)
+    server_credential_admin_service_factory = container.resolve_singleton(
+        "platform.server_credential_admin_service_factory"
+    )
+    container.register_singleton(
+        "platform.server_credential_admin_service_factory",
+        lambda **kwargs: server_credential_admin_service_factory(
+            **kwargs,
+            cli_health_check_runner=fake_cli_health_runner,
+        ),
+    )
     runtime_audit_service = PlatformRuntimeAuditService(
         session_factory=container.resolve_singleton("platform.db_session_factory"),
         storage_root=tmp_path / "runtime-audit",
@@ -266,11 +286,11 @@ def client(tmp_path):
     app.include_router(router, prefix="/api")
 
     with TestClient(app) as test_client:
-        yield test_client, job.id, execution.id, fake_health_checker
+        yield test_client, job.id, execution.id, fake_health_checker, fake_cli_health_runner
 
 
 def test_platform_admin_router_supports_execution_refund_and_audit_queries(client):
-    test_client, job_id, execution_id, _ = client
+    test_client, job_id, execution_id, _, _ = client
 
     login = test_client.post(
         "/api/auth/login",
@@ -331,7 +351,7 @@ def test_platform_admin_router_supports_execution_refund_and_audit_queries(clien
 
 
 def test_platform_admin_router_returns_workstation_runtime_status(client, monkeypatch, tmp_path: Path):
-    test_client, _, _, _ = client
+    test_client, _, _, _, _ = client
     runtime_root = tmp_path / "runtime"
     knowledge_root = runtime_root / "knowledge"
     monkeypatch.setattr(knowledge_runtime, "RUNTIME_ROOT", runtime_root)
@@ -395,7 +415,7 @@ def test_platform_admin_router_returns_workstation_runtime_status(client, monkey
 
 
 def test_platform_admin_router_returns_workstation_runtime_logs(client):
-    test_client, _, _, _ = client
+    test_client, _, _, _, _ = client
 
     login = test_client.post(
         "/api/auth/login",
@@ -433,7 +453,7 @@ def test_platform_admin_router_returns_workstation_runtime_logs(client):
 
 
 def test_platform_admin_router_deletes_knowledge_pack(client, monkeypatch, tmp_path: Path):
-    test_client, _, _, _ = client
+    test_client, _, _, _, _ = client
     knowledge_root = tmp_path / "runtime" / "knowledge"
     packs_dir = knowledge_root / "packs"
     active_path = knowledge_root / "active-knowledge-pack.json"
@@ -486,7 +506,7 @@ def test_platform_admin_router_deletes_knowledge_pack(client, monkeypatch, tmp_p
 
 
 def test_platform_admin_router_manages_execution_profiles(client):
-    test_client, _, _, _ = client
+    test_client, _, _, _, _ = client
 
     login = test_client.post(
         "/api/auth/login",
@@ -558,7 +578,7 @@ def test_platform_admin_router_manages_execution_profiles(client):
 
 
 def test_platform_admin_router_rejects_deleting_referenced_execution_profile(client):
-    test_client, _, _, _ = client
+    test_client, _, _, _, _ = client
 
     login = test_client.post(
         "/api/auth/login",
@@ -599,7 +619,7 @@ def test_platform_admin_router_rejects_deleting_referenced_execution_profile(cli
 
 
 def test_platform_admin_router_supports_user_quota_management(client):
-    test_client, _, _, _ = client
+    test_client, _, _, _, _ = client
 
     login = test_client.post(
         "/api/auth/login",
@@ -638,7 +658,7 @@ def test_platform_admin_router_supports_user_quota_management(client):
 
 
 def test_platform_admin_router_creates_server_credential_with_ciphertext_storage(client):
-    test_client, _, _, _ = client
+    test_client, _, _, _, _ = client
 
     login = test_client.post(
         "/api/auth/login",
@@ -682,7 +702,7 @@ def test_platform_admin_router_creates_server_credential_with_ciphertext_storage
 
 
 def test_platform_admin_router_updates_and_toggles_server_credential(client):
-    test_client, _, _, _ = client
+    test_client, _, _, _, _ = client
 
     login = test_client.post(
         "/api/auth/login",
@@ -722,7 +742,7 @@ def test_platform_admin_router_updates_and_toggles_server_credential(client):
 
 
 def test_platform_admin_router_rejects_server_credential_incompatible_with_execution_profile(client):
-    test_client, _, _, _ = client
+    test_client, _, _, _, _ = client
 
     login = test_client.post(
         "/api/auth/login",
@@ -752,7 +772,7 @@ def test_platform_admin_router_rejects_server_credential_incompatible_with_execu
 
 
 def test_platform_admin_router_does_not_delete_server_credential(client):
-    test_client, _, _, _ = client
+    test_client, _, _, _, _ = client
 
     login = test_client.post(
         "/api/auth/login",
@@ -772,7 +792,7 @@ def test_platform_admin_router_does_not_delete_server_credential(client):
 
 
 def test_platform_admin_router_runs_manual_health_check_and_writes_result(client):
-    test_client, _, _, fake_health_checker = client
+    test_client, _, _, fake_health_checker, _ = client
 
     fake_health_checker.result = ServerCredentialHealthCheckResult(
         status="rate_limited",
@@ -808,8 +828,33 @@ def test_platform_admin_router_runs_manual_health_check_and_writes_result(client
         session.close()
 
 
+def test_platform_admin_router_runs_cli_health_check_with_bound_credential(client):
+    test_client, _, _, _, fake_cli_health_runner = client
+
+    login = test_client.post(
+        "/api/auth/login",
+        json={
+            "login": "admin@example.com",
+            "password": "admin-pass",
+        },
+    )
+    assert login.status_code == 200
+
+    checked = test_client.post("/api/admin/platform/server-credentials/1/cli-health-check")
+    assert checked.status_code == 200
+    payload = checked.json()
+    assert payload["credential_id"] == 1
+    assert payload["execution_profile_id"] == 1
+    assert payload["runner_type"] == "codex_cli"
+    assert payload["api_protocol"] == "openai_compatible"
+    assert payload["model"] == "gpt-5.4"
+    assert payload["cli_health_status"] == "healthy"
+    assert fake_cli_health_runner.calls[0][1]["agent_backend"] == "codex"
+    assert fake_cli_health_runner.calls[0][1]["api_key"] == "seed-openai-main"
+
+
 def test_platform_admin_router_requires_authenticated_admin_session(client):
-    test_client, job_id, _, _ = client
+    test_client, job_id, _, _, _ = client
 
     unauthenticated = test_client.get(f"/api/admin/jobs/{job_id}/executions")
     assert unauthenticated.status_code == 401
@@ -842,7 +887,7 @@ def test_platform_admin_router_requires_authenticated_admin_session(client):
 
 
 def test_platform_admin_router_rejects_invalid_server_credential_payload(client):
-    test_client, _, _, _ = client
+    test_client, _, _, _, _ = client
 
     login = test_client.post(
         "/api/auth/login",

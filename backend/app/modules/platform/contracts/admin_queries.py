@@ -122,6 +122,20 @@ class AdminServerCredentialHealthCheckView(ModelBase):
 
 
 @dataclass(slots=True)
+class AdminServerCredentialCliHealthCheckView(ModelBase):
+    credential_id: int
+    execution_profile_id: int
+    runner_type: str
+    api_protocol: str
+    model: str
+    cli_health_status: str
+    error_code: str = ""
+    error_message: str = ""
+    checked_at: str | None = None
+    latency_ms: int | None = None
+
+
+@dataclass(slots=True)
 class AdminExecutionProfileListItem(ModelBase):
     id: int
     code: str

@@ -97,25 +97,34 @@ class ServerCredentialAdminRepositorySqlAlchemy(ServerCredentialAdminRepository)
 
     def get_server_credential(self, credential_id: int) -> ServerCredentialAdminRecord | None:
         row = (
-            self.session.query(ServerCredentialRecord).filter(ServerCredentialRecord.id == credential_id).one_or_none()
+            self.session.query(ServerCredentialRecord, ExecutionProfileRecord)
+            .join(
+                ExecutionProfileRecord,
+                ExecutionProfileRecord.id == ServerCredentialRecord.execution_profile_id,
+            )
+            .filter(ServerCredentialRecord.id == credential_id)
+            .one_or_none()
         )
         if row is None:
             return None
+        credential, profile = row
         return ServerCredentialAdminRecord(
-            id=row.id,
-            execution_profile_id=row.execution_profile_id,
-            api_protocol=row.api_protocol,
-            auth_type=row.auth_type,
-            credential_ciphertext=row.credential_ciphertext,
-            secret_ciphertext=row.secret_ciphertext,
-            api_base_url=row.api_base_url,
-            label=row.label,
-            priority=row.priority,
-            enabled=row.enabled,
-            health_status=row.health_status,
-            last_checked_at=row.last_checked_at,
-            last_error_code=row.last_error_code,
-            last_error_message=row.last_error_message,
+            id=credential.id,
+            execution_profile_id=credential.execution_profile_id,
+            execution_profile_runner_type=profile.runner_type,
+            execution_profile_model=profile.model,
+            api_protocol=credential.api_protocol,
+            auth_type=credential.auth_type,
+            credential_ciphertext=credential.credential_ciphertext,
+            secret_ciphertext=credential.secret_ciphertext,
+            api_base_url=credential.api_base_url,
+            label=credential.label,
+            priority=credential.priority,
+            enabled=credential.enabled,
+            health_status=credential.health_status,
+            last_checked_at=credential.last_checked_at,
+            last_error_code=credential.last_error_code,
+            last_error_message=credential.last_error_message,
         )
 
     def update_server_credential(

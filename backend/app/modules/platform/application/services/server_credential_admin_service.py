@@ -1,19 +1,26 @@
 from __future__ import annotations
 
+import time
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import ClassVar
 from urllib.parse import urlparse
 
 from app.modules.platform.contracts import (
+    AdminServerCredentialCliHealthCheckView,
     AdminServerCredentialHealthCheckView,
     AdminServerCredentialListItem,
     CreateServerCredentialCommand,
     UpdateServerCredentialCommand,
 )
+from app.modules.platform.domain.execution_compatibility import require_api_protocol_compatible_with_runner_type
 from app.modules.platform.domain.repositories import ServerCredentialAdminRepository
+from llm.text_runner import complete_text
 
 from .server_credential_cipher import ServerCredentialCipher
 from .server_credential_health_checker import ServerCredentialHealthChecker
+
+CliHealthCheckRunner = Callable[[str, dict, object | None], Awaitable[str]]
 
 
 class ServerCredentialAdminService:
@@ -25,10 +32,12 @@ class ServerCredentialAdminService:
         server_credential_admin_repository: ServerCredentialAdminRepository,
         server_credential_cipher: ServerCredentialCipher,
         server_credential_health_checker: ServerCredentialHealthChecker,
+        cli_health_check_runner: CliHealthCheckRunner = complete_text,
     ) -> None:
         self.server_credential_admin_repository = server_credential_admin_repository
         self.server_credential_cipher = server_credential_cipher
         self.server_credential_health_checker = server_credential_health_checker
+        self.cli_health_check_runner = cli_health_check_runner
 
     def create_server_credential(self, command: CreateServerCredentialCommand) -> AdminServerCredentialListItem:
         api_protocol = str(command.api_protocol).strip().lower()
@@ -158,7 +167,85 @@ class ServerCredentialAdminService:
             checked_at=checked_at,
         )
 
+    async def run_cli_health_check(self, credential_id: int) -> AdminServerCredentialCliHealthCheckView:
+        current = self.server_credential_admin_repository.get_server_credential(credential_id)
+        if current is None:
+            raise LookupError(f"server credential not found: {credential_id}")
+
+        checked_at = datetime.now(UTC)
+        common = {
+            "credential_id": credential_id,
+            "execution_profile_id": current.execution_profile_id,
+            "runner_type": current.execution_profile_runner_type,
+            "api_protocol": current.api_protocol,
+            "model": current.execution_profile_model,
+            "checked_at": checked_at.isoformat(),
+        }
+        if not current.enabled:
+            return AdminServerCredentialCliHealthCheckView(
+                **common,
+                cli_health_status="disabled",
+                error_code="disabled",
+                error_message="credential is disabled",
+                latency_ms=None,
+            )
+
+        try:
+            require_api_protocol_compatible_with_runner_type(
+                runner_type=current.execution_profile_runner_type,
+                api_protocol=current.api_protocol,
+            )
+            llm_cfg = {
+                "mode": "agent_cli",
+                "agent_backend": self._agent_backend_for_runner_type(current.execution_profile_runner_type),
+                "provider": self._provider_for_api_protocol(current.api_protocol),
+                "model": current.execution_profile_model,
+                "api_key": self.server_credential_cipher.decrypt(current.credential_ciphertext),
+                "base_url": current.api_base_url,
+            }
+            started_at = time.monotonic()
+            await self.cli_health_check_runner("请只回复 OK，用于验证 CLI 执行健康。", llm_cfg, None)
+            latency_ms = int((time.monotonic() - started_at) * 1000)
+            return AdminServerCredentialCliHealthCheckView(
+                **common,
+                cli_health_status="healthy",
+                latency_ms=latency_ms,
+            )
+        except ValueError as error:
+            return AdminServerCredentialCliHealthCheckView(
+                **common,
+                cli_health_status="degraded",
+                error_code="runner_protocol_incompatible",
+                error_message=str(error)[:1000],
+                latency_ms=None,
+            )
+        except Exception as error:
+            latency_ms = int((time.monotonic() - started_at) * 1000) if "started_at" in locals() else None
+            return AdminServerCredentialCliHealthCheckView(
+                **common,
+                cli_health_status="degraded",
+                error_code="cli_execution_failed",
+                error_message=str(error)[:1000],
+                latency_ms=latency_ms,
+            )
+
     @staticmethod
     def _is_valid_http_url(value: str) -> bool:
         parsed = urlparse(value)
         return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+    @staticmethod
+    def _agent_backend_for_runner_type(runner_type: str) -> str:
+        if runner_type == "codex_cli":
+            return "codex"
+        if runner_type == "claude_cli":
+            return "claude"
+        raise ValueError("CLI health check only supports codex_cli or claude_cli")
+
+    @staticmethod
+    def _provider_for_api_protocol(api_protocol: str) -> str:
+        if api_protocol == "openai_compatible":
+            return "openai"
+        if api_protocol == "anthropic_compatible":
+            return "anthropic"
+        raise ValueError(f"api_protocol is not supported: {api_protocol}")

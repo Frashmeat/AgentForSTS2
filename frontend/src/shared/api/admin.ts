@@ -169,6 +169,19 @@ export interface AdminServerCredentialHealthCheckView {
   checked_at?: string | null;
 }
 
+export interface AdminServerCredentialCliHealthCheckView {
+  credential_id: number;
+  execution_profile_id: number;
+  runner_type: string;
+  api_protocol: string;
+  model: string;
+  cli_health_status: string;
+  error_code: string;
+  error_message: string;
+  checked_at?: string | null;
+  latency_ms?: number | null;
+}
+
 export interface AdminAuditEvent {
   event_id: number;
   event_type: string;
@@ -442,6 +455,18 @@ export function runAdminServerCredentialHealthCheck(
 ): Promise<AdminServerCredentialHealthCheckView> {
   return requestJson<AdminServerCredentialHealthCheckView>(
     `/api/admin/platform/server-credentials/${credentialId}/health-check`,
+    {
+      backend: "web",
+      method: "POST",
+    },
+  );
+}
+
+export function runAdminServerCredentialCliHealthCheck(
+  credentialId: number,
+): Promise<AdminServerCredentialCliHealthCheckView> {
+  return requestJson<AdminServerCredentialCliHealthCheckView>(
+    `/api/admin/platform/server-credentials/${credentialId}/cli-health-check`,
     {
       backend: "web",
       method: "POST",

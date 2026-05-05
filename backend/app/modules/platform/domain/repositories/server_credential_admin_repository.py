@@ -11,6 +11,8 @@ from app.modules.platform.contracts import AdminServerCredentialHealthCheckView,
 class ServerCredentialAdminRecord:
     id: int
     execution_profile_id: int
+    execution_profile_runner_type: str
+    execution_profile_model: str
     api_protocol: str
     auth_type: str
     credential_ciphertext: str
