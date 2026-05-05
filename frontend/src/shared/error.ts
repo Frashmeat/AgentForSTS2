@@ -43,13 +43,26 @@ function readStructuredErrorMessage(payload: StructuredErrorPayload): string | n
     if (nestedMessage) {
       return nestedMessage;
     }
+    if (typeof nested.detail === "object" && nested.detail !== null) {
+      const nestedDetailMessage = readStructuredErrorMessage(nested.detail as StructuredErrorPayload);
+      if (nestedDetailMessage) {
+        return nestedDetailMessage;
+      }
+    }
   }
 
   if (typeof payload.error === "string") {
     return pickText(payload.error);
   }
 
-  return pickText(payload.message, payload.detail);
+  const message = pickText(payload.message, payload.detail);
+  if (message) {
+    return message;
+  }
+  if (typeof payload.detail === "object" && payload.detail !== null) {
+    return readStructuredErrorMessage(payload.detail as StructuredErrorPayload);
+  }
+  return null;
 }
 
 export function resolveErrorMessage(error: unknown, fallback = DEFAULT_ERROR_MESSAGE): string {

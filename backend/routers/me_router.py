@@ -256,16 +256,43 @@ def download_artifact(request: Request, artifact_id: int):
         user = require_current_user(request, session)
         artifact = _artifact_repository(session, request).find_by_id_for_user(artifact_id, user.user_id)
         if artifact is None:
-            raise HTTPException(status_code=404, detail="artifact not found")
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "artifact_not_found",
+                    "message": "产物记录不存在或不属于当前用户。",
+                    "artifact_id": artifact_id,
+                },
+            )
         if artifact.storage_provider != "server_workspace":
-            raise HTTPException(status_code=400, detail="artifact is not downloadable")
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "artifact_not_downloadable",
+                    "message": "当前产物不支持下载。",
+                    "artifact_id": artifact.id,
+                    "artifact_type": artifact.artifact_type,
+                    "storage_provider": artifact.storage_provider,
+                },
+            )
         path = Path(artifact.object_key).expanduser().resolve()
         if not path.exists() or not path.is_file():
             repaired = _plan_artifact_backfill_service(session, request).repair_plan_markdown_file(artifact)
             if repaired is not None:
                 path = Path(repaired.object_key).expanduser().resolve()
         if not path.exists() or not path.is_file():
-            raise HTTPException(status_code=404, detail="artifact file not found")
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "artifact_file_missing",
+                    "message": "产物文件不存在，记录已创建但服务器上的实际文件缺失。",
+                    "artifact_id": artifact.id,
+                    "artifact_type": artifact.artifact_type,
+                    "storage_provider": artifact.storage_provider,
+                    "file_name": artifact.file_name,
+                    "reason": "record exists but object_key does not point to a readable file",
+                },
+            )
         return FileResponse(
             path,
             media_type=artifact.mime_type or "application/octet-stream",
