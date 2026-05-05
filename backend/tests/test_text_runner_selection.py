@@ -525,13 +525,29 @@ def test_complete_via_codex_cli_passes_execution_credentials_to_subprocess(monke
 
     monkeypatch.setattr(text_runner.shutil, "which", lambda _name: "C:/Tools/codex.cmd")
     monkeypatch.setattr(text_runner.subprocess, "run", fake_run)
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://stale.example.invalid/v1")
 
     result = asyncio.run(run_case())
 
     assert result == "ok"
     assert captured["cmd"][0] == "C:/Tools/codex.cmd"
     assert captured["env"]["OPENAI_API_KEY"] == "sk-live-openai"
-    assert captured["env"]["OPENAI_BASE_URL"] == "https://api.openai.com/v1"
+    assert "OPENAI_BASE_URL" not in captured["env"]
+    assert "--ignore-user-config" in captured["cmd"]
+    assert "-c" in captured["cmd"]
+    config_values = [
+        captured["cmd"][index + 1]
+        for index, value in enumerate(captured["cmd"])
+        if value == "-c"
+    ]
+    assert "model_provider=\"platform_openai_compatible\"" in config_values
+    assert "model_providers.platform_openai_compatible.name=\"platform_openai_compatible\"" in config_values
+    assert "model_providers.platform_openai_compatible.wire_api=\"responses\"" in config_values
+    assert "model_providers.platform_openai_compatible.env_key=\"OPENAI_API_KEY\"" in config_values
+    assert "model_providers.platform_openai_compatible.requires_openai_auth=false" in config_values
+    assert "model_providers.platform_openai_compatible.supports_websockets=false" in config_values
+    assert "model_providers.platform_openai_compatible.base_url=\"https://api.openai.com/v1\"" in config_values
+    assert "sk-live-openai" not in " ".join(captured["cmd"])
 
 
 def test_complete_via_codex_cli_logs_start_and_finish_without_secret(monkeypatch, caplog):

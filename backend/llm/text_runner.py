@@ -30,6 +30,7 @@ DEFAULT_LITELLM_USER_AGENT = "AgentTheSpire/0.1.0"
 CLI_COMPLETION_TIMEOUT_SECONDS = 180
 CLI_WAIT_TIMEOUT_SECONDS = CLI_COMPLETION_TIMEOUT_SECONDS + 5
 _LOG_TAIL_LIMIT = 1200
+_CODEX_EXECUTION_PROVIDER_ID = "platform_openai_compatible"
 logger = logging.getLogger(__name__)
 
 
@@ -207,6 +208,44 @@ def _build_claude_cli_env(llm_cfg: dict) -> dict[str, str]:
     return env
 
 
+def _toml_config_value(value: str | bool | int) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    return json.dumps(value)
+
+
+def _build_codex_cli_env(llm_cfg: dict) -> dict[str, str]:
+    env = os.environ.copy()
+    env.pop("OPENAI_BASE_URL", None)
+    cfg = normalize_llm_config(llm_cfg)
+    if cfg.get("api_key"):
+        env["OPENAI_API_KEY"] = str(cfg["api_key"])
+    return env
+
+
+def _build_codex_cli_provider_config_args(llm_cfg: dict) -> list[str]:
+    cfg = normalize_llm_config(llm_cfg)
+    provider_key = f"model_providers.{_CODEX_EXECUTION_PROVIDER_ID}"
+    config_pairs: list[tuple[str, str | bool | int]] = [
+        ("model_provider", _CODEX_EXECUTION_PROVIDER_ID),
+        (f"{provider_key}.name", _CODEX_EXECUTION_PROVIDER_ID),
+        (f"{provider_key}.wire_api", "responses"),
+        (f"{provider_key}.env_key", "OPENAI_API_KEY"),
+        (f"{provider_key}.requires_openai_auth", False),
+        (f"{provider_key}.supports_websockets", False),
+    ]
+    base_url = str(cfg.get("base_url") or "").strip()
+    if base_url:
+        config_pairs.append((f"{provider_key}.base_url", base_url))
+
+    args: list[str] = []
+    for key, value in config_pairs:
+        args.extend(["-c", f"{key}={_toml_config_value(value)}"])
+    return args
+
+
 async def complete_text(
     prompt: str,
     llm_cfg: dict,
@@ -334,12 +373,6 @@ async def _complete_via_claude_cli(prompt: str, llm_cfg: dict, cwd: Path | None)
 
 
 async def _complete_via_codex_cli(prompt: str, llm_cfg: dict, cwd: Path | None) -> str:
-    env = os.environ.copy()
-    if llm_cfg.get("api_key"):
-        env["OPENAI_API_KEY"] = str(llm_cfg["api_key"])
-    if llm_cfg.get("base_url"):
-        env["OPENAI_BASE_URL"] = str(llm_cfg["base_url"])
-
     codex_exe = shutil.which("codex.cmd" if os.name == "nt" else "codex") or shutil.which("codex")
     if not codex_exe:
         raise RuntimeError("未找到 Codex CLI，请先安装并确保 codex 可执行文件在 PATH 中")
@@ -347,6 +380,8 @@ async def _complete_via_codex_cli(prompt: str, llm_cfg: dict, cwd: Path | None) 
     cmd = [
         codex_exe,
         "exec",
+        *_build_codex_cli_provider_config_args(llm_cfg),
+        "--ignore-user-config",
         "--full-auto",
         "--color",
         "never",
@@ -380,7 +415,7 @@ async def _complete_via_codex_cli(prompt: str, llm_cfg: dict, cwd: Path | None) 
                     capture_output=True,
                     timeout=CLI_COMPLETION_TIMEOUT_SECONDS,
                     cwd=str(cwd) if cwd else None,
-                    env=env,
+                    env=_build_codex_cli_env(llm_cfg),
                 ),
             ),
             timeout=CLI_WAIT_TIMEOUT_SECONDS,
