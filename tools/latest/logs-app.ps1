@@ -167,6 +167,27 @@ function Get-ProjectName {
     return "agentthespire-app"
 }
 
+function Convert-PathForComposeEnv {
+    param([string]$Path)
+    return ([System.IO.Path]::GetFullPath($Path) -replace "\\", "/")
+}
+
+function Ensure-DockerEnvPlatformRuntimeDir {
+    param([hashtable]$Layout, [string]$EnvFile)
+    if (-not (Test-Path -LiteralPath $EnvFile)) {
+        return
+    }
+    $content = Get-Content -LiteralPath $EnvFile -Raw -Encoding UTF8
+    if ($content -match "(?m)^ATS_PLATFORM_RUNTIME_DIR=") {
+        return
+    }
+    $platformRuntimeDir = Join-Path $Layout.ConfigRoot "platform"
+    New-Item -ItemType Directory -Path $platformRuntimeDir -Force | Out-Null
+    Add-Content -LiteralPath $EnvFile -Encoding UTF8 -Value (
+        "ATS_PLATFORM_RUNTIME_DIR=$(Convert-PathForComposeEnv -Path $platformRuntimeDir)"
+    )
+}
+
 function Get-LocalLogFiles {
     param([hashtable]$Layout, [string]$SelectedService)
     $logRoot = Join-Path $Layout.ConfigRoot "logs"
@@ -238,6 +259,7 @@ function Invoke-DockerLogs {
         Write-Host "Docker env file does not exist; skipping Docker logs: $EnvFile"
         return
     }
+    Ensure-DockerEnvPlatformRuntimeDir -Layout $Layout -EnvFile $EnvFile
 
     $services = if ($SelectedService -eq "all") { @("postgres", "web-workstation", "web") } else { @($SelectedService) }
     $services = @($services | Where-Object { $_ -in @("postgres", "web-workstation", "web") })

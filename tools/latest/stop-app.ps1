@@ -128,6 +128,27 @@ function Get-ProjectName {
     return "agentthespire-app"
 }
 
+function Convert-PathForComposeEnv {
+    param([string]$Path)
+    return ([System.IO.Path]::GetFullPath($Path) -replace "\\", "/")
+}
+
+function Ensure-DockerEnvPlatformRuntimeDir {
+    param([hashtable]$Layout, [string]$EnvFile)
+    if (-not (Test-Path -LiteralPath $EnvFile)) {
+        return
+    }
+    $content = Get-Content -LiteralPath $EnvFile -Raw -Encoding UTF8
+    if ($content -match "(?m)^ATS_PLATFORM_RUNTIME_DIR=") {
+        return
+    }
+    $platformRuntimeDir = Join-Path $Layout.ConfigRoot "platform"
+    New-Item -ItemType Directory -Path $platformRuntimeDir -Force | Out-Null
+    Add-Content -LiteralPath $EnvFile -Encoding UTF8 -Value (
+        "ATS_PLATFORM_RUNTIME_DIR=$(Convert-PathForComposeEnv -Path $platformRuntimeDir)"
+    )
+}
+
 $layout = Resolve-AppLayout -PreferredReleaseRoot $ReleaseRoot
 $configPathResolved = Get-ConfigPath -Layout $layout -PreferredPath $ConfigPath
 $statePath = Join-Path $layout.ConfigRoot "app-deploy-state.json"
@@ -151,6 +172,7 @@ if (Test-Path -LiteralPath $statePath) {
 
 $envFile = Join-Path (Join-Path $layout.ConfigRoot "generated") "docker.env"
 if ((Test-Path -LiteralPath $layout.ComposeFile) -and (Test-Path -LiteralPath $envFile) -and (Get-Command docker -ErrorAction SilentlyContinue)) {
+    Ensure-DockerEnvPlatformRuntimeDir -Layout $layout -EnvFile $envFile
     $projectName = Get-ProjectName -Path $configPathResolved
     Push-Location $layout.Root
     try {

@@ -12,6 +12,7 @@ GITIGNORE_PATH = REPO_ROOT / ".gitignore"
 COMPOSE_APP_PATH = REPO_ROOT / "tools" / "latest" / "templates" / "compose.app.yml"
 DEPLOY_APP_PATH = REPO_ROOT / "tools" / "latest" / "deploy-app.ps1"
 LOGS_APP_PATH = REPO_ROOT / "tools" / "latest" / "logs-app.ps1"
+STOP_APP_PATH = REPO_ROOT / "tools" / "latest" / "stop-app.ps1"
 
 
 def _run_tools(*args: str) -> subprocess.CompletedProcess[str]:
@@ -312,6 +313,15 @@ def test_deploy_app_writes_shared_web_knowledge_dir_env() -> None:
         '"ATS_WEB_WORKSTATION_RUNTIME_DIR=$(Convert-PathForComposeEnv -Path (Join-Path $Layout.ConfigRoot \'web-workstation\'))"'
         in source
     )
+
+
+def test_stop_and_logs_app_backfill_platform_runtime_env_for_existing_docker_env() -> None:
+    for path in (STOP_APP_PATH, LOGS_APP_PATH):
+        source = path.read_text(encoding="utf-8-sig")
+
+        assert "function Ensure-DockerEnvPlatformRuntimeDir" in source
+        assert "ATS_PLATFORM_RUNTIME_DIR=$(Convert-PathForComposeEnv -Path $platformRuntimeDir)" in source
+        assert 'Join-Path $Layout.ConfigRoot "platform"' in source
 
 
 def test_deploy_app_merges_legacy_web_knowledge_before_generating_env() -> None:
