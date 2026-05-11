@@ -64,6 +64,7 @@ pub fn run() {
             commands::health::get_health,
             commands::capabilities::get_local_capabilities_sync,
             commands::capabilities::get_local_capabilities_full,
+            commands::mod_analyzer::analyze_mod_project,
             commands::knowledge::get_knowledge_status,
             commands::knowledge::check_knowledge_status,
             commands::knowledge::export_knowledge_pack,

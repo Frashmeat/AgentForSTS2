@@ -8,6 +8,7 @@ pub mod codegen;
 pub mod health;
 pub mod knowledge;
 pub mod llm;
+pub mod mod_analyzer;
 pub mod planning;
 pub mod platform;
 pub mod project;

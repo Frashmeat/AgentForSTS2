@@ -65,6 +65,9 @@ export function importKnowledgePack(
 ): Promise<never> {
   return Promise.resolve().then(() => desktopOnly("importKnowledgePack"));
 }
+export function analyzeModProject(_projectRoot: string): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("analyzeModProject"));
+}
 
 export async function validatePlan(
   plan: ModPlan,

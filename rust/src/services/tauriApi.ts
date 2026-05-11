@@ -112,6 +112,36 @@ export function importKnowledgePack(
   });
 }
 
+// -------- mod_analyzer --------
+
+export interface CsprojSummary {
+  targetFramework: string | null;
+  sdk: string | null;
+  packageReferences: string[];
+}
+
+export interface ModMeta {
+  name: string | null;
+  author: string | null;
+  version: string | null;
+  rawExcerpt: string;
+}
+
+export interface ModAnalysisReport {
+  projectRoot: string;
+  csprojPath: string | null;
+  csprojSummary: CsprojSummary | null;
+  modMeta: ModMeta | null;
+  csFilesCount: number;
+  csTotalBytes: number;
+  artifactsCount: number;
+  warnings: string[];
+}
+
+export function analyzeModProject(projectRoot: string): Promise<ModAnalysisReport> {
+  return invoke<ModAnalysisReport>("analyze_mod_project", { projectRoot });
+}
+
 // -------- Planning --------
 
 export type AssetItemType =

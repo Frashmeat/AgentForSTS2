@@ -12,6 +12,7 @@ pub mod image_gen;
 pub mod image_proc;
 pub mod knowledge;
 pub mod llm;
+pub mod mod_analyzer;
 pub mod planning;
 pub mod platform;
 pub mod project;
