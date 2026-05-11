@@ -68,6 +68,26 @@ export function importKnowledgePack(
 export function analyzeModProject(_projectRoot: string): Promise<never> {
   return Promise.resolve().then(() => desktopOnly("analyzeModProject"));
 }
+export function auditAppend(
+  _kind: string,
+  _message: string,
+  _refId?: string,
+  _data?: unknown,
+): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("auditAppend"));
+}
+export function auditReadRecent(_limit: number): Promise<never[]> {
+  return Promise.resolve([]);
+}
+export function planArtifactSave(_status: unknown): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("planArtifactSave"));
+}
+export function planArtifactLoad(_itemId: string): Promise<null> {
+  return Promise.resolve(null);
+}
+export function planArtifactList(): Promise<never[]> {
+  return Promise.resolve([]);
+}
 
 export async function validatePlan(
   plan: ModPlan,

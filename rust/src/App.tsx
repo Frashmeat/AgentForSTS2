@@ -1,35 +1,22 @@
-import { CapabilitiesCard } from "@/components/CapabilitiesCard";
-import { CodegenCard } from "@/components/CodegenCard";
-import { HealthCard } from "@/components/HealthCard";
-import { JobsCard } from "@/components/JobsCard";
-import { KnowledgeCard } from "@/components/KnowledgeCard";
-import { LlmCard } from "@/components/LlmCard";
-import { PlanningCard } from "@/components/PlanningCard";
-import { ProjectCard } from "@/components/ProjectCard";
-import { SingleAssetWorkflowCard } from "@/components/SingleAssetWorkflowCard";
+import { HashRouter, Route, Routes } from "react-router-dom";
+
+import { Layout } from "@/components/Layout";
+import { BatchGenerationPage } from "@/pages/BatchGenerationPage";
+import { DashboardPage } from "@/pages/DashboardPage";
+import { LogAnalysisPage } from "@/pages/LogAnalysisPage";
+import { ModEditorPage } from "@/pages/ModEditorPage";
 
 export default function App() {
   return (
-    <div className="min-h-screen p-8 max-w-3xl space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold">AgentTheSpire</h1>
-        <p className="text-muted mt-1">
-          Rust + Tauri rewrite — version {__APP_VERSION__}
-        </p>
-        <p className="text-muted text-sm">
-          Runtime: {__IS_TAURI__ ? "Tauri desktop (workstation)" : "Web browser"}
-        </p>
-      </header>
-
-      <HealthCard />
-      <CapabilitiesCard />
-      <ProjectCard />
-      <SingleAssetWorkflowCard />
-      <JobsCard />
-      <KnowledgeCard />
-      <PlanningCard />
-      <CodegenCard />
-      <LlmCard />
-    </div>
+    <HashRouter>
+      <Routes>
+        <Route element={<Layout />}>
+          <Route index element={<DashboardPage />} />
+          <Route path="editor" element={<ModEditorPage />} />
+          <Route path="batch" element={<BatchGenerationPage />} />
+          <Route path="log" element={<LogAnalysisPage />} />
+        </Route>
+      </Routes>
+    </HashRouter>
   );
 }

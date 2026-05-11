@@ -149,6 +149,63 @@ export function analyzeModProject(projectRoot: string): Promise<ModAnalysisRepor
   return invoke<ModAnalysisReport>("analyze_mod_project", { projectRoot });
 }
 
+// -------- Audit + PlanArtifact --------
+
+export interface AuditEntry {
+  timestamp: string;
+  kind: string;
+  message: string;
+  refId?: string | null;
+  data?: unknown;
+}
+
+export type ArtifactState =
+  | "pending"
+  | "in_progress"
+  | "generated"
+  | "reviewed"
+  | "failed";
+
+export interface ArtifactStatus {
+  itemId: string;
+  state: ArtifactState;
+  updatedAt: string;
+  lastJobId?: string | null;
+  csPath?: string | null;
+  pngPath?: string | null;
+  note?: string | null;
+}
+
+export function auditAppend(
+  kind: string,
+  message: string,
+  refId?: string,
+  data?: unknown,
+): Promise<void> {
+  return invoke<void>("audit_append", {
+    kind,
+    message,
+    refId: refId ?? null,
+    data: data ?? null,
+  });
+}
+
+export function auditReadRecent(limit: number): Promise<AuditEntry[]> {
+  return invoke<AuditEntry[]>("audit_read_recent", { limit });
+}
+
+export function planArtifactSave(status: ArtifactStatus): Promise<void> {
+  return invoke<void>("plan_artifact_save", { status });
+}
+
+export function planArtifactLoad(itemId: string): Promise<ArtifactStatus | null> {
+  return invoke<ArtifactStatus | null>("plan_artifact_load", { itemId });
+}
+
+export function planArtifactList(): Promise<ArtifactStatus[]> {
+  return invoke<ArtifactStatus[]>("plan_artifact_list");
+}
+
 // -------- Planning --------
 
 export type AssetItemType =
