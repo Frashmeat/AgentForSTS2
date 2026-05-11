@@ -54,6 +54,7 @@ pub enum JobKind {
     PackageProject,
     SingleAssetPlan,
     LogAnalysis,
+    KnowledgeRefresh,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]

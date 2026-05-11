@@ -8,16 +8,16 @@ use std::sync::Arc;
 
 use super::handlers::{
     ProgressSink, batch_custom_code::run_batch_custom_code, build_project::run_build_project,
-    code_generate::run_code_generate, log_analysis::run_log_analysis,
-    package_project::run_package_project, single_asset_plan::run_single_asset_plan,
-    text_generate::run_text_generate,
+    code_generate::run_code_generate, knowledge_refresh::run_knowledge_refresh,
+    log_analysis::run_log_analysis, package_project::run_package_project,
+    single_asset_plan::run_single_asset_plan, text_generate::run_text_generate,
 };
 use crate::knowledge::KnowledgePaths;
 use crate::llm::LlmClient;
 use crate::platform::contracts::{
     SubmitBatchCustomCodeRequest, SubmitBuildProjectRequest, SubmitCodeGenerateRequest,
-    SubmitLogAnalysisRequest, SubmitPackageProjectRequest, SubmitSingleAssetPlanRequest,
-    SubmitTextGenerateRequest,
+    SubmitKnowledgeRefreshRequest, SubmitLogAnalysisRequest, SubmitPackageProjectRequest,
+    SubmitSingleAssetPlanRequest, SubmitTextGenerateRequest,
 };
 use crate::platform::domain::{
     Job, JobError, JobId, JobKind, JobRepository, JobResult, JobStatus, JobSummary,
@@ -112,6 +112,30 @@ impl JobApplicationService {
                 artifacts_dir,
             )
             .await;
+        });
+
+        Ok(job_id)
+    }
+
+    /// 提交 knowledge_refresh 任务：跑 ilspycmd 把 sts2.dll 反编译到 game 目录，
+    /// 并更新 knowledge-manifest.json。`force=false` 时若 manifest 与当前 dll 元数据
+    /// 一致则跳过子进程直接 Completed。
+    pub async fn submit_knowledge_refresh(
+        &self,
+        request: SubmitKnowledgeRefreshRequest,
+        knowledge_paths: KnowledgePaths,
+        sink: Arc<dyn ProgressSink>,
+    ) -> JobResult<JobId> {
+        let payload = serde_json::to_value(&request)
+            .map_err(|e| JobError::Storage(format!("serialize request: {e}")))?;
+        let job = Job::new(JobKind::KnowledgeRefresh, payload);
+        let job_id = job.id.clone();
+        self.repo.create(&job).await?;
+
+        let repo = Arc::clone(&self.repo);
+        let id_for_task = job_id.clone();
+        tokio::spawn(async move {
+            run_knowledge_refresh(repo, sink, id_for_task, request, knowledge_paths).await;
         });
 
         Ok(job_id)

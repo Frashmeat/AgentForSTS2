@@ -87,6 +87,7 @@ pub fn run() {
             commands::platform::submit_package_project_job,
             commands::platform::submit_batch_custom_code_job,
             commands::platform::submit_single_asset_plan_job,
+            commands::platform::submit_knowledge_refresh_job,
             commands::platform::get_job,
             commands::platform::list_jobs,
             commands::platform::cancel_job,

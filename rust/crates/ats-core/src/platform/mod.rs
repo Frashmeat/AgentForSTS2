@@ -27,8 +27,8 @@ pub mod infra;
 pub use application::{JobApplicationService, ProgressEvent, ProgressSink, NoopProgressSink};
 pub use contracts::{
     SubmitBatchCustomCodeRequest, SubmitBuildProjectRequest, SubmitCodeGenerateRequest,
-    SubmitJobAck, SubmitLogAnalysisRequest, SubmitPackageProjectRequest,
-    SubmitSingleAssetPlanRequest, SubmitTextGenerateRequest,
+    SubmitJobAck, SubmitKnowledgeRefreshRequest, SubmitLogAnalysisRequest,
+    SubmitPackageProjectRequest, SubmitSingleAssetPlanRequest, SubmitTextGenerateRequest,
 };
 pub use domain::{
     Job, JobError, JobId, JobKind, JobProgress, JobRepository, JobResult, JobStatus, JobSummary,

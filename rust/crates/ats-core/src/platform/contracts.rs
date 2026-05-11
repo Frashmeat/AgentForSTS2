@@ -9,6 +9,7 @@
 //! - package_project（artifacts 目录 → zip）
 //! - batch_custom_code（多 item 套 code_generate）
 //! - single_asset_plan（LLM → 结构化 PlanItem）
+//! - knowledge_refresh（ilspycmd 反编译 sts2.dll → 落产物 + 更新 manifest）
 
 use std::path::PathBuf;
 
@@ -88,6 +89,19 @@ pub struct SubmitSingleAssetPlanRequest {
     /// 留空时由 LLM 自行判断。
     pub asset_type: Option<String>,
     pub max_tokens: Option<u32>,
+}
+
+/// knowledge_refresh 任务的输入：反编译 sts2.dll 到知识库的 game 目录。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "snake_case")]
+pub struct SubmitKnowledgeRefreshRequest {
+    /// STS2 安装中的 game dll 路径（一般是 sts2.dll 或 Assembly-CSharp.dll）。
+    pub sts2_dll_path: PathBuf,
+    /// 明确指定 ilspycmd 可执行路径；为 None 时走自动发现
+    /// （PATH + ~/.dotnet/tools）。
+    pub ilspycmd_path: Option<PathBuf>,
+    /// 即使 manifest 显示当前产物已是最新，仍强制重新反编译。
+    pub force: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

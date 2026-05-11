@@ -11,8 +11,8 @@ use ats_core::llm::{AnthropicClient, LlmClient, RetryConfig, RetryingClient};
 use ats_core::platform::{
     FileJobRepository, Job, JobApplicationService, JobId, JobSummary, ProgressEvent, ProgressSink,
     SubmitBatchCustomCodeRequest, SubmitBuildProjectRequest, SubmitCodeGenerateRequest,
-    SubmitJobAck, SubmitLogAnalysisRequest, SubmitPackageProjectRequest,
-    SubmitSingleAssetPlanRequest, SubmitTextGenerateRequest,
+    SubmitJobAck, SubmitKnowledgeRefreshRequest, SubmitLogAnalysisRequest,
+    SubmitPackageProjectRequest, SubmitSingleAssetPlanRequest, SubmitTextGenerateRequest,
 };
 use async_trait::async_trait;
 use tauri::{AppHandle, Emitter, State};
@@ -86,6 +86,23 @@ pub async fn submit_code_generate_job(
     let knowledge_paths = KnowledgePaths::from_runtime_dir(&config.status.runtime_dir());
     let job_id = service
         .submit_code_generate(request, knowledge_paths, artifacts_dir, sink)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(SubmitJobAck { job_id })
+}
+
+#[tauri::command]
+pub async fn submit_knowledge_refresh_job(
+    app: AppHandle,
+    config: State<'_, AppConfig>,
+    active: State<'_, ActiveProject>,
+    request: SubmitKnowledgeRefreshRequest,
+) -> Result<SubmitJobAck, String> {
+    let service = build_service(&config, &active)?;
+    let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
+    let knowledge_paths = KnowledgePaths::from_runtime_dir(&config.status.runtime_dir());
+    let job_id = service
+        .submit_knowledge_refresh(request, knowledge_paths, sink)
         .await
         .map_err(|e| e.to_string())?;
     Ok(SubmitJobAck { job_id })
