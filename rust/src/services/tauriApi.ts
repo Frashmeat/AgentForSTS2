@@ -248,3 +248,67 @@ export function codegenCreateModProjectPrompt(
 export function codegenPackagePrompt(): Promise<string> {
   return invoke<string>("codegen_package_prompt");
 }
+
+// -------- LLM --------
+
+export type MessageRole = "system" | "user" | "assistant";
+export type FinishReason =
+  | "end_turn"
+  | "max_tokens"
+  | "stop_sequence"
+  | "tool_use"
+  | "other";
+
+export interface LlmMessage {
+  role: MessageRole;
+  content: string;
+}
+
+export interface CompletionRequest {
+  messages: LlmMessage[];
+  system_prompt?: string | null;
+  max_tokens: number;
+  temperature?: number | null;
+  model?: string | null;
+}
+
+export interface Usage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export interface CompletionResponse {
+  model: string;
+  content: string;
+  finishReason: FinishReason;
+  usage: Usage;
+}
+
+export type StreamEvent =
+  | { kind: "start"; model: string }
+  | { kind: "delta"; text: string }
+  | { kind: "end"; finishReason: FinishReason; usage: Usage };
+
+export function llmComplete(request: CompletionRequest): Promise<CompletionResponse> {
+  return invoke<CompletionResponse>("llm_complete", { request });
+}
+
+/**
+ * 启动流式补全。后端通过 Tauri 事件 `llm-stream` 推送 chunk，前端用
+ * `@tauri-apps/api/event` 的 listen 接收，按 request_id 过滤。
+ *
+ * 调用方传入唯一 request_id（uuid 或时间戳），命令本身立刻返回；
+ * 实际数据通过事件流到达。Web 端 webApi 走 SSE 实现相同语义。
+ */
+export function llmStartStream(
+  requestId: string,
+  request: CompletionRequest,
+): Promise<void> {
+  return invoke<void>("llm_start_stream", { requestId, request });
+}
+
+/** Tauri 事件 payload —— 与 src-tauri/src/commands/llm.rs::StreamPayload 一致 */
+export type LlmStreamPayload =
+  | { type: "event"; request_id: string; event: StreamEvent }
+  | { type: "error"; request_id: string; message: string }
+  | { type: "done"; request_id: string };

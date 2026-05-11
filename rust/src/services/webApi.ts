@@ -4,6 +4,8 @@ import type {
   AssetCodegenRequest,
   AssetGroupRequest,
   BundleDecision,
+  CompletionRequest,
+  CompletionResponse,
   CustomCodegenRequest,
   ExecutionPlanPreview,
   HealthReport,
@@ -122,4 +124,29 @@ export function codegenCreateModProjectPrompt(
 
 export function codegenPackagePrompt(): Promise<string> {
   return codegenPost("package-prompt", {});
+}
+
+export async function llmComplete(
+  request: CompletionRequest,
+): Promise<CompletionResponse> {
+  const response = await fetch(`${API_BASE}/llm/complete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    throw new Error(`${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<CompletionResponse>;
+}
+
+/**
+ * Web 端流式 stub —— SSE 集成待 stage 4.2。当前直接走非流式 fallback。
+ * 当 LlmCard 仅调 llmComplete 时不会触发此分支。
+ */
+export async function llmStartStream(
+  _requestId: string,
+  _request: CompletionRequest,
+): Promise<void> {
+  throw new Error("Web streaming not yet wired (use llmComplete for now)");
 }

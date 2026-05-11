@@ -44,6 +44,8 @@ pub fn run() {
             commands::codegen::codegen_build_prompt,
             commands::codegen::codegen_create_mod_project_prompt,
             commands::codegen::codegen_package_prompt,
+            commands::llm::llm_complete,
+            commands::llm::llm_start_stream,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

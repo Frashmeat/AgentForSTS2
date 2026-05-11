@@ -2,4 +2,5 @@
 
 pub mod codegen;
 pub mod knowledge;
+pub mod llm;
 pub mod planning;

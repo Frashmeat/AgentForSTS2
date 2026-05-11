@@ -33,6 +33,8 @@ struct Args {
 pub struct AppState {
     pub config_status: ConfigStatus,
     pub runtime_dir: PathBuf,
+    /// 启动期加载的 Settings 快照，路由从此读 llm/auth 等字段。
+    pub settings_snapshot: Option<Settings>,
 }
 
 async fn health_handler(
@@ -73,21 +75,22 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let runtime_dir = config_status.runtime_dir();
-    let app_state = Arc::new(AppState {
-        config_status: config_status.clone(),
-        runtime_dir,
-    });
-
     let host = args
         .host
         .unwrap_or_else(|| settings.runtime.web.host.clone());
     let port = args.port.unwrap_or(settings.runtime.web.port);
+    let app_state = Arc::new(AppState {
+        config_status: config_status.clone(),
+        runtime_dir,
+        settings_snapshot: Some(settings),
+    });
 
     let api = Router::new()
         .route("/api/health", get(health_handler))
         .merge(routes::knowledge::router())
         .merge(routes::planning::router())
         .merge(routes::codegen::router())
+        .merge(routes::llm::router())
         .layer(Extension(Arc::clone(&app_state)));
 
     let app = Router::new()

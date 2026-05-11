@@ -8,6 +8,7 @@ pub mod config;
 pub mod errors;
 pub mod health;
 pub mod knowledge;
+pub mod llm;
 pub mod planning;
 pub mod prompting;
 
