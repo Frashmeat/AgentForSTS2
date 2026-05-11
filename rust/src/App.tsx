@@ -1,5 +1,6 @@
 import { CodegenCard } from "@/components/CodegenCard";
 import { HealthCard } from "@/components/HealthCard";
+import { JobsCard } from "@/components/JobsCard";
 import { KnowledgeCard } from "@/components/KnowledgeCard";
 import { LlmCard } from "@/components/LlmCard";
 import { PlanningCard } from "@/components/PlanningCard";
@@ -20,6 +21,7 @@ export default function App() {
 
       <HealthCard />
       <ProjectCard />
+      <JobsCard />
       <KnowledgeCard />
       <PlanningCard />
       <CodegenCard />

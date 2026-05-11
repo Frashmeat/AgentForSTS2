@@ -1,0 +1,131 @@
+//! Platform commands —— Job 生命周期 + text_generate 提交。
+//!
+//! Repository 用 ActiveProject 的 history_dir 作存储路径；切换项目时下条提交
+//! 会落到新工程。LLM client 每次新建（Arc 包裹的开销极小，避免与配置变更竞态）。
+
+use std::sync::Arc;
+
+use ats_core::llm::{AnthropicClient, LlmClient, RetryConfig, RetryingClient};
+use ats_core::platform::{
+    FileJobRepository, Job, JobApplicationService, JobId, JobSummary, ProgressEvent, ProgressSink,
+    SubmitJobAck, SubmitTextGenerateRequest,
+};
+use async_trait::async_trait;
+use tauri::{AppHandle, Emitter, State};
+
+use crate::commands::project::ActiveProject;
+use crate::AppConfig;
+
+const JOB_PROGRESS_EVENT: &str = "job-progress";
+
+#[tauri::command]
+pub async fn submit_text_generate_job(
+    app: AppHandle,
+    config: State<'_, AppConfig>,
+    active: State<'_, ActiveProject>,
+    request: SubmitTextGenerateRequest,
+) -> Result<SubmitJobAck, String> {
+    let service = build_service(&config, &active)?;
+    let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
+    let job_id = service
+        .submit_text_generate(request, sink)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(SubmitJobAck { job_id })
+}
+
+#[tauri::command]
+pub async fn get_job(
+    config: State<'_, AppConfig>,
+    active: State<'_, ActiveProject>,
+    id: String,
+) -> Result<Job, String> {
+    let service = build_service(&config, &active)?;
+    service
+        .get(&JobId(id))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn list_jobs(
+    config: State<'_, AppConfig>,
+    active: State<'_, ActiveProject>,
+) -> Result<Vec<JobSummary>, String> {
+    let service = build_service(&config, &active)?;
+    service.list().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn cancel_job(
+    config: State<'_, AppConfig>,
+    active: State<'_, ActiveProject>,
+    id: String,
+) -> Result<(), String> {
+    let service = build_service(&config, &active)?;
+    service
+        .cancel(&JobId(id))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+fn build_service(
+    config: &State<'_, AppConfig>,
+    active: &State<'_, ActiveProject>,
+) -> Result<JobApplicationService, String> {
+    let history_dir = {
+        let guard = active
+            .0
+            .lock()
+            .map_err(|e| format!("active project lock poisoned: {e}"))?;
+        let project = guard
+            .as_ref()
+            .ok_or_else(|| "no active project — open or create one first".to_string())?;
+        project.history_dir()
+    };
+    let repo = Arc::new(FileJobRepository::new(history_dir));
+    let llm = build_llm_client(config)?;
+    Ok(JobApplicationService::new(repo, llm))
+}
+
+fn build_llm_client(config: &State<'_, AppConfig>) -> Result<Arc<dyn LlmClient>, String> {
+    let settings = &config.settings;
+    let api_key = settings.llm.api_key.clone();
+    if api_key.is_empty() {
+        return Err("llm.api_key not configured".into());
+    }
+    let model = if settings.llm.model.is_empty() {
+        "claude-opus-4-1-20250805".to_string()
+    } else {
+        settings.llm.model.clone()
+    };
+    let base_url = if settings.llm.base_url.is_empty() {
+        None
+    } else {
+        Some(settings.llm.base_url.clone())
+    };
+    let client = AnthropicClient::new(api_key, model, base_url).map_err(|e| e.to_string())?;
+    Ok(Arc::new(RetryingClient::new(
+        Arc::new(client),
+        RetryConfig::default(),
+    )))
+}
+
+struct TauriProgressSink {
+    app: AppHandle,
+}
+
+impl TauriProgressSink {
+    fn new(app: AppHandle) -> Self {
+        Self { app }
+    }
+}
+
+#[async_trait]
+impl ProgressSink for TauriProgressSink {
+    async fn emit(&self, event: ProgressEvent) {
+        if let Err(e) = self.app.emit(JOB_PROGRESS_EVENT, &event) {
+            eprintln!("job-progress emit failed: {e}");
+        }
+    }
+}

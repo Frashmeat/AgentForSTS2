@@ -80,6 +80,10 @@ pub fn run() {
             commands::project::close_project,
             commands::project::current_project,
             commands::project::forget_recent_project,
+            commands::platform::submit_text_generate_job,
+            commands::platform::get_job,
+            commands::platform::list_jobs,
+            commands::platform::cancel_job,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

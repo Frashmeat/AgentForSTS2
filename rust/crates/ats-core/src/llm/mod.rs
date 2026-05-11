@@ -11,7 +11,7 @@ mod retry;
 
 pub use anthropic::AnthropicClient;
 pub use client::{
-    CompletionRequest, CompletionResponse, FinishReason, LlmClient, LlmError, Message,
-    MessageRole, StreamEvent, Usage,
+    CompletionRequest, CompletionResponse, CompletionStream, FinishReason, LlmClient, LlmError,
+    Message, MessageRole, StreamEvent, Usage,
 };
 pub use retry::{RetryConfig, RetryingClient};

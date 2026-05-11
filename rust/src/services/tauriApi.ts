@@ -360,3 +360,91 @@ export function currentProject(): Promise<ProjectSnapshot | null> {
 export function forgetRecentProject(path: string): Promise<void> {
   return invoke<void>("forget_recent_project", { path });
 }
+
+// -------- Platform Jobs --------
+
+export type JobKind =
+  | "text_generate"
+  | "code_generate"
+  | "asset_generate"
+  | "batch_custom_code"
+  | "build_project"
+  | "package_project"
+  | "single_asset_plan"
+  | "log_analysis";
+
+export type JobStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export interface JobProgressFields {
+  stage: string;
+  percent: number | null;
+  message: string | null;
+}
+
+export interface Job {
+  id: string;
+  kind: JobKind;
+  status: JobStatus;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  payload: unknown;
+  result: unknown;
+  error: string | null;
+  progress: JobProgressFields | null;
+  attempts: number;
+}
+
+export interface JobSummary {
+  id: string;
+  kind: JobKind;
+  status: JobStatus;
+  createdAt: string;
+  completedAt: string | null;
+  progress: JobProgressFields | null;
+  error: string | null;
+}
+
+export interface SubmitTextGenerateRequest {
+  prompt: string;
+  system_prompt?: string | null;
+  max_tokens?: number | null;
+  temperature?: number | null;
+  model?: string | null;
+}
+
+export interface SubmitJobAck {
+  jobId: string;
+}
+
+/** ProgressSink::emit 推送的事件（job-progress） */
+export interface JobProgressEvent {
+  jobId: string;
+  stage: string;
+  percent: number | null;
+  message: string | null;
+  delta: string | null;
+}
+
+export function submitTextGenerateJob(
+  request: SubmitTextGenerateRequest,
+): Promise<SubmitJobAck> {
+  return invoke<SubmitJobAck>("submit_text_generate_job", { request });
+}
+
+export function getJob(id: string): Promise<Job> {
+  return invoke<Job>("get_job", { id });
+}
+
+export function listJobs(): Promise<JobSummary[]> {
+  return invoke<JobSummary[]>("list_jobs");
+}
+
+export function cancelJob(id: string): Promise<void> {
+  return invoke<void>("cancel_job", { id });
+}
