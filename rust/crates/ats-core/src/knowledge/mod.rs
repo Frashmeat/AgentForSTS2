@@ -16,6 +16,7 @@ mod contracts;
 mod decompile;
 mod manifest;
 mod models;
+pub mod pack;
 mod paths;
 mod runtime;
 mod sts2_code_facts_provider;

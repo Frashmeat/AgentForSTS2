@@ -1,11 +1,19 @@
 import { useEffect, useState } from "react";
 import { api } from "@/services/api";
-import type { KnowledgeStatus } from "@/services/tauriApi";
+import type {
+  ExportPackStats,
+  ImportPackStats,
+  KnowledgeStatus,
+} from "@/services/tauriApi";
 
 export function KnowledgeCard() {
   const [knowledge, setKnowledge] = useState<KnowledgeStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
+  const [packPath, setPackPath] = useState("");
+  const [packMsg, setPackMsg] = useState<string | null>(null);
+  const [packBusy, setPackBusy] = useState(false);
+  const [overwriteOnImport, setOverwriteOnImport] = useState(false);
 
   useEffect(() => {
     (api.getKnowledgeStatus() as Promise<KnowledgeStatus>)
@@ -23,6 +31,50 @@ export function KnowledgeCard() {
       setError(String(e));
     } finally {
       setChecking(false);
+    }
+  }
+
+  async function handleExport() {
+    if (!packPath.trim()) {
+      setPackMsg("先填写一个目标 .zip 路径");
+      return;
+    }
+    setPackBusy(true);
+    setPackMsg(null);
+    try {
+      const stats = (await api.exportKnowledgePack(packPath.trim())) as ExportPackStats;
+      setPackMsg(
+        `✓ 导出成功：${stats.gameFiles} game 文件 + ${stats.baselibIncluded ? "baselib" : "无 baselib"}，${stats.zipBytes} bytes → ${stats.outputPath}`,
+      );
+    } catch (e: unknown) {
+      setPackMsg(`✗ 导出失败：${String(e)}`);
+    } finally {
+      setPackBusy(false);
+    }
+  }
+
+  async function handleImport() {
+    if (!packPath.trim()) {
+      setPackMsg("先填写一个源 .zip 路径");
+      return;
+    }
+    setPackBusy(true);
+    setPackMsg(null);
+    try {
+      const stats = (await api.importKnowledgePack(
+        packPath.trim(),
+        overwriteOnImport,
+      )) as ImportPackStats;
+      setPackMsg(
+        `✓ 导入成功：${stats.gameFilesWritten} game 文件 + baselib=${stats.baselibWritten} + manifest=${stats.manifestReplaced}`,
+      );
+      // 刷新状态显示
+      const next = (await api.getKnowledgeStatus()) as KnowledgeStatus;
+      setKnowledge(next);
+    } catch (e: unknown) {
+      setPackMsg(`✗ 导入失败：${String(e)}`);
+    } finally {
+      setPackBusy(false);
     }
   }
 
@@ -101,6 +153,50 @@ export function KnowledgeCard() {
               {knowledge.embeddedTemplates.join(", ")}
             </span>
           </p>
+
+          {__IS_TAURI__ && (
+            <div className="mt-4 pt-3 border-t border-muted/20 space-y-2">
+              <p className="text-sm font-medium">Knowledge pack</p>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="text-muted text-xs">ZIP 路径（导出目标 / 导入源）</span>
+                <input
+                  value={packPath}
+                  onChange={(e) => setPackPath(e.target.value)}
+                  placeholder="E:/share/sts2-knowledge.zip"
+                  className="px-2 py-1 rounded border border-muted/30 bg-transparent font-mono text-xs"
+                />
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={overwriteOnImport}
+                  onChange={(e) => setOverwriteOnImport(e.target.checked)}
+                />
+                <span>导入时覆盖现有 game/baselib（默认拒绝避免误操作）</span>
+              </label>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleExport}
+                  disabled={packBusy}
+                  className="text-xs px-3 py-1 rounded border border-accent/60 text-accent hover:bg-accent/10 disabled:opacity-50"
+                >
+                  Export
+                </button>
+                <button
+                  type="button"
+                  onClick={handleImport}
+                  disabled={packBusy}
+                  className="text-xs px-3 py-1 rounded border border-accent/60 text-accent hover:bg-accent/10 disabled:opacity-50"
+                >
+                  Import
+                </button>
+              </div>
+              {packMsg && (
+                <p className="text-xs whitespace-pre-wrap break-all">{packMsg}</p>
+              )}
+            </div>
+          )}
         </>
       )}
     </section>

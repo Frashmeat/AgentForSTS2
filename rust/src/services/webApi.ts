@@ -53,6 +53,19 @@ export function checkKnowledgeStatus(): Promise<KnowledgeStatus> {
   return postJson<KnowledgeStatus>("/knowledge/check");
 }
 
+export function exportKnowledgePack(
+  _outputPath: string,
+  _machineHint?: string,
+): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("exportKnowledgePack"));
+}
+export function importKnowledgePack(
+  _inputPath: string,
+  _overwrite: boolean,
+): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("importKnowledgePack"));
+}
+
 export async function validatePlan(
   plan: ModPlan,
   strictness: ReviewStrictness = "balanced",

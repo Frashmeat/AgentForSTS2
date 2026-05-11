@@ -79,6 +79,39 @@ export function checkKnowledgeStatus(): Promise<KnowledgeStatus> {
   return invoke<KnowledgeStatus>("check_knowledge_status");
 }
 
+export interface ExportPackStats {
+  outputPath: string;
+  zipBytes: number;
+  gameFiles: number;
+  baselibIncluded: boolean;
+}
+
+export interface ImportPackStats {
+  gameFilesWritten: number;
+  baselibWritten: boolean;
+  manifestReplaced: boolean;
+}
+
+export function exportKnowledgePack(
+  outputPath: string,
+  machineHint?: string,
+): Promise<ExportPackStats> {
+  return invoke<ExportPackStats>("export_knowledge_pack", {
+    outputPath,
+    machineHint: machineHint ?? null,
+  });
+}
+
+export function importKnowledgePack(
+  inputPath: string,
+  overwrite: boolean,
+): Promise<ImportPackStats> {
+  return invoke<ImportPackStats>("import_knowledge_pack", {
+    inputPath,
+    overwrite,
+  });
+}
+
 // -------- Planning --------
 
 export type AssetItemType =

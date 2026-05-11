@@ -66,6 +66,8 @@ pub fn run() {
             commands::capabilities::get_local_capabilities_full,
             commands::knowledge::get_knowledge_status,
             commands::knowledge::check_knowledge_status,
+            commands::knowledge::export_knowledge_pack,
+            commands::knowledge::import_knowledge_pack,
             commands::planning::validate_plan_cmd,
             commands::planning::build_execution_plan_cmd,
             commands::codegen::codegen_asset_prompt,
