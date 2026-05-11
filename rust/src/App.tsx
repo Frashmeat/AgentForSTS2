@@ -5,6 +5,7 @@ import { KnowledgeCard } from "@/components/KnowledgeCard";
 import { LlmCard } from "@/components/LlmCard";
 import { PlanningCard } from "@/components/PlanningCard";
 import { ProjectCard } from "@/components/ProjectCard";
+import { SingleAssetWorkflowCard } from "@/components/SingleAssetWorkflowCard";
 
 export default function App() {
   return (
@@ -21,6 +22,7 @@ export default function App() {
 
       <HealthCard />
       <ProjectCard />
+      <SingleAssetWorkflowCard />
       <JobsCard />
       <KnowledgeCard />
       <PlanningCard />

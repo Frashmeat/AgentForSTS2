@@ -371,7 +371,8 @@ export type JobKind =
   | "build_project"
   | "package_project"
   | "single_asset_plan"
-  | "log_analysis";
+  | "log_analysis"
+  | "knowledge_refresh";
 
 export type JobStatus =
   | "pending"
@@ -468,4 +469,67 @@ export function submitBuildProjectJob(
   request: SubmitBuildProjectRequest,
 ): Promise<SubmitJobAck> {
   return invoke<SubmitJobAck>("submit_build_project_job", { request });
+}
+
+// -------- Phase B/2.2.x Job kinds（stage 3.5 第二轮 + 2.2.1 落地） --------
+
+export interface SubmitLogAnalysisRequest {
+  log_path?: string | null;
+  log_text?: string | null;
+  context_hint?: string | null;
+  max_log_chars?: number | null;
+}
+
+export function submitLogAnalysisJob(
+  request: SubmitLogAnalysisRequest,
+): Promise<SubmitJobAck> {
+  return invoke<SubmitJobAck>("submit_log_analysis_job", { request });
+}
+
+export interface SubmitPackageProjectRequest {
+  source_dir: string;
+  output_path?: string | null;
+  compression_level?: number | null;
+}
+
+export function submitPackageProjectJob(
+  request: SubmitPackageProjectRequest,
+): Promise<SubmitJobAck> {
+  return invoke<SubmitJobAck>("submit_package_project_job", { request });
+}
+
+export interface SubmitBatchCustomCodeRequest {
+  items: CustomCodegenRequest[];
+  fail_fast?: boolean;
+}
+
+export function submitBatchCustomCodeJob(
+  request: SubmitBatchCustomCodeRequest,
+): Promise<SubmitJobAck> {
+  return invoke<SubmitJobAck>("submit_batch_custom_code_job", { request });
+}
+
+export interface SubmitSingleAssetPlanRequest {
+  requirements: string;
+  asset_type?: string | null;
+  max_tokens?: number | null;
+}
+
+export function submitSingleAssetPlanJob(
+  request: SubmitSingleAssetPlanRequest,
+): Promise<SubmitJobAck> {
+  return invoke<SubmitJobAck>("submit_single_asset_plan_job", { request });
+}
+
+export interface SubmitKnowledgeRefreshRequest {
+  sts2_dll_path: string;
+  ilspycmd_path?: string | null;
+  force?: boolean;
+  include_baselib?: boolean;
+}
+
+export function submitKnowledgeRefreshJob(
+  request: SubmitKnowledgeRefreshRequest,
+): Promise<SubmitJobAck> {
+  return invoke<SubmitJobAck>("submit_knowledge_refresh_job", { request });
 }

@@ -193,3 +193,18 @@ export function submitCodeGenerateJob(_request: unknown): Promise<never> {
 export function submitBuildProjectJob(_request: unknown): Promise<never> {
   return Promise.resolve().then(() => desktopOnly("submitBuildProjectJob"));
 }
+export function submitLogAnalysisJob(_request: unknown): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("submitLogAnalysisJob"));
+}
+export function submitPackageProjectJob(_request: unknown): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("submitPackageProjectJob"));
+}
+export function submitBatchCustomCodeJob(_request: unknown): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("submitBatchCustomCodeJob"));
+}
+export function submitSingleAssetPlanJob(_request: unknown): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("submitSingleAssetPlanJob"));
+}
+export function submitKnowledgeRefreshJob(_request: unknown): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("submitKnowledgeRefreshJob"));
+}
