@@ -128,20 +128,20 @@ impl Settings {
     /// `explicit_path` overrides the env/default lookup when `Some`.
     /// The returned `ConfigStatus` is safe to expose to the frontend
     /// (no secrets, just metadata about the load).
+    ///
+    /// Path resolution order:
+    /// 1. `explicit_path` if `Some` — used as-is (no walk-up).
+    /// 2. `SPIREFORGE_CONFIG_PATH` env — used as-is.
+    /// 3. `runtime/agentthespire.config.json` searched from cwd, walking up
+    ///    parents (max 4 levels). This makes the path stable across `cargo run -p ats-web`
+    ///    (cwd = workspace root) vs `tauri dev` (cwd = src-tauri/).
     #[must_use]
     pub fn load(explicit_path: Option<&Path>) -> (Self, ConfigStatus) {
-        let path = explicit_path
-            .map(PathBuf::from)
-            .or_else(|| std::env::var(CONFIG_PATH_ENV).ok().map(PathBuf::from))
-            .unwrap_or_else(|| PathBuf::from(DEFAULT_CONFIG_PATH));
-        let absolute = std::env::current_dir()
-            .map(|cwd| cwd.join(&path))
-            .unwrap_or_else(|_| path.clone());
-        let file_present = absolute.exists();
+        let (chosen_path, file_present) = resolve_config_path(explicit_path);
 
         let mut figment = Figment::new().merge(Serialized::defaults(Self::built_in_defaults()));
         if file_present {
-            figment = figment.merge(Json::file(&absolute));
+            figment = figment.merge(Json::file(&chosen_path));
         }
         figment = figment.merge(Env::prefixed(ENV_PREFIX).split("__"));
 
@@ -155,7 +155,7 @@ impl Settings {
         };
 
         let status = ConfigStatus {
-            path: Some(absolute.display().to_string()),
+            path: Some(chosen_path.display().to_string()),
             file_present,
             loaded: file_present && errors.is_empty(),
             errors,
@@ -163,6 +163,54 @@ impl Settings {
 
         (settings, status)
     }
+}
+
+/// Resolve which file we should attempt to load, returning the path we'll
+/// report in `ConfigStatus.path` and whether that file exists.
+///
+/// For the default case (no explicit override) we walk up from the current
+/// working directory looking for `runtime/agentthespire.config.json`. This
+/// covers both `cargo run -p ats-web` (cwd = `rust/`) and `tauri dev`
+/// (cwd = `rust/src-tauri/`) without per-binary configuration.
+fn resolve_config_path(explicit_path: Option<&Path>) -> (PathBuf, bool) {
+    if let Some(p) = explicit_path {
+        let absolute = absolutize(p);
+        let exists = absolute.exists();
+        return (absolute, exists);
+    }
+    if let Ok(env_val) = std::env::var(CONFIG_PATH_ENV) {
+        if !env_val.is_empty() {
+            let absolute = absolutize(Path::new(&env_val));
+            let exists = absolute.exists();
+            return (absolute, exists);
+        }
+    }
+    let Ok(cwd) = std::env::current_dir() else {
+        let fallback = PathBuf::from(DEFAULT_CONFIG_PATH);
+        return (fallback.clone(), fallback.exists());
+    };
+    let mut probe: Option<&Path> = Some(&cwd);
+    for _ in 0..5 {
+        let Some(dir) = probe else { break };
+        let candidate = dir.join(DEFAULT_CONFIG_PATH);
+        if candidate.exists() {
+            return (candidate, true);
+        }
+        probe = dir.parent();
+    }
+    // None of the parent directories had it — report the cwd-relative path so
+    // the user sees where we looked first.
+    let displayed = cwd.join(DEFAULT_CONFIG_PATH);
+    (displayed, false)
+}
+
+fn absolutize(p: &Path) -> PathBuf {
+    if p.is_absolute() {
+        return p.to_path_buf();
+    }
+    std::env::current_dir()
+        .map(|c| c.join(p))
+        .unwrap_or_else(|_| p.to_path_buf())
 }
 
 impl Default for Settings {
