@@ -1,5 +1,7 @@
 # AgentTheSpire — Rust 重写
 
+[![Rust CI](https://github.com/Frashmeat/AgentForSTS2/actions/workflows/rust-ci.yml/badge.svg?branch=rust)](https://github.com/Frashmeat/AgentForSTS2/actions/workflows/rust-ci.yml)
+
 本目录是项目的 Rust + Tauri 重写。与仓库根的 Python `backend/` / React `frontend/` / PowerShell `tools/` 并存，目标在路线图 stage 8 完整接管。
 
 设计文档：[`docs/03-方案/全栈重写/进行中/2026-05-11-Rust+Tauri全栈重写计划.md`](../docs/03-方案/全栈重写/进行中/2026-05-11-Rust+Tauri全栈重写计划.md)。
