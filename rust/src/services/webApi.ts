@@ -38,6 +38,13 @@ export function getHealth(): Promise<HealthReport> {
   return getJson<HealthReport>("/health");
 }
 
+export function getLocalCapabilitiesSync(): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("getLocalCapabilitiesSync"));
+}
+export function getLocalCapabilitiesFull(): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("getLocalCapabilitiesFull"));
+}
+
 export function getKnowledgeStatus(): Promise<KnowledgeStatus> {
   return getJson<KnowledgeStatus>("/knowledge/status");
 }

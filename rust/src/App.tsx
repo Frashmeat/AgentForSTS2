@@ -1,3 +1,4 @@
+import { CapabilitiesCard } from "@/components/CapabilitiesCard";
 import { CodegenCard } from "@/components/CodegenCard";
 import { HealthCard } from "@/components/HealthCard";
 import { JobsCard } from "@/components/JobsCard";
@@ -21,6 +22,7 @@ export default function App() {
       </header>
 
       <HealthCard />
+      <CapabilitiesCard />
       <ProjectCard />
       <SingleAssetWorkflowCard />
       <JobsCard />

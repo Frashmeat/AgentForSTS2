@@ -62,6 +62,8 @@ pub fn run() {
         .manage(ActiveProject::new())
         .invoke_handler(tauri::generate_handler![
             commands::health::get_health,
+            commands::capabilities::get_local_capabilities_sync,
+            commands::capabilities::get_local_capabilities_full,
             commands::knowledge::get_knowledge_status,
             commands::knowledge::check_knowledge_status,
             commands::planning::validate_plan_cmd,

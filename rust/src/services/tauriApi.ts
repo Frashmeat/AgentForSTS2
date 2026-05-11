@@ -25,6 +25,26 @@ export function getHealth(): Promise<HealthReport> {
   return invoke<HealthReport>("get_health");
 }
 
+// -------- Local Capabilities --------
+
+export interface LocalCapabilities {
+  os: string;
+  arch: string;
+  cpuCount: number;
+  ilspycmdFound: boolean;
+  ilspycmdPath: string | null;
+  dotnetVersion: string | null;
+  warnings: string[];
+}
+
+export function getLocalCapabilitiesSync(): Promise<LocalCapabilities> {
+  return invoke<LocalCapabilities>("get_local_capabilities_sync");
+}
+
+export function getLocalCapabilitiesFull(): Promise<LocalCapabilities> {
+  return invoke<LocalCapabilities>("get_local_capabilities_full");
+}
+
 // -------- Knowledge --------
 
 export type OverallState = "fresh" | "missing" | "stale";
