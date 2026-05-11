@@ -23,6 +23,7 @@ use super::code_generate::{
 use super::common::{ProgressEvent, ProgressSink, finalize_with_error, transition_to_running};
 use crate::codegen::PromptAssembler;
 use crate::image_gen::{ImageGenClient, ImageGenRequest};
+use crate::image_proc::{ImageProcClient, SimpleBgRemover};
 use crate::knowledge::{KnowledgePaths, SourceMode};
 use crate::llm::LlmClient;
 use crate::platform::contracts::SubmitAssetGenerateRequest;
@@ -99,7 +100,44 @@ pub async fn run_asset_generate(
             }
             image_model = Some(img_resp.model.clone());
             revised_prompt = img_resp.revised_prompt.clone();
-            asset_request.image_paths = vec![path.clone()];
+
+            // 启发式背景去除：把"看起来像白色"的像素 alpha 改为 0，写到 .rembg.png
+            // 失败不致命（保留原图 path 给 prompt assembler 用）
+            let rembg = SimpleBgRemover::default();
+            let raw_bytes = first.bytes.clone();
+            let rembg_path = target_dir.join(format!("{entity_name}.rembg.png"));
+            match rembg.remove_background(&raw_bytes).await {
+                Ok(processed) => {
+                    if let Err(err) = fs::write(&rembg_path, &processed).await {
+                        sink.emit(ProgressEvent {
+                            job_id: job_id.clone(),
+                            stage: "rembg-write-warn".into(),
+                            percent: None,
+                            message: Some(format!(
+                                "wrote raw image but rembg output failed: {err}; using raw image"
+                            )),
+                            delta: None,
+                        })
+                        .await;
+                        asset_request.image_paths = vec![path.clone()];
+                    } else {
+                        asset_request.image_paths = vec![rembg_path.clone()];
+                    }
+                }
+                Err(err) => {
+                    sink.emit(ProgressEvent {
+                        job_id: job_id.clone(),
+                        stage: "rembg-warn".into(),
+                        percent: None,
+                        message: Some(format!(
+                            "background removal failed: {err}; using raw image"
+                        )),
+                        delta: None,
+                    })
+                    .await;
+                    asset_request.image_paths = vec![path.clone()];
+                }
+            }
             png_path = Some(path);
 
             sink.emit(ProgressEvent {
