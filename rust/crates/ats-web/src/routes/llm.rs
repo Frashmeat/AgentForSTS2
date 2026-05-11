@@ -82,8 +82,10 @@ async fn stream_handler(
 
     let sse_stream = llm_stream.map(|item| {
         let payload = match item {
-            Ok(ev) => SsePayload::Event(ev),
-            Err(err) => SsePayload::Error(err.to_string()),
+            Ok(ev) => SsePayload::Event { event: ev },
+            Err(err) => SsePayload::Error {
+                message: err.to_string(),
+            },
         };
         let json = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".into());
         Ok(Event::default().data(json))
@@ -96,11 +98,14 @@ async fn stream_handler(
     ))
 }
 
+/// SSE envelope —— 与 src-tauri commands/llm.rs::StreamPayload 同形态
+/// （`{type:"event",event:{...}}` / `{type:"error",message:"..."}`），
+/// 前端 llmStream.ts 用同一 dispatch 处理双壳。
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum SsePayload {
-    Event(StreamEvent),
-    Error(String),
+    Event { event: StreamEvent },
+    Error { message: String },
 }
 
 fn llm_error_to_response(err: LlmError) -> (StatusCode, String) {
