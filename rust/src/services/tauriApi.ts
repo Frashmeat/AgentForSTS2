@@ -533,3 +533,15 @@ export function submitKnowledgeRefreshJob(
 ): Promise<SubmitJobAck> {
   return invoke<SubmitJobAck>("submit_knowledge_refresh_job", { request });
 }
+
+export interface SubmitAssetGenerateRequest {
+  asset_request: AssetCodegenRequest;
+  image_prompt?: string | null;
+  image_size?: string | null;
+}
+
+export function submitAssetGenerateJob(
+  request: SubmitAssetGenerateRequest,
+): Promise<SubmitJobAck> {
+  return invoke<SubmitJobAck>("submit_asset_generate_job", { request });
+}

@@ -208,3 +208,6 @@ export function submitSingleAssetPlanJob(_request: unknown): Promise<never> {
 export function submitKnowledgeRefreshJob(_request: unknown): Promise<never> {
   return Promise.resolve().then(() => desktopOnly("submitKnowledgeRefreshJob"));
 }
+export function submitAssetGenerateJob(_request: unknown): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("submitAssetGenerateJob"));
+}

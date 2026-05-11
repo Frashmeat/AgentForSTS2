@@ -16,23 +16,70 @@ const STATUS_COLOR: Record<JobStatus, string> = {
   cancelled: "text-amber-600",
 };
 
-type SubmitKind = "text_generate" | "code_generate_asset" | "build_project";
+type SubmitKind =
+  | "text_generate"
+  | "code_generate_asset"
+  | "code_generate_custom"
+  | "asset_generate"
+  | "batch_custom_code"
+  | "build_project"
+  | "package_project"
+  | "log_analysis"
+  | "knowledge_refresh";
+
+const KIND_LABELS: Array<{ value: SubmitKind; label: string }> = [
+  { value: "text_generate", label: "text_generate (free prompt)" },
+  { value: "code_generate_asset", label: "code_generate (asset)" },
+  { value: "code_generate_custom", label: "code_generate (custom code)" },
+  { value: "asset_generate", label: "asset_generate (image+code)" },
+  { value: "batch_custom_code", label: "batch_custom_code" },
+  { value: "build_project", label: "build_project (dotnet publish)" },
+  { value: "package_project", label: "package_project (zip)" },
+  { value: "log_analysis", label: "log_analysis (LLM diagnose)" },
+  { value: "knowledge_refresh", label: "knowledge_refresh (ilspycmd)" },
+];
 
 export function JobsCard() {
   const [list, setList] = useState<JobSummary[]>([]);
   const [active, setActive] = useState<Job | null>(null);
   const [submitKind, setSubmitKind] = useState<SubmitKind>("text_generate");
-  // text_generate fields
+
+  // 各 kind 的字段，分散放置（明确好读）
   const [prompt, setPrompt] = useState("用一句中文打招呼");
-  // code_generate (asset) fields
   const [assetType, setAssetType] = useState("card");
   const [assetName, setAssetName] = useState("DemoCard");
   const [designDescription, setDesignDescription] = useState(
     "造成 10 点伤害，弃 1 张牌。",
   );
   const [assetProjectRoot, setAssetProjectRoot] = useState("");
-  // build_project fields
+  const [customName, setCustomName] = useState("MyHook");
+  const [customDescription, setCustomDescription] = useState("把 player.maxHp 翻倍");
+  const [customImplNotes, setCustomImplNotes] = useState(
+    "OverrideMember Player.GetMaxHp 返回原值 *2",
+  );
+  const [imagePrompt, setImagePrompt] = useState(
+    "a fierce-looking card art, dark background, fantasy style",
+  );
   const [buildProjectRoot, setBuildProjectRoot] = useState("");
+  const [packageSourceDir, setPackageSourceDir] = useState("");
+  const [packageOutputPath, setPackageOutputPath] = useState("");
+  const [logText, setLogText] = useState("");
+  const [logContextHint, setLogContextHint] = useState("");
+  const [batchItemsJson, setBatchItemsJson] = useState(
+    `[
+  {
+    "name": "HookOne",
+    "description": "把 player 起手获得 1 点护甲",
+    "implementation_notes": "OnBattleStart hook 加 BlockPower 1",
+    "project_root": "",
+    "skip_build": true
+  }
+]`,
+  );
+  const [batchFailFast, setBatchFailFast] = useState(false);
+  const [knowledgeDllPath, setKnowledgeDllPath] = useState("");
+  const [knowledgeForce, setKnowledgeForce] = useState(false);
+  const [knowledgeIncludeBaselib, setKnowledgeIncludeBaselib] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -61,9 +108,13 @@ export function JobsCard() {
             [ev.jobId]: (prev[ev.jobId] ?? "") + ev.delta,
           }));
         }
-        if (ev.stage === "completed" || ev.stage.includes("error") || ev.stage.includes("cancel")) {
+        if (
+          ev.stage === "completed" ||
+          ev.stage.includes("error") ||
+          ev.stage.includes("cancel") ||
+          ev.stage === "failed"
+        ) {
           void refresh();
-          // 若当前查看的就是这条任务，刷新它的完整 Job
           setActive((cur) => {
             if (cur && cur.id === ev.jobId) {
               void (async () => {
@@ -71,7 +122,7 @@ export function JobsCard() {
                   const next = (await api.getJob(ev.jobId)) as Job;
                   setActive(next);
                 } catch {
-                  // 任务被删等情况忽略
+                  // ignore
                 }
               })();
             }
@@ -92,26 +143,91 @@ export function JobsCard() {
     setError(null);
     try {
       let ack: SubmitJobAck;
-      if (submitKind === "text_generate") {
-        ack = (await api.submitTextGenerateJob({ prompt })) as SubmitJobAck;
-      } else if (submitKind === "code_generate_asset") {
-        ack = (await api.submitCodeGenerateJob({
-          mode: "asset",
-          request: {
-            asset_type: assetType,
-            asset_name: assetName,
-            design_description: designDescription,
-            project_root: assetProjectRoot || ".",
-            image_paths: [],
-            name_zhs: "",
-            skip_build: true,
-          },
-        })) as SubmitJobAck;
-      } else {
-        ack = (await api.submitBuildProjectJob({
-          project_root: buildProjectRoot,
-          max_attempts: 3,
-        })) as SubmitJobAck;
+      switch (submitKind) {
+        case "text_generate":
+          ack = (await api.submitTextGenerateJob({ prompt })) as SubmitJobAck;
+          break;
+        case "code_generate_asset":
+          ack = (await api.submitCodeGenerateJob({
+            mode: "asset",
+            request: {
+              asset_type: assetType,
+              asset_name: assetName,
+              design_description: designDescription,
+              project_root: assetProjectRoot || ".",
+              image_paths: [],
+              name_zhs: "",
+              skip_build: true,
+            },
+          })) as SubmitJobAck;
+          break;
+        case "code_generate_custom":
+          ack = (await api.submitCodeGenerateJob({
+            mode: "custom_code",
+            request: {
+              name: customName,
+              description: customDescription,
+              implementation_notes: customImplNotes,
+              project_root: assetProjectRoot || ".",
+              skip_build: true,
+            },
+          })) as SubmitJobAck;
+          break;
+        case "asset_generate":
+          ack = (await api.submitAssetGenerateJob({
+            asset_request: {
+              asset_type: assetType,
+              asset_name: assetName,
+              design_description: designDescription,
+              project_root: assetProjectRoot || ".",
+              image_paths: [],
+              name_zhs: "",
+              skip_build: true,
+            },
+            image_prompt: imagePrompt.trim() || null,
+          })) as SubmitJobAck;
+          break;
+        case "batch_custom_code": {
+          let items;
+          try {
+            items = JSON.parse(batchItemsJson);
+          } catch (e) {
+            throw new Error(`batch items JSON parse failed: ${String(e)}`);
+          }
+          if (!Array.isArray(items)) {
+            throw new Error("batch items must be a JSON array");
+          }
+          ack = (await api.submitBatchCustomCodeJob({
+            items,
+            fail_fast: batchFailFast,
+          })) as SubmitJobAck;
+          break;
+        }
+        case "build_project":
+          ack = (await api.submitBuildProjectJob({
+            project_root: buildProjectRoot,
+            max_attempts: 3,
+          })) as SubmitJobAck;
+          break;
+        case "package_project":
+          ack = (await api.submitPackageProjectJob({
+            source_dir: packageSourceDir,
+            output_path: packageOutputPath.trim() || null,
+          })) as SubmitJobAck;
+          break;
+        case "log_analysis":
+          ack = (await api.submitLogAnalysisJob({
+            log_text: logText.trim() || null,
+            context_hint: logContextHint.trim() || null,
+          })) as SubmitJobAck;
+          break;
+        case "knowledge_refresh":
+          ack = (await api.submitKnowledgeRefreshJob({
+            sts2_dll_path: knowledgeDllPath,
+            force: knowledgeForce,
+            include_baselib: knowledgeIncludeBaselib,
+          })) as SubmitJobAck;
+          break;
       }
       setLiveDeltaById((prev) => ({ ...prev, [ack.jobId]: "" }));
       await refresh();
@@ -154,7 +270,7 @@ export function JobsCard() {
   return (
     <section className="rounded border border-muted/30 p-4">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-lg font-medium">Jobs — Text Generate</h2>
+        <h2 className="text-lg font-medium">Jobs — submit any handler</h2>
         <button
           type="button"
           onClick={refresh}
@@ -175,9 +291,11 @@ export function JobsCard() {
             onChange={(e) => setSubmitKind(e.target.value as SubmitKind)}
             className="px-2 py-1 rounded border border-muted/30 bg-transparent"
           >
-            <option value="text_generate">text_generate (free prompt)</option>
-            <option value="code_generate_asset">code_generate (asset)</option>
-            <option value="build_project">build_project (dotnet publish)</option>
+            {KIND_LABELS.map((k) => (
+              <option key={k.value} value={k.value}>
+                {k.label}
+              </option>
+            ))}
           </select>
         </label>
 
@@ -193,7 +311,7 @@ export function JobsCard() {
           </label>
         )}
 
-        {submitKind === "code_generate_asset" && (
+        {(submitKind === "code_generate_asset" || submitKind === "asset_generate") && (
           <>
             <div className="grid grid-cols-2 gap-2 text-sm">
               <label className="flex flex-col gap-1">
@@ -237,9 +355,92 @@ export function JobsCard() {
                 className="px-2 py-1 rounded border border-muted/30 bg-transparent"
               />
             </label>
+            {submitKind === "asset_generate" && (
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="text-muted text-xs">
+                  Image prompt（留空跳过出图，仅跑 code）
+                </span>
+                <textarea
+                  value={imagePrompt}
+                  onChange={(e) => setImagePrompt(e.target.value)}
+                  rows={2}
+                  className="px-2 py-1 rounded border border-muted/30 bg-transparent"
+                />
+              </label>
+            )}
             <p className="text-xs text-muted">
-              Output → <code>artifacts/{assetName}/{assetName}.cs</code> + raw.md in the active project
+              Output → <code>artifacts/{assetName}/{assetName}.cs</code>
+              {submitKind === "asset_generate" && imagePrompt.trim() && (
+                <>
+                  {" "}
+                  + <code>{assetName}.png</code>
+                </>
+              )}
             </p>
+          </>
+        )}
+
+        {submitKind === "code_generate_custom" && (
+          <>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-muted text-xs">Name (sanitized as class name)</span>
+              <input
+                value={customName}
+                onChange={(e) => setCustomName(e.target.value)}
+                className="px-2 py-1 rounded border border-muted/30 bg-transparent"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-muted text-xs">Project root</span>
+              <input
+                value={assetProjectRoot}
+                onChange={(e) => setAssetProjectRoot(e.target.value)}
+                placeholder="E:/mods/demo_mod"
+                className="px-2 py-1 rounded border border-muted/30 bg-transparent font-mono text-xs"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-muted text-xs">Description</span>
+              <textarea
+                value={customDescription}
+                onChange={(e) => setCustomDescription(e.target.value)}
+                rows={2}
+                className="px-2 py-1 rounded border border-muted/30 bg-transparent"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-muted text-xs">Implementation notes</span>
+              <textarea
+                value={customImplNotes}
+                onChange={(e) => setCustomImplNotes(e.target.value)}
+                rows={2}
+                className="px-2 py-1 rounded border border-muted/30 bg-transparent"
+              />
+            </label>
+          </>
+        )}
+
+        {submitKind === "batch_custom_code" && (
+          <>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-muted text-xs">
+                Items (JSON array of CustomCodegenRequest)
+              </span>
+              <textarea
+                value={batchItemsJson}
+                onChange={(e) => setBatchItemsJson(e.target.value)}
+                rows={8}
+                className="px-2 py-1 rounded border border-muted/30 bg-transparent font-mono text-xs"
+              />
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={batchFailFast}
+                onChange={(e) => setBatchFailFast(e.target.checked)}
+              />
+              <span>fail_fast（首失立停）</span>
+            </label>
           </>
         )}
 
@@ -253,6 +454,87 @@ export function JobsCard() {
               className="px-2 py-1 rounded border border-muted/30 bg-transparent font-mono text-xs"
             />
           </label>
+        )}
+
+        {submitKind === "package_project" && (
+          <>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-muted text-xs">Source dir (要打包的目录)</span>
+              <input
+                value={packageSourceDir}
+                onChange={(e) => setPackageSourceDir(e.target.value)}
+                placeholder="E:/mods/demo_mod/artifacts"
+                className="px-2 py-1 rounded border border-muted/30 bg-transparent font-mono text-xs"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-muted text-xs">
+                Output zip path (留空 → 与 source_dir 同级 &lt;name&gt;-&lt;ts&gt;.zip)
+              </span>
+              <input
+                value={packageOutputPath}
+                onChange={(e) => setPackageOutputPath(e.target.value)}
+                placeholder="E:/mods/demo_mod-release.zip"
+                className="px-2 py-1 rounded border border-muted/30 bg-transparent font-mono text-xs"
+              />
+            </label>
+          </>
+        )}
+
+        {submitKind === "log_analysis" && (
+          <>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-muted text-xs">Build log（粘贴日志文本）</span>
+              <textarea
+                value={logText}
+                onChange={(e) => setLogText(e.target.value)}
+                rows={6}
+                placeholder="把 dotnet publish 失败日志粘贴到这里…"
+                className="px-2 py-1 rounded border border-muted/30 bg-transparent font-mono text-xs"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-muted text-xs">Context hint（可选，提示用户改了什么）</span>
+              <input
+                value={logContextHint}
+                onChange={(e) => setLogContextHint(e.target.value)}
+                placeholder="我刚改了 TargetFramework 到 net9.0"
+                className="px-2 py-1 rounded border border-muted/30 bg-transparent"
+              />
+            </label>
+          </>
+        )}
+
+        {submitKind === "knowledge_refresh" && (
+          <>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-muted text-xs">sts2.dll path</span>
+              <input
+                value={knowledgeDllPath}
+                onChange={(e) => setKnowledgeDllPath(e.target.value)}
+                placeholder="E:/Steam/steamapps/common/SlayTheSpire2/sts2.dll"
+                className="px-2 py-1 rounded border border-muted/30 bg-transparent font-mono text-xs"
+              />
+            </label>
+            <div className="flex flex-wrap gap-4 text-sm">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={knowledgeForce}
+                  onChange={(e) => setKnowledgeForce(e.target.checked)}
+                />
+                <span>force（忽略 manifest 缓存重新反编译）</span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={knowledgeIncludeBaselib}
+                  onChange={(e) => setKnowledgeIncludeBaselib(e.target.checked)}
+                />
+                <span>include_baselib（同时拉 BaseLib.dll 反编译）</span>
+              </label>
+            </div>
+          </>
         )}
 
         <button
