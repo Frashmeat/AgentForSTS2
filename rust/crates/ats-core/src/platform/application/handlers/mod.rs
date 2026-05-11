@@ -7,6 +7,7 @@
 //! 的 `submit_xxx(...)` spawn。后续 stage 引入 Handler trait 注册表后会再做一次
 //! 切分，当前形状保留对 service 直接依赖以减小改动面。
 
+pub mod asset_generate;
 pub mod batch_custom_code;
 pub mod build_project;
 pub mod code_generate;

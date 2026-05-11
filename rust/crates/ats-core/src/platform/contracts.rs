@@ -10,6 +10,7 @@
 //! - batch_custom_code（多 item 套 code_generate）
 //! - single_asset_plan（LLM → 结构化 PlanItem）
 //! - knowledge_refresh（ilspycmd 反编译 sts2.dll → 落产物 + 更新 manifest）
+//! - asset_generate（image_gen 出图 + code_generate 出 .cs，串行）
 
 use std::path::PathBuf;
 
@@ -89,6 +90,23 @@ pub struct SubmitSingleAssetPlanRequest {
     /// 留空时由 LLM 自行判断。
     pub asset_type: Option<String>,
     pub max_tokens: Option<u32>,
+}
+
+/// asset_generate 任务的输入：先 image_gen 出图 → 写到 artifacts/<name>/<name>.png →
+/// 再 code_generate 出 .cs（image_paths 自动指向刚生成的 png）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct SubmitAssetGenerateRequest {
+    /// 与 code_generate(asset) 同款的入参；handler 会在 image_gen 后用生成的图填
+    /// `image_paths` 字段（覆盖原值）。
+    pub asset_request: AssetCodegenRequest,
+    /// 图像生成 prompt。留空 / None → 跳过 image_gen，仅跑 code_generate
+    /// （等价于 code_generate(asset)，但保留原 image_paths）。
+    #[serde(default)]
+    pub image_prompt: Option<String>,
+    /// 覆盖 image_gen 的默认尺寸。例 "1024x1024" / "1792x1024"。
+    #[serde(default)]
+    pub image_size: Option<String>,
 }
 
 /// knowledge_refresh 任务的输入：反编译 sts2.dll 到知识库的 game 目录，

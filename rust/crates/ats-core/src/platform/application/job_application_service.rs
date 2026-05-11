@@ -7,17 +7,19 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::handlers::{
-    ProgressSink, batch_custom_code::run_batch_custom_code, build_project::run_build_project,
-    code_generate::run_code_generate, knowledge_refresh::run_knowledge_refresh,
-    log_analysis::run_log_analysis, package_project::run_package_project,
-    single_asset_plan::run_single_asset_plan, text_generate::run_text_generate,
+    ProgressSink, asset_generate::run_asset_generate, batch_custom_code::run_batch_custom_code,
+    build_project::run_build_project, code_generate::run_code_generate,
+    knowledge_refresh::run_knowledge_refresh, log_analysis::run_log_analysis,
+    package_project::run_package_project, single_asset_plan::run_single_asset_plan,
+    text_generate::run_text_generate,
 };
+use crate::image_gen::ImageGenClient;
 use crate::knowledge::{BaselibSource, KnowledgePaths};
 use crate::llm::LlmClient;
 use crate::platform::contracts::{
-    SubmitBatchCustomCodeRequest, SubmitBuildProjectRequest, SubmitCodeGenerateRequest,
-    SubmitKnowledgeRefreshRequest, SubmitLogAnalysisRequest, SubmitPackageProjectRequest,
-    SubmitSingleAssetPlanRequest, SubmitTextGenerateRequest,
+    SubmitAssetGenerateRequest, SubmitBatchCustomCodeRequest, SubmitBuildProjectRequest,
+    SubmitCodeGenerateRequest, SubmitKnowledgeRefreshRequest, SubmitLogAnalysisRequest,
+    SubmitPackageProjectRequest, SubmitSingleAssetPlanRequest, SubmitTextGenerateRequest,
 };
 use crate::platform::domain::{
     Job, JobError, JobId, JobKind, JobRepository, JobResult, JobStatus, JobSummary,
@@ -192,6 +194,42 @@ impl JobApplicationService {
         let id_for_task = job_id.clone();
         tokio::spawn(async move {
             run_log_analysis(repo, llm, sink, id_for_task, request).await;
+        });
+
+        Ok(job_id)
+    }
+
+    /// 提交 asset_generate 任务：image_gen 出图 + code_generate 出 .cs。
+    /// image_prompt 留空时跳过 image_gen，等价于 code_generate(asset) 但通过统一接口。
+    pub async fn submit_asset_generate(
+        &self,
+        request: SubmitAssetGenerateRequest,
+        knowledge_paths: KnowledgePaths,
+        artifacts_dir: PathBuf,
+        image_gen: Arc<dyn ImageGenClient>,
+        sink: Arc<dyn ProgressSink>,
+    ) -> JobResult<JobId> {
+        let payload = serde_json::to_value(&request)
+            .map_err(|e| JobError::Storage(format!("serialize request: {e}")))?;
+        let job = Job::new(JobKind::AssetGenerate, payload);
+        let job_id = job.id.clone();
+        self.repo.create(&job).await?;
+
+        let repo = Arc::clone(&self.repo);
+        let llm = Arc::clone(&self.llm);
+        let id_for_task = job_id.clone();
+        tokio::spawn(async move {
+            run_asset_generate(
+                repo,
+                llm,
+                image_gen,
+                sink,
+                id_for_task,
+                request,
+                knowledge_paths,
+                artifacts_dir,
+            )
+            .await;
         });
 
         Ok(job_id)

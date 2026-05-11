@@ -43,6 +43,14 @@
     "api_key": "",
     "base_url": ""
   },
+  "_image_gen_help": "image_gen 默认走 OpenAI Images 协议（DALL-E + 所有 OpenAI 兼容代理 + 部分通过代理的火山方舟）。size 留空 → 1024x1024。",
+  "image_gen": {
+    "provider": "",
+    "model": "",
+    "api_key": "",
+    "base_url": "",
+    "size": ""
+  },
   "auth": {
     "session_cookie_name": "agentthespire_session",
     "session_secret": "CHANGE_ME_FOR_WEB_DEPLOYMENT",

@@ -7,6 +7,7 @@ pub mod codegen;
 pub mod config;
 pub mod errors;
 pub mod health;
+pub mod image_gen;
 pub mod knowledge;
 pub mod llm;
 pub mod planning;

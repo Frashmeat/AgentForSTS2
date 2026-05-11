@@ -6,13 +6,15 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use ats_core::image_gen::{ImageGenClient, build_from_config as build_image_gen};
 use ats_core::knowledge::{BaselibSource, GitHubBaselibSource, KnowledgePaths};
 use ats_core::llm::{LlmClient, build_from_config};
 use ats_core::platform::{
     FileJobRepository, Job, JobApplicationService, JobId, JobSummary, ProgressEvent, ProgressSink,
-    SubmitBatchCustomCodeRequest, SubmitBuildProjectRequest, SubmitCodeGenerateRequest,
-    SubmitJobAck, SubmitKnowledgeRefreshRequest, SubmitLogAnalysisRequest,
-    SubmitPackageProjectRequest, SubmitSingleAssetPlanRequest, SubmitTextGenerateRequest,
+    SubmitAssetGenerateRequest, SubmitBatchCustomCodeRequest, SubmitBuildProjectRequest,
+    SubmitCodeGenerateRequest, SubmitJobAck, SubmitKnowledgeRefreshRequest,
+    SubmitLogAnalysisRequest, SubmitPackageProjectRequest, SubmitSingleAssetPlanRequest,
+    SubmitTextGenerateRequest,
 };
 use async_trait::async_trait;
 use tauri::{AppHandle, Emitter, State};
@@ -86,6 +88,26 @@ pub async fn submit_code_generate_job(
     let knowledge_paths = KnowledgePaths::from_runtime_dir(&config.status.runtime_dir());
     let job_id = service
         .submit_code_generate(request, knowledge_paths, artifacts_dir, sink)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(SubmitJobAck { job_id })
+}
+
+#[tauri::command]
+pub async fn submit_asset_generate_job(
+    app: AppHandle,
+    config: State<'_, AppConfig>,
+    active: State<'_, ActiveProject>,
+    request: SubmitAssetGenerateRequest,
+) -> Result<SubmitJobAck, String> {
+    let service = build_service(&config, &active)?;
+    let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
+    let artifacts_dir = active_artifacts_dir(&active)?;
+    let knowledge_paths = KnowledgePaths::from_runtime_dir(&config.status.runtime_dir());
+    let image_gen: Arc<dyn ImageGenClient> =
+        build_image_gen(&config.settings.image_gen).map_err(|e| e.to_string())?;
+    let job_id = service
+        .submit_asset_generate(request, knowledge_paths, artifacts_dir, image_gen, sink)
         .await
         .map_err(|e| e.to_string())?;
     Ok(SubmitJobAck { job_id })

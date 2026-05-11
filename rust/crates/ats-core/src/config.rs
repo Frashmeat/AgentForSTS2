@@ -27,6 +27,7 @@ const ENV_PREFIX: &str = "SPIREFORGE_";
 pub struct Settings {
     pub runtime: RuntimeMap,
     pub llm: LlmConfig,
+    pub image_gen: ImageGenConfig,
     pub auth: AuthConfig,
 }
 
@@ -58,6 +59,18 @@ pub struct LlmConfig {
     /// API key — never expose this in serialized output meant for the frontend.
     pub api_key: String,
     pub base_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "snake_case")]
+pub struct ImageGenConfig {
+    /// 留空走 OpenAI Images 兼容路径（覆盖 OpenAI 官方 + new-api / one-api / litellm 等代理）。
+    pub provider: String,
+    pub model: String,
+    pub api_key: String,
+    pub base_url: String,
+    /// 默认尺寸，例 "1024x1024" / "1792x1024" / "512x512"。留空 → "1024x1024"。
+    pub size: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,6 +112,7 @@ impl Settings {
                 api_key: String::new(),
                 base_url: String::new(),
             },
+            image_gen: ImageGenConfig::default(),
             auth: AuthConfig {
                 session_cookie_name: "agentthespire_session".into(),
                 session_secret: String::new(),
