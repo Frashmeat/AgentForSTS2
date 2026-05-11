@@ -24,6 +24,7 @@ use crate::knowledge::{
 };
 use crate::platform::contracts::SubmitKnowledgeRefreshRequest;
 use crate::platform::domain::{JobId, JobRepository, JobStatus};
+use crate::project_utils::to_extended_length_path;
 
 pub async fn run_knowledge_refresh(
     repo: Arc<dyn JobRepository>,
@@ -219,8 +220,9 @@ async fn run_game_step(
     })
     .await;
 
-    let dll = request.sts2_dll_path.clone();
-    let out = knowledge_paths.game_dir.clone();
+    // Windows 长路径 / 中文路径保护：subprocess 调用前加 \\?\ 前缀（短路径无效果）
+    let dll = to_extended_length_path(&request.sts2_dll_path);
+    let out = to_extended_length_path(&knowledge_paths.game_dir);
     let cmd = ilspycmd.clone();
     let stats_result =
         tokio::task::spawn_blocking(move || run_decompile_project(&cmd, &dll, &out)).await;
@@ -277,8 +279,8 @@ async fn run_baselib_step(
 
     let target = knowledge_paths.baselib_decompiled_file();
     let cmd = ilspycmd.clone();
-    let dll = fetched.dll_path.clone();
-    let out = target.clone();
+    let dll = to_extended_length_path(&fetched.dll_path);
+    let out = to_extended_length_path(&target);
     let stats_result =
         tokio::task::spawn_blocking(move || run_decompile_file(&cmd, &dll, &out)).await;
     let stats = match stats_result {

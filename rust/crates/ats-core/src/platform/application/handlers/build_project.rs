@@ -9,6 +9,7 @@ use std::sync::Arc;
 use super::common::{ProgressEvent, ProgressSink, finalize_with_error, transition_to_running};
 use crate::platform::contracts::SubmitBuildProjectRequest;
 use crate::platform::domain::{JobId, JobRepository, JobStatus};
+use crate::project_utils::to_extended_length_path;
 
 pub async fn run_build_project(
     repo: Arc<dyn JobRepository>,
@@ -32,7 +33,8 @@ pub async fn run_build_project(
     })
     .await;
 
-    let cwd = request.project_root.clone();
+    // Windows 长路径保护
+    let cwd = to_extended_length_path(&request.project_root);
     let output_result = tokio::task::spawn_blocking(move || {
         std::process::Command::new("dotnet")
             .arg("publish")
