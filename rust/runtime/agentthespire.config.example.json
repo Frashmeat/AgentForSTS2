@@ -28,6 +28,13 @@
       "requires_database": true
     }
   },
+  "_llm_provider_help": "provider 字段决定客户端协议：留空或 'anthropic' → Anthropic Messages API；'openai' / 'openai_compatible' / 'new_api' / 'one_api' → OpenAI Chat Completions（兼容 new-api / one-api / litellm / vLLM 等代理）。base_url 留空时走对应官方端点，填写后走第三方代理。",
+  "_llm_examples": {
+    "anthropic_official": { "provider": "anthropic", "model": "claude-sonnet-4-6", "base_url": "" },
+    "anthropic_proxy": { "provider": "anthropic", "model": "claude-sonnet-4-6", "base_url": "https://your-anthropic-proxy.example/" },
+    "openai_official": { "provider": "openai", "model": "gpt-4o-mini", "base_url": "" },
+    "new_api_proxy": { "provider": "new_api", "model": "gpt-4o-mini", "base_url": "https://your-new-api.example/" }
+  },
   "llm": {
     "mode": "agent_cli",
     "agent_backend": "claude",

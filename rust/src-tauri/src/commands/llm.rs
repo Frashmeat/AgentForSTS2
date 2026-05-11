@@ -8,8 +8,7 @@
 use std::sync::Arc;
 
 use ats_core::llm::{
-    AnthropicClient, CompletionRequest, CompletionResponse, LlmClient, RetryConfig, RetryingClient,
-    StreamEvent,
+    CompletionRequest, CompletionResponse, LlmClient, StreamEvent, build_from_config,
 };
 use futures_util::StreamExt;
 use serde::Serialize;
@@ -20,29 +19,7 @@ use crate::AppConfig;
 const STREAM_EVENT: &str = "llm-stream";
 
 fn build_client(config: &AppConfig) -> Result<Arc<dyn LlmClient>, String> {
-    let settings = &config.settings;
-    let api_key = settings.llm.api_key.clone();
-    if api_key.is_empty() {
-        return Err(
-            "llm.api_key not configured; fill agentthespire.config.json or set SPIREFORGE_LLM__API_KEY"
-                .into(),
-        );
-    }
-    let model = if settings.llm.model.is_empty() {
-        "claude-opus-4-1-20250805".to_string()
-    } else {
-        settings.llm.model.clone()
-    };
-    let base_url = if settings.llm.base_url.is_empty() {
-        None
-    } else {
-        Some(settings.llm.base_url.clone())
-    };
-    let client = AnthropicClient::new(api_key, model, base_url).map_err(|e| e.to_string())?;
-    Ok(Arc::new(RetryingClient::new(
-        Arc::new(client),
-        RetryConfig::default(),
-    )))
+    build_from_config(&config.settings.llm).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

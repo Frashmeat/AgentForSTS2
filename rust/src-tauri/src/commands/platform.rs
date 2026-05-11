@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use ats_core::knowledge::{BaselibSource, GitHubBaselibSource, KnowledgePaths};
-use ats_core::llm::{AnthropicClient, LlmClient, RetryConfig, RetryingClient};
+use ats_core::llm::{LlmClient, build_from_config};
 use ats_core::platform::{
     FileJobRepository, Job, JobApplicationService, JobId, JobSummary, ProgressEvent, ProgressSink,
     SubmitBatchCustomCodeRequest, SubmitBuildProjectRequest, SubmitCodeGenerateRequest,
@@ -225,26 +225,7 @@ fn build_service(
 }
 
 fn build_llm_client(config: &State<'_, AppConfig>) -> Result<Arc<dyn LlmClient>, String> {
-    let settings = &config.settings;
-    let api_key = settings.llm.api_key.clone();
-    if api_key.is_empty() {
-        return Err("llm.api_key not configured".into());
-    }
-    let model = if settings.llm.model.is_empty() {
-        "claude-opus-4-1-20250805".to_string()
-    } else {
-        settings.llm.model.clone()
-    };
-    let base_url = if settings.llm.base_url.is_empty() {
-        None
-    } else {
-        Some(settings.llm.base_url.clone())
-    };
-    let client = AnthropicClient::new(api_key, model, base_url).map_err(|e| e.to_string())?;
-    Ok(Arc::new(RetryingClient::new(
-        Arc::new(client),
-        RetryConfig::default(),
-    )))
+    build_from_config(&config.settings.llm).map_err(|e| e.to_string())
 }
 
 struct TauriProgressSink {

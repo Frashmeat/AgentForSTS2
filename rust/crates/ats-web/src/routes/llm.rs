@@ -7,8 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ats_core::llm::{
-    AnthropicClient, CompletionRequest, CompletionResponse, LlmClient, LlmError, RetryConfig,
-    RetryingClient, StreamEvent,
+    CompletionRequest, CompletionResponse, LlmClient, LlmError, StreamEvent, build_from_config,
 };
 use axum::{
     Extension, Json, Router,
@@ -28,36 +27,17 @@ pub fn router() -> Router {
 }
 
 fn build_client(state: &AppState) -> Result<Arc<dyn LlmClient>, (StatusCode, String)> {
-    let llm = &state.config_status; // 这里只用 status，真实配置应从 settings 读
-    let _ = llm; // 占位，真实拿 settings 需要把 Settings 注入 AppState（见 main.rs TODO）
     let settings = state
         .settings_snapshot
         .as_ref()
         .ok_or((StatusCode::SERVICE_UNAVAILABLE, "settings not loaded".to_string()))?;
-
-    let api_key = settings.llm.api_key.clone();
-    if api_key.is_empty() {
-        return Err((
-            StatusCode::PRECONDITION_FAILED,
-            "llm.api_key not configured; set SPIREFORGE_LLM__API_KEY or fill config".into(),
-        ));
-    }
-    let model = if settings.llm.model.is_empty() {
-        "claude-opus-4-1-20250805".to_string()
-    } else {
-        settings.llm.model.clone()
-    };
-    let base_url = if settings.llm.base_url.is_empty() {
-        None
-    } else {
-        Some(settings.llm.base_url.clone())
-    };
-    let client = AnthropicClient::new(api_key, model, base_url)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    Ok(Arc::new(RetryingClient::new(
-        Arc::new(client),
-        RetryConfig::default(),
-    )))
+    build_from_config(&settings.llm).map_err(|e| {
+        let status = match &e {
+            LlmError::Config(_) => StatusCode::PRECONDITION_FAILED,
+            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        (status, e.to_string())
+    })
 }
 
 async fn complete_handler(
