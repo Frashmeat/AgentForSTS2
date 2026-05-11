@@ -1,0 +1,44 @@
+{
+  "_comment": "AgentTheSpire runtime config — copy to agentthespire.config.json and fill in. Field names mirror the Python schema where overlap exists.",
+  "runtime": {
+    "workstation": {
+      "host": "127.0.0.1",
+      "port": 7860,
+      "allow_loopback_origins": true,
+      "cors_origins": [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:7860",
+        "http://127.0.0.1:7860"
+      ],
+      "mount_frontend": true,
+      "requires_database": false
+    },
+    "web": {
+      "host": "127.0.0.1",
+      "port": 7870,
+      "allow_loopback_origins": false,
+      "cors_origins": [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:7870",
+        "http://127.0.0.1:7870"
+      ],
+      "mount_frontend": false,
+      "requires_database": true
+    }
+  },
+  "llm": {
+    "mode": "agent_cli",
+    "agent_backend": "claude",
+    "provider": "",
+    "model": "",
+    "api_key": "",
+    "base_url": ""
+  },
+  "auth": {
+    "session_cookie_name": "agentthespire_session",
+    "session_secret": "CHANGE_ME_FOR_WEB_DEPLOYMENT",
+    "credential_secret": "CHANGE_ME_FOR_WEB_DEPLOYMENT"
+  }
+}

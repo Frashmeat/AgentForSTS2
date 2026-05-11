@@ -21,3 +21,6 @@ src-tauri/gen/
 .env.local
 *.key
 *.pem
+
+# Active runtime config (contains secrets / machine paths); ship .example only
+runtime/agentthespire.config.json
