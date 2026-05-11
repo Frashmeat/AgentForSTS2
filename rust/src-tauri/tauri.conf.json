@@ -35,16 +35,6 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ],
-    "_signing_help": "Q7 决议为先发不签名版；下方占位字段保留供未来填入。Windows 用 EV 证书 thumbprint；macOS 用 Apple Developer ID。",
-    "windows": {
-      "_certificateThumbprint": "（Q7 未启用，留空）",
-      "_digestAlgorithm": "sha256",
-      "_timestampUrl": "http://timestamp.digicert.com"
-    },
-    "macOS": {
-      "_signingIdentity": "（Q7 未启用，留空，例 \"Developer ID Application: Name (TEAMID)\"）",
-      "_providerShortName": "（公证用 Apple Team ID）"
-    }
+    ]
   }
 }

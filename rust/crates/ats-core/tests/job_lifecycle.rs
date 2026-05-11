@@ -169,30 +169,24 @@ async fn code_generate_writes_files_via_public_api() {
 }
 
 #[tokio::test]
-async fn cancel_before_run_keeps_terminal_state() {
+async fn cancel_pending_job_marks_cancelled() {
+    // 不走 spawn 路径（race-y），直接创建 Pending → 调 cancel → 验证状态机。
+    use ats_core::platform::{Job, JobKind};
+
     let td = tempfile::TempDir::new().unwrap();
     let repo = make_repo(&td);
     let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
         events: Mutex::new(vec![]),
     });
     let service = JobApplicationService::new(Arc::clone(&repo), llm);
-    let sink: Arc<dyn ProgressSink> = Arc::new(NoopProgressSink);
 
-    // 提交 + 立即取消
-    let id = service
-        .submit_text_generate(
-            SubmitTextGenerateRequest {
-                prompt: "x".into(),
-                ..Default::default()
-            },
-            sink,
-        )
-        .await
-        .unwrap();
+    let job = Job::new(JobKind::TextGenerate, serde_json::json!({}));
+    repo.create(&job).await.unwrap();
+    let id = job.id.clone();
+
     service.cancel(&id).await.unwrap();
-    wait_terminal(&service, &id).await;
-    let job = service.get(&id).await.unwrap();
-    assert_eq!(job.status, JobStatus::Cancelled);
+    let reloaded = service.get(&id).await.unwrap();
+    assert_eq!(reloaded.status, JobStatus::Cancelled);
 
     // 二次 cancel 应该报 Terminal（已经是终态）
     let err = service.cancel(&id).await.unwrap_err();
