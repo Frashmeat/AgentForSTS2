@@ -13,12 +13,19 @@ export interface ConfigStatus {
   errors: string[];
 }
 
+export interface ReadinessFlags {
+  llmConfigured: boolean;
+  imageGenConfigured: boolean;
+  activeProjectOpen: boolean;
+}
+
 export interface HealthReport {
   status: "ok" | "degraded";
   role: Role;
   coreVersion: string;
   serverTime: string;
   config: ConfigStatus;
+  readiness: ReadinessFlags;
 }
 
 export function getHealth(): Promise<HealthReport> {

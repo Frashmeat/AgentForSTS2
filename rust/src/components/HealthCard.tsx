@@ -62,6 +62,46 @@ export function HealthCard() {
               </ul>
             </div>
           )}
+
+          <div className="mt-3 pt-3 border-t border-muted/20">
+            <h3 className="text-sm font-medium text-muted mb-1">Readiness</h3>
+            <ul className="text-sm space-y-0.5">
+              <li>
+                <span
+                  className={
+                    health.readiness.llmConfigured ? "text-emerald-600" : "text-amber-600"
+                  }
+                >
+                  {health.readiness.llmConfigured ? "✓" : "○"}
+                </span>{" "}
+                LLM api_key 配置
+              </li>
+              <li>
+                <span
+                  className={
+                    health.readiness.imageGenConfigured
+                      ? "text-emerald-600"
+                      : "text-muted"
+                  }
+                >
+                  {health.readiness.imageGenConfigured ? "✓" : "○"}
+                </span>{" "}
+                image_gen api_key 配置（asset_generate 需要）
+              </li>
+              <li>
+                <span
+                  className={
+                    health.readiness.activeProjectOpen
+                      ? "text-emerald-600"
+                      : "text-muted"
+                  }
+                >
+                  {health.readiness.activeProjectOpen ? "✓" : "○"}
+                </span>{" "}
+                工程文件夹已打开
+              </li>
+            </ul>
+          </div>
         </>
       )}
     </section>
