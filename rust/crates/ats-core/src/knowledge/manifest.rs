@@ -46,6 +46,9 @@ pub struct DecompileRecord {
     pub decompiled_at: DateTime<Utc>,
     pub cs_file_count: u32,
     pub total_bytes: u64,
+    /// 仅 baselib 用：来自 GitHub Releases 的 tag_name。game 留空。
+    #[serde(default)]
+    pub release_tag: Option<String>,
 }
 
 impl DecompileRecord {
@@ -81,11 +84,24 @@ pub fn build_record(
     cs_file_count: u32,
     total_bytes: u64,
 ) -> std::io::Result<DecompileRecord> {
+    build_record_with_tag(source, cs_file_count, total_bytes, None)
+}
+
+/// 同 `build_record` 但允许附加一个 release_tag（用于 baselib）。
+///
+/// # Errors
+/// 读取 metadata 失败时返回 io 错误。
+pub fn build_record_with_tag(
+    source: &Path,
+    cs_file_count: u32,
+    total_bytes: u64,
+    release_tag: Option<String>,
+) -> std::io::Result<DecompileRecord> {
     let meta = std::fs::metadata(source)?;
     let mtime = meta
         .modified()
         .ok()
-        .and_then(|t| Some(DateTime::<Utc>::from(t)));
+        .map(DateTime::<Utc>::from);
     Ok(DecompileRecord {
         source_path: source.to_path_buf(),
         source_size_bytes: meta.len(),
@@ -93,6 +109,7 @@ pub fn build_record(
         decompiled_at: Utc::now(),
         cs_file_count,
         total_bytes,
+        release_tag,
     })
 }
 

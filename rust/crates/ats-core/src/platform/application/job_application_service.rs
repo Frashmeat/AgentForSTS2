@@ -12,7 +12,7 @@ use super::handlers::{
     log_analysis::run_log_analysis, package_project::run_package_project,
     single_asset_plan::run_single_asset_plan, text_generate::run_text_generate,
 };
-use crate::knowledge::KnowledgePaths;
+use crate::knowledge::{BaselibSource, KnowledgePaths};
 use crate::llm::LlmClient;
 use crate::platform::contracts::{
     SubmitBatchCustomCodeRequest, SubmitBuildProjectRequest, SubmitCodeGenerateRequest,
@@ -118,12 +118,14 @@ impl JobApplicationService {
     }
 
     /// 提交 knowledge_refresh 任务：跑 ilspycmd 把 sts2.dll 反编译到 game 目录，
-    /// 并更新 knowledge-manifest.json。`force=false` 时若 manifest 与当前 dll 元数据
-    /// 一致则跳过子进程直接 Completed。
+    /// 可选同时拉 BaseLib.dll 并反编译到 baselib/BaseLib.decompiled.cs。
+    /// `force=false` 时若 manifest 与当前 dll 元数据一致则跳过 game 子进程。
+    /// baselib 不做缓存命中检查（每次 include_baselib=true 都会拉 + 反编译）。
     pub async fn submit_knowledge_refresh(
         &self,
         request: SubmitKnowledgeRefreshRequest,
         knowledge_paths: KnowledgePaths,
+        baselib_source: Arc<dyn BaselibSource>,
         sink: Arc<dyn ProgressSink>,
     ) -> JobResult<JobId> {
         let payload = serde_json::to_value(&request)
@@ -135,7 +137,15 @@ impl JobApplicationService {
         let repo = Arc::clone(&self.repo);
         let id_for_task = job_id.clone();
         tokio::spawn(async move {
-            run_knowledge_refresh(repo, sink, id_for_task, request, knowledge_paths).await;
+            run_knowledge_refresh(
+                repo,
+                sink,
+                id_for_task,
+                request,
+                knowledge_paths,
+                baselib_source,
+            )
+            .await;
         });
 
         Ok(job_id)

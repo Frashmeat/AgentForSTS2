@@ -11,6 +11,7 @@
 //! - 知识包导出 ZIP（下一轮）
 //! - sts2_code_facts_provider 走真实反编译产物（下一轮，依赖本轮 manifest）
 
+mod baselib;
 mod contracts;
 mod decompile;
 mod manifest;
@@ -24,16 +25,18 @@ mod sts2_knowledge_resolver;
 mod sts2_lookup_provider;
 mod templates;
 
+pub use baselib::{BaselibError, BaselibSource, FetchedBaselib, GitHubBaselibSource};
 pub use contracts::{
     KnowledgeFactItem, KnowledgeGuidanceItem, KnowledgeLookupItem, KnowledgePacket, KnowledgeQuery,
     KnowledgeScenario,
 };
 pub use decompile::{
     DecompileError, DecompileStats, default_dotnet_tools_dirs, discover_ilspycmd,
-    discover_ilspycmd_in, run_decompile,
+    discover_ilspycmd_in, run_decompile_file, run_decompile_project,
 };
 pub use manifest::{
-    DecompileRecord, KnowledgeManifest, build_record, read_manifest, write_manifest,
+    DecompileRecord, KnowledgeManifest, build_record, build_record_with_tag, read_manifest,
+    write_manifest,
 };
 pub use models::{BaselibStatus, GameStatus, KnowledgeStatus, OverallState, SourceMode};
 pub use paths::KnowledgePaths;

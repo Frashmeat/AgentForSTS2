@@ -89,26 +89,12 @@ pub fn default_dotnet_tools_dirs() -> Vec<PathBuf> {
     dirs
 }
 
-/// 跑 ilspycmd 把 `dll` 反编译到 `output_dir`。
-///
-/// 阻塞调用。一般通过 `tokio::task::spawn_blocking` 包住。预期 ilspycmd 用法：
-/// ```text
-/// ilspycmd <dll> -o <output_dir> -p
-/// ```
-///
-/// `-p` 让 ilspycmd 按命名空间拆 .cs 文件而非合并到单个文件。
-///
-/// 返回 stdout/stderr 末尾片段方便排错；exit_code 非 0 视为失败但仍封装在
-/// `ProcessFailed` 里供上层决策。
+/// 项目模式：跑 `ilspycmd <dll> -o <output_dir> -p`，按命名空间拆多个 .cs 文件。
+/// 适合大型 DLL（如 sts2.dll）。
 ///
 /// # Errors
-/// - `DllMissing`：dll 不存在
-/// - `OutputCreate`：output_dir 创建失败
-/// - `Spawn`：进程启动失败（ilspycmd 路径无效 / 权限问题）
-/// - `ProcessFailed`：进程退出码非 0
-/// - `EmptyOutput`：进程成功但产出 0 个 .cs 文件
-/// - `Walk`：统计输出文件时出错
-pub fn run_decompile(
+/// - `DllMissing` / `OutputCreate` / `Spawn` / `ProcessFailed` / `EmptyOutput` / `Walk`
+pub fn run_decompile_project(
     ilspycmd: &Path,
     dll: &Path,
     output_dir: &Path,
@@ -147,6 +133,60 @@ pub fn run_decompile(
     Ok(DecompileStats {
         cs_file_count,
         total_bytes,
+        stdout_tail,
+        stderr_tail,
+        exit_code,
+    })
+}
+
+/// 单文件模式：跑 `ilspycmd <dll> -o <output_file>`，输出合并到单个 .cs 文件。
+/// 适合小型 DLL（如 BaseLib.dll）以及 runtime 既定单文件布局。
+///
+/// # Errors
+/// - `DllMissing`：dll 不存在
+/// - `OutputCreate`：output_file 父目录创建失败
+/// - `Spawn`：进程启动失败
+/// - `ProcessFailed`：进程退出码非 0
+/// - `EmptyOutput`：输出文件不存在或 0 字节
+pub fn run_decompile_file(
+    ilspycmd: &Path,
+    dll: &Path,
+    output_file: &Path,
+) -> Result<DecompileStats, DecompileError> {
+    if !dll.is_file() {
+        return Err(DecompileError::DllMissing(dll.to_path_buf()));
+    }
+    if let Some(parent) = output_file.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| DecompileError::OutputCreate(e.to_string()))?;
+    }
+
+    let output = Command::new(ilspycmd)
+        .arg(dll)
+        .arg("-o")
+        .arg(output_file)
+        .output()
+        .map_err(|e| DecompileError::Spawn(e.to_string()))?;
+
+    let stdout_tail = tail_lossy(&output.stdout, 4000);
+    let stderr_tail = tail_lossy(&output.stderr, 4000);
+    let exit_code = output.status.code().unwrap_or(-1);
+
+    if !output.status.success() {
+        return Err(DecompileError::ProcessFailed {
+            code: exit_code,
+            tail: format!("stdout: {stdout_tail}\nstderr: {stderr_tail}"),
+        });
+    }
+
+    let meta = std::fs::metadata(output_file).map_err(|e| DecompileError::Walk(e.to_string()))?;
+    if meta.len() == 0 {
+        return Err(DecompileError::EmptyOutput);
+    }
+
+    Ok(DecompileStats {
+        cs_file_count: 1,
+        total_bytes: meta.len(),
         stdout_tail,
         stderr_tail,
         exit_code,
@@ -219,11 +259,11 @@ mod tests {
     }
 
     #[test]
-    fn run_decompile_errors_when_dll_missing() {
+    fn run_decompile_project_errors_when_dll_missing() {
         let td = tempfile::TempDir::new().unwrap();
         let fake_dll = td.path().join("nope.dll");
         let out = td.path().join("out");
-        let result = run_decompile(Path::new("/usr/bin/true"), &fake_dll, &out);
+        let result = run_decompile_project(Path::new("/usr/bin/true"), &fake_dll, &out);
         match result {
             Err(DecompileError::DllMissing(p)) => assert_eq!(p, fake_dll),
             other => panic!("expected DllMissing, got {other:?}"),
@@ -231,18 +271,38 @@ mod tests {
     }
 
     #[test]
-    fn run_decompile_errors_when_ilspycmd_path_invalid() {
+    fn run_decompile_project_errors_when_ilspycmd_path_invalid() {
         let td = tempfile::TempDir::new().unwrap();
         let dll = td.path().join("fake.dll");
         fs::write(&dll, b"mz...").unwrap();
         let out = td.path().join("out");
 
         let bogus = td.path().join("does-not-exist-binary");
-        let result = run_decompile(&bogus, &dll, &out);
+        let result = run_decompile_project(&bogus, &dll, &out);
         match result {
             Err(DecompileError::Spawn(msg)) => assert!(!msg.is_empty()),
             other => panic!("expected Spawn error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn run_decompile_file_errors_when_dll_missing() {
+        let td = tempfile::TempDir::new().unwrap();
+        let fake_dll = td.path().join("nope.dll");
+        let out = td.path().join("out.cs");
+        let result = run_decompile_file(Path::new("/usr/bin/true"), &fake_dll, &out);
+        assert!(matches!(result, Err(DecompileError::DllMissing(_))));
+    }
+
+    #[test]
+    fn run_decompile_file_errors_when_ilspycmd_invalid() {
+        let td = tempfile::TempDir::new().unwrap();
+        let dll = td.path().join("fake.dll");
+        fs::write(&dll, b"mz").unwrap();
+        let out = td.path().join("out.cs");
+        let bogus = td.path().join("nonexistent-cmd");
+        let result = run_decompile_file(&bogus, &dll, &out);
+        assert!(matches!(result, Err(DecompileError::Spawn(_))));
     }
 
     #[test]

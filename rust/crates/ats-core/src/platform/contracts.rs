@@ -91,7 +91,8 @@ pub struct SubmitSingleAssetPlanRequest {
     pub max_tokens: Option<u32>,
 }
 
-/// knowledge_refresh 任务的输入：反编译 sts2.dll 到知识库的 game 目录。
+/// knowledge_refresh 任务的输入：反编译 sts2.dll 到知识库的 game 目录，
+/// 可选同时下载并反编译 BaseLib.dll。
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default, rename_all = "snake_case")]
 pub struct SubmitKnowledgeRefreshRequest {
@@ -102,6 +103,9 @@ pub struct SubmitKnowledgeRefreshRequest {
     pub ilspycmd_path: Option<PathBuf>,
     /// 即使 manifest 显示当前产物已是最新，仍强制重新反编译。
     pub force: bool,
+    /// 同时从 GitHub Releases 拉 BaseLib.dll 并反编译到
+    /// `<knowledge>/baselib/BaseLib.decompiled.cs`。
+    pub include_baselib: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

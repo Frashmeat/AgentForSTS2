@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use ats_core::knowledge::KnowledgePaths;
+use ats_core::knowledge::{BaselibSource, GitHubBaselibSource, KnowledgePaths};
 use ats_core::llm::{AnthropicClient, LlmClient, RetryConfig, RetryingClient};
 use ats_core::platform::{
     FileJobRepository, Job, JobApplicationService, JobId, JobSummary, ProgressEvent, ProgressSink,
@@ -101,8 +101,12 @@ pub async fn submit_knowledge_refresh_job(
     let service = build_service(&config, &active)?;
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
     let knowledge_paths = KnowledgePaths::from_runtime_dir(&config.status.runtime_dir());
+    let baselib_source: Arc<dyn BaselibSource> = Arc::new(
+        GitHubBaselibSource::default_alchyr_with_default_client()
+            .map_err(|e| format!("init baselib source: {e}"))?,
+    );
     let job_id = service
-        .submit_knowledge_refresh(request, knowledge_paths, sink)
+        .submit_knowledge_refresh(request, knowledge_paths, baselib_source, sink)
         .await
         .map_err(|e| e.to_string())?;
     Ok(SubmitJobAck { job_id })
