@@ -38,6 +38,12 @@ pub fn run() {
             commands::knowledge::check_knowledge_status,
             commands::planning::validate_plan_cmd,
             commands::planning::build_execution_plan_cmd,
+            commands::codegen::codegen_asset_prompt,
+            commands::codegen::codegen_custom_code_prompt,
+            commands::codegen::codegen_asset_group_prompt,
+            commands::codegen::codegen_build_prompt,
+            commands::codegen::codegen_create_mod_project_prompt,
+            commands::codegen::codegen_package_prompt,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

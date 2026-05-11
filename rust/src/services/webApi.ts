@@ -1,11 +1,15 @@
 // Web 端 API 实现 —— 必须实现 tauriApi.ts 全部导出。
 
 import type {
+  AssetCodegenRequest,
+  AssetGroupRequest,
   BundleDecision,
+  CustomCodegenRequest,
   ExecutionPlanPreview,
   HealthReport,
   KnowledgeStatus,
   ModPlan,
+  ModProjectRequest,
   PlanValidationResult,
   ReviewStrictness,
 } from "./tauriApi";
@@ -75,4 +79,47 @@ export async function buildExecutionPlan(
     throw new Error(`${response.status} ${response.statusText}`);
   }
   return response.json() as Promise<ExecutionPlanPreview>;
+}
+
+async function codegenPost(path: string, body: unknown): Promise<string> {
+  const response = await fetch(`${API_BASE}/codegen/${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    throw new Error(`${response.status} ${response.statusText}`);
+  }
+  const payload = (await response.json()) as { prompt: string };
+  return payload.prompt;
+}
+
+export function codegenAssetPrompt(request: AssetCodegenRequest): Promise<string> {
+  return codegenPost("asset-prompt", request);
+}
+
+export function codegenCustomCodePrompt(
+  request: CustomCodegenRequest,
+): Promise<string> {
+  return codegenPost("custom-code-prompt", request);
+}
+
+export function codegenAssetGroupPrompt(
+  request: AssetGroupRequest,
+): Promise<string> {
+  return codegenPost("asset-group-prompt", request);
+}
+
+export function codegenBuildPrompt(maxAttempts = 3): Promise<string> {
+  return codegenPost("build-prompt", { max_attempts: maxAttempts });
+}
+
+export function codegenCreateModProjectPrompt(
+  request: ModProjectRequest,
+): Promise<string> {
+  return codegenPost("create-mod-project-prompt", request);
+}
+
+export function codegenPackagePrompt(): Promise<string> {
+  return codegenPost("package-prompt", {});
 }

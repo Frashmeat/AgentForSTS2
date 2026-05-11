@@ -1,3 +1,4 @@
+import { CodegenCard } from "@/components/CodegenCard";
 import { HealthCard } from "@/components/HealthCard";
 import { KnowledgeCard } from "@/components/KnowledgeCard";
 import { PlanningCard } from "@/components/PlanningCard";
@@ -18,6 +19,7 @@ export default function App() {
       <HealthCard />
       <KnowledgeCard />
       <PlanningCard />
+      <CodegenCard />
     </div>
   );
 }

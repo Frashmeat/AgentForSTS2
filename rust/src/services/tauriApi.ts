@@ -183,3 +183,68 @@ export function buildExecutionPlan(
     bundleDecisions,
   });
 }
+
+// -------- Codegen --------
+
+export interface AssetCodegenRequest {
+  design_description: string;
+  asset_type: string;
+  asset_name: string;
+  image_paths: string[];
+  project_root: string;
+  name_zhs: string;
+  skip_build: boolean;
+}
+
+export interface CustomCodegenRequest {
+  description: string;
+  implementation_notes: string;
+  name: string;
+  project_root: string;
+  skip_build: boolean;
+}
+
+export interface AssetGroupItem {
+  item: PlanItem;
+  image_paths: string[];
+}
+
+export interface AssetGroupRequest {
+  assets: AssetGroupItem[];
+  project_root: string;
+}
+
+export interface ModProjectRequest {
+  project_name: string;
+  target_dir: string;
+}
+
+export function codegenAssetPrompt(request: AssetCodegenRequest): Promise<string> {
+  return invoke<string>("codegen_asset_prompt", { request });
+}
+
+export function codegenCustomCodePrompt(
+  request: CustomCodegenRequest,
+): Promise<string> {
+  return invoke<string>("codegen_custom_code_prompt", { request });
+}
+
+export function codegenAssetGroupPrompt(
+  request: AssetGroupRequest,
+): Promise<string> {
+  return invoke<string>("codegen_asset_group_prompt", { request });
+}
+
+export function codegenBuildPrompt(maxAttempts = 3): Promise<string> {
+  return invoke<string>("codegen_build_prompt", { maxAttempts });
+}
+
+export function codegenCreateModProjectPrompt(
+  request: ModProjectRequest,
+): Promise<string> {
+  return invoke<string>("codegen_create_mod_project_prompt", { request });
+}
+
+export function codegenPackagePrompt(): Promise<string> {
+  return invoke<string>("codegen_package_prompt");
+}
