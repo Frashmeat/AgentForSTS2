@@ -6,17 +6,18 @@
 //!
 //! 共享：contracts + domain trait + application services 全部在本 crate。
 //!
-//! 当前 stage 3.2 + 3.3b（desktop）+ 3.4 部分范围：
+//! 当前 stage 3.2 + 3.3b（desktop）+ 3.4 部分 + 3.5 第一轮 / 第二轮范围：
 //! - Job/JobKind/JobStatus 等领域类型
 //! - JobRepository async trait
 //! - FileJobRepository 文件实现
 //! - JobApplicationService submit/get/list/cancel
-//! - text_generate kind 的 handler 落到 LLM
+//! - handlers/ 子目录：text_generate / code_generate / build_project /
+//!   log_analysis / package_project / batch_custom_code / single_asset_plan
 //!
 //! 不在本阶段范围：
 //! - ServerCredential / ExecutionRouting / Artifact 等 Web 专属仓库
 //! - sqlx 实现（Q3 决议后再做）
-//! - 其它 6 个 handler（code/asset/batch/build/package/single/log）
+//! - asset_generate handler（依赖 image_gen 客户端）
 
 pub mod application;
 pub mod contracts;
@@ -25,7 +26,9 @@ pub mod infra;
 
 pub use application::{JobApplicationService, ProgressEvent, ProgressSink, NoopProgressSink};
 pub use contracts::{
-    SubmitBuildProjectRequest, SubmitCodeGenerateRequest, SubmitJobAck, SubmitTextGenerateRequest,
+    SubmitBatchCustomCodeRequest, SubmitBuildProjectRequest, SubmitCodeGenerateRequest,
+    SubmitJobAck, SubmitLogAnalysisRequest, SubmitPackageProjectRequest,
+    SubmitSingleAssetPlanRequest, SubmitTextGenerateRequest,
 };
 pub use domain::{
     Job, JobError, JobId, JobKind, JobProgress, JobRepository, JobResult, JobStatus, JobSummary,

@@ -10,7 +10,9 @@ use ats_core::knowledge::KnowledgePaths;
 use ats_core::llm::{AnthropicClient, LlmClient, RetryConfig, RetryingClient};
 use ats_core::platform::{
     FileJobRepository, Job, JobApplicationService, JobId, JobSummary, ProgressEvent, ProgressSink,
-    SubmitBuildProjectRequest, SubmitCodeGenerateRequest, SubmitJobAck, SubmitTextGenerateRequest,
+    SubmitBatchCustomCodeRequest, SubmitBuildProjectRequest, SubmitCodeGenerateRequest,
+    SubmitJobAck, SubmitLogAnalysisRequest, SubmitPackageProjectRequest,
+    SubmitSingleAssetPlanRequest, SubmitTextGenerateRequest,
 };
 use async_trait::async_trait;
 use tauri::{AppHandle, Emitter, State};
@@ -84,6 +86,72 @@ pub async fn submit_code_generate_job(
     let knowledge_paths = KnowledgePaths::from_runtime_dir(&config.status.runtime_dir());
     let job_id = service
         .submit_code_generate(request, knowledge_paths, artifacts_dir, sink)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(SubmitJobAck { job_id })
+}
+
+#[tauri::command]
+pub async fn submit_single_asset_plan_job(
+    app: AppHandle,
+    config: State<'_, AppConfig>,
+    active: State<'_, ActiveProject>,
+    request: SubmitSingleAssetPlanRequest,
+) -> Result<SubmitJobAck, String> {
+    let service = build_service(&config, &active)?;
+    let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
+    let job_id = service
+        .submit_single_asset_plan(request, sink)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(SubmitJobAck { job_id })
+}
+
+#[tauri::command]
+pub async fn submit_batch_custom_code_job(
+    app: AppHandle,
+    config: State<'_, AppConfig>,
+    active: State<'_, ActiveProject>,
+    request: SubmitBatchCustomCodeRequest,
+) -> Result<SubmitJobAck, String> {
+    let service = build_service(&config, &active)?;
+    let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
+    let artifacts_dir = active_artifacts_dir(&active)?;
+    let knowledge_paths = KnowledgePaths::from_runtime_dir(&config.status.runtime_dir());
+    let job_id = service
+        .submit_batch_custom_code(request, knowledge_paths, artifacts_dir, sink)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(SubmitJobAck { job_id })
+}
+
+#[tauri::command]
+pub async fn submit_package_project_job(
+    app: AppHandle,
+    config: State<'_, AppConfig>,
+    active: State<'_, ActiveProject>,
+    request: SubmitPackageProjectRequest,
+) -> Result<SubmitJobAck, String> {
+    let service = build_service(&config, &active)?;
+    let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
+    let job_id = service
+        .submit_package_project(request, sink)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(SubmitJobAck { job_id })
+}
+
+#[tauri::command]
+pub async fn submit_log_analysis_job(
+    app: AppHandle,
+    config: State<'_, AppConfig>,
+    active: State<'_, ActiveProject>,
+    request: SubmitLogAnalysisRequest,
+) -> Result<SubmitJobAck, String> {
+    let service = build_service(&config, &active)?;
+    let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
+    let job_id = service
+        .submit_log_analysis(request, sink)
         .await
         .map_err(|e| e.to_string())?;
     Ok(SubmitJobAck { job_id })

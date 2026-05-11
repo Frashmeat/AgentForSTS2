@@ -24,6 +24,8 @@ futures-util = "0.3"
 eventsource-stream = "0.2"
 bytes = "1"
 dirs = "6"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+walkdir = "2"
 
 [dev-dependencies]
 tempfile = "3"
