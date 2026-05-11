@@ -3,6 +3,7 @@ import { HealthCard } from "@/components/HealthCard";
 import { KnowledgeCard } from "@/components/KnowledgeCard";
 import { LlmCard } from "@/components/LlmCard";
 import { PlanningCard } from "@/components/PlanningCard";
+import { ProjectCard } from "@/components/ProjectCard";
 
 export default function App() {
   return (
@@ -18,6 +19,7 @@ export default function App() {
       </header>
 
       <HealthCard />
+      <ProjectCard />
       <KnowledgeCard />
       <PlanningCard />
       <CodegenCard />

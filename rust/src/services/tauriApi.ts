@@ -312,3 +312,51 @@ export type LlmStreamPayload =
   | { type: "event"; request_id: string; event: StreamEvent }
   | { type: "error"; request_id: string; message: string }
   | { type: "done"; request_id: string };
+
+// -------- Project（仅桌面端）--------
+
+export interface ProjectMeta {
+  name: string;
+  created_at: string;
+  schema_version: number;
+  sts2_path: string | null;
+  template_version: string | null;
+}
+
+export interface ProjectSnapshot {
+  path: string;
+  meta: ProjectMeta;
+}
+
+export interface RecentEntry {
+  path: string;
+  name: string;
+  last_opened_at: string;
+}
+
+export function listRecentProjects(): Promise<RecentEntry[]> {
+  return invoke<RecentEntry[]>("list_recent_projects");
+}
+
+export function createProject(
+  parentDir: string,
+  name: string,
+): Promise<ProjectSnapshot> {
+  return invoke<ProjectSnapshot>("create_project", { parentDir, name });
+}
+
+export function openProject(path: string): Promise<ProjectSnapshot> {
+  return invoke<ProjectSnapshot>("open_project", { path });
+}
+
+export function closeProject(): Promise<void> {
+  return invoke<void>("close_project");
+}
+
+export function currentProject(): Promise<ProjectSnapshot | null> {
+  return invoke<ProjectSnapshot | null>("current_project");
+}
+
+export function forgetRecentProject(path: string): Promise<void> {
+  return invoke<void>("forget_recent_project", { path });
+}

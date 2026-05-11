@@ -8,3 +8,4 @@ pub mod health;
 pub mod knowledge;
 pub mod llm;
 pub mod planning;
+pub mod project;

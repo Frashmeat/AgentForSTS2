@@ -2,13 +2,30 @@
 
 mod commands;
 
+use std::path::PathBuf;
+
 use ats_core::config::{ConfigStatus, Settings};
 use ats_core::health::Role;
+use ats_core::project::AppDataPaths;
+
+use crate::commands::project::ActiveProject;
 
 /// Tauri 同进程内单一配置快照，通过 `app.manage()` 注入，由 command 通过 `tauri::State` 读取。
 pub struct AppConfig {
     pub settings: Settings,
     pub status: ConfigStatus,
+}
+
+/// 路径快照，提供给 project commands 读 recent_projects.json 等。
+pub struct AppPaths {
+    pub data: AppDataPaths,
+}
+
+impl AppPaths {
+    #[must_use]
+    pub fn recents_path(&self) -> PathBuf {
+        self.data.recent_projects_path.clone()
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -26,12 +43,23 @@ pub fn run() {
         status.errors.len()
     );
 
+    let app_data = AppDataPaths::resolve();
+    if let Err(e) = app_data.ensure_dirs() {
+        eprintln!(
+            "ats-desktop: failed to create app data dir {}: {e}",
+            app_data.root.display()
+        );
+    }
+    eprintln!("ats-desktop: app data root={}", app_data.root.display());
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .manage(AppConfig { settings, status })
+        .manage(AppPaths { data: app_data })
+        .manage(ActiveProject::new())
         .invoke_handler(tauri::generate_handler![
             commands::health::get_health,
             commands::knowledge::get_knowledge_status,
@@ -46,6 +74,12 @@ pub fn run() {
             commands::codegen::codegen_package_prompt,
             commands::llm::llm_complete,
             commands::llm::llm_start_stream,
+            commands::project::list_recent_projects,
+            commands::project::create_project,
+            commands::project::open_project,
+            commands::project::close_project,
+            commands::project::current_project,
+            commands::project::forget_recent_project,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
