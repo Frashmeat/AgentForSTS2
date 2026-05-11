@@ -16,18 +16,30 @@ cargo --version
 
 case "$MODE" in
     check)
+        # ats-web rust-embed needs dist/. Build it if missing.
+        if [ ! -d dist ]; then
+            npm ci
+            npm run build:web
+        fi
         cargo check --workspace --all-targets
         ;;
     clippy)
+        if [ ! -d dist ]; then
+            npm ci
+            npm run build:web
+        fi
         cargo clippy --workspace --all-targets
         ;;
     full)
         node --version
-        cargo check --workspace --all-targets
-        cargo test --workspace --all-targets
+        # Remove dist/ first so a stale local build can't hide a CI failure.
+        # ats-web rust-embed needs dist/ present, so npm steps must run before cargo.
+        rm -rf dist
         npm ci
         npx tsc --noEmit
         npm run build:web
+        cargo check --workspace --all-targets
+        cargo test --workspace --all-targets
         ;;
     *)
         echo "unknown mode: $MODE (expected: full / check / clippy)" >&2

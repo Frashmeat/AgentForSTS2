@@ -43,6 +43,23 @@ jobs:
             libxdo-dev \
             patchelf
 
+      # === 前端先构建：ats-web 用 rust-embed 把 dist/ 嵌进二进制，
+      # cargo check / test 都依赖 dist/ 存在，所以 npm 步骤必须早于 cargo。===
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: npm ci
+        run: npm ci
+
+      - name: tsc --noEmit
+        run: npx tsc --noEmit
+
+      - name: vite build (generates dist/ that rust-embed needs)
+        run: npm run build:web
+
       - name: Install Rust toolchain
         # rust-toolchain.toml 在仓库根，rustup 自动读
         run: |
@@ -60,21 +77,6 @@ jobs:
 
       - name: cargo test
         run: cargo test --workspace --all-targets
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: npm ci
-        run: npm ci
-
-      - name: tsc --noEmit
-        run: npx tsc --noEmit
-
-      - name: vite build
-        run: npm run build:web
 
   # --- Clippy 单独 job：当前 pedantic 警告未清；不阻塞主 CI，只跑趋势观察。 ---
   clippy:
