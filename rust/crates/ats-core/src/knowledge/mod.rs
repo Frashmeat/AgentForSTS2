@@ -15,6 +15,11 @@ mod contracts;
 mod models;
 mod paths;
 mod runtime;
+mod sts2_code_facts_provider;
+mod sts2_guidance;
+mod sts2_guidance_provider;
+mod sts2_knowledge_resolver;
+mod sts2_lookup_provider;
 mod templates;
 
 pub use contracts::{
@@ -24,4 +29,9 @@ pub use contracts::{
 pub use models::{BaselibStatus, GameStatus, KnowledgeStatus, OverallState, SourceMode};
 pub use paths::KnowledgePaths;
 pub use runtime::{ensure_dirs, get_status};
+pub use sts2_code_facts_provider::Sts2CodeFactsProvider;
+pub use sts2_guidance::{guidance_for_asset_type, planner_guidance};
+pub use sts2_guidance_provider::Sts2GuidanceProvider;
+pub use sts2_knowledge_resolver::Sts2KnowledgeResolver;
+pub use sts2_lookup_provider::Sts2LookupProvider;
 pub use templates::{TEMPLATE_SLOTS, get_template};
