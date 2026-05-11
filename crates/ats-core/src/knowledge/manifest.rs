@@ -180,8 +180,10 @@ mod tests {
         std::fs::write(&src, b"MZ--placeholder").unwrap();
 
         let record = build_record(&src, 42, 12345).unwrap();
-        let mut m = KnowledgeManifest::default();
-        m.game = Some(record.clone());
+        let m = KnowledgeManifest {
+            game: Some(record.clone()),
+            ..KnowledgeManifest::default()
+        };
 
         let manifest_path = td.path().join("knowledge-manifest.json");
         write_manifest(&manifest_path, &m).unwrap();

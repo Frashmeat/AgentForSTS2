@@ -3,7 +3,7 @@
 //! Asset 和 CustomCode 两种入参共用同一条主链，区别仅在 prompt 装配步骤。
 //! `generate_and_write_code_artifact` 提取出来给 batch_custom_code 复用。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use futures_util::StreamExt;
@@ -189,7 +189,7 @@ pub(crate) async fn generate_and_write_code_artifact(
     job_id: &JobId,
     prompt: String,
     entity_name: &str,
-    artifacts_dir: &PathBuf,
+    artifacts_dir: &Path,
 ) -> Result<WrittenArtifact, GenerateError> {
     let completion_request = CompletionRequest {
         messages: vec![Message {
@@ -214,7 +214,7 @@ pub(crate) async fn generate_and_write_code_artifact(
     let mut tick: u32 = 0;
     while let Some(item) = stream.next().await {
         tick = tick.wrapping_add(1);
-        if tick % 5 == 0 && is_cancelled(&repo, job_id).await {
+        if tick.is_multiple_of(5) && is_cancelled(&repo, job_id).await {
             emit_cancelled_mid_stream(&sink, job_id).await;
             return Err(GenerateError::Cancelled);
         }

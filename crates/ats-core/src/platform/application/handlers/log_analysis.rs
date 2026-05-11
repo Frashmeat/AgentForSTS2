@@ -96,7 +96,7 @@ pub async fn run_log_analysis(
     let mut tick: u32 = 0;
     while let Some(item) = stream.next().await {
         tick = tick.wrapping_add(1);
-        if tick % 5 == 0 && is_cancelled(&repo, &job_id).await {
+        if tick.is_multiple_of(5) && is_cancelled(&repo, &job_id).await {
             emit_cancelled_mid_stream(&sink, &job_id).await;
             return;
         }
@@ -169,12 +169,12 @@ async fn resolve_log_text(request: &SubmitLogAnalysisRequest) -> Result<String, 
 
 fn build_user_prompt(log: &str, context_hint: Option<&str>) -> String {
     let mut buf = String::new();
-    if let Some(hint) = context_hint {
-        if !hint.trim().is_empty() {
-            buf.push_str("用户上下文提示：\n");
-            buf.push_str(hint.trim());
-            buf.push_str("\n\n");
-        }
+    if let Some(hint) = context_hint
+        && !hint.trim().is_empty()
+    {
+        buf.push_str("用户上下文提示：\n");
+        buf.push_str(hint.trim());
+        buf.push_str("\n\n");
     }
     buf.push_str("以下是构建日志：\n\n```\n");
     buf.push_str(log);

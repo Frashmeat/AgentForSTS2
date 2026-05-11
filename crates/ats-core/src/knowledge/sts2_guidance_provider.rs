@@ -65,10 +65,10 @@ struct GuidanceFile {
 
 fn iter_asset_types(query: &KnowledgeQuery) -> Vec<String> {
     let mut ordered: Vec<String> = Vec::new();
-    if let Some(at) = &query.asset_type {
-        if !at.is_empty() {
-            ordered.push(at.clone());
-        }
+    if let Some(at) = &query.asset_type
+        && !at.is_empty()
+    {
+        ordered.push(at.clone());
     }
     for at in &query.group_asset_types {
         if !ordered.iter().any(|x| x == at) {

@@ -65,7 +65,7 @@ pub async fn run_text_generate(
     while let Some(item) = stream.next().await {
         // 每 5 个事件查一次取消（避免 file repo 被 hammer）。drop stream 即关连接。
         tick = tick.wrapping_add(1);
-        if tick % 5 == 0 && is_cancelled(&repo, &job_id).await {
+        if tick.is_multiple_of(5) && is_cancelled(&repo, &job_id).await {
             emit_cancelled_mid_stream(&sink, &job_id).await;
             return;
         }

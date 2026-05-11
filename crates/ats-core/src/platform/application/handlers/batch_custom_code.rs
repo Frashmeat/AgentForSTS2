@@ -4,7 +4,7 @@
 //! `<artifacts_dir>/<sanitized name>/<name>.cs`。单 item 失败不影响其它，除非
 //! `fail_fast = true`。每个 item 的结果（成功路径或失败原因）汇总到 job.result.items。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde::Serialize;
@@ -55,10 +55,10 @@ pub async fn run_batch_custom_code(
 
     for (idx, item) in request.items.into_iter().enumerate() {
         // 中途检查 cancel：若被取消则停止后续 item 但保留已完成结果到 job.result。
-        if let Ok(j) = repo.get(&job_id).await {
-            if matches!(j.status, JobStatus::Cancelled) {
-                break;
-            }
+        if let Ok(j) = repo.get(&job_id).await
+            && matches!(j.status, JobStatus::Cancelled)
+        {
+            break;
         }
 
         let entity_name = sanitize_entity_name(&item.name);
@@ -145,6 +145,7 @@ pub async fn run_batch_custom_code(
     .await;
 }
 
+#[allow(clippy::too_many_arguments)] // 同 run_asset_generate，DI 注入式 handler
 async fn process_one_item(
     assembler: &PromptAssembler,
     repo: &Arc<dyn JobRepository>,
@@ -152,7 +153,7 @@ async fn process_one_item(
     sink: &Arc<dyn ProgressSink>,
     job_id: &JobId,
     knowledge_paths: &KnowledgePaths,
-    artifacts_dir: &PathBuf,
+    artifacts_dir: &Path,
     item: &CustomCodegenRequest,
     entity_name: &str,
 ) -> ItemOutcome {

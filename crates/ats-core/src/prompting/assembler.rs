@@ -115,23 +115,25 @@ mod tests {
 
     #[test]
     fn facts_sorted_by_priority_then_key() {
-        let mut packet = KnowledgePacket::default();
-        packet.facts = vec![
-            KnowledgeFactItem {
-                key: "z".into(),
-                title: "Low priority Z".into(),
-                body: "body-z".into(),
-                priority: 10,
-                ..Default::default()
-            },
-            KnowledgeFactItem {
-                key: "a".into(),
-                title: "High priority A".into(),
-                body: "body-a".into(),
-                priority: 1,
-                ..Default::default()
-            },
-        ];
+        let packet = KnowledgePacket {
+            facts: vec![
+                KnowledgeFactItem {
+                    key: "z".into(),
+                    title: "Low priority Z".into(),
+                    body: "body-z".into(),
+                    priority: 10,
+                    ..Default::default()
+                },
+                KnowledgeFactItem {
+                    key: "a".into(),
+                    title: "High priority A".into(),
+                    body: "body-a".into(),
+                    priority: 1,
+                    ..Default::default()
+                },
+            ],
+            ..KnowledgePacket::default()
+        };
         let out = PromptContextAssembler.assemble(&packet);
         let priority_a = out["facts"].find("High priority A").unwrap();
         let priority_z = out["facts"].find("Low priority Z").unwrap();

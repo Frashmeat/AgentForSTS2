@@ -246,7 +246,7 @@ fn build_split_bundles(items: &[&PlanItem]) -> Vec<ExecutionBundle> {
     items
         .iter()
         .map(|item| ExecutionBundle {
-            bundle_id: bundle_id_for(&[item.id.clone()]),
+            bundle_id: bundle_id_for(std::slice::from_ref(&item.id)),
             item_ids: vec![item.id.clone()],
             status: BundleReviewStatus::Clear,
             reason: "已按用户要求拆分为独立执行单元".into(),

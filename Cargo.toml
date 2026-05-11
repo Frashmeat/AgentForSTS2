@@ -17,10 +17,9 @@ authors = ["AgentTheSpire contributors"]
 unsafe_code = "forbid"
 
 [workspace.lints.clippy]
-pedantic = { level = "warn", priority = -1 }
-module_name_repetitions = "allow"
-missing_errors_doc = "allow"
-missing_panics_doc = "allow"
+# clippy::all (correctness + suspicious + style + complexity + perf) 当 error。
+# pedantic 已撤回 —— 大量 cast_possible_truncation / must_use_candidate /
+# doc_markdown 等噪音 lint 不值得维护，详见 CLAUDE.md "Clippy 策略" 一节。
 
 [profile.release]
 lto = "thin"

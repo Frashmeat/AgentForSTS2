@@ -53,7 +53,7 @@ pub fn display_path_safe(p: &Path) -> String {
 /// 用于诊断 / 日志，**不**作判定标准——大多数非 ASCII 路径在 Rust 下能正常工作。
 #[must_use]
 pub fn path_has_non_ascii(p: &Path) -> bool {
-    p.to_string_lossy().chars().any(|c| !c.is_ascii())
+    !p.to_string_lossy().is_ascii()
 }
 
 /// 检测路径在 Windows 上是否可能踩 MAX_PATH 限制（260 字符阈值，留 20 缓冲）。

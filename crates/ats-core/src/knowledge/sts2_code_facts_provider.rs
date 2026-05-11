@@ -363,10 +363,10 @@ fn score_type(
         }
     }
     // item_name 命中 +3（弱信号，仅作 tie-breaker）
-    if let Some(item_key) = item_name_key {
-        if name_lower.contains(item_key) {
-            score += 3;
-        }
+    if let Some(item_key) = item_name_key
+        && name_lower.contains(item_key)
+    {
+        score += 3;
     }
     // hook 关键字降级匹配（asset_keys 为空但有 custom_code 类需求时也能拿到东西）
     if score == 0 && t.has_hook_keyword && asset_keys.iter().any(|k| k == "hook" || k == "patch") {

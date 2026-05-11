@@ -133,12 +133,12 @@ fn zip_directory(
     output_path: &Path,
     compression_level: Option<i32>,
 ) -> Result<ZipStats, String> {
-    if let Some(parent) = output_path.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                format!("create output parent {}: {e}", parent.display())
-            })?;
-        }
+    if let Some(parent) = output_path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            format!("create output parent {}: {e}", parent.display())
+        })?;
     }
     let file = File::create(output_path)
         .map_err(|e| format!("create {}: {e}", output_path.display()))?;

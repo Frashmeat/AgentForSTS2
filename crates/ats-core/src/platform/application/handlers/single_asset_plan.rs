@@ -85,7 +85,7 @@ pub async fn run_single_asset_plan(
     let mut tick: u32 = 0;
     while let Some(item) = stream.next().await {
         tick = tick.wrapping_add(1);
-        if tick % 5 == 0 && is_cancelled(&repo, &job_id).await {
+        if tick.is_multiple_of(5) && is_cancelled(&repo, &job_id).await {
             emit_cancelled_mid_stream(&sink, &job_id).await;
             return;
         }
@@ -162,10 +162,10 @@ fn build_user_prompt(request: &SubmitSingleAssetPlanRequest) -> String {
     buf.push_str("需求描述：\n");
     buf.push_str(request.requirements.trim());
     buf.push_str("\n\n");
-    if let Some(t) = &request.asset_type {
-        if !t.trim().is_empty() {
-            buf.push_str(&format!("用户指定资产类型：{}\n", t.trim()));
-        }
+    if let Some(t) = &request.asset_type
+        && !t.trim().is_empty()
+    {
+        buf.push_str(&format!("用户指定资产类型：{}\n", t.trim()));
     }
     buf.push_str("请按 schema 输出严格 JSON 对象，不要附加任何说明文字。\n");
     buf
@@ -181,17 +181,17 @@ pub(crate) fn parse_plan_item(raw: &str) -> Result<PlanItem, String> {
     if let Ok(p) = serde_json::from_str::<PlanItem>(raw.trim()) {
         return Ok(p);
     }
-    if let Some(inner) = extract_first_code_block(raw) {
-        if let Ok(p) = serde_json::from_str::<PlanItem>(inner.trim()) {
-            return Ok(p);
-        }
+    if let Some(inner) = extract_first_code_block(raw)
+        && let Ok(p) = serde_json::from_str::<PlanItem>(inner.trim())
+    {
+        return Ok(p);
     }
-    if let (Some(start), Some(end)) = (raw.find('{'), raw.rfind('}')) {
-        if end > start {
-            let candidate = &raw[start..=end];
-            if let Ok(p) = serde_json::from_str::<PlanItem>(candidate) {
-                return Ok(p);
-            }
+    if let (Some(start), Some(end)) = (raw.find('{'), raw.rfind('}'))
+        && end > start
+    {
+        let candidate = &raw[start..=end];
+        if let Ok(p) = serde_json::from_str::<PlanItem>(candidate) {
+            return Ok(p);
         }
     }
     Err("response did not contain parseable PlanItem JSON".into())

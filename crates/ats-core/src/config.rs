@@ -192,12 +192,12 @@ fn resolve_config_path(explicit_path: Option<&Path>) -> (PathBuf, bool) {
         let exists = absolute.exists();
         return (absolute, exists);
     }
-    if let Ok(env_val) = std::env::var(CONFIG_PATH_ENV) {
-        if !env_val.is_empty() {
-            let absolute = absolutize(Path::new(&env_val));
-            let exists = absolute.exists();
-            return (absolute, exists);
-        }
+    if let Ok(env_val) = std::env::var(CONFIG_PATH_ENV)
+        && !env_val.is_empty()
+    {
+        let absolute = absolutize(Path::new(&env_val));
+        let exists = absolute.exists();
+        return (absolute, exists);
     }
     let Ok(cwd) = std::env::current_dir() else {
         let fallback = PathBuf::from(DEFAULT_CONFIG_PATH);

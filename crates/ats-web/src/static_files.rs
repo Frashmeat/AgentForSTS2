@@ -14,8 +14,8 @@ struct Asset;
 pub async fn static_handler(uri: Uri) -> Response {
     let path = uri.path().trim_start_matches('/');
 
-    if !path.is_empty() {
-        if let Some(content) = Asset::get(path) {
+    if !path.is_empty()
+        && let Some(content) = Asset::get(path) {
             let mime = mime_guess::from_path(path).first_or_octet_stream();
             return (
                 StatusCode::OK,
@@ -24,7 +24,6 @@ pub async fn static_handler(uri: Uri) -> Response {
             )
                 .into_response();
         }
-    }
 
     match Asset::get("index.html") {
         Some(content) => Html(String::from_utf8_lossy(&content.data).to_string()).into_response(),

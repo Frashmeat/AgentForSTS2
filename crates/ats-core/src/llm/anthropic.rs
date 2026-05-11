@@ -84,10 +84,10 @@ impl AnthropicClient {
             "stream": stream,
             "messages": request.messages.iter().map(message_to_json).collect::<Vec<_>>(),
         });
-        if let Some(system) = &request.system_prompt {
-            if !system.is_empty() {
-                body["system"] = Value::String(system.clone());
-            }
+        if let Some(system) = &request.system_prompt
+            && !system.is_empty()
+        {
+            body["system"] = Value::String(system.clone());
         }
         if let Some(temp) = request.temperature {
             body["temperature"] = serde_json::json!(temp);
@@ -177,7 +177,7 @@ impl LlmClient for AnthropicClient {
 
         let byte_stream = response.bytes_stream();
         let sse_stream = byte_stream
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+            .map_err(std::io::Error::other)
             .eventsource();
 
         // 在 stream 处理过程中需要保留累积的 usage 与 finish_reason；
@@ -248,10 +248,10 @@ impl AnthropicMessageResponse {
     fn into_completion(self) -> CompletionResponse {
         let mut text = String::new();
         for block in &self.content {
-            if block.r#type == "text" {
-                if let Some(t) = &block.text {
-                    text.push_str(t);
-                }
+            if block.r#type == "text"
+                && let Some(t) = &block.text
+            {
+                text.push_str(t);
             }
         }
         CompletionResponse {
@@ -354,15 +354,15 @@ impl StreamState {
                 Some(StreamEvent::Delta { text })
             }
             "message_delta" => {
-                if let Some(delta) = parsed.get("delta") {
-                    if let Some(stop) = delta.get("stop_reason").and_then(Value::as_str) {
-                        self.finish_reason = finish_reason_from_str(stop);
-                    }
+                if let Some(delta) = parsed.get("delta")
+                    && let Some(stop) = delta.get("stop_reason").and_then(Value::as_str)
+                {
+                    self.finish_reason = finish_reason_from_str(stop);
                 }
-                if let Some(usage) = parsed.get("usage") {
-                    if let Some(ot) = usage.get("output_tokens").and_then(Value::as_u64) {
-                        self.output_tokens = ot as u32;
-                    }
+                if let Some(usage) = parsed.get("usage")
+                    && let Some(ot) = usage.get("output_tokens").and_then(Value::as_u64)
+                {
+                    self.output_tokens = ot as u32;
                 }
                 None
             }

@@ -29,6 +29,7 @@ use crate::llm::LlmClient;
 use crate::platform::contracts::SubmitAssetGenerateRequest;
 use crate::platform::domain::{JobId, JobRepository, JobStatus};
 
+#[allow(clippy::too_many_arguments)] // handler 注入 8 个依赖是 stage 3 设计的有意为之，避免引大型 Context 结构体
 pub async fn run_asset_generate(
     repo: Arc<dyn JobRepository>,
     llm: Arc<dyn LlmClient>,

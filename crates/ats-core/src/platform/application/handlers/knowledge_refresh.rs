@@ -13,7 +13,7 @@
 //!
 //! 任一分支失败即任务 Failed；baselib 失败时 game 结果不写入 manifest（避免半状态）。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::common::{ProgressEvent, ProgressSink, finalize_with_error, transition_to_running};
@@ -186,25 +186,24 @@ pub async fn run_knowledge_refresh(
 async fn run_game_step(
     sink: &Arc<dyn ProgressSink>,
     job_id: &JobId,
-    ilspycmd: &PathBuf,
+    ilspycmd: &Path,
     request: &SubmitKnowledgeRefreshRequest,
     knowledge_paths: &KnowledgePaths,
     cached_game: Option<&DecompileRecord>,
 ) -> Result<(DecompileRecord, bool, Option<DecompileStats>), String> {
-    if !request.force {
-        if let Some(g) = cached_game {
-            if g.matches_current_source(&request.sts2_dll_path) {
-                sink.emit(ProgressEvent {
-                    job_id: job_id.clone(),
-                    stage: "game-cache-hit".into(),
-                    percent: Some(0.4),
-                    message: Some(format!("game cache hit: {} files", g.cs_file_count)),
-                    delta: None,
-                })
-                .await;
-                return Ok((g.clone(), true, None));
-            }
-        }
+    if !request.force
+        && let Some(g) = cached_game
+        && g.matches_current_source(&request.sts2_dll_path)
+    {
+        sink.emit(ProgressEvent {
+            job_id: job_id.clone(),
+            stage: "game-cache-hit".into(),
+            percent: Some(0.4),
+            message: Some(format!("game cache hit: {} files", g.cs_file_count)),
+            delta: None,
+        })
+        .await;
+        return Ok((g.clone(), true, None));
     }
 
     sink.emit(ProgressEvent {
@@ -223,7 +222,7 @@ async fn run_game_step(
     // Windows 长路径 / 中文路径保护：subprocess 调用前加 \\?\ 前缀（短路径无效果）
     let dll = to_extended_length_path(&request.sts2_dll_path);
     let out = to_extended_length_path(&knowledge_paths.game_dir);
-    let cmd = ilspycmd.clone();
+    let cmd = ilspycmd.to_path_buf();
     let stats_result =
         tokio::task::spawn_blocking(move || run_decompile_project(&cmd, &dll, &out)).await;
     let stats = match stats_result {
@@ -246,7 +245,7 @@ async fn run_game_step(
 async fn run_baselib_step(
     sink: &Arc<dyn ProgressSink>,
     job_id: &JobId,
-    ilspycmd: &PathBuf,
+    ilspycmd: &Path,
     knowledge_paths: &KnowledgePaths,
     source: &dyn BaselibSource,
 ) -> Result<DecompileRecord, String> {
@@ -278,7 +277,7 @@ async fn run_baselib_step(
     .await;
 
     let target = knowledge_paths.baselib_decompiled_file();
-    let cmd = ilspycmd.clone();
+    let cmd = ilspycmd.to_path_buf();
     let dll = to_extended_length_path(&fetched.dll_path);
     let out = to_extended_length_path(&target);
     let stats_result =
@@ -511,8 +510,10 @@ mod tests {
         let dll = td.path().join("sts2.dll");
         std::fs::write(&dll, b"MZ--placeholder").unwrap();
 
-        let mut manifest = KnowledgeManifest::default();
-        manifest.game = Some(build_record(&dll, 42, 12345).unwrap());
+        let manifest = KnowledgeManifest {
+            game: Some(build_record(&dll, 42, 12345).unwrap()),
+            ..KnowledgeManifest::default()
+        };
         write_manifest(&paths.manifest_path, &manifest).unwrap();
 
         let bin = td
@@ -555,8 +556,10 @@ mod tests {
 
         let dll = td.path().join("sts2.dll");
         std::fs::write(&dll, b"MZ--placeholder").unwrap();
-        let mut manifest = KnowledgeManifest::default();
-        manifest.game = Some(build_record(&dll, 42, 12345).unwrap());
+        let manifest = KnowledgeManifest {
+            game: Some(build_record(&dll, 42, 12345).unwrap()),
+            ..KnowledgeManifest::default()
+        };
         write_manifest(&paths.manifest_path, &manifest).unwrap();
 
         let bin = td
@@ -598,8 +601,10 @@ mod tests {
 
         let dll = td.path().join("sts2.dll");
         std::fs::write(&dll, b"MZ--placeholder").unwrap();
-        let mut manifest = KnowledgeManifest::default();
-        manifest.game = Some(build_record(&dll, 42, 12345).unwrap());
+        let manifest = KnowledgeManifest {
+            game: Some(build_record(&dll, 42, 12345).unwrap()),
+            ..KnowledgeManifest::default()
+        };
         write_manifest(&paths.manifest_path, &manifest).unwrap();
 
         // 假 ilspycmd（不可执行的文本文件）—— 文件存在让 resolve 通过，但 spawn 会失败

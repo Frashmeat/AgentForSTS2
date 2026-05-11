@@ -8,7 +8,7 @@
 //! 设计取向：本 CLI 不维护进程，只调度外部工具。
 //! Docker compose 模板内嵌见 stage 7 后续 commit。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 use anyhow::{Context, Result};
@@ -85,7 +85,7 @@ fn main() -> ExitCode {
 
 fn cmd_build(desktop: bool, web: bool) -> Result<()> {
     // 默认 (--web --desktop 都不指定) 跑前端 build
-    let do_web = web || (!desktop && !web);
+    let do_web = web || !desktop;
     let do_desktop = desktop;
 
     if do_web {
@@ -105,7 +105,7 @@ fn cmd_build(desktop: bool, web: bool) -> Result<()> {
     Ok(())
 }
 
-fn cmd_compose(action: &str, extra: &str, compose: &PathBuf) -> Result<()> {
+fn cmd_compose(action: &str, extra: &str, compose: &Path) -> Result<()> {
     if !compose.is_file() {
         anyhow::bail!(
             "compose file not found: {}\n  hint: run `ats print-compose-template > compose.app.yml` 先生成一个模板",
@@ -119,7 +119,7 @@ fn cmd_compose(action: &str, extra: &str, compose: &PathBuf) -> Result<()> {
     run("docker", &args, None)
 }
 
-fn cmd_logs(compose: &PathBuf, follow: bool) -> Result<()> {
+fn cmd_logs(compose: &Path, follow: bool) -> Result<()> {
     if !compose.is_file() {
         anyhow::bail!("compose file not found: {}", compose.display());
     }
@@ -130,7 +130,7 @@ fn cmd_logs(compose: &PathBuf, follow: bool) -> Result<()> {
     run("docker", &args, None)
 }
 
-fn run(program: &str, args: &[&str], cwd: Option<&PathBuf>) -> Result<()> {
+fn run(program: &str, args: &[&str], cwd: Option<&Path>) -> Result<()> {
     let mut cmd = Command::new(program);
     cmd.args(args);
     if let Some(c) = cwd {

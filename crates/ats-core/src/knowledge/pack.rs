@@ -87,10 +87,10 @@ pub fn export(
         return Err(PackError::EmptyKnowledge(paths.root.clone()));
     }
 
-    if let Some(parent) = output_zip.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent).map_err(|e| PackError::Io(e.to_string()))?;
-        }
+    if let Some(parent) = output_zip.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent).map_err(|e| PackError::Io(e.to_string()))?;
     }
     let file = File::create(output_zip).map_err(|e| PackError::Io(e.to_string()))?;
     let mut writer = zip::ZipWriter::new(file);

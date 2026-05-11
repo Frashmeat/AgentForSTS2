@@ -28,7 +28,7 @@ case "$MODE" in
             npm ci
             npm run build:web
         fi
-        cargo clippy --workspace --all-targets
+        cargo clippy --workspace --all-targets -- -D warnings
         ;;
     full)
         node --version

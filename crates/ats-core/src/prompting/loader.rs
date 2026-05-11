@@ -45,7 +45,7 @@ fn built_in_files() -> HashMap<String, String> {
     m
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum PromptError {
     #[error("prompt template not found: {0}")]
     NotFound(String),
@@ -120,22 +120,18 @@ impl PromptLoader {
         // 先看 cache。若缓存的是 Err，克隆该 Err 返回。
         let mut cache = self.lock_cache();
         if let Some(cached) = cache.get(bundle_name) {
-            return cached.as_ref().map(Clone::clone).map_err(clone_prompt_err);
+            return cached.clone();
         }
 
         let bundle_file = format!("{bundle_name}.md");
         let Some(content) = self.files.get(&bundle_file) else {
             let err = PromptError::NotFound(bundle_name.into());
-            cache.insert(bundle_name.into(), Err(clone_prompt_err(&err)));
+            cache.insert(bundle_name.into(), Err(err.clone()));
             return Err(err);
         };
 
         let parsed = parse_bundle_sections(content);
-        let to_store: Result<BundleSections, PromptError> = match &parsed {
-            Ok(s) => Ok(s.clone()),
-            Err(e) => Err(clone_prompt_err(e)),
-        };
-        cache.insert(bundle_name.into(), to_store);
+        cache.insert(bundle_name.into(), parsed.clone());
         parsed
     }
 
@@ -279,16 +275,6 @@ fn render_template_string(
     }
     result.push_str(&template[last_end..]);
     Ok(result)
-}
-
-fn clone_prompt_err(err: &PromptError) -> PromptError {
-    match err {
-        PromptError::NotFound(s) => PromptError::NotFound(s.clone()),
-        PromptError::MissingVariable(s) => PromptError::MissingVariable(s.clone()),
-        PromptError::InvalidBundleKey(s) => PromptError::InvalidBundleKey(s.clone()),
-        PromptError::DuplicateBundleKey(s) => PromptError::DuplicateBundleKey(s.clone()),
-        PromptError::EmptyBundleSection(s) => PromptError::EmptyBundleSection(s.clone()),
-    }
 }
 
 #[cfg(test)]

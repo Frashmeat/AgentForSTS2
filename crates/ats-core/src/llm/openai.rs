@@ -80,13 +80,13 @@ impl OpenAiClient {
 
         let mut messages: Vec<Value> = Vec::new();
         // OpenAI 把 system 放进 messages 数组的开头，不像 Anthropic 独立字段。
-        if let Some(system) = &request.system_prompt {
-            if !system.is_empty() {
-                messages.push(serde_json::json!({
-                    "role": "system",
-                    "content": system,
-                }));
-            }
+        if let Some(system) = &request.system_prompt
+            && !system.is_empty()
+        {
+            messages.push(serde_json::json!({
+                "role": "system",
+                "content": system,
+            }));
         }
         for m in &request.messages {
             messages.push(message_to_json(m));
@@ -192,7 +192,7 @@ impl LlmClient for OpenAiClient {
 
         let byte_stream = response.bytes_stream();
         let sse_stream = byte_stream
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+            .map_err(std::io::Error::other)
             .eventsource();
 
         let state = StreamState::default();
@@ -365,15 +365,15 @@ impl StreamState {
         }
 
         // 抓 model（首帧）
-        if !self.start_emitted {
-            if let Some(model) = parsed.get("model").and_then(Value::as_str) {
-                self.model = model.to_string();
-                self.start_emitted = true;
-                // start 帧不消费 delta；先产 Start，下次进来再产 delta
-                return Some(StreamEvent::Start {
-                    model: self.model.clone(),
-                });
-            }
+        if !self.start_emitted
+            && let Some(model) = parsed.get("model").and_then(Value::as_str)
+        {
+            self.model = model.to_string();
+            self.start_emitted = true;
+            // start 帧不消费 delta；先产 Start，下次进来再产 delta
+            return Some(StreamEvent::Start {
+                model: self.model.clone(),
+            });
         }
 
         // 抓 usage（含 stream_options 时的末帧）
@@ -389,20 +389,19 @@ impl StreamState {
         // 抓 choices[0].delta.content + finish_reason
         let choices = parsed.get("choices")?.as_array()?;
         if let Some(choice) = choices.first() {
-            if let Some(reason) = choice.get("finish_reason").and_then(Value::as_str) {
-                if !reason.is_empty() {
-                    self.finish_reason = finish_reason_from_str(reason);
-                    self.finished = true;
-                }
+            if let Some(reason) = choice.get("finish_reason").and_then(Value::as_str)
+                && !reason.is_empty()
+            {
+                self.finish_reason = finish_reason_from_str(reason);
+                self.finished = true;
             }
-            if let Some(delta) = choice.get("delta") {
-                if let Some(text) = delta.get("content").and_then(Value::as_str) {
-                    if !text.is_empty() {
-                        return Some(StreamEvent::Delta {
-                            text: text.to_string(),
-                        });
-                    }
-                }
+            if let Some(delta) = choice.get("delta")
+                && let Some(text) = delta.get("content").and_then(Value::as_str)
+                && !text.is_empty()
+            {
+                return Some(StreamEvent::Delta {
+                    text: text.to_string(),
+                });
             }
         }
 

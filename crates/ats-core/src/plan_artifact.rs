@@ -137,7 +137,7 @@ pub fn list_statuses(
         }
     }
     // 按 updated_at 倒序
-    out.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    out.sort_by_key(|s| std::cmp::Reverse(s.updated_at));
     Ok(out)
 }
 
