@@ -8,6 +8,7 @@ pub mod errors;
 pub mod health;
 pub mod knowledge;
 pub mod planning;
+pub mod prompting;
 
 /// 当前 core 版本号（从 Cargo metadata 注入）。
 #[must_use]

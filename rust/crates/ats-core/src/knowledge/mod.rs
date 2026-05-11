@@ -11,11 +11,16 @@
 //! - 后台刷新任务（依赖 job 状态机）
 //! - 知识包导出 ZIP
 
+mod contracts;
 mod models;
 mod paths;
 mod runtime;
 mod templates;
 
+pub use contracts::{
+    KnowledgeFactItem, KnowledgeGuidanceItem, KnowledgeLookupItem, KnowledgePacket, KnowledgeQuery,
+    KnowledgeScenario,
+};
 pub use models::{BaselibStatus, GameStatus, KnowledgeStatus, OverallState, SourceMode};
 pub use paths::KnowledgePaths;
 pub use runtime::{ensure_dirs, get_status};
