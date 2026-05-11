@@ -10,7 +10,10 @@ use std::sync::Arc;
 
 use futures_util::StreamExt;
 
-use super::common::{ProgressEvent, ProgressSink, finalize_with_error, transition_to_running};
+use super::common::{
+    ProgressEvent, ProgressSink, emit_cancelled_mid_stream, finalize_with_error, is_cancelled,
+    transition_to_running,
+};
 use crate::llm::{CompletionRequest, LlmClient, Message, MessageRole, StreamEvent};
 use crate::platform::contracts::SubmitLogAnalysisRequest;
 use crate::platform::domain::{JobId, JobRepository, JobStatus};
@@ -90,7 +93,13 @@ pub async fn run_log_analysis(
     let mut model = String::new();
     let mut usage_in: u32 = 0;
     let mut usage_out: u32 = 0;
+    let mut tick: u32 = 0;
     while let Some(item) = stream.next().await {
+        tick = tick.wrapping_add(1);
+        if tick % 5 == 0 && is_cancelled(&repo, &job_id).await {
+            emit_cancelled_mid_stream(&sink, &job_id).await;
+            return;
+        }
         match item {
             Ok(StreamEvent::Start { model: m }) => {
                 model = m;

@@ -19,5 +19,6 @@ pub mod single_asset_plan;
 pub mod text_generate;
 
 pub use common::{
-    NoopProgressSink, ProgressEvent, ProgressSink, finalize_with_error, transition_to_running,
+    NoopProgressSink, ProgressEvent, ProgressSink, emit_cancelled_mid_stream, finalize_with_error,
+    is_cancelled, transition_to_running,
 };

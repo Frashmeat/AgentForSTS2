@@ -7,7 +7,10 @@ use std::sync::Arc;
 
 use futures_util::StreamExt;
 
-use super::common::{ProgressEvent, ProgressSink, finalize_with_error, transition_to_running};
+use super::common::{
+    ProgressEvent, ProgressSink, emit_cancelled_mid_stream, finalize_with_error, is_cancelled,
+    transition_to_running,
+};
 use crate::llm::{CompletionRequest, LlmClient, Message, MessageRole, StreamEvent};
 use crate::platform::contracts::SubmitTextGenerateRequest;
 use crate::platform::domain::{JobId, JobRepository, JobStatus};
@@ -57,8 +60,15 @@ pub async fn run_text_generate(
     let mut input_tokens: u32 = 0;
     let mut output_tokens: u32 = 0;
     let mut finish: Option<String> = None;
+    let mut tick: u32 = 0;
 
     while let Some(item) = stream.next().await {
+        // 每 5 个事件查一次取消（避免 file repo 被 hammer）。drop stream 即关连接。
+        tick = tick.wrapping_add(1);
+        if tick % 5 == 0 && is_cancelled(&repo, &job_id).await {
+            emit_cancelled_mid_stream(&sink, &job_id).await;
+            return;
+        }
         match item {
             Ok(StreamEvent::Start { model: m }) => {
                 model = m.clone();
@@ -248,6 +258,117 @@ mod tests {
         assert!(events.iter().any(|e| e.stage == "running"));
         assert!(events.iter().any(|e| e.stage == "stream-delta"));
         assert!(events.iter().any(|e| e.stage == "completed"));
+    }
+
+    #[tokio::test]
+    async fn cancel_mid_stream_drops_remaining_events() {
+        // 用一个慢速 stream（每帧 50ms）模拟真实 LLM；中途调 cancel，
+        // handler 应在下一次 5-event-tick 检查时发现 Cancelled 并 return，
+        // 剩余事件不再被处理（accumulated 远小于"完整跑完"应有的长度）。
+        use futures_util::StreamExt as _;
+        use std::time::Duration;
+
+        // 构造 100 个 delta + 1 个 End，每帧 yield 前 sleep 30ms
+        let mut events: Vec<Result<StreamEvent, LlmError>> = vec![Ok(StreamEvent::Start {
+            model: "slow-model".into(),
+        })];
+        for _ in 0..100 {
+            events.push(Ok(StreamEvent::Delta { text: "x".into() }));
+        }
+        events.push(Ok(StreamEvent::End {
+            finish_reason: FinishReason::EndTurn,
+            usage: Usage {
+                input_tokens: 1,
+                output_tokens: 100,
+            },
+        }));
+
+        struct SlowLlm {
+            events: Mutex<Option<Vec<Result<StreamEvent, LlmError>>>>,
+        }
+        #[async_trait]
+        impl LlmClient for SlowLlm {
+            async fn complete(&self, _: CompletionRequest) -> Result<CompletionResponse, LlmError> {
+                unimplemented!()
+            }
+            async fn stream(&self, _: CompletionRequest) -> Result<CompletionStream, LlmError> {
+                let evs = self.events.lock().unwrap().take().unwrap_or_default();
+                let s = stream::iter(evs).then(|item| async move {
+                    tokio::time::sleep(Duration::from_millis(30)).await;
+                    item
+                });
+                Ok(Box::pin(s))
+            }
+        }
+
+        let td = tempfile::TempDir::new().unwrap();
+        let repo: Arc<dyn JobRepository> =
+            Arc::new(FileJobRepository::new(td.path().to_path_buf()));
+        let llm: Arc<dyn LlmClient> = Arc::new(SlowLlm {
+            events: Mutex::new(Some(events)),
+        });
+        let sink = Arc::new(CapturingSink {
+            events: tokio::sync::Mutex::new(Vec::new()),
+        });
+        let service = JobApplicationService::new(repo.clone(), llm);
+
+        let id = service
+            .submit_text_generate(
+                SubmitTextGenerateRequest {
+                    prompt: "long output".into(),
+                    ..Default::default()
+                },
+                sink.clone(),
+            )
+            .await
+            .unwrap();
+
+        // 让 handler 处理几帧后再 cancel
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        service.cancel(&id).await.unwrap();
+
+        // cancel 是同步写 status；handler 是异步轮询。等 handler 看到 Cancelled
+        // → 下一个 tick%5==0 时 break → emit "cancelled-mid-stream"。轮询 sink
+        // 直到该事件出现，最长 2s（实际 30ms*5 ≈ 150ms 就该到）。
+        let mut cancelled_emitted = false;
+        for _ in 0..200 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            if sink
+                .events
+                .lock()
+                .await
+                .iter()
+                .any(|e| e.stage == "cancelled-mid-stream")
+            {
+                cancelled_emitted = true;
+                break;
+            }
+        }
+
+        let job = service.get(&id).await.unwrap();
+        assert_eq!(job.status, JobStatus::Cancelled);
+        assert!(job.result.is_none(), "result should NOT be written on cancel");
+        assert!(
+            cancelled_emitted,
+            "expected cancelled-mid-stream event within 2s; stages={:?}",
+            sink.events
+                .lock()
+                .await
+                .iter()
+                .map(|e| e.stage.clone())
+                .collect::<Vec<_>>()
+        );
+        let delta_count = sink
+            .events
+            .lock()
+            .await
+            .iter()
+            .filter(|e| e.stage == "stream-delta")
+            .count();
+        assert!(
+            delta_count < 100,
+            "expected fewer than 100 deltas (got {delta_count}); stream should be cut short"
+        );
     }
 
     #[tokio::test]

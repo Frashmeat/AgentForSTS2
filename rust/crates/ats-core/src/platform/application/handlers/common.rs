@@ -80,3 +80,26 @@ pub async fn finalize_with_error(repo: &Arc<dyn JobRepository>, id: &JobId, mess
         let _ = repo.update(&job).await;
     }
 }
+
+/// 轮询检查 job 是否被取消。Stream 循环每 N 个事件调一次，发现取消则 break
+/// 以让 stream / reqwest 连接被 drop，真正断开 LLM 网络请求。
+///
+/// 任何 repo 读错误（罕见）视为未取消，避免误判中断正常任务。
+pub async fn is_cancelled(repo: &Arc<dyn JobRepository>, id: &JobId) -> bool {
+    matches!(
+        repo.get(id).await.ok().map(|j| j.status),
+        Some(JobStatus::Cancelled)
+    )
+}
+
+/// stream 循环里被取消时统一发的进度事件。
+pub async fn emit_cancelled_mid_stream(sink: &Arc<dyn ProgressSink>, job_id: &JobId) {
+    sink.emit(ProgressEvent {
+        job_id: job_id.clone(),
+        stage: "cancelled-mid-stream".into(),
+        percent: None,
+        message: Some("job cancelled; dropping stream".into()),
+        delta: None,
+    })
+    .await;
+}

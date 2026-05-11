@@ -9,7 +9,10 @@ use std::sync::Arc;
 use futures_util::StreamExt;
 use tokio::fs;
 
-use super::common::{ProgressEvent, ProgressSink, finalize_with_error, transition_to_running};
+use super::common::{
+    ProgressEvent, ProgressSink, emit_cancelled_mid_stream, finalize_with_error, is_cancelled,
+    transition_to_running,
+};
 use crate::codegen::PromptAssembler;
 use crate::knowledge::{KnowledgePaths, SourceMode};
 use crate::llm::{CompletionRequest, LlmClient, Message, MessageRole, StreamEvent};
@@ -48,6 +51,7 @@ pub async fn run_code_generate(
     let entity_name = code_generate_entity_name(&request);
 
     let artifact = match generate_and_write_code_artifact(
+        Arc::clone(&repo),
         Arc::clone(&llm),
         Arc::clone(&sink),
         &job_id,
@@ -64,6 +68,11 @@ pub async fn run_code_generate(
         }
         Err(GenerateError::Write(err)) => {
             finalize_with_error(&repo, &job_id, &format!("write artifact: {err}")).await;
+            return;
+        }
+        Err(GenerateError::Cancelled) => {
+            // 已经在 handler 内 emit cancelled-mid-stream；状态机已是 Cancelled，
+            // 不写 result，不动 status，直接退出。
             return;
         }
     };
@@ -162,13 +171,19 @@ pub(crate) struct WrittenArtifact {
 pub(crate) enum GenerateError {
     Stream(String),
     Write(String),
+    /// 流被取消（job.status=Cancelled）；调用方应当不写 result。
+    Cancelled,
 }
 
 /// 把 prompt 转给 LLM 流式生成，累积响应后解 fence，再写到
 /// `<artifacts_dir>/<entity_name>/<entity_name>.cs` + `raw.md`。
 ///
 /// 流式 delta 通过 sink 实时推出。供 code_generate 和 batch_custom_code 共用。
+///
+/// 中途轮询 repo 状态：若 job 被 cancel 则立即返回 `GenerateError::Cancelled`，
+/// 让 reqwest stream 被 drop（实际断开网络）。
 pub(crate) async fn generate_and_write_code_artifact(
+    repo: Arc<dyn JobRepository>,
     llm: Arc<dyn LlmClient>,
     sink: Arc<dyn ProgressSink>,
     job_id: &JobId,
@@ -196,7 +211,13 @@ pub(crate) async fn generate_and_write_code_artifact(
     let mut model = String::new();
     let mut usage_in: u32 = 0;
     let mut usage_out: u32 = 0;
+    let mut tick: u32 = 0;
     while let Some(item) = stream.next().await {
+        tick = tick.wrapping_add(1);
+        if tick % 5 == 0 && is_cancelled(&repo, job_id).await {
+            emit_cancelled_mid_stream(&sink, job_id).await;
+            return Err(GenerateError::Cancelled);
+        }
         match item {
             Ok(StreamEvent::Start { model: m }) => {
                 model = m;

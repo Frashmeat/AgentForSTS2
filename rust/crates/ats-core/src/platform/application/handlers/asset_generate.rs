@@ -141,6 +141,7 @@ pub async fn run_asset_generate(
 
     // 3. 跑 LLM + 写 .cs（复用 code_generate 提取的子例程）
     let artifact = match generate_and_write_code_artifact(
+        Arc::clone(&repo),
         Arc::clone(&llm),
         Arc::clone(&sink),
         &job_id,
@@ -159,6 +160,7 @@ pub async fn run_asset_generate(
             finalize_with_error(&repo, &job_id, &format!("write artifact: {err}")).await;
             return;
         }
+        Err(GenerateError::Cancelled) => return,
     };
 
     // 4. 收口

@@ -72,9 +72,11 @@ pub async fn run_batch_custom_code(
         .await;
 
         let outcome =
-            process_one_item(&assembler, &llm, &sink, &job_id, &knowledge_paths, &artifacts_dir,
-                &item, &entity_name)
-                .await;
+            process_one_item(
+                &assembler, &repo, &llm, &sink, &job_id, &knowledge_paths, &artifacts_dir,
+                &item, &entity_name,
+            )
+            .await;
 
         let item_success = outcome.success;
         if item_success {
@@ -145,6 +147,7 @@ pub async fn run_batch_custom_code(
 
 async fn process_one_item(
     assembler: &PromptAssembler,
+    repo: &Arc<dyn JobRepository>,
     llm: &Arc<dyn LlmClient>,
     sink: &Arc<dyn ProgressSink>,
     job_id: &JobId,
@@ -168,6 +171,7 @@ async fn process_one_item(
         }
     };
     match generate_and_write_code_artifact(
+        Arc::clone(repo),
         Arc::clone(llm),
         Arc::clone(sink),
         job_id,
@@ -185,6 +189,15 @@ async fn process_one_item(
             extracted_chars: Some(art.extracted_chars),
             raw_chars: Some(art.raw_chars),
             error: None,
+        },
+        Err(GenerateError::Cancelled) => ItemOutcome {
+            name: item.name.clone(),
+            entity_name: entity_name.to_string(),
+            success: false,
+            cs_path: None,
+            extracted_chars: None,
+            raw_chars: None,
+            error: Some("cancelled".into()),
         },
         Err(GenerateError::Stream(msg)) => ItemOutcome {
             name: item.name.clone(),
