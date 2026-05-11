@@ -1,0 +1,61 @@
+# Dockerfile.ci — local mirror of GitHub Actions Rust CI (Ubuntu).
+#
+# Built by scripts/ci-local.ps1 once, then reused for fast iteration.
+# Mirrors .github/workflows/rust-ci.yml apt + toolchain setup so that
+# "passes locally in this image" == "passes on ubuntu-latest runner".
+
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    CARGO_TERM_COLOR=always \
+    RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:/usr/local/nvm/versions/node/v20.18.0/bin:$PATH
+
+# --- 1. System packages ---
+# Tauri 2 on Linux needs GTK + webkit2gtk + soup family + librsvg + libxdo.
+# build-essential / pkg-config / ssl pull C toolchain and OpenSSL needed by
+# native crates (reqwest, ring, etc).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    wget \
+    file \
+    git \
+    xz-utils \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    libwebkit2gtk-4.1-dev \
+    libjavascriptcoregtk-4.1-dev \
+    libgtk-3-dev \
+    libsoup-3.0-dev \
+    librsvg2-dev \
+    libayatana-appindicator3-dev \
+    libxdo-dev \
+    patchelf \
+ && rm -rf /var/lib/apt/lists/*
+
+# --- 2. Rust toolchain (stable, matches rust-toolchain.toml minimal profile) ---
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+      | sh -s -- -y --default-toolchain stable --profile minimal \
+        --component rustfmt --component clippy \
+ && chmod -R a+w "$RUSTUP_HOME" "$CARGO_HOME" \
+ && rustc --version \
+ && cargo --version
+
+# --- 3. Node 20 (matches actions/setup-node@v4 with node-version: 20) ---
+ENV NVM_DIR=/usr/local/nvm
+RUN mkdir -p "$NVM_DIR" \
+ && curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash \
+ && . "$NVM_DIR/nvm.sh" \
+ && nvm install 20.18.0 \
+ && nvm alias default 20.18.0 \
+ && node --version \
+ && npm --version
+
+WORKDIR /workspace
+
+# Default entrypoint runs the same steps as rust-ci.yml.
+# Override with `docker run ... bash` for interactive debugging.
+CMD ["bash", "-c", "set -ex && rustc --version && cargo --version && node --version && cargo check --workspace --all-targets && cargo test --workspace --all-targets && npm ci && npx tsc --noEmit && npm run build:web"]

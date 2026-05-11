@@ -25,6 +25,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Linux deps (Tauri / glib / webkit2gtk)
+        # 与 Dockerfile.ci 同步：Tauri Linux 编译链所需系统包。
+        # 改 yaml 时务必同步 Dockerfile.ci，否则本地 ci-local.ps1 与远端会失真。
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            pkg-config \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            librsvg2-dev \
+            libayatana-appindicator3-dev \
+            libxdo-dev \
+            patchelf
+
       - name: Install Rust toolchain
         # rust-toolchain.toml 在仓库根，rustup 自动读
         run: |
@@ -65,6 +83,21 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+      - name: Install Linux deps (Tauri / glib / webkit2gtk)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            pkg-config \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            librsvg2-dev \
+            libayatana-appindicator3-dev \
+            libxdo-dev \
+            patchelf
       - name: Show toolchain
         run: rustup show
       - name: Cache cargo
