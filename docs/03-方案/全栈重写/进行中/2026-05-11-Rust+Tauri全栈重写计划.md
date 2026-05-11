@@ -455,11 +455,11 @@ export const api = new Proxy({} as ApiModule, { /* 异步代理 */ });
 
 按是否阻塞下一阶段排序。
 
-#### Q1 — 桌面端是否需要数据库？（阶段 1 前必须答）
-- **A**：桌面端用 SQLite（本地文件）；Web 端用 Postgres。`ats-core::db` 双 backend。
-- **B**：桌面端无数据库，持久化走文件（JSON/TOML）。Web 端 Postgres。
-- **C**：桌面端也连 Postgres（要求用户本地起 docker）。
-- **目前倾向**：B。桌面用户工作流不像 Web 平台需要队列、审计、多账户。
+#### Q1 — 桌面端是否需要数据库？✅ 已决（2026-05-11）
+- **决议**：**B+ "工程文件夹"模式** —— 桌面端无 DB，每个 mod 项目是一个自包含目录（`project.json` / `plan.json` / `items/` / `artifacts/` / `history/` / `.ats/`），可整体 zip / git / 复制粘贴。App 级状态（凭据 / recent_projects / 反编译知识缓存）落在 OS app data dir。Web 端继续 Postgres。
+- **影响**：Stage 3.1 拆双轨：3.1a Web sqlx + 3.1b Desktop 工程文件夹存储；Stage 3.3 Repository 实现双轨（sqlx + file）；Stage 6 前端新增"项目管理"页（新建/打开/最近列表）。
+- **取舍**：相比 SQLite 多了 ~3 天工作量，换取桌面端零 DB 依赖 + 项目可整体携带。
+- **详见**：[后续执行计划 §2.3.0 工程文件夹布局规范](./2026-05-11-Rust重写后续执行计划.md#230-工程文件夹布局规范)。
 
 #### Q2 — 桌面端是否暴露 admin/management 路由？
 当前 Web 端有完整 admin 子站（用户管理、credential 健康、refund 等）。桌面端是单用户工具，admin 概念可能不存在。决定哪些 router 要在 src-tauri 注册命令、哪些前端路由在 `__IS_TAURI__` 下隐藏。
