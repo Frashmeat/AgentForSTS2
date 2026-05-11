@@ -448,3 +448,24 @@ export function listJobs(): Promise<JobSummary[]> {
 export function cancelJob(id: string): Promise<void> {
   return invoke<void>("cancel_job", { id });
 }
+
+export type SubmitCodeGenerateRequest =
+  | { mode: "asset"; request: AssetCodegenRequest }
+  | { mode: "custom_code"; request: CustomCodegenRequest };
+
+export interface SubmitBuildProjectRequest {
+  project_root: string;
+  max_attempts: number;
+}
+
+export function submitCodeGenerateJob(
+  request: SubmitCodeGenerateRequest,
+): Promise<SubmitJobAck> {
+  return invoke<SubmitJobAck>("submit_code_generate_job", { request });
+}
+
+export function submitBuildProjectJob(
+  request: SubmitBuildProjectRequest,
+): Promise<SubmitJobAck> {
+  return invoke<SubmitJobAck>("submit_build_project_job", { request });
+}

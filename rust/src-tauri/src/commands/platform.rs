@@ -1,14 +1,16 @@
-//! Platform commands —— Job 生命周期 + text_generate 提交。
+//! Platform commands —— Job 生命周期 + text/code/build 三类 handler 提交。
 //!
 //! Repository 用 ActiveProject 的 history_dir 作存储路径；切换项目时下条提交
 //! 会落到新工程。LLM client 每次新建（Arc 包裹的开销极小，避免与配置变更竞态）。
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
+use ats_core::knowledge::KnowledgePaths;
 use ats_core::llm::{AnthropicClient, LlmClient, RetryConfig, RetryingClient};
 use ats_core::platform::{
     FileJobRepository, Job, JobApplicationService, JobId, JobSummary, ProgressEvent, ProgressSink,
-    SubmitJobAck, SubmitTextGenerateRequest,
+    SubmitBuildProjectRequest, SubmitCodeGenerateRequest, SubmitJobAck, SubmitTextGenerateRequest,
 };
 use async_trait::async_trait;
 use tauri::{AppHandle, Emitter, State};
@@ -67,6 +69,51 @@ pub async fn cancel_job(
         .cancel(&JobId(id))
         .await
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn submit_code_generate_job(
+    app: AppHandle,
+    config: State<'_, AppConfig>,
+    active: State<'_, ActiveProject>,
+    request: SubmitCodeGenerateRequest,
+) -> Result<SubmitJobAck, String> {
+    let service = build_service(&config, &active)?;
+    let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
+    let artifacts_dir = active_artifacts_dir(&active)?;
+    let knowledge_paths = KnowledgePaths::from_runtime_dir(&config.status.runtime_dir());
+    let job_id = service
+        .submit_code_generate(request, knowledge_paths, artifacts_dir, sink)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(SubmitJobAck { job_id })
+}
+
+#[tauri::command]
+pub async fn submit_build_project_job(
+    app: AppHandle,
+    config: State<'_, AppConfig>,
+    active: State<'_, ActiveProject>,
+    request: SubmitBuildProjectRequest,
+) -> Result<SubmitJobAck, String> {
+    let service = build_service(&config, &active)?;
+    let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
+    let job_id = service
+        .submit_build_project(request, sink)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(SubmitJobAck { job_id })
+}
+
+fn active_artifacts_dir(active: &State<'_, ActiveProject>) -> Result<PathBuf, String> {
+    let guard = active
+        .0
+        .lock()
+        .map_err(|e| format!("active project lock poisoned: {e}"))?;
+    let project = guard
+        .as_ref()
+        .ok_or_else(|| "no active project — open or create one first".to_string())?;
+    Ok(project.artifacts_dir())
 }
 
 fn build_service(

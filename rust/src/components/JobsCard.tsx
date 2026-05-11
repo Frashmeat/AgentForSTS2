@@ -5,6 +5,7 @@ import type {
   JobProgressEvent,
   JobStatus,
   JobSummary,
+  SubmitJobAck,
 } from "@/services/tauriApi";
 
 const STATUS_COLOR: Record<JobStatus, string> = {
@@ -15,10 +16,24 @@ const STATUS_COLOR: Record<JobStatus, string> = {
   cancelled: "text-amber-600",
 };
 
+type SubmitKind = "text_generate" | "code_generate_asset" | "build_project";
+
 export function JobsCard() {
   const [list, setList] = useState<JobSummary[]>([]);
   const [active, setActive] = useState<Job | null>(null);
+  const [submitKind, setSubmitKind] = useState<SubmitKind>("text_generate");
+  // text_generate fields
   const [prompt, setPrompt] = useState("用一句中文打招呼");
+  // code_generate (asset) fields
+  const [assetType, setAssetType] = useState("card");
+  const [assetName, setAssetName] = useState("DemoCard");
+  const [designDescription, setDesignDescription] = useState(
+    "造成 10 点伤害，弃 1 张牌。",
+  );
+  const [assetProjectRoot, setAssetProjectRoot] = useState("");
+  // build_project fields
+  const [buildProjectRoot, setBuildProjectRoot] = useState("");
+
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [liveDeltaById, setLiveDeltaById] = useState<Record<string, string>>({});
@@ -76,8 +91,29 @@ export function JobsCard() {
     setBusy(true);
     setError(null);
     try {
-      const ack = await api.submitTextGenerateJob({ prompt });
-      setLiveDeltaById((prev) => ({ ...prev, [(ack as { jobId: string }).jobId]: "" }));
+      let ack: SubmitJobAck;
+      if (submitKind === "text_generate") {
+        ack = (await api.submitTextGenerateJob({ prompt })) as SubmitJobAck;
+      } else if (submitKind === "code_generate_asset") {
+        ack = (await api.submitCodeGenerateJob({
+          mode: "asset",
+          request: {
+            asset_type: assetType,
+            asset_name: assetName,
+            design_description: designDescription,
+            project_root: assetProjectRoot || ".",
+            image_paths: [],
+            name_zhs: "",
+            skip_build: true,
+          },
+        })) as SubmitJobAck;
+      } else {
+        ack = (await api.submitBuildProjectJob({
+          project_root: buildProjectRoot,
+          max_attempts: 3,
+        })) as SubmitJobAck;
+      }
+      setLiveDeltaById((prev) => ({ ...prev, [ack.jobId]: "" }));
       await refresh();
     } catch (e: unknown) {
       setError(String(e));
@@ -133,18 +169,96 @@ export function JobsCard() {
 
       <div className="mb-4 space-y-2">
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-muted text-xs">Prompt</span>
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            rows={2}
+          <span className="text-muted text-xs">Job kind</span>
+          <select
+            value={submitKind}
+            onChange={(e) => setSubmitKind(e.target.value as SubmitKind)}
             className="px-2 py-1 rounded border border-muted/30 bg-transparent"
-          />
+          >
+            <option value="text_generate">text_generate (free prompt)</option>
+            <option value="code_generate_asset">code_generate (asset)</option>
+            <option value="build_project">build_project (dotnet publish)</option>
+          </select>
         </label>
+
+        {submitKind === "text_generate" && (
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-muted text-xs">Prompt</span>
+            <textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              rows={2}
+              className="px-2 py-1 rounded border border-muted/30 bg-transparent"
+            />
+          </label>
+        )}
+
+        {submitKind === "code_generate_asset" && (
+          <>
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <label className="flex flex-col gap-1">
+                <span className="text-muted text-xs">Asset type</span>
+                <select
+                  value={assetType}
+                  onChange={(e) => setAssetType(e.target.value)}
+                  className="px-2 py-1 rounded border border-muted/30 bg-transparent"
+                >
+                  {["card", "card_fullscreen", "relic", "power", "character"].map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-muted text-xs">Asset name</span>
+                <input
+                  value={assetName}
+                  onChange={(e) => setAssetName(e.target.value)}
+                  className="px-2 py-1 rounded border border-muted/30 bg-transparent"
+                />
+              </label>
+            </div>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-muted text-xs">Project root (for prompt context)</span>
+              <input
+                value={assetProjectRoot}
+                onChange={(e) => setAssetProjectRoot(e.target.value)}
+                placeholder="E:/mods/demo_mod"
+                className="px-2 py-1 rounded border border-muted/30 bg-transparent font-mono text-xs"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-muted text-xs">Design description</span>
+              <textarea
+                value={designDescription}
+                onChange={(e) => setDesignDescription(e.target.value)}
+                rows={2}
+                className="px-2 py-1 rounded border border-muted/30 bg-transparent"
+              />
+            </label>
+            <p className="text-xs text-muted">
+              Output → <code>artifacts/{assetName}/{assetName}.cs</code> + raw.md in the active project
+            </p>
+          </>
+        )}
+
+        {submitKind === "build_project" && (
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-muted text-xs">Project root (will run `dotnet publish` here)</span>
+            <input
+              value={buildProjectRoot}
+              onChange={(e) => setBuildProjectRoot(e.target.value)}
+              placeholder="E:/mods/demo_mod/DemoMod"
+              className="px-2 py-1 rounded border border-muted/30 bg-transparent font-mono text-xs"
+            />
+          </label>
+        )}
+
         <button
           type="button"
           onClick={handleSubmit}
-          disabled={busy || !prompt.trim()}
+          disabled={busy}
           className="text-sm px-3 py-1 rounded border border-accent/60 text-accent hover:bg-accent/10 disabled:opacity-50"
         >
           Submit

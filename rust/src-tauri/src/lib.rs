@@ -81,6 +81,8 @@ pub fn run() {
             commands::project::current_project,
             commands::project::forget_recent_project,
             commands::platform::submit_text_generate_job,
+            commands::platform::submit_code_generate_job,
+            commands::platform::submit_build_project_job,
             commands::platform::get_job,
             commands::platform::list_jobs,
             commands::platform::cancel_job,

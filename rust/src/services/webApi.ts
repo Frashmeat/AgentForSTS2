@@ -150,3 +150,46 @@ export async function llmStartStream(
 ): Promise<void> {
   throw new Error("Web streaming not yet wired (use llmComplete for now)");
 }
+
+// -------- Project / Jobs stubs（桌面专属，Web 端 stage 3.1a 后接 sqlx）--------
+
+function desktopOnly(name: string): never {
+  throw new Error(`${name} is desktop-only (Tauri); Web sqlx pending stage 3.1a`);
+}
+
+export function listRecentProjects(): Promise<never[]> {
+  return Promise.resolve([]);
+}
+export function createProject(_parentDir: string, _name: string): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("createProject"));
+}
+export function openProject(_path: string): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("openProject"));
+}
+export function closeProject(): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("closeProject"));
+}
+export function currentProject(): Promise<null> {
+  return Promise.resolve(null);
+}
+export function forgetRecentProject(_path: string): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("forgetRecentProject"));
+}
+export function submitTextGenerateJob(_request: unknown): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("submitTextGenerateJob"));
+}
+export function getJob(_id: string): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("getJob"));
+}
+export function listJobs(): Promise<never[]> {
+  return Promise.resolve([]);
+}
+export function cancelJob(_id: string): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("cancelJob"));
+}
+export function submitCodeGenerateJob(_request: unknown): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("submitCodeGenerateJob"));
+}
+export function submitBuildProjectJob(_request: unknown): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("submitBuildProjectJob"));
+}
