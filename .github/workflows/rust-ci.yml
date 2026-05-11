@@ -1,18 +1,11 @@
 name: Rust CI
 
-# 触发：rust 分支或 main 的 push，以及任意目标到这两个分支的 PR。
-# 路径过滤避免文档 / Python 端 / tools 单独修改时无意义地烧分钟数。
+# 触发：rust 分支 push + PR。main 分支保留 Python 端不在 CI 范围。
 on:
   push:
-    branches: [rust, main]
-    paths:
-      - 'rust/**'
-      - '.github/workflows/rust-ci.yml'
+    branches: [rust]
   pull_request:
-    branches: [rust, main]
-    paths:
-      - 'rust/**'
-      - '.github/workflows/rust-ci.yml'
+    branches: [rust]
   workflow_dispatch:
 
 # 同分支同 PR 的旧 run 自动取消，节省额度
@@ -29,14 +22,11 @@ jobs:
   rust-and-frontend:
     name: cargo + frontend (ubuntu)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: rust
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
-        # rust-toolchain.toml 在 rust/ 下，rustup 在该目录运行时会自动读
+        # rust-toolchain.toml 在仓库根，rustup 自动读
         run: |
           rustc --version
           cargo --version
@@ -45,8 +35,6 @@ jobs:
       - name: Cache cargo registry + target
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: rust -> target
-          # 给 cache key 加 toolchain 信息避免跨版本撞车
           shared-key: rust-ci-stable
 
       - name: cargo check
@@ -60,7 +48,6 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: rust/package-lock.json
 
       - name: npm ci
         run: npm ci
@@ -71,15 +58,11 @@ jobs:
       - name: vite build
         run: npm run build:web
 
-  # --- Clippy 单独 job：当前 217+ pedantic 警告未清；不阻塞主 CI，
-  #     只跑出来作为趋势观察。等清完一次后可改 -D warnings + 合并到主 job。
+  # --- Clippy 单独 job：当前 pedantic 警告未清；不阻塞主 CI，只跑趋势观察。 ---
   clippy:
     name: clippy (advisory)
     runs-on: ubuntu-latest
     continue-on-error: true
-    defaults:
-      run:
-        working-directory: rust
     steps:
       - uses: actions/checkout@v4
       - name: Show toolchain
@@ -87,9 +70,6 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: rust -> target
           shared-key: rust-ci-stable
       - name: cargo clippy
-        # 主 job 已经覆盖了"-D warnings"on rustc；这里只跑 clippy 看 lint。
-        # 不加 -D，让 clippy 把 warnings 全打出来用于追踪。
         run: cargo clippy --workspace --all-targets

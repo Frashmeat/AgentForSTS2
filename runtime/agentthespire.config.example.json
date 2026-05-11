@@ -1,61 +1,59 @@
 {
-  "deployment": {
-    "frontend_port": 8080,
-    "local_workstation_port": 7860,
-    "web_port": 7870,
-    "postgres_host_port": 55432,
-    "web_base_url": "http://127.0.0.1:7870"
-  },
-  "local_workstation": {
-    "config": {
-      "llm": {
-        "mode": "agent_cli",
-        "agent_backend": "claude",
-        "model": "",
-        "api_key": "",
-        "base_url": "",
-        "custom_prompt": ""
-      },
-      "image_gen": {
-        "mode": "cloud",
-        "provider": "volcengine",
-        "model": "doubao-seedream-3-0-t2i-250415",
-        "api_key": "",
-        "api_secret": "",
-        "batch_size": 3
-      },
-      "godot_exe_path": "",
-      "dotnet_path": "dotnet",
-      "sts2_path": "",
-      "default_project_root": "",
-      "mod_template_path": "",
-      "mod_projects": [],
-      "active_project": "",
-      "decompiled_src_path": ""
+  "_comment": "AgentTheSpire runtime config — copy to agentthespire.config.json and fill in. Field names mirror the Python schema where overlap exists.",
+  "runtime": {
+    "workstation": {
+      "host": "127.0.0.1",
+      "port": 7860,
+      "allow_loopback_origins": true,
+      "cors_origins": [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:7860",
+        "http://127.0.0.1:7860"
+      ],
+      "mount_frontend": true,
+      "requires_database": false
+    },
+    "web": {
+      "host": "127.0.0.1",
+      "port": 7870,
+      "allow_loopback_origins": false,
+      "cors_origins": [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:7870",
+        "http://127.0.0.1:7870"
+      ],
+      "mount_frontend": false,
+      "requires_database": true
     }
   },
-  "web": {
-    "database": {
-      "name": "agentthespire",
-      "user": "agentthespire",
-      "password": "agentthespire"
-    },
-    "auth": {
-      "session_secret": "",
-      "credential_secret": ""
-    },
-    "config": {}
+  "_llm_provider_help": "provider 字段决定客户端协议：留空或 'anthropic' → Anthropic Messages API；'openai' / 'openai_compatible' / 'new_api' / 'one_api' → OpenAI Chat Completions（兼容 new-api / one-api / litellm / vLLM 等代理）。base_url 留空时走对应官方端点，填写后走第三方代理。",
+  "_llm_examples": {
+    "anthropic_official": { "provider": "anthropic", "model": "claude-sonnet-4-6", "base_url": "" },
+    "anthropic_proxy": { "provider": "anthropic", "model": "claude-sonnet-4-6", "base_url": "https://your-anthropic-proxy.example/" },
+    "openai_official": { "provider": "openai", "model": "gpt-4o-mini", "base_url": "" },
+    "new_api_proxy": { "provider": "new_api", "model": "gpt-4o-mini", "base_url": "https://your-new-api.example/" }
   },
-  "web_workstation": {
-    "internal_url": "http://web-workstation:7860",
-    "control_token": "",
-    "config": {}
+  "llm": {
+    "mode": "agent_cli",
+    "agent_backend": "claude",
+    "provider": "",
+    "model": "",
+    "api_key": "",
+    "base_url": ""
   },
-  "docker": {
-    "project_name": "agentthespire-app",
-    "network": "agentthespire-app",
-    "python_base_image": "python:3.11-slim",
-    "node_base_image": "node:20-alpine",
-    "postgres_image": "postgres:16-alpine"
+  "_image_gen_help": "image_gen 默认走 OpenAI Images 协议（DALL-E + 所有 OpenAI 兼容代理 + 部分通过代理的火山方舟）。size 留空 → 1024x1024。",
+  "image_gen": {
+    "provider": "",
+    "model": "",
+    "api_key": "",
+    "base_url": "",
+    "size": ""
+  },
+  "auth": {
+    "session_cookie_name": "agentthespire_session",
+    "session_secret": "CHANGE_ME_FOR_WEB_DEPLOYMENT",
+    "credential_secret": "CHANGE_ME_FOR_WEB_DEPLOYMENT"
   }
 }

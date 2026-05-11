@@ -1,1 +1,0 @@
-"""Authentication persistence package."""
