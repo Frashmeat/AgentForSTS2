@@ -86,6 +86,7 @@ async fn main() -> anyhow::Result<()> {
     let api = Router::new()
         .route("/api/health", get(health_handler))
         .merge(routes::knowledge::router())
+        .merge(routes::planning::router())
         .layer(Extension(Arc::clone(&app_state)));
 
     let app = Router::new()

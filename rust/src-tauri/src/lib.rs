@@ -36,6 +36,7 @@ pub fn run() {
             commands::health::get_health,
             commands::knowledge::get_knowledge_status,
             commands::knowledge::check_knowledge_status,
+            commands::planning::validate_plan_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

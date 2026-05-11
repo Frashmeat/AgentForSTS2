@@ -58,3 +58,73 @@ export function getKnowledgeStatus(): Promise<KnowledgeStatus> {
 export function checkKnowledgeStatus(): Promise<KnowledgeStatus> {
   return invoke<KnowledgeStatus>("check_knowledge_status");
 }
+
+// -------- Planning --------
+
+export type AssetItemType =
+  | "card"
+  | "card_fullscreen"
+  | "relic"
+  | "power"
+  | "character"
+  | "custom_code";
+
+export type ReviewStrictness = "efficient" | "balanced" | "strict";
+
+export type PlanItemReviewStatus = "clear" | "needs_user_input" | "invalid";
+
+// Mirror of ats-core::planning::PlanItem. All fields optional on input — the
+// Rust side fills defaults — but the response always carries every field.
+export interface PlanItem {
+  id: string;
+  type: AssetItemType;
+  name: string;
+  name_zhs?: string;
+  description?: string;
+  goal?: string;
+  detailed_description?: string;
+  implementation_notes?: string;
+  needs_image?: boolean;
+  image_description?: string;
+  depends_on_item_ids?: string[];
+  scope_boundary?: string;
+  relationship_reason?: string;
+  acceptance_notes?: string;
+  affected_targets?: string[];
+  relationship_type?: string;
+  clarification_status?: string;
+  clarification_questions?: string[];
+  provided_image_b64?: string;
+}
+
+export interface ModPlan {
+  mod_name: string;
+  summary: string;
+  items: PlanItem[];
+}
+
+export interface PlanValidationIssue {
+  code: string;
+  message: string;
+  field: string;
+}
+
+export interface PlanItemValidation {
+  itemId: string;
+  status: PlanItemReviewStatus;
+  issues: PlanValidationIssue[];
+  missingFields: string[];
+  clarificationQuestions: string[];
+}
+
+export interface PlanValidationResult {
+  strictness: ReviewStrictness;
+  items: PlanItemValidation[];
+}
+
+export function validatePlan(
+  plan: ModPlan,
+  strictness: ReviewStrictness = "balanced",
+): Promise<PlanValidationResult> {
+  return invoke<PlanValidationResult>("validate_plan_cmd", { plan, strictness });
+}
