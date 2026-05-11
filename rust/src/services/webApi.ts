@@ -1,6 +1,8 @@
 // Web 端 API 实现 —— 必须实现 tauriApi.ts 全部导出。
 
 import type {
+  BundleDecision,
+  ExecutionPlanPreview,
   HealthReport,
   KnowledgeStatus,
   ModPlan,
@@ -54,4 +56,23 @@ export async function validatePlan(
     throw new Error(`${response.status} ${response.statusText}`);
   }
   return response.json() as Promise<PlanValidationResult>;
+}
+
+export async function buildExecutionPlan(
+  plan: ModPlan,
+  strictness: ReviewStrictness = "balanced",
+  bundleDecisions: Record<string, BundleDecision> = {},
+): Promise<ExecutionPlanPreview> {
+  const response = await fetch(
+    `${API_BASE}/planning/execution-plan?strictness=${encodeURIComponent(strictness)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan, bundle_decisions: bundleDecisions }),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`${response.status} ${response.statusText}`);
+  }
+  return response.json() as Promise<ExecutionPlanPreview>;
 }

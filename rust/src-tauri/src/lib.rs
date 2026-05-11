@@ -37,6 +37,7 @@ pub fn run() {
             commands::knowledge::get_knowledge_status,
             commands::knowledge::check_knowledge_status,
             commands::planning::validate_plan_cmd,
+            commands::planning::build_execution_plan_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

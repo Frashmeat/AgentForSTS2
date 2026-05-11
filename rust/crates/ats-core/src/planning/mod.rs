@@ -12,11 +12,16 @@
 //! - prompt 装配（依赖 knowledge::sts2 一族 provider，后续阶段）
 
 mod dependency_graph;
+mod execution_bundles;
 mod models;
 mod parse;
 mod validation;
 
 pub use dependency_graph::{find_groups, topological_sort};
+pub use execution_bundles::{
+    BundleDecision, BundleReviewStatus, DependencyGroup, ExecutionBundle, ExecutionPlanPreview,
+    RecommendedAction, RiskDetail, build_execution_plan,
+};
 pub use models::{AssetItemType, ModPlan, PlanItem};
 pub use parse::{ParseError, parse_plan};
 pub use validation::{

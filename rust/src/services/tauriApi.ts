@@ -128,3 +128,58 @@ export function validatePlan(
 ): Promise<PlanValidationResult> {
   return invoke<PlanValidationResult>("validate_plan_cmd", { plan, strictness });
 }
+
+export type BundleReviewStatus = "clear" | "needs_confirmation" | "split_recommended";
+export type BundleDecision =
+  | "unresolved"
+  | "accepted"
+  | "split_requested"
+  | "needs_item_revision";
+
+export interface DependencyGroup {
+  itemIds: string[];
+}
+
+export interface RiskDetail {
+  code: string;
+  title: string;
+  summary: string;
+  recommendation: string;
+  impact?: string;
+}
+
+export interface RecommendedAction {
+  action: string;
+  label: string;
+  description: string;
+  emphasis: string;
+}
+
+export interface ExecutionBundle {
+  bundleId: string;
+  itemIds: string[];
+  status: BundleReviewStatus;
+  reason: string;
+  riskCodes: string[];
+  riskDetails: RiskDetail[];
+  recommendedActions: RecommendedAction[];
+  blockingReason: string;
+}
+
+export interface ExecutionPlanPreview {
+  strictness: ReviewStrictness;
+  dependencyGroups: DependencyGroup[];
+  executionBundles: ExecutionBundle[];
+}
+
+export function buildExecutionPlan(
+  plan: ModPlan,
+  strictness: ReviewStrictness = "balanced",
+  bundleDecisions: Record<string, BundleDecision> = {},
+): Promise<ExecutionPlanPreview> {
+  return invoke<ExecutionPlanPreview>("build_execution_plan_cmd", {
+    plan,
+    strictness,
+    bundleDecisions,
+  });
+}
