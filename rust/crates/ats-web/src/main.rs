@@ -1,5 +1,6 @@
 //! ats-web — AgentTheSpire 的 Web 角色 HTTP 服务器。
 
+mod routes;
 mod static_files;
 
 use std::path::PathBuf;
@@ -28,10 +29,19 @@ struct Args {
     config: Option<PathBuf>,
 }
 
+/// Shared per-process state attached via axum's `Extension` layer.
+pub struct AppState {
+    pub config_status: ConfigStatus,
+    pub runtime_dir: PathBuf,
+}
+
 async fn health_handler(
-    Extension(status): Extension<Arc<ConfigStatus>>,
+    Extension(state): Extension<Arc<AppState>>,
 ) -> Json<HealthReport> {
-    Json(ats_core::health::report(Role::Web, (*status).clone()))
+    Json(ats_core::health::report(
+        Role::Web,
+        state.config_status.clone(),
+    ))
 }
 
 #[tokio::main]
@@ -61,7 +71,12 @@ async fn main() -> anyhow::Result<()> {
             tracing::warn!("config: {err}");
         }
     }
-    let status_arc = Arc::new(config_status);
+
+    let runtime_dir = config_status.runtime_dir();
+    let app_state = Arc::new(AppState {
+        config_status: config_status.clone(),
+        runtime_dir,
+    });
 
     let host = args
         .host
@@ -70,7 +85,8 @@ async fn main() -> anyhow::Result<()> {
 
     let api = Router::new()
         .route("/api/health", get(health_handler))
-        .layer(Extension(Arc::clone(&status_arc)));
+        .merge(routes::knowledge::router())
+        .layer(Extension(Arc::clone(&app_state)));
 
     let app = Router::new()
         .merge(api)

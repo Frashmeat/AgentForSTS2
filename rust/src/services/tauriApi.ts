@@ -2,6 +2,8 @@
 
 import { invoke } from "@tauri-apps/api/core";
 
+// -------- Health --------
+
 export type Role = "web" | "workstation";
 
 export interface ConfigStatus {
@@ -21,4 +23,38 @@ export interface HealthReport {
 
 export function getHealth(): Promise<HealthReport> {
   return invoke<HealthReport>("get_health");
+}
+
+// -------- Knowledge --------
+
+export type OverallState = "fresh" | "missing" | "stale";
+export type SourceMode = "runtime_decompiled" | "missing";
+
+export interface GameStatus {
+  sourceMode: SourceMode;
+  knowledgePath: string;
+  hasDecompiledSources: boolean;
+}
+
+export interface BaselibStatus {
+  sourceMode: SourceMode;
+  knowledgePath: string;
+  hasDecompiledSources: boolean;
+}
+
+export interface KnowledgeStatus {
+  overall: OverallState;
+  knowledgeRoot: string;
+  warnings: string[];
+  game: GameStatus;
+  baselib: BaselibStatus;
+  embeddedTemplates: string[];
+}
+
+export function getKnowledgeStatus(): Promise<KnowledgeStatus> {
+  return invoke<KnowledgeStatus>("get_knowledge_status");
+}
+
+export function checkKnowledgeStatus(): Promise<KnowledgeStatus> {
+  return invoke<KnowledgeStatus>("check_knowledge_status");
 }

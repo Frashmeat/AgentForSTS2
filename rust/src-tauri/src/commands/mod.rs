@@ -4,3 +4,4 @@
 //! 错误统一转 `Result<T, String>`（Tauri 前端只能拿到字符串错误）。
 
 pub mod health;
+pub mod knowledge;

@@ -32,7 +32,11 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .manage(AppConfig { settings, status })
-        .invoke_handler(tauri::generate_handler![commands::health::get_health])
+        .invoke_handler(tauri::generate_handler![
+            commands::health::get_health,
+            commands::knowledge::get_knowledge_status,
+            commands::knowledge::check_knowledge_status,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

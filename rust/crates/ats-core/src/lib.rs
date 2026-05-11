@@ -6,6 +6,7 @@
 pub mod config;
 pub mod errors;
 pub mod health;
+pub mod knowledge;
 
 /// 当前 core 版本号（从 Cargo metadata 注入）。
 #[must_use]

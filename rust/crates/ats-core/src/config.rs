@@ -277,3 +277,16 @@ pub struct ConfigStatus {
     /// Human-readable error strings (parse + role-validation).
     pub errors: Vec<String>,
 }
+
+impl ConfigStatus {
+    /// Directory containing the config file (parent of `path`). Used by sibling
+    /// modules (knowledge / future packs) to anchor their data subtrees so they
+    /// stay co-located with the active config.
+    #[must_use]
+    pub fn runtime_dir(&self) -> PathBuf {
+        self.path
+            .as_deref()
+            .and_then(|p| Path::new(p).parent().map(Path::to_path_buf))
+            .unwrap_or_else(|| PathBuf::from("runtime"))
+    }
+}
