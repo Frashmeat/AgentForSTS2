@@ -102,6 +102,37 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!("ats-web listening on http://{addr}");
 
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
+    tracing::info!("ats-web shut down cleanly");
     Ok(())
+}
+
+/// 监听 Ctrl+C 与 SIGTERM（Unix 上）；任一触发即返回，axum 进入优雅停机
+/// （等待 in-flight 请求完成、不再 accept 新连接）。
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        if let Err(err) = tokio::signal::ctrl_c().await {
+            tracing::error!("install ctrl_c handler failed: {err}");
+        }
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut s) => {
+                s.recv().await;
+            }
+            Err(err) => tracing::error!("install SIGTERM handler failed: {err}"),
+        }
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        () = ctrl_c => tracing::info!("received Ctrl+C, shutting down"),
+        () = terminate => tracing::info!("received SIGTERM, shutting down"),
+    }
 }
