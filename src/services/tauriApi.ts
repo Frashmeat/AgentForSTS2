@@ -464,10 +464,12 @@ export type LlmStreamPayload =
 
 export interface ProjectMeta {
   name: string;
+  csharp_name: string;
   created_at: string;
   schema_version: number;
   sts2_path: string | null;
   template_version: string | null;
+  scaffolded: boolean;
 }
 
 export interface ProjectSnapshot {

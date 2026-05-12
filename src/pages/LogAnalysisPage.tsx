@@ -38,6 +38,18 @@ export function LogAnalysisPage() {
               // ignore
             }
           })();
+        } else if (ev.stage === "failed" || ev.stage.includes("error")) {
+          // handler 报错时把 job.error 拉出来给用户看
+          void (async () => {
+            try {
+              const job = (await api.getJob(ev.jobId)) as Job;
+              setError(
+                `LLM 诊断失败：${job.error ?? ev.message ?? ev.stage}`,
+              );
+            } catch {
+              setError(`LLM 诊断失败（stage=${ev.stage}）：${ev.message ?? ""}`);
+            }
+          })();
         }
       });
       unlistenRef.current = stop;

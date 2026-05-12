@@ -53,12 +53,17 @@ export function BatchGenerationPage() {
         if (
           ev.stage === "completed" ||
           ev.stage === "failed" ||
+          ev.stage === "item-failed" ||
           ev.stage.includes("error")
         ) {
           void (async () => {
             try {
               const next = (await api.getJob(ev.jobId)) as Job;
               setJob(next);
+              // 整批失败时 job.error 有顶层信息；部分 item 失败靠 result.items 看
+              if (next.status === "failed" && next.error) {
+                setError(`批量失败：${next.error}`);
+              }
             } catch {
               // ignore
             }
@@ -85,6 +90,15 @@ export function BatchGenerationPage() {
     const validItems = items.filter((it) => it.name.trim() !== "");
     if (validItems.length === 0) {
       setError("至少一个 item 需要 name");
+      return;
+    }
+    const blankBodies = validItems.filter(
+      (it) => !it.description.trim() && !it.implementation_notes.trim(),
+    );
+    if (blankBodies.length === validItems.length) {
+      setError(
+        "所有 item 都缺 description 与 implementation_notes —— LLM 会拿到空 prompt 并大概率失败。先填一份。",
+      );
       return;
     }
     setBusy(true);

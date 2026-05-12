@@ -18,8 +18,10 @@ mod error;
 mod folder;
 mod paths;
 mod recents;
+mod template;
 
 pub use error::{ProjectError, ProjectResult};
 pub use folder::{ProjectFolder, ProjectMeta, PROJECT_SCHEMA_VERSION};
 pub use paths::AppDataPaths;
 pub use recents::{RecentEntry, RecentProjects};
+pub use template::{derive_csharp_name, scaffold_from_template};

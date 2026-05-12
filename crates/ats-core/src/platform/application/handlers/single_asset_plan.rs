@@ -5,6 +5,7 @@
 //! - LLM 可能用 ```json fence 包裹，复用 code_generate 的 extract_first_code_block
 //! - 字段缺失走 PlanItem::default() 兜底（PlanItem 自带 #[serde(default)])
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use futures_util::StreamExt;
@@ -49,6 +50,7 @@ pub async fn run_single_asset_plan(
     sink: Arc<dyn ProgressSink>,
     job_id: JobId,
     request: SubmitSingleAssetPlanRequest,
+    items_dir: Option<PathBuf>,
 ) {
     if transition_to_running(&repo, &job_id, &sink).await.is_err() {
         return;
@@ -136,12 +138,34 @@ pub async fn run_single_asset_plan(
         }
     };
 
+    // 把 PlanItem 落到 <items_dir>/<id>.json，让用户在工程目录里能看到 plan
+    // 产物。写失败不致命——job.result 仍可保留 item。
+    let item_file_path = if let Some(dir) = &items_dir {
+        match persist_plan_item(dir, &plan_item).await {
+            Ok(p) => Some(p),
+            Err(err) => {
+                sink.emit(ProgressEvent {
+                    job_id: job_id.clone(),
+                    stage: "items-write-warn".into(),
+                    percent: None,
+                    message: Some(format!("write items file failed: {err}")),
+                    delta: None,
+                })
+                .await;
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let mut job = job;
     job.status = JobStatus::Completed;
     job.completed_at = Some(chrono::Utc::now());
     job.result = Some(serde_json::json!({
         "model": model,
         "item": plan_item,
+        "itemFilePath": item_file_path.as_ref().map(|p| p.display().to_string()),
         "rawChars": accumulated.len(),
         "usage": { "inputTokens": usage_in, "outputTokens": usage_out },
     }));
@@ -155,6 +179,30 @@ pub async fn run_single_asset_plan(
         delta: None,
     })
     .await;
+}
+
+/// 把 PlanItem 写到 `<items_dir>/<sanitized id>.json`。
+/// 用 tempfile + rename 模式避免半截文件；id 经 sanitize_entity_name 兜底，
+/// 防止恶意 / 中文 id 串目录。
+async fn persist_plan_item(
+    items_dir: &std::path::Path,
+    plan_item: &PlanItem,
+) -> Result<PathBuf, String> {
+    tokio::fs::create_dir_all(items_dir)
+        .await
+        .map_err(|e| format!("create items dir: {e}"))?;
+    let safe_id = super::code_generate::sanitize_entity_name(&plan_item.id);
+    let final_path = items_dir.join(format!("{safe_id}.json"));
+    let tmp_path = items_dir.join(format!("{safe_id}.json.tmp"));
+    let body = serde_json::to_vec_pretty(plan_item)
+        .map_err(|e| format!("serialize plan item: {e}"))?;
+    tokio::fs::write(&tmp_path, &body)
+        .await
+        .map_err(|e| format!("write tmp: {e}"))?;
+    tokio::fs::rename(&tmp_path, &final_path)
+        .await
+        .map_err(|e| format!("rename to {}: {e}", final_path.display()))?;
+    Ok(final_path)
 }
 
 fn build_user_prompt(request: &SubmitSingleAssetPlanRequest) -> String {
@@ -295,7 +343,7 @@ mod tests {
             asset_type: Some("relic".into()),
             max_tokens: None,
         };
-        let id = service.submit_single_asset_plan(req, sink).await.unwrap();
+        let id = service.submit_single_asset_plan(req, None, sink).await.unwrap();
         wait_terminal(&service, &id).await;
 
         let job = service.get(&id).await.unwrap();
@@ -326,7 +374,7 @@ mod tests {
             asset_type: None,
             max_tokens: None,
         };
-        let id = service.submit_single_asset_plan(req, sink).await.unwrap();
+        let id = service.submit_single_asset_plan(req, None, sink).await.unwrap();
         wait_terminal(&service, &id).await;
 
         let job = service.get(&id).await.unwrap();
@@ -355,7 +403,7 @@ mod tests {
             asset_type: None,
             max_tokens: None,
         };
-        let id = service.submit_single_asset_plan(req, sink).await.unwrap();
+        let id = service.submit_single_asset_plan(req, None, sink).await.unwrap();
         wait_terminal(&service, &id).await;
 
         let job = service.get(&id).await.unwrap();
@@ -380,7 +428,7 @@ mod tests {
             asset_type: None,
             max_tokens: None,
         };
-        let id = service.submit_single_asset_plan(req, sink).await.unwrap();
+        let id = service.submit_single_asset_plan(req, None, sink).await.unwrap();
         wait_terminal(&service, &id).await;
 
         let job = service.get(&id).await.unwrap();
@@ -405,12 +453,63 @@ mod tests {
             requirements: "   ".into(),
             ..Default::default()
         };
-        let id = service.submit_single_asset_plan(req, sink).await.unwrap();
+        let id = service.submit_single_asset_plan(req, None, sink).await.unwrap();
         wait_terminal(&service, &id).await;
 
         let job = service.get(&id).await.unwrap();
         assert_eq!(job.status, JobStatus::Failed);
         assert!(job.error.unwrap_or_default().contains("requirements is empty"));
+    }
+
+    #[tokio::test]
+    async fn single_asset_plan_writes_items_file_when_dir_provided() {
+        let td = tempfile::TempDir::new().unwrap();
+        let history = td.path().join("history");
+        std::fs::create_dir_all(&history).unwrap();
+        let items = td.path().join("items");
+
+        let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
+        let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
+            events: Mutex::new(one_chunk(VALID_JSON)),
+        });
+        let sink = Arc::new(super::super::common::NoopProgressSink);
+        let service = JobApplicationService::new(repo, llm);
+
+        let req = SubmitSingleAssetPlanRequest {
+            requirements: "测试 items 落盘".into(),
+            asset_type: Some("relic".into()),
+            max_tokens: None,
+        };
+        let id = service
+            .submit_single_asset_plan(req, Some(items.clone()), sink)
+            .await
+            .unwrap();
+        wait_terminal(&service, &id).await;
+
+        let job = service.get(&id).await.unwrap();
+        assert_eq!(job.status, JobStatus::Completed);
+
+        let expected = items.join("flame_relic_v1.json");
+        assert!(
+            expected.is_file(),
+            "items file not written: {}",
+            expected.display()
+        );
+
+        let body = std::fs::read_to_string(&expected).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["id"], "flame_relic_v1");
+        assert_eq!(v["needs_image"], true);
+
+        let res = job.result.unwrap();
+        assert!(
+            res["itemFilePath"]
+                .as_str()
+                .unwrap_or("")
+                .ends_with("flame_relic_v1.json"),
+            "result.itemFilePath should point at the new file: {:?}",
+            res["itemFilePath"]
+        );
     }
 
     #[test]

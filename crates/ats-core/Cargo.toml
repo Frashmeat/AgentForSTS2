@@ -28,6 +28,7 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 walkdir = "2"
 base64 = "0.22"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+include_dir = "0.7"
 
 [dev-dependencies]
 tempfile = "3"

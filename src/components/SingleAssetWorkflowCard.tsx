@@ -48,6 +48,7 @@ export function SingleAssetWorkflowCard() {
     csPath: string;
     rawPath: string;
     extractedChars: number;
+    pngPath?: string | null;
   } | null>(null);
 
   // 监听 job-progress 事件，按 jobId 派发
@@ -130,12 +131,14 @@ export function SingleAssetWorkflowCard() {
             csPath?: string;
             rawPath?: string;
             extractedChars?: number;
+            pngPath?: string | null;
           } | null;
           if (r?.csPath) {
             setCodeResult({
               csPath: r.csPath,
               rawPath: r.rawPath ?? "",
               extractedChars: r.extractedChars ?? 0,
+              pngPath: r.pngPath ?? null,
             });
           }
           setPhase("code_done");
@@ -143,7 +146,8 @@ export function SingleAssetWorkflowCard() {
           setError(`fetch code job: ${String(err)}`);
         }
       })();
-    } else if (ev.stage.includes("error")) {
+    } else if (ev.stage === "failed" || ev.stage.includes("error")) {
+      // image_gen / stream / write 失败均在此分支
       setError(`code failed at ${ev.stage}: ${ev.message ?? ""}`);
       setPhase("plan_done");
     }
@@ -179,20 +183,43 @@ export function SingleAssetWorkflowCard() {
     setCodeResult(null);
     setPhase("generating");
     try {
-      // 用 custom_code 模式：用 plan 的 name + description + implementation_notes
       const description = [planItem.description ?? "", planItem.detailed_description ?? ""]
         .filter(Boolean)
         .join("\n\n");
-      const ack = (await api.submitCodeGenerateJob({
-        mode: "custom_code",
-        request: {
-          name: planItem.name || planItem.id || "Unnamed",
-          description,
-          implementation_notes: planItem.implementation_notes ?? "",
-          project_root: project.path,
-          skip_build: true,
-        },
-      })) as SubmitJobAck;
+      const name = planItem.name || planItem.id || "Unnamed";
+      // needs_image=true + 资产类型不是 custom_code → 走 asset_generate（出 PNG + .cs）
+      // 否则走 code_generate(custom_code)：纯代码、不调 image_gen
+      const needsImage =
+        planItem.needs_image === true && planItem.type !== "custom_code";
+      let ack: SubmitJobAck;
+      if (needsImage) {
+        ack = (await api.submitAssetGenerateJob({
+          asset_request: {
+            design_description: description,
+            asset_type: planItem.type || "card",
+            asset_name: name,
+            image_paths: [],
+            project_root: project.path,
+            name_zhs: planItem.name_zhs ?? "",
+            skip_build: true,
+          },
+          image_prompt: planItem.image_description?.trim()
+            ? planItem.image_description.trim()
+            : description,
+          image_size: null,
+        })) as SubmitJobAck;
+      } else {
+        ack = (await api.submitCodeGenerateJob({
+          mode: "custom_code",
+          request: {
+            name,
+            description,
+            implementation_notes: planItem.implementation_notes ?? "",
+            project_root: project.path,
+            skip_build: true,
+          },
+        })) as SubmitJobAck;
+      }
       setCodeJobId(ack.jobId);
     } catch (e: unknown) {
       setError(String(e));
@@ -359,6 +386,12 @@ export function SingleAssetWorkflowCard() {
             <span className="text-muted">.cs：</span>
             <code className="break-all">{codeResult.csPath}</code>
           </p>
+          {codeResult.pngPath && (
+            <p>
+              <span className="text-muted">.png：</span>
+              <code className="break-all">{codeResult.pngPath}</code>
+            </p>
+          )}
           <p>
             <span className="text-muted">raw.md：</span>
             <code className="break-all">{codeResult.rawPath}</code>

@@ -154,10 +154,12 @@ impl JobApplicationService {
     }
 
     /// 提交 single_asset_plan 任务：自然语言需求 → LLM 出 JSON → 解析成 PlanItem。
-    /// 结果直接落到 job.result.item，前端可拿去预填 plan editor。
+    /// 结果落到 job.result.item；当 `items_dir` 提供时，还会把 PlanItem 序列化到
+    /// `<items_dir>/<item_id>.json`，让用户在工程目录里看到 plan 的产物。
     pub async fn submit_single_asset_plan(
         &self,
         request: SubmitSingleAssetPlanRequest,
+        items_dir: Option<PathBuf>,
         sink: Arc<dyn ProgressSink>,
     ) -> JobResult<JobId> {
         let payload = serde_json::to_value(&request)
@@ -170,7 +172,7 @@ impl JobApplicationService {
         let llm = Arc::clone(&self.llm);
         let id_for_task = job_id.clone();
         tokio::spawn(async move {
-            run_single_asset_plan(repo, llm, sink, id_for_task, request).await;
+            run_single_asset_plan(repo, llm, sink, id_for_task, request, items_dir).await;
         });
 
         Ok(job_id)

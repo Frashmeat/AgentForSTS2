@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/services/api";
 import type {
   ExportPackStats,
   ImportPackStats,
+  JobProgressEvent,
   KnowledgeStatus,
+  SubmitJobAck,
 } from "@/services/tauriApi";
 
 export function KnowledgeCard() {
@@ -15,11 +17,82 @@ export function KnowledgeCard() {
   const [packBusy, setPackBusy] = useState(false);
   const [overwriteOnImport, setOverwriteOnImport] = useState(false);
 
+  // Refresh state
+  const [dllPath, setDllPath] = useState("");
+  const [includeBaselib, setIncludeBaselib] = useState(true);
+  const [force, setForce] = useState(false);
+  const [refreshBusy, setRefreshBusy] = useState(false);
+  const [refreshStage, setRefreshStage] = useState<string | null>(null);
+  const [refreshMsg, setRefreshMsg] = useState<string | null>(null);
+  const [refreshJobId, setRefreshJobId] = useState<string | null>(null);
+  const refreshJobIdRef = useRef<string | null>(null);
+  const unlistenRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    refreshJobIdRef.current = refreshJobId;
+  }, [refreshJobId]);
+
   useEffect(() => {
     (api.getKnowledgeStatus() as Promise<KnowledgeStatus>)
       .then(setKnowledge)
       .catch((e: unknown) => setError(String(e)));
   }, []);
+
+  useEffect(() => {
+    if (!__IS_TAURI__) return;
+    void (async () => {
+      const { listen } = await import("@tauri-apps/api/event");
+      const stop = await listen<JobProgressEvent>("job-progress", (e) => {
+        const ev = e.payload;
+        if (ev.jobId !== refreshJobIdRef.current) return;
+        setRefreshStage(ev.stage);
+        if (ev.message) setRefreshMsg(ev.message);
+        if (
+          ev.stage === "completed" ||
+          ev.stage === "failed" ||
+          ev.stage.includes("error")
+        ) {
+          setRefreshBusy(false);
+          void (async () => {
+            try {
+              const next = (await api.getKnowledgeStatus()) as KnowledgeStatus;
+              setKnowledge(next);
+            } catch {
+              // 状态刷新失败不致命
+            }
+          })();
+        }
+      });
+      unlistenRef.current = stop;
+    })();
+    return () => {
+      unlistenRef.current?.();
+      unlistenRef.current = null;
+    };
+  }, []);
+
+  async function handleRefresh() {
+    if (!dllPath.trim()) {
+      setError("先填 sts2.dll 路径");
+      return;
+    }
+    setError(null);
+    setRefreshMsg(null);
+    setRefreshStage("submitting");
+    setRefreshBusy(true);
+    try {
+      const ack = (await api.submitKnowledgeRefreshJob({
+        sts2_dll_path: dllPath.trim(),
+        force,
+        include_baselib: includeBaselib,
+      })) as SubmitJobAck;
+      setRefreshJobId(ack.jobId);
+    } catch (e: unknown) {
+      setError(String(e));
+      setRefreshBusy(false);
+      setRefreshStage(null);
+    }
+  }
 
   async function handleRecheck() {
     setChecking(true);
@@ -153,6 +226,60 @@ export function KnowledgeCard() {
               {knowledge.embeddedTemplates.join(", ")}
             </span>
           </p>
+
+          {__IS_TAURI__ && (
+            <div className="mt-4 pt-3 border-t border-muted/20 space-y-2">
+              <p className="text-sm font-medium">Refresh (ilspycmd)</p>
+              <p className="text-xs text-muted">
+                需要本机装了 <code>ilspycmd</code>（
+                <code>dotnet tool install -g ilspycmd</code>）。
+              </p>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="text-muted text-xs">sts2.dll 路径</span>
+                <input
+                  value={dllPath}
+                  onChange={(e) => setDllPath(e.target.value)}
+                  placeholder="C:/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2/data_sts2_windows_x86_64/sts2.dll"
+                  className="px-2 py-1 rounded border border-muted/30 bg-transparent font-mono text-xs"
+                />
+              </label>
+              <div className="flex flex-wrap items-center gap-3 text-sm">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={includeBaselib}
+                    onChange={(e) => setIncludeBaselib(e.target.checked)}
+                  />
+                  <span>include_baselib</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={force}
+                    onChange={(e) => setForce(e.target.checked)}
+                  />
+                  <span>force（跳过 manifest 缓存）</span>
+                </label>
+              </div>
+              <button
+                type="button"
+                onClick={handleRefresh}
+                disabled={refreshBusy}
+                className="text-xs px-3 py-1 rounded border border-accent/60 text-accent hover:bg-accent/10 disabled:opacity-50"
+              >
+                {refreshBusy ? "Refreshing…" : "Refresh game library"}
+              </button>
+              {(refreshStage || refreshMsg) && (
+                <p className="text-xs">
+                  <span className="text-muted">stage: </span>
+                  <span className="font-mono">{refreshStage}</span>
+                  {refreshMsg && (
+                    <span className="text-muted ml-2 break-all">— {refreshMsg}</span>
+                  )}
+                </p>
+              )}
+            </div>
+          )}
 
           {__IS_TAURI__ && (
             <div className="mt-4 pt-3 border-t border-muted/20 space-y-2">

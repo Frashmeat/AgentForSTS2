@@ -24,6 +24,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use serde::{Deserialize, Serialize};
 
 use super::error::{ProjectError, ProjectResult};
+use super::template::{derive_csharp_name, scaffold_from_template};
 
 pub const PROJECT_SCHEMA_VERSION: u32 = 1;
 
@@ -36,20 +37,26 @@ const VERSION_FILE: &str = "version";
 #[serde(default, rename_all = "snake_case")]
 pub struct ProjectMeta {
     pub name: String,
+    /// 派生的 C# 合法标识符；用于 .csproj / namespace。允许用户后续手改 meta 覆盖。
+    pub csharp_name: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub schema_version: u32,
     pub sts2_path: Option<String>,
     pub template_version: Option<String>,
+    /// scaffolding 是否已铺过；老工程升级时可据此判断是否需要补铺。
+    pub scaffolded: bool,
 }
 
 impl Default for ProjectMeta {
     fn default() -> Self {
         Self {
             name: String::new(),
+            csharp_name: String::new(),
             created_at: chrono::Utc::now(),
             schema_version: PROJECT_SCHEMA_VERSION,
             sts2_path: None,
             template_version: None,
+            scaffolded: false,
         }
     }
 }
@@ -63,6 +70,11 @@ pub struct ProjectFolder {
 
 impl ProjectFolder {
     /// 在 `parent_dir/<name>` 处创建全新工程。`name` 校验：非空、不含 `/\:*?"<>|`。
+    ///
+    /// 创建后立即从内嵌的 `mod_template/` 铺一份 dotnet 项目骨架（含 .csproj / .sln
+    /// / MainFile.cs / nuget.config 等），文件中 `ModTemplate` 字面量替换为派生的
+    /// `csharp_name`。这是 single_asset_plan → asset_generate → build_project 全链路
+    /// 能 dotnet publish 起来的前置条件。
     pub fn create(parent_dir: &Path, name: &str) -> ProjectResult<Self> {
         validate_name(name)?;
         if !parent_dir.is_dir() {
@@ -76,8 +88,16 @@ impl ProjectFolder {
         for sub in ["items", "artifacts", "history", ATS_DIR] {
             fs::create_dir_all(project_root.join(sub))?;
         }
+        let csharp_name = derive_csharp_name(name);
+        // 脚手架失败要把已建的目录清干净，避免半状态
+        if let Err(err) = scaffold_from_template(&project_root, &csharp_name) {
+            let _ = fs::remove_dir_all(&project_root);
+            return Err(err);
+        }
         let meta = ProjectMeta {
             name: name.to_string(),
+            csharp_name,
+            scaffolded: true,
             ..ProjectMeta::default()
         };
         write_json_atomic(&project_root.join(PROJECT_JSON), &meta)?;

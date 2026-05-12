@@ -143,8 +143,9 @@ pub async fn submit_single_asset_plan_job(
 ) -> Result<SubmitJobAck, String> {
     let service = build_service(&config, &active)?;
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
+    let items_dir = active_items_dir(&active).ok();
     let job_id = service
-        .submit_single_asset_plan(request, sink)
+        .submit_single_asset_plan(request, items_dir, sink)
         .await
         .map_err(|e| e.to_string())?;
     Ok(SubmitJobAck { job_id })
@@ -225,6 +226,17 @@ fn active_artifacts_dir(active: &State<'_, ActiveProject>) -> Result<PathBuf, St
         .as_ref()
         .ok_or_else(|| "no active project — open or create one first".to_string())?;
     Ok(project.artifacts_dir())
+}
+
+fn active_items_dir(active: &State<'_, ActiveProject>) -> Result<PathBuf, String> {
+    let guard = active
+        .0
+        .lock()
+        .map_err(|e| format!("active project lock poisoned: {e}"))?;
+    let project = guard
+        .as_ref()
+        .ok_or_else(|| "no active project — open or create one first".to_string())?;
+    Ok(project.items_dir())
 }
 
 fn build_service(
