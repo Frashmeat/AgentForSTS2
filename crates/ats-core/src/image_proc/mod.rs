@@ -1,14 +1,24 @@
 //! 图像后处理：背景去除 + alpha 通道。
 //!
-//! **当前阶段**：lightweight 启发式（luminance + RGB 阈值），适合 AI 文生图常见的
-//! 纯白 / 浅灰背景。处理速度 ~10ms/1024x1024。
+//! **两条实现**：
+//! - `SimpleBgRemover`（always-on）：启发式 luminance + RGB 阈值，~10ms/1024px，
+//!   只对纯白 / 浅灰背景有效；
+//! - `MlBgRemover`（feature `ml-rembg`）：ort + u2netp 真做语义分割，
+//!   ~200-400ms CPU，能处理复杂 / 深色背景。
 //!
-//! **后续阶段**：rembg via ort（u2net.onnx）。Q10 决议是内嵌模型 170MB；
-//! 真实 ML 实现是 Stage 4 后续工作。trait 设计已经留好扩展位 ——
-//! 加 `OrtRembgClient` 实现同 trait 即可无侵入升级。
+//! 调用方建议直接用 `BgRemoverChain`：自动 ML→Simple 回退，不感知 feature 状态。
+//! 模型权重缓存在 `image_proc::cache::ModelSpec` + `ensure_model`，落到
+//! `<app_data>/models/u2netp.onnx`。
 
+pub mod cache;
+mod chain;
+#[cfg(feature = "ml-rembg")]
+mod ml;
 mod simple;
 
+pub use chain::BgRemoverChain;
+#[cfg(feature = "ml-rembg")]
+pub use ml::{MlBgRemover, MlBgRemoverError};
 pub use simple::{SimpleBgRemover, remove_white_background};
 
 use async_trait::async_trait;

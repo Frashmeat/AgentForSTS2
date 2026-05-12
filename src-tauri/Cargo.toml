@@ -13,6 +13,11 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [lints]
 workspace = true
 
+[features]
+default = []
+# 透传到 ats-core 的 ml-rembg。生产 Tauri build 用 `cargo tauri build --features ml-rembg`。
+ml-rembg = ["ats-core/ml-rembg"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

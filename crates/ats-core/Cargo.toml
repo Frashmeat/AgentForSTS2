@@ -8,6 +8,13 @@ authors.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = []
+# 开启 ML 背景去除（u2netp via ort）。默认关，CI 在 feature off 下跑通；
+# 用户在 Tauri prod build / 自己开发时 cargo build --features ml-rembg 启用。
+# 启用会拉 ~200MB 的 ort + onnxruntime native binaries（download-binaries feature）。
+ml-rembg = ["dep:ort", "dep:ndarray"]
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -29,6 +36,9 @@ walkdir = "2"
 base64 = "0.22"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 include_dir = "0.7"
+sha2 = "0.10"
+ort = { version = "=2.0.0-rc.10", optional = true, default-features = false, features = ["std", "ndarray", "download-binaries"] }
+ndarray = { version = "0.16", optional = true }
 
 [dev-dependencies]
 tempfile = "3"

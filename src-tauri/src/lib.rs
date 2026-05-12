@@ -3,11 +3,13 @@
 mod commands;
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use ats_core::config::{ConfigStatus, Settings};
 use ats_core::health::Role;
 use ats_core::project::AppDataPaths;
 
+use crate::commands::image_proc_state::{ImageProcState, prewarm};
 use crate::commands::project::ActiveProject;
 
 /// Tauri 同进程内单一配置快照，通过 `app.manage()` 注入，由 command 通过 `tauri::State` 读取。
@@ -52,14 +54,29 @@ pub fn run() {
     }
     eprintln!("ats-desktop: app data root={}", app_data.root.display());
 
+    let app_data_root = app_data.root.clone();
+    let image_proc_state = Arc::new(ImageProcState::new());
+    let image_proc_for_prewarm = Arc::clone(&image_proc_state);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
+        .setup(move |_app| {
+            // ML rembg prewarm 后台跑（feature on 才真正下载/加载，
+            // off 时立刻置 Failed("feature disabled")）。失败不影响 app 启动。
+            let state = Arc::clone(&image_proc_for_prewarm);
+            let root = app_data_root.clone();
+            tauri::async_runtime::spawn(async move {
+                prewarm(state, root).await;
+            });
+            Ok(())
+        })
         .manage(AppConfig { settings, status })
         .manage(AppPaths { data: app_data })
         .manage(ActiveProject::new())
+        .manage(image_proc_state)
         .invoke_handler(tauri::generate_handler![
             commands::health::get_health,
             commands::capabilities::get_local_capabilities_sync,
@@ -99,6 +116,7 @@ pub fn run() {
             commands::platform::submit_single_asset_plan_job,
             commands::platform::submit_knowledge_refresh_job,
             commands::platform::submit_asset_generate_job,
+            commands::image_proc_state::image_proc_status,
             commands::platform::get_job,
             commands::platform::list_jobs,
             commands::platform::cancel_job,

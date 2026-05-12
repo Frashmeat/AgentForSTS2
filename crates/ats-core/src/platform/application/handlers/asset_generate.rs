@@ -23,17 +23,18 @@ use super::code_generate::{
 use super::common::{ProgressEvent, ProgressSink, finalize_with_error, transition_to_running};
 use crate::codegen::PromptAssembler;
 use crate::image_gen::{ImageGenClient, ImageGenRequest};
-use crate::image_proc::{ImageProcClient, SimpleBgRemover};
+use crate::image_proc::ImageProcClient;
 use crate::knowledge::{KnowledgePaths, SourceMode};
 use crate::llm::LlmClient;
 use crate::platform::contracts::SubmitAssetGenerateRequest;
 use crate::platform::domain::{JobId, JobRepository, JobStatus};
 
-#[allow(clippy::too_many_arguments)] // handler 注入 8 个依赖是 stage 3 设计的有意为之，避免引大型 Context 结构体
+#[allow(clippy::too_many_arguments)] // handler 注入 9 个依赖是 stage 3 设计的有意为之，避免引大型 Context 结构体
 pub async fn run_asset_generate(
     repo: Arc<dyn JobRepository>,
     llm: Arc<dyn LlmClient>,
     image_gen: Arc<dyn ImageGenClient>,
+    image_proc: Arc<dyn ImageProcClient>,
     sink: Arc<dyn ProgressSink>,
     job_id: JobId,
     request: SubmitAssetGenerateRequest,
@@ -102,12 +103,11 @@ pub async fn run_asset_generate(
             image_model = Some(img_resp.model.clone());
             revised_prompt = img_resp.revised_prompt.clone();
 
-            // 启发式背景去除：把"看起来像白色"的像素 alpha 改为 0，写到 .rembg.png
-            // 失败不致命（保留原图 path 给 prompt assembler 用）
-            let rembg = SimpleBgRemover::default();
+            // 背景去除：调注入的 ImageProcClient（生产路径是 BgRemoverChain
+            // ML→Simple 回退）。失败不致命（保留原图 path 给 prompt assembler 用）
             let raw_bytes = first.bytes.clone();
             let rembg_path = target_dir.join(format!("{entity_name}.rembg.png"));
-            match rembg.remove_background(&raw_bytes).await {
+            match image_proc.remove_background(&raw_bytes).await {
                 Ok(processed) => {
                     if let Err(err) = fs::write(&rembg_path, &processed).await {
                         sink.emit(ProgressEvent {
@@ -252,6 +252,7 @@ mod tests {
     use crate::image_gen::{
         GeneratedImage, ImageGenError, ImageGenResponse,
     };
+    use crate::image_proc::SimpleBgRemover;
     use crate::llm::{
         CompletionRequest, CompletionResponse, CompletionStream, FinishReason, LlmError,
         StreamEvent, Usage,
@@ -394,7 +395,14 @@ mod tests {
 
         let req = make_request("AlphaCard", Some("draw an alpha card art"));
         let id = service
-            .submit_asset_generate(req, kp, artifacts.clone(), image_gen.clone(), sink)
+            .submit_asset_generate(
+                req,
+                kp,
+                artifacts.clone(),
+                image_gen.clone(),
+                Arc::new(SimpleBgRemover::default()),
+                sink,
+            )
             .await
             .unwrap();
         wait_terminal(&service, &id).await;
@@ -437,7 +445,14 @@ mod tests {
 
         let req = make_request("BetaCard", Some("a beta card art"));
         let id = service
-            .submit_asset_generate(req, kp, artifacts.clone(), image_gen, sink)
+            .submit_asset_generate(
+                req,
+                kp,
+                artifacts.clone(),
+                image_gen,
+                Arc::new(SimpleBgRemover::default()),
+                sink,
+            )
             .await
             .unwrap();
         wait_terminal(&service, &id).await;
@@ -474,7 +489,14 @@ mod tests {
 
         let req = make_request("GammaCard", None);
         let id = service
-            .submit_asset_generate(req, kp, artifacts.clone(), image_gen, sink)
+            .submit_asset_generate(
+                req,
+                kp,
+                artifacts.clone(),
+                image_gen,
+                Arc::new(SimpleBgRemover::default()),
+                sink,
+            )
             .await
             .unwrap();
         wait_terminal(&service, &id).await;
@@ -514,7 +536,14 @@ mod tests {
 
         let req = make_request("DeltaCard", Some("   \n  "));
         let id = service
-            .submit_asset_generate(req, kp, artifacts, image_gen, sink)
+            .submit_asset_generate(
+                req,
+                kp,
+                artifacts,
+                image_gen,
+                Arc::new(SimpleBgRemover::default()),
+                sink,
+            )
             .await
             .unwrap();
         wait_terminal(&service, &id).await;

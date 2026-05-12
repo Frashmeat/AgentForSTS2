@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use ats_core::audit::{AuditSinkArc, FileAuditSink};
 use ats_core::image_gen::{ImageGenClient, build_from_config as build_image_gen};
+use ats_core::image_proc::{BgRemoverChain, ImageProcClient};
 use ats_core::knowledge::{BaselibSource, GitHubBaselibSource, KnowledgePaths};
 use ats_core::llm::{LlmClient, build_from_config};
 use ats_core::platform::{
@@ -99,6 +100,7 @@ pub async fn submit_asset_generate_job(
     app: AppHandle,
     config: State<'_, AppConfig>,
     active: State<'_, ActiveProject>,
+    image_proc_state: State<'_, Arc<crate::commands::image_proc_state::ImageProcState>>,
     request: SubmitAssetGenerateRequest,
 ) -> Result<SubmitJobAck, String> {
     let service = build_service(&config, &active)?;
@@ -107,8 +109,20 @@ pub async fn submit_asset_generate_job(
     let knowledge_paths = KnowledgePaths::from_runtime_dir(&config.status.runtime_dir());
     let image_gen: Arc<dyn ImageGenClient> =
         build_image_gen(&config.settings.image_gen).map_err(|e| e.to_string())?;
+    // BgRemoverChain：prewarm 阶段装好的 ML primary（feature on 且加载成功），
+    // 没装则只用启发式 fallback。
+    let primary = image_proc_state.primary();
+    let image_proc: Arc<dyn ImageProcClient> =
+        Arc::new(BgRemoverChain::with_simple_fallback(primary));
     let job_id = service
-        .submit_asset_generate(request, knowledge_paths, artifacts_dir, image_gen, sink)
+        .submit_asset_generate(
+            request,
+            knowledge_paths,
+            artifacts_dir,
+            image_gen,
+            image_proc,
+            sink,
+        )
         .await
         .map_err(|e| e.to_string())?;
     Ok(SubmitJobAck { job_id })

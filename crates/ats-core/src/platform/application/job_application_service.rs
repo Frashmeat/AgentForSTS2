@@ -14,6 +14,7 @@ use super::handlers::{
     text_generate::run_text_generate,
 };
 use crate::image_gen::ImageGenClient;
+use crate::image_proc::ImageProcClient;
 use crate::knowledge::{BaselibSource, KnowledgePaths};
 use crate::llm::LlmClient;
 use crate::platform::contracts::{
@@ -203,12 +204,15 @@ impl JobApplicationService {
 
     /// 提交 asset_generate 任务：image_gen 出图 + code_generate 出 .cs。
     /// image_prompt 留空时跳过 image_gen，等价于 code_generate(asset) 但通过统一接口。
+    /// `image_proc` 走 BgRemoverChain（生产 ML→Simple 回退），失败不致命。
+    #[allow(clippy::too_many_arguments)] // 同 handler，DI 注入式 service
     pub async fn submit_asset_generate(
         &self,
         request: SubmitAssetGenerateRequest,
         knowledge_paths: KnowledgePaths,
         artifacts_dir: PathBuf,
         image_gen: Arc<dyn ImageGenClient>,
+        image_proc: Arc<dyn ImageProcClient>,
         sink: Arc<dyn ProgressSink>,
     ) -> JobResult<JobId> {
         let payload = serde_json::to_value(&request)
@@ -225,6 +229,7 @@ impl JobApplicationService {
                 repo,
                 llm,
                 image_gen,
+                image_proc,
                 sink,
                 id_for_task,
                 request,

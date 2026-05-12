@@ -7,6 +7,7 @@ pub mod audit;
 pub mod capabilities;
 pub mod codegen;
 pub mod health;
+pub mod image_proc_state;
 pub mod knowledge;
 pub mod llm;
 pub mod mod_analyzer;
