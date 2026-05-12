@@ -5,6 +5,7 @@ import { BatchGenerationPage } from "@/pages/BatchGenerationPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { LogAnalysisPage } from "@/pages/LogAnalysisPage";
 import { ModEditorPage } from "@/pages/ModEditorPage";
+import { SettingsPage } from "@/pages/SettingsPage";
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
           <Route path="editor" element={<ModEditorPage />} />
           <Route path="batch" element={<BatchGenerationPage />} />
           <Route path="log" element={<LogAnalysisPage />} />
+          <Route path="settings" element={<SettingsPage />} />
         </Route>
       </Routes>
     </HashRouter>

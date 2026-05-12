@@ -117,6 +117,8 @@ pub fn run() {
             commands::platform::submit_knowledge_refresh_job,
             commands::platform::submit_asset_generate_job,
             commands::image_proc_state::image_proc_status,
+            commands::settings::get_settings_snapshot,
+            commands::settings::open_config_in_editor,
             commands::platform::get_job,
             commands::platform::list_jobs,
             commands::platform::cancel_job,

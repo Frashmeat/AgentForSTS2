@@ -14,3 +14,4 @@ pub mod mod_analyzer;
 pub mod planning;
 pub mod platform;
 pub mod project;
+pub mod settings;

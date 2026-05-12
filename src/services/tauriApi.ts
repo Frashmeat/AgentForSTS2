@@ -153,6 +153,50 @@ export function analyzeModProject(projectRoot: string): Promise<ModAnalysisRepor
   return invoke<ModAnalysisReport>("analyze_mod_project", { projectRoot });
 }
 
+// -------- Settings --------
+
+export interface LlmSnapshot {
+  provider: string;
+  model: string;
+  baseUrl: string;
+  apiKeyMasked: string;
+  apiKeyConfigured: boolean;
+}
+
+export interface ImageGenSnapshot {
+  provider: string;
+  model: string;
+  baseUrl: string;
+  size: string;
+  apiKeyMasked: string;
+  apiKeyConfigured: boolean;
+}
+
+export interface RuntimeSnapshot {
+  host: string;
+  port: number;
+  mountFrontend: boolean;
+  requiresDatabase: boolean;
+}
+
+export interface SettingsSnapshot {
+  configPath: string | null;
+  configLoaded: boolean;
+  configErrors: string[];
+  llm: LlmSnapshot;
+  imageGen: ImageGenSnapshot;
+  runtimeWorkstation: RuntimeSnapshot;
+  runtimeWeb: RuntimeSnapshot;
+}
+
+export function getSettingsSnapshot(): Promise<SettingsSnapshot> {
+  return invoke<SettingsSnapshot>("get_settings_snapshot");
+}
+
+export function openConfigInEditor(): Promise<string> {
+  return invoke<string>("open_config_in_editor");
+}
+
 // -------- Image proc prewarm --------
 
 export type PrewarmStatus =

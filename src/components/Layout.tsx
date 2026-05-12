@@ -8,6 +8,7 @@ const NAV_LINKS = [
   { to: "/editor", label: "Mod Editor" },
   { to: "/batch", label: "Batch Generate" },
   { to: "/log", label: "Log Analysis" },
+  { to: "/settings", label: "Settings" },
 ];
 
 export function Layout() {

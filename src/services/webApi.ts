@@ -83,6 +83,12 @@ export function imageProcStatus(): Promise<{ state: "idle" }> {
   // Web 模式不跑 ML prewarm，永远 Idle。
   return Promise.resolve({ state: "idle" });
 }
+export function getSettingsSnapshot(): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("getSettingsSnapshot"));
+}
+export function openConfigInEditor(): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("openConfigInEditor"));
+}
 export function planArtifactSave(_status: unknown): Promise<never> {
   return Promise.resolve().then(() => desktopOnly("planArtifactSave"));
 }
