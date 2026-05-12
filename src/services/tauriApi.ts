@@ -17,6 +17,10 @@ export interface ReadinessFlags {
   llmConfigured: boolean;
   imageGenConfigured: boolean;
   activeProjectOpen: boolean;
+  /// ML rembg 预热是否就绪（feature ml-rembg + 模型加载成功）
+  imageProcReady: boolean;
+  /// 后台任务 worker 是否在跑（Stage 3.4 Web 轨上线前 desktop 始终为 true）
+  queueWorkerReady: boolean;
 }
 
 export interface HealthReport {
@@ -147,6 +151,18 @@ export interface ModAnalysisReport {
 
 export function analyzeModProject(projectRoot: string): Promise<ModAnalysisReport> {
   return invoke<ModAnalysisReport>("analyze_mod_project", { projectRoot });
+}
+
+// -------- Image proc prewarm --------
+
+export type PrewarmStatus =
+  | { state: "idle" }
+  | { state: "loading"; message: string }
+  | { state: "ready"; model: string }
+  | { state: "failed"; message: string };
+
+export function imageProcStatus(): Promise<PrewarmStatus> {
+  return invoke<PrewarmStatus>("image_proc_status");
 }
 
 // -------- Audit + PlanArtifact --------

@@ -100,6 +100,31 @@ export function HealthCard() {
                 </span>{" "}
                 工程文件夹已打开
               </li>
+              <li>
+                <span
+                  className={
+                    health.readiness.imageProcReady
+                      ? "text-emerald-600"
+                      : "text-muted"
+                  }
+                  title="cargo build --features ml-rembg 启用 + 模型加载成功"
+                >
+                  {health.readiness.imageProcReady ? "✓" : "○"}
+                </span>{" "}
+                ML 背景去除就绪（否则走启发式 fallback）
+              </li>
+              <li>
+                <span
+                  className={
+                    health.readiness.queueWorkerReady
+                      ? "text-emerald-600"
+                      : "text-muted"
+                  }
+                >
+                  {health.readiness.queueWorkerReady ? "✓" : "○"}
+                </span>{" "}
+                后台任务 worker
+              </li>
             </ul>
           </div>
         </>

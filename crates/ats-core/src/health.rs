@@ -26,6 +26,19 @@ pub struct ReadinessFlags {
     pub image_gen_configured: bool,
     /// 当前是否有 active project（仅 Tauri 端能填，Web 端永 false）
     pub active_project_open: bool,
+    /// ML 背景去除模型预热是否就绪（feature ml-rembg + 模型加载成功）。
+    /// 仅 Tauri 端可能为 true；feature off / web 端永 false。
+    #[serde(default)]
+    pub image_proc_ready: bool,
+    /// 后台 queue worker 是否在跑。当前 desktop 没有显式 worker（每个 submit
+    /// spawn 一个 tokio task），所以一直是 true；Stage 3.4 Web 轨 worker 上线后
+    /// 才有实际意义。
+    #[serde(default = "default_true")]
+    pub queue_worker_ready: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,23 +61,29 @@ pub fn report(role: Role, config: ConfigStatus) -> HealthReport {
         core_version: crate::version().to_string(),
         server_time: chrono::Utc::now(),
         config,
-        readiness: ReadinessFlags::default(),
+        readiness: ReadinessFlags {
+            queue_worker_ready: true,
+            ..ReadinessFlags::default()
+        },
     }
 }
 
-/// 扩展版：把 settings + active_project 状态填进 readiness。
+/// 扩展版：把 settings + active_project + ML prewarm 状态填进 readiness。
 #[must_use]
 pub fn report_full(
     role: Role,
     config: ConfigStatus,
     settings: &Settings,
     active_project_open: bool,
+    image_proc_ready: bool,
 ) -> HealthReport {
     let mut r = report(role, config);
     r.readiness = ReadinessFlags {
         llm_configured: !settings.llm.api_key.is_empty(),
         image_gen_configured: !settings.image_gen.api_key.is_empty(),
         active_project_open,
+        image_proc_ready,
+        queue_worker_ready: true,
     };
     r
 }

@@ -79,6 +79,10 @@ export function auditAppend(
 export function auditReadRecent(_limit: number): Promise<never[]> {
   return Promise.resolve([]);
 }
+export function imageProcStatus(): Promise<{ state: "idle" }> {
+  // Web 模式不跑 ML prewarm，永远 Idle。
+  return Promise.resolve({ state: "idle" });
+}
 export function planArtifactSave(_status: unknown): Promise<never> {
   return Promise.resolve().then(() => desktopOnly("planArtifactSave"));
 }

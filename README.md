@@ -182,13 +182,41 @@ Q1 决议：桌面端无 DB，每个 mod 项目是自包含目录：
 
 未来启用签名时填 `src-tauri/tauri.conf.json` 的 `bundle.windows.certificateThumbprint` 和 `bundle.macOS.signingIdentity`（当前占位字段 `_signing_help` 注释）。
 
+## 启用 ML 背景去除（可选 feature）
+
+启发式 `SimpleBgRemover` 默认走纯白背景；要让深色 / 复杂背景也能正确出 alpha，
+启用 `ml-rembg` feature 启用 u2netp + ort 推理：
+
+```powershell
+# 开发跑
+cargo run -p ats-web --features ml-rembg
+# 桌面打包
+cargo tauri build --features ml-rembg
+```
+
+- 首次启动会下载 ~5MB 的 `u2netp.onnx` 到 `%APPDATA%/AgentTheSpire/models/`
+  并做 SHA-256 校验。下载失败 / 网络断开自动回退到启发式（启发式永远 always-on）。
+- **Windows**：`onnxruntime.lib` 静态链接进 exe（验证：build script 输出
+  `cargo:rustc-link-lib=static=onnxruntime`）。运行时需要 `DirectML.dll`，
+  Win10 1903+ 已自带；Win Server LTSC / Win7/8 缺，从 pyke 缓存目录
+  `%LOCALAPPDATA%/ort.pyke.io/dfbin/.../onnxruntime/lib/DirectML.dll` 拷到
+  exe 旁即可。
+- **macOS / Linux**：当前 ort 2.0 走动态链接 `libonnxruntime.{dylib,so}`，build
+  完后用 `otool -L` / `ldd` 看下产物，必要时把 lib 放进 bundle 资源（待真有用户跑
+  Mac/Linux 时再补具体步骤）。
+- 关闭 feature 后整个 ML 代码路径不编译，二进制无 ort / ndarray 开销。CI
+  默认 off，保持构建轻量。
+- 实时状态在 UI 的 `AuditCard` 上有 chip：Loading / Ready / Failed。
+
 ## 路线图剩余
 
 详见 [执行计划文档](../docs/03-方案/全栈重写/进行中/2026-05-11-Rust重写后续执行计划.md)。当前主要剩余项：
 
-- Stage 5 装配收口剩余子项（优雅停机 / image_proc prewarm 钩子）
+- ~~Stage 5 装配收口剩余子项~~ 大半已完成（audit auto-write + ctrl_c + image_proc
+  prewarm + ML rembg + health readiness 字段都在）
 - Stage 8 切换 main（rust 分支合并到 main；main 当前仍是 Python reference）
-- 真正的 ML rembg（ort + u2net.onnx；现是启发式）
+- 真实端到端 ML rembg 复杂背景效果验证（脚手架已就绪，等真生图测）
+- Mac/Linux 桌面构建 + onnxruntime 动态库 bundling（按需）
 - Web 轨（sqlx + auth + admin pages）—— 中转站方案确定后启动
 
 ## 工作流偏好

@@ -4,11 +4,49 @@
 // 在 completed/failed/cancelled stage 自动 refresh，让用户看到 job 终态写盘
 // 的 audit 立即出现，不用手点。
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/services/api";
-import type { AuditEntry, JobProgressEvent } from "@/services/tauriApi";
+import type {
+  AuditEntry,
+  JobProgressEvent,
+  PrewarmStatus,
+} from "@/services/tauriApi";
 
 const DEFAULT_LIMIT = 20;
+const KIND_OPTIONS = [
+  "all",
+  "job.submitted",
+  "job.started",
+  "job.completed",
+  "job.failed",
+  "job.cancelled",
+] as const;
+
+type KindFilter = (typeof KIND_OPTIONS)[number];
+
+function prewarmBadge(s: PrewarmStatus): { text: string; color: string } {
+  switch (s.state) {
+    case "idle":
+      return { text: "ML rembg: idle", color: "text-muted border-muted/30" };
+    case "loading":
+      return {
+        text: `ML rembg: loading — ${s.message}`,
+        color: "text-amber-600 border-amber-500/40 bg-amber-50/30",
+      };
+    case "ready":
+      return {
+        text: `ML rembg: ready (${s.model})`,
+        color: "text-emerald-600 border-emerald-500/40 bg-emerald-50/30",
+      };
+    case "failed":
+      return {
+        text: `ML rembg: fallback — ${s.message}`,
+        color: "text-muted border-muted/30",
+      };
+    default:
+      return { text: "ML rembg: ?", color: "text-muted border-muted/30" };
+  }
+}
 
 function kindColor(kind: string): string {
   switch (kind) {
@@ -41,7 +79,15 @@ export function AuditCard() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [limit, setLimit] = useState(DEFAULT_LIMIT);
+  const [kindFilter, setKindFilter] = useState<KindFilter>("all");
+  const [prewarm, setPrewarm] = useState<PrewarmStatus>({ state: "idle" });
   const unlistenRef = useRef<(() => void) | null>(null);
+
+  const visibleEntries = useMemo(() => {
+    if (!entries) return null;
+    if (kindFilter === "all") return entries;
+    return entries.filter((e) => e.kind === kindFilter);
+  }, [entries, kindFilter]);
 
   async function refresh() {
     setBusy(true);
@@ -57,6 +103,30 @@ export function AuditCard() {
       setBusy(false);
     }
   }
+
+  // Prewarm 状态轮询：每 2s 拉一次，直到 ready/failed 锁定后停。
+  useEffect(() => {
+    if (!__IS_TAURI__) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const tick = async () => {
+      try {
+        const s = (await api.imageProcStatus()) as PrewarmStatus;
+        if (stopped) return;
+        setPrewarm(s);
+        if (s.state === "loading" || s.state === "idle") {
+          timer = setTimeout(() => void tick(), 2000);
+        }
+      } catch {
+        // 静默；命令不存在或 app 还没装好都不当 fatal
+      }
+    };
+    void tick();
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
 
   useEffect(() => {
     if (!__IS_TAURI__) return;
@@ -94,11 +164,33 @@ export function AuditCard() {
     );
   }
 
+  const badge = prewarmBadge(prewarm);
+
   return (
     <section className="rounded border border-muted/30 p-4">
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
         <h2 className="text-lg font-medium">Audit · 最近事件</h2>
-        <div className="flex items-center gap-2 text-sm">
+        <div className="flex items-center gap-2 text-sm flex-wrap">
+          <span
+            className={`text-xs px-2 py-0.5 rounded border ${badge.color}`}
+            title="ML 背景去除模型预热状态"
+          >
+            {badge.text}
+          </span>
+          <label className="flex items-center gap-1 text-xs text-muted">
+            kind
+            <select
+              value={kindFilter}
+              onChange={(e) => setKindFilter(e.target.value as KindFilter)}
+              className="px-1 py-0.5 rounded border border-muted/30 bg-transparent"
+            >
+              {KIND_OPTIONS.map((k) => (
+                <option key={k} value={k}>
+                  {k}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="flex items-center gap-1 text-xs text-muted">
             limit
             <select
@@ -134,10 +226,18 @@ export function AuditCard() {
           还没有 audit 事件。提交一个 job 后这里会自动出现 submitted/started/completed/failed。
         </p>
       )}
+      {visibleEntries !== null &&
+        entries !== null &&
+        entries.length > 0 &&
+        visibleEntries.length === 0 && (
+          <p className="text-muted text-sm">
+            当前 filter 没有匹配事件（kind={kindFilter}）。
+          </p>
+        )}
 
-      {entries !== null && entries.length > 0 && (
+      {visibleEntries !== null && visibleEntries.length > 0 && (
         <ul className="space-y-1 text-xs font-mono max-h-72 overflow-auto">
-          {entries.map((e, i) => (
+          {visibleEntries.map((e, i) => (
             <li
               key={`${e.timestamp}-${i}`}
               className="grid grid-cols-[80px_140px_1fr] gap-2 items-baseline border-b border-muted/10 py-0.5"
