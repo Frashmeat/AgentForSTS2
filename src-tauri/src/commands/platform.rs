@@ -6,15 +6,16 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use ats_core::audit::{AuditSinkArc, FileAuditSink};
 use ats_core::image_gen::{ImageGenClient, build_from_config as build_image_gen};
 use ats_core::knowledge::{BaselibSource, GitHubBaselibSource, KnowledgePaths};
 use ats_core::llm::{LlmClient, build_from_config};
 use ats_core::platform::{
-    FileJobRepository, Job, JobApplicationService, JobId, JobSummary, ProgressEvent, ProgressSink,
-    SubmitAssetGenerateRequest, SubmitBatchCustomCodeRequest, SubmitBuildProjectRequest,
-    SubmitCodeGenerateRequest, SubmitJobAck, SubmitKnowledgeRefreshRequest,
-    SubmitLogAnalysisRequest, SubmitPackageProjectRequest, SubmitSingleAssetPlanRequest,
-    SubmitTextGenerateRequest,
+    AuditedJobRepository, FileJobRepository, Job, JobApplicationService, JobId, JobRepository,
+    JobSummary, ProgressEvent, ProgressSink, SubmitAssetGenerateRequest,
+    SubmitBatchCustomCodeRequest, SubmitBuildProjectRequest, SubmitCodeGenerateRequest,
+    SubmitJobAck, SubmitKnowledgeRefreshRequest, SubmitLogAnalysisRequest,
+    SubmitPackageProjectRequest, SubmitSingleAssetPlanRequest, SubmitTextGenerateRequest,
 };
 use async_trait::async_trait;
 use tauri::{AppHandle, Emitter, State};
@@ -243,7 +244,7 @@ fn build_service(
     config: &State<'_, AppConfig>,
     active: &State<'_, ActiveProject>,
 ) -> Result<JobApplicationService, String> {
-    let history_dir = {
+    let (history_dir, project_root) = {
         let guard = active
             .0
             .lock()
@@ -251,9 +252,13 @@ fn build_service(
         let project = guard
             .as_ref()
             .ok_or_else(|| "no active project — open or create one first".to_string())?;
-        project.history_dir()
+        (project.history_dir(), project.path().to_path_buf())
     };
-    let repo = Arc::new(FileJobRepository::new(history_dir));
+    let base_repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history_dir));
+    // 自动写 audit.log 到 <project>/.ats/audit.log。Sink 内部 spawn_blocking +
+    // eprintln 兜底，写失败不会影响业务路径。
+    let audit_sink: AuditSinkArc = Arc::new(FileAuditSink::new(project_root));
+    let repo: Arc<dyn JobRepository> = Arc::new(AuditedJobRepository::new(base_repo, audit_sink));
     let llm = build_llm_client(config)?;
     Ok(JobApplicationService::new(repo, llm))
 }

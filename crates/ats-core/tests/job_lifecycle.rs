@@ -9,6 +9,7 @@
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use ats_core::audit::{AuditSinkArc, FileAuditSink, read_recent};
 use ats_core::codegen::CustomCodegenRequest;
 use ats_core::knowledge::KnowledgePaths;
 use ats_core::llm::{
@@ -16,8 +17,8 @@ use ats_core::llm::{
     StreamEvent, Usage,
 };
 use ats_core::platform::{
-    FileJobRepository, JobApplicationService, JobId, JobRepository, JobStatus, NoopProgressSink,
-    ProgressSink, SubmitCodeGenerateRequest, SubmitTextGenerateRequest,
+    AuditedJobRepository, FileJobRepository, JobApplicationService, JobId, JobRepository,
+    JobStatus, NoopProgressSink, ProgressSink, SubmitCodeGenerateRequest, SubmitTextGenerateRequest,
 };
 use async_trait::async_trait;
 use futures_util::stream;
@@ -191,6 +192,63 @@ async fn cancel_pending_job_marks_cancelled() {
     // 二次 cancel 应该报 Terminal（已经是终态）
     let err = service.cancel(&id).await.unwrap_err();
     assert!(err.to_string().to_lowercase().contains("terminal"));
+}
+
+/// 端到端：text_generate 跑完后 `.ats/audit.log` 含 submitted + started + completed
+/// 三条 JSONL 记录。验证 AuditedJobRepository 通过 FileAuditSink 真把 audit 落盘。
+#[tokio::test]
+async fn text_generate_writes_audit_log_lifecycle() {
+    let td = tempfile::TempDir::new().unwrap();
+    let project_root = td.path().to_path_buf();
+    let history = project_root.join("history");
+    std::fs::create_dir_all(&history).unwrap();
+    std::fs::create_dir_all(project_root.join(".ats")).unwrap();
+
+    let base_repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
+    let audit: AuditSinkArc = Arc::new(FileAuditSink::new(project_root.clone()));
+    let repo: Arc<dyn JobRepository> =
+        Arc::new(AuditedJobRepository::new(base_repo, audit));
+    let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
+        events: Mutex::new(ok_text_events()),
+    });
+    let service = JobApplicationService::new(repo, llm);
+    let sink: Arc<dyn ProgressSink> = Arc::new(NoopProgressSink);
+
+    let id = service
+        .submit_text_generate(
+            SubmitTextGenerateRequest {
+                prompt: "audit lifecycle smoke".into(),
+                ..Default::default()
+            },
+            sink,
+        )
+        .await
+        .unwrap();
+    wait_terminal(&service, &id).await;
+
+    // FileAuditSink 通过 spawn_blocking 写盘，可能在 wait_terminal 返回后才结束
+    // —— 给 50ms 让最后一条 audit 落地。
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let entries = read_recent(&project_root, 20).expect("read audit");
+    // read_recent 倒序：最新在前
+    let kinds: Vec<&str> = entries.iter().map(|e| e.kind.as_str()).collect();
+    assert!(
+        kinds.contains(&"job.submitted"),
+        "audit missing submitted; kinds = {kinds:?}"
+    );
+    assert!(
+        kinds.contains(&"job.started"),
+        "audit missing started; kinds = {kinds:?}"
+    );
+    assert!(
+        kinds.contains(&"job.completed"),
+        "audit missing completed; kinds = {kinds:?}"
+    );
+    // ref_id 都应该指向同一个 job id
+    for e in &entries {
+        assert_eq!(e.ref_id.as_deref(), Some(id.0.as_str()));
+    }
 }
 
 #[tokio::test]

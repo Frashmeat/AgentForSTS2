@@ -2,11 +2,19 @@
 //!
 //! 用途：用户排查"上次 LLM 跑了什么 / 哪个任务失败 / 凭据用哪个 model" 等历史问题。
 //! 单条记录是 newline-delimited JSON（每行一个 AuditEntry），方便 grep / 增量追加。
+//!
+//! 抽象层：`AuditSink` trait + 三个实现：
+//! - `FileAuditSink`：按工程目录写 `.ats/audit.log`（生产）
+//! - `NoopAuditSink`：忽略所有事件（测试 / 没有 active project 的场景）
+//! - 自动接线在 `AuditedJobRepository` —— 任意 JobRepository 都可被包一层
+//!   自动 emit 状态迁移事件，handlers 完全无感知。
 
 use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -113,6 +121,59 @@ pub fn read_recent(project_root: &Path, limit: usize) -> Result<Vec<AuditEntry>,
 pub fn audit_log_path(project_root: &Path) -> PathBuf {
     project_root.join(".ats").join("audit.log")
 }
+
+/// 异步审计写入抽象。生产用 [`FileAuditSink`]；测试 / 无 project 场景用
+/// [`NoopAuditSink`]；observer 装配通过 [`AuditedJobRepository`] 在 JobRepository
+/// 状态迁移点自动 emit，handlers 不感知。
+#[async_trait]
+pub trait AuditSink: Send + Sync {
+    async fn emit(&self, entry: AuditEntry);
+}
+
+/// 不做任何事的 sink。常用于 unit test 或没有 active project 的情境。
+#[derive(Debug, Default, Clone, Copy)]
+pub struct NoopAuditSink;
+
+#[async_trait]
+impl AuditSink for NoopAuditSink {
+    async fn emit(&self, _entry: AuditEntry) {}
+}
+
+/// 把 entry 追加到 `<project_root>/.ats/audit.log`。
+/// I/O 通过 spawn_blocking 包住——append 是同步系统调用，避免阻塞 tokio 调度。
+/// 写失败只 eprintln（审计不是关键路径，不能影响业务任务的成功/失败判定）。
+#[derive(Debug, Clone)]
+pub struct FileAuditSink {
+    project_root: PathBuf,
+}
+
+impl FileAuditSink {
+    #[must_use]
+    pub fn new(project_root: PathBuf) -> Self {
+        Self { project_root }
+    }
+
+    #[must_use]
+    pub fn project_root(&self) -> &Path {
+        &self.project_root
+    }
+}
+
+#[async_trait]
+impl AuditSink for FileAuditSink {
+    async fn emit(&self, entry: AuditEntry) {
+        let root = self.project_root.clone();
+        let result = tokio::task::spawn_blocking(move || append_entry(&root, &entry)).await;
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => eprintln!("audit emit failed: {err}"),
+            Err(join) => eprintln!("audit emit join error: {join}"),
+        }
+    }
+}
+
+/// 类型别名，统一 trait object Arc 写法（替代到处写 `Arc<dyn AuditSink>`）。
+pub type AuditSinkArc = Arc<dyn AuditSink>;
 
 #[cfg(test)]
 mod tests {

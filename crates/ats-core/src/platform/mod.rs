@@ -34,4 +34,4 @@ pub use contracts::{
 pub use domain::{
     Job, JobError, JobId, JobKind, JobProgress, JobRepository, JobResult, JobStatus, JobSummary,
 };
-pub use infra::FileJobRepository;
+pub use infra::{AuditedJobRepository, FileJobRepository};
