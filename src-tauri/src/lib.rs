@@ -3,7 +3,7 @@
 mod commands;
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use ats_core::config::{ConfigStatus, Settings};
 use ats_core::health::Role;
@@ -12,10 +12,59 @@ use ats_core::project::AppDataPaths;
 use crate::commands::image_proc_state::{ImageProcState, prewarm};
 use crate::commands::project::ActiveProject;
 
-/// Tauri 同进程内单一配置快照，通过 `app.manage()` 注入，由 command 通过 `tauri::State` 读取。
+/// Tauri 同进程内可变配置：包裹 RwLock 让 `save_settings_patch` command 能在用户
+/// 改完表单后热替换内存里的 Settings，不重启 app。读侧用 `snapshot()` 拿
+/// clone，避免持锁跨 await。
 pub struct AppConfig {
+    inner: RwLock<AppConfigInner>,
+}
+
+pub struct AppConfigInner {
     pub settings: Settings,
     pub status: ConfigStatus,
+}
+
+impl AppConfig {
+    #[must_use]
+    pub fn new(settings: Settings, status: ConfigStatus) -> Self {
+        Self {
+            inner: RwLock::new(AppConfigInner { settings, status }),
+        }
+    }
+
+    /// 克隆当前 settings + status。clone 廉价（Settings 只是嵌套小结构体），
+    /// 锁立刻释放，避免 await 时持锁。
+    pub fn snapshot(&self) -> (Settings, ConfigStatus) {
+        let g = self.inner.read().expect("AppConfig RwLock poisoned");
+        (g.settings.clone(), g.status.clone())
+    }
+
+    /// 仅读 settings 的便捷快捷。
+    pub fn settings_snapshot(&self) -> Settings {
+        self.inner
+            .read()
+            .expect("AppConfig RwLock poisoned")
+            .settings
+            .clone()
+    }
+
+    /// 仅读 status 的便捷快捷。
+    pub fn status_snapshot(&self) -> ConfigStatus {
+        self.inner
+            .read()
+            .expect("AppConfig RwLock poisoned")
+            .status
+            .clone()
+    }
+
+    /// 用新的 Settings 替换。validate 由调用方做（save_settings_patch 命令）。
+    /// status 不动 —— path / file_present / loaded 由文件本身决定，与内存值无关。
+    pub fn replace_settings(&self, new: Settings) {
+        self.inner
+            .write()
+            .expect("AppConfig RwLock poisoned")
+            .settings = new;
+    }
 }
 
 /// 路径快照，提供给 project commands 读 recent_projects.json 等。
@@ -73,7 +122,7 @@ pub fn run() {
             });
             Ok(())
         })
-        .manage(AppConfig { settings, status })
+        .manage(AppConfig::new(settings, status))
         .manage(AppPaths { data: app_data })
         .manage(ActiveProject::new())
         .manage(image_proc_state)
@@ -119,6 +168,7 @@ pub fn run() {
             commands::image_proc_state::image_proc_status,
             commands::settings::get_settings_snapshot,
             commands::settings::open_config_in_editor,
+            commands::settings::save_settings_patch,
             commands::platform::get_job,
             commands::platform::list_jobs,
             commands::platform::cancel_job,

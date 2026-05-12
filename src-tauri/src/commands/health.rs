@@ -24,10 +24,11 @@ pub fn get_health(
         .map(|g| g.is_some())
         .unwrap_or(false);
     let image_proc_ready = matches!(image_proc.status_snapshot(), PrewarmStatus::Ready { .. });
+    let (settings, status) = config.snapshot();
     ats_core::health::report_full(
         Role::Workstation,
-        config.status.clone(),
-        &config.settings,
+        status,
+        &settings,
         active_open,
         image_proc_ready,
     )

@@ -3,6 +3,7 @@
 import { AuditCard } from "@/components/AuditCard";
 import { CapabilitiesCard } from "@/components/CapabilitiesCard";
 import { CodegenCard } from "@/components/CodegenCard";
+import { FirstRunBanner } from "@/components/FirstRunBanner";
 import { HealthCard } from "@/components/HealthCard";
 import { JobsCard } from "@/components/JobsCard";
 import { KnowledgeCard } from "@/components/KnowledgeCard";
@@ -20,6 +21,8 @@ export function DashboardPage() {
           Runtime: {__IS_TAURI__ ? "Tauri desktop (workstation)" : "Web browser"}
         </p>
       </header>
+
+      <FirstRunBanner />
 
       <HealthCard />
       <CapabilitiesCard />

@@ -89,6 +89,9 @@ export function getSettingsSnapshot(): Promise<never> {
 export function openConfigInEditor(): Promise<never> {
   return Promise.resolve().then(() => desktopOnly("openConfigInEditor"));
 }
+export function saveSettingsPatch(_patch: unknown): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("saveSettingsPatch"));
+}
 export function planArtifactSave(_status: unknown): Promise<never> {
   return Promise.resolve().then(() => desktopOnly("planArtifactSave"));
 }

@@ -12,13 +12,13 @@ use crate::AppConfig;
 
 #[tauri::command]
 pub fn get_knowledge_status(config: State<'_, AppConfig>) -> KnowledgeStatus {
-    let paths = KnowledgePaths::from_runtime_dir(&config.status.runtime_dir());
+    let paths = KnowledgePaths::from_runtime_dir(&config.status_snapshot().runtime_dir());
     get_status(&paths)
 }
 
 #[tauri::command]
 pub fn check_knowledge_status(config: State<'_, AppConfig>) -> KnowledgeStatus {
-    let paths = KnowledgePaths::from_runtime_dir(&config.status.runtime_dir());
+    let paths = KnowledgePaths::from_runtime_dir(&config.status_snapshot().runtime_dir());
     get_status(&paths)
 }
 
@@ -29,7 +29,7 @@ pub async fn export_knowledge_pack(
     output_path: String,
     machine_hint: Option<String>,
 ) -> Result<ExportStats, String> {
-    let paths = KnowledgePaths::from_runtime_dir(&config.status.runtime_dir());
+    let paths = KnowledgePaths::from_runtime_dir(&config.status_snapshot().runtime_dir());
     let out = PathBuf::from(output_path);
     tokio::task::spawn_blocking(move || pack::export(&paths, &out, machine_hint))
         .await
@@ -44,7 +44,7 @@ pub async fn import_knowledge_pack(
     input_path: String,
     overwrite: bool,
 ) -> Result<ImportStats, String> {
-    let paths = KnowledgePaths::from_runtime_dir(&config.status.runtime_dir());
+    let paths = KnowledgePaths::from_runtime_dir(&config.status_snapshot().runtime_dir());
     let input = PathBuf::from(input_path);
     tokio::task::spawn_blocking(move || pack::import(&paths, &input, overwrite))
         .await

@@ -13,7 +13,7 @@ fn assemble<F>(config: &State<'_, AppConfig>, f: F) -> Result<String, String>
 where
     F: FnOnce(&PromptAssembler, &KnowledgePaths) -> Result<String, ats_core::prompting::PromptError>,
 {
-    let paths = KnowledgePaths::from_runtime_dir(&config.status.runtime_dir());
+    let paths = KnowledgePaths::from_runtime_dir(&config.status_snapshot().runtime_dir());
     let assembler = PromptAssembler::built_in();
     f(&assembler, &paths).map_err(|e| e.to_string())
 }

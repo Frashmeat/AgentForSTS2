@@ -87,7 +87,7 @@ pub async fn submit_code_generate_job(
     let service = build_service(&config, &active)?;
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
     let artifacts_dir = active_artifacts_dir(&active)?;
-    let knowledge_paths = KnowledgePaths::from_runtime_dir(&config.status.runtime_dir());
+    let knowledge_paths = KnowledgePaths::from_runtime_dir(&config.status_snapshot().runtime_dir());
     let job_id = service
         .submit_code_generate(request, knowledge_paths, artifacts_dir, sink)
         .await
@@ -106,9 +106,10 @@ pub async fn submit_asset_generate_job(
     let service = build_service(&config, &active)?;
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
     let artifacts_dir = active_artifacts_dir(&active)?;
-    let knowledge_paths = KnowledgePaths::from_runtime_dir(&config.status.runtime_dir());
+    let knowledge_paths = KnowledgePaths::from_runtime_dir(&config.status_snapshot().runtime_dir());
+    let settings = config.settings_snapshot();
     let image_gen: Arc<dyn ImageGenClient> =
-        build_image_gen(&config.settings.image_gen).map_err(|e| e.to_string())?;
+        build_image_gen(&settings.image_gen).map_err(|e| e.to_string())?;
     // BgRemoverChain：prewarm 阶段装好的 ML primary（feature on 且加载成功），
     // 没装则只用启发式 fallback。
     let primary = image_proc_state.primary();
@@ -137,7 +138,7 @@ pub async fn submit_knowledge_refresh_job(
 ) -> Result<SubmitJobAck, String> {
     let service = build_service(&config, &active)?;
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
-    let knowledge_paths = KnowledgePaths::from_runtime_dir(&config.status.runtime_dir());
+    let knowledge_paths = KnowledgePaths::from_runtime_dir(&config.status_snapshot().runtime_dir());
     let baselib_source: Arc<dyn BaselibSource> = Arc::new(
         GitHubBaselibSource::default_alchyr_with_default_client()
             .map_err(|e| format!("init baselib source: {e}"))?,
@@ -176,7 +177,7 @@ pub async fn submit_batch_custom_code_job(
     let service = build_service(&config, &active)?;
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
     let artifacts_dir = active_artifacts_dir(&active)?;
-    let knowledge_paths = KnowledgePaths::from_runtime_dir(&config.status.runtime_dir());
+    let knowledge_paths = KnowledgePaths::from_runtime_dir(&config.status_snapshot().runtime_dir());
     let job_id = service
         .submit_batch_custom_code(request, knowledge_paths, artifacts_dir, sink)
         .await
@@ -278,7 +279,8 @@ fn build_service(
 }
 
 fn build_llm_client(config: &State<'_, AppConfig>) -> Result<Arc<dyn LlmClient>, String> {
-    build_from_config(&config.settings.llm).map_err(|e| e.to_string())
+    let settings = config.settings_snapshot();
+    build_from_config(&settings.llm).map_err(|e| e.to_string())
 }
 
 struct TauriProgressSink {

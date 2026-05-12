@@ -9,7 +9,7 @@
 use std::path::PathBuf;
 
 use ats_core::config::Settings;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 use tauri_plugin_shell::ShellExt;
 
@@ -61,11 +61,11 @@ pub struct RuntimeSnapshot {
 pub fn get_settings_snapshot(
     config: tauri::State<'_, AppConfig>,
 ) -> SettingsSnapshot {
-    let s: &Settings = &config.settings;
+    let (s, status) = config.snapshot();
     SettingsSnapshot {
-        config_path: config.status.path.clone(),
-        config_loaded: config.status.loaded,
-        config_errors: config.status.errors.clone(),
+        config_path: status.path.clone(),
+        config_loaded: status.loaded,
+        config_errors: status.errors.clone(),
         llm: LlmSnapshot {
             provider: s.llm.provider.clone(),
             model: s.llm.model.clone(),
@@ -86,13 +86,110 @@ pub fn get_settings_snapshot(
     }
 }
 
+/// 表单提交的部分配置补丁：每个字段 None = 不改。
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default, rename_all = "snake_case")]
+pub struct SettingsPatch {
+    pub llm: Option<LlmPatch>,
+    pub image_gen: Option<ImageGenPatch>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default, rename_all = "snake_case")]
+pub struct LlmPatch {
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub base_url: Option<String>,
+    /// 用户不填 = 不改；空字符串 = 清空。前端用 `null` 表示"不改"。
+    pub api_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default, rename_all = "snake_case")]
+pub struct ImageGenPatch {
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub base_url: Option<String>,
+    pub size: Option<String>,
+    pub api_key: Option<String>,
+}
+
+/// 把 patch 合并进当前内存里的 settings + 写回 config.json，然后热替换。
+///
+/// 设计：
+/// - 文件写入用 tempfile + rename 保原子
+/// - 写盘失败 → 不动内存（让用户重试），返回 Err
+/// - 写盘成功 → AppConfig::replace_settings 让下一次 build_client 拿到新值
+#[tauri::command]
+pub fn save_settings_patch(
+    config: tauri::State<'_, AppConfig>,
+    patch: SettingsPatch,
+) -> Result<SettingsSnapshot, String> {
+    let mut new_settings = config.settings_snapshot();
+    if let Some(p) = patch.llm {
+        if let Some(v) = p.provider {
+            new_settings.llm.provider = v;
+        }
+        if let Some(v) = p.model {
+            new_settings.llm.model = v;
+        }
+        if let Some(v) = p.base_url {
+            new_settings.llm.base_url = v;
+        }
+        if let Some(v) = p.api_key {
+            new_settings.llm.api_key = v;
+        }
+    }
+    if let Some(p) = patch.image_gen {
+        if let Some(v) = p.provider {
+            new_settings.image_gen.provider = v;
+        }
+        if let Some(v) = p.model {
+            new_settings.image_gen.model = v;
+        }
+        if let Some(v) = p.base_url {
+            new_settings.image_gen.base_url = v;
+        }
+        if let Some(v) = p.size {
+            new_settings.image_gen.size = v;
+        }
+        if let Some(v) = p.api_key {
+            new_settings.image_gen.api_key = v;
+        }
+    }
+
+    let status = config.status_snapshot();
+    let path = status
+        .path
+        .clone()
+        .ok_or_else(|| "no config path resolved — can't save".to_string())?;
+    write_settings_atomic(&PathBuf::from(&path), &new_settings)
+        .map_err(|e| format!("write config: {e}"))?;
+    config.replace_settings(new_settings);
+    Ok(get_settings_snapshot(config))
+}
+
+fn write_settings_atomic(path: &std::path::Path, settings: &Settings) -> std::io::Result<()> {
+    let body = serde_json::to_vec_pretty(settings)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    let tmp = path.with_extension("json.tmp");
+    {
+        use std::io::Write;
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(&body)?;
+        f.sync_all().ok();
+    }
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn open_config_in_editor(
     app: AppHandle,
     config: tauri::State<'_, AppConfig>,
 ) -> Result<String, String> {
     let path = config
-        .status
+        .status_snapshot()
         .path
         .clone()
         .ok_or_else(|| "no config path resolved — load 失败时不能打开".to_string())?;

@@ -19,7 +19,8 @@ use crate::AppConfig;
 const STREAM_EVENT: &str = "llm-stream";
 
 fn build_client(config: &AppConfig) -> Result<Arc<dyn LlmClient>, String> {
-    build_from_config(&config.settings.llm).map_err(|e| e.to_string())
+    let settings = config.settings_snapshot();
+    build_from_config(&settings.llm).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

@@ -197,6 +197,30 @@ export function openConfigInEditor(): Promise<string> {
   return invoke<string>("open_config_in_editor");
 }
 
+export interface LlmPatch {
+  provider?: string | null;
+  model?: string | null;
+  base_url?: string | null;
+  api_key?: string | null;
+}
+
+export interface ImageGenPatch {
+  provider?: string | null;
+  model?: string | null;
+  base_url?: string | null;
+  size?: string | null;
+  api_key?: string | null;
+}
+
+export interface SettingsPatch {
+  llm?: LlmPatch | null;
+  image_gen?: ImageGenPatch | null;
+}
+
+export function saveSettingsPatch(patch: SettingsPatch): Promise<SettingsSnapshot> {
+  return invoke<SettingsSnapshot>("save_settings_patch", { patch });
+}
+
 // -------- Image proc prewarm --------
 
 export type PrewarmStatus =
