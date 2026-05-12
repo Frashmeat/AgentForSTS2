@@ -189,42 +189,101 @@ export function ProjectCard() {
         </div>
       </details>
 
-      {recents.length > 0 && (
-        <div>
-          <p className="text-sm font-medium mb-2">Recent</p>
-          <ul className="space-y-1 text-sm">
-            {recents.map((r) => (
-              <li
-                key={r.path}
-                className="flex items-center justify-between border border-muted/20 rounded p-2 gap-2"
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="font-medium truncate">{r.name}</p>
-                  <p className="text-xs text-muted truncate">
-                    <code>{r.path}</code>
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => handleOpen(r.path)}
-                  disabled={busy}
-                  className="text-xs px-2 py-1 rounded border border-muted/40 hover:bg-muted/10 disabled:opacity-50"
-                >
-                  Open
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleForget(r.path)}
-                  disabled={busy}
-                  className="text-xs px-2 py-1 rounded border border-muted/20 text-muted hover:bg-muted/10 disabled:opacity-50"
-                >
-                  Forget
-                </button>
-              </li>
-            ))}
-          </ul>
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-sm font-medium">Recent ({recents.length})</p>
+          {recents.length > 0 && (
+            <button
+              type="button"
+              onClick={() => void refresh()}
+              disabled={busy}
+              className="text-xs px-2 py-0.5 rounded border border-muted/40 hover:bg-muted/10 disabled:opacity-50"
+            >
+              Refresh
+            </button>
+          )}
         </div>
-      )}
+        {recents.length === 0 ? (
+          <p className="text-xs text-muted">
+            还没打开过任何工程。上面"Create" 建一个新工程，或 "Open existing
+            project" 输入既有工程路径打开。
+          </p>
+        ) : (
+          <ul className="space-y-1 text-sm">
+            {recents.map((r) => {
+              const isActive = current?.path === r.path;
+              return (
+                <li
+                  key={r.path}
+                  className={`flex items-center justify-between border rounded p-2 gap-2 ${
+                    isActive
+                      ? "border-emerald-500/40 bg-emerald-50/20"
+                      : "border-muted/20 hover:bg-muted/5"
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => !isActive && handleOpen(r.path)}
+                    disabled={busy || isActive}
+                    className="min-w-0 flex-1 text-left disabled:cursor-default"
+                  >
+                    <p className="font-medium truncate flex items-center gap-2">
+                      {r.name}
+                      {isActive && (
+                        <span className="text-xs text-emerald-600">(active)</span>
+                      )}
+                    </p>
+                    <p className="text-xs text-muted truncate">
+                      <code>{r.path}</code>
+                    </p>
+                    <p className="text-xs text-muted">
+                      Last opened:{" "}
+                      <span className="font-mono">
+                        {fmtRelative(r.last_opened_at)}
+                      </span>
+                    </p>
+                  </button>
+                  {!isActive && (
+                    <button
+                      type="button"
+                      onClick={() => handleOpen(r.path)}
+                      disabled={busy}
+                      className="text-xs px-2 py-1 rounded border border-accent/60 text-accent hover:bg-accent/10 disabled:opacity-50"
+                    >
+                      Open
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => handleForget(r.path)}
+                    disabled={busy}
+                    className="text-xs px-2 py-1 rounded border border-muted/20 text-muted hover:bg-muted/10 disabled:opacity-50"
+                    title="从最近列表移除（不删除文件）"
+                  >
+                    Forget
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
     </section>
   );
+}
+
+/// 把 ISO 时间字串渲染为"x 分钟/小时/天前"，>30 天显示本地日期。
+function fmtRelative(iso: string): string {
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return iso;
+  const diffMs = Date.now() - t;
+  const sec = Math.floor(diffMs / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 30) return `${day}d ago`;
+  return new Date(t).toLocaleDateString();
 }
