@@ -1,5 +1,6 @@
 // Dashboard 主页：原来 App.tsx 里 stack 的所有 Card，保持原状但放进 router。
 
+import { AuditCard } from "@/components/AuditCard";
 import { CapabilitiesCard } from "@/components/CapabilitiesCard";
 import { CodegenCard } from "@/components/CodegenCard";
 import { HealthCard } from "@/components/HealthCard";
@@ -25,6 +26,7 @@ export function DashboardPage() {
       <ProjectCard />
       <SingleAssetWorkflowCard />
       <JobsCard />
+      <AuditCard />
       <KnowledgeCard />
       <PlanningCard />
       <CodegenCard />
