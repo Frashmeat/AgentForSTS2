@@ -1,2 +1,7 @@
 # Normalize EOL for all files that Git considers text files.
 * text=auto eol=lf
+
+# .sln 必须 CRLF + UTF-8 BOM —— include_dir! 编译期把字节嵌入 binary，
+# 用户 dotnet build 时 MSBuild 对头部格式很严格（曾因双 CR 报 MSB5010）。
+*.sln          -text
+*.DotSettings  -text

@@ -19,7 +19,9 @@ export function KnowledgeCard() {
 
   // Refresh state
   const [dllPath, setDllPath] = useState("");
-  const [includeBaselib, setIncludeBaselib] = useState(true);
+  // 默认关闭：baselib-fetch 走 GitHub API，国内网络经常卡住；
+  // 用户需要时勾上即可。
+  const [includeBaselib, setIncludeBaselib] = useState(false);
   const [force, setForce] = useState(false);
   const [refreshBusy, setRefreshBusy] = useState(false);
   const [refreshStage, setRefreshStage] = useState<string | null>(null);
@@ -244,13 +246,13 @@ export function KnowledgeCard() {
                 />
               </label>
               <div className="flex flex-wrap items-center gap-3 text-sm">
-                <label className="flex items-center gap-2">
+                <label className="flex items-center gap-2" title="勾上会从 GitHub 拉 BaseLib.dll —— 国内网络可能卡住">
                   <input
                     type="checkbox"
                     checked={includeBaselib}
                     onChange={(e) => setIncludeBaselib(e.target.checked)}
                   />
-                  <span>include_baselib</span>
+                  <span>include_baselib（需要访问 GitHub）</span>
                 </label>
                 <label className="flex items-center gap-2">
                   <input

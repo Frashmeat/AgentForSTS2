@@ -42,6 +42,19 @@ pub async fn run_package_project(
     }
 
     let output = resolve_output_path(&request);
+    if output.is_dir() {
+        finalize_with_error(
+            &repo,
+            &job_id,
+            &format!(
+                "output_path 指向已存在的目录: {} —— 应该传完整 .zip 文件路径，如 {}\\release.zip",
+                output.display(),
+                output.display()
+            ),
+        )
+        .await;
+        return;
+    }
     sink.emit(ProgressEvent {
         job_id: job_id.clone(),
         stage: "zipping".into(),
@@ -351,6 +364,41 @@ mod tests {
         let res = job.result.unwrap();
         assert_eq!(res["filesAdded"], 0);
         assert!(out.exists());
+    }
+
+    #[tokio::test]
+    async fn package_project_fails_when_output_path_is_existing_dir() {
+        // 用户在 UI 里把"输出 zip 路径"填成一个已存在的目录（如 E:\mods\output），
+        // Windows 下 File::create 会直接返回 os error 5（拒绝访问），错误信息很迷惑。
+        // 这里前置校验：明确告诉用户路径必须是 .zip 文件，而不是目录。
+        let td = tempfile::TempDir::new().unwrap();
+        let history = td.path().join("history");
+        std::fs::create_dir_all(&history).unwrap();
+        let source = td.path().join("artifacts");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("only.txt"), b"x").unwrap();
+
+        // 故意把 output_path 指向一个已存在的目录
+        let out_dir = td.path().join("existing-output-dir");
+        std::fs::create_dir_all(&out_dir).unwrap();
+
+        let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
+        let llm: Arc<dyn LlmClient> = Arc::new(DummyLlm);
+        let sink = Arc::new(super::super::common::NoopProgressSink);
+        let service = JobApplicationService::new(repo, llm);
+
+        let req = SubmitPackageProjectRequest {
+            source_dir: source,
+            output_path: Some(out_dir.clone()),
+            compression_level: None,
+        };
+        let id = service.submit_package_project(req, sink).await.unwrap();
+        wait_terminal(&service, &id).await;
+
+        let job = service.get(&id).await.unwrap();
+        assert_eq!(job.status, JobStatus::Failed);
+        let err = job.error.unwrap_or_default();
+        assert!(err.contains("已存在的目录"), "expected dir hint, got: {err}");
     }
 
     #[tokio::test]

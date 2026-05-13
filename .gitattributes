@@ -2,3 +2,9 @@
 *.sh         text eol=lf
 Dockerfile*  text eol=lf
 *.dockerfile text eol=lf
+
+# .sln 必须 CRLF + UTF-8 BOM —— include_dir! 在编译期把字节嵌入 template，
+# MSBuild 对头部格式很严格（曾因 git autocrlf 二次转换出 "EF BB BF 0D 0D 0A" 报 MSB5010）。
+# 标为 binary 防止任何换行转换。
+*.sln          -text
+*.DotSettings  -text
