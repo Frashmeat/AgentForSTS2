@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Badge, Button, Card, Field, Notice } from "@/components/ui";
 import { api } from "@/services/api";
 import type {
   PlanValidationResult,
@@ -53,69 +54,78 @@ export function PlanningCard() {
   }
 
   return (
-    <section className="rounded border border-muted/30 p-4">
-      <div className="flex items-center justify-between mb-2">
-        <h2 className="text-lg font-medium">Planning</h2>
-        <div className="flex items-center gap-2">
-          <select
-            value={strictness}
-            onChange={(e) => setStrictness(e.target.value as ReviewStrictness)}
-            className="text-sm px-2 py-1 rounded border border-muted/40 bg-transparent"
-          >
-            {STRICTNESS_OPTIONS.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={handleValidate}
-            disabled={running}
-            className="text-sm px-3 py-1 rounded border border-muted/40 hover:bg-muted/10 disabled:opacity-50"
-          >
+    <Card
+      eyebrow="planning · validator"
+      title="Planning"
+      actions={
+        <>
+          <Field label="strictness">
+            <select
+              value={strictness}
+              onChange={(e) => setStrictness(e.target.value as ReviewStrictness)}
+            >
+              {STRICTNESS_OPTIONS.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Button size="sm" onClick={handleValidate} disabled={running}>
             {running ? "Validating…" : "Validate"}
-          </button>
-        </div>
-      </div>
+          </Button>
+        </>
+      }
+    >
+      <Field label="plan JSON">
+        <textarea
+          value={planText}
+          onChange={(e) => setPlanText(e.target.value)}
+          rows={10}
+          spellCheck={false}
+          className="input-mono"
+        />
+      </Field>
 
-      <textarea
-        value={planText}
-        onChange={(e) => setPlanText(e.target.value)}
-        rows={10}
-        spellCheck={false}
-        className="w-full font-mono text-xs p-2 rounded border border-muted/30 bg-transparent"
-      />
-
-      {error && <p className="text-red-500 text-sm mt-2">Error: {error}</p>}
+      {error && <Notice variant="error" title={`Error: ${error}`} className="mt-3" />}
 
       {result && (
-        <div className="mt-3">
-          <p className="text-sm text-muted mb-2">
-            Strictness: <span className="font-mono">{result.strictness}</span> · Items:{" "}
-            {result.items.length}
+        <div className="mt-4">
+          <p
+            style={{ fontSize: "11.5px", color: "var(--ink-mute)" }}
+            className="mb-3"
+          >
+            strictness <code>{result.strictness}</code> · items {result.items.length}
           </p>
-          <ul className="space-y-1 text-sm">
+          <ul className="space-y-2">
             {result.items.map((it) => {
-              const color =
+              const variant =
                 it.status === "clear"
-                  ? "text-emerald-600"
+                  ? "ok"
                   : it.status === "needs_user_input"
-                    ? "text-amber-600"
-                    : "text-red-600";
+                    ? "warn"
+                    : "error";
               return (
                 <li
                   key={`${it.itemId}-${it.status}`}
-                  className="border border-muted/20 rounded p-2"
+                  className="p-2.5"
+                  style={{
+                    background: "var(--paper)",
+                    border: "1px solid var(--rule-soft)",
+                    borderRadius: "3px",
+                  }}
                 >
-                  <div>
-                    <code className="text-xs">{it.itemId || "<no-id>"}</code>
-                    <span className={`ml-2 text-xs font-medium ${color}`}>
-                      {it.status}
-                    </span>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <code style={{ fontSize: "11.5px" }}>
+                      {it.itemId || "<no-id>"}
+                    </code>
+                    <Badge variant={variant}>{it.status}</Badge>
                   </div>
                   {it.issues.length > 0 && (
-                    <ul className="text-xs text-red-600 mt-1 ml-3 list-disc">
+                    <ul
+                      className="mt-2 ml-3 list-disc space-y-0.5"
+                      style={{ color: "var(--accent-deep)", fontSize: "12px" }}
+                    >
                       {it.issues.map((iss, i) => (
                         <li key={i}>
                           [{iss.code}] {iss.message}
@@ -125,8 +135,11 @@ export function PlanningCard() {
                     </ul>
                   )}
                   {it.missingFields.length > 0 && (
-                    <p className="text-xs text-amber-700 mt-1 ml-3">
-                      Missing: {it.missingFields.join(", ")}
+                    <p
+                      className="mt-1 ml-3"
+                      style={{ fontSize: "11.5px", color: "var(--gold)" }}
+                    >
+                      missing: {it.missingFields.join(", ")}
                     </p>
                   )}
                 </li>
@@ -135,6 +148,6 @@ export function PlanningCard() {
           </ul>
         </div>
       )}
-    </section>
+    </Card>
   );
 }

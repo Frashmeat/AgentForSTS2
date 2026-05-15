@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { Badge, Button } from "@/components/ui";
 import { api } from "@/services/api";
 import type {
   Job,
@@ -18,12 +19,12 @@ import type {
   JobSummary,
 } from "@/services/tauriApi";
 
-const STATUS_COLOR: Record<JobStatus, string> = {
-  pending: "text-muted",
-  running: "text-accent",
-  completed: "text-emerald-600",
-  failed: "text-red-600",
-  cancelled: "text-amber-600",
+const STATUS_VARIANT: Record<JobStatus, "muted" | "running" | "ok" | "error" | "warn"> = {
+  pending: "muted",
+  running: "running",
+  completed: "ok",
+  failed: "error",
+  cancelled: "warn",
 };
 
 export interface JobsListHandle {
@@ -119,69 +120,88 @@ export const JobsList = forwardRef<JobsListHandle, Props>(function JobsList(
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <p className="text-sm font-medium">
-          Recent jobs ({list.length})
-        </p>
-        <button
-          type="button"
-          onClick={() => void refresh()}
-          className="text-xs px-2 py-0.5 rounded border border-muted/40 hover:bg-muted/10"
-        >
+        <h3 style={{ margin: 0 }}>Recent jobs ({list.length})</h3>
+        <Button size="sm" onClick={() => void refresh()}>
           Refresh
-        </button>
+        </Button>
       </div>
 
       {list.length === 0 ? (
-        <p className="text-muted text-sm">No jobs yet. Submit one above.</p>
+        <p style={{ color: "var(--ink-faint)", fontSize: "12.5px" }}>
+          No jobs yet. Submit one above.
+        </p>
       ) : (
-        <ul className="space-y-2 text-sm mb-4">
+        <ul className="space-y-2 mb-4">
           {list.map((j) => (
             <li
               key={j.id}
-              className={`border rounded p-2 flex items-center justify-between gap-2 ${
-                active?.id === j.id
-                  ? "border-accent/60 bg-accent/5"
-                  : "border-muted/20"
-              }`}
+              className="flex items-center gap-3 p-2.5"
+              style={{
+                background:
+                  active?.id === j.id
+                    ? "rgba(201, 56, 43, 0.05)"
+                    : "var(--paper)",
+                border: "1px solid",
+                borderColor:
+                  active?.id === j.id
+                    ? "rgba(201, 56, 43, 0.4)"
+                    : "var(--rule-soft)",
+                borderRadius: "3px",
+              }}
             >
               <button
                 type="button"
                 onClick={() => handleSelect(j.id)}
                 className="min-w-0 flex-1 text-left"
+                style={{
+                  background: "transparent",
+                  border: 0,
+                  padding: 0,
+                  color: "inherit",
+                  cursor: "pointer",
+                }}
               >
-                <p>
-                  <code className="text-xs">{j.id.slice(0, 8)}…</code>
-                  <span
-                    className={`ml-2 text-xs font-medium ${STATUS_COLOR[j.status]}`}
-                  >
-                    {j.status}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <code style={{ fontSize: "11px" }}>{j.id.slice(0, 8)}…</code>
+                  <Badge variant={STATUS_VARIANT[j.status]}>{j.status}</Badge>
+                  <span style={{ fontSize: "11.5px", color: "var(--ink-mute)" }}>
+                    {j.kind}
                   </span>
-                  <span className="ml-2 text-xs text-muted">{j.kind}</span>
-                </p>
-                <p className="text-xs text-muted">
-                  Created {new Date(j.createdAt).toLocaleTimeString()}
+                </div>
+                <p style={{ fontSize: "11px", color: "var(--ink-faint)" }}>
+                  Created{" "}
+                  <span style={{ fontFamily: '"JetBrains Mono", monospace' }}>
+                    {new Date(j.createdAt).toLocaleTimeString()}
+                  </span>
                   {j.completedAt && (
                     <>
-                      {" · "}Completed{" "}
-                      {new Date(j.completedAt).toLocaleTimeString()}
+                      {" · completed "}
+                      <span
+                        style={{ fontFamily: '"JetBrains Mono", monospace' }}
+                      >
+                        {new Date(j.completedAt).toLocaleTimeString()}
+                      </span>
                     </>
                   )}
                 </p>
                 {liveDeltaById[j.id] && j.status === "running" && (
-                  <p className="text-xs text-accent truncate">
+                  <p
+                    className="truncate"
+                    style={{ fontSize: "11.5px", color: "var(--accent)" }}
+                  >
                     {liveDeltaById[j.id]}
                   </p>
                 )}
               </button>
               {j.status === "running" && (
-                <button
-                  type="button"
+                <Button
+                  size="sm"
+                  variant="danger"
                   onClick={() => handleCancel(j.id)}
-                  className="text-xs px-2 py-1 rounded border border-amber-500/40 text-amber-600 hover:bg-amber-50/40"
                   title="发送 cancel 信号；流式任务会在下一个事件处真断网"
                 >
                   Cancel
-                </button>
+                </Button>
               )}
             </li>
           ))}
@@ -190,27 +210,45 @@ export const JobsList = forwardRef<JobsListHandle, Props>(function JobsList(
 
       {active && (
         <details open className="mt-3">
-          <summary className="cursor-pointer text-sm font-medium mb-2 flex items-center justify-between">
-            <span>
-              Job {active.id.slice(0, 8)}…{" "}
-              <span className={`text-xs ${STATUS_COLOR[active.status]}`}>
-                ({active.status})
-              </span>
+          <summary
+            className="cursor-pointer mb-2 flex items-center justify-between gap-2"
+            style={{
+              fontFamily: '"JetBrains Mono", monospace',
+              fontSize: "10.5px",
+              letterSpacing: "0.16em",
+              textTransform: "uppercase",
+              color: "var(--ink-mute)",
+            }}
+          >
+            <span className="flex items-center gap-2">
+              <span>Job {active.id.slice(0, 8)}…</span>
+              <Badge variant={STATUS_VARIANT[active.status]}>{active.status}</Badge>
             </span>
             <button
               type="button"
               onClick={() => setActive(null)}
-              className="text-xs text-muted hover:text-foreground"
+              style={{
+                fontSize: "10px",
+                color: "var(--ink-mute)",
+                background: "transparent",
+                border: 0,
+                cursor: "pointer",
+                letterSpacing: "0.16em",
+                textTransform: "uppercase",
+              }}
             >
-              Close detail
+              Close
             </button>
           </summary>
           {active.error && (
-            <p className="text-xs text-red-600 mb-2 break-all">
+            <p
+              className="mb-2 break-all"
+              style={{ fontSize: "12px", color: "var(--accent-deep)" }}
+            >
               error: {active.error}
             </p>
           )}
-          <pre className="text-xs p-3 rounded border border-muted/20 overflow-auto max-h-96 whitespace-pre-wrap">
+          <pre className="pre-block max-h-96">
             {JSON.stringify(
               active.result ?? { error: active.error, status: active.status },
               null,

@@ -5,6 +5,15 @@
 // 桌面端 only（依赖 Tauri job-progress 事件）。
 
 import { useEffect, useRef, useState } from "react";
+import {
+  Badge,
+  Button,
+  Card,
+  Field,
+  KV,
+  KVList,
+  Notice,
+} from "@/components/ui";
 import { api } from "@/services/api";
 import type {
   AssetItemType,
@@ -36,12 +45,10 @@ export function SingleAssetWorkflowCard() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
 
-  // Plan 阶段状态
   const [planJobId, setPlanJobId] = useState<string | null>(null);
   const [planDelta, setPlanDelta] = useState("");
   const [planItem, setPlanItem] = useState<PlanItem | null>(null);
 
-  // Code 阶段状态
   const [codeJobId, setCodeJobId] = useState<string | null>(null);
   const [codeDelta, setCodeDelta] = useState("");
   const [codeResult, setCodeResult] = useState<{
@@ -51,7 +58,6 @@ export function SingleAssetWorkflowCard() {
     pngPath?: string | null;
   } | null>(null);
 
-  // 监听 job-progress 事件，按 jobId 派发
   const unlistenRef = useRef<(() => void) | null>(null);
   const planJobIdRef = useRef<string | null>(null);
   const codeJobIdRef = useRef<string | null>(null);
@@ -70,7 +76,6 @@ export function SingleAssetWorkflowCard() {
         const snap = await api.currentProject();
         setProject(snap as ProjectSnapshot | null);
       } catch (e: unknown) {
-        // 没有 active project 不致命，UI 自己提示。
         console.warn("currentProject:", e);
       }
       const { listen } = await import("@tauri-apps/api/event");
@@ -99,7 +104,6 @@ export function SingleAssetWorkflowCard() {
       void (async () => {
         try {
           const job = (await api.getJob(ev.jobId)) as Job;
-          // job.result.item 是 PlanItem
           const result = job.result as { item?: PlanItem } | null;
           if (result?.item) {
             setPlanItem(result.item);
@@ -147,7 +151,6 @@ export function SingleAssetWorkflowCard() {
         }
       })();
     } else if (ev.stage === "failed" || ev.stage.includes("error")) {
-      // image_gen / stream / write 失败均在此分支
       setError(`code failed at ${ev.stage}: ${ev.message ?? ""}`);
       setPhase("plan_done");
     }
@@ -183,12 +186,13 @@ export function SingleAssetWorkflowCard() {
     setCodeResult(null);
     setPhase("generating");
     try {
-      const description = [planItem.description ?? "", planItem.detailed_description ?? ""]
+      const description = [
+        planItem.description ?? "",
+        planItem.detailed_description ?? "",
+      ]
         .filter(Boolean)
         .join("\n\n");
       const name = planItem.name || planItem.id || "Unnamed";
-      // needs_image=true + 资产类型不是 custom_code → 走 asset_generate（出 PNG + .cs）
-      // 否则走 code_generate(custom_code)：纯代码、不调 image_gen
       const needsImage =
         planItem.needs_image === true && planItem.type !== "custom_code";
       let ack: SubmitJobAck;
@@ -240,167 +244,172 @@ export function SingleAssetWorkflowCard() {
 
   if (!__IS_TAURI__) {
     return (
-      <section className="rounded border border-muted/30 p-4">
-        <h2 className="text-lg font-medium mb-2">Single-Asset Workflow</h2>
-        <p className="text-muted text-sm">
-          桌面端 only —— Web 模式下需要 Stage 3.6 ats-web platform routes 落地后再启用。
-        </p>
-      </section>
+      <Card
+        eyebrow="workflow · single asset"
+        title="Single-Asset Workflow"
+        subtitle="桌面端 only —— Web 模式下需要 Stage 3.6 ats-web platform routes 落地后再启用。"
+      />
     );
   }
 
   return (
-    <section className="rounded border border-muted/30 p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-medium">Single-Asset Workflow（MVP）</h2>
-        {phase !== "idle" && (
-          <button
-            type="button"
-            onClick={reset}
-            className="text-xs px-2 py-1 rounded border border-muted/40 hover:bg-muted/10"
-          >
+    <Card
+      eyebrow="workflow · single asset · mvp"
+      title="Single-Asset Workflow"
+      actions={
+        phase !== "idle" && (
+          <Button size="sm" onClick={reset}>
             Reset
-          </button>
+          </Button>
+        )
+      }
+    >
+      <div className="space-y-3">
+        {!project && (
+          <Notice
+            variant="warn"
+            title="先打开或新建一个工程"
+          >
+            请在 Project 卡片中"打开"或"新建"一个工程，才能跑代码生成。
+          </Notice>
+        )}
+
+        {error && <Notice variant="error" title={`Error: ${error}`} />}
+
+        <fieldset
+          disabled={phase === "planning" || phase === "generating"}
+          className="space-y-2 border-0 p-0"
+        >
+          <Field label="requirements（自然语言）">
+            <textarea
+              value={requirements}
+              onChange={(e) => setRequirements(e.target.value)}
+              rows={3}
+              placeholder="例：做一个回合开始时获得 3 点格挡的卡牌"
+            />
+          </Field>
+          <Field label="asset type">
+            <select
+              value={assetType}
+              onChange={(e) => setAssetType(e.target.value as AssetItemType)}
+            >
+              {ASSET_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Button
+            variant="accent"
+            onClick={runPlan}
+            disabled={phase === "planning" || phase === "generating"}
+          >
+            {phase === "planning" ? "Planning…" : "1. Generate plan"}
+          </Button>
+        </fieldset>
+
+        {(phase === "planning" || planDelta) && (
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="eyebrow-label">Plan LLM stream</span>
+              {planJobId && <code style={{ fontSize: "11px" }}>{planJobId.slice(0, 8)}</code>}
+              {phase === "planning" && <Badge variant="running">streaming</Badge>}
+            </div>
+            <pre className="pre-block pre-block-stream max-h-48">
+              {planDelta || "等待 LLM 首帧…"}
+            </pre>
+          </div>
+        )}
+
+        {planItem && (
+          <div
+            className="p-3"
+            style={{
+              background: "rgba(77, 122, 106, 0.05)",
+              border: "1px solid rgba(77, 122, 106, 0.35)",
+              borderRadius: "4px",
+            }}
+          >
+            <div className="flex items-center gap-2 mb-3 flex-wrap">
+              <Badge variant="ok">PlanItem</Badge>
+              <code style={{ fontSize: "11.5px" }}>{planItem.id}</code>
+            </div>
+            <KVList variant="narrow">
+              <KV k="name">
+                {planItem.name}
+                {planItem.name_zhs && (
+                  <span style={{ color: "var(--ink-mute)" }}>
+                    {" "} · {planItem.name_zhs}
+                  </span>
+                )}
+              </KV>
+              <KV k="type">{planItem.type}</KV>
+              <KV k="description">{planItem.description}</KV>
+              <KV k="goal">{planItem.goal}</KV>
+              <KV k="impl notes">
+                <span className="whitespace-pre-wrap">{planItem.implementation_notes}</span>
+              </KV>
+              <KV k="acceptance">
+                <span className="whitespace-pre-wrap">{planItem.acceptance_notes}</span>
+              </KV>
+            </KVList>
+            <details className="mt-3">
+              <summary
+                className="cursor-pointer"
+                style={{ fontSize: "11px", color: "var(--ink-mute)" }}
+              >
+                完整 JSON
+              </summary>
+              <pre className="pre-block mt-2 max-h-48">
+                {JSON.stringify(planItem, null, 2)}
+              </pre>
+            </details>
+          </div>
+        )}
+
+        {planItem && project && (
+          <Button
+            variant="accent"
+            onClick={runCode}
+            disabled={phase === "generating"}
+          >
+            {phase === "generating" ? "Generating…" : "2. Generate code"}
+          </Button>
+        )}
+
+        {(phase === "generating" || codeDelta) && (
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="eyebrow-label">Code LLM stream</span>
+              {codeJobId && <code style={{ fontSize: "11px" }}>{codeJobId.slice(0, 8)}</code>}
+              {phase === "generating" && <Badge variant="running">streaming</Badge>}
+            </div>
+            <pre className="pre-block pre-block-stream max-h-64">
+              {codeDelta || "等待 LLM 首帧…"}
+            </pre>
+          </div>
+        )}
+
+        {codeResult && (
+          <Notice variant="ok" title="代码已落盘 ✓">
+            <KVList variant="narrow">
+              <KV k=".cs">
+                <code className="break-all">{codeResult.csPath}</code>
+              </KV>
+              {codeResult.pngPath && (
+                <KV k=".png">
+                  <code className="break-all">{codeResult.pngPath}</code>
+                </KV>
+              )}
+              <KV k="raw.md">
+                <code className="break-all">{codeResult.rawPath}</code>
+              </KV>
+              <KV k="extracted">{codeResult.extractedChars} 字符</KV>
+            </KVList>
+          </Notice>
         )}
       </div>
-
-      {!project && (
-        <p className="text-amber-600 text-sm">
-          请先在 Project 卡片中"打开"或"新建"一个工程，才能跑代码生成。
-        </p>
-      )}
-
-      {error && <p className="text-red-500 text-sm">Error: {error}</p>}
-
-      {/* 阶段 1：输入需求 */}
-      <fieldset
-        disabled={phase === "planning" || phase === "generating"}
-        className="space-y-2"
-      >
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-muted text-xs">Requirements（自然语言）</span>
-          <textarea
-            value={requirements}
-            onChange={(e) => setRequirements(e.target.value)}
-            rows={3}
-            className="px-2 py-1 rounded border border-muted/30 bg-transparent text-sm"
-            placeholder="例：做一个回合开始时获得 3 点格挡的卡牌"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-muted text-xs">Asset type</span>
-          <select
-            value={assetType}
-            onChange={(e) => setAssetType(e.target.value as AssetItemType)}
-            className="px-2 py-1 rounded border border-muted/30 bg-transparent text-sm"
-          >
-            {ASSET_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button
-          type="button"
-          onClick={runPlan}
-          disabled={phase === "planning" || phase === "generating"}
-          className="text-sm px-3 py-1 rounded border border-accent/60 text-accent hover:bg-accent/10 disabled:opacity-50"
-        >
-          {phase === "planning" ? "Planning…" : "1. Generate Plan"}
-        </button>
-      </fieldset>
-
-      {/* 阶段 2：流式 LLM 输出 + PlanItem 结果 */}
-      {(phase === "planning" || planDelta) && (
-        <div className="space-y-2">
-          <p className="text-xs text-muted">
-            Plan LLM stream {planJobId && <code className="ml-1">{planJobId.slice(0, 8)}</code>}
-          </p>
-          <pre className="text-xs p-2 rounded border border-muted/20 max-h-48 overflow-auto whitespace-pre-wrap bg-muted/5">
-            {planDelta || (phase === "planning" ? "等待 LLM 首帧…" : "")}
-          </pre>
-        </div>
-      )}
-
-      {planItem && (
-        <details open className="rounded border border-emerald-500/30 p-2">
-          <summary className="cursor-pointer text-sm font-medium">
-            PlanItem ✓ <code className="text-xs text-muted">{planItem.id}</code>
-          </summary>
-          <dl className="text-xs mt-2 grid grid-cols-[120px_1fr] gap-x-2 gap-y-1">
-            <dt className="text-muted">name</dt>
-            <dd>
-              {planItem.name}
-              {planItem.name_zhs && (
-                <span className="text-muted"> · {planItem.name_zhs}</span>
-              )}
-            </dd>
-            <dt className="text-muted">type</dt>
-            <dd>{planItem.type}</dd>
-            <dt className="text-muted">description</dt>
-            <dd>{planItem.description}</dd>
-            <dt className="text-muted">goal</dt>
-            <dd>{planItem.goal}</dd>
-            <dt className="text-muted">implementation_notes</dt>
-            <dd className="whitespace-pre-wrap">{planItem.implementation_notes}</dd>
-            <dt className="text-muted">acceptance_notes</dt>
-            <dd className="whitespace-pre-wrap">{planItem.acceptance_notes}</dd>
-          </dl>
-          <details className="mt-2">
-            <summary className="cursor-pointer text-xs text-muted">完整 JSON</summary>
-            <pre className="text-xs mt-1 max-h-48 overflow-auto whitespace-pre-wrap">
-              {JSON.stringify(planItem, null, 2)}
-            </pre>
-          </details>
-        </details>
-      )}
-
-      {/* 阶段 3：代码生成 */}
-      {planItem && project && (
-        <button
-          type="button"
-          onClick={runCode}
-          disabled={phase === "generating"}
-          className="text-sm px-3 py-1 rounded border border-accent/60 text-accent hover:bg-accent/10 disabled:opacity-50"
-        >
-          {phase === "generating" ? "Generating…" : "2. Generate Code"}
-        </button>
-      )}
-
-      {(phase === "generating" || codeDelta) && (
-        <div className="space-y-2">
-          <p className="text-xs text-muted">
-            Code LLM stream {codeJobId && <code className="ml-1">{codeJobId.slice(0, 8)}</code>}
-          </p>
-          <pre className="text-xs p-2 rounded border border-muted/20 max-h-64 overflow-auto whitespace-pre-wrap bg-muted/5">
-            {codeDelta || (phase === "generating" ? "等待 LLM 首帧…" : "")}
-          </pre>
-        </div>
-      )}
-
-      {codeResult && (
-        <div className="rounded border border-emerald-500/30 p-2 text-xs space-y-1">
-          <p className="font-medium text-emerald-600">代码已落盘 ✓</p>
-          <p>
-            <span className="text-muted">.cs：</span>
-            <code className="break-all">{codeResult.csPath}</code>
-          </p>
-          {codeResult.pngPath && (
-            <p>
-              <span className="text-muted">.png：</span>
-              <code className="break-all">{codeResult.pngPath}</code>
-            </p>
-          )}
-          <p>
-            <span className="text-muted">raw.md：</span>
-            <code className="break-all">{codeResult.rawPath}</code>
-          </p>
-          <p className="text-muted">
-            提取代码 {codeResult.extractedChars} 字符。在工程目录里查看。
-          </p>
-        </div>
-      )}
-    </section>
+    </Card>
   );
 }

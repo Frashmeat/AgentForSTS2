@@ -1,4 +1,12 @@
 import { useEffect, useRef, useState } from "react";
+import {
+  Badge,
+  Button,
+  Card,
+  CardSection,
+  Field,
+  Notice,
+} from "@/components/ui";
 import { api } from "@/services/api";
 import type {
   ExportPackStats,
@@ -17,7 +25,6 @@ export function KnowledgeCard() {
   const [packBusy, setPackBusy] = useState(false);
   const [overwriteOnImport, setOverwriteOnImport] = useState(false);
 
-  // Refresh state
   const [dllPath, setDllPath] = useState("");
   // 默认关闭：baselib-fetch 走 GitHub API，国内网络经常卡住；
   // 用户需要时勾上即可。
@@ -117,7 +124,9 @@ export function KnowledgeCard() {
     setPackBusy(true);
     setPackMsg(null);
     try {
-      const stats = (await api.exportKnowledgePack(packPath.trim())) as ExportPackStats;
+      const stats = (await api.exportKnowledgePack(
+        packPath.trim(),
+      )) as ExportPackStats;
       setPackMsg(
         `✓ 导出成功：${stats.gameFiles} game 文件 + ${stats.baselibIncluded ? "baselib" : "无 baselib"}，${stats.zipBytes} bytes → ${stats.outputPath}`,
       );
@@ -143,7 +152,6 @@ export function KnowledgeCard() {
       setPackMsg(
         `✓ 导入成功：${stats.gameFilesWritten} game 文件 + baselib=${stats.baselibWritten} + manifest=${stats.manifestReplaced}`,
       );
-      // 刷新状态显示
       const next = (await api.getKnowledgeStatus()) as KnowledgeStatus;
       setKnowledge(next);
     } catch (e: unknown) {
@@ -153,181 +161,221 @@ export function KnowledgeCard() {
     }
   }
 
-  const overallColor =
+  const overallVariant =
     knowledge?.overall === "fresh"
-      ? "text-emerald-600"
+      ? "ok"
       : knowledge?.overall === "stale"
-        ? "text-amber-600"
-        : "text-red-600";
+        ? "warn"
+        : "error";
 
   return (
-    <section className="rounded border border-muted/30 p-4">
-      <div className="flex items-center justify-between mb-2">
-        <h2 className="text-lg font-medium">Knowledge</h2>
-        <button
-          type="button"
-          onClick={handleRecheck}
-          disabled={checking}
-          className="text-sm px-3 py-1 rounded border border-muted/40 hover:bg-muted/10 disabled:opacity-50"
-        >
+    <Card
+      eyebrow="knowledge · sts2 sources"
+      title="Knowledge"
+      actions={
+        <Button size="sm" onClick={handleRecheck} disabled={checking}>
           {checking ? "Checking…" : "Re-check"}
-        </button>
-      </div>
-      {error && <p className="text-red-500">Error: {error}</p>}
-      {!error && !knowledge && <p className="text-muted">Loading…</p>}
+        </Button>
+      }
+    >
+      {error && <Notice variant="error" title={`Error: ${error}`} />}
+      {!error && !knowledge && (
+        <p style={{ color: "var(--ink-mute)", fontSize: "13px" }}>Loading…</p>
+      )}
+
       {knowledge && (
         <>
-          <p className="mb-3">
-            <span className="text-muted text-sm">Overall: </span>
-            <span className={`font-medium ${overallColor}`}>{knowledge.overall}</span>
-            <span className="text-muted text-sm ml-4">Root: </span>
-            <code className="text-xs">{knowledge.knowledgeRoot}</code>
-          </p>
+          <div className="flex items-center gap-3 flex-wrap mb-4">
+            <Badge variant={overallVariant}>{knowledge.overall}</Badge>
+            <span style={{ fontSize: "11.5px", color: "var(--ink-mute)" }}>
+              root <code>{knowledge.knowledgeRoot}</code>
+            </span>
+          </div>
 
-          <div className="grid grid-cols-2 gap-3 text-sm mb-3">
-            <div className="border border-muted/20 rounded p-2">
-              <p className="font-medium mb-1">Game</p>
-              <p className="text-muted text-xs">
-                Mode: <span className="font-mono">{knowledge.game.sourceMode}</span>
-              </p>
-              <p className="text-muted text-xs">
-                Has .cs sources:{" "}
-                <span className="font-mono">
-                  {String(knowledge.game.hasDecompiledSources)}
-                </span>
-              </p>
-            </div>
-            <div className="border border-muted/20 rounded p-2">
-              <p className="font-medium mb-1">BaseLib</p>
-              <p className="text-muted text-xs">
-                Mode: <span className="font-mono">{knowledge.baselib.sourceMode}</span>
-              </p>
-              <p className="text-muted text-xs">
-                Has decompiled.cs:{" "}
-                <span className="font-mono">
-                  {String(knowledge.baselib.hasDecompiledSources)}
-                </span>
-              </p>
-            </div>
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            {[
+              { label: "Game", obj: knowledge.game },
+              { label: "BaseLib", obj: knowledge.baselib },
+            ].map(({ label, obj }) => (
+              <div
+                key={label}
+                className="p-3"
+                style={{
+                  background: "var(--paper)",
+                  border: "1px solid var(--rule-soft)",
+                  borderRadius: "4px",
+                }}
+              >
+                <p
+                  style={{
+                    fontFamily: '"JetBrains Mono", monospace',
+                    fontSize: "10px",
+                    letterSpacing: "0.16em",
+                    textTransform: "uppercase",
+                    color: "var(--ink-mute)",
+                    marginBottom: "6px",
+                  }}
+                >
+                  {label}
+                </p>
+                <p style={{ fontSize: "12px" }}>
+                  <span style={{ color: "var(--ink-mute)" }}>mode </span>
+                  <code>{obj.sourceMode}</code>
+                </p>
+                <p style={{ fontSize: "12px" }}>
+                  <span style={{ color: "var(--ink-mute)" }}>has .cs </span>
+                  <code>{String(obj.hasDecompiledSources)}</code>
+                </p>
+              </div>
+            ))}
           </div>
 
           {knowledge.warnings.length > 0 && (
-            <div className="rounded border border-amber-500/40 bg-amber-50/40 p-2 mb-3">
-              <p className="text-amber-700 text-sm font-medium mb-1">Warnings</p>
-              <ul className="text-xs space-y-0.5 text-amber-800">
+            <Notice variant="warn" title="Warnings" className="mb-3">
+              <ul className="space-y-0.5">
                 {knowledge.warnings.map((w, i) => (
-                  <li key={i}>• {w}</li>
+                  <li key={i} style={{ fontSize: "12px" }}>• {w}</li>
                 ))}
               </ul>
-            </div>
+            </Notice>
           )}
 
-          <p className="text-xs text-muted">
-            Embedded templates ({knowledge.embeddedTemplates.length}):{" "}
-            <span className="font-mono">
-              {knowledge.embeddedTemplates.join(", ")}
-            </span>
+          <p
+            style={{ fontSize: "11.5px", color: "var(--ink-mute)" }}
+            className="mb-1"
+          >
+            Embedded templates ({knowledge.embeddedTemplates.length}):
+          </p>
+          <p
+            style={{
+              fontFamily: '"JetBrains Mono", monospace',
+              fontSize: "11px",
+              color: "var(--ink-soft)",
+            }}
+          >
+            {knowledge.embeddedTemplates.join(", ")}
           </p>
 
           {__IS_TAURI__ && (
-            <div className="mt-4 pt-3 border-t border-muted/20 space-y-2">
-              <p className="text-sm font-medium">Refresh (ilspycmd)</p>
-              <p className="text-xs text-muted">
-                需要本机装了 <code>ilspycmd</code>（
-                <code>dotnet tool install -g ilspycmd</code>）。
-              </p>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="text-muted text-xs">sts2.dll 路径</span>
-                <input
-                  value={dllPath}
-                  onChange={(e) => setDllPath(e.target.value)}
-                  placeholder="C:/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2/data_sts2_windows_x86_64/sts2.dll"
-                  className="px-2 py-1 rounded border border-muted/30 bg-transparent font-mono text-xs"
-                />
-              </label>
-              <div className="flex flex-wrap items-center gap-3 text-sm">
-                <label className="flex items-center gap-2" title="勾上会从 GitHub 拉 BaseLib.dll —— 国内网络可能卡住">
-                  <input
-                    type="checkbox"
-                    checked={includeBaselib}
-                    onChange={(e) => setIncludeBaselib(e.target.checked)}
-                  />
-                  <span>include_baselib（需要访问 GitHub）</span>
-                </label>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={force}
-                    onChange={(e) => setForce(e.target.checked)}
-                  />
-                  <span>force（跳过 manifest 缓存）</span>
-                </label>
-              </div>
-              <button
-                type="button"
-                onClick={handleRefresh}
-                disabled={refreshBusy}
-                className="text-xs px-3 py-1 rounded border border-accent/60 text-accent hover:bg-accent/10 disabled:opacity-50"
+            <CardSection title="Refresh (ilspycmd)">
+              <p
+                style={{ fontSize: "11.5px", color: "var(--ink-mute)" }}
+                className="mb-2"
               >
-                {refreshBusy ? "Refreshing…" : "Refresh game library"}
-              </button>
-              {(refreshStage || refreshMsg) && (
-                <p className="text-xs">
-                  <span className="text-muted">stage: </span>
-                  <span className="font-mono">{refreshStage}</span>
-                  {refreshMsg && (
-                    <span className="text-muted ml-2 break-all">— {refreshMsg}</span>
-                  )}
-                </p>
-              )}
-            </div>
+                需要本机装了 <code>ilspycmd</code>（<code>dotnet tool install -g ilspycmd</code>）。
+              </p>
+              <div className="space-y-2">
+                <Field label="sts2.dll 路径">
+                  <input
+                    value={dllPath}
+                    onChange={(e) => setDllPath(e.target.value)}
+                    placeholder="C:/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2/data_sts2_windows_x86_64/sts2.dll"
+                    className="input-mono"
+                  />
+                </Field>
+                <div
+                  className="flex flex-wrap items-center gap-4"
+                  style={{ fontSize: "13px" }}
+                >
+                  <label
+                    className="flex items-center gap-2"
+                    title="勾上会从 GitHub 拉 BaseLib.dll —— 国内网络可能卡住"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={includeBaselib}
+                      onChange={(e) => setIncludeBaselib(e.target.checked)}
+                    />
+                    <span>include_baselib（需访问 GitHub）</span>
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={force}
+                      onChange={(e) => setForce(e.target.checked)}
+                    />
+                    <span>force（跳过 manifest 缓存）</span>
+                  </label>
+                </div>
+                <Button
+                  variant="accent"
+                  size="sm"
+                  onClick={handleRefresh}
+                  disabled={refreshBusy}
+                >
+                  {refreshBusy ? "Refreshing…" : "Refresh game library"}
+                </Button>
+                {(refreshStage || refreshMsg) && (
+                  <p style={{ fontSize: "11.5px" }}>
+                    <span style={{ color: "var(--ink-mute)" }}>stage </span>
+                    <code>{refreshStage}</code>
+                    {refreshMsg && (
+                      <span
+                        className="break-all ml-2"
+                        style={{ color: "var(--ink-mute)" }}
+                      >
+                        — {refreshMsg}
+                      </span>
+                    )}
+                  </p>
+                )}
+              </div>
+            </CardSection>
           )}
 
           {__IS_TAURI__ && (
-            <div className="mt-4 pt-3 border-t border-muted/20 space-y-2">
-              <p className="text-sm font-medium">Knowledge pack</p>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="text-muted text-xs">ZIP 路径（导出目标 / 导入源）</span>
-                <input
-                  value={packPath}
-                  onChange={(e) => setPackPath(e.target.value)}
-                  placeholder="E:/share/sts2-knowledge.zip"
-                  className="px-2 py-1 rounded border border-muted/30 bg-transparent font-mono text-xs"
-                />
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={overwriteOnImport}
-                  onChange={(e) => setOverwriteOnImport(e.target.checked)}
-                />
-                <span>导入时覆盖现有 game/baselib（默认拒绝避免误操作）</span>
-              </label>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={handleExport}
-                  disabled={packBusy}
-                  className="text-xs px-3 py-1 rounded border border-accent/60 text-accent hover:bg-accent/10 disabled:opacity-50"
+            <CardSection title="Knowledge pack">
+              <div className="space-y-2">
+                <Field label="ZIP 路径（导出目标 / 导入源）">
+                  <input
+                    value={packPath}
+                    onChange={(e) => setPackPath(e.target.value)}
+                    placeholder="E:/share/sts2-knowledge.zip"
+                    className="input-mono"
+                  />
+                </Field>
+                <label
+                  className="flex items-center gap-2"
+                  style={{ fontSize: "13px" }}
                 >
-                  Export
-                </button>
-                <button
-                  type="button"
-                  onClick={handleImport}
-                  disabled={packBusy}
-                  className="text-xs px-3 py-1 rounded border border-accent/60 text-accent hover:bg-accent/10 disabled:opacity-50"
-                >
-                  Import
-                </button>
+                  <input
+                    type="checkbox"
+                    checked={overwriteOnImport}
+                    onChange={(e) => setOverwriteOnImport(e.target.checked)}
+                  />
+                  <span>导入时覆盖现有 game/baselib（默认拒绝避免误操作）</span>
+                </label>
+                <div className="flex gap-2">
+                  <Button
+                    variant="accent"
+                    size="sm"
+                    onClick={handleExport}
+                    disabled={packBusy}
+                  >
+                    Export
+                  </Button>
+                  <Button
+                    variant="accent"
+                    size="sm"
+                    onClick={handleImport}
+                    disabled={packBusy}
+                  >
+                    Import
+                  </Button>
+                </div>
+                {packMsg && (
+                  <p
+                    className="whitespace-pre-wrap break-all"
+                    style={{ fontSize: "11.5px" }}
+                  >
+                    {packMsg}
+                  </p>
+                )}
               </div>
-              {packMsg && (
-                <p className="text-xs whitespace-pre-wrap break-all">{packMsg}</p>
-              )}
-            </div>
+            </CardSection>
           )}
         </>
       )}
-    </section>
+    </Card>
   );
 }

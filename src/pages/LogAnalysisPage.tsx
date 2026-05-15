@@ -2,6 +2,7 @@
 // 大文本区 + 流式渲染。
 
 import { useEffect, useRef, useState } from "react";
+import { Button, Card, Field, Notice, PageHero } from "@/components/ui";
 import { api } from "@/services/api";
 import type { Job, JobProgressEvent, SubmitJobAck } from "@/services/tauriApi";
 
@@ -39,13 +40,10 @@ export function LogAnalysisPage() {
             }
           })();
         } else if (ev.stage === "failed" || ev.stage.includes("error")) {
-          // handler 报错时把 job.error 拉出来给用户看
           void (async () => {
             try {
               const job = (await api.getJob(ev.jobId)) as Job;
-              setError(
-                `LLM 诊断失败：${job.error ?? ev.message ?? ev.stage}`,
-              );
+              setError(`LLM 诊断失败：${job.error ?? ev.message ?? ev.stage}`);
             } catch {
               setError(`LLM 诊断失败（stage=${ev.stage}）：${ev.message ?? ""}`);
             }
@@ -84,73 +82,71 @@ export function LogAnalysisPage() {
 
   if (!__IS_TAURI__) {
     return (
-      <section className="rounded border border-muted/30 p-4">
-        <h1 className="text-2xl font-semibold mb-2">Log Analysis</h1>
-        <p className="text-muted text-sm">桌面端 only。</p>
-      </section>
+      <div>
+        <PageHero
+          eyebrow="diagnostics · log"
+          title="Log Analysis"
+          subtitle="桌面端 only。"
+        />
+      </div>
     );
   }
 
   return (
-    <div className="space-y-4">
-      <header>
-        <h1 className="text-2xl font-semibold">Log Analysis</h1>
-        <p className="text-muted text-sm">
-          粘贴 dotnet publish 失败日志 → LLM 诊断 markdown
-        </p>
-      </header>
+    <div>
+      <PageHero
+        eyebrow="diagnostics · log analysis"
+        title="Log Analysis"
+        subtitle="粘贴 dotnet publish 失败日志 → LLM 诊断 markdown"
+      />
 
-      {error && <p className="text-red-500 text-sm">Error: {error}</p>}
+      <div className="space-y-4">
+        {error && <Notice variant="error" title={`Error: ${error}`} />}
 
-      <section className="rounded border border-muted/30 p-4 space-y-2">
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-muted text-xs">Build log</span>
-          <textarea
-            value={logText}
-            onChange={(e) => setLogText(e.target.value)}
-            rows={12}
-            placeholder="MSBUILD : error MSB4019: ..."
-            className="px-2 py-1 rounded border border-muted/30 bg-transparent font-mono text-xs"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-muted text-xs">Context hint（可选）</span>
-          <input
-            value={contextHint}
-            onChange={(e) => setContextHint(e.target.value)}
-            placeholder="我刚改了 TargetFramework 到 net9.0"
-            className="px-2 py-1 rounded border border-muted/30 bg-transparent"
-          />
-        </label>
-        <button
-          type="button"
-          onClick={handleSubmit}
-          disabled={busy}
-          className="text-sm px-3 py-1 rounded border border-accent/60 text-accent hover:bg-accent/10 disabled:opacity-50"
-        >
-          {busy ? "Submitting…" : "Diagnose"}
-        </button>
-      </section>
+        <Card eyebrow="input · build log" title="Submit log">
+          <div className="space-y-3">
+            <Field label="build log">
+              <textarea
+                value={logText}
+                onChange={(e) => setLogText(e.target.value)}
+                rows={12}
+                placeholder="MSBUILD : error MSB4019: ..."
+                className="input-mono"
+              />
+            </Field>
+            <Field label="context hint（可选）">
+              <input
+                value={contextHint}
+                onChange={(e) => setContextHint(e.target.value)}
+                placeholder="我刚改了 TargetFramework 到 net9.0"
+              />
+            </Field>
+            <Button variant="primary" onClick={handleSubmit} disabled={busy}>
+              {busy ? "Submitting…" : "Diagnose"}
+            </Button>
+          </div>
+        </Card>
 
-      {(stream || report) && (
-        <section className="rounded border border-muted/30 p-4 space-y-2">
-          <h2 className="text-lg font-medium">Diagnosis</h2>
-          {jobId && (
-            <p className="text-xs text-muted">
-              Job <code>{jobId.slice(0, 8)}</code>
-            </p>
-          )}
-          {report ? (
-            <pre className="text-sm p-3 rounded border border-emerald-500/30 bg-emerald-50/30 whitespace-pre-wrap">
-              {report}
-            </pre>
-          ) : (
-            <pre className="text-xs p-3 rounded border border-muted/20 max-h-96 overflow-auto whitespace-pre-wrap bg-muted/5">
-              {stream || "等待 LLM 首帧…"}
-            </pre>
-          )}
-        </section>
-      )}
+        {(stream || report) && (
+          <Card
+            eyebrow="output · llm diagnosis"
+            title="Diagnosis"
+            actions={
+              jobId && (
+                <code style={{ fontSize: "11.5px" }}>{jobId.slice(0, 12)}</code>
+              )
+            }
+          >
+            {report ? (
+              <pre className="pre-block pre-block-ok">{report}</pre>
+            ) : (
+              <pre className="pre-block pre-block-stream max-h-96">
+                {stream || "等待 LLM 首帧…"}
+              </pre>
+            )}
+          </Card>
+        )}
+      </div>
     </div>
   );
 }

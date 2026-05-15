@@ -6,6 +6,7 @@
 import { useRef, useState } from "react";
 import { JobsList, type JobsListHandle } from "@/components/JobsList";
 import { JobsSubmitForm } from "@/components/JobsSubmitForm";
+import { Card, Notice } from "@/components/ui";
 
 export function JobsCard() {
   const [error, setError] = useState<string | null>(null);
@@ -13,26 +14,33 @@ export function JobsCard() {
 
   if (!__IS_TAURI__) {
     return (
-      <section className="rounded border border-muted/30 p-4">
-        <h2 className="text-lg font-medium mb-2">Jobs</h2>
-        <p className="text-muted text-sm">
-          Platform jobs are desktop-only for now. Web sqlx repository lands in
-          stage 3.1a.
-        </p>
-      </section>
+      <Card
+        eyebrow="background · jobs"
+        title="Jobs"
+        subtitle="Platform jobs are desktop-only for now. Web sqlx repository lands in stage 3.1a."
+      />
     );
   }
 
   return (
-    <section className="rounded border border-muted/30 p-4">
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-lg font-medium">Jobs — submit any handler</h2>
-      </div>
-
-      {error && <p className="text-red-500 text-sm mb-2">Error: {error}</p>}
+    <Card
+      eyebrow="background · jobs"
+      title="Jobs"
+      subtitle="submit any handler — text_generate / asset / build / package / log / knowledge"
+    >
+      {error && <Notice variant="error" title={`Error: ${error}`} className="mb-3" />}
 
       <details open className="mb-4">
-        <summary className="cursor-pointer text-sm font-medium mb-2">
+        <summary
+          className="cursor-pointer mb-3"
+          style={{
+            fontFamily: '"JetBrains Mono", monospace',
+            fontSize: "10.5px",
+            letterSpacing: "0.16em",
+            textTransform: "uppercase",
+            color: "var(--ink-mute)",
+          }}
+        >
           Submit new job
         </summary>
         <JobsSubmitForm
@@ -45,6 +53,6 @@ export function JobsCard() {
       </details>
 
       <JobsList ref={listRef} onError={(msg) => setError(msg)} />
-    </section>
+    </Card>
   );
 }

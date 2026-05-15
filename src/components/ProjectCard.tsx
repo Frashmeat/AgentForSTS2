@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Badge, Button, Card, CardSection, Field, Notice } from "@/components/ui";
 import { api } from "@/services/api";
 import type { ProjectSnapshot, RecentEntry } from "@/services/tauriApi";
 
@@ -85,190 +86,217 @@ export function ProjectCard() {
 
   if (!__IS_TAURI__) {
     return (
-      <section className="rounded border border-muted/30 p-4">
-        <h2 className="text-lg font-medium mb-2">Project</h2>
-        <p className="text-muted text-sm">
-          Project folders are desktop-only. In Web mode, projects live in the
-          server database instead.
-        </p>
-      </section>
+      <Card
+        eyebrow="workspace · project"
+        title="Project"
+        subtitle="Project folders are desktop-only. In Web mode, projects live in the server database instead."
+      />
     );
   }
 
   return (
-    <section className="rounded border border-muted/30 p-4">
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-lg font-medium">Project</h2>
-        {current && (
-          <button
-            type="button"
-            onClick={handleClose}
-            disabled={busy}
-            className="text-sm px-3 py-1 rounded border border-muted/40 hover:bg-muted/10 disabled:opacity-50"
-          >
+    <Card
+      eyebrow="workspace · project"
+      title="Project"
+      actions={
+        current && (
+          <Button size="sm" onClick={handleClose} disabled={busy}>
             Close
-          </button>
-        )}
-      </div>
-
-      {error && <p className="text-red-500 text-sm mb-2">Error: {error}</p>}
+          </Button>
+        )
+      }
+    >
+      {error && <Notice variant="error" title={`Error: ${error}`} />}
 
       {current ? (
         <div className="mb-4">
-          <p className="text-sm">
-            <span className="text-muted">Active:</span>{" "}
-            <span className="font-medium">{current.meta.name}</span>
-          </p>
-          <p className="text-xs text-muted">
+          <div className="flex items-center gap-2 flex-wrap mb-1">
+            <Badge variant="ok">active</Badge>
+            <span style={{ fontWeight: 500 }}>{current.meta.name}</span>
+          </div>
+          <p style={{ fontSize: "12px", color: "var(--ink-mute)" }}>
             <code>{current.path}</code>
           </p>
-          <p className="text-xs text-muted mt-1">
-            Created:{" "}
-            <span className="font-mono">
+          <p
+            className="mt-1"
+            style={{ fontSize: "11.5px", color: "var(--ink-faint)" }}
+          >
+            Created{" "}
+            <span style={{ fontFamily: '"JetBrains Mono", monospace' }}>
               {new Date(current.meta.created_at).toLocaleString()}
-            </span>{" "}
-            · Schema v{current.meta.schema_version}
+            </span>
+            {" · schema v"}
+            {current.meta.schema_version}
           </p>
         </div>
       ) : (
-        <p className="text-muted text-sm mb-4">No active project</p>
+        <p
+          style={{ color: "var(--ink-mute)", fontSize: "13px" }}
+          className="mb-4"
+        >
+          No active project
+        </p>
       )}
 
       <details open className="mb-3">
-        <summary className="cursor-pointer text-sm font-medium mb-2">
+        <summary
+          className="cursor-pointer mb-2"
+          style={{
+            fontFamily: '"JetBrains Mono", monospace',
+            fontSize: "10.5px",
+            letterSpacing: "0.16em",
+            textTransform: "uppercase",
+            color: "var(--ink-mute)",
+          }}
+        >
           Create new project
         </summary>
-        <div className="space-y-2 pl-2">
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-muted text-xs">Parent directory</span>
+        <div className="space-y-2 pl-1">
+          <Field label="parent directory">
             <input
               value={parentDir}
               onChange={(e) => setParentDir(e.target.value)}
               placeholder="E:/mods"
-              className="px-2 py-1 rounded border border-muted/30 bg-transparent font-mono text-xs"
+              className="input-mono"
             />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-muted text-xs">Project name</span>
+          </Field>
+          <Field label="project name">
             <input
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              className="px-2 py-1 rounded border border-muted/30 bg-transparent"
             />
-          </label>
-          <button
-            type="button"
-            onClick={handleCreate}
-            disabled={busy}
-            className="text-sm px-3 py-1 rounded border border-accent/60 text-accent hover:bg-accent/10 disabled:opacity-50"
-          >
+          </Field>
+          <Button variant="accent" onClick={handleCreate} disabled={busy}>
             Create
-          </button>
+          </Button>
         </div>
       </details>
 
       <details className="mb-3">
-        <summary className="cursor-pointer text-sm font-medium mb-2">
+        <summary
+          className="cursor-pointer mb-2"
+          style={{
+            fontFamily: '"JetBrains Mono", monospace',
+            fontSize: "10.5px",
+            letterSpacing: "0.16em",
+            textTransform: "uppercase",
+            color: "var(--ink-mute)",
+          }}
+        >
           Open existing project (path)
         </summary>
-        <div className="flex gap-2 pl-2">
-          <input
-            value={openPath}
-            onChange={(e) => setOpenPath(e.target.value)}
-            placeholder="E:/mods/my_mod"
-            className="flex-1 px-2 py-1 rounded border border-muted/30 bg-transparent font-mono text-xs"
-          />
-          <button
-            type="button"
+        <div className="flex gap-2 pl-1 items-end">
+          <Field label="path" className="flex-1">
+            <input
+              value={openPath}
+              onChange={(e) => setOpenPath(e.target.value)}
+              placeholder="E:/mods/my_mod"
+              className="input-mono"
+            />
+          </Field>
+          <Button
             onClick={() => handleOpen(openPath)}
             disabled={busy || !openPath.trim()}
-            className="text-sm px-3 py-1 rounded border border-muted/40 hover:bg-muted/10 disabled:opacity-50"
           >
             Open
-          </button>
+          </Button>
         </div>
       </details>
 
-      <div>
+      <CardSection>
         <div className="flex items-center justify-between mb-2">
-          <p className="text-sm font-medium">Recent ({recents.length})</p>
+          <h3 style={{ margin: 0 }}>Recent ({recents.length})</h3>
           {recents.length > 0 && (
-            <button
-              type="button"
-              onClick={() => void refresh()}
-              disabled={busy}
-              className="text-xs px-2 py-0.5 rounded border border-muted/40 hover:bg-muted/10 disabled:opacity-50"
-            >
+            <Button size="sm" onClick={() => void refresh()} disabled={busy}>
               Refresh
-            </button>
+            </Button>
           )}
         </div>
         {recents.length === 0 ? (
-          <p className="text-xs text-muted">
-            还没打开过任何工程。上面"Create" 建一个新工程，或 "Open existing
-            project" 输入既有工程路径打开。
+          <p style={{ color: "var(--ink-faint)", fontSize: "12px" }}>
+            还没打开过任何工程。上面 "Create" 建一个新工程，或 "Open existing project" 输入既有工程路径打开。
           </p>
         ) : (
-          <ul className="space-y-1 text-sm">
+          <ul className="space-y-1.5">
             {recents.map((r) => {
               const isActive = current?.path === r.path;
               return (
                 <li
                   key={r.path}
-                  className={`flex items-center justify-between border rounded p-2 gap-2 ${
-                    isActive
-                      ? "border-emerald-500/40 bg-emerald-50/20"
-                      : "border-muted/20 hover:bg-muted/5"
-                  }`}
+                  className="flex items-center gap-2 p-2.5"
+                  style={{
+                    background: isActive
+                      ? "rgba(77, 122, 106, 0.08)"
+                      : "var(--paper)",
+                    border: "1px solid",
+                    borderColor: isActive
+                      ? "rgba(77, 122, 106, 0.4)"
+                      : "var(--rule-soft)",
+                    borderRadius: "3px",
+                  }}
                 >
                   <button
                     type="button"
                     onClick={() => !isActive && handleOpen(r.path)}
                     disabled={busy || isActive}
                     className="min-w-0 flex-1 text-left disabled:cursor-default"
+                    style={{
+                      background: "transparent",
+                      border: 0,
+                      padding: 0,
+                      color: "inherit",
+                      cursor: isActive ? "default" : "pointer",
+                    }}
                   >
-                    <p className="font-medium truncate flex items-center gap-2">
-                      {r.name}
-                      {isActive && (
-                        <span className="text-xs text-emerald-600">(active)</span>
-                      )}
+                    <p
+                      className="flex items-center gap-2"
+                      style={{ fontWeight: 500 }}
+                    >
+                      <span className="truncate">{r.name}</span>
+                      {isActive && <Badge variant="ok">active</Badge>}
                     </p>
-                    <p className="text-xs text-muted truncate">
+                    <p
+                      className="truncate"
+                      style={{ fontSize: "11.5px", color: "var(--ink-mute)" }}
+                    >
                       <code>{r.path}</code>
                     </p>
-                    <p className="text-xs text-muted">
-                      Last opened:{" "}
-                      <span className="font-mono">
+                    <p
+                      style={{ fontSize: "11px", color: "var(--ink-faint)" }}
+                    >
+                      Last opened{" "}
+                      <span
+                        style={{ fontFamily: '"JetBrains Mono", monospace' }}
+                      >
                         {fmtRelative(r.last_opened_at)}
                       </span>
                     </p>
                   </button>
                   {!isActive && (
-                    <button
-                      type="button"
+                    <Button
+                      size="sm"
+                      variant="accent"
                       onClick={() => handleOpen(r.path)}
                       disabled={busy}
-                      className="text-xs px-2 py-1 rounded border border-accent/60 text-accent hover:bg-accent/10 disabled:opacity-50"
                     >
                       Open
-                    </button>
+                    </Button>
                   )}
-                  <button
-                    type="button"
+                  <Button
+                    size="sm"
                     onClick={() => handleForget(r.path)}
                     disabled={busy}
-                    className="text-xs px-2 py-1 rounded border border-muted/20 text-muted hover:bg-muted/10 disabled:opacity-50"
                     title="从最近列表移除（不删除文件）"
                   >
                     Forget
-                  </button>
+                  </Button>
                 </li>
               );
             })}
           </ul>
         )}
-      </div>
-    </section>
+      </CardSection>
+    </Card>
   );
 }
 

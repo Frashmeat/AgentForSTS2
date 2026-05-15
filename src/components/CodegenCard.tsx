@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Button, Card, Field, FieldRow, Notice } from "@/components/ui";
 import { api } from "@/services/api";
 import type { AssetCodegenRequest } from "@/services/tauriApi";
 
@@ -42,91 +43,87 @@ export function CodegenCard() {
   }
 
   return (
-    <section className="rounded border border-muted/30 p-4">
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-lg font-medium">Codegen — Asset Prompt Preview</h2>
-        <button
-          type="button"
-          onClick={handleAssemble}
-          disabled={running}
-          className="text-sm px-3 py-1 rounded border border-muted/40 hover:bg-muted/10 disabled:opacity-50"
-        >
+    <Card
+      eyebrow="codegen · prompt preview"
+      title="Codegen — Asset Prompt"
+      actions={
+        <Button size="sm" onClick={handleAssemble} disabled={running}>
           {running ? "Assembling…" : "Assemble"}
-        </button>
+        </Button>
+      }
+    >
+      <div className="space-y-3">
+        <FieldRow>
+          <Field label="asset type">
+            <select
+              value={assetType}
+              onChange={(e) => setAssetType(e.target.value)}
+            >
+              {ASSET_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="asset name">
+            <input
+              value={assetName}
+              onChange={(e) => setAssetName(e.target.value)}
+            />
+          </Field>
+        </FieldRow>
+        <FieldRow>
+          <Field label="name (zhs)">
+            <input
+              value={nameZhs}
+              onChange={(e) => setNameZhs(e.target.value)}
+            />
+          </Field>
+          <Field label="project root">
+            <input
+              value={projectRoot}
+              onChange={(e) => setProjectRoot(e.target.value)}
+              className="input-mono"
+            />
+          </Field>
+        </FieldRow>
+        <Field label="design description">
+          <textarea
+            value={designDescription}
+            onChange={(e) => setDesignDescription(e.target.value)}
+            rows={3}
+          />
+        </Field>
+        <label className="flex items-center gap-2" style={{ fontSize: "13px" }}>
+          <input
+            type="checkbox"
+            checked={skipBuild}
+            onChange={(e) => setSkipBuild(e.target.checked)}
+          />
+          <span>skip_build</span>
+        </label>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 text-sm mb-3">
-        <label className="flex flex-col gap-1">
-          <span className="text-muted text-xs">Asset type</span>
-          <select
-            value={assetType}
-            onChange={(e) => setAssetType(e.target.value)}
-            className="px-2 py-1 rounded border border-muted/30 bg-transparent"
-          >
-            {ASSET_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-muted text-xs">Asset name</span>
-          <input
-            value={assetName}
-            onChange={(e) => setAssetName(e.target.value)}
-            className="px-2 py-1 rounded border border-muted/30 bg-transparent"
-          />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-muted text-xs">Name (zhs)</span>
-          <input
-            value={nameZhs}
-            onChange={(e) => setNameZhs(e.target.value)}
-            className="px-2 py-1 rounded border border-muted/30 bg-transparent"
-          />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-muted text-xs">Project root</span>
-          <input
-            value={projectRoot}
-            onChange={(e) => setProjectRoot(e.target.value)}
-            className="px-2 py-1 rounded border border-muted/30 bg-transparent font-mono text-xs"
-          />
-        </label>
-      </div>
-
-      <label className="flex flex-col gap-1 text-sm mb-3">
-        <span className="text-muted text-xs">Design description</span>
-        <textarea
-          value={designDescription}
-          onChange={(e) => setDesignDescription(e.target.value)}
-          rows={3}
-          className="px-2 py-1 rounded border border-muted/30 bg-transparent"
-        />
-      </label>
-
-      <label className="flex items-center gap-2 text-sm mb-3">
-        <input
-          type="checkbox"
-          checked={skipBuild}
-          onChange={(e) => setSkipBuild(e.target.checked)}
-        />
-        <span>skip_build</span>
-      </label>
-
-      {error && <p className="text-red-500 text-sm">Error: {error}</p>}
+      {error && <Notice variant="error" title={`Error: ${error}`} className="mt-3" />}
 
       {prompt && (
-        <details open className="mt-3">
-          <summary className="cursor-pointer text-sm text-muted mb-2">
+        <details open className="mt-4">
+          <summary
+            className="cursor-pointer mb-2"
+            style={{
+              fontFamily: '"JetBrains Mono", monospace',
+              fontSize: "10.5px",
+              letterSpacing: "0.16em",
+              textTransform: "uppercase",
+              color: "var(--ink-mute)",
+            }}
+          >
             Assembled prompt ({prompt.length} chars)
           </summary>
-          <pre className="text-xs p-3 rounded border border-muted/20 overflow-auto max-h-96 whitespace-pre-wrap">
-            {prompt}
-          </pre>
+          <pre className="pre-block max-h-96">{prompt}</pre>
         </details>
       )}
-    </section>
+    </Card>
   );
 }

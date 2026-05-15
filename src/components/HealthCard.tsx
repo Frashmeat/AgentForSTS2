@@ -1,6 +1,28 @@
 import { useEffect, useState } from "react";
+import { Badge, Card, CardSection, KV, KVList, Notice } from "@/components/ui";
 import { api } from "@/services/api";
 import type { HealthReport } from "@/services/tauriApi";
+
+function ReadyDot({ ok, label, title }: { ok: boolean; label: string; title?: string }) {
+  return (
+    <li className="flex items-baseline gap-2">
+      <span
+        title={title}
+        style={{
+          color: ok ? "var(--jade)" : "var(--ink-faint)",
+          fontFamily: '"JetBrains Mono", monospace',
+          fontSize: "12px",
+          width: "12px",
+          textAlign: "center",
+          flexShrink: 0,
+        }}
+      >
+        {ok ? "✓" : "○"}
+      </span>
+      <span style={{ fontSize: "13px" }}>{label}</span>
+    </li>
+  );
+}
 
 export function HealthCard() {
   const [health, setHealth] = useState<HealthReport | null>(null);
@@ -12,123 +34,78 @@ export function HealthCard() {
       .catch((e: unknown) => setError(String(e)));
   }, []);
 
-  const statusColor =
+  const statusVariant =
     health?.status === "ok"
-      ? "text-emerald-600"
+      ? "ok"
       : health?.status === "degraded"
-        ? "text-amber-600"
-        : "text-muted";
+        ? "warn"
+        : "muted";
 
   return (
-    <section className="rounded border border-muted/30 p-4">
-      <h2 className="text-lg font-medium mb-2">Health</h2>
-      {error && <p className="text-red-500">Error: {error}</p>}
-      {!error && !health && <p className="text-muted">Loading…</p>}
+    <Card
+      eyebrow="diagnostics · runtime"
+      title="Health"
+      actions={
+        health && (
+          <>
+            <Badge variant={statusVariant}>{health.status}</Badge>
+            <Badge variant="muted">role · {health.role}</Badge>
+            <Badge variant="muted">core · {health.coreVersion}</Badge>
+          </>
+        )
+      }
+    >
+      {error && <Notice variant="error" title={`Error: ${error}`} />}
+      {!error && !health && (
+        <p style={{ color: "var(--ink-mute)", fontSize: "13px" }}>Loading…</p>
+      )}
+
       {health && (
         <>
-          <p className="mb-3">
-            <span className="text-muted text-sm">Status: </span>
-            <span className={`font-medium ${statusColor}`}>{health.status}</span>
-            <span className="text-muted text-sm ml-4">Role: </span>
-            <span className="font-medium">{health.role}</span>
-            <span className="text-muted text-sm ml-4">Core: </span>
-            <span className="font-medium">{health.coreVersion}</span>
-          </p>
+          <CardSection title="Config">
+            <KVList>
+              <KV k="path">
+                <code>{health.config.path ?? "<none>"}</code>
+              </KV>
+              <KV k="file present">{String(health.config.filePresent)}</KV>
+              <KV k="loaded">{String(health.config.loaded)}</KV>
+            </KVList>
+            {health.config.errors.length > 0 && (
+              <Notice
+                variant="warn"
+                title="Config issues"
+                className="mt-3"
+              >
+                <ul className="space-y-0.5">
+                  {health.config.errors.map((e, i) => (
+                    <li key={i} style={{ fontSize: "12px" }}>• {e}</li>
+                  ))}
+                </ul>
+              </Notice>
+            )}
+          </CardSection>
 
-          <h3 className="text-sm font-medium text-muted mb-1">Config</h3>
-          <ul className="text-sm space-y-1 mb-3">
-            <li>
-              <span className="text-muted">Path: </span>
-              <code className="text-xs">{health.config.path ?? "<none>"}</code>
-            </li>
-            <li>
-              <span className="text-muted">File present: </span>
-              <span>{String(health.config.filePresent)}</span>
-            </li>
-            <li>
-              <span className="text-muted">Loaded: </span>
-              <span>{String(health.config.loaded)}</span>
-            </li>
-          </ul>
-          {health.config.errors.length > 0 && (
-            <div className="rounded border border-amber-500/40 bg-amber-50/40 p-2">
-              <p className="text-amber-700 text-sm font-medium mb-1">
-                Config issues
-              </p>
-              <ul className="text-xs space-y-0.5 text-amber-800">
-                {health.config.errors.map((e, i) => (
-                  <li key={i}>• {e}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          <div className="mt-3 pt-3 border-t border-muted/20">
-            <h3 className="text-sm font-medium text-muted mb-1">Readiness</h3>
-            <ul className="text-sm space-y-0.5">
-              <li>
-                <span
-                  className={
-                    health.readiness.llmConfigured ? "text-emerald-600" : "text-amber-600"
-                  }
-                >
-                  {health.readiness.llmConfigured ? "✓" : "○"}
-                </span>{" "}
-                LLM api_key 配置
-              </li>
-              <li>
-                <span
-                  className={
-                    health.readiness.imageGenConfigured
-                      ? "text-emerald-600"
-                      : "text-muted"
-                  }
-                >
-                  {health.readiness.imageGenConfigured ? "✓" : "○"}
-                </span>{" "}
-                image_gen api_key 配置（asset_generate 需要）
-              </li>
-              <li>
-                <span
-                  className={
-                    health.readiness.activeProjectOpen
-                      ? "text-emerald-600"
-                      : "text-muted"
-                  }
-                >
-                  {health.readiness.activeProjectOpen ? "✓" : "○"}
-                </span>{" "}
-                工程文件夹已打开
-              </li>
-              <li>
-                <span
-                  className={
-                    health.readiness.imageProcReady
-                      ? "text-emerald-600"
-                      : "text-muted"
-                  }
-                  title="cargo build --features ml-rembg 启用 + 模型加载成功"
-                >
-                  {health.readiness.imageProcReady ? "✓" : "○"}
-                </span>{" "}
-                ML 背景去除就绪（否则走启发式 fallback）
-              </li>
-              <li>
-                <span
-                  className={
-                    health.readiness.queueWorkerReady
-                      ? "text-emerald-600"
-                      : "text-muted"
-                  }
-                >
-                  {health.readiness.queueWorkerReady ? "✓" : "○"}
-                </span>{" "}
-                后台任务 worker
-              </li>
+          <CardSection title="Readiness">
+            <ul className="space-y-1.5">
+              <ReadyDot ok={health.readiness.llmConfigured} label="LLM api_key 配置" />
+              <ReadyDot
+                ok={health.readiness.imageGenConfigured}
+                label="image_gen api_key 配置（asset_generate 需要）"
+              />
+              <ReadyDot
+                ok={health.readiness.activeProjectOpen}
+                label="工程文件夹已打开"
+              />
+              <ReadyDot
+                ok={health.readiness.imageProcReady}
+                label="ML 背景去除就绪（否则走启发式 fallback）"
+                title="cargo build --features ml-rembg 启用 + 模型加载成功"
+              />
+              <ReadyDot ok={health.readiness.queueWorkerReady} label="后台任务 worker" />
             </ul>
-          </div>
+          </CardSection>
         </>
       )}
-    </section>
+    </Card>
   );
 }

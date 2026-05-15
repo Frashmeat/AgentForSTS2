@@ -5,6 +5,7 @@
 // 的 audit 立即出现，不用手点。
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Badge, Button, Card, Field } from "@/components/ui";
 import { api } from "@/services/api";
 import type {
   AuditEntry,
@@ -24,44 +25,46 @@ const KIND_OPTIONS = [
 
 type KindFilter = (typeof KIND_OPTIONS)[number];
 
-function prewarmBadge(s: PrewarmStatus): { text: string; color: string } {
+function prewarmBadge(
+  s: PrewarmStatus,
+): { text: string; variant: "muted" | "warn" | "ok" } {
   switch (s.state) {
     case "idle":
-      return { text: "ML rembg: idle", color: "text-muted border-muted/30" };
+      return { text: "ML rembg · idle", variant: "muted" };
     case "loading":
       return {
-        text: `ML rembg: loading — ${s.message}`,
-        color: "text-amber-600 border-amber-500/40 bg-amber-50/30",
+        text: `ML rembg · loading — ${s.message}`,
+        variant: "warn",
       };
     case "ready":
       return {
-        text: `ML rembg: ready (${s.model})`,
-        color: "text-emerald-600 border-emerald-500/40 bg-emerald-50/30",
+        text: `ML rembg · ready (${s.model})`,
+        variant: "ok",
       };
     case "failed":
       return {
-        text: `ML rembg: fallback — ${s.message}`,
-        color: "text-muted border-muted/30",
+        text: `ML rembg · fallback — ${s.message}`,
+        variant: "muted",
       };
     default:
-      return { text: "ML rembg: ?", color: "text-muted border-muted/30" };
+      return { text: "ML rembg · ?", variant: "muted" };
   }
 }
 
 function kindColor(kind: string): string {
   switch (kind) {
     case "job.submitted":
-      return "text-muted";
+      return "var(--ink-mute)";
     case "job.started":
-      return "text-accent";
+      return "var(--accent)";
     case "job.completed":
-      return "text-emerald-600";
+      return "var(--jade)";
     case "job.failed":
-      return "text-red-600";
+      return "var(--accent-deep)";
     case "job.cancelled":
-      return "text-amber-600";
+      return "var(--gold)";
     default:
-      return "text-fg";
+      return "var(--ink)";
   }
 }
 
@@ -96,7 +99,6 @@ export function AuditCard() {
       const rows = await api.auditReadRecent(limit);
       setEntries(rows as AuditEntry[]);
     } catch (e: unknown) {
-      // 没有 active project / 文件不存在都会进这里，UI 不当 fatal 显
       setEntries([]);
       setError(String(e));
     } finally {
@@ -104,7 +106,6 @@ export function AuditCard() {
     }
   }
 
-  // Prewarm 状态轮询：每 2s 拉一次，直到 ready/failed 锁定后停。
   useEffect(() => {
     if (!__IS_TAURI__) return;
     let stopped = false;
@@ -118,7 +119,7 @@ export function AuditCard() {
           timer = setTimeout(() => void tick(), 2000);
         }
       } catch {
-        // 静默；命令不存在或 app 还没装好都不当 fatal
+        // 静默
       }
     };
     void tick();
@@ -135,7 +136,6 @@ export function AuditCard() {
       const { listen } = await import("@tauri-apps/api/event");
       const stop = await listen<JobProgressEvent>("job-progress", (e) => {
         const stage = e.payload.stage;
-        // 终态事件后自动拉一次最新审计
         if (
           stage === "completed" ||
           stage === "failed" ||
@@ -155,34 +155,29 @@ export function AuditCard() {
 
   if (!__IS_TAURI__) {
     return (
-      <section className="rounded border border-muted/30 p-4">
-        <h2 className="text-lg font-medium mb-2">Audit</h2>
-        <p className="text-muted text-sm">
-          Audit 日志是桌面端 only —— Web 模式在 Stage 3 服务端审计落地后再启用。
-        </p>
-      </section>
+      <Card
+        eyebrow="observability · audit"
+        title="Audit"
+        subtitle="Audit 日志是桌面端 only —— Web 模式在 Stage 3 服务端审计落地后再启用。"
+      />
     );
   }
 
   const badge = prewarmBadge(prewarm);
 
   return (
-    <section className="rounded border border-muted/30 p-4">
-      <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-        <h2 className="text-lg font-medium">Audit · 最近事件</h2>
-        <div className="flex items-center gap-2 text-sm flex-wrap">
-          <span
-            className={`text-xs px-2 py-0.5 rounded border ${badge.color}`}
-            title="ML 背景去除模型预热状态"
-          >
+    <Card
+      eyebrow="observability · audit"
+      title="Audit · 最近事件"
+      actions={
+        <>
+          <Badge variant={badge.variant} title="ML 背景去除模型预热状态">
             {badge.text}
-          </span>
-          <label className="flex items-center gap-1 text-xs text-muted">
-            kind
+          </Badge>
+          <Field label="kind">
             <select
               value={kindFilter}
               onChange={(e) => setKindFilter(e.target.value as KindFilter)}
-              className="px-1 py-0.5 rounded border border-muted/30 bg-transparent"
             >
               {KIND_OPTIONS.map((k) => (
                 <option key={k} value={k}>
@@ -190,39 +185,37 @@ export function AuditCard() {
                 </option>
               ))}
             </select>
-          </label>
-          <label className="flex items-center gap-1 text-xs text-muted">
-            limit
+          </Field>
+          <Field label="limit">
             <select
               value={limit}
               onChange={(e) => setLimit(Number(e.target.value))}
-              className="px-1 py-0.5 rounded border border-muted/30 bg-transparent"
             >
               <option value={20}>20</option>
               <option value={50}>50</option>
               <option value={100}>100</option>
             </select>
-          </label>
-          <button
-            type="button"
-            onClick={() => void refresh()}
-            disabled={busy}
-            className="text-xs px-2 py-1 rounded border border-muted/40 hover:bg-muted/10 disabled:opacity-50"
-          >
+          </Field>
+          <Button size="sm" onClick={() => void refresh()} disabled={busy}>
             {busy ? "…" : "Refresh"}
-          </button>
-        </div>
-      </div>
-
+          </Button>
+        </>
+      }
+    >
       {error && (
-        <p className="text-xs text-muted mb-2">
+        <p
+          style={{ fontSize: "12px", color: "var(--ink-mute)" }}
+          className="mb-2"
+        >
           ({error.includes("active project") ? "先打开一个工程" : error})
         </p>
       )}
 
-      {entries === null && !error && <p className="text-muted text-sm">Loading…</p>}
+      {entries === null && !error && (
+        <p style={{ color: "var(--ink-mute)", fontSize: "13px" }}>Loading…</p>
+      )}
       {entries !== null && entries.length === 0 && !error && (
-        <p className="text-muted text-sm">
+        <p style={{ color: "var(--ink-faint)", fontSize: "12.5px" }}>
           还没有 audit 事件。提交一个 job 后这里会自动出现 submitted/started/completed/failed。
         </p>
       )}
@@ -230,30 +223,41 @@ export function AuditCard() {
         entries !== null &&
         entries.length > 0 &&
         visibleEntries.length === 0 && (
-          <p className="text-muted text-sm">
+          <p style={{ color: "var(--ink-faint)", fontSize: "12.5px" }}>
             当前 filter 没有匹配事件（kind={kindFilter}）。
           </p>
         )}
 
       {visibleEntries !== null && visibleEntries.length > 0 && (
-        <ul className="space-y-1 text-xs font-mono max-h-72 overflow-auto">
+        <ul
+          className="space-y-0.5 max-h-72 overflow-auto"
+          style={{ fontSize: "11.5px", fontFamily: '"JetBrains Mono", monospace' }}
+        >
           {visibleEntries.map((e, i) => (
             <li
               key={`${e.timestamp}-${i}`}
-              className="grid grid-cols-[80px_140px_1fr] gap-2 items-baseline border-b border-muted/10 py-0.5"
+              className="grid items-baseline gap-2 py-1"
+              style={{
+                gridTemplateColumns: "80px 140px 1fr",
+                borderBottom: "1px solid var(--rule-hair)",
+              }}
             >
-              <span className="text-muted">{fmtTime(e.timestamp)}</span>
-              <span className={`font-medium ${kindColor(e.kind)}`}>{e.kind}</span>
-              <span className="break-all">
+              <span style={{ color: "var(--ink-mute)" }}>{fmtTime(e.timestamp)}</span>
+              <span style={{ color: kindColor(e.kind), fontWeight: 500 }}>
+                {e.kind}
+              </span>
+              <span className="break-all" style={{ color: "var(--ink-soft)" }}>
                 {e.message}
                 {e.refId && (
-                  <span className="text-muted ml-2">({e.refId.slice(0, 8)})</span>
+                  <span style={{ color: "var(--ink-faint)", marginLeft: "8px" }}>
+                    ({e.refId.slice(0, 8)})
+                  </span>
                 )}
               </span>
             </li>
           ))}
         </ul>
       )}
-    </section>
+    </Card>
   );
 }

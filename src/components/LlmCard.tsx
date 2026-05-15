@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { Badge, Button, Card, Field, Notice } from "@/components/ui";
 import { api } from "@/services/api";
 import { streamLlmCompletion, type StreamHandle } from "@/services/llmStream";
 import type {
@@ -29,9 +30,7 @@ export function LlmCard() {
   const [systemPrompt, setSystemPrompt] = useState("");
   const [maxTokens, setMaxTokens] = useState(512);
 
-  const [completeResp, setCompleteResp] = useState<CompletionResponse | null>(
-    null,
-  );
+  const [completeResp, setCompleteResp] = useState<CompletionResponse | null>(null);
   const [streamState, setStreamState] = useState<StreamState>(INITIAL_STREAM_STATE);
   const [streaming, setStreaming] = useState(false);
   const [running, setRunning] = useState(false);
@@ -97,106 +96,86 @@ export function LlmCard() {
   const showStream = streamState.text.length > 0 || streamState.model !== null;
 
   return (
-    <section className="rounded border border-muted/30 p-4">
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-lg font-medium">LLM — Anthropic Completion</h2>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={handleComplete}
-            disabled={running}
-            className="text-sm px-3 py-1 rounded border border-muted/40 hover:bg-muted/10 disabled:opacity-50"
-          >
+    <Card
+      eyebrow="llm · anthropic completion"
+      title="LLM"
+      actions={
+        <>
+          <Button size="sm" onClick={handleComplete} disabled={running}>
             {running && !streaming ? "Running…" : "Complete"}
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            size="sm"
+            variant="accent"
             onClick={streaming ? handleCancel : handleStream}
             disabled={running && !streaming}
-            className="text-sm px-3 py-1 rounded border border-accent/60 text-accent hover:bg-accent/10 disabled:opacity-50"
           >
             {streaming ? "Cancel" : "Stream"}
-          </button>
-        </div>
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <Field label="system prompt (optional)">
+          <input
+            value={systemPrompt}
+            onChange={(e) => setSystemPrompt(e.target.value)}
+          />
+        </Field>
+        <Field label="user prompt">
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            rows={3}
+          />
+        </Field>
+        <Field label="max tokens" className="max-w-[200px]">
+          <input
+            type="number"
+            min={1}
+            max={8192}
+            value={maxTokens}
+            onChange={(e) => setMaxTokens(Number(e.target.value) || 512)}
+          />
+        </Field>
       </div>
 
-      <label className="flex flex-col gap-1 text-sm mb-2">
-        <span className="text-muted text-xs">System prompt (optional)</span>
-        <input
-          value={systemPrompt}
-          onChange={(e) => setSystemPrompt(e.target.value)}
-          className="px-2 py-1 rounded border border-muted/30 bg-transparent"
-        />
-      </label>
-
-      <label className="flex flex-col gap-1 text-sm mb-2">
-        <span className="text-muted text-xs">User prompt</span>
-        <textarea
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          rows={3}
-          className="px-2 py-1 rounded border border-muted/30 bg-transparent"
-        />
-      </label>
-
-      <label className="flex flex-col gap-1 text-sm mb-3 max-w-[160px]">
-        <span className="text-muted text-xs">Max tokens</span>
-        <input
-          type="number"
-          min={1}
-          max={8192}
-          value={maxTokens}
-          onChange={(e) => setMaxTokens(Number(e.target.value) || 512)}
-          className="px-2 py-1 rounded border border-muted/30 bg-transparent"
-        />
-      </label>
-
-      {error && <p className="text-red-500 text-sm">Error: {error}</p>}
+      {error && <Notice variant="error" title={`Error: ${error}`} className="mt-3" />}
 
       {completeResp && !showStream && (
-        <div className="mt-2 space-y-2">
-          <p className="text-xs text-muted">
-            Model: <span className="font-mono">{completeResp.model}</span>
-            <span className="ml-3">Finish:</span>{" "}
-            <span className="font-mono">{completeResp.finishReason}</span>
-            <span className="ml-3">Tokens:</span>{" "}
-            <span className="font-mono">
-              in {completeResp.usage.inputTokens} / out{" "}
+        <div className="mt-4 space-y-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Badge variant="muted">model · {completeResp.model}</Badge>
+            <Badge variant="muted">finish · {completeResp.finishReason}</Badge>
+            <Badge variant="muted">
+              tok in {completeResp.usage.inputTokens} / out{" "}
               {completeResp.usage.outputTokens}
-            </span>
-          </p>
-          <pre className="text-sm p-3 rounded border border-muted/20 overflow-auto max-h-96 whitespace-pre-wrap">
-            {completeResp.content}
-          </pre>
+            </Badge>
+          </div>
+          <pre className="pre-block max-h-96">{completeResp.content}</pre>
         </div>
       )}
 
       {showStream && (
-        <div className="mt-2 space-y-2">
-          <p className="text-xs text-muted">
-            Model: <span className="font-mono">{streamState.model ?? "—"}</span>
+        <div className="mt-4 space-y-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Badge variant="muted">model · {streamState.model ?? "—"}</Badge>
             {streamState.finishReason && (
-              <>
-                <span className="ml-3">Finish:</span>{" "}
-                <span className="font-mono">{streamState.finishReason}</span>
-              </>
+              <Badge variant="muted">finish · {streamState.finishReason}</Badge>
             )}
             {streamState.usage && (
-              <>
-                <span className="ml-3">Tokens:</span>{" "}
-                <span className="font-mono">
-                  in {streamState.usage.inputTokens} / out{" "}
-                  {streamState.usage.outputTokens}
-                </span>
-              </>
+              <Badge variant="muted">
+                tok in {streamState.usage.inputTokens} / out{" "}
+                {streamState.usage.outputTokens}
+              </Badge>
             )}
-            {streaming && <span className="ml-3 text-accent">streaming…</span>}
-          </p>
-          <pre className="text-sm p-3 rounded border border-muted/20 overflow-auto max-h-96 whitespace-pre-wrap">
+            {streaming && <Badge variant="running">streaming</Badge>}
+          </div>
+          <pre className="pre-block pre-block-stream max-h-96">
             {streamState.text || (streaming ? " " : "")}
           </pre>
         </div>
       )}
-    </section>
+    </Card>
   );
 }

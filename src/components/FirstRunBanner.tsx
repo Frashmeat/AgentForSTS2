@@ -1,21 +1,17 @@
-// 首次运行引导横幅：检测关键就绪项，红色横幅列出缺哪些 + 链到对应卡片。
+// 首次运行引导横幅：检测关键就绪项，列出缺哪些 + 链到对应卡片。
 // 全部绿了横幅消失（不持久化 dismiss —— 全绿就够清晰）。
 
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { Notice } from "@/components/ui";
 import { api } from "@/services/api";
-import type {
-  HealthReport,
-  LocalCapabilities,
-} from "@/services/tauriApi";
+import type { HealthReport, LocalCapabilities } from "@/services/tauriApi";
 
 interface CheckItem {
   ok: boolean;
   label: string;
   hint?: string;
-  /// 内部路由路径（react-router）
   to?: string;
-  /// 外部链接
   href?: string;
 }
 
@@ -40,7 +36,7 @@ export function FirstRunBanner() {
   }, []);
 
   if (!__IS_TAURI__) return null;
-  if (!health && !caps) return null; // 还没拉到
+  if (!health && !caps) return null;
 
   const items: CheckItem[] = [
     {
@@ -71,25 +67,28 @@ export function FirstRunBanner() {
   if (missing.length === 0) return null;
 
   return (
-    <section className="rounded border border-amber-500/50 bg-amber-50/30 p-4 mb-4">
-      <p className="text-amber-700 font-medium mb-2">
-        快速上手 — 还缺 {missing.length} 项配置
-      </p>
-      <ul className="space-y-1.5 text-sm">
+    <Notice
+      variant="warn"
+      title={`快速上手 — 还缺 ${missing.length} 项配置`}
+      className="mb-4"
+    >
+      <ul className="space-y-2 mt-1">
         {missing.map((it, i) => (
-          <li key={i} className="flex items-start gap-2">
-            <span className="text-amber-600">○</span>
-            <div className="flex-1">
-              <p>{it.label}</p>
+          <li key={i} className="flex items-start gap-3">
+            <span style={{ color: "var(--gold)", lineHeight: 1.4 }}>○</span>
+            <div className="flex-1 min-w-0">
+              <p style={{ color: "var(--ink)" }}>{it.label}</p>
               {it.hint && (
-                <p className="text-xs text-muted">{it.hint}</p>
+                <p
+                  className="mt-0.5"
+                  style={{ fontSize: "11.5px", color: "var(--ink-mute)" }}
+                >
+                  {it.hint}
+                </p>
               )}
             </div>
             {it.to && (
-              <Link
-                to={it.to}
-                className="text-xs px-2 py-0.5 rounded border border-accent/60 text-accent hover:bg-accent/10 shrink-0"
-              >
+              <Link to={it.to} className="btn btn-accent btn-sm shrink-0">
                 Go →
               </Link>
             )}
@@ -98,7 +97,7 @@ export function FirstRunBanner() {
                 href={it.href}
                 target="_blank"
                 rel="noreferrer"
-                className="text-xs px-2 py-0.5 rounded border border-accent/60 text-accent hover:bg-accent/10 shrink-0"
+                className="btn btn-accent btn-sm shrink-0"
               >
                 Open
               </a>
@@ -106,9 +105,12 @@ export function FirstRunBanner() {
           </li>
         ))}
       </ul>
-      <p className="text-xs text-muted mt-2">
-        配齐这些项后横幅会自动消失。全部✓的项已经满足，不再列出。
+      <p
+        className="mt-3"
+        style={{ fontSize: "11px", color: "var(--ink-faint)" }}
+      >
+        配齐这些项后横幅会自动消失。全部 ✓ 的项已经满足，不再列出。
       </p>
-    </section>
+    </Notice>
   );
 }

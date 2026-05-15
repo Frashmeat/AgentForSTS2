@@ -2,18 +2,94 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --color-background: #ffffff;
-  --color-foreground: #0f172a;
-  --color-muted: #64748b;
-  --color-accent: #2563eb;
+/* ============================================================
+   AgentTheSpire · 视觉沿用 e—flowcode 三件套的"墨青"基调
+   4 主题：vermilion(default) / indigo / jade / ink
+   颜色 token 通过 CSS 变量，Tailwind 配置里以语义名引用
+   ============================================================ */
+
+/* ---------- THEME · vermilion 朱砂（默认） ---------- */
+:root,
+:root[data-theme="vermilion"] {
+  --paper: #efe7d8;
+  --paper-deep: #e6dcc9;
+  --paper-soft: #f6efe2;
+  --ink: #14171c;
+  --ink-soft: #2a2f37;
+  --ink-mute: #5a6068;
+  --ink-faint: #8b8f95;
+  --rule: #1a1d24;
+  --rule-soft: rgba(20, 23, 28, 0.18);
+  --rule-hair: rgba(20, 23, 28, 0.10);
+  --accent: #c9382b;
+  --accent-deep: #9a2418;
+  --jade: #4d7a6a;
+  --jade-soft: #c9d8cf;
+  --gold: #b88c2f;
 }
 
-.dark {
-  --color-background: #0f172a;
-  --color-foreground: #f1f5f9;
-  --color-muted: #94a3b8;
-  --color-accent: #60a5fa;
+/* ---------- THEME · indigo 靛青 ---------- */
+:root[data-theme="indigo"] {
+  --paper: #ebeef5;
+  --paper-deep: #dde2ec;
+  --paper-soft: #f3f5f9;
+  --ink: #14171c;
+  --ink-soft: #2a2f37;
+  --ink-mute: #5a6068;
+  --ink-faint: #8b8f95;
+  --rule: #1a1d24;
+  --rule-soft: rgba(31, 50, 96, 0.20);
+  --rule-hair: rgba(31, 50, 96, 0.10);
+  --accent: #3b5998;
+  --accent-deep: #1f3260;
+  --jade: #4d7a6a;
+  --jade-soft: #c9d8cf;
+  --gold: #b88c2f;
+}
+
+/* ---------- THEME · jade 松绿 ---------- */
+:root[data-theme="jade"] {
+  --paper: #ebf0ec;
+  --paper-deep: #dbe4dd;
+  --paper-soft: #f3f7f4;
+  --ink: #14171c;
+  --ink-soft: #2a2f37;
+  --ink-mute: #5a6068;
+  --ink-faint: #8b8f95;
+  --rule: #1a1d24;
+  --rule-soft: rgba(47, 77, 64, 0.20);
+  --rule-hair: rgba(47, 77, 64, 0.10);
+  --accent: #4d7a6a;
+  --accent-deep: #2f4d40;
+  --jade: #4d7a6a;
+  --jade-soft: #c9d8cf;
+  --gold: #b88c2f;
+}
+
+/* ---------- THEME · ink 墨黑 ---------- */
+:root[data-theme="ink"] {
+  --paper: #ece9e2;
+  --paper-deep: #ddd9cf;
+  --paper-soft: #f4f1e8;
+  --ink: #14171c;
+  --ink-soft: #2a2f37;
+  --ink-mute: #5a6068;
+  --ink-faint: #8b8f95;
+  --rule: #1a1d24;
+  --rule-soft: rgba(20, 23, 28, 0.22);
+  --rule-hair: rgba(20, 23, 28, 0.12);
+  --accent: #2a2f37;
+  --accent-deep: #14171c;
+  --jade: #4d7a6a;
+  --jade-soft: #c9d8cf;
+  --gold: #b88c2f;
+}
+
+/* ---------- 全局基础 ---------- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
 }
 
 html,
@@ -23,7 +99,652 @@ body,
 }
 
 body {
-  background-color: var(--color-background);
-  color: var(--color-foreground);
-  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "Instrument Sans", "Noto Sans SC", -apple-system,
+    BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 14.5px;
+  line-height: 1.55;
+  font-feature-settings: "ss01", "ss02", "cv11";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+}
+
+::selection {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+/* ---------- PAPER GRAIN 背景层（fixed 在 body 下） ---------- */
+.paper-grain {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 20% 10%, rgba(20, 23, 28, 0.025) 0, transparent 40%),
+    radial-gradient(circle at 80% 80%, rgba(20, 23, 28, 0.03) 0, transparent 50%);
+  mix-blend-mode: multiply;
+}
+
+.paper-noise {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.32;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' seed='4'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.06 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+}
+
+/* ---------- 字体辅助类 ---------- */
+.font-display {
+  font-family: "Fraunces", "Noto Serif SC", serif;
+  font-variation-settings: "opsz" 144, "SOFT" 30;
+  letter-spacing: -0.02em;
+}
+
+.font-mono {
+  font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+
+.eyebrow {
+  font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+/* ---------- BRAND LOGO（圆形单字） ---------- */
+.brand-logo {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--accent);
+  color: var(--paper-soft);
+  font-family: "Noto Serif SC", "Fraunces", serif;
+  font-weight: 700;
+  font-size: 19px;
+  position: relative;
+  box-shadow: inset 0 0 0 2px var(--accent), inset 0 0 0 3px var(--paper);
+  transform: rotate(-4deg);
+  flex-shrink: 0;
+}
+
+.brand-logo::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background-image:
+    radial-gradient(circle at 30% 25%, transparent 12%, rgba(255, 255, 255, 0.18) 13%, transparent 14%),
+    radial-gradient(circle at 70% 75%, transparent 8%, rgba(0, 0, 0, 0.18) 9%, transparent 10%);
+  mix-blend-mode: overlay;
+}
+
+/* ---------- 顶栏主题切换胶囊 ---------- */
+.theme-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--paper-soft);
+  border: 1px solid var(--rule);
+}
+
+.theme-chip {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  background: transparent;
+  display: grid;
+  place-items: center;
+  transition: border-color 0.12s, transform 0.12s;
+}
+
+.theme-chip:hover {
+  transform: scale(1.06);
+}
+
+.theme-chip.active {
+  border-color: var(--accent);
+}
+
+.theme-chip .swatch {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
+.theme-chip[data-theme="vermilion"] .swatch {
+  background: linear-gradient(135deg, #c9382b 50%, #f7efde 50%);
+}
+.theme-chip[data-theme="indigo"] .swatch {
+  background: linear-gradient(135deg, #3b5998 50%, #eaf0f8 50%);
+}
+.theme-chip[data-theme="jade"] .swatch {
+  background: linear-gradient(135deg, #4d7a6a 50%, #e9efe8 50%);
+}
+.theme-chip[data-theme="ink"] .swatch {
+  background: linear-gradient(135deg, #efe7d8 50%, #1a1d22 50%);
+}
+
+/* ---------- 顶栏圆角胶囊按钮 ---------- */
+.topbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--rule);
+  background: var(--paper);
+  color: var(--ink);
+  font: 500 11.5px "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  text-decoration: none;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  white-space: nowrap;
+}
+
+.topbtn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.topbtn.ghost {
+  background: transparent;
+}
+
+.topbtn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--paper-soft);
+}
+
+.topbtn-icon {
+  font-size: 13px;
+  letter-spacing: 0;
+}
+
+/* ---------- 链接基础 ---------- */
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--accent-deep);
+}
+
+/* ============================================================
+   组件原语 (与 src/components/ui/* 配套)
+   ============================================================ */
+@layer components {
+  /* ---------- CARD ---------- */
+  .card-shell {
+    position: relative;
+    background: var(--paper-soft);
+    border: 1px solid var(--rule-soft);
+    border-radius: 6px;
+    padding: 18px 20px 16px;
+    box-shadow: 0 1px 0 var(--rule-hair);
+  }
+  .card-shell + .card-shell {
+    margin-top: 14px;
+  }
+  .card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+  }
+  .card-header-text {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    flex: 1;
+  }
+  .card-title {
+    font-family: "Fraunces", "Noto Serif SC", serif;
+    font-variation-settings: "opsz" 144, "SOFT" 30;
+    font-weight: 500;
+    font-size: 19px;
+    color: var(--ink);
+    letter-spacing: -0.015em;
+    line-height: 1.15;
+    margin: 0;
+  }
+  .card-subtitle {
+    font-size: 12.5px;
+    color: var(--ink-mute);
+    margin: 0;
+    max-width: 60ch;
+  }
+  .card-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .card-section + .card-section {
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid var(--rule-hair);
+  }
+
+  /* 卡片内 h3 副标题 */
+  .card-shell h3 {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    font-weight: 500;
+    margin: 0 0 6px;
+  }
+
+  /* 卡片里 code 用等宽 + 微底 */
+  .card-shell code,
+  .notice code,
+  .kv-val code {
+    font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+    background: rgba(20, 23, 28, 0.05);
+    padding: 0 4px;
+    border-radius: 3px;
+    font-size: 0.92em;
+  }
+
+  /* ---------- EYEBROW LABEL（卡片标题上方的小帽子） ---------- */
+  .eyebrow-label {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    line-height: 1;
+  }
+
+  /* ---------- BUTTON ---------- */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 6px 12px;
+    font: 500 11px "JetBrains Mono", ui-monospace, monospace;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    background: transparent;
+    color: var(--ink);
+    transition: border-color 0.12s, color 0.12s, background 0.12s, transform 0.06s;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .btn:disabled,
+  .btn[aria-disabled="true"] {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .btn:not(:disabled):active {
+    transform: translateY(1px);
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: var(--paper-soft);
+    border-color: var(--accent);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+
+  .btn-ghost {
+    border-color: var(--rule-soft);
+    color: var(--ink);
+  }
+  .btn-ghost:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .btn-accent {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .btn-accent:hover:not(:disabled) {
+    background: var(--accent);
+    color: var(--paper-soft);
+  }
+
+  .btn-success {
+    border-color: var(--jade);
+    color: var(--jade);
+  }
+  .btn-success:hover:not(:disabled) {
+    background: var(--jade);
+    color: var(--paper-soft);
+  }
+
+  .btn-danger {
+    border-color: rgba(154, 36, 24, 0.5);
+    color: var(--accent-deep);
+  }
+  .btn-danger:hover:not(:disabled) {
+    background: var(--accent-deep);
+    color: var(--paper-soft);
+  }
+
+  /* sizes */
+  .btn-sm {
+    padding: 3px 8px;
+    font-size: 9.5px;
+    letter-spacing: 0.12em;
+  }
+  .btn-md {
+    /* default */
+  }
+  .btn-lg {
+    padding: 8px 16px;
+    font-size: 12px;
+  }
+
+  /* ---------- BADGE ---------- */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 7px;
+    font: 500 9.5px "JetBrains Mono", monospace;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    border-radius: 3px;
+    border: 1px solid;
+    line-height: 1.7;
+    white-space: nowrap;
+  }
+  .badge-ok {
+    color: var(--jade);
+    border-color: rgba(77, 122, 106, 0.45);
+    background: rgba(77, 122, 106, 0.10);
+  }
+  .badge-warn {
+    color: var(--gold);
+    border-color: rgba(184, 140, 47, 0.5);
+    background: rgba(184, 140, 47, 0.10);
+  }
+  .badge-error {
+    color: var(--accent-deep);
+    border-color: rgba(154, 36, 24, 0.5);
+    background: rgba(154, 36, 24, 0.08);
+  }
+  .badge-muted {
+    color: var(--ink-mute);
+    border-color: var(--rule-soft);
+    background: var(--paper);
+  }
+  .badge-accent {
+    color: var(--accent);
+    border-color: rgba(201, 56, 43, 0.5);
+    background: rgba(201, 56, 43, 0.08);
+  }
+  .badge-running {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: rgba(201, 56, 43, 0.08);
+  }
+  .badge-running::before {
+    content: "";
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: badge-pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes badge-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+  }
+
+  /* ---------- NOTICE（横幅 / 提示框，左侧 3px 强调线） ---------- */
+  .notice {
+    padding: 10px 14px;
+    border-radius: 4px;
+    border: 1px solid;
+    border-left-width: 3px;
+    font-size: 13px;
+    color: var(--ink-soft);
+  }
+  .notice-title {
+    font-weight: 500;
+    color: var(--ink);
+    margin: 0 0 4px;
+    font-size: 13.5px;
+  }
+  .notice-body {
+    margin: 0;
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+  .notice-warn {
+    background: rgba(184, 140, 47, 0.06);
+    border-color: rgba(184, 140, 47, 0.35);
+    border-left-color: var(--gold);
+  }
+  .notice-warn .notice-title {
+    color: var(--gold);
+  }
+  .notice-error {
+    background: rgba(154, 36, 24, 0.05);
+    border-color: rgba(154, 36, 24, 0.35);
+    border-left-color: var(--accent);
+  }
+  .notice-error .notice-title {
+    color: var(--accent-deep);
+  }
+  .notice-ok {
+    background: rgba(77, 122, 106, 0.07);
+    border-color: rgba(77, 122, 106, 0.35);
+    border-left-color: var(--jade);
+  }
+  .notice-ok .notice-title {
+    color: var(--jade);
+  }
+  .notice-muted {
+    background: var(--paper);
+    border-color: var(--rule-soft);
+    border-left-color: var(--ink-mute);
+  }
+
+  /* ---------- FIELD（label 行 + input 行 + hint） ---------- */
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .field-label {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 9.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+  }
+  .field-hint {
+    font-size: 11px;
+    color: var(--ink-faint);
+    line-height: 1.4;
+  }
+  .field input,
+  .field textarea,
+  .field select,
+  .input-bare,
+  .card-shell input[type="text"],
+  .card-shell input:not([type]),
+  .card-shell input[type="number"],
+  .card-shell input[type="search"],
+  .card-shell input[type="password"],
+  .card-shell textarea,
+  .card-shell select {
+    background: var(--paper);
+    border: 1px solid var(--rule-soft);
+    color: var(--ink);
+    border-radius: 3px;
+    padding: 6px 9px;
+    font-size: 13px;
+    transition: border-color 0.12s, background 0.12s;
+  }
+  .field input:focus,
+  .field textarea:focus,
+  .field select:focus,
+  .card-shell input:focus,
+  .card-shell textarea:focus,
+  .card-shell select:focus {
+    outline: none;
+    border-color: var(--accent);
+    background: var(--paper-soft);
+  }
+  .field code,
+  .input-mono {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11.5px;
+  }
+  .field-row {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+  }
+  .field-row > .field {
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* ---------- KV LIST ---------- */
+  .kv-list {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    gap: 6px 14px;
+    font-size: 13px;
+    margin: 0;
+  }
+  .kv-list-narrow {
+    grid-template-columns: 100px 1fr;
+  }
+  .kv-list-wide {
+    grid-template-columns: 180px 1fr;
+  }
+  .kv-key {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 9.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    padding-top: 3px;
+    margin: 0;
+    align-self: start;
+  }
+  .kv-val {
+    margin: 0;
+    min-width: 0;
+    color: var(--ink);
+    word-break: break-word;
+  }
+
+  /* ---------- DIVIDER ---------- */
+  .rule-soft {
+    height: 1px;
+    background: var(--rule-soft);
+    margin: 14px 0;
+    border: 0;
+  }
+  .rule-hair {
+    height: 1px;
+    background: var(--rule-hair);
+    margin: 10px 0;
+    border: 0;
+  }
+
+  /* ---------- PAGE HERO ---------- */
+  .page-hero {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 22px;
+  }
+  .page-hero h1 {
+    font-family: "Fraunces", "Noto Serif SC", serif;
+    font-variation-settings: "opsz" 144, "SOFT" 30;
+    font-size: 36px;
+    font-weight: 500;
+    letter-spacing: -0.025em;
+    margin: 0;
+    line-height: 1.1;
+  }
+  .page-hero-text {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    flex: 1;
+  }
+  .page-hero-subtitle {
+    font-size: 13px;
+    color: var(--ink-mute);
+    max-width: 70ch;
+    margin: 0;
+  }
+  .page-hero-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  /* ---------- PRE / 流式输出 ---------- */
+  .pre-block {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11.5px;
+    padding: 10px 12px;
+    background: var(--paper);
+    border: 1px solid var(--rule-soft);
+    border-radius: 3px;
+    white-space: pre-wrap;
+    overflow: auto;
+    line-height: 1.45;
+    color: var(--ink-soft);
+  }
+  .pre-block-stream {
+    background: rgba(20, 23, 28, 0.025);
+  }
+  .pre-block-ok {
+    background: rgba(77, 122, 106, 0.06);
+    border-color: rgba(77, 122, 106, 0.35);
+    color: var(--ink);
+  }
+  .pre-block-error {
+    background: rgba(154, 36, 24, 0.05);
+    border-color: rgba(154, 36, 24, 0.35);
+    color: var(--accent-deep);
+  }
 }

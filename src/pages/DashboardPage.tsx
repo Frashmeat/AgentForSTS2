@@ -1,4 +1,4 @@
-// Dashboard 主页：原来 App.tsx 里 stack 的所有 Card，保持原状但放进 router。
+// Dashboard 主页：原来 App.tsx 里 stack 的所有 Card，放进路由后保持原状。
 
 import { AuditCard } from "@/components/AuditCard";
 import { CapabilitiesCard } from "@/components/CapabilitiesCard";
@@ -11,29 +11,31 @@ import { LlmCard } from "@/components/LlmCard";
 import { PlanningCard } from "@/components/PlanningCard";
 import { ProjectCard } from "@/components/ProjectCard";
 import { SingleAssetWorkflowCard } from "@/components/SingleAssetWorkflowCard";
+import { PageHero } from "@/components/ui";
 
 export function DashboardPage() {
   return (
-    <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold">Dashboard</h1>
-        <p className="text-muted text-sm">
-          Runtime: {__IS_TAURI__ ? "Tauri desktop (workstation)" : "Web browser"}
-        </p>
-      </header>
+    <div>
+      <PageHero
+        eyebrow="cockpit · dashboard"
+        title="Dashboard"
+        subtitle={`Runtime · ${__IS_TAURI__ ? "Tauri desktop (workstation)" : "Web browser"}`}
+      />
 
       <FirstRunBanner />
 
-      <HealthCard />
-      <CapabilitiesCard />
-      <ProjectCard />
-      <SingleAssetWorkflowCard />
-      <JobsCard />
-      <AuditCard />
-      <KnowledgeCard />
-      <PlanningCard />
-      <CodegenCard />
-      <LlmCard />
+      <div className="space-y-4">
+        <HealthCard />
+        <CapabilitiesCard />
+        <ProjectCard />
+        <SingleAssetWorkflowCard />
+        <JobsCard />
+        <AuditCard />
+        <KnowledgeCard />
+        <PlanningCard />
+        <CodegenCard />
+        <LlmCard />
+      </div>
     </div>
   );
 }
