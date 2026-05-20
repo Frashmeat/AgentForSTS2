@@ -123,6 +123,34 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// 监听 Ctrl+C 与 SIGTERM（Unix 上）；任一触发即返回，axum 进入优雅停机
+/// （等待 in-flight 请求完成、不再 accept 新连接）。
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        if let Err(err) = tokio::signal::ctrl_c().await {
+            tracing::error!("install ctrl_c handler failed: {err}");
+        }
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut s) => {
+                s.recv().await;
+            }
+            Err(err) => tracing::error!("install SIGTERM handler failed: {err}"),
+        }
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        () = ctrl_c => tracing::info!("received Ctrl+C, shutting down"),
+        () = terminate => tracing::info!("received SIGTERM, shutting down"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -174,33 +202,5 @@ mod tests {
         // 无 settings 走 report() 分支，readiness 走 Default
         assert!(!report.readiness.llm_configured);
         assert!(!report.readiness.image_gen_configured);
-    }
-}
-
-/// 监听 Ctrl+C 与 SIGTERM（Unix 上）；任一触发即返回，axum 进入优雅停机
-/// （等待 in-flight 请求完成、不再 accept 新连接）。
-async fn shutdown_signal() {
-    let ctrl_c = async {
-        if let Err(err) = tokio::signal::ctrl_c().await {
-            tracing::error!("install ctrl_c handler failed: {err}");
-        }
-    };
-
-    #[cfg(unix)]
-    let terminate = async {
-        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
-            Ok(mut s) => {
-                s.recv().await;
-            }
-            Err(err) => tracing::error!("install SIGTERM handler failed: {err}"),
-        }
-    };
-
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-
-    tokio::select! {
-        () = ctrl_c => tracing::info!("received Ctrl+C, shutting down"),
-        () = terminate => tracing::info!("received SIGTERM, shutting down"),
     }
 }
