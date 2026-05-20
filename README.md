@@ -188,9 +188,13 @@ Q1 决议：桌面端无 DB，每个 mod 项目是自包含目录：
 启用 `ml-rembg` feature 启用 u2netp + ort 推理：
 
 ```powershell
-# 开发跑
+# 桌面开发（带 ml-rembg）
+./dev.ps1 -MlRembg
+# 桌面生产打包（带 ml-rembg；产物含 onnxruntime native lib）
+./build.ps1 -MlRembg
+# Web 服务器开发
 cargo run -p ats-web --features ml-rembg
-# 桌面打包
+# 直跑 cargo tauri 命令（PS 脚本只是 UX 糖）
 cargo tauri build --features ml-rembg
 ```
 
