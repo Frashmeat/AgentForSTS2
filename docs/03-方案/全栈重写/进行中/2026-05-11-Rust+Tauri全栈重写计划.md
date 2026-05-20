@@ -327,16 +327,16 @@ export const api = new Proxy({} as ApiModule, { /* 异步代理 */ });
 
 ### 阶段 0 — 骨架 + 设计文档（本计划完成时）
 
-**产物**（已落地）：
-- `rust/Cargo.toml` workspace 根
+**产物**（已落地，commit `3603911` 平铺后路径）：
+- `Cargo.toml` workspace 根
 - `crates/ats-core/`、`crates/ats-web/`、`crates/ats-cli/`、`src-tauri/` 四 crate 最小 stub
-- `rust/src/`、`vite.config.ts`、`package.json` 前端骨架
-- `rust/src-tauri/tauri.conf.json`
+- `src/`、`vite.config.ts`、`package.json` 前端骨架
+- `src-tauri/tauri.conf.json`
 - 本计划文档
 
 **验收**：
-- `cd rust && cargo check --workspace` 通过
-- `cd rust && npm install && npm run build` 通过
+- `cargo check --workspace` 通过
+- `npm install && npm run build` 通过
 
 ### 阶段 1 — 端到端最小通路（≈1 周）
 

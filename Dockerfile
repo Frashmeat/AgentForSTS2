@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 # AgentTheSpire — ats-web 多阶段构建。
-# 构建上下文：rust/ 目录。
+# 构建上下文：仓库根。
 
 # ---- Stage 1: 前端构建 ----------------------------------------------------
 FROM node:lts AS frontend

@@ -184,8 +184,8 @@ impl Settings {
 ///
 /// For the default case (no explicit override) we walk up from the current
 /// working directory looking for `runtime/agentthespire.config.json`. This
-/// covers both `cargo run -p ats-web` (cwd = `rust/`) and `tauri dev`
-/// (cwd = `rust/src-tauri/`) without per-binary configuration.
+/// covers both `cargo run -p ats-web` (cwd = repo root) and `tauri dev`
+/// (cwd = `src-tauri/`) without per-binary configuration.
 fn resolve_config_path(explicit_path: Option<&Path>) -> (PathBuf, bool) {
     if let Some(p) = explicit_path {
         let absolute = absolutize(p);
