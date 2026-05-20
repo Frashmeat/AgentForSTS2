@@ -40,6 +40,9 @@ case "$MODE" in
         npm run build:web
         cargo check --workspace --all-targets
         cargo test --workspace --all-targets
+        # clippy 是 GitHub CI 的独立 job (-D warnings)。本地必须跑，否则会出现
+        # "本地 ci-local PASSED 但远端 CI fail" 的情况（参见 commit 1f1c5ce/0a40086）。
+        cargo clippy --workspace --all-targets -- -D warnings
         ;;
     *)
         echo "unknown mode: $MODE (expected: full / check / clippy)" >&2
