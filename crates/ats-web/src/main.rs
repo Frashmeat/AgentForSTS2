@@ -40,10 +40,24 @@ pub struct AppState {
 async fn health_handler(
     Extension(state): Extension<Arc<AppState>>,
 ) -> Json<HealthReport> {
-    Json(ats_core::health::report(
-        Role::Web,
-        state.config_status.clone(),
-    ))
+    Json(build_health_report(&state))
+}
+
+/// 装 HealthReport：有 settings 时填全 readiness（LLM / image_gen），
+/// active_project_open / image_proc_ready 在 Web 角色永为 false（前者是桌面端
+/// 工程文件夹概念，后者是桌面端 ML prewarm）。
+/// settings 缺失时回退到不带 readiness 的 report()，避免崩溃。
+fn build_health_report(state: &AppState) -> HealthReport {
+    match state.settings_snapshot.as_ref() {
+        Some(settings) => ats_core::health::report_full(
+            Role::Web,
+            state.config_status.clone(),
+            settings,
+            false,
+            false,
+        ),
+        None => ats_core::health::report(Role::Web, state.config_status.clone()),
+    }
 }
 
 #[tokio::main]
@@ -107,6 +121,60 @@ async fn main() -> anyhow::Result<()> {
         .await?;
     tracing::info!("ats-web shut down cleanly");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ats_core::config::{ConfigStatus, Settings};
+
+    fn make_state(settings: Option<Settings>) -> AppState {
+        AppState {
+            config_status: ConfigStatus {
+                path: Some("/tmp/test.json".to_string()),
+                file_present: true,
+                loaded: settings.is_some(),
+                errors: vec![],
+            },
+            runtime_dir: PathBuf::from("/tmp"),
+            settings_snapshot: settings,
+        }
+    }
+
+    #[test]
+    fn build_health_report_with_configured_keys() {
+        let mut settings = Settings::built_in_defaults();
+        settings.llm.api_key = "sk-test-llm".to_string();
+        settings.image_gen.api_key = "sk-test-img".to_string();
+
+        let report = build_health_report(&make_state(Some(settings)));
+
+        assert_eq!(report.role, Role::Web);
+        assert!(report.readiness.llm_configured);
+        assert!(report.readiness.image_gen_configured);
+        assert!(!report.readiness.active_project_open, "Web 端永 false");
+        assert!(!report.readiness.image_proc_ready, "Web 端无 ML prewarm");
+        assert!(report.readiness.queue_worker_ready);
+    }
+
+    #[test]
+    fn build_health_report_with_empty_keys() {
+        let settings = Settings::built_in_defaults();
+        let report = build_health_report(&make_state(Some(settings)));
+
+        assert_eq!(report.role, Role::Web);
+        assert!(!report.readiness.llm_configured);
+        assert!(!report.readiness.image_gen_configured);
+    }
+
+    #[test]
+    fn build_health_report_without_settings_snapshot_does_not_panic() {
+        let report = build_health_report(&make_state(None));
+        assert_eq!(report.role, Role::Web);
+        // 无 settings 走 report() 分支，readiness 走 Default
+        assert!(!report.readiness.llm_configured);
+        assert!(!report.readiness.image_gen_configured);
+    }
 }
 
 /// 监听 Ctrl+C 与 SIGTERM（Unix 上）；任一触发即返回，axum 进入优雅停机
