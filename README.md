@@ -90,6 +90,10 @@ npx tauri dev
 # 或者用本目录里的 ps1 脚本：
 ./dev.ps1
 
+# 如果 node_modules 是从 WSL/Linux/macOS 复制过来的，或安装中断导致
+# node_modules/.bin/vite.cmd / Rollup Windows 原生包缺失，ps1 脚本会
+# 自动尝试 npm install 修复；仍失败时，按提示删除 node_modules 后重装。
+
 # Web 服务器开发
 ./dev-web.ps1
 # 等价于：
