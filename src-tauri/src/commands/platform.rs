@@ -6,6 +6,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use ats_core::audit::{AuditSinkArc, FileAuditSink};
 use ats_core::image_gen::{ImageGenClient, build_from_config as build_image_gen};
 use ats_core::image_proc::{BgRemoverChain, ImageProcClient};
@@ -18,11 +19,10 @@ use ats_core::platform::{
     SubmitJobAck, SubmitKnowledgeRefreshRequest, SubmitLogAnalysisRequest,
     SubmitPackageProjectRequest, SubmitSingleAssetPlanRequest, SubmitTextGenerateRequest,
 };
-use async_trait::async_trait;
 use tauri::{AppHandle, Emitter, State};
 
-use crate::commands::project::ActiveProject;
 use crate::AppConfig;
+use crate::commands::project::ActiveProject;
 
 const JOB_PROGRESS_EVENT: &str = "job-progress";
 
@@ -49,10 +49,7 @@ pub async fn get_job(
     id: String,
 ) -> Result<Job, String> {
     let service = build_service(&config, &active)?;
-    service
-        .get(&JobId(id))
-        .await
-        .map_err(|e| e.to_string())
+    service.get(&JobId(id)).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -71,10 +68,7 @@ pub async fn cancel_job(
     id: String,
 ) -> Result<(), String> {
     let service = build_service(&config, &active)?;
-    service
-        .cancel(&JobId(id))
-        .await
-        .map_err(|e| e.to_string())
+    service.cancel(&JobId(id)).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]

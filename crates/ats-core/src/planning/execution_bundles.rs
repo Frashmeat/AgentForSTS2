@@ -113,8 +113,7 @@ fn build_group_bundles(
     strictness: ReviewStrictness,
     bundle_decisions: &HashMap<String, BundleDecision>,
 ) -> Vec<ExecutionBundle> {
-    let id_to_item: HashMap<&str, &PlanItem> =
-        group.iter().map(|i| (i.id.as_str(), i)).collect();
+    let id_to_item: HashMap<&str, &PlanItem> = group.iter().map(|i| (i.id.as_str(), i)).collect();
     let mut neighbors: HashMap<String, BTreeSet<String>> = group
         .iter()
         .map(|i| (i.id.clone(), BTreeSet::new()))
@@ -129,8 +128,14 @@ fn build_group_bundles(
         }
         for dep in &item.depends_on_item_ids {
             if id_to_item.contains_key(dep.as_str()) {
-                neighbors.entry(item.id.clone()).or_default().insert(dep.clone());
-                neighbors.entry(dep.clone()).or_default().insert(item.id.clone());
+                neighbors
+                    .entry(item.id.clone())
+                    .or_default()
+                    .insert(dep.clone());
+                neighbors
+                    .entry(dep.clone())
+                    .or_default()
+                    .insert(item.id.clone());
             }
         }
     }
@@ -148,7 +153,10 @@ fn build_group_bundles(
             .filter_map(|id| id_to_item.get(id.as_str()).copied())
             .collect();
         let bundle_id = bundle_id_for(&component_ids);
-        let decision = bundle_decisions.get(&bundle_id).copied().unwrap_or_default();
+        let decision = bundle_decisions
+            .get(&bundle_id)
+            .copied()
+            .unwrap_or_default();
         if matches!(decision, BundleDecision::SplitRequested) && component_items.len() > 1 {
             bundles.extend(build_split_bundles(&component_items));
             continue;
@@ -284,21 +292,24 @@ fn risk_detail(code: &str) -> RiskDetail {
             code: code.into(),
             title: "Item 关系不明确".into(),
             summary: "系统无法确认这些 item 是否必须绑在一起执行。".into(),
-            recommendation: "若你确认它们必须一起落地，可接受当前分组；否则优先补充关系说明或要求拆分。".into(),
+            recommendation:
+                "若你确认它们必须一起落地，可接受当前分组；否则优先补充关系说明或要求拆分。".into(),
             impact: "错误合并后会扩大一次执行失败的影响范围。".into(),
         },
         "bundle_size_threshold" => RiskDetail {
             code: code.into(),
             title: "Bundle 规模偏大".into(),
             summary: "当前 bundle 的 item 数已超过当前严格度下的建议阈值。".into(),
-            recommendation: "优先要求拆分；只有在这些 item 明显属于同一功能包时再接受当前分组。".into(),
+            recommendation: "优先要求拆分；只有在这些 item 明显属于同一功能包时再接受当前分组。"
+                .into(),
             impact: "bundle 越大，失败后的定位和回滚成本越高。".into(),
         },
         "mixed_item_types" => RiskDetail {
             code: code.into(),
             title: "包含多种 item 类型".into(),
             summary: "同一 bundle 混入不同类型 item，执行节奏和验收口径更复杂。".into(),
-            recommendation: "若只是弱相关，建议拆开；若围绕同一功能共同交付，可接受当前分组。".into(),
+            recommendation: "若只是弱相关，建议拆开；若围绕同一功能共同交付，可接受当前分组。"
+                .into(),
             impact: "混合类型越多，执行与验收越容易漂移。".into(),
         },
         "affected_targets_spread" => RiskDetail {
@@ -390,8 +401,7 @@ mod tests {
     #[test]
     fn empty_plan_yields_empty_preview() {
         let plan = ModPlan::default();
-        let preview =
-            build_execution_plan(&plan, ReviewStrictness::Balanced, &HashMap::new());
+        let preview = build_execution_plan(&plan, ReviewStrictness::Balanced, &HashMap::new());
         assert!(preview.dependency_groups.is_empty());
         assert!(preview.execution_bundles.is_empty());
     }
@@ -406,10 +416,12 @@ mod tests {
             items: vec![a],
             ..Default::default()
         };
-        let preview =
-            build_execution_plan(&plan, ReviewStrictness::Balanced, &HashMap::new());
+        let preview = build_execution_plan(&plan, ReviewStrictness::Balanced, &HashMap::new());
         assert_eq!(preview.execution_bundles.len(), 1);
-        assert_eq!(preview.execution_bundles[0].status, BundleReviewStatus::Clear);
+        assert_eq!(
+            preview.execution_bundles[0].status,
+            BundleReviewStatus::Clear
+        );
     }
 
     #[test]
@@ -420,16 +432,17 @@ mod tests {
             items: vec![item("a", AssetItemType::Card)],
             ..Default::default()
         };
-        let preview =
-            build_execution_plan(&plan, ReviewStrictness::Balanced, &HashMap::new());
+        let preview = build_execution_plan(&plan, ReviewStrictness::Balanced, &HashMap::new());
         assert_eq!(
             preview.execution_bundles[0].status,
             BundleReviewStatus::NeedsConfirmation,
         );
-        assert!(preview.execution_bundles[0]
-            .risk_codes
-            .iter()
-            .any(|c| c == "unclear_coupling"));
+        assert!(
+            preview.execution_bundles[0]
+                .risk_codes
+                .iter()
+                .any(|c| c == "unclear_coupling")
+        );
     }
 
     #[test]
@@ -441,9 +454,11 @@ mod tests {
             it.depends_on_item_ids = vec!["a".into()];
             items.push(it);
         }
-        let plan = ModPlan { items, ..Default::default() };
-        let preview =
-            build_execution_plan(&plan, ReviewStrictness::Balanced, &HashMap::new());
+        let plan = ModPlan {
+            items,
+            ..Default::default()
+        };
+        let preview = build_execution_plan(&plan, ReviewStrictness::Balanced, &HashMap::new());
         assert_eq!(preview.execution_bundles.len(), 1);
         assert_eq!(
             preview.execution_bundles[0].status,
@@ -461,17 +476,16 @@ mod tests {
         };
         let mut decisions = HashMap::new();
         // 该 bundle 的 id 由两个 item 拼接得到。
-        decisions.insert(
-            "bundle:a::b".into(),
-            BundleDecision::SplitRequested,
-        );
+        decisions.insert("bundle:a::b".into(), BundleDecision::SplitRequested);
         let preview = build_execution_plan(&plan, ReviewStrictness::Balanced, &decisions);
         // 拆分后应得到 2 个独立 bundle，全部 clear。
         assert_eq!(preview.execution_bundles.len(), 2);
-        assert!(preview
-            .execution_bundles
-            .iter()
-            .all(|b| b.status == BundleReviewStatus::Clear));
+        assert!(
+            preview
+                .execution_bundles
+                .iter()
+                .all(|b| b.status == BundleReviewStatus::Clear)
+        );
     }
 
     #[test]
@@ -484,8 +498,7 @@ mod tests {
             items: vec![item("a", AssetItemType::Card), b],
             ..Default::default()
         };
-        let preview =
-            build_execution_plan(&plan, ReviewStrictness::Balanced, &HashMap::new());
+        let preview = build_execution_plan(&plan, ReviewStrictness::Balanced, &HashMap::new());
         assert_eq!(preview.execution_bundles.len(), 2);
     }
 }

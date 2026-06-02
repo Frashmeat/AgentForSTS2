@@ -91,6 +91,7 @@ pub async fn run_code_generate(
         "model": artifact.model,
         "entityName": artifact.entity_name,
         "csPath": artifact.cs_path.display().to_string(),
+        "artifactCsPath": artifact.artifact_cs_path.display().to_string(),
         "rawPath": artifact.raw_path.display().to_string(),
         "extractedChars": artifact.extracted_chars,
         "rawChars": artifact.raw_chars,
@@ -161,6 +162,7 @@ pub(crate) struct WrittenArtifact {
     pub model: String,
     pub entity_name: String,
     pub cs_path: PathBuf,
+    pub artifact_cs_path: PathBuf,
     pub raw_path: PathBuf,
     pub extracted_chars: usize,
     pub raw_chars: usize,
@@ -177,6 +179,8 @@ pub(crate) enum GenerateError {
 
 /// 把 prompt 转给 LLM 流式生成，累积响应后解 fence，再写到
 /// `<artifacts_dir>/<entity_name>/<entity_name>.cs` + `raw.md`。
+/// 同时把可编译 `.cs` 镜像到 `<project_root>/Generated/<entity_name>.cs`，
+/// 让 IDE 和 dotnet 工程能直接识别生成源码。
 ///
 /// 流式 delta 通过 sink 实时推出。供 code_generate 和 batch_custom_code 共用。
 ///
@@ -241,13 +245,26 @@ pub(crate) async fn generate_and_write_code_artifact(
         }
     }
 
-    let extracted =
-        extract_first_code_block(&accumulated).unwrap_or_else(|| accumulated.clone());
+    let extracted = extract_first_code_block(&accumulated).unwrap_or_else(|| accumulated.clone());
 
     let target_dir = artifacts_dir.join(entity_name);
-    let cs_path = target_dir.join(format!("{entity_name}.cs"));
+    let artifact_cs_path = target_dir.join(format!("{entity_name}.cs"));
     let raw_path = target_dir.join("raw.md");
+    let project_root = artifacts_dir.parent().ok_or_else(|| {
+        GenerateError::Write(format!(
+            "artifacts dir has no parent: {}",
+            artifacts_dir.display()
+        ))
+    })?;
+    let generated_dir = project_root.join("Generated");
+    let cs_path = generated_dir.join(format!("{entity_name}.cs"));
     fs::create_dir_all(&target_dir)
+        .await
+        .map_err(|e| GenerateError::Write(e.to_string()))?;
+    fs::create_dir_all(&generated_dir)
+        .await
+        .map_err(|e| GenerateError::Write(e.to_string()))?;
+    fs::write(&artifact_cs_path, &extracted)
         .await
         .map_err(|e| GenerateError::Write(e.to_string()))?;
     fs::write(&cs_path, &extracted)
@@ -261,6 +278,7 @@ pub(crate) async fn generate_and_write_code_artifact(
         model,
         entity_name: entity_name.to_string(),
         cs_path,
+        artifact_cs_path,
         raw_path,
         extracted_chars: extracted.len(),
         raw_chars: accumulated.len(),

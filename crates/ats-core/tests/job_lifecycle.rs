@@ -2,13 +2,15 @@
 //!
 //! 只用 pub API（不能 import 私有 modules）。覆盖：
 //! 1. submit_text_generate → 流式 LLM → 结果写入 FileJobRepository → 用 list/get 验证
-//! 2. submit_code_generate (custom_code) → 写 artifacts/<name>/<name>.cs + raw.md
+//! 2. submit_code_generate (custom_code) → 写 Generated/<name>.cs，
+//!    并保留 artifacts/<name>/<name>.cs + raw.md 便于追溯
 //! 3. cancel_job → status 终态 + 结果不写
 //! 4. 跨 service 实例：写一个 job 后，新实例 list 时仍能看到（验证 FileJobRepository 持久化）
 
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use async_trait::async_trait;
 use ats_core::audit::{AuditSinkArc, FileAuditSink, read_recent};
 use ats_core::codegen::CustomCodegenRequest;
 use ats_core::knowledge::KnowledgePaths;
@@ -18,9 +20,9 @@ use ats_core::llm::{
 };
 use ats_core::platform::{
     AuditedJobRepository, FileJobRepository, JobApplicationService, JobId, JobRepository,
-    JobStatus, NoopProgressSink, ProgressSink, SubmitCodeGenerateRequest, SubmitTextGenerateRequest,
+    JobStatus, NoopProgressSink, ProgressSink, SubmitCodeGenerateRequest,
+    SubmitTextGenerateRequest,
 };
-use async_trait::async_trait;
 use futures_util::stream;
 
 struct ScriptedLlm {
@@ -161,12 +163,32 @@ async fn code_generate_writes_files_via_public_api() {
 
     let job = service.get(&id).await.unwrap();
     assert_eq!(job.status, JobStatus::Completed);
-    let cs = artifacts.join("IntegrationDemo/IntegrationDemo.cs");
+    let generated_cs = td.path().join("Generated/IntegrationDemo.cs");
+    let artifact_cs = artifacts.join("IntegrationDemo/IntegrationDemo.cs");
+    let cs = generated_cs;
     assert!(cs.exists(), "cs file should be written");
     let cs_text = std::fs::read_to_string(&cs).unwrap();
     assert!(cs_text.contains("public class IntegrationDemo"));
+    assert!(artifact_cs.exists(), "artifact cs copy should be retained");
     let raw = artifacts.join("IntegrationDemo/raw.md");
     assert!(raw.exists());
+    let result = job.result.expect("result");
+    assert!(
+        result["csPath"]
+            .as_str()
+            .unwrap_or_default()
+            .ends_with("Generated\\IntegrationDemo.cs")
+            || result["csPath"]
+                .as_str()
+                .unwrap_or_default()
+                .ends_with("Generated/IntegrationDemo.cs")
+    );
+    assert!(
+        result["artifactCsPath"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("artifacts")
+    );
 }
 
 #[tokio::test]
@@ -206,8 +228,7 @@ async fn text_generate_writes_audit_log_lifecycle() {
 
     let base_repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
     let audit: AuditSinkArc = Arc::new(FileAuditSink::new(project_root.clone()));
-    let repo: Arc<dyn JobRepository> =
-        Arc::new(AuditedJobRepository::new(base_repo, audit));
+    let repo: Arc<dyn JobRepository> = Arc::new(AuditedJobRepository::new(base_repo, audit));
     let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
         events: Mutex::new(ok_text_events()),
     });

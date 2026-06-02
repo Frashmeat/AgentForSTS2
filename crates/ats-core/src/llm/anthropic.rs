@@ -12,7 +12,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use eventsource_stream::Eventsource;
 use futures_util::{StreamExt, TryStreamExt};
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE, RETRY_AFTER};
+use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, RETRY_AFTER};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -176,9 +176,7 @@ impl LlmClient for AnthropicClient {
         }
 
         let byte_stream = response.bytes_stream();
-        let sse_stream = byte_stream
-            .map_err(std::io::Error::other)
-            .eventsource();
+        let sse_stream = byte_stream.map_err(std::io::Error::other).eventsource();
 
         // 在 stream 处理过程中需要保留累积的 usage 与 finish_reason；
         // 用 unfold 模式把这个状态藏在闭包里。
@@ -434,7 +432,10 @@ mod tests {
         let stop = serde_json::json!({ "type": "message_stop" }).to_string();
         let ev = state.apply(&stop).unwrap();
         match ev {
-            StreamEvent::End { finish_reason, usage } => {
+            StreamEvent::End {
+                finish_reason,
+                usage,
+            } => {
                 assert_eq!(finish_reason, FinishReason::EndTurn);
                 assert_eq!(usage.input_tokens, 10);
                 assert_eq!(usage.output_tokens, 5);
@@ -446,17 +447,32 @@ mod tests {
     #[test]
     fn ignores_ping_and_unknown_events() {
         let mut state = StreamState::default();
-        assert!(state.apply(&serde_json::json!({"type":"ping"}).to_string()).is_none());
-        assert!(state.apply(&serde_json::json!({"type":"unknown_xyz"}).to_string()).is_none());
+        assert!(
+            state
+                .apply(&serde_json::json!({"type":"ping"}).to_string())
+                .is_none()
+        );
+        assert!(
+            state
+                .apply(&serde_json::json!({"type":"unknown_xyz"}).to_string())
+                .is_none()
+        );
         assert!(state.apply("").is_none());
         assert!(state.apply("not json").is_none());
     }
 
     #[test]
     fn maps_429_to_rate_limit_with_retry_after() {
-        let err = map_http_error(429, Some(30), r#"{"type":"error","error":{"type":"rate_limit_error","message":"too fast"}}"#);
+        let err = map_http_error(
+            429,
+            Some(30),
+            r#"{"type":"error","error":{"type":"rate_limit_error","message":"too fast"}}"#,
+        );
         match err {
-            LlmError::RateLimit { retry_after_secs, message } => {
+            LlmError::RateLimit {
+                retry_after_secs,
+                message,
+            } => {
                 assert_eq!(retry_after_secs, Some(30));
                 assert_eq!(message, "too fast");
             }
@@ -466,7 +482,11 @@ mod tests {
 
     #[test]
     fn maps_401_to_auth() {
-        let err = map_http_error(401, None, r#"{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}"#);
+        let err = map_http_error(
+            401,
+            None,
+            r#"{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}"#,
+        );
         assert!(matches!(err, LlmError::Auth(m) if m == "invalid x-api-key"));
     }
 

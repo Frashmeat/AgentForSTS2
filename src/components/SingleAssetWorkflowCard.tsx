@@ -53,6 +53,7 @@ export function SingleAssetWorkflowCard() {
   const [codeDelta, setCodeDelta] = useState("");
   const [codeResult, setCodeResult] = useState<{
     csPath: string;
+    artifactCsPath?: string | null;
     rawPath: string;
     extractedChars: number;
     pngPath?: string | null;
@@ -133,6 +134,7 @@ export function SingleAssetWorkflowCard() {
           const job = (await api.getJob(ev.jobId)) as Job;
           const r = job.result as {
             csPath?: string;
+            artifactCsPath?: string | null;
             rawPath?: string;
             extractedChars?: number;
             pngPath?: string | null;
@@ -140,6 +142,7 @@ export function SingleAssetWorkflowCard() {
           if (r?.csPath) {
             setCodeResult({
               csPath: r.csPath,
+              artifactCsPath: r.artifactCsPath ?? null,
               rawPath: r.rawPath ?? "",
               extractedChars: r.extractedChars ?? 0,
               pngPath: r.pngPath ?? null,
@@ -397,6 +400,11 @@ export function SingleAssetWorkflowCard() {
               <KV k=".cs">
                 <code className="break-all">{codeResult.csPath}</code>
               </KV>
+              {codeResult.artifactCsPath && (
+                <KV k="artifact copy">
+                  <code className="break-all">{codeResult.artifactCsPath}</code>
+                </KV>
+              )}
               {codeResult.pngPath && (
                 <KV k=".png">
                   <code className="break-all">{codeResult.pngPath}</code>

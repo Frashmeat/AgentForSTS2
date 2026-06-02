@@ -158,7 +158,8 @@ pub fn export(
         writer
             .start_file("knowledge-manifest.json", options)
             .map_err(|e| PackError::Zip(e.to_string()))?;
-        let bytes = std::fs::read(&paths.manifest_path).map_err(|e| PackError::Io(e.to_string()))?;
+        let bytes =
+            std::fs::read(&paths.manifest_path).map_err(|e| PackError::Io(e.to_string()))?;
         writer
             .write_all(&bytes)
             .map_err(|e| PackError::Io(e.to_string()))?;
@@ -385,7 +386,8 @@ mod tests {
         {
             let f = File::create(&bad_zip).unwrap();
             let mut w = zip::ZipWriter::new(f);
-            w.start_file("hello.txt", SimpleFileOptions::default()).unwrap();
+            w.start_file("hello.txt", SimpleFileOptions::default())
+                .unwrap();
             w.write_all(b"hi").unwrap();
             w.finish().unwrap();
         }
@@ -401,14 +403,21 @@ mod tests {
         {
             let f = File::create(&bad_zip).unwrap();
             let mut w = zip::ZipWriter::new(f);
-            w.start_file("pack-info.json", SimpleFileOptions::default()).unwrap();
+            w.start_file("pack-info.json", SimpleFileOptions::default())
+                .unwrap();
             w.write_all(br#"{"schemaVersion":99,"exportedAt":"2026-05-11T00:00:00Z","gameFileCount":0,"baselibPresent":false}"#).unwrap();
             w.finish().unwrap();
         }
         let paths = make_paths(&td);
         let err = import(&paths, &bad_zip, true).unwrap_err();
         assert!(
-            matches!(err, PackError::SchemaMismatch { got: 99, expected: 1 }),
+            matches!(
+                err,
+                PackError::SchemaMismatch {
+                    got: 99,
+                    expected: 1
+                }
+            ),
             "got: {err:?}"
         );
     }

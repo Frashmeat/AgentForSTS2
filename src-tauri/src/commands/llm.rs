@@ -78,12 +78,7 @@ pub async fn llm_start_stream(
                 break;
             }
         }
-        let _ = app_handle.emit(
-            STREAM_EVENT,
-            &StreamPayload::Done {
-                request_id: req_id,
-            },
-        );
+        let _ = app_handle.emit(STREAM_EVENT, &StreamPayload::Done { request_id: req_id });
     });
 
     Ok(())

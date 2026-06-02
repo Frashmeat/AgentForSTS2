@@ -78,11 +78,15 @@ impl ProjectFolder {
     pub fn create(parent_dir: &Path, name: &str) -> ProjectResult<Self> {
         validate_name(name)?;
         if !parent_dir.is_dir() {
-            return Err(ProjectError::NotADirectory(parent_dir.display().to_string()));
+            return Err(ProjectError::NotADirectory(
+                parent_dir.display().to_string(),
+            ));
         }
         let project_root = parent_dir.join(name);
         if project_root.exists() {
-            return Err(ProjectError::AlreadyExists(project_root.display().to_string()));
+            return Err(ProjectError::AlreadyExists(
+                project_root.display().to_string(),
+            ));
         }
         fs::create_dir_all(&project_root)?;
         for sub in ["items", "artifacts", "history", ATS_DIR] {
@@ -173,7 +177,10 @@ fn validate_name(name: &str) -> ProjectResult<()> {
     if name.trim().is_empty() {
         return Err(ProjectError::InvalidName(name.to_string()));
     }
-    if name.chars().any(|c| matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')) {
+    if name
+        .chars()
+        .any(|c| matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'))
+    {
         return Err(ProjectError::InvalidName(name.to_string()));
     }
     Ok(())

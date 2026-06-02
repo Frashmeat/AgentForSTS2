@@ -157,9 +157,7 @@ pub async fn run_text_generate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::{
-        CompletionResponse, CompletionStream, FinishReason, LlmError, Usage,
-    };
+    use crate::llm::{CompletionResponse, CompletionStream, FinishReason, LlmError, Usage};
     use crate::platform::application::JobApplicationService;
     use crate::platform::domain::{Job, JobKind, JobRepository};
     use crate::platform::infra::FileJobRepository;
@@ -347,7 +345,10 @@ mod tests {
 
         let job = service.get(&id).await.unwrap();
         assert_eq!(job.status, JobStatus::Cancelled);
-        assert!(job.result.is_none(), "result should NOT be written on cancel");
+        assert!(
+            job.result.is_none(),
+            "result should NOT be written on cancel"
+        );
         assert!(
             cancelled_emitted,
             "expected cancelled-mid-stream event within 2s; stages={:?}",

@@ -16,7 +16,10 @@ impl PromptContextAssembler {
         out.insert("facts".into(), render_facts(&packet.facts));
         out.insert("guidance".into(), render_guidance(&packet.guidance));
         out.insert("lookup".into(), render_lookup(&packet.lookup));
-        out.insert("knowledge_warnings".into(), render_warnings(&packet.warnings));
+        out.insert(
+            "knowledge_warnings".into(),
+            render_warnings(&packet.warnings),
+        );
         out.insert("summary".into(), packet.summary.trim().to_string());
         out
     }
@@ -90,7 +93,10 @@ fn render_guidance_item(item: &KnowledgeGuidanceItem) -> String {
 }
 
 fn render_lookup_item(item: &KnowledgeLookupItem) -> String {
-    let mut lines = vec![format!("### {}", item.title), format!("Path: `{}`", item.path)];
+    let mut lines = vec![
+        format!("### {}", item.title),
+        format!("Path: `{}`", item.path),
+    ];
     if !item.note.is_empty() {
         lines.push(item.note.trim().to_string());
     }

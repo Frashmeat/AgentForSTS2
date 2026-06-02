@@ -27,10 +27,10 @@ pub fn router() -> Router {
 }
 
 fn build_client(state: &AppState) -> Result<Arc<dyn LlmClient>, (StatusCode, String)> {
-    let settings = state
-        .settings_snapshot
-        .as_ref()
-        .ok_or((StatusCode::SERVICE_UNAVAILABLE, "settings not loaded".to_string()))?;
+    let settings = state.settings_snapshot.as_ref().ok_or((
+        StatusCode::SERVICE_UNAVAILABLE,
+        "settings not loaded".to_string(),
+    ))?;
     build_from_config(&settings.llm).map_err(|e| {
         let status = match &e {
             LlmError::Config(_) => StatusCode::PRECONDITION_FAILED,
@@ -58,7 +58,10 @@ async fn stream_handler(
 ) -> Result<Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>>, (StatusCode, String)>
 {
     let client = build_client(&state)?;
-    let llm_stream = client.stream(request).await.map_err(llm_error_to_response)?;
+    let llm_stream = client
+        .stream(request)
+        .await
+        .map_err(llm_error_to_response)?;
 
     let sse_stream = llm_stream.map(|item| {
         let payload = match item {
@@ -93,7 +96,9 @@ fn llm_error_to_response(err: LlmError) -> (StatusCode, String) {
         LlmError::Auth(_) => StatusCode::UNAUTHORIZED,
         LlmError::RateLimit { .. } => StatusCode::TOO_MANY_REQUESTS,
         LlmError::Config(_) => StatusCode::PRECONDITION_FAILED,
-        LlmError::Http { status: 400..=499, .. } => StatusCode::BAD_REQUEST,
+        LlmError::Http {
+            status: 400..=499, ..
+        } => StatusCode::BAD_REQUEST,
         _ => StatusCode::BAD_GATEWAY,
     };
     (status, err.to_string())

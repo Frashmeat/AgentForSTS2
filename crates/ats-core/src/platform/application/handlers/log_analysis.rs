@@ -199,9 +199,7 @@ fn truncate_tail(text: &str, max_chars: usize) -> (String, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::{
-        CompletionResponse, CompletionStream, FinishReason, LlmError, Usage,
-    };
+    use crate::llm::{CompletionResponse, CompletionStream, FinishReason, LlmError, Usage};
     use crate::platform::application::JobApplicationService;
     use crate::platform::domain::{JobRepository, JobStatus};
     use crate::platform::infra::FileJobRepository;
@@ -271,9 +269,7 @@ mod tests {
         let service = JobApplicationService::new(repo, llm);
 
         let req = SubmitLogAnalysisRequest {
-            log_text: Some(
-                "MSBUILD : error MSB1009: Project file does not exist.".into(),
-            ),
+            log_text: Some("MSBUILD : error MSB1009: Project file does not exist.".into()),
             ..Default::default()
         };
         let id = service.submit_log_analysis(req, sink).await.unwrap();

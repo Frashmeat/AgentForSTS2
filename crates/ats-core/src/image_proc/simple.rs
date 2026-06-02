@@ -36,9 +36,11 @@ impl ImageProcClient for SimpleBgRemover {
         let threshold = self.threshold;
         let tolerance = self.tolerance;
         let input = input_png.to_vec();
-        tokio::task::spawn_blocking(move || remove_white_background_inner(&input, threshold, tolerance))
-            .await
-            .map_err(|e| ImageProcError::Decode(format!("join: {e}")))?
+        tokio::task::spawn_blocking(move || {
+            remove_white_background_inner(&input, threshold, tolerance)
+        })
+        .await
+        .map_err(|e| ImageProcError::Decode(format!("join: {e}")))?
     }
 }
 
@@ -117,7 +119,11 @@ mod tests {
 
         // 第一行应该 alpha=0（白色被识别为背景）
         for x in 0..4 {
-            assert_eq!(img.get_pixel(x, 0).0[3], 0, "white row should be transparent");
+            assert_eq!(
+                img.get_pixel(x, 0).0[3],
+                0,
+                "white row should be transparent"
+            );
         }
         // 第二行应该保留 alpha=255（红色非背景）
         for x in 0..4 {
@@ -146,7 +152,11 @@ mod tests {
         let input = make_test_png(2, 2, [255, 200, 0, 255]);
         let output = remove_white_background(&input, 235, 20).unwrap();
         let img = image::load_from_memory(&output).unwrap().to_rgba8();
-        assert_eq!(img.get_pixel(0, 0).0[3], 255, "vivid color should stay opaque");
+        assert_eq!(
+            img.get_pixel(0, 0).0[3],
+            255,
+            "vivid color should stay opaque"
+        );
     }
 
     #[tokio::test]

@@ -64,6 +64,18 @@ impl MlBgRemover {
     }
 }
 
+/// 初始化 ONNX Runtime 动态库路径。必须在创建任何 Session 前调用。
+///
+/// 使用 `ort` 的 `load-dynamic` feature 时，默认会尝试从可执行文件旁加载
+/// `onnxruntime.dll`。桌面端 prewarm 会先把官方 DLL 准备到 app data，再通过
+/// 这个函数显式绑定路径。
+pub fn init_ort_from_dylib(path: &Path) -> Result<(), MlBgRemoverError> {
+    ort::init_from(path.display().to_string())
+        .commit()
+        .map(|_| ())
+        .map_err(|e| MlBgRemoverError::OrtInit(e.to_string()))
+}
+
 #[async_trait]
 impl ImageProcClient for MlBgRemover {
     async fn remove_background(&self, input_png: &[u8]) -> Result<Vec<u8>, ImageProcError> {
@@ -89,8 +101,8 @@ fn run_inference(
     input_png: &[u8],
 ) -> Result<Vec<u8>, MlBgRemoverError> {
     // 1. 解码
-    let img = image::load_from_memory(input_png)
-        .map_err(|e| MlBgRemoverError::Decode(e.to_string()))?;
+    let img =
+        image::load_from_memory(input_png).map_err(|e| MlBgRemoverError::Decode(e.to_string()))?;
     let original_w = img.width();
     let original_h = img.height();
     let resized = img
@@ -103,8 +115,7 @@ fn run_inference(
 
     // 2-3. 归一化 + NHWC→NCHW
     // mean=(0.485,0.456,0.406), std=(1.0,1.0,1.0) —— rembg 项目实测有效
-    let mut tensor =
-        Array4::<f32>::zeros((1, 3, U2NETP_INPUT_SIZE, U2NETP_INPUT_SIZE));
+    let mut tensor = Array4::<f32>::zeros((1, 3, U2NETP_INPUT_SIZE, U2NETP_INPUT_SIZE));
     let means = [0.485_f32, 0.456, 0.406];
     for (y, row) in resized.rows().enumerate() {
         for (x, px) in row.enumerate() {
@@ -116,8 +127,8 @@ fn run_inference(
     }
 
     // 4. 推理。SessionOutputs 借用 guard，必须在同一作用域内提取完毕。
-    let ort_tensor = Tensor::from_array(tensor)
-        .map_err(|e| MlBgRemoverError::Inference(e.to_string()))?;
+    let ort_tensor =
+        Tensor::from_array(tensor).map_err(|e| MlBgRemoverError::Inference(e.to_string()))?;
     let (shape_owned, raw_owned): (Vec<i64>, Vec<f32>) = {
         let mut guard = session
             .lock()
@@ -161,10 +172,7 @@ fn run_inference(
         }
     }
     let range = (max - min).max(1e-6);
-    let mut mask_u8 = image::GrayImage::new(
-        U2NETP_INPUT_SIZE as u32,
-        U2NETP_INPUT_SIZE as u32,
-    );
+    let mut mask_u8 = image::GrayImage::new(U2NETP_INPUT_SIZE as u32, U2NETP_INPUT_SIZE as u32);
     for ((y, x), v) in mask_2d.indexed_iter() {
         let scaled = ((*v - min) / range).clamp(0.0, 1.0) * 255.0;
         mask_u8.put_pixel(x as u32, y as u32, image::Luma([scaled as u8]));
@@ -172,12 +180,7 @@ fn run_inference(
     let _ = (Axis(0),); // 引用 Axis 防止 ndarray 路径 warning
 
     // 升采样回原尺寸
-    let mask_full = image::imageops::resize(
-        &mask_u8,
-        original_w,
-        original_h,
-        FilterType::Lanczos3,
-    );
+    let mask_full = image::imageops::resize(&mask_u8, original_w, original_h, FilterType::Lanczos3);
 
     // 6. 复合：保留原 RGB，alpha = mask
     let original_rgba = img.to_rgba8();

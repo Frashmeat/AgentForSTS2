@@ -12,7 +12,8 @@ workspace = true
 default = []
 # 开启 ML 背景去除（u2netp via ort）。默认关，CI 在 feature off 下跑通；
 # 用户在 Tauri prod build / 自己开发时 cargo build --features ml-rembg 启用。
-# 启用会拉 ~200MB 的 ort + onnxruntime native binaries（download-binaries feature）。
+# 启用会拉 ~200MB 的 ort + onnxruntime native binaries。Windows 下使用
+# load-dynamic/copy-dylibs；运行时由 Tauri prewarm 准备官方 onnxruntime.dll。
 ml-rembg = ["dep:ort", "dep:ndarray"]
 
 [dependencies]
@@ -37,7 +38,7 @@ base64 = "0.22"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 include_dir = "0.7"
 sha2 = "0.10"
-ort = { version = "=2.0.0-rc.10", optional = true, default-features = false, features = ["std", "ndarray", "download-binaries"] }
+ort = { version = "=2.0.0-rc.10", optional = true, default-features = false, features = ["std", "ndarray", "download-binaries", "load-dynamic", "copy-dylibs"] }
 ndarray = { version = "0.16", optional = true }
 
 [dev-dependencies]

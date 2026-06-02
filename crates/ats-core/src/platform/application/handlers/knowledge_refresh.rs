@@ -11,7 +11,8 @@
 //!    否则保留 manifest 中原 baselib 记录
 //! 6. 写 manifest，落 Completed
 //!
-//! 任一分支失败即任务 Failed；baselib 失败时 game 结果不写入 manifest（避免半状态）。
+//! Game 分支失败即任务 Failed；BaseLib 是可选知识，失败时记录 warning，
+//! 但不阻止 game manifest 写入。
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -107,6 +108,7 @@ pub async fn run_knowledge_refresh(
     };
 
     // 5. Baselib 分支
+    let mut baselib_error: Option<String> = None;
     let baselib_outcome = if request.include_baselib {
         match run_baselib_step(
             &sink,
@@ -119,8 +121,17 @@ pub async fn run_knowledge_refresh(
         {
             Ok(record) => Some(record),
             Err(msg) => {
-                finalize_with_error(&repo, &job_id, &format!("baselib: {msg}")).await;
-                return;
+                let message = format!("baselib: {msg}");
+                sink.emit(ProgressEvent {
+                    job_id: job_id.clone(),
+                    stage: "baselib-warning".into(),
+                    percent: Some(0.9),
+                    message: Some(message.clone()),
+                    delta: None,
+                })
+                .await;
+                baselib_error = Some(message);
+                cached_manifest.as_ref().and_then(|m| m.baselib.clone())
             }
         }
     } else {
@@ -155,6 +166,9 @@ pub async fn run_knowledge_refresh(
         "gameTotalBytes": game_record.total_bytes,
         "gameExitCode": game_stats.as_ref().map(|s| s.exit_code),
         "baselibIncluded": request.include_baselib,
+        "baselibStatus": baselib_status(request.include_baselib, baselib_outcome.as_ref(), baselib_error.as_ref()),
+        "baselibError": baselib_error,
+        "warnings": knowledge_refresh_warnings(baselib_error.as_ref()),
         "baselibReleaseTag": baselib_outcome.as_ref().and_then(|r| r.release_tag.clone()),
         "baselibFile": baselib_outcome
             .as_ref()
@@ -170,7 +184,9 @@ pub async fn run_knowledge_refresh(
         message: Some(format!(
             "game {} files; baselib {}",
             game_record.cs_file_count,
-            if let Some(b) = &baselib_outcome {
+            if let Some(err) = &baselib_error {
+                format!("warning ({err})")
+            } else if let Some(b) = &baselib_outcome {
                 format!("@{}", b.release_tag.as_deref().unwrap_or("?"))
             } else {
                 "skipped".into()
@@ -179,6 +195,26 @@ pub async fn run_knowledge_refresh(
         delta: None,
     })
     .await;
+}
+
+fn baselib_status(
+    include_baselib: bool,
+    baselib_record: Option<&DecompileRecord>,
+    baselib_error: Option<&String>,
+) -> &'static str {
+    if baselib_error.is_some() {
+        "warning"
+    } else if !include_baselib {
+        "skipped"
+    } else if baselib_record.is_some() {
+        "completed"
+    } else {
+        "skipped"
+    }
+}
+
+fn knowledge_refresh_warnings(baselib_error: Option<&String>) -> Vec<String> {
+    baselib_error.iter().map(|s| (*s).clone()).collect()
 }
 
 /// 跑 game 分支：缓存命中走快路径；否则 ilspycmd -p。
@@ -322,7 +358,9 @@ mod tests {
     use crate::knowledge::{
         BaselibError, FetchedBaselib, KnowledgeManifest, build_record, write_manifest,
     };
-    use crate::llm::{CompletionRequest, CompletionResponse, CompletionStream, LlmClient, LlmError};
+    use crate::llm::{
+        CompletionRequest, CompletionResponse, CompletionStream, LlmClient, LlmError,
+    };
     use crate::platform::application::JobApplicationService;
     use crate::platform::domain::JobRepository;
     use crate::platform::infra::FileJobRepository;
@@ -367,14 +405,10 @@ mod tests {
 
     #[async_trait]
     impl BaselibSource for MockBaselibSource {
-        async fn fetch_baselib_dll(
-            &self,
-            dest_dir: &Path,
-        ) -> Result<FetchedBaselib, BaselibError> {
+        async fn fetch_baselib_dll(&self, dest_dir: &Path) -> Result<FetchedBaselib, BaselibError> {
             *self.called.lock().unwrap() += 1;
-            std::fs::create_dir_all(dest_dir).map_err(|e| {
-                BaselibError::Write(dest_dir.to_path_buf(), e.to_string())
-            })?;
+            std::fs::create_dir_all(dest_dir)
+                .map_err(|e| BaselibError::Write(dest_dir.to_path_buf(), e.to_string()))?;
             let path = dest_dir.join(&self.asset_name);
             std::fs::write(&path, &self.bytes)
                 .map_err(|e| BaselibError::Write(path.clone(), e.to_string()))?;
@@ -437,9 +471,11 @@ mod tests {
         std::fs::create_dir_all(&history).unwrap();
         let runtime = td.path().join("runtime");
         let paths = KnowledgePaths::from_runtime_dir(&runtime);
-        let bin = td
-            .path()
-            .join(if cfg!(windows) { "ilspycmd.exe" } else { "ilspycmd" });
+        let bin = td.path().join(if cfg!(windows) {
+            "ilspycmd.exe"
+        } else {
+            "ilspycmd"
+        });
         std::fs::write(&bin, b"fake").unwrap();
 
         let service = make_service(history);
@@ -516,9 +552,11 @@ mod tests {
         };
         write_manifest(&paths.manifest_path, &manifest).unwrap();
 
-        let bin = td
-            .path()
-            .join(if cfg!(windows) { "ilspycmd.exe" } else { "ilspycmd" });
+        let bin = td.path().join(if cfg!(windows) {
+            "ilspycmd.exe"
+        } else {
+            "ilspycmd"
+        });
         std::fs::write(&bin, b"fake").unwrap();
 
         let service = make_service(history);
@@ -544,9 +582,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn refresh_baselib_failure_reports_baselib_prefix() {
+    async fn refresh_baselib_fetch_failure_completes_with_warning() {
         // game 走缓存命中早退；include_baselib=true 触发 baselib 步骤，被 mock
-        // 故意失败的 source 拦下，handler 应在错误里挂 "baselib:" 前缀。
+        // 故意失败的 source 拦下。BaseLib 是可选知识，失败不能拖死 game 知识刷新。
         let td = tempfile::TempDir::new().unwrap();
         let history = td.path().join("history");
         std::fs::create_dir_all(&history).unwrap();
@@ -562,9 +600,11 @@ mod tests {
         };
         write_manifest(&paths.manifest_path, &manifest).unwrap();
 
-        let bin = td
-            .path()
-            .join(if cfg!(windows) { "ilspycmd.exe" } else { "ilspycmd" });
+        let bin = td.path().join(if cfg!(windows) {
+            "ilspycmd.exe"
+        } else {
+            "ilspycmd"
+        });
         std::fs::write(&bin, b"fake").unwrap();
 
         let service = make_service(history);
@@ -582,16 +622,24 @@ mod tests {
             .unwrap();
         wait_terminal(&service, &id).await;
         let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Failed);
-        let err = job.error.unwrap_or_default();
-        assert!(err.starts_with("baselib:"), "expected baselib: prefix in: {err}");
-        assert!(err.contains("simulated network failure"));
+        assert_eq!(job.status, JobStatus::Completed);
+        assert!(job.error.is_none());
+        let res = job.result.unwrap();
+        assert_eq!(res["baselibIncluded"], true);
+        assert_eq!(res["baselibStatus"], "warning");
+        assert!(
+            res["baselibError"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("simulated network failure")
+        );
+        assert_eq!(res["gameCsFileCount"], 42);
     }
 
     #[tokio::test]
-    async fn refresh_baselib_decompile_fails_when_ilspycmd_invalid() {
+    async fn refresh_baselib_decompile_failure_completes_with_warning() {
         // game cache hit + 真实 mock baselib（写入文件成功）+ 假 ilspycmd → baselib
-        // decompile 阶段必然失败。验证 mock source 被调用一次。
+        // decompile 阶段必然失败。BaseLib 是可选知识，失败时 job 保持 Completed。
         let td = tempfile::TempDir::new().unwrap();
         let history = td.path().join("history");
         std::fs::create_dir_all(&history).unwrap();
@@ -608,9 +656,11 @@ mod tests {
         write_manifest(&paths.manifest_path, &manifest).unwrap();
 
         // 假 ilspycmd（不可执行的文本文件）—— 文件存在让 resolve 通过，但 spawn 会失败
-        let bin = td
-            .path()
-            .join(if cfg!(windows) { "ilspycmd.exe" } else { "ilspycmd" });
+        let bin = td.path().join(if cfg!(windows) {
+            "ilspycmd.exe"
+        } else {
+            "ilspycmd"
+        });
         std::fs::write(&bin, b"#!/bin/sh\nexit 0").unwrap();
 
         let mock = Arc::new(MockBaselibSource::new(
@@ -635,10 +685,23 @@ mod tests {
         wait_terminal(&service, &id).await;
 
         let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Failed);
-        assert_eq!(mock.call_count(), 1, "baselib source should have been called");
-        let err = job.error.unwrap_or_default();
-        assert!(err.contains("baselib"), "expected baselib error, got: {err}");
-        assert!(err.contains("decompile"), "expected decompile error stage: {err}");
+        assert_eq!(job.status, JobStatus::Completed);
+        assert_eq!(
+            mock.call_count(),
+            1,
+            "baselib source should have been called"
+        );
+        assert!(job.error.is_none());
+        let res = job.result.unwrap();
+        assert_eq!(res["baselibStatus"], "warning");
+        let err = res["baselibError"].as_str().unwrap_or_default();
+        assert!(
+            err.contains("baselib"),
+            "expected baselib error, got: {err}"
+        );
+        assert!(
+            err.contains("decompile"),
+            "expected decompile error stage: {err}"
+        );
     }
 }

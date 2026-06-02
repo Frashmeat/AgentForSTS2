@@ -44,11 +44,7 @@ pub fn build_from_config(
         Some(cfg.size.clone())
     };
     // provider 全部走 OpenAI Images 兼容路径；保留 normalized 供未来分流
-    let _normalized = cfg
-        .provider
-        .trim()
-        .to_ascii_lowercase()
-        .replace('-', "_");
+    let _normalized = cfg.provider.trim().to_ascii_lowercase().replace('-', "_");
 
     let model = if cfg.model.is_empty() {
         "dall-e-3".to_string()

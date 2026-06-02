@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 use thiserror::Error;
+use zip::ZipArchive;
 
 #[derive(Debug, Error)]
 pub enum ModelCacheError {
@@ -22,6 +23,8 @@ pub enum ModelCacheError {
     Io(String),
     #[error("checksum mismatch (expected {expected}, got {actual})")]
     Checksum { expected: String, actual: String },
+    #[error("archive: {0}")]
+    Archive(String),
 }
 
 /// 一份模型权重的规范定义：本地相对路径 + 远端 URL + 可选 SHA-256。
@@ -32,6 +35,24 @@ pub struct ModelSpec {
     pub url: String,
     /// 小写 hex（64 字符）；None 表示不校验
     pub expected_sha256: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct OrtDylibSpec {
+    pub file_name: String,
+    pub archive_url: String,
+    pub archive_member_suffix: String,
+}
+
+impl OrtDylibSpec {
+    #[must_use]
+    pub fn onnxruntime_1_22_windows_x64() -> Self {
+        Self {
+            file_name: "onnxruntime.dll".into(),
+            archive_url: "https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-win-x64-1.22.0.zip".into(),
+            archive_member_suffix: "lib/onnxruntime.dll".into(),
+        }
+    }
 }
 
 impl ModelSpec {
@@ -61,10 +82,7 @@ pub fn model_cache_path(models_dir: &Path, spec: &ModelSpec) -> PathBuf {
 ///
 /// 并发安全：写 `<file>.tmp` 再 rename；多个进程同时下载只是会浪费一次带宽，
 /// 后到者 rename 会覆盖。最坏不会出"半截文件"。
-pub async fn ensure_model(
-    models_dir: &Path,
-    spec: &ModelSpec,
-) -> Result<PathBuf, ModelCacheError> {
+pub async fn ensure_model(models_dir: &Path, spec: &ModelSpec) -> Result<PathBuf, ModelCacheError> {
     let target = model_cache_path(models_dir, spec);
     if target.is_file() && file_ok(&target, spec.expected_sha256.as_deref()).await? {
         return Ok(target);
@@ -80,7 +98,9 @@ pub async fn ensure_model(
         && !file_ok(&tmp, Some(expected)).await?
     {
         let _ = tokio::fs::remove_file(&tmp).await;
-        let actual = sha256_of(&tmp).await.unwrap_or_else(|_| "<unreadable>".into());
+        let actual = sha256_of(&tmp)
+            .await
+            .unwrap_or_else(|_| "<unreadable>".into());
         return Err(ModelCacheError::Checksum {
             expected: expected.into(),
             actual,
@@ -89,6 +109,37 @@ pub async fn ensure_model(
     tokio::fs::rename(&tmp, &target)
         .await
         .map_err(|e| ModelCacheError::Io(format!("rename to {}: {e}", target.display())))?;
+    Ok(target)
+}
+
+pub async fn ensure_ort_dylib(
+    runtimes_dir: &Path,
+    spec: &OrtDylibSpec,
+) -> Result<PathBuf, ModelCacheError> {
+    let target = runtimes_dir.join(&spec.file_name);
+    if target.is_file() {
+        return Ok(target);
+    }
+
+    tokio::fs::create_dir_all(runtimes_dir)
+        .await
+        .map_err(|e| ModelCacheError::Io(format!("create runtimes_dir: {e}")))?;
+
+    let archive_path = runtimes_dir.join("onnxruntime.zip");
+    download_to(&spec.archive_url, &archive_path).await?;
+    let target_for_extract = target.clone();
+    let archive_member_suffix = spec.archive_member_suffix.clone();
+    let archive_for_extract = archive_path.clone();
+    tokio::task::spawn_blocking(move || {
+        extract_archive_member(
+            &archive_for_extract,
+            &archive_member_suffix,
+            &target_for_extract,
+        )
+    })
+    .await
+    .map_err(|e| ModelCacheError::Archive(format!("extract join: {e}")))??;
+    let _ = tokio::fs::remove_file(&archive_path).await;
     Ok(target)
 }
 
@@ -133,6 +184,50 @@ async fn download_to(url: &str, dest: &Path) -> Result<(), ModelCacheError> {
     Ok(())
 }
 
+fn extract_archive_member(
+    archive_path: &Path,
+    member_suffix: &str,
+    dest: &Path,
+) -> Result<(), ModelCacheError> {
+    let file = std::fs::File::open(archive_path).map_err(|e| {
+        ModelCacheError::Io(format!("open archive {}: {e}", archive_path.display()))
+    })?;
+    let mut zip = ZipArchive::new(file).map_err(|e| ModelCacheError::Archive(e.to_string()))?;
+    let mut member_index = None;
+    for i in 0..zip.len() {
+        let name = {
+            let file = zip
+                .by_index(i)
+                .map_err(|e| ModelCacheError::Archive(e.to_string()))?;
+            file.name().replace('\\', "/")
+        };
+        if name.ends_with(member_suffix) {
+            member_index = Some(i);
+            break;
+        }
+    }
+    let Some(index) = member_index else {
+        return Err(ModelCacheError::Archive(format!(
+            "member ending with {member_suffix} not found"
+        )));
+    };
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| ModelCacheError::Io(format!("create {}: {e}", parent.display())))?;
+    }
+    let tmp = dest.with_extension("dll.tmp");
+    let mut member = zip
+        .by_index(index)
+        .map_err(|e| ModelCacheError::Archive(e.to_string()))?;
+    let mut out = std::fs::File::create(&tmp)
+        .map_err(|e| ModelCacheError::Io(format!("create {}: {e}", tmp.display())))?;
+    std::io::copy(&mut member, &mut out)
+        .map_err(|e| ModelCacheError::Io(format!("extract {}: {e}", dest.display())))?;
+    std::fs::rename(&tmp, dest)
+        .map_err(|e| ModelCacheError::Io(format!("rename to {}: {e}", dest.display())))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,6 +240,14 @@ mod tests {
         let sha = s.expected_sha256.unwrap();
         assert_eq!(sha.len(), 64);
         assert!(sha.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn ort_dylib_spec_targets_windows_x64_dll() {
+        let spec = OrtDylibSpec::onnxruntime_1_22_windows_x64();
+        assert_eq!(spec.file_name, "onnxruntime.dll");
+        assert!(spec.archive_url.contains("v1.22.0"));
+        assert_eq!(spec.archive_member_suffix, "lib/onnxruntime.dll");
     }
 
     #[test]

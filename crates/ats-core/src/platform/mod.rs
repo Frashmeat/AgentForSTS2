@@ -24,7 +24,7 @@ pub mod contracts;
 pub mod domain;
 pub mod infra;
 
-pub use application::{JobApplicationService, ProgressEvent, ProgressSink, NoopProgressSink};
+pub use application::{JobApplicationService, NoopProgressSink, ProgressEvent, ProgressSink};
 pub use contracts::{
     SubmitAssetGenerateRequest, SubmitBatchCustomCodeRequest, SubmitBuildProjectRequest,
     SubmitCodeGenerateRequest, SubmitJobAck, SubmitKnowledgeRefreshRequest,

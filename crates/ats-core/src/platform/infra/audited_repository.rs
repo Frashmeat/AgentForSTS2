@@ -20,9 +20,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::audit::{AuditEntry, AuditSinkArc};
-use crate::platform::domain::{
-    Job, JobId, JobRepository, JobResult, JobStatus, JobSummary,
-};
+use crate::platform::domain::{Job, JobId, JobRepository, JobResult, JobStatus, JobSummary};
 
 pub struct AuditedJobRepository {
     inner: Arc<dyn JobRepository>,
@@ -46,15 +44,12 @@ impl AuditedJobRepository {
 impl JobRepository for AuditedJobRepository {
     async fn create(&self, job: &Job) -> JobResult<()> {
         self.inner.create(job).await?;
-        let entry = AuditEntry::new(
-            "job.submitted",
-            format!("{:?} submitted", job.kind),
-        )
-        .with_ref(job.id.0.clone())
-        .with_data(serde_json::json!({
-            "kind": job.kind,
-            "createdAt": job.created_at,
-        }));
+        let entry = AuditEntry::new("job.submitted", format!("{:?} submitted", job.kind))
+            .with_ref(job.id.0.clone())
+            .with_data(serde_json::json!({
+                "kind": job.kind,
+                "createdAt": job.created_at,
+            }));
         self.audit.emit(entry).await;
         Ok(())
     }
@@ -90,18 +85,9 @@ fn transition_to_entry(prev: &Job, current: &Job) -> Option<AuditEntry> {
             "job.started",
             format!("{:?} started (attempt {})", current.kind, current.attempts),
         ),
-        JobStatus::Completed => (
-            "job.completed",
-            format!("{:?} completed", current.kind),
-        ),
-        JobStatus::Failed => (
-            "job.failed",
-            format!("{:?} failed", current.kind),
-        ),
-        JobStatus::Cancelled => (
-            "job.cancelled",
-            format!("{:?} cancelled", current.kind),
-        ),
+        JobStatus::Completed => ("job.completed", format!("{:?} completed", current.kind)),
+        JobStatus::Failed => ("job.failed", format!("{:?} failed", current.kind)),
+        JobStatus::Cancelled => ("job.cancelled", format!("{:?} cancelled", current.kind)),
         _ => return None,
     };
     let mut data = serde_json::json!({
@@ -233,7 +219,10 @@ mod tests {
         repo.update(&job).await.unwrap();
 
         let entries = sink.snapshot().await;
-        let failed = entries.iter().find(|e| e.kind == "job.failed").expect("failed entry");
+        let failed = entries
+            .iter()
+            .find(|e| e.kind == "job.failed")
+            .expect("failed entry");
         assert_eq!(failed.data["error"], "LLM 429 rate limited");
         assert_eq!(failed.data["prevStatus"], "Pending");
         assert_eq!(failed.data["newStatus"], "Failed");

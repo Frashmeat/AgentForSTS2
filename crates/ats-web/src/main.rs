@@ -37,9 +37,7 @@ pub struct AppState {
     pub settings_snapshot: Option<Settings>,
 }
 
-async fn health_handler(
-    Extension(state): Extension<Arc<AppState>>,
-) -> Json<HealthReport> {
+async fn health_handler(Extension(state): Extension<Arc<AppState>>) -> Json<HealthReport> {
     Json(build_health_report(&state))
 }
 

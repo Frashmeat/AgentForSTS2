@@ -10,8 +10,7 @@ use super::models::PlanItem;
 /// 调 `validate_plan` 处理这类语义错误。
 #[must_use]
 pub fn topological_sort(items: &[PlanItem]) -> Vec<PlanItem> {
-    let id_map: HashMap<&str, &PlanItem> =
-        items.iter().map(|it| (it.id.as_str(), it)).collect();
+    let id_map: HashMap<&str, &PlanItem> = items.iter().map(|it| (it.id.as_str(), it)).collect();
     let mut visited: HashSet<String> = HashSet::new();
     let mut result: Vec<PlanItem> = Vec::with_capacity(items.len());
 
@@ -112,11 +111,7 @@ mod tests {
 
     #[test]
     fn topological_sort_orders_dependencies_first() {
-        let items = vec![
-            item("c", &["b"]),
-            item("a", &[]),
-            item("b", &["a"]),
-        ];
+        let items = vec![item("c", &["b"]), item("a", &[]), item("b", &["a"])];
         let sorted: Vec<String> = topological_sort(&items).into_iter().map(|i| i.id).collect();
         // a 必须在 b 前，b 必须在 c 前
         let pos = |id: &str| sorted.iter().position(|i| i == id).unwrap();
@@ -139,8 +134,12 @@ mod tests {
             .iter()
             .map(|g| g.iter().map(|i| i.id.clone()).collect())
             .collect();
-        let has_ab = group_ids.iter().any(|g| g.contains(&"a".into()) && g.contains(&"b".into()));
-        let has_xy = group_ids.iter().any(|g| g.contains(&"x".into()) && g.contains(&"y".into()));
+        let has_ab = group_ids
+            .iter()
+            .any(|g| g.contains(&"a".into()) && g.contains(&"b".into()));
+        let has_xy = group_ids
+            .iter()
+            .any(|g| g.contains(&"x".into()) && g.contains(&"y".into()));
         assert!(has_ab && has_xy);
     }
 

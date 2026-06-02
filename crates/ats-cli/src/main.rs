@@ -92,11 +92,7 @@ fn cmd_build(desktop: bool, web: bool) -> Result<()> {
         tracing::info!("building web frontend (vite)");
         run("npm", &["run", "build:web"], None)?;
         tracing::info!("building ats-web release binary");
-        run(
-            "cargo",
-            &["build", "--release", "-p", "ats-web"],
-            None,
-        )?;
+        run("cargo", &["build", "--release", "-p", "ats-web"], None)?;
     }
     if do_desktop {
         tracing::info!("building Tauri desktop bundle");
@@ -137,14 +133,15 @@ fn run(program: &str, args: &[&str], cwd: Option<&Path>) -> Result<()> {
         cmd.current_dir(c);
     }
     tracing::debug!(program, ?args, "spawning");
-    let status = cmd
-        .status()
-        .with_context(|| format!("spawn {program}"))?;
+    let status = cmd.status().with_context(|| format!("spawn {program}"))?;
     if !status.success() {
         anyhow::bail!(
             "{program} {} exited with {}",
             args.join(" "),
-            status.code().map(|c| c.to_string()).unwrap_or_else(|| "(no code)".into())
+            status
+                .code()
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "(no code)".into())
         );
     }
     Ok(())

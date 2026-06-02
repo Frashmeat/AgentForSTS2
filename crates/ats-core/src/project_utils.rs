@@ -105,7 +105,9 @@ mod tests {
 
     #[test]
     fn non_ascii_detection_true_for_chinese() {
-        assert!(path_has_non_ascii(Path::new("E:/zuolan_lib/中文目录/foo.dll")));
+        assert!(path_has_non_ascii(Path::new(
+            "E:/zuolan_lib/中文目录/foo.dll"
+        )));
     }
 
     #[test]

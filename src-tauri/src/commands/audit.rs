@@ -71,9 +71,7 @@ pub fn plan_artifact_load(
 }
 
 #[tauri::command]
-pub fn plan_artifact_list(
-    active: State<'_, ActiveProject>,
-) -> Result<Vec<ArtifactStatus>, String> {
+pub fn plan_artifact_list(active: State<'_, ActiveProject>) -> Result<Vec<ArtifactStatus>, String> {
     let root = active_root(&active)?;
     list_statuses(&root).map_err(|e| e.to_string())
 }

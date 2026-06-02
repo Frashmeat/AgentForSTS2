@@ -200,7 +200,10 @@ mod tests {
     #[test]
     fn empty_id_marked_invalid() {
         let plan = ModPlan {
-            items: vec![PlanItem { name: "x".into(), ..Default::default() }],
+            items: vec![PlanItem {
+                name: "x".into(),
+                ..Default::default()
+            }],
             ..Default::default()
         };
         let r = validate_plan(&plan, ReviewStrictness::Balanced);
@@ -215,32 +218,55 @@ mod tests {
             ..Default::default()
         };
         let r = validate_plan(&plan, ReviewStrictness::Balanced);
-        assert!(r.items.iter().all(|i| i.issues.iter().any(|x| x.code == "duplicate_id")));
+        assert!(
+            r.items
+                .iter()
+                .all(|i| i.issues.iter().any(|x| x.code == "duplicate_id"))
+        );
     }
 
     #[test]
     fn missing_dependency_flagged() {
         let mut a = item("a");
         a.depends_on_item_ids = vec!["ghost".into()];
-        let plan = ModPlan { items: vec![a], ..Default::default() };
+        let plan = ModPlan {
+            items: vec![a],
+            ..Default::default()
+        };
         let r = validate_plan(&plan, ReviewStrictness::Balanced);
-        assert!(r.items[0].issues.iter().any(|i| i.code == "missing_dependency"));
+        assert!(
+            r.items[0]
+                .issues
+                .iter()
+                .any(|i| i.code == "missing_dependency")
+        );
     }
 
     #[test]
     fn self_dependency_flagged() {
         let mut a = item("a");
         a.depends_on_item_ids = vec!["a".into()];
-        let plan = ModPlan { items: vec![a], ..Default::default() };
+        let plan = ModPlan {
+            items: vec![a],
+            ..Default::default()
+        };
         let r = validate_plan(&plan, ReviewStrictness::Balanced);
-        assert!(r.items[0].issues.iter().any(|i| i.code == "self_dependency"));
+        assert!(
+            r.items[0]
+                .issues
+                .iter()
+                .any(|i| i.code == "self_dependency")
+        );
     }
 
     #[test]
     fn custom_code_missing_goal_needs_input() {
         let mut a = item("a");
         a.item_type = AssetItemType::CustomCode;
-        let plan = ModPlan { items: vec![a], ..Default::default() };
+        let plan = ModPlan {
+            items: vec![a],
+            ..Default::default()
+        };
         let r = validate_plan(&plan, ReviewStrictness::Balanced);
         assert_eq!(r.items[0].status, PlanItemReviewStatus::NeedsUserInput);
         assert!(r.items[0].missing_fields.contains(&"goal".to_string()));
@@ -248,14 +274,20 @@ mod tests {
 
     #[test]
     fn balanced_card_without_goal_is_clear() {
-        let plan = ModPlan { items: vec![item("a")], ..Default::default() };
+        let plan = ModPlan {
+            items: vec![item("a")],
+            ..Default::default()
+        };
         let r = validate_plan(&plan, ReviewStrictness::Balanced);
         assert_eq!(r.items[0].status, PlanItemReviewStatus::Clear);
     }
 
     #[test]
     fn strict_mode_requires_goal() {
-        let plan = ModPlan { items: vec![item("a")], ..Default::default() };
+        let plan = ModPlan {
+            items: vec![item("a")],
+            ..Default::default()
+        };
         let r = validate_plan(&plan, ReviewStrictness::Strict);
         assert_eq!(r.items[0].status, PlanItemReviewStatus::NeedsUserInput);
         assert!(r.items[0].missing_fields.contains(&"goal".to_string()));

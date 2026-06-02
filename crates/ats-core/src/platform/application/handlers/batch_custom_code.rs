@@ -9,9 +9,7 @@ use std::sync::Arc;
 
 use serde::Serialize;
 
-use super::code_generate::{
-    GenerateError, generate_and_write_code_artifact, sanitize_entity_name,
-};
+use super::code_generate::{GenerateError, generate_and_write_code_artifact, sanitize_entity_name};
 use super::common::{ProgressEvent, ProgressSink, finalize_with_error, transition_to_running};
 use crate::codegen::{CustomCodegenRequest, PromptAssembler};
 use crate::knowledge::{KnowledgePaths, SourceMode};
@@ -25,6 +23,7 @@ struct ItemOutcome {
     entity_name: String,
     success: bool,
     cs_path: Option<String>,
+    artifact_cs_path: Option<String>,
     extracted_chars: Option<usize>,
     raw_chars: Option<usize>,
     error: Option<String>,
@@ -71,12 +70,18 @@ pub async fn run_batch_custom_code(
         })
         .await;
 
-        let outcome =
-            process_one_item(
-                &assembler, &repo, &llm, &sink, &job_id, &knowledge_paths, &artifacts_dir,
-                &item, &entity_name,
-            )
-            .await;
+        let outcome = process_one_item(
+            &assembler,
+            &repo,
+            &llm,
+            &sink,
+            &job_id,
+            &knowledge_paths,
+            &artifacts_dir,
+            &item,
+            &entity_name,
+        )
+        .await;
 
         let item_success = outcome.success;
         if item_success {
@@ -157,20 +162,22 @@ async fn process_one_item(
     item: &CustomCodegenRequest,
     entity_name: &str,
 ) -> ItemOutcome {
-    let prompt = match assembler.assemble_custom_code_prompt(item, knowledge_paths, SourceMode::Missing) {
-        Ok(p) => p,
-        Err(err) => {
-            return ItemOutcome {
-                name: item.name.clone(),
-                entity_name: entity_name.to_string(),
-                success: false,
-                cs_path: None,
-                extracted_chars: None,
-                raw_chars: None,
-                error: Some(format!("prompt assembly: {err}")),
-            };
-        }
-    };
+    let prompt =
+        match assembler.assemble_custom_code_prompt(item, knowledge_paths, SourceMode::Missing) {
+            Ok(p) => p,
+            Err(err) => {
+                return ItemOutcome {
+                    name: item.name.clone(),
+                    entity_name: entity_name.to_string(),
+                    success: false,
+                    cs_path: None,
+                    artifact_cs_path: None,
+                    extracted_chars: None,
+                    raw_chars: None,
+                    error: Some(format!("prompt assembly: {err}")),
+                };
+            }
+        };
     match generate_and_write_code_artifact(
         Arc::clone(repo),
         Arc::clone(llm),
@@ -187,6 +194,7 @@ async fn process_one_item(
             entity_name: art.entity_name,
             success: true,
             cs_path: Some(art.cs_path.display().to_string()),
+            artifact_cs_path: Some(art.artifact_cs_path.display().to_string()),
             extracted_chars: Some(art.extracted_chars),
             raw_chars: Some(art.raw_chars),
             error: None,
@@ -196,6 +204,7 @@ async fn process_one_item(
             entity_name: entity_name.to_string(),
             success: false,
             cs_path: None,
+            artifact_cs_path: None,
             extracted_chars: None,
             raw_chars: None,
             error: Some("cancelled".into()),
@@ -205,6 +214,7 @@ async fn process_one_item(
             entity_name: entity_name.to_string(),
             success: false,
             cs_path: None,
+            artifact_cs_path: None,
             extracted_chars: None,
             raw_chars: None,
             error: Some(format!("stream: {msg}")),
@@ -214,6 +224,7 @@ async fn process_one_item(
             entity_name: entity_name.to_string(),
             success: false,
             cs_path: None,
+            artifact_cs_path: None,
             extracted_chars: None,
             raw_chars: None,
             error: Some(format!("write: {msg}")),
@@ -243,10 +254,7 @@ mod tests {
 
     #[async_trait]
     impl LlmClient for RotatingLlm {
-        async fn complete(
-            &self,
-            _: CompletionRequest,
-        ) -> Result<CompletionResponse, LlmError> {
+        async fn complete(&self, _: CompletionRequest) -> Result<CompletionResponse, LlmError> {
             unimplemented!()
         }
         async fn stream(&self, _: CompletionRequest) -> Result<CompletionStream, LlmError> {
@@ -263,7 +271,9 @@ mod tests {
 
     fn ok_code_response(model: &str, body: &str) -> Vec<Result<StreamEvent, LlmError>> {
         vec![
-            Ok(StreamEvent::Start { model: model.into() }),
+            Ok(StreamEvent::Start {
+                model: model.into(),
+            }),
             Ok(StreamEvent::Delta {
                 text: format!("```csharp\n{body}\n```"),
             }),
@@ -372,10 +382,12 @@ mod tests {
         assert_eq!(res["succeeded"], 2);
         assert_eq!(res["failed"], 1);
         let items = res["items"].as_array().unwrap();
-        assert!(items[1]["error"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("forced failure"));
+        assert!(
+            items[1]["error"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("forced failure")
+        );
     }
 
     #[tokio::test]

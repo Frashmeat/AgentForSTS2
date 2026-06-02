@@ -6,7 +6,7 @@
 //!    → 把路径塞回 asset_request.image_paths（覆盖原值）
 //! 3. 用 PromptAssembler.assemble_asset_prompt 装 prompt
 //! 4. 复用 code_generate 的 generate_and_write_code_artifact 写 .cs + raw.md
-//! 5. 落 job.result 包含 csPath / pngPath / model 等
+//! 5. 落 job.result 包含 csPath / artifactCsPath / pngPath / model 等
 //!
 //! image_gen 失败 → 整任务 Failed（不继续 code）。
 //! image_prompt 留空 → 跳过 image_gen，仅跑 code_generate（与 code_generate(asset)
@@ -17,9 +17,7 @@ use std::sync::Arc;
 
 use tokio::fs;
 
-use super::code_generate::{
-    GenerateError, generate_and_write_code_artifact, sanitize_entity_name,
-};
+use super::code_generate::{GenerateError, generate_and_write_code_artifact, sanitize_entity_name};
 use super::common::{ProgressEvent, ProgressSink, finalize_with_error, transition_to_running};
 use crate::codegen::PromptAssembler;
 use crate::image_gen::{ImageGenClient, ImageGenRequest};
@@ -130,9 +128,7 @@ pub async fn run_asset_generate(
                         job_id: job_id.clone(),
                         stage: "rembg-warn".into(),
                         percent: None,
-                        message: Some(format!(
-                            "background removal failed: {err}; using raw image"
-                        )),
+                        message: Some(format!("background removal failed: {err}; using raw image")),
                         delta: None,
                     })
                     .await;
@@ -145,10 +141,7 @@ pub async fn run_asset_generate(
                 job_id: job_id.clone(),
                 stage: "image-gen-done".into(),
                 percent: Some(0.4),
-                message: Some(format!(
-                    "image written ({} bytes)",
-                    first.bytes.len()
-                )),
+                message: Some(format!("image written ({} bytes)", first.bytes.len())),
                 delta: None,
             })
             .await;
@@ -216,6 +209,7 @@ pub async fn run_asset_generate(
     job.result = Some(serde_json::json!({
         "entityName": artifact.entity_name,
         "csPath": artifact.cs_path.display().to_string(),
+        "artifactCsPath": artifact.artifact_cs_path.display().to_string(),
         "rawPath": artifact.raw_path.display().to_string(),
         "pngPath": png_path.as_ref().map(|p| p.display().to_string()),
         "imageModel": image_model,
@@ -249,9 +243,7 @@ pub async fn run_asset_generate(
 mod tests {
     use super::*;
     use crate::codegen::AssetCodegenRequest;
-    use crate::image_gen::{
-        GeneratedImage, ImageGenError, ImageGenResponse,
-    };
+    use crate::image_gen::{GeneratedImage, ImageGenError, ImageGenResponse};
     use crate::image_proc::SimpleBgRemover;
     use crate::llm::{
         CompletionRequest, CompletionResponse, CompletionStream, FinishReason, LlmError,
@@ -411,9 +403,11 @@ mod tests {
         assert_eq!(job.status, JobStatus::Completed);
 
         let png = artifacts.join("AlphaCard/AlphaCard.png");
-        let cs = artifacts.join("AlphaCard/AlphaCard.cs");
+        let artifact_cs = artifacts.join("AlphaCard/AlphaCard.cs");
+        let cs = td.path().join("Generated/AlphaCard.cs");
         assert!(png.exists(), "png missing");
         assert!(cs.exists(), "cs missing");
+        assert!(artifact_cs.exists(), "artifact cs missing");
 
         let res = job.result.unwrap();
         assert_eq!(res["entityName"], "AlphaCard");
@@ -505,8 +499,9 @@ mod tests {
         assert_eq!(job.status, JobStatus::Completed);
         assert_eq!(mock_img.call_count(), 0, "image gen should not be called");
 
-        let cs = artifacts.join("GammaCard/GammaCard.cs");
+        let cs = td.path().join("Generated/GammaCard.cs");
         assert!(cs.exists());
+        assert!(artifacts.join("GammaCard/GammaCard.cs").exists());
         let png = artifacts.join("GammaCard/GammaCard.png");
         assert!(!png.exists(), "png should not be written");
 

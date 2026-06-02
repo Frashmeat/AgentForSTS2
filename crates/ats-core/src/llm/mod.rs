@@ -34,9 +34,7 @@ pub use retry::{RetryConfig, RetryingClient};
 ///
 /// # Errors
 /// - `LlmError::Config`：api_key 为空 或 reqwest 客户端构建失败
-pub fn build_from_config(
-    cfg: &crate::config::LlmConfig,
-) -> Result<Arc<dyn LlmClient>, LlmError> {
+pub fn build_from_config(cfg: &crate::config::LlmConfig) -> Result<Arc<dyn LlmClient>, LlmError> {
     if cfg.api_key.is_empty() {
         return Err(LlmError::Config("llm.api_key is empty".into()));
     }
@@ -45,11 +43,7 @@ pub fn build_from_config(
     } else {
         Some(cfg.base_url.clone())
     };
-    let normalized = cfg
-        .provider
-        .trim()
-        .to_ascii_lowercase()
-        .replace('-', "_");
+    let normalized = cfg.provider.trim().to_ascii_lowercase().replace('-', "_");
 
     let raw: Arc<dyn LlmClient> = match normalized.as_str() {
         "openai" | "openai_compatible" | "new_api" | "one_api" => {
@@ -100,7 +94,13 @@ mod factory_tests {
 
     #[test]
     fn factory_builds_openai_for_known_aliases() {
-        for p in ["openai", "OpenAI", "openai-compatible", "new-api", "one_api"] {
+        for p in [
+            "openai",
+            "OpenAI",
+            "openai-compatible",
+            "new-api",
+            "one_api",
+        ] {
             assert!(
                 build_from_config(&cfg(p, "k", "gpt-4o", "https://example.com")).is_ok(),
                 "provider {p:?} should produce a client"

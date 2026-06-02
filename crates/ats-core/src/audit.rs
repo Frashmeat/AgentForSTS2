@@ -104,11 +104,10 @@ pub fn read_recent(project_root: &Path, limit: usize) -> Result<Vec<AuditEntry>,
         if line.trim().is_empty() {
             continue;
         }
-        let entry: AuditEntry =
-            serde_json::from_str(&line).map_err(|e| AuditError::Parse {
-                line_num: i + 1,
-                message: e.to_string(),
-            })?;
+        let entry: AuditEntry = serde_json::from_str(&line).map_err(|e| AuditError::Parse {
+            line_num: i + 1,
+            message: e.to_string(),
+        })?;
         all.push(entry);
     }
     if all.len() > limit {
@@ -182,8 +181,7 @@ mod tests {
     #[test]
     fn append_then_read_round_trips() {
         let td = tempfile::TempDir::new().unwrap();
-        let entry1 = AuditEntry::new("job.submitted", "code_generate started")
-            .with_ref("job-1");
+        let entry1 = AuditEntry::new("job.submitted", "code_generate started").with_ref("job-1");
         let entry2 = AuditEntry::new("job.completed", "code_generate ok")
             .with_ref("job-1")
             .with_data(serde_json::json!({"csPath": "/foo/Bar.cs"}));
@@ -210,11 +208,7 @@ mod tests {
     fn read_respects_limit() {
         let td = tempfile::TempDir::new().unwrap();
         for i in 0..20 {
-            append_entry(
-                td.path(),
-                &AuditEntry::new("test", format!("entry {i}")),
-            )
-            .unwrap();
+            append_entry(td.path(), &AuditEntry::new("test", format!("entry {i}"))).unwrap();
         }
         let last_5 = read_recent(td.path(), 5).unwrap();
         assert_eq!(last_5.len(), 5);

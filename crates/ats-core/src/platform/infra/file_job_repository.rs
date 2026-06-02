@@ -10,9 +10,7 @@ use async_trait::async_trait;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 
-use crate::platform::domain::{
-    Job, JobError, JobId, JobRepository, JobResult, JobSummary,
-};
+use crate::platform::domain::{Job, JobError, JobId, JobRepository, JobResult, JobSummary};
 
 const FILE_SUFFIX: &str = ".json";
 const TMP_SUFFIX: &str = ".tmp";

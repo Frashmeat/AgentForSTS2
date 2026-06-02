@@ -40,9 +40,7 @@ impl Sts2CodeFactsProvider {
         let mut warnings: Vec<String> = Vec::new();
 
         if !matches!(game_mode, SourceMode::RuntimeDecompiled) {
-            warnings.push(
-                "游戏反编译源缺失，无法抽取代码事实；先在知识库面板执行更新。".into(),
-            );
+            warnings.push("游戏反编译源缺失，无法抽取代码事实；先在知识库面板执行更新。".into());
             return (Vec::new(), warnings);
         }
 
@@ -52,15 +50,12 @@ impl Sts2CodeFactsProvider {
         if baselib_file.exists() {
             index.scan_file(&baselib_file, &mut warnings);
         } else {
-            warnings.push(
-                "BaseLib.decompiled.cs 不存在；prompt 不会包含 BaseLib 类型事实。".into(),
-            );
+            warnings
+                .push("BaseLib.decompiled.cs 不存在；prompt 不会包含 BaseLib 类型事实。".into());
         }
 
         if index.types.is_empty() {
-            warnings.push(
-                "反编译产物未抽取到任何类型；可能 game_dir 为空或文件格式异常。".into(),
-            );
+            warnings.push("反编译产物未抽取到任何类型；可能 game_dir 为空或文件格式异常。".into());
             return (Vec::new(), warnings);
         }
 
@@ -119,10 +114,7 @@ impl CodeFactsIndex {
                 return;
             }
             let p = entry.path();
-            if p.is_file()
-                && p.extension()
-                    .is_some_and(|e| e.eq_ignore_ascii_case("cs"))
-            {
+            if p.is_file() && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("cs")) {
                 self.scan_file(p, warnings);
             }
         }
@@ -159,10 +151,18 @@ impl CodeFactsIndex {
         let mut scored: Vec<(i32, &TypeSymbol)> = self
             .types
             .iter()
-            .map(|t| (score_type(t, &asset_type_keys, &symbol_keys, item_name_key.as_deref()), t))
+            .map(|t| {
+                (
+                    score_type(t, &asset_type_keys, &symbol_keys, item_name_key.as_deref()),
+                    t,
+                )
+            })
             .filter(|(score, _)| *score > 0)
             .collect();
-        scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.full_name.cmp(&b.1.full_name)));
+        scored.sort_by(|a, b| {
+            b.0.cmp(&a.0)
+                .then_with(|| a.1.full_name.cmp(&b.1.full_name))
+        });
         scored.truncate(MAX_FACTS);
 
         scored
@@ -473,18 +473,23 @@ namespace STS2.Cards
             asset_type: Some("card".into()),
             ..Default::default()
         };
-        let (facts, warnings) = Sts2CodeFactsProvider.build_facts(
-            &query,
-            &paths,
-            SourceMode::RuntimeDecompiled,
-        );
+        let (facts, warnings) =
+            Sts2CodeFactsProvider.build_facts(&query, &paths, SourceMode::RuntimeDecompiled);
 
         assert_eq!(facts.len(), 1, "warnings={warnings:?}");
         let f = &facts[0];
         assert_eq!(f.key, "STS2.Cards.StrikeCard");
         assert!(f.title.contains("class STS2.Cards.StrikeCard"));
-        assert!(f.body.contains("AbstractCard"), "body should mention base: {}", f.body);
-        assert!(f.body.contains("Use"), "method excerpt missing in body: {}", f.body);
+        assert!(
+            f.body.contains("AbstractCard"),
+            "body should mention base: {}",
+            f.body
+        );
+        assert!(
+            f.body.contains("Use"),
+            "method excerpt missing in body: {}",
+            f.body
+        );
         assert!(f.evidence_paths[0].ends_with("StrikeCard.cs"));
     }
 
@@ -523,11 +528,8 @@ namespace STS2.Cards
             asset_type: Some("relic".into()),
             ..Default::default()
         };
-        let (facts, _w) = Sts2CodeFactsProvider.build_facts(
-            &query,
-            &paths,
-            SourceMode::RuntimeDecompiled,
-        );
+        let (facts, _w) =
+            Sts2CodeFactsProvider.build_facts(&query, &paths, SourceMode::RuntimeDecompiled);
 
         assert!(
             facts.iter().any(|f| f.key.contains("RingOfFireRelic")),
@@ -553,11 +555,8 @@ namespace STS2.Cards
             symbols: vec!["WeirdName".into()],
             ..Default::default()
         };
-        let (facts, _w) = Sts2CodeFactsProvider.build_facts(
-            &query,
-            &paths,
-            SourceMode::RuntimeDecompiled,
-        );
+        let (facts, _w) =
+            Sts2CodeFactsProvider.build_facts(&query, &paths, SourceMode::RuntimeDecompiled);
         assert_eq!(facts.len(), 1);
         assert_eq!(facts[0].key, "STS2.WeirdName");
     }
@@ -604,11 +603,8 @@ namespace STS2.Cards
             symbols: vec!["HookManager".into()],
             ..Default::default()
         };
-        let (facts, _w) = Sts2CodeFactsProvider.build_facts(
-            &query,
-            &paths,
-            SourceMode::RuntimeDecompiled,
-        );
+        let (facts, _w) =
+            Sts2CodeFactsProvider.build_facts(&query, &paths, SourceMode::RuntimeDecompiled);
         assert!(facts.iter().any(|f| f.key.contains("HookManager")));
     }
 
@@ -632,7 +628,11 @@ namespace STS2.Cards
             SourceMode::RuntimeDecompiled,
         );
         assert!(!facts.is_empty());
-        assert!(warnings.iter().any(|w| w.contains("BaseLib.decompiled.cs 不存在")));
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("BaseLib.decompiled.cs 不存在"))
+        );
     }
 
     #[test]
@@ -645,9 +645,7 @@ namespace STS2.Cards
             write_cs(
                 &paths.game_dir,
                 &format!("Card{i}.cs"),
-                &format!(
-                    "namespace STS2.Cards {{ public class Card{i} : AbstractCard {{ }} }}"
-                ),
+                &format!("namespace STS2.Cards {{ public class Card{i} : AbstractCard {{ }} }}"),
             );
         }
         let (facts, _w) = Sts2CodeFactsProvider.build_facts(

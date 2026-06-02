@@ -191,9 +191,7 @@ impl LlmClient for OpenAiClient {
         }
 
         let byte_stream = response.bytes_stream();
-        let sse_stream = byte_stream
-            .map_err(std::io::Error::other)
-            .eventsource();
+        let sse_stream = byte_stream.map_err(std::io::Error::other).eventsource();
 
         let state = StreamState::default();
         let mapped = futures_util::stream::unfold(
@@ -501,11 +499,7 @@ mod tests {
         let auth = map_http_error(401, None, r#"{"error":{"message":"bad key"}}"#);
         assert!(matches!(auth, LlmError::Auth(msg) if msg.contains("bad key")));
 
-        let rate = map_http_error(
-            429,
-            Some(7),
-            r#"{"error":{"message":"slow down"}}"#,
-        );
+        let rate = map_http_error(429, Some(7), r#"{"error":{"message":"slow down"}}"#);
         match rate {
             LlmError::RateLimit {
                 retry_after_secs,

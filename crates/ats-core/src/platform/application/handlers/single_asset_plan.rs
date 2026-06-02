@@ -131,7 +131,10 @@ pub async fn run_single_asset_plan(
             finalize_with_error(
                 &repo,
                 &job_id,
-                &format!("parse plan json: {err}; raw: {}", truncate(&accumulated, 500)),
+                &format!(
+                    "parse plan json: {err}; raw: {}",
+                    truncate(&accumulated, 500)
+                ),
             )
             .await;
             return;
@@ -194,8 +197,8 @@ async fn persist_plan_item(
     let safe_id = super::code_generate::sanitize_entity_name(&plan_item.id);
     let final_path = items_dir.join(format!("{safe_id}.json"));
     let tmp_path = items_dir.join(format!("{safe_id}.json.tmp"));
-    let body = serde_json::to_vec_pretty(plan_item)
-        .map_err(|e| format!("serialize plan item: {e}"))?;
+    let body =
+        serde_json::to_vec_pretty(plan_item).map_err(|e| format!("serialize plan item: {e}"))?;
     tokio::fs::write(&tmp_path, &body)
         .await
         .map_err(|e| format!("write tmp: {e}"))?;
@@ -284,11 +287,18 @@ mod tests {
 
     fn one_chunk(text: &str) -> Vec<Result<StreamEvent, LlmError>> {
         vec![
-            Ok(StreamEvent::Start { model: "plan-model".into() }),
-            Ok(StreamEvent::Delta { text: text.to_string() }),
+            Ok(StreamEvent::Start {
+                model: "plan-model".into(),
+            }),
+            Ok(StreamEvent::Delta {
+                text: text.to_string(),
+            }),
             Ok(StreamEvent::End {
                 finish_reason: FinishReason::EndTurn,
-                usage: Usage { input_tokens: 100, output_tokens: 50 },
+                usage: Usage {
+                    input_tokens: 100,
+                    output_tokens: 50,
+                },
             }),
         ]
     }
@@ -343,7 +353,10 @@ mod tests {
             asset_type: Some("relic".into()),
             max_tokens: None,
         };
-        let id = service.submit_single_asset_plan(req, None, sink).await.unwrap();
+        let id = service
+            .submit_single_asset_plan(req, None, sink)
+            .await
+            .unwrap();
         wait_terminal(&service, &id).await;
 
         let job = service.get(&id).await.unwrap();
@@ -360,7 +373,8 @@ mod tests {
         let history = td.path().join("history");
         std::fs::create_dir_all(&history).unwrap();
 
-        let wrapped = format!("当然，以下是您的方案：\n\n```json\n{VALID_JSON}\n```\n\n希望有帮助！");
+        let wrapped =
+            format!("当然，以下是您的方案：\n\n```json\n{VALID_JSON}\n```\n\n希望有帮助！");
 
         let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
         let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
@@ -374,7 +388,10 @@ mod tests {
             asset_type: None,
             max_tokens: None,
         };
-        let id = service.submit_single_asset_plan(req, None, sink).await.unwrap();
+        let id = service
+            .submit_single_asset_plan(req, None, sink)
+            .await
+            .unwrap();
         wait_terminal(&service, &id).await;
 
         let job = service.get(&id).await.unwrap();
@@ -403,7 +420,10 @@ mod tests {
             asset_type: None,
             max_tokens: None,
         };
-        let id = service.submit_single_asset_plan(req, None, sink).await.unwrap();
+        let id = service
+            .submit_single_asset_plan(req, None, sink)
+            .await
+            .unwrap();
         wait_terminal(&service, &id).await;
 
         let job = service.get(&id).await.unwrap();
@@ -428,7 +448,10 @@ mod tests {
             asset_type: None,
             max_tokens: None,
         };
-        let id = service.submit_single_asset_plan(req, None, sink).await.unwrap();
+        let id = service
+            .submit_single_asset_plan(req, None, sink)
+            .await
+            .unwrap();
         wait_terminal(&service, &id).await;
 
         let job = service.get(&id).await.unwrap();
@@ -453,12 +476,19 @@ mod tests {
             requirements: "   ".into(),
             ..Default::default()
         };
-        let id = service.submit_single_asset_plan(req, None, sink).await.unwrap();
+        let id = service
+            .submit_single_asset_plan(req, None, sink)
+            .await
+            .unwrap();
         wait_terminal(&service, &id).await;
 
         let job = service.get(&id).await.unwrap();
         assert_eq!(job.status, JobStatus::Failed);
-        assert!(job.error.unwrap_or_default().contains("requirements is empty"));
+        assert!(
+            job.error
+                .unwrap_or_default()
+                .contains("requirements is empty")
+        );
     }
 
     #[tokio::test]
@@ -515,10 +545,7 @@ mod tests {
     #[test]
     fn parse_plan_item_handles_unicode_quotes_in_string_fields() {
         // 中文引号/省略号要能保留
-        let json_with_unicode = VALID_JSON.replace(
-            "永燃之火",
-            "永燃之火（火之传说……）",
-        );
+        let json_with_unicode = VALID_JSON.replace("永燃之火", "永燃之火（火之传说……）");
         let item = parse_plan_item(&json_with_unicode).expect("should parse");
         assert!(item.name_zhs.contains("火之传说"));
     }

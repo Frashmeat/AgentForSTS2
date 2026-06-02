@@ -95,7 +95,10 @@ impl OpenAiImagesClient {
 #[async_trait]
 impl ImageGenClient for OpenAiImagesClient {
     async fn generate(&self, request: ImageGenRequest) -> Result<ImageGenResponse, ImageGenError> {
-        let url = format!("{}/v1/images/generations", self.base_url.trim_end_matches('/'));
+        let url = format!(
+            "{}/v1/images/generations",
+            self.base_url.trim_end_matches('/')
+        );
         let body = self.build_body(&request);
         let response = self
             .http
@@ -208,7 +211,8 @@ mod tests {
 
     #[test]
     fn build_body_uses_request_size_when_provided() {
-        let client = OpenAiImagesClient::new("k", "dall-e-3", None, Some("512x512".into())).unwrap();
+        let client =
+            OpenAiImagesClient::new("k", "dall-e-3", None, Some("512x512".into())).unwrap();
         let req = ImageGenRequest {
             prompt: "a cat".into(),
             n: 1,
@@ -279,11 +283,7 @@ mod tests {
     fn map_http_error_classifies_status_codes() {
         let auth = map_http_error(401, None, r#"{"error":{"message":"bad key"}}"#);
         assert!(matches!(auth, ImageGenError::Auth(msg) if msg.contains("bad key")));
-        let rate = map_http_error(
-            429,
-            Some(5),
-            r#"{"error":{"message":"slow down"}}"#,
-        );
+        let rate = map_http_error(429, Some(5), r#"{"error":{"message":"slow down"}}"#);
         match rate {
             ImageGenError::RateLimit {
                 retry_after_secs,

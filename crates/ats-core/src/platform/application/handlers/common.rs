@@ -5,9 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use crate::platform::domain::{
-    JobError, JobId, JobProgress, JobRepository, JobResult, JobStatus,
-};
+use crate::platform::domain::{JobError, JobId, JobProgress, JobRepository, JobResult, JobStatus};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

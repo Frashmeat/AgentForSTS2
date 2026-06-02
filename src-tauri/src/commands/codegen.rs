@@ -11,7 +11,10 @@ use crate::AppConfig;
 
 fn assemble<F>(config: &State<'_, AppConfig>, f: F) -> Result<String, String>
 where
-    F: FnOnce(&PromptAssembler, &KnowledgePaths) -> Result<String, ats_core::prompting::PromptError>,
+    F: FnOnce(
+        &PromptAssembler,
+        &KnowledgePaths,
+    ) -> Result<String, ats_core::prompting::PromptError>,
 {
     let paths = KnowledgePaths::from_runtime_dir(&config.status_snapshot().runtime_dir());
     let assembler = PromptAssembler::built_in();
@@ -56,9 +59,7 @@ pub fn codegen_build_prompt(max_attempts: Option<u32>) -> Result<String, String>
 }
 
 #[tauri::command]
-pub fn codegen_create_mod_project_prompt(
-    request: ModProjectRequest,
-) -> Result<String, String> {
+pub fn codegen_create_mod_project_prompt(request: ModProjectRequest) -> Result<String, String> {
     PromptAssembler::built_in()
         .assemble_create_mod_project_prompt(&request)
         .map_err(|e| e.to_string())

@@ -15,15 +15,16 @@ pub async fn static_handler(uri: Uri) -> Response {
     let path = uri.path().trim_start_matches('/');
 
     if !path.is_empty()
-        && let Some(content) = Asset::get(path) {
-            let mime = mime_guess::from_path(path).first_or_octet_stream();
-            return (
-                StatusCode::OK,
-                [(header::CONTENT_TYPE, mime.as_ref())],
-                content.data.into_owned(),
-            )
-                .into_response();
-        }
+        && let Some(content) = Asset::get(path)
+    {
+        let mime = mime_guess::from_path(path).first_or_octet_stream();
+        return (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, mime.as_ref())],
+            content.data.into_owned(),
+        )
+            .into_response();
+    }
 
     match Asset::get("index.html") {
         Some(content) => Html(String::from_utf8_lossy(&content.data).to_string()).into_response(),

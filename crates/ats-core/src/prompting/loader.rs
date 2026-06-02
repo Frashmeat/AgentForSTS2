@@ -341,6 +341,9 @@ mod tests {
     fn built_in_loader_serves_codegen() {
         let loader = PromptLoader::built_in();
         let content = loader.load("codegen.md").unwrap();
-        assert!(!content.is_empty(), "built-in codegen.md should not be empty");
+        assert!(
+            !content.is_empty(),
+            "built-in codegen.md should not be empty"
+        );
     }
 }

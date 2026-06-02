@@ -58,9 +58,7 @@ pub struct RuntimeSnapshot {
 }
 
 #[tauri::command]
-pub fn get_settings_snapshot(
-    config: tauri::State<'_, AppConfig>,
-) -> SettingsSnapshot {
+pub fn get_settings_snapshot(config: tauri::State<'_, AppConfig>) -> SettingsSnapshot {
     let (s, status) = config.snapshot();
     SettingsSnapshot {
         config_path: status.path.clone(),

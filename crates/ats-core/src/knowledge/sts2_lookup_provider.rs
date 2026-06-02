@@ -91,11 +91,8 @@ mod tests {
     #[test]
     fn missing_game_mode_emits_fallback_lookup() {
         let provider = Sts2LookupProvider;
-        let items = provider.build_lookup(
-            &KnowledgeQuery::default(),
-            &paths(),
-            SourceMode::Missing,
-        );
+        let items =
+            provider.build_lookup(&KnowledgeQuery::default(), &paths(), SourceMode::Missing);
         let keys: Vec<&str> = items.iter().map(|i| i.key.as_str()).collect();
         assert!(keys.contains(&"sts2.lookup.baselib"));
         assert!(keys.contains(&"sts2.lookup.game_fallback"));

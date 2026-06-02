@@ -98,10 +98,7 @@ pub fn build_record_with_tag(
     release_tag: Option<String>,
 ) -> std::io::Result<DecompileRecord> {
     let meta = std::fs::metadata(source)?;
-    let mtime = meta
-        .modified()
-        .ok()
-        .map(DateTime::<Utc>::from);
+    let mtime = meta.modified().ok().map(DateTime::<Utc>::from);
     Ok(DecompileRecord {
         source_path: source.to_path_buf(),
         source_size_bytes: meta.len(),
@@ -122,9 +119,8 @@ pub fn build_record_with_tag(
 pub fn read_manifest(path: &Path) -> std::io::Result<Option<KnowledgeManifest>> {
     match std::fs::read_to_string(path) {
         Ok(text) => {
-            let m: KnowledgeManifest = serde_json::from_str(&text).map_err(|e| {
-                std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string())
-            })?;
+            let m: KnowledgeManifest = serde_json::from_str(&text)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
             Ok(Some(m))
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -188,7 +184,9 @@ mod tests {
         let manifest_path = td.path().join("knowledge-manifest.json");
         write_manifest(&manifest_path, &m).unwrap();
 
-        let loaded = read_manifest(&manifest_path).unwrap().expect("file present");
+        let loaded = read_manifest(&manifest_path)
+            .unwrap()
+            .expect("file present");
         let g = loaded.game.expect("game record");
         assert_eq!(g.source_path, src);
         assert_eq!(g.cs_file_count, 42);

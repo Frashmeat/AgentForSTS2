@@ -18,11 +18,7 @@ pub fn get_health(
     active: State<'_, ActiveProject>,
     image_proc: State<'_, Arc<ImageProcState>>,
 ) -> HealthReport {
-    let active_open = active
-        .0
-        .lock()
-        .map(|g| g.is_some())
-        .unwrap_or(false);
+    let active_open = active.0.lock().map(|g| g.is_some()).unwrap_or(false);
     let image_proc_ready = matches!(image_proc.status_snapshot(), PrewarmStatus::Ready { .. });
     let (settings, status) = config.snapshot();
     ats_core::health::report_full(

@@ -3,9 +3,7 @@
 //! 镜像 Python `Sts2GuidanceProvider`。Python 端从磁盘读 `.md`，本端读内嵌模板。
 //! `source_path` 字段保留模板 slot 名，方便前端/日志定位。
 
-use crate::knowledge::contracts::{
-    KnowledgeGuidanceItem, KnowledgeQuery, KnowledgeScenario,
-};
+use crate::knowledge::contracts::{KnowledgeGuidanceItem, KnowledgeQuery, KnowledgeScenario};
 use crate::knowledge::templates::get_template;
 
 #[derive(Debug, Default, Clone)]
@@ -48,7 +46,9 @@ impl Sts2GuidanceProvider {
             if !seen.insert(file.key.clone()) {
                 continue;
             }
-            if let Some(item) = template_or_empty(&file.key, &file.title, &file.slot, &file.asset_types) {
+            if let Some(item) =
+                template_or_empty(&file.key, &file.title, &file.slot, &file.asset_types)
+            {
                 out.push(item);
             }
         }
@@ -201,7 +201,10 @@ mod tests {
             ..Default::default()
         };
         let items = Sts2GuidanceProvider.build_guidance(&query);
-        let card_count = items.iter().filter(|i| i.key == "sts2.guidance.card").count();
+        let card_count = items
+            .iter()
+            .filter(|i| i.key == "sts2.guidance.card")
+            .count();
         assert_eq!(card_count, 1);
     }
 }

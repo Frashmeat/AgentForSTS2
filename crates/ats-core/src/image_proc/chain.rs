@@ -44,9 +44,7 @@ impl ImageProcClient for BgRemoverChain {
             match p.remove_background(input_png).await {
                 Ok(out) => return Ok(out),
                 Err(err) => {
-                    tracing::warn!(
-                        "ML bg remover failed, falling back to heuristic: {err}"
-                    );
+                    tracing::warn!("ML bg remover failed, falling back to heuristic: {err}");
                 }
             }
         }

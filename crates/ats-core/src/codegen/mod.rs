@@ -14,7 +14,6 @@ mod models;
 mod prompt_assembler;
 
 pub use models::{
-    AssetCodegenRequest, AssetGroupItem, AssetGroupRequest, CustomCodegenRequest,
-    ModProjectRequest,
+    AssetCodegenRequest, AssetGroupItem, AssetGroupRequest, CustomCodegenRequest, ModProjectRequest,
 };
 pub use prompt_assembler::PromptAssembler;

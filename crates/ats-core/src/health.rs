@@ -56,7 +56,11 @@ pub struct HealthReport {
 #[must_use]
 pub fn report(role: Role, config: ConfigStatus) -> HealthReport {
     HealthReport {
-        status: if config.errors.is_empty() { "ok" } else { "degraded" },
+        status: if config.errors.is_empty() {
+            "ok"
+        } else {
+            "degraded"
+        },
         role,
         core_version: crate::version().to_string(),
         server_time: chrono::Utc::now(),

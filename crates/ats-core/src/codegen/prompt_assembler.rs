@@ -78,7 +78,10 @@ impl PromptAssembler {
         let zhs_hint = if request.name_zhs.is_empty() {
             String::new()
         } else {
-            format!("\nSimplified Chinese display name (name_zhs): {}", request.name_zhs)
+            format!(
+                "\nSimplified Chinese display name (name_zhs): {}",
+                request.name_zhs
+            )
         };
         let build_note = "NOTE: Godot headless export always exits with code -1, but if MSBuild reports '0 Error(s)' and the overall dotnet exit code is 0 — that is SUCCESS. Do NOT re-run just because of Godot's -1.";
         let build_step = if request.skip_build {
@@ -150,7 +153,10 @@ impl PromptAssembler {
             ("guidance", knowledge.guidance.as_str()),
             ("lookup", knowledge.lookup.as_str()),
             ("knowledge_warnings", knowledge.warnings.as_str()),
-            ("implementation_notes", request.implementation_notes.as_str()),
+            (
+                "implementation_notes",
+                request.implementation_notes.as_str(),
+            ),
             ("mod_name", mod_name.as_str()),
             ("name", request.name.as_str()),
             ("project_root", project_root.as_str()),
@@ -228,7 +234,8 @@ impl PromptAssembler {
     }
 
     pub fn assemble_package_prompt(&self) -> Result<String, PromptError> {
-        self.loader.render("codegen.package_prompt", &HashMap::new())
+        self.loader
+            .render("codegen.package_prompt", &HashMap::new())
     }
 
     fn resolve_knowledge(
@@ -425,7 +432,9 @@ mod tests {
             project_name: "NewMod".into(),
             target_dir: PathBuf::from("E:/work"),
         };
-        let prompt = assembler.assemble_create_mod_project_prompt(&request).unwrap();
+        let prompt = assembler
+            .assemble_create_mod_project_prompt(&request)
+            .unwrap();
         assert!(prompt.contains("NewMod"));
         assert!(prompt.contains("E:/work/NewMod"));
     }

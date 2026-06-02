@@ -18,7 +18,7 @@ mod simple;
 
 pub use chain::BgRemoverChain;
 #[cfg(feature = "ml-rembg")]
-pub use ml::{MlBgRemover, MlBgRemoverError};
+pub use ml::{MlBgRemover, MlBgRemoverError, init_ort_from_dylib};
 pub use simple::{SimpleBgRemover, remove_white_background};
 
 use async_trait::async_trait;

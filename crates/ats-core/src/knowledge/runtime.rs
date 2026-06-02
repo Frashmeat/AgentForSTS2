@@ -35,19 +35,29 @@ pub fn get_status(paths: &KnowledgePaths) -> KnowledgeStatus {
 
     let mut warnings: Vec<String> = Vec::new();
     if !game_has_cs {
-        warnings.push("游戏反编译源码目录为空——需要先执行知识库更新（stage 4 接入 ilspycmd 调度）".into());
+        warnings.push(
+            "游戏反编译源码目录为空——需要先执行知识库更新（stage 4 接入 ilspycmd 调度）".into(),
+        );
     }
     if !baselib_exists {
         warnings.push("BaseLib 反编译结果缺失——需要先执行知识库更新".into());
     }
 
     let game = GameStatus {
-        source_mode: if game_has_cs { SourceMode::RuntimeDecompiled } else { SourceMode::Missing },
+        source_mode: if game_has_cs {
+            SourceMode::RuntimeDecompiled
+        } else {
+            SourceMode::Missing
+        },
         knowledge_path: paths.game_dir.display().to_string(),
         has_decompiled_sources: game_has_cs,
     };
     let baselib = BaselibStatus {
-        source_mode: if baselib_exists { SourceMode::RuntimeDecompiled } else { SourceMode::Missing },
+        source_mode: if baselib_exists {
+            SourceMode::RuntimeDecompiled
+        } else {
+            SourceMode::Missing
+        },
         knowledge_path: paths.baselib_dir.display().to_string(),
         has_decompiled_sources: baselib_exists,
     };
@@ -73,9 +83,13 @@ fn has_cs_files(root: &Path, max_depth: usize) -> bool {
     if max_depth == 0 || !root.exists() {
         return false;
     }
-    let Ok(entries) = fs::read_dir(root) else { return false };
+    let Ok(entries) = fs::read_dir(root) else {
+        return false;
+    };
     for entry in entries.flatten() {
-        let Ok(file_type) = entry.file_type() else { continue };
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
         let path = entry.path();
         if file_type.is_file()
             && path

@@ -71,10 +71,8 @@ pub async fn detect_full() -> LocalCapabilities {
     let mut caps = detect_sync();
     caps.dotnet_version = detect_dotnet_version().await;
     if caps.dotnet_version.is_none() {
-        caps.warnings.push(
-            "dotnet SDK 未检测到。运行 `dotnet --version` 看是否能输出版本号。"
-                .into(),
-        );
+        caps.warnings
+            .push("dotnet SDK 未检测到。运行 `dotnet --version` 看是否能输出版本号。".into());
     }
     caps
 }

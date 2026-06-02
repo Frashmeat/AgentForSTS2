@@ -18,7 +18,10 @@ pub fn router() -> Router {
         .route("/api/codegen/custom-code-prompt", post(custom_code_prompt))
         .route("/api/codegen/asset-group-prompt", post(asset_group_prompt))
         .route("/api/codegen/build-prompt", post(build_prompt))
-        .route("/api/codegen/create-mod-project-prompt", post(create_mod_project_prompt))
+        .route(
+            "/api/codegen/create-mod-project-prompt",
+            post(create_mod_project_prompt),
+        )
         .route("/api/codegen/package-prompt", post(package_prompt))
 }
 

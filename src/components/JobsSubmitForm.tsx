@@ -250,7 +250,7 @@ export function JobsSubmitForm({ onSubmitted, onError }: Props) {
             </Field>
           )}
           <p style={{ fontSize: "11.5px", color: "var(--ink-mute)" }}>
-            Output → <code>artifacts/{assetName}/{assetName}.cs</code>
+            Output → <code>Generated/{assetName}.cs</code> + <code>artifacts/{assetName}/raw.md</code>
             {submitKind === "asset_generate" && imagePrompt.trim() && (
               <>
                 {" "}+ <code>{assetName}.png</code>

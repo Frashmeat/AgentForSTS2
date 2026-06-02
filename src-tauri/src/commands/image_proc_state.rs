@@ -46,10 +46,7 @@ impl ImageProcState {
 
     #[must_use]
     pub fn status_snapshot(&self) -> PrewarmStatus {
-        self.status
-            .lock()
-            .map(|g| g.clone())
-            .unwrap_or_default()
+        self.status.lock().map(|g| g.clone()).unwrap_or_default()
     }
 }
 
@@ -61,18 +58,12 @@ pub enum PrewarmStatus {
     #[default]
     Idle,
     /// 正在下载 / 加载模型
-    Loading {
-        message: String,
-    },
+    Loading { message: String },
     /// ML rembg 已就绪
-    Ready {
-        model: String,
-    },
+    Ready { model: String },
     /// 启动失败（feature off / 网络问题 / onnxruntime 缺失）—— asset_generate 仍会
     /// 走启发式 fallback，UI 提示用户但不致命
-    Failed {
-        message: String,
-    },
+    Failed { message: String },
 }
 
 /// 在 Tauri setup 阶段 spawn 调用：feature on 时下载 u2netp + 加载 MlBgRemover；
@@ -94,8 +85,34 @@ pub async fn prewarm(state: Arc<ImageProcState>, app_data_dir: PathBuf) {
 
     #[cfg(feature = "ml-rembg")]
     {
-        use ats_core::image_proc::MlBgRemover;
-        use ats_core::image_proc::cache::{ModelSpec, ensure_model};
+        use ats_core::image_proc::cache::{
+            ModelSpec, OrtDylibSpec, ensure_model, ensure_ort_dylib,
+        };
+        use ats_core::image_proc::{MlBgRemover, init_ort_from_dylib};
+
+        #[cfg(windows)]
+        {
+            let spec = OrtDylibSpec::onnxruntime_1_22_windows_x64();
+            let runtimes_dir = app_data_dir.join("runtimes").join("onnxruntime-1.22.0");
+            state.set_status(PrewarmStatus::Loading {
+                message: "preparing onnxruntime.dll".into(),
+            });
+            let dll_path = match ensure_ort_dylib(&runtimes_dir, &spec).await {
+                Ok(p) => p,
+                Err(err) => {
+                    state.set_status(PrewarmStatus::Failed {
+                        message: format!("onnxruntime dll: {err}"),
+                    });
+                    return;
+                }
+            };
+            if let Err(err) = init_ort_from_dylib(&dll_path) {
+                state.set_status(PrewarmStatus::Failed {
+                    message: format!("ort init: {err}"),
+                });
+                return;
+            }
+        }
 
         let spec = ModelSpec::u2netp();
         let models_dir = app_data_dir.join("models");
@@ -115,10 +132,8 @@ pub async fn prewarm(state: Arc<ImageProcState>, app_data_dir: PathBuf) {
             message: "loading onnxruntime session".into(),
         });
         let model_path_for_load = model_path.clone();
-        let load_result = tokio::task::spawn_blocking(move || {
-            MlBgRemover::load(&model_path_for_load)
-        })
-        .await;
+        let load_result =
+            tokio::task::spawn_blocking(move || MlBgRemover::load(&model_path_for_load)).await;
         match load_result {
             Ok(Ok(remover)) => {
                 state.set_primary(Arc::new(remover));
@@ -142,8 +157,6 @@ pub async fn prewarm(state: Arc<ImageProcState>, app_data_dir: PathBuf) {
 
 #[tauri::command]
 #[must_use]
-pub fn image_proc_status(
-    state: tauri::State<'_, Arc<ImageProcState>>,
-) -> PrewarmStatus {
+pub fn image_proc_status(state: tauri::State<'_, Arc<ImageProcState>>) -> PrewarmStatus {
     state.status_snapshot()
 }

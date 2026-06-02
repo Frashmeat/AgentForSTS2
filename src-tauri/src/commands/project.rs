@@ -33,9 +33,7 @@ pub struct ProjectSnapshot {
 }
 
 #[tauri::command]
-pub fn list_recent_projects(
-    paths: State<'_, AppPaths>,
-) -> Result<Vec<RecentEntry>, String> {
+pub fn list_recent_projects(paths: State<'_, AppPaths>) -> Result<Vec<RecentEntry>, String> {
     let r = RecentProjects::load(&paths.recents_path());
     Ok(r.items)
 }
@@ -86,10 +84,7 @@ pub fn current_project(
 }
 
 #[tauri::command]
-pub fn forget_recent_project(
-    paths: State<'_, AppPaths>,
-    path: String,
-) -> Result<(), String> {
+pub fn forget_recent_project(paths: State<'_, AppPaths>, path: String) -> Result<(), String> {
     let mut r = RecentProjects::load(&paths.recents_path());
     r.forget(&PathBuf::from(path));
     r.save(&paths.recents_path()).map_err(|e| e.to_string())?;
@@ -103,18 +98,15 @@ fn snapshot(folder: &ProjectFolder) -> ProjectSnapshot {
     }
 }
 
-fn record_recent(
-    paths: &AppPaths,
-    project_path: &Path,
-    meta: &ProjectMeta,
-) -> Result<(), String> {
+fn record_recent(paths: &AppPaths, project_path: &Path, meta: &ProjectMeta) -> Result<(), String> {
     let recents_path = paths.recents_path();
     let mut r = RecentProjects::load(&recents_path);
     r.record(project_path, meta);
     if let Some(parent) = recents_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("create app data dir: {e}"))?;
     }
-    r.save(&recents_path).map_err(|e| format!("save recents: {e}"))?;
+    r.save(&recents_path)
+        .map_err(|e| format!("save recents: {e}"))?;
     Ok(())
 }
 

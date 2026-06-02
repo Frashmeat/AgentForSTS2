@@ -102,8 +102,7 @@ pub fn run_decompile_project(
     if !dll.is_file() {
         return Err(DecompileError::DllMissing(dll.to_path_buf()));
     }
-    std::fs::create_dir_all(output_dir)
-        .map_err(|e| DecompileError::OutputCreate(e.to_string()))?;
+    std::fs::create_dir_all(output_dir).map_err(|e| DecompileError::OutputCreate(e.to_string()))?;
 
     let output = Command::new(ilspycmd)
         .arg(dll)
@@ -157,8 +156,7 @@ pub fn run_decompile_file(
         return Err(DecompileError::DllMissing(dll.to_path_buf()));
     }
     if let Some(parent) = output_file.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| DecompileError::OutputCreate(e.to_string()))?;
+        std::fs::create_dir_all(parent).map_err(|e| DecompileError::OutputCreate(e.to_string()))?;
     }
 
     let output = Command::new(ilspycmd)
@@ -217,10 +215,7 @@ fn count_cs_files(dir: &Path) -> std::io::Result<(u32, u64)> {
     let walker = walkdir::WalkDir::new(dir);
     for entry in walker.into_iter().filter_map(Result::ok) {
         let p = entry.path();
-        if p.is_file()
-            && p.extension()
-                .is_some_and(|e| e.eq_ignore_ascii_case("cs"))
-        {
+        if p.is_file() && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("cs")) {
             count += 1;
             if let Ok(meta) = entry.metadata() {
                 bytes += meta.len();
@@ -243,7 +238,11 @@ mod tests {
         fs::create_dir_all(&d1).unwrap();
         fs::create_dir_all(&d2).unwrap();
 
-        let bin_name = if cfg!(windows) { "ilspycmd.exe" } else { "ilspycmd" };
+        let bin_name = if cfg!(windows) {
+            "ilspycmd.exe"
+        } else {
+            "ilspycmd"
+        };
         fs::write(d2.join(bin_name), b"fake").unwrap();
 
         let dirs: Vec<&Path> = vec![d1.as_path(), d2.as_path()];

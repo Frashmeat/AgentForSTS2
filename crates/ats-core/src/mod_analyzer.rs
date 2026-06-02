@@ -89,9 +89,7 @@ pub fn analyze(project_root: &Path) -> Result<ModAnalysisReport, ModAnalyzerErro
     if mod_meta_path.is_file() {
         match std::fs::read_to_string(&mod_meta_path) {
             Ok(text) => report.mod_meta = Some(parse_mod_meta(&text)),
-            Err(err) => report
-                .warnings
-                .push(format!("read packages.json: {err}")),
+            Err(err) => report.warnings.push(format!("read packages.json: {err}")),
         }
     }
 
@@ -314,7 +312,10 @@ mod tests {
             report.warnings
         );
         assert!(
-            report.warnings.iter().any(|w| w.contains(".cs 源文件数为 0")),
+            report
+                .warnings
+                .iter()
+                .any(|w| w.contains(".cs 源文件数为 0")),
             "expected cs-files warning"
         );
     }

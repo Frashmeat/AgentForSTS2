@@ -75,10 +75,7 @@ fn status_path(project_root: &Path, item_id: &str) -> PathBuf {
 /// 写入（覆盖）单个 item 的状态。
 ///
 /// 原子写：tmp + rename，避免读者看到半截 JSON。
-pub fn save_status(
-    project_root: &Path,
-    status: &ArtifactStatus,
-) -> Result<(), PlanArtifactError> {
+pub fn save_status(project_root: &Path, status: &ArtifactStatus) -> Result<(), PlanArtifactError> {
     let path = status_path(project_root, &status.item_id);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| PlanArtifactError::Io(e.to_string()))?;
@@ -98,8 +95,8 @@ pub fn load_status(
     let path = status_path(project_root, item_id);
     match std::fs::read_to_string(&path) {
         Ok(text) => {
-            let s: ArtifactStatus = serde_json::from_str(&text)
-                .map_err(|e| PlanArtifactError::Parse(e.to_string()))?;
+            let s: ArtifactStatus =
+                serde_json::from_str(&text).map_err(|e| PlanArtifactError::Parse(e.to_string()))?;
             Ok(Some(s))
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -107,9 +104,7 @@ pub fn load_status(
     }
 }
 
-pub fn list_statuses(
-    project_root: &Path,
-) -> Result<Vec<ArtifactStatus>, PlanArtifactError> {
+pub fn list_statuses(project_root: &Path) -> Result<Vec<ArtifactStatus>, PlanArtifactError> {
     let dir = items_dir(project_root);
     if !dir.is_dir() {
         return Ok(Vec::new());
@@ -192,7 +187,11 @@ mod tests {
         let dir = items_dir(td.path());
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("random.json"), b"{}").unwrap();
-        std::fs::write(dir.join("item-x.status.json"), br#"{"itemId":"x","state":"pending","updatedAt":"2026-05-11T00:00:00Z"}"#).unwrap();
+        std::fs::write(
+            dir.join("item-x.status.json"),
+            br#"{"itemId":"x","state":"pending","updatedAt":"2026-05-11T00:00:00Z"}"#,
+        )
+        .unwrap();
         let list = list_statuses(td.path()).unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].item_id, "x");

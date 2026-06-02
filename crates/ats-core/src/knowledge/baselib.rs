@@ -135,9 +135,8 @@ impl BaselibSource for GitHubBaselibSource {
             available: release.assets.iter().map(|a| a.name.clone()).collect(),
         })?;
 
-        std::fs::create_dir_all(dest_dir).map_err(|e| {
-            BaselibError::Write(dest_dir.to_path_buf(), format!("create dir: {e}"))
-        })?;
+        std::fs::create_dir_all(dest_dir)
+            .map_err(|e| BaselibError::Write(dest_dir.to_path_buf(), format!("create dir: {e}")))?;
         let dest = dest_dir.join(&asset.name);
 
         let dl_resp = self

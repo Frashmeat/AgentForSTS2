@@ -38,7 +38,9 @@ impl RecentProjects {
     /// 读取 recent_projects.json；文件缺失/格式错误时返回空列表（永不报错）。
     #[must_use]
     pub fn load(path: &Path) -> Self {
-        let Ok(text) = fs::read_to_string(path) else { return Self::default() };
+        let Ok(text) = fs::read_to_string(path) else {
+            return Self::default();
+        };
         serde_json::from_str(&text).unwrap_or_default()
     }
 

@@ -149,12 +149,11 @@ fn zip_directory(
     if let Some(parent) = output_path.parent()
         && !parent.as_os_str().is_empty()
     {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            format!("create output parent {}: {e}", parent.display())
-        })?;
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("create output parent {}: {e}", parent.display()))?;
     }
-    let file = File::create(output_path)
-        .map_err(|e| format!("create {}: {e}", output_path.display()))?;
+    let file =
+        File::create(output_path).map_err(|e| format!("create {}: {e}", output_path.display()))?;
     let mut writer = zip::ZipWriter::new(file);
 
     let mut options = SimpleFileOptions::default()
@@ -212,10 +211,7 @@ fn zip_directory(
     }
 
     let final_file = writer.finish().map_err(|e| format!("finish zip: {e}"))?;
-    stats.zip_bytes = final_file
-        .metadata()
-        .map(|m| m.len())
-        .unwrap_or(0);
+    stats.zip_bytes = final_file.metadata().map(|m| m.len()).unwrap_or(0);
     Ok(stats)
 }
 
@@ -235,10 +231,7 @@ mod tests {
 
     #[async_trait]
     impl LlmClient for DummyLlm {
-        async fn complete(
-            &self,
-            _: CompletionRequest,
-        ) -> Result<CompletionResponse, LlmError> {
+        async fn complete(&self, _: CompletionRequest) -> Result<CompletionResponse, LlmError> {
             unimplemented!()
         }
         async fn stream(&self, _: CompletionRequest) -> Result<CompletionStream, LlmError> {
@@ -330,7 +323,11 @@ mod tests {
         assert_eq!(job.status, JobStatus::Completed);
         let res = job.result.expect("result");
         let out_path = PathBuf::from(res["outputPath"].as_str().unwrap());
-        assert!(out_path.exists(), "default output should exist: {}", out_path.display());
+        assert!(
+            out_path.exists(),
+            "default output should exist: {}",
+            out_path.display()
+        );
         // 默认名应在 source 父目录下，以 "artifacts-" 开头
         assert_eq!(out_path.parent().unwrap(), td.path());
         let fname = out_path.file_name().unwrap().to_string_lossy().to_string();
@@ -398,7 +395,10 @@ mod tests {
         let job = service.get(&id).await.unwrap();
         assert_eq!(job.status, JobStatus::Failed);
         let err = job.error.unwrap_or_default();
-        assert!(err.contains("已存在的目录"), "expected dir hint, got: {err}");
+        assert!(
+            err.contains("已存在的目录"),
+            "expected dir hint, got: {err}"
+        );
     }
 
     #[tokio::test]

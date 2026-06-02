@@ -8,9 +8,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use super::client::{
-    CompletionRequest, CompletionResponse, CompletionStream, LlmClient, LlmError,
-};
+use super::client::{CompletionRequest, CompletionResponse, CompletionStream, LlmClient, LlmError};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "snake_case")]
@@ -127,15 +125,9 @@ mod tests {
 
     #[async_trait]
     impl LlmClient for ScriptedClient {
-        async fn complete(
-            &self,
-            _: CompletionRequest,
-        ) -> Result<CompletionResponse, LlmError> {
+        async fn complete(&self, _: CompletionRequest) -> Result<CompletionResponse, LlmError> {
             *self.calls.lock().unwrap() += 1;
-            self.responses
-                .lock()
-                .unwrap()
-                .remove(0)
+            self.responses.lock().unwrap().remove(0)
         }
         async fn stream(&self, _: CompletionRequest) -> Result<CompletionStream, LlmError> {
             unimplemented!()
@@ -186,7 +178,9 @@ mod tests {
 
     #[tokio::test]
     async fn does_not_retry_auth_error() {
-        let inner = Arc::new(ScriptedClient::new(vec![Err(LlmError::Auth("bad key".into()))]));
+        let inner = Arc::new(ScriptedClient::new(vec![Err(LlmError::Auth(
+            "bad key".into(),
+        ))]));
         let client = RetryingClient::new(inner.clone(), fast_retry_config());
         let r = client.complete(CompletionRequest::default()).await;
         assert!(matches!(r, Err(LlmError::Auth(_))));
