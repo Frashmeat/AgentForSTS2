@@ -69,7 +69,28 @@ fn items_dir(project_root: &Path) -> PathBuf {
 }
 
 fn status_path(project_root: &Path, item_id: &str) -> PathBuf {
-    items_dir(project_root).join(format!("{item_id}.status.json"))
+    items_dir(project_root).join(format!("{}.status.json", sanitize_item_id(item_id)))
+}
+
+/// 收敛 item_id 为安全文件名片段，防路径穿越：仅保留字母数字 / `-` / `_`，
+/// 其余（含 `.`、`/`、`\`、盘符冒号）一律替换为 `_`。save/load 都经 status_path，
+/// sanitize 自动一致；正常 id（如 `card-strike`）保持原样。
+fn sanitize_item_id(item_id: &str) -> String {
+    let safe: String = item_id
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if safe.is_empty() {
+        "item".to_string()
+    } else {
+        safe
+    }
 }
 
 /// 写入（覆盖）单个 item 的状态。
@@ -211,5 +232,28 @@ mod tests {
         let list = list_statuses(td.path()).unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].item_id, "good");
+    }
+
+    #[test]
+    fn sanitize_item_id_blocks_path_traversal() {
+        assert_eq!(sanitize_item_id("card-strike"), "card-strike");
+        assert_eq!(sanitize_item_id("rel_1"), "rel_1");
+        let s = sanitize_item_id("../../evil");
+        assert!(!s.contains('/'));
+        assert!(!s.contains('.'));
+        assert_eq!(sanitize_item_id("a/b\\c"), "a_b_c");
+        assert_eq!(sanitize_item_id(""), "item");
+    }
+
+    #[test]
+    fn save_status_with_traversal_id_stays_in_items_dir() {
+        let td = tempfile::TempDir::new().unwrap();
+        let s = ArtifactStatus::new("../../evil", ArtifactState::Generated);
+        save_status(td.path(), &s).unwrap();
+        // 不应在 items/ 之外（如 project_root 同级）写出文件
+        assert!(!td.path().join("evil.status.json").exists());
+        assert!(!td.path().join("../evil.status.json").exists());
+        // load 经同样 sanitize → 能取回
+        assert!(load_status(td.path(), "../../evil").unwrap().is_some());
     }
 }

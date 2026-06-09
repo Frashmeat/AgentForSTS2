@@ -21,22 +21,39 @@ pub fn topological_sort(items: &[PlanItem]) -> Vec<PlanItem> {
 }
 
 fn visit(
-    item_id: &str,
+    root_id: &str,
     id_map: &HashMap<&str, &PlanItem>,
     visited: &mut HashSet<String>,
     result: &mut Vec<PlanItem>,
 ) {
-    if visited.contains(item_id) {
-        return;
+    // 迭代式 post-order DFS：用显式栈替代递归，避免 LLM 产出的超深依赖链把调用栈打爆
+    // （递归实现会 stack overflow 直接 abort 进程；这是不可 catch 的崩溃）。
+    // 栈帧 (id, expanded)：expanded=false 表示首次访问、需展开依赖；
+    // expanded=true 表示依赖已全部输出，可以输出该节点本身（post-order）。
+    let mut stack: Vec<(String, bool)> = vec![(root_id.to_string(), false)];
+    while let Some((id, expanded)) = stack.pop() {
+        if expanded {
+            if let Some(item) = id_map.get(id.as_str()).copied() {
+                result.push(item.clone());
+            }
+            continue;
+        }
+        if visited.contains(&id) {
+            continue;
+        }
+        let Some(item) = id_map.get(id.as_str()).copied() else {
+            continue;
+        };
+        visited.insert(id.clone());
+        // 先压「退出」帧（输出自己），再逆序压依赖 —— 栈是 LIFO，逆序保证
+        // 依赖按原列表顺序被处理，与原递归实现的输出顺序一致。
+        stack.push((id, true));
+        for dep in item.depends_on_item_ids.iter().rev() {
+            if !visited.contains(dep) {
+                stack.push((dep.clone(), false));
+            }
+        }
     }
-    let Some(item) = id_map.get(item_id).copied() else {
-        return;
-    };
-    visited.insert(item_id.to_string());
-    for dep in &item.depends_on_item_ids {
-        visit(dep, id_map, visited, result);
-    }
-    result.push(item.clone());
 }
 
 /// 把通过依赖关系（无向）相连的 items 聚成一组。每组内部按拓扑顺序排列。
@@ -149,5 +166,42 @@ mod tests {
         let sorted = topological_sort(&items);
         assert_eq!(sorted.len(), 1);
         assert_eq!(sorted[0].id, "a");
+    }
+
+    #[test]
+    fn topological_sort_handles_deep_chain_without_stack_overflow() {
+        // 一条 20000 长的依赖链：item_0 <- item_1 <- ... <- item_19999。
+        // 递归实现在测试线程 2MB 栈上会爆栈 abort；迭代实现必须正常返回。
+        let n: usize = 20_000;
+        let items: Vec<PlanItem> = (0..n)
+            .map(|i| {
+                let id = format!("item_{i}");
+                let deps = if i == 0 {
+                    Vec::new()
+                } else {
+                    vec![format!("item_{}", i - 1)]
+                };
+                PlanItem {
+                    id: id.clone(),
+                    item_type: AssetItemType::Card,
+                    name: id,
+                    depends_on_item_ids: deps,
+                    ..Default::default()
+                }
+            })
+            .collect();
+        let sorted = topological_sort(&items);
+        assert_eq!(sorted.len(), n);
+        // 依赖在前：item_0 必须最先，item_{n-1} 必须最后。
+        assert_eq!(sorted[0].id, "item_0");
+        assert_eq!(sorted[n - 1].id, format!("item_{}", n - 1));
+    }
+
+    #[test]
+    fn topological_sort_terminates_on_cycle() {
+        // a<->b 互相依赖：必须终止（不死循环 / 不爆栈），两个都产出。
+        let items = vec![item("a", &["b"]), item("b", &["a"])];
+        let sorted = topological_sort(&items);
+        assert_eq!(sorted.len(), 2);
     }
 }

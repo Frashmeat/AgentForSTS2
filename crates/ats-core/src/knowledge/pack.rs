@@ -16,7 +16,7 @@
 
 use std::fs::File;
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -258,6 +258,11 @@ pub fn import(
             continue;
         }
         let target = if let Some(rest) = name.strip_prefix("game/") {
+            // 防 Zip Slip：拒绝含 `..` / 绝对路径 / 盘符前缀的条目，
+            // 否则恶意知识包能把文件写到 game_dir 之外（任意文件写入）。
+            if !is_safe_relative(rest) {
+                continue;
+            }
             paths.game_dir.join(rest)
         } else if name == "baselib/BaseLib.decompiled.cs" {
             paths.baselib_decompiled_file()
@@ -286,6 +291,21 @@ pub fn import(
     }
 
     Ok(stats)
+}
+
+/// 校验 ZIP 内 `game/` 之后的相对路径段是否安全，防 Zip Slip。
+///
+/// 仅允许普通路径段：拒绝空串、`..`（ParentDir）、绝对路径（RootDir）、
+/// Windows 盘符前缀（Prefix）。全 `Normal` 段保证 `game_dir.join(rest)` 不会逃逸目录。
+/// 跨平台：Linux CI 上 `../x` 解析成 ParentDir 段被拒；反斜杠在 Linux 是普通字符，
+/// 仍落在 game_dir 内（安全），在 Windows 上则作为分隔符触发 ParentDir 检查。
+fn is_safe_relative(rest: &str) -> bool {
+    if rest.is_empty() {
+        return false;
+    }
+    Path::new(rest)
+        .components()
+        .all(|c| matches!(c, Component::Normal(_)))
 }
 
 fn has_any_file(dir: &Path) -> bool {
@@ -345,6 +365,65 @@ mod tests {
         assert!(dst_paths.baselib_decompiled_file().exists());
         let manifest = fs::read_to_string(&dst_paths.manifest_path).unwrap();
         assert!(manifest.contains("schemaVersion"));
+    }
+
+    #[test]
+    fn is_safe_relative_rejects_traversal() {
+        assert!(is_safe_relative("Cards/b.cs"));
+        assert!(is_safe_relative("a.cs"));
+        assert!(!is_safe_relative(""));
+        assert!(!is_safe_relative("../evil.cs"));
+        assert!(!is_safe_relative("../../evil.cs"));
+        assert!(!is_safe_relative("a/../../evil.cs"));
+        #[cfg(unix)]
+        assert!(!is_safe_relative("/etc/passwd"));
+    }
+
+    #[test]
+    fn import_skips_zip_slip_entries() {
+        use std::io::Write as _;
+
+        let dst = tempfile::TempDir::new().unwrap();
+        let dst_paths = make_paths(&dst);
+
+        // 手造一个含目录穿越条目的知识包：pack-info + 1 恶意 + 1 正常
+        let zip_path = dst.path().join("evil.zip");
+        {
+            let f = fs::File::create(&zip_path).unwrap();
+            let mut zw = zip::ZipWriter::new(f);
+            let opts = zip::write::SimpleFileOptions::default();
+
+            let info = serde_json::json!({
+                "schemaVersion": PACK_SCHEMA_VERSION,
+                "exportedAt": "2024-01-01T00:00:00Z",
+                "sourceMachineHint": null,
+                "gameFileCount": 1,
+                "baselibPresent": false,
+            });
+            zw.start_file(PACK_INFO_NAME, opts).unwrap();
+            zw.write_all(&serde_json::to_vec(&info).unwrap()).unwrap();
+
+            zw.start_file("game/../../evil.cs", opts).unwrap();
+            zw.write_all(b"// pwned").unwrap();
+
+            zw.start_file("game/ok.cs", opts).unwrap();
+            zw.write_all(b"// ok").unwrap();
+
+            zw.finish().unwrap();
+        }
+
+        let stats = import(&dst_paths, &zip_path, false).unwrap();
+
+        // 正常条目落地
+        assert!(dst_paths.game_dir.join("ok.cs").exists());
+        // 穿越条目被跳过：仅写出 1 个 game 文件（无防护时会是 2）
+        assert_eq!(stats.game_files_written, 1);
+        // 兜底：确认 evil.cs 没有泄漏到临时目录树任意位置
+        let leaked = walkdir::WalkDir::new(dst.path())
+            .into_iter()
+            .filter_map(Result::ok)
+            .any(|e| e.file_name() == "evil.cs");
+        assert!(!leaked, "zip slip 条目不应被写出");
     }
 
     #[test]
