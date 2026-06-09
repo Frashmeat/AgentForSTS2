@@ -121,6 +121,12 @@ cargo build -p ats-web --release
 cargo build -p ats-cli --release
 ```
 
+> **⚠️ Web 端部署安全**：`ats-web` 的 `/api/*`（含会消耗 LLM 配额的补全接口）**当前无网络层鉴权**。
+> 默认 bind `127.0.0.1` 是安全的；CORS 已收紧为 `web.cors_origins` 白名单（+ `allow_loopback_origins` 时放行本机回环），
+> 可挡住浏览器跨源读取响应。但若把端口**对外发布**（如 `0.0.0.0` 或 Docker `-p 7870:7870`），
+> 任何能直连该端口的非浏览器客户端仍可直接调用接口盗刷配额。对外发布**必须**置于带鉴权的反向代理之后
+> （或仅 `127.0.0.1:7870` bind-publish）。完整的 session 登录鉴权属 Web 轨（sqlx + auth）后续工作。
+
 ### 质量门
 
 ```bash

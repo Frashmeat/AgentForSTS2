@@ -8,9 +8,11 @@ use std::sync::Arc;
 
 use ats_core::config::{ConfigStatus, Settings};
 use ats_core::health::{HealthReport, Role};
+use axum::http::{HeaderValue, Method, header, request::Parts};
 use axum::{Extension, Json, Router, routing::get};
 use clap::Parser;
-use tower_http::cors::CorsLayer;
+use tower_http::catch_panic::CatchPanicLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 
 #[derive(Debug, Parser)]
 #[command(name = "ats-web", version, about = "AgentTheSpire Web server")]
@@ -91,6 +93,9 @@ async fn main() -> anyhow::Result<()> {
         .host
         .unwrap_or_else(|| settings.runtime.web.host.clone());
     let port = args.port.unwrap_or(settings.runtime.web.port);
+    // CORS 配置须在 settings 被 move 进 app_state 前取出。
+    let cors_origins = settings.runtime.web.cors_origins.clone();
+    let allow_loopback = settings.runtime.web.allow_loopback_origins;
     let app_state = Arc::new(AppState {
         config_status: config_status.clone(),
         runtime_dir,
@@ -108,7 +113,9 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .merge(api)
         .fallback(static_files::static_handler)
-        .layer(CorsLayer::permissive());
+        .layer(build_cors_layer(&cors_origins, allow_loopback))
+        // 兜底：任何 handler panic 转成 500 而非直接断连。
+        .layer(CatchPanicLayer::new());
 
     let addr = format!("{host}:{port}");
     let listener = tokio::net::TcpListener::bind(&addr).await?;
@@ -119,6 +126,41 @@ async fn main() -> anyhow::Result<()> {
         .await?;
     tracing::info!("ats-web shut down cleanly");
     Ok(())
+}
+
+/// 按配置构造 CORS 白名单层，替代 `CorsLayer::permissive()`。
+///
+/// 仅放行 `cors_origins` 显式列出的来源；`allow_loopback` 为真时额外放行任意本机
+/// 回环来源（任意端口）。同源 SPA（由本服务 fallback 托管）属同源、不经 CORS，不受影响。
+/// 这样可挡住端口外发时，恶意站点在用户浏览器里跨源读取 `/api` 响应（配额盗刷 / 补全外泄）。
+/// 真正的网络层鉴权仍需反向代理——见 README 部署说明。
+fn build_cors_layer(cors_origins: &[String], allow_loopback: bool) -> CorsLayer {
+    let allowed: Vec<String> = cors_origins.to_vec();
+    let origin = AllowOrigin::predicate(move |origin: &HeaderValue, _parts: &Parts| {
+        let Ok(value) = origin.to_str() else {
+            return false;
+        };
+        if allowed.iter().any(|a| a == value) {
+            return true;
+        }
+        allow_loopback && is_loopback_origin(value)
+    });
+    CorsLayer::new()
+        .allow_methods([Method::GET, Method::POST])
+        .allow_headers([header::CONTENT_TYPE])
+        .allow_origin(origin)
+}
+
+/// 判断一个 Origin 头是否指向本机回环（任意端口）。
+fn is_loopback_origin(origin: &str) -> bool {
+    let after = origin.split("://").nth(1).unwrap_or("");
+    let host = if let Some(rest) = after.strip_prefix('[') {
+        // IPv6：http://[::1]:port
+        rest.split(']').next().unwrap_or("")
+    } else {
+        after.split(['/', ':']).next().unwrap_or("")
+    };
+    matches!(host, "127.0.0.1" | "localhost" | "::1")
 }
 
 /// 监听 Ctrl+C 与 SIGTERM（Unix 上）；任一触发即返回，axum 进入优雅停机
@@ -200,5 +242,25 @@ mod tests {
         // 无 settings 走 report() 分支，readiness 走 Default
         assert!(!report.readiness.llm_configured);
         assert!(!report.readiness.image_gen_configured);
+    }
+
+    #[test]
+    fn loopback_origin_detection() {
+        assert!(is_loopback_origin("http://127.0.0.1:5173"));
+        assert!(is_loopback_origin("http://localhost:3000"));
+        assert!(is_loopback_origin("https://localhost"));
+        assert!(is_loopback_origin("http://[::1]:8080"));
+        assert!(!is_loopback_origin("http://evil.com"));
+        assert!(!is_loopback_origin("http://127.0.0.1.evil.com"));
+        assert!(!is_loopback_origin("https://example.org:443"));
+    }
+
+    #[test]
+    fn cors_layer_builds_without_panicking() {
+        // 冒烟：默认 web 配置（显式 loopback 列表）能构造出 CORS 层。
+        let origins = vec!["http://127.0.0.1:7870".to_string()];
+        let _ = build_cors_layer(&origins, false);
+        let empty: Vec<String> = Vec::new();
+        let _ = build_cors_layer(&empty, true);
     }
 }
