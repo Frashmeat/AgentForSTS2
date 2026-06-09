@@ -91,6 +91,10 @@ pub enum StreamEvent {
     Delta { text: String },
     /// 模型结束（含 finish reason + usage）。
     End {
+        // enum 级 rename_all 只改 variant 名（tag），不改 struct variant 字段名，
+        // 故 finish_reason 默认按字段原名（snake）序列化，但前端按 camelCase 读。
+        // 显式 rename 对齐前端 StreamEvent.end.finishReason，否则结束 badge 永不渲染。
+        #[serde(rename = "finishReason")]
         finish_reason: FinishReason,
         usage: Usage,
     },

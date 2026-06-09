@@ -42,9 +42,16 @@ impl OpenAiClient {
         default_model: impl Into<String>,
         base_url: Option<String>,
     ) -> Result<Self, LlmError> {
-        let api_key = api_key.into();
+        let api_key: String = api_key.into();
+        let api_key = api_key.trim().to_string();
         if api_key.is_empty() {
             return Err(LlmError::Config("OpenAI api_key is empty".into()));
+        }
+        // 提前校验 Bearer 头能否构造，避免 headers() 里 .expect() panic。
+        if HeaderValue::from_str(&format!("Bearer {api_key}")).is_err() {
+            return Err(LlmError::Config(
+                "OpenAI api_key contains characters invalid for an HTTP header".into(),
+            ));
         }
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
@@ -202,15 +209,19 @@ impl LlmClient for OpenAiClient {
                 }
                 while let Some(item) = sse.next().await {
                     match item {
-                        Ok(event) => {
-                            if let Some(out) = state.apply(&event.data) {
+                        Ok(event) => match state.apply(&event.data) {
+                            Some(Ok(out)) => {
                                 if matches!(out, StreamEvent::End { .. }) {
                                     done = true;
                                 }
                                 return Some((Ok(out), (sse, state, done)));
                             }
+                            Some(Err(err)) => {
+                                return Some((Err(err), (sse, state, true)));
+                            }
                             // 没产出，继续读下一帧
-                        }
+                            None => {}
+                        },
                         Err(e) => {
                             return Some((
                                 Err(LlmError::Stream(e.to_string())),
@@ -327,39 +338,42 @@ struct StreamState {
 }
 
 impl StreamState {
-    /// 处理一个 SSE 数据帧。返回需要向上层产出的 StreamEvent（若有）。
+    /// 处理一个 SSE 数据帧。
+    ///
+    /// - `Some(Ok(event))`：产出一个事件（Start / Delta / End）。
+    /// - `Some(Err(_))`：流级错误（部分代理把错误包成 SSE 帧），作为终止性失败上抛。
+    /// - `None`：该帧无需产出，继续读下一帧。
     ///
     /// OpenAI 流式协议：
     /// - 普通帧：`data: {"id":..., "model":..., "choices":[{"delta":{"content":"..."}, "finish_reason": null}], "usage": null}`
     /// - 末帧（含 stream_options 时）：`data: {"choices":[], "usage": {prompt_tokens, completion_tokens, ...}}`
     /// - 结束哨兵：`data: [DONE]`
-    fn apply(&mut self, data: &str) -> Option<StreamEvent> {
+    fn apply(&mut self, data: &str) -> Option<Result<StreamEvent, LlmError>> {
         let data = data.trim();
         if data.is_empty() {
             return None;
         }
         if data == "[DONE]" {
             // 兜底：如果之前没有 finish_reason，仍然产出 End
-            return Some(StreamEvent::End {
+            return Some(Ok(StreamEvent::End {
                 finish_reason: self.finish_reason,
                 usage: Usage {
                     input_tokens: self.input_tokens,
                     output_tokens: self.output_tokens,
                 },
-            });
+            }));
         }
         let parsed: Value = serde_json::from_str(data).ok()?;
 
-        // 错误事件（部分代理把错误包成 SSE 帧）
+        // 错误事件（部分代理把错误包成 SSE 帧）：作为终止性 Err 上抛，
+        // 让消费者把 job 标记 Failed，而非把错误文本当成功输出保存。
         if let Some(err) = parsed.get("error") {
             let message = err
                 .get("message")
                 .and_then(Value::as_str)
                 .unwrap_or("stream error")
                 .to_string();
-            return Some(StreamEvent::Delta {
-                text: format!("\n[stream error: {message}]"),
-            });
+            return Some(Err(LlmError::Stream(message)));
         }
 
         // 抓 model（首帧）
@@ -369,9 +383,9 @@ impl StreamState {
             self.model = model.to_string();
             self.start_emitted = true;
             // start 帧不消费 delta；先产 Start，下次进来再产 delta
-            return Some(StreamEvent::Start {
+            return Some(Ok(StreamEvent::Start {
                 model: self.model.clone(),
-            });
+            }));
         }
 
         // 抓 usage（含 stream_options 时的末帧）
@@ -397,9 +411,9 @@ impl StreamState {
                 && let Some(text) = delta.get("content").and_then(Value::as_str)
                 && !text.is_empty()
             {
-                return Some(StreamEvent::Delta {
+                return Some(Ok(StreamEvent::Delta {
                     text: text.to_string(),
-                });
+                }));
             }
         }
 
@@ -425,7 +439,7 @@ mod tests {
             }]
         })
         .to_string();
-        let ev = state.apply(&chunk1).expect("start event");
+        let ev = state.apply(&chunk1).expect("yields an item").unwrap();
         assert!(matches!(ev, StreamEvent::Start { model } if model == "gpt-4o-mini"));
 
         let chunk2 = serde_json::json!({
@@ -435,7 +449,7 @@ mod tests {
             }]
         })
         .to_string();
-        let ev = state.apply(&chunk2).expect("delta event");
+        let ev = state.apply(&chunk2).expect("yields an item").unwrap();
         match ev {
             StreamEvent::Delta { text } => assert_eq!(text, " world"),
             _ => panic!("expected Delta"),
@@ -452,7 +466,7 @@ mod tests {
         .to_string();
         let _ = state.apply(&chunk3); // 无 content 不产 Delta；状态机记录 finish_reason + usage
 
-        let done = state.apply("[DONE]").expect("end event");
+        let done = state.apply("[DONE]").expect("yields an item").unwrap();
         match done {
             StreamEvent::End {
                 finish_reason,
@@ -474,23 +488,23 @@ mod tests {
     }
 
     #[test]
-    fn handles_inline_error_event() {
+    fn inline_error_event_yields_terminal_stream_error() {
+        // 代理把错误包成 SSE 帧时，必须变成终止性 Err，而非被降级成 Delta 当成功保存。
         let mut state = StreamState::default();
         let err = serde_json::json!({
             "error": { "message": "context_length_exceeded", "type": "bad_request" }
         })
         .to_string();
-        let ev = state.apply(&err).expect("delta with error message");
-        match ev {
-            StreamEvent::Delta { text } => assert!(text.contains("context_length_exceeded")),
-            _ => panic!("expected Delta"),
+        match state.apply(&err) {
+            Some(Err(LlmError::Stream(msg))) => assert!(msg.contains("context_length_exceeded")),
+            other => panic!("expected terminal Stream error, got {other:?}"),
         }
     }
 
     #[test]
     fn done_without_explicit_finish_still_emits_end() {
         let mut state = StreamState::default();
-        let done = state.apply("[DONE]").expect("end event");
+        let done = state.apply("[DONE]").expect("yields an item").unwrap();
         assert!(matches!(done, StreamEvent::End { .. }));
     }
 
@@ -571,6 +585,15 @@ mod tests {
             Err(LlmError::Config(_)) => {}
             Err(other) => panic!("expected Config error, got {other:?}"),
             Ok(_) => panic!("expected error for empty api_key"),
+        }
+    }
+
+    #[test]
+    fn rejects_api_key_with_invalid_header_char() {
+        match OpenAiClient::new("sk-with\nnewline", "gpt-4o", None) {
+            Err(LlmError::Config(_)) => {}
+            Err(other) => panic!("expected Config error, got {other:?}"),
+            Ok(_) => panic!("expected error for invalid api_key"),
         }
     }
 }

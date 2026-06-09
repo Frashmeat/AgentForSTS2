@@ -39,10 +39,17 @@ impl OpenAiImagesClient {
         base_url: Option<String>,
         default_size: Option<String>,
     ) -> Result<Self, ImageGenError> {
-        let api_key = api_key.into();
+        let api_key: String = api_key.into();
+        let api_key = api_key.trim().to_string();
         if api_key.is_empty() {
             return Err(ImageGenError::Config(
                 "OpenAI Images api_key is empty".into(),
+            ));
+        }
+        // 提前校验 Bearer 头能否构造，避免 headers() 里 .expect() panic。
+        if HeaderValue::from_str(&format!("Bearer {api_key}")).is_err() {
+            return Err(ImageGenError::Config(
+                "OpenAI Images api_key contains characters invalid for an HTTP header".into(),
             ));
         }
         let http = reqwest::Client::builder()
@@ -296,5 +303,18 @@ mod tests {
         }
         let server = map_http_error(500, None, "boom");
         assert!(matches!(server, ImageGenError::Http { status: 500, .. }));
+    }
+
+    #[test]
+    fn new_rejects_empty_and_invalid_api_key() {
+        assert!(matches!(
+            OpenAiImagesClient::new("", "dall-e-3", None, None),
+            Err(ImageGenError::Config(_))
+        ));
+        // 内嵌换行的 key 旧实现会在 headers() 里 panic；现在 new() 直接拒。
+        assert!(matches!(
+            OpenAiImagesClient::new("sk-with\nnewline", "dall-e-3", None, None),
+            Err(ImageGenError::Config(_))
+        ));
     }
 }

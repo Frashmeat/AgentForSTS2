@@ -83,7 +83,7 @@ fn backoff_duration(
     let exponent = attempt.saturating_sub(1) as i32;
     let raw = (config.initial_backoff_ms as f32) * config.backoff_multiplier.powi(exponent);
     let capped = (raw as u64).min(config.max_backoff_ms);
-    // 简单 jitter：在 [50%, 100%] 区间随机
+    // 简单 jitter：在 [50%, 100%) 区间随机（pseudo_random_in_range 返回 [0, max)）
     let jittered = capped / 2 + pseudo_random_in_range(capped / 2);
     Duration::from_millis(jittered)
 }

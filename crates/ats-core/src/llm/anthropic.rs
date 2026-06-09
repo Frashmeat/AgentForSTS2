@@ -40,9 +40,17 @@ impl AnthropicClient {
         default_model: impl Into<String>,
         base_url: Option<String>,
     ) -> Result<Self, LlmError> {
-        let api_key = api_key.into();
+        let api_key: String = api_key.into();
+        let api_key = api_key.trim().to_string();
         if api_key.is_empty() {
             return Err(LlmError::Config("Anthropic api_key is empty".into()));
+        }
+        // 提前校验能否作为 HTTP header 值，避免 headers() 里 .expect() 在用户
+        // 粘贴了含换行/控制字符的 key 时 panic 掉 async 任务。
+        if HeaderValue::from_str(&api_key).is_err() {
+            return Err(LlmError::Config(
+                "Anthropic api_key contains characters invalid for an HTTP header".into(),
+            ));
         }
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
@@ -189,15 +197,19 @@ impl LlmClient for AnthropicClient {
                 }
                 while let Some(item) = sse.next().await {
                     match item {
-                        Ok(event) => {
-                            if let Some(out) = state.apply(&event.data) {
+                        Ok(event) => match state.apply(&event.data) {
+                            Some(Ok(out)) => {
                                 if matches!(out, StreamEvent::End { .. }) {
                                     done = true;
                                 }
                                 return Some((Ok(out), (sse, state, done)));
                             }
+                            Some(Err(err)) => {
+                                return Some((Err(err), (sse, state, true)));
+                            }
                             // 没产出，继续读下一帧
-                        }
+                            None => {}
+                        },
                         Err(e) => {
                             return Some((
                                 Err(LlmError::Stream(e.to_string())),
@@ -309,8 +321,13 @@ struct StreamState {
 }
 
 impl StreamState {
-    /// 处理一个 SSE 数据帧。返回需要向上层产出的 StreamEvent（若有）。
-    fn apply(&mut self, data: &str) -> Option<StreamEvent> {
+    /// 处理一个 SSE 数据帧。
+    ///
+    /// - `Some(Ok(event))`：产出一个事件（Start / Delta / End）。
+    /// - `Some(Err(_))`：流级错误（如 `overloaded_error` / 中途 rate limit），
+    ///   作为终止性失败上抛，调用方据此把 job 标记 Failed。
+    /// - `None`：该帧无需产出，继续读下一帧。
+    fn apply(&mut self, data: &str) -> Option<Result<StreamEvent, LlmError>> {
         if data.is_empty() {
             return None;
         }
@@ -333,9 +350,9 @@ impl StreamState {
                 }
                 if !self.start_emitted {
                     self.start_emitted = true;
-                    return Some(StreamEvent::Start {
+                    return Some(Ok(StreamEvent::Start {
                         model: self.model.clone(),
-                    });
+                    }));
                 }
                 None
             }
@@ -349,7 +366,7 @@ impl StreamState {
                 if text.is_empty() {
                     return None;
                 }
-                Some(StreamEvent::Delta { text })
+                Some(Ok(StreamEvent::Delta { text }))
             }
             "message_delta" => {
                 if let Some(delta) = parsed.get("delta")
@@ -364,13 +381,13 @@ impl StreamState {
                 }
                 None
             }
-            "message_stop" => Some(StreamEvent::End {
+            "message_stop" => Some(Ok(StreamEvent::End {
                 finish_reason: self.finish_reason,
                 usage: Usage {
                     input_tokens: self.input_tokens,
                     output_tokens: self.output_tokens,
                 },
-            }),
+            })),
             "ping" => None,
             "error" => {
                 let message = parsed
@@ -379,11 +396,10 @@ impl StreamState {
                     .and_then(Value::as_str)
                     .unwrap_or("stream error event")
                     .to_string();
-                // 用一条 Delta 通知上层，紧接着用 End 收尾。
-                // 但 apply() 一次只能返回一个事件——先发 End 结束本流，错误信息丢进 delta-prefix 上层观察。
-                Some(StreamEvent::Delta {
-                    text: format!("\n[stream error: {message}]"),
-                })
+                // 流级错误必须作为终止性 Err 上抛：unfold 把它转成 yielded Err 并置 done，
+                // 消费者的 Err 分支调用 finalize_with_error 把 job 标记 Failed。
+                // 旧实现把它降级成一条 Delta 文本，导致 API 失败被当成功输出持久化。
+                Some(Err(LlmError::Stream(message)))
             }
             _ => None,
         }
@@ -406,7 +422,7 @@ mod tests {
             }
         })
         .to_string();
-        let ev = state.apply(&start).unwrap();
+        let ev = state.apply(&start).unwrap().unwrap();
         assert!(matches!(ev, StreamEvent::Start { model } if model == "claude-opus-4-1"));
 
         // text_delta
@@ -416,7 +432,7 @@ mod tests {
             "delta": { "type": "text_delta", "text": "Hello" }
         })
         .to_string();
-        let ev = state.apply(&delta).unwrap();
+        let ev = state.apply(&delta).unwrap().unwrap();
         assert!(matches!(ev, StreamEvent::Delta { text } if text == "Hello"));
 
         // message_delta 含 stop_reason
@@ -430,7 +446,7 @@ mod tests {
 
         // message_stop
         let stop = serde_json::json!({ "type": "message_stop" }).to_string();
-        let ev = state.apply(&stop).unwrap();
+        let ev = state.apply(&stop).unwrap().unwrap();
         match ev {
             StreamEvent::End {
                 finish_reason,
@@ -459,6 +475,22 @@ mod tests {
         );
         assert!(state.apply("").is_none());
         assert!(state.apply("not json").is_none());
+    }
+
+    #[test]
+    fn error_frame_yields_terminal_stream_error() {
+        // 顶层 error 帧（overloaded_error / 中途 rate limit）必须变成终止性 Err，
+        // 而不是被降级成 Delta 文本当成功输出保存。
+        let mut state = StreamState::default();
+        let frame = serde_json::json!({
+            "type": "error",
+            "error": { "type": "overloaded_error", "message": "Overloaded" }
+        })
+        .to_string();
+        match state.apply(&frame) {
+            Some(Err(LlmError::Stream(msg))) => assert!(msg.contains("Overloaded")),
+            other => panic!("expected terminal Stream error, got {other:?}"),
+        }
     }
 
     #[test]
@@ -493,6 +525,13 @@ mod tests {
     #[test]
     fn rejects_empty_api_key() {
         let r = AnthropicClient::new("", "claude-opus-4-1", None);
+        assert!(matches!(r, Err(LlmError::Config(_))));
+    }
+
+    #[test]
+    fn rejects_api_key_with_invalid_header_char() {
+        // 内嵌换行的 key（粘贴事故）旧实现会在 headers() 里 panic；现在 new() 直接拒。
+        let r = AnthropicClient::new("sk-with\nnewline", "claude-opus-4-1", None);
         assert!(matches!(r, Err(LlmError::Config(_))));
     }
 }
