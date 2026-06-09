@@ -66,6 +66,22 @@ impl JobRepository for AuditedJobRepository {
         Ok(())
     }
 
+    async fn modify(
+        &self,
+        id: &JobId,
+        apply: Box<dyn for<'a> FnOnce(&'a mut Job) -> bool + Send>,
+    ) -> JobResult<Job> {
+        let prev = self.inner.get(id).await.ok();
+        let job = self.inner.modify(id, apply).await?;
+        if let Some(p) = prev
+            && p.status != job.status
+            && let Some(entry) = transition_to_entry(&p, &job)
+        {
+            self.audit.emit(entry).await;
+        }
+        Ok(job)
+    }
+
     async fn get(&self, id: &JobId) -> JobResult<Job> {
         self.inner.get(id).await
     }

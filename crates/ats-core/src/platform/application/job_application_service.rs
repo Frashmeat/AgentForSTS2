@@ -48,16 +48,31 @@ impl JobApplicationService {
     /// 标记 Cancelled 并保存。任务实际执行中如已发起 LLM 请求，本 stage 不
     /// 中断网络层；handler 结束时会发现 status=Cancelled 而跳过最终结果覆写。
     pub async fn cancel(&self, id: &JobId) -> JobResult<()> {
-        let mut job = self.repo.get(id).await?;
-        if job.status.is_terminal() {
+        // 先快速判断（非关键路径，此处 TOCTOU 无害）：已终态直接报错，行为同旧实现。
+        let current = self.repo.get(id).await?;
+        if current.status.is_terminal() {
             return Err(JobError::Terminal {
-                id: job.id.0.clone(),
-                status: format!("{:?}", job.status),
+                id: current.id.0.clone(),
+                status: format!("{:?}", current.status),
             });
         }
-        job.status = JobStatus::Cancelled;
-        job.completed_at = Some(chrono::Utc::now());
-        self.repo.update(&job).await
+        // 关键路径：在仓库锁下原子置 Cancelled（仅当仍非终态），与 handler 收尾的
+        // CAS 互斥，杜绝「取消被 stream 收尾复活成 Completed」的竞态。
+        self.repo
+            .modify(
+                id,
+                Box::new(|job| {
+                    if job.status.is_terminal() {
+                        false
+                    } else {
+                        job.status = JobStatus::Cancelled;
+                        job.completed_at = Some(chrono::Utc::now());
+                        true
+                    }
+                }),
+            )
+            .await?;
+        Ok(())
     }
 
     /// 提交 text_generate 任务：保存 Pending → spawn 后台 tokio 任务跑 LLM。

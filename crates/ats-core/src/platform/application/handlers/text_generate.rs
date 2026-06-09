@@ -8,12 +8,12 @@ use std::sync::Arc;
 use futures_util::StreamExt;
 
 use super::common::{
-    ProgressEvent, ProgressSink, emit_cancelled_mid_stream, finalize_with_error, is_cancelled,
-    transition_to_running,
+    FinalizeOutcome, ProgressEvent, ProgressSink, emit_cancelled_mid_stream, finalize_with_error,
+    finalize_with_success, is_cancelled, transition_to_running,
 };
 use crate::llm::{CompletionRequest, LlmClient, Message, MessageRole, StreamEvent};
 use crate::platform::contracts::SubmitTextGenerateRequest;
-use crate::platform::domain::{JobId, JobRepository, JobStatus};
+use crate::platform::domain::{JobId, JobRepository};
 
 pub async fn run_text_generate(
     repo: Arc<dyn JobRepository>,
@@ -115,43 +115,38 @@ pub async fn run_text_generate(
         }
     }
 
-    let mut job = match repo.get(&job_id).await {
-        Ok(j) => j,
-        Err(err) => {
-            tracing::warn!(error = %err, "job vanished mid-run");
-            return;
-        }
-    };
-    if matches!(job.status, JobStatus::Cancelled) {
-        sink.emit(ProgressEvent {
-            job_id: job_id.clone(),
-            stage: "cancelled-after-stream".into(),
-            percent: None,
-            message: Some("job was cancelled while running".into()),
-            delta: None,
-        })
-        .await;
-        return;
-    }
-
-    job.status = JobStatus::Completed;
-    job.completed_at = Some(chrono::Utc::now());
-    job.result = Some(serde_json::json!({
+    let result = serde_json::json!({
         "model": model,
         "content": accumulated,
         "finishReason": finish,
         "usage": { "inputTokens": input_tokens, "outputTokens": output_tokens },
-    }));
-    let _ = repo.update(&job).await;
-
-    sink.emit(ProgressEvent {
-        job_id: job_id.clone(),
-        stage: "completed".into(),
-        percent: Some(1.0),
-        message: None,
-        delta: None,
-    })
-    .await;
+    });
+    // 原子收尾：仅当未被并发 cancel 时才落 Completed，避免覆盖用户的取消。
+    match finalize_with_success(&repo, &job_id, result).await {
+        FinalizeOutcome::Completed => {
+            sink.emit(ProgressEvent {
+                job_id: job_id.clone(),
+                stage: "completed".into(),
+                percent: Some(1.0),
+                message: None,
+                delta: None,
+            })
+            .await;
+        }
+        FinalizeOutcome::Cancelled => {
+            sink.emit(ProgressEvent {
+                job_id: job_id.clone(),
+                stage: "cancelled-after-stream".into(),
+                percent: None,
+                message: Some("job was cancelled while running".into()),
+                delta: None,
+            })
+            .await;
+        }
+        FinalizeOutcome::Vanished => {
+            tracing::warn!(job_id = %job_id.0, "job vanished mid-run");
+        }
+    }
 }
 
 #[cfg(test)]
@@ -159,7 +154,7 @@ mod tests {
     use super::*;
     use crate::llm::{CompletionResponse, CompletionStream, FinishReason, LlmError, Usage};
     use crate::platform::application::JobApplicationService;
-    use crate::platform::domain::{Job, JobKind, JobRepository};
+    use crate::platform::domain::{Job, JobKind, JobRepository, JobStatus};
     use crate::platform::infra::FileJobRepository;
     use async_trait::async_trait;
     use futures_util::stream;

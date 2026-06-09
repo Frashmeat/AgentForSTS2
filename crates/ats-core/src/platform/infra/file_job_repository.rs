@@ -2,9 +2,11 @@
 //!
 //! 文件命名：`<created_at_iso8601-basic>--<job_id>.json`，按文件名排序就是按时间。
 //! 写入原子：先写 `.tmp` 再 rename。
-//! list() 走 `tokio::fs::read_dir`，逐文件读 Summary 字段（不解 payload/result）。
+//! list() 走 `tokio::fs::read_dir`，逐文件解析完整 Job 再转 Summary（目录通常
+//! 10-100 量级，够用；并非只读 Summary 字段）。
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use tokio::fs;
@@ -18,12 +20,18 @@ const TMP_SUFFIX: &str = ".tmp";
 #[derive(Debug, Clone)]
 pub struct FileJobRepository {
     root: PathBuf,
+    /// 串行化所有写路径（create/update/delete/modify），让 `modify` 的「读-改-写」
+    /// 成为真正的原子 CAS：读与写之间不会有其它写插入。clone 共享同一把锁。
+    write_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl FileJobRepository {
     #[must_use]
     pub fn new(root: PathBuf) -> Self {
-        Self { root }
+        Self {
+            root,
+            write_lock: Arc::new(tokio::sync::Mutex::new(())),
+        }
     }
 
     fn job_path(&self, id: &JobId, created_at: chrono::DateTime<chrono::Utc>) -> PathBuf {
@@ -76,6 +84,7 @@ impl FileJobRepository {
 #[async_trait]
 impl JobRepository for FileJobRepository {
     async fn create(&self, job: &Job) -> JobResult<()> {
+        let _guard = self.write_lock.lock().await;
         self.ensure_root().await?;
         if self.locate(&job.id).await?.is_some() {
             return Err(JobError::AlreadyExists(job.id.0.clone()));
@@ -86,12 +95,33 @@ impl JobRepository for FileJobRepository {
     }
 
     async fn update(&self, job: &Job) -> JobResult<()> {
+        let _guard = self.write_lock.lock().await;
         let path = self
             .locate(&job.id)
             .await?
             .ok_or_else(|| JobError::NotFound(job.id.0.clone()))?;
         let bytes = serde_json::to_vec_pretty(job)?;
         Self::write_atomic(&path, &bytes).await
+    }
+
+    async fn modify(
+        &self,
+        id: &JobId,
+        apply: Box<dyn for<'a> FnOnce(&'a mut Job) -> bool + Send>,
+    ) -> JobResult<Job> {
+        let _guard = self.write_lock.lock().await;
+        let path = self
+            .locate(id)
+            .await?
+            .ok_or_else(|| JobError::NotFound(id.0.clone()))?;
+        let text = fs::read_to_string(&path).await?;
+        let mut job: Job = serde_json::from_str(&text)?;
+        let should_write = apply(&mut job);
+        if should_write {
+            let bytes = serde_json::to_vec_pretty(&job)?;
+            Self::write_atomic(&path, &bytes).await?;
+        }
+        Ok(job)
     }
 
     async fn get(&self, id: &JobId) -> JobResult<Job> {
@@ -137,6 +167,7 @@ impl JobRepository for FileJobRepository {
     }
 
     async fn delete(&self, id: &JobId) -> JobResult<()> {
+        let _guard = self.write_lock.lock().await;
         let Some(path) = self.locate(id).await? else {
             return Err(JobError::NotFound(id.0.clone()));
         };
