@@ -70,8 +70,9 @@ pub enum AuditError {
 
 /// 写入到 `<project>/.ats/audit.log`（追加模式）。父目录不存在会自动创建。
 ///
-/// 写入用 OpenOptions + create(true) + append(true)，多写者并发追加是
-/// OS write(2) 原子性的（POSIX 保证）+ Windows 上 NTFS 也基本可靠。
+/// 写入用 OpenOptions + create(true) + append(true)。O_APPEND 让每次 write(2)
+/// 都定位到文件末尾；单行 JSON 通常小于一次 write 的原子上限，实践中不交错，
+/// 但 write_all 可能拆成多次 write，并非硬性原子保证（高并发巨行时可能交错）。
 pub fn append_entry(project_root: &Path, entry: &AuditEntry) -> Result<(), AuditError> {
     let log_path = audit_log_path(project_root);
     if let Some(parent) = log_path.parent() {

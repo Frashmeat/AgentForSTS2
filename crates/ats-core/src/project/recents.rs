@@ -41,7 +41,15 @@ impl RecentProjects {
         let Ok(text) = fs::read_to_string(path) else {
             return Self::default();
         };
-        serde_json::from_str(&text).unwrap_or_default()
+        match serde_json::from_str(&text) {
+            Ok(parsed) => parsed,
+            Err(_) => {
+                // 损坏文件不静默丢弃：改名 .corrupt 备查（best-effort），再返回空列表。
+                // 下次 save 才写出新文件，用户可从 .corrupt 找回旧数据。
+                let _ = fs::rename(path, path.with_extension("json.corrupt"));
+                Self::default()
+            }
+        }
     }
 
     pub fn save(&self, path: &Path) -> ProjectResult<()> {
@@ -128,6 +136,18 @@ mod tests {
         let _ = fs::remove_file(&p);
         let r = RecentProjects::load(&p);
         assert!(r.items.is_empty());
+    }
+
+    #[test]
+    fn load_corrupt_file_renames_to_corrupt_not_silent_wipe() {
+        let td = tempfile::TempDir::new().unwrap();
+        let path = td.path().join("recent_projects.json");
+        fs::write(&path, b"NOT JSON {{{").unwrap();
+        let r = RecentProjects::load(&path);
+        assert!(r.items.is_empty());
+        // 原文件被改名备查，而非静默清空。
+        assert!(!path.exists());
+        assert!(path.with_extension("json.corrupt").exists());
     }
 
     #[test]

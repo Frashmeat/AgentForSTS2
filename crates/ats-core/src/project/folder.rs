@@ -220,15 +220,27 @@ struct ProjectLock {
 impl ProjectLock {
     fn acquire(project_root: &Path) -> ProjectResult<Self> {
         let lock_path = project_root.join(ATS_DIR).join(LOCK_FILE);
-        if lock_path.exists() {
-            return Err(ProjectError::Locked(project_root.display().to_string()));
-        }
         // 父目录可能在 create() / open() 已经创建，但保险起见再 ensure。
         if let Some(parent) = lock_path.parent() {
             fs::create_dir_all(parent)?;
         }
+        // 原子获取：create_new (O_EXCL) 在文件已存在时直接失败，杜绝两个进程同时
+        // 看到「不存在」再各自写入的 TOCTOU（旧实现先 exists() 后 write 有竞态窗口）。
         let pid_text = format!("{}", std::process::id());
-        write_text_atomic(&lock_path, &pid_text)?;
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)
+        {
+            Ok(mut f) => {
+                // 锁的语义由「文件存在」承载；pid 仅作诊断，写失败不影响加锁成立。
+                let _ = f.write_all(pid_text.as_bytes());
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                return Err(ProjectError::Locked(project_root.display().to_string()));
+            }
+            Err(e) => return Err(e.into()),
+        }
         Ok(Self {
             path: lock_path,
             released: AtomicBool::new(false),
