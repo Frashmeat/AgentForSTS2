@@ -141,7 +141,31 @@ struct ZipStats {
     zip_bytes: u64,
 }
 
+/// 原子打包：把 zip 写到同目录临时文件，全部成功后再 rename 到最终路径。
+/// 中途失败 / rename 失败都会清理临时文件——目标位置在 rename 前完全不被触碰，
+/// 因此构建失败或取消绝不会留下半截 .zip，也不会覆盖上一份好包。
 fn zip_directory(
+    source_dir: &Path,
+    output_path: &Path,
+    compression_level: Option<i32>,
+) -> Result<ZipStats, String> {
+    let tmp_path = output_path.with_extension("zip.partial");
+    match zip_to_tmp(source_dir, &tmp_path, compression_level) {
+        Ok(stats) => {
+            std::fs::rename(&tmp_path, output_path).map_err(|e| {
+                let _ = std::fs::remove_file(&tmp_path);
+                format!("rename to {}: {e}", output_path.display())
+            })?;
+            Ok(stats)
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp_path);
+            Err(e)
+        }
+    }
+}
+
+fn zip_to_tmp(
     source_dir: &Path,
     output_path: &Path,
     compression_level: Option<i32>,
@@ -254,6 +278,25 @@ mod tests {
         std::fs::write(root.join("a.txt"), b"hello").unwrap();
         std::fs::write(root.join("nested/b.cs"), b"public class B {}").unwrap();
         std::fs::write(root.join("nested/deep/c.json"), b"{\"k\":1}").unwrap();
+    }
+
+    #[test]
+    fn zip_directory_writes_atomically_and_leaves_no_partial() {
+        let td = tempfile::TempDir::new().unwrap();
+        let src = td.path().join("src");
+        populate_sample_tree(&src);
+        let out = td.path().join("pkg.zip");
+
+        let stats = zip_directory(&src, &out, None).unwrap();
+
+        assert!(out.exists(), "final zip should exist");
+        assert!(stats.files >= 3);
+        assert!(stats.zip_bytes > 0);
+        // 临时包不应残留
+        assert!(
+            !out.with_extension("zip.partial").exists(),
+            "no .partial temp should remain after success"
+        );
     }
 
     fn list_zip_entries(zip_path: &Path) -> Vec<String> {

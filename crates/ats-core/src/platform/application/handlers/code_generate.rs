@@ -245,7 +245,7 @@ pub(crate) async fn generate_and_write_code_artifact(
         }
     }
 
-    let extracted = extract_first_code_block(&accumulated).unwrap_or_else(|| accumulated.clone());
+    let extracted = extract_code_or_reject(&accumulated)?;
 
     let target_dir = artifacts_dir.join(entity_name);
     let artifact_cs_path = target_dir.join(format!("{entity_name}.cs"));
@@ -264,13 +264,13 @@ pub(crate) async fn generate_and_write_code_artifact(
     fs::create_dir_all(&generated_dir)
         .await
         .map_err(|e| GenerateError::Write(e.to_string()))?;
-    fs::write(&artifact_cs_path, &extracted)
+    crate::fs_atomic::write_atomic(&artifact_cs_path, extracted.as_bytes())
         .await
         .map_err(|e| GenerateError::Write(e.to_string()))?;
-    fs::write(&cs_path, &extracted)
+    crate::fs_atomic::write_atomic(&cs_path, extracted.as_bytes())
         .await
         .map_err(|e| GenerateError::Write(e.to_string()))?;
-    fs::write(&raw_path, &accumulated)
+    crate::fs_atomic::write_atomic(&raw_path, accumulated.as_bytes())
         .await
         .map_err(|e| GenerateError::Write(e.to_string()))?;
 
@@ -287,10 +287,49 @@ pub(crate) async fn generate_and_write_code_artifact(
     })
 }
 
+/// 从累积的原始模型输出中提取代码块，并拒绝空输出。
+///
+/// 优先取首个围栏代码块；无围栏时回退到原文。若提取结果去空白后为空
+/// （模型拒答 / 只回了空白 / 流中途无内容），返回 `Err` 让调用方把 job 标记 Failed，
+/// 而不是把 0 字节 `.cs` 当成功产物写盘并计入 batch「succeeded」。
+fn extract_code_or_reject(accumulated: &str) -> Result<String, GenerateError> {
+    let extracted =
+        extract_first_code_block(accumulated).unwrap_or_else(|| accumulated.to_string());
+    if extracted.trim().is_empty() {
+        return Err(GenerateError::Stream(
+            "model produced no code (empty output)".into(),
+        ));
+    }
+    Ok(extracted)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::codegen::CustomCodegenRequest;
+
+    #[test]
+    fn extract_code_or_reject_errors_on_empty_output() {
+        assert!(matches!(
+            extract_code_or_reject(""),
+            Err(GenerateError::Stream(_))
+        ));
+        assert!(matches!(
+            extract_code_or_reject("   \n\t  "),
+            Err(GenerateError::Stream(_))
+        ));
+        // 无围栏但有内容 → 回退原文，不报错
+        match extract_code_or_reject("public class Foo {}") {
+            Ok(s) => assert_eq!(s, "public class Foo {}"),
+            Err(_) => panic!("non-empty content should be accepted"),
+        }
+        // 有围栏 → 取围栏内代码
+        let md = "```csharp\npublic class Bar {}\n```";
+        match extract_code_or_reject(md) {
+            Ok(s) => assert!(s.contains("public class Bar")),
+            Err(_) => panic!("fenced code should be accepted"),
+        }
+    }
 
     #[test]
     fn extract_first_code_block_strips_fence() {

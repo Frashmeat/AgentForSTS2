@@ -94,7 +94,7 @@ pub async fn run_asset_generate(
                 finalize_with_error(&repo, &job_id, &format!("create target dir: {err}")).await;
                 return;
             }
-            if let Err(err) = fs::write(&path, &first.bytes).await {
+            if let Err(err) = crate::fs_atomic::write_atomic(&path, &first.bytes).await {
                 finalize_with_error(&repo, &job_id, &format!("write image: {err}")).await;
                 return;
             }
@@ -107,7 +107,7 @@ pub async fn run_asset_generate(
             let rembg_path = target_dir.join(format!("{entity_name}.rembg.png"));
             match image_proc.remove_background(&raw_bytes).await {
                 Ok(processed) => {
-                    if let Err(err) = fs::write(&rembg_path, &processed).await {
+                    if let Err(err) = crate::fs_atomic::write_atomic(&rembg_path, &processed).await {
                         sink.emit(ProgressEvent {
                             job_id: job_id.clone(),
                             stage: "rembg-write-warn".into(),

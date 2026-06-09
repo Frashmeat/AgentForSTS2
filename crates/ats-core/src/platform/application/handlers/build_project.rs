@@ -58,7 +58,7 @@ pub async fn run_build_project(
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let exit_code = output.status.code().unwrap_or(-1);
-    let success = exit_code == 0 || stdout.contains("0 Error(s)");
+    let success = exit_code == 0 || build_reports_zero_errors(&stdout);
 
     let job = match repo.get(&job_id).await {
         Ok(j) => j,
@@ -100,6 +100,27 @@ pub async fn run_build_project(
     .await;
 }
 
+/// 判定 dotnet/MSBuild 输出是否报告「0 个错误」。
+///
+/// MSBuild 末尾会打印形如 `    N Error(s)` 的摘要。必须按词边界解析数字：
+/// 旧实现 `stdout.contains("0 Error(s)")` 会被 `10 Error(s)` 命中，把失败构建误报成功。
+/// 取最后一个 `N Error(s)` 摘要判定，N 全为 0 才算成功；无摘要时保守返回 false。
+fn build_reports_zero_errors(stdout: &str) -> bool {
+    let mut zero: Option<bool> = None;
+    for (idx, _) in stdout.match_indices("Error(s)") {
+        let digits: String = stdout[..idx]
+            .chars()
+            .rev()
+            .skip_while(|c| c.is_whitespace())
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
+        if !digits.is_empty() {
+            zero = Some(digits.bytes().all(|b| b == b'0'));
+        }
+    }
+    zero.unwrap_or(false)
+}
+
 /// 保留文本末尾 max_chars 个字符，超长则前缀加截断标记。
 pub(crate) fn tail(text: &str, max_chars: usize) -> String {
     if text.chars().count() <= max_chars {
@@ -117,6 +138,22 @@ mod tests {
     #[test]
     fn tail_keeps_short_text_intact() {
         assert_eq!(tail("hello", 100), "hello");
+    }
+
+    #[test]
+    fn build_reports_zero_errors_respects_word_boundary() {
+        assert!(build_reports_zero_errors(
+            "Build succeeded.\n    0 Warning(s)\n    0 Error(s)\n"
+        ));
+        // 核心回归：10 Error(s) 不得被当成 0 Error(s)
+        assert!(!build_reports_zero_errors("    10 Error(s)"));
+        assert!(!build_reports_zero_errors("Build FAILED.\n    3 Error(s)"));
+        // 无摘要 → 保守判失败
+        assert!(!build_reports_zero_errors("no summary present"));
+        // 取最后一个摘要：先 0 后 2 → 失败
+        assert!(!build_reports_zero_errors(
+            "ProjA -> 0 Error(s)\nProjB -> 2 Error(s)"
+        ));
     }
 
     #[test]
