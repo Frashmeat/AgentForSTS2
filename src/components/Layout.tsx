@@ -12,6 +12,7 @@ const NAV_LINKS = [
   { to: "/editor", label: "Mod Editor" },
   { to: "/batch", label: "Batch" },
   { to: "/log", label: "Log Analysis" },
+  { to: "/devtools", label: "DevTools" },
   { to: "/settings", label: "Settings" },
 ];
 

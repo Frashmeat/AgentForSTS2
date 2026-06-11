@@ -9,12 +9,12 @@ import {
   Notice,
   PageHero,
 } from "@/components/ui";
+import { useProjectStore } from "@/stores/project";
+import { useJobProgress } from "@/hooks/useJobProgress";
 import { api } from "@/services/api";
 import type {
   CustomCodegenRequest,
   Job,
-  JobProgressEvent,
-  ProjectSnapshot,
   SubmitJobAck,
 } from "@/services/tauriApi";
 
@@ -29,7 +29,7 @@ function emptyItem(): BatchItem {
 }
 
 export function BatchGenerationPage() {
-  const [project, setProject] = useState<ProjectSnapshot | null>(null);
+  const project = useProjectStore((s) => s.project);
   const [items, setItems] = useState<BatchItem[]>([emptyItem()]);
   const [failFast, setFailFast] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,51 +38,32 @@ export function BatchGenerationPage() {
   const [job, setJob] = useState<Job | null>(null);
   const [delta, setDelta] = useState("");
   const jobIdRef = useRef<string | null>(null);
-  const unlistenRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     jobIdRef.current = jobId;
   }, [jobId]);
 
-  useEffect(() => {
-    if (!__IS_TAURI__) return;
-    void (async () => {
-      try {
-        setProject((await api.currentProject()) as ProjectSnapshot | null);
-      } catch (e: unknown) {
-        console.warn("currentProject:", e);
-      }
-      const { listen } = await import("@tauri-apps/api/event");
-      const stop = await listen<JobProgressEvent>("job-progress", (e) => {
-        const ev = e.payload;
-        if (ev.jobId !== jobIdRef.current) return;
-        if (ev.delta) setDelta((prev) => prev + ev.delta);
-        if (
-          ev.stage === "completed" ||
-          ev.stage === "failed" ||
-          ev.stage === "item-failed" ||
-          ev.stage.includes("error")
-        ) {
-          void (async () => {
-            try {
-              const next = (await api.getJob(ev.jobId)) as Job;
-              setJob(next);
-              if (next.status === "failed" && next.error) {
-                setError(`批量失败：${next.error}`);
-              }
-            } catch {
-              // ignore
-            }
-          })();
+  useJobProgress(jobIdRef, (ev) => {
+    if (ev.delta) setDelta((prev) => prev + ev.delta);
+    if (
+      ev.stage === "completed" ||
+      ev.stage === "failed" ||
+      ev.stage === "item-failed" ||
+      ev.stage.includes("error")
+    ) {
+      void (async () => {
+        try {
+          const next = (await api.getJob(ev.jobId)) as Job;
+          setJob(next);
+          if (next.status === "failed" && next.error) {
+            setError(`批量失败：${next.error}`);
+          }
+        } catch {
+          // ignore
         }
-      });
-      unlistenRef.current = stop;
-    })();
-    return () => {
-      unlistenRef.current?.();
-      unlistenRef.current = null;
-    };
-  }, []);
+      })();
+    }
+  });
 
   function updateItem(idx: number, patch: Partial<BatchItem>) {
     setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)));

@@ -4,12 +4,12 @@
 // 在 completed/failed/cancelled stage 自动 refresh，让用户看到 job 终态写盘
 // 的 audit 立即出现，不用手点。
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Badge, Button, Card, Field } from "@/components/ui";
 import { api } from "@/services/api";
+import { useAllJobProgress } from "@/hooks/useJobProgress";
 import type {
   AuditEntry,
-  JobProgressEvent,
   PrewarmStatus,
 } from "@/services/tauriApi";
 
@@ -84,7 +84,6 @@ export function AuditCard() {
   const [limit, setLimit] = useState(DEFAULT_LIMIT);
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
   const [prewarm, setPrewarm] = useState<PrewarmStatus>({ state: "idle" });
-  const unlistenRef = useRef<(() => void) | null>(null);
 
   const visibleEntries = useMemo(() => {
     if (!entries) return null;
@@ -129,29 +128,11 @@ export function AuditCard() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!__IS_TAURI__) return;
-    void refresh();
-    void (async () => {
-      const { listen } = await import("@tauri-apps/api/event");
-      const stop = await listen<JobProgressEvent>("job-progress", (e) => {
-        const stage = e.payload.stage;
-        if (
-          stage === "completed" ||
-          stage === "failed" ||
-          stage === "cancelled-mid-stream"
-        ) {
-          void refresh();
-        }
-      });
-      unlistenRef.current = stop;
-    })();
-    return () => {
-      unlistenRef.current?.();
-      unlistenRef.current = null;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [limit]);
+  useAllJobProgress((ev) => {
+    if (ev.stage === "completed" || ev.stage === "failed" || ev.stage === "cancelled-mid-stream") {
+      void refresh();
+    }
+  });
 
   if (!__IS_TAURI__) {
     return (

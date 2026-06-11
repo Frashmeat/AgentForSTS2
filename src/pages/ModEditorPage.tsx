@@ -5,6 +5,7 @@
 // "用户看一眼这个 mod 项目长啥样、缺什么、跑过几个 item"。
 
 import { useEffect, useState } from "react";
+import { useProjectStore } from "@/stores/project";
 import {
   Badge,
   Button,
@@ -18,7 +19,6 @@ import { api } from "@/services/api";
 import type {
   ArtifactStatus,
   ModAnalysisReport,
-  ProjectSnapshot,
 } from "@/services/tauriApi";
 
 function stateVariant(s: string): "ok" | "error" | "warn" | "muted" {
@@ -29,27 +29,15 @@ function stateVariant(s: string): "ok" | "error" | "warn" | "muted" {
 }
 
 export function ModEditorPage() {
-  const [project, setProject] = useState<ProjectSnapshot | null>(null);
+  const project = useProjectStore((s) => s.project);
   const [report, setReport] = useState<ModAnalysisReport | null>(null);
   const [artifacts, setArtifacts] = useState<ArtifactStatus[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
 
   useEffect(() => {
-    if (!__IS_TAURI__) return;
-    void (async () => {
-      try {
-        const snap = (await api.currentProject()) as ProjectSnapshot | null;
-        setProject(snap);
-        if (snap) {
-          void refreshAll(snap.path);
-        }
-      } catch (e: unknown) {
-        setError(String(e));
-      }
-    })();
-  }, []);
-
+    if (project) void refreshAll(project.path);
+  }, [project]);
   async function refreshAll(projectRoot: string) {
     setAnalyzing(true);
     setError(null);

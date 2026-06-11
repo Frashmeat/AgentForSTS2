@@ -2,15 +2,13 @@
 
 import { AuditCard } from "@/components/AuditCard";
 import { CapabilitiesCard } from "@/components/CapabilitiesCard";
-import { CodegenCard } from "@/components/CodegenCard";
 import { FirstRunBanner } from "@/components/FirstRunBanner";
 import { HealthCard } from "@/components/HealthCard";
 import { JobsCard } from "@/components/JobsCard";
 import { KnowledgeCard } from "@/components/KnowledgeCard";
-import { LlmCard } from "@/components/LlmCard";
-import { PlanningCard } from "@/components/PlanningCard";
 import { ProjectCard } from "@/components/ProjectCard";
 import { SingleAssetWorkflowCard } from "@/components/SingleAssetWorkflowCard";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { PageHero } from "@/components/ui";
 
 export function DashboardPage() {
@@ -25,16 +23,27 @@ export function DashboardPage() {
       <FirstRunBanner />
 
       <div className="space-y-4">
-        <HealthCard />
-        <CapabilitiesCard />
-        <ProjectCard />
-        <SingleAssetWorkflowCard />
-        <JobsCard />
-        <AuditCard />
-        <KnowledgeCard />
-        <PlanningCard />
-        <CodegenCard />
-        <LlmCard />
+        <ErrorBoundary label="Health">
+          <HealthCard />
+        </ErrorBoundary>
+        <ErrorBoundary label="Capabilities">
+          <CapabilitiesCard />
+        </ErrorBoundary>
+        <ErrorBoundary label="Project">
+          <ProjectCard />
+        </ErrorBoundary>
+        <ErrorBoundary label="SingleAssetWorkflow">
+          <SingleAssetWorkflowCard />
+        </ErrorBoundary>
+        <ErrorBoundary label="Jobs">
+          <JobsCard />
+        </ErrorBoundary>
+        <ErrorBoundary label="Audit">
+          <AuditCard />
+        </ErrorBoundary>
+        <ErrorBoundary label="Knowledge">
+          <KnowledgeCard />
+        </ErrorBoundary>
       </div>
     </div>
   );

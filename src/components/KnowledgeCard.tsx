@@ -8,10 +8,10 @@ import {
   Notice,
 } from "@/components/ui";
 import { api } from "@/services/api";
+import { useJobProgress } from "@/hooks/useJobProgress";
 import type {
   ExportPackStats,
   ImportPackStats,
-  JobProgressEvent,
   KnowledgeStatus,
   SubmitJobAck,
 } from "@/services/tauriApi";
@@ -35,7 +35,6 @@ export function KnowledgeCard() {
   const [refreshMsg, setRefreshMsg] = useState<string | null>(null);
   const [refreshJobId, setRefreshJobId] = useState<string | null>(null);
   const refreshJobIdRef = useRef<string | null>(null);
-  const unlistenRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     refreshJobIdRef.current = refreshJobId;
@@ -47,38 +46,19 @@ export function KnowledgeCard() {
       .catch((e: unknown) => setError(String(e)));
   }, []);
 
-  useEffect(() => {
-    if (!__IS_TAURI__) return;
-    void (async () => {
-      const { listen } = await import("@tauri-apps/api/event");
-      const stop = await listen<JobProgressEvent>("job-progress", (e) => {
-        const ev = e.payload;
-        if (ev.jobId !== refreshJobIdRef.current) return;
-        setRefreshStage(ev.stage);
-        if (ev.message) setRefreshMsg(ev.message);
-        if (
-          ev.stage === "completed" ||
-          ev.stage === "failed" ||
-          ev.stage.includes("error")
-        ) {
-          setRefreshBusy(false);
-          void (async () => {
-            try {
-              const next = (await api.getKnowledgeStatus()) as KnowledgeStatus;
-              setKnowledge(next);
-            } catch {
-              // 状态刷新失败不致命
-            }
-          })();
-        }
-      });
-      unlistenRef.current = stop;
-    })();
-    return () => {
-      unlistenRef.current?.();
-      unlistenRef.current = null;
-    };
-  }, []);
+useJobProgress(refreshJobIdRef, (ev) => {
+    setRefreshStage(ev.stage);
+    if (ev.message) setRefreshMsg(ev.message);
+    if (ev.stage === "completed" || ev.stage === "failed" || ev.stage.includes("error")) {
+      setRefreshBusy(false);
+      void (async () => {
+        try {
+          const next = (await api.getKnowledgeStatus()) as KnowledgeStatus;
+          setKnowledge(next);
+        } catch { /* 状态刷新失败不致命 */ }
+      })();
+    }
+  });
 
   async function handleRefresh() {
     if (!dllPath.trim()) {

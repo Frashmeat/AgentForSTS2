@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
+import { useProjectStore } from "@/stores/project";
 import { Badge, Button, Card, CardSection, Field, Notice } from "@/components/ui";
 import { api } from "@/services/api";
-import type { ProjectSnapshot, RecentEntry } from "@/services/tauriApi";
+import type { RecentEntry } from "@/services/tauriApi";
 
 export function ProjectCard() {
-  const [current, setCurrent] = useState<ProjectSnapshot | null>(null);
+  const current = useProjectStore((s) => s.project);
   const [recents, setRecents] = useState<RecentEntry[]>([]);
   const [parentDir, setParentDir] = useState("");
   const [newName, setNewName] = useState("my_mod");
@@ -14,11 +15,7 @@ export function ProjectCard() {
 
   async function refresh() {
     try {
-      const [cur, recs] = await Promise.all([
-        api.currentProject() as Promise<ProjectSnapshot | null>,
-        api.listRecentProjects() as Promise<RecentEntry[]>,
-      ]);
-      setCurrent(cur);
+      const recs = (await api.listRecentProjects()) as RecentEntry[];
       setRecents(recs);
     } catch (e: unknown) {
       setError(String(e));
@@ -37,8 +34,7 @@ export function ProjectCard() {
     setBusy(true);
     setError(null);
     try {
-      const snap = (await api.createProject(parentDir, newName)) as ProjectSnapshot;
-      setCurrent(snap);
+      await api.createProject(parentDir, newName);
       await refresh();
     } catch (e: unknown) {
       setError(String(e));
@@ -51,8 +47,7 @@ export function ProjectCard() {
     setBusy(true);
     setError(null);
     try {
-      const snap = (await api.openProject(path)) as ProjectSnapshot;
-      setCurrent(snap);
+      await api.openProject(path);
       await refresh();
     } catch (e: unknown) {
       setError(String(e));
@@ -66,7 +61,6 @@ export function ProjectCard() {
     setError(null);
     try {
       await api.closeProject();
-      setCurrent(null);
       await refresh();
     } catch (e: unknown) {
       setError(String(e));

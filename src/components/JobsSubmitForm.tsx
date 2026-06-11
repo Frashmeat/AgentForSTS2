@@ -76,6 +76,19 @@ export function JobsSubmitForm({ onSubmitted, onError }: Props) {
 
   async function handleSubmit() {
     setBusy(true);
+    // Client-side validation
+    if (submitKind === "text_generate" && !prompt.trim()) { onError("prompt 不能为空"); return; }
+    if ((submitKind === "code_generate_asset" || submitKind === "code_generate_custom") && (!customName.trim() || !customDescription.trim())) { onError("name 和 description 不能为空"); return; }
+    if (submitKind === "asset_generate" && (!imagePrompt.trim() || !assetName.trim() || !designDescription.trim())) { onError("image_prompt / asset_name / design_description 不能为空"); return; }
+    if (submitKind === "batch_custom_code") {
+      let items: unknown[];
+      try { items = JSON.parse(batchItemsJson); } catch { onError("batch items JSON 格式错误"); return; }
+      if (!Array.isArray(items) || items.length === 0) { onError("batch items 数组不能为空"); return; }
+    }
+    if (submitKind === "build_project" && !buildProjectRoot.trim()) { onError("project_root 不能为空"); return; }
+    if (submitKind === "package_project" && !packageSourceDir.trim()) { onError("source_dir 不能为空"); return; }
+    if (submitKind === "log_analysis" && !logText.trim()) { onError("log_text 不能为空"); return; }
+    if (submitKind === "knowledge_refresh" && !knowledgeDllPath.trim()) { onError("sts2.dll 路径不能为空"); return; }
     try {
       let ack: SubmitJobAck;
       switch (submitKind) {

@@ -5,16 +5,14 @@
 
 import {
   forwardRef,
-  useEffect,
   useImperativeHandle,
-  useRef,
   useState,
 } from "react";
 import { Badge, Button } from "@/components/ui";
+import { useAllJobProgress } from "@/hooks/useJobProgress";
 import { api } from "@/services/api";
 import type {
   Job,
-  JobProgressEvent,
   JobStatus,
   JobSummary,
 } from "@/services/tauriApi";
@@ -42,7 +40,6 @@ export const JobsList = forwardRef<JobsListHandle, Props>(function JobsList(
   const [list, setList] = useState<JobSummary[]>([]);
   const [active, setActive] = useState<Job | null>(null);
   const [liveDeltaById, setLiveDeltaById] = useState<Record<string, string>>({});
-  const unlistenRef = useRef<(() => void) | null>(null);
 
   async function refresh() {
     try {
@@ -55,49 +52,33 @@ export const JobsList = forwardRef<JobsListHandle, Props>(function JobsList(
 
   useImperativeHandle(ref, () => ({ refresh }));
 
-  useEffect(() => {
-    void refresh();
-    if (!__IS_TAURI__) return;
-    void (async () => {
-      const { listen } = await import("@tauri-apps/api/event");
-      const stop = await listen<JobProgressEvent>("job-progress", (e) => {
-        const ev = e.payload;
-        if (ev.delta) {
-          setLiveDeltaById((prev) => ({
-            ...prev,
-            [ev.jobId]: (prev[ev.jobId] ?? "") + ev.delta,
-          }));
+  useAllJobProgress((ev) => {
+    if (ev.delta) {
+      setLiveDeltaById((prev) => ({
+        ...prev,
+        [ev.jobId]: (prev[ev.jobId] ?? "") + ev.delta,
+      }));
+    }
+    if (
+      ev.stage === "completed" ||
+      ev.stage.includes("error") ||
+      ev.stage.includes("cancel") ||
+      ev.stage === "failed"
+    ) {
+      void refresh();
+      setActive((cur) => {
+        if (cur && cur.id === ev.jobId) {
+          void (async () => {
+            try {
+              const next = (await api.getJob(ev.jobId)) as Job;
+              setActive(next);
+            } catch { /* ignore */ }
+          })();
         }
-        if (
-          ev.stage === "completed" ||
-          ev.stage.includes("error") ||
-          ev.stage.includes("cancel") ||
-          ev.stage === "failed"
-        ) {
-          void refresh();
-          setActive((cur) => {
-            if (cur && cur.id === ev.jobId) {
-              void (async () => {
-                try {
-                  const next = (await api.getJob(ev.jobId)) as Job;
-                  setActive(next);
-                } catch {
-                  // ignore
-                }
-              })();
-            }
-            return cur;
-          });
-        }
+        return cur;
       });
-      unlistenRef.current = stop;
-    })();
-    return () => {
-      unlistenRef.current?.();
-      unlistenRef.current = null;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    }
+  });
 
   async function handleSelect(id: string) {
     try {

@@ -18,8 +18,11 @@ export interface ReadinessFlags {
   imageGenConfigured: boolean;
   activeProjectOpen: boolean;
   /// ML rembg 预热是否就绪（feature ml-rembg + 模型加载成功）
+  /** ML rembg 预热是否就绪（feature ml-rembg + 模型加载成功） */
   imageProcReady: boolean;
-  /// 后台任务 worker 是否在跑（Stage 3.4 Web 轨上线前 desktop 始终为 true）
+  /** 游戏知识库反编译产物是否就绪（game_dir 下有 .cs 文件）。codegen prompt 含真实类型事实的前提。 */
+  knowledgeReady: boolean;
+  /** 后台任务 worker 是否在跑（Stage 3.4 Web 轨上线前 desktop 始终为 true） */
   queueWorkerReady: boolean;
 }
 
@@ -107,6 +110,8 @@ export function exportKnowledgePack(
   outputPath: string,
   machineHint?: string,
 ): Promise<ExportPackStats> {
+  /* 游戏知识库反编译产物是否就绪（game_dir 下有 .cs 文件）。
+   * codegen prompt 含有真实类型事实的前提。 */
   return invoke<ExportPackStats>("export_knowledge_pack", {
     outputPath,
     machineHint: machineHint ?? null,
@@ -168,6 +173,7 @@ export interface ImageGenSnapshot {
   model: string;
   baseUrl: string;
   size: string;
+  protocol: string;
   apiKeyMasked: string;
   apiKeyConfigured: boolean;
 }
@@ -177,8 +183,8 @@ export interface RuntimeSnapshot {
   port: number;
   mountFrontend: boolean;
   requiresDatabase: boolean;
+  githubToken: string;
 }
-
 export interface SettingsSnapshot {
   configPath: string | null;
   configLoaded: boolean;
@@ -209,6 +215,7 @@ export interface ImageGenPatch {
   model?: string | null;
   base_url?: string | null;
   size?: string | null;
+  protocol?: string | null;
   api_key?: string | null;
 }
 

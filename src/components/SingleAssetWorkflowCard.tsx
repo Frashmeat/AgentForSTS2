@@ -4,7 +4,9 @@
 // 目标：让用户在 UI 里走完一条端到端链路，验证 LLM 第三方代理通路可用。
 // 桌面端 only（依赖 Tauri job-progress 事件）。
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
+import { useProjectStore } from "@/stores/project";
+import { useJobProgress } from "@/hooks/useJobProgress";
 import {
   Badge,
   Button,
@@ -20,7 +22,6 @@ import type {
   Job,
   JobProgressEvent,
   PlanItem,
-  ProjectSnapshot,
   SubmitJobAck,
 } from "@/services/tauriApi";
 
@@ -36,7 +37,7 @@ const ASSET_TYPES: AssetItemType[] = [
 ];
 
 export function SingleAssetWorkflowCard() {
-  const [project, setProject] = useState<ProjectSnapshot | null>(null);
+  const project = useProjectStore((s) => s.project);
   const [requirements, setRequirements] = useState(
     "做一个回合开始时获得 3 点格挡的卡牌",
   );
@@ -59,43 +60,11 @@ export function SingleAssetWorkflowCard() {
     pngPath?: string | null;
   } | null>(null);
 
-  const unlistenRef = useRef<(() => void) | null>(null);
   const planJobIdRef = useRef<string | null>(null);
   const codeJobIdRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    planJobIdRef.current = planJobId;
-  }, [planJobId]);
-  useEffect(() => {
-    codeJobIdRef.current = codeJobId;
-  }, [codeJobId]);
-
-  useEffect(() => {
-    if (!__IS_TAURI__) return;
-    void (async () => {
-      try {
-        const snap = await api.currentProject();
-        setProject(snap as ProjectSnapshot | null);
-      } catch (e: unknown) {
-        console.warn("currentProject:", e);
-      }
-      const { listen } = await import("@tauri-apps/api/event");
-      const stop = await listen<JobProgressEvent>("job-progress", (e) => {
-        const ev = e.payload;
-        if (ev.jobId === planJobIdRef.current) {
-          handlePlanProgress(ev);
-        } else if (ev.jobId === codeJobIdRef.current) {
-          handleCodeProgress(ev);
-        }
-      });
-      unlistenRef.current = stop;
-    })();
-    return () => {
-      unlistenRef.current?.();
-      unlistenRef.current = null;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useJobProgress(planJobIdRef, handlePlanProgress);
+  useJobProgress(codeJobIdRef, handleCodeProgress);
 
   function handlePlanProgress(ev: JobProgressEvent) {
     if (ev.delta) {
@@ -115,6 +84,7 @@ export function SingleAssetWorkflowCard() {
         }
       })();
     } else if (
+      ev.stage === "failed" ||
       ev.stage.includes("error") ||
       ev.stage === "stream-start-error" ||
       ev.stage === "stream-error"
@@ -176,6 +146,7 @@ export function SingleAssetWorkflowCard() {
         asset_type: assetType,
       })) as SubmitJobAck;
       setPlanJobId(ack.jobId);
+      planJobIdRef.current = ack.jobId;
     } catch (e: unknown) {
       setError(String(e));
       setPhase("idle");
@@ -228,6 +199,7 @@ export function SingleAssetWorkflowCard() {
         })) as SubmitJobAck;
       }
       setCodeJobId(ack.jobId);
+      codeJobIdRef.current = ack.jobId;
     } catch (e: unknown) {
       setError(String(e));
       setPhase("plan_done");

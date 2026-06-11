@@ -50,9 +50,11 @@ interface FormState {
   igModel: string;
   igBaseUrl: string;
   igSize: string;
+  igProtocol: string;
   igApiKey: string;
   igApiKeyTouched: boolean;
 }
+
 
 function formFromSnapshot(s: SettingsSnapshot): FormState {
   return {
@@ -65,6 +67,7 @@ function formFromSnapshot(s: SettingsSnapshot): FormState {
     igModel: s.imageGen.model,
     igBaseUrl: s.imageGen.baseUrl,
     igSize: s.imageGen.size,
+    igProtocol: s.imageGen.protocol || "auto",
     igApiKey: "",
     igApiKeyTouched: false,
   };
@@ -84,6 +87,7 @@ function buildPatch(form: FormState, original: SettingsSnapshot): SettingsPatch 
   if (form.igModel !== original.imageGen.model) ig.model = form.igModel;
   if (form.igBaseUrl !== original.imageGen.baseUrl) ig.base_url = form.igBaseUrl;
   if (form.igSize !== original.imageGen.size) ig.size = form.igSize;
+  if (form.igProtocol !== (original.imageGen.protocol || "auto")) ig.protocol = form.igProtocol;
   if (form.igApiKeyTouched) ig.api_key = form.igApiKey;
   if (Object.keys(ig).length > 0) patch.image_gen = ig;
   return patch;
@@ -388,6 +392,22 @@ export function SettingsPage() {
                     />
                   </Field>
                   <Field
+                    label="protocol"
+                    hint="auto 从模型名推断；images_api 走 DALL-E 标准；chat_completions 走 Gemini/Nano Banana"
+                  >
+                    <select
+                      value={form.igProtocol}
+                      onChange={(e) =>
+                        setForm({ ...form, igProtocol: e.target.value })
+                      }
+                      className="input-mono"
+                    >
+                      <option value="auto">auto (推荐)</option>
+                      <option value="images_api">images_api (DALL-E)</option>
+                      <option value="chat_completions">chat_completions (Nano Banana / Gemini)</option>
+                    </select>
+                  </Field>
+                  <Field
                     label="api_key"
                     hint="同 LLM 规则"
                   >
@@ -425,6 +445,9 @@ export function SettingsPage() {
                   </KV>
                   <KV k="size">
                     <code>{snap.imageGen.size || "<default 1024x1024>"}</code>
+                  </KV>
+                  <KV k="protocol">
+                    <code>{snap.imageGen.protocol || "auto"}</code>
                   </KV>
                   <KV k="api_key">
                     <code>{snap.imageGen.apiKeyMasked}</code>

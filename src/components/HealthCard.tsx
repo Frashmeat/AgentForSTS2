@@ -101,6 +101,11 @@ export function HealthCard() {
                 label="ML 背景去除就绪（否则走启发式 fallback）"
                 title="cargo build --features ml-rembg 启用 + 模型加载成功"
               />
+              <ReadyDot
+                ok={health.readiness.knowledgeReady}
+                label="知识库就绪（game 反编译源码存在）"
+                title="有反编译源码时 codegen prompt 含真实 API 事实；否则 LLM 将根据模板推测生成"
+              />
               <ReadyDot ok={health.readiness.queueWorkerReady} label="后台任务 worker" />
             </ul>
           </CardSection>
