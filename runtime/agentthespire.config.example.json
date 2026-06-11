@@ -12,7 +12,8 @@
         "http://127.0.0.1:7860"
       ],
       "mount_frontend": true,
-      "requires_database": false
+      "requires_database": false,
+      "github_token": ""
     },
     "web": {
       "host": "127.0.0.1",
@@ -25,7 +26,8 @@
         "http://127.0.0.1:7870"
       ],
       "mount_frontend": false,
-      "requires_database": true
+      "requires_database": true,
+      "github_token": ""
     }
   },
   "_llm_provider_help": "provider 字段决定客户端协议：留空或 'anthropic' → Anthropic Messages API；'openai' / 'openai_compatible' / 'new_api' / 'one_api' → OpenAI Chat Completions（兼容 new-api / one-api / litellm / vLLM 等代理）。base_url 留空时走对应官方端点，填写后走第三方代理。",
@@ -43,8 +45,9 @@
     "api_key": "",
     "base_url": ""
   },
-  "_image_gen_help": "image_gen 默认走 OpenAI Images 协议（DALL-E + 所有 OpenAI 兼容代理 + 部分通过代理的火山方舟）。size 留空 → 1024x1024。",
+  "_image_gen_help": "protocol 留空 / \"images_api\" → 标准 DALL-E /v1/images/generations；\"chat_completions\" → 通过 Chat Completions 生图（Nano Banana / Gemini）。size 留空→1024x1024。chat_completions 时 size 映射为 Gemini aspect_ratio + image_size。",
   "image_gen": {
+    "protocol": "",
     "provider": "",
     "model": "",
     "api_key": "",
