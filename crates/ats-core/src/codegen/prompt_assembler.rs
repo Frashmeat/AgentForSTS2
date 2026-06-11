@@ -259,17 +259,21 @@ struct ResolvedKnowledge {
 impl ResolvedKnowledge {
     fn from_packet(packet: &KnowledgePacket, assembler: &PromptContextAssembler) -> Self {
         let mut ctx = assembler.assemble(packet);
-        // Facts 在当前阶段始终为空（stage 2.2 todo）；为了让 LLM 不至于把空字符串
-        // 当作"无事实"，我们注入一段明确指引文本 + 一条 warning，提示走源码兜底。
         let facts = ctx.remove("facts").unwrap_or_default();
         let facts = if facts.trim().is_empty() {
             FACTS_STUB_MESSAGE.to_string()
         } else {
             facts
         };
-        let warnings = match ctx.remove("knowledge_warnings") {
-            Some(w) if !w.trim().is_empty() => format!("{w}\n- {FACTS_STUB_WARNING}"),
-            _ => FACTS_STUB_WARNING.to_string(),
+        let raw_warnings = ctx.remove("knowledge_warnings").unwrap_or_default();
+        let warnings = if raw_warnings.trim().is_empty() {
+            String::new()
+        } else if facts.trim().is_empty() || facts == FACTS_STUB_MESSAGE {
+            // facts 为空 → 追加 stub warning
+            format!("{raw_warnings}\n- {FACTS_STUB_WARNING}")
+        } else {
+            // facts 非空 → 真实知识源就位，不加 stub warning
+            raw_warnings
         };
         Self {
             facts,

@@ -12,7 +12,7 @@ use serde::Serialize;
 use super::code_generate::{GenerateError, generate_and_write_code_artifact, sanitize_entity_name};
 use super::common::{ProgressEvent, ProgressSink, finalize_with_error, transition_to_running};
 use crate::codegen::{CustomCodegenRequest, PromptAssembler};
-use crate::knowledge::{KnowledgePaths, SourceMode};
+use crate::knowledge::{KnowledgePaths, runtime::detect_source_mode};
 use crate::llm::LlmClient;
 use crate::platform::contracts::SubmitBatchCustomCodeRequest;
 use crate::platform::domain::{JobId, JobRepository, JobStatus};
@@ -42,7 +42,7 @@ pub async fn run_batch_custom_code(
         return;
     }
     if request.items.is_empty() {
-        finalize_with_error(&repo, &job_id, "items list is empty").await;
+        finalize_with_error(&repo, &job_id, &sink, "items list is empty").await;
         return;
     }
 
@@ -163,7 +163,7 @@ async fn process_one_item(
     entity_name: &str,
 ) -> ItemOutcome {
     let prompt =
-        match assembler.assemble_custom_code_prompt(item, knowledge_paths, SourceMode::Missing) {
+        match assembler.assemble_custom_code_prompt(item, knowledge_paths, detect_source_mode(knowledge_paths)) {
             Ok(p) => p,
             Err(err) => {
                 return ItemOutcome {

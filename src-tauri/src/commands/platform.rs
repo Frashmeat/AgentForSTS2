@@ -134,8 +134,11 @@ pub async fn submit_knowledge_refresh_job(
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
     let knowledge_paths = KnowledgePaths::from_runtime_dir(&config.status_snapshot().runtime_dir());
     let baselib_source: Arc<dyn BaselibSource> = Arc::new(
-        GitHubBaselibSource::default_alchyr_with_default_client()
-            .map_err(|e| format!("init baselib source: {e}"))?,
+        GitHubBaselibSource::default_alchyr_with_default_client(
+            Some(config.settings_snapshot().runtime.workstation.github_token.clone())
+                .filter(|t| !t.is_empty()),
+        )
+        .map_err(|e| format!("init baselib source: {e}"))?,
     );
     let job_id = service
         .submit_knowledge_refresh(request, knowledge_paths, baselib_source, sink)
@@ -226,6 +229,7 @@ pub async fn submit_build_project_job(
         .map_err(|e| e.to_string())?;
     Ok(SubmitJobAck { job_id })
 }
+
 
 fn active_artifacts_dir(active: &State<'_, ActiveProject>) -> Result<PathBuf, String> {
     let guard = active

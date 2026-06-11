@@ -46,11 +46,11 @@ pub async fn run_build_project(
     let output = match output_result {
         Ok(Ok(out)) => out,
         Ok(Err(err)) => {
-            finalize_with_error(&repo, &job_id, &format!("spawn dotnet: {err}")).await;
+            finalize_with_error(&repo, &job_id, &sink, &format!("spawn dotnet: {err}")).await;
             return;
         }
         Err(err) => {
-            finalize_with_error(&repo, &job_id, &format!("join blocking: {err}")).await;
+            finalize_with_error(&repo, &job_id, &sink, &format!("join blocking: {err}")).await;
             return;
         }
     };

@@ -78,6 +78,17 @@ pub fn get_status(paths: &KnowledgePaths) -> KnowledgeStatus {
     }
 }
 
+/// 探测知识源模式：检查 game_dir 下是否有 .cs 反编译产物。
+/// 有 → RuntimeDecompiled，无 → Missing。不依赖 manifest，只看文件存在性。
+#[must_use]
+pub fn detect_source_mode(paths: &KnowledgePaths) -> SourceMode {
+    if has_cs_files(&paths.game_dir, 4) {
+        SourceMode::RuntimeDecompiled
+    } else {
+        SourceMode::Missing
+    }
+}
+
 /// 递归探测目录下是否存在 `.cs` 文件，限制最大深度防止失控。
 fn has_cs_files(root: &Path, max_depth: usize) -> bool {
     if max_depth == 0 || !root.exists() {

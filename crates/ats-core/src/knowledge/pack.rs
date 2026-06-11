@@ -87,12 +87,28 @@ pub fn export(
         return Err(PackError::EmptyKnowledge(paths.root.clone()));
     }
 
+    // 输出路径若是已有目录，给出明确提示而非 Windows 的 os error 5
+    if output_zip.is_dir() {
+        let hint = output_zip.join("knowledge.zip");
+        return Err(PackError::Io(format!(
+            "{} 是目录，请指定完整的 .zip 文件名，例如 {}",
+            output_zip.display(),
+            hint.display(),
+        )));
+    }
+    // 没有 .zip 后缀时提示但允许执行
+    if output_zip.extension().is_none_or(|ext| ext != "zip") {
+        tracing::warn!("export output path does not end in .zip: {}", output_zip.display());
+    }
+
     if let Some(parent) = output_zip.parent()
         && !parent.as_os_str().is_empty()
     {
-        std::fs::create_dir_all(parent).map_err(|e| PackError::Io(e.to_string()))?;
+        std::fs::create_dir_all(parent)
+            .map_err(|e| PackError::Io(format!("create parent dir {}: {e}", parent.display())))?;
     }
-    let file = File::create(output_zip).map_err(|e| PackError::Io(e.to_string()))?;
+    let file = File::create(output_zip)
+        .map_err(|e| PackError::Io(format!("create output {}: {e}", output_zip.display())))?;
     let mut writer = zip::ZipWriter::new(file);
     let options = SimpleFileOptions::default()
         .compression_method(CompressionMethod::Deflated)
@@ -127,13 +143,15 @@ pub fn export(
                 writer
                     .start_file(format!("game/{rel_str}"), options)
                     .map_err(|e| PackError::Zip(e.to_string()))?;
-                buffer.clear();
                 File::open(p)
                     .and_then(|mut f| f.read_to_end(&mut buffer))
-                    .map_err(|e| PackError::Io(e.to_string()))?;
+                    .map_err(|e| {
+                        PackError::Io(format!("read game file {}: {e}", p.display()))
+                    })?;
+                buffer.clear();
                 writer
                     .write_all(&buffer)
-                    .map_err(|e| PackError::Io(e.to_string()))?;
+                    .map_err(|e| PackError::Io(format!("write game entry to zip: {e}")))?;
                 game_files += 1;
             }
         }
@@ -144,13 +162,14 @@ pub fn export(
         writer
             .start_file("baselib/BaseLib.decompiled.cs", options)
             .map_err(|e| PackError::Zip(e.to_string()))?;
-        let mut f = File::open(&baselib_file).map_err(|e| PackError::Io(e.to_string()))?;
+        let mut f = File::open(&baselib_file)
+            .map_err(|e| PackError::Io(format!("read baselib {}: {e}", baselib_file.display())))?;
         buffer.clear();
         f.read_to_end(&mut buffer)
-            .map_err(|e| PackError::Io(e.to_string()))?;
+            .map_err(|e| PackError::Io(format!("read baselib content: {e}")))?;
         writer
             .write_all(&buffer)
-            .map_err(|e| PackError::Io(e.to_string()))?;
+            .map_err(|e| PackError::Io(format!("write baselib entry to zip: {e}")))?;
     }
 
     // manifest（若存在）
@@ -158,11 +177,11 @@ pub fn export(
         writer
             .start_file("knowledge-manifest.json", options)
             .map_err(|e| PackError::Zip(e.to_string()))?;
-        let bytes =
-            std::fs::read(&paths.manifest_path).map_err(|e| PackError::Io(e.to_string()))?;
+        let bytes = std::fs::read(&paths.manifest_path)
+            .map_err(|e| PackError::Io(format!("read manifest {}: {e}", paths.manifest_path.display())))?;
         writer
             .write_all(&bytes)
-            .map_err(|e| PackError::Io(e.to_string()))?;
+            .map_err(|e| PackError::Io(format!("write manifest entry to zip: {e}")))?;
     }
 
     // pack-info.json

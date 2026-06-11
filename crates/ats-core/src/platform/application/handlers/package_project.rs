@@ -32,26 +32,18 @@ pub async fn run_package_project(
 
     let source = request.source_dir.clone();
     if !source.is_dir() {
-        finalize_with_error(
-            &repo,
-            &job_id,
-            &format!("source_dir is not a directory: {}", source.display()),
-        )
+        finalize_with_error(&repo, &job_id, &sink, &format!("source_dir is not a directory: {}", source.display()))
         .await;
         return;
     }
 
     let output = resolve_output_path(&request);
     if output.is_dir() {
-        finalize_with_error(
-            &repo,
-            &job_id,
-            &format!(
-                "output_path 指向已存在的目录: {} —— 应该传完整 .zip 文件路径，如 {}\\release.zip",
-                output.display(),
-                output.display()
-            ),
-        )
+        finalize_with_error(&repo, &job_id, &sink, &format!(
+            "output_path 指向已存在的目录: {} —— 应该传完整 .zip 文件路径，如 {}\\release.zip",
+            output.display(),
+            output.display()
+        ))
         .await;
         return;
     }
@@ -76,11 +68,11 @@ pub async fn run_package_project(
     let stats = match result {
         Ok(Ok(s)) => s,
         Ok(Err(err)) => {
-            finalize_with_error(&repo, &job_id, &format!("zip: {err}")).await;
+            finalize_with_error(&repo, &job_id, &sink, &format!("zip: {err}")).await;
             return;
         }
         Err(err) => {
-            finalize_with_error(&repo, &job_id, &format!("join blocking: {err}")).await;
+            finalize_with_error(&repo, &job_id, &sink, &format!("join blocking: {err}")).await;
             return;
         }
     };

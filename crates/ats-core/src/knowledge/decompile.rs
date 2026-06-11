@@ -177,6 +177,21 @@ pub fn run_decompile_file(
         });
     }
 
+    if output_file.is_dir() {
+        let (count, bytes) =
+            count_cs_files(output_file).map_err(|e| DecompileError::Walk(e.to_string()))?;
+        if count == 0 {
+            return Err(DecompileError::EmptyOutput);
+        }
+        return Ok(DecompileStats {
+            cs_file_count: count,
+            total_bytes: bytes,
+            stdout_tail,
+            stderr_tail,
+            exit_code,
+        });
+    }
+
     let meta = std::fs::metadata(output_file).map_err(|e| DecompileError::Walk(e.to_string()))?;
     if meta.len() == 0 {
         return Err(DecompileError::EmptyOutput);

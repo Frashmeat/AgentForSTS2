@@ -43,7 +43,7 @@ pub async fn run_knowledge_refresh(
     let ilspycmd = match resolve_ilspycmd(&request) {
         Ok(p) => p,
         Err(msg) => {
-            finalize_with_error(&repo, &job_id, &msg).await;
+            finalize_with_error(&repo, &job_id, &sink, &msg).await;
             return;
         }
     };
@@ -57,21 +57,17 @@ pub async fn run_knowledge_refresh(
     .await;
 
     if !request.sts2_dll_path.is_file() {
-        finalize_with_error(
-            &repo,
-            &job_id,
-            &format!(
-                "sts2_dll_path not found: {}",
-                request.sts2_dll_path.display()
-            ),
-        )
+        finalize_with_error(&repo, &job_id, &sink, &format!(
+            "sts2_dll_path not found: {}",
+            request.sts2_dll_path.display()
+        ))
         .await;
         return;
     }
 
     // 3. 准备目录 + 读 manifest
     if let Err(err) = ensure_dirs(&knowledge_paths) {
-        finalize_with_error(&repo, &job_id, &format!("ensure_dirs: {err}")).await;
+        finalize_with_error(&repo, &job_id, &sink, &format!("ensure_dirs: {err}")).await;
         return;
     }
     let cached_manifest = match read_manifest(&knowledge_paths.manifest_path) {
@@ -102,7 +98,7 @@ pub async fn run_knowledge_refresh(
     let (game_record, game_cache_hit, game_stats) = match game_outcome {
         Ok(t) => t,
         Err(msg) => {
-            finalize_with_error(&repo, &job_id, &msg).await;
+            finalize_with_error(&repo, &job_id, &sink, &msg).await;
             return;
         }
     };
@@ -143,7 +139,7 @@ pub async fn run_knowledge_refresh(
     manifest.game = Some(game_record.clone());
     manifest.baselib = baselib_outcome.clone();
     if let Err(err) = write_manifest(&knowledge_paths.manifest_path, &manifest) {
-        finalize_with_error(&repo, &job_id, &format!("write manifest: {err}")).await;
+        finalize_with_error(&repo, &job_id, &sink, &format!("write manifest: {err}")).await;
         return;
     }
 
@@ -311,11 +307,22 @@ async fn run_baselib_step(
         delta: None,
     })
     .await;
-
+    // ilspycmd -o 期望目录而非文件；首次运行会把 baselib_decompiled_file()
+    // 创建成目录导致二次运行 Directory.CreateDirectory 抛 IOException。
+    // 策略：以 baselib_dir 作为输出目录，反编译后把产物 .cs 移到预期文件位置。
     let target = knowledge_paths.baselib_decompiled_file();
+    let _ = std::fs::remove_dir_all(&target);
+    let _ = std::fs::remove_file(&target);
+
+    let out_dir = &knowledge_paths.baselib_dir;
+    let mut out_files: Vec<PathBuf> = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(out_dir) {
+        out_files = rd.filter_map(|e| e.ok().map(|e| e.path())).collect();
+    }
+
     let cmd = ilspycmd.to_path_buf();
     let dll = to_extended_length_path(&fetched.dll_path);
-    let out = to_extended_length_path(&target);
+    let out = to_extended_length_path(out_dir);
     let stats_result =
         tokio::task::spawn_blocking(move || run_decompile_file(&cmd, &dll, &out)).await;
     let stats = match stats_result {
@@ -323,6 +330,21 @@ async fn run_baselib_step(
         Ok(Err(err)) => return Err(format!("decompile: {err}")),
         Err(err) => return Err(format!("join blocking: {err}")),
     };
+
+    // 反编译后 ilspycmd 在 out_dir 下生成了新的 .cs 文件，找出来移到 target
+    let new_file = match std::fs::read_dir(out_dir) {
+        Ok(rd) => rd
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .find(|p| p.is_file() && p.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("cs")) && !out_files.contains(p)),
+        Err(_) => None,
+    };
+    if let Some(src) = new_file
+        && src != target
+    {
+        let _ = std::fs::remove_file(&target);
+        let _ = std::fs::rename(&src, &target);
+    }
 
     let record = build_record_with_tag(
         &target,

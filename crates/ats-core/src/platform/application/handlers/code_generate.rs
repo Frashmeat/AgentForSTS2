@@ -14,7 +14,7 @@ use super::common::{
     transition_to_running,
 };
 use crate::codegen::PromptAssembler;
-use crate::knowledge::{KnowledgePaths, SourceMode};
+use crate::knowledge::{KnowledgePaths, runtime::detect_source_mode};
 use crate::llm::{CompletionRequest, LlmClient, Message, MessageRole, StreamEvent};
 use crate::platform::contracts::SubmitCodeGenerateRequest;
 use crate::platform::domain::{JobId, JobRepository, JobStatus};
@@ -33,18 +33,19 @@ pub async fn run_code_generate(
     }
 
     let assembler = PromptAssembler::built_in();
+    let mode = detect_source_mode(&knowledge_paths);
     let prompt_result = match &request {
         SubmitCodeGenerateRequest::Asset { request: req } => {
-            assembler.assemble_asset_prompt(req, &knowledge_paths, SourceMode::Missing)
+            assembler.assemble_asset_prompt(req, &knowledge_paths, mode)
         }
         SubmitCodeGenerateRequest::CustomCode { request: req } => {
-            assembler.assemble_custom_code_prompt(req, &knowledge_paths, SourceMode::Missing)
+            assembler.assemble_custom_code_prompt(req, &knowledge_paths, mode)
         }
     };
     let prompt = match prompt_result {
         Ok(p) => p,
         Err(err) => {
-            finalize_with_error(&repo, &job_id, &format!("prompt assembly: {err}")).await;
+            finalize_with_error(&repo, &job_id, &sink, &format!("prompt assembly: {err}")).await;
             return;
         }
     };
@@ -63,11 +64,11 @@ pub async fn run_code_generate(
     {
         Ok(a) => a,
         Err(GenerateError::Stream(err)) => {
-            finalize_with_error(&repo, &job_id, &err).await;
+            finalize_with_error(&repo, &job_id, &sink, &err).await;
             return;
         }
         Err(GenerateError::Write(err)) => {
-            finalize_with_error(&repo, &job_id, &format!("write artifact: {err}")).await;
+            finalize_with_error(&repo, &job_id, &sink, &format!("write artifact: {err}")).await;
             return;
         }
         Err(GenerateError::Cancelled) => {
@@ -177,6 +178,36 @@ pub(crate) enum GenerateError {
     Cancelled,
 }
 
+/// 兜底校验：LLM 产出的代码必须有至少一个 C# 声明或 using 语句。
+/// 杜绝"// 假设此处 namespace 为 MyMod4" 类型的占位注释通过检查。
+fn validate_generated_code_skein(text: &str) -> Result<(), GenerateError> {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(
+            r"(?m)^\s*(public|internal|private|protected|sealed|abstract|static|partial|class|struct|enum|interface|namespace|using|record)\s",
+        )
+        .unwrap()
+    });
+    if re.is_match(text) {
+        return Ok(());
+    }
+    let non_comment: String = text
+        .lines()
+        .filter(|l| {
+            let t = l.trim_start();
+            !t.is_empty() && !t.starts_with("//") && !t.starts_with("/*") && !t.starts_with('*')
+        })
+        .collect::<Vec<&str>>()
+        .join("\n");
+    if non_comment.trim().is_empty() {
+        return Err(GenerateError::Write(
+            "LLM 生成内容只含注释或占位符，无有效 C# 代码。请检查 prompt 或 knowledge 就绪状态后重试"
+                .into(),
+        ));
+    }
+    Ok(())
+}
+
 /// 把 prompt 转给 LLM 流式生成，累积响应后解 fence，再写到
 /// `<artifacts_dir>/<entity_name>/<entity_name>.cs` + `raw.md`。
 /// 同时把可编译 `.cs` 镜像到 `<project_root>/Generated/<entity_name>.cs`，
@@ -244,8 +275,14 @@ pub(crate) async fn generate_and_write_code_artifact(
             Err(err) => return Err(GenerateError::Stream(err.to_string())),
         }
     }
+<<<<<<< HEAD
 
     let extracted = extract_code_or_reject(&accumulated)?;
+=======
+    let extracted = extract_first_code_block(&accumulated).unwrap_or_else(|| accumulated.clone());
+    // 兜底校验：生成的"代码"必须有实际声明结构，不能是纯注释占位符
+    validate_generated_code_skein(&extracted)?;
+>>>>>>> 0980c393 (fix: codegen 知识库集成 + prompt 锁定 + 产出校验 + 全链路错误修复)
 
     let target_dir = artifacts_dir.join(entity_name);
     let artifact_cs_path = target_dir.join(format!("{entity_name}.cs"));
@@ -253,7 +290,7 @@ pub(crate) async fn generate_and_write_code_artifact(
     let project_root = artifacts_dir.parent().ok_or_else(|| {
         GenerateError::Write(format!(
             "artifacts dir has no parent: {}",
-            artifacts_dir.display()
+            artifacts_dir.display(),
         ))
     })?;
     let generated_dir = project_root.join("Generated");

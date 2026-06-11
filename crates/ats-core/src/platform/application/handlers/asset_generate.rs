@@ -22,7 +22,7 @@ use super::common::{ProgressEvent, ProgressSink, finalize_with_error, transition
 use crate::codegen::PromptAssembler;
 use crate::image_gen::{ImageGenClient, ImageGenRequest};
 use crate::image_proc::ImageProcClient;
-use crate::knowledge::{KnowledgePaths, SourceMode};
+use crate::knowledge::{KnowledgePaths, runtime::detect_source_mode};
 use crate::llm::LlmClient;
 use crate::platform::contracts::SubmitAssetGenerateRequest;
 use crate::platform::domain::{JobId, JobRepository, JobStatus};
@@ -73,14 +73,14 @@ pub async fn run_asset_generate(
             let img_resp = match image_gen.generate(img_req).await {
                 Ok(r) => r,
                 Err(err) => {
-                    finalize_with_error(&repo, &job_id, &format!("image_gen: {err}")).await;
+                    finalize_with_error(&repo, &job_id, &sink, &format!("image_gen: {err}")).await;
                     return;
                 }
             };
             let first = match img_resp.images.first() {
                 Some(i) => i,
                 None => {
-                    finalize_with_error(&repo, &job_id, "image_gen returned no image").await;
+                    finalize_with_error(&repo, &job_id, &sink, "image_gen returned no image").await;
                     return;
                 }
             };
@@ -91,11 +91,16 @@ pub async fn run_asset_generate(
             };
             let path = target_dir.join(format!("{entity_name}.{ext}"));
             if let Err(err) = fs::create_dir_all(&target_dir).await {
-                finalize_with_error(&repo, &job_id, &format!("create target dir: {err}")).await;
+                finalize_with_error(&repo, &job_id, &sink, &format!("create target dir: {err}")).await;
                 return;
             }
+<<<<<<< HEAD
             if let Err(err) = crate::fs_atomic::write_atomic(&path, &first.bytes).await {
                 finalize_with_error(&repo, &job_id, &format!("write image: {err}")).await;
+=======
+            if let Err(err) = fs::write(&path, &first.bytes).await {
+                finalize_with_error(&repo, &job_id, &sink, &format!("write image: {err}")).await;
+>>>>>>> 0980c393 (fix: codegen 知识库集成 + prompt 锁定 + 产出校验 + 全链路错误修复)
                 return;
             }
             image_model = Some(img_resp.model.clone());
@@ -153,11 +158,11 @@ pub async fn run_asset_generate(
     let prompt = match assembler.assemble_asset_prompt(
         &asset_request,
         &knowledge_paths,
-        SourceMode::Missing,
+        detect_source_mode(&knowledge_paths),
     ) {
         Ok(p) => p,
         Err(err) => {
-            finalize_with_error(&repo, &job_id, &format!("prompt assembly: {err}")).await;
+            finalize_with_error(&repo, &job_id, &sink, &format!("prompt assembly: {err}")).await;
             return;
         }
     };
@@ -185,11 +190,11 @@ pub async fn run_asset_generate(
     {
         Ok(a) => a,
         Err(GenerateError::Stream(err)) => {
-            finalize_with_error(&repo, &job_id, &err).await;
+            finalize_with_error(&repo, &job_id, &sink, &err).await;
             return;
         }
         Err(GenerateError::Write(err)) => {
-            finalize_with_error(&repo, &job_id, &format!("write artifact: {err}")).await;
+            finalize_with_error(&repo, &job_id, &sink, &format!("write artifact: {err}")).await;
             return;
         }
         Err(GenerateError::Cancelled) => return,

@@ -43,12 +43,12 @@ pub async fn run_log_analysis(
     let raw_log = match resolve_log_text(&request).await {
         Ok(t) => t,
         Err(err) => {
-            finalize_with_error(&repo, &job_id, &err).await;
+            finalize_with_error(&repo, &job_id, &sink, &err).await;
             return;
         }
     };
     if raw_log.trim().is_empty() {
-        finalize_with_error(&repo, &job_id, "log content is empty").await;
+        finalize_with_error(&repo, &job_id, &sink, "log content is empty").await;
         return;
     }
 
@@ -84,7 +84,7 @@ pub async fn run_log_analysis(
     let mut stream = match llm.stream(completion_request).await {
         Ok(s) => s,
         Err(err) => {
-            finalize_with_error(&repo, &job_id, &err.to_string()).await;
+            finalize_with_error(&repo, &job_id, &sink, &err.to_string()).await;
             return;
         }
     };
@@ -120,7 +120,7 @@ pub async fn run_log_analysis(
                 usage_out = usage.output_tokens;
             }
             Err(err) => {
-                finalize_with_error(&repo, &job_id, &err.to_string()).await;
+                finalize_with_error(&repo, &job_id, &sink, &err.to_string()).await;
                 return;
             }
         }

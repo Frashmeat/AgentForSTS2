@@ -6,6 +6,17 @@ Priority rules:
 2. If Rules And Guidance conflict with Code Facts, follow Code Facts.
 3. Use Further Lookup only for details not already covered.
 
+**USING DIRECTIVE LOCKDOWN — READ BEFORE WRITING ANY CODE:**
+Only use `using` directives shown in `### Rules And Guidance` below. Do NOT add:
+- `System.Threading` / `System.Threading.Tasks` — STS2 mods never use these
+- `UnityEngine` / `Godot` namespaces beyond those shown in the guidance
+- ANY namespace that does not appear in the guidance or Code Facts sections
+If you need async behavior, use `public override Task SomeMethod(...)` — that's it.
+Do NOT call `Task.Run`, `Task.Delay`, `ConfigureAwait`, or any other TPL API.
+ALL hook methods in BaseLib already return Task; just override them as shown in the guidance.
+2. If Rules And Guidance conflict with Code Facts, follow Code Facts.
+3. Use Further Lookup only for details not already covered.
+
 ### Code Facts
 {{ facts }}
 
@@ -63,6 +74,14 @@ Priority rules:
 2. If Rules And Guidance conflict with Code Facts, follow Code Facts.
 3. Use Further Lookup only for details not already covered.
 
+**USING DIRECTIVE LOCKDOWN — READ BEFORE WRITING ANY CODE:**
+Only use `using` directives shown in `### Rules And Guidance` below. Do NOT add:
+- `System.Threading` / `System.Threading.Tasks` — STS2 mods never use these
+- `UnityEngine` / `Godot` namespaces beyond those shown in the guidance
+- ANY namespace that does not appear in the guidance or Code Facts sections
+If you need async behavior, use `public override Task SomeMethod(...)` — that's it.
+Do NOT call `Task.Run`, `Task.Delay`, `ConfigureAwait`, or any other TPL API.
+ALL hook methods in BaseLib already return Task; just override them as shown in the guidance.
 ### Code Facts
 {{ facts }}
 
@@ -112,9 +131,15 @@ Steps to complete:
 4. Create BOTH localization files:
    - `{{ mod_name }}/localization/eng/<type>s.json` — English
    - `{{ mod_name }}/localization/zhs/<type>s.json` — Simplified Chinese
-5. Register it in MainFile.cs if needed (BaseLib handles most registration automatically).
 {{ build_step }}
 
+**CRITICAL — OUTPUT FORMAT:**
+- Output the COMPLETE .cs file inside ONE markdown code fence (```csharp ... ```).
+- Do NOT write placeholder comments like "// 此处 namespace...".
+- Do NOT ask which namespace to use — read MainFile.cs and use whatever namespace it declares.
+- Do NOT ask for confirmation before writing. Write the complete file immediately.
+
+Follow the existing code style in the project.
 Follow the existing code style in the project.
 
 ## build_prompt
@@ -140,6 +165,14 @@ Priority rules:
 2. If Rules And Guidance conflict with Code Facts, follow Code Facts.
 3. Use Further Lookup only for details not already covered.
 
+**USING DIRECTIVE LOCKDOWN — READ BEFORE WRITING ANY CODE:**
+Only use `using` directives shown in `### Rules And Guidance` below. Do NOT add:
+- `System.Threading` / `System.Threading.Tasks` — STS2 mods never use these
+- `UnityEngine` / `Godot` namespaces beyond those shown in the guidance
+- ANY namespace that does not appear in the guidance or Code Facts sections
+If you need async behavior, use `public override Task SomeMethod(...)` — that's it.
+Do NOT call `Task.Run`, `Task.Delay`, `ConfigureAwait`, or any other TPL API.
+ALL hook methods in BaseLib already return Task; just override them as shown in the guidance.
 ### Code Facts
 {{ facts }}
 

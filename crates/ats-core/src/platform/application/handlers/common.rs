@@ -77,6 +77,7 @@ pub async fn transition_to_running(
     Ok(())
 }
 
+<<<<<<< HEAD
 /// 任务失败收口。CAS：仅当未处于终态时才落 Failed，保留已有的 Cancelled 等终态。
 pub async fn finalize_with_error(repo: &Arc<dyn JobRepository>, id: &JobId, message: &str) {
     let message = message.to_string();
@@ -134,6 +135,32 @@ pub async fn finalize_with_success(
         Ok(job) if matches!(job.status, JobStatus::Cancelled) => FinalizeOutcome::Cancelled,
         Ok(_) => FinalizeOutcome::Completed,
         Err(_) => FinalizeOutcome::Vanished,
+=======
+/// 任务失败收口。若 job 已 Cancelled 则保留该状态。
+/// 始终 emit 一个 "failed" 进度事件，让前端立即感知错误。
+pub async fn finalize_with_error(
+    repo: &Arc<dyn JobRepository>,
+    id: &JobId,
+    sink: &Arc<dyn ProgressSink>,
+    message: &str,
+) {
+    sink.emit(ProgressEvent {
+        job_id: id.clone(),
+        stage: "failed".into(),
+        percent: None,
+        message: Some(message.to_string()),
+        delta: None,
+    })
+    .await;
+    if let Ok(mut job) = repo.get(id).await {
+        if matches!(job.status, JobStatus::Cancelled) {
+            return;
+        }
+        job.status = JobStatus::Failed;
+        job.completed_at = Some(chrono::Utc::now());
+        job.error = Some(message.to_string());
+        let _ = repo.update(&job).await;
+>>>>>>> 0980c393 (fix: codegen 知识库集成 + prompt 锁定 + 产出校验 + 全链路错误修复)
     }
 }
 

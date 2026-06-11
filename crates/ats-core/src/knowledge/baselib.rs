@@ -51,6 +51,8 @@ pub struct GitHubBaselibSource {
     client: reqwest::Client,
     owner: String,
     repo: String,
+    /// Optional GitHub token for authenticated API requests (avoids 60 req/h rate limit).
+    token: Option<String>,
 }
 
 impl GitHubBaselibSource {
@@ -61,6 +63,7 @@ impl GitHubBaselibSource {
             client,
             owner: "Alchyr".into(),
             repo: "BaseLib-StS2".into(),
+            token: None,
         }
     }
 
@@ -70,17 +73,24 @@ impl GitHubBaselibSource {
             client,
             owner,
             repo,
+            token: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_token(mut self, token: Option<String>) -> Self {
+        self.token = token.filter(|t| !t.is_empty());
+        self
     }
 
     /// 不需要让上层 crate 引入 reqwest：用内置默认 client（60s 超时）。
     /// 失败时返回 `BaselibError::Http`。
-    pub fn default_alchyr_with_default_client() -> Result<Self, BaselibError> {
+    pub fn default_alchyr_with_default_client(token: Option<String>) -> Result<Self, BaselibError> {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(60))
             .build()
             .map_err(|e| BaselibError::Http(e.to_string()))?;
-        Ok(Self::default_alchyr(client))
+        Ok(Self::default_alchyr(client).with_token(token))
     }
 
     fn latest_release_url(&self) -> String {
@@ -106,12 +116,15 @@ struct GitHubAsset {
 #[async_trait]
 impl BaselibSource for GitHubBaselibSource {
     async fn fetch_baselib_dll(&self, dest_dir: &Path) -> Result<FetchedBaselib, BaselibError> {
-        let release_resp = self
+        let mut req = self
             .client
             .get(self.latest_release_url())
-            // GitHub API 要 UA，否则 403
             .header("User-Agent", "agentthespire-rust")
-            .header("Accept", "application/vnd.github+json")
+            .header("Accept", "application/vnd.github+json");
+        if let Some(ref t) = self.token {
+            req = req.header("Authorization", format!("Bearer {t}"));
+        }
+        let release_resp = req
             .send()
             .await
             .map_err(|e| BaselibError::Http(e.to_string()))?;

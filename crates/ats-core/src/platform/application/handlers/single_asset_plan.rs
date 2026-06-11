@@ -56,7 +56,7 @@ pub async fn run_single_asset_plan(
         return;
     }
     if request.requirements.trim().is_empty() {
-        finalize_with_error(&repo, &job_id, "requirements is empty").await;
+        finalize_with_error(&repo, &job_id, &sink, "requirements is empty").await;
         return;
     }
 
@@ -75,7 +75,7 @@ pub async fn run_single_asset_plan(
     let mut stream = match llm.stream(completion_request).await {
         Ok(s) => s,
         Err(err) => {
-            finalize_with_error(&repo, &job_id, &err.to_string()).await;
+            finalize_with_error(&repo, &job_id, &sink, &err.to_string()).await;
             return;
         }
     };
@@ -111,7 +111,7 @@ pub async fn run_single_asset_plan(
                 usage_out = usage.output_tokens;
             }
             Err(err) => {
-                finalize_with_error(&repo, &job_id, &err.to_string()).await;
+                finalize_with_error(&repo, &job_id, &sink, &err.to_string()).await;
                 return;
             }
         }
@@ -128,14 +128,10 @@ pub async fn run_single_asset_plan(
     let plan_item = match parse_plan_item(&accumulated) {
         Ok(p) => p,
         Err(err) => {
-            finalize_with_error(
-                &repo,
-                &job_id,
-                &format!(
-                    "parse plan json: {err}; raw: {}",
-                    truncate(&accumulated, 500)
-                ),
-            )
+            finalize_with_error(&repo, &job_id, &sink, &format!(
+                "parse plan json: {err}; raw: {}",
+                truncate(&accumulated, 500)
+            ))
             .await;
             return;
         }
@@ -229,13 +225,19 @@ fn build_user_prompt(request: &SubmitSingleAssetPlanRequest) -> String {
 /// 2. 若失败，尝试剥离 ``` fence 后再解
 /// 3. 若仍失败，尝试 strip 到第一个 `{` 与最后一个 `}` 之间
 pub(crate) fn parse_plan_item(raw: &str) -> Result<PlanItem, String> {
+    let mut last_err = String::new();
     if let Ok(p) = serde_json::from_str::<PlanItem>(raw.trim()) {
         return Ok(p);
     }
-    if let Some(inner) = extract_first_code_block(raw)
-        && let Ok(p) = serde_json::from_str::<PlanItem>(inner.trim())
-    {
-        return Ok(p);
+    if let Some(inner) = extract_first_code_block(raw) {
+        if let Ok(p) = serde_json::from_str::<PlanItem>(inner.trim()) {
+            return Ok(p);
+        }
+        last_err = format!(
+            "code-block extraction failed: {}",
+            serde_json::from_str::<PlanItem>(inner.trim())
+                .unwrap_err()
+        );
     }
     if let (Some(start), Some(end)) = (raw.find('{'), raw.rfind('}'))
         && end > start
@@ -244,8 +246,22 @@ pub(crate) fn parse_plan_item(raw: &str) -> Result<PlanItem, String> {
         if let Ok(p) = serde_json::from_str::<PlanItem>(candidate) {
             return Ok(p);
         }
+        last_err = format!(
+            "braces extraction failed: {}",
+            serde_json::from_str::<PlanItem>(candidate)
+                .unwrap_err()
+        );
+    } else if last_err.is_empty() {
+        last_err = format!(
+            "direct parse failed: {}",
+            serde_json::from_str::<PlanItem>(raw.trim())
+                .unwrap_err()
+        );
     }
-    Err("response did not contain parseable PlanItem JSON".into())
+    Err(format!(
+        "PlanItem parse failed — {last_err} — raw(500): {}",
+        truncate(raw, 500)
+    ))
 }
 
 fn truncate(s: &str, max: usize) -> String {

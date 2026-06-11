@@ -111,11 +111,11 @@ public class MyPatch
 9. Upgrade check: `IsUpgraded` (bool property), NOT `UpgradeLevel` (int) → compile error or wrong behavior
 10. `new XxxModel()` → `DuplicateModelException` → black screen on run start; always use `ModelDb.Relic<T>().ToMutable()` etc.
 11. Localization JSON must be **flat key-value**, NOT nested objects. `{"FOO.title": "Bar"}` ✅  `{"FOO": {"title": "Bar"}}` ❌ → `LocException: token type 'StartObject' as a string` → game crashes on startup.
-    Localization text must NOT contain square brackets `[]` — the game's rich text renderer parses them as BBCode tags. `[MyTag]` text becomes an unclosed BBCode open tag → rendering exception → event state machine hangs, game gets stuck. Use `()`, `{}`, or plain text instead. `{"FOO.title": "Bar"}` ✅  `{"FOO": {"title": "Bar"}}` ❌ → `LocException: token type 'StartObject' as a string` → game crashes on startup.
+    Localization text must NOT contain square brackets `[]` — the game's rich text renderer parses them as BBCode tags. `[MyTag]` text becomes an unclosed BBCode open tag → rendering exception → event state machine hangs, game gets stuck. Use `()`, `{}`, or plain text instead.
 12. `FromSimpleGridForRewards` / `FromSimpleGrid` work OUTSIDE combat (in events, Neow callbacks). The `CombatManager.IsEnding` check only early-returns during combat teardown, not a requirement for combat to exist. BrainLeech event uses this in a non-combat context.
 13. `CardSelectCmd.FromChooseACardScreen` max 3 cards only — passing >3 throws ArgumentException. For showing many cards use `FromSimpleGridForRewards` instead.
-14. Card localization key format is `{RootNS.ToUpperInvariant()}-{Slugify(ClassName)}.title`. The prefix is simple `.ToUpperInvariant()` (NO CamelCase splitting via Slugify). Example: `S08_FuseCharge.Cards` → prefix `S08_FUSECHARGE-`, class `FuseCharge` → `FUSE_CHARGE` → full key `S08_FUSECHARGE-FUSE_CHARGE.title`. Wrong: `S08_FUSE_CHARGE-FUSE_CHARGE` ❌  Wrong: `FUSE_CHARGE.title` ❌  Wrong: `.name` suffix ❌
-15. Custom Neow/event option callbacks MUST call `SetEventFinished(LocString)` at the end, or the event state machine never advances — player sees no "Continue" button and is permanently stuck. `SetEventFinished` is `protected` on `EventModel`, so call via reflection:
+14. Card localization key format is `{RootNS.ToUpperInvariant()}-{Slugify(ClassName)}.title`. The prefix is simple `.ToUpperInvariant()` (NO CamelCase splitting via Slugify). Example: `S08_FuseCharge.Cards` → prefix `S08_FUSECHARGE-`, class `FuseCharge` → `FUSE_CHARGE` → full key `S08_FUSECHARGE-FUSE_CHARGE.title`.
+15. Custom Neow/event option callbacks MUST call `SetEventFinished(LocString)` at the end, or the event state machine never advances. Call via reflection:
     ```csharp
     typeof(EventModel).GetMethod("SetEventFinished",
         BindingFlags.NonPublic | BindingFlags.Instance)
@@ -177,3 +177,13 @@ int stacks = (int)creature.GetPower<TPower>().Amount;
 ## Debugging
 Game logs: `%AppData%/SlayTheSpire2/logs/godot.log`
 Key search terms: `[ERROR]`, `Finished mod initialization for` (confirms mod loaded)
+
+## FORBIDDEN NAMESPACES — DO NOT USE ANY OF THESE
+`System.Threading`, `System.Threading.Tasks`, `System.Linq`, `System.Collections`, `System.IO`,
+`System.Net`, `System.Text.RegularExpressions`, `UnityEngine`, `UnityEditor`,
+`System.Diagnostics`, `System.Reflection.Emit`
+
+If you need async, use the Task return type (already provided by BaseLib hook signatures).
+Do NOT write `Task.Run(...)`, `Task.Delay(...)`, `await`, or any TPL API — just return `Task.CompletedTask`
+or call other synchronous methods. The modding API uses synchronous hook patterns that return Task only
+for the framework contract; no actual async work is needed.

@@ -42,7 +42,7 @@ pub async fn run_text_generate(
     let mut stream = match stream_result {
         Ok(s) => s,
         Err(err) => {
-            finalize_with_error(&repo, &job_id, &err.to_string()).await;
+            finalize_with_error(&repo, &job_id, &sink, &err.to_string()).await;
             sink.emit(ProgressEvent {
                 job_id: job_id.clone(),
                 stage: "stream-start-error".into(),
@@ -101,7 +101,7 @@ pub async fn run_text_generate(
                 finish = Some(format!("{finish_reason:?}").to_lowercase());
             }
             Err(err) => {
-                finalize_with_error(&repo, &job_id, &err.to_string()).await;
+                finalize_with_error(&repo, &job_id, &sink, &err.to_string()).await;
                 sink.emit(ProgressEvent {
                     job_id: job_id.clone(),
                     stage: "stream-error".into(),
