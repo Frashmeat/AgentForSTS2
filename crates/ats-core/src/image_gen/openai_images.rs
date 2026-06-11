@@ -165,7 +165,7 @@ impl ImageGenClient for OpenAiImagesClient {
     }
 }
 
-fn map_http_error(status: u16, retry_after: Option<u64>, body: &str) -> ImageGenError {
+pub(crate) fn map_http_error(status: u16, retry_after: Option<u64>, body: &str) -> ImageGenError {
     let parsed: Option<OpenAiErrorBody> = serde_json::from_str(body).ok();
     let message = parsed
         .map(|p| p.error.message)

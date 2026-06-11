@@ -47,6 +47,10 @@ pub struct RuntimeConfig {
     pub cors_origins: Vec<String>,
     pub mount_frontend: bool,
     pub requires_database: bool,
+    /// GitHub personal access token（可选）。提供后 knowledge_refresh 的 baselib
+    /// 下载阶段使用认证请求，避免未认证 API 的 60 req/h 限流。
+    #[serde(default)]
+    pub github_token: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,15 +68,18 @@ pub struct LlmConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default, rename_all = "snake_case")]
 pub struct ImageGenConfig {
-    /// 留空走 OpenAI Images 兼容路径（覆盖 OpenAI 官方 + new-api / one-api / litellm 等代理）。
     pub provider: String,
+    /// 生图协议：留空 / `"images_api"` → 标准 DALL-E `/v1/images/generations`；
+    /// `"chat_completions"` → 通过 Chat Completions 接口生图（Nano Banana / Gemini 等）。
+    #[serde(default)]
+    pub protocol: String,
     pub model: String,
     pub api_key: String,
     pub base_url: String,
     /// 默认尺寸，例 "1024x1024" / "1792x1024" / "512x512"。留空 → "1024x1024"。
+    /// chat_completions 协议下映射为 Gemini aspect_ratio + image_size。
     pub size: String,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "snake_case")]
 pub struct AuthConfig {
@@ -94,6 +101,7 @@ impl Settings {
                     cors_origins: loopback_cors_defaults(7860),
                     mount_frontend: true,
                     requires_database: false,
+                    github_token: String::new(),
                 },
                 web: RuntimeConfig {
                     host: "127.0.0.1".into(),
@@ -102,6 +110,7 @@ impl Settings {
                     cors_origins: loopback_cors_defaults(7870),
                     mount_frontend: false,
                     requires_database: true,
+                    github_token: String::new(),
                 },
             },
             llm: LlmConfig {
@@ -251,6 +260,7 @@ impl Default for RuntimeConfig {
             cors_origins: Vec::new(),
             mount_frontend: false,
             requires_database: false,
+            github_token: String::new(),
         }
     }
 }
