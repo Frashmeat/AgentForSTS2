@@ -1,13 +1,14 @@
 //! Project commands —— 工程文件夹生命周期。
 
 use std::path::{Path, PathBuf};
+use tauri::Emitter;
 use std::sync::Mutex;
 
 use ats_core::project::{ProjectFolder, ProjectMeta, RecentEntry, RecentProjects};
 use serde::Serialize;
 use tauri::State;
 
-use crate::AppPaths;
+use crate::{AppConfig, AppPaths};
 
 /// 当前活动工程的进程内单例。`None` 表示用户尚未打开任何工程。
 pub struct ActiveProject(pub Mutex<Option<ProjectFolder>>);
@@ -40,6 +41,8 @@ pub fn list_recent_projects(paths: State<'_, AppPaths>) -> Result<Vec<RecentEntr
 
 #[tauri::command]
 pub fn create_project(
+    app: tauri::AppHandle,
+    config: State<'_, AppConfig>,
     paths: State<'_, AppPaths>,
     active: State<'_, ActiveProject>,
     parent_dir: String,
@@ -50,28 +53,42 @@ pub fn create_project(
     let snap = snapshot(&folder);
     record_recent(&paths, folder.path(), folder.meta())?;
     *lock_active(&active)? = Some(folder);
+
+    // 尝试从 knowledge manifest 派生 STS2 路径并自动生成 local.props
+    let kp = ats_core::knowledge::KnowledgePaths::from_runtime_dir(
+        &config.status_snapshot().runtime_dir(),
+    );
+    if let Err(warn) = try_generate_local_props(Path::new(&snap.path), &kp.manifest_path) {
+        eprintln!("local.props auto-generate skipped: {warn}");
+    }
+
+    app.emit("project-changed", Some(snap.clone())).ok();
     Ok(snap)
 }
-
 #[tauri::command]
 pub fn open_project(
+    app: tauri::AppHandle,
     paths: State<'_, AppPaths>,
     active: State<'_, ActiveProject>,
     path: String,
 ) -> Result<ProjectSnapshot, String> {
     let p = PathBuf::from(path);
-    // 关闭旧工程（释放 lock）
     drop(lock_active(&active)?.take());
     let folder = ProjectFolder::open(&p).map_err(|e| e.to_string())?;
     let snap = snapshot(&folder);
     record_recent(&paths, folder.path(), folder.meta())?;
     *lock_active(&active)? = Some(folder);
+    app.emit("project-changed", Some(snap.clone())).ok();
     Ok(snap)
 }
 
 #[tauri::command]
-pub fn close_project(active: State<'_, ActiveProject>) -> Result<(), String> {
+pub fn close_project(
+    app: tauri::AppHandle,
+    active: State<'_, ActiveProject>,
+) -> Result<(), String> {
     drop(lock_active(&active)?.take());
+    app.emit("project-changed", Option::<ProjectSnapshot>::None).ok();
     Ok(())
 }
 
@@ -91,11 +108,45 @@ pub fn forget_recent_project(paths: State<'_, AppPaths>, path: String) -> Result
     Ok(())
 }
 
+
 fn snapshot(folder: &ProjectFolder) -> ProjectSnapshot {
     ProjectSnapshot {
-        path: folder.path().display().to_string(),
+        path: folder.path().to_string_lossy().to_string(),
         meta: folder.meta().clone(),
     }
+}
+
+/// 从 knowledge manifest 读取 STS2 DLL 路径，推导出 SteamLibraryPath，
+/// 并自动生成 `local.props`，使新建工程可立即编译。
+fn try_generate_local_props(
+    project_root: &Path,
+    manifest_path: &Path,
+) -> Result<(), String> {
+    let manifest: ats_core::knowledge::KnowledgeManifest =
+        serde_json::from_str(
+            &std::fs::read_to_string(manifest_path)
+                .map_err(|e| format!("read manifest: {e}"))?,
+        )
+        .map_err(|e| format!("parse manifest: {e}"))?;
+    let game = manifest.game.as_ref().ok_or_else(|| "no game record in manifest".to_string())?;
+    let mut steam = game.source_path.clone();
+    for _ in 0..4 {
+        steam = steam
+            .parent()
+            .map(Path::to_path_buf)
+            .ok_or_else(|| format!("cannot derive SteamLibraryPath from {}", game.source_path.display()))?;
+    }
+    let example_path = project_root.join("local.props.example");
+    let example = std::fs::read_to_string(&example_path)
+        .map_err(|e| format!("read local.props.example: {e}"))?;
+    let props = example.replace(
+        "C:/Program Files (x86)/Steam/steamapps",
+        &steam.to_string_lossy(),
+    );
+    let target = project_root.join("local.props");
+    std::fs::write(&target, &props)
+        .map_err(|e| format!("write local.props: {e}"))?;
+    Ok(())
 }
 
 fn record_recent(paths: &AppPaths, project_path: &Path, meta: &ProjectMeta) -> Result<(), String> {
@@ -106,8 +157,7 @@ fn record_recent(paths: &AppPaths, project_path: &Path, meta: &ProjectMeta) -> R
         std::fs::create_dir_all(parent).map_err(|e| format!("create app data dir: {e}"))?;
     }
     r.save(&recents_path)
-        .map_err(|e| format!("save recents: {e}"))?;
-    Ok(())
+        .map_err(|e| format!("save recents: {e}"))
 }
 
 fn lock_active<'a>(

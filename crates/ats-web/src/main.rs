@@ -53,8 +53,9 @@ fn build_health_report(state: &AppState) -> HealthReport {
             Role::Web,
             state.config_status.clone(),
             settings,
-            false,
-            false,
+            false, // active_project_open
+            false, // image_proc_ready
+            false, // knowledge_ready — web 端无本地知识库
         ),
         None => ats_core::health::report(Role::Web, state.config_status.clone()),
     }

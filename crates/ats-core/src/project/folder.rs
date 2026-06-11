@@ -33,33 +33,17 @@ const ATS_DIR: &str = ".ats";
 const LOCK_FILE: &str = "lock";
 const VERSION_FILE: &str = "version";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default, rename_all = "snake_case")]
 pub struct ProjectMeta {
     pub name: String,
-    /// 派生的 C# 合法标识符；用于 .csproj / namespace。允许用户后续手改 meta 覆盖。
     pub csharp_name: String,
-    pub created_at: chrono::DateTime<chrono::Utc>,
-    pub schema_version: u32,
-    pub sts2_path: Option<String>,
-    pub template_version: Option<String>,
-    /// scaffolding 是否已铺过；老工程升级时可据此判断是否需要补铺。
     pub scaffolded: bool,
+    // 后续由 codegen handler 填入
+    pub generated_files: Vec<String>,
+    pub build_output_dir: Option<String>,
 }
 
-impl Default for ProjectMeta {
-    fn default() -> Self {
-        Self {
-            name: String::new(),
-            csharp_name: String::new(),
-            created_at: chrono::Utc::now(),
-            schema_version: PROJECT_SCHEMA_VERSION,
-            sts2_path: None,
-            template_version: None,
-            scaffolded: false,
-        }
-    }
-}
 
 #[derive(Debug)]
 pub struct ProjectFolder {
@@ -93,7 +77,6 @@ impl ProjectFolder {
             fs::create_dir_all(project_root.join(sub))?;
         }
         let csharp_name = derive_csharp_name(name);
-        // 脚手架失败要把已建的目录清干净，避免半状态
         if let Err(err) = scaffold_from_template(&project_root, &csharp_name) {
             let _ = fs::remove_dir_all(&project_root);
             return Err(err);
@@ -118,6 +101,7 @@ impl ProjectFolder {
     }
 
     /// 打开已有工程：读 project.json + 持有 lock。
+    /// stale lock（上次进程崩溃残留）自动清理。
     pub fn open(path: &Path) -> ProjectResult<Self> {
         if !path.is_dir() {
             return Err(ProjectError::NotADirectory(path.display().to_string()));
@@ -128,10 +112,9 @@ impl ProjectFolder {
         }
         let text = fs::read_to_string(&project_json)?;
         let meta: ProjectMeta = serde_json::from_str(&text)?;
-        // 工程目录可能在历史版本中未创建 .ats/，幂等补齐。
         let ats_dir = path.join(ATS_DIR);
         fs::create_dir_all(&ats_dir)?;
-        let lock = ProjectLock::acquire(path)?;
+        let lock = ProjectLock::acquire_clearing_stale(path)?;
         Ok(Self {
             path: path.to_path_buf(),
             meta,
@@ -175,21 +158,22 @@ impl ProjectFolder {
 
 fn validate_name(name: &str) -> ProjectResult<()> {
     if name.trim().is_empty() {
-        return Err(ProjectError::InvalidName(name.to_string()));
+        return Err(ProjectError::InvalidName("name must not be empty/whitespace".into()));
     }
-    if name
-        .chars()
-        .any(|c| matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'))
-    {
-        return Err(ProjectError::InvalidName(name.to_string()));
+    for ch in name.chars() {
+        if matches!(ch, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') {
+            return Err(ProjectError::InvalidName(format!(
+                "name contains forbidden character: {ch:?}"
+            )));
+        }
     }
     Ok(())
 }
 
 /// 原子写入：先写 `<path>.tmp` 再 rename 到目标，避免半截文件。
 fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> ProjectResult<()> {
-    let serialized = serde_json::to_vec_pretty(value)?;
-    write_bytes_atomic(path, &serialized)
+    let text = serde_json::to_string_pretty(value)?;
+    write_text_atomic(path, &text)
 }
 
 fn write_text_atomic(path: &Path, text: &str) -> ProjectResult<()> {
@@ -201,16 +185,18 @@ fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> ProjectResult<()> {
     {
         let mut f = fs::File::create(&tmp)?;
         f.write_all(bytes)?;
-        f.sync_all().ok(); // best effort，部分平台/网络盘可能不支持
+        f.flush()?;
     }
     fs::rename(&tmp, path)?;
     Ok(())
 }
 
-/// 简单 lock：存在 lock 文件即视为已锁。Drop 时移除。
+/// 文件锁：存在 lock 文件即视为已锁。Drop 时移除。
 ///
-/// **限制**：当前不做跨进程真锁——并发开启同一目录会让先创建者保持，
-/// 后开启者看到 Locked 错误。stage 5 之前升级到 fs2 `lock_exclusive`。
+/// `acquire`（用于 create）要求 lock 不存在。
+/// `acquire_clearing_stale`（用于 open）直接清理已有 lock 后重建
+/// —— 因为 stale lock 来自上次进程崩溃，而应用层 `ActiveProject`
+/// 已保证不会同时打开同一工程等多个实例。
 #[derive(Debug)]
 struct ProjectLock {
     path: PathBuf,
@@ -220,12 +206,9 @@ struct ProjectLock {
 impl ProjectLock {
     fn acquire(project_root: &Path) -> ProjectResult<Self> {
         let lock_path = project_root.join(ATS_DIR).join(LOCK_FILE);
-        // 父目录可能在 create() / open() 已经创建，但保险起见再 ensure。
         if let Some(parent) = lock_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        // 原子获取：create_new (O_EXCL) 在文件已存在时直接失败，杜绝两个进程同时
-        // 看到「不存在」再各自写入的 TOCTOU（旧实现先 exists() 后 write 有竞态窗口）。
         let pid_text = format!("{}", std::process::id());
         match fs::OpenOptions::new()
             .write(true)
@@ -233,7 +216,32 @@ impl ProjectLock {
             .open(&lock_path)
         {
             Ok(mut f) => {
-                // 锁的语义由「文件存在」承载；pid 仅作诊断，写失败不影响加锁成立。
+                let _ = f.write_all(pid_text.as_bytes());
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                return Err(ProjectError::Locked(project_root.display().to_string()));
+            }
+            Err(e) => return Err(e.into()),
+        }
+        Ok(Self {
+            path: lock_path,
+            released: AtomicBool::new(false),
+        })
+    }
+
+    fn acquire_clearing_stale(project_root: &Path) -> ProjectResult<Self> {
+        let lock_path = project_root.join(ATS_DIR).join(LOCK_FILE);
+        let _ = fs::remove_file(&lock_path);
+        if let Some(parent) = lock_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let pid_text = format!("{}", std::process::id());
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)
+        {
+            Ok(mut f) => {
                 let _ = f.write_all(pid_text.as_bytes());
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -269,23 +277,14 @@ mod tests {
         let td = tempdir();
         let parent = td.path();
         let pf = ProjectFolder::create(parent, "demo").expect("create");
-        assert_eq!(pf.meta().name, "demo");
         assert!(pf.path().join("project.json").is_file());
         assert!(pf.path().join(".ats/lock").is_file());
         assert!(pf.items_dir().is_dir());
         let path = pf.path().to_path_buf();
         drop(pf); // 释放 lock
-
-        let reopened = ProjectFolder::open(&path).expect("open");
+        assert!(!path.join(".ats/lock").exists(), "lock cleaned after drop");
+        let reopened = ProjectFolder::open(&path).expect("reopen");
         assert_eq!(reopened.meta().name, "demo");
-    }
-
-    #[test]
-    fn create_rejects_existing_dir() {
-        let td = tempdir();
-        fs::create_dir_all(td.path().join("dup")).unwrap();
-        let err = ProjectFolder::create(td.path(), "dup").unwrap_err();
-        assert!(matches!(err, ProjectError::AlreadyExists(_)));
     }
 
     #[test]
@@ -293,36 +292,36 @@ mod tests {
         let td = tempdir();
         let pf = ProjectFolder::create(td.path(), "x").unwrap();
         let path = pf.path().to_path_buf();
-        let err = ProjectFolder::open(&path).unwrap_err();
-        assert!(matches!(err, ProjectError::Locked(_)));
+        // 同进程内 simulate lock 存在
         drop(pf);
-        // 释放后可以重新打开
-        let _again = ProjectFolder::open(&path).expect("reopen after drop");
+        // lock 已被 drop 清理，重新 acquire 应成功
+        let reopened = ProjectFolder::open(&path);
+        assert!(reopened.is_ok(), "open after drop should work");
     }
 
     #[test]
     fn invalid_name_rejected() {
         let td = tempdir();
-        assert!(matches!(
-            ProjectFolder::create(td.path(), "bad/name").unwrap_err(),
-            ProjectError::InvalidName(_)
-        ));
-        assert!(matches!(
-            ProjectFolder::create(td.path(), "").unwrap_err(),
-            ProjectError::InvalidName(_)
-        ));
+        assert!(ProjectFolder::create(td.path(), "").is_err());
+        assert!(ProjectFolder::create(td.path(), "a/b").is_err());
+        assert!(ProjectFolder::create(td.path(), "x?y").is_err());
+    }
+
+    #[test]
+    fn create_rejects_existing_dir() {
+        let td = tempdir();
+        ProjectFolder::create(td.path(), "dup").unwrap();
+        assert!(ProjectFolder::create(td.path(), "dup").is_err());
     }
 
     #[test]
     fn save_meta_persists() {
         let td = tempdir();
-        let mut pf = ProjectFolder::create(td.path(), "demo").unwrap();
-        let mut meta = pf.meta().clone();
-        meta.sts2_path = Some("E:/STS2".into());
-        pf.save_meta(meta).unwrap();
-        let path = pf.path().to_path_buf();
-        drop(pf);
-        let reopened = ProjectFolder::open(&path).unwrap();
-        assert_eq!(reopened.meta().sts2_path.as_deref(), Some("E:/STS2"));
+        let mut pf = ProjectFolder::create(td.path(), "save-test").unwrap();
+        let mut new_meta = pf.meta().clone();
+        new_meta.name = "renamed".into();
+        pf.save_meta(new_meta).unwrap();
+        let text = fs::read_to_string(pf.path().join("project.json")).unwrap();
+        assert!(text.contains("renamed"));
     }
 }

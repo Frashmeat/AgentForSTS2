@@ -30,6 +30,10 @@ pub struct ReadinessFlags {
     /// 仅 Tauri 端可能为 true；feature off / web 端永 false。
     #[serde(default)]
     pub image_proc_ready: bool,
+    /// 游戏知识库反编译产物是否就绪（game_dir 下有 .cs 文件）。
+    /// codegen prompt 含有真实类型事实的前提。
+    #[serde(default)]
+    pub knowledge_ready: bool,
     /// 后台 queue worker 是否在跑。当前 desktop 没有显式 worker（每个 submit
     /// spawn 一个 tokio task），所以一直是 true；Stage 3.4 Web 轨 worker 上线后
     /// 才有实际意义。
@@ -80,6 +84,7 @@ pub fn report_full(
     settings: &Settings,
     active_project_open: bool,
     image_proc_ready: bool,
+    knowledge_ready: bool,
 ) -> HealthReport {
     let mut r = report(role, config);
     r.readiness = ReadinessFlags {
@@ -87,6 +92,7 @@ pub fn report_full(
         image_gen_configured: !settings.image_gen.api_key.is_empty(),
         active_project_open,
         image_proc_ready,
+        knowledge_ready,
         queue_worker_ready: true,
     };
     r

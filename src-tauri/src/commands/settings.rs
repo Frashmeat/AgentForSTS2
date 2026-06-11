@@ -44,17 +44,19 @@ pub struct ImageGenSnapshot {
     pub model: String,
     pub base_url: String,
     pub size: String,
+    pub protocol: String,
     pub api_key_masked: String,
     pub api_key_configured: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct RuntimeSnapshot {
     pub host: String,
     pub port: u16,
     pub mount_frontend: bool,
     pub requires_database: bool,
+    #[serde(rename = "githubToken")]
+    pub github_token: String,
 }
 
 #[tauri::command]
@@ -76,6 +78,7 @@ pub fn get_settings_snapshot(config: tauri::State<'_, AppConfig>) -> SettingsSna
             model: s.image_gen.model.clone(),
             base_url: s.image_gen.base_url.clone(),
             size: s.image_gen.size.clone(),
+            protocol: s.image_gen.protocol.clone(),
             api_key_masked: masked_secret(&s.image_gen.api_key),
             api_key_configured: !s.image_gen.api_key.is_empty(),
         },
@@ -109,6 +112,7 @@ pub struct ImageGenPatch {
     pub model: Option<String>,
     pub base_url: Option<String>,
     pub size: Option<String>,
+    pub protocol: Option<String>,
     pub api_key: Option<String>,
 }
 
@@ -150,6 +154,9 @@ pub fn save_settings_patch(
         }
         if let Some(v) = p.size {
             new_settings.image_gen.size = v;
+        }
+        if let Some(v) = p.protocol {
+            new_settings.image_gen.protocol = v;
         }
         if let Some(v) = p.api_key {
             new_settings.image_gen.api_key = v;
@@ -211,6 +218,7 @@ fn snapshot_runtime(r: &ats_core::config::RuntimeConfig) -> RuntimeSnapshot {
         port: r.port,
         mount_frontend: r.mount_frontend,
         requires_database: r.requires_database,
+        github_token: masked_secret(&r.github_token),
     }
 }
 

@@ -20,12 +20,18 @@ pub fn get_health(
 ) -> HealthReport {
     let active_open = active.0.lock().map(|g| g.is_some()).unwrap_or(false);
     let image_proc_ready = matches!(image_proc.status_snapshot(), PrewarmStatus::Ready { .. });
-    let (settings, status) = config.snapshot();
+    let status = config.status_snapshot();
+    let knowledge_ready =
+        ats_core::knowledge::runtime::detect_source_mode(
+            &ats_core::knowledge::KnowledgePaths::from_runtime_dir(&status.runtime_dir()),
+        ) == ats_core::knowledge::SourceMode::RuntimeDecompiled;
+    let (settings, _) = config.snapshot();
     ats_core::health::report_full(
         Role::Workstation,
         status,
         &settings,
         active_open,
         image_proc_ready,
+        knowledge_ready,
     )
 }
