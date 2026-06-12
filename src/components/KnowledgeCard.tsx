@@ -1,18 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  Badge,
-  Button,
-  Card,
-  CardSection,
-  Field,
-  Notice,
-} from "@/components/ui";
+import { Badge, Button, Card, CardSection, Notice } from "@/components/ui";
 import { api } from "@/services/api";
 import { useJobProgress } from "@/hooks/useJobProgress";
 import type {
   ExportPackStats,
   ImportPackStats,
   KnowledgeStatus,
+  SettingsSnapshot,
   SubmitJobAck,
 } from "@/services/tauriApi";
 
@@ -24,7 +18,8 @@ export function KnowledgeCard() {
   const [packMsg, setPackMsg] = useState<string | null>(null);
   const [packBusy, setPackBusy] = useState(false);
   const [overwriteOnImport, setOverwriteOnImport] = useState(false);
-
+  const [kSts2Path, setKSts2Path] = useState("");
+  const [kSts2Editing, setKSts2Editing] = useState(false);
   const [force, setForce] = useState(false);
   const [refreshBusy, setRefreshBusy] = useState(false);
   const [refreshStage, setRefreshStage] = useState<string | null>(null);
@@ -32,9 +27,7 @@ export function KnowledgeCard() {
   const [refreshJobId, setRefreshJobId] = useState<string | null>(null);
   const refreshJobIdRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    refreshJobIdRef.current = refreshJobId;
-  }, [refreshJobId]);
+  useEffect(() => { refreshJobIdRef.current = refreshJobId; }, [refreshJobId]);
 
   useEffect(() => {
     (api.getKnowledgeStatus() as Promise<KnowledgeStatus>)
@@ -42,116 +35,74 @@ export function KnowledgeCard() {
       .catch((e: unknown) => setError(String(e)));
   }, []);
 
-useJobProgress(refreshJobIdRef, (ev) => {
+  useEffect(() => {
+    (api.getSettingsSnapshot() as Promise<SettingsSnapshot>)
+      .then((s) => setKSts2Path(s.knowledge.sts2DllPath))
+      .catch(() => {});
+  }, []);
+
+  useJobProgress(refreshJobIdRef, (ev) => {
     setRefreshStage(ev.stage);
     if (ev.message) setRefreshMsg(ev.message);
     if (ev.stage === "completed" || ev.stage === "failed" || ev.stage.includes("error")) {
       setRefreshBusy(false);
       void (async () => {
         try {
-          const next = (await api.getKnowledgeStatus()) as KnowledgeStatus;
-          setKnowledge(next);
-        } catch { /* 状态刷新失败不致命 */ }
+          setKnowledge((await api.getKnowledgeStatus()) as KnowledgeStatus);
+        } catch { /* ignore */ }
       })();
     }
   });
 
   async function handleRefresh() {
-    setError(null);
-    setRefreshMsg(null);
-    setRefreshStage("submitting");
-    setRefreshBusy(true);
+    setError(null); setRefreshBusy(true); setRefreshStage(null); setRefreshMsg(null);
     try {
-      const ack = (await api.submitKnowledgeRefreshJob({
-        force,
-      })) as SubmitJobAck;
+      const ack = (await api.submitKnowledgeRefreshJob({ force })) as SubmitJobAck;
       setRefreshJobId(ack.jobId);
-    } catch (e: unknown) {
-      setError(String(e));
-      setRefreshBusy(false);
-      setRefreshStage(null);
-    }
+    } catch (e: unknown) { setError(String(e)); setRefreshBusy(false); setRefreshStage(null); }
   }
 
   async function handleRecheck() {
-    setChecking(true);
-    setError(null);
-    try {
-      const next = (await api.checkKnowledgeStatus()) as KnowledgeStatus;
-      setKnowledge(next);
-    } catch (e: unknown) {
-      setError(String(e));
-    } finally {
-      setChecking(false);
-    }
+    setChecking(true); setError(null);
+    try { setKnowledge((await api.checkKnowledgeStatus()) as KnowledgeStatus); }
+    catch (e: unknown) { setError(String(e)); }
+    finally { setChecking(false); }
   }
 
   async function handleExport() {
-    if (!packPath.trim()) {
-      setPackMsg("先填写一个目标 .zip 路径");
-      return;
-    }
-    setPackBusy(true);
-    setPackMsg(null);
+    setPackMsg(null); setPackBusy(true);
     try {
-      const stats = (await api.exportKnowledgePack(
-        packPath.trim(),
-      )) as ExportPackStats;
-      setPackMsg(
-        `✓ 导出成功：${stats.gameFiles} game 文件 + ${stats.baselibIncluded ? "baselib" : "无 baselib"}，${stats.zipBytes} bytes → ${stats.outputPath}`,
-      );
-    } catch (e: unknown) {
-      setPackMsg(`✗ 导出失败：${String(e)}`);
-    } finally {
-      setPackBusy(false);
-    }
+      const s = (await api.exportKnowledgePack(packPath, "AgentTheSpire-Rust")) as ExportPackStats;
+      setPackMsg(`Exported ${s.gameFiles} game + ${s.baselibIncluded ? "baselib" : "no baselib"} → ${packPath}`);
+    } catch (e: unknown) { setError(String(e)); }
+    finally { setPackBusy(false); }
   }
 
   async function handleImport() {
-    if (!packPath.trim()) {
-      setPackMsg("先填写一个源 .zip 路径");
-      return;
-    }
-    setPackBusy(true);
-    setPackMsg(null);
+    setPackMsg(null); setPackBusy(true);
     try {
-      const stats = (await api.importKnowledgePack(
-        packPath.trim(),
-        overwriteOnImport,
-      )) as ImportPackStats;
-      setPackMsg(
-        `✓ 导入成功：${stats.gameFilesWritten} game 文件 + baselib=${stats.baselibWritten} + manifest=${stats.manifestReplaced}`,
-      );
-      const next = (await api.getKnowledgeStatus()) as KnowledgeStatus;
-      setKnowledge(next);
-    } catch (e: unknown) {
-      setPackMsg(`✗ 导入失败：${String(e)}`);
-    } finally {
-      setPackBusy(false);
-    }
+      const s = (await api.importKnowledgePack(packPath, overwriteOnImport)) as ImportPackStats;
+      setPackMsg(`Imported ${s.gameFilesWritten} files from ${packPath}`);
+      void handleRecheck();
+    } catch (e: unknown) { setError(String(e)); }
+    finally { setPackBusy(false); }
   }
 
   const overallVariant =
-    knowledge?.overall === "fresh"
-      ? "ok"
-      : knowledge?.overall === "stale"
-        ? "warn"
-        : "error";
+    knowledge?.overall === "fresh" ? "ok" : knowledge?.overall === "stale" ? "warn" : "error";
+
+  if (!__IS_TAURI__) {
+    return <Card eyebrow="knowledge · sts2 sources" title="Knowledge" subtitle="desktop-only" />;
+  }
 
   return (
     <Card
       eyebrow="knowledge · sts2 sources"
       title="Knowledge"
-      actions={
-        <Button size="sm" onClick={handleRecheck} disabled={checking}>
-          {checking ? "Checking…" : "Re-check"}
-        </Button>
-      }
+      actions={<Button size="sm" onClick={handleRecheck} disabled={checking}>{checking ? "Checking…" : "Re-check"}</Button>}
     >
       {error && <Notice variant="error" title={`Error: ${error}`} />}
-      {!error && !knowledge && (
-        <p style={{ color: "var(--ink-mute)", fontSize: "13px" }}>Loading…</p>
-      )}
+      {!error && !knowledge && <p style={{ color: "var(--ink-mute)", fontSize: "13px" }}>Loading…</p>}
 
       {knowledge && (
         <>
@@ -167,169 +118,76 @@ useJobProgress(refreshJobIdRef, (ev) => {
               { label: "Game", obj: knowledge.game },
               { label: "BaseLib", obj: knowledge.baselib },
             ].map(({ label, obj }) => (
-              <div
-                key={label}
-                className="p-3"
-                style={{
-                  background: "var(--paper)",
-                  border: "1px solid var(--rule-soft)",
-                  borderRadius: "4px",
-                }}
-              >
-                <p
-                  style={{
-                    fontFamily: '"JetBrains Mono", monospace',
-                    fontSize: "10px",
-                    letterSpacing: "0.16em",
-                    textTransform: "uppercase",
-                    color: "var(--ink-mute)",
-                    marginBottom: "6px",
-                  }}
-                >
+              <div key={label} className="p-3" style={{ background: "var(--paper)", border: "1px solid var(--rule-soft)", borderRadius: "4px" }}>
+                <p style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: "10px", letterSpacing: "0.16em", textTransform: "uppercase", color: "var(--ink-mute)", marginBottom: "6px" }}>
                   {label}
                 </p>
-                <p style={{ fontSize: "12px" }}>
-                  <span style={{ color: "var(--ink-mute)" }}>mode </span>
-                  <code>{obj.sourceMode}</code>
-                </p>
-                <p style={{ fontSize: "12px" }}>
-                  <span style={{ color: "var(--ink-mute)" }}>has .cs </span>
-                  <code>{String(obj.hasDecompiledSources)}</code>
-                </p>
+                {obj ? (
+                  <>
+                    <p style={{ fontSize: "12px" }}><span style={{ color: "var(--ink-mute)" }}>mode </span>{obj.sourceMode}</p>
+                    <p style={{ fontSize: "12px" }}><span style={{ color: "var(--ink-mute)" }}>decompiled </span>{String(obj.hasDecompiledSources)}</p>
+                  </>
+                ) : (
+                  <p style={{ fontSize: "12px", color: "var(--ink-mute)" }}>absent</p>
+                )}
               </div>
             ))}
           </div>
 
-          {knowledge.warnings.length > 0 && (
-            <Notice variant="warn" title="Warnings" className="mb-3">
-              <ul className="space-y-0.5">
-                {knowledge.warnings.map((w, i) => (
-                  <li key={i} style={{ fontSize: "12px" }}>• {w}</li>
-                ))}
-              </ul>
-            </Notice>
+          {knowledge.embeddedTemplates && knowledge.embeddedTemplates.length > 0 && (
+            <p style={{ fontSize: "11.5px", color: "var(--ink-mute)", marginBottom: "12px" }}>
+              embedded templates: {knowledge.embeddedTemplates.join(", ")}
+            </p>
           )}
 
-          <p
-            style={{ fontSize: "11.5px", color: "var(--ink-mute)" }}
-            className="mb-1"
-          >
-            Embedded templates ({knowledge.embeddedTemplates.length}):
-          </p>
-          <p
-            style={{
-              fontFamily: '"JetBrains Mono", monospace',
-              fontSize: "11px",
-              color: "var(--ink-soft)",
-            }}
-          >
-            {knowledge.embeddedTemplates.join(", ")}
-          </p>
-
-          {__IS_TAURI__ && (
-            <CardSection title="Refresh (ilspycmd)">
-              <p
-                style={{ fontSize: "11.5px", color: "var(--ink-mute)" }}
-                className="mb-2"
-              >
-                需要本机装了 <code>ilspycmd</code>（<code>dotnet tool install -g ilspycmd</code>）。
-              </p>
-              <div className="space-y-2">
-                <div
-                  className="flex flex-wrap items-center gap-4"
-                  style={{ fontSize: "13px" }}
-                >
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={force}
-                      onChange={(e) => setForce(e.target.checked)}
-                    />
-                    <span>force（跳过 manifest 缓存）</span>
-                  </label>
-                </div>
-                <p
-                  style={{ fontSize: "11.5px", color: "var(--ink-mute)" }}
-                >
-                  tip: 在 Settings &gt; Knowledge 中配置 sts2.dll 路径后一键刷新
-                </p>
-                <Button
-                  variant="accent"
-                  size="sm"
-                  onClick={handleRefresh}
-                  disabled={refreshBusy}
-                >
-                  {refreshBusy ? "Refreshing…" : "Refresh game library"}
-                </Button>
-                {(refreshStage || refreshMsg) && (
-                  <p style={{ fontSize: "11.5px" }}>
-                    <span style={{ color: "var(--ink-mute)" }}>stage </span>
-                    <code>{refreshStage}</code>
-                    {refreshMsg && (
-                      <span
-                        className="break-all ml-2"
-                        style={{ color: "var(--ink-mute)" }}
-                      >
-                        — {refreshMsg}
-                      </span>
-                    )}
-                  </p>
-                )}
-              </div>
-            </CardSection>
-          )}
-
-          {__IS_TAURI__ && (
-            <CardSection title="Knowledge pack">
-              <div className="space-y-2">
-                <Field label="ZIP 路径（导出目标 / 导入源）">
-                  <input
-                    value={packPath}
-                    onChange={(e) => setPackPath(e.target.value)}
-                    placeholder="E:/share/sts2-knowledge.zip"
-                    className="input-mono"
-                  />
-                </Field>
-                <label
-                  className="flex items-center gap-2"
-                  style={{ fontSize: "13px" }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={overwriteOnImport}
-                    onChange={(e) => setOverwriteOnImport(e.target.checked)}
-                  />
-                  <span>导入时覆盖现有 game/baselib（默认拒绝避免误操作）</span>
-                </label>
+          <CardSection title="反编译源 (sts2.dll)">
+            {kSts2Editing ? (
+              <>
                 <div className="flex gap-2">
-                  <Button
-                    variant="accent"
-                    size="sm"
-                    onClick={handleExport}
-                    disabled={packBusy}
-                  >
-                    Export
-                  </Button>
-                  <Button
-                    variant="accent"
-                    size="sm"
-                    onClick={handleImport}
-                    disabled={packBusy}
-                  >
-                    Import
-                  </Button>
+                  <input value={kSts2Path} onChange={(e) => setKSts2Path(e.target.value)} placeholder="sts2.dll 完整路径" className="input-mono flex-1" />
+                  <Button size="sm" onClick={async () => {
+                    try { const f = await api.discoverSts2Dll() as string | null; if (f) setKSts2Path(f); else setError("未自动发现 sts2.dll"); } catch (e) { setError(String(e)); }
+                  }}>🔍</Button>
                 </div>
-                {packMsg && (
-                  <p
-                    className="whitespace-pre-wrap break-all"
-                    style={{ fontSize: "11.5px" }}
-                  >
-                    {packMsg}
-                  </p>
-                )}
-              </div>
-            </CardSection>
-          )}
+                <div className="flex gap-2 mt-2">
+                  <Button variant="success" size="sm" onClick={async () => {
+                    try { await api.saveSettingsPatch({ knowledge: { sts2_dll_path: kSts2Path } }); setKSts2Editing(false); } catch (e) { setError(String(e)); }
+                  }}>Save</Button>
+                  <Button size="sm" onClick={async () => {
+                    setKSts2Editing(false);
+                    try { const s = await api.getSettingsSnapshot() as SettingsSnapshot; setKSts2Path(s.knowledge.sts2DllPath); } catch {}
+                  }}>Cancel</Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <code className="break-all" style={{ fontSize: "12px" }}>{kSts2Path || "<not set>"}</code>
+                <div className="mt-2"><Button size="sm" onClick={() => setKSts2Editing(true)}>Edit</Button></div>
+              </>
+            )}
+          </CardSection>
+
+          <CardSection title="刷新 & 导出 / 导入">
+            <div className="flex items-center gap-3 mb-3">
+              <label className="flex items-center gap-2" style={{ fontSize: "13px" }}>
+                <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} /> force
+              </label>
+              <Button variant="accent" onClick={() => void handleRefresh()} disabled={refreshBusy}>
+                {refreshBusy ? (refreshStage ?? "Refreshing…") : "刷新知识库"}
+              </Button>
+              {refreshMsg && <span style={{ fontSize: "12px", color: "var(--ink-mute)" }}>{refreshMsg}</span>}
+            </div>
+
+            <div className="flex items-center gap-3 mb-3">
+              <input value={packPath} onChange={(e) => setPackPath(e.target.value)} placeholder="导出 / 导入 .zip 路径" className="input-mono flex-1" />
+              <label className="flex items-center gap-2" style={{ fontSize: "13px", whiteSpace: "nowrap" }}>
+                <input type="checkbox" checked={overwriteOnImport} onChange={(e) => setOverwriteOnImport(e.target.checked)} /> overwrite
+              </label>
+              <Button onClick={() => void handleExport()} disabled={!packPath || packBusy}>Export</Button>
+              <Button variant="accent" onClick={() => void handleImport()} disabled={!packPath || packBusy}>Import</Button>
+            </div>
+            {packMsg && <p style={{ fontSize: "12px", color: "var(--jade)" }}>{packMsg}</p>}
+          </CardSection>
         </>
       )}
     </Card>

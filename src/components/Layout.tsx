@@ -14,7 +14,6 @@ const NAV_LINKS = [
   { to: "/batch", label: "Batch" },
   { to: "/log", label: "Log Analysis" },
   { to: "/devtools", label: "DevTools" },
-  { to: "/settings", label: "Settings" },
 ];
 
 const THEMES = ["vermilion", "indigo", "jade", "ink"] as const;

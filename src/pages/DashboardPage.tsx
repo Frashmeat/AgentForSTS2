@@ -19,12 +19,12 @@ function StatusBar() {
   return (
     <div className="mt-6 pt-4" style={{ borderTop: "1px solid var(--rule-soft)" }}>
       <div className="flex flex-wrap gap-3 items-center" style={{ fontSize: "12px" }}>
-        <Link to="/settings" style={{ textDecoration: "none" }}>
+        <Link to="/system?tab=config" style={{ textDecoration: "none" }}>
           <Badge variant={health?.readiness?.llmConfigured ? "ok" : "error"}>
             {health?.readiness?.llmConfigured ? "LLM" : "LLM ⚠"}
           </Badge>
         </Link>
-        <Link to="/settings" style={{ textDecoration: "none" }}>
+        <Link to="/system?tab=config" style={{ textDecoration: "none" }}>
           <Badge variant={health?.readiness?.imageGenConfigured ? "ok" : "muted"}>
             {health?.readiness?.imageGenConfigured ? "ImageGen" : "ImageGen ⚠"}
           </Badge>

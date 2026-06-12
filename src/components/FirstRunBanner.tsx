@@ -42,8 +42,8 @@ export function FirstRunBanner() {
     {
       ok: health?.readiness.llmConfigured ?? false,
       label: "LLM api_key 配置",
-      hint: "去 Settings → LLM 区域填 provider / model / base_url / api_key",
-      to: "/settings",
+      hint: "去 System → 配置 页填 provider / model / base_url / api_key",
+      to: "/system?tab=config",
     },
     {
       ok: caps?.ilspycmdFound ?? false,
