@@ -68,6 +68,7 @@ pub fn create_project(
 #[tauri::command]
 pub fn open_project(
     app: tauri::AppHandle,
+    config: State<'_, AppConfig>,
     paths: State<'_, AppPaths>,
     active: State<'_, ActiveProject>,
     path: String,
@@ -78,6 +79,18 @@ pub fn open_project(
     let snap = snapshot(&folder);
     record_recent(&paths, folder.path(), folder.meta())?;
     *lock_active(&active)? = Some(folder);
+
+    // 老工程可能没有 local.props 或为模板占位符——自动从 knowledge manifest 补齐
+    let kp = ats_core::knowledge::KnowledgePaths::from_runtime_dir(
+        &config.status_snapshot().runtime_dir(),
+    );
+    let target = p.join("local.props");
+    if !target.exists()
+        && let Err(warn) = try_generate_local_props(&p, &kp.manifest_path)
+    {
+        eprintln!("local.props auto-generate skipped on open: {warn}");
+    }
+
     app.emit("project-changed", Some(snap.clone())).ok();
     Ok(snap)
 }
