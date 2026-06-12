@@ -25,6 +25,7 @@ pub struct SettingsSnapshot {
     pub image_gen: ImageGenSnapshot,
     pub runtime_workstation: RuntimeSnapshot,
     pub runtime_web: RuntimeSnapshot,
+    pub knowledge: KnowledgeSnapshot,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -47,6 +48,12 @@ pub struct ImageGenSnapshot {
     pub protocol: String,
     pub api_key_masked: String,
     pub api_key_configured: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KnowledgeSnapshot {
+    pub sts2_dll_path: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -84,6 +91,9 @@ pub fn get_settings_snapshot(config: tauri::State<'_, AppConfig>) -> SettingsSna
         },
         runtime_workstation: snapshot_runtime(&s.runtime.workstation),
         runtime_web: snapshot_runtime(&s.runtime.web),
+        knowledge: KnowledgeSnapshot {
+            sts2_dll_path: s.knowledge.sts2_dll_path.clone(),
+        },
     }
 }
 
@@ -93,6 +103,8 @@ pub fn get_settings_snapshot(config: tauri::State<'_, AppConfig>) -> SettingsSna
 pub struct SettingsPatch {
     pub llm: Option<LlmPatch>,
     pub image_gen: Option<ImageGenPatch>,
+    pub runtime_workstation: Option<RuntimePatch>,
+    pub knowledge: Option<KnowledgePatch>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -116,6 +128,17 @@ pub struct ImageGenPatch {
     pub api_key: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default, rename_all = "snake_case")]
+pub struct RuntimePatch {
+    pub github_token: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default, rename_all = "snake_case")]
+pub struct KnowledgePatch {
+    pub sts2_dll_path: Option<String>,
+}
 /// 把 patch 合并进当前内存里的 settings + 写回 config.json，然后热替换。
 ///
 /// 设计：
@@ -161,6 +184,16 @@ pub fn save_settings_patch(
         if let Some(v) = p.api_key {
             new_settings.image_gen.api_key = v;
         }
+    }
+    if let Some(p) = patch.runtime_workstation
+        && let Some(v) = p.github_token
+    {
+        new_settings.runtime.workstation.github_token = v;
+    }
+    if let Some(p) = patch.knowledge
+        && let Some(v) = p.sts2_dll_path
+    {
+        new_settings.knowledge.sts2_dll_path = v;
     }
 
     let status = config.status_snapshot();
@@ -240,6 +273,11 @@ fn masked_secret(raw: &str) -> String {
     format!("{prefix}...{suffix} ({n} chars)")
 }
 
+
+#[tauri::command]
+pub fn discover_sts2_dll() -> Result<Option<String>, String> {
+    Ok(ats_core::platform::discovery::discover_sts2_dll())
+}
 #[cfg(test)]
 mod tests {
     use super::*;

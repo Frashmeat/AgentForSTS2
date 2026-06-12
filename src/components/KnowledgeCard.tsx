@@ -25,10 +25,6 @@ export function KnowledgeCard() {
   const [packBusy, setPackBusy] = useState(false);
   const [overwriteOnImport, setOverwriteOnImport] = useState(false);
 
-  const [dllPath, setDllPath] = useState("");
-  // 默认关闭：baselib-fetch 走 GitHub API，国内网络经常卡住；
-  // 用户需要时勾上即可。
-  const [includeBaselib, setIncludeBaselib] = useState(false);
   const [force, setForce] = useState(false);
   const [refreshBusy, setRefreshBusy] = useState(false);
   const [refreshStage, setRefreshStage] = useState<string | null>(null);
@@ -61,19 +57,13 @@ useJobProgress(refreshJobIdRef, (ev) => {
   });
 
   async function handleRefresh() {
-    if (!dllPath.trim()) {
-      setError("先填 sts2.dll 路径");
-      return;
-    }
     setError(null);
     setRefreshMsg(null);
     setRefreshStage("submitting");
     setRefreshBusy(true);
     try {
       const ack = (await api.submitKnowledgeRefreshJob({
-        sts2_dll_path: dllPath.trim(),
         force,
-        include_baselib: includeBaselib,
       })) as SubmitJobAck;
       setRefreshJobId(ack.jobId);
     } catch (e: unknown) {
@@ -245,29 +235,10 @@ useJobProgress(refreshJobIdRef, (ev) => {
                 需要本机装了 <code>ilspycmd</code>（<code>dotnet tool install -g ilspycmd</code>）。
               </p>
               <div className="space-y-2">
-                <Field label="sts2.dll 路径">
-                  <input
-                    value={dllPath}
-                    onChange={(e) => setDllPath(e.target.value)}
-                    placeholder="C:/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2/data_sts2_windows_x86_64/sts2.dll"
-                    className="input-mono"
-                  />
-                </Field>
                 <div
                   className="flex flex-wrap items-center gap-4"
                   style={{ fontSize: "13px" }}
                 >
-                  <label
-                    className="flex items-center gap-2"
-                    title="勾上会从 GitHub 拉 BaseLib.dll —— 国内网络可能卡住"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={includeBaselib}
-                      onChange={(e) => setIncludeBaselib(e.target.checked)}
-                    />
-                    <span>include_baselib（需访问 GitHub）</span>
-                  </label>
                   <label className="flex items-center gap-2">
                     <input
                       type="checkbox"
@@ -277,6 +248,11 @@ useJobProgress(refreshJobIdRef, (ev) => {
                     <span>force（跳过 manifest 缓存）</span>
                   </label>
                 </div>
+                <p
+                  style={{ fontSize: "11.5px", color: "var(--ink-mute)" }}
+                >
+                  tip: 在 Settings &gt; Knowledge 中配置 sts2.dll 路径后一键刷新
+                </p>
                 <Button
                   variant="accent"
                   size="sm"

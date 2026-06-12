@@ -140,6 +140,12 @@ pub async fn submit_knowledge_refresh_job(
         )
         .map_err(|e| format!("init baselib source: {e}"))?,
     );
+    let sts2_dll_path = PathBuf::from(&config.settings_snapshot().knowledge.sts2_dll_path);
+    if sts2_dll_path.as_os_str().is_empty() {
+        return Err("knowledge.sts2_dll_path is not set — configure in Settings > Knowledge".into());
+    }
+    let mut request = request;
+    request.sts2_dll_path = sts2_dll_path;
     let job_id = service
         .submit_knowledge_refresh(request, knowledge_paths, baselib_source, sink)
         .await

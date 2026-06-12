@@ -6,7 +6,7 @@
 //   3. Save → 调 saveSettingsPatch（后端原子写 config.json + replace in-memory）
 //   4. 成功 → 退回 view 模式，重新拉 snapshot 显示
 //
-// 复杂的 runtime / auth 段还是引导用户用 Open in OS editor 改文件。
+// 所有 config.json 字段都在此可编辑（llm / image_gen / runtime_workstation / knowledge）。
 
 import { useEffect, useState } from "react";
 import {
@@ -26,16 +26,15 @@ function StatusDot({ ok, label }: { ok: boolean; label: string }) {
   return (
     <span className="inline-flex items-center gap-2" style={{ fontSize: "13px" }}>
       <span
+        className="inline-block"
         style={{
-          color: ok ? "var(--jade)" : "var(--gold)",
-          fontFamily: '"JetBrains Mono", monospace',
-          width: "12px",
-          textAlign: "center",
+          width: 8,
+          height: 8,
+          borderRadius: "50%",
+          background: ok ? "var(--jade)" : "var(--accent)",
         }}
-      >
-        {ok ? "✓" : "○"}
-      </span>
-      <span>{label}</span>
+      />
+      {label}
     </span>
   );
 }
@@ -53,8 +52,11 @@ interface FormState {
   igProtocol: string;
   igApiKey: string;
   igApiKeyTouched: boolean;
+  rtGithubToken: string;
+  rtGithubTokenTouched: boolean;
+  kSts2DllPath: string;
+  kSts2DllPathTouched: boolean;
 }
-
 
 function formFromSnapshot(s: SettingsSnapshot): FormState {
   return {
@@ -70,6 +72,10 @@ function formFromSnapshot(s: SettingsSnapshot): FormState {
     igProtocol: s.imageGen.protocol || "auto",
     igApiKey: "",
     igApiKeyTouched: false,
+    rtGithubToken: s.runtimeWorkstation.githubToken,
+    rtGithubTokenTouched: false,
+    kSts2DllPath: s.knowledge.sts2DllPath,
+    kSts2DllPathTouched: false,
   };
 }
 
@@ -90,6 +96,13 @@ function buildPatch(form: FormState, original: SettingsSnapshot): SettingsPatch 
   if (form.igProtocol !== (original.imageGen.protocol || "auto")) ig.protocol = form.igProtocol;
   if (form.igApiKeyTouched) ig.api_key = form.igApiKey;
   if (Object.keys(ig).length > 0) patch.image_gen = ig;
+
+  if (form.rtGithubTokenTouched) {
+    patch.runtime_workstation = { github_token: form.rtGithubToken };
+  }
+  if (form.kSts2DllPathTouched) {
+    patch.knowledge = { sts2_dll_path: form.kSts2DllPath };
+  }
   return patch;
 }
 
@@ -134,7 +147,7 @@ export function SettingsPage() {
   async function handleSave() {
     if (!form || !snap) return;
     const patch = buildPatch(form, snap);
-    if (!patch.llm && !patch.image_gen) {
+    if (!patch.llm && !patch.image_gen && !patch.runtime_workstation && !patch.knowledge) {
       setSavedMsg("没有改动");
       return;
     }
@@ -177,7 +190,7 @@ export function SettingsPage() {
       <PageHero
         eyebrow="settings · runtime config"
         title="Settings"
-        subtitle="LLM / image_gen 可在 UI 内编辑（保存即热替换）；其它字段请用 Open in OS editor。"
+        subtitle="所有运行时配置均可在 UI 编辑（保存即热替换）"
         actions={
           editing ? (
             <>
@@ -263,74 +276,69 @@ export function SettingsPage() {
               )}
             </Card>
 
-            <Card eyebrow="provider · llm" title="LLM">
+            <Card eyebrow="provider · llm" title="llm">
               {editing ? (
-                <div className="space-y-3">
-                  <Field label="provider">
-                    <input
-                      value={form.llmProvider}
-                      onChange={(e) =>
-                        setForm({ ...form, llmProvider: e.target.value })
-                      }
-                      placeholder="anthropic / openai / openai-compat"
-                      className="input-mono"
-                    />
-                  </Field>
-                  <Field label="model">
-                    <input
-                      value={form.llmModel}
-                      onChange={(e) =>
-                        setForm({ ...form, llmModel: e.target.value })
-                      }
-                      placeholder="claude-sonnet-4-6 / gpt-4o ..."
-                      className="input-mono"
-                    />
-                  </Field>
-                  <Field label="base_url">
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="provider" hint="anthropic / openai / new_api …">
+                      <input
+                        value={form.llmProvider}
+                        onChange={(e) =>
+                          setForm({ ...form, llmProvider: e.target.value })
+                        }
+                        placeholder="openai"
+                        className="input-mono"
+                      />
+                    </Field>
+                    <Field label="model" hint="gpt-4o-mini / claude-sonnet-4-6 / deepseek-v4 …">
+                      <input
+                        value={form.llmModel}
+                        onChange={(e) =>
+                          setForm({ ...form, llmModel: e.target.value })
+                        }
+                        placeholder="gpt-4o-mini"
+                        className="input-mono"
+                      />
+                    </Field>
+                  </div>
+                  <Field label="base_url" hint="留空走官方端点">
                     <input
                       value={form.llmBaseUrl}
                       onChange={(e) =>
                         setForm({ ...form, llmBaseUrl: e.target.value })
                       }
-                      placeholder="https://api.anthropic.com 或代理 URL"
+                      placeholder="https://api.openai.com"
                       className="input-mono"
                     />
                   </Field>
                   <Field
                     label="api_key"
-                    hint="留空 = 不改；输入则替换"
+                    hint="留空 = 不改"
                   >
                     <input
-                      type="password"
                       value={form.llmApiKey}
-                      onChange={(e) =>
+                      onChange={(e) => {
                         setForm({
                           ...form,
                           llmApiKey: e.target.value,
                           llmApiKeyTouched: true,
-                        })
-                      }
-                      placeholder={
-                        snap.llm.apiKeyConfigured
-                          ? "(已配置 — 留空保持原值)"
-                          : "(未配置)"
-                      }
+                        });
+                      }}
+                      placeholder={snap.llm.apiKeyConfigured ? "（未改动 — 保留原值）" : ""}
                       className="input-mono"
                     />
                   </Field>
-                </div>
+                </>
               ) : (
                 <KVList>
                   <KV k="provider">
-                    <code>{snap.llm.provider || "<empty>"}</code>
+                    <code>{snap.llm.provider || "<default>"}</code>
                   </KV>
                   <KV k="model">
-                    <code>{snap.llm.model || "<empty>"}</code>
+                    <code>{snap.llm.model || "<default>"}</code>
                   </KV>
                   <KV k="base_url">
-                    <code className="break-all">
-                      {snap.llm.baseUrl || "<empty>"}
-                    </code>
+                    <code>{snap.llm.baseUrl || "<official endpoint>"}</code>
                   </KV>
                   <KV k="api_key">
                     <code>{snap.llm.apiKeyMasked}</code>
@@ -339,58 +347,63 @@ export function SettingsPage() {
               )}
               <div className="mt-3">
                 {snap.llm.apiKeyConfigured ? (
-                  <Badge variant="ok">api_key configured</Badge>
+                  <Badge variant="ok">api_key configured · all LLM tasks ready</Badge>
                 ) : (
-                  <Badge variant="warn">api_key missing</Badge>
+                  <Badge variant="warn">api_key missing · LLM tasks disabled</Badge>
                 )}
               </div>
             </Card>
 
             <Card eyebrow="provider · image_gen" title="image_gen">
               {editing ? (
-                <div className="space-y-3">
-                  <Field label="provider">
-                    <input
-                      value={form.igProvider}
-                      onChange={(e) =>
-                        setForm({ ...form, igProvider: e.target.value })
-                      }
-                      placeholder="openai-compat / dalle …"
-                      className="input-mono"
-                    />
-                  </Field>
-                  <Field label="model">
-                    <input
-                      value={form.igModel}
-                      onChange={(e) =>
-                        setForm({ ...form, igModel: e.target.value })
-                      }
-                      placeholder="dall-e-3 / gpt-image-1 …"
-                      className="input-mono"
-                    />
-                  </Field>
-                  <Field label="base_url">
-                    <input
-                      value={form.igBaseUrl}
-                      onChange={(e) =>
-                        setForm({ ...form, igBaseUrl: e.target.value })
-                      }
-                      className="input-mono"
-                    />
-                  </Field>
-                  <Field
-                    label="size"
-                    hint="1024x1024 / 1792x1024 / 512x512 …"
-                  >
-                    <input
-                      value={form.igSize}
-                      onChange={(e) =>
-                        setForm({ ...form, igSize: e.target.value })
-                      }
-                      placeholder="1024x1024"
-                      className="input-mono"
-                    />
-                  </Field>
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="provider" hint="openai / new_api …">
+                      <input
+                        value={form.igProvider}
+                        onChange={(e) =>
+                          setForm({ ...form, igProvider: e.target.value })
+                        }
+                        placeholder="openai"
+                        className="input-mono"
+                      />
+                    </Field>
+                    <Field label="model" hint="dall-e-3 / nano-banana …">
+                      <input
+                        value={form.igModel}
+                        onChange={(e) =>
+                          setForm({ ...form, igModel: e.target.value })
+                        }
+                        placeholder="dall-e-3"
+                        className="input-mono"
+                      />
+                    </Field>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="base_url" hint="留空走官方端点">
+                      <input
+                        value={form.igBaseUrl}
+                        onChange={(e) =>
+                          setForm({ ...form, igBaseUrl: e.target.value })
+                        }
+                        placeholder="https://api.openai.com"
+                        className="input-mono"
+                      />
+                    </Field>
+                    <Field
+                      label="size"
+                      hint="1024x1024 / 1792x1024 / 512x512 …"
+                    >
+                      <input
+                        value={form.igSize}
+                        onChange={(e) =>
+                          setForm({ ...form, igSize: e.target.value })
+                        }
+                        placeholder="1024x1024"
+                        className="input-mono"
+                      />
+                    </Field>
+                  </div>
                   <Field
                     label="protocol"
                     hint="auto 从模型名推断；images_api 走 DALL-E 标准；chat_completions 走 Gemini/Nano Banana"
@@ -412,36 +425,29 @@ export function SettingsPage() {
                     hint="同 LLM 规则"
                   >
                     <input
-                      type="password"
                       value={form.igApiKey}
-                      onChange={(e) =>
+                      onChange={(e) => {
                         setForm({
                           ...form,
                           igApiKey: e.target.value,
                           igApiKeyTouched: true,
-                        })
-                      }
-                      placeholder={
-                        snap.imageGen.apiKeyConfigured
-                          ? "(已配置 — 留空保持原值)"
-                          : "(未配置)"
-                      }
+                        });
+                      }}
+                      placeholder={snap.imageGen.apiKeyConfigured ? "（未改动 — 保留原值）" : ""}
                       className="input-mono"
                     />
                   </Field>
-                </div>
+                </>
               ) : (
                 <KVList>
                   <KV k="provider">
-                    <code>{snap.imageGen.provider || "<empty>"}</code>
+                    <code>{snap.imageGen.provider || "<default>"}</code>
                   </KV>
                   <KV k="model">
-                    <code>{snap.imageGen.model || "<empty>"}</code>
+                    <code>{snap.imageGen.model || "<default>"}</code>
                   </KV>
                   <KV k="base_url">
-                    <code className="break-all">
-                      {snap.imageGen.baseUrl || "<empty>"}
-                    </code>
+                    <code>{snap.imageGen.baseUrl || "<official endpoint>"}</code>
                   </KV>
                   <KV k="size">
                     <code>{snap.imageGen.size || "<default 1024x1024>"}</code>
@@ -463,56 +469,106 @@ export function SettingsPage() {
               </div>
             </Card>
 
-            <Card eyebrow="runtime · read-only" title="Runtime">
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  { label: "Workstation (desktop)", rt: snap.runtimeWorkstation },
-                  { label: "Web (HTTP server)", rt: snap.runtimeWeb },
-                ].map(({ label, rt }) => (
-                  <div
-                    key={label}
-                    className="p-3"
-                    style={{
-                      background: "var(--paper)",
-                      border: "1px solid var(--rule-soft)",
-                      borderRadius: "4px",
+            <Card eyebrow="runtime · editable" title="Runtime">
+              {editing ? (
+                <Field
+                  label="github_token"
+                  hint="提供后 knowledge_refresh 的 baselib 下载走认证（5000 req/h），避免 GitHub 未认证限流"
+                >
+                  <input
+                    type="password"
+                    value={form.rtGithubToken}
+                    onChange={(e) => {
+                      setForm({
+                        ...form,
+                        rtGithubToken: e.target.value,
+                        rtGithubTokenTouched: true,
+                      });
                     }}
+                    placeholder={snap.runtimeWorkstation.githubToken ? "（未改动 — 保留原值）" : ""}
+                    className="input-mono"
+                  />
+                </Field>
+              ) : (
+                <KVList>
+                  <KV k="github_token">
+                    <code>
+                      {snap.runtimeWorkstation.githubToken || "<not set>"}
+                    </code>
+                  </KV>
+                  <KV k="host:port">
+                    <code>
+                      {snap.runtimeWorkstation.host}:{snap.runtimeWorkstation.port}
+                    </code>
+                  </KV>
+                  <KV k="mount_frontend">
+                    {String(snap.runtimeWorkstation.mountFrontend)}
+                  </KV>
+                  <KV k="requires_database">
+                    {String(snap.runtimeWorkstation.requiresDatabase)}
+                  </KV>
+                </KVList>
+              )}
+              <p className="mt-2" style={{ fontSize: "11.5px", color: "var(--ink-mute)" }}>
+                host/port/CORS 需重启后生效；github_token 保存即热替换。
+              </p>
+            </Card>
+
+            <Card eyebrow="knowledge · paths" title="Knowledge">
+              {editing ? (
+                <>
+                  <Field
+                    label="sts2.dll 路径"
+                    hint="Slay the Spire 2 安装目录下的 sts2.dll 路径，用于反编译游戏代码生成知识库"
                   >
-                    <p
-                      style={{
-                        fontFamily: '"JetBrains Mono", monospace',
-                        fontSize: "10px",
-                        letterSpacing: "0.16em",
-                        textTransform: "uppercase",
-                        color: "var(--ink-mute)",
-                        marginBottom: "6px",
-                      }}
-                    >
-                      {label}
-                    </p>
-                    <p style={{ fontSize: "12px" }}>
-                      <span style={{ color: "var(--ink-mute)" }}>host:port </span>
-                      <code>
-                        {rt.host}:{rt.port}
-                      </code>
-                    </p>
-                    <p style={{ fontSize: "12px" }}>
-                      <span style={{ color: "var(--ink-mute)" }}>mount_frontend </span>
-                      {String(rt.mountFrontend)}
-                    </p>
-                    <p style={{ fontSize: "12px" }}>
-                      <span style={{ color: "var(--ink-mute)" }}>requires_database </span>
-                      {String(rt.requiresDatabase)}
-                    </p>
-                  </div>
-                ))}
-              </div>
-              <p
-                className="mt-3"
-                style={{ fontSize: "11.5px", color: "var(--ink-mute)" }}
-              >
-                要改 host/port/CORS 用 Open in OS editor，UI 内只暴露 LLM /
-                image_gen 字段。
+                    <div className="flex gap-2">
+                      <input
+                        value={form.kSts2DllPath}
+                        onChange={(e) => {
+                          setForm({
+                            ...form,
+                            kSts2DllPath: e.target.value,
+                            kSts2DllPathTouched: true,
+                          });
+                        }}
+                        placeholder={snap.knowledge.sts2DllPath || "e.g. J:/SteamLibrary/steamapps/common/Slay the Spire 2/data_sts2_windows_x86_64/sts2.dll"}
+                        className="input-mono flex-1"
+                      />
+                      <Button
+                        size="sm"
+                        onClick={async () => {
+                          try {
+                            const found = await api.discoverSts2Dll();
+                            if (found) {
+                              setForm({
+                                ...form,
+                                kSts2DllPath: found,
+                                kSts2DllPathTouched: true,
+                              });
+                            } else {
+                              setError("未自动发现 sts2.dll，请手动填写路径");
+                            }
+                          } catch (e: unknown) {
+                            setError(`探测失败: ${String(e)}`);
+                          }
+                        }}
+                      >
+                        🔍 Detect
+                      </Button>
+                    </div>
+                  </Field>
+                </>
+              ) : (
+                <KVList>
+                  <KV k="sts2.dll">
+                    <code className="break-all">
+                      {snap.knowledge.sts2DllPath || "<not set — knowledge_refresh 不可用>"}
+                    </code>
+                  </KV>
+                </KVList>
+              )}
+              <p className="mt-2" style={{ fontSize: "11.5px", color: "var(--ink-mute)" }}>
+                配置后请到 Dashboard → Knowledge 卡点击「刷新知识库」运行反编译。
               </p>
             </Card>
           </>

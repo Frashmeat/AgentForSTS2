@@ -54,11 +54,11 @@ pub fn create_project(
     record_recent(&paths, folder.path(), folder.meta())?;
     *lock_active(&active)? = Some(folder);
 
-    // 尝试从 knowledge manifest 派生 STS2 路径并自动生成 local.props
-    let kp = ats_core::knowledge::KnowledgePaths::from_runtime_dir(
-        &config.status_snapshot().runtime_dir(),
-    );
-    if let Err(warn) = try_generate_local_props(Path::new(&snap.path), &kp.manifest_path) {
+    // 尝试从配置中的 STS2 DLL 路径自动生成 local.props
+    let sts2 = &config.settings_snapshot().knowledge.sts2_dll_path;
+    if !sts2.is_empty()
+        && let Err(warn) = try_generate_local_props(Path::new(&snap.path), sts2)
+    {
         eprintln!("local.props auto-generate skipped: {warn}");
     }
 
@@ -80,13 +80,10 @@ pub fn open_project(
     record_recent(&paths, folder.path(), folder.meta())?;
     *lock_active(&active)? = Some(folder);
 
-    // 老工程可能没有 local.props 或为模板占位符——自动从 knowledge manifest 补齐
-    let kp = ats_core::knowledge::KnowledgePaths::from_runtime_dir(
-        &config.status_snapshot().runtime_dir(),
-    );
-    let target = p.join("local.props");
-    if !target.exists()
-        && let Err(warn) = try_generate_local_props(&p, &kp.manifest_path)
+    // 老工程可能没有 local.props——自动从配置中的 STS2 DLL 路径补齐
+    let sts2 = &config.settings_snapshot().knowledge.sts2_dll_path;
+    if !sts2.is_empty()
+        && let Err(warn) = try_generate_local_props(&p, sts2)
     {
         eprintln!("local.props auto-generate skipped on open: {warn}");
     }
@@ -129,21 +126,12 @@ fn snapshot(folder: &ProjectFolder) -> ProjectSnapshot {
     }
 }
 
-/// 从 knowledge manifest 读取 STS2 DLL 路径，推导出 SteamLibraryPath，
+/// 从配置中的 STS2 DLL 路径推导出 SteamLibraryPath，
 /// 并自动生成 `local.props`，使新建工程可立即编译。
-fn try_generate_local_props(
-    project_root: &Path,
-    manifest_path: &Path,
-) -> Result<(), String> {
-    let manifest: ats_core::knowledge::KnowledgeManifest =
-        serde_json::from_str(
-            &std::fs::read_to_string(manifest_path)
-                .map_err(|e| format!("read manifest: {e}"))?,
-        )
-        .map_err(|e| format!("parse manifest: {e}"))?;
-    let game = manifest.game.as_ref().ok_or_else(|| "no game record in manifest".to_string())?;
-    // 向上追溯到包含 steamapps 的父目录，兼容 ModDev/decompile/ 等非标准路径
-    let mut steam = game.source_path.clone();
+fn try_generate_local_props(project_root: &Path, sts2_dll_path: &str) -> Result<(), String> {
+    let dll = Path::new(sts2_dll_path);
+    // 向上追溯到包含 steamapps 的父目录
+    let mut steam = dll.to_path_buf();
     loop {
         if steam.file_name().is_some_and(|n| n.eq_ignore_ascii_case("steamapps")) {
             break;
@@ -151,12 +139,7 @@ fn try_generate_local_props(
         steam = steam
             .parent()
             .map(Path::to_path_buf)
-            .ok_or_else(|| {
-                format!(
-                    "cannot find steamapps/ ancestor from {}",
-                    game.source_path.display()
-                )
-            })?;
+            .ok_or_else(|| "cannot find steamapps ancestor".to_string())?;
     }
     let example_path = project_root.join("local.props.example");
     let example = std::fs::read_to_string(&example_path)

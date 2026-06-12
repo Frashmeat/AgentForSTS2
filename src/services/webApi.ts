@@ -267,3 +267,6 @@ export function submitKnowledgeRefreshJob(_request: unknown): Promise<never> {
 export function submitAssetGenerateJob(_request: unknown): Promise<never> {
   return Promise.resolve().then(() => desktopOnly("submitAssetGenerateJob"));
 }
+export function discoverSts2Dll(): Promise<null> {
+  return Promise.resolve(null);
+}

@@ -94,13 +94,8 @@ pub async fn run_asset_generate(
                 finalize_with_error(&repo, &job_id, &sink, &format!("create target dir: {err}")).await;
                 return;
             }
-<<<<<<< HEAD
-            if let Err(err) = crate::fs_atomic::write_atomic(&path, &first.bytes).await {
-                finalize_with_error(&repo, &job_id, &format!("write image: {err}")).await;
-=======
             if let Err(err) = fs::write(&path, &first.bytes).await {
                 finalize_with_error(&repo, &job_id, &sink, &format!("write image: {err}")).await;
->>>>>>> 0980c393 (fix: codegen 知识库集成 + prompt 锁定 + 产出校验 + 全链路错误修复)
                 return;
             }
             image_model = Some(img_resp.model.clone());

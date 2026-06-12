@@ -169,6 +169,7 @@ pub fn run() {
             commands::settings::get_settings_snapshot,
             commands::settings::open_config_in_editor,
             commands::settings::save_settings_patch,
+            commands::settings::discover_sts2_dll,
             commands::platform::get_job,
             commands::platform::list_jobs,
             commands::platform::cancel_job,

@@ -28,6 +28,7 @@ pub struct Settings {
     pub runtime: RuntimeMap,
     pub llm: LlmConfig,
     pub image_gen: ImageGenConfig,
+    pub knowledge: KnowledgeConfig,
     pub auth: AuthConfig,
 }
 
@@ -80,6 +81,14 @@ pub struct ImageGenConfig {
     /// chat_completions 协议下映射为 Gemini aspect_ratio + image_size。
     pub size: String,
 }
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "snake_case")]
+pub struct KnowledgeConfig {
+    /// sts2.dll 路径。knowledge_refresh 从此取值；local.props 从此推导 SteamLibraryPath。
+    /// 留空时 knowledge_refresh 不可用。
+    #[serde(default)]
+    pub sts2_dll_path: String,
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "snake_case")]
 pub struct AuthConfig {
@@ -122,6 +131,7 @@ impl Settings {
                 base_url: String::new(),
             },
             image_gen: ImageGenConfig::default(),
+            knowledge: KnowledgeConfig::default(),
             auth: AuthConfig {
                 session_cookie_name: "agentthespire_session".into(),
                 session_secret: String::new(),

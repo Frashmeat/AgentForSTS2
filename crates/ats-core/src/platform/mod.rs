@@ -20,6 +20,7 @@
 //! - asset_generate handler（依赖 image_gen 客户端）
 
 pub mod application;
+pub mod discovery;
 pub mod contracts;
 pub mod domain;
 pub mod infra;

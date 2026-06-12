@@ -193,6 +193,7 @@ export interface SettingsSnapshot {
   imageGen: ImageGenSnapshot;
   runtimeWorkstation: RuntimeSnapshot;
   runtimeWeb: RuntimeSnapshot;
+  knowledge: KnowledgeSnapshot;
 }
 
 export function getSettingsSnapshot(): Promise<SettingsSnapshot> {
@@ -219,13 +220,31 @@ export interface ImageGenPatch {
   api_key?: string | null;
 }
 
+export interface KnowledgeSnapshot {
+  sts2DllPath: string;
+}
+
+export interface RuntimePatch {
+  github_token?: string | null;
+}
+
+export interface KnowledgePatch {
+  sts2_dll_path?: string | null;
+}
+
 export interface SettingsPatch {
   llm?: LlmPatch | null;
   image_gen?: ImageGenPatch | null;
+  runtime_workstation?: RuntimePatch | null;
+  knowledge?: KnowledgePatch | null;
 }
 
 export function saveSettingsPatch(patch: SettingsPatch): Promise<SettingsSnapshot> {
   return invoke<SettingsSnapshot>("save_settings_patch", { patch });
+}
+
+export function discoverSts2Dll(): Promise<string | null> {
+  return invoke<string | null>("discover_sts2_dll");
 }
 
 // -------- Image proc prewarm --------
@@ -762,7 +781,7 @@ export function submitSingleAssetPlanJob(
 }
 
 export interface SubmitKnowledgeRefreshRequest {
-  sts2_dll_path: string;
+  sts2_dll_path?: string;
   ilspycmd_path?: string | null;
   force?: boolean;
   include_baselib?: boolean;

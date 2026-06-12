@@ -275,14 +275,10 @@ pub(crate) async fn generate_and_write_code_artifact(
             Err(err) => return Err(GenerateError::Stream(err.to_string())),
         }
     }
-<<<<<<< HEAD
 
     let extracted = extract_code_or_reject(&accumulated)?;
-=======
-    let extracted = extract_first_code_block(&accumulated).unwrap_or_else(|| accumulated.clone());
     // 兜底校验：生成的"代码"必须有实际声明结构，不能是纯注释占位符
     validate_generated_code_skein(&extracted)?;
->>>>>>> 0980c393 (fix: codegen 知识库集成 + prompt 锁定 + 产出校验 + 全链路错误修复)
 
     let target_dir = artifacts_dir.join(entity_name);
     let artifact_cs_path = target_dir.join(format!("{entity_name}.cs"));
