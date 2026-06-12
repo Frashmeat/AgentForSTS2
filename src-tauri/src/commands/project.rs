@@ -142,12 +142,21 @@ fn try_generate_local_props(
         )
         .map_err(|e| format!("parse manifest: {e}"))?;
     let game = manifest.game.as_ref().ok_or_else(|| "no game record in manifest".to_string())?;
+    // 向上追溯到包含 steamapps 的父目录，兼容 ModDev/decompile/ 等非标准路径
     let mut steam = game.source_path.clone();
-    for _ in 0..4 {
+    loop {
+        if steam.file_name().is_some_and(|n| n.eq_ignore_ascii_case("steamapps")) {
+            break;
+        }
         steam = steam
             .parent()
             .map(Path::to_path_buf)
-            .ok_or_else(|| format!("cannot derive SteamLibraryPath from {}", game.source_path.display()))?;
+            .ok_or_else(|| {
+                format!(
+                    "cannot find steamapps/ ancestor from {}",
+                    game.source_path.display()
+                )
+            })?;
     }
     let example_path = project_root.join("local.props.example");
     let example = std::fs::read_to_string(&example_path)
