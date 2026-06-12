@@ -7,6 +7,7 @@ import { LogAnalysisPage } from "@/pages/LogAnalysisPage";
 import { ModEditorPage } from "@/pages/ModEditorPage";
 import { DevToolsPage } from "@/pages/DevToolsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
+import { SystemPage } from "@/pages/SystemPage";
 
 export default function App() {
   return (
@@ -14,6 +15,7 @@ export default function App() {
       <Routes>
         <Route element={<Layout />}>
           <Route index element={<DashboardPage />} />
+          <Route path="system" element={<SystemPage />} />
           <Route path="editor" element={<ModEditorPage />} />
           <Route path="batch" element={<BatchGenerationPage />} />
           <Route path="log" element={<LogAnalysisPage />} />

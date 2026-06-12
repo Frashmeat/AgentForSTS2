@@ -9,6 +9,7 @@ import { NavLink, Outlet } from "react-router-dom";
 
 const NAV_LINKS = [
   { to: "/", label: "Dashboard", end: true },
+  { to: "/system", label: "System" },
   { to: "/editor", label: "Mod Editor" },
   { to: "/batch", label: "Batch" },
   { to: "/log", label: "Log Analysis" },
