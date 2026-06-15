@@ -1,8 +1,9 @@
-// Dashboard 主页：工作台，展示工程和资产卡片，底部状态栏。
+// Dashboard 主页：工作台 — SingleAssetWorkflowCard + 底部状态栏。
+// 工程管理已迁移至顶栏 ProjectPill。
 
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ProjectCard } from "@/components/ProjectCard";
+
 import { SingleAssetWorkflowCard } from "@/components/SingleAssetWorkflowCard";
 import { Badge, PageHero } from "@/components/ui";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -53,9 +54,7 @@ export function DashboardPage() {
         subtitle={`Runtime · ${__IS_TAURI__ ? "Tauri desktop (workstation)" : "Web browser"}`}
       />
       <div className="space-y-4">
-        <ErrorBoundary label="Project">
-          <ProjectCard />
-        </ErrorBoundary>
+
         <ErrorBoundary label="SingleAssetWorkflow">
           <SingleAssetWorkflowCard />
         </ErrorBoundary>
