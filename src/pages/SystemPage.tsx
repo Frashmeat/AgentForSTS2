@@ -15,6 +15,9 @@ import { HealthCard } from "@/components/HealthCard";
 import { JobsCard } from "@/components/JobsCard";
 import { KnowledgeCard } from "@/components/KnowledgeCard";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { PlanningCard } from "@/components/PlanningCard";
+import { CodegenCard } from "@/components/CodegenCard";
+import { LlmCard } from "@/components/LlmCard";
 import {
   Badge,
   Button,
@@ -27,9 +30,6 @@ import {
 } from "@/components/ui";
 import { api } from "@/services/api";
 import type { SettingsPatch, SettingsSnapshot } from "@/services/tauriApi";
-
-// ---------------------------------------------------------------------------
-// TabBar
 // ---------------------------------------------------------------------------
 
 function TabBar({
@@ -42,6 +42,7 @@ function TabBar({
   const tabs = [
     { id: "config", label: "配置" },
     { id: "ops", label: "运维" },
+    { id: "devtools", label: "开发" },
   ];
   return (
     <div
@@ -178,9 +179,9 @@ function buildPatch(
 
 export function SystemPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab = searchParams.get("tab") ?? "ops";
-  const validTabs = ["config", "ops"];
-  const activeTab = validTabs.includes(tab) ? tab : "ops";
+  const raw = searchParams.get("tab") ?? "ops";
+  const validTabs = ["config", "ops", "devtools"] as const;
+  const activeTab: string = validTabs.includes(raw as typeof validTabs[number]) ? raw : "ops";
 
   function selectTab(t: string) {
     setSearchParams({ tab: t }, { replace: true });
@@ -648,45 +649,48 @@ export function SystemPage() {
       <>
         <FirstRunBanner />
         <div className="space-y-4">
-          <ErrorBoundary label="Health">
-            <HealthCard />
-          </ErrorBoundary>
-          <ErrorBoundary label="Capabilities">
-            <CapabilitiesCard />
-          </ErrorBoundary>
-          <ErrorBoundary label="Knowledge">
-            <KnowledgeCard />
-          </ErrorBoundary>
-          <ErrorBoundary label="Jobs">
-            <JobsCard />
-          </ErrorBoundary>
-          <ErrorBoundary label="Audit">
-            <AuditCard />
-          </ErrorBoundary>
+          <ErrorBoundary label="Health"><HealthCard /></ErrorBoundary>
+          <ErrorBoundary label="Capabilities"><CapabilitiesCard /></ErrorBoundary>
+          <ErrorBoundary label="Knowledge"><KnowledgeCard /></ErrorBoundary>
+          <ErrorBoundary label="Jobs"><JobsCard /></ErrorBoundary>
+          <ErrorBoundary label="Audit"><AuditCard /></ErrorBoundary>
         </div>
       </>
     );
   }
-
+  function renderDevToolsTab() {
+    return (
+      <div className="space-y-4">
+        <ErrorBoundary label="Planning">
+          <PlanningCard />
+        </ErrorBoundary>
+        <ErrorBoundary label="Codegen">
+          <CodegenCard />
+        </ErrorBoundary>
+        <ErrorBoundary label="LLM">
+          <LlmCard />
+        </ErrorBoundary>
+      </div>
+    );
+  }
+  const pageSubtitles: Record<string, string> = {
+    config: "所有运行时配置均可在 UI 编辑（保存即热替换）",
+    ops: "状态监控 · 知识库 · 任务队列 · 审计日志",
+    devtools: "LLM prompt preview · plan validation · playground",
+  };
   return (
     <div>
       <PageHero
         eyebrow={
-          activeTab === "config" ? "settings · runtime config" : "operations · system"
+          activeTab === "config" ? "settings · runtime config" : activeTab === "devtools" ? "devtools" : "operations · system"
         }
         title="System"
-        subtitle={
-          activeTab === "config"
-            ? "所有运行时配置均可在 UI 编辑（保存即热替换）"
-            : "状态监控 · 知识库 · 任务队列 · 审计日志"
-        }
+        subtitle={pageSubtitles[activeTab]}
         actions={activeTab === "config" ? renderActions() : undefined}
       />
-
       <TabBar active={activeTab} onSelect={selectTab} />
-
       <div className="space-y-4">
-        {activeTab === "config" ? renderConfigTab() : renderOpsTab()}
+        {activeTab === "config" ? renderConfigTab() : activeTab === "devtools" ? renderDevToolsTab() : renderOpsTab()}
       </div>
     </div>
   );
