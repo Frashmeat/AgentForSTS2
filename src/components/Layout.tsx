@@ -6,6 +6,8 @@
 
 import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
+import { ProjectPill } from "@/components/ProjectPill";
+import { KnowledgePill } from "@/components/KnowledgePill";
 
 const NAV_LINKS = [
   { to: "/", label: "Dashboard", end: true },
@@ -90,6 +92,12 @@ export function Layout() {
             </div>
           </div>
 
+
+          <div style={{ flex: 1 }} />
+          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <ProjectPill />
+            <KnowledgePill />
+          </div>
           {/* 顶栏右侧：主题切换 */}
           <div className="flex items-center gap-2">
             <div

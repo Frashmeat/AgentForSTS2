@@ -127,10 +127,8 @@ pub async fn submit_asset_generate_job(
 pub async fn submit_knowledge_refresh_job(
     app: AppHandle,
     config: State<'_, AppConfig>,
-    active: State<'_, ActiveProject>,
     request: SubmitKnowledgeRefreshRequest,
 ) -> Result<SubmitJobAck, String> {
-    let service = build_service(&config, &active)?;
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
     let knowledge_paths = KnowledgePaths::from_runtime_dir(&config.status_snapshot().runtime_dir());
     let baselib_source: Arc<dyn BaselibSource> = Arc::new(
@@ -142,10 +140,16 @@ pub async fn submit_knowledge_refresh_job(
     );
     let sts2_dll_path = PathBuf::from(&config.settings_snapshot().knowledge.sts2_dll_path);
     if sts2_dll_path.as_os_str().is_empty() {
-        return Err("knowledge.sts2_dll_path is not set — configure in Settings > Knowledge".into());
+        return Err("knowledge.sts2_dll_path is not set — configure in System > 运维 > Knowledge".into());
     }
     let mut request = request;
     request.sts2_dll_path = sts2_dll_path;
+    let llm = build_llm_client(&config)?;
+    let history_dir = config.status_snapshot().runtime_dir().join("knowledge").join("jobs");
+    std::fs::create_dir_all(&history_dir)
+        .map_err(|e| format!("create knowledge jobs dir: {e}"))?;
+    let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history_dir));
+    let service = JobApplicationService::new(repo, llm);
     let job_id = service
         .submit_knowledge_refresh(request, knowledge_paths, baselib_source, sink)
         .await
