@@ -235,17 +235,17 @@ export function SystemPage() {
             {/* ---- LLM card ---- */}
             <Card eyebrow="provider · llm" title="llm">
               <div className="grid grid-cols-2 gap-3">
-                <Field label="provider" hint="下拉选择或直接输入">
-                  <input value={form.llmProvider} list="llm-providers"
-                    onChange={(e) => setForm({ ...form, llmProvider: e.target.value })}
-                    className="input-mono" />
-                  <datalist id="llm-providers">
-                    <option value="openai" />
-                    <option value="anthropic" />
-                    <option value="openai_compatible" />
-                    <option value="new_api" />
-                    <option value="one_api" />
-                  </datalist>
+                <Field label="provider" hint="选择 LLM 协议">
+                  <select value={form.llmProvider} onChange={(e) => setForm({ ...form, llmProvider: e.target.value })} className="input-mono">
+                    <option value="openai">openai</option>
+                    <option value="anthropic">anthropic</option>
+                    <option value="openai_compatible">openai_compatible</option>
+                    <option value="new_api">new_api</option>
+                    <option value="one_api">one_api</option>
+                    {!["openai","anthropic","openai_compatible","new_api","one_api",""].includes(form.llmProvider) && (
+                      <option value={form.llmProvider}>{form.llmProvider}</option>
+                    )}
+                  </select>
                 </Field>
                 <Field label="model" hint="gpt-4o-mini / claude-sonnet-4-6 / deepseek-v4 …">
                   <input value={form.llmModel}
@@ -273,14 +273,14 @@ export function SystemPage() {
             {/* ---- ImageGen card ---- */}
             <Card eyebrow="provider · image_gen" title="image_gen">
               <div className="grid grid-cols-2 gap-3">
-                <Field label="provider" hint="下拉选择或直接输入">
-                  <input value={form.igProvider} list="ig-providers"
-                    onChange={(e) => setForm({ ...form, igProvider: e.target.value })}
-                    className="input-mono" />
-                  <datalist id="ig-providers">
-                    <option value="openai" />
-                    <option value="new_api" />
-                  </datalist>
+                <Field label="provider" hint="选择生图协议">
+                  <select value={form.igProvider} onChange={(e) => setForm({ ...form, igProvider: e.target.value })} className="input-mono">
+                    <option value="openai">openai</option>
+                    <option value="new_api">new_api</option>
+                    {!["openai","new_api",""].includes(form.igProvider) && (
+                      <option value={form.igProvider}>{form.igProvider}</option>
+                    )}
+                  </select>
                 </Field>
                 <Field label="model" hint="dall-e-3 / nano-banana …">
                   <input value={form.igModel}
