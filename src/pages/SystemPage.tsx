@@ -638,6 +638,63 @@ export function SystemPage() {
                 host/port/CORS 需重启后生效；github_token 保存即热替换。
               </p>
             </Card>
+
+            {/* Knowledge card */}
+            <Card eyebrow="knowledge · paths" title="Knowledge">
+              {editing ? (
+                <Field
+                  label="sts2.dll 路径"
+                  hint="Slay the Spire 2 安装目录下的 sts2.dll 路径，用于反编译游戏代码生成知识库。保存后请在运维 tab → Knowledge 卡点击刷新。"
+                >
+                  <div className="flex gap-2">
+                    <input
+                      value={form.kSts2DllPath}
+                      onChange={(e) => {
+                        setForm({
+                          ...form,
+                          kSts2DllPath: e.target.value,
+                          kSts2DllPathTouched: true,
+                        });
+                      }}
+                      placeholder={snap.knowledge.sts2DllPath || "e.g. J:/SteamLibrary/steamapps/common/Slay the Spire 2/data_sts2_windows_x86_64/sts2.dll"}
+                      className="input-mono flex-1"
+                    />
+                    <Button
+                      size="sm"
+                      onClick={async () => {
+                        try {
+                          const found = await api.discoverSts2Dll();
+                          if (found) {
+                            setForm({
+                              ...form,
+                              kSts2DllPath: found,
+                              kSts2DllPathTouched: true,
+                            });
+                          } else {
+                            setError("未自动发现 sts2.dll，请手动填写路径");
+                          }
+                        } catch (e: unknown) {
+                          setError(`探测失败: ${String(e)}`);
+                        }
+                      }}
+                    >
+                      🔍 Detect
+                    </Button>
+                  </div>
+                </Field>
+              ) : (
+                <KVList>
+                  <KV k="sts2.dll">
+                    <code className="break-all">
+                      {snap.knowledge.sts2DllPath || "<not set>"}
+                    </code>
+                  </KV>
+                </KVList>
+              )}
+              <p className="mt-2" style={{ fontSize: "11.5px", color: "var(--ink-mute)" }}>
+                保存后请到 运维 tab → Knowledge 卡点击「刷新知识库」运行反编译。
+              </p>
+            </Card>
           </>
         )}
       </>

@@ -6,7 +6,7 @@ import type {
   ExportPackStats,
   ImportPackStats,
   KnowledgeStatus,
-  SettingsSnapshot,
+
   SubmitJobAck,
 } from "@/services/tauriApi";
 
@@ -18,8 +18,7 @@ export function KnowledgeCard() {
   const [packMsg, setPackMsg] = useState<string | null>(null);
   const [packBusy, setPackBusy] = useState(false);
   const [overwriteOnImport, setOverwriteOnImport] = useState(false);
-  const [kSts2Path, setKSts2Path] = useState("");
-  const [kSts2Editing, setKSts2Editing] = useState(false);
+
   const [force, setForce] = useState(false);
   const [refreshBusy, setRefreshBusy] = useState(false);
   const [refreshStage, setRefreshStage] = useState<string | null>(null);
@@ -35,11 +34,7 @@ export function KnowledgeCard() {
       .catch((e: unknown) => setError(String(e)));
   }, []);
 
-  useEffect(() => {
-    (api.getSettingsSnapshot() as Promise<SettingsSnapshot>)
-      .then((s) => setKSts2Path(s.knowledge.sts2DllPath))
-      .catch(() => {});
-  }, []);
+
 
   useJobProgress(refreshJobIdRef, (ev) => {
     setRefreshStage(ev.stage);
@@ -139,33 +134,6 @@ export function KnowledgeCard() {
               embedded templates: {knowledge.embeddedTemplates.join(", ")}
             </p>
           )}
-
-          <CardSection title="反编译源 (sts2.dll)">
-            {kSts2Editing ? (
-              <>
-                <div className="flex gap-2">
-                  <input value={kSts2Path} onChange={(e) => setKSts2Path(e.target.value)} placeholder="sts2.dll 完整路径" className="input-mono flex-1" />
-                  <Button size="sm" onClick={async () => {
-                    try { const f = await api.discoverSts2Dll() as string | null; if (f) setKSts2Path(f); else setError("未自动发现 sts2.dll"); } catch (e) { setError(String(e)); }
-                  }}>🔍</Button>
-                </div>
-                <div className="flex gap-2 mt-2">
-                  <Button variant="success" size="sm" onClick={async () => {
-                    try { await api.saveSettingsPatch({ knowledge: { sts2_dll_path: kSts2Path } }); setKSts2Editing(false); } catch (e) { setError(String(e)); }
-                  }}>Save</Button>
-                  <Button size="sm" onClick={async () => {
-                    setKSts2Editing(false);
-                    try { const s = await api.getSettingsSnapshot() as SettingsSnapshot; setKSts2Path(s.knowledge.sts2DllPath); } catch {}
-                  }}>Cancel</Button>
-                </div>
-              </>
-            ) : (
-              <>
-                <code className="break-all" style={{ fontSize: "12px" }}>{kSts2Path || "<not set>"}</code>
-                <div className="mt-2"><Button size="sm" onClick={() => setKSts2Editing(true)}>Edit</Button></div>
-              </>
-            )}
-          </CardSection>
 
           <CardSection title="刷新 & 导出 / 导入">
             <div className="flex items-center gap-3 mb-3">
