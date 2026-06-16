@@ -235,10 +235,17 @@ export function SystemPage() {
             {/* ---- LLM card ---- */}
             <Card eyebrow="provider · llm" title="llm">
               <div className="grid grid-cols-2 gap-3">
-                <Field label="provider" hint="anthropic / openai / new_api …">
-                  <input value={form.llmProvider}
+                <Field label="provider" hint="下拉选择或直接输入">
+                  <input value={form.llmProvider} list="llm-providers"
                     onChange={(e) => setForm({ ...form, llmProvider: e.target.value })}
-                    placeholder="openai" className="input-mono" />
+                    className="input-mono" />
+                  <datalist id="llm-providers">
+                    <option value="openai" />
+                    <option value="anthropic" />
+                    <option value="openai_compatible" />
+                    <option value="new_api" />
+                    <option value="one_api" />
+                  </datalist>
                 </Field>
                 <Field label="model" hint="gpt-4o-mini / claude-sonnet-4-6 / deepseek-v4 …">
                   <input value={form.llmModel}
@@ -266,10 +273,14 @@ export function SystemPage() {
             {/* ---- ImageGen card ---- */}
             <Card eyebrow="provider · image_gen" title="image_gen">
               <div className="grid grid-cols-2 gap-3">
-                <Field label="provider" hint="openai / new_api …">
-                  <input value={form.igProvider}
+                <Field label="provider" hint="下拉选择或直接输入">
+                  <input value={form.igProvider} list="ig-providers"
                     onChange={(e) => setForm({ ...form, igProvider: e.target.value })}
-                    placeholder="openai" className="input-mono" />
+                    className="input-mono" />
+                  <datalist id="ig-providers">
+                    <option value="openai" />
+                    <option value="new_api" />
+                  </datalist>
                 </Field>
                 <Field label="model" hint="dall-e-3 / nano-banana …">
                   <input value={form.igModel}
@@ -283,10 +294,14 @@ export function SystemPage() {
                     onChange={(e) => setForm({ ...form, igBaseUrl: e.target.value })}
                     placeholder="https://api.openai.com" className="input-mono" />
                 </Field>
-                <Field label="size" hint="1024x1024 / 1792x1024 / 512x512 …">
-                  <input value={form.igSize}
-                    onChange={(e) => setForm({ ...form, igSize: e.target.value })}
-                    placeholder="1024x1024" className="input-mono" />
+                <Field label="size" hint="标准图像尺寸">
+                  <select value={form.igSize} onChange={(e) => setForm({ ...form, igSize: e.target.value })} className="input-mono">
+                    <option value="">(默认 1024×1024)</option>
+                    <option value="1024x1024">1024×1024 (1:1)</option>
+                    <option value="1792x1024">1792×1024 (16:9)</option>
+                    <option value="1024x1792">1024×1792 (9:16)</option>
+                    <option value="512x512">512×512</option>
+                  </select>
                 </Field>
               </div>
               <Field label="protocol" hint="auto 从模型名推断">
