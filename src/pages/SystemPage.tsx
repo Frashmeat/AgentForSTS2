@@ -340,6 +340,9 @@ export function SystemPage() {
                 host/port/CORS 需重启后生效；github_token 保存即热替换。
               </p>
             </Card>
+
+            {/* ---- Knowledge card ---- */}
+            <ErrorBoundary label="Knowledge"><KnowledgeCard /></ErrorBoundary>
           </>
         )}
       </>
@@ -357,7 +360,6 @@ export function SystemPage() {
         <div className="space-y-4">
           <ErrorBoundary label="Health"><HealthCard /></ErrorBoundary>
           <ErrorBoundary label="Capabilities"><CapabilitiesCard /></ErrorBoundary>
-          <ErrorBoundary label="Knowledge"><KnowledgeCard /></ErrorBoundary>
           <ErrorBoundary label="Jobs"><JobsCard /></ErrorBoundary>
           <ErrorBoundary label="Audit"><AuditCard /></ErrorBoundary>
         </div>
