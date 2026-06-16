@@ -1,22 +1,9 @@
-// 单资产工作流 MVP：自然语言需求 → single_asset_plan handler 出 PlanItem
-// → 用户校对/编辑 → code_generate handler 出 .cs 文件。
-//
-// 目标：让用户在 UI 里走完一条端到端链路，验证 LLM 第三方代理通路可用。
-// 桌面端 only（依赖 Tauri job-progress 事件）。
-
-import { useRef, useState } from "react";
-import { useProjectStore } from "@/stores/project";
-import { useJobProgress } from "@/hooks/useJobProgress";
-import {
-  Badge,
-  Button,
-  Card,
-  Field,
-  KV,
-  KVList,
-  Notice,
-} from "@/components/ui";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/services/api";
+import { useJobProgress } from "@/hooks/useJobProgress";
+import { useProjectStore } from "@/stores/project";
+import { useWorkflowStore } from "@/stores/workflow";
+import { Button, Card, CardSection, Field, Notice } from "@/components/ui";
 import type {
   AssetItemType,
   Job,
@@ -25,8 +12,6 @@ import type {
   SubmitJobAck,
 } from "@/services/tauriApi";
 
-type Phase = "idle" | "planning" | "plan_done" | "generating" | "code_done";
-
 const ASSET_TYPES: AssetItemType[] = [
   "card",
   "card_fullscreen",
@@ -34,23 +19,27 @@ const ASSET_TYPES: AssetItemType[] = [
   "power",
   "character",
   "custom_code",
-];
+] as const;
+
+type Phase =
+  | "idle"
+  | "planning"
+  | "plan_done"
+  | "generating"
+  | "code_done";
 
 export function SingleAssetWorkflowCard() {
   const project = useProjectStore((s) => s.project);
+  const wfStore = useWorkflowStore();
+
   const [requirements, setRequirements] = useState(
     "做一个回合开始时获得 3 点格挡的卡牌",
   );
   const [assetType, setAssetType] = useState<AssetItemType>("card");
-
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
-
-  const [planJobId, setPlanJobId] = useState<string | null>(null);
   const [planDelta, setPlanDelta] = useState("");
   const [planItem, setPlanItem] = useState<PlanItem | null>(null);
-
-  const [codeJobId, setCodeJobId] = useState<string | null>(null);
   const [codeDelta, setCodeDelta] = useState("");
   const [codeResult, setCodeResult] = useState<{
     csPath: string;
@@ -63,332 +52,266 @@ export function SingleAssetWorkflowCard() {
   const planJobIdRef = useRef<string | null>(null);
   const codeJobIdRef = useRef<string | null>(null);
 
+  planJobIdRef.current = wfStore.planJobId;
+  codeJobIdRef.current = wfStore.codeJobId;
+
   useJobProgress(planJobIdRef, handlePlanProgress);
   useJobProgress(codeJobIdRef, handleCodeProgress);
 
+  function clearPlanStore() { useWorkflowStore.getState().setPlanJobId(null); }
+  function clearCodeStore() { useWorkflowStore.getState().setCodeJobId(null); }
+
+  function handlePlanResult(job: Job) {
+    const result = job.result as { item?: PlanItem } | null;
+    if (result?.item) setPlanItem(result.item);
+    setPhase("plan_done");
+    clearPlanStore();
+  }
+
+  function handleCodeResult(job: Job) {
+    const r = job.result as {
+      csPath?: string; artifactCsPath?: string | null;
+      rawPath?: string; extractedChars?: number; pngPath?: string | null;
+    } | null;
+    if (r?.csPath) setCodeResult({
+      csPath: r.csPath, artifactCsPath: r.artifactCsPath ?? null,
+      rawPath: r.rawPath ?? "", extractedChars: r.extractedChars ?? 0, pngPath: r.pngPath ?? null,
+    });
+    setPhase("code_done");
+    clearCodeStore();
+  }
+
   function handlePlanProgress(ev: JobProgressEvent) {
-    if (ev.delta) {
-      setPlanDelta((prev) => prev + ev.delta);
-    }
+    if (ev.delta) setPlanDelta((prev) => prev + ev.delta);
     if (ev.stage === "completed") {
       void (async () => {
-        try {
-          const job = (await api.getJob(ev.jobId)) as Job;
-          const result = job.result as { item?: PlanItem } | null;
-          if (result?.item) {
-            setPlanItem(result.item);
-          }
-          setPhase("plan_done");
-        } catch (err) {
-          setError(`fetch plan job: ${String(err)}`);
-        }
+        try { handlePlanResult((await api.getJob(ev.jobId)) as Job); }
+        catch (err) { setError(`fetch plan job: ${String(err)}`); }
       })();
     } else if (
-      ev.stage === "failed" ||
-      ev.stage.includes("error") ||
-      ev.stage === "stream-start-error" ||
-      ev.stage === "stream-error"
+      ev.stage === "failed" || ev.stage.includes("error") ||
+      ev.stage === "stream-start-error" || ev.stage === "stream-error"
     ) {
       setError(`plan failed at ${ev.stage}: ${ev.message ?? ""}`);
       setPhase("idle");
+      clearPlanStore();
     }
   }
 
   function handleCodeProgress(ev: JobProgressEvent) {
-    if (ev.delta) {
-      setCodeDelta((prev) => prev + ev.delta);
-    }
+    if (ev.delta) setCodeDelta((prev) => prev + ev.delta);
     if (ev.stage === "completed") {
       void (async () => {
-        try {
-          const job = (await api.getJob(ev.jobId)) as Job;
-          const r = job.result as {
-            csPath?: string;
-            artifactCsPath?: string | null;
-            rawPath?: string;
-            extractedChars?: number;
-            pngPath?: string | null;
-          } | null;
-          if (r?.csPath) {
-            setCodeResult({
-              csPath: r.csPath,
-              artifactCsPath: r.artifactCsPath ?? null,
-              rawPath: r.rawPath ?? "",
-              extractedChars: r.extractedChars ?? 0,
-              pngPath: r.pngPath ?? null,
-            });
-          }
-          setPhase("code_done");
-        } catch (err) {
-          setError(`fetch code job: ${String(err)}`);
-        }
+        try { handleCodeResult((await api.getJob(ev.jobId)) as Job); }
+        catch (err) { setError(`fetch code job: ${String(err)}`); }
       })();
     } else if (ev.stage === "failed" || ev.stage.includes("error")) {
       setError(`code failed at ${ev.stage}: ${ev.message ?? ""}`);
       setPhase("plan_done");
+      clearCodeStore();
     }
   }
 
-  async function runPlan() {
-    if (!requirements.trim()) {
-      setError("requirements 不能为空");
-      return;
+  // 挂载时检查 workflowStore 中是否有未完成的 job
+  // job.status type is "failed" | "completed" | "cancelled" — if it's NOT one of
+  // those (i.e. the job JSON has no status field yet), treat as still-running
+  useEffect(() => {
+    if (wfStore.planJobId) {
+      void (async () => {
+        try {
+          const job = (await api.getJob(wfStore.planJobId!)) as Job;
+          if (job.status === "completed") {
+            handlePlanResult(job);
+          } else if (job.status !== "failed" && job.status !== "cancelled") {
+            setPhase("planning");
+          } else {
+            clearPlanStore();
+          }
+        } catch { clearPlanStore(); }
+      })();
     }
-    setError(null);
-    setPlanDelta("");
-    setPlanItem(null);
-    setCodeDelta("");
-    setCodeResult(null);
-    setPhase("planning");
+    if (wfStore.codeJobId) {
+      void (async () => {
+        try {
+          const job = (await api.getJob(wfStore.codeJobId!)) as Job;
+          if (job.status === "completed") {
+            handleCodeResult(job);
+          } else if (job.status !== "failed" && job.status !== "cancelled") {
+            setPhase("generating");
+          } else {
+            clearCodeStore();
+          }
+        } catch { clearCodeStore(); }
+      })();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function runPlan() {
+    if (!requirements.trim()) { setError("requirements 不能为空"); return; }
+    setError(null); setPlanDelta(""); setPlanItem(null);
+    setCodeDelta(""); setCodeResult(null); setPhase("planning");
     try {
       const ack = (await api.submitSingleAssetPlanJob({
-        requirements: requirements.trim(),
-        asset_type: assetType,
+        requirements: requirements.trim(), asset_type: assetType,
       })) as SubmitJobAck;
-      setPlanJobId(ack.jobId);
       planJobIdRef.current = ack.jobId;
-    } catch (e: unknown) {
-      setError(String(e));
-      setPhase("idle");
-    }
+      useWorkflowStore.getState().setPlanJobId(ack.jobId);
+    } catch (e: unknown) { setError(String(e)); setPhase("idle"); }
   }
 
   async function runCode() {
     if (!planItem || !project) return;
-    setError(null);
-    setCodeDelta("");
-    setCodeResult(null);
-    setPhase("generating");
+    setError(null); setCodeDelta(""); setCodeResult(null); setPhase("generating");
     try {
-      const description = [
-        planItem.description ?? "",
-        planItem.detailed_description ?? "",
-      ]
-        .filter(Boolean)
-        .join("\n\n");
+      const description = [planItem.description ?? "", planItem.detailed_description ?? ""]
+        .filter(Boolean).join("\n\n");
       const name = planItem.name || planItem.id || "Unnamed";
-      const needsImage =
-        planItem.needs_image === true && planItem.type !== "custom_code";
+      const needsImage = planItem.needs_image === true && planItem.type !== "custom_code";
       let ack: SubmitJobAck;
       if (needsImage) {
         ack = (await api.submitAssetGenerateJob({
           asset_request: {
-            design_description: description,
-            asset_type: planItem.type || "card",
-            asset_name: name,
-            image_paths: [],
-            project_root: project.path,
-            name_zhs: planItem.name_zhs ?? "",
-            skip_build: true,
+            design_description: description, asset_type: planItem.type || "card",
+            asset_name: name, image_paths: [], project_root: project.path,
+            name_zhs: planItem.name_zhs ?? "", skip_build: true,
           },
           image_prompt: planItem.image_description?.trim()
-            ? planItem.image_description.trim()
-            : description,
+            ? planItem.image_description.trim() : description,
           image_size: null,
         })) as SubmitJobAck;
       } else {
         ack = (await api.submitCodeGenerateJob({
           mode: "custom_code",
           request: {
-            name,
-            description,
+            name, description,
             implementation_notes: planItem.implementation_notes ?? "",
-            project_root: project.path,
-            skip_build: true,
+            project_root: project.path, skip_build: true,
           },
         })) as SubmitJobAck;
       }
-      setCodeJobId(ack.jobId);
       codeJobIdRef.current = ack.jobId;
-    } catch (e: unknown) {
-      setError(String(e));
-      setPhase("plan_done");
-    }
+      useWorkflowStore.getState().setCodeJobId(ack.jobId);
+    } catch (e: unknown) { setError(String(e)); setPhase("plan_done"); }
   }
 
   function reset() {
-    setPhase("idle");
-    setError(null);
-    setPlanJobId(null);
-    setPlanDelta("");
-    setPlanItem(null);
-    setCodeJobId(null);
-    setCodeDelta("");
-    setCodeResult(null);
+    setPhase("idle"); setError(null);
+    setPlanDelta(""); setPlanItem(null);
+    setCodeDelta(""); setCodeResult(null);
+    clearPlanStore(); clearCodeStore();
   }
 
   if (!__IS_TAURI__) {
-    return (
-      <Card
-        eyebrow="workflow · single asset"
-        title="Single-Asset Workflow"
-        subtitle="桌面端 only —— Web 模式下需要 Stage 3.6 ats-web platform routes 落地后再启用。"
-      />
-    );
+    return <Card eyebrow="workflow · single asset" title="Single Asset Workflow" subtitle="desktop-only" />;
   }
 
   return (
     <Card
-      eyebrow="workflow · single asset · mvp"
-      title="Single-Asset Workflow"
+      eyebrow="workflow · single asset"
+      title="Single Asset Workflow"
       actions={
-        phase !== "idle" && (
-          <Button size="sm" onClick={reset}>
-            Reset
-          </Button>
-        )
+        phase !== "idle" ? (
+          <Button size="sm" onClick={reset}>Reset</Button>
+        ) : undefined
       }
     >
-      <div className="space-y-3">
-        {!project && (
-          <Notice
-            variant="warn"
-            title="先打开或新建一个工程"
+      {error && <Notice variant="error" title={`Error: ${error}`} />}
+
+      {phase === "plan_done" && planItem && (
+        <CardSection title="plan 结果">
+          <div className="grid gap-2" style={{ fontSize: "12px" }}>
+            <div><span style={{ color: "var(--ink-mute)" }}>name:</span> {planItem.name ?? planItem.id}</div>
+            {planItem.name_zhs && <div><span style={{ color: "var(--ink-mute)" }}>name_zhs:</span> {planItem.name_zhs}</div>}
+            <div><span style={{ color: "var(--ink-mute)" }}>type:</span> {planItem.type}</div>
+            <div style={{ color: "var(--ink-mute)" }}>{planItem.description ?? planItem.detailed_description}</div>
+            <div>
+              <span style={{ fontSize: "11px", background: "var(--rule-soft)", padding: "2px 6px", borderRadius: "3px" }}>
+                {planItem.needs_image ? "🖼 needs image" : "📄 code only"}
+              </span>
+            </div>
+          </div>
+        </CardSection>
+      )}
+
+      {phase === "code_done" && codeResult && (
+        <CardSection title="code 结果">
+          <div className="grid gap-2" style={{ fontSize: "12px" }}>
+            <div><span style={{ color: "var(--ink-mute)" }}>csPath:</span> <code>{codeResult.csPath}</code></div>
+            {codeResult.artifactCsPath && (
+              <div><span style={{ color: "var(--ink-mute)" }}>artifactCsPath:</span> <code>{codeResult.artifactCsPath}</code></div>
+            )}
+            <div><span style={{ color: "var(--ink-mute)" }}>rawPath:</span> <code>{codeResult.rawPath}</code></div>
+            <div><span style={{ color: "var(--ink-mute)" }}>extractedChars:</span> {codeResult.extractedChars}</div>
+            {codeResult.pngPath && (
+              <div><span style={{ color: "var(--ink-mute)" }}>pngPath:</span> <code>{codeResult.pngPath}</code></div>
+            )}
+          </div>
+        </CardSection>
+      )}
+
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="requirements" hint="描述你想要的 asset">
+          <textarea
+            value={requirements}
+            onChange={(e) => setRequirements(e.target.value)}
+            rows={4}
+            className="input-mono"
+            placeholder="做一个回合开始时获得 3 点格挡的卡牌"
+          />
+        </Field>
+        <Field label="type" hint="asset 类型">
+          <select
+            value={assetType}
+            onChange={(e) => setAssetType(e.target.value as AssetItemType)}
+            className="input-mono"
           >
-            请在 Project 卡片中"打开"或"新建"一个工程，才能跑代码生成。
-          </Notice>
-        )}
+            {ASSET_TYPES.map((t) => (
+              <option key={t} value={t}>{t}</option>
+            ))}
+          </select>
+        </Field>
+      </div>
 
-        {error && <Notice variant="error" title={`Error: ${error}`} />}
+      {phase === "planning" && (
+        <div className="mt-3" style={{ fontSize: "12px", color: "var(--ink-mute)" }}>
+          {planDelta ? (
+            <pre className="pre-block mt-1" style={{ maxHeight: 200, overflow: "auto", fontSize: "11.5px" }}>
+              {planDelta}
+            </pre>
+          ) : (
+            <span>等待 LLM 首帧…</span>
+          )}
+        </div>
+      )}
 
-        <fieldset
-          disabled={phase === "planning" || phase === "generating"}
-          className="space-y-2 border-0 p-0"
+      {phase === "generating" && (
+        <div className="mt-3" style={{ fontSize: "12px", color: "var(--ink-mute)" }}>
+          {codeDelta ? (
+            <pre className="pre-block mt-1" style={{ maxHeight: 200, overflow: "auto", fontSize: "11.5px" }}>
+              {codeDelta}
+            </pre>
+          ) : (
+            <span>代码生成中…</span>
+          )}
+        </div>
+      )}
+
+      <div className="mt-4 flex gap-3 flex-wrap">
+        <Button
+          variant="accent"
+          onClick={() => void runPlan()}
+          disabled={!requirements.trim() || phase !== "idle" || !project}
         >
-          <Field label="requirements（自然语言）">
-            <textarea
-              value={requirements}
-              onChange={(e) => setRequirements(e.target.value)}
-              rows={3}
-              placeholder="例：做一个回合开始时获得 3 点格挡的卡牌"
-            />
-          </Field>
-          <Field label="asset type">
-            <select
-              value={assetType}
-              onChange={(e) => setAssetType(e.target.value as AssetItemType)}
-            >
-              {ASSET_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Button
-            variant="accent"
-            onClick={runPlan}
-            disabled={phase === "planning" || phase === "generating"}
-          >
-            {phase === "planning" ? "Planning…" : "1. Generate plan"}
-          </Button>
-        </fieldset>
-
-        {(phase === "planning" || planDelta) && (
-          <div>
-            <div className="flex items-center gap-2 mb-2">
-              <span className="eyebrow-label">Plan LLM stream</span>
-              {planJobId && <code style={{ fontSize: "11px" }}>{planJobId.slice(0, 8)}</code>}
-              {phase === "planning" && <Badge variant="running">streaming</Badge>}
-            </div>
-            <pre className="pre-block pre-block-stream max-h-48">
-              {planDelta || "等待 LLM 首帧…"}
-            </pre>
-          </div>
-        )}
-
-        {planItem && (
-          <div
-            className="p-3"
-            style={{
-              background: "rgba(77, 122, 106, 0.05)",
-              border: "1px solid rgba(77, 122, 106, 0.35)",
-              borderRadius: "4px",
-            }}
-          >
-            <div className="flex items-center gap-2 mb-3 flex-wrap">
-              <Badge variant="ok">PlanItem</Badge>
-              <code style={{ fontSize: "11.5px" }}>{planItem.id}</code>
-            </div>
-            <KVList variant="narrow">
-              <KV k="name">
-                {planItem.name}
-                {planItem.name_zhs && (
-                  <span style={{ color: "var(--ink-mute)" }}>
-                    {" "} · {planItem.name_zhs}
-                  </span>
-                )}
-              </KV>
-              <KV k="type">{planItem.type}</KV>
-              <KV k="description">{planItem.description}</KV>
-              <KV k="goal">{planItem.goal}</KV>
-              <KV k="impl notes">
-                <span className="whitespace-pre-wrap">{planItem.implementation_notes}</span>
-              </KV>
-              <KV k="acceptance">
-                <span className="whitespace-pre-wrap">{planItem.acceptance_notes}</span>
-              </KV>
-            </KVList>
-            <details className="mt-3">
-              <summary
-                className="cursor-pointer"
-                style={{ fontSize: "11px", color: "var(--ink-mute)" }}
-              >
-                完整 JSON
-              </summary>
-              <pre className="pre-block mt-2 max-h-48">
-                {JSON.stringify(planItem, null, 2)}
-              </pre>
-            </details>
-          </div>
-        )}
-
-        {planItem && project && (
-          <Button
-            variant="accent"
-            onClick={runCode}
-            disabled={phase === "generating"}
-          >
-            {phase === "generating" ? "Generating…" : "2. Generate code"}
-          </Button>
-        )}
-
-        {(phase === "generating" || codeDelta) && (
-          <div>
-            <div className="flex items-center gap-2 mb-2">
-              <span className="eyebrow-label">Code LLM stream</span>
-              {codeJobId && <code style={{ fontSize: "11px" }}>{codeJobId.slice(0, 8)}</code>}
-              {phase === "generating" && <Badge variant="running">streaming</Badge>}
-            </div>
-            <pre className="pre-block pre-block-stream max-h-64">
-              {codeDelta || "等待 LLM 首帧…"}
-            </pre>
-          </div>
-        )}
-
-        {codeResult && (
-          <Notice variant="ok" title="代码已落盘 ✓">
-            <KVList variant="narrow">
-              <KV k=".cs">
-                <code className="break-all">{codeResult.csPath}</code>
-              </KV>
-              {codeResult.artifactCsPath && (
-                <KV k="artifact copy">
-                  <code className="break-all">{codeResult.artifactCsPath}</code>
-                </KV>
-              )}
-              {codeResult.pngPath && (
-                <KV k=".png">
-                  <code className="break-all">{codeResult.pngPath}</code>
-                </KV>
-              )}
-              <KV k="raw.md">
-                <code className="break-all">{codeResult.rawPath}</code>
-              </KV>
-              <KV k="extracted">{codeResult.extractedChars} 字符</KV>
-            </KVList>
-          </Notice>
-        )}
+          1. Generate Plan
+        </Button>
+        <Button
+          variant="accent"
+          onClick={() => void runCode()}
+          disabled={!planItem || !project || phase !== "plan_done"}
+        >
+          2. Generate Code
+        </Button>
       </div>
     </Card>
   );
