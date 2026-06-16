@@ -1,5 +1,6 @@
 // System 页：Tab 导航 → 配置 | 运维 | 开发。
 // 配置 tab 始终显示输入框，Save 按钮即时保存 hot-reload。
+// Knowledge card（路径+状态+刷新）整合在运维 tab 中。
 
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -75,8 +76,6 @@ interface FormState {
   igApiKeyTouched: boolean;
   rtGithubToken: string;
   rtGithubTokenTouched: boolean;
-  kSts2DllPath: string;
-  kSts2DllPathTouched: boolean;
 }
 
 function formFromSnapshot(s: SettingsSnapshot): FormState {
@@ -95,8 +94,6 @@ function formFromSnapshot(s: SettingsSnapshot): FormState {
     igApiKeyTouched: false,
     rtGithubToken: s.runtimeWorkstation.githubToken,
     rtGithubTokenTouched: false,
-    kSts2DllPath: s.knowledge.sts2DllPath,
-    kSts2DllPathTouched: false,
   };
 }
 
@@ -119,7 +116,6 @@ function buildPatch(form: FormState, original: SettingsSnapshot): SettingsPatch 
   if (Object.keys(ig).length > 0) patch.image_gen = ig;
 
   if (form.rtGithubTokenTouched) patch.runtime_workstation = { github_token: form.rtGithubToken };
-  if (form.kSts2DllPathTouched) patch.knowledge = { sts2_dll_path: form.kSts2DllPath };
   return patch;
 }
 
@@ -168,7 +164,7 @@ export function SystemPage() {
   async function handleSave() {
     if (!form || !snap) return;
     const patch = buildPatch(form, snap);
-    if (!patch.llm && !patch.image_gen && !patch.runtime_workstation && !patch.knowledge) {
+    if (!patch.llm && !patch.image_gen && !patch.runtime_workstation) {
       setSavedMsg("没有改动"); return;
     }
     setBusy(true); setError(null); setSavedMsg(null);
@@ -194,7 +190,7 @@ export function SystemPage() {
   }
 
   // -----------------------------------------------------------------------
-  // config tab — always editable
+  // config tab — always editable (LLM / ImageGen / Runtime)
   // -----------------------------------------------------------------------
 
   function renderConfigTab() {
@@ -342,28 +338,6 @@ export function SystemPage() {
               </div>
               <p className="mt-2" style={{ fontSize: "11.5px", color: "var(--ink-mute)" }}>
                 host/port/CORS 需重启后生效；github_token 保存即热替换。
-              </p>
-            </Card>
-
-            {/* ---- Knowledge card ---- */}
-            <Card eyebrow="knowledge · paths" title="Knowledge">
-              <Field label="sts2.dll 路径" hint="Slay the Spire 2 安装目录下的 sts2.dll 路径，用于反编译游戏代码生成知识库。保存后请在运维 tab → Knowledge 卡点击刷新。">
-                <div className="flex gap-2">
-                  <input value={form.kSts2DllPath}
-                    onChange={(e) => setForm({ ...form, kSts2DllPath: e.target.value, kSts2DllPathTouched: true })}
-                    placeholder={snap.knowledge.sts2DllPath || "e.g. J:/SteamLibrary/steamapps/common/Slay the Spire 2/data_sts2_windows_x86_64/sts2.dll"}
-                    className="input-mono flex-1" />
-                  <Button size="sm" onClick={async () => {
-                    try {
-                      const found = await api.discoverSts2Dll();
-                      if (found) setForm({ ...form, kSts2DllPath: found, kSts2DllPathTouched: true });
-                      else setError("未自动发现 sts2.dll，请手动填写路径");
-                    } catch (e: unknown) { setError(`探测失败: ${String(e)}`); }
-                  }}>🔍 Detect</Button>
-                </div>
-              </Field>
-              <p className="mt-2" style={{ fontSize: "11.5px", color: "var(--ink-mute)" }}>
-                保存后请到 运维 tab → Knowledge 卡点击「刷新知识库」运行反编译。
               </p>
             </Card>
           </>
