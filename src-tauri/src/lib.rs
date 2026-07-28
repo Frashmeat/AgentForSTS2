@@ -12,6 +12,8 @@ use ats_core::project::AppDataPaths;
 use crate::commands::image_proc_state::{ImageProcState, prewarm};
 use crate::commands::project::ActiveProject;
 
+const APP_DATA_ROOT_ENV: &str = "SPIREFORGE_APP_DATA_ROOT";
+
 /// Tauri 同进程内可变配置：包裹 RwLock 让 `save_settings_patch` command 能在用户
 /// 改完表单后热替换内存里的 Settings，不重启 app。读侧用 `snapshot()` 拿
 /// clone，避免持锁跨 await。
@@ -94,7 +96,11 @@ pub fn run() {
         status.errors.len()
     );
 
-    let app_data = AppDataPaths::resolve();
+    let app_data = std::env::var_os(APP_DATA_ROOT_ENV)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .map(AppDataPaths::from_root)
+        .unwrap_or_else(AppDataPaths::resolve);
     if let Err(e) = app_data.ensure_dirs() {
         eprintln!(
             "ats-desktop: failed to create app data dir {}: {e}",
@@ -107,11 +113,18 @@ pub fn run() {
     let image_proc_state = Arc::new(ImageProcState::new());
     let image_proc_for_prewarm = Arc::clone(&image_proc_state);
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_process::init());
+
+    #[cfg(feature = "e2e")]
+    let builder = builder
+        .plugin(tauri_plugin_wdio::init())
+        .plugin(tauri_plugin_wdio_webdriver::init());
+
+    builder
         .setup(move |_app| {
             // ML rembg prewarm 后台跑（feature on 才真正下载/加载，
             // off 时立刻置 Failed("feature disabled")）。失败不影响 app 启动。

@@ -216,9 +216,10 @@ export function SingleAssetWorkflowCard() {
         ) : undefined
       }
     >
-      {error && <Notice variant="error" title={`Error: ${error}`} />}
+      {error && <div data-testid="single-asset-error"><Notice variant="error" title={`Error: ${error}`} /></div>}
 
       {phase === "plan_done" && planItem && (
+        <div data-testid="single-asset-plan-result">
         <CardSection title="plan 结果">
           <div className="grid gap-2" style={{ fontSize: "12px" }}>
             <div><span style={{ color: "var(--ink-mute)" }}>name:</span> {planItem.name ?? planItem.id}</div>
@@ -232,9 +233,11 @@ export function SingleAssetWorkflowCard() {
             </div>
           </div>
         </CardSection>
+        </div>
       )}
 
       {phase === "code_done" && codeResult && (
+        <div data-testid="single-asset-code-result">
         <CardSection title="code 结果">
           <div className="grid gap-2" style={{ fontSize: "12px" }}>
             <div><span style={{ color: "var(--ink-mute)" }}>csPath:</span> <code>{codeResult.csPath}</code></div>
@@ -248,6 +251,7 @@ export function SingleAssetWorkflowCard() {
             )}
           </div>
         </CardSection>
+        </div>
       )}
 
       <div className="grid grid-cols-2 gap-3">
@@ -258,6 +262,7 @@ export function SingleAssetWorkflowCard() {
             rows={4}
             className="input-mono"
             placeholder="做一个回合开始时获得 3 点格挡的卡牌"
+            data-testid="single-asset-requirements"
           />
         </Field>
         <Field label="type" hint="asset 类型">
@@ -265,6 +270,7 @@ export function SingleAssetWorkflowCard() {
             value={assetType}
             onChange={(e) => setAssetType(e.target.value as AssetItemType)}
             className="input-mono"
+            data-testid="single-asset-type"
           >
             {ASSET_TYPES.map((t) => (
               <option key={t} value={t}>{t}</option>
@@ -274,7 +280,7 @@ export function SingleAssetWorkflowCard() {
       </div>
 
       {phase === "planning" && (
-        <div className="mt-3" style={{ fontSize: "12px", color: "var(--ink-mute)" }}>
+        <div data-testid="single-asset-planning" className="mt-3" style={{ fontSize: "12px", color: "var(--ink-mute)" }}>
           {planDelta ? (
             <pre className="pre-block mt-1" style={{ maxHeight: 200, overflow: "auto", fontSize: "11.5px" }}>
               {planDelta}
@@ -286,7 +292,7 @@ export function SingleAssetWorkflowCard() {
       )}
 
       {phase === "generating" && (
-        <div className="mt-3" style={{ fontSize: "12px", color: "var(--ink-mute)" }}>
+        <div data-testid="single-asset-generating" className="mt-3" style={{ fontSize: "12px", color: "var(--ink-mute)" }}>
           {codeDelta ? (
             <pre className="pre-block mt-1" style={{ maxHeight: 200, overflow: "auto", fontSize: "11.5px" }}>
               {codeDelta}
@@ -302,6 +308,7 @@ export function SingleAssetWorkflowCard() {
           variant="accent"
           onClick={() => void runPlan()}
           disabled={!requirements.trim() || phase !== "idle" || !project}
+          data-testid="single-asset-plan-submit"
         >
           1. Generate Plan
         </Button>
@@ -309,6 +316,7 @@ export function SingleAssetWorkflowCard() {
           variant="accent"
           onClick={() => void runCode()}
           disabled={!planItem || !project || phase !== "plan_done"}
+          data-testid="single-asset-code-submit"
         >
           2. Generate Code
         </Button>

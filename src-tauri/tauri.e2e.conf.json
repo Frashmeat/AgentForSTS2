@@ -1,0 +1,33 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "beforeBuildCommand": "npm run build:e2e"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "AgentTheSpire · STS2 mod cockpit",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 960,
+        "minHeight": 640,
+        "decorations": true,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "capabilities": [
+        "default",
+        {
+          "identifier": "e2e-wdio",
+          "description": "WebdriverIO permissions for explicit E2E builds only",
+          "windows": ["main"],
+          "permissions": [
+            "wdio:default",
+            "wdio-webdriver:default"
+          ]
+        }
+      ]
+    }
+  }
+}

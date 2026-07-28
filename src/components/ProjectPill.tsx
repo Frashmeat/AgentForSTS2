@@ -59,6 +59,7 @@ export function ProjectPill() {
       <button
         onClick={() => setOpen(!open)}
         disabled={busy}
+        data-testid="project-menu"
         style={{
           display: "inline-flex", alignItems: "center", gap: "6px",
           padding: "3px 10px", borderRadius: "4px", border: "none", cursor: "pointer",
@@ -108,6 +109,7 @@ export function ProjectPill() {
           <div style={{ borderTop: "1px solid var(--rule-soft)", marginTop: "4px", paddingTop: "4px" }}>
             <button
               onClick={() => setShowCreate(true)}
+              data-testid="project-create-open"
               style={{ width: "100%", padding: "6px 8px", border: "none", background: "none",
                 cursor: "pointer", textAlign: "left", fontSize: "12px", color: "var(--accent)" }}
             >
@@ -137,6 +139,7 @@ export function ProjectPill() {
           <div style={{ marginBottom: "6px" }}>
             <div style={{ fontSize: "10px", color: "var(--ink-mute)", marginBottom: "2px" }}>父目录</div>
             <input value={parentDir} onChange={(e) => setParentDir(e.target.value)}
+              data-testid="project-parent-dir"
               placeholder="E:/mods" style={{ width: "100%", padding: "4px 6px", fontSize: "12px",
                 border: "1px solid var(--rule-soft)", borderRadius: "3px",
                 background: "var(--paper-soft)", color: "var(--ink)" }} />
@@ -144,6 +147,7 @@ export function ProjectPill() {
           <div style={{ marginBottom: "8px" }}>
             <div style={{ fontSize: "10px", color: "var(--ink-mute)", marginBottom: "2px" }}>工程名</div>
             <input value={newName} onChange={(e) => setNewName(e.target.value)}
+              data-testid="project-name"
               placeholder="my_mod" style={{ width: "100%", padding: "4px 6px", fontSize: "12px",
                 border: "1px solid var(--rule-soft)", borderRadius: "3px",
                 background: "var(--paper-soft)", color: "var(--ink)" }} />
@@ -155,6 +159,7 @@ export function ProjectPill() {
               取消
             </button>
             <button onClick={() => void handleCreate()} disabled={busy}
+              data-testid="project-create-submit"
               style={{ padding: "4px 10px", border: "none", borderRadius: "3px",
                 background: "var(--accent)", cursor: "pointer", fontSize: "12px", color: "#fff" }}>
               创建

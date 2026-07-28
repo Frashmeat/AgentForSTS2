@@ -54,6 +54,12 @@
     "base_url": "",
     "size": ""
   },
+  "knowledge": {
+    "sts2_dll_path": ""
+  },
+  "toolchain": {
+    "godot_exe_path": ""
+  },
   "auth": {
     "session_cookie_name": "agentthespire_session",
     "session_secret": "CHANGE_ME_FOR_WEB_DEPLOYMENT",

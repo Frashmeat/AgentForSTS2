@@ -51,7 +51,19 @@ const snapshot = {
     githubToken: "<empty>",
   },
   knowledge: { sts2DllPath: "C:/game/sts2.dll" },
+  toolchain: { godotExePath: "I:/Godot/godot.exe" },
 };
+
+test("Godot path is loaded and emitted only when changed", () => {
+  const unchanged = formFromSnapshot(snapshot);
+  assert.equal(unchanged.godotExePath, "I:/Godot/godot.exe");
+  assert.deepEqual(buildPatch(unchanged, snapshot), {});
+
+  const changed = { ...unchanged, godotExePath: "D:/Tools/Godot/godot.exe" };
+  assert.deepEqual(buildPatch(changed, snapshot), {
+    toolchain: { godot_exe_path: "D:/Tools/Godot/godot.exe" },
+  });
+});
 
 test("masked GitHub token is not loaded into the editable form", () => {
   const form = formFromSnapshot(snapshot);

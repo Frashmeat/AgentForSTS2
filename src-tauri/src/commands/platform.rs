@@ -22,7 +22,7 @@ use ats_core::platform::{
 use tauri::{AppHandle, Emitter, State};
 
 use crate::AppConfig;
-use crate::commands::project::ActiveProject;
+use crate::commands::project::{ActiveProject, sync_project_local_props};
 
 const JOB_PROGRESS_EVENT: &str = "job-progress";
 
@@ -78,6 +78,9 @@ pub async fn submit_code_generate_job(
     active: State<'_, ActiveProject>,
     request: SubmitCodeGenerateRequest,
 ) -> Result<SubmitJobAck, String> {
+    if let SubmitCodeGenerateRequest::Asset { request: asset } = &request {
+        sync_requested_project(&config, &active, &asset.project_root)?;
+    }
     let service = build_service(&config, &active)?;
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
     let artifacts_dir = active_artifacts_dir(&active)?;
@@ -97,6 +100,7 @@ pub async fn submit_asset_generate_job(
     image_proc_state: State<'_, Arc<crate::commands::image_proc_state::ImageProcState>>,
     request: SubmitAssetGenerateRequest,
 ) -> Result<SubmitJobAck, String> {
+    sync_requested_project(&config, &active, &request.asset_request.project_root)?;
     let service = build_service(&config, &active)?;
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
     let artifacts_dir = active_artifacts_dir(&active)?;
@@ -231,6 +235,7 @@ pub async fn submit_build_project_job(
     active: State<'_, ActiveProject>,
     request: SubmitBuildProjectRequest,
 ) -> Result<SubmitJobAck, String> {
+    sync_requested_project(&config, &active, &request.project_root)?;
     let service = build_service(&config, &active)?;
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
     let job_id = service
@@ -240,6 +245,39 @@ pub async fn submit_build_project_job(
     Ok(SubmitJobAck { job_id })
 }
 
+fn sync_requested_project(
+    config: &State<'_, AppConfig>,
+    active: &State<'_, ActiveProject>,
+    requested_root: &std::path::Path,
+) -> Result<(), String> {
+    let active_root = {
+        let guard = active
+            .0
+            .lock()
+            .map_err(|e| format!("active project lock poisoned: {e}"))?;
+        guard
+            .as_ref()
+            .ok_or_else(|| "no active project — open or create one first".to_string())?
+            .path()
+            .to_path_buf()
+    };
+    let canonical_active = std::fs::canonicalize(&active_root)
+        .map_err(|e| format!("resolve active project {}: {e}", active_root.display()))?;
+    let canonical_requested = std::fs::canonicalize(requested_root).map_err(|e| {
+        format!(
+            "resolve requested project {}: {e}",
+            requested_root.display()
+        )
+    })?;
+    if canonical_active != canonical_requested {
+        return Err(format!(
+            "requested project {} is not the active project {}",
+            requested_root.display(),
+            active_root.display()
+        ));
+    }
+    sync_project_local_props(&active_root, &config.settings_snapshot()).map(|_| ())
+}
 
 fn active_artifacts_dir(active: &State<'_, ActiveProject>) -> Result<PathBuf, String> {
     let guard = active

@@ -29,6 +29,7 @@ pub struct Settings {
     pub llm: LlmConfig,
     pub image_gen: ImageGenConfig,
     pub knowledge: KnowledgeConfig,
+    pub toolchain: ToolchainConfig,
     pub auth: AuthConfig,
 }
 
@@ -89,6 +90,14 @@ pub struct KnowledgeConfig {
     #[serde(default)]
     pub sts2_dll_path: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "snake_case")]
+pub struct ToolchainConfig {
+    /// Godot 4.5.1 executable used by the STS2 MSBuild export target.
+    #[serde(default)]
+    pub godot_exe_path: String,
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "snake_case")]
 pub struct AuthConfig {
@@ -132,6 +141,7 @@ impl Settings {
             },
             image_gen: ImageGenConfig::default(),
             knowledge: KnowledgeConfig::default(),
+            toolchain: ToolchainConfig::default(),
             auth: AuthConfig {
                 session_cookie_name: "agentthespire_session".into(),
                 session_secret: String::new(),

@@ -28,7 +28,11 @@ export function JobsCard() {
       title="Jobs"
       subtitle="submit any handler — text_generate / asset / build / package / log / knowledge"
     >
-      {error && <Notice variant="error" title={`Error: ${error}`} className="mb-3" />}
+      {error && (
+        <div data-testid="job-error">
+          <Notice variant="error" title={`Error: ${error}`} className="mb-3" />
+        </div>
+      )}
 
       <details open className="mb-4">
         <summary

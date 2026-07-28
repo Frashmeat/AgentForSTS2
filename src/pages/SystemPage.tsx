@@ -35,6 +35,7 @@ function TabBar({ active, onSelect }: { active: string; onSelect: (tab: string) 
     <div className="flex gap-1 mb-4" style={{ borderBottom: "1px solid var(--rule-soft)" }}>
       {tabs.map((t) => (
         <button key={t.id} onClick={() => onSelect(t.id)}
+          data-testid={`system-tab-${t.id}`}
           className="px-4 py-2"
           style={{
             background: "none", border: "none", cursor: "pointer",
@@ -107,7 +108,7 @@ export function SystemPage() {
   async function handleSave() {
     if (!form || !snap) return;
     const patch = buildPatch(form, snap);
-    if (!patch.llm && !patch.image_gen && !patch.runtime_workstation) {
+    if (!patch.llm && !patch.image_gen && !patch.runtime_workstation && !patch.toolchain) {
       setSavedMsg("没有改动"); return;
     }
     setBusy(true); setError(null); setSavedMsg(null);
@@ -122,7 +123,12 @@ export function SystemPage() {
   function renderActions() {
     return (
       <>
-        <Button variant="success" onClick={() => void handleSave()} disabled={busy}>
+        <Button
+          variant="success"
+          onClick={() => void handleSave()}
+          disabled={busy}
+          data-testid="settings-save"
+        >
           {busy ? "Saving…" : "Save"}
         </Button>
         <Button size="sm" onClick={() => void reload()} disabled={busy}>
@@ -143,8 +149,8 @@ export function SystemPage() {
 
     return (
       <>
-        {error && <Notice variant="error" title={`Error: ${error}`} />}
-        {savedMsg && <Notice variant="ok" title={savedMsg} />}
+        {error && <div data-testid="settings-error"><Notice variant="error" title={`Error: ${error}`} /></div>}
+        {savedMsg && <div data-testid="settings-saved"><Notice variant="ok" title={savedMsg} /></div>}
         {!snap && !error && <p style={{ color: "var(--ink-mute)", fontSize: "13px" }}>Loading…</p>}
 
         {snap && form && (
@@ -282,6 +288,19 @@ export function SystemPage() {
               <p className="mt-2" style={{ fontSize: "11.5px", color: "var(--ink-mute)" }}>
                 host/port/CORS 需重启后生效；github_token 保存即热替换。
               </p>
+            </Card>
+
+            {/* ---- Local toolchain card ---- */}
+            <Card eyebrow="local · build toolchain" title="Toolchain">
+              <Field label="Godot executable" hint="保存时校验 Godot 4.5.1">
+                <input
+                  value={form.godotExePath}
+                  onChange={(e) => setForm({ ...form, godotExePath: e.target.value })}
+                  placeholder="I:/Godot/Godot_v4.5.1-stable_win64.exe"
+                  className="input-mono"
+                  data-testid="godot-exe-path"
+                />
+              </Field>
             </Card>
 
             {/* ---- Knowledge card ---- */}

@@ -126,3 +126,80 @@ Assertions must cover type/acronym normalization, inline project context, strict
 Wrong: ask for C# and two JSON files, accept one C# fence, and mark completed without compilation.
 
 Correct: require `{csharp, localization.eng, localization.zhs}`, calculate paths in Rust, transactionally write C#/localization/images, run isolated `dotnet build`, then commit or roll back before job finalization.
+
+## Scenario: Godot Toolchain and local.props Synchronization
+
+### 1. Scope / Trigger
+
+This contract applies when changing desktop toolchain settings, project creation/open, `local.props`, asset/code submission, or `build_project`. It prevents GUI/config/MSBuild drift and prevents E2E from touching real app-data or game Mods.
+
+### 2. Signatures
+
+```text
+Tauri command: save_settings_patch(SettingsPatch) -> SettingsSnapshot
+Tauri commands: create_project, open_project
+Tauri commands: submit_code_generate_job, submit_asset_generate_job, submit_build_project_job
+```
+
+```rust
+validate_godot_executable(path, timeout) -> Result<GodotInstallation, GodotValidationError>
+
+sync_local_props(project_root, LocalBuildPaths {
+    sts2_dll_path,
+    godot_exe_path,
+}) -> Result<LocalPropsSync, LocalPropsError>
+```
+
+Implementations live in `crates/ats-core/src/toolchain.rs`, `crates/ats-core/src/project/local_props.rs`, `src-tauri/src/commands/settings.rs`, `project.rs`, and `platform.rs`.
+
+### 3. Contracts
+
+```text
+config JSON: toolchain.godot_exe_path: string
+Tauri snapshot: toolchain.godotExePath: string
+Tauri patch: toolchain.godot_exe_path?: string | null
+MSBuild: <GodotPath>...</GodotPath>
+```
+
+- Omitted/null patch keeps the current value; `""` explicitly clears it.
+- Non-empty values must be files whose `--version` first line is exactly `4.5.1` or starts with `4.5.1.`. Drain stdout/stderr concurrently while waiting so Godot cannot block on full pipes.
+- Managed XML fields are `SteamLibraryPath` and `GodotPath`. Preserve unknown nodes, attributes, self-closing nodes, and custom `ModsPath`; writes are atomic.
+- Asset/code/build requests must canonicalize to the active project before synchronization.
+- E2E-only env keys are `SPIREFORGE_CONFIG_PATH`, `SPIREFORGE_APP_DATA_ROOT`, `ATS_E2E_GODOT_PATH`, and `ATS_E2E_STS2_DLL_PATH`. E2E WDIO plugins/capabilities must remain behind the Cargo `e2e` feature and E2E Tauri config.
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| Valid Godot 4.5.1 file | Save, hot-reload, and synchronize active project |
+| Empty Godot path | Save empty value; build submission fails before job creation |
+| Missing file | Reject save and keep config/memory unchanged |
+| Godot 4.5.10 or another executable | Reject as unsupported/non-Godot |
+| STS2 DLL outside `steamapps` | Return `MissingSteamapps`; do not write partial XML |
+| Existing custom XML / `ModsPath` | Update only managed fields and preserve custom content |
+| Requested project differs from active project | Reject before asset/build submission |
+
+### 5. Good / Base / Bad Cases
+
+- Good: GUI saves real 4.5.1, creates a project, completes asset compile gate, `dotnet publish`, Godot PCK export, and package in an isolated Mods directory.
+- Base: GUI explicitly clears Godot; config and `local.props` contain an empty value, and build returns a user-actionable not-configured error before creating a job.
+- Bad: a missing file, non-Godot executable, or `4.5.10` is rejected without changing persisted settings.
+
+### 6. Tests Required
+
+```text
+npm run test:frontend
+npx tsc --noEmit
+cargo test -p ats-core --test local_props --test toolchain_config --test godot_toolchain
+cargo check -p agentthespire-desktop
+cargo check -p agentthespire-desktop --features e2e
+npm run test:e2e:gui
+```
+
+Assertions must cover exact version boundaries, large-output pipe draining, explicit clear, self-closing managed XML without duplicates, custom XML preservation, isolated config/app-data/recent projects/Mods, page-switch recovery, DLL/PCK/zip output, and build rejection after clear.
+
+### 7. Wrong vs Correct
+
+Wrong: replace `local.props` as a string template, accept any version starting with `4.5.1`, register WDIO permissions in production, or hard-code a developer's tool path in the runner.
+
+Correct: validate at the settings boundary, synchronize through the shared XML module before project work, inject machine paths through local env/config, and prove Good/Base/Bad through the real Tauri IPC and filesystem chain.

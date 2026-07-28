@@ -1,12 +1,17 @@
 //! Project commands —— 工程文件夹生命周期。
 
 use std::path::{Path, PathBuf};
-use tauri::Emitter;
 use std::sync::Mutex;
+use std::time::Duration;
 
-use ats_core::project::{ProjectFolder, ProjectMeta, RecentEntry, RecentProjects};
+use ats_core::config::Settings;
+use ats_core::project::{
+    LocalBuildPaths, LocalPropsSync, ProjectFolder, ProjectMeta, RecentEntry, RecentProjects,
+    sync_local_props,
+};
+use ats_core::toolchain::validate_godot_executable;
 use serde::Serialize;
-use tauri::State;
+use tauri::{Emitter, State};
 
 use crate::{AppConfig, AppPaths};
 
@@ -55,9 +60,7 @@ pub fn create_project(
     *lock_active(&active)? = Some(folder);
 
     // 尝试从配置中的 STS2 DLL 路径自动生成 local.props
-    let sts2 = &config.settings_snapshot().knowledge.sts2_dll_path;
-    if !sts2.is_empty()
-        && let Err(warn) = try_generate_local_props(Path::new(&snap.path), sts2)
+    if let Err(warn) = sync_project_local_props(Path::new(&snap.path), &config.settings_snapshot())
     {
         eprintln!("local.props auto-generate skipped: {warn}");
     }
@@ -81,10 +84,7 @@ pub fn open_project(
     *lock_active(&active)? = Some(folder);
 
     // 老工程可能没有 local.props——自动从配置中的 STS2 DLL 路径补齐
-    let sts2 = &config.settings_snapshot().knowledge.sts2_dll_path;
-    if !sts2.is_empty()
-        && let Err(warn) = try_generate_local_props(&p, sts2)
-    {
+    if let Err(warn) = sync_project_local_props(&p, &config.settings_snapshot()) {
         eprintln!("local.props auto-generate skipped on open: {warn}");
     }
 
@@ -126,32 +126,51 @@ fn snapshot(folder: &ProjectFolder) -> ProjectSnapshot {
     }
 }
 
-/// 从配置中的 STS2 DLL 路径推导出 SteamLibraryPath，
-/// 并自动生成 `local.props`，使新建工程可立即编译。
-fn try_generate_local_props(project_root: &Path, sts2_dll_path: &str) -> Result<(), String> {
-    let dll = Path::new(sts2_dll_path);
-    // 向上追溯到包含 steamapps 的父目录
-    let mut steam = dll.to_path_buf();
-    loop {
-        if steam.file_name().is_some_and(|n| n.eq_ignore_ascii_case("steamapps")) {
-            break;
-        }
-        steam = steam
-            .parent()
-            .map(Path::to_path_buf)
-            .ok_or_else(|| "cannot find steamapps ancestor".to_string())?;
+pub(crate) fn sync_project_local_props(
+    project_root: &Path,
+    settings: &Settings,
+) -> Result<LocalPropsSync, String> {
+    sync_project_local_props_with_mode(project_root, settings, true)
+}
+
+pub(crate) fn sync_project_local_props_after_settings(
+    project_root: &Path,
+    settings: &Settings,
+) -> Result<LocalPropsSync, String> {
+    sync_project_local_props_with_mode(project_root, settings, false)
+}
+
+fn sync_project_local_props_with_mode(
+    project_root: &Path,
+    settings: &Settings,
+    require_godot: bool,
+) -> Result<LocalPropsSync, String> {
+    let sts2_dll_path = PathBuf::from(&settings.knowledge.sts2_dll_path);
+    if settings.knowledge.sts2_dll_path.is_empty() {
+        return Err("knowledge.sts2_dll_path is not configured".into());
     }
-    let example_path = project_root.join("local.props.example");
-    let example = std::fs::read_to_string(&example_path)
-        .map_err(|e| format!("read local.props.example: {e}"))?;
-    let props = example.replace(
-        "C:/Program Files (x86)/Steam/steamapps",
-        &steam.to_string_lossy(),
-    );
-    let target = project_root.join("local.props");
-    std::fs::write(&target, &props)
-        .map_err(|e| format!("write local.props: {e}"))?;
-    Ok(())
+    if !sts2_dll_path.is_file() {
+        return Err(format!(
+            "configured STS2 DLL is not a file: {}",
+            sts2_dll_path.display()
+        ));
+    }
+    let godot_exe_path = PathBuf::from(&settings.toolchain.godot_exe_path);
+    if require_godot && settings.toolchain.godot_exe_path.is_empty() {
+        return Err("toolchain.godot_exe_path is not configured".into());
+    }
+    if !settings.toolchain.godot_exe_path.is_empty() {
+        validate_godot_executable(&godot_exe_path, Duration::from_secs(5))
+            .map_err(|error| format!("Godot validation failed: {error}"))?;
+    }
+    sync_local_props(
+        project_root,
+        &LocalBuildPaths {
+            sts2_dll_path,
+            godot_exe_path,
+        },
+    )
+    .map_err(|error| format!("sync local.props: {error}"))
 }
 
 fn record_recent(paths: &AppPaths, project_path: &Path, meta: &ProjectMeta) -> Result<(), String> {

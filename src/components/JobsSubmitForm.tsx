@@ -191,6 +191,7 @@ export function JobsSubmitForm({ onSubmitted, onError }: Props) {
         <select
           value={submitKind}
           onChange={(e) => setSubmitKind(e.target.value as SubmitKind)}
+          data-testid="job-kind"
         >
           {KIND_LABELS.map((k) => (
             <option key={k.value} value={k.value}>
@@ -334,6 +335,7 @@ export function JobsSubmitForm({ onSubmitted, onError }: Props) {
             onChange={(e) => setBuildProjectRoot(e.target.value)}
             placeholder="E:/mods/demo_mod/DemoMod"
             className="input-mono"
+            data-testid="job-build-project-root"
           />
         </Field>
       )}
@@ -346,6 +348,7 @@ export function JobsSubmitForm({ onSubmitted, onError }: Props) {
               onChange={(e) => setPackageSourceDir(e.target.value)}
               placeholder="E:/mods/demo_mod/artifacts"
               className="input-mono"
+              data-testid="job-package-source-dir"
             />
           </Field>
           <Field
@@ -357,6 +360,7 @@ export function JobsSubmitForm({ onSubmitted, onError }: Props) {
               onChange={(e) => setPackageOutputPath(e.target.value)}
               placeholder="E:/mods/demo_mod-release.zip"
               className="input-mono"
+              data-testid="job-package-output-path"
             />
           </Field>
         </>
@@ -418,6 +422,7 @@ export function JobsSubmitForm({ onSubmitted, onError }: Props) {
         variant="primary"
         onClick={() => void handleSubmit()}
         disabled={busy}
+        data-testid="job-submit"
       >
         {busy ? "Submitting…" : "Submit"}
       </Button>

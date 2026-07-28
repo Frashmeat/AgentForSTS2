@@ -21,6 +21,7 @@ pub mod platform;
 pub mod project;
 pub mod project_utils;
 pub mod prompting;
+pub mod toolchain;
 
 /// 当前 core 版本号（从 Cargo metadata 注入）。
 #[must_use]

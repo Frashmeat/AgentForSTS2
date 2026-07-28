@@ -15,6 +15,7 @@ export interface FormState {
   igApiKeyTouched: boolean;
   rtGithubToken: string;
   rtGithubTokenTouched: boolean;
+  godotExePath: string;
 }
 
 export function formFromSnapshot(s: SettingsSnapshot): FormState {
@@ -33,6 +34,7 @@ export function formFromSnapshot(s: SettingsSnapshot): FormState {
     igApiKeyTouched: false,
     rtGithubToken: "",
     rtGithubTokenTouched: false,
+    godotExePath: s.toolchain.godotExePath,
   };
 }
 
@@ -61,6 +63,9 @@ export function buildPatch(
 
   if (form.rtGithubTokenTouched) {
     patch.runtime_workstation = { github_token: form.rtGithubToken };
+  }
+  if (form.godotExePath !== original.toolchain.godotExePath) {
+    patch.toolchain = { godot_exe_path: form.godotExePath };
   }
   return patch;
 }

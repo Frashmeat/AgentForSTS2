@@ -6,14 +6,17 @@
 //! 编辑用 `tauri_plugin_shell::ShellExt::shell().open`，跨平台用 OS 默认编辑器。
 //! 改完后用户需要重启 app 让 figment 重新加载（Stage 5 之后再做 hot-reload）。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use ats_core::config::Settings;
+use ats_core::toolchain::validate_godot_executable;
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 use tauri_plugin_shell::ShellExt;
 
 use crate::AppConfig;
+use crate::commands::project::{ActiveProject, sync_project_local_props_after_settings};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,6 +29,7 @@ pub struct SettingsSnapshot {
     pub runtime_workstation: RuntimeSnapshot,
     pub runtime_web: RuntimeSnapshot,
     pub knowledge: KnowledgeSnapshot,
+    pub toolchain: ToolchainSnapshot,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -54,6 +58,12 @@ pub struct ImageGenSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct KnowledgeSnapshot {
     pub sts2_dll_path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolchainSnapshot {
+    pub godot_exe_path: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -94,6 +104,9 @@ pub fn get_settings_snapshot(config: tauri::State<'_, AppConfig>) -> SettingsSna
         knowledge: KnowledgeSnapshot {
             sts2_dll_path: s.knowledge.sts2_dll_path.clone(),
         },
+        toolchain: ToolchainSnapshot {
+            godot_exe_path: s.toolchain.godot_exe_path.clone(),
+        },
     }
 }
 
@@ -105,6 +118,7 @@ pub struct SettingsPatch {
     pub image_gen: Option<ImageGenPatch>,
     pub runtime_workstation: Option<RuntimePatch>,
     pub knowledge: Option<KnowledgePatch>,
+    pub toolchain: Option<ToolchainPatch>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -139,6 +153,12 @@ pub struct RuntimePatch {
 pub struct KnowledgePatch {
     pub sts2_dll_path: Option<String>,
 }
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default, rename_all = "snake_case")]
+pub struct ToolchainPatch {
+    pub godot_exe_path: Option<String>,
+}
 /// 把 patch 合并进当前内存里的 settings + 写回 config.json，然后热替换。
 ///
 /// 设计：
@@ -148,9 +168,36 @@ pub struct KnowledgePatch {
 #[tauri::command]
 pub fn save_settings_patch(
     config: tauri::State<'_, AppConfig>,
+    active: tauri::State<'_, ActiveProject>,
     patch: SettingsPatch,
 ) -> Result<SettingsSnapshot, String> {
-    let mut new_settings = config.settings_snapshot();
+    let new_settings = merge_settings_patch(config.settings_snapshot(), patch)?;
+    let active_root = active
+        .0
+        .lock()
+        .map_err(|error| format!("active project lock poisoned: {error}"))?
+        .as_ref()
+        .map(|project| project.path().to_path_buf());
+    if let Some(project_root) = active_root
+        && !new_settings.knowledge.sts2_dll_path.is_empty()
+    {
+        sync_project_local_props_after_settings(&project_root, &new_settings)?;
+    }
+    let status = config.status_snapshot();
+    let path = status
+        .path
+        .clone()
+        .ok_or_else(|| "no config path resolved — can't save".to_string())?;
+    write_settings_atomic(&PathBuf::from(&path), &new_settings)
+        .map_err(|e| format!("write config: {e}"))?;
+    config.replace_settings(new_settings);
+    Ok(get_settings_snapshot(config))
+}
+
+fn merge_settings_patch(
+    mut new_settings: Settings,
+    patch: SettingsPatch,
+) -> Result<Settings, String> {
     if let Some(p) = patch.llm {
         if let Some(v) = p.provider {
             new_settings.llm.provider = v;
@@ -195,16 +242,16 @@ pub fn save_settings_patch(
     {
         new_settings.knowledge.sts2_dll_path = v;
     }
-
-    let status = config.status_snapshot();
-    let path = status
-        .path
-        .clone()
-        .ok_or_else(|| "no config path resolved — can't save".to_string())?;
-    write_settings_atomic(&PathBuf::from(&path), &new_settings)
-        .map_err(|e| format!("write config: {e}"))?;
-    config.replace_settings(new_settings);
-    Ok(get_settings_snapshot(config))
+    if let Some(p) = patch.toolchain
+        && let Some(v) = p.godot_exe_path
+    {
+        if !v.is_empty() {
+            validate_godot_executable(Path::new(&v), Duration::from_secs(5))
+                .map_err(|error| format!("Godot path validation failed: {error}"))?;
+        }
+        new_settings.toolchain.godot_exe_path = v;
+    }
+    Ok(new_settings)
 }
 
 fn write_settings_atomic(path: &std::path::Path, settings: &Settings) -> std::io::Result<()> {
@@ -281,6 +328,22 @@ pub fn discover_sts2_dll() -> Result<Option<String>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn toolchain_patch_can_explicitly_clear_godot_path() {
+        let mut settings = Settings::default();
+        settings.toolchain.godot_exe_path = "C:/old/godot.exe".into();
+        let patch = SettingsPatch {
+            toolchain: Some(ToolchainPatch {
+                godot_exe_path: Some(String::new()),
+            }),
+            ..SettingsPatch::default()
+        };
+
+        let merged = merge_settings_patch(settings, patch).expect("clear Godot path");
+
+        assert!(merged.toolchain.godot_exe_path.is_empty());
+    }
 
     #[test]
     fn masked_secret_empty() {

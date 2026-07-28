@@ -116,6 +116,9 @@ export const JobsList = forwardRef<JobsListHandle, Props>(function JobsList(
           {list.map((j) => (
             <li
               key={j.id}
+              data-testid="job-row"
+              data-job-kind={j.kind}
+              data-job-status={j.status}
               className="flex items-center gap-3 p-2.5"
               style={{
                 background:

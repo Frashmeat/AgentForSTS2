@@ -194,6 +194,7 @@ export interface SettingsSnapshot {
   runtimeWorkstation: RuntimeSnapshot;
   runtimeWeb: RuntimeSnapshot;
   knowledge: KnowledgeSnapshot;
+  toolchain: ToolchainSnapshot;
 }
 
 export function getSettingsSnapshot(): Promise<SettingsSnapshot> {
@@ -224,6 +225,10 @@ export interface KnowledgeSnapshot {
   sts2DllPath: string;
 }
 
+export interface ToolchainSnapshot {
+  godotExePath: string;
+}
+
 export interface RuntimePatch {
   github_token?: string | null;
 }
@@ -232,11 +237,16 @@ export interface KnowledgePatch {
   sts2_dll_path?: string | null;
 }
 
+export interface ToolchainPatch {
+  godot_exe_path?: string | null;
+}
+
 export interface SettingsPatch {
   llm?: LlmPatch | null;
   image_gen?: ImageGenPatch | null;
   runtime_workstation?: RuntimePatch | null;
   knowledge?: KnowledgePatch | null;
+  toolchain?: ToolchainPatch | null;
 }
 
 export function saveSettingsPatch(patch: SettingsPatch): Promise<SettingsSnapshot> {

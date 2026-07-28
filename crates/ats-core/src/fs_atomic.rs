@@ -11,6 +11,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::{fs as std_fs, io::Write};
 
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
@@ -42,6 +43,26 @@ pub async fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     if let Err(err) = fs::rename(&tmp, path).await {
         let _ = fs::remove_file(&tmp).await;
         return Err(err);
+    }
+    Ok(())
+}
+
+/// 同步版原子写，供同步 Tauri command 和工程配置模块使用。
+pub fn write_atomic_sync(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let tmp = unique_tmp_path(path);
+    let write_result = (|| {
+        let mut file = std_fs::File::create(&tmp)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        Ok::<(), std::io::Error>(())
+    })();
+    if let Err(error) = write_result {
+        let _ = std_fs::remove_file(&tmp);
+        return Err(error);
+    }
+    if let Err(error) = std_fs::rename(&tmp, path) {
+        let _ = std_fs::remove_file(&tmp);
+        return Err(error);
     }
     Ok(())
 }
@@ -114,5 +135,14 @@ mod tests {
         let got = fs::read(&p).await.unwrap();
         assert_eq!(got.len(), 32);
         assert!(got.iter().all(|b| *b == got[0]));
+    }
+
+    #[test]
+    fn sync_write_overwrites_atomically() {
+        let td = tempfile::TempDir::new().unwrap();
+        let path = td.path().join("local.props");
+        write_atomic_sync(&path, b"v1").unwrap();
+        write_atomic_sync(&path, b"v2").unwrap();
+        assert_eq!(std_fs::read(&path).unwrap(), b"v2");
     }
 }
