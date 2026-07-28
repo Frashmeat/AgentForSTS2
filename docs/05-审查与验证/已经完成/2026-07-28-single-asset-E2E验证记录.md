@@ -6,7 +6,7 @@
 >
 > 权威入口：当前进度见 [`2026-07-27-当前进度说明`](../../02-现状/2026-07-27-当前进度说明.md)，后续处置见 [`2026-07-28-统一后续任务清单`](../../03-方案/2026-07-28-统一后续任务清单.md)。
 >
-> 当前状态：已经完成；结论为“真实 build/package 能通过，但自动 codegen 产物仍不可编译，不能视为主链验收通过”。
+> 当前状态：已经完成；首次运行暴露的自动 codegen 主链问题已修复，核心服务复验通过；GUI、游戏内加载、`GodotPath` 产品配置和透明图片质量仍未验证。
 >
 > 最后更新：2026-07-28
 
@@ -22,7 +22,7 @@ ProjectFolder::create
   -> package_project（zip）
 ```
 
-只生成一个最小遗物，未执行 GUI 自动化、全量 workspace 测试、生产 Tauri 构建或安装版验证。为隔离变量，后续在 `.tmp` 工程中人工修正生成源码并补齐本地化，再通过正式 build/package job 验证剩余链路。
+只生成一个最小遗物，未执行 GUI 自动化、全量 workspace 测试、生产 Tauri 构建、安装版或游戏内加载验证。首次运行曾通过人工修正夹具隔离构建问题；修复后复验不再人工修改生成内容。
 
 ## 2. 执行结果
 
@@ -95,7 +95,7 @@ Godot 的 `BasicExport` 使用 `export_filter="all_resources"` 和 `include_filt
 
 最终 PCK 约 3.01 MB。history、items 和 project metadata 不应进入交付包，既增加体积，也扩大内部信息暴露面。
 
-## 4. 结论与下一次验收
+## 4. 首次运行结论与修复顺序
 
 核心 job 编排、真实外部模型调用、DLL/PCK 生成、zip、history 和 audit 均已得到真实证据。人工正确夹具可以完整 build/package，但自动 codegen 产物仍不可编译，因此 single asset 自动主链仍未通过；GUI 也未验证。
 
@@ -107,3 +107,28 @@ Godot 的 `BasicExport` 使用 `export_filter="all_resources"` 和 `include_filt
 4. 把 `GodotPath` 纳入桌面设置和 `local.props` 生成链。
 5. 调整图片 prompt/透明度检查，拒绝棋盘格假透明产物或启用有效的 ML rembg。
 6. 修复后从桌面 GUI 重跑主流程和跨页面进度恢复。
+
+## 5. 修复后核心服务复验
+
+2026-07-28 在全新隔离工程 `.tmp/e2e-runs/1785222129-38860/E2ESingleRelic` 重跑同一链路。运行时通过本机 `local.props` 临时注入 `I:\Godot\Godot_v4.5.1-stable_win64.exe\Godot_v4.5.1-stable_win64.exe`，`ModsPath` 指向该运行目录，没有写入真实游戏 Mods。
+
+脱敏复验摘要位于同级 `.tmp/e2e-runs/1785222129-38860/verification-report.json`；原始 `report.json` 保留了旧 PCK 验证器对 raw PNG 的误判，不能单独作为最终状态依据。
+
+| 阶段 | 结果 | 证据 |
+| --- | --- | --- |
+| `single_asset_plan` | 通过 | 真实 LLM 生成 `E2EEnergySeedRelic` 规划并落盘 item |
+| `asset_generate` | 通过 | 严格 bundle 自动生成 C#、双语本地化和普通/outline/big 三张正式资源；compile gate 为 0 warning / 0 error |
+| `build_project` | 通过 | 未人工修改生成内容，正式 `dotnet publish` completed，DLL/PCK 生成 |
+| `package_project` | 通过 | 6 个文件，2,913,114 未压缩字节生成 2,158,587 字节 zip |
+| history / audit | 通过 | 4 个 job 全部 completed；12 条 submitted/started/terminal audit 一致 |
+| PCK 目录 | 通过 | 11 个真实目录项含双语 JSON、3 个 `.png.import` 和 3 个 `.ctex`；不含 `.ats/`、`artifacts/`、`history/`、`items/`、`packages/`、`Generated/`、`project.json` |
+
+复验过程中 compile gate 还实际拦截并推动修复了两类边界错误：Windows `\\?\` 路径不能直接作为 MSBuild `ModsPath`；`E2EEnergySeedRelic` 必须按 analyzer 规则转换为 `E2_E_ENERGY_SEED_RELIC`。失败运行均回滚正式 C#/本地化/图片，artifact 保留用于诊断。
+
+本轮已修复首次记录中的类型归一化、无工具 prompt 上下文、结构化多文件输出、空输出有限重试、completed 前编译门禁、正式图片资源落盘和 PCK 内部资料过滤。
+
+仍未解决或未验证：
+
+1. `GodotPath` 尚未进入桌面设置和工程创建产品链，本次仍是隔离工程人工注入。
+2. 图片透明度/棋盘格质量与 ML rembg 不在本轮范围，正式资源当前复用同一处理图生成普通/outline/big 变体。
+3. GUI 主流程、跨页面进度恢复、真实游戏加载和安装版仍未验证。

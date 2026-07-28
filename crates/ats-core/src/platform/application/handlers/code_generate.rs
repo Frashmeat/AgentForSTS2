@@ -1,7 +1,7 @@
-//! code_generate handler：PromptAssembler 装 prompt → LLM 流式 → 解 fence → 写 .cs。
+//! code_generate handler：asset 走结构化 bundle + compile gate，custom_code 走单 C# fence。
 //!
-//! Asset 和 CustomCode 两种入参共用同一条主链，区别仅在 prompt 装配步骤。
-//! `generate_and_write_code_artifact` 提取出来给 batch_custom_code 复用。
+//! `generate_and_write_code_artifact` 保留给 custom_code 和 batch_custom_code 复用；
+//! asset 的多文件事务由 `asset_bundle` 模块统一处理。
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -9,17 +9,20 @@ use std::sync::Arc;
 use futures_util::StreamExt;
 use tokio::fs;
 
+use super::asset_bundle::{AssetBundleError, AssetBundleGeneration, validate_project_scope};
+use super::asset_compile::AssetCompileValidator;
 use super::common::{
-    ProgressEvent, ProgressSink, emit_cancelled_mid_stream, finalize_with_error, is_cancelled,
-    transition_to_running,
+    FinalizeOutcome, ProgressEvent, ProgressSink, emit_cancelled_mid_stream, finalize_with_error,
+    finalize_with_success, is_cancelled, transition_to_running,
 };
-use crate::codegen::PromptAssembler;
+use crate::codegen::{AssetKind, PromptAssembler};
 use crate::knowledge::{KnowledgePaths, runtime::detect_source_mode};
 use crate::llm::{CompletionRequest, LlmClient, Message, MessageRole, StreamEvent};
 use crate::platform::contracts::SubmitCodeGenerateRequest;
-use crate::platform::domain::{JobId, JobRepository, JobStatus};
+use crate::platform::domain::{JobId, JobRepository};
 
-pub async fn run_code_generate(
+#[allow(clippy::too_many_arguments)] // handler 直接接收 job 依赖与 compile adapter，保持 service 注入方式一致
+pub(crate) async fn run_code_generate(
     repo: Arc<dyn JobRepository>,
     llm: Arc<dyn LlmClient>,
     sink: Arc<dyn ProgressSink>,
@@ -27,9 +30,33 @@ pub async fn run_code_generate(
     request: SubmitCodeGenerateRequest,
     knowledge_paths: KnowledgePaths,
     artifacts_dir: PathBuf,
+    compile_validator: Arc<dyn AssetCompileValidator>,
 ) {
     if transition_to_running(&repo, &job_id, &sink).await.is_err() {
         return;
+    }
+
+    if let SubmitCodeGenerateRequest::Asset { request: asset } = &request {
+        if let Err(err) = validate_project_scope(&asset.project_root, &artifacts_dir) {
+            finalize_with_error(
+                &repo,
+                &job_id,
+                &sink,
+                &format!("invalid asset project scope: {err}"),
+            )
+            .await;
+            return;
+        }
+        if AssetKind::parse(&asset.asset_type).is_none() {
+            finalize_with_error(
+                &repo,
+                &job_id,
+                &sink,
+                &format!("unsupported asset_type: {}", asset.asset_type),
+            )
+            .await;
+            return;
+        }
     }
 
     let assembler = PromptAssembler::built_in();
@@ -49,64 +76,121 @@ pub async fn run_code_generate(
             return;
         }
     };
-    let entity_name = code_generate_entity_name(&request);
-
-    let artifact = match generate_and_write_code_artifact(
-        Arc::clone(&repo),
-        Arc::clone(&llm),
-        Arc::clone(&sink),
-        &job_id,
-        prompt,
-        &entity_name,
-        &artifacts_dir,
-    )
-    .await
-    {
-        Ok(a) => a,
-        Err(GenerateError::Stream(err)) => {
-            finalize_with_error(&repo, &job_id, &sink, &err).await;
-            return;
+    let (result, output_path) = match &request {
+        SubmitCodeGenerateRequest::Asset {
+            request: asset_request,
+        } => {
+            let generator = AssetBundleGeneration::new(
+                Arc::clone(&repo),
+                Arc::clone(&llm),
+                compile_validator,
+                Arc::clone(&sink),
+            );
+            let artifact = match generator
+                .generate(&job_id, prompt, asset_request, &artifacts_dir, None)
+                .await
+            {
+                Ok(artifact) => artifact,
+                Err(err) => {
+                    finalize_asset_bundle_error(&repo, &job_id, &sink, err).await;
+                    return;
+                }
+            };
+            let output_path = artifact.cs_path.clone();
+            let localization_paths: Vec<String> = artifact
+                .localization_paths
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect();
+            let result = serde_json::json!({
+                "model": artifact.model,
+                "entityName": artifact.entity_name,
+                "csPath": artifact.cs_path.display().to_string(),
+                "artifactCsPath": artifact.artifact_cs_path.display().to_string(),
+                "rawPath": artifact.raw_path.display().to_string(),
+                "localizationPaths": localization_paths,
+                "runtimeImagePaths": artifact.runtime_image_paths.iter().map(|path| path.display().to_string()).collect::<Vec<_>>(),
+                "extractedChars": artifact.extracted_chars,
+                "rawChars": artifact.raw_chars,
+                "usage": { "inputTokens": artifact.usage_in, "outputTokens": artifact.usage_out },
+                "compileGate": {
+                    "exitCode": artifact.compile.exit_code,
+                    "stdoutTail": artifact.compile.stdout_tail,
+                    "stderrTail": artifact.compile.stderr_tail,
+                },
+            });
+            (result, output_path)
         }
-        Err(GenerateError::Write(err)) => {
-            finalize_with_error(&repo, &job_id, &sink, &format!("write artifact: {err}")).await;
-            return;
-        }
-        Err(GenerateError::Cancelled) => {
-            // 已经在 handler 内 emit cancelled-mid-stream；状态机已是 Cancelled，
-            // 不写 result，不动 status，直接退出。
-            return;
+        SubmitCodeGenerateRequest::CustomCode { .. } => {
+            let entity_name = code_generate_entity_name(&request);
+            let artifact = match generate_and_write_code_artifact(
+                Arc::clone(&repo),
+                Arc::clone(&llm),
+                Arc::clone(&sink),
+                &job_id,
+                prompt,
+                &entity_name,
+                &artifacts_dir,
+            )
+            .await
+            {
+                Ok(artifact) => artifact,
+                Err(GenerateError::Stream(err)) => {
+                    finalize_with_error(&repo, &job_id, &sink, &err).await;
+                    return;
+                }
+                Err(GenerateError::Write(err)) => {
+                    finalize_with_error(&repo, &job_id, &sink, &format!("write artifact: {err}"))
+                        .await;
+                    return;
+                }
+                Err(GenerateError::Cancelled) => return,
+            };
+            let output_path = artifact.cs_path.clone();
+            let result = serde_json::json!({
+                "model": artifact.model,
+                "entityName": artifact.entity_name,
+                "csPath": artifact.cs_path.display().to_string(),
+                "artifactCsPath": artifact.artifact_cs_path.display().to_string(),
+                "rawPath": artifact.raw_path.display().to_string(),
+                "extractedChars": artifact.extracted_chars,
+                "rawChars": artifact.raw_chars,
+                "usage": { "inputTokens": artifact.usage_in, "outputTokens": artifact.usage_out },
+            });
+            (result, output_path)
         }
     };
 
-    let job = match repo.get(&job_id).await {
-        Ok(j) => j,
-        Err(_) => return,
-    };
-    if matches!(job.status, JobStatus::Cancelled) {
+    if !matches!(
+        finalize_with_success(&repo, &job_id, result).await,
+        FinalizeOutcome::Completed
+    ) {
         return;
     }
-    let mut job = job;
-    job.status = JobStatus::Completed;
-    job.completed_at = Some(chrono::Utc::now());
-    job.result = Some(serde_json::json!({
-        "model": artifact.model,
-        "entityName": artifact.entity_name,
-        "csPath": artifact.cs_path.display().to_string(),
-        "artifactCsPath": artifact.artifact_cs_path.display().to_string(),
-        "rawPath": artifact.raw_path.display().to_string(),
-        "extractedChars": artifact.extracted_chars,
-        "rawChars": artifact.raw_chars,
-        "usage": { "inputTokens": artifact.usage_in, "outputTokens": artifact.usage_out },
-    }));
-    let _ = repo.update(&job).await;
     sink.emit(ProgressEvent {
         job_id,
         stage: "completed".into(),
         percent: Some(1.0),
-        message: Some(format!("wrote {}", artifact.cs_path.display())),
+        message: Some(format!("wrote {}", output_path.display())),
         delta: None,
     })
     .await;
+}
+
+pub(crate) async fn finalize_asset_bundle_error(
+    repo: &Arc<dyn JobRepository>,
+    job_id: &JobId,
+    sink: &Arc<dyn ProgressSink>,
+    error: AssetBundleError,
+) {
+    let message = match error {
+        AssetBundleError::Stream(err) => format!("asset model stream: {err}"),
+        AssetBundleError::ModelOutput(err) => format!("invalid asset model output: {err}"),
+        AssetBundleError::Write(err) => format!("write asset bundle: {err}"),
+        AssetBundleError::Compile(err) => format!("asset compile gate: {err}"),
+        AssetBundleError::Cancelled => return,
+    };
+    finalize_with_error(repo, job_id, sink, &message).await;
 }
 
 /// 从 SubmitCodeGenerateRequest 提取一个文件名安全的实体名。非 ASCII 字母数字/下划线
@@ -180,7 +264,7 @@ pub(crate) enum GenerateError {
 
 /// 兜底校验：LLM 产出的代码必须有至少一个 C# 声明或 using 语句。
 /// 杜绝"// 假设此处 namespace 为 MyMod4" 类型的占位注释通过检查。
-fn validate_generated_code_skein(text: &str) -> Result<(), GenerateError> {
+pub(crate) fn validate_generated_code_skein(text: &str) -> Result<(), String> {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     let re = RE.get_or_init(|| {
         regex::Regex::new(
@@ -200,10 +284,10 @@ fn validate_generated_code_skein(text: &str) -> Result<(), GenerateError> {
         .collect::<Vec<&str>>()
         .join("\n");
     if non_comment.trim().is_empty() {
-        return Err(GenerateError::Write(
+        return Err(
             "LLM 生成内容只含注释或占位符，无有效 C# 代码。请检查 prompt 或 knowledge 就绪状态后重试"
                 .into(),
-        ));
+        );
     }
     Ok(())
 }
@@ -278,7 +362,7 @@ pub(crate) async fn generate_and_write_code_artifact(
 
     let extracted = extract_code_or_reject(&accumulated)?;
     // 兜底校验：生成的"代码"必须有实际声明结构，不能是纯注释占位符
-    validate_generated_code_skein(&extracted)?;
+    validate_generated_code_skein(&extracted).map_err(GenerateError::Write)?;
 
     let target_dir = artifacts_dir.join(entity_name);
     let artifact_cs_path = target_dir.join(format!("{entity_name}.cs"));

@@ -68,17 +68,32 @@ fn iter_asset_types(query: &KnowledgeQuery) -> Vec<String> {
     if let Some(at) = &query.asset_type
         && !at.is_empty()
     {
-        ordered.push(at.clone());
+        ordered.push(normalize_asset_type(at));
     }
     for at in &query.group_asset_types {
-        if !ordered.iter().any(|x| x == at) {
-            ordered.push(at.clone());
+        let normalized = normalize_asset_type(at);
+        if !ordered.iter().any(|x| x == &normalized) {
+            ordered.push(normalized);
         }
     }
     if ordered.is_empty() && matches!(query.scenario, Some(KnowledgeScenario::CustomCodeCodegen)) {
         ordered.push("custom_code".into());
     }
     ordered
+}
+
+fn normalize_asset_type(raw: &str) -> String {
+    let compact: String = raw
+        .trim()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect();
+    match compact.as_str() {
+        "cardfullscreen" => "card_fullscreen".into(),
+        "customcode" => "custom_code".into(),
+        _ => raw.trim().to_ascii_lowercase(),
+    }
 }
 
 fn files_for_asset_type(asset_type: &str) -> Vec<GuidanceFile> {
@@ -177,6 +192,18 @@ mod tests {
         let keys: Vec<&str> = items.iter().map(|i| i.key.as_str()).collect();
         assert!(keys.contains(&"sts2.guidance.common"));
         assert!(keys.contains(&"sts2.guidance.card"));
+    }
+
+    #[test]
+    fn asset_type_matching_is_case_insensitive() {
+        let query = KnowledgeQuery {
+            scenario: Some(KnowledgeScenario::AssetCodegen),
+            asset_type: Some("Relic".into()),
+            ..Default::default()
+        };
+        let items = Sts2GuidanceProvider.build_guidance(&query);
+        let keys: Vec<&str> = items.iter().map(|i| i.key.as_str()).collect();
+        assert!(keys.contains(&"sts2.guidance.relic"));
     }
 
     #[test]

@@ -197,6 +197,33 @@ mod tests {
     }
 
     #[test]
+    fn scaffold_limits_pck_export_to_runtime_resources() {
+        let td = tempfile::TempDir::new().unwrap();
+        let root = td.path().join("ExportSafe");
+        std::fs::create_dir_all(&root).unwrap();
+
+        scaffold_from_template(&root, "ExportSafe").expect("scaffold");
+
+        let preset = std::fs::read_to_string(root.join("export_presets.cfg")).unwrap();
+        assert!(preset.contains(r#"include_filter="ExportSafe/**/*.json""#));
+        assert!(!preset.contains(r#"include_filter="*.json""#));
+        for excluded in [
+            ".ats/**",
+            "artifacts/**",
+            "history/**",
+            "items/**",
+            "packages/**",
+            "Generated/**",
+            "project.json",
+        ] {
+            assert!(
+                preset.contains(excluded),
+                "missing PCK exclusion: {excluded}"
+            );
+        }
+    }
+
+    #[test]
     fn scaffold_fails_when_target_missing() {
         let td = tempfile::TempDir::new().unwrap();
         let nope = td.path().join("does_not_exist");

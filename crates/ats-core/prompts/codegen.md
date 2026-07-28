@@ -108,39 +108,53 @@ Image assets already generated and placed at:
 {{ img_list }}
 
 ### Project already initialized
-The project at `{{ project_root }}` is already set up (copied from a working template).
-- `MainFile.cs` — entry point (read it to confirm the exact namespace and ModId)
-- `local.props` — managed by current machine settings (do NOT recreate unless the task explicitly requires fixing project path config)
-- `nuget.config` — already correct (do NOT recreate)
-- `Extensions/StringExtensions.cs` — image path helpers, already present
-- `{{ mod_name }}/` — Godot resource dir (named after the MOD, NOT the asset). Images and localization go here.
+The project at `{{ project_root }}` is already set up. The application has read the relevant
+project identity and entry point for you:
+
+{{ project_context }}
+
+- `{{ mod_name }}/` is the Godot resource root.
+- The localization table for this asset is `{{ localization_table }}`.
+- The exact localization key base is `{{ localization_key }}`.
 
 IMPORTANT: The Godot resource directory is `{{ mod_name }}/`, not `{{ asset_name }}/`.
 All image paths and res:// references must use `{{ mod_name }}` as the root.
 
-DO NOT re-clone from GitHub. DO NOT recreate local.props or nuget.config.
-Read MainFile.cs first to confirm the exact namespace and ModId.
+Do not read or write files, run commands, clone repositories, or ask for more context. You only
+produce the structured result below; the application owns file writes and compilation.
 
-Steps to complete:
-1. Read `MainFile.cs` to confirm the namespace and ModId. Read `{{ asset_name }}.csproj` to understand project structure.
-2. If you are unsure of an exact API signature, method name, or base class, read `{{ api_ref_path }}` before writing code.
-3. Create the C# class file for this {{ asset_type }} following BaseLib conventions (see reference above).
+Create the C# class for this {{ asset_type }} following the supplied facts and guidance.
    CRITICAL rules for cards:
    - Cards MUST have [Pool(typeof(SomeCardPool))] attribute (e.g. ColorlessCardPool) — without it the game crashes on startup.
    - Do NOT create a Harmony patch to manually add cards to pools — BaseLib autoAdd handles this.
-4. Create BOTH localization files:
-   - `{{ mod_name }}/localization/eng/<type>s.json` — English
-   - `{{ mod_name }}/localization/zhs/<type>s.json` — Simplified Chinese
-{{ build_step }}
 
-**CRITICAL — OUTPUT FORMAT:**
-- Output the COMPLETE .cs file inside ONE markdown code fence (```csharp ... ```).
-- Do NOT write placeholder comments like "// 此处 namespace...".
-- Do NOT ask which namespace to use — read MainFile.cs and use whatever namespace it declares.
-- Do NOT ask for confirmation before writing. Write the complete file immediately.
+**CRITICAL OUTPUT CONTRACT:**
+- Return one strict JSON object and nothing else. Do not use markdown fences.
+- `csharp` is the complete compilable C# source, JSON-escaped as a string.
+- `localization.eng` and `localization.zhs` are flat string maps with identical keys.
+- Every key must begin with `{{ localization_key }}.`.
+- Include `.title`, `.description`, and, for relics, `.flavor` in both languages.
+- Do not return paths; the application derives safe paths.
+- Do not return placeholder comments or explanatory prose.
 
-Follow the existing code style in the project.
-Follow the existing code style in the project.
+Example shape (replace all values with the requested implementation):
+```json
+{
+  "csharp": "using ...;\n\nnamespace ...;\n\npublic sealed class ... {}",
+  "localization": {
+    "eng": {
+      "{{ localization_key }}.title": "English title",
+      "{{ localization_key }}.description": "English description",
+      "{{ localization_key }}.flavor": "English flavor"
+    },
+    "zhs": {
+      "{{ localization_key }}.title": "中文名称",
+      "{{ localization_key }}.description": "中文描述",
+      "{{ localization_key }}.flavor": "中文风味文本"
+    }
+  }
+}
+```
 
 ## build_prompt
 Run `dotnet publish` in this STS2 mod project (this builds the DLL and exports the Godot .pck file).

@@ -13,7 +13,9 @@
 mod models;
 mod prompt_assembler;
 
+pub(crate) use models::asset_localization_key_segment;
 pub use models::{
-    AssetCodegenRequest, AssetGroupItem, AssetGroupRequest, CustomCodegenRequest, ModProjectRequest,
+    AssetCodegenRequest, AssetGroupItem, AssetGroupRequest, AssetKind, CustomCodegenRequest,
+    ModProjectRequest,
 };
 pub use prompt_assembler::PromptAssembler;

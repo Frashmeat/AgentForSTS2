@@ -4,6 +4,7 @@
 ```csharp
 using BaseLib.Abstracts;      // CustomRelicModel
 using BaseLib.Utils;          // PoolAttribute
+using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Relics;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
@@ -26,6 +27,13 @@ public sealed class FangedGrimoire : CustomRelicModel
     public override string PackedIconPath           => "MyMod/images/relics/fanged_grimoire.png";
     protected override string PackedIconOutlinePath => "MyMod/images/relics/fanged_grimoire_outline.png";
     protected override string BigIconPath           => "MyMod/images/relics/big/fanged_grimoire.png";
+
+    // Exact combat-start hook. Do not use OnCombatStart or add an IRunState parameter.
+    public override async Task BeforeCombatStart()
+    {
+        Flash();
+        await PlayerCmd.GainEnergy(1m, Owner);
+    }
 
     // All hook methods are virtual Task (default returns Task.CompletedTask).
     // Full list of 60+ hooks in sts2_api_reference.md (AbstractModel section).
@@ -66,18 +74,18 @@ Always create BOTH `eng/` and `zhs/` files.
 **pack/MyMod/localization/eng/relics.json**
 ```json
 {
-  "FANGED_GRIMOIRE.title": "Fanged Grimoire",
-  "FANGED_GRIMOIRE.description": "Whenever you deal damage, gain [blue]2[/blue] Block.",
-  "FANGED_GRIMOIRE.flavor": "A tome that feeds on violence."
+  "MYMOD-FANGED_GRIMOIRE.title": "Fanged Grimoire",
+  "MYMOD-FANGED_GRIMOIRE.description": "Whenever you deal damage, gain [blue]2[/blue] Block.",
+  "MYMOD-FANGED_GRIMOIRE.flavor": "A tome that feeds on violence."
 }
 ```
 
 **pack/MyMod/localization/zhs/relics.json**
 ```json
 {
-  "FANGED_GRIMOIRE.title": "獠牙魔典",
-  "FANGED_GRIMOIRE.description": "每当你造成伤害时，获得 [blue]2[/blue] 点格挡。",
-  "FANGED_GRIMOIRE.flavor": "一本以暴力为食的典籍。"
+  "MYMOD-FANGED_GRIMOIRE.title": "獠牙魔典",
+  "MYMOD-FANGED_GRIMOIRE.description": "每当你造成伤害时，获得 [blue]2[/blue] 点格挡。",
+  "MYMOD-FANGED_GRIMOIRE.flavor": "一本以暴力为食的典籍。"
 }
 ```
 ALL custom relics must have .title, .description, and optionally .flavor entries.

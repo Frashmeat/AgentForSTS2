@@ -7,10 +7,16 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::handlers::{
-    ProgressSink, asset_generate::run_asset_generate, batch_custom_code::run_batch_custom_code,
-    build_project::run_build_project, code_generate::run_code_generate,
-    knowledge_refresh::run_knowledge_refresh, log_analysis::run_log_analysis,
-    package_project::run_package_project, single_asset_plan::run_single_asset_plan,
+    ProgressSink,
+    asset_compile::{AssetCompileValidator, DotnetAssetCompileValidator},
+    asset_generate::run_asset_generate,
+    batch_custom_code::run_batch_custom_code,
+    build_project::run_build_project,
+    code_generate::run_code_generate,
+    knowledge_refresh::run_knowledge_refresh,
+    log_analysis::run_log_analysis,
+    package_project::run_package_project,
+    single_asset_plan::run_single_asset_plan,
     text_generate::run_text_generate,
 };
 use crate::image_gen::ImageGenClient;
@@ -29,12 +35,26 @@ use crate::platform::domain::{
 pub struct JobApplicationService {
     repo: Arc<dyn JobRepository>,
     llm: Arc<dyn LlmClient>,
+    asset_compile_validator: Arc<dyn AssetCompileValidator>,
 }
 
 impl JobApplicationService {
     #[must_use]
     pub fn new(repo: Arc<dyn JobRepository>, llm: Arc<dyn LlmClient>) -> Self {
-        Self { repo, llm }
+        Self {
+            repo,
+            llm,
+            asset_compile_validator: Arc::new(DotnetAssetCompileValidator),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_asset_compile_validator(
+        mut self,
+        validator: Arc<dyn AssetCompileValidator>,
+    ) -> Self {
+        self.asset_compile_validator = validator;
+        self
     }
 
     pub async fn get(&self, id: &JobId) -> JobResult<Job> {
@@ -98,11 +118,12 @@ impl JobApplicationService {
         Ok(job_id)
     }
 
-    /// 提交 code_generate 任务：装 prompt → LLM stream → 解 fence → 写文件。
+    /// 提交 code_generate 任务：asset 模式生成结构化 C# + 本地化 bundle 并编译验证；
+    /// custom_code 模式保持单 C# fence 写入流程。
     ///
     /// `knowledge_paths` 来自 ConfigStatus::runtime_dir()（app data 共享），
-    /// 与 active project 解耦。生成的 `.cs` 落到工程的
-    /// `artifacts/<name>/<name>.cs`，原始 markdown 同步存到 `raw.md` 便于排错。
+    /// 与 active project 解耦。原始模型输出和 C# artifact 落到 `artifacts/<name>/`；
+    /// asset 正式文件只在 compile gate 通过后保留。
     pub async fn submit_code_generate(
         &self,
         request: SubmitCodeGenerateRequest,
@@ -118,6 +139,7 @@ impl JobApplicationService {
 
         let repo = Arc::clone(&self.repo);
         let llm = Arc::clone(&self.llm);
+        let compile_validator = Arc::clone(&self.asset_compile_validator);
         let id_for_task = job_id.clone();
         tokio::spawn(async move {
             run_code_generate(
@@ -128,6 +150,7 @@ impl JobApplicationService {
                 request,
                 knowledge_paths,
                 artifacts_dir,
+                compile_validator,
             )
             .await;
         });
@@ -217,7 +240,7 @@ impl JobApplicationService {
         Ok(job_id)
     }
 
-    /// 提交 asset_generate 任务：image_gen 出图 + code_generate 出 .cs。
+    /// 提交 asset_generate 任务：image_gen 出图 + 结构化 C#/本地化生成 + compile gate。
     /// image_prompt 留空时跳过 image_gen，等价于 code_generate(asset) 但通过统一接口。
     /// `image_proc` 走 BgRemoverChain（生产 ML→Simple 回退），失败不致命。
     #[allow(clippy::too_many_arguments)] // 同 handler，DI 注入式 service
@@ -238,6 +261,7 @@ impl JobApplicationService {
 
         let repo = Arc::clone(&self.repo);
         let llm = Arc::clone(&self.llm);
+        let compile_validator = Arc::clone(&self.asset_compile_validator);
         let id_for_task = job_id.clone();
         tokio::spawn(async move {
             run_asset_generate(
@@ -250,6 +274,7 @@ impl JobApplicationService {
                 request,
                 knowledge_paths,
                 artifacts_dir,
+                compile_validator,
             )
             .await;
         });

@@ -8,6 +8,129 @@ use serde::{Deserialize, Serialize};
 
 use crate::planning::PlanItem;
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum AssetKind {
+    Card,
+    CardFullscreen,
+    Relic,
+    Power,
+    Character,
+}
+
+impl AssetKind {
+    #[must_use]
+    pub fn parse(raw: &str) -> Option<Self> {
+        let compact: String = raw
+            .trim()
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .flat_map(char::to_lowercase)
+            .collect();
+        match compact.as_str() {
+            "card" => Some(Self::Card),
+            "cardfullscreen" => Some(Self::CardFullscreen),
+            "relic" => Some(Self::Relic),
+            "power" => Some(Self::Power),
+            "character" => Some(Self::Character),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Card => "card",
+            Self::CardFullscreen => "card_fullscreen",
+            Self::Relic => "relic",
+            Self::Power => "power",
+            Self::Character => "character",
+        }
+    }
+
+    #[must_use]
+    pub const fn localization_table(self) -> &'static str {
+        match self {
+            Self::Card | Self::CardFullscreen => "cards",
+            Self::Relic => "relics",
+            Self::Power => "powers",
+            Self::Character => "characters",
+        }
+    }
+
+    #[must_use]
+    pub const fn required_localization_suffixes(self) -> &'static [&'static str] {
+        match self {
+            Self::Relic => &["title", "description", "flavor"],
+            _ => &["title", "description"],
+        }
+    }
+}
+
+/// 把资产名转换成本地化 key 使用的 ASCII `UPPER_SNAKE_CASE` 片段。
+/// Prompt 契约与落盘校验必须共用这一实现，避免模型看到的 key 与后端验收 key 漂移。
+#[must_use]
+pub(crate) fn asset_localization_key_segment(raw: &str) -> String {
+    let mut out = String::new();
+    let mut previous_is_lower_or_digit = false;
+    let chars: Vec<char> = raw.chars().collect();
+    for (index, ch) in chars.iter().copied().enumerate() {
+        if ch.is_ascii_alphanumeric() {
+            let acronym_boundary = ch.is_ascii_uppercase()
+                && index > 0
+                && chars[index - 1].is_ascii_uppercase()
+                && chars.get(index + 1).is_some_and(char::is_ascii_lowercase);
+            if ch.is_ascii_uppercase()
+                && (previous_is_lower_or_digit || acronym_boundary)
+                && !out.ends_with('_')
+            {
+                out.push('_');
+            }
+            out.push(ch.to_ascii_uppercase());
+            previous_is_lower_or_digit = ch.is_ascii_lowercase() || ch.is_ascii_digit();
+        } else if !out.is_empty() && !out.ends_with('_') {
+            out.push('_');
+            previous_is_lower_or_digit = false;
+        }
+    }
+    out.trim_matches('_').to_string()
+}
+
+#[cfg(test)]
+mod asset_kind_tests {
+    use super::{AssetKind, asset_localization_key_segment};
+
+    #[test]
+    fn parses_supported_types_case_and_separator_insensitively() {
+        assert_eq!(AssetKind::parse("Relic"), Some(AssetKind::Relic));
+        assert_eq!(
+            AssetKind::parse(" card_fullscreen "),
+            Some(AssetKind::CardFullscreen)
+        );
+        assert_eq!(
+            AssetKind::parse("CARD-FULLSCREEN"),
+            Some(AssetKind::CardFullscreen)
+        );
+        assert_eq!(AssetKind::parse("unknown"), None);
+    }
+
+    #[test]
+    fn localization_key_segment_is_shared_and_stable() {
+        assert_eq!(
+            asset_localization_key_segment("EnergySeed Relic"),
+            "ENERGY_SEED_RELIC"
+        );
+        assert_eq!(
+            asset_localization_key_segment("E2EEnergySeedRelic"),
+            "E2_E_ENERGY_SEED_RELIC"
+        );
+        assert_eq!(asset_localization_key_segment("XMLParser"), "XML_PARSER");
+        assert_eq!(
+            asset_localization_key_segment(" energy--seed "),
+            "ENERGY_SEED"
+        );
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "snake_case")]
 pub struct AssetCodegenRequest {
@@ -17,6 +140,7 @@ pub struct AssetCodegenRequest {
     pub image_paths: Vec<PathBuf>,
     pub project_root: PathBuf,
     pub name_zhs: String,
+    /// 控制后续正式 publish 编排；结构化资产生成始终执行隔离的 compile gate。
     pub skip_build: bool,
 }
 

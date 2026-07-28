@@ -9,7 +9,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::codegen::models::{
-    AssetCodegenRequest, AssetGroupRequest, CustomCodegenRequest, ModProjectRequest,
+    AssetCodegenRequest, AssetGroupRequest, AssetKind, CustomCodegenRequest, ModProjectRequest,
+    asset_localization_key_segment,
 };
 use crate::knowledge::{
     KnowledgePacket, KnowledgePaths, KnowledgeQuery, KnowledgeScenario, SourceMode,
@@ -19,9 +20,8 @@ use crate::prompting::{PromptContextAssembler, PromptError, PromptLoader};
 
 const GAME_API_REFERENCE_FILE_NAME: &str = "sts2_api_reference.md";
 
-const FACTS_STUB_MESSAGE: &str = "Structured code facts are not yet available in the Rust port (stage 2.2 todo). \
-Read `MainFile.cs`, the project `.csproj`, and the lookup sources below to verify exact base classes, \
-signatures, resource paths, and registration behavior before writing code.";
+const FACTS_STUB_MESSAGE: &str = "Structured code facts are not available for this request. \
+Use only the inlined Rules And Guidance and project context below. Do not invent API signatures or claim to read local files.";
 
 const FACTS_STUB_WARNING: &str = "### Warnings\n- Structured code facts are unavailable in this build. \
 Treat the guidance summary as best-effort context, not as the authoritative code fact source.";
@@ -62,10 +62,14 @@ impl PromptAssembler {
         paths: &KnowledgePaths,
         game_source_mode: SourceMode,
     ) -> Result<String, PromptError> {
+        let asset_kind = AssetKind::parse(&request.asset_type);
+        let canonical_asset_type = asset_kind
+            .map(AssetKind::as_str)
+            .unwrap_or_else(|| request.asset_type.trim());
         let query = KnowledgeQuery {
             scenario: Some(KnowledgeScenario::AssetCodegen),
             domain: "sts2".into(),
-            asset_type: Some(request.asset_type.clone()),
+            asset_type: Some(canonical_asset_type.to_string()),
             project_root: Some(request.project_root.clone()),
             requirements: Some(request.design_description.clone()),
             item_name: Some(request.asset_name.clone()),
@@ -83,31 +87,31 @@ impl PromptAssembler {
                 request.name_zhs
             )
         };
-        let build_note = "NOTE: Godot headless export always exits with code -1, but if MSBuild reports '0 Error(s)' and the overall dotnet exit code is 0 — that is SUCCESS. Do NOT re-run just because of Godot's -1.";
-        let build_step = if request.skip_build {
-            "6. Do NOT run dotnet publish — the build will be done later after all assets are created.".to_string()
-        } else {
-            format!(
-                "6. Run `dotnet publish` (NOT dotnet build) to compile AND export the Godot .pck file.\n   {build_note}\n   Fix any actual compilation errors and re-run until it succeeds.\n7. Confirm both the .dll and .pck were deployed to the mods folder."
-            )
-        };
-
-        let api_ref = api_ref_path_string(paths);
         let project_root = path_to_posix(&request.project_root);
-        let mod_name = path_basename(&request.project_root);
+        let (mod_name, project_context) = project_context(&request.project_root);
+        let localization_table = asset_kind
+            .map(AssetKind::localization_table)
+            .unwrap_or("unknown");
+        let localization_key = format!(
+            "{}-{}",
+            mod_name.to_ascii_uppercase(),
+            asset_localization_key_segment(&request.asset_name)
+        );
+        let asset_lookup = "No file or tool lookup is available during this request. Use the inlined Code Facts, Rules And Guidance, and project context only.";
 
         let vars = HashMap::from([
-            ("api_ref_path", api_ref.as_str()),
             ("asset_name", request.asset_name.as_str()),
-            ("asset_type", request.asset_type.as_str()),
-            ("build_step", build_step.as_str()),
+            ("asset_type", canonical_asset_type),
             ("design_description", request.design_description.as_str()),
             ("facts", knowledge.facts.as_str()),
             ("guidance", knowledge.guidance.as_str()),
-            ("lookup", knowledge.lookup.as_str()),
+            ("lookup", asset_lookup),
             ("knowledge_warnings", knowledge.warnings.as_str()),
             ("img_list", img_list.as_str()),
+            ("localization_key", localization_key.as_str()),
+            ("localization_table", localization_table),
             ("mod_name", mod_name.as_str()),
+            ("project_context", project_context.as_str()),
             ("project_root", project_root.as_str()),
             ("zhs_hint", zhs_hint.as_str()),
         ]);
@@ -354,6 +358,23 @@ fn path_basename(p: &Path) -> String {
         .unwrap_or_default()
 }
 
+fn project_context(project_root: &Path) -> (String, String) {
+    let meta = std::fs::read_to_string(project_root.join("project.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<crate::project::ProjectMeta>(&text).ok());
+    let mod_name = meta
+        .as_ref()
+        .map(|m| m.csharp_name.trim())
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| path_basename(project_root));
+    let main_file = std::fs::read_to_string(project_root.join("MainFile.cs"))
+        .unwrap_or_else(|_| "(MainFile.cs is unavailable; generation will fail validation)".into());
+    let context =
+        format!("Resolved ModId: {mod_name}\n\nCurrent MainFile.cs:\n```csharp\n{main_file}\n```");
+    (mod_name, context)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -381,13 +402,15 @@ mod tests {
         assert!(prompt.contains("card"));
         assert!(prompt.contains("演示卡"));
         assert!(prompt.contains("demo.png"));
-        assert!(prompt.contains("dotnet publish"));
+        assert!(prompt.contains("strict JSON"));
+        assert!(prompt.contains("localization"));
         // facts stub injected when game source missing
-        assert!(prompt.contains("Structured code facts are not yet available"));
+        assert!(prompt.contains("Structured code facts are not available"));
+        assert!(!prompt.contains("Read `MainFile.cs`"));
     }
 
     #[test]
-    fn asset_prompt_skip_build_omits_publish() {
+    fn asset_prompt_does_not_delegate_file_or_build_operations() {
         let assembler = PromptAssembler::built_in();
         let request = AssetCodegenRequest {
             asset_type: "card".into(),
@@ -399,8 +422,36 @@ mod tests {
         let prompt = assembler
             .assemble_asset_prompt(&request, &paths(), SourceMode::Missing)
             .unwrap();
-        assert!(prompt.contains("Do NOT run dotnet publish"));
-        assert!(!prompt.contains("Run `dotnet publish` (NOT dotnet build) to compile"));
+        assert!(!prompt.contains("Run `dotnet publish`"));
+        assert!(prompt.contains("Do not read or write files"));
+    }
+
+    #[test]
+    fn asset_prompt_normalizes_type_and_inlines_project_context() {
+        let td = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            td.path().join("project.json"),
+            r#"{"name":"demo","csharp_name":"DemoMod","scaffolded":true}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            td.path().join("MainFile.cs"),
+            "namespace DemoMod; public class MainFile {}",
+        )
+        .unwrap();
+        let request = AssetCodegenRequest {
+            asset_type: "Relic".into(),
+            asset_name: "EnergySeedRelic".into(),
+            project_root: td.path().to_path_buf(),
+            ..Default::default()
+        };
+        let prompt = PromptAssembler::built_in()
+            .assemble_asset_prompt(&request, &paths(), SourceMode::Missing)
+            .unwrap();
+        assert!(prompt.contains("new relic"));
+        assert!(prompt.contains("namespace DemoMod"));
+        assert!(prompt.contains("DEMOMOD-ENERGY_SEED_RELIC"));
+        assert!(prompt.contains("relics"));
     }
 
     #[test]
