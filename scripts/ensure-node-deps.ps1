@@ -15,7 +15,7 @@ function Invoke-NpmInstall {
     Write-Host "==> $Reason" -ForegroundColor Cyan
     Push-Location $Root
     try {
-        npm install
+        npm install --include=dev
         if ($LASTEXITCODE -ne 0) {
             throw "npm install failed"
         }
@@ -65,7 +65,7 @@ npm dependencies are still incomplete: $($stillMissing -join ', ')
 The local node_modules directory may have been created on another platform or left in a partial state.
 Run these commands from the repository root, then retry:
   Remove-Item -Recurse -Force .\node_modules
-  npm install
+  npm install --include=dev
 "@
     throw ($message.Trim())
 }
