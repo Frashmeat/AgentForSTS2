@@ -17,7 +17,7 @@ workspace = true
 default = []
 # 透传到 ats-core 的 ml-rembg。生产 Tauri build 用 `cargo tauri build --features ml-rembg`。
 ml-rembg = ["ats-core/ml-rembg"]
-e2e = ["dep:tauri-plugin-wdio", "dep:tauri-plugin-wdio-webdriver"]
+e2e = ["ats-core/e2e", "dep:tauri-plugin-wdio", "dep:tauri-plugin-wdio-webdriver"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

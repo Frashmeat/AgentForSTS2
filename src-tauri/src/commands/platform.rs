@@ -13,8 +13,8 @@ use ats_core::image_proc::{BgRemoverChain, ImageProcClient};
 use ats_core::knowledge::{BaselibSource, GitHubBaselibSource, KnowledgePaths};
 use ats_core::llm::{LlmClient, build_from_config};
 use ats_core::platform::{
-    AuditedJobRepository, FileJobRepository, Job, JobApplicationService, JobId, JobRepository,
-    JobSummary, ProgressEvent, ProgressSink, SubmitAssetGenerateRequest,
+    AuditedJobRepository, FileJobRepository, Job, JobApplicationService, JobError, JobId,
+    JobRepository, JobSummary, ProgressEvent, ProgressSink, SubmitAssetGenerateRequest,
     SubmitBatchCustomCodeRequest, SubmitBuildProjectRequest, SubmitCodeGenerateRequest,
     SubmitJobAck, SubmitKnowledgeRefreshRequest, SubmitLogAnalysisRequest,
     SubmitPackageProjectRequest, SubmitSingleAssetPlanRequest, SubmitTextGenerateRequest,
@@ -48,8 +48,9 @@ pub async fn get_job(
     active: State<'_, ActiveProject>,
     id: String,
 ) -> Result<Job, String> {
-    let service = build_service(&config, &active)?;
-    service.get(&JobId(id)).await.map_err(|e| e.to_string())
+    let repositories = job_repositories(&config, &active)?;
+    let (_, job) = find_job_repository(&repositories, &JobId(id)).await?;
+    Ok(job)
 }
 
 #[tauri::command]
@@ -57,8 +58,14 @@ pub async fn list_jobs(
     config: State<'_, AppConfig>,
     active: State<'_, ActiveProject>,
 ) -> Result<Vec<JobSummary>, String> {
-    let service = build_service(&config, &active)?;
-    service.list().await.map_err(|e| e.to_string())
+    let repositories = job_repositories(&config, &active)?;
+    let mut jobs = Vec::new();
+    for repository in repositories {
+        jobs.extend(repository.list().await.map_err(|e| e.to_string())?);
+    }
+    jobs.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    jobs.dedup_by(|a, b| a.id == b.id);
+    Ok(jobs)
 }
 
 #[tauri::command]
@@ -67,7 +74,9 @@ pub async fn cancel_job(
     active: State<'_, ActiveProject>,
     id: String,
 ) -> Result<(), String> {
-    let service = build_service(&config, &active)?;
+    let repositories = job_repositories(&config, &active)?;
+    let (repository, _) = find_job_repository(&repositories, &JobId(id.clone())).await?;
+    let service = JobApplicationService::new(repository, build_llm_client(&config)?);
     service.cancel(&JobId(id)).await.map_err(|e| e.to_string())
 }
 
@@ -135,23 +144,39 @@ pub async fn submit_knowledge_refresh_job(
 ) -> Result<SubmitJobAck, String> {
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
     let knowledge_paths = KnowledgePaths::from_runtime_dir(&config.status_snapshot().runtime_dir());
-    let baselib_source: Arc<dyn BaselibSource> = Arc::new(
-        GitHubBaselibSource::default_alchyr_with_default_client(
-            Some(config.settings_snapshot().runtime.workstation.github_token.clone())
-                .filter(|t| !t.is_empty()),
+    let github_baselib = GitHubBaselibSource::default_alchyr_with_default_client(
+        Some(
+            config
+                .settings_snapshot()
+                .runtime
+                .workstation
+                .github_token
+                .clone(),
         )
-        .map_err(|e| format!("init baselib source: {e}"))?,
-    );
+        .filter(|t| !t.is_empty()),
+    )
+    .map_err(|e| format!("init baselib source: {e}"))?;
+    #[cfg(feature = "e2e")]
+    let github_baselib = match std::env::var("ATS_E2E_BASELIB_RELEASE_URL") {
+        Ok(url) if !url.is_empty() => github_baselib.with_latest_release_url_override(url),
+        _ => github_baselib,
+    };
+    let baselib_source: Arc<dyn BaselibSource> = Arc::new(github_baselib);
     let sts2_dll_path = PathBuf::from(&config.settings_snapshot().knowledge.sts2_dll_path);
     if sts2_dll_path.as_os_str().is_empty() {
-        return Err("knowledge.sts2_dll_path is not set — configure in System > 运维 > Knowledge".into());
+        return Err(
+            "knowledge.sts2_dll_path is not set — configure in System > 运维 > Knowledge".into(),
+        );
     }
     let mut request = request;
     request.sts2_dll_path = sts2_dll_path;
     let llm = build_llm_client(&config)?;
-    let history_dir = config.status_snapshot().runtime_dir().join("knowledge").join("jobs");
-    std::fs::create_dir_all(&history_dir)
-        .map_err(|e| format!("create knowledge jobs dir: {e}"))?;
+    let history_dir = config
+        .status_snapshot()
+        .runtime_dir()
+        .join("knowledge")
+        .join("jobs");
+    std::fs::create_dir_all(&history_dir).map_err(|e| format!("create knowledge jobs dir: {e}"))?;
     let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history_dir));
     let service = JobApplicationService::new(repo, llm);
     let job_id = service
@@ -322,6 +347,52 @@ fn build_service(
     let repo: Arc<dyn JobRepository> = Arc::new(AuditedJobRepository::new(base_repo, audit_sink));
     let llm = build_llm_client(config)?;
     Ok(JobApplicationService::new(repo, llm))
+}
+
+fn job_repositories(
+    config: &State<'_, AppConfig>,
+    active: &State<'_, ActiveProject>,
+) -> Result<Vec<Arc<dyn JobRepository>>, String> {
+    let mut repositories: Vec<Arc<dyn JobRepository>> = Vec::with_capacity(2);
+    if let Some((history_dir, project_root)) = {
+        let guard = active
+            .0
+            .lock()
+            .map_err(|e| format!("active project lock poisoned: {e}"))?;
+        guard
+            .as_ref()
+            .map(|project| (project.history_dir(), project.path().to_path_buf()))
+    } {
+        let base_repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history_dir));
+        let audit_sink: AuditSinkArc = Arc::new(FileAuditSink::new(project_root));
+        repositories.push(Arc::new(AuditedJobRepository::new(base_repo, audit_sink)));
+    }
+    repositories.push(knowledge_job_repository(config));
+    Ok(repositories)
+}
+
+fn knowledge_job_repository(config: &State<'_, AppConfig>) -> Arc<dyn JobRepository> {
+    Arc::new(FileJobRepository::new(
+        config
+            .status_snapshot()
+            .runtime_dir()
+            .join("knowledge")
+            .join("jobs"),
+    ))
+}
+
+async fn find_job_repository(
+    repositories: &[Arc<dyn JobRepository>],
+    id: &JobId,
+) -> Result<(Arc<dyn JobRepository>, Job), String> {
+    for repository in repositories {
+        match repository.get(id).await {
+            Ok(job) => return Ok((Arc::clone(repository), job)),
+            Err(JobError::NotFound(_)) => continue,
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    Err(JobError::NotFound(id.0.clone()).to_string())
 }
 
 fn build_llm_client(config: &State<'_, AppConfig>) -> Result<Arc<dyn LlmClient>, String> {

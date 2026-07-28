@@ -10,6 +10,8 @@ workspace = true
 
 [features]
 default = []
+# 仅供桌面 GUI E2E 注入本地 GitHub Releases stub；生产构建不启用。
+e2e = []
 # 开启 ML 背景去除（u2netp via ort）。默认关，CI 在 feature off 下跑通；
 # 用户在 Tauri prod build / 自己开发时 cargo build --features ml-rembg 启用。
 # 启用会拉 ~200MB 的 ort + onnxruntime native binaries。Windows 下使用

@@ -395,6 +395,7 @@ export function JobsSubmitForm({ onSubmitted, onError }: Props) {
               onChange={(e) => setKnowledgeDllPath(e.target.value)}
               placeholder="E:/Steam/steamapps/common/SlayTheSpire2/sts2.dll"
               className="input-mono"
+              data-testid="job-knowledge-dll-path"
             />
           </Field>
           <div className="flex flex-wrap gap-4" style={{ fontSize: "13px" }}>
@@ -403,6 +404,7 @@ export function JobsSubmitForm({ onSubmitted, onError }: Props) {
                 type="checkbox"
                 checked={knowledgeForce}
                 onChange={(e) => setKnowledgeForce(e.target.checked)}
+                data-testid="job-knowledge-force"
               />
               <span>force（忽略 manifest 缓存重新反编译）</span>
             </label>
@@ -411,6 +413,7 @@ export function JobsSubmitForm({ onSubmitted, onError }: Props) {
                 type="checkbox"
                 checked={knowledgeIncludeBaselib}
                 onChange={(e) => setKnowledgeIncludeBaselib(e.target.checked)}
+                data-testid="job-knowledge-include-baselib"
               />
               <span>include_baselib（同时拉 BaseLib.dll 反编译）</span>
             </label>

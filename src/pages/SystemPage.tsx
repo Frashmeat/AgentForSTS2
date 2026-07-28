@@ -273,7 +273,8 @@ export function SystemPage() {
               <Field label="github_token" hint="提供后 knowledge_refresh 的 baselib 下载走认证（5000 req/h），避免 GitHub 未认证限流">
                 <input type="password" value={form.rtGithubToken}
                   onChange={(e) => setForm({ ...form, rtGithubToken: e.target.value, rtGithubTokenTouched: true })}
-                  placeholder={snap.runtimeWorkstation.githubToken ? "（未改动 — 保留原值）" : ""} className="input-mono" />
+                  placeholder={snap.runtimeWorkstation.githubToken ? "（未改动 — 保留原值）" : ""} className="input-mono"
+                  data-testid="github-token" />
               </Field>
               <div className="grid grid-cols-2 gap-2 mt-2">
                 <KVList>

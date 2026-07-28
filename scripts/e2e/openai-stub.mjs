@@ -94,6 +94,18 @@ async function streamCompletion(response, content, initialDelay) {
 
 const server = http.createServer(async (request, response) => {
   try {
+    if (request.method === "GET" && request.url === "/baselib/releases/latest") {
+      const authorization = request.headers.authorization ?? "";
+      await record(`baselib_${authorization === "Bearer e2e-401" ? "401" : "403"}`);
+      if (authorization === "Bearer e2e-401") {
+        response.writeHead(401, { "content-type": "application/json" });
+        response.end(JSON.stringify({ message: "Bad credentials", secret: "must-not-leak" }));
+      } else {
+        response.writeHead(403, { "content-type": "application/json" });
+        response.end(JSON.stringify({ message: "API rate limit exceeded for 203.0.113.1" }));
+      }
+      return;
+    }
     if (request.method === "POST" && request.url === "/v1/chat/completions") {
       const body = await readJson(request);
       const isPlan = body.messages?.some((message) =>

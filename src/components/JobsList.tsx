@@ -117,6 +117,7 @@ export const JobsList = forwardRef<JobsListHandle, Props>(function JobsList(
             <li
               key={j.id}
               data-testid="job-row"
+              data-job-id={j.id}
               data-job-kind={j.kind}
               data-job-status={j.status}
               className="flex items-center gap-3 p-2.5"
@@ -193,7 +194,12 @@ export const JobsList = forwardRef<JobsListHandle, Props>(function JobsList(
       )}
 
       {active && (
-        <details open className="mt-3">
+        <details
+          open
+          className="mt-3"
+          data-testid="job-detail"
+          data-job-id={active.id}
+        >
           <summary
             className="cursor-pointer mb-2 flex items-center justify-between gap-2"
             style={{
@@ -226,13 +232,14 @@ export const JobsList = forwardRef<JobsListHandle, Props>(function JobsList(
           </summary>
           {active.error && (
             <p
+              data-testid="job-detail-error"
               className="mb-2 break-all"
               style={{ fontSize: "12px", color: "var(--accent-deep)" }}
             >
               error: {active.error}
             </p>
           )}
-          <pre className="pre-block max-h-96">
+          <pre className="pre-block max-h-96" data-testid="job-detail-result">
             {JSON.stringify(
               active.result ?? { error: active.error, status: active.status },
               null,

@@ -20,6 +20,7 @@ export const config = {
       ATS_E2E_GODOT_PATH: process.env.ATS_E2E_GODOT_PATH,
       ATS_E2E_STS2_DLL_PATH: process.env.ATS_E2E_STS2_DLL_PATH,
       ATS_E2E_STUB_URL: process.env.ATS_E2E_STUB_URL,
+      ATS_E2E_BASELIB_RELEASE_URL: process.env.ATS_E2E_BASELIB_RELEASE_URL,
     },
   }]],
   capabilities: [{

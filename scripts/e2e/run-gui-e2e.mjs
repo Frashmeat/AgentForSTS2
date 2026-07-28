@@ -152,6 +152,7 @@ try {
     ATS_E2E_GODOT_PATH: godotPath,
     ATS_E2E_STS2_DLL_PATH: sts2Path,
     ATS_E2E_STUB_URL: stub.url,
+    ATS_E2E_BASELIB_RELEASE_URL: `${stub.url}/baselib/releases/latest`,
     SPIREFORGE_CONFIG_PATH: configPath,
     SPIREFORGE_APP_DATA_ROOT: appDataRoot,
   };

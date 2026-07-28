@@ -49,6 +49,72 @@ const waitForJob = async (kind, status, timeout = 180_000) => {
   );
 };
 
+const setChecked = async (testId, checked) => {
+  const element = await $(`[data-testid="${testId}"]`);
+  if ((await element.isSelected()) !== checked) await element.click();
+  assert.equal(await element.isSelected(), checked, `${testId} did not change checked state`);
+};
+
+const listedJobIds = async (kind) => browser.execute((expectedKind) => Array.from(
+  document.querySelectorAll('[data-testid="job-row"]'),
+).filter((row) => row.getAttribute("data-job-kind") === expectedKind)
+  .map((row) => row.getAttribute("data-job-id"))
+  .filter(Boolean), kind);
+
+const waitForNewJob = async (kind, status, previousIds, timeout = 240_000) => {
+  let jobId = null;
+  await browser.waitUntil(
+    async () => browser.execute((expectedKind, expectedStatus, oldIds) => {
+      const row = Array.from(document.querySelectorAll('[data-testid="job-row"]')).find(
+        (candidate) => candidate.getAttribute("data-job-kind") === expectedKind
+          && candidate.getAttribute("data-job-status") === expectedStatus
+          && !oldIds.includes(candidate.getAttribute("data-job-id")),
+      );
+      return row?.getAttribute("data-job-id") ?? null;
+    }, kind, status, previousIds).then((id) => {
+      jobId = id;
+      return Boolean(id);
+    }),
+    { timeout, timeoutMsg: `new ${kind} job did not reach ${status}` },
+  );
+  return jobId;
+};
+
+const openJobResult = async (jobId) => {
+  const clicked = await browser.execute((expectedId) => {
+    const row = Array.from(document.querySelectorAll('[data-testid="job-row"]')).find(
+      (candidate) => candidate.getAttribute("data-job-id") === expectedId,
+    );
+    const button = row?.querySelector("button");
+    button?.click();
+    return Boolean(button);
+  }, jobId);
+  assert.equal(clicked, true, `job row ${jobId} was not clickable`);
+  await browser.waitUntil(
+    async () => browser.execute((expectedId) => (
+      document.querySelector('[data-testid="job-detail"]')?.getAttribute("data-job-id")
+        === expectedId
+    ), jobId),
+    { timeout: 15_000, timeoutMsg: `job detail ${jobId} did not open` },
+  );
+  return JSON.parse(await $('[data-testid="job-detail-result"]').getText());
+};
+
+const countFilesWithExtension = async (root, extension) => {
+  let count = 0;
+  const pending = [root];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    const entries = await fs.readdir(current, { withFileTypes: true });
+    for (const entry of entries) {
+      const entryPath = path.join(current, entry.name);
+      if (entry.isDirectory()) pending.push(entryPath);
+      else if (entry.isFile() && path.extname(entry.name).toLowerCase() === extension) count += 1;
+    }
+  }
+  return count;
+};
+
 describe("Godot toolchain settings and project creation", () => {
   it("rejects an invalid Godot path, persists 4.5.1, and synchronizes local.props", async () => {
     const root = requiredEnv("ATS_E2E_ROOT");
@@ -152,6 +218,83 @@ describe("Godot toolchain settings and project creation", () => {
     await $('[data-testid="job-submit"]').click();
     await waitForJob("package_project", "completed");
     await fs.access(packagePath);
+  });
+
+  it("refreshes the complete knowledge source and exposes actionable BaseLib auth errors", async () => {
+    const root = requiredEnv("ATS_E2E_ROOT");
+    const configPath = requiredEnv("SPIREFORGE_CONFIG_PATH");
+    const sts2DllPath = requiredEnv("ATS_E2E_STS2_DLL_PATH");
+
+    await navigate("/system?tab=ops");
+    await waitForTestId("job-kind");
+    await selectValue("job-kind", "knowledge_refresh");
+    await waitForTestId("job-knowledge-dll-path");
+    await $('[data-testid="job-knowledge-dll-path"]').setValue(sts2DllPath);
+    await setChecked("job-knowledge-force", true);
+    const beforeRefresh = await listedJobIds("knowledge_refresh");
+    await $('[data-testid="job-submit"]').click();
+    const refreshJobId = await waitForNewJob(
+      "knowledge_refresh",
+      "completed",
+      beforeRefresh,
+    );
+    const refreshResult = await openJobResult(refreshJobId);
+    assert.equal(refreshResult.baselibIncluded, false);
+    assert.equal(refreshResult.gameCacheHit, false);
+    assert.ok(refreshResult.gameCsFileCount > 2_000);
+
+    const knowledgeRoot = path.join(root, "knowledge");
+    const manifest = JSON.parse(await fs.readFile(
+      path.join(knowledgeRoot, "knowledge-manifest.json"),
+      "utf8",
+    ));
+    const actualCsFiles = await countFilesWithExtension(path.join(knowledgeRoot, "game"), ".cs");
+    assert.equal(actualCsFiles, manifest.game.csFileCount);
+    assert.equal(actualCsFiles, refreshResult.gameCsFileCount);
+    await fs.access(path.join(
+      knowledgeRoot,
+      "game",
+      "MegaCrit.Sts2.Core.Nodes.Screens.Settings",
+      "NSettingsScreen.cs",
+    ));
+
+    for (const scenario of [
+      {
+        token: "e2e-401",
+        status: 401,
+        expected: /invalid or expired.*runtime\.workstation\.github_token/i,
+      },
+      {
+        token: "e2e-403",
+        status: 403,
+        expected: /rate limit.*valid GitHub token/i,
+      },
+    ]) {
+      await navigate("/system?tab=config");
+      await waitForTestId("github-token");
+      await $('[data-testid="github-token"]').setValue(scenario.token);
+      await $('[data-testid="settings-save"]').click();
+      await browser.waitUntil(async () => {
+        const persisted = JSON.parse(await fs.readFile(configPath, "utf8"));
+        return persisted.runtime?.workstation?.github_token === scenario.token;
+      }, { timeout: 15_000, timeoutMsg: `GitHub token for ${scenario.status} was not persisted` });
+
+      await navigate("/system?tab=ops");
+      await waitForTestId("job-kind");
+      await selectValue("job-kind", "knowledge_refresh");
+      await waitForTestId("job-knowledge-dll-path");
+      await $('[data-testid="job-knowledge-dll-path"]').setValue(sts2DllPath);
+      await setChecked("job-knowledge-include-baselib", true);
+      const previousIds = await listedJobIds("knowledge_refresh");
+      await $('[data-testid="job-submit"]').click();
+      const jobId = await waitForNewJob("knowledge_refresh", "completed", previousIds);
+      const result = await openJobResult(jobId);
+      assert.equal(result.gameCacheHit, true);
+      assert.equal(result.baselibStatus, "warning");
+      assert.match(result.baselibError, new RegExp(`API responded ${scenario.status}`));
+      assert.match(result.baselibError, scenario.expected);
+      assert.doesNotMatch(result.baselibError, /must-not-leak|Bad credentials|203\.0\.113\.1/i);
+    }
   });
 
   it("persists an explicit Godot clear and blocks build submission", async () => {

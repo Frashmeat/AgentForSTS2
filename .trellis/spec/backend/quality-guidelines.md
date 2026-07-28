@@ -165,7 +165,7 @@ MSBuild: <GodotPath>...</GodotPath>
 - Non-empty values must be files whose `--version` first line is exactly `4.5.1` or starts with `4.5.1.`. Drain stdout/stderr concurrently while waiting so Godot cannot block on full pipes.
 - Managed XML fields are `SteamLibraryPath` and `GodotPath`. Preserve unknown nodes, attributes, self-closing nodes, and custom `ModsPath`; writes are atomic.
 - Asset/code/build requests must canonicalize to the active project before synchronization.
-- E2E-only env keys are `SPIREFORGE_CONFIG_PATH`, `SPIREFORGE_APP_DATA_ROOT`, `ATS_E2E_GODOT_PATH`, and `ATS_E2E_STS2_DLL_PATH`. E2E WDIO plugins/capabilities must remain behind the Cargo `e2e` feature and E2E Tauri config.
+- E2E-only env keys are `SPIREFORGE_CONFIG_PATH`, `SPIREFORGE_APP_DATA_ROOT`, `ATS_E2E_GODOT_PATH`, `ATS_E2E_STS2_DLL_PATH`, and `ATS_E2E_BASELIB_RELEASE_URL`. E2E WDIO plugins/capabilities and endpoint overrides must remain behind the Cargo `e2e` feature and E2E Tauri config.
 
 ### 4. Validation & Error Matrix
 
@@ -203,3 +203,79 @@ Assertions must cover exact version boundaries, large-output pipe draining, expl
 Wrong: replace `local.props` as a string template, accept any version starting with `4.5.1`, register WDIO permissions in production, or hard-code a developer's tool path in the runner.
 
 Correct: validate at the settings boundary, synchronize through the shared XML module before project work, inject machine paths through local env/config, and prove Good/Base/Bad through the real Tauri IPC and filesystem chain.
+
+## Scenario: Complete Knowledge Refresh and Desktop Job Routing
+
+### 1. Scope / Trigger
+
+This contract applies when changing STS2 source scanning, BaseLib GitHub errors, `knowledge_refresh`, desktop job retrieval, or knowledge GUI E2E. It covers complete fact indexing, optional BaseLib warning semantics, global knowledge job visibility, and E2E isolation. It does not authorize writing the game installation, real Mods, or the repository's formal `runtime/knowledge` during E2E.
+
+### 2. Signatures and Storage
+
+```rust
+Sts2CodeFactsProvider::build_facts(
+    query: &KnowledgeQuery,
+    paths: &KnowledgePaths,
+    game_mode: SourceMode,
+) -> (Vec<KnowledgeFactItem>, Vec<String>)
+
+BaselibSource::fetch_baselib_dll(dest_dir: &Path)
+    -> Result<FetchedBaselib, BaselibError>
+```
+
+```text
+Tauri write: submit_knowledge_refresh_job(request) -> <runtime>/knowledge/jobs
+Tauri read:  get_job(id), list_jobs(), cancel_job(id)
+Project jobs: <project>/.ats/history
+Knowledge jobs: <runtime>/knowledge/jobs
+```
+
+The read commands route across the active project repository and the global knowledge repository. `list_jobs` merges both and sorts by `createdAt` descending. A knowledge refresh must remain observable even when an active project is open.
+
+### 3. Contracts
+
+- Collect `.cs` files first, sort paths deterministically, then scan. The production safety limit is 10,000 files, which exceeds the verified 3,425-file STS2 source while retaining an IO bound.
+- If discovered files exceed the limit, return a warning containing discovered count, scanned limit, and explicit truncation language. Never report a truncated index as complete.
+- A BaseLib failure is optional: preserve the successful game manifest, complete the job with `baselibStatus = "warning"`, and place the actionable message in `baselibError`.
+- GitHub 401 says the token is invalid or expired and names `runtime.workstation.github_token`. Rate-limited 403/429 says to configure a valid token or wait. Other 403 responses say to check permissions.
+- Do not return the raw upstream body for these statuses and never echo tokens, credentials, IP-specific rate-limit text, or unbounded response content.
+- `ATS_E2E_BASELIB_RELEASE_URL` is read only when the desktop and core `e2e` Cargo features are enabled. Production builds always use the official GitHub Releases URL.
+- GUI E2E uses temporary config, runtime, app-data, projects, and Mods. The real STS2 DLL and `ilspycmd` are read-only inputs.
+
+### 4. Validation and Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| 3,425-file current game source | all files indexed; no truncation warning; later symbols resolve from `knowledge/game` |
+| More than 10,000 `.cs` files | scan first 10,000 sorted paths and emit explicit truncation warning |
+| Empty game directory | no facts and the existing no-types warning |
+| BaseLib 401 | game refresh preserved; completed job with actionable invalid/expired-token warning |
+| BaseLib rate-limited 403/429 | game refresh preserved; completed job with valid-token/wait guidance |
+| Other BaseLib 403 | completed warning that directs the user to token permissions |
+| Active project plus knowledge job | merged list and ID lookup expose both repositories |
+| Missing job ID | `JobError::NotFound`; do not silently select another repository |
+
+### 5. Good / Base / Bad Cases
+
+- Good: a forced GUI refresh of the current DLL writes a matching manifest with 3,425 files; `NSettingsScreen` and the core command/model symbols resolve from game sources.
+- Base: repeated scan order is stable; a game cache hit plus `include_baselib = false` completes without network access.
+- Bad: deterministic local 401 and rate-limited 403 responses produce sanitized, actionable `baselibError` values visible in the GUI job detail.
+
+### 6. Tests Required
+
+```text
+cargo test -p ats-core knowledge::
+cargo check -p agentthespire-desktop
+cargo check -p agentthespire-desktop --features e2e
+npm run test:frontend
+npx tsc --noEmit
+npm run test:e2e:gui
+```
+
+Assertions must cover more than the legacy 2,000-file threshold, deterministic ordering, explicit small-limit truncation, empty directory behavior, sanitized 401/403/429 classification, merged job visibility, manifest/source/count consistency, a real later source such as `NSettingsScreen.cs`, and GUI job details. The E2E runner must delete its temporary root only after success and retain it on failure.
+
+### 7. Wrong vs Correct
+
+Wrong: stop during unsorted `WalkDir` enumeration, surface GitHub's raw body, or write a knowledge job to a repository that the GUI never queries.
+
+Correct: sort then bound with an explicit warning, classify external errors into safe actions, route reads across project/global job stores, and prove the complete flow with isolated real-DLL GUI E2E.

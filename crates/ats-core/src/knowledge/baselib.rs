@@ -53,6 +53,8 @@ pub struct GitHubBaselibSource {
     repo: String,
     /// Optional GitHub token for authenticated API requests (avoids 60 req/h rate limit).
     token: Option<String>,
+    #[cfg(feature = "e2e")]
+    latest_release_url_override: Option<String>,
 }
 
 impl GitHubBaselibSource {
@@ -64,6 +66,8 @@ impl GitHubBaselibSource {
             owner: "Alchyr".into(),
             repo: "BaseLib-StS2".into(),
             token: None,
+            #[cfg(feature = "e2e")]
+            latest_release_url_override: None,
         }
     }
 
@@ -74,12 +78,22 @@ impl GitHubBaselibSource {
             owner,
             repo,
             token: None,
+            #[cfg(feature = "e2e")]
+            latest_release_url_override: None,
         }
     }
 
     #[must_use]
     pub fn with_token(mut self, token: Option<String>) -> Self {
         self.token = token.filter(|t| !t.is_empty());
+        self
+    }
+
+    /// 仅供 `e2e` feature 将 GitHub Releases 请求定向到本地确定性 stub。
+    #[cfg(feature = "e2e")]
+    #[must_use]
+    pub fn with_latest_release_url_override(mut self, url: String) -> Self {
+        self.latest_release_url_override = Some(url);
         self
     }
 
@@ -94,6 +108,10 @@ impl GitHubBaselibSource {
     }
 
     fn latest_release_url(&self) -> String {
+        #[cfg(feature = "e2e")]
+        if let Some(url) = &self.latest_release_url_override {
+            return url.clone();
+        }
         format!(
             "https://api.github.com/repos/{}/{}/releases/latest",
             self.owner, self.repo
@@ -136,7 +154,7 @@ impl BaselibSource for GitHubBaselibSource {
                 .unwrap_or_else(|_| "<no body>".into());
             return Err(BaselibError::Api {
                 status: status.as_u16(),
-                message: message.chars().take(500).collect(),
+                message: api_error_message(status.as_u16(), &message),
             });
         }
         let release: GitHubRelease = release_resp
@@ -161,9 +179,10 @@ impl BaselibSource for GitHubBaselibSource {
             .map_err(|e| BaselibError::Http(e.to_string()))?;
         let dl_status = dl_resp.status();
         if !dl_status.is_success() {
+            let message = dl_resp.text().await.unwrap_or_else(|_| "<no body>".into());
             return Err(BaselibError::Api {
                 status: dl_status.as_u16(),
-                message: "asset download failed".into(),
+                message: api_error_message(dl_status.as_u16(), &message),
             });
         }
         let bytes = dl_resp
@@ -199,6 +218,19 @@ fn select_baselib_asset(assets: &[GitHubAsset]) -> Option<&GitHubAsset> {
         let lower = a.name.to_ascii_lowercase();
         lower.ends_with(".dll") && lower.contains("baselib")
     })
+}
+
+fn api_error_message(status: u16, response_body: &str) -> String {
+    let body = response_body.to_ascii_lowercase();
+    match status {
+        401 => "GitHub token is invalid or expired; update or clear runtime.workstation.github_token and retry.".into(),
+        403 if body.contains("rate limit") || body.contains("rate_limit") => {
+            "GitHub API rate limit exceeded; configure a valid GitHub token in runtime.workstation.github_token or wait for the limit to reset.".into()
+        }
+        429 => "GitHub API rate limit exceeded; configure a valid GitHub token in runtime.workstation.github_token or wait for the limit to reset.".into(),
+        403 => "GitHub request was forbidden; check GitHub token permissions in runtime.workstation.github_token and retry.".into(),
+        _ => "GitHub request failed; retry later and check the GitHub service status or network connection.".into(),
+    }
 }
 
 #[cfg(test)]
@@ -260,5 +292,36 @@ mod tests {
             s.latest_release_url(),
             "https://api.github.com/repos/Alchyr/BaseLib-StS2/releases/latest"
         );
+    }
+
+    #[test]
+    fn api_error_explains_invalid_or_expired_token() {
+        let message = api_error_message(
+            401,
+            r#"{\"message\":\"Bad credentials\",\"token\":\"secret\"}"#,
+        );
+        assert!(message.contains("invalid or expired"));
+        assert!(message.contains("runtime.workstation.github_token"));
+        assert!(!message.contains("secret"));
+        assert!(!message.contains("Bad credentials"));
+    }
+
+    #[test]
+    fn api_error_explains_rate_limit_and_forbidden_permissions() {
+        let rate_limit = api_error_message(
+            403,
+            r#"{\"message\":\"API rate limit exceeded for 203.0.113.1\"}"#,
+        );
+        assert!(rate_limit.contains("rate limit"));
+        assert!(rate_limit.contains("valid GitHub token"));
+        assert!(!rate_limit.contains("203.0.113.1"));
+
+        let forbidden = api_error_message(403, r#"{\"message\":\"Resource not accessible\"}"#);
+        assert!(forbidden.contains("permissions"));
+        assert!(forbidden.contains("GitHub token"));
+
+        let throttled = api_error_message(429, "arbitrary upstream body");
+        assert!(throttled.contains("rate limit"));
+        assert!(!throttled.contains("upstream body"));
     }
 }

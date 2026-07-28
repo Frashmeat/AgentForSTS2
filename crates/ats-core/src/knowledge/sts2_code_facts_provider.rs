@@ -4,13 +4,13 @@
 //! 设计取向：
 //! - **regex-only**，不引入完整 C# parser（依赖太重）。只抽 declaration 行，
 //!   不解析 method body
-//! - 单次 build_facts 调用扫一遍游戏目录（最多 max_files 个文件）
+//! - 单次 build_facts 调用确定性地扫描游戏目录（受安全上限保护）
 //! - 按 asset_type / symbols / item_name 三个轴过滤，最多返回 `MAX_FACTS` 条
 //! - 找不到匹配时退化为返回若干"高价值候选"（带 OverrideMember / hook 关键字
 //!   的类型）以免完全空白
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use regex::Regex;
@@ -22,8 +22,8 @@ use crate::knowledge::paths::KnowledgePaths;
 #[derive(Debug, Default, Clone)]
 pub struct Sts2CodeFactsProvider;
 
-/// 单次扫描上限——防止巨型仓库炸 IO。STS2 反编译约几百到几千 .cs，2000 够用。
-const MAX_FILES: usize = 2000;
+/// 单次扫描安全上限。当前完整 STS2 反编译约 3,425 个 .cs 文件，保留足够余量。
+const MAX_FILES: usize = 10_000;
 /// 单次返回 fact 上限，避免 prompt 膨胀。
 const MAX_FACTS: usize = 12;
 /// 单个 fact body 的字符上限。
@@ -102,21 +102,36 @@ struct TypeSymbol {
 
 impl CodeFactsIndex {
     fn scan_dir(&mut self, dir: &Path, warnings: &mut Vec<String>) {
+        self.scan_dir_with_limit(dir, MAX_FILES, warnings);
+    }
+
+    fn scan_dir_with_limit(&mut self, dir: &Path, limit: usize, warnings: &mut Vec<String>) {
         if !dir.is_dir() {
             return;
         }
-        let walker = walkdir::WalkDir::new(dir).max_depth(8);
-        for entry in walker.into_iter().filter_map(Result::ok) {
-            if self.files_scanned as usize >= MAX_FILES {
-                warnings.push(format!(
-                    "已扫描到 MAX_FILES={MAX_FILES} 个 .cs 文件上限，其余被跳过。"
-                ));
-                return;
-            }
-            let p = entry.path();
-            if p.is_file() && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("cs")) {
-                self.scan_file(p, warnings);
-            }
+
+        let mut source_files: Vec<PathBuf> = walkdir::WalkDir::new(dir)
+            .max_depth(8)
+            .into_iter()
+            .filter_map(Result::ok)
+            .map(|entry| entry.into_path())
+            .filter(|path| {
+                path.is_file()
+                    && path
+                        .extension()
+                        .is_some_and(|extension| extension.eq_ignore_ascii_case("cs"))
+            })
+            .collect();
+        source_files.sort();
+
+        if source_files.len() > limit {
+            warnings.push(format!(
+                "检测到 {} 个 .cs 文件，超过安全上限 {limit}；仅索引前 {limit} 个，结果已截断。",
+                source_files.len()
+            ));
+        }
+        for path in source_files.iter().take(limit) {
+            self.scan_file(path, warnings);
         }
     }
 
@@ -657,5 +672,83 @@ namespace STS2.Cards
             SourceMode::RuntimeDecompiled,
         );
         assert_eq!(facts.len(), super::MAX_FACTS);
+    }
+
+    #[test]
+    fn scans_more_than_the_legacy_two_thousand_file_limit() {
+        let td = tempfile::TempDir::new().unwrap();
+        let paths = KnowledgePaths::from_runtime_dir(td.path());
+        crate::knowledge::ensure_dirs(&paths).unwrap();
+
+        for i in 0..2_001 {
+            write_cs(
+                &paths.game_dir,
+                &format!("Generated{i:04}.cs"),
+                &format!("namespace STS2.Generated {{ public class Generated{i:04} {{ }} }}"),
+            );
+        }
+        write_cs(
+            &paths.game_dir,
+            "zzzz/NSettingsScreen.cs",
+            "namespace STS2.Screens { public class NSettingsScreen { } }",
+        );
+
+        let (facts, warnings) = Sts2CodeFactsProvider.build_facts(
+            &KnowledgeQuery {
+                symbols: vec!["NSettingsScreen".into()],
+                ..Default::default()
+            },
+            &paths,
+            SourceMode::RuntimeDecompiled,
+        );
+
+        assert!(
+            facts
+                .iter()
+                .any(|fact| fact.key == "STS2.Screens.NSettingsScreen"),
+            "the complete game source should be indexed; warnings={warnings:?}"
+        );
+        assert!(
+            warnings.iter().all(|warning| !warning.contains("文件上限")),
+            "the normal STS2 source size must not be reported as truncated: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn scan_dir_is_deterministic_and_reports_explicit_truncation() {
+        let td = tempfile::TempDir::new().unwrap();
+        for rel in ["z/Z.cs", "a/A.cs", "m/M.cs"] {
+            write_cs(
+                td.path(),
+                rel,
+                "namespace STS2 { public class Example { } }",
+            );
+        }
+
+        let mut first = CodeFactsIndex::default();
+        let mut first_warnings = Vec::new();
+        first.scan_dir_with_limit(td.path(), 2, &mut first_warnings);
+
+        let mut second = CodeFactsIndex::default();
+        let mut second_warnings = Vec::new();
+        second.scan_dir_with_limit(td.path(), 2, &mut second_warnings);
+
+        let first_paths: Vec<_> = first.types.iter().map(|symbol| &symbol.file_path).collect();
+        let second_paths: Vec<_> = second
+            .types
+            .iter()
+            .map(|symbol| &symbol.file_path)
+            .collect();
+        assert_eq!(first_paths, second_paths);
+        assert!(first_paths[0].ends_with("a\\A.cs") || first_paths[0].ends_with("a/A.cs"));
+        assert!(first_paths[1].ends_with("m\\M.cs") || first_paths[1].ends_with("m/M.cs"));
+        assert_eq!(first.files_scanned, 2);
+        assert_eq!(first_warnings, second_warnings);
+        assert!(
+            first_warnings.iter().any(|warning| {
+                warning.contains("3") && warning.contains("2") && warning.contains("截断")
+            }),
+            "warnings={first_warnings:?}"
+        );
     }
 }
