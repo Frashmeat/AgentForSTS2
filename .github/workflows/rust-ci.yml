@@ -57,6 +57,9 @@ jobs:
       - name: tsc --noEmit
         run: npx tsc --noEmit
 
+      - name: frontend tests
+        run: npm run test:frontend
+
       - name: vite build (generates dist/ that rust-embed needs)
         run: npm run build:web
 

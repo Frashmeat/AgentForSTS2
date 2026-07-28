@@ -12,7 +12,7 @@ pub enum ProjectError {
     AlreadyExists(String),
     #[error("project file missing: {0}")]
     Missing(String),
-    #[error("project is locked by another process (.ats/lock exists): {0}")]
+    #[error("project is locked by another process (.ats/lock is held): {0}")]
     Locked(String),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),

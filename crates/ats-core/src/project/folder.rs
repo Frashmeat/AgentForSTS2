@@ -19,7 +19,6 @@
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
 
@@ -100,8 +99,8 @@ impl ProjectFolder {
         })
     }
 
-    /// 打开已有工程：读 project.json + 持有 lock。
-    /// stale lock（上次进程崩溃残留）自动清理。
+    /// 打开已有工程：读 project.json + 获取操作系统独占文件锁。
+    /// 上次进程退出后锁会由 OS 自动释放，常驻的锁文件可以直接复用。
     pub fn open(path: &Path) -> ProjectResult<Self> {
         if !path.is_dir() {
             return Err(ProjectError::NotADirectory(path.display().to_string()));
@@ -114,7 +113,7 @@ impl ProjectFolder {
         let meta: ProjectMeta = serde_json::from_str(&text)?;
         let ats_dir = path.join(ATS_DIR);
         fs::create_dir_all(&ats_dir)?;
-        let lock = ProjectLock::acquire_clearing_stale(path)?;
+        let lock = ProjectLock::acquire(path)?;
         Ok(Self {
             path: path.to_path_buf(),
             meta,
@@ -191,16 +190,11 @@ fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> ProjectResult<()> {
     Ok(())
 }
 
-/// 文件锁：存在 lock 文件即视为已锁。Drop 时移除。
-///
-/// `acquire`（用于 create）要求 lock 不存在。
-/// `acquire_clearing_stale`（用于 open）直接清理已有 lock 后重建
-/// —— 因为 stale lock 来自上次进程崩溃，而应用层 `ActiveProject`
-/// 已保证不会同时打开同一工程等多个实例。
+/// 跨进程文件锁。锁文件常驻用于诊断，真正的排他性由操作系统文件锁保证；
+/// 进程退出后 OS 自动释放锁，因此不需要删除文件来猜测锁是否陈旧。
 #[derive(Debug)]
 struct ProjectLock {
-    path: PathBuf,
-    released: AtomicBool,
+    _file: fs::File,
 }
 
 impl ProjectLock {
@@ -209,58 +203,23 @@ impl ProjectLock {
         if let Some(parent) = lock_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let pid_text = format!("{}", std::process::id());
-        match fs::OpenOptions::new()
+        let mut file = fs::OpenOptions::new()
+            .read(true)
             .write(true)
-            .create_new(true)
-            .open(&lock_path)
-        {
-            Ok(mut f) => {
-                let _ = f.write_all(pid_text.as_bytes());
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)?;
+        match file.try_lock() {
+            Ok(()) => {}
+            Err(fs::TryLockError::WouldBlock) => {
                 return Err(ProjectError::Locked(project_root.display().to_string()));
             }
-            Err(e) => return Err(e.into()),
+            Err(fs::TryLockError::Error(e)) => return Err(e.into()),
         }
-        Ok(Self {
-            path: lock_path,
-            released: AtomicBool::new(false),
-        })
-    }
-
-    fn acquire_clearing_stale(project_root: &Path) -> ProjectResult<Self> {
-        let lock_path = project_root.join(ATS_DIR).join(LOCK_FILE);
-        let _ = fs::remove_file(&lock_path);
-        if let Some(parent) = lock_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let pid_text = format!("{}", std::process::id());
-        match fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&lock_path)
-        {
-            Ok(mut f) => {
-                let _ = f.write_all(pid_text.as_bytes());
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                return Err(ProjectError::Locked(project_root.display().to_string()));
-            }
-            Err(e) => return Err(e.into()),
-        }
-        Ok(Self {
-            path: lock_path,
-            released: AtomicBool::new(false),
-        })
-    }
-}
-
-impl Drop for ProjectLock {
-    fn drop(&mut self) {
-        if !self.released.swap(true, Ordering::SeqCst) {
-            let _ = fs::remove_file(&self.path);
-        }
+        file.set_len(0)?;
+        file.write_all(std::process::id().to_string().as_bytes())?;
+        file.flush()?;
+        Ok(Self { _file: file })
     }
 }
 
@@ -281,8 +240,8 @@ mod tests {
         assert!(pf.path().join(".ats/lock").is_file());
         assert!(pf.items_dir().is_dir());
         let path = pf.path().to_path_buf();
-        drop(pf); // 释放 lock
-        assert!(!path.join(".ats/lock").exists(), "lock cleaned after drop");
+        drop(pf); // OS 锁释放，诊断文件保留
+        assert!(path.join(".ats/lock").is_file());
         let reopened = ProjectFolder::open(&path).expect("reopen");
         assert_eq!(reopened.meta().name, "demo");
     }
@@ -292,11 +251,24 @@ mod tests {
         let td = tempdir();
         let pf = ProjectFolder::create(td.path(), "x").unwrap();
         let path = pf.path().to_path_buf();
-        // 同进程内 simulate lock 存在
-        drop(pf);
-        // lock 已被 drop 清理，重新 acquire 应成功
         let reopened = ProjectFolder::open(&path);
-        assert!(reopened.is_ok(), "open after drop should work");
+        assert!(
+            matches!(reopened, Err(ProjectError::Locked(_))),
+            "an active project lock must reject a second opener"
+        );
+        drop(pf);
+    }
+
+    #[test]
+    fn released_lock_file_does_not_block_reopen() {
+        let td = tempdir();
+        let pf = ProjectFolder::create(td.path(), "x").unwrap();
+        let path = pf.path().to_path_buf();
+        drop(pf);
+
+        assert!(path.join(".ats/lock").is_file());
+        let reopened = ProjectFolder::open(&path);
+        assert!(reopened.is_ok(), "an unlocked lock file is reusable");
     }
 
     #[test]

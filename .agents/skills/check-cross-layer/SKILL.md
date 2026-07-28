@@ -7,7 +7,7 @@ description: "Cross-Layer Check"
 
 Check if your changes considered all dimensions. Most bugs come from "didn't think of it", not lack of technical skill.
 
-> **Note**: This is a **post-implementation** safety net. Ideally, read the [Pre-Implementation Checklist](.trellis/spec/guides/pre-implementation-checklist.md) **before** writing code.
+> **Note**: This is a **post-implementation** safety net. Read the [Cross-Layer Thinking Guide](../../../.trellis/spec/guides/cross-layer-thinking-guide.md) **before** writing code.
 
 ---
 
@@ -15,8 +15,8 @@ Check if your changes considered all dimensions. Most bugs come from "didn't thi
 
 | Document | Purpose | Timing |
 |----------|---------|--------|
-| [Pre-Implementation Checklist](.trellis/spec/guides/pre-implementation-checklist.md) | Questions before coding | **Before** writing code |
-| [Code Reuse Thinking Guide](.trellis/spec/guides/code-reuse-thinking-guide.md) | Pattern recognition | During implementation |
+| [Cross-Layer Thinking Guide](../../../.trellis/spec/guides/cross-layer-thinking-guide.md) | Questions before coding | **Before** writing code |
+| [Code Reuse Thinking Guide](../../../.trellis/spec/guides/code-reuse-thinking-guide.md) | Pattern recognition | During implementation |
 | **`$check-cross-layer`** (this skill) | Verification check | **After** implementation |
 
 ---
@@ -55,7 +55,7 @@ Based on your change type, execute relevant checks below:
 - [ ] Errors properly propagated to caller?
 - [ ] Loading/pending states handled at each layer?
 
-**Detailed Guide**: `.trellis/spec/guides/cross-layer-thinking-guide.md`
+**Detailed Guide**: `../../../.trellis/spec/guides/cross-layer-thinking-guide.md`
 
 ---
 
@@ -78,7 +78,7 @@ Based on your change type, execute relevant checks below:
 - [ ] After modification, all usage sites updated?
 - [ ] If creating utility: Does similar utility already exist?
 
-**Detailed Guide**: `.trellis/spec/guides/code-reuse-thinking-guide.md`
+**Detailed Guide**: `../../../.trellis/spec/guides/code-reuse-thinking-guide.md`
 
 ---
 

@@ -36,6 +36,7 @@ case "$MODE" in
         # ats-web rust-embed needs dist/ present, so npm steps must run before cargo.
         rm -rf dist
         npm ci
+        npm run test:frontend
         npx tsc --noEmit
         npm run build:web
         cargo check --workspace --all-targets

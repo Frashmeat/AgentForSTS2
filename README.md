@@ -26,10 +26,10 @@
 | Stage 3.1b 桌面端工程文件夹 | ✅ |
 | Stage 3.5 全 9 个 handler（含 asset_generate） | ✅ |
 | Stage 4 LLM（Anthropic + OpenAI 双协议）+ image_gen | ✅ |
-| Stage 5 装配收口（桌面侧） | 🟡 进行中 |
+| Stage 5 桌面端 MVP 收口 | 🟡 真实链路与安装版待人工验收 |
 | Stage 3.1a / 3.3a / 3.6 Web 轨 | ⏳ 中转站决策后启动 |
-| Stage 6 前端业务页 | ✅ 4 个核心页（dashboard / editor / batch / log） |
-| Stage 7 deploy CLI | ✅ 4 子命令 |
+| Stage 6 前端业务页 | ✅ Dashboard / Editor / Batch / Log / System |
+| Stage 7 deploy CLI | ✅ build / deploy / logs / stop / compose template |
 | Stage 8 切换 main | ⏳ |
 
 ## 结构
@@ -40,8 +40,8 @@
 ├── package.json            前端依赖 + 构建脚本
 ├── vite.config.ts          __IS_TAURI__ 编译时变量
 ├── index.html / src/       React/TS 前端
-│   ├── components/         8 个 Card 组件 + Layout
-│   ├── pages/              4 个 page（Dashboard/ModEditor/Batch/Log）
+│   ├── components/         业务 Card + 通用 UI + Layout
+│   ├── pages/              Dashboard/ModEditor/Batch/Log/System
 │   └── services/           api.ts + tauriApi.ts + webApi.ts 双适配
 ├── crates/
 │   ├── ats-core/           纯业务逻辑（无 axum/无 tauri 依赖）
@@ -61,9 +61,9 @@
 │   │   ├── mod_analyzer/   已存在 mod 项目分析
 │   │   └── config/health/errors 基础设施
 │   ├── ats-web/            axum HTTP 服务器（Web 端）
-│   └── ats-cli/            部署/打包/日志 CLI（4 子命令）
+│   └── ats-cli/            构建/部署/日志/停止/模板 CLI
 └── src-tauri/              Tauri v2 桌面壳（Workstation 端）
-    └── src/commands/       11 个命令模块对应 ats-core 服务
+    └── src/commands/       Tauri commands 对应 ats-core 服务
 ```
 
 ## 前置
@@ -83,7 +83,7 @@
 
 ```bash
 # 第一次拉下来
-npm install
+npm install --include=dev
 
 # 桌面应用开发（Vite HMR + Tauri，自动 reload）
 npx tauri dev
@@ -91,8 +91,10 @@ npx tauri dev
 ./dev.ps1
 
 # 如果 node_modules 是从 WSL/Linux/macOS 复制过来的，或安装中断导致
-# node_modules/.bin/vite.cmd / Rollup Windows 原生包缺失，ps1 脚本会
-# 自动尝试 npm install 修复；仍失败时，按提示删除 node_modules 后重装。
+# node_modules/.bin/vite.cmd / Rollup Windows 原生包缺失时，ps1 脚本会
+# 自动尝试 `npm install --include=dev` 修复。
+# 若本机存在 NODE_ENV=production，手动安装也必须带 `--include=dev`；
+# 仍失败时，按提示删除 node_modules 后用同一命令重装。
 
 # Web 服务器开发
 ./dev-web.ps1
@@ -133,6 +135,7 @@ cargo build -p ats-cli --release
 cargo test --workspace               # 200+ unit + integration tests
 cargo check --workspace
 cargo clippy --workspace             # 当前有 pedantic 警告未清；CI advisory 跑
+npm run test:frontend                # 前端纯逻辑回归测试
 npx tsc --noEmit
 npm run build:web
 ```
@@ -200,7 +203,7 @@ Q1 决议：桌面端无 DB，每个 mod 项目是自包含目录：
 ```powershell
 # 桌面开发（带 ml-rembg）
 ./dev.ps1 -MlRembg
-# 桌面生产打包（带 ml-rembg；产物含 onnxruntime native lib）
+# 桌面生产打包（带 ml-rembg；首次运行准备 onnxruntime native lib）
 ./build.ps1 -MlRembg
 # Web 服务器开发
 cargo run -p ats-web --features ml-rembg
@@ -210,11 +213,9 @@ cargo tauri build --features ml-rembg
 
 - 首次启动会下载 ~5MB 的 `u2netp.onnx` 到 `%APPDATA%/AgentTheSpire/models/`
   并做 SHA-256 校验。下载失败 / 网络断开自动回退到启发式（启发式永远 always-on）。
-- **Windows**：`onnxruntime.lib` 静态链接进 exe（验证：build script 输出
-  `cargo:rustc-link-lib=static=onnxruntime`）。运行时需要 `DirectML.dll`，
-  Win10 1903+ 已自带；Win Server LTSC / Win7/8 缺，从 pyke 缓存目录
-  `%LOCALAPPDATA%/ort.pyke.io/dfbin/.../onnxruntime/lib/DirectML.dll` 拷到
-  exe 旁即可。
+- **Windows**：使用 `ort` 的 `load-dynamic` 模式。桌面端首次 ML prewarm 会把官方
+  ONNX Runtime 1.22.0 的 `onnxruntime.dll` 准备到应用数据目录，再通过
+  `ort::init_from` 显式加载；准备或加载失败时回退到启发式背景去除。
 - **macOS / Linux**：当前 ort 2.0 走动态链接 `libonnxruntime.{dylib,so}`，build
   完后用 `otool -L` / `ldd` 看下产物，必要时把 lib 放进 bundle 资源（待真有用户跑
   Mac/Linux 时再补具体步骤）。
@@ -236,7 +237,7 @@ cargo tauri build --features ml-rembg
 ## 工作流偏好
 
 - TDD：每个新模块带 3+ 个 cargo 单测
-- 提交前必跑：`cargo test --workspace` + `npx tsc --noEmit` + `npm run build:web`
+- 提交前必跑：`cargo test --workspace` + `npm run test:frontend` + `npx tsc --noEmit` + `npm run build:web`
 - commit message 用中文，标 stage 编号 + 测试数量
 - ats-core 不引 axum/tauri；ats-web 装配 sqlx；src-tauri 装配 file repo
 - LLM/文件等含外部 IO 的 trait 用 async-trait

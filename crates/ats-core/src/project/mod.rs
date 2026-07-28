@@ -12,7 +12,7 @@
 //! 不在本阶段范围（后续 stage 接）：
 //! - plan.json / items/* / artifacts/* 业务持久化 → 跟随 platform 模块迁移
 //! - credentials.json + OS keyring → stage 5 装配收口前
-//! - 跨进程 fs2 文件锁 → 现在用进程内 Mutex + lock 文件存在性检查兜底
+//! - `.ats/lock` 使用标准库 OS 文件锁实现跨进程排他；锁文件常驻用于诊断
 
 mod error;
 mod folder;
