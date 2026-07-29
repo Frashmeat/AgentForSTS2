@@ -186,6 +186,10 @@ Successful image jobs expose `imageQualityPath`, `imageQuality`, and `runtimeIma
 - Relic normal/outline/big bytes must be pairwise different. Cards, powers, and characters retain their existing preserve behavior until their own role specifications are verified.
 - Before transactional writes, normal and big must pass the standard quality rules at their declared dimensions; outline must contain both non-transparent outline pixels and transparent pixels.
 - Runtime image writes remain in the existing file transaction and roll back on compile failure.
+- `ml-rembg` remains an explicit desktop build feature. Its prewarm downloads ONNX Runtime 1.22.0 and u2netp through the shared cache before installing the ML primary in `BgRemoverChain`.
+- Model and Runtime downloads stream to disk with connect, stall, and total timeouts. An interrupted file is resumed only when the server returns a matching `Content-Range`; a full `200` response truncates the partial file instead of appending it.
+- The u2netp model, ONNX Runtime archive, and extracted DLL use exact SHA-256 baselines. A mismatched cache is never loaded or published.
+- Native ONNX loader panics are converted into `MlBgRemoverError::OrtInit`. On Windows the prewarm failure tells the user to install or repair Microsoft Visual C++ 2015-2022 Redistributable (x64); it must not leave the state stuck at `Loading`.
 
 ### 4. Validation Matrix
 
@@ -195,6 +199,9 @@ Successful image jobs expose `imageQualityPath`, `imageQuality`, and `runtimeIma
 | Invalid PNG or remover failure | fail before LLM/compile; keep raw diagnostic only |
 | Checker/neutral residue on image border | fail with `likely_background_residue`; keep raw/rembg/report |
 | Fully opaque output | fail with `invalid_alpha` |
+| Interrupted model/Runtime download | keep resumable bytes; continue only from a matching HTTP range |
+| Wrong model/archive/DLL checksum | remove the invalid download or extracted target and fail before session creation |
+| Missing/incompatible Windows VC++ Runtime | prewarm becomes `Failed` with an actionable repair message; heuristic fallback remains available |
 | Valid relic master | derive 128 normal, independent 128 outline, and 1024 big |
 | Compile failure after derivation | roll back formal runtime images; diagnostic inputs/report survive |
 
@@ -202,9 +209,12 @@ Successful image jobs expose `imageQualityPath`, `imageQuality`, and `runtimeIma
 
 ```text
 cargo test -p ats-core image_proc::
+cargo test -p ats-core --features ml-rembg init_missing_runtime_returns_error_without_panicking
+cargo test -p ats-core --features ml-rembg loader_panic_returns_actionable_vc_runtime_error
 cargo test -p ats-core platform::application::handlers::asset_generate::tests
 cargo test -p ats-core platform::application::handlers::asset_bundle::tests
 cargo check -p ats-core
+cargo check -p agentthespire-desktop --features ml-rembg
 ```
 
 ## Scenario: Godot Toolchain and local.props Synchronization
@@ -359,3 +369,60 @@ Assertions must cover more than the legacy 2,000-file threshold, deterministic o
 Wrong: stop during unsorted `WalkDir` enumeration, surface GitHub's raw body, or write a knowledge job to a repository that the GUI never queries.
 
 Correct: sort then bound with an explicit warning, classify external errors into safe actions, route reads across project/global job stores, and prove the complete flow with isolated real-DLL GUI E2E.
+
+## Scenario: STS2 Mod Manifest Scaffold Contract
+
+### 1. Scope / Trigger
+
+This contract applies when changing `mod_template/ModTemplate.json` or
+`project::template::scaffold_from_template`. It describes the STS2 `v0.107.1`
+manifest format used by newly scaffolded projects. It does not describe the
+unrelated `runtime/knowledge/knowledge-manifest.json` cache format.
+
+### 2. Current Source Evidence
+
+The current game assembly is
+`<game>/data_sts2_windows_x86_64/sts2.dll`. Direct decompilation of
+`MegaCrit.Sts2.Core.Modding.ModManifest` and `ModDependency` defines:
+
+```json
+{
+  "min_game_version": "0.107.1",
+  "dependencies": [
+    {"id": "BaseLib", "min_version": "v3.3.8"}
+  ]
+}
+```
+
+BaseLib `v3.3.8` is the verified runtime and NuGet package baseline. The game
+temporarily migrates old string-only dependencies in `ReadFromStream`, but
+logs that the compatibility path will be removed.
+
+### 3. Contracts
+
+- `scaffold_from_template` must emit `<CSharpName>.json` with
+  `min_game_version = "0.107.1"`.
+- Each dependency entry must be an object with `id` and `min_version`.
+- The STS2 template must declare BaseLib with `min_version = "v3.3.8"`.
+- `dependencies: ["BaseLib"]` is not an accepted scaffold baseline.
+- Build and package handlers copy or collect this file; they must not rewrite
+  it into another schema.
+- Changes to future game or BaseLib baselines require fresh current-source
+  evidence and synchronized template assertions.
+
+### 4. Validation Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| Good: current game and BaseLib fields | Scaffolded manifest contains the exact minimum versions and object dependency |
+| Base: placeholder replacement | `id` and `name` use the derived C# name while schema fields remain unchanged |
+| Bad: string-only BaseLib dependency | The scaffold regression test fails before the template becomes a release baseline |
+| Bad: missing dependency minimum version | The scaffold regression test fails |
+| Bad: knowledge manifest confused with Mod manifest | No changes are made to `knowledge::manifest` for this contract |
+
+### 5. Targeted Tests
+
+```text
+cargo test -p ats-core project::template::tests
+cargo check -p ats-core
+```

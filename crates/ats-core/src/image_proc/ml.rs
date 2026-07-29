@@ -70,10 +70,47 @@ impl MlBgRemover {
 /// `onnxruntime.dll`。桌面端 prewarm 会先把官方 DLL 准备到 app data，再通过
 /// 这个函数显式绑定路径。
 pub fn init_ort_from_dylib(path: &Path) -> Result<(), MlBgRemoverError> {
-    ort::init_from(path.display().to_string())
-        .commit()
-        .map(|_| ())
-        .map_err(|e| MlBgRemoverError::OrtInit(e.to_string()))
+    if !path.is_file() {
+        return Err(MlBgRemoverError::OrtInit(format!(
+            "ONNX Runtime library does not exist: {}",
+            path.display()
+        )));
+    }
+    run_ort_initializer(path, || {
+        ort::init_from(path.display().to_string())
+            .commit()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    })
+}
+
+fn run_ort_initializer(
+    path: &Path,
+    initialize: impl FnOnce() -> Result<(), String>,
+) -> Result<(), MlBgRemoverError> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(initialize)) {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(message)) => Err(ort_init_error(path, &message)),
+        Err(payload) => {
+            let message = payload
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| payload.downcast_ref::<&str>().copied())
+                .unwrap_or("ONNX Runtime loader panicked");
+            Err(ort_init_error(path, message))
+        }
+    }
+}
+
+fn ort_init_error(path: &Path, detail: &str) -> MlBgRemoverError {
+    #[cfg(windows)]
+    let message = format!(
+        "failed to load {}. Install or repair Microsoft Visual C++ 2015-2022 Redistributable (x64), then restart AgentTheSpire. Loader detail: {detail}",
+        path.display()
+    );
+    #[cfg(not(windows))]
+    let message = format!("failed to load {}: {detail}", path.display());
+    MlBgRemoverError::OrtInit(message)
 }
 
 #[async_trait]
@@ -232,5 +269,25 @@ mod tests {
             Err(e) => e,
         };
         assert!(matches!(err, MlBgRemoverError::OrtSession(_)));
+    }
+
+    #[test]
+    fn init_missing_runtime_returns_error_without_panicking() {
+        let err = init_ort_from_dylib(std::path::Path::new("/definitely/not/onnxruntime.dll"))
+            .unwrap_err();
+        assert!(matches!(err, MlBgRemoverError::OrtInit(_)));
+        assert!(err.to_string().contains("does not exist"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn loader_panic_returns_actionable_vc_runtime_error() {
+        let err = run_ort_initializer(std::path::Path::new("C:/runtime/onnxruntime.dll"), || {
+            panic!("LoadLibraryExW failed")
+        })
+        .unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("Microsoft Visual C++ 2015-2022 Redistributable (x64)"));
+        assert!(message.contains("LoadLibraryExW failed"));
     }
 }

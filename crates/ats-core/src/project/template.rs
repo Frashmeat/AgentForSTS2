@@ -194,6 +194,18 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&txt).unwrap();
         assert_eq!(v["id"], "Gamma");
         assert_eq!(v["name"], "Gamma");
+        assert_eq!(v["min_game_version"], "0.107.1");
+
+        let dependencies = v["dependencies"]
+            .as_array()
+            .expect("dependencies must use the current object schema");
+        assert_eq!(dependencies.len(), 1);
+        assert!(
+            dependencies.iter().all(serde_json::Value::is_object),
+            "old string-only dependency entries are not an accepted scaffold baseline"
+        );
+        assert_eq!(dependencies[0]["id"], "BaseLib");
+        assert_eq!(dependencies[0]["min_version"], "v3.3.8");
     }
 
     #[test]
