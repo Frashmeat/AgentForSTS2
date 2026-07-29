@@ -43,6 +43,7 @@ impl AssetBundleGeneration {
         &self,
         job_id: &JobId,
         prompt: String,
+        evidence_record: &str,
         request: &AssetCodegenRequest,
         artifacts_dir: &Path,
         runtime_image_source: Option<&Path>,
@@ -118,9 +119,15 @@ impl AssetBundleGeneration {
         }
 
         let _write_guard = ASSET_WRITE_LOCK.lock().await;
-        let mut artifact = write_artifacts(artifacts_dir, &entity_name, &bundle.csharp, &final_raw)
-            .await
-            .map_err(AssetBundleError::Write)?;
+        let mut artifact = write_artifacts(
+            artifacts_dir,
+            &entity_name,
+            &bundle.csharp,
+            &final_raw,
+            evidence_record,
+        )
+        .await
+        .map_err(AssetBundleError::Write)?;
         let planned = plan_project_writes(
             request,
             asset_kind,
@@ -181,6 +188,7 @@ impl AssetBundleGeneration {
             cs_path: artifact.cs_path,
             artifact_cs_path: artifact.artifact_cs_path,
             raw_path: artifact.raw_path,
+            evidence_path: artifact.evidence_path,
             localization_paths: artifact.localization_paths,
             runtime_image_paths: artifact.runtime_image_paths,
             extracted_chars: bundle.csharp.len(),
@@ -258,6 +266,7 @@ pub(crate) struct WrittenAssetBundle {
     pub cs_path: PathBuf,
     pub artifact_cs_path: PathBuf,
     pub raw_path: PathBuf,
+    pub evidence_path: PathBuf,
     pub localization_paths: Vec<PathBuf>,
     pub runtime_image_paths: Vec<PathBuf>,
     pub extracted_chars: usize,
@@ -349,6 +358,7 @@ struct ArtifactPaths {
     cs_path: PathBuf,
     artifact_cs_path: PathBuf,
     raw_path: PathBuf,
+    evidence_path: PathBuf,
     localization_paths: Vec<PathBuf>,
     runtime_image_paths: Vec<PathBuf>,
 }
@@ -358,6 +368,7 @@ async fn write_artifacts(
     entity_name: &str,
     csharp: &str,
     raw: &str,
+    evidence_record: &str,
 ) -> Result<ArtifactPaths, String> {
     let target_dir = artifacts_dir.join(entity_name);
     tokio::fs::create_dir_all(&target_dir)
@@ -365,16 +376,21 @@ async fn write_artifacts(
         .map_err(|err| format!("create asset artifact dir: {err}"))?;
     let artifact_cs_path = target_dir.join(format!("{entity_name}.cs"));
     let raw_path = target_dir.join("raw.md");
+    let evidence_path = target_dir.join("evidence.md");
     crate::fs_atomic::write_atomic(&artifact_cs_path, csharp.as_bytes())
         .await
         .map_err(|err| format!("write artifact C#: {err}"))?;
     crate::fs_atomic::write_atomic(&raw_path, raw.as_bytes())
         .await
         .map_err(|err| format!("write raw model output: {err}"))?;
+    crate::fs_atomic::write_atomic(&evidence_path, evidence_record.as_bytes())
+        .await
+        .map_err(|err| format!("write evidence record: {err}"))?;
     Ok(ArtifactPaths {
         cs_path: PathBuf::new(),
         artifact_cs_path,
         raw_path,
+        evidence_path,
         localization_paths: Vec::new(),
         runtime_image_paths: Vec::new(),
     })

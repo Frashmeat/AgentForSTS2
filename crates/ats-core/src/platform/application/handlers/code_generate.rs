@@ -62,15 +62,15 @@ pub(crate) async fn run_code_generate(
     let assembler = PromptAssembler::built_in();
     let mode = detect_source_mode(&knowledge_paths);
     let prompt_result = match &request {
-        SubmitCodeGenerateRequest::Asset { request: req } => {
-            assembler.assemble_asset_prompt(req, &knowledge_paths, mode)
-        }
-        SubmitCodeGenerateRequest::CustomCode { request: req } => {
-            assembler.assemble_custom_code_prompt(req, &knowledge_paths, mode)
-        }
+        SubmitCodeGenerateRequest::Asset { request: req } => assembler
+            .assemble_asset_prompt_with_evidence(req, &knowledge_paths, mode)
+            .map(|assembly| (assembly.prompt, assembly.evidence_record)),
+        SubmitCodeGenerateRequest::CustomCode { request: req } => assembler
+            .assemble_custom_code_prompt(req, &knowledge_paths, mode)
+            .map(|prompt| (prompt, String::new())),
     };
-    let prompt = match prompt_result {
-        Ok(p) => p,
+    let (prompt, evidence_record) = match prompt_result {
+        Ok(value) => value,
         Err(err) => {
             finalize_with_error(&repo, &job_id, &sink, &format!("prompt assembly: {err}")).await;
             return;
@@ -87,7 +87,14 @@ pub(crate) async fn run_code_generate(
                 Arc::clone(&sink),
             );
             let artifact = match generator
-                .generate(&job_id, prompt, asset_request, &artifacts_dir, None)
+                .generate(
+                    &job_id,
+                    prompt,
+                    &evidence_record,
+                    asset_request,
+                    &artifacts_dir,
+                    None,
+                )
                 .await
             {
                 Ok(artifact) => artifact,
@@ -108,6 +115,7 @@ pub(crate) async fn run_code_generate(
                 "csPath": artifact.cs_path.display().to_string(),
                 "artifactCsPath": artifact.artifact_cs_path.display().to_string(),
                 "rawPath": artifact.raw_path.display().to_string(),
+                "evidencePath": artifact.evidence_path.display().to_string(),
                 "localizationPaths": localization_paths,
                 "runtimeImagePaths": artifact.runtime_image_paths.iter().map(|path| path.display().to_string()).collect::<Vec<_>>(),
                 "extractedChars": artifact.extracted_chars,
@@ -137,6 +145,16 @@ pub(crate) async fn run_code_generate(
                 Ok(artifact) => artifact,
                 Err(GenerateError::Stream(err)) => {
                     finalize_with_error(&repo, &job_id, &sink, &err).await;
+                    return;
+                }
+                Err(GenerateError::ModelOutput(err)) => {
+                    finalize_with_error(
+                        &repo,
+                        &job_id,
+                        &sink,
+                        &format!("invalid code model output: {err}"),
+                    )
+                    .await;
                     return;
                 }
                 Err(GenerateError::Write(err)) => {
@@ -257,6 +275,7 @@ pub(crate) struct WrittenArtifact {
 
 pub(crate) enum GenerateError {
     Stream(String),
+    ModelOutput(String),
     Write(String),
     /// 流被取消（job.status=Cancelled）；调用方应当不写 result。
     Cancelled,
@@ -272,24 +291,23 @@ pub(crate) fn validate_generated_code_skein(text: &str) -> Result<(), String> {
         )
         .unwrap()
     });
-    if re.is_match(text) {
-        return Ok(());
+    if !re.is_match(text) {
+        let non_comment: String = text
+            .lines()
+            .filter(|l| {
+                let t = l.trim_start();
+                !t.is_empty() && !t.starts_with("//") && !t.starts_with("/*") && !t.starts_with('*')
+            })
+            .collect::<Vec<&str>>()
+            .join("\n");
+        if non_comment.trim().is_empty() {
+            return Err(
+                "LLM 生成内容只含注释或占位符，无有效 C# 代码。请检查 prompt 或 knowledge 就绪状态后重试"
+                    .into(),
+            );
+        }
     }
-    let non_comment: String = text
-        .lines()
-        .filter(|l| {
-            let t = l.trim_start();
-            !t.is_empty() && !t.starts_with("//") && !t.starts_with("/*") && !t.starts_with('*')
-        })
-        .collect::<Vec<&str>>()
-        .join("\n");
-    if non_comment.trim().is_empty() {
-        return Err(
-            "LLM 生成内容只含注释或占位符，无有效 C# 代码。请检查 prompt 或 knowledge 就绪状态后重试"
-                .into(),
-        );
-    }
-    Ok(())
+    crate::codegen::validate_sts2_generated_csharp(text)
 }
 
 /// 把 prompt 转给 LLM 流式生成，累积响应后解 fence，再写到
@@ -362,7 +380,7 @@ pub(crate) async fn generate_and_write_code_artifact(
 
     let extracted = extract_code_or_reject(&accumulated)?;
     // 兜底校验：生成的"代码"必须有实际声明结构，不能是纯注释占位符
-    validate_generated_code_skein(&extracted).map_err(GenerateError::Write)?;
+    validate_generated_code_skein(&extracted).map_err(GenerateError::ModelOutput)?;
 
     let target_dir = artifacts_dir.join(entity_name);
     let artifact_cs_path = target_dir.join(format!("{entity_name}.cs"));

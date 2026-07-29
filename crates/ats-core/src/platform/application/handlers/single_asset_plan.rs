@@ -30,7 +30,7 @@ JSON 字段（snake_case，全部必填，未涉及的字段输出空字符串�
 - description: 一句话英文描述（卡面/遗物效果原文风格）\n\
 - goal: 设计目标，一句话\n\
 - detailed_description: 详细中文设计说明，3-6 句\n\
-- implementation_notes: 实现要点（涉及哪些 hook / 数值约束），中文\n\
+- implementation_notes: 行为意图、数值约束和需要核实的源码证据，中文；没有当前源码证据时不得猜测具体 hook 名\n\
 - needs_image: bool，是否需要美术图\n\
 - image_description: 若 needs_image=true，描述图片内容；否则空字符串\n\
 - depends_on_item_ids: 字符串数组，依赖项 id 列表\n\
@@ -42,7 +42,8 @@ JSON 字段（snake_case，全部必填，未涉及的字段输出空字符串�
 - clarification_status: 一般填 \"\"，若有未决问题填 \"pending\"\n\
 - clarification_questions: 若有不明确点列出，否则空数组\n\
 - provided_image_b64: 一律输出 \"\"\n\n\
-**重要**：只输出 JSON 对象本体，不要附加说明、不要 markdown fence。\n";
+**重要**：规划阶段不提供游戏源码。不要把方法名看作时序证据，也不要发明 OnCombatStart、OnPlayerStartTurn 等 hook。需要 hook 的行为应在 implementation_notes 中写明“生成时从当前源码检索官方相似实现和生命周期调用方”。\n\
+只输出 JSON 对象本体，不要附加说明、不要 markdown fence。\n";
 
 pub async fn run_single_asset_plan(
     repo: Arc<dyn JobRepository>,
@@ -575,5 +576,12 @@ mod tests {
         };
         let p = build_user_prompt(&req);
         assert!(!p.contains("用户指定资产类型"));
+    }
+
+    #[test]
+    fn planner_prompt_forbids_unsourced_hook_names() {
+        assert!(SYSTEM_PROMPT.contains("不得猜测具体 hook 名"));
+        assert!(SYSTEM_PROMPT.contains("当前源码检索官方相似实现和生命周期调用方"));
+        assert!(SYSTEM_PROMPT.contains("不要发明 OnCombatStart、OnPlayerStartTurn"));
     }
 }

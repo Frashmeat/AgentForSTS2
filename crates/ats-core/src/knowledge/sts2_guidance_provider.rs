@@ -207,6 +207,24 @@ mod tests {
     }
 
     #[test]
+    fn relic_guidance_is_stable_scaffold_without_energy_hook_recipe() {
+        let query = KnowledgeQuery {
+            scenario: Some(KnowledgeScenario::AssetCodegen),
+            asset_type: Some("relic".into()),
+            ..Default::default()
+        };
+        let items = Sts2GuidanceProvider.build_guidance(&query);
+        let relic = items
+            .iter()
+            .find(|item| item.key == "sts2.guidance.relic")
+            .expect("relic guidance");
+        assert!(!relic.body.contains("BeforeCombatStart"));
+        assert!(!relic.body.contains("PlayerCmd.GainEnergy"));
+        assert!(relic.body.contains("Behavior evidence — REQUIRED"));
+        assert!(relic.body.contains("lifecycle caller"));
+    }
+
+    #[test]
     fn custom_code_codegen_defaults_to_custom_code_bundle() {
         let query = KnowledgeQuery {
             scenario: Some(KnowledgeScenario::CustomCodeCodegen),

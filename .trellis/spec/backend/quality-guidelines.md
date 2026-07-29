@@ -127,6 +127,40 @@ Wrong: ask for C# and two JSON files, accept one C# fence, and mark completed wi
 
 Correct: require `{csharp, localization.eng, localization.zhs}`, calculate paths in Rust, transactionally write C#/localization/images, run isolated `dotnet build`, then commit or roll back before job finalization.
 
+## Scenario: Current Source Evidence and Semantic Regression Gate
+
+### 1. Scope / Trigger
+
+This contract applies to generated STS2 C# behavior code. It supplements compile validation; it does not claim that compilation proves runtime semantics or replace user-run real-game acceptance.
+
+### 2. Contracts
+
+- Stable asset templates contain engineering structure only. They must not persist timing-sensitive behavior recipes.
+- `KnowledgeQuery.requirements` selects bounded excerpts from the current decompiled game source. Timing-sensitive evidence includes an official similar implementation and the lifecycle caller for the selected override.
+- A successful structured asset generation preserves `artifacts/<asset>/evidence.md` with the actual knowledge manifest snapshot, source mode, requirement, symbol/path/line evidence, purpose, and injected facts.
+- The reusable validator implements `forbidden_call_in_method`; STS2 supplies the known rule data that forbids `PlayerCmd.GainEnergy` inside `BeforeCombatStart`.
+- Semantic rules execute before artifact/project writes and before the compile validator. Comments, string literals, unrelated methods, and method invocations must not create false positives.
+
+### 3. Validation Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| Current official similar implementation + lifecycle caller found | Both bounded excerpts enter Code Facts and Evidence Record |
+| `BeforeCombatStart` body calls `PlayerCmd.GainEnergy` | Retry/reject as invalid model output before writes and compile |
+| `AfterSideTurnStart` with Owner-side and first-round guards | Semantic rule passes; compile gate remains required |
+| Forbidden text appears only in comments/strings/another method | No semantic false positive |
+| Current source or manifest unavailable | Prompt exposes the knowledge warning; do not claim verified evidence |
+
+### 4. Targeted Tests
+
+```text
+cargo test -p ats-core knowledge::sts2_code_facts_provider::tests
+cargo test -p ats-core codegen::prompt_assembler::tests
+cargo test -p ats-core codegen::validation::tests
+cargo test -p ats-core platform::application::handlers::asset_generate::tests
+cargo check -p ats-core
+```
+
 ## Scenario: Godot Toolchain and local.props Synchronization
 
 ### 1. Scope / Trigger

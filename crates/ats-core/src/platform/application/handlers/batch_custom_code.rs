@@ -219,6 +219,16 @@ async fn process_one_item(
             raw_chars: None,
             error: Some(format!("stream: {msg}")),
         },
+        Err(GenerateError::ModelOutput(msg)) => ItemOutcome {
+            name: item.name.clone(),
+            entity_name: entity_name.to_string(),
+            success: false,
+            cs_path: None,
+            artifact_cs_path: None,
+            extracted_chars: None,
+            raw_chars: None,
+            error: Some(format!("invalid code model output: {msg}")),
+        },
         Err(GenerateError::Write(msg)) => ItemOutcome {
             name: item.name.clone(),
             entity_name: entity_name.to_string(),

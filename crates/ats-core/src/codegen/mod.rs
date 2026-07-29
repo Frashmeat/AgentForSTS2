@@ -12,10 +12,12 @@
 
 mod models;
 mod prompt_assembler;
+mod validation;
 
 pub(crate) use models::asset_localization_key_segment;
 pub use models::{
     AssetCodegenRequest, AssetGroupItem, AssetGroupRequest, AssetKind, CustomCodegenRequest,
     ModProjectRequest,
 };
-pub use prompt_assembler::PromptAssembler;
+pub use prompt_assembler::{AssetPromptAssembly, PromptAssembler};
+pub(crate) use validation::validate_sts2_generated_csharp;

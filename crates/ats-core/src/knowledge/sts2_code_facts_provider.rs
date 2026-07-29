@@ -5,7 +5,8 @@
 //! - **regex-only**，不引入完整 C# parser（依赖太重）。只抽 declaration 行，
 //!   不解析 method body
 //! - 单次 build_facts 调用确定性地扫描游戏目录（受安全上限保护）
-//! - 按 asset_type / symbols / item_name 三个轴过滤，最多返回 `MAX_FACTS` 条
+//! - 按 asset_type / symbols / item_name 三个轴过滤，最多返回 `MAX_FACTS` 条声明事实；
+//!   需求相关的官方实现与生命周期证据另行追加
 //! - 找不到匹配时退化为返回若干"高价值候选"（带 OverrideMember / hook 关键字
 //!   的类型）以免完全空白
 
@@ -28,6 +29,9 @@ const MAX_FILES: usize = 10_000;
 const MAX_FACTS: usize = 12;
 /// 单个 fact body 的字符上限。
 const MAX_BODY_CHARS: usize = 1200;
+/// 行为证据优先按 needle 顺序取样，限制每个 needle 和总匹配数，避免大型源码撑爆 prompt。
+const MAX_EVIDENCE_MATCHES_PER_NEEDLE: usize = 3;
+const MAX_EVIDENCE_RANGES: usize = 12;
 
 impl Sts2CodeFactsProvider {
     /// 返回 (facts, warnings)。
@@ -59,7 +63,8 @@ impl Sts2CodeFactsProvider {
             return (Vec::new(), warnings);
         }
 
-        let facts = index.facts_for_query(query);
+        let mut facts = index.behavior_evidence_for_query(query);
+        facts.extend(index.facts_for_query(query));
         if facts.is_empty() {
             warnings.push(format!(
                 "未找到匹配 asset_type={:?} 的类型；共扫描 {} 个 .cs 文件 / {} 个类型符号。",
@@ -77,7 +82,14 @@ impl Sts2CodeFactsProvider {
 #[derive(Debug, Default)]
 struct CodeFactsIndex {
     types: Vec<TypeSymbol>,
+    source_files: Vec<SourceFile>,
     files_scanned: u32,
+}
+
+#[derive(Debug, Clone)]
+struct SourceFile {
+    path: String,
+    text: String,
 }
 
 #[derive(Debug, Clone)]
@@ -143,6 +155,10 @@ impl CodeFactsIndex {
         let display = path.display().to_string();
         let symbols = extract_types(&text, &display);
         self.types.extend(symbols);
+        self.source_files.push(SourceFile {
+            path: display,
+            text,
+        });
     }
 
     /// 按 query 过滤返回 facts。
@@ -185,6 +201,361 @@ impl CodeFactsIndex {
             .map(|(_, t)| symbol_to_fact(t, &asset_type_keys))
             .collect()
     }
+
+    /// 从当前反编译源码按需求检索官方相似实现，再沿 override 名称查找生命周期调用方。
+    /// 这里保存的是本次读取到的源码片段，不持久化行为结论。
+    fn behavior_evidence_for_query(&self, query: &KnowledgeQuery) -> Vec<KnowledgeFactItem> {
+        let Some(requirements) = query
+            .requirements
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        else {
+            return Vec::new();
+        };
+        let Some(asset_type) = query.asset_type.as_deref() else {
+            return Vec::new();
+        };
+        let Some(path_marker) = asset_source_path_marker(asset_type) else {
+            return Vec::new();
+        };
+        let intent = BehaviorSearchIntent::from_requirements(requirements);
+        if intent.terms.len() < 2 {
+            return Vec::new();
+        }
+
+        let similar = self
+            .source_files
+            .iter()
+            .filter(|source| normalized_path(&source.path).contains(path_marker))
+            .map(|source| (score_similar_source(source, &intent), source))
+            .filter(|(score, _)| *score > 0)
+            .max_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.path.cmp(&a.1.path)))
+            .map(|(_, source)| source);
+        let Some(similar) = similar else {
+            return Vec::new();
+        };
+
+        let hook_name = relevant_override_method(&similar.text, &intent);
+        let mut evidence = vec![source_evidence_fact(
+            "official-similar-implementation",
+            "Official similar implementation",
+            similar,
+            &intent.evidence_needles(),
+            asset_type,
+            -20,
+        )];
+
+        if let Some(hook_name) = hook_name {
+            let hook_call = format!("Hook.{hook_name}");
+            let lifecycle = self
+                .source_files
+                .iter()
+                .filter(|source| source.path != similar.path && source.text.contains(&hook_call))
+                .map(|source| (score_lifecycle_source(source, &intent, &hook_call), source))
+                .max_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.path.cmp(&a.1.path)))
+                .map(|(_, source)| source);
+            if let Some(lifecycle) = lifecycle {
+                let mut needles = vec![hook_call];
+                if intent.energy {
+                    needles.extend(["ResetEnergy".into(), "SetupPlayerTurn".into()]);
+                }
+                if intent.combat_start {
+                    needles.push("BeforeCombatStart".into());
+                }
+                evidence.push(source_evidence_fact(
+                    "lifecycle-caller",
+                    "Lifecycle caller and surrounding state changes",
+                    lifecycle,
+                    &needles,
+                    asset_type,
+                    -10,
+                ));
+            }
+        }
+        evidence
+    }
+}
+
+#[derive(Debug)]
+struct BehaviorSearchIntent {
+    terms: Vec<String>,
+    energy: bool,
+    gain: bool,
+    combat_start: bool,
+    numbers: Vec<String>,
+}
+
+impl BehaviorSearchIntent {
+    fn from_requirements(requirements: &str) -> Self {
+        let lower = requirements.to_ascii_lowercase();
+        let energy = lower.contains("energy") || requirements.contains("能量");
+        let gain = lower.contains("gain")
+            || lower.contains("grant")
+            || requirements.contains("获得")
+            || requirements.contains("增加");
+        let combat = lower.contains("combat") || requirements.contains("战斗");
+        let start = lower.contains("start") || requirements.contains("开始");
+        let mut terms: Vec<String> = re_ascii_word()
+            .find_iter(&lower)
+            .map(|value| value.as_str().to_string())
+            .filter(|value| !is_requirement_stop_word(value))
+            .collect();
+        for (matched, term) in [
+            (energy, "energy"),
+            (gain, "gain"),
+            (combat, "combat"),
+            (start, "start"),
+            (
+                requirements.contains("回合") || lower.contains("turn"),
+                "turn",
+            ),
+        ] {
+            if matched && !terms.iter().any(|value| value == term) {
+                terms.push(term.into());
+            }
+        }
+        terms.sort();
+        terms.dedup();
+        let mut numbers: Vec<String> = re_number()
+            .find_iter(requirements)
+            .map(|value| value.as_str().to_string())
+            .collect();
+        numbers.sort();
+        numbers.dedup();
+        Self {
+            terms,
+            energy,
+            gain,
+            combat_start: combat && start,
+            numbers,
+        }
+    }
+
+    fn evidence_needles(&self) -> Vec<String> {
+        let mut needles = Vec::new();
+        if self.energy && self.gain {
+            needles.push("GainEnergy".into());
+        }
+        if self.combat_start {
+            needles.extend(["AfterSideTurnStart".into(), "RoundNumber".into()]);
+        }
+        needles.extend(self.terms.iter().cloned());
+        needles
+    }
+}
+
+fn re_ascii_word() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| Regex::new(r"[a-z][a-z0-9_]{2,}").unwrap())
+}
+
+fn re_number() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| Regex::new(r"\b\d+(?:\.\d+)?\b").unwrap())
+}
+
+fn re_override_method() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| {
+        Regex::new(
+            r"(?m)^\s*(?:public|protected)\s+override\s+(?:async\s+)?[A-Za-z_][\w<>,\.\[\]\?\s]*?\s+([A-Za-z_]\w*)\s*\(",
+        )
+        .unwrap()
+    })
+}
+
+fn is_requirement_stop_word(value: &str) -> bool {
+    matches!(
+        value,
+        "the"
+            | "and"
+            | "for"
+            | "with"
+            | "this"
+            | "that"
+            | "from"
+            | "into"
+            | "only"
+            | "each"
+            | "every"
+            | "new"
+            | "relic"
+            | "card"
+            | "power"
+            | "player"
+    )
+}
+
+fn asset_source_path_marker(asset_type: &str) -> Option<&'static str> {
+    match asset_type.trim().to_ascii_lowercase().as_str() {
+        "relic" => Some("models/relics"),
+        "card" | "card_fullscreen" => Some("models/cards"),
+        "power" => Some("models/powers"),
+        "character" => Some("models/characters"),
+        _ => None,
+    }
+}
+
+fn normalized_path(path: &str) -> String {
+    path.replace('\\', "/")
+        .replace('.', "/")
+        .to_ascii_lowercase()
+}
+
+fn count_occurrences(haystack: &str, needle: &str) -> i32 {
+    haystack.matches(needle).count().min(4) as i32
+}
+
+fn score_similar_source(source: &SourceFile, intent: &BehaviorSearchIntent) -> i32 {
+    let lower = source.text.to_ascii_lowercase();
+    let mut score = intent
+        .terms
+        .iter()
+        .map(|term| count_occurrences(&lower, term))
+        .sum::<i32>();
+    if intent.energy && intent.gain && lower.contains(".gainenergy(") {
+        score += 30;
+    }
+    if intent.combat_start && lower.contains("roundnumber") {
+        score += 15;
+        if lower.contains("roundnumber <= 1") || lower.contains("roundnumber == 1") {
+            score += 10;
+        }
+    }
+    if intent.energy {
+        for number in &intent.numbers {
+            let exact_var = format!("energyvar({number}");
+            if lower.contains(&exact_var) {
+                score += 25;
+            }
+        }
+    }
+    score
+}
+
+fn relevant_override_method(source: &str, intent: &BehaviorSearchIntent) -> Option<String> {
+    let focus = if intent.energy && intent.gain {
+        source.to_ascii_lowercase().find(".gainenergy(")
+    } else {
+        None
+    };
+    let candidates = re_override_method()
+        .captures_iter(source)
+        .filter_map(|capture| {
+            let whole = capture.get(0)?;
+            let name = capture.get(1)?.as_str().to_string();
+            Some((whole.start(), name))
+        });
+    match focus {
+        Some(focus) => candidates
+            .filter(|(position, _)| *position < focus)
+            .fold(None, |_, (_, name)| Some(name)),
+        None => candidates.into_iter().next().map(|(_, name)| name),
+    }
+}
+
+fn score_lifecycle_source(
+    source: &SourceFile,
+    intent: &BehaviorSearchIntent,
+    hook_call: &str,
+) -> i32 {
+    let lower = source.text.to_ascii_lowercase();
+    let mut score = count_occurrences(&lower, &hook_call.to_ascii_lowercase()) * 20;
+    if intent.energy && lower.contains("resetenergy") {
+        score += 30;
+    }
+    if lower.contains("setupplayerturn") {
+        score += 20;
+    }
+    if intent.combat_start && lower.contains("beforecombatstart") {
+        score += 10;
+    }
+    score
+}
+
+fn source_evidence_fact(
+    key_suffix: &str,
+    purpose: &str,
+    source: &SourceFile,
+    needles: &[String],
+    asset_type: &str,
+    priority: i32,
+) -> KnowledgeFactItem {
+    let (excerpt, ranges) = source_excerpt(&source.text, needles, 6);
+    let range_text = ranges
+        .iter()
+        .map(|(start, end)| format!("{start}-{end}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    KnowledgeFactItem {
+        key: format!("sts2.evidence.{key_suffix}"),
+        title: purpose.into(),
+        body: format!("Purpose: {purpose}\nSource lines: {range_text}\n```csharp\n{excerpt}\n```"),
+        priority,
+        evidence_paths: vec![source.path.clone()],
+        keywords: needles.to_vec(),
+        asset_types: vec![asset_type.into()],
+    }
+}
+
+fn source_excerpt(text: &str, needles: &[String], context: usize) -> (String, Vec<(usize, usize)>) {
+    let lines: Vec<&str> = text.lines().collect();
+    if lines.is_empty() {
+        return (String::new(), Vec::new());
+    }
+    let lower_needles: Vec<String> = needles
+        .iter()
+        .filter(|needle| !needle.trim().is_empty())
+        .map(|needle| needle.to_ascii_lowercase())
+        .collect();
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    'needles: for needle in &lower_needles {
+        let mut matches_for_needle = 0;
+        for (index, line) in lines.iter().enumerate() {
+            if !line.to_ascii_lowercase().contains(needle) {
+                continue;
+            }
+            ranges.push((
+                index.saturating_sub(context),
+                (index + context + 1).min(lines.len()),
+            ));
+            matches_for_needle += 1;
+            if ranges.len() >= MAX_EVIDENCE_RANGES {
+                break 'needles;
+            }
+            if matches_for_needle >= MAX_EVIDENCE_MATCHES_PER_NEEDLE {
+                break;
+            }
+        }
+    }
+    if ranges.is_empty() {
+        ranges.push((0, lines.len().min(context * 2 + 1)));
+    }
+    ranges.sort_unstable();
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for (start, end) in ranges {
+        if let Some((_, previous_end)) = merged.last_mut()
+            && start <= *previous_end
+        {
+            *previous_end = (*previous_end).max(end);
+        } else {
+            merged.push((start, end));
+        }
+    }
+    let mut excerpt_parts = Vec::new();
+    let mut one_based_ranges = Vec::new();
+    for (start, end) in merged {
+        one_based_ranges.push((start + 1, end));
+        excerpt_parts.push(
+            lines[start..end]
+                .iter()
+                .enumerate()
+                .map(|(offset, line)| format!("{:>4}: {line}", start + offset + 1))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+    }
+    (excerpt_parts.join("\n...\n"), one_based_ranges)
 }
 
 // -------- regex 模式（lazy_static 风格通过 OnceLock） --------
@@ -525,6 +896,7 @@ namespace STS2.Cards
         }
     }
 }
+
 "#,
         );
         write_cs(
@@ -553,6 +925,103 @@ namespace STS2.Cards
         );
         // HelperUtility 无 asset_type 关键字命中，不应进入结果
         assert!(facts.iter().all(|f| !f.key.contains("HelperUtility")));
+    }
+
+    #[test]
+    fn behavior_requirement_injects_official_implementation_and_lifecycle_caller() {
+        let td = tempfile::TempDir::new().unwrap();
+        let paths = KnowledgePaths::from_runtime_dir(td.path());
+        crate::knowledge::ensure_dirs(&paths).unwrap();
+        write_cs(
+            &paths.game_dir,
+            "MegaCrit.Sts2.Core.Models.Relics/Bread.cs",
+            r#"namespace MegaCrit.Sts2.Core.Models.Relics;
+public sealed class Bread : RelicModel
+{
+    protected override IEnumerable<DynamicVar> CanonicalVars => new[] { new EnergyVar(1) };
+    public override Task BeforeCombatStart() => Task.CompletedTask;
+}"#,
+        );
+        write_cs(
+            &paths.game_dir,
+            "MegaCrit.Sts2.Core.Models.Relics/Lantern.cs",
+            r#"namespace MegaCrit.Sts2.Core.Models.Relics;
+public sealed class Lantern : RelicModel
+{
+    protected override IEnumerable<DynamicVar> CanonicalVars => new[] { new EnergyVar(1) };
+    public override async Task AfterSideTurnStart(CombatSide side, CombatState combatState)
+    {
+        if (side == base.Owner.Creature.Side && combatState.RoundNumber <= 1)
+            await PlayerCmd.GainEnergy(base.DynamicVars.Energy.BaseValue, base.Owner);
+    }
+}"#,
+        );
+        write_cs(
+            &paths.game_dir,
+            "MegaCrit.Sts2.Core.Combat/CombatManager.cs",
+            r#"namespace MegaCrit.Sts2.Core.Combat;
+public sealed class CombatManager
+{
+    public async Task StartCombatInternal() { await Hook.BeforeCombatStart(_state.RunState, _state); }
+    public async Task StartSideTurn()
+    {
+        await SetupPlayerTurn(player);
+        await Hook.AfterSideTurnStart(_state, _state.CurrentSide);
+    }
+    private async Task SetupPlayerTurn(Player player)
+    {
+        player.PlayerCombatState.ResetEnergy();
+    }
+}"#,
+        );
+
+        let query = KnowledgeQuery {
+            asset_type: Some("relic".into()),
+            requirements: Some(
+                "At the start of combat, gain 1 Energy. 战斗开始时获得1点能量。".into(),
+            ),
+            ..Default::default()
+        };
+        let (facts, warnings) =
+            Sts2CodeFactsProvider.build_facts(&query, &paths, SourceMode::RuntimeDecompiled);
+
+        let similar = facts
+            .iter()
+            .find(|fact| fact.key == "sts2.evidence.official-similar-implementation")
+            .unwrap_or_else(|| panic!("missing similar evidence; warnings={warnings:?}"));
+        assert!(similar.body.contains("AfterSideTurnStart"));
+        assert!(similar.body.contains("RoundNumber <= 1"));
+        assert!(similar.evidence_paths[0].ends_with("Lantern.cs"));
+
+        let lifecycle = facts
+            .iter()
+            .find(|fact| fact.key == "sts2.evidence.lifecycle-caller")
+            .expect("lifecycle caller evidence");
+        assert!(lifecycle.body.contains("Hook.AfterSideTurnStart"));
+        assert!(lifecycle.body.contains("ResetEnergy"));
+        assert!(lifecycle.evidence_paths[0].ends_with("CombatManager.cs"));
+    }
+
+    #[test]
+    fn source_evidence_excerpt_is_bounded_and_keeps_high_priority_needles() {
+        let mut lines = (1..=500)
+            .map(|line| format!("// generic combat marker {line}"))
+            .collect::<Vec<_>>();
+        lines[399] = "await Hook.AfterSideTurnStart(_state, side);".into();
+        lines[449] = "player.PlayerCombatState.ResetEnergy();".into();
+        let source = lines.join("\n");
+        let needles = vec![
+            "Hook.AfterSideTurnStart".into(),
+            "ResetEnergy".into(),
+            "combat".into(),
+        ];
+
+        let (excerpt, ranges) = source_excerpt(&source, &needles, 2);
+
+        assert!(excerpt.contains("Hook.AfterSideTurnStart"));
+        assert!(excerpt.contains("ResetEnergy"));
+        assert!(ranges.len() <= MAX_EVIDENCE_RANGES);
+        assert!(excerpt.lines().count() <= MAX_EVIDENCE_RANGES * 5 + MAX_EVIDENCE_RANGES - 1);
     }
 
     #[test]

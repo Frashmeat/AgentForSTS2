@@ -32,6 +32,12 @@ pub struct PromptAssembler {
     pub context_assembler: PromptContextAssembler,
 }
 
+#[derive(Debug, Clone)]
+pub struct AssetPromptAssembly {
+    pub prompt: String,
+    pub evidence_record: String,
+}
+
 impl PromptAssembler {
     #[must_use]
     pub fn new(
@@ -62,6 +68,16 @@ impl PromptAssembler {
         paths: &KnowledgePaths,
         game_source_mode: SourceMode,
     ) -> Result<String, PromptError> {
+        self.assemble_asset_prompt_with_evidence(request, paths, game_source_mode)
+            .map(|assembly| assembly.prompt)
+    }
+
+    pub fn assemble_asset_prompt_with_evidence(
+        &self,
+        request: &AssetCodegenRequest,
+        paths: &KnowledgePaths,
+        game_source_mode: SourceMode,
+    ) -> Result<AssetPromptAssembly, PromptError> {
         let asset_kind = AssetKind::parse(&request.asset_type);
         let canonical_asset_type = asset_kind
             .map(AssetKind::as_str)
@@ -115,7 +131,13 @@ impl PromptAssembler {
             ("project_root", project_root.as_str()),
             ("zhs_hint", zhs_hint.as_str()),
         ]);
-        self.loader.render("codegen.asset_prompt", &vars)
+        let prompt = self.loader.render("codegen.asset_prompt", &vars)?;
+        let evidence_record =
+            build_asset_evidence_record(&query, paths, game_source_mode, knowledge.facts.as_str());
+        Ok(AssetPromptAssembly {
+            prompt,
+            evidence_record,
+        })
     }
 
     pub fn assemble_custom_code_prompt(
@@ -251,6 +273,40 @@ impl PromptAssembler {
         let packet = self.resolver.resolve(query, paths, game_source_mode);
         ResolvedKnowledge::from_packet(&packet, &self.context_assembler)
     }
+}
+
+fn build_asset_evidence_record(
+    query: &KnowledgeQuery,
+    paths: &KnowledgePaths,
+    game_source_mode: SourceMode,
+    rendered_facts: &str,
+) -> String {
+    let manifest_snapshot = std::fs::read_to_string(&paths.manifest_path).unwrap_or_else(|err| {
+        format!(
+            "knowledge manifest unavailable at {}: {err}",
+            paths.manifest_path.display()
+        )
+    });
+    let requirements = query.requirements.as_deref().unwrap_or_default().trim();
+    format!(
+        "# Evidence Record\n\n\
+- Domain: `{}`\n\
+- Scenario: `asset_codegen`\n\
+- Asset type: `{}`\n\
+- Source mode: `{:?}`\n\
+- Knowledge manifest: `{}`\n\
+- Purpose: current official implementation and lifecycle evidence used for this generation\n\n\
+## Requirement\n\n{}\n\n\
+## Knowledge Manifest Snapshot\n\n```json\n{}\n```\n\n\
+## Injected Code Facts\n\n{}\n",
+        query.domain,
+        query.asset_type.as_deref().unwrap_or_default(),
+        game_source_mode,
+        paths.manifest_path.display(),
+        requirements,
+        manifest_snapshot.trim(),
+        rendered_facts.trim(),
+    )
 }
 
 struct ResolvedKnowledge {
@@ -452,6 +508,90 @@ mod tests {
         assert!(prompt.contains("namespace DemoMod"));
         assert!(prompt.contains("DEMOMOD-ENERGY_SEED_RELIC"));
         assert!(prompt.contains("relics"));
+    }
+
+    #[test]
+    fn asset_prompt_inlines_current_behavior_evidence_and_records_manifest() {
+        let td = tempfile::TempDir::new().unwrap();
+        let knowledge_paths = KnowledgePaths::from_runtime_dir(td.path());
+        crate::knowledge::ensure_dirs(&knowledge_paths).unwrap();
+        let relic_dir = knowledge_paths
+            .game_dir
+            .join("MegaCrit.Sts2.Core.Models.Relics");
+        let combat_dir = knowledge_paths.game_dir.join("MegaCrit.Sts2.Core.Combat");
+        std::fs::create_dir_all(&relic_dir).unwrap();
+        std::fs::create_dir_all(&combat_dir).unwrap();
+        std::fs::write(
+            relic_dir.join("Lantern.cs"),
+            r#"namespace MegaCrit.Sts2.Core.Models.Relics;
+public sealed class Lantern : RelicModel
+{
+    protected override IEnumerable<DynamicVar> CanonicalVars => new[] { new EnergyVar(1) };
+    public override async Task AfterSideTurnStart(CombatSide side, CombatState combatState)
+    {
+        if (side == base.Owner.Creature.Side && combatState.RoundNumber <= 1)
+            await PlayerCmd.GainEnergy(base.DynamicVars.Energy.BaseValue, base.Owner);
+    }
+}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            combat_dir.join("CombatManager.cs"),
+            r#"namespace MegaCrit.Sts2.Core.Combat;
+public sealed class CombatManager
+{
+    public async Task StartSideTurn()
+    {
+        await SetupPlayerTurn(player);
+        await Hook.AfterSideTurnStart(_state, _state.CurrentSide);
+    }
+    private async Task SetupPlayerTurn(Player player)
+    {
+        player.PlayerCombatState.ResetEnergy();
+    }
+}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            &knowledge_paths.manifest_path,
+            r#"{"schemaVersion":1,"game":{"sourceSizeBytes":8896512,"sourceMtime":"fixture"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            td.path().join("project.json"),
+            r#"{"name":"demo","csharp_name":"DemoMod","scaffolded":true}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            td.path().join("MainFile.cs"),
+            "namespace DemoMod; public class MainFile {}",
+        )
+        .unwrap();
+
+        let request = AssetCodegenRequest {
+            asset_type: "relic".into(),
+            asset_name: "EnergySeedRelic".into(),
+            design_description: "At the start of combat, gain 1 Energy. 战斗开始时获得1点能量。"
+                .into(),
+            project_root: td.path().to_path_buf(),
+            ..Default::default()
+        };
+        let assembly = PromptAssembler::built_in()
+            .assemble_asset_prompt_with_evidence(
+                &request,
+                &knowledge_paths,
+                SourceMode::RuntimeDecompiled,
+            )
+            .unwrap();
+
+        assert!(assembly.prompt.contains("Official similar implementation"));
+        assert!(assembly.prompt.contains("RoundNumber <= 1"));
+        assert!(assembly.prompt.contains("Hook.AfterSideTurnStart"));
+        assert!(assembly.prompt.contains("ResetEnergy"));
+        assert!(assembly.evidence_record.contains("sourceSizeBytes"));
+        assert!(assembly.evidence_record.contains("Lantern.cs"));
+        assert!(assembly.evidence_record.contains("CombatManager.cs"));
+        assert!(assembly.evidence_record.contains("Purpose:"));
     }
 
     #[test]

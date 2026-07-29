@@ -193,12 +193,12 @@ pub(crate) async fn run_asset_generate(
 
     // 2. 装 codegen prompt
     let assembler = PromptAssembler::built_in();
-    let prompt = match assembler.assemble_asset_prompt(
+    let prompt_assembly = match assembler.assemble_asset_prompt_with_evidence(
         &asset_request,
         &knowledge_paths,
         detect_source_mode(&knowledge_paths),
     ) {
-        Ok(p) => p,
+        Ok(assembly) => assembly,
         Err(err) => {
             finalize_with_error(&repo, &job_id, &sink, &format!("prompt assembly: {err}")).await;
             return;
@@ -209,7 +209,7 @@ pub(crate) async fn run_asset_generate(
         job_id: job_id.clone(),
         stage: "code-gen-start".into(),
         percent: Some(0.45),
-        message: Some(format!("LLM prompt {} chars", prompt.len())),
+        message: Some(format!("LLM prompt {} chars", prompt_assembly.prompt.len())),
         delta: None,
     })
     .await;
@@ -224,7 +224,8 @@ pub(crate) async fn run_asset_generate(
     let artifact = match generator
         .generate(
             &job_id,
-            prompt,
+            prompt_assembly.prompt,
+            &prompt_assembly.evidence_record,
             &asset_request,
             &artifacts_dir,
             runtime_image_source.as_deref(),
@@ -244,6 +245,7 @@ pub(crate) async fn run_asset_generate(
         "csPath": artifact.cs_path.display().to_string(),
         "artifactCsPath": artifact.artifact_cs_path.display().to_string(),
         "rawPath": artifact.raw_path.display().to_string(),
+        "evidencePath": artifact.evidence_path.display().to_string(),
         "localizationPaths": artifact.localization_paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
         "runtimeImagePaths": artifact.runtime_image_paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
         "pngPath": png_path.as_ref().map(|p| p.display().to_string()),
@@ -306,6 +308,7 @@ mod tests {
     use std::collections::VecDeque;
     use std::path::Path;
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicU32, Ordering};
 
     struct ScriptedLlm {
         events: Mutex<Vec<Result<StreamEvent, LlmError>>>,
@@ -425,6 +428,27 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct CountingCompileValidator {
+        calls: AtomicU32,
+    }
+
+    #[async_trait]
+    impl AssetCompileValidator for CountingCompileValidator {
+        async fn validate(
+            &self,
+            _project_root: &Path,
+            _job_id: &JobId,
+        ) -> Result<CompileValidation, String> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(CompileValidation {
+                exit_code: 0,
+                stdout_tail: String::new(),
+                stderr_tail: String::new(),
+            })
+        }
+    }
+
     fn ok_code_events(asset_name: &str) -> Vec<Result<StreamEvent, LlmError>> {
         let key = format!(
             "DEMOMOD-{}",
@@ -432,6 +456,43 @@ mod tests {
         );
         let output = serde_json::json!({
             "csharp": format!("public sealed class {} {{}}", sanitize_entity_name(asset_name)),
+            "localization": {
+                "eng": {
+                    format!("{key}.title"): asset_name,
+                    format!("{key}.description"): "English description"
+                },
+                "zhs": {
+                    format!("{key}.title"): "中文名称",
+                    format!("{key}.description"): "中文描述"
+                }
+            }
+        })
+        .to_string();
+        vec![
+            Ok(StreamEvent::Start {
+                model: "test-model".into(),
+            }),
+            Ok(StreamEvent::Delta { text: output }),
+            Ok(StreamEvent::End {
+                finish_reason: FinishReason::EndTurn,
+                usage: Usage {
+                    input_tokens: 10,
+                    output_tokens: 5,
+                },
+            }),
+        ]
+    }
+
+    fn code_events_with_csharp(
+        asset_name: &str,
+        csharp: &str,
+    ) -> Vec<Result<StreamEvent, LlmError>> {
+        let key = format!(
+            "DEMOMOD-{}",
+            crate::codegen::asset_localization_key_segment(asset_name)
+        );
+        let output = serde_json::json!({
+            "csharp": csharp,
             "localization": {
                 "eng": {
                     format!("{key}.title"): asset_name,
@@ -556,10 +617,12 @@ mod tests {
 
         let png = artifacts.join("AlphaCard/AlphaCard.png");
         let artifact_cs = artifacts.join("AlphaCard/AlphaCard.cs");
+        let evidence = artifacts.join("AlphaCard/evidence.md");
         let cs = td.path().join("Generated/AlphaCard.cs");
         assert!(png.exists(), "png missing");
         assert!(cs.exists(), "cs missing");
         assert!(artifact_cs.exists(), "artifact cs missing");
+        assert!(evidence.exists(), "evidence record missing");
         assert!(
             td.path()
                 .join("DemoMod/images/card_portraits/alpha_card.png")
@@ -593,6 +656,61 @@ mod tests {
         assert_eq!(res["imageModel"], "mock-image-model");
         assert_eq!(res["revisedPrompt"], "a revised prompt");
         assert_eq!(res["runtimeImagePaths"].as_array().unwrap().len(), 2);
+        let evidence_result = PathBuf::from(res["evidencePath"].as_str().unwrap());
+        assert_eq!(
+            evidence_result.canonicalize().unwrap(),
+            evidence.canonicalize().unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn semantic_regression_is_rejected_before_write_and_compile() {
+        let td = tempfile::TempDir::new().unwrap();
+        prepare_project(td.path());
+        let history = td.path().join("history");
+        let artifacts = td.path().join("artifacts");
+        std::fs::create_dir_all(&history).unwrap();
+        std::fs::create_dir_all(&artifacts).unwrap();
+        let bad_csharp = r#"public sealed class BadRelic
+{
+    public override async Task BeforeCombatStart()
+    {
+        await PlayerCmd.GainEnergy(1m, Owner);
+    }
+}"#;
+        let responses = VecDeque::from([
+            code_events_with_csharp("BadRelic", bad_csharp),
+            code_events_with_csharp("BadRelic", bad_csharp),
+        ]);
+        let llm: Arc<dyn LlmClient> = Arc::new(SequencedLlm {
+            responses: Mutex::new(responses),
+        });
+        let validator = Arc::new(CountingCompileValidator::default());
+        let service = service_with_validator(
+            Arc::new(FileJobRepository::new(history)),
+            llm,
+            validator.clone(),
+        );
+        let request = make_request(td.path(), "BadRelic", None);
+        let id = service
+            .submit_asset_generate(
+                request,
+                KnowledgePaths::from_runtime_dir(td.path()),
+                artifacts.clone(),
+                Arc::new(MockImageGen::new(Vec::new())),
+                Arc::new(SimpleBgRemover::default()),
+                Arc::new(super::super::common::NoopProgressSink),
+            )
+            .await
+            .unwrap();
+        wait_terminal(&service, &id).await;
+
+        let job = service.get(&id).await.unwrap();
+        assert_eq!(job.status, JobStatus::Failed);
+        assert!(job.error.unwrap_or_default().contains("ResetEnergy"));
+        assert_eq!(validator.calls.load(Ordering::SeqCst), 0);
+        assert!(!td.path().join("Generated/BadRelic.cs").exists());
+        assert!(!artifacts.join("BadRelic/BadRelic.cs").exists());
     }
 
     #[tokio::test]

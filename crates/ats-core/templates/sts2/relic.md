@@ -28,15 +28,11 @@ public sealed class FangedGrimoire : CustomRelicModel
     protected override string PackedIconOutlinePath => "MyMod/images/relics/fanged_grimoire_outline.png";
     protected override string BigIconPath           => "MyMod/images/relics/big/fanged_grimoire.png";
 
-    // Exact combat-start hook. Do not use OnCombatStart or add an IRunState parameter.
-    public override async Task BeforeCombatStart()
-    {
-        Flash();
-        await PlayerCmd.GainEnergy(1m, Owner);
-    }
-
+    // Behavior hook selection is intentionally NOT part of this stable scaffold.
+    // Use the current inlined Code Facts for an official similar implementation.
+    // For timing-sensitive behavior, also require the lifecycle caller that proves
+    // when the hook runs. Do not invent a hook from its name alone.
     // All hook methods are virtual Task (default returns Task.CompletedTask).
-    // Full list of 60+ hooks in sts2_api_reference.md (AbstractModel section).
     public override Task AfterDamageGiven(
         PlayerChoiceContext choiceContext,
         Creature? dealer,
@@ -60,6 +56,12 @@ public sealed class FangedGrimoire : CustomRelicModel
 
 ### CRITICAL: `ShouldReceiveCombatHooks => true` — without this, all combat hooks silently never fire.
 ### `Flash()` — plays the relic glowing animation (always call when the relic triggers).
+
+### Behavior evidence — REQUIRED
+- This file is a stable engineering scaffold, not an authoritative behavior recipe.
+- Select behavior hooks only from current-version Code Facts injected for this request.
+- Timing-sensitive behavior requires both an official similar model implementation and its lifecycle caller.
+- If those facts are absent, do not guess a hook or infer ordering from method names.
 
 ### Pool registration — NO Harmony patch needed
 `CustomRelicModel` (BaseLib) calls `CustomContentDictionary.AddModel()` in its constructor.
