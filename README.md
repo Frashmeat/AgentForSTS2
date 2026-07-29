@@ -11,8 +11,8 @@
 - 总入口：[`docs/README.md`](./docs/README.md)
 - 架构：[项目架构总览](./docs/01-总览/项目架构总览.md)
 - 当前事实：[当前进度说明](./docs/02-现状/当前进度说明.md)
-- 当前方向：[当前方案](./docs/03-当前方案.md)
-- 历史材料：[`docs/90-归档/`](./docs/90-归档/README.md)
+- 当前方向：[当前方案](./docs/03-当前方案/当前方案.md)
+- 历史材料：[`docs/90-归档/`](./docs/90-归档/)
 
 ## 当前进度
 
@@ -226,7 +226,7 @@ cargo tauri build --features ml-rembg
 
 ## 路线图剩余
 
-详见[当前方案](./docs/03-当前方案.md)；具体任务、状态和验证证据由 Trellis 管理。当前主要剩余方向：
+详见[当前方案](./docs/03-当前方案/当前方案.md)；具体任务、状态和验证证据由 Trellis 管理。当前主要剩余方向：
 
 - ~~Stage 5 装配收口剩余子项~~ 大半已完成（audit auto-write + ctrl_c + image_proc
   prewarm + ML rembg + health readiness 字段都在）

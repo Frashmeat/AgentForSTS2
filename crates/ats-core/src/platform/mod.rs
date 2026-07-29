@@ -1,6 +1,6 @@
 //! Platform 模块 —— 任务（Job）调度的 DDD 实现。
 //!
-//! 桌面/Web 边界见 `docs/01-总览/项目架构总览.md` 与 `docs/03-当前方案.md`：
+//! 桌面/Web 边界见 `docs/01-总览/项目架构总览.md` 与 `docs/03-当前方案/当前方案.md`：
 //! - Web 轨：sqlx 走 Postgres，repository 实现见 ats-web crate（stage 3.1a 之后）
 //! - Desktop 轨：文件存储，repository 实现见 `infra::file`，落到工程目录 `history/`
 //!
