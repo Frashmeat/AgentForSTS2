@@ -14,12 +14,19 @@ pub mod cache;
 mod chain;
 #[cfg(feature = "ml-rembg")]
 mod ml;
+mod quality;
 mod simple;
+mod variants;
 
 pub use chain::BgRemoverChain;
 #[cfg(feature = "ml-rembg")]
 pub use ml::{MlBgRemover, MlBgRemoverError, init_ort_from_dylib};
+pub use quality::{ImageQualityIssue, ImageQualityReport, ImageQualitySpec, analyze_png_quality};
 pub use simple::{SimpleBgRemover, remove_white_background};
+pub use variants::{
+    DerivedImageVariant, ImageVariantRole, ImageVariantSpec, ImageVariantTransform,
+    derive_png_variants,
+};
 
 use async_trait::async_trait;
 use thiserror::Error;
@@ -32,6 +39,8 @@ pub enum ImageProcError {
     Encode(String),
     #[error("unsupported format: {0}")]
     Unsupported(String),
+    #[error("image quality: {0}")]
+    Quality(String),
 }
 
 /// 图像后处理客户端：把输入 png bytes 处理成带 alpha 通道的 png bytes。

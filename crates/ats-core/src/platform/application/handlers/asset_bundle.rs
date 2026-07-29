@@ -11,10 +11,34 @@ use super::code_generate::{
 };
 use super::common::{ProgressEvent, ProgressSink, emit_cancelled_mid_stream, is_cancelled};
 use crate::codegen::{AssetCodegenRequest, AssetKind, asset_localization_key_segment};
+use crate::image_proc::{
+    ImageQualitySpec, ImageVariantRole, ImageVariantSpec, ImageVariantTransform,
+    analyze_png_quality, derive_png_variants,
+};
 use crate::llm::{CompletionRequest, LlmClient, Message, MessageRole, StreamEvent};
 use crate::platform::domain::{JobId, JobRepository};
 
 const MAX_MODEL_ATTEMPTS: u32 = 2;
+const STS2_RELIC_IMAGE_SPECS: [ImageVariantSpec; 3] = [
+    ImageVariantSpec {
+        role: ImageVariantRole::Normal,
+        width: 128,
+        height: 128,
+        transform: ImageVariantTransform::Cover,
+    },
+    ImageVariantSpec {
+        role: ImageVariantRole::Outline,
+        width: 128,
+        height: 128,
+        transform: ImageVariantTransform::Outline { radius: 4 },
+    },
+    ImageVariantSpec {
+        role: ImageVariantRole::Big,
+        width: 1024,
+        height: 1024,
+        transform: ImageVariantTransform::Cover,
+    },
+];
 static ASSET_WRITE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 pub(crate) struct AssetBundleGeneration {
@@ -440,15 +464,26 @@ async fn plan_project_writes(
         let bytes = tokio::fs::read(source)
             .await
             .map_err(|err| format!("read generated runtime image {}: {err}", source.display()))?;
-        let expected_paths = runtime_image_paths_for(request)?;
+        let targets = runtime_image_targets_for(request)?;
+        let expected_paths = targets
+            .iter()
+            .map(|target| target.path.clone())
+            .collect::<Vec<_>>();
         if request.image_paths != expected_paths {
             return Err("generated image destinations do not match the asset path contract".into());
         }
-        for path in expected_paths {
-            runtime_image_paths.push(path.clone());
+        let specs = targets.iter().map(|target| target.spec).collect::<Vec<_>>();
+        let variants = derive_png_variants(&bytes, &specs)
+            .map_err(|err| format!("derive runtime image roles: {err}"))?;
+        validate_role_derivation(&variants, &specs)?;
+        for (target, variant) in targets.into_iter().zip(variants) {
+            if target.spec.role != variant.role {
+                return Err("derived runtime image role order does not match resource spec".into());
+            }
+            runtime_image_paths.push(target.path.clone());
             writes.push(PlannedWrite {
-                path,
-                bytes: bytes.clone(),
+                path: target.path,
+                bytes: variant.bytes,
             });
         }
     }
@@ -463,6 +498,21 @@ async fn plan_project_writes(
 pub(crate) fn runtime_image_paths_for(
     request: &AssetCodegenRequest,
 ) -> Result<Vec<PathBuf>, String> {
+    Ok(runtime_image_targets_for(request)?
+        .into_iter()
+        .map(|target| target.path)
+        .collect())
+}
+
+#[derive(Debug)]
+struct RuntimeImageTarget {
+    path: PathBuf,
+    spec: ImageVariantSpec,
+}
+
+fn runtime_image_targets_for(
+    request: &AssetCodegenRequest,
+) -> Result<Vec<RuntimeImageTarget>, String> {
     let kind = AssetKind::parse(&request.asset_type).ok_or_else(|| {
         format!(
             "unsupported asset_type for image delivery: {}",
@@ -477,31 +527,119 @@ pub(crate) fn runtime_image_paths_for(
         );
     }
     let root = request.project_root.join(mod_id).join("images");
-    let relative: Vec<PathBuf> = match kind {
+    let preserve = |role| ImageVariantSpec {
+        role,
+        width: 0,
+        height: 0,
+        transform: ImageVariantTransform::Preserve,
+    };
+    let targets: Vec<(PathBuf, ImageVariantSpec)> = match kind {
         AssetKind::Card | AssetKind::CardFullscreen => vec![
-            PathBuf::from("card_portraits").join(format!("{slug}.png")),
-            PathBuf::from("card_portraits")
-                .join("big")
-                .join(format!("{slug}.png")),
+            (
+                PathBuf::from("card_portraits").join(format!("{slug}.png")),
+                preserve(ImageVariantRole::Normal),
+            ),
+            (
+                PathBuf::from("card_portraits")
+                    .join("big")
+                    .join(format!("{slug}.png")),
+                preserve(ImageVariantRole::Big),
+            ),
         ],
         AssetKind::Relic => vec![
-            PathBuf::from("relics").join(format!("{slug}.png")),
-            PathBuf::from("relics").join(format!("{slug}_outline.png")),
-            PathBuf::from("relics")
-                .join("big")
-                .join(format!("{slug}.png")),
+            (
+                PathBuf::from("relics").join(format!("{slug}.png")),
+                STS2_RELIC_IMAGE_SPECS[0],
+            ),
+            (
+                PathBuf::from("relics").join(format!("{slug}_outline.png")),
+                STS2_RELIC_IMAGE_SPECS[1],
+            ),
+            (
+                PathBuf::from("relics")
+                    .join("big")
+                    .join(format!("{slug}.png")),
+                STS2_RELIC_IMAGE_SPECS[2],
+            ),
         ],
         AssetKind::Power => vec![
-            PathBuf::from("powers").join(format!("{slug}.png")),
-            PathBuf::from("powers")
-                .join("big")
-                .join(format!("{slug}.png")),
+            (
+                PathBuf::from("powers").join(format!("{slug}.png")),
+                preserve(ImageVariantRole::Normal),
+            ),
+            (
+                PathBuf::from("powers")
+                    .join("big")
+                    .join(format!("{slug}.png")),
+                preserve(ImageVariantRole::Big),
+            ),
         ],
-        AssetKind::Character => {
-            vec![PathBuf::from("characters").join(format!("{slug}.png"))]
-        }
+        AssetKind::Character => vec![(
+            PathBuf::from("characters").join(format!("{slug}.png")),
+            preserve(ImageVariantRole::Normal),
+        )],
     };
-    Ok(relative.into_iter().map(|path| root.join(path)).collect())
+    Ok(targets
+        .into_iter()
+        .map(|(path, spec)| RuntimeImageTarget {
+            path: root.join(path),
+            spec,
+        })
+        .collect())
+}
+
+fn validate_role_derivation(
+    variants: &[crate::image_proc::DerivedImageVariant],
+    specs: &[ImageVariantSpec],
+) -> Result<(), String> {
+    let requires_distinct_roles = specs
+        .iter()
+        .any(|spec| spec.transform != ImageVariantTransform::Preserve);
+    if !requires_distinct_roles {
+        return Ok(());
+    }
+    for left in 0..variants.len() {
+        for right in left + 1..variants.len() {
+            if variants[left].bytes == variants[right].bytes {
+                return Err(format!(
+                    "resource role derivation produced identical {:?} and {:?} PNG bytes",
+                    variants[left].role, variants[right].role
+                ));
+            }
+        }
+    }
+    for (variant, spec) in variants.iter().zip(specs) {
+        if spec.transform == ImageVariantTransform::Preserve {
+            continue;
+        }
+        if (variant.width, variant.height) != (spec.width, spec.height) {
+            return Err(format!(
+                "derived {:?} image is {}x{}, expected {}x{}",
+                variant.role, variant.width, variant.height, spec.width, spec.height
+            ));
+        }
+        let report = analyze_png_quality(&variant.bytes, ImageQualitySpec::default())
+            .map_err(|err| format!("validate derived {:?} image: {err}", variant.role))?;
+        match variant.role {
+            ImageVariantRole::Normal | ImageVariantRole::Big if !report.accepted => {
+                return Err(format!(
+                    "derived {:?} image failed quality rules: {}",
+                    variant.role,
+                    report.rejection_summary()
+                ));
+            }
+            ImageVariantRole::Outline
+                if report.foreground_pixels == 0 || report.transparent_pixels == 0 =>
+            {
+                return Err(
+                    "derived Outline image must contain both outline pixels and transparency"
+                        .into(),
+                );
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 async fn merge_localization(
@@ -756,5 +894,50 @@ mod tests {
         std::fs::create_dir_all(&other).unwrap();
         let err = validate_project_scope(&other, &active.join("artifacts")).unwrap_err();
         assert!(err.contains("must match the active project"));
+    }
+
+    #[test]
+    fn relic_resource_spec_rejects_identical_role_bytes() {
+        assert_eq!(STS2_RELIC_IMAGE_SPECS[0].role, ImageVariantRole::Normal);
+        assert_eq!(
+            (
+                STS2_RELIC_IMAGE_SPECS[0].width,
+                STS2_RELIC_IMAGE_SPECS[0].height
+            ),
+            (128, 128)
+        );
+        assert_eq!(STS2_RELIC_IMAGE_SPECS[1].role, ImageVariantRole::Outline);
+        assert_eq!(STS2_RELIC_IMAGE_SPECS[2].role, ImageVariantRole::Big);
+        assert_eq!(
+            (
+                STS2_RELIC_IMAGE_SPECS[2].width,
+                STS2_RELIC_IMAGE_SPECS[2].height
+            ),
+            (1024, 1024)
+        );
+        let variants = [
+            crate::image_proc::DerivedImageVariant {
+                role: ImageVariantRole::Normal,
+                bytes: vec![1, 2, 3],
+                width: 128,
+                height: 128,
+            },
+            crate::image_proc::DerivedImageVariant {
+                role: ImageVariantRole::Outline,
+                bytes: vec![1, 2, 3],
+                width: 128,
+                height: 128,
+            },
+            crate::image_proc::DerivedImageVariant {
+                role: ImageVariantRole::Big,
+                bytes: vec![4, 5, 6],
+                width: 1024,
+                height: 1024,
+            },
+        ];
+
+        let error = validate_role_derivation(&variants, &STS2_RELIC_IMAGE_SPECS).unwrap_err();
+
+        assert!(error.contains("identical Normal and Outline"));
     }
 }

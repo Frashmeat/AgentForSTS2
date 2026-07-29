@@ -2,8 +2,8 @@
 //!
 //! 决策流：
 //! 1. transition_to_running
-//! 2. 如 image_prompt 非空 → 调 ImageGenClient → 写 artifacts/<name>/<name>.png
-//!    → 把路径塞回 asset_request.image_paths（覆盖原值）
+//! 2. 如 image_prompt 非空 → 调 ImageGenClient → 背景去除 → 质量门禁
+//!    → 写诊断原图、处理图和质量报告 → 把正式资源路径塞回 image_paths
 //! 3. 用 PromptAssembler.assemble_asset_prompt 装 prompt
 //! 4. 生成结构化 C# + 双语本地化 bundle，并通过隔离编译门禁
 //! 5. 门禁通过后落 job.result；失败时回滚正式生成目录
@@ -26,7 +26,9 @@ use super::common::{
 };
 use crate::codegen::{AssetKind, PromptAssembler};
 use crate::image_gen::{ImageGenClient, ImageGenRequest};
-use crate::image_proc::ImageProcClient;
+use crate::image_proc::{
+    ImageProcClient, ImageProcError, ImageQualityReport, ImageQualitySpec, analyze_png_quality,
+};
 use crate::knowledge::{KnowledgePaths, runtime::detect_source_mode};
 use crate::llm::LlmClient;
 use crate::platform::contracts::SubmitAssetGenerateRequest;
@@ -78,6 +80,8 @@ pub(crate) async fn run_asset_generate(
     let mut image_model: Option<String> = None;
     let mut revised_prompt: Option<String> = None;
     let mut runtime_image_source: Option<PathBuf> = None;
+    let mut image_quality_path: Option<PathBuf> = None;
+    let mut image_quality_report: Option<ImageQualityReport> = None;
 
     if let Some(prompt) = &request.image_prompt {
         let prompt = prompt.trim();
@@ -130,38 +134,103 @@ pub(crate) async fn run_asset_generate(
             revised_prompt = img_resp.revised_prompt.clone();
 
             // 背景去除：调注入的 ImageProcClient（生产路径是 BgRemoverChain
-            // ML→Simple 回退）。失败不致命（保留原图 path 给 prompt assembler 用）
+            // ML→Simple 回退）。处理失败或质量门禁失败时保留诊断文件，但不交付原图。
             let raw_bytes = first.bytes.clone();
             let rembg_path = target_dir.join(format!("{entity_name}.rembg.png"));
             match image_proc.remove_background(&raw_bytes).await {
                 Ok(processed) => {
                     if let Err(err) = crate::fs_atomic::write_atomic(&rembg_path, &processed).await
                     {
-                        sink.emit(ProgressEvent {
-                            job_id: job_id.clone(),
-                            stage: "rembg-write-warn".into(),
-                            percent: None,
-                            message: Some(format!(
-                                "wrote raw image but rembg output failed: {err}; using raw image"
-                            )),
-                            delta: None,
-                        })
+                        finalize_with_error(
+                            &repo,
+                            &job_id,
+                            &sink,
+                            &format!(
+                                "write processed image: {err}; raw diagnostic kept at {}",
+                                path.display()
+                            ),
+                        )
                         .await;
-                        runtime_image_source = Some(path.clone());
-                    } else {
-                        runtime_image_source = Some(rembg_path.clone());
+                        return;
                     }
+
+                    let report = match analyze_png_quality(&processed, ImageQualitySpec::default())
+                    {
+                        Ok(report) => report,
+                        Err(err) => {
+                            finalize_with_error(
+                                &repo,
+                                &job_id,
+                                &sink,
+                                &format!(
+                                    "analyze processed image quality: {err}; diagnostics kept at {} and {}",
+                                    path.display(),
+                                    rembg_path.display()
+                                ),
+                            )
+                            .await;
+                            return;
+                        }
+                    };
+                    let report_path = target_dir.join("image-quality.json");
+                    let report_bytes = match serde_json::to_vec_pretty(&report) {
+                        Ok(bytes) => bytes,
+                        Err(err) => {
+                            finalize_with_error(
+                                &repo,
+                                &job_id,
+                                &sink,
+                                &format!("serialize image quality report: {err}"),
+                            )
+                            .await;
+                            return;
+                        }
+                    };
+                    if let Err(err) =
+                        crate::fs_atomic::write_atomic(&report_path, &report_bytes).await
+                    {
+                        finalize_with_error(
+                            &repo,
+                            &job_id,
+                            &sink,
+                            &format!("write image quality report: {err}"),
+                        )
+                        .await;
+                        return;
+                    }
+                    if !report.accepted {
+                        let quality_error =
+                            ImageProcError::Quality(report.rejection_summary()).to_string();
+                        finalize_with_error(
+                            &repo,
+                            &job_id,
+                            &sink,
+                            &format!(
+                                "{quality_error}; diagnostics kept at {}, {}, and {}",
+                                path.display(),
+                                rembg_path.display(),
+                                report_path.display()
+                            ),
+                        )
+                        .await;
+                        return;
+                    }
+                    runtime_image_source = Some(rembg_path.clone());
+                    image_quality_path = Some(report_path);
+                    image_quality_report = Some(report);
                 }
                 Err(err) => {
-                    sink.emit(ProgressEvent {
-                        job_id: job_id.clone(),
-                        stage: "rembg-warn".into(),
-                        percent: None,
-                        message: Some(format!("background removal failed: {err}; using raw image")),
-                        delta: None,
-                    })
+                    finalize_with_error(
+                        &repo,
+                        &job_id,
+                        &sink,
+                        &format!(
+                            "background removal failed: {err}; raw diagnostic kept at {}; no runtime image delivered",
+                            path.display()
+                        ),
+                    )
                     .await;
-                    runtime_image_source = Some(path.clone());
+                    return;
                 }
             }
             png_path = Some(path);
@@ -249,6 +318,8 @@ pub(crate) async fn run_asset_generate(
         "localizationPaths": artifact.localization_paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
         "runtimeImagePaths": artifact.runtime_image_paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
         "pngPath": png_path.as_ref().map(|p| p.display().to_string()),
+        "imageQualityPath": image_quality_path.as_ref().map(|p| p.display().to_string()),
+        "imageQuality": image_quality_report,
         "imageModel": image_model,
         "revisedPrompt": revised_prompt,
         "codeModel": artifact.model,
@@ -305,7 +376,9 @@ mod tests {
     use crate::platform::infra::FileJobRepository;
     use async_trait::async_trait;
     use futures_util::stream;
+    use image::{ImageFormat, Rgba, RgbaImage};
     use std::collections::VecDeque;
+    use std::io::Cursor;
     use std::path::Path;
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicU32, Ordering};
@@ -459,11 +532,13 @@ mod tests {
             "localization": {
                 "eng": {
                     format!("{key}.title"): asset_name,
-                    format!("{key}.description"): "English description"
+                    format!("{key}.description"): "English description",
+                    format!("{key}.flavor"): "English flavor"
                 },
                 "zhs": {
                     format!("{key}.title"): "中文名称",
-                    format!("{key}.description"): "中文描述"
+                    format!("{key}.description"): "中文描述",
+                    format!("{key}.flavor"): "中文风味"
                 }
             }
         })
@@ -496,11 +571,13 @@ mod tests {
             "localization": {
                 "eng": {
                     format!("{key}.title"): asset_name,
-                    format!("{key}.description"): "English description"
+                    format!("{key}.description"): "English description",
+                    format!("{key}.flavor"): "English flavor"
                 },
                 "zhs": {
                     format!("{key}.title"): "中文名称",
-                    format!("{key}.description"): "中文描述"
+                    format!("{key}.description"): "中文描述",
+                    format!("{key}.flavor"): "中文风味"
                 }
             }
         })
@@ -525,10 +602,19 @@ mod tests {
         asset_name: &str,
         image_prompt: Option<&str>,
     ) -> SubmitAssetGenerateRequest {
+        make_request_for_type(project_root, asset_name, "card", image_prompt)
+    }
+
+    fn make_request_for_type(
+        project_root: &Path,
+        asset_name: &str,
+        asset_type: &str,
+        image_prompt: Option<&str>,
+    ) -> SubmitAssetGenerateRequest {
         SubmitAssetGenerateRequest {
             asset_request: AssetCodegenRequest {
                 design_description: "造成 10 点伤害".into(),
-                asset_type: "card".into(),
+                asset_type: asset_type.into(),
                 asset_name: asset_name.into(),
                 image_paths: vec![],
                 project_root: project_root.to_path_buf(),
@@ -538,6 +624,38 @@ mod tests {
             image_prompt: image_prompt.map(|s| s.to_string()),
             image_size: None,
         }
+    }
+
+    fn encode_png(image: &RgbaImage) -> Vec<u8> {
+        let mut output = Cursor::new(Vec::new());
+        image.write_to(&mut output, ImageFormat::Png).unwrap();
+        output.into_inner()
+    }
+
+    fn valid_subject_png() -> Vec<u8> {
+        let mut image = RgbaImage::from_pixel(64, 64, Rgba([255, 255, 255, 255]));
+        for y in 16..48 {
+            for x in 16..48 {
+                image.put_pixel(x, y, Rgba([200, 40, 30, 255]));
+            }
+        }
+        encode_png(&image)
+    }
+
+    fn checkerboard_subject_png() -> Vec<u8> {
+        let mut image = RgbaImage::new(64, 64);
+        for y in 0..64 {
+            for x in 0..64 {
+                let value = if (x / 8 + y / 8) % 2 == 0 { 255 } else { 190 };
+                image.put_pixel(x, y, Rgba([value, value, value, 255]));
+            }
+        }
+        for y in 20..44 {
+            for x in 20..44 {
+                image.put_pixel(x, y, Rgba([180, 20, 20, 255]));
+            }
+        }
+        encode_png(&image)
     }
 
     fn prepare_project(root: &Path) {
@@ -593,8 +711,7 @@ mod tests {
         let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
             events: Mutex::new(ok_code_events("AlphaCard")),
         });
-        let image_gen: Arc<dyn ImageGenClient> =
-            Arc::new(MockImageGen::new(b"FAKE-PNG-BYTES".to_vec()));
+        let image_gen: Arc<dyn ImageGenClient> = Arc::new(MockImageGen::new(valid_subject_png()));
         let sink = Arc::new(super::super::common::NoopProgressSink);
         let service = service_with_compile_validator(repo, llm);
 
@@ -618,11 +735,13 @@ mod tests {
         let png = artifacts.join("AlphaCard/AlphaCard.png");
         let artifact_cs = artifacts.join("AlphaCard/AlphaCard.cs");
         let evidence = artifacts.join("AlphaCard/evidence.md");
+        let quality = artifacts.join("AlphaCard/image-quality.json");
         let cs = td.path().join("Generated/AlphaCard.cs");
         assert!(png.exists(), "png missing");
         assert!(cs.exists(), "cs missing");
         assert!(artifact_cs.exists(), "artifact cs missing");
         assert!(evidence.exists(), "evidence record missing");
+        assert!(quality.exists(), "image quality report missing");
         assert!(
             td.path()
                 .join("DemoMod/images/card_portraits/alpha_card.png")
@@ -656,11 +775,169 @@ mod tests {
         assert_eq!(res["imageModel"], "mock-image-model");
         assert_eq!(res["revisedPrompt"], "a revised prompt");
         assert_eq!(res["runtimeImagePaths"].as_array().unwrap().len(), 2);
+        assert_eq!(res["imageQuality"]["accepted"], true);
+        assert_eq!(
+            PathBuf::from(res["imageQualityPath"].as_str().unwrap())
+                .canonicalize()
+                .unwrap(),
+            quality.canonicalize().unwrap()
+        );
         let evidence_result = PathBuf::from(res["evidencePath"].as_str().unwrap());
         assert_eq!(
             evidence_result.canonicalize().unwrap(),
             evidence.canonicalize().unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn checkerboard_residue_is_rejected_before_code_and_compile() {
+        let td = tempfile::TempDir::new().unwrap();
+        prepare_project(td.path());
+        let history = td.path().join("history");
+        let artifacts = td.path().join("artifacts");
+        std::fs::create_dir_all(&history).unwrap();
+        std::fs::create_dir_all(&artifacts).unwrap();
+        let validator = Arc::new(CountingCompileValidator::default());
+        let service = service_with_validator(
+            Arc::new(FileJobRepository::new(history)),
+            Arc::new(ScriptedLlm {
+                events: Mutex::new(ok_code_events("NoisyRelic")),
+            }),
+            validator.clone(),
+        );
+
+        let id = service
+            .submit_asset_generate(
+                make_request_for_type(td.path(), "NoisyRelic", "relic", Some("checkerboard relic")),
+                KnowledgePaths::from_runtime_dir(td.path()),
+                artifacts.clone(),
+                Arc::new(MockImageGen::new(checkerboard_subject_png())),
+                Arc::new(SimpleBgRemover::default()),
+                Arc::new(super::super::common::NoopProgressSink),
+            )
+            .await
+            .unwrap();
+        wait_terminal(&service, &id).await;
+
+        let job = service.get(&id).await.unwrap();
+        assert_eq!(job.status, JobStatus::Failed);
+        assert!(
+            job.error
+                .unwrap_or_default()
+                .contains("likely_background_residue")
+        );
+        assert_eq!(validator.calls.load(Ordering::SeqCst), 0);
+        assert!(artifacts.join("NoisyRelic/NoisyRelic.png").is_file());
+        assert!(artifacts.join("NoisyRelic/NoisyRelic.rembg.png").is_file());
+        assert!(artifacts.join("NoisyRelic/image-quality.json").is_file());
+        assert!(!artifacts.join("NoisyRelic/NoisyRelic.cs").exists());
+        assert!(!td.path().join("Generated/NoisyRelic.cs").exists());
+    }
+
+    #[tokio::test]
+    async fn background_removal_failure_never_delivers_raw_image() {
+        let td = tempfile::TempDir::new().unwrap();
+        prepare_project(td.path());
+        let history = td.path().join("history");
+        let artifacts = td.path().join("artifacts");
+        std::fs::create_dir_all(&history).unwrap();
+        std::fs::create_dir_all(&artifacts).unwrap();
+        let validator = Arc::new(CountingCompileValidator::default());
+        let service = service_with_validator(
+            Arc::new(FileJobRepository::new(history)),
+            Arc::new(ScriptedLlm {
+                events: Mutex::new(ok_code_events("InvalidImageRelic")),
+            }),
+            validator.clone(),
+        );
+
+        let id = service
+            .submit_asset_generate(
+                make_request_for_type(
+                    td.path(),
+                    "InvalidImageRelic",
+                    "relic",
+                    Some("invalid image bytes"),
+                ),
+                KnowledgePaths::from_runtime_dir(td.path()),
+                artifacts.clone(),
+                Arc::new(MockImageGen::new(b"not-a-png".to_vec())),
+                Arc::new(SimpleBgRemover::default()),
+                Arc::new(super::super::common::NoopProgressSink),
+            )
+            .await
+            .unwrap();
+        wait_terminal(&service, &id).await;
+
+        let job = service.get(&id).await.unwrap();
+        assert_eq!(job.status, JobStatus::Failed);
+        assert!(
+            job.error
+                .unwrap_or_default()
+                .contains("no runtime image delivered")
+        );
+        assert_eq!(validator.calls.load(Ordering::SeqCst), 0);
+        assert!(
+            artifacts
+                .join("InvalidImageRelic/InvalidImageRelic.png")
+                .is_file()
+        );
+        assert!(
+            !artifacts
+                .join("InvalidImageRelic/InvalidImageRelic.rembg.png")
+                .exists()
+        );
+        assert!(!td.path().join("Generated/InvalidImageRelic.cs").exists());
+        assert!(
+            !td.path()
+                .join("DemoMod/images/relics/invalid_image_relic.png")
+                .exists()
+        );
+    }
+
+    #[tokio::test]
+    async fn relic_runtime_images_are_role_specific() {
+        let td = tempfile::TempDir::new().unwrap();
+        prepare_project(td.path());
+        let history = td.path().join("history");
+        let artifacts = td.path().join("artifacts");
+        std::fs::create_dir_all(&history).unwrap();
+        std::fs::create_dir_all(&artifacts).unwrap();
+        let service = service_with_compile_validator(
+            Arc::new(FileJobRepository::new(history)),
+            Arc::new(ScriptedLlm {
+                events: Mutex::new(ok_code_events("RoleRelic")),
+            }),
+        );
+
+        let id = service
+            .submit_asset_generate(
+                make_request_for_type(td.path(), "RoleRelic", "relic", Some("transparent relic")),
+                KnowledgePaths::from_runtime_dir(td.path()),
+                artifacts,
+                Arc::new(MockImageGen::new(valid_subject_png())),
+                Arc::new(SimpleBgRemover::default()),
+                Arc::new(super::super::common::NoopProgressSink),
+            )
+            .await
+            .unwrap();
+        wait_terminal(&service, &id).await;
+
+        let job = service.get(&id).await.unwrap();
+        assert_eq!(job.status, JobStatus::Completed, "error={:?}", job.error);
+        let root = td.path().join("DemoMod/images/relics");
+        let normal = std::fs::read(root.join("role_relic.png")).unwrap();
+        let outline = std::fs::read(root.join("role_relic_outline.png")).unwrap();
+        let big = std::fs::read(root.join("big/role_relic.png")).unwrap();
+        assert_ne!(normal, outline);
+        assert_ne!(normal, big);
+        assert_ne!(outline, big);
+        let normal_image = image::load_from_memory(&normal).unwrap();
+        let outline_image = image::load_from_memory(&outline).unwrap();
+        let big_image = image::load_from_memory(&big).unwrap();
+        assert_eq!((normal_image.width(), normal_image.height()), (128, 128));
+        assert_eq!((outline_image.width(), outline_image.height()), (128, 128));
+        assert_eq!((big_image.width(), big_image.height()), (1024, 1024));
     }
 
     #[tokio::test]
@@ -952,7 +1229,7 @@ mod tests {
                 make_request(td.path(), "RollbackCard", Some("rollback card image")),
                 KnowledgePaths::from_runtime_dir(td.path()),
                 artifacts.clone(),
-                Arc::new(MockImageGen::new(b"ROLLBACK-IMAGE".to_vec())),
+                Arc::new(MockImageGen::new(valid_subject_png())),
                 Arc::new(SimpleBgRemover::default()),
                 Arc::new(super::super::common::NoopProgressSink),
             )

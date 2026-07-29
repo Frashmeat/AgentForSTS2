@@ -56,7 +56,7 @@ Questions to answer:
 
 ### 1. Scope / Trigger
 
-This contract applies to `SubmitCodeGenerateRequest::Asset` and `submit_asset_generate`. It covers model output, runtime image delivery, localization, compile validation, rollback, and job finalization. It does not cover product configuration of `GodotPath` or image alpha quality.
+This contract applies to `SubmitCodeGenerateRequest::Asset` and `submit_asset_generate`. It covers model output, runtime image delivery, image quality, localization, compile validation, rollback, and job finalization. It does not cover product configuration of `GodotPath`.
 
 ### 2. Signatures
 
@@ -158,6 +158,52 @@ cargo test -p ats-core knowledge::sts2_code_facts_provider::tests
 cargo test -p ats-core codegen::prompt_assembler::tests
 cargo test -p ats-core codegen::validation::tests
 cargo test -p ats-core platform::application::handlers::asset_generate::tests
+cargo check -p ats-core
+```
+
+## Scenario: Runtime Image Quality and STS2 Relic Role Derivation
+
+### 1. Scope / Trigger
+
+This contract applies when `submit_asset_generate` receives generated image bytes. Generic PNG analysis and role transforms live in `crates/ats-core/src/image_proc/`; STS2 target declarations and runtime paths live in `platform/application/handlers/asset_bundle.rs`.
+
+### 2. Signatures and Result Fields
+
+```rust
+analyze_png_quality(bytes, ImageQualitySpec) -> Result<ImageQualityReport, ImageProcError>
+derive_png_variants(bytes, &[ImageVariantSpec]) -> Result<Vec<DerivedImageVariant>, ImageProcError>
+```
+
+Successful image jobs expose `imageQualityPath`, `imageQuality`, and `runtimeImagePaths`. Diagnostics are `artifacts/<asset>/<asset>.png`, `<asset>.rembg.png`, and `image-quality.json`.
+
+### 3. Contracts
+
+- `ImageProcClient::remove_background` returning `Ok` is not sufficient for delivery. The processed PNG must pass the quality report.
+- Default thresholds require at least 5% transparent pixels, 1% foreground pixels, and 60% of foreground pixels in the largest connected component. At most 30% of border pixels may contain foreground, and at most 15% may contain light neutral foreground residue.
+- Decode/removal failure keeps the raw diagnostic and fails before code generation, project writes, and compile validation. It must not silently deliver the raw image.
+- A rejected processed PNG keeps raw, rembg, and JSON diagnostics. The error names the failed quality rule.
+- The current STS2 relic Resource Specification is: normal `128x128` cover resize; outline `128x128` alpha-derived hollow white ring with radius 4; big `1024x1024` cover resize.
+- Relic normal/outline/big bytes must be pairwise different. Cards, powers, and characters retain their existing preserve behavior until their own role specifications are verified.
+- Before transactional writes, normal and big must pass the standard quality rules at their declared dimensions; outline must contain both non-transparent outline pixels and transparent pixels.
+- Runtime image writes remain in the existing file transaction and roll back on compile failure.
+
+### 4. Validation Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| White background with centered subject | heuristic removal passes and writes an explainable accepted report |
+| Invalid PNG or remover failure | fail before LLM/compile; keep raw diagnostic only |
+| Checker/neutral residue on image border | fail with `likely_background_residue`; keep raw/rembg/report |
+| Fully opaque output | fail with `invalid_alpha` |
+| Valid relic master | derive 128 normal, independent 128 outline, and 1024 big |
+| Compile failure after derivation | roll back formal runtime images; diagnostic inputs/report survive |
+
+### 5. Targeted Tests
+
+```text
+cargo test -p ats-core image_proc::
+cargo test -p ats-core platform::application::handlers::asset_generate::tests
+cargo test -p ats-core platform::application::handlers::asset_bundle::tests
 cargo check -p ats-core
 ```
 

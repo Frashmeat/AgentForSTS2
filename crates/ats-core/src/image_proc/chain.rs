@@ -3,8 +3,9 @@
 //! 不依赖 `ml-rembg` feature —— ML 后端通过 `Option<Arc<dyn ImageProcClient>>`
 //! 注入。Feature off 时直接传 None，行为等同于裸 SimpleBgRemover。
 //!
-//! 设计取向：handler 不关心是 ML 还是启发式，只看 trait。Chain 在异常路径
-//! tracing::warn 但不传播错误，让用户拿到"至少有图"的输出。
+//! 设计取向：handler 不关心是 ML 还是启发式，只看 trait。Primary 失败时 Chain
+//! 记录 tracing::warn 并尝试启发式；fallback 失败仍向上传播，最终输出还必须通过
+//! handler 的质量门禁，不能仅因为任一路径返回字节就交付。
 
 use std::sync::Arc;
 

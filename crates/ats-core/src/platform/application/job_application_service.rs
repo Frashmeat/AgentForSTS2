@@ -242,7 +242,8 @@ impl JobApplicationService {
 
     /// 提交 asset_generate 任务：image_gen 出图 + 结构化 C#/本地化生成 + compile gate。
     /// image_prompt 留空时跳过 image_gen，等价于 code_generate(asset) 但通过统一接口。
-    /// `image_proc` 走 BgRemoverChain（生产 ML→Simple 回退），失败不致命。
+    /// `image_proc` 走 BgRemoverChain（生产 ML→Simple 回退）；fallback 或质量门禁失败
+    /// 会保留诊断文件并终止本次资产生成，不交付原图。
     #[allow(clippy::too_many_arguments)] // 同 handler，DI 注入式 service
     pub async fn submit_asset_generate(
         &self,
