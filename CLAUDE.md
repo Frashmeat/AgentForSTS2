@@ -33,7 +33,7 @@ Dockerfile.ci 的复杂度只是 actions/setup-* 的简化版，可控性更好�
 ## 2. 通用约束
 
 - 详细任务流 / 项目背景：先读 `AGENTS.md` → `PROJECT_SPEC.md`（若存在）→ `docs/`
-- 计划文档：`docs/03-方案/全栈重写/进行中/` 三份核心文档（战略 / 执行 / Q 决议）
+- 当前方案：`docs/03-当前方案.md`；具体任务和执行状态读取当前 Trellis `prd.md`
 - 测试基线：`cargo test --workspace` 必须 204 unit + 4 integration = 208 全过；
   新增模块带 3+ 单测（TDD）
 - 提交消息：中文，标 stage / 测试数量（参照 `git log --oneline -10`）

@@ -1,4 +1,4 @@
-// 统一 API 入口。详见 docs/04-决策/0002-frontend-and-api-double-adapter.md。
+// 统一 API 入口。详见 docs/01-总览/项目架构总览.md。
 //
 // 编译期常量 __IS_TAURI__ 决定动态 import 哪一边的实现。Proxy 把同步访问
 // 包成 async 调用，保证 app 启动不依赖顶层 await。

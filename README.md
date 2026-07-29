@@ -8,10 +8,11 @@
 
 ## 文档
 
-- 战略层：[Rust+Tauri 全栈重写计划](./docs/03-方案/全栈重写/进行中/2026-05-11-Rust+Tauri全栈重写计划.md)
-- 战术层：[Rust 重写后续执行计划](./docs/03-方案/全栈重写/进行中/2026-05-11-Rust重写后续执行计划.md)
-- 决议清单：[Q1-Q10 + N1-N5 决议汇总](./docs/03-方案/全栈重写/进行中/2026-05-11-Q决议汇总.md)
-- ADRs：[`docs/04-决策/`](./docs/04-决策/)（含 0001 架构 / 0002 前端双适配）
+- 总入口：[`docs/README.md`](./docs/README.md)
+- 架构：[项目架构总览](./docs/01-总览/项目架构总览.md)
+- 当前事实：[当前进度说明](./docs/02-现状/当前进度说明.md)
+- 当前方向：[当前方案](./docs/03-当前方案.md)
+- 历史材料：[`docs/90-归档/`](./docs/90-归档/README.md)
 
 ## 当前进度
 
@@ -144,7 +145,7 @@ npm run build:web
 
 主配置文件：`runtime/agentthespire.config.json`（template 见 `runtime/agentthespire.config.example.json`）。
 
-### LLM provider（Q5/Q9 决议）
+### LLM provider
 
 支持任意第三方代理（OpenAI / Anthropic 协议兼容均可）：
 
@@ -175,7 +176,7 @@ provider 字段容错（trim + lowercase + hyphen→underscore）：
 
 ## 工程文件夹（桌面端）
 
-Q1 决议：桌面端无 DB，每个 mod 项目是自包含目录：
+桌面端无 DB，每个 mod 项目是自包含目录：
 
 ```
 <user-chosen-path>/<project_name>/
@@ -189,7 +190,7 @@ Q1 决议：桌面端无 DB，每个 mod 项目是自包含目录：
 
 可整体 zip / git / 复制粘贴携带。
 
-## 签名 / 公证（Q7）
+## 签名 / 公证
 
 当前决议：先发不签名版本。Windows 用户看 SmartScreen 警告时点"更多信息 → 仍要运行"。
 
@@ -225,7 +226,7 @@ cargo tauri build --features ml-rembg
 
 ## 路线图剩余
 
-详见 [执行计划文档](../docs/03-方案/全栈重写/进行中/2026-05-11-Rust重写后续执行计划.md)。当前主要剩余项：
+详见[当前方案](./docs/03-当前方案.md)；具体任务、状态和验证证据由 Trellis 管理。当前主要剩余方向：
 
 - ~~Stage 5 装配收口剩余子项~~ 大半已完成（audit auto-write + ctrl_c + image_proc
   prewarm + ML rembg + health readiness 字段都在）
