@@ -4,7 +4,7 @@
 >
 > 权威入口：上级入口为 `docs/README.md`。
 >
-> 最后更新：2026-05-04
+> 最后更新：2026-07-29
 
 ## 专题目录
 
@@ -21,3 +21,4 @@
 - [`0001-rust-tauri-workspace-architecture.md`](./0001-rust-tauri-workspace-architecture.md) — 整体架构与 workspace 划分
 - [`0002-frontend-and-api-double-adapter.md`](./0002-frontend-and-api-double-adapter.md) — 前端 `services/api.ts` 双适配（Tauri ↔ Web）
 - [`0003-startup-and-shutdown-lifecycle.md`](./0003-startup-and-shutdown-lifecycle.md) — Tauri / ats-web 启动与停机的有序生命周期契约
+- [`0004-generic-mod-pipeline-and-game-pack.md`](./0004-generic-mod-pipeline-and-game-pack.md) — 通用 Mod 生产流水线与 Game Pack 的多游戏扩展边界
