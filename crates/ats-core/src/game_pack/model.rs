@@ -4,6 +4,8 @@
 pub struct LoadedGamePack {
     pub schema_version: u32,
     pub id: String,
+    /// SHA-256 of the exact manifest bytes accepted by the loader.
+    pub content_sha256: String,
     pub display_name: String,
     pub capabilities: Vec<String>,
     pub truth_sources: Vec<TruthSource>,
@@ -26,5 +28,6 @@ pub enum TruthSourceKind {
         repository: String,
         pinned_release: String,
         asset: String,
+        sha256: String,
     },
 }

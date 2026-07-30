@@ -324,7 +324,7 @@ project.json: game_id: string
 - IDs use lowercase ASCII letters, digits, `_`, and `-`. Duplicate capability, truth-source ID, or Pack ID is rejected.
 - `local_file` requires `input_key`. `github_release_asset` requires `repository`, `pinned_release`, and a path-free `asset` file name.
 - Existing Pack-relative files must resolve through `resolve_pack_relative_path`; canonical paths outside the Pack root are rejected.
-- The built-in STS2 Pack declares the current `v3.3.8` BaseLib release. A remote asset SHA-256 becomes mandatory in the Truth Snapshot slice when exact asset fetching is wired; Slice 1 must not invent an unverified hash.
+- The built-in STS2 Pack declares the current `v3.3.8` BaseLib release. Every `github_release_asset` requires an exact 64-character SHA-256; the verified STS2 `BaseLib.dll` digest is part of the Pack declaration.
 - `ProjectMeta.game_id` is required and `PROJECT_SCHEMA_VERSION` is 2. Create, open, and save validate the ID through the loaded registry.
 - Missing `game_id`, unknown Pack IDs, and old schema versions fail before acquiring the project lock. There is no implicit `sts2` default or legacy fallback.
 - The current GUI explicitly sends the single installed Pack ID. Tauri accepts Rust `game_id` through the JavaScript `gameId` argument and persists snake-case `game_id` in `project.json`.
@@ -367,6 +367,84 @@ Assertions must cover built-in STS2 lookup and pinned BaseLib release, optional 
 Wrong: deserialize `game_id` with `#[serde(default)]`, treat an empty value as STS2, accept unknown declaration strings, or let the UI omit game identity because only one game currently ships.
 
 Correct: validate declarations against an explicit Core capability catalog, persist a required registry-backed `game_id`, reject legacy ambiguity before locking, and add new schema dimensions only with their vertical cutover and evidence.
+
+## Scenario: Content-Addressed Truth Snapshot Store
+
+### 1. Scope / Trigger
+
+This contract applies when changing `crates/ats-core/src/game_pack/truth_snapshot/`, Pack truth-source checksums, snapshot storage, or the future provider/Prompt cutover. Slice 2 establishes an immutable verified input boundary beside the legacy knowledge path; it does not switch `knowledge_refresh`, `KnowledgePaths`, `SourceMode`, Prompt/Evidence, or the formal `runtime/knowledge` cache.
+
+### 2. Signatures and Storage
+
+```rust
+TruthSnapshotStore::new(runtime_dir, pack) -> TruthSnapshotStore
+TruthSnapshotStore::begin(&self, pack) -> TruthSnapshotResult<TruthSnapshotDraft>
+TruthSnapshotDraft::stage_source(&mut self, source_id, source_path) -> TruthSnapshotResult<PathBuf>
+TruthSnapshotDraft::index_output_dir(&self, source_id) -> TruthSnapshotResult<PathBuf>
+TruthSnapshotDraft::finalize(self, tool_versions) -> TruthSnapshotResult<VerifiedTruthSnapshot>
+TruthSnapshotStore::open_current(&self, pack) -> TruthSnapshotResult<Option<VerifiedTruthSnapshot>>
+TruthSnapshotStore::open_snapshot(&self, pack, snapshot_id) -> TruthSnapshotResult<VerifiedTruthSnapshot>
+```
+
+```text
+runtime/game-packs/<game-id>/
+  .staging/<draft-id>/
+  snapshots/<snapshot-id>/
+    snapshot.json
+    sources/<source-id>/source.bin
+    indexes/<source-id>/...
+  current.json
+```
+
+### 3. Contracts
+
+- `LoadedGamePack.content_sha256` is the SHA-256 of the exact manifest bytes accepted by `GamePackLoader`. A remote `github_release_asset.sha256` is required, validated as exactly 64 hexadecimal characters, and normalized to lowercase.
+- A draft must stage every Pack-declared source exactly once. Source bytes are copied into the draft while streaming SHA-256 and size; a pinned remote checksum mismatch fails before index activation.
+- Indexers consume only the staged source copy and write to the source-specific index directory. Every declared source requires a non-empty index containing at least one `.cs` file.
+- Index tree identity sorts UTF-8 relative paths and binds each path, byte size, and file SHA-256. Symbolic links and non-regular index entries are rejected.
+- Snapshot identity binds snapshot schema, Pack ID/schema/content SHA-256, sorted source identities, indexer/provider/tree summaries, and non-empty tool versions. `created_at` and draft names are excluded, so identical verified content reuses one snapshot ID and directory.
+- Drafts and final snapshots are on the same volume. A verified draft is renamed into `snapshots/<snapshot-id>` before the atomic `current.json` pointer is replaced. A failed draft never changes the previous pointer.
+- Opening a snapshot recomputes its identity and verifies Pack binding, manifest pointer checksum, every source hash/size, and every index tree. Snapshot IDs and manifest-relative paths cannot escape the store.
+- `VerifiedTruthSnapshot` can only be constructed by store verification. A job holds one handle for its lifetime; activating a new current snapshot does not retarget that handle.
+- Snapshot acquisition/provider execution, legacy refresh cutover, import/export, and garbage collection are later slices. No caller may describe the new store as the active Prompt evidence source until Slice 3 is complete.
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| All declared sources and indexes match | Rename to immutable snapshot, atomically activate pointer, return verified handle |
+| Identical Pack/source/index/tool identity | Reuse the existing snapshot ID and directory |
+| Missing/duplicate/unknown source | Reject the draft; leave current unchanged |
+| Remote source checksum mismatch | Return `SourceChecksumMismatch`; do not activate |
+| Missing index or zero `.cs` files | Return `MissingIndex` / `EmptyIndex`; do not activate |
+| Empty tool map or blank name/version | Return `InvalidToolVersion` |
+| Pointer traversal or Pack mismatch | Reject before reading an out-of-scope snapshot |
+| Source or index bytes changed after activation | Reopen fails with checksum/integrity mismatch |
+| Index contains a symlink | Return `InvalidIndexEntry`; do not activate |
+| A newer snapshot becomes current | Existing job handle remains bound to its original root and ID |
+
+### 5. Good / Base / Bad Cases
+
+- Good: current game and pinned BaseLib copies produce complete indexes, activate one verified snapshot, and reopen with the same ID.
+- Base: rebuilding identical content at a later time discards the duplicate draft and reuses the immutable snapshot while refreshing only the pointer.
+- Bad: BaseLib bytes do not match the Pack checksum, one provider emits an empty index, or stored bytes are tampered; activation/reopen fails without silently falling back to legacy knowledge.
+
+### 6. Tests Required
+
+```text
+cargo test -p ats-core game_pack::truth_snapshot::
+cargo test -p ats-core game_pack::loader::tests
+cargo test -p ats-core game_pack::registry::tests
+cargo check -p ats-core
+```
+
+Assertions must cover staging/activation/reopen, content deduplication, pinned checksum mismatch, missing source/index, empty C# index, failed-draft pointer preservation, source/index tampering, fixed job handles, pointer traversal, store/Pack mismatch, and index symlink rejection.
+
+### 7. Wrong vs Correct
+
+Wrong: mark a directory current because it contains `.cs` files, let a caller supply `SourceMode::RuntimeDecompiled`, or update `current.json` before hashing all source and index bytes.
+
+Correct: bind the exact Pack/source/index/tool identity, finish all work in same-volume staging, verify immutable contents, atomically activate a pointer, and pass the resulting verified handle through the complete job.
 
 ## Scenario: Complete Knowledge Refresh and Desktop Job Routing
 

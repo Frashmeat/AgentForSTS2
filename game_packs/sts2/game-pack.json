@@ -19,6 +19,7 @@
       "repository": "Alchyr/BaseLib-StS2",
       "pinned_release": "v3.3.8",
       "asset": "BaseLib.dll",
+      "sha256": "e92213e9286cb8cb9db42b83735cc9ddc2d642a7c90c67c5350c983d734407a8",
       "indexer": "dotnet_file",
       "provider": "sts2_baselib"
     }

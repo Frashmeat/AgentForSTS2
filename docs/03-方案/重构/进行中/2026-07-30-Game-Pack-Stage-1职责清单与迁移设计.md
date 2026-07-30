@@ -227,4 +227,31 @@ cargo check -p agentthespire-desktop               # passed
 npx tsc --noEmit                                   # passed
 ```
 
-本切片没有刷新或删除旧 knowledge 缓存，也没有改动 Prompt、Evidence、图片、validation、template、build 或 package 的生产路径。下一步是 Slice 2 Truth Snapshot；只有其内容身份、staging、原子激活和 job 固定语义通过后，才进入 Evidence cutover。
+本切片没有刷新或删除旧 knowledge 缓存，也没有改动 Prompt、Evidence、图片、validation、template、build 或 package 的生产路径。
+
+## 12. Slice 2 实施结果（2026-07-30）
+
+已完成：
+
+- `LoadedGamePack` 记录 loader 实际接受的 Pack manifest 字节 SHA-256；`github_release_asset.sha256` 成为必填字段并统一为小写。
+- STS2 Pack 固定 BaseLib `v3.3.8` 官方 `BaseLib.dll`：`1,014,272` 字节，SHA-256 为 `e92213e9286cb8cb9db42b83735cc9ddc2d642a7c90c67c5350c983d734407a8`。
+- 新增 `TruthSnapshotStore`、`TruthSnapshotDraft`、`TruthSnapshotManifest` 和 `VerifiedTruthSnapshot`。源文件流式复制并计算 SHA-256；索引树按排序后的相对路径、大小与文件哈希形成稳定摘要。
+- draft 位于 `runtime/game-packs/<game-id>/.staging/`，完成验证后同卷重命名到不可变的 `snapshots/<snapshot-id>/`；`current.json` 仅在快照验证成功后原子更新。
+- Snapshot ID 绑定 Pack ID/schema/内容哈希、全部 source 身份、provider/indexer/索引树摘要和工具版本；`created_at` 与 staging 目录名不参与身份，相同内容复用同一快照。
+- `open_current` / `open_snapshot` 重新校验 Pack 绑定、manifest 身份、source SHA-256/大小和 index tree 完整性；路径穿越和 index symlink 被拒绝。
+- 一个生成 job 可以持有既有 `VerifiedTruthSnapshot`；后续激活新 current 不改变旧 handle 指向的证据目录。
+
+针对性验证：
+
+```text
+cargo test -p ats-core game_pack::truth_snapshot::   # 11 passed
+cargo test -p ats-core game_pack::loader::tests      # 7 passed
+cargo test -p ats-core game_pack::registry::tests    # 3 passed
+cargo check -p ats-core                              # passed
+```
+
+边界与下一步：
+
+- 本切片是新 Snapshot Store 的旁路能力，尚未改动旧 `KnowledgePaths`、`knowledge_refresh`、`SourceMode`、Prompt/Evidence 或正式 `runtime/knowledge` 缓存。
+- 本切片不负责 Snapshot 获取器、反编译 runner、GC、导入/导出或真实缓存刷新。
+- 下一步先建立“旧刷新基线 vs Snapshot provider”事实选择等价性夹具，固定相同 query 的 symbol、路径、excerpt 和警告语义；夹具通过后再进入 Slice 3 Evidence cutover，并在同一切片删除旧 truth-source API 和 fallback。

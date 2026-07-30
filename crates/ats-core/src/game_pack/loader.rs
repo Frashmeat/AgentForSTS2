@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 
 use super::error::{GamePackError, GamePackResult};
 use super::model::{LoadedGamePack, TruthSource, TruthSourceKind};
@@ -54,6 +55,7 @@ impl GamePackLoader {
     }
 
     pub fn load_str(&self, source_name: &str, text: &str) -> GamePackResult<LoadedGamePack> {
+        let content_sha256 = format!("{:x}", Sha256::digest(text.as_bytes()));
         let mut deserializer = serde_json::Deserializer::from_str(text);
         let raw: RawGamePack =
             serde_path_to_error::deserialize(&mut deserializer).map_err(|err| {
@@ -63,10 +65,15 @@ impl GamePackLoader {
                     message: err.inner().to_string(),
                 }
             })?;
-        self.validate(source_name, raw)
+        self.validate(source_name, raw, content_sha256)
     }
 
-    fn validate(&self, source_name: &str, raw: RawGamePack) -> GamePackResult<LoadedGamePack> {
+    fn validate(
+        &self,
+        source_name: &str,
+        raw: RawGamePack,
+        content_sha256: String,
+    ) -> GamePackResult<LoadedGamePack> {
         if raw.schema_version != GAME_PACK_SCHEMA_VERSION {
             return Err(GamePackError::UnsupportedSchema {
                 source_name: source_name.to_string(),
@@ -155,10 +162,17 @@ impl GamePackLoader {
                             "asset must be a file name without path components",
                         );
                     }
+                    let sha256 = required_non_empty(
+                        source_name,
+                        &format!("{prefix}.sha256"),
+                        source.sha256,
+                    )?;
+                    validate_sha256(source_name, &format!("{prefix}.sha256"), &sha256)?;
                     TruthSourceKind::GitHubReleaseAsset {
                         repository,
                         pinned_release,
                         asset,
+                        sha256: sha256.to_ascii_lowercase(),
                     }
                 }
                 other => {
@@ -188,6 +202,7 @@ impl GamePackLoader {
         Ok(LoadedGamePack {
             schema_version: raw.schema_version,
             id: raw.id,
+            content_sha256,
             display_name: raw.display_name,
             capabilities: raw.capabilities,
             truth_sources,
@@ -244,6 +259,7 @@ struct RawTruthSource {
     repository: Option<String>,
     pinned_release: Option<String>,
     asset: Option<String>,
+    sha256: Option<String>,
 }
 
 fn json_path(path: String) -> String {
@@ -350,6 +366,18 @@ fn validate_repository(source_name: &str, field: &str, value: &str) -> GamePackR
     }
 }
 
+fn validate_sha256(source_name: &str, field: &str, value: &str) -> GamePackResult<()> {
+    if value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        Ok(())
+    } else {
+        invalid(
+            source_name,
+            field,
+            "must contain exactly 64 hexadecimal SHA-256 characters",
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -382,6 +410,7 @@ mod tests {
     fn loads_valid_pack() {
         let pack = loader().load_str("fixture", GOOD).unwrap();
         assert_eq!(pack.id, "test-game");
+        assert_eq!(pack.content_sha256.len(), 64);
         assert_eq!(pack.truth_sources[0].provider, "test_code_facts");
     }
 
@@ -465,6 +494,25 @@ mod tests {
             error,
             GamePackError::DuplicateTruthSourceId { .. }
         ));
+    }
+
+    #[test]
+    fn github_release_asset_requires_valid_sha256() {
+        let github = GOOD
+            .replace("local_file", "github_release_asset")
+            .replace(
+                "\"input_key\": \"game_assembly\"",
+                "\"repository\": \"owner/repo\", \"pinned_release\": \"v1\", \"asset\": \"library.dll\"",
+            );
+        let error = loader().load_str("missing-sha", &github).unwrap_err();
+        assert!(error.to_string().contains("truth_sources[0].sha256"));
+
+        let invalid = github.replace(
+            "\"asset\": \"library.dll\"",
+            "\"asset\": \"library.dll\", \"sha256\": \"not-a-digest\"",
+        );
+        let error = loader().load_str("invalid-sha", &invalid).unwrap_err();
+        assert!(error.to_string().contains("64 hexadecimal"));
     }
 
     #[test]

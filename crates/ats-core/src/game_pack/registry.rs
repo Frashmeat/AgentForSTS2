@@ -68,8 +68,12 @@ mod tests {
         assert_eq!(sts2.truth_sources.len(), 2);
         assert!(matches!(
             &sts2.truth_sources[1].kind,
-            super::super::TruthSourceKind::GitHubReleaseAsset { pinned_release, .. }
-                if pinned_release == "v3.3.8"
+            super::super::TruthSourceKind::GitHubReleaseAsset {
+                pinned_release,
+                sha256,
+                ..
+            } if pinned_release == "v3.3.8"
+                && sha256 == "e92213e9286cb8cb9db42b83735cc9ddc2d642a7c90c67c5350c983d734407a8"
         ));
     }
 
