@@ -18,7 +18,7 @@ impl GamePackRegistry {
         let loader = GamePackLoader::new(GamePackLoadPolicy::new(
             ["truth_sources"],
             ["dotnet_project", "dotnet_file"],
-            ["sts2_code_facts", "sts2_baselib"],
+            ["sts2_code_facts"],
         ));
         let sts2 = loader.load_str("built-in:sts2", STS2_GAME_PACK)?;
         Self::from_packs([sts2])
@@ -75,6 +75,11 @@ mod tests {
             } if pinned_release == "v3.3.8"
                 && sha256 == "e92213e9286cb8cb9db42b83735cc9ddc2d642a7c90c67c5350c983d734407a8"
         ));
+        assert!(
+            sts2.truth_sources
+                .iter()
+                .all(|source| source.provider == "sts2_code_facts")
+        );
     }
 
     #[test]

@@ -255,3 +255,25 @@ cargo check -p ats-core                              # passed
 - 本切片是新 Snapshot Store 的旁路能力，尚未改动旧 `KnowledgePaths`、`knowledge_refresh`、`SourceMode`、Prompt/Evidence 或正式 `runtime/knowledge` 缓存。
 - 本切片不负责 Snapshot 获取器、反编译 runner、GC、导入/导出或真实缓存刷新。
 - 下一步先建立“旧刷新基线 vs Snapshot provider”事实选择等价性夹具，固定相同 query 的 symbol、路径、excerpt 和警告语义；夹具通过后再进入 Slice 3 Evidence cutover，并在同一切片删除旧 truth-source API 和 fallback。
+
+## 13. Snapshot provider 等价性夹具（2026-07-30）
+
+已完成：
+
+- `VerifiedTruthSnapshot::provider_index_roots` 按 Pack 声明选择一个 provider 的全部已验证 index roots，并保留 manifest 的确定性 source-id 顺序。
+- STS2 Pack 的 game 与 BaseLib source 统一声明 `sts2_code_facts`。provider 在查询前聚合两个 index，继续共享一个 `CodeFactsIndex`、一次全局排序、一个 `MAX_FACTS` 预算和一次行为证据选择；不采用两个 source 分别查询后拼接。
+- `Sts2CodeFactsProvider::build_facts_from_snapshot` 只接受 `VerifiedTruthSnapshot`，为 evidence path 生成 `snapshot://<snapshot-id>/<source-id>/<relative-path>` 稳定坐标；未映射 provider 确定性返回 `SnapshotCodeFactsError::MissingProvider`。
+- 复用同一份 Lantern、CombatManager 和 BaseLib fixture，同时建立旧 `KnowledgePaths` 布局与内容相同的 Truth Snapshot。比较时只归一化旧绝对根目录与 Snapshot URI，fact key/title/body/priority/evidence path/keywords/asset types、顺序和 warnings 必须完全相同。
+- 等价性覆盖首回合能量行为证据、BaseLib 精确 symbol 和普通 relic 查询。路径根和 snapshot ID 是已声明的非语义差异，source-id 后的相对路径必须一致。
+
+针对性验证：
+
+```text
+cargo test -p ats-core knowledge::sts2_code_facts_provider::tests  # 14 passed
+cargo test -p ats-core game_pack::                                 # 21 passed
+```
+
+边界与下一步：
+
+- 当前只是 Snapshot provider 的可验证旁路，`PromptAssembler` 和 handlers 仍使用 `KnowledgePaths + SourceMode`；正式 Evidence Record 尚未改为 Snapshot URI。
+- 下一步进入 Slice 3 Evidence cutover：新增不可伪造的 `VerifiedGameContext`，让 Prompt/Evidence 与生成 job 固定使用同一 Pack/Snapshot，切换全部调用方后删除 `detect_source_mode`、旧 Prompt truth-source 参数和静默 fallback。

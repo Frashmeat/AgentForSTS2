@@ -15,13 +15,24 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use regex::Regex;
+use thiserror::Error;
 
+use crate::game_pack::VerifiedTruthSnapshot;
 use crate::knowledge::contracts::{KnowledgeFactItem, KnowledgeQuery};
 use crate::knowledge::models::SourceMode;
 use crate::knowledge::paths::KnowledgePaths;
 
 #[derive(Debug, Default, Clone)]
 pub struct Sts2CodeFactsProvider;
+
+#[derive(Debug, Error)]
+pub enum SnapshotCodeFactsError {
+    #[error("verified truth snapshot `{snapshot_id}` has no indexes for provider `{provider}`")]
+    MissingProvider {
+        snapshot_id: String,
+        provider: String,
+    },
+}
 
 /// 单次扫描安全上限。当前完整 STS2 反编译约 3,425 个 .cs 文件，保留足够余量。
 const MAX_FILES: usize = 10_000;
@@ -58,23 +69,62 @@ impl Sts2CodeFactsProvider {
                 .push("BaseLib.decompiled.cs 不存在；prompt 不会包含 BaseLib 类型事实。".into());
         }
 
-        if index.types.is_empty() {
-            warnings.push("反编译产物未抽取到任何类型；可能 game_dir 为空或文件格式异常。".into());
-            return (Vec::new(), warnings);
+        finish_facts(query, index, warnings)
+    }
+
+    /// Query all snapshot indexes assigned to one provider as a single fact corpus.
+    ///
+    /// Grouping before ranking preserves the legacy behavior where game and
+    /// BaseLib symbols share one `MAX_FACTS` budget and one evidence selection.
+    pub fn build_facts_from_snapshot(
+        &self,
+        query: &KnowledgeQuery,
+        snapshot: &VerifiedTruthSnapshot,
+        provider: &str,
+    ) -> Result<(Vec<KnowledgeFactItem>, Vec<String>), SnapshotCodeFactsError> {
+        let provider_indexes = snapshot.provider_index_roots(provider);
+        if provider_indexes.is_empty() {
+            return Err(SnapshotCodeFactsError::MissingProvider {
+                snapshot_id: snapshot.snapshot_id().into(),
+                provider: provider.into(),
+            });
         }
 
-        let mut facts = index.behavior_evidence_for_query(query);
-        facts.extend(index.facts_for_query(query));
-        if facts.is_empty() {
-            warnings.push(format!(
-                "未找到匹配 asset_type={:?} 的类型；共扫描 {} 个 .cs 文件 / {} 个类型符号。",
-                query.asset_type,
-                index.files_scanned,
-                index.types.len()
-            ));
+        let mut warnings = Vec::new();
+        let mut index = CodeFactsIndex::default();
+        for (manifest, root) in provider_indexes {
+            let logical_root = format!(
+                "snapshot://{}/{}/",
+                snapshot.snapshot_id(),
+                manifest.source_id
+            );
+            index.scan_dir_with_prefix(&root, &logical_root, &mut warnings);
         }
-        (facts, warnings)
+        Ok(finish_facts(query, index, warnings))
     }
+}
+
+fn finish_facts(
+    query: &KnowledgeQuery,
+    index: CodeFactsIndex,
+    mut warnings: Vec<String>,
+) -> (Vec<KnowledgeFactItem>, Vec<String>) {
+    if index.types.is_empty() {
+        warnings.push("反编译产物未抽取到任何类型；可能 game_dir 为空或文件格式异常。".into());
+        return (Vec::new(), warnings);
+    }
+
+    let mut facts = index.behavior_evidence_for_query(query);
+    facts.extend(index.facts_for_query(query));
+    if facts.is_empty() {
+        warnings.push(format!(
+            "未找到匹配 asset_type={:?} 的类型；共扫描 {} 个 .cs 文件 / {} 个类型符号。",
+            query.asset_type,
+            index.files_scanned,
+            index.types.len()
+        ));
+    }
+    (facts, warnings)
 }
 
 // -------- 索引构建 --------
@@ -118,6 +168,20 @@ impl CodeFactsIndex {
     }
 
     fn scan_dir_with_limit(&mut self, dir: &Path, limit: usize, warnings: &mut Vec<String>) {
+        self.scan_dir_with_limit_and_prefix(dir, limit, None, warnings);
+    }
+
+    fn scan_dir_with_prefix(&mut self, dir: &Path, prefix: &str, warnings: &mut Vec<String>) {
+        self.scan_dir_with_limit_and_prefix(dir, MAX_FILES, Some(prefix), warnings);
+    }
+
+    fn scan_dir_with_limit_and_prefix(
+        &mut self,
+        dir: &Path,
+        limit: usize,
+        prefix: Option<&str>,
+        warnings: &mut Vec<String>,
+    ) {
         if !dir.is_dir() {
             return;
         }
@@ -143,20 +207,33 @@ impl CodeFactsIndex {
             ));
         }
         for path in source_files.iter().take(limit) {
-            self.scan_file(path, warnings);
+            if let Some(prefix) = prefix {
+                let relative = path.strip_prefix(dir).unwrap_or(path);
+                let display = format!(
+                    "{}{}",
+                    prefix,
+                    relative.to_string_lossy().replace('\\', "/")
+                );
+                self.scan_file_with_display(path, &display, warnings);
+            } else {
+                self.scan_file(path, warnings);
+            }
         }
     }
 
-    fn scan_file(&mut self, path: &Path, _warnings: &mut Vec<String>) {
+    fn scan_file(&mut self, path: &Path, warnings: &mut Vec<String>) {
+        self.scan_file_with_display(path, &path.display().to_string(), warnings);
+    }
+
+    fn scan_file_with_display(&mut self, path: &Path, display: &str, _warnings: &mut Vec<String>) {
         self.files_scanned += 1;
         let Ok(text) = fs::read_to_string(path) else {
             return;
         };
-        let display = path.display().to_string();
-        let symbols = extract_types(&text, &display);
+        let symbols = extract_types(&text, display);
         self.types.extend(symbols);
         self.source_files.push(SourceFile {
-            path: display,
+            path: display.into(),
             text,
         });
     }
@@ -804,7 +881,15 @@ fn symbol_to_fact(t: &TypeSymbol, asset_keys: &[String]) -> KnowledgeFactItem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
     use std::fs;
+
+    use sha2::{Digest, Sha256};
+
+    use crate::game_pack::{
+        GamePackLoadPolicy, GamePackLoader, LoadedGamePack, TruthSnapshotStore,
+        VerifiedTruthSnapshot,
+    };
 
     #[test]
     fn missing_source_emits_warning() {
@@ -1219,5 +1304,207 @@ public sealed class CombatManager
             }),
             "warnings={first_warnings:?}"
         );
+    }
+
+    const SNAPSHOT_PROVIDER: &str = "sts2_code_facts";
+    const SNAPSHOT_GAME_BYTES: &[u8] = b"fixture-current-game";
+    const SNAPSHOT_BASELIB_BYTES: &[u8] = b"fixture-pinned-baselib";
+
+    fn equivalence_pack() -> LoadedGamePack {
+        let baselib_sha = format!("{:x}", Sha256::digest(SNAPSHOT_BASELIB_BYTES));
+        let json = format!(
+            r#"{{
+              "schema_version": 1,
+              "id": "equivalence-game",
+              "display_name": "Equivalence Game",
+              "capabilities": ["truth_sources"],
+              "truth_sources": [
+                {{
+                  "id": "game",
+                  "kind": "local_file",
+                  "input_key": "game_assembly",
+                  "indexer": "dotnet_project",
+                  "provider": "{SNAPSHOT_PROVIDER}"
+                }},
+                {{
+                  "id": "baselib",
+                  "kind": "github_release_asset",
+                  "repository": "owner/repository",
+                  "pinned_release": "v1.2.3",
+                  "asset": "BaseLib.dll",
+                  "sha256": "{baselib_sha}",
+                  "indexer": "dotnet_file",
+                  "provider": "{SNAPSHOT_PROVIDER}"
+                }}
+              ]
+            }}"#
+        );
+        GamePackLoader::new(GamePackLoadPolicy::new(
+            ["truth_sources"],
+            ["dotnet_project", "dotnet_file"],
+            [SNAPSHOT_PROVIDER],
+        ))
+        .load_str("equivalence-pack", &json)
+        .unwrap()
+    }
+
+    fn write_equivalence_game_sources(root: &Path) {
+        write_cs(
+            root,
+            "MegaCrit.Sts2.Core.Models.Relics/Lantern.cs",
+            r#"namespace MegaCrit.Sts2.Core.Models.Relics;
+public sealed class Lantern : RelicModel
+{
+    protected override IEnumerable<DynamicVar> CanonicalVars => new[] { new EnergyVar(1) };
+    public override async Task AfterSideTurnStart(CombatSide side, CombatState combatState)
+    {
+        if (side == base.Owner.Creature.Side && combatState.RoundNumber <= 1)
+            await PlayerCmd.GainEnergy(base.DynamicVars.Energy.BaseValue, base.Owner);
+    }
+}"#,
+        );
+        write_cs(
+            root,
+            "MegaCrit.Sts2.Core.Combat/CombatManager.cs",
+            r#"namespace MegaCrit.Sts2.Core.Combat;
+public sealed class CombatManager
+{
+    public async Task StartSideTurn()
+    {
+        await SetupPlayerTurn(player);
+        await Hook.AfterSideTurnStart(_state, _state.CurrentSide);
+    }
+    private async Task SetupPlayerTurn(Player player)
+    {
+        player.PlayerCombatState.ResetEnergy();
+    }
+}"#,
+        );
+    }
+
+    fn write_equivalence_baselib_source(path: &Path) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            path,
+            r#"namespace BaseLib;
+public class BaseLibRelicSupport : RelicModel
+{
+    public void RegisterRelic() { }
+}"#,
+        )
+        .unwrap();
+    }
+
+    fn equivalence_snapshot(
+        temp: &tempfile::TempDir,
+        pack: &LoadedGamePack,
+    ) -> VerifiedTruthSnapshot {
+        let raw_root = temp.path().join("raw-sources");
+        fs::create_dir_all(&raw_root).unwrap();
+        let game_dll = raw_root.join("game.dll");
+        let baselib_dll = raw_root.join("BaseLib.dll");
+        fs::write(&game_dll, SNAPSHOT_GAME_BYTES).unwrap();
+        fs::write(&baselib_dll, SNAPSHOT_BASELIB_BYTES).unwrap();
+
+        let store = TruthSnapshotStore::new(&temp.path().join("snapshot-runtime"), pack);
+        let mut draft = store.begin(pack).unwrap();
+        draft.stage_source("game", &game_dll).unwrap();
+        draft.stage_source("baselib", &baselib_dll).unwrap();
+        write_equivalence_game_sources(&draft.index_output_dir("game").unwrap());
+        write_equivalence_baselib_source(
+            &draft
+                .index_output_dir("baselib")
+                .unwrap()
+                .join("BaseLib.decompiled.cs"),
+        );
+        draft
+            .finalize(BTreeMap::from([("fixture-indexer".into(), "1.0.0".into())]))
+            .unwrap()
+    }
+
+    fn normalized_facts(
+        facts: &[KnowledgeFactItem],
+        legacy: &KnowledgePaths,
+        snapshot: &VerifiedTruthSnapshot,
+    ) -> serde_json::Value {
+        let legacy_game = legacy.game_dir.to_string_lossy().replace('\\', "/");
+        let legacy_baselib = legacy.baselib_dir.to_string_lossy().replace('\\', "/");
+        let snapshot_prefix = format!("snapshot://{}/", snapshot.snapshot_id());
+        let normalize = |value: &str| {
+            value
+                .replace('\\', "/")
+                .replace(&legacy_game, "game")
+                .replace(&legacy_baselib, "baselib")
+                .replace(&snapshot_prefix, "")
+        };
+        let mut normalized = facts.to_vec();
+        for fact in &mut normalized {
+            fact.body = normalize(&fact.body);
+            fact.evidence_paths = fact
+                .evidence_paths
+                .iter()
+                .map(|path| normalize(path))
+                .collect();
+        }
+        serde_json::to_value(normalized).unwrap()
+    }
+
+    #[test]
+    fn legacy_and_snapshot_fact_selection_are_semantically_equivalent() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let legacy = KnowledgePaths::from_runtime_dir(&temp.path().join("legacy-runtime"));
+        crate::knowledge::ensure_dirs(&legacy).unwrap();
+        write_equivalence_game_sources(&legacy.game_dir);
+        write_equivalence_baselib_source(&legacy.baselib_decompiled_file());
+
+        let pack = equivalence_pack();
+        let snapshot = equivalence_snapshot(&temp, &pack);
+        let provider = Sts2CodeFactsProvider;
+        let queries = [
+            KnowledgeQuery {
+                asset_type: Some("relic".into()),
+                requirements: Some(
+                    "At the start of combat, gain 1 Energy. 战斗开始时获得1点能量。".into(),
+                ),
+                ..Default::default()
+            },
+            KnowledgeQuery {
+                symbols: vec!["BaseLibRelicSupport".into()],
+                ..Default::default()
+            },
+            KnowledgeQuery {
+                asset_type: Some("relic".into()),
+                ..Default::default()
+            },
+        ];
+
+        for query in queries {
+            let (legacy_facts, legacy_warnings) =
+                provider.build_facts(&query, &legacy, SourceMode::RuntimeDecompiled);
+            let (snapshot_facts, snapshot_warnings) = provider
+                .build_facts_from_snapshot(&query, &snapshot, SNAPSHOT_PROVIDER)
+                .unwrap();
+            assert_eq!(legacy_warnings, snapshot_warnings);
+            assert_eq!(
+                normalized_facts(&legacy_facts, &legacy, &snapshot),
+                normalized_facts(&snapshot_facts, &legacy, &snapshot),
+                "query={query:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn snapshot_fact_provider_rejects_an_unmapped_provider() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let pack = equivalence_pack();
+        let snapshot = equivalence_snapshot(&temp, &pack);
+        let error = Sts2CodeFactsProvider
+            .build_facts_from_snapshot(&KnowledgeQuery::default(), &snapshot, "missing-provider")
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            SnapshotCodeFactsError::MissingProvider { provider, .. }
+                if provider == "missing-provider"
+        ));
     }
 }

@@ -5,11 +5,10 @@
 //! - 知识库目录布局（runtime/knowledge/{game,baselib,resources,cache,packs}）
 //! - 状态报告（哪些反编译产物存在 / 缺失，警告列表）
 //! - **Stage 2.2.1**：ilspycmd 子进程发现 + 反编译调度 + manifest 持久化
+//! - STS2 代码事实检索，以及 legacy / Truth Snapshot 事实选择等价性
 //!
 //! 不在本阶段范围：
-//! - BaseLib GitHub 下载（下一轮）
-//! - 知识包导出 ZIP（下一轮）
-//! - sts2_code_facts_provider 走真实反编译产物（下一轮，依赖本轮 manifest）
+//! - Prompt / Evidence 生产链切换到 `VerifiedGameContext`
 
 mod baselib;
 mod contracts;
@@ -42,7 +41,7 @@ pub use manifest::{
 pub use models::{BaselibStatus, GameStatus, KnowledgeStatus, OverallState, SourceMode};
 pub use paths::KnowledgePaths;
 pub use runtime::{detect_source_mode, ensure_dirs, get_status};
-pub use sts2_code_facts_provider::Sts2CodeFactsProvider;
+pub use sts2_code_facts_provider::{SnapshotCodeFactsError, Sts2CodeFactsProvider};
 pub use sts2_guidance::{guidance_for_asset_type, planner_guidance};
 pub use sts2_guidance_provider::Sts2GuidanceProvider;
 pub use sts2_knowledge_resolver::Sts2KnowledgeResolver;

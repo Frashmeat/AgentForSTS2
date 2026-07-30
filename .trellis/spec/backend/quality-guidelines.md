@@ -446,6 +446,62 @@ Wrong: mark a directory current because it contains `.cs` files, let a caller su
 
 Correct: bind the exact Pack/source/index/tool identity, finish all work in same-volume staging, verify immutable contents, atomically activate a pointer, and pass the resulting verified handle through the complete job.
 
+## Scenario: Legacy-to-Snapshot Fact Selection Equivalence
+
+### 1. Scope / Trigger
+
+This contract applies when changing `Sts2CodeFactsProvider`, Snapshot provider grouping, provider IDs in `game_packs/sts2/game-pack.json`, or the future `VerifiedGameContext` cutover. It proves semantic fact selection before production Prompt/Evidence APIs are switched.
+
+### 2. Signatures
+
+```rust
+VerifiedTruthSnapshot::provider_index_roots(provider)
+    -> Vec<(&TruthSnapshotIndex, PathBuf)>
+
+Sts2CodeFactsProvider::build_facts_from_snapshot(query, snapshot, provider)
+    -> Result<(Vec<KnowledgeFactItem>, Vec<String>), SnapshotCodeFactsError>
+```
+
+### 3. Contracts
+
+- A provider query groups every verified index carrying the same provider ID before scanning, scoring, truncation, and evidence selection. It must not query each source independently and concatenate results.
+- The STS2 game and BaseLib truth sources both select `sts2_code_facts`, preserving the legacy single `CodeFactsIndex` and shared `MAX_FACTS` budget.
+- Snapshot facts use `snapshot://<snapshot-id>/<source-id>/<relative-path>` coordinates. Equivalence comparison may normalize only the legacy absolute root and Snapshot URI prefix; source-relative paths, excerpts, order, and all other fields remain semantic.
+- A provider ID with no verified indexes returns `SnapshotCodeFactsError::MissingProvider`. It does not return empty facts, consult `KnowledgePaths`, or fall back to `SourceMode`.
+- The Snapshot provider remains a side path until Slice 3. Passing this fixture does not authorize claiming that production Prompt/Evidence uses current Snapshot evidence.
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| game and BaseLib share one provider | Aggregate both roots, query once, preserve global ranking and cap |
+| Behavior query selects Lantern and lifecycle caller | Legacy and Snapshot normalized facts/excerpts/order are identical |
+| BaseLib symbol query | Same BaseLib fact and source-relative evidence path |
+| Normal relic query | Same facts, ordering, keywords, asset types, and warnings |
+| Provider absent from verified manifest | Return `MissingProvider`; do not produce an empty success |
+
+### 5. Good / Base / Bad Cases
+
+- Good: identical game/BaseLib C# trees in legacy and Snapshot layouts produce byte-equivalent serialized facts after root-only normalization.
+- Base: paths differ by legacy absolute root versus Snapshot ID URI, while the source ID and relative path remain equal.
+- Bad: game and BaseLib are queried separately and concatenated, creating two ranking budgets or different evidence selection; the equivalence fixture must fail.
+
+### 6. Tests Required
+
+```text
+cargo test -p ats-core knowledge::sts2_code_facts_provider::tests
+cargo test -p ats-core game_pack::
+cargo check -p ats-core
+```
+
+Assertions must cover behavior evidence, a BaseLib symbol, a normal asset query, exact warnings, normalized full fact payloads, deterministic provider grouping, and missing-provider rejection.
+
+### 7. Wrong vs Correct
+
+Wrong: call the provider once per source, take up to 12 facts from each, concatenate them, and treat different ranking as an acceptable migration detail.
+
+Correct: select all Snapshot indexes declared for one provider, build one corpus, execute the existing selection algorithm once, and require root-normalized output equality before cutover.
+
 ## Scenario: Complete Knowledge Refresh and Desktop Job Routing
 
 ### 1. Scope / Trigger

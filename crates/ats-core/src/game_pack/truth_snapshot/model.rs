@@ -121,4 +121,18 @@ impl VerifiedTruthSnapshot {
             .find(|index| index.source_id == source_id)
             .map(|index| self.root.join(&index.relative_root))
     }
+
+    /// Return every verified index selected by one provider declaration.
+    ///
+    /// The manifest stores indexes in source-id order, so callers can build one
+    /// deterministic provider view without querying each source independently.
+    #[must_use]
+    pub fn provider_index_roots(&self, provider: &str) -> Vec<(&TruthSnapshotIndex, PathBuf)> {
+        self.manifest
+            .indexes
+            .iter()
+            .filter(|index| index.provider == provider)
+            .map(|index| (index, self.root.join(&index.relative_root)))
+            .collect()
+    }
 }
