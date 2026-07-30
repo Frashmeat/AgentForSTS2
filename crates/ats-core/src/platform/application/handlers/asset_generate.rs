@@ -24,7 +24,7 @@ use super::common::{
     FinalizeOutcome, ProgressEvent, ProgressSink, finalize_with_error, finalize_with_success,
     transition_to_running,
 };
-use crate::codegen::{AssetKind, PromptAssembler};
+use crate::codegen::PromptAssembler;
 use crate::game_pack::VerifiedGameContext;
 use crate::image_gen::{ImageGenClient, ImageGenRequest};
 use crate::image_proc::{
@@ -62,7 +62,11 @@ pub(crate) async fn run_asset_generate(
         .await;
         return;
     }
-    if AssetKind::parse(&asset_request.asset_type).is_none() {
+    if game_context
+        .pack()
+        .resource_spec(&asset_request.asset_type)
+        .is_none()
+    {
         finalize_with_error(
             &repo,
             &job_id,
@@ -235,19 +239,20 @@ pub(crate) async fn run_asset_generate(
             }
             png_path = Some(path);
 
-            asset_request.image_paths = match runtime_image_paths_for(&asset_request) {
-                Ok(paths) => paths,
-                Err(err) => {
-                    finalize_with_error(
-                        &repo,
-                        &job_id,
-                        &sink,
-                        &format!("plan runtime image delivery: {err}"),
-                    )
-                    .await;
-                    return;
-                }
-            };
+            asset_request.image_paths =
+                match runtime_image_paths_for(&asset_request, game_context.pack()) {
+                    Ok(paths) => paths,
+                    Err(err) => {
+                        finalize_with_error(
+                            &repo,
+                            &job_id,
+                            &sink,
+                            &format!("plan runtime image delivery: {err}"),
+                        )
+                        .await;
+                        return;
+                    }
+                };
 
             sink.emit(ProgressEvent {
                 job_id: job_id.clone(),
@@ -293,6 +298,7 @@ pub(crate) async fn run_asset_generate(
             &job_id,
             prompt_assembly.prompt,
             &prompt_assembly.evidence_record,
+            game_context.pack(),
             &asset_request,
             &artifacts_dir,
             runtime_image_source.as_deref(),

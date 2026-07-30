@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -6,11 +7,11 @@ use quick_xml::{Reader, Writer};
 use thiserror::Error;
 
 use crate::fs_atomic::write_atomic_sync;
+use crate::game_pack::BuildRecipe;
 
 #[derive(Debug, Clone)]
-pub struct LocalBuildPaths {
-    pub sts2_dll_path: PathBuf,
-    pub godot_exe_path: PathBuf,
+pub struct LocalBuildInputs {
+    pub values: BTreeMap<String, PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -21,8 +22,10 @@ pub struct LocalPropsSync {
 
 #[derive(Debug, Error)]
 pub enum LocalPropsError {
-    #[error("cannot find a steamapps ancestor for STS2 DLL: {0}")]
-    MissingSteamapps(PathBuf),
+    #[error("build recipe requires local input `{0}`")]
+    MissingInput(String),
+    #[error("game pack does not declare a build recipe")]
+    MissingBuildRecipe,
     #[error("local.props has no PropertyGroup")]
     MissingPropertyGroup,
     #[error("local.props I/O failed: {0}")]
@@ -33,9 +36,10 @@ pub enum LocalPropsError {
 
 pub fn sync_local_props(
     project_root: &Path,
-    paths: &LocalBuildPaths,
+    recipe: Option<&BuildRecipe>,
+    inputs: &LocalBuildInputs,
 ) -> Result<LocalPropsSync, LocalPropsError> {
-    let steam_library = steamapps_ancestor(&paths.sts2_dll_path)?;
+    let recipe = recipe.ok_or(LocalPropsError::MissingBuildRecipe)?;
     let target = project_root.join("local.props");
     let created = !target.exists();
     let source = if created {
@@ -44,16 +48,20 @@ pub fn sync_local_props(
         target.clone()
     };
     let xml = fs::read_to_string(source)?;
-    let properties = [
-        (
-            "SteamLibraryPath",
-            steam_library.to_string_lossy().into_owned(),
-        ),
-        (
-            "GodotPath",
-            paths.godot_exe_path.to_string_lossy().into_owned(),
-        ),
-    ];
+    let properties = recipe
+        .local_properties
+        .iter()
+        .map(|mapping| {
+            let value = inputs
+                .values
+                .get(&mapping.input_key)
+                .ok_or_else(|| LocalPropsError::MissingInput(mapping.input_key.clone()))?;
+            Ok((
+                mapping.property.clone(),
+                value.to_string_lossy().into_owned(),
+            ))
+        })
+        .collect::<Result<Vec<_>, LocalPropsError>>()?;
     let output = replace_managed_properties(&xml, &properties)?;
     write_atomic_sync(&target, &output)?;
     Ok(LocalPropsSync {
@@ -62,20 +70,9 @@ pub fn sync_local_props(
     })
 }
 
-fn steamapps_ancestor(sts2_dll_path: &Path) -> Result<PathBuf, LocalPropsError> {
-    sts2_dll_path
-        .ancestors()
-        .find(|path| {
-            path.file_name()
-                .is_some_and(|name| name.eq_ignore_ascii_case("steamapps"))
-        })
-        .map(Path::to_path_buf)
-        .ok_or_else(|| LocalPropsError::MissingSteamapps(sts2_dll_path.to_path_buf()))
-}
-
 fn replace_managed_properties(
     xml: &str,
-    properties: &[(&str, String)],
+    properties: &[(String, String)],
 ) -> Result<Vec<u8>, LocalPropsError> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(false);
@@ -124,9 +121,9 @@ fn replace_managed_properties(
                     if seen[index] {
                         continue;
                     }
-                    writer.write_event(Event::Start(BytesStart::new(*name)))?;
+                    writer.write_event(Event::Start(BytesStart::new(name)))?;
                     writer.write_event(Event::Text(BytesText::new(value)))?;
-                    writer.write_event(Event::End(BytesEnd::new(*name)))?;
+                    writer.write_event(Event::End(BytesEnd::new(name)))?;
                 }
                 inserted_missing = true;
                 writer.write_event(Event::End(end.into_owned()))?;
@@ -135,9 +132,9 @@ fn replace_managed_properties(
                 found_property_group = true;
                 writer.write_event(Event::Start(empty.into_owned()))?;
                 for (name, value) in properties {
-                    writer.write_event(Event::Start(BytesStart::new(*name)))?;
+                    writer.write_event(Event::Start(BytesStart::new(name)))?;
                     writer.write_event(Event::Text(BytesText::new(value)))?;
-                    writer.write_event(Event::End(BytesEnd::new(*name)))?;
+                    writer.write_event(Event::End(BytesEnd::new(name)))?;
                 }
                 inserted_missing = true;
                 writer.write_event(Event::End(BytesEnd::new("PropertyGroup")))?;
@@ -151,7 +148,7 @@ fn replace_managed_properties(
                     let (name, value) = &properties[index];
                     writer.write_event(Event::Start(empty.into_owned()))?;
                     writer.write_event(Event::Text(BytesText::new(value)))?;
-                    writer.write_event(Event::End(BytesEnd::new(*name)))?;
+                    writer.write_event(Event::End(BytesEnd::new(name)))?;
                 } else {
                     writer.write_event(Event::Empty(empty.into_owned()))?;
                 }

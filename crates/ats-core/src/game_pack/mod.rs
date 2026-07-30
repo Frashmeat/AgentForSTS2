@@ -15,7 +15,12 @@ pub use context::{
 };
 pub use error::{GamePackError, GamePackResult};
 pub use loader::{GamePackLoadPolicy, GamePackLoader, resolve_pack_relative_path};
-pub use model::{LoadedGamePack, TruthSource, TruthSourceKind};
+pub use model::{
+    AssetResourceSpec, BuildLocalProperty, BuildRecipe, BuildRunner, BuildStep, GuidanceItem,
+    GuidanceScenario, GuidanceSet, ImageResourceSpec, JsonManifestContract, LoadedGamePack,
+    LocalizationResourceSpec, PackageLayout, ProjectTemplate, ProjectTemplateFile,
+    ResourceImageRole, ResourceImageTransform, TruthSource, TruthSourceKind, ValidationRule,
+};
 pub use registry::GamePackRegistry;
 pub use truth_snapshot::{
     GitHubReleaseAssetFetcher, IlspycmdTruthIndexer, RemoteTruthSourceFetcher, TruthSnapshotDraft,

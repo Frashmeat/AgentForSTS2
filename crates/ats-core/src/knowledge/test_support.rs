@@ -3,7 +3,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::game_pack::{
-    GamePackLoadPolicy, GamePackLoader, GamePackRegistry, TruthSnapshotStore, VerifiedGameContext,
+    GamePackRegistry, TruthSnapshotStore, TruthSourceKind, VerifiedGameContext,
 };
 
 pub(crate) fn fixture_game_context(
@@ -11,38 +11,14 @@ pub(crate) fn fixture_game_context(
     game_files: &[(&str, &str)],
     library_files: &[(&str, &str)],
 ) -> VerifiedGameContext {
-    let loader = GamePackLoader::new(GamePackLoadPolicy::new(
-        ["truth_sources"],
-        ["dotnet_project"],
-        ["sts2_code_facts"],
-    ));
-    let pack = loader
-        .load_str(
-            "fixture:sts2",
-            r#"{
-              "schema_version": 1,
-              "id": "sts2",
-              "display_name": "Slay the Spire 2 Fixture",
-              "capabilities": ["truth_sources"],
-              "truth_sources": [
-                {
-                  "id": "game",
-                  "kind": "local_file",
-                  "input_key": "game_assembly",
-                  "indexer": "dotnet_project",
-                  "provider": "sts2_code_facts"
-                },
-                {
-                  "id": "baselib",
-                  "kind": "local_file",
-                  "input_key": "baselib_assembly",
-                  "indexer": "dotnet_project",
-                  "provider": "sts2_code_facts"
-                }
-              ]
-            }"#,
-        )
-        .unwrap();
+    let mut pack = GamePackRegistry::built_in()
+        .unwrap()
+        .require("sts2")
+        .unwrap()
+        .clone();
+    pack.truth_sources[1].kind = TruthSourceKind::LocalFile {
+        input_key: "baselib_assembly".into(),
+    };
 
     let raw_dir = runtime_dir.join("fixture-inputs");
     fs::create_dir_all(&raw_dir).unwrap();

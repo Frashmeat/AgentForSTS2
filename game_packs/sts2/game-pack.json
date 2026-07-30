@@ -3,7 +3,14 @@
   "id": "sts2",
   "display_name": "Slay the Spire 2",
   "capabilities": [
-    "truth_sources"
+    "truth_sources",
+    "validation_rules",
+    "resource_specs",
+    "guidance",
+    "project_template",
+    "manifest_contract",
+    "build_recipe",
+    "package_layout"
   ],
   "truth_sources": [
     {
@@ -23,5 +30,198 @@
       "indexer": "dotnet_file",
       "provider": "sts2_code_facts"
     }
-  ]
+  ],
+  "validation_rules": [
+    {
+      "id": "sts2.energy.before_combat_start",
+      "kind": "forbidden_call_in_method",
+      "method_name": "BeforeCombatStart",
+      "call_path": ["PlayerCmd", "GainEnergy"],
+      "message": "known STS2 timing error: BeforeCombatStart calls PlayerCmd.GainEnergy, but SetupPlayerTurn.ResetEnergy runs afterwards. Use the current official implementation and lifecycle caller evidence to choose a post-reset hook, with Owner-side and first-turn guards where required"
+    }
+  ],
+  "resource_specs": [
+    {
+      "id": "card",
+      "localization": {
+        "table": "cards",
+        "relative_path": "localization/{locale}/cards.json",
+        "locales": ["eng", "zhs"],
+        "required_suffixes": ["title", "description"]
+      },
+      "images": [
+        {"role": "normal", "relative_path": "images/card_portraits/{slug}.png", "transform": "preserve"},
+        {"role": "big", "relative_path": "images/card_portraits/big/{slug}.png", "transform": "preserve"}
+      ]
+    },
+    {
+      "id": "card_fullscreen",
+      "localization": {
+        "table": "cards",
+        "relative_path": "localization/{locale}/cards.json",
+        "locales": ["eng", "zhs"],
+        "required_suffixes": ["title", "description"]
+      },
+      "images": [
+        {"role": "normal", "relative_path": "images/card_portraits/{slug}.png", "transform": "preserve"},
+        {"role": "big", "relative_path": "images/card_portraits/big/{slug}.png", "transform": "preserve"}
+      ]
+    },
+    {
+      "id": "relic",
+      "localization": {
+        "table": "relics",
+        "relative_path": "localization/{locale}/relics.json",
+        "locales": ["eng", "zhs"],
+        "required_suffixes": ["title", "description", "flavor"]
+      },
+      "images": [
+        {"role": "normal", "relative_path": "images/relics/{slug}.png", "transform": "cover", "width": 128, "height": 128},
+        {"role": "outline", "relative_path": "images/relics/{slug}_outline.png", "transform": "outline", "width": 128, "height": 128, "radius": 4},
+        {"role": "big", "relative_path": "images/relics/big/{slug}.png", "transform": "cover", "width": 1024, "height": 1024}
+      ]
+    },
+    {
+      "id": "power",
+      "localization": {
+        "table": "powers",
+        "relative_path": "localization/{locale}/powers.json",
+        "locales": ["eng", "zhs"],
+        "required_suffixes": ["title", "description"]
+      },
+      "images": [
+        {"role": "normal", "relative_path": "images/powers/{slug}.png", "transform": "preserve"},
+        {"role": "big", "relative_path": "images/powers/big/{slug}.png", "transform": "preserve"}
+      ]
+    },
+    {
+      "id": "character",
+      "localization": {
+        "table": "characters",
+        "relative_path": "localization/{locale}/characters.json",
+        "locales": ["eng", "zhs"],
+        "required_suffixes": ["title", "description"]
+      },
+      "images": [
+        {"role": "normal", "relative_path": "images/characters/{slug}.png", "transform": "preserve"}
+      ]
+    }
+  ],
+  "guidance": {
+    "root": "guidance",
+    "sha256": "24cf0aaf1a36a4045d11bbbd92dd872d2d6b28d6e757d5988ea0b129d4edcb3b",
+    "items": [
+      {
+        "id": "common",
+        "title": "Common guidance",
+        "relative_path": "common.md",
+        "scenarios": ["asset_codegen", "custom_code_codegen", "asset_group_codegen"],
+        "always": true
+      },
+      {
+        "id": "planner",
+        "title": "Planner hints",
+        "relative_path": "planner_guidance.md",
+        "scenarios": ["planner"],
+        "always": true
+      },
+      {
+        "id": "card",
+        "title": "Card guidance",
+        "relative_path": "card.md",
+        "scenarios": ["asset_codegen", "asset_group_codegen"],
+        "asset_types": ["card", "card_fullscreen"]
+      },
+      {
+        "id": "power",
+        "title": "Power guidance",
+        "relative_path": "power.md",
+        "scenarios": ["asset_codegen", "asset_group_codegen"],
+        "asset_types": ["power"]
+      },
+      {
+        "id": "relic",
+        "title": "Relic guidance",
+        "relative_path": "relic.md",
+        "scenarios": ["asset_codegen", "asset_group_codegen"],
+        "asset_types": ["relic"]
+      },
+      {
+        "id": "character",
+        "title": "Character guidance",
+        "relative_path": "character.md",
+        "scenarios": ["asset_codegen", "custom_code_codegen", "asset_group_codegen"],
+        "asset_types": ["character", "custom_code"]
+      },
+      {
+        "id": "custom_code",
+        "title": "Custom code guidance",
+        "relative_path": "custom_code.md",
+        "scenarios": ["custom_code_codegen", "asset_group_codegen"],
+        "asset_types": ["custom_code"]
+      },
+      {
+        "id": "potion",
+        "title": "Potion guidance",
+        "relative_path": "potion.md",
+        "scenarios": ["custom_code_codegen", "asset_group_codegen"],
+        "asset_types": ["custom_code"]
+      }
+    ]
+  },
+  "project_template": {
+    "root": "template",
+    "placeholder": "ModTemplate",
+    "sha256": "a08225ec2054415f559993a3c7b11eab9726f0227da9d67f33344736a1e388ea",
+    "files": [
+      ".gitattributes",
+      ".gitignore",
+      "Extensions/StringExtensions.cs",
+      "MainFile.cs",
+      "ModTemplate.csproj",
+      "ModTemplate.json",
+      "ModTemplate.sln",
+      "ModTemplate.sln.DotSettings",
+      "export_presets.cfg",
+      "local.props.example",
+      "nuget.config",
+      "project.godot"
+    ]
+  },
+  "manifest_contract": {
+    "relative_path": "{mod_id}.json",
+    "expected": {
+      "id": "{mod_id}",
+      "name": "{mod_id}",
+      "author": "User",
+      "description": "Slay the Spire 2 mod created from a template for use with BaseLib",
+      "version": "v0.0.0",
+      "has_pck": true,
+      "has_dll": true,
+      "min_game_version": "0.107.1",
+      "dependencies": [
+        {"id": "BaseLib", "min_version": "v3.3.8"}
+      ],
+      "affects_gameplay": true
+    }
+  },
+  "build_recipe": {
+    "local_properties": [
+      {"input_key": "game_assembly", "property": "Sts2AssemblyPath"},
+      {"input_key": "godot_executable", "property": "GodotPath"}
+    ],
+    "steps": [
+      {"id": "publish", "runner": "dotnet_publish"}
+    ]
+  },
+  "package_layout": {
+    "required_files": [
+      "BaseLib/BaseLib.dll",
+      "BaseLib/BaseLib.pck",
+      "BaseLib/BaseLib.json",
+      "{mod_id}/{mod_id}.dll",
+      "{mod_id}/{mod_id}.pck",
+      "{mod_id}/{mod_id}.json"
+    ]
+  }
 }

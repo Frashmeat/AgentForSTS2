@@ -20,6 +20,8 @@ pub enum ProjectError {
     UnknownGameId(String),
     #[error("game pack registry is unavailable: {0}")]
     GamePackRegistry(String),
+    #[error("project scaffold does not satisfy the game pack contract: {0}")]
+    ScaffoldContract(String),
     #[error("invalid project schema version in `{path}`: `{value}`")]
     InvalidSchemaVersion { path: String, value: String },
     #[error("unsupported project schema version {found}; expected {expected}")]

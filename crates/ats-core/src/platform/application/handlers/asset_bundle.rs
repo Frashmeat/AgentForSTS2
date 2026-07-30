@@ -10,7 +10,10 @@ use super::code_generate::{
     extract_first_code_block, sanitize_entity_name, validate_generated_code_skein,
 };
 use super::common::{ProgressEvent, ProgressSink, emit_cancelled_mid_stream, is_cancelled};
-use crate::codegen::{AssetCodegenRequest, AssetKind, asset_localization_key_segment};
+use crate::codegen::{AssetCodegenRequest, asset_localization_key_segment};
+use crate::game_pack::{
+    AssetResourceSpec, LoadedGamePack, ResourceImageRole, ResourceImageTransform, ValidationRule,
+};
 use crate::image_proc::{
     ImageQualitySpec, ImageVariantRole, ImageVariantSpec, ImageVariantTransform,
     analyze_png_quality, derive_png_variants,
@@ -19,26 +22,6 @@ use crate::llm::{CompletionRequest, LlmClient, Message, MessageRole, StreamEvent
 use crate::platform::domain::{JobId, JobRepository};
 
 const MAX_MODEL_ATTEMPTS: u32 = 2;
-const STS2_RELIC_IMAGE_SPECS: [ImageVariantSpec; 3] = [
-    ImageVariantSpec {
-        role: ImageVariantRole::Normal,
-        width: 128,
-        height: 128,
-        transform: ImageVariantTransform::Cover,
-    },
-    ImageVariantSpec {
-        role: ImageVariantRole::Outline,
-        width: 128,
-        height: 128,
-        transform: ImageVariantTransform::Outline { radius: 4 },
-    },
-    ImageVariantSpec {
-        role: ImageVariantRole::Big,
-        width: 1024,
-        height: 1024,
-        transform: ImageVariantTransform::Cover,
-    },
-];
 static ASSET_WRITE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 pub(crate) struct AssetBundleGeneration {
@@ -68,6 +51,7 @@ impl AssetBundleGeneration {
         job_id: &JobId,
         prompt: String,
         evidence_record: &str,
+        pack: &LoadedGamePack,
         request: &AssetCodegenRequest,
         artifacts_dir: &Path,
         runtime_image_source: Option<&Path>,
@@ -79,10 +63,10 @@ impl AssetBundleGeneration {
                 "asset_name must not be empty".into(),
             ));
         }
-        let asset_kind = AssetKind::parse(&request.asset_type).ok_or_else(|| {
+        let resource_spec = pack.resource_spec(&request.asset_type).ok_or_else(|| {
             AssetBundleError::ModelOutput(format!(
-                "unsupported asset_type for structured generation: {}",
-                request.asset_type
+                "game pack `{}` does not declare structured asset type `{}`",
+                pack.id, request.asset_type
             ))
         })?;
         let entity_name = sanitize_entity_name(&request.asset_name);
@@ -107,7 +91,12 @@ impl AssetBundleGeneration {
             final_model = completion.model;
             final_raw = completion.raw;
 
-            let parsed = parse_and_validate_bundle(&final_raw, asset_kind, &expected_key);
+            let parsed = parse_and_validate_bundle(
+                &final_raw,
+                &pack.validation_rules,
+                resource_spec,
+                &expected_key,
+            );
             match parsed {
                 Ok(bundle) => {
                     parsed_bundle = Some(bundle);
@@ -154,7 +143,7 @@ impl AssetBundleGeneration {
         .map_err(AssetBundleError::Write)?;
         let planned = plan_project_writes(
             request,
-            asset_kind,
+            resource_spec,
             &mod_id,
             &entity_name,
             &bundle,
@@ -319,19 +308,13 @@ struct RawCompletion {
 #[serde(deny_unknown_fields)]
 struct ModelAssetBundle {
     csharp: String,
-    localization: ModelLocalization,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ModelLocalization {
-    eng: BTreeMap<String, String>,
-    zhs: BTreeMap<String, String>,
+    localization: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 fn parse_and_validate_bundle(
     raw: &str,
-    asset_kind: AssetKind,
+    validation_rules: &[ValidationRule],
+    resource_spec: &AssetResourceSpec,
     expected_key: &str,
 ) -> Result<ModelAssetBundle, String> {
     if raw.trim().is_empty() {
@@ -340,37 +323,68 @@ fn parse_and_validate_bundle(
     let candidate = extract_first_code_block(raw).unwrap_or_else(|| raw.to_string());
     let bundle: ModelAssetBundle = serde_json::from_str(candidate.trim())
         .map_err(|err| format!("parse strict asset bundle JSON: {err}"))?;
-    validate_generated_code_skein(&bundle.csharp)?;
-    validate_localization(asset_kind, expected_key, &bundle.localization)?;
+    validate_generated_code_skein(&bundle.csharp, validation_rules)?;
+    validate_localization(resource_spec, expected_key, &bundle.localization)?;
     Ok(bundle)
 }
 
 fn validate_localization(
-    asset_kind: AssetKind,
+    resource_spec: &AssetResourceSpec,
     expected_key: &str,
-    localization: &ModelLocalization,
+    localization: &BTreeMap<String, BTreeMap<String, String>>,
 ) -> Result<(), String> {
-    if localization.eng.is_empty() || localization.zhs.is_empty() {
-        return Err("asset bundle must include non-empty eng and zhs localization".into());
+    let expected_locales = resource_spec
+        .localization
+        .locales
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    let actual_locales = localization
+        .keys()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    if actual_locales != expected_locales {
+        return Err(format!(
+            "localization locales must match resource spec exactly: expected {}, found {}",
+            expected_locales.into_iter().collect::<Vec<_>>().join(", "),
+            actual_locales.into_iter().collect::<Vec<_>>().join(", ")
+        ));
     }
-    let eng_keys: BTreeSet<&str> = localization.eng.keys().map(String::as_str).collect();
-    let zhs_keys: BTreeSet<&str> = localization.zhs.keys().map(String::as_str).collect();
-    if eng_keys != zhs_keys {
-        return Err("eng and zhs localization keys must match exactly".into());
+    let Some(reference) = resource_spec
+        .localization
+        .locales
+        .first()
+        .and_then(|locale| localization.get(locale))
+    else {
+        return Err("resource spec must declare at least one localization locale".into());
+    };
+    let expected_keys = reference
+        .keys()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    if expected_keys.is_empty() {
+        return Err("asset bundle localization maps must not be empty".into());
+    }
+    for locale in &resource_spec.localization.locales {
+        let entries = &localization[locale];
+        let keys = entries.keys().map(String::as_str).collect::<BTreeSet<_>>();
+        if keys != expected_keys {
+            return Err("localization keys must match exactly across all locales".into());
+        }
     }
     let prefix = format!("{expected_key}.");
-    for key in &eng_keys {
+    for key in &expected_keys {
         if !key.starts_with(&prefix) {
             return Err(format!("localization key must start with {prefix}: {key}"));
         }
     }
-    for suffix in asset_kind.required_localization_suffixes() {
+    for suffix in &resource_spec.localization.required_suffixes {
         let key = format!("{expected_key}.{suffix}");
-        if !localization.eng.contains_key(&key) {
+        if !reference.contains_key(&key) {
             return Err(format!("missing required localization key: {key}"));
         }
     }
-    for (locale, entries) in [("eng", &localization.eng), ("zhs", &localization.zhs)] {
+    for (locale, entries) in localization {
         if let Some((key, _)) = entries.iter().find(|(_, value)| value.trim().is_empty()) {
             return Err(format!("{locale} localization value is empty: {key}"));
         }
@@ -429,7 +443,7 @@ struct PlannedProjectBundle {
 
 async fn plan_project_writes(
     request: &AssetCodegenRequest,
-    asset_kind: AssetKind,
+    resource_spec: &AssetResourceSpec,
     mod_id: &str,
     entity_name: &str,
     bundle: &ModelAssetBundle,
@@ -439,22 +453,18 @@ async fn plan_project_writes(
         .project_root
         .join("Generated")
         .join(format!("{entity_name}.cs"));
-    let table = asset_kind.localization_table();
     let mut writes = vec![PlannedWrite {
         path: cs_path.clone(),
         bytes: bundle.csharp.as_bytes().to_vec(),
     }];
     let mut localization_paths = Vec::new();
-    for (locale, additions) in [
-        ("eng", &bundle.localization.eng),
-        ("zhs", &bundle.localization.zhs),
-    ] {
-        let path = request
-            .project_root
-            .join(mod_id)
-            .join("localization")
-            .join(locale)
-            .join(format!("{table}.json"));
+    for locale in &resource_spec.localization.locales {
+        let additions = &bundle.localization[locale];
+        let relative_path = resource_spec
+            .localization
+            .relative_path
+            .replace("{locale}", locale);
+        let path = request.project_root.join(mod_id).join(relative_path);
         let bytes = merge_localization(&path, additions).await?;
         localization_paths.push(path.clone());
         writes.push(PlannedWrite { path, bytes });
@@ -464,7 +474,7 @@ async fn plan_project_writes(
         let bytes = tokio::fs::read(source)
             .await
             .map_err(|err| format!("read generated runtime image {}: {err}", source.display()))?;
-        let targets = runtime_image_targets_for(request)?;
+        let targets = runtime_image_targets_for(request, resource_spec)?;
         let expected_paths = targets
             .iter()
             .map(|target| target.path.clone())
@@ -497,8 +507,15 @@ async fn plan_project_writes(
 
 pub(crate) fn runtime_image_paths_for(
     request: &AssetCodegenRequest,
+    pack: &LoadedGamePack,
 ) -> Result<Vec<PathBuf>, String> {
-    Ok(runtime_image_targets_for(request)?
+    let resource_spec = pack.resource_spec(&request.asset_type).ok_or_else(|| {
+        format!(
+            "game pack `{}` does not declare structured asset type `{}`",
+            pack.id, request.asset_type
+        )
+    })?;
+    Ok(runtime_image_targets_for(request, resource_spec)?
         .into_iter()
         .map(|target| target.path)
         .collect())
@@ -512,13 +529,8 @@ struct RuntimeImageTarget {
 
 fn runtime_image_targets_for(
     request: &AssetCodegenRequest,
+    resource_spec: &AssetResourceSpec,
 ) -> Result<Vec<RuntimeImageTarget>, String> {
-    let kind = AssetKind::parse(&request.asset_type).ok_or_else(|| {
-        format!(
-            "unsupported asset_type for image delivery: {}",
-            request.asset_type
-        )
-    })?;
     let mod_id = load_mod_id(&request.project_root)?;
     let slug = asset_localization_key_segment(&request.asset_name).to_ascii_lowercase();
     if slug.is_empty() {
@@ -526,66 +538,50 @@ fn runtime_image_targets_for(
             "asset_name must contain at least one ASCII letter or digit for image delivery".into(),
         );
     }
-    let root = request.project_root.join(mod_id).join("images");
-    let preserve = |role| ImageVariantSpec {
-        role,
-        width: 0,
-        height: 0,
-        transform: ImageVariantTransform::Preserve,
-    };
-    let targets: Vec<(PathBuf, ImageVariantSpec)> = match kind {
-        AssetKind::Card | AssetKind::CardFullscreen => vec![
-            (
-                PathBuf::from("card_portraits").join(format!("{slug}.png")),
-                preserve(ImageVariantRole::Normal),
-            ),
-            (
-                PathBuf::from("card_portraits")
-                    .join("big")
-                    .join(format!("{slug}.png")),
-                preserve(ImageVariantRole::Big),
-            ),
-        ],
-        AssetKind::Relic => vec![
-            (
-                PathBuf::from("relics").join(format!("{slug}.png")),
-                STS2_RELIC_IMAGE_SPECS[0],
-            ),
-            (
-                PathBuf::from("relics").join(format!("{slug}_outline.png")),
-                STS2_RELIC_IMAGE_SPECS[1],
-            ),
-            (
-                PathBuf::from("relics")
-                    .join("big")
-                    .join(format!("{slug}.png")),
-                STS2_RELIC_IMAGE_SPECS[2],
-            ),
-        ],
-        AssetKind::Power => vec![
-            (
-                PathBuf::from("powers").join(format!("{slug}.png")),
-                preserve(ImageVariantRole::Normal),
-            ),
-            (
-                PathBuf::from("powers")
-                    .join("big")
-                    .join(format!("{slug}.png")),
-                preserve(ImageVariantRole::Big),
-            ),
-        ],
-        AssetKind::Character => vec![(
-            PathBuf::from("characters").join(format!("{slug}.png")),
-            preserve(ImageVariantRole::Normal),
-        )],
-    };
-    Ok(targets
-        .into_iter()
-        .map(|(path, spec)| RuntimeImageTarget {
-            path: root.join(path),
-            spec,
+    let root = request.project_root.join(mod_id);
+    Ok(resource_spec
+        .images
+        .iter()
+        .map(|image| RuntimeImageTarget {
+            path: root.join(image.relative_path.replace("{slug}", &slug)),
+            spec: image_variant_spec(image.role, image.transform),
         })
         .collect())
+}
+
+fn image_variant_spec(
+    role: ResourceImageRole,
+    transform: ResourceImageTransform,
+) -> ImageVariantSpec {
+    let role = match role {
+        ResourceImageRole::Normal => ImageVariantRole::Normal,
+        ResourceImageRole::Outline => ImageVariantRole::Outline,
+        ResourceImageRole::Big => ImageVariantRole::Big,
+    };
+    match transform {
+        ResourceImageTransform::Preserve => ImageVariantSpec {
+            role,
+            width: 0,
+            height: 0,
+            transform: ImageVariantTransform::Preserve,
+        },
+        ResourceImageTransform::Cover { width, height } => ImageVariantSpec {
+            role,
+            width,
+            height,
+            transform: ImageVariantTransform::Cover,
+        },
+        ResourceImageTransform::Outline {
+            width,
+            height,
+            radius,
+        } => ImageVariantSpec {
+            role,
+            width,
+            height,
+            transform: ImageVariantTransform::Outline { radius },
+        },
+    }
 }
 
 fn validate_role_derivation(
@@ -803,6 +799,30 @@ impl FileTransaction {
 mod tests {
     use super::*;
 
+    fn sts2_pack() -> LoadedGamePack {
+        crate::game_pack::GamePackRegistry::built_in()
+            .unwrap()
+            .require("sts2")
+            .unwrap()
+            .clone()
+    }
+
+    fn prepare_project_identity(root: &Path) {
+        std::fs::write(
+            root.join("project.json"),
+            serde_json::json!({
+                "name": "Demo Mod",
+                "csharp_name": "DemoMod",
+                "game_id": "sts2",
+                "scaffolded": true,
+                "generated_files": [],
+                "build_output_dir": null
+            })
+            .to_string(),
+        )
+        .unwrap();
+    }
+
     fn relic_bundle() -> String {
         serde_json::json!({
             "csharp": "using BaseLib.Abstracts;\npublic sealed class EnergySeedRelic {}",
@@ -824,26 +844,27 @@ mod tests {
 
     #[test]
     fn parses_good_and_fenced_bundle() {
+        let pack = sts2_pack();
+        let relic = pack.resource_spec("relic").unwrap();
         let raw = relic_bundle();
-        assert!(
-            parse_and_validate_bundle(&raw, AssetKind::Relic, "DEMOMOD-ENERGY_SEED_RELIC").is_ok()
-        );
+        assert!(parse_and_validate_bundle(&raw, &[], relic, "DEMOMOD-ENERGY_SEED_RELIC").is_ok());
         let fenced = format!("```json\n{raw}\n```");
         assert!(
-            parse_and_validate_bundle(&fenced, AssetKind::Relic, "DEMOMOD-ENERGY_SEED_RELIC")
-                .is_ok()
+            parse_and_validate_bundle(&fenced, &[], relic, "DEMOMOD-ENERGY_SEED_RELIC").is_ok()
         );
     }
 
     #[test]
     fn rejects_missing_language_and_wrong_prefix() {
+        let pack = sts2_pack();
+        let relic = pack.resource_spec("relic").unwrap();
         let missing_zhs =
             r#"{"csharp":"public class X {}","localization":{"eng":{"X.title":"x"},"zhs":{}}}"#;
-        assert!(parse_and_validate_bundle(missing_zhs, AssetKind::Relic, "DEMOMOD-X").is_err());
+        assert!(parse_and_validate_bundle(missing_zhs, &[], relic, "DEMOMOD-X").is_err());
 
         let wrong_prefix = relic_bundle().replace("DEMOMOD-", "OTHER-");
         assert!(
-            parse_and_validate_bundle(&wrong_prefix, AssetKind::Relic, "DEMOMOD-ENERGY_SEED_RELIC")
+            parse_and_validate_bundle(&wrong_prefix, &[], relic, "DEMOMOD-ENERGY_SEED_RELIC",)
                 .is_err()
         );
     }
@@ -860,6 +881,97 @@ mod tests {
         let merged: BTreeMap<String, String> = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(merged.get("EXISTING.title").unwrap(), "Existing");
         assert_eq!(merged.get("NEW.title").unwrap(), "New");
+    }
+
+    #[tokio::test]
+    async fn sts2_resource_specs_preserve_all_output_paths() {
+        let temp = tempfile::TempDir::new().unwrap();
+        prepare_project_identity(temp.path());
+        let pack = sts2_pack();
+        let cases = [
+            (
+                "card",
+                "cards.json",
+                vec![
+                    "images/card_portraits/energy_seed.png",
+                    "images/card_portraits/big/energy_seed.png",
+                ],
+            ),
+            (
+                "card_fullscreen",
+                "cards.json",
+                vec![
+                    "images/card_portraits/energy_seed.png",
+                    "images/card_portraits/big/energy_seed.png",
+                ],
+            ),
+            (
+                "relic",
+                "relics.json",
+                vec![
+                    "images/relics/energy_seed.png",
+                    "images/relics/energy_seed_outline.png",
+                    "images/relics/big/energy_seed.png",
+                ],
+            ),
+            (
+                "power",
+                "powers.json",
+                vec![
+                    "images/powers/energy_seed.png",
+                    "images/powers/big/energy_seed.png",
+                ],
+            ),
+            (
+                "character",
+                "characters.json",
+                vec!["images/characters/energy_seed.png"],
+            ),
+        ];
+        for (asset_type, table, expected_images) in cases {
+            let spec = pack.resource_spec(asset_type).unwrap();
+            let request = AssetCodegenRequest {
+                asset_type: asset_type.into(),
+                asset_name: "EnergySeed".into(),
+                project_root: temp.path().to_path_buf(),
+                ..Default::default()
+            };
+            let expected_key = "DEMOMOD-ENERGY_SEED";
+            let entries = spec
+                .localization
+                .required_suffixes
+                .iter()
+                .map(|suffix| (format!("{expected_key}.{suffix}"), "value".into()))
+                .collect::<BTreeMap<_, _>>();
+            let bundle = ModelAssetBundle {
+                csharp: "public class EnergySeed {}".into(),
+                localization: spec
+                    .localization
+                    .locales
+                    .iter()
+                    .map(|locale| (locale.clone(), entries.clone()))
+                    .collect(),
+            };
+            let planned =
+                plan_project_writes(&request, spec, "DemoMod", "EnergySeed", &bundle, None)
+                    .await
+                    .unwrap();
+            assert_eq!(
+                planned.localization_paths,
+                ["eng", "zhs"].map(|locale| temp
+                    .path()
+                    .join("DemoMod/localization")
+                    .join(locale)
+                    .join(table))
+            );
+            assert_eq!(
+                runtime_image_paths_for(&request, &pack).unwrap(),
+                expected_images
+                    .into_iter()
+                    .map(|relative| temp.path().join("DemoMod").join(relative))
+                    .collect::<Vec<_>>()
+            );
+        }
     }
 
     #[tokio::test]
@@ -898,23 +1010,18 @@ mod tests {
 
     #[test]
     fn relic_resource_spec_rejects_identical_role_bytes() {
-        assert_eq!(STS2_RELIC_IMAGE_SPECS[0].role, ImageVariantRole::Normal);
-        assert_eq!(
-            (
-                STS2_RELIC_IMAGE_SPECS[0].width,
-                STS2_RELIC_IMAGE_SPECS[0].height
-            ),
-            (128, 128)
-        );
-        assert_eq!(STS2_RELIC_IMAGE_SPECS[1].role, ImageVariantRole::Outline);
-        assert_eq!(STS2_RELIC_IMAGE_SPECS[2].role, ImageVariantRole::Big);
-        assert_eq!(
-            (
-                STS2_RELIC_IMAGE_SPECS[2].width,
-                STS2_RELIC_IMAGE_SPECS[2].height
-            ),
-            (1024, 1024)
-        );
+        let pack = sts2_pack();
+        let relic = pack.resource_spec("relic").unwrap();
+        let specs = relic
+            .images
+            .iter()
+            .map(|image| image_variant_spec(image.role, image.transform))
+            .collect::<Vec<_>>();
+        assert_eq!(specs[0].role, ImageVariantRole::Normal);
+        assert_eq!((specs[0].width, specs[0].height), (128, 128));
+        assert_eq!(specs[1].role, ImageVariantRole::Outline);
+        assert_eq!(specs[2].role, ImageVariantRole::Big);
+        assert_eq!((specs[2].width, specs[2].height), (1024, 1024));
         let variants = [
             crate::image_proc::DerivedImageVariant {
                 role: ImageVariantRole::Normal,
@@ -936,7 +1043,7 @@ mod tests {
             },
         ];
 
-        let error = validate_role_derivation(&variants, &STS2_RELIC_IMAGE_SPECS).unwrap_err();
+        let error = validate_role_derivation(&variants, &specs).unwrap_err();
 
         assert!(error.contains("identical Normal and Outline"));
     }

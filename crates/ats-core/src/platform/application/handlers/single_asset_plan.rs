@@ -15,16 +15,17 @@ use super::common::{
     ProgressEvent, ProgressSink, emit_cancelled_mid_stream, finalize_with_error, is_cancelled,
     transition_to_running,
 };
+use crate::game_pack::LoadedGamePack;
 use crate::llm::{CompletionRequest, LlmClient, Message, MessageRole, StreamEvent};
 use crate::planning::PlanItem;
 use crate::platform::contracts::SubmitSingleAssetPlanRequest;
 use crate::platform::domain::{JobId, JobRepository, JobStatus};
 
-const SYSTEM_PROMPT: &str = "你是 Slay the Spire 2 mod 开发的策划助手。\n\
+const SYSTEM_PROMPT: &str = "你是 {{ game_name }} mod 开发的策划助手。\n\
 用户会给出一个自然语言需求和（可选的）资产类型，请输出**单个** PlanItem 的严格 JSON。\n\n\
 JSON 字段（snake_case，全部必填，未涉及的字段输出空字符串或空数组）：\n\
 - id: 短英文标识，蛇形命名，例如 \"flame_relic_v1\"\n\
-- type: 资产类型，枚举值之一：\"card\" / \"card_fullscreen\" / \"relic\" / \"power\" / \"character\" / \"custom_code\"\n\
+- type: 资产类型，枚举值之一：{{ asset_types }}\n\
 - name: 英文名（标题大小写）\n\
 - name_zhs: 简体中文名\n\
 - description: 一句话英文描述（卡面/遗物效果原文风格）\n\
@@ -51,6 +52,7 @@ pub async fn run_single_asset_plan(
     sink: Arc<dyn ProgressSink>,
     job_id: JobId,
     request: SubmitSingleAssetPlanRequest,
+    pack: LoadedGamePack,
     items_dir: Option<PathBuf>,
 ) {
     if transition_to_running(&repo, &job_id, &sink).await.is_err() {
@@ -60,6 +62,24 @@ pub async fn run_single_asset_plan(
         finalize_with_error(&repo, &job_id, &sink, "requirements is empty").await;
         return;
     }
+    if let Some(asset_type) = request.asset_type.as_deref()
+        && !asset_type.trim().is_empty()
+        && asset_type.trim() != "custom_code"
+        && pack.resource_spec(asset_type).is_none()
+    {
+        finalize_with_error(
+            &repo,
+            &job_id,
+            &sink,
+            &format!(
+                "game pack `{}` does not declare asset type `{}`",
+                pack.id,
+                asset_type.trim()
+            ),
+        )
+        .await;
+        return;
+    }
 
     let user_prompt = build_user_prompt(&request);
     let completion_request = CompletionRequest {
@@ -67,7 +87,7 @@ pub async fn run_single_asset_plan(
             role: MessageRole::User,
             content: user_prompt,
         }],
-        system_prompt: Some(SYSTEM_PROMPT.to_string()),
+        system_prompt: Some(system_prompt(&pack)),
         max_tokens: request.max_tokens.unwrap_or(2048),
         temperature: Some(0.4),
         model: None,
@@ -129,10 +149,15 @@ pub async fn run_single_asset_plan(
     let plan_item = match parse_plan_item(&accumulated) {
         Ok(p) => p,
         Err(err) => {
-            finalize_with_error(&repo, &job_id, &sink, &format!(
-                "parse plan json: {err}; raw: {}",
-                truncate(&accumulated, 500)
-            ))
+            finalize_with_error(
+                &repo,
+                &job_id,
+                &sink,
+                &format!(
+                    "parse plan json: {err}; raw: {}",
+                    truncate(&accumulated, 500)
+                ),
+            )
             .await;
             return;
         }
@@ -179,6 +204,18 @@ pub async fn run_single_asset_plan(
         delta: None,
     })
     .await;
+}
+
+fn system_prompt(pack: &LoadedGamePack) -> String {
+    let mut asset_types = pack
+        .resource_specs
+        .iter()
+        .map(|spec| format!("\"{}\"", spec.id))
+        .collect::<Vec<_>>();
+    asset_types.push("\"custom_code\"".into());
+    SYSTEM_PROMPT
+        .replace("{{ game_name }}", &pack.display_name)
+        .replace("{{ asset_types }}", &asset_types.join(" / "))
 }
 
 /// 把 PlanItem 写到 `<items_dir>/<sanitized id>.json`。
@@ -236,8 +273,7 @@ pub(crate) fn parse_plan_item(raw: &str) -> Result<PlanItem, String> {
         }
         last_err = format!(
             "code-block extraction failed: {}",
-            serde_json::from_str::<PlanItem>(inner.trim())
-                .unwrap_err()
+            serde_json::from_str::<PlanItem>(inner.trim()).unwrap_err()
         );
     }
     if let (Some(start), Some(end)) = (raw.find('{'), raw.rfind('}'))
@@ -249,14 +285,12 @@ pub(crate) fn parse_plan_item(raw: &str) -> Result<PlanItem, String> {
         }
         last_err = format!(
             "braces extraction failed: {}",
-            serde_json::from_str::<PlanItem>(candidate)
-                .unwrap_err()
+            serde_json::from_str::<PlanItem>(candidate).unwrap_err()
         );
     } else if last_err.is_empty() {
         last_err = format!(
             "direct parse failed: {}",
-            serde_json::from_str::<PlanItem>(raw.trim())
-                .unwrap_err()
+            serde_json::from_str::<PlanItem>(raw.trim()).unwrap_err()
         );
     }
     Err(format!(
@@ -330,6 +364,14 @@ mod tests {
         }
     }
 
+    fn sts2_pack() -> LoadedGamePack {
+        crate::game_pack::GamePackRegistry::built_in()
+            .unwrap()
+            .require("sts2")
+            .unwrap()
+            .clone()
+    }
+
     const VALID_JSON: &str = r#"{
         "id": "flame_relic_v1",
         "type": "relic",
@@ -371,7 +413,7 @@ mod tests {
             max_tokens: None,
         };
         let id = service
-            .submit_single_asset_plan(req, None, sink)
+            .submit_single_asset_plan(req, sts2_pack(), None, sink)
             .await
             .unwrap();
         wait_terminal(&service, &id).await;
@@ -406,7 +448,7 @@ mod tests {
             max_tokens: None,
         };
         let id = service
-            .submit_single_asset_plan(req, None, sink)
+            .submit_single_asset_plan(req, sts2_pack(), None, sink)
             .await
             .unwrap();
         wait_terminal(&service, &id).await;
@@ -438,7 +480,7 @@ mod tests {
             max_tokens: None,
         };
         let id = service
-            .submit_single_asset_plan(req, None, sink)
+            .submit_single_asset_plan(req, sts2_pack(), None, sink)
             .await
             .unwrap();
         wait_terminal(&service, &id).await;
@@ -466,7 +508,7 @@ mod tests {
             max_tokens: None,
         };
         let id = service
-            .submit_single_asset_plan(req, None, sink)
+            .submit_single_asset_plan(req, sts2_pack(), None, sink)
             .await
             .unwrap();
         wait_terminal(&service, &id).await;
@@ -494,7 +536,7 @@ mod tests {
             ..Default::default()
         };
         let id = service
-            .submit_single_asset_plan(req, None, sink)
+            .submit_single_asset_plan(req, sts2_pack(), None, sink)
             .await
             .unwrap();
         wait_terminal(&service, &id).await;
@@ -528,7 +570,7 @@ mod tests {
             max_tokens: None,
         };
         let id = service
-            .submit_single_asset_plan(req, Some(items.clone()), sink)
+            .submit_single_asset_plan(req, sts2_pack(), Some(items.clone()), sink)
             .await
             .unwrap();
         wait_terminal(&service, &id).await;
@@ -576,6 +618,43 @@ mod tests {
         };
         let p = build_user_prompt(&req);
         assert!(!p.contains("用户指定资产类型"));
+    }
+
+    #[test]
+    fn planner_system_prompt_uses_pack_asset_ids() {
+        let prompt = system_prompt(&sts2_pack());
+        assert!(prompt.contains("Slay the Spire 2"));
+        assert!(prompt.contains("\"card_fullscreen\""));
+        assert!(prompt.contains("\"relic\""));
+        assert!(prompt.contains("\"custom_code\""));
+    }
+
+    #[tokio::test]
+    async fn single_asset_plan_rejects_type_not_declared_by_pack() {
+        let td = tempfile::TempDir::new().unwrap();
+        let repo: Arc<dyn JobRepository> =
+            Arc::new(FileJobRepository::new(td.path().to_path_buf()));
+        let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
+            events: Mutex::new(Vec::new()),
+        });
+        let service = JobApplicationService::new(repo, llm);
+        let id = service
+            .submit_single_asset_plan(
+                SubmitSingleAssetPlanRequest {
+                    requirements: "x".into(),
+                    asset_type: Some("undeclared_asset".into()),
+                    ..Default::default()
+                },
+                sts2_pack(),
+                None,
+                Arc::new(super::super::common::NoopProgressSink),
+            )
+            .await
+            .unwrap();
+        wait_terminal(&service, &id).await;
+        let job = service.get(&id).await.unwrap();
+        assert_eq!(job.status, JobStatus::Failed);
+        assert!(job.error.unwrap_or_default().contains("does not declare"));
     }
 
     #[test]

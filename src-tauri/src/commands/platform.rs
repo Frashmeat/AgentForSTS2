@@ -192,8 +192,14 @@ pub async fn submit_single_asset_plan_job(
     let service = build_service(&config, &active)?;
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
     let items_dir = active_items_dir(&active).ok();
+    let game_id = active_game_id(&active)?;
+    let pack = GamePackRegistry::built_in()
+        .map_err(|error| error.to_string())?
+        .require(&game_id)
+        .map_err(|error| error.to_string())?
+        .clone();
     let job_id = service
-        .submit_single_asset_plan(request, items_dir, sink)
+        .submit_single_asset_plan(request, pack, items_dir, sink)
         .await
         .map_err(|e| e.to_string())?;
     Ok(SubmitJobAck { job_id })
@@ -226,8 +232,10 @@ pub async fn submit_package_project_job(
 ) -> Result<SubmitJobAck, String> {
     let service = build_service(&config, &active)?;
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
+    let pack = active_game_pack(&active)?;
+    let mod_id = active_mod_id(&active)?;
     let job_id = service
-        .submit_package_project(request, sink)
+        .submit_package_project(request, pack, mod_id, sink)
         .await
         .map_err(|e| e.to_string())?;
     Ok(SubmitJobAck { job_id })
@@ -259,8 +267,9 @@ pub async fn submit_build_project_job(
     sync_requested_project(&config, &active, &request.project_root)?;
     let service = build_service(&config, &active)?;
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
+    let pack = active_game_pack(&active)?;
     let job_id = service
-        .submit_build_project(request, sink)
+        .submit_build_project(request, pack, sink)
         .await
         .map_err(|e| e.to_string())?;
     Ok(SubmitJobAck { job_id })
@@ -271,16 +280,15 @@ fn sync_requested_project(
     active: &State<'_, ActiveProject>,
     requested_root: &std::path::Path,
 ) -> Result<(), String> {
-    let active_root = {
+    let (active_root, game_id) = {
         let guard = active
             .0
             .lock()
             .map_err(|e| format!("active project lock poisoned: {e}"))?;
-        guard
+        let project = guard
             .as_ref()
-            .ok_or_else(|| "no active project — open or create one first".to_string())?
-            .path()
-            .to_path_buf()
+            .ok_or_else(|| "no active project — open or create one first".to_string())?;
+        (project.path().to_path_buf(), project.meta().game_id.clone())
     };
     let canonical_active = std::fs::canonicalize(&active_root)
         .map_err(|e| format!("resolve active project {}: {e}", active_root.display()))?;
@@ -297,7 +305,7 @@ fn sync_requested_project(
             active_root.display()
         ));
     }
-    sync_project_local_props(&active_root, &config.settings_snapshot()).map(|_| ())
+    sync_project_local_props(&active_root, &game_id, &config.settings_snapshot()).map(|_| ())
 }
 
 fn active_artifacts_dir(active: &State<'_, ActiveProject>) -> Result<PathBuf, String> {
@@ -330,6 +338,30 @@ pub(crate) fn active_game_context(
     let registry = GamePackRegistry::built_in().map_err(|error| error.to_string())?;
     VerifiedGameContext::open_current(&config.status_snapshot().runtime_dir(), &registry, &game_id)
         .map_err(|error| error.to_string())
+}
+
+fn active_game_pack(
+    active: &State<'_, ActiveProject>,
+) -> Result<ats_core::game_pack::LoadedGamePack, String> {
+    let game_id = active_game_id(active)?;
+    GamePackRegistry::built_in()
+        .map_err(|error| error.to_string())?
+        .require(&game_id)
+        .cloned()
+        .map_err(|error| error.to_string())
+}
+
+fn active_mod_id(active: &State<'_, ActiveProject>) -> Result<String, String> {
+    let guard = active
+        .0
+        .lock()
+        .map_err(|error| format!("active project lock poisoned: {error}"))?;
+    Ok(guard
+        .as_ref()
+        .ok_or_else(|| "no active project — open or create one first".to_string())?
+        .meta()
+        .csharp_name
+        .clone())
 }
 
 pub(crate) fn active_game_id(active: &State<'_, ActiveProject>) -> Result<String, String> {

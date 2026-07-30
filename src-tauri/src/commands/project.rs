@@ -1,12 +1,14 @@
 //! Project commands —— 工程文件夹生命周期。
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
 use ats_core::config::Settings;
+use ats_core::game_pack::GamePackRegistry;
 use ats_core::project::{
-    LocalBuildPaths, LocalPropsSync, ProjectFolder, ProjectMeta, RecentEntry, RecentProjects,
+    LocalBuildInputs, LocalPropsSync, ProjectFolder, ProjectMeta, RecentEntry, RecentProjects,
     sync_local_props,
 };
 use ats_core::toolchain::validate_godot_executable;
@@ -61,8 +63,11 @@ pub fn create_project(
     *lock_active(&active)? = Some(folder);
 
     // 尝试从配置中的 STS2 DLL 路径自动生成 local.props
-    if let Err(warn) = sync_project_local_props(Path::new(&snap.path), &config.settings_snapshot())
-    {
+    if let Err(warn) = sync_project_local_props(
+        Path::new(&snap.path),
+        &snap.meta.game_id,
+        &config.settings_snapshot(),
+    ) {
         eprintln!("local.props auto-generate skipped: {warn}");
     }
 
@@ -85,7 +90,8 @@ pub fn open_project(
     *lock_active(&active)? = Some(folder);
 
     // 老工程可能没有 local.props——自动从配置中的 STS2 DLL 路径补齐
-    if let Err(warn) = sync_project_local_props(&p, &config.settings_snapshot()) {
+    if let Err(warn) = sync_project_local_props(&p, &snap.meta.game_id, &config.settings_snapshot())
+    {
         eprintln!("local.props auto-generate skipped on open: {warn}");
     }
 
@@ -99,7 +105,8 @@ pub fn close_project(
     active: State<'_, ActiveProject>,
 ) -> Result<(), String> {
     drop(lock_active(&active)?.take());
-    app.emit("project-changed", Option::<ProjectSnapshot>::None).ok();
+    app.emit("project-changed", Option::<ProjectSnapshot>::None)
+        .ok();
     Ok(())
 }
 
@@ -119,7 +126,6 @@ pub fn forget_recent_project(paths: State<'_, AppPaths>, path: String) -> Result
     Ok(())
 }
 
-
 fn snapshot(folder: &ProjectFolder) -> ProjectSnapshot {
     ProjectSnapshot {
         path: folder.path().to_string_lossy().to_string(),
@@ -129,20 +135,23 @@ fn snapshot(folder: &ProjectFolder) -> ProjectSnapshot {
 
 pub(crate) fn sync_project_local_props(
     project_root: &Path,
+    game_id: &str,
     settings: &Settings,
 ) -> Result<LocalPropsSync, String> {
-    sync_project_local_props_with_mode(project_root, settings, true)
+    sync_project_local_props_with_mode(project_root, game_id, settings, true)
 }
 
 pub(crate) fn sync_project_local_props_after_settings(
     project_root: &Path,
+    game_id: &str,
     settings: &Settings,
 ) -> Result<LocalPropsSync, String> {
-    sync_project_local_props_with_mode(project_root, settings, false)
+    sync_project_local_props_with_mode(project_root, game_id, settings, false)
 }
 
 fn sync_project_local_props_with_mode(
     project_root: &Path,
+    game_id: &str,
     settings: &Settings,
     require_godot: bool,
 ) -> Result<LocalPropsSync, String> {
@@ -164,14 +173,18 @@ fn sync_project_local_props_with_mode(
         validate_godot_executable(&godot_exe_path, Duration::from_secs(5))
             .map_err(|error| format!("Godot validation failed: {error}"))?;
     }
-    sync_local_props(
-        project_root,
-        &LocalBuildPaths {
-            sts2_dll_path,
-            godot_exe_path,
-        },
-    )
-    .map_err(|error| format!("sync local.props: {error}"))
+    let registry = GamePackRegistry::built_in().map_err(|error| error.to_string())?;
+    let pack = registry
+        .require(game_id)
+        .map_err(|error| error.to_string())?;
+    let inputs = LocalBuildInputs {
+        values: BTreeMap::from([
+            ("game_assembly".into(), sts2_dll_path),
+            ("godot_executable".into(), godot_exe_path),
+        ]),
+    };
+    sync_local_props(project_root, pack.build_recipe.as_ref(), &inputs)
+        .map_err(|error| format!("sync local.props: {error}"))
 }
 
 fn record_recent(paths: &AppPaths, project_path: &Path, meta: &ProjectMeta) -> Result<(), String> {

@@ -1,8 +1,8 @@
 //! Codegen prompt 装配——把请求 + 知识包渲染成完整 LLM prompt。
 //!
 //! 与 Python 端的简化：移除了 "legacy fallback"（当 resolver 缺失/返回空时回退到
-//! Sts2GuidanceKnowledgeSource）。Rust 端 resolver 永远可用，guidance 一定非空
-//! （内嵌模板兜底），所以裸跑 resolver 即可。Facts 当前为 stub（stage 2.2 之前为空），
+//! Pack guidance）。Rust 端 resolver 从固定 Game Pack 读取已校验 guidance，
+//! 所以不需要磁盘 fallback。Facts 当前为 stub（stage 2.2 之前为空），
 //! 我们在 prompt 中明确告知 LLM "结构化代码事实暂不可用，请直接读源码"。
 
 use std::collections::HashMap;
@@ -11,10 +11,10 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 use crate::codegen::models::{
-    AssetCodegenRequest, AssetGroupRequest, AssetKind, CustomCodegenRequest, ModProjectRequest,
+    AssetCodegenRequest, AssetGroupRequest, CustomCodegenRequest, ModProjectRequest,
     asset_localization_key_segment,
 };
-use crate::game_pack::VerifiedGameContext;
+use crate::game_pack::{AssetResourceSpec, VerifiedGameContext};
 use crate::knowledge::{
     KnowledgePacket, KnowledgeQuery, KnowledgeScenario, SnapshotCodeFactsError,
     Sts2KnowledgeResolver,
@@ -47,6 +47,11 @@ pub enum PromptAssemblyError {
     Knowledge(#[from] SnapshotCodeFactsError),
     #[error("serialize verified game context evidence: {0}")]
     EvidenceSerialization(#[from] serde_json::Error),
+    #[error("game pack `{game_pack_id}` does not declare structured asset type `{asset_type}`")]
+    UnsupportedAssetType {
+        game_pack_id: String,
+        asset_type: String,
+    },
 }
 
 impl PromptAssembler {
@@ -87,13 +92,17 @@ impl PromptAssembler {
         request: &AssetCodegenRequest,
         context: &VerifiedGameContext,
     ) -> Result<AssetPromptAssembly, PromptAssemblyError> {
-        let asset_kind = AssetKind::parse(&request.asset_type);
-        let canonical_asset_type = asset_kind
-            .map(AssetKind::as_str)
-            .unwrap_or_else(|| request.asset_type.trim());
+        let resource_spec = context
+            .pack()
+            .resource_spec(&request.asset_type)
+            .ok_or_else(|| PromptAssemblyError::UnsupportedAssetType {
+                game_pack_id: context.game_pack_id().into(),
+                asset_type: request.asset_type.clone(),
+            })?;
+        let canonical_asset_type = resource_spec.id.as_str();
         let query = KnowledgeQuery {
             scenario: Some(KnowledgeScenario::AssetCodegen),
-            domain: "sts2".into(),
+            domain: context.game_pack_id().into(),
             asset_type: Some(canonical_asset_type.to_string()),
             project_root: Some(request.project_root.clone()),
             requirements: Some(request.design_description.clone()),
@@ -114,15 +123,15 @@ impl PromptAssembler {
         };
         let project_root = path_to_posix(&request.project_root);
         let (mod_name, project_context) = project_context(&request.project_root);
-        let localization_table = asset_kind
-            .map(AssetKind::localization_table)
-            .unwrap_or("unknown");
+        let localization_table = resource_spec.localization.table.as_str();
         let localization_key = format!(
             "{}-{}",
             mod_name.to_ascii_uppercase(),
             asset_localization_key_segment(&request.asset_name)
         );
         let asset_lookup = "No file or tool lookup is available during this request. Use the inlined Code Facts, Rules And Guidance, and project context only.";
+        let localization_contract = render_localization_contract(resource_spec);
+        let localization_example = render_localization_example(resource_spec, &localization_key)?;
 
         let vars = HashMap::from([
             ("asset_name", request.asset_name.as_str()),
@@ -135,6 +144,8 @@ impl PromptAssembler {
             ("img_list", img_list.as_str()),
             ("localization_key", localization_key.as_str()),
             ("localization_table", localization_table),
+            ("localization_contract", localization_contract.as_str()),
+            ("localization_example", localization_example.as_str()),
             ("mod_name", mod_name.as_str()),
             ("project_context", project_context.as_str()),
             ("project_root", project_root.as_str()),
@@ -156,7 +167,7 @@ impl PromptAssembler {
     ) -> Result<String, PromptAssemblyError> {
         let query = KnowledgeQuery {
             scenario: Some(KnowledgeScenario::CustomCodeCodegen),
-            domain: "sts2".into(),
+            domain: context.game_pack_id().into(),
             asset_type: Some("custom_code".into()),
             project_root: Some(request.project_root.clone()),
             requirements: Some(request.description.clone()),
@@ -211,7 +222,7 @@ impl PromptAssembler {
             .collect();
         let query = KnowledgeQuery {
             scenario: Some(KnowledgeScenario::AssetGroupCodegen),
-            domain: "sts2".into(),
+            domain: context.game_pack_id().into(),
             asset_type: None,
             project_root: Some(request.project_root.clone()),
             requirements: None,
@@ -231,6 +242,7 @@ impl PromptAssembler {
         let asset_count = request.assets.len().to_string();
         let project_root = path_to_posix(&request.project_root);
         let mod_name = path_basename(&request.project_root);
+        let group_resource_contracts = render_group_resource_contracts(&request.assets, context)?;
 
         let vars = HashMap::from([
             ("asset_count", asset_count.as_str()),
@@ -238,6 +250,10 @@ impl PromptAssembler {
             ("class_names", class_names.as_str()),
             ("facts", knowledge.facts.as_str()),
             ("guidance", knowledge.guidance.as_str()),
+            (
+                "group_resource_contracts",
+                group_resource_contracts.as_str(),
+            ),
             ("lookup", knowledge.lookup.as_str()),
             ("knowledge_warnings", knowledge.warnings.as_str()),
             ("mod_name", mod_name.as_str()),
@@ -347,16 +363,83 @@ impl ResolvedKnowledge {
     }
 }
 
-fn asset_type_str(asset_type: &crate::planning::AssetItemType) -> &'static str {
-    use crate::planning::AssetItemType::*;
-    match asset_type {
-        Card => "card",
-        CardFullscreen => "card_fullscreen",
-        Relic => "relic",
-        Power => "power",
-        Character => "character",
-        CustomCode => "custom_code",
+fn render_localization_contract(spec: &AssetResourceSpec) -> String {
+    format!(
+        "Required locale maps: {}. Required key suffixes in every locale: {}.",
+        spec.localization.locales.join(", "),
+        spec.localization
+            .required_suffixes
+            .iter()
+            .map(|suffix| format!(".{suffix}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+fn render_localization_example(
+    spec: &AssetResourceSpec,
+    localization_key: &str,
+) -> Result<String, serde_json::Error> {
+    let mut localization = serde_json::Map::new();
+    for locale in &spec.localization.locales {
+        let entries = spec
+            .localization
+            .required_suffixes
+            .iter()
+            .map(|suffix| {
+                (
+                    format!("{localization_key}.{suffix}"),
+                    serde_json::Value::String(format!("{locale} {suffix}")),
+                )
+            })
+            .collect::<serde_json::Map<_, _>>();
+        localization.insert(locale.clone(), serde_json::Value::Object(entries));
     }
+    serde_json::to_string_pretty(&serde_json::json!({
+        "csharp": "using ...;\n\nnamespace ...;\n\npublic sealed class ... {}",
+        "localization": localization,
+    }))
+}
+
+fn render_group_resource_contracts(
+    assets: &[crate::codegen::AssetGroupItem],
+    context: &VerifiedGameContext,
+) -> Result<String, PromptAssemblyError> {
+    let mut rendered = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for asset in assets {
+        let asset_type = asset_type_str(&asset.item.item_type);
+        if asset_type == "custom_code" || !seen.insert(asset_type) {
+            continue;
+        }
+        let spec = context.pack().resource_spec(asset_type).ok_or_else(|| {
+            PromptAssemblyError::UnsupportedAssetType {
+                game_pack_id: context.game_pack_id().into(),
+                asset_type: asset_type.into(),
+            }
+        })?;
+        rendered.push(format!(
+            "- `{}`: locales {}; table `{}`; required suffixes {}",
+            spec.id,
+            spec.localization.locales.join(", "),
+            spec.localization.table,
+            spec.localization
+                .required_suffixes
+                .iter()
+                .map(|suffix| format!(".{suffix}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    if rendered.is_empty() {
+        Ok("- No structured asset localization is required.".into())
+    } else {
+        Ok(rendered.join("\n"))
+    }
+}
+
+fn asset_type_str(asset_type: &crate::planning::AssetItemType) -> &str {
+    asset_type.as_str()
 }
 
 fn format_image_list(paths: &[PathBuf]) -> String {
@@ -641,7 +724,7 @@ public sealed class CombatManager
     #[test]
     fn asset_group_prompt_lists_all_assets() {
         use crate::codegen::AssetGroupItem;
-        use crate::planning::{AssetItemType, PlanItem};
+        use crate::planning::PlanItem;
 
         let assembler = PromptAssembler::built_in();
         let temp = tempfile::TempDir::new().unwrap();
@@ -652,7 +735,7 @@ public sealed class CombatManager
                 AssetGroupItem {
                     item: PlanItem {
                         id: "a1".into(),
-                        item_type: AssetItemType::Card,
+                        item_type: "card".into(),
                         name: "FirstCard".into(),
                         description: "卡1".into(),
                         ..Default::default()
@@ -662,7 +745,7 @@ public sealed class CombatManager
                 AssetGroupItem {
                     item: PlanItem {
                         id: "a2".into(),
-                        item_type: AssetItemType::Power,
+                        item_type: "power".into(),
                         name: "SecondPower".into(),
                         description: "力1".into(),
                         ..Default::default()
@@ -676,6 +759,8 @@ public sealed class CombatManager
             .unwrap();
         assert!(prompt.contains("FirstCard"));
         assert!(prompt.contains("SecondPower"));
+        assert!(prompt.contains("`card`: locales eng, zhs; table `cards`"));
+        assert!(prompt.contains("`power`: locales eng, zhs; table `powers`"));
         assert!(prompt.contains("卡1"));
         assert!(prompt.contains("code-only asset"));
         assert!(prompt.contains("first.png"));

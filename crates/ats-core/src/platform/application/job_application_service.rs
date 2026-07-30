@@ -221,11 +221,23 @@ impl JobApplicationService {
     pub async fn submit_single_asset_plan(
         &self,
         request: SubmitSingleAssetPlanRequest,
+        pack: LoadedGamePack,
         items_dir: Option<PathBuf>,
         sink: Arc<dyn ProgressSink>,
     ) -> JobResult<JobId> {
-        let payload = serde_json::to_value(&request)
+        let mut payload = serde_json::to_value(&request)
             .map_err(|e| JobError::Storage(format!("serialize request: {e}")))?;
+        payload
+            .as_object_mut()
+            .ok_or_else(|| JobError::Storage("single asset plan payload must be an object".into()))?
+            .insert(
+                "_gamePack".into(),
+                serde_json::json!({
+                    "id": pack.id.clone(),
+                    "schemaVersion": pack.schema_version,
+                    "sha256": pack.content_sha256.clone(),
+                }),
+            );
         let job = Job::new(JobKind::SingleAssetPlan, payload);
         let job_id = job.id.clone();
         self.repo.create(&job).await?;
@@ -234,7 +246,7 @@ impl JobApplicationService {
         let llm = self.require_llm()?;
         let id_for_task = job_id.clone();
         tokio::spawn(async move {
-            run_single_asset_plan(repo, llm, sink, id_for_task, request, items_dir).await;
+            run_single_asset_plan(repo, llm, sink, id_for_task, request, pack, items_dir).await;
         });
 
         Ok(job_id)
@@ -343,10 +355,14 @@ impl JobApplicationService {
     pub async fn submit_package_project(
         &self,
         request: SubmitPackageProjectRequest,
+        pack: LoadedGamePack,
+        mod_id: String,
         sink: Arc<dyn ProgressSink>,
     ) -> JobResult<JobId> {
-        let payload = serde_json::to_value(&request)
-            .map_err(|e| JobError::Storage(format!("serialize request: {e}")))?;
+        let layout = pack.package_layout.clone().ok_or_else(|| {
+            JobError::Storage(format!("game pack `{}` has no package layout", pack.id))
+        })?;
+        let payload = request_payload_with_pack(&request, &pack)?;
         let job = Job::new(JobKind::PackageProject, payload);
         let job_id = job.id.clone();
         self.repo.create(&job).await?;
@@ -354,7 +370,7 @@ impl JobApplicationService {
         let repo = Arc::clone(&self.repo);
         let id_for_task = job_id.clone();
         tokio::spawn(async move {
-            run_package_project(repo, sink, id_for_task, request).await;
+            run_package_project(repo, sink, id_for_task, request, layout, mod_id).await;
         });
 
         Ok(job_id)
@@ -365,10 +381,13 @@ impl JobApplicationService {
     pub async fn submit_build_project(
         &self,
         request: SubmitBuildProjectRequest,
+        pack: LoadedGamePack,
         sink: Arc<dyn ProgressSink>,
     ) -> JobResult<JobId> {
-        let payload = serde_json::to_value(&request)
-            .map_err(|e| JobError::Storage(format!("serialize request: {e}")))?;
+        let recipe = pack.build_recipe.clone().ok_or_else(|| {
+            JobError::Storage(format!("game pack `{}` has no build recipe", pack.id))
+        })?;
+        let payload = request_payload_with_pack(&request, &pack)?;
         let job = Job::new(JobKind::BuildProject, payload);
         let job_id = job.id.clone();
         self.repo.create(&job).await?;
@@ -376,7 +395,7 @@ impl JobApplicationService {
         let repo = Arc::clone(&self.repo);
         let id_for_task = job_id.clone();
         tokio::spawn(async move {
-            run_build_project(repo, sink, id_for_task, request).await;
+            run_build_project(repo, sink, id_for_task, request, recipe).await;
         });
 
         Ok(job_id)
@@ -404,6 +423,26 @@ fn request_payload_with_context<T: Serialize>(
         serde_json::to_value(context.evidence()).map_err(|error| {
             JobError::Storage(format!("serialize verified game context: {error}"))
         })?,
+    );
+    Ok(payload)
+}
+
+fn request_payload_with_pack<T: Serialize>(
+    request: &T,
+    pack: &LoadedGamePack,
+) -> JobResult<serde_json::Value> {
+    let mut payload = serde_json::to_value(request)
+        .map_err(|error| JobError::Storage(format!("serialize request: {error}")))?;
+    let object = payload
+        .as_object_mut()
+        .ok_or_else(|| JobError::Storage("job request payload must be a JSON object".into()))?;
+    object.insert(
+        "_gamePack".into(),
+        serde_json::json!({
+            "id": pack.id,
+            "schemaVersion": pack.schema_version,
+            "sha256": pack.content_sha256,
+        }),
     );
     Ok(payload)
 }

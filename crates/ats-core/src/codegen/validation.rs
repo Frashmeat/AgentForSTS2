@@ -1,43 +1,33 @@
 use regex::Regex;
 
-pub(crate) struct ForbiddenCallInMethodRule {
-    pub id: &'static str,
-    pub method_name: &'static str,
-    pub call_path: &'static [&'static str],
-    pub message: &'static str,
-}
+use crate::game_pack::ValidationRule;
 
-const STS2_RULES: &[ForbiddenCallInMethodRule] = &[ForbiddenCallInMethodRule {
-    id: "sts2.energy.before_combat_start",
-    method_name: "BeforeCombatStart",
-    call_path: &["PlayerCmd", "GainEnergy"],
-    message: "known STS2 timing error: BeforeCombatStart calls PlayerCmd.GainEnergy, but SetupPlayerTurn.ResetEnergy runs afterwards. Use the current official implementation and lifecycle caller evidence to choose a post-reset hook, with Owner-side and first-round guards where required",
-}];
-
-pub(crate) fn validate_sts2_generated_csharp(source: &str) -> Result<(), String> {
-    validate_forbidden_calls_in_methods(source, STS2_RULES)
-}
-
-fn validate_forbidden_calls_in_methods(
+pub(crate) fn validate_generated_csharp(
     source: &str,
-    rules: &[ForbiddenCallInMethodRule],
+    rules: &[ValidationRule],
 ) -> Result<(), String> {
     let masked = mask_csharp_comments_and_literals(source);
     for rule in rules {
+        let ValidationRule::ForbiddenCallInMethod {
+            id,
+            method_name,
+            call_path,
+            message,
+        } = rule;
         let method_pattern = Regex::new(&format!(
-            r"(?m)^\s*(?:public|protected|internal|private)\s+(?:(?:static|virtual|override|async|sealed|new)\s+)*[A-Za-z_][\w<>,\.\[\]\?]*\s+{}\s*\(",
-            regex::escape(rule.method_name)
+            r"(?m)(?:^|[{{}};])\s*(?:public|protected|internal|private)\s+(?:(?:static|virtual|override|async|sealed|new)\s+)*[A-Za-z_][\w<>,\.\[\]\?]*\s+{}\s*\(",
+            regex::escape(method_name)
         ))
-        .expect("static method rule must compile");
+        .expect("validated method rule must compile");
         let call_pattern = Regex::new(&format!(
             r"\b{}\s*\(",
-            rule.call_path
+            call_path
                 .iter()
                 .map(|part| regex::escape(part))
                 .collect::<Vec<_>>()
                 .join(r"\s*\.\s*")
         ))
-        .expect("static call rule must compile");
+        .expect("validated call rule must compile");
 
         for method_match in method_pattern.find_iter(&masked) {
             let open_paren = method_match.end() - 1;
@@ -50,7 +40,7 @@ fn validate_forbidden_calls_in_methods(
             if call_pattern.is_match(body) {
                 return Err(format!(
                     "semantic rule {} rejected generated C#: {}",
-                    rule.id, rule.message
+                    id, message
                 ));
             }
         }
@@ -214,6 +204,15 @@ fn mask_csharp_comments_and_literals(source: &str) -> String {
 mod tests {
     use super::*;
 
+    fn sts2_rules() -> Vec<ValidationRule> {
+        vec![ValidationRule::ForbiddenCallInMethod {
+            id: "sts2.energy.before_combat_start".into(),
+            method_name: "BeforeCombatStart".into(),
+            call_path: vec!["PlayerCmd".into(), "GainEnergy".into()],
+            message: "ResetEnergy runs afterwards".into(),
+        }]
+    }
+
     #[test]
     fn rejects_gain_energy_inside_before_combat_start() {
         let source = r#"
@@ -226,7 +225,7 @@ public override async Task BeforeCombatStart()
     }
 }
 "#;
-        let err = validate_sts2_generated_csharp(source).unwrap_err();
+        let err = validate_generated_csharp(source, &sts2_rules()).unwrap_err();
         assert!(err.contains("ResetEnergy"));
         assert!(err.contains("sts2.energy.before_combat_start"));
     }
@@ -242,7 +241,7 @@ public override async Task AfterSideTurnStart(CombatSide side, CombatState comba
     }
 }
 "#;
-        validate_sts2_generated_csharp(source).unwrap();
+        validate_generated_csharp(source, &sts2_rules()).unwrap();
     }
 
     #[test]
@@ -260,13 +259,19 @@ public async Task Later()
     await PlayerCmd.GainEnergy(1m, Owner);
 }
 "#;
-        validate_sts2_generated_csharp(source).unwrap();
+        validate_generated_csharp(source, &sts2_rules()).unwrap();
     }
 
     #[test]
     fn rejects_expression_bodied_method() {
         let source = "public override Task BeforeCombatStart() => PlayerCmd.GainEnergy(1m, Owner);";
-        assert!(validate_sts2_generated_csharp(source).is_err());
+        assert!(validate_generated_csharp(source, &sts2_rules()).is_err());
+    }
+
+    #[test]
+    fn rejects_method_declared_after_class_brace_on_same_line() {
+        let source = "public class Relic { public override Task BeforeCombatStart() => PlayerCmd.GainEnergy(1m, Owner); }";
+        assert!(validate_generated_csharp(source, &sts2_rules()).is_err());
     }
 
     #[test]
@@ -281,6 +286,12 @@ public async Task Wrapper()
     }
 }
 "#;
-        validate_sts2_generated_csharp(source).unwrap();
+        validate_generated_csharp(source, &sts2_rules()).unwrap();
+    }
+
+    #[test]
+    fn source_is_not_rejected_when_pack_declares_no_rules() {
+        let source = "public override Task BeforeCombatStart() => PlayerCmd.GainEnergy(1m, Owner);";
+        validate_generated_csharp(source, &[]).unwrap();
     }
 }

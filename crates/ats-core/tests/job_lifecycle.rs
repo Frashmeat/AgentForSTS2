@@ -82,13 +82,31 @@ fn ok_code_events() -> Vec<Result<StreamEvent, LlmError>> {
     ]
 }
 
+fn forbidden_code_events() -> Vec<Result<StreamEvent, LlmError>> {
+    vec![
+        Ok(StreamEvent::Start {
+            model: "integration-test".into(),
+        }),
+        Ok(StreamEvent::Delta {
+            text: "```csharp\npublic class BadRelic { public override Task BeforeCombatStart() => PlayerCmd.GainEnergy(1m, Owner); }\n```".into(),
+        }),
+        Ok(StreamEvent::End {
+            finish_reason: FinishReason::EndTurn,
+            usage: Usage {
+                input_tokens: 30,
+                output_tokens: 10,
+            },
+        }),
+    ]
+}
+
 fn make_repo(td: &tempfile::TempDir) -> Arc<dyn JobRepository> {
     Arc::new(FileJobRepository::new(td.path().to_path_buf()))
 }
 
 fn game_context(runtime_dir: &Path) -> VerifiedGameContext {
     let loader = GamePackLoader::new(GamePackLoadPolicy::new(
-        ["truth_sources"],
+        ["truth_sources", "validation_rules"],
         ["dotnet_project"],
         ["sts2_code_facts"],
     ));
@@ -99,13 +117,20 @@ fn game_context(runtime_dir: &Path) -> VerifiedGameContext {
               "schema_version":1,
               "id":"sts2",
               "display_name":"STS2 Fixture",
-              "capabilities":["truth_sources"],
+              "capabilities":["truth_sources", "validation_rules"],
               "truth_sources":[{
                 "id":"game",
                 "kind":"local_file",
                 "input_key":"game_assembly",
                 "indexer":"dotnet_project",
                 "provider":"sts2_code_facts"
+              }],
+              "validation_rules":[{
+                "id":"sts2.energy.before_combat_start",
+                "kind":"forbidden_call_in_method",
+                "method_name":"BeforeCombatStart",
+                "call_path":["PlayerCmd", "GainEnergy"],
+                "message":"ResetEnergy runs afterwards"
               }]
             }"#,
         )
@@ -236,6 +261,44 @@ async fn code_generate_writes_files_via_public_api() {
             .unwrap_or_default()
             .contains("artifacts")
     );
+}
+
+#[tokio::test]
+async fn code_generate_applies_pack_rules_before_writing_files() {
+    let td = tempfile::TempDir::new().unwrap();
+    let history = td.path().join("history");
+    std::fs::create_dir_all(&history).unwrap();
+    let artifacts = td.path().join("artifacts");
+    std::fs::create_dir_all(&artifacts).unwrap();
+
+    let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
+    let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
+        events: Mutex::new(forbidden_code_events()),
+    });
+    let service = JobApplicationService::new(repo, llm);
+    let id = service
+        .submit_code_generate(
+            SubmitCodeGenerateRequest::CustomCode {
+                request: CustomCodegenRequest {
+                    name: "BadRelic".into(),
+                    project_root: td.path().to_path_buf(),
+                    skip_build: true,
+                    ..Default::default()
+                },
+            },
+            game_context(td.path()),
+            artifacts.clone(),
+            Arc::new(NoopProgressSink),
+        )
+        .await
+        .unwrap();
+    wait_terminal(&service, &id).await;
+
+    let job = service.get(&id).await.unwrap();
+    assert_eq!(job.status, JobStatus::Failed);
+    assert!(job.error.unwrap_or_default().contains("ResetEnergy"));
+    assert!(!td.path().join("Generated/BadRelic.cs").exists());
+    assert!(!artifacts.join("BadRelic/BadRelic.cs").exists());
 }
 
 #[tokio::test]

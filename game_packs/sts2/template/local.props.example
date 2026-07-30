@@ -1,0 +1,7 @@
+<Project>
+    <!-- AgentTheSpire manages these machine-local values from the active Game Pack. -->
+    <PropertyGroup>
+        <Sts2AssemblyPath>C:/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2/data_sts2_windows_x86_64/sts2.dll</Sts2AssemblyPath>
+        <GodotPath>C:/megadot/MegaDot_v4.5.1-stable_mono_win64.exe</GodotPath>
+    </PropertyGroup>
+</Project>

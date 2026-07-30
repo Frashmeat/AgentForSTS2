@@ -4,6 +4,7 @@
 ```csharp
 using BaseLib.Abstracts;      // CustomRelicModel
 using BaseLib.Utils;          // PoolAttribute
+using MegaCrit.Sts2.Core.Combat;       // CombatSide, ICombatState
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Relics;
 using MegaCrit.Sts2.Core.Entities.Creatures;

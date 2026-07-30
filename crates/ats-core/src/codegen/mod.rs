@@ -16,8 +16,7 @@ mod validation;
 
 pub(crate) use models::asset_localization_key_segment;
 pub use models::{
-    AssetCodegenRequest, AssetGroupItem, AssetGroupRequest, AssetKind, CustomCodegenRequest,
-    ModProjectRequest,
+    AssetCodegenRequest, AssetGroupItem, AssetGroupRequest, CustomCodegenRequest, ModProjectRequest,
 };
 pub use prompt_assembler::{AssetPromptAssembly, PromptAssembler, PromptAssemblyError};
-pub(crate) use validation::validate_sts2_generated_csharp;
+pub(crate) use validation::validate_generated_csharp;

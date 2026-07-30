@@ -7,7 +7,7 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-use super::models::{AssetItemType, ModPlan, PlanItem};
+use super::models::{ModPlan, PlanItem};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -95,6 +95,9 @@ fn validate_item(
     if item.name.trim().is_empty() {
         issues.push(issue("missing_name", "item 缺少 name", "name"));
     }
+    if item.item_type.as_str().trim().is_empty() {
+        issues.push(issue("missing_type", "item 缺少 type", "type"));
+    }
     if duplicate_ids.contains(&item.id) {
         issues.push(issue("duplicate_id", "item id 重复", "id"));
     }
@@ -116,7 +119,7 @@ fn validate_item(
     }
 
     // strictness 分级缺字段检查
-    if matches!(item.item_type, AssetItemType::CustomCode) {
+    if item.item_type.as_str() == "custom_code" {
         if item.goal.trim().is_empty() {
             missing_fields.push("goal".into());
         }
@@ -192,6 +195,7 @@ mod tests {
     fn item(id: &str) -> PlanItem {
         PlanItem {
             id: id.into(),
+            item_type: "card".into(),
             name: id.into(),
             ..Default::default()
         }
@@ -262,7 +266,7 @@ mod tests {
     #[test]
     fn custom_code_missing_goal_needs_input() {
         let mut a = item("a");
-        a.item_type = AssetItemType::CustomCode;
+        a.item_type = "custom_code".into();
         let plan = ModPlan {
             items: vec![a],
             ..Default::default()

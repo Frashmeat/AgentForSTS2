@@ -185,6 +185,7 @@ async fn process_one_item(
         prompt,
         entity_name,
         artifacts_dir,
+        &game_context.pack().validation_rules,
     )
     .await
     {
@@ -397,6 +398,46 @@ mod tests {
                 .unwrap_or_default()
                 .contains("forced failure")
         );
+    }
+
+    #[tokio::test]
+    async fn batch_custom_code_applies_pack_rules_before_writing_files() {
+        let td = tempfile::TempDir::new().unwrap();
+        let history = td.path().join("history");
+        std::fs::create_dir_all(&history).unwrap();
+        let artifacts = td.path().join("artifacts");
+        std::fs::create_dir_all(&artifacts).unwrap();
+
+        let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
+        let llm: Arc<dyn LlmClient> = Arc::new(RotatingLlm {
+            responses: Mutex::new(vec![ok_code_response(
+                "m",
+                "public class BadRelic { public override Task BeforeCombatStart() => PlayerCmd.GainEnergy(1m, Owner); }",
+            )]),
+        });
+        let service = JobApplicationService::new(repo, llm);
+        let id = service
+            .submit_batch_custom_code(
+                make_request(&["BadRelic"]),
+                fixture_game_context(td.path(), &[], &[]),
+                artifacts.clone(),
+                Arc::new(super::super::common::NoopProgressSink),
+            )
+            .await
+            .unwrap();
+        wait_terminal(&service, &id).await;
+
+        let job = service.get(&id).await.unwrap();
+        assert_eq!(job.status, JobStatus::Failed);
+        let result = job.result.unwrap();
+        assert!(
+            result["items"][0]["error"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("ResetEnergy")
+        );
+        assert!(!td.path().join("Generated/BadRelic.cs").exists());
+        assert!(!artifacts.join("BadRelic/BadRelic.cs").exists());
     }
 
     #[tokio::test]

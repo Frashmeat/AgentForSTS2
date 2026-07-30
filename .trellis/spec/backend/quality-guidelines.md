@@ -234,10 +234,11 @@ Tauri commands: submit_code_generate_job, submit_asset_generate_job, submit_buil
 ```rust
 validate_godot_executable(path, timeout) -> Result<GodotInstallation, GodotValidationError>
 
-sync_local_props(project_root, LocalBuildPaths {
-    sts2_dll_path,
-    godot_exe_path,
-}) -> Result<LocalPropsSync, LocalPropsError>
+sync_local_props(
+    project_root,
+    build_recipe: Option<&BuildRecipe>,
+    inputs: &LocalBuildInputs,
+) -> Result<LocalPropsSync, LocalPropsError>
 ```
 
 Implementations live in `crates/ats-core/src/toolchain.rs`, `crates/ats-core/src/project/local_props.rs`, `src-tauri/src/commands/settings.rs`, `project.rs`, and `platform.rs`.
@@ -253,7 +254,8 @@ MSBuild: <GodotPath>...</GodotPath>
 
 - Omitted/null patch keeps the current value; `""` explicitly clears it.
 - Non-empty values must be files whose `--version` first line is exactly `4.5.1` or starts with `4.5.1.`. Drain stdout/stderr concurrently while waiting so Godot cannot block on full pipes.
-- Managed XML fields are `SteamLibraryPath` and `GodotPath`. Preserve unknown nodes, attributes, self-closing nodes, and custom `ModsPath`; writes are atomic.
+- Tauri resolves workstation values to Pack input keys. The STS2 Pack maps `game_assembly -> Sts2AssemblyPath` and `godot_executable -> GodotPath`; Core does not derive Steam paths.
+- Only properties declared by `build_recipe.local_properties` are managed. Preserve unknown nodes, attributes, self-closing nodes, and custom `ModsPath`; writes are atomic.
 - Asset/code/build requests must canonicalize to the active project before synchronization.
 - E2E-only env keys are `SPIREFORGE_CONFIG_PATH`, `SPIREFORGE_APP_DATA_ROOT`, `ATS_E2E_GODOT_PATH`, `ATS_E2E_STS2_DLL_PATH`, and `ATS_E2E_BASELIB_RELEASE_URL`. E2E WDIO plugins/capabilities and endpoint overrides must remain behind the Cargo `e2e` feature and E2E Tauri config.
 
@@ -265,7 +267,8 @@ MSBuild: <GodotPath>...</GodotPath>
 | Empty Godot path | Save empty value; build submission fails before job creation |
 | Missing file | Reject save and keep config/memory unchanged |
 | Godot 4.5.10 or another executable | Reject as unsupported/non-Godot |
-| STS2 DLL outside `steamapps` | Return `MissingSteamapps`; do not write partial XML |
+| Required Pack input missing or blank | Return `MissingInput(<input_key>)`; do not write partial XML |
+| Pack has no build recipe | Leave `local.props` unchanged and report no managed properties |
 | Existing custom XML / `ModsPath` | Update only managed fields and preserve custom content |
 | Requested project differs from active project | Reject before asset/build submission |
 
@@ -290,15 +293,15 @@ Assertions must cover exact version boundaries, large-output pipe draining, expl
 
 ### 7. Wrong vs Correct
 
-Wrong: replace `local.props` as a string template, accept any version starting with `4.5.1`, register WDIO permissions in production, or hard-code a developer's tool path in the runner.
+Wrong: derive a Steam library path in Core, replace `local.props` as a string template, accept any version starting with `4.5.1`, register WDIO permissions in production, or hard-code a developer's tool path in the runner.
 
-Correct: validate at the settings boundary, synchronize through the shared XML module before project work, inject machine paths through local env/config, and prove Good/Base/Bad through the real Tauri IPC and filesystem chain.
+Correct: validate at the settings boundary, resolve Pack input bindings in Tauri, synchronize declared MSBuild properties through the shared XML module, and prove Good/Base/Bad through the real Tauri IPC and filesystem chain.
 
 ## Scenario: Game Pack Kernel and Project Identity Binding
 
 ### 1. Scope / Trigger
 
-This contract applies when changing `crates/ats-core/src/game_pack/`, `ProjectMeta`, project create/open, or the Tauri/frontend project creation payload. Slice 1 establishes identity and truth-source declarations only; Truth Snapshot, resource specifications, templates, validation, build, and package cutovers remain separate slices.
+This contract applies when changing `crates/ats-core/src/game_pack/`, `ProjectMeta`, project create/open, or the Tauri/frontend project creation payload. Schema v1 now includes the Stage 1 vertical declarations; every declared capability must have one validated loader model and one finite Core executor.
 
 ### 2. Signatures
 
@@ -660,59 +663,78 @@ Wrong: fetch `releases/latest`, use one short whole-request timeout without resu
 
 Correct: resolve all inputs from the active Pack, resume interrupted fixed assets only through validated HTTP ranges, stage and hash every source, run only declared Core indexers over staged copies, verify the complete Snapshot, then atomically activate current.
 
-## Scenario: STS2 Mod Manifest Scaffold Contract
+## Scenario: Pack-Owned Guidance, Project, Build, and Package Contracts
 
 ### 1. Scope / Trigger
 
-This contract applies when changing `mod_template/ModTemplate.json` or
-`project::template::scaffold_from_template`. It describes the STS2 `v0.107.1`
-manifest format used by newly scaffolded projects. It does not describe the
-unrelated `runtime/knowledge/knowledge-manifest.json` cache format.
+This contract applies when changing `game_packs/<game-id>/game-pack.json`, Pack guidance/template files, `project::template`, `project::local_props`, `build_project`, or `package_project`. Core owns finite parsing and execution; the active Pack owns game-specific content and declarations.
 
-### 2. Current Source Evidence
+### 2. Signatures and Payload
 
-The current game assembly is
-`<game>/data_sts2_windows_x86_64/sts2.dll`. Direct decompilation of
-`MegaCrit.Sts2.Core.Modding.ModManifest` and `ModDependency` defines:
-
-```json
-{
-  "min_game_version": "0.107.1",
-  "dependencies": [
-    {"id": "BaseLib", "min_version": "v3.3.8"}
-  ]
-}
+```rust
+GamePackLoader::load_from_dir(pack_root) -> GamePackResult<LoadedGamePack>
+GamePackGuidanceProvider::build_guidance(query, pack) -> Vec<KnowledgeGuidanceItem>
+scaffold_from_template(project_root, csharp_name, pack) -> ProjectResult<()>
+sync_local_props(project_root, pack.build_recipe.as_ref(), inputs) -> Result<LocalPropsSync, LocalPropsError>
+JobApplicationService::submit_build_project(request, pack, sink) -> JobResult<JobId>
+JobApplicationService::submit_package_project(request, pack, mod_id, sink) -> JobResult<JobId>
 ```
 
-BaseLib `v3.3.8` is the verified runtime and NuGet package baseline. The game
-temporarily migrates old string-only dependencies in `ReadFromStream`, but
-logs that the compatibility path will be removed.
+Build and package Job payloads add `_gamePack` with `id`, `schemaVersion`, and `sha256`. The STS2 recipe uses the finite `dotnet_publish` runner. The package layout declares exactly:
+
+```text
+BaseLib/{BaseLib.dll,BaseLib.pck,BaseLib.json}
+{mod_id}/{mod_id}.dll
+{mod_id}/{mod_id}.pck
+{mod_id}/{mod_id}.json
+```
 
 ### 3. Contracts
 
-- `scaffold_from_template` must emit `<CSharpName>.json` with
-  `min_game_version = "0.107.1"`.
-- Each dependency entry must be an object with `id` and `min_version`.
-- The STS2 template must declare BaseLib with `min_version = "v3.3.8"`.
-- `dependencies: ["BaseLib"]` is not an accepted scaffold baseline.
-- Build and package handlers copy or collect this file; they must not rewrite
-  it into another schema.
-- Changes to future game or BaseLib baselines require fresh current-source
-  evidence and synchronized template assertions.
+- `guidance` and `project_template` declare an explicit file list and a deterministic tree SHA-256. Undeclared ignored/cache files cannot enter an embedded Pack.
+- Guidance selection is driven by declared scenario and normalized asset type. Stable guidance may declare namespaces and engineering structure, but must not persist timing-sensitive behavior recipes.
+- `project_template.placeholder` is replaced in relative paths and UTF-8 file contents. The scaffold then compares the generated manifest with `manifest_contract.expected` as an exact JSON value.
+- The STS2 manifest declares `min_game_version = "0.107.1"` and `dependencies = [{"id":"BaseLib","min_version":"v3.3.8"}]`; string-only dependencies are rejected as a baseline.
+- The STS2 template pins `Alchyr.Sts2.BaseLib` to `3.3.8` and `Alchyr.Sts2.ModAnalyzers` to `0.1.9`; no `PackageReference` may use `Version="*"`. Build/package handlers do not rewrite manifest schema or dependency versions.
+- `build_recipe.local_properties` maps Pack input keys to MSBuild property names. Core accepts only the finite `dotnet_publish` runner and does not interpret Pack shell commands.
+- `package_layout.required_files` is the only ZIP input. Every rendered path must remain below `source_dir`, be a regular non-symlink file, and exist. Recursive directory packaging and undeclared files are forbidden.
+- Unknown runner/scenario, unsafe relative path, checksum mismatch, missing template/recipe/layout, or missing package file fails deterministically without a fallback to STS2 constants.
 
-### 4. Validation Matrix
+### 4. Validation and Error Matrix
 
 | Condition | Expected behavior |
 | --- | --- |
-| Good: current game and BaseLib fields | Scaffolded manifest contains the exact minimum versions and object dependency |
-| Base: placeholder replacement | `id` and `name` use the derived C# name while schema fields remain unchanged |
-| Bad: string-only BaseLib dependency | The scaffold regression test fails before the template becomes a release baseline |
-| Bad: missing dependency minimum version | The scaffold regression test fails |
-| Bad: knowledge manifest confused with Mod manifest | No changes are made to `knowledge::manifest` for this contract |
+| Valid STS2 Pack and project create | Load guidance/template, scaffold exact manifest, and write declared local properties |
+| Minimal non-STS2 fixture | Scaffold, build-recipe parse, and package layout execute without checking the ID `sts2` |
+| Template/guidance checksum mismatch | Reject Pack load before project or Prompt work |
+| Unknown guidance scenario or build runner | Reject Pack load with the exact field path |
+| Manifest differs after placeholder rendering | Return `ProjectError::ScaffoldContract`; remove the failed new project |
+| Required build input missing | Return `LocalPropsError::MissingInput`; preserve existing XML |
+| Required package file missing/symlink/outside root | Fail the package Job and leave no partial ZIP |
+| Valid package layout | Atomically write a ZIP containing exactly the declared regular files |
 
-### 5. Targeted Tests
+### 5. Good / Base / Bad Cases
+
+- Good: current STS2 Pack scaffolds, injects current Snapshot guidance, passes compile/publish, and packages the six declared files.
+- Base: a fixture Pack named `fixture-game` scaffolds a different placeholder/manifest and packages its declared file without any STS2 branch.
+- Bad: a Pack requests an arbitrary runner, a template path escapes root, or a package source contains only a similarly named undeclared file; load/job fails without fallback.
+
+### 6. Targeted Tests
 
 ```text
+cargo test -p ats-core game_pack::loader::tests
+cargo test -p ats-core knowledge::game_pack_guidance_provider::tests
 cargo test -p ats-core project::template::tests
+cargo test -p ats-core platform::application::handlers::package_project::tests
+cargo test -p ats-core --test local_props
 cargo check -p ats-core
+cargo check -p agentthespire-desktop
 ```
+
+Assertions must cover explicit file/checksum loading, scenario selection, no persisted energy-hook recipe, non-STS2 scaffold/package fixtures, exact manifest JSON, finite runner rejection, local-property binding, package traversal/symlink/missing-file rejection, atomic ZIP output, and `_gamePack` identity.
+
+### 7. Wrong vs Correct
+
+Wrong: embed one global template, copy the same image/resource bytes to every role, recurse over an output directory, or branch on `game_id == "sts2"` inside generic handlers.
+
+Correct: load a validated Pack, select declared content, execute only finite Core algorithms/runners, record Pack identity in Jobs, and package only the declared regular files.

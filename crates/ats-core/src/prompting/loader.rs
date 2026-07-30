@@ -345,5 +345,7 @@ mod tests {
             !content.is_empty(),
             "built-in codegen.md should not be empty"
         );
+        let runtime_system = loader.load("runtime_system.md").unwrap();
+        assert!(!runtime_system.contains("mod_template_path"));
     }
 }

@@ -203,7 +203,7 @@ fn review_bundle(
         .iter()
         .flat_map(|i| i.affected_targets.iter().map(String::as_str))
         .collect();
-    let item_types: HashSet<AssetItemType> = items.iter().map(|i| i.item_type).collect();
+    let item_types: HashSet<&AssetItemType> = items.iter().map(|i| &i.item_type).collect();
 
     let size_threshold = match strictness {
         ReviewStrictness::Efficient => 4,
@@ -410,7 +410,7 @@ mod tests {
     fn single_independent_item_clear_bundle() {
         // 默认 relationship_type="unknown" 会触发 unclear_coupling；需显式 independent
         // 才是真正的 "clear"。这条规则同时存在于 Python 端，是有意为之。
-        let mut a = item("a", AssetItemType::Card);
+        let mut a = item("a", "card".into());
         a.relationship_type = "independent".into();
         let plan = ModPlan {
             items: vec![a],
@@ -429,7 +429,7 @@ mod tests {
         // 默认 unknown → unclear_coupling → NeedsConfirmation。
         // 显式记录这条行为以防回归。
         let plan = ModPlan {
-            items: vec![item("a", AssetItemType::Card)],
+            items: vec![item("a", "card".into())],
             ..Default::default()
         };
         let preview = build_execution_plan(&plan, ReviewStrictness::Balanced, &HashMap::new());
@@ -448,9 +448,9 @@ mod tests {
     #[test]
     fn oversize_group_marked_split_recommended() {
         // 6 items in one connected group → status=split_recommended (>5 hard cap)
-        let mut items = vec![item("a", AssetItemType::Card)];
+        let mut items = vec![item("a", "card".into())];
         for i in 1..6 {
-            let mut it = item(&format!("x{i}"), AssetItemType::Card);
+            let mut it = item(&format!("x{i}"), "card".into());
             it.depends_on_item_ids = vec!["a".into()];
             items.push(it);
         }
@@ -468,10 +468,10 @@ mod tests {
 
     #[test]
     fn split_requested_decision_breaks_bundle_into_items() {
-        let mut b = item("b", AssetItemType::Card);
+        let mut b = item("b", "card".into());
         b.depends_on_item_ids = vec!["a".into()];
         let plan = ModPlan {
-            items: vec![item("a", AssetItemType::Card), b],
+            items: vec![item("a", "card".into()), b],
             ..Default::default()
         };
         let mut decisions = HashMap::new();
@@ -491,11 +491,11 @@ mod tests {
     #[test]
     fn ordered_dependency_keeps_items_split() {
         // ordered_dependency / independent 不参与二次合并 → 即使依赖相连，仍拆开为独立 bundle。
-        let mut b = item("b", AssetItemType::Card);
+        let mut b = item("b", "card".into());
         b.depends_on_item_ids = vec!["a".into()];
         b.relationship_type = "ordered_dependency".into();
         let plan = ModPlan {
-            items: vec![item("a", AssetItemType::Card), b],
+            items: vec![item("a", "card".into()), b],
             ..Default::default()
         };
         let preview = build_execution_plan(&plan, ReviewStrictness::Balanced, &HashMap::new());

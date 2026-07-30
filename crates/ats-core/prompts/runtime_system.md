@@ -26,8 +26,3 @@ a glowing icon
 
 ## project_utils_godot_not_found
 未能自动找到 Godot 4.5.1 Mono，请手动填写路径
-
-## project_utils_template_missing
-Mod 模板目录不存在: {{ template_path }}
-请将模板项目放到 {{ default_template_path }}，
-或在 config.json 中设置 mod_template_path。

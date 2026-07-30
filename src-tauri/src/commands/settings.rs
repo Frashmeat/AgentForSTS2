@@ -172,16 +172,16 @@ pub fn save_settings_patch(
     patch: SettingsPatch,
 ) -> Result<SettingsSnapshot, String> {
     let new_settings = merge_settings_patch(config.settings_snapshot(), patch)?;
-    let active_root = active
+    let active_project = active
         .0
         .lock()
         .map_err(|error| format!("active project lock poisoned: {error}"))?
         .as_ref()
-        .map(|project| project.path().to_path_buf());
-    if let Some(project_root) = active_root
+        .map(|project| (project.path().to_path_buf(), project.meta().game_id.clone()));
+    if let Some((project_root, game_id)) = active_project
         && !new_settings.knowledge.sts2_dll_path.is_empty()
     {
-        sync_project_local_props_after_settings(&project_root, &new_settings)?;
+        sync_project_local_props_after_settings(&project_root, &game_id, &new_settings)?;
     }
     let status = config.status_snapshot();
     let path = status
@@ -319,7 +319,6 @@ fn masked_secret(raw: &str) -> String {
     let suffix: String = chars.iter().skip(n - 4).collect();
     format!("{prefix}...{suffix} ({n} chars)")
 }
-
 
 #[tauri::command]
 pub fn discover_sts2_dll() -> Result<Option<String>, String> {

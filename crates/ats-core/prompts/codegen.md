@@ -58,7 +58,8 @@ DO NOT re-clone from GitHub. DO NOT recreate local.props or nuget.config.
 1. Read `MainFile.cs` to confirm the exact namespace and ModId.
 2. For each asset in the group (in dependency order — dependencies first):
    a. Create the C# class file following BaseLib conventions.
-   b. Create localization files (eng + zhs) under `<ModDir>/localization/`.
+   b. Create localization files according to the active Game Pack resource contracts:
+{{ group_resource_contracts }}
    When an asset references another asset in this group, use its exact class name from the list above.
 3. After ALL assets are written, run `dotnet publish` ONCE (not once per asset).
 4. Fix any compilation errors and re-run until it succeeds.
@@ -131,29 +132,15 @@ Create the C# class for this {{ asset_type }} following the supplied facts and g
 **CRITICAL OUTPUT CONTRACT:**
 - Return one strict JSON object and nothing else. Do not use markdown fences.
 - `csharp` is the complete compilable C# source, JSON-escaped as a string.
-- `localization.eng` and `localization.zhs` are flat string maps with identical keys.
+- `localization` contains flat string maps with identical keys according to the active Game Pack.
 - Every key must begin with `{{ localization_key }}.`.
-- Include `.title`, `.description`, and, for relics, `.flavor` in both languages.
+- {{ localization_contract }}
 - Do not return paths; the application derives safe paths.
 - Do not return placeholder comments or explanatory prose.
 
 Example shape (replace all values with the requested implementation):
 ```json
-{
-  "csharp": "using ...;\n\nnamespace ...;\n\npublic sealed class ... {}",
-  "localization": {
-    "eng": {
-      "{{ localization_key }}.title": "English title",
-      "{{ localization_key }}.description": "English description",
-      "{{ localization_key }}.flavor": "English flavor"
-    },
-    "zhs": {
-      "{{ localization_key }}.title": "中文名称",
-      "{{ localization_key }}.description": "中文描述",
-      "{{ localization_key }}.flavor": "中文风味文本"
-    }
-  }
-}
+{{ localization_example }}
 ```
 
 ## build_prompt

@@ -85,7 +85,7 @@ pub struct ImageGenConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default, rename_all = "snake_case")]
 pub struct KnowledgeConfig {
-    /// sts2.dll 路径。Truth Snapshot 刷新从此取值；local.props 从此推导 SteamLibraryPath。
+    /// sts2.dll 路径。Truth Snapshot 刷新从此取值；Game Pack 将其映射到本地构建属性。
     /// 留空时 Truth Snapshot 刷新不可用。
     #[serde(default)]
     pub sts2_dll_path: String,

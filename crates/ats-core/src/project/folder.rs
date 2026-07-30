@@ -46,7 +46,6 @@ pub struct ProjectMeta {
     pub build_output_dir: Option<String>,
 }
 
-
 #[derive(Debug)]
 pub struct ProjectFolder {
     path: PathBuf,
@@ -57,13 +56,12 @@ pub struct ProjectFolder {
 impl ProjectFolder {
     /// 在 `parent_dir/<name>` 处创建全新工程。`name` 校验：非空、不含 `/\:*?"<>|`。
     ///
-    /// 创建后立即从内嵌的 `mod_template/` 铺一份 dotnet 项目骨架（含 .csproj / .sln
-    /// / MainFile.cs / nuget.config 等），文件中 `ModTemplate` 字面量替换为派生的
-    /// `csharp_name`。这是 single_asset_plan → asset_generate → build_project 全链路
-    /// 能 dotnet publish 起来的前置条件。
+    /// 创建后立即从对应 Game Pack 的 `project_template` 铺一份工程骨架，并将 Pack
+    /// 声明的占位符替换为派生的 `csharp_name`。这是 single_asset_plan →
+    /// asset_generate → build_project 全链路能执行 Pack build recipe 的前置条件。
     pub fn create(parent_dir: &Path, name: &str, game_id: &str) -> ProjectResult<Self> {
         validate_name(name)?;
-        validate_game_id(game_id)?;
+        let pack = require_game_pack(game_id)?;
         if !parent_dir.is_dir() {
             return Err(ProjectError::NotADirectory(
                 parent_dir.display().to_string(),
@@ -80,7 +78,7 @@ impl ProjectFolder {
             fs::create_dir_all(project_root.join(sub))?;
         }
         let csharp_name = derive_csharp_name(name);
-        if let Err(err) = scaffold_from_template(&project_root, &csharp_name) {
+        if let Err(err) = scaffold_from_template(&project_root, &csharp_name, &pack) {
             let _ = fs::remove_dir_all(&project_root);
             return Err(err);
         }
@@ -184,17 +182,23 @@ impl ProjectFolder {
 }
 
 fn validate_game_id(game_id: &str) -> ProjectResult<()> {
+    require_game_pack(game_id).map(|_| ())
+}
+
+fn require_game_pack(game_id: &str) -> ProjectResult<crate::game_pack::LoadedGamePack> {
     let registry = GamePackRegistry::built_in()
         .map_err(|error| ProjectError::GamePackRegistry(error.to_string()))?;
-    if registry.get(game_id).is_none() {
-        return Err(ProjectError::UnknownGameId(game_id.to_string()));
-    }
-    Ok(())
+    registry
+        .get(game_id)
+        .cloned()
+        .ok_or_else(|| ProjectError::UnknownGameId(game_id.to_string()))
 }
 
 fn validate_name(name: &str) -> ProjectResult<()> {
     if name.trim().is_empty() {
-        return Err(ProjectError::InvalidName("name must not be empty/whitespace".into()));
+        return Err(ProjectError::InvalidName(
+            "name must not be empty/whitespace".into(),
+        ));
     }
     for ch in name.chars() {
         if matches!(ch, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') {

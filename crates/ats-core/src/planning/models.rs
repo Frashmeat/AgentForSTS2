@@ -2,24 +2,35 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq, Hash)]
-#[serde(rename_all = "snake_case")]
-pub enum AssetItemType {
-    Card,
-    CardFullscreen,
-    Relic,
-    Power,
-    Character,
-    CustomCode,
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Eq, PartialEq, Hash)]
+#[serde(transparent)]
+pub struct AssetItemType(String);
+
+impl AssetItemType {
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<&str> for AssetItemType {
+    fn from(value: &str) -> Self {
+        Self(value.into())
+    }
+}
+
+impl From<String> for AssetItemType {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "snake_case")]
 pub struct PlanItem {
     pub id: String,
-    /// 反序列化时若字段缺失，使用 `AssetItemType::Card` 作为兜底；
-    /// 上层 `validate_plan` 会捕获 "type 缺失" 的语义错误。这种宽松反序列化
-    /// 让前端发送有 bug 的 plan 时仍能进入校验环节给出诊断，而不是早夭于 serde。
+    /// Missing values deserialize to an empty ID so validation can report the
+    /// field without choosing a game-specific fallback type.
     #[serde(rename = "type")]
     pub item_type: AssetItemType,
     pub name: String,
@@ -45,7 +56,7 @@ impl Default for PlanItem {
     fn default() -> Self {
         Self {
             id: String::new(),
-            item_type: AssetItemType::Card,
+            item_type: AssetItemType::default(),
             name: String::new(),
             name_zhs: String::new(),
             description: String::new(),

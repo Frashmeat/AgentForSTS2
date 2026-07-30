@@ -4,16 +4,14 @@
 
 mod contracts;
 mod decompile;
+mod game_pack_guidance_provider;
 #[cfg(test)]
 mod models;
 #[cfg(test)]
 mod paths;
 mod sts2_code_facts_provider;
-mod sts2_guidance;
-mod sts2_guidance_provider;
 mod sts2_knowledge_resolver;
 mod sts2_lookup_provider;
-mod templates;
 #[cfg(test)]
 pub(crate) mod test_support;
 
@@ -43,9 +41,7 @@ pub fn ensure_dirs(paths: &KnowledgePaths) -> std::io::Result<()> {
     }
     Ok(())
 }
+pub use game_pack_guidance_provider::GamePackGuidanceProvider;
 pub use sts2_code_facts_provider::{SnapshotCodeFactsError, Sts2CodeFactsProvider};
-pub use sts2_guidance::{guidance_for_asset_type, planner_guidance};
-pub use sts2_guidance_provider::Sts2GuidanceProvider;
 pub use sts2_knowledge_resolver::Sts2KnowledgeResolver;
 pub use sts2_lookup_provider::Sts2LookupProvider;
-pub use templates::{TEMPLATE_SLOTS, get_template};

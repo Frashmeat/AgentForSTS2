@@ -23,7 +23,7 @@ mod template;
 
 pub use error::{ProjectError, ProjectResult};
 pub use folder::{PROJECT_SCHEMA_VERSION, ProjectFolder, ProjectMeta};
-pub use local_props::{LocalBuildPaths, LocalPropsError, LocalPropsSync, sync_local_props};
+pub use local_props::{LocalBuildInputs, LocalPropsError, LocalPropsSync, sync_local_props};
 pub use paths::AppDataPaths;
 pub use recents::{RecentEntry, RecentProjects};
 pub use template::{derive_csharp_name, scaffold_from_template};

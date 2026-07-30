@@ -15,8 +15,8 @@ use super::common::{
     FinalizeOutcome, ProgressEvent, ProgressSink, emit_cancelled_mid_stream, finalize_with_error,
     finalize_with_success, is_cancelled, transition_to_running,
 };
-use crate::codegen::{AssetKind, PromptAssembler};
-use crate::game_pack::VerifiedGameContext;
+use crate::codegen::PromptAssembler;
+use crate::game_pack::{ValidationRule, VerifiedGameContext};
 use crate::llm::{CompletionRequest, LlmClient, Message, MessageRole, StreamEvent};
 use crate::platform::contracts::SubmitCodeGenerateRequest;
 use crate::platform::domain::{JobId, JobRepository};
@@ -47,7 +47,11 @@ pub(crate) async fn run_code_generate(
             .await;
             return;
         }
-        if AssetKind::parse(&asset.asset_type).is_none() {
+        if game_context
+            .pack()
+            .resource_spec(&asset.asset_type)
+            .is_none()
+        {
             finalize_with_error(
                 &repo,
                 &job_id,
@@ -90,6 +94,7 @@ pub(crate) async fn run_code_generate(
                     &job_id,
                     prompt,
                     &evidence_record,
+                    game_context.pack(),
                     asset_request,
                     &artifacts_dir,
                     None,
@@ -138,6 +143,7 @@ pub(crate) async fn run_code_generate(
                 prompt,
                 &entity_name,
                 &artifacts_dir,
+                &game_context.pack().validation_rules,
             )
             .await
             {
@@ -282,7 +288,10 @@ pub(crate) enum GenerateError {
 
 /// 兜底校验：LLM 产出的代码必须有至少一个 C# 声明或 using 语句。
 /// 杜绝"// 假设此处 namespace 为 MyMod4" 类型的占位注释通过检查。
-pub(crate) fn validate_generated_code_skein(text: &str) -> Result<(), String> {
+pub(crate) fn validate_generated_code_skein(
+    text: &str,
+    validation_rules: &[ValidationRule],
+) -> Result<(), String> {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     let re = RE.get_or_init(|| {
         regex::Regex::new(
@@ -306,7 +315,7 @@ pub(crate) fn validate_generated_code_skein(text: &str) -> Result<(), String> {
             );
         }
     }
-    crate::codegen::validate_sts2_generated_csharp(text)
+    crate::codegen::validate_generated_csharp(text, validation_rules)
 }
 
 /// 把 prompt 转给 LLM 流式生成，累积响应后解 fence，再写到
@@ -326,6 +335,7 @@ pub(crate) async fn generate_and_write_code_artifact(
     prompt: String,
     entity_name: &str,
     artifacts_dir: &Path,
+    validation_rules: &[ValidationRule],
 ) -> Result<WrittenArtifact, GenerateError> {
     let completion_request = CompletionRequest {
         messages: vec![Message {
@@ -379,7 +389,8 @@ pub(crate) async fn generate_and_write_code_artifact(
 
     let extracted = extract_code_or_reject(&accumulated)?;
     // 兜底校验：生成的"代码"必须有实际声明结构，不能是纯注释占位符
-    validate_generated_code_skein(&extracted).map_err(GenerateError::ModelOutput)?;
+    validate_generated_code_skein(&extracted, validation_rules)
+        .map_err(GenerateError::ModelOutput)?;
 
     let target_dir = artifacts_dir.join(entity_name);
     let artifact_cs_path = target_dir.join(format!("{entity_name}.cs"));

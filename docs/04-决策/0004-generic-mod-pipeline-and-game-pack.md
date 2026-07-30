@@ -5,7 +5,7 @@
 | 状态 | Accepted |
 | 决议日期 | 2026-07-29 |
 | 适用范围 | AgentTheSpire 多游戏 Mod 生成、验证、构建与打包架构 |
-| 当前实施状态 | 架构边界已确认；现有 STS2 实现尚未按本 ADR 完成全部资源化收口 |
+| 当前实施状态 | Stage 1 自动迁移已完成；最终 STS2 候选待用户真实游戏复验 |
 | 相关决策 | [ADR 0001 — Rust + Tauri 整体架构](./0001-rust-tauri-workspace-architecture.md) |
 | 问题来源 | [真实游戏加载与资产质量问题审查](../05-审查与验证/进行中/2026-07-28-真实游戏加载与资产质量问题审查.md) |
 
@@ -202,3 +202,12 @@ Game Pack 模板只保留工程文件、目录、依赖、入口、资源路径�
 - 当前问题修复应优先使用最小可验证的通用抽象：源码取证、轻量回归规则、图片质量门禁和 schema 校验。
 - Game Pack 文件格式、加载路径和 runner 协议属于后续实施设计，需要基于当前代码和第二个游戏用例单独确认。
 - 接入第二个游戏时，以“是否只需新增 Game Pack”作为通用化验收；不在只有 STS2 一个样本时预测并穷举所有游戏差异。
+
+## 12. Stage 1 实施状态（2026-07-30）
+
+- 已实现最小 Game Pack schema、受控 loader/registry、工程 `game_id` 绑定、内容寻址 Truth Snapshot 和固定 job `VerifiedGameContext`。
+- STS2 的 guidance、稳定工程模板、manifest、资源规格、验证规则、build recipe 和 package layout 已迁移到 `game_packs/sts2/`；Core 只保留有限、可复用的执行器。
+- 旧 `SourceMode` 生成 fallback、Core 内嵌 STS2 guidance/templates、全局 `mod_template` 和专属 build/package 硬编码已从生产链删除；最小非 STS2 fixture 用于防止执行器依赖游戏名称。
+- 最终隔离桌面 E2E 已完成 Snapshot refresh、生成、compile、build、PCK 和精确 ZIP 检查。模板固定 BaseLib `3.3.8` 与 ModAnalyzers `0.1.9`，自动证据位于 `.tmp/e2e-runs/1785417051-99088/gate0-candidate-evidence.json`。
+- 本 ADR 的人工验收边界保持不变：真实游戏行为、视觉、加载、稳定性和日志仍由用户完成，自动结果不替代该结论。
+- Stage 1 不将当前单一 STS2 workstation Settings/发现 UI 或有限 `Sts2CodeFactsProvider` 宣称为完整多游戏产品；第二个真实游戏出现后再依据共同需求提升这些边界，避免提前扩张 schema。

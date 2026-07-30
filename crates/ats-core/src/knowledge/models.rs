@@ -48,6 +48,6 @@ pub struct KnowledgeStatus {
     pub warnings: Vec<String>,
     pub game: GameStatus,
     pub baselib: BaselibStatus,
-    /// 内嵌模板的 slot 名列表（不返回内容；内容通过 `get_template` 取）
+    /// 当前 Game Pack 提供的 guidance slot 名列表（不返回内容）。
     pub embedded_templates: Vec<String>,
 }

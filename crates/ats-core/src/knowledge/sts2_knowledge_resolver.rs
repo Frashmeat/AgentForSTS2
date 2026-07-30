@@ -4,14 +4,14 @@
 
 use crate::game_pack::VerifiedGameContext;
 use crate::knowledge::contracts::{KnowledgePacket, KnowledgeQuery};
+use crate::knowledge::game_pack_guidance_provider::GamePackGuidanceProvider;
 use crate::knowledge::sts2_code_facts_provider::{SnapshotCodeFactsError, Sts2CodeFactsProvider};
-use crate::knowledge::sts2_guidance_provider::Sts2GuidanceProvider;
 use crate::knowledge::sts2_lookup_provider::Sts2LookupProvider;
 
 #[derive(Debug, Default, Clone)]
 pub struct Sts2KnowledgeResolver {
     pub code_facts: Sts2CodeFactsProvider,
-    pub guidance: Sts2GuidanceProvider,
+    pub guidance: GamePackGuidanceProvider,
     pub lookup: Sts2LookupProvider,
 }
 
@@ -26,7 +26,7 @@ impl Sts2KnowledgeResolver {
             context.snapshot(),
             "sts2_code_facts",
         )?;
-        let guidance = self.guidance.build_guidance(query);
+        let guidance = self.guidance.build_guidance(query, context.pack());
         let lookup = self.lookup.build_lookup(query, context);
 
         let scenario = query

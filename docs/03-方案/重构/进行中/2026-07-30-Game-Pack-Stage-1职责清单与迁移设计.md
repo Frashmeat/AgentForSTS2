@@ -304,7 +304,7 @@ cargo check -p ats-web                                                 # passed
 边界与下一步：
 
 - Slice 3 提交时尚未实现生产刷新链；该限制已由下述 Slice 4A 解除。
-- 当前 STS2 `v0.107.1` / BaseLib `v3.3.8` Snapshot 已由下述 Slice 4B 建立。下一步生成 Gate 0 候选并执行 compile/build/package 文件级检查；真实游戏复验仍由用户人工执行。
+- 当前 STS2 `v0.107.1` / BaseLib `v3.3.8` Snapshot 已由下述 Slice 4B 建立；Gate 0 候选和后续职责迁移已由 Slice 4C 完成。真实游戏复验仍由用户人工执行。
 
 ## 15. Slice 4A Snapshot refresh cutover 实施结果（2026-07-30）
 
@@ -333,9 +333,9 @@ npx tsc -b --pretty false                                                       
 
 边界与下一步：
 
-- Slice 4A 收口时尚未通过新入口刷新本机真实 Snapshot；该项已由下述 Slice 4B 完成。Gate 0 新候选仍未生成。
+- Slice 4A 收口时尚未通过新入口刷新本机真实 Snapshot；该项已由下述 Slice 4B 完成，Gate 0 候选已由 Slice 4C 完成。
 - 未运行全量测试、全量构建或真实游戏 UI。
-- 下一步继续 Slice 4B：生成新候选并完成 compile gate、build/package 和文件级检查，再交由用户执行真实游戏复验。
+- 后续自动迁移与候选结果见 Slice 4C；最终真实游戏复验交由用户执行。
 
 ## 16. Slice 4B 真实 current Snapshot 验证结果（2026-07-30）
 
@@ -349,10 +349,34 @@ npx tsc -b --pretty false                                                       
 
 当前 verified Snapshot：
 
-- Snapshot ID：`63b5429c576494463d92d117612b01445ae23115a8a728c4501942ac8841b974`。
+- 最终候选使用的 Snapshot ID：`5bd4e6ffd7e667bfac6613d6c6a7c3185e9fd9fafe7a07974c9a3faef03c4b6d`。
 - STS2：`9,364,480` 字节，SHA-256 `a1f9e653f1e28e4076558fee1e60d218619cb7e057b887c6417f62c62c6d7a52`。
 - BaseLib `v3.3.8`：`1,014,272` 字节，SHA-256 `e92213e9286cb8cb9db42b83735cc9ddc2d642a7c90c67c5350c983d734407a8`。
 - game index：`dotnet_project`，3,425 个 C# 文件；BaseLib index：`dotnet_file`，1 个 C# 文件。
 - 工具身份：`ilspycmd 9.1.0.7988`。
 
-尚未完成：Gate 0 新候选、compile gate、build/package、文件清单和静态图片检查；真实游戏行为、视觉、加载和稳定性仍必须由用户人工复验。现有 `e2e/settings-project.e2e.mjs` 仍包含已删除的 `knowledge_refresh` 场景，后续必须迁移后才能宣称全量 GUI E2E 恢复；本次通过的是专用于真实 Snapshot 刷新的窄范围规格。
+该切片建立 Snapshot 时尚未完成的候选与 GUI E2E 迁移均已由 Slice 4C 收口。真实游戏行为、视觉、加载和稳定性仍必须由用户人工复验。
+
+## 17. Slice 4C Game Pack Stage 1 自动收口结果（2026-07-30）
+
+已完成：
+
+- validation、resource specifications、guidance/template/manifest、build recipe 与 package layout 已逐维度迁移到 `game_packs/sts2/game-pack.json` 及其受控资源；消费者统一通过 Pack loader/registry 读取，旧 `Sts2GuidanceProvider`、Core 内嵌 STS2 templates、全局 `mod_template` 和对应 fallback 已删除。
+- Core 只保留有限执行器：声明校验、资源派生、模板渲染、`dotnet_publish` 和精确文件布局打包。最小非 STS2 fixture 证明执行器不依赖 `sts2` 名称。
+- `local.props` 改由 Pack 的本地输入绑定和 build recipe 生成；STS2 游戏 DLL 与 Godot 路径不再以 Core 专属字段作为公开契约。
+- 从空 Snapshot 根执行正式桌面 E2E。首次 compile gate 以 `CS0246` 暴露 relic guidance 缺少 `MegaCrit.Sts2.Core.Combat`；补齐 Pack guidance 和防回归断言后重新刷新并生成最终候选。
+
+最终自动证据：
+
+- 候选目录：`.tmp/e2e-runs/1785417051-99088`，WDIO `1 passing`。
+- Pack SHA-256：`81238b4f679c9bc994d596021903446aa0091edaa576c5c604f1e4ed2985dd39`；Snapshot ID：`5bd4e6ffd7e667bfac6613d6c6a7c3185e9fd9fafe7a07974c9a3faef03c4b6d`。
+- Snapshot 固定 STS2 SHA-256 `a1f9e653f1e28e4076558fee1e60d218619cb7e057b887c6417f62c62c6d7a52`、BaseLib `v3.3.8` SHA-256 `e92213e9286cb8cb9db42b83735cc9ddc2d642a7c90c67c5350c983d734407a8` 和 `ilspycmd 9.1.0.7988`。
+- 最终源码使用三参数 `AfterSideTurnStart`，拒绝非 Owner side 和 `TurnNumber > 1`，再调用 `PlayerCmd.GainEnergy(1, Owner)`；`BeforeCombatStart` 不存在，compile/build 均通过。
+- 模板固定 `Alchyr.Sts2.BaseLib 3.3.8` 和 E2E 实际解析过的 `Alchyr.Sts2.ModAnalyzers 0.1.9`，脚手架断言不再允许 `Version="*"`；模板树 SHA-256 为 `a08225ec2054415f559993a3c7b11eab9726f0227da9d67f33344736a1e388ea`。
+- 图片质量 `accepted = true`：透明覆盖约 70.48%、边缘前景 0、最大主体连通度 100%；normal/outline/big 尺寸分别为 `128x128`、`128x128`、`1024x1024` 且 SHA-256 互不相同。
+- manifest 使用 `min_game_version: "0.107.1"` 和 BaseLib `v3.3.8` 对象 dependency；ZIP 恰好包含 BaseLib 与 E2ESingleRelic 的 6 个声明文件。
+- 自动证据文件：`.tmp/e2e-runs/1785417051-99088/gate0-candidate-evidence.json`。
+
+Stage 1 自动化部分已经收口。未执行 workspace 全量测试/构建，也未操作真实游戏 UI；唯一剩余门禁是用户对该最终候选执行真实游戏行为、视觉、加载、稳定性和日志复验。
+
+Stage 1 不宣称完整多游戏 UI 已完成：当前只有一个已安装 Pack，因此 workstation Settings/发现命令仍以 STS2 DLL 为用户可见输入；`Sts2CodeFactsProvider` 仍是 Pack 选择的有限 provider executor。它们不参与已迁移维度的 STS2 常量 fallback，是否提升为多 Pack 声明由第二个真实游戏需求决定，避免在单一样本上继续预测 schema。

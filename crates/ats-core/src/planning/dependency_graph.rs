@@ -114,12 +114,12 @@ pub fn find_groups(items: &[PlanItem]) -> Vec<Vec<PlanItem>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::planning::models::{AssetItemType, PlanItem};
+    use crate::planning::models::PlanItem;
 
     fn item(id: &str, deps: &[&str]) -> PlanItem {
         PlanItem {
             id: id.into(),
-            item_type: AssetItemType::Card,
+            item_type: "card".into(),
             name: id.into(),
             depends_on_item_ids: deps.iter().map(|s| (*s).to_string()).collect(),
             ..Default::default()
@@ -183,7 +183,7 @@ mod tests {
                 };
                 PlanItem {
                     id: id.clone(),
-                    item_type: AssetItemType::Card,
+                    item_type: "card".into(),
                     name: id,
                     depends_on_item_ids: deps,
                     ..Default::default()

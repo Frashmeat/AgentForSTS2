@@ -7,6 +7,7 @@
 use std::sync::Arc;
 
 use super::common::{ProgressEvent, ProgressSink, finalize_with_error, transition_to_running};
+use crate::game_pack::{BuildRecipe, BuildRunner};
 use crate::platform::contracts::SubmitBuildProjectRequest;
 use crate::platform::domain::{JobId, JobRepository, JobStatus};
 use crate::project_utils::to_extended_length_path;
@@ -16,49 +17,60 @@ pub async fn run_build_project(
     sink: Arc<dyn ProgressSink>,
     job_id: JobId,
     request: SubmitBuildProjectRequest,
+    recipe: BuildRecipe,
 ) {
     if transition_to_running(&repo, &job_id, &sink).await.is_err() {
         return;
     }
 
-    sink.emit(ProgressEvent {
-        job_id: job_id.clone(),
-        stage: "spawning".into(),
-        percent: None,
-        message: Some(format!(
-            "dotnet publish in {}",
-            request.project_root.display()
-        )),
-        delta: None,
-    })
-    .await;
-
-    // Windows 长路径保护
-    let cwd = to_extended_length_path(&request.project_root);
-    let output_result = tokio::task::spawn_blocking(move || {
-        std::process::Command::new("dotnet")
-            .arg("publish")
-            .current_dir(&cwd)
-            .output()
-    })
-    .await;
-
-    let output = match output_result {
-        Ok(Ok(out)) => out,
-        Ok(Err(err)) => {
-            finalize_with_error(&repo, &job_id, &sink, &format!("spawn dotnet: {err}")).await;
-            return;
+    let mut step_results = Vec::with_capacity(recipe.steps.len());
+    let mut success = true;
+    let mut exit_code = 0;
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    for (index, step) in recipe.steps.iter().enumerate() {
+        sink.emit(ProgressEvent {
+            job_id: job_id.clone(),
+            stage: step.id.clone(),
+            percent: Some(index as f32 / recipe.steps.len() as f32),
+            message: Some(format!(
+                "{} in {}",
+                step.runner.as_str(),
+                request.project_root.display()
+            )),
+            delta: None,
+        })
+        .await;
+        let output = match execute_build_step(&request.project_root, step.runner).await {
+            Ok(output) => output,
+            Err(error) => {
+                finalize_with_error(
+                    &repo,
+                    &job_id,
+                    &sink,
+                    &format!("build step `{}`: {error}", step.id),
+                )
+                .await;
+                return;
+            }
+        };
+        exit_code = output.exit_code;
+        stdout = output.stdout;
+        stderr = output.stderr;
+        let step_success = exit_code == 0 || build_reports_zero_errors(&stdout);
+        step_results.push(serde_json::json!({
+            "id": step.id,
+            "runner": step.runner.as_str(),
+            "success": step_success,
+            "exitCode": exit_code,
+            "stdoutTail": tail(&stdout, 5000),
+            "stderrTail": tail(&stderr, 5000),
+        }));
+        if !step_success {
+            success = false;
+            break;
         }
-        Err(err) => {
-            finalize_with_error(&repo, &job_id, &sink, &format!("join blocking: {err}")).await;
-            return;
-        }
-    };
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let exit_code = output.status.code().unwrap_or(-1);
-    let success = exit_code == 0 || build_reports_zero_errors(&stdout);
+    }
 
     let job = match repo.get(&job_id).await {
         Ok(j) => j,
@@ -83,6 +95,7 @@ pub async fn run_build_project(
         "stdoutTail": tail(&stdout, 5000),
         "stderrTail": tail(&stderr, 5000),
         "projectRoot": request.project_root.display().to_string(),
+        "steps": step_results,
     }));
     let _ = repo.update(&job).await;
 
@@ -98,6 +111,33 @@ pub async fn run_build_project(
         delta: None,
     })
     .await;
+}
+
+struct BuildStepOutput {
+    exit_code: i32,
+    stdout: String,
+    stderr: String,
+}
+
+async fn execute_build_step(
+    project_root: &std::path::Path,
+    runner: BuildRunner,
+) -> Result<BuildStepOutput, String> {
+    let cwd = to_extended_length_path(project_root);
+    let output = tokio::task::spawn_blocking(move || match runner {
+        BuildRunner::DotnetPublish => std::process::Command::new("dotnet")
+            .arg("publish")
+            .current_dir(&cwd)
+            .output(),
+    })
+    .await
+    .map_err(|error| format!("join blocking runner: {error}"))?
+    .map_err(|error| format!("spawn {}: {error}", runner.as_str()))?;
+    Ok(BuildStepOutput {
+        exit_code: output.status.code().unwrap_or(-1),
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+    })
 }
 
 /// 判定 dotnet/MSBuild 输出是否报告「0 个错误」。

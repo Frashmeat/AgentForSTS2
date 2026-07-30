@@ -1,7 +1,7 @@
-//! package_project handler：把 `source_dir` 整目录打成 zip。
+//! package_project handler：按 Game Pack 的有限发布布局打包。
 //!
 //! 设计取向：
-//! - 用 walkdir 递归，按相对路径写 zip 条目，保留目录结构
+//! - 只收集 Pack 声明的必需文件，不递归包含未声明内容
 //! - 全程同步阻塞——zip crate 不是 async，用 spawn_blocking 包住
 //! - 输出路径：用户没传则落 `<source_dir 父目录>/<source_dir 名>-<ts>.zip`
 //! - 压缩方法固定 Deflated（zip crate 默认 store，但我们要体积小）
@@ -12,11 +12,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::Utc;
-use walkdir::WalkDir;
 use zip::CompressionMethod;
 use zip::write::SimpleFileOptions;
 
 use super::common::{ProgressEvent, ProgressSink, finalize_with_error, transition_to_running};
+use crate::game_pack::PackageLayout;
 use crate::platform::contracts::SubmitPackageProjectRequest;
 use crate::platform::domain::{JobId, JobRepository, JobStatus};
 
@@ -25,6 +25,8 @@ pub async fn run_package_project(
     sink: Arc<dyn ProgressSink>,
     job_id: JobId,
     request: SubmitPackageProjectRequest,
+    layout: PackageLayout,
+    mod_id: String,
 ) {
     if transition_to_running(&repo, &job_id, &sink).await.is_err() {
         return;
@@ -32,18 +34,28 @@ pub async fn run_package_project(
 
     let source = request.source_dir.clone();
     if !source.is_dir() {
-        finalize_with_error(&repo, &job_id, &sink, &format!("source_dir is not a directory: {}", source.display()))
+        finalize_with_error(
+            &repo,
+            &job_id,
+            &sink,
+            &format!("source_dir is not a directory: {}", source.display()),
+        )
         .await;
         return;
     }
 
     let output = resolve_output_path(&request);
     if output.is_dir() {
-        finalize_with_error(&repo, &job_id, &sink, &format!(
-            "output_path 指向已存在的目录: {} —— 应该传完整 .zip 文件路径，如 {}\\release.zip",
-            output.display(),
-            output.display()
-        ))
+        finalize_with_error(
+            &repo,
+            &job_id,
+            &sink,
+            &format!(
+                "output_path 指向已存在的目录: {} —— 应该传完整 .zip 文件路径，如 {}\\release.zip",
+                output.display(),
+                output.display()
+            ),
+        )
         .await;
         return;
     }
@@ -61,7 +73,7 @@ pub async fn run_package_project(
     let source_for_task = source.clone();
 
     let result = tokio::task::spawn_blocking(move || {
-        zip_directory(&source_for_task, &output_for_task, level)
+        zip_package_layout(&source_for_task, &output_for_task, &layout, &mod_id, level)
     })
     .await;
 
@@ -136,13 +148,15 @@ struct ZipStats {
 /// 原子打包：把 zip 写到同目录临时文件，全部成功后再 rename 到最终路径。
 /// 中途失败 / rename 失败都会清理临时文件——目标位置在 rename 前完全不被触碰，
 /// 因此构建失败或取消绝不会留下半截 .zip，也不会覆盖上一份好包。
-fn zip_directory(
+fn zip_package_layout(
     source_dir: &Path,
     output_path: &Path,
+    layout: &PackageLayout,
+    mod_id: &str,
     compression_level: Option<i32>,
 ) -> Result<ZipStats, String> {
     let tmp_path = output_path.with_extension("zip.partial");
-    match zip_to_tmp(source_dir, &tmp_path, compression_level) {
+    match zip_to_tmp(source_dir, &tmp_path, layout, mod_id, compression_level) {
         Ok(stats) => {
             std::fs::rename(&tmp_path, output_path).map_err(|e| {
                 let _ = std::fs::remove_file(&tmp_path);
@@ -160,6 +174,8 @@ fn zip_directory(
 fn zip_to_tmp(
     source_dir: &Path,
     output_path: &Path,
+    layout: &PackageLayout,
+    mod_id: &str,
     compression_level: Option<i32>,
 ) -> Result<ZipStats, String> {
     if let Some(parent) = output_path.parent()
@@ -189,41 +205,41 @@ fn zip_to_tmp(
     };
     let mut buffer = Vec::with_capacity(8192);
 
-    for entry in WalkDir::new(source_dir).into_iter().filter_map(Result::ok) {
-        let path = entry.path();
-        let rel = match path.strip_prefix(source_dir) {
-            Ok(r) => r,
-            Err(_) => continue,
-        };
-        if rel.as_os_str().is_empty() {
-            continue; // 跳过根目录自身
+    let canonical_source = std::fs::canonicalize(source_dir)
+        .map_err(|error| format!("resolve source {}: {error}", source_dir.display()))?;
+    for declared in &layout.required_files {
+        let rel_str = declared.replace("{mod_id}", mod_id);
+        let path = source_dir.join(Path::new(&rel_str));
+        let metadata = std::fs::symlink_metadata(&path)
+            .map_err(|error| format!("required package file is missing `{rel_str}`: {error}"))?;
+        if metadata.file_type().is_symlink() {
+            return Err(format!(
+                "required package file must not be a symbolic link: {rel_str}"
+            ));
         }
-        let rel_str = rel
-            .to_str()
-            .ok_or_else(|| format!("non-utf8 path: {}", rel.display()))?
-            .replace('\\', "/");
-
-        if entry.file_type().is_dir() {
-            // ZipWriter::add_directory 让 unzip 工具能识别空目录
-            writer
-                .add_directory(format!("{rel_str}/"), options)
-                .map_err(|e| format!("add dir {rel_str}: {e}"))?;
-        } else if entry.file_type().is_file() {
-            writer
-                .start_file(rel_str.clone(), options)
-                .map_err(|e| format!("start file {rel_str}: {e}"))?;
-            buffer.clear();
-            File::open(path)
-                .map_err(|e| format!("open {}: {e}", path.display()))?
-                .read_to_end(&mut buffer)
-                .map_err(|e| format!("read {}: {e}", path.display()))?;
-            writer
-                .write_all(&buffer)
-                .map_err(|e| format!("write entry {rel_str}: {e}"))?;
-            stats.files += 1;
-            stats.uncompressed_bytes += buffer.len() as u64;
+        if !metadata.is_file() {
+            return Err(format!("required package path is not a file: {rel_str}"));
         }
-        // symlink / 其它类型忽略
+        let canonical = std::fs::canonicalize(&path)
+            .map_err(|error| format!("resolve required package file `{rel_str}`: {error}"))?;
+        if !canonical.starts_with(&canonical_source) {
+            return Err(format!(
+                "required package file escapes source root: {rel_str}"
+            ));
+        }
+        writer
+            .start_file(rel_str.clone(), options)
+            .map_err(|error| format!("start file {rel_str}: {error}"))?;
+        buffer.clear();
+        File::open(&canonical)
+            .map_err(|error| format!("open {}: {error}", canonical.display()))?
+            .read_to_end(&mut buffer)
+            .map_err(|error| format!("read {}: {error}", canonical.display()))?;
+        writer
+            .write_all(&buffer)
+            .map_err(|error| format!("write entry {rel_str}: {error}"))?;
+        stats.files += 1;
+        stats.uncompressed_bytes += buffer.len() as u64;
     }
 
     let final_file = writer.finish().map_err(|e| format!("finish zip: {e}"))?;
@@ -234,6 +250,7 @@ fn zip_to_tmp(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game_pack::{GamePackLoadPolicy, GamePackLoader, LoadedGamePack};
     use crate::llm::{
         CompletionRequest, CompletionResponse, CompletionStream, LlmClient, LlmError,
     };
@@ -265,24 +282,59 @@ mod tests {
         }
     }
 
+    const MOD_ID: &str = "FixtureMod";
+
+    fn fixture_pack() -> LoadedGamePack {
+        GamePackLoader::new(GamePackLoadPolicy::new(
+            ["package_layout"],
+            std::iter::empty::<&str>(),
+            std::iter::empty::<&str>(),
+        ))
+        .load_str(
+            "fixture",
+            r#"{
+                  "schema_version": 1,
+                  "id": "fixture-game",
+                  "display_name": "Fixture Game",
+                  "capabilities": ["package_layout"],
+                  "package_layout": {
+                    "required_files": [
+                      "runtime/core.bin",
+                      "{mod_id}/{mod_id}.dll"
+                    ]
+                  }
+                }"#,
+        )
+        .unwrap()
+    }
+
     fn populate_sample_tree(root: &Path) {
-        std::fs::create_dir_all(root.join("nested/deep")).unwrap();
-        std::fs::write(root.join("a.txt"), b"hello").unwrap();
-        std::fs::write(root.join("nested/b.cs"), b"public class B {}").unwrap();
-        std::fs::write(root.join("nested/deep/c.json"), b"{\"k\":1}").unwrap();
+        std::fs::create_dir_all(root.join("runtime")).unwrap();
+        std::fs::create_dir_all(root.join(MOD_ID)).unwrap();
+        std::fs::write(root.join("runtime/core.bin"), b"core").unwrap();
+        std::fs::write(root.join(MOD_ID).join(format!("{MOD_ID}.dll")), b"mod").unwrap();
+        std::fs::write(root.join("not-declared.txt"), b"must not ship").unwrap();
     }
 
     #[test]
-    fn zip_directory_writes_atomically_and_leaves_no_partial() {
+    fn zip_package_layout_writes_atomically_and_leaves_no_partial() {
         let td = tempfile::TempDir::new().unwrap();
         let src = td.path().join("src");
         populate_sample_tree(&src);
         let out = td.path().join("pkg.zip");
 
-        let stats = zip_directory(&src, &out, None).unwrap();
+        let pack = fixture_pack();
+        let stats = zip_package_layout(
+            &src,
+            &out,
+            pack.package_layout.as_ref().unwrap(),
+            MOD_ID,
+            None,
+        )
+        .unwrap();
 
         assert!(out.exists(), "final zip should exist");
-        assert!(stats.files >= 3);
+        assert_eq!(stats.files, 2);
         assert!(stats.zip_bytes > 0);
         // 临时包不应残留
         assert!(
@@ -298,7 +350,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn package_project_zips_nested_tree() {
+    async fn package_project_uses_only_declared_layout() {
         let td = tempfile::TempDir::new().unwrap();
         let history = td.path().join("history");
         std::fs::create_dir_all(&history).unwrap();
@@ -317,19 +369,23 @@ mod tests {
             output_path: Some(out.clone()),
             compression_level: Some(5),
         };
-        let id = service.submit_package_project(req, sink).await.unwrap();
+        let id = service
+            .submit_package_project(req, fixture_pack(), MOD_ID.into(), sink)
+            .await
+            .unwrap();
         wait_terminal(&service, &id).await;
 
         let job = service.get(&id).await.unwrap();
         assert_eq!(job.status, JobStatus::Completed);
         let res = job.result.expect("result");
-        assert_eq!(res["filesAdded"], 3);
+        assert_eq!(res["filesAdded"], 2);
         assert!(out.exists());
 
         let entries = list_zip_entries(&out);
-        assert!(entries.iter().any(|e| e == "a.txt"));
-        assert!(entries.iter().any(|e| e == "nested/b.cs"));
-        assert!(entries.iter().any(|e| e == "nested/deep/c.json"));
+        assert_eq!(
+            entries,
+            vec!["runtime/core.bin", "FixtureMod/FixtureMod.dll"]
+        );
     }
 
     #[tokio::test]
@@ -339,7 +395,7 @@ mod tests {
         std::fs::create_dir_all(&history).unwrap();
         let source = td.path().join("artifacts");
         std::fs::create_dir_all(&source).unwrap();
-        std::fs::write(source.join("only.txt"), b"x").unwrap();
+        populate_sample_tree(&source);
 
         let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
         let llm: Arc<dyn LlmClient> = Arc::new(DummyLlm);
@@ -351,7 +407,10 @@ mod tests {
             output_path: None,
             compression_level: None,
         };
-        let id = service.submit_package_project(req, sink).await.unwrap();
+        let id = service
+            .submit_package_project(req, fixture_pack(), MOD_ID.into(), sink)
+            .await
+            .unwrap();
         wait_terminal(&service, &id).await;
 
         let job = service.get(&id).await.unwrap();
@@ -370,7 +429,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn package_project_empty_dir_succeeds_with_zero_files() {
+    async fn package_project_rejects_missing_required_files() {
         let td = tempfile::TempDir::new().unwrap();
         let history = td.path().join("history");
         std::fs::create_dir_all(&history).unwrap();
@@ -388,14 +447,20 @@ mod tests {
             output_path: Some(out.clone()),
             compression_level: None,
         };
-        let id = service.submit_package_project(req, sink).await.unwrap();
+        let id = service
+            .submit_package_project(req, fixture_pack(), MOD_ID.into(), sink)
+            .await
+            .unwrap();
         wait_terminal(&service, &id).await;
 
         let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Completed);
-        let res = job.result.unwrap();
-        assert_eq!(res["filesAdded"], 0);
-        assert!(out.exists());
+        assert_eq!(job.status, JobStatus::Failed);
+        assert!(
+            job.error
+                .unwrap_or_default()
+                .contains("required package file is missing")
+        );
+        assert!(!out.exists());
     }
 
     #[tokio::test]
@@ -408,7 +473,7 @@ mod tests {
         std::fs::create_dir_all(&history).unwrap();
         let source = td.path().join("artifacts");
         std::fs::create_dir_all(&source).unwrap();
-        std::fs::write(source.join("only.txt"), b"x").unwrap();
+        populate_sample_tree(&source);
 
         // 故意把 output_path 指向一个已存在的目录
         let out_dir = td.path().join("existing-output-dir");
@@ -424,7 +489,10 @@ mod tests {
             output_path: Some(out_dir.clone()),
             compression_level: None,
         };
-        let id = service.submit_package_project(req, sink).await.unwrap();
+        let id = service
+            .submit_package_project(req, fixture_pack(), MOD_ID.into(), sink)
+            .await
+            .unwrap();
         wait_terminal(&service, &id).await;
 
         let job = service.get(&id).await.unwrap();
@@ -453,7 +521,10 @@ mod tests {
             output_path: Some(td.path().join("x.zip")),
             compression_level: None,
         };
-        let id = service.submit_package_project(req, sink).await.unwrap();
+        let id = service
+            .submit_package_project(req, fixture_pack(), MOD_ID.into(), sink)
+            .await
+            .unwrap();
         wait_terminal(&service, &id).await;
 
         let job = service.get(&id).await.unwrap();
