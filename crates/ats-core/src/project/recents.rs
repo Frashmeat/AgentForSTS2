@@ -95,7 +95,11 @@ mod tests {
     fn meta(name: &str) -> ProjectMeta {
         ProjectMeta {
             name: name.into(),
-            ..ProjectMeta::default()
+            csharp_name: name.into(),
+            game_id: "sts2".into(),
+            scaffolded: true,
+            generated_files: Vec::new(),
+            build_output_dir: None,
         }
     }
 

@@ -294,6 +294,80 @@ Wrong: replace `local.props` as a string template, accept any version starting w
 
 Correct: validate at the settings boundary, synchronize through the shared XML module before project work, inject machine paths through local env/config, and prove Good/Base/Bad through the real Tauri IPC and filesystem chain.
 
+## Scenario: Game Pack Kernel and Project Identity Binding
+
+### 1. Scope / Trigger
+
+This contract applies when changing `crates/ats-core/src/game_pack/`, `ProjectMeta`, project create/open, or the Tauri/frontend project creation payload. Slice 1 establishes identity and truth-source declarations only; Truth Snapshot, resource specifications, templates, validation, build, and package cutovers remain separate slices.
+
+### 2. Signatures
+
+```rust
+GamePackLoader::load_str(source_name, text) -> GamePackResult<LoadedGamePack>
+GamePackLoader::load_from_dir(pack_root) -> GamePackResult<LoadedGamePack>
+resolve_pack_relative_path(pack_root, relative) -> GamePackResult<PathBuf>
+GamePackRegistry::built_in() -> GamePackResult<GamePackRegistry>
+ProjectFolder::create(parent_dir, name, game_id) -> ProjectResult<ProjectFolder>
+ProjectFolder::open(path) -> ProjectResult<ProjectFolder>
+```
+
+```text
+Tauri command: create_project(parentDir, name, gameId) -> ProjectSnapshot
+project.json: game_id: string
+.ats/version: 2
+```
+
+### 3. Contracts
+
+- Game Pack schema v1 requires `schema_version`, `id`, and `display_name`; `capabilities` and `truth_sources` default to empty collections.
+- Loader capability/indexer/provider support comes from `GamePackLoadPolicy`. Unknown identifiers and source kinds are rejected; a Pack cannot declare an arbitrary command or shell runner.
+- IDs use lowercase ASCII letters, digits, `_`, and `-`. Duplicate capability, truth-source ID, or Pack ID is rejected.
+- `local_file` requires `input_key`. `github_release_asset` requires `repository`, `pinned_release`, and a path-free `asset` file name.
+- Existing Pack-relative files must resolve through `resolve_pack_relative_path`; canonical paths outside the Pack root are rejected.
+- The built-in STS2 Pack declares the current `v3.3.8` BaseLib release. A remote asset SHA-256 becomes mandatory in the Truth Snapshot slice when exact asset fetching is wired; Slice 1 must not invent an unverified hash.
+- `ProjectMeta.game_id` is required and `PROJECT_SCHEMA_VERSION` is 2. Create, open, and save validate the ID through the loaded registry.
+- Missing `game_id`, unknown Pack IDs, and old schema versions fail before acquiring the project lock. There is no implicit `sts2` default or legacy fallback.
+- The current GUI explicitly sends the single installed Pack ID. Tauri accepts Rust `game_id` through the JavaScript `gameId` argument and persists snake-case `game_id` in `project.json`.
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| Valid schema v1 Pack | Load and register; lookup by exact ID succeeds |
+| Optional collections omitted | Load with empty capability/source collections |
+| Unknown schema/capability/kind/indexer/provider | Reject with source name and field path |
+| Missing kind-specific field | Reject with `truth_sources[n].<field>` |
+| Duplicate source or Pack ID | Reject deterministically; do not replace the first entry |
+| Pack-relative path escapes root | Return `GamePackError::PathOutsideRoot` |
+| Create with known `game_id` | Write `project.json.game_id` and `.ats/version = 2` |
+| Missing `game_id` in legacy project | Return `ProjectError::MissingGameId` with explicit recreate/migrate guidance |
+| Unknown `game_id` | Return `ProjectError::UnknownGameId`; create must not leave a project directory |
+| `.ats/version = 1` | Return `ProjectError::UnsupportedSchemaVersion` |
+
+### 5. Good / Base / Bad Cases
+
+- Good: the embedded STS2 Pack loads with two truth sources, and a new STS2 project survives create/drop/open with `game_id = "sts2"`.
+- Base: a generic fixture with only schema, ID, and display name loads with empty optional collections and does not consult STS2 constants.
+- Bad: a Pack with a shell capability, duplicate source ID, or `../` path is rejected; a legacy project never becomes STS2 by default.
+
+### 6. Tests Required
+
+```text
+cargo test -p ats-core game_pack::
+cargo test -p ats-core project::folder::tests
+cargo check -p ats-core
+cargo check -p agentthespire-desktop
+npx tsc --noEmit
+```
+
+Assertions must cover built-in STS2 lookup and pinned BaseLib release, optional defaults, all unknown identifier categories, missing kind fields, duplicates, containment, project round-trip, no-directory-on-rejection, missing/unknown game ID, old schema rejection, and matching Tauri/TypeScript payload signatures.
+
+### 7. Wrong vs Correct
+
+Wrong: deserialize `game_id` with `#[serde(default)]`, treat an empty value as STS2, accept unknown declaration strings, or let the UI omit game identity because only one game currently ships.
+
+Correct: validate declarations against an explicit Core capability catalog, persist a required registry-backed `game_id`, reject legacy ambiguity before locking, and add new schema dimensions only with their vertical cutover and evidence.
+
 ## Scenario: Complete Knowledge Refresh and Desktop Job Routing
 
 ### 1. Scope / Trigger

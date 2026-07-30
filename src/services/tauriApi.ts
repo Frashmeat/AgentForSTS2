@@ -585,6 +585,7 @@ export type LlmStreamPayload =
 export interface ProjectMeta {
   name: string;
   csharp_name: string;
+  game_id: string;
   created_at: string;
   schema_version: number;
   sts2_path: string | null;
@@ -610,8 +611,9 @@ export function listRecentProjects(): Promise<RecentEntry[]> {
 export function createProject(
   parentDir: string,
   name: string,
+  gameId: string,
 ): Promise<ProjectSnapshot> {
-  return invoke<ProjectSnapshot>("create_project", { parentDir, name });
+  return invoke<ProjectSnapshot>("create_project", { parentDir, name, gameId });
 }
 
 export function openProject(path: string): Promise<ProjectSnapshot> {

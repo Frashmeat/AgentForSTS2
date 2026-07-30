@@ -52,9 +52,10 @@ pub fn create_project(
     active: State<'_, ActiveProject>,
     parent_dir: String,
     name: String,
+    game_id: String,
 ) -> Result<ProjectSnapshot, String> {
     let parent = PathBuf::from(parent_dir);
-    let folder = ProjectFolder::create(&parent, &name).map_err(|e| e.to_string())?;
+    let folder = ProjectFolder::create(&parent, &name, &game_id).map_err(|e| e.to_string())?;
     let snap = snapshot(&folder);
     record_recent(&paths, folder.path(), folder.meta())?;
     *lock_active(&active)? = Some(folder);

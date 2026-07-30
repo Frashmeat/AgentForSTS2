@@ -216,7 +216,11 @@ function desktopOnly(name: string): never {
 export function listRecentProjects(): Promise<never[]> {
   return Promise.resolve([]);
 }
-export function createProject(_parentDir: string, _name: string): Promise<never> {
+export function createProject(
+  _parentDir: string,
+  _name: string,
+  _gameId: string,
+): Promise<never> {
   return Promise.resolve().then(() => desktopOnly("createProject"));
 }
 export function openProject(_path: string): Promise<never> {

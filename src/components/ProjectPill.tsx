@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useProjectStore } from "@/stores/project";
 import { api } from "@/services/api";
+import { INSTALLED_GAME_PACK_ID } from "@/services/gamePacks";
 import type { RecentEntry } from "@/services/tauriApi";
 
 function useClickOutside(ref: React.RefObject<HTMLDivElement | null>, handler: () => void) {
@@ -40,7 +41,7 @@ export function ProjectPill() {
   async function handleCreate() {
     if (!parentDir.trim() || !newName.trim()) return;
     setBusy(true);
-    try { await api.createProject(parentDir, newName); setShowCreate(false); setOpen(false); } catch (e) { console.error(e); }
+    try { await api.createProject(parentDir, newName, INSTALLED_GAME_PACK_ID); setShowCreate(false); setOpen(false); } catch (e) { console.error(e); }
     finally { setBusy(false); }
   }
 
@@ -51,7 +52,7 @@ export function ProjectPill() {
 
   if (!__IS_TAURI__) return null;
 
-  const label = project ? project.meta.name : "无工程";
+  const label = project ? `${project.meta.name} · ${project.meta.game_id}` : "无工程";
   
 
   return (

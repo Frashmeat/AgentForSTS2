@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useProjectStore } from "@/stores/project";
 import { Badge, Button, Card, CardSection, Field, Notice } from "@/components/ui";
 import { api } from "@/services/api";
+import { INSTALLED_GAME_PACK_ID } from "@/services/gamePacks";
 import type { RecentEntry } from "@/services/tauriApi";
 
 export function ProjectCard() {
@@ -34,7 +35,7 @@ export function ProjectCard() {
     setBusy(true);
     setError(null);
     try {
-      await api.createProject(parentDir, newName);
+      await api.createProject(parentDir, newName, INSTALLED_GAME_PACK_ID);
       await refresh();
     } catch (e: unknown) {
       setError(String(e));
@@ -121,6 +122,8 @@ export function ProjectCard() {
             </span>
             {" · schema v"}
             {current.meta.schema_version}
+            {" · game "}
+            <code>{current.meta.game_id}</code>
           </p>
         </div>
       ) : (

@@ -9,6 +9,7 @@ pub mod codegen;
 pub mod config;
 pub mod errors;
 pub mod fs_atomic;
+pub mod game_pack;
 pub mod health;
 pub mod image_gen;
 pub mod image_proc;

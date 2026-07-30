@@ -22,21 +22,24 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::game_pack::GamePackRegistry;
+
 use super::error::{ProjectError, ProjectResult};
 use super::template::{derive_csharp_name, scaffold_from_template};
 
-pub const PROJECT_SCHEMA_VERSION: u32 = 1;
+pub const PROJECT_SCHEMA_VERSION: u32 = 2;
 
 const PROJECT_JSON: &str = "project.json";
 const ATS_DIR: &str = ".ats";
 const LOCK_FILE: &str = "lock";
 const VERSION_FILE: &str = "version";
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(default, rename_all = "snake_case")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct ProjectMeta {
     pub name: String,
     pub csharp_name: String,
+    pub game_id: String,
     pub scaffolded: bool,
     // 后续由 codegen handler 填入
     pub generated_files: Vec<String>,
@@ -58,8 +61,9 @@ impl ProjectFolder {
     /// / MainFile.cs / nuget.config 等），文件中 `ModTemplate` 字面量替换为派生的
     /// `csharp_name`。这是 single_asset_plan → asset_generate → build_project 全链路
     /// 能 dotnet publish 起来的前置条件。
-    pub fn create(parent_dir: &Path, name: &str) -> ProjectResult<Self> {
+    pub fn create(parent_dir: &Path, name: &str, game_id: &str) -> ProjectResult<Self> {
         validate_name(name)?;
+        validate_game_id(game_id)?;
         if !parent_dir.is_dir() {
             return Err(ProjectError::NotADirectory(
                 parent_dir.display().to_string(),
@@ -83,8 +87,10 @@ impl ProjectFolder {
         let meta = ProjectMeta {
             name: name.to_string(),
             csharp_name,
+            game_id: game_id.to_string(),
             scaffolded: true,
-            ..ProjectMeta::default()
+            generated_files: Vec::new(),
+            build_output_dir: None,
         };
         write_json_atomic(&project_root.join(PROJECT_JSON), &meta)?;
         write_text_atomic(
@@ -110,8 +116,29 @@ impl ProjectFolder {
             return Err(ProjectError::Missing(project_json.display().to_string()));
         }
         let text = fs::read_to_string(&project_json)?;
-        let meta: ProjectMeta = serde_json::from_str(&text)?;
+        let value: serde_json::Value = serde_json::from_str(&text)?;
+        if value.get("game_id").is_none() {
+            return Err(ProjectError::MissingGameId);
+        }
+        let meta: ProjectMeta = serde_json::from_value(value)?;
+        validate_game_id(&meta.game_id)?;
         let ats_dir = path.join(ATS_DIR);
+        let version_path = ats_dir.join(VERSION_FILE);
+        let version_text = fs::read_to_string(&version_path)?;
+        let version =
+            version_text
+                .trim()
+                .parse::<u32>()
+                .map_err(|_| ProjectError::InvalidSchemaVersion {
+                    path: version_path.display().to_string(),
+                    value: version_text.trim().to_string(),
+                })?;
+        if version != PROJECT_SCHEMA_VERSION {
+            return Err(ProjectError::UnsupportedSchemaVersion {
+                found: version,
+                expected: PROJECT_SCHEMA_VERSION,
+            });
+        }
         fs::create_dir_all(&ats_dir)?;
         let lock = ProjectLock::acquire(path)?;
         Ok(Self {
@@ -132,6 +159,7 @@ impl ProjectFolder {
     }
 
     pub fn save_meta(&mut self, meta: ProjectMeta) -> ProjectResult<()> {
+        validate_game_id(&meta.game_id)?;
         write_json_atomic(&self.path.join(PROJECT_JSON), &meta)?;
         self.meta = meta;
         Ok(())
@@ -153,6 +181,15 @@ impl ProjectFolder {
     pub fn history_dir(&self) -> PathBuf {
         self.path.join("history")
     }
+}
+
+fn validate_game_id(game_id: &str) -> ProjectResult<()> {
+    let registry = GamePackRegistry::built_in()
+        .map_err(|error| ProjectError::GamePackRegistry(error.to_string()))?;
+    if registry.get(game_id).is_none() {
+        return Err(ProjectError::UnknownGameId(game_id.to_string()));
+    }
+    Ok(())
 }
 
 fn validate_name(name: &str) -> ProjectResult<()> {
@@ -235,7 +272,7 @@ mod tests {
     fn create_then_open_round_trip() {
         let td = tempdir();
         let parent = td.path();
-        let pf = ProjectFolder::create(parent, "demo").expect("create");
+        let pf = ProjectFolder::create(parent, "demo", "sts2").expect("create");
         assert!(pf.path().join("project.json").is_file());
         assert!(pf.path().join(".ats/lock").is_file());
         assert!(pf.items_dir().is_dir());
@@ -244,12 +281,17 @@ mod tests {
         assert!(path.join(".ats/lock").is_file());
         let reopened = ProjectFolder::open(&path).expect("reopen");
         assert_eq!(reopened.meta().name, "demo");
+        assert_eq!(reopened.meta().game_id, "sts2");
+        assert_eq!(
+            fs::read_to_string(path.join(".ats/version")).unwrap(),
+            PROJECT_SCHEMA_VERSION.to_string()
+        );
     }
 
     #[test]
     fn open_locked_project_fails() {
         let td = tempdir();
-        let pf = ProjectFolder::create(td.path(), "x").unwrap();
+        let pf = ProjectFolder::create(td.path(), "x", "sts2").unwrap();
         let path = pf.path().to_path_buf();
         let reopened = ProjectFolder::open(&path);
         assert!(
@@ -262,7 +304,7 @@ mod tests {
     #[test]
     fn released_lock_file_does_not_block_reopen() {
         let td = tempdir();
-        let pf = ProjectFolder::create(td.path(), "x").unwrap();
+        let pf = ProjectFolder::create(td.path(), "x", "sts2").unwrap();
         let path = pf.path().to_path_buf();
         drop(pf);
 
@@ -274,26 +316,85 @@ mod tests {
     #[test]
     fn invalid_name_rejected() {
         let td = tempdir();
-        assert!(ProjectFolder::create(td.path(), "").is_err());
-        assert!(ProjectFolder::create(td.path(), "a/b").is_err());
-        assert!(ProjectFolder::create(td.path(), "x?y").is_err());
+        assert!(ProjectFolder::create(td.path(), "", "sts2").is_err());
+        assert!(ProjectFolder::create(td.path(), "a/b", "sts2").is_err());
+        assert!(ProjectFolder::create(td.path(), "x?y", "sts2").is_err());
     }
 
     #[test]
     fn create_rejects_existing_dir() {
         let td = tempdir();
-        ProjectFolder::create(td.path(), "dup").unwrap();
-        assert!(ProjectFolder::create(td.path(), "dup").is_err());
+        ProjectFolder::create(td.path(), "dup", "sts2").unwrap();
+        assert!(ProjectFolder::create(td.path(), "dup", "sts2").is_err());
     }
 
     #[test]
     fn save_meta_persists() {
         let td = tempdir();
-        let mut pf = ProjectFolder::create(td.path(), "save-test").unwrap();
+        let mut pf = ProjectFolder::create(td.path(), "save-test", "sts2").unwrap();
         let mut new_meta = pf.meta().clone();
         new_meta.name = "renamed".into();
         pf.save_meta(new_meta).unwrap();
         let text = fs::read_to_string(pf.path().join("project.json")).unwrap();
         assert!(text.contains("renamed"));
+    }
+
+    #[test]
+    fn unknown_game_id_is_rejected_before_project_creation() {
+        let td = tempdir();
+        let error = ProjectFolder::create(td.path(), "bad-game", "unknown").unwrap_err();
+        assert!(matches!(error, ProjectError::UnknownGameId(id) if id == "unknown"));
+        assert!(!td.path().join("bad-game").exists());
+    }
+
+    #[test]
+    fn legacy_project_without_game_id_is_rejected_explicitly() {
+        let td = tempdir();
+        let pf = ProjectFolder::create(td.path(), "legacy", "sts2").unwrap();
+        let path = pf.path().to_path_buf();
+        drop(pf);
+        let project_json = path.join(PROJECT_JSON);
+        let mut value: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&project_json).unwrap()).unwrap();
+        value.as_object_mut().unwrap().remove("game_id");
+        fs::write(&project_json, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+
+        let error = ProjectFolder::open(&path).unwrap_err();
+        assert!(matches!(error, ProjectError::MissingGameId));
+        assert!(error.to_string().contains("migrated explicitly"));
+    }
+
+    #[test]
+    fn project_with_unknown_game_id_is_rejected() {
+        let td = tempdir();
+        let pf = ProjectFolder::create(td.path(), "unknown-game", "sts2").unwrap();
+        let path = pf.path().to_path_buf();
+        drop(pf);
+        let project_json = path.join(PROJECT_JSON);
+        let mut value: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&project_json).unwrap()).unwrap();
+        value["game_id"] = serde_json::Value::String("missing-pack".into());
+        fs::write(&project_json, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+
+        let error = ProjectFolder::open(&path).unwrap_err();
+        assert!(matches!(error, ProjectError::UnknownGameId(id) if id == "missing-pack"));
+    }
+
+    #[test]
+    fn old_project_schema_is_rejected() {
+        let td = tempdir();
+        let pf = ProjectFolder::create(td.path(), "old-schema", "sts2").unwrap();
+        let path = pf.path().to_path_buf();
+        drop(pf);
+        fs::write(path.join(ATS_DIR).join(VERSION_FILE), "1").unwrap();
+
+        let error = ProjectFolder::open(&path).unwrap_err();
+        assert!(matches!(
+            error,
+            ProjectError::UnsupportedSchemaVersion {
+                found: 1,
+                expected: PROJECT_SCHEMA_VERSION
+            }
+        ));
     }
 }

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "id": "sts2",
+  "display_name": "Slay the Spire 2",
+  "capabilities": [
+    "truth_sources"
+  ],
+  "truth_sources": [
+    {
+      "id": "game",
+      "kind": "local_file",
+      "input_key": "game_assembly",
+      "indexer": "dotnet_project",
+      "provider": "sts2_code_facts"
+    },
+    {
+      "id": "baselib",
+      "kind": "github_release_asset",
+      "repository": "Alchyr/BaseLib-StS2",
+      "pinned_release": "v3.3.8",
+      "asset": "BaseLib.dll",
+      "indexer": "dotnet_file",
+      "provider": "sts2_baselib"
+    }
+  ]
+}
