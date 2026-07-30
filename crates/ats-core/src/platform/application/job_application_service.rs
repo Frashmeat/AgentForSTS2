@@ -3,6 +3,7 @@
 //! 实际 handler 实现位于 `super::handlers::*` 子模块，本文件只负责持久化
 //! 初始 Pending 记录 + spawn 后台 tokio 任务。
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -15,21 +16,22 @@ use super::handlers::{
     batch_custom_code::run_batch_custom_code,
     build_project::run_build_project,
     code_generate::run_code_generate,
-    knowledge_refresh::run_knowledge_refresh,
     log_analysis::run_log_analysis,
     package_project::run_package_project,
     single_asset_plan::run_single_asset_plan,
     text_generate::run_text_generate,
+    truth_snapshot_refresh::run_truth_snapshot_refresh,
 };
-use crate::game_pack::VerifiedGameContext;
+use crate::game_pack::{
+    LoadedGamePack, TruthSnapshotRefresher, TruthSnapshotStore, VerifiedGameContext,
+};
 use crate::image_gen::ImageGenClient;
 use crate::image_proc::ImageProcClient;
-use crate::knowledge::{BaselibSource, KnowledgePaths};
 use crate::llm::LlmClient;
 use crate::platform::contracts::{
     SubmitAssetGenerateRequest, SubmitBatchCustomCodeRequest, SubmitBuildProjectRequest,
-    SubmitCodeGenerateRequest, SubmitKnowledgeRefreshRequest, SubmitLogAnalysisRequest,
-    SubmitPackageProjectRequest, SubmitSingleAssetPlanRequest, SubmitTextGenerateRequest,
+    SubmitCodeGenerateRequest, SubmitLogAnalysisRequest, SubmitPackageProjectRequest,
+    SubmitSingleAssetPlanRequest, SubmitTextGenerateRequest, SubmitTruthSnapshotRefreshRequest,
 };
 use crate::platform::domain::{
     Job, JobError, JobId, JobKind, JobRepository, JobResult, JobStatus, JobSummary,
@@ -37,7 +39,7 @@ use crate::platform::domain::{
 
 pub struct JobApplicationService {
     repo: Arc<dyn JobRepository>,
-    llm: Arc<dyn LlmClient>,
+    llm: Option<Arc<dyn LlmClient>>,
     asset_compile_validator: Arc<dyn AssetCompileValidator>,
 }
 
@@ -46,7 +48,17 @@ impl JobApplicationService {
     pub fn new(repo: Arc<dyn JobRepository>, llm: Arc<dyn LlmClient>) -> Self {
         Self {
             repo,
-            llm,
+            llm: Some(llm),
+            asset_compile_validator: Arc::new(DotnetAssetCompileValidator),
+        }
+    }
+
+    /// Construct a service for jobs whose execution does not use an LLM.
+    #[must_use]
+    pub fn without_llm(repo: Arc<dyn JobRepository>) -> Self {
+        Self {
+            repo,
+            llm: None,
             asset_compile_validator: Arc::new(DotnetAssetCompileValidator),
         }
     }
@@ -112,7 +124,7 @@ impl JobApplicationService {
         self.repo.create(&job).await?;
 
         let repo = Arc::clone(&self.repo);
-        let llm = Arc::clone(&self.llm);
+        let llm = self.require_llm()?;
         let id_for_task = job_id.clone();
         tokio::spawn(async move {
             run_text_generate(repo, llm, sink, id_for_task, request).await;
@@ -140,7 +152,7 @@ impl JobApplicationService {
         self.repo.create(&job).await?;
 
         let repo = Arc::clone(&self.repo);
-        let llm = Arc::clone(&self.llm);
+        let llm = self.require_llm()?;
         let compile_validator = Arc::clone(&self.asset_compile_validator);
         let id_for_task = job_id.clone();
         tokio::spawn(async move {
@@ -160,33 +172,42 @@ impl JobApplicationService {
         Ok(job_id)
     }
 
-    /// 提交 knowledge_refresh 任务：跑 ilspycmd 把 sts2.dll 反编译到 game 目录，
-    /// 可选同时拉 BaseLib.dll 并反编译到 baselib/BaseLib.decompiled.cs。
-    /// `force=false` 时若 manifest 与当前 dll 元数据一致则跳过 game 子进程。
-    /// baselib 不做缓存命中检查（每次 include_baselib=true 都会拉 + 反编译）。
-    pub async fn submit_knowledge_refresh(
+    /// Submit a Pack-driven refresh. The caller must resolve the Pack and local input
+    /// bindings from the active project before the Pending job is persisted.
+    pub async fn submit_truth_snapshot_refresh(
         &self,
-        request: SubmitKnowledgeRefreshRequest,
-        knowledge_paths: KnowledgePaths,
-        baselib_source: Arc<dyn BaselibSource>,
+        request: SubmitTruthSnapshotRefreshRequest,
+        pack: LoadedGamePack,
+        store: TruthSnapshotStore,
+        local_inputs: BTreeMap<String, PathBuf>,
+        refresher: TruthSnapshotRefresher,
         sink: Arc<dyn ProgressSink>,
     ) -> JobResult<JobId> {
-        let payload = serde_json::to_value(&request)
+        let mut payload = serde_json::to_value(&request)
             .map_err(|e| JobError::Storage(format!("serialize request: {e}")))?;
-        let job = Job::new(JobKind::KnowledgeRefresh, payload);
+        payload
+            .as_object_mut()
+            .ok_or_else(|| JobError::Storage("refresh payload must be an object".into()))?
+            .insert(
+                "gamePackId".into(),
+                serde_json::Value::String(pack.id.clone()),
+            );
+        let job = Job::new(JobKind::TruthSnapshotRefresh, payload);
         let job_id = job.id.clone();
         self.repo.create(&job).await?;
 
         let repo = Arc::clone(&self.repo);
         let id_for_task = job_id.clone();
         tokio::spawn(async move {
-            run_knowledge_refresh(
+            run_truth_snapshot_refresh(
                 repo,
                 sink,
                 id_for_task,
                 request,
-                knowledge_paths,
-                baselib_source,
+                pack,
+                store,
+                local_inputs,
+                refresher,
             )
             .await;
         });
@@ -210,7 +231,7 @@ impl JobApplicationService {
         self.repo.create(&job).await?;
 
         let repo = Arc::clone(&self.repo);
-        let llm = Arc::clone(&self.llm);
+        let llm = self.require_llm()?;
         let id_for_task = job_id.clone();
         tokio::spawn(async move {
             run_single_asset_plan(repo, llm, sink, id_for_task, request, items_dir).await;
@@ -233,7 +254,7 @@ impl JobApplicationService {
         self.repo.create(&job).await?;
 
         let repo = Arc::clone(&self.repo);
-        let llm = Arc::clone(&self.llm);
+        let llm = self.require_llm()?;
         let id_for_task = job_id.clone();
         tokio::spawn(async move {
             run_log_analysis(repo, llm, sink, id_for_task, request).await;
@@ -262,7 +283,7 @@ impl JobApplicationService {
         self.repo.create(&job).await?;
 
         let repo = Arc::clone(&self.repo);
-        let llm = Arc::clone(&self.llm);
+        let llm = self.require_llm()?;
         let compile_validator = Arc::clone(&self.asset_compile_validator);
         let id_for_task = job_id.clone();
         tokio::spawn(async move {
@@ -299,7 +320,7 @@ impl JobApplicationService {
         self.repo.create(&job).await?;
 
         let repo = Arc::clone(&self.repo);
-        let llm = Arc::clone(&self.llm);
+        let llm = self.require_llm()?;
         let id_for_task = job_id.clone();
         tokio::spawn(async move {
             run_batch_custom_code(
@@ -359,6 +380,13 @@ impl JobApplicationService {
         });
 
         Ok(job_id)
+    }
+
+    fn require_llm(&self) -> JobResult<Arc<dyn LlmClient>> {
+        self.llm
+            .as_ref()
+            .map(Arc::clone)
+            .ok_or_else(|| JobError::Storage("this Job service has no LLM client".into()))
     }
 }
 

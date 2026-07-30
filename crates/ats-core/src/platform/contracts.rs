@@ -9,7 +9,7 @@
 //! - package_project（artifacts 目录 → zip）
 //! - batch_custom_code（多 item 套 code_generate）
 //! - single_asset_plan（LLM → 结构化 PlanItem）
-//! - knowledge_refresh（ilspycmd 反编译 sts2.dll → 落产物 + 更新 manifest）
+//! - truth_snapshot_refresh（按 Game Pack 获取、索引并原子激活当前真相源）
 //! - asset_generate（image_gen 出图 + code_generate 出 .cs，串行）
 
 use std::path::PathBuf;
@@ -109,21 +109,13 @@ pub struct SubmitAssetGenerateRequest {
     pub image_size: Option<String>,
 }
 
-/// knowledge_refresh 任务的输入：反编译 sts2.dll 到知识库的 game 目录，
-/// 可选同时下载并反编译 BaseLib.dll。
+/// Truth Snapshot 刷新输入。游戏身份和本机源绑定由宿主从活动工程解析，
+/// 调用方不能在请求中伪造 Pack 或源路径。
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default, rename_all = "snake_case")]
-pub struct SubmitKnowledgeRefreshRequest {
-    /// STS2 安装中的 game dll 路径（一般是 sts2.dll 或 Assembly-CSharp.dll）。
-    pub sts2_dll_path: PathBuf,
-    /// 明确指定 ilspycmd 可执行路径；为 None 时走自动发现
-    /// （PATH + ~/.dotnet/tools）。
-    pub ilspycmd_path: Option<PathBuf>,
-    /// 即使 manifest 显示当前产物已是最新，仍强制重新反编译。
+pub struct SubmitTruthSnapshotRefreshRequest {
+    /// 即使当前 Snapshot 输入身份未变化，仍重新获取远程源并执行索引。
     pub force: bool,
-    /// 同时从 GitHub Releases 拉 BaseLib.dll 并反编译到
-    /// `<knowledge>/baselib/BaseLib.decompiled.cs`。
-    pub include_baselib: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -49,7 +49,7 @@ pub struct RuntimeConfig {
     pub cors_origins: Vec<String>,
     pub mount_frontend: bool,
     pub requires_database: bool,
-    /// GitHub personal access token（可选）。提供后 knowledge_refresh 的 baselib
+    /// GitHub personal access token（可选）。提供后 Truth Snapshot 刷新的 BaseLib
     /// 下载阶段使用认证请求，避免未认证 API 的 60 req/h 限流。
     #[serde(default)]
     pub github_token: String,
@@ -85,8 +85,8 @@ pub struct ImageGenConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default, rename_all = "snake_case")]
 pub struct KnowledgeConfig {
-    /// sts2.dll 路径。knowledge_refresh 从此取值；local.props 从此推导 SteamLibraryPath。
-    /// 留空时 knowledge_refresh 不可用。
+    /// sts2.dll 路径。Truth Snapshot 刷新从此取值；local.props 从此推导 SteamLibraryPath。
+    /// 留空时 Truth Snapshot 刷新不可用。
     #[serde(default)]
     pub sts2_dll_path: String,
 }

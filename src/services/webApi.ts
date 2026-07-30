@@ -9,7 +9,7 @@ import type {
   CustomCodegenRequest,
   ExecutionPlanPreview,
   HealthReport,
-  KnowledgeStatus,
+  TruthSnapshotStatus,
   ModPlan,
   ModProjectRequest,
   PlanValidationResult,
@@ -20,14 +20,6 @@ const API_BASE = "/api";
 
 async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`);
-  if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}`);
-  }
-  return response.json() as Promise<T>;
-}
-
-async function postJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, { method: "POST" });
   if (!response.ok) {
     throw new Error(`${response.status} ${response.statusText}`);
   }
@@ -45,25 +37,12 @@ export function getLocalCapabilitiesFull(): Promise<never> {
   return Promise.resolve().then(() => desktopOnly("getLocalCapabilitiesFull"));
 }
 
-export function getKnowledgeStatus(): Promise<KnowledgeStatus> {
-  return getJson<KnowledgeStatus>("/knowledge/status");
+export function getTruthSnapshotStatus(): Promise<TruthSnapshotStatus> {
+  return Promise.resolve().then(() => desktopOnly("getTruthSnapshotStatus"));
 }
 
-export function checkKnowledgeStatus(): Promise<KnowledgeStatus> {
-  return postJson<KnowledgeStatus>("/knowledge/check");
-}
-
-export function exportKnowledgePack(
-  _outputPath: string,
-  _machineHint?: string,
-): Promise<never> {
-  return Promise.resolve().then(() => desktopOnly("exportKnowledgePack"));
-}
-export function importKnowledgePack(
-  _inputPath: string,
-  _overwrite: boolean,
-): Promise<never> {
-  return Promise.resolve().then(() => desktopOnly("importKnowledgePack"));
+export function checkTruthSnapshotStatus(): Promise<TruthSnapshotStatus> {
+  return Promise.resolve().then(() => desktopOnly("checkTruthSnapshotStatus"));
 }
 export function analyzeModProject(_projectRoot: string): Promise<never> {
   return Promise.resolve().then(() => desktopOnly("analyzeModProject"));
@@ -265,8 +244,8 @@ export function submitBatchCustomCodeJob(_request: unknown): Promise<never> {
 export function submitSingleAssetPlanJob(_request: unknown): Promise<never> {
   return Promise.resolve().then(() => desktopOnly("submitSingleAssetPlanJob"));
 }
-export function submitKnowledgeRefreshJob(_request: unknown): Promise<never> {
-  return Promise.resolve().then(() => desktopOnly("submitKnowledgeRefreshJob"));
+export function submitTruthSnapshotRefreshJob(_request: unknown): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("submitTruthSnapshotRefreshJob"));
 }
 export function submitAssetGenerateJob(_request: unknown): Promise<never> {
   return Promise.resolve().then(() => desktopOnly("submitAssetGenerateJob"));

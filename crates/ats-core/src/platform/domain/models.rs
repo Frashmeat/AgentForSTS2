@@ -54,6 +54,8 @@ pub enum JobKind {
     PackageProject,
     SingleAssetPlan,
     LogAnalysis,
+    TruthSnapshotRefresh,
+    /// Historical only. New submissions must use `TruthSnapshotRefresh`.
     KnowledgeRefresh,
 }
 

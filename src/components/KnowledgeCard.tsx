@@ -1,185 +1,279 @@
 import { useEffect, useRef, useState } from "react";
+import { Pencil, RefreshCw, Save, Search, X } from "lucide-react";
+
 import { Badge, Button, Card, CardSection, Notice } from "@/components/ui";
-import { api } from "@/services/api";
 import { useJobProgress } from "@/hooks/useJobProgress";
+import { api } from "@/services/api";
 import type {
-  ExportPackStats,
-  ImportPackStats,
-  KnowledgeStatus,
   SettingsSnapshot,
   SubmitJobAck,
+  TruthSnapshotStatus,
 } from "@/services/tauriApi";
+import { useProjectStore } from "@/stores/project";
 
 export function KnowledgeCard() {
-  const [knowledge, setKnowledge] = useState<KnowledgeStatus | null>(null);
+  const [snapshot, setSnapshot] = useState<TruthSnapshotStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
-  const [packPath, setPackPath] = useState("");
-  const [packMsg, setPackMsg] = useState<string | null>(null);
-  const [packBusy, setPackBusy] = useState(false);
-  const [overwriteOnImport, setOverwriteOnImport] = useState(false);
-  const [kSts2Path, setKSts2Path] = useState("");
-  const [kSts2Editing, setKSts2Editing] = useState(false);
+  const [sts2Path, setSts2Path] = useState("");
+  const [editingPath, setEditingPath] = useState(false);
   const [force, setForce] = useState(false);
   const [refreshBusy, setRefreshBusy] = useState(false);
   const [refreshStage, setRefreshStage] = useState<string | null>(null);
-  const [refreshMsg, setRefreshMsg] = useState<string | null>(null);
+  const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
   const [refreshJobId, setRefreshJobId] = useState<string | null>(null);
   const refreshJobIdRef = useRef<string | null>(null);
-
-  useEffect(() => { refreshJobIdRef.current = refreshJobId; }, [refreshJobId]);
-
-  useEffect(() => {
-    (api.getKnowledgeStatus() as Promise<KnowledgeStatus>)
-      .then(setKnowledge)
-      .catch((e: unknown) => setError(String(e)));
-  }, []);
+  const project = useProjectStore((state) => state.project);
 
   useEffect(() => {
+    refreshJobIdRef.current = refreshJobId;
+  }, [refreshJobId]);
+
+  useEffect(() => {
+    if (!__IS_TAURI__) return;
+    setSnapshot(null);
+    setError(null);
+    if (project) void loadStatus();
+  }, [project?.path]);
+
+  useEffect(() => {
+    if (!__IS_TAURI__) return;
     (api.getSettingsSnapshot() as Promise<SettingsSnapshot>)
-      .then((s) => setKSts2Path(s.knowledge.sts2DllPath))
+      .then((settings) => setSts2Path(settings.knowledge.sts2DllPath))
       .catch(() => {});
   }, []);
 
-  useJobProgress(refreshJobIdRef, (ev) => {
-    setRefreshStage(ev.stage);
-    if (ev.message) setRefreshMsg(ev.message);
-    if (ev.stage === "completed" || ev.stage === "failed" || ev.stage.includes("error")) {
+  useJobProgress(refreshJobIdRef, (event) => {
+    setRefreshStage(event.stage);
+    if (event.message) setRefreshMessage(event.message);
+    if (
+      event.stage === "completed" ||
+      event.stage === "failed" ||
+      event.stage.includes("error")
+    ) {
       setRefreshBusy(false);
-      void (async () => {
-        try { setKnowledge((await api.getKnowledgeStatus()) as KnowledgeStatus); }
-        catch { /* ignore */ }
-      })();
+      void loadStatus();
     }
   });
 
-  async function handleRefresh() {
-    setError(null); setRefreshBusy(true); setRefreshStage(null); setRefreshMsg(null);
+  async function loadStatus(check = false) {
+    setError(null);
     try {
-      const ack = (await api.submitKnowledgeRefreshJob({ force })) as SubmitJobAck;
+      const result = check
+        ? await api.checkTruthSnapshotStatus()
+        : await api.getTruthSnapshotStatus();
+      setSnapshot(result as TruthSnapshotStatus);
+    } catch (caught: unknown) {
+      setError(String(caught));
+    }
+  }
+
+  async function handleRefresh() {
+    setError(null);
+    setRefreshBusy(true);
+    setRefreshStage(null);
+    setRefreshMessage(null);
+    try {
+      const ack = (await api.submitTruthSnapshotRefreshJob({ force })) as SubmitJobAck;
       setRefreshJobId(ack.jobId);
-    } catch (e: unknown) { setError(String(e)); setRefreshBusy(false); setRefreshStage(null); }
+    } catch (caught: unknown) {
+      setError(String(caught));
+      setRefreshBusy(false);
+    }
   }
 
   async function handleRecheck() {
-    setChecking(true); setError(null);
-    try { setKnowledge((await api.checkKnowledgeStatus()) as KnowledgeStatus); }
-    catch (e: unknown) { setError(String(e)); }
-    finally { setChecking(false); }
+    setChecking(true);
+    await loadStatus(true);
+    setChecking(false);
   }
-
-  async function handleExport() {
-    setPackMsg(null); setPackBusy(true);
-    try {
-      const s = (await api.exportKnowledgePack(packPath, "AgentTheSpire-Rust")) as ExportPackStats;
-      setPackMsg(`Exported ${s.gameFiles} game + ${s.baselibIncluded ? "baselib" : "no baselib"} → ${packPath}`);
-    } catch (e: unknown) { setError(String(e)); }
-    finally { setPackBusy(false); }
-  }
-
-  async function handleImport() {
-    setPackMsg(null); setPackBusy(true);
-    try {
-      const s = (await api.importKnowledgePack(packPath, overwriteOnImport)) as ImportPackStats;
-      setPackMsg(`Imported ${s.gameFilesWritten} files from ${packPath}`);
-      void handleRecheck();
-    } catch (e: unknown) { setError(String(e)); }
-    finally { setPackBusy(false); }
-  }
-
-  const overallVariant =
-    knowledge?.overall === "fresh" ? "ok" : knowledge?.overall === "stale" ? "warn" : "error";
 
   if (!__IS_TAURI__) {
-    return <Card eyebrow="knowledge · sts2 sources" title="Knowledge" subtitle="desktop-only" />;
+    return (
+      <Card
+        eyebrow="game pack · truth snapshot"
+        title="Truth Snapshot"
+        subtitle="desktop-only"
+      />
+    );
   }
+
+  const stateVariant =
+    snapshot?.state === "ready"
+      ? "ok"
+      : snapshot?.state === "invalid"
+        ? "error"
+        : "warn";
 
   return (
     <Card
-      eyebrow="knowledge · sts2 sources"
-      title="Knowledge"
-      actions={<Button size="sm" onClick={handleRecheck} disabled={checking}>{checking ? "Checking…" : "Re-check"}</Button>}
+      eyebrow="game pack · verified sources"
+      title="Truth Snapshot"
+      actions={
+        <Button
+          size="sm"
+          onClick={() => void handleRecheck()}
+          disabled={checking}
+        >
+          <RefreshCw size={14} />
+          {checking ? "Checking..." : "Re-check"}
+        </Button>
+      }
     >
-      {error && <Notice variant="error" title={`Error: ${error}`} />}
-      {!error && !knowledge && <p style={{ color: "var(--ink-mute)", fontSize: "13px" }}>Loading…</p>}
+      {error && <Notice variant="error" title={error} />}
+      {!project && <Notice variant="warn" title="Open a project to select its Game Pack." />}
+      {!error && project && !snapshot && (
+        <p style={{ color: "var(--ink-mute)", fontSize: "13px" }}>Loading...</p>
+      )}
 
-      {knowledge && (
+      {snapshot && (
         <>
           <div className="flex items-center gap-3 flex-wrap mb-4">
-            <Badge variant={overallVariant}>{knowledge.overall}</Badge>
-            <span style={{ fontSize: "11.5px", color: "var(--ink-mute)" }}>
-              root <code>{knowledge.knowledgeRoot}</code>
+            <Badge variant={stateVariant}>{snapshot.state}</Badge>
+            <span style={{ fontSize: "12px", color: "var(--ink-mute)" }}>
+              pack <code>{snapshot.gamePackId}</code>
             </span>
+            {snapshot.snapshotId && (
+              <span style={{ fontSize: "12px", color: "var(--ink-mute)" }}>
+                snapshot <code>{snapshot.snapshotId.slice(0, 12)}</code>
+              </span>
+            )}
           </div>
 
-          <div className="grid grid-cols-2 gap-3 mb-3">
-            {[{ label: "Game", obj: knowledge.game }, { label: "BaseLib", obj: knowledge.baselib }].map(({ label, obj }) => (
-              <div key={label} className="p-3" style={{ background: "var(--paper)", border: "1px solid var(--rule-soft)", borderRadius: "4px" }}>
-                <p style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: "10px", letterSpacing: "0.16em", textTransform: "uppercase", color: "var(--ink-mute)", marginBottom: "6px" }}>{label}</p>
-                {obj ? (
-                  <>
-                    <p style={{ fontSize: "12px" }}><span style={{ color: "var(--ink-mute)" }}>mode </span>{obj.sourceMode}</p>
-                    <p style={{ fontSize: "12px" }}><span style={{ color: "var(--ink-mute)" }}>decompiled </span>{String(obj.hasDecompiledSources)}</p>
-                  </>
-                ) : (
-                  <p style={{ fontSize: "12px", color: "var(--ink-mute)" }}>absent</p>
-                )}
+          {snapshot.warnings.map((warning) => (
+            <Notice key={warning} variant="warn" title={warning} />
+          ))}
+
+          {snapshot.sources.length > 0 && (
+            <CardSection title="Verified sources">
+              <div className="space-y-2">
+                {snapshot.sources.map((source) => {
+                  const index = snapshot.indexes.find(
+                    (candidate) => candidate.sourceId === source.id,
+                  );
+                  return (
+                    <div
+                      key={source.id}
+                      className="grid gap-1 py-2"
+                      style={{ borderBottom: "1px solid var(--rule-soft)" }}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <strong style={{ fontSize: "13px" }}>{source.id}</strong>
+                        <code style={{ fontSize: "11px" }}>
+                          {source.sha256.slice(0, 12)}
+                        </code>
+                      </div>
+                      <div style={{ color: "var(--ink-mute)", fontSize: "12px" }}>
+                        {source.kind}
+                        {source.version ? ` · ${source.version}` : ""}
+                        {index
+                          ? ` · ${index.indexer} · ${index.csFileCount} C# files`
+                          : ""}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            ))}
-          </div>
-
-          {knowledge.embeddedTemplates && knowledge.embeddedTemplates.length > 0 && (
-            <p style={{ fontSize: "11.5px", color: "var(--ink-mute)", marginBottom: "12px" }}>
-              embedded templates: {knowledge.embeddedTemplates.join(", ")}
-            </p>
+              {Object.keys(snapshot.toolVersions).length > 0 && (
+                <p className="mt-3" style={{ color: "var(--ink-mute)", fontSize: "12px" }}>
+                  {Object.entries(snapshot.toolVersions)
+                    .map(([tool, version]) => `${tool} ${version}`)
+                    .join(" · ")}
+                </p>
+              )}
+            </CardSection>
           )}
 
-          <CardSection title="反编译源 (sts2.dll)">
-            {kSts2Editing ? (
+          <CardSection title="Local game assembly">
+            {editingPath ? (
               <>
                 <div className="flex gap-2">
-                  <input value={kSts2Path} onChange={(e) => setKSts2Path(e.target.value)} placeholder="sts2.dll 完整路径" className="input-mono flex-1" />
-                  <Button size="sm" onClick={async () => {
-                    try { const f = await api.discoverSts2Dll() as string | null; if (f) setKSts2Path(f); else setError("未自动发现 sts2.dll"); } catch (e) { setError(String(e)); }
-                  }}>🔍</Button>
+                  <input
+                    value={sts2Path}
+                    onChange={(event) => setSts2Path(event.target.value)}
+                    placeholder="sts2.dll full path"
+                    className="input-mono flex-1"
+                  />
+                  <Button
+                    size="sm"
+                    title="Discover sts2.dll"
+                    aria-label="Discover sts2.dll"
+                    onClick={async () => {
+                      try {
+                        const found = (await api.discoverSts2Dll()) as string | null;
+                        if (found) setSts2Path(found);
+                        else setError("sts2.dll was not found");
+                      } catch (caught) {
+                        setError(String(caught));
+                      }
+                    }}
+                  >
+                    <Search size={14} />
+                  </Button>
                 </div>
                 <div className="flex gap-2 mt-2">
-                  <Button variant="success" size="sm" onClick={async () => {
-                    try { await api.saveSettingsPatch({ knowledge: { sts2_dll_path: kSts2Path } }); setKSts2Editing(false); } catch (e) { setError(String(e)); }
-                  }}>Save</Button>
-                  <Button size="sm" onClick={async () => {
-                    setKSts2Editing(false);
-                    try { const s = await api.getSettingsSnapshot() as SettingsSnapshot; setKSts2Path(s.knowledge.sts2DllPath); } catch {}
-                  }}>Cancel</Button>
+                  <Button
+                    variant="success"
+                    size="sm"
+                    onClick={async () => {
+                      try {
+                        await api.saveSettingsPatch({
+                          knowledge: { sts2_dll_path: sts2Path },
+                        });
+                        setEditingPath(false);
+                      } catch (caught) {
+                        setError(String(caught));
+                      }
+                    }}
+                  >
+                    <Save size={14} /> Save
+                  </Button>
+                  <Button size="sm" onClick={() => setEditingPath(false)}>
+                    <X size={14} /> Cancel
+                  </Button>
                 </div>
               </>
             ) : (
-              <>
-                <code className="break-all" style={{ fontSize: "12px" }}>{kSts2Path || "<not set>"}</code>
-                <div className="mt-2"><Button size="sm" onClick={() => setKSts2Editing(true)}>Edit</Button></div>
-              </>
+              <div className="flex items-center gap-2">
+                <code className="break-all flex-1" style={{ fontSize: "12px" }}>
+                  {sts2Path || "<not set>"}
+                </code>
+                <Button
+                  size="sm"
+                  title="Edit local game assembly"
+                  aria-label="Edit local game assembly"
+                  onClick={() => setEditingPath(true)}
+                >
+                  <Pencil size={14} />
+                </Button>
+              </div>
             )}
           </CardSection>
 
-          <CardSection title="刷新 & 导出 / 导入">
-            <div className="flex items-center gap-3 mb-3">
+          <CardSection title="Refresh">
+            <div className="flex items-center gap-3 flex-wrap">
               <label className="flex items-center gap-2" style={{ fontSize: "13px" }}>
-                <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} /> force
+                <input
+                  type="checkbox"
+                  checked={force}
+                  onChange={(event) => setForce(event.target.checked)}
+                />
+                force re-index
               </label>
-              <Button variant="accent" onClick={() => void handleRefresh()} disabled={refreshBusy}>
-                {refreshBusy ? (refreshStage ?? "Refreshing…") : "刷新知识库"}
+              <Button
+                variant="accent"
+                onClick={() => void handleRefresh()}
+                disabled={refreshBusy || !sts2Path || !project}
+              >
+                <RefreshCw size={14} />
+                {refreshBusy ? (refreshStage ?? "Refreshing...") : "Refresh snapshot"}
               </Button>
-              {refreshMsg && <span style={{ fontSize: "12px", color: "var(--ink-mute)" }}>{refreshMsg}</span>}
+              {refreshMessage && (
+                <span style={{ fontSize: "12px", color: "var(--ink-mute)" }}>
+                  {refreshMessage}
+                </span>
+              )}
             </div>
-            <div className="flex items-center gap-3 mb-3">
-              <input value={packPath} onChange={(e) => setPackPath(e.target.value)} placeholder="导出 / 导入 .zip 路径" className="input-mono flex-1" />
-              <label className="flex items-center gap-2" style={{ fontSize: "13px", whiteSpace: "nowrap" }}>
-                <input type="checkbox" checked={overwriteOnImport} onChange={(e) => setOverwriteOnImport(e.target.checked)} /> overwrite
-              </label>
-              <Button onClick={() => void handleExport()} disabled={!packPath || packBusy}>Export</Button>
-              <Button variant="accent" onClick={() => void handleImport()} disabled={!packPath || packBusy}>Import</Button>
-            </div>
-            {packMsg && <p style={{ fontSize: "12px", color: "var(--jade)" }}>{packMsg}</p>}
           </CardSection>
         </>
       )}

@@ -31,8 +31,8 @@ function StatusBar() {
           </Badge>
         </Link>
         <Link to="/system" style={{ textDecoration: "none" }}>
-          <Badge variant={health?.readiness?.knowledgeReady ? "ok" : "warn"}>
-            {health?.readiness?.knowledgeReady ? "知识库" : "知识库 ⚠"}
+          <Badge variant={health?.readiness?.truthSnapshotReady ? "ok" : "warn"}>
+            {health?.readiness?.truthSnapshotReady ? "Snapshot" : "Snapshot ⚠"}
           </Badge>
         </Link>
         <Link to="/system" style={{ textDecoration: "none" }}>

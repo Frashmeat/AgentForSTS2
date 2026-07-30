@@ -20,8 +20,8 @@ export interface ReadinessFlags {
   /// ML rembg 预热是否就绪（feature ml-rembg + 模型加载成功）
   /** ML rembg 预热是否就绪（feature ml-rembg + 模型加载成功） */
   imageProcReady: boolean;
-  /** 游戏知识库反编译产物是否就绪（game_dir 下有 .cs 文件）。codegen prompt 含真实类型事实的前提。 */
-  knowledgeReady: boolean;
+  /** 活动工程是否有经过完整校验的 current Truth Snapshot。 */
+  truthSnapshotReady: boolean;
   /** 后台任务 worker 是否在跑（Stage 3.4 Web 轨上线前 desktop 始终为 true） */
   queueWorkerReady: boolean;
 }
@@ -59,73 +59,47 @@ export function getLocalCapabilitiesFull(): Promise<LocalCapabilities> {
   return invoke<LocalCapabilities>("get_local_capabilities_full");
 }
 
-// -------- Knowledge --------
+// -------- Truth Snapshot --------
 
-export type OverallState = "fresh" | "missing" | "stale";
-export type SourceMode = "runtime_decompiled" | "missing";
+export type TruthSnapshotReadiness = "ready" | "missing" | "invalid";
 
-export interface GameStatus {
-  sourceMode: SourceMode;
-  knowledgePath: string;
-  hasDecompiledSources: boolean;
+export interface TruthSnapshotSource {
+  id: string;
+  kind: string;
+  version: string | null;
+  relativePath: string;
+  sha256: string;
+  sizeBytes: number;
 }
 
-export interface BaselibStatus {
-  sourceMode: SourceMode;
-  knowledgePath: string;
-  hasDecompiledSources: boolean;
+export interface TruthSnapshotIndex {
+  sourceId: string;
+  indexer: string;
+  provider: string;
+  relativeRoot: string;
+  fileCount: number;
+  csFileCount: number;
+  totalBytes: number;
+  treeSha256: string;
 }
 
-export interface KnowledgeStatus {
-  overall: OverallState;
-  knowledgeRoot: string;
+export interface TruthSnapshotStatus {
+  state: TruthSnapshotReadiness;
+  gamePackId: string;
+  snapshotId: string | null;
+  createdAt: string | null;
+  sources: TruthSnapshotSource[];
+  indexes: TruthSnapshotIndex[];
+  toolVersions: Record<string, string>;
   warnings: string[];
-  game: GameStatus;
-  baselib: BaselibStatus;
-  embeddedTemplates: string[];
 }
 
-export function getKnowledgeStatus(): Promise<KnowledgeStatus> {
-  return invoke<KnowledgeStatus>("get_knowledge_status");
+export function getTruthSnapshotStatus(): Promise<TruthSnapshotStatus> {
+  return invoke<TruthSnapshotStatus>("get_truth_snapshot_status");
 }
 
-export function checkKnowledgeStatus(): Promise<KnowledgeStatus> {
-  return invoke<KnowledgeStatus>("check_knowledge_status");
-}
-
-export interface ExportPackStats {
-  outputPath: string;
-  zipBytes: number;
-  gameFiles: number;
-  baselibIncluded: boolean;
-}
-
-export interface ImportPackStats {
-  gameFilesWritten: number;
-  baselibWritten: boolean;
-  manifestReplaced: boolean;
-}
-
-export function exportKnowledgePack(
-  outputPath: string,
-  machineHint?: string,
-): Promise<ExportPackStats> {
-  /* 游戏知识库反编译产物是否就绪（game_dir 下有 .cs 文件）。
-   * codegen prompt 含有真实类型事实的前提。 */
-  return invoke<ExportPackStats>("export_knowledge_pack", {
-    outputPath,
-    machineHint: machineHint ?? null,
-  });
-}
-
-export function importKnowledgePack(
-  inputPath: string,
-  overwrite: boolean,
-): Promise<ImportPackStats> {
-  return invoke<ImportPackStats>("import_knowledge_pack", {
-    inputPath,
-    overwrite,
-  });
+export function checkTruthSnapshotStatus(): Promise<TruthSnapshotStatus> {
+  return invoke<TruthSnapshotStatus>("check_truth_snapshot_status");
 }
 
 // -------- mod_analyzer --------
@@ -643,6 +617,8 @@ export type JobKind =
   | "package_project"
   | "single_asset_plan"
   | "log_analysis"
+  | "truth_snapshot_refresh"
+  // Historical records only.
   | "knowledge_refresh";
 
 export type JobStatus =
@@ -792,17 +768,14 @@ export function submitSingleAssetPlanJob(
   return invoke<SubmitJobAck>("submit_single_asset_plan_job", { request });
 }
 
-export interface SubmitKnowledgeRefreshRequest {
-  sts2_dll_path?: string;
-  ilspycmd_path?: string | null;
+export interface SubmitTruthSnapshotRefreshRequest {
   force?: boolean;
-  include_baselib?: boolean;
 }
 
-export function submitKnowledgeRefreshJob(
-  request: SubmitKnowledgeRefreshRequest,
+export function submitTruthSnapshotRefreshJob(
+  request: SubmitTruthSnapshotRefreshRequest,
 ): Promise<SubmitJobAck> {
-  return invoke<SubmitJobAck>("submit_knowledge_refresh_job", { request });
+  return invoke<SubmitJobAck>("submit_truth_snapshot_refresh_job", { request });
 }
 
 export interface SubmitAssetGenerateRequest {

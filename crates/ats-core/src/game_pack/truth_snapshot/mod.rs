@@ -3,11 +3,18 @@
 mod error;
 mod hash;
 mod model;
+mod refresh;
 mod store;
 
 pub use error::{TruthSnapshotError, TruthSnapshotResult};
 pub use model::{
     TruthSnapshotIndex, TruthSnapshotManifest, TruthSnapshotSource, VerifiedTruthSnapshot,
+};
+pub use refresh::{
+    GitHubReleaseAssetFetcher, IlspycmdTruthIndexer, RemoteTruthSourceFetcher,
+    TruthSnapshotReadiness, TruthSnapshotRefreshError, TruthSnapshotRefreshOutcome,
+    TruthSnapshotRefreshResult, TruthSnapshotRefresher, TruthSnapshotStatus, TruthSourceIndexer,
+    inspect_truth_snapshot, validate_truth_source_inputs,
 };
 pub use store::{TruthSnapshotDraft, TruthSnapshotStore};
 

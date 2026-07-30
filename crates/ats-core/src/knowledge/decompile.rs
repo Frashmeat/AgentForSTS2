@@ -1,7 +1,7 @@
 //! ilspycmd 子进程发现 + 反编译调度。
 //!
 //! Stage 2.2.1：先把"找到 ilspycmd"和"跑 ilspycmd"两件事拆成纯函数 + 子进程封装。
-//! Handler 层（platform/handlers/knowledge_refresh.rs）负责拼装这两步并接 Job 框架。
+//! Truth Snapshot refresher 负责拼装这两步并接 Job 框架。
 //!
 //! 设计取向：
 //! - 发现走 PATH + 候选目录数组。`discover_ilspycmd_in` 是纯函数，单测注入假目录即可

@@ -372,7 +372,7 @@ Correct: validate declarations against an explicit Core capability catalog, pers
 
 ### 1. Scope / Trigger
 
-This contract applies when changing `crates/ats-core/src/game_pack/truth_snapshot/`, Pack truth-source checksums, snapshot storage, or the future provider/Prompt cutover. Slice 2 establishes an immutable verified input boundary beside the legacy knowledge path; it does not switch `knowledge_refresh`, `KnowledgePaths`, `SourceMode`, Prompt/Evidence, or the formal `runtime/knowledge` cache.
+This contract applies when changing `crates/ats-core/src/game_pack/truth_snapshot/`, Pack truth-source checksums, snapshot storage, refresh, or provider/Prompt consumers. The immutable verified input boundary is the only production truth-source path; the old `runtime/knowledge` layout is test-only where needed for committed equivalence fixtures.
 
 ### 2. Signatures and Storage
 
@@ -406,7 +406,7 @@ runtime/game-packs/<game-id>/
 - Drafts and final snapshots are on the same volume. A verified draft is renamed into `snapshots/<snapshot-id>` before the atomic `current.json` pointer is replaced. A failed draft never changes the previous pointer.
 - Opening a snapshot recomputes its identity and verifies Pack binding, manifest pointer checksum, every source hash/size, and every index tree. Snapshot IDs and manifest-relative paths cannot escape the store.
 - `VerifiedTruthSnapshot` can only be constructed by store verification. A job holds one handle for its lifetime; activating a new current snapshot does not retarget that handle.
-- Snapshot acquisition/provider execution, legacy refresh cutover, import/export, and garbage collection are later slices. No caller may describe the new store as the active Prompt evidence source until Slice 3 is complete.
+- Snapshot acquisition and provider execution are implemented by the Pack-driven refresh and verified context paths. Snapshot import/export and garbage collection remain unsupported and must not bypass store verification.
 
 ### 4. Validation & Error Matrix
 
@@ -506,7 +506,7 @@ Correct: select all Snapshot indexes declared for one provider, build one corpus
 
 ### 1. Scope / Trigger
 
-This contract applies to production code, asset, and batch generation; Prompt previews; and Evidence Records. Legacy knowledge refresh/status remains temporarily available for maintenance UI but is not a generation input.
+This contract applies to production code, asset, and batch generation; Prompt previews; and Evidence Records. Production refresh and status use the active project's Pack and verified Truth Snapshot; legacy knowledge refresh/status is not available.
 
 ### 2. Signatures and Payload
 
@@ -576,81 +576,86 @@ cargo check -p agentthespire-desktop
 cargo check -p ats-web
 ```
 
-## Scenario: Complete Knowledge Refresh and Desktop Job Routing
+## Scenario: Pack-Driven Truth Snapshot Refresh
 
 ### 1. Scope / Trigger
 
-This contract applies when changing STS2 source scanning, BaseLib GitHub errors, `knowledge_refresh`, desktop job retrieval, or knowledge GUI E2E. It covers complete fact indexing, optional BaseLib warning semantics, global knowledge job visibility, and E2E isolation. It does not authorize writing the game installation, real Mods, or the repository's formal `runtime/knowledge` during E2E.
+This contract applies when changing Pack truth-source acquisition, indexer execution, current Snapshot activation, Desktop refresh/status, health readiness, or refresh Job history. It does not authorize writing the game installation or operating the game UI.
 
 ### 2. Signatures and Storage
 
 ```rust
-Sts2CodeFactsProvider::build_facts(
-    query: &KnowledgeQuery,
-    paths: &KnowledgePaths,
-    game_mode: SourceMode,
-) -> (Vec<KnowledgeFactItem>, Vec<String>)
+TruthSnapshotRefresher::refresh(pack, store, local_inputs, force)
+    -> Result<TruthSnapshotRefreshOutcome, TruthSnapshotRefreshError>
 
-BaselibSource::fetch_baselib_dll(dest_dir: &Path)
-    -> Result<FetchedBaselib, BaselibError>
+inspect_truth_snapshot(pack, store) -> TruthSnapshotStatus
+
+JobApplicationService::submit_truth_snapshot_refresh(
+    request, pack, store, local_inputs, refresher, sink,
+) -> JobResult<JobId>
 ```
 
 ```text
-Tauri write: submit_knowledge_refresh_job(request) -> <runtime>/knowledge/jobs
+Tauri write: submit_truth_snapshot_refresh_job({force}) -> <project>/.ats/history
 Tauri read:  get_job(id), list_jobs(), cancel_job(id)
 Project jobs: <project>/.ats/history
-Knowledge jobs: <runtime>/knowledge/jobs
+Historical legacy jobs: <runtime>/knowledge/jobs (read-only compatibility)
 ```
 
-The read commands route across the active project repository and the global knowledge repository. `list_jobs` merges both and sorts by `createdAt` descending. A knowledge refresh must remain observable even when an active project is open.
+The Tauri submit command derives `game_id` from the active project and local source bindings from workstation configuration. The request cannot provide a Pack ID, source path, release, asset, checksum, indexer, or provider.
 
 ### 3. Contracts
 
-- Collect `.cs` files first, sort paths deterministically, then scan. The production safety limit is 10,000 files, which exceeds the verified 3,425-file STS2 source while retaining an IO bound.
-- If discovered files exceed the limit, return a warning containing discovered count, scanned limit, and explicit truncation language. Never report a truncated index as complete.
-- A BaseLib failure is optional: preserve the successful game manifest, complete the job with `baselibStatus = "warning"`, and place the actionable message in `baselibError`.
-- GitHub 401 says the token is invalid or expired and names `runtime.workstation.github_token`. Rate-limited 403/429 says to configure a valid token or wait. Other 403 responses say to check permissions.
-- Do not return the raw upstream body for these statuses and never echo tokens, credentials, IP-specific rate-limit text, or unbounded response content.
-- `ATS_E2E_BASELIB_RELEASE_URL` is read only when the desktop and core `e2e` Cargo features are enabled. Production builds always use the official GitHub Releases URL.
-- GUI E2E uses temporary config, runtime, app-data, projects, and Mods. The real STS2 DLL and `ilspycmd` are read-only inputs.
+- Local inputs are validated before Job creation. Every Pack-declared source is required.
+- Refresh-only Job submission does not construct or require an LLM client or API key.
+- GitHub sources use `/releases/tags/<pinned-release>` and require an exact asset name, matching response tag, and exact Pack SHA-256. Production never calls `releases/latest`.
+- The GitHub API token is sent only to the API request. It is never forwarded to the response-provided browser download URL.
+- Indexers are a closed Core capability set. Stage 1 supports `dotnet_project` and `dotnet_file`; unknown values fail deterministically.
+- Every source is copied into the draft before indexing. Indexers consume only the staged copy.
+- `ilspycmd --version` is part of Snapshot identity. A verified current Snapshot is a cache hit only when Pack, local source hashes, pinned remote identities, indexes, and tool versions still match.
+- A verified pinned remote source may be reused when a local source or tool changes. `force = true` reacquires remote inputs and reindexes all sources; identical content still deduplicates by Snapshot ID.
+- Fetch, checksum, index, or finalize failure never updates `current.json`. A Pack-declared BaseLib failure fails the refresh Job; it is not an optional warning.
+- Status is `ready`, `missing`, or `invalid`. `ready` requires reopening and fully verifying the current Snapshot.
+- Desktop health uses verified current readiness. Web has no global knowledge status route because it has no active-project identity; Web generation validates the request project's context directly.
+- Legacy `KnowledgeRefresh` remains an enum value only for historical Job deserialization. Old refresh/status, manifest v1, import/export, and `releases/latest` clients have no production entry.
 
 ### 4. Validation and Error Matrix
 
 | Condition | Expected behavior |
 | --- | --- |
-| 3,425-file current game source | all files indexed; no truncation warning; later symbols resolve from `knowledge/game` |
-| More than 10,000 `.cs` files | scan first 10,000 sorted paths and emit explicit truncation warning |
-| Empty game directory | no facts and the existing no-types warning |
-| BaseLib 401 | game refresh preserved; completed job with actionable invalid/expired-token warning |
-| BaseLib rate-limited 403/429 | game refresh preserved; completed job with valid-token/wait guidance |
-| Other BaseLib 403 | completed warning that directs the user to token permissions |
-| Active project plus knowledge job | merged list and ID lookup expose both repositories |
-| Missing job ID | `JobError::NotFound`; do not silently select another repository |
+| All declared sources fetch, hash, and index | Atomically activate a verified current Snapshot and complete the Job with Pack/Snapshot/source/index/tool identity |
+| Inputs and tool versions unchanged | Return `cacheHit = true` without fetch or index work |
+| Local game assembly changes | Create a new Snapshot and reuse the still-verified pinned remote source |
+| Fixed remote bytes do not match Pack SHA | Fail and preserve the previous current pointer |
+| Indexer fails or emits no C# | Fail and preserve the previous current pointer |
+| Local input key is absent or not a file | Reject before Job creation |
+| Current pointer or bytes are corrupt | Status is `invalid`; generation cannot open a context |
+| Refresh is already locked | Fail with a deterministic busy error; do not race Snapshot directory activation |
 
 ### 5. Good / Base / Bad Cases
 
-- Good: a forced GUI refresh of the current DLL writes a matching manifest with 3,425 files; `NSettingsScreen` and the core command/model symbols resolve from game sources.
-- Base: repeated scan order is stable; a game cache hit plus `include_baselib = false` completes without network access.
-- Bad: deterministic local 401 and rate-limited 403 responses produce sanitized, actionable `baselibError` values visible in the GUI job detail.
+- Good: current game assembly and the Pack-pinned BaseLib produce one verified Snapshot whose manifest records both source and index identities.
+- Base: a second non-forced refresh is a cache hit; a forced identical refresh reexecutes work but reuses the content-addressed Snapshot ID.
+- Bad: remote checksum or index failure leaves the previous verified current usable and records a failed refresh Job.
 
 ### 6. Tests Required
 
 ```text
-cargo test -p ats-core knowledge::
+cargo test -p ats-core game_pack::truth_snapshot::refresh::tests
+cargo test -p ats-core platform::application::handlers::truth_snapshot_refresh::tests
+cargo check -p ats-core
 cargo check -p agentthespire-desktop
-cargo check -p agentthespire-desktop --features e2e
-npm run test:frontend
-npx tsc --noEmit
-npm run test:e2e:gui
+cargo check -p ats-web
+npx tsc -b --pretty false
 ```
 
-Assertions must cover more than the legacy 2,000-file threshold, deterministic ordering, explicit small-limit truncation, empty directory behavior, sanitized 401/403/429 classification, merged job visibility, manifest/source/count consistency, a real later source such as `NSettingsScreen.cs`, and GUI job details. The E2E runner must delete its temporary root only after success and retain it on failure.
+Assertions must cover successful activation, cache hit, local source change, pinned release URL, exact remote SHA, index failure, missing local input, `ready/missing/invalid`, token non-forwarding, and Job result identity/counts.
 
 ### 7. Wrong vs Correct
 
-Wrong: stop during unsorted `WalkDir` enumeration, surface GitHub's raw body, or write a knowledge job to a repository that the GUI never queries.
+Wrong: fetch `releases/latest`, treat BaseLib as optional, index the caller's mutable source path, or update current after only the game source succeeds.
 
-Correct: sort then bound with an explicit warning, classify external errors into safe actions, route reads across project/global job stores, and prove the complete flow with isolated real-DLL GUI E2E.
+Correct: resolve all inputs from the active Pack, stage and hash every source, run only declared Core indexers over staged copies, verify the complete Snapshot, then atomically activate current.
 
 ## Scenario: STS2 Mod Manifest Scaffold Contract
 

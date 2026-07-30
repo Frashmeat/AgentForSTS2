@@ -20,17 +20,16 @@
 //! - asset_generate handler（依赖 image_gen 客户端）
 
 pub mod application;
-pub mod discovery;
 pub mod contracts;
+pub mod discovery;
 pub mod domain;
 pub mod infra;
 
 pub use application::{JobApplicationService, NoopProgressSink, ProgressEvent, ProgressSink};
 pub use contracts::{
     SubmitAssetGenerateRequest, SubmitBatchCustomCodeRequest, SubmitBuildProjectRequest,
-    SubmitCodeGenerateRequest, SubmitJobAck, SubmitKnowledgeRefreshRequest,
-    SubmitLogAnalysisRequest, SubmitPackageProjectRequest, SubmitSingleAssetPlanRequest,
-    SubmitTextGenerateRequest,
+    SubmitCodeGenerateRequest, SubmitJobAck, SubmitLogAnalysisRequest, SubmitPackageProjectRequest,
+    SubmitSingleAssetPlanRequest, SubmitTextGenerateRequest, SubmitTruthSnapshotRefreshRequest,
 };
 pub use domain::{
     Job, JobError, JobId, JobKind, JobProgress, JobRepository, JobResult, JobStatus, JobSummary,

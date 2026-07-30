@@ -303,5 +303,36 @@ cargo check -p ats-web                                                 # passed
 
 边界与下一步：
 
-- 当前仓库尚未实现从真实 STS2/BaseLib 输入创建新 current Snapshot 的生产刷新链，因此本机没有 current Snapshot 时，生成和 prompt preview 会按设计失败；不得回退到旧 `runtime/knowledge`。
-- 下一步是 Work Order 6：接入当前 STS2 `v0.107.1` 与 BaseLib `v3.3.8` 的 Snapshot 获取/索引，生成 Gate 0 新候选并执行 compile/build/package 文件级检查；真实游戏复验仍由用户人工执行。
+- Slice 3 提交时尚未实现生产刷新链；该限制已由下述 Slice 4A 解除。
+- 下一步在新刷新入口创建当前 STS2 `v0.107.1` / BaseLib `v3.3.8` Snapshot，再生成 Gate 0 候选并执行 compile/build/package 文件级检查；真实游戏复验仍由用户人工执行。
+
+## 15. Slice 4A Snapshot refresh cutover 实施结果（2026-07-30）
+
+已完成：
+
+- 新增 Pack 驱动的 `TruthSnapshotRefresher`。本地输入由活动工程和 workstation 配置绑定；远程输入只访问 Pack 固定 GitHub release tag 和精确 asset，并由 Snapshot staging 校验 Pack SHA-256。
+- `dotnet_project` / `dotnet_file` 是当前唯一允许的 indexer；`ilspycmd --version` 进入 Snapshot 身份。所有 indexer 只消费 staging 副本。
+- verified current 的 Pack、local SHA、remote identity、index 和 tool version 未变化时返回 cache hit；本地源变化时可复用仍通过完整校验的固定远程源；`force` 重新获取并索引，但相同内容仍按 Snapshot ID 去重。
+- 刷新持有 OS 文件锁。fetch/hash/index/finalize 任一步失败都不会更新 `current.json`；Pack 声明的 BaseLib 不再是可选 warning。
+- 新增 `TruthSnapshotRefresh` Job，结果记录 Pack ID、Snapshot ID、cache hit、source/index 数和 tool versions。请求只含 `force`，不能伪造 game/source/indexer。
+- Refresh-only Job service 不构造也不要求 LLM client；没有配置 API key 时仍可建立首次 Snapshot。
+- Desktop 状态切换为 `ready | missing | invalid`，展示 Pack、Snapshot、source/index/tool 身份；health readiness 只认可完整 verified current。
+- 删除旧 `knowledge_refresh` handler、latest BaseLib 客户端、manifest v1、runtime status、ZIP import/export 和 Web 全局 knowledge status route。`KnowledgeRefresh` 只保留为历史 Job 反序列化枚举；legacy `SourceMode` / `KnowledgePaths` 仅在 `cfg(test)` 等价性夹具中存在。
+- GitHub API token 只发给 API 请求，不转发给 release 响应提供的 asset download URL。
+
+针对性验证：
+
+```text
+cargo test -p ats-core game_pack::truth_snapshot::refresh::tests                  # 10 passed
+cargo test -p ats-core platform::application::handlers::truth_snapshot_refresh::tests # 1 passed
+cargo check -p ats-core                                                           # passed
+cargo check -p agentthespire-desktop                                              # passed
+cargo check -p ats-web                                                            # passed
+npx tsc -b --pretty false                                                         # passed
+```
+
+边界与下一步：
+
+- 尚未通过新入口刷新本机真实 Snapshot，也未生成 Gate 0 新候选。
+- 未运行全量测试、全量构建或真实游戏 UI。
+- 下一步是 Slice 4B：创建真实 current Snapshot，生成新候选并完成 compile gate、build/package 和文件级检查，再交由用户执行真实游戏复验。

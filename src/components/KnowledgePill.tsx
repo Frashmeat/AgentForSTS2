@@ -1,45 +1,58 @@
 import { useEffect, useState } from "react";
+import { Database } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+
 import { api } from "@/services/api";
-import type { KnowledgeStatus } from "@/services/tauriApi";
+import type { TruthSnapshotStatus } from "@/services/tauriApi";
+import { useProjectStore } from "@/stores/project";
 
 export function KnowledgePill() {
-  const [status, setStatus] = useState<KnowledgeStatus | null>(null);
-  const nav = useNavigate();
+  const [status, setStatus] = useState<TruthSnapshotStatus | null>(null);
+  const navigate = useNavigate();
+  const projectPath = useProjectStore((state) => state.project?.path);
 
   useEffect(() => {
     if (!__IS_TAURI__) return;
-    (api.getKnowledgeStatus() as Promise<KnowledgeStatus>)
-      .then(setStatus)
-      .catch(() => {});
-    // Poll every 30s
-    const i = setInterval(() => {
-      (api.getKnowledgeStatus() as Promise<KnowledgeStatus>)
+    if (!projectPath) {
+      setStatus(null);
+      return;
+    }
+    const refresh = () => {
+      (api.getTruthSnapshotStatus() as Promise<TruthSnapshotStatus>)
         .then(setStatus)
-        .catch(() => {});
-    }, 30000);
-    return () => clearInterval(i);
-  }, []);
+        .catch(() => setStatus(null));
+    };
+    refresh();
+    const interval = setInterval(refresh, 60_000);
+    return () => clearInterval(interval);
+  }, [projectPath]);
 
   if (!__IS_TAURI__) return null;
 
-  const overall = status?.overall ?? "missing";
-  
-  const color = overall === "fresh" ? "#16a34a" : overall === "stale" ? "#d97706" : "#dc2626";
+  const state = status?.state ?? "missing";
+  const color =
+    state === "ready" ? "#15803d" : state === "invalid" ? "#b91c1c" : "#b45309";
 
   return (
     <button
-      onClick={() => nav("/system?tab=ops")}
-      title={`知识库: ${overall}`}
+      onClick={() => navigate("/system?tab=ops")}
+      title={`Truth Snapshot: ${state}`}
       style={{
-        display: "inline-flex", alignItems: "center", gap: "5px",
-        padding: "3px 10px", borderRadius: "4px", border: "none", cursor: "pointer",
-        fontSize: "11.5px", fontFamily: '"JetBrains Mono", monospace',
-        background: "var(--paper-soft)", color: color,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "5px",
+        padding: "3px 8px",
+        borderRadius: "4px",
+        border: "none",
+        cursor: "pointer",
+        fontSize: "11.5px",
+        fontFamily: '"JetBrains Mono", monospace',
+        background: "var(--paper-soft)",
+        color,
       }}
     >
-      <span>🧠</span>
-      <span>{overall === "fresh" ? "知识库" : overall === "stale" ? "知识库(旧)" : "知识库 ✗"}</span>
+      <Database size={13} />
+      <span>{state === "ready" ? "Snapshot" : `Snapshot ${state}`}</span>
     </button>
   );
 }

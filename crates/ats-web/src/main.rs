@@ -55,7 +55,7 @@ fn build_health_report(state: &AppState) -> HealthReport {
             settings,
             false, // active_project_open
             false, // image_proc_ready
-            false, // knowledge_ready — web 端无本地知识库
+            false, // truth_snapshot_ready — Web 健康检查没有工程上下文
         ),
         None => ats_core::health::report(Role::Web, state.config_status.clone()),
     }
@@ -105,7 +105,6 @@ async fn main() -> anyhow::Result<()> {
 
     let api = Router::new()
         .route("/api/health", get(health_handler))
-        .merge(routes::knowledge::router())
         .merge(routes::planning::router())
         .merge(routes::codegen::router())
         .merge(routes::llm::router())

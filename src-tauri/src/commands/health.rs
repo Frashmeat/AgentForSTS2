@@ -5,6 +5,9 @@
 
 use std::sync::Arc;
 
+use ats_core::game_pack::{
+    GamePackRegistry, TruthSnapshotReadiness, TruthSnapshotStore, inspect_truth_snapshot,
+};
 use ats_core::health::{HealthReport, Role};
 use tauri::State;
 
@@ -13,25 +16,42 @@ use crate::commands::image_proc_state::{ImageProcState, PrewarmStatus};
 use crate::commands::project::ActiveProject;
 
 #[tauri::command]
-pub fn get_health(
+pub async fn get_health(
     config: State<'_, AppConfig>,
     active: State<'_, ActiveProject>,
     image_proc: State<'_, Arc<ImageProcState>>,
-) -> HealthReport {
-    let active_open = active.0.lock().map(|g| g.is_some()).unwrap_or(false);
+) -> Result<HealthReport, String> {
+    let (active_open, game_id) = active
+        .0
+        .lock()
+        .map(|guard| {
+            (
+                guard.is_some(),
+                guard.as_ref().map(|project| project.meta().game_id.clone()),
+            )
+        })
+        .unwrap_or((false, None));
     let image_proc_ready = matches!(image_proc.status_snapshot(), PrewarmStatus::Ready { .. });
     let status = config.status_snapshot();
-    let knowledge_ready =
-        ats_core::knowledge::runtime::detect_source_mode(
-            &ats_core::knowledge::KnowledgePaths::from_runtime_dir(&status.runtime_dir()),
-        ) == ats_core::knowledge::SourceMode::RuntimeDecompiled;
     let (settings, _) = config.snapshot();
-    ats_core::health::report_full(
+    let runtime_dir = status.runtime_dir();
+    let truth_snapshot_ready = tokio::task::spawn_blocking(move || {
+        let game_id = game_id?;
+        let registry = GamePackRegistry::built_in().ok()?;
+        let pack = registry.require(&game_id).ok()?;
+        let store = TruthSnapshotStore::new(&runtime_dir, pack);
+        Some(inspect_truth_snapshot(pack, &store).state == TruthSnapshotReadiness::Ready)
+    })
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or(false);
+    Ok(ats_core::health::report_full(
         Role::Workstation,
         status,
         &settings,
         active_open,
         image_proc_ready,
-        knowledge_ready,
-    )
+        truth_snapshot_ready,
+    ))
 }

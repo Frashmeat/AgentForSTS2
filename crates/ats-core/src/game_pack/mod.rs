@@ -18,6 +18,10 @@ pub use loader::{GamePackLoadPolicy, GamePackLoader, resolve_pack_relative_path}
 pub use model::{LoadedGamePack, TruthSource, TruthSourceKind};
 pub use registry::GamePackRegistry;
 pub use truth_snapshot::{
-    TruthSnapshotDraft, TruthSnapshotError, TruthSnapshotIndex, TruthSnapshotManifest,
-    TruthSnapshotResult, TruthSnapshotSource, TruthSnapshotStore, VerifiedTruthSnapshot,
+    GitHubReleaseAssetFetcher, IlspycmdTruthIndexer, RemoteTruthSourceFetcher, TruthSnapshotDraft,
+    TruthSnapshotError, TruthSnapshotIndex, TruthSnapshotManifest, TruthSnapshotReadiness,
+    TruthSnapshotRefreshError, TruthSnapshotRefreshOutcome, TruthSnapshotRefreshResult,
+    TruthSnapshotRefresher, TruthSnapshotResult, TruthSnapshotSource, TruthSnapshotStatus,
+    TruthSnapshotStore, TruthSourceIndexer, VerifiedTruthSnapshot, inspect_truth_snapshot,
+    validate_truth_source_inputs,
 };

@@ -17,7 +17,7 @@ export type SubmitKind =
   | "build_project"
   | "package_project"
   | "log_analysis"
-  | "knowledge_refresh";
+  | "truth_snapshot_refresh";
 
 const KIND_LABELS: Array<{ value: SubmitKind; label: string }> = [
   { value: "text_generate", label: "text_generate (free prompt)" },
@@ -28,7 +28,7 @@ const KIND_LABELS: Array<{ value: SubmitKind; label: string }> = [
   { value: "build_project", label: "build_project (dotnet publish)" },
   { value: "package_project", label: "package_project (zip)" },
   { value: "log_analysis", label: "log_analysis (LLM diagnose)" },
-  { value: "knowledge_refresh", label: "knowledge_refresh (ilspycmd)" },
+  { value: "truth_snapshot_refresh", label: "truth_snapshot_refresh" },
 ];
 
 interface Props {
@@ -70,9 +70,7 @@ export function JobsSubmitForm({ onSubmitted, onError }: Props) {
 ]`,
   );
   const [batchFailFast, setBatchFailFast] = useState(false);
-  const [knowledgeDllPath, setKnowledgeDllPath] = useState("");
-  const [knowledgeForce, setKnowledgeForce] = useState(false);
-  const [knowledgeIncludeBaselib, setKnowledgeIncludeBaselib] = useState(false);
+  const [snapshotForce, setSnapshotForce] = useState(false);
 
   async function handleSubmit() {
     setBusy(true);
@@ -88,7 +86,6 @@ export function JobsSubmitForm({ onSubmitted, onError }: Props) {
     if (submitKind === "build_project" && !buildProjectRoot.trim()) { onError("project_root 不能为空"); return; }
     if (submitKind === "package_project" && !packageSourceDir.trim()) { onError("source_dir 不能为空"); return; }
     if (submitKind === "log_analysis" && !logText.trim()) { onError("log_text 不能为空"); return; }
-    if (submitKind === "knowledge_refresh" && !knowledgeDllPath.trim()) { onError("sts2.dll 路径不能为空"); return; }
     try {
       let ack: SubmitJobAck;
       switch (submitKind) {
@@ -169,11 +166,9 @@ export function JobsSubmitForm({ onSubmitted, onError }: Props) {
             context_hint: logContextHint.trim() || null,
           })) as SubmitJobAck;
           break;
-        case "knowledge_refresh":
-          ack = (await api.submitKnowledgeRefreshJob({
-            sts2_dll_path: knowledgeDllPath,
-            force: knowledgeForce,
-            include_baselib: knowledgeIncludeBaselib,
+        case "truth_snapshot_refresh":
+          ack = (await api.submitTruthSnapshotRefreshJob({
+            force: snapshotForce,
           })) as SubmitJobAck;
           break;
       }
@@ -387,38 +382,16 @@ export function JobsSubmitForm({ onSubmitted, onError }: Props) {
         </>
       )}
 
-      {submitKind === "knowledge_refresh" && (
-        <>
-          <Field label="sts2.dll path">
-            <input
-              value={knowledgeDllPath}
-              onChange={(e) => setKnowledgeDllPath(e.target.value)}
-              placeholder="E:/Steam/steamapps/common/SlayTheSpire2/sts2.dll"
-              className="input-mono"
-              data-testid="job-knowledge-dll-path"
-            />
-          </Field>
-          <div className="flex flex-wrap gap-4" style={{ fontSize: "13px" }}>
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={knowledgeForce}
-                onChange={(e) => setKnowledgeForce(e.target.checked)}
-                data-testid="job-knowledge-force"
-              />
-              <span>force（忽略 manifest 缓存重新反编译）</span>
-            </label>
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={knowledgeIncludeBaselib}
-                onChange={(e) => setKnowledgeIncludeBaselib(e.target.checked)}
-                data-testid="job-knowledge-include-baselib"
-              />
-              <span>include_baselib（同时拉 BaseLib.dll 反编译）</span>
-            </label>
-          </div>
-        </>
+      {submitKind === "truth_snapshot_refresh" && (
+        <label className="flex items-center gap-2" style={{ fontSize: "13px" }}>
+          <input
+            type="checkbox"
+            checked={snapshotForce}
+            onChange={(event) => setSnapshotForce(event.target.checked)}
+            data-testid="job-truth-snapshot-force"
+          />
+          <span>force re-index</span>
+        </label>
       )}
 
       <Button

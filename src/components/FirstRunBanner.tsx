@@ -47,7 +47,7 @@ export function FirstRunBanner() {
     },
     {
       ok: caps?.ilspycmdFound ?? false,
-      label: "ilspycmd 已安装（knowledge_refresh 需要）",
+      label: "ilspycmd 已安装（Truth Snapshot 刷新需要）",
       hint: "Capabilities 卡片有一键复制 dotnet tool install -g ilspycmd",
     },
     {

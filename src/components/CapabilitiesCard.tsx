@@ -118,7 +118,7 @@ export function CapabilitiesCard() {
           {!caps.ilspycmdFound && (
             <Notice
               variant="warn"
-              title="需要 ilspycmd —— knowledge_refresh 反编译 sts2.dll 用"
+              title="需要 ilspycmd —— Truth Snapshot 刷新反编译 sts2.dll 用"
             >
               <p style={{ marginBottom: "6px", color: "var(--ink-mute)" }}>
                 前置 dotnet SDK 6+（参 dotnet 行），然后执行：

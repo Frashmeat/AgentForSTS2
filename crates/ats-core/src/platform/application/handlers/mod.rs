@@ -14,11 +14,11 @@ pub mod batch_custom_code;
 pub mod build_project;
 pub mod code_generate;
 pub mod common;
-pub mod knowledge_refresh;
 pub mod log_analysis;
 pub mod package_project;
 pub mod single_asset_plan;
 pub mod text_generate;
+pub mod truth_snapshot_refresh;
 
 pub use common::{
     NoopProgressSink, ProgressEvent, ProgressSink, emit_cancelled_mid_stream, finalize_with_error,

@@ -1,53 +1,42 @@
-//! Knowledge commands —— 对标 `routes::knowledge`。
+//! Verified Truth Snapshot status for the active project.
 
-use std::path::PathBuf;
-
-use ats_core::knowledge::{
-    KnowledgePaths, KnowledgeStatus, get_status,
-    pack::{self, ExportStats, ImportStats},
+use ats_core::game_pack::{
+    GamePackRegistry, TruthSnapshotStatus, TruthSnapshotStore, inspect_truth_snapshot,
 };
 use tauri::State;
 
 use crate::AppConfig;
+use crate::commands::platform::active_game_id;
+use crate::commands::project::ActiveProject;
 
 #[tauri::command]
-pub fn get_knowledge_status(config: State<'_, AppConfig>) -> KnowledgeStatus {
-    let paths = KnowledgePaths::from_runtime_dir(&config.status_snapshot().runtime_dir());
-    get_status(&paths)
-}
-
-#[tauri::command]
-pub fn check_knowledge_status(config: State<'_, AppConfig>) -> KnowledgeStatus {
-    let paths = KnowledgePaths::from_runtime_dir(&config.status_snapshot().runtime_dir());
-    get_status(&paths)
-}
-
-/// 导出当前知识库到 zip 文件。`machine_hint` 写到 pack-info 里供使用者参考来源。
-#[tauri::command]
-pub async fn export_knowledge_pack(
+pub async fn get_truth_snapshot_status(
     config: State<'_, AppConfig>,
-    output_path: String,
-    machine_hint: Option<String>,
-) -> Result<ExportStats, String> {
-    let paths = KnowledgePaths::from_runtime_dir(&config.status_snapshot().runtime_dir());
-    let out = PathBuf::from(output_path);
-    tokio::task::spawn_blocking(move || pack::export(&paths, &out, machine_hint))
-        .await
-        .map_err(|e| format!("join: {e}"))?
-        .map_err(|e| e.to_string())
+    active: State<'_, ActiveProject>,
+) -> Result<TruthSnapshotStatus, String> {
+    status(&config, &active).await
 }
 
-/// 从 zip 导入知识库。`overwrite=true` 覆盖现有内容。
 #[tauri::command]
-pub async fn import_knowledge_pack(
+pub async fn check_truth_snapshot_status(
     config: State<'_, AppConfig>,
-    input_path: String,
-    overwrite: bool,
-) -> Result<ImportStats, String> {
-    let paths = KnowledgePaths::from_runtime_dir(&config.status_snapshot().runtime_dir());
-    let input = PathBuf::from(input_path);
-    tokio::task::spawn_blocking(move || pack::import(&paths, &input, overwrite))
+    active: State<'_, ActiveProject>,
+) -> Result<TruthSnapshotStatus, String> {
+    status(&config, &active).await
+}
+
+async fn status(
+    config: &State<'_, AppConfig>,
+    active: &State<'_, ActiveProject>,
+) -> Result<TruthSnapshotStatus, String> {
+    let game_id = active_game_id(active)?;
+    let registry = GamePackRegistry::built_in().map_err(|error| error.to_string())?;
+    let pack = registry
+        .require(&game_id)
+        .map_err(|error| error.to_string())?
+        .clone();
+    let store = TruthSnapshotStore::new(&config.status_snapshot().runtime_dir(), &pack);
+    tokio::task::spawn_blocking(move || inspect_truth_snapshot(&pack, &store))
         .await
-        .map_err(|e| format!("join: {e}"))?
-        .map_err(|e| e.to_string())
+        .map_err(|error| format!("inspect truth snapshot worker: {error}"))
 }

@@ -3,22 +3,25 @@
 //! Repository 用 ActiveProject 的 history_dir 作存储路径；切换项目时下条提交
 //! 会落到新工程。LLM client 每次新建（Arc 包裹的开销极小，避免与配置变更竞态）。
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use ats_core::audit::{AuditSinkArc, FileAuditSink};
-use ats_core::game_pack::{GamePackRegistry, VerifiedGameContext};
+use ats_core::game_pack::{
+    GamePackRegistry, GitHubReleaseAssetFetcher, IlspycmdTruthIndexer, TruthSnapshotRefresher,
+    TruthSnapshotStore, VerifiedGameContext, validate_truth_source_inputs,
+};
 use ats_core::image_gen::{ImageGenClient, build_from_config as build_image_gen};
 use ats_core::image_proc::{BgRemoverChain, ImageProcClient};
-use ats_core::knowledge::{BaselibSource, GitHubBaselibSource, KnowledgePaths};
 use ats_core::llm::{LlmClient, build_from_config};
 use ats_core::platform::{
     AuditedJobRepository, FileJobRepository, Job, JobApplicationService, JobError, JobId,
     JobRepository, JobSummary, ProgressEvent, ProgressSink, SubmitAssetGenerateRequest,
     SubmitBatchCustomCodeRequest, SubmitBuildProjectRequest, SubmitCodeGenerateRequest,
-    SubmitJobAck, SubmitKnowledgeRefreshRequest, SubmitLogAnalysisRequest,
-    SubmitPackageProjectRequest, SubmitSingleAssetPlanRequest, SubmitTextGenerateRequest,
+    SubmitJobAck, SubmitLogAnalysisRequest, SubmitPackageProjectRequest,
+    SubmitSingleAssetPlanRequest, SubmitTextGenerateRequest, SubmitTruthSnapshotRefreshRequest,
 };
 use tauri::{AppHandle, Emitter, State};
 
@@ -138,50 +141,42 @@ pub async fn submit_asset_generate_job(
 }
 
 #[tauri::command]
-pub async fn submit_knowledge_refresh_job(
+pub async fn submit_truth_snapshot_refresh_job(
     app: AppHandle,
     config: State<'_, AppConfig>,
-    request: SubmitKnowledgeRefreshRequest,
+    active: State<'_, ActiveProject>,
+    request: SubmitTruthSnapshotRefreshRequest,
 ) -> Result<SubmitJobAck, String> {
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
-    let knowledge_paths = KnowledgePaths::from_runtime_dir(&config.status_snapshot().runtime_dir());
-    let github_baselib = GitHubBaselibSource::default_alchyr_with_default_client(
-        Some(
-            config
-                .settings_snapshot()
-                .runtime
-                .workstation
-                .github_token
-                .clone(),
-        )
-        .filter(|t| !t.is_empty()),
+    let service = JobApplicationService::without_llm(active_job_repository(&active)?);
+    let game_id = active_game_id(&active)?;
+    let registry = GamePackRegistry::built_in().map_err(|error| error.to_string())?;
+    let pack = registry
+        .require(&game_id)
+        .map_err(|error| error.to_string())?
+        .clone();
+    let settings = config.settings_snapshot();
+    let game_assembly = PathBuf::from(&settings.knowledge.sts2_dll_path);
+    let local_inputs = BTreeMap::from([("game_assembly".into(), game_assembly)]);
+    validate_truth_source_inputs(&pack, &local_inputs).map_err(|error| error.to_string())?;
+    let github = GitHubReleaseAssetFetcher::with_default_client(
+        Some(settings.runtime.workstation.github_token.clone()).filter(|token| !token.is_empty()),
     )
-    .map_err(|e| format!("init baselib source: {e}"))?;
+    .map_err(|error| format!("initialize GitHub release source: {error}"))?;
     #[cfg(feature = "e2e")]
-    let github_baselib = match std::env::var("ATS_E2E_BASELIB_RELEASE_URL") {
-        Ok(url) if !url.is_empty() => github_baselib.with_latest_release_url_override(url),
-        _ => github_baselib,
+    let github = match std::env::var("ATS_E2E_BASELIB_RELEASE_URL") {
+        Ok(url) if !url.is_empty() => github.with_release_url_override(url),
+        _ => github,
     };
-    let baselib_source: Arc<dyn BaselibSource> = Arc::new(github_baselib);
-    let sts2_dll_path = PathBuf::from(&config.settings_snapshot().knowledge.sts2_dll_path);
-    if sts2_dll_path.as_os_str().is_empty() {
-        return Err(
-            "knowledge.sts2_dll_path is not set — configure in System > 运维 > Knowledge".into(),
-        );
-    }
-    let mut request = request;
-    request.sts2_dll_path = sts2_dll_path;
-    let llm = build_llm_client(&config)?;
-    let history_dir = config
-        .status_snapshot()
-        .runtime_dir()
-        .join("knowledge")
-        .join("jobs");
-    std::fs::create_dir_all(&history_dir).map_err(|e| format!("create knowledge jobs dir: {e}"))?;
-    let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history_dir));
-    let service = JobApplicationService::new(repo, llm);
+    #[cfg(feature = "e2e")]
+    let explicit_ilspycmd = std::env::var_os("ATS_E2E_ILSPYCMD_PATH").map(PathBuf::from);
+    #[cfg(not(feature = "e2e"))]
+    let explicit_ilspycmd = None;
+    let indexer = IlspycmdTruthIndexer::discover(explicit_ilspycmd)?;
+    let refresher = TruthSnapshotRefresher::new(Arc::new(github), Arc::new(indexer));
+    let store = TruthSnapshotStore::new(&config.status_snapshot().runtime_dir(), &pack);
     let job_id = service
-        .submit_knowledge_refresh(request, knowledge_paths, baselib_source, sink)
+        .submit_truth_snapshot_refresh(request, pack, store, local_inputs, refresher, sink)
         .await
         .map_err(|e| e.to_string())?;
     Ok(SubmitJobAck { job_id })
@@ -331,27 +326,37 @@ pub(crate) fn active_game_context(
     config: &State<'_, AppConfig>,
     active: &State<'_, ActiveProject>,
 ) -> Result<VerifiedGameContext, String> {
-    let game_id = {
-        let guard = active
-            .0
-            .lock()
-            .map_err(|e| format!("active project lock poisoned: {e}"))?;
-        guard
-            .as_ref()
-            .ok_or_else(|| "no active project — open or create one first".to_string())?
-            .meta()
-            .game_id
-            .clone()
-    };
+    let game_id = active_game_id(active)?;
     let registry = GamePackRegistry::built_in().map_err(|error| error.to_string())?;
     VerifiedGameContext::open_current(&config.status_snapshot().runtime_dir(), &registry, &game_id)
         .map_err(|error| error.to_string())
+}
+
+pub(crate) fn active_game_id(active: &State<'_, ActiveProject>) -> Result<String, String> {
+    let guard = active
+        .0
+        .lock()
+        .map_err(|e| format!("active project lock poisoned: {e}"))?;
+    Ok(guard
+        .as_ref()
+        .ok_or_else(|| "no active project — open or create one first".to_string())?
+        .meta()
+        .game_id
+        .clone())
 }
 
 fn build_service(
     config: &State<'_, AppConfig>,
     active: &State<'_, ActiveProject>,
 ) -> Result<JobApplicationService, String> {
+    let repo = active_job_repository(active)?;
+    let llm = build_llm_client(config)?;
+    Ok(JobApplicationService::new(repo, llm))
+}
+
+fn active_job_repository(
+    active: &State<'_, ActiveProject>,
+) -> Result<Arc<dyn JobRepository>, String> {
     let (history_dir, project_root) = {
         let guard = active
             .0
@@ -367,8 +372,7 @@ fn build_service(
     // eprintln 兜底，写失败不会影响业务路径。
     let audit_sink: AuditSinkArc = Arc::new(FileAuditSink::new(project_root));
     let repo: Arc<dyn JobRepository> = Arc::new(AuditedJobRepository::new(base_repo, audit_sink));
-    let llm = build_llm_client(config)?;
-    Ok(JobApplicationService::new(repo, llm))
+    Ok(repo)
 }
 
 fn job_repositories(
