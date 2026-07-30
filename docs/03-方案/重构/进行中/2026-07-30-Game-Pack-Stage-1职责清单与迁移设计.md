@@ -1,8 +1,8 @@
 # Game Pack Stage 1 职责清单与迁移设计
 
-> 状态：进行中
+> 状态：已完成
 >
-> 对应任务：`.trellis/tasks/07-29-game-pack-stage1`
+> 对应任务：`.trellis/tasks/archive/2026-07/07-29-game-pack-stage1`
 >
 > 决策依据：[`ADR 0004`](../../../04-决策/0004-generic-mod-pipeline-and-game-pack.md)
 
@@ -377,6 +377,6 @@ npx tsc -b --pretty false                                                       
 - manifest 使用 `min_game_version: "0.107.1"` 和 BaseLib `v3.3.8` 对象 dependency；ZIP 恰好包含 BaseLib 与 E2ESingleRelic 的 6 个声明文件。
 - 自动证据文件：`.tmp/e2e-runs/1785417051-99088/gate0-candidate-evidence.json`。
 
-Stage 1 自动化部分已经收口。未执行 workspace 全量测试/构建，也未操作真实游戏 UI；唯一剩余门禁是用户对该最终候选执行真实游戏行为、视觉、加载、稳定性和日志复验。
+Stage 1 自动化部分已经收口。未执行 workspace 全量测试/构建，Agent 未操作真实游戏 UI。2026-07-30 用户完成最终候选人工复验，确认图片与背景、中文描述、Mod 本体和游戏内功能正常；日志确认 BaseLib 266 patches/0 failed 及 E2ESingleRelic DLL/PCK/initializer 成功。Gate 0、Gate 5 和 Gate 7 已闭环。
 
 Stage 1 不宣称完整多游戏 UI 已完成：当前只有一个已安装 Pack，因此 workstation Settings/发现命令仍以 STS2 DLL 为用户可见输入；`Sts2CodeFactsProvider` 仍是 Pack 选择的有限 provider executor。它们不参与已迁移维度的 STS2 常量 fallback，是否提升为多 Pack 声明由第二个真实游戏需求决定，避免在单一样本上继续预测 schema。
