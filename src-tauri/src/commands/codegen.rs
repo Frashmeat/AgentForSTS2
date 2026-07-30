@@ -4,50 +4,59 @@ use ats_core::codegen::{
     AssetCodegenRequest, AssetGroupRequest, CustomCodegenRequest, ModProjectRequest,
     PromptAssembler,
 };
-use ats_core::knowledge::{KnowledgePaths, SourceMode};
+use ats_core::game_pack::VerifiedGameContext;
 use tauri::State;
 
 use crate::AppConfig;
+use crate::commands::platform::active_game_context;
+use crate::commands::project::ActiveProject;
 
-fn assemble<F>(config: &State<'_, AppConfig>, f: F) -> Result<String, String>
+fn assemble<F>(
+    config: &State<'_, AppConfig>,
+    active: &State<'_, ActiveProject>,
+    f: F,
+) -> Result<String, String>
 where
     F: FnOnce(
         &PromptAssembler,
-        &KnowledgePaths,
-    ) -> Result<String, ats_core::prompting::PromptError>,
+        &VerifiedGameContext,
+    ) -> Result<String, ats_core::codegen::PromptAssemblyError>,
 {
-    let paths = KnowledgePaths::from_runtime_dir(&config.status_snapshot().runtime_dir());
+    let context = active_game_context(config, active)?;
     let assembler = PromptAssembler::built_in();
-    f(&assembler, &paths).map_err(|e| e.to_string())
+    f(&assembler, &context).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn codegen_asset_prompt(
     config: State<'_, AppConfig>,
+    active: State<'_, ActiveProject>,
     request: AssetCodegenRequest,
 ) -> Result<String, String> {
-    assemble(&config, |a, p| {
-        a.assemble_asset_prompt(&request, p, SourceMode::Missing)
+    assemble(&config, &active, |assembler, context| {
+        assembler.assemble_asset_prompt(&request, context)
     })
 }
 
 #[tauri::command]
 pub fn codegen_custom_code_prompt(
     config: State<'_, AppConfig>,
+    active: State<'_, ActiveProject>,
     request: CustomCodegenRequest,
 ) -> Result<String, String> {
-    assemble(&config, |a, p| {
-        a.assemble_custom_code_prompt(&request, p, SourceMode::Missing)
+    assemble(&config, &active, |assembler, context| {
+        assembler.assemble_custom_code_prompt(&request, context)
     })
 }
 
 #[tauri::command]
 pub fn codegen_asset_group_prompt(
     config: State<'_, AppConfig>,
+    active: State<'_, ActiveProject>,
     request: AssetGroupRequest,
 ) -> Result<String, String> {
-    assemble(&config, |a, p| {
-        a.assemble_asset_group_prompt(&request, p, SourceMode::Missing)
+    assemble(&config, &active, |assembler, context| {
+        assembler.assemble_asset_group_prompt(&request, context)
     })
 }
 

@@ -6,6 +6,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use serde::Serialize;
+
 use super::handlers::{
     ProgressSink,
     asset_compile::{AssetCompileValidator, DotnetAssetCompileValidator},
@@ -19,6 +21,7 @@ use super::handlers::{
     single_asset_plan::run_single_asset_plan,
     text_generate::run_text_generate,
 };
+use crate::game_pack::VerifiedGameContext;
 use crate::image_gen::ImageGenClient;
 use crate::image_proc::ImageProcClient;
 use crate::knowledge::{BaselibSource, KnowledgePaths};
@@ -121,18 +124,17 @@ impl JobApplicationService {
     /// 提交 code_generate 任务：asset 模式生成结构化 C# + 本地化 bundle 并编译验证；
     /// custom_code 模式保持单 C# fence 写入流程。
     ///
-    /// `knowledge_paths` 来自 ConfigStatus::runtime_dir()（app data 共享），
-    /// 与 active project 解耦。原始模型输出和 C# artifact 落到 `artifacts/<name>/`；
+    /// `game_context` fixes the registry Pack and verified current Snapshot before
+    /// the job record is created. Original model output and C# artifacts land in `artifacts/<name>/`;
     /// asset 正式文件只在 compile gate 通过后保留。
     pub async fn submit_code_generate(
         &self,
         request: SubmitCodeGenerateRequest,
-        knowledge_paths: KnowledgePaths,
+        game_context: VerifiedGameContext,
         artifacts_dir: PathBuf,
         sink: Arc<dyn ProgressSink>,
     ) -> JobResult<JobId> {
-        let payload = serde_json::to_value(&request)
-            .map_err(|e| JobError::Storage(format!("serialize request: {e}")))?;
+        let payload = request_payload_with_context(&request, &game_context)?;
         let job = Job::new(JobKind::CodeGenerate, payload);
         let job_id = job.id.clone();
         self.repo.create(&job).await?;
@@ -148,7 +150,7 @@ impl JobApplicationService {
                 sink,
                 id_for_task,
                 request,
-                knowledge_paths,
+                game_context,
                 artifacts_dir,
                 compile_validator,
             )
@@ -248,14 +250,13 @@ impl JobApplicationService {
     pub async fn submit_asset_generate(
         &self,
         request: SubmitAssetGenerateRequest,
-        knowledge_paths: KnowledgePaths,
+        game_context: VerifiedGameContext,
         artifacts_dir: PathBuf,
         image_gen: Arc<dyn ImageGenClient>,
         image_proc: Arc<dyn ImageProcClient>,
         sink: Arc<dyn ProgressSink>,
     ) -> JobResult<JobId> {
-        let payload = serde_json::to_value(&request)
-            .map_err(|e| JobError::Storage(format!("serialize request: {e}")))?;
+        let payload = request_payload_with_context(&request, &game_context)?;
         let job = Job::new(JobKind::AssetGenerate, payload);
         let job_id = job.id.clone();
         self.repo.create(&job).await?;
@@ -273,7 +274,7 @@ impl JobApplicationService {
                 sink,
                 id_for_task,
                 request,
-                knowledge_paths,
+                game_context,
                 artifacts_dir,
                 compile_validator,
             )
@@ -288,12 +289,11 @@ impl JobApplicationService {
     pub async fn submit_batch_custom_code(
         &self,
         request: SubmitBatchCustomCodeRequest,
-        knowledge_paths: KnowledgePaths,
+        game_context: VerifiedGameContext,
         artifacts_dir: PathBuf,
         sink: Arc<dyn ProgressSink>,
     ) -> JobResult<JobId> {
-        let payload = serde_json::to_value(&request)
-            .map_err(|e| JobError::Storage(format!("serialize request: {e}")))?;
+        let payload = request_payload_with_context(&request, &game_context)?;
         let job = Job::new(JobKind::BatchCustomCode, payload);
         let job_id = job.id.clone();
         self.repo.create(&job).await?;
@@ -308,7 +308,7 @@ impl JobApplicationService {
                 sink,
                 id_for_task,
                 request,
-                knowledge_paths,
+                game_context,
                 artifacts_dir,
             )
             .await;
@@ -360,4 +360,22 @@ impl JobApplicationService {
 
         Ok(job_id)
     }
+}
+
+fn request_payload_with_context<T: Serialize>(
+    request: &T,
+    context: &VerifiedGameContext,
+) -> JobResult<serde_json::Value> {
+    let mut payload = serde_json::to_value(request)
+        .map_err(|error| JobError::Storage(format!("serialize request: {error}")))?;
+    let object = payload
+        .as_object_mut()
+        .ok_or_else(|| JobError::Storage("job request payload must be a JSON object".into()))?;
+    object.insert(
+        "_gameContext".into(),
+        serde_json::to_value(context.evidence()).map_err(|error| {
+            JobError::Storage(format!("serialize verified game context: {error}"))
+        })?,
+    );
+    Ok(payload)
 }

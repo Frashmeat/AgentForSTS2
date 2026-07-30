@@ -223,7 +223,7 @@ DO NOT re-clone from GitHub. DO NOT recreate local.props or nuget.config.
 
 Steps to complete:
 1. Read `MainFile.cs` to confirm the namespace and ModId.
-2. If you are unsure of an exact API signature, read `{{ api_ref_path }}` before writing code.
+2. If you are unsure of an exact API signature, use the inlined Code Facts. `{{ api_ref_path }}` identifies the immutable verified source index used for this request.
 3. Create the C# implementation file(s) following BaseLib/Harmony conventions.
 4. `MainFile.cs` already calls `harmony.PatchAll()` — Harmony patches are auto-discovered, no manual registration needed.
 {{ build_steps }}

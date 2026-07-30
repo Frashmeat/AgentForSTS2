@@ -3,12 +3,16 @@
 //! Core owns parsing and validation. Game-specific provider registrations and
 //! declarations are assembled by [`GamePackRegistry`].
 
+mod context;
 mod error;
 mod loader;
 mod model;
 mod registry;
 mod truth_snapshot;
 
+pub use context::{
+    GameContextError, GameContextResult, VerifiedGameContext, VerifiedGameContextEvidence,
+};
 pub use error::{GamePackError, GamePackResult};
 pub use loader::{GamePackLoadPolicy, GamePackLoader, resolve_pack_relative_path};
 pub use model::{LoadedGamePack, TruthSource, TruthSourceKind};

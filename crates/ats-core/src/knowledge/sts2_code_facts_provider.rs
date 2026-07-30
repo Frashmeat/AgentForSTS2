@@ -19,7 +19,9 @@ use thiserror::Error;
 
 use crate::game_pack::VerifiedTruthSnapshot;
 use crate::knowledge::contracts::{KnowledgeFactItem, KnowledgeQuery};
+#[cfg(test)]
 use crate::knowledge::models::SourceMode;
+#[cfg(test)]
 use crate::knowledge::paths::KnowledgePaths;
 
 #[derive(Debug, Default, Clone)]
@@ -46,6 +48,7 @@ const MAX_EVIDENCE_RANGES: usize = 12;
 
 impl Sts2CodeFactsProvider {
     /// 返回 (facts, warnings)。
+    #[cfg(test)]
     pub fn build_facts(
         &self,
         query: &KnowledgeQuery,
@@ -163,10 +166,12 @@ struct TypeSymbol {
 }
 
 impl CodeFactsIndex {
+    #[cfg(test)]
     fn scan_dir(&mut self, dir: &Path, warnings: &mut Vec<String>) {
         self.scan_dir_with_limit(dir, MAX_FILES, warnings);
     }
 
+    #[cfg(test)]
     fn scan_dir_with_limit(&mut self, dir: &Path, limit: usize, warnings: &mut Vec<String>) {
         self.scan_dir_with_limit_and_prefix(dir, limit, None, warnings);
     }

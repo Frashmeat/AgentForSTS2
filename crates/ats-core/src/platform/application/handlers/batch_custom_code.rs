@@ -12,7 +12,7 @@ use serde::Serialize;
 use super::code_generate::{GenerateError, generate_and_write_code_artifact, sanitize_entity_name};
 use super::common::{ProgressEvent, ProgressSink, finalize_with_error, transition_to_running};
 use crate::codegen::{CustomCodegenRequest, PromptAssembler};
-use crate::knowledge::{KnowledgePaths, runtime::detect_source_mode};
+use crate::game_pack::VerifiedGameContext;
 use crate::llm::LlmClient;
 use crate::platform::contracts::SubmitBatchCustomCodeRequest;
 use crate::platform::domain::{JobId, JobRepository, JobStatus};
@@ -35,7 +35,7 @@ pub async fn run_batch_custom_code(
     sink: Arc<dyn ProgressSink>,
     job_id: JobId,
     request: SubmitBatchCustomCodeRequest,
-    knowledge_paths: KnowledgePaths,
+    game_context: VerifiedGameContext,
     artifacts_dir: PathBuf,
 ) {
     if transition_to_running(&repo, &job_id, &sink).await.is_err() {
@@ -76,7 +76,7 @@ pub async fn run_batch_custom_code(
             &llm,
             &sink,
             &job_id,
-            &knowledge_paths,
+            &game_context,
             &artifacts_dir,
             &item,
             &entity_name,
@@ -157,27 +157,26 @@ async fn process_one_item(
     llm: &Arc<dyn LlmClient>,
     sink: &Arc<dyn ProgressSink>,
     job_id: &JobId,
-    knowledge_paths: &KnowledgePaths,
+    game_context: &VerifiedGameContext,
     artifacts_dir: &Path,
     item: &CustomCodegenRequest,
     entity_name: &str,
 ) -> ItemOutcome {
-    let prompt =
-        match assembler.assemble_custom_code_prompt(item, knowledge_paths, detect_source_mode(knowledge_paths)) {
-            Ok(p) => p,
-            Err(err) => {
-                return ItemOutcome {
-                    name: item.name.clone(),
-                    entity_name: entity_name.to_string(),
-                    success: false,
-                    cs_path: None,
-                    artifact_cs_path: None,
-                    extracted_chars: None,
-                    raw_chars: None,
-                    error: Some(format!("prompt assembly: {err}")),
-                };
-            }
-        };
+    let prompt = match assembler.assemble_custom_code_prompt(item, game_context) {
+        Ok(p) => p,
+        Err(err) => {
+            return ItemOutcome {
+                name: item.name.clone(),
+                entity_name: entity_name.to_string(),
+                success: false,
+                cs_path: None,
+                artifact_cs_path: None,
+                extracted_chars: None,
+                raw_chars: None,
+                error: Some(format!("prompt assembly: {err}")),
+            };
+        }
+    };
     match generate_and_write_code_artifact(
         Arc::clone(repo),
         Arc::clone(llm),
@@ -245,7 +244,7 @@ async fn process_one_item(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::knowledge::KnowledgePaths;
+    use crate::knowledge::test_support::fixture_game_context;
     use crate::llm::{
         CompletionRequest, CompletionResponse, CompletionStream, FinishReason, LlmError,
         StreamEvent, Usage,
@@ -338,7 +337,7 @@ mod tests {
         let sink = Arc::new(super::super::common::NoopProgressSink);
         let service = JobApplicationService::new(repo, llm);
 
-        let kp = KnowledgePaths::from_runtime_dir(td.path());
+        let kp = fixture_game_context(td.path(), &[], &[]);
         let req = make_request(&["AlphaHook", "BetaHook"]);
         let id = service
             .submit_batch_custom_code(req, kp, artifacts.clone(), sink)
@@ -376,7 +375,7 @@ mod tests {
         let sink = Arc::new(super::super::common::NoopProgressSink);
         let service = JobApplicationService::new(repo, llm);
 
-        let kp = KnowledgePaths::from_runtime_dir(td.path());
+        let kp = fixture_game_context(td.path(), &[], &[]);
         let req = make_request(&["one", "two", "three"]);
         let id = service
             .submit_batch_custom_code(req, kp, artifacts.clone(), sink)
@@ -418,7 +417,7 @@ mod tests {
         let sink = Arc::new(super::super::common::NoopProgressSink);
         let service = JobApplicationService::new(repo, llm);
 
-        let kp = KnowledgePaths::from_runtime_dir(td.path());
+        let kp = fixture_game_context(td.path(), &[], &[]);
         let mut req = make_request(&["one", "two"]);
         req.fail_fast = true;
         let id = service
@@ -456,7 +455,7 @@ mod tests {
         let sink = Arc::new(super::super::common::NoopProgressSink);
         let service = JobApplicationService::new(repo, llm);
 
-        let kp = KnowledgePaths::from_runtime_dir(td.path());
+        let kp = fixture_game_context(td.path(), &[], &[]);
         let req = SubmitBatchCustomCodeRequest::default();
         let id = service
             .submit_batch_custom_code(req, kp, artifacts, sink)

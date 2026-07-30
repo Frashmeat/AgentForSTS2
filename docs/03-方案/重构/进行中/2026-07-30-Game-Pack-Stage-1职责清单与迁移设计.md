@@ -131,14 +131,11 @@ VerifiedGameContext
 
 ### Truth-source 切换时删除
 
-- `knowledge::SourceMode`
-- `knowledge::runtime::detect_source_mode`
-- 仅根据文件存在性给出 Fresh/Ready 的逻辑
-- `KnowledgePaths` 的固定 STS2 资源布局
-- `KnowledgeManifest` / `DecompileRecord` v1 运行时契约
+- 生成 Prompt/Job 对 `knowledge::SourceMode`、`detect_source_mode` 和 `KnowledgePaths` 的读取
 - Prompt API 中的 `KnowledgePaths + SourceMode`
-- `PromptAssembler::built_in()` 对 `Sts2KnowledgeResolver` 的直接构造
-- 旧 `knowledge::pack` 原地覆盖导入路径
+- lookup 的 ilspy/可变目录 fallback
+
+旧 `KnowledgePaths`、`SourceMode`、refresh/status、manifest v1 与 import/export 暂时只服务旧知识维护 UI；Work Order 6 接入 Snapshot 获取/刷新后再整体删除，生产生成链不得读取这些接口。
 
 ### 后续按维度删除
 
@@ -277,3 +274,34 @@ cargo test -p ats-core game_pack::                                 # 21 passed
 
 - 当前只是 Snapshot provider 的可验证旁路，`PromptAssembler` 和 handlers 仍使用 `KnowledgePaths + SourceMode`；正式 Evidence Record 尚未改为 Snapshot URI。
 - 下一步进入 Slice 3 Evidence cutover：新增不可伪造的 `VerifiedGameContext`，让 Prompt/Evidence 与生成 job 固定使用同一 Pack/Snapshot，切换全部调用方后删除 `detect_source_mode`、旧 Prompt truth-source 参数和静默 fallback。
+
+## 14. Slice 3 Evidence cutover 实施结果（2026-07-30）
+
+已完成：
+
+- 新增不可直接构造的 `VerifiedGameContext`。Desktop/Web 入口从工程 `project.json.game_id`、内置 registry 与 `TruthSnapshotStore::open_current` 创建；不存在 current Snapshot 时在创建 Job、图片生成或 LLM 调用前明确失败。
+- `Sts2KnowledgeResolver` 与 `Sts2LookupProvider` 只读取 context 中固定的 `VerifiedTruthSnapshot`。facts 使用已通过等价性门禁的聚合 provider；lookup 只暴露 `snapshot://<snapshot-id>/<source-id>/`，不再提供 ilspy 或可变缓存路径 fallback。
+- 生成 Prompt API 删除 `KnowledgePaths + SourceMode` 参数。Evidence Record 序列化 Pack ID/display/schema/SHA、Snapshot ID/schema、全部 source/index 摘要、tool versions 与 `created_at`，并记录实际 injected facts。
+- `JobApplicationService` 的 code、asset、batch 提交接口按值持有 context，spawn 后不会受并发 current 切换影响；Job payload 的 `_gameContext` 固化同一身份。
+- code/asset/batch handlers 删除 `detect_source_mode`；Tauri prompt preview 与提交链从活动工程创建 context，Web prompt preview 从请求工程 metadata 创建 context。
+- 旧 `Sts2CodeFactsProvider::build_facts` 仅在 `cfg(test)` 下保留，用于已提交的 legacy ↔ Snapshot 等价性夹具。旧 refresh/status 仍暂时存在，但生产生成链搜索不到其类型或探测函数。
+
+针对性验证：
+
+```text
+cargo test -p ats-core codegen::prompt_assembler::tests                 # 9 passed
+cargo test -p ats-core knowledge::sts2_knowledge_resolver::tests       # 1 passed
+cargo test -p ats-core knowledge::sts2_lookup_provider::tests          # 1 passed
+cargo test -p ats-core platform::application::handlers::batch_custom_code::tests  # 4 passed
+cargo test -p ats-core platform::application::handlers::asset_generate::tests      # 11 passed
+cargo test -p ats-core --test job_lifecycle code_generate_writes_files_via_public_api # 1 passed
+cargo test -p ats-web routes::codegen::tests::missing_current_snapshot_is_rejected_as_bad_request # 1 passed
+cargo check -p ats-core                                                # passed
+cargo check -p agentthespire-desktop                                   # passed
+cargo check -p ats-web                                                 # passed
+```
+
+边界与下一步：
+
+- 当前仓库尚未实现从真实 STS2/BaseLib 输入创建新 current Snapshot 的生产刷新链，因此本机没有 current Snapshot 时，生成和 prompt preview 会按设计失败；不得回退到旧 `runtime/knowledge`。
+- 下一步是 Work Order 6：接入当前 STS2 `v0.107.1` 与 BaseLib `v3.3.8` 的 Snapshot 获取/索引，生成 Gate 0 新候选并执行 compile/build/package 文件级检查；真实游戏复验仍由用户人工执行。

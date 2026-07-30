@@ -24,6 +24,8 @@ mod sts2_guidance_provider;
 mod sts2_knowledge_resolver;
 mod sts2_lookup_provider;
 mod templates;
+#[cfg(test)]
+pub(crate) mod test_support;
 
 pub use baselib::{BaselibError, BaselibSource, FetchedBaselib, GitHubBaselibSource};
 pub use contracts::{

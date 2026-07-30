@@ -1,14 +1,10 @@
 //! 装配 sts2 知识查找指引（lookup items）。
 //!
-//! 镜像 Python `Sts2LookupProvider`。Python 端从 `build_lookup_context()` 读
-//! runtime 目录状态；本端要求调用方显式传入 `KnowledgePaths` + `SourceMode`，
-//! 让函数纯化、便于测试。
+//! Lookup coordinates name immutable Snapshot indexes; no mutable cache or
+//! decompiler fallback is exposed to generation.
 
+use crate::game_pack::VerifiedGameContext;
 use crate::knowledge::contracts::{KnowledgeLookupItem, KnowledgeQuery};
-use crate::knowledge::models::SourceMode;
-use crate::knowledge::paths::KnowledgePaths;
-
-const ILSPY_EXAMPLE_DLL_PATH: &str = "<sts2_path>/data_sts2_windows_x86_64/sts2.dll";
 
 #[derive(Debug, Default, Clone)]
 pub struct Sts2LookupProvider;
@@ -17,99 +13,53 @@ impl Sts2LookupProvider {
     pub fn build_lookup(
         &self,
         _query: &KnowledgeQuery,
-        paths: &KnowledgePaths,
-        game_mode: SourceMode,
+        context: &VerifiedGameContext,
     ) -> Vec<KnowledgeLookupItem> {
-        let baselib_decompiled = paths.baselib_decompiled_file();
-        let baselib_path_str = baselib_decompiled.display().to_string();
-
-        let mut items: Vec<KnowledgeLookupItem> = vec![KnowledgeLookupItem {
-            key: "sts2.lookup.baselib".into(),
-            title: "BaseLib local source".into(),
-            path: baselib_path_str,
-            note: "Read this local decompiled source for `CustomCardModel`, `CustomPotionModel`, `PlaceholderCharacterModel`, and related BaseLib wrappers.".into(),
-            keywords: vec![
-                "BaseLib".into(),
-                "CustomCardModel".into(),
-                "CustomPotionModel".into(),
-                "PlaceholderCharacterModel".into(),
-            ],
-        }];
-
-        if matches!(game_mode, SourceMode::RuntimeDecompiled) {
-            items.push(KnowledgeLookupItem {
-                key: "sts2.lookup.game_runtime".into(),
-                title: "STS2 runtime knowledge directory".into(),
-                path: paths.game_dir.display().to_string(),
-                note: "Read or grep this runtime knowledge directory directly. Key subdirs include `MegaCrit.Sts2.Core.Commands`, `MegaCrit.Sts2.Core.Models.Cards`, and `MegaCrit.Sts2.Core.CardSelection`.".into(),
+        context
+            .snapshot()
+            .manifest()
+            .indexes
+            .iter()
+            .map(|index| KnowledgeLookupItem {
+                key: format!("sts2.lookup.snapshot.{}", index.source_id),
+                title: format!("Verified {} source index", index.source_id),
+                path: format!("snapshot://{}/{}/", context.snapshot_id(), index.source_id),
+                note: format!(
+                    "Immutable source index verified by `{}` for this generation context.",
+                    index.indexer
+                ),
                 keywords: vec![
-                    "runtime".into(),
-                    "knowledge".into(),
-                    "DamageCmd".into(),
-                    "PowerCmd".into(),
-                    "CardSelectorPrefs".into(),
+                    "verified".into(),
+                    "snapshot".into(),
+                    index.source_id.clone(),
+                    index.provider.clone(),
                 ],
-            });
-        } else {
-            items.push(KnowledgeLookupItem {
-                key: "sts2.lookup.game_fallback".into(),
-                title: "STS2 ilspy fallback".into(),
-                path: ILSPY_EXAMPLE_DLL_PATH.into(),
-                note: "If runtime-decompiled sources are missing, inspect the game DLL via `ilspycmd`.".into(),
-                keywords: vec!["ilspycmd".into(), "sts2.dll".into()],
-            });
-        }
-
-        items.push(KnowledgeLookupItem {
-            key: "sts2.lookup.guidance_resources".into(),
-            title: "STS2 guidance resources".into(),
-            path: paths.resources_dir.display().to_string(),
-            note: "Use these Markdown resources for conventions, common pitfalls, and summarized examples.".into(),
-            keywords: vec![
-                "guidance".into(),
-                "common.md".into(),
-                "card.md".into(),
-                "power.md".into(),
-                "relic.md".into(),
-                "custom_code.md".into(),
-            ],
-        });
-
-        items
+            })
+            .collect()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
-
-    fn paths() -> KnowledgePaths {
-        KnowledgePaths::from_runtime_dir(Path::new("/tmp/runtime"))
-    }
+    use crate::knowledge::test_support::fixture_game_context;
 
     #[test]
-    fn missing_game_mode_emits_fallback_lookup() {
+    fn lookup_uses_only_verified_snapshot_coordinates() {
         let provider = Sts2LookupProvider;
-        let items =
-            provider.build_lookup(&KnowledgeQuery::default(), &paths(), SourceMode::Missing);
+        let temp = tempfile::TempDir::new().unwrap();
+        let context = fixture_game_context(temp.path(), &[], &[]);
+        let items = provider.build_lookup(&KnowledgeQuery::default(), &context);
         let keys: Vec<&str> = items.iter().map(|i| i.key.as_str()).collect();
-        assert!(keys.contains(&"sts2.lookup.baselib"));
-        assert!(keys.contains(&"sts2.lookup.game_fallback"));
-        assert!(!keys.contains(&"sts2.lookup.game_runtime"));
-        assert!(keys.contains(&"sts2.lookup.guidance_resources"));
-    }
-
-    #[test]
-    fn runtime_decompiled_emits_game_runtime_lookup() {
-        let provider = Sts2LookupProvider;
-        let items = provider.build_lookup(
-            &KnowledgeQuery::default(),
-            &paths(),
-            SourceMode::RuntimeDecompiled,
+        assert_eq!(
+            keys,
+            ["sts2.lookup.snapshot.baselib", "sts2.lookup.snapshot.game"]
         );
-        let keys: Vec<&str> = items.iter().map(|i| i.key.as_str()).collect();
-        assert!(keys.contains(&"sts2.lookup.game_runtime"));
-        assert!(!keys.contains(&"sts2.lookup.game_fallback"));
+        assert!(
+            items
+                .iter()
+                .all(|item| item.path.starts_with("snapshot://"))
+        );
+        assert!(items.iter().all(|item| !item.path.contains("ilspy")));
     }
 }

@@ -19,5 +19,5 @@ pub use models::{
     AssetCodegenRequest, AssetGroupItem, AssetGroupRequest, AssetKind, CustomCodegenRequest,
     ModProjectRequest,
 };
-pub use prompt_assembler::{AssetPromptAssembly, PromptAssembler};
+pub use prompt_assembler::{AssetPromptAssembly, PromptAssembler, PromptAssemblyError};
 pub(crate) use validation::validate_sts2_generated_csharp;

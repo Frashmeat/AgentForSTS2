@@ -502,6 +502,80 @@ Wrong: call the provider once per source, take up to 12 facts from each, concate
 
 Correct: select all Snapshot indexes declared for one provider, build one corpus, execute the existing selection algorithm once, and require root-normalized output equality before cutover.
 
+## Scenario: Verified Game Context Generation Cutover
+
+### 1. Scope / Trigger
+
+This contract applies to production code, asset, and batch generation; Prompt previews; and Evidence Records. Legacy knowledge refresh/status remains temporarily available for maintenance UI but is not a generation input.
+
+### 2. Signatures and Payload
+
+```rust
+VerifiedGameContext::open_current(runtime_dir, registry, game_pack_id)
+    -> Result<VerifiedGameContext, GameContextError>
+
+PromptAssembler::assemble_asset_prompt(request, context)
+    -> Result<String, PromptAssemblyError>
+PromptAssembler::assemble_asset_prompt_with_evidence(request, context)
+    -> Result<AssetPromptAssembly, PromptAssemblyError>
+PromptAssembler::assemble_custom_code_prompt(request, context)
+    -> Result<String, PromptAssemblyError>
+PromptAssembler::assemble_asset_group_prompt(request, context)
+    -> Result<String, PromptAssemblyError>
+
+JobApplicationService::submit_code_generate(request, context, artifacts_dir, sink)
+    -> JobResult<JobId>
+JobApplicationService::submit_asset_generate(request, context, artifacts_dir, image_gen, image_proc, sink)
+    -> JobResult<JobId>
+JobApplicationService::submit_batch_custom_code(request, context, artifacts_dir, sink)
+    -> JobResult<JobId>
+```
+
+Generation Job payloads preserve the request fields and add `_gameContext` with camel-case `gamePackId`, `gamePackDisplayName`, `gamePackSchemaVersion`, `gamePackSha256`, `snapshotSchemaVersion`, `snapshotId`, `sources`, `indexes`, `toolVersions`, and `createdAt`.
+
+### 3. Contracts
+
+- `VerifiedGameContext` is created only from a loaded registry Pack, the project's explicit `game_id`, and `TruthSnapshotStore::open_current`.
+- Production Prompt and Job APIs accept `VerifiedGameContext`; they do not accept `KnowledgePaths`, `SourceMode`, or caller-asserted freshness.
+- A missing current Snapshot fails before Job creation, image generation, or LLM calls. There is no legacy cache or ilspy fallback.
+- Resolver facts come from all verified indexes assigned to the Pack provider. Lookup coordinates use `snapshot://<snapshot-id>/<source-id>/` only.
+- Evidence and Job payload `_gameContext` record Pack ID/display/schema/SHA, Snapshot ID/schema, sources, indexes, tool versions, and creation time.
+- The context is moved into the spawned Job so a later current-pointer change cannot alter in-flight evidence.
+- The legacy fact builder is test-only and exists solely for the committed equivalence fixture.
+
+### 4. Validation and Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| Known project `game_id` and verified current Snapshot | Create context, persist matching `_gameContext`, and resolve Prompt facts from that Snapshot |
+| No `current.json` for the project Pack | Return `GameContextError::MissingCurrent` before Job creation, image generation, or LLM calls |
+| Unknown project `game_id` | Return `GamePackError::UnknownPackId`; do not select STS2 implicitly |
+| Current pointer or Snapshot bytes fail integrity verification | Return `TruthSnapshotError`; do not consult legacy knowledge |
+| Requested provider has no verified indexes | Return `SnapshotCodeFactsError::MissingProvider`; do not return empty success |
+| Current pointer changes after Job submission | In-flight Job continues with its owned context and original Snapshot ID |
+| Web Prompt request has no current Snapshot | Return HTTP 400 with the actionable missing-current message |
+
+### 5. Good / Base / Bad Cases
+
+- Good: an STS2 project with a verified current Snapshot produces Snapshot facts and an Evidence Record whose Pack/Snapshot/source/index/tool identity matches Job payload `_gameContext`.
+- Base: facts contain no matching type for a valid query; guidance and an explicit no-matching-facts warning render from the verified Snapshot without falling back to mutable paths.
+- Bad: a project has no current Snapshot; Desktop/Web reject the request before creating a Job or invoking image/LLM clients.
+
+### 6. Targeted Tests
+
+```text
+cargo test -p ats-core codegen::prompt_assembler::tests
+cargo test -p ats-core knowledge::sts2_knowledge_resolver::tests
+cargo test -p ats-core knowledge::sts2_lookup_provider::tests
+cargo test -p ats-core platform::application::handlers::batch_custom_code::tests
+cargo test -p ats-core platform::application::handlers::asset_generate::tests
+cargo test -p ats-core --test job_lifecycle code_generate_writes_files_via_public_api
+cargo test -p ats-web routes::codegen::tests::missing_current_snapshot_is_rejected_as_bad_request
+cargo check -p ats-core
+cargo check -p agentthespire-desktop
+cargo check -p ats-web
+```
+
 ## Scenario: Complete Knowledge Refresh and Desktop Job Routing
 
 ### 1. Scope / Trigger

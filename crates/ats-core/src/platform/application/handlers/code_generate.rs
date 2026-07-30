@@ -16,7 +16,7 @@ use super::common::{
     finalize_with_success, is_cancelled, transition_to_running,
 };
 use crate::codegen::{AssetKind, PromptAssembler};
-use crate::knowledge::{KnowledgePaths, runtime::detect_source_mode};
+use crate::game_pack::VerifiedGameContext;
 use crate::llm::{CompletionRequest, LlmClient, Message, MessageRole, StreamEvent};
 use crate::platform::contracts::SubmitCodeGenerateRequest;
 use crate::platform::domain::{JobId, JobRepository};
@@ -28,7 +28,7 @@ pub(crate) async fn run_code_generate(
     sink: Arc<dyn ProgressSink>,
     job_id: JobId,
     request: SubmitCodeGenerateRequest,
-    knowledge_paths: KnowledgePaths,
+    game_context: VerifiedGameContext,
     artifacts_dir: PathBuf,
     compile_validator: Arc<dyn AssetCompileValidator>,
 ) {
@@ -60,13 +60,12 @@ pub(crate) async fn run_code_generate(
     }
 
     let assembler = PromptAssembler::built_in();
-    let mode = detect_source_mode(&knowledge_paths);
     let prompt_result = match &request {
         SubmitCodeGenerateRequest::Asset { request: req } => assembler
-            .assemble_asset_prompt_with_evidence(req, &knowledge_paths, mode)
+            .assemble_asset_prompt_with_evidence(req, &game_context)
             .map(|assembly| (assembly.prompt, assembly.evidence_record)),
         SubmitCodeGenerateRequest::CustomCode { request: req } => assembler
-            .assemble_custom_code_prompt(req, &knowledge_paths, mode)
+            .assemble_custom_code_prompt(req, &game_context)
             .map(|prompt| (prompt, String::new())),
     };
     let (prompt, evidence_record) = match prompt_result {

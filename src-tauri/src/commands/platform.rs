@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use ats_core::audit::{AuditSinkArc, FileAuditSink};
+use ats_core::game_pack::{GamePackRegistry, VerifiedGameContext};
 use ats_core::image_gen::{ImageGenClient, build_from_config as build_image_gen};
 use ats_core::image_proc::{BgRemoverChain, ImageProcClient};
 use ats_core::knowledge::{BaselibSource, GitHubBaselibSource, KnowledgePaths};
@@ -93,9 +94,9 @@ pub async fn submit_code_generate_job(
     let service = build_service(&config, &active)?;
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
     let artifacts_dir = active_artifacts_dir(&active)?;
-    let knowledge_paths = KnowledgePaths::from_runtime_dir(&config.status_snapshot().runtime_dir());
+    let game_context = active_game_context(&config, &active)?;
     let job_id = service
-        .submit_code_generate(request, knowledge_paths, artifacts_dir, sink)
+        .submit_code_generate(request, game_context, artifacts_dir, sink)
         .await
         .map_err(|e| e.to_string())?;
     Ok(SubmitJobAck { job_id })
@@ -113,7 +114,7 @@ pub async fn submit_asset_generate_job(
     let service = build_service(&config, &active)?;
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
     let artifacts_dir = active_artifacts_dir(&active)?;
-    let knowledge_paths = KnowledgePaths::from_runtime_dir(&config.status_snapshot().runtime_dir());
+    let game_context = active_game_context(&config, &active)?;
     let settings = config.settings_snapshot();
     let image_gen: Arc<dyn ImageGenClient> =
         build_image_gen(&settings.image_gen).map_err(|e| e.to_string())?;
@@ -125,7 +126,7 @@ pub async fn submit_asset_generate_job(
     let job_id = service
         .submit_asset_generate(
             request,
-            knowledge_paths,
+            game_context,
             artifacts_dir,
             image_gen,
             image_proc,
@@ -213,9 +214,9 @@ pub async fn submit_batch_custom_code_job(
     let service = build_service(&config, &active)?;
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
     let artifacts_dir = active_artifacts_dir(&active)?;
-    let knowledge_paths = KnowledgePaths::from_runtime_dir(&config.status_snapshot().runtime_dir());
+    let game_context = active_game_context(&config, &active)?;
     let job_id = service
-        .submit_batch_custom_code(request, knowledge_paths, artifacts_dir, sink)
+        .submit_batch_custom_code(request, game_context, artifacts_dir, sink)
         .await
         .map_err(|e| e.to_string())?;
     Ok(SubmitJobAck { job_id })
@@ -324,6 +325,27 @@ fn active_items_dir(active: &State<'_, ActiveProject>) -> Result<PathBuf, String
         .as_ref()
         .ok_or_else(|| "no active project — open or create one first".to_string())?;
     Ok(project.items_dir())
+}
+
+pub(crate) fn active_game_context(
+    config: &State<'_, AppConfig>,
+    active: &State<'_, ActiveProject>,
+) -> Result<VerifiedGameContext, String> {
+    let game_id = {
+        let guard = active
+            .0
+            .lock()
+            .map_err(|e| format!("active project lock poisoned: {e}"))?;
+        guard
+            .as_ref()
+            .ok_or_else(|| "no active project — open or create one first".to_string())?
+            .meta()
+            .game_id
+            .clone()
+    };
+    let registry = GamePackRegistry::built_in().map_err(|error| error.to_string())?;
+    VerifiedGameContext::open_current(&config.status_snapshot().runtime_dir(), &registry, &game_id)
+        .map_err(|error| error.to_string())
 }
 
 fn build_service(

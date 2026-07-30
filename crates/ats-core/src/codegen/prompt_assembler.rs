@@ -8,17 +8,18 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use thiserror::Error;
+
 use crate::codegen::models::{
     AssetCodegenRequest, AssetGroupRequest, AssetKind, CustomCodegenRequest, ModProjectRequest,
     asset_localization_key_segment,
 };
+use crate::game_pack::VerifiedGameContext;
 use crate::knowledge::{
-    KnowledgePacket, KnowledgePaths, KnowledgeQuery, KnowledgeScenario, SourceMode,
+    KnowledgePacket, KnowledgeQuery, KnowledgeScenario, SnapshotCodeFactsError,
     Sts2KnowledgeResolver,
 };
 use crate::prompting::{PromptContextAssembler, PromptError, PromptLoader};
-
-const GAME_API_REFERENCE_FILE_NAME: &str = "sts2_api_reference.md";
 
 const FACTS_STUB_MESSAGE: &str = "Structured code facts are not available for this request. \
 Use only the inlined Rules And Guidance and project context below. Do not invent API signatures or claim to read local files.";
@@ -36,6 +37,16 @@ pub struct PromptAssembler {
 pub struct AssetPromptAssembly {
     pub prompt: String,
     pub evidence_record: String,
+}
+
+#[derive(Debug, Error)]
+pub enum PromptAssemblyError {
+    #[error(transparent)]
+    Template(#[from] PromptError),
+    #[error(transparent)]
+    Knowledge(#[from] SnapshotCodeFactsError),
+    #[error("serialize verified game context evidence: {0}")]
+    EvidenceSerialization(#[from] serde_json::Error),
 }
 
 impl PromptAssembler {
@@ -65,19 +76,17 @@ impl PromptAssembler {
     pub fn assemble_asset_prompt(
         &self,
         request: &AssetCodegenRequest,
-        paths: &KnowledgePaths,
-        game_source_mode: SourceMode,
-    ) -> Result<String, PromptError> {
-        self.assemble_asset_prompt_with_evidence(request, paths, game_source_mode)
+        context: &VerifiedGameContext,
+    ) -> Result<String, PromptAssemblyError> {
+        self.assemble_asset_prompt_with_evidence(request, context)
             .map(|assembly| assembly.prompt)
     }
 
     pub fn assemble_asset_prompt_with_evidence(
         &self,
         request: &AssetCodegenRequest,
-        paths: &KnowledgePaths,
-        game_source_mode: SourceMode,
-    ) -> Result<AssetPromptAssembly, PromptError> {
+        context: &VerifiedGameContext,
+    ) -> Result<AssetPromptAssembly, PromptAssemblyError> {
         let asset_kind = AssetKind::parse(&request.asset_type);
         let canonical_asset_type = asset_kind
             .map(AssetKind::as_str)
@@ -92,7 +101,7 @@ impl PromptAssembler {
             symbols: Vec::new(),
             group_asset_types: Vec::new(),
         };
-        let knowledge = self.resolve_knowledge(&query, paths, game_source_mode);
+        let knowledge = self.resolve_knowledge(&query, context)?;
 
         let img_list = format_image_list(&request.image_paths);
         let zhs_hint = if request.name_zhs.is_empty() {
@@ -133,7 +142,7 @@ impl PromptAssembler {
         ]);
         let prompt = self.loader.render("codegen.asset_prompt", &vars)?;
         let evidence_record =
-            build_asset_evidence_record(&query, paths, game_source_mode, knowledge.facts.as_str());
+            build_asset_evidence_record(&query, context, knowledge.facts.as_str())?;
         Ok(AssetPromptAssembly {
             prompt,
             evidence_record,
@@ -143,9 +152,8 @@ impl PromptAssembler {
     pub fn assemble_custom_code_prompt(
         &self,
         request: &CustomCodegenRequest,
-        paths: &KnowledgePaths,
-        game_source_mode: SourceMode,
-    ) -> Result<String, PromptError> {
+        context: &VerifiedGameContext,
+    ) -> Result<String, PromptAssemblyError> {
         let query = KnowledgeQuery {
             scenario: Some(KnowledgeScenario::CustomCodeCodegen),
             domain: "sts2".into(),
@@ -156,7 +164,7 @@ impl PromptAssembler {
             symbols: Vec::new(),
             group_asset_types: Vec::new(),
         };
-        let knowledge = self.resolve_knowledge(&query, paths, game_source_mode);
+        let knowledge = self.resolve_knowledge(&query, context)?;
 
         let build_note = "NOTE: Godot headless export always exits with code -1, but if MSBuild reports '0 Error(s)' and the overall dotnet exit code is 0 — that is SUCCESS. Do NOT re-run just because of Godot's -1.";
         let build_steps = if request.skip_build {
@@ -167,7 +175,7 @@ impl PromptAssembler {
             )
         };
 
-        let api_ref = api_ref_path_string(paths);
+        let api_ref = snapshot_lookup_root(context, "game");
         let project_root = path_to_posix(&request.project_root);
         let mod_name = path_basename(&request.project_root);
 
@@ -187,15 +195,14 @@ impl PromptAssembler {
             ("name", request.name.as_str()),
             ("project_root", project_root.as_str()),
         ]);
-        self.loader.render("codegen.custom_code_prompt", &vars)
+        Ok(self.loader.render("codegen.custom_code_prompt", &vars)?)
     }
 
     pub fn assemble_asset_group_prompt(
         &self,
         request: &AssetGroupRequest,
-        paths: &KnowledgePaths,
-        game_source_mode: SourceMode,
-    ) -> Result<String, PromptError> {
+        context: &VerifiedGameContext,
+    ) -> Result<String, PromptAssemblyError> {
         let symbols: Vec<String> = request.assets.iter().map(|a| a.item.name.clone()).collect();
         let group_asset_types: Vec<String> = request
             .assets
@@ -212,7 +219,7 @@ impl PromptAssembler {
             symbols,
             group_asset_types,
         };
-        let knowledge = self.resolve_knowledge(&query, paths, game_source_mode);
+        let knowledge = self.resolve_knowledge(&query, context)?;
 
         let assets_section = render_assets_section(&request.assets);
         let class_names = request
@@ -236,7 +243,7 @@ impl PromptAssembler {
             ("mod_name", mod_name.as_str()),
             ("project_root", project_root.as_str()),
         ]);
-        self.loader.render("codegen.asset_group_prompt", &vars)
+        Ok(self.loader.render("codegen.asset_group_prompt", &vars)?)
     }
 
     pub fn assemble_build_prompt(&self, max_attempts: u32) -> Result<String, PromptError> {
@@ -267,46 +274,42 @@ impl PromptAssembler {
     fn resolve_knowledge(
         &self,
         query: &KnowledgeQuery,
-        paths: &KnowledgePaths,
-        game_source_mode: SourceMode,
-    ) -> ResolvedKnowledge {
-        let packet = self.resolver.resolve(query, paths, game_source_mode);
-        ResolvedKnowledge::from_packet(&packet, &self.context_assembler)
+        context: &VerifiedGameContext,
+    ) -> Result<ResolvedKnowledge, PromptAssemblyError> {
+        let packet = self.resolver.resolve(query, context)?;
+        Ok(ResolvedKnowledge::from_packet(
+            &packet,
+            &self.context_assembler,
+        ))
     }
 }
 
 fn build_asset_evidence_record(
     query: &KnowledgeQuery,
-    paths: &KnowledgePaths,
-    game_source_mode: SourceMode,
+    context: &VerifiedGameContext,
     rendered_facts: &str,
-) -> String {
-    let manifest_snapshot = std::fs::read_to_string(&paths.manifest_path).unwrap_or_else(|err| {
-        format!(
-            "knowledge manifest unavailable at {}: {err}",
-            paths.manifest_path.display()
-        )
-    });
+) -> Result<String, PromptAssemblyError> {
+    let context_evidence = serde_json::to_string_pretty(&context.evidence())?;
     let requirements = query.requirements.as_deref().unwrap_or_default().trim();
-    format!(
+    Ok(format!(
         "# Evidence Record\n\n\
 - Domain: `{}`\n\
 - Scenario: `asset_codegen`\n\
 - Asset type: `{}`\n\
-- Source mode: `{:?}`\n\
-- Knowledge manifest: `{}`\n\
+- Game Pack: `{}`\n\
+- Truth Snapshot: `{}`\n\
 - Purpose: current official implementation and lifecycle evidence used for this generation\n\n\
 ## Requirement\n\n{}\n\n\
-## Knowledge Manifest Snapshot\n\n```json\n{}\n```\n\n\
+## Verified Game Context\n\n```json\n{}\n```\n\n\
 ## Injected Code Facts\n\n{}\n",
         query.domain,
         query.asset_type.as_deref().unwrap_or_default(),
-        game_source_mode,
-        paths.manifest_path.display(),
+        context.game_pack_id(),
+        context.snapshot_id(),
         requirements,
-        manifest_snapshot.trim(),
+        context_evidence,
         rendered_facts.trim(),
-    )
+    ))
 }
 
 struct ResolvedKnowledge {
@@ -400,8 +403,8 @@ fn render_assets_section(assets: &[crate::codegen::AssetGroupItem]) -> String {
     buf.trim().to_string()
 }
 
-fn api_ref_path_string(paths: &KnowledgePaths) -> String {
-    path_to_posix(&paths.game_dir.join(GAME_API_REFERENCE_FILE_NAME))
+fn snapshot_lookup_root(context: &VerifiedGameContext, source_id: &str) -> String {
+    format!("snapshot://{}/{source_id}/", context.snapshot_id())
 }
 
 fn path_to_posix(p: &Path) -> String {
@@ -434,14 +437,17 @@ fn project_context(project_root: &Path) -> (String, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::knowledge::test_support::fixture_game_context;
 
-    fn paths() -> KnowledgePaths {
-        KnowledgePaths::from_runtime_dir(Path::new("/tmp/runtime"))
+    fn context(temp: &tempfile::TempDir) -> VerifiedGameContext {
+        fixture_game_context(temp.path(), &[], &[])
     }
 
     #[test]
     fn asset_prompt_contains_required_fragments() {
         let assembler = PromptAssembler::built_in();
+        let temp = tempfile::TempDir::new().unwrap();
+        let context = context(&temp);
         let request = AssetCodegenRequest {
             asset_type: "card".into(),
             asset_name: "DemoCard".into(),
@@ -452,7 +458,7 @@ mod tests {
             ..Default::default()
         };
         let prompt = assembler
-            .assemble_asset_prompt(&request, &paths(), SourceMode::Missing)
+            .assemble_asset_prompt(&request, &context)
             .expect("assembly should succeed");
         assert!(prompt.contains("DemoCard"));
         assert!(prompt.contains("card"));
@@ -460,7 +466,6 @@ mod tests {
         assert!(prompt.contains("demo.png"));
         assert!(prompt.contains("strict JSON"));
         assert!(prompt.contains("localization"));
-        // facts stub injected when game source missing
         assert!(prompt.contains("Structured code facts are not available"));
         assert!(!prompt.contains("Read `MainFile.cs`"));
     }
@@ -468,6 +473,8 @@ mod tests {
     #[test]
     fn asset_prompt_does_not_delegate_file_or_build_operations() {
         let assembler = PromptAssembler::built_in();
+        let temp = tempfile::TempDir::new().unwrap();
+        let context = context(&temp);
         let request = AssetCodegenRequest {
             asset_type: "card".into(),
             asset_name: "X".into(),
@@ -475,9 +482,7 @@ mod tests {
             skip_build: true,
             ..Default::default()
         };
-        let prompt = assembler
-            .assemble_asset_prompt(&request, &paths(), SourceMode::Missing)
-            .unwrap();
+        let prompt = assembler.assemble_asset_prompt(&request, &context).unwrap();
         assert!(!prompt.contains("Run `dotnet publish`"));
         assert!(prompt.contains("Do not read or write files"));
     }
@@ -485,9 +490,10 @@ mod tests {
     #[test]
     fn asset_prompt_normalizes_type_and_inlines_project_context() {
         let td = tempfile::TempDir::new().unwrap();
+        let context = context(&td);
         std::fs::write(
             td.path().join("project.json"),
-            r#"{"name":"demo","csharp_name":"DemoMod","scaffolded":true}"#,
+            r#"{"name":"demo","csharp_name":"DemoMod","game_id":"sts2","scaffolded":true,"generated_files":[],"build_output_dir":null}"#,
         )
         .unwrap();
         std::fs::write(
@@ -502,7 +508,7 @@ mod tests {
             ..Default::default()
         };
         let prompt = PromptAssembler::built_in()
-            .assemble_asset_prompt(&request, &paths(), SourceMode::Missing)
+            .assemble_asset_prompt(&request, &context)
             .unwrap();
         assert!(prompt.contains("new relic"));
         assert!(prompt.contains("namespace DemoMod"));
@@ -513,17 +519,12 @@ mod tests {
     #[test]
     fn asset_prompt_inlines_current_behavior_evidence_and_records_manifest() {
         let td = tempfile::TempDir::new().unwrap();
-        let knowledge_paths = KnowledgePaths::from_runtime_dir(td.path());
-        crate::knowledge::ensure_dirs(&knowledge_paths).unwrap();
-        let relic_dir = knowledge_paths
-            .game_dir
-            .join("MegaCrit.Sts2.Core.Models.Relics");
-        let combat_dir = knowledge_paths.game_dir.join("MegaCrit.Sts2.Core.Combat");
-        std::fs::create_dir_all(&relic_dir).unwrap();
-        std::fs::create_dir_all(&combat_dir).unwrap();
-        std::fs::write(
-            relic_dir.join("Lantern.cs"),
-            r#"namespace MegaCrit.Sts2.Core.Models.Relics;
+        let context = fixture_game_context(
+            td.path(),
+            &[
+                (
+                    "MegaCrit.Sts2.Core.Models.Relics/Lantern.cs",
+                    r#"namespace MegaCrit.Sts2.Core.Models.Relics;
 public sealed class Lantern : RelicModel
 {
     protected override IEnumerable<DynamicVar> CanonicalVars => new[] { new EnergyVar(1) };
@@ -533,11 +534,10 @@ public sealed class Lantern : RelicModel
             await PlayerCmd.GainEnergy(base.DynamicVars.Energy.BaseValue, base.Owner);
     }
 }"#,
-        )
-        .unwrap();
-        std::fs::write(
-            combat_dir.join("CombatManager.cs"),
-            r#"namespace MegaCrit.Sts2.Core.Combat;
+                ),
+                (
+                    "MegaCrit.Sts2.Core.Combat/CombatManager.cs",
+                    r#"namespace MegaCrit.Sts2.Core.Combat;
 public sealed class CombatManager
 {
     public async Task StartSideTurn()
@@ -550,16 +550,13 @@ public sealed class CombatManager
         player.PlayerCombatState.ResetEnergy();
     }
 }"#,
-        )
-        .unwrap();
-        std::fs::write(
-            &knowledge_paths.manifest_path,
-            r#"{"schemaVersion":1,"game":{"sourceSizeBytes":8896512,"sourceMtime":"fixture"}}"#,
-        )
-        .unwrap();
+                ),
+            ],
+            &[],
+        );
         std::fs::write(
             td.path().join("project.json"),
-            r#"{"name":"demo","csharp_name":"DemoMod","scaffolded":true}"#,
+            r#"{"name":"demo","csharp_name":"DemoMod","game_id":"sts2","scaffolded":true,"generated_files":[],"build_output_dir":null}"#,
         )
         .unwrap();
         std::fs::write(
@@ -577,18 +574,16 @@ public sealed class CombatManager
             ..Default::default()
         };
         let assembly = PromptAssembler::built_in()
-            .assemble_asset_prompt_with_evidence(
-                &request,
-                &knowledge_paths,
-                SourceMode::RuntimeDecompiled,
-            )
+            .assemble_asset_prompt_with_evidence(&request, &context)
             .unwrap();
 
         assert!(assembly.prompt.contains("Official similar implementation"));
         assert!(assembly.prompt.contains("RoundNumber <= 1"));
         assert!(assembly.prompt.contains("Hook.AfterSideTurnStart"));
         assert!(assembly.prompt.contains("ResetEnergy"));
-        assert!(assembly.evidence_record.contains("sourceSizeBytes"));
+        assert!(assembly.evidence_record.contains("gamePackSha256"));
+        assert!(assembly.evidence_record.contains("snapshotId"));
+        assert!(assembly.evidence_record.contains("fixture-indexer"));
         assert!(assembly.evidence_record.contains("Lantern.cs"));
         assert!(assembly.evidence_record.contains("CombatManager.cs"));
         assert!(assembly.evidence_record.contains("Purpose:"));
@@ -597,6 +592,8 @@ public sealed class CombatManager
     #[test]
     fn custom_code_prompt_renders() {
         let assembler = PromptAssembler::built_in();
+        let temp = tempfile::TempDir::new().unwrap();
+        let context = context(&temp);
         let request = CustomCodegenRequest {
             name: "MyHook".into(),
             description: "钩子描述".into(),
@@ -605,7 +602,7 @@ public sealed class CombatManager
             skip_build: false,
         };
         let prompt = assembler
-            .assemble_custom_code_prompt(&request, &paths(), SourceMode::Missing)
+            .assemble_custom_code_prompt(&request, &context)
             .unwrap();
         assert!(prompt.contains("MyHook"));
         assert!(prompt.contains("钩子描述"));
@@ -647,6 +644,8 @@ public sealed class CombatManager
         use crate::planning::{AssetItemType, PlanItem};
 
         let assembler = PromptAssembler::built_in();
+        let temp = tempfile::TempDir::new().unwrap();
+        let context = context(&temp);
         let request = AssetGroupRequest {
             project_root: PathBuf::from("E:/mods/m"),
             assets: vec![
@@ -673,7 +672,7 @@ public sealed class CombatManager
             ],
         };
         let prompt = assembler
-            .assemble_asset_group_prompt(&request, &paths(), SourceMode::Missing)
+            .assemble_asset_group_prompt(&request, &context)
             .unwrap();
         assert!(prompt.contains("FirstCard"));
         assert!(prompt.contains("SecondPower"));

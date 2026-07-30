@@ -9,11 +9,14 @@
 
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::{collections::BTreeMap, fs, path::Path};
 
 use async_trait::async_trait;
 use ats_core::audit::{AuditSinkArc, FileAuditSink, read_recent};
 use ats_core::codegen::CustomCodegenRequest;
-use ats_core::knowledge::KnowledgePaths;
+use ats_core::game_pack::{
+    GamePackLoadPolicy, GamePackLoader, GamePackRegistry, TruthSnapshotStore, VerifiedGameContext,
+};
 use ats_core::llm::{
     CompletionRequest, CompletionResponse, CompletionStream, FinishReason, LlmClient, LlmError,
     StreamEvent, Usage,
@@ -83,6 +86,47 @@ fn make_repo(td: &tempfile::TempDir) -> Arc<dyn JobRepository> {
     Arc::new(FileJobRepository::new(td.path().to_path_buf()))
 }
 
+fn game_context(runtime_dir: &Path) -> VerifiedGameContext {
+    let loader = GamePackLoader::new(GamePackLoadPolicy::new(
+        ["truth_sources"],
+        ["dotnet_project"],
+        ["sts2_code_facts"],
+    ));
+    let pack = loader
+        .load_str(
+            "fixture:sts2",
+            r#"{
+              "schema_version":1,
+              "id":"sts2",
+              "display_name":"STS2 Fixture",
+              "capabilities":["truth_sources"],
+              "truth_sources":[{
+                "id":"game",
+                "kind":"local_file",
+                "input_key":"game_assembly",
+                "indexer":"dotnet_project",
+                "provider":"sts2_code_facts"
+              }]
+            }"#,
+        )
+        .unwrap();
+    let input = runtime_dir.join("fixture-game.dll");
+    fs::write(&input, b"fixture-game").unwrap();
+    let store = TruthSnapshotStore::new(runtime_dir, &pack);
+    let mut draft = store.begin(&pack).unwrap();
+    draft.stage_source("game", &input).unwrap();
+    fs::write(
+        draft.index_output_dir("game").unwrap().join("Fixture.cs"),
+        "public class Fixture {}",
+    )
+    .unwrap();
+    draft
+        .finalize(BTreeMap::from([("fixture".into(), "1".into())]))
+        .unwrap();
+    let registry = GamePackRegistry::from_packs([pack]).unwrap();
+    VerifiedGameContext::open_current(runtime_dir, &registry, "sts2").unwrap()
+}
+
 async fn wait_terminal(service: &JobApplicationService, id: &JobId) {
     for _ in 0..200 {
         let job = service.get(id).await.unwrap();
@@ -133,7 +177,8 @@ async fn code_generate_writes_files_via_public_api() {
     std::fs::create_dir_all(&history).unwrap();
     let artifacts = td.path().join("artifacts");
     std::fs::create_dir_all(&artifacts).unwrap();
-    let knowledge = KnowledgePaths::from_runtime_dir(td.path());
+    let context = game_context(td.path());
+    let snapshot_id = context.snapshot_id().to_string();
 
     let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
     let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
@@ -153,7 +198,7 @@ async fn code_generate_writes_files_via_public_api() {
                     skip_build: true,
                 },
             },
-            knowledge,
+            context,
             artifacts.clone(),
             sink,
         )
@@ -163,6 +208,8 @@ async fn code_generate_writes_files_via_public_api() {
 
     let job = service.get(&id).await.unwrap();
     assert_eq!(job.status, JobStatus::Completed);
+    assert_eq!(job.payload["_gameContext"]["gamePackId"], "sts2");
+    assert_eq!(job.payload["_gameContext"]["snapshotId"], snapshot_id);
     let generated_cs = td.path().join("Generated/IntegrationDemo.cs");
     let artifact_cs = artifacts.join("IntegrationDemo/IntegrationDemo.cs");
     let cs = generated_cs;

@@ -25,11 +25,11 @@ use super::common::{
     transition_to_running,
 };
 use crate::codegen::{AssetKind, PromptAssembler};
+use crate::game_pack::VerifiedGameContext;
 use crate::image_gen::{ImageGenClient, ImageGenRequest};
 use crate::image_proc::{
     ImageProcClient, ImageProcError, ImageQualityReport, ImageQualitySpec, analyze_png_quality,
 };
-use crate::knowledge::{KnowledgePaths, runtime::detect_source_mode};
 use crate::llm::LlmClient;
 use crate::platform::contracts::SubmitAssetGenerateRequest;
 use crate::platform::domain::{JobId, JobRepository};
@@ -43,7 +43,7 @@ pub(crate) async fn run_asset_generate(
     sink: Arc<dyn ProgressSink>,
     job_id: JobId,
     request: SubmitAssetGenerateRequest,
-    knowledge_paths: KnowledgePaths,
+    game_context: VerifiedGameContext,
     artifacts_dir: PathBuf,
     compile_validator: Arc<dyn AssetCompileValidator>,
 ) {
@@ -262,11 +262,9 @@ pub(crate) async fn run_asset_generate(
 
     // 2. 装 codegen prompt
     let assembler = PromptAssembler::built_in();
-    let prompt_assembly = match assembler.assemble_asset_prompt_with_evidence(
-        &asset_request,
-        &knowledge_paths,
-        detect_source_mode(&knowledge_paths),
-    ) {
+    let prompt_assembly = match assembler
+        .assemble_asset_prompt_with_evidence(&asset_request, &game_context)
+    {
         Ok(assembly) => assembly,
         Err(err) => {
             finalize_with_error(&repo, &job_id, &sink, &format!("prompt assembly: {err}")).await;
@@ -363,6 +361,7 @@ mod tests {
     use crate::codegen::AssetCodegenRequest;
     use crate::image_gen::{GeneratedImage, ImageGenError, ImageGenResponse};
     use crate::image_proc::SimpleBgRemover;
+    use crate::knowledge::test_support::fixture_game_context;
     use crate::llm::{
         CompletionRequest, CompletionResponse, CompletionStream, FinishReason, LlmError,
         StreamEvent, Usage,
@@ -661,7 +660,7 @@ mod tests {
     fn prepare_project(root: &Path) {
         std::fs::write(
             root.join("project.json"),
-            r#"{"name":"demo","csharp_name":"DemoMod","scaffolded":true}"#,
+            r#"{"name":"demo","csharp_name":"DemoMod","game_id":"sts2","scaffolded":true,"generated_files":[],"build_output_dir":null}"#,
         )
         .unwrap();
         std::fs::write(
@@ -705,7 +704,7 @@ mod tests {
         std::fs::create_dir_all(&history).unwrap();
         let artifacts = td.path().join("artifacts");
         std::fs::create_dir_all(&artifacts).unwrap();
-        let kp = KnowledgePaths::from_runtime_dir(td.path());
+        let kp = fixture_game_context(td.path(), &[], &[]);
 
         let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
         let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
@@ -809,7 +808,7 @@ mod tests {
         let id = service
             .submit_asset_generate(
                 make_request_for_type(td.path(), "NoisyRelic", "relic", Some("checkerboard relic")),
-                KnowledgePaths::from_runtime_dir(td.path()),
+                fixture_game_context(td.path(), &[], &[]),
                 artifacts.clone(),
                 Arc::new(MockImageGen::new(checkerboard_subject_png())),
                 Arc::new(SimpleBgRemover::default()),
@@ -859,7 +858,7 @@ mod tests {
                     "relic",
                     Some("invalid image bytes"),
                 ),
-                KnowledgePaths::from_runtime_dir(td.path()),
+                fixture_game_context(td.path(), &[], &[]),
                 artifacts.clone(),
                 Arc::new(MockImageGen::new(b"not-a-png".to_vec())),
                 Arc::new(SimpleBgRemover::default()),
@@ -913,7 +912,7 @@ mod tests {
         let id = service
             .submit_asset_generate(
                 make_request_for_type(td.path(), "RoleRelic", "relic", Some("transparent relic")),
-                KnowledgePaths::from_runtime_dir(td.path()),
+                fixture_game_context(td.path(), &[], &[]),
                 artifacts,
                 Arc::new(MockImageGen::new(valid_subject_png())),
                 Arc::new(SimpleBgRemover::default()),
@@ -972,7 +971,7 @@ mod tests {
         let id = service
             .submit_asset_generate(
                 request,
-                KnowledgePaths::from_runtime_dir(td.path()),
+                fixture_game_context(td.path(), &[], &[]),
                 artifacts.clone(),
                 Arc::new(MockImageGen::new(Vec::new())),
                 Arc::new(SimpleBgRemover::default()),
@@ -998,7 +997,7 @@ mod tests {
         std::fs::create_dir_all(&history).unwrap();
         let artifacts = td.path().join("artifacts");
         std::fs::create_dir_all(&artifacts).unwrap();
-        let kp = KnowledgePaths::from_runtime_dir(td.path());
+        let kp = fixture_game_context(td.path(), &[], &[]);
 
         let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
         let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
@@ -1054,7 +1053,7 @@ mod tests {
         let id = service
             .submit_asset_generate(
                 make_request(&other, "ScopedCard", Some("must not run")),
-                KnowledgePaths::from_runtime_dir(td.path()),
+                fixture_game_context(td.path(), &[], &[]),
                 active.join("artifacts"),
                 mock_img.clone(),
                 Arc::new(SimpleBgRemover::default()),
@@ -1078,7 +1077,7 @@ mod tests {
         std::fs::create_dir_all(&history).unwrap();
         let artifacts = td.path().join("artifacts");
         std::fs::create_dir_all(&artifacts).unwrap();
-        let kp = KnowledgePaths::from_runtime_dir(td.path());
+        let kp = fixture_game_context(td.path(), &[], &[]);
 
         let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
         let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
@@ -1127,7 +1126,7 @@ mod tests {
         std::fs::create_dir_all(&history).unwrap();
         let artifacts = td.path().join("artifacts");
         std::fs::create_dir_all(&artifacts).unwrap();
-        let kp = KnowledgePaths::from_runtime_dir(td.path());
+        let kp = fixture_game_context(td.path(), &[], &[]);
 
         let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
         let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
@@ -1182,7 +1181,7 @@ mod tests {
         let id = service
             .submit_asset_generate(
                 make_request(td.path(), "RetryCard", None),
-                KnowledgePaths::from_runtime_dir(td.path()),
+                fixture_game_context(td.path(), &[], &[]),
                 artifacts,
                 Arc::new(MockImageGen::new(Vec::new())),
                 Arc::new(SimpleBgRemover::default()),
@@ -1227,7 +1226,7 @@ mod tests {
         let id = service
             .submit_asset_generate(
                 make_request(td.path(), "RollbackCard", Some("rollback card image")),
-                KnowledgePaths::from_runtime_dir(td.path()),
+                fixture_game_context(td.path(), &[], &[]),
                 artifacts.clone(),
                 Arc::new(MockImageGen::new(valid_subject_png())),
                 Arc::new(SimpleBgRemover::default()),
