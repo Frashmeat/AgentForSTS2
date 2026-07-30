@@ -5,9 +5,11 @@ use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
+use reqwest::header::{CONTENT_RANGE, RANGE};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
@@ -18,6 +20,12 @@ use crate::game_pack::{LoadedGamePack, TruthSourceKind};
 use crate::knowledge::{
     default_dotnet_tools_dirs, discover_ilspycmd, run_decompile_file, run_decompile_project,
 };
+
+const GITHUB_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const GITHUB_STALL_TIMEOUT: Duration = Duration::from_secs(45);
+const GITHUB_TOTAL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+const ASSET_DOWNLOAD_MAX_ATTEMPTS: usize = 4;
+const ASSET_DOWNLOAD_RETRY_DELAY: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Error)]
 pub enum TruthSnapshotRefreshError {
@@ -111,10 +119,17 @@ pub struct GitHubReleaseAssetFetcher {
     release_url_override: Option<String>,
 }
 
+enum AssetDownloadAttemptError {
+    Retryable(String),
+    Fatal(String),
+}
+
 impl GitHubReleaseAssetFetcher {
     pub fn with_default_client(token: Option<String>) -> Result<Self, String> {
         let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(60))
+            .connect_timeout(GITHUB_CONNECT_TIMEOUT)
+            .read_timeout(GITHUB_STALL_TIMEOUT)
+            .timeout(GITHUB_TOTAL_TIMEOUT)
             .build()
             .map_err(|error| error.to_string())?;
         Ok(Self {
@@ -176,6 +191,170 @@ impl GitHubReleaseAssetFetcher {
             .get(url)
             .header("User-Agent", "agentthespire-rust")
     }
+
+    async fn download_asset(&self, url: &reqwest::Url, destination: &Path) -> Result<(), String> {
+        if let Some(parent) = destination.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|error| format!("create download directory: {error}"))?;
+        }
+
+        let mut last_error = String::new();
+        for attempt in 1..=ASSET_DOWNLOAD_MAX_ATTEMPTS {
+            match self.download_asset_attempt(url, destination).await {
+                Ok(()) => return Ok(()),
+                Err(AssetDownloadAttemptError::Fatal(message)) => return Err(message),
+                Err(AssetDownloadAttemptError::Retryable(message)) => {
+                    last_error = message;
+                    if attempt < ASSET_DOWNLOAD_MAX_ATTEMPTS {
+                        tokio::time::sleep(ASSET_DOWNLOAD_RETRY_DELAY).await;
+                    }
+                }
+            }
+        }
+
+        let downloaded = tokio::fs::metadata(destination)
+            .await
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        Err(format!(
+            "asset download failed after {ASSET_DOWNLOAD_MAX_ATTEMPTS} attempts at {downloaded} bytes: {last_error}"
+        ))
+    }
+
+    async fn download_asset_attempt(
+        &self,
+        url: &reqwest::Url,
+        destination: &Path,
+    ) -> Result<(), AssetDownloadAttemptError> {
+        let existing_len = tokio::fs::metadata(destination)
+            .await
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        let mut request = self.download_request(url.clone());
+        if existing_len > 0 {
+            request = request.header(RANGE, format!("bytes={existing_len}-"));
+        }
+        let response = request.send().await.map_err(|error| {
+            AssetDownloadAttemptError::Retryable(format!("send asset request: {error}"))
+        })?;
+
+        if response.status() == reqwest::StatusCode::RANGE_NOT_SATISFIABLE
+            && existing_len > 0
+            && unsatisfied_range_total(response.headers().get(CONTENT_RANGE)) == Some(existing_len)
+        {
+            return Ok(());
+        }
+        if !response.status().is_success() {
+            let message = format!("GitHub asset download returned {}", response.status());
+            return if response.status().is_server_error()
+                || response.status() == reqwest::StatusCode::REQUEST_TIMEOUT
+                || response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS
+            {
+                Err(AssetDownloadAttemptError::Retryable(message))
+            } else {
+                Err(AssetDownloadAttemptError::Fatal(message))
+            };
+        }
+
+        let partial = response.status() == reqwest::StatusCode::PARTIAL_CONTENT;
+        let expected_total = if partial {
+            let Some((start, total)) = satisfied_range(response.headers().get(CONTENT_RANGE))
+            else {
+                return Err(AssetDownloadAttemptError::Fatal(format!(
+                    "GitHub asset download returned invalid Content-Range for offset {existing_len}"
+                )));
+            };
+            if start != existing_len {
+                return Err(AssetDownloadAttemptError::Fatal(format!(
+                    "GitHub asset download returned Content-Range start {start} for offset {existing_len}"
+                )));
+            }
+            Some(total)
+        } else {
+            response.content_length()
+        };
+
+        let append = partial && existing_len > 0;
+        let mut options = tokio::fs::OpenOptions::new();
+        options.create(true).write(true);
+        if append {
+            options.append(true);
+        } else {
+            options.truncate(true);
+        }
+        let mut file = options.open(destination).await.map_err(|error| {
+            AssetDownloadAttemptError::Fatal(format!(
+                "open download destination {}: {error}",
+                destination.display()
+            ))
+        })?;
+        let mut written = if append { existing_len } else { 0 };
+        let mut stream = response.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = match chunk {
+                Ok(chunk) => chunk,
+                Err(error) => {
+                    file.flush().await.map_err(|flush_error| {
+                        AssetDownloadAttemptError::Fatal(format!(
+                            "flush partial download {}: {flush_error}",
+                            destination.display()
+                        ))
+                    })?;
+                    return Err(AssetDownloadAttemptError::Retryable(format!(
+                        "read asset body after {written} bytes: {error}"
+                    )));
+                }
+            };
+            file.write_all(&chunk).await.map_err(|error| {
+                AssetDownloadAttemptError::Fatal(format!(
+                    "write downloaded asset {}: {error}",
+                    destination.display()
+                ))
+            })?;
+            written = written.saturating_add(chunk.len() as u64);
+        }
+        file.flush().await.map_err(|error| {
+            AssetDownloadAttemptError::Fatal(format!(
+                "flush downloaded asset {}: {error}",
+                destination.display()
+            ))
+        })?;
+        file.sync_all().await.map_err(|error| {
+            AssetDownloadAttemptError::Fatal(format!(
+                "sync downloaded asset {}: {error}",
+                destination.display()
+            ))
+        })?;
+        if let Some(expected) = expected_total
+            && written != expected
+        {
+            return Err(AssetDownloadAttemptError::Retryable(format!(
+                "asset body ended at {written} bytes, expected {expected}"
+            )));
+        }
+        Ok(())
+    }
+}
+
+fn satisfied_range(value: Option<&reqwest::header::HeaderValue>) -> Option<(u64, u64)> {
+    let value = value?.to_str().ok()?.strip_prefix("bytes ")?;
+    let (range, total) = value.split_once('/')?;
+    let (start, end) = range.split_once('-')?;
+    let start = start.parse().ok()?;
+    let end: u64 = end.parse().ok()?;
+    let total: u64 = total.parse().ok()?;
+    (start <= end && end < total).then_some((start, total))
+}
+
+fn unsatisfied_range_total(value: Option<&reqwest::header::HeaderValue>) -> Option<u64> {
+    value?.to_str().ok()?.strip_prefix("bytes */")?.parse().ok()
+}
+
+fn normalize_ilspycmd_version_line(line: &str) -> &str {
+    line.split_once(':')
+        .filter(|(label, value)| label.eq_ignore_ascii_case("ilspycmd") && !value.trim().is_empty())
+        .map_or(line, |(_, value)| value.trim())
 }
 
 #[derive(Debug, Deserialize)]
@@ -227,39 +406,7 @@ impl RemoteTruthSourceFetcher for GitHubReleaseAssetFetcher {
             .map_err(|error| format!("invalid asset download URL: {error}"))?;
         // Never forward the GitHub API bearer token to a URL selected by the
         // release response.
-        let response = self
-            .download_request(download_url)
-            .send()
-            .await
-            .map_err(|error| error.to_string())?;
-        if !response.status().is_success() {
-            return Err(format!(
-                "GitHub asset download returned {}",
-                response.status()
-            ));
-        }
-        if let Some(parent) = destination.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|error| format!("create download directory: {error}"))?;
-        }
-        let mut file = tokio::fs::File::create(destination)
-            .await
-            .map_err(|error| format!("create download destination: {error}"))?;
-        let mut stream = response.bytes_stream();
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|error| error.to_string())?;
-            file.write_all(&chunk)
-                .await
-                .map_err(|error| format!("write downloaded asset: {error}"))?;
-        }
-        file.flush()
-            .await
-            .map_err(|error| format!("flush downloaded asset: {error}"))?;
-        file.sync_all()
-            .await
-            .map_err(|error| format!("sync downloaded asset: {error}"))?;
-        Ok(())
+        self.download_asset(&download_url, destination).await
     }
 }
 
@@ -300,12 +447,13 @@ impl TruthSourceIndexer for IlspycmdTruthIndexer {
         }
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let version = stdout
+        let version_line = stdout
             .lines()
             .chain(stderr.lines())
             .map(str::trim)
             .find(|line| !line.is_empty())
             .ok_or_else(|| "ilspycmd --version returned no version text".to_string())?;
+        let version = normalize_ilspycmd_version_line(version_line);
         Ok(BTreeMap::from([("ilspycmd".into(), version.into())]))
     }
 
@@ -583,6 +731,8 @@ fn acquire_refresh_lock(
 
 #[cfg(test)]
 mod tests {
+    use std::io::{Read, Write};
+    use std::net::{TcpListener, TcpStream};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use sha2::{Digest, Sha256};
@@ -684,6 +834,22 @@ mod tests {
 
     fn refresher(fetcher: Arc<MockFetcher>, indexer: Arc<MockIndexer>) -> TruthSnapshotRefresher {
         TruthSnapshotRefresher::new(fetcher, indexer)
+    }
+
+    fn read_http_request(stream: &mut TcpStream) -> String {
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut request = Vec::new();
+        let mut buffer = [0_u8; 1024];
+        while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+            let count = stream.read(&mut buffer).unwrap();
+            if count == 0 {
+                break;
+            }
+            request.extend_from_slice(&buffer[..count]);
+        }
+        String::from_utf8(request).unwrap().to_ascii_lowercase()
     }
 
     #[tokio::test]
@@ -907,6 +1073,91 @@ mod tests {
             .build()
             .unwrap();
         assert!(!download_request.headers().contains_key("authorization"));
+    }
+
+    #[test]
+    fn ilspycmd_version_value_does_not_repeat_tool_name() {
+        assert_eq!(
+            normalize_ilspycmd_version_line("ilspycmd: 9.1.0.7988"),
+            "9.1.0.7988"
+        );
+        assert_eq!(normalize_ilspycmd_version_line("9.1.0.7988"), "9.1.0.7988");
+    }
+
+    #[tokio::test]
+    async fn asset_download_resumes_after_interrupted_body() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut first, _) = listener.accept().unwrap();
+            let first_request = read_http_request(&mut first);
+            assert!(!first_request.contains("range:"));
+            write!(
+                first,
+                "HTTP/1.1 200 OK\r\nContent-Length: 11\r\nConnection: close\r\n\r\n"
+            )
+            .unwrap();
+            first.write_all(b"hello ").unwrap();
+            first.flush().unwrap();
+            drop(first);
+
+            let (mut second, _) = listener.accept().unwrap();
+            let second_request = read_http_request(&mut second);
+            assert!(second_request.contains("range: bytes=6-"));
+            write!(
+                second,
+                "HTTP/1.1 206 Partial Content\r\nContent-Length: 5\r\nContent-Range: bytes 6-10/11\r\nConnection: close\r\n\r\n"
+            )
+            .unwrap();
+            second.write_all(b"world").unwrap();
+        });
+        let temp = tempfile::TempDir::new().unwrap();
+        let destination = temp.path().join("Library.dll");
+        let fetcher = GitHubReleaseAssetFetcher::with_default_client(None).unwrap();
+
+        fetcher
+            .download_asset(
+                &reqwest::Url::parse(&format!("http://{address}/Library.dll")).unwrap(),
+                &destination,
+            )
+            .await
+            .unwrap();
+
+        server.join().unwrap();
+        assert_eq!(tokio::fs::read(destination).await.unwrap(), b"hello world");
+    }
+
+    #[tokio::test]
+    async fn asset_download_rejects_mismatched_content_range() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let request = read_http_request(&mut stream);
+            assert!(request.contains("range: bytes=6-"));
+            write!(
+                stream,
+                "HTTP/1.1 206 Partial Content\r\nContent-Length: 6\r\nContent-Range: bytes 5-10/11\r\nConnection: close\r\n\r\n"
+            )
+            .unwrap();
+            stream.write_all(b" world").unwrap();
+        });
+        let temp = tempfile::TempDir::new().unwrap();
+        let destination = temp.path().join("Library.dll");
+        tokio::fs::write(&destination, b"hello ").await.unwrap();
+        let fetcher = GitHubReleaseAssetFetcher::with_default_client(None).unwrap();
+
+        let error = fetcher
+            .download_asset(
+                &reqwest::Url::parse(&format!("http://{address}/Library.dll")).unwrap(),
+                &destination,
+            )
+            .await
+            .unwrap_err();
+
+        server.join().unwrap();
+        assert!(error.contains("Content-Range start 5 for offset 6"));
+        assert_eq!(tokio::fs::read(destination).await.unwrap(), b"hello ");
     }
 
     #[test]

@@ -610,9 +610,10 @@ The Tauri submit command derives `game_id` from the active project and local sou
 - Refresh-only Job submission does not construct or require an LLM client or API key.
 - GitHub sources use `/releases/tags/<pinned-release>` and require an exact asset name, matching response tag, and exact Pack SHA-256. Production never calls `releases/latest`.
 - The GitHub API token is sent only to the API request. It is never forwarded to the response-provided browser download URL.
+- GitHub asset downloads use 15-second connect, 45-second read-stall, and 10-minute per-request total timeouts with at most four attempts. A retry sends `Range: bytes=<stored>-`; bytes are appended only when `206 Content-Range` starts at that exact offset. A full `200` truncates the partial file, an invalid range is rejected, and retry exhaustion reports attempt and byte progress.
 - Indexers are a closed Core capability set. Stage 1 supports `dotnet_project` and `dotnet_file`; unknown values fail deterministically.
 - Every source is copied into the draft before indexing. Indexers consume only the staged copy.
-- `ilspycmd --version` is part of Snapshot identity. A verified current Snapshot is a cache hit only when Pack, local source hashes, pinned remote identities, indexes, and tool versions still match.
+- `ilspycmd --version` is part of Snapshot identity. The `toolVersions.ilspycmd` value is the normalized version without a repeated `ilspycmd:` label. A verified current Snapshot is a cache hit only when Pack, local source hashes, pinned remote identities, indexes, and tool versions still match.
 - A verified pinned remote source may be reused when a local source or tool changes. `force = true` reacquires remote inputs and reindexes all sources; identical content still deduplicates by Snapshot ID.
 - Fetch, checksum, index, or finalize failure never updates `current.json`. A Pack-declared BaseLib failure fails the refresh Job; it is not an optional warning.
 - Status is `ready`, `missing`, or `invalid`. `ready` requires reopening and fully verifying the current Snapshot.
@@ -626,6 +627,8 @@ The Tauri submit command derives `game_id` from the active project and local sou
 | All declared sources fetch, hash, and index | Atomically activate a verified current Snapshot and complete the Job with Pack/Snapshot/source/index/tool identity |
 | Inputs and tool versions unchanged | Return `cacheHit = true` without fetch or index work |
 | Local game assembly changes | Create a new Snapshot and reuse the still-verified pinned remote source |
+| Asset body stalls or ends early | Retry from the stored byte count with a matching HTTP range |
+| Asset returns a mismatched `Content-Range` | Reject the download; do not append bytes or activate current |
 | Fixed remote bytes do not match Pack SHA | Fail and preserve the previous current pointer |
 | Indexer fails or emits no C# | Fail and preserve the previous current pointer |
 | Local input key is absent or not a file | Reject before Job creation |
@@ -649,13 +652,13 @@ cargo check -p ats-web
 npx tsc -b --pretty false
 ```
 
-Assertions must cover successful activation, cache hit, local source change, pinned release URL, exact remote SHA, index failure, missing local input, `ready/missing/invalid`, token non-forwarding, and Job result identity/counts.
+Assertions must cover successful activation, cache hit, local source change, pinned release URL, exact remote SHA, interrupted-body resume, mismatched `Content-Range` rejection, normalized tool version, index failure, missing local input, `ready/missing/invalid`, token non-forwarding, and Job result identity/counts.
 
 ### 7. Wrong vs Correct
 
-Wrong: fetch `releases/latest`, treat BaseLib as optional, index the caller's mutable source path, or update current after only the game source succeeds.
+Wrong: fetch `releases/latest`, use one short whole-request timeout without resume, treat BaseLib as optional, index the caller's mutable source path, or update current after only the game source succeeds.
 
-Correct: resolve all inputs from the active Pack, stage and hash every source, run only declared Core indexers over staged copies, verify the complete Snapshot, then atomically activate current.
+Correct: resolve all inputs from the active Pack, resume interrupted fixed assets only through validated HTTP ranges, stage and hash every source, run only declared Core indexers over staged copies, verify the complete Snapshot, then atomically activate current.
 
 ## Scenario: STS2 Mod Manifest Scaffold Contract
 

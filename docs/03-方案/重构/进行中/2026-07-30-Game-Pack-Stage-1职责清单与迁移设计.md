@@ -304,7 +304,7 @@ cargo check -p ats-web                                                 # passed
 边界与下一步：
 
 - Slice 3 提交时尚未实现生产刷新链；该限制已由下述 Slice 4A 解除。
-- 下一步在新刷新入口创建当前 STS2 `v0.107.1` / BaseLib `v3.3.8` Snapshot，再生成 Gate 0 候选并执行 compile/build/package 文件级检查；真实游戏复验仍由用户人工执行。
+- 当前 STS2 `v0.107.1` / BaseLib `v3.3.8` Snapshot 已由下述 Slice 4B 建立。下一步生成 Gate 0 候选并执行 compile/build/package 文件级检查；真实游戏复验仍由用户人工执行。
 
 ## 15. Slice 4A Snapshot refresh cutover 实施结果（2026-07-30）
 
@@ -333,6 +333,26 @@ npx tsc -b --pretty false                                                       
 
 边界与下一步：
 
-- 尚未通过新入口刷新本机真实 Snapshot，也未生成 Gate 0 新候选。
+- Slice 4A 收口时尚未通过新入口刷新本机真实 Snapshot；该项已由下述 Slice 4B 完成。Gate 0 新候选仍未生成。
 - 未运行全量测试、全量构建或真实游戏 UI。
-- 下一步是 Slice 4B：创建真实 current Snapshot，生成新候选并完成 compile gate、build/package 和文件级检查，再交由用户执行真实游戏复验。
+- 下一步继续 Slice 4B：生成新候选并完成 compile gate、build/package 和文件级检查，再交由用户执行真实游戏复验。
+
+## 16. Slice 4B 真实 current Snapshot 验证结果（2026-07-30）
+
+真实桌面 E2E 使用当前 Tauri Job/UI 入口和临时 STS2 工程，不操作游戏 UI。首次真实刷新暴露 GitHub asset 在慢链路下被 60 秒 whole-request timeout 中断；API 和 CDN 均可达，但 BaseLib 只传输部分字节，旧实现没有续传。修复后：
+
+- GitHub asset 获取使用独立 connect/read-stall/total timeout，并在同一次刷新内限定重试。
+- 中断后只在 `206 Content-Range` 起点精确匹配本地长度时追加；完整 `200` 截断重下，错误 range 确定性拒绝。
+- `toolVersions.ilspycmd` 归一化为 `9.1.0.7988`，避免 value 重复工具名并污染 Snapshot 身份/UI。
+- 定点 Snapshot 测试 `24 passed`，`cargo check -p ats-core` 通过。
+- 最终真实桌面 E2E `1 passing`，Job、`current.json` 和 manifest 的 Snapshot ID 一致。
+
+当前 verified Snapshot：
+
+- Snapshot ID：`63b5429c576494463d92d117612b01445ae23115a8a728c4501942ac8841b974`。
+- STS2：`9,364,480` 字节，SHA-256 `a1f9e653f1e28e4076558fee1e60d218619cb7e057b887c6417f62c62c6d7a52`。
+- BaseLib `v3.3.8`：`1,014,272` 字节，SHA-256 `e92213e9286cb8cb9db42b83735cc9ddc2d642a7c90c67c5350c983d734407a8`。
+- game index：`dotnet_project`，3,425 个 C# 文件；BaseLib index：`dotnet_file`，1 个 C# 文件。
+- 工具身份：`ilspycmd 9.1.0.7988`。
+
+尚未完成：Gate 0 新候选、compile gate、build/package、文件清单和静态图片检查；真实游戏行为、视觉、加载和稳定性仍必须由用户人工复验。现有 `e2e/settings-project.e2e.mjs` 仍包含已删除的 `knowledge_refresh` 场景，后续必须迁移后才能宣称全量 GUI E2E 恢复；本次通过的是专用于真实 Snapshot 刷新的窄范围规格。
