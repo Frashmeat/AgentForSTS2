@@ -1,6 +1,6 @@
 //! log_analysis handler：读构建日志 → 调 LLM 出诊断 markdown。
 //!
-//! 不写文件、不耦合工程目录，诊断结果直接落到 `job.result.report`。前端 / Tauri
+//! 不写文件、不耦合工程目录，诊断结果直接落到 `run.result.report`。前端 / Tauri
 //! 命令拿到后自行渲染或拷贝。
 //!
 //! 输入两种来源：内联文本（log_text）或文件路径（log_path）。两者都缺即失败。
@@ -11,12 +11,12 @@ use std::sync::Arc;
 use futures_util::StreamExt;
 
 use super::common::{
-    ProgressEvent, ProgressSink, emit_cancelled_mid_stream, finalize_with_error, is_cancelled,
-    transition_to_running,
+    FinalizeOutcome, ProgressEvent, ProgressSink, emit_cancelled_mid_stream, finalize_with_error,
+    finalize_with_success, is_cancelled, transition_to_running,
 };
 use crate::llm::{CompletionRequest, LlmClient, Message, MessageRole, StreamEvent};
 use crate::platform::contracts::SubmitLogAnalysisRequest;
-use crate::platform::domain::{JobId, JobRepository, JobStatus};
+use crate::platform::domain::{RunId, RunRepository, RunResult, TokenUsage};
 
 const DEFAULT_MAX_LOG_CHARS: usize = 30_000;
 const SYSTEM_PROMPT: &str = "你是一位经验丰富的 .NET / MSBuild 构建专家，专门诊断 dotnet publish 失败。\n\n\
@@ -29,13 +29,13 @@ const SYSTEM_PROMPT: &str = "你是一位经验丰富的 .NET / MSBuild 构建�
 ## 根本原因\n## 建议修复\n## 额外观察\n";
 
 pub async fn run_log_analysis(
-    repo: Arc<dyn JobRepository>,
+    repo: Arc<dyn RunRepository>,
     llm: Arc<dyn LlmClient>,
     sink: Arc<dyn ProgressSink>,
-    job_id: JobId,
+    run_id: RunId,
     request: SubmitLogAnalysisRequest,
 ) {
-    if transition_to_running(&repo, &job_id, &sink).await.is_err() {
+    if transition_to_running(&repo, &run_id, &sink).await.is_err() {
         return;
     }
 
@@ -43,12 +43,12 @@ pub async fn run_log_analysis(
     let raw_log = match resolve_log_text(&request).await {
         Ok(t) => t,
         Err(err) => {
-            finalize_with_error(&repo, &job_id, &sink, &err).await;
+            finalize_with_error(&repo, &run_id, &sink, &err).await;
             return;
         }
     };
     if raw_log.trim().is_empty() {
-        finalize_with_error(&repo, &job_id, &sink, "log content is empty").await;
+        finalize_with_error(&repo, &run_id, &sink, "log content is empty").await;
         return;
     }
 
@@ -56,7 +56,7 @@ pub async fn run_log_analysis(
     let (log_for_prompt, truncated_chars) = truncate_tail(&raw_log, max_chars);
 
     sink.emit(ProgressEvent {
-        job_id: job_id.clone(),
+        run_id: run_id.clone(),
         stage: "prepared".into(),
         percent: Some(0.1),
         message: Some(format!(
@@ -84,7 +84,7 @@ pub async fn run_log_analysis(
     let mut stream = match llm.stream(completion_request).await {
         Ok(s) => s,
         Err(err) => {
-            finalize_with_error(&repo, &job_id, &sink, &err.to_string()).await;
+            finalize_with_error(&repo, &run_id, &sink, &err.to_string()).await;
             return;
         }
     };
@@ -96,8 +96,8 @@ pub async fn run_log_analysis(
     let mut tick: u32 = 0;
     while let Some(item) = stream.next().await {
         tick = tick.wrapping_add(1);
-        if tick.is_multiple_of(5) && is_cancelled(&repo, &job_id).await {
-            emit_cancelled_mid_stream(&sink, &job_id).await;
+        if tick.is_multiple_of(5) && is_cancelled(&repo, &run_id).await {
+            emit_cancelled_mid_stream(&sink, &run_id).await;
             return;
         }
         match item {
@@ -107,7 +107,7 @@ pub async fn run_log_analysis(
             Ok(StreamEvent::Delta { text }) => {
                 accumulated.push_str(&text);
                 sink.emit(ProgressEvent {
-                    job_id: job_id.clone(),
+                    run_id: run_id.clone(),
                     stage: "stream-delta".into(),
                     percent: None,
                     message: None,
@@ -120,36 +120,35 @@ pub async fn run_log_analysis(
                 usage_out = usage.output_tokens;
             }
             Err(err) => {
-                finalize_with_error(&repo, &job_id, &sink, &err.to_string()).await;
+                finalize_with_error(&repo, &run_id, &sink, &err.to_string()).await;
                 return;
             }
         }
     }
 
-    let job = match repo.get(&job_id).await {
-        Ok(j) => j,
-        Err(_) => return,
+    let report_chars = accumulated.chars().count();
+    let result = RunResult::LogAnalysis {
+        model,
+        report: accumulated,
+        log_chars: raw_log.chars().count(),
+        truncated_chars,
+        usage: TokenUsage {
+            input_tokens: usage_in,
+            output_tokens: usage_out,
+        },
     };
-    if matches!(job.status, JobStatus::Cancelled) {
+    if !matches!(
+        finalize_with_success(&repo, &run_id, result).await,
+        FinalizeOutcome::Succeeded
+    ) {
         return;
     }
-    let mut job = job;
-    job.status = JobStatus::Completed;
-    job.completed_at = Some(chrono::Utc::now());
-    job.result = Some(serde_json::json!({
-        "model": model,
-        "report": accumulated,
-        "logChars": raw_log.chars().count(),
-        "truncatedChars": truncated_chars,
-        "usage": { "inputTokens": usage_in, "outputTokens": usage_out },
-    }));
-    let _ = repo.update(&job).await;
 
     sink.emit(ProgressEvent {
-        job_id,
+        run_id,
         stage: "completed".into(),
         percent: Some(1.0),
-        message: Some(format!("report {} chars", accumulated.chars().count())),
+        message: Some(format!("report {report_chars} chars")),
         delta: None,
     })
     .await;
@@ -200,9 +199,9 @@ fn truncate_tail(text: &str, max_chars: usize) -> (String, usize) {
 mod tests {
     use super::*;
     use crate::llm::{CompletionResponse, CompletionStream, FinishReason, LlmError, Usage};
-    use crate::platform::application::JobApplicationService;
-    use crate::platform::domain::{JobRepository, JobStatus};
-    use crate::platform::infra::FileJobRepository;
+    use crate::platform::application::RunApplicationService;
+    use crate::platform::domain::{RunRepository, RunStatus};
+    use crate::platform::infra::FileRunRepository;
     use async_trait::async_trait;
     use futures_util::stream;
     use std::sync::Mutex;
@@ -249,10 +248,10 @@ mod tests {
         ]
     }
 
-    async fn wait_terminal(service: &JobApplicationService, id: &JobId) {
+    async fn wait_terminal(service: &RunApplicationService, id: &RunId) {
         for _ in 0..50 {
-            let job = service.get(id).await.unwrap();
-            if job.status.is_terminal() {
+            let run = service.get(id).await.unwrap();
+            if run.status.is_terminal() {
                 return;
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -262,11 +261,11 @@ mod tests {
     #[tokio::test]
     async fn log_analysis_inline_text_succeeds() {
         let td = tempfile::TempDir::new().unwrap();
-        let repo: Arc<dyn JobRepository> =
-            Arc::new(FileJobRepository::new(td.path().to_path_buf()));
+        let repo: Arc<dyn RunRepository> =
+            Arc::new(FileRunRepository::new(td.path().to_path_buf()));
         let llm = make_llm(diagnostic_events());
         let sink = Arc::new(super::super::common::NoopProgressSink);
-        let service = JobApplicationService::new(repo, llm);
+        let service = RunApplicationService::new(repo, llm);
 
         let req = SubmitLogAnalysisRequest {
             log_text: Some("MSBUILD : error MSB1009: Project file does not exist.".into()),
@@ -275,9 +274,9 @@ mod tests {
         let id = service.submit_log_analysis(req, sink).await.unwrap();
         wait_terminal(&service, &id).await;
 
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Completed);
-        let result = job.result.expect("result");
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Succeeded);
+        let result = serde_json::to_value(run.result.expect("result")).unwrap();
         assert!(result["report"].as_str().unwrap().contains("根本原因"));
         assert_eq!(result["model"], "diag-model");
         assert_eq!(result["truncatedChars"], 0);
@@ -286,11 +285,11 @@ mod tests {
     #[tokio::test]
     async fn log_analysis_reads_log_file() {
         let td = tempfile::TempDir::new().unwrap();
-        let repo: Arc<dyn JobRepository> =
-            Arc::new(FileJobRepository::new(td.path().to_path_buf()));
+        let repo: Arc<dyn RunRepository> =
+            Arc::new(FileRunRepository::new(td.path().to_path_buf()));
         let llm = make_llm(diagnostic_events());
         let sink = Arc::new(super::super::common::NoopProgressSink);
-        let service = JobApplicationService::new(repo, llm);
+        let service = RunApplicationService::new(repo, llm);
 
         let log_file = td.path().join("build.log");
         tokio::fs::write(&log_file, b"CS0246: namespace not found\n")
@@ -304,27 +303,27 @@ mod tests {
         let id = service.submit_log_analysis(req, sink).await.unwrap();
         wait_terminal(&service, &id).await;
 
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Completed);
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Succeeded);
     }
 
     #[tokio::test]
     async fn log_analysis_fails_when_neither_input_provided() {
         let td = tempfile::TempDir::new().unwrap();
-        let repo: Arc<dyn JobRepository> =
-            Arc::new(FileJobRepository::new(td.path().to_path_buf()));
+        let repo: Arc<dyn RunRepository> =
+            Arc::new(FileRunRepository::new(td.path().to_path_buf()));
         let llm = make_llm(vec![]);
         let sink = Arc::new(super::super::common::NoopProgressSink);
-        let service = JobApplicationService::new(repo, llm);
+        let service = RunApplicationService::new(repo, llm);
 
         let req = SubmitLogAnalysisRequest::default();
         let id = service.submit_log_analysis(req, sink).await.unwrap();
         wait_terminal(&service, &id).await;
 
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Failed);
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Failed);
         assert!(
-            job.error
+            run.error_message()
                 .as_deref()
                 .unwrap_or("")
                 .contains("neither log_text nor log_path")
@@ -334,11 +333,11 @@ mod tests {
     #[tokio::test]
     async fn log_analysis_fails_on_empty_log() {
         let td = tempfile::TempDir::new().unwrap();
-        let repo: Arc<dyn JobRepository> =
-            Arc::new(FileJobRepository::new(td.path().to_path_buf()));
+        let repo: Arc<dyn RunRepository> =
+            Arc::new(FileRunRepository::new(td.path().to_path_buf()));
         let llm = make_llm(vec![]);
         let sink = Arc::new(super::super::common::NoopProgressSink);
-        let service = JobApplicationService::new(repo, llm);
+        let service = RunApplicationService::new(repo, llm);
 
         let req = SubmitLogAnalysisRequest {
             log_text: Some("   \n  \n".into()),
@@ -347,9 +346,14 @@ mod tests {
         let id = service.submit_log_analysis(req, sink).await.unwrap();
         wait_terminal(&service, &id).await;
 
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Failed);
-        assert!(job.error.as_deref().unwrap_or("").contains("empty"));
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Failed);
+        assert!(
+            run.error_message()
+                .as_deref()
+                .unwrap_or("")
+                .contains("empty")
+        );
     }
 
     #[test]

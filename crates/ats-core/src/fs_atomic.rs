@@ -6,7 +6,7 @@
 //! 新内容，绝不出现中间态。临时名带进程内单调计数器 + pid，避免并发写同一目标时撞名
 //! （否则两个写者用同一个 `.tmp` 会把彼此写坏的中间文件 rename 上去）。
 //!
-//! 本仓库约定见 `CLAUDE.md §2`：重要产物一律原子写。FileJobRepository / plan_artifact /
+//! 本仓库约定见 `CLAUDE.md §2`：重要产物一律原子写。FileRunRepository / plan_artifact /
 //! recents 早已各自实现，本模块把它收成一份共享实现，供 handler 复用。
 
 use std::path::{Path, PathBuf};

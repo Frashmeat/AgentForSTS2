@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { Pencil, RefreshCw, Save, Search, X } from "lucide-react";
 
 import { Badge, Button, Card, CardSection, Notice } from "@/components/ui";
-import { useJobProgress } from "@/hooks/useJobProgress";
+import { useRunProgress } from "@/hooks/useRunProgress";
 import { api } from "@/services/api";
 import type {
   SettingsSnapshot,
-  SubmitJobAck,
+  SubmitRunAck,
   TruthSnapshotStatus,
 } from "@/services/tauriApi";
 import { useProjectStore } from "@/stores/project";
@@ -21,13 +21,13 @@ export function KnowledgeCard() {
   const [refreshBusy, setRefreshBusy] = useState(false);
   const [refreshStage, setRefreshStage] = useState<string | null>(null);
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
-  const [refreshJobId, setRefreshJobId] = useState<string | null>(null);
-  const refreshJobIdRef = useRef<string | null>(null);
+  const [refreshRunId, setRefreshRunId] = useState<string | null>(null);
+  const refreshRunIdRef = useRef<string | null>(null);
   const project = useProjectStore((state) => state.project);
 
   useEffect(() => {
-    refreshJobIdRef.current = refreshJobId;
-  }, [refreshJobId]);
+    refreshRunIdRef.current = refreshRunId;
+  }, [refreshRunId]);
 
   useEffect(() => {
     if (!__IS_TAURI__) return;
@@ -43,7 +43,7 @@ export function KnowledgeCard() {
       .catch(() => {});
   }, []);
 
-  useJobProgress(refreshJobIdRef, (event) => {
+  useRunProgress(refreshRunIdRef, (event) => {
     setRefreshStage(event.stage);
     if (event.message) setRefreshMessage(event.message);
     if (
@@ -74,8 +74,8 @@ export function KnowledgeCard() {
     setRefreshStage(null);
     setRefreshMessage(null);
     try {
-      const ack = (await api.submitTruthSnapshotRefreshJob({ force })) as SubmitJobAck;
-      setRefreshJobId(ack.jobId);
+      const ack = (await api.submitTruthSnapshotRefreshRun({ force })) as SubmitRunAck;
+      setRefreshRunId(ack.runId);
     } catch (caught: unknown) {
       setError(String(caught));
       setRefreshBusy(false);

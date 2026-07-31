@@ -1,4 +1,4 @@
-//! JobApplicationService —— Job 生命周期入口（submit / get / list / cancel）。
+//! RunApplicationService —— RunRecord 生命周期入口（submit / get / list / cancel）。
 //!
 //! 实际 handler 实现位于 `super::handlers::*` 子模块，本文件只负责持久化
 //! 初始 Pending 记录 + spawn 后台 tokio 任务。
@@ -34,18 +34,19 @@ use crate::platform::contracts::{
     SubmitSingleAssetPlanRequest, SubmitTextGenerateRequest, SubmitTruthSnapshotRefreshRequest,
 };
 use crate::platform::domain::{
-    Job, JobError, JobId, JobKind, JobRepository, JobResult, JobStatus, JobSummary,
+    CancellationReason, RunError, RunId, RunKind, RunRecord, RunRepository, RunRepositoryResult,
+    RunSummary, RunTransition,
 };
 
-pub struct JobApplicationService {
-    repo: Arc<dyn JobRepository>,
+pub struct RunApplicationService {
+    repo: Arc<dyn RunRepository>,
     llm: Option<Arc<dyn LlmClient>>,
     asset_compile_validator: Arc<dyn AssetCompileValidator>,
 }
 
-impl JobApplicationService {
+impl RunApplicationService {
     #[must_use]
-    pub fn new(repo: Arc<dyn JobRepository>, llm: Arc<dyn LlmClient>) -> Self {
+    pub fn new(repo: Arc<dyn RunRepository>, llm: Arc<dyn LlmClient>) -> Self {
         Self {
             repo,
             llm: Some(llm),
@@ -53,9 +54,9 @@ impl JobApplicationService {
         }
     }
 
-    /// Construct a service for jobs whose execution does not use an LLM.
+    /// Construct a service for runs whose execution does not use an LLM.
     #[must_use]
-    pub fn without_llm(repo: Arc<dyn JobRepository>) -> Self {
+    pub fn without_llm(repo: Arc<dyn RunRepository>) -> Self {
         Self {
             repo,
             llm: None,
@@ -72,72 +73,55 @@ impl JobApplicationService {
         self
     }
 
-    pub async fn get(&self, id: &JobId) -> JobResult<Job> {
+    pub async fn get(&self, id: &RunId) -> RunRepositoryResult<RunRecord> {
         self.repo.get(id).await
     }
 
-    pub async fn list(&self) -> JobResult<Vec<JobSummary>> {
+    pub async fn list(&self) -> RunRepositoryResult<Vec<RunSummary>> {
         self.repo.list().await
     }
 
-    /// 标记 Cancelled 并保存。任务实际执行中如已发起 LLM 请求，本 stage 不
-    /// 中断网络层；handler 结束时会发现 status=Cancelled 而跳过最终结果覆写。
-    pub async fn cancel(&self, id: &JobId) -> JobResult<()> {
-        // 先快速判断（非关键路径，此处 TOCTOU 无害）：已终态直接报错，行为同旧实现。
-        let current = self.repo.get(id).await?;
-        if current.status.is_terminal() {
-            return Err(JobError::Terminal {
-                id: current.id.0.clone(),
-                status: format!("{:?}", current.status),
-            });
-        }
-        // 关键路径：在仓库锁下原子置 Cancelled（仅当仍非终态），与 handler 收尾的
-        // CAS 互斥，杜绝「取消被 stream 收尾复活成 Completed」的竞态。
+    /// Atomically cancel a non-terminal run.
+    pub async fn cancel(&self, id: &RunId) -> RunRepositoryResult<()> {
         self.repo
-            .modify(
+            .transition(
                 id,
-                Box::new(|job| {
-                    if job.status.is_terminal() {
-                        false
-                    } else {
-                        job.status = JobStatus::Cancelled;
-                        job.completed_at = Some(chrono::Utc::now());
-                        true
-                    }
-                }),
+                RunTransition::Cancel {
+                    reason: CancellationReason::User,
+                },
             )
             .await?;
         Ok(())
     }
 
     /// 提交 text_generate 任务：保存 Pending → spawn 后台 tokio 任务跑 LLM。
-    /// 立刻返回 JobId；调用方通过 `get` / `list` / progress 事件观察进度。
+    /// 立刻返回 RunId；调用方通过 `get` / `list` / progress 事件观察进度。
     pub async fn submit_text_generate(
         &self,
         request: SubmitTextGenerateRequest,
         sink: Arc<dyn ProgressSink>,
-    ) -> JobResult<JobId> {
+    ) -> RunRepositoryResult<RunId> {
         let payload = serde_json::to_value(&request)
-            .map_err(|e| JobError::Storage(format!("serialize request: {e}")))?;
-        let job = Job::new(JobKind::TextGenerate, payload);
-        let job_id = job.id.clone();
-        self.repo.create(&job).await?;
+            .map_err(|e| RunError::Storage(format!("serialize request: {e}")))?;
+        let run = RunRecord::new(RunKind::TextGenerate, payload);
+        let run_id = run.id.clone();
+        self.repo.create(&run).await?;
 
         let repo = Arc::clone(&self.repo);
         let llm = self.require_llm()?;
-        let id_for_task = job_id.clone();
+        let id_for_task = run_id.clone();
         tokio::spawn(async move {
             run_text_generate(repo, llm, sink, id_for_task, request).await;
         });
 
-        Ok(job_id)
+        Ok(run_id)
     }
 
     /// 提交 code_generate 任务：asset 模式生成结构化 C# + 本地化 bundle 并编译验证；
     /// custom_code 模式保持单 C# fence 写入流程。
     ///
     /// `game_context` fixes the registry Pack and verified current Snapshot before
-    /// the job record is created. Original model output and C# artifacts land in `artifacts/<name>/`;
+    /// the run record is created. Original model output and C# artifacts land in `artifacts/<name>/`;
     /// asset 正式文件只在 compile gate 通过后保留。
     pub async fn submit_code_generate(
         &self,
@@ -145,16 +129,16 @@ impl JobApplicationService {
         game_context: VerifiedGameContext,
         artifacts_dir: PathBuf,
         sink: Arc<dyn ProgressSink>,
-    ) -> JobResult<JobId> {
+    ) -> RunRepositoryResult<RunId> {
         let payload = request_payload_with_context(&request, &game_context)?;
-        let job = Job::new(JobKind::CodeGenerate, payload);
-        let job_id = job.id.clone();
-        self.repo.create(&job).await?;
+        let run = RunRecord::new(RunKind::CodeGenerate, payload);
+        let run_id = run.id.clone();
+        self.repo.create(&run).await?;
 
         let repo = Arc::clone(&self.repo);
         let llm = self.require_llm()?;
         let compile_validator = Arc::clone(&self.asset_compile_validator);
-        let id_for_task = job_id.clone();
+        let id_for_task = run_id.clone();
         tokio::spawn(async move {
             run_code_generate(
                 repo,
@@ -169,11 +153,11 @@ impl JobApplicationService {
             .await;
         });
 
-        Ok(job_id)
+        Ok(run_id)
     }
 
     /// Submit a Pack-driven refresh. The caller must resolve the Pack and local input
-    /// bindings from the active project before the Pending job is persisted.
+    /// bindings from the active project before the Pending run is persisted.
     pub async fn submit_truth_snapshot_refresh(
         &self,
         request: SubmitTruthSnapshotRefreshRequest,
@@ -182,22 +166,22 @@ impl JobApplicationService {
         local_inputs: BTreeMap<String, PathBuf>,
         refresher: TruthSnapshotRefresher,
         sink: Arc<dyn ProgressSink>,
-    ) -> JobResult<JobId> {
+    ) -> RunRepositoryResult<RunId> {
         let mut payload = serde_json::to_value(&request)
-            .map_err(|e| JobError::Storage(format!("serialize request: {e}")))?;
+            .map_err(|e| RunError::Storage(format!("serialize request: {e}")))?;
         payload
             .as_object_mut()
-            .ok_or_else(|| JobError::Storage("refresh payload must be an object".into()))?
+            .ok_or_else(|| RunError::Storage("refresh payload must be an object".into()))?
             .insert(
                 "gamePackId".into(),
                 serde_json::Value::String(pack.id.clone()),
             );
-        let job = Job::new(JobKind::TruthSnapshotRefresh, payload);
-        let job_id = job.id.clone();
-        self.repo.create(&job).await?;
+        let run = RunRecord::new(RunKind::TruthSnapshotRefresh, payload);
+        let run_id = run.id.clone();
+        self.repo.create(&run).await?;
 
         let repo = Arc::clone(&self.repo);
-        let id_for_task = job_id.clone();
+        let id_for_task = run_id.clone();
         tokio::spawn(async move {
             run_truth_snapshot_refresh(
                 repo,
@@ -212,11 +196,11 @@ impl JobApplicationService {
             .await;
         });
 
-        Ok(job_id)
+        Ok(run_id)
     }
 
     /// 提交 single_asset_plan 任务：自然语言需求 → LLM 出 JSON → 解析成 PlanItem。
-    /// 结果落到 job.result.item；当 `items_dir` 提供时，还会把 PlanItem 序列化到
+    /// 结果落到 run.result.item；当 `items_dir` 提供时，还会把 PlanItem 序列化到
     /// `<items_dir>/<item_id>.json`，让用户在工程目录里看到 plan 的产物。
     pub async fn submit_single_asset_plan(
         &self,
@@ -224,12 +208,12 @@ impl JobApplicationService {
         pack: LoadedGamePack,
         items_dir: Option<PathBuf>,
         sink: Arc<dyn ProgressSink>,
-    ) -> JobResult<JobId> {
+    ) -> RunRepositoryResult<RunId> {
         let mut payload = serde_json::to_value(&request)
-            .map_err(|e| JobError::Storage(format!("serialize request: {e}")))?;
+            .map_err(|e| RunError::Storage(format!("serialize request: {e}")))?;
         payload
             .as_object_mut()
-            .ok_or_else(|| JobError::Storage("single asset plan payload must be an object".into()))?
+            .ok_or_else(|| RunError::Storage("single asset plan payload must be an object".into()))?
             .insert(
                 "_gamePack".into(),
                 serde_json::json!({
@@ -238,41 +222,41 @@ impl JobApplicationService {
                     "sha256": pack.content_sha256.clone(),
                 }),
             );
-        let job = Job::new(JobKind::SingleAssetPlan, payload);
-        let job_id = job.id.clone();
-        self.repo.create(&job).await?;
+        let run = RunRecord::new(RunKind::SingleAssetPlan, payload);
+        let run_id = run.id.clone();
+        self.repo.create(&run).await?;
 
         let repo = Arc::clone(&self.repo);
         let llm = self.require_llm()?;
-        let id_for_task = job_id.clone();
+        let id_for_task = run_id.clone();
         tokio::spawn(async move {
             run_single_asset_plan(repo, llm, sink, id_for_task, request, pack, items_dir).await;
         });
 
-        Ok(job_id)
+        Ok(run_id)
     }
 
     /// 提交 log_analysis 任务：读 build log → LLM 出诊断 markdown。
-    /// 结果直接落到 job.result.report，不写工程目录。
+    /// 结果直接落到 run.result.report，不写工程目录。
     pub async fn submit_log_analysis(
         &self,
         request: SubmitLogAnalysisRequest,
         sink: Arc<dyn ProgressSink>,
-    ) -> JobResult<JobId> {
+    ) -> RunRepositoryResult<RunId> {
         let payload = serde_json::to_value(&request)
-            .map_err(|e| JobError::Storage(format!("serialize request: {e}")))?;
-        let job = Job::new(JobKind::LogAnalysis, payload);
-        let job_id = job.id.clone();
-        self.repo.create(&job).await?;
+            .map_err(|e| RunError::Storage(format!("serialize request: {e}")))?;
+        let run = RunRecord::new(RunKind::LogAnalysis, payload);
+        let run_id = run.id.clone();
+        self.repo.create(&run).await?;
 
         let repo = Arc::clone(&self.repo);
         let llm = self.require_llm()?;
-        let id_for_task = job_id.clone();
+        let id_for_task = run_id.clone();
         tokio::spawn(async move {
             run_log_analysis(repo, llm, sink, id_for_task, request).await;
         });
 
-        Ok(job_id)
+        Ok(run_id)
     }
 
     /// 提交 asset_generate 任务：image_gen 出图 + 结构化 C#/本地化生成 + compile gate。
@@ -288,16 +272,16 @@ impl JobApplicationService {
         image_gen: Arc<dyn ImageGenClient>,
         image_proc: Arc<dyn ImageProcClient>,
         sink: Arc<dyn ProgressSink>,
-    ) -> JobResult<JobId> {
+    ) -> RunRepositoryResult<RunId> {
         let payload = request_payload_with_context(&request, &game_context)?;
-        let job = Job::new(JobKind::AssetGenerate, payload);
-        let job_id = job.id.clone();
-        self.repo.create(&job).await?;
+        let run = RunRecord::new(RunKind::AssetGenerate, payload);
+        let run_id = run.id.clone();
+        self.repo.create(&run).await?;
 
         let repo = Arc::clone(&self.repo);
         let llm = self.require_llm()?;
         let compile_validator = Arc::clone(&self.asset_compile_validator);
-        let id_for_task = job_id.clone();
+        let id_for_task = run_id.clone();
         tokio::spawn(async move {
             run_asset_generate(
                 repo,
@@ -314,7 +298,7 @@ impl JobApplicationService {
             .await;
         });
 
-        Ok(job_id)
+        Ok(run_id)
     }
 
     /// 提交 batch_custom_code 任务：N 个 CustomCodegenRequest 顺序处理。
@@ -325,15 +309,15 @@ impl JobApplicationService {
         game_context: VerifiedGameContext,
         artifacts_dir: PathBuf,
         sink: Arc<dyn ProgressSink>,
-    ) -> JobResult<JobId> {
+    ) -> RunRepositoryResult<RunId> {
         let payload = request_payload_with_context(&request, &game_context)?;
-        let job = Job::new(JobKind::BatchCustomCode, payload);
-        let job_id = job.id.clone();
-        self.repo.create(&job).await?;
+        let run = RunRecord::new(RunKind::BatchCustomCode, payload);
+        let run_id = run.id.clone();
+        self.repo.create(&run).await?;
 
         let repo = Arc::clone(&self.repo);
         let llm = self.require_llm()?;
-        let id_for_task = job_id.clone();
+        let id_for_task = run_id.clone();
         tokio::spawn(async move {
             run_batch_custom_code(
                 repo,
@@ -347,7 +331,7 @@ impl JobApplicationService {
             .await;
         });
 
-        Ok(job_id)
+        Ok(run_id)
     }
 
     /// 提交 package_project 任务：把 source_dir 整个 zip 到 output_path。
@@ -355,25 +339,39 @@ impl JobApplicationService {
     pub async fn submit_package_project(
         &self,
         request: SubmitPackageProjectRequest,
-        pack: LoadedGamePack,
+        game_context: VerifiedGameContext,
+        project_root: PathBuf,
         mod_id: String,
         sink: Arc<dyn ProgressSink>,
-    ) -> JobResult<JobId> {
-        let layout = pack.package_layout.clone().ok_or_else(|| {
-            JobError::Storage(format!("game pack `{}` has no package layout", pack.id))
+    ) -> RunRepositoryResult<RunId> {
+        let layout = game_context.pack().package_layout.clone().ok_or_else(|| {
+            RunError::Storage(format!(
+                "game pack `{}` has no package layout",
+                game_context.game_pack_id()
+            ))
         })?;
-        let payload = request_payload_with_pack(&request, &pack)?;
-        let job = Job::new(JobKind::PackageProject, payload);
-        let job_id = job.id.clone();
-        self.repo.create(&job).await?;
+        let payload = request_payload_with_context(&request, &game_context)?;
+        let run = RunRecord::new(RunKind::PackageProject, payload);
+        let run_id = run.id.clone();
+        self.repo.create(&run).await?;
 
         let repo = Arc::clone(&self.repo);
-        let id_for_task = job_id.clone();
+        let id_for_task = run_id.clone();
         tokio::spawn(async move {
-            run_package_project(repo, sink, id_for_task, request, layout, mod_id).await;
+            run_package_project(
+                repo,
+                sink,
+                id_for_task,
+                request,
+                layout,
+                mod_id,
+                game_context,
+                project_root,
+            )
+            .await;
         });
 
-        Ok(job_id)
+        Ok(run_id)
     }
 
     /// 提交 build_project 任务：在 `request.project_root` 下跑 `dotnet publish`，
@@ -383,45 +381,45 @@ impl JobApplicationService {
         request: SubmitBuildProjectRequest,
         pack: LoadedGamePack,
         sink: Arc<dyn ProgressSink>,
-    ) -> JobResult<JobId> {
+    ) -> RunRepositoryResult<RunId> {
         let recipe = pack.build_recipe.clone().ok_or_else(|| {
-            JobError::Storage(format!("game pack `{}` has no build recipe", pack.id))
+            RunError::Storage(format!("game pack `{}` has no build recipe", pack.id))
         })?;
         let payload = request_payload_with_pack(&request, &pack)?;
-        let job = Job::new(JobKind::BuildProject, payload);
-        let job_id = job.id.clone();
-        self.repo.create(&job).await?;
+        let run = RunRecord::new(RunKind::BuildProject, payload);
+        let run_id = run.id.clone();
+        self.repo.create(&run).await?;
 
         let repo = Arc::clone(&self.repo);
-        let id_for_task = job_id.clone();
+        let id_for_task = run_id.clone();
         tokio::spawn(async move {
             run_build_project(repo, sink, id_for_task, request, recipe).await;
         });
 
-        Ok(job_id)
+        Ok(run_id)
     }
 
-    fn require_llm(&self) -> JobResult<Arc<dyn LlmClient>> {
+    fn require_llm(&self) -> RunRepositoryResult<Arc<dyn LlmClient>> {
         self.llm
             .as_ref()
             .map(Arc::clone)
-            .ok_or_else(|| JobError::Storage("this Job service has no LLM client".into()))
+            .ok_or_else(|| RunError::Storage("this run service has no LLM client".into()))
     }
 }
 
 fn request_payload_with_context<T: Serialize>(
     request: &T,
     context: &VerifiedGameContext,
-) -> JobResult<serde_json::Value> {
+) -> RunRepositoryResult<serde_json::Value> {
     let mut payload = serde_json::to_value(request)
-        .map_err(|error| JobError::Storage(format!("serialize request: {error}")))?;
+        .map_err(|error| RunError::Storage(format!("serialize request: {error}")))?;
     let object = payload
         .as_object_mut()
-        .ok_or_else(|| JobError::Storage("job request payload must be a JSON object".into()))?;
+        .ok_or_else(|| RunError::Storage("run request payload must be a JSON object".into()))?;
     object.insert(
         "_gameContext".into(),
         serde_json::to_value(context.evidence()).map_err(|error| {
-            JobError::Storage(format!("serialize verified game context: {error}"))
+            RunError::Storage(format!("serialize verified game context: {error}"))
         })?,
     );
     Ok(payload)
@@ -430,12 +428,12 @@ fn request_payload_with_context<T: Serialize>(
 fn request_payload_with_pack<T: Serialize>(
     request: &T,
     pack: &LoadedGamePack,
-) -> JobResult<serde_json::Value> {
+) -> RunRepositoryResult<serde_json::Value> {
     let mut payload = serde_json::to_value(request)
-        .map_err(|error| JobError::Storage(format!("serialize request: {error}")))?;
+        .map_err(|error| RunError::Storage(format!("serialize request: {error}")))?;
     let object = payload
         .as_object_mut()
-        .ok_or_else(|| JobError::Storage("job request payload must be a JSON object".into()))?;
+        .ok_or_else(|| RunError::Storage("run request payload must be a JSON object".into()))?;
     object.insert(
         "_gamePack".into(),
         serde_json::json!({

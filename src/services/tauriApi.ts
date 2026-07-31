@@ -243,15 +243,7 @@ export function imageProcStatus(): Promise<PrewarmStatus> {
   return invoke<PrewarmStatus>("image_proc_status");
 }
 
-// -------- Audit + PlanArtifact --------
-
-export interface AuditEntry {
-  timestamp: string;
-  kind: string;
-  message: string;
-  refId?: string | null;
-  data?: unknown;
-}
+// -------- PlanArtifact --------
 
 export type ArtifactState =
   | "pending"
@@ -264,28 +256,10 @@ export interface ArtifactStatus {
   itemId: string;
   state: ArtifactState;
   updatedAt: string;
-  lastJobId?: string | null;
+  lastRunId?: string | null;
   csPath?: string | null;
   pngPath?: string | null;
   note?: string | null;
-}
-
-export function auditAppend(
-  kind: string,
-  message: string,
-  refId?: string,
-  data?: unknown,
-): Promise<void> {
-  return invoke<void>("audit_append", {
-    kind,
-    message,
-    refId: refId ?? null,
-    data: data ?? null,
-  });
-}
-
-export function auditReadRecent(limit: number): Promise<AuditEntry[]> {
-  return invoke<AuditEntry[]>("audit_read_recent", { limit });
 }
 
 export function planArtifactSave(status: ArtifactStatus): Promise<void> {
@@ -606,9 +580,9 @@ export function forgetRecentProject(path: string): Promise<void> {
   return invoke<void>("forget_recent_project", { path });
 }
 
-// -------- Platform Jobs --------
+// -------- Platform Runs --------
 
-export type JobKind =
+export type RunKind =
   | "text_generate"
   | "code_generate"
   | "asset_generate"
@@ -617,45 +591,164 @@ export type JobKind =
   | "package_project"
   | "single_asset_plan"
   | "log_analysis"
-  | "truth_snapshot_refresh"
-  // Historical records only.
-  | "knowledge_refresh";
+  | "truth_snapshot_refresh";
 
-export type JobStatus =
+export type RunStatus =
   | "pending"
   | "running"
-  | "completed"
+  | "succeeded"
   | "failed"
   | "cancelled";
 
-export interface JobProgressFields {
+export interface RunProgressFields {
   stage: string;
   percent: number | null;
   message: string | null;
 }
 
-export interface Job {
+export interface ActionableFailure {
+  schemaVersion: number;
+  code: string;
+  stage: string;
+  message: string;
+  retryable: boolean;
+  diagnosticRef?: string | null;
+}
+
+export type CancellationReason =
+  | "user"
+  | "project_close"
+  | "project_switch"
+  | "app_shutdown";
+
+export type RunTimelineEventKind =
+  | "created"
+  | "started"
+  | "cancel_requested"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "interrupted";
+
+export interface RunTimelineEvent {
+  kind: RunTimelineEventKind;
+  at: string;
+  stage?: string | null;
+  failureCode?: string | null;
+  cancellationReason?: CancellationReason | null;
+}
+
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export interface BatchArtifactItemResult {
+  itemId: string;
+  artifactManifestRef: string | null;
+  manifestSha256: string | null;
+  diagnosticRef: string | null;
+}
+
+export interface BuildStepResult {
   id: string;
-  kind: JobKind;
-  status: JobStatus;
+  runner: string;
+  success: boolean;
+  exitCode: number;
+  stdoutTail: string;
+  stderrTail: string;
+}
+
+export type RunResult =
+  | {
+      kind: "text_generation";
+      model: string;
+      content: string;
+      finishReason: string;
+      usage: TokenUsage;
+    }
+  | {
+      kind: "artifact_production";
+      artifactManifestRef: string;
+      manifestSha256: string;
+      artifactId: string;
+      entityName: string;
+      model: string | null;
+      usage: TokenUsage | null;
+    }
+  | {
+      kind: "batch_artifact_production";
+      total: number;
+      succeeded: number;
+      failed: number;
+      items: BatchArtifactItemResult[];
+    }
+  | {
+      kind: "build";
+      projectRelativeRoot: string;
+      steps: BuildStepResult[];
+      artifactManifestRef: string | null;
+      manifestSha256: string | null;
+    }
+  | {
+      kind: "package";
+      artifactManifestRef: string;
+      manifestSha256: string;
+      artifactId: string;
+      filesAdded: number;
+      uncompressedBytes: number;
+      packageBytes: number;
+    }
+  | {
+      kind: "plan";
+      item: PlanItem;
+      itemFileRef: string | null;
+      model: string;
+      usage: TokenUsage;
+    }
+  | {
+      kind: "log_analysis";
+      model: string;
+      report: string;
+      logChars: number;
+      truncatedChars: number;
+      usage: TokenUsage;
+    }
+  | {
+      kind: "truth_snapshot_refresh";
+      gamePackId: string;
+      snapshotId: string;
+      cacheHit: boolean;
+      sourceCount: number;
+      indexCount: number;
+      toolVersions: Record<string, string>;
+      warnings: string[];
+    };
+
+export interface RunRecord {
+  schemaVersion: number;
+  id: string;
+  kind: RunKind;
+  status: RunStatus;
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
   payload: unknown;
-  result: unknown;
-  error: string | null;
-  progress: JobProgressFields | null;
+  progress: RunProgressFields | null;
+  failure: ActionableFailure | null;
+  result: RunResult | null;
   attempts: number;
+  timeline: RunTimelineEvent[];
 }
 
-export interface JobSummary {
+export interface RunSummary {
   id: string;
-  kind: JobKind;
-  status: JobStatus;
+  kind: RunKind;
+  status: RunStatus;
   createdAt: string;
   completedAt: string | null;
-  progress: JobProgressFields | null;
-  error: string | null;
+  progress: RunProgressFields | null;
+  failure: ActionableFailure | null;
 }
 
 export interface SubmitTextGenerateRequest {
@@ -666,35 +759,35 @@ export interface SubmitTextGenerateRequest {
   model?: string | null;
 }
 
-export interface SubmitJobAck {
-  jobId: string;
+export interface SubmitRunAck {
+  runId: string;
 }
 
-/** ProgressSink::emit 推送的事件（job-progress） */
-export interface JobProgressEvent {
-  jobId: string;
+/** ProgressSink::emit 推送的事件（run-progress） */
+export interface RunProgressEvent {
+  runId: string;
   stage: string;
   percent: number | null;
   message: string | null;
   delta: string | null;
 }
 
-export function submitTextGenerateJob(
+export function submitTextGenerateRun(
   request: SubmitTextGenerateRequest,
-): Promise<SubmitJobAck> {
-  return invoke<SubmitJobAck>("submit_text_generate_job", { request });
+): Promise<SubmitRunAck> {
+  return invoke<SubmitRunAck>("submit_text_generate_run", { request });
 }
 
-export function getJob(id: string): Promise<Job> {
-  return invoke<Job>("get_job", { id });
+export function getRun(id: string): Promise<RunRecord> {
+  return invoke<RunRecord>("get_run", { id });
 }
 
-export function listJobs(): Promise<JobSummary[]> {
-  return invoke<JobSummary[]>("list_jobs");
+export function listRuns(): Promise<RunSummary[]> {
+  return invoke<RunSummary[]>("list_runs");
 }
 
-export function cancelJob(id: string): Promise<void> {
-  return invoke<void>("cancel_job", { id });
+export function cancelRun(id: string): Promise<void> {
+  return invoke<void>("cancel_run", { id });
 }
 
 export type SubmitCodeGenerateRequest =
@@ -706,19 +799,19 @@ export interface SubmitBuildProjectRequest {
   max_attempts: number;
 }
 
-export function submitCodeGenerateJob(
+export function submitCodeGenerateRun(
   request: SubmitCodeGenerateRequest,
-): Promise<SubmitJobAck> {
-  return invoke<SubmitJobAck>("submit_code_generate_job", { request });
+): Promise<SubmitRunAck> {
+  return invoke<SubmitRunAck>("submit_code_generate_run", { request });
 }
 
-export function submitBuildProjectJob(
+export function submitBuildProjectRun(
   request: SubmitBuildProjectRequest,
-): Promise<SubmitJobAck> {
-  return invoke<SubmitJobAck>("submit_build_project_job", { request });
+): Promise<SubmitRunAck> {
+  return invoke<SubmitRunAck>("submit_build_project_run", { request });
 }
 
-// -------- Phase B/2.2.x Job kinds（stage 3.5 第二轮 + 2.2.1 落地） --------
+// -------- Phase B/2.2.x RunRecord kinds（stage 3.5 第二轮 + 2.2.1 落地） --------
 
 export interface SubmitLogAnalysisRequest {
   log_path?: string | null;
@@ -727,10 +820,10 @@ export interface SubmitLogAnalysisRequest {
   max_log_chars?: number | null;
 }
 
-export function submitLogAnalysisJob(
+export function submitLogAnalysisRun(
   request: SubmitLogAnalysisRequest,
-): Promise<SubmitJobAck> {
-  return invoke<SubmitJobAck>("submit_log_analysis_job", { request });
+): Promise<SubmitRunAck> {
+  return invoke<SubmitRunAck>("submit_log_analysis_run", { request });
 }
 
 export interface SubmitPackageProjectRequest {
@@ -739,10 +832,10 @@ export interface SubmitPackageProjectRequest {
   compression_level?: number | null;
 }
 
-export function submitPackageProjectJob(
+export function submitPackageProjectRun(
   request: SubmitPackageProjectRequest,
-): Promise<SubmitJobAck> {
-  return invoke<SubmitJobAck>("submit_package_project_job", { request });
+): Promise<SubmitRunAck> {
+  return invoke<SubmitRunAck>("submit_package_project_run", { request });
 }
 
 export interface SubmitBatchCustomCodeRequest {
@@ -750,10 +843,10 @@ export interface SubmitBatchCustomCodeRequest {
   fail_fast?: boolean;
 }
 
-export function submitBatchCustomCodeJob(
+export function submitBatchCustomCodeRun(
   request: SubmitBatchCustomCodeRequest,
-): Promise<SubmitJobAck> {
-  return invoke<SubmitJobAck>("submit_batch_custom_code_job", { request });
+): Promise<SubmitRunAck> {
+  return invoke<SubmitRunAck>("submit_batch_custom_code_run", { request });
 }
 
 export interface SubmitSingleAssetPlanRequest {
@@ -762,20 +855,20 @@ export interface SubmitSingleAssetPlanRequest {
   max_tokens?: number | null;
 }
 
-export function submitSingleAssetPlanJob(
+export function submitSingleAssetPlanRun(
   request: SubmitSingleAssetPlanRequest,
-): Promise<SubmitJobAck> {
-  return invoke<SubmitJobAck>("submit_single_asset_plan_job", { request });
+): Promise<SubmitRunAck> {
+  return invoke<SubmitRunAck>("submit_single_asset_plan_run", { request });
 }
 
 export interface SubmitTruthSnapshotRefreshRequest {
   force?: boolean;
 }
 
-export function submitTruthSnapshotRefreshJob(
+export function submitTruthSnapshotRefreshRun(
   request: SubmitTruthSnapshotRefreshRequest,
-): Promise<SubmitJobAck> {
-  return invoke<SubmitJobAck>("submit_truth_snapshot_refresh_job", { request });
+): Promise<SubmitRunAck> {
+  return invoke<SubmitRunAck>("submit_truth_snapshot_refresh_run", { request });
 }
 
 export interface SubmitAssetGenerateRequest {
@@ -784,8 +877,8 @@ export interface SubmitAssetGenerateRequest {
   image_size?: string | null;
 }
 
-export function submitAssetGenerateJob(
+export function submitAssetGenerateRun(
   request: SubmitAssetGenerateRequest,
-): Promise<SubmitJobAck> {
-  return invoke<SubmitJobAck>("submit_asset_generate_job", { request });
+): Promise<SubmitRunAck> {
+  return invoke<SubmitRunAck>("submit_asset_generate_run", { request });
 }

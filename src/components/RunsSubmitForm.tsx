@@ -1,12 +1,12 @@
-// Jobs 提交表单：按 kind 切换字段。原 JobsCard 里的提交部分独立成组件。
+// Runs 提交表单：按 kind 切换字段。原 RunsCard 里的提交部分独立成组件。
 //
 // 字段 state 留在本组件内部；提交成功通过 onSubmitted callback 通知父级（父级
-// 一般触发 JobsList refresh）。错误冒泡给父级。
+// 一般触发 RunsList refresh）。错误冒泡给父级。
 
 import { useState } from "react";
 import { Button, Field, FieldRow } from "@/components/ui";
 import { api } from "@/services/api";
-import type { SubmitJobAck } from "@/services/tauriApi";
+import type { SubmitRunAck } from "@/services/tauriApi";
 
 export type SubmitKind =
   | "text_generate"
@@ -32,11 +32,11 @@ const KIND_LABELS: Array<{ value: SubmitKind; label: string }> = [
 ];
 
 interface Props {
-  onSubmitted: (jobId: string) => void;
+  onSubmitted: (runId: string) => void;
   onError: (message: string) => void;
 }
 
-export function JobsSubmitForm({ onSubmitted, onError }: Props) {
+export function RunsSubmitForm({ onSubmitted, onError }: Props) {
   const [submitKind, setSubmitKind] = useState<SubmitKind>("text_generate");
   const [busy, setBusy] = useState(false);
 
@@ -87,13 +87,13 @@ export function JobsSubmitForm({ onSubmitted, onError }: Props) {
     if (submitKind === "package_project" && !packageSourceDir.trim()) { onError("source_dir 不能为空"); return; }
     if (submitKind === "log_analysis" && !logText.trim()) { onError("log_text 不能为空"); return; }
     try {
-      let ack: SubmitJobAck;
+      let ack: SubmitRunAck;
       switch (submitKind) {
         case "text_generate":
-          ack = (await api.submitTextGenerateJob({ prompt })) as SubmitJobAck;
+          ack = (await api.submitTextGenerateRun({ prompt })) as SubmitRunAck;
           break;
         case "code_generate_asset":
-          ack = (await api.submitCodeGenerateJob({
+          ack = (await api.submitCodeGenerateRun({
             mode: "asset",
             request: {
               asset_type: assetType,
@@ -104,10 +104,10 @@ export function JobsSubmitForm({ onSubmitted, onError }: Props) {
               name_zhs: "",
               skip_build: true,
             },
-          })) as SubmitJobAck;
+          })) as SubmitRunAck;
           break;
         case "code_generate_custom":
-          ack = (await api.submitCodeGenerateJob({
+          ack = (await api.submitCodeGenerateRun({
             mode: "custom_code",
             request: {
               name: customName,
@@ -116,10 +116,10 @@ export function JobsSubmitForm({ onSubmitted, onError }: Props) {
               project_root: assetProjectRoot || ".",
               skip_build: true,
             },
-          })) as SubmitJobAck;
+          })) as SubmitRunAck;
           break;
         case "asset_generate":
-          ack = (await api.submitAssetGenerateJob({
+          ack = (await api.submitAssetGenerateRun({
             asset_request: {
               asset_type: assetType,
               asset_name: assetName,
@@ -130,7 +130,7 @@ export function JobsSubmitForm({ onSubmitted, onError }: Props) {
               skip_build: true,
             },
             image_prompt: imagePrompt.trim() || null,
-          })) as SubmitJobAck;
+          })) as SubmitRunAck;
           break;
         case "batch_custom_code": {
           let items;
@@ -142,37 +142,37 @@ export function JobsSubmitForm({ onSubmitted, onError }: Props) {
           if (!Array.isArray(items)) {
             throw new Error("batch items must be a JSON array");
           }
-          ack = (await api.submitBatchCustomCodeJob({
+          ack = (await api.submitBatchCustomCodeRun({
             items,
             fail_fast: batchFailFast,
-          })) as SubmitJobAck;
+          })) as SubmitRunAck;
           break;
         }
         case "build_project":
-          ack = (await api.submitBuildProjectJob({
+          ack = (await api.submitBuildProjectRun({
             project_root: buildProjectRoot,
             max_attempts: 3,
-          })) as SubmitJobAck;
+          })) as SubmitRunAck;
           break;
         case "package_project":
-          ack = (await api.submitPackageProjectJob({
+          ack = (await api.submitPackageProjectRun({
             source_dir: packageSourceDir,
             output_path: packageOutputPath.trim() || null,
-          })) as SubmitJobAck;
+          })) as SubmitRunAck;
           break;
         case "log_analysis":
-          ack = (await api.submitLogAnalysisJob({
+          ack = (await api.submitLogAnalysisRun({
             log_text: logText.trim() || null,
             context_hint: logContextHint.trim() || null,
-          })) as SubmitJobAck;
+          })) as SubmitRunAck;
           break;
         case "truth_snapshot_refresh":
-          ack = (await api.submitTruthSnapshotRefreshJob({
+          ack = (await api.submitTruthSnapshotRefreshRun({
             force: snapshotForce,
-          })) as SubmitJobAck;
+          })) as SubmitRunAck;
           break;
       }
-      onSubmitted(ack.jobId);
+      onSubmitted(ack.runId);
     } catch (e: unknown) {
       onError(String(e));
     } finally {
@@ -182,11 +182,11 @@ export function JobsSubmitForm({ onSubmitted, onError }: Props) {
 
   return (
     <div className="space-y-3">
-      <Field label="job kind">
+      <Field label="run kind">
         <select
           value={submitKind}
           onChange={(e) => setSubmitKind(e.target.value as SubmitKind)}
-          data-testid="job-kind"
+          data-testid="run-kind"
         >
           {KIND_LABELS.map((k) => (
             <option key={k.value} value={k.value}>
@@ -259,7 +259,7 @@ export function JobsSubmitForm({ onSubmitted, onError }: Props) {
             </Field>
           )}
           <p style={{ fontSize: "11.5px", color: "var(--ink-mute)" }}>
-            Output → <code>Generated/{assetName}.cs</code> + <code>artifacts/{assetName}/raw.md</code>
+            Output → formal project files + immutable artifact manifest
             {submitKind === "asset_generate" && imagePrompt.trim() && (
               <>
                 {" "}+ <code>{assetName}.png</code>
@@ -330,7 +330,7 @@ export function JobsSubmitForm({ onSubmitted, onError }: Props) {
             onChange={(e) => setBuildProjectRoot(e.target.value)}
             placeholder="E:/mods/demo_mod/DemoMod"
             className="input-mono"
-            data-testid="job-build-project-root"
+            data-testid="run-build-project-root"
           />
         </Field>
       )}
@@ -343,7 +343,7 @@ export function JobsSubmitForm({ onSubmitted, onError }: Props) {
               onChange={(e) => setPackageSourceDir(e.target.value)}
               placeholder="E:/mods/demo_mod/artifacts"
               className="input-mono"
-              data-testid="job-package-source-dir"
+              data-testid="run-package-source-dir"
             />
           </Field>
           <Field
@@ -355,7 +355,7 @@ export function JobsSubmitForm({ onSubmitted, onError }: Props) {
               onChange={(e) => setPackageOutputPath(e.target.value)}
               placeholder="E:/mods/demo_mod-release.zip"
               className="input-mono"
-              data-testid="job-package-output-path"
+              data-testid="run-package-output-path"
             />
           </Field>
         </>
@@ -388,7 +388,7 @@ export function JobsSubmitForm({ onSubmitted, onError }: Props) {
             type="checkbox"
             checked={snapshotForce}
             onChange={(event) => setSnapshotForce(event.target.checked)}
-            data-testid="job-truth-snapshot-force"
+            data-testid="run-truth-snapshot-force"
           />
           <span>force re-index</span>
         </label>
@@ -398,7 +398,7 @@ export function JobsSubmitForm({ onSubmitted, onError }: Props) {
         variant="primary"
         onClick={() => void handleSubmit()}
         disabled={busy}
-        data-testid="job-submit"
+        data-testid="run-submit"
       >
         {busy ? "Submitting…" : "Submit"}
       </Button>

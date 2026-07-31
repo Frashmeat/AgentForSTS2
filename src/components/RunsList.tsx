@@ -1,6 +1,6 @@
-// 任务列表 + 详情：从原 JobsCard 独立出来。
+// 任务列表 + 详情：从原 RunsCard 独立出来。
 //
-// 自管：list / active / liveDeltaById / busy。监听 job-progress 自动 refresh。
+// 自管：list / active / liveDeltaById / busy。监听 run-progress 自动 refresh。
 // 父级通过 ref 触发 refresh（提交完后调）。
 
 import {
@@ -9,23 +9,23 @@ import {
   useState,
 } from "react";
 import { Badge, Button } from "@/components/ui";
-import { useAllJobProgress } from "@/hooks/useJobProgress";
+import { useAllRunProgress } from "@/hooks/useRunProgress";
 import { api } from "@/services/api";
 import type {
-  Job,
-  JobStatus,
-  JobSummary,
+  RunRecord,
+  RunStatus,
+  RunSummary,
 } from "@/services/tauriApi";
 
-const STATUS_VARIANT: Record<JobStatus, "muted" | "running" | "ok" | "error" | "warn"> = {
+const STATUS_VARIANT: Record<RunStatus, "muted" | "running" | "ok" | "error" | "warn"> = {
   pending: "muted",
   running: "running",
-  completed: "ok",
+  succeeded: "ok",
   failed: "error",
   cancelled: "warn",
 };
 
-export interface JobsListHandle {
+export interface RunsListHandle {
   refresh: () => Promise<void>;
 }
 
@@ -33,17 +33,17 @@ interface Props {
   onError: (msg: string) => void;
 }
 
-export const JobsList = forwardRef<JobsListHandle, Props>(function JobsList(
+export const RunsList = forwardRef<RunsListHandle, Props>(function RunsList(
   { onError },
   ref,
 ) {
-  const [list, setList] = useState<JobSummary[]>([]);
-  const [active, setActive] = useState<Job | null>(null);
+  const [list, setList] = useState<RunSummary[]>([]);
+  const [active, setActive] = useState<RunRecord | null>(null);
   const [liveDeltaById, setLiveDeltaById] = useState<Record<string, string>>({});
 
   async function refresh() {
     try {
-      const items = (await api.listJobs()) as JobSummary[];
+      const items = (await api.listRuns()) as RunSummary[];
       setList(items);
     } catch (e: unknown) {
       onError(String(e));
@@ -52,11 +52,11 @@ export const JobsList = forwardRef<JobsListHandle, Props>(function JobsList(
 
   useImperativeHandle(ref, () => ({ refresh }));
 
-  useAllJobProgress((ev) => {
+  useAllRunProgress((ev) => {
     if (ev.delta) {
       setLiveDeltaById((prev) => ({
         ...prev,
-        [ev.jobId]: (prev[ev.jobId] ?? "") + ev.delta,
+        [ev.runId]: (prev[ev.runId] ?? "") + ev.delta,
       }));
     }
     if (
@@ -67,10 +67,10 @@ export const JobsList = forwardRef<JobsListHandle, Props>(function JobsList(
     ) {
       void refresh();
       setActive((cur) => {
-        if (cur && cur.id === ev.jobId) {
+        if (cur && cur.id === ev.runId) {
           void (async () => {
             try {
-              const next = (await api.getJob(ev.jobId)) as Job;
+              const next = (await api.getRun(ev.runId)) as RunRecord;
               setActive(next);
             } catch { /* ignore */ }
           })();
@@ -82,8 +82,8 @@ export const JobsList = forwardRef<JobsListHandle, Props>(function JobsList(
 
   async function handleSelect(id: string) {
     try {
-      const job = (await api.getJob(id)) as Job;
-      setActive(job);
+      const run = (await api.getRun(id)) as RunRecord;
+      setActive(run);
     } catch (e: unknown) {
       onError(String(e));
     }
@@ -91,7 +91,7 @@ export const JobsList = forwardRef<JobsListHandle, Props>(function JobsList(
 
   async function handleCancel(id: string) {
     try {
-      await api.cancelJob(id);
+      await api.cancelRun(id);
       await refresh();
     } catch (e: unknown) {
       onError(String(e));
@@ -101,7 +101,7 @@ export const JobsList = forwardRef<JobsListHandle, Props>(function JobsList(
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <h3 style={{ margin: 0 }}>Recent jobs ({list.length})</h3>
+        <h3 style={{ margin: 0 }}>Recent runs ({list.length})</h3>
         <Button size="sm" onClick={() => void refresh()}>
           Refresh
         </Button>
@@ -109,17 +109,17 @@ export const JobsList = forwardRef<JobsListHandle, Props>(function JobsList(
 
       {list.length === 0 ? (
         <p style={{ color: "var(--ink-faint)", fontSize: "12.5px" }}>
-          No jobs yet. Submit one above.
+          No runs yet. Submit one above.
         </p>
       ) : (
         <ul className="space-y-2 mb-4">
           {list.map((j) => (
             <li
               key={j.id}
-              data-testid="job-row"
-              data-job-id={j.id}
-              data-job-kind={j.kind}
-              data-job-status={j.status}
+              data-testid="run-row"
+              data-run-id={j.id}
+              data-run-kind={j.kind}
+              data-run-status={j.status}
               className="flex items-center gap-3 p-2.5"
               style={{
                 background:
@@ -197,8 +197,8 @@ export const JobsList = forwardRef<JobsListHandle, Props>(function JobsList(
         <details
           open
           className="mt-3"
-          data-testid="job-detail"
-          data-job-id={active.id}
+          data-testid="run-detail"
+          data-run-id={active.id}
         >
           <summary
             className="cursor-pointer mb-2 flex items-center justify-between gap-2"
@@ -211,7 +211,7 @@ export const JobsList = forwardRef<JobsListHandle, Props>(function JobsList(
             }}
           >
             <span className="flex items-center gap-2">
-              <span>Job {active.id.slice(0, 8)}…</span>
+              <span>RunRecord {active.id.slice(0, 8)}…</span>
               <Badge variant={STATUS_VARIANT[active.status]}>{active.status}</Badge>
             </span>
             <button
@@ -230,18 +230,18 @@ export const JobsList = forwardRef<JobsListHandle, Props>(function JobsList(
               Close
             </button>
           </summary>
-          {active.error && (
+          {active.failure && (
             <p
-              data-testid="job-detail-error"
+              data-testid="run-detail-error"
               className="mb-2 break-all"
               style={{ fontSize: "12px", color: "var(--accent-deep)" }}
             >
-              error: {active.error}
+              {active.failure.code}: {active.failure.message}
             </p>
           )}
-          <pre className="pre-block max-h-96" data-testid="job-detail-result">
+          <pre className="pre-block max-h-96" data-testid="run-detail-result">
             {JSON.stringify(
-              active.result ?? { error: active.error, status: active.status },
+              active.result ?? { failure: active.failure, status: active.status },
               null,
               2,
             )}

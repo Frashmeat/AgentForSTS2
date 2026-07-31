@@ -52,23 +52,67 @@ Questions to answer:
 
 (To be filled by the team)
 
+## Scenario: RunRecord v2 And ArtifactManifest
+
+### Contracts
+
+- `RunRecord.schemaVersion` is `2`; IDs start with `run-`; status is `pending | running | succeeded | failed | cancelled`.
+- Status, `completedAt`, `failure/result`, and the terminal timeline event change in one `RunRepository::transition` CAS. Progress updates do not append timeline events.
+- A failed Run has one `ActionableFailure` and no result; a cancelled Run has neither failure nor result; a succeeded Run has a kind-compatible tagged `RunResult`.
+- Product code reads and writes only the active project's V2 `history/`. An unmarked non-empty V1 history is atomically renamed to `history.v1-backup-<UTC>` while the project OS lock is held.
+- Successful artifact Runs publish `artifacts/<artifact-id>/runs/<run-id>/artifact-manifest.json` plus immutable `files/`. Run results keep only the manifest reference, SHA-256, and bounded kind-specific summaries.
+- Manifest Evidence is the structured fact set selected for the same Prompt assembly: `source`, `symbol`, `purpose`, and `boundedExcerpt`, together with verified Game Pack and Truth Snapshot identity.
+- Formal project writes remain rollback-capable until manifest publication and terminal CAS succeed. Manifest failure restores prior files; CAS loss removes the new artifact run directory and restores formal writes.
+- Failed image diagnostics use `.ats/diagnostics/<run-id>/` and `failure.diagnosticRef`. Successful image diagnostics are copied into the immutable artifact snapshot and the diagnostics directory is removed.
+- The independent lifecycle Audit product path and `evidence.md` do not exist. Legacy shared artifact entries are moved to a run-scoped backup and committed or restored with the Run outcome.
+
+### Validation Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| Valid artifact Run | Publish immutable manifest/files, then transition once to `succeeded` |
+| Manifest write or path validation fails | Restore prior formal files; Run is `failed` with no result |
+| Cancellation wins terminal CAS | Remove the new artifact run directory and restore formal files |
+| Image quality/compile fails | Keep only `.ats/diagnostics/<run-id>/`; no success manifest |
+| Existing V1 history | Rename the whole directory before creating a marked V2 history |
+| Terminal Run is modified again | Reject without changing status, result, or timeline |
+
+### Good / Base / Bad Cases
+
+- Good: an asset Run has one created, started, and succeeded timeline event; its manifest digest and every file digest can be recomputed.
+- Base: an existing generated file is replaced by a successful Run while its prior shared artifact entries are removed through the legacy cleanup transaction.
+- Bad: force `artifacts/<artifact-id>/runs` to be a regular file; publication fails, the previous generated file is restored byte-for-byte, and no success result is persisted.
+
+### Targeted Tests
+
+```text
+cargo test -p ats-core --test run_lifecycle
+cargo test -p ats-core platform::artifact::tests
+cargo test -p ats-core platform::application::handlers::asset_generate::tests
+cargo test -p ats-core platform::application::handlers::batch_custom_code::tests
+cargo test -p ats-core platform::application::handlers::package_project::tests
+cargo check -p agentthespire-desktop
+npx tsc -b --pretty false
+npm run test:frontend
+```
+
 ## Scenario: Structured Asset Codegen
 
 ### 1. Scope / Trigger
 
-This contract applies to `SubmitCodeGenerateRequest::Asset` and `submit_asset_generate`. It covers model output, runtime image delivery, image quality, localization, compile validation, rollback, and job finalization. It does not cover product configuration of `GodotPath`.
+This contract applies to `SubmitCodeGenerateRequest::Asset` and `submit_asset_generate`. It covers model output, runtime image delivery, image quality, localization, compile validation, rollback, and Run finalization. It does not cover product configuration of `GodotPath`.
 
 ### 2. Signatures
 
 ```rust
-JobApplicationService::submit_code_generate(...) -> JobResult<JobId>
-JobApplicationService::submit_asset_generate(...) -> JobResult<JobId>
+RunApplicationService::submit_code_generate(...) -> RunRepositoryResult<RunId>
+RunApplicationService::submit_asset_generate(...) -> RunRepositoryResult<RunId>
 ```
 
 Compile gate:
 
 ```text
-dotnet build --nologo -p:ModsPath=<project>/.ats/compile-gate/<job-id>/
+dotnet build --nologo -p:ModsPath=<project>/.ats/compile-gate/<run-id>/
 ```
 
 On Windows, cwd may retain `\\?\`, but the `ModsPath` MSBuild property must use a normal drive or UNC absolute path. The template appends child paths, and mixed verbatim/forward-slash paths are invalid for the MSBuild `Copy` task.
@@ -91,11 +135,11 @@ The model returns one strict JSON object, optionally in one JSON fence:
 
 Rust owns all paths. The ModId is `project.json.csharp_name`; prompt and validator share `asset_localization_key_segment()`. It follows analyzer acronym boundaries: `E2EEnergySeedRelic -> E2_E_ENERGY_SEED_RELIC`, `XMLParser -> XML_PARSER`.
 
-Committed writes are `Generated/<name>.cs`, both `<ModId>/localization/<locale>/<table>.json`, and generated runtime images under `<ModId>/images/`. Relics receive normal/outline/big paths; cards and powers receive normal/big paths. Diagnostic copies under `artifacts/` survive compile failures.
+Committed writes are `Generated/<name>.cs`, both `<ModId>/localization/<locale>/<table>.json`, and generated runtime images under `<ModId>/images/`. Relics receive normal/outline/big paths; cards and powers receive normal/big paths. Compile failures roll back formal writes and retain only run-scoped diagnostics under `.ats/diagnostics/<run-id>/`.
 
 ### 4. Validation & Error Matrix
 
-| Condition | Job result | File behavior |
+| Condition | Run result | File behavior |
 | --- | --- | --- |
 | Empty or invalid JSON | retry once, then `Failed` | no project writes |
 | Unsupported type or project scope mismatch | `Failed` | no out-of-scope write |
@@ -103,12 +147,12 @@ Committed writes are `Generated/<name>.cs`, both `<ModId>/localization/<locale>/
 | Existing localization is not a flat string map | `Failed` | existing files preserved |
 | Compile failure | `Failed` with `asset compile gate` | C#, localization, and runtime image writes rolled back |
 | Cancellation during stream/compile | `Cancelled` | writes rolled back; success cannot overwrite cancellation |
-| Compile success | `Completed` | transaction committed |
+| Compile success | `Succeeded` | transaction committed after ArtifactManifest publication |
 
 ### 5. Good / Base / Bad Cases
 
 - Good: strict relic bundle has matching `eng` / `zhs` `.title/.description/.flavor`; compile succeeds and C#, localization, and images remain.
-- Base: first stream is empty and second is valid; job completes and usage accumulates.
+- Base: first stream is empty and second is valid; Run succeeds and usage accumulates.
 - Bad: JSON is valid but C# does not compile; prior files are restored and new runtime files are removed.
 
 ### 6. Tests Required
@@ -125,7 +169,7 @@ Assertions must cover type/acronym normalization, inline project context, strict
 
 Wrong: ask for C# and two JSON files, accept one C# fence, and mark completed without compilation.
 
-Correct: require `{csharp, localization.eng, localization.zhs}`, calculate paths in Rust, transactionally write C#/localization/images, run isolated `dotnet build`, then commit or roll back before job finalization.
+Correct: require `{csharp, localization.eng, localization.zhs}`, calculate paths in Rust, transactionally write C#/localization/images, run isolated `dotnet build`, publish and verify ArtifactManifest, then commit or roll back before Run finalization.
 
 ## Scenario: Current Source Evidence and Semantic Regression Gate
 
@@ -137,7 +181,7 @@ This contract applies to generated STS2 C# behavior code. It supplements compile
 
 - Stable asset templates contain engineering structure only. They must not persist timing-sensitive behavior recipes.
 - `KnowledgeQuery.requirements` selects bounded excerpts from the current decompiled game source. Timing-sensitive evidence includes an official similar implementation and the lifecycle caller for the selected override.
-- A successful structured asset generation preserves `artifacts/<asset>/evidence.md` with the actual knowledge manifest snapshot, source mode, requirement, symbol/path/line evidence, purpose, and injected facts.
+- A successful structured asset generation stores selected `source/symbol/purpose/boundedExcerpt` facts in `ArtifactManifest.evidence[]`; production does not create or read `evidence.md`.
 - The reusable validator implements `forbidden_call_in_method`; STS2 supplies the known rule data that forbids `PlayerCmd.GainEnergy` inside `BeforeCombatStart`.
 - Semantic rules execute before artifact/project writes and before the compile validator. Comments, string literals, unrelated methods, and method invocations must not create false positives.
 
@@ -174,7 +218,7 @@ analyze_png_quality(bytes, ImageQualitySpec) -> Result<ImageQualityReport, Image
 derive_png_variants(bytes, &[ImageVariantSpec]) -> Result<Vec<DerivedImageVariant>, ImageProcError>
 ```
 
-Successful image jobs expose `imageQualityPath`, `imageQuality`, and `runtimeImagePaths`. Diagnostics are `artifacts/<asset>/<asset>.png`, `<asset>.rembg.png`, and `image-quality.json`.
+Successful image Runs snapshot raw/processed images and `image-quality.json` inside immutable Artifact files. Failed image diagnostics are stored under `.ats/diagnostics/<run-id>/` and referenced by `RunRecord.failure.diagnosticRef`.
 
 ### 3. Contracts
 
@@ -228,7 +272,7 @@ This contract applies when changing desktop toolchain settings, project creation
 ```text
 Tauri command: save_settings_patch(SettingsPatch) -> SettingsSnapshot
 Tauri commands: create_project, open_project
-Tauri commands: submit_code_generate_job, submit_asset_generate_job, submit_build_project_job
+Tauri commands: submit_code_generate_run, submit_asset_generate_run, submit_build_project_run
 ```
 
 ```rust
@@ -264,7 +308,7 @@ MSBuild: <GodotPath>...</GodotPath>
 | Condition | Expected behavior |
 | --- | --- |
 | Valid Godot 4.5.1 file | Save, hot-reload, and synchronize active project |
-| Empty Godot path | Save empty value; build submission fails before job creation |
+| Empty Godot path | Save empty value; build submission fails before Run creation |
 | Missing file | Reject save and keep config/memory unchanged |
 | Godot 4.5.10 or another executable | Reject as unsupported/non-Godot |
 | Required Pack input missing or blank | Return `MissingInput(<input_key>)`; do not write partial XML |
@@ -275,7 +319,7 @@ MSBuild: <GodotPath>...</GodotPath>
 ### 5. Good / Base / Bad Cases
 
 - Good: GUI saves real 4.5.1, creates a project, completes asset compile gate, `dotnet publish`, Godot PCK export, and package in an isolated Mods directory.
-- Base: GUI explicitly clears Godot; config and `local.props` contain an empty value, and build returns a user-actionable not-configured error before creating a job.
+- Base: GUI explicitly clears Godot; config and `local.props` contain an empty value, and build returns a user-actionable not-configured error before creating a Run.
 - Bad: a missing file, non-Godot executable, or `4.5.10` is rejected without changing persisted settings.
 
 ### 6. Tests Required
@@ -408,7 +452,7 @@ runtime/game-packs/<game-id>/
 - Snapshot identity binds snapshot schema, Pack ID/schema/content SHA-256, sorted source identities, indexer/provider/tree summaries, and non-empty tool versions. `created_at` and draft names are excluded, so identical verified content reuses one snapshot ID and directory.
 - Drafts and final snapshots are on the same volume. A verified draft is renamed into `snapshots/<snapshot-id>` before the atomic `current.json` pointer is replaced. A failed draft never changes the previous pointer.
 - Opening a snapshot recomputes its identity and verifies Pack binding, manifest pointer checksum, every source hash/size, and every index tree. Snapshot IDs and manifest-relative paths cannot escape the store.
-- `VerifiedTruthSnapshot` can only be constructed by store verification. A job holds one handle for its lifetime; activating a new current snapshot does not retarget that handle.
+- `VerifiedTruthSnapshot` can only be constructed by store verification. A Run holds one handle for its lifetime; activating a new current snapshot does not retarget that handle.
 - Snapshot acquisition and provider execution are implemented by the Pack-driven refresh and verified context paths. Snapshot import/export and garbage collection remain unsupported and must not bypass store verification.
 
 ### 4. Validation & Error Matrix
@@ -424,7 +468,7 @@ runtime/game-packs/<game-id>/
 | Pointer traversal or Pack mismatch | Reject before reading an out-of-scope snapshot |
 | Source or index bytes changed after activation | Reopen fails with checksum/integrity mismatch |
 | Index contains a symlink | Return `InvalidIndexEntry`; do not activate |
-| A newer snapshot becomes current | Existing job handle remains bound to its original root and ID |
+| A newer snapshot becomes current | Existing Run handle remains bound to its original root and ID |
 
 ### 5. Good / Base / Bad Cases
 
@@ -441,13 +485,13 @@ cargo test -p ats-core game_pack::registry::tests
 cargo check -p ats-core
 ```
 
-Assertions must cover staging/activation/reopen, content deduplication, pinned checksum mismatch, missing source/index, empty C# index, failed-draft pointer preservation, source/index tampering, fixed job handles, pointer traversal, store/Pack mismatch, and index symlink rejection.
+Assertions must cover staging/activation/reopen, content deduplication, pinned checksum mismatch, missing source/index, empty C# index, failed-draft pointer preservation, source/index tampering, fixed Run handles, pointer traversal, store/Pack mismatch, and index symlink rejection.
 
 ### 7. Wrong vs Correct
 
 Wrong: mark a directory current because it contains `.cs` files, let a caller supply `SourceMode::RuntimeDecompiled`, or update `current.json` before hashing all source and index bytes.
 
-Correct: bind the exact Pack/source/index/tool identity, finish all work in same-volume staging, verify immutable contents, atomically activate a pointer, and pass the resulting verified handle through the complete job.
+Correct: bind the exact Pack/source/index/tool identity, finish all work in same-volume staging, verify immutable contents, atomically activate a pointer, and pass the resulting verified handle through the complete Run.
 
 ## Scenario: Legacy-to-Snapshot Fact Selection Equivalence
 
@@ -526,24 +570,24 @@ PromptAssembler::assemble_custom_code_prompt(request, context)
 PromptAssembler::assemble_asset_group_prompt(request, context)
     -> Result<String, PromptAssemblyError>
 
-JobApplicationService::submit_code_generate(request, context, artifacts_dir, sink)
-    -> JobResult<JobId>
-JobApplicationService::submit_asset_generate(request, context, artifacts_dir, image_gen, image_proc, sink)
-    -> JobResult<JobId>
-JobApplicationService::submit_batch_custom_code(request, context, artifacts_dir, sink)
-    -> JobResult<JobId>
+RunApplicationService::submit_code_generate(request, context, artifacts_dir, sink)
+    -> RunRepositoryResult<RunId>
+RunApplicationService::submit_asset_generate(request, context, artifacts_dir, image_gen, image_proc, sink)
+    -> RunRepositoryResult<RunId>
+RunApplicationService::submit_batch_custom_code(request, context, artifacts_dir, sink)
+    -> RunRepositoryResult<RunId>
 ```
 
-Generation Job payloads preserve the request fields and add `_gameContext` with camel-case `gamePackId`, `gamePackDisplayName`, `gamePackSchemaVersion`, `gamePackSha256`, `snapshotSchemaVersion`, `snapshotId`, `sources`, `indexes`, `toolVersions`, and `createdAt`.
+Generation Run payloads preserve the request fields and add `_gameContext` with camel-case `gamePackId`, `gamePackDisplayName`, `gamePackSchemaVersion`, `gamePackSha256`, `snapshotSchemaVersion`, `snapshotId`, `sources`, `indexes`, `toolVersions`, and `createdAt`.
 
 ### 3. Contracts
 
 - `VerifiedGameContext` is created only from a loaded registry Pack, the project's explicit `game_id`, and `TruthSnapshotStore::open_current`.
-- Production Prompt and Job APIs accept `VerifiedGameContext`; they do not accept `KnowledgePaths`, `SourceMode`, or caller-asserted freshness.
-- A missing current Snapshot fails before Job creation, image generation, or LLM calls. There is no legacy cache or ilspy fallback.
+- Production Prompt and Run APIs accept `VerifiedGameContext`; they do not accept `KnowledgePaths`, `SourceMode`, or caller-asserted freshness.
+- A missing current Snapshot fails before Run creation, image generation, or LLM calls. There is no legacy cache or ilspy fallback.
 - Resolver facts come from all verified indexes assigned to the Pack provider. Lookup coordinates use `snapshot://<snapshot-id>/<source-id>/` only.
-- Evidence and Job payload `_gameContext` record Pack ID/display/schema/SHA, Snapshot ID/schema, sources, indexes, tool versions, and creation time.
-- The context is moved into the spawned Job so a later current-pointer change cannot alter in-flight evidence.
+- ArtifactManifest Evidence and Run payload `_gameContext` record Pack ID/display/schema/SHA, Snapshot ID/schema, sources, indexes, tool versions, and creation time.
+- The context is moved into the spawned Run so a later current-pointer change cannot alter in-flight evidence.
 - The legacy fact builder is test-only and exists solely for the committed equivalence fixture.
 
 ### 4. Validation and Error Matrix
@@ -551,18 +595,18 @@ Generation Job payloads preserve the request fields and add `_gameContext` with 
 | Condition | Expected behavior |
 | --- | --- |
 | Known project `game_id` and verified current Snapshot | Create context, persist matching `_gameContext`, and resolve Prompt facts from that Snapshot |
-| No `current.json` for the project Pack | Return `GameContextError::MissingCurrent` before Job creation, image generation, or LLM calls |
+| No `current.json` for the project Pack | Return `GameContextError::MissingCurrent` before Run creation, image generation, or LLM calls |
 | Unknown project `game_id` | Return `GamePackError::UnknownPackId`; do not select STS2 implicitly |
 | Current pointer or Snapshot bytes fail integrity verification | Return `TruthSnapshotError`; do not consult legacy knowledge |
 | Requested provider has no verified indexes | Return `SnapshotCodeFactsError::MissingProvider`; do not return empty success |
-| Current pointer changes after Job submission | In-flight Job continues with its owned context and original Snapshot ID |
+| Current pointer changes after Run submission | In-flight Run continues with its owned context and original Snapshot ID |
 | Web Prompt request has no current Snapshot | Return HTTP 400 with the actionable missing-current message |
 
 ### 5. Good / Base / Bad Cases
 
-- Good: an STS2 project with a verified current Snapshot produces Snapshot facts and an Evidence Record whose Pack/Snapshot/source/index/tool identity matches Job payload `_gameContext`.
+- Good: an STS2 project with a verified current Snapshot produces Snapshot facts and an ArtifactManifest whose Pack/Snapshot/source/index/tool identity matches Run payload `_gameContext`.
 - Base: facts contain no matching type for a valid query; guidance and an explicit no-matching-facts warning render from the verified Snapshot without falling back to mutable paths.
-- Bad: a project has no current Snapshot; Desktop/Web reject the request before creating a Job or invoking image/LLM clients.
+- Bad: a project has no current Snapshot; Desktop/Web reject the request before creating a Run or invoking image/LLM clients.
 
 ### 6. Targeted Tests
 
@@ -572,7 +616,7 @@ cargo test -p ats-core knowledge::sts2_knowledge_resolver::tests
 cargo test -p ats-core knowledge::sts2_lookup_provider::tests
 cargo test -p ats-core platform::application::handlers::batch_custom_code::tests
 cargo test -p ats-core platform::application::handlers::asset_generate::tests
-cargo test -p ats-core --test job_lifecycle code_generate_writes_files_via_public_api
+cargo test -p ats-core --test run_lifecycle code_generate_writes_files_via_public_api
 cargo test -p ats-web routes::codegen::tests::missing_current_snapshot_is_rejected_as_bad_request
 cargo check -p ats-core
 cargo check -p agentthespire-desktop
@@ -583,7 +627,7 @@ cargo check -p ats-web
 
 ### 1. Scope / Trigger
 
-This contract applies when changing Pack truth-source acquisition, indexer execution, current Snapshot activation, Desktop refresh/status, health readiness, or refresh Job history. It does not authorize writing the game installation or operating the game UI.
+This contract applies when changing Pack truth-source acquisition, indexer execution, current Snapshot activation, Desktop refresh/status, health readiness, or refresh Run history. It does not authorize writing the game installation or operating the game UI.
 
 ### 2. Signatures and Storage
 
@@ -593,24 +637,24 @@ TruthSnapshotRefresher::refresh(pack, store, local_inputs, force)
 
 inspect_truth_snapshot(pack, store) -> TruthSnapshotStatus
 
-JobApplicationService::submit_truth_snapshot_refresh(
+RunApplicationService::submit_truth_snapshot_refresh(
     request, pack, store, local_inputs, refresher, sink,
-) -> JobResult<JobId>
+) -> RunRepositoryResult<RunId>
 ```
 
 ```text
-Tauri write: submit_truth_snapshot_refresh_job({force}) -> <project>/.ats/history
-Tauri read:  get_job(id), list_jobs(), cancel_job(id)
-Project jobs: <project>/.ats/history
-Historical legacy jobs: <runtime>/knowledge/jobs (read-only compatibility)
+Tauri write: submit_truth_snapshot_refresh_run({force}) -> <project>/.ats/history
+Tauri read:  get_run(id), list_runs(), cancel_run(id)
+Project Runs: <project>/.ats/history
+Historical `<runtime>/knowledge/jobs` are not read by the product.
 ```
 
 The Tauri submit command derives `game_id` from the active project and local source bindings from workstation configuration. The request cannot provide a Pack ID, source path, release, asset, checksum, indexer, or provider.
 
 ### 3. Contracts
 
-- Local inputs are validated before Job creation. Every Pack-declared source is required.
-- Refresh-only Job submission does not construct or require an LLM client or API key.
+- Local inputs are validated before Run creation. Every Pack-declared source is required.
+- Refresh-only Run submission does not construct or require an LLM client or API key.
 - GitHub sources use `/releases/tags/<pinned-release>` and require an exact asset name, matching response tag, and exact Pack SHA-256. Production never calls `releases/latest`.
 - The GitHub API token is sent only to the API request. It is never forwarded to the response-provided browser download URL.
 - GitHub asset downloads use 15-second connect, 45-second read-stall, and 10-minute per-request total timeouts with at most four attempts. A retry sends `Range: bytes=<stored>-`; bytes are appended only when `206 Content-Range` starts at that exact offset. A full `200` truncates the partial file, an invalid range is rejected, and retry exhaustion reports attempt and byte progress.
@@ -618,23 +662,23 @@ The Tauri submit command derives `game_id` from the active project and local sou
 - Every source is copied into the draft before indexing. Indexers consume only the staged copy.
 - `ilspycmd --version` is part of Snapshot identity. The `toolVersions.ilspycmd` value is the normalized version without a repeated `ilspycmd:` label. A verified current Snapshot is a cache hit only when Pack, local source hashes, pinned remote identities, indexes, and tool versions still match.
 - A verified pinned remote source may be reused when a local source or tool changes. `force = true` reacquires remote inputs and reindexes all sources; identical content still deduplicates by Snapshot ID.
-- Fetch, checksum, index, or finalize failure never updates `current.json`. A Pack-declared BaseLib failure fails the refresh Job; it is not an optional warning.
+- Fetch, checksum, index, or finalize failure never updates `current.json`. A Pack-declared BaseLib failure fails the refresh Run; it is not an optional warning.
 - Status is `ready`, `missing`, or `invalid`. `ready` requires reopening and fully verifying the current Snapshot.
 - Desktop health uses verified current readiness. Web has no global knowledge status route because it has no active-project identity; Web generation validates the request project's context directly.
-- Legacy `KnowledgeRefresh` remains an enum value only for historical Job deserialization. Old refresh/status, manifest v1, import/export, and `releases/latest` clients have no production entry.
+- Legacy `KnowledgeRefresh` is not part of RunKind or production deserialization. Old refresh/status, manifest v1, import/export, and `releases/latest` clients have no production entry.
 
 ### 4. Validation and Error Matrix
 
 | Condition | Expected behavior |
 | --- | --- |
-| All declared sources fetch, hash, and index | Atomically activate a verified current Snapshot and complete the Job with Pack/Snapshot/source/index/tool identity |
+| All declared sources fetch, hash, and index | Atomically activate a verified current Snapshot and complete the Run with Pack/Snapshot/source/index/tool identity |
 | Inputs and tool versions unchanged | Return `cacheHit = true` without fetch or index work |
 | Local game assembly changes | Create a new Snapshot and reuse the still-verified pinned remote source |
 | Asset body stalls or ends early | Retry from the stored byte count with a matching HTTP range |
 | Asset returns a mismatched `Content-Range` | Reject the download; do not append bytes or activate current |
 | Fixed remote bytes do not match Pack SHA | Fail and preserve the previous current pointer |
 | Indexer fails or emits no C# | Fail and preserve the previous current pointer |
-| Local input key is absent or not a file | Reject before Job creation |
+| Local input key is absent or not a file | Reject before Run creation |
 | Current pointer or bytes are corrupt | Status is `invalid`; generation cannot open a context |
 | Refresh is already locked | Fail with a deterministic busy error; do not race Snapshot directory activation |
 
@@ -642,7 +686,7 @@ The Tauri submit command derives `game_id` from the active project and local sou
 
 - Good: current game assembly and the Pack-pinned BaseLib produce one verified Snapshot whose manifest records both source and index identities.
 - Base: a second non-forced refresh is a cache hit; a forced identical refresh reexecutes work but reuses the content-addressed Snapshot ID.
-- Bad: remote checksum or index failure leaves the previous verified current usable and records a failed refresh Job.
+- Bad: remote checksum or index failure leaves the previous verified current usable and records a failed refresh Run.
 
 ### 6. Tests Required
 
@@ -655,7 +699,7 @@ cargo check -p ats-web
 npx tsc -b --pretty false
 ```
 
-Assertions must cover successful activation, cache hit, local source change, pinned release URL, exact remote SHA, interrupted-body resume, mismatched `Content-Range` rejection, normalized tool version, index failure, missing local input, `ready/missing/invalid`, token non-forwarding, and Job result identity/counts.
+Assertions must cover successful activation, cache hit, local source change, pinned release URL, exact remote SHA, interrupted-body resume, mismatched `Content-Range` rejection, normalized tool version, index failure, missing local input, `ready/missing/invalid`, token non-forwarding, and Run result identity/counts.
 
 ### 7. Wrong vs Correct
 
@@ -676,11 +720,11 @@ GamePackLoader::load_from_dir(pack_root) -> GamePackResult<LoadedGamePack>
 GamePackGuidanceProvider::build_guidance(query, pack) -> Vec<KnowledgeGuidanceItem>
 scaffold_from_template(project_root, csharp_name, pack) -> ProjectResult<()>
 sync_local_props(project_root, pack.build_recipe.as_ref(), inputs) -> Result<LocalPropsSync, LocalPropsError>
-JobApplicationService::submit_build_project(request, pack, sink) -> JobResult<JobId>
-JobApplicationService::submit_package_project(request, pack, mod_id, sink) -> JobResult<JobId>
+RunApplicationService::submit_build_project(request, pack, sink) -> RunRepositoryResult<RunId>
+RunApplicationService::submit_package_project(request, pack, mod_id, sink) -> RunRepositoryResult<RunId>
 ```
 
-Build and package Job payloads add `_gamePack` with `id`, `schemaVersion`, and `sha256`. The STS2 recipe uses the finite `dotnet_publish` runner. The package layout declares exactly:
+Build and package Run payloads add `_gamePack` with `id`, `schemaVersion`, and `sha256`. The STS2 recipe uses the finite `dotnet_publish` runner. The package layout declares exactly:
 
 ```text
 BaseLib/{BaseLib.dll,BaseLib.pck,BaseLib.json}
@@ -710,14 +754,14 @@ BaseLib/{BaseLib.dll,BaseLib.pck,BaseLib.json}
 | Unknown guidance scenario or build runner | Reject Pack load with the exact field path |
 | Manifest differs after placeholder rendering | Return `ProjectError::ScaffoldContract`; remove the failed new project |
 | Required build input missing | Return `LocalPropsError::MissingInput`; preserve existing XML |
-| Required package file missing/symlink/outside root | Fail the package Job and leave no partial ZIP |
+| Required package file missing/symlink/outside root | Fail the package Run and leave no partial ZIP |
 | Valid package layout | Atomically write a ZIP containing exactly the declared regular files |
 
 ### 5. Good / Base / Bad Cases
 
 - Good: current STS2 Pack scaffolds, injects current Snapshot guidance, passes compile/publish, and packages the six declared files.
 - Base: a fixture Pack named `fixture-game` scaffolds a different placeholder/manifest and packages its declared file without any STS2 branch.
-- Bad: a Pack requests an arbitrary runner, a template path escapes root, or a package source contains only a similarly named undeclared file; load/job fails without fallback.
+- Bad: a Pack requests an arbitrary runner, a template path escapes root, or a package source contains only a similarly named undeclared file; load/Run fails without fallback.
 
 ### 6. Targeted Tests
 
@@ -737,4 +781,4 @@ Assertions must cover explicit file/checksum loading, scenario selection, no per
 
 Wrong: embed one global template, copy the same image/resource bytes to every role, recurse over an output directory, or branch on `game_id == "sts2"` inside generic handlers.
 
-Correct: load a validated Pack, select declared content, execute only finite Core algorithms/runners, record Pack identity in Jobs, and package only the declared regular files.
+Correct: load a validated Pack, select declared content, execute only finite Core algorithms/runners, record Pack identity in Runs, and package only the declared regular files.

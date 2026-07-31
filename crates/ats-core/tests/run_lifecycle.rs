@@ -1,18 +1,17 @@
-//! 集成测试：JobApplicationService 全生命周期 + 文件 IO 一致性。
+//! 集成测试：RunApplicationService 全生命周期 + 文件 IO 一致性。
 //!
 //! 只用 pub API（不能 import 私有 modules）。覆盖：
-//! 1. submit_text_generate → 流式 LLM → 结果写入 FileJobRepository → 用 list/get 验证
+//! 1. submit_text_generate → 流式 LLM → 结果写入 FileRunRepository → 用 list/get 验证
 //! 2. submit_code_generate (custom_code) → 写 Generated/<name>.cs，
-//!    并保留 artifacts/<name>/<name>.cs + raw.md 便于追溯
-//! 3. cancel_job → status 终态 + 结果不写
-//! 4. 跨 service 实例：写一个 job 后，新实例 list 时仍能看到（验证 FileJobRepository 持久化）
+//!    并发布不可变 ArtifactManifest
+//! 3. cancel_run → status 终态 + 结果不写
+//! 4. 跨 service 实例：写一个 run 后，新实例 list 时仍能看到（验证 FileRunRepository 持久化）
 
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::{collections::BTreeMap, fs, path::Path};
 
 use async_trait::async_trait;
-use ats_core::audit::{AuditSinkArc, FileAuditSink, read_recent};
 use ats_core::codegen::CustomCodegenRequest;
 use ats_core::game_pack::{
     GamePackLoadPolicy, GamePackLoader, GamePackRegistry, TruthSnapshotStore, VerifiedGameContext,
@@ -22,9 +21,8 @@ use ats_core::llm::{
     StreamEvent, Usage,
 };
 use ats_core::platform::{
-    AuditedJobRepository, FileJobRepository, JobApplicationService, JobId, JobRepository,
-    JobStatus, NoopProgressSink, ProgressSink, SubmitCodeGenerateRequest,
-    SubmitTextGenerateRequest,
+    FileRunRepository, NoopProgressSink, ProgressSink, RunApplicationService, RunId, RunRepository,
+    RunStatus, SubmitCodeGenerateRequest, SubmitTextGenerateRequest,
 };
 use futures_util::stream;
 
@@ -100,8 +98,8 @@ fn forbidden_code_events() -> Vec<Result<StreamEvent, LlmError>> {
     ]
 }
 
-fn make_repo(td: &tempfile::TempDir) -> Arc<dyn JobRepository> {
-    Arc::new(FileJobRepository::new(td.path().to_path_buf()))
+fn make_repo(td: &tempfile::TempDir) -> Arc<dyn RunRepository> {
+    Arc::new(FileRunRepository::new(td.path().to_path_buf()))
 }
 
 fn game_context(runtime_dir: &Path) -> VerifiedGameContext {
@@ -152,10 +150,10 @@ fn game_context(runtime_dir: &Path) -> VerifiedGameContext {
     VerifiedGameContext::open_current(runtime_dir, &registry, "sts2").unwrap()
 }
 
-async fn wait_terminal(service: &JobApplicationService, id: &JobId) {
+async fn wait_terminal(service: &RunApplicationService, id: &RunId) {
     for _ in 0..200 {
-        let job = service.get(id).await.unwrap();
-        if job.status.is_terminal() {
+        let run = service.get(id).await.unwrap();
+        if run.status.is_terminal() {
             return;
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -169,7 +167,7 @@ async fn text_generate_end_to_end_through_public_api() {
     let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
         events: Mutex::new(ok_text_events()),
     });
-    let service = JobApplicationService::new(repo, llm);
+    let service = RunApplicationService::new(repo, llm);
     let sink: Arc<dyn ProgressSink> = Arc::new(NoopProgressSink);
 
     let id = service
@@ -184,9 +182,9 @@ async fn text_generate_end_to_end_through_public_api() {
         .unwrap();
     wait_terminal(&service, &id).await;
 
-    let job = service.get(&id).await.unwrap();
-    assert_eq!(job.status, JobStatus::Completed);
-    let result = job.result.expect("result");
+    let run = service.get(&id).await.unwrap();
+    assert_eq!(run.status, RunStatus::Succeeded);
+    let result = serde_json::to_value(run.result.expect("result")).unwrap();
     assert_eq!(result["content"], "hello world");
     assert_eq!(result["model"], "integration-test");
 
@@ -205,11 +203,11 @@ async fn code_generate_writes_files_via_public_api() {
     let context = game_context(td.path());
     let snapshot_id = context.snapshot_id().to_string();
 
-    let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
+    let repo: Arc<dyn RunRepository> = Arc::new(FileRunRepository::new(history));
     let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
         events: Mutex::new(ok_code_events()),
     });
-    let service = JobApplicationService::new(repo, llm);
+    let service = RunApplicationService::new(repo, llm);
     let sink: Arc<dyn ProgressSink> = Arc::new(NoopProgressSink);
 
     let id = service
@@ -231,36 +229,32 @@ async fn code_generate_writes_files_via_public_api() {
         .unwrap();
     wait_terminal(&service, &id).await;
 
-    let job = service.get(&id).await.unwrap();
-    assert_eq!(job.status, JobStatus::Completed);
-    assert_eq!(job.payload["_gameContext"]["gamePackId"], "sts2");
-    assert_eq!(job.payload["_gameContext"]["snapshotId"], snapshot_id);
+    let run = service.get(&id).await.unwrap();
+    assert_eq!(run.status, RunStatus::Succeeded);
+    assert_eq!(run.payload["_gameContext"]["gamePackId"], "sts2");
+    assert_eq!(run.payload["_gameContext"]["snapshotId"], snapshot_id);
     let generated_cs = td.path().join("Generated/IntegrationDemo.cs");
-    let artifact_cs = artifacts.join("IntegrationDemo/IntegrationDemo.cs");
     let cs = generated_cs;
     assert!(cs.exists(), "cs file should be written");
     let cs_text = std::fs::read_to_string(&cs).unwrap();
     assert!(cs_text.contains("public class IntegrationDemo"));
-    assert!(artifact_cs.exists(), "artifact cs copy should be retained");
-    let raw = artifacts.join("IntegrationDemo/raw.md");
-    assert!(raw.exists());
-    let result = job.result.expect("result");
-    assert!(
-        result["csPath"]
+    assert!(!artifacts.join("IntegrationDemo/raw.md").exists());
+    assert!(!artifacts.join("IntegrationDemo/evidence.md").exists());
+    let result = serde_json::to_value(run.result.expect("result")).unwrap();
+    assert_eq!(result["artifactId"], "IntegrationDemo");
+    assert_eq!(result["manifestSha256"].as_str().unwrap().len(), 64);
+    let manifest_path = td
+        .path()
+        .join(result["artifactManifestRef"].as_str().unwrap());
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+    assert_eq!(manifest["producingRunId"], id.0);
+    let snapshot = manifest_path.parent().unwrap().join(
+        manifest["files"][0]["snapshotRelativePath"]
             .as_str()
-            .unwrap_or_default()
-            .ends_with("Generated\\IntegrationDemo.cs")
-            || result["csPath"]
-                .as_str()
-                .unwrap_or_default()
-                .ends_with("Generated/IntegrationDemo.cs")
+            .unwrap(),
     );
-    assert!(
-        result["artifactCsPath"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("artifacts")
-    );
+    assert_eq!(std::fs::read_to_string(snapshot).unwrap(), cs_text);
 }
 
 #[tokio::test]
@@ -271,11 +265,11 @@ async fn code_generate_applies_pack_rules_before_writing_files() {
     let artifacts = td.path().join("artifacts");
     std::fs::create_dir_all(&artifacts).unwrap();
 
-    let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
+    let repo: Arc<dyn RunRepository> = Arc::new(FileRunRepository::new(history));
     let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
         events: Mutex::new(forbidden_code_events()),
     });
-    let service = JobApplicationService::new(repo, llm);
+    let service = RunApplicationService::new(repo, llm);
     let id = service
         .submit_code_generate(
             SubmitCodeGenerateRequest::CustomCode {
@@ -294,106 +288,109 @@ async fn code_generate_applies_pack_rules_before_writing_files() {
         .unwrap();
     wait_terminal(&service, &id).await;
 
-    let job = service.get(&id).await.unwrap();
-    assert_eq!(job.status, JobStatus::Failed);
-    assert!(job.error.unwrap_or_default().contains("ResetEnergy"));
+    let run = service.get(&id).await.unwrap();
+    assert_eq!(run.status, RunStatus::Failed);
+    assert!(
+        run.error_message()
+            .unwrap_or_default()
+            .contains("ResetEnergy")
+    );
     assert!(!td.path().join("Generated/BadRelic.cs").exists());
     assert!(!artifacts.join("BadRelic/BadRelic.cs").exists());
 }
 
 #[tokio::test]
-async fn cancel_pending_job_marks_cancelled() {
+async fn manifest_publish_failure_restores_previous_generated_file() {
+    let td = tempfile::TempDir::new().unwrap();
+    let history = td.path().join("history");
+    fs::create_dir_all(&history).unwrap();
+    let artifacts = td.path().join("artifacts");
+    fs::create_dir_all(artifacts.join("IntegrationDemo")).unwrap();
+    fs::write(
+        artifacts.join("IntegrationDemo/runs"),
+        b"force directory conflict",
+    )
+    .unwrap();
+    let generated = td.path().join("Generated/IntegrationDemo.cs");
+    fs::create_dir_all(generated.parent().unwrap()).unwrap();
+    fs::write(&generated, b"public class PreviousVersion {}").unwrap();
+
+    let repo: Arc<dyn RunRepository> = Arc::new(FileRunRepository::new(history));
+    let service = RunApplicationService::new(
+        repo,
+        Arc::new(ScriptedLlm {
+            events: Mutex::new(ok_code_events()),
+        }),
+    );
+    let id = service
+        .submit_code_generate(
+            SubmitCodeGenerateRequest::CustomCode {
+                request: CustomCodegenRequest {
+                    name: "IntegrationDemo".into(),
+                    project_root: td.path().to_path_buf(),
+                    skip_build: true,
+                    ..Default::default()
+                },
+            },
+            game_context(td.path()),
+            artifacts,
+            Arc::new(NoopProgressSink),
+        )
+        .await
+        .unwrap();
+    wait_terminal(&service, &id).await;
+
+    let run = service.get(&id).await.unwrap();
+    assert_eq!(run.status, RunStatus::Failed);
+    assert!(run.result.is_none());
+    assert!(
+        run.error_message()
+            .unwrap_or_default()
+            .contains("publish artifact manifest")
+    );
+    assert_eq!(
+        fs::read_to_string(generated).unwrap(),
+        "public class PreviousVersion {}"
+    );
+}
+
+#[tokio::test]
+async fn cancel_pending_run_marks_cancelled() {
     // 不走 spawn 路径（race-y），直接创建 Pending → 调 cancel → 验证状态机。
-    use ats_core::platform::{Job, JobKind};
+    use ats_core::platform::{RunKind, RunRecord};
 
     let td = tempfile::TempDir::new().unwrap();
     let repo = make_repo(&td);
     let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
         events: Mutex::new(vec![]),
     });
-    let service = JobApplicationService::new(Arc::clone(&repo), llm);
+    let service = RunApplicationService::new(Arc::clone(&repo), llm);
 
-    let job = Job::new(JobKind::TextGenerate, serde_json::json!({}));
-    repo.create(&job).await.unwrap();
-    let id = job.id.clone();
+    let run = RunRecord::new(RunKind::TextGenerate, serde_json::json!({}));
+    repo.create(&run).await.unwrap();
+    let id = run.id.clone();
 
     service.cancel(&id).await.unwrap();
     let reloaded = service.get(&id).await.unwrap();
-    assert_eq!(reloaded.status, JobStatus::Cancelled);
+    assert_eq!(reloaded.status, RunStatus::Cancelled);
 
     // 二次 cancel 应该报 Terminal（已经是终态）
     let err = service.cancel(&id).await.unwrap_err();
     assert!(err.to_string().to_lowercase().contains("terminal"));
 }
 
-/// 端到端：text_generate 跑完后 `.ats/audit.log` 含 submitted + started + completed
-/// 三条 JSONL 记录。验证 AuditedJobRepository 通过 FileAuditSink 真把 audit 落盘。
 #[tokio::test]
-async fn text_generate_writes_audit_log_lifecycle() {
-    let td = tempfile::TempDir::new().unwrap();
-    let project_root = td.path().to_path_buf();
-    let history = project_root.join("history");
-    std::fs::create_dir_all(&history).unwrap();
-    std::fs::create_dir_all(project_root.join(".ats")).unwrap();
-
-    let base_repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
-    let audit: AuditSinkArc = Arc::new(FileAuditSink::new(project_root.clone()));
-    let repo: Arc<dyn JobRepository> = Arc::new(AuditedJobRepository::new(base_repo, audit));
-    let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
-        events: Mutex::new(ok_text_events()),
-    });
-    let service = JobApplicationService::new(repo, llm);
-    let sink: Arc<dyn ProgressSink> = Arc::new(NoopProgressSink);
-
-    let id = service
-        .submit_text_generate(
-            SubmitTextGenerateRequest {
-                prompt: "audit lifecycle smoke".into(),
-                ..Default::default()
-            },
-            sink,
-        )
-        .await
-        .unwrap();
-    wait_terminal(&service, &id).await;
-
-    // FileAuditSink 通过 spawn_blocking 写盘，可能在 wait_terminal 返回后才结束
-    // —— 给 50ms 让最后一条 audit 落地。
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-
-    let entries = read_recent(&project_root, 20).expect("read audit");
-    // read_recent 倒序：最新在前
-    let kinds: Vec<&str> = entries.iter().map(|e| e.kind.as_str()).collect();
-    assert!(
-        kinds.contains(&"job.submitted"),
-        "audit missing submitted; kinds = {kinds:?}"
-    );
-    assert!(
-        kinds.contains(&"job.started"),
-        "audit missing started; kinds = {kinds:?}"
-    );
-    assert!(
-        kinds.contains(&"job.completed"),
-        "audit missing completed; kinds = {kinds:?}"
-    );
-    // ref_id 都应该指向同一个 job id
-    for e in &entries {
-        assert_eq!(e.ref_id.as_deref(), Some(id.0.as_str()));
-    }
-}
-
-#[tokio::test]
-async fn jobs_persist_across_service_instances() {
+async fn runs_persist_across_service_instances() {
     let td = tempfile::TempDir::new().unwrap();
     let history = td.path().to_path_buf();
 
     // 第一个 service：提交并跑完
     {
-        let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history.clone()));
+        let repo: Arc<dyn RunRepository> = Arc::new(FileRunRepository::new(history.clone()));
         let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
             events: Mutex::new(ok_text_events()),
         });
-        let service = JobApplicationService::new(repo, llm);
+        let service = RunApplicationService::new(repo, llm);
         let sink: Arc<dyn ProgressSink> = Arc::new(NoopProgressSink);
         let id = service
             .submit_text_generate(
@@ -406,21 +403,21 @@ async fn jobs_persist_across_service_instances() {
             .await
             .unwrap();
         wait_terminal(&service, &id).await;
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Completed);
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Succeeded);
     } // service drop 后 repo 也 drop
 
-    // 第二个 service 用同一个 history dir → 应当能 list 出之前的 job
-    let repo2: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
+    // 第二个 service 用同一个 history dir → 应当能 list 出之前的 run
+    let repo2: Arc<dyn RunRepository> = Arc::new(FileRunRepository::new(history));
     let llm2: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
         events: Mutex::new(vec![]),
     });
-    let service2 = JobApplicationService::new(repo2, llm2);
+    let service2 = RunApplicationService::new(repo2, llm2);
     let summaries = service2.list().await.unwrap();
     assert_eq!(
         summaries.len(),
         1,
-        "second service instance should see persisted job"
+        "second service instance should see persisted run"
     );
-    assert_eq!(summaries[0].status, JobStatus::Completed);
+    assert_eq!(summaries[0].status, RunStatus::Succeeded);
 }

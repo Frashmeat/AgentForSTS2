@@ -15,28 +15,40 @@ use chrono::Utc;
 use zip::CompressionMethod;
 use zip::write::SimpleFileOptions;
 
-use super::common::{ProgressEvent, ProgressSink, finalize_with_error, transition_to_running};
-use crate::game_pack::PackageLayout;
+use super::common::{
+    FinalizeOutcome, ProgressEvent, ProgressSink, finalize_with_error, finalize_with_success,
+    transition_to_running,
+};
+use crate::game_pack::{PackageLayout, VerifiedGameContext};
+use crate::platform::artifact::{
+    ArtifactFileInput, ArtifactGameContext, ArtifactGeneration, ArtifactPublishRequest,
+    ArtifactStore, sha256_bytes, snapshot_evidence,
+};
 use crate::platform::contracts::SubmitPackageProjectRequest;
-use crate::platform::domain::{JobId, JobRepository, JobStatus};
+use crate::platform::domain::{RunId, RunRepository, RunResult};
 
 pub async fn run_package_project(
-    repo: Arc<dyn JobRepository>,
+    repo: Arc<dyn RunRepository>,
     sink: Arc<dyn ProgressSink>,
-    job_id: JobId,
+    run_id: RunId,
     request: SubmitPackageProjectRequest,
     layout: PackageLayout,
     mod_id: String,
+    game_context: VerifiedGameContext,
+    project_root: PathBuf,
 ) {
-    if transition_to_running(&repo, &job_id, &sink).await.is_err() {
+    if transition_to_running(&repo, &run_id, &sink).await.is_err() {
         return;
     }
 
+    let inputs_sha256 = serde_json::to_vec(&request)
+        .map(|bytes| sha256_bytes(&bytes))
+        .unwrap_or_else(|_| sha256_bytes(b"package request"));
     let source = request.source_dir.clone();
     if !source.is_dir() {
         finalize_with_error(
             &repo,
-            &job_id,
+            &run_id,
             &sink,
             &format!("source_dir is not a directory: {}", source.display()),
         )
@@ -48,7 +60,7 @@ pub async fn run_package_project(
     if output.is_dir() {
         finalize_with_error(
             &repo,
-            &job_id,
+            &run_id,
             &sink,
             &format!(
                 "output_path 指向已存在的目录: {} —— 应该传完整 .zip 文件路径，如 {}\\release.zip",
@@ -60,7 +72,7 @@ pub async fn run_package_project(
         return;
     }
     sink.emit(ProgressEvent {
-        job_id: job_id.clone(),
+        run_id: run_id.clone(),
         stage: "zipping".into(),
         percent: Some(0.1),
         message: Some(format!("zip → {}", output.display())),
@@ -71,45 +83,118 @@ pub async fn run_package_project(
     let level = request.compression_level;
     let output_for_task = output.clone();
     let source_for_task = source.clone();
+    let mod_id_for_task = mod_id.clone();
+    let run_id_for_task = run_id.clone();
 
     let result = tokio::task::spawn_blocking(move || {
-        zip_package_layout(&source_for_task, &output_for_task, &layout, &mod_id, level)
+        zip_package_layout(
+            &source_for_task,
+            &output_for_task,
+            &layout,
+            &mod_id_for_task,
+            level,
+            &run_id_for_task,
+        )
     })
     .await;
 
-    let stats = match result {
+    let (stats, output_transaction) = match result {
         Ok(Ok(s)) => s,
         Ok(Err(err)) => {
-            finalize_with_error(&repo, &job_id, &sink, &format!("zip: {err}")).await;
+            finalize_with_error(&repo, &run_id, &sink, &format!("zip: {err}")).await;
             return;
         }
         Err(err) => {
-            finalize_with_error(&repo, &job_id, &sink, &format!("join blocking: {err}")).await;
+            finalize_with_error(&repo, &run_id, &sink, &format!("join blocking: {err}")).await;
             return;
         }
     };
 
-    let job = match repo.get(&job_id).await {
-        Ok(j) => j,
-        Err(_) => return,
+    let store = ArtifactStore::new(project_root);
+    let artifact_id = format!("package-{mod_id}");
+    let published_relative_path = store.project_relative_ref(&output).ok();
+    let published = match store
+        .publish_async(ArtifactPublishRequest {
+            artifact_id: artifact_id.clone(),
+            artifact_kind: "package".into(),
+            run_id: run_id.clone(),
+            game_context: ArtifactGameContext::from(&game_context),
+            evidence: snapshot_evidence(&game_context),
+            generation: ArtifactGeneration {
+                provider: "local".into(),
+                model: "zip".into(),
+                inputs_sha256,
+            },
+            image_processing: None,
+            files: vec![ArtifactFileInput {
+                role: "package_zip".into(),
+                source_path: output.clone(),
+                published_relative_path,
+            }],
+        })
+        .await
+    {
+        Ok(published) => published,
+        Err(error) => {
+            let rollback = output_transaction.rollback();
+            finalize_with_error(
+                &repo,
+                &run_id,
+                &sink,
+                &match rollback {
+                    Ok(()) => format!("publish package manifest: {error}"),
+                    Err(rollback_error) => format!(
+                        "publish package manifest: {error}; rollback package output failed: {rollback_error}"
+                    ),
+                },
+            )
+            .await;
+            return;
+        }
     };
-    if matches!(job.status, JobStatus::Cancelled) {
+    let legacy_cleanup = match store.begin_legacy_cleanup(&artifact_id, &run_id) {
+        Ok(cleanup) => cleanup,
+        Err(error) => {
+            let _ = store.remove_published_run(&artifact_id, &run_id);
+            let rollback = output_transaction.rollback();
+            finalize_with_error(
+                &repo,
+                &run_id,
+                &sink,
+                &match rollback {
+                    Ok(()) => format!("prepare legacy artifact cleanup: {error}"),
+                    Err(rollback_error) => format!(
+                        "prepare legacy artifact cleanup: {error}; rollback package output failed: {rollback_error}"
+                    ),
+                },
+            )
+            .await;
+            return;
+        }
+    };
+    let result = RunResult::Package {
+        artifact_manifest_ref: published.artifact_manifest_ref,
+        manifest_sha256: published.manifest_sha256,
+        artifact_id: artifact_id.clone(),
+        files_added: stats.files as usize,
+        uncompressed_bytes: stats.uncompressed_bytes,
+        package_bytes: stats.zip_bytes,
+    };
+    if !matches!(
+        finalize_with_success(&repo, &run_id, result).await,
+        FinalizeOutcome::Succeeded
+    ) {
+        let legacy_rollback = legacy_cleanup.rollback();
+        let artifact_rollback = store.remove_published_run(&artifact_id, &run_id);
+        let output_rollback = output_transaction.rollback();
+        let _ = (legacy_rollback, artifact_rollback, output_rollback);
         return;
     }
-    let mut job = job;
-    job.status = JobStatus::Completed;
-    job.completed_at = Some(chrono::Utc::now());
-    job.result = Some(serde_json::json!({
-        "sourceDir": source.display().to_string(),
-        "outputPath": output.display().to_string(),
-        "filesAdded": stats.files,
-        "uncompressedBytes": stats.uncompressed_bytes,
-        "zipBytes": stats.zip_bytes,
-    }));
-    let _ = repo.update(&job).await;
+    let _ = legacy_cleanup.commit();
+    let _ = output_transaction.commit();
 
     sink.emit(ProgressEvent {
-        job_id,
+        run_id,
         stage: "completed".into(),
         percent: Some(1.0),
         message: Some(format!(
@@ -154,21 +239,121 @@ fn zip_package_layout(
     layout: &PackageLayout,
     mod_id: &str,
     compression_level: Option<i32>,
-) -> Result<ZipStats, String> {
-    let tmp_path = output_path.with_extension("zip.partial");
+    run_id: &RunId,
+) -> Result<(ZipStats, PackageOutputTransaction), String> {
+    let tmp_path = sibling_work_path(output_path, "partial", run_id)?;
+    let backup_path = sibling_work_path(output_path, "previous", run_id)?;
+    if backup_path.exists() {
+        return Err(format!(
+            "package backup path already exists: {}",
+            backup_path.display()
+        ));
+    }
     match zip_to_tmp(source_dir, &tmp_path, layout, mod_id, compression_level) {
         Ok(stats) => {
-            std::fs::rename(&tmp_path, output_path).map_err(|e| {
+            let backup = match std::fs::symlink_metadata(output_path) {
+                Ok(metadata) if metadata.file_type().is_symlink() => {
+                    let _ = std::fs::remove_file(&tmp_path);
+                    return Err(format!(
+                        "package output may not be a symbolic link: {}",
+                        output_path.display()
+                    ));
+                }
+                Ok(metadata) if metadata.is_file() => {
+                    std::fs::rename(output_path, &backup_path).map_err(|error| {
+                        let _ = std::fs::remove_file(&tmp_path);
+                        format!("backup existing package {}: {error}", output_path.display())
+                    })?;
+                    Some(backup_path)
+                }
+                Ok(_) => {
+                    let _ = std::fs::remove_file(&tmp_path);
+                    return Err(format!(
+                        "package output is not a regular file: {}",
+                        output_path.display()
+                    ));
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => {
+                    let _ = std::fs::remove_file(&tmp_path);
+                    return Err(format!(
+                        "inspect package output {}: {error}",
+                        output_path.display()
+                    ));
+                }
+            };
+            if let Err(error) = std::fs::rename(&tmp_path, output_path) {
+                if let Some(previous) = &backup {
+                    let _ = std::fs::rename(previous, output_path);
+                }
                 let _ = std::fs::remove_file(&tmp_path);
-                format!("rename to {}: {e}", output_path.display())
-            })?;
-            Ok(stats)
+                return Err(format!("rename to {}: {error}", output_path.display()));
+            }
+            Ok((
+                stats,
+                PackageOutputTransaction {
+                    output_path: output_path.to_path_buf(),
+                    backup_path: backup,
+                },
+            ))
         }
         Err(e) => {
             let _ = std::fs::remove_file(&tmp_path);
             Err(e)
         }
     }
+}
+
+struct PackageOutputTransaction {
+    output_path: PathBuf,
+    backup_path: Option<PathBuf>,
+}
+
+impl PackageOutputTransaction {
+    fn rollback(self) -> Result<(), String> {
+        match std::fs::remove_file(&self.output_path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(format!(
+                    "remove package output {}: {error}",
+                    self.output_path.display()
+                ));
+            }
+        }
+        if let Some(backup_path) = self.backup_path {
+            std::fs::rename(&backup_path, &self.output_path).map_err(|error| {
+                format!(
+                    "restore package backup {} -> {}: {error}",
+                    backup_path.display(),
+                    self.output_path.display()
+                )
+            })?;
+        }
+        Ok(())
+    }
+
+    fn commit(self) -> Result<(), String> {
+        if let Some(backup_path) = self.backup_path {
+            std::fs::remove_file(&backup_path).map_err(|error| {
+                format!("remove package backup {}: {error}", backup_path.display())
+            })?;
+        }
+        Ok(())
+    }
+}
+
+fn sibling_work_path(output_path: &Path, role: &str, run_id: &RunId) -> Result<PathBuf, String> {
+    let file_name = output_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            format!(
+                "package output has no valid file name: {}",
+                output_path.display()
+            )
+        })?;
+    Ok(output_path.with_file_name(format!(".{file_name}.{role}-{}", run_id.0)))
 }
 
 fn zip_to_tmp(
@@ -250,13 +435,17 @@ fn zip_to_tmp(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game_pack::{GamePackLoadPolicy, GamePackLoader, LoadedGamePack};
+    use std::collections::BTreeMap;
+
+    use crate::game_pack::{
+        GamePackLoadPolicy, GamePackLoader, GamePackRegistry, LoadedGamePack, TruthSnapshotStore,
+    };
     use crate::llm::{
         CompletionRequest, CompletionResponse, CompletionStream, LlmClient, LlmError,
     };
-    use crate::platform::application::JobApplicationService;
-    use crate::platform::domain::JobRepository;
-    use crate::platform::infra::FileJobRepository;
+    use crate::platform::application::RunApplicationService;
+    use crate::platform::domain::{RunRepository, RunStatus};
+    use crate::platform::infra::FileRunRepository;
     use async_trait::async_trait;
     use futures_util::stream;
 
@@ -272,10 +461,10 @@ mod tests {
         }
     }
 
-    async fn wait_terminal(service: &JobApplicationService, id: &JobId) {
+    async fn wait_terminal(service: &RunApplicationService, id: &RunId) {
         for _ in 0..100 {
-            let job = service.get(id).await.unwrap();
-            if job.status.is_terminal() {
+            let run = service.get(id).await.unwrap();
+            if run.status.is_terminal() {
                 return;
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -308,6 +497,18 @@ mod tests {
         .unwrap()
     }
 
+    fn fixture_context(runtime_root: &Path) -> VerifiedGameContext {
+        let pack = fixture_pack();
+        let store = TruthSnapshotStore::new(runtime_root, &pack);
+        store
+            .begin(&pack)
+            .unwrap()
+            .finalize(BTreeMap::from([("fixture".into(), "1".into())]))
+            .unwrap();
+        let registry = GamePackRegistry::from_packs([pack]).unwrap();
+        VerifiedGameContext::open_current(runtime_root, &registry, "fixture-game").unwrap()
+    }
+
     fn populate_sample_tree(root: &Path) {
         std::fs::create_dir_all(root.join("runtime")).unwrap();
         std::fs::create_dir_all(root.join(MOD_ID)).unwrap();
@@ -324,21 +525,26 @@ mod tests {
         let out = td.path().join("pkg.zip");
 
         let pack = fixture_pack();
-        let stats = zip_package_layout(
+        let run_id = RunId::new();
+        let (stats, transaction) = zip_package_layout(
             &src,
             &out,
             pack.package_layout.as_ref().unwrap(),
             MOD_ID,
             None,
+            &run_id,
         )
         .unwrap();
+        transaction.commit().unwrap();
 
         assert!(out.exists(), "final zip should exist");
         assert_eq!(stats.files, 2);
         assert!(stats.zip_bytes > 0);
         // 临时包不应残留
         assert!(
-            !out.with_extension("zip.partial").exists(),
+            !sibling_work_path(&out, "partial", &run_id)
+                .unwrap()
+                .exists(),
             "no .partial temp should remain after success"
         );
     }
@@ -358,10 +564,10 @@ mod tests {
         std::fs::create_dir_all(&source).unwrap();
         populate_sample_tree(&source);
 
-        let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
+        let repo: Arc<dyn RunRepository> = Arc::new(FileRunRepository::new(history));
         let llm: Arc<dyn LlmClient> = Arc::new(DummyLlm);
         let sink = Arc::new(super::super::common::NoopProgressSink);
-        let service = JobApplicationService::new(repo, llm);
+        let service = RunApplicationService::new(repo, llm);
 
         let out = td.path().join("out.zip");
         let req = SubmitPackageProjectRequest {
@@ -370,14 +576,20 @@ mod tests {
             compression_level: Some(5),
         };
         let id = service
-            .submit_package_project(req, fixture_pack(), MOD_ID.into(), sink)
+            .submit_package_project(
+                req,
+                fixture_context(td.path()),
+                td.path().to_path_buf(),
+                MOD_ID.into(),
+                sink,
+            )
             .await
             .unwrap();
         wait_terminal(&service, &id).await;
 
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Completed);
-        let res = job.result.expect("result");
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Succeeded);
+        let res = serde_json::to_value(run.result.expect("result")).unwrap();
         assert_eq!(res["filesAdded"], 2);
         assert!(out.exists());
 
@@ -389,6 +601,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn manifest_publish_failure_restores_previous_package() {
+        let td = tempfile::TempDir::new().unwrap();
+        let history = td.path().join("history");
+        std::fs::create_dir_all(&history).unwrap();
+        let source = td.path().join("artifacts");
+        std::fs::create_dir_all(&source).unwrap();
+        populate_sample_tree(&source);
+        std::fs::create_dir_all(source.join(format!("package-{MOD_ID}"))).unwrap();
+        std::fs::write(
+            source.join(format!("package-{MOD_ID}/runs")),
+            b"force directory conflict",
+        )
+        .unwrap();
+        let output = td.path().join("out.zip");
+        std::fs::write(&output, b"previous package").unwrap();
+
+        let repo: Arc<dyn RunRepository> = Arc::new(FileRunRepository::new(history));
+        let service = RunApplicationService::new(repo, Arc::new(DummyLlm));
+        let id = service
+            .submit_package_project(
+                SubmitPackageProjectRequest {
+                    source_dir: source,
+                    output_path: Some(output.clone()),
+                    compression_level: None,
+                },
+                fixture_context(td.path()),
+                td.path().to_path_buf(),
+                MOD_ID.into(),
+                Arc::new(super::super::common::NoopProgressSink),
+            )
+            .await
+            .unwrap();
+        wait_terminal(&service, &id).await;
+
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Failed);
+        assert!(run.result.is_none());
+        assert!(
+            run.error_message()
+                .unwrap_or_default()
+                .contains("publish package manifest")
+        );
+        assert_eq!(std::fs::read(output).unwrap(), b"previous package");
+    }
+
+    #[tokio::test]
     async fn package_project_default_output_path() {
         let td = tempfile::TempDir::new().unwrap();
         let history = td.path().join("history");
@@ -397,10 +655,10 @@ mod tests {
         std::fs::create_dir_all(&source).unwrap();
         populate_sample_tree(&source);
 
-        let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
+        let repo: Arc<dyn RunRepository> = Arc::new(FileRunRepository::new(history));
         let llm: Arc<dyn LlmClient> = Arc::new(DummyLlm);
         let sink = Arc::new(super::super::common::NoopProgressSink);
-        let service = JobApplicationService::new(repo, llm);
+        let service = RunApplicationService::new(repo, llm);
 
         let req = SubmitPackageProjectRequest {
             source_dir: source.clone(),
@@ -408,15 +666,29 @@ mod tests {
             compression_level: None,
         };
         let id = service
-            .submit_package_project(req, fixture_pack(), MOD_ID.into(), sink)
+            .submit_package_project(
+                req,
+                fixture_context(td.path()),
+                td.path().to_path_buf(),
+                MOD_ID.into(),
+                sink,
+            )
             .await
             .unwrap();
         wait_terminal(&service, &id).await;
 
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Completed);
-        let res = job.result.expect("result");
-        let out_path = PathBuf::from(res["outputPath"].as_str().unwrap());
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Succeeded);
+        let res = serde_json::to_value(run.result.expect("result")).unwrap();
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(td.path().join(res["artifactManifestRef"].as_str().unwrap())).unwrap(),
+        )
+        .unwrap();
+        let out_path = td.path().join(
+            manifest["files"][0]["publishedRelativePath"]
+                .as_str()
+                .unwrap(),
+        );
         assert!(
             out_path.exists(),
             "default output should exist: {}",
@@ -436,10 +708,10 @@ mod tests {
         let source = td.path().join("empty");
         std::fs::create_dir_all(&source).unwrap();
 
-        let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
+        let repo: Arc<dyn RunRepository> = Arc::new(FileRunRepository::new(history));
         let llm: Arc<dyn LlmClient> = Arc::new(DummyLlm);
         let sink = Arc::new(super::super::common::NoopProgressSink);
-        let service = JobApplicationService::new(repo, llm);
+        let service = RunApplicationService::new(repo, llm);
 
         let out = td.path().join("empty.zip");
         let req = SubmitPackageProjectRequest {
@@ -448,15 +720,21 @@ mod tests {
             compression_level: None,
         };
         let id = service
-            .submit_package_project(req, fixture_pack(), MOD_ID.into(), sink)
+            .submit_package_project(
+                req,
+                fixture_context(td.path()),
+                td.path().to_path_buf(),
+                MOD_ID.into(),
+                sink,
+            )
             .await
             .unwrap();
         wait_terminal(&service, &id).await;
 
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Failed);
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Failed);
         assert!(
-            job.error
+            run.error_message()
                 .unwrap_or_default()
                 .contains("required package file is missing")
         );
@@ -479,10 +757,10 @@ mod tests {
         let out_dir = td.path().join("existing-output-dir");
         std::fs::create_dir_all(&out_dir).unwrap();
 
-        let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
+        let repo: Arc<dyn RunRepository> = Arc::new(FileRunRepository::new(history));
         let llm: Arc<dyn LlmClient> = Arc::new(DummyLlm);
         let sink = Arc::new(super::super::common::NoopProgressSink);
-        let service = JobApplicationService::new(repo, llm);
+        let service = RunApplicationService::new(repo, llm);
 
         let req = SubmitPackageProjectRequest {
             source_dir: source,
@@ -490,14 +768,20 @@ mod tests {
             compression_level: None,
         };
         let id = service
-            .submit_package_project(req, fixture_pack(), MOD_ID.into(), sink)
+            .submit_package_project(
+                req,
+                fixture_context(td.path()),
+                td.path().to_path_buf(),
+                MOD_ID.into(),
+                sink,
+            )
             .await
             .unwrap();
         wait_terminal(&service, &id).await;
 
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Failed);
-        let err = job.error.unwrap_or_default();
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Failed);
+        let err = run.error_message().unwrap_or_default();
         assert!(
             err.contains("已存在的目录"),
             "expected dir hint, got: {err}"
@@ -511,10 +795,10 @@ mod tests {
         std::fs::create_dir_all(&history).unwrap();
         let phantom = td.path().join("does-not-exist");
 
-        let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
+        let repo: Arc<dyn RunRepository> = Arc::new(FileRunRepository::new(history));
         let llm: Arc<dyn LlmClient> = Arc::new(DummyLlm);
         let sink = Arc::new(super::super::common::NoopProgressSink);
-        let service = JobApplicationService::new(repo, llm);
+        let service = RunApplicationService::new(repo, llm);
 
         let req = SubmitPackageProjectRequest {
             source_dir: phantom,
@@ -522,13 +806,23 @@ mod tests {
             compression_level: None,
         };
         let id = service
-            .submit_package_project(req, fixture_pack(), MOD_ID.into(), sink)
+            .submit_package_project(
+                req,
+                fixture_context(td.path()),
+                td.path().to_path_buf(),
+                MOD_ID.into(),
+                sink,
+            )
             .await
             .unwrap();
         wait_terminal(&service, &id).await;
 
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Failed);
-        assert!(job.error.unwrap_or_default().contains("not a directory"));
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Failed);
+        assert!(
+            run.error_message()
+                .unwrap_or_default()
+                .contains("not a directory")
+        );
     }
 }

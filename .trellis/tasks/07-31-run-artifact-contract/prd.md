@@ -320,17 +320,17 @@ npx tsc -b --pretty false
 
 ## 12. 验收清单
 
-- [ ] 实际生产符号、文件和调用链调查完成并写入本 PRD。
-- [ ] RunRecord v2 字段、serde 形状和校验测试完成。
-- [ ] 状态转换、CAS、timeline 去重和终态竞争测试完成。
-- [ ] 所有生产 `Job*` 契约破坏性迁移为 `Run*`，无兼容别名或 fallback。
-- [ ] Artifact Store 安全路径和不可变 run 快照完成。
-- [ ] ArtifactManifest schema、文件哈希、Evidence 和发布顺序完成。
-- [ ] 成功 Run result 只引用 manifest；失败/取消不生成 manifest。
-- [ ] V1 history 整目录备份和 V2 空 history 完成。
-- [ ] 产品不再读写 Audit 生命周期、legacy Job history 或 `evidence.md`。
-- [ ] Core、Tauri、TypeScript 和相关目标通过本任务定向检查。
-- [ ] 稳定文档与 backend code-spec 同步。
+- [x] 实际生产符号、文件和调用链调查完成并写入本 PRD。
+- [x] RunRecord v2 字段、serde 形状和校验测试完成。
+- [x] 状态转换、CAS、timeline 去重和终态竞争测试完成。
+- [x] 所有生产 `Job*` 契约破坏性迁移为 `Run*`，无兼容别名或 fallback。
+- [x] Artifact Store 安全路径和不可变 run 快照完成。
+- [x] ArtifactManifest schema、文件哈希、Evidence 和发布顺序完成。
+- [x] 成功 Run result 只引用 manifest；失败/取消不生成 manifest。
+- [x] V1 history 整目录备份和 V2 空 history 完成。
+- [x] 产品不再读写 Audit 生命周期、legacy Job history 或 `evidence.md`。
+- [x] Core、Tauri、TypeScript 和相关目标通过本任务定向检查。
+- [x] 稳定文档与 backend code-spec 同步。
 
 ## 13. 停止条件
 
@@ -343,6 +343,18 @@ npx tsc -b --pretty false
 触发停止条件时先汇报证据、影响范围和备选方案，不继续堆叠兼容层。
 
 ## 14. 调查结果
+
+### 14.0 Implementation Status (2026-07-31)
+
+- Core、Tauri 和 TypeScript 已完成无兼容层的 `Job -> Run` 破坏性迁移；生产 ID、commands、event 和 store 均使用 Run。
+- `RunRecord v2`、typed `RunResult`、`ActionableFailure`、timeline、repository transition/progress CAS 与终态校验已实现。
+- V1 history 在工程 OS 锁持有期间整目录备份；产品只读写带 `.schema-version = 2` 的当前工程 history。
+- 独立 lifecycle Audit、Audit UI/commands 和生产 `evidence.md` 已删除；`plan_artifact` 保持独立职责并使用 `lastRunId`。
+- Artifact Store 已实现安全 ID/相对路径/symlink 门禁、不可变 run 目录、manifest/file SHA-256 和结构化 Evidence。
+- PromptAssembler 的同一次 resolver 结果同时驱动 Prompt 与 `ArtifactManifest.evidence[]`，不再构造 Markdown Evidence Record。
+- asset/code/batch/package 的正式输出保持可回滚，直到 manifest 发布和 Run terminal CAS 成功；发布或 CAS 失败恢复旧文件并删除本次 artifact run。
+- 图片失败诊断写入 `.ats/diagnostics/<run-id>/` 并进入 `failure.diagnosticRef`；成功时 raw/processed/quality 文件进入不可变快照后清理 diagnostics。
+- 旧共享 artifact 条目通过同目录备份事务清理；package 使用 `package-<mod-id>` artifact ID，避免与 Pack 声明的打包输入目录冲突。
 
 ### 14.1 Relevant Specs
 

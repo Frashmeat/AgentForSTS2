@@ -366,7 +366,7 @@ impl StreamState {
         let parsed: Value = serde_json::from_str(data).ok()?;
 
         // 错误事件（部分代理把错误包成 SSE 帧）：作为终止性 Err 上抛，
-        // 让消费者把 job 标记 Failed，而非把错误文本当成功输出保存。
+        // 让消费者把 run 标记 Failed，而非把错误文本当成功输出保存。
         if let Some(err) = parsed.get("error") {
             let message = err
                 .get("message")

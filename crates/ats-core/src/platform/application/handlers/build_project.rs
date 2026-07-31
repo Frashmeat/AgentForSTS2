@@ -6,31 +6,32 @@
 
 use std::sync::Arc;
 
-use super::common::{ProgressEvent, ProgressSink, finalize_with_error, transition_to_running};
+use super::common::{
+    FinalizeOutcome, ProgressEvent, ProgressSink, finalize_with_error, finalize_with_success,
+    transition_to_running,
+};
 use crate::game_pack::{BuildRecipe, BuildRunner};
 use crate::platform::contracts::SubmitBuildProjectRequest;
-use crate::platform::domain::{JobId, JobRepository, JobStatus};
+use crate::platform::domain::{BuildStepResult, RunId, RunRepository, RunResult};
 use crate::project_utils::to_extended_length_path;
 
 pub async fn run_build_project(
-    repo: Arc<dyn JobRepository>,
+    repo: Arc<dyn RunRepository>,
     sink: Arc<dyn ProgressSink>,
-    job_id: JobId,
+    run_id: RunId,
     request: SubmitBuildProjectRequest,
     recipe: BuildRecipe,
 ) {
-    if transition_to_running(&repo, &job_id, &sink).await.is_err() {
+    if transition_to_running(&repo, &run_id, &sink).await.is_err() {
         return;
     }
 
     let mut step_results = Vec::with_capacity(recipe.steps.len());
     let mut success = true;
     let mut exit_code = 0;
-    let mut stdout = String::new();
-    let mut stderr = String::new();
     for (index, step) in recipe.steps.iter().enumerate() {
         sink.emit(ProgressEvent {
-            job_id: job_id.clone(),
+            run_id: run_id.clone(),
             stage: step.id.clone(),
             percent: Some(index as f32 / recipe.steps.len() as f32),
             message: Some(format!(
@@ -46,7 +47,7 @@ pub async fn run_build_project(
             Err(error) => {
                 finalize_with_error(
                     &repo,
-                    &job_id,
+                    &run_id,
                     &sink,
                     &format!("build step `{}`: {error}", step.id),
                 )
@@ -55,57 +56,47 @@ pub async fn run_build_project(
             }
         };
         exit_code = output.exit_code;
-        stdout = output.stdout;
-        stderr = output.stderr;
-        let step_success = exit_code == 0 || build_reports_zero_errors(&stdout);
-        step_results.push(serde_json::json!({
-            "id": step.id,
-            "runner": step.runner.as_str(),
-            "success": step_success,
-            "exitCode": exit_code,
-            "stdoutTail": tail(&stdout, 5000),
-            "stderrTail": tail(&stderr, 5000),
-        }));
+        let step_success = exit_code == 0 || build_reports_zero_errors(&output.stdout);
+        step_results.push(BuildStepResult {
+            id: step.id.clone(),
+            runner: step.runner.as_str().to_string(),
+            success: step_success,
+            exit_code,
+            stdout_tail: tail(&output.stdout, 5000),
+            stderr_tail: tail(&output.stderr, 5000),
+        });
         if !step_success {
             success = false;
             break;
         }
     }
 
-    let job = match repo.get(&job_id).await {
-        Ok(j) => j,
-        Err(_) => return,
-    };
-    if matches!(job.status, JobStatus::Cancelled) {
+    if !success {
+        finalize_with_error(
+            &repo,
+            &run_id,
+            &sink,
+            &format!("build exited with code {exit_code}"),
+        )
+        .await;
         return;
     }
-    let mut job = job;
-    job.status = if success {
-        JobStatus::Completed
-    } else {
-        JobStatus::Failed
+    let result = RunResult::Build {
+        project_relative_root: ".".into(),
+        steps: step_results,
+        artifact_manifest_ref: None,
+        manifest_sha256: None,
     };
-    job.completed_at = Some(chrono::Utc::now());
-    if !success {
-        job.error = Some(format!("dotnet publish exited with code {exit_code}"));
+    if !matches!(
+        finalize_with_success(&repo, &run_id, result).await,
+        FinalizeOutcome::Succeeded
+    ) {
+        return;
     }
-    job.result = Some(serde_json::json!({
-        "success": success,
-        "exitCode": exit_code,
-        "stdoutTail": tail(&stdout, 5000),
-        "stderrTail": tail(&stderr, 5000),
-        "projectRoot": request.project_root.display().to_string(),
-        "steps": step_results,
-    }));
-    let _ = repo.update(&job).await;
 
     sink.emit(ProgressEvent {
-        job_id,
-        stage: if success {
-            "completed".into()
-        } else {
-            "failed".into()
-        },
+        run_id,
+        stage: "completed".into(),
         percent: Some(1.0),
         message: Some(format!("exit_code={exit_code}, success={success}")),
         delta: None,

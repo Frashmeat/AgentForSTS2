@@ -1,4 +1,4 @@
-//! Platform commands —— Job 生命周期 + text/code/build 三类 handler 提交。
+//! Platform commands —— RunRecord 生命周期 + text/code/build 三类 handler 提交。
 //!
 //! Repository 用 ActiveProject 的 history_dir 作存储路径；切换项目时下条提交
 //! 会落到新工程。LLM client 每次新建（Arc 包裹的开销极小，避免与配置变更竞态）。
@@ -8,7 +8,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use ats_core::audit::{AuditSinkArc, FileAuditSink};
 use ats_core::game_pack::{
     GamePackRegistry, GitHubReleaseAssetFetcher, IlspycmdTruthIndexer, TruthSnapshotRefresher,
     TruthSnapshotStore, VerifiedGameContext, validate_truth_source_inputs,
@@ -17,80 +16,76 @@ use ats_core::image_gen::{ImageGenClient, build_from_config as build_image_gen};
 use ats_core::image_proc::{BgRemoverChain, ImageProcClient};
 use ats_core::llm::{LlmClient, build_from_config};
 use ats_core::platform::{
-    AuditedJobRepository, FileJobRepository, Job, JobApplicationService, JobError, JobId,
-    JobRepository, JobSummary, ProgressEvent, ProgressSink, SubmitAssetGenerateRequest,
-    SubmitBatchCustomCodeRequest, SubmitBuildProjectRequest, SubmitCodeGenerateRequest,
-    SubmitJobAck, SubmitLogAnalysisRequest, SubmitPackageProjectRequest,
-    SubmitSingleAssetPlanRequest, SubmitTextGenerateRequest, SubmitTruthSnapshotRefreshRequest,
+    FileRunRepository, ProgressEvent, ProgressSink, RunApplicationService, RunId, RunRecord,
+    RunRepository, RunSummary, SubmitAssetGenerateRequest, SubmitBatchCustomCodeRequest,
+    SubmitBuildProjectRequest, SubmitCodeGenerateRequest, SubmitLogAnalysisRequest,
+    SubmitPackageProjectRequest, SubmitRunAck, SubmitSingleAssetPlanRequest,
+    SubmitTextGenerateRequest, SubmitTruthSnapshotRefreshRequest,
 };
 use tauri::{AppHandle, Emitter, State};
 
 use crate::AppConfig;
 use crate::commands::project::{ActiveProject, sync_project_local_props};
 
-const JOB_PROGRESS_EVENT: &str = "job-progress";
+const RUN_PROGRESS_EVENT: &str = "run-progress";
 
 #[tauri::command]
-pub async fn submit_text_generate_job(
+pub async fn submit_text_generate_run(
     app: AppHandle,
     config: State<'_, AppConfig>,
     active: State<'_, ActiveProject>,
     request: SubmitTextGenerateRequest,
-) -> Result<SubmitJobAck, String> {
+) -> Result<SubmitRunAck, String> {
     let service = build_service(&config, &active)?;
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
-    let job_id = service
+    let run_id = service
         .submit_text_generate(request, sink)
         .await
         .map_err(|e| e.to_string())?;
-    Ok(SubmitJobAck { job_id })
+    Ok(SubmitRunAck { run_id })
 }
 
 #[tauri::command]
-pub async fn get_job(
-    config: State<'_, AppConfig>,
+pub async fn get_run(
+    _config: State<'_, AppConfig>,
     active: State<'_, ActiveProject>,
     id: String,
-) -> Result<Job, String> {
-    let repositories = job_repositories(&config, &active)?;
-    let (_, job) = find_job_repository(&repositories, &JobId(id)).await?;
-    Ok(job)
+) -> Result<RunRecord, String> {
+    active_run_repository(&active)?
+        .get(&RunId(id))
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-pub async fn list_jobs(
-    config: State<'_, AppConfig>,
+pub async fn list_runs(
+    _config: State<'_, AppConfig>,
     active: State<'_, ActiveProject>,
-) -> Result<Vec<JobSummary>, String> {
-    let repositories = job_repositories(&config, &active)?;
-    let mut jobs = Vec::new();
-    for repository in repositories {
-        jobs.extend(repository.list().await.map_err(|e| e.to_string())?);
-    }
-    jobs.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-    jobs.dedup_by(|a, b| a.id == b.id);
-    Ok(jobs)
+) -> Result<Vec<RunSummary>, String> {
+    active_run_repository(&active)?
+        .list()
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-pub async fn cancel_job(
+pub async fn cancel_run(
     config: State<'_, AppConfig>,
     active: State<'_, ActiveProject>,
     id: String,
 ) -> Result<(), String> {
-    let repositories = job_repositories(&config, &active)?;
-    let (repository, _) = find_job_repository(&repositories, &JobId(id.clone())).await?;
-    let service = JobApplicationService::new(repository, build_llm_client(&config)?);
-    service.cancel(&JobId(id)).await.map_err(|e| e.to_string())
+    let service =
+        RunApplicationService::new(active_run_repository(&active)?, build_llm_client(&config)?);
+    service.cancel(&RunId(id)).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn submit_code_generate_job(
+pub async fn submit_code_generate_run(
     app: AppHandle,
     config: State<'_, AppConfig>,
     active: State<'_, ActiveProject>,
     request: SubmitCodeGenerateRequest,
-) -> Result<SubmitJobAck, String> {
+) -> Result<SubmitRunAck, String> {
     if let SubmitCodeGenerateRequest::Asset { request: asset } = &request {
         sync_requested_project(&config, &active, &asset.project_root)?;
     }
@@ -98,21 +93,21 @@ pub async fn submit_code_generate_job(
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
     let artifacts_dir = active_artifacts_dir(&active)?;
     let game_context = active_game_context(&config, &active)?;
-    let job_id = service
+    let run_id = service
         .submit_code_generate(request, game_context, artifacts_dir, sink)
         .await
         .map_err(|e| e.to_string())?;
-    Ok(SubmitJobAck { job_id })
+    Ok(SubmitRunAck { run_id })
 }
 
 #[tauri::command]
-pub async fn submit_asset_generate_job(
+pub async fn submit_asset_generate_run(
     app: AppHandle,
     config: State<'_, AppConfig>,
     active: State<'_, ActiveProject>,
     image_proc_state: State<'_, Arc<crate::commands::image_proc_state::ImageProcState>>,
     request: SubmitAssetGenerateRequest,
-) -> Result<SubmitJobAck, String> {
+) -> Result<SubmitRunAck, String> {
     sync_requested_project(&config, &active, &request.asset_request.project_root)?;
     let service = build_service(&config, &active)?;
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
@@ -126,7 +121,7 @@ pub async fn submit_asset_generate_job(
     let primary = image_proc_state.primary();
     let image_proc: Arc<dyn ImageProcClient> =
         Arc::new(BgRemoverChain::with_simple_fallback(primary));
-    let job_id = service
+    let run_id = service
         .submit_asset_generate(
             request,
             game_context,
@@ -137,18 +132,18 @@ pub async fn submit_asset_generate_job(
         )
         .await
         .map_err(|e| e.to_string())?;
-    Ok(SubmitJobAck { job_id })
+    Ok(SubmitRunAck { run_id })
 }
 
 #[tauri::command]
-pub async fn submit_truth_snapshot_refresh_job(
+pub async fn submit_truth_snapshot_refresh_run(
     app: AppHandle,
     config: State<'_, AppConfig>,
     active: State<'_, ActiveProject>,
     request: SubmitTruthSnapshotRefreshRequest,
-) -> Result<SubmitJobAck, String> {
+) -> Result<SubmitRunAck, String> {
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
-    let service = JobApplicationService::without_llm(active_job_repository(&active)?);
+    let service = RunApplicationService::without_llm(active_run_repository(&active)?);
     let game_id = active_game_id(&active)?;
     let registry = GamePackRegistry::built_in().map_err(|error| error.to_string())?;
     let pack = registry
@@ -175,20 +170,20 @@ pub async fn submit_truth_snapshot_refresh_job(
     let indexer = IlspycmdTruthIndexer::discover(explicit_ilspycmd)?;
     let refresher = TruthSnapshotRefresher::new(Arc::new(github), Arc::new(indexer));
     let store = TruthSnapshotStore::new(&config.status_snapshot().runtime_dir(), &pack);
-    let job_id = service
+    let run_id = service
         .submit_truth_snapshot_refresh(request, pack, store, local_inputs, refresher, sink)
         .await
         .map_err(|e| e.to_string())?;
-    Ok(SubmitJobAck { job_id })
+    Ok(SubmitRunAck { run_id })
 }
 
 #[tauri::command]
-pub async fn submit_single_asset_plan_job(
+pub async fn submit_single_asset_plan_run(
     app: AppHandle,
     config: State<'_, AppConfig>,
     active: State<'_, ActiveProject>,
     request: SubmitSingleAssetPlanRequest,
-) -> Result<SubmitJobAck, String> {
+) -> Result<SubmitRunAck, String> {
     let service = build_service(&config, &active)?;
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
     let items_dir = active_items_dir(&active).ok();
@@ -198,81 +193,82 @@ pub async fn submit_single_asset_plan_job(
         .require(&game_id)
         .map_err(|error| error.to_string())?
         .clone();
-    let job_id = service
+    let run_id = service
         .submit_single_asset_plan(request, pack, items_dir, sink)
         .await
         .map_err(|e| e.to_string())?;
-    Ok(SubmitJobAck { job_id })
+    Ok(SubmitRunAck { run_id })
 }
 
 #[tauri::command]
-pub async fn submit_batch_custom_code_job(
+pub async fn submit_batch_custom_code_run(
     app: AppHandle,
     config: State<'_, AppConfig>,
     active: State<'_, ActiveProject>,
     request: SubmitBatchCustomCodeRequest,
-) -> Result<SubmitJobAck, String> {
+) -> Result<SubmitRunAck, String> {
     let service = build_service(&config, &active)?;
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
     let artifacts_dir = active_artifacts_dir(&active)?;
     let game_context = active_game_context(&config, &active)?;
-    let job_id = service
+    let run_id = service
         .submit_batch_custom_code(request, game_context, artifacts_dir, sink)
         .await
         .map_err(|e| e.to_string())?;
-    Ok(SubmitJobAck { job_id })
+    Ok(SubmitRunAck { run_id })
 }
 
 #[tauri::command]
-pub async fn submit_package_project_job(
+pub async fn submit_package_project_run(
     app: AppHandle,
     config: State<'_, AppConfig>,
     active: State<'_, ActiveProject>,
     request: SubmitPackageProjectRequest,
-) -> Result<SubmitJobAck, String> {
+) -> Result<SubmitRunAck, String> {
     let service = build_service(&config, &active)?;
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
-    let pack = active_game_pack(&active)?;
+    let game_context = active_game_context(&config, &active)?;
+    let project_root = active_project_root(&active)?;
     let mod_id = active_mod_id(&active)?;
-    let job_id = service
-        .submit_package_project(request, pack, mod_id, sink)
+    let run_id = service
+        .submit_package_project(request, game_context, project_root, mod_id, sink)
         .await
         .map_err(|e| e.to_string())?;
-    Ok(SubmitJobAck { job_id })
+    Ok(SubmitRunAck { run_id })
 }
 
 #[tauri::command]
-pub async fn submit_log_analysis_job(
+pub async fn submit_log_analysis_run(
     app: AppHandle,
     config: State<'_, AppConfig>,
     active: State<'_, ActiveProject>,
     request: SubmitLogAnalysisRequest,
-) -> Result<SubmitJobAck, String> {
+) -> Result<SubmitRunAck, String> {
     let service = build_service(&config, &active)?;
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
-    let job_id = service
+    let run_id = service
         .submit_log_analysis(request, sink)
         .await
         .map_err(|e| e.to_string())?;
-    Ok(SubmitJobAck { job_id })
+    Ok(SubmitRunAck { run_id })
 }
 
 #[tauri::command]
-pub async fn submit_build_project_job(
+pub async fn submit_build_project_run(
     app: AppHandle,
     config: State<'_, AppConfig>,
     active: State<'_, ActiveProject>,
     request: SubmitBuildProjectRequest,
-) -> Result<SubmitJobAck, String> {
+) -> Result<SubmitRunAck, String> {
     sync_requested_project(&config, &active, &request.project_root)?;
     let service = build_service(&config, &active)?;
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
     let pack = active_game_pack(&active)?;
-    let job_id = service
+    let run_id = service
         .submit_build_project(request, pack, sink)
         .await
         .map_err(|e| e.to_string())?;
-    Ok(SubmitJobAck { job_id })
+    Ok(SubmitRunAck { run_id })
 }
 
 fn sync_requested_project(
@@ -330,6 +326,18 @@ fn active_items_dir(active: &State<'_, ActiveProject>) -> Result<PathBuf, String
     Ok(project.items_dir())
 }
 
+fn active_project_root(active: &State<'_, ActiveProject>) -> Result<PathBuf, String> {
+    let guard = active
+        .0
+        .lock()
+        .map_err(|error| format!("active project lock poisoned: {error}"))?;
+    Ok(guard
+        .as_ref()
+        .ok_or_else(|| "no active project — open or create one first".to_string())?
+        .path()
+        .to_path_buf())
+}
+
 pub(crate) fn active_game_context(
     config: &State<'_, AppConfig>,
     active: &State<'_, ActiveProject>,
@@ -380,16 +388,16 @@ pub(crate) fn active_game_id(active: &State<'_, ActiveProject>) -> Result<String
 fn build_service(
     config: &State<'_, AppConfig>,
     active: &State<'_, ActiveProject>,
-) -> Result<JobApplicationService, String> {
-    let repo = active_job_repository(active)?;
+) -> Result<RunApplicationService, String> {
+    let repo = active_run_repository(active)?;
     let llm = build_llm_client(config)?;
-    Ok(JobApplicationService::new(repo, llm))
+    Ok(RunApplicationService::new(repo, llm))
 }
 
-fn active_job_repository(
+fn active_run_repository(
     active: &State<'_, ActiveProject>,
-) -> Result<Arc<dyn JobRepository>, String> {
-    let (history_dir, project_root) = {
+) -> Result<Arc<dyn RunRepository>, String> {
+    let history_dir = {
         let guard = active
             .0
             .lock()
@@ -397,60 +405,9 @@ fn active_job_repository(
         let project = guard
             .as_ref()
             .ok_or_else(|| "no active project — open or create one first".to_string())?;
-        (project.history_dir(), project.path().to_path_buf())
+        project.history_dir()
     };
-    let base_repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history_dir));
-    // 自动写 audit.log 到 <project>/.ats/audit.log。Sink 内部 spawn_blocking +
-    // eprintln 兜底，写失败不会影响业务路径。
-    let audit_sink: AuditSinkArc = Arc::new(FileAuditSink::new(project_root));
-    let repo: Arc<dyn JobRepository> = Arc::new(AuditedJobRepository::new(base_repo, audit_sink));
-    Ok(repo)
-}
-
-fn job_repositories(
-    config: &State<'_, AppConfig>,
-    active: &State<'_, ActiveProject>,
-) -> Result<Vec<Arc<dyn JobRepository>>, String> {
-    let mut repositories: Vec<Arc<dyn JobRepository>> = Vec::with_capacity(2);
-    if let Some((history_dir, project_root)) = {
-        let guard = active
-            .0
-            .lock()
-            .map_err(|e| format!("active project lock poisoned: {e}"))?;
-        guard
-            .as_ref()
-            .map(|project| (project.history_dir(), project.path().to_path_buf()))
-    } {
-        let base_repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history_dir));
-        let audit_sink: AuditSinkArc = Arc::new(FileAuditSink::new(project_root));
-        repositories.push(Arc::new(AuditedJobRepository::new(base_repo, audit_sink)));
-    }
-    repositories.push(knowledge_job_repository(config));
-    Ok(repositories)
-}
-
-fn knowledge_job_repository(config: &State<'_, AppConfig>) -> Arc<dyn JobRepository> {
-    Arc::new(FileJobRepository::new(
-        config
-            .status_snapshot()
-            .runtime_dir()
-            .join("knowledge")
-            .join("jobs"),
-    ))
-}
-
-async fn find_job_repository(
-    repositories: &[Arc<dyn JobRepository>],
-    id: &JobId,
-) -> Result<(Arc<dyn JobRepository>, Job), String> {
-    for repository in repositories {
-        match repository.get(id).await {
-            Ok(job) => return Ok((Arc::clone(repository), job)),
-            Err(JobError::NotFound(_)) => continue,
-            Err(error) => return Err(error.to_string()),
-        }
-    }
-    Err(JobError::NotFound(id.0.clone()).to_string())
+    Ok(Arc::new(FileRunRepository::new(history_dir)))
 }
 
 fn build_llm_client(config: &State<'_, AppConfig>) -> Result<Arc<dyn LlmClient>, String> {
@@ -471,8 +428,8 @@ impl TauriProgressSink {
 #[async_trait]
 impl ProgressSink for TauriProgressSink {
     async fn emit(&self, event: ProgressEvent) {
-        if let Err(e) = self.app.emit(JOB_PROGRESS_EVENT, &event) {
-            eprintln!("job-progress emit failed: {e}");
+        if let Err(e) = self.app.emit(RUN_PROGRESS_EVENT, &event) {
+            eprintln!("run-progress emit failed: {e}");
         }
     }
 }

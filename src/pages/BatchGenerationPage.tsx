@@ -1,5 +1,5 @@
 // 批量生成审查页：用户填多个 CustomCodegenRequest item 然后批量执行。
-// 比 JobsCard 里裸 JSON textarea 友好：表格式增删改查。
+// 比 RunsCard 里裸 JSON textarea 友好：表格式增删改查。
 
 import { useEffect, useRef, useState } from "react";
 import {
@@ -10,12 +10,12 @@ import {
   PageHero,
 } from "@/components/ui";
 import { useProjectStore } from "@/stores/project";
-import { useJobProgress } from "@/hooks/useJobProgress";
+import { useRunProgress } from "@/hooks/useRunProgress";
 import { api } from "@/services/api";
 import type {
   CustomCodegenRequest,
-  Job,
-  SubmitJobAck,
+  RunRecord,
+  SubmitRunAck,
 } from "@/services/tauriApi";
 
 interface BatchItem {
@@ -34,16 +34,16 @@ export function BatchGenerationPage() {
   const [failFast, setFailFast] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [job, setJob] = useState<Job | null>(null);
+  const [runId, setRunId] = useState<string | null>(null);
+  const [run, setRun] = useState<RunRecord | null>(null);
   const [delta, setDelta] = useState("");
-  const jobIdRef = useRef<string | null>(null);
+  const runIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    jobIdRef.current = jobId;
-  }, [jobId]);
+    runIdRef.current = runId;
+  }, [runId]);
 
-  useJobProgress(jobIdRef, (ev) => {
+  useRunProgress(runIdRef, (ev) => {
     if (ev.delta) setDelta((prev) => prev + ev.delta);
     if (
       ev.stage === "completed" ||
@@ -53,10 +53,10 @@ export function BatchGenerationPage() {
     ) {
       void (async () => {
         try {
-          const next = (await api.getJob(ev.jobId)) as Job;
-          setJob(next);
-          if (next.status === "failed" && next.error) {
-            setError(`批量失败：${next.error}`);
+          const next = (await api.getRun(ev.runId)) as RunRecord;
+          setRun(next);
+          if (next.status === "failed" && next.failure) {
+            setError(`批量失败：${next.failure.message}`);
           }
         } catch {
           // ignore
@@ -91,7 +91,7 @@ export function BatchGenerationPage() {
     setBusy(true);
     setError(null);
     setDelta("");
-    setJob(null);
+    setRun(null);
     try {
       const req: CustomCodegenRequest[] = validItems.map((it) => ({
         name: it.name.trim(),
@@ -100,11 +100,11 @@ export function BatchGenerationPage() {
         project_root: project.path,
         skip_build: true,
       }));
-      const ack = (await api.submitBatchCustomCodeJob({
+      const ack = (await api.submitBatchCustomCodeRun({
         items: req,
         fail_fast: failFast,
-      })) as SubmitJobAck;
-      setJobId(ack.jobId);
+      })) as SubmitRunAck;
+      setRunId(ack.runId);
     } catch (e: unknown) {
       setError(String(e));
     } finally {
@@ -124,12 +124,12 @@ export function BatchGenerationPage() {
     );
   }
 
-  const jobVariant =
-    job?.status === "completed"
+  const runVariant =
+    run?.status === "succeeded"
       ? "ok"
-      : job?.status === "failed"
+      : run?.status === "failed"
         ? "error"
-        : job?.status === "running"
+        : run?.status === "running"
           ? "running"
           : "muted";
 
@@ -220,14 +220,14 @@ export function BatchGenerationPage() {
           </div>
         </Card>
 
-        {jobId && (
+        {runId && (
           <Card
-            eyebrow="job · batch_custom_code"
+            eyebrow="run · batch_custom_code"
             title="Run"
             actions={
               <>
-                <code style={{ fontSize: "11.5px" }}>{jobId.slice(0, 12)}…</code>
-                {job && <Badge variant={jobVariant}>{job.status}</Badge>}
+                <code style={{ fontSize: "11.5px" }}>{runId.slice(0, 12)}…</code>
+                {run && <Badge variant={runVariant}>{run.status}</Badge>}
               </>
             }
           >
@@ -236,7 +236,7 @@ export function BatchGenerationPage() {
                 {delta}
               </pre>
             )}
-            {job?.result !== undefined && job.result !== null && (
+            {run?.result !== undefined && run.result !== null && (
               <details open>
                 <summary
                   className="cursor-pointer mb-2"
@@ -251,7 +251,7 @@ export function BatchGenerationPage() {
                   Result summary
                 </summary>
                 <pre className="pre-block max-h-64">
-                  {JSON.stringify(job.result, null, 2)}
+                  {JSON.stringify(run.result, null, 2)}
                 </pre>
               </details>
             )}

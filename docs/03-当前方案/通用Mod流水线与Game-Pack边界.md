@@ -21,7 +21,7 @@ AgentTheSpire 采用：
 
 > **一条通用 Mod 生产流水线 + 多个可加载的游戏知识与资源包（Game Pack）。**
 
-平台统一提供资源获取、索引检索、LLM 生成、资产处理、验证、构建、打包、job/history/audit 与人工验收串联。Game Pack 只提供真相源声明、游戏专属资源、工程骨架、目标资产规格、稳定验证规则和构建/打包步骤的声明数据；它不重新实现一套游戏专属 handler。
+平台统一提供资源获取、索引检索、LLM 生成、资产处理、验证、构建、打包、Run history、ArtifactManifest 与人工验收串联。Game Pack 只提供真相源声明、游戏专属资源、工程骨架、目标资产规格、稳定验证规则和构建/打包步骤的声明数据；它不重新实现一套游戏专属 handler。
 
 ### 2.1 总体关系
 
@@ -36,7 +36,7 @@ flowchart TB
         Generate --> Validate["通用验证框架"]
         Validate --> Build["通用构建执行器"]
         Build --> Package["通用打包执行器"]
-        Trace["Job / History / Audit"]
+        Trace["RunRecord / ArtifactManifest"]
     end
 
     subgraph Packs["游戏知识与资源包"]
@@ -69,7 +69,7 @@ flowchart TB
 | 执行结构、schema、质量与回归规则 | 提供稳定约束与已知错误规则数据 |
 | 运行构建图、捕获日志、处理取消 | 描述工具、参数、依赖和预期产物 |
 | 收集、校验、哈希和压缩文件 | 描述必需文件、目录布局与 include/exclude |
-| 记录 job/history/audit 并展示验收项 | 提供游戏和资源版本、人工验收清单 |
+| 记录 Run history、ArtifactManifest 并展示验收项 | 提供游戏和资源版本、人工验收清单 |
 
 这一边界的判定句是：
 
@@ -85,7 +85,7 @@ flowchart TB
 | `Resource Specification` | Game Pack 对代码、图片、音频、本地化等目标资产的声明 | 不自己实现资产处理算法 |
 | `Build Recipe` | 对构建步骤、工具、参数、依赖与预期产物的声明式描述 | 不是游戏专属构建代码 |
 | `Package Layout` | 对最终交付目录/压缩包布局与收集规则的声明 | 不是游戏专属打包 handler |
-| `Evidence Record` | 本次生成实际使用的当前来源、symbol、版本与用途记录 | 不是下次生成可直接复用的行为答案缓存 |
+| `Evidence Record` | `ArtifactManifest.evidence[]` 中记录的本次生成实际来源、symbol、bounded excerpt 与用途 | 不是独立 Markdown 文件，也不是下次生成可直接复用的行为答案缓存 |
 
 ## 4. Game Pack 的逻辑结构
 
@@ -161,7 +161,7 @@ Game Pack 模板只保留工程文件、目录、依赖、入口、资源路径�
 
 - 只新增 Game Pack 及声明配置。
 - 不新增游戏专属 asset/code/build/package handler。
-- 不复制 job、history、audit、文件事务或 UI 流程。
+- 不复制 Run history、Artifact Store、文件事务或 UI 流程。
 - 通过同一条主链完成资源获取、生成、验证、构建、打包和人工验收。
 
 只有遇到新的、可跨游戏复用的基础能力时，才修改通用引擎，例如新反编译格式、新资源编码器、新 build runner 或新压缩格式。这类能力不得以游戏名称命名或只能被单个 Game Pack 调用。
@@ -170,7 +170,7 @@ Game Pack 模板只保留工程文件、目录、依赖、入口、资源路径�
 
 ### 9.1 每游戏一套厚 GameAdapter
 
-不让 STS2、Unity/BepInEx 或其他游戏分别重写资源生成、构建、打包、job 与 UI 流程。这会形成平行子系统，增加漂移和维护成本。
+不让 STS2、Unity/BepInEx 或其他游戏分别重写资源生成、构建、打包、Run 与 UI 流程。这会形成平行子系统，增加漂移和维护成本。
 
 ### 9.2 每功能一条持久化行为契约
 
@@ -205,7 +205,7 @@ Game Pack 模板只保留工程文件、目录、依赖、入口、资源路径�
 
 ## 12. Stage 1 实施状态（2026-07-30）
 
-- 已实现最小 Game Pack schema、受控 loader/registry、工程 `game_id` 绑定、内容寻址 Truth Snapshot 和固定 job `VerifiedGameContext`。
+- 已实现最小 Game Pack schema、受控 loader/registry、工程 `game_id` 绑定、内容寻址 Truth Snapshot 和固定 Run `VerifiedGameContext`。
 - STS2 的 guidance、稳定工程模板、manifest、资源规格、验证规则、build recipe 和 package layout 已迁移到 `game_packs/sts2/`；Core 只保留有限、可复用的执行器。
 - 旧 `SourceMode` 生成 fallback、Core 内嵌 STS2 guidance/templates、全局 `mod_template` 和专属 build/package 硬编码已从生产链删除；最小非 STS2 fixture 用于防止执行器依赖游戏名称。
 - 最终隔离桌面 E2E 已完成 Snapshot refresh、生成、compile、build、PCK 和精确 ZIP 检查。模板固定 BaseLib `3.3.8` 与 ModAnalyzers `0.1.9`，自动证据位于 `.tmp/e2e-runs/1785417051-99088/gate0-candidate-evidence.json`。

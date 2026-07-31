@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::codegen::models::{
@@ -36,7 +37,16 @@ pub struct PromptAssembler {
 #[derive(Debug, Clone)]
 pub struct AssetPromptAssembly {
     pub prompt: String,
-    pub evidence_record: String,
+    pub evidence: Vec<GenerationEvidence>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerationEvidence {
+    pub source: String,
+    pub symbol: String,
+    pub purpose: String,
+    pub bounded_excerpt: String,
 }
 
 #[derive(Debug, Error)]
@@ -45,8 +55,8 @@ pub enum PromptAssemblyError {
     Template(#[from] PromptError),
     #[error(transparent)]
     Knowledge(#[from] SnapshotCodeFactsError),
-    #[error("serialize verified game context evidence: {0}")]
-    EvidenceSerialization(#[from] serde_json::Error),
+    #[error("serialize prompt contract: {0}")]
+    Serialization(#[from] serde_json::Error),
     #[error("game pack `{game_pack_id}` does not declare structured asset type `{asset_type}`")]
     UnsupportedAssetType {
         game_pack_id: String,
@@ -152,11 +162,9 @@ impl PromptAssembler {
             ("zhs_hint", zhs_hint.as_str()),
         ]);
         let prompt = self.loader.render("codegen.asset_prompt", &vars)?;
-        let evidence_record =
-            build_asset_evidence_record(&query, context, knowledge.facts.as_str())?;
         Ok(AssetPromptAssembly {
             prompt,
-            evidence_record,
+            evidence: knowledge.evidence,
         })
     }
 
@@ -165,6 +173,15 @@ impl PromptAssembler {
         request: &CustomCodegenRequest,
         context: &VerifiedGameContext,
     ) -> Result<String, PromptAssemblyError> {
+        self.assemble_custom_code_prompt_with_evidence(request, context)
+            .map(|assembly| assembly.prompt)
+    }
+
+    pub fn assemble_custom_code_prompt_with_evidence(
+        &self,
+        request: &CustomCodegenRequest,
+        context: &VerifiedGameContext,
+    ) -> Result<AssetPromptAssembly, PromptAssemblyError> {
         let query = KnowledgeQuery {
             scenario: Some(KnowledgeScenario::CustomCodeCodegen),
             domain: context.game_pack_id().into(),
@@ -206,7 +223,10 @@ impl PromptAssembler {
             ("name", request.name.as_str()),
             ("project_root", project_root.as_str()),
         ]);
-        Ok(self.loader.render("codegen.custom_code_prompt", &vars)?)
+        Ok(AssetPromptAssembly {
+            prompt: self.loader.render("codegen.custom_code_prompt", &vars)?,
+            evidence: knowledge.evidence,
+        })
     }
 
     pub fn assemble_asset_group_prompt(
@@ -300,43 +320,28 @@ impl PromptAssembler {
     }
 }
 
-fn build_asset_evidence_record(
-    query: &KnowledgeQuery,
-    context: &VerifiedGameContext,
-    rendered_facts: &str,
-) -> Result<String, PromptAssemblyError> {
-    let context_evidence = serde_json::to_string_pretty(&context.evidence())?;
-    let requirements = query.requirements.as_deref().unwrap_or_default().trim();
-    Ok(format!(
-        "# Evidence Record\n\n\
-- Domain: `{}`\n\
-- Scenario: `asset_codegen`\n\
-- Asset type: `{}`\n\
-- Game Pack: `{}`\n\
-- Truth Snapshot: `{}`\n\
-- Purpose: current official implementation and lifecycle evidence used for this generation\n\n\
-## Requirement\n\n{}\n\n\
-## Verified Game Context\n\n```json\n{}\n```\n\n\
-## Injected Code Facts\n\n{}\n",
-        query.domain,
-        query.asset_type.as_deref().unwrap_or_default(),
-        context.game_pack_id(),
-        context.snapshot_id(),
-        requirements,
-        context_evidence,
-        rendered_facts.trim(),
-    ))
-}
-
 struct ResolvedKnowledge {
     facts: String,
     guidance: String,
     lookup: String,
     warnings: String,
+    evidence: Vec<GenerationEvidence>,
 }
 
 impl ResolvedKnowledge {
     fn from_packet(packet: &KnowledgePacket, assembler: &PromptContextAssembler) -> Self {
+        let evidence = packet
+            .facts
+            .iter()
+            .flat_map(|fact| {
+                fact.evidence_paths.iter().map(|source| GenerationEvidence {
+                    source: source.clone(),
+                    symbol: fact.key.clone(),
+                    purpose: fact.title.clone(),
+                    bounded_excerpt: fact.body.clone(),
+                })
+            })
+            .collect();
         let mut ctx = assembler.assemble(packet);
         let facts = ctx.remove("facts").unwrap_or_default();
         let facts = if facts.trim().is_empty() {
@@ -359,6 +364,7 @@ impl ResolvedKnowledge {
             guidance: ctx.remove("guidance").unwrap_or_default(),
             lookup: ctx.remove("lookup").unwrap_or_default(),
             warnings,
+            evidence,
         }
     }
 }
@@ -664,12 +670,26 @@ public sealed class CombatManager
         assert!(assembly.prompt.contains("RoundNumber <= 1"));
         assert!(assembly.prompt.contains("Hook.AfterSideTurnStart"));
         assert!(assembly.prompt.contains("ResetEnergy"));
-        assert!(assembly.evidence_record.contains("gamePackSha256"));
-        assert!(assembly.evidence_record.contains("snapshotId"));
-        assert!(assembly.evidence_record.contains("fixture-indexer"));
-        assert!(assembly.evidence_record.contains("Lantern.cs"));
-        assert!(assembly.evidence_record.contains("CombatManager.cs"));
-        assert!(assembly.evidence_record.contains("Purpose:"));
+        assert!(
+            assembly
+                .evidence
+                .iter()
+                .any(|item| item.source.contains("Lantern.cs")
+                    && item.bounded_excerpt.contains("AfterSideTurnStart"))
+        );
+        assert!(
+            assembly
+                .evidence
+                .iter()
+                .any(|item| item.source.contains("CombatManager.cs")
+                    && item.bounded_excerpt.contains("ResetEnergy"))
+        );
+        assert!(
+            assembly
+                .evidence
+                .iter()
+                .all(|item| item.source.starts_with("snapshot://"))
+        );
     }
 
     #[test]

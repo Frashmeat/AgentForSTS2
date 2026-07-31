@@ -164,7 +164,7 @@ export function ModEditorPage() {
         <Card eyebrow="planning · artifacts" title="PlanItem artifacts">
           {artifacts.length === 0 ? (
             <p style={{ color: "var(--ink-faint)", fontSize: "12.5px" }}>
-              没有 plan_artifact 状态记录。通过 audit 接口或后续 batch UI 写入。
+              没有 plan_artifact 状态记录。通过生成流程或后续 batch UI 写入。
             </p>
           ) : (
             <table

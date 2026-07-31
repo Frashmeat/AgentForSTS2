@@ -2,33 +2,33 @@
 // 大文本区 + 流式渲染。
 
 import { useEffect, useRef, useState } from "react";
-import { useJobProgress } from "@/hooks/useJobProgress";
+import { useRunProgress } from "@/hooks/useRunProgress";
 import { Button, Card, Field, Notice, PageHero } from "@/components/ui";
 import { api } from "@/services/api";
-import type { Job, SubmitJobAck } from "@/services/tauriApi";
+import type { RunRecord, SubmitRunAck } from "@/services/tauriApi";
 
 export function LogAnalysisPage() {
   const [logText, setLogText] = useState("");
   const [contextHint, setContextHint] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [jobId, setJobId] = useState<string | null>(null);
+  const [runId, setRunId] = useState<string | null>(null);
   const [stream, setStream] = useState("");
   const [report, setReport] = useState<string | null>(null);
-  const jobIdRef = useRef<string | null>(null);
+  const runIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    jobIdRef.current = jobId;
-  }, [jobId]);
+    runIdRef.current = runId;
+  }, [runId]);
 
-  useJobProgress(jobIdRef, (ev) => {
+  useRunProgress(runIdRef, (ev) => {
     if (ev.delta) setStream((prev) => prev + ev.delta);
     if (ev.stage === "completed") {
       setBusy(false);
       void (async () => {
         try {
-          const job = await api.getJob(ev.jobId) as Job;
-          const content = (job.result as { content?: string } | null)?.content ?? "";
+          const run = await api.getRun(ev.runId) as RunRecord;
+          const content = (run.result as { content?: string } | null)?.content ?? "";
           setReport(content);
         } catch (err) { setError(String(err)); }
       })();
@@ -49,11 +49,11 @@ export function LogAnalysisPage() {
     setStream("");
     setReport(null);
     try {
-      const ack = (await api.submitLogAnalysisJob({
+      const ack = (await api.submitLogAnalysisRun({
         log_text: logText.trim(),
         context_hint: contextHint.trim() || null,
-      })) as SubmitJobAck;
-      setJobId(ack.jobId);
+      })) as SubmitRunAck;
+      setRunId(ack.runId);
     } catch (e: unknown) {
       setError(String(e));
     } finally {
@@ -113,8 +113,8 @@ export function LogAnalysisPage() {
             eyebrow="output · llm diagnosis"
             title="Diagnosis"
             actions={
-              jobId && (
-                <code style={{ fontSize: "11.5px" }}>{jobId.slice(0, 12)}</code>
+              runId && (
+                <code style={{ fontSize: "11.5px" }}>{runId.slice(0, 12)}</code>
               )
             }
           >

@@ -26,6 +26,8 @@ pub enum ProjectError {
     InvalidSchemaVersion { path: String, value: String },
     #[error("unsupported project schema version {found}; expected {expected}")]
     UnsupportedSchemaVersion { found: u32, expected: u32 },
+    #[error("invalid run history schema marker in `{path}`: `{value}`")]
+    InvalidHistorySchema { path: String, value: String },
     #[error("project is locked by another process (.ats/lock is held): {0}")]
     Locked(String),
     #[error("io error: {0}")]

@@ -20,6 +20,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::game_pack::GamePackRegistry;
@@ -33,6 +34,9 @@ const PROJECT_JSON: &str = "project.json";
 const ATS_DIR: &str = ".ats";
 const LOCK_FILE: &str = "lock";
 const VERSION_FILE: &str = "version";
+const HISTORY_DIR: &str = "history";
+const HISTORY_SCHEMA_FILE: &str = ".schema-version";
+const RUN_HISTORY_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -95,6 +99,7 @@ impl ProjectFolder {
             &project_root.join(ATS_DIR).join(VERSION_FILE),
             &PROJECT_SCHEMA_VERSION.to_string(),
         )?;
+        prepare_v2_history(&project_root)?;
         let lock = ProjectLock::acquire(&project_root)?;
         Ok(Self {
             path: project_root,
@@ -139,6 +144,7 @@ impl ProjectFolder {
         }
         fs::create_dir_all(&ats_dir)?;
         let lock = ProjectLock::acquire(path)?;
+        prepare_v2_history(path)?;
         Ok(Self {
             path: path.to_path_buf(),
             meta,
@@ -177,8 +183,37 @@ impl ProjectFolder {
     }
     #[must_use]
     pub fn history_dir(&self) -> PathBuf {
-        self.path.join("history")
+        self.path.join(HISTORY_DIR)
     }
+}
+
+/// Establish an empty V2 Run history while preserving any unmarked V1 directory.
+/// The caller opening an existing project must already hold the OS project lock.
+fn prepare_v2_history(project_root: &Path) -> ProjectResult<()> {
+    let history = project_root.join(HISTORY_DIR);
+    let marker = history.join(HISTORY_SCHEMA_FILE);
+    if marker.is_file() {
+        let value = fs::read_to_string(&marker)?;
+        if value.trim() == RUN_HISTORY_SCHEMA_VERSION.to_string() {
+            return Ok(());
+        }
+        return Err(ProjectError::InvalidHistorySchema {
+            path: marker.display().to_string(),
+            value: value.trim().to_string(),
+        });
+    }
+
+    if history.exists() {
+        let mut entries = fs::read_dir(&history)?;
+        if entries.next().transpose()?.is_some() {
+            let stamp = Utc::now().format("%Y%m%dT%H%M%S%.9fZ");
+            let backup = project_root.join(format!("history.v1-backup-{stamp}"));
+            fs::rename(&history, &backup)?;
+        }
+    }
+    fs::create_dir_all(&history)?;
+    write_text_atomic(&marker, &RUN_HISTORY_SCHEMA_VERSION.to_string())?;
+    Ok(())
 }
 
 fn validate_game_id(game_id: &str) -> ProjectResult<()> {
@@ -400,5 +435,57 @@ mod tests {
                 expected: PROJECT_SCHEMA_VERSION
             }
         ));
+    }
+
+    #[test]
+    fn unmarked_v1_history_is_backed_up_before_v2_open() {
+        let td = tempdir();
+        let project = ProjectFolder::create(td.path(), "history-migration", "sts2").unwrap();
+        let path = project.path().to_path_buf();
+        drop(project);
+        fs::remove_file(path.join(HISTORY_DIR).join(HISTORY_SCHEMA_FILE)).unwrap();
+        fs::write(path.join(HISTORY_DIR).join("legacy-job.json"), b"{}").unwrap();
+
+        let reopened = ProjectFolder::open(&path).unwrap();
+        assert_eq!(
+            fs::read_to_string(reopened.history_dir().join(HISTORY_SCHEMA_FILE)).unwrap(),
+            RUN_HISTORY_SCHEMA_VERSION.to_string()
+        );
+        assert_eq!(
+            fs::read_dir(reopened.history_dir())
+                .unwrap()
+                .filter_map(Result::ok)
+                .filter(|entry| entry.file_name() != HISTORY_SCHEMA_FILE)
+                .count(),
+            0
+        );
+        let backups = fs::read_dir(&path)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("history.v1-backup-")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(backups.len(), 1);
+        assert!(backups[0].path().join("legacy-job.json").is_file());
+    }
+
+    #[test]
+    fn malformed_history_marker_rejects_writable_open() {
+        let td = tempdir();
+        let project = ProjectFolder::create(td.path(), "bad-history", "sts2").unwrap();
+        let path = project.path().to_path_buf();
+        drop(project);
+        fs::write(path.join(HISTORY_DIR).join(HISTORY_SCHEMA_FILE), "1").unwrap();
+
+        let error = ProjectFolder::open(&path).unwrap_err();
+        assert!(matches!(error, ProjectError::InvalidHistorySchema { .. }));
+        assert_eq!(
+            fs::read_to_string(path.join(HISTORY_DIR).join(HISTORY_SCHEMA_FILE)).unwrap(),
+            "1"
+        );
     }
 }

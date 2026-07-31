@@ -1,7 +1,7 @@
 //! text_generate handler：纯 LLM 流式生成。
 //!
 //! 不写文件、不依赖工程目录。把 prompt 转给 LlmClient::stream，把 delta 实时
-//! 推 sink，结束后把累积内容写入 job.result。
+//! 推 sink，结束后把累积内容写入 run.result。
 
 use std::sync::Arc;
 
@@ -13,17 +13,17 @@ use super::common::{
 };
 use crate::llm::{CompletionRequest, LlmClient, Message, MessageRole, StreamEvent};
 use crate::platform::contracts::SubmitTextGenerateRequest;
-use crate::platform::domain::{JobId, JobRepository};
+use crate::platform::domain::{RunId, RunRepository, RunResult, TokenUsage};
 
 pub async fn run_text_generate(
-    repo: Arc<dyn JobRepository>,
+    repo: Arc<dyn RunRepository>,
     llm: Arc<dyn LlmClient>,
     sink: Arc<dyn ProgressSink>,
-    job_id: JobId,
+    run_id: RunId,
     request: SubmitTextGenerateRequest,
 ) {
-    if let Err(err) = transition_to_running(&repo, &job_id, &sink).await {
-        tracing::warn!(error = %err, "failed to mark job running");
+    if let Err(err) = transition_to_running(&repo, &run_id, &sink).await {
+        tracing::warn!(error = %err, "failed to mark run running");
         return;
     }
 
@@ -42,9 +42,9 @@ pub async fn run_text_generate(
     let mut stream = match stream_result {
         Ok(s) => s,
         Err(err) => {
-            finalize_with_error(&repo, &job_id, &sink, &err.to_string()).await;
+            finalize_with_error(&repo, &run_id, &sink, &err.to_string()).await;
             sink.emit(ProgressEvent {
-                job_id: job_id.clone(),
+                run_id: run_id.clone(),
                 stage: "stream-start-error".into(),
                 percent: None,
                 message: Some(err.to_string()),
@@ -65,15 +65,15 @@ pub async fn run_text_generate(
     while let Some(item) = stream.next().await {
         // 每 5 个事件查一次取消（避免 file repo 被 hammer）。drop stream 即关连接。
         tick = tick.wrapping_add(1);
-        if tick.is_multiple_of(5) && is_cancelled(&repo, &job_id).await {
-            emit_cancelled_mid_stream(&sink, &job_id).await;
+        if tick.is_multiple_of(5) && is_cancelled(&repo, &run_id).await {
+            emit_cancelled_mid_stream(&sink, &run_id).await;
             return;
         }
         match item {
             Ok(StreamEvent::Start { model: m }) => {
                 model = m.clone();
                 sink.emit(ProgressEvent {
-                    job_id: job_id.clone(),
+                    run_id: run_id.clone(),
                     stage: "stream-start".into(),
                     percent: None,
                     message: Some(format!("model={m}")),
@@ -84,7 +84,7 @@ pub async fn run_text_generate(
             Ok(StreamEvent::Delta { text }) => {
                 accumulated.push_str(&text);
                 sink.emit(ProgressEvent {
-                    job_id: job_id.clone(),
+                    run_id: run_id.clone(),
                     stage: "stream-delta".into(),
                     percent: None,
                     message: None,
@@ -101,9 +101,9 @@ pub async fn run_text_generate(
                 finish = Some(format!("{finish_reason:?}").to_lowercase());
             }
             Err(err) => {
-                finalize_with_error(&repo, &job_id, &sink, &err.to_string()).await;
+                finalize_with_error(&repo, &run_id, &sink, &err.to_string()).await;
                 sink.emit(ProgressEvent {
-                    job_id: job_id.clone(),
+                    run_id: run_id.clone(),
                     stage: "stream-error".into(),
                     percent: None,
                     message: Some(err.to_string()),
@@ -115,17 +115,20 @@ pub async fn run_text_generate(
         }
     }
 
-    let result = serde_json::json!({
-        "model": model,
-        "content": accumulated,
-        "finishReason": finish,
-        "usage": { "inputTokens": input_tokens, "outputTokens": output_tokens },
-    });
+    let result = RunResult::TextGeneration {
+        model,
+        content: accumulated,
+        finish_reason: finish.unwrap_or_else(|| "unknown".into()),
+        usage: TokenUsage {
+            input_tokens,
+            output_tokens,
+        },
+    };
     // 原子收尾：仅当未被并发 cancel 时才落 Completed，避免覆盖用户的取消。
-    match finalize_with_success(&repo, &job_id, result).await {
-        FinalizeOutcome::Completed => {
+    match finalize_with_success(&repo, &run_id, result).await {
+        FinalizeOutcome::Succeeded => {
             sink.emit(ProgressEvent {
-                job_id: job_id.clone(),
+                run_id: run_id.clone(),
                 stage: "completed".into(),
                 percent: Some(1.0),
                 message: None,
@@ -135,16 +138,16 @@ pub async fn run_text_generate(
         }
         FinalizeOutcome::Cancelled => {
             sink.emit(ProgressEvent {
-                job_id: job_id.clone(),
+                run_id: run_id.clone(),
                 stage: "cancelled-after-stream".into(),
                 percent: None,
-                message: Some("job was cancelled while running".into()),
+                message: Some("run was cancelled while running".into()),
                 delta: None,
             })
             .await;
         }
         FinalizeOutcome::Vanished => {
-            tracing::warn!(job_id = %job_id.0, "job vanished mid-run");
+            tracing::warn!(run_id = %run_id.0, "run vanished mid-run");
         }
     }
 }
@@ -153,9 +156,9 @@ pub async fn run_text_generate(
 mod tests {
     use super::*;
     use crate::llm::{CompletionResponse, CompletionStream, FinishReason, LlmError, Usage};
-    use crate::platform::application::JobApplicationService;
-    use crate::platform::domain::{Job, JobKind, JobRepository, JobStatus};
-    use crate::platform::infra::FileJobRepository;
+    use crate::platform::application::RunApplicationService;
+    use crate::platform::domain::{RunKind, RunRecord, RunRepository, RunStatus};
+    use crate::platform::infra::FileRunRepository;
     use async_trait::async_trait;
     use futures_util::stream;
     use std::sync::Mutex;
@@ -207,10 +210,10 @@ mod tests {
         ]
     }
 
-    async fn wait_terminal(service: &JobApplicationService, id: &JobId) {
+    async fn wait_terminal(service: &RunApplicationService, id: &RunId) {
         for _ in 0..50 {
-            let job = service.get(id).await.unwrap();
-            if job.status.is_terminal() {
+            let run = service.get(id).await.unwrap();
+            if run.status.is_terminal() {
                 return;
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -220,15 +223,15 @@ mod tests {
     #[tokio::test]
     async fn text_generate_flow_completes_and_persists_result() {
         let td = tempfile::TempDir::new().unwrap();
-        let repo: Arc<dyn JobRepository> =
-            Arc::new(FileJobRepository::new(td.path().to_path_buf()));
+        let repo: Arc<dyn RunRepository> =
+            Arc::new(FileRunRepository::new(td.path().to_path_buf()));
         let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
             events: Mutex::new(happy_events()),
         });
         let sink = Arc::new(CapturingSink {
             events: tokio::sync::Mutex::new(Vec::new()),
         });
-        let service = JobApplicationService::new(repo, llm);
+        let service = RunApplicationService::new(repo, llm);
 
         let req = SubmitTextGenerateRequest {
             prompt: "say hi".into(),
@@ -240,9 +243,9 @@ mod tests {
             .unwrap();
         wait_terminal(&service, &id).await;
 
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Completed);
-        let result = job.result.expect("result should be set");
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Succeeded);
+        let result = serde_json::to_value(run.result.expect("result should be set")).unwrap();
         assert_eq!(result["content"], "hello world");
         assert_eq!(result["model"], "test-model");
         assert_eq!(result["usage"]["outputTokens"], 2);
@@ -295,15 +298,15 @@ mod tests {
         }
 
         let td = tempfile::TempDir::new().unwrap();
-        let repo: Arc<dyn JobRepository> =
-            Arc::new(FileJobRepository::new(td.path().to_path_buf()));
+        let repo: Arc<dyn RunRepository> =
+            Arc::new(FileRunRepository::new(td.path().to_path_buf()));
         let llm: Arc<dyn LlmClient> = Arc::new(SlowLlm {
             events: Mutex::new(Some(events)),
         });
         let sink = Arc::new(CapturingSink {
             events: tokio::sync::Mutex::new(Vec::new()),
         });
-        let service = JobApplicationService::new(repo.clone(), llm);
+        let service = RunApplicationService::new(repo.clone(), llm);
 
         let id = service
             .submit_text_generate(
@@ -338,10 +341,10 @@ mod tests {
             }
         }
 
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Cancelled);
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Cancelled);
         assert!(
-            job.result.is_none(),
+            run.result.is_none(),
             "result should NOT be written on cancel"
         );
         assert!(
@@ -368,27 +371,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancel_marks_pending_job_cancelled() {
+    async fn cancel_marks_pending_run_cancelled() {
         // 直接操纵 repo 绕开 spawn，专注测 cancel 状态机本身。
         let td = tempfile::TempDir::new().unwrap();
-        let repo: Arc<dyn JobRepository> =
-            Arc::new(FileJobRepository::new(td.path().to_path_buf()));
+        let repo: Arc<dyn RunRepository> =
+            Arc::new(FileRunRepository::new(td.path().to_path_buf()));
         let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
             events: Mutex::new(vec![]),
         });
-        let service = JobApplicationService::new(repo.clone(), llm);
+        let service = RunApplicationService::new(repo.clone(), llm);
 
-        let job = Job::new(JobKind::TextGenerate, serde_json::json!({}));
-        repo.create(&job).await.unwrap();
+        let run = RunRecord::new(RunKind::TextGenerate, serde_json::json!({}));
+        repo.create(&run).await.unwrap();
 
-        service.cancel(&job.id).await.unwrap();
-        let reloaded = service.get(&job.id).await.unwrap();
-        assert_eq!(reloaded.status, JobStatus::Cancelled);
+        service.cancel(&run.id).await.unwrap();
+        let reloaded = service.get(&run.id).await.unwrap();
+        assert_eq!(reloaded.status, RunStatus::Cancelled);
 
-        let err = service.cancel(&job.id).await.unwrap_err();
+        let err = service.cancel(&run.id).await.unwrap_err();
         assert!(matches!(
             err,
-            crate::platform::domain::JobError::Terminal { .. }
+            crate::platform::domain::RunError::InvalidTransition { .. }
         ));
     }
 }

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use futures_util::StreamExt;
 use serde::Deserialize;
 
-use super::asset_compile::{AssetCompileValidator, CompileValidation};
+use super::asset_compile::AssetCompileValidator;
 use super::code_generate::{
     extract_first_code_block, sanitize_entity_name, validate_generated_code_skein,
 };
@@ -19,13 +19,13 @@ use crate::image_proc::{
     analyze_png_quality, derive_png_variants,
 };
 use crate::llm::{CompletionRequest, LlmClient, Message, MessageRole, StreamEvent};
-use crate::platform::domain::{JobId, JobRepository};
+use crate::platform::domain::{RunId, RunRepository};
 
 const MAX_MODEL_ATTEMPTS: u32 = 2;
 static ASSET_WRITE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 pub(crate) struct AssetBundleGeneration {
-    repo: Arc<dyn JobRepository>,
+    repo: Arc<dyn RunRepository>,
     llm: Arc<dyn LlmClient>,
     compile_validator: Arc<dyn AssetCompileValidator>,
     sink: Arc<dyn ProgressSink>,
@@ -33,7 +33,7 @@ pub(crate) struct AssetBundleGeneration {
 
 impl AssetBundleGeneration {
     pub(crate) fn new(
-        repo: Arc<dyn JobRepository>,
+        repo: Arc<dyn RunRepository>,
         llm: Arc<dyn LlmClient>,
         compile_validator: Arc<dyn AssetCompileValidator>,
         sink: Arc<dyn ProgressSink>,
@@ -48,16 +48,12 @@ impl AssetBundleGeneration {
 
     pub(crate) async fn generate(
         &self,
-        job_id: &JobId,
+        run_id: &RunId,
         prompt: String,
-        evidence_record: &str,
         pack: &LoadedGamePack,
         request: &AssetCodegenRequest,
-        artifacts_dir: &Path,
         runtime_image_source: Option<&Path>,
     ) -> Result<WrittenAssetBundle, AssetBundleError> {
-        validate_project_scope(&request.project_root, artifacts_dir)
-            .map_err(AssetBundleError::Write)?;
         if request.asset_name.trim().is_empty() {
             return Err(AssetBundleError::ModelOutput(
                 "asset_name must not be empty".into(),
@@ -80,25 +76,22 @@ impl AssetBundleGeneration {
         let mut usage_in = 0_u32;
         let mut usage_out = 0_u32;
         let mut final_model = String::new();
-        let mut final_raw = String::new();
         let mut parsed_bundle = None;
         let mut last_model_error = String::new();
 
         for attempt in 1..=MAX_MODEL_ATTEMPTS {
-            let completion = self.collect_once(job_id, prompt.clone()).await?;
+            let completion = self.collect_once(run_id, prompt.clone()).await?;
             usage_in = usage_in.saturating_add(completion.usage_in);
             usage_out = usage_out.saturating_add(completion.usage_out);
-            final_model = completion.model;
-            final_raw = completion.raw;
-
             let parsed = parse_and_validate_bundle(
-                &final_raw,
+                &completion.raw,
                 &pack.validation_rules,
                 resource_spec,
                 &expected_key,
             );
             match parsed {
                 Ok(bundle) => {
+                    final_model = completion.model;
                     parsed_bundle = Some(bundle);
                     break;
                 }
@@ -107,7 +100,7 @@ impl AssetBundleGeneration {
                     if attempt < MAX_MODEL_ATTEMPTS {
                         self.sink
                             .emit(ProgressEvent {
-                                job_id: job_id.clone(),
+                                run_id: run_id.clone(),
                                 stage: "model-output-retry".into(),
                                 percent: None,
                                 message: Some(format!(
@@ -126,21 +119,12 @@ impl AssetBundleGeneration {
                 "model output remained invalid after {MAX_MODEL_ATTEMPTS} attempts: {last_model_error}"
             ))
         })?;
-        if is_cancelled(&self.repo, job_id).await {
-            emit_cancelled_mid_stream(&self.sink, job_id).await;
+        if is_cancelled(&self.repo, run_id).await {
+            emit_cancelled_mid_stream(&self.sink, run_id).await;
             return Err(AssetBundleError::Cancelled);
         }
 
         let _write_guard = ASSET_WRITE_LOCK.lock().await;
-        let mut artifact = write_artifacts(
-            artifacts_dir,
-            &entity_name,
-            &bundle.csharp,
-            &final_raw,
-            evidence_record,
-        )
-        .await
-        .map_err(AssetBundleError::Write)?;
         let planned = plan_project_writes(
             request,
             resource_spec,
@@ -151,16 +135,16 @@ impl AssetBundleGeneration {
         )
         .await
         .map_err(AssetBundleError::Write)?;
-        artifact.cs_path = planned.cs_path;
-        artifact.localization_paths = planned.localization_paths;
-        artifact.runtime_image_paths = planned.runtime_image_paths;
-        let transaction = FileTransaction::apply(planned.writes)
+        let cs_path = planned.cs_path.clone();
+        let localization_paths = planned.localization_paths.clone();
+        let runtime_image_paths = planned.runtime_image_paths.clone();
+        let transaction = ProjectFileTransaction::apply(planned.writes)
             .await
             .map_err(AssetBundleError::Write)?;
 
         self.sink
             .emit(ProgressEvent {
-                job_id: job_id.clone(),
+                run_id: run_id.clone(),
                 stage: "compile-gate".into(),
                 percent: None,
                 message: Some("validating generated asset with dotnet build".into()),
@@ -169,52 +153,42 @@ impl AssetBundleGeneration {
             .await;
         let compile = self
             .compile_validator
-            .validate(&request.project_root, job_id)
+            .validate(&request.project_root, run_id)
             .await;
-        if is_cancelled(&self.repo, job_id).await {
+        if is_cancelled(&self.repo, run_id).await {
             let rollback = transaction.rollback().await;
             if let Err(err) = rollback {
                 return Err(AssetBundleError::Write(format!(
                     "cancelled and failed to roll back generated files: {err}"
                 )));
             }
-            emit_cancelled_mid_stream(&self.sink, job_id).await;
+            emit_cancelled_mid_stream(&self.sink, run_id).await;
             return Err(AssetBundleError::Cancelled);
         }
-        let compile = match compile {
-            Ok(report) => report,
-            Err(err) => {
-                let rollback = transaction.rollback().await;
-                return Err(AssetBundleError::Compile(match rollback {
-                    Ok(()) => err,
-                    Err(rollback_err) => {
-                        format!("{err}\nrollback generated files failed: {rollback_err}")
-                    }
-                }));
-            }
-        };
-        transaction.commit();
-
+        if let Err(err) = compile {
+            let rollback = transaction.rollback().await;
+            return Err(AssetBundleError::Compile(match rollback {
+                Ok(()) => err,
+                Err(rollback_err) => {
+                    format!("{err}\nrollback generated files failed: {rollback_err}")
+                }
+            }));
+        }
         Ok(WrittenAssetBundle {
             model: final_model,
             entity_name,
-            cs_path: artifact.cs_path,
-            artifact_cs_path: artifact.artifact_cs_path,
-            raw_path: artifact.raw_path,
-            evidence_path: artifact.evidence_path,
-            localization_paths: artifact.localization_paths,
-            runtime_image_paths: artifact.runtime_image_paths,
-            extracted_chars: bundle.csharp.len(),
-            raw_chars: final_raw.len(),
+            cs_path,
+            localization_paths,
+            runtime_image_paths,
             usage_in,
             usage_out,
-            compile,
+            transaction: Some(transaction),
         })
     }
 
     async fn collect_once(
         &self,
-        job_id: &JobId,
+        run_id: &RunId,
         prompt: String,
     ) -> Result<RawCompletion, AssetBundleError> {
         let request = CompletionRequest {
@@ -239,8 +213,8 @@ impl AssetBundleGeneration {
         let mut tick = 0_u32;
         while let Some(item) = stream.next().await {
             tick = tick.wrapping_add(1);
-            if tick.is_multiple_of(5) && is_cancelled(&self.repo, job_id).await {
-                emit_cancelled_mid_stream(&self.sink, job_id).await;
+            if tick.is_multiple_of(5) && is_cancelled(&self.repo, run_id).await {
+                emit_cancelled_mid_stream(&self.sink, run_id).await;
                 return Err(AssetBundleError::Cancelled);
             }
             match item {
@@ -249,7 +223,7 @@ impl AssetBundleGeneration {
                     raw.push_str(&text);
                     self.sink
                         .emit(ProgressEvent {
-                            job_id: job_id.clone(),
+                            run_id: run_id.clone(),
                             stage: "stream-delta".into(),
                             percent: None,
                             message: None,
@@ -277,16 +251,26 @@ pub(crate) struct WrittenAssetBundle {
     pub model: String,
     pub entity_name: String,
     pub cs_path: PathBuf,
-    pub artifact_cs_path: PathBuf,
-    pub raw_path: PathBuf,
-    pub evidence_path: PathBuf,
     pub localization_paths: Vec<PathBuf>,
     pub runtime_image_paths: Vec<PathBuf>,
-    pub extracted_chars: usize,
-    pub raw_chars: usize,
     pub usage_in: u32,
     pub usage_out: u32,
-    pub compile: CompileValidation,
+    transaction: Option<ProjectFileTransaction>,
+}
+
+impl WrittenAssetBundle {
+    pub(crate) fn commit_writes(&mut self) {
+        if let Some(transaction) = self.transaction.take() {
+            transaction.commit();
+        }
+    }
+
+    pub(crate) async fn rollback_writes(&mut self) -> Result<(), String> {
+        match self.transaction.take() {
+            Some(transaction) => transaction.rollback().await,
+            None => Ok(()),
+        }
+    }
 }
 
 pub(crate) enum AssetBundleError {
@@ -390,48 +374,6 @@ fn validate_localization(
         }
     }
     Ok(())
-}
-
-struct ArtifactPaths {
-    cs_path: PathBuf,
-    artifact_cs_path: PathBuf,
-    raw_path: PathBuf,
-    evidence_path: PathBuf,
-    localization_paths: Vec<PathBuf>,
-    runtime_image_paths: Vec<PathBuf>,
-}
-
-async fn write_artifacts(
-    artifacts_dir: &Path,
-    entity_name: &str,
-    csharp: &str,
-    raw: &str,
-    evidence_record: &str,
-) -> Result<ArtifactPaths, String> {
-    let target_dir = artifacts_dir.join(entity_name);
-    tokio::fs::create_dir_all(&target_dir)
-        .await
-        .map_err(|err| format!("create asset artifact dir: {err}"))?;
-    let artifact_cs_path = target_dir.join(format!("{entity_name}.cs"));
-    let raw_path = target_dir.join("raw.md");
-    let evidence_path = target_dir.join("evidence.md");
-    crate::fs_atomic::write_atomic(&artifact_cs_path, csharp.as_bytes())
-        .await
-        .map_err(|err| format!("write artifact C#: {err}"))?;
-    crate::fs_atomic::write_atomic(&raw_path, raw.as_bytes())
-        .await
-        .map_err(|err| format!("write raw model output: {err}"))?;
-    crate::fs_atomic::write_atomic(&evidence_path, evidence_record.as_bytes())
-        .await
-        .map_err(|err| format!("write evidence record: {err}"))?;
-    Ok(ArtifactPaths {
-        cs_path: PathBuf::new(),
-        artifact_cs_path,
-        raw_path,
-        evidence_path,
-        localization_paths: Vec::new(),
-        runtime_image_paths: Vec::new(),
-    })
 }
 
 struct PlannedProjectBundle {
@@ -723,11 +665,11 @@ struct FileSnapshot {
     previous: Option<Vec<u8>>,
 }
 
-struct FileTransaction {
+pub(crate) struct ProjectFileTransaction {
     snapshots: Vec<FileSnapshot>,
 }
 
-impl FileTransaction {
+impl ProjectFileTransaction {
     async fn apply(writes: Vec<PlannedWrite>) -> Result<Self, String> {
         let mut transaction = Self {
             snapshots: Vec::new(),
@@ -765,7 +707,11 @@ impl FileTransaction {
         Ok(transaction)
     }
 
-    async fn rollback(mut self) -> Result<(), String> {
+    pub(crate) async fn write_one(path: PathBuf, bytes: Vec<u8>) -> Result<Self, String> {
+        Self::apply(vec![PlannedWrite { path, bytes }]).await
+    }
+
+    pub(crate) async fn rollback(mut self) -> Result<(), String> {
         self.rollback_in_place().await
     }
 
@@ -792,7 +738,7 @@ impl FileTransaction {
         }
     }
 
-    fn commit(self) {}
+    pub(crate) fn commit(self) {}
 }
 
 #[cfg(test)]
@@ -980,7 +926,7 @@ mod tests {
         let old = td.path().join("old.json");
         let new = td.path().join("new.cs");
         tokio::fs::write(&old, b"old").await.unwrap();
-        let transaction = FileTransaction::apply(vec![
+        let transaction = ProjectFileTransaction::apply(vec![
             PlannedWrite {
                 path: old.clone(),
                 bytes: b"changed".to_vec(),

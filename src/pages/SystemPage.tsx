@@ -4,13 +4,12 @@
 
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { AuditCard } from "@/components/AuditCard";
 import { CapabilitiesCard } from "@/components/CapabilitiesCard";
 import { CodegenCard } from "@/components/CodegenCard";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { FirstRunBanner } from "@/components/FirstRunBanner";
 import { HealthCard } from "@/components/HealthCard";
-import { JobsCard } from "@/components/JobsCard";
+import { RunsCard } from "@/components/RunsCard";
 import { KnowledgeCard } from "@/components/KnowledgeCard";
 import { LlmCard } from "@/components/LlmCard";
 import { PlanningCard } from "@/components/PlanningCard";
@@ -323,8 +322,7 @@ export function SystemPage() {
         <div className="space-y-4">
           <ErrorBoundary label="Health"><HealthCard /></ErrorBoundary>
           <ErrorBoundary label="Capabilities"><CapabilitiesCard /></ErrorBoundary>
-          <ErrorBoundary label="Jobs"><JobsCard /></ErrorBoundary>
-          <ErrorBoundary label="Audit"><AuditCard /></ErrorBoundary>
+          <ErrorBoundary label="Runs"><RunsCard /></ErrorBoundary>
         </div>
       </>
     );

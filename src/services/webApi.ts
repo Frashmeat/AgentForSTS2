@@ -47,17 +47,6 @@ export function checkTruthSnapshotStatus(): Promise<TruthSnapshotStatus> {
 export function analyzeModProject(_projectRoot: string): Promise<never> {
   return Promise.resolve().then(() => desktopOnly("analyzeModProject"));
 }
-export function auditAppend(
-  _kind: string,
-  _message: string,
-  _refId?: string,
-  _data?: unknown,
-): Promise<never> {
-  return Promise.resolve().then(() => desktopOnly("auditAppend"));
-}
-export function auditReadRecent(_limit: number): Promise<never[]> {
-  return Promise.resolve([]);
-}
 export function imageProcStatus(): Promise<{ state: "idle" }> {
   // Web 模式不跑 ML prewarm，永远 Idle。
   return Promise.resolve({ state: "idle" });
@@ -186,7 +175,7 @@ export async function llmStartStream(
   throw new Error("Web streaming not yet wired (use llmComplete for now)");
 }
 
-// -------- Project / Jobs stubs（桌面专属，Web 端 stage 3.1a 后接 sqlx）--------
+// -------- Project / Runs stubs（桌面专属，Web 端 stage 3.1a 后接 sqlx）--------
 
 function desktopOnly(name: string): never {
   throw new Error(`${name} is desktop-only (Tauri); Web sqlx pending stage 3.1a`);
@@ -214,41 +203,41 @@ export function currentProject(): Promise<null> {
 export function forgetRecentProject(_path: string): Promise<never> {
   return Promise.resolve().then(() => desktopOnly("forgetRecentProject"));
 }
-export function submitTextGenerateJob(_request: unknown): Promise<never> {
-  return Promise.resolve().then(() => desktopOnly("submitTextGenerateJob"));
+export function submitTextGenerateRun(_request: unknown): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("submitTextGenerateRun"));
 }
-export function getJob(_id: string): Promise<never> {
-  return Promise.resolve().then(() => desktopOnly("getJob"));
+export function getRun(_id: string): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("getRun"));
 }
-export function listJobs(): Promise<never[]> {
+export function listRuns(): Promise<never[]> {
   return Promise.resolve([]);
 }
-export function cancelJob(_id: string): Promise<never> {
-  return Promise.resolve().then(() => desktopOnly("cancelJob"));
+export function cancelRun(_id: string): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("cancelRun"));
 }
-export function submitCodeGenerateJob(_request: unknown): Promise<never> {
-  return Promise.resolve().then(() => desktopOnly("submitCodeGenerateJob"));
+export function submitCodeGenerateRun(_request: unknown): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("submitCodeGenerateRun"));
 }
-export function submitBuildProjectJob(_request: unknown): Promise<never> {
-  return Promise.resolve().then(() => desktopOnly("submitBuildProjectJob"));
+export function submitBuildProjectRun(_request: unknown): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("submitBuildProjectRun"));
 }
-export function submitLogAnalysisJob(_request: unknown): Promise<never> {
-  return Promise.resolve().then(() => desktopOnly("submitLogAnalysisJob"));
+export function submitLogAnalysisRun(_request: unknown): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("submitLogAnalysisRun"));
 }
-export function submitPackageProjectJob(_request: unknown): Promise<never> {
-  return Promise.resolve().then(() => desktopOnly("submitPackageProjectJob"));
+export function submitPackageProjectRun(_request: unknown): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("submitPackageProjectRun"));
 }
-export function submitBatchCustomCodeJob(_request: unknown): Promise<never> {
-  return Promise.resolve().then(() => desktopOnly("submitBatchCustomCodeJob"));
+export function submitBatchCustomCodeRun(_request: unknown): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("submitBatchCustomCodeRun"));
 }
-export function submitSingleAssetPlanJob(_request: unknown): Promise<never> {
-  return Promise.resolve().then(() => desktopOnly("submitSingleAssetPlanJob"));
+export function submitSingleAssetPlanRun(_request: unknown): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("submitSingleAssetPlanRun"));
 }
-export function submitTruthSnapshotRefreshJob(_request: unknown): Promise<never> {
-  return Promise.resolve().then(() => desktopOnly("submitTruthSnapshotRefreshJob"));
+export function submitTruthSnapshotRefreshRun(_request: unknown): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("submitTruthSnapshotRefreshRun"));
 }
-export function submitAssetGenerateJob(_request: unknown): Promise<never> {
-  return Promise.resolve().then(() => desktopOnly("submitAssetGenerateJob"));
+export function submitAssetGenerateRun(_request: unknown): Promise<never> {
+  return Promise.resolve().then(() => desktopOnly("submitAssetGenerateRun"));
 }
 export function discoverSts2Dll(): Promise<null> {
   return Promise.resolve(null);

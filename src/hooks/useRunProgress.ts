@@ -1,19 +1,19 @@
-// 统一的 job-progress 事件监听 hook。
+// 统一的 run-progress 事件监听 hook。
 // 消灭 6 个组件里重复的 listen + cleanup 样板。
 //
-// useJobProgress: 按 jobId 过滤，只回调匹配的事件。
-// useAllJobProgress: 不过滤，所有 job 的事件都回调。
+// useRunProgress: 按 runId 过滤，只回调匹配的事件。
+// useAllRunProgress: 不过滤，所有 run 的事件都回调。
 
 import { useEffect, useRef } from "react";
-import type { JobProgressEvent } from "@/services/tauriApi";
+import type { RunProgressEvent } from "@/services/tauriApi";
 
 /**
- * 监听指定 jobId 的 progress 事件。jobId 通过 ref 传入，避免 useEffect
+ * 监听指定 runId 的 progress 事件。runId 通过 ref 传入，避免 useEffect
  * 重跑——事件监听只建立一次，回调始终拿到最新 closure。
  */
-export function useJobProgress(
-  jobIdRef: React.MutableRefObject<string | null>,
-  onEvent: (ev: JobProgressEvent) => void,
+export function useRunProgress(
+  runIdRef: React.MutableRefObject<string | null>,
+  onEvent: (ev: RunProgressEvent) => void,
 ): void {
   const handlerRef = useRef(onEvent);
   handlerRef.current = onEvent;
@@ -27,8 +27,8 @@ export function useJobProgress(
     // Web 构建中不存在对应的 IPC bridge。
     void (async () => {
       const { listen } = await import("@tauri-apps/api/event");
-      const stop = await listen<JobProgressEvent>("job-progress", (e) => {
-        if (e.payload.jobId === jobIdRef.current) {
+      const stop = await listen<RunProgressEvent>("run-progress", (e) => {
+        if (e.payload.runId === runIdRef.current) {
           handlerRef.current(e.payload);
         }
       });
@@ -44,11 +44,11 @@ export function useJobProgress(
 }
 
 /**
- * 监听所有 job 的 progress 事件（不过滤 jobId）。
- * 适用场景：JobsList 实时刷新列表、AuditCard 监听终态事件。
+ * 监听所有 run 的 progress 事件（不过滤 runId）。
+ * 适用场景：RunsList 实时刷新列表。
  */
-export function useAllJobProgress(
-  onEvent: (ev: JobProgressEvent) => void,
+export function useAllRunProgress(
+  onEvent: (ev: RunProgressEvent) => void,
 ): void {
   const handlerRef = useRef(onEvent);
   handlerRef.current = onEvent;
@@ -61,7 +61,7 @@ export function useAllJobProgress(
     // Dynamic import justified: @tauri-apps/api/event 是 Tauri 专属模块。
     void (async () => {
       const { listen } = await import("@tauri-apps/api/event");
-      const stop = await listen<JobProgressEvent>("job-progress", (e) => {
+      const stop = await listen<RunProgressEvent>("run-progress", (e) => {
         handlerRef.current(e.payload);
       });
       unlisten.current = stop;

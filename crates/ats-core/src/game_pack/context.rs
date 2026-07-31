@@ -1,4 +1,4 @@
-//! Verified game identity and immutable truth snapshot bound for one job.
+//! Verified game identity and immutable truth snapshot bound for one run.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -26,7 +26,7 @@ pub enum GameContextError {
 
 pub type GameContextResult<T> = Result<T, GameContextError>;
 
-/// Pack and Snapshot identity that stays fixed for one complete generation job.
+/// Pack and Snapshot identity that stays fixed for one complete generation run.
 #[derive(Debug, Clone)]
 pub struct VerifiedGameContext {
     pack: LoadedGamePack,

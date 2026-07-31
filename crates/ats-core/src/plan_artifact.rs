@@ -31,7 +31,7 @@ pub struct ArtifactStatus {
     pub state: ArtifactState,
     pub updated_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_job_id: Option<String>,
+    pub last_run_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cs_path: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -48,7 +48,7 @@ impl ArtifactStatus {
             item_id: item_id.into(),
             state,
             updated_at: Utc::now(),
-            last_job_id: None,
+            last_run_id: None,
             cs_path: None,
             png_path: None,
             note: None,
@@ -165,14 +165,14 @@ mod tests {
     fn save_then_load_round_trips() {
         let td = tempfile::TempDir::new().unwrap();
         let mut s = ArtifactStatus::new("item-1", ArtifactState::Generated);
-        s.last_job_id = Some("job-9".into());
+        s.last_run_id = Some("run-9".into());
         s.cs_path = Some(PathBuf::from("/foo/Bar.cs"));
         s.note = Some("looks good".into());
         save_status(td.path(), &s).unwrap();
 
         let loaded = load_status(td.path(), "item-1").unwrap().expect("present");
         assert_eq!(loaded.state, ArtifactState::Generated);
-        assert_eq!(loaded.last_job_id.as_deref(), Some("job-9"));
+        assert_eq!(loaded.last_run_id.as_deref(), Some("run-9"));
         assert_eq!(loaded.cs_path.as_deref(), Some(Path::new("/foo/Bar.cs")));
         assert_eq!(loaded.note.as_deref(), Some("looks good"));
     }

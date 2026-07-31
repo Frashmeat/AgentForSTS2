@@ -1,4 +1,4 @@
-//! Job lifecycle adapter for Pack-driven Truth Snapshot refresh.
+//! RunRecord lifecycle adapter for Pack-driven Truth Snapshot refresh.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use crate::game_pack::{LoadedGamePack, TruthSnapshotRefresher, TruthSnapshotStore};
 use crate::platform::contracts::SubmitTruthSnapshotRefreshRequest;
-use crate::platform::domain::{JobId, JobRepository};
+use crate::platform::domain::{RunId, RunRepository, RunResult};
 
 use super::common::{
     FinalizeOutcome, ProgressEvent, ProgressSink, finalize_with_error, finalize_with_success,
@@ -15,20 +15,20 @@ use super::common::{
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run_truth_snapshot_refresh(
-    repo: Arc<dyn JobRepository>,
+    repo: Arc<dyn RunRepository>,
     sink: Arc<dyn ProgressSink>,
-    job_id: JobId,
+    run_id: RunId,
     request: SubmitTruthSnapshotRefreshRequest,
     pack: LoadedGamePack,
     store: TruthSnapshotStore,
     local_inputs: BTreeMap<String, PathBuf>,
     refresher: TruthSnapshotRefresher,
 ) {
-    if transition_to_running(&repo, &job_id, &sink).await.is_err() {
+    if transition_to_running(&repo, &run_id, &sink).await.is_err() {
         return;
     }
     sink.emit(ProgressEvent {
-        job_id: job_id.clone(),
+        run_id: run_id.clone(),
         stage: "truth-snapshot-refresh".into(),
         percent: Some(0.1),
         message: Some(format!("refreshing verified sources for {}", pack.id)),
@@ -42,23 +42,23 @@ pub async fn run_truth_snapshot_refresh(
     {
         Ok(outcome) => outcome,
         Err(error) => {
-            finalize_with_error(&repo, &job_id, &sink, &error.to_string()).await;
+            finalize_with_error(&repo, &run_id, &sink, &error.to_string()).await;
             return;
         }
     };
-    let result = serde_json::json!({
-        "gamePackId": pack.id,
-        "snapshotId": outcome.snapshot_id,
-        "cacheHit": outcome.cache_hit,
-        "sourceCount": outcome.source_count,
-        "indexCount": outcome.index_count,
-        "toolVersions": outcome.tool_versions,
-        "warnings": outcome.warnings,
-    });
-    match finalize_with_success(&repo, &job_id, result).await {
-        FinalizeOutcome::Completed => {
+    let result = RunResult::TruthSnapshotRefresh {
+        game_pack_id: pack.id,
+        snapshot_id: outcome.snapshot_id,
+        cache_hit: outcome.cache_hit,
+        source_count: outcome.source_count,
+        index_count: outcome.index_count,
+        tool_versions: outcome.tool_versions,
+        warnings: outcome.warnings,
+    };
+    match finalize_with_success(&repo, &run_id, result).await {
+        FinalizeOutcome::Succeeded => {
             sink.emit(ProgressEvent {
-                job_id,
+                run_id,
                 stage: "completed".into(),
                 percent: Some(1.0),
                 message: Some("verified truth snapshot is active".into()),
@@ -82,9 +82,9 @@ mod tests {
     use crate::game_pack::{
         GamePackLoadPolicy, GamePackLoader, RemoteTruthSourceFetcher, TruthSourceIndexer,
     };
-    use crate::platform::application::{JobApplicationService, NoopProgressSink};
-    use crate::platform::domain::JobStatus;
-    use crate::platform::infra::FileJobRepository;
+    use crate::platform::application::{NoopProgressSink, RunApplicationService};
+    use crate::platform::domain::RunStatus;
+    use crate::platform::infra::FileRunRepository;
 
     struct FixtureFetcher;
 
@@ -141,18 +141,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn completed_job_records_snapshot_identity_and_counts() {
+    async fn succeeded_run_records_snapshot_identity_and_counts() {
         let temp = tempfile::TempDir::new().unwrap();
         let pack = fixture_pack();
         let game = temp.path().join("game.dll");
         fs::write(&game, b"fixture-game").unwrap();
-        let repo: Arc<dyn JobRepository> =
-            Arc::new(FileJobRepository::new(temp.path().join("history")));
+        let repo: Arc<dyn RunRepository> =
+            Arc::new(FileRunRepository::new(temp.path().join("history")));
         let store = TruthSnapshotStore::new(temp.path(), &pack);
         let refresher =
             TruthSnapshotRefresher::new(Arc::new(FixtureFetcher), Arc::new(FixtureIndexer));
-        let service = JobApplicationService::without_llm(Arc::clone(&repo));
-        let job_id = service
+        let service = RunApplicationService::without_llm(Arc::clone(&repo));
+        let run_id = service
             .submit_truth_snapshot_refresh(
                 SubmitTruthSnapshotRefreshRequest { force: false },
                 pack,
@@ -165,15 +165,15 @@ mod tests {
             .unwrap();
 
         for _ in 0..100 {
-            if repo.get(&job_id).await.unwrap().status.is_terminal() {
+            if repo.get(&run_id).await.unwrap().status.is_terminal() {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
 
-        let completed = repo.get(&job_id).await.unwrap();
-        assert_eq!(completed.status, JobStatus::Completed);
-        let result = completed.result.unwrap();
+        let completed = repo.get(&run_id).await.unwrap();
+        assert_eq!(completed.status, RunStatus::Succeeded);
+        let result = serde_json::to_value(completed.result.unwrap()).unwrap();
         assert_eq!(result["gamePackId"], "fixture-game");
         assert_eq!(result["sourceCount"], 2);
         assert_eq!(result["indexCount"], 2);

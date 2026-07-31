@@ -1,35 +1,35 @@
-// JobsCard 主壳 —— 拼接 JobsSubmitForm + JobsList。
+// RunsCard 主壳 —— 拼接 RunsSubmitForm + RunsList。
 //
-// 顶层只持有 error；列表自管 list state，监听 job-progress 自动 refresh；
+// 顶层只持有 error；列表自管 list state，监听 run-progress 自动 refresh；
 // 表单负责所有 kind 字段。提交完调 listRef.current.refresh() 立刻刷新。
 
 import { useRef, useState } from "react";
-import { JobsList, type JobsListHandle } from "@/components/JobsList";
-import { JobsSubmitForm } from "@/components/JobsSubmitForm";
+import { RunsList, type RunsListHandle } from "@/components/RunsList";
+import { RunsSubmitForm } from "@/components/RunsSubmitForm";
 import { Card, Notice } from "@/components/ui";
 
-export function JobsCard() {
+export function RunsCard() {
   const [error, setError] = useState<string | null>(null);
-  const listRef = useRef<JobsListHandle>(null);
+  const listRef = useRef<RunsListHandle>(null);
 
   if (!__IS_TAURI__) {
     return (
       <Card
-        eyebrow="background · jobs"
-        title="Jobs"
-        subtitle="Platform jobs are desktop-only for now. Web sqlx repository lands in stage 3.1a."
+        eyebrow="background · runs"
+        title="Runs"
+        subtitle="Platform runs are desktop-only for now. Web sqlx repository lands in stage 3.1a."
       />
     );
   }
 
   return (
     <Card
-      eyebrow="background · jobs"
-      title="Jobs"
-      subtitle="submit any handler — text_generate / asset / build / package / log / knowledge"
+      eyebrow="background · runs"
+      title="Runs"
+      subtitle="submit any handler — text_generate / asset / build / package / log / truth snapshot"
     >
       {error && (
-        <div data-testid="job-error">
+        <div data-testid="run-error">
           <Notice variant="error" title={`Error: ${error}`} className="mb-3" />
         </div>
       )}
@@ -45,10 +45,10 @@ export function JobsCard() {
             color: "var(--ink-mute)",
           }}
         >
-          Submit new job
+          Submit new run
         </summary>
-        <JobsSubmitForm
-          onSubmitted={(_jobId) => {
+        <RunsSubmitForm
+          onSubmitted={(_runId) => {
             setError(null);
             void listRef.current?.refresh();
           }}
@@ -56,7 +56,7 @@ export function JobsCard() {
         />
       </details>
 
-      <JobsList ref={listRef} onError={(msg) => setError(msg)} />
+      <RunsList ref={listRef} onError={(msg) => setError(msg)} />
     </Card>
   );
 }

@@ -1,14 +1,11 @@
-//! 审计日志 + 产物状态命令。
+//! Plan artifact status commands.
 //!
 //! 都基于当前 active project；调用方有责任先打开一个工程。
 
-use std::path::PathBuf;
-use std::sync::Arc;
-
-use ats_core::audit::{AuditEntry, append_entry, read_recent};
 use ats_core::plan_artifact::{
     ArtifactState, ArtifactStatus, list_statuses, load_status, save_status,
 };
+use std::path::PathBuf;
 use tauri::State;
 
 use crate::commands::project::ActiveProject;
@@ -22,34 +19,6 @@ fn active_root(active: &State<'_, ActiveProject>) -> Result<PathBuf, String> {
         .as_ref()
         .ok_or_else(|| "no active project — open or create one first".to_string())?;
     Ok(project.path().to_path_buf())
-}
-
-#[tauri::command]
-pub fn audit_append(
-    active: State<'_, ActiveProject>,
-    kind: String,
-    message: String,
-    ref_id: Option<String>,
-    data: Option<serde_json::Value>,
-) -> Result<(), String> {
-    let root = active_root(&active)?;
-    let mut entry = AuditEntry::new(kind, message);
-    if let Some(id) = ref_id {
-        entry = entry.with_ref(id);
-    }
-    if let Some(d) = data {
-        entry = entry.with_data(d);
-    }
-    append_entry(&root, &entry).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub fn audit_read_recent(
-    active: State<'_, ActiveProject>,
-    limit: usize,
-) -> Result<Vec<AuditEntry>, String> {
-    let root = active_root(&active)?;
-    read_recent(&root, limit).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -81,7 +50,3 @@ pub fn plan_artifact_list(active: State<'_, ActiveProject>) -> Result<Vec<Artifa
 fn _force_export_artifact_state() -> ArtifactState {
     ArtifactState::Pending
 }
-
-/// Arc 强制导入避免 unused-warning（实际使用见 active_root）。
-#[allow(dead_code)]
-fn _arc_in_scope(_: Arc<()>) {}

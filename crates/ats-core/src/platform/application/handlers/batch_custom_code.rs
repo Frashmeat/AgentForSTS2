@@ -2,47 +2,54 @@
 //!
 //! 输入是 N 个 CustomCodegenRequest，每个独立装 prompt → LLM → 解 fence → 落
 //! `<artifacts_dir>/<sanitized name>/<name>.cs`。单 item 失败不影响其它，除非
-//! `fail_fast = true`。每个 item 的结果（成功路径或失败原因）汇总到 job.result.items。
+//! `fail_fast = true`。每个 item 的结果（成功路径或失败原因）汇总到 run.result.items。
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use serde::Serialize;
-
-use super::code_generate::{GenerateError, generate_and_write_code_artifact, sanitize_entity_name};
-use super::common::{ProgressEvent, ProgressSink, finalize_with_error, transition_to_running};
+use super::code_generate::{
+    GenerateError, PublishedRunArtifact, WrittenArtifact, generate_and_write_code_artifact,
+    publish_generated_artifact, sanitize_entity_name,
+};
+use super::common::{
+    FinalizeOutcome, ProgressEvent, ProgressSink, finalize_with_error, finalize_with_success,
+    transition_to_running,
+};
 use crate::codegen::{CustomCodegenRequest, PromptAssembler};
 use crate::game_pack::VerifiedGameContext;
 use crate::llm::LlmClient;
+use crate::platform::artifact::sha256_bytes;
 use crate::platform::contracts::SubmitBatchCustomCodeRequest;
-use crate::platform::domain::{JobId, JobRepository, JobStatus};
+use crate::platform::domain::{
+    BatchArtifactItemResult, RunId, RunRepository, RunResult, RunStatus, TokenUsage,
+};
 
-#[derive(Debug, Clone, Serialize)]
 struct ItemOutcome {
-    name: String,
-    entity_name: String,
     success: bool,
-    cs_path: Option<String>,
-    artifact_cs_path: Option<String>,
-    extracted_chars: Option<usize>,
-    raw_chars: Option<usize>,
+    result: BatchArtifactItemResult,
     error: Option<String>,
+    pending_commit: Option<PendingItemCommit>,
+}
+
+struct PendingItemCommit {
+    artifact: WrittenArtifact,
+    published: PublishedRunArtifact,
 }
 
 pub async fn run_batch_custom_code(
-    repo: Arc<dyn JobRepository>,
+    repo: Arc<dyn RunRepository>,
     llm: Arc<dyn LlmClient>,
     sink: Arc<dyn ProgressSink>,
-    job_id: JobId,
+    run_id: RunId,
     request: SubmitBatchCustomCodeRequest,
     game_context: VerifiedGameContext,
     artifacts_dir: PathBuf,
 ) {
-    if transition_to_running(&repo, &job_id, &sink).await.is_err() {
+    if transition_to_running(&repo, &run_id, &sink).await.is_err() {
         return;
     }
     if request.items.is_empty() {
-        finalize_with_error(&repo, &job_id, &sink, "items list is empty").await;
+        finalize_with_error(&repo, &run_id, &sink, "items list is empty").await;
         return;
     }
 
@@ -53,16 +60,16 @@ pub async fn run_batch_custom_code(
     let mut failed: u32 = 0;
 
     for (idx, item) in request.items.into_iter().enumerate() {
-        // 中途检查 cancel：若被取消则停止后续 item 但保留已完成结果到 job.result。
-        if let Ok(j) = repo.get(&job_id).await
-            && matches!(j.status, JobStatus::Cancelled)
+        // 中途检查 cancel：若被取消则停止后续 item 但保留已完成结果到 run.result。
+        if let Ok(j) = repo.get(&run_id).await
+            && matches!(j.status, RunStatus::Cancelled)
         {
             break;
         }
 
         let entity_name = sanitize_entity_name(&item.name);
         sink.emit(ProgressEvent {
-            job_id: job_id.clone(),
+            run_id: run_id.clone(),
             stage: "item-start".into(),
             percent: Some((idx as f32) / (total as f32)),
             message: Some(format!("{}/{}: {}", idx + 1, total, entity_name)),
@@ -75,7 +82,7 @@ pub async fn run_batch_custom_code(
             &repo,
             &llm,
             &sink,
-            &job_id,
+            &run_id,
             &game_context,
             &artifacts_dir,
             &item,
@@ -84,6 +91,10 @@ pub async fn run_batch_custom_code(
         .await;
 
         let item_success = outcome.success;
+        let item_message = outcome
+            .error
+            .clone()
+            .unwrap_or_else(|| format!("{}/{} done", idx + 1, total));
         if item_success {
             succeeded += 1;
         } else {
@@ -92,14 +103,14 @@ pub async fn run_batch_custom_code(
         outcomes.push(outcome);
 
         sink.emit(ProgressEvent {
-            job_id: job_id.clone(),
+            run_id: run_id.clone(),
             stage: if item_success {
                 "item-completed".into()
             } else {
                 "item-failed".into()
             },
             percent: Some(((idx + 1) as f32) / (total as f32)),
-            message: Some(format!("{}/{} done", idx + 1, total)),
+            message: Some(item_message),
             delta: None,
         })
         .await;
@@ -109,35 +120,48 @@ pub async fn run_batch_custom_code(
         }
     }
 
-    let job = match repo.get(&job_id).await {
-        Ok(j) => j,
-        Err(_) => return,
-    };
-    if matches!(job.status, JobStatus::Cancelled) {
+    if matches!(
+        repo.get(&run_id).await.map(|run| run.status),
+        Ok(RunStatus::Cancelled)
+    ) {
+        rollback_pending_items(&mut outcomes).await;
         return;
     }
-    let mut job = job;
-    // 任一 item 成功就算 batch 跑通；全失败才置 Failed。
     let overall_ok = succeeded > 0;
-    job.status = if overall_ok {
-        JobStatus::Completed
-    } else {
-        JobStatus::Failed
-    };
-    job.completed_at = Some(chrono::Utc::now());
     if !overall_ok {
-        job.error = Some(format!("all {failed} items failed"));
+        let first_error = outcomes
+            .iter()
+            .find_map(|outcome| outcome.error.as_deref())
+            .unwrap_or("unknown item failure");
+        finalize_with_error(
+            &repo,
+            &run_id,
+            &sink,
+            &format!("all {failed} items failed: {first_error}"),
+        )
+        .await;
+        return;
     }
-    job.result = Some(serde_json::json!({
-        "total": total,
-        "succeeded": succeeded,
-        "failed": failed,
-        "items": outcomes,
-    }));
-    let _ = repo.update(&job).await;
+    let result = RunResult::BatchArtifactProduction {
+        total,
+        succeeded: succeeded as usize,
+        failed: failed as usize,
+        items: outcomes
+            .iter()
+            .map(|outcome| outcome.result.clone())
+            .collect(),
+    };
+    if !matches!(
+        finalize_with_success(&repo, &run_id, result).await,
+        FinalizeOutcome::Succeeded
+    ) {
+        rollback_pending_items(&mut outcomes).await;
+        return;
+    }
+    commit_pending_items(&mut outcomes).await;
 
     sink.emit(ProgressEvent {
-        job_id,
+        run_id,
         stage: if overall_ok {
             "completed".into()
         } else {
@@ -153,35 +177,33 @@ pub async fn run_batch_custom_code(
 #[allow(clippy::too_many_arguments)] // 同 run_asset_generate，DI 注入式 handler
 async fn process_one_item(
     assembler: &PromptAssembler,
-    repo: &Arc<dyn JobRepository>,
+    repo: &Arc<dyn RunRepository>,
     llm: &Arc<dyn LlmClient>,
     sink: &Arc<dyn ProgressSink>,
-    job_id: &JobId,
+    run_id: &RunId,
     game_context: &VerifiedGameContext,
     artifacts_dir: &Path,
     item: &CustomCodegenRequest,
     entity_name: &str,
 ) -> ItemOutcome {
-    let prompt = match assembler.assemble_custom_code_prompt(item, game_context) {
-        Ok(p) => p,
+    let assembly = match assembler.assemble_custom_code_prompt_with_evidence(item, game_context) {
+        Ok(assembly) => assembly,
         Err(err) => {
             return ItemOutcome {
-                name: item.name.clone(),
-                entity_name: entity_name.to_string(),
                 success: false,
-                cs_path: None,
-                artifact_cs_path: None,
-                extracted_chars: None,
-                raw_chars: None,
+                result: failed_batch_item(entity_name),
                 error: Some(format!("prompt assembly: {err}")),
+                pending_commit: None,
             };
         }
     };
+    let prompt = assembly.prompt;
+    let inputs_sha256 = sha256_bytes(prompt.as_bytes());
     match generate_and_write_code_artifact(
         Arc::clone(repo),
         Arc::clone(llm),
         Arc::clone(sink),
-        job_id,
+        run_id,
         prompt,
         entity_name,
         artifacts_dir,
@@ -189,56 +211,118 @@ async fn process_one_item(
     )
     .await
     {
-        Ok(art) => ItemOutcome {
-            name: item.name.clone(),
-            entity_name: art.entity_name,
-            success: true,
-            cs_path: Some(art.cs_path.display().to_string()),
-            artifact_cs_path: Some(art.artifact_cs_path.display().to_string()),
-            extracted_chars: Some(art.extracted_chars),
-            raw_chars: Some(art.raw_chars),
-            error: None,
-        },
+        Ok(mut art) => {
+            let published = publish_generated_artifact(
+                artifacts_dir,
+                run_id,
+                game_context,
+                "custom_code",
+                art.entity_name.clone(),
+                art.model.clone(),
+                inputs_sha256,
+                TokenUsage {
+                    input_tokens: art.usage_in,
+                    output_tokens: art.usage_out,
+                },
+                assembly.evidence,
+                vec![("csharp".into(), art.cs_path.clone())],
+                Vec::new(),
+            )
+            .await;
+            match published {
+                Ok(published) => {
+                    let result = match &published.result {
+                        RunResult::ArtifactProduction {
+                            artifact_manifest_ref,
+                            manifest_sha256,
+                            artifact_id,
+                            ..
+                        } => BatchArtifactItemResult {
+                            item_id: artifact_id.clone(),
+                            artifact_manifest_ref: Some(artifact_manifest_ref.clone()),
+                            manifest_sha256: Some(manifest_sha256.clone()),
+                            diagnostic_ref: None,
+                        },
+                        _ => unreachable!("generation helper returns artifact production"),
+                    };
+                    ItemOutcome {
+                        success: true,
+                        result,
+                        error: None,
+                        pending_commit: Some(PendingItemCommit {
+                            artifact: art,
+                            published,
+                        }),
+                    }
+                }
+                Err(error) => {
+                    let rollback = art.rollback_writes().await;
+                    ItemOutcome {
+                        success: false,
+                        result: failed_batch_item(entity_name),
+                        error: Some(match rollback {
+                            Ok(()) => error,
+                            Err(rollback_error) => format!(
+                                "{error}; rollback generated files failed: {rollback_error}"
+                            ),
+                        }),
+                        pending_commit: None,
+                    }
+                }
+            }
+        }
         Err(GenerateError::Cancelled) => ItemOutcome {
-            name: item.name.clone(),
-            entity_name: entity_name.to_string(),
             success: false,
-            cs_path: None,
-            artifact_cs_path: None,
-            extracted_chars: None,
-            raw_chars: None,
+            result: failed_batch_item(entity_name),
             error: Some("cancelled".into()),
+            pending_commit: None,
         },
         Err(GenerateError::Stream(msg)) => ItemOutcome {
-            name: item.name.clone(),
-            entity_name: entity_name.to_string(),
             success: false,
-            cs_path: None,
-            artifact_cs_path: None,
-            extracted_chars: None,
-            raw_chars: None,
+            result: failed_batch_item(entity_name),
             error: Some(format!("stream: {msg}")),
+            pending_commit: None,
         },
         Err(GenerateError::ModelOutput(msg)) => ItemOutcome {
-            name: item.name.clone(),
-            entity_name: entity_name.to_string(),
             success: false,
-            cs_path: None,
-            artifact_cs_path: None,
-            extracted_chars: None,
-            raw_chars: None,
+            result: failed_batch_item(entity_name),
             error: Some(format!("invalid code model output: {msg}")),
+            pending_commit: None,
         },
         Err(GenerateError::Write(msg)) => ItemOutcome {
-            name: item.name.clone(),
-            entity_name: entity_name.to_string(),
             success: false,
-            cs_path: None,
-            artifact_cs_path: None,
-            extracted_chars: None,
-            raw_chars: None,
+            result: failed_batch_item(entity_name),
             error: Some(format!("write: {msg}")),
+            pending_commit: None,
         },
+    }
+}
+
+async fn rollback_pending_items(outcomes: &mut [ItemOutcome]) {
+    for outcome in outcomes.iter_mut().rev() {
+        if let Some(mut pending) = outcome.pending_commit.take() {
+            let artifact_rollback = pending.published.rollback().await;
+            let file_rollback = pending.artifact.rollback_writes().await;
+            let _ = (artifact_rollback, file_rollback);
+        }
+    }
+}
+
+async fn commit_pending_items(outcomes: &mut [ItemOutcome]) {
+    for outcome in outcomes {
+        if let Some(mut pending) = outcome.pending_commit.take() {
+            let _ = pending.published.commit().await;
+            pending.artifact.commit_writes();
+        }
+    }
+}
+
+fn failed_batch_item(item_id: &str) -> BatchArtifactItemResult {
+    BatchArtifactItemResult {
+        item_id: item_id.to_string(),
+        artifact_manifest_ref: None,
+        manifest_sha256: None,
+        diagnostic_ref: None,
     }
 }
 
@@ -250,9 +334,9 @@ mod tests {
         CompletionRequest, CompletionResponse, CompletionStream, FinishReason, LlmError,
         StreamEvent, Usage,
     };
-    use crate::platform::application::JobApplicationService;
-    use crate::platform::domain::JobRepository;
-    use crate::platform::infra::FileJobRepository;
+    use crate::platform::application::RunApplicationService;
+    use crate::platform::domain::RunRepository;
+    use crate::platform::infra::FileRunRepository;
     use async_trait::async_trait;
     use futures_util::stream;
     use std::sync::Mutex;
@@ -297,10 +381,10 @@ mod tests {
         ]
     }
 
-    async fn wait_terminal(service: &JobApplicationService, id: &JobId) {
+    async fn wait_terminal(service: &RunApplicationService, id: &RunId) {
         for _ in 0..200 {
-            let job = service.get(id).await.unwrap();
-            if job.status.is_terminal() {
+            let run = service.get(id).await.unwrap();
+            if run.status.is_terminal() {
                 return;
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -328,7 +412,7 @@ mod tests {
         let artifacts = td.path().join("artifacts");
         std::fs::create_dir_all(&artifacts).unwrap();
 
-        let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
+        let repo: Arc<dyn RunRepository> = Arc::new(FileRunRepository::new(history));
         let llm: Arc<dyn LlmClient> = Arc::new(RotatingLlm {
             responses: Mutex::new(vec![
                 ok_code_response("m1", "public class A {}"),
@@ -336,7 +420,7 @@ mod tests {
             ]),
         });
         let sink = Arc::new(super::super::common::NoopProgressSink);
-        let service = JobApplicationService::new(repo, llm);
+        let service = RunApplicationService::new(repo, llm);
 
         let kp = fixture_game_context(td.path(), &[], &[]);
         let req = make_request(&["AlphaHook", "BetaHook"]);
@@ -346,15 +430,19 @@ mod tests {
             .unwrap();
         wait_terminal(&service, &id).await;
 
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Completed);
-        let res = job.result.expect("result");
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Succeeded);
+        let res = serde_json::to_value(run.result.expect("result")).unwrap();
         assert_eq!(res["total"], 2);
         assert_eq!(res["succeeded"], 2);
         assert_eq!(res["failed"], 0);
 
-        assert!(artifacts.join("AlphaHook/AlphaHook.cs").exists());
-        assert!(artifacts.join("BetaHook/BetaHook.cs").exists());
+        assert!(td.path().join("Generated/AlphaHook.cs").exists());
+        assert!(td.path().join("Generated/BetaHook.cs").exists());
+        for item in res["items"].as_array().unwrap() {
+            let manifest_ref = item["artifactManifestRef"].as_str().unwrap();
+            assert!(td.path().join(manifest_ref).is_file());
+        }
     }
 
     #[tokio::test]
@@ -365,7 +453,7 @@ mod tests {
         let artifacts = td.path().join("artifacts");
         std::fs::create_dir_all(&artifacts).unwrap();
 
-        let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
+        let repo: Arc<dyn RunRepository> = Arc::new(FileRunRepository::new(history));
         let llm: Arc<dyn LlmClient> = Arc::new(RotatingLlm {
             responses: Mutex::new(vec![
                 ok_code_response("m", "class Good {}"),
@@ -374,7 +462,7 @@ mod tests {
             ]),
         });
         let sink = Arc::new(super::super::common::NoopProgressSink);
-        let service = JobApplicationService::new(repo, llm);
+        let service = RunApplicationService::new(repo, llm);
 
         let kp = fixture_game_context(td.path(), &[], &[]);
         let req = make_request(&["one", "two", "three"]);
@@ -384,20 +472,15 @@ mod tests {
             .unwrap();
         wait_terminal(&service, &id).await;
 
-        let job = service.get(&id).await.unwrap();
+        let run = service.get(&id).await.unwrap();
         // 部分成功 batch 整体 Completed
-        assert_eq!(job.status, JobStatus::Completed);
-        let res = job.result.expect("result");
+        assert_eq!(run.status, RunStatus::Succeeded);
+        let res = serde_json::to_value(run.result.expect("result")).unwrap();
         assert_eq!(res["total"], 3);
         assert_eq!(res["succeeded"], 2);
         assert_eq!(res["failed"], 1);
         let items = res["items"].as_array().unwrap();
-        assert!(
-            items[1]["error"]
-                .as_str()
-                .unwrap_or_default()
-                .contains("forced failure")
-        );
+        assert!(items[1]["artifactManifestRef"].is_null());
     }
 
     #[tokio::test]
@@ -408,14 +491,14 @@ mod tests {
         let artifacts = td.path().join("artifacts");
         std::fs::create_dir_all(&artifacts).unwrap();
 
-        let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
+        let repo: Arc<dyn RunRepository> = Arc::new(FileRunRepository::new(history));
         let llm: Arc<dyn LlmClient> = Arc::new(RotatingLlm {
             responses: Mutex::new(vec![ok_code_response(
                 "m",
                 "public class BadRelic { public override Task BeforeCombatStart() => PlayerCmd.GainEnergy(1m, Owner); }",
             )]),
         });
-        let service = JobApplicationService::new(repo, llm);
+        let service = RunApplicationService::new(repo, llm);
         let id = service
             .submit_batch_custom_code(
                 make_request(&["BadRelic"]),
@@ -427,12 +510,11 @@ mod tests {
             .unwrap();
         wait_terminal(&service, &id).await;
 
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Failed);
-        let result = job.result.unwrap();
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Failed);
+        assert!(run.result.is_none());
         assert!(
-            result["items"][0]["error"]
-                .as_str()
+            run.error_message()
                 .unwrap_or_default()
                 .contains("ResetEnergy")
         );
@@ -448,7 +530,7 @@ mod tests {
         let artifacts = td.path().join("artifacts");
         std::fs::create_dir_all(&artifacts).unwrap();
 
-        let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
+        let repo: Arc<dyn RunRepository> = Arc::new(FileRunRepository::new(history));
         let llm: Arc<dyn LlmClient> = Arc::new(RotatingLlm {
             responses: Mutex::new(vec![
                 vec![Err(LlmError::Stream("boom".into()))],
@@ -456,7 +538,7 @@ mod tests {
             ]),
         });
         let sink = Arc::new(super::super::common::NoopProgressSink);
-        let service = JobApplicationService::new(repo, llm);
+        let service = RunApplicationService::new(repo, llm);
 
         let kp = fixture_game_context(td.path(), &[], &[]);
         let mut req = make_request(&["one", "two"]);
@@ -467,18 +549,11 @@ mod tests {
             .unwrap();
         wait_terminal(&service, &id).await;
 
-        let job = service.get(&id).await.unwrap();
+        let run = service.get(&id).await.unwrap();
         // 第 1 个失败 + fail_fast → 不再跑第 2 个；零成功 = Failed
-        assert_eq!(job.status, JobStatus::Failed);
-        let res = job.result.expect("result");
-        assert_eq!(res["total"], 2);
-        assert_eq!(res["succeeded"], 0);
-        assert_eq!(res["failed"], 1);
-        assert_eq!(
-            res["items"].as_array().unwrap().len(),
-            1,
-            "fail_fast 应在第 1 个 item 后停止"
-        );
+        assert_eq!(run.status, RunStatus::Failed);
+        assert!(run.result.is_none());
+        assert!(run.error_message().unwrap_or_default().contains("boom"));
     }
 
     #[tokio::test]
@@ -489,12 +564,12 @@ mod tests {
         let artifacts = td.path().join("artifacts");
         std::fs::create_dir_all(&artifacts).unwrap();
 
-        let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
+        let repo: Arc<dyn RunRepository> = Arc::new(FileRunRepository::new(history));
         let llm: Arc<dyn LlmClient> = Arc::new(RotatingLlm {
             responses: Mutex::new(vec![]),
         });
         let sink = Arc::new(super::super::common::NoopProgressSink);
-        let service = JobApplicationService::new(repo, llm);
+        let service = RunApplicationService::new(repo, llm);
 
         let kp = fixture_game_context(td.path(), &[], &[]);
         let req = SubmitBatchCustomCodeRequest::default();
@@ -504,10 +579,10 @@ mod tests {
             .unwrap();
         wait_terminal(&service, &id).await;
 
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Failed);
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Failed);
         assert!(
-            job.error
+            run.error_message()
                 .as_deref()
                 .unwrap_or("")
                 .contains("items list is empty")

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 
 use super::build_project::tail;
-use crate::platform::domain::JobId;
+use crate::platform::domain::RunId;
 use crate::project_utils::to_extended_length_path;
 
 #[derive(Debug, Clone)]
@@ -18,7 +18,7 @@ pub(crate) trait AssetCompileValidator: Send + Sync {
     async fn validate(
         &self,
         project_root: &Path,
-        job_id: &JobId,
+        run_id: &RunId,
     ) -> Result<CompileValidation, String>;
 }
 
@@ -30,9 +30,9 @@ impl AssetCompileValidator for DotnetAssetCompileValidator {
     async fn validate(
         &self,
         project_root: &Path,
-        job_id: &JobId,
+        run_id: &RunId,
     ) -> Result<CompileValidation, String> {
-        let mods_path = isolated_mods_path(project_root, job_id);
+        let mods_path = isolated_mods_path(project_root, run_id);
         tokio::fs::create_dir_all(&mods_path)
             .await
             .map_err(|err| format!("create isolated compile output: {err}"))?;
@@ -79,8 +79,8 @@ impl AssetCompileValidator for DotnetAssetCompileValidator {
     }
 }
 
-fn isolated_mods_path(project_root: &Path, job_id: &JobId) -> PathBuf {
-    let safe_job_id: String = job_id
+fn isolated_mods_path(project_root: &Path, run_id: &RunId) -> PathBuf {
+    let safe_run_id: String = run_id
         .0
         .chars()
         .map(|ch| {
@@ -94,7 +94,7 @@ fn isolated_mods_path(project_root: &Path, job_id: &JobId) -> PathBuf {
     project_root
         .join(".ats")
         .join("compile-gate")
-        .join(safe_job_id)
+        .join(safe_run_id)
 }
 
 fn with_trailing_separator(path: &Path) -> String {
@@ -136,11 +136,11 @@ mod tests {
     #[test]
     fn isolated_output_stays_below_project_root() {
         let root = Path::new("C:/mods/demo");
-        let path = isolated_mods_path(root, &JobId("job/../../escape".into()));
+        let path = isolated_mods_path(root, &RunId("run/../../escape".into()));
         assert!(path.starts_with(root));
         assert_eq!(
             path.file_name().and_then(|name| name.to_str()),
-            Some("job_______escape")
+            Some("run_______escape")
         );
     }
 

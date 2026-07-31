@@ -3,7 +3,6 @@
 //! 每个子模块对标一个或一组 `backend/routers/*.py`，调用同一份 `ats-core` 服务。
 //! 错误统一转 `Result<T, String>`（Tauri 前端只能拿到字符串错误）。
 
-pub mod audit;
 pub mod capabilities;
 pub mod codegen;
 pub mod health;
@@ -11,6 +10,7 @@ pub mod image_proc_state;
 pub mod knowledge;
 pub mod llm;
 pub mod mod_analyzer;
+pub mod plan_artifact;
 pub mod planning;
 pub mod platform;
 pub mod project;

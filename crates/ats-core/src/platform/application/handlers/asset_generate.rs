@@ -6,7 +6,7 @@
 //!    → 写诊断原图、处理图和质量报告 → 把正式资源路径塞回 image_paths
 //! 3. 用 PromptAssembler.assemble_asset_prompt 装 prompt
 //! 4. 生成结构化 C# + 双语本地化 bundle，并通过隔离编译门禁
-//! 5. 门禁通过后落 job.result；失败时回滚正式生成目录
+//! 5. 门禁通过后落 run.result；失败时回滚正式生成目录
 //!
 //! image_gen 失败 → 整任务 Failed（不继续 code）。
 //! image_prompt 留空 → 跳过 image_gen，仅跑 code_generate（与 code_generate(asset)
@@ -19,35 +19,36 @@ use tokio::fs;
 
 use super::asset_bundle::{AssetBundleGeneration, runtime_image_paths_for, validate_project_scope};
 use super::asset_compile::AssetCompileValidator;
-use super::code_generate::{finalize_asset_bundle_error, sanitize_entity_name};
+use super::code_generate::{
+    finalize_asset_bundle_error, publish_generated_artifact, sanitize_entity_name,
+};
 use super::common::{
-    FinalizeOutcome, ProgressEvent, ProgressSink, finalize_with_error, finalize_with_success,
-    transition_to_running,
+    FinalizeOutcome, ProgressEvent, ProgressSink, finalize_with_error,
+    finalize_with_error_diagnostic, finalize_with_success, transition_to_running,
 };
 use crate::codegen::PromptAssembler;
 use crate::game_pack::VerifiedGameContext;
 use crate::image_gen::{ImageGenClient, ImageGenRequest};
-use crate::image_proc::{
-    ImageProcClient, ImageProcError, ImageQualityReport, ImageQualitySpec, analyze_png_quality,
-};
+use crate::image_proc::{ImageProcClient, ImageProcError, ImageQualitySpec, analyze_png_quality};
 use crate::llm::LlmClient;
+use crate::platform::artifact::sha256_bytes;
 use crate::platform::contracts::SubmitAssetGenerateRequest;
-use crate::platform::domain::{JobId, JobRepository};
+use crate::platform::domain::{RunId, RunRepository, TokenUsage};
 
-#[allow(clippy::too_many_arguments)] // handler 注入 job 与外部 adapter，避免为单一调用引入浅 Context 结构体
+#[allow(clippy::too_many_arguments)] // handler 注入 run 与外部 adapter，避免为单一调用引入浅 Context 结构体
 pub(crate) async fn run_asset_generate(
-    repo: Arc<dyn JobRepository>,
+    repo: Arc<dyn RunRepository>,
     llm: Arc<dyn LlmClient>,
     image_gen: Arc<dyn ImageGenClient>,
     image_proc: Arc<dyn ImageProcClient>,
     sink: Arc<dyn ProgressSink>,
-    job_id: JobId,
+    run_id: RunId,
     request: SubmitAssetGenerateRequest,
     game_context: VerifiedGameContext,
     artifacts_dir: PathBuf,
     compile_validator: Arc<dyn AssetCompileValidator>,
 ) {
-    if transition_to_running(&repo, &job_id, &sink).await.is_err() {
+    if transition_to_running(&repo, &run_id, &sink).await.is_err() {
         return;
     }
 
@@ -55,7 +56,7 @@ pub(crate) async fn run_asset_generate(
     if let Err(err) = validate_project_scope(&asset_request.project_root, &artifacts_dir) {
         finalize_with_error(
             &repo,
-            &job_id,
+            &run_id,
             &sink,
             &format!("invalid asset project scope: {err}"),
         )
@@ -69,7 +70,7 @@ pub(crate) async fn run_asset_generate(
     {
         finalize_with_error(
             &repo,
-            &job_id,
+            &run_id,
             &sink,
             &format!("unsupported asset_type: {}", asset_request.asset_type),
         )
@@ -77,21 +78,23 @@ pub(crate) async fn run_asset_generate(
         return;
     }
     let entity_name = sanitize_entity_name(&asset_request.asset_name);
-    let target_dir = artifacts_dir.join(&entity_name);
+    let project_root = artifacts_dir
+        .parent()
+        .expect("validated artifacts directory has a project parent");
+    let diagnostic_ref = format!(".ats/diagnostics/{}", run_id.0);
+    let target_dir = project_root.join(&diagnostic_ref);
 
     // 1. 出图（若提供 image_prompt）
     let mut png_path: Option<PathBuf> = None;
-    let mut image_model: Option<String> = None;
-    let mut revised_prompt: Option<String> = None;
     let mut runtime_image_source: Option<PathBuf> = None;
-    let mut image_quality_path: Option<PathBuf> = None;
-    let mut image_quality_report: Option<ImageQualityReport> = None;
+    let mut quality_path: Option<PathBuf> = None;
+    let mut diagnostics_written = false;
 
     if let Some(prompt) = &request.image_prompt {
         let prompt = prompt.trim();
         if !prompt.is_empty() {
             sink.emit(ProgressEvent {
-                job_id: job_id.clone(),
+                run_id: run_id.clone(),
                 stage: "image-gen-start".into(),
                 percent: Some(0.05),
                 message: Some(format!("generating image: {} chars prompt", prompt.len())),
@@ -108,14 +111,14 @@ pub(crate) async fn run_asset_generate(
             let img_resp = match image_gen.generate(img_req).await {
                 Ok(r) => r,
                 Err(err) => {
-                    finalize_with_error(&repo, &job_id, &sink, &format!("image_gen: {err}")).await;
+                    finalize_with_error(&repo, &run_id, &sink, &format!("image_gen: {err}")).await;
                     return;
                 }
             };
             let first = match img_resp.images.first() {
                 Some(i) => i,
                 None => {
-                    finalize_with_error(&repo, &job_id, &sink, "image_gen returned no image").await;
+                    finalize_with_error(&repo, &run_id, &sink, "image_gen returned no image").await;
                     return;
                 }
             };
@@ -126,17 +129,15 @@ pub(crate) async fn run_asset_generate(
             };
             let path = target_dir.join(format!("{entity_name}.{ext}"));
             if let Err(err) = fs::create_dir_all(&target_dir).await {
-                finalize_with_error(&repo, &job_id, &sink, &format!("create target dir: {err}"))
+                finalize_with_error(&repo, &run_id, &sink, &format!("create target dir: {err}"))
                     .await;
                 return;
             }
             if let Err(err) = fs::write(&path, &first.bytes).await {
-                finalize_with_error(&repo, &job_id, &sink, &format!("write image: {err}")).await;
+                finalize_with_error(&repo, &run_id, &sink, &format!("write image: {err}")).await;
                 return;
             }
-            image_model = Some(img_resp.model.clone());
-            revised_prompt = img_resp.revised_prompt.clone();
-
+            diagnostics_written = true;
             // 背景去除：调注入的 ImageProcClient（生产路径是 BgRemoverChain
             // ML→Simple 回退）。处理失败或质量门禁失败时保留诊断文件，但不交付原图。
             let raw_bytes = first.bytes.clone();
@@ -145,14 +146,14 @@ pub(crate) async fn run_asset_generate(
                 Ok(processed) => {
                     if let Err(err) = crate::fs_atomic::write_atomic(&rembg_path, &processed).await
                     {
-                        finalize_with_error(
+                        finalize_with_error_diagnostic(
                             &repo,
-                            &job_id,
+                            &run_id,
                             &sink,
                             &format!(
-                                "write processed image: {err}; raw diagnostic kept at {}",
-                                path.display()
+                                "write processed image: {err}; raw diagnostic kept at {diagnostic_ref}"
                             ),
+                            Some(diagnostic_ref.clone()),
                         )
                         .await;
                         return;
@@ -162,15 +163,14 @@ pub(crate) async fn run_asset_generate(
                     {
                         Ok(report) => report,
                         Err(err) => {
-                            finalize_with_error(
+                            finalize_with_error_diagnostic(
                                 &repo,
-                                &job_id,
+                                &run_id,
                                 &sink,
                                 &format!(
-                                    "analyze processed image quality: {err}; diagnostics kept at {} and {}",
-                                    path.display(),
-                                    rembg_path.display()
+                                    "analyze processed image quality: {err}; diagnostics kept at {diagnostic_ref}"
                                 ),
+                                Some(diagnostic_ref.clone()),
                             )
                             .await;
                             return;
@@ -180,11 +180,12 @@ pub(crate) async fn run_asset_generate(
                     let report_bytes = match serde_json::to_vec_pretty(&report) {
                         Ok(bytes) => bytes,
                         Err(err) => {
-                            finalize_with_error(
+                            finalize_with_error_diagnostic(
                                 &repo,
-                                &job_id,
+                                &run_id,
                                 &sink,
                                 &format!("serialize image quality report: {err}"),
+                                Some(diagnostic_ref.clone()),
                             )
                             .await;
                             return;
@@ -193,45 +194,41 @@ pub(crate) async fn run_asset_generate(
                     if let Err(err) =
                         crate::fs_atomic::write_atomic(&report_path, &report_bytes).await
                     {
-                        finalize_with_error(
+                        finalize_with_error_diagnostic(
                             &repo,
-                            &job_id,
+                            &run_id,
                             &sink,
                             &format!("write image quality report: {err}"),
+                            Some(diagnostic_ref.clone()),
                         )
                         .await;
                         return;
                     }
+                    quality_path = Some(report_path.clone());
                     if !report.accepted {
                         let quality_error =
                             ImageProcError::Quality(report.rejection_summary()).to_string();
-                        finalize_with_error(
+                        finalize_with_error_diagnostic(
                             &repo,
-                            &job_id,
+                            &run_id,
                             &sink,
-                            &format!(
-                                "{quality_error}; diagnostics kept at {}, {}, and {}",
-                                path.display(),
-                                rembg_path.display(),
-                                report_path.display()
-                            ),
+                            &format!("{quality_error}; diagnostics kept at {diagnostic_ref}"),
+                            Some(diagnostic_ref.clone()),
                         )
                         .await;
                         return;
                     }
                     runtime_image_source = Some(rembg_path.clone());
-                    image_quality_path = Some(report_path);
-                    image_quality_report = Some(report);
                 }
                 Err(err) => {
-                    finalize_with_error(
+                    finalize_with_error_diagnostic(
                         &repo,
-                        &job_id,
+                        &run_id,
                         &sink,
                         &format!(
-                            "background removal failed: {err}; raw diagnostic kept at {}; no runtime image delivered",
-                            path.display()
+                            "background removal failed: {err}; raw diagnostic kept at {diagnostic_ref}; no runtime image delivered"
                         ),
+                        Some(diagnostic_ref.clone()),
                     )
                     .await;
                     return;
@@ -245,7 +242,7 @@ pub(crate) async fn run_asset_generate(
                     Err(err) => {
                         finalize_with_error(
                             &repo,
-                            &job_id,
+                            &run_id,
                             &sink,
                             &format!("plan runtime image delivery: {err}"),
                         )
@@ -255,7 +252,7 @@ pub(crate) async fn run_asset_generate(
                 };
 
             sink.emit(ProgressEvent {
-                job_id: job_id.clone(),
+                run_id: run_id.clone(),
                 stage: "image-gen-done".into(),
                 percent: Some(0.4),
                 message: Some(format!("image written ({} bytes)", first.bytes.len())),
@@ -272,19 +269,20 @@ pub(crate) async fn run_asset_generate(
     {
         Ok(assembly) => assembly,
         Err(err) => {
-            finalize_with_error(&repo, &job_id, &sink, &format!("prompt assembly: {err}")).await;
+            finalize_with_error(&repo, &run_id, &sink, &format!("prompt assembly: {err}")).await;
             return;
         }
     };
 
     sink.emit(ProgressEvent {
-        job_id: job_id.clone(),
+        run_id: run_id.clone(),
         stage: "code-gen-start".into(),
         percent: Some(0.45),
         message: Some(format!("LLM prompt {} chars", prompt_assembly.prompt.len())),
         delta: None,
     })
     .await;
+    let inputs_sha256 = sha256_bytes(prompt_assembly.prompt.as_bytes());
 
     // 3. 生成结构化 bundle，写入后执行隔离编译门禁
     let generator = AssetBundleGeneration::new(
@@ -293,58 +291,116 @@ pub(crate) async fn run_asset_generate(
         compile_validator,
         Arc::clone(&sink),
     );
-    let artifact = match generator
+    let mut artifact = match generator
         .generate(
-            &job_id,
+            &run_id,
             prompt_assembly.prompt,
-            &prompt_assembly.evidence_record,
             game_context.pack(),
             &asset_request,
-            &artifacts_dir,
             runtime_image_source.as_deref(),
         )
         .await
     {
         Ok(artifact) => artifact,
         Err(err) => {
-            finalize_asset_bundle_error(&repo, &job_id, &sink, err).await;
+            finalize_asset_bundle_error(
+                &repo,
+                &run_id,
+                &sink,
+                err,
+                diagnostics_written.then(|| diagnostic_ref.clone()),
+            )
+            .await;
             return;
         }
     };
 
-    // 4. 收口
-    let result = serde_json::json!({
-        "entityName": artifact.entity_name,
-        "csPath": artifact.cs_path.display().to_string(),
-        "artifactCsPath": artifact.artifact_cs_path.display().to_string(),
-        "rawPath": artifact.raw_path.display().to_string(),
-        "evidencePath": artifact.evidence_path.display().to_string(),
-        "localizationPaths": artifact.localization_paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
-        "runtimeImagePaths": artifact.runtime_image_paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
-        "pngPath": png_path.as_ref().map(|p| p.display().to_string()),
-        "imageQualityPath": image_quality_path.as_ref().map(|p| p.display().to_string()),
-        "imageQuality": image_quality_report,
-        "imageModel": image_model,
-        "revisedPrompt": revised_prompt,
-        "codeModel": artifact.model,
-        "extractedChars": artifact.extracted_chars,
-        "rawChars": artifact.raw_chars,
-        "usage": { "inputTokens": artifact.usage_in, "outputTokens": artifact.usage_out },
-        "compileGate": {
-            "exitCode": artifact.compile.exit_code,
-            "stdoutTail": artifact.compile.stdout_tail,
-            "stderrTail": artifact.compile.stderr_tail,
+    // 4. Publish an immutable snapshot before the Run succeeds.
+    let mut files = vec![("csharp".to_string(), artifact.cs_path.clone())];
+    files.extend(
+        artifact
+            .localization_paths
+            .iter()
+            .cloned()
+            .map(|path| ("localization".to_string(), path)),
+    );
+    files.extend(
+        artifact
+            .runtime_image_paths
+            .iter()
+            .cloned()
+            .map(|path| ("runtime_image".to_string(), path)),
+    );
+    let mut diagnostic_files = Vec::new();
+    if let Some(path) = &png_path {
+        diagnostic_files.push(("source_image".to_string(), path.clone()));
+    }
+    if let Some(path) = &runtime_image_source {
+        diagnostic_files.push(("processed_image".to_string(), path.clone()));
+    }
+    if let Some(path) = &quality_path {
+        diagnostic_files.push(("image_quality".to_string(), path.clone()));
+    }
+    let published = match publish_generated_artifact(
+        &artifacts_dir,
+        &run_id,
+        &game_context,
+        &asset_request.asset_type,
+        artifact.entity_name.clone(),
+        artifact.model.clone(),
+        inputs_sha256,
+        TokenUsage {
+            input_tokens: artifact.usage_in,
+            output_tokens: artifact.usage_out,
         },
-    });
-    if !matches!(
-        finalize_with_success(&repo, &job_id, result).await,
-        FinalizeOutcome::Completed
-    ) {
+        prompt_assembly.evidence,
+        files,
+        diagnostic_files,
+    )
+    .await
+    {
+        Ok(published) => published,
+        Err(error) => {
+            let rollback = artifact.rollback_writes().await;
+            let message = match rollback {
+                Ok(()) => error,
+                Err(rollback_error) => {
+                    format!("{error}; rollback generated files failed: {rollback_error}")
+                }
+            };
+            finalize_with_error_diagnostic(
+                &repo,
+                &run_id,
+                &sink,
+                &message,
+                diagnostics_written.then(|| diagnostic_ref.clone()),
+            )
+            .await;
+            return;
+        }
+    };
+    if diagnostics_written && let Err(error) = tokio::fs::remove_dir_all(&target_dir).await {
+        let artifact_rollback = published.rollback().await;
+        let file_rollback = artifact.rollback_writes().await;
+        let message = format!("clean successful run diagnostics: {error}");
+        let _ = (artifact_rollback, file_rollback);
+        finalize_with_error_diagnostic(&repo, &run_id, &sink, &message, Some(diagnostic_ref)).await;
         return;
     }
+    if !matches!(
+        finalize_with_success(&repo, &run_id, published.result.clone()).await,
+        FinalizeOutcome::Succeeded
+    ) {
+        let artifact_rollback = published.rollback().await;
+        let file_rollback = artifact.rollback_writes().await;
+        let _ = (artifact_rollback, file_rollback);
+        return;
+    }
+    let _ = published.commit().await;
+    artifact.commit_writes();
 
     sink.emit(ProgressEvent {
-        job_id,
+        run_id,
         stage: "completed".into(),
         percent: Some(1.0),
         message: Some(format!(
@@ -372,13 +428,13 @@ mod tests {
         CompletionRequest, CompletionResponse, CompletionStream, FinishReason, LlmError,
         StreamEvent, Usage,
     };
-    use crate::platform::application::JobApplicationService;
+    use crate::platform::application::RunApplicationService;
     use crate::platform::application::handlers::asset_compile::{
         AssetCompileValidator, CompileValidation,
     };
-    use crate::platform::domain::JobRepository;
-    use crate::platform::domain::JobStatus;
-    use crate::platform::infra::FileJobRepository;
+    use crate::platform::domain::RunRepository;
+    use crate::platform::domain::RunStatus;
+    use crate::platform::infra::FileRunRepository;
     use async_trait::async_trait;
     use futures_util::stream;
     use image::{ImageFormat, Rgba, RgbaImage};
@@ -483,7 +539,7 @@ mod tests {
         async fn validate(
             &self,
             _project_root: &Path,
-            _job_id: &JobId,
+            _run_id: &RunId,
         ) -> Result<CompileValidation, String> {
             Ok(CompileValidation {
                 exit_code: 0,
@@ -500,7 +556,7 @@ mod tests {
         async fn validate(
             &self,
             _project_root: &Path,
-            _job_id: &JobId,
+            _run_id: &RunId,
         ) -> Result<CompileValidation, String> {
             Err("simulated compile failure".into())
         }
@@ -516,7 +572,7 @@ mod tests {
         async fn validate(
             &self,
             _project_root: &Path,
-            _job_id: &JobId,
+            _run_id: &RunId,
         ) -> Result<CompileValidation, String> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             Ok(CompileValidation {
@@ -677,25 +733,25 @@ mod tests {
     }
 
     fn service_with_compile_validator(
-        repo: Arc<dyn JobRepository>,
+        repo: Arc<dyn RunRepository>,
         llm: Arc<dyn LlmClient>,
-    ) -> JobApplicationService {
-        JobApplicationService::new(repo, llm)
+    ) -> RunApplicationService {
+        RunApplicationService::new(repo, llm)
             .with_asset_compile_validator(Arc::new(PassingCompileValidator))
     }
 
     fn service_with_validator(
-        repo: Arc<dyn JobRepository>,
+        repo: Arc<dyn RunRepository>,
         llm: Arc<dyn LlmClient>,
         validator: Arc<dyn AssetCompileValidator>,
-    ) -> JobApplicationService {
-        JobApplicationService::new(repo, llm).with_asset_compile_validator(validator)
+    ) -> RunApplicationService {
+        RunApplicationService::new(repo, llm).with_asset_compile_validator(validator)
     }
 
-    async fn wait_terminal(service: &JobApplicationService, id: &JobId) {
+    async fn wait_terminal(service: &RunApplicationService, id: &RunId) {
         for _ in 0..200 {
-            let job = service.get(id).await.unwrap();
-            if job.status.is_terminal() {
+            let run = service.get(id).await.unwrap();
+            if run.status.is_terminal() {
                 return;
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -710,9 +766,18 @@ mod tests {
         std::fs::create_dir_all(&history).unwrap();
         let artifacts = td.path().join("artifacts");
         std::fs::create_dir_all(&artifacts).unwrap();
-        let kp = fixture_game_context(td.path(), &[], &[]);
+        std::fs::create_dir_all(artifacts.join("AlphaCard")).unwrap();
+        std::fs::write(artifacts.join("AlphaCard/raw.md"), b"legacy").unwrap();
+        let kp = fixture_game_context(
+            td.path(),
+            &[(
+                "AlphaCard.cs",
+                "public class AlphaCard { public void Play() {} }",
+            )],
+            &[],
+        );
 
-        let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
+        let repo: Arc<dyn RunRepository> = Arc::new(FileRunRepository::new(history));
         let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
             events: Mutex::new(ok_code_events("AlphaCard")),
         });
@@ -734,19 +799,18 @@ mod tests {
             .unwrap();
         wait_terminal(&service, &id).await;
 
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Completed);
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Succeeded);
 
-        let png = artifacts.join("AlphaCard/AlphaCard.png");
-        let artifact_cs = artifacts.join("AlphaCard/AlphaCard.cs");
-        let evidence = artifacts.join("AlphaCard/evidence.md");
-        let quality = artifacts.join("AlphaCard/image-quality.json");
+        let diagnostics = td.path().join(".ats/diagnostics").join(&id.0);
         let cs = td.path().join("Generated/AlphaCard.cs");
-        assert!(png.exists(), "png missing");
         assert!(cs.exists(), "cs missing");
-        assert!(artifact_cs.exists(), "artifact cs missing");
-        assert!(evidence.exists(), "evidence record missing");
-        assert!(quality.exists(), "image quality report missing");
+        assert!(!artifacts.join("AlphaCard/evidence.md").exists());
+        assert!(!artifacts.join("AlphaCard/raw.md").exists());
+        assert!(
+            !diagnostics.exists(),
+            "successful run diagnostics should be cleaned"
+        );
         assert!(
             td.path()
                 .join("DemoMod/images/card_portraits/alpha_card.png")
@@ -770,28 +834,27 @@ mod tests {
                 .exists()
         );
 
-        let res = job.result.unwrap();
+        let res = serde_json::to_value(run.result.unwrap()).unwrap();
         assert_eq!(res["entityName"], "AlphaCard");
+        let manifest_path = td.path().join(res["artifactManifestRef"].as_str().unwrap());
+        assert!(manifest_path.is_file());
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(manifest_path).unwrap()).unwrap();
+        assert_eq!(manifest["producingRunId"], id.0);
+        assert_eq!(manifest["files"].as_array().unwrap().len(), 8);
         assert!(
-            res["pngPath"].as_str().unwrap_or("").ends_with(".png"),
-            "pngPath should be set: {:?}",
-            res["pngPath"]
+            manifest["files"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|file| file["role"] == "image_quality"
+                    && file.get("publishedRelativePath").is_none())
         );
-        assert_eq!(res["imageModel"], "mock-image-model");
-        assert_eq!(res["revisedPrompt"], "a revised prompt");
-        assert_eq!(res["runtimeImagePaths"].as_array().unwrap().len(), 2);
-        assert_eq!(res["imageQuality"]["accepted"], true);
-        assert_eq!(
-            PathBuf::from(res["imageQualityPath"].as_str().unwrap())
-                .canonicalize()
-                .unwrap(),
-            quality.canonicalize().unwrap()
-        );
-        let evidence_result = PathBuf::from(res["evidencePath"].as_str().unwrap());
-        assert_eq!(
-            evidence_result.canonicalize().unwrap(),
-            evidence.canonicalize().unwrap()
-        );
+        assert!(manifest["evidence"].as_array().unwrap().iter().any(|item| {
+            item["source"]
+                .as_str()
+                .is_some_and(|source| source.contains("AlphaCard.cs"))
+        }));
     }
 
     #[tokio::test]
@@ -804,7 +867,7 @@ mod tests {
         std::fs::create_dir_all(&artifacts).unwrap();
         let validator = Arc::new(CountingCompileValidator::default());
         let service = service_with_validator(
-            Arc::new(FileJobRepository::new(history)),
+            Arc::new(FileRunRepository::new(history)),
             Arc::new(ScriptedLlm {
                 events: Mutex::new(ok_code_events("NoisyRelic")),
             }),
@@ -824,17 +887,24 @@ mod tests {
             .unwrap();
         wait_terminal(&service, &id).await;
 
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Failed);
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Failed);
         assert!(
-            job.error
+            run.error_message()
                 .unwrap_or_default()
                 .contains("likely_background_residue")
         );
         assert_eq!(validator.calls.load(Ordering::SeqCst), 0);
-        assert!(artifacts.join("NoisyRelic/NoisyRelic.png").is_file());
-        assert!(artifacts.join("NoisyRelic/NoisyRelic.rembg.png").is_file());
-        assert!(artifacts.join("NoisyRelic/image-quality.json").is_file());
+        let diagnostics = td.path().join(".ats/diagnostics").join(&id.0);
+        assert!(diagnostics.join("NoisyRelic.png").is_file());
+        assert!(diagnostics.join("NoisyRelic.rembg.png").is_file());
+        assert!(diagnostics.join("image-quality.json").is_file());
+        assert_eq!(
+            run.failure
+                .as_ref()
+                .and_then(|failure| failure.diagnostic_ref.as_deref()),
+            Some(format!(".ats/diagnostics/{}", id.0).as_str())
+        );
         assert!(!artifacts.join("NoisyRelic/NoisyRelic.cs").exists());
         assert!(!td.path().join("Generated/NoisyRelic.cs").exists());
     }
@@ -849,7 +919,7 @@ mod tests {
         std::fs::create_dir_all(&artifacts).unwrap();
         let validator = Arc::new(CountingCompileValidator::default());
         let service = service_with_validator(
-            Arc::new(FileJobRepository::new(history)),
+            Arc::new(FileRunRepository::new(history)),
             Arc::new(ScriptedLlm {
                 events: Mutex::new(ok_code_events("InvalidImageRelic")),
             }),
@@ -874,24 +944,17 @@ mod tests {
             .unwrap();
         wait_terminal(&service, &id).await;
 
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Failed);
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Failed);
         assert!(
-            job.error
+            run.error_message()
                 .unwrap_or_default()
                 .contains("no runtime image delivered")
         );
         assert_eq!(validator.calls.load(Ordering::SeqCst), 0);
-        assert!(
-            artifacts
-                .join("InvalidImageRelic/InvalidImageRelic.png")
-                .is_file()
-        );
-        assert!(
-            !artifacts
-                .join("InvalidImageRelic/InvalidImageRelic.rembg.png")
-                .exists()
-        );
+        let diagnostics = td.path().join(".ats/diagnostics").join(&id.0);
+        assert!(diagnostics.join("InvalidImageRelic.png").is_file());
+        assert!(!diagnostics.join("InvalidImageRelic.rembg.png").exists());
         assert!(!td.path().join("Generated/InvalidImageRelic.cs").exists());
         assert!(
             !td.path()
@@ -909,7 +972,7 @@ mod tests {
         std::fs::create_dir_all(&history).unwrap();
         std::fs::create_dir_all(&artifacts).unwrap();
         let service = service_with_compile_validator(
-            Arc::new(FileJobRepository::new(history)),
+            Arc::new(FileRunRepository::new(history)),
             Arc::new(ScriptedLlm {
                 events: Mutex::new(ok_code_events("RoleRelic")),
             }),
@@ -928,8 +991,13 @@ mod tests {
             .unwrap();
         wait_terminal(&service, &id).await;
 
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Completed, "error={:?}", job.error);
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(
+            run.status,
+            RunStatus::Succeeded,
+            "error={:?}",
+            run.error_message()
+        );
         let root = td.path().join("DemoMod/images/relics");
         let normal = std::fs::read(root.join("role_relic.png")).unwrap();
         let outline = std::fs::read(root.join("role_relic_outline.png")).unwrap();
@@ -969,7 +1037,7 @@ mod tests {
         });
         let validator = Arc::new(CountingCompileValidator::default());
         let service = service_with_validator(
-            Arc::new(FileJobRepository::new(history)),
+            Arc::new(FileRunRepository::new(history)),
             llm,
             validator.clone(),
         );
@@ -987,16 +1055,20 @@ mod tests {
             .unwrap();
         wait_terminal(&service, &id).await;
 
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Failed);
-        assert!(job.error.unwrap_or_default().contains("ResetEnergy"));
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Failed);
+        assert!(
+            run.error_message()
+                .unwrap_or_default()
+                .contains("ResetEnergy")
+        );
         assert_eq!(validator.calls.load(Ordering::SeqCst), 0);
         assert!(!td.path().join("Generated/BadRelic.cs").exists());
         assert!(!artifacts.join("BadRelic/BadRelic.cs").exists());
     }
 
     #[tokio::test]
-    async fn image_gen_failure_marks_job_failed_without_writing_cs() {
+    async fn image_gen_failure_marks_run_failed_without_writing_cs() {
         let td = tempfile::TempDir::new().unwrap();
         prepare_project(td.path());
         let history = td.path().join("history");
@@ -1005,7 +1077,7 @@ mod tests {
         std::fs::create_dir_all(&artifacts).unwrap();
         let kp = fixture_game_context(td.path(), &[], &[]);
 
-        let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
+        let repo: Arc<dyn RunRepository> = Arc::new(FileRunRepository::new(history));
         let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
             events: Mutex::new(vec![]),
         });
@@ -1027,10 +1099,12 @@ mod tests {
             .unwrap();
         wait_terminal(&service, &id).await;
 
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Failed);
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Failed);
         assert!(
-            job.error.unwrap_or_default().contains("image_gen"),
+            run.error_message()
+                .unwrap_or_default()
+                .contains("image_gen"),
             "error should mention image_gen"
         );
         assert!(
@@ -1050,7 +1124,7 @@ mod tests {
         prepare_project(&active);
         prepare_project(&other);
 
-        let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(active.join("history")));
+        let repo: Arc<dyn RunRepository> = Arc::new(FileRunRepository::new(active.join("history")));
         let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
             events: Mutex::new(ok_code_events("ScopedCard")),
         });
@@ -1069,9 +1143,13 @@ mod tests {
             .unwrap();
         wait_terminal(&service, &id).await;
 
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Failed);
-        assert!(job.error.unwrap_or_default().contains("project scope"));
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Failed);
+        assert!(
+            run.error_message()
+                .unwrap_or_default()
+                .contains("project scope")
+        );
         assert_eq!(mock_img.call_count(), 0);
     }
 
@@ -1085,7 +1163,7 @@ mod tests {
         std::fs::create_dir_all(&artifacts).unwrap();
         let kp = fixture_game_context(td.path(), &[], &[]);
 
-        let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
+        let repo: Arc<dyn RunRepository> = Arc::new(FileRunRepository::new(history));
         let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
             events: Mutex::new(ok_code_events("GammaCard")),
         });
@@ -1108,19 +1186,22 @@ mod tests {
             .unwrap();
         wait_terminal(&service, &id).await;
 
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Completed);
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Succeeded);
         assert_eq!(mock_img.call_count(), 0, "image gen should not be called");
 
         let cs = td.path().join("Generated/GammaCard.cs");
         assert!(cs.exists());
-        assert!(artifacts.join("GammaCard/GammaCard.cs").exists());
+        assert!(!artifacts.join("GammaCard/GammaCard.cs").exists());
         let png = artifacts.join("GammaCard/GammaCard.png");
         assert!(!png.exists(), "png should not be written");
 
-        let res = job.result.unwrap();
-        assert!(res["pngPath"].is_null());
-        assert!(res["imageModel"].is_null());
+        let res = serde_json::to_value(run.result.unwrap()).unwrap();
+        assert!(
+            td.path()
+                .join(res["artifactManifestRef"].as_str().unwrap())
+                .is_file()
+        );
     }
 
     #[tokio::test]
@@ -1134,7 +1215,7 @@ mod tests {
         std::fs::create_dir_all(&artifacts).unwrap();
         let kp = fixture_game_context(td.path(), &[], &[]);
 
-        let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
+        let repo: Arc<dyn RunRepository> = Arc::new(FileRunRepository::new(history));
         let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
             events: Mutex::new(ok_code_events("DeltaCard")),
         });
@@ -1157,8 +1238,8 @@ mod tests {
             .unwrap();
         wait_terminal(&service, &id).await;
 
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Completed);
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Succeeded);
         assert_eq!(mock_img.call_count(), 0);
     }
 
@@ -1170,7 +1251,7 @@ mod tests {
         let artifacts = td.path().join("artifacts");
         std::fs::create_dir_all(&history).unwrap();
         std::fs::create_dir_all(&artifacts).unwrap();
-        let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
+        let repo: Arc<dyn RunRepository> = Arc::new(FileRunRepository::new(history));
         let empty = vec![
             Ok(StreamEvent::Start {
                 model: "test-model".into(),
@@ -1196,8 +1277,8 @@ mod tests {
             .await
             .unwrap();
         wait_terminal(&service, &id).await;
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Completed);
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Succeeded);
         assert!(td.path().join("Generated/RetryCard.cs").is_file());
     }
 
@@ -1224,7 +1305,7 @@ mod tests {
         )
         .unwrap();
 
-        let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
+        let repo: Arc<dyn RunRepository> = Arc::new(FileRunRepository::new(history));
         let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
             events: Mutex::new(ok_code_events("RollbackCard")),
         });
@@ -1241,10 +1322,10 @@ mod tests {
             .await
             .unwrap();
         wait_terminal(&service, &id).await;
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Failed);
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Failed);
         assert!(
-            job.error
+            run.error_message()
                 .unwrap_or_default()
                 .contains("simulated compile failure")
         );
@@ -1256,10 +1337,7 @@ mod tests {
             std::fs::read_to_string(eng_dir.join("cards.json")).unwrap(),
             r#"{"EXISTING.title":"Existing"}"#
         );
-        assert!(
-            artifacts.join("RollbackCard/RollbackCard.cs").is_file(),
-            "raw artifact should remain for diagnosis"
-        );
+        assert!(!artifacts.join("RollbackCard/runs").exists());
         assert!(
             !td.path()
                 .join("DemoMod/localization/zhs/cards.json")
@@ -1272,7 +1350,11 @@ mod tests {
             "new runtime image should be rolled back"
         );
         assert!(
-            artifacts.join("RollbackCard/RollbackCard.png").is_file(),
+            td.path()
+                .join(".ats/diagnostics")
+                .join(&id.0)
+                .join("RollbackCard.png")
+                .is_file(),
             "raw image artifact should remain for diagnosis"
         );
     }

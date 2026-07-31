@@ -1,6 +1,6 @@
 //! mod_analyzer command —— 分析已存在的 mod 项目结构。
 //!
-//! 同步操作（几十毫秒），不进 Job 框架。
+//! 同步操作（几十毫秒），不进 Run 框架。
 
 use std::path::PathBuf;
 

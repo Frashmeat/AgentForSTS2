@@ -1,9 +1,9 @@
-//! Job handler 子模块集合。
+//! RunRecord handler 子模块集合。
 //!
-//! 每个 handler 一个文件，对应 JobKind 的一个 variant。共享类型（ProgressEvent /
+//! 每个 handler 一个文件，对应 RunKind 的一个 variant。共享类型（ProgressEvent /
 //! ProgressSink / 状态迁移 helper）放 common。
 //!
-//! 设计取向：handler 内部都是自由函数 `run_xxx(...)`，由 JobApplicationService
+//! 设计取向：handler 内部都是自由函数 `run_xxx(...)`，由 RunApplicationService
 //! 的 `submit_xxx(...)` spawn。后续 stage 引入 Handler trait 注册表后会再做一次
 //! 切分，当前形状保留对 service 直接依赖以减小改动面。
 

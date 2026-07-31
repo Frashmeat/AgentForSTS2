@@ -1,0 +1,690 @@
+//! Immutable artifact snapshots and their reproducible manifest.
+
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::{Component, Path, PathBuf};
+
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use thiserror::Error;
+
+use crate::codegen::GenerationEvidence;
+use crate::game_pack::{TruthSnapshotIndex, TruthSnapshotSource, VerifiedGameContext};
+use crate::platform::domain::RunId;
+
+pub const ARTIFACT_MANIFEST_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ArtifactManifest {
+    pub schema_version: u32,
+    pub artifact_id: String,
+    pub artifact_kind: String,
+    pub producing_run_id: RunId,
+    pub created_at: DateTime<Utc>,
+    pub game_context: ArtifactGameContext,
+    pub evidence: Vec<ArtifactEvidence>,
+    pub generation: ArtifactGeneration,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_processing: Option<ImageProcessingProvenance>,
+    pub files: Vec<ArtifactFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ArtifactGameContext {
+    pub game_pack_id: String,
+    pub game_pack_schema_version: u32,
+    pub game_pack_sha256: String,
+    pub snapshot_id: String,
+    pub snapshot_schema_version: u32,
+    pub sources: Vec<TruthSnapshotSource>,
+    pub indexes: Vec<TruthSnapshotIndex>,
+    pub tool_versions: BTreeMap<String, String>,
+}
+
+impl From<&VerifiedGameContext> for ArtifactGameContext {
+    fn from(context: &VerifiedGameContext) -> Self {
+        let evidence = context.evidence();
+        Self {
+            game_pack_id: evidence.game_pack_id.to_string(),
+            game_pack_schema_version: evidence.game_pack_schema_version,
+            game_pack_sha256: evidence.game_pack_sha256.to_string(),
+            snapshot_id: evidence.snapshot_id.to_string(),
+            snapshot_schema_version: evidence.snapshot_schema_version,
+            sources: evidence.sources.to_vec(),
+            indexes: evidence.indexes.to_vec(),
+            tool_versions: evidence.tool_versions.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ArtifactEvidence {
+    pub source: String,
+    pub symbol: String,
+    pub purpose: String,
+    pub bounded_excerpt: String,
+}
+
+impl From<GenerationEvidence> for ArtifactEvidence {
+    fn from(evidence: GenerationEvidence) -> Self {
+        Self {
+            source: evidence.source,
+            symbol: evidence.symbol,
+            purpose: evidence.purpose,
+            bounded_excerpt: evidence.bounded_excerpt,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ArtifactGeneration {
+    pub provider: String,
+    pub model: String,
+    pub inputs_sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ImageProcessingProvenance {
+    pub processor: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_version: Option<String>,
+    pub fallback: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ArtifactFile {
+    pub role: String,
+    pub snapshot_relative_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub published_relative_path: Option<String>,
+    pub byte_length: u64,
+    pub sha256: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ArtifactFileInput {
+    pub role: String,
+    pub source_path: PathBuf,
+    pub published_relative_path: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ArtifactPublishRequest {
+    pub artifact_id: String,
+    pub artifact_kind: String,
+    pub run_id: RunId,
+    pub game_context: ArtifactGameContext,
+    pub evidence: Vec<ArtifactEvidence>,
+    pub generation: ArtifactGeneration,
+    pub image_processing: Option<ImageProcessingProvenance>,
+    pub files: Vec<ArtifactFileInput>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PublishedArtifact {
+    pub artifact_manifest_ref: String,
+    pub manifest_sha256: String,
+}
+
+#[derive(Debug, Error)]
+pub enum ArtifactError {
+    #[error("unsafe artifact identifier `{0}`")]
+    UnsafeId(String),
+    #[error("unsafe project-relative path `{0}`")]
+    UnsafeRelativePath(String),
+    #[error("artifact source is not a regular file: {0}")]
+    NotRegularFile(String),
+    #[error("artifact source may not be a symlink: {0}")]
+    Symlink(String),
+    #[error("artifact snapshot already exists: {0}")]
+    AlreadyExists(String),
+    #[error("invalid artifact manifest: {0}")]
+    InvalidManifest(String),
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("json error: {0}")]
+    Json(#[from] serde_json::Error),
+}
+
+pub type ArtifactResult<T> = Result<T, ArtifactError>;
+
+#[derive(Debug, Clone)]
+pub struct ArtifactStore {
+    project_root: PathBuf,
+    root: PathBuf,
+}
+
+pub struct LegacyArtifactCleanup {
+    artifact_root: PathBuf,
+    backup_root: Option<PathBuf>,
+    moved_names: Vec<std::ffi::OsString>,
+}
+
+impl ArtifactStore {
+    #[must_use]
+    pub fn new(project_root: PathBuf) -> Self {
+        let root = project_root.join("artifacts");
+        Self { project_root, root }
+    }
+
+    pub fn project_relative_ref(&self, path: &Path) -> ArtifactResult<String> {
+        let relative = path
+            .strip_prefix(&self.project_root)
+            .map_err(|_| ArtifactError::UnsafeRelativePath(path.display().to_string()))?;
+        normalize_relative_path(relative)
+    }
+
+    pub fn publish(&self, request: ArtifactPublishRequest) -> ArtifactResult<PublishedArtifact> {
+        validate_safe_segment(&request.artifact_id)?;
+        if !request.run_id.is_safe_segment() {
+            return Err(ArtifactError::UnsafeId(request.run_id.0));
+        }
+        if request.files.is_empty() {
+            return Err(ArtifactError::InvalidManifest(
+                "artifact must contain at least one file".into(),
+            ));
+        }
+
+        ensure_directory(&self.root)?;
+        let artifact_root = self.root.join(&request.artifact_id);
+        ensure_directory(&artifact_root)?;
+        let runs_root = artifact_root.join("runs");
+        ensure_directory(&runs_root)?;
+        let final_dir = runs_root.join(&request.run_id.0);
+        if final_dir.exists() {
+            return Err(ArtifactError::AlreadyExists(
+                final_dir.display().to_string(),
+            ));
+        }
+        let staging_dir = runs_root.join(format!(".staging-{}", request.run_id));
+        if staging_dir.exists() {
+            fs::remove_dir_all(&staging_dir)?;
+        }
+        fs::create_dir_all(staging_dir.join("files"))?;
+
+        let publish_result = self.build_staging(&staging_dir, &request);
+        let manifest = match publish_result {
+            Ok(manifest) => manifest,
+            Err(error) => {
+                let _ = fs::remove_dir_all(&staging_dir);
+                return Err(error);
+            }
+        };
+        let manifest_bytes = serde_json::to_vec_pretty(&manifest)?;
+        fs::write(staging_dir.join("artifact-manifest.json"), &manifest_bytes)?;
+        let manifest_ref = normalize_relative_path(
+            &final_dir
+                .join("artifact-manifest.json")
+                .strip_prefix(&self.project_root)
+                .map_err(|_| ArtifactError::UnsafeRelativePath(final_dir.display().to_string()))?,
+        )?;
+        fs::rename(&staging_dir, &final_dir)?;
+        Ok(PublishedArtifact {
+            artifact_manifest_ref: manifest_ref,
+            manifest_sha256: sha256_bytes(&manifest_bytes),
+        })
+    }
+
+    pub fn remove_published_run(&self, artifact_id: &str, run_id: &RunId) -> ArtifactResult<()> {
+        validate_safe_segment(artifact_id)?;
+        if !run_id.is_safe_segment() {
+            return Err(ArtifactError::UnsafeId(run_id.0.clone()));
+        }
+        let artifact_root = self.root.join(artifact_id);
+        let runs_root = artifact_root.join("runs");
+        reject_symlink_if_exists(&self.root)?;
+        reject_symlink_if_exists(&artifact_root)?;
+        reject_symlink_if_exists(&runs_root)?;
+        let run_root = runs_root.join(&run_id.0);
+        match fs::symlink_metadata(&run_root) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                Err(ArtifactError::Symlink(run_root.display().to_string()))
+            }
+            Ok(metadata) if metadata.is_dir() => {
+                fs::remove_dir_all(run_root)?;
+                Ok(())
+            }
+            Ok(_) => Err(ArtifactError::NotRegularFile(
+                run_root.display().to_string(),
+            )),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    pub fn begin_legacy_cleanup(
+        &self,
+        artifact_id: &str,
+        run_id: &RunId,
+    ) -> ArtifactResult<LegacyArtifactCleanup> {
+        validate_safe_segment(artifact_id)?;
+        if !run_id.is_safe_segment() {
+            return Err(ArtifactError::UnsafeId(run_id.0.clone()));
+        }
+        let artifact_root = self.root.join(artifact_id);
+        reject_symlink_if_exists(&self.root)?;
+        reject_symlink_if_exists(&artifact_root)?;
+        if !artifact_root.is_dir() {
+            return Ok(LegacyArtifactCleanup {
+                artifact_root,
+                backup_root: None,
+                moved_names: Vec::new(),
+            });
+        }
+
+        let mut legacy_entries = Vec::new();
+        for entry in fs::read_dir(&artifact_root)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            if name == "runs" {
+                continue;
+            }
+            if name.to_string_lossy().starts_with(".legacy-backup-") {
+                return Err(ArtifactError::AlreadyExists(
+                    entry.path().display().to_string(),
+                ));
+            }
+            let metadata = fs::symlink_metadata(entry.path())?;
+            if metadata.file_type().is_symlink() {
+                return Err(ArtifactError::Symlink(entry.path().display().to_string()));
+            }
+            legacy_entries.push(name);
+        }
+        if legacy_entries.is_empty() {
+            return Ok(LegacyArtifactCleanup {
+                artifact_root,
+                backup_root: None,
+                moved_names: Vec::new(),
+            });
+        }
+
+        let backup_root = artifact_root.join(format!(".legacy-backup-{}", run_id.0));
+        fs::create_dir(&backup_root)?;
+        let mut transaction = LegacyArtifactCleanup {
+            artifact_root,
+            backup_root: Some(backup_root),
+            moved_names: Vec::new(),
+        };
+        for name in legacy_entries {
+            let source = transaction.artifact_root.join(&name);
+            let destination = transaction
+                .backup_root
+                .as_ref()
+                .expect("backup exists for legacy entries")
+                .join(&name);
+            if let Err(error) = fs::rename(&source, &destination) {
+                let _ = transaction.rollback_in_place();
+                return Err(error.into());
+            }
+            transaction.moved_names.push(name);
+        }
+        Ok(transaction)
+    }
+
+    pub async fn publish_async(
+        &self,
+        request: ArtifactPublishRequest,
+    ) -> ArtifactResult<PublishedArtifact> {
+        let store = self.clone();
+        tokio::task::spawn_blocking(move || store.publish(request))
+            .await
+            .map_err(|error| {
+                ArtifactError::InvalidManifest(format!("publish task failed: {error}"))
+            })?
+    }
+
+    fn build_staging(
+        &self,
+        staging_dir: &Path,
+        request: &ArtifactPublishRequest,
+    ) -> ArtifactResult<ArtifactManifest> {
+        let mut files = Vec::with_capacity(request.files.len());
+        for (index, input) in request.files.iter().enumerate() {
+            let metadata = fs::symlink_metadata(&input.source_path)?;
+            if metadata.file_type().is_symlink() {
+                return Err(ArtifactError::Symlink(
+                    input.source_path.display().to_string(),
+                ));
+            }
+            if !metadata.is_file() {
+                return Err(ArtifactError::NotRegularFile(
+                    input.source_path.display().to_string(),
+                ));
+            }
+            let file_name = input
+                .source_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| {
+                    ArtifactError::UnsafeRelativePath(input.source_path.display().to_string())
+                })?;
+            let snapshot_relative_path = format!("files/{index:03}-{file_name}");
+            let destination = staging_dir.join(&snapshot_relative_path);
+            let bytes = fs::read(&input.source_path)?;
+            fs::write(&destination, &bytes)?;
+            let published_relative_path = input
+                .published_relative_path
+                .as_deref()
+                .map(|path| normalize_relative_path(Path::new(path)))
+                .transpose()?;
+            files.push(ArtifactFile {
+                role: input.role.clone(),
+                snapshot_relative_path,
+                published_relative_path,
+                byte_length: bytes.len() as u64,
+                sha256: sha256_bytes(&bytes),
+            });
+        }
+
+        let manifest = ArtifactManifest {
+            schema_version: ARTIFACT_MANIFEST_SCHEMA_VERSION,
+            artifact_id: request.artifact_id.clone(),
+            artifact_kind: request.artifact_kind.clone(),
+            producing_run_id: request.run_id.clone(),
+            created_at: Utc::now(),
+            game_context: request.game_context.clone(),
+            evidence: request.evidence.clone(),
+            generation: request.generation.clone(),
+            image_processing: request.image_processing.clone(),
+            files,
+        };
+        manifest.validate()?;
+        Ok(manifest)
+    }
+}
+
+impl LegacyArtifactCleanup {
+    pub fn rollback(mut self) -> ArtifactResult<()> {
+        self.rollback_in_place()
+    }
+
+    fn rollback_in_place(&mut self) -> ArtifactResult<()> {
+        let Some(backup_root) = &self.backup_root else {
+            return Ok(());
+        };
+        for name in self.moved_names.iter().rev() {
+            fs::rename(backup_root.join(name), self.artifact_root.join(name))?;
+        }
+        self.moved_names.clear();
+        fs::remove_dir(backup_root)?;
+        self.backup_root = None;
+        Ok(())
+    }
+
+    pub fn commit(self) -> ArtifactResult<()> {
+        if let Some(backup_root) = self.backup_root {
+            fs::remove_dir_all(backup_root)?;
+        }
+        Ok(())
+    }
+}
+
+#[must_use]
+pub fn snapshot_evidence(context: &VerifiedGameContext) -> Vec<ArtifactEvidence> {
+    let identity = context.evidence();
+    let mut evidence = identity
+        .sources
+        .iter()
+        .map(|source| ArtifactEvidence {
+            source: source.relative_path.clone(),
+            symbol: source.id.clone(),
+            purpose: "verified truth source used by this generation".into(),
+            bounded_excerpt: format!(
+                "kind={}; sha256={}; bytes={}",
+                source.kind, source.sha256, source.size_bytes
+            ),
+        })
+        .collect::<Vec<_>>();
+    evidence.extend(identity.indexes.iter().map(|index| ArtifactEvidence {
+        source: index.relative_root.clone(),
+        symbol: index.source_id.clone(),
+        purpose: format!(
+            "structured index via {} / {}",
+            index.indexer, index.provider
+        ),
+        bounded_excerpt: format!(
+            "files={}; csharpFiles={}; treeSha256={}",
+            index.file_count, index.cs_file_count, index.tree_sha256
+        ),
+    }));
+    evidence
+}
+
+impl ArtifactManifest {
+    pub fn validate(&self) -> ArtifactResult<()> {
+        if self.schema_version != ARTIFACT_MANIFEST_SCHEMA_VERSION {
+            return Err(ArtifactError::InvalidManifest(format!(
+                "unsupported schema version {}",
+                self.schema_version
+            )));
+        }
+        validate_safe_segment(&self.artifact_id)?;
+        if !self.producing_run_id.is_safe_segment() {
+            return Err(ArtifactError::UnsafeId(self.producing_run_id.0.clone()));
+        }
+        validate_sha256(&self.game_context.game_pack_sha256)?;
+        validate_sha256(&self.game_context.snapshot_id)?;
+        validate_sha256(&self.generation.inputs_sha256)?;
+        for file in &self.files {
+            let relative = normalize_relative_path(Path::new(&file.snapshot_relative_path))?;
+            if !relative.starts_with("files/") {
+                return Err(ArtifactError::UnsafeRelativePath(relative));
+            }
+            validate_sha256(&file.sha256)?;
+            if let Some(path) = &file.published_relative_path {
+                normalize_relative_path(Path::new(path))?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[must_use]
+pub fn sha256_bytes(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+fn validate_sha256(value: &str) -> ArtifactResult<()> {
+    if value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        Ok(())
+    } else {
+        Err(ArtifactError::InvalidManifest(format!(
+            "invalid SHA-256 `{value}`"
+        )))
+    }
+}
+
+fn validate_safe_segment(value: &str) -> ArtifactResult<()> {
+    if !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        Ok(())
+    } else {
+        Err(ArtifactError::UnsafeId(value.to_string()))
+    }
+}
+
+fn ensure_directory(path: &Path) -> ArtifactResult<()> {
+    reject_symlink_if_exists(path)?;
+    fs::create_dir(path).or_else(|error| {
+        if error.kind() == std::io::ErrorKind::AlreadyExists {
+            Ok(())
+        } else {
+            Err(error)
+        }
+    })?;
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() {
+        return Err(ArtifactError::Symlink(path.display().to_string()));
+    }
+    if !metadata.is_dir() {
+        return Err(ArtifactError::NotRegularFile(path.display().to_string()));
+    }
+    Ok(())
+}
+
+fn reject_symlink_if_exists(path: &Path) -> ArtifactResult<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            Err(ArtifactError::Symlink(path.display().to_string()))
+        }
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn normalize_relative_path(path: &Path) -> ArtifactResult<String> {
+    if path.is_absolute() || path.as_os_str().is_empty() {
+        return Err(ArtifactError::UnsafeRelativePath(
+            path.display().to_string(),
+        ));
+    }
+    let mut parts = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(part) => parts.push(part.to_string_lossy().into_owned()),
+            _ => {
+                return Err(ArtifactError::UnsafeRelativePath(
+                    path.display().to_string(),
+                ));
+            }
+        }
+    }
+    if parts.is_empty() {
+        return Err(ArtifactError::UnsafeRelativePath(
+            path.display().to_string(),
+        ));
+    }
+    Ok(parts.join("/"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::knowledge::test_support::fixture_game_context;
+
+    #[test]
+    fn publishes_immutable_manifest_and_hashes() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let context = fixture_game_context(temp.path(), &[], &[]);
+        let project = temp.path().join("project");
+        fs::create_dir_all(project.join("Generated")).unwrap();
+        let source = project.join("Generated/Demo.cs");
+        fs::write(&source, "class Demo {}").unwrap();
+        fs::create_dir_all(project.join("artifacts/Demo")).unwrap();
+        let legacy = project.join("artifacts/Demo/legacy.txt");
+        fs::write(&legacy, b"legacy").unwrap();
+        let store = ArtifactStore::new(project.clone());
+        let run_id = RunId::new();
+        let published = store
+            .publish(ArtifactPublishRequest {
+                artifact_id: "Demo".into(),
+                artifact_kind: "code".into(),
+                run_id: run_id.clone(),
+                game_context: ArtifactGameContext::from(&context),
+                evidence: Vec::new(),
+                generation: ArtifactGeneration {
+                    provider: "fixture".into(),
+                    model: "fixture".into(),
+                    inputs_sha256: sha256_bytes(b"fixture input"),
+                },
+                image_processing: None,
+                files: vec![ArtifactFileInput {
+                    role: "csharp".into(),
+                    source_path: source,
+                    published_relative_path: Some("Generated/Demo.cs".into()),
+                }],
+            })
+            .unwrap();
+
+        assert!(project.join(&published.artifact_manifest_ref).is_file());
+        assert_eq!(published.manifest_sha256.len(), 64);
+        let cleanup = store.begin_legacy_cleanup("Demo", &run_id).unwrap();
+        assert!(!legacy.exists());
+        cleanup.rollback().unwrap();
+        assert!(legacy.exists());
+        let cleanup = store.begin_legacy_cleanup("Demo", &run_id).unwrap();
+        cleanup.commit().unwrap();
+        assert!(!legacy.exists());
+        assert!(
+            store
+                .publish(ArtifactPublishRequest {
+                    artifact_id: "Demo".into(),
+                    artifact_kind: "code".into(),
+                    run_id: run_id.clone(),
+                    game_context: ArtifactGameContext::from(&context),
+                    evidence: Vec::new(),
+                    generation: ArtifactGeneration {
+                        provider: "fixture".into(),
+                        model: "fixture".into(),
+                        inputs_sha256: sha256_bytes(b"fixture input"),
+                    },
+                    image_processing: None,
+                    files: vec![],
+                })
+                .is_err()
+        );
+
+        store.remove_published_run("Demo", &run_id).unwrap();
+        assert!(!project.join(&published.artifact_manifest_ref).exists());
+    }
+
+    #[test]
+    fn rejects_traversal_and_symlink_inputs() {
+        assert!(normalize_relative_path(Path::new("../outside")).is_err());
+        assert!(validate_safe_segment("bad/id").is_err());
+    }
+
+    #[test]
+    fn rejects_non_directory_artifact_ancestor() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let project = temp.path().join("project");
+        fs::create_dir_all(&project).unwrap();
+        let source = project.join("Demo.cs");
+        fs::write(&source, b"class Demo {}").unwrap();
+        fs::write(project.join("artifacts"), b"not a directory").unwrap();
+        let store = ArtifactStore::new(project);
+        let error = store
+            .publish(ArtifactPublishRequest {
+                artifact_id: "Demo".into(),
+                artifact_kind: "code".into(),
+                run_id: RunId::new(),
+                game_context: ArtifactGameContext {
+                    game_pack_id: "fixture".into(),
+                    game_pack_schema_version: 1,
+                    game_pack_sha256: sha256_bytes(b"pack"),
+                    snapshot_id: sha256_bytes(b"snapshot"),
+                    snapshot_schema_version: 1,
+                    sources: Vec::new(),
+                    indexes: Vec::new(),
+                    tool_versions: BTreeMap::new(),
+                },
+                evidence: Vec::new(),
+                generation: ArtifactGeneration {
+                    provider: "fixture".into(),
+                    model: "fixture".into(),
+                    inputs_sha256: sha256_bytes(b"input"),
+                },
+                image_processing: None,
+                files: vec![ArtifactFileInput {
+                    role: "csharp".into(),
+                    source_path: source,
+                    published_relative_path: Some("Demo.cs".into()),
+                }],
+            })
+            .unwrap_err();
+        assert!(matches!(error, ArtifactError::NotRegularFile(_)));
+    }
+}

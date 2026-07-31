@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/services/api";
-import { useJobProgress } from "@/hooks/useJobProgress";
+import { useRunProgress } from "@/hooks/useRunProgress";
 import { useProjectStore } from "@/stores/project";
 import { useWorkflowStore } from "@/stores/workflow";
 import { Button, Card, CardSection, Field, Notice } from "@/components/ui";
 import type {
   AssetItemType,
-  Job,
-  JobProgressEvent,
+  RunRecord,
+  RunProgressEvent,
   PlanItem,
-  SubmitJobAck,
+  SubmitRunAck,
 } from "@/services/tauriApi";
 
 const ASSET_TYPES: AssetItemType[] = [
@@ -42,51 +42,52 @@ export function SingleAssetWorkflowCard() {
   const [planItem, setPlanItem] = useState<PlanItem | null>(null);
   const [codeDelta, setCodeDelta] = useState("");
   const [codeResult, setCodeResult] = useState<{
-    csPath: string;
-    artifactCsPath?: string | null;
-    rawPath: string;
-    extractedChars: number;
-    pngPath?: string | null;
+    artifactManifestRef: string;
+    manifestSha256: string;
+    artifactId: string;
+    entityName: string;
   } | null>(null);
 
-  const planJobIdRef = useRef<string | null>(null);
-  const codeJobIdRef = useRef<string | null>(null);
+  const planRunIdRef = useRef<string | null>(null);
+  const codeRunIdRef = useRef<string | null>(null);
 
-  planJobIdRef.current = wfStore.planJobId;
-  codeJobIdRef.current = wfStore.codeJobId;
+  planRunIdRef.current = wfStore.planRunId;
+  codeRunIdRef.current = wfStore.codeRunId;
 
-  useJobProgress(planJobIdRef, handlePlanProgress);
-  useJobProgress(codeJobIdRef, handleCodeProgress);
+  useRunProgress(planRunIdRef, handlePlanProgress);
+  useRunProgress(codeRunIdRef, handleCodeProgress);
 
-  function clearPlanStore() { useWorkflowStore.getState().setPlanJobId(null); }
-  function clearCodeStore() { useWorkflowStore.getState().setCodeJobId(null); }
+  function clearPlanStore() { useWorkflowStore.getState().setPlanRunId(null); }
+  function clearCodeStore() { useWorkflowStore.getState().setCodeRunId(null); }
 
-  function handlePlanResult(job: Job) {
-    const result = job.result as { item?: PlanItem } | null;
-    if (result?.item) setPlanItem(result.item);
+  function handlePlanResult(run: RunRecord) {
+    if (run.result?.kind !== "plan") {
+      setError("plan run returned an incompatible result");
+      clearPlanStore();
+      return;
+    }
+    setPlanItem(run.result.item);
     setPhase("plan_done");
     clearPlanStore();
   }
 
-  function handleCodeResult(job: Job) {
-    const r = job.result as {
-      csPath?: string; artifactCsPath?: string | null;
-      rawPath?: string; extractedChars?: number; pngPath?: string | null;
-    } | null;
-    if (r?.csPath) setCodeResult({
-      csPath: r.csPath, artifactCsPath: r.artifactCsPath ?? null,
-      rawPath: r.rawPath ?? "", extractedChars: r.extractedChars ?? 0, pngPath: r.pngPath ?? null,
-    });
+  function handleCodeResult(run: RunRecord) {
+    if (run.result?.kind !== "artifact_production") {
+      setError("code run returned an incompatible result");
+      clearCodeStore();
+      return;
+    }
+    setCodeResult(run.result);
     setPhase("code_done");
     clearCodeStore();
   }
 
-  function handlePlanProgress(ev: JobProgressEvent) {
+  function handlePlanProgress(ev: RunProgressEvent) {
     if (ev.delta) setPlanDelta((prev) => prev + ev.delta);
     if (ev.stage === "completed") {
       void (async () => {
-        try { handlePlanResult((await api.getJob(ev.jobId)) as Job); }
-        catch (err) { setError(`fetch plan job: ${String(err)}`); }
+        try { handlePlanResult((await api.getRun(ev.runId)) as RunRecord); }
+        catch (err) { setError(`fetch plan run: ${String(err)}`); }
       })();
     } else if (
       ev.stage === "failed" || ev.stage.includes("error") ||
@@ -98,12 +99,12 @@ export function SingleAssetWorkflowCard() {
     }
   }
 
-  function handleCodeProgress(ev: JobProgressEvent) {
+  function handleCodeProgress(ev: RunProgressEvent) {
     if (ev.delta) setCodeDelta((prev) => prev + ev.delta);
     if (ev.stage === "completed") {
       void (async () => {
-        try { handleCodeResult((await api.getJob(ev.jobId)) as Job); }
-        catch (err) { setError(`fetch code job: ${String(err)}`); }
+        try { handleCodeResult((await api.getRun(ev.runId)) as RunRecord); }
+        catch (err) { setError(`fetch code run: ${String(err)}`); }
       })();
     } else if (ev.stage === "failed" || ev.stage.includes("error")) {
       setError(`code failed at ${ev.stage}: ${ev.message ?? ""}`);
@@ -112,17 +113,16 @@ export function SingleAssetWorkflowCard() {
     }
   }
 
-  // 挂载时检查 workflowStore 中是否有未完成的 job
-  // job.status type is "failed" | "completed" | "cancelled" — if it's NOT one of
-  // those (i.e. the job JSON has no status field yet), treat as still-running
+  // 挂载时检查 workflowStore 中是否有未完成的 run
   useEffect(() => {
-    if (wfStore.planJobId) {
+    const pendingPlanRunId = wfStore.planRunId;
+    if (pendingPlanRunId) {
       void (async () => {
         try {
-          const job = (await api.getJob(wfStore.planJobId!)) as Job;
-          if (job.status === "completed") {
-            handlePlanResult(job);
-          } else if (job.status !== "failed" && job.status !== "cancelled") {
+          const run = (await api.getRun(pendingPlanRunId)) as RunRecord;
+          if (run.status === "succeeded") {
+            handlePlanResult(run);
+          } else if (run.status !== "failed" && run.status !== "cancelled") {
             setPhase("planning");
           } else {
             clearPlanStore();
@@ -130,13 +130,14 @@ export function SingleAssetWorkflowCard() {
         } catch { clearPlanStore(); }
       })();
     }
-    if (wfStore.codeJobId) {
+    const pendingCodeRunId = wfStore.codeRunId;
+    if (pendingCodeRunId) {
       void (async () => {
         try {
-          const job = (await api.getJob(wfStore.codeJobId!)) as Job;
-          if (job.status === "completed") {
-            handleCodeResult(job);
-          } else if (job.status !== "failed" && job.status !== "cancelled") {
+          const run = (await api.getRun(pendingCodeRunId)) as RunRecord;
+          if (run.status === "succeeded") {
+            handleCodeResult(run);
+          } else if (run.status !== "failed" && run.status !== "cancelled") {
             setPhase("generating");
           } else {
             clearCodeStore();
@@ -152,11 +153,11 @@ export function SingleAssetWorkflowCard() {
     setError(null); setPlanDelta(""); setPlanItem(null);
     setCodeDelta(""); setCodeResult(null); setPhase("planning");
     try {
-      const ack = (await api.submitSingleAssetPlanJob({
+      const ack = (await api.submitSingleAssetPlanRun({
         requirements: requirements.trim(), asset_type: assetType,
-      })) as SubmitJobAck;
-      planJobIdRef.current = ack.jobId;
-      useWorkflowStore.getState().setPlanJobId(ack.jobId);
+      })) as SubmitRunAck;
+      planRunIdRef.current = ack.runId;
+      useWorkflowStore.getState().setPlanRunId(ack.runId);
     } catch (e: unknown) { setError(String(e)); setPhase("idle"); }
   }
 
@@ -168,9 +169,9 @@ export function SingleAssetWorkflowCard() {
         .filter(Boolean).join("\n\n");
       const name = planItem.name || planItem.id || "Unnamed";
       const needsImage = planItem.needs_image === true && planItem.type !== "custom_code";
-      let ack: SubmitJobAck;
+      let ack: SubmitRunAck;
       if (needsImage) {
-        ack = (await api.submitAssetGenerateJob({
+        ack = (await api.submitAssetGenerateRun({
           asset_request: {
             design_description: description, asset_type: planItem.type || "card",
             asset_name: name, image_paths: [], project_root: project.path,
@@ -179,19 +180,19 @@ export function SingleAssetWorkflowCard() {
           image_prompt: planItem.image_description?.trim()
             ? planItem.image_description.trim() : description,
           image_size: null,
-        })) as SubmitJobAck;
+        })) as SubmitRunAck;
       } else {
-        ack = (await api.submitCodeGenerateJob({
+        ack = (await api.submitCodeGenerateRun({
           mode: "custom_code",
           request: {
             name, description,
             implementation_notes: planItem.implementation_notes ?? "",
             project_root: project.path, skip_build: true,
           },
-        })) as SubmitJobAck;
+        })) as SubmitRunAck;
       }
-      codeJobIdRef.current = ack.jobId;
-      useWorkflowStore.getState().setCodeJobId(ack.jobId);
+      codeRunIdRef.current = ack.runId;
+      useWorkflowStore.getState().setCodeRunId(ack.runId);
     } catch (e: unknown) { setError(String(e)); setPhase("plan_done"); }
   }
 
@@ -240,15 +241,10 @@ export function SingleAssetWorkflowCard() {
         <div data-testid="single-asset-code-result">
         <CardSection title="code 结果">
           <div className="grid gap-2" style={{ fontSize: "12px" }}>
-            <div><span style={{ color: "var(--ink-mute)" }}>csPath:</span> <code>{codeResult.csPath}</code></div>
-            {codeResult.artifactCsPath && (
-              <div><span style={{ color: "var(--ink-mute)" }}>artifactCsPath:</span> <code>{codeResult.artifactCsPath}</code></div>
-            )}
-            <div><span style={{ color: "var(--ink-mute)" }}>rawPath:</span> <code>{codeResult.rawPath}</code></div>
-            <div><span style={{ color: "var(--ink-mute)" }}>extractedChars:</span> {codeResult.extractedChars}</div>
-            {codeResult.pngPath && (
-              <div><span style={{ color: "var(--ink-mute)" }}>pngPath:</span> <code>{codeResult.pngPath}</code></div>
-            )}
+            <div><span style={{ color: "var(--ink-mute)" }}>entity:</span> {codeResult.entityName}</div>
+            <div><span style={{ color: "var(--ink-mute)" }}>artifact:</span> <code>{codeResult.artifactId}</code></div>
+            <div><span style={{ color: "var(--ink-mute)" }}>manifest:</span> <code>{codeResult.artifactManifestRef}</code></div>
+            <div><span style={{ color: "var(--ink-mute)" }}>sha256:</span> <code>{codeResult.manifestSha256}</code></div>
           </div>
         </CardSection>
         </div>

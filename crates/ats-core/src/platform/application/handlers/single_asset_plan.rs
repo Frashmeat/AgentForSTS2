@@ -12,14 +12,14 @@ use futures_util::StreamExt;
 
 use super::code_generate::extract_first_code_block;
 use super::common::{
-    ProgressEvent, ProgressSink, emit_cancelled_mid_stream, finalize_with_error, is_cancelled,
-    transition_to_running,
+    FinalizeOutcome, ProgressEvent, ProgressSink, emit_cancelled_mid_stream, finalize_with_error,
+    finalize_with_success, is_cancelled, transition_to_running,
 };
 use crate::game_pack::LoadedGamePack;
 use crate::llm::{CompletionRequest, LlmClient, Message, MessageRole, StreamEvent};
 use crate::planning::PlanItem;
 use crate::platform::contracts::SubmitSingleAssetPlanRequest;
-use crate::platform::domain::{JobId, JobRepository, JobStatus};
+use crate::platform::domain::{RunId, RunRepository, RunResult, RunStatus, TokenUsage};
 
 const SYSTEM_PROMPT: &str = "你是 {{ game_name }} mod 开发的策划助手。\n\
 用户会给出一个自然语言需求和（可选的）资产类型，请输出**单个** PlanItem 的严格 JSON。\n\n\
@@ -47,19 +47,19 @@ JSON 字段（snake_case，全部必填，未涉及的字段输出空字符串�
 只输出 JSON 对象本体，不要附加说明、不要 markdown fence。\n";
 
 pub async fn run_single_asset_plan(
-    repo: Arc<dyn JobRepository>,
+    repo: Arc<dyn RunRepository>,
     llm: Arc<dyn LlmClient>,
     sink: Arc<dyn ProgressSink>,
-    job_id: JobId,
+    run_id: RunId,
     request: SubmitSingleAssetPlanRequest,
     pack: LoadedGamePack,
     items_dir: Option<PathBuf>,
 ) {
-    if transition_to_running(&repo, &job_id, &sink).await.is_err() {
+    if transition_to_running(&repo, &run_id, &sink).await.is_err() {
         return;
     }
     if request.requirements.trim().is_empty() {
-        finalize_with_error(&repo, &job_id, &sink, "requirements is empty").await;
+        finalize_with_error(&repo, &run_id, &sink, "requirements is empty").await;
         return;
     }
     if let Some(asset_type) = request.asset_type.as_deref()
@@ -69,7 +69,7 @@ pub async fn run_single_asset_plan(
     {
         finalize_with_error(
             &repo,
-            &job_id,
+            &run_id,
             &sink,
             &format!(
                 "game pack `{}` does not declare asset type `{}`",
@@ -96,7 +96,7 @@ pub async fn run_single_asset_plan(
     let mut stream = match llm.stream(completion_request).await {
         Ok(s) => s,
         Err(err) => {
-            finalize_with_error(&repo, &job_id, &sink, &err.to_string()).await;
+            finalize_with_error(&repo, &run_id, &sink, &err.to_string()).await;
             return;
         }
     };
@@ -108,8 +108,8 @@ pub async fn run_single_asset_plan(
     let mut tick: u32 = 0;
     while let Some(item) = stream.next().await {
         tick = tick.wrapping_add(1);
-        if tick.is_multiple_of(5) && is_cancelled(&repo, &job_id).await {
-            emit_cancelled_mid_stream(&sink, &job_id).await;
+        if tick.is_multiple_of(5) && is_cancelled(&repo, &run_id).await {
+            emit_cancelled_mid_stream(&sink, &run_id).await;
             return;
         }
         match item {
@@ -119,7 +119,7 @@ pub async fn run_single_asset_plan(
             Ok(StreamEvent::Delta { text }) => {
                 accumulated.push_str(&text);
                 sink.emit(ProgressEvent {
-                    job_id: job_id.clone(),
+                    run_id: run_id.clone(),
                     stage: "stream-delta".into(),
                     percent: None,
                     message: None,
@@ -132,17 +132,17 @@ pub async fn run_single_asset_plan(
                 usage_out = usage.output_tokens;
             }
             Err(err) => {
-                finalize_with_error(&repo, &job_id, &sink, &err.to_string()).await;
+                finalize_with_error(&repo, &run_id, &sink, &err.to_string()).await;
                 return;
             }
         }
     }
 
-    let job = match repo.get(&job_id).await {
+    let run = match repo.get(&run_id).await {
         Ok(j) => j,
         Err(_) => return,
     };
-    if matches!(job.status, JobStatus::Cancelled) {
+    if matches!(run.status, RunStatus::Cancelled) {
         return;
     }
 
@@ -151,7 +151,7 @@ pub async fn run_single_asset_plan(
         Err(err) => {
             finalize_with_error(
                 &repo,
-                &job_id,
+                &run_id,
                 &sink,
                 &format!(
                     "parse plan json: {err}; raw: {}",
@@ -164,13 +164,13 @@ pub async fn run_single_asset_plan(
     };
 
     // 把 PlanItem 落到 <items_dir>/<id>.json，让用户在工程目录里能看到 plan
-    // 产物。写失败不致命——job.result 仍可保留 item。
+    // 产物。写失败不致命——run.result 仍可保留 item。
     let item_file_path = if let Some(dir) = &items_dir {
         match persist_plan_item(dir, &plan_item).await {
             Ok(p) => Some(p),
             Err(err) => {
                 sink.emit(ProgressEvent {
-                    job_id: job_id.clone(),
+                    run_id: run_id.clone(),
                     stage: "items-write-warn".into(),
                     percent: None,
                     message: Some(format!("write items file failed: {err}")),
@@ -184,23 +184,32 @@ pub async fn run_single_asset_plan(
         None
     };
 
-    let mut job = job;
-    job.status = JobStatus::Completed;
-    job.completed_at = Some(chrono::Utc::now());
-    job.result = Some(serde_json::json!({
-        "model": model,
-        "item": plan_item,
-        "itemFilePath": item_file_path.as_ref().map(|p| p.display().to_string()),
-        "rawChars": accumulated.len(),
-        "usage": { "inputTokens": usage_in, "outputTokens": usage_out },
-    }));
-    let _ = repo.update(&job).await;
+    let item_id = plan_item.id.clone();
+    let item_file_ref = item_file_path.as_ref().and_then(|path| {
+        path.file_name()
+            .map(|name| format!("items/{}", name.to_string_lossy()))
+    });
+    let result = RunResult::Plan {
+        item: plan_item,
+        item_file_ref,
+        model,
+        usage: TokenUsage {
+            input_tokens: usage_in,
+            output_tokens: usage_out,
+        },
+    };
+    if !matches!(
+        finalize_with_success(&repo, &run_id, result).await,
+        FinalizeOutcome::Succeeded
+    ) {
+        return;
+    }
 
     sink.emit(ProgressEvent {
-        job_id,
+        run_id,
         stage: "completed".into(),
         percent: Some(1.0),
-        message: Some(format!("parsed plan item: {}", plan_item.id)),
+        message: Some(format!("parsed plan item: {item_id}")),
         delta: None,
     })
     .await;
@@ -314,9 +323,9 @@ mod tests {
         CompletionRequest, CompletionResponse, CompletionStream, FinishReason, LlmClient, LlmError,
         Usage,
     };
-    use crate::platform::application::JobApplicationService;
-    use crate::platform::domain::JobRepository;
-    use crate::platform::infra::FileJobRepository;
+    use crate::platform::application::RunApplicationService;
+    use crate::platform::domain::RunRepository;
+    use crate::platform::infra::FileRunRepository;
     use async_trait::async_trait;
     use futures_util::stream;
     use std::sync::Mutex;
@@ -354,10 +363,10 @@ mod tests {
         ]
     }
 
-    async fn wait_terminal(service: &JobApplicationService, id: &JobId) {
+    async fn wait_terminal(service: &RunApplicationService, id: &RunId) {
         for _ in 0..100 {
-            let job = service.get(id).await.unwrap();
-            if job.status.is_terminal() {
+            let run = service.get(id).await.unwrap();
+            if run.status.is_terminal() {
                 return;
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -400,12 +409,12 @@ mod tests {
         let history = td.path().join("history");
         std::fs::create_dir_all(&history).unwrap();
 
-        let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
+        let repo: Arc<dyn RunRepository> = Arc::new(FileRunRepository::new(history));
         let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
             events: Mutex::new(one_chunk(VALID_JSON)),
         });
         let sink = Arc::new(super::super::common::NoopProgressSink);
-        let service = JobApplicationService::new(repo, llm);
+        let service = RunApplicationService::new(repo, llm);
 
         let req = SubmitSingleAssetPlanRequest {
             requirements: "做一个开战获得力量的遗物".into(),
@@ -418,9 +427,9 @@ mod tests {
             .unwrap();
         wait_terminal(&service, &id).await;
 
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Completed);
-        let res = job.result.expect("result");
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Succeeded);
+        let res = serde_json::to_value(run.result.expect("result")).unwrap();
         assert_eq!(res["item"]["id"], "flame_relic_v1");
         assert_eq!(res["item"]["type"], "relic");
         assert_eq!(res["item"]["needs_image"], true);
@@ -435,12 +444,12 @@ mod tests {
         let wrapped =
             format!("当然，以下是您的方案：\n\n```json\n{VALID_JSON}\n```\n\n希望有帮助！");
 
-        let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
+        let repo: Arc<dyn RunRepository> = Arc::new(FileRunRepository::new(history));
         let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
             events: Mutex::new(one_chunk(&wrapped)),
         });
         let sink = Arc::new(super::super::common::NoopProgressSink);
-        let service = JobApplicationService::new(repo, llm);
+        let service = RunApplicationService::new(repo, llm);
 
         let req = SubmitSingleAssetPlanRequest {
             requirements: "测试 fence 容错".into(),
@@ -453,9 +462,9 @@ mod tests {
             .unwrap();
         wait_terminal(&service, &id).await;
 
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Completed);
-        let res = job.result.unwrap();
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Succeeded);
+        let res = serde_json::to_value(run.result.unwrap()).unwrap();
         assert_eq!(res["item"]["id"], "flame_relic_v1");
     }
 
@@ -467,12 +476,12 @@ mod tests {
 
         let prose = format!("好的，我给你一个建议方案。\n\n{VALID_JSON}\n\n如果需要调整告诉我。");
 
-        let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
+        let repo: Arc<dyn RunRepository> = Arc::new(FileRunRepository::new(history));
         let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
             events: Mutex::new(one_chunk(&prose)),
         });
         let sink = Arc::new(super::super::common::NoopProgressSink);
-        let service = JobApplicationService::new(repo, llm);
+        let service = RunApplicationService::new(repo, llm);
 
         let req = SubmitSingleAssetPlanRequest {
             requirements: "需求".into(),
@@ -485,8 +494,8 @@ mod tests {
             .unwrap();
         wait_terminal(&service, &id).await;
 
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Completed);
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Succeeded);
     }
 
     #[tokio::test]
@@ -495,12 +504,12 @@ mod tests {
         let history = td.path().join("history");
         std::fs::create_dir_all(&history).unwrap();
 
-        let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
+        let repo: Arc<dyn RunRepository> = Arc::new(FileRunRepository::new(history));
         let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
             events: Mutex::new(one_chunk("抱歉我不会输出 JSON。")),
         });
         let sink = Arc::new(super::super::common::NoopProgressSink);
-        let service = JobApplicationService::new(repo, llm);
+        let service = RunApplicationService::new(repo, llm);
 
         let req = SubmitSingleAssetPlanRequest {
             requirements: "需求".into(),
@@ -513,9 +522,13 @@ mod tests {
             .unwrap();
         wait_terminal(&service, &id).await;
 
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Failed);
-        assert!(job.error.unwrap_or_default().contains("parse plan json"));
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Failed);
+        assert!(
+            run.error_message()
+                .unwrap_or_default()
+                .contains("parse plan json")
+        );
     }
 
     #[tokio::test]
@@ -524,12 +537,12 @@ mod tests {
         let history = td.path().join("history");
         std::fs::create_dir_all(&history).unwrap();
 
-        let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
+        let repo: Arc<dyn RunRepository> = Arc::new(FileRunRepository::new(history));
         let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
             events: Mutex::new(vec![]),
         });
         let sink = Arc::new(super::super::common::NoopProgressSink);
-        let service = JobApplicationService::new(repo, llm);
+        let service = RunApplicationService::new(repo, llm);
 
         let req = SubmitSingleAssetPlanRequest {
             requirements: "   ".into(),
@@ -541,10 +554,10 @@ mod tests {
             .unwrap();
         wait_terminal(&service, &id).await;
 
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Failed);
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Failed);
         assert!(
-            job.error
+            run.error_message()
                 .unwrap_or_default()
                 .contains("requirements is empty")
         );
@@ -557,12 +570,12 @@ mod tests {
         std::fs::create_dir_all(&history).unwrap();
         let items = td.path().join("items");
 
-        let repo: Arc<dyn JobRepository> = Arc::new(FileJobRepository::new(history));
+        let repo: Arc<dyn RunRepository> = Arc::new(FileRunRepository::new(history));
         let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
             events: Mutex::new(one_chunk(VALID_JSON)),
         });
         let sink = Arc::new(super::super::common::NoopProgressSink);
-        let service = JobApplicationService::new(repo, llm);
+        let service = RunApplicationService::new(repo, llm);
 
         let req = SubmitSingleAssetPlanRequest {
             requirements: "测试 items 落盘".into(),
@@ -575,8 +588,8 @@ mod tests {
             .unwrap();
         wait_terminal(&service, &id).await;
 
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Completed);
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Succeeded);
 
         let expected = items.join("flame_relic_v1.json");
         assert!(
@@ -590,14 +603,14 @@ mod tests {
         assert_eq!(v["id"], "flame_relic_v1");
         assert_eq!(v["needs_image"], true);
 
-        let res = job.result.unwrap();
+        let res = serde_json::to_value(run.result.unwrap()).unwrap();
         assert!(
-            res["itemFilePath"]
+            res["itemFileRef"]
                 .as_str()
                 .unwrap_or("")
                 .ends_with("flame_relic_v1.json"),
-            "result.itemFilePath should point at the new file: {:?}",
-            res["itemFilePath"]
+            "result.itemFileRef should point at the new file: {:?}",
+            res["itemFileRef"]
         );
     }
 
@@ -632,12 +645,12 @@ mod tests {
     #[tokio::test]
     async fn single_asset_plan_rejects_type_not_declared_by_pack() {
         let td = tempfile::TempDir::new().unwrap();
-        let repo: Arc<dyn JobRepository> =
-            Arc::new(FileJobRepository::new(td.path().to_path_buf()));
+        let repo: Arc<dyn RunRepository> =
+            Arc::new(FileRunRepository::new(td.path().to_path_buf()));
         let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
             events: Mutex::new(Vec::new()),
         });
-        let service = JobApplicationService::new(repo, llm);
+        let service = RunApplicationService::new(repo, llm);
         let id = service
             .submit_single_asset_plan(
                 SubmitSingleAssetPlanRequest {
@@ -652,9 +665,13 @@ mod tests {
             .await
             .unwrap();
         wait_terminal(&service, &id).await;
-        let job = service.get(&id).await.unwrap();
-        assert_eq!(job.status, JobStatus::Failed);
-        assert!(job.error.unwrap_or_default().contains("does not declare"));
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Failed);
+        assert!(
+            run.error_message()
+                .unwrap_or_default()
+                .contains("does not declare")
+        );
     }
 
     #[test]

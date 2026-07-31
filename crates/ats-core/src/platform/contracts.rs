@@ -16,7 +16,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use super::domain::JobId;
+use super::domain::RunId;
 use crate::codegen::{AssetCodegenRequest, CustomCodegenRequest};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -120,6 +120,6 @@ pub struct SubmitTruthSnapshotRefreshRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SubmitJobAck {
-    pub job_id: JobId,
+pub struct SubmitRunAck {
+    pub run_id: RunId,
 }
