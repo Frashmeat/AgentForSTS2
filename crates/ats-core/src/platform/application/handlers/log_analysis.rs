@@ -11,9 +11,10 @@ use std::sync::Arc;
 use futures_util::StreamExt;
 
 use super::common::{
-    FinalizeOutcome, ProgressEvent, ProgressSink, emit_cancelled_mid_stream, finalize_with_error,
+    FinalizeOutcome, ProgressEvent, ProgressSink, emit_cancelled_mid_stream, finalize_with_failure,
     finalize_with_success, is_cancelled, transition_to_running,
 };
+use crate::failure::{ActionableFailure, FailureNormalizer};
 use crate::llm::{CompletionRequest, LlmClient, Message, MessageRole, StreamEvent};
 use crate::platform::contracts::SubmitLogAnalysisRequest;
 use crate::platform::domain::{RunId, RunRepository, RunResult, TokenUsage};
@@ -42,13 +43,46 @@ pub async fn run_log_analysis(
     // 1. 取日志内容：优先 inline text，其次读文件
     let raw_log = match resolve_log_text(&request).await {
         Ok(t) => t,
-        Err(err) => {
-            finalize_with_error(&repo, &run_id, &sink, &err).await;
+        Err(LogInputError::Missing) => {
+            finalize_with_failure(
+                &repo,
+                &run_id,
+                &sink,
+                ActionableFailure::invalid_input(
+                    "log_analysis.input",
+                    "Provide log text or select a log file.",
+                ),
+            )
+            .await;
+            return;
+        }
+        Err(LogInputError::Io(error)) => {
+            finalize_with_failure(
+                &repo,
+                &run_id,
+                &sink,
+                FailureNormalizer::io(
+                    "run.input_unavailable",
+                    "log_analysis.read",
+                    "The selected log file could not be read.",
+                    &error,
+                ),
+            )
+            .await;
             return;
         }
     };
     if raw_log.trim().is_empty() {
-        finalize_with_error(&repo, &run_id, &sink, "log content is empty").await;
+        finalize_with_failure(
+            &repo,
+            &run_id,
+            &sink,
+            ActionableFailure::invalid_input(
+                "log_analysis.input",
+                "The selected log content is empty.",
+            ),
+        )
+        .await;
         return;
     }
 
@@ -84,7 +118,13 @@ pub async fn run_log_analysis(
     let mut stream = match llm.stream(completion_request).await {
         Ok(s) => s,
         Err(err) => {
-            finalize_with_error(&repo, &run_id, &sink, &err.to_string()).await;
+            finalize_with_failure(
+                &repo,
+                &run_id,
+                &sink,
+                FailureNormalizer::llm("log_analysis.stream_start", &err),
+            )
+            .await;
             return;
         }
     };
@@ -120,7 +160,13 @@ pub async fn run_log_analysis(
                 usage_out = usage.output_tokens;
             }
             Err(err) => {
-                finalize_with_error(&repo, &run_id, &sink, &err.to_string()).await;
+                finalize_with_failure(
+                    &repo,
+                    &run_id,
+                    &sink,
+                    FailureNormalizer::llm("log_analysis.stream", &err),
+                )
+                .await;
                 return;
             }
         }
@@ -154,16 +200,21 @@ pub async fn run_log_analysis(
     .await;
 }
 
-async fn resolve_log_text(request: &SubmitLogAnalysisRequest) -> Result<String, String> {
+enum LogInputError {
+    Missing,
+    Io(std::io::Error),
+}
+
+async fn resolve_log_text(request: &SubmitLogAnalysisRequest) -> Result<String, LogInputError> {
     if let Some(text) = &request.log_text {
         return Ok(text.clone());
     }
     if let Some(path) = &request.log_path {
         return tokio::fs::read_to_string(path)
             .await
-            .map_err(|e| format!("read log file {}: {e}", path.display()));
+            .map_err(LogInputError::Io);
     }
-    Err("neither log_text nor log_path provided".into())
+    Err(LogInputError::Missing)
 }
 
 fn build_user_prompt(log: &str, context_hint: Option<&str>) -> String {
@@ -322,12 +373,9 @@ mod tests {
 
         let run = service.get(&id).await.unwrap();
         assert_eq!(run.status, RunStatus::Failed);
-        assert!(
-            run.error_message()
-                .as_deref()
-                .unwrap_or("")
-                .contains("neither log_text nor log_path")
-        );
+        let failure = run.failure.as_ref().unwrap();
+        assert_eq!(failure.code, "run.input_invalid");
+        assert_eq!(failure.stage, "log_analysis.input");
     }
 
     #[tokio::test]
@@ -348,12 +396,7 @@ mod tests {
 
         let run = service.get(&id).await.unwrap();
         assert_eq!(run.status, RunStatus::Failed);
-        assert!(
-            run.error_message()
-                .as_deref()
-                .unwrap_or("")
-                .contains("empty")
-        );
+        assert_eq!(run.failure.as_ref().unwrap().code, "run.input_invalid");
     }
 
     #[test]

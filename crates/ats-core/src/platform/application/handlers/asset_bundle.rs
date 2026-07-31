@@ -18,7 +18,7 @@ use crate::image_proc::{
     ImageQualitySpec, ImageVariantRole, ImageVariantSpec, ImageVariantTransform,
     analyze_png_quality, derive_png_variants,
 };
-use crate::llm::{CompletionRequest, LlmClient, Message, MessageRole, StreamEvent};
+use crate::llm::{CompletionRequest, LlmClient, LlmError, Message, MessageRole, StreamEvent};
 use crate::platform::domain::{RunId, RunRepository};
 
 const MAX_MODEL_ATTEMPTS: u32 = 2;
@@ -55,18 +55,13 @@ impl AssetBundleGeneration {
         runtime_image_source: Option<&Path>,
     ) -> Result<WrittenAssetBundle, AssetBundleError> {
         if request.asset_name.trim().is_empty() {
-            return Err(AssetBundleError::ModelOutput(
-                "asset_name must not be empty".into(),
-            ));
+            return Err(AssetBundleError::ModelOutput);
         }
-        let resource_spec = pack.resource_spec(&request.asset_type).ok_or_else(|| {
-            AssetBundleError::ModelOutput(format!(
-                "game pack `{}` does not declare structured asset type `{}`",
-                pack.id, request.asset_type
-            ))
-        })?;
+        let resource_spec = pack
+            .resource_spec(&request.asset_type)
+            .ok_or(AssetBundleError::ModelOutput)?;
         let entity_name = sanitize_entity_name(&request.asset_name);
-        let mod_id = load_mod_id(&request.project_root).map_err(AssetBundleError::Write)?;
+        let mod_id = load_mod_id(&request.project_root).map_err(|_| AssetBundleError::Write)?;
         let expected_key = format!(
             "{}-{}",
             mod_id.to_ascii_uppercase(),
@@ -114,11 +109,8 @@ impl AssetBundleGeneration {
             }
         }
 
-        let bundle = parsed_bundle.ok_or_else(|| {
-            AssetBundleError::ModelOutput(format!(
-                "model output remained invalid after {MAX_MODEL_ATTEMPTS} attempts: {last_model_error}"
-            ))
-        })?;
+        let _ = last_model_error;
+        let bundle = parsed_bundle.ok_or(AssetBundleError::ModelOutput)?;
         if is_cancelled(&self.repo, run_id).await {
             emit_cancelled_mid_stream(&self.sink, run_id).await;
             return Err(AssetBundleError::Cancelled);
@@ -134,13 +126,13 @@ impl AssetBundleGeneration {
             runtime_image_source,
         )
         .await
-        .map_err(AssetBundleError::Write)?;
+        .map_err(|_| AssetBundleError::Write)?;
         let cs_path = planned.cs_path.clone();
         let localization_paths = planned.localization_paths.clone();
         let runtime_image_paths = planned.runtime_image_paths.clone();
         let transaction = ProjectFileTransaction::apply(planned.writes)
             .await
-            .map_err(AssetBundleError::Write)?;
+            .map_err(|_| AssetBundleError::Write)?;
 
         self.sink
             .emit(ProgressEvent {
@@ -157,22 +149,16 @@ impl AssetBundleGeneration {
             .await;
         if is_cancelled(&self.repo, run_id).await {
             let rollback = transaction.rollback().await;
-            if let Err(err) = rollback {
-                return Err(AssetBundleError::Write(format!(
-                    "cancelled and failed to roll back generated files: {err}"
-                )));
+            if rollback.is_err() {
+                return Err(AssetBundleError::Write);
             }
             emit_cancelled_mid_stream(&self.sink, run_id).await;
             return Err(AssetBundleError::Cancelled);
         }
-        if let Err(err) = compile {
+        if compile.is_err() {
             let rollback = transaction.rollback().await;
-            return Err(AssetBundleError::Compile(match rollback {
-                Ok(()) => err,
-                Err(rollback_err) => {
-                    format!("{err}\nrollback generated files failed: {rollback_err}")
-                }
-            }));
+            let _ = rollback;
+            return Err(AssetBundleError::Compile);
         }
         Ok(WrittenAssetBundle {
             model: final_model,
@@ -205,7 +191,7 @@ impl AssetBundleGeneration {
             .llm
             .stream(request)
             .await
-            .map_err(|err| AssetBundleError::Stream(err.to_string()))?;
+            .map_err(AssetBundleError::Stream)?;
         let mut raw = String::new();
         let mut model = String::new();
         let mut usage_in = 0;
@@ -235,7 +221,7 @@ impl AssetBundleGeneration {
                     usage_in = usage.input_tokens;
                     usage_out = usage.output_tokens;
                 }
-                Err(err) => return Err(AssetBundleError::Stream(err.to_string())),
+                Err(err) => return Err(AssetBundleError::Stream(err)),
             }
         }
         Ok(RawCompletion {
@@ -274,10 +260,10 @@ impl WrittenAssetBundle {
 }
 
 pub(crate) enum AssetBundleError {
-    Stream(String),
-    ModelOutput(String),
-    Write(String),
-    Compile(String),
+    Stream(LlmError),
+    ModelOutput,
+    Write,
+    Compile,
     Cancelled,
 }
 

@@ -9,8 +9,11 @@ import {
   useState,
 } from "react";
 import { Badge, Button } from "@/components/ui";
+import { ActionableErrorNotice } from "@/components/ActionableErrorNotice";
 import { useAllRunProgress } from "@/hooks/useRunProgress";
 import { api } from "@/services/api";
+import { toActionableFailure } from "@/services/actionableFailure";
+import type { ActionableFailure } from "@/services/actionableFailure";
 import type {
   RunRecord,
   RunStatus,
@@ -30,7 +33,7 @@ export interface RunsListHandle {
 }
 
 interface Props {
-  onError: (msg: string) => void;
+  onError: (failure: ActionableFailure) => void;
 }
 
 export const RunsList = forwardRef<RunsListHandle, Props>(function RunsList(
@@ -46,7 +49,7 @@ export const RunsList = forwardRef<RunsListHandle, Props>(function RunsList(
       const items = (await api.listRuns()) as RunSummary[];
       setList(items);
     } catch (e: unknown) {
-      onError(String(e));
+      onError(toActionableFailure(e));
     }
   }
 
@@ -85,7 +88,7 @@ export const RunsList = forwardRef<RunsListHandle, Props>(function RunsList(
       const run = (await api.getRun(id)) as RunRecord;
       setActive(run);
     } catch (e: unknown) {
-      onError(String(e));
+      onError(toActionableFailure(e));
     }
   }
 
@@ -94,7 +97,7 @@ export const RunsList = forwardRef<RunsListHandle, Props>(function RunsList(
       await api.cancelRun(id);
       await refresh();
     } catch (e: unknown) {
-      onError(String(e));
+      onError(toActionableFailure(e));
     }
   }
 
@@ -231,13 +234,9 @@ export const RunsList = forwardRef<RunsListHandle, Props>(function RunsList(
             </button>
           </summary>
           {active.failure && (
-            <p
-              data-testid="run-detail-error"
-              className="mb-2 break-all"
-              style={{ fontSize: "12px", color: "var(--accent-deep)" }}
-            >
-              {active.failure.code}: {active.failure.message}
-            </p>
+            <div data-testid="run-detail-error">
+              <ActionableErrorNotice failure={active.failure} className="mb-2" />
+            </div>
           )}
           <pre className="pre-block max-h-96" data-testid="run-detail-result">
             {JSON.stringify(

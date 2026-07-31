@@ -58,32 +58,20 @@ pub async fn transition_to_running(
     Ok(())
 }
 
-pub async fn finalize_with_error(
+pub async fn finalize_with_failure(
     repo: &Arc<dyn RunRepository>,
     id: &RunId,
     sink: &Arc<dyn ProgressSink>,
-    message: &str,
-) {
-    finalize_with_error_diagnostic(repo, id, sink, message, None).await;
-}
-
-pub async fn finalize_with_error_diagnostic(
-    repo: &Arc<dyn RunRepository>,
-    id: &RunId,
-    sink: &Arc<dyn ProgressSink>,
-    message: &str,
-    diagnostic_ref: Option<String>,
+    failure: ActionableFailure,
 ) {
     sink.emit(ProgressEvent {
         run_id: id.clone(),
         stage: "failed".into(),
         percent: None,
-        message: Some(message.to_string()),
+        message: Some(failure.message.clone()),
         delta: None,
     })
     .await;
-    let mut failure = ActionableFailure::execution("execution", message);
-    failure.diagnostic_ref = diagnostic_ref;
     let _ = repo.transition(id, RunTransition::Fail { failure }).await;
 }
 

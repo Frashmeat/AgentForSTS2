@@ -2,8 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { Pencil, RefreshCw, Save, Search, X } from "lucide-react";
 
 import { Badge, Button, Card, CardSection, Notice } from "@/components/ui";
+import { ActionableErrorNotice } from "@/components/ActionableErrorNotice";
 import { useRunProgress } from "@/hooks/useRunProgress";
 import { api } from "@/services/api";
+import {
+  localValidationFailure,
+  toActionableFailure,
+} from "@/services/actionableFailure";
+import type { ActionableFailure } from "@/services/actionableFailure";
 import type {
   SettingsSnapshot,
   SubmitRunAck,
@@ -13,7 +19,7 @@ import { useProjectStore } from "@/stores/project";
 
 export function KnowledgeCard() {
   const [snapshot, setSnapshot] = useState<TruthSnapshotStatus | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ActionableFailure | null>(null);
   const [checking, setChecking] = useState(false);
   const [sts2Path, setSts2Path] = useState("");
   const [editingPath, setEditingPath] = useState(false);
@@ -64,7 +70,7 @@ export function KnowledgeCard() {
         : await api.getTruthSnapshotStatus();
       setSnapshot(result as TruthSnapshotStatus);
     } catch (caught: unknown) {
-      setError(String(caught));
+      setError(toActionableFailure(caught));
     }
   }
 
@@ -77,7 +83,7 @@ export function KnowledgeCard() {
       const ack = (await api.submitTruthSnapshotRefreshRun({ force })) as SubmitRunAck;
       setRefreshRunId(ack.runId);
     } catch (caught: unknown) {
-      setError(String(caught));
+      setError(toActionableFailure(caught));
       setRefreshBusy(false);
     }
   }
@@ -120,7 +126,7 @@ export function KnowledgeCard() {
         </Button>
       }
     >
-      {error && <Notice variant="error" title={error} />}
+      <ActionableErrorNotice failure={error} />
       {!project && <Notice variant="warn" title="Open a project to select its Game Pack." />}
       {!error && project && !snapshot && (
         <p style={{ color: "var(--ink-mute)", fontSize: "13px" }}>Loading...</p>
@@ -202,9 +208,12 @@ export function KnowledgeCard() {
                       try {
                         const found = (await api.discoverSts2Dll()) as string | null;
                         if (found) setSts2Path(found);
-                        else setError("sts2.dll was not found");
+                        else setError(localValidationFailure(
+                          "knowledge.discover",
+                          "sts2.dll was not found.",
+                        ));
                       } catch (caught) {
-                        setError(String(caught));
+                        setError(toActionableFailure(caught));
                       }
                     }}
                   >
@@ -222,7 +231,7 @@ export function KnowledgeCard() {
                         });
                         setEditingPath(false);
                       } catch (caught) {
-                        setError(String(caught));
+                        setError(toActionableFailure(caught));
                       }
                     }}
                   >

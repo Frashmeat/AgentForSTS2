@@ -3,15 +3,21 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRunProgress } from "@/hooks/useRunProgress";
-import { Button, Card, Field, Notice, PageHero } from "@/components/ui";
+import { Button, Card, Field, PageHero } from "@/components/ui";
+import { ActionableErrorNotice } from "@/components/ActionableErrorNotice";
 import { api } from "@/services/api";
+import {
+  localValidationFailure,
+  toActionableFailure,
+} from "@/services/actionableFailure";
+import type { ActionableFailure } from "@/services/actionableFailure";
 import type { RunRecord, SubmitRunAck } from "@/services/tauriApi";
 
 export function LogAnalysisPage() {
   const [logText, setLogText] = useState("");
   const [contextHint, setContextHint] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ActionableFailure | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
   const [stream, setStream] = useState("");
   const [report, setReport] = useState<string | null>(null);
@@ -30,18 +36,31 @@ export function LogAnalysisPage() {
           const run = await api.getRun(ev.runId) as RunRecord;
           const content = (run.result as { content?: string } | null)?.content ?? "";
           setReport(content);
-        } catch (err) { setError(String(err)); }
+        } catch (err) { setError(toActionableFailure(err)); }
       })();
     }
     if (ev.stage === "failed" || ev.stage.includes("error")) {
       setBusy(false);
-      setError(ev.message ?? "log analysis failed");
+      void (async () => {
+        try {
+          const run = (await api.getRun(ev.runId)) as RunRecord;
+          setError(run.failure ?? localValidationFailure(
+            "log_analysis.run",
+            "Log analysis failed without a valid failure payload.",
+          ));
+        } catch (caught: unknown) {
+          setError(toActionableFailure(caught));
+        }
+      })();
     }
   });
 
   async function handleSubmit() {
     if (!logText.trim()) {
-      setError("把 build log 贴进文本框");
+      setError(localValidationFailure(
+        "log_analysis.input",
+        "把 build log 贴进文本框。",
+      ));
       return;
     }
     setBusy(true);
@@ -55,7 +74,7 @@ export function LogAnalysisPage() {
       })) as SubmitRunAck;
       setRunId(ack.runId);
     } catch (e: unknown) {
-      setError(String(e));
+      setError(toActionableFailure(e));
     } finally {
       setBusy(false);
     }
@@ -82,7 +101,7 @@ export function LogAnalysisPage() {
       />
 
       <div className="space-y-4">
-        {error && <Notice variant="error" title={`Error: ${error}`} />}
+        <ActionableErrorNotice failure={error} />
 
         <Card eyebrow="input · build log" title="Submit log">
           <div className="space-y-3">

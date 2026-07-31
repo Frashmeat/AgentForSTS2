@@ -4,9 +4,11 @@
 
 use std::path::PathBuf;
 
+use crate::commands::failure::{CommandFailure, CommandResult};
 use ats_core::mod_analyzer::{ModAnalysisReport, analyze};
 
 #[tauri::command]
-pub fn analyze_mod_project(project_root: String) -> Result<ModAnalysisReport, String> {
-    analyze(&PathBuf::from(project_root)).map_err(|e| e.to_string())
+pub fn analyze_mod_project(project_root: String) -> CommandResult<ModAnalysisReport> {
+    analyze(&PathBuf::from(project_root))
+        .map_err(|_| CommandFailure::unclassified("mod_analyzer.analyze"))
 }

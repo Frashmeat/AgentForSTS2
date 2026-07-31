@@ -9,9 +9,15 @@ import {
   Notice,
   PageHero,
 } from "@/components/ui";
+import { ActionableErrorNotice } from "@/components/ActionableErrorNotice";
 import { useProjectStore } from "@/stores/project";
 import { useRunProgress } from "@/hooks/useRunProgress";
 import { api } from "@/services/api";
+import {
+  localValidationFailure,
+  toActionableFailure,
+} from "@/services/actionableFailure";
+import type { ActionableFailure } from "@/services/actionableFailure";
 import type {
   CustomCodegenRequest,
   RunRecord,
@@ -32,7 +38,7 @@ export function BatchGenerationPage() {
   const project = useProjectStore((s) => s.project);
   const [items, setItems] = useState<BatchItem[]>([emptyItem()]);
   const [failFast, setFailFast] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ActionableFailure | null>(null);
   const [busy, setBusy] = useState(false);
   const [runId, setRunId] = useState<string | null>(null);
   const [run, setRun] = useState<RunRecord | null>(null);
@@ -56,7 +62,7 @@ export function BatchGenerationPage() {
           const next = (await api.getRun(ev.runId)) as RunRecord;
           setRun(next);
           if (next.status === "failed" && next.failure) {
-            setError(`批量失败：${next.failure.message}`);
+            setError(next.failure);
           }
         } catch {
           // ignore
@@ -71,21 +77,22 @@ export function BatchGenerationPage() {
 
   async function handleSubmit() {
     if (!project) {
-      setError("先打开一个工程");
+      setError(localValidationFailure("batch.project", "先打开一个工程。"));
       return;
     }
     const validItems = items.filter((it) => it.name.trim() !== "");
     if (validItems.length === 0) {
-      setError("至少一个 item 需要 name");
+      setError(localValidationFailure("batch.items", "至少一个 item 需要 name。"));
       return;
     }
     const blankBodies = validItems.filter(
       (it) => !it.description.trim() && !it.implementation_notes.trim(),
     );
     if (blankBodies.length === validItems.length) {
-      setError(
-        "所有 item 都缺 description 与 implementation_notes —— LLM 会拿到空 prompt 并大概率失败。先填一份。",
-      );
+      setError(localValidationFailure(
+        "batch.items",
+        "所有 item 都缺 description 与 implementation notes，请先填写至少一项。",
+      ));
       return;
     }
     setBusy(true);
@@ -106,7 +113,7 @@ export function BatchGenerationPage() {
       })) as SubmitRunAck;
       setRunId(ack.runId);
     } catch (e: unknown) {
-      setError(String(e));
+      setError(toActionableFailure(e));
     } finally {
       setBusy(false);
     }
@@ -147,7 +154,7 @@ export function BatchGenerationPage() {
             去 Dashboard 打开一个工程。
           </Notice>
         )}
-        {error && <Notice variant="error" title={`Error: ${error}`} />}
+        <ActionableErrorNotice failure={error} />
 
         <Card eyebrow="items · request rows" title="Items">
           <div className="space-y-2">

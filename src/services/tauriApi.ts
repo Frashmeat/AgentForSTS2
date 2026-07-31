@@ -1,6 +1,30 @@
 // Tauri 端 API 实现 —— 签名权威，webApi.ts 必须实现同名同签名的所有导出。
 
 import { invoke } from "@tauri-apps/api/core";
+import { toActionableFailure } from "./actionableFailure";
+export {
+  isActionableFailure,
+  toActionableFailure,
+} from "./actionableFailure";
+export type {
+  ActionableFailure,
+  FailureCategory,
+  FailureContext,
+  FailureDiagnostic,
+  FailureIoKind,
+  RecoveryAction,
+} from "./actionableFailure";
+
+export async function invokeCommand<T>(
+  command: string,
+  args?: Record<string, unknown>,
+): Promise<T> {
+  try {
+    return await invoke<T>(command, args);
+  } catch (error: unknown) {
+    throw toActionableFailure(error);
+  }
+}
 
 // -------- Health --------
 
@@ -36,7 +60,7 @@ export interface HealthReport {
 }
 
 export function getHealth(): Promise<HealthReport> {
-  return invoke<HealthReport>("get_health");
+  return invokeCommand<HealthReport>("get_health");
 }
 
 // -------- Local Capabilities --------
@@ -52,11 +76,11 @@ export interface LocalCapabilities {
 }
 
 export function getLocalCapabilitiesSync(): Promise<LocalCapabilities> {
-  return invoke<LocalCapabilities>("get_local_capabilities_sync");
+  return invokeCommand<LocalCapabilities>("get_local_capabilities_sync");
 }
 
 export function getLocalCapabilitiesFull(): Promise<LocalCapabilities> {
-  return invoke<LocalCapabilities>("get_local_capabilities_full");
+  return invokeCommand<LocalCapabilities>("get_local_capabilities_full");
 }
 
 // -------- Truth Snapshot --------
@@ -95,11 +119,11 @@ export interface TruthSnapshotStatus {
 }
 
 export function getTruthSnapshotStatus(): Promise<TruthSnapshotStatus> {
-  return invoke<TruthSnapshotStatus>("get_truth_snapshot_status");
+  return invokeCommand<TruthSnapshotStatus>("get_truth_snapshot_status");
 }
 
 export function checkTruthSnapshotStatus(): Promise<TruthSnapshotStatus> {
-  return invoke<TruthSnapshotStatus>("check_truth_snapshot_status");
+  return invokeCommand<TruthSnapshotStatus>("check_truth_snapshot_status");
 }
 
 // -------- mod_analyzer --------
@@ -129,7 +153,7 @@ export interface ModAnalysisReport {
 }
 
 export function analyzeModProject(projectRoot: string): Promise<ModAnalysisReport> {
-  return invoke<ModAnalysisReport>("analyze_mod_project", { projectRoot });
+  return invokeCommand<ModAnalysisReport>("analyze_mod_project", { projectRoot });
 }
 
 // -------- Settings --------
@@ -172,11 +196,11 @@ export interface SettingsSnapshot {
 }
 
 export function getSettingsSnapshot(): Promise<SettingsSnapshot> {
-  return invoke<SettingsSnapshot>("get_settings_snapshot");
+  return invokeCommand<SettingsSnapshot>("get_settings_snapshot");
 }
 
 export function openConfigInEditor(): Promise<string> {
-  return invoke<string>("open_config_in_editor");
+  return invokeCommand<string>("open_config_in_editor");
 }
 
 export interface LlmPatch {
@@ -224,11 +248,11 @@ export interface SettingsPatch {
 }
 
 export function saveSettingsPatch(patch: SettingsPatch): Promise<SettingsSnapshot> {
-  return invoke<SettingsSnapshot>("save_settings_patch", { patch });
+  return invokeCommand<SettingsSnapshot>("save_settings_patch", { patch });
 }
 
 export function discoverSts2Dll(): Promise<string | null> {
-  return invoke<string | null>("discover_sts2_dll");
+  return invokeCommand<string | null>("discover_sts2_dll");
 }
 
 // -------- Image proc prewarm --------
@@ -240,7 +264,7 @@ export type PrewarmStatus =
   | { state: "failed"; message: string };
 
 export function imageProcStatus(): Promise<PrewarmStatus> {
-  return invoke<PrewarmStatus>("image_proc_status");
+  return invokeCommand<PrewarmStatus>("image_proc_status");
 }
 
 // -------- PlanArtifact --------
@@ -263,15 +287,15 @@ export interface ArtifactStatus {
 }
 
 export function planArtifactSave(status: ArtifactStatus): Promise<void> {
-  return invoke<void>("plan_artifact_save", { status });
+  return invokeCommand<void>("plan_artifact_save", { status });
 }
 
 export function planArtifactLoad(itemId: string): Promise<ArtifactStatus | null> {
-  return invoke<ArtifactStatus | null>("plan_artifact_load", { itemId });
+  return invokeCommand<ArtifactStatus | null>("plan_artifact_load", { itemId });
 }
 
 export function planArtifactList(): Promise<ArtifactStatus[]> {
-  return invoke<ArtifactStatus[]>("plan_artifact_list");
+  return invokeCommand<ArtifactStatus[]>("plan_artifact_list");
 }
 
 // -------- Planning --------
@@ -341,7 +365,7 @@ export function validatePlan(
   plan: ModPlan,
   strictness: ReviewStrictness = "balanced",
 ): Promise<PlanValidationResult> {
-  return invoke<PlanValidationResult>("validate_plan_cmd", { plan, strictness });
+  return invokeCommand<PlanValidationResult>("validate_plan_cmd", { plan, strictness });
 }
 
 export type BundleReviewStatus = "clear" | "needs_confirmation" | "split_recommended";
@@ -392,7 +416,7 @@ export function buildExecutionPlan(
   strictness: ReviewStrictness = "balanced",
   bundleDecisions: Record<string, BundleDecision> = {},
 ): Promise<ExecutionPlanPreview> {
-  return invoke<ExecutionPlanPreview>("build_execution_plan_cmd", {
+  return invokeCommand<ExecutionPlanPreview>("build_execution_plan_cmd", {
     plan,
     strictness,
     bundleDecisions,
@@ -435,33 +459,33 @@ export interface ModProjectRequest {
 }
 
 export function codegenAssetPrompt(request: AssetCodegenRequest): Promise<string> {
-  return invoke<string>("codegen_asset_prompt", { request });
+  return invokeCommand<string>("codegen_asset_prompt", { request });
 }
 
 export function codegenCustomCodePrompt(
   request: CustomCodegenRequest,
 ): Promise<string> {
-  return invoke<string>("codegen_custom_code_prompt", { request });
+  return invokeCommand<string>("codegen_custom_code_prompt", { request });
 }
 
 export function codegenAssetGroupPrompt(
   request: AssetGroupRequest,
 ): Promise<string> {
-  return invoke<string>("codegen_asset_group_prompt", { request });
+  return invokeCommand<string>("codegen_asset_group_prompt", { request });
 }
 
 export function codegenBuildPrompt(maxAttempts = 3): Promise<string> {
-  return invoke<string>("codegen_build_prompt", { maxAttempts });
+  return invokeCommand<string>("codegen_build_prompt", { maxAttempts });
 }
 
 export function codegenCreateModProjectPrompt(
   request: ModProjectRequest,
 ): Promise<string> {
-  return invoke<string>("codegen_create_mod_project_prompt", { request });
+  return invokeCommand<string>("codegen_create_mod_project_prompt", { request });
 }
 
 export function codegenPackagePrompt(): Promise<string> {
-  return invoke<string>("codegen_package_prompt");
+  return invokeCommand<string>("codegen_package_prompt");
 }
 
 // -------- LLM --------
@@ -505,7 +529,7 @@ export type StreamEvent =
   | { kind: "end"; finishReason: FinishReason; usage: Usage };
 
 export function llmComplete(request: CompletionRequest): Promise<CompletionResponse> {
-  return invoke<CompletionResponse>("llm_complete", { request });
+  return invokeCommand<CompletionResponse>("llm_complete", { request });
 }
 
 /**
@@ -519,13 +543,13 @@ export function llmStartStream(
   requestId: string,
   request: CompletionRequest,
 ): Promise<void> {
-  return invoke<void>("llm_start_stream", { requestId, request });
+  return invokeCommand<void>("llm_start_stream", { requestId, request });
 }
 
 /** Tauri 事件 payload —— 与 src-tauri/src/commands/llm.rs::StreamPayload 一致 */
 export type LlmStreamPayload =
   | { type: "event"; request_id: string; event: StreamEvent }
-  | { type: "error"; request_id: string; message: string }
+  | { type: "error"; request_id: string; failure: import("./actionableFailure").ActionableFailure }
   | { type: "done"; request_id: string };
 
 // -------- Project（仅桌面端）--------
@@ -553,7 +577,7 @@ export interface RecentEntry {
 }
 
 export function listRecentProjects(): Promise<RecentEntry[]> {
-  return invoke<RecentEntry[]>("list_recent_projects");
+  return invokeCommand<RecentEntry[]>("list_recent_projects");
 }
 
 export function createProject(
@@ -561,23 +585,23 @@ export function createProject(
   name: string,
   gameId: string,
 ): Promise<ProjectSnapshot> {
-  return invoke<ProjectSnapshot>("create_project", { parentDir, name, gameId });
+  return invokeCommand<ProjectSnapshot>("create_project", { parentDir, name, gameId });
 }
 
 export function openProject(path: string): Promise<ProjectSnapshot> {
-  return invoke<ProjectSnapshot>("open_project", { path });
+  return invokeCommand<ProjectSnapshot>("open_project", { path });
 }
 
 export function closeProject(): Promise<void> {
-  return invoke<void>("close_project");
+  return invokeCommand<void>("close_project");
 }
 
 export function currentProject(): Promise<ProjectSnapshot | null> {
-  return invoke<ProjectSnapshot | null>("current_project");
+  return invokeCommand<ProjectSnapshot | null>("current_project");
 }
 
 export function forgetRecentProject(path: string): Promise<void> {
-  return invoke<void>("forget_recent_project", { path });
+  return invokeCommand<void>("forget_recent_project", { path });
 }
 
 // -------- Platform Runs --------
@@ -604,15 +628,6 @@ export interface RunProgressFields {
   stage: string;
   percent: number | null;
   message: string | null;
-}
-
-export interface ActionableFailure {
-  schemaVersion: number;
-  code: string;
-  stage: string;
-  message: string;
-  retryable: boolean;
-  diagnosticRef?: string | null;
 }
 
 export type CancellationReason =
@@ -735,7 +750,7 @@ export interface RunRecord {
   completedAt: string | null;
   payload: unknown;
   progress: RunProgressFields | null;
-  failure: ActionableFailure | null;
+  failure: import("./actionableFailure").ActionableFailure | null;
   result: RunResult | null;
   attempts: number;
   timeline: RunTimelineEvent[];
@@ -748,7 +763,7 @@ export interface RunSummary {
   createdAt: string;
   completedAt: string | null;
   progress: RunProgressFields | null;
-  failure: ActionableFailure | null;
+  failure: import("./actionableFailure").ActionableFailure | null;
 }
 
 export interface SubmitTextGenerateRequest {
@@ -775,19 +790,19 @@ export interface RunProgressEvent {
 export function submitTextGenerateRun(
   request: SubmitTextGenerateRequest,
 ): Promise<SubmitRunAck> {
-  return invoke<SubmitRunAck>("submit_text_generate_run", { request });
+  return invokeCommand<SubmitRunAck>("submit_text_generate_run", { request });
 }
 
 export function getRun(id: string): Promise<RunRecord> {
-  return invoke<RunRecord>("get_run", { id });
+  return invokeCommand<RunRecord>("get_run", { id });
 }
 
 export function listRuns(): Promise<RunSummary[]> {
-  return invoke<RunSummary[]>("list_runs");
+  return invokeCommand<RunSummary[]>("list_runs");
 }
 
 export function cancelRun(id: string): Promise<void> {
-  return invoke<void>("cancel_run", { id });
+  return invokeCommand<void>("cancel_run", { id });
 }
 
 export type SubmitCodeGenerateRequest =
@@ -802,13 +817,13 @@ export interface SubmitBuildProjectRequest {
 export function submitCodeGenerateRun(
   request: SubmitCodeGenerateRequest,
 ): Promise<SubmitRunAck> {
-  return invoke<SubmitRunAck>("submit_code_generate_run", { request });
+  return invokeCommand<SubmitRunAck>("submit_code_generate_run", { request });
 }
 
 export function submitBuildProjectRun(
   request: SubmitBuildProjectRequest,
 ): Promise<SubmitRunAck> {
-  return invoke<SubmitRunAck>("submit_build_project_run", { request });
+  return invokeCommand<SubmitRunAck>("submit_build_project_run", { request });
 }
 
 // -------- Phase B/2.2.x RunRecord kinds（stage 3.5 第二轮 + 2.2.1 落地） --------
@@ -823,7 +838,7 @@ export interface SubmitLogAnalysisRequest {
 export function submitLogAnalysisRun(
   request: SubmitLogAnalysisRequest,
 ): Promise<SubmitRunAck> {
-  return invoke<SubmitRunAck>("submit_log_analysis_run", { request });
+  return invokeCommand<SubmitRunAck>("submit_log_analysis_run", { request });
 }
 
 export interface SubmitPackageProjectRequest {
@@ -835,7 +850,7 @@ export interface SubmitPackageProjectRequest {
 export function submitPackageProjectRun(
   request: SubmitPackageProjectRequest,
 ): Promise<SubmitRunAck> {
-  return invoke<SubmitRunAck>("submit_package_project_run", { request });
+  return invokeCommand<SubmitRunAck>("submit_package_project_run", { request });
 }
 
 export interface SubmitBatchCustomCodeRequest {
@@ -846,7 +861,7 @@ export interface SubmitBatchCustomCodeRequest {
 export function submitBatchCustomCodeRun(
   request: SubmitBatchCustomCodeRequest,
 ): Promise<SubmitRunAck> {
-  return invoke<SubmitRunAck>("submit_batch_custom_code_run", { request });
+  return invokeCommand<SubmitRunAck>("submit_batch_custom_code_run", { request });
 }
 
 export interface SubmitSingleAssetPlanRequest {
@@ -858,7 +873,7 @@ export interface SubmitSingleAssetPlanRequest {
 export function submitSingleAssetPlanRun(
   request: SubmitSingleAssetPlanRequest,
 ): Promise<SubmitRunAck> {
-  return invoke<SubmitRunAck>("submit_single_asset_plan_run", { request });
+  return invokeCommand<SubmitRunAck>("submit_single_asset_plan_run", { request });
 }
 
 export interface SubmitTruthSnapshotRefreshRequest {
@@ -868,7 +883,7 @@ export interface SubmitTruthSnapshotRefreshRequest {
 export function submitTruthSnapshotRefreshRun(
   request: SubmitTruthSnapshotRefreshRequest,
 ): Promise<SubmitRunAck> {
-  return invoke<SubmitRunAck>("submit_truth_snapshot_refresh_run", { request });
+  return invokeCommand<SubmitRunAck>("submit_truth_snapshot_refresh_run", { request });
 }
 
 export interface SubmitAssetGenerateRequest {
@@ -880,5 +895,5 @@ export interface SubmitAssetGenerateRequest {
 export function submitAssetGenerateRun(
   request: SubmitAssetGenerateRequest,
 ): Promise<SubmitRunAck> {
-  return invoke<SubmitRunAck>("submit_asset_generate_run", { request });
+  return invokeCommand<SubmitRunAck>("submit_asset_generate_run", { request });
 }

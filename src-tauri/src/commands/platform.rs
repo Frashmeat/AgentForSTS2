@@ -25,6 +25,7 @@ use ats_core::platform::{
 use tauri::{AppHandle, Emitter, State};
 
 use crate::AppConfig;
+use crate::commands::failure::{CommandFailure, CommandResult};
 use crate::commands::project::{ActiveProject, sync_project_local_props};
 
 const RUN_PROGRESS_EVENT: &str = "run-progress";
@@ -35,13 +36,13 @@ pub async fn submit_text_generate_run(
     config: State<'_, AppConfig>,
     active: State<'_, ActiveProject>,
     request: SubmitTextGenerateRequest,
-) -> Result<SubmitRunAck, String> {
+) -> CommandResult<SubmitRunAck> {
     let service = build_service(&config, &active)?;
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
     let run_id = service
         .submit_text_generate(request, sink)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|error| CommandFailure::run("run.submit_text", &error))?;
     Ok(SubmitRunAck { run_id })
 }
 
@@ -50,22 +51,22 @@ pub async fn get_run(
     _config: State<'_, AppConfig>,
     active: State<'_, ActiveProject>,
     id: String,
-) -> Result<RunRecord, String> {
+) -> CommandResult<RunRecord> {
     active_run_repository(&active)?
         .get(&RunId(id))
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| CommandFailure::run("run.get", &error))
 }
 
 #[tauri::command]
 pub async fn list_runs(
     _config: State<'_, AppConfig>,
     active: State<'_, ActiveProject>,
-) -> Result<Vec<RunSummary>, String> {
+) -> CommandResult<Vec<RunSummary>> {
     active_run_repository(&active)?
         .list()
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| CommandFailure::run("run.list", &error))
 }
 
 #[tauri::command]
@@ -73,10 +74,13 @@ pub async fn cancel_run(
     config: State<'_, AppConfig>,
     active: State<'_, ActiveProject>,
     id: String,
-) -> Result<(), String> {
+) -> CommandResult<()> {
     let service =
         RunApplicationService::new(active_run_repository(&active)?, build_llm_client(&config)?);
-    service.cancel(&RunId(id)).await.map_err(|e| e.to_string())
+    service
+        .cancel(&RunId(id))
+        .await
+        .map_err(|error| CommandFailure::run("run.cancel", &error))
 }
 
 #[tauri::command]
@@ -85,7 +89,7 @@ pub async fn submit_code_generate_run(
     config: State<'_, AppConfig>,
     active: State<'_, ActiveProject>,
     request: SubmitCodeGenerateRequest,
-) -> Result<SubmitRunAck, String> {
+) -> CommandResult<SubmitRunAck> {
     if let SubmitCodeGenerateRequest::Asset { request: asset } = &request {
         sync_requested_project(&config, &active, &asset.project_root)?;
     }
@@ -96,7 +100,7 @@ pub async fn submit_code_generate_run(
     let run_id = service
         .submit_code_generate(request, game_context, artifacts_dir, sink)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|error| CommandFailure::run("run.submit_code", &error))?;
     Ok(SubmitRunAck { run_id })
 }
 
@@ -107,15 +111,15 @@ pub async fn submit_asset_generate_run(
     active: State<'_, ActiveProject>,
     image_proc_state: State<'_, Arc<crate::commands::image_proc_state::ImageProcState>>,
     request: SubmitAssetGenerateRequest,
-) -> Result<SubmitRunAck, String> {
+) -> CommandResult<SubmitRunAck> {
     sync_requested_project(&config, &active, &request.asset_request.project_root)?;
     let service = build_service(&config, &active)?;
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
     let artifacts_dir = active_artifacts_dir(&active)?;
     let game_context = active_game_context(&config, &active)?;
     let settings = config.settings_snapshot();
-    let image_gen: Arc<dyn ImageGenClient> =
-        build_image_gen(&settings.image_gen).map_err(|e| e.to_string())?;
+    let image_gen: Arc<dyn ImageGenClient> = build_image_gen(&settings.image_gen)
+        .map_err(|error| CommandFailure::image("image.configure", &error))?;
     // BgRemoverChain：prewarm 阶段装好的 ML primary（feature on 且加载成功），
     // 没装则只用启发式 fallback。
     let primary = image_proc_state.primary();
@@ -131,7 +135,7 @@ pub async fn submit_asset_generate_run(
             sink,
         )
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|error| CommandFailure::run("run.submit_asset", &error))?;
     Ok(SubmitRunAck { run_id })
 }
 
@@ -141,23 +145,34 @@ pub async fn submit_truth_snapshot_refresh_run(
     config: State<'_, AppConfig>,
     active: State<'_, ActiveProject>,
     request: SubmitTruthSnapshotRefreshRequest,
-) -> Result<SubmitRunAck, String> {
+) -> CommandResult<SubmitRunAck> {
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
     let service = RunApplicationService::without_llm(active_run_repository(&active)?);
     let game_id = active_game_id(&active)?;
-    let registry = GamePackRegistry::built_in().map_err(|error| error.to_string())?;
+    let registry = GamePackRegistry::built_in()
+        .map_err(|_| CommandFailure::unclassified("truth_snapshot.registry"))?;
     let pack = registry
         .require(&game_id)
-        .map_err(|error| error.to_string())?
+        .map_err(|_| {
+            CommandFailure::invalid_input(
+                "truth_snapshot.game_pack",
+                "The active project references an unavailable Game Pack.",
+            )
+        })?
         .clone();
     let settings = config.settings_snapshot();
     let game_assembly = PathBuf::from(&settings.knowledge.sts2_dll_path);
     let local_inputs = BTreeMap::from([("game_assembly".into(), game_assembly)]);
-    validate_truth_source_inputs(&pack, &local_inputs).map_err(|error| error.to_string())?;
+    validate_truth_source_inputs(&pack, &local_inputs).map_err(|_| {
+        CommandFailure::invalid_input(
+            "truth_snapshot.inputs",
+            "The configured truth source inputs are incomplete or invalid.",
+        )
+    })?;
     let github = GitHubReleaseAssetFetcher::with_default_client(
         Some(settings.runtime.workstation.github_token.clone()).filter(|token| !token.is_empty()),
     )
-    .map_err(|error| format!("initialize GitHub release source: {error}"))?;
+    .map_err(|_| CommandFailure::unclassified("truth_snapshot.github_client"))?;
     #[cfg(feature = "e2e")]
     let github = match std::env::var("ATS_E2E_BASELIB_RELEASE_URL") {
         Ok(url) if !url.is_empty() => github.with_release_url_override(url),
@@ -167,13 +182,14 @@ pub async fn submit_truth_snapshot_refresh_run(
     let explicit_ilspycmd = std::env::var_os("ATS_E2E_ILSPYCMD_PATH").map(PathBuf::from);
     #[cfg(not(feature = "e2e"))]
     let explicit_ilspycmd = None;
-    let indexer = IlspycmdTruthIndexer::discover(explicit_ilspycmd)?;
+    let indexer = IlspycmdTruthIndexer::discover(explicit_ilspycmd)
+        .map_err(|_| CommandFailure::unclassified("truth_snapshot.indexer"))?;
     let refresher = TruthSnapshotRefresher::new(Arc::new(github), Arc::new(indexer));
     let store = TruthSnapshotStore::new(&config.status_snapshot().runtime_dir(), &pack);
     let run_id = service
         .submit_truth_snapshot_refresh(request, pack, store, local_inputs, refresher, sink)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|error| CommandFailure::run("run.submit_truth_snapshot", &error))?;
     Ok(SubmitRunAck { run_id })
 }
 
@@ -183,20 +199,25 @@ pub async fn submit_single_asset_plan_run(
     config: State<'_, AppConfig>,
     active: State<'_, ActiveProject>,
     request: SubmitSingleAssetPlanRequest,
-) -> Result<SubmitRunAck, String> {
+) -> CommandResult<SubmitRunAck> {
     let service = build_service(&config, &active)?;
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
-    let items_dir = active_items_dir(&active).ok();
+    let items_dir = Some(active_items_dir(&active)?);
     let game_id = active_game_id(&active)?;
     let pack = GamePackRegistry::built_in()
-        .map_err(|error| error.to_string())?
+        .map_err(|_| CommandFailure::unclassified("single_asset_plan.registry"))?
         .require(&game_id)
-        .map_err(|error| error.to_string())?
+        .map_err(|_| {
+            CommandFailure::invalid_input(
+                "single_asset_plan.game_pack",
+                "The active project references an unavailable Game Pack.",
+            )
+        })?
         .clone();
     let run_id = service
         .submit_single_asset_plan(request, pack, items_dir, sink)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|error| CommandFailure::run("run.submit_plan", &error))?;
     Ok(SubmitRunAck { run_id })
 }
 
@@ -206,7 +227,7 @@ pub async fn submit_batch_custom_code_run(
     config: State<'_, AppConfig>,
     active: State<'_, ActiveProject>,
     request: SubmitBatchCustomCodeRequest,
-) -> Result<SubmitRunAck, String> {
+) -> CommandResult<SubmitRunAck> {
     let service = build_service(&config, &active)?;
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
     let artifacts_dir = active_artifacts_dir(&active)?;
@@ -214,7 +235,7 @@ pub async fn submit_batch_custom_code_run(
     let run_id = service
         .submit_batch_custom_code(request, game_context, artifacts_dir, sink)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|error| CommandFailure::run("run.submit_batch", &error))?;
     Ok(SubmitRunAck { run_id })
 }
 
@@ -224,7 +245,7 @@ pub async fn submit_package_project_run(
     config: State<'_, AppConfig>,
     active: State<'_, ActiveProject>,
     request: SubmitPackageProjectRequest,
-) -> Result<SubmitRunAck, String> {
+) -> CommandResult<SubmitRunAck> {
     let service = build_service(&config, &active)?;
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
     let game_context = active_game_context(&config, &active)?;
@@ -233,7 +254,7 @@ pub async fn submit_package_project_run(
     let run_id = service
         .submit_package_project(request, game_context, project_root, mod_id, sink)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|error| CommandFailure::run("run.submit_package", &error))?;
     Ok(SubmitRunAck { run_id })
 }
 
@@ -243,13 +264,13 @@ pub async fn submit_log_analysis_run(
     config: State<'_, AppConfig>,
     active: State<'_, ActiveProject>,
     request: SubmitLogAnalysisRequest,
-) -> Result<SubmitRunAck, String> {
+) -> CommandResult<SubmitRunAck> {
     let service = build_service(&config, &active)?;
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
     let run_id = service
         .submit_log_analysis(request, sink)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|error| CommandFailure::run("run.submit_log_analysis", &error))?;
     Ok(SubmitRunAck { run_id })
 }
 
@@ -259,7 +280,7 @@ pub async fn submit_build_project_run(
     config: State<'_, AppConfig>,
     active: State<'_, ActiveProject>,
     request: SubmitBuildProjectRequest,
-) -> Result<SubmitRunAck, String> {
+) -> CommandResult<SubmitRunAck> {
     sync_requested_project(&config, &active, &request.project_root)?;
     let service = build_service(&config, &active)?;
     let sink: Arc<dyn ProgressSink> = Arc::new(TauriProgressSink::new(app));
@@ -267,7 +288,7 @@ pub async fn submit_build_project_run(
     let run_id = service
         .submit_build_project(request, pack, sink)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|error| CommandFailure::run("run.submit_build", &error))?;
     Ok(SubmitRunAck { run_id })
 }
 
@@ -275,65 +296,72 @@ fn sync_requested_project(
     config: &State<'_, AppConfig>,
     active: &State<'_, ActiveProject>,
     requested_root: &std::path::Path,
-) -> Result<(), String> {
+) -> CommandResult<()> {
     let (active_root, game_id) = {
         let guard = active
             .0
             .lock()
-            .map_err(|e| format!("active project lock poisoned: {e}"))?;
+            .map_err(|_| CommandFailure::unclassified("project.active_lock"))?;
         let project = guard
             .as_ref()
-            .ok_or_else(|| "no active project — open or create one first".to_string())?;
+            .ok_or_else(|| CommandFailure::project_not_open("project.sync"))?;
         (project.path().to_path_buf(), project.meta().game_id.clone())
     };
-    let canonical_active = std::fs::canonicalize(&active_root)
-        .map_err(|e| format!("resolve active project {}: {e}", active_root.display()))?;
-    let canonical_requested = std::fs::canonicalize(requested_root).map_err(|e| {
-        format!(
-            "resolve requested project {}: {e}",
-            requested_root.display()
+    let canonical_active = std::fs::canonicalize(&active_root).map_err(|error| {
+        CommandFailure::io(
+            "project.path_invalid",
+            "project.resolve_active",
+            "The active project path could not be resolved.",
+            &error,
+        )
+    })?;
+    let canonical_requested = std::fs::canonicalize(requested_root).map_err(|error| {
+        CommandFailure::io(
+            "project.path_invalid",
+            "project.resolve_requested",
+            "The requested project path could not be resolved.",
+            &error,
         )
     })?;
     if canonical_active != canonical_requested {
-        return Err(format!(
-            "requested project {} is not the active project {}",
-            requested_root.display(),
-            active_root.display()
+        return Err(CommandFailure::invalid_input(
+            "project.scope",
+            "The requested project is not the active project.",
         ));
     }
     sync_project_local_props(&active_root, &game_id, &config.settings_snapshot()).map(|_| ())
 }
 
-fn active_artifacts_dir(active: &State<'_, ActiveProject>) -> Result<PathBuf, String> {
+fn active_artifacts_dir(active: &State<'_, ActiveProject>) -> CommandResult<PathBuf> {
     let guard = active
         .0
         .lock()
-        .map_err(|e| format!("active project lock poisoned: {e}"))?;
+        .map_err(|_| CommandFailure::unclassified("project.active_lock"))?;
     let project = guard
         .as_ref()
-        .ok_or_else(|| "no active project — open or create one first".to_string())?;
+        .ok_or_else(|| CommandFailure::project_not_open("project.artifacts_dir"))?;
     Ok(project.artifacts_dir())
 }
 
-fn active_items_dir(active: &State<'_, ActiveProject>) -> Result<PathBuf, String> {
+fn active_items_dir(active: &State<'_, ActiveProject>) -> CommandResult<PathBuf> {
     let guard = active
         .0
         .lock()
-        .map_err(|e| format!("active project lock poisoned: {e}"))?;
+        .map_err(|_| CommandFailure::unclassified("project.active_lock"))?;
     let project = guard
         .as_ref()
-        .ok_or_else(|| "no active project — open or create one first".to_string())?;
+        .ok_or_else(|| CommandFailure::project_not_open("project.items_dir"))?;
     Ok(project.items_dir())
 }
 
-fn active_project_root(active: &State<'_, ActiveProject>) -> Result<PathBuf, String> {
+fn active_project_root(active: &State<'_, ActiveProject>) -> CommandResult<PathBuf> {
     let guard = active
         .0
         .lock()
-        .map_err(|error| format!("active project lock poisoned: {error}"))?;
+        .map_err(|_| CommandFailure::unclassified("project.active_lock"))?;
     Ok(guard
         .as_ref()
-        .ok_or_else(|| "no active project — open or create one first".to_string())?
+        .ok_or_else(|| CommandFailure::project_not_open("project.root"))?
         .path()
         .to_path_buf())
 }
@@ -341,45 +369,51 @@ fn active_project_root(active: &State<'_, ActiveProject>) -> Result<PathBuf, Str
 pub(crate) fn active_game_context(
     config: &State<'_, AppConfig>,
     active: &State<'_, ActiveProject>,
-) -> Result<VerifiedGameContext, String> {
+) -> CommandResult<VerifiedGameContext> {
     let game_id = active_game_id(active)?;
-    let registry = GamePackRegistry::built_in().map_err(|error| error.to_string())?;
+    let registry = GamePackRegistry::built_in()
+        .map_err(|_| CommandFailure::unclassified("project.game_pack_registry"))?;
     VerifiedGameContext::open_current(&config.status_snapshot().runtime_dir(), &registry, &game_id)
-        .map_err(|error| error.to_string())
+        .map_err(|_| CommandFailure::unclassified("project.game_context"))
 }
 
 fn active_game_pack(
     active: &State<'_, ActiveProject>,
-) -> Result<ats_core::game_pack::LoadedGamePack, String> {
+) -> CommandResult<ats_core::game_pack::LoadedGamePack> {
     let game_id = active_game_id(active)?;
     GamePackRegistry::built_in()
-        .map_err(|error| error.to_string())?
+        .map_err(|_| CommandFailure::unclassified("project.game_pack_registry"))?
         .require(&game_id)
         .cloned()
-        .map_err(|error| error.to_string())
+        .map_err(|_| {
+            CommandFailure::invalid_input(
+                "project.game_pack",
+                "The active project references an unavailable Game Pack.",
+            )
+        })
 }
 
-fn active_mod_id(active: &State<'_, ActiveProject>) -> Result<String, String> {
+fn active_mod_id(active: &State<'_, ActiveProject>) -> CommandResult<String> {
     let guard = active
         .0
         .lock()
-        .map_err(|error| format!("active project lock poisoned: {error}"))?;
+        .map_err(|_| CommandFailure::unclassified("project.active_lock"))?;
     Ok(guard
         .as_ref()
-        .ok_or_else(|| "no active project — open or create one first".to_string())?
+        .ok_or_else(|| CommandFailure::project_not_open("project.mod_id"))?
         .meta()
         .csharp_name
         .clone())
 }
 
-pub(crate) fn active_game_id(active: &State<'_, ActiveProject>) -> Result<String, String> {
+pub(crate) fn active_game_id(active: &State<'_, ActiveProject>) -> CommandResult<String> {
     let guard = active
         .0
         .lock()
-        .map_err(|e| format!("active project lock poisoned: {e}"))?;
+        .map_err(|_| CommandFailure::unclassified("project.active_lock"))?;
     Ok(guard
         .as_ref()
-        .ok_or_else(|| "no active project — open or create one first".to_string())?
+        .ok_or_else(|| CommandFailure::project_not_open("project.game_id"))?
         .meta()
         .game_id
         .clone())
@@ -388,7 +422,7 @@ pub(crate) fn active_game_id(active: &State<'_, ActiveProject>) -> Result<String
 fn build_service(
     config: &State<'_, AppConfig>,
     active: &State<'_, ActiveProject>,
-) -> Result<RunApplicationService, String> {
+) -> CommandResult<RunApplicationService> {
     let repo = active_run_repository(active)?;
     let llm = build_llm_client(config)?;
     Ok(RunApplicationService::new(repo, llm))
@@ -396,23 +430,23 @@ fn build_service(
 
 fn active_run_repository(
     active: &State<'_, ActiveProject>,
-) -> Result<Arc<dyn RunRepository>, String> {
+) -> CommandResult<Arc<dyn RunRepository>> {
     let history_dir = {
         let guard = active
             .0
             .lock()
-            .map_err(|e| format!("active project lock poisoned: {e}"))?;
+            .map_err(|_| CommandFailure::unclassified("project.active_lock"))?;
         let project = guard
             .as_ref()
-            .ok_or_else(|| "no active project — open or create one first".to_string())?;
+            .ok_or_else(|| CommandFailure::project_not_open("run.repository"))?;
         project.history_dir()
     };
     Ok(Arc::new(FileRunRepository::new(history_dir)))
 }
 
-fn build_llm_client(config: &State<'_, AppConfig>) -> Result<Arc<dyn LlmClient>, String> {
+fn build_llm_client(config: &State<'_, AppConfig>) -> CommandResult<Arc<dyn LlmClient>> {
     let settings = config.settings_snapshot();
-    build_from_config(&settings.llm).map_err(|e| e.to_string())
+    build_from_config(&settings.llm).map_err(|error| CommandFailure::llm("llm.configure", &error))
 }
 
 struct TauriProgressSink {

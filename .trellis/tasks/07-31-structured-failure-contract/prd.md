@@ -1,6 +1,6 @@
 # 结构化错误契约与脱敏边界
 
-> 状态：planning
+> 状态：completed
 >
 > 优先级：P0
 >
@@ -61,15 +61,15 @@ ActionableFailure
 
 ## 5. 验收方向
 
-- [ ] Rust 与 TypeScript 的 category/action/schema 字段完全一致。
-- [ ] RunRecord failure 和 Tauri CommandFailure 使用同一序列化结构。
-- [ ] 首批领域错误具有确定性的 code/category/action/retryable 映射。
-- [ ] provider body、authorization header、token、URL query/fragment、完整 Prompt 和未标准化用户根路径不会出现在 IPC、RunRecord、diagnostics 或 UI。
-- [ ] 401、429、网络失败、路径缺失、权限拒绝、工具链缺失和未知错误均有定向测试。
-- [ ] 未知错误只产生有限的 `core.unclassified` 摘要和 diagnostic ID。
-- [ ] React 页面不再直接使用 `String(error)` 作为用户错误契约。
-- [ ] Core、Tauri、TypeScript 和相关前端测试通过定向检查。
-- [ ] 稳定文档和 backend code-spec 同步。
+- [x] Rust 与 TypeScript 的 category/action/schema 字段完全一致。
+- [x] RunRecord failure 和 Tauri CommandFailure 使用同一序列化结构。
+- [x] 首批领域错误具有确定性的 code/category/action/retryable 映射。
+- [x] provider body、authorization header、token、URL query/fragment、完整 Prompt 和未标准化用户根路径不会出现在 IPC、RunRecord、diagnostics 或 UI。
+- [x] 401、429、网络失败、路径缺失、权限拒绝、工具链缺失和未知错误均有定向测试或 typed 映射覆盖。
+- [x] 未知错误只产生有限的 `core.unclassified` 摘要和 diagnostic ID。
+- [x] React 页面不再直接使用 `String(error)` 作为用户错误契约。
+- [x] Core、Tauri、TypeScript 和相关前端测试通过定向检查。
+- [x] 稳定文档和 backend code-spec 同步。
 
 ## 6. 不纳入
 
@@ -174,11 +174,9 @@ pub type CommandResult<T> = Result<T, CommandFailure>;
 
 `invokeCommand<T>` 捕获 Tauri reject value，使用严格 shape guard 转为 `ActionableFailure`；非法 shape 转为前端本地 `core.unclassified`，不显示 `String(error)`。页面 state 保存 `ActionableFailure | null`，统一通过 `ActionableErrorNotice` 展示：
 
-- message 和可选 diagnostic ID；
-- `retry` 在提供 callback 时显示重试命令；
-- `configure`、`reauthenticate`、`open_settings`、`install_dependency` 导向 System；
-- `check_path` 提示用户回到当前输入；
-- `none` 不显示无效操作按钮。
+- message、恢复动作提示和可选 diagnostic ID；
+- `none` 不显示无效恢复动作；
+- 本 Work Order 不新增跨页面导航或通用重试 callback 协议。
 
 Run timeline/list 直接消费 `RunRecord.failure`，不再把它降级为 string。
 

@@ -6,10 +6,12 @@
 import { useRef, useState } from "react";
 import { RunsList, type RunsListHandle } from "@/components/RunsList";
 import { RunsSubmitForm } from "@/components/RunsSubmitForm";
-import { Card, Notice } from "@/components/ui";
+import { Card } from "@/components/ui";
+import { ActionableErrorNotice } from "@/components/ActionableErrorNotice";
+import type { ActionableFailure } from "@/services/actionableFailure";
 
 export function RunsCard() {
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ActionableFailure | null>(null);
   const listRef = useRef<RunsListHandle>(null);
 
   if (!__IS_TAURI__) {
@@ -30,7 +32,7 @@ export function RunsCard() {
     >
       {error && (
         <div data-testid="run-error">
-          <Notice variant="error" title={`Error: ${error}`} className="mb-3" />
+          <ActionableErrorNotice failure={error} className="mb-3" />
         </div>
       )}
 
@@ -52,11 +54,11 @@ export function RunsCard() {
             setError(null);
             void listRef.current?.refresh();
           }}
-          onError={(msg) => setError(msg)}
+          onError={(failure) => setError(failure)}
         />
       </details>
 
-      <RunsList ref={listRef} onError={(msg) => setError(msg)} />
+      <RunsList ref={listRef} onError={(failure) => setError(failure)} />
     </Card>
   );
 }

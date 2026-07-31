@@ -16,16 +16,17 @@ use zip::CompressionMethod;
 use zip::write::SimpleFileOptions;
 
 use super::common::{
-    FinalizeOutcome, ProgressEvent, ProgressSink, finalize_with_error, finalize_with_success,
+    FinalizeOutcome, ProgressEvent, ProgressSink, finalize_with_failure, finalize_with_success,
     transition_to_running,
 };
+use crate::failure::{ActionableFailure, FailureNormalizer};
 use crate::game_pack::{PackageLayout, VerifiedGameContext};
 use crate::platform::artifact::{
     ArtifactFileInput, ArtifactGameContext, ArtifactGeneration, ArtifactPublishRequest,
     ArtifactStore, sha256_bytes, snapshot_evidence,
 };
 use crate::platform::contracts::SubmitPackageProjectRequest;
-use crate::platform::domain::{RunId, RunRepository, RunResult};
+use crate::platform::domain::{PackageError, RunId, RunRepository, RunResult};
 
 pub async fn run_package_project(
     repo: Arc<dyn RunRepository>,
@@ -46,29 +47,13 @@ pub async fn run_package_project(
         .unwrap_or_else(|_| sha256_bytes(b"package request"));
     let source = request.source_dir.clone();
     if !source.is_dir() {
-        finalize_with_error(
-            &repo,
-            &run_id,
-            &sink,
-            &format!("source_dir is not a directory: {}", source.display()),
-        )
-        .await;
+        fail_package(&repo, &run_id, &sink, PackageError::SourceMissing).await;
         return;
     }
 
     let output = resolve_output_path(&request);
     if output.is_dir() {
-        finalize_with_error(
-            &repo,
-            &run_id,
-            &sink,
-            &format!(
-                "output_path 指向已存在的目录: {} —— 应该传完整 .zip 文件路径，如 {}\\release.zip",
-                output.display(),
-                output.display()
-            ),
-        )
-        .await;
+        fail_package(&repo, &run_id, &sink, PackageError::OutputInvalid).await;
         return;
     }
     sink.emit(ProgressEvent {
@@ -101,11 +86,11 @@ pub async fn run_package_project(
     let (stats, output_transaction) = match result {
         Ok(Ok(s)) => s,
         Ok(Err(err)) => {
-            finalize_with_error(&repo, &run_id, &sink, &format!("zip: {err}")).await;
+            fail_package(&repo, &run_id, &sink, err).await;
             return;
         }
-        Err(err) => {
-            finalize_with_error(&repo, &run_id, &sink, &format!("join blocking: {err}")).await;
+        Err(_) => {
+            fail_package(&repo, &run_id, &sink, PackageError::Worker).await;
             return;
         }
     };
@@ -135,18 +120,13 @@ pub async fn run_package_project(
         .await
     {
         Ok(published) => published,
-        Err(error) => {
-            let rollback = output_transaction.rollback();
-            finalize_with_error(
+        Err(_) => {
+            let _ = output_transaction.rollback();
+            finalize_with_failure(
                 &repo,
                 &run_id,
                 &sink,
-                &match rollback {
-                    Ok(()) => format!("publish package manifest: {error}"),
-                    Err(rollback_error) => format!(
-                        "publish package manifest: {error}; rollback package output failed: {rollback_error}"
-                    ),
-                },
+                ActionableFailure::unclassified("package.publish"),
             )
             .await;
             return;
@@ -154,19 +134,14 @@ pub async fn run_package_project(
     };
     let legacy_cleanup = match store.begin_legacy_cleanup(&artifact_id, &run_id) {
         Ok(cleanup) => cleanup,
-        Err(error) => {
+        Err(_) => {
             let _ = store.remove_published_run(&artifact_id, &run_id);
-            let rollback = output_transaction.rollback();
-            finalize_with_error(
+            let _ = output_transaction.rollback();
+            finalize_with_failure(
                 &repo,
                 &run_id,
                 &sink,
-                &match rollback {
-                    Ok(()) => format!("prepare legacy artifact cleanup: {error}"),
-                    Err(rollback_error) => format!(
-                        "prepare legacy artifact cleanup: {error}; rollback package output failed: {rollback_error}"
-                    ),
-                },
+                ActionableFailure::unclassified("package.cleanup"),
             )
             .await;
             return;
@@ -206,6 +181,21 @@ pub async fn run_package_project(
     .await;
 }
 
+async fn fail_package(
+    repo: &Arc<dyn RunRepository>,
+    run_id: &RunId,
+    sink: &Arc<dyn ProgressSink>,
+    error: PackageError,
+) {
+    finalize_with_failure(
+        repo,
+        run_id,
+        sink,
+        FailureNormalizer::package("package", &error),
+    )
+    .await;
+}
+
 fn resolve_output_path(request: &SubmitPackageProjectRequest) -> PathBuf {
     if let Some(p) = &request.output_path {
         return p.clone();
@@ -240,54 +230,51 @@ fn zip_package_layout(
     mod_id: &str,
     compression_level: Option<i32>,
     run_id: &RunId,
-) -> Result<(ZipStats, PackageOutputTransaction), String> {
+) -> Result<(ZipStats, PackageOutputTransaction), PackageError> {
     let tmp_path = sibling_work_path(output_path, "partial", run_id)?;
     let backup_path = sibling_work_path(output_path, "previous", run_id)?;
     if backup_path.exists() {
-        return Err(format!(
-            "package backup path already exists: {}",
-            backup_path.display()
-        ));
+        return Err(PackageError::OutputInvalid);
     }
     match zip_to_tmp(source_dir, &tmp_path, layout, mod_id, compression_level) {
         Ok(stats) => {
             let backup = match std::fs::symlink_metadata(output_path) {
                 Ok(metadata) if metadata.file_type().is_symlink() => {
                     let _ = std::fs::remove_file(&tmp_path);
-                    return Err(format!(
-                        "package output may not be a symbolic link: {}",
-                        output_path.display()
-                    ));
+                    return Err(PackageError::OutputInvalid);
                 }
                 Ok(metadata) if metadata.is_file() => {
-                    std::fs::rename(output_path, &backup_path).map_err(|error| {
+                    std::fs::rename(output_path, &backup_path).map_err(|source| {
                         let _ = std::fs::remove_file(&tmp_path);
-                        format!("backup existing package {}: {error}", output_path.display())
+                        PackageError::Io {
+                            operation: "backup_output",
+                            source,
+                        }
                     })?;
                     Some(backup_path)
                 }
                 Ok(_) => {
                     let _ = std::fs::remove_file(&tmp_path);
-                    return Err(format!(
-                        "package output is not a regular file: {}",
-                        output_path.display()
-                    ));
+                    return Err(PackageError::OutputInvalid);
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-                Err(error) => {
+                Err(source) => {
                     let _ = std::fs::remove_file(&tmp_path);
-                    return Err(format!(
-                        "inspect package output {}: {error}",
-                        output_path.display()
-                    ));
+                    return Err(PackageError::Io {
+                        operation: "inspect_output",
+                        source,
+                    });
                 }
             };
-            if let Err(error) = std::fs::rename(&tmp_path, output_path) {
+            if let Err(source) = std::fs::rename(&tmp_path, output_path) {
                 if let Some(previous) = &backup {
                     let _ = std::fs::rename(previous, output_path);
                 }
                 let _ = std::fs::remove_file(&tmp_path);
-                return Err(format!("rename to {}: {error}", output_path.display()));
+                return Err(PackageError::Io {
+                    operation: "publish_output",
+                    source,
+                });
             }
             Ok((
                 stats,
@@ -310,49 +297,48 @@ struct PackageOutputTransaction {
 }
 
 impl PackageOutputTransaction {
-    fn rollback(self) -> Result<(), String> {
+    fn rollback(self) -> Result<(), PackageError> {
         match std::fs::remove_file(&self.output_path) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(format!(
-                    "remove package output {}: {error}",
-                    self.output_path.display()
-                ));
+            Err(source) => {
+                return Err(PackageError::Io {
+                    operation: "remove_output",
+                    source,
+                });
             }
         }
         if let Some(backup_path) = self.backup_path {
-            std::fs::rename(&backup_path, &self.output_path).map_err(|error| {
-                format!(
-                    "restore package backup {} -> {}: {error}",
-                    backup_path.display(),
-                    self.output_path.display()
-                )
+            std::fs::rename(&backup_path, &self.output_path).map_err(|source| {
+                PackageError::Io {
+                    operation: "restore_output",
+                    source,
+                }
             })?;
         }
         Ok(())
     }
 
-    fn commit(self) -> Result<(), String> {
+    fn commit(self) -> Result<(), PackageError> {
         if let Some(backup_path) = self.backup_path {
-            std::fs::remove_file(&backup_path).map_err(|error| {
-                format!("remove package backup {}: {error}", backup_path.display())
+            std::fs::remove_file(&backup_path).map_err(|source| PackageError::Io {
+                operation: "remove_backup",
+                source,
             })?;
         }
         Ok(())
     }
 }
 
-fn sibling_work_path(output_path: &Path, role: &str, run_id: &RunId) -> Result<PathBuf, String> {
+fn sibling_work_path(
+    output_path: &Path,
+    role: &str,
+    run_id: &RunId,
+) -> Result<PathBuf, PackageError> {
     let file_name = output_path
         .file_name()
         .and_then(|name| name.to_str())
-        .ok_or_else(|| {
-            format!(
-                "package output has no valid file name: {}",
-                output_path.display()
-            )
-        })?;
+        .ok_or(PackageError::OutputInvalid)?;
     Ok(output_path.with_file_name(format!(".{file_name}.{role}-{}", run_id.0)))
 }
 
@@ -362,15 +348,19 @@ fn zip_to_tmp(
     layout: &PackageLayout,
     mod_id: &str,
     compression_level: Option<i32>,
-) -> Result<ZipStats, String> {
+) -> Result<ZipStats, PackageError> {
     if let Some(parent) = output_path.parent()
         && !parent.as_os_str().is_empty()
     {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("create output parent {}: {e}", parent.display()))?;
+        std::fs::create_dir_all(parent).map_err(|source| PackageError::Io {
+            operation: "create_output_parent",
+            source,
+        })?;
     }
-    let file =
-        File::create(output_path).map_err(|e| format!("create {}: {e}", output_path.display()))?;
+    let file = File::create(output_path).map_err(|source| PackageError::Io {
+        operation: "create_output",
+        source,
+    })?;
     let mut writer = zip::ZipWriter::new(file);
 
     let mut options = SimpleFileOptions::default()
@@ -390,44 +380,70 @@ fn zip_to_tmp(
     };
     let mut buffer = Vec::with_capacity(8192);
 
-    let canonical_source = std::fs::canonicalize(source_dir)
-        .map_err(|error| format!("resolve source {}: {error}", source_dir.display()))?;
+    let canonical_source =
+        std::fs::canonicalize(source_dir).map_err(|source| PackageError::Io {
+            operation: "resolve_source",
+            source,
+        })?;
     for declared in &layout.required_files {
         let rel_str = declared.replace("{mod_id}", mod_id);
         let path = source_dir.join(Path::new(&rel_str));
-        let metadata = std::fs::symlink_metadata(&path)
-            .map_err(|error| format!("required package file is missing `{rel_str}`: {error}"))?;
+        let metadata = std::fs::symlink_metadata(&path).map_err(|source| {
+            if source.kind() == std::io::ErrorKind::NotFound {
+                PackageError::RequiredFileMissing {
+                    relative_path: rel_str.clone(),
+                }
+            } else {
+                PackageError::Io {
+                    operation: "inspect_required_file",
+                    source,
+                }
+            }
+        })?;
         if metadata.file_type().is_symlink() {
-            return Err(format!(
-                "required package file must not be a symbolic link: {rel_str}"
-            ));
+            return Err(PackageError::Symlink {
+                relative_path: rel_str,
+            });
         }
         if !metadata.is_file() {
-            return Err(format!("required package path is not a file: {rel_str}"));
+            return Err(PackageError::NotRegularFile {
+                relative_path: rel_str,
+            });
         }
-        let canonical = std::fs::canonicalize(&path)
-            .map_err(|error| format!("resolve required package file `{rel_str}`: {error}"))?;
+        let canonical = std::fs::canonicalize(&path).map_err(|source| PackageError::Io {
+            operation: "resolve_required_file",
+            source,
+        })?;
         if !canonical.starts_with(&canonical_source) {
-            return Err(format!(
-                "required package file escapes source root: {rel_str}"
-            ));
+            return Err(PackageError::PathEscape {
+                relative_path: rel_str,
+            });
         }
         writer
             .start_file(rel_str.clone(), options)
-            .map_err(|error| format!("start file {rel_str}: {error}"))?;
+            .map_err(|_| PackageError::Zip)?;
         buffer.clear();
         File::open(&canonical)
-            .map_err(|error| format!("open {}: {error}", canonical.display()))?
+            .map_err(|source| PackageError::Io {
+                operation: "open_required_file",
+                source,
+            })?
             .read_to_end(&mut buffer)
-            .map_err(|error| format!("read {}: {error}", canonical.display()))?;
+            .map_err(|source| PackageError::Io {
+                operation: "read_required_file",
+                source,
+            })?;
         writer
             .write_all(&buffer)
-            .map_err(|error| format!("write entry {rel_str}: {error}"))?;
+            .map_err(|source| PackageError::Io {
+                operation: "write_zip_entry",
+                source,
+            })?;
         stats.files += 1;
         stats.uncompressed_bytes += buffer.len() as u64;
     }
 
-    let final_file = writer.finish().map_err(|e| format!("finish zip: {e}"))?;
+    let final_file = writer.finish().map_err(|_| PackageError::Zip)?;
     stats.zip_bytes = final_file.metadata().map(|m| m.len()).unwrap_or(0);
     Ok(stats)
 }
@@ -638,11 +654,8 @@ mod tests {
         let run = service.get(&id).await.unwrap();
         assert_eq!(run.status, RunStatus::Failed);
         assert!(run.result.is_none());
-        assert!(
-            run.error_message()
-                .unwrap_or_default()
-                .contains("publish package manifest")
-        );
+        assert_eq!(run.failure.as_ref().unwrap().code, "core.unclassified");
+        assert_eq!(run.failure.as_ref().unwrap().stage, "package.publish");
         assert_eq!(std::fs::read(output).unwrap(), b"previous package");
     }
 
@@ -733,10 +746,14 @@ mod tests {
 
         let run = service.get(&id).await.unwrap();
         assert_eq!(run.status, RunStatus::Failed);
-        assert!(
-            run.error_message()
-                .unwrap_or_default()
-                .contains("required package file is missing")
+        let failure = run.failure.as_ref().unwrap();
+        assert_eq!(failure.code, "package.required_file_missing");
+        assert_eq!(
+            failure
+                .context
+                .as_ref()
+                .and_then(|context| context.project_relative_path.as_deref()),
+            Some("runtime/core.bin")
         );
         assert!(!out.exists());
     }
@@ -781,11 +798,7 @@ mod tests {
 
         let run = service.get(&id).await.unwrap();
         assert_eq!(run.status, RunStatus::Failed);
-        let err = run.error_message().unwrap_or_default();
-        assert!(
-            err.contains("已存在的目录"),
-            "expected dir hint, got: {err}"
-        );
+        assert_eq!(run.failure.as_ref().unwrap().code, "package.output_invalid");
     }
 
     #[tokio::test]
@@ -819,10 +832,6 @@ mod tests {
 
         let run = service.get(&id).await.unwrap();
         assert_eq!(run.status, RunStatus::Failed);
-        assert!(
-            run.error_message()
-                .unwrap_or_default()
-                .contains("not a directory")
-        );
+        assert_eq!(run.failure.as_ref().unwrap().code, "package.source_missing");
     }
 }

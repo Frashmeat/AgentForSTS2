@@ -16,6 +16,7 @@ use tauri::AppHandle;
 use tauri_plugin_shell::ShellExt;
 
 use crate::AppConfig;
+use crate::commands::failure::{CommandFailure, CommandResult};
 use crate::commands::project::{ActiveProject, sync_project_local_props_after_settings};
 
 #[derive(Debug, Clone, Serialize)]
@@ -170,12 +171,12 @@ pub fn save_settings_patch(
     config: tauri::State<'_, AppConfig>,
     active: tauri::State<'_, ActiveProject>,
     patch: SettingsPatch,
-) -> Result<SettingsSnapshot, String> {
+) -> CommandResult<SettingsSnapshot> {
     let new_settings = merge_settings_patch(config.settings_snapshot(), patch)?;
     let active_project = active
         .0
         .lock()
-        .map_err(|error| format!("active project lock poisoned: {error}"))?
+        .map_err(|_| CommandFailure::unclassified("settings.project_lock"))?
         .as_ref()
         .map(|project| (project.path().to_path_buf(), project.meta().game_id.clone()));
     if let Some((project_root, game_id)) = active_project
@@ -187,9 +188,15 @@ pub fn save_settings_patch(
     let path = status
         .path
         .clone()
-        .ok_or_else(|| "no config path resolved — can't save".to_string())?;
-    write_settings_atomic(&PathBuf::from(&path), &new_settings)
-        .map_err(|e| format!("write config: {e}"))?;
+        .ok_or_else(|| CommandFailure::settings_path("settings.save"))?;
+    write_settings_atomic(&PathBuf::from(&path), &new_settings).map_err(|error| {
+        CommandFailure::io(
+            "run.storage_failed",
+            "settings.write",
+            "The settings file could not be saved.",
+            &error,
+        )
+    })?;
     config.replace_settings(new_settings);
     Ok(get_settings_snapshot(config))
 }
@@ -197,7 +204,7 @@ pub fn save_settings_patch(
 fn merge_settings_patch(
     mut new_settings: Settings,
     patch: SettingsPatch,
-) -> Result<Settings, String> {
+) -> CommandResult<Settings> {
     if let Some(p) = patch.llm {
         if let Some(v) = p.provider {
             new_settings.llm.provider = v;
@@ -247,7 +254,7 @@ fn merge_settings_patch(
     {
         if !v.is_empty() {
             validate_godot_executable(Path::new(&v), Duration::from_secs(5))
-                .map_err(|error| format!("Godot path validation failed: {error}"))?;
+                .map_err(|error| CommandFailure::toolchain("settings.godot_validate", &error))?;
         }
         new_settings.toolchain.godot_exe_path = v;
     }
@@ -272,15 +279,15 @@ fn write_settings_atomic(path: &std::path::Path, settings: &Settings) -> std::io
 pub async fn open_config_in_editor(
     app: AppHandle,
     config: tauri::State<'_, AppConfig>,
-) -> Result<String, String> {
+) -> CommandResult<String> {
     let path = config
         .status_snapshot()
         .path
         .clone()
-        .ok_or_else(|| "no config path resolved — load 失败时不能打开".to_string())?;
+        .ok_or_else(|| CommandFailure::settings_path("settings.open"))?;
     let resolved = PathBuf::from(&path);
     if !resolved.is_file() {
-        return Err(format!("config file not found: {path}"));
+        return Err(CommandFailure::settings_path("settings.open"));
     }
     // shell.open 在 tauri 2.x 标记为 deprecated（建议用 tauri-plugin-opener）。
     // 现在还能用，等真切换 opener plugin 时一起改；CI 用 -D warnings 这里 allow
@@ -288,7 +295,7 @@ pub async fn open_config_in_editor(
     #[allow(deprecated)]
     app.shell()
         .open(path.clone(), None)
-        .map_err(|e| format!("shell::open: {e}"))?;
+        .map_err(|_| CommandFailure::unclassified("settings.shell_open"))?;
     Ok(path)
 }
 
@@ -321,8 +328,8 @@ fn masked_secret(raw: &str) -> String {
 }
 
 #[tauri::command]
-pub fn discover_sts2_dll() -> Result<Option<String>, String> {
-    Ok(ats_core::platform::discovery::discover_sts2_dll())
+pub fn discover_sts2_dll() -> Option<String> {
+    ats_core::platform::discovery::discover_sts2_dll()
 }
 #[cfg(test)]
 mod tests {

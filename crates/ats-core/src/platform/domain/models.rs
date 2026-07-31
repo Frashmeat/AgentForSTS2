@@ -6,11 +6,10 @@ use std::fmt;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::failure::ActionableFailure;
 use crate::planning::PlanItem;
 
 pub const RUN_SCHEMA_VERSION: u32 = 2;
-pub const FAILURE_SCHEMA_VERSION: u32 = 1;
-const MAX_FAILURE_MESSAGE_CHARS: usize = 2_048;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Hash)]
 #[serde(transparent)]
@@ -90,45 +89,6 @@ pub struct RunProgress {
     pub stage: String,
     pub percent: Option<f32>,
     pub message: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct ActionableFailure {
-    pub schema_version: u32,
-    pub code: String,
-    pub stage: String,
-    pub message: String,
-    pub retryable: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub diagnostic_ref: Option<String>,
-}
-
-impl ActionableFailure {
-    #[must_use]
-    pub fn execution(stage: impl Into<String>, message: impl Into<String>) -> Self {
-        let message = message.into();
-        Self {
-            schema_version: FAILURE_SCHEMA_VERSION,
-            code: "run.execution_failed".into(),
-            stage: stage.into(),
-            message: message.chars().take(MAX_FAILURE_MESSAGE_CHARS).collect(),
-            retryable: false,
-            diagnostic_ref: None,
-        }
-    }
-
-    #[must_use]
-    pub fn interrupted(stage: impl Into<String>) -> Self {
-        Self {
-            schema_version: FAILURE_SCHEMA_VERSION,
-            code: "run.interrupted".into(),
-            stage: stage.into(),
-            message: "The application stopped before this run completed.".into(),
-            retryable: true,
-            diagnostic_ref: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
@@ -520,35 +480,7 @@ impl RunRecord {
             }
         }
         if let Some(failure) = &self.failure {
-            if failure.schema_version != FAILURE_SCHEMA_VERSION {
-                return Err(format!(
-                    "unsupported failure schema version {}",
-                    failure.schema_version
-                ));
-            }
-            if failure.code.trim().is_empty()
-                || failure.stage.trim().is_empty()
-                || failure.message.trim().is_empty()
-            {
-                return Err("failure code, stage, and message must not be empty".into());
-            }
-            if failure.message.chars().count() > MAX_FAILURE_MESSAGE_CHARS {
-                return Err("failure message exceeds the persisted length limit".into());
-            }
-            if let Some(diagnostic_ref) = &failure.diagnostic_ref {
-                let expected = format!(".ats/diagnostics/{}", self.id.0);
-                if diagnostic_ref.contains('\\')
-                    || diagnostic_ref.contains(':')
-                    || diagnostic_ref.contains("//")
-                    || !(diagnostic_ref == &expected
-                        || diagnostic_ref.starts_with(&format!("{expected}/")))
-                    || diagnostic_ref.split('/').any(|component| {
-                        component.is_empty() || component == "." || component == ".."
-                    })
-                {
-                    return Err(format!("diagnosticRef must stay below {expected}"));
-                }
-            }
+            failure.validate()?;
         }
         Ok(())
     }
@@ -583,6 +515,7 @@ impl From<&RunRecord> for RunSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::failure::{FailureDiagnostic, MAX_FAILURE_MESSAGE_CHARS};
 
     fn text_result() -> RunResult {
         RunResult::TextGeneration {
@@ -653,23 +586,36 @@ mod tests {
     }
 
     #[test]
-    fn failure_diagnostic_ref_must_stay_below_its_run_directory() {
+    fn failure_diagnostic_id_must_be_a_safe_segment() {
         let mut run = RunRecord::new(RunKind::TextGenerate, serde_json::json!({}));
         run.apply_transition(RunTransition::Start, Utc::now())
             .unwrap();
-        let mut failure = ActionableFailure::execution("stream", "failed");
-        failure.diagnostic_ref = Some(format!(".ats/diagnostics/{}/trace.json", run.id.0));
+        let mut failure = ActionableFailure::unclassified("stream");
+        failure.diagnostic = Some(FailureDiagnostic::for_run(&run.id, "trace available"));
         run.apply_transition(RunTransition::Fail { failure }, Utc::now())
             .unwrap();
         assert!(run.validate().is_ok());
 
-        run.failure.as_mut().unwrap().diagnostic_ref = Some("../outside".into());
-        assert!(run.validate().unwrap_err().contains("diagnosticRef"));
+        run.failure
+            .as_mut()
+            .unwrap()
+            .diagnostic
+            .as_mut()
+            .unwrap()
+            .id = "../outside".into();
+        assert!(run.validate().unwrap_err().contains("diagnostic id"));
     }
 
     #[test]
-    fn execution_failure_message_is_bounded() {
-        let failure = ActionableFailure::execution("stream", "x".repeat(3_000));
+    fn failure_message_is_bounded() {
+        let failure = ActionableFailure::new(
+            "core.test",
+            crate::failure::FailureCategory::Internal,
+            "stream",
+            "x".repeat(3_000),
+            crate::failure::RecoveryAction::None,
+            false,
+        );
         assert_eq!(failure.message.chars().count(), MAX_FAILURE_MESSAGE_CHARS);
     }
 }

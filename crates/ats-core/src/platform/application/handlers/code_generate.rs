@@ -11,12 +11,13 @@ use super::asset_bundle::{
 };
 use super::asset_compile::AssetCompileValidator;
 use super::common::{
-    FinalizeOutcome, ProgressEvent, ProgressSink, emit_cancelled_mid_stream, finalize_with_error,
+    FinalizeOutcome, ProgressEvent, ProgressSink, emit_cancelled_mid_stream, finalize_with_failure,
     finalize_with_success, is_cancelled, transition_to_running,
 };
 use crate::codegen::{GenerationEvidence, PromptAssembler};
+use crate::failure::{ActionableFailure, FailureDiagnostic, FailureNormalizer};
 use crate::game_pack::{ValidationRule, VerifiedGameContext};
-use crate::llm::{CompletionRequest, LlmClient, Message, MessageRole, StreamEvent};
+use crate::llm::{CompletionRequest, LlmClient, LlmError, Message, MessageRole, StreamEvent};
 use crate::platform::artifact::{
     ArtifactFileInput, ArtifactGameContext, ArtifactGeneration, ArtifactPublishRequest,
     ArtifactStore, LegacyArtifactCleanup, sha256_bytes, snapshot_evidence,
@@ -41,12 +42,15 @@ pub(crate) async fn run_code_generate(
     }
 
     if let SubmitCodeGenerateRequest::Asset { request: asset } = &request {
-        if let Err(err) = validate_project_scope(&asset.project_root, &artifacts_dir) {
-            finalize_with_error(
+        if validate_project_scope(&asset.project_root, &artifacts_dir).is_err() {
+            finalize_with_failure(
                 &repo,
                 &run_id,
                 &sink,
-                &format!("invalid asset project scope: {err}"),
+                ActionableFailure::invalid_input(
+                    "code_generate.project_scope",
+                    "The asset project path is outside the active project.",
+                ),
             )
             .await;
             return;
@@ -56,11 +60,14 @@ pub(crate) async fn run_code_generate(
             .resource_spec(&asset.asset_type)
             .is_none()
         {
-            finalize_with_error(
+            finalize_with_failure(
                 &repo,
                 &run_id,
                 &sink,
-                &format!("unsupported asset_type: {}", asset.asset_type),
+                ActionableFailure::invalid_input(
+                    "code_generate.asset_type",
+                    "The selected Game Pack does not support this asset type.",
+                ),
             )
             .await;
             return;
@@ -78,8 +85,14 @@ pub(crate) async fn run_code_generate(
     };
     let (prompt, evidence) = match prompt_result {
         Ok(value) => value,
-        Err(err) => {
-            finalize_with_error(&repo, &run_id, &sink, &format!("prompt assembly: {err}")).await;
+        Err(_) => {
+            finalize_with_failure(
+                &repo,
+                &run_id,
+                &sink,
+                ActionableFailure::unclassified("code_generate.prompt"),
+            )
+            .await;
             return;
         }
     };
@@ -139,13 +152,14 @@ pub(crate) async fn run_code_generate(
             .await
             {
                 Ok(published) => published,
-                Err(error) => {
+                Err(_) => {
                     let rollback = artifact.rollback_writes().await;
-                    finalize_with_error(
+                    let _ = rollback;
+                    finalize_with_failure(
                         &repo,
                         &run_id,
                         &sink,
-                        &with_rollback_error(error, rollback),
+                        ActionableFailure::unclassified("code_generate.publish"),
                     )
                     .await;
                     return;
@@ -181,22 +195,36 @@ pub(crate) async fn run_code_generate(
             {
                 Ok(artifact) => artifact,
                 Err(GenerateError::Stream(err)) => {
-                    finalize_with_error(&repo, &run_id, &sink, &err).await;
-                    return;
-                }
-                Err(GenerateError::ModelOutput(err)) => {
-                    finalize_with_error(
+                    finalize_with_failure(
                         &repo,
                         &run_id,
                         &sink,
-                        &format!("invalid code model output: {err}"),
+                        FailureNormalizer::llm("code_generate.stream", &err),
                     )
                     .await;
                     return;
                 }
-                Err(GenerateError::Write(err)) => {
-                    finalize_with_error(&repo, &run_id, &sink, &format!("write artifact: {err}"))
-                        .await;
+                Err(GenerateError::ModelOutput) => {
+                    finalize_with_failure(
+                        &repo,
+                        &run_id,
+                        &sink,
+                        ActionableFailure::invalid_input(
+                            "code_generate.output",
+                            "The model returned invalid code. Retry generation.",
+                        ),
+                    )
+                    .await;
+                    return;
+                }
+                Err(GenerateError::Write) => {
+                    finalize_with_failure(
+                        &repo,
+                        &run_id,
+                        &sink,
+                        ActionableFailure::unclassified("code_generate.write"),
+                    )
+                    .await;
                     return;
                 }
                 Err(GenerateError::Cancelled) => return,
@@ -221,13 +249,14 @@ pub(crate) async fn run_code_generate(
             .await
             {
                 Ok(published) => published,
-                Err(error) => {
+                Err(_) => {
                     let rollback = artifact.rollback_writes().await;
-                    finalize_with_error(
+                    let _ = rollback;
+                    finalize_with_failure(
                         &repo,
                         &run_id,
                         &sink,
-                        &with_rollback_error(error, rollback),
+                        ActionableFailure::unclassified("code_generate.publish"),
                     )
                     .await;
                     return;
@@ -379,13 +408,6 @@ impl PublishedRunArtifact {
     }
 }
 
-fn with_rollback_error(message: String, rollback: Result<(), String>) -> String {
-    match rollback {
-        Ok(()) => message,
-        Err(error) => format!("{message}; rollback generated files failed: {error}"),
-    }
-}
-
 pub(crate) async fn finalize_asset_bundle_error(
     repo: &Arc<dyn RunRepository>,
     run_id: &RunId,
@@ -393,15 +415,23 @@ pub(crate) async fn finalize_asset_bundle_error(
     error: AssetBundleError,
     diagnostic_ref: Option<String>,
 ) {
-    let message = match error {
-        AssetBundleError::Stream(err) => format!("asset model stream: {err}"),
-        AssetBundleError::ModelOutput(err) => format!("invalid asset model output: {err}"),
-        AssetBundleError::Write(err) => format!("write asset bundle: {err}"),
-        AssetBundleError::Compile(err) => format!("asset compile gate: {err}"),
+    let mut failure = match error {
+        AssetBundleError::Stream(err) => FailureNormalizer::llm("asset_bundle.stream", &err),
+        AssetBundleError::ModelOutput => ActionableFailure::invalid_input(
+            "asset_bundle.output",
+            "The model returned an invalid asset bundle. Retry generation.",
+        ),
+        AssetBundleError::Write => ActionableFailure::unclassified("asset_bundle.write"),
+        AssetBundleError::Compile => ActionableFailure::unclassified("asset_bundle.compile"),
         AssetBundleError::Cancelled => return,
     };
-    super::common::finalize_with_error_diagnostic(repo, run_id, sink, &message, diagnostic_ref)
-        .await;
+    if diagnostic_ref.is_some() {
+        failure = failure.with_diagnostic(FailureDiagnostic::for_run(
+            run_id,
+            "Run diagnostics are available for this failed execution.",
+        ));
+    }
+    finalize_with_failure(repo, run_id, sink, failure).await;
 }
 
 /// 从 SubmitCodeGenerateRequest 提取一个文件名安全的实体名。非 ASCII 字母数字/下划线
@@ -479,9 +509,9 @@ impl WrittenArtifact {
 }
 
 pub(crate) enum GenerateError {
-    Stream(String),
-    ModelOutput(String),
-    Write(String),
+    Stream(LlmError),
+    ModelOutput,
+    Write,
     /// 流被取消（run.status=Cancelled）；调用方应当不写 result。
     Cancelled,
 }
@@ -549,7 +579,7 @@ pub(crate) async fn generate_and_write_code_artifact(
     let mut stream = llm
         .stream(completion_request)
         .await
-        .map_err(|e| GenerateError::Stream(e.to_string()))?;
+        .map_err(GenerateError::Stream)?;
 
     let mut accumulated = String::new();
     let mut model = String::new();
@@ -581,27 +611,22 @@ pub(crate) async fn generate_and_write_code_artifact(
                 usage_in = usage.input_tokens;
                 usage_out = usage.output_tokens;
             }
-            Err(err) => return Err(GenerateError::Stream(err.to_string())),
+            Err(err) => return Err(GenerateError::Stream(err)),
         }
     }
 
     let extracted = extract_code_or_reject(&accumulated)?;
     // 兜底校验：生成的"代码"必须有实际声明结构，不能是纯注释占位符
     validate_generated_code_skein(&extracted, validation_rules)
-        .map_err(GenerateError::ModelOutput)?;
+        .map_err(|_| GenerateError::ModelOutput)?;
 
-    let project_root = artifacts_dir.parent().ok_or_else(|| {
-        GenerateError::Write(format!(
-            "artifacts dir has no parent: {}",
-            artifacts_dir.display(),
-        ))
-    })?;
+    let project_root = artifacts_dir.parent().ok_or(GenerateError::Write)?;
     let generated_dir = project_root.join("Generated");
     let cs_path = generated_dir.join(format!("{entity_name}.cs"));
     let transaction =
         ProjectFileTransaction::write_one(cs_path.clone(), extracted.as_bytes().to_vec())
             .await
-            .map_err(GenerateError::Write)?;
+            .map_err(|_| GenerateError::Write)?;
 
     Ok(WrittenArtifact {
         model,
@@ -622,9 +647,7 @@ fn extract_code_or_reject(accumulated: &str) -> Result<String, GenerateError> {
     let extracted =
         extract_first_code_block(accumulated).unwrap_or_else(|| accumulated.to_string());
     if extracted.trim().is_empty() {
-        return Err(GenerateError::Stream(
-            "model produced no code (empty output)".into(),
-        ));
+        return Err(GenerateError::ModelOutput);
     }
     Ok(extracted)
 }
@@ -638,11 +661,11 @@ mod tests {
     fn extract_code_or_reject_errors_on_empty_output() {
         assert!(matches!(
             extract_code_or_reject(""),
-            Err(GenerateError::Stream(_))
+            Err(GenerateError::ModelOutput)
         ));
         assert!(matches!(
             extract_code_or_reject("   \n\t  "),
-            Err(GenerateError::Stream(_))
+            Err(GenerateError::ModelOutput)
         ));
         // 无围栏但有内容 → 回退原文，不报错
         match extract_code_or_reject("public class Foo {}") {

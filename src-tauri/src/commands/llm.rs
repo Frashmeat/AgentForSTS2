@@ -7,6 +7,7 @@
 
 use std::sync::Arc;
 
+use ats_core::failure::ActionableFailure;
 use ats_core::llm::{
     CompletionRequest, CompletionResponse, LlmClient, StreamEvent, build_from_config,
 };
@@ -15,21 +16,25 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::AppConfig;
+use crate::commands::failure::{CommandFailure, CommandResult};
 
 const STREAM_EVENT: &str = "llm-stream";
 
-fn build_client(config: &AppConfig) -> Result<Arc<dyn LlmClient>, String> {
+fn build_client(config: &AppConfig) -> CommandResult<Arc<dyn LlmClient>> {
     let settings = config.settings_snapshot();
-    build_from_config(&settings.llm).map_err(|e| e.to_string())
+    build_from_config(&settings.llm).map_err(|error| CommandFailure::llm("llm.configure", &error))
 }
 
 #[tauri::command]
 pub async fn llm_complete(
     config: State<'_, AppConfig>,
     request: CompletionRequest,
-) -> Result<CompletionResponse, String> {
+) -> CommandResult<CompletionResponse> {
     let client = build_client(&config)?;
-    client.complete(request).await.map_err(|e| e.to_string())
+    client
+        .complete(request)
+        .await
+        .map_err(|error| CommandFailure::llm("llm.complete", &error))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -41,7 +46,7 @@ enum StreamPayload {
     },
     Error {
         request_id: String,
-        message: String,
+        failure: ActionableFailure,
     },
     Done {
         request_id: String,
@@ -54,9 +59,12 @@ pub async fn llm_start_stream(
     config: State<'_, AppConfig>,
     request_id: String,
     request: CompletionRequest,
-) -> Result<(), String> {
+) -> CommandResult<()> {
     let client = build_client(&config)?;
-    let mut stream = client.stream(request).await.map_err(|e| e.to_string())?;
+    let mut stream = client
+        .stream(request)
+        .await
+        .map_err(|error| CommandFailure::llm("llm.stream_start", &error))?;
 
     let app_handle = app.clone();
     let req_id = request_id.clone();
@@ -68,9 +76,9 @@ pub async fn llm_start_stream(
                     request_id: req_id.clone(),
                     event,
                 },
-                Err(err) => StreamPayload::Error {
+                Err(error) => StreamPayload::Error {
                     request_id: req_id.clone(),
-                    message: err.to_string(),
+                    failure: ats_core::failure::FailureNormalizer::llm("llm.stream", &error),
                 },
             };
             if let Err(e) = app_handle.emit(STREAM_EVENT, &payload) {

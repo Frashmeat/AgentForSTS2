@@ -8,6 +8,9 @@
 import { useEffect, useState } from "react";
 import { Badge, Button, Card, KV, KVList, Notice } from "@/components/ui";
 import { api } from "@/services/api";
+import { ActionableErrorNotice } from "@/components/ActionableErrorNotice";
+import { toActionableFailure } from "@/services/actionableFailure";
+import type { ActionableFailure } from "@/services/actionableFailure";
 import type { LocalCapabilities } from "@/services/tauriApi";
 
 const ILSPYCMD_INSTALL = "dotnet tool install -g ilspycmd";
@@ -33,7 +36,7 @@ function CopyButton({ text }: { text: string }) {
 
 export function CapabilitiesCard() {
   const [caps, setCaps] = useState<LocalCapabilities | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ActionableFailure | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -43,7 +46,7 @@ export function CapabilitiesCard() {
         const c = (await api.getLocalCapabilitiesSync()) as LocalCapabilities;
         setCaps(c);
       } catch (e: unknown) {
-        setError(String(e));
+        setError(toActionableFailure(e));
       }
     })();
   }, []);
@@ -55,7 +58,7 @@ export function CapabilitiesCard() {
       const c = (await api.getLocalCapabilitiesFull()) as LocalCapabilities;
       setCaps(c);
     } catch (e: unknown) {
-      setError(String(e));
+      setError(toActionableFailure(e));
     } finally {
       setBusy(false);
     }
@@ -81,7 +84,7 @@ export function CapabilitiesCard() {
         </Button>
       }
     >
-      {error && <Notice variant="error" title={`Error: ${error}`} />}
+      <ActionableErrorNotice failure={error} />
 
       {caps ? (
         <div className="space-y-3">

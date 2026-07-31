@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
 import { useProjectStore } from "@/stores/project";
-import { Badge, Button, Card, CardSection, Field, Notice } from "@/components/ui";
+import { Badge, Button, Card, CardSection, Field } from "@/components/ui";
+import { ActionableErrorNotice } from "@/components/ActionableErrorNotice";
 import { api } from "@/services/api";
+import {
+  localValidationFailure,
+  toActionableFailure,
+} from "@/services/actionableFailure";
+import type { ActionableFailure } from "@/services/actionableFailure";
 import { INSTALLED_GAME_PACK_ID } from "@/services/gamePacks";
 import type { RecentEntry } from "@/services/tauriApi";
 
@@ -11,7 +17,7 @@ export function ProjectCard() {
   const [parentDir, setParentDir] = useState("");
   const [newName, setNewName] = useState("my_mod");
   const [openPath, setOpenPath] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ActionableFailure | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function refresh() {
@@ -19,7 +25,7 @@ export function ProjectCard() {
       const recs = (await api.listRecentProjects()) as RecentEntry[];
       setRecents(recs);
     } catch (e: unknown) {
-      setError(String(e));
+      setError(toActionableFailure(e));
     }
   }
 
@@ -29,7 +35,10 @@ export function ProjectCard() {
 
   async function handleCreate() {
     if (!parentDir.trim() || !newName.trim()) {
-      setError("Parent dir and name required");
+      setError(localValidationFailure(
+        "project.create",
+        "Parent directory and project name are required.",
+      ));
       return;
     }
     setBusy(true);
@@ -38,7 +47,7 @@ export function ProjectCard() {
       await api.createProject(parentDir, newName, INSTALLED_GAME_PACK_ID);
       await refresh();
     } catch (e: unknown) {
-      setError(String(e));
+      setError(toActionableFailure(e));
     } finally {
       setBusy(false);
     }
@@ -51,7 +60,7 @@ export function ProjectCard() {
       await api.openProject(path);
       await refresh();
     } catch (e: unknown) {
-      setError(String(e));
+      setError(toActionableFailure(e));
     } finally {
       setBusy(false);
     }
@@ -64,7 +73,7 @@ export function ProjectCard() {
       await api.closeProject();
       await refresh();
     } catch (e: unknown) {
-      setError(String(e));
+      setError(toActionableFailure(e));
     } finally {
       setBusy(false);
     }
@@ -75,7 +84,7 @@ export function ProjectCard() {
       await api.forgetRecentProject(path);
       await refresh();
     } catch (e: unknown) {
-      setError(String(e));
+      setError(toActionableFailure(e));
     }
   }
 
@@ -101,7 +110,7 @@ export function ProjectCard() {
         )
       }
     >
-      {error && <Notice variant="error" title={`Error: ${error}`} />}
+      <ActionableErrorNotice failure={error} />
 
       {current ? (
         <div className="mb-4">

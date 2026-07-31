@@ -21,6 +21,6 @@ pub mod text_generate;
 pub mod truth_snapshot_refresh;
 
 pub use common::{
-    NoopProgressSink, ProgressEvent, ProgressSink, emit_cancelled_mid_stream, finalize_with_error,
-    is_cancelled, transition_to_running,
+    NoopProgressSink, ProgressEvent, ProgressSink, emit_cancelled_mid_stream,
+    finalize_with_failure, is_cancelled, transition_to_running,
 };

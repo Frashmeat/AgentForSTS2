@@ -1,6 +1,9 @@
 import { useState } from "react";
-import { Button, Card, Field, FieldRow, Notice } from "@/components/ui";
+import { Button, Card, Field, FieldRow } from "@/components/ui";
+import { ActionableErrorNotice } from "@/components/ActionableErrorNotice";
 import { api } from "@/services/api";
+import { toActionableFailure } from "@/services/actionableFailure";
+import type { ActionableFailure } from "@/services/actionableFailure";
 import type { AssetCodegenRequest } from "@/services/tauriApi";
 
 const ASSET_TYPES = ["card", "card_fullscreen", "relic", "power", "character"];
@@ -16,7 +19,7 @@ export function CodegenCard() {
   const [skipBuild, setSkipBuild] = useState(false);
 
   const [prompt, setPrompt] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ActionableFailure | null>(null);
   const [running, setRunning] = useState(false);
 
   async function handleAssemble() {
@@ -35,7 +38,7 @@ export function CodegenCard() {
       const result = (await api.codegenAssetPrompt(request)) as string;
       setPrompt(result);
     } catch (e: unknown) {
-      setError(String(e));
+      setError(toActionableFailure(e));
       setPrompt(null);
     } finally {
       setRunning(false);
@@ -105,7 +108,7 @@ export function CodegenCard() {
         </label>
       </div>
 
-      {error && <Notice variant="error" title={`Error: ${error}`} className="mt-3" />}
+      <ActionableErrorNotice failure={error} className="mt-3" />
 
       {prompt && (
         <details open className="mt-4">

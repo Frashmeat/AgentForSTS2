@@ -1,6 +1,9 @@
 import { useState } from "react";
-import { Badge, Button, Card, Field, Notice } from "@/components/ui";
+import { Badge, Button, Card, Field } from "@/components/ui";
+import { ActionableErrorNotice } from "@/components/ActionableErrorNotice";
 import { api } from "@/services/api";
+import { toActionableFailure } from "@/services/actionableFailure";
+import type { ActionableFailure } from "@/services/actionableFailure";
 import type {
   PlanValidationResult,
   ReviewStrictness,
@@ -35,7 +38,7 @@ export function PlanningCard() {
   const [planText, setPlanText] = useState(SAMPLE_PLAN);
   const [strictness, setStrictness] = useState<ReviewStrictness>("balanced");
   const [result, setResult] = useState<PlanValidationResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ActionableFailure | null>(null);
   const [running, setRunning] = useState(false);
 
   async function handleValidate() {
@@ -46,7 +49,7 @@ export function PlanningCard() {
       const r = (await api.validatePlan(plan, strictness)) as PlanValidationResult;
       setResult(r);
     } catch (e: unknown) {
-      setError(String(e));
+      setError(toActionableFailure(e));
       setResult(null);
     } finally {
       setRunning(false);
@@ -87,7 +90,7 @@ export function PlanningCard() {
         />
       </Field>
 
-      {error && <Notice variant="error" title={`Error: ${error}`} className="mt-3" />}
+      <ActionableErrorNotice failure={error} className="mt-3" />
 
       {result && (
         <div className="mt-4">

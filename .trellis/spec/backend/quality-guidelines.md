@@ -63,7 +63,7 @@ Questions to answer:
 - Successful artifact Runs publish `artifacts/<artifact-id>/runs/<run-id>/artifact-manifest.json` plus immutable `files/`. Run results keep only the manifest reference, SHA-256, and bounded kind-specific summaries.
 - Manifest Evidence is the structured fact set selected for the same Prompt assembly: `source`, `symbol`, `purpose`, and `boundedExcerpt`, together with verified Game Pack and Truth Snapshot identity.
 - Formal project writes remain rollback-capable until manifest publication and terminal CAS succeed. Manifest failure restores prior files; CAS loss removes the new artifact run directory and restores formal writes.
-- Failed image diagnostics use `.ats/diagnostics/<run-id>/` and `failure.diagnosticRef`. Successful image diagnostics are copied into the immutable artifact snapshot and the diagnostics directory is removed.
+- Failed image diagnostics use `.ats/diagnostics/<run-id>/` and `failure.diagnostic.id`. Successful image diagnostics are copied into the immutable artifact snapshot and the diagnostics directory is removed.
 - The independent lifecycle Audit product path and `evidence.md` do not exist. Legacy shared artifact entries are moved to a run-scoped backup and committed or restored with the Run outcome.
 
 ### Validation Matrix
@@ -91,6 +91,58 @@ cargo test -p ats-core platform::artifact::tests
 cargo test -p ats-core platform::application::handlers::asset_generate::tests
 cargo test -p ats-core platform::application::handlers::batch_custom_code::tests
 cargo test -p ats-core platform::application::handlers::package_project::tests
+cargo check -p agentthespire-desktop
+npx tsc -b --pretty false
+npm run test:frontend
+```
+
+## Scenario: Actionable Failure Contract
+
+### Scope And Signatures
+
+Core owns the only serialized failure schema in `crates/ats-core/src/failure.rs`:
+
+```rust
+FailureNormalizer::{llm,image,project,run,toolchain,local_props,image_proc,package}(...)
+    -> ActionableFailure
+
+#[serde(transparent)]
+pub struct CommandFailure(pub ActionableFailure);
+pub type CommandResult<T> = Result<T, CommandFailure>;
+```
+
+`RunRecord.failure` and every fallible Tauri command serialize the same `ActionableFailure` fields: `schemaVersion`, `code`, `category`, `stage`, `message`, `action`, `retryable`, optional `retryAfterMs`, optional whitelisted `context`, and optional `diagnostic { id, summary, ioKind }`. Tauri must not copy these fields into a second transport schema.
+
+React accepts command rejection only through `src/services/actionableFailure.ts::toActionableFailure`. Invalid payloads become a local fixed `core.unclassified` failure; pages render failures through `ActionableErrorNotice` and do not expose `String(error)`.
+
+### Validation And Error Matrix
+
+| Source fact | Stable output | Required safety behavior |
+| --- | --- | --- |
+| LLM/Image 401 or auth variant | `*.authentication_failed`, `authentication`, `reauthenticate` | Do not expose provider body or credential |
+| LLM/Image 429 | `*.rate_limited`, `rate_limit`, `retry` | Preserve only bounded `retryAfterMs` |
+| Transport failure | `*.network_failed`, `network`, `retry` | Do not expose URL query or raw client error |
+| Package path escape or required file missing | stable `package.*` code | Context may contain only a safe project-relative path |
+| Filesystem failure | domain code plus `diagnostic.ioKind` | Do not persist an absolute user path |
+| Unknown error | `core.unclassified`, `internal` | Use fixed message/summary and a diagnostic ID; never call unknown `Display` for output |
+| Invalid Tauri reject payload | client-local `core.unclassified` | Do not render the rejected value |
+
+`FailureContext` is a fixed struct, not a free-form map. Provider IDs, setting keys, dependency names, Run IDs and project-relative paths are bounded and validated. Provider response bodies, authorization values, complete prompts, URL query/fragment values and unnormalized absolute roots never enter IPC, Run history, diagnostics or UI.
+
+### Good / Base / Bad Cases
+
+- Good: a typed LLM authentication failure reaches React with the same schema and recovery action while the provider body is absent from serialized output.
+- Base: an IO error preserves only its stable `ioKind`; the user receives an actionable message without an absolute path.
+- Bad: an unknown error or malformed command rejection contains a token/path canary; output is a fixed `core.unclassified` payload and contains none of the canary text.
+
+### Targeted Tests
+
+```text
+cargo test -p ats-core failure::
+cargo test -p ats-core platform::application::handlers::
+cargo test -p ats-core --features ml-rembg image_proc::ml::tests
+cargo check -p ats-core
+cargo test -p agentthespire-desktop commands::failure::tests
 cargo check -p agentthespire-desktop
 npx tsc -b --pretty false
 npm run test:frontend
@@ -218,7 +270,7 @@ analyze_png_quality(bytes, ImageQualitySpec) -> Result<ImageQualityReport, Image
 derive_png_variants(bytes, &[ImageVariantSpec]) -> Result<Vec<DerivedImageVariant>, ImageProcError>
 ```
 
-Successful image Runs snapshot raw/processed images and `image-quality.json` inside immutable Artifact files. Failed image diagnostics are stored under `.ats/diagnostics/<run-id>/` and referenced by `RunRecord.failure.diagnosticRef`.
+Successful image Runs snapshot raw/processed images and `image-quality.json` inside immutable Artifact files. Failed image diagnostics are stored under `.ats/diagnostics/<run-id>/` and referenced by `RunRecord.failure.diagnostic.id`.
 
 ### 3. Contracts
 

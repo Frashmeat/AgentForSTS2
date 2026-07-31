@@ -4,10 +4,11 @@ mod errors;
 mod models;
 mod repository;
 
-pub use errors::{RunError, RunRepositoryResult};
+pub use crate::failure::ActionableFailure;
+pub use errors::{PackageError, RunError, RunRepositoryResult};
 pub use models::{
-    ActionableFailure, BatchArtifactItemResult, BuildStepResult, CancellationReason,
-    RUN_SCHEMA_VERSION, RunId, RunKind, RunProgress, RunRecord, RunResult, RunStatus, RunSummary,
-    RunTimelineEvent, RunTimelineEventKind, RunTransition, TokenUsage,
+    BatchArtifactItemResult, BuildStepResult, CancellationReason, RUN_SCHEMA_VERSION, RunId,
+    RunKind, RunProgress, RunRecord, RunResult, RunStatus, RunSummary, RunTimelineEvent,
+    RunTimelineEventKind, RunTransition, TokenUsage,
 };
 pub use repository::RunRepository;

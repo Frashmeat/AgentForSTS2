@@ -7,9 +7,10 @@
 use std::sync::Arc;
 
 use super::common::{
-    FinalizeOutcome, ProgressEvent, ProgressSink, finalize_with_error, finalize_with_success,
+    FinalizeOutcome, ProgressEvent, ProgressSink, finalize_with_failure, finalize_with_success,
     transition_to_running,
 };
+use crate::failure::{ActionableFailure, FailureCategory, FailureNormalizer, RecoveryAction};
 use crate::game_pack::{BuildRecipe, BuildRunner};
 use crate::platform::contracts::SubmitBuildProjectRequest;
 use crate::platform::domain::{BuildStepResult, RunId, RunRepository, RunResult};
@@ -44,12 +45,27 @@ pub async fn run_build_project(
         .await;
         let output = match execute_build_step(&request.project_root, step.runner).await {
             Ok(output) => output,
-            Err(error) => {
-                finalize_with_error(
+            Err(BuildStepError::Io(error)) => {
+                finalize_with_failure(
                     &repo,
                     &run_id,
                     &sink,
-                    &format!("build step `{}`: {error}", step.id),
+                    FailureNormalizer::io(
+                        "toolchain.not_found",
+                        "build.spawn",
+                        "The configured build tool could not be started.",
+                        &error,
+                    ),
+                )
+                .await;
+                return;
+            }
+            Err(BuildStepError::Worker) => {
+                finalize_with_failure(
+                    &repo,
+                    &run_id,
+                    &sink,
+                    ActionableFailure::unclassified("build.worker"),
                 )
                 .await;
                 return;
@@ -72,11 +88,18 @@ pub async fn run_build_project(
     }
 
     if !success {
-        finalize_with_error(
+        finalize_with_failure(
             &repo,
             &run_id,
             &sink,
-            &format!("build exited with code {exit_code}"),
+            ActionableFailure::new(
+                "toolchain.command_failed",
+                FailureCategory::Toolchain,
+                "build.execute",
+                "The project build failed. Review the build output and retry.",
+                RecoveryAction::Retry,
+                false,
+            ),
         )
         .await;
         return;
@@ -110,10 +133,15 @@ struct BuildStepOutput {
     stderr: String,
 }
 
+enum BuildStepError {
+    Worker,
+    Io(std::io::Error),
+}
+
 async fn execute_build_step(
     project_root: &std::path::Path,
     runner: BuildRunner,
-) -> Result<BuildStepOutput, String> {
+) -> Result<BuildStepOutput, BuildStepError> {
     let cwd = to_extended_length_path(project_root);
     let output = tokio::task::spawn_blocking(move || match runner {
         BuildRunner::DotnetPublish => std::process::Command::new("dotnet")
@@ -122,8 +150,8 @@ async fn execute_build_step(
             .output(),
     })
     .await
-    .map_err(|error| format!("join blocking runner: {error}"))?
-    .map_err(|error| format!("spawn {}: {error}", runner.as_str()))?;
+    .map_err(|_| BuildStepError::Worker)?
+    .map_err(BuildStepError::Io)?;
     Ok(BuildStepOutput {
         exit_code: output.status.code().unwrap_or(-1),
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),

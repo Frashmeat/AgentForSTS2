@@ -3,6 +3,32 @@
 use thiserror::Error;
 
 #[derive(Debug, Error)]
+pub enum PackageError {
+    #[error("package source directory is missing")]
+    SourceMissing,
+    #[error("package output path is invalid")]
+    OutputInvalid,
+    #[error("required package file is missing: {relative_path}")]
+    RequiredFileMissing { relative_path: String },
+    #[error("package path escapes the declared source root: {relative_path}")]
+    PathEscape { relative_path: String },
+    #[error("package path may not be a symbolic link: {relative_path}")]
+    Symlink { relative_path: String },
+    #[error("package path is not a regular file: {relative_path}")]
+    NotRegularFile { relative_path: String },
+    #[error("package I/O failed during {operation}")]
+    Io {
+        operation: &'static str,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("ZIP encoding failed")]
+    Zip,
+    #[error("package worker failed")]
+    Worker,
+}
+
+#[derive(Debug, Error)]
 pub enum RunError {
     #[error("run not found: {0}")]
     NotFound(String),

@@ -15,7 +15,10 @@ import {
   Notice,
   PageHero,
 } from "@/components/ui";
+import { ActionableErrorNotice } from "@/components/ActionableErrorNotice";
 import { api } from "@/services/api";
+import { toActionableFailure } from "@/services/actionableFailure";
+import type { ActionableFailure } from "@/services/actionableFailure";
 import type {
   ArtifactStatus,
   ModAnalysisReport,
@@ -32,7 +35,7 @@ export function ModEditorPage() {
   const project = useProjectStore((s) => s.project);
   const [report, setReport] = useState<ModAnalysisReport | null>(null);
   const [artifacts, setArtifacts] = useState<ArtifactStatus[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ActionableFailure | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
 
   useEffect(() => {
@@ -49,7 +52,7 @@ export function ModEditorPage() {
       setReport(r);
       setArtifacts(a);
     } catch (e: unknown) {
-      setError(String(e));
+      setError(toActionableFailure(e));
     } finally {
       setAnalyzing(false);
     }
@@ -94,7 +97,7 @@ export function ModEditorPage() {
       />
 
       <div className="space-y-4">
-        {error && <Notice variant="error" title={`Error: ${error}`} />}
+        <ActionableErrorNotice failure={error} />
 
         {report && (
           <Card eyebrow="structure · csproj" title="Project structure">

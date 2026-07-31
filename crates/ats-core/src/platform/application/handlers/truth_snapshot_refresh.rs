@@ -4,12 +4,13 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::failure::ActionableFailure;
 use crate::game_pack::{LoadedGamePack, TruthSnapshotRefresher, TruthSnapshotStore};
 use crate::platform::contracts::SubmitTruthSnapshotRefreshRequest;
 use crate::platform::domain::{RunId, RunRepository, RunResult};
 
 use super::common::{
-    FinalizeOutcome, ProgressEvent, ProgressSink, finalize_with_error, finalize_with_success,
+    FinalizeOutcome, ProgressEvent, ProgressSink, finalize_with_failure, finalize_with_success,
     transition_to_running,
 };
 
@@ -41,8 +42,14 @@ pub async fn run_truth_snapshot_refresh(
         .await
     {
         Ok(outcome) => outcome,
-        Err(error) => {
-            finalize_with_error(&repo, &run_id, &sink, &error.to_string()).await;
+        Err(_) => {
+            finalize_with_failure(
+                &repo,
+                &run_id,
+                &sink,
+                ActionableFailure::unclassified("truth_snapshot.refresh"),
+            )
+            .await;
             return;
         }
     };

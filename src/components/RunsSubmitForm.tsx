@@ -6,6 +6,11 @@
 import { useState } from "react";
 import { Button, Field, FieldRow } from "@/components/ui";
 import { api } from "@/services/api";
+import {
+  localValidationFailure,
+  toActionableFailure,
+} from "@/services/actionableFailure";
+import type { ActionableFailure } from "@/services/actionableFailure";
 import type { SubmitRunAck } from "@/services/tauriApi";
 
 export type SubmitKind =
@@ -33,7 +38,7 @@ const KIND_LABELS: Array<{ value: SubmitKind; label: string }> = [
 
 interface Props {
   onSubmitted: (runId: string) => void;
-  onError: (message: string) => void;
+  onError: (failure: ActionableFailure) => void;
 }
 
 export function RunsSubmitForm({ onSubmitted, onError }: Props) {
@@ -73,19 +78,21 @@ export function RunsSubmitForm({ onSubmitted, onError }: Props) {
   const [snapshotForce, setSnapshotForce] = useState(false);
 
   async function handleSubmit() {
-    setBusy(true);
     // Client-side validation
-    if (submitKind === "text_generate" && !prompt.trim()) { onError("prompt 不能为空"); return; }
-    if ((submitKind === "code_generate_asset" || submitKind === "code_generate_custom") && (!customName.trim() || !customDescription.trim())) { onError("name 和 description 不能为空"); return; }
-    if (submitKind === "asset_generate" && (!imagePrompt.trim() || !assetName.trim() || !designDescription.trim())) { onError("image_prompt / asset_name / design_description 不能为空"); return; }
+    const invalid = (message: string) =>
+      onError(localValidationFailure("runs.submit", message));
+    if (submitKind === "text_generate" && !prompt.trim()) { invalid("Prompt 不能为空。"); return; }
+    if ((submitKind === "code_generate_asset" || submitKind === "code_generate_custom") && (!customName.trim() || !customDescription.trim())) { invalid("Name 和 description 不能为空。"); return; }
+    if (submitKind === "asset_generate" && (!imagePrompt.trim() || !assetName.trim() || !designDescription.trim())) { invalid("Image prompt、asset name 和 design description 不能为空。"); return; }
     if (submitKind === "batch_custom_code") {
       let items: unknown[];
-      try { items = JSON.parse(batchItemsJson); } catch { onError("batch items JSON 格式错误"); return; }
-      if (!Array.isArray(items) || items.length === 0) { onError("batch items 数组不能为空"); return; }
+      try { items = JSON.parse(batchItemsJson); } catch { invalid("Batch items JSON 格式错误。"); return; }
+      if (!Array.isArray(items) || items.length === 0) { invalid("Batch items 数组不能为空。"); return; }
     }
-    if (submitKind === "build_project" && !buildProjectRoot.trim()) { onError("project_root 不能为空"); return; }
-    if (submitKind === "package_project" && !packageSourceDir.trim()) { onError("source_dir 不能为空"); return; }
-    if (submitKind === "log_analysis" && !logText.trim()) { onError("log_text 不能为空"); return; }
+    if (submitKind === "build_project" && !buildProjectRoot.trim()) { invalid("Project root 不能为空。"); return; }
+    if (submitKind === "package_project" && !packageSourceDir.trim()) { invalid("Source directory 不能为空。"); return; }
+    if (submitKind === "log_analysis" && !logText.trim()) { invalid("Log text 不能为空。"); return; }
+    setBusy(true);
     try {
       let ack: SubmitRunAck;
       switch (submitKind) {
@@ -136,11 +143,11 @@ export function RunsSubmitForm({ onSubmitted, onError }: Props) {
           let items;
           try {
             items = JSON.parse(batchItemsJson);
-          } catch (e) {
-            throw new Error(`batch items JSON parse failed: ${String(e)}`);
+          } catch {
+            throw localValidationFailure("runs.batch_items", "Batch items JSON 格式错误。");
           }
           if (!Array.isArray(items)) {
-            throw new Error("batch items must be a JSON array");
+            throw localValidationFailure("runs.batch_items", "Batch items 必须是 JSON 数组。");
           }
           ack = (await api.submitBatchCustomCodeRun({
             items,
@@ -174,7 +181,7 @@ export function RunsSubmitForm({ onSubmitted, onError }: Props) {
       }
       onSubmitted(ack.runId);
     } catch (e: unknown) {
-      onError(String(e));
+      onError(toActionableFailure(e));
     } finally {
       setBusy(false);
     }

@@ -397,7 +397,7 @@ impl StreamState {
                     .unwrap_or("stream error event")
                     .to_string();
                 // 流级错误必须作为终止性 Err 上抛：unfold 把它转成 yielded Err 并置 done，
-                // 消费者的 Err 分支调用 finalize_with_error 把 run 标记 Failed。
+                // 消费者的 Err 分支将结构化 failure 写入 Run 并标记 Failed。
                 // 旧实现把它降级成一条 Delta 文本，导致 API 失败被当成功输出持久化。
                 Some(Err(LlmError::Stream(message)))
             }

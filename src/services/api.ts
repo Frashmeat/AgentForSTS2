@@ -4,6 +4,7 @@
 // 包成 async 调用，保证 app 启动不依赖顶层 await。
 
 import type * as TauriApi from "./tauriApi";
+import { toActionableFailure } from "./actionableFailure";
 
 type ApiModule = typeof TauriApi;
 
@@ -22,9 +23,7 @@ export const api = new Proxy({} as ApiModule, {
       if (member === undefined) {
         // 当前后端未实现该成员：直接抛错，而非静默返回 undefined（旧行为会让
         // 漏接口在调用处变成 `undefined is not a function` 之类的间接报错）。
-        throw new Error(
-          `api.${String(prop)} is not implemented in the active backend`,
-        );
+        throw toActionableFailure(undefined);
       }
       if (typeof member !== "function") {
         return member;

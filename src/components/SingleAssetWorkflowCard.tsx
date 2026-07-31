@@ -3,7 +3,13 @@ import { api } from "@/services/api";
 import { useRunProgress } from "@/hooks/useRunProgress";
 import { useProjectStore } from "@/stores/project";
 import { useWorkflowStore } from "@/stores/workflow";
-import { Button, Card, CardSection, Field, Notice } from "@/components/ui";
+import { Button, Card, CardSection, Field } from "@/components/ui";
+import { ActionableErrorNotice } from "@/components/ActionableErrorNotice";
+import {
+  localValidationFailure,
+  toActionableFailure,
+} from "@/services/actionableFailure";
+import type { ActionableFailure } from "@/services/actionableFailure";
 import type {
   AssetItemType,
   RunRecord,
@@ -37,7 +43,7 @@ export function SingleAssetWorkflowCard() {
   );
   const [assetType, setAssetType] = useState<AssetItemType>("card");
   const [phase, setPhase] = useState<Phase>("idle");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ActionableFailure | null>(null);
   const [planDelta, setPlanDelta] = useState("");
   const [planItem, setPlanItem] = useState<PlanItem | null>(null);
   const [codeDelta, setCodeDelta] = useState("");
@@ -62,7 +68,10 @@ export function SingleAssetWorkflowCard() {
 
   function handlePlanResult(run: RunRecord) {
     if (run.result?.kind !== "plan") {
-      setError("plan run returned an incompatible result");
+      setError(localValidationFailure(
+        "single_asset.plan_result",
+        "The plan run returned an incompatible result.",
+      ));
       clearPlanStore();
       return;
     }
@@ -73,7 +82,10 @@ export function SingleAssetWorkflowCard() {
 
   function handleCodeResult(run: RunRecord) {
     if (run.result?.kind !== "artifact_production") {
-      setError("code run returned an incompatible result");
+      setError(localValidationFailure(
+        "single_asset.code_result",
+        "The code run returned an incompatible result.",
+      ));
       clearCodeStore();
       return;
     }
@@ -87,13 +99,13 @@ export function SingleAssetWorkflowCard() {
     if (ev.stage === "completed") {
       void (async () => {
         try { handlePlanResult((await api.getRun(ev.runId)) as RunRecord); }
-        catch (err) { setError(`fetch plan run: ${String(err)}`); }
+        catch (err) { setError(toActionableFailure(err)); }
       })();
     } else if (
       ev.stage === "failed" || ev.stage.includes("error") ||
       ev.stage === "stream-start-error" || ev.stage === "stream-error"
     ) {
-      setError(`plan failed at ${ev.stage}: ${ev.message ?? ""}`);
+      void loadRunFailure(ev.runId, "single_asset.plan");
       setPhase("idle");
       clearPlanStore();
     }
@@ -104,10 +116,10 @@ export function SingleAssetWorkflowCard() {
     if (ev.stage === "completed") {
       void (async () => {
         try { handleCodeResult((await api.getRun(ev.runId)) as RunRecord); }
-        catch (err) { setError(`fetch code run: ${String(err)}`); }
+        catch (err) { setError(toActionableFailure(err)); }
       })();
     } else if (ev.stage === "failed" || ev.stage.includes("error")) {
-      setError(`code failed at ${ev.stage}: ${ev.message ?? ""}`);
+      void loadRunFailure(ev.runId, "single_asset.code");
       setPhase("plan_done");
       clearCodeStore();
     }
@@ -149,7 +161,13 @@ export function SingleAssetWorkflowCard() {
   }, []);
 
   async function runPlan() {
-    if (!requirements.trim()) { setError("requirements 不能为空"); return; }
+    if (!requirements.trim()) {
+      setError(localValidationFailure(
+        "single_asset.requirements",
+        "Requirements 不能为空。",
+      ));
+      return;
+    }
     setError(null); setPlanDelta(""); setPlanItem(null);
     setCodeDelta(""); setCodeResult(null); setPhase("planning");
     try {
@@ -158,7 +176,7 @@ export function SingleAssetWorkflowCard() {
       })) as SubmitRunAck;
       planRunIdRef.current = ack.runId;
       useWorkflowStore.getState().setPlanRunId(ack.runId);
-    } catch (e: unknown) { setError(String(e)); setPhase("idle"); }
+    } catch (e: unknown) { setError(toActionableFailure(e)); setPhase("idle"); }
   }
 
   async function runCode() {
@@ -193,7 +211,7 @@ export function SingleAssetWorkflowCard() {
       }
       codeRunIdRef.current = ack.runId;
       useWorkflowStore.getState().setCodeRunId(ack.runId);
-    } catch (e: unknown) { setError(String(e)); setPhase("plan_done"); }
+    } catch (e: unknown) { setError(toActionableFailure(e)); setPhase("plan_done"); }
   }
 
   function reset() {
@@ -201,6 +219,18 @@ export function SingleAssetWorkflowCard() {
     setPlanDelta(""); setPlanItem(null);
     setCodeDelta(""); setCodeResult(null);
     clearPlanStore(); clearCodeStore();
+  }
+
+  async function loadRunFailure(runId: string, stage: string) {
+    try {
+      const run = (await api.getRun(runId)) as RunRecord;
+      setError(
+        run.failure ??
+          localValidationFailure(stage, "The run failed without a valid failure payload."),
+      );
+    } catch (error: unknown) {
+      setError(toActionableFailure(error));
+    }
   }
 
   if (!__IS_TAURI__) {
@@ -217,7 +247,7 @@ export function SingleAssetWorkflowCard() {
         ) : undefined
       }
     >
-      {error && <div data-testid="single-asset-error"><Notice variant="error" title={`Error: ${error}`} /></div>}
+      {error && <div data-testid="single-asset-error"><ActionableErrorNotice failure={error} /></div>}
 
       {phase === "plan_done" && planItem && (
         <div data-testid="single-asset-plan-result">

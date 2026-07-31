@@ -13,11 +13,14 @@ import { RunsCard } from "@/components/RunsCard";
 import { KnowledgeCard } from "@/components/KnowledgeCard";
 import { LlmCard } from "@/components/LlmCard";
 import { PlanningCard } from "@/components/PlanningCard";
+import { ActionableErrorNotice } from "@/components/ActionableErrorNotice";
 import {
   Badge, Button, Card, Field, KV, KVList, Notice, PageHero,
 } from "@/components/ui";
 import { buildPatch, formFromSnapshot, type FormState } from "@/pages/systemForm";
 import { api } from "@/services/api";
+import { toActionableFailure } from "@/services/actionableFailure";
+import type { ActionableFailure } from "@/services/actionableFailure";
 import type { SettingsSnapshot } from "@/services/tauriApi";
 
 // ---------------------------------------------------------------------------
@@ -81,7 +84,7 @@ export function SystemPage() {
   function selectTab(t: string) { setSearchParams({ tab: t }, { replace: true }); }
 
   const [snap, setSnap] = useState<SettingsSnapshot | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ActionableFailure | null>(null);
   const [busy, setBusy] = useState(false);
   const [opened, setOpened] = useState<string | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
@@ -92,7 +95,7 @@ export function SystemPage() {
     try {
       const s = (await api.getSettingsSnapshot()) as SettingsSnapshot;
       setSnap(s); setForm(formFromSnapshot(s));
-    } catch (e: unknown) { setError(String(e)); }
+    } catch (e: unknown) { setError(toActionableFailure(e)); }
     finally { setBusy(false); }
   }
 
@@ -101,7 +104,7 @@ export function SystemPage() {
   async function handleOpen() {
     setOpened(null); setError(null);
     try { setOpened((await api.openConfigInEditor()) as string); }
-    catch (e: unknown) { setError(String(e)); }
+    catch (e: unknown) { setError(toActionableFailure(e)); }
   }
 
   async function handleSave() {
@@ -115,7 +118,7 @@ export function SystemPage() {
       const updated = (await api.saveSettingsPatch(patch)) as SettingsSnapshot;
       setSnap(updated); setForm(formFromSnapshot(updated));
       setSavedMsg("✓ 已保存并热替换");
-    } catch (e: unknown) { setError(String(e)); }
+    } catch (e: unknown) { setError(toActionableFailure(e)); }
     finally { setBusy(false); }
   }
 
@@ -148,7 +151,7 @@ export function SystemPage() {
 
     return (
       <>
-        {error && <div data-testid="settings-error"><Notice variant="error" title={`Error: ${error}`} /></div>}
+        {error && <div data-testid="settings-error"><ActionableErrorNotice failure={error} /></div>}
         {savedMsg && <div data-testid="settings-saved"><Notice variant="ok" title={savedMsg} /></div>}
         {!snap && !error && <p style={{ color: "var(--ink-mute)", fontSize: "13px" }}>Loading…</p>}
 

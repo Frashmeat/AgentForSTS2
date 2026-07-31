@@ -12,6 +12,7 @@ use ats_core::health::{HealthReport, Role};
 use tauri::State;
 
 use crate::AppConfig;
+use crate::commands::failure::CommandResult;
 use crate::commands::image_proc_state::{ImageProcState, PrewarmStatus};
 use crate::commands::project::ActiveProject;
 
@@ -20,7 +21,7 @@ pub async fn get_health(
     config: State<'_, AppConfig>,
     active: State<'_, ActiveProject>,
     image_proc: State<'_, Arc<ImageProcState>>,
-) -> Result<HealthReport, String> {
+) -> CommandResult<HealthReport> {
     let (active_open, game_id) = active
         .0
         .lock()

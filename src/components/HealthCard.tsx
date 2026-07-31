@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { Badge, Card, CardSection, KV, KVList, Notice } from "@/components/ui";
 import { api } from "@/services/api";
+import { ActionableErrorNotice } from "@/components/ActionableErrorNotice";
+import { toActionableFailure } from "@/services/actionableFailure";
+import type { ActionableFailure } from "@/services/actionableFailure";
 import type { HealthReport } from "@/services/tauriApi";
 
 function ReadyDot({ ok, label, title }: { ok: boolean; label: string; title?: string }) {
@@ -26,12 +29,12 @@ function ReadyDot({ ok, label, title }: { ok: boolean; label: string; title?: st
 
 export function HealthCard() {
   const [health, setHealth] = useState<HealthReport | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ActionableFailure | null>(null);
 
   useEffect(() => {
     (api.getHealth() as Promise<HealthReport>)
       .then(setHealth)
-      .catch((e: unknown) => setError(String(e)));
+      .catch((e: unknown) => setError(toActionableFailure(e)));
   }, []);
 
   const statusVariant =
@@ -55,7 +58,7 @@ export function HealthCard() {
         )
       }
     >
-      {error && <Notice variant="error" title={`Error: ${error}`} />}
+      <ActionableErrorNotice failure={error} />
       {!error && !health && (
         <p style={{ color: "var(--ink-mute)", fontSize: "13px" }}>Loading…</p>
       )}

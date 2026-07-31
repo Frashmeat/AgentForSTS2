@@ -12,10 +12,11 @@ use super::code_generate::{
     publish_generated_artifact, sanitize_entity_name,
 };
 use super::common::{
-    FinalizeOutcome, ProgressEvent, ProgressSink, finalize_with_error, finalize_with_success,
+    FinalizeOutcome, ProgressEvent, ProgressSink, finalize_with_failure, finalize_with_success,
     transition_to_running,
 };
 use crate::codegen::{CustomCodegenRequest, PromptAssembler};
+use crate::failure::{ActionableFailure, FailureNormalizer};
 use crate::game_pack::VerifiedGameContext;
 use crate::llm::LlmClient;
 use crate::platform::artifact::sha256_bytes;
@@ -27,7 +28,7 @@ use crate::platform::domain::{
 struct ItemOutcome {
     success: bool,
     result: BatchArtifactItemResult,
-    error: Option<String>,
+    error: Option<ActionableFailure>,
     pending_commit: Option<PendingItemCommit>,
 }
 
@@ -49,7 +50,16 @@ pub async fn run_batch_custom_code(
         return;
     }
     if request.items.is_empty() {
-        finalize_with_error(&repo, &run_id, &sink, "items list is empty").await;
+        finalize_with_failure(
+            &repo,
+            &run_id,
+            &sink,
+            ActionableFailure::invalid_input(
+                "batch_custom_code.input",
+                "Add at least one custom code item before generating.",
+            ),
+        )
+        .await;
         return;
     }
 
@@ -93,7 +103,8 @@ pub async fn run_batch_custom_code(
         let item_success = outcome.success;
         let item_message = outcome
             .error
-            .clone()
+            .as_ref()
+            .map(|failure| failure.message.clone())
             .unwrap_or_else(|| format!("{}/{} done", idx + 1, total));
         if item_success {
             succeeded += 1;
@@ -129,17 +140,11 @@ pub async fn run_batch_custom_code(
     }
     let overall_ok = succeeded > 0;
     if !overall_ok {
-        let first_error = outcomes
+        let first_failure = outcomes
             .iter()
-            .find_map(|outcome| outcome.error.as_deref())
-            .unwrap_or("unknown item failure");
-        finalize_with_error(
-            &repo,
-            &run_id,
-            &sink,
-            &format!("all {failed} items failed: {first_error}"),
-        )
-        .await;
+            .find_map(|outcome| outcome.error.clone())
+            .unwrap_or_else(|| ActionableFailure::unclassified("batch_custom_code.items"));
+        finalize_with_failure(&repo, &run_id, &sink, first_failure).await;
         return;
     }
     let result = RunResult::BatchArtifactProduction {
@@ -188,11 +193,11 @@ async fn process_one_item(
 ) -> ItemOutcome {
     let assembly = match assembler.assemble_custom_code_prompt_with_evidence(item, game_context) {
         Ok(assembly) => assembly,
-        Err(err) => {
+        Err(_) => {
             return ItemOutcome {
                 success: false,
                 result: failed_batch_item(entity_name),
-                error: Some(format!("prompt assembly: {err}")),
+                error: Some(ActionableFailure::unclassified("batch_custom_code.prompt")),
                 pending_commit: None,
             };
         }
@@ -255,17 +260,13 @@ async fn process_one_item(
                         }),
                     }
                 }
-                Err(error) => {
+                Err(_) => {
                     let rollback = art.rollback_writes().await;
+                    let _ = rollback;
                     ItemOutcome {
                         success: false,
                         result: failed_batch_item(entity_name),
-                        error: Some(match rollback {
-                            Ok(()) => error,
-                            Err(rollback_error) => format!(
-                                "{error}; rollback generated files failed: {rollback_error}"
-                            ),
-                        }),
+                        error: Some(ActionableFailure::unclassified("batch_custom_code.publish")),
                         pending_commit: None,
                     }
                 }
@@ -274,25 +275,30 @@ async fn process_one_item(
         Err(GenerateError::Cancelled) => ItemOutcome {
             success: false,
             result: failed_batch_item(entity_name),
-            error: Some("cancelled".into()),
+            error: Some(ActionableFailure::interrupted(
+                "batch_custom_code.cancelled",
+            )),
             pending_commit: None,
         },
-        Err(GenerateError::Stream(msg)) => ItemOutcome {
+        Err(GenerateError::Stream(error)) => ItemOutcome {
             success: false,
             result: failed_batch_item(entity_name),
-            error: Some(format!("stream: {msg}")),
+            error: Some(FailureNormalizer::llm("batch_custom_code.stream", &error)),
             pending_commit: None,
         },
-        Err(GenerateError::ModelOutput(msg)) => ItemOutcome {
+        Err(GenerateError::ModelOutput) => ItemOutcome {
             success: false,
             result: failed_batch_item(entity_name),
-            error: Some(format!("invalid code model output: {msg}")),
+            error: Some(ActionableFailure::invalid_input(
+                "batch_custom_code.output",
+                "The model returned invalid code. Retry generation.",
+            )),
             pending_commit: None,
         },
-        Err(GenerateError::Write(msg)) => ItemOutcome {
+        Err(GenerateError::Write) => ItemOutcome {
             success: false,
             result: failed_batch_item(entity_name),
-            error: Some(format!("write: {msg}")),
+            error: Some(ActionableFailure::unclassified("batch_custom_code.write")),
             pending_commit: None,
         },
     }
@@ -513,11 +519,9 @@ mod tests {
         let run = service.get(&id).await.unwrap();
         assert_eq!(run.status, RunStatus::Failed);
         assert!(run.result.is_none());
-        assert!(
-            run.error_message()
-                .unwrap_or_default()
-                .contains("ResetEnergy")
-        );
+        let failure = run.failure.as_ref().unwrap();
+        assert_eq!(failure.code, "run.input_invalid");
+        assert_eq!(failure.stage, "batch_custom_code.output");
         assert!(!td.path().join("Generated/BadRelic.cs").exists());
         assert!(!artifacts.join("BadRelic/BadRelic.cs").exists());
     }
@@ -553,7 +557,10 @@ mod tests {
         // 第 1 个失败 + fail_fast → 不再跑第 2 个；零成功 = Failed
         assert_eq!(run.status, RunStatus::Failed);
         assert!(run.result.is_none());
-        assert!(run.error_message().unwrap_or_default().contains("boom"));
+        let failure = run.failure.as_ref().unwrap();
+        assert_eq!(failure.code, "llm.network_failed");
+        assert_eq!(failure.stage, "batch_custom_code.stream");
+        assert!(!serde_json::to_string(failure).unwrap().contains("boom"));
     }
 
     #[tokio::test]
@@ -581,11 +588,8 @@ mod tests {
 
         let run = service.get(&id).await.unwrap();
         assert_eq!(run.status, RunStatus::Failed);
-        assert!(
-            run.error_message()
-                .as_deref()
-                .unwrap_or("")
-                .contains("items list is empty")
-        );
+        let failure = run.failure.as_ref().unwrap();
+        assert_eq!(failure.code, "run.input_invalid");
+        assert_eq!(failure.stage, "batch_custom_code.input");
     }
 }

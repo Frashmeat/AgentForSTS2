@@ -1,6 +1,9 @@
 import { useRef, useState } from "react";
-import { Badge, Button, Card, Field, Notice } from "@/components/ui";
+import { Badge, Button, Card, Field } from "@/components/ui";
+import { ActionableErrorNotice } from "@/components/ActionableErrorNotice";
 import { api } from "@/services/api";
+import { toActionableFailure } from "@/services/actionableFailure";
+import type { ActionableFailure } from "@/services/actionableFailure";
 import { streamLlmCompletion, type StreamHandle } from "@/services/llmStream";
 import type {
   CompletionRequest,
@@ -34,7 +37,7 @@ export function LlmCard() {
   const [streamState, setStreamState] = useState<StreamState>(INITIAL_STREAM_STATE);
   const [streaming, setStreaming] = useState(false);
   const [running, setRunning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ActionableFailure | null>(null);
   const handleRef = useRef<StreamHandle | null>(null);
 
   function buildRequest(): CompletionRequest {
@@ -56,7 +59,7 @@ export function LlmCard() {
       const result = (await api.llmComplete(buildRequest())) as CompletionResponse;
       setCompleteResp(result);
     } catch (e: unknown) {
-      setError(String(e));
+      setError(toActionableFailure(e));
     } finally {
       setRunning(false);
     }
@@ -78,8 +81,8 @@ export function LlmCard() {
         setStreaming(false);
         setRunning(false);
       },
-      onError: (message) => {
-        setError(message);
+      onError: (failure) => {
+        setError(failure);
         setStreaming(false);
         setRunning(false);
       },
@@ -140,7 +143,7 @@ export function LlmCard() {
         </Field>
       </div>
 
-      {error && <Notice variant="error" title={`Error: ${error}`} className="mt-3" />}
+      <ActionableErrorNotice failure={error} className="mt-3" />
 
       {completeResp && !showStream && (
         <div className="mt-4 space-y-2">

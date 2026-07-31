@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useProjectStore } from "@/stores/project";
 import { api } from "@/services/api";
+import { ActionableErrorNotice } from "@/components/ActionableErrorNotice";
+import {
+  toActionableFailure,
+  type ActionableFailure,
+} from "@/services/actionableFailure";
 import { INSTALLED_GAME_PACK_ID } from "@/services/gamePacks";
 import type { RecentEntry } from "@/services/tauriApi";
 
@@ -19,6 +24,7 @@ export function ProjectPill() {
   const [open, setOpen] = useState(false);
   const [recents, setRecents] = useState<RecentEntry[]>([]);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<ActionableFailure | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [parentDir, setParentDir] = useState("E:/mods");
   const [newName, setNewName] = useState("my_mod");
@@ -27,27 +33,51 @@ export function ProjectPill() {
   useClickOutside(ref, () => { setOpen(false); setShowCreate(false); });
 
   async function refreshRecents() {
-    try { setRecents((await api.listRecentProjects()) as RecentEntry[]); } catch {}
+    try {
+      setRecents((await api.listRecentProjects()) as RecentEntry[]);
+    } catch (caught: unknown) {
+      setError(toActionableFailure(caught));
+    }
   }
 
   useEffect(() => { if (open) { void refreshRecents(); } }, [open]);
 
   async function handleOpen(path: string) {
     setBusy(true);
-    try { await api.openProject(path); } catch (e) { console.error(e); }
-    finally { setBusy(false); setOpen(false); }
+    setError(null);
+    try {
+      await api.openProject(path);
+      setOpen(false);
+    } catch (caught: unknown) {
+      setError(toActionableFailure(caught));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function handleCreate() {
     if (!parentDir.trim() || !newName.trim()) return;
     setBusy(true);
-    try { await api.createProject(parentDir, newName, INSTALLED_GAME_PACK_ID); setShowCreate(false); setOpen(false); } catch (e) { console.error(e); }
-    finally { setBusy(false); }
+    setError(null);
+    try {
+      await api.createProject(parentDir, newName, INSTALLED_GAME_PACK_ID);
+      setShowCreate(false);
+      setOpen(false);
+    } catch (caught: unknown) {
+      setError(toActionableFailure(caught));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function handleClose() {
-    try { await api.closeProject(); } catch {}
-    setOpen(false);
+    setError(null);
+    try {
+      await api.closeProject();
+      setOpen(false);
+    } catch (caught: unknown) {
+      setError(toActionableFailure(caught));
+    }
   }
 
   if (!__IS_TAURI__) return null;
@@ -80,6 +110,7 @@ export function ProjectPill() {
           borderRadius: "6px", boxShadow: "0 4px 12px rgba(0,0,0,0.15)", zIndex: 100,
           padding: "8px",
         }}>
+          <ActionableErrorNotice failure={error} className="mb-2" />
           {project && (
             <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--rule-soft)", marginBottom: "4px" }}>
               <div style={{ fontSize: "12px", fontWeight: 600 }}>{project.meta.name}</div>
@@ -136,6 +167,7 @@ export function ProjectPill() {
           borderRadius: "6px", boxShadow: "0 4px 12px rgba(0,0,0,0.15)", zIndex: 100,
           padding: "10px",
         }}>
+          <ActionableErrorNotice failure={error} className="mb-2" />
           <div style={{ fontSize: "12px", fontWeight: 600, marginBottom: "8px" }}>新建工程</div>
           <div style={{ marginBottom: "6px" }}>
             <div style={{ fontSize: "10px", color: "var(--ink-mute)", marginBottom: "2px" }}>父目录</div>

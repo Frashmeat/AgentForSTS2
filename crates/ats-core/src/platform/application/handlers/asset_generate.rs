@@ -23,10 +23,11 @@ use super::code_generate::{
     finalize_asset_bundle_error, publish_generated_artifact, sanitize_entity_name,
 };
 use super::common::{
-    FinalizeOutcome, ProgressEvent, ProgressSink, finalize_with_error,
-    finalize_with_error_diagnostic, finalize_with_success, transition_to_running,
+    FinalizeOutcome, ProgressEvent, ProgressSink, finalize_with_failure, finalize_with_success,
+    transition_to_running,
 };
 use crate::codegen::PromptAssembler;
+use crate::failure::{ActionableFailure, FailureDiagnostic, FailureNormalizer};
 use crate::game_pack::VerifiedGameContext;
 use crate::image_gen::{ImageGenClient, ImageGenRequest};
 use crate::image_proc::{ImageProcClient, ImageProcError, ImageQualitySpec, analyze_png_quality};
@@ -53,12 +54,15 @@ pub(crate) async fn run_asset_generate(
     }
 
     let mut asset_request = request.asset_request.clone();
-    if let Err(err) = validate_project_scope(&asset_request.project_root, &artifacts_dir) {
-        finalize_with_error(
+    if validate_project_scope(&asset_request.project_root, &artifacts_dir).is_err() {
+        finalize_with_failure(
             &repo,
             &run_id,
             &sink,
-            &format!("invalid asset project scope: {err}"),
+            ActionableFailure::invalid_input(
+                "asset_generate.project_scope",
+                "The asset project path is outside the active project.",
+            ),
         )
         .await;
         return;
@@ -68,11 +72,14 @@ pub(crate) async fn run_asset_generate(
         .resource_spec(&asset_request.asset_type)
         .is_none()
     {
-        finalize_with_error(
+        finalize_with_failure(
             &repo,
             &run_id,
             &sink,
-            &format!("unsupported asset_type: {}", asset_request.asset_type),
+            ActionableFailure::invalid_input(
+                "asset_generate.asset_type",
+                "The selected Game Pack does not support this asset type.",
+            ),
         )
         .await;
         return;
@@ -111,14 +118,29 @@ pub(crate) async fn run_asset_generate(
             let img_resp = match image_gen.generate(img_req).await {
                 Ok(r) => r,
                 Err(err) => {
-                    finalize_with_error(&repo, &run_id, &sink, &format!("image_gen: {err}")).await;
+                    finalize_with_failure(
+                        &repo,
+                        &run_id,
+                        &sink,
+                        FailureNormalizer::image("asset_generate.image", &err),
+                    )
+                    .await;
                     return;
                 }
             };
             let first = match img_resp.images.first() {
                 Some(i) => i,
                 None => {
-                    finalize_with_error(&repo, &run_id, &sink, "image_gen returned no image").await;
+                    finalize_with_failure(
+                        &repo,
+                        &run_id,
+                        &sink,
+                        FailureNormalizer::image(
+                            "asset_generate.image",
+                            &crate::image_gen::ImageGenError::Empty,
+                        ),
+                    )
+                    .await;
                     return;
                 }
             };
@@ -129,12 +151,33 @@ pub(crate) async fn run_asset_generate(
             };
             let path = target_dir.join(format!("{entity_name}.{ext}"));
             if let Err(err) = fs::create_dir_all(&target_dir).await {
-                finalize_with_error(&repo, &run_id, &sink, &format!("create target dir: {err}"))
-                    .await;
+                finalize_with_failure(
+                    &repo,
+                    &run_id,
+                    &sink,
+                    FailureNormalizer::io(
+                        "run.storage_failed",
+                        "asset_generate.diagnostics_create",
+                        "Image diagnostics could not be created.",
+                        &err,
+                    ),
+                )
+                .await;
                 return;
             }
             if let Err(err) = fs::write(&path, &first.bytes).await {
-                finalize_with_error(&repo, &run_id, &sink, &format!("write image: {err}")).await;
+                finalize_with_failure(
+                    &repo,
+                    &run_id,
+                    &sink,
+                    FailureNormalizer::io(
+                        "run.storage_failed",
+                        "asset_generate.diagnostics_write",
+                        "The generated image diagnostic could not be saved.",
+                        &err,
+                    ),
+                )
+                .await;
                 return;
             }
             diagnostics_written = true;
@@ -146,14 +189,19 @@ pub(crate) async fn run_asset_generate(
                 Ok(processed) => {
                     if let Err(err) = crate::fs_atomic::write_atomic(&rembg_path, &processed).await
                     {
-                        finalize_with_error_diagnostic(
+                        finalize_with_failure(
                             &repo,
                             &run_id,
                             &sink,
-                            &format!(
-                                "write processed image: {err}; raw diagnostic kept at {diagnostic_ref}"
+                            with_run_diagnostic(
+                                FailureNormalizer::io(
+                                    "run.storage_failed",
+                                    "asset_generate.processed_write",
+                                    "The processed image diagnostic could not be saved.",
+                                    &err,
+                                ),
+                                &run_id,
                             ),
-                            Some(diagnostic_ref.clone()),
                         )
                         .await;
                         return;
@@ -163,14 +211,17 @@ pub(crate) async fn run_asset_generate(
                     {
                         Ok(report) => report,
                         Err(err) => {
-                            finalize_with_error_diagnostic(
+                            finalize_with_failure(
                                 &repo,
                                 &run_id,
                                 &sink,
-                                &format!(
-                                    "analyze processed image quality: {err}; diagnostics kept at {diagnostic_ref}"
+                                with_run_diagnostic(
+                                    FailureNormalizer::image_proc(
+                                        "asset_generate.quality_analyze",
+                                        &err,
+                                    ),
+                                    &run_id,
                                 ),
-                                Some(diagnostic_ref.clone()),
                             )
                             .await;
                             return;
@@ -179,13 +230,17 @@ pub(crate) async fn run_asset_generate(
                     let report_path = target_dir.join("image-quality.json");
                     let report_bytes = match serde_json::to_vec_pretty(&report) {
                         Ok(bytes) => bytes,
-                        Err(err) => {
-                            finalize_with_error_diagnostic(
+                        Err(_) => {
+                            finalize_with_failure(
                                 &repo,
                                 &run_id,
                                 &sink,
-                                &format!("serialize image quality report: {err}"),
-                                Some(diagnostic_ref.clone()),
+                                with_run_diagnostic(
+                                    ActionableFailure::unclassified(
+                                        "asset_generate.quality_serialize",
+                                    ),
+                                    &run_id,
+                                ),
                             )
                             .await;
                             return;
@@ -194,26 +249,37 @@ pub(crate) async fn run_asset_generate(
                     if let Err(err) =
                         crate::fs_atomic::write_atomic(&report_path, &report_bytes).await
                     {
-                        finalize_with_error_diagnostic(
+                        finalize_with_failure(
                             &repo,
                             &run_id,
                             &sink,
-                            &format!("write image quality report: {err}"),
-                            Some(diagnostic_ref.clone()),
+                            with_run_diagnostic(
+                                FailureNormalizer::io(
+                                    "run.storage_failed",
+                                    "asset_generate.quality_write",
+                                    "The image quality diagnostic could not be saved.",
+                                    &err,
+                                ),
+                                &run_id,
+                            ),
                         )
                         .await;
                         return;
                     }
                     quality_path = Some(report_path.clone());
                     if !report.accepted {
-                        let quality_error =
-                            ImageProcError::Quality(report.rejection_summary()).to_string();
-                        finalize_with_error_diagnostic(
+                        let quality_error = ImageProcError::Quality(report.rejection_summary());
+                        finalize_with_failure(
                             &repo,
                             &run_id,
                             &sink,
-                            &format!("{quality_error}; diagnostics kept at {diagnostic_ref}"),
-                            Some(diagnostic_ref.clone()),
+                            with_run_diagnostic(
+                                FailureNormalizer::image_proc(
+                                    "asset_generate.quality_gate",
+                                    &quality_error,
+                                ),
+                                &run_id,
+                            ),
                         )
                         .await;
                         return;
@@ -221,14 +287,14 @@ pub(crate) async fn run_asset_generate(
                     runtime_image_source = Some(rembg_path.clone());
                 }
                 Err(err) => {
-                    finalize_with_error_diagnostic(
+                    finalize_with_failure(
                         &repo,
                         &run_id,
                         &sink,
-                        &format!(
-                            "background removal failed: {err}; raw diagnostic kept at {diagnostic_ref}; no runtime image delivered"
+                        with_run_diagnostic(
+                            FailureNormalizer::image_proc("asset_generate.remove_background", &err),
+                            &run_id,
                         ),
-                        Some(diagnostic_ref.clone()),
                     )
                     .await;
                     return;
@@ -239,12 +305,18 @@ pub(crate) async fn run_asset_generate(
             asset_request.image_paths =
                 match runtime_image_paths_for(&asset_request, game_context.pack()) {
                     Ok(paths) => paths,
-                    Err(err) => {
-                        finalize_with_error(
+                    Err(_) => {
+                        finalize_with_failure(
                             &repo,
                             &run_id,
                             &sink,
-                            &format!("plan runtime image delivery: {err}"),
+                            with_optional_run_diagnostic(
+                                ActionableFailure::unclassified(
+                                    "asset_generate.runtime_image_plan",
+                                ),
+                                &run_id,
+                                diagnostics_written,
+                            ),
                         )
                         .await;
                         return;
@@ -264,15 +336,24 @@ pub(crate) async fn run_asset_generate(
 
     // 2. 装 codegen prompt
     let assembler = PromptAssembler::built_in();
-    let prompt_assembly = match assembler
-        .assemble_asset_prompt_with_evidence(&asset_request, &game_context)
-    {
-        Ok(assembly) => assembly,
-        Err(err) => {
-            finalize_with_error(&repo, &run_id, &sink, &format!("prompt assembly: {err}")).await;
-            return;
-        }
-    };
+    let prompt_assembly =
+        match assembler.assemble_asset_prompt_with_evidence(&asset_request, &game_context) {
+            Ok(assembly) => assembly,
+            Err(_) => {
+                finalize_with_failure(
+                    &repo,
+                    &run_id,
+                    &sink,
+                    with_optional_run_diagnostic(
+                        ActionableFailure::unclassified("asset_generate.prompt"),
+                        &run_id,
+                        diagnostics_written,
+                    ),
+                )
+                .await;
+                return;
+            }
+        };
 
     sink.emit(ProgressEvent {
         run_id: run_id.clone(),
@@ -360,31 +441,37 @@ pub(crate) async fn run_asset_generate(
     .await
     {
         Ok(published) => published,
-        Err(error) => {
+        Err(_) => {
             let rollback = artifact.rollback_writes().await;
-            let message = match rollback {
-                Ok(()) => error,
-                Err(rollback_error) => {
-                    format!("{error}; rollback generated files failed: {rollback_error}")
-                }
-            };
-            finalize_with_error_diagnostic(
+            let _ = rollback;
+            finalize_with_failure(
                 &repo,
                 &run_id,
                 &sink,
-                &message,
-                diagnostics_written.then(|| diagnostic_ref.clone()),
+                with_optional_run_diagnostic(
+                    ActionableFailure::unclassified("asset_generate.publish"),
+                    &run_id,
+                    diagnostics_written,
+                ),
             )
             .await;
             return;
         }
     };
-    if diagnostics_written && let Err(error) = tokio::fs::remove_dir_all(&target_dir).await {
+    if diagnostics_written && tokio::fs::remove_dir_all(&target_dir).await.is_err() {
         let artifact_rollback = published.rollback().await;
         let file_rollback = artifact.rollback_writes().await;
-        let message = format!("clean successful run diagnostics: {error}");
         let _ = (artifact_rollback, file_rollback);
-        finalize_with_error_diagnostic(&repo, &run_id, &sink, &message, Some(diagnostic_ref)).await;
+        finalize_with_failure(
+            &repo,
+            &run_id,
+            &sink,
+            with_run_diagnostic(
+                ActionableFailure::unclassified("asset_generate.diagnostics_cleanup"),
+                &run_id,
+            ),
+        )
+        .await;
         return;
     }
     if !matches!(
@@ -415,6 +502,25 @@ pub(crate) async fn run_asset_generate(
         delta: None,
     })
     .await;
+}
+
+fn with_optional_run_diagnostic(
+    failure: ActionableFailure,
+    run_id: &RunId,
+    available: bool,
+) -> ActionableFailure {
+    if available {
+        with_run_diagnostic(failure, run_id)
+    } else {
+        failure
+    }
+}
+
+fn with_run_diagnostic(failure: ActionableFailure, run_id: &RunId) -> ActionableFailure {
+    failure.with_diagnostic(FailureDiagnostic::for_run(
+        run_id,
+        "Run diagnostics are available for this failed execution.",
+    ))
 }
 
 #[cfg(test)]
@@ -889,11 +995,9 @@ mod tests {
 
         let run = service.get(&id).await.unwrap();
         assert_eq!(run.status, RunStatus::Failed);
-        assert!(
-            run.error_message()
-                .unwrap_or_default()
-                .contains("likely_background_residue")
-        );
+        let failure = run.failure.as_ref().unwrap();
+        assert_eq!(failure.code, "image_proc.runtime_failed");
+        assert_eq!(failure.stage, "asset_generate.quality_gate");
         assert_eq!(validator.calls.load(Ordering::SeqCst), 0);
         let diagnostics = td.path().join(".ats/diagnostics").join(&id.0);
         assert!(diagnostics.join("NoisyRelic.png").is_file());
@@ -902,8 +1006,9 @@ mod tests {
         assert_eq!(
             run.failure
                 .as_ref()
-                .and_then(|failure| failure.diagnostic_ref.as_deref()),
-            Some(format!(".ats/diagnostics/{}", id.0).as_str())
+                .and_then(|failure| failure.diagnostic.as_ref())
+                .map(|diagnostic| diagnostic.id.as_str()),
+            Some(id.0.as_str())
         );
         assert!(!artifacts.join("NoisyRelic/NoisyRelic.cs").exists());
         assert!(!td.path().join("Generated/NoisyRelic.cs").exists());
@@ -946,11 +1051,10 @@ mod tests {
 
         let run = service.get(&id).await.unwrap();
         assert_eq!(run.status, RunStatus::Failed);
-        assert!(
-            run.error_message()
-                .unwrap_or_default()
-                .contains("no runtime image delivered")
-        );
+        let failure = run.failure.as_ref().unwrap();
+        assert_eq!(failure.code, "image_proc.runtime_failed");
+        assert_eq!(failure.stage, "asset_generate.remove_background");
+        assert_eq!(failure.diagnostic.as_ref().unwrap().id, id.0);
         assert_eq!(validator.calls.load(Ordering::SeqCst), 0);
         let diagnostics = td.path().join(".ats/diagnostics").join(&id.0);
         assert!(diagnostics.join("InvalidImageRelic.png").is_file());
@@ -1057,11 +1161,9 @@ mod tests {
 
         let run = service.get(&id).await.unwrap();
         assert_eq!(run.status, RunStatus::Failed);
-        assert!(
-            run.error_message()
-                .unwrap_or_default()
-                .contains("ResetEnergy")
-        );
+        let failure = run.failure.as_ref().unwrap();
+        assert_eq!(failure.code, "run.input_invalid");
+        assert_eq!(failure.stage, "asset_bundle.output");
         assert_eq!(validator.calls.load(Ordering::SeqCst), 0);
         assert!(!td.path().join("Generated/BadRelic.cs").exists());
         assert!(!artifacts.join("BadRelic/BadRelic.cs").exists());
@@ -1101,12 +1203,9 @@ mod tests {
 
         let run = service.get(&id).await.unwrap();
         assert_eq!(run.status, RunStatus::Failed);
-        assert!(
-            run.error_message()
-                .unwrap_or_default()
-                .contains("image_gen"),
-            "error should mention image_gen"
-        );
+        let failure = run.failure.as_ref().unwrap();
+        assert_eq!(failure.code, "image.upstream_failed");
+        assert_eq!(failure.stage, "asset_generate.image");
         assert!(
             !artifacts.join("BetaCard/BetaCard.cs").exists(),
             "cs should not be written when image_gen fails"
@@ -1145,11 +1244,9 @@ mod tests {
 
         let run = service.get(&id).await.unwrap();
         assert_eq!(run.status, RunStatus::Failed);
-        assert!(
-            run.error_message()
-                .unwrap_or_default()
-                .contains("project scope")
-        );
+        let failure = run.failure.as_ref().unwrap();
+        assert_eq!(failure.code, "run.input_invalid");
+        assert_eq!(failure.stage, "asset_generate.project_scope");
         assert_eq!(mock_img.call_count(), 0);
     }
 
@@ -1324,11 +1421,9 @@ mod tests {
         wait_terminal(&service, &id).await;
         let run = service.get(&id).await.unwrap();
         assert_eq!(run.status, RunStatus::Failed);
-        assert!(
-            run.error_message()
-                .unwrap_or_default()
-                .contains("simulated compile failure")
-        );
+        let failure = run.failure.as_ref().unwrap();
+        assert_eq!(failure.code, "core.unclassified");
+        assert_eq!(failure.stage, "asset_bundle.compile");
         assert_eq!(
             std::fs::read_to_string(generated.join("RollbackCard.cs")).unwrap(),
             "public class OldVersion {}"

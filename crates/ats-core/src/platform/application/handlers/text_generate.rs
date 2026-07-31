@@ -8,9 +8,10 @@ use std::sync::Arc;
 use futures_util::StreamExt;
 
 use super::common::{
-    FinalizeOutcome, ProgressEvent, ProgressSink, emit_cancelled_mid_stream, finalize_with_error,
+    FinalizeOutcome, ProgressEvent, ProgressSink, emit_cancelled_mid_stream, finalize_with_failure,
     finalize_with_success, is_cancelled, transition_to_running,
 };
+use crate::failure::FailureNormalizer;
 use crate::llm::{CompletionRequest, LlmClient, Message, MessageRole, StreamEvent};
 use crate::platform::contracts::SubmitTextGenerateRequest;
 use crate::platform::domain::{RunId, RunRepository, RunResult, TokenUsage};
@@ -42,14 +43,12 @@ pub async fn run_text_generate(
     let mut stream = match stream_result {
         Ok(s) => s,
         Err(err) => {
-            finalize_with_error(&repo, &run_id, &sink, &err.to_string()).await;
-            sink.emit(ProgressEvent {
-                run_id: run_id.clone(),
-                stage: "stream-start-error".into(),
-                percent: None,
-                message: Some(err.to_string()),
-                delta: None,
-            })
+            finalize_with_failure(
+                &repo,
+                &run_id,
+                &sink,
+                FailureNormalizer::llm("text_generate.stream_start", &err),
+            )
             .await;
             return;
         }
@@ -101,14 +100,12 @@ pub async fn run_text_generate(
                 finish = Some(format!("{finish_reason:?}").to_lowercase());
             }
             Err(err) => {
-                finalize_with_error(&repo, &run_id, &sink, &err.to_string()).await;
-                sink.emit(ProgressEvent {
-                    run_id: run_id.clone(),
-                    stage: "stream-error".into(),
-                    percent: None,
-                    message: Some(err.to_string()),
-                    delta: None,
-                })
+                finalize_with_failure(
+                    &repo,
+                    &run_id,
+                    &sink,
+                    FailureNormalizer::llm("text_generate.stream", &err),
+                )
                 .await;
                 return;
             }

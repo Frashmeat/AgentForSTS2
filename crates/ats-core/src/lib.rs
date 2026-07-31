@@ -7,6 +7,7 @@ pub mod capabilities;
 pub mod codegen;
 pub mod config;
 pub mod errors;
+pub mod failure;
 pub mod fs_atomic;
 pub mod game_pack;
 pub mod health;

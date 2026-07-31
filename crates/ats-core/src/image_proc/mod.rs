@@ -33,6 +33,12 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ImageProcError {
+    #[error("image processor is not ready: {0}")]
+    NotReady(String),
+    #[error("image model failed: {0}")]
+    Model(String),
+    #[error("image runtime failed: {0}")]
+    Runtime(String),
     #[error("image decode: {0}")]
     Decode(String),
     #[error("image encode: {0}")]

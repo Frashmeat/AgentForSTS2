@@ -15,13 +15,29 @@ import type {
   PlanValidationResult,
   ReviewStrictness,
 } from "./tauriApi";
+import type {
+  ActionableFailure,
+  FailureCategory,
+  RecoveryAction,
+} from "./actionableFailure";
+export {
+  isActionableFailure,
+  toActionableFailure,
+} from "./actionableFailure";
+
+export function invokeCommand<T>(
+  command: string,
+  _args?: Record<string, unknown>,
+): Promise<T> {
+  return Promise.reject(desktopOnlyFailure(command));
+}
 
 const API_BASE = "/api";
 
 async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`);
   if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}`);
+    throw httpFailure(response.status, "web.get");
   }
   return response.json() as Promise<T>;
 }
@@ -83,7 +99,7 @@ export async function validatePlan(
     },
   );
   if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}`);
+    throw httpFailure(response.status, "web.planning_validate");
   }
   return response.json() as Promise<PlanValidationResult>;
 }
@@ -102,7 +118,7 @@ export async function buildExecutionPlan(
     },
   );
   if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}`);
+    throw httpFailure(response.status, "web.execution_plan");
   }
   return response.json() as Promise<ExecutionPlanPreview>;
 }
@@ -114,7 +130,7 @@ async function codegenPost(path: string, body: unknown): Promise<string> {
     body: JSON.stringify(body),
   });
   if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}`);
+    throw httpFailure(response.status, "web.codegen");
   }
   const payload = (await response.json()) as { prompt: string };
   return payload.prompt;
@@ -159,7 +175,7 @@ export async function llmComplete(
     body: JSON.stringify(request),
   });
   if (!response.ok) {
-    throw new Error(`${response.status} ${await response.text()}`);
+    throw httpFailure(response.status, "web.llm_complete");
   }
   return response.json() as Promise<CompletionResponse>;
 }
@@ -172,13 +188,76 @@ export async function llmStartStream(
   _requestId: string,
   _request: CompletionRequest,
 ): Promise<void> {
-  throw new Error("Web streaming not yet wired (use llmComplete for now)");
+  throw desktopOnlyFailure("llmStartStream");
 }
 
 // -------- Project / Runs stubs（桌面专属，Web 端 stage 3.1a 后接 sqlx）--------
 
 function desktopOnly(name: string): never {
-  throw new Error(`${name} is desktop-only (Tauri); Web sqlx pending stage 3.1a`);
+  throw desktopOnlyFailure(name);
+}
+
+function desktopOnlyFailure(_name: string): ActionableFailure {
+  return failure(
+    "web.desktop_only",
+    "state",
+    "web.command",
+    "This operation is available only in the desktop application.",
+    "none",
+    false,
+  );
+}
+
+function httpFailure(status: number, stage: string): ActionableFailure {
+  if (status === 401 || status === 403) {
+    return failure(
+      "web.authentication_failed",
+      "authentication",
+      stage,
+      "Authentication failed. Sign in again and retry.",
+      "reauthenticate",
+      false,
+    );
+  }
+  if (status === 429) {
+    return failure(
+      "web.rate_limited",
+      "rate_limit",
+      stage,
+      "The server rate-limited this request. Retry later.",
+      "retry",
+      true,
+    );
+  }
+  return failure(
+    status >= 500 ? "web.upstream_failed" : "web.request_invalid",
+    status >= 500 ? "upstream" : "validation",
+    stage,
+    status >= 500
+      ? "The server could not complete the request. Retry later."
+      : "The server rejected the request.",
+    status >= 500 ? "retry" : "none",
+    status >= 500,
+  );
+}
+
+function failure(
+  code: string,
+  category: FailureCategory,
+  stage: string,
+  message: string,
+  action: RecoveryAction,
+  retryable: boolean,
+): ActionableFailure {
+  return {
+    schemaVersion: 1,
+    code,
+    category,
+    stage,
+    message,
+    action,
+    retryable,
+  };
 }
 
 export function listRecentProjects(): Promise<never[]> {

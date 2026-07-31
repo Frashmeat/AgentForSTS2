@@ -11,12 +11,17 @@ import type {
   StreamEvent,
   Usage,
 } from "./tauriApi";
+import type { ActionableFailure } from "./actionableFailure";
+import {
+  localValidationFailure,
+  toActionableFailure,
+} from "./actionableFailure";
 
 export interface StreamCallbacks {
   onStart?: (model: string) => void;
   onDelta: (text: string) => void;
   onEnd?: (finishReason: FinishReason, usage: Usage) => void;
-  onError: (message: string) => void;
+  onError: (failure: ActionableFailure) => void;
 }
 
 export interface StreamHandle {
@@ -29,7 +34,12 @@ export interface StreamHandle {
  */
 type Envelope =
   | { type: "event"; request_id?: string; event: StreamEvent }
-  | { type: "error"; request_id?: string; message: string }
+  | {
+      type: "error";
+      request_id?: string;
+      failure?: ActionableFailure;
+      message?: string;
+    }
   | { type: "done"; request_id?: string };
 
 function dispatch(envelope: Envelope, callbacks: StreamCallbacks): boolean {
@@ -44,7 +54,14 @@ function dispatch(envelope: Envelope, callbacks: StreamCallbacks): boolean {
       return true;
     }
   } else if (envelope.type === "error") {
-    callbacks.onError(envelope.message);
+    callbacks.onError(
+      envelope.failure
+        ? toActionableFailure(envelope.failure)
+        : localValidationFailure(
+            "llm.stream",
+            "The LLM stream failed before completion.",
+          ),
+    );
     return true;
   } else if (envelope.type === "done") {
     return true;
@@ -77,7 +94,7 @@ function startTauriStream(
 
   void (async () => {
     const { listen } = await import("@tauri-apps/api/event");
-    const { invoke } = await import("@tauri-apps/api/core");
+    const { invokeCommand } = await import("./tauriApi");
     if (cancelled) return;
 
     unlisten = await listen<Envelope & { request_id?: string }>(
@@ -102,9 +119,9 @@ function startTauriStream(
     }
 
     try {
-      await invoke("llm_start_stream", { requestId, request });
+      await invokeCommand("llm_start_stream", { requestId, request });
     } catch (e) {
-      callbacks.onError(String(e));
+      callbacks.onError(toActionableFailure(e));
       unlisten?.();
       unlisten = null;
     }
@@ -136,9 +153,7 @@ function startWebStream(
         signal: controller.signal,
       });
       if (!response.ok || !response.body) {
-        callbacks.onError(
-          `HTTP ${response.status} ${response.statusText || "(no body)"}`,
-        );
+        callbacks.onError(toActionableFailure(undefined));
         return;
       }
 
@@ -172,8 +187,8 @@ function startWebStream(
                 terminal = true;
                 break;
               }
-            } catch (err) {
-              callbacks.onError(`failed to parse SSE payload: ${String(err)}`);
+            } catch {
+              callbacks.onError(toActionableFailure(undefined));
               terminal = true;
               break;
             }
@@ -186,7 +201,7 @@ function startWebStream(
         // 用户主动 cancel 不报错
         return;
       }
-      callbacks.onError(String(e));
+      callbacks.onError(toActionableFailure(e));
     }
   })();
 

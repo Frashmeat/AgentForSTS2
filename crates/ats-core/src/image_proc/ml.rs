@@ -54,6 +54,11 @@ impl MlBgRemover {
     /// - 模型文件不存在 / 不可读
     /// - ort 加载失败（onnxruntime 原生 lib 缺失 / 不兼容）
     pub fn load(model_path: &Path) -> Result<Self, MlBgRemoverError> {
+        if !model_path.is_file() {
+            return Err(MlBgRemoverError::OrtSession(
+                "ONNX model file does not exist".into(),
+            ));
+        }
         let session = Session::builder()
             .map_err(|e| MlBgRemoverError::OrtSession(e.to_string()))?
             .commit_from_file(model_path)
@@ -120,7 +125,7 @@ impl ImageProcClient for MlBgRemover {
         let input = input_png.to_vec();
         tokio::task::spawn_blocking(move || run_inference(&session, &input))
             .await
-            .map_err(|e| ImageProcError::Decode(format!("join: {e}")))?
+            .map_err(|e| ImageProcError::Runtime(format!("worker join: {e}")))?
             .map_err(map_err)
     }
 }
@@ -129,7 +134,9 @@ fn map_err(err: MlBgRemoverError) -> ImageProcError {
     match err {
         MlBgRemoverError::Decode(m) => ImageProcError::Decode(m),
         MlBgRemoverError::Encode(m) => ImageProcError::Encode(m),
-        e => ImageProcError::Decode(e.to_string()),
+        MlBgRemoverError::OrtInit(message) => ImageProcError::NotReady(message),
+        MlBgRemoverError::OrtSession(message) => ImageProcError::Model(message),
+        MlBgRemoverError::Inference(message) => ImageProcError::Runtime(message),
     }
 }
 
@@ -251,14 +258,21 @@ mod tests {
     }
 
     #[test]
-    fn map_err_collapses_inference_to_decode() {
-        // 推理错误归到 Decode 类别（ImageProcError 没有 Inference 分类，
-        // 避免 trait 改动；调用方看错误字符串即可）
+    fn map_err_preserves_inference_kind() {
         let mapped = map_err(MlBgRemoverError::Inference("kaboom".into()));
-        match mapped {
-            ImageProcError::Decode(s) => assert!(s.contains("kaboom")),
-            _ => panic!("expected Decode"),
-        }
+        assert!(matches!(mapped, ImageProcError::Runtime(message) if message == "kaboom"));
+    }
+
+    #[test]
+    fn map_err_distinguishes_runtime_and_model_readiness() {
+        assert!(matches!(
+            map_err(MlBgRemoverError::OrtInit("missing runtime".into())),
+            ImageProcError::NotReady(_)
+        ));
+        assert!(matches!(
+            map_err(MlBgRemoverError::OrtSession("bad model".into())),
+            ImageProcError::Model(_)
+        ));
     }
 
     #[test]

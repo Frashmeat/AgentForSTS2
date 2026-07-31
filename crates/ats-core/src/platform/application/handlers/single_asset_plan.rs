@@ -12,9 +12,10 @@ use futures_util::StreamExt;
 
 use super::code_generate::extract_first_code_block;
 use super::common::{
-    FinalizeOutcome, ProgressEvent, ProgressSink, emit_cancelled_mid_stream, finalize_with_error,
+    FinalizeOutcome, ProgressEvent, ProgressSink, emit_cancelled_mid_stream, finalize_with_failure,
     finalize_with_success, is_cancelled, transition_to_running,
 };
+use crate::failure::{ActionableFailure, FailureNormalizer};
 use crate::game_pack::LoadedGamePack;
 use crate::llm::{CompletionRequest, LlmClient, Message, MessageRole, StreamEvent};
 use crate::planning::PlanItem;
@@ -59,7 +60,16 @@ pub async fn run_single_asset_plan(
         return;
     }
     if request.requirements.trim().is_empty() {
-        finalize_with_error(&repo, &run_id, &sink, "requirements is empty").await;
+        finalize_with_failure(
+            &repo,
+            &run_id,
+            &sink,
+            ActionableFailure::invalid_input(
+                "single_asset_plan.input",
+                "Describe the asset requirements before generating a plan.",
+            ),
+        )
+        .await;
         return;
     }
     if let Some(asset_type) = request.asset_type.as_deref()
@@ -67,14 +77,13 @@ pub async fn run_single_asset_plan(
         && asset_type.trim() != "custom_code"
         && pack.resource_spec(asset_type).is_none()
     {
-        finalize_with_error(
+        finalize_with_failure(
             &repo,
             &run_id,
             &sink,
-            &format!(
-                "game pack `{}` does not declare asset type `{}`",
-                pack.id,
-                asset_type.trim()
+            ActionableFailure::invalid_input(
+                "single_asset_plan.asset_type",
+                "The selected Game Pack does not support this asset type.",
             ),
         )
         .await;
@@ -96,7 +105,13 @@ pub async fn run_single_asset_plan(
     let mut stream = match llm.stream(completion_request).await {
         Ok(s) => s,
         Err(err) => {
-            finalize_with_error(&repo, &run_id, &sink, &err.to_string()).await;
+            finalize_with_failure(
+                &repo,
+                &run_id,
+                &sink,
+                FailureNormalizer::llm("single_asset_plan.stream_start", &err),
+            )
+            .await;
             return;
         }
     };
@@ -132,7 +147,13 @@ pub async fn run_single_asset_plan(
                 usage_out = usage.output_tokens;
             }
             Err(err) => {
-                finalize_with_error(&repo, &run_id, &sink, &err.to_string()).await;
+                finalize_with_failure(
+                    &repo,
+                    &run_id,
+                    &sink,
+                    FailureNormalizer::llm("single_asset_plan.stream", &err),
+                )
+                .await;
                 return;
             }
         }
@@ -148,14 +169,14 @@ pub async fn run_single_asset_plan(
 
     let plan_item = match parse_plan_item(&accumulated) {
         Ok(p) => p,
-        Err(err) => {
-            finalize_with_error(
+        Err(_) => {
+            finalize_with_failure(
                 &repo,
                 &run_id,
                 &sink,
-                &format!(
-                    "parse plan json: {err}; raw: {}",
-                    truncate(&accumulated, 500)
+                ActionableFailure::invalid_input(
+                    "single_asset_plan.output",
+                    "The model returned an invalid plan. Retry generation.",
                 ),
             )
             .await;
@@ -168,12 +189,12 @@ pub async fn run_single_asset_plan(
     let item_file_path = if let Some(dir) = &items_dir {
         match persist_plan_item(dir, &plan_item).await {
             Ok(p) => Some(p),
-            Err(err) => {
+            Err(_) => {
                 sink.emit(ProgressEvent {
                     run_id: run_id.clone(),
                     stage: "items-write-warn".into(),
                     percent: None,
-                    message: Some(format!("write items file failed: {err}")),
+                    message: Some("The generated plan item could not be saved to disk.".into()),
                     delta: None,
                 })
                 .await;
@@ -524,11 +545,9 @@ mod tests {
 
         let run = service.get(&id).await.unwrap();
         assert_eq!(run.status, RunStatus::Failed);
-        assert!(
-            run.error_message()
-                .unwrap_or_default()
-                .contains("parse plan json")
-        );
+        let failure = run.failure.as_ref().unwrap();
+        assert_eq!(failure.code, "run.input_invalid");
+        assert_eq!(failure.stage, "single_asset_plan.output");
     }
 
     #[tokio::test]
@@ -556,11 +575,9 @@ mod tests {
 
         let run = service.get(&id).await.unwrap();
         assert_eq!(run.status, RunStatus::Failed);
-        assert!(
-            run.error_message()
-                .unwrap_or_default()
-                .contains("requirements is empty")
-        );
+        let failure = run.failure.as_ref().unwrap();
+        assert_eq!(failure.code, "run.input_invalid");
+        assert_eq!(failure.stage, "single_asset_plan.input");
     }
 
     #[tokio::test]
@@ -667,11 +684,9 @@ mod tests {
         wait_terminal(&service, &id).await;
         let run = service.get(&id).await.unwrap();
         assert_eq!(run.status, RunStatus::Failed);
-        assert!(
-            run.error_message()
-                .unwrap_or_default()
-                .contains("does not declare")
-        );
+        let failure = run.failure.as_ref().unwrap();
+        assert_eq!(failure.code, "run.input_invalid");
+        assert_eq!(failure.stage, "single_asset_plan.asset_type");
     }
 
     #[test]
