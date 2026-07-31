@@ -1,0 +1,44 @@
+{
+  "id": "structured-failure-contract",
+  "name": "structured-failure-contract",
+  "title": "结构化错误契约与脱敏边界",
+  "description": "执行桌面后端运行时加固 Work Order 2：建立 Core、RunRecord、Tauri 与 React 共用的结构化错误契约、稳定领域映射和统一脱敏边界。",
+  "status": "planning",
+  "dev_type": "fullstack",
+  "scope": "ats-core+desktop+frontend",
+  "priority": "P0",
+  "creator": "codex-agent",
+  "assignee": "codex-agent",
+  "createdAt": "2026-07-31",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "rust",
+  "worktree_path": null,
+  "current_phase": 0,
+  "next_action": [
+    {
+      "phase": 1,
+      "action": "implement"
+    },
+    {
+      "phase": 2,
+      "action": "check"
+    },
+    {
+      "phase": 3,
+      "action": "finish"
+    },
+    {
+      "phase": 4,
+      "action": "create-pr"
+    }
+  ],
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
