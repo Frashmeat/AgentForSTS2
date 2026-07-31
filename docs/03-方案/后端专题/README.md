@@ -4,7 +4,7 @@
 >
 > 权威入口：上级入口为 `docs/03-方案/README.md`。
 >
-> 最后更新：2026-05-06
+> 最后更新：2026-07-31
 
 ## 主入口
 
@@ -14,6 +14,7 @@
 
 ## 未开始
 
+- [`2026-07-31-桌面后端运行时加固与发布收口方案.md`](./未开始/2026-07-31-桌面后端运行时加固与发布收口方案.md)（Rust/Tauri RunRecord/ArtifactManifest、错误契约、Project Session、baseline/ML 安装版和 Windows 发布门禁）
 - [`2026-04-28-后端Prompt声明式Recipe重构计划.md`](./未开始/2026-04-28-后端Prompt声明式Recipe重构计划.md)
 
 ## 进行中
