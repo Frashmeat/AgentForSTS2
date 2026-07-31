@@ -1,0 +1,10 @@
+{"file": ".claude/commands/trellis/finish-work.md", "reason": "Finish work checklist"}
+{"file": ".claude/commands/trellis/check-backend.md", "reason": "Backend check spec"}
+{"file": ".claude/commands/trellis/check-frontend.md", "reason": "Frontend check spec"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "核对可执行契约与测试矩阵"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "核对安全错误展示"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "核对序列化和往返数据流"}
+{"file": ".trellis/tasks/07-31-structured-failure-contract/prd.md", "reason": "逐项核对错误码、脱敏和验收门禁"}
+{"file": "crates/ats-core/src/platform/domain/models.rs", "reason": "核对 Run failure schema"}
+{"file": "src-tauri/src/commands/mod.rs", "reason": "扫描全部 Tauri command 返回契约"}
+{"file": "src/services/tauriApi.ts", "reason": "核对 TypeScript schema 与 runtime guard"}

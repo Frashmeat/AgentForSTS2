@@ -1,0 +1,14 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend development guide"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "错误边界与禁止原始异常透传"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Run、图片、工具链和打包现行契约"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "前端安全展示与纯逻辑测试"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Core 到 React 的跨层 schema"}
+{"file": "crates/ats-core/src/platform/domain/models.rs", "reason": "现有 ActionableFailure 与 RunRecord"}
+{"file": "crates/ats-core/src/platform/application/handlers/common.rs", "reason": "Run 失败统一收尾入口"}
+{"file": "crates/ats-core/src/llm/client.rs", "reason": "LLM typed error 与 retry 元数据"}
+{"file": "crates/ats-core/src/image_gen/client.rs", "reason": "Image typed error"}
+{"file": "crates/ats-core/src/platform/application/handlers/package_project.rs", "reason": "Package typed error 迁移目标"}
+{"file": "src-tauri/src/commands/platform.rs", "reason": "Tauri command failure 边界"}
+{"file": "src/services/tauriApi.ts", "reason": "TypeScript API 权威与 invoke wrapper"}
