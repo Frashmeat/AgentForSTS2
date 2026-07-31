@@ -1,0 +1,4 @@
+{"file": ".agents/skills/check-backend/SKILL.md", "reason": "Rust 后端问题定位与规范复核"}
+{"file": ".agents/skills/check-frontend/SKILL.md", "reason": "TypeScript/React 问题定位与规范复核"}
+{"file": ".agents/skills/check-cross-layer/SKILL.md", "reason": "跨层契约问题定位"}
+{"file": ".trellis/tasks/07-31-run-artifact-contract/prd.md", "reason": "调试时保持状态机、Artifact 和停止条件边界"}

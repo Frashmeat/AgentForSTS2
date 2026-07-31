@@ -1,0 +1,11 @@
+{"file": "PROJECT_SPEC.md", "reason": "检查范围、验证和文档同步"}
+{"file": ".agents/skills/finish-work/SKILL.md", "reason": "交付前检查"}
+{"file": ".agents/skills/check-backend/SKILL.md", "reason": "Rust 后端规范审查"}
+{"file": ".agents/skills/check-frontend/SKILL.md", "reason": "TypeScript/React 迁移审查"}
+{"file": ".agents/skills/check-cross-layer/SKILL.md", "reason": "跨层字段、事件和错误边界审查"}
+{"file": ".trellis/tasks/07-31-run-artifact-contract/prd.md", "reason": "逐项检查验收矩阵和停止条件"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "检查 code-spec 是否与新契约同步"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "检查数据往返与边界一致性"}
+{"file": "docs/03-当前方案/2026-07-31-桌面后端运行时加固与发布收口方案.md", "reason": "检查未越界进入 Work Order 2/3"}
+{"file": "crates/ats-core/tests/job_lifecycle.rs", "reason": "现有集成基线及 run_lifecycle 重命名目标"}
+{"file": "src/services/tauriApi.ts", "reason": "检查 command/type/event 全链路无兼容 Job API"}

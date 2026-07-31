@@ -1,0 +1,24 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend development guide"}
+{"file": "PROJECT_SPEC.md", "reason": "项目协作、文档同步与验证边界"}
+{"file": ".trellis/tasks/07-31-run-artifact-contract/prd.md", "reason": "已确认的 RunRecord v2、ArtifactManifest、矩阵与停止条件"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "现有 Rust 生成与 Evidence 可执行契约，实施中同步迁移"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Core、Tauri、TypeScript 与 React 跨层契约检查"}
+{"file": "docs/03-当前方案/2026-07-31-桌面后端运行时加固与发布收口方案.md", "reason": "总体 Work Order、已确认门禁和后续任务边界"}
+{"file": "docs/03-当前方案/通用Mod流水线与Game-Pack边界.md", "reason": "Artifact Evidence 与 Game Pack 的稳定架构边界"}
+{"file": "crates/ats-core/src/platform/domain/models.rs", "reason": "现有 Job 领域模型与待替换序列化形状"}
+{"file": "crates/ats-core/src/platform/domain/repository.rs", "reason": "现有 modify CAS 原语"}
+{"file": "crates/ats-core/src/platform/infra/file_job_repository.rs", "reason": "V1 文件仓库、原子写和实例锁模式"}
+{"file": "crates/ats-core/src/platform/application/handlers/common.rs", "reason": "现有局部状态转换与终态 CAS helper"}
+{"file": "crates/ats-core/src/platform/application/job_application_service.rs", "reason": "所有 Run kind 提交、查询、取消和 spawn 入口"}
+{"file": "crates/ats-core/src/platform/application/handlers/asset_bundle.rs", "reason": "现有 Evidence 文件、产物写入和 FileTransaction"}
+{"file": "crates/ats-core/src/codegen/prompt_assembler.rs", "reason": "Markdown Evidence 的当前来源与结构化迁移点"}
+{"file": "crates/ats-core/src/game_pack/context.rs", "reason": "Game Pack/Truth Snapshot 结构化 evidence 来源"}
+{"file": "crates/ats-core/src/game_pack/truth_snapshot/store.rs", "reason": "不可变 staging、哈希和原子发布参考模式"}
+{"file": "crates/ats-core/src/game_pack/truth_snapshot/hash.rs", "reason": "文件/目录哈希、symlink 与相对路径安全模式"}
+{"file": "crates/ats-core/src/project/folder.rs", "reason": "工程锁、history 创建和 V1 备份接入点"}
+{"file": "src-tauri/src/commands/platform.rs", "reason": "Desktop command、repository 装配和 progress event 迁移面"}
+{"file": "src/services/tauriApi.ts", "reason": "共享前端 API 类型和 command 权威"}
+{"file": "src/hooks/useJobProgress.ts", "reason": "事件 topic 与 Run ID hook 迁移"}
+{"file": "src/components/JobsList.tsx", "reason": "任务列表、详情、取消和 timeline/manifest 消费入口"}

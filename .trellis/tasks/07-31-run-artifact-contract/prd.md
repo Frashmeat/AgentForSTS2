@@ -95,7 +95,65 @@ RunRecord
 - `cancelled` 不写 `failure`；`failed` 必须写 `failure`；`succeeded` 必须写与 kind 匹配的 `result`。
 - `startedAt` 只在进入 `running` 时写入；`completedAt` 只在终态 CAS 中写入。
 
-### 5.2 Timeline
+### 5.2 最小 ActionableFailure
+
+```text
+ActionableFailure
+  schemaVersion = 1
+  code
+  stage
+  message
+  retryable
+  diagnosticRef?
+```
+
+- 本任务只产生 `run.interrupted`、`run.storage_failed`、`run.invalid_transition` 和按 handler 收口的 `run.execution_failed`；不得在本任务内预测完整 provider/IO 分类。
+- `message` 必须是面向用户的有限长度脱敏摘要；`diagnosticRef` 只能是 `.ats/diagnostics/<run-id>/` 下的工程相对路径。
+- Work Order 2 在同一 schema 上补充 `category`、`action`、`retryAfterMs` 和白名单 context，并将领域错误归一化为更具体的 code；不得恢复 `error: String` 第二真相源。
+
+### 5.3 RunResult 变体
+
+```text
+RunResult
+  serde = { "kind": "<snake_case variant>", ...variant fields }
+
+  text_generation
+    model / content / finishReason / usage
+
+  artifact_production
+    artifactManifestRef / manifestSha256 / artifactId / entityName
+    model? / usage?
+
+  batch_artifact_production
+    total / succeeded / failed
+    items[] = itemId / artifactManifestRef? / manifestSha256? / diagnosticRef?
+
+  build
+    projectRelativeRoot / steps[]
+    artifactManifestRef? / manifestSha256?
+
+  package
+    artifactManifestRef / manifestSha256 / artifactId
+    filesAdded / uncompressedBytes / packageBytes
+
+  plan
+    item / itemFileRef? / model / usage
+
+  log_analysis
+    model / report / logChars / truncatedChars / usage
+
+  truth_snapshot_refresh
+    gamePackId / snapshotId / cacheHit / sourceCount / indexCount
+    toolVersions / warnings
+```
+
+- `artifact_production` 覆盖 `code_generate` 和 `asset_generate`，只保存 `artifactManifestRef`、`manifestSha256`、`artifactId`、`entityName` 及必要的 token/模型摘要；文件路径、Evidence、compile 输出和图片质量详情进入 manifest 或 diagnostics。
+- `batch_artifact_production` 保存每个 item 的成功 manifest 引用或失败 diagnostic 引用及计数，不复制子产物 Evidence。
+- `package` 的 ZIP 是正式产物，必须生成 manifest；`build` 只有在声明的构建输出形成可发布快照时才使用 manifest，否则结果只保存已脱敏的步骤摘要。
+- `text_generation`、`plan`、`log_analysis` 和 `truth_snapshot_refresh` 保存各自受控字段；所有路径必须是工程相对路径，不得把完整 Prompt、原始上游 body、未标准化绝对路径或任意 `serde_json::Value` 作为 result。
+- `RunResult` 与 `RunKind` 必须在 repository 终态校验中匹配；失败和取消不允许保存成功 result。
+
+### 5.4 Timeline
 
 ```text
 RunTimelineEvent
@@ -114,7 +172,7 @@ RunTimelineEvent
 - `interrupted` 是崩溃恢复专用 terminal event，对应 `status = failed`、`failure.code = run.interrupted`。
 - terminal CAS 同时提交 `status`、`completedAt`、`failure/result` 和 terminal timeline event。
 
-### 5.3 状态转换
+### 5.5 状态转换
 
 | 当前状态 | 允许目标 | 必需 timeline | failure/result |
 | --- | --- | --- | --- |
@@ -286,10 +344,63 @@ npx tsc -b --pretty false
 
 ## 14. 调查结果
 
-待代码调查后补充：
+### 14.1 Relevant Specs
 
-- Relevant Specs
-- Existing Patterns
-- Production Job/Run Symbol Inventory
-- Files to Modify
-- Contract Gaps
+- `.trellis/spec/backend/quality-guidelines.md`：当前唯一包含 Rust 桌面生成、Evidence、图片和工具链可执行契约的后端规范；本任务必须把其中 `Job`、`evidence.md` 和任意 JSON result 口径改成 Run/Manifest。
+- `.trellis/spec/guides/cross-layer-thinking-guide.md`：用于核对 Core -> Tauri -> TypeScript -> React 的字段、事件和错误边界。
+- `docs/03-当前方案/2026-07-31-桌面后端运行时加固与发布收口方案.md`：Work Order 1、停止条件和后续任务边界。
+- `docs/03-当前方案/通用Mod流水线与Game-Pack边界.md`：Evidence 必须绑定 Game Pack/Truth Snapshot，不得把 STS2 特例写入通用 Run/Artifact 层。
+- frontend hook/state/type 规范仍是骨架，backend `type-safety.md` 不存在；本 PRD 的 schema、矩阵和跨层命名清单是本任务主要的类型安全门禁。
+
+### 14.2 Existing Patterns
+
+- `JobRepository::modify` 与 `handlers/common.rs` 已提供单次读改写和“取消不被成功收尾覆盖”的局部 CAS 模式，可演化为状态、timeline、failure/result 同提交的 Run transition API。
+- `fs_atomic::{write_atomic, write_atomic_sync}` 提供同目录临时文件 + rename；Truth Snapshot store 已有 staging 目录、内容哈希、不可变目录发布和 pointer digest 模式，可复用于 Artifact Store。
+- Truth Snapshot 的 `digest_tree` 和 package layout 已有拒绝 symlink、限制 root、规范化相对路径和 SHA-256 的实现模式。
+- `VerifiedGameContext::evidence()` 已提供 Game Pack、Snapshot、source、index 和 tool version 的结构化事实；`PromptAssembler` 目前又把它和代码事实渲染成 Markdown，需拆成可序列化 Evidence 数据后供 prompt 与 manifest 两个消费者使用。
+- `asset_bundle.rs::FileTransaction` 已能回滚正式工程文件，但诊断文件在事务外先写入；Artifact Store 发布需要独立 staging/commit 协调器，不能仅在现有 helper 上追加 manifest 写入。
+
+### 14.3 Production Job/Run Symbol Inventory
+
+Core 生产链：
+
+- `platform/domain/{models,repository,errors}.rs`：`JobId/Kind/Status/Progress/Job/Summary/Error/Result/Repository`。
+- `platform/application/job_application_service.rs`、`application/mod.rs`、`platform/mod.rs`、`contracts.rs`：service、submit/get/list/cancel、`SubmitJobAck` 和公开 re-export。
+- 九个 handler：`text_generate`、`code_generate`、`asset_generate`、`batch_custom_code`、`build_project`、`package_project`、`single_asset_plan`、`log_analysis`、`truth_snapshot_refresh`；其中 build/package/plan/log/batch 仍手写 `get -> update` 终态。
+- `platform/infra/file_job_repository.rs` 与 `audited_repository.rs`：V1 文件仓库和 Audit 装饰器。
+- `audit.rs`：独立 Audit 类型、sink 和 `.ats/audit.log` 读写；`plan_artifact.rs` 是另一套功能，不随 Audit 删除。
+- `project/folder.rs`：创建 `history/` 并持有工程 OS 锁，当前 open 没有 V1 history 识别或备份。
+
+Desktop/Tauri：
+
+- `src-tauri/src/commands/platform.rs`：9 个 `submit_*_job`、`get_job/list_jobs/cancel_job`、`job-progress`，并在每次 command 中新建 repository/Audit wrapper。
+- `src-tauri/src/commands/audit.rs`：`audit_append/audit_read_recent` 与 plan artifact command 混放；只删除前两者并保留/重命名后者所属模块。
+- `src-tauri/src/lib.rs`：全部 command 注册。
+
+TypeScript/React：
+
+- `src/services/tauriApi.ts` 与 `webApi.ts`：Job 类型、ack、commands 和 desktop-only stubs。
+- `src/hooks/useJobProgress.ts`、`src/stores/workflow.ts`：event topic、ID 和跨页恢复状态。
+- `JobsCard/JobsList/JobsSubmitForm`、`SingleAssetWorkflowCard`、`KnowledgeCard`、`BatchGenerationPage`、`LogAnalysisPage`、`SystemPage`：生产 Job API 消费者；产品中文“任务”保留。
+- `AuditCard` 当前直接读取 `.ats/audit.log`，应删除独立 Audit 视图或改为直接渲染 Run timeline/ArtifactManifest，不能保留旧 command fallback。
+
+### 14.4 Files to Modify
+
+- 新建/重命名：`run_application_service.rs`、`file_run_repository.rs`、`tests/run_lifecycle.rs`，并在 platform domain 中定义 RunRecord v2、timeline、typed payload/result、最小 ActionableFailure。
+- 新建 Artifact Store 模块，负责安全 ID/相对路径、staging、文件 digest、manifest 校验和不可变发布；复用通用哈希/路径规则，不把 STS2 逻辑放入该模块。
+- 修改上述九个 handler，使全部状态迁移经过同一 Run transition API；产物型 handler 在成功 CAS 前完成 manifest 发布，失败诊断写入 `.ats/diagnostics/<run-id>/`。
+- 修改 `PromptAssembler`/Evidence 数据模型和 asset bundle transaction，停止创建、返回和测试 `evidence.md`。
+- 修改 `ProjectFolder::create/open` 及测试，建立 V2 history 标记和 V1 整目录备份。
+- 删除 `audited_repository.rs` 和 Core Audit 生命周期实现；拆分 Tauri `commands/audit.rs`，保留独立的 plan artifact command。
+- 全量迁移 Tauri commands/events、TypeScript service/hook/store/component 内部标识，并更新 command 注册和定向 frontend tests/E2E selectors。
+- 同步 backend quality spec、架构总览、当前进度和 Game Pack 边界文档。
+
+### 14.5 Contract Gaps And Implementation Order
+
+1. 先定义纯领域 schema、合法转换和 `RunKind <-> payload/result` 校验，再替换 repository；禁止在 handler 中继续直接修改公开字段。
+2. 先实现 V1 识别/可恢复目录备份，再允许 V2 repository 初始化；当前 JSON 没有 `schemaVersion`，因此不能与 V2 混读。
+3. 先实现结构化 Evidence 和 Artifact Store staging，再迁移 asset/code/package 成功结果；当前 `artifacts/<entity>/` 会覆盖同名产物且把 raw/evidence/正式文件混放。
+4. 再迁移所有 handler 到统一 terminal CAS；当前五个 handler 的 `get -> update` 会覆盖并发取消，build 还在失败状态中写成功形状的 result。
+5. 最后破坏性切换 Tauri/TypeScript 命名并删除 Audit/evidence 入口，使用定向 compile/typecheck 暴露漏网符号。
+
+已知边界：Tauri 当前每个 command 都新建 `FileJobRepository`，实例内 mutex 不能形成跨 command 锁域。Work Order 1 负责让单个 repository 的 Run 聚合和终态转换正确；共享 `Arc<RunRepository>`、关闭工程 cancel-and-drain 和全局竞争收口仍由 Work Order 3 完成。本任务验收不得声称已解决工程 session 级并发。
