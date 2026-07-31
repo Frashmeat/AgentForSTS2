@@ -7,7 +7,7 @@
 1. `PROJECT_SPEC.md`
 2. `docs/README.md`
 3. `.trellis/workflow.md`
-4. 当前任务相关专题目录的 `README.md`
-5. 当前任务相关的具体文档或代码
+4. `docs/README.md` 指向的当前任务相关文档
+5. 当前任务相关的代码
 
-协作规则以 `PROJECT_SPEC.md` 为准；项目事实与专题资料以 `docs/README.md` 及各目录索引为准。
+协作规则以 `PROJECT_SPEC.md` 为准；项目事实与专题资料统一从 `docs/README.md` 下钻。
