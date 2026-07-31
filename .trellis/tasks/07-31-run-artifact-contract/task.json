@@ -1,0 +1,44 @@
+{
+  "id": "run-artifact-contract",
+  "name": "run-artifact-contract",
+  "title": "RunRecord v2 与 ArtifactManifest",
+  "description": "执行桌面后端运行时加固 Work Order 1：破坏性完成 Job 到 Run 的全链路迁移，建立 RunRecord v2、timeline、ArtifactManifest 和 V1 history 备份边界。",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "priority": "P0",
+  "creator": "codex-agent",
+  "assignee": "codex-agent",
+  "createdAt": "2026-07-31",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "rust",
+  "worktree_path": null,
+  "current_phase": 0,
+  "next_action": [
+    {
+      "phase": 1,
+      "action": "implement"
+    },
+    {
+      "phase": 2,
+      "action": "check"
+    },
+    {
+      "phase": 3,
+      "action": "finish"
+    },
+    {
+      "phase": 4,
+      "action": "create-pr"
+    }
+  ],
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
