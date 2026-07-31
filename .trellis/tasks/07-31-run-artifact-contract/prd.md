@@ -1,6 +1,6 @@
 # RunRecord v2 与 ArtifactManifest
 
-> 状态：planning
+> 状态：in_progress
 >
 > 优先级：P0
 >

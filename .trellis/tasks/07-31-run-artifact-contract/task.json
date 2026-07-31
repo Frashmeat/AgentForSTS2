@@ -3,7 +3,7 @@
   "name": "run-artifact-contract",
   "title": "RunRecord v2 与 ArtifactManifest",
   "description": "执行桌面后端运行时加固 Work Order 1：破坏性完成 Job 到 Run 的全链路迁移，建立 RunRecord v2、timeline、ArtifactManifest 和 V1 history 备份边界。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": "fullstack",
   "scope": "ats-core+desktop+frontend",
   "priority": "P0",
@@ -14,7 +14,7 @@
   "branch": null,
   "base_branch": "rust",
   "worktree_path": null,
-  "current_phase": 0,
+  "current_phase": 1,
   "next_action": [
     {
       "phase": 1,
