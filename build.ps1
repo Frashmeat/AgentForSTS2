@@ -32,6 +32,36 @@ function Assert-BoundedIdentifier {
     }
 }
 
+function Assert-RuntimeBuildIdentity {
+    param(
+        [Parameter(Mandatory = $true)][string]$Executable,
+        [Parameter(Mandatory = $true)][string]$Commit,
+        [Parameter(Mandatory = $true)][string]$Variant,
+        [string[]]$Features = @(),
+        [Parameter(Mandatory = $true)][string]$BuildId
+    )
+    if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) {
+        throw "candidate executable was not produced: $Executable"
+    }
+    $identityJson = & $Executable --print-build-info
+    if ($LASTEXITCODE -ne 0) {
+        throw 'candidate executable failed to report BuildInfo'
+    }
+    try {
+        $identity = $identityJson | ConvertFrom-Json
+    } catch {
+        throw 'candidate executable returned invalid BuildInfo JSON'
+    }
+    $actualFeatures = @($identity.features)
+    if ($identity.commit -ne $Commit -or
+        $identity.variant -ne $Variant -or
+        $identity.buildId -ne $BuildId -or
+        $actualFeatures.Count -ne $Features.Count -or
+        ($actualFeatures -join ',') -ne ($Features -join ',')) {
+        throw 'candidate executable BuildInfo does not match the requested build identity'
+    }
+}
+
 $variantId = $Variant.ToLowerInvariant()
 $commit = (& git rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $commit -notmatch '^[0-9a-fA-F]{40}$') {
@@ -113,6 +143,14 @@ try {
     $env:ATS_BUILD_VARIANT = $previousVariant
     $env:ATS_BUILD_ID = $previousBuildId
 }
+
+$candidateExecutable = Join-Path $targetDir 'release\agentthespire-desktop.exe'
+Assert-RuntimeBuildIdentity `
+    -Executable $candidateExecutable `
+    -Commit $commit `
+    -Variant $variantId `
+    -Features $features `
+    -BuildId $BuildId
 
 $manifest = Publish-IsolatedBundle `
     -TargetDir $targetDir `
