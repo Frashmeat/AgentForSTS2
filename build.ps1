@@ -43,14 +43,21 @@ function Assert-RuntimeBuildIdentity {
     if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) {
         throw "candidate executable was not produced: $Executable"
     }
-    $identityJson = & $Executable --print-build-info
-    if ($LASTEXITCODE -ne 0) {
-        throw 'candidate executable failed to report BuildInfo'
-    }
+    $identityPath = Join-Path `
+        (Split-Path -Parent $Executable) `
+        ("runtime-build-info-" + [Guid]::NewGuid().ToString('N') + '.json')
     try {
-        $identity = $identityJson | ConvertFrom-Json
-    } catch {
-        throw 'candidate executable returned invalid BuildInfo JSON'
+        & $Executable --write-build-info $identityPath
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $identityPath -PathType Leaf)) {
+            throw 'candidate executable failed to report BuildInfo'
+        }
+        try {
+            $identity = Get-Content -Raw -LiteralPath $identityPath | ConvertFrom-Json
+        } catch {
+            throw 'candidate executable returned invalid BuildInfo JSON'
+        }
+    } finally {
+        Remove-Item -LiteralPath $identityPath -Force -ErrorAction SilentlyContinue
     }
     $actualFeatures = @($identity.features)
     if ($identity.commit -ne $Commit -or

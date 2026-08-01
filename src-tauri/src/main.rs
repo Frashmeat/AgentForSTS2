@@ -2,12 +2,18 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--print-build-info")) {
+    let mut args = std::env::args_os().skip(1);
+    if args.next().as_deref() == Some(std::ffi::OsStr::new("--write-build-info")) {
+        let Some(output_path) = args.next() else {
+            std::process::exit(2);
+        };
         let build = ats_core::build_info::BuildInfo::current();
-        println!(
-            "{}",
-            serde_json::to_string(&build).expect("BuildInfo must serialize")
-        );
+        let Ok(json) = serde_json::to_vec(&build) else {
+            std::process::exit(2);
+        };
+        if std::fs::write(output_path, json).is_err() {
+            std::process::exit(2);
+        }
         return;
     }
     agentthespire_desktop_lib::run();
