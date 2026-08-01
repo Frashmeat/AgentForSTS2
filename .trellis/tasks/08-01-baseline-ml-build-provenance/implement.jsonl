@@ -1,0 +1,11 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend development guide"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "ArtifactManifest、ImageProc、BuildInfo 与发布构建契约"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "prewarm last failure 的 ActionableFailure 和脱敏边界"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Tauri status/health TypeScript 边界"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Core、Tauri、TypeScript、PowerShell 身份数据流"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "BuildInfo 与 provenance 单一真相源"}
+{"file": "crates/ats-core/src/platform/artifact.rs", "reason": "现有 ArtifactManifest schema 和发布验证"}
+{"file": "src-tauri/src/commands/image_proc_state.rs", "reason": "现有 ML prewarm composition 状态"}
+{"file": "build.ps1", "reason": "现有 Tauri variant 构建入口"}

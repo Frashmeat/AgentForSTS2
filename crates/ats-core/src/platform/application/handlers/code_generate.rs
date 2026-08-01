@@ -158,6 +158,7 @@ pub(crate) async fn run_code_generate(
                     output_tokens: artifact.usage_out,
                 },
                 evidence,
+                None,
                 files,
                 Vec::new(),
             )
@@ -267,6 +268,7 @@ pub(crate) async fn run_code_generate(
                     output_tokens: artifact.usage_out,
                 },
                 evidence,
+                None,
                 vec![("csharp".into(), artifact.cs_path.clone())],
                 Vec::new(),
             )
@@ -329,6 +331,7 @@ pub(crate) async fn publish_generated_artifact(
     inputs_sha256: String,
     usage: TokenUsage,
     evidence: Vec<GenerationEvidence>,
+    image_processing: Option<crate::image_proc::ImageProcessingProvenance>,
     files: Vec<(String, PathBuf)>,
     snapshot_only_files: Vec<(String, PathBuf)>,
 ) -> Result<PublishedRunArtifact, String> {
@@ -374,7 +377,7 @@ pub(crate) async fn publish_generated_artifact(
                 model: model.clone(),
                 inputs_sha256,
             },
-            image_processing: None,
+            image_processing,
             files: file_inputs,
         })
         .await

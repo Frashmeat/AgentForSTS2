@@ -11,9 +11,10 @@ use thiserror::Error;
 
 use crate::codegen::GenerationEvidence;
 use crate::game_pack::{TruthSnapshotIndex, TruthSnapshotSource, VerifiedGameContext};
+use crate::image_proc::{ImageProcessingProvenance, ImageProcessor};
 use crate::platform::domain::RunId;
 
-pub const ARTIFACT_MANIFEST_SCHEMA_VERSION: u32 = 1;
+pub const ARTIFACT_MANIFEST_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -86,17 +87,6 @@ pub struct ArtifactGeneration {
     pub provider: String,
     pub model: String,
     pub inputs_sha256: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ImageProcessingProvenance {
-    pub processor: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model_sha256: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub runtime_version: Option<String>,
-    pub fallback: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -474,6 +464,9 @@ impl ArtifactManifest {
         validate_sha256(&self.game_context.game_pack_sha256)?;
         validate_sha256(&self.game_context.snapshot_id)?;
         validate_sha256(&self.generation.inputs_sha256)?;
+        if let Some(image_processing) = &self.image_processing {
+            validate_image_processing(image_processing)?;
+        }
         for file in &self.files {
             let relative = normalize_relative_path(Path::new(&file.snapshot_relative_path))?;
             if !relative.starts_with("files/") {
@@ -486,6 +479,56 @@ impl ArtifactManifest {
         }
         Ok(())
     }
+}
+
+fn validate_image_processing(provenance: &ImageProcessingProvenance) -> ArtifactResult<()> {
+    if !provenance.build.is_consistent() {
+        return Err(ArtifactError::InvalidManifest(
+            "image processing BuildInfo is inconsistent".into(),
+        ));
+    }
+    match provenance.processor {
+        ImageProcessor::Simple => {
+            if provenance.model_sha256.is_some() || provenance.runtime_version.is_some() {
+                return Err(ArtifactError::InvalidManifest(
+                    "simple image processing cannot claim model or runtime metadata".into(),
+                ));
+            }
+        }
+        ImageProcessor::MlU2netp => {
+            let model_sha256 = provenance.model_sha256.as_deref().ok_or_else(|| {
+                ArtifactError::InvalidManifest(
+                    "ML image processing requires a model SHA-256".into(),
+                )
+            })?;
+            validate_sha256(model_sha256)?;
+            if provenance.runtime_version.as_deref().is_none_or(|version| {
+                version.is_empty()
+                    || version.len() > 64
+                    || !version.bytes().all(|byte| {
+                        byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-')
+                    })
+            }) {
+                return Err(ArtifactError::InvalidManifest(
+                    "ML image processing requires a runtime version".into(),
+                ));
+            }
+            if provenance.fallback.is_some() {
+                return Err(ArtifactError::InvalidManifest(
+                    "an ML outcome cannot also be a fallback outcome".into(),
+                ));
+            }
+        }
+    }
+    if let Some(fallback) = &provenance.fallback
+        && (provenance.processor != ImageProcessor::Simple
+            || fallback.from != ImageProcessor::MlU2netp)
+    {
+        return Err(ArtifactError::InvalidManifest(
+            "fallback provenance must describe ML to simple processing".into(),
+        ));
+    }
+    Ok(())
 }
 
 #[must_use]
@@ -573,6 +616,9 @@ fn normalize_relative_path(path: &Path) -> ArtifactResult<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::image_proc::{
+        ImageProcFallback, ImageProcFallbackReason, ImageProcessingProvenance, ImageProcessor,
+    };
     use crate::knowledge::test_support::fixture_game_context;
 
     #[test]
@@ -645,6 +691,32 @@ mod tests {
     fn rejects_traversal_and_symlink_inputs() {
         assert!(normalize_relative_path(Path::new("../outside")).is_err());
         assert!(validate_safe_segment("bad/id").is_err());
+    }
+
+    #[test]
+    fn image_processing_provenance_enforces_processor_specific_metadata() {
+        let simple = ImageProcessingProvenance::simple();
+        validate_image_processing(&simple).unwrap();
+
+        let mut invalid_simple = simple.clone();
+        invalid_simple.model_sha256 = Some(sha256_bytes(b"model"));
+        assert!(validate_image_processing(&invalid_simple).is_err());
+
+        let mut fallback = simple;
+        fallback.fallback = Some(ImageProcFallback {
+            from: ImageProcessor::MlU2netp,
+            reason: ImageProcFallbackReason::Runtime,
+        });
+        validate_image_processing(&fallback).unwrap();
+
+        let invalid_ml = ImageProcessingProvenance {
+            processor: ImageProcessor::MlU2netp,
+            model_sha256: None,
+            runtime_version: None,
+            fallback: None,
+            build: crate::build_info::BuildInfo::current(),
+        };
+        assert!(validate_image_processing(&invalid_ml).is_err());
     }
 
     #[test]

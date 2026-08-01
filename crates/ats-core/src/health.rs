@@ -8,6 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::build_info::BuildInfo;
 use crate::config::{ConfigStatus, Settings};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
@@ -50,6 +51,7 @@ pub struct HealthReport {
     pub status: &'static str,
     pub role: Role,
     pub core_version: String,
+    pub build: BuildInfo,
     pub server_time: chrono::DateTime<chrono::Utc>,
     pub config: ConfigStatus,
     #[serde(default)]
@@ -66,6 +68,7 @@ pub fn report(role: Role, config: ConfigStatus) -> HealthReport {
         },
         role,
         core_version: crate::version().to_string(),
+        build: BuildInfo::current(),
         server_time: chrono::Utc::now(),
         config,
         readiness: ReadinessFlags {

@@ -180,6 +180,7 @@ pub fn run() {
             commands::platform::submit_truth_snapshot_refresh_run,
             commands::platform::submit_asset_generate_run,
             commands::image_proc_state::image_proc_status,
+            commands::image_proc_state::retry_image_proc,
             commands::settings::get_settings_snapshot,
             commands::settings::open_config_in_editor,
             commands::settings::save_settings_patch,

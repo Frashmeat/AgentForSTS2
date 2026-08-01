@@ -11,7 +11,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use super::{ImageProcClient, ImageProcError, SimpleBgRemover};
+use super::{
+    ImageProcClient, ImageProcError, ImageProcFallback, ImageProcFallbackReason, ImageProcOutcome,
+    ImageProcessor, SimpleBgRemover,
+};
 use crate::cancellation::CancellationToken;
 
 pub struct BgRemoverChain {
@@ -41,11 +44,17 @@ impl BgRemoverChain {
 
 #[async_trait]
 impl ImageProcClient for BgRemoverChain {
+    fn processor(&self) -> ImageProcessor {
+        self.primary
+            .as_ref()
+            .map_or_else(|| self.fallback.processor(), |primary| primary.processor())
+    }
+
     async fn remove_background(
         &self,
         input_png: &[u8],
         cancellation: &CancellationToken,
-    ) -> Result<Vec<u8>, ImageProcError> {
+    ) -> Result<ImageProcOutcome, ImageProcError> {
         if cancellation.is_cancelled() {
             return Err(ImageProcError::Cancelled);
         }
@@ -55,6 +64,15 @@ impl ImageProcClient for BgRemoverChain {
                 Err(ImageProcError::Cancelled) => return Err(ImageProcError::Cancelled),
                 Err(err) => {
                     tracing::warn!("ML bg remover failed, falling back to heuristic: {err}");
+                    let mut outcome = self
+                        .fallback
+                        .remove_background(input_png, cancellation)
+                        .await?;
+                    outcome.provenance.fallback = Some(ImageProcFallback {
+                        from: p.processor(),
+                        reason: ImageProcFallbackReason::from_error(&err),
+                    });
+                    return Ok(outcome);
                 }
             }
         }
@@ -75,13 +93,20 @@ mod tests {
     }
     #[async_trait]
     impl ImageProcClient for OkClient {
+        fn processor(&self) -> ImageProcessor {
+            ImageProcessor::Simple
+        }
+
         async fn remove_background(
             &self,
             _input: &[u8],
             _cancellation: &CancellationToken,
-        ) -> Result<Vec<u8>, ImageProcError> {
+        ) -> Result<ImageProcOutcome, ImageProcError> {
             *self.calls.lock().unwrap() += 1;
-            Ok(vec![self.marker])
+            Ok(ImageProcOutcome {
+                png: vec![self.marker],
+                provenance: crate::image_proc::ImageProcessingProvenance::simple(),
+            })
         }
     }
 
@@ -90,11 +115,15 @@ mod tests {
     }
     #[async_trait]
     impl ImageProcClient for FailingClient {
+        fn processor(&self) -> ImageProcessor {
+            ImageProcessor::MlU2netp
+        }
+
         async fn remove_background(
             &self,
             _input: &[u8],
             _cancellation: &CancellationToken,
-        ) -> Result<Vec<u8>, ImageProcError> {
+        ) -> Result<ImageProcOutcome, ImageProcError> {
             *self.calls.lock().unwrap() += 1;
             Err(ImageProcError::Decode("simulated".into()))
         }
@@ -125,7 +154,7 @@ mod tests {
             .remove_background(&[], &CancellationToken::new())
             .await
             .unwrap();
-        assert_eq!(out, vec![1]);
+        assert_eq!(out.png, vec![1]);
         assert_eq!(*primary.calls.lock().unwrap(), 1);
         assert_eq!(*fallback.calls.lock().unwrap(), 0);
     }
@@ -142,7 +171,14 @@ mod tests {
             .remove_background(&[], &CancellationToken::new())
             .await
             .unwrap();
-        assert_eq!(out, vec![9]);
+        assert_eq!(out.png, vec![9]);
+        assert_eq!(
+            out.provenance.fallback,
+            Some(ImageProcFallback {
+                from: ImageProcessor::MlU2netp,
+                reason: ImageProcFallbackReason::Decode,
+            })
+        );
         assert_eq!(*primary.calls.lock().unwrap(), 1);
         assert_eq!(*fallback.calls.lock().unwrap(), 1);
     }
@@ -155,7 +191,8 @@ mod tests {
             .remove_background(&[], &CancellationToken::new())
             .await
             .unwrap();
-        assert_eq!(out, vec![7]);
+        assert_eq!(out.png, vec![7]);
+        assert!(out.provenance.fallback.is_none());
         assert_eq!(*fallback.calls.lock().unwrap(), 1);
     }
 

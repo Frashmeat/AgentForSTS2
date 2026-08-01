@@ -100,6 +100,7 @@ pub(crate) async fn run_asset_generate(
     let mut png_path: Option<PathBuf> = None;
     let mut runtime_image_source: Option<PathBuf> = None;
     let mut quality_path: Option<PathBuf> = None;
+    let mut image_processing = None;
     let mut diagnostics_written = false;
 
     if let Some(prompt) = &request.image_prompt {
@@ -213,7 +214,9 @@ pub(crate) async fn run_asset_generate(
                 return;
             }
             match processed_result {
-                Ok(processed) => {
+                Ok(outcome) => {
+                    let processed = outcome.png;
+                    image_processing = Some(outcome.provenance);
                     if let Err(err) = crate::fs_atomic::write_atomic(&rembg_path, &processed).await
                     {
                         finalize_with_failure(
@@ -498,6 +501,7 @@ pub(crate) async fn run_asset_generate(
             output_tokens: artifact.usage_out,
         },
         prompt_assembly.evidence,
+        image_processing,
         files,
         diagnostic_files,
     )
@@ -721,17 +725,24 @@ mod tests {
 
     #[async_trait]
     impl ImageProcClient for BlockingImageProc {
+        fn processor(&self) -> crate::image_proc::ImageProcessor {
+            crate::image_proc::ImageProcessor::Simple
+        }
+
         async fn remove_background(
             &self,
             input_png: &[u8],
             cancellation: &CancellationToken,
-        ) -> Result<Vec<u8>, ImageProcError> {
+        ) -> Result<crate::image_proc::ImageProcOutcome, ImageProcError> {
             self.entered.wait().await;
             self.release.notified().await;
             if cancellation.is_cancelled() {
                 Err(ImageProcError::Cancelled)
             } else {
-                Ok(input_png.to_vec())
+                Ok(crate::image_proc::ImageProcOutcome {
+                    png: input_png.to_vec(),
+                    provenance: crate::image_proc::ImageProcessingProvenance::simple(),
+                })
             }
         }
     }
@@ -1064,6 +1075,11 @@ mod tests {
         let manifest: serde_json::Value =
             serde_json::from_slice(&std::fs::read(manifest_path).unwrap()).unwrap();
         assert_eq!(manifest["producingRunId"], id.0);
+        assert_eq!(manifest["schemaVersion"], 2);
+        assert_eq!(manifest["imageProcessing"]["processor"], "simple");
+        assert!(manifest["imageProcessing"].get("fallback").is_none());
+        assert!(manifest["imageProcessing"].get("modelSha256").is_none());
+        assert!(manifest["imageProcessing"]["build"]["buildId"].is_string());
         assert_eq!(manifest["files"].as_array().unwrap().len(), 8);
         assert!(
             manifest["files"]

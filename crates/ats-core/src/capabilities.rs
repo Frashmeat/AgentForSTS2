@@ -9,11 +9,13 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::build_info::BuildInfo;
 use crate::knowledge::{default_dotnet_tools_dirs, discover_ilspycmd};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalCapabilities {
+    pub build: BuildInfo,
     /// OS family，例 "windows" / "macos" / "linux"
     pub os: String,
     /// CPU arch，例 "x86_64" / "aarch64"
@@ -54,6 +56,7 @@ pub fn detect_sync() -> LocalCapabilities {
     }
 
     LocalCapabilities {
+        build: BuildInfo::current(),
         os,
         arch,
         cpu_count,

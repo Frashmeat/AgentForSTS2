@@ -1,43 +1,127 @@
-# AgentTheSpire -- Tauri desktop production build
-# Outputs installers: MSI/NSIS (Windows), DMG (macOS), AppImage/DEB (Linux).
-# Artifacts land under src-tauri/target/release/bundle/.
+# AgentTheSpire isolated Tauri candidate build.
 #
 # Usage:
-#   .\build.ps1                   # CI-equivalent build, ml-rembg OFF
-#   .\build.ps1 -MlRembg          # enable ML background removal (adds ~200MB)
-#   .\build.ps1 --verbose         # extra args pass through to tauri build
+#   .\build.ps1 -Variant Baseline
+#   .\build.ps1 -Variant Ml
+#   .\build.ps1 -Variant Ml -PlanOnly -BuildId test-ml
 
 [CmdletBinding()]
 param(
-    [switch]$MlRembg,
+    [ValidateSet('Baseline', 'Ml')]
+    [string]$Variant = 'Baseline',
+    [switch]$PlanOnly,
+    [string]$BuildId,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$TauriArgsExtra
 )
 
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
+. "$PSScriptRoot\scripts\release-build-lib.ps1"
 
-& "$PSScriptRoot\scripts\ensure-node-deps.ps1" -Root $PSScriptRoot
+function Assert-BoundedIdentifier {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Value,
+        [Parameter(Mandatory = $true)][int]$MaxLength
+    )
+    if ([string]::IsNullOrWhiteSpace($Value) -or
+        $Value.Length -gt $MaxLength -or
+        $Value -notmatch '^[A-Za-z0-9._-]+$') {
+        throw "$Name must contain 1-$MaxLength ASCII identifier characters"
+    }
+}
 
-# To enable signing later, set these before `npx tauri build`:
-# $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content "$env:USERPROFILE\.tauri\agentthespire.key" -Raw
-# $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = '...'
+$variantId = $Variant.ToLowerInvariant()
+$commit = (& git rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $commit -notmatch '^[0-9a-fA-F]{40}$') {
+    throw 'A full Git commit SHA is required for a candidate build'
+}
+if ([string]::IsNullOrWhiteSpace($BuildId)) {
+    $timestamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ')
+    $BuildId = "$timestamp-$variantId-$($commit.Substring(0, 12))"
+}
+Assert-BoundedIdentifier -Name 'BuildId' -Value $BuildId -MaxLength 96
+if ($TauriArgsExtra | Where-Object { $_ -eq '--features' -or $_ -eq '-F' -or $_ -like '--features=*' }) {
+    throw 'Cargo features are controlled exclusively by -Variant'
+}
 
+$workingTreeChanges = @(& git status --porcelain --untracked-files=normal)
+if ($LASTEXITCODE -ne 0) { throw 'Git working tree status could not be determined' }
+$workingTreeClean = $workingTreeChanges.Count -eq 0
+
+$features = @()
 $tauriArgs = @()
-if ($MlRembg) {
-    Write-Host '==> ml-rembg feature ON (adds ~200MB ort + onnxruntime native lib)' -ForegroundColor Yellow
+if ($variantId -eq 'ml') {
+    $features = @('ml-rembg')
     $tauriArgs += '--features'
     $tauriArgs += 'ml-rembg'
 }
 
-Write-Host '==> npx tauri build' -ForegroundColor Cyan
-npx tauri build @tauriArgs @TauriArgsExtra
-if ($LASTEXITCODE -ne 0) { throw "tauri build failed" }
-
-$bundleDir = Join-Path $PSScriptRoot 'src-tauri\target\release\bundle'
-if (Test-Path $bundleDir) {
-    Write-Host "`n==> Bundle artifacts" -ForegroundColor Green
-    Get-ChildItem -Recurse -File $bundleDir |
-        Where-Object { $_.Extension -in '.msi', '.exe', '.dmg', '.deb', '.AppImage', '.app' } |
-        ForEach-Object { Write-Host "  $($_.FullName)" }
+$targetDir = Join-Path $PSScriptRoot "artifacts\build\$variantId\$BuildId\target"
+$bundleDir = Join-Path $targetDir 'release\bundle'
+$releaseDir = Join-Path $PSScriptRoot "artifacts\release\$BuildId\$variantId"
+$manifestPath = Join-Path $releaseDir 'release-manifest.json'
+$plan = [ordered]@{
+    schemaVersion = 1
+    commit = $commit
+    variant = $variantId
+    features = $features
+    buildId = $BuildId
+    targetDir = $targetDir
+    bundleDir = $bundleDir
+    releaseDir = $releaseDir
+    manifestPath = $manifestPath
+    tauriArgs = $tauriArgs
+    workingTreeClean = $workingTreeClean
 }
+
+if ($PlanOnly) {
+    $plan | ConvertTo-Json -Depth 5
+    return
+}
+
+if (-not $workingTreeClean) {
+    throw 'candidate builds require a clean Git working tree'
+}
+
+if (Test-Path -LiteralPath $targetDir) {
+    throw "isolated target directory already exists for build id: $BuildId"
+}
+if (Test-Path -LiteralPath $releaseDir) {
+    throw "release directory already exists for build id: $BuildId"
+}
+
+& "$PSScriptRoot\scripts\ensure-node-deps.ps1" -Root $PSScriptRoot
+
+$previousTargetDir = $env:CARGO_TARGET_DIR
+$previousCommit = $env:ATS_BUILD_COMMIT
+$previousVariant = $env:ATS_BUILD_VARIANT
+$previousBuildId = $env:ATS_BUILD_ID
+try {
+    $env:CARGO_TARGET_DIR = $targetDir
+    $env:ATS_BUILD_COMMIT = $commit
+    $env:ATS_BUILD_VARIANT = $variantId
+    $env:ATS_BUILD_ID = $BuildId
+
+    Write-Host "==> Building $variantId candidate $BuildId" -ForegroundColor Cyan
+    npx tauri build @tauriArgs @TauriArgsExtra
+    if ($LASTEXITCODE -ne 0) { throw 'tauri build failed' }
+} finally {
+    $env:CARGO_TARGET_DIR = $previousTargetDir
+    $env:ATS_BUILD_COMMIT = $previousCommit
+    $env:ATS_BUILD_VARIANT = $previousVariant
+    $env:ATS_BUILD_ID = $previousBuildId
+}
+
+$manifest = Publish-IsolatedBundle `
+    -TargetDir $targetDir `
+    -BundleDir $bundleDir `
+    -ReleaseDir $releaseDir `
+    -Commit $commit `
+    -Variant $variantId `
+    -Features $features `
+    -BuildId $BuildId
+
+Write-Host "==> Release manifest: $manifestPath" -ForegroundColor Green
+$manifest | ConvertTo-Json -Depth 6

@@ -23,7 +23,9 @@ use ort::value::Tensor;
 use std::io::Cursor;
 use thiserror::Error;
 
-use super::{ImageProcClient, ImageProcError};
+use super::{
+    ImageProcClient, ImageProcError, ImageProcOutcome, ImageProcessingProvenance, ImageProcessor,
+};
 
 const U2NETP_INPUT_SIZE: usize = 320;
 
@@ -44,6 +46,8 @@ pub enum MlBgRemoverError {
 /// 持有一个 ort Session，外部用 Arc 共享。Session 内部线程安全。
 pub struct MlBgRemover {
     session: Arc<std::sync::Mutex<Session>>,
+    model_sha256: String,
+    runtime_version: String,
 }
 
 impl MlBgRemover {
@@ -53,7 +57,11 @@ impl MlBgRemover {
     /// # Errors
     /// - 模型文件不存在 / 不可读
     /// - ort 加载失败（onnxruntime 原生 lib 缺失 / 不兼容）
-    pub fn load(model_path: &Path) -> Result<Self, MlBgRemoverError> {
+    pub fn load(
+        model_path: &Path,
+        model_sha256: String,
+        runtime_version: String,
+    ) -> Result<Self, MlBgRemoverError> {
         if !model_path.is_file() {
             return Err(MlBgRemoverError::OrtSession(
                 "ONNX model file does not exist".into(),
@@ -65,6 +73,8 @@ impl MlBgRemover {
             .map_err(|e| MlBgRemoverError::OrtSession(e.to_string()))?;
         Ok(Self {
             session: Arc::new(std::sync::Mutex::new(session)),
+            model_sha256,
+            runtime_version,
         })
     }
 }
@@ -120,16 +130,22 @@ fn ort_init_error(path: &Path, detail: &str) -> MlBgRemoverError {
 
 #[async_trait]
 impl ImageProcClient for MlBgRemover {
+    fn processor(&self) -> ImageProcessor {
+        ImageProcessor::MlU2netp
+    }
+
     async fn remove_background(
         &self,
         input_png: &[u8],
         cancellation: &crate::cancellation::CancellationToken,
-    ) -> Result<Vec<u8>, ImageProcError> {
+    ) -> Result<ImageProcOutcome, ImageProcError> {
         if cancellation.is_cancelled() {
             return Err(ImageProcError::Cancelled);
         }
         let session = Arc::clone(&self.session);
         let input = input_png.to_vec();
+        let model_sha256 = self.model_sha256.clone();
+        let runtime_version = self.runtime_version.clone();
         let worker_cancellation = cancellation.clone();
         tokio::task::spawn_blocking(move || {
             if worker_cancellation.is_cancelled() {
@@ -139,7 +155,10 @@ impl ImageProcClient for MlBgRemover {
             if worker_cancellation.is_cancelled() {
                 Err(ImageProcError::Cancelled)
             } else {
-                Ok(result)
+                Ok(ImageProcOutcome {
+                    png: result,
+                    provenance: ImageProcessingProvenance::ml_u2netp(model_sha256, runtime_version),
+                })
             }
         })
         .await
@@ -294,7 +313,11 @@ mod tests {
 
     #[test]
     fn load_returns_err_for_missing_file() {
-        let result = MlBgRemover::load(std::path::Path::new("/definitely/not/a/model.onnx"));
+        let result = MlBgRemover::load(
+            std::path::Path::new("/definitely/not/a/model.onnx"),
+            "a".repeat(64),
+            "1.22.0".into(),
+        );
         let err = match result {
             Ok(_) => panic!("expected error from missing model path"),
             Err(e) => e,

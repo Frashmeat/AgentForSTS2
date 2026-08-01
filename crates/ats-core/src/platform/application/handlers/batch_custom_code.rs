@@ -233,6 +233,7 @@ async fn process_one_item(
                     output_tokens: art.usage_out,
                 },
                 assembly.evidence,
+                None,
                 vec![("csharp".into(), art.cs_path.clone())],
                 Vec::new(),
             )

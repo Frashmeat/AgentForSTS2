@@ -63,9 +63,13 @@ export function checkTruthSnapshotStatus(): Promise<TruthSnapshotStatus> {
 export function analyzeModProject(_projectRoot: string): Promise<never> {
   return Promise.resolve().then(() => desktopOnly("analyzeModProject"));
 }
-export function imageProcStatus(): Promise<{ state: "idle" }> {
+export function imageProcStatus(): Promise<{ state: "idle"; attempt: 0 }> {
   // Web 模式不跑 ML prewarm，永远 Idle。
-  return Promise.resolve({ state: "idle" });
+  return Promise.resolve({ state: "idle", attempt: 0 });
+}
+
+export function retryImageProc(): Promise<{ state: "idle"; attempt: 0 }> {
+  return Promise.resolve({ state: "idle", attempt: 0 });
 }
 export function getSettingsSnapshot(): Promise<never> {
   return Promise.resolve().then(() => desktopOnly("getSettingsSnapshot"));

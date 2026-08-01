@@ -1,0 +1,44 @@
+{
+  "id": "baseline-ml-build-provenance",
+  "name": "baseline-ml-build-provenance",
+  "title": "baseline/ML 安装版与 provenance",
+  "description": "执行桌面后端运行时加固 Work Order 4：图片处理 provenance、ML prewarm 单飞重试、BuildInfo、baseline/ML 隔离构建和 release manifest。",
+  "status": "in_progress",
+  "dev_type": "fullstack",
+  "scope": "ats-core+desktop+build",
+  "priority": "P0",
+  "creator": "codex-agent",
+  "assignee": "codex-agent",
+  "createdAt": "2026-08-01",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "rust",
+  "worktree_path": null,
+  "current_phase": 1,
+  "next_action": [
+    {
+      "phase": 1,
+      "action": "implement"
+    },
+    {
+      "phase": 2,
+      "action": "check"
+    },
+    {
+      "phase": 3,
+      "action": "finish"
+    },
+    {
+      "phase": 4,
+      "action": "create-pr"
+    }
+  ],
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

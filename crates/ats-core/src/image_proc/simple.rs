@@ -12,7 +12,9 @@ use async_trait::async_trait;
 use image::{ImageFormat, Rgba, RgbaImage};
 use std::io::Cursor;
 
-use super::{ImageProcClient, ImageProcError};
+use super::{
+    ImageProcClient, ImageProcError, ImageProcOutcome, ImageProcessingProvenance, ImageProcessor,
+};
 use crate::cancellation::CancellationToken;
 
 pub struct SimpleBgRemover {
@@ -33,11 +35,15 @@ impl Default for SimpleBgRemover {
 
 #[async_trait]
 impl ImageProcClient for SimpleBgRemover {
+    fn processor(&self) -> ImageProcessor {
+        ImageProcessor::Simple
+    }
+
     async fn remove_background(
         &self,
         input_png: &[u8],
         cancellation: &CancellationToken,
-    ) -> Result<Vec<u8>, ImageProcError> {
+    ) -> Result<ImageProcOutcome, ImageProcError> {
         if cancellation.is_cancelled() {
             return Err(ImageProcError::Cancelled);
         }
@@ -53,7 +59,10 @@ impl ImageProcClient for SimpleBgRemover {
             if worker_cancellation.is_cancelled() {
                 Err(ImageProcError::Cancelled)
             } else {
-                Ok(result)
+                Ok(ImageProcOutcome {
+                    png: result,
+                    provenance: ImageProcessingProvenance::simple(),
+                })
             }
         })
         .await
@@ -184,8 +193,10 @@ mod tests {
             .remove_background(&input, &CancellationToken::new())
             .await
             .unwrap();
-        let img = image::load_from_memory(&output).unwrap().to_rgba8();
+        let img = image::load_from_memory(&output.png).unwrap().to_rgba8();
         assert_eq!(img.get_pixel(0, 0).0[3], 0); // 白色行透明
         assert_eq!(img.get_pixel(0, 1).0[3], 255); // 红色行不透明
+        assert_eq!(output.provenance.processor, ImageProcessor::Simple);
+        assert!(output.provenance.fallback.is_none());
     }
 }

@@ -268,6 +268,7 @@ This contract applies when `submit_asset_generate` receives generated image byte
 ```rust
 analyze_png_quality(bytes, ImageQualitySpec) -> Result<ImageQualityReport, ImageProcError>
 derive_png_variants(bytes, &[ImageVariantSpec]) -> Result<Vec<DerivedImageVariant>, ImageProcError>
+ImageProcClient::remove_background(...) -> Result<ImageProcOutcome, ImageProcError>
 ```
 
 Successful image Runs snapshot raw/processed images and `image-quality.json` inside immutable Artifact files. Failed image diagnostics are stored under `.ats/diagnostics/<run-id>/` and referenced by `RunRecord.failure.diagnostic.id`.
@@ -285,7 +286,7 @@ Successful image Runs snapshot raw/processed images and `image-quality.json` ins
 - `ml-rembg` remains an explicit desktop build feature. Its prewarm downloads ONNX Runtime 1.22.0 and u2netp through the shared cache before installing the ML primary in `BgRemoverChain`.
 - Model and Runtime downloads stream to disk with connect, stall, and total timeouts. An interrupted file is resumed only when the server returns a matching `Content-Range`; a full `200` response truncates the partial file instead of appending it.
 - The u2netp model, ONNX Runtime archive, and extracted DLL use exact SHA-256 baselines. A mismatched cache is never loaded or published.
-- Native ONNX loader panics are converted into `MlBgRemoverError::OrtInit`. On Windows the prewarm failure tells the user to install or repair Microsoft Visual C++ 2015-2022 Redistributable (x64); it must not leave the state stuck at `Loading`.
+- Native ONNX loader panics are converted into `MlBgRemoverError::OrtInit`. On Windows the prewarm `ActionableFailure` tells the user to install or repair Microsoft Visual C++ 2015-2022 Redistributable (x64); it must not expose the raw loader/path text or leave the state stuck at `Loading`.
 
 ### 4. Validation Matrix
 
@@ -926,3 +927,82 @@ Assertions must cover first-reason-wins, stalled-stream cancellation, partial ZI
 Wrong: recreate a repository per command, drop `JoinHandle`s, write `cancelled` immediately, abort blocking work, or release the project lock while a handler or child process can still write.
 
 Correct: keep one repository and task registry in `ProjectSession`, publish cancellation through tokens, wait for real cleanup, persist one terminal CAS, and release the OS lock only after a successful drain.
+
+## Scenario: Candidate Build Identity And Image Processing Provenance
+
+### 1. Scope / Trigger
+
+This contract applies to image background removal, ML prewarm status/retry, `ArtifactManifest.imageProcessing`, health/capabilities BuildInfo, and baseline/ML candidate build collection.
+
+### 2. Signatures And Schemas
+
+```rust
+BuildInfo { commit, variant, features, build_id }
+BuildVariant = Development | Baseline | Ml
+
+ImageProcClient::remove_background(...)
+    -> Result<ImageProcOutcome, ImageProcError>
+
+ImageProcOutcome { png, provenance }
+ImageProcessingProvenance {
+    processor,
+    model_sha256?,
+    runtime_version?,
+    fallback?,
+    build,
+}
+
+retry_image_proc() -> CommandResult<PrewarmStatus>
+```
+
+`build.ps1 -Variant Baseline|Ml [-PlanOnly] [-BuildId <id>]` is the only candidate variant entry. `-MlRembg` and caller-supplied feature arguments are not accepted.
+
+### 3. Contracts
+
+- `crates/ats-core/build.rs` derives the feature list from actual Cargo cfg and embeds the only runtime BuildInfo. Candidate builds require a clean Git worktree, full commit SHA, non-development build ID, and an exact variant/feature combination: baseline has no features; ML has only `ml-rembg`; neither may enable `e2e`.
+- Health and local capabilities return `BuildInfo::current()`. `ImageProcOutcome` records the same runtime identity when processing occurs; callers do not guess processor or build identity from configuration.
+- Simple processing has no model/runtime fields. ML u2netp requires the pinned model SHA and ONNX Runtime version. ML-primary failure followed by simple success records processor `simple`, a stable ML-to-simple fallback reason, and no raw error text.
+- ArtifactManifest schema v2 writes `ImageProcOutcome.provenance` separately from the image quality report. Run result continues to reference only the manifest and its SHA-256.
+- Prewarm startup and retry share one async singleflight. Concurrent callers observe one attempt; a failed terminal attempt may increment exactly once on retry. Failed status contains the shared `ActionableFailure`, not a raw provider/path string.
+- Baseline and ML use `artifacts/build/<variant>/<build-id>/target`; bundle collection only traverses that target's `release/bundle`. Copied candidates and `release-manifest.json` live under `artifacts/release/<build-id>/<variant>` and are never collected from the legacy shared Tauri target.
+- The release manifest stores commit, variant, actual features, build ID, creation time, relative artifact paths, sizes, and SHA-256. Existing target/release directories for the same build ID are rejected instead of overwritten.
+
+### 4. Validation And Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| Simple succeeds | outcome/manifest say `simple`; no model/runtime/fallback |
+| ML succeeds | outcome/manifest say `ml_u2netp` with pinned model SHA and runtime version |
+| ML fails and simple succeeds | quality gate still runs; manifest says `simple` plus stable fallback reason; not valid ML acceptance evidence |
+| Concurrent prewarm retries | one download/init attempt; callers receive the same terminal attempt |
+| Baseline enables ML or candidate enables e2e | build script rejects before compiling a candidate |
+| ML omits `ml-rembg` | build script rejects before compiling a candidate |
+| Git worktree is dirty | non-plan candidate build is rejected because commit identity would be false |
+| Shared/stale installer exists elsewhere | isolated collector ignores it; manifest contains only files below this build's bundle root |
+| Copied artifact hash differs | candidate verification fails; do not enter installation acceptance |
+
+### 5. Good / Base / Bad Cases
+
+- Good: an ML image ArtifactManifest contains `processor=ml_u2netp`, u2netp SHA, ONNX Runtime 1.22.0, and a BuildInfo matching the ML release manifest.
+- Base: baseline uses simple processing and emits a BuildInfo with zero features; the image quality gate remains mandatory.
+- Base: ML fallback produces a valid image but records simple/fallback provenance and is excluded from ML acceptance evidence.
+- Bad: a dirty worktree or caller-supplied `--features=e2e` attempts a candidate build; `build.ps1` rejects it.
+- Bad: a stale MSI exists under another target; the fixture manifest still contains only the current isolated MSI and its recomputed hash.
+
+### 6. Targeted Tests
+
+```text
+cargo test -p ats-core build_info::tests --no-default-features
+cargo test -p ats-core image_proc:: --no-default-features
+cargo test -p ats-core image_proc:: --features ml-rembg
+cargo test -p ats-core platform::artifact::tests --no-default-features
+cargo test -p ats-core happy_path_writes_png_and_cs --no-default-features
+cargo test -p agentthespire-desktop commands::image_proc_state::tests --no-default-features
+cargo test -p agentthespire-desktop commands::image_proc_state::tests --features ml-rembg
+cargo check -p agentthespire-desktop --no-default-features
+cargo check -p agentthespire-desktop --features ml-rembg
+npx tsc -b --pretty false
+pwsh -NoProfile -File scripts/test-build-plan.ps1
+```
+
+Real baseline/ML Tauri bundle builds and installer launches are separate candidate/manual gates and must not be claimed from PlanOnly or fixture results.

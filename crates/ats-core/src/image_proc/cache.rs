@@ -24,6 +24,7 @@ const DOWNLOAD_CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 const DOWNLOAD_STALL_TIMEOUT: Duration = Duration::from_secs(30);
 const DOWNLOAD_TOTAL_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const DOWNLOAD_PROGRESS_INTERVAL: u64 = 8 * 1024 * 1024;
+pub const ONNX_RUNTIME_VERSION: &str = "1.22.0";
 
 #[derive(Debug, Error)]
 pub enum ModelCacheError {

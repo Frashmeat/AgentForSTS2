@@ -2,6 +2,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { toActionableFailure } from "./actionableFailure";
+import type { ActionableFailure } from "./actionableFailure";
 export {
   isActionableFailure,
   toActionableFailure,
@@ -30,6 +31,15 @@ export async function invokeCommand<T>(
 
 export type Role = "web" | "workstation";
 
+export type BuildVariant = "development" | "baseline" | "ml";
+
+export interface BuildInfo {
+  commit: string;
+  variant: BuildVariant;
+  features: string[];
+  buildId: string;
+}
+
 export interface ConfigStatus {
   path: string | null;
   filePresent: boolean;
@@ -54,6 +64,7 @@ export interface HealthReport {
   status: "ok" | "degraded";
   role: Role;
   coreVersion: string;
+  build: BuildInfo;
   serverTime: string;
   config: ConfigStatus;
   readiness: ReadinessFlags;
@@ -66,6 +77,7 @@ export function getHealth(): Promise<HealthReport> {
 // -------- Local Capabilities --------
 
 export interface LocalCapabilities {
+  build: BuildInfo;
   os: string;
   arch: string;
   cpuCount: number;
@@ -258,13 +270,23 @@ export function discoverSts2Dll(): Promise<string | null> {
 // -------- Image proc prewarm --------
 
 export type PrewarmStatus =
-  | { state: "idle" }
-  | { state: "loading"; message: string }
-  | { state: "ready"; model: string }
-  | { state: "failed"; message: string };
+  | { state: "idle"; attempt: number }
+  | { state: "loading"; attempt: number; message: string }
+  | {
+      state: "ready";
+      attempt: number;
+      model: string;
+      modelSha256: string;
+      runtimeVersion: string;
+    }
+  | { state: "failed"; attempt: number; failure: ActionableFailure };
 
 export function imageProcStatus(): Promise<PrewarmStatus> {
   return invokeCommand<PrewarmStatus>("image_proc_status");
+}
+
+export function retryImageProc(): Promise<PrewarmStatus> {
+  return invokeCommand<PrewarmStatus>("retry_image_proc");
 }
 
 // -------- PlanArtifact --------

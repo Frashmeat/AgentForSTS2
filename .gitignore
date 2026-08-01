@@ -15,6 +15,8 @@ dist/
 # === Tauri build artifacts ===
 src-tauri/target/
 src-tauri/gen/
+artifacts/build/
+artifacts/release/
 
 # === Env / signing（含密钥） ===
 .env

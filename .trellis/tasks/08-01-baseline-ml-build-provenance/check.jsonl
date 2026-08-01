@@ -1,0 +1,7 @@
+{"file": ".claude/commands/trellis/finish-work.md", "reason": "Finish work checklist"}
+{"file": ".claude/commands/trellis/check-backend.md", "reason": "Backend check spec"}
+{"file": ".claude/commands/trellis/check-frontend.md", "reason": "Frontend check spec"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "核对发布与 provenance 可执行门禁"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "核对结构化失败和敏感信息边界"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "核对 TypeScript/API 边界"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "核对跨层身份一致性"}
