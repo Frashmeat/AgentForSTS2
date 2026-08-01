@@ -3,6 +3,7 @@
 //! 不依赖任何具体 IO 框架（axum、tauri）。两个壳（`ats-web`、`src-tauri`）
 //! 通过 import 本 crate 复用同一份领域逻辑。
 
+pub mod cancellation;
 pub mod capabilities;
 pub mod codegen;
 pub mod config;

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, RwLock};
 use std::time::Duration;
 
@@ -18,6 +18,7 @@ use tokio::time::Instant;
 
 const SESSION_OPEN: u8 = 0;
 const SESSION_CLOSING: u8 = 1;
+pub(crate) const PROJECT_DRAIN_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct ActiveProject {
     current: RwLock<Option<Arc<ProjectSession>>>,
@@ -82,6 +83,7 @@ struct RunTaskScope {
 
 struct TrackedRun {
     cancellation: ats_core::platform::CancellationToken,
+    finished: Arc<AtomicBool>,
     task: JoinHandle<()>,
 }
 
@@ -172,6 +174,8 @@ impl ProjectSession {
         let cancellation = spawned.cancellation.clone();
         let repository = Arc::clone(&self.repository);
         let finished = Arc::clone(&self.task_finished);
+        let task_complete = Arc::new(AtomicBool::new(false));
+        let supervisor_complete = Arc::clone(&task_complete);
         let supervised_id = run_id.clone();
         let supervised_cancellation = cancellation.clone();
         let task = tokio::spawn(async move {
@@ -192,11 +196,20 @@ impl ProjectSession {
                 };
                 let _ = repository.transition(&supervised_id, transition).await;
             }
-            finished.notify_waiters();
+            supervisor_complete.store(true, Ordering::Release);
+            // `notify_one` retains a permit when the drain future has not been
+            // polled yet. Together with the completion flag this closes both
+            // sides of the completion/wait registration race.
+            finished.notify_one();
         });
-        scope
-            .tasks
-            .insert(run_id.clone(), TrackedRun { cancellation, task });
+        scope.tasks.insert(
+            run_id.clone(),
+            TrackedRun {
+                cancellation,
+                finished: task_complete,
+                task,
+            },
+        );
         Ok(run_id)
     }
 
@@ -212,9 +225,9 @@ impl ProjectSession {
         reason: CancellationReason,
         timeout: Duration,
     ) -> Result<(), DrainTimeout> {
-        self.state.store(SESSION_CLOSING, Ordering::Release);
         {
             let mut scope = self.tasks.lock().await;
+            self.state.store(SESSION_CLOSING, Ordering::Release);
             scope.accepting = false;
             for tracked in scope.tasks.values() {
                 tracked.cancellation.cancel(reason);
@@ -229,7 +242,12 @@ impl ProjectSession {
                 let finished_ids: Vec<_> = scope
                     .tasks
                     .iter()
-                    .filter_map(|(id, tracked)| tracked.task.is_finished().then_some(id.clone()))
+                    .filter_map(|(id, tracked)| {
+                        tracked
+                            .finished
+                            .load(Ordering::Acquire)
+                            .then_some(id.clone())
+                    })
                     .collect();
                 let mut handles = Vec::with_capacity(finished_ids.len());
                 for id in finished_ids {
@@ -261,7 +279,8 @@ impl ProjectSession {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ats_core::platform::domain::{RunKind, RunRecord};
+    use ats_core::platform::domain::{RunKind, RunRecord, RunTimelineEventKind};
+    use tokio::sync::{Barrier, Notify};
 
     async fn session() -> (tempfile::TempDir, Arc<ProjectSession>) {
         let temp = tempfile::TempDir::new().unwrap();
@@ -335,5 +354,87 @@ mod tests {
             .cancel_and_drain(CancellationReason::ProjectClose, Duration::from_secs(1))
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn submit_and_close_barrier_registers_before_closing_or_rejects() {
+        let (_temp, session) = session().await;
+        let repo = session.file_repository();
+        let entered = Arc::new(Barrier::new(2));
+        let release = Arc::new(Barrier::new(2));
+        let submit_session = Arc::clone(&session);
+        let submit_repo = Arc::clone(&repo);
+        let submit_entered = Arc::clone(&entered);
+        let submit_release = Arc::clone(&release);
+        let submit = tokio::spawn(async move {
+            submit_session
+                .submit(async move {
+                    let run = RunRecord::new(RunKind::TextGenerate, serde_json::json!({}));
+                    submit_repo.create(&run).await.unwrap();
+                    submit_entered.wait().await;
+                    submit_release.wait().await;
+                    let cancellation = ats_core::platform::CancellationToken::new();
+                    let worker_cancellation = cancellation.clone();
+                    Ok(SpawnedRun {
+                        run_id: run.id,
+                        cancellation,
+                        task: tokio::spawn(async move {
+                            worker_cancellation.cancelled().await;
+                        }),
+                    })
+                })
+                .await
+        });
+
+        entered.wait().await;
+        let close_session = Arc::clone(&session);
+        let close = tokio::spawn(async move {
+            close_session
+                .cancel_and_drain(CancellationReason::ProjectClose, Duration::from_secs(1))
+                .await
+        });
+        tokio::task::yield_now().await;
+        assert!(!session.is_closing());
+        release.wait().await;
+
+        let run_id = submit.await.unwrap().unwrap();
+        close.await.unwrap().unwrap();
+        let record = repo.get(&run_id).await.unwrap();
+        assert_eq!(record.status, RunStatus::Cancelled);
+        assert_eq!(
+            record
+                .timeline
+                .iter()
+                .filter(|event| event.kind == RunTimelineEventKind::Cancelled)
+                .count(),
+            1
+        );
+        assert!(session.tasks.lock().await.tasks.is_empty());
+    }
+
+    #[tokio::test]
+    async fn open_reconciles_pending_run_before_returning_session() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let project = ProjectFolder::create(temp.path(), "sample", "sts2").unwrap();
+        let repo = FileRunRepository::new(project.history_dir());
+        let pending = RunRecord::new(RunKind::TextGenerate, serde_json::json!({}));
+        repo.create(&pending).await.unwrap();
+
+        let session = ProjectSession::open(project).await.unwrap();
+        let reconciled = session.file_repository().get(&pending.id).await.unwrap();
+        assert_eq!(reconciled.status, RunStatus::Failed);
+        assert!(
+            reconciled
+                .failure
+                .is_some_and(|failure| failure.code == "run.interrupted")
+        );
+        assert_eq!(
+            reconciled
+                .timeline
+                .iter()
+                .filter(|event| event.kind == RunTimelineEventKind::Interrupted)
+                .count(),
+            1
+        );
     }
 }

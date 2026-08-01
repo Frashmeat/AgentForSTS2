@@ -77,7 +77,7 @@ pub async fn run_batch_custom_code(
     let mut failed: u32 = 0;
 
     for (idx, item) in request.items.into_iter().enumerate() {
-        // 中途检查 cancel：若被取消则停止后续 item 但保留已完成结果到 run.result。
+        // 中途检查 cancel：停止后续 item，并在统一取消分支回滚所有尚未提交的产物。
         if cancellation.is_cancelled() {
             break;
         }

@@ -14,7 +14,8 @@ pub use refresh::{
     GitHubReleaseAssetFetcher, IlspycmdTruthIndexer, RemoteTruthSourceFetcher,
     TruthSnapshotReadiness, TruthSnapshotRefreshError, TruthSnapshotRefreshOutcome,
     TruthSnapshotRefreshResult, TruthSnapshotRefresher, TruthSnapshotStatus, TruthSourceIndexer,
-    inspect_truth_snapshot, validate_truth_source_inputs,
+    TruthSourceOperationError, TruthSourceOperationResult, inspect_truth_snapshot,
+    validate_truth_source_inputs,
 };
 pub use store::{TruthSnapshotDraft, TruthSnapshotStore};
 
@@ -27,7 +28,9 @@ mod tests {
     use sha2::{Digest, Sha256};
 
     use super::*;
+    use crate::cancellation::CancellationToken;
     use crate::game_pack::{GamePackLoadPolicy, GamePackLoader, LoadedGamePack};
+    use crate::platform::domain::CancellationReason;
 
     const GAME_BYTES: &[u8] = b"MZ-current-game-assembly";
     const BASELIB_BYTES: &[u8] = b"MZ-pinned-baselib-assembly";
@@ -129,6 +132,39 @@ mod tests {
         let reopened = store.open_current(&pack).unwrap().unwrap();
         assert_eq!(reopened.snapshot_id(), verified.snapshot_id());
         assert_eq!(reopened.root(), verified.root());
+    }
+
+    #[test]
+    fn cancellation_after_prepare_does_not_activate_current_pointer() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let pack = fixture_pack();
+        let store = TruthSnapshotStore::new(&temp.path().join("runtime"), &pack);
+        let (game, baselib) = source_files(temp.path(), GAME_BYTES, BASELIB_BYTES);
+        let cancellation = CancellationToken::new();
+        let mut draft = store.begin(&pack).unwrap();
+        draft.stage_source("game", &game).unwrap();
+        draft.stage_source("baselib", &baselib).unwrap();
+        fs::write(
+            draft.index_output_dir("game").unwrap().join("Game.cs"),
+            "class Game {}",
+        )
+        .unwrap();
+        fs::write(
+            draft
+                .index_output_dir("baselib")
+                .unwrap()
+                .join("BaseLib.cs"),
+            "class BaseLib {}",
+        )
+        .unwrap();
+
+        let prepared = draft.prepare_cancellable(tools(), &cancellation).unwrap();
+        cancellation.cancel(CancellationReason::ProjectClose);
+        assert!(matches!(
+            prepared.activate_cancellable(&cancellation),
+            Err(TruthSnapshotError::Cancelled)
+        ));
+        assert!(store.open_current(&pack).unwrap().is_none());
     }
 
     #[test]

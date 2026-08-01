@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
+use crate::cancellation::CancellationToken;
+
 use super::error::{TruthSnapshotError, TruthSnapshotResult};
 
 const BUFFER_SIZE: usize = 64 * 1024;
@@ -29,18 +31,50 @@ pub(super) fn sha256_bytes(bytes: &[u8]) -> String {
 }
 
 pub(super) fn digest_file(path: &Path) -> TruthSnapshotResult<FileDigest> {
+    digest_file_inner(path, None)
+}
+
+pub(super) fn digest_file_cancellable(
+    path: &Path,
+    cancellation: &CancellationToken,
+) -> TruthSnapshotResult<FileDigest> {
+    digest_file_inner(path, Some(cancellation))
+}
+
+fn digest_file_inner(
+    path: &Path,
+    cancellation: Option<&CancellationToken>,
+) -> TruthSnapshotResult<FileDigest> {
+    check_cancelled(cancellation)?;
     let file = File::open(path).map_err(|source| TruthSnapshotError::Io {
         action: "open file",
         path: path.to_path_buf(),
         source,
     })?;
-    digest_reader(BufReader::new(file), path)
+    digest_reader(BufReader::new(file), path, cancellation)
 }
 
 pub(super) fn copy_and_digest(
     source: &Path,
     destination: &Path,
 ) -> TruthSnapshotResult<FileDigest> {
+    copy_and_digest_inner(source, destination, None)
+}
+
+pub(super) fn copy_and_digest_cancellable(
+    source: &Path,
+    destination: &Path,
+    cancellation: &CancellationToken,
+) -> TruthSnapshotResult<FileDigest> {
+    copy_and_digest_inner(source, destination, Some(cancellation))
+}
+
+fn copy_and_digest_inner(
+    source: &Path,
+    destination: &Path,
+    cancellation: Option<&CancellationToken>,
+) -> TruthSnapshotResult<FileDigest> {
+    check_cancelled(cancellation)?;
     if !source.is_file() {
         return Err(TruthSnapshotError::SourceNotFile(source.to_path_buf()));
     }
@@ -67,6 +101,7 @@ pub(super) fn copy_and_digest(
     let mut total = 0_u64;
     let mut buffer = vec![0_u8; BUFFER_SIZE];
     loop {
+        check_cancelled(cancellation)?;
         let count = reader
             .read(&mut buffer)
             .map_err(|source_error| TruthSnapshotError::Io {
@@ -87,6 +122,7 @@ pub(super) fn copy_and_digest(
         hasher.update(&buffer[..count]);
         total += count as u64;
     }
+    check_cancelled(cancellation)?;
     writer
         .flush()
         .map_err(|source_error| TruthSnapshotError::Io {
@@ -108,11 +144,16 @@ pub(super) fn copy_and_digest(
     })
 }
 
-fn digest_reader(mut reader: impl Read, path: &Path) -> TruthSnapshotResult<FileDigest> {
+fn digest_reader(
+    mut reader: impl Read,
+    path: &Path,
+    cancellation: Option<&CancellationToken>,
+) -> TruthSnapshotResult<FileDigest> {
     let mut hasher = Sha256::new();
     let mut total = 0_u64;
     let mut buffer = vec![0_u8; BUFFER_SIZE];
     loop {
+        check_cancelled(cancellation)?;
         let count = reader
             .read(&mut buffer)
             .map_err(|source| TruthSnapshotError::Io {
@@ -133,6 +174,21 @@ fn digest_reader(mut reader: impl Read, path: &Path) -> TruthSnapshotResult<File
 }
 
 pub(super) fn digest_tree(root: &Path) -> TruthSnapshotResult<TreeDigest> {
+    digest_tree_inner(root, None)
+}
+
+pub(super) fn digest_tree_cancellable(
+    root: &Path,
+    cancellation: &CancellationToken,
+) -> TruthSnapshotResult<TreeDigest> {
+    digest_tree_inner(root, Some(cancellation))
+}
+
+fn digest_tree_inner(
+    root: &Path,
+    cancellation: Option<&CancellationToken>,
+) -> TruthSnapshotResult<TreeDigest> {
+    check_cancelled(cancellation)?;
     let root_meta = fs::symlink_metadata(root).map_err(|source| TruthSnapshotError::Io {
         action: "inspect truth index root",
         path: root.to_path_buf(),
@@ -147,6 +203,7 @@ pub(super) fn digest_tree(root: &Path) -> TruthSnapshotResult<TreeDigest> {
 
     let mut files: Vec<(String, PathBuf)> = Vec::new();
     for entry in walkdir::WalkDir::new(root).follow_links(false) {
+        check_cancelled(cancellation)?;
         let entry = entry.map_err(|error| TruthSnapshotError::InvalidIndexEntry {
             path: error.path().unwrap_or(root).to_path_buf(),
             reason: error.to_string(),
@@ -193,7 +250,11 @@ pub(super) fn digest_tree(root: &Path) -> TruthSnapshotResult<TreeDigest> {
     let mut total_bytes = 0_u64;
     let mut cs_file_count = 0_u32;
     for (relative, path) in &files {
-        let digest = digest_file(path)?;
+        check_cancelled(cancellation)?;
+        let digest = match cancellation {
+            Some(cancellation) => digest_file_cancellable(path, cancellation)?,
+            None => digest_file(path)?,
+        };
         tree_hasher.update((relative.len() as u64).to_be_bytes());
         tree_hasher.update(relative.as_bytes());
         tree_hasher.update(digest.size_bytes.to_be_bytes());
@@ -218,4 +279,12 @@ pub(super) fn digest_tree(root: &Path) -> TruthSnapshotResult<TreeDigest> {
         cs_file_count,
         total_bytes,
     })
+}
+
+fn check_cancelled(cancellation: Option<&CancellationToken>) -> TruthSnapshotResult<()> {
+    if cancellation.is_some_and(CancellationToken::is_cancelled) {
+        Err(TruthSnapshotError::Cancelled)
+    } else {
+        Ok(())
+    }
 }

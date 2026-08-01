@@ -685,6 +685,7 @@ impl FailureNormalizer {
     #[must_use]
     pub fn image_proc(stage: &str, error: &ImageProcError) -> ActionableFailure {
         match error {
+            ImageProcError::Cancelled => ActionableFailure::interrupted(stage),
             ImageProcError::NotReady(_) => failure(
                 "image_proc.not_ready",
                 FailureCategory::Configuration,

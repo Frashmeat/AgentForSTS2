@@ -197,7 +197,22 @@ pub(crate) async fn run_asset_generate(
             // ML→Simple 回退）。处理失败或质量门禁失败时保留诊断文件，但不交付原图。
             let raw_bytes = first.bytes.clone();
             let rembg_path = target_dir.join(format!("{entity_name}.rembg.png"));
-            match image_proc.remove_background(&raw_bytes).await {
+            let processed_result = image_proc
+                .remove_background(&raw_bytes, &cancellation)
+                .await;
+            if let Some(reason) = cancellation.reason() {
+                finalize_asset_cancellation(
+                    &repo,
+                    &run_id,
+                    &sink,
+                    &target_dir,
+                    diagnostics_written,
+                    reason,
+                )
+                .await;
+                return;
+            }
+            match processed_result {
                 Ok(processed) => {
                     if let Err(err) = crate::fs_atomic::write_atomic(&rembg_path, &processed).await
                     {
@@ -298,6 +313,16 @@ pub(crate) async fn run_asset_generate(
                     }
                     runtime_image_source = Some(rembg_path.clone());
                 }
+                Err(ImageProcError::Cancelled) => {
+                    finalize_with_failure(
+                        &repo,
+                        &run_id,
+                        &sink,
+                        ActionableFailure::unclassified("asset_generate.cancel_without_reason"),
+                    )
+                    .await;
+                    return;
+                }
                 Err(err) => {
                     finalize_with_failure(
                         &repo,
@@ -313,7 +338,15 @@ pub(crate) async fn run_asset_generate(
                 }
             }
             if let Some(reason) = cancellation.reason() {
-                finalize_with_cancellation(&repo, &run_id, &sink, reason).await;
+                finalize_asset_cancellation(
+                    &repo,
+                    &run_id,
+                    &sink,
+                    &target_dir,
+                    diagnostics_written,
+                    reason,
+                )
+                .await;
                 return;
             }
             png_path = Some(path);
@@ -401,7 +434,15 @@ pub(crate) async fn run_asset_generate(
         Ok(artifact) => artifact,
         Err(super::asset_bundle::AssetBundleError::Cancelled) => {
             if let Some(reason) = cancellation.reason() {
-                finalize_with_cancellation(&repo, &run_id, &sink, reason).await;
+                finalize_asset_cancellation(
+                    &repo,
+                    &run_id,
+                    &sink,
+                    &target_dir,
+                    diagnostics_written,
+                    reason,
+                )
+                .await;
             }
             return;
         }
@@ -533,6 +574,27 @@ pub(crate) async fn run_asset_generate(
     .await;
 }
 
+async fn finalize_asset_cancellation(
+    repo: &Arc<dyn RunRepository>,
+    run_id: &RunId,
+    sink: &Arc<dyn ProgressSink>,
+    diagnostic_dir: &std::path::Path,
+    diagnostics_written: bool,
+    reason: crate::platform::domain::CancellationReason,
+) {
+    if diagnostics_written
+        && let Err(error) = tokio::fs::remove_dir_all(diagnostic_dir).await
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!(
+            run_id = %run_id.0,
+            io_kind = ?error.kind(),
+            "failed to remove cancelled image diagnostics"
+        );
+    }
+    finalize_with_cancellation(repo, run_id, sink, reason).await;
+}
+
 fn with_optional_run_diagnostic(
     failure: ActionableFailure,
     run_id: &RunId,
@@ -578,6 +640,7 @@ mod tests {
     use std::path::Path;
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicU32, Ordering};
+    use tokio::sync::{Barrier, Notify};
 
     struct ScriptedLlm {
         events: Mutex<Vec<Result<StreamEvent, LlmError>>>,
@@ -648,6 +711,28 @@ mod tests {
                 }],
                 revised_prompt: Some("a revised prompt".into()),
             })
+        }
+    }
+
+    struct BlockingImageProc {
+        entered: Arc<Barrier>,
+        release: Arc<Notify>,
+    }
+
+    #[async_trait]
+    impl ImageProcClient for BlockingImageProc {
+        async fn remove_background(
+            &self,
+            input_png: &[u8],
+            cancellation: &CancellationToken,
+        ) -> Result<Vec<u8>, ImageProcError> {
+            self.entered.wait().await;
+            self.release.notified().await;
+            if cancellation.is_cancelled() {
+                Err(ImageProcError::Cancelled)
+            } else {
+                Ok(input_png.to_vec())
+            }
         }
     }
 
@@ -993,6 +1078,64 @@ mod tests {
                 .as_str()
                 .is_some_and(|source| source.contains("AlphaCard.cs"))
         }));
+    }
+
+    #[tokio::test]
+    async fn cancellation_waits_for_image_processing_then_removes_partial_diagnostics() {
+        let td = tempfile::TempDir::new().unwrap();
+        prepare_project(td.path());
+        let history = td.path().join("history");
+        let artifacts = td.path().join("artifacts");
+        std::fs::create_dir_all(&artifacts).unwrap();
+        let context = fixture_game_context(td.path(), &[], &[]);
+        let repo: Arc<dyn RunRepository> = Arc::new(FileRunRepository::new(history));
+        let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
+            events: Mutex::new(Vec::new()),
+        });
+        let entered = Arc::new(Barrier::new(2));
+        let release = Arc::new(Notify::new());
+        let image_proc: Arc<dyn ImageProcClient> = Arc::new(BlockingImageProc {
+            entered: Arc::clone(&entered),
+            release: Arc::clone(&release),
+        });
+        let service = service_with_compile_validator(Arc::clone(&repo), llm);
+        let spawned = service
+            .submit_asset_generate(
+                make_request(td.path(), "CancelledCard", Some("draw a card")),
+                context,
+                artifacts,
+                Arc::new(MockImageGen::new(valid_subject_png())),
+                image_proc,
+                Arc::new(super::super::common::NoopProgressSink),
+            )
+            .await
+            .unwrap();
+        let run_id = spawned.run_id.clone();
+
+        entered.wait().await;
+        assert!(
+            td.path()
+                .join(format!(".ats/diagnostics/{}", run_id.0))
+                .is_dir()
+        );
+        assert!(
+            spawned
+                .cancellation
+                .cancel(crate::platform::domain::CancellationReason::ProjectClose)
+        );
+        assert_eq!(repo.get(&run_id).await.unwrap().status, RunStatus::Running);
+        release.notify_waiters();
+        spawned.task.await.unwrap();
+
+        assert_eq!(
+            repo.get(&run_id).await.unwrap().status,
+            RunStatus::Cancelled
+        );
+        assert!(
+            !td.path()
+                .join(format!(".ats/diagnostics/{}", run_id.0))
+                .exists()
+        );
     }
 
     #[tokio::test]

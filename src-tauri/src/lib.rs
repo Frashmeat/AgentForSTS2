@@ -1,5 +1,6 @@
 //! AgentTheSpire desktop（workstation 角色）入口。
 
+mod app_shutdown;
 mod commands;
 mod project_session;
 
@@ -9,9 +10,11 @@ use std::sync::{Arc, RwLock};
 use ats_core::config::{ConfigStatus, Settings};
 use ats_core::health::Role;
 use ats_core::project::AppDataPaths;
+use tauri::Manager;
 
+use crate::app_shutdown::{AppShutdown, ExitRequestAction, drain_active_project};
 use crate::commands::image_proc_state::{ImageProcState, prewarm};
-use crate::project_session::ActiveProject;
+use crate::project_session::{ActiveProject, PROJECT_DRAIN_TIMEOUT};
 
 const APP_DATA_ROOT_ENV: &str = "SPIREFORGE_APP_DATA_ROOT";
 
@@ -139,6 +142,7 @@ pub fn run() {
         .manage(AppConfig::new(settings, status))
         .manage(AppPaths { data: app_data })
         .manage(ActiveProject::new())
+        .manage(AppShutdown::new())
         .manage(image_proc_state)
         .invoke_handler(tauri::generate_handler![
             commands::health::get_health,
@@ -184,6 +188,38 @@ pub fn run() {
             commands::platform::list_runs,
             commands::platform::cancel_run,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            let tauri::RunEvent::ExitRequested { code, api, .. } = event else {
+                return;
+            };
+            match app.state::<AppShutdown>().on_exit_requested() {
+                ExitRequestAction::Allow => {}
+                ExitRequestAction::Prevent => api.prevent_exit(),
+                ExitRequestAction::StartDrain => {
+                    api.prevent_exit();
+                    let app = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let result = {
+                            let active = app.state::<ActiveProject>();
+                            drain_active_project(&active, PROJECT_DRAIN_TIMEOUT).await
+                        };
+                        let shutdown = app.state::<AppShutdown>();
+                        match result {
+                            Ok(()) => {
+                                shutdown.allow_exit();
+                                app.exit(code.unwrap_or(0));
+                            }
+                            Err(error) => {
+                                eprintln!(
+                                    "ats-desktop: application shutdown drain blocked: {error}"
+                                );
+                                shutdown.retry_after_failure();
+                            }
+                        }
+                    });
+                }
+            }
+        });
 }

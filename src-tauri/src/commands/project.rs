@@ -17,10 +17,8 @@ use serde::Serialize;
 use tauri::{Emitter, State};
 
 use crate::commands::failure::{CommandFailure, CommandResult};
-use crate::project_session::{ActiveProject, ProjectSession};
+use crate::project_session::{ActiveProject, PROJECT_DRAIN_TIMEOUT, ProjectSession};
 use crate::{AppConfig, AppPaths};
-
-const PROJECT_DRAIN_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -285,4 +283,54 @@ fn record_recent(paths: &AppPaths, project_path: &Path, meta: &ProjectMeta) -> C
     }
     r.save(&recents_path)
         .map_err(|_| CommandFailure::unclassified("project.recents_save"))
+}
+
+#[cfg(test)]
+mod tests {
+    use ats_core::platform::domain::{RunKind, RunRecord, RunRepository, RunStatus};
+    use ats_core::platform::{CancellationToken, SpawnedRun};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn prepare_switch_drains_with_project_switch_reason() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let project = ProjectFolder::create(temp.path(), "sample", "sts2").unwrap();
+        let session = ProjectSession::open(project).await.unwrap();
+        let repository = session.file_repository();
+        let run = RunRecord::new(RunKind::TextGenerate, serde_json::json!({}));
+        let run_id = run.id.clone();
+        repository.create(&run).await.unwrap();
+        let cancellation = CancellationToken::new();
+        let worker_cancellation = cancellation.clone();
+        let spawned_run_id = run_id.clone();
+        session
+            .submit(async move {
+                Ok(SpawnedRun {
+                    run_id: spawned_run_id,
+                    cancellation,
+                    task: tokio::spawn(async move {
+                        worker_cancellation.cancelled().await;
+                    }),
+                })
+            })
+            .await
+            .unwrap();
+        let active = ActiveProject::new();
+        active.replace(Some(Arc::clone(&session))).unwrap();
+
+        let previous = prepare_switch(&active, CancellationReason::ProjectSwitch)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert!(Arc::ptr_eq(&previous, &session));
+        assert!(session.is_closing());
+        let record = repository.get(&run_id).await.unwrap();
+        assert_eq!(record.status, RunStatus::Cancelled);
+        assert_eq!(
+            record.timeline.last().unwrap().cancellation_reason,
+            Some(CancellationReason::ProjectSwitch)
+        );
+    }
 }

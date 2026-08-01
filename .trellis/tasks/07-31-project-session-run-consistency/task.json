@@ -3,42 +3,25 @@
   "name": "project-session-run-consistency",
   "title": "ProjectSession 与 Run 并发正确性",
   "description": "执行桌面后端运行时加固 Work Order 3：建立 ProjectSession、共享 RunRepository、cancel-and-drain、child process 取消等待和崩溃 reconciliation。",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": "backend",
   "scope": "ats-core+desktop",
   "priority": "P0",
   "creator": "codex-agent",
   "assignee": "codex-agent",
   "createdAt": "2026-07-31",
-  "completedAt": null,
+  "completedAt": "2026-08-01",
   "branch": null,
   "base_branch": "rust",
   "worktree_path": null,
-  "current_phase": 1,
-  "next_action": [
-    {
-      "phase": 1,
-      "action": "implement"
-    },
-    {
-      "phase": 2,
-      "action": "check"
-    },
-    {
-      "phase": 3,
-      "action": "finish"
-    },
-    {
-      "phase": 4,
-      "action": "create-pr"
-    }
-  ],
+  "current_phase": 3,
+  "next_action": [],
   "commit": null,
   "pr_url": null,
   "subtasks": [],
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "",
+  "notes": "2026-08-01：Work Order 3 自动门禁通过；完整 workspace/release 构建、双桌面进程与窗口退出 UI 冒烟未执行，留给后续候选和人工验收。",
   "meta": {}
 }

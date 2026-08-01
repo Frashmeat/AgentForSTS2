@@ -31,8 +31,12 @@ pub use variants::{
 use async_trait::async_trait;
 use thiserror::Error;
 
+use crate::cancellation::CancellationToken;
+
 #[derive(Debug, Error)]
 pub enum ImageProcError {
+    #[error("image processing was cancelled")]
+    Cancelled,
     #[error("image processor is not ready: {0}")]
     NotReady(String),
     #[error("image model failed: {0}")]
@@ -53,5 +57,9 @@ pub enum ImageProcError {
 #[async_trait]
 pub trait ImageProcClient: Send + Sync {
     /// 输入 PNG 字节序列 → 输出 PNG 字节序列（带 alpha）。
-    async fn remove_background(&self, input_png: &[u8]) -> Result<Vec<u8>, ImageProcError>;
+    async fn remove_background(
+        &self,
+        input_png: &[u8],
+        cancellation: &CancellationToken,
+    ) -> Result<Vec<u8>, ImageProcError>;
 }

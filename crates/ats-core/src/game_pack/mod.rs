@@ -27,6 +27,6 @@ pub use truth_snapshot::{
     TruthSnapshotError, TruthSnapshotIndex, TruthSnapshotManifest, TruthSnapshotReadiness,
     TruthSnapshotRefreshError, TruthSnapshotRefreshOutcome, TruthSnapshotRefreshResult,
     TruthSnapshotRefresher, TruthSnapshotResult, TruthSnapshotSource, TruthSnapshotStatus,
-    TruthSnapshotStore, TruthSourceIndexer, VerifiedTruthSnapshot, inspect_truth_snapshot,
-    validate_truth_source_inputs,
+    TruthSnapshotStore, TruthSourceIndexer, TruthSourceOperationError, TruthSourceOperationResult,
+    VerifiedTruthSnapshot, inspect_truth_snapshot, validate_truth_source_inputs,
 };

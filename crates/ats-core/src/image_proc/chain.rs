@@ -12,6 +12,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use super::{ImageProcClient, ImageProcError, SimpleBgRemover};
+use crate::cancellation::CancellationToken;
 
 pub struct BgRemoverChain {
     primary: Option<Arc<dyn ImageProcClient>>,
@@ -40,16 +41,26 @@ impl BgRemoverChain {
 
 #[async_trait]
 impl ImageProcClient for BgRemoverChain {
-    async fn remove_background(&self, input_png: &[u8]) -> Result<Vec<u8>, ImageProcError> {
+    async fn remove_background(
+        &self,
+        input_png: &[u8],
+        cancellation: &CancellationToken,
+    ) -> Result<Vec<u8>, ImageProcError> {
+        if cancellation.is_cancelled() {
+            return Err(ImageProcError::Cancelled);
+        }
         if let Some(p) = &self.primary {
-            match p.remove_background(input_png).await {
+            match p.remove_background(input_png, cancellation).await {
                 Ok(out) => return Ok(out),
+                Err(ImageProcError::Cancelled) => return Err(ImageProcError::Cancelled),
                 Err(err) => {
                     tracing::warn!("ML bg remover failed, falling back to heuristic: {err}");
                 }
             }
         }
-        self.fallback.remove_background(input_png).await
+        self.fallback
+            .remove_background(input_png, cancellation)
+            .await
     }
 }
 
@@ -64,7 +75,11 @@ mod tests {
     }
     #[async_trait]
     impl ImageProcClient for OkClient {
-        async fn remove_background(&self, _input: &[u8]) -> Result<Vec<u8>, ImageProcError> {
+        async fn remove_background(
+            &self,
+            _input: &[u8],
+            _cancellation: &CancellationToken,
+        ) -> Result<Vec<u8>, ImageProcError> {
             *self.calls.lock().unwrap() += 1;
             Ok(vec![self.marker])
         }
@@ -75,7 +90,11 @@ mod tests {
     }
     #[async_trait]
     impl ImageProcClient for FailingClient {
-        async fn remove_background(&self, _input: &[u8]) -> Result<Vec<u8>, ImageProcError> {
+        async fn remove_background(
+            &self,
+            _input: &[u8],
+            _cancellation: &CancellationToken,
+        ) -> Result<Vec<u8>, ImageProcError> {
             *self.calls.lock().unwrap() += 1;
             Err(ImageProcError::Decode("simulated".into()))
         }
@@ -102,7 +121,10 @@ mod tests {
             Some(primary.clone() as Arc<dyn ImageProcClient>),
             fallback.clone() as Arc<dyn ImageProcClient>,
         );
-        let out = chain.remove_background(&[]).await.unwrap();
+        let out = chain
+            .remove_background(&[], &CancellationToken::new())
+            .await
+            .unwrap();
         assert_eq!(out, vec![1]);
         assert_eq!(*primary.calls.lock().unwrap(), 1);
         assert_eq!(*fallback.calls.lock().unwrap(), 0);
@@ -116,7 +138,10 @@ mod tests {
             Some(primary.clone() as Arc<dyn ImageProcClient>),
             fallback.clone() as Arc<dyn ImageProcClient>,
         );
-        let out = chain.remove_background(&[]).await.unwrap();
+        let out = chain
+            .remove_background(&[], &CancellationToken::new())
+            .await
+            .unwrap();
         assert_eq!(out, vec![9]);
         assert_eq!(*primary.calls.lock().unwrap(), 1);
         assert_eq!(*fallback.calls.lock().unwrap(), 1);
@@ -126,7 +151,10 @@ mod tests {
     async fn no_primary_goes_straight_to_fallback() {
         let fallback = ok_client(7);
         let chain = BgRemoverChain::new(None, fallback.clone() as Arc<dyn ImageProcClient>);
-        let out = chain.remove_background(&[]).await.unwrap();
+        let out = chain
+            .remove_background(&[], &CancellationToken::new())
+            .await
+            .unwrap();
         assert_eq!(out, vec![7]);
         assert_eq!(*fallback.calls.lock().unwrap(), 1);
     }
@@ -139,7 +167,10 @@ mod tests {
             Some(primary.clone() as Arc<dyn ImageProcClient>),
             fallback.clone() as Arc<dyn ImageProcClient>,
         );
-        let err = chain.remove_background(&[]).await.unwrap_err();
+        let err = chain
+            .remove_background(&[], &CancellationToken::new())
+            .await
+            .unwrap_err();
         assert!(matches!(err, ImageProcError::Decode(_)));
     }
 }

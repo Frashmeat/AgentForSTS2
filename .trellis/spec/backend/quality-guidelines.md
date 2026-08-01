@@ -906,10 +906,17 @@ cargo test -p ats-core pending_run_can_be_reconciled_as_interrupted_without_faki
 cargo test -p ats-core platform::application::handlers::text_generate::tests --no-default-features
 cargo test -p ats-core platform::application::handlers::package_project::tests --no-default-features
 cargo test -p ats-core game_pack::truth_snapshot::refresh::tests --no-default-features
+cargo test -p ats-core platform::application::handlers::truth_snapshot_refresh::tests --no-default-features
+cargo test -p ats-core image_proc:: --no-default-features
+cargo test -p ats-core cancellation_waits_for_image_processing_then_removes_partial_diagnostics --no-default-features
+cargo test -p ats-core concurrent_cancel_and_success_persist_exactly_one_terminal_event --no-default-features
+cargo test -p ats-core controlled_process::tests::cancellation_kills_the_windows_job_process_tree --no-default-features
 cargo test -p agentthespire-desktop project_session::tests --no-default-features
+cargo test -p agentthespire-desktop app_shutdown::tests --no-default-features
 cargo test -p agentthespire-desktop commands::project::tests --no-default-features
 cargo check -p ats-core --no-default-features
 cargo check -p agentthespire-desktop --no-default-features
+cargo check -p ats-core --features ml-rembg
 ```
 
 Assertions must cover first-reason-wins, stalled-stream cancellation, partial ZIP removal, process-tree kill-and-wait, Truth Snapshot non-activation after cancellation, submit/close barrier behavior, lock retention on timeout, lock release after a successful drain, exit-hook re-entry, and terminal CAS uniqueness.

@@ -120,13 +120,30 @@ fn ort_init_error(path: &Path, detail: &str) -> MlBgRemoverError {
 
 #[async_trait]
 impl ImageProcClient for MlBgRemover {
-    async fn remove_background(&self, input_png: &[u8]) -> Result<Vec<u8>, ImageProcError> {
+    async fn remove_background(
+        &self,
+        input_png: &[u8],
+        cancellation: &crate::cancellation::CancellationToken,
+    ) -> Result<Vec<u8>, ImageProcError> {
+        if cancellation.is_cancelled() {
+            return Err(ImageProcError::Cancelled);
+        }
         let session = Arc::clone(&self.session);
         let input = input_png.to_vec();
-        tokio::task::spawn_blocking(move || run_inference(&session, &input))
-            .await
-            .map_err(|e| ImageProcError::Runtime(format!("worker join: {e}")))?
-            .map_err(map_err)
+        let worker_cancellation = cancellation.clone();
+        tokio::task::spawn_blocking(move || {
+            if worker_cancellation.is_cancelled() {
+                return Err(ImageProcError::Cancelled);
+            }
+            let result = run_inference(&session, &input).map_err(map_err)?;
+            if worker_cancellation.is_cancelled() {
+                Err(ImageProcError::Cancelled)
+            } else {
+                Ok(result)
+            }
+        })
+        .await
+        .map_err(|e| ImageProcError::Runtime(format!("worker join: {e}")))?
     }
 }
 

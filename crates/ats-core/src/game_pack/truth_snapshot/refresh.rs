@@ -3,7 +3,6 @@
 use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -14,11 +13,14 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 
-use super::hash::digest_file;
+use super::hash::digest_file_cancellable;
 use super::{TruthSnapshotError, TruthSnapshotIndex, TruthSnapshotSource, TruthSnapshotStore};
+use crate::cancellation::CancellationToken;
+use crate::controlled_process::{ControlledProcessResult, run_controlled_process};
 use crate::game_pack::{LoadedGamePack, TruthSourceKind};
 use crate::knowledge::{
-    default_dotnet_tools_dirs, discover_ilspycmd, run_decompile_file, run_decompile_project,
+    DecompileError, default_dotnet_tools_dirs, discover_ilspycmd, run_decompile_file,
+    run_decompile_project,
 };
 
 const GITHUB_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -29,6 +31,8 @@ const ASSET_DOWNLOAD_RETRY_DELAY: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Error)]
 pub enum TruthSnapshotRefreshError {
+    #[error("truth snapshot refresh was cancelled")]
+    Cancelled,
     #[error("truth snapshot refresh is already running for game pack `{0}`")]
     Busy(String),
     #[error("truth source `{source_id}` requires missing local input `{input_key}`")]
@@ -51,7 +55,7 @@ pub enum TruthSnapshotRefreshError {
     #[error("truth snapshot worker stopped unexpectedly: {0}")]
     Worker(String),
     #[error(transparent)]
-    Snapshot(#[from] TruthSnapshotError),
+    Snapshot(TruthSnapshotError),
     #[error("{action} `{path}`: {source}")]
     Io {
         action: &'static str,
@@ -61,7 +65,26 @@ pub enum TruthSnapshotRefreshError {
     },
 }
 
+impl From<TruthSnapshotError> for TruthSnapshotRefreshError {
+    fn from(error: TruthSnapshotError) -> Self {
+        match error {
+            TruthSnapshotError::Cancelled => Self::Cancelled,
+            error => Self::Snapshot(error),
+        }
+    }
+}
+
 pub type TruthSnapshotRefreshResult<T> = Result<T, TruthSnapshotRefreshError>;
+
+#[derive(Debug, Error)]
+pub enum TruthSourceOperationError {
+    #[error("truth source operation was cancelled")]
+    Cancelled,
+    #[error("{0}")]
+    Failed(String),
+}
+
+pub type TruthSourceOperationResult<T> = Result<T, TruthSourceOperationError>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -103,13 +126,24 @@ pub trait RemoteTruthSourceFetcher: Send + Sync {
         pinned_release: &str,
         asset: &str,
         destination: &Path,
-    ) -> Result<(), String>;
+        cancellation: &CancellationToken,
+    ) -> TruthSourceOperationResult<()>;
 }
 
+#[async_trait]
 pub trait TruthSourceIndexer: Send + Sync {
-    fn tool_versions(&self) -> Result<BTreeMap<String, String>, String>;
+    async fn tool_versions(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> TruthSourceOperationResult<BTreeMap<String, String>>;
 
-    fn index(&self, indexer: &str, source: &Path, output_dir: &Path) -> Result<(), String>;
+    async fn index(
+        &self,
+        indexer: &str,
+        source: &Path,
+        output_dir: &Path,
+        cancellation: &CancellationToken,
+    ) -> TruthSourceOperationResult<()>;
 }
 
 pub struct GitHubReleaseAssetFetcher {
@@ -120,6 +154,7 @@ pub struct GitHubReleaseAssetFetcher {
 }
 
 enum AssetDownloadAttemptError {
+    Cancelled,
     Retryable(String),
     Fatal(String),
 }
@@ -192,22 +227,43 @@ impl GitHubReleaseAssetFetcher {
             .header("User-Agent", "agentthespire-rust")
     }
 
-    async fn download_asset(&self, url: &reqwest::Url, destination: &Path) -> Result<(), String> {
+    async fn download_asset(
+        &self,
+        url: &reqwest::Url,
+        destination: &Path,
+        cancellation: &CancellationToken,
+    ) -> TruthSourceOperationResult<()> {
+        if cancellation.is_cancelled() {
+            return Err(TruthSourceOperationError::Cancelled);
+        }
         if let Some(parent) = destination.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|error| format!("create download directory: {error}"))?;
+            tokio::fs::create_dir_all(parent).await.map_err(|error| {
+                TruthSourceOperationError::Failed(format!("create download directory: {error}"))
+            })?;
         }
 
         let mut last_error = String::new();
         for attempt in 1..=ASSET_DOWNLOAD_MAX_ATTEMPTS {
-            match self.download_asset_attempt(url, destination).await {
+            match self
+                .download_asset_attempt(url, destination, cancellation)
+                .await
+            {
                 Ok(()) => return Ok(()),
-                Err(AssetDownloadAttemptError::Fatal(message)) => return Err(message),
+                Err(AssetDownloadAttemptError::Cancelled) => {
+                    return Err(TruthSourceOperationError::Cancelled);
+                }
+                Err(AssetDownloadAttemptError::Fatal(message)) => {
+                    return Err(TruthSourceOperationError::Failed(message));
+                }
                 Err(AssetDownloadAttemptError::Retryable(message)) => {
                     last_error = message;
                     if attempt < ASSET_DOWNLOAD_MAX_ATTEMPTS {
-                        tokio::time::sleep(ASSET_DOWNLOAD_RETRY_DELAY).await;
+                        tokio::select! {
+                            _ = cancellation.cancelled() => {
+                                return Err(TruthSourceOperationError::Cancelled);
+                            }
+                            _ = tokio::time::sleep(ASSET_DOWNLOAD_RETRY_DELAY) => {}
+                        }
                     }
                 }
             }
@@ -217,16 +273,20 @@ impl GitHubReleaseAssetFetcher {
             .await
             .map(|metadata| metadata.len())
             .unwrap_or(0);
-        Err(format!(
+        Err(TruthSourceOperationError::Failed(format!(
             "asset download failed after {ASSET_DOWNLOAD_MAX_ATTEMPTS} attempts at {downloaded} bytes: {last_error}"
-        ))
+        )))
     }
 
     async fn download_asset_attempt(
         &self,
         url: &reqwest::Url,
         destination: &Path,
+        cancellation: &CancellationToken,
     ) -> Result<(), AssetDownloadAttemptError> {
+        if cancellation.is_cancelled() {
+            return Err(AssetDownloadAttemptError::Cancelled);
+        }
         let existing_len = tokio::fs::metadata(destination)
             .await
             .map(|metadata| metadata.len())
@@ -235,9 +295,14 @@ impl GitHubReleaseAssetFetcher {
         if existing_len > 0 {
             request = request.header(RANGE, format!("bytes={existing_len}-"));
         }
-        let response = request.send().await.map_err(|error| {
-            AssetDownloadAttemptError::Retryable(format!("send asset request: {error}"))
-        })?;
+        let response = tokio::select! {
+            _ = cancellation.cancelled() => {
+                return Err(AssetDownloadAttemptError::Cancelled);
+            }
+            response = request.send() => response.map_err(|error| {
+                AssetDownloadAttemptError::Retryable(format!("send asset request: {error}"))
+            })?,
+        };
 
         if response.status() == reqwest::StatusCode::RANGE_NOT_SATISFIABLE
             && existing_len > 0
@@ -291,7 +356,16 @@ impl GitHubReleaseAssetFetcher {
         })?;
         let mut written = if append { existing_len } else { 0 };
         let mut stream = response.bytes_stream();
-        while let Some(chunk) = stream.next().await {
+        loop {
+            let next = tokio::select! {
+                _ = cancellation.cancelled() => {
+                    return Err(AssetDownloadAttemptError::Cancelled);
+                }
+                next = stream.next() => next,
+            };
+            let Some(chunk) = next else {
+                break;
+            };
             let chunk = match chunk {
                 Ok(chunk) => chunk,
                 Err(error) => {
@@ -306,13 +380,21 @@ impl GitHubReleaseAssetFetcher {
                     )));
                 }
             };
-            file.write_all(&chunk).await.map_err(|error| {
-                AssetDownloadAttemptError::Fatal(format!(
-                    "write downloaded asset {}: {error}",
-                    destination.display()
-                ))
-            })?;
+            tokio::select! {
+                _ = cancellation.cancelled() => {
+                    return Err(AssetDownloadAttemptError::Cancelled);
+                }
+                result = file.write_all(&chunk) => result.map_err(|error| {
+                    AssetDownloadAttemptError::Fatal(format!(
+                        "write downloaded asset {}: {error}",
+                        destination.display()
+                    ))
+                })?,
+            }
             written = written.saturating_add(chunk.len() as u64);
+        }
+        if cancellation.is_cancelled() {
+            return Err(AssetDownloadAttemptError::Cancelled);
         }
         file.flush().await.map_err(|error| {
             AssetDownloadAttemptError::Fatal(format!(
@@ -377,36 +459,57 @@ impl RemoteTruthSourceFetcher for GitHubReleaseAssetFetcher {
         pinned_release: &str,
         asset: &str,
         destination: &Path,
-    ) -> Result<(), String> {
-        let release_url = self.release_url(repository, pinned_release)?;
-        let response = self
-            .api_request(release_url)
-            .send()
-            .await
-            .map_err(|error| error.to_string())?;
+        cancellation: &CancellationToken,
+    ) -> TruthSourceOperationResult<()> {
+        let release_url = self
+            .release_url(repository, pinned_release)
+            .map_err(TruthSourceOperationError::Failed)?;
+        let response = tokio::select! {
+            _ = cancellation.cancelled() => {
+                return Err(TruthSourceOperationError::Cancelled);
+            }
+            response = self.api_request(release_url).send() => response
+                .map_err(|error| TruthSourceOperationError::Failed(error.to_string()))?,
+        };
         if !response.status().is_success() {
-            return Err(format!("GitHub release API returned {}", response.status()));
+            return Err(TruthSourceOperationError::Failed(format!(
+                "GitHub release API returned {}",
+                response.status()
+            )));
         }
-        let release: GitHubRelease = response
-            .json()
-            .await
-            .map_err(|error| format!("parse GitHub release response: {error}"))?;
+        let release: GitHubRelease = tokio::select! {
+            _ = cancellation.cancelled() => {
+                return Err(TruthSourceOperationError::Cancelled);
+            }
+            release = response.json() => release.map_err(|error| {
+                TruthSourceOperationError::Failed(format!(
+                    "parse GitHub release response: {error}"
+                ))
+            })?,
+        };
         if release.tag_name != pinned_release {
-            return Err(format!(
+            return Err(TruthSourceOperationError::Failed(format!(
                 "GitHub release tag mismatch: expected `{pinned_release}`, got `{}`",
                 release.tag_name
-            ));
+            )));
         }
         let release_asset = release
             .assets
             .iter()
             .find(|candidate| candidate.name == asset)
-            .ok_or_else(|| format!("release `{pinned_release}` has no exact asset `{asset}`"))?;
-        let download_url = reqwest::Url::parse(&release_asset.browser_download_url)
-            .map_err(|error| format!("invalid asset download URL: {error}"))?;
+            .ok_or_else(|| {
+                TruthSourceOperationError::Failed(format!(
+                    "release `{pinned_release}` has no exact asset `{asset}`"
+                ))
+            })?;
+        let download_url =
+            reqwest::Url::parse(&release_asset.browser_download_url).map_err(|error| {
+                TruthSourceOperationError::Failed(format!("invalid asset download URL: {error}"))
+            })?;
         // Never forward the GitHub API bearer token to a URL selected by the
         // release response.
-        self.download_asset(&download_url, destination).await
+        self.download_asset(&download_url, destination, cancellation)
+            .await
     }
 }
 
@@ -433,17 +536,30 @@ impl IlspycmdTruthIndexer {
     }
 }
 
+#[async_trait]
 impl TruthSourceIndexer for IlspycmdTruthIndexer {
-    fn tool_versions(&self) -> Result<BTreeMap<String, String>, String> {
-        let output = Command::new(&self.executable)
-            .arg("--version")
-            .output()
-            .map_err(|error| format!("run ilspycmd --version: {error}"))?;
+    async fn tool_versions(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> TruthSourceOperationResult<BTreeMap<String, String>> {
+        let args = [std::ffi::OsString::from("--version")];
+        let cwd = self.executable.parent().unwrap_or_else(|| Path::new("."));
+        let output =
+            match run_controlled_process(self.executable.as_os_str(), &args, cwd, cancellation)
+                .await
+                .map_err(|error| {
+                    TruthSourceOperationError::Failed(format!("run ilspycmd --version: {error}"))
+                })? {
+                ControlledProcessResult::Completed(output) => output,
+                ControlledProcessResult::Cancelled(_) => {
+                    return Err(TruthSourceOperationError::Cancelled);
+                }
+            };
         if !output.status.success() {
-            return Err(format!(
+            return Err(TruthSourceOperationError::Failed(format!(
                 "ilspycmd --version exited with code {}",
                 output.status.code().unwrap_or(-1)
-            ));
+            )));
         }
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -452,23 +568,49 @@ impl TruthSourceIndexer for IlspycmdTruthIndexer {
             .chain(stderr.lines())
             .map(str::trim)
             .find(|line| !line.is_empty())
-            .ok_or_else(|| "ilspycmd --version returned no version text".to_string())?;
+            .ok_or_else(|| {
+                TruthSourceOperationError::Failed(
+                    "ilspycmd --version returned no version text".to_string(),
+                )
+            })?;
         let version = normalize_ilspycmd_version_line(version_line);
         Ok(BTreeMap::from([("ilspycmd".into(), version.into())]))
     }
 
-    fn index(&self, indexer: &str, source: &Path, output_dir: &Path) -> Result<(), String> {
+    async fn index(
+        &self,
+        indexer: &str,
+        source: &Path,
+        output_dir: &Path,
+        cancellation: &CancellationToken,
+    ) -> TruthSourceOperationResult<()> {
         match indexer {
-            "dotnet_project" => run_decompile_project(&self.executable, source, output_dir)
-                .map(|_| ())
-                .map_err(|error| error.to_string()),
-            "dotnet_file" => {
-                run_decompile_file(&self.executable, source, &output_dir.join("decompiled.cs"))
+            "dotnet_project" => {
+                run_decompile_project(&self.executable, source, output_dir, cancellation)
+                    .await
                     .map(|_| ())
-                    .map_err(|error| error.to_string())
+                    .map_err(map_decompile_error)
             }
-            other => Err(format!("unsupported truth indexer `{other}`")),
+            "dotnet_file" => run_decompile_file(
+                &self.executable,
+                source,
+                &output_dir.join("decompiled.cs"),
+                cancellation,
+            )
+            .await
+            .map(|_| ())
+            .map_err(map_decompile_error),
+            other => Err(TruthSourceOperationError::Failed(format!(
+                "unsupported truth indexer `{other}`"
+            ))),
         }
+    }
+}
+
+fn map_decompile_error(error: DecompileError) -> TruthSourceOperationError {
+    match error {
+        DecompileError::Cancelled => TruthSourceOperationError::Cancelled,
+        error => TruthSourceOperationError::Failed(error.to_string()),
     }
 }
 
@@ -494,18 +636,49 @@ impl TruthSnapshotRefresher {
         local_inputs: &BTreeMap<String, PathBuf>,
         force: bool,
     ) -> TruthSnapshotRefreshResult<TruthSnapshotRefreshOutcome> {
+        self.refresh_cancellable(pack, store, local_inputs, force, &CancellationToken::new())
+            .await
+    }
+
+    pub async fn refresh_cancellable(
+        &self,
+        pack: &LoadedGamePack,
+        store: &TruthSnapshotStore,
+        local_inputs: &BTreeMap<String, PathBuf>,
+        force: bool,
+        cancellation: &CancellationToken,
+    ) -> TruthSnapshotRefreshResult<TruthSnapshotRefreshOutcome> {
+        if cancellation.is_cancelled() {
+            return Err(TruthSnapshotRefreshError::Cancelled);
+        }
         validate_truth_source_inputs(pack, local_inputs)?;
         let _refresh_lock = acquire_refresh_lock(store, pack)?;
 
-        let indexer = Arc::clone(&self.indexer);
-        let tool_versions = tokio::task::spawn_blocking(move || indexer.tool_versions())
+        let tool_versions = self
+            .indexer
+            .tool_versions(cancellation)
             .await
-            .map_err(|error| TruthSnapshotRefreshError::Worker(error.to_string()))?
-            .map_err(TruthSnapshotRefreshError::Tool)?;
+            .map_err(|error| match error {
+                TruthSourceOperationError::Cancelled => TruthSnapshotRefreshError::Cancelled,
+                TruthSourceOperationError::Failed(message) => {
+                    TruthSnapshotRefreshError::Tool(message)
+                }
+            })?;
 
         let mut warnings = Vec::new();
-        let current = match store.open_current(pack) {
+        let current_store = store.clone();
+        let current_pack = pack.clone();
+        let current_cancellation = cancellation.clone();
+        let current = match tokio::task::spawn_blocking(move || {
+            current_store.open_current_cancellable(&current_pack, &current_cancellation)
+        })
+        .await
+        .map_err(|error| TruthSnapshotRefreshError::Worker(error.to_string()))?
+        {
             Ok(current) => current,
+            Err(TruthSnapshotError::Cancelled) => {
+                return Err(TruthSnapshotRefreshError::Cancelled);
+            }
             Err(error) => {
                 warnings.push(format!(
                     "existing current snapshot is invalid and will not be reused: {error}"
@@ -513,16 +686,34 @@ impl TruthSnapshotRefresher {
                 None
             }
         };
-        if !force
-            && let Some(current) = &current
-            && current_matches_inputs(current, pack, local_inputs, &tool_versions)?
-        {
-            return Ok(outcome(current, true, warnings));
+        if !force && let Some(current) = &current {
+            let checked_current = current.clone();
+            let checked_pack = pack.clone();
+            let checked_inputs = local_inputs.clone();
+            let checked_tools = tool_versions.clone();
+            let checked_cancellation = cancellation.clone();
+            let matches = tokio::task::spawn_blocking(move || {
+                current_matches_inputs(
+                    &checked_current,
+                    &checked_pack,
+                    &checked_inputs,
+                    &checked_tools,
+                    &checked_cancellation,
+                )
+            })
+            .await
+            .map_err(|error| TruthSnapshotRefreshError::Worker(error.to_string()))??;
+            if matches {
+                return Ok(outcome(current, true, warnings));
+            }
         }
 
-        let mut draft = store.begin(pack)?;
-        let mut staged_sources = BTreeMap::new();
+        let draft = store.begin(pack)?;
+        let mut source_paths = BTreeMap::new();
         for declaration in &pack.truth_sources {
+            if cancellation.is_cancelled() {
+                return Err(TruthSnapshotRefreshError::Cancelled);
+            }
             let source_path = match &declaration.kind {
                 TruthSourceKind::LocalFile { input_key } => local_inputs[input_key].clone(),
                 TruthSourceKind::GitHubReleaseAsset {
@@ -544,48 +735,97 @@ impl TruthSnapshotRefresher {
                             .join(&declaration.id)
                             .join(asset);
                         self.fetcher
-                            .fetch(repository, pinned_release, asset, &destination)
+                            .fetch(
+                                repository,
+                                pinned_release,
+                                asset,
+                                &destination,
+                                cancellation,
+                            )
                             .await
-                            .map_err(|message| TruthSnapshotRefreshError::Fetch {
-                                source_id: declaration.id.clone(),
-                                message,
+                            .map_err(|error| match error {
+                                TruthSourceOperationError::Cancelled => {
+                                    TruthSnapshotRefreshError::Cancelled
+                                }
+                                TruthSourceOperationError::Failed(message) => {
+                                    TruthSnapshotRefreshError::Fetch {
+                                        source_id: declaration.id.clone(),
+                                        message,
+                                    }
+                                }
                             })?;
                         destination
                     }
                 }
             };
-            let staged = draft.stage_source(&declaration.id, &source_path)?;
-            staged_sources.insert(declaration.id.clone(), staged);
+            source_paths.insert(declaration.id.clone(), source_path);
         }
 
-        let fetch_root = draft.staging_root().join(".fetch");
-        if fetch_root.exists() {
-            fs::remove_dir_all(&fetch_root).map_err(|source| TruthSnapshotRefreshError::Io {
-                action: "remove staged truth source download",
-                path: fetch_root,
-                source,
-            })?;
-        }
+        let staging_cancellation = cancellation.clone();
+        let (draft, staged_sources) = tokio::task::spawn_blocking(move || {
+            let mut draft = draft;
+            let mut staged_sources = BTreeMap::new();
+            for (source_id, source_path) in source_paths {
+                let staged = draft.stage_source_cancellable(
+                    &source_id,
+                    &source_path,
+                    &staging_cancellation,
+                )?;
+                staged_sources.insert(source_id, staged);
+            }
+            let fetch_root = draft.staging_root().join(".fetch");
+            if fetch_root.exists() {
+                if staging_cancellation.is_cancelled() {
+                    return Err(TruthSnapshotRefreshError::Cancelled);
+                }
+                fs::remove_dir_all(&fetch_root).map_err(|source| {
+                    TruthSnapshotRefreshError::Io {
+                        action: "remove staged truth source download",
+                        path: fetch_root,
+                        source,
+                    }
+                })?;
+            }
+            Ok::<_, TruthSnapshotRefreshError>((draft, staged_sources))
+        })
+        .await
+        .map_err(|error| TruthSnapshotRefreshError::Worker(error.to_string()))??;
 
         for declaration in &pack.truth_sources {
+            if cancellation.is_cancelled() {
+                return Err(TruthSnapshotRefreshError::Cancelled);
+            }
             let source = staged_sources[&declaration.id].clone();
             let output = draft.index_output_dir(&declaration.id)?;
             let source_id = declaration.id.clone();
-            let indexer_name = declaration.indexer.clone();
-            let indexer = Arc::clone(&self.indexer);
-            tokio::task::spawn_blocking(move || indexer.index(&indexer_name, &source, &output))
+            self.indexer
+                .index(&declaration.indexer, &source, &output, cancellation)
                 .await
-                .map_err(|error| TruthSnapshotRefreshError::Worker(error.to_string()))?
-                .map_err(|message| TruthSnapshotRefreshError::Index {
-                    source_id,
-                    indexer: declaration.indexer.clone(),
-                    message,
+                .map_err(|error| match error {
+                    TruthSourceOperationError::Cancelled => TruthSnapshotRefreshError::Cancelled,
+                    TruthSourceOperationError::Failed(message) => {
+                        TruthSnapshotRefreshError::Index {
+                            source_id,
+                            indexer: declaration.indexer.clone(),
+                            message,
+                        }
+                    }
                 })?;
         }
 
-        let verified = tokio::task::spawn_blocking(move || draft.finalize(tool_versions))
-            .await
-            .map_err(|error| TruthSnapshotRefreshError::Worker(error.to_string()))??;
+        let prepare_cancellation = cancellation.clone();
+        let prepared = tokio::task::spawn_blocking(move || {
+            draft.prepare_cancellable(tool_versions, &prepare_cancellation)
+        })
+        .await
+        .map_err(|error| TruthSnapshotRefreshError::Worker(error.to_string()))??;
+
+        let activate_cancellation = cancellation.clone();
+        let verified = tokio::task::spawn_blocking(move || {
+            prepared.activate_cancellable(&activate_cancellation)
+        })
+        .await
+        .map_err(|error| TruthSnapshotRefreshError::Worker(error.to_string()))??;
         Ok(outcome(&verified, false, warnings))
     }
 }
@@ -659,13 +899,20 @@ fn current_matches_inputs(
     pack: &LoadedGamePack,
     local_inputs: &BTreeMap<String, PathBuf>,
     tool_versions: &BTreeMap<String, String>,
+    cancellation: &CancellationToken,
 ) -> TruthSnapshotRefreshResult<bool> {
+    if cancellation.is_cancelled() {
+        return Err(TruthSnapshotRefreshError::Cancelled);
+    }
     if &current.manifest().tool_versions != tool_versions {
         return Ok(false);
     }
     for declaration in &pack.truth_sources {
+        if cancellation.is_cancelled() {
+            return Err(TruthSnapshotRefreshError::Cancelled);
+        }
         if let TruthSourceKind::LocalFile { input_key } = &declaration.kind {
-            let digest = digest_file(&local_inputs[input_key])?;
+            let digest = digest_file_cancellable(&local_inputs[input_key], cancellation)?;
             let Some(source) = current
                 .manifest()
                 .sources
@@ -736,9 +983,11 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use sha2::{Digest, Sha256};
+    use tokio::sync::Barrier;
 
     use super::*;
     use crate::game_pack::{GamePackLoadPolicy, GamePackLoader};
+    use crate::platform::domain::CancellationReason;
 
     const GAME: &[u8] = b"fixture-game";
     const BASELIB: &[u8] = b"fixture-baselib";
@@ -778,7 +1027,11 @@ mod tests {
             pinned_release: &str,
             asset: &str,
             destination: &Path,
-        ) -> Result<(), String> {
+            cancellation: &CancellationToken,
+        ) -> TruthSourceOperationResult<()> {
+            if cancellation.is_cancelled() {
+                return Err(TruthSourceOperationError::Cancelled);
+            }
             assert_eq!(repository, "owner/repo");
             assert_eq!(pinned_release, "v1.2.3");
             assert_eq!(asset, "Library.dll");
@@ -805,15 +1058,33 @@ mod tests {
         }
     }
 
+    #[async_trait]
     impl TruthSourceIndexer for MockIndexer {
-        fn tool_versions(&self) -> Result<BTreeMap<String, String>, String> {
+        async fn tool_versions(
+            &self,
+            cancellation: &CancellationToken,
+        ) -> TruthSourceOperationResult<BTreeMap<String, String>> {
+            if cancellation.is_cancelled() {
+                return Err(TruthSourceOperationError::Cancelled);
+            }
             Ok(BTreeMap::from([("ilspycmd".into(), self.version.clone())]))
         }
 
-        fn index(&self, indexer: &str, source: &Path, output_dir: &Path) -> Result<(), String> {
+        async fn index(
+            &self,
+            indexer: &str,
+            source: &Path,
+            output_dir: &Path,
+            cancellation: &CancellationToken,
+        ) -> TruthSourceOperationResult<()> {
+            if cancellation.is_cancelled() {
+                return Err(TruthSourceOperationError::Cancelled);
+            }
             self.calls.fetch_add(1, Ordering::SeqCst);
             if self.fail_on.as_deref() == Some(indexer) {
-                return Err("injected index failure".into());
+                return Err(TruthSourceOperationError::Failed(
+                    "injected index failure".into(),
+                ));
             }
             fs::create_dir_all(output_dir).unwrap();
             let bytes = fs::read(source).unwrap();
@@ -823,6 +1094,35 @@ mod tests {
             )
             .unwrap();
             Ok(())
+        }
+    }
+
+    struct BlockingIndexer {
+        entered: Arc<Barrier>,
+    }
+
+    #[async_trait]
+    impl TruthSourceIndexer for BlockingIndexer {
+        async fn tool_versions(
+            &self,
+            cancellation: &CancellationToken,
+        ) -> TruthSourceOperationResult<BTreeMap<String, String>> {
+            if cancellation.is_cancelled() {
+                return Err(TruthSourceOperationError::Cancelled);
+            }
+            Ok(BTreeMap::from([("ilspycmd".into(), "9.2.0".into())]))
+        }
+
+        async fn index(
+            &self,
+            _indexer: &str,
+            _source: &Path,
+            _output_dir: &Path,
+            cancellation: &CancellationToken,
+        ) -> TruthSourceOperationResult<()> {
+            self.entered.wait().await;
+            cancellation.cancelled().await;
+            Err(TruthSourceOperationError::Cancelled)
         }
     }
 
@@ -883,6 +1183,52 @@ mod tests {
         assert_eq!(second.snapshot_id, first.snapshot_id);
         assert_eq!(fetcher.calls.load(Ordering::SeqCst), 1);
         assert_eq!(indexer.calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn cancellation_during_index_preserves_previous_current_snapshot() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let pack = fixture_pack(&format!("{:x}", Sha256::digest(BASELIB)));
+        let store = TruthSnapshotStore::new(temp.path(), &pack);
+        let fetcher = Arc::new(MockFetcher::default());
+        let initial_inputs = inputs(temp.path(), GAME);
+        let initial = refresher(Arc::clone(&fetcher), Arc::new(MockIndexer::good()))
+            .refresh(&pack, &store, &initial_inputs, false)
+            .await
+            .unwrap();
+
+        let changed_inputs = inputs(temp.path(), b"changed-game");
+        let entered = Arc::new(Barrier::new(2));
+        let blocking = TruthSnapshotRefresher::new(
+            fetcher,
+            Arc::new(BlockingIndexer {
+                entered: Arc::clone(&entered),
+            }),
+        );
+        let cancellation = CancellationToken::new();
+        let worker_token = cancellation.clone();
+        let worker_pack = pack.clone();
+        let worker_store = store.clone();
+        let task = tokio::spawn(async move {
+            blocking
+                .refresh_cancellable(
+                    &worker_pack,
+                    &worker_store,
+                    &changed_inputs,
+                    false,
+                    &worker_token,
+                )
+                .await
+        });
+
+        entered.wait().await;
+        assert!(cancellation.cancel(CancellationReason::ProjectClose));
+        assert!(matches!(
+            task.await.unwrap(),
+            Err(TruthSnapshotRefreshError::Cancelled)
+        ));
+        let current = store.open_current(&pack).unwrap().unwrap();
+        assert_eq!(current.snapshot_id(), initial.snapshot_id);
     }
 
     #[tokio::test]
@@ -1119,12 +1465,55 @@ mod tests {
             .download_asset(
                 &reqwest::Url::parse(&format!("http://{address}/Library.dll")).unwrap(),
                 &destination,
+                &CancellationToken::new(),
             )
             .await
             .unwrap();
 
         server.join().unwrap();
         assert_eq!(tokio::fs::read(destination).await.unwrap(), b"hello world");
+    }
+
+    #[tokio::test]
+    async fn asset_download_cancels_while_response_body_is_stalled() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (body_started_tx, body_started_rx) = tokio::sync::oneshot::channel();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            read_http_request(&mut stream);
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\npartial"
+            )
+            .unwrap();
+            stream.flush().unwrap();
+            let _ = body_started_tx.send(());
+            std::thread::sleep(Duration::from_millis(500));
+        });
+        let temp = tempfile::TempDir::new().unwrap();
+        let destination = temp.path().join("Library.dll");
+        let cancellation = CancellationToken::new();
+        let worker_cancellation = cancellation.clone();
+        let task = tokio::spawn(async move {
+            GitHubReleaseAssetFetcher::with_default_client(None)
+                .unwrap()
+                .download_asset(
+                    &reqwest::Url::parse(&format!("http://{address}/Library.dll")).unwrap(),
+                    &destination,
+                    &worker_cancellation,
+                )
+                .await
+        });
+
+        body_started_rx.await.unwrap();
+        cancellation.cancel(CancellationReason::ProjectClose);
+        let result = tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("stalled response body did not observe cancellation")
+            .unwrap();
+        assert!(matches!(result, Err(TruthSourceOperationError::Cancelled)));
+        server.join().unwrap();
     }
 
     #[tokio::test]
@@ -1151,12 +1540,17 @@ mod tests {
             .download_asset(
                 &reqwest::Url::parse(&format!("http://{address}/Library.dll")).unwrap(),
                 &destination,
+                &CancellationToken::new(),
             )
             .await
             .unwrap_err();
 
         server.join().unwrap();
-        assert!(error.contains("Content-Range start 5 for offset 6"));
+        assert!(
+            error
+                .to_string()
+                .contains("Content-Range start 5 for offset 6")
+        );
         assert_eq!(tokio::fs::read(destination).await.unwrap(), b"hello ");
     }
 

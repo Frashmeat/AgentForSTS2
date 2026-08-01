@@ -227,8 +227,13 @@ impl RunRepository for FileRunRepository {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
-    use crate::platform::domain::{CancellationReason, RunKind, RunStatus, RunTimelineEventKind};
+    use crate::platform::domain::{
+        CancellationReason, RunKind, RunResult, RunStatus, RunTimelineEventKind, TokenUsage,
+    };
+    use tokio::sync::Barrier;
 
     fn sample_run() -> RunRecord {
         RunRecord::new(RunKind::TextGenerate, serde_json::json!({"prompt": "hi"}))
@@ -282,6 +287,73 @@ mod tests {
         );
         let reloaded = repo.get(&run.id).await.unwrap();
         assert_eq!(reloaded.status, RunStatus::Cancelled);
+        assert_eq!(
+            reloaded
+                .timeline
+                .iter()
+                .filter(|event| event.kind.is_terminal())
+                .count(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_cancel_and_success_persist_exactly_one_terminal_event() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let repo = Arc::new(FileRunRepository::new(temp.path().join("history")));
+        let run = sample_run();
+        repo.create(&run).await.unwrap();
+        repo.transition(&run.id, RunTransition::Start)
+            .await
+            .unwrap();
+        let barrier = Arc::new(Barrier::new(3));
+
+        let cancel_repo = Arc::clone(&repo);
+        let cancel_id = run.id.clone();
+        let cancel_barrier = Arc::clone(&barrier);
+        let cancel = tokio::spawn(async move {
+            cancel_barrier.wait().await;
+            cancel_repo
+                .transition(
+                    &cancel_id,
+                    RunTransition::Cancel {
+                        reason: CancellationReason::User,
+                    },
+                )
+                .await
+        });
+        let success_repo = Arc::clone(&repo);
+        let success_id = run.id.clone();
+        let success_barrier = Arc::clone(&barrier);
+        let success = tokio::spawn(async move {
+            success_barrier.wait().await;
+            success_repo
+                .transition(
+                    &success_id,
+                    RunTransition::Succeed {
+                        result: RunResult::TextGeneration {
+                            model: "fixture".into(),
+                            content: "done".into(),
+                            finish_reason: "stop".into(),
+                            usage: TokenUsage {
+                                input_tokens: 1,
+                                output_tokens: 1,
+                            },
+                        },
+                    },
+                )
+                .await
+        });
+
+        barrier.wait().await;
+        let cancel_result = cancel.await.unwrap();
+        let success_result = success.await.unwrap();
+        assert_ne!(cancel_result.is_ok(), success_result.is_ok());
+        let reloaded = repo.get(&run.id).await.unwrap();
+        assert!(matches!(
+            reloaded.status,
+            RunStatus::Cancelled | RunStatus::Succeeded
+        ));
         assert_eq!(
             reloaded
                 .timeline

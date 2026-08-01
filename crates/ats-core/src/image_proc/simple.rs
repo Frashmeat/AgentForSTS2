@@ -13,6 +13,7 @@ use image::{ImageFormat, Rgba, RgbaImage};
 use std::io::Cursor;
 
 use super::{ImageProcClient, ImageProcError};
+use crate::cancellation::CancellationToken;
 
 pub struct SimpleBgRemover {
     /// 亮度阈值：R / G / B 每个通道都 ≥ 此值才视作"背景候选"
@@ -32,12 +33,28 @@ impl Default for SimpleBgRemover {
 
 #[async_trait]
 impl ImageProcClient for SimpleBgRemover {
-    async fn remove_background(&self, input_png: &[u8]) -> Result<Vec<u8>, ImageProcError> {
+    async fn remove_background(
+        &self,
+        input_png: &[u8],
+        cancellation: &CancellationToken,
+    ) -> Result<Vec<u8>, ImageProcError> {
+        if cancellation.is_cancelled() {
+            return Err(ImageProcError::Cancelled);
+        }
         let threshold = self.threshold;
         let tolerance = self.tolerance;
         let input = input_png.to_vec();
+        let worker_cancellation = cancellation.clone();
         tokio::task::spawn_blocking(move || {
-            remove_white_background_inner(&input, threshold, tolerance)
+            if worker_cancellation.is_cancelled() {
+                return Err(ImageProcError::Cancelled);
+            }
+            let result = remove_white_background_inner(&input, threshold, tolerance)?;
+            if worker_cancellation.is_cancelled() {
+                Err(ImageProcError::Cancelled)
+            } else {
+                Ok(result)
+            }
         })
         .await
         .map_err(|e| ImageProcError::Decode(format!("join: {e}")))?
@@ -163,7 +180,10 @@ mod tests {
     async fn async_client_round_trip() {
         let client = SimpleBgRemover::default();
         let input = make_two_color_png();
-        let output = client.remove_background(&input).await.unwrap();
+        let output = client
+            .remove_background(&input, &CancellationToken::new())
+            .await
+            .unwrap();
         let img = image::load_from_memory(&output).unwrap().to_rgba8();
         assert_eq!(img.get_pixel(0, 0).0[3], 0); // 白色行透明
         assert_eq!(img.get_pixel(0, 1).0[3], 255); // 红色行不透明

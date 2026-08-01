@@ -5,7 +5,7 @@
 | 日期 | 2026-05-12 |
 | 状态 | 采纳 |
 | 作用域 | `src-tauri` 桌面壳 + `ats-web` HTTP 服务器 |
-| 相关代码 | `src-tauri/src/lib.rs`、`crates/ats-web/src/main.rs`、`src-tauri/src/commands/image_proc_state.rs` |
+| 相关代码 | `src-tauri/src/lib.rs`、`src-tauri/src/app_shutdown.rs`、`src-tauri/src/project_session.rs`、`crates/ats-web/src/main.rs`、`src-tauri/src/commands/image_proc_state.rs` |
 
 ---
 
@@ -66,10 +66,12 @@ Stage 5 装配收口要求双壳启动 / 停机有可预测的顺序，避免"�
      })
      .manage(AppConfig)                     // config + status
      .manage(AppPaths)                      // recents_path 等
-     .manage(ActiveProject::new())          // 内部 Mutex<Option<ProjectFolder>>
+     .manage(ActiveProject::new())          // 长期 ProjectSession + lifecycle 串行化
+     .manage(AppShutdown::new())            // 退出 drain 的防重入状态
      .manage(image_proc_state)              // Arc<ImageProcState>
      .invoke_handler(generate_handler![...]) // ~45 command
-     .run(generate_context!())              // 阻塞直到窗口关闭
+     .build(generate_context!())
+     .run(exit_callback)                    // ExitRequested 先排空工程 Run
 ```
 
 **契约**：
@@ -81,10 +83,21 @@ Stage 5 装配收口要求双壳启动 / 停机有可预测的顺序，避免"�
 
 ### 2.4 src-tauri 停机顺序
 
-由 Tauri 内核接管 —— 用户点窗口 X / Cmd+Q / `Window::close()` 触发，
-`tauri::Builder::run()` 返回，进程退出。当前没有显式 cleanup hook；
-若后续有"需要 drain 的"（如真有后台 queue worker 持久化写盘），
-要走 `app_handle.run_on_main_thread` + drop guard 模式。
+本文最初采纳时，桌面端由 Tauri 内核直接结束进程，没有显式 cleanup hook。
+当前实现已经由 Work Order 3 收口为显式 cancel-and-drain：
+
+```text
+RunEvent::ExitRequested
+  -> 首次请求 prevent_exit()
+  -> 以 AppShutdown 原因关闭当前 ProjectSession
+  -> 拒绝新 Run，取消并等待全部工程 Run 清理完成（上限 30 秒）
+  -> 排空成功：释放工程 OS 锁，设置内部 allow 标记，app.exit(code)
+  -> 排空失败/超时：保持应用、closing session、task handles 和 OS 锁，允许用户重试退出
+```
+
+内部 allow 标记使 `app.exit(code)` 触发的后续 `ExitRequested` 被放行，避免递归阻止。
+全局 ML prewarm 不访问活动工程，不属于 `ProjectSession`，因此不参加工程退出排空。
+窗口退出和显式关闭/切换工程复用同一个 `ProjectSession::cancel_and_drain` 语义。
 
 ---
 

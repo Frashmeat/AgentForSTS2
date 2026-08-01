@@ -1,6 +1,6 @@
 # ProjectSession 与 Run 并发正确性
 
-> 状态：in_progress
+> 状态：completed
 >
 > 优先级：P0
 >
@@ -142,12 +142,12 @@ lock lifecycle
 
 ## 7. 验收标准
 
-- [ ] cancel 与 handler completion 并发时只有一个终态 CAS 成功，terminal timeline 恰好一次。
-- [ ] 关闭/切换成功返回后没有工程 Run、文件事务或 child process 继续运行，OS 锁才释放。
-- [ ] drain 超时后第二进程仍无法打开工程，新 Run 被拒绝，重试取消仍可执行。
-- [ ] 打开含遗留 Pending/Running 的工程后，它们确定性进入 failed + `run.interrupted`。
-- [ ] 全局 ML prewarm 不注册到 ProjectSession，也不访问活动工程目录。
-- [ ] Core/Desktop/TypeScript 定向测试和 code-spec 同步通过。
+- [x] cancel 与 handler completion 并发时只有一个终态 CAS 成功，terminal timeline 恰好一次。
+- [x] 关闭/切换成功返回后没有工程 Run、文件事务或 child process 继续运行，OS 锁才释放。
+- [x] drain 超时后第二进程仍无法打开工程，新 Run 被拒绝，重试取消仍可执行。
+- [x] 打开含遗留 Pending/Running 的工程后，它们确定性进入 failed + `run.interrupted`。
+- [x] 全局 ML prewarm 不注册到 ProjectSession，也不访问活动工程目录。
+- [x] Core/Desktop/TypeScript 定向测试和 code-spec 同步通过。
 
 ### Good / Base / Bad
 
@@ -197,3 +197,16 @@ npx tsc -b --pretty false          # 仅当前端 command 签名发生变化时
 - 目标方案与停止条件见运行时收口方案 Work Order 3。
 - 相关规范：`.trellis/spec/backend/quality-guidelines.md`、`.trellis/spec/backend/error-handling.md`、`.trellis/spec/guides/cross-layer-thinking-guide.md`。
 - 相关稳定文档：`docs/01-总览/项目架构总览.md`、`docs/02-现状/当前进度说明.md` 和运行时收口方案。
+
+## 12. 完成证据（2026-08-01）
+
+- Core/Desktop 编译：`ats-core --no-default-features`、`agentthespire-desktop --no-default-features`、`ats-core --features ml-rembg` 均通过。
+- 取消与终态：CancellationToken 2 项、cancel/success 并发 CAS 1 项通过。
+- Truth Snapshot：refresh 15 项、application handler 2 项通过；覆盖 stalled HTTP body 取消、旧 current 保留和 worker 退出后才写 Cancelled。
+- 图片处理：`image_proc` 25 项及阻塞背景处理取消 1 项通过；取消等待真实 worker 退出后清理 partial diagnostics。
+- 进程树：Windows Job Object 父子进程树取消测试 1 项通过。
+- Desktop 生命周期：ProjectSession 4 项、AppShutdown 4 项、工程切换 command 1 项通过；覆盖 submit/closing barrier、timeout 持锁、退出防重入、成功排空释放锁和 `ProjectSwitch` reason。
+- code-spec、架构总览、当前进度、当前方案和历史生命周期 ADR 已同步。TypeScript command 签名未变化，因此本任务没有新增 TypeScript 编译边界。
+- 本轮 20 个非模块入口 Rust 文件的独立 rustfmt 检查和 `git diff --check` 通过；模块入口由三组 `cargo check` 覆盖。全仓 `cargo fmt --check` 仍被未改动的 `crates/ats-core/src/image_gen/chat_image.rs` 既有格式漂移阻断，本任务未越界格式化该文件。
+
+未执行：完整 workspace 测试、全量 clippy、完整 Tauri build、双桌面进程 UI 冒烟和真实窗口退出冒烟。前四类重型/人工门禁不作为本 Work Order 自动完成的替代证据；窗口和双进程行为保留给后续人工/候选验收。

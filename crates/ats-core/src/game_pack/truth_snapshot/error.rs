@@ -6,6 +6,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum TruthSnapshotError {
+    #[error("truth snapshot operation was cancelled")]
+    Cancelled,
     #[error("unknown truth source `{0}`")]
     UnknownSource(String),
     #[error("truth source `{0}` was staged more than once")]

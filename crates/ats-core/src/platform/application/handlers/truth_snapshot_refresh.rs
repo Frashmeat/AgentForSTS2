@@ -11,8 +11,8 @@ use crate::platform::contracts::SubmitTruthSnapshotRefreshRequest;
 use crate::platform::domain::{RunId, RunRepository, RunResult};
 
 use super::common::{
-    FinalizeOutcome, ProgressEvent, ProgressSink, finalize_with_failure, finalize_with_success,
-    transition_to_running,
+    FinalizeOutcome, ProgressEvent, ProgressSink, finalize_with_cancellation,
+    finalize_with_failure, finalize_with_success, transition_to_running,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -43,10 +43,24 @@ pub async fn run_truth_snapshot_refresh(
     .await;
 
     let outcome = match refresher
-        .refresh(&pack, &store, &local_inputs, request.force)
+        .refresh_cancellable(&pack, &store, &local_inputs, request.force, &cancellation)
         .await
     {
         Ok(outcome) => outcome,
+        Err(crate::game_pack::TruthSnapshotRefreshError::Cancelled) => {
+            if let Some(reason) = cancellation.reason() {
+                finalize_with_cancellation(&repo, &run_id, &sink, reason).await;
+            } else {
+                finalize_with_failure(
+                    &repo,
+                    &run_id,
+                    &sink,
+                    ActionableFailure::unclassified("truth_snapshot.cancel"),
+                )
+                .await;
+            }
+            return;
+        }
         Err(_) => {
             finalize_with_failure(
                 &repo,
@@ -89,12 +103,14 @@ mod tests {
 
     use async_trait::async_trait;
     use sha2::{Digest, Sha256};
+    use tokio::sync::Barrier;
 
     use super::*;
     use crate::game_pack::{
         GamePackLoadPolicy, GamePackLoader, RemoteTruthSourceFetcher, TruthSourceIndexer,
     };
     use crate::platform::application::{NoopProgressSink, RunApplicationService};
+    use crate::platform::domain::CancellationReason;
     use crate::platform::domain::RunStatus;
     use crate::platform::infra::FileRunRepository;
 
@@ -108,7 +124,11 @@ mod tests {
             _pinned_release: &str,
             _asset: &str,
             destination: &Path,
-        ) -> Result<(), String> {
+            cancellation: &CancellationToken,
+        ) -> crate::game_pack::TruthSourceOperationResult<()> {
+            if cancellation.is_cancelled() {
+                return Err(crate::game_pack::TruthSourceOperationError::Cancelled);
+            }
             fs::create_dir_all(destination.parent().unwrap()).unwrap();
             fs::write(destination, b"fixture-library").unwrap();
             Ok(())
@@ -117,15 +137,57 @@ mod tests {
 
     struct FixtureIndexer;
 
+    #[async_trait]
     impl TruthSourceIndexer for FixtureIndexer {
-        fn tool_versions(&self) -> Result<BTreeMap<String, String>, String> {
+        async fn tool_versions(
+            &self,
+            cancellation: &CancellationToken,
+        ) -> crate::game_pack::TruthSourceOperationResult<BTreeMap<String, String>> {
+            if cancellation.is_cancelled() {
+                return Err(crate::game_pack::TruthSourceOperationError::Cancelled);
+            }
             Ok(BTreeMap::from([("fixture-indexer".into(), "1".into())]))
         }
 
-        fn index(&self, indexer: &str, _source: &Path, output_dir: &Path) -> Result<(), String> {
+        async fn index(
+            &self,
+            indexer: &str,
+            _source: &Path,
+            output_dir: &Path,
+            cancellation: &CancellationToken,
+        ) -> crate::game_pack::TruthSourceOperationResult<()> {
+            if cancellation.is_cancelled() {
+                return Err(crate::game_pack::TruthSourceOperationError::Cancelled);
+            }
             fs::create_dir_all(output_dir).unwrap();
             fs::write(output_dir.join(format!("{indexer}.cs")), "class Fixture {}").unwrap();
             Ok(())
+        }
+    }
+
+    struct WaitingIndexer {
+        entered: Arc<Barrier>,
+    }
+
+    #[async_trait]
+    impl TruthSourceIndexer for WaitingIndexer {
+        async fn tool_versions(
+            &self,
+            cancellation: &CancellationToken,
+        ) -> crate::game_pack::TruthSourceOperationResult<BTreeMap<String, String>> {
+            self.entered.wait().await;
+            cancellation.cancelled().await;
+            Err(crate::game_pack::TruthSourceOperationError::Cancelled)
+        }
+
+        async fn index(
+            &self,
+            _indexer: &str,
+            _source: &Path,
+            _output_dir: &Path,
+            _cancellation: &CancellationToken,
+        ) -> crate::game_pack::TruthSourceOperationResult<()> {
+            unreachable!("cancellation should stop during tool version discovery")
         }
     }
 
@@ -191,5 +253,49 @@ mod tests {
         assert_eq!(result["indexCount"], 2);
         assert_eq!(result["cacheHit"], false);
         assert_eq!(result["snapshotId"].as_str().unwrap().len(), 64);
+    }
+
+    #[tokio::test]
+    async fn cancellation_is_persisted_only_after_refresh_worker_stops() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let pack = fixture_pack();
+        let game = temp.path().join("game.dll");
+        fs::write(&game, b"fixture-game").unwrap();
+        let repo: Arc<dyn RunRepository> =
+            Arc::new(FileRunRepository::new(temp.path().join("history")));
+        let store = TruthSnapshotStore::new(temp.path(), &pack);
+        let entered = Arc::new(Barrier::new(2));
+        let refresher = TruthSnapshotRefresher::new(
+            Arc::new(FixtureFetcher),
+            Arc::new(WaitingIndexer {
+                entered: Arc::clone(&entered),
+            }),
+        );
+        let service = RunApplicationService::without_llm(Arc::clone(&repo));
+        let spawned = service
+            .submit_truth_snapshot_refresh(
+                SubmitTruthSnapshotRefreshRequest { force: false },
+                pack,
+                store,
+                BTreeMap::from([("game_assembly".into(), game)]),
+                refresher,
+                Arc::new(NoopProgressSink),
+            )
+            .await
+            .unwrap();
+        let run_id = spawned.run_id.clone();
+
+        entered.wait().await;
+        assert!(spawned.cancellation.cancel(CancellationReason::User));
+        spawned.task.await.unwrap();
+
+        let completed = repo.get(&run_id).await.unwrap();
+        assert_eq!(completed.status, RunStatus::Cancelled);
+        assert!(completed.failure.is_none());
+        assert!(completed.result.is_none());
+        assert_eq!(
+            completed.timeline.last().unwrap().cancellation_reason,
+            Some(CancellationReason::User)
+        );
     }
 }

@@ -1,7 +1,7 @@
 //! build_project handler：在 project_root 下跑 `dotnet publish`，捕获输出。
 //!
-//! 用 std::process::Command + spawn_blocking 而非 tokio::process（Windows 下
-//! tokio::process::Command::output 偶尔挂起）。成功判定：exit 0 优先，否则
+//! 外部构建通过受控进程启动；Windows 使用 Job Object，在取消时终止并等待
+//! 整棵进程树。成功判定：exit 0 优先，否则
 //! 启发性看 stdout 含 "0 Error(s)"（部分 godot/msbuild 组合会返回 -1）。
 
 use std::sync::Arc;

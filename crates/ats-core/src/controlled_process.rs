@@ -4,7 +4,7 @@ use std::process::{ExitStatus, Stdio};
 
 use tokio::io::AsyncReadExt;
 
-use crate::platform::CancellationToken;
+use crate::cancellation::CancellationToken;
 use crate::platform::domain::CancellationReason;
 
 #[derive(Debug)]
@@ -116,4 +116,61 @@ async fn join_pipe(
 ) -> std::io::Result<Vec<u8>> {
     task.await
         .map_err(|error| std::io::Error::other(format!("process output task failed: {error}")))?
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+    use crate::platform::domain::CancellationReason;
+
+    #[tokio::test]
+    async fn cancellation_kills_the_windows_job_process_tree() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let child = temp.path().join("child.cmd");
+        let parent = temp.path().join("parent.cmd");
+        let sentinel = temp.path().join("child-survived.txt");
+        std::fs::write(
+            &child,
+            "@echo off\r\nping -n 4 127.0.0.1 >nul\r\necho survived>child-survived.txt\r\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &parent,
+            "@echo off\r\nstart \"\" /b cmd.exe /D /C child.cmd\r\nping -n 30 127.0.0.1 >nul\r\n",
+        )
+        .unwrap();
+        let cancellation = CancellationToken::new();
+        let worker_cancellation = cancellation.clone();
+        let cwd = temp.path().to_path_buf();
+        let task = tokio::spawn(async move {
+            run_controlled_process(
+                OsStr::new("cmd.exe"),
+                &[
+                    OsString::from("/D"),
+                    OsString::from("/C"),
+                    parent.into_os_string(),
+                ],
+                &cwd,
+                &worker_cancellation,
+            )
+            .await
+        });
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        cancellation.cancel(CancellationReason::ProjectClose);
+        let result = tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .expect("controlled process did not finish after cancellation")
+            .unwrap()
+            .unwrap();
+        assert!(matches!(result, ControlledProcessResult::Cancelled(_)));
+
+        tokio::time::sleep(Duration::from_secs(4)).await;
+        assert!(
+            !sentinel.exists(),
+            "a child process survived the Windows Job Object cancellation"
+        );
+    }
 }

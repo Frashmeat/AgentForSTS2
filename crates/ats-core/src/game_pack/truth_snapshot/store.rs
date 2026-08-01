@@ -8,10 +8,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
+use crate::cancellation::CancellationToken;
 use crate::fs_atomic::write_atomic_sync;
 
 use super::error::{TruthSnapshotError, TruthSnapshotResult};
-use super::hash::{copy_and_digest, digest_file, digest_tree, sha256_bytes};
+use super::hash::{
+    copy_and_digest, copy_and_digest_cancellable, digest_file, digest_file_cancellable,
+    digest_tree, digest_tree_cancellable, sha256_bytes,
+};
 use super::model::{
     TRUTH_SNAPSHOT_SCHEMA_VERSION, TruthSnapshotIdentity, TruthSnapshotIndex,
     TruthSnapshotManifest, TruthSnapshotSource, VerifiedTruthSnapshot,
@@ -69,6 +73,23 @@ impl TruthSnapshotStore {
         &self,
         pack: &LoadedGamePack,
     ) -> TruthSnapshotResult<Option<VerifiedTruthSnapshot>> {
+        self.open_current_inner(pack, None)
+    }
+
+    pub(crate) fn open_current_cancellable(
+        &self,
+        pack: &LoadedGamePack,
+        cancellation: &CancellationToken,
+    ) -> TruthSnapshotResult<Option<VerifiedTruthSnapshot>> {
+        self.open_current_inner(pack, Some(cancellation))
+    }
+
+    fn open_current_inner(
+        &self,
+        pack: &LoadedGamePack,
+        cancellation: Option<&CancellationToken>,
+    ) -> TruthSnapshotResult<Option<VerifiedTruthSnapshot>> {
+        check_cancelled(cancellation)?;
         self.ensure_pack(pack)?;
         let current_path = self.root.join(CURRENT_FILE);
         let bytes = match fs::read(&current_path) {
@@ -100,6 +121,7 @@ impl TruthSnapshotStore {
             &snapshot_root,
             &pointer.snapshot_id,
             Some(&pointer.manifest_sha256),
+            cancellation,
         )
         .map(Some)
     }
@@ -112,7 +134,7 @@ impl TruthSnapshotStore {
         self.ensure_pack(pack)?;
         validate_snapshot_id(snapshot_id)?;
         let snapshot_root = self.root.join("snapshots").join(snapshot_id);
-        verify_snapshot_root(pack, &snapshot_root, snapshot_id, None)
+        verify_snapshot_root(pack, &snapshot_root, snapshot_id, None, None)
     }
 
     fn ensure_pack(&self, pack: &LoadedGamePack) -> TruthSnapshotResult<()> {
@@ -148,6 +170,25 @@ impl TruthSnapshotDraft {
         source_id: &str,
         source_path: &Path,
     ) -> TruthSnapshotResult<PathBuf> {
+        self.stage_source_inner(source_id, source_path, None)
+    }
+
+    pub(crate) fn stage_source_cancellable(
+        &mut self,
+        source_id: &str,
+        source_path: &Path,
+        cancellation: &CancellationToken,
+    ) -> TruthSnapshotResult<PathBuf> {
+        self.stage_source_inner(source_id, source_path, Some(cancellation))
+    }
+
+    fn stage_source_inner(
+        &mut self,
+        source_id: &str,
+        source_path: &Path,
+        cancellation: Option<&CancellationToken>,
+    ) -> TruthSnapshotResult<PathBuf> {
+        check_cancelled(cancellation)?;
         if self.sources.contains_key(source_id) {
             return Err(TruthSnapshotError::DuplicateSource(source_id.into()));
         }
@@ -159,7 +200,12 @@ impl TruthSnapshotDraft {
             .ok_or_else(|| TruthSnapshotError::UnknownSource(source_id.into()))?;
         let relative_path = PathBuf::from("sources").join(source_id).join("source.bin");
         let destination = self.staging_dir.join(&relative_path);
-        let digest = copy_and_digest(source_path, &destination)?;
+        let digest = match cancellation {
+            Some(cancellation) => {
+                copy_and_digest_cancellable(source_path, &destination, cancellation)?
+            }
+            None => copy_and_digest(source_path, &destination)?,
+        };
         let (kind, version, expected_sha256) = source_identity(declaration);
         if let Some(expected) = expected_sha256
             && !digest.sha256.eq_ignore_ascii_case(expected)
@@ -193,9 +239,27 @@ impl TruthSnapshotDraft {
     }
 
     pub fn finalize(
-        mut self,
+        self,
         tool_versions: BTreeMap<String, String>,
     ) -> TruthSnapshotResult<VerifiedTruthSnapshot> {
+        self.prepare_inner(tool_versions, None)?
+            .activate_inner(None)
+    }
+
+    pub(crate) fn prepare_cancellable(
+        self,
+        tool_versions: BTreeMap<String, String>,
+        cancellation: &CancellationToken,
+    ) -> TruthSnapshotResult<PreparedTruthSnapshot> {
+        self.prepare_inner(tool_versions, Some(cancellation))
+    }
+
+    fn prepare_inner(
+        mut self,
+        tool_versions: BTreeMap<String, String>,
+        cancellation: Option<&CancellationToken>,
+    ) -> TruthSnapshotResult<PreparedTruthSnapshot> {
+        check_cancelled(cancellation)?;
         validate_tool_versions(&tool_versions)?;
         let declared_ids: BTreeSet<&str> = self
             .pack
@@ -213,12 +277,16 @@ impl TruthSnapshotDraft {
         sources.sort_by(|left, right| left.id.cmp(&right.id));
         let mut indexes = Vec::with_capacity(self.pack.truth_sources.len());
         for declaration in &self.pack.truth_sources {
+            check_cancelled(cancellation)?;
             let relative_root = PathBuf::from("indexes").join(&declaration.id);
             let index_root = self.staging_dir.join(&relative_root);
             if !index_root.is_dir() {
                 return Err(TruthSnapshotError::MissingIndex(declaration.id.clone()));
             }
-            let digest = digest_tree(&index_root)?;
+            let digest = match cancellation {
+                Some(cancellation) => digest_tree_cancellable(&index_root, cancellation)?,
+                None => digest_tree(&index_root)?,
+            };
             if digest.cs_file_count == 0 {
                 return Err(TruthSnapshotError::EmptyIndex(declaration.id.clone()));
             }
@@ -264,6 +332,7 @@ impl TruthSnapshotDraft {
         })?;
         manifest_bytes.push(b'\n');
         let manifest_path = self.staging_dir.join(MANIFEST_FILE);
+        check_cancelled(cancellation)?;
         write_atomic_sync(&manifest_path, &manifest_bytes).map_err(|source| {
             TruthSnapshotError::Io {
                 action: "write truth snapshot manifest",
@@ -273,8 +342,10 @@ impl TruthSnapshotDraft {
         })?;
 
         let target = self.store.root.join("snapshots").join(&snapshot_id);
+        check_cancelled(cancellation)?;
         let verified = if target.exists() {
-            let existing = verify_snapshot_root(&self.pack, &target, &snapshot_id, None)?;
+            let existing =
+                verify_snapshot_root(&self.pack, &target, &snapshot_id, None, cancellation)?;
             fs::remove_dir_all(&self.staging_dir).map_err(|source| TruthSnapshotError::Io {
                 action: "remove duplicate truth snapshot draft",
                 path: self.staging_dir.clone(),
@@ -289,8 +360,36 @@ impl TruthSnapshotDraft {
                 source,
             })?;
             self.cleanup_staging = false;
-            verify_snapshot_root(&self.pack, &target, &snapshot_id, None)?
+            verify_snapshot_root(&self.pack, &target, &snapshot_id, None, cancellation)?
         };
+
+        Ok(PreparedTruthSnapshot {
+            store: self.store.clone(),
+            verified,
+        })
+    }
+}
+
+pub(crate) struct PreparedTruthSnapshot {
+    store: TruthSnapshotStore,
+    verified: VerifiedTruthSnapshot,
+}
+
+impl PreparedTruthSnapshot {
+    pub(crate) fn activate_cancellable(
+        self,
+        cancellation: &CancellationToken,
+    ) -> TruthSnapshotResult<VerifiedTruthSnapshot> {
+        self.activate_inner(Some(cancellation))
+    }
+
+    fn activate_inner(
+        self,
+        cancellation: Option<&CancellationToken>,
+    ) -> TruthSnapshotResult<VerifiedTruthSnapshot> {
+        check_cancelled(cancellation)?;
+        let snapshot_id = self.verified.snapshot_id().to_string();
+        let target = self.verified.root();
 
         let stored_manifest =
             fs::read(target.join(MANIFEST_FILE)).map_err(|source| TruthSnapshotError::Io {
@@ -308,6 +407,7 @@ impl TruthSnapshotDraft {
         })?;
         pointer_bytes.push(b'\n');
         let current_path = self.store.root.join(CURRENT_FILE);
+        check_cancelled(cancellation)?;
         write_atomic_sync(&current_path, &pointer_bytes).map_err(|source| {
             TruthSnapshotError::Io {
                 action: "activate current truth snapshot pointer",
@@ -315,7 +415,7 @@ impl TruthSnapshotDraft {
                 source,
             }
         })?;
-        Ok(verified)
+        Ok(self.verified)
     }
 }
 
@@ -340,7 +440,9 @@ fn verify_snapshot_root(
     root: &Path,
     expected_snapshot_id: &str,
     expected_manifest_sha256: Option<&str>,
+    cancellation: Option<&CancellationToken>,
 ) -> TruthSnapshotResult<VerifiedTruthSnapshot> {
+    check_cancelled(cancellation)?;
     let manifest_path = root.join(MANIFEST_FILE);
     let bytes = fs::read(&manifest_path).map_err(|source| TruthSnapshotError::Io {
         action: "read truth snapshot manifest",
@@ -361,7 +463,7 @@ fn verify_snapshot_root(
             message: error.to_string(),
         })?;
     validate_manifest_identity(pack, &manifest, expected_snapshot_id)?;
-    validate_manifest_contents(pack, root, &manifest)?;
+    validate_manifest_contents(pack, root, &manifest, cancellation)?;
     Ok(VerifiedTruthSnapshot::new(root.to_path_buf(), manifest))
 }
 
@@ -414,6 +516,7 @@ fn validate_manifest_contents(
     pack: &LoadedGamePack,
     root: &Path,
     manifest: &TruthSnapshotManifest,
+    cancellation: Option<&CancellationToken>,
 ) -> TruthSnapshotResult<()> {
     if manifest.sources.len() != pack.truth_sources.len()
         || manifest.indexes.len() != pack.truth_sources.len()
@@ -423,6 +526,7 @@ fn validate_manifest_contents(
         ));
     }
     for declaration in &pack.truth_sources {
+        check_cancelled(cancellation)?;
         let source = manifest
             .sources
             .iter()
@@ -430,7 +534,10 @@ fn validate_manifest_contents(
             .ok_or_else(|| TruthSnapshotError::MissingSource(declaration.id.clone()))?;
         validate_source_declaration(declaration, source)?;
         let source_path = resolve_manifest_path(root, &source.relative_path)?;
-        let digest = digest_file(&source_path)?;
+        let digest = match cancellation {
+            Some(cancellation) => digest_file_cancellable(&source_path, cancellation)?,
+            None => digest_file(&source_path)?,
+        };
         if digest.size_bytes != source.size_bytes || digest.sha256 != source.sha256 {
             return Err(TruthSnapshotError::SourceChecksumMismatch {
                 source_id: source.id.clone(),
@@ -451,7 +558,10 @@ fn validate_manifest_contents(
             )));
         }
         let index_root = resolve_manifest_path(root, &index.relative_root)?;
-        let digest = digest_tree(&index_root)?;
+        let digest = match cancellation {
+            Some(cancellation) => digest_tree_cancellable(&index_root, cancellation)?,
+            None => digest_tree(&index_root)?,
+        };
         if digest.file_count != index.file_count
             || digest.cs_file_count != index.cs_file_count
             || digest.total_bytes != index.total_bytes
@@ -596,4 +706,12 @@ fn create_dir_all(path: &Path, action: &'static str) -> TruthSnapshotResult<()> 
         path: path.to_path_buf(),
         source,
     })
+}
+
+fn check_cancelled(cancellation: Option<&CancellationToken>) -> TruthSnapshotResult<()> {
+    if cancellation.is_some_and(CancellationToken::is_cancelled) {
+        Err(TruthSnapshotError::Cancelled)
+    } else {
+        Ok(())
+    }
 }

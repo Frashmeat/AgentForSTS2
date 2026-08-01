@@ -5,16 +5,20 @@
 //!
 //! 设计取向：
 //! - 发现走 PATH + 候选目录数组。`discover_ilspycmd_in` 是纯函数，单测注入假目录即可
-//! - 反编译用 std::process::Command + spawn_blocking，与 build_project handler 同套路
+//! - 反编译使用受控异步子进程；Windows 通过 Job Object 取消整棵进程树
 //! - 不做缓存命中判定（manifest 比较留给上层 handler 决策），本模块只负责"动作"
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use thiserror::Error;
 
+use crate::cancellation::CancellationToken;
+use crate::controlled_process::{ControlledProcessResult, run_controlled_process};
+
 #[derive(Debug, Error)]
 pub enum DecompileError {
+    #[error("ilspycmd operation was cancelled")]
+    Cancelled,
     #[error("ilspycmd not found: searched PATH and {searched_count} candidate dirs")]
     NotFound { searched_count: usize },
     #[error("source dll not found: {0}")]
@@ -94,23 +98,35 @@ pub fn default_dotnet_tools_dirs() -> Vec<PathBuf> {
 ///
 /// # Errors
 /// - `DllMissing` / `OutputCreate` / `Spawn` / `ProcessFailed` / `EmptyOutput` / `Walk`
-pub fn run_decompile_project(
+pub async fn run_decompile_project(
     ilspycmd: &Path,
     dll: &Path,
     output_dir: &Path,
+    cancellation: &CancellationToken,
 ) -> Result<DecompileStats, DecompileError> {
+    if cancellation.is_cancelled() {
+        return Err(DecompileError::Cancelled);
+    }
     if !dll.is_file() {
         return Err(DecompileError::DllMissing(dll.to_path_buf()));
     }
-    std::fs::create_dir_all(output_dir).map_err(|e| DecompileError::OutputCreate(e.to_string()))?;
-
-    let output = Command::new(ilspycmd)
-        .arg(dll)
-        .arg("-o")
-        .arg(output_dir)
-        .arg("-p")
-        .output()
-        .map_err(|e| DecompileError::Spawn(e.to_string()))?;
+    tokio::fs::create_dir_all(output_dir)
+        .await
+        .map_err(|error| DecompileError::OutputCreate(error.to_string()))?;
+    let args = [
+        dll.as_os_str().to_owned(),
+        "-o".into(),
+        output_dir.as_os_str().to_owned(),
+        "-p".into(),
+    ];
+    let cwd = dll.parent().unwrap_or_else(|| Path::new("."));
+    let output = match run_controlled_process(ilspycmd.as_os_str(), &args, cwd, cancellation)
+        .await
+        .map_err(|error| DecompileError::Spawn(error.to_string()))?
+    {
+        ControlledProcessResult::Completed(output) => output,
+        ControlledProcessResult::Cancelled(_) => return Err(DecompileError::Cancelled),
+    };
 
     let stdout_tail = tail_lossy(&output.stdout, 4000);
     let stderr_tail = tail_lossy(&output.stderr, 4000);
@@ -123,8 +139,7 @@ pub fn run_decompile_project(
         });
     }
 
-    let (cs_file_count, total_bytes) =
-        count_cs_files(output_dir).map_err(|e| DecompileError::Walk(e.to_string()))?;
+    let (cs_file_count, total_bytes) = count_cs_files_async(output_dir, cancellation).await?;
     if cs_file_count == 0 {
         return Err(DecompileError::EmptyOutput);
     }
@@ -147,24 +162,36 @@ pub fn run_decompile_project(
 /// - `Spawn`：进程启动失败
 /// - `ProcessFailed`：进程退出码非 0
 /// - `EmptyOutput`：输出文件不存在或 0 字节
-pub fn run_decompile_file(
+pub async fn run_decompile_file(
     ilspycmd: &Path,
     dll: &Path,
     output_file: &Path,
+    cancellation: &CancellationToken,
 ) -> Result<DecompileStats, DecompileError> {
+    if cancellation.is_cancelled() {
+        return Err(DecompileError::Cancelled);
+    }
     if !dll.is_file() {
         return Err(DecompileError::DllMissing(dll.to_path_buf()));
     }
     if let Some(parent) = output_file.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| DecompileError::OutputCreate(e.to_string()))?;
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|error| DecompileError::OutputCreate(error.to_string()))?;
     }
-
-    let output = Command::new(ilspycmd)
-        .arg(dll)
-        .arg("-o")
-        .arg(output_file)
-        .output()
-        .map_err(|e| DecompileError::Spawn(e.to_string()))?;
+    let args = [
+        dll.as_os_str().to_owned(),
+        "-o".into(),
+        output_file.as_os_str().to_owned(),
+    ];
+    let cwd = dll.parent().unwrap_or_else(|| Path::new("."));
+    let output = match run_controlled_process(ilspycmd.as_os_str(), &args, cwd, cancellation)
+        .await
+        .map_err(|error| DecompileError::Spawn(error.to_string()))?
+    {
+        ControlledProcessResult::Completed(output) => output,
+        ControlledProcessResult::Cancelled(_) => return Err(DecompileError::Cancelled),
+    };
 
     let stdout_tail = tail_lossy(&output.stdout, 4000);
     let stderr_tail = tail_lossy(&output.stderr, 4000);
@@ -178,8 +205,7 @@ pub fn run_decompile_file(
     }
 
     if output_file.is_dir() {
-        let (count, bytes) =
-            count_cs_files(output_file).map_err(|e| DecompileError::Walk(e.to_string()))?;
+        let (count, bytes) = count_cs_files_async(output_file, cancellation).await?;
         if count == 0 {
             return Err(DecompileError::EmptyOutput);
         }
@@ -192,7 +218,12 @@ pub fn run_decompile_file(
         });
     }
 
-    let meta = std::fs::metadata(output_file).map_err(|e| DecompileError::Walk(e.to_string()))?;
+    if cancellation.is_cancelled() {
+        return Err(DecompileError::Cancelled);
+    }
+    let meta = tokio::fs::metadata(output_file)
+        .await
+        .map_err(|error| DecompileError::Walk(error.to_string()))?;
     if meta.len() == 0 {
         return Err(DecompileError::EmptyOutput);
     }
@@ -224,11 +255,36 @@ fn tail_lossy(bytes: &[u8], max_chars: usize) -> String {
     format!("...[truncated {skip} chars]\n{tail}")
 }
 
+#[cfg(test)]
 fn count_cs_files(dir: &Path) -> std::io::Result<(u32, u64)> {
+    count_cs_files_inner(dir, None).map_err(|error| match error {
+        DecompileError::Walk(message) => std::io::Error::other(message),
+        other => std::io::Error::other(other.to_string()),
+    })
+}
+
+async fn count_cs_files_async(
+    dir: &Path,
+    cancellation: &CancellationToken,
+) -> Result<(u32, u64), DecompileError> {
+    let dir = dir.to_path_buf();
+    let cancellation = cancellation.clone();
+    tokio::task::spawn_blocking(move || count_cs_files_inner(&dir, Some(&cancellation)))
+        .await
+        .map_err(|error| DecompileError::Walk(format!("count output task failed: {error}")))?
+}
+
+fn count_cs_files_inner(
+    dir: &Path,
+    cancellation: Option<&CancellationToken>,
+) -> Result<(u32, u64), DecompileError> {
     let mut count: u32 = 0;
     let mut bytes: u64 = 0;
     let walker = walkdir::WalkDir::new(dir);
     for entry in walker.into_iter().filter_map(Result::ok) {
+        if cancellation.is_some_and(CancellationToken::is_cancelled) {
+            return Err(DecompileError::Cancelled);
+        }
         let p = entry.path();
         if p.is_file() && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("cs")) {
             count += 1;
@@ -272,50 +328,62 @@ mod tests {
         assert!(discover_ilspycmd_in(&dirs).is_none());
     }
 
-    #[test]
-    fn run_decompile_project_errors_when_dll_missing() {
+    #[tokio::test]
+    async fn run_decompile_project_errors_when_dll_missing() {
         let td = tempfile::TempDir::new().unwrap();
         let fake_dll = td.path().join("nope.dll");
         let out = td.path().join("out");
-        let result = run_decompile_project(Path::new("/usr/bin/true"), &fake_dll, &out);
+        let result = run_decompile_project(
+            Path::new("/usr/bin/true"),
+            &fake_dll,
+            &out,
+            &CancellationToken::new(),
+        )
+        .await;
         match result {
             Err(DecompileError::DllMissing(p)) => assert_eq!(p, fake_dll),
             other => panic!("expected DllMissing, got {other:?}"),
         }
     }
 
-    #[test]
-    fn run_decompile_project_errors_when_ilspycmd_path_invalid() {
+    #[tokio::test]
+    async fn run_decompile_project_errors_when_ilspycmd_path_invalid() {
         let td = tempfile::TempDir::new().unwrap();
         let dll = td.path().join("fake.dll");
         fs::write(&dll, b"mz...").unwrap();
         let out = td.path().join("out");
 
         let bogus = td.path().join("does-not-exist-binary");
-        let result = run_decompile_project(&bogus, &dll, &out);
+        let result = run_decompile_project(&bogus, &dll, &out, &CancellationToken::new()).await;
         match result {
             Err(DecompileError::Spawn(msg)) => assert!(!msg.is_empty()),
             other => panic!("expected Spawn error, got {other:?}"),
         }
     }
 
-    #[test]
-    fn run_decompile_file_errors_when_dll_missing() {
+    #[tokio::test]
+    async fn run_decompile_file_errors_when_dll_missing() {
         let td = tempfile::TempDir::new().unwrap();
         let fake_dll = td.path().join("nope.dll");
         let out = td.path().join("out.cs");
-        let result = run_decompile_file(Path::new("/usr/bin/true"), &fake_dll, &out);
+        let result = run_decompile_file(
+            Path::new("/usr/bin/true"),
+            &fake_dll,
+            &out,
+            &CancellationToken::new(),
+        )
+        .await;
         assert!(matches!(result, Err(DecompileError::DllMissing(_))));
     }
 
-    #[test]
-    fn run_decompile_file_errors_when_ilspycmd_invalid() {
+    #[tokio::test]
+    async fn run_decompile_file_errors_when_ilspycmd_invalid() {
         let td = tempfile::TempDir::new().unwrap();
         let dll = td.path().join("fake.dll");
         fs::write(&dll, b"mz").unwrap();
         let out = td.path().join("out.cs");
         let bogus = td.path().join("nonexistent-cmd");
-        let result = run_decompile_file(&bogus, &dll, &out);
+        let result = run_decompile_file(&bogus, &dll, &out, &CancellationToken::new()).await;
         assert!(matches!(result, Err(DecompileError::Spawn(_))));
     }
 
