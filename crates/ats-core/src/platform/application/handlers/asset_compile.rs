@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 
 use super::build_project::tail;
+use crate::controlled_process::{ControlledProcessResult, run_controlled_process};
+use crate::platform::application::CancellationToken;
 use crate::platform::domain::RunId;
 use crate::project_utils::to_extended_length_path;
 
@@ -19,6 +21,7 @@ pub(crate) trait AssetCompileValidator: Send + Sync {
         &self,
         project_root: &Path,
         run_id: &RunId,
+        cancellation: &CancellationToken,
     ) -> Result<CompileValidation, String>;
 }
 
@@ -31,6 +34,7 @@ impl AssetCompileValidator for DotnetAssetCompileValidator {
         &self,
         project_root: &Path,
         run_id: &RunId,
+        cancellation: &CancellationToken,
     ) -> Result<CompileValidation, String> {
         let mods_path = isolated_mods_path(project_root, run_id);
         tokio::fs::create_dir_all(&mods_path)
@@ -42,21 +46,19 @@ impl AssetCompileValidator for DotnetAssetCompileValidator {
             "-p:ModsPath={}",
             with_trailing_separator(&msbuild_property_path(&mods_path))
         );
-        let output_result = tokio::task::spawn_blocking(move || {
-            std::process::Command::new("dotnet")
-                .arg("build")
-                .arg("--nologo")
-                .arg(mods_arg)
-                .current_dir(cwd)
-                .output()
-        })
-        .await;
+        let args = vec![
+            std::ffi::OsString::from("build"),
+            std::ffi::OsString::from("--nologo"),
+            std::ffi::OsString::from(mods_arg),
+        ];
+        let output_result =
+            run_controlled_process(std::ffi::OsStr::new("dotnet"), &args, &cwd, cancellation).await;
 
         let cleanup_result = tokio::fs::remove_dir_all(&mods_path).await;
         let output = match output_result {
-            Ok(Ok(output)) => output,
-            Ok(Err(err)) => return Err(format!("spawn dotnet compile gate: {err}")),
-            Err(err) => return Err(format!("join dotnet compile gate: {err}")),
+            Ok(ControlledProcessResult::Completed(output)) => output,
+            Ok(ControlledProcessResult::Cancelled(_)) => return Err("compile cancelled".into()),
+            Err(err) => return Err(format!("spawn dotnet compile gate: {err}")),
         };
         if let Err(err) = cleanup_result
             && mods_path.exists()

@@ -11,13 +11,15 @@ use super::asset_bundle::{
 };
 use super::asset_compile::AssetCompileValidator;
 use super::common::{
-    FinalizeOutcome, ProgressEvent, ProgressSink, emit_cancelled_mid_stream, finalize_with_failure,
-    finalize_with_success, is_cancelled, transition_to_running,
+    FinalizeOutcome, ProgressEvent, ProgressSink, emit_cancelled_mid_stream,
+    finalize_with_cancellation, finalize_with_failure, finalize_with_success,
+    transition_to_running,
 };
 use crate::codegen::{GenerationEvidence, PromptAssembler};
 use crate::failure::{ActionableFailure, FailureDiagnostic, FailureNormalizer};
 use crate::game_pack::{ValidationRule, VerifiedGameContext};
 use crate::llm::{CompletionRequest, LlmClient, LlmError, Message, MessageRole, StreamEvent};
+use crate::platform::application::CancellationToken;
 use crate::platform::artifact::{
     ArtifactFileInput, ArtifactGameContext, ArtifactGeneration, ArtifactPublishRequest,
     ArtifactStore, LegacyArtifactCleanup, sha256_bytes, snapshot_evidence,
@@ -36,8 +38,12 @@ pub(crate) async fn run_code_generate(
     game_context: VerifiedGameContext,
     artifacts_dir: PathBuf,
     compile_validator: Arc<dyn AssetCompileValidator>,
+    cancellation: CancellationToken,
 ) {
-    if transition_to_running(&repo, &run_id, &sink).await.is_err() {
+    if !matches!(
+        transition_to_running(&repo, &run_id, &sink, &cancellation).await,
+        Ok(true)
+    ) {
         return;
     }
 
@@ -102,16 +108,22 @@ pub(crate) async fn run_code_generate(
             request: asset_request,
         } => {
             let generator = AssetBundleGeneration::new(
-                Arc::clone(&repo),
                 Arc::clone(&llm),
                 compile_validator,
                 Arc::clone(&sink),
+                cancellation.clone(),
             );
             let mut artifact = match generator
                 .generate(&run_id, prompt, game_context.pack(), asset_request, None)
                 .await
             {
                 Ok(artifact) => artifact,
+                Err(AssetBundleError::Cancelled) => {
+                    if let Some(reason) = cancellation.reason() {
+                        finalize_with_cancellation(&repo, &run_id, &sink, reason).await;
+                    }
+                    return;
+                }
                 Err(err) => {
                     finalize_asset_bundle_error(&repo, &run_id, &sink, err, None).await;
                     return;
@@ -166,6 +178,13 @@ pub(crate) async fn run_code_generate(
                 }
             };
             let result = published.result.clone();
+            if let Some(reason) = cancellation.reason() {
+                let artifact_rollback = published.rollback().await;
+                let file_rollback = artifact.rollback_writes().await;
+                let _ = (artifact_rollback, file_rollback);
+                finalize_with_cancellation(&repo, &run_id, &sink, reason).await;
+                return;
+            }
             if !matches!(
                 finalize_with_success(&repo, &run_id, result.clone()).await,
                 FinalizeOutcome::Succeeded
@@ -182,7 +201,6 @@ pub(crate) async fn run_code_generate(
         SubmitCodeGenerateRequest::CustomCode { .. } => {
             let entity_name = code_generate_entity_name(&request);
             let mut artifact = match generate_and_write_code_artifact(
-                Arc::clone(&repo),
                 Arc::clone(&llm),
                 Arc::clone(&sink),
                 &run_id,
@@ -190,6 +208,7 @@ pub(crate) async fn run_code_generate(
                 &entity_name,
                 &artifacts_dir,
                 &game_context.pack().validation_rules,
+                &cancellation,
             )
             .await
             {
@@ -227,7 +246,12 @@ pub(crate) async fn run_code_generate(
                     .await;
                     return;
                 }
-                Err(GenerateError::Cancelled) => return,
+                Err(GenerateError::Cancelled) => {
+                    if let Some(reason) = cancellation.reason() {
+                        finalize_with_cancellation(&repo, &run_id, &sink, reason).await;
+                    }
+                    return;
+                }
             };
             let output_path = artifact.cs_path.clone();
             let published = match publish_generated_artifact(
@@ -263,6 +287,13 @@ pub(crate) async fn run_code_generate(
                 }
             };
             let result = published.result.clone();
+            if let Some(reason) = cancellation.reason() {
+                let artifact_rollback = published.rollback().await;
+                let file_rollback = artifact.rollback_writes().await;
+                let _ = (artifact_rollback, file_rollback);
+                finalize_with_cancellation(&repo, &run_id, &sink, reason).await;
+                return;
+            }
             if !matches!(
                 finalize_with_success(&repo, &run_id, result.clone()).await,
                 FinalizeOutcome::Succeeded
@@ -556,7 +587,6 @@ pub(crate) fn validate_generated_code_skein(
 /// 中途轮询 repo 状态：若 run 被 cancel 则立即返回 `GenerateError::Cancelled`，
 /// 让 reqwest stream 被 drop（实际断开网络）。
 pub(crate) async fn generate_and_write_code_artifact(
-    repo: Arc<dyn RunRepository>,
     llm: Arc<dyn LlmClient>,
     sink: Arc<dyn ProgressSink>,
     run_id: &RunId,
@@ -564,6 +594,7 @@ pub(crate) async fn generate_and_write_code_artifact(
     entity_name: &str,
     artifacts_dir: &Path,
     validation_rules: &[ValidationRule],
+    cancellation: &CancellationToken,
 ) -> Result<WrittenArtifact, GenerateError> {
     let completion_request = CompletionRequest {
         messages: vec![Message {
@@ -576,22 +607,26 @@ pub(crate) async fn generate_and_write_code_artifact(
         model: None,
     };
 
-    let mut stream = llm
-        .stream(completion_request)
-        .await
-        .map_err(GenerateError::Stream)?;
+    let stream_result = tokio::select! {
+        _ = cancellation.cancelled() => return Err(GenerateError::Cancelled),
+        result = llm.stream(completion_request) => result,
+    };
+    let mut stream = stream_result.map_err(GenerateError::Stream)?;
 
     let mut accumulated = String::new();
     let mut model = String::new();
     let mut usage_in: u32 = 0;
     let mut usage_out: u32 = 0;
-    let mut tick: u32 = 0;
-    while let Some(item) = stream.next().await {
-        tick = tick.wrapping_add(1);
-        if tick.is_multiple_of(5) && is_cancelled(&repo, run_id).await {
-            emit_cancelled_mid_stream(&sink, run_id).await;
-            return Err(GenerateError::Cancelled);
-        }
+    loop {
+        let item = tokio::select! {
+            _ = cancellation.cancelled() => {
+                drop(stream);
+                emit_cancelled_mid_stream(&sink, run_id).await;
+                return Err(GenerateError::Cancelled);
+            }
+            item = stream.next() => item,
+        };
+        let Some(item) = item else { break };
         match item {
             Ok(StreamEvent::Start { model: m }) => {
                 model = m;
@@ -627,6 +662,10 @@ pub(crate) async fn generate_and_write_code_artifact(
         ProjectFileTransaction::write_one(cs_path.clone(), extracted.as_bytes().to_vec())
             .await
             .map_err(|_| GenerateError::Write)?;
+    if cancellation.is_cancelled() {
+        let _ = transaction.rollback().await;
+        return Err(GenerateError::Cancelled);
+    }
 
     Ok(WrittenArtifact {
         model,

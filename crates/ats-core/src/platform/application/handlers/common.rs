@@ -5,9 +5,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+use crate::platform::application::CancellationToken;
 use crate::platform::domain::{
-    ActionableFailure, RunId, RunProgress, RunRepository, RunRepositoryResult, RunResult,
-    RunStatus, RunTransition,
+    ActionableFailure, CancellationReason, RunId, RunProgress, RunRepository, RunRepositoryResult,
+    RunResult, RunStatus, RunTransition,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,8 +37,17 @@ pub async fn transition_to_running(
     repo: &Arc<dyn RunRepository>,
     id: &RunId,
     sink: &Arc<dyn ProgressSink>,
-) -> RunRepositoryResult<()> {
+    cancellation: &CancellationToken,
+) -> RunRepositoryResult<bool> {
+    if let Some(reason) = cancellation.reason() {
+        finalize_with_cancellation(repo, id, sink, reason).await;
+        return Ok(false);
+    }
     repo.transition(id, RunTransition::Start).await?;
+    if let Some(reason) = cancellation.reason() {
+        finalize_with_cancellation(repo, id, sink, reason).await;
+        return Ok(false);
+    }
     repo.update_progress(
         id,
         RunProgress {
@@ -55,7 +65,36 @@ pub async fn transition_to_running(
         delta: None,
     })
     .await;
-    Ok(())
+    Ok(true)
+}
+
+pub async fn finalize_with_cancellation(
+    repo: &Arc<dyn RunRepository>,
+    id: &RunId,
+    sink: &Arc<dyn ProgressSink>,
+    reason: CancellationReason,
+) {
+    if repo
+        .transition(id, RunTransition::Cancel { reason })
+        .await
+        .is_ok()
+    {
+        emit_cancelled_mid_stream(sink, id).await;
+    }
+}
+
+pub async fn finalize_if_cancelled(
+    repo: &Arc<dyn RunRepository>,
+    id: &RunId,
+    sink: &Arc<dyn ProgressSink>,
+    cancellation: &CancellationToken,
+) -> bool {
+    if let Some(reason) = cancellation.reason() {
+        finalize_with_cancellation(repo, id, sink, reason).await;
+        true
+    } else {
+        false
+    }
 }
 
 pub async fn finalize_with_failure(
@@ -188,10 +227,38 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(transition_to_running(&repo, &run.id, &sink).await.is_err());
+        assert!(
+            transition_to_running(&repo, &run.id, &sink, &CancellationToken::new())
+                .await
+                .is_err()
+        );
         assert_eq!(
             repo.get(&run.id).await.unwrap().status,
             RunStatus::Cancelled
+        );
+    }
+
+    #[tokio::test]
+    async fn cancellation_before_start_never_enters_running() {
+        let td = tempfile::TempDir::new().unwrap();
+        let repo = repo(&td);
+        let sink: Arc<dyn ProgressSink> = Arc::new(NoopProgressSink);
+        let run = RunRecord::new(RunKind::TextGenerate, serde_json::json!({}));
+        repo.create(&run).await.unwrap();
+        let cancellation = CancellationToken::new();
+        cancellation.cancel(CancellationReason::ProjectClose);
+
+        assert!(
+            !transition_to_running(&repo, &run.id, &sink, &cancellation)
+                .await
+                .unwrap()
+        );
+        let run = repo.get(&run.id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Cancelled);
+        assert!(run.started_at.is_none());
+        assert_eq!(
+            run.timeline.last().unwrap().cancellation_reason,
+            Some(CancellationReason::ProjectClose)
         );
     }
 }

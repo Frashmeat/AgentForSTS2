@@ -14,7 +14,7 @@ use tauri::State;
 use crate::AppConfig;
 use crate::commands::failure::CommandResult;
 use crate::commands::image_proc_state::{ImageProcState, PrewarmStatus};
-use crate::commands::project::ActiveProject;
+use crate::project_session::ActiveProject;
 
 #[tauri::command]
 pub async fn get_health(
@@ -22,16 +22,11 @@ pub async fn get_health(
     active: State<'_, ActiveProject>,
     image_proc: State<'_, Arc<ImageProcState>>,
 ) -> CommandResult<HealthReport> {
-    let (active_open, game_id) = active
-        .0
-        .lock()
-        .map(|guard| {
-            (
-                guard.is_some(),
-                guard.as_ref().map(|project| project.meta().game_id.clone()),
-            )
-        })
-        .unwrap_or((false, None));
+    let current = active.current().unwrap_or(None);
+    let active_open = current.is_some();
+    let game_id = current
+        .as_ref()
+        .map(|session| session.meta().game_id.clone());
     let image_proc_ready = matches!(image_proc.status_snapshot(), PrewarmStatus::Ready { .. });
     let status = config.status_snapshot();
     let (settings, _) = config.snapshot();

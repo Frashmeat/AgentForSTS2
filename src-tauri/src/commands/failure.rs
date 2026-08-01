@@ -2,7 +2,9 @@
 
 use std::io;
 
-use ats_core::failure::{ActionableFailure, FailureCategory, FailureNormalizer, RecoveryAction};
+use ats_core::failure::{
+    ActionableFailure, FailureCategory, FailureContext, FailureNormalizer, RecoveryAction,
+};
 use ats_core::image_gen::ImageGenError;
 use ats_core::llm::LlmError;
 use ats_core::platform::domain::RunError;
@@ -51,6 +53,34 @@ impl CommandFailure {
 
     pub fn project_not_open(stage: &'static str) -> Self {
         FailureNormalizer::project_not_open(stage).into()
+    }
+
+    pub fn project_closing(stage: &'static str) -> Self {
+        ActionableFailure::new(
+            "project.closing",
+            FailureCategory::State,
+            stage,
+            "The active project is closing. Wait for its runs to stop.",
+            RecoveryAction::None,
+            false,
+        )
+        .into()
+    }
+
+    pub fn project_close_timeout(stage: &'static str, blocked_run: Option<&str>) -> Self {
+        ActionableFailure::new(
+            "project.close_timeout",
+            FailureCategory::State,
+            stage,
+            "The project could not close because a run is still stopping.",
+            RecoveryAction::Retry,
+            true,
+        )
+        .with_context(FailureContext {
+            run_id: blocked_run.map(ToOwned::to_owned),
+            ..FailureContext::default()
+        })
+        .into()
     }
 
     pub fn run(stage: &'static str, error: &RunError) -> Self {

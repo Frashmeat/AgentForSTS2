@@ -7,8 +7,10 @@
 //! 后续 stage 引入 Handler trait 注册表后会再做一次切分，当前形状保留对 service
 //! 直接依赖以减小改动面。
 
+mod cancellation;
 pub mod handlers;
 mod run_application_service;
 
+pub use cancellation::{CancellationToken, SpawnedRun};
 pub use handlers::{NoopProgressSink, ProgressEvent, ProgressSink};
 pub use run_application_service::RunApplicationService;

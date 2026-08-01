@@ -11,11 +11,13 @@ use std::sync::Arc;
 use futures_util::StreamExt;
 
 use super::common::{
-    FinalizeOutcome, ProgressEvent, ProgressSink, emit_cancelled_mid_stream, finalize_with_failure,
-    finalize_with_success, is_cancelled, transition_to_running,
+    FinalizeOutcome, ProgressEvent, ProgressSink, finalize_if_cancelled,
+    finalize_with_cancellation, finalize_with_failure, finalize_with_success,
+    transition_to_running,
 };
 use crate::failure::{ActionableFailure, FailureNormalizer};
 use crate::llm::{CompletionRequest, LlmClient, Message, MessageRole, StreamEvent};
+use crate::platform::application::CancellationToken;
 use crate::platform::contracts::SubmitLogAnalysisRequest;
 use crate::platform::domain::{RunId, RunRepository, RunResult, TokenUsage};
 
@@ -35,8 +37,12 @@ pub async fn run_log_analysis(
     sink: Arc<dyn ProgressSink>,
     run_id: RunId,
     request: SubmitLogAnalysisRequest,
+    cancellation: CancellationToken,
 ) {
-    if transition_to_running(&repo, &run_id, &sink).await.is_err() {
+    if !matches!(
+        transition_to_running(&repo, &run_id, &sink, &cancellation).await,
+        Ok(true)
+    ) {
         return;
     }
 
@@ -115,7 +121,14 @@ pub async fn run_log_analysis(
         model: None,
     };
 
-    let mut stream = match llm.stream(completion_request).await {
+    let stream_result = tokio::select! {
+        reason = cancellation.cancelled() => {
+            finalize_with_cancellation(&repo, &run_id, &sink, reason).await;
+            return;
+        }
+        result = llm.stream(completion_request) => result,
+    };
+    let mut stream = match stream_result {
         Ok(s) => s,
         Err(err) => {
             finalize_with_failure(
@@ -133,13 +146,16 @@ pub async fn run_log_analysis(
     let mut model = String::new();
     let mut usage_in: u32 = 0;
     let mut usage_out: u32 = 0;
-    let mut tick: u32 = 0;
-    while let Some(item) = stream.next().await {
-        tick = tick.wrapping_add(1);
-        if tick.is_multiple_of(5) && is_cancelled(&repo, &run_id).await {
-            emit_cancelled_mid_stream(&sink, &run_id).await;
-            return;
-        }
+    loop {
+        let item = tokio::select! {
+            reason = cancellation.cancelled() => {
+                drop(stream);
+                finalize_with_cancellation(&repo, &run_id, &sink, reason).await;
+                return;
+            }
+            item = stream.next() => item,
+        };
+        let Some(item) = item else { break };
         match item {
             Ok(StreamEvent::Start { model: m }) => {
                 model = m;
@@ -183,6 +199,9 @@ pub async fn run_log_analysis(
             output_tokens: usage_out,
         },
     };
+    if finalize_if_cancelled(&repo, &run_id, &sink, &cancellation).await {
+        return;
+    }
     if !matches!(
         finalize_with_success(&repo, &run_id, result).await,
         FinalizeOutcome::Succeeded

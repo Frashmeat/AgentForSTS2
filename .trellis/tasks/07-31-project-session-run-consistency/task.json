@@ -3,7 +3,7 @@
   "name": "project-session-run-consistency",
   "title": "ProjectSession 与 Run 并发正确性",
   "description": "执行桌面后端运行时加固 Work Order 3：建立 ProjectSession、共享 RunRepository、cancel-and-drain、child process 取消等待和崩溃 reconciliation。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": "backend",
   "scope": "ats-core+desktop",
   "priority": "P0",
@@ -14,7 +14,7 @@
   "branch": null,
   "base_branch": "rust",
   "worktree_path": null,
-  "current_phase": 0,
+  "current_phase": 1,
   "next_action": [
     {
       "phase": 1,

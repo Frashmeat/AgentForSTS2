@@ -10,7 +10,7 @@ use tauri::State;
 use crate::AppConfig;
 use crate::commands::failure::{CommandFailure, CommandResult};
 use crate::commands::platform::active_game_context;
-use crate::commands::project::ActiveProject;
+use crate::project_session::ActiveProject;
 
 fn assemble<F>(
     config: &State<'_, AppConfig>,

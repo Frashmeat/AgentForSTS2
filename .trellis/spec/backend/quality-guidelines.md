@@ -834,3 +834,88 @@ Assertions must cover explicit file/checksum loading, scenario selection, no per
 Wrong: embed one global template, copy the same image/resource bytes to every role, recurse over an output directory, or branch on `game_id == "sts2"` inside generic handlers.
 
 Correct: load a validated Pack, select declared content, execute only finite Core algorithms/runners, record Pack identity in Runs, and package only the declared regular files.
+
+## Scenario: ProjectSession Ownership And Run Drain
+
+### 1. Scope / Trigger
+
+This contract applies to every desktop Run that reads or writes the active project, and to project close, project switch, application exit, cancellation, child-process execution, and crash reconciliation. Global ML prewarm is excluded because it does not access an active project.
+
+### 2. Signatures
+
+```rust
+CancellationToken::{cancel, reason, is_cancelled, cancelled}
+
+RunApplicationService::submit_*(...)
+    -> RunRepositoryResult<SpawnedRun>
+
+ProjectSession::open(project: ProjectFolder)
+    -> RunRepositoryResult<Arc<ProjectSession>>
+
+ProjectSession::submit(submission)
+    -> Result<RunId, SubmitError>
+
+ProjectSession::cancel_and_drain(reason, timeout)
+    -> Result<(), DrainTimeout>
+
+FileRunRepository::reconcile_interrupted()
+    -> RunRepositoryResult<Vec<RunId>>
+```
+
+`SpawnedRun` contains the `run_id`, its `CancellationToken`, and the handler `JoinHandle<()>`. Desktop commands never detach or discard this handle.
+
+### 3. Contracts
+
+- `ActiveProject` owns one `Arc<ProjectSession>` and serializes create/open/close/switch through one async lifecycle mutex. A command takes an `Arc` snapshot and never holds the active-project lock across an `await`.
+- One `ProjectSession` owns the `ProjectFolder` OS lock, one shared `Arc<FileRunRepository>`, an immutable project snapshot, the session state, and every active Run task.
+- Submission checks the `open` gate and registers the spawned task while holding the same task-scope mutex. Entering `closing` cannot leave a created Pending Run outside the registry.
+- The first cancellation reason wins. User cancel, project close, project switch, and application shutdown publish a reason through the token; handlers stop network/file/process work, complete rollback and cleanup, then attempt the sole terminal repository CAS.
+- `close_project`, project switch, and application exit use the same cancel-and-drain protocol. They reject new submissions, cancel every registered task, and wait at most 30 seconds. The project OS lock is released only after every handler has exited.
+- A drain timeout preserves the `closing` session, task handles, and OS lock. It reports `project.close_timeout` with at most the first bounded blocking `runId`; there is no force-unlock path.
+- `FileRunRepository::reconcile_interrupted` runs before a newly opened session is exposed. It converts legacy Pending/Running records to `failed + run.interrupted` through the same CAS and appends exactly one interrupted terminal event. Pending interruption does not invent `startedAt`.
+- On Windows, `dotnet` and `ilspycmd` use `process-wrap` Tokio `JobObject + KillOnDrop`; cancellation kills and waits for the entire Job before the task is drained. Blocking work receives a token and checks it at bounded rollback-safe boundaries; aborting a `spawn_blocking` handle is not proof that work stopped.
+- A task supervisor converts a handler panic or a handler return without a terminal state into a failed Run. If another terminal CAS already won, the supervisor preserves it.
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| Submit while session is open | Create, register, and return one Run ID |
+| Submit races with closing | Either register before closing or reject with `project.closing`; never leave an unregistered Pending Run |
+| User cancels an active Run | Stop and clean up first, then persist `cancelled` with no failure/result and reason `user` |
+| Close/switch/shutdown drains in time | All project tasks exit, then the OS lock is released |
+| Drain exceeds 30 seconds | Return `project.close_timeout`; keep session closing, handles, and OS lock |
+| Cancel races with success/failure | Exactly one terminal CAS and one terminal timeline event win |
+| Child-process kill/wait fails or stalls | Do not claim drain success; retain the project lock until timeout/retry |
+| Open finds Pending/Running records | Mark each once as `failed + run.interrupted` before exposing the session |
+| Global ML prewarm is active | Do not register or wait for it during project close |
+
+### 5. Good / Base / Bad Cases
+
+- Good: close cancels an LLM stream, ZIP writer, and process tree; each rolls back and exits before a second `ProjectFolder::open` can acquire the lock.
+- Base: close with no project Run drains immediately. A retry after a previous timeout can finish remaining tasks and then release the lock.
+- Bad: a controlled handler ignores cancellation; close times out, a second opener still receives `ProjectError::Locked`, and new submissions receive `project.closing`.
+- Bad: cancellation and successful publication cross the same barrier; the persisted Run contains one terminal status/event and any losing artifact publication is rolled back.
+
+### 6. Tests Required
+
+```text
+cargo test -p ats-core cancellation::tests --no-default-features
+cargo test -p ats-core reconciliation_interrupts_pending_and_running_once --no-default-features
+cargo test -p ats-core pending_run_can_be_reconciled_as_interrupted_without_faking_a_start --no-default-features
+cargo test -p ats-core platform::application::handlers::text_generate::tests --no-default-features
+cargo test -p ats-core platform::application::handlers::package_project::tests --no-default-features
+cargo test -p ats-core game_pack::truth_snapshot::refresh::tests --no-default-features
+cargo test -p agentthespire-desktop project_session::tests --no-default-features
+cargo test -p agentthespire-desktop commands::project::tests --no-default-features
+cargo check -p ats-core --no-default-features
+cargo check -p agentthespire-desktop --no-default-features
+```
+
+Assertions must cover first-reason-wins, stalled-stream cancellation, partial ZIP removal, process-tree kill-and-wait, Truth Snapshot non-activation after cancellation, submit/close barrier behavior, lock retention on timeout, lock release after a successful drain, exit-hook re-entry, and terminal CAS uniqueness.
+
+### 7. Wrong vs Correct
+
+Wrong: recreate a repository per command, drop `JoinHandle`s, write `cancelled` immediately, abort blocking work, or release the project lock while a handler or child process can still write.
+
+Correct: keep one repository and task registry in `ProjectSession`, publish cancellation through tokens, wait for real cleanup, persist one terminal CAS, and release the OS lock only after a successful drain.

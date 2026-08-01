@@ -361,21 +361,31 @@ async fn cancel_pending_run_marks_cancelled() {
 
     let td = tempfile::TempDir::new().unwrap();
     let repo = make_repo(&td);
-    let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
-        events: Mutex::new(vec![]),
-    });
-    let service = RunApplicationService::new(Arc::clone(&repo), llm);
-
     let run = RunRecord::new(RunKind::TextGenerate, serde_json::json!({}));
     repo.create(&run).await.unwrap();
     let id = run.id.clone();
 
-    service.cancel(&id).await.unwrap();
-    let reloaded = service.get(&id).await.unwrap();
+    repo.transition(
+        &id,
+        ats_core::platform::domain::RunTransition::Cancel {
+            reason: ats_core::platform::domain::CancellationReason::User,
+        },
+    )
+    .await
+    .unwrap();
+    let reloaded = repo.get(&id).await.unwrap();
     assert_eq!(reloaded.status, RunStatus::Cancelled);
 
     // 二次 cancel 应该报 Terminal（已经是终态）
-    let err = service.cancel(&id).await.unwrap_err();
+    let err = repo
+        .transition(
+            &id,
+            ats_core::platform::domain::RunTransition::Cancel {
+                reason: ats_core::platform::domain::CancellationReason::User,
+            },
+        )
+        .await
+        .unwrap_err();
     assert!(err.to_string().to_lowercase().contains("terminal"));
 }
 

@@ -372,7 +372,9 @@ impl RunRecord {
                 self.result = None;
                 self.timeline.push(event);
             }
-            RunTransition::Interrupt { failure } if self.status == RunStatus::Running => {
+            RunTransition::Interrupt { failure }
+                if matches!(self.status, RunStatus::Pending | RunStatus::Running) =>
+            {
                 if failure.code != "run.interrupted" {
                     return Err("interrupted transition requires run.interrupted failure".into());
                 }
@@ -448,10 +450,17 @@ impl RunRecord {
         if matches!(self.status, RunStatus::Pending) && self.started_at.is_some() {
             return Err("pending run must not have startedAt".into());
         }
+        let pending_interrupted = self.status == RunStatus::Failed
+            && self.started_at.is_none()
+            && self
+                .failure
+                .as_ref()
+                .is_some_and(|failure| failure.code == "run.interrupted");
         if matches!(
             self.status,
             RunStatus::Running | RunStatus::Succeeded | RunStatus::Failed
         ) && self.started_at.is_none()
+            && !pending_interrupted
         {
             return Err("started run must have startedAt".into());
         }
@@ -617,5 +626,29 @@ mod tests {
             false,
         );
         assert_eq!(failure.message.chars().count(), MAX_FAILURE_MESSAGE_CHARS);
+    }
+
+    #[test]
+    fn pending_run_can_be_reconciled_as_interrupted_without_faking_a_start() {
+        let mut run = RunRecord::new(RunKind::TextGenerate, serde_json::json!({}));
+        run.apply_transition(
+            RunTransition::Interrupt {
+                failure: ActionableFailure::interrupted("run.reconcile"),
+            },
+            Utc::now(),
+        )
+        .unwrap();
+
+        assert_eq!(run.status, RunStatus::Failed);
+        assert!(run.started_at.is_none());
+        assert_eq!(run.failure.as_ref().unwrap().code, "run.interrupted");
+        assert_eq!(
+            run.timeline
+                .iter()
+                .filter(|event| event.kind.is_terminal())
+                .count(),
+            1
+        );
+        assert!(run.validate().is_ok());
     }
 }

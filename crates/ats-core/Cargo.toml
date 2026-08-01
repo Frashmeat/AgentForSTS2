@@ -25,7 +25,7 @@ serde_path_to_error = "0.1"
 thiserror = "2"
 anyhow = "1"
 tracing = "0.1"
-tokio = { version = "1", features = ["rt", "sync", "macros", "time", "fs", "io-util"] }
+tokio = { version = "1", features = ["rt", "sync", "macros", "time", "fs", "io-util", "process"] }
 chrono = { version = "0.4", features = ["serde"] }
 figment = { version = "0.10", features = ["json", "env"] }
 regex = "1"
@@ -43,6 +43,9 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 sha2 = "0.10"
 ort = { version = "=2.0.0-rc.10", optional = true, default-features = false, features = ["std", "ndarray", "download-binaries", "load-dynamic", "copy-dylibs"] }
 ndarray = { version = "0.16", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+process-wrap = { version = "9.1", default-features = false, features = ["tokio1", "job-object", "kill-on-drop"] }
 
 
 

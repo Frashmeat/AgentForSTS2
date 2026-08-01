@@ -12,17 +12,20 @@ use super::code_generate::{
     publish_generated_artifact, sanitize_entity_name,
 };
 use super::common::{
-    FinalizeOutcome, ProgressEvent, ProgressSink, finalize_with_failure, finalize_with_success,
-    transition_to_running,
+    FinalizeOutcome, ProgressEvent, ProgressSink, finalize_with_cancellation,
+    finalize_with_failure, finalize_with_success, transition_to_running,
 };
 use crate::codegen::{CustomCodegenRequest, PromptAssembler};
 use crate::failure::{ActionableFailure, FailureNormalizer};
 use crate::game_pack::VerifiedGameContext;
 use crate::llm::LlmClient;
+use crate::platform::application::CancellationToken;
 use crate::platform::artifact::sha256_bytes;
 use crate::platform::contracts::SubmitBatchCustomCodeRequest;
+#[cfg(test)]
+use crate::platform::domain::RunStatus;
 use crate::platform::domain::{
-    BatchArtifactItemResult, RunId, RunRepository, RunResult, RunStatus, TokenUsage,
+    BatchArtifactItemResult, RunId, RunRepository, RunResult, TokenUsage,
 };
 
 struct ItemOutcome {
@@ -45,8 +48,12 @@ pub async fn run_batch_custom_code(
     request: SubmitBatchCustomCodeRequest,
     game_context: VerifiedGameContext,
     artifacts_dir: PathBuf,
+    cancellation: CancellationToken,
 ) {
-    if transition_to_running(&repo, &run_id, &sink).await.is_err() {
+    if !matches!(
+        transition_to_running(&repo, &run_id, &sink, &cancellation).await,
+        Ok(true)
+    ) {
         return;
     }
     if request.items.is_empty() {
@@ -71,9 +78,7 @@ pub async fn run_batch_custom_code(
 
     for (idx, item) in request.items.into_iter().enumerate() {
         // 中途检查 cancel：若被取消则停止后续 item 但保留已完成结果到 run.result。
-        if let Ok(j) = repo.get(&run_id).await
-            && matches!(j.status, RunStatus::Cancelled)
-        {
+        if cancellation.is_cancelled() {
             break;
         }
 
@@ -89,7 +94,6 @@ pub async fn run_batch_custom_code(
 
         let outcome = process_one_item(
             &assembler,
-            &repo,
             &llm,
             &sink,
             &run_id,
@@ -97,6 +101,7 @@ pub async fn run_batch_custom_code(
             &artifacts_dir,
             &item,
             &entity_name,
+            &cancellation,
         )
         .await;
 
@@ -131,11 +136,9 @@ pub async fn run_batch_custom_code(
         }
     }
 
-    if matches!(
-        repo.get(&run_id).await.map(|run| run.status),
-        Ok(RunStatus::Cancelled)
-    ) {
+    if let Some(reason) = cancellation.reason() {
         rollback_pending_items(&mut outcomes).await;
+        finalize_with_cancellation(&repo, &run_id, &sink, reason).await;
         return;
     }
     let overall_ok = succeeded > 0;
@@ -182,7 +185,6 @@ pub async fn run_batch_custom_code(
 #[allow(clippy::too_many_arguments)] // 同 run_asset_generate，DI 注入式 handler
 async fn process_one_item(
     assembler: &PromptAssembler,
-    repo: &Arc<dyn RunRepository>,
     llm: &Arc<dyn LlmClient>,
     sink: &Arc<dyn ProgressSink>,
     run_id: &RunId,
@@ -190,6 +192,7 @@ async fn process_one_item(
     artifacts_dir: &Path,
     item: &CustomCodegenRequest,
     entity_name: &str,
+    cancellation: &CancellationToken,
 ) -> ItemOutcome {
     let assembly = match assembler.assemble_custom_code_prompt_with_evidence(item, game_context) {
         Ok(assembly) => assembly,
@@ -205,7 +208,6 @@ async fn process_one_item(
     let prompt = assembly.prompt;
     let inputs_sha256 = sha256_bytes(prompt.as_bytes());
     match generate_and_write_code_artifact(
-        Arc::clone(repo),
         Arc::clone(llm),
         Arc::clone(sink),
         run_id,
@@ -213,6 +215,7 @@ async fn process_one_item(
         entity_name,
         artifacts_dir,
         &game_context.pack().validation_rules,
+        cancellation,
     )
     .await
     {

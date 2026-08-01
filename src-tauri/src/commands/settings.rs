@@ -17,7 +17,8 @@ use tauri_plugin_shell::ShellExt;
 
 use crate::AppConfig;
 use crate::commands::failure::{CommandFailure, CommandResult};
-use crate::commands::project::{ActiveProject, sync_project_local_props_after_settings};
+use crate::commands::project::sync_project_local_props_after_settings;
+use crate::project_session::ActiveProject;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -174,11 +175,9 @@ pub fn save_settings_patch(
 ) -> CommandResult<SettingsSnapshot> {
     let new_settings = merge_settings_patch(config.settings_snapshot(), patch)?;
     let active_project = active
-        .0
-        .lock()
+        .current()
         .map_err(|_| CommandFailure::unclassified("settings.project_lock"))?
-        .as_ref()
-        .map(|project| (project.path().to_path_buf(), project.meta().game_id.clone()));
+        .map(|session| (session.path().to_path_buf(), session.meta().game_id.clone()));
     if let Some((project_root, game_id)) = active_project
         && !new_settings.knowledge.sts2_dll_path.is_empty()
     {

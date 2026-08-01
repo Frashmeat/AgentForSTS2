@@ -9,7 +9,7 @@ use super::asset_compile::AssetCompileValidator;
 use super::code_generate::{
     extract_first_code_block, sanitize_entity_name, validate_generated_code_skein,
 };
-use super::common::{ProgressEvent, ProgressSink, emit_cancelled_mid_stream, is_cancelled};
+use super::common::{ProgressEvent, ProgressSink};
 use crate::codegen::{AssetCodegenRequest, asset_localization_key_segment};
 use crate::game_pack::{
     AssetResourceSpec, LoadedGamePack, ResourceImageRole, ResourceImageTransform, ValidationRule,
@@ -19,30 +19,31 @@ use crate::image_proc::{
     analyze_png_quality, derive_png_variants,
 };
 use crate::llm::{CompletionRequest, LlmClient, LlmError, Message, MessageRole, StreamEvent};
-use crate::platform::domain::{RunId, RunRepository};
+use crate::platform::application::CancellationToken;
+use crate::platform::domain::RunId;
 
 const MAX_MODEL_ATTEMPTS: u32 = 2;
 static ASSET_WRITE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 pub(crate) struct AssetBundleGeneration {
-    repo: Arc<dyn RunRepository>,
     llm: Arc<dyn LlmClient>,
     compile_validator: Arc<dyn AssetCompileValidator>,
     sink: Arc<dyn ProgressSink>,
+    cancellation: CancellationToken,
 }
 
 impl AssetBundleGeneration {
     pub(crate) fn new(
-        repo: Arc<dyn RunRepository>,
         llm: Arc<dyn LlmClient>,
         compile_validator: Arc<dyn AssetCompileValidator>,
         sink: Arc<dyn ProgressSink>,
+        cancellation: CancellationToken,
     ) -> Self {
         Self {
-            repo,
             llm,
             compile_validator,
             sink,
+            cancellation,
         }
     }
 
@@ -111,8 +112,7 @@ impl AssetBundleGeneration {
 
         let _ = last_model_error;
         let bundle = parsed_bundle.ok_or(AssetBundleError::ModelOutput)?;
-        if is_cancelled(&self.repo, run_id).await {
-            emit_cancelled_mid_stream(&self.sink, run_id).await;
+        if self.cancellation.is_cancelled() {
             return Err(AssetBundleError::Cancelled);
         }
 
@@ -145,14 +145,13 @@ impl AssetBundleGeneration {
             .await;
         let compile = self
             .compile_validator
-            .validate(&request.project_root, run_id)
+            .validate(&request.project_root, run_id, &self.cancellation)
             .await;
-        if is_cancelled(&self.repo, run_id).await {
+        if self.cancellation.is_cancelled() {
             let rollback = transaction.rollback().await;
             if rollback.is_err() {
                 return Err(AssetBundleError::Write);
             }
-            emit_cancelled_mid_stream(&self.sink, run_id).await;
             return Err(AssetBundleError::Cancelled);
         }
         if compile.is_err() {
@@ -187,22 +186,24 @@ impl AssetBundleGeneration {
             temperature: None,
             model: None,
         };
-        let mut stream = self
-            .llm
-            .stream(request)
-            .await
-            .map_err(AssetBundleError::Stream)?;
+        let stream_result = tokio::select! {
+            _ = self.cancellation.cancelled() => return Err(AssetBundleError::Cancelled),
+            result = self.llm.stream(request) => result,
+        };
+        let mut stream = stream_result.map_err(AssetBundleError::Stream)?;
         let mut raw = String::new();
         let mut model = String::new();
         let mut usage_in = 0;
         let mut usage_out = 0;
-        let mut tick = 0_u32;
-        while let Some(item) = stream.next().await {
-            tick = tick.wrapping_add(1);
-            if tick.is_multiple_of(5) && is_cancelled(&self.repo, run_id).await {
-                emit_cancelled_mid_stream(&self.sink, run_id).await;
-                return Err(AssetBundleError::Cancelled);
-            }
+        loop {
+            let item = tokio::select! {
+                _ = self.cancellation.cancelled() => {
+                    drop(stream);
+                    return Err(AssetBundleError::Cancelled);
+                }
+                item = stream.next() => item,
+            };
+            let Some(item) = item else { break };
             match item {
                 Ok(StreamEvent::Start { model: value }) => model = value,
                 Ok(StreamEvent::Delta { text }) => {

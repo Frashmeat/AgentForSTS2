@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use crate::failure::ActionableFailure;
 use crate::game_pack::{LoadedGamePack, TruthSnapshotRefresher, TruthSnapshotStore};
+use crate::platform::application::CancellationToken;
 use crate::platform::contracts::SubmitTruthSnapshotRefreshRequest;
 use crate::platform::domain::{RunId, RunRepository, RunResult};
 
@@ -24,8 +25,12 @@ pub async fn run_truth_snapshot_refresh(
     store: TruthSnapshotStore,
     local_inputs: BTreeMap<String, PathBuf>,
     refresher: TruthSnapshotRefresher,
+    cancellation: CancellationToken,
 ) {
-    if transition_to_running(&repo, &run_id, &sink).await.is_err() {
+    if !matches!(
+        transition_to_running(&repo, &run_id, &sink, &cancellation).await,
+        Ok(true)
+    ) {
         return;
     }
     sink.emit(ProgressEvent {

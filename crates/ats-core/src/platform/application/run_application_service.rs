@@ -22,6 +22,7 @@ use super::handlers::{
     text_generate::run_text_generate,
     truth_snapshot_refresh::run_truth_snapshot_refresh,
 };
+use super::{CancellationToken, SpawnedRun};
 use crate::game_pack::{
     LoadedGamePack, TruthSnapshotRefresher, TruthSnapshotStore, VerifiedGameContext,
 };
@@ -34,8 +35,7 @@ use crate::platform::contracts::{
     SubmitSingleAssetPlanRequest, SubmitTextGenerateRequest, SubmitTruthSnapshotRefreshRequest,
 };
 use crate::platform::domain::{
-    CancellationReason, RunError, RunId, RunKind, RunRecord, RunRepository, RunRepositoryResult,
-    RunSummary, RunTransition,
+    RunError, RunId, RunKind, RunRecord, RunRepository, RunRepositoryResult, RunSummary,
 };
 
 pub struct RunApplicationService {
@@ -81,26 +81,13 @@ impl RunApplicationService {
         self.repo.list().await
     }
 
-    /// Atomically cancel a non-terminal run.
-    pub async fn cancel(&self, id: &RunId) -> RunRepositoryResult<()> {
-        self.repo
-            .transition(
-                id,
-                RunTransition::Cancel {
-                    reason: CancellationReason::User,
-                },
-            )
-            .await?;
-        Ok(())
-    }
-
     /// 提交 text_generate 任务：保存 Pending → spawn 后台 tokio 任务跑 LLM。
     /// 立刻返回 RunId；调用方通过 `get` / `list` / progress 事件观察进度。
     pub async fn submit_text_generate(
         &self,
         request: SubmitTextGenerateRequest,
         sink: Arc<dyn ProgressSink>,
-    ) -> RunRepositoryResult<RunId> {
+    ) -> RunRepositoryResult<SpawnedRun> {
         let payload = serde_json::to_value(&request)
             .map_err(|e| RunError::Storage(format!("serialize request: {e}")))?;
         let run = RunRecord::new(RunKind::TextGenerate, payload);
@@ -110,11 +97,17 @@ impl RunApplicationService {
         let repo = Arc::clone(&self.repo);
         let llm = self.require_llm()?;
         let id_for_task = run_id.clone();
-        tokio::spawn(async move {
-            run_text_generate(repo, llm, sink, id_for_task, request).await;
+        let cancellation = CancellationToken::new();
+        let task_cancellation = cancellation.clone();
+        let task = tokio::spawn(async move {
+            run_text_generate(repo, llm, sink, id_for_task, request, task_cancellation).await;
         });
 
-        Ok(run_id)
+        Ok(SpawnedRun {
+            run_id,
+            cancellation,
+            task,
+        })
     }
 
     /// 提交 code_generate 任务：asset 模式生成结构化 C# + 本地化 bundle 并编译验证；
@@ -129,7 +122,7 @@ impl RunApplicationService {
         game_context: VerifiedGameContext,
         artifacts_dir: PathBuf,
         sink: Arc<dyn ProgressSink>,
-    ) -> RunRepositoryResult<RunId> {
+    ) -> RunRepositoryResult<SpawnedRun> {
         let payload = request_payload_with_context(&request, &game_context)?;
         let run = RunRecord::new(RunKind::CodeGenerate, payload);
         let run_id = run.id.clone();
@@ -139,7 +132,9 @@ impl RunApplicationService {
         let llm = self.require_llm()?;
         let compile_validator = Arc::clone(&self.asset_compile_validator);
         let id_for_task = run_id.clone();
-        tokio::spawn(async move {
+        let cancellation = CancellationToken::new();
+        let task_cancellation = cancellation.clone();
+        let task = tokio::spawn(async move {
             run_code_generate(
                 repo,
                 llm,
@@ -149,11 +144,16 @@ impl RunApplicationService {
                 game_context,
                 artifacts_dir,
                 compile_validator,
+                task_cancellation,
             )
             .await;
         });
 
-        Ok(run_id)
+        Ok(SpawnedRun {
+            run_id,
+            cancellation,
+            task,
+        })
     }
 
     /// Submit a Pack-driven refresh. The caller must resolve the Pack and local input
@@ -166,7 +166,7 @@ impl RunApplicationService {
         local_inputs: BTreeMap<String, PathBuf>,
         refresher: TruthSnapshotRefresher,
         sink: Arc<dyn ProgressSink>,
-    ) -> RunRepositoryResult<RunId> {
+    ) -> RunRepositoryResult<SpawnedRun> {
         let mut payload = serde_json::to_value(&request)
             .map_err(|e| RunError::Storage(format!("serialize request: {e}")))?;
         payload
@@ -182,7 +182,9 @@ impl RunApplicationService {
 
         let repo = Arc::clone(&self.repo);
         let id_for_task = run_id.clone();
-        tokio::spawn(async move {
+        let cancellation = CancellationToken::new();
+        let task_cancellation = cancellation.clone();
+        let task = tokio::spawn(async move {
             run_truth_snapshot_refresh(
                 repo,
                 sink,
@@ -192,11 +194,16 @@ impl RunApplicationService {
                 store,
                 local_inputs,
                 refresher,
+                task_cancellation,
             )
             .await;
         });
 
-        Ok(run_id)
+        Ok(SpawnedRun {
+            run_id,
+            cancellation,
+            task,
+        })
     }
 
     /// 提交 single_asset_plan 任务：自然语言需求 → LLM 出 JSON → 解析成 PlanItem。
@@ -208,7 +215,7 @@ impl RunApplicationService {
         pack: LoadedGamePack,
         items_dir: Option<PathBuf>,
         sink: Arc<dyn ProgressSink>,
-    ) -> RunRepositoryResult<RunId> {
+    ) -> RunRepositoryResult<SpawnedRun> {
         let mut payload = serde_json::to_value(&request)
             .map_err(|e| RunError::Storage(format!("serialize request: {e}")))?;
         payload
@@ -229,11 +236,27 @@ impl RunApplicationService {
         let repo = Arc::clone(&self.repo);
         let llm = self.require_llm()?;
         let id_for_task = run_id.clone();
-        tokio::spawn(async move {
-            run_single_asset_plan(repo, llm, sink, id_for_task, request, pack, items_dir).await;
+        let cancellation = CancellationToken::new();
+        let task_cancellation = cancellation.clone();
+        let task = tokio::spawn(async move {
+            run_single_asset_plan(
+                repo,
+                llm,
+                sink,
+                id_for_task,
+                request,
+                pack,
+                items_dir,
+                task_cancellation,
+            )
+            .await;
         });
 
-        Ok(run_id)
+        Ok(SpawnedRun {
+            run_id,
+            cancellation,
+            task,
+        })
     }
 
     /// 提交 log_analysis 任务：读 build log → LLM 出诊断 markdown。
@@ -242,7 +265,7 @@ impl RunApplicationService {
         &self,
         request: SubmitLogAnalysisRequest,
         sink: Arc<dyn ProgressSink>,
-    ) -> RunRepositoryResult<RunId> {
+    ) -> RunRepositoryResult<SpawnedRun> {
         let payload = serde_json::to_value(&request)
             .map_err(|e| RunError::Storage(format!("serialize request: {e}")))?;
         let run = RunRecord::new(RunKind::LogAnalysis, payload);
@@ -252,11 +275,17 @@ impl RunApplicationService {
         let repo = Arc::clone(&self.repo);
         let llm = self.require_llm()?;
         let id_for_task = run_id.clone();
-        tokio::spawn(async move {
-            run_log_analysis(repo, llm, sink, id_for_task, request).await;
+        let cancellation = CancellationToken::new();
+        let task_cancellation = cancellation.clone();
+        let task = tokio::spawn(async move {
+            run_log_analysis(repo, llm, sink, id_for_task, request, task_cancellation).await;
         });
 
-        Ok(run_id)
+        Ok(SpawnedRun {
+            run_id,
+            cancellation,
+            task,
+        })
     }
 
     /// 提交 asset_generate 任务：image_gen 出图 + 结构化 C#/本地化生成 + compile gate。
@@ -272,7 +301,7 @@ impl RunApplicationService {
         image_gen: Arc<dyn ImageGenClient>,
         image_proc: Arc<dyn ImageProcClient>,
         sink: Arc<dyn ProgressSink>,
-    ) -> RunRepositoryResult<RunId> {
+    ) -> RunRepositoryResult<SpawnedRun> {
         let payload = request_payload_with_context(&request, &game_context)?;
         let run = RunRecord::new(RunKind::AssetGenerate, payload);
         let run_id = run.id.clone();
@@ -282,7 +311,9 @@ impl RunApplicationService {
         let llm = self.require_llm()?;
         let compile_validator = Arc::clone(&self.asset_compile_validator);
         let id_for_task = run_id.clone();
-        tokio::spawn(async move {
+        let cancellation = CancellationToken::new();
+        let task_cancellation = cancellation.clone();
+        let task = tokio::spawn(async move {
             run_asset_generate(
                 repo,
                 llm,
@@ -294,11 +325,16 @@ impl RunApplicationService {
                 game_context,
                 artifacts_dir,
                 compile_validator,
+                task_cancellation,
             )
             .await;
         });
 
-        Ok(run_id)
+        Ok(SpawnedRun {
+            run_id,
+            cancellation,
+            task,
+        })
     }
 
     /// 提交 batch_custom_code 任务：N 个 CustomCodegenRequest 顺序处理。
@@ -309,7 +345,7 @@ impl RunApplicationService {
         game_context: VerifiedGameContext,
         artifacts_dir: PathBuf,
         sink: Arc<dyn ProgressSink>,
-    ) -> RunRepositoryResult<RunId> {
+    ) -> RunRepositoryResult<SpawnedRun> {
         let payload = request_payload_with_context(&request, &game_context)?;
         let run = RunRecord::new(RunKind::BatchCustomCode, payload);
         let run_id = run.id.clone();
@@ -318,7 +354,9 @@ impl RunApplicationService {
         let repo = Arc::clone(&self.repo);
         let llm = self.require_llm()?;
         let id_for_task = run_id.clone();
-        tokio::spawn(async move {
+        let cancellation = CancellationToken::new();
+        let task_cancellation = cancellation.clone();
+        let task = tokio::spawn(async move {
             run_batch_custom_code(
                 repo,
                 llm,
@@ -327,11 +365,16 @@ impl RunApplicationService {
                 request,
                 game_context,
                 artifacts_dir,
+                task_cancellation,
             )
             .await;
         });
 
-        Ok(run_id)
+        Ok(SpawnedRun {
+            run_id,
+            cancellation,
+            task,
+        })
     }
 
     /// 提交 package_project 任务：把 source_dir 整个 zip 到 output_path。
@@ -343,7 +386,7 @@ impl RunApplicationService {
         project_root: PathBuf,
         mod_id: String,
         sink: Arc<dyn ProgressSink>,
-    ) -> RunRepositoryResult<RunId> {
+    ) -> RunRepositoryResult<SpawnedRun> {
         let layout = game_context.pack().package_layout.clone().ok_or_else(|| {
             RunError::Storage(format!(
                 "game pack `{}` has no package layout",
@@ -357,7 +400,9 @@ impl RunApplicationService {
 
         let repo = Arc::clone(&self.repo);
         let id_for_task = run_id.clone();
-        tokio::spawn(async move {
+        let cancellation = CancellationToken::new();
+        let task_cancellation = cancellation.clone();
+        let task = tokio::spawn(async move {
             run_package_project(
                 repo,
                 sink,
@@ -367,11 +412,16 @@ impl RunApplicationService {
                 mod_id,
                 game_context,
                 project_root,
+                task_cancellation,
             )
             .await;
         });
 
-        Ok(run_id)
+        Ok(SpawnedRun {
+            run_id,
+            cancellation,
+            task,
+        })
     }
 
     /// 提交 build_project 任务：在 `request.project_root` 下跑 `dotnet publish`，
@@ -381,7 +431,7 @@ impl RunApplicationService {
         request: SubmitBuildProjectRequest,
         pack: LoadedGamePack,
         sink: Arc<dyn ProgressSink>,
-    ) -> RunRepositoryResult<RunId> {
+    ) -> RunRepositoryResult<SpawnedRun> {
         let recipe = pack.build_recipe.clone().ok_or_else(|| {
             RunError::Storage(format!("game pack `{}` has no build recipe", pack.id))
         })?;
@@ -392,11 +442,17 @@ impl RunApplicationService {
 
         let repo = Arc::clone(&self.repo);
         let id_for_task = run_id.clone();
-        tokio::spawn(async move {
-            run_build_project(repo, sink, id_for_task, request, recipe).await;
+        let cancellation = CancellationToken::new();
+        let task_cancellation = cancellation.clone();
+        let task = tokio::spawn(async move {
+            run_build_project(repo, sink, id_for_task, request, recipe, task_cancellation).await;
         });
 
-        Ok(run_id)
+        Ok(SpawnedRun {
+            run_id,
+            cancellation,
+            task,
+        })
     }
 
     fn require_llm(&self) -> RunRepositoryResult<Arc<dyn LlmClient>> {

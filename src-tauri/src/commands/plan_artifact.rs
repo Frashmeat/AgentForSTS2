@@ -9,17 +9,20 @@ use std::path::PathBuf;
 use tauri::State;
 
 use crate::commands::failure::{CommandFailure, CommandResult};
-use crate::commands::project::ActiveProject;
+use crate::project_session::ActiveProject;
 
 fn active_root(active: &State<'_, ActiveProject>) -> CommandResult<PathBuf> {
-    let guard = active
-        .0
-        .lock()
-        .map_err(|_| CommandFailure::unclassified("plan_artifact.project_lock"))?;
-    let project = guard
-        .as_ref()
-        .ok_or_else(|| CommandFailure::project_not_open("plan_artifact.active_project"))?;
-    Ok(project.path().to_path_buf())
+    active
+        .require()
+        .map(|session| session.path().to_path_buf())
+        .map_err(|error| match error {
+            crate::project_session::ActiveProjectError::NotOpen => {
+                CommandFailure::project_not_open("plan_artifact.active_project")
+            }
+            crate::project_session::ActiveProjectError::Poisoned => {
+                CommandFailure::unclassified("plan_artifact.project_lock")
+            }
+        })
 }
 
 #[tauri::command]

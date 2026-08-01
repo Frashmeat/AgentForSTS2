@@ -26,7 +26,10 @@ pub mod discovery;
 pub mod domain;
 pub mod infra;
 
-pub use application::{NoopProgressSink, ProgressEvent, ProgressSink, RunApplicationService};
+pub use application::{
+    CancellationToken, NoopProgressSink, ProgressEvent, ProgressSink, RunApplicationService,
+    SpawnedRun,
+};
 pub use contracts::{
     SubmitAssetGenerateRequest, SubmitBatchCustomCodeRequest, SubmitBuildProjectRequest,
     SubmitCodeGenerateRequest, SubmitLogAnalysisRequest, SubmitPackageProjectRequest, SubmitRunAck,

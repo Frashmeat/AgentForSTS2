@@ -7,11 +7,13 @@
 use std::sync::Arc;
 
 use super::common::{
-    FinalizeOutcome, ProgressEvent, ProgressSink, finalize_with_failure, finalize_with_success,
-    transition_to_running,
+    FinalizeOutcome, ProgressEvent, ProgressSink, finalize_with_cancellation,
+    finalize_with_failure, finalize_with_success, transition_to_running,
 };
+use crate::controlled_process::{ControlledProcessResult, run_controlled_process};
 use crate::failure::{ActionableFailure, FailureCategory, FailureNormalizer, RecoveryAction};
 use crate::game_pack::{BuildRecipe, BuildRunner};
+use crate::platform::application::CancellationToken;
 use crate::platform::contracts::SubmitBuildProjectRequest;
 use crate::platform::domain::{BuildStepResult, RunId, RunRepository, RunResult};
 use crate::project_utils::to_extended_length_path;
@@ -22,8 +24,12 @@ pub async fn run_build_project(
     run_id: RunId,
     request: SubmitBuildProjectRequest,
     recipe: BuildRecipe,
+    cancellation: CancellationToken,
 ) {
-    if transition_to_running(&repo, &run_id, &sink).await.is_err() {
+    if !matches!(
+        transition_to_running(&repo, &run_id, &sink, &cancellation).await,
+        Ok(true)
+    ) {
         return;
     }
 
@@ -43,34 +49,29 @@ pub async fn run_build_project(
             delta: None,
         })
         .await;
-        let output = match execute_build_step(&request.project_root, step.runner).await {
-            Ok(output) => output,
-            Err(BuildStepError::Io(error)) => {
-                finalize_with_failure(
-                    &repo,
-                    &run_id,
-                    &sink,
-                    FailureNormalizer::io(
-                        "toolchain.not_found",
-                        "build.spawn",
-                        "The configured build tool could not be started.",
-                        &error,
-                    ),
-                )
-                .await;
-                return;
-            }
-            Err(BuildStepError::Worker) => {
-                finalize_with_failure(
-                    &repo,
-                    &run_id,
-                    &sink,
-                    ActionableFailure::unclassified("build.worker"),
-                )
-                .await;
-                return;
-            }
-        };
+        let output =
+            match execute_build_step(&request.project_root, step.runner, &cancellation).await {
+                Ok(output) => output,
+                Err(BuildStepError::Cancelled(reason)) => {
+                    finalize_with_cancellation(&repo, &run_id, &sink, reason).await;
+                    return;
+                }
+                Err(BuildStepError::Io(error)) => {
+                    finalize_with_failure(
+                        &repo,
+                        &run_id,
+                        &sink,
+                        FailureNormalizer::io(
+                            "toolchain.not_found",
+                            "build.spawn",
+                            "The configured build tool could not be started.",
+                            &error,
+                        ),
+                    )
+                    .await;
+                    return;
+                }
+            };
         exit_code = output.exit_code;
         let step_success = exit_code == 0 || build_reports_zero_errors(&output.stdout);
         step_results.push(BuildStepResult {
@@ -110,6 +111,10 @@ pub async fn run_build_project(
         artifact_manifest_ref: None,
         manifest_sha256: None,
     };
+    if let Some(reason) = cancellation.reason() {
+        finalize_with_cancellation(&repo, &run_id, &sink, reason).await;
+        return;
+    }
     if !matches!(
         finalize_with_success(&repo, &run_id, result).await,
         FinalizeOutcome::Succeeded
@@ -134,24 +139,31 @@ struct BuildStepOutput {
 }
 
 enum BuildStepError {
-    Worker,
     Io(std::io::Error),
+    Cancelled(crate::platform::domain::CancellationReason),
 }
 
 async fn execute_build_step(
     project_root: &std::path::Path,
     runner: BuildRunner,
+    cancellation: &CancellationToken,
 ) -> Result<BuildStepOutput, BuildStepError> {
     let cwd = to_extended_length_path(project_root);
-    let output = tokio::task::spawn_blocking(move || match runner {
-        BuildRunner::DotnetPublish => std::process::Command::new("dotnet")
-            .arg("publish")
-            .current_dir(&cwd)
-            .output(),
-    })
-    .await
-    .map_err(|_| BuildStepError::Worker)?
-    .map_err(BuildStepError::Io)?;
+    let (program, args) = match runner {
+        BuildRunner::DotnetPublish => (
+            std::ffi::OsString::from("dotnet"),
+            vec![std::ffi::OsString::from("publish")],
+        ),
+    };
+    let output = match run_controlled_process(&program, &args, &cwd, cancellation)
+        .await
+        .map_err(BuildStepError::Io)?
+    {
+        ControlledProcessResult::Completed(output) => output,
+        ControlledProcessResult::Cancelled(reason) => {
+            return Err(BuildStepError::Cancelled(reason));
+        }
+    };
     Ok(BuildStepOutput {
         exit_code: output.status.code().unwrap_or(-1),
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),

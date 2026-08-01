@@ -23,8 +23,8 @@ use super::code_generate::{
     finalize_asset_bundle_error, publish_generated_artifact, sanitize_entity_name,
 };
 use super::common::{
-    FinalizeOutcome, ProgressEvent, ProgressSink, finalize_with_failure, finalize_with_success,
-    transition_to_running,
+    FinalizeOutcome, ProgressEvent, ProgressSink, finalize_with_cancellation,
+    finalize_with_failure, finalize_with_success, transition_to_running,
 };
 use crate::codegen::PromptAssembler;
 use crate::failure::{ActionableFailure, FailureDiagnostic, FailureNormalizer};
@@ -32,6 +32,7 @@ use crate::game_pack::VerifiedGameContext;
 use crate::image_gen::{ImageGenClient, ImageGenRequest};
 use crate::image_proc::{ImageProcClient, ImageProcError, ImageQualitySpec, analyze_png_quality};
 use crate::llm::LlmClient;
+use crate::platform::application::CancellationToken;
 use crate::platform::artifact::sha256_bytes;
 use crate::platform::contracts::SubmitAssetGenerateRequest;
 use crate::platform::domain::{RunId, RunRepository, TokenUsage};
@@ -48,8 +49,12 @@ pub(crate) async fn run_asset_generate(
     game_context: VerifiedGameContext,
     artifacts_dir: PathBuf,
     compile_validator: Arc<dyn AssetCompileValidator>,
+    cancellation: CancellationToken,
 ) {
-    if transition_to_running(&repo, &run_id, &sink).await.is_err() {
+    if !matches!(
+        transition_to_running(&repo, &run_id, &sink, &cancellation).await,
+        Ok(true)
+    ) {
         return;
     }
 
@@ -115,7 +120,14 @@ pub(crate) async fn run_asset_generate(
                 size: request.image_size.clone(),
                 model: None,
             };
-            let img_resp = match image_gen.generate(img_req).await {
+            let image_result = tokio::select! {
+                reason = cancellation.cancelled() => {
+                    finalize_with_cancellation(&repo, &run_id, &sink, reason).await;
+                    return;
+                }
+                result = image_gen.generate(img_req) => result,
+            };
+            let img_resp = match image_result {
                 Ok(r) => r,
                 Err(err) => {
                     finalize_with_failure(
@@ -300,6 +312,10 @@ pub(crate) async fn run_asset_generate(
                     return;
                 }
             }
+            if let Some(reason) = cancellation.reason() {
+                finalize_with_cancellation(&repo, &run_id, &sink, reason).await;
+                return;
+            }
             png_path = Some(path);
 
             asset_request.image_paths =
@@ -367,10 +383,10 @@ pub(crate) async fn run_asset_generate(
 
     // 3. 生成结构化 bundle，写入后执行隔离编译门禁
     let generator = AssetBundleGeneration::new(
-        Arc::clone(&repo),
         Arc::clone(&llm),
         compile_validator,
         Arc::clone(&sink),
+        cancellation.clone(),
     );
     let mut artifact = match generator
         .generate(
@@ -383,6 +399,12 @@ pub(crate) async fn run_asset_generate(
         .await
     {
         Ok(artifact) => artifact,
+        Err(super::asset_bundle::AssetBundleError::Cancelled) => {
+            if let Some(reason) = cancellation.reason() {
+                finalize_with_cancellation(&repo, &run_id, &sink, reason).await;
+            }
+            return;
+        }
         Err(err) => {
             finalize_asset_bundle_error(
                 &repo,
@@ -472,6 +494,13 @@ pub(crate) async fn run_asset_generate(
             ),
         )
         .await;
+        return;
+    }
+    if let Some(reason) = cancellation.reason() {
+        let artifact_rollback = published.rollback().await;
+        let file_rollback = artifact.rollback_writes().await;
+        let _ = (artifact_rollback, file_rollback);
+        finalize_with_cancellation(&repo, &run_id, &sink, reason).await;
         return;
     }
     if !matches!(
@@ -646,6 +675,7 @@ mod tests {
             &self,
             _project_root: &Path,
             _run_id: &RunId,
+            _cancellation: &CancellationToken,
         ) -> Result<CompileValidation, String> {
             Ok(CompileValidation {
                 exit_code: 0,
@@ -663,6 +693,7 @@ mod tests {
             &self,
             _project_root: &Path,
             _run_id: &RunId,
+            _cancellation: &CancellationToken,
         ) -> Result<CompileValidation, String> {
             Err("simulated compile failure".into())
         }
@@ -679,6 +710,7 @@ mod tests {
             &self,
             _project_root: &Path,
             _run_id: &RunId,
+            _cancellation: &CancellationToken,
         ) -> Result<CompileValidation, String> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             Ok(CompileValidation {

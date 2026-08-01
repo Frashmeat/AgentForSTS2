@@ -8,9 +8,10 @@ use chrono::Utc;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 
+use crate::failure::ActionableFailure;
 use crate::platform::domain::{
-    RunError, RunId, RunProgress, RunRecord, RunRepository, RunRepositoryResult, RunSummary,
-    RunTransition,
+    RunError, RunId, RunProgress, RunRecord, RunRepository, RunRepositoryResult, RunStatus,
+    RunSummary, RunTransition,
 };
 
 const FILE_SUFFIX: &str = ".json";
@@ -91,6 +92,48 @@ impl FileRunRepository {
             .ok_or_else(|| RunError::NotFound(id.0.clone()))?;
         let run = Self::read_record(&path).await?;
         Ok((path, run))
+    }
+
+    /// Marks runs left non-terminal by a previous process as interrupted.
+    /// The project OS lock must already be held by the caller.
+    pub async fn reconcile_interrupted(&self) -> RunRepositoryResult<Vec<RunId>> {
+        let _guard = self.write_lock.lock().await;
+        let mut entries = match fs::read_dir(&self.root).await {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error.into()),
+        };
+        let mut paths = Vec::new();
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if path
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
+            {
+                paths.push(path);
+            }
+        }
+        paths.sort();
+
+        let mut interrupted = Vec::new();
+        for path in paths {
+            let mut run = Self::read_record(&path).await?;
+            if matches!(run.status, RunStatus::Pending | RunStatus::Running) {
+                run.apply_transition(
+                    RunTransition::Interrupt {
+                        failure: ActionableFailure::interrupted("run.reconcile"),
+                    },
+                    Utc::now(),
+                )
+                .map_err(|message| RunError::InvalidTransition {
+                    id: run.id.0.clone(),
+                    message,
+                })?;
+                Self::write_record(&path, &run).await?;
+                interrupted.push(run.id);
+            }
+        }
+        Ok(interrupted)
     }
 }
 
@@ -288,5 +331,41 @@ mod tests {
         assert_eq!(list[0].id, newer.id);
         assert_eq!(list[1].id, older.id);
         assert_eq!(older.timeline[0].kind, RunTimelineEventKind::Created);
+    }
+
+    #[tokio::test]
+    async fn reconciliation_interrupts_pending_and_running_once() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let repo = FileRunRepository::new(temp.path().join("history"));
+        let pending = sample_run();
+        let running = sample_run();
+        repo.create(&pending).await.unwrap();
+        repo.create(&running).await.unwrap();
+        repo.transition(&running.id, RunTransition::Start)
+            .await
+            .unwrap();
+
+        let mut reconciled = repo.reconcile_interrupted().await.unwrap();
+        reconciled.sort_by(|left, right| left.0.cmp(&right.0));
+        let mut expected = vec![pending.id.clone(), running.id.clone()];
+        expected.sort_by(|left, right| left.0.cmp(&right.0));
+        assert_eq!(reconciled, expected);
+        assert!(repo.reconcile_interrupted().await.unwrap().is_empty());
+
+        let pending = repo.get(&pending.id).await.unwrap();
+        let running = repo.get(&running.id).await.unwrap();
+        assert!(pending.started_at.is_none());
+        assert!(running.started_at.is_some());
+        for run in [pending, running] {
+            assert_eq!(run.status, RunStatus::Failed);
+            assert_eq!(run.failure.as_ref().unwrap().code, "run.interrupted");
+            assert_eq!(
+                run.timeline
+                    .iter()
+                    .filter(|event| event.kind.is_terminal())
+                    .count(),
+                1
+            );
+        }
     }
 }

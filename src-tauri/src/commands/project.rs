@@ -2,11 +2,12 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::Arc;
 use std::time::Duration;
 
 use ats_core::config::Settings;
 use ats_core::game_pack::GamePackRegistry;
+use ats_core::platform::domain::CancellationReason;
 use ats_core::project::{
     LocalBuildInputs, LocalPropsSync, ProjectFolder, ProjectMeta, RecentEntry, RecentProjects,
     sync_local_props,
@@ -16,23 +17,10 @@ use serde::Serialize;
 use tauri::{Emitter, State};
 
 use crate::commands::failure::{CommandFailure, CommandResult};
+use crate::project_session::{ActiveProject, ProjectSession};
 use crate::{AppConfig, AppPaths};
 
-/// 当前活动工程的进程内单例。`None` 表示用户尚未打开任何工程。
-pub struct ActiveProject(pub Mutex<Option<ProjectFolder>>);
-
-impl ActiveProject {
-    #[must_use]
-    pub fn new() -> Self {
-        Self(Mutex::new(None))
-    }
-}
-
-impl Default for ActiveProject {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+const PROJECT_DRAIN_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -48,7 +36,7 @@ pub fn list_recent_projects(paths: State<'_, AppPaths>) -> Vec<RecentEntry> {
 }
 
 #[tauri::command]
-pub fn create_project(
+pub async fn create_project(
     app: tauri::AppHandle,
     config: State<'_, AppConfig>,
     paths: State<'_, AppPaths>,
@@ -57,12 +45,25 @@ pub fn create_project(
     name: String,
     game_id: String,
 ) -> CommandResult<ProjectSnapshot> {
+    let _lifecycle = active.lifecycle.lock().await;
+    let previous = prepare_switch(&active, CancellationReason::ProjectSwitch).await?;
     let parent = PathBuf::from(parent_dir);
     let folder = ProjectFolder::create(&parent, &name, &game_id)
         .map_err(|error| CommandFailure::project("project.create", &error))?;
-    let snap = snapshot(&folder);
-    record_recent(&paths, folder.path(), folder.meta())?;
-    *lock_active(&active)? = Some(folder);
+    let session = ProjectSession::open(folder)
+        .await
+        .map_err(|error| CommandFailure::run("project.reconcile", &error))?;
+    let snap = snapshot(&session);
+    record_recent(&paths, session.path(), session.meta())?;
+    if let Some(previous) = &previous {
+        previous
+            .release_project_lock()
+            .map_err(|_| CommandFailure::unclassified("project.active_lock"))?;
+    }
+    active
+        .replace(Some(Arc::clone(&session)))
+        .map_err(|_| CommandFailure::unclassified("project.active_lock"))?;
+    drop(previous);
 
     // 尝试从配置中的 STS2 DLL 路径自动生成 local.props
     if sync_project_local_props(
@@ -79,7 +80,7 @@ pub fn create_project(
     Ok(snap)
 }
 #[tauri::command]
-pub fn open_project(
+pub async fn open_project(
     app: tauri::AppHandle,
     config: State<'_, AppConfig>,
     paths: State<'_, AppPaths>,
@@ -87,12 +88,31 @@ pub fn open_project(
     path: String,
 ) -> CommandResult<ProjectSnapshot> {
     let p = PathBuf::from(path);
-    drop(lock_active(&active)?.take());
+    let _lifecycle = active.lifecycle.lock().await;
+    if let Some(current) = active
+        .current()
+        .map_err(|_| CommandFailure::unclassified("project.active_lock"))?
+        && same_project_path(current.path(), &p)
+    {
+        return Ok(snapshot(&current));
+    }
+    let previous = prepare_switch(&active, CancellationReason::ProjectSwitch).await?;
     let folder =
         ProjectFolder::open(&p).map_err(|error| CommandFailure::project("project.open", &error))?;
-    let snap = snapshot(&folder);
-    record_recent(&paths, folder.path(), folder.meta())?;
-    *lock_active(&active)? = Some(folder);
+    let session = ProjectSession::open(folder)
+        .await
+        .map_err(|error| CommandFailure::run("project.reconcile", &error))?;
+    let snap = snapshot(&session);
+    record_recent(&paths, session.path(), session.meta())?;
+    if let Some(previous) = &previous {
+        previous
+            .release_project_lock()
+            .map_err(|_| CommandFailure::unclassified("project.active_lock"))?;
+    }
+    active
+        .replace(Some(Arc::clone(&session)))
+        .map_err(|_| CommandFailure::unclassified("project.active_lock"))?;
+    drop(previous);
 
     // 老工程可能没有 local.props——自动从配置中的 STS2 DLL 路径补齐
     if sync_project_local_props(&p, &snap.meta.game_id, &config.settings_snapshot()).is_err() {
@@ -104,8 +124,25 @@ pub fn open_project(
 }
 
 #[tauri::command]
-pub fn close_project(app: tauri::AppHandle, active: State<'_, ActiveProject>) -> CommandResult<()> {
-    drop(lock_active(&active)?.take());
+pub async fn close_project(
+    app: tauri::AppHandle,
+    active: State<'_, ActiveProject>,
+) -> CommandResult<()> {
+    let _lifecycle = active.lifecycle.lock().await;
+    let Some(session) = active
+        .current()
+        .map_err(|_| CommandFailure::unclassified("project.active_lock"))?
+    else {
+        return Ok(());
+    };
+    drain_session(&session, CancellationReason::ProjectClose).await?;
+    session
+        .release_project_lock()
+        .map_err(|_| CommandFailure::unclassified("project.active_lock"))?;
+    active
+        .replace(None)
+        .map_err(|_| CommandFailure::unclassified("project.active_lock"))?;
+    drop(session);
     app.emit("project-changed", Option::<ProjectSnapshot>::None)
         .ok();
     Ok(())
@@ -113,8 +150,11 @@ pub fn close_project(app: tauri::AppHandle, active: State<'_, ActiveProject>) ->
 
 #[tauri::command]
 pub fn current_project(active: State<'_, ActiveProject>) -> CommandResult<Option<ProjectSnapshot>> {
-    let guard = lock_active(&active)?;
-    Ok(guard.as_ref().map(snapshot))
+    Ok(active
+        .current()
+        .map_err(|_| CommandFailure::unclassified("project.active_lock"))?
+        .as_deref()
+        .map(snapshot))
 }
 
 #[tauri::command]
@@ -126,10 +166,42 @@ pub fn forget_recent_project(paths: State<'_, AppPaths>, path: String) -> Comman
     Ok(())
 }
 
-fn snapshot(folder: &ProjectFolder) -> ProjectSnapshot {
+fn snapshot(session: &ProjectSession) -> ProjectSnapshot {
     ProjectSnapshot {
-        path: folder.path().to_string_lossy().to_string(),
-        meta: folder.meta().clone(),
+        path: session.path().to_string_lossy().to_string(),
+        meta: session.meta().clone(),
+    }
+}
+
+async fn prepare_switch(
+    active: &ActiveProject,
+    reason: CancellationReason,
+) -> CommandResult<Option<Arc<ProjectSession>>> {
+    let previous = active
+        .current()
+        .map_err(|_| CommandFailure::unclassified("project.active_lock"))?;
+    if let Some(session) = &previous {
+        drain_session(session, reason).await?;
+    }
+    Ok(previous)
+}
+
+async fn drain_session(session: &ProjectSession, reason: CancellationReason) -> CommandResult<()> {
+    session
+        .cancel_and_drain(reason, PROJECT_DRAIN_TIMEOUT)
+        .await
+        .map_err(|timeout| {
+            CommandFailure::project_close_timeout(
+                "project.close",
+                timeout.blocked_runs.first().map(|id| id.0.as_str()),
+            )
+        })
+}
+
+fn same_project_path(left: &Path, right: &Path) -> bool {
+    match (std::fs::canonicalize(left), std::fs::canonicalize(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => left == right,
     }
 }
 
@@ -213,13 +285,4 @@ fn record_recent(paths: &AppPaths, project_path: &Path, meta: &ProjectMeta) -> C
     }
     r.save(&recents_path)
         .map_err(|_| CommandFailure::unclassified("project.recents_save"))
-}
-
-fn lock_active<'a>(
-    active: &'a State<'_, ActiveProject>,
-) -> CommandResult<std::sync::MutexGuard<'a, Option<ProjectFolder>>> {
-    active
-        .0
-        .lock()
-        .map_err(|_| CommandFailure::unclassified("project.active_lock"))
 }

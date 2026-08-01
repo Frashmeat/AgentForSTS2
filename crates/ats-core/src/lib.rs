@@ -6,6 +6,7 @@
 pub mod capabilities;
 pub mod codegen;
 pub mod config;
+pub mod controlled_process;
 pub mod errors;
 pub mod failure;
 pub mod fs_atomic;

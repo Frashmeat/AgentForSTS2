@@ -8,11 +8,13 @@ use std::sync::Arc;
 use futures_util::StreamExt;
 
 use super::common::{
-    FinalizeOutcome, ProgressEvent, ProgressSink, emit_cancelled_mid_stream, finalize_with_failure,
-    finalize_with_success, is_cancelled, transition_to_running,
+    FinalizeOutcome, ProgressEvent, ProgressSink, finalize_if_cancelled,
+    finalize_with_cancellation, finalize_with_failure, finalize_with_success,
+    transition_to_running,
 };
 use crate::failure::FailureNormalizer;
 use crate::llm::{CompletionRequest, LlmClient, Message, MessageRole, StreamEvent};
+use crate::platform::application::CancellationToken;
 use crate::platform::contracts::SubmitTextGenerateRequest;
 use crate::platform::domain::{RunId, RunRepository, RunResult, TokenUsage};
 
@@ -22,9 +24,13 @@ pub async fn run_text_generate(
     sink: Arc<dyn ProgressSink>,
     run_id: RunId,
     request: SubmitTextGenerateRequest,
+    cancellation: CancellationToken,
 ) {
-    if let Err(err) = transition_to_running(&repo, &run_id, &sink).await {
-        tracing::warn!(error = %err, "failed to mark run running");
+    let started = transition_to_running(&repo, &run_id, &sink, &cancellation).await;
+    if !matches!(started, Ok(true)) {
+        if let Err(err) = started {
+            tracing::warn!(error = %err, "failed to mark run running");
+        }
         return;
     }
 
@@ -39,7 +45,13 @@ pub async fn run_text_generate(
         model: request.model.clone(),
     };
 
-    let stream_result = llm.stream(completion_request).await;
+    let stream_result = tokio::select! {
+        reason = cancellation.cancelled() => {
+            finalize_with_cancellation(&repo, &run_id, &sink, reason).await;
+            return;
+        }
+        result = llm.stream(completion_request) => result,
+    };
     let mut stream = match stream_result {
         Ok(s) => s,
         Err(err) => {
@@ -59,15 +71,16 @@ pub async fn run_text_generate(
     let mut input_tokens: u32 = 0;
     let mut output_tokens: u32 = 0;
     let mut finish: Option<String> = None;
-    let mut tick: u32 = 0;
-
-    while let Some(item) = stream.next().await {
-        // 每 5 个事件查一次取消（避免 file repo 被 hammer）。drop stream 即关连接。
-        tick = tick.wrapping_add(1);
-        if tick.is_multiple_of(5) && is_cancelled(&repo, &run_id).await {
-            emit_cancelled_mid_stream(&sink, &run_id).await;
-            return;
-        }
+    loop {
+        let item = tokio::select! {
+            reason = cancellation.cancelled() => {
+                drop(stream);
+                finalize_with_cancellation(&repo, &run_id, &sink, reason).await;
+                return;
+            }
+            item = stream.next() => item,
+        };
+        let Some(item) = item else { break };
         match item {
             Ok(StreamEvent::Start { model: m }) => {
                 model = m.clone();
@@ -110,6 +123,10 @@ pub async fn run_text_generate(
                 return;
             }
         }
+    }
+
+    if finalize_if_cancelled(&repo, &run_id, &sink, &cancellation).await {
+        return;
     }
 
     let result = RunResult::TextGeneration {
@@ -234,13 +251,13 @@ mod tests {
             prompt: "say hi".into(),
             ..Default::default()
         };
-        let id = service
+        let spawned = service
             .submit_text_generate(req, sink.clone())
             .await
             .unwrap();
-        wait_terminal(&service, &id).await;
+        wait_terminal(&service, &spawned).await;
 
-        let run = service.get(&id).await.unwrap();
+        let run = service.get(&spawned).await.unwrap();
         assert_eq!(run.status, RunStatus::Succeeded);
         let result = serde_json::to_value(run.result.expect("result should be set")).unwrap();
         assert_eq!(result["content"], "hello world");
@@ -305,7 +322,7 @@ mod tests {
         });
         let service = RunApplicationService::new(repo.clone(), llm);
 
-        let id = service
+        let spawned = service
             .submit_text_generate(
                 SubmitTextGenerateRequest {
                     prompt: "long output".into(),
@@ -318,7 +335,9 @@ mod tests {
 
         // 让 handler 处理几帧后再 cancel
         tokio::time::sleep(Duration::from_millis(150)).await;
-        service.cancel(&id).await.unwrap();
+        spawned
+            .cancellation
+            .cancel(crate::platform::domain::CancellationReason::User);
 
         // cancel 是同步写 status；handler 是异步轮询。等 handler 看到 Cancelled
         // → 下一个 tick%5==0 时 break → emit "cancelled-mid-stream"。轮询 sink
@@ -338,7 +357,7 @@ mod tests {
             }
         }
 
-        let run = service.get(&id).await.unwrap();
+        let run = service.get(&spawned).await.unwrap();
         assert_eq!(run.status, RunStatus::Cancelled);
         assert!(
             run.result.is_none(),
@@ -373,19 +392,29 @@ mod tests {
         let td = tempfile::TempDir::new().unwrap();
         let repo: Arc<dyn RunRepository> =
             Arc::new(FileRunRepository::new(td.path().to_path_buf()));
-        let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
-            events: Mutex::new(vec![]),
-        });
-        let service = RunApplicationService::new(repo.clone(), llm);
-
         let run = RunRecord::new(RunKind::TextGenerate, serde_json::json!({}));
         repo.create(&run).await.unwrap();
 
-        service.cancel(&run.id).await.unwrap();
-        let reloaded = service.get(&run.id).await.unwrap();
+        repo.transition(
+            &run.id,
+            crate::platform::domain::RunTransition::Cancel {
+                reason: crate::platform::domain::CancellationReason::User,
+            },
+        )
+        .await
+        .unwrap();
+        let reloaded = repo.get(&run.id).await.unwrap();
         assert_eq!(reloaded.status, RunStatus::Cancelled);
 
-        let err = service.cancel(&run.id).await.unwrap_err();
+        let err = repo
+            .transition(
+                &run.id,
+                crate::platform::domain::RunTransition::Cancel {
+                    reason: crate::platform::domain::CancellationReason::User,
+                },
+            )
+            .await
+            .unwrap_err();
         assert!(matches!(
             err,
             crate::platform::domain::RunError::InvalidTransition { .. }

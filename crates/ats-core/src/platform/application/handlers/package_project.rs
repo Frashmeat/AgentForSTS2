@@ -16,11 +16,12 @@ use zip::CompressionMethod;
 use zip::write::SimpleFileOptions;
 
 use super::common::{
-    FinalizeOutcome, ProgressEvent, ProgressSink, finalize_with_failure, finalize_with_success,
-    transition_to_running,
+    FinalizeOutcome, ProgressEvent, ProgressSink, finalize_with_cancellation,
+    finalize_with_failure, finalize_with_success, transition_to_running,
 };
 use crate::failure::{ActionableFailure, FailureNormalizer};
 use crate::game_pack::{PackageLayout, VerifiedGameContext};
+use crate::platform::application::CancellationToken;
 use crate::platform::artifact::{
     ArtifactFileInput, ArtifactGameContext, ArtifactGeneration, ArtifactPublishRequest,
     ArtifactStore, sha256_bytes, snapshot_evidence,
@@ -37,8 +38,12 @@ pub async fn run_package_project(
     mod_id: String,
     game_context: VerifiedGameContext,
     project_root: PathBuf,
+    cancellation: CancellationToken,
 ) {
-    if transition_to_running(&repo, &run_id, &sink).await.is_err() {
+    if !matches!(
+        transition_to_running(&repo, &run_id, &sink, &cancellation).await,
+        Ok(true)
+    ) {
         return;
     }
 
@@ -70,6 +75,7 @@ pub async fn run_package_project(
     let source_for_task = source.clone();
     let mod_id_for_task = mod_id.clone();
     let run_id_for_task = run_id.clone();
+    let task_cancellation = cancellation.clone();
 
     let result = tokio::task::spawn_blocking(move || {
         zip_package_layout(
@@ -79,9 +85,15 @@ pub async fn run_package_project(
             &mod_id_for_task,
             level,
             &run_id_for_task,
+            &task_cancellation,
         )
     })
     .await;
+
+    if let Some(reason) = cancellation.reason() {
+        finalize_with_cancellation(&repo, &run_id, &sink, reason).await;
+        return;
+    }
 
     let (stats, output_transaction) = match result {
         Ok(Ok(s)) => s,
@@ -155,6 +167,14 @@ pub async fn run_package_project(
         uncompressed_bytes: stats.uncompressed_bytes,
         package_bytes: stats.zip_bytes,
     };
+    if let Some(reason) = cancellation.reason() {
+        let legacy_rollback = legacy_cleanup.rollback();
+        let artifact_rollback = store.remove_published_run(&artifact_id, &run_id);
+        let output_rollback = output_transaction.rollback();
+        let _ = (legacy_rollback, artifact_rollback, output_rollback);
+        finalize_with_cancellation(&repo, &run_id, &sink, reason).await;
+        return;
+    }
     if !matches!(
         finalize_with_success(&repo, &run_id, result).await,
         FinalizeOutcome::Succeeded
@@ -230,14 +250,26 @@ fn zip_package_layout(
     mod_id: &str,
     compression_level: Option<i32>,
     run_id: &RunId,
+    cancellation: &CancellationToken,
 ) -> Result<(ZipStats, PackageOutputTransaction), PackageError> {
     let tmp_path = sibling_work_path(output_path, "partial", run_id)?;
     let backup_path = sibling_work_path(output_path, "previous", run_id)?;
     if backup_path.exists() {
         return Err(PackageError::OutputInvalid);
     }
-    match zip_to_tmp(source_dir, &tmp_path, layout, mod_id, compression_level) {
+    match zip_to_tmp(
+        source_dir,
+        &tmp_path,
+        layout,
+        mod_id,
+        compression_level,
+        cancellation,
+    ) {
         Ok(stats) => {
+            if cancellation.is_cancelled() {
+                let _ = std::fs::remove_file(&tmp_path);
+                return Err(PackageError::Worker);
+            }
             let backup = match std::fs::symlink_metadata(output_path) {
                 Ok(metadata) if metadata.file_type().is_symlink() => {
                     let _ = std::fs::remove_file(&tmp_path);
@@ -348,6 +380,7 @@ fn zip_to_tmp(
     layout: &PackageLayout,
     mod_id: &str,
     compression_level: Option<i32>,
+    cancellation: &CancellationToken,
 ) -> Result<ZipStats, PackageError> {
     if let Some(parent) = output_path.parent()
         && !parent.as_os_str().is_empty()
@@ -378,7 +411,7 @@ fn zip_to_tmp(
         uncompressed_bytes: 0,
         zip_bytes: 0,
     };
-    let mut buffer = Vec::with_capacity(8192);
+    let mut buffer = [0_u8; 64 * 1024];
 
     let canonical_source =
         std::fs::canonicalize(source_dir).map_err(|source| PackageError::Io {
@@ -386,6 +419,9 @@ fn zip_to_tmp(
             source,
         })?;
     for declared in &layout.required_files {
+        if cancellation.is_cancelled() {
+            return Err(PackageError::Worker);
+        }
         let rel_str = declared.replace("{mod_id}", mod_id);
         let path = source_dir.join(Path::new(&rel_str));
         let metadata = std::fs::symlink_metadata(&path).map_err(|source| {
@@ -422,25 +458,32 @@ fn zip_to_tmp(
         writer
             .start_file(rel_str.clone(), options)
             .map_err(|_| PackageError::Zip)?;
-        buffer.clear();
-        File::open(&canonical)
-            .map_err(|source| PackageError::Io {
-                operation: "open_required_file",
-                source,
-            })?
-            .read_to_end(&mut buffer)
-            .map_err(|source| PackageError::Io {
+        let mut input = File::open(&canonical).map_err(|source| PackageError::Io {
+            operation: "open_required_file",
+            source,
+        })?;
+        let mut file_bytes = 0_u64;
+        loop {
+            if cancellation.is_cancelled() {
+                return Err(PackageError::Worker);
+            }
+            let read = input.read(&mut buffer).map_err(|source| PackageError::Io {
                 operation: "read_required_file",
                 source,
             })?;
-        writer
-            .write_all(&buffer)
-            .map_err(|source| PackageError::Io {
-                operation: "write_zip_entry",
-                source,
-            })?;
+            if read == 0 {
+                break;
+            }
+            writer
+                .write_all(&buffer[..read])
+                .map_err(|source| PackageError::Io {
+                    operation: "write_zip_entry",
+                    source,
+                })?;
+            file_bytes = file_bytes.saturating_add(read as u64);
+        }
         stats.files += 1;
-        stats.uncompressed_bytes += buffer.len() as u64;
+        stats.uncompressed_bytes = stats.uncompressed_bytes.saturating_add(file_bytes);
     }
 
     let final_file = writer.finish().map_err(|_| PackageError::Zip)?;
@@ -549,6 +592,7 @@ mod tests {
             MOD_ID,
             None,
             &run_id,
+            &CancellationToken::new(),
         )
         .unwrap();
         transaction.commit().unwrap();

@@ -1,6 +1,7 @@
 //! AgentTheSpire desktop（workstation 角色）入口。
 
 mod commands;
+mod project_session;
 
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -10,7 +11,7 @@ use ats_core::health::Role;
 use ats_core::project::AppDataPaths;
 
 use crate::commands::image_proc_state::{ImageProcState, prewarm};
-use crate::commands::project::ActiveProject;
+use crate::project_session::ActiveProject;
 
 const APP_DATA_ROOT_ENV: &str = "SPIREFORGE_APP_DATA_ROOT";
 
