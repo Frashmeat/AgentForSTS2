@@ -14,7 +14,7 @@
   "branch": null,
   "base_branch": "rust",
   "worktree_path": null,
-  "current_phase": 2,
+  "current_phase": 3,
   "next_action": [
     {
       "phase": 1,
@@ -39,6 +39,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "完整 workspace test/clippy、前端生产构建、baseline/ML Tauri bundle 与安装验收需在最终阶段单独说明成本并取得用户确认。",
+  "notes": "提交 3c88bf28 的完整机器候选 rc-20260801T142915Z-3c88bf28c2b3 已通过；当前只等待用户执行该候选的最终安装/启动冒烟。",
   "meta": {}
 }

@@ -72,7 +72,8 @@
 - [x] 架构总览、当前进度、统一任务清单和总方案与 Work Order 1-5 的当前事实一致。
 - [x] 后端 code-spec 达到可执行契约深度，并删除失效的 Python/FastAPI 主路径描述。
 - [x] PowerShell、文档链接/格式及相关定向测试通过。
-- [ ] 获得单独授权后，前端/workspace/Windows/ML/installer 最终门禁通过并生成可复验候选；未获授权时明确保持未执行。
+- [x] 获得单独授权后，前端/workspace/Windows/ML/installer 最终门禁通过并生成可复验候选；未获授权时明确保持未执行。
+- [ ] 用户对当前候选执行最终安装/启动冒烟；Agent 不操作安装器或桌面应用 UI。
 
 ## 6. Good / Base / Bad
 
@@ -215,4 +216,10 @@ active documentation stale-path search
 
 修正后 `cargo clippy --workspace --all-targets -- -D warnings`、Core 全目标测试和 Desktop 全目标测试通过；`Box<PlanItem>`、`Box<ActionableFailure>` 的 JSON/IPC 透明性有明确回归断言。
 
-尚未执行且不得据此声称通过：修正提交上的第三次完整候选、baseline/ML Tauri bundle、installer manifest/hash 总复验，以及新的候选安装/启动验收。
+第三次候选 `rc-20260801T142915Z-3c88bf28c2b3` 绑定提交 `3c88bf28c2b3fba182e589cdf24e5c75b8b66f17`，总入口退出码为 0：10/10 steps succeeded，baseline/ML 2/2 variants 的 BuildInfo 与 release manifest 独立复验通过，四个 installer 的大小和 SHA-256 可重新计算一致，原子临时文件残留为 0。机器证据位于：
+
+```text
+artifacts/release/rc-20260801T142915Z-3c88bf28c2b3/release-verification.json
+```
+
+四个 installer 均为 `NotSigned`，符合本阶段未签名候选边界。尚未执行且不得据此声称通过：该候选的人工安装/启动冒烟。
