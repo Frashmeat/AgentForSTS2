@@ -968,7 +968,7 @@ retry_image_proc() -> CommandResult<PrewarmStatus>
 - Prewarm startup and retry share one async singleflight. Concurrent callers observe one attempt; a failed terminal attempt may increment exactly once on retry. Failed status contains the shared `ActionableFailure`, not a raw provider/path string.
 - Baseline and ML use `artifacts/build/<variant>/<build-id>/target`; bundle collection only traverses that target's `release/bundle`. Copied candidates and `release-manifest.json` live under `artifacts/release/<build-id>/<variant>` and are never collected from the legacy shared Tauri target.
 - The release manifest stores commit, variant, actual features, build ID, creation time, relative artifact paths, sizes, and SHA-256. Existing target/release directories for the same build ID are rejected instead of overwritten.
-- After Tauri bundling, `build.ps1` executes the final candidate EXE with `--write-build-info` and a unique temporary path; commit, variant, exact feature set, and build ID must match the requested identity before installer files are copied to the release directory. The temporary file is deleted in `finally` and is not a release artifact.
+- After Tauri bundling, `build.ps1` starts the final GUI-subsystem candidate EXE with `--write-build-info` and a unique temporary path, waits for its process exit, then reads the file; commit, variant, exact feature set, and build ID must match the requested identity before installer files are copied to the release directory. The temporary file is deleted in `finally` and is not a release artifact.
 
 ### 4. Validation And Error Matrix
 

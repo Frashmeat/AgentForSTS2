@@ -47,8 +47,14 @@ function Assert-RuntimeBuildIdentity {
         (Split-Path -Parent $Executable) `
         ("runtime-build-info-" + [Guid]::NewGuid().ToString('N') + '.json')
     try {
-        & $Executable --write-build-info $identityPath
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $identityPath -PathType Leaf)) {
+        $identityProcess = Start-Process `
+            -FilePath $Executable `
+            -ArgumentList @('--write-build-info', ('"' + $identityPath + '"')) `
+            -Wait `
+            -PassThru `
+            -WindowStyle Hidden
+        if ($identityProcess.ExitCode -ne 0 -or
+            -not (Test-Path -LiteralPath $identityPath -PathType Leaf)) {
             throw 'candidate executable failed to report BuildInfo'
         }
         try {
