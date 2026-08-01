@@ -12,11 +12,10 @@ dist/
 *.log
 *.tsbuildinfo
 
-# === Tauri build artifacts ===
+# === Build / release / E2E artifacts ===
 src-tauri/target/
 src-tauri/gen/
-artifacts/build/
-artifacts/release/
+/artifacts/
 
 # === Env / signing（含密钥） ===
 .env

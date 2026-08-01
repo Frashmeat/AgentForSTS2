@@ -3,42 +3,25 @@
   "name": "baseline-ml-build-provenance",
   "title": "baseline/ML 安装版与 provenance",
   "description": "执行桌面后端运行时加固 Work Order 4：图片处理 provenance、ML prewarm 单飞重试、BuildInfo、baseline/ML 隔离构建和 release manifest。",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": "fullstack",
   "scope": "ats-core+desktop+build",
   "priority": "P0",
   "creator": "codex-agent",
   "assignee": "codex-agent",
   "createdAt": "2026-08-01",
-  "completedAt": null,
+  "completedAt": "2026-08-01",
   "branch": null,
   "base_branch": "rust",
   "worktree_path": null,
-  "current_phase": 2,
-  "next_action": [
-    {
-      "phase": 1,
-      "action": "implement"
-    },
-    {
-      "phase": 2,
-      "action": "check"
-    },
-    {
-      "phase": 3,
-      "action": "finish"
-    },
-    {
-      "phase": 4,
-      "action": "create-pr"
-    }
-  ],
+  "current_phase": 3,
+  "next_action": [],
   "commit": null,
   "pr_url": null,
   "subtasks": [],
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "自动实现与 a2570e26 baseline/ML 候选构建已完成；等待人工安装、首次 ML prewarm 和真实图片 ArtifactManifest provenance 验收。",
+  "notes": "2026-08-01：baseline/ML NSIS 候选安装、启动、BuildInfo 对照、ML 首次 prewarm、确定性图片生成、ArtifactManifest provenance 与哈希交叉核验、正常退出和卸载均已完成；未操作真实游戏 UI。",
   "meta": {}
 }

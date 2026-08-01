@@ -1,6 +1,6 @@
 # baseline/ML 安装版与 provenance
 
-> 状态：in_progress
+> 状态：completed
 >
 > 优先级：P0
 >
@@ -67,7 +67,7 @@
 - [x] prewarm retry 单飞；并发调用不会重复下载/初始化，attempt 与 last failure 可观察。
 - [x] baseline/ML 的 BuildInfo 与实际 Cargo feature 组合一致，health/capabilities 返回同一身份。
 - [x] baseline/ML 使用独立 target/bundle 目录，release manifest 只枚举对应 variant 的新产物。
-- [ ] manifest 的 commit、variant、features、build_id 和 SHA-256 可与运行时/产物交叉核对。
+- [x] manifest 的 commit、variant、features、build_id 和 SHA-256 可与运行时/产物交叉核对。
 - [x] Core/Desktop/TypeScript/PowerShell 定向测试及相关 code-spec、架构/现状文档同步。
 
 ### Good / Base / Bad
@@ -221,4 +221,17 @@ git diff --check
 
 四个文件的 manifest/release/bundle 哈希均已现场复算一致，两个 variant 的哈希互不相同，且身份临时文件已清理。候选位于 `artifacts/release/<build-id>/<variant>/`，均为 `NotSigned`。
 
-第 6 项仍保持未完成：还需用户人工安装/启动对照 health/capabilities，完成 ML 首次网络 prewarm 和真实图片任务，并把图片 ArtifactManifest 的 processor/model/runtime/fallback/BuildInfo 与上述 release manifest 交叉核对。
+## 11. 安装候选人工 E2E 证据（2026-08-01）
+
+已使用两种 NSIS 候选完成隔离安装验收，随后正常关闭并卸载：
+
+- baseline：安装器 SHA-256 为 `05627782c35a3fd42b2a8ef144f8855d03855ebfef8c607a3802820360bd1fa4`；运行时 BuildInfo 为 commit `a2570e2606ef1c21a589d9c8ec3abea37ebdfbce`、variant `baseline`、features `[]`、buildId `wo4-a2570e26-baseline`，与 release manifest 完全一致。应用可启动、加载隔离配置、通过 UI 创建工程，并通过窗口关闭流程正常退出。
+- ML：安装器 SHA-256 为 `0912545b7f512b8da65d07ebe91030f7d80c8a741aa71b8541db7b2592e73531`；运行时 BuildInfo 为同一 commit、variant `ml`、features `["ml-rembg"]`、buildId `wo4-a2570e26-ml`，与 release manifest 完全一致。
+- ML 从空隔离目录完成首次 prewarm；u2netp SHA-256 为 `309c8469258dda742793dce0ebea8e6dd393174f89934733ecc8b14c76f4ddd8`，ONNX Runtime 版本为 `1.22.0`，下载的 `onnxruntime.dll` SHA-256 为 `579b636403983254346a5c1d80bd28f1519cd1e284cd204f8d4ff41f8d711559`。
+- UI 完成 `Generate Plan` 与 `Generate Code`。Run `run-000000000000000018c7adebadbcc894-00000004` 状态为 `succeeded`；ArtifactManifest schema version 为 2，processor 为 `ml_u2netp`，model/runtime/BuildInfo 与上述候选一致，且不存在 fallback。
+- ArtifactManifest SHA-256 为 `68172455af59f180c09543761e25fd8047d8e8e1b9e89ad12381e12779f143f5`，与 RunRecord 的 `manifestSha256` 一致；manifest 内所有快照文件和已发布文件均已逐项重算哈希一致。
+- 图片质量门禁通过：透明像素比例 `0.537109375`、最大连通组件比例 `0.9852320675105485`、边缘前景比例 `0.21774193548387097`，`accepted=true`、`issues=[]`。
+- 本次生成引用 STS2 Game Pack SHA-256 `81238b4f679c9bc994d596021903446aa0091edaa576c5c604f1e4ed2985dd39` 和 Truth Snapshot `5bd4e6ffd7e667bfac6613d6c6a7c3185e9fd9fafe7a07974c9a3faef03c4b6d`；`current.json`、snapshot manifest 与 ArtifactManifest 引用一致。
+- ML 应用通过窗口关闭正常退出，本地 E2E stub 已停止，候选卸载器以退出码 0 完成；安装目录和卸载注册表项均已移除。隔离 E2E 证据保留在 `artifacts/e2e/wo4-installed-candidates/`，不纳入版本控制。
+
+由此，第 6 项验收标准已完成。该 E2E 使用确定性本地 image/LLM stub 验证安装版的真实桌面调用链、ML 处理和 provenance，不用于评价外部模型的提示词语义一致性，也未操作真实游戏 UI。
