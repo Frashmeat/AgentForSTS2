@@ -14,7 +14,7 @@
   "branch": null,
   "base_branch": "rust",
   "worktree_path": null,
-  "current_phase": 1,
+  "current_phase": 2,
   "next_action": [
     {
       "phase": 1,
@@ -39,6 +39,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "",
+  "notes": "自动实现与 a2570e26 baseline/ML 候选构建已完成；等待人工安装、首次 ML prewarm 和真实图片 ArtifactManifest provenance 验收。",
   "meta": {}
 }

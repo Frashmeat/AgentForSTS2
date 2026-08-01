@@ -208,4 +208,17 @@ git diff --check
 
 `scripts/test-build-plan.ps1` 已覆盖 variant/feature 组合、拒绝调用方额外 feature、baseline/ML 目录隔离、忽略共享目录陈旧 installer、只收集允许的当前 bundle 文件以及复制后 SHA-256 重算。
 
-尚未执行完整 baseline/ML Tauri bundle，因此第 6 项仍未完成：必须在干净提交上生成两个真实候选，核对 `release-manifest.json`、运行时 health/capabilities、图片 ArtifactManifest 和 installer SHA-256 后，才能进入人工安装验收。
+完整 baseline/ML Tauri bundle 已在干净提交 `a2570e2606ef1c21a589d9c8ec3abea37ebdfbce` 上完成。`build.ps1` 会在 bundle 后用最终 GUI EXE 的 `--write-build-info` 文件握手核对 commit/variant/features/buildId，不一致时不发布 release 目录。
+
+最终候选：
+
+| Variant | Build ID | Installer | Bytes | SHA-256 |
+| --- | --- | --- | ---: | --- |
+| baseline | `wo4-a2570e26-baseline` | `msi/AgentTheSpire_0.1.0_x64_en-US.msi` | 8622080 | `3634ad392b18086c76867d6b65478bd3e81c6e180e5effb17a97529b362b67cb` |
+| baseline | `wo4-a2570e26-baseline` | `nsis/AgentTheSpire_0.1.0_x64-setup.exe` | 6256029 | `05627782c35a3fd42b2a8ef144f8855d03855ebfef8c607a3802820360bd1fa4` |
+| ml | `wo4-a2570e26-ml` | `msi/AgentTheSpire_0.1.0_x64_en-US.msi` | 18092032 | `d9d287c11c65ede33717fad2836eea941cf940981a4cae3e092cc1c456267e71` |
+| ml | `wo4-a2570e26-ml` | `nsis/AgentTheSpire_0.1.0_x64-setup.exe` | 6364765 | `0912545b7f512b8da65d07ebe91030f7d80c8a741aa71b8541db7b2592e73531` |
+
+四个文件的 manifest/release/bundle 哈希均已现场复算一致，两个 variant 的哈希互不相同，且身份临时文件已清理。候选位于 `artifacts/release/<build-id>/<variant>/`，均为 `NotSigned`。
+
+第 6 项仍保持未完成：还需用户人工安装/启动对照 health/capabilities，完成 ML 首次网络 prewarm 和真实图片任务，并把图片 ArtifactManifest 的 processor/model/runtime/fallback/BuildInfo 与上述 release manifest 交叉核对。
