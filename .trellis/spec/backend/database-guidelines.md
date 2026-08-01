@@ -1,51 +1,21 @@
 # Database Guidelines
 
-> Database patterns and conventions for this project.
+> Current status: not applicable to the desktop MVP.
 
----
+AgentTheSpire does not use a product database in the current Rust/Tauri desktop scope. A Mod project is a self-contained folder whose authoritative state is persisted through versioned JSON, immutable artifact snapshots, and atomic filesystem operations.
 
-## Overview
+## Current Persistence Contracts
 
-<!--
-Document your project's database conventions here.
+- Project identity: `project.json` plus `.ats/version`.
+- Run facts: `history/` schema-v2 `RunRecord` files through `FileRunRepository` CAS.
+- Successful artifacts: `artifacts/<artifact-id>/runs/<run-id>/artifact-manifest.json` and immutable `files/`.
+- Failed diagnostics: `.ats/diagnostics/<run-id>/`.
+- Workstation configuration, Game Pack Truth Snapshots, and recent projects live below the configured external app-data root, not inside the repository.
 
-Questions to answer:
-- What ORM/query library do you use?
-- How are migrations managed?
-- What are the naming conventions for tables/columns?
-- How do you handle transactions?
--->
+## Forbidden Without A New Approved Task
 
-(To be filled by the team)
+- Adding SQLx/PostgreSQL, migrations, a platform queue, or database-backed Run/Audit storage.
+- Treating a database as a hidden second authority beside project RunRecord/ArtifactManifest files.
+- Moving desktop project locks or transactional file publication into an unrelated service.
 
----
-
-## Query Patterns
-
-<!-- How should queries be written? Batch operations? -->
-
-(To be filled by the team)
-
----
-
-## Migrations
-
-<!-- How to create and run migrations -->
-
-(To be filled by the team)
-
----
-
-## Naming Conventions
-
-<!-- Table names, column names, index names -->
-
-(To be filled by the team)
-
----
-
-## Common Mistakes
-
-<!-- Database-related mistakes your team has made -->
-
-(To be filled by the team)
+Any future database introduction requires an explicit architecture task defining ownership, migration/rollback, concurrency, backup, and the cutover from current filesystem authorities.

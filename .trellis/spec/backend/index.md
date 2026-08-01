@@ -14,11 +14,12 @@ This directory contains guidelines for backend development. Fill in each file wi
 
 | Guide | Description | Status |
 |-------|-------------|--------|
-| [Directory Structure](./directory-structure.md) | Module organization and file layout | To fill |
-| [Database Guidelines](./database-guidelines.md) | ORM patterns, queries, migrations | To fill |
-| [Error Handling](./error-handling.md) | Error types, handling strategies | To fill |
-| [Quality Guidelines](./quality-guidelines.md) | Code standards, project locking, structured asset codegen, and Godot toolchain contracts | Active |
-| [Logging Guidelines](./logging-guidelines.md) | Structured logging, log levels | To fill |
+| [Directory Structure](./directory-structure.md) | Rust workspace ownership, Platform DDD, Game Pack and script placement | Active |
+| [Database Guidelines](./database-guidelines.md) | Explicit no-database desktop boundary and future cutover gate | Active / N/A |
+| [Error Handling](./error-handling.md) | ActionableFailure, cancellation, IPC/React mapping and redaction | Active |
+| [Quality Guidelines](./quality-guidelines.md) | Run/Artifact, generation, Game Pack, Truth Snapshot, ProjectSession and candidate provenance contracts | Active |
+| [Logging Guidelines](./logging-guidelines.md) | tracing/desktop diagnostics, redaction and release-output boundary | Active |
+| [Release Guidelines](./release-guidelines.md) | Windows candidate CLI, verification schema, manifests and CI boundary | Active |
 
 ---
 

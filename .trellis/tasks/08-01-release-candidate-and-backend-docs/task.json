@@ -1,0 +1,44 @@
+{
+  "id": "release-candidate-and-backend-docs",
+  "name": "release-candidate-and-backend-docs",
+  "title": "Windows 发布候选与文档规范收口",
+  "description": "执行桌面后端运行时加固 Work Order 5：建立 Windows release candidate 总入口和 verification，补齐 Windows CI，并收口 Rust/Tauri 架构与后端 code-spec。",
+  "status": "in_progress",
+  "dev_type": "fullstack",
+  "scope": "build+ci+docs",
+  "priority": "P0",
+  "creator": "codex-agent",
+  "assignee": "codex-agent",
+  "createdAt": "2026-08-01",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "rust",
+  "worktree_path": null,
+  "current_phase": 2,
+  "next_action": [
+    {
+      "phase": 1,
+      "action": "implement"
+    },
+    {
+      "phase": 2,
+      "action": "check"
+    },
+    {
+      "phase": 3,
+      "action": "finish"
+    },
+    {
+      "phase": 4,
+      "action": "create-pr"
+    }
+  ],
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "完整 workspace test/clippy、前端生产构建、baseline/ML Tauri bundle 与安装验收需在最终阶段单独说明成本并取得用户确认。",
+  "meta": {}
+}

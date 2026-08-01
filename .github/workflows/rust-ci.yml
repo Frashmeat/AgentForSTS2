@@ -121,3 +121,27 @@ jobs:
       - name: cargo clippy
         # RUSTFLAGS=-D warnings 已把 clippy 提升为 error；显式 -- -D warnings 兜底
         run: cargo clippy --workspace --all-targets -- -D warnings
+
+  # --- Windows 桌面编译门禁：覆盖正式 baseline/ML feature 组合，不在普通 CI 出 installer ---
+  windows-desktop-variants:
+    name: desktop baseline + ML (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          rustc --version
+          cargo --version
+          rustup show
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rust-ci-windows-desktop
+
+      - name: cargo check desktop baseline
+        run: cargo check -p agentthespire-desktop --no-default-features
+
+      - name: cargo check desktop ML
+        run: cargo check -p agentthespire-desktop --features ml-rembg

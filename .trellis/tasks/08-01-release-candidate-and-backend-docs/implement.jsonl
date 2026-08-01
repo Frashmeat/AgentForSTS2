@@ -1,0 +1,10 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend development guide"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Existing BuildInfo, ArtifactManifest, failure, ProjectSession and candidate contracts"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Release flow crosses frontend, Rust, build artifacts, CI and documentation"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse build.ps1 and release-build-lib.ps1 instead of duplicating identity logic"}
+{"file": "build.ps1", "reason": "Authoritative baseline and ML build identity entry"}
+{"file": "scripts/release-build-lib.ps1", "reason": "Existing isolated bundle publication and atomic manifest pattern"}
+{"file": "scripts/test-build-plan.ps1", "reason": "PowerShell fixture and safe temporary directory test pattern"}
+{"file": ".github/workflows/rust-ci.yml", "reason": "Current CI trigger and job boundary"}

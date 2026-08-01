@@ -6,51 +6,44 @@
 
 ## Overview
 
-<!--
-Document your project's quality standards here.
-
-Questions to answer:
-- What patterns are forbidden?
-- What linting rules do you enforce?
-- What are your testing requirements?
-- What code review standards apply?
--->
-
-(To be filled by the team)
+This file contains executable scenario contracts for Core/Desktop behavior. Cross-cutting ownership, errors, logging, and release orchestration are indexed from `index.md` and are not duplicated here.
 
 ---
 
 ## Forbidden Patterns
 
-<!-- Patterns that should never be used and why -->
-
-(To be filled by the team)
+- A shell/UI adapter cannot become a second authority for a Core state machine or persisted schema.
+- A successful status cannot be written before transactional files, child processes, and immutable evidence are complete.
+- Unknown error text, secrets, provider bodies, or absolute private paths cannot cross serialized product boundaries.
+- Game-specific paths, hooks, commands, and resources cannot be hard-coded in generic handlers when a validated Game Pack declaration owns them.
+- Tests cannot bypass validation, disable rollback, or replace a failed required gate with a claimed success.
 
 ---
 
 ## Required Patterns
 
-- 桌面工程的 `.ats/lock` 必须通过 `std::fs::File::try_lock()` 持有操作系统独占锁。
-- 锁文件可以常驻并记录 PID；不得通过无条件删除锁文件来判断或接管陈旧锁。
-- `TryLockError::WouldBlock` 映射为 `ProjectError::Locked`，其他 IO 错误保留为 `ProjectError::Io`。
+- Desktop `.ats/lock` ownership uses `std::fs::File::try_lock()`. A persistent lock file is diagnostic data, not proof that a process still holds the OS lock.
+- Formal project writes remain rollback-capable until validation, ArtifactManifest publication, and the terminal repository CAS succeed.
+- Long-running work receives cancellation explicitly and proves that file/process cleanup has completed before a session lock is released.
+- Persisted JSON schemas, CLI feature combinations, and Game Pack declarations are validated at their owning boundary.
 
 ---
 
 ## Testing Requirements
 
-工程锁改动至少覆盖三类用例：
-
-- Good：工程未锁定时可以打开。
-- Base：锁持有者退出、锁文件仍存在时可以重新打开。
-- Bad：另一 handle 或进程仍持锁时返回 `ProjectError::Locked`。
+- Every changed scenario runs the targeted tests listed in its section.
+- Boundary changes include Good/Base/Bad cases plus malformed, cancellation, rollback, and redaction cases where applicable.
+- Full workspace test/clippy, production frontend build, Tauri bundles, and installer E2E are release gates; targeted task evidence cannot be relabeled as those full gates.
 
 ---
 
 ## Code Review Checklist
 
-<!-- What reviewers should check -->
-
-(To be filled by the team)
+- The authoritative owner of every changed field/state/identity is explicit.
+- Validation runs before side effects; rollback and terminal CAS ordering are preserved.
+- Failure/cancellation semantics and safe serialized output are covered.
+- Tests assert persisted files and hashes, not only return values.
+- Documentation paths, signatures, field names, commands, and feature combinations match current code.
 
 ## Scenario: RunRecord v2 And ArtifactManifest
 
@@ -91,58 +84,6 @@ cargo test -p ats-core platform::artifact::tests
 cargo test -p ats-core platform::application::handlers::asset_generate::tests
 cargo test -p ats-core platform::application::handlers::batch_custom_code::tests
 cargo test -p ats-core platform::application::handlers::package_project::tests
-cargo check -p agentthespire-desktop
-npx tsc -b --pretty false
-npm run test:frontend
-```
-
-## Scenario: Actionable Failure Contract
-
-### Scope And Signatures
-
-Core owns the only serialized failure schema in `crates/ats-core/src/failure.rs`:
-
-```rust
-FailureNormalizer::{llm,image,project,run,toolchain,local_props,image_proc,package}(...)
-    -> ActionableFailure
-
-#[serde(transparent)]
-pub struct CommandFailure(pub ActionableFailure);
-pub type CommandResult<T> = Result<T, CommandFailure>;
-```
-
-`RunRecord.failure` and every fallible Tauri command serialize the same `ActionableFailure` fields: `schemaVersion`, `code`, `category`, `stage`, `message`, `action`, `retryable`, optional `retryAfterMs`, optional whitelisted `context`, and optional `diagnostic { id, summary, ioKind }`. Tauri must not copy these fields into a second transport schema.
-
-React accepts command rejection only through `src/services/actionableFailure.ts::toActionableFailure`. Invalid payloads become a local fixed `core.unclassified` failure; pages render failures through `ActionableErrorNotice` and do not expose `String(error)`.
-
-### Validation And Error Matrix
-
-| Source fact | Stable output | Required safety behavior |
-| --- | --- | --- |
-| LLM/Image 401 or auth variant | `*.authentication_failed`, `authentication`, `reauthenticate` | Do not expose provider body or credential |
-| LLM/Image 429 | `*.rate_limited`, `rate_limit`, `retry` | Preserve only bounded `retryAfterMs` |
-| Transport failure | `*.network_failed`, `network`, `retry` | Do not expose URL query or raw client error |
-| Package path escape or required file missing | stable `package.*` code | Context may contain only a safe project-relative path |
-| Filesystem failure | domain code plus `diagnostic.ioKind` | Do not persist an absolute user path |
-| Unknown error | `core.unclassified`, `internal` | Use fixed message/summary and a diagnostic ID; never call unknown `Display` for output |
-| Invalid Tauri reject payload | client-local `core.unclassified` | Do not render the rejected value |
-
-`FailureContext` is a fixed struct, not a free-form map. Provider IDs, setting keys, dependency names, Run IDs and project-relative paths are bounded and validated. Provider response bodies, authorization values, complete prompts, URL query/fragment values and unnormalized absolute roots never enter IPC, Run history, diagnostics or UI.
-
-### Good / Base / Bad Cases
-
-- Good: a typed LLM authentication failure reaches React with the same schema and recovery action while the provider body is absent from serialized output.
-- Base: an IO error preserves only its stable `ioKind`; the user receives an actionable message without an absolute path.
-- Bad: an unknown error or malformed command rejection contains a token/path canary; output is a fixed `core.unclassified` payload and contains none of the canary text.
-
-### Targeted Tests
-
-```text
-cargo test -p ats-core failure::
-cargo test -p ats-core platform::application::handlers::
-cargo test -p ats-core --features ml-rembg image_proc::ml::tests
-cargo check -p ats-core
-cargo test -p agentthespire-desktop commands::failure::tests
 cargo check -p agentthespire-desktop
 npx tsc -b --pretty false
 npm run test:frontend

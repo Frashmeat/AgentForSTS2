@@ -1,88 +1,91 @@
 # Error Handling
 
-> How errors are handled in this project.
+> Executable error and redaction contract for the current Rust/Tauri/React implementation.
 
----
+## Ownership And Signatures
 
-## Overview
+Core owns the only serialized product failure schema in `crates/ats-core/src/failure.rs`:
 
-本项目已经通过 `app.shared.infra.http_errors.install_http_error_handlers()` 安装 HTTP 错误处理器。HTTP 成功响应仍以 FastAPI 原生返回为主；HTTP 失败响应由全局 handler 统一为 `{"error": {"code": "...", "message": "...", "detail": ...}}`。WebSocket 工作流使用事件流表达进度、完成、失败和取消。
+```rust
+FailureNormalizer::{llm,image,project,run,toolchain,local_props,image_proc,package}(...)
+    -> ActionableFailure
 
-取消不是系统失败。工作站 WebSocket 与 Web 端平台任务都应把用户主动取消归入可预期终止，避免继续占用本地 CLI 进程、外部 AI key 或平台任务额度。
-
----
-
-## Error Types
-
-- `DomainError`：业务域错误基类，携带 `code/message/detail/status_code`。
-- `WorkflowTermination`：工作流可预期终止错误，用于用户取消、客户端断开等非系统失败场景。
-- `user_cancelled()`：生成 `code = "user_cancelled"` 的 `WorkflowTermination`。
-- `client_disconnected()`：生成 `code = "client_disconnected"` 的 `WorkflowTermination`。
-- `HTTPException`：仍是多数 HTTP 路由的直接错误返回方式。
-
----
-
-## Error Handling Patterns
-
-- WebSocket 工作流执行长耗时步骤时，应包裹为可取消任务；收到 `{"action":"cancel"}` 或连接断开时，应取消当前协程。
-- 调用 Code Agent CLI 的 runner 在协程取消时必须终止子进程；Windows 下使用进程树终止，避免强退后 key 仍被后台进程继续使用。
-- `WorkflowTermination` 应转换为 `cancelled` 事件，不应落入通用 `error` 事件或错误日志告警。
-- 普通异常仍转换为 `error` 事件，并尽量携带 `code/message/traceback` 以便前端统一解析。
-- 前端识别 `user_cancelled` 与 `client_disconnected` 时，应进入取消态，不展示为“执行失败”。
-- HTTP 路由只捕获可预期业务异常并转换为明确 4xx / 409 / 429；未知异常应继续抛出，交给全局 handler 记录日志并返回安全的 `internal_server_error`。
-- 禁止在路由或 HTTP facade 中用 `except Exception` 包一层 `HTTPException(status_code=500, detail=str(exc))`，避免把内部路径、密钥提示、上游 SDK 原始文本暴露给前端。
-- Web 服务器模式调用外部模型时，上游内容安全或网关阻断应归类为明确错误码，例如 `upstream_request_blocked`，不要把 `litellm.APIError` / SDK 原始异常直接展示为最终用户错误。
-- 面向游戏 Mod 生成的 Prompt 若包含“伤害 / 攻击 / 毒”等游戏机制词，应明确这些词属于虚构电子游戏内的数值规则，降低上游网关误判概率。
-
----
-
-## API Error Responses
-
-HTTP 当前返回风格：
-
-- 成功：直接返回 JSON 对象或数组。
-- 可预期失败：路由抛出 FastAPI `HTTPException`，全局 handler 返回 `{"error":{"code":"http_<status>","message":"...","detail":"..."}}`。
-- 未处理异常：全局 handler 记录异常日志，并返回 `{"error":{"code":"internal_server_error","message":"服务端发生异常，请稍后重试","detail":null}}`。
-- 少数旧接口：可能返回 `200 + {"error": "..."}`，后续新接口不应继续扩散这种模式。
-
-WebSocket 当前公共事件：
-
-```json
-{
-  "event": "error",
-  "stage": "error",
-  "code": "optional_error_code",
-  "message": "面向用户或开发者的错误说明",
-  "traceback": "可选"
-}
+#[serde(transparent)]
+pub struct CommandFailure(pub ActionableFailure);
+pub type CommandResult<T> = Result<T, CommandFailure>;
 ```
 
-取消事件：
+`ActionableFailure` uses camel-case JSON fields:
 
-```json
-{
-  "event": "cancelled",
-  "stage": "cancelled",
-  "code": "user_cancelled",
-  "message": "已取消当前生成"
-}
+```text
+schemaVersion
+code
+category
+stage
+message
+action
+retryable
+retryAfterMs?
+context?
+diagnostic? { id, summary, ioKind? }
 ```
 
-客户端主动取消 WebSocket 工作流时发送：
+- `RunRecord.failure` stores the Core type directly.
+- `src-tauri/src/commands/failure.rs::CommandFailure` is a transparent IPC wrapper. Tauri must not copy the fields into another transport DTO.
+- `src/services/actionableFailure.ts::toActionableFailure` is the React runtime guard. Invalid reject values become a fixed local `core.unclassified` failure.
+- `ActionableErrorNotice` renders the safe message, recovery action, and optional diagnostic ID. Pages do not render `String(error)`.
 
-```json
-{
-  "action": "cancel"
-}
+## Failure Versus Cancellation
+
+- A failed Run has one `ActionableFailure`, no result, and one `failed` terminal timeline event.
+- A cancelled Run has neither failure nor result. The first `CancellationReason` wins and the Run receives one `cancelled` terminal event only after work has stopped and rollback has finished.
+- Tauri command rejection is not a Run terminal transition. The handler/repository remains the authority for persisted Run state.
+- A panic or handler return without a terminal state is converted by the task supervisor into a classified failed Run unless another terminal CAS already won.
+
+## Redaction Boundary
+
+`FailureContext` is a fixed whitelist, not a free-form map. It may contain bounded provider IDs, setting keys, dependency names, Run IDs, project-relative paths, attempt counts, and byte progress when the matching field exists.
+
+The following values never enter IPC, Run history, ArtifactManifest, release verification, diagnostics summaries, or user-visible UI:
+
+- API keys, GitHub tokens, authorization headers, cookies, or decrypted credentials.
+- Provider response bodies, full prompts, generated output, or request/response payloads.
+- URL query/fragment values.
+- Unnormalized absolute project, app-data, model, runtime, or temporary paths.
+- Unknown exception `Display`/`Debug` text.
+
+Unknown errors use the fixed `core.unclassified` code/message/action and a generated diagnostic ID. Stable normalizers classify expected domain errors before that fallback.
+
+## Validation And Error Matrix
+
+| Source fact | Stable result | Safety requirement |
+| --- | --- | --- |
+| LLM/Image 401 or equivalent | `*.authentication_failed` | No provider body or credential |
+| LLM/Image 429 | `*.rate_limited` plus bounded `retryAfterMs` | No raw headers/body |
+| Transport failure | `*.network_failed` | No URL query or raw client error |
+| Package path escape/missing file | stable `package.*` | Only safe project-relative path context |
+| Filesystem failure | domain code plus optional `diagnostic.ioKind` | No absolute user path |
+| Project closing/drain timeout | stable `project.*` | At most one bounded blocking Run ID |
+| Unknown backend error | `core.unclassified` | Fixed text; no unknown `Display` |
+| Invalid Tauri reject payload | client-local `core.unclassified` | Rejected value is not rendered |
+| User/project/shutdown cancellation | Run `cancelled` | No fake failure payload |
+
+## Good / Base / Bad
+
+- Good: a typed authentication error reaches React with the same schema and recovery action while a provider-body canary is absent from every serialized boundary.
+- Base: an IO error preserves only a stable `ioKind` and safe relative path; the diagnostic ID can be used to correlate local logs.
+- Base: a user cancels during a child process; cleanup finishes and the Run becomes `cancelled` with no failure.
+- Bad: `anyhow`, SDK, reqwest, IO, or serde error text is returned through `CommandFailure` or persisted directly.
+- Bad: React converts a rejected object with `String(error)` and displays its token/path canary.
+
+## Required Tests
+
+```text
+cargo test -p ats-core failure::
+cargo test -p ats-core platform::application::handlers::
+cargo test -p agentthespire-desktop commands::failure::tests
+npm run test:frontend
+npx tsc -b --pretty false
 ```
 
----
-
-## Common Mistakes
-
-- 把用户取消当作系统失败展示，导致用户误以为生成异常。
-- 只关闭 WebSocket，不取消后端协程或 CLI 子进程，导致 key 仍被后台请求使用。
-- 在长耗时步骤外层缺少取消检查，导致收到取消后仍继续执行后续生成、构建或审批步骤。
-- HTTP 与 WebSocket 错误载荷字段不一致，前端只能靠字符串解析错误原因。
-- 捕获所有 `Exception` 后手动返回 `500 detail=str(exc)`，导致未知内部异常绕过全局安全错误处理。
-- 外部 AI 网关阻断时只记录原始 SDK 异常，导致用户看到不可行动的 `Your request was blocked`，也无法区分配置错误、内容误判和系统异常。
+Assertions must include token, provider-body, URL-query, absolute-path, malformed-payload, unknown-error, typed-error, and cancellation canaries.

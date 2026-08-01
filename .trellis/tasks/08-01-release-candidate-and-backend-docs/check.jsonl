@@ -1,0 +1,9 @@
+{"file": ".claude/commands/trellis/finish-work.md", "reason": "Finish work checklist"}
+{"file": ".claude/commands/trellis/check-backend.md", "reason": "Backend check spec"}
+{"file": ".claude/commands/trellis/check-frontend.md", "reason": "Frontend check spec"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify candidate contracts and executable code-spec depth"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Verify step data and failure facts across layers"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Check no duplicated build identity or hashing logic"}
+{"file": "build.ps1", "reason": "Verify the orchestrator preserves the authoritative variant entry"}
+{"file": "scripts/test-build-plan.ps1", "reason": "Verify fixture tests follow repository cleanup patterns"}
+{"file": ".github/workflows/rust-ci.yml", "reason": "Verify Windows compile gates do not build installers"}
