@@ -290,11 +290,11 @@ async fn code_generate_applies_pack_rules_before_writing_files() {
 
     let run = service.get(&id).await.unwrap();
     assert_eq!(run.status, RunStatus::Failed);
-    assert!(
-        run.error_message()
-            .unwrap_or_default()
-            .contains("ResetEnergy")
-    );
+    let failure = run.failure.as_ref().unwrap();
+    assert_eq!(failure.code, "run.input_invalid");
+    assert_eq!(failure.stage, "code_generate.output");
+    assert!(failure.diagnostic.is_none());
+    assert!(!serde_json::to_string(&run).unwrap().contains("ResetEnergy"));
     assert!(!td.path().join("Generated/BadRelic.cs").exists());
     assert!(!artifacts.join("BadRelic/BadRelic.cs").exists());
 }
@@ -343,11 +343,13 @@ async fn manifest_publish_failure_restores_previous_generated_file() {
     let run = service.get(&id).await.unwrap();
     assert_eq!(run.status, RunStatus::Failed);
     assert!(run.result.is_none());
-    assert!(
-        run.error_message()
-            .unwrap_or_default()
-            .contains("publish artifact manifest")
-    );
+    let failure = run.failure.as_ref().unwrap();
+    assert_eq!(failure.code, "core.unclassified");
+    assert_eq!(failure.stage, "code_generate.publish");
+    assert!(failure.diagnostic.is_some());
+    assert!(!serde_json::to_string(&run)
+        .unwrap()
+        .contains("publish artifact manifest"));
     assert_eq!(
         fs::read_to_string(generated).unwrap(),
         "public class PreviousVersion {}"
