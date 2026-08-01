@@ -957,6 +957,7 @@ fn acquire_refresh_lock(
     let path = store.root().join("refresh.lock");
     let file = OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(&path)
@@ -1090,7 +1091,7 @@ mod tests {
             let bytes = fs::read(source).unwrap();
             fs::write(
                 output_dir.join(format!("{indexer}.cs")),
-                format!("// {}", format!("{:x}", Sha256::digest(bytes))),
+                format!("// {:x}", Sha256::digest(bytes)),
             )
             .unwrap();
             Ok(())
@@ -1375,6 +1376,7 @@ mod tests {
         fs::create_dir_all(store.root()).unwrap();
         let lock = OpenOptions::new()
             .create(true)
+            .truncate(false)
             .read(true)
             .write(true)
             .open(store.root().join("refresh.lock"))

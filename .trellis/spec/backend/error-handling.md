@@ -11,7 +11,7 @@ FailureNormalizer::{llm,image,project,run,toolchain,local_props,image_proc,packa
     -> ActionableFailure
 
 #[serde(transparent)]
-pub struct CommandFailure(pub ActionableFailure);
+pub struct CommandFailure(pub Box<ActionableFailure>);
 pub type CommandResult<T> = Result<T, CommandFailure>;
 ```
 
@@ -31,7 +31,7 @@ diagnostic? { id, summary, ioKind? }
 ```
 
 - `RunRecord.failure` stores the Core type directly.
-- `src-tauri/src/commands/failure.rs::CommandFailure` is a transparent IPC wrapper. Tauri must not copy the fields into another transport DTO.
+- `src-tauri/src/commands/failure.rs::CommandFailure` is a boxed transparent IPC wrapper. Boxing keeps the Rust `Result` error variant bounded; Serde still emits the same `ActionableFailure` JSON object. Tauri must not copy the fields into another transport DTO.
 - `src/services/actionableFailure.ts::toActionableFailure` is the React runtime guard. Invalid reject values become a fixed local `core.unclassified` failure.
 - `ActionableErrorNotice` renders the safe message, recovery action, and optional diagnostic ID. Pages do not render `String(error)`.
 

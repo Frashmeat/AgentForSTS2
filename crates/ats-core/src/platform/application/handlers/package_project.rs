@@ -29,6 +29,7 @@ use crate::platform::artifact::{
 use crate::platform::contracts::SubmitPackageProjectRequest;
 use crate::platform::domain::{PackageError, RunId, RunRepository, RunResult};
 
+#[allow(clippy::too_many_arguments)] // Package execution exposes its finite Run and Game Pack inputs directly.
 pub async fn run_package_project(
     repo: Arc<dyn RunRepository>,
     sink: Arc<dyn ProgressSink>,

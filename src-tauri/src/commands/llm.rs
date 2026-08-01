@@ -46,7 +46,7 @@ enum StreamPayload {
     },
     Error {
         request_id: String,
-        failure: ActionableFailure,
+        failure: Box<ActionableFailure>,
     },
     Done {
         request_id: String,
@@ -78,7 +78,10 @@ pub async fn llm_start_stream(
                 },
                 Err(error) => StreamPayload::Error {
                     request_id: req_id.clone(),
-                    failure: ats_core::failure::FailureNormalizer::llm("llm.stream", &error),
+                    failure: Box::new(ats_core::failure::FailureNormalizer::llm(
+                        "llm.stream",
+                        &error,
+                    )),
                 },
             };
             if let Err(e) = app_handle.emit(STREAM_EVENT, &payload) {
@@ -90,4 +93,23 @@ pub async fn llm_start_stream(
     });
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn boxed_stream_failure_preserves_the_event_json_contract() {
+        let payload = StreamPayload::Error {
+            request_id: "request-1".into(),
+            failure: Box::new(ActionableFailure::unclassified("llm.stream")),
+        };
+
+        let serialized = serde_json::to_value(payload).unwrap();
+        assert_eq!(serialized["type"], "error");
+        assert_eq!(serialized["request_id"], "request-1");
+        assert_eq!(serialized["failure"]["code"], "core.unclassified");
+        assert!(serialized["failure"].get("failure").is_none());
+    }
 }

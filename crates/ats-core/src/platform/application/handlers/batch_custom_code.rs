@@ -40,6 +40,7 @@ struct PendingItemCommit {
     published: PublishedRunArtifact,
 }
 
+#[allow(clippy::too_many_arguments)] // Explicit Run/LLM dependencies are clearer than a handler parameter bag.
 pub async fn run_batch_custom_code(
     repo: Arc<dyn RunRepository>,
     llm: Arc<dyn LlmClient>,

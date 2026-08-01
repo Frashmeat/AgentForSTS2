@@ -216,7 +216,7 @@ pub enum RunResult {
         package_bytes: u64,
     },
     Plan {
-        item: PlanItem,
+        item: Box<PlanItem>,
         item_file_ref: Option<String>,
         model: String,
         usage: TokenUsage,
@@ -533,6 +533,31 @@ mod tests {
             finish_reason: "end_turn".into(),
             usage: TokenUsage::default(),
         }
+    }
+
+    #[test]
+    fn boxed_plan_item_preserves_the_run_result_json_contract() {
+        let result = RunResult::Plan {
+            item: Box::new(PlanItem {
+                id: "item-1".into(),
+                name: "Fixture".into(),
+                ..PlanItem::default()
+            }),
+            item_file_ref: Some("items/item-1.json".into()),
+            model: "fixture".into(),
+            usage: TokenUsage::default(),
+        };
+
+        let value = serde_json::to_value(&result).unwrap();
+        assert_eq!(value["kind"], "plan");
+        assert_eq!(value["item"]["id"], "item-1");
+        assert_eq!(value["item"]["name"], "Fixture");
+
+        let decoded: RunResult = serde_json::from_value(value).unwrap();
+        assert!(matches!(
+            decoded,
+            RunResult::Plan { item, .. } if item.id == "item-1"
+        ));
     }
 
     #[test]

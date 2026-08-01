@@ -145,7 +145,6 @@ impl GamePackRegistry {
             .ok_or_else(|| GamePackError::UnknownPackId { id: id.to_string() })
     }
 
-    #[must_use]
     pub fn iter(&self) -> impl Iterator<Item = &LoadedGamePack> {
         self.packs.values()
     }

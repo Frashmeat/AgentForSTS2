@@ -212,7 +212,7 @@ impl ArtifactStore {
         let manifest_bytes = serde_json::to_vec_pretty(&manifest)?;
         fs::write(staging_dir.join("artifact-manifest.json"), &manifest_bytes)?;
         let manifest_ref = normalize_relative_path(
-            &final_dir
+            final_dir
                 .join("artifact-manifest.json")
                 .strip_prefix(&self.project_root)
                 .map_err(|_| ArtifactError::UnsafeRelativePath(final_dir.display().to_string()))?,

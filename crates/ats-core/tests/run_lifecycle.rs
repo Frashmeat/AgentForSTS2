@@ -347,9 +347,11 @@ async fn manifest_publish_failure_restores_previous_generated_file() {
     assert_eq!(failure.code, "core.unclassified");
     assert_eq!(failure.stage, "code_generate.publish");
     assert!(failure.diagnostic.is_some());
-    assert!(!serde_json::to_string(&run)
-        .unwrap()
-        .contains("publish artifact manifest"));
+    assert!(
+        !serde_json::to_string(&run)
+            .unwrap()
+            .contains("publish artifact manifest")
+    );
     assert_eq!(
         fs::read_to_string(generated).unwrap(),
         "public class PreviousVersion {}"

@@ -49,6 +49,7 @@ JSON 字段（snake_case，全部必填，未涉及的字段输出空字符串�
 **重要**：规划阶段不提供游戏源码。不要把方法名看作时序证据，也不要发明 OnCombatStart、OnPlayerStartTurn 等 hook。需要 hook 的行为应在 implementation_notes 中写明“生成时从当前源码检索官方相似实现和生命周期调用方”。\n\
 只输出 JSON 对象本体，不要附加说明、不要 markdown fence。\n";
 
+#[allow(clippy::too_many_arguments)] // Planning keeps Run, LLM, and Pack inputs explicit at the handler boundary.
 pub async fn run_single_asset_plan(
     repo: Arc<dyn RunRepository>,
     llm: Arc<dyn LlmClient>,
@@ -227,7 +228,7 @@ pub async fn run_single_asset_plan(
             .map(|name| format!("items/{}", name.to_string_lossy()))
     });
     let result = RunResult::Plan {
-        item: plan_item,
+        item: Box::new(plan_item),
         item_file_ref,
         model,
         usage: TokenUsage {

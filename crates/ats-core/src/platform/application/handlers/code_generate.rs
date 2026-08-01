@@ -589,6 +589,7 @@ pub(crate) fn validate_generated_code_skein(
 ///
 /// 中途轮询 repo 状态：若 run 被 cancel 则立即返回 `GenerateError::Cancelled`，
 /// 让 reqwest stream 被 drop（实际断开网络）。
+#[allow(clippy::too_many_arguments)] // Shared streaming primitive keeps its Run and validation dependencies explicit.
 pub(crate) async fn generate_and_write_code_artifact(
     llm: Arc<dyn LlmClient>,
     sink: Arc<dyn ProgressSink>,

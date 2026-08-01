@@ -14,7 +14,7 @@ use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(transparent)]
-pub struct CommandFailure(pub ActionableFailure);
+pub struct CommandFailure(pub Box<ActionableFailure>);
 
 pub type CommandResult<T> = Result<T, CommandFailure>;
 
@@ -107,7 +107,7 @@ impl CommandFailure {
 
 impl From<ActionableFailure> for CommandFailure {
     fn from(value: ActionableFailure) -> Self {
-        Self(value)
+        Self(Box::new(value))
     }
 }
 

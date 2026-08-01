@@ -479,9 +479,7 @@ fn asset_source_path_marker(asset_type: &str) -> Option<&'static str> {
 }
 
 fn normalized_path(path: &str) -> String {
-    path.replace('\\', "/")
-        .replace('.', "/")
-        .to_ascii_lowercase()
+    path.replace(['\\', '.'], "/").to_ascii_lowercase()
 }
 
 fn count_occurrences(haystack: &str, needle: &str) -> i32 {
@@ -1111,7 +1109,7 @@ public sealed class CombatManager
         assert!(excerpt.contains("Hook.AfterSideTurnStart"));
         assert!(excerpt.contains("ResetEnergy"));
         assert!(ranges.len() <= MAX_EVIDENCE_RANGES);
-        assert!(excerpt.lines().count() <= MAX_EVIDENCE_RANGES * 5 + MAX_EVIDENCE_RANGES - 1);
+        assert!(excerpt.lines().count() < MAX_EVIDENCE_RANGES * 5 + MAX_EVIDENCE_RANGES);
     }
 
     #[test]

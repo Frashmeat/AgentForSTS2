@@ -208,4 +208,11 @@ changed Markdown relative-link check
 active documentation stale-path search
 ```
 
-尚未执行且不得据此声称通过：前端生产构建、workspace check/test/clippy、baseline/ML Tauri bundle、候选安装与真实应用验收。这些仍是最后一项单独授权门禁。
+完整候选门禁的两次失败尝试均保留为不可变 verification：
+
+- `rc-20260801T133725Z-40a014d79b19` 在 `workspace-test` 停止。根因是两条 `run_lifecycle` 测试仍断言 Work Order 2 已禁止暴露的内部错误文本；产品结构化失败与回滚行为正确。测试改为断言 `ActionableFailure.code/stage/diagnostic` 和脱敏结果后，定向 6/6 通过。
+- `rc-20260801T134159Z-3d31211c5433` 通过 frontend、workspace check/test，在 `workspace-clippy` 停止。Rust 1.94 的严格 lint 暴露 Core 13 项和其后 Desktop 31 项派生警告；按最小根因方案修正显式文件打开语义、机械 lint、RunResult 大 variant 和透明 IPC failure 的内存表示。
+
+修正后 `cargo clippy --workspace --all-targets -- -D warnings`、Core 全目标测试和 Desktop 全目标测试通过；`Box<PlanItem>`、`Box<ActionableFailure>` 的 JSON/IPC 透明性有明确回归断言。
+
+尚未执行且不得据此声称通过：修正提交上的第三次完整候选、baseline/ML Tauri bundle、installer manifest/hash 总复验，以及新的候选安装/启动验收。

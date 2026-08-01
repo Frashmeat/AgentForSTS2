@@ -106,7 +106,7 @@ pub enum PrewarmStatus {
     /// 走启发式 fallback，UI 提示用户但不致命
     Failed {
         attempt: u64,
-        failure: ActionableFailure,
+        failure: Box<ActionableFailure>,
     },
 }
 
@@ -174,7 +174,10 @@ where
     });
     let terminal = match operation(Arc::clone(&state), attempt).await {
         Ok(loaded) => return state.publish_loaded(loaded, attempt),
-        Err(failure) => PrewarmStatus::Failed { attempt, failure },
+        Err(failure) => PrewarmStatus::Failed {
+            attempt,
+            failure: Box::new(failure),
+        },
     };
     state.set_status(terminal.clone());
     terminal
@@ -366,6 +369,10 @@ mod tests {
     async fn baseline_prewarm_reports_structured_feature_failure() {
         let state = Arc::new(ImageProcState::new());
         let status = prewarm(Arc::clone(&state), PathBuf::from("private-canary")).await;
+        let serialized = serde_json::to_value(&status).unwrap();
+        assert_eq!(serialized["state"], "failed");
+        assert_eq!(serialized["failure"]["code"], "image_proc.feature_disabled");
+        assert!(serialized["failure"].get("failure").is_none());
         let PrewarmStatus::Failed { attempt, failure } = status else {
             panic!("baseline prewarm should report a terminal feature failure");
         };
