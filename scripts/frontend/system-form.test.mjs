@@ -24,6 +24,7 @@ const snapshot = {
     provider: "openai",
     model: "model",
     baseUrl: "https://llm.example/v1",
+    customPrompt: "",
     apiKeyMasked: "sk-a...-key (len=20)",
     apiKeyConfigured: true,
   },
@@ -41,14 +42,14 @@ const snapshot = {
     port: 7860,
     mountFrontend: true,
     requiresDatabase: false,
-    githubToken: "ghp_...mask (len=40)",
+    githubTokenMasked: "ghp_...mask (len=40)",
   },
   runtimeWeb: {
     host: "127.0.0.1",
     port: 7870,
     mountFrontend: false,
     requiresDatabase: true,
-    githubToken: "<empty>",
+    githubTokenMasked: "<empty>",
   },
   knowledge: { sts2DllPath: "C:/game/sts2.dll" },
   toolchain: { godotExePath: "I:/Godot/godot.exe" },
@@ -61,38 +62,48 @@ test("Godot path is loaded and emitted only when changed", () => {
 
   const changed = { ...unchanged, godotExePath: "D:/Tools/Godot/godot.exe" };
   assert.deepEqual(buildPatch(changed, snapshot), {
-    toolchain: { godot_exe_path: "D:/Tools/Godot/godot.exe" },
+    toolchain: { godotExePath: "D:/Tools/Godot/godot.exe" },
   });
 });
 
 test("masked GitHub token is not loaded into the editable form", () => {
   const form = formFromSnapshot(snapshot);
 
-  assert.equal(form.rtGithubToken, "");
-  assert.equal(form.rtGithubTokenTouched, false);
+  assert.equal(form.githubToken, "");
+  assert.equal(form.githubTokenTouched, false);
   assert.deepEqual(buildPatch(form, snapshot), {});
 });
 
 test("a new GitHub token is written exactly as entered", () => {
   const form = {
     ...formFromSnapshot(snapshot),
-    rtGithubToken: "ghp_new-token",
-    rtGithubTokenTouched: true,
+    githubToken: "ghp_new-token",
+    githubTokenTouched: true,
   };
 
   assert.deepEqual(buildPatch(form, snapshot), {
-    runtime_workstation: { github_token: "ghp_new-token" },
+    runtimeWorkstation: { githubToken: "ghp_new-token" },
+  });
+});
+
+test("runtime custom instructions use the typed LLM patch", () => {
+  const form = {
+    ...formFromSnapshot(snapshot),
+    llmCustomPrompt: "Keep generated names concise.",
+  };
+  assert.deepEqual(buildPatch(form, snapshot), {
+    llm: { customPrompt: "Keep generated names concise." },
   });
 });
 
 test("an explicitly cleared GitHub token is preserved as an empty patch value", () => {
   const form = {
     ...formFromSnapshot(snapshot),
-    rtGithubToken: "",
-    rtGithubTokenTouched: true,
+    githubToken: "",
+    githubTokenTouched: true,
   };
 
   assert.deepEqual(buildPatch(form, snapshot), {
-    runtime_workstation: { github_token: "" },
+    runtimeWorkstation: { githubToken: "" },
   });
 });

@@ -23,6 +23,8 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Cmd {
+    /// Print the registered Feature catalog as JSON.
+    Features,
     /// 构建产物：cargo + frontend + 可选 Tauri bundle。
     Build {
         /// 同时构建桌面 Tauri 安装包（需要本机已装 tauri-cli）
@@ -65,6 +67,7 @@ fn main() -> ExitCode {
 
     let cli = Cli::parse();
     let result = match cli.command {
+        Cmd::Features => cmd_features(),
         Cmd::Build { desktop, web } => cmd_build(desktop, web),
         Cmd::Deploy { compose } => cmd_compose("up", "-d", &compose),
         Cmd::Logs { compose, follow } => cmd_logs(&compose, follow),
@@ -81,6 +84,15 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn cmd_features() -> Result<()> {
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&ats_features::built_in_feature_contracts())
+            .context("serialize Feature catalog")?
+    );
+    Ok(())
 }
 
 fn cmd_build(desktop: bool, web: bool) -> Result<()> {

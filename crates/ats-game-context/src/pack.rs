@@ -7,7 +7,7 @@ use thiserror::Error;
 
 pub const GAME_PACK_SCHEMA_VERSION: u32 = 2;
 const BUILT_IN_STS2_SHA256: &str =
-    "00a0cc406271ef993254f78fafb9e55cd27b5f9edf03ede1fc49dd2dc99f721e";
+    "34ba4773de6eec0e9a7762c692baa2589ae12fe389678460c787921f1a3ac003";
 const BUILT_IN_STS2: &[u8] = include_bytes!("../../../game_packs/sts2/stage2-game-pack.json");
 
 #[derive(Debug, Clone)]

@@ -2,6 +2,7 @@
 
 mod contribution;
 mod pack;
+mod template;
 mod truth;
 
 pub use ats_kernel::GamePackId;
@@ -13,6 +14,7 @@ pub use pack::{
     GAME_PACK_SCHEMA_VERSION, GamePackLoadError, GamePackLoader, GamePackRegistry,
     GamePackRegistryError, LoadedGamePack, PackContribution,
 };
+pub use template::{ProjectTemplateError, built_in_project_template};
 pub use truth::{
     EvidenceQuery, EvidenceQueryError, TRUTH_SNAPSHOT_SCHEMA_VERSION, TruthEvidenceRecord,
     TruthSnapshotIndex, TruthSnapshotManifest, TruthSnapshotRepository, TruthSnapshotSource,

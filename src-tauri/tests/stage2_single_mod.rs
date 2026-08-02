@@ -36,7 +36,11 @@ struct FixtureModel {
 
 #[async_trait]
 impl ModelClient for FixtureModel {
-    async fn complete(&self, request: ModelRequestSnapshot) -> Result<ModelResponse, ModelError> {
+    async fn complete(
+        &self,
+        request: ModelRequestSnapshot,
+        _: &CancellationToken,
+    ) -> Result<ModelResponse, ModelError> {
         self.snapshots.lock().unwrap().push(request);
         Ok(ModelResponse {
             model: "fixture-model".into(),
@@ -54,7 +58,11 @@ impl ModelClient for FixtureModel {
         })
     }
 
-    async fn stream(&self, _: ModelRequestSnapshot) -> Result<ModelStream, ModelError> {
+    async fn stream(
+        &self,
+        _: ModelRequestSnapshot,
+        _: &CancellationToken,
+    ) -> Result<ModelStream, ModelError> {
         Ok(Box::pin(stream::empty()))
     }
 }

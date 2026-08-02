@@ -8,7 +8,7 @@ use ats_kernel::{
     ContributionId, FeatureId, RecipeId, SchemaId, SchemaRef, SchemaVersion, Sha256Digest,
 };
 use ats_runtime::{
-    FinishReason, ModelClient, ModelError, ModelGamePackRef, ModelRequestError,
+    CancellationToken, FinishReason, ModelClient, ModelError, ModelGamePackRef, ModelRequestError,
     ModelRequestSnapshot, ModelResourceRef, TokenUsage,
 };
 use ats_workspace::ResourceAsset;
@@ -201,11 +201,15 @@ impl LogAnalyzeService {
         client: &C,
         request: LogAnalyzeRequest,
         context: LogAnalyzeContext<'_>,
+        cancellation: &CancellationToken,
     ) -> Result<LogAnalyzeExecution, LogAnalyzeError>
     where
         C: ModelClient + ?Sized,
     {
         validate_context(&context)?;
+        if cancellation.is_cancelled() {
+            return Err(LogAnalyzeError::Cancelled);
+        }
         let log = bounded_log(&request)?;
         let rules: LogAnalysisRules = context.contributions.decode(&log_rules_slot())?;
         rules.validate()?;
@@ -263,7 +267,10 @@ impl LogAnalyzeService {
             resource_refs,
             model_request,
         )?;
-        let response = client.complete(snapshot.clone()).await?;
+        let response = client.complete(snapshot.clone(), cancellation).await?;
+        if cancellation.is_cancelled() {
+            return Err(LogAnalyzeError::Cancelled);
+        }
         if response.finish_reason == FinishReason::MaxTokens {
             return Err(LogAnalyzeError::TruncatedModelOutput);
         }
@@ -302,6 +309,8 @@ pub enum LogAnalyzeError {
     TruncatedModelOutput,
     #[error("log analysis model output failed typed decoding")]
     InvalidModelOutput,
+    #[error("log analysis was cancelled")]
+    Cancelled,
     #[error(transparent)]
     Contribution(#[from] ContributionResolverError),
     #[error(transparent)]
@@ -428,12 +437,17 @@ mod tests {
         async fn complete(
             &self,
             request: ModelRequestSnapshot,
+            _: &CancellationToken,
         ) -> Result<ModelResponse, ModelError> {
             self.snapshots.lock().unwrap().push(request);
             Ok(self.response.clone())
         }
 
-        async fn stream(&self, _request: ModelRequestSnapshot) -> Result<ModelStream, ModelError> {
+        async fn stream(
+            &self,
+            _request: ModelRequestSnapshot,
+            _: &CancellationToken,
+        ) -> Result<ModelStream, ModelError> {
             Ok(Box::pin(stream::empty()))
         }
     }
@@ -586,6 +600,7 @@ mod tests {
                     &query,
                     Some("CUSTOM-INSTRUCTION-CANARY"),
                 ),
+                &CancellationToken::new(),
             )
             .await
             .unwrap();
@@ -628,6 +643,7 @@ mod tests {
                         max_log_chars: None,
                     },
                     context(&pack, &contributions, &snapshot, &query, None),
+                    &CancellationToken::new(),
                 )
                 .await
                 .unwrap();
@@ -658,6 +674,7 @@ mod tests {
                         max_log_chars: None,
                     },
                     context(&alpha, &contributions, &beta_snapshot, &query, None),
+                    &CancellationToken::new(),
                 )
                 .await,
             Err(LogAnalyzeError::ContextIdentityMismatch)
@@ -681,6 +698,7 @@ mod tests {
                         max_log_chars: None,
                     },
                     context(&alpha, &contributions, &snapshot, &query, None),
+                    &CancellationToken::new(),
                 )
                 .await,
             Err(LogAnalyzeError::InvalidModelOutput)

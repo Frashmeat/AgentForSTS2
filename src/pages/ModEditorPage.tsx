@@ -1,225 +1,106 @@
-// Mod Editor 页：当前 active project 的快速概览 —— mod_analyzer 输出 +
-// 关键路径 + 一键打开 artifacts/items/history。
-//
-// 简化版：不做完整文件树 + .cs 高亮（CodeMirror 集成是后续工作），先满足
-// "用户看一眼这个 mod 项目长啥样、缺什么、跑过几个 item"。
-
 import { useEffect, useState } from "react";
-import { useProjectStore } from "@/stores/project";
-import {
-  Badge,
-  Button,
-  Card,
-  KV,
-  KVList,
-  Notice,
-  PageHero,
-} from "@/components/ui";
-import { ActionableErrorNotice } from "@/components/ActionableErrorNotice";
-import { api } from "@/services/api";
-import { toActionableFailure } from "@/services/actionableFailure";
-import type { ActionableFailure } from "@/services/actionableFailure";
-import type {
-  ArtifactStatus,
-  ModAnalysisReport,
-} from "@/services/tauriApi";
+import { Play, WandSparkles } from "lucide-react";
 
-function stateVariant(s: string): "ok" | "error" | "warn" | "muted" {
-  if (s === "reviewed" || s === "generated") return "ok";
-  if (s === "failed") return "error";
-  if (s === "stale" || s === "needs_input") return "warn";
-  return "muted";
-}
+import { ActionableErrorNotice } from "@/components/ActionableErrorNotice";
+import { Badge, Button, Card, Field, Notice, PageHero } from "@/components/ui";
+import { api } from "@/services/api";
+import { toActionableFailure, type ActionableFailure } from "@/services/actionableFailure";
+import { waitForRun } from "@/services/runPolling";
+import type { CurrentProject, PlanItem, RunRecord, SelectedResource } from "@/services/tauriApi";
 
 export function ModEditorPage() {
-  const project = useProjectStore((s) => s.project);
-  const [report, setReport] = useState<ModAnalysisReport | null>(null);
-  const [artifacts, setArtifacts] = useState<ArtifactStatus[]>([]);
-  const [error, setError] = useState<ActionableFailure | null>(null);
-  const [analyzing, setAnalyzing] = useState(false);
+  const [project, setProject] = useState<CurrentProject | null>(null);
+  const [requirements, setRequirements] = useState("");
+  const [itemType, setItemType] = useState("custom_code");
+  const [artifactId, setArtifactId] = useState("mod-item");
+  const [resourcesJson, setResourcesJson] = useState("[]");
+  const [plan, setPlan] = useState<PlanItem | null>(null);
+  const [run, setRun] = useState<RunRecord | null>(null);
+  const [failure, setFailure] = useState<ActionableFailure | null>(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (project) void refreshAll(project.path);
-  }, [project]);
-  async function refreshAll(projectRoot: string) {
-    setAnalyzing(true);
-    setError(null);
+    if (__IS_TAURI__) void api.currentProject().then((value) => setProject(value as CurrentProject | null));
+  }, []);
+
+  async function planMod() {
+    setBusy(true); setFailure(null); setPlan(null);
     try {
-      const [r, a] = await Promise.all([
-        api.analyzeModProject(projectRoot) as Promise<ModAnalysisReport>,
-        api.planArtifactList() as Promise<ArtifactStatus[]>,
-      ]);
-      setReport(r);
-      setArtifacts(a);
-    } catch (e: unknown) {
-      setError(toActionableFailure(e));
-    } finally {
-      setAnalyzing(false);
-    }
+      const id = await api.submitModPlan({ requirements, itemType }) as string;
+      const terminal = await waitForRun(id, setRun);
+      if (terminal.status === "succeeded") {
+        const value = decodePlan(terminal);
+        if (value) setPlan(value);
+      }
+    } catch (error: unknown) { setFailure(toActionableFailure(error)); }
+    finally { setBusy(false); }
   }
 
-  if (!__IS_TAURI__) {
-    return (
-      <div>
-        <PageHero
-          eyebrow="editor · mod project"
-          title="Mod Editor"
-          subtitle="桌面端 only —— 需访问本地工程文件。"
-        />
-      </div>
-    );
-  }
-
-  if (!project) {
-    return (
-      <div>
-        <PageHero eyebrow="editor · mod project" title="Mod Editor" />
-        <Notice variant="warn" title="没有打开的工程">
-          先去 Dashboard → Project 卡片新建或打开一个工程。
-        </Notice>
-      </div>
-    );
+  async function generate() {
+    if (!plan || !project) return;
+    setBusy(true); setFailure(null);
+    try {
+      const selectedResources = JSON.parse(resourcesJson) as SelectedResource[];
+      if (!Array.isArray(selectedResources)) throw new Error("invalid resources");
+      const id = await api.submitSingleGenerate({
+        artifactId,
+        modId: project.csharpName,
+        plan,
+        selectedResources,
+      }) as string;
+      await waitForRun(id, setRun);
+    } catch (error: unknown) { setFailure(toActionableFailure(error)); }
+    finally { setBusy(false); }
   }
 
   return (
-    <div>
-      <PageHero
-        eyebrow="editor · mod project"
-        title="Mod Editor"
-        subtitle={
-          <code style={{ fontSize: "12px" }}>{project.path}</code>
-        }
-        actions={
-          <Button onClick={() => refreshAll(project.path)} disabled={analyzing}>
-            {analyzing ? "Analyzing…" : "Re-analyze"}
+    <div className="space-y-4">
+      <PageHero eyebrow="feature · mod.plan + mod.generate.single" title="Mod generation" subtitle={project?.name ?? "No project open"} />
+      <ActionableErrorNotice failure={failure} />
+      {!project && <Notice variant="warn" title="Project required">Open a project from Dashboard.</Notice>}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Card eyebrow="plan" title="Design contract">
+          <Field label="Item type">
+            <select className="input-mono" value={itemType} onChange={(event) => setItemType(event.target.value)}>
+              <option value="custom_code">custom_code</option>
+              <option value="relic">relic</option>
+              <option value="card">card</option>
+              <option value="power">power</option>
+              <option value="character">character</option>
+            </select>
+          </Field>
+          <Field label="Requirements"><textarea className="input-mono min-h-44" value={requirements} onChange={(event) => setRequirements(event.target.value)} /></Field>
+          <Button variant="accent" disabled={busy || !project || !requirements.trim()} onClick={() => void planMod()}>
+            <WandSparkles size={15} /> Plan
           </Button>
-        }
-      />
-
-      <div className="space-y-4">
-        <ActionableErrorNotice failure={error} />
-
-        {report && (
-          <Card eyebrow="structure · csproj" title="Project structure">
-            <KVList>
-              <KV k=".csproj">
-                <code className="break-all">{report.csprojPath ?? "(none)"}</code>
-              </KV>
-              {report.csprojSummary && (
-                <>
-                  <KV k="SDK">{report.csprojSummary.sdk ?? "(none)"}</KV>
-                  <KV k="TargetFramework">
-                    {report.csprojSummary.targetFramework ?? "(none)"}
-                  </KV>
-                  <KV k="PackageRefs">
-                    {report.csprojSummary.packageReferences.length === 0 ? (
-                      <span style={{ color: "var(--ink-faint)" }}>(none)</span>
-                    ) : (
-                      <ul className="space-y-0.5">
-                        {report.csprojSummary.packageReferences.map((p) => (
-                          <li key={p} style={{ fontSize: "11.5px" }}>
-                            <code>{p}</code>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </KV>
-                </>
-              )}
-              <KV k=".cs files">
-                {report.csFilesCount} files · {report.csTotalBytes} bytes
-              </KV>
-              <KV k="artifacts/ count">{report.artifactsCount}</KV>
-            </KVList>
-            {report.modMeta && (
-              <details className="mt-3">
-                <summary
-                  className="cursor-pointer"
-                  style={{
-                    fontFamily: '"JetBrains Mono", monospace',
-                    fontSize: "10.5px",
-                    letterSpacing: "0.16em",
-                    textTransform: "uppercase",
-                    color: "var(--ink-mute)",
-                  }}
-                >
-                  packages.json
-                </summary>
-                <KVList variant="narrow" className="mt-2">
-                  <KV k="name">{report.modMeta.name ?? "-"}</KV>
-                  <KV k="author">{report.modMeta.author ?? "-"}</KV>
-                  <KV k="version">{report.modMeta.version ?? "-"}</KV>
-                </KVList>
-              </details>
-            )}
-            {report.warnings.length > 0 && (
-              <Notice variant="warn" title="Warnings" className="mt-3">
-                <ul className="space-y-0.5">
-                  {report.warnings.map((w, i) => (
-                    <li key={i} style={{ fontSize: "12px" }}>⚠ {w}</li>
-                  ))}
-                </ul>
-              </Notice>
-            )}
-          </Card>
-        )}
-
-        <Card eyebrow="planning · artifacts" title="PlanItem artifacts">
-          {artifacts.length === 0 ? (
-            <p style={{ color: "var(--ink-faint)", fontSize: "12.5px" }}>
-              没有 plan_artifact 状态记录。通过生成流程或后续 batch UI 写入。
-            </p>
-          ) : (
-            <table
-              className="w-full"
-              style={{ fontSize: "12.5px", borderCollapse: "collapse" }}
-            >
-              <thead>
-                <tr style={{ color: "var(--ink-mute)" }}>
-                  {["item_id", "state", "updated", "cs / png"].map((h) => (
-                    <th
-                      key={h}
-                      className="text-left pb-2"
-                      style={{
-                        fontFamily: '"JetBrains Mono", monospace',
-                        fontSize: "9.5px",
-                        letterSpacing: "0.16em",
-                        textTransform: "uppercase",
-                        fontWeight: 500,
-                        borderBottom: "1px solid var(--rule-soft)",
-                      }}
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {artifacts.map((a) => (
-                  <tr
-                    key={a.itemId}
-                    style={{ borderBottom: "1px solid var(--rule-hair)" }}
-                  >
-                    <td className="py-1.5">
-                      <code style={{ fontSize: "11.5px" }}>{a.itemId}</code>
-                    </td>
-                    <td>
-                      <Badge variant={stateVariant(a.state)}>{a.state}</Badge>
-                    </td>
-                    <td style={{ color: "var(--ink-mute)", fontSize: "11.5px" }}>
-                      {new Date(a.updatedAt).toLocaleString()}
-                    </td>
-                    <td style={{ color: "var(--ink-mute)", fontSize: "11.5px" }}>
-                      {a.csPath ? "✓ cs " : ""}
-                      {a.pngPath ? "✓ png" : ""}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+        </Card>
+        <Card eyebrow="generate" title={plan?.name ?? "Awaiting plan"}>
+          {plan && <pre className="code-block max-h-64 overflow-auto">{JSON.stringify(plan, null, 2)}</pre>}
+          <Field label="Artifact ID"><input className="input-mono" value={artifactId} onChange={(event) => setArtifactId(event.target.value)} /></Field>
+          <Field label="Selected resources"><textarea className="input-mono min-h-24" value={resourcesJson} onChange={(event) => setResourcesJson(event.target.value)} /></Field>
+          <Button variant="success" disabled={busy || !plan || !artifactId.trim()} onClick={() => void generate()}>
+            <Play size={15} /> Generate
+          </Button>
         </Card>
       </div>
+      {run && <RunResult run={run} />}
     </div>
+  );
+}
+
+function decodePlan(run: RunRecord): PlanItem | null {
+  if (run.result?.schema.id !== "feature.mod-plan-result") return null;
+  const value = run.result.payload;
+  return typeof value.itemId === "string" && typeof value.itemType === "string"
+    ? value as PlanItem
+    : null;
+}
+
+function RunResult({ run }: { run: RunRecord }) {
+  return (
+    <Card eyebrow="run" title={run.featureId} actions={<Badge variant={run.status === "succeeded" ? "ok" : run.status === "failed" ? "error" : "warn"}>{run.status}</Badge>}>
+      {run.failure && <Notice variant="error" title={run.failure.code}>{run.failure.stage}</Notice>}
+      {run.result && <pre className="code-block max-h-80 overflow-auto">{JSON.stringify(run.result.payload, null, 2)}</pre>}
+    </Card>
   );
 }

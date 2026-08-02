@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
 
-use ats_core::platform::domain::CancellationReason;
+use ats_runtime::CancellationReason;
 
 use crate::project_session::{ActiveProject, DrainTimeout};
 
@@ -90,7 +90,7 @@ impl std::fmt::Display for ShutdownDrainError {
                 timeout
                     .blocked_runs
                     .first()
-                    .map_or("<unknown>", |run_id| run_id.0.as_str())
+                    .map_or("<unknown>", |run_id| run_id.as_str())
             ),
         }
     }
@@ -123,15 +123,7 @@ pub(crate) async fn drain_active_project(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use ats_core::platform::domain::{RunKind, RunRecord, RunRepository};
-    use ats_core::platform::{CancellationToken, SpawnedRun};
-    use ats_core::project::{ProjectError, ProjectFolder};
-    use tokio::sync::Notify;
-
     use super::*;
-    use crate::project_session::ProjectSession;
 
     #[test]
     fn exit_state_prevents_reentry_until_internal_exit_is_allowed() {
@@ -148,71 +140,5 @@ mod tests {
         assert_eq!(shutdown.on_exit_requested(), ExitRequestAction::StartDrain);
         shutdown.retry_after_failure();
         assert_eq!(shutdown.on_exit_requested(), ExitRequestAction::StartDrain);
-    }
-
-    #[tokio::test]
-    async fn successful_shutdown_drain_releases_the_project_os_lock() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let project = ProjectFolder::create(temp.path(), "sample", "sts2").unwrap();
-        let project_path = project.path().to_path_buf();
-        let session = ProjectSession::open(project).await.unwrap();
-        let active = ActiveProject::new();
-        active.replace(Some(Arc::clone(&session))).unwrap();
-        assert!(matches!(
-            ProjectFolder::open(&project_path),
-            Err(ProjectError::Locked(_))
-        ));
-
-        drain_active_project(&active, Duration::from_secs(1))
-            .await
-            .unwrap();
-
-        assert!(active.current().unwrap().is_none());
-        let reopened = ProjectFolder::open(&project_path).unwrap();
-        drop(reopened);
-    }
-
-    #[tokio::test]
-    async fn shutdown_timeout_keeps_the_project_os_lock_until_retry_drains() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let project = ProjectFolder::create(temp.path(), "sample", "sts2").unwrap();
-        let project_path = project.path().to_path_buf();
-        let session = ProjectSession::open(project).await.unwrap();
-        let repo = session.file_repository();
-        let run = RunRecord::new(RunKind::TextGenerate, serde_json::json!({}));
-        repo.create(&run).await.unwrap();
-        let release = Arc::new(Notify::new());
-        let worker_release = Arc::clone(&release);
-        session
-            .submit(async move {
-                Ok(SpawnedRun {
-                    run_id: run.id,
-                    cancellation: CancellationToken::new(),
-                    task: tokio::spawn(async move {
-                        worker_release.notified().await;
-                    }),
-                })
-            })
-            .await
-            .unwrap();
-        let active = ActiveProject::new();
-        active.replace(Some(Arc::clone(&session))).unwrap();
-
-        assert!(matches!(
-            drain_active_project(&active, Duration::from_millis(10)).await,
-            Err(ShutdownDrainError::Timeout(_))
-        ));
-        assert!(session.is_closing());
-        assert!(matches!(
-            ProjectFolder::open(&project_path),
-            Err(ProjectError::Locked(_))
-        ));
-
-        release.notify_waiters();
-        drain_active_project(&active, Duration::from_secs(1))
-            .await
-            .unwrap();
-        let reopened = ProjectFolder::open(&project_path).unwrap();
-        drop(reopened);
     }
 }

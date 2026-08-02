@@ -14,13 +14,19 @@ ats-runtime = { path = "../ats-runtime" }
 ats-game-context = { path = "../ats-game-context" }
 ats-workspace = { path = "../ats-workspace" }
 async-trait = "0.1"
+base64 = "0.22"
 chrono = "0.4"
+figment = { version = "0.10", features = ["json", "env"] }
+futures-util = "0.3"
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 thiserror = "2"
-tokio = { version = "1", features = ["fs", "macros", "process", "rt", "time"] }
+tokio = { version = "1", features = ["fs", "macros", "process", "rt", "sync", "time"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
+walkdir = "2"
 
 [dev-dependencies]
 tempfile = "3"

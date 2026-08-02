@@ -1,4 +1,8 @@
 export type FailureCategory =
+  | "input"
+  | "project"
+  | "truth"
+  | "storage"
   | "configuration"
   | "authentication"
   | "rate_limit"
@@ -11,6 +15,11 @@ export type FailureCategory =
   | "internal";
 
 export type RecoveryAction =
+  | "check_settings"
+  | "open_project"
+  | "refresh_truth"
+  | "replace_resource"
+  | "inspect_run"
   | "configure"
   | "reauthenticate"
   | "retry"
@@ -60,6 +69,10 @@ export interface ActionableFailure {
 }
 
 const CATEGORIES = new Set<FailureCategory>([
+  "input",
+  "project",
+  "truth",
+  "storage",
   "configuration",
   "authentication",
   "rate_limit",
@@ -73,6 +86,11 @@ const CATEGORIES = new Set<FailureCategory>([
 ]);
 
 const ACTIONS = new Set<RecoveryAction>([
+  "check_settings",
+  "open_project",
+  "refresh_truth",
+  "replace_resource",
+  "inspect_run",
   "configure",
   "reauthenticate",
   "retry",

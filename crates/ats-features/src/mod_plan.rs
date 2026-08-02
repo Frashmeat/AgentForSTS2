@@ -5,7 +5,7 @@ use ats_kernel::{
     ContributionId, FeatureId, RecipeId, SchemaId, SchemaRef, SchemaVersion, Sha256Digest,
 };
 use ats_runtime::{
-    FinishReason, ModelClient, ModelError, ModelGamePackRef, ModelRequestError,
+    CancellationToken, FinishReason, ModelClient, ModelError, ModelGamePackRef, ModelRequestError,
     ModelRequestSnapshot, TokenUsage,
 };
 use serde::{Deserialize, Serialize};
@@ -171,6 +171,7 @@ impl ModPlanService {
         client: &C,
         request: ModPlanRequest,
         context: ModPlanContext<'_>,
+        cancellation: &CancellationToken,
     ) -> Result<ModPlanExecution, ModPlanError>
     where
         C: ModelClient + ?Sized,
@@ -182,6 +183,9 @@ impl ModPlanService {
             return Err(ModPlanError::InvalidInput);
         }
         validate_context(&context)?;
+        if cancellation.is_cancelled() {
+            return Err(ModPlanError::Cancelled);
+        }
         let guidance: PlanGuidance = context.contributions.decode(&guidance_slot())?;
         guidance.validate()?;
         if request.item_type.as_ref().is_some_and(|item_type| {
@@ -225,7 +229,10 @@ impl ModPlanService {
             Vec::new(),
             model_request,
         )?;
-        let response = client.complete(snapshot.clone()).await?;
+        let response = client.complete(snapshot.clone(), cancellation).await?;
+        if cancellation.is_cancelled() {
+            return Err(ModPlanError::Cancelled);
+        }
         if response.finish_reason == FinishReason::MaxTokens {
             return Err(ModPlanError::TruncatedModelOutput);
         }
@@ -273,6 +280,8 @@ pub enum ModPlanError {
     TruncatedModelOutput,
     #[error("Mod plan model output failed typed validation")]
     InvalidModelOutput,
+    #[error("Mod plan was cancelled")]
+    Cancelled,
     #[error(transparent)]
     Contribution(#[from] ContributionResolverError),
     #[error(transparent)]
@@ -373,12 +382,17 @@ mod tests {
         async fn complete(
             &self,
             request: ModelRequestSnapshot,
+            _: &CancellationToken,
         ) -> Result<ModelResponse, ModelError> {
             self.snapshots.lock().unwrap().push(request);
             Ok(self.response.clone())
         }
 
-        async fn stream(&self, _: ModelRequestSnapshot) -> Result<ModelStream, ModelError> {
+        async fn stream(
+            &self,
+            _: ModelRequestSnapshot,
+            _: &CancellationToken,
+        ) -> Result<ModelStream, ModelError> {
             Ok(Box::pin(stream::empty()))
         }
     }
@@ -457,6 +471,7 @@ mod tests {
                         custom_instructions: Some("CUSTOM-CANARY"),
                         model: None,
                     },
+                    &CancellationToken::new(),
                 )
                 .await
                 .unwrap();
@@ -493,7 +508,8 @@ mod tests {
                         project_context: None,
                         custom_instructions: None,
                         model: None
-                    }
+                    },
+                    &CancellationToken::new()
                 )
                 .await,
             Err(ModPlanError::UnsupportedItemType)

@@ -11,7 +11,7 @@ build.ps1 -Variant Baseline|Ml [-BuildId <id>] [-PlanOnly]
 
 - The candidate script owns orchestration and `release-verification.json`.
 - `build.ps1` owns commit/variant/features/build-id injection, isolated target/bundle paths, final GUI BuildInfo handshake, and variant `release-manifest.json` publication.
-- `ats-core/build.rs` derives embedded features from actual Cargo cfg. Scripts do not accept caller-supplied feature strings.
+- `src-tauri/build.rs` derives candidate identity inputs from actual Cargo cfg and `ats-kernel::BuildInfo` validates the embedded result. Scripts do not accept caller-supplied feature strings.
 
 One candidate uses one build ID for all requested variants:
 

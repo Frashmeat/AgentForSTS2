@@ -1,0 +1,44 @@
+{
+  "id": "stage2-wo7-shell-cutover-core-removal",
+  "name": "stage2-wo7-shell-cutover-core-removal",
+  "title": "Stage 2 Work Order 7：Shell 切换与旧 Core 删除",
+  "description": "Cut Tauri, Web and CLI over to Stage 2 Feature facades/composition roots, synchronize TypeScript contracts, and delete replaced ats-core paths.",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "Stage 2 production cutover across Tauri/Web/CLI/React, v3 Feature facade and removal of legacy ats-core/Prompt/handler paths",
+  "priority": "P1",
+  "creator": "codex-agent",
+  "assignee": "codex-agent",
+  "createdAt": "2026-08-03",
+  "completedAt": "2026-08-03",
+  "branch": null,
+  "base_branch": "rust",
+  "worktree_path": null,
+  "current_phase": 1,
+  "next_action": [
+    {
+      "phase": 1,
+      "action": "implement"
+    },
+    {
+      "phase": 2,
+      "action": "check"
+    },
+    {
+      "phase": 3,
+      "action": "finish"
+    },
+    {
+      "phase": 4,
+      "action": "create-pr"
+    }
+  ],
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "WO7 machine gates passed: 94 Rust tests, workspace clippy, desktop ml-rembg/e2e checks, frontend 8 tests/type/build, DAG/legacy guards, 9-Feature catalog, rustfmt and diff check. No candidate build or evidence deletion.",
+  "meta": {}
+}

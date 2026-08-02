@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "src-tauri",
-    "crates/ats-core",
     "crates/ats-kernel",
     "crates/ats-runtime",
     "crates/ats-game-context",

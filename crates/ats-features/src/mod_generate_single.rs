@@ -255,7 +255,10 @@ impl SingleGenerateService {
         let snapshot =
             self.assemble_request(&request, &context, &contribution, &evidence, &resource_refs)?;
         check_cancelled(cancellation)?;
-        let response = dependencies.model.complete(snapshot.clone()).await?;
+        let response = dependencies
+            .model
+            .complete(snapshot.clone(), cancellation)
+            .await?;
         check_cancelled(cancellation)?;
         if response.finish_reason == FinishReason::MaxTokens {
             return Err(SingleGenerateError::TruncatedModelOutput);

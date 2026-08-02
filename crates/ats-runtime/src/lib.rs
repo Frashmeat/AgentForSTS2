@@ -6,6 +6,7 @@ mod execution;
 mod media;
 mod model;
 mod payload;
+mod repository;
 mod run;
 
 use ats_kernel::{PrimitiveId, SchemaRef};
@@ -32,6 +33,7 @@ pub use model::{
     ModelResponse, ModelStream, ModelStreamEvent, RecipeRef, TokenUsage,
 };
 pub use payload::{PayloadError, VersionedPayload};
+pub use repository::{RunRepository, RunRepositoryError};
 pub use run::{
     CancellationReason, RUN_RECORD_SCHEMA_VERSION, RunFailure, RunId, RunLifecycleError,
     RunProgress, RunRecord, RunStatus, RunSummary, RunTimelineEvent, RunTimelineEventKind,

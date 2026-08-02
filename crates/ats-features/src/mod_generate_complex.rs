@@ -223,6 +223,7 @@ impl<'a> ComplexGenerateService<'a> {
                         custom_instructions: context.custom_instructions,
                         model: context.model.clone(),
                     },
+                    cancellation,
                 )
                 .await?;
             let plan_payload =

@@ -8,7 +8,7 @@
       "featureId": "project.create",
       "schema": { "id": "pack.project-template", "version": 1 },
       "requiredPrimitives": ["storage.project-template"],
-      "payload": { "legacyCapability": "project_template" }
+      "payload": { "templateId": "sts2.default" }
     },
     {
       "slotId": "mod.plan.guidance",

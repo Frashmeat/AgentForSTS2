@@ -1,270 +1,86 @@
-// 批量生成审查页：用户填多个 CustomCodegenRequest item 然后批量执行。
-// 比 RunsCard 里裸 JSON textarea 友好：表格式增删改查。
+import { useState } from "react";
+import { Hammer, Package, Play } from "lucide-react";
 
-import { useEffect, useRef, useState } from "react";
-import {
-  Badge,
-  Button,
-  Card,
-  Notice,
-  PageHero,
-} from "@/components/ui";
 import { ActionableErrorNotice } from "@/components/ActionableErrorNotice";
-import { useProjectStore } from "@/stores/project";
-import { useRunProgress } from "@/hooks/useRunProgress";
+import { Badge, Button, Card, Field, Notice, PageHero } from "@/components/ui";
 import { api } from "@/services/api";
-import {
-  localValidationFailure,
-  toActionableFailure,
-} from "@/services/actionableFailure";
-import type { ActionableFailure } from "@/services/actionableFailure";
+import { toActionableFailure, type ActionableFailure } from "@/services/actionableFailure";
+import { waitForRun } from "@/services/runPolling";
 import type {
-  CustomCodegenRequest,
+  BatchGenerateRequest,
+  ComplexGenerateRequest,
+  ProjectPackageRequest,
   RunRecord,
-  SubmitRunAck,
 } from "@/services/tauriApi";
 
-interface BatchItem {
-  name: string;
-  description: string;
-  implementation_notes: string;
-}
-
-function emptyItem(): BatchItem {
-  return { name: "", description: "", implementation_notes: "" };
-}
+type Mode = "batch" | "complex" | "build" | "package";
 
 export function BatchGenerationPage() {
-  const project = useProjectStore((s) => s.project);
-  const [items, setItems] = useState<BatchItem[]>([emptyItem()]);
-  const [failFast, setFailFast] = useState(false);
-  const [error, setError] = useState<ActionableFailure | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [runId, setRunId] = useState<string | null>(null);
+  const [mode, setMode] = useState<Mode>("batch");
+  const [requestJson, setRequestJson] = useState('{\n  "items": [],\n  "failFast": true\n}');
+  const [artifactId, setArtifactId] = useState("mod-package");
+  const [modId, setModId] = useState("");
+  const [sourceRoot, setSourceRoot] = useState("delivery");
+  const [outputPath, setOutputPath] = useState("packages/mod.zip");
   const [run, setRun] = useState<RunRecord | null>(null);
-  const [delta, setDelta] = useState("");
-  const runIdRef = useRef<string | null>(null);
+  const [failure, setFailure] = useState<ActionableFailure | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    runIdRef.current = runId;
-  }, [runId]);
-
-  useRunProgress(runIdRef, (ev) => {
-    if (ev.delta) setDelta((prev) => prev + ev.delta);
-    if (
-      ev.stage === "completed" ||
-      ev.stage === "failed" ||
-      ev.stage === "item-failed" ||
-      ev.stage.includes("error")
-    ) {
-      void (async () => {
-        try {
-          const next = (await api.getRun(ev.runId)) as RunRecord;
-          setRun(next);
-          if (next.status === "failed" && next.failure) {
-            setError(next.failure);
-          }
-        } catch {
-          // ignore
-        }
-      })();
-    }
-  });
-
-  function updateItem(idx: number, patch: Partial<BatchItem>) {
-    setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
-  }
-
-  async function handleSubmit() {
-    if (!project) {
-      setError(localValidationFailure("batch.project", "先打开一个工程。"));
-      return;
-    }
-    const validItems = items.filter((it) => it.name.trim() !== "");
-    if (validItems.length === 0) {
-      setError(localValidationFailure("batch.items", "至少一个 item 需要 name。"));
-      return;
-    }
-    const blankBodies = validItems.filter(
-      (it) => !it.description.trim() && !it.implementation_notes.trim(),
-    );
-    if (blankBodies.length === validItems.length) {
-      setError(localValidationFailure(
-        "batch.items",
-        "所有 item 都缺 description 与 implementation notes，请先填写至少一项。",
-      ));
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    setDelta("");
-    setRun(null);
+  async function submit() {
+    setBusy(true); setFailure(null);
     try {
-      const req: CustomCodegenRequest[] = validItems.map((it) => ({
-        name: it.name.trim(),
-        description: it.description,
-        implementation_notes: it.implementation_notes,
-        project_root: project.path,
-        skip_build: true,
-      }));
-      const ack = (await api.submitBatchCustomCodeRun({
-        items: req,
-        fail_fast: failFast,
-      })) as SubmitRunAck;
-      setRunId(ack.runId);
-    } catch (e: unknown) {
-      setError(toActionableFailure(e));
-    } finally {
-      setBusy(false);
-    }
+      let runId: string;
+      if (mode === "batch") {
+        runId = await api.submitBatchGenerate(JSON.parse(requestJson) as BatchGenerateRequest) as string;
+      } else if (mode === "complex") {
+        runId = await api.submitComplexGenerate(JSON.parse(requestJson) as ComplexGenerateRequest) as string;
+      } else if (mode === "build") {
+        runId = await api.submitProjectBuild({}) as string;
+      } else {
+        const request: ProjectPackageRequest = {
+          artifactId, modId, sourceRelativeRoot: sourceRoot, outputRelativePath: outputPath,
+        };
+        runId = await api.submitProjectPackage(request) as string;
+      }
+      await waitForRun(runId, setRun);
+    } catch (error: unknown) { setFailure(toActionableFailure(error)); }
+    finally { setBusy(false); }
   }
-
-  if (!__IS_TAURI__) {
-    return (
-      <div>
-        <PageHero
-          eyebrow="batch · custom code"
-          title="Batch Generation"
-          subtitle="桌面端 only。"
-        />
-      </div>
-    );
-  }
-
-  const runVariant =
-    run?.status === "succeeded"
-      ? "ok"
-      : run?.status === "failed"
-        ? "error"
-        : run?.status === "running"
-          ? "running"
-          : "muted";
 
   return (
-    <div>
-      <PageHero
-        eyebrow="batch · custom code"
-        title="Batch Generation"
-        subtitle="批量跑 custom_code handler。每行一个 item，全部用同一个工程目录。"
-      />
-
-      <div className="space-y-4">
-        {!project && (
-          <Notice variant="warn" title="没有 active project">
-            去 Dashboard 打开一个工程。
-          </Notice>
+    <div className="space-y-4">
+      <PageHero eyebrow="feature · composition and delivery" title="Batch and delivery" subtitle="Typed Stage 2 execution" />
+      <ActionableErrorNotice failure={failure} />
+      <Card eyebrow="mode" title="Feature">
+        <div className="flex gap-2 flex-wrap mb-4">
+          {(["batch", "complex", "build", "package"] as Mode[]).map((value) => (
+            <Button key={value} size="sm" variant={mode === value ? "accent" : "ghost"} onClick={() => setMode(value)}>{value}</Button>
+          ))}
+        </div>
+        {(mode === "batch" || mode === "complex") && (
+          <Field label="Request"><textarea className="input-mono min-h-80" value={requestJson} onChange={(event) => setRequestJson(event.target.value)} /></Field>
         )}
-        <ActionableErrorNotice failure={error} />
-
-        <Card eyebrow="items · request rows" title="Items">
-          <div className="space-y-2">
-            {items.map((it, i) => (
-              <div
-                key={i}
-                className="grid items-start gap-2 p-2.5"
-                style={{
-                  gridTemplateColumns: "1fr 1fr 2fr auto",
-                  background: "var(--paper)",
-                  border: "1px solid var(--rule-soft)",
-                  borderRadius: "3px",
-                }}
-              >
-                <input
-                  placeholder="name (类名)"
-                  value={it.name}
-                  onChange={(e) => updateItem(i, { name: e.target.value })}
-                />
-                <input
-                  placeholder="description"
-                  value={it.description}
-                  onChange={(e) => updateItem(i, { description: e.target.value })}
-                />
-                <textarea
-                  placeholder="implementation_notes"
-                  value={it.implementation_notes}
-                  onChange={(e) =>
-                    updateItem(i, { implementation_notes: e.target.value })
-                  }
-                  rows={2}
-                />
-                <Button
-                  size="sm"
-                  onClick={() =>
-                    setItems((prev) => prev.filter((_, k) => k !== i))
-                  }
-                  disabled={items.length === 1}
-                >
-                  ✕
-                </Button>
-              </div>
-            ))}
+        {mode === "package" && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <Field label="Artifact ID"><input className="input-mono" value={artifactId} onChange={(event) => setArtifactId(event.target.value)} /></Field>
+            <Field label="Mod ID"><input className="input-mono" value={modId} onChange={(event) => setModId(event.target.value)} /></Field>
+            <Field label="Source root"><input className="input-mono" value={sourceRoot} onChange={(event) => setSourceRoot(event.target.value)} /></Field>
+            <Field label="Output path"><input className="input-mono" value={outputPath} onChange={(event) => setOutputPath(event.target.value)} /></Field>
           </div>
-          <div className="flex items-center gap-3 flex-wrap mt-3">
-            <Button
-              size="sm"
-              onClick={() => setItems((prev) => [...prev, emptyItem()])}
-            >
-              + Add item
-            </Button>
-            <label
-              className="flex items-center gap-2"
-              style={{ fontSize: "13px" }}
-            >
-              <input
-                type="checkbox"
-                checked={failFast}
-                onChange={(e) => setFailFast(e.target.checked)}
-              />
-              <span>fail_fast</span>
-            </label>
-            <Button
-              variant="primary"
-              onClick={handleSubmit}
-              disabled={busy || !project}
-            >
-              {busy ? "Submitting…" : "Run batch"}
-            </Button>
-          </div>
+        )}
+        <div className="mt-4">
+          <Button variant="success" disabled={busy} onClick={() => void submit()}>
+            {mode === "build" ? <Hammer size={15} /> : mode === "package" ? <Package size={15} /> : <Play size={15} />}
+            Run
+          </Button>
+        </div>
+      </Card>
+      {run && (
+        <Card eyebrow="run" title={run.featureId} actions={<Badge variant={run.status === "succeeded" ? "ok" : run.status === "failed" ? "error" : "warn"}>{run.status}</Badge>}>
+          {run.failure && <Notice variant="error" title={run.failure.code}>{run.failure.stage}</Notice>}
+          {run.result && <pre className="code-block max-h-96 overflow-auto">{JSON.stringify(run.result.payload, null, 2)}</pre>}
         </Card>
-
-        {runId && (
-          <Card
-            eyebrow="run · batch_custom_code"
-            title="Run"
-            actions={
-              <>
-                <code style={{ fontSize: "11.5px" }}>{runId.slice(0, 12)}…</code>
-                {run && <Badge variant={runVariant}>{run.status}</Badge>}
-              </>
-            }
-          >
-            {delta && (
-              <pre className="pre-block pre-block-stream max-h-48 mb-3">
-                {delta}
-              </pre>
-            )}
-            {run?.result !== undefined && run.result !== null && (
-              <details open>
-                <summary
-                  className="cursor-pointer mb-2"
-                  style={{
-                    fontFamily: '"JetBrains Mono", monospace',
-                    fontSize: "10.5px",
-                    letterSpacing: "0.16em",
-                    textTransform: "uppercase",
-                    color: "var(--ink-mute)",
-                  }}
-                >
-                  Result summary
-                </summary>
-                <pre className="pre-block max-h-64">
-                  {JSON.stringify(run.result, null, 2)}
-                </pre>
-              </details>
-            )}
-          </Card>
-        )}
-      </div>
+      )}
     </div>
   );
 }

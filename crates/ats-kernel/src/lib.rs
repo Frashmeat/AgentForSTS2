@@ -5,6 +5,13 @@ use std::fmt;
 use serde::{Deserialize, Deserializer, Serialize};
 use thiserror::Error;
 
+mod product;
+
+pub use product::{
+    ActionableFailure, BuildInfo, BuildVariant, ProductContractError, ProjectTemplateBundle,
+    ProjectTemplateFile, RecoveryAction,
+};
+
 #[derive(Debug, Clone, Error, Eq, PartialEq)]
 pub enum ContractValueError {
     #[error("invalid {kind}: expected at least two dot-separated lowercase ASCII segments")]

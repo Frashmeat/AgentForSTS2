@@ -1,151 +1,131 @@
 # Prompt、Game Pack 与真相源文本资源总览
 
-> 文档定位：本文说明当前 Rust 实现中通用 Prompt、Game Pack guidance/template、Truth Snapshot 与生成证据的加载边界。
+> 本文描述 Stage 2 当前生产 Prompt 的唯一所有权与装配链。旧 `crates/ats-core/prompts/`、Prompt preview 和旧 assembler 已删除。
 >
-> 事实依据：`crates/ats-features/recipes/`、`crates/ats-features/src/prompt/`、`crates/ats-runtime/src/model.rs`、`game_packs/*/stage2-game-pack.json`，以及迁移期间仍服务当前 Shell 的 `crates/ats-core/prompts/` 和旧 Prompt assembler。
->
-> 权威入口：系统结构见 [`项目架构总览`](./项目架构总览.md)。
->
-> 最后更新：2026-08-02
+> 最后更新：2026-08-03
 
-## 1. Stage 2 目标装配
+## 1. 一次请求如何形成
 
 ```mermaid
 flowchart TB
-    Recipe["Pinned Feature Recipe"] --> Slots["Exact Slot Resolver"]
-    Pack["Verified Pack Contribution"] --> Slots
-    Truth["Bounded Truth Evidence"] --> Slots
-    Resource["Selected Resource References"] --> Slots
-    Project["Sanitized Project Context"] --> Slots
-    Custom["Runtime Custom Instructions"] --> Slots
-    Request["Typed Feature Request"] --> Slots
-    Contract["Typed Output Contract"] --> Slots
-    Slots --> Snapshot["ModelRequestSnapshot + SHA-256"]
-    Snapshot --> Port["Provider-neutral Model Port"]
+    Input[Typed Feature Request] --> Recipe[Versioned Feature Recipe]
+    Pack[Verified Pack Contribution] --> Slots[Exact Slot Resolution]
+    Truth[Bounded Truth Evidence] --> Slots
+    Resources[Selected Resource References] --> Slots
+    Project[Sanitized Project Context] --> Slots
+    Custom[Runtime Custom Instructions] --> Slots
+    Contract[Typed Output Contract] --> Slots
+    Recipe --> Slots
+    Slots --> Validate{Complete and valid?}
+    Validate -->|No| Failure[prompt.assembly_failed]
+    Validate -->|Yes| Snapshot[ModelRequestSnapshot v1]
+    Snapshot --> Model[Runtime ModelClient]
 ```
 
-Work Order 4-6 已实现 `log.analyze`、`mod.plan`、`mod.generate.single` 及其组合 Feature 的隔离纵切面：
-
-- `crates/ats-features/recipes/log-analyze.json` 拥有通用诊断任务、消息角色和输出 JSON 合同，exact bytes SHA-256 固定为 `2c745f0ab0dffd260373ff9fe86a3b9d1ea488ba7e7c3e39fe33c4503b1973e2`。
-- `mod-plan.json` 和 `mod-generate-single.json` 分别拥有通用规划与单项文本 bundle 合同，exact bytes SHA-256 为 `2a5a1dd5004f0fa1798decc921fa28798155022695c5a4b9191f3680134a83c2` 和 `ca176463b8c05058bdb49d359e4098b0b5ae9450004bb3c0ab83fc84de86e3e2`。
-- `game_packs/sts2/stage2-game-pack.json` 的日志、规划、单项/批量/复杂生成、资源、构建和打包 Contribution 拥有具体游戏依据、文件角色、目标模板、资源规格和声明式交付布局；Pack exact bytes SHA-256 为 `00a0cc406271ef993254f78fafb9e55cd27b5f9edf03ede1fc49dd2dc99f721e`。
-- Truth Evidence 仍只表示当前版本的 bounded 事实；Resource slot 只传递已选择版本的 identity/role/media type，不嵌入未验证文件。
-- `runtime.custom_instructions` 在 Recipe 中恰好出现一次。Loader 拒绝未知、重复、遗漏、未消费或超长 slot，插入值中的 `{{...}}` 不会被二次解释。
-- `ats-runtime::ModelRequestSnapshot` 保存 Feature、Recipe、Pack、Truth、Resource、消息、输出合同和限制，并对除 `requestSha256` 自身外的规范字段计算 SHA-256。反序列化重新校验内容身份。
-- `mod.generate.single` 的模型输出只有声明过的文本角色和内容，模型不能提供目标路径或二进制资源。Feature 使用 Pack 模板展开路径，读取 Resource 当前 selected version，完成可回滚写入、注册 compile gate、ArtifactManifest v3 发布和 RunRecord v3 成功转换。
-- `mod.generate.batch` 只组合既有 Single service，`mod.generate.complex` 只组合 Plan、Batch/Single、Build 和 Package；它们不拥有第二套 Prompt、模型输出解码或 Resource 生成路径。
-- Build Pack payload 只列出 step ID 和已注册 Primitive ID；Package payload 只列出 required-file 模板。`process.dotnet-publish` 的固定命令和 ZIP 实现属于 Adapter，Pack 不能注入命令、参数、环境变量或脚本。
-
-新 Runtime 和通用 Recipe 不包含游戏分支或游戏/工具链专属术语。
-
-## 2. 迁移期间的生产事实
+公式：
 
 ```text
-通用 Prompt（编译时内嵌）
-  crates/ats-core/prompts/
-           |
-           v
-Game Pack（游戏声明、guidance、工程模板）
-  game_packs/<game-id>/
-           |
-           v
-VerifiedGameContext（一次 Run 固定 Pack + 当前 Snapshot）
-           |
-           v
-Truth Snapshot（外部 app-data 中不可变的当前游戏事实）
-  <runtime>/game-packs/<game-id>/snapshots/<snapshot-id>/
-           |
-           v
-PromptAssembler -> 模型请求 -> ArtifactManifest.evidence[]
+Feature Prompt Recipe
++ Pack Contribution
++ Truth Evidence
++ Selected Resources
++ Project Context
++ Runtime Custom Instructions
++ Typed Output Contract
+= Run-scoped Model Request
 ```
 
-- 通用 Prompt 定义跨游戏稳定的请求结构、输出协议和工作流要求。
-- Game Pack 声明某个游戏的能力、事实源、验证规则、资源规格、guidance、工程模板、构建和打包契约。
-- Truth Snapshot 保存从当前游戏版本和依赖中取得、经过索引与完整性校验的不可变事实。
-- `VerifiedGameContext` 在一次 Run 内固定 Game Pack 和 Snapshot identity，防止生成中途切换事实版本。
+所有 slot 精确匹配、顺序确定并参与请求 hash。缺失、重复、未知或 schema/hash 不匹配都在模型调用前失败。
 
-## 3. 旧通用 Prompt
+## 2. 唯一所有者
 
-当前内置 Prompt 位于：
+| 内容 | 唯一真源 | 示例 |
+| --- | --- | --- |
+| 跨游戏任务结构 | `crates/ats-features/recipes/*.json` | plan、single generate、log analyze |
+| Feature request/result | `crates/ats-features/src/*.rs` | typed schema、验证和组合 |
+| 游戏指导和 Mod 类型模板 | `game_packs/<id>/stage2-game-pack.json` | STS2 custom code/relic/log contribution |
+| 当前游戏事实 | verified Truth Snapshot v2 | symbol、purpose、bounded excerpt、source hash |
+| 用户/AI/Pack 资源 | Resource Workspace v1 | resource ID、selected version、provenance |
+| 工程上下文 | composition root 生成的脱敏摘要 | 工程名、Mod ID、Pack ID |
+| 用户运行时补充指令 | `llm.custom_prompt` | 本次运行附加偏好 |
+| 模型 transport | `ats-runtime::ModelClient` + `ats-adapters::HttpModelClient` | provider-neutral request/response |
+
+Feature Recipe 不包含 STS2 hook、BaseLib 类型或具体资源路径；Pack 不拥有完整工作流；Truth 不保存用户偏好；runtime custom instructions 不能覆盖 schema、安全、证据或验证合同。
+
+## 3. 当前 Recipe
+
+`crates/ats-features/recipes/` 当前包含：
 
 ```text
-crates/ats-core/prompts/
-  analyzer.md
-  codegen.md
-  image.md
-  runtime_agent.md
-  runtime_system.md
-  runtime_workflow.md
+mod-plan.v1.json
+mod-generate-single.v1.json
+log-analyze.v1.json
 ```
 
-`PromptLoader::built_in()` 通过 `include_str!` 将六个文件编译进二进制，生产运行时不从磁盘读取这些文件。`codegen.md` 等文件可按 Markdown `## section_key` 读取 bundle 分段；分段键必须匹配 `^[a-z0-9_]+$`，模板变量使用 `{{ name }}`。
+Batch 复用 Single，Complex 组合 Plan、Batch/Single、Build 和 Package，因此不再维护第二套长 Prompt。Build、Package、Project create 和 file-based Resource prepare 是确定性执行，不需要模型 Recipe。
 
-这些旧文件和 handler 目前仍服务 Shell，其中 `codegen.md`、`single_asset_plan` 和旧 `log_analysis` 混有已经在新层建立替代合同、但尚未切换生产入口的 Feature 任务、游戏/工具链指导或长生产 Prompt。它们不是 Stage 2 的目标所有权；WO7 切换 Shell 后删除被替代入口。在此之前不得把新纵切面描述成当前 UI 已使用。
+Recipe 文件以编译时字节和 pinned SHA 加载。修改文本必须同时更新 hash，并由 loader/assembly 测试证明 schema、slot 与渲染顺序。
 
-## 4. Game Pack 文本与工程资源
+## 4. Game Pack Contribution
 
-STS2 的当前资源位于：
+STS2 当前真源是：
 
 ```text
-game_packs/sts2/
-  game-pack.json          能力、事实源、规则、资源、构建和打包声明
-  guidance/               按 scenario / asset type 选择的游戏专属指导
-  template/               创建工程时使用的稳定工程骨架
+game_packs/sts2/stage2-game-pack.json
 ```
 
-`GamePackRegistry::built_in()` 将当前 STS2 manifest、guidance 和 template 字节编译进应用。`GamePackLoader` 在 Pack 可用前校验声明、允许的有限 runner/provider/indexer、文件列表和目录校验和；加载失败不得退回隐藏的 Core 内置 STS2 规则。
+它声明 Feature contribution、item type、生成文件角色/目标、资源规格、日志规则、验证/build/package Primitive 和工程模板引用。Pack 先经过 schema 与 pinned SHA 校验，再由 `ContributionResolver` 按 Feature required slot 选择。
 
-边界如下：
+新增游戏应新增独立 Pack 与 Truth 来源。不得把游戏自然语言、hook、C#/Godot/BaseLib 约束重新写入通用 Feature 或 Shell。
 
-- guidance 可以表达稳定的游戏约束和工程习惯，但不能持久化容易随版本变化的行为答案。
-- template 只负责工程骨架；具体 API、生命周期 hook 和调用顺序必须从当前 Truth Snapshot 取证。
-- validation rules 由 Pack 提供规则数据，通用验证引擎执行有限、可测试的算法。
-- `resource_specs[].localization.allowed_rich_text_tags` 声明生成本地化可使用的精确标签；Prompt 展示同一白名单，通用 bundle 校验器在写文件和 compile gate 之前拒绝未知、属性式、未闭合、错配或裸方括号文本。
-- 新游戏应新增独立 Game Pack，并复用通用 Core 能力；不得在通用 handler 中增加 `game_id == "sts2"` 分支。
+## 5. Truth 与 Evidence
 
-## 5. Truth Snapshot 与 `VerifiedGameContext`
+Truth Snapshot 是内容寻址、不可变、可验证的当前游戏事实。模型只接收 bounded Evidence，不接收未验证目录、调用者声明的“最新”事实或整个反编译输出。
 
-Truth Snapshot 不在仓库内，也不使用旧 `runtime/knowledge/` 布局。`TruthSnapshotStore` 以应用 runtime/app-data 目录为根，使用以下结构：
+每条 Evidence 至少包含：
 
 ```text
-<runtime>/game-packs/<game-id>/
-  current.json
-  snapshots/<snapshot-id>/
-    snapshot.json
-    sources/...
-    indexes/...
+source_id
+symbol
+purpose
+bounded_excerpt
+relative_path
 ```
 
-Snapshot refresh 先在 `.staging/` 中复制声明的 source、运行有限 indexer、计算内容摘要并完成验证，随后才原子更新 `current.json`。生产生成入口通过 `VerifiedGameContext::open_current(...)` 同时取得：
+缺少 current Snapshot、Pack 身份不匹配或任一 source/index hash 失败时，依赖 Truth 的 Feature 必须返回 typed failure，不能退回手写知识或旧 Prompt。
 
-- 已加载且校验通过的 Game Pack；
-- 当前指针指向且完整性校验通过的不可变 Snapshot；
-- Pack/Snapshot schema、SHA-256、source、index、工具版本和创建时间。
+## 6. Resource 文本与媒体
 
-缺少 current Snapshot 或完整性校验失败时，生产生成必须停止，不能使用陈旧目录或手写 Prompt 冒充已验证事实。
+Selected Resource 通过 `resourceId + selectedVersion` 进入请求，模型看到的是验证后的角色、媒体类型和 provenance 摘要。用户上传、Pack default 与 AI media 都进入同一 Resource Workspace；AI 请求来自 typed `resource.prepare` payload 和 Pack resource spec，不使用隐藏的 handler Prompt。
 
-## 6. 旧生产装配与生成证据
+未来扩展动画或新的媒体类型时，媒体模型请求仍应由 typed Feature request + Pack resource contribution 装配，生成结果先进入 Resource Workspace，再由 Mod Feature 显式选择。
 
-`PromptAssembler` 接收 `VerifiedGameContext`，按请求 scenario 和 asset type 组合：
+## 7. 哪些文本留在代码中
 
-1. `PromptLoader` 提供的通用 Prompt bundle；
-2. Game Pack 选择出的 guidance 和资源契约；
-3. 当前 Snapshot provider 返回的 bounded code facts、lookup 和 warning；
-4. 当前工程的 ModId、`MainFile.cs` 及本次请求上下文。
+以下文本可以且必须留在代码，因为它们是协议和安全合同，不是 Mod 领域 Prompt：
 
-事实引用使用逻辑 URI，而不是本机绝对路径：
+- message role、section/slot ID、schema ID/version、Feature/Primitive/failure code；
+- JSON field、结构化输出合同、枚举值和有限注册表；
+- 转义、截断、token budget、路径规范化和脱敏规则；
+- 固定的安全 fallback 和可行动错误文案；
+- 测试夹具中的确定性模型输出。
 
-```text
-snapshot://<snapshot-id>/<source-id>/...
+以下内容不得作为生产长字符串写入 handler、Shell 或 Adapter：
+
+- “如何生成某类 Mod”的自然语言任务说明；
+- STS2 hook、类型、BaseLib/Godot 规则或日志解释；
+- 当前版本 API/符号事实；
+- 用户风格偏好或资源选择；
+- provider 专属业务 Prompt。
+
+## 8. 安全与复验
+
+Run/Artifact 可以保存 schema/hash、Pack/Snapshot/Resource identity 和安全 provenance，但不能保存 API key、Authorization、完整 provider body、绝对私有路径或未经边界控制的 Prompt/输出。`ModelRequestSnapshot` 是 run-scoped 可复验请求合同，日志不成为第二真源。
+
+当前残留门禁：
+
+```powershell
+rg -n "single_asset_plan|submit_text_generate_run|codegen_.*_prompt|llm_complete|llm_start_stream|SYSTEM_PROMPT|crates/ats-core/prompts" src src-tauri crates
 ```
 
-结构化资产和 custom code 生成会把本次实际选择的 `source`、`symbol`、`purpose`、`boundedExcerpt` 写入对应 `ArtifactManifest.evidence[]`，并同时记录 Pack/Snapshot identity。Evidence 是某次产物的可复验事实，不是独立的持久化行为契约，也不创建 `evidence.md`。
-
-## 7. 维护与验证
-
-- 新 Feature 的跨游戏稳定任务结构放入 `crates/ats-features/recipes/`；旧生产入口在 WO7 前仍从 `crates/ats-core/prompts/` 加载。
-- Recipe 和 Stage 2 Pack manifest 使用 LF exact bytes，并在 Loader 旁固定 SHA-256；修改内容必须同步 pin 和 loader test。
-- 游戏专属 guidance、模板和声明放入 `game_packs/<game-id>/`，并同步 manifest 文件列表和 SHA-256。
-- 当前游戏/依赖事实只通过 Truth Snapshot refresh 进入生产上下文。
-- 修改 Prompt 装配、Pack guidance 或事实选择时，至少验证 loader、Game Pack loader、knowledge resolver、prompt assembler 和相关生成 handler。
-- 旧 Python Prompt、`crates/ats-core/templates/sts2/` 和 `runtime/knowledge/` 都不是当前产品真源；历史迁移文档可以提及它们，但活跃架构文档不得将其描述为现行路径。
+生产路径预期零结果。修改 Prompt/Pack/Truth/Resource 装配时还必须运行相关 Feature、Pack、Snapshot、Artifact 与 facade E2E，而不能只检查字符串输出。

@@ -373,9 +373,17 @@ pub type ModelStream =
 
 #[async_trait]
 pub trait ModelClient: Send + Sync {
-    async fn complete(&self, request: ModelRequestSnapshot) -> Result<ModelResponse, ModelError>;
+    async fn complete(
+        &self,
+        request: ModelRequestSnapshot,
+        cancellation: &crate::CancellationToken,
+    ) -> Result<ModelResponse, ModelError>;
 
-    async fn stream(&self, request: ModelRequestSnapshot) -> Result<ModelStream, ModelError>;
+    async fn stream(
+        &self,
+        request: ModelRequestSnapshot,
+        cancellation: &crate::CancellationToken,
+    ) -> Result<ModelStream, ModelError>;
 }
 
 fn valid_label(value: &str, max_len: usize) -> bool {

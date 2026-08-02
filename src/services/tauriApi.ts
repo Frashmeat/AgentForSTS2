@@ -1,20 +1,8 @@
-// Tauri 端 API 实现 —— 签名权威，webApi.ts 必须实现同名同签名的所有导出。
-
 import { invoke } from "@tauri-apps/api/core";
+
 import { toActionableFailure } from "./actionableFailure";
-import type { ActionableFailure } from "./actionableFailure";
-export {
-  isActionableFailure,
-  toActionableFailure,
-} from "./actionableFailure";
-export type {
-  ActionableFailure,
-  FailureCategory,
-  FailureContext,
-  FailureDiagnostic,
-  FailureIoKind,
-  RecoveryAction,
-} from "./actionableFailure";
+export { isActionableFailure, toActionableFailure } from "./actionableFailure";
+export type { ActionableFailure, RecoveryAction } from "./actionableFailure";
 
 export async function invokeCommand<T>(
   command: string,
@@ -27,12 +15,7 @@ export async function invokeCommand<T>(
   }
 }
 
-// -------- Health --------
-
-export type Role = "web" | "workstation";
-
 export type BuildVariant = "development" | "baseline" | "ml";
-
 export interface BuildInfo {
   commit: string;
   variant: BuildVariant;
@@ -40,556 +23,274 @@ export interface BuildInfo {
   buildId: string;
 }
 
-export interface ConfigStatus {
-  path: string | null;
-  filePresent: boolean;
-  loaded: boolean;
-  errors: string[];
-}
-
-export interface ReadinessFlags {
-  llmConfigured: boolean;
-  imageGenConfigured: boolean;
-  activeProjectOpen: boolean;
-  /// ML rembg 预热是否就绪（feature ml-rembg + 模型加载成功）
-  /** ML rembg 预热是否就绪（feature ml-rembg + 模型加载成功） */
-  imageProcReady: boolean;
-  /** 活动工程是否有经过完整校验的 current Truth Snapshot。 */
-  truthSnapshotReady: boolean;
-  /** 后台任务 worker 是否在跑（Stage 3.4 Web 轨上线前 desktop 始终为 true） */
-  queueWorkerReady: boolean;
-}
-
 export interface HealthReport {
-  status: "ok" | "degraded";
-  role: Role;
-  coreVersion: string;
-  build: BuildInfo;
-  serverTime: string;
-  config: ConfigStatus;
-  readiness: ReadinessFlags;
+  status: string;
+  role?: "web" | "workstation";
+  build?: BuildInfo | null;
+  gamePackId?: string | null;
+  gamePackSha256?: string | null;
+  featureCount: number;
+  projectOpen?: boolean;
+  truthReady?: boolean;
+  mediaGenerationRegistered?: boolean;
+  projectExecutionAvailable?: boolean;
+  llmConfigured?: boolean;
+  imageGenerationConfigured?: boolean;
+  configLoaded?: boolean;
+  configErrors?: string[];
 }
 
 export function getHealth(): Promise<HealthReport> {
   return invokeCommand<HealthReport>("get_health");
 }
 
-// -------- Local Capabilities --------
-
-export interface LocalCapabilities {
-  build: BuildInfo;
-  os: string;
-  arch: string;
-  cpuCount: number;
-  ilspycmdFound: boolean;
-  ilspycmdPath: string | null;
-  dotnetVersion: string | null;
-  warnings: string[];
-}
-
-export function getLocalCapabilitiesSync(): Promise<LocalCapabilities> {
-  return invokeCommand<LocalCapabilities>("get_local_capabilities_sync");
-}
-
-export function getLocalCapabilitiesFull(): Promise<LocalCapabilities> {
-  return invokeCommand<LocalCapabilities>("get_local_capabilities_full");
-}
-
-// -------- Truth Snapshot --------
-
-export type TruthSnapshotReadiness = "ready" | "missing" | "invalid";
-
-export interface TruthSnapshotSource {
+export interface SchemaRef {
   id: string;
-  kind: string;
-  version: string | null;
-  relativePath: string;
-  sha256: string;
-  sizeBytes: number;
+  version: number;
 }
 
-export interface TruthSnapshotIndex {
-  sourceId: string;
-  indexer: string;
-  provider: string;
-  relativeRoot: string;
-  fileCount: number;
-  csFileCount: number;
-  totalBytes: number;
-  treeSha256: string;
+export interface VersionedPayload<T extends Record<string, unknown> = Record<string, unknown>> {
+  schema: SchemaRef;
+  payload: T;
 }
 
-export interface TruthSnapshotStatus {
-  state: TruthSnapshotReadiness;
-  gamePackId: string;
-  snapshotId: string | null;
-  createdAt: string | null;
-  sources: TruthSnapshotSource[];
-  indexes: TruthSnapshotIndex[];
-  toolVersions: Record<string, string>;
-  warnings: string[];
+export interface FeatureContract {
+  id: string;
+  requestSchema: SchemaRef;
+  resultSchema: SchemaRef;
+  requiredContributions: string[];
 }
 
-export function getTruthSnapshotStatus(): Promise<TruthSnapshotStatus> {
-  return invokeCommand<TruthSnapshotStatus>("get_truth_snapshot_status");
+export function getFeatureCatalog(): Promise<FeatureContract[]> {
+  return invokeCommand<FeatureContract[]>("get_feature_catalog");
 }
 
-export function checkTruthSnapshotStatus(): Promise<TruthSnapshotStatus> {
-  return invokeCommand<TruthSnapshotStatus>("check_truth_snapshot_status");
+export type RunStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
+export type CancellationReason = "user" | "project_close" | "project_switch" | "app_shutdown";
+export type RunTimelineEventKind =
+  | "created"
+  | "started"
+  | "cancel_requested"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "interrupted";
+
+export interface RunProgress {
+  stage: string;
+  percent?: number | null;
+  message?: string | null;
 }
 
-// -------- mod_analyzer --------
-
-export interface CsprojSummary {
-  targetFramework: string | null;
-  sdk: string | null;
-  packageReferences: string[];
+export interface RunFailure {
+  code: string;
+  stage: string;
+  details?: VersionedPayload | null;
 }
 
-export interface ModMeta {
-  name: string | null;
-  author: string | null;
-  version: string | null;
-  rawExcerpt: string;
+export interface RunTimelineEvent {
+  kind: RunTimelineEventKind;
+  at: string;
+  stage?: string | null;
+  failureCode?: string | null;
+  cancellationReason?: CancellationReason | null;
 }
 
-export interface ModAnalysisReport {
-  projectRoot: string;
-  csprojPath: string | null;
-  csprojSummary: CsprojSummary | null;
-  modMeta: ModMeta | null;
-  csFilesCount: number;
-  csTotalBytes: number;
-  artifactsCount: number;
-  warnings: string[];
+export interface RunRecord {
+  schemaVersion: 3;
+  id: string;
+  featureId: string;
+  status: RunStatus;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  request: VersionedPayload;
+  progress: RunProgress | null;
+  failure: RunFailure | null;
+  result: VersionedPayload | null;
+  attempts: number;
+  timeline: RunTimelineEvent[];
 }
 
-export function analyzeModProject(projectRoot: string): Promise<ModAnalysisReport> {
-  return invokeCommand<ModAnalysisReport>("analyze_mod_project", { projectRoot });
+export interface RunSummary {
+  id: string;
+  featureId: string;
+  status: RunStatus;
+  createdAt: string;
+  completedAt: string | null;
+  progress: RunProgress | null;
+  failure: RunFailure | null;
 }
 
-// -------- Settings --------
-
-export interface LlmSnapshot {
-  provider: string;
-  model: string;
-  baseUrl: string;
-  apiKeyMasked: string;
-  apiKeyConfigured: boolean;
+function isVersionedPayload(value: unknown): value is VersionedPayload {
+  if (!isRecord(value) || !isRecord(value.schema) || !isRecord(value.payload)) return false;
+  return (
+    typeof value.schema.id === "string" &&
+    Number.isInteger(value.schema.version) &&
+    (value.schema.version as number) > 0
+  );
 }
 
-export interface ImageGenSnapshot {
-  provider: string;
-  model: string;
-  baseUrl: string;
-  size: string;
-  protocol: string;
-  apiKeyMasked: string;
-  apiKeyConfigured: boolean;
+function isRunRecord(value: unknown): value is RunRecord {
+  if (!isRecord(value)) return false;
+  return (
+    value.schemaVersion === 3 &&
+    typeof value.id === "string" &&
+    typeof value.featureId === "string" &&
+    isRunStatus(value.status) &&
+    isVersionedPayload(value.request) &&
+    (value.result === null || isVersionedPayload(value.result)) &&
+    (value.failure === null || isRunFailure(value.failure)) &&
+    Array.isArray(value.timeline)
+  );
 }
 
-export interface RuntimeSnapshot {
-  host: string;
-  port: number;
-  mountFrontend: boolean;
-  requiresDatabase: boolean;
-  githubToken: string;
-}
-export interface SettingsSnapshot {
-  configPath: string | null;
-  configLoaded: boolean;
-  configErrors: string[];
-  llm: LlmSnapshot;
-  imageGen: ImageGenSnapshot;
-  runtimeWorkstation: RuntimeSnapshot;
-  runtimeWeb: RuntimeSnapshot;
-  knowledge: KnowledgeSnapshot;
-  toolchain: ToolchainSnapshot;
+export async function getRun(runId: string): Promise<RunRecord> {
+  const value = await invokeCommand<unknown>("get_run", { runId });
+  if (!isRunRecord(value)) throw toActionableFailure(undefined);
+  return value;
 }
 
-export function getSettingsSnapshot(): Promise<SettingsSnapshot> {
-  return invokeCommand<SettingsSnapshot>("get_settings_snapshot");
+export async function listRuns(): Promise<RunSummary[]> {
+  const values = await invokeCommand<unknown>("list_runs");
+  if (!Array.isArray(values) || !values.every(isRunSummary)) {
+    throw toActionableFailure(undefined);
+  }
+  return values;
 }
 
-export function openConfigInEditor(): Promise<string> {
-  return invokeCommand<string>("open_config_in_editor");
+export function cancelRun(runId: string): Promise<boolean> {
+  return invokeCommand<boolean>("cancel_run", { runId });
 }
 
-export interface LlmPatch {
-  provider?: string | null;
-  model?: string | null;
-  base_url?: string | null;
-  api_key?: string | null;
-}
-
-export interface ImageGenPatch {
-  provider?: string | null;
-  model?: string | null;
-  base_url?: string | null;
-  size?: string | null;
-  protocol?: string | null;
-  api_key?: string | null;
-}
-
-export interface KnowledgeSnapshot {
-  sts2DllPath: string;
-}
-
-export interface ToolchainSnapshot {
-  godotExePath: string;
-}
-
-export interface RuntimePatch {
-  github_token?: string | null;
-}
-
-export interface KnowledgePatch {
-  sts2_dll_path?: string | null;
-}
-
-export interface ToolchainPatch {
-  godot_exe_path?: string | null;
-}
-
-export interface SettingsPatch {
-  llm?: LlmPatch | null;
-  image_gen?: ImageGenPatch | null;
-  runtime_workstation?: RuntimePatch | null;
-  knowledge?: KnowledgePatch | null;
-  toolchain?: ToolchainPatch | null;
-}
-
-export function saveSettingsPatch(patch: SettingsPatch): Promise<SettingsSnapshot> {
-  return invokeCommand<SettingsSnapshot>("save_settings_patch", { patch });
-}
-
-export function discoverSts2Dll(): Promise<string | null> {
-  return invokeCommand<string | null>("discover_sts2_dll");
-}
-
-// -------- Image proc prewarm --------
-
-export type PrewarmStatus =
-  | { state: "idle"; attempt: number }
-  | { state: "loading"; attempt: number; message: string }
-  | {
-      state: "ready";
-      attempt: number;
-      model: string;
-      modelSha256: string;
-      runtimeVersion: string;
-    }
-  | { state: "failed"; attempt: number; failure: ActionableFailure };
-
-export function imageProcStatus(): Promise<PrewarmStatus> {
-  return invokeCommand<PrewarmStatus>("image_proc_status");
-}
-
-export function retryImageProc(): Promise<PrewarmStatus> {
-  return invokeCommand<PrewarmStatus>("retry_image_proc");
-}
-
-// -------- PlanArtifact --------
-
-export type ArtifactState =
-  | "pending"
-  | "in_progress"
-  | "generated"
-  | "reviewed"
-  | "failed";
-
-export interface ArtifactStatus {
+export interface PlanItem extends Record<string, unknown> {
   itemId: string;
-  state: ArtifactState;
-  updatedAt: string;
-  lastRunId?: string | null;
-  csPath?: string | null;
-  pngPath?: string | null;
-  note?: string | null;
-}
-
-export function planArtifactSave(status: ArtifactStatus): Promise<void> {
-  return invokeCommand<void>("plan_artifact_save", { status });
-}
-
-export function planArtifactLoad(itemId: string): Promise<ArtifactStatus | null> {
-  return invokeCommand<ArtifactStatus | null>("plan_artifact_load", { itemId });
-}
-
-export function planArtifactList(): Promise<ArtifactStatus[]> {
-  return invokeCommand<ArtifactStatus[]>("plan_artifact_list");
-}
-
-// -------- Planning --------
-
-export type AssetItemType =
-  | "card"
-  | "card_fullscreen"
-  | "relic"
-  | "power"
-  | "character"
-  | "custom_code";
-
-export type ReviewStrictness = "efficient" | "balanced" | "strict";
-
-export type PlanItemReviewStatus = "clear" | "needs_user_input" | "invalid";
-
-// Mirror of ats-core::planning::PlanItem. All fields optional on input — the
-// Rust side fills defaults — but the response always carries every field.
-export interface PlanItem {
-  id: string;
-  type: AssetItemType;
+  itemType: string;
   name: string;
-  name_zhs?: string;
-  description?: string;
-  goal?: string;
-  detailed_description?: string;
-  implementation_notes?: string;
-  needs_image?: boolean;
-  image_description?: string;
-  depends_on_item_ids?: string[];
-  scope_boundary?: string;
-  relationship_reason?: string;
-  acceptance_notes?: string;
-  affected_targets?: string[];
-  relationship_type?: string;
-  clarification_status?: string;
-  clarification_questions?: string[];
-  provided_image_b64?: string;
-}
-
-export interface ModPlan {
-  mod_name: string;
   summary: string;
-  items: PlanItem[];
+  behaviorIntent: string[];
+  implementationConstraints: string[];
+  requiredEvidence: string[];
+  requiredResourceRoles: string[];
+  acceptanceCriteria: string[];
 }
 
-export interface PlanValidationIssue {
-  code: string;
-  message: string;
-  field: string;
+export interface ModPlanRequest extends Record<string, unknown> {
+  requirements: string;
+  itemType?: string | null;
 }
 
-export interface PlanItemValidation {
-  itemId: string;
-  status: PlanItemReviewStatus;
-  issues: PlanValidationIssue[];
-  missingFields: string[];
-  clarificationQuestions: string[];
+export interface SelectedResource extends Record<string, unknown> {
+  resourceId: string;
+  selectedVersion: string;
 }
 
-export interface PlanValidationResult {
-  strictness: ReviewStrictness;
-  items: PlanItemValidation[];
+export interface SingleGenerateRequest extends Record<string, unknown> {
+  artifactId: string;
+  modId: string;
+  plan: PlanItem;
+  selectedResources: SelectedResource[];
 }
 
-export function validatePlan(
-  plan: ModPlan,
-  strictness: ReviewStrictness = "balanced",
-): Promise<PlanValidationResult> {
-  return invokeCommand<PlanValidationResult>("validate_plan_cmd", { plan, strictness });
+export interface BatchGenerateRequest extends Record<string, unknown> {
+  items: SingleGenerateRequest[];
+  failFast: boolean;
 }
 
-export type BundleReviewStatus = "clear" | "needs_confirmation" | "split_recommended";
-export type BundleDecision =
-  | "unresolved"
-  | "accepted"
-  | "split_requested"
-  | "needs_item_revision";
-
-export interface DependencyGroup {
-  itemIds: string[];
+export interface ComplexPlanningItem extends Record<string, unknown> {
+  request: ModPlanRequest;
+  artifactId: string;
+  selectedResources: SelectedResource[];
 }
 
-export interface RiskDetail {
-  code: string;
-  title: string;
-  summary: string;
-  recommendation: string;
-  impact?: string;
+export interface ProjectPackageRequest extends Record<string, unknown> {
+  artifactId: string;
+  modId: string;
+  sourceRelativeRoot: string;
+  outputRelativePath: string;
+  compressionLevel?: number | null;
 }
 
-export interface RecommendedAction {
-  action: string;
-  label: string;
-  description: string;
-  emphasis: string;
+export interface ComplexGenerateRequest extends Record<string, unknown> {
+  modId: string;
+  planningItems: ComplexPlanningItem[];
+  failFast: boolean;
+  package: ProjectPackageRequest;
 }
 
-export interface ExecutionBundle {
-  bundleId: string;
-  itemIds: string[];
-  status: BundleReviewStatus;
-  reason: string;
-  riskCodes: string[];
-  riskDetails: RiskDetail[];
-  recommendedActions: RecommendedAction[];
-  blockingReason: string;
+export interface LogAnalyzeRequest extends Record<string, unknown> {
+  logText: string;
+  contextHint?: string | null;
+  maxLogChars?: number | null;
 }
 
-export interface ExecutionPlanPreview {
-  strictness: ReviewStrictness;
-  dependencyGroups: DependencyGroup[];
-  executionBundles: ExecutionBundle[];
+export interface ResourcePrepareRequest extends Record<string, unknown> {
+  logicalRole: string;
+  mediaType: string;
+  source:
+    | { kind: "user_upload" }
+    | { kind: "pack_default" }
+    | { kind: "ai_generated"; prompt: string; fileName: string; model?: string | null };
 }
 
-export function buildExecutionPlan(
-  plan: ModPlan,
-  strictness: ReviewStrictness = "balanced",
-  bundleDecisions: Record<string, BundleDecision> = {},
-): Promise<ExecutionPlanPreview> {
-  return invokeCommand<ExecutionPlanPreview>("build_execution_plan_cmd", {
-    plan,
-    strictness,
-    bundleDecisions,
+export interface ProjectBuildRequest extends Record<string, unknown> {}
+
+export function submitModPlan(request: ModPlanRequest): Promise<string> {
+  return submit("mod.plan", "feature.mod-plan-request", request);
+}
+
+export function submitSingleGenerate(request: SingleGenerateRequest): Promise<string> {
+  return submit("mod.generate.single", "feature.mod-generate-single-request", request);
+}
+
+export function submitBatchGenerate(request: BatchGenerateRequest): Promise<string> {
+  return submit("mod.generate.batch", "feature.mod-generate-batch-request", request);
+}
+
+export function submitComplexGenerate(request: ComplexGenerateRequest): Promise<string> {
+  return submit("mod.generate.complex", "feature.mod-generate-complex-request", request);
+}
+
+export function submitLogAnalyze(request: LogAnalyzeRequest): Promise<string> {
+  return submit("log.analyze", "feature.log-analyze-request", request);
+}
+
+export function submitResourcePrepare(
+  request: ResourcePrepareRequest,
+  sourcePath?: string,
+): Promise<string> {
+  return submit("resource.prepare", "feature.resource-prepare-request", request, sourcePath);
+}
+
+export function submitProjectBuild(request: ProjectBuildRequest = {}): Promise<string> {
+  return submit("project.build", "feature.project-build-request", request);
+}
+
+export function submitProjectPackage(request: ProjectPackageRequest): Promise<string> {
+  return submit("project.package", "feature.project-package-request", request);
+}
+
+function submit(
+  featureId: string,
+  schemaId: string,
+  payload: Record<string, unknown>,
+  sourcePath?: string,
+): Promise<string> {
+  return invokeCommand<string>("submit_feature", {
+    submission: {
+      featureId,
+      request: { schema: { id: schemaId, version: 1 }, payload },
+      ...(sourcePath ? { sourcePath } : {}),
+    },
   });
 }
 
-// -------- Codegen --------
-
-export interface AssetCodegenRequest {
-  design_description: string;
-  asset_type: string;
-  asset_name: string;
-  image_paths: string[];
-  project_root: string;
-  name_zhs: string;
-  skip_build: boolean;
-}
-
-export interface CustomCodegenRequest {
-  description: string;
-  implementation_notes: string;
-  name: string;
-  project_root: string;
-  skip_build: boolean;
-}
-
-export interface AssetGroupItem {
-  item: PlanItem;
-  image_paths: string[];
-}
-
-export interface AssetGroupRequest {
-  assets: AssetGroupItem[];
-  project_root: string;
-}
-
-export interface ModProjectRequest {
-  project_name: string;
-  target_dir: string;
-}
-
-export function codegenAssetPrompt(request: AssetCodegenRequest): Promise<string> {
-  return invokeCommand<string>("codegen_asset_prompt", { request });
-}
-
-export function codegenCustomCodePrompt(
-  request: CustomCodegenRequest,
-): Promise<string> {
-  return invokeCommand<string>("codegen_custom_code_prompt", { request });
-}
-
-export function codegenAssetGroupPrompt(
-  request: AssetGroupRequest,
-): Promise<string> {
-  return invokeCommand<string>("codegen_asset_group_prompt", { request });
-}
-
-export function codegenBuildPrompt(maxAttempts = 3): Promise<string> {
-  return invokeCommand<string>("codegen_build_prompt", { maxAttempts });
-}
-
-export function codegenCreateModProjectPrompt(
-  request: ModProjectRequest,
-): Promise<string> {
-  return invokeCommand<string>("codegen_create_mod_project_prompt", { request });
-}
-
-export function codegenPackagePrompt(): Promise<string> {
-  return invokeCommand<string>("codegen_package_prompt");
-}
-
-// -------- LLM --------
-
-export type MessageRole = "system" | "user" | "assistant";
-export type FinishReason =
-  | "end_turn"
-  | "max_tokens"
-  | "stop_sequence"
-  | "tool_use"
-  | "other";
-
-export interface LlmMessage {
-  role: MessageRole;
-  content: string;
-}
-
-export interface CompletionRequest {
-  messages: LlmMessage[];
-  system_prompt?: string | null;
-  max_tokens: number;
-  temperature?: number | null;
-  model?: string | null;
-}
-
-export interface Usage {
-  inputTokens: number;
-  outputTokens: number;
-}
-
-export interface CompletionResponse {
-  model: string;
-  content: string;
-  finishReason: FinishReason;
-  usage: Usage;
-}
-
-export type StreamEvent =
-  | { kind: "start"; model: string }
-  | { kind: "delta"; text: string }
-  | { kind: "end"; finishReason: FinishReason; usage: Usage };
-
-export function llmComplete(request: CompletionRequest): Promise<CompletionResponse> {
-  return invokeCommand<CompletionResponse>("llm_complete", { request });
-}
-
-/**
- * 启动流式补全。后端通过 Tauri 事件 `llm-stream` 推送 chunk，前端用
- * `@tauri-apps/api/event` 的 listen 接收，按 request_id 过滤。
- *
- * 调用方传入唯一 request_id（uuid 或时间戳），命令本身立刻返回；
- * 实际数据通过事件流到达。Web 端 webApi 走 SSE 实现相同语义。
- */
-export function llmStartStream(
-  requestId: string,
-  request: CompletionRequest,
-): Promise<void> {
-  return invokeCommand<void>("llm_start_stream", { requestId, request });
-}
-
-/** Tauri 事件 payload —— 与 src-tauri/src/commands/llm.rs::StreamPayload 一致 */
-export type LlmStreamPayload =
-  | { type: "event"; request_id: string; event: StreamEvent }
-  | { type: "error"; request_id: string; failure: import("./actionableFailure").ActionableFailure }
-  | { type: "done"; request_id: string };
-
-// -------- Project（仅桌面端）--------
-
-export interface ProjectMeta {
-  name: string;
-  csharp_name: string;
-  game_id: string;
-  created_at: string;
-  schema_version: number;
-  sts2_path: string | null;
-  template_version: string | null;
-  scaffolded: boolean;
-}
-
-export interface ProjectSnapshot {
+export interface CurrentProject {
   path: string;
-  meta: ProjectMeta;
+  name: string;
+  csharpName: string;
+  gameId: string;
+  closing: boolean;
 }
 
 export interface RecentEntry {
@@ -601,321 +302,112 @@ export interface RecentEntry {
 export function listRecentProjects(): Promise<RecentEntry[]> {
   return invokeCommand<RecentEntry[]>("list_recent_projects");
 }
-
-export function createProject(
-  parentDir: string,
-  name: string,
-  gameId: string,
-): Promise<ProjectSnapshot> {
-  return invokeCommand<ProjectSnapshot>("create_project", { parentDir, name, gameId });
+export function createProject(parentDir: string, name: string): Promise<CurrentProject> {
+  return invokeCommand<CurrentProject>("create_project", { parentDir, name });
 }
-
-export function openProject(path: string): Promise<ProjectSnapshot> {
-  return invokeCommand<ProjectSnapshot>("open_project", { path });
+export function openProject(path: string): Promise<CurrentProject> {
+  return invokeCommand<CurrentProject>("open_project", { path });
 }
-
 export function closeProject(): Promise<void> {
   return invokeCommand<void>("close_project");
 }
-
-export function currentProject(): Promise<ProjectSnapshot | null> {
-  return invokeCommand<ProjectSnapshot | null>("current_project");
+export function currentProject(): Promise<CurrentProject | null> {
+  return invokeCommand<CurrentProject | null>("current_project");
 }
-
 export function forgetRecentProject(path: string): Promise<void> {
   return invokeCommand<void>("forget_recent_project", { path });
 }
 
-// -------- Platform Runs --------
-
-export type RunKind =
-  | "text_generate"
-  | "code_generate"
-  | "asset_generate"
-  | "batch_custom_code"
-  | "build_project"
-  | "package_project"
-  | "single_asset_plan"
-  | "log_analysis"
-  | "truth_snapshot_refresh";
-
-export type RunStatus =
-  | "pending"
-  | "running"
-  | "succeeded"
-  | "failed"
-  | "cancelled";
-
-export interface RunProgressFields {
-  stage: string;
-  percent: number | null;
-  message: string | null;
+export interface TruthStatus {
+  ready: boolean;
+  snapshotId: string | null;
+}
+export function getTruthStatus(): Promise<TruthStatus> {
+  return invokeCommand<TruthStatus>("get_truth_status");
+}
+export function importTruth(): Promise<TruthStatus> {
+  return invokeCommand<TruthStatus>("import_truth");
 }
 
-export type CancellationReason =
-  | "user"
-  | "project_close"
-  | "project_switch"
-  | "app_shutdown";
-
-export type RunTimelineEventKind =
-  | "created"
-  | "started"
-  | "cancel_requested"
-  | "succeeded"
-  | "failed"
-  | "cancelled"
-  | "interrupted";
-
-export interface RunTimelineEvent {
-  kind: RunTimelineEventKind;
-  at: string;
-  stage?: string | null;
-  failureCode?: string | null;
-  cancellationReason?: CancellationReason | null;
+export interface LlmSnapshot {
+  provider: string;
+  model: string;
+  baseUrl: string;
+  customPrompt: string;
+  apiKeyMasked: string;
+  apiKeyConfigured: boolean;
+}
+export interface ImageGenSnapshot {
+  provider: string;
+  model: string;
+  baseUrl: string;
+  size: string;
+  protocol: string;
+  apiKeyMasked: string;
+  apiKeyConfigured: boolean;
+}
+export interface RuntimeSnapshot {
+  host: string;
+  port: number;
+  mountFrontend: boolean;
+  requiresDatabase: boolean;
+  githubTokenMasked: string;
+}
+export interface SettingsSnapshot {
+  configPath: string | null;
+  configLoaded: boolean;
+  configErrors: string[];
+  llm: LlmSnapshot;
+  imageGen: ImageGenSnapshot;
+  runtimeWorkstation: RuntimeSnapshot;
+  runtimeWeb: RuntimeSnapshot;
+  knowledge: { sts2DllPath: string };
+  toolchain: { godotExePath: string };
+}
+export interface SettingsPatch {
+  llm?: Partial<{
+    provider: string;
+    model: string;
+    baseUrl: string;
+    customPrompt: string;
+    apiKey: string;
+  }> | null;
+  imageGen?: Partial<{
+    provider: string;
+    model: string;
+    baseUrl: string;
+    size: string;
+    protocol: string;
+    apiKey: string;
+  }> | null;
+  runtimeWorkstation?: Partial<{ githubToken: string }> | null;
+  knowledge?: Partial<{ sts2DllPath: string }> | null;
+  toolchain?: Partial<{ godotExePath: string }> | null;
+}
+export function getSettingsSnapshot(): Promise<SettingsSnapshot> {
+  return invokeCommand<SettingsSnapshot>("get_settings_snapshot");
+}
+export function saveSettingsPatch(patch: SettingsPatch): Promise<SettingsSnapshot> {
+  return invokeCommand<SettingsSnapshot>("save_settings_patch", { patch });
+}
+export function openConfigInEditor(): Promise<string> {
+  return invokeCommand<string>("open_config_in_editor");
 }
 
-export interface TokenUsage {
-  inputTokens: number;
-  outputTokens: number;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
-
-export interface BatchArtifactItemResult {
-  itemId: string;
-  artifactManifestRef: string | null;
-  manifestSha256: string | null;
-  diagnosticRef: string | null;
+function isRunStatus(value: unknown): value is RunStatus {
+  return ["pending", "running", "succeeded", "failed", "cancelled"].includes(String(value));
 }
-
-export interface BuildStepResult {
-  id: string;
-  runner: string;
-  success: boolean;
-  exitCode: number;
-  stdoutTail: string;
-  stderrTail: string;
+function isRunFailure(value: unknown): value is RunFailure {
+  return isRecord(value) && typeof value.code === "string" && typeof value.stage === "string";
 }
-
-export type RunResult =
-  | {
-      kind: "text_generation";
-      model: string;
-      content: string;
-      finishReason: string;
-      usage: TokenUsage;
-    }
-  | {
-      kind: "artifact_production";
-      artifactManifestRef: string;
-      manifestSha256: string;
-      artifactId: string;
-      entityName: string;
-      model: string | null;
-      usage: TokenUsage | null;
-    }
-  | {
-      kind: "batch_artifact_production";
-      total: number;
-      succeeded: number;
-      failed: number;
-      items: BatchArtifactItemResult[];
-    }
-  | {
-      kind: "build";
-      projectRelativeRoot: string;
-      steps: BuildStepResult[];
-      artifactManifestRef: string | null;
-      manifestSha256: string | null;
-    }
-  | {
-      kind: "package";
-      artifactManifestRef: string;
-      manifestSha256: string;
-      artifactId: string;
-      filesAdded: number;
-      uncompressedBytes: number;
-      packageBytes: number;
-    }
-  | {
-      kind: "plan";
-      item: PlanItem;
-      itemFileRef: string | null;
-      model: string;
-      usage: TokenUsage;
-    }
-  | {
-      kind: "log_analysis";
-      model: string;
-      report: string;
-      logChars: number;
-      truncatedChars: number;
-      usage: TokenUsage;
-    }
-  | {
-      kind: "truth_snapshot_refresh";
-      gamePackId: string;
-      snapshotId: string;
-      cacheHit: boolean;
-      sourceCount: number;
-      indexCount: number;
-      toolVersions: Record<string, string>;
-      warnings: string[];
-    };
-
-export interface RunRecord {
-  schemaVersion: number;
-  id: string;
-  kind: RunKind;
-  status: RunStatus;
-  createdAt: string;
-  startedAt: string | null;
-  completedAt: string | null;
-  payload: unknown;
-  progress: RunProgressFields | null;
-  failure: import("./actionableFailure").ActionableFailure | null;
-  result: RunResult | null;
-  attempts: number;
-  timeline: RunTimelineEvent[];
-}
-
-export interface RunSummary {
-  id: string;
-  kind: RunKind;
-  status: RunStatus;
-  createdAt: string;
-  completedAt: string | null;
-  progress: RunProgressFields | null;
-  failure: import("./actionableFailure").ActionableFailure | null;
-}
-
-export interface SubmitTextGenerateRequest {
-  prompt: string;
-  system_prompt?: string | null;
-  max_tokens?: number | null;
-  temperature?: number | null;
-  model?: string | null;
-}
-
-export interface SubmitRunAck {
-  runId: string;
-}
-
-/** ProgressSink::emit 推送的事件（run-progress） */
-export interface RunProgressEvent {
-  runId: string;
-  stage: string;
-  percent: number | null;
-  message: string | null;
-  delta: string | null;
-}
-
-export function submitTextGenerateRun(
-  request: SubmitTextGenerateRequest,
-): Promise<SubmitRunAck> {
-  return invokeCommand<SubmitRunAck>("submit_text_generate_run", { request });
-}
-
-export function getRun(id: string): Promise<RunRecord> {
-  return invokeCommand<RunRecord>("get_run", { id });
-}
-
-export function listRuns(): Promise<RunSummary[]> {
-  return invokeCommand<RunSummary[]>("list_runs");
-}
-
-export function cancelRun(id: string): Promise<void> {
-  return invokeCommand<void>("cancel_run", { id });
-}
-
-export type SubmitCodeGenerateRequest =
-  | { mode: "asset"; request: AssetCodegenRequest }
-  | { mode: "custom_code"; request: CustomCodegenRequest };
-
-export interface SubmitBuildProjectRequest {
-  project_root: string;
-  max_attempts: number;
-}
-
-export function submitCodeGenerateRun(
-  request: SubmitCodeGenerateRequest,
-): Promise<SubmitRunAck> {
-  return invokeCommand<SubmitRunAck>("submit_code_generate_run", { request });
-}
-
-export function submitBuildProjectRun(
-  request: SubmitBuildProjectRequest,
-): Promise<SubmitRunAck> {
-  return invokeCommand<SubmitRunAck>("submit_build_project_run", { request });
-}
-
-// -------- Phase B/2.2.x RunRecord kinds（stage 3.5 第二轮 + 2.2.1 落地） --------
-
-export interface SubmitLogAnalysisRequest {
-  log_path?: string | null;
-  log_text?: string | null;
-  context_hint?: string | null;
-  max_log_chars?: number | null;
-}
-
-export function submitLogAnalysisRun(
-  request: SubmitLogAnalysisRequest,
-): Promise<SubmitRunAck> {
-  return invokeCommand<SubmitRunAck>("submit_log_analysis_run", { request });
-}
-
-export interface SubmitPackageProjectRequest {
-  source_dir: string;
-  output_path?: string | null;
-  compression_level?: number | null;
-}
-
-export function submitPackageProjectRun(
-  request: SubmitPackageProjectRequest,
-): Promise<SubmitRunAck> {
-  return invokeCommand<SubmitRunAck>("submit_package_project_run", { request });
-}
-
-export interface SubmitBatchCustomCodeRequest {
-  items: CustomCodegenRequest[];
-  fail_fast?: boolean;
-}
-
-export function submitBatchCustomCodeRun(
-  request: SubmitBatchCustomCodeRequest,
-): Promise<SubmitRunAck> {
-  return invokeCommand<SubmitRunAck>("submit_batch_custom_code_run", { request });
-}
-
-export interface SubmitSingleAssetPlanRequest {
-  requirements: string;
-  asset_type?: string | null;
-  max_tokens?: number | null;
-}
-
-export function submitSingleAssetPlanRun(
-  request: SubmitSingleAssetPlanRequest,
-): Promise<SubmitRunAck> {
-  return invokeCommand<SubmitRunAck>("submit_single_asset_plan_run", { request });
-}
-
-export interface SubmitTruthSnapshotRefreshRequest {
-  force?: boolean;
-}
-
-export function submitTruthSnapshotRefreshRun(
-  request: SubmitTruthSnapshotRefreshRequest,
-): Promise<SubmitRunAck> {
-  return invokeCommand<SubmitRunAck>("submit_truth_snapshot_refresh_run", { request });
-}
-
-export interface SubmitAssetGenerateRequest {
-  asset_request: AssetCodegenRequest;
-  image_prompt?: string | null;
-  image_size?: string | null;
-}
-
-export function submitAssetGenerateRun(
-  request: SubmitAssetGenerateRequest,
-): Promise<SubmitRunAck> {
-  return invokeCommand<SubmitRunAck>("submit_asset_generate_run", { request });
+function isRunSummary(value: unknown): value is RunSummary {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.featureId === "string" &&
+    isRunStatus(value.status)
+  );
 }

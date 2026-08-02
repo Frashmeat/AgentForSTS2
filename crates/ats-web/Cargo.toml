@@ -9,7 +9,8 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
-ats-core = { path = "../ats-core" }
+ats-adapters = { path = "../ats-adapters" }
+ats-features = { path = "../ats-features" }
 axum = { version = "0.8", features = ["ws"] }
 tower-http = { version = "0.6", features = ["cors", "trace", "catch-panic"] }
 tokio = { version = "1", features = ["full"] }
@@ -21,4 +22,3 @@ clap = { version = "4", features = ["derive", "env"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 anyhow = "1"
-futures-util = "0.3"

@@ -7,7 +7,7 @@ fn main() {
         let Some(output_path) = args.next() else {
             std::process::exit(2);
         };
-        let build = ats_core::build_info::BuildInfo::current();
+        let build = agentthespire_desktop_lib::build_info();
         let Ok(json) = serde_json::to_vec(&build) else {
             std::process::exit(2);
         };

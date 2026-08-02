@@ -4,68 +4,65 @@ export interface FormState {
   llmProvider: string;
   llmModel: string;
   llmBaseUrl: string;
+  llmCustomPrompt: string;
   llmApiKey: string;
   llmApiKeyTouched: boolean;
-  igProvider: string;
-  igModel: string;
-  igBaseUrl: string;
-  igSize: string;
-  igProtocol: string;
-  igApiKey: string;
-  igApiKeyTouched: boolean;
-  rtGithubToken: string;
-  rtGithubTokenTouched: boolean;
+  imageProvider: string;
+  imageModel: string;
+  imageBaseUrl: string;
+  imageSize: string;
+  imageProtocol: string;
+  imageApiKey: string;
+  imageApiKeyTouched: boolean;
+  githubToken: string;
+  githubTokenTouched: boolean;
+  sts2DllPath: string;
   godotExePath: string;
 }
 
-export function formFromSnapshot(s: SettingsSnapshot): FormState {
+export function formFromSnapshot(snapshot: SettingsSnapshot): FormState {
   return {
-    llmProvider: s.llm.provider,
-    llmModel: s.llm.model,
-    llmBaseUrl: s.llm.baseUrl,
+    llmProvider: snapshot.llm.provider,
+    llmModel: snapshot.llm.model,
+    llmBaseUrl: snapshot.llm.baseUrl,
+    llmCustomPrompt: snapshot.llm.customPrompt ?? "",
     llmApiKey: "",
     llmApiKeyTouched: false,
-    igProvider: s.imageGen.provider,
-    igModel: s.imageGen.model,
-    igBaseUrl: s.imageGen.baseUrl,
-    igSize: s.imageGen.size,
-    igProtocol: s.imageGen.protocol || "auto",
-    igApiKey: "",
-    igApiKeyTouched: false,
-    rtGithubToken: "",
-    rtGithubTokenTouched: false,
-    godotExePath: s.toolchain.godotExePath,
+    imageProvider: snapshot.imageGen.provider,
+    imageModel: snapshot.imageGen.model,
+    imageBaseUrl: snapshot.imageGen.baseUrl,
+    imageSize: snapshot.imageGen.size,
+    imageProtocol: snapshot.imageGen.protocol,
+    imageApiKey: "",
+    imageApiKeyTouched: false,
+    githubToken: "",
+    githubTokenTouched: false,
+    sts2DllPath: snapshot.knowledge.sts2DllPath,
+    godotExePath: snapshot.toolchain.godotExePath,
   };
 }
 
-export function buildPatch(
-  form: FormState,
-  original: SettingsSnapshot,
-): SettingsPatch {
+export function buildPatch(form: FormState, original: SettingsSnapshot): SettingsPatch {
   const patch: SettingsPatch = {};
   const llm: NonNullable<SettingsPatch["llm"]> = {};
   if (form.llmProvider !== original.llm.provider) llm.provider = form.llmProvider;
   if (form.llmModel !== original.llm.model) llm.model = form.llmModel;
-  if (form.llmBaseUrl !== original.llm.baseUrl) llm.base_url = form.llmBaseUrl;
-  if (form.llmApiKeyTouched) llm.api_key = form.llmApiKey;
+  if (form.llmBaseUrl !== original.llm.baseUrl) llm.baseUrl = form.llmBaseUrl;
+  if (form.llmCustomPrompt !== (original.llm.customPrompt ?? "")) llm.customPrompt = form.llmCustomPrompt;
+  if (form.llmApiKeyTouched) llm.apiKey = form.llmApiKey;
   if (Object.keys(llm).length > 0) patch.llm = llm;
 
-  const imageGen: NonNullable<SettingsPatch["image_gen"]> = {};
-  if (form.igProvider !== original.imageGen.provider) imageGen.provider = form.igProvider;
-  if (form.igModel !== original.imageGen.model) imageGen.model = form.igModel;
-  if (form.igBaseUrl !== original.imageGen.baseUrl) imageGen.base_url = form.igBaseUrl;
-  if (form.igSize !== original.imageGen.size) imageGen.size = form.igSize;
-  if (form.igProtocol !== (original.imageGen.protocol || "auto")) {
-    imageGen.protocol = form.igProtocol;
-  }
-  if (form.igApiKeyTouched) imageGen.api_key = form.igApiKey;
-  if (Object.keys(imageGen).length > 0) patch.image_gen = imageGen;
+  const image: NonNullable<SettingsPatch["imageGen"]> = {};
+  if (form.imageProvider !== original.imageGen.provider) image.provider = form.imageProvider;
+  if (form.imageModel !== original.imageGen.model) image.model = form.imageModel;
+  if (form.imageBaseUrl !== original.imageGen.baseUrl) image.baseUrl = form.imageBaseUrl;
+  if (form.imageSize !== original.imageGen.size) image.size = form.imageSize;
+  if (form.imageProtocol !== original.imageGen.protocol) image.protocol = form.imageProtocol;
+  if (form.imageApiKeyTouched) image.apiKey = form.imageApiKey;
+  if (Object.keys(image).length > 0) patch.imageGen = image;
 
-  if (form.rtGithubTokenTouched) {
-    patch.runtime_workstation = { github_token: form.rtGithubToken };
-  }
-  if (form.godotExePath !== original.toolchain.godotExePath) {
-    patch.toolchain = { godot_exe_path: form.godotExePath };
-  }
+  if (form.githubTokenTouched) patch.runtimeWorkstation = { githubToken: form.githubToken };
+  if (form.sts2DllPath !== original.knowledge.sts2DllPath) patch.knowledge = { sts2DllPath: form.sts2DllPath };
+  if (form.godotExePath !== original.toolchain.godotExePath) patch.toolchain = { godotExePath: form.godotExePath };
   return patch;
 }

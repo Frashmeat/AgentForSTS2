@@ -37,7 +37,7 @@ Dockerfile.ci 的复杂度只是 actions/setup-* 的简化版，可控性更好�
 - 测试基线：`cargo test --workspace` 必须 204 unit + 4 integration = 208 全过；
   新增模块带 3+ 单测（TDD）
 - 提交消息：中文，标 stage / 测试数量（参照 `git log --oneline -10`）
-- ats-core 不引 axum / tauri；含外部 IO 用 async-trait
+- `ats-kernel`/`ats-runtime` 不依赖 Feature、Game Pack 或 Shell；含外部 IO 的 port/adapter 使用 async-trait
 - 文件 IO 用 tempfile + rename 保原子
 
 ---

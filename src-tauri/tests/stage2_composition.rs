@@ -46,7 +46,11 @@ struct CompositionModel {
 
 #[async_trait]
 impl ModelClient for CompositionModel {
-    async fn complete(&self, request: ModelRequestSnapshot) -> Result<ModelResponse, ModelError> {
+    async fn complete(
+        &self,
+        request: ModelRequestSnapshot,
+        _: &CancellationToken,
+    ) -> Result<ModelResponse, ModelError> {
         let content = if request.feature_id() == &ModPlanFeature::id() {
             serde_json::json!({
                 "itemId":"planned_item",
@@ -90,7 +94,11 @@ impl ModelClient for CompositionModel {
         })
     }
 
-    async fn stream(&self, _: ModelRequestSnapshot) -> Result<ModelStream, ModelError> {
+    async fn stream(
+        &self,
+        _: ModelRequestSnapshot,
+        _: &CancellationToken,
+    ) -> Result<ModelStream, ModelError> {
         Ok(Box::pin(stream::empty()))
     }
 }

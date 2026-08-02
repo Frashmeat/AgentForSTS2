@@ -1,99 +1,77 @@
 # Error Handling
 
-> Executable error and redaction contract for the current Rust/Tauri/React implementation.
+> Active Stage 2 failure, cancellation, shell mapping, and redaction contract.
 
-## Ownership And Signatures
+## Serialized Product Failure
 
-Core owns the only serialized product failure schema in `crates/ats-core/src/failure.rs`:
-
-```rust
-FailureNormalizer::{llm,image,project,run,artifact,toolchain,local_props,image_proc,package}(...)
-    -> ActionableFailure
-
-#[serde(transparent)]
-pub struct CommandFailure(pub Box<ActionableFailure>);
-pub type CommandResult<T> = Result<T, CommandFailure>;
-```
-
-`ActionableFailure` uses camel-case JSON fields:
+`ats-kernel::ActionableFailure` is the only backend failure object serialized to a Shell:
 
 ```text
-schemaVersion
-code
-category
-stage
-message
-action
-retryable
-retryAfterMs?
-context?
-diagnostic? { id, summary, ioKind? }
+schemaVersion, code, category, stage, message, action, retryable
 ```
 
-- `RunRecord.failure` stores the Core type directly.
-- `src-tauri/src/commands/failure.rs::CommandFailure` is a boxed transparent IPC wrapper. Boxing keeps the Rust `Result` error variant bounded; Serde still emits the same `ActionableFailure` JSON object. Tauri must not copy the fields into another transport DTO.
-- `src/services/actionableFailure.ts::toActionableFailure` is the React runtime guard. Invalid reject values become a fixed local `core.unclassified` failure.
-- `ActionableErrorNotice` renders the safe message, recovery action, and optional diagnostic ID. Pages do not render `String(error)`.
+The constructor validates schema version, stable identifiers, bounded message text, and recovery action. Tauri's `CommandFailure` is a transparent newtype; it must not duplicate or extend the Kernel fields.
 
-## Failure Versus Cancellation
+`ats-runtime::RunFailure` is the persisted execution failure envelope:
 
-- A failed Run has one `ActionableFailure`, no result, and one `failed` terminal timeline event.
-- A cancelled Run has neither failure nor result. The first `CancellationReason` wins and the Run receives one `cancelled` terminal event only after work has stopped and rollback has finished.
-- Tauri command rejection is not a Run terminal transition. The handler/repository remains the authority for persisted Run state.
-- A panic or handler return without a terminal state is converted by the task supervisor into a classified failed Run unless another terminal CAS already won.
+```text
+code, stage, optional versioned safe details
+```
 
-## Redaction Boundary
+It is not an arbitrary error string. The composition boundary maps internal Feature/Adapter errors to stable `RunFailure`; Shell commands map product rejection to `ActionableFailure`.
 
-`FailureContext` is a fixed whitelist, not a free-form map. It may contain bounded provider IDs, setting keys, dependency names, Run IDs, project-relative paths, attempt counts, and byte progress when the matching field exists.
+## Ownership
 
-The following values never enter IPC, Run history, ArtifactManifest, release verification, diagnostics summaries, or user-visible UI:
+- Kernel owns serialized shape and validation.
+- Runtime owns Run terminal invariants and `RunFailure`.
+- Features classify domain stages without provider/OS text.
+- Adapters return typed local errors and never decide UI messages.
+- Composition/Shell maps known failures to fixed codes/actions.
+- React validates the exact object at runtime and replaces malformed rejects with a fixed local fallback; it never displays `String(error)`.
 
-- API keys, GitHub tokens, authorization headers, cookies, or decrypted credentials.
-- Provider response bodies, full prompts, generated output, or request/response payloads.
-- URL query/fragment values.
-- Unnormalized absolute project, app-data, model, runtime, or temporary paths.
-- Unknown exception `Display`/`Debug` text.
+## Run Terminal Contract
 
-Unknown errors use the fixed `core.unclassified` code/message/action and a generated diagnostic ID. Stable normalizers classify expected domain errors before that fallback.
+- `succeeded`: one versioned result, no failure.
+- `failed`: one `RunFailure`, no result.
+- `cancelled`: cancellation reason, no failure and no result.
+- Pending/Running records have neither result nor failure.
+- A Feature returns only after rollback/cleanup; `ProjectSession` supervisor performs the sole persisted terminal transition.
+- Panic or non-terminal worker return becomes fixed `run.task_panic` or `run.incomplete` unless another terminal CAS already won.
 
-## Validation And Error Matrix
+## Cancellation
 
-| Source fact | Stable result | Safety requirement |
-| --- | --- | --- |
-| LLM/Image 401 or equivalent | `*.authentication_failed` | No provider body or credential |
-| LLM/Image 429 | `*.rate_limited` plus bounded `retryAfterMs` | No raw headers/body |
-| Transport failure | `*.network_failed` | No URL query or raw client error |
-| Package path escape/missing file | stable `package.*` | Only safe project-relative path context |
-| Artifact source/path/manifest is invalid | `artifact.path_invalid`, `artifact.snapshot_exists`, or `artifact.manifest_invalid` | No absolute path or raw manifest error |
-| Artifact publish I/O fails after bounded retry | `artifact.publish_failed` plus `diagnostic.ioKind` | No raw path/OS message; Windows sharing conflicts remain retryable |
-| Generated asset fails `dotnet build` | `artifact.compile_failed` plus Run diagnostic ID | Generated bundle and bounded redacted compile output stay only under `.ats/diagnostics/<run-id>/` |
-| Asset compile process/output is unavailable | `artifact.compile_unavailable` plus `diagnostic.ioKind` when known | No command error text or absolute path crosses Run/IPC |
-| Truth Snapshot runtime is locked or not writable | `truth_snapshot.storage_locked` plus `diagnostic.ioKind=permission_denied` | Persistent watcher conflicts are non-retryable until the runtime owner is released |
-| Filesystem failure | domain code plus optional `diagnostic.ioKind` | No absolute user path |
-| Project closing/drain timeout | stable `project.*` | At most one bounded blocking Run ID |
-| Unknown backend error | `core.unclassified` | Fixed text; no unknown `Display` |
-| Invalid Tauri reject payload | client-local `core.unclassified` | Rejected value is not rendered |
-| User/project/shutdown cancellation | Run `cancelled` | No fake failure payload |
+The first cancellation reason wins. User cancel, project close/switch, and shutdown publish through `CancellationToken`; network/process/file work stops and cleanup completes before terminal persistence. Close timeout retains task handles and the OS lock. There is no force-success or force-unlock path.
 
-## Good / Base / Bad
+## Redaction
 
-- Good: a typed authentication error reaches React with the same schema and recovery action while a provider-body canary is absent from every serialized boundary.
-- Good: a Windows artifact directory rename exhausts its bounded sharing-conflict retry and reaches the Run as retryable `artifact.publish_failed` with `ioKind=permission_denied`, without the absolute path or OS text.
-- Base: an IO error preserves only a stable `ioKind` and safe relative path; the diagnostic ID can be used to correlate local logs.
-- Base: a user cancels during a child process; cleanup finishes and the Run becomes `cancelled` with no failure.
-- Bad: `anyhow`, SDK, reqwest, IO, or serde error text is returned through `CommandFailure` or persisted directly.
-- Bad: an artifact handler discards `ArtifactError` and substitutes `core.unclassified`.
-- Bad: a compile failure discards stdout/stderr and generated source, or copies either into RunRecord/IPC.
-- Bad: React converts a rejected object with `String(error)` and displays its token/path canary.
+Never serialize or persist:
+
+- API keys, Authorization, cookies, provider bodies, complete prompts or outputs;
+- absolute private paths, URL query/fragment, SDK/reqwest/IO `Display` text;
+- unbounded compiler output or arbitrary JSON supplied by a reject value.
+
+Use stable code/stage, safe relative identifiers, bounded classified details, and local-only diagnostics. Unknown values map to `core.unclassified`; they are not interpolated into its message.
+
+## Artifact Failures
+
+Artifact validation, path, IO, publish, rollback, codegen, batch and package failures must remain typed `artifact.*`/Feature stage failures. Only Interrupted, Windows PermissionDenied, and OS errors 5/32/33 are eligible for bounded atomic rename retry. Exhaustion fails, cleans this run's staging, and never synthesizes success.
 
 ## Required Tests
 
-```text
-cargo test -p ats-core failure::
-cargo test -p ats-core platform::application::handlers::
-cargo test -p agentthespire-desktop commands::failure::tests
+```powershell
+cargo test -p ats-kernel product
+cargo test -p ats-runtime --all-targets
+cargo test -p agentthespire-desktop --lib commands::failure
 npm run test:frontend
 npx tsc -b --pretty false
 ```
 
-Assertions must include token, provider-body, URL-query, absolute-path, malformed-payload, unknown-error, typed-error, artifact I/O/path normalization, and cancellation canaries.
+Tests must include malformed/unknown reject canaries, terminal invariants, cancellation cleanup, storage conflict, and absence of raw path/token/provider text.
+
+## Forbidden Patterns
+
+- `Result<T, String>` or `anyhow::Error` at a serialized boundary.
+- Persisting `error.to_string()` in Run/Artifact.
+- Replacing a known Adapter error with `core.unclassified`.
+- Marking cancellation before cleanup or dropping a `JoinHandle` as proof of completion.
+- React rendering an unvalidated reject.

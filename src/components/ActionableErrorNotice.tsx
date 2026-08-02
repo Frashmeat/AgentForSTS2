@@ -7,6 +7,11 @@ interface ActionableErrorNoticeProps {
 }
 
 const ACTION_LABELS: Record<RecoveryAction, string | null> = {
+  check_settings: "检查设置后重试",
+  open_project: "打开工程后重试",
+  refresh_truth: "刷新 Truth 后重试",
+  replace_resource: "替换资源后重试",
+  inspect_run: "检查 Run 记录",
   configure: "检查配置后重试",
   reauthenticate: "更新凭据后重试",
   retry: "请重试",
