@@ -1,0 +1,6 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/backend/stage2-contracts.md", "reason": "Kernel IDs, exact DAG and typed envelope baseline"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Run failure, cancellation and redaction invariants"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Run/Artifact CAS, atomic publication and rollback contracts"}
+{"file": "docs/03-当前方案/2026-08-02-Stage-2分层能力与资源架构方案.md", "reason": "Confirmed Work Order 2 target"}

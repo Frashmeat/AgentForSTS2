@@ -13,3 +13,8 @@ ats-kernel = { path = "../ats-kernel" }
 ats-runtime = { path = "../ats-runtime" }
 ats-game-context = { path = "../ats-game-context" }
 ats-workspace = { path = "../ats-workspace" }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+[dev-dependencies]
+chrono = "0.4"

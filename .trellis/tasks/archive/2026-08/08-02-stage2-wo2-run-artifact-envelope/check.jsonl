@@ -1,0 +1,5 @@
+{"file": ".claude/commands/trellis/finish-work.md", "reason": "Finish work checklist"}
+{"file": ".claude/commands/trellis/check-backend.md", "reason": "Backend check spec"}
+{"file": ".trellis/spec/backend/stage2-contracts.md", "reason": "Verify no product enums or reverse dependencies"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify lifecycle, immutable evidence and rollback order"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Verify typed flow between Feature, Runtime and Adapter"}

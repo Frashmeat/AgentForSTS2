@@ -73,3 +73,72 @@ node scripts/check-stage2-dependency-dag.mjs --self-test
 node scripts/check-stage2-dependency-dag.mjs
 cargo check --workspace --all-targets
 ```
+
+## Run And Artifact Envelope
+
+`ats-runtime` owns `VersionedPayload`, `RunRecord` schema v3 and the base
+`ArtifactManifest` schema v3. These contracts contain validated Feature/schema identities but no
+product `RunKind`, product result enum, Game Pack type, evidence type, codegen type or image
+processing type.
+
+- `VersionedPayload::from_typed` accepts only typed values that serialize to a JSON object.
+- Persisted request, result and Artifact extension payloads are decoded only through the registered
+  `FeatureSpec` in `ats-features::FeatureRegistry`; unknown Features, schema mismatch and typed
+  decode errors fail.
+- A Run transition is transactional in memory: an invalid transition or invariant failure leaves
+  the prior record unchanged. Deserialization rechecks schema, timestamps, timeline, attempts,
+  failure/result exclusivity and terminal-event invariants.
+- A base Artifact manifest contains only identity, producing Run, versioned context/provenance
+  records, one Feature extension and immutable file records. Deserialization reruns full manifest
+  validation.
+
+`ats-adapters::FileArtifactStore` owns filesystem publication. It validates all source and
+published paths before staging, rejects symlink inputs and non-directory ancestors, writes the
+complete manifest and file snapshots under a unique `.staging-*` sibling, then exposes the
+snapshot with one same-directory rename. Existing final directories are immutable and are never
+overwritten.
+
+The rename operation retries only `Interrupted` and, on Windows, `PermissionDenied` or OS errors
+5/32/33 using 50/100/200/400/800 ms delays. Exhaustion and deterministic errors remain failures;
+staging cleanup is best effort and no copy fallback can report success.
+
+### Validation And Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Registered typed request/result/Artifact extension | Registry decodes the owning associated type |
+| Unknown Feature | `FeatureRegistryError::UnknownFeature` before workflow execution |
+| Schema mismatch or malformed object | `InvalidPayload` with typed `PayloadError`; no unchecked business input |
+| Invalid Run transition or tampered persisted record | Typed lifecycle failure; prior in-memory record remains unchanged |
+| Empty files, unsafe/non-normalized path, external source or symlink | Contract/path failure before final publication |
+| Complete valid staging directory | Same-directory rename publishes one immutable final snapshot |
+| Transient Windows rename conflict | At most five delayed retries after the initial attempt |
+| Retry exhaustion or deterministic rename failure | Typed I/O failure, no final directory and best-effort staging cleanup |
+| Existing final directory | `SnapshotExists`; existing contents are never overwritten |
+
+### Good / Base / Bad
+
+- Good: a newly registered fixture Feature validates its typed request, result and Artifact
+  extension without adding a Runtime enum branch; the published manifest and every file hash can
+  be recomputed and no `.staging-*` entry remains.
+- Base: legacy `ats-core` v2 continues to compile and serve current Shells while the isolated v3
+  contract is exercised only by Stage 2 fixtures.
+- Bad: Runtime matches a product Feature ID, Adapters imports Feature/Game/codegen types, a raw JSON
+  object enters a workflow without registry decode, or a failed rename is replaced by copy/success.
+
+The legacy `ats-core` RunRecord v2 and ArtifactManifest v2 remain the production Shell contract
+until the vertical Feature migrations and Work Order 7 cutover. New schema v3 files cannot be
+presented as current production output before that cutover.
+
+### Required Tests
+
+```text
+cargo test -p ats-runtime
+cargo test -p ats-features
+cargo test -p ats-adapters
+node scripts/check-stage2-dependency-dag.mjs --self-test
+node scripts/check-stage2-dependency-dag.mjs
+cargo check --workspace --all-targets
+cargo test --workspace --all-targets
+cargo clippy --workspace --all-targets -- -D warnings
+```

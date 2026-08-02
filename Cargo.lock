@@ -196,6 +196,12 @@ dependencies = [
  "ats-kernel",
  "ats-runtime",
  "ats-workspace",
+ "chrono",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -248,6 +254,9 @@ dependencies = [
  "ats-kernel",
  "ats-runtime",
  "ats-workspace",
+ "chrono",
+ "serde",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -271,6 +280,10 @@ name = "ats-runtime"
 version = "0.1.0"
 dependencies = [
  "ats-kernel",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
