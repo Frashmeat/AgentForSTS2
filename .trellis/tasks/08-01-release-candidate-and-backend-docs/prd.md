@@ -259,4 +259,30 @@ SHA-256 B85CED8C798272924E13A20C9B206FC6760103FE1D078B88624DDEEED32D4333
 
 用户随后启动真实游戏，并通过 `relic add ATSRELEASESMOKE-RELEASE_SPARK` 获取“发布火花”。最终人工结果为：富文本描述显示正常，图片与透明背景正常，Mod 本体无报错，中文内容正常，首回合能量行为正常。由此，`ATSReleaseSmoke-v0.0.0-blue.zip` 的真实游戏复验通过；该结论只覆盖本次 Mod 候选，不替代提交 `3c88bf28` 的 Windows baseline/ML 桌面候选安装与启动冒烟。
 
-同一次全链还暴露独立缺陷：`asset_generate.publish` 在 Windows staging 目录最终原子重命名处两次失败为 `core.unclassified`，但失败后同目录手动重命名成功。失败 Run 保持失败，未伪造成 succeeded；当前候选曾按 staging manifest/SHA-256 人工恢复后再走正式 build/package。该发布事务问题尚未修复，不在本次富文本补丁中混入处理。
+同一次全链还暴露独立缺陷：`asset_generate.publish` 在 Windows staging 目录最终原子重命名处两次失败为 `core.unclassified`，但失败后同目录手动重命名成功。失败 Run 保持失败，未伪造成 succeeded；当前候选曾按 staging manifest/SHA-256 人工恢复后再走正式 build/package。该发布事务问题当时尚未修复，没有混入本次富文本补丁；后续闭环见第 13 节。
+
+## 13. Artifact Windows 原子发布修复
+
+真实链留下的两个失败 Run 均包含完整 `.<run-id>.staging`，最终 Artifact Run 目录不存在，且稍后在同一目录手动重命名成功。结合 Windows 错误类型，根因为 Defender、索引器或同类进程造成的短暂 access/sharing/lock conflict，不是产物、manifest、路径 containment 或 Run CAS 错误。
+
+本次修复保持以下事务边界：
+
+- `ArtifactStore::publish` 仍先完整构建 staging，再通过同目录目录重命名一次性暴露最终快照；不降级为复制发布。
+- 初次重命名失败后仅重试 `Interrupted`，以及 Windows `PermissionDenied`、OS error 5/32/33；退避为 `50/100/200/400/800 ms`，总计最多 6 次尝试。
+- `AlreadyExists` 等确定性错误不重试；重试耗尽仍返回失败，并尽力删除 staging，不写 final 目录或成功 RunResult。
+- 重试日志只记录 attempt、delay 和 `io::ErrorKind`，不记录绝对路径或原始 OS 错误文本。
+- `ArtifactError` 不再在 asset、codegen、batch 和 package handler 中丢失为 `core.unclassified`；统一由 `FailureNormalizer::artifact` 映射为 `artifact.publish_failed`、`artifact.snapshot_exists`、`artifact.path_invalid` 或 `artifact.manifest_invalid`。
+- 原有正式文件回滚、已发布 Artifact 清理和终态 Run CAS 顺序保持不变。
+
+定向自动验证：
+
+```text
+cargo test -p ats-core platform::artifact::tests                                      # 8 passed
+cargo test -p ats-core failure::tests                                                  # 10 passed
+cargo test -p ats-core platform::application::handlers::code_generate::tests           # 6 passed
+cargo test -p ats-core platform::application::handlers::batch_custom_code::tests       # 5 passed
+cargo test -p ats-core platform::application::handlers::package_project::tests          # 7 passed
+cargo test -p ats-core platform::application::handlers::asset_generate::tests           # 14 passed
+```
+
+回归覆盖两次瞬态冲突后成功、重试耗尽清理、确定性错误不重试、平台错误分类、typed failure 脱敏，以及 asset/package 发布失败后的文件回滚。尚未执行新的 baseline/ML release candidate 和安装版真实产品链复验；旧候选、手动重命名或人工恢复结果不能替代该门禁。

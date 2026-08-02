@@ -7,7 +7,7 @@
 Core owns the only serialized product failure schema in `crates/ats-core/src/failure.rs`:
 
 ```rust
-FailureNormalizer::{llm,image,project,run,toolchain,local_props,image_proc,package}(...)
+FailureNormalizer::{llm,image,project,run,artifact,toolchain,local_props,image_proc,package}(...)
     -> ActionableFailure
 
 #[serde(transparent)]
@@ -64,6 +64,8 @@ Unknown errors use the fixed `core.unclassified` code/message/action and a gener
 | LLM/Image 429 | `*.rate_limited` plus bounded `retryAfterMs` | No raw headers/body |
 | Transport failure | `*.network_failed` | No URL query or raw client error |
 | Package path escape/missing file | stable `package.*` | Only safe project-relative path context |
+| Artifact source/path/manifest is invalid | `artifact.path_invalid`, `artifact.snapshot_exists`, or `artifact.manifest_invalid` | No absolute path or raw manifest error |
+| Artifact publish I/O fails after bounded retry | `artifact.publish_failed` plus `diagnostic.ioKind` | No raw path/OS message; Windows sharing conflicts remain retryable |
 | Filesystem failure | domain code plus optional `diagnostic.ioKind` | No absolute user path |
 | Project closing/drain timeout | stable `project.*` | At most one bounded blocking Run ID |
 | Unknown backend error | `core.unclassified` | Fixed text; no unknown `Display` |
@@ -73,9 +75,11 @@ Unknown errors use the fixed `core.unclassified` code/message/action and a gener
 ## Good / Base / Bad
 
 - Good: a typed authentication error reaches React with the same schema and recovery action while a provider-body canary is absent from every serialized boundary.
+- Good: a Windows artifact directory rename exhausts its bounded sharing-conflict retry and reaches the Run as retryable `artifact.publish_failed` with `ioKind=permission_denied`, without the absolute path or OS text.
 - Base: an IO error preserves only a stable `ioKind` and safe relative path; the diagnostic ID can be used to correlate local logs.
 - Base: a user cancels during a child process; cleanup finishes and the Run becomes `cancelled` with no failure.
 - Bad: `anyhow`, SDK, reqwest, IO, or serde error text is returned through `CommandFailure` or persisted directly.
+- Bad: an artifact handler discards `ArtifactError` and substitutes `core.unclassified`.
 - Bad: React converts a rejected object with `String(error)` and displays its token/path canary.
 
 ## Required Tests
@@ -88,4 +92,4 @@ npm run test:frontend
 npx tsc -b --pretty false
 ```
 
-Assertions must include token, provider-body, URL-query, absolute-path, malformed-payload, unknown-error, typed-error, and cancellation canaries.
+Assertions must include token, provider-body, URL-query, absolute-path, malformed-payload, unknown-error, typed-error, artifact I/O/path normalization, and cancellation canaries.

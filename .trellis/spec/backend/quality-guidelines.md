@@ -54,6 +54,7 @@ This file contains executable scenario contracts for Core/Desktop behavior. Cros
 - A failed Run has one `ActionableFailure` and no result; a cancelled Run has neither failure nor result; a succeeded Run has a kind-compatible tagged `RunResult`.
 - Product code reads and writes only the active project's V2 `history/`. An unmarked non-empty V1 history is atomically renamed to `history.v1-backup-<UTC>` while the project OS lock is held.
 - Successful artifact Runs publish `artifacts/<artifact-id>/runs/<run-id>/artifact-manifest.json` plus immutable `files/`. Run results keep only the manifest reference, SHA-256, and bounded kind-specific summaries.
+- `ArtifactStore::publish` builds `.<run-id>.staging` completely and exposes it only through a same-directory rename. On Windows, only `Interrupted`, access denied, sharing violation, and lock violation rename failures are retried with `50/100/200/400/800 ms` delays; deterministic conflicts are never retried. Exhaustion remains failure and triggers best-effort staging cleanup.
 - Manifest Evidence is the structured fact set selected for the same Prompt assembly: `source`, `symbol`, `purpose`, and `boundedExcerpt`, together with verified Game Pack and Truth Snapshot identity.
 - Formal project writes remain rollback-capable until manifest publication and terminal CAS succeed. Manifest failure restores prior files; CAS loss removes the new artifact run directory and restores formal writes.
 - Failed image diagnostics use `.ats/diagnostics/<run-id>/` and `failure.diagnostic.id`. Successful image diagnostics are copied into the immutable artifact snapshot and the diagnostics directory is removed.
@@ -64,6 +65,8 @@ This file contains executable scenario contracts for Core/Desktop behavior. Cros
 | Condition | Expected behavior |
 | --- | --- |
 | Valid artifact Run | Publish immutable manifest/files, then transition once to `succeeded` |
+| Windows scanner holds the staging directory briefly | Retry the atomic rename at most five times after the initial attempt; publish the same complete directory when the conflict clears |
+| Rename retry exhausts or a deterministic rename error occurs | No success result or final directory; remove staging when possible, restore formal writes, persist a typed `artifact.*` failure |
 | Manifest write or path validation fails | Restore prior formal files; Run is `failed` with no result |
 | Cancellation wins terminal CAS | Remove the new artifact run directory and restore formal files |
 | Image quality/compile fails | Keep only `.ats/diagnostics/<run-id>/`; no success manifest |
@@ -73,13 +76,16 @@ This file contains executable scenario contracts for Core/Desktop behavior. Cros
 ### Good / Base / Bad Cases
 
 - Good: an asset Run has one created, started, and succeeded timeline event; its manifest digest and every file digest can be recomputed.
+- Good: the first two directory renames return a sharing conflict and the third succeeds; the final directory contains the complete manifest and staging no longer exists.
 - Base: an existing generated file is replaced by a successful Run while its prior shared artifact entries are removed through the legacy cleanup transaction.
+- Bad: a permanent path conflict is retried or relabeled as success.
 - Bad: force `artifacts/<artifact-id>/runs` to be a regular file; publication fails, the previous generated file is restored byte-for-byte, and no success result is persisted.
 
 ### Targeted Tests
 
 ```text
 cargo test -p ats-core --test run_lifecycle
+cargo test -p ats-core failure::tests
 cargo test -p ats-core platform::artifact::tests
 cargo test -p ats-core platform::application::handlers::asset_generate::tests
 cargo test -p ats-core platform::application::handlers::batch_custom_code::tests

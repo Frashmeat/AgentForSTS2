@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::image_gen::ImageGenError;
 use crate::image_proc::ImageProcError;
 use crate::llm::LlmError;
+use crate::platform::artifact::ArtifactError;
 use crate::platform::domain::{PackageError, RunError, RunId};
 use crate::project::{LocalPropsError, ProjectError};
 use crate::toolchain::GodotValidationError;
@@ -611,6 +612,52 @@ impl FailureNormalizer {
     }
 
     #[must_use]
+    pub fn artifact(stage: &str, error: &ArtifactError) -> ActionableFailure {
+        match error {
+            ArtifactError::Io(error) => {
+                let mut normalized = io_failure(
+                    "artifact.publish_failed",
+                    stage,
+                    "The artifact snapshot could not be published.",
+                    error,
+                );
+                if error.kind() == std::io::ErrorKind::PermissionDenied {
+                    normalized.action = RecoveryAction::Retry;
+                    normalized.retryable = true;
+                }
+                normalized
+            }
+            ArtifactError::AlreadyExists(_) => failure(
+                "artifact.snapshot_exists",
+                FailureCategory::State,
+                stage,
+                "An artifact snapshot already exists for this run.",
+                RecoveryAction::None,
+                false,
+            ),
+            ArtifactError::UnsafeId(_)
+            | ArtifactError::UnsafeRelativePath(_)
+            | ArtifactError::NotRegularFile(_)
+            | ArtifactError::Symlink(_) => failure(
+                "artifact.path_invalid",
+                FailureCategory::Validation,
+                stage,
+                "The artifact snapshot contains an invalid or unsafe path.",
+                RecoveryAction::CheckPath,
+                false,
+            ),
+            ArtifactError::InvalidManifest(_) | ArtifactError::Json(_) => failure(
+                "artifact.manifest_invalid",
+                FailureCategory::Internal,
+                stage,
+                "The artifact manifest could not be created or validated.",
+                RecoveryAction::Retry,
+                true,
+            ),
+        }
+    }
+
+    #[must_use]
     pub fn toolchain(stage: &str, error: &GodotValidationError) -> ActionableFailure {
         match error {
             GodotValidationError::NotAFile(_) => failure(
@@ -1003,6 +1050,44 @@ mod tests {
             failure.diagnostic.unwrap().io_kind,
             Some(FailureIoKind::PermissionDenied)
         );
+    }
+
+    #[test]
+    fn artifact_publish_failure_keeps_io_kind_without_raw_error() {
+        let canary = "C:\\Users\\private\\artifact.lock";
+        let error = ArtifactError::Io(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            canary,
+        ));
+        let failure = FailureNormalizer::artifact("asset_generate.publish", &error);
+        let serialized = serde_json::to_string(&failure).unwrap();
+
+        assert_eq!(failure.code, "artifact.publish_failed");
+        assert_eq!(failure.category, FailureCategory::Filesystem);
+        assert_eq!(failure.action, RecoveryAction::Retry);
+        assert!(failure.retryable);
+        assert_eq!(
+            failure.diagnostic.unwrap().io_kind,
+            Some(FailureIoKind::PermissionDenied)
+        );
+        assert!(!serialized.contains("private"));
+        assert!(!serialized.contains("artifact.lock"));
+    }
+
+    #[test]
+    fn artifact_path_failure_does_not_expose_absolute_path() {
+        let canary = "C:\\Users\\private\\artifacts";
+        let failure = FailureNormalizer::artifact(
+            "package.publish",
+            &ArtifactError::NotRegularFile(canary.into()),
+        );
+        let serialized = serde_json::to_string(&failure).unwrap();
+
+        assert_eq!(failure.code, "artifact.path_invalid");
+        assert_eq!(failure.category, FailureCategory::Validation);
+        assert_eq!(failure.action, RecoveryAction::CheckPath);
+        assert!(!failure.retryable);
+        assert!(!serialized.contains("private"));
     }
 
     #[test]

@@ -508,7 +508,7 @@ pub(crate) async fn run_asset_generate(
     .await
     {
         Ok(published) => published,
-        Err(_) => {
+        Err(error) => {
             let rollback = artifact.rollback_writes().await;
             let _ = rollback;
             finalize_with_failure(
@@ -516,7 +516,7 @@ pub(crate) async fn run_asset_generate(
                 &run_id,
                 &sink,
                 with_optional_run_diagnostic(
-                    ActionableFailure::unclassified("asset_generate.publish"),
+                    FailureNormalizer::artifact("asset_generate.publish", &error),
                     &run_id,
                     diagnostics_written,
                 ),
@@ -1453,6 +1453,71 @@ mod tests {
                 .exists()
         );
         assert!(!artifacts.join("BadRichTextRelic").exists());
+    }
+
+    #[tokio::test]
+    async fn artifact_publish_failure_rolls_back_formal_asset_writes() {
+        let td = tempfile::TempDir::new().unwrap();
+        prepare_project(td.path());
+        let history = td.path().join("history");
+        let artifacts = td.path().join("artifacts");
+        let generated = td.path().join("Generated");
+        std::fs::create_dir_all(&history).unwrap();
+        std::fs::create_dir_all(&artifacts).unwrap();
+        std::fs::create_dir_all(&generated).unwrap();
+        std::fs::write(
+            generated.join("PublishRollbackCard.cs"),
+            "public class PreviousVersion {}",
+        )
+        .unwrap();
+        std::fs::create_dir_all(artifacts.join("PublishRollbackCard")).unwrap();
+        std::fs::write(
+            artifacts.join("PublishRollbackCard/runs"),
+            b"force deterministic publish failure",
+        )
+        .unwrap();
+
+        let repo: Arc<dyn RunRepository> = Arc::new(FileRunRepository::new(history.clone()));
+        let llm: Arc<dyn LlmClient> = Arc::new(ScriptedLlm {
+            events: Mutex::new(ok_code_events("PublishRollbackCard")),
+        });
+        let validator = Arc::new(CountingCompileValidator::default());
+        let service = service_with_validator(repo, llm, validator.clone());
+        let id = service
+            .submit_asset_generate(
+                make_request(td.path(), "PublishRollbackCard", None),
+                fixture_game_context(td.path(), &[], &[]),
+                artifacts.clone(),
+                Arc::new(MockImageGen::new(Vec::new())),
+                Arc::new(SimpleBgRemover::default()),
+                Arc::new(super::super::common::NoopProgressSink),
+            )
+            .await
+            .unwrap();
+        wait_terminal(&service, &id).await;
+
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Failed);
+        assert!(run.result.is_none());
+        let failure = run.failure.as_ref().unwrap();
+        assert_eq!(failure.code, "artifact.path_invalid");
+        assert_eq!(failure.stage, "asset_generate.publish");
+        assert_eq!(validator.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            std::fs::read_to_string(generated.join("PublishRollbackCard.cs")).unwrap(),
+            "public class PreviousVersion {}"
+        );
+        assert!(artifacts.join("PublishRollbackCard/runs").is_file());
+        assert!(
+            !td.path()
+                .join("DemoMod/localization/eng/cards.json")
+                .exists()
+        );
+        assert!(
+            !td.path()
+                .join("DemoMod/localization/zhs/cards.json")
+                .exists()
+        );
     }
 
     #[tokio::test]

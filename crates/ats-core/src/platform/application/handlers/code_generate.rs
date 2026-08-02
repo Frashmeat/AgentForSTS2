@@ -21,8 +21,9 @@ use crate::game_pack::{ValidationRule, VerifiedGameContext};
 use crate::llm::{CompletionRequest, LlmClient, LlmError, Message, MessageRole, StreamEvent};
 use crate::platform::application::CancellationToken;
 use crate::platform::artifact::{
-    ArtifactFileInput, ArtifactGameContext, ArtifactGeneration, ArtifactPublishRequest,
-    ArtifactStore, LegacyArtifactCleanup, sha256_bytes, snapshot_evidence,
+    ArtifactError, ArtifactFileInput, ArtifactGameContext, ArtifactGeneration,
+    ArtifactPublishRequest, ArtifactResult, ArtifactStore, LegacyArtifactCleanup, sha256_bytes,
+    snapshot_evidence,
 };
 use crate::platform::contracts::SubmitCodeGenerateRequest;
 use crate::platform::domain::{RunId, RunRepository, RunResult, TokenUsage};
@@ -165,14 +166,14 @@ pub(crate) async fn run_code_generate(
             .await
             {
                 Ok(published) => published,
-                Err(_) => {
+                Err(error) => {
                     let rollback = artifact.rollback_writes().await;
                     let _ = rollback;
                     finalize_with_failure(
                         &repo,
                         &run_id,
                         &sink,
-                        ActionableFailure::unclassified("code_generate.publish"),
+                        FailureNormalizer::artifact("code_generate.publish", &error),
                     )
                     .await;
                     return;
@@ -275,14 +276,14 @@ pub(crate) async fn run_code_generate(
             .await
             {
                 Ok(published) => published,
-                Err(_) => {
+                Err(error) => {
                     let rollback = artifact.rollback_writes().await;
                     let _ = rollback;
                     finalize_with_failure(
                         &repo,
                         &run_id,
                         &sink,
-                        ActionableFailure::unclassified("code_generate.publish"),
+                        FailureNormalizer::artifact("code_generate.publish", &error),
                     )
                     .await;
                     return;
@@ -334,22 +335,15 @@ pub(crate) async fn publish_generated_artifact(
     image_processing: Option<crate::image_proc::ImageProcessingProvenance>,
     files: Vec<(String, PathBuf)>,
     snapshot_only_files: Vec<(String, PathBuf)>,
-) -> Result<PublishedRunArtifact, String> {
+) -> ArtifactResult<PublishedRunArtifact> {
     let project_root = artifacts_dir
         .parent()
-        .ok_or_else(|| {
-            format!(
-                "artifacts dir has no project parent: {}",
-                artifacts_dir.display()
-            )
-        })?
+        .ok_or_else(|| ArtifactError::UnsafeRelativePath("artifacts".into()))?
         .to_path_buf();
     let store = ArtifactStore::new(project_root);
     let mut file_inputs = Vec::with_capacity(files.len());
     for (role, source_path) in files {
-        let published_relative_path = store
-            .project_relative_ref(&source_path)
-            .map_err(|error| error.to_string())?;
+        let published_relative_path = store.project_relative_ref(&source_path)?;
         file_inputs.push(ArtifactFileInput {
             role,
             source_path,
@@ -380,13 +374,12 @@ pub(crate) async fn publish_generated_artifact(
             image_processing,
             files: file_inputs,
         })
-        .await
-        .map_err(|error| format!("publish artifact manifest: {error}"))?;
+        .await?;
     let legacy_cleanup = match store.begin_legacy_cleanup(&entity_name, run_id) {
         Ok(cleanup) => cleanup,
         Err(error) => {
             let _ = store.remove_published_run(&entity_name, run_id);
-            return Err(format!("prepare legacy artifact cleanup: {error}"));
+            return Err(error);
         }
     };
     Ok(PublishedRunArtifact {

@@ -19,7 +19,7 @@ use super::common::{
     FinalizeOutcome, ProgressEvent, ProgressSink, finalize_with_cancellation,
     finalize_with_failure, finalize_with_success, transition_to_running,
 };
-use crate::failure::{ActionableFailure, FailureNormalizer};
+use crate::failure::FailureNormalizer;
 use crate::game_pack::{PackageLayout, VerifiedGameContext};
 use crate::platform::application::CancellationToken;
 use crate::platform::artifact::{
@@ -133,13 +133,13 @@ pub async fn run_package_project(
         .await
     {
         Ok(published) => published,
-        Err(_) => {
+        Err(error) => {
             let _ = output_transaction.rollback();
             finalize_with_failure(
                 &repo,
                 &run_id,
                 &sink,
-                ActionableFailure::unclassified("package.publish"),
+                FailureNormalizer::artifact("package.publish", &error),
             )
             .await;
             return;
@@ -147,14 +147,14 @@ pub async fn run_package_project(
     };
     let legacy_cleanup = match store.begin_legacy_cleanup(&artifact_id, &run_id) {
         Ok(cleanup) => cleanup,
-        Err(_) => {
+        Err(error) => {
             let _ = store.remove_published_run(&artifact_id, &run_id);
             let _ = output_transaction.rollback();
             finalize_with_failure(
                 &repo,
                 &run_id,
                 &sink,
-                ActionableFailure::unclassified("package.cleanup"),
+                FailureNormalizer::artifact("package.cleanup", &error),
             )
             .await;
             return;
@@ -699,7 +699,7 @@ mod tests {
         let run = service.get(&id).await.unwrap();
         assert_eq!(run.status, RunStatus::Failed);
         assert!(run.result.is_none());
-        assert_eq!(run.failure.as_ref().unwrap().code, "core.unclassified");
+        assert_eq!(run.failure.as_ref().unwrap().code, "artifact.path_invalid");
         assert_eq!(run.failure.as_ref().unwrap().stage, "package.publish");
         assert_eq!(std::fs::read(output).unwrap(), b"previous package");
     }

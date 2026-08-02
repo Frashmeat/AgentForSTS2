@@ -2,7 +2,10 @@
 
 use std::collections::BTreeMap;
 use std::fs;
+use std::io;
 use std::path::{Component, Path, PathBuf};
+use std::thread;
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -15,6 +18,13 @@ use crate::image_proc::{ImageProcessingProvenance, ImageProcessor};
 use crate::platform::domain::RunId;
 
 pub const ARTIFACT_MANIFEST_SCHEMA_VERSION: u32 = 2;
+const PUBLISH_RENAME_RETRY_DELAYS: [Duration; 5] = [
+    Duration::from_millis(50),
+    Duration::from_millis(100),
+    Duration::from_millis(200),
+    Duration::from_millis(400),
+    Duration::from_millis(800),
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -201,27 +211,28 @@ impl ArtifactStore {
         }
         fs::create_dir_all(staging_dir.join("files"))?;
 
-        let publish_result = self.build_staging(&staging_dir, &request);
-        let manifest = match publish_result {
-            Ok(manifest) => manifest,
-            Err(error) => {
-                let _ = fs::remove_dir_all(&staging_dir);
-                return Err(error);
-            }
-        };
-        let manifest_bytes = serde_json::to_vec_pretty(&manifest)?;
-        fs::write(staging_dir.join("artifact-manifest.json"), &manifest_bytes)?;
-        let manifest_ref = normalize_relative_path(
-            final_dir
-                .join("artifact-manifest.json")
-                .strip_prefix(&self.project_root)
-                .map_err(|_| ArtifactError::UnsafeRelativePath(final_dir.display().to_string()))?,
-        )?;
-        fs::rename(&staging_dir, &final_dir)?;
-        Ok(PublishedArtifact {
-            artifact_manifest_ref: manifest_ref,
-            manifest_sha256: sha256_bytes(&manifest_bytes),
-        })
+        let result = (|| {
+            let manifest = self.build_staging(&staging_dir, &request)?;
+            let manifest_bytes = serde_json::to_vec_pretty(&manifest)?;
+            fs::write(staging_dir.join("artifact-manifest.json"), &manifest_bytes)?;
+            let manifest_ref = normalize_relative_path(
+                final_dir
+                    .join("artifact-manifest.json")
+                    .strip_prefix(&self.project_root)
+                    .map_err(|_| {
+                        ArtifactError::UnsafeRelativePath(final_dir.display().to_string())
+                    })?,
+            )?;
+            publish_staging_directory(&staging_dir, &final_dir)?;
+            Ok(PublishedArtifact {
+                artifact_manifest_ref: manifest_ref,
+                manifest_sha256: sha256_bytes(&manifest_bytes),
+            })
+        })();
+        if result.is_err() {
+            let _ = fs::remove_dir_all(&staging_dir);
+        }
+        result
     }
 
     pub fn remove_published_run(&self, artifact_id: &str, run_id: &RunId) -> ArtifactResult<()> {
@@ -389,6 +400,70 @@ impl ArtifactStore {
         };
         manifest.validate()?;
         Ok(manifest)
+    }
+}
+
+fn publish_staging_directory(staging_dir: &Path, final_dir: &Path) -> io::Result<()> {
+    publish_staging_directory_with(
+        staging_dir,
+        final_dir,
+        |from, to| fs::rename(from, to),
+        thread::sleep,
+        is_transient_publish_rename_error,
+    )
+}
+
+fn publish_staging_directory_with<R, S, C>(
+    staging_dir: &Path,
+    final_dir: &Path,
+    mut rename: R,
+    mut sleep: S,
+    is_retryable: C,
+) -> io::Result<()>
+where
+    R: FnMut(&Path, &Path) -> io::Result<()>,
+    S: FnMut(Duration),
+    C: Fn(&io::Error) -> bool,
+{
+    let mut attempt = 1_u8;
+    loop {
+        match rename(staging_dir, final_dir) {
+            Ok(()) => return Ok(()),
+            Err(error)
+                if is_retryable(&error)
+                    && usize::from(attempt) <= PUBLISH_RENAME_RETRY_DELAYS.len() =>
+            {
+                let delay = PUBLISH_RENAME_RETRY_DELAYS[usize::from(attempt) - 1];
+                tracing::warn!(
+                    attempt,
+                    next_attempt = attempt + 1,
+                    delay_ms = delay.as_millis(),
+                    io_kind = ?error.kind(),
+                    "artifact directory publish was temporarily unavailable; retrying"
+                );
+                sleep(delay);
+                attempt += 1;
+            }
+            Err(error) => {
+                let _ = fs::remove_dir_all(staging_dir);
+                return Err(error);
+            }
+        }
+    }
+}
+
+fn is_transient_publish_rename_error(error: &io::Error) -> bool {
+    if error.kind() == io::ErrorKind::Interrupted {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        error.kind() == io::ErrorKind::PermissionDenied
+            || matches!(error.raw_os_error(), Some(5 | 32 | 33))
+    }
+    #[cfg(not(windows))]
+    {
+        false
     }
 }
 
@@ -685,6 +760,123 @@ mod tests {
 
         store.remove_published_run("Demo", &run_id).unwrap();
         assert!(!project.join(&published.artifact_manifest_ref).exists());
+    }
+
+    #[test]
+    fn publish_directory_retries_transient_conflicts_then_renames_atomically() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let staging = temp.path().join(".staging-run");
+        let final_dir = temp.path().join("run");
+        fs::create_dir(&staging).unwrap();
+        fs::write(staging.join("artifact-manifest.json"), b"complete").unwrap();
+        let mut attempts = 0_u8;
+        let mut delays = Vec::new();
+
+        publish_staging_directory_with(
+            &staging,
+            &final_dir,
+            |from, to| {
+                attempts += 1;
+                if attempts <= 2 {
+                    Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "sharing violation canary",
+                    ))
+                } else {
+                    fs::rename(from, to)
+                }
+            },
+            |delay| delays.push(delay),
+            |error| error.kind() == io::ErrorKind::PermissionDenied,
+        )
+        .unwrap();
+
+        assert_eq!(attempts, 3);
+        assert_eq!(delays, PUBLISH_RENAME_RETRY_DELAYS[..2]);
+        assert!(!staging.exists());
+        assert_eq!(
+            fs::read(final_dir.join("artifact-manifest.json")).unwrap(),
+            b"complete"
+        );
+    }
+
+    #[test]
+    fn publish_directory_exhaustion_removes_incomplete_staging() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let staging = temp.path().join(".staging-run");
+        let final_dir = temp.path().join("run");
+        fs::create_dir(&staging).unwrap();
+        fs::write(staging.join("artifact-manifest.json"), b"incomplete").unwrap();
+        let mut attempts = 0_u8;
+
+        let error = publish_staging_directory_with(
+            &staging,
+            &final_dir,
+            |_, _| {
+                attempts += 1;
+                Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "sharing violation canary",
+                ))
+            },
+            |_| {},
+            |_| true,
+        )
+        .unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(usize::from(attempts), PUBLISH_RENAME_RETRY_DELAYS.len() + 1);
+        assert!(!staging.exists());
+        assert!(!final_dir.exists());
+    }
+
+    #[test]
+    fn publish_directory_does_not_retry_deterministic_errors() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let staging = temp.path().join(".staging-run");
+        let final_dir = temp.path().join("run");
+        fs::create_dir(&staging).unwrap();
+        let mut attempts = 0_u8;
+        let mut sleeps = 0_u8;
+
+        let error = publish_staging_directory_with(
+            &staging,
+            &final_dir,
+            |_, _| {
+                attempts += 1;
+                Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "deterministic conflict canary",
+                ))
+            },
+            |_| sleeps += 1,
+            |_| false,
+        )
+        .unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(attempts, 1);
+        assert_eq!(sleeps, 0);
+        assert!(!staging.exists());
+        assert!(!final_dir.exists());
+    }
+
+    #[test]
+    fn publish_rename_classifier_is_platform_bounded() {
+        assert!(is_transient_publish_rename_error(&io::Error::new(
+            io::ErrorKind::Interrupted,
+            "interrupted canary",
+        )));
+        assert!(!is_transient_publish_rename_error(&io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "deterministic canary",
+        )));
+
+        let permission = io::Error::new(io::ErrorKind::PermissionDenied, "permission canary");
+        #[cfg(windows)]
+        assert!(is_transient_publish_rename_error(&permission));
+        #[cfg(not(windows))]
+        assert!(!is_transient_publish_rename_error(&permission));
     }
 
     #[test]

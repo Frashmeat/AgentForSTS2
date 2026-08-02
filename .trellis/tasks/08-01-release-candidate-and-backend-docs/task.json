@@ -39,6 +39,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "ATSReleaseSmoke 富文本修复候选已通过用户真实游戏复验。提交 3c88bf28 的机器候选 rc-20260801T142915Z-3c88bf28c2b3 已通过，但其最终安装/启动冒烟仍未记录；asset_generate.publish 原子重命名缺陷为独立后续事项。",
+  "notes": "ATSReleaseSmoke 富文本修复候选已通过用户真实游戏复验。Artifact Windows 瞬态原子重命名冲突已以共享有界重试、typed failure 和失败清理修复，定向回归通过。下一步是提交修复，并在新的干净 HEAD 上重新生成 baseline/ML 候选后由用户完成最终安装/启动冒烟。",
   "meta": {}
 }

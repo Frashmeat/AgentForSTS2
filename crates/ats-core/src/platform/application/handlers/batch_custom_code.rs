@@ -265,13 +265,16 @@ async fn process_one_item(
                         }),
                     }
                 }
-                Err(_) => {
+                Err(error) => {
                     let rollback = art.rollback_writes().await;
                     let _ = rollback;
                     ItemOutcome {
                         success: false,
                         result: failed_batch_item(entity_name),
-                        error: Some(ActionableFailure::unclassified("batch_custom_code.publish")),
+                        error: Some(FailureNormalizer::artifact(
+                            "batch_custom_code.publish",
+                            &error,
+                        )),
                         pending_commit: None,
                     }
                 }
