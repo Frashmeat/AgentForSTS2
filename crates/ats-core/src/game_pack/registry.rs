@@ -180,6 +180,20 @@ mod tests {
         );
         let relic = sts2.resource_spec("Relic").unwrap();
         assert_eq!(relic.localization.table, "relics");
+        assert!(
+            relic
+                .localization
+                .allowed_rich_text_tags
+                .iter()
+                .any(|tag| tag == "blue")
+        );
+        assert!(
+            !relic
+                .localization
+                .allowed_rich_text_tags
+                .iter()
+                .any(|tag| tag == "yellow")
+        );
         assert_eq!(relic.images.len(), 3);
         assert!(sts2.project_template.is_some());
         assert_eq!(sts2.guidance.as_ref().unwrap().items.len(), 8);

@@ -10,7 +10,9 @@ use super::code_generate::{
     extract_first_code_block, sanitize_entity_name, validate_generated_code_skein,
 };
 use super::common::{ProgressEvent, ProgressSink};
-use crate::codegen::{AssetCodegenRequest, asset_localization_key_segment};
+use crate::codegen::{
+    AssetCodegenRequest, asset_localization_key_segment, validate_localization_rich_text,
+};
 use crate::game_pack::{
     AssetResourceSpec, LoadedGamePack, ResourceImageRole, ResourceImageTransform, ValidationRule,
 };
@@ -356,8 +358,15 @@ fn validate_localization(
         }
     }
     for (locale, entries) in localization {
-        if let Some((key, _)) = entries.iter().find(|(_, value)| value.trim().is_empty()) {
-            return Err(format!("{locale} localization value is empty: {key}"));
+        for (key, value) in entries {
+            if value.trim().is_empty() {
+                return Err(format!("{locale} localization value is empty: {key}"));
+            }
+            validate_localization_rich_text(
+                value,
+                &resource_spec.localization.allowed_rich_text_tags,
+            )
+            .map_err(|error| format!("{locale} localization value is invalid ({key}): {error}"))?;
         }
     }
     Ok(())
@@ -799,6 +808,33 @@ mod tests {
         assert!(
             parse_and_validate_bundle(&wrong_prefix, &[], relic, "DEMOMOD-ENERGY_SEED_RELIC",)
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_or_unbalanced_localization_rich_text_before_writes() {
+        let pack = sts2_pack();
+        let relic = pack.resource_spec("relic").unwrap();
+        let yellow = relic_bundle().replace("Gain energy.", "Gain [yellow]1[/yellow] Energy.");
+        let error = parse_and_validate_bundle(
+            &yellow,
+            &pack.validation_rules,
+            relic,
+            "DEMOMOD-ENERGY_SEED_RELIC",
+        )
+        .unwrap_err();
+        assert!(error.contains("yellow"));
+        assert!(error.contains("not allowed"));
+
+        let unclosed = relic_bundle().replace("Gain energy.", "Gain [blue]1 Energy.");
+        assert!(
+            parse_and_validate_bundle(
+                &unclosed,
+                &pack.validation_rules,
+                relic,
+                "DEMOMOD-ENERGY_SEED_RELIC",
+            )
+            .is_err()
         );
     }
 

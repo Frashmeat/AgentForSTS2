@@ -147,6 +147,8 @@ pub struct LocalizationResourceSpec {
     pub relative_path: String,
     pub locales: Vec<String>,
     pub required_suffixes: Vec<String>,
+    /// Exact lower-case rich-text tags accepted in generated localization values.
+    pub allowed_rich_text_tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

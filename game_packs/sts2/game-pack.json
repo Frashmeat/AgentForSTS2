@@ -47,7 +47,8 @@
         "table": "cards",
         "relative_path": "localization/{locale}/cards.json",
         "locales": ["eng", "zhs"],
-        "required_suffixes": ["title", "description"]
+        "required_suffixes": ["title", "description"],
+        "allowed_rich_text_tags": ["aqua", "blue", "gold", "green", "orange", "pink", "purple", "red"]
       },
       "images": [
         {"role": "normal", "relative_path": "images/card_portraits/{slug}.png", "transform": "preserve"},
@@ -60,7 +61,8 @@
         "table": "cards",
         "relative_path": "localization/{locale}/cards.json",
         "locales": ["eng", "zhs"],
-        "required_suffixes": ["title", "description"]
+        "required_suffixes": ["title", "description"],
+        "allowed_rich_text_tags": ["aqua", "blue", "gold", "green", "orange", "pink", "purple", "red"]
       },
       "images": [
         {"role": "normal", "relative_path": "images/card_portraits/{slug}.png", "transform": "preserve"},
@@ -73,7 +75,8 @@
         "table": "relics",
         "relative_path": "localization/{locale}/relics.json",
         "locales": ["eng", "zhs"],
-        "required_suffixes": ["title", "description", "flavor"]
+        "required_suffixes": ["title", "description", "flavor"],
+        "allowed_rich_text_tags": ["aqua", "blue", "gold", "green", "orange", "pink", "purple", "red"]
       },
       "images": [
         {"role": "normal", "relative_path": "images/relics/{slug}.png", "transform": "cover", "width": 128, "height": 128},
@@ -87,7 +90,8 @@
         "table": "powers",
         "relative_path": "localization/{locale}/powers.json",
         "locales": ["eng", "zhs"],
-        "required_suffixes": ["title", "description"]
+        "required_suffixes": ["title", "description"],
+        "allowed_rich_text_tags": ["aqua", "blue", "gold", "green", "orange", "pink", "purple", "red"]
       },
       "images": [
         {"role": "normal", "relative_path": "images/powers/{slug}.png", "transform": "preserve"},
@@ -100,7 +104,8 @@
         "table": "characters",
         "relative_path": "localization/{locale}/characters.json",
         "locales": ["eng", "zhs"],
-        "required_suffixes": ["title", "description"]
+        "required_suffixes": ["title", "description"],
+        "allowed_rich_text_tags": ["aqua", "blue", "gold", "green", "orange", "pink", "purple", "red"]
       },
       "images": [
         {"role": "normal", "relative_path": "images/characters/{slug}.png", "transform": "preserve"}
@@ -109,7 +114,7 @@
   ],
   "guidance": {
     "root": "guidance",
-    "sha256": "24cf0aaf1a36a4045d11bbbd92dd872d2d6b28d6e757d5988ea0b129d4edcb3b",
+    "sha256": "61d71ef0aa5228e2884a21d82d64e4dd4c61460448b8c01017e9cfa2151958bc",
     "items": [
       {
         "id": "common",

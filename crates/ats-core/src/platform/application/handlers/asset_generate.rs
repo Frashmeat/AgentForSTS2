@@ -892,6 +892,45 @@ mod tests {
         ]
     }
 
+    fn code_events_with_description(
+        asset_name: &str,
+        description: &str,
+    ) -> Vec<Result<StreamEvent, LlmError>> {
+        let key = format!(
+            "DEMOMOD-{}",
+            crate::codegen::asset_localization_key_segment(asset_name)
+        );
+        let output = serde_json::json!({
+            "csharp": format!("public sealed class {} {{}}", sanitize_entity_name(asset_name)),
+            "localization": {
+                "eng": {
+                    format!("{key}.title"): asset_name,
+                    format!("{key}.description"): description,
+                    format!("{key}.flavor"): "English flavor"
+                },
+                "zhs": {
+                    format!("{key}.title"): "中文名称",
+                    format!("{key}.description"): description,
+                    format!("{key}.flavor"): "中文风味"
+                }
+            }
+        })
+        .to_string();
+        vec![
+            Ok(StreamEvent::Start {
+                model: "test-model".into(),
+            }),
+            Ok(StreamEvent::Delta { text: output }),
+            Ok(StreamEvent::End {
+                finish_reason: FinishReason::EndTurn,
+                usage: Usage {
+                    input_tokens: 10,
+                    output_tokens: 5,
+                },
+            }),
+        ]
+    }
+
     fn make_request(
         project_root: &Path,
         asset_name: &str,
@@ -1358,6 +1397,62 @@ mod tests {
         assert_eq!(validator.calls.load(Ordering::SeqCst), 0);
         assert!(!td.path().join("Generated/BadRelic.cs").exists());
         assert!(!artifacts.join("BadRelic/BadRelic.cs").exists());
+    }
+
+    #[tokio::test]
+    async fn unknown_localization_tag_is_rejected_before_write_and_compile() {
+        let td = tempfile::TempDir::new().unwrap();
+        prepare_project(td.path());
+        let history = td.path().join("history");
+        let artifacts = td.path().join("artifacts");
+        std::fs::create_dir_all(&history).unwrap();
+        std::fs::create_dir_all(&artifacts).unwrap();
+        let invalid = "Gain [yellow]1[/yellow] Energy.";
+        let responses = VecDeque::from([
+            code_events_with_description("BadRichTextRelic", invalid),
+            code_events_with_description("BadRichTextRelic", invalid),
+        ]);
+        let llm: Arc<dyn LlmClient> = Arc::new(SequencedLlm {
+            responses: Mutex::new(responses),
+        });
+        let validator = Arc::new(CountingCompileValidator::default());
+        let service = service_with_validator(
+            Arc::new(FileRunRepository::new(history)),
+            llm,
+            validator.clone(),
+        );
+        let request = make_request_for_type(td.path(), "BadRichTextRelic", "relic", None);
+        let id = service
+            .submit_asset_generate(
+                request,
+                fixture_game_context(td.path(), &[], &[]),
+                artifacts.clone(),
+                Arc::new(MockImageGen::new(Vec::new())),
+                Arc::new(SimpleBgRemover::default()),
+                Arc::new(super::super::common::NoopProgressSink),
+            )
+            .await
+            .unwrap();
+        wait_terminal(&service, &id).await;
+
+        let run = service.get(&id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Failed);
+        let failure = run.failure.as_ref().unwrap();
+        assert_eq!(failure.code, "run.input_invalid");
+        assert_eq!(failure.stage, "asset_bundle.output");
+        assert_eq!(validator.calls.load(Ordering::SeqCst), 0);
+        assert!(!td.path().join("Generated/BadRichTextRelic.cs").exists());
+        assert!(
+            !td.path()
+                .join("DemoMod/localization/eng/relics.json")
+                .exists()
+        );
+        assert!(
+            !td.path()
+                .join("DemoMod/localization/zhs/relics.json")
+                .exists()
+        );
+        assert!(!artifacts.join("BadRichTextRelic").exists());
     }
 
     #[tokio::test]

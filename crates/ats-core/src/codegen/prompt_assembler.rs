@@ -370,15 +370,24 @@ impl ResolvedKnowledge {
 }
 
 fn render_localization_contract(spec: &AssetResourceSpec) -> String {
+    let rich_text_contract = if spec.localization.allowed_rich_text_tags.is_empty() {
+        "Square-bracket rich-text syntax is not allowed.".to_string()
+    } else {
+        format!(
+            "Allowed rich-text tags: {}. Use only exact, balanced open/close pairs drawn from this list; unknown tags and raw square-bracket text are invalid.",
+            spec.localization.allowed_rich_text_tags.join(", ")
+        )
+    };
     format!(
-        "Required locale maps: {}. Required key suffixes in every locale: {}.",
+        "Required locale maps: {}. Required key suffixes in every locale: {}. {}",
         spec.localization.locales.join(", "),
         spec.localization
             .required_suffixes
             .iter()
             .map(|suffix| format!(".{suffix}"))
             .collect::<Vec<_>>()
-            .join(", ")
+            .join(", "),
+        rich_text_contract,
     )
 }
 
@@ -425,7 +434,7 @@ fn render_group_resource_contracts(
             }
         })?;
         rendered.push(format!(
-            "- `{}`: locales {}; table `{}`; required suffixes {}",
+            "- `{}`: locales {}; table `{}`; required suffixes {}; allowed rich-text tags {}",
             spec.id,
             spec.localization.locales.join(", "),
             spec.localization.table,
@@ -434,7 +443,12 @@ fn render_group_resource_contracts(
                 .iter()
                 .map(|suffix| format!(".{suffix}"))
                 .collect::<Vec<_>>()
-                .join(", ")
+                .join(", "),
+            if spec.localization.allowed_rich_text_tags.is_empty() {
+                "none".into()
+            } else {
+                spec.localization.allowed_rich_text_tags.join(", ")
+            }
         ));
     }
     if rendered.is_empty() {
@@ -603,6 +617,9 @@ mod tests {
         assert!(prompt.contains("namespace DemoMod"));
         assert!(prompt.contains("DEMOMOD-ENERGY_SEED_RELIC"));
         assert!(prompt.contains("relics"));
+        assert!(prompt.contains("Allowed rich-text tags: aqua, blue"));
+        assert!(prompt.contains("[blue]1[/blue]"));
+        assert!(prompt.contains("Never invent tags such as `[yellow]`"));
     }
 
     #[test]

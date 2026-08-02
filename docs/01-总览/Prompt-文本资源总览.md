@@ -6,7 +6,7 @@
 >
 > 权威入口：系统结构见 [`项目架构总览`](./项目架构总览.md)。
 >
-> 最后更新：2026-08-01
+> 最后更新：2026-08-02
 
 ## 1. 四类资源及其职责
 
@@ -70,6 +70,7 @@ game_packs/sts2/
 - guidance 可以表达稳定的游戏约束和工程习惯，但不能持久化容易随版本变化的行为答案。
 - template 只负责工程骨架；具体 API、生命周期 hook 和调用顺序必须从当前 Truth Snapshot 取证。
 - validation rules 由 Pack 提供规则数据，通用验证引擎执行有限、可测试的算法。
+- `resource_specs[].localization.allowed_rich_text_tags` 声明生成本地化可使用的精确标签；Prompt 展示同一白名单，通用 bundle 校验器在写文件和 compile gate 之前拒绝未知、属性式、未闭合、错配或裸方括号文本。
 - 新游戏应新增独立 Game Pack，并复用通用 Core 能力；不得在通用 handler 中增加 `game_id == "sts2"` 分支。
 
 ## 4. Truth Snapshot 与 `VerifiedGameContext`

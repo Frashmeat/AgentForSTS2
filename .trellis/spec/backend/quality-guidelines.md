@@ -100,6 +100,7 @@ This contract applies to `SubmitCodeGenerateRequest::Asset` and `submit_asset_ge
 ```rust
 RunApplicationService::submit_code_generate(...) -> RunRepositoryResult<RunId>
 RunApplicationService::submit_asset_generate(...) -> RunRepositoryResult<RunId>
+validate_localization_rich_text(value, allowed_tags) -> Result<(), String>
 ```
 
 Compile gate:
@@ -128,6 +129,8 @@ The model returns one strict JSON object, optionally in one JSON fence:
 
 Rust owns all paths. The ModId is `project.json.csharp_name`; prompt and validator share `asset_localization_key_segment()`. It follows analyzer acronym boundaries: `E2EEnergySeedRelic -> E2_E_ENERGY_SEED_RELIC`, `XMLParser -> XML_PARSER`.
 
+The active resource specification owns `localization.allowed_rich_text_tags`. Prompt assembly renders that exact list, and bundle validation accepts only exact lower-case, balanced and correctly nested pairs. Unknown tags such as `[yellow]`, attribute forms such as `[color=yellow]`, unmatched tags, and raw ASCII square-bracket text are rejected before project or artifact writes. STS2 currently declares the registered color tags `aqua`, `blue`, `gold`, `green`, `orange`, `pink`, `purple`, and `red`; generated numeric values use `[blue]...[/blue]`.
+
 Committed writes are `Generated/<name>.cs`, both `<ModId>/localization/<locale>/<table>.json`, and generated runtime images under `<ModId>/images/`. Relics receive normal/outline/big paths; cards and powers receive normal/big paths. Compile failures roll back formal writes and retain only run-scoped diagnostics under `.ats/diagnostics/<run-id>/`.
 
 ### 4. Validation & Error Matrix
@@ -137,6 +140,7 @@ Committed writes are `Generated/<name>.cs`, both `<ModId>/localization/<locale>/
 | Empty or invalid JSON | retry once, then `Failed` | no project writes |
 | Unsupported type or project scope mismatch | `Failed` | no out-of-scope write |
 | Missing/mismatched locale keys, wrong prefix, empty value | retry once, then `Failed` | no project writes |
+| Unknown, malformed, or unbalanced localization rich-text tag | retry once, then `Failed` | no project writes; compile gate is not called |
 | Existing localization is not a flat string map | `Failed` | existing files preserved |
 | Compile failure | `Failed` with `asset compile gate` | C#, localization, and runtime image writes rolled back |
 | Cancellation during stream/compile | `Cancelled` | writes rolled back; success cannot overwrite cancellation |
@@ -145,7 +149,10 @@ Committed writes are `Generated/<name>.cs`, both `<ModId>/localization/<locale>/
 ### 5. Good / Base / Bad Cases
 
 - Good: strict relic bundle has matching `eng` / `zhs` `.title/.description/.flavor`; compile succeeds and C#, localization, and images remain.
+- Good: `[blue]1[/blue]` is declared by the active STS2 resource specification, is balanced, and reaches the transactional write plan.
 - Base: first stream is empty and second is valid; Run succeeds and usage accumulates.
+- Base: plain localization contains no ASCII square brackets and passes even when it uses no rich-text tags.
+- Bad: both model attempts contain `[yellow]1[/yellow]`; the Run fails as `run.input_invalid / asset_bundle.output`, compile is never called, and no C#, localization, or Artifact file is written.
 - Bad: JSON is valid but C# does not compile; prior files are restored and new runtime files are removed.
 
 ### 6. Tests Required
@@ -156,7 +163,7 @@ cargo clippy -p ats-core --all-targets -- -D warnings
 cargo check -p agentthespire-desktop
 ```
 
-Assertions must cover type/acronym normalization, inline project context, strict bundle parsing, locale merge, empty-output retry, Windows MSBuild path normalization, compile rollback including images, cancellation finalization, and scaffold PCK include/exclude rules.
+Assertions must cover type/acronym normalization, inline project context, strict bundle parsing, Pack-owned rich-text tags, unknown/unbalanced tag rejection before writes and compile, locale merge, empty-output retry, Windows MSBuild path normalization, compile rollback including images, cancellation finalization, and scaffold PCK include/exclude rules.
 
 ### 7. Wrong vs Correct
 

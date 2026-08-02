@@ -223,3 +223,40 @@ artifacts/release/rc-20260801T142915Z-3c88bf28c2b3/release-verification.json
 ```
 
 四个 installer 均为 `NotSigned`，符合本阶段未签名候选边界。尚未执行且不得据此声称通过：该候选的人工安装/启动冒烟。
+
+## 12. 真实 Mod 冒烟与本地化富文本修复
+
+2026-08-02，用户对 `ATSReleaseSmoke` 完成真实游戏观察：图片与透明背景正常，Mod DLL/PCK/initializer 加载正常，中文内容可读，首回合能量行为正常；唯一问题是 `[yellow]1[/yellow]` 被原样显示。
+
+静态证据确认当前 `MegaRichTextLabel` 注册 `RichTextBlue` 等颜色 effect，但没有 `RichTextYellow`；官方源码和 BaseLib 数值强调均使用 `[blue]...[/blue]`。本次修复采用以下边界：
+
+- `resource_specs[].localization.allowed_rich_text_tags` 由 Game Pack 声明可用的精确小写标签。
+- 通用 Prompt 根据同一声明输出允许列表和配对规则；STS2 guidance 提供 `[blue]1[/blue]` 数值示例，通用装配器不硬编码游戏标签。
+- 通用 bundle 校验器在项目/Artifact 写入和 compile gate 之前拒绝 `[yellow]`、`[color=...]`、未知、未闭合、错配标签和裸 ASCII 方括号文本。
+- 不对模型产物做静默字符串替换；无效输出仍按现有两次尝试契约重试，最终失败为 `run.input_invalid / asset_bundle.output`。
+
+定向自动验证已通过：
+
+```text
+cargo test -p ats-core codegen::validation::tests                         # 9 passed
+cargo test -p ats-core game_pack::loader::tests                            # 14 passed
+cargo test -p ats-core codegen::prompt_assembler::tests                    # 9 passed
+cargo test -p ats-core platform::application::handlers::asset_bundle::tests # 8 passed
+cargo test -p ats-core game_pack::registry::tests::built_in_sts2_pack_is_loadable_and_pinned
+cargo test -p ats-core platform::application::handlers::asset_generate::tests::unknown_localization_tag_is_rejected_before_write_and_compile
+```
+
+handler 回归证明连续两次无效 `[yellow]` 输出后 Run 失败，compile 调用次数为 0，C#、双语本地化和 Artifact 均未写入。
+
+现有候选已在不改动桌面会话持有工程的前提下复制到隔离目录，将英中描述改为 `[blue]1[/blue]`，并完成 `dotnet publish`、Godot 4.5.1 PCK 导出和六文件 ZIP 打包。ZIP 为：
+
+```text
+.tmp/real-game-smoke/20260801-2326/rebuild-blue/ATSReleaseSmoke-v0.0.0-blue.zip
+SHA-256 B85CED8C798272924E13A20C9B206FC6760103FE1D078B88624DDEEED32D4333
+```
+
+用户正常退出游戏后，已备份原 `ATSReleaseSmoke` 三文件并覆盖安装。安装文件与 staging SHA-256 全部一致：DLL `08A37112...A0D6`、JSON `CEDB1F18...5FFD`、PCK `E8C4DDED...B64DA`；安装 PCK 中 `[blue]` 2 处、`[yellow]` 0 处。
+
+用户随后启动真实游戏，并通过 `relic add ATSRELEASESMOKE-RELEASE_SPARK` 获取“发布火花”。最终人工结果为：富文本描述显示正常，图片与透明背景正常，Mod 本体无报错，中文内容正常，首回合能量行为正常。由此，`ATSReleaseSmoke-v0.0.0-blue.zip` 的真实游戏复验通过；该结论只覆盖本次 Mod 候选，不替代提交 `3c88bf28` 的 Windows baseline/ML 桌面候选安装与启动冒烟。
+
+同一次全链还暴露独立缺陷：`asset_generate.publish` 在 Windows staging 目录最终原子重命名处两次失败为 `core.unclassified`，但失败后同目录手动重命名成功。失败 Run 保持失败，未伪造成 succeeded；当前候选曾按 staging manifest/SHA-256 人工恢复后再走正式 build/package。该发布事务问题尚未修复，不在本次富文本补丁中混入处理。

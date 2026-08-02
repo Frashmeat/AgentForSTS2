@@ -21,4 +21,4 @@ pub use models::{
 pub use prompt_assembler::{
     AssetPromptAssembly, GenerationEvidence, PromptAssembler, PromptAssemblyError,
 };
-pub(crate) use validation::validate_generated_csharp;
+pub(crate) use validation::{validate_generated_csharp, validate_localization_rich_text};

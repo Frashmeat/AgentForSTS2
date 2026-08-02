@@ -406,6 +406,13 @@ impl GamePackLoader {
                 &format!("{localization_prefix}.required_suffixes"),
                 &resource.localization.required_suffixes,
             )?;
+            if !resource.localization.allowed_rich_text_tags.is_empty() {
+                validate_unique_identifiers(
+                    source_name,
+                    &format!("{localization_prefix}.allowed_rich_text_tags"),
+                    &resource.localization.allowed_rich_text_tags,
+                )?;
+            }
 
             let mut images = Vec::with_capacity(resource.images.len());
             let mut seen_roles = BTreeSet::new();
@@ -522,6 +529,7 @@ impl GamePackLoader {
                     relative_path: resource.localization.relative_path,
                     locales: resource.localization.locales,
                     required_suffixes: resource.localization.required_suffixes,
+                    allowed_rich_text_tags: resource.localization.allowed_rich_text_tags,
                 },
                 images,
             });
@@ -1117,6 +1125,8 @@ struct RawLocalizationResourceSpec {
     relative_path: String,
     locales: Vec<String>,
     required_suffixes: Vec<String>,
+    #[serde(default)]
+    allowed_rich_text_tags: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1996,7 +2006,8 @@ mod tests {
               "table": "cards",
               "relative_path": "localization/{locale}/cards.json",
               "locales": ["eng", "zhs"],
-              "required_suffixes": ["title", "description"]
+              "required_suffixes": ["title", "description"],
+              "allowed_rich_text_tags": ["blue", "red"]
             },
             "images": [
               {"role":"normal", "relative_path":"images/cards/{slug}.png", "transform":"preserve"},
@@ -2007,6 +2018,7 @@ mod tests {
         let pack = loader().load_str("resources", text).unwrap();
         let spec = pack.resource_spec(" CARD-FULLSCREEN ").unwrap();
         assert_eq!(spec.localization.table, "cards");
+        assert_eq!(spec.localization.allowed_rich_text_tags, ["blue", "red"]);
         assert_eq!(spec.images[1].role, ResourceImageRole::Big);
         assert!(matches!(
             spec.images[1].transform,
@@ -2030,7 +2042,8 @@ mod tests {
               "table": "relics",
               "relative_path": "localization/{locale}/relics.json",
               "locales": ["eng", "zhs"],
-              "required_suffixes": ["title", "description", "flavor"]
+              "required_suffixes": ["title", "description", "flavor"],
+              "allowed_rich_text_tags": ["blue", "red"]
             },
             "images": [{"role":"normal", "relative_path":"images/relics/{slug}.png", "transform":"cover", "width":128, "height":128}]
           }]
@@ -2050,6 +2063,11 @@ mod tests {
                 "\"transform\":\"cover\"",
                 "\"transform\":\"shell\"",
                 "resource_specs[0].images[0].transform",
+            ),
+            (
+                "\"allowed_rich_text_tags\": [\"blue\", \"red\"]",
+                "\"allowed_rich_text_tags\": [\"blue\", \"blue\"]",
+                "resource_specs[0].localization.allowed_rich_text_tags",
             ),
         ] {
             let error = loader()

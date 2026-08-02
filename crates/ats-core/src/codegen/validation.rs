@@ -2,6 +2,77 @@ use regex::Regex;
 
 use crate::game_pack::ValidationRule;
 
+pub(crate) fn validate_localization_rich_text(
+    value: &str,
+    allowed_tags: &[String],
+) -> Result<(), String> {
+    let allowed = allowed_tags
+        .iter()
+        .map(String::as_str)
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut open_tags = Vec::new();
+    let bytes = value.as_bytes();
+    let mut cursor = 0;
+
+    while cursor < bytes.len() {
+        match bytes[cursor] {
+            b'[' => {
+                let Some(relative_end) = bytes[cursor + 1..].iter().position(|byte| *byte == b']')
+                else {
+                    return Err("localization rich-text tag is missing a closing `]`".into());
+                };
+                let end = cursor + 1 + relative_end;
+                let token = &value[cursor + 1..end];
+                let (is_closing, tag) = token
+                    .strip_prefix('/')
+                    .map_or((false, token), |tag| (true, tag));
+                if tag.is_empty()
+                    || !tag.chars().all(|character| {
+                        character.is_ascii_lowercase()
+                            || character.is_ascii_digit()
+                            || character == '_'
+                            || character == '-'
+                    })
+                    || !allowed.contains(tag)
+                {
+                    return Err(format!(
+                        "localization rich-text tag `{token}` is not allowed; allowed tags: {}",
+                        allowed.iter().copied().collect::<Vec<_>>().join(", ")
+                    ));
+                }
+                if is_closing {
+                    let Some(open) = open_tags.pop() else {
+                        return Err(format!(
+                            "localization rich-text closing tag `/{tag}` has no matching opening tag"
+                        ));
+                    };
+                    if open != tag {
+                        return Err(format!(
+                            "localization rich-text closing tag `/{tag}` does not match open tag `{open}`"
+                        ));
+                    }
+                } else {
+                    open_tags.push(tag);
+                }
+                cursor = end + 1;
+            }
+            b']' => {
+                return Err(
+                    "localization contains `]` without a matching rich-text opening tag".into(),
+                );
+            }
+            _ => cursor += 1,
+        }
+    }
+
+    if let Some(tag) = open_tags.last() {
+        return Err(format!(
+            "localization rich-text opening tag `{tag}` is not closed"
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_generated_csharp(
     source: &str,
     rules: &[ValidationRule],
@@ -293,5 +364,35 @@ public async Task Wrapper()
     fn source_is_not_rejected_when_pack_declares_no_rules() {
         let source = "public override Task BeforeCombatStart() => PlayerCmd.GainEnergy(1m, Owner);";
         validate_generated_csharp(source, &[]).unwrap();
+    }
+
+    #[test]
+    fn accepts_only_balanced_declared_localization_tags() {
+        let allowed = vec!["blue".into(), "red".into()];
+        validate_localization_rich_text(
+            "Gain [blue]1[/blue] Energy and lose [red]2[/red] HP.",
+            &allowed,
+        )
+        .unwrap();
+        validate_localization_rich_text("Plain text.", &allowed).unwrap();
+    }
+
+    #[test]
+    fn rejects_unknown_unbalanced_and_raw_square_bracket_tags() {
+        let allowed = vec!["blue".into(), "red".into()];
+        for value in [
+            "Gain [yellow]1[/yellow] Energy.",
+            "Gain [color=yellow]1[/color] Energy.",
+            "Gain [blue]1 Energy.",
+            "Gain [blue]1[/red] Energy.",
+            "Gain [/blue]1 Energy.",
+            "Use [1] charge.",
+            "Use 1] charge.",
+        ] {
+            assert!(
+                validate_localization_rich_text(value, &allowed).is_err(),
+                "must reject {value}"
+            );
+        }
     }
 }
