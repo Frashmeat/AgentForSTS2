@@ -1,0 +1,44 @@
+{
+  "id": "stage2-wo5-single-mod-resource",
+  "name": "stage2-wo5-single-mod-resource",
+  "title": "Stage 2 Work Order 5：单 Mod 与资源纵切面",
+  "description": "迁移 mod.plan、mod.generate.single 和 resource.prepare，完成 STS2 单项生成、compile 与 Artifact 主链。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "Stage 2 mod.plan, resource.prepare and mod.generate.single vertical slices with Runtime ports, immutable resources, rollback-capable project writes, registered compile validation and Artifact/Run v3 publication",
+  "priority": "P2",
+  "creator": "codex-agent",
+  "assignee": "codex-agent",
+  "createdAt": "2026-08-03",
+  "completedAt": "2026-08-03",
+  "branch": null,
+  "base_branch": "rust",
+  "worktree_path": null,
+  "current_phase": 3,
+  "next_action": [
+    {
+      "phase": 1,
+      "action": "implement"
+    },
+    {
+      "phase": 2,
+      "action": "check"
+    },
+    {
+      "phase": 3,
+      "action": "finish"
+    },
+    {
+      "phase": 4,
+      "action": "create-pr"
+    }
+  ],
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "Runtime/Game Context/Workspace/Features/Adapters targeted tests passed. The desktop Stage 2 integration test passed a real dotnet build, ArtifactManifest v3 publication/hash recomputation and RunRecord v3 success, plus compile, Artifact and cancellation rollback. Workspace check/test/clippy, DAG self-test/real check, changed-file rustfmt, pinned hashes, game-term guard and git diff check passed. Full cargo fmt --all -- --check remains blocked only by pre-existing formatting in untouched ats-core/src/image_gen/chat_image.rs; every WO5 Rust file passes explicit rustfmt --check. Shell remains on legacy ats-core until WO7.",
+  "meta": {}
+}

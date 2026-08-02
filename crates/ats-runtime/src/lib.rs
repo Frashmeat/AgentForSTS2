@@ -1,6 +1,8 @@
 //! Game-neutral execution contracts for Run, Artifact and external capability ports.
 
 mod artifact;
+mod execution;
+mod media;
 mod model;
 mod payload;
 mod run;
@@ -12,6 +14,12 @@ pub use artifact::{
     ArtifactManifest, ArtifactPublishRequest, ArtifactPublisher, PublishedArtifact,
     normalize_relative_path,
 };
+pub use execution::{
+    CancellationToken, PendingProjectWrites, ProjectFileWrite, ProjectFileWriter,
+    ProjectWriteError, ValidationError, ValidationReport, ValidationRequest, ValidationRunner,
+    validate_project_writes,
+};
+pub use media::{MediaClient, MediaError, MediaRequest, MediaRequestSnapshot, MediaResponse};
 pub use model::{
     FinishReason, ModelClient, ModelError, ModelGamePackRef, ModelMessage, ModelMessageRole,
     ModelOutputContract, ModelRequest, ModelRequestError, ModelRequestSnapshot, ModelResourceRef,

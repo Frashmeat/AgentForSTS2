@@ -25,7 +25,7 @@ artifacts/        ignored local build/release/E2E outputs
 
 ## Ownership Rules
 
-- During the Stage 2 migration, `ats-core` still owns the current production Shell behavior. Work Orders 2-4 have established isolated Run/Artifact v3, Pack/Truth v2, Resource v1, model-request snapshot and `log.analyze` contracts; production cutover still occurs only through later vertical slices and WO7.
+- During the Stage 2 migration, `ats-core` still owns the current production Shell behavior. Work Orders 2-5 have established isolated Run/Artifact v3, Pack/Truth v2, Resource v1, model/media/execution ports and log/plan/resource/single-generation contracts; production cutover still occurs only through later vertical slices and WO7.
 - `ats-kernel` owns only stable values shared by at least two responsibility domains. The exact target DAG is enforced by `scripts/check-stage2-dependency-dag.mjs` and documented in `stage2-contracts.md`.
 - `ats-runtime`, `ats-game-context`, and `ats-workspace` cannot depend on `ats-features`. `ats-adapters` implements lower-layer ports and cannot depend on Feature workflows. No target crate may depend on legacy `ats-core`.
 - `src-tauri` owns the active desktop project, `ProjectSession`, app-data paths, workstation configuration bindings, IPC commands, startup prewarm, and application exit integration. It delegates domain work to Core.

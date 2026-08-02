@@ -24,13 +24,15 @@ flowchart TB
     Snapshot --> Port["Provider-neutral Model Port"]
 ```
 
-Work Order 4 已实现第一条 `log.analyze` 纵切面：
+Work Order 4-5 已实现 `log.analyze`、`mod.plan` 和 `mod.generate.single` 的隔离纵切面：
 
 - `crates/ats-features/recipes/log-analyze.json` 拥有通用诊断任务、消息角色和输出 JSON 合同，exact bytes SHA-256 固定为 `2c745f0ab0dffd260373ff9fe86a3b9d1ea488ba7e7c3e39fe33c4503b1973e2`。
-- `game_packs/sts2/stage2-game-pack.json` 的 `log.analyze.rules` 拥有具体编译、构建、运行时和 Mod 生命周期依据；Pack exact bytes SHA-256 为 `e12b9fa3aab96efeabcb2b52953a9e39b705ae6115012d0272f52952f21b3fc9`。
+- `mod-plan.json` 和 `mod-generate-single.json` 分别拥有通用规划与单项文本 bundle 合同，exact bytes SHA-256 为 `2a5a1dd5004f0fa1798decc921fa28798155022695c5a4b9191f3680134a83c2` 和 `ca176463b8c05058bdb49d359e4098b0b5ae9450004bb3c0ab83fc84de86e3e2`。
+- `game_packs/sts2/stage2-game-pack.json` 的日志、规划、单项生成和资源 Contribution 拥有具体游戏/工具链依据、文件角色、目标模板和资源规格；Pack exact bytes SHA-256 为 `e0f8b8c063c69393a77cc19bc868bb4102d90676f93d943235adeced3e12c20e`。
 - Truth Evidence 仍只表示当前版本的 bounded 事实；Resource slot 只传递已选择版本的 identity/role/media type，不嵌入未验证文件。
 - `runtime.custom_instructions` 在 Recipe 中恰好出现一次。Loader 拒绝未知、重复、遗漏、未消费或超长 slot，插入值中的 `{{...}}` 不会被二次解释。
 - `ats-runtime::ModelRequestSnapshot` 保存 Feature、Recipe、Pack、Truth、Resource、消息、输出合同和限制，并对除 `requestSha256` 自身外的规范字段计算 SHA-256。反序列化重新校验内容身份。
+- `mod.generate.single` 的模型输出只有声明过的文本角色和内容，模型不能提供目标路径或二进制资源。Feature 使用 Pack 模板展开路径，读取 Resource 当前 selected version，完成可回滚写入、注册 compile gate、ArtifactManifest v3 发布和 RunRecord v3 成功转换。
 
 新 Runtime 和通用 Recipe 不包含游戏分支或游戏/工具链专属术语。
 
@@ -76,7 +78,7 @@ crates/ats-core/prompts/
 
 `PromptLoader::built_in()` 通过 `include_str!` 将六个文件编译进二进制，生产运行时不从磁盘读取这些文件。`codegen.md` 等文件可按 Markdown `## section_key` 读取 bundle 分段；分段键必须匹配 `^[a-z0-9_]+$`，模板变量使用 `{{ name }}`。
 
-这些旧文件和 handler 目前仍服务 Shell，其中 `codegen.md`、`single_asset_plan` 和旧 `log_analysis` 混有待迁移的 Feature 任务、游戏/工具链指导或长生产 Prompt。它们不是 Stage 2 的目标所有权；WO5 迁移生成与规划，WO7 切换 Shell 后删除被替代入口。在此之前不得把新纵切面描述成当前 UI 已使用。
+这些旧文件和 handler 目前仍服务 Shell，其中 `codegen.md`、`single_asset_plan` 和旧 `log_analysis` 混有已经在新层建立替代合同、但尚未切换生产入口的 Feature 任务、游戏/工具链指导或长生产 Prompt。它们不是 Stage 2 的目标所有权；WO7 切换 Shell 后删除被替代入口。在此之前不得把新纵切面描述成当前 UI 已使用。
 
 ## 4. Game Pack 文本与工程资源
 

@@ -7,8 +7,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use ats_kernel::{ResourceId, Sha256Digest};
 use ats_workspace::{
-    ResourceAsset, ResourceBlob, ResourceDeriveRequest, ResourceIngestRequest, ResourceRepository,
-    ResourceVersion, ResourceVersionProvenance, WorkspaceError,
+    ResourceAsset, ResourceBlob, ResourceBytesIngestRequest, ResourceDeriveRequest,
+    ResourceIngestRequest, ResourceRepository, ResourceVersion, ResourceVersionProvenance,
+    WorkspaceError,
 };
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -126,19 +127,20 @@ impl FileResourceRepository {
         }
         result
     }
-}
 
-impl ResourceRepository for FileResourceRepository {
-    type Error = ResourceStoreError;
-
-    fn ingest(&self, request: ResourceIngestRequest) -> Result<ResourceAsset, Self::Error> {
-        let _guard = self
-            .gate
-            .lock()
-            .map_err(|_| ResourceStoreError::LockUnavailable)?;
-        let bytes = read_source(&request.source_path)?;
+    fn ingest_unlocked(
+        &self,
+        logical_role: String,
+        origin: ats_workspace::ResourceOrigin,
+        media_type: String,
+        source_name: &Path,
+        bytes: Vec<u8>,
+    ) -> Result<ResourceAsset, ResourceStoreError> {
+        if bytes.is_empty() || bytes.len() > 64 * 1024 * 1024 {
+            return Err(ResourceStoreError::PathInvalid);
+        }
         let digest = sha256_bytes(&bytes);
-        let extension = safe_extension(&request.source_path);
+        let extension = safe_extension(source_name);
         let resource_id = new_resource_id();
         let blob_relative = format!("versions/{digest}/original.{extension}");
         let original = ResourceVersion {
@@ -146,19 +148,14 @@ impl ResourceRepository for FileResourceRepository {
             parent_version: None,
             blob: ResourceBlob {
                 relative_path: blob_relative.clone(),
-                media_type: request.media_type,
+                media_type,
                 byte_length: u64::try_from(bytes.len())
                     .map_err(|_| ResourceStoreError::PathInvalid)?,
                 sha256: digest,
             },
             provenance: ResourceVersionProvenance::Original,
         };
-        let asset = ResourceAsset::new(
-            resource_id.clone(),
-            request.logical_role,
-            request.origin,
-            original,
-        )?;
+        let asset = ResourceAsset::new(resource_id.clone(), logical_role, origin, original)?;
         let resources_root = self.prepare_root()?;
         let final_root = resources_root.join(resource_id.as_str());
         if fs::symlink_metadata(&final_root).is_ok() {
@@ -188,6 +185,47 @@ impl ResourceRepository for FileResourceRepository {
             let _ = fs::remove_dir_all(staging_root);
         }
         result
+    }
+}
+
+impl ResourceRepository for FileResourceRepository {
+    type Error = ResourceStoreError;
+
+    fn ingest(&self, request: ResourceIngestRequest) -> Result<ResourceAsset, Self::Error> {
+        let _guard = self
+            .gate
+            .lock()
+            .map_err(|_| ResourceStoreError::LockUnavailable)?;
+        let bytes = read_source(&request.source_path)?;
+        self.ingest_unlocked(
+            request.logical_role,
+            request.origin,
+            request.media_type,
+            &request.source_path,
+            bytes,
+        )
+    }
+
+    fn ingest_bytes(
+        &self,
+        request: ResourceBytesIngestRequest,
+    ) -> Result<ResourceAsset, Self::Error> {
+        let _guard = self
+            .gate
+            .lock()
+            .map_err(|_| ResourceStoreError::LockUnavailable)?;
+        let file_name = Path::new(&request.file_name);
+        if file_name.file_name().and_then(|name| name.to_str()) != Some(request.file_name.as_str())
+        {
+            return Err(ResourceStoreError::PathInvalid);
+        }
+        self.ingest_unlocked(
+            request.logical_role,
+            request.origin,
+            request.media_type,
+            file_name,
+            request.bytes,
+        )
     }
 
     fn add_version(&self, request: ResourceDeriveRequest) -> Result<ResourceAsset, Self::Error> {
@@ -269,6 +307,26 @@ impl ResourceRepository for FileResourceRepository {
             .lock()
             .map_err(|_| ResourceStoreError::LockUnavailable)?;
         self.load_unlocked(resource_id)
+    }
+
+    fn read_selected_bytes(
+        &self,
+        resource_id: &ResourceId,
+        selected_version: &Sha256Digest,
+    ) -> Result<Vec<u8>, Self::Error> {
+        let _guard = self
+            .gate
+            .lock()
+            .map_err(|_| ResourceStoreError::LockUnavailable)?;
+        let asset = self.load_unlocked(resource_id)?;
+        if asset.selected_version() != selected_version {
+            return Err(WorkspaceError::VersionNotFound.into());
+        }
+        let path = self
+            .resources_root()
+            .join(resource_id.as_str())
+            .join(&asset.selected().blob.relative_path);
+        read_regular_file(&path, "read_selected_resource")
     }
 }
 
@@ -427,6 +485,18 @@ mod tests {
             .unwrap();
         assert_eq!(selected.selected_version(), &derived_id);
         assert_eq!(repository.load(original.resource_id()).unwrap(), selected);
+        assert_eq!(
+            repository
+                .read_selected_bytes(original.resource_id(), &derived_id)
+                .unwrap(),
+            b"derived-png"
+        );
+        assert!(matches!(
+            repository.read_selected_bytes(original.resource_id(), original.selected_version()),
+            Err(ResourceStoreError::Contract(
+                WorkspaceError::VersionNotFound
+            ))
+        ));
 
         let manifest = project
             .join(".ats/resources")
@@ -519,6 +589,11 @@ mod tests {
                 WorkspaceError::InvalidManifest
             ))
         ));
+        assert!(
+            repository
+                .read_selected_bytes(asset.resource_id(), asset.selected_version())
+                .is_err()
+        );
     }
 
     #[cfg(windows)]

@@ -143,6 +143,50 @@ cargo test --workspace --all-targets
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
+## Single Mod And Resource Vertical Slice
+
+`ats-features` owns typed `mod.plan`, `resource.prepare` and `mod.generate.single` contracts.
+Planning and generation use exact-byte pinned Recipes; STS2-specific item types, guidance, generated
+file roles/path templates, resource roles/dimensions and the `code.dotnet-validate` Primitive
+reference live only in verified Pack contributions.
+
+`resource.prepare` validates role/media support before repository mutation. User upload and Pack
+default files use the same immutable repository path; AI bytes cross the game-neutral Media port and
+record provider/model/request hash provenance. Generation loads each selected asset and reads bytes
+only with the manifest's exact `selectedVersion`; stale selection and tampered blob reads fail.
+
+The single-generation order is:
+
+```text
+typed running Run + verified Pack/Truth/Resource identities
+-> bounded Truth Evidence + selected Resource identities
+-> pinned Recipe assembly + ModelRequestSnapshot
+-> strict role/content text bundle
+-> Pack-owned path expansion
+-> rollback-capable text and binary project writes
+-> registered validation Primitive
+-> immutable ArtifactManifest v3 publication
+-> RunRecord v3 success transition
+-> project transaction commit
+```
+
+The model never supplies a destination path or binary payload. Compile, Artifact publication,
+cancellation after writes, or terminal Run transition failure removes a newly published run when
+needed and restores previous project bytes. The current v2 Shell remains unchanged until WO7.
+
+### Required Tests
+
+```text
+cargo test -p ats-runtime
+cargo test -p ats-game-context
+cargo test -p ats-workspace
+cargo test -p ats-features
+cargo test -p ats-adapters
+cargo test -p agentthespire-desktop --test stage2_single_mod
+node scripts/check-stage2-dependency-dag.mjs --self-test
+node scripts/check-stage2-dependency-dag.mjs
+```
+
 ## Model Request And Log Analysis Vertical Slice
 
 `ats-runtime::ModelRequestSnapshot` schema v1 is the game-neutral, replayable model boundary:

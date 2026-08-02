@@ -43,6 +43,15 @@ pub struct ResourceIngestRequest {
 }
 
 #[derive(Debug, Clone)]
+pub struct ResourceBytesIngestRequest {
+    pub logical_role: String,
+    pub origin: ResourceOrigin,
+    pub media_type: String,
+    pub file_name: String,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
 pub struct ResourceDeriveRequest {
     pub resource_id: ResourceId,
     pub parent_version: Sha256Digest,
@@ -315,6 +324,10 @@ pub trait ResourceRepository: Send + Sync {
     type Error: std::error::Error + Send + Sync + 'static;
 
     fn ingest(&self, request: ResourceIngestRequest) -> Result<ResourceAsset, Self::Error>;
+    fn ingest_bytes(
+        &self,
+        request: ResourceBytesIngestRequest,
+    ) -> Result<ResourceAsset, Self::Error>;
     fn add_version(&self, request: ResourceDeriveRequest) -> Result<ResourceAsset, Self::Error>;
     fn select(
         &self,
@@ -322,6 +335,11 @@ pub trait ResourceRepository: Send + Sync {
         version: &Sha256Digest,
     ) -> Result<ResourceAsset, Self::Error>;
     fn load(&self, resource_id: &ResourceId) -> Result<ResourceAsset, Self::Error>;
+    fn read_selected_bytes(
+        &self,
+        resource_id: &ResourceId,
+        selected_version: &Sha256Digest,
+    ) -> Result<Vec<u8>, Self::Error>;
 }
 
 #[derive(Debug, Error, Eq, PartialEq)]
