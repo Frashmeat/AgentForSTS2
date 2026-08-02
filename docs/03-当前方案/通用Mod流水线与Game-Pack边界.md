@@ -6,6 +6,7 @@
 | 决议日期 | 2026-07-29 |
 | 适用范围 | AgentTheSpire 多游戏 Mod 生成、验证、构建与打包架构 |
 | 当前实施状态 | Stage 1 自动迁移与最终 STS2 真实游戏复验均已完成 |
+| Stage 2 细化 | [Stage 2 分层能力与资源架构方案](./2026-08-02-Stage-2分层能力与资源架构方案.md) |
 | 相关决策 | [ADR 0001 — Rust + Tauri 整体架构](../90-归档/Rust重写过程材料/04-决策/0001-rust-tauri-workspace-architecture.md) |
 | 问题来源 | [真实游戏加载与资产质量问题审查](../90-归档/历史审查与验证/Rust重写/已经完成/2026-07-28-真实游戏加载与资产质量问题审查.md) |
 
@@ -22,6 +23,8 @@ AgentTheSpire 采用：
 > **一条通用 Mod 生产流水线 + 多个可加载的游戏知识与资源包（Game Pack）。**
 
 平台统一提供资源获取、索引检索、LLM 生成、资产处理、验证、构建、打包、Run history、ArtifactManifest 与人工验收串联。Game Pack 只提供真相源声明、游戏专属资源、工程骨架、目标资产规格、稳定验证规则和构建/打包步骤的声明数据；它不重新实现一套游戏专属 handler。
+
+Stage 2 将本文所称“通用引擎”进一步拆分为 Feature Layer、Core Runtime、Infrastructure Adapters、Truth Evidence 和 Project/Resource Workspace。本文的“一条流水线 + 多个 Game Pack”原则继续成立；具体编译依赖、Prompt ownership、Run/Artifact envelope 和资源版本合同以后续 Stage 2 专题方案为准。
 
 ### 2.1 总体关系
 
