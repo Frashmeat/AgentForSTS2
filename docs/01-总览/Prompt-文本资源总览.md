@@ -24,15 +24,17 @@ flowchart TB
     Snapshot --> Port["Provider-neutral Model Port"]
 ```
 
-Work Order 4-5 已实现 `log.analyze`、`mod.plan` 和 `mod.generate.single` 的隔离纵切面：
+Work Order 4-6 已实现 `log.analyze`、`mod.plan`、`mod.generate.single` 及其组合 Feature 的隔离纵切面：
 
 - `crates/ats-features/recipes/log-analyze.json` 拥有通用诊断任务、消息角色和输出 JSON 合同，exact bytes SHA-256 固定为 `2c745f0ab0dffd260373ff9fe86a3b9d1ea488ba7e7c3e39fe33c4503b1973e2`。
 - `mod-plan.json` 和 `mod-generate-single.json` 分别拥有通用规划与单项文本 bundle 合同，exact bytes SHA-256 为 `2a5a1dd5004f0fa1798decc921fa28798155022695c5a4b9191f3680134a83c2` 和 `ca176463b8c05058bdb49d359e4098b0b5ae9450004bb3c0ab83fc84de86e3e2`。
-- `game_packs/sts2/stage2-game-pack.json` 的日志、规划、单项生成和资源 Contribution 拥有具体游戏/工具链依据、文件角色、目标模板和资源规格；Pack exact bytes SHA-256 为 `e0f8b8c063c69393a77cc19bc868bb4102d90676f93d943235adeced3e12c20e`。
+- `game_packs/sts2/stage2-game-pack.json` 的日志、规划、单项/批量/复杂生成、资源、构建和打包 Contribution 拥有具体游戏依据、文件角色、目标模板、资源规格和声明式交付布局；Pack exact bytes SHA-256 为 `00a0cc406271ef993254f78fafb9e55cd27b5f9edf03ede1fc49dd2dc99f721e`。
 - Truth Evidence 仍只表示当前版本的 bounded 事实；Resource slot 只传递已选择版本的 identity/role/media type，不嵌入未验证文件。
 - `runtime.custom_instructions` 在 Recipe 中恰好出现一次。Loader 拒绝未知、重复、遗漏、未消费或超长 slot，插入值中的 `{{...}}` 不会被二次解释。
 - `ats-runtime::ModelRequestSnapshot` 保存 Feature、Recipe、Pack、Truth、Resource、消息、输出合同和限制，并对除 `requestSha256` 自身外的规范字段计算 SHA-256。反序列化重新校验内容身份。
 - `mod.generate.single` 的模型输出只有声明过的文本角色和内容，模型不能提供目标路径或二进制资源。Feature 使用 Pack 模板展开路径，读取 Resource 当前 selected version，完成可回滚写入、注册 compile gate、ArtifactManifest v3 发布和 RunRecord v3 成功转换。
+- `mod.generate.batch` 只组合既有 Single service，`mod.generate.complex` 只组合 Plan、Batch/Single、Build 和 Package；它们不拥有第二套 Prompt、模型输出解码或 Resource 生成路径。
+- Build Pack payload 只列出 step ID 和已注册 Primitive ID；Package payload 只列出 required-file 模板。`process.dotnet-publish` 的固定命令和 ZIP 实现属于 Adapter，Pack 不能注入命令、参数、环境变量或脚本。
 
 新 Runtime 和通用 Recipe 不包含游戏分支或游戏/工具链专属术语。
 

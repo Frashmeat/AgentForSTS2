@@ -1,6 +1,7 @@
 //! Game-neutral execution contracts for Run, Artifact and external capability ports.
 
 mod artifact;
+mod delivery;
 mod execution;
 mod media;
 mod model;
@@ -13,6 +14,11 @@ pub use artifact::{
     ARTIFACT_MANIFEST_SCHEMA_VERSION, ArtifactContractError, ArtifactFileInput, ArtifactFileRecord,
     ArtifactManifest, ArtifactPublishRequest, ArtifactPublisher, PublishedArtifact,
     normalize_relative_path,
+};
+pub use delivery::{
+    BuildError, BuildRunner, BuildStepReport, BuildStepRequest, PackageEntry, PackageError,
+    PackagePrepareRequest, PackageReport, PackageWriter, PendingPackageOutput,
+    validate_package_request,
 };
 pub use execution::{
     CancellationToken, PendingProjectWrites, ProjectFileWrite, ProjectFileWriter,

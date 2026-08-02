@@ -1,0 +1,44 @@
+{
+  "id": "stage2-wo6-composition-build-package",
+  "name": "stage2-wo6-composition-build-package",
+  "title": "Stage 2 Work Order 6：组合 Feature 与构建打包",
+  "description": "Compose the Stage 2 Single/Plan/Resource services and add registered build plus rollback-capable package vertical slices without switching Shells.",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "Stage 2 batch/complex composition plus registered build and rollback-capable package vertical slices",
+  "priority": "P2",
+  "creator": "codex-agent",
+  "assignee": "codex-agent",
+  "createdAt": "2026-08-03",
+  "completedAt": "2026-08-03",
+  "branch": null,
+  "base_branch": "rust",
+  "worktree_path": null,
+  "current_phase": 3,
+  "next_action": [
+    {
+      "phase": 1,
+      "action": "implement"
+    },
+    {
+      "phase": 2,
+      "action": "check"
+    },
+    {
+      "phase": 3,
+      "action": "finish"
+    },
+    {
+      "phase": 4,
+      "action": "create-pr"
+    }
+  ],
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "Batch composes Single with truthful child Runs; Complex composes Plan, Batch/Single, registered dotnet publish and rollback-capable ZIP packaging. Runtime/Features/Adapters and 5 desktop composition tests passed, including real dotnet publish, six-file ZIP/ArtifactManifest v3 publication, fail-fast/continue/cancellation, previous-package restoration and no run-scoped transaction residue. Workspace check/test/clippy, DAG self-test/real check, changed-file rustfmt, Pack hash/payload guard and git diff check passed. Build failure paths now always remove the run report directory; dropped package transactions restore prior output.",
+  "meta": {}
+}

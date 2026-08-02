@@ -166,13 +166,26 @@
       "featureId": "project.build",
       "schema": { "id": "pack.build-recipe", "version": 1 },
       "requiredPrimitives": ["process.dotnet-publish"],
-      "payload": { "legacyCapability": "build_recipe" }
+      "payload": {
+        "steps": [
+          { "id": "publish", "primitive": "process.dotnet-publish" }
+        ]
+      }
     },
     {
       "slotId": "project.package.layout",
       "featureId": "project.package",
       "schema": { "id": "pack.package-layout", "version": 1 },
-      "payload": { "legacyCapability": "package_layout" }
+      "payload": {
+        "requiredFiles": [
+          "BaseLib/BaseLib.dll",
+          "BaseLib/BaseLib.pck",
+          "BaseLib/BaseLib.json",
+          "{mod_id}/{mod_id}.dll",
+          "{mod_id}/{mod_id}.pck",
+          "{mod_id}/{mod_id}.json"
+        ]
+      }
     }
   ]
 }

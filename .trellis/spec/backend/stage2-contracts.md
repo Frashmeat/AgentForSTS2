@@ -187,6 +187,74 @@ node scripts/check-stage2-dependency-dag.mjs --self-test
 node scripts/check-stage2-dependency-dag.mjs
 ```
 
+## Composition, Build And Package Vertical Slices
+
+`ats-runtime::BuildRunner` receives only a registered `PrimitiveId`, project root and Run identity.
+`ats-adapters::RegisteredBuildRunner` currently maps only `process.dotnet-publish` to fixed
+`dotnet publish --nologo`; Pack payloads cannot supply programs, arguments, environment variables or
+scripts. Reports preserve Primitive/exit-code and bounded path-redacted output.
+
+`ats-runtime::PackageWriter` receives validated project-relative source/output paths and an exact
+list of source/archive entries. `ats-adapters::ZipPackageWriter` rejects symlink/missing/escaping
+sources, writes a same-directory temporary ZIP and holds an existing output backup in
+`.ats/package-transactions/<run-id>` until commit. Cancellation, archive failure, Artifact failure or
+Run transition failure removes the new output and restores previous bytes.
+
+`mod.generate.batch` creates a typed child Run per item and invokes `SingleGenerateService`; it owns
+no Prompt, model-output decoder, path expansion, compile gate or file transaction. Successful child
+Runs are independent immutable evidence. `failFast` stops after the first ordinary failure;
+otherwise later children continue and the result reports exact succeeded/failed child states.
+Cancellation stops future work and cannot relabel a completed child.
+
+`mod.generate.complex` composes existing services in this fixed order:
+
+```text
+ModPlanService children
+-> BatchGenerateService -> SingleGenerateService children
+-> ProjectBuildService -> registered BuildRunner steps
+-> ProjectPackageService -> PackageWriter + ArtifactManifest v3
+-> Complex RunRecord v3 success
+```
+
+The Complex request binds already prepared Resource selections to planning requests. It does not
+create a parallel media/resource pipeline. A later stage never runs after an earlier typed failure or
+cancellation. The current Shell still uses legacy v2 handlers until WO7.
+
+### Validation And Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Unknown build Primitive or Pack command-like data | Reject before process start |
+| Nonzero publish, unavailable process or cancellation | No successful Build child or later Package |
+| Missing/unsafe package file or duplicate layout path | Reject and preserve existing package |
+| Artifact publication or terminal transition failure | Remove new Artifact, rollback package output |
+| Batch item failure with `failFast=false` | Record failed child and continue later items |
+| Batch item failure with `failFast=true` | Stop before the next model/write invocation |
+| Cancellation after model response | Cancel child and leave no project/Artifact writes |
+
+### Good / Base / Bad
+
+- Good: a Complex fixture produces a typed Plan, Single Artifact, real successful dotnet publish,
+  exact Pack-layout ZIP, package Artifact and succeeded child/outer Runs with no transaction residue.
+- Base: a two-item Batch has one failed and one succeeded child; the outer typed result reports both
+  without copying Single implementation.
+- Bad: Pack text becomes a command, Batch owns another Prompt/codegen path, Package recursively zips
+  undeclared files, or Complex marks success before Build/Package completes.
+
+### Required Tests
+
+```text
+cargo test -p ats-runtime
+cargo test -p ats-features
+cargo test -p ats-adapters
+cargo test -p agentthespire-desktop --test stage2_composition
+node scripts/check-stage2-dependency-dag.mjs --self-test
+node scripts/check-stage2-dependency-dag.mjs
+cargo check --workspace --all-targets
+cargo test --workspace --all-targets
+cargo clippy --workspace --all-targets -- -D warnings
+```
+
 ## Model Request And Log Analysis Vertical Slice
 
 `ats-runtime::ModelRequestSnapshot` schema v1 is the game-neutral, replayable model boundary:
