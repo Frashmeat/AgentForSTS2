@@ -6,7 +6,13 @@
 
 ```text
 crates/
-  ats-core/       framework-independent domain and application logic
+  ats-core/       transitional current domain/application implementation
+  ats-kernel/     stable cross-domain IDs, hashes and schema envelopes
+  ats-runtime/    game-neutral Run/Artifact/workflow mechanisms and ports
+  ats-game-context/ validated Pack contribution and Truth Evidence
+  ats-workspace/  project and resource workspace ownership
+  ats-features/   product Feature contracts and vertical workflows
+  ats-adapters/   external provider/tool/storage implementations
   ats-web/        Axum HTTP/static frontend shell
   ats-cli/        operator/build command shell
 src-tauri/        Tauri desktop composition root and IPC commands
@@ -19,7 +25,9 @@ artifacts/        ignored local build/release/E2E outputs
 
 ## Ownership Rules
 
-- `ats-core` owns project folders, Game Pack loading, Truth Snapshot verification, Prompt/evidence assembly, Run lifecycle, ArtifactManifest, generation, validation, build/package algorithms, cancellation, and stable failures. It does not import Tauri, Axum, or React types.
+- During the Stage 2 migration, `ats-core` still owns the current production behavior. New ownership moves only through completed Work Orders; the presence of a target crate does not imply its corresponding behavior has migrated.
+- `ats-kernel` owns only stable values shared by at least two responsibility domains. The exact target DAG is enforced by `scripts/check-stage2-dependency-dag.mjs` and documented in `stage2-contracts.md`.
+- `ats-runtime`, `ats-game-context`, and `ats-workspace` cannot depend on `ats-features`. `ats-adapters` implements lower-layer ports and cannot depend on Feature workflows. No target crate may depend on legacy `ats-core`.
 - `src-tauri` owns the active desktop project, `ProjectSession`, app-data paths, workstation configuration bindings, IPC commands, startup prewarm, and application exit integration. It delegates domain work to Core.
 - `ats-web` and `ats-cli` are shells. They may map transport/CLI arguments but do not copy Run state machines, artifact schemas, feature rules, or game-specific content.
 - `game_packs/<game-id>/` owns truth-source declarations, guidance, project templates, resource specifications, validation rules, build recipe, and package layout. Generic handlers do not branch on `game_id == "sts2"`.

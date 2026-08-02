@@ -189,6 +189,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
+name = "ats-adapters"
+version = "0.1.0"
+dependencies = [
+ "ats-game-context",
+ "ats-kernel",
+ "ats-runtime",
+ "ats-workspace",
+]
+
+[[package]]
 name = "ats-cli"
 version = "0.1.0"
 dependencies = [
@@ -231,6 +241,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "ats-features"
+version = "0.1.0"
+dependencies = [
+ "ats-game-context",
+ "ats-kernel",
+ "ats-runtime",
+ "ats-workspace",
+]
+
+[[package]]
+name = "ats-game-context"
+version = "0.1.0"
+dependencies = [
+ "ats-kernel",
+]
+
+[[package]]
+name = "ats-kernel"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "ats-runtime"
+version = "0.1.0"
+dependencies = [
+ "ats-kernel",
+]
+
+[[package]]
 name = "ats-web"
 version = "0.1.0"
 dependencies = [
@@ -247,6 +290,13 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "ats-workspace"
+version = "0.1.0"
+dependencies = [
+ "ats-kernel",
 ]
 
 [[package]]

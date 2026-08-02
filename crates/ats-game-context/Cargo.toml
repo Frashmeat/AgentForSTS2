@@ -1,0 +1,12 @@
+[package]
+name = "ats-game-context"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+ats-kernel = { path = "../ats-kernel" }

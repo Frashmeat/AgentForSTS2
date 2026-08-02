@@ -13,6 +13,8 @@ MODE="${1:-full}"
 
 rustc --version
 cargo --version
+node scripts/check-stage2-dependency-dag.mjs --self-test
+node scripts/check-stage2-dependency-dag.mjs
 
 case "$MODE" in
     check)

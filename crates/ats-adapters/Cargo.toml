@@ -1,0 +1,15 @@
+[package]
+name = "ats-adapters"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+ats-kernel = { path = "../ats-kernel" }
+ats-runtime = { path = "../ats-runtime" }
+ats-game-context = { path = "../ats-game-context" }
+ats-workspace = { path = "../ats-workspace" }

@@ -20,6 +20,7 @@ This directory contains guidelines for backend development. Fill in each file wi
 | [Quality Guidelines](./quality-guidelines.md) | Run/Artifact, generation, Game Pack, Truth Snapshot, ProjectSession and candidate provenance contracts | Active |
 | [Logging Guidelines](./logging-guidelines.md) | tracing/desktop diagnostics, redaction and release-output boundary | Active |
 | [Release Guidelines](./release-guidelines.md) | Windows candidate CLI, verification schema, manifests and CI boundary | Active |
+| [Stage 2 Contracts](./stage2-contracts.md) | Kernel value objects, schema envelopes and enforced modular-monolith Cargo DAG | Active |
 
 ---
 

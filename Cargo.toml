@@ -2,6 +2,12 @@
 members = [
     "src-tauri",
     "crates/ats-core",
+    "crates/ats-kernel",
+    "crates/ats-runtime",
+    "crates/ats-game-context",
+    "crates/ats-workspace",
+    "crates/ats-features",
+    "crates/ats-adapters",
     "crates/ats-web",
     "crates/ats-cli",
 ]

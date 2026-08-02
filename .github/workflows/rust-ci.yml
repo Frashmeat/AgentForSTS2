@@ -70,6 +70,11 @@ jobs:
           cargo --version
           rustup show
 
+      - name: Stage 2 dependency DAG
+        run: |
+          node scripts/check-stage2-dependency-dag.mjs --self-test
+          node scripts/check-stage2-dependency-dag.mjs
+
       - name: Cache cargo registry + target
         uses: Swatinem/rust-cache@v2
         with:
@@ -114,6 +119,10 @@ jobs:
           npm run build:web
       - name: Show toolchain
         run: rustup show
+      - name: Stage 2 dependency DAG
+        run: |
+          node scripts/check-stage2-dependency-dag.mjs --self-test
+          node scripts/check-stage2-dependency-dag.mjs
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
