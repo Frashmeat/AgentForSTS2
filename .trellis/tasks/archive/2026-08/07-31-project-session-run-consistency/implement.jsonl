@@ -1,0 +1,5 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Run CAS、工程锁、外部工具与文件事务契约"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "结构化 project/run failure 映射"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Tauri command 生命周期与前端边界"}
