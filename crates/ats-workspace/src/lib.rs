@@ -1,8 +1,9 @@
-//! Project and resource workspace contracts.
+//! Project and versioned resource workspace contracts.
 
-use ats_kernel::SchemaRef;
+mod resource;
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct WorkspaceContract {
-    pub schema: SchemaRef,
-}
+pub use resource::{
+    RESOURCE_ASSET_SCHEMA_VERSION, ResourceAsset, ResourceBlob, ResourceDeriveRequest,
+    ResourceIngestRequest, ResourceOrigin, ResourceRepository, ResourceVersion,
+    ResourceVersionProvenance, WorkspaceError, normalize_relative_path,
+};

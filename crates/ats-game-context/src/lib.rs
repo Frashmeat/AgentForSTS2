@@ -1,11 +1,21 @@
 //! Validated Game Pack contribution and immutable Truth Evidence contracts.
 
-use ats_kernel::{ContributionId, FeatureId, PrimitiveId, SchemaRef};
+mod contribution;
+mod pack;
+mod truth;
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct ContributionContract {
-    pub id: ContributionId,
-    pub feature_id: FeatureId,
-    pub schema: SchemaRef,
-    pub required_primitives: Vec<PrimitiveId>,
-}
+pub use ats_kernel::GamePackId;
+pub use contribution::{
+    ContributionRequirement, ContributionResolver, ContributionResolverError,
+    VerifiedContributionSet,
+};
+pub use pack::{
+    GAME_PACK_SCHEMA_VERSION, GamePackLoadError, GamePackLoader, GamePackRegistry,
+    GamePackRegistryError, LoadedGamePack, PackContribution,
+};
+pub use truth::{
+    EvidenceQuery, EvidenceQueryError, TRUTH_SNAPSHOT_SCHEMA_VERSION, TruthEvidenceRecord,
+    TruthSnapshotIndex, TruthSnapshotManifest, TruthSnapshotRepository, TruthSnapshotSource,
+    TruthStoreError, VerifiedGameContext, VerifiedGameContextError, VerifiedTruthSnapshot,
+    normalize_relative_path,
+};

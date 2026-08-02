@@ -264,6 +264,11 @@ name = "ats-game-context"
 version = "0.1.0"
 dependencies = [
  "ats-kernel",
+ "chrono",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -310,6 +315,9 @@ name = "ats-workspace"
 version = "0.1.0"
 dependencies = [
  "ats-kernel",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

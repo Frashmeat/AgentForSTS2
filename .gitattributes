@@ -8,3 +8,6 @@ Dockerfile*  text eol=lf
 # 标为 binary 防止任何换行转换。
 *.sln          -text
 *.DotSettings  -text
+
+# Stage 2 Pack manifests use an exact-byte pinned SHA-256 across every platform.
+game_packs/*/stage2-game-pack.json text eol=lf

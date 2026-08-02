@@ -142,3 +142,83 @@ cargo check --workspace --all-targets
 cargo test --workspace --all-targets
 cargo clippy --workspace --all-targets -- -D warnings
 ```
+
+## Game Context And Resource Workspace
+
+`crates/ats-game-context/src/pack.rs` owns `GamePackManifest` schema v2 loading. The loader receives
+an expected `Sha256Digest` and hashes the exact input bytes before parsing. The built-in STS2 target
+manifest is `game_packs/sts2/stage2-game-pack.json`; its digest is pinned beside the compile-time
+`include_bytes!`. The legacy `game-pack.json` remains the current `ats-core` production manifest and
+is not interpreted as schema v2.
+
+Each contribution has `slotId`, `featureId`, `schema`, `requiredPrimitives` and an object `payload`.
+`ContributionResolver::resolve` checks every Feature requirement and available Primitive before it
+returns `VerifiedContributionSet`. Consumers can only obtain a typed value through
+`VerifiedContributionSet::decode`; raw Pack JSON is not a Feature input.
+
+`crates/ats-game-context/src/truth.rs` owns Truth Snapshot schema v2 and bounded evidence records:
+
+```text
+TruthSnapshotManifest
+  schemaVersion / snapshotId
+  gamePackId / gamePackSchemaVersion / gamePackSha256
+  sources[] / indexes[] / toolVersions / createdAt
+
+TruthEvidenceRecord
+  sourceId / symbol / purpose / boundedExcerpt / relativePath
+```
+
+The snapshot ID is the SHA-256 of the canonical identity fields excluding `createdAt` and the ID
+itself. `ats-adapters::FileTruthSnapshotRepository` reads
+`truth/<pack>/current.json`, verifies every directory/file against symlinks, checks the Pack and
+snapshot identities, recomputes source/index hashes and counts, then calls
+`VerifiedTruthSnapshot::verify`. `EvidenceQuery` requires at least one symbol/term, limits results to
+1..=50 and queries only the fixed verified record set.
+
+`crates/ats-workspace/src/resource.rs` owns `ResourceAsset` schema v1. `ResourceOrigin` is exactly
+`user_upload`, `ai_generated` or `pack_default`. AI origin records registered provider/model/request
+hash; Pack origin records Pack ID/hash and contribution slot. Absolute input paths are transient
+adapter input and never enter the manifest.
+
+`ats-adapters::FileResourceRepository` stores each asset under
+`.ats/resources/<resource-id>/`, with immutable content-addressed blobs below
+`versions/<sha256>/` and an atomically replaced `resource-manifest.json`. A derived version names an
+existing parent and registered transform; every parent chain must terminate at `originalVersion`.
+Selection only updates `selectedVersion`; it cannot overwrite or point outside the asset.
+
+### Validation And Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Pinned STS2 or synthetic exact bytes | Same Loader/Registry accepts schema v2 |
+| Wrong Pack hash, schema, duplicate slot/Primitive or scalar payload | Typed load failure before registration |
+| Missing slot, Feature/schema mismatch or unavailable Primitive | Typed resolver failure before Feature work |
+| Snapshot identity, Pack identity, source/index hash/count mismatch | No `VerifiedTruthSnapshot` |
+| Empty/oversized Evidence query or invalid record path/excerpt | Typed query/store failure |
+| User, AI or Pack-default Resource input | Same repository and schema preserve distinct provenance |
+| Derived version with unknown parent, cycle, wrong digest path or tampered blob | Reject without changing valid manifest |
+| Selection names unknown version | Reject; manifest bytes stay unchanged |
+| Symlinked Pack/Truth/Resource path | Reject; no verified handle or success state |
+
+### Good / Base / Bad
+
+- Good: pinned STS2 and a synthetic Pack resolve through one contract; a fixed verified Snapshot
+  returns bounded evidence; all three Resource origins produce immutable, reloadable versions.
+- Base: `ats-core` continues to use legacy Pack/Truth v1 while schema v2 fixtures establish the new
+  ownership boundary for later Feature migration.
+- Bad: a Feature parses raw Pack JSON, switches on `game_id`, accepts an unverified Snapshot, stores
+  an upload absolute path, overwrites an old blob or selects a version from another asset.
+
+### Required Tests
+
+```text
+cargo test -p ats-kernel
+cargo test -p ats-game-context
+cargo test -p ats-workspace
+cargo test -p ats-adapters
+node scripts/check-stage2-dependency-dag.mjs --self-test
+node scripts/check-stage2-dependency-dag.mjs
+cargo check --workspace --all-targets
+cargo test --workspace --all-targets
+cargo clippy --workspace --all-targets -- -D warnings
+```

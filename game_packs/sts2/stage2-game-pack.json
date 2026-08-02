@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 2,
+  "id": "sts2",
+  "displayName": "Slay the Spire 2",
+  "contributions": [
+    {
+      "slotId": "project.create.template",
+      "featureId": "project.create",
+      "schema": { "id": "pack.project-template", "version": 1 },
+      "requiredPrimitives": ["storage.project-template"],
+      "payload": { "legacyCapability": "project_template" }
+    },
+    {
+      "slotId": "mod.plan.guidance",
+      "featureId": "mod.plan",
+      "schema": { "id": "pack.mod-plan-guidance", "version": 1 },
+      "payload": { "legacyGuidanceScenario": "planner" }
+    },
+    {
+      "slotId": "mod.generate.single",
+      "featureId": "mod.generate.single",
+      "schema": { "id": "pack.mod-generate-single", "version": 1 },
+      "requiredPrimitives": ["code.dotnet-validate"],
+      "payload": {
+        "legacyCapabilities": ["guidance", "validation_rules", "resource_specs"]
+      }
+    },
+    {
+      "slotId": "mod.generate.batch",
+      "featureId": "mod.generate.batch",
+      "schema": { "id": "pack.mod-generate-batch", "version": 1 },
+      "payload": { "compose": "mod.generate.single" }
+    },
+    {
+      "slotId": "mod.generate.complex",
+      "featureId": "mod.generate.complex",
+      "schema": { "id": "pack.mod-generate-complex", "version": 1 },
+      "payload": { "compose": "mod.generate.batch" }
+    },
+    {
+      "slotId": "log.analyze.rules",
+      "featureId": "log.analyze",
+      "schema": { "id": "pack.log-rules", "version": 1 },
+      "requiredPrimitives": ["log.dotnet-parser"],
+      "payload": { "frameworks": ["dotnet", "msbuild", "godot", "baselib"] }
+    },
+    {
+      "slotId": "resource.prepare.specs",
+      "featureId": "resource.prepare",
+      "schema": { "id": "pack.resource-specs", "version": 1 },
+      "requiredPrimitives": ["image.role-transform"],
+      "payload": { "legacyCapability": "resource_specs" }
+    },
+    {
+      "slotId": "project.build.recipe",
+      "featureId": "project.build",
+      "schema": { "id": "pack.build-recipe", "version": 1 },
+      "requiredPrimitives": ["process.dotnet-publish"],
+      "payload": { "legacyCapability": "build_recipe" }
+    },
+    {
+      "slotId": "project.package.layout",
+      "featureId": "project.package",
+      "schema": { "id": "pack.package-layout", "version": 1 },
+      "payload": { "legacyCapability": "package_layout" }
+    }
+  ]
+}

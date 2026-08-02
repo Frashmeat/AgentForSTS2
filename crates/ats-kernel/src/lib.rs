@@ -9,6 +9,8 @@ use thiserror::Error;
 pub enum ContractValueError {
     #[error("invalid {kind}: expected at least two dot-separated lowercase ASCII segments")]
     InvalidQualifiedId { kind: &'static str },
+    #[error("invalid {kind}: expected a lowercase ASCII slug")]
+    InvalidSlugId { kind: &'static str },
     #[error("schema version must be greater than zero")]
     InvalidSchemaVersion,
     #[error("SHA-256 digest must contain exactly 64 hexadecimal characters")]
@@ -102,6 +104,52 @@ qualified_id!(ContributionId, "contribution ID");
 qualified_id!(PrimitiveId, "primitive ID");
 qualified_id!(SchemaId, "schema ID");
 qualified_id!(FailureCode, "failure code");
+qualified_id!(ResourceId, "resource ID");
+
+#[derive(Debug, Clone, Serialize, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[serde(transparent)]
+pub struct GamePackId(String);
+
+impl GamePackId {
+    pub fn parse(value: impl Into<String>) -> Result<Self, ContractValueError> {
+        let value = value.into();
+        if value.len() <= 64
+            && value
+                .bytes()
+                .next()
+                .is_some_and(|byte| byte.is_ascii_lowercase())
+            && value.bytes().all(|byte| {
+                byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_')
+            })
+        {
+            Ok(Self(value))
+        } else {
+            Err(ContractValueError::InvalidSlugId {
+                kind: "game pack ID",
+            })
+        }
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for GamePackId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for GamePackId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Self::parse(String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+    }
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[serde(transparent)]
@@ -261,6 +309,9 @@ mod tests {
         }
         assert!(FeatureId::parse("mod.generate.single").is_ok());
         assert!(FailureCode::parse("artifact.publish_failed").is_ok());
+        assert!(GamePackId::parse("sts2").is_ok());
+        assert!(GamePackId::parse("fixture-game").is_ok());
+        assert!(GamePackId::parse("Bad/Game").is_err());
     }
 
     #[test]

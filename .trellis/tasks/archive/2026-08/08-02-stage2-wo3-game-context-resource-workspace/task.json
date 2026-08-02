@@ -1,0 +1,44 @@
+{
+  "id": "stage2-wo3-game-context-resource-workspace",
+  "name": "stage2-wo3-game-context-resource-workspace",
+  "title": "Stage 2 Work Order 3：Game Context 与 Resource Workspace",
+  "description": "迁出 Pack/Truth/Evidence 合同，建立 Contribution Resolver 与版本化 Resource Workspace；旧生产链保持到后续纵切面切换。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "priority": "P2",
+  "creator": "codex-agent",
+  "assignee": "codex-agent",
+  "createdAt": "2026-08-02",
+  "completedAt": "2026-08-03",
+  "branch": null,
+  "base_branch": "rust",
+  "worktree_path": null,
+  "current_phase": 3,
+  "next_action": [
+    {
+      "phase": 1,
+      "action": "implement"
+    },
+    {
+      "phase": 2,
+      "action": "check"
+    },
+    {
+      "phase": 3,
+      "action": "finish"
+    },
+    {
+      "phase": 4,
+      "action": "create-pr"
+    }
+  ],
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

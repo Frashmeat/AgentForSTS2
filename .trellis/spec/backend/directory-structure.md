@@ -25,12 +25,12 @@ artifacts/        ignored local build/release/E2E outputs
 
 ## Ownership Rules
 
-- During the Stage 2 migration, `ats-core` still owns the current production behavior. New ownership moves only through completed Work Orders; the presence of a target crate does not imply its corresponding behavior has migrated.
+- During the Stage 2 migration, `ats-core` still owns the current production Shell behavior. Work Orders 2-3 have established isolated Run/Artifact v3, Pack/Truth v2 and Resource v1 contracts; production cutover still occurs only through later vertical slices and WO7.
 - `ats-kernel` owns only stable values shared by at least two responsibility domains. The exact target DAG is enforced by `scripts/check-stage2-dependency-dag.mjs` and documented in `stage2-contracts.md`.
 - `ats-runtime`, `ats-game-context`, and `ats-workspace` cannot depend on `ats-features`. `ats-adapters` implements lower-layer ports and cannot depend on Feature workflows. No target crate may depend on legacy `ats-core`.
 - `src-tauri` owns the active desktop project, `ProjectSession`, app-data paths, workstation configuration bindings, IPC commands, startup prewarm, and application exit integration. It delegates domain work to Core.
 - `ats-web` and `ats-cli` are shells. They may map transport/CLI arguments but do not copy Run state machines, artifact schemas, feature rules, or game-specific content.
-- `game_packs/<game-id>/` owns truth-source declarations, guidance, project templates, resource specifications, validation rules, build recipe, and package layout. Generic handlers do not branch on `game_id == "sts2"`.
+- `game_packs/<game-id>/` owns truth-source declarations, guidance, project templates, resource specifications, validation rules, build recipe, and package layout. `stage2-game-pack.json` is the pinned v2 contribution target while legacy `game-pack.json` serves the current Core. Generic handlers do not branch on `game_id == "sts2"`.
 - `scripts/` may orchestrate closed project commands. A release script cannot accept arbitrary shell commands or reimplement Cargo feature/BuildInfo identity owned by `build.ps1` and `ats-core/build.rs`.
 
 ## Platform DDD Placement
