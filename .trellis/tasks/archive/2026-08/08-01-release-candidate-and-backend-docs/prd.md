@@ -73,7 +73,7 @@
 - [x] 后端 code-spec 达到可执行契约深度，并删除失效的 Python/FastAPI 主路径描述。
 - [x] PowerShell、文档链接/格式及相关定向测试通过。
 - [x] 获得单独授权后，前端/workspace/Windows/ML/installer 最终门禁通过并生成可复验候选；未获授权时明确保持未执行。
-- [ ] 用户对当前候选执行最终安装/启动冒烟；Agent 不操作安装器或桌面应用 UI。
+- [x] 用户明确授权 Agent 通过 E2E 操作当前候选桌面应用完成最终安装版启动、工程打开、真实 Artifact 发布和工程锁恢复冒烟，并在 2026-08-02 明确确认验收。
 
 ## 6. Good / Base / Bad
 
@@ -298,4 +298,20 @@ cargo test -p ats-core platform::application::handlers::asset_generate::tests   
 artifacts/release/rc-20260802T064241Z-6e8d291971e8/release-verification.json
 ```
 
-四个 installer 均为 `NotSigned`，符合当前未签名候选边界。尚未执行且不得据此声称通过：该候选的人工安装/启动冒烟，以及安装版中再次触发真实 Artifact 发布链；旧候选、手动重命名或人工恢复结果不能替代这些人工事实。
+四个 installer 均为 `NotSigned`，符合当前未签名候选边界。旧候选、手动重命名或人工恢复结果不能替代本次候选的安装版事实；最终 E2E 结论见第 14 节。
+
+## 14. 最终安装版 E2E 验收
+
+2026-08-02，用户明确要求 Agent 直接使用 E2E 验证，并在结果汇报后明确确认验收。安装位置中的桌面二进制通过 `--write-build-info` 报告 `commit=6e8d291971e8911ad48abcfb866613acf753f01d`、`variant=ml`、`features=[ml-rembg]` 和 `buildId=rc-20260802T064241Z-6e8d291971e8`，与最终候选完全一致。
+
+安装版成功启动并打开现有工程 `ATSReleaseSmoke`。真实 `truth_snapshot_refresh` Run `run-000000000000000018c7f20447ae6154-00000000` 为 `succeeded`，在隔离的 `C:` runtime 中以 `cacheHit=false` 生成 Snapshot `0a9ae5e2f66dbfa1b5736a6ea5a39029cb6e69f1aa86941aab7dfd21dbe08f43`，包含 2 个 source 和 2 个 index；随后 `single_asset_plan` Run `run-000000000000000018c7f215aac8a324-00000001` 成功。
+
+首次真实 `asset_generate` Run `run-000000000000000018c7f22187acd534-00000002` 完成 ML 出图和去背景，但在 `asset_bundle.compile` 失败；Run 保持 `failed`，正式文件与 Artifact 事务回滚，本轮没有 final Artifact 或所属 staging，未伪造成功。为单独复验修复目标中的正式 Artifact 原子发布，安装版随后提交无副作用的 custom-code Run `run-000000000000000018c7f2d771269848-00000003`，状态为 `succeeded`，生成新的 `RcE2eMarker` final Artifact：
+
+```text
+.tmp/real-game-smoke/20260801-2326/projects/ATSReleaseSmoke/artifacts/RcE2eMarker/runs/run-000000000000000018c7f2d771269848-00000003/artifact-manifest.json
+```
+
+RunRecord 中的 manifest SHA-256 与文件复算值均为 `5e6ceef8ec27984503c1d5ee864568e5ab5406a858431f1ba36308af8d9e382e`。Manifest schema 为 2，绑定 `sts2`、上述 Snapshot、2 个 source 和 2 个 index；immutable snapshot 文件与正式 `Generated/RcE2eMarker.cs` 均为 150 bytes，SHA-256 均为 `5df44e3d74eb211b4854b8527ec577a79e6bf27730cf88fef070d89e56460242`。该 Run 的 staging 残留为 0；工程中保留的 2 个 `.staging-*` 均属于更早的 `Release_Spark` 失败 Run，未删除也未计入本轮。
+
+退出生命周期也已完成闭环：应用运行时 OS 独占锁探针确认工程锁被持有；正常关闭后锁可获取；重启同一安装版并重新打开 `ATSReleaseSmoke` 后锁再次被独占持有；第二次正常关闭后锁再次释放。验收不覆盖签名发行、SmartScreen、custom-code 的 `dotnet publish`，也不把上述失败的 ML `asset_generate` 描述为成功，但已覆盖本任务要求的候选身份、安装版启动、现有工程打开、成功 Run、真实 final Artifact/manifest/哈希、无本轮 staging 残留和工程锁恢复。
