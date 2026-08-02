@@ -143,6 +143,82 @@ cargo test --workspace --all-targets
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
+## Model Request And Log Analysis Vertical Slice
+
+`ats-runtime::ModelRequestSnapshot` schema v1 is the game-neutral, replayable model boundary:
+
+```text
+featureId
+recipe { id, version, sha256 }
+gamePack { id, sha256 }
+truthSnapshotId?
+selectedResources[] { resourceId, logicalRole, selectedVersion, mediaType }
+request { messages, outputContract, maxOutputTokens, temperature?, model? }
+requestSha256
+```
+
+The request identity hashes canonical JSON for every field except `requestSha256` itself. Resource
+references are sorted and unique by `ResourceId`; deserialization revalidates structure and identity.
+Runtime owns message roles, provider-neutral request/response/stream contracts, limits and safe model
+error categories. It does not own Feature Recipe text, Pack guidance, project semantics or a product
+result enum.
+
+`ats-features::prompt` loads exact pinned Recipe bytes. A Recipe declares its Feature/version,
+messages, each bounded slot exactly once, typed output schema, token limit and temperature. The
+renderer rejects unknown, duplicate, unconsumed, missing or oversized slots and never reparses slot
+tokens introduced by a supplied value. Recipe resources use LF exact bytes; Stage 2 does not support
+unsigned runtime Recipe replacement.
+
+`ats-features::log_analyze` owns the typed request/result, bounded UTF-8 tail policy, generic
+diagnostic result validation and orchestration. It requires `log.analyze.rules` schema v1 from a
+`VerifiedContributionSet`, obtains bounded evidence from a verified Truth Snapshot and records all
+identities in the model snapshot. The STS2 Pack owns its compiler/build/runtime/mod-lifecycle
+indicators and checks. Runtime and the generic Recipe contain none of those game/toolchain terms.
+
+Runtime Custom Instructions enter only through `runtime.custom_instructions`, an optional slot that
+the Recipe loader requires to occur exactly once. They cannot replace the system message or typed
+output contract. Full prompt/model content is not copied into failure messages.
+
+### Validation And Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Exact pinned Recipe and complete slots | Deterministic messages and verified request SHA-256 |
+| Recipe hash/schema/template tampering | Fail before model invocation |
+| Required/unknown/duplicate/oversized slot | Typed Recipe assembly failure |
+| Pack slot/schema/Primitive missing | Contribution resolution fails before Feature execution |
+| Pack, contribution and Truth identities differ | `ContextIdentityMismatch`; no model invocation |
+| Same Recipe/request with different Pack guidance | Different rendered content and request identity |
+| Oversized Unicode log | Keep the requested number of trailing characters on valid UTF-8 boundaries |
+| Model returns malformed, oversized or truncated typed output | No fabricated `LogAnalyzeResult` |
+
+### Good / Base / Bad
+
+- Good: the same pinned Recipe combines one verified STS2 contribution and one fixed Truth Snapshot;
+  the model sees the exact rendered request and the returned snapshot hash verifies after JSON
+  round-trip.
+- Good: a synthetic Pack supplies different typed log guidance, so the rendered messages and request
+  hash change without a Feature or Runtime branch.
+- Base: the new vertical slice compiles and is exercised through mocks while the current Shell still
+  invokes the legacy `ats-core` handler until WO7.
+- Bad: a handler contains a long production prompt, parses raw Pack JSON, accepts mismatched Pack and
+  Truth identities, injects Custom Instructions into multiple messages or treats malformed model
+  output as a typed success.
+
+### Required Tests
+
+```text
+cargo test -p ats-kernel
+cargo test -p ats-runtime
+cargo test -p ats-game-context
+cargo test -p ats-features
+node scripts/check-stage2-dependency-dag.mjs --self-test
+node scripts/check-stage2-dependency-dag.mjs
+cargo check --workspace --all-targets
+cargo test --workspace --all-targets
+cargo clippy --workspace --all-targets -- -D warnings
+```
+
 ## Game Context And Resource Workspace
 
 `crates/ats-game-context/src/pack.rs` owns `GamePackManifest` schema v2 loading. The loader receives

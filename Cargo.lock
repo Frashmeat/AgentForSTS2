@@ -250,13 +250,18 @@ dependencies = [
 name = "ats-features"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "ats-game-context",
  "ats-kernel",
  "ats-runtime",
  "ats-workspace",
  "chrono",
+ "futures-util",
  "serde",
+ "serde_json",
+ "sha2",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]
@@ -284,10 +289,13 @@ dependencies = [
 name = "ats-runtime"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "ats-kernel",
  "chrono",
+ "futures-util",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror 2.0.18",
 ]
 

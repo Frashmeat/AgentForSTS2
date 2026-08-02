@@ -42,7 +42,63 @@
       "featureId": "log.analyze",
       "schema": { "id": "pack.log-rules", "version": 1 },
       "requiredPrimitives": ["log.dotnet-parser"],
-      "payload": { "frameworks": ["dotnet", "msbuild", "godot", "baselib"] }
+      "payload": {
+        "ecosystems": [
+          {
+            "label": ".NET compiler",
+            "indicators": ["CS0246", "CS0103", "CS1061", "namespace", "type or namespace name"],
+            "interpretations": [
+              "A compiler diagnostic is normally downstream of a missing reference, incompatible API version, or incorrect namespace.",
+              "Use the first compiler error as the primary signal because later errors may be cascading failures."
+            ],
+            "checks": [
+              "Compare referenced API symbols with the pinned Truth Snapshot.",
+              "Confirm the project targets the framework version required by the installed mod toolchain."
+            ]
+          },
+          {
+            "label": "MSBuild and dotnet publish",
+            "indicators": ["MSB", "dotnet publish", "Copy", "ResolveAssemblyReference", "project.assets.json"],
+            "interpretations": [
+              "Restore, reference resolution, compilation, and publish are distinct stages; identify the earliest failing target.",
+              "A publish failure can occur after compilation succeeds and should not be reported as a source-code failure."
+            ],
+            "checks": [
+              "Identify the failing target and task before proposing a project-file change.",
+              "Check output and dependency paths without exposing absolute user paths."
+            ]
+          },
+          {
+            "label": "Godot runtime",
+            "indicators": ["Godot", "SCRIPT ERROR", "Node", "ResourceLoader", "res://"],
+            "interpretations": [
+              "Runtime resource or node errors are separate from managed compilation and packaging failures.",
+              "The first engine error generally has more diagnostic value than repeated follow-on stack entries."
+            ],
+            "checks": [
+              "Verify the packaged resource path and case exactly match the runtime reference.",
+              "Distinguish engine startup failures from mod initialization failures."
+            ]
+          },
+          {
+            "label": "BaseLib mod lifecycle",
+            "indicators": ["BaseLib", "ModInitializer", "LoadMods", "Harmony", "patch"],
+            "interpretations": [
+              "A mod can compile and publish successfully but fail during discovery, initialization, or patch application.",
+              "Lifecycle ordering and API compatibility must be supported by pinned Truth Evidence."
+            ],
+            "checks": [
+              "Locate the earliest mod discovery or initialization failure.",
+              "Compare lifecycle symbols and hook signatures with the selected Truth Snapshot."
+            ]
+          }
+        ],
+        "priorities": [
+          "Report the earliest actionable root cause before cascading symptoms.",
+          "Separate build, publish, package, game startup, and mod initialization stages.",
+          "Mark an explanation as a hypothesis when the supplied log and Truth Evidence do not prove it."
+        ]
+      }
     },
     {
       "slotId": "resource.prepare.specs",

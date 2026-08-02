@@ -1,0 +1,44 @@
+{
+  "id": "stage2-wo4-prompt-log-analysis",
+  "name": "stage2-wo4-prompt-log-analysis",
+  "title": "Stage 2 Work Order 4：Prompt 与日志分析纵切面",
+  "description": "建立版本化 Prompt Recipe、可复验 ModelRequestSnapshot 和新的 log.analyze 纵切面；旧 Shell 到 WO7 再切换。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "Stage 2 model port, pinned Feature Recipe, exact slot assembly, ModelRequestSnapshot and log.analyze vertical slice",
+  "priority": "P2",
+  "creator": "codex-agent",
+  "assignee": "codex-agent",
+  "createdAt": "2026-08-03",
+  "completedAt": "2026-08-03",
+  "branch": null,
+  "base_branch": "rust",
+  "worktree_path": null,
+  "current_phase": 3,
+  "next_action": [
+    {
+      "phase": 1,
+      "action": "implement"
+    },
+    {
+      "phase": 2,
+      "action": "check"
+    },
+    {
+      "phase": 3,
+      "action": "finish"
+    },
+    {
+      "phase": 4,
+      "action": "create-pr"
+    }
+  ],
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "Runtime/Feature/Game Context targeted tests and clippy passed; workspace check passed; workspace test passed on full rerun after one non-reproducing legacy ats-core timing failure; workspace clippy, DAG self-test/real check, pinned hash verification, rustfmt and git diff checks passed. Shell remains on legacy ats-core until WO7.",
+  "meta": {}
+}

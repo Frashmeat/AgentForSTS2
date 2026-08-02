@@ -105,6 +105,7 @@ qualified_id!(PrimitiveId, "primitive ID");
 qualified_id!(SchemaId, "schema ID");
 qualified_id!(FailureCode, "failure code");
 qualified_id!(ResourceId, "resource ID");
+qualified_id!(RecipeId, "recipe ID");
 
 #[derive(Debug, Clone, Serialize, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[serde(transparent)]

@@ -1,5 +1,7 @@
 //! Product Feature contracts and vertical workflow ownership.
 
+pub mod log_analyze;
+pub mod prompt;
 mod registry;
 
 use ats_kernel::{ContributionId, FeatureId, SchemaRef};

@@ -11,3 +11,4 @@ Dockerfile*  text eol=lf
 
 # Stage 2 Pack manifests use an exact-byte pinned SHA-256 across every platform.
 game_packs/*/stage2-game-pack.json text eol=lf
+crates/ats-features/recipes/*.json text eol=lf

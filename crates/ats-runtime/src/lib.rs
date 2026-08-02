@@ -1,6 +1,7 @@
 //! Game-neutral execution contracts for Run, Artifact and external capability ports.
 
 mod artifact;
+mod model;
 mod payload;
 mod run;
 
@@ -10,6 +11,11 @@ pub use artifact::{
     ARTIFACT_MANIFEST_SCHEMA_VERSION, ArtifactContractError, ArtifactFileInput, ArtifactFileRecord,
     ArtifactManifest, ArtifactPublishRequest, ArtifactPublisher, PublishedArtifact,
     normalize_relative_path,
+};
+pub use model::{
+    FinishReason, ModelClient, ModelError, ModelGamePackRef, ModelMessage, ModelMessageRole,
+    ModelOutputContract, ModelRequest, ModelRequestError, ModelRequestSnapshot, ModelResourceRef,
+    ModelResponse, ModelStream, ModelStreamEvent, RecipeRef, TokenUsage,
 };
 pub use payload::{PayloadError, VersionedPayload};
 pub use run::{
