@@ -285,4 +285,17 @@ cargo test -p ats-core platform::application::handlers::package_project::tests  
 cargo test -p ats-core platform::application::handlers::asset_generate::tests           # 14 passed
 ```
 
-回归覆盖两次瞬态冲突后成功、重试耗尽清理、确定性错误不重试、平台错误分类、typed failure 脱敏，以及 asset/package 发布失败后的文件回滚。尚未执行新的 baseline/ML release candidate 和安装版真实产品链复验；旧候选、手动重命名或人工恢复结果不能替代该门禁。
+回归覆盖两次瞬态冲突后成功、重试耗尽清理、确定性错误不重试、平台错误分类、typed failure 脱敏，以及 asset/package 发布失败后的文件回滚。
+
+修复后的候选执行保留了两次不可变失败事实：
+
+- `rc-20260802T062122Z-7bef18f99bfe` 在 `workspace-test` 停止，因为 `run_lifecycle` 集成测试仍断言旧的 `core.unclassified` 和 diagnostic 契约；生产失败已正确变为 `artifact.path_invalid` 且文件回滚通过。测试契约修正后定向 6/6 通过。
+- `rc-20260802T062517Z-6e8d291971e8` 的 baseline 构建与复验通过，但 ML release 编译因 `I:` 盘 `no space on device` 停止；verification 保持 failed，没有复用部分成功结果。经用户授权，只删除 8 个 `artifacts/build` 可重建隔离 target，保留全部 `artifacts/release`、`.tmp` 和真实验证证据。
+
+最终候选 `rc-20260802T064241Z-6e8d291971e8` 绑定提交 `6e8d291971e8911ad48abcfb866613acf753f01d`，总入口退出码为 0：10/10 steps succeeded，baseline/ML 2/2 variants 的 BuildInfo 与 release manifest 复验通过，四个 installer 的大小和 SHA-256 重新计算一致，原子临时文件残留为 0。机器证据位于：
+
+```text
+artifacts/release/rc-20260802T064241Z-6e8d291971e8/release-verification.json
+```
+
+四个 installer 均为 `NotSigned`，符合当前未签名候选边界。尚未执行且不得据此声称通过：该候选的人工安装/启动冒烟，以及安装版中再次触发真实 Artifact 发布链；旧候选、手动重命名或人工恢复结果不能替代这些人工事实。

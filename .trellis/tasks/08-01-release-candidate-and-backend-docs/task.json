@@ -39,6 +39,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "ATSReleaseSmoke 富文本修复候选已通过用户真实游戏复验。Artifact Windows 瞬态原子重命名冲突已以共享有界重试、typed failure 和失败清理修复，定向回归通过。下一步是提交修复，并在新的干净 HEAD 上重新生成 baseline/ML 候选后由用户完成最终安装/启动冒烟。",
+  "notes": "Artifact Windows 瞬态原子重命名修复已提交并通过 workspace 全量回归。最终候选 rc-20260802T064241Z-6e8d291971e8 绑定提交 6e8d2919，10/10 steps、2/2 variants 和 4/4 installer hash 机器复验通过。下一步由用户完成该候选的安装/启动冒烟；如继续生成 Mod，同时记录真实 Artifact 发布结果。",
   "meta": {}
 }
