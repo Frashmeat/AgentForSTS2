@@ -344,9 +344,9 @@ async fn manifest_publish_failure_restores_previous_generated_file() {
     assert_eq!(run.status, RunStatus::Failed);
     assert!(run.result.is_none());
     let failure = run.failure.as_ref().unwrap();
-    assert_eq!(failure.code, "core.unclassified");
+    assert_eq!(failure.code, "artifact.path_invalid");
     assert_eq!(failure.stage, "code_generate.publish");
-    assert!(failure.diagnostic.is_some());
+    assert!(failure.diagnostic.is_none());
     assert!(
         !serde_json::to_string(&run)
             .unwrap()
