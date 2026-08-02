@@ -9,14 +9,17 @@ use std::sync::Arc;
 use super::asset_bundle::{
     AssetBundleError, AssetBundleGeneration, ProjectFileTransaction, validate_project_scope,
 };
-use super::asset_compile::AssetCompileValidator;
+use super::asset_compile::{AssetCompileError, AssetCompileValidator};
 use super::common::{
     FinalizeOutcome, ProgressEvent, ProgressSink, emit_cancelled_mid_stream,
     finalize_with_cancellation, finalize_with_failure, finalize_with_success,
     transition_to_running,
 };
 use crate::codegen::{GenerationEvidence, PromptAssembler};
-use crate::failure::{ActionableFailure, FailureDiagnostic, FailureNormalizer};
+use crate::failure::{
+    ActionableFailure, FailureCategory, FailureDiagnostic, FailureIoKind, FailureNormalizer,
+    RecoveryAction,
+};
 use crate::game_pack::{ValidationRule, VerifiedGameContext};
 use crate::llm::{CompletionRequest, LlmClient, LlmError, Message, MessageRole, StreamEvent};
 use crate::platform::application::CancellationToken;
@@ -442,6 +445,14 @@ pub(crate) async fn finalize_asset_bundle_error(
     error: AssetBundleError,
     diagnostic_ref: Option<String>,
 ) {
+    let diagnostic_io_kind = match &error {
+        AssetBundleError::Compile(AssetCompileError::Io { kind, .. }) => {
+            Some(FailureIoKind::from(*kind))
+        }
+        _ => None,
+    };
+    let has_run_diagnostics =
+        diagnostic_ref.is_some() || matches!(&error, AssetBundleError::Compile(_));
     let mut failure = match error {
         AssetBundleError::Stream(err) => FailureNormalizer::llm("asset_bundle.stream", &err),
         AssetBundleError::ModelOutput => ActionableFailure::invalid_input(
@@ -449,14 +460,48 @@ pub(crate) async fn finalize_asset_bundle_error(
             "The model returned an invalid asset bundle. Retry generation.",
         ),
         AssetBundleError::Write => ActionableFailure::unclassified("asset_bundle.write"),
-        AssetBundleError::Compile => ActionableFailure::unclassified("asset_bundle.compile"),
+        AssetBundleError::Compile(AssetCompileError::Rejected(_)) => ActionableFailure::new(
+            "artifact.compile_failed",
+            FailureCategory::Toolchain,
+            "asset_bundle.compile",
+            "The generated asset did not pass the compile gate. Review the run diagnostics and retry generation.",
+            RecoveryAction::Retry,
+            false,
+        ),
+        AssetBundleError::Compile(AssetCompileError::Io { kind, .. }) => {
+            let (action, retryable) = match kind {
+                std::io::ErrorKind::NotFound => (RecoveryAction::InstallDependency, false),
+                std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::InvalidInput => {
+                    (RecoveryAction::CheckPath, false)
+                }
+                _ => (RecoveryAction::Retry, true),
+            };
+            ActionableFailure::new(
+                "artifact.compile_unavailable",
+                FailureCategory::Toolchain,
+                "asset_bundle.compile",
+                "The asset compile gate could not run or clean up its isolated output.",
+                action,
+                retryable,
+            )
+        }
+        AssetBundleError::Compile(AssetCompileError::Cancelled) => return,
+        AssetBundleError::Diagnostics => ActionableFailure::new(
+            "artifact.diagnostics_failed",
+            FailureCategory::Filesystem,
+            "asset_bundle.diagnostics",
+            "Compile diagnostics could not be retained safely.",
+            RecoveryAction::CheckPath,
+            false,
+        ),
         AssetBundleError::Cancelled => return,
     };
-    if diagnostic_ref.is_some() {
-        failure = failure.with_diagnostic(FailureDiagnostic::for_run(
-            run_id,
-            "Run diagnostics are available for this failed execution.",
-        ));
+    if has_run_diagnostics {
+        failure = failure.with_diagnostic(FailureDiagnostic {
+            id: run_id.0.clone(),
+            summary: "Run diagnostics are available for this failed execution.".into(),
+            io_kind: diagnostic_io_kind,
+        });
     }
     finalize_with_failure(repo, run_id, sink, failure).await;
 }

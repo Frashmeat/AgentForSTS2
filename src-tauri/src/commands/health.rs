@@ -30,7 +30,7 @@ pub async fn get_health(
     let image_proc_ready = matches!(image_proc.status_snapshot(), PrewarmStatus::Ready { .. });
     let status = config.status_snapshot();
     let (settings, _) = config.snapshot();
-    let runtime_dir = status.runtime_dir();
+    let runtime_dir = config.runtime_dir();
     let truth_snapshot_ready = tokio::task::spawn_blocking(move || {
         let game_id = game_id?;
         let registry = GamePackRegistry::built_in().ok()?;

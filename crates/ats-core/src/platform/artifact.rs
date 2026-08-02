@@ -4,8 +4,6 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
-use std::thread;
-use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -13,18 +11,12 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::codegen::GenerationEvidence;
+use crate::fs_atomic::rename_with_retry;
 use crate::game_pack::{TruthSnapshotIndex, TruthSnapshotSource, VerifiedGameContext};
 use crate::image_proc::{ImageProcessingProvenance, ImageProcessor};
 use crate::platform::domain::RunId;
 
 pub const ARTIFACT_MANIFEST_SCHEMA_VERSION: u32 = 2;
-const PUBLISH_RENAME_RETRY_DELAYS: [Duration; 5] = [
-    Duration::from_millis(50),
-    Duration::from_millis(100),
-    Duration::from_millis(200),
-    Duration::from_millis(400),
-    Duration::from_millis(800),
-];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -404,66 +396,25 @@ impl ArtifactStore {
 }
 
 fn publish_staging_directory(staging_dir: &Path, final_dir: &Path) -> io::Result<()> {
-    publish_staging_directory_with(
-        staging_dir,
-        final_dir,
-        |from, to| fs::rename(from, to),
-        thread::sleep,
-        is_transient_publish_rename_error,
-    )
+    publish_staging_directory_with(staging_dir, final_dir, |from, to| {
+        rename_with_retry(from, to, "artifact_directory_publish")
+    })
 }
 
-fn publish_staging_directory_with<R, S, C>(
+fn publish_staging_directory_with<P>(
     staging_dir: &Path,
     final_dir: &Path,
-    mut rename: R,
-    mut sleep: S,
-    is_retryable: C,
+    mut publish: P,
 ) -> io::Result<()>
 where
-    R: FnMut(&Path, &Path) -> io::Result<()>,
-    S: FnMut(Duration),
-    C: Fn(&io::Error) -> bool,
+    P: FnMut(&Path, &Path) -> io::Result<()>,
 {
-    let mut attempt = 1_u8;
-    loop {
-        match rename(staging_dir, final_dir) {
-            Ok(()) => return Ok(()),
+    match publish(staging_dir, final_dir) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            let _ = fs::remove_dir_all(staging_dir);
             Err(error)
-                if is_retryable(&error)
-                    && usize::from(attempt) <= PUBLISH_RENAME_RETRY_DELAYS.len() =>
-            {
-                let delay = PUBLISH_RENAME_RETRY_DELAYS[usize::from(attempt) - 1];
-                tracing::warn!(
-                    attempt,
-                    next_attempt = attempt + 1,
-                    delay_ms = delay.as_millis(),
-                    io_kind = ?error.kind(),
-                    "artifact directory publish was temporarily unavailable; retrying"
-                );
-                sleep(delay);
-                attempt += 1;
-            }
-            Err(error) => {
-                let _ = fs::remove_dir_all(staging_dir);
-                return Err(error);
-            }
         }
-    }
-}
-
-fn is_transient_publish_rename_error(error: &io::Error) -> bool {
-    if error.kind() == io::ErrorKind::Interrupted {
-        return true;
-    }
-    #[cfg(windows)]
-    {
-        error.kind() == io::ErrorKind::PermissionDenied
-            || matches!(error.raw_os_error(), Some(5 | 32 | 33))
-    }
-    #[cfg(not(windows))]
-    {
-        false
     }
 }
 
@@ -691,6 +642,7 @@ fn normalize_relative_path(path: &Path) -> ArtifactResult<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fs_atomic::{RENAME_RETRY_DELAYS, rename_with_retry_with};
     use crate::image_proc::{
         ImageProcFallback, ImageProcFallbackReason, ImageProcessingProvenance, ImageProcessor,
     };
@@ -772,27 +724,30 @@ mod tests {
         let mut attempts = 0_u8;
         let mut delays = Vec::new();
 
-        publish_staging_directory_with(
-            &staging,
-            &final_dir,
-            |from, to| {
-                attempts += 1;
-                if attempts <= 2 {
-                    Err(io::Error::new(
-                        io::ErrorKind::PermissionDenied,
-                        "sharing violation canary",
-                    ))
-                } else {
-                    fs::rename(from, to)
-                }
-            },
-            |delay| delays.push(delay),
-            |error| error.kind() == io::ErrorKind::PermissionDenied,
-        )
+        publish_staging_directory_with(&staging, &final_dir, |from, to| {
+            rename_with_retry_with(
+                from,
+                to,
+                "artifact_directory_publish_test",
+                |from, to| {
+                    attempts += 1;
+                    if attempts <= 2 {
+                        Err(io::Error::new(
+                            io::ErrorKind::PermissionDenied,
+                            "sharing violation canary",
+                        ))
+                    } else {
+                        fs::rename(from, to)
+                    }
+                },
+                |delay| delays.push(delay),
+                |error| error.kind() == io::ErrorKind::PermissionDenied,
+            )
+        })
         .unwrap();
 
         assert_eq!(attempts, 3);
-        assert_eq!(delays, PUBLISH_RENAME_RETRY_DELAYS[..2]);
+        assert_eq!(delays, RENAME_RETRY_DELAYS[..2]);
         assert!(!staging.exists());
         assert_eq!(
             fs::read(final_dir.join("artifact-manifest.json")).unwrap(),
@@ -809,23 +764,26 @@ mod tests {
         fs::write(staging.join("artifact-manifest.json"), b"incomplete").unwrap();
         let mut attempts = 0_u8;
 
-        let error = publish_staging_directory_with(
-            &staging,
-            &final_dir,
-            |_, _| {
-                attempts += 1;
-                Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    "sharing violation canary",
-                ))
-            },
-            |_| {},
-            |_| true,
-        )
+        let error = publish_staging_directory_with(&staging, &final_dir, |from, to| {
+            rename_with_retry_with(
+                from,
+                to,
+                "artifact_directory_publish_test",
+                |_, _| {
+                    attempts += 1;
+                    Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "sharing violation canary",
+                    ))
+                },
+                |_| {},
+                |_| true,
+            )
+        })
         .unwrap_err();
 
         assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
-        assert_eq!(usize::from(attempts), PUBLISH_RENAME_RETRY_DELAYS.len() + 1);
+        assert_eq!(usize::from(attempts), RENAME_RETRY_DELAYS.len() + 1);
         assert!(!staging.exists());
         assert!(!final_dir.exists());
     }
@@ -839,19 +797,22 @@ mod tests {
         let mut attempts = 0_u8;
         let mut sleeps = 0_u8;
 
-        let error = publish_staging_directory_with(
-            &staging,
-            &final_dir,
-            |_, _| {
-                attempts += 1;
-                Err(io::Error::new(
-                    io::ErrorKind::AlreadyExists,
-                    "deterministic conflict canary",
-                ))
-            },
-            |_| sleeps += 1,
-            |_| false,
-        )
+        let error = publish_staging_directory_with(&staging, &final_dir, |from, to| {
+            rename_with_retry_with(
+                from,
+                to,
+                "artifact_directory_publish_test",
+                |_, _| {
+                    attempts += 1;
+                    Err(io::Error::new(
+                        io::ErrorKind::AlreadyExists,
+                        "deterministic conflict canary",
+                    ))
+                },
+                |_| sleeps += 1,
+                |_| false,
+            )
+        })
         .unwrap_err();
 
         assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
@@ -859,24 +820,6 @@ mod tests {
         assert_eq!(sleeps, 0);
         assert!(!staging.exists());
         assert!(!final_dir.exists());
-    }
-
-    #[test]
-    fn publish_rename_classifier_is_platform_bounded() {
-        assert!(is_transient_publish_rename_error(&io::Error::new(
-            io::ErrorKind::Interrupted,
-            "interrupted canary",
-        )));
-        assert!(!is_transient_publish_rename_error(&io::Error::new(
-            io::ErrorKind::AlreadyExists,
-            "deterministic canary",
-        )));
-
-        let permission = io::Error::new(io::ErrorKind::PermissionDenied, "permission canary");
-        #[cfg(windows)]
-        assert!(is_transient_publish_rename_error(&permission));
-        #[cfg(not(windows))]
-        assert!(!is_transient_publish_rename_error(&permission));
     }
 
     #[test]

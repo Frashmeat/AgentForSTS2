@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -30,10 +31,36 @@ function configuredPath(envName, fallback, configKey) {
   return resolveExistingFile(value, envName);
 }
 
+async function resolvePinnedBaseLib() {
+  const expectedSha256 = "e92213e9286cb8cb9db42b83735cc9ddc2d642a7c90c67c5350c983d734407a8";
+  const explicit = process.env.ATS_E2E_BASELIB_PATH;
+  const candidates = [];
+  if (explicit) candidates.push(resolveExistingFile(explicit, "ATS_E2E_BASELIB_PATH"));
+  const snapshotsRoot = path.join(repoRoot, "runtime", "game-packs", "sts2", "snapshots");
+  if (fs.statSync(snapshotsRoot, { throwIfNoEntry: false })?.isDirectory()) {
+    for (const snapshotId of await fsp.readdir(snapshotsRoot)) {
+      candidates.push(path.join(snapshotsRoot, snapshotId, "sources", "baselib", "source.bin"));
+    }
+  }
+  for (const candidate of candidates) {
+    if (!fs.statSync(candidate, { throwIfNoEntry: false })?.isFile()) continue;
+    const digest = createHash("sha256").update(await fsp.readFile(candidate)).digest("hex");
+    if (digest === expectedSha256) return candidate;
+  }
+  throw new Error("ATS_E2E_BASELIB_PATH or a pinned local BaseLib v3.3.8 source is required");
+}
+
 function assertInsideRoot(root, candidate, label) {
   const relative = path.relative(root, candidate);
   if (relative.startsWith("..") || path.isAbsolute(relative)) {
     throw new Error(`${label} must stay inside the E2E root: ${candidate}`);
+  }
+}
+
+function assertOutsideRoot(root, candidate, label) {
+  const relative = path.relative(root, candidate);
+  if (!relative.startsWith("..") && !path.isAbsolute(relative)) {
+    throw new Error(`${label} must stay outside the repository: ${candidate}`);
   }
 }
 
@@ -55,12 +82,12 @@ function runNpm(script, env) {
   }
 }
 
-function startOpenAiStub(e2eRoot) {
+function startOpenAiStub(e2eRoot, baseLibPath) {
   const stubPath = path.join(repoRoot, "scripts", "e2e", "openai-stub.mjs");
   return new Promise((resolve, reject) => {
     const stub = spawn(process.execPath, [stubPath], {
       cwd: repoRoot,
-      env: { ...process.env, ATS_E2E_ROOT: e2eRoot },
+      env: { ...process.env, ATS_E2E_ROOT: e2eRoot, ATS_E2E_BASELIB_PATH: baseLibPath },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -100,11 +127,14 @@ const sts2Path = configuredPath(
   localConfig.knowledge?.sts2_dll_path,
   "knowledge.sts2_dll_path",
 );
+const baseLibPath = await resolvePinnedBaseLib();
 const e2eRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "ats-gui-e2e-"));
 const configPath = path.join(e2eRoot, "config.json");
 const appDataRoot = path.join(e2eRoot, "app-data");
 const projectsRoot = path.join(e2eRoot, "projects");
 const modsRoot = path.join(e2eRoot, "mods");
+
+assertOutsideRoot(repoRoot, e2eRoot, "E2E root");
 
 for (const [label, candidate] of [
   ["config", configPath],
@@ -122,7 +152,7 @@ await fsp.mkdir(modsRoot, { recursive: true });
 let passed = false;
 let stubProcess;
 try {
-  const stub = await startOpenAiStub(e2eRoot);
+  const stub = await startOpenAiStub(e2eRoot, baseLibPath);
   stubProcess = stub.process;
   await fsp.writeFile(
     configPath,

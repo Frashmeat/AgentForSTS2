@@ -549,7 +549,7 @@ mod tests {
                   "package_layout": {
                     "required_files": [
                       "runtime/core.bin",
-                      "{mod_id}/{mod_id}.dll"
+                      "payload/{mod_id}.bundle"
                     ]
                   }
                 }"#,
@@ -571,9 +571,13 @@ mod tests {
 
     fn populate_sample_tree(root: &Path) {
         std::fs::create_dir_all(root.join("runtime")).unwrap();
-        std::fs::create_dir_all(root.join(MOD_ID)).unwrap();
+        std::fs::create_dir_all(root.join("payload")).unwrap();
         std::fs::write(root.join("runtime/core.bin"), b"core").unwrap();
-        std::fs::write(root.join(MOD_ID).join(format!("{MOD_ID}.dll")), b"mod").unwrap();
+        std::fs::write(
+            root.join("payload").join(format!("{MOD_ID}.bundle")),
+            b"mod",
+        )
+        .unwrap();
         std::fs::write(root.join("not-declared.txt"), b"must not ship").unwrap();
     }
 
@@ -657,7 +661,7 @@ mod tests {
         let entries = list_zip_entries(&out);
         assert_eq!(
             entries,
-            vec!["runtime/core.bin", "FixtureMod/FixtureMod.dll"]
+            vec!["runtime/core.bin", "payload/FixtureMod.bundle"]
         );
     }
 

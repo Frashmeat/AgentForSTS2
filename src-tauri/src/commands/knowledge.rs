@@ -42,7 +42,7 @@ async fn status(
             )
         })?
         .clone();
-    let store = TruthSnapshotStore::new(&config.status_snapshot().runtime_dir(), &pack);
+    let store = TruthSnapshotStore::new(&config.runtime_dir(), &pack);
     tokio::task::spawn_blocking(move || inspect_truth_snapshot(&pack, &store))
         .await
         .map_err(|_| CommandFailure::unclassified("truth_snapshot.worker"))

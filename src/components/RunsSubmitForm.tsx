@@ -83,7 +83,7 @@ export function RunsSubmitForm({ onSubmitted, onError }: Props) {
       onError(localValidationFailure("runs.submit", message));
     if (submitKind === "text_generate" && !prompt.trim()) { invalid("Prompt 不能为空。"); return; }
     if ((submitKind === "code_generate_asset" || submitKind === "code_generate_custom") && (!customName.trim() || !customDescription.trim())) { invalid("Name 和 description 不能为空。"); return; }
-    if (submitKind === "asset_generate" && (!imagePrompt.trim() || !assetName.trim() || !designDescription.trim())) { invalid("Image prompt、asset name 和 design description 不能为空。"); return; }
+    if (submitKind === "asset_generate" && (!assetName.trim() || !designDescription.trim())) { invalid("Asset name 和 design description 不能为空。"); return; }
     if (submitKind === "batch_custom_code") {
       let items: unknown[];
       try { items = JSON.parse(batchItemsJson); } catch { invalid("Batch items JSON 格式错误。"); return; }
@@ -221,6 +221,7 @@ export function RunsSubmitForm({ onSubmitted, onError }: Props) {
               <select
                 value={assetType}
                 onChange={(e) => setAssetType(e.target.value)}
+                data-testid="run-asset-type"
               >
                 {["card", "card_fullscreen", "relic", "power", "character"].map(
                   (t) => (
@@ -235,6 +236,7 @@ export function RunsSubmitForm({ onSubmitted, onError }: Props) {
               <input
                 value={assetName}
                 onChange={(e) => setAssetName(e.target.value)}
+                data-testid="run-asset-name"
               />
             </Field>
           </FieldRow>
@@ -244,6 +246,7 @@ export function RunsSubmitForm({ onSubmitted, onError }: Props) {
               onChange={(e) => setAssetProjectRoot(e.target.value)}
               placeholder="E:/mods/demo_mod"
               className="input-mono"
+              data-testid="run-asset-project-root"
             />
           </Field>
           <Field label="design description">
@@ -251,6 +254,7 @@ export function RunsSubmitForm({ onSubmitted, onError }: Props) {
               value={designDescription}
               onChange={(e) => setDesignDescription(e.target.value)}
               rows={2}
+              data-testid="run-asset-description"
             />
           </Field>
           {submitKind === "asset_generate" && (
@@ -262,6 +266,7 @@ export function RunsSubmitForm({ onSubmitted, onError }: Props) {
                 value={imagePrompt}
                 onChange={(e) => setImagePrompt(e.target.value)}
                 rows={2}
+                data-testid="run-asset-image-prompt"
               />
             </Field>
           )}

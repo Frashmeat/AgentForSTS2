@@ -66,6 +66,9 @@ Unknown errors use the fixed `core.unclassified` code/message/action and a gener
 | Package path escape/missing file | stable `package.*` | Only safe project-relative path context |
 | Artifact source/path/manifest is invalid | `artifact.path_invalid`, `artifact.snapshot_exists`, or `artifact.manifest_invalid` | No absolute path or raw manifest error |
 | Artifact publish I/O fails after bounded retry | `artifact.publish_failed` plus `diagnostic.ioKind` | No raw path/OS message; Windows sharing conflicts remain retryable |
+| Generated asset fails `dotnet build` | `artifact.compile_failed` plus Run diagnostic ID | Generated bundle and bounded redacted compile output stay only under `.ats/diagnostics/<run-id>/` |
+| Asset compile process/output is unavailable | `artifact.compile_unavailable` plus `diagnostic.ioKind` when known | No command error text or absolute path crosses Run/IPC |
+| Truth Snapshot runtime is locked or not writable | `truth_snapshot.storage_locked` plus `diagnostic.ioKind=permission_denied` | Persistent watcher conflicts are non-retryable until the runtime owner is released |
 | Filesystem failure | domain code plus optional `diagnostic.ioKind` | No absolute user path |
 | Project closing/drain timeout | stable `project.*` | At most one bounded blocking Run ID |
 | Unknown backend error | `core.unclassified` | Fixed text; no unknown `Display` |
@@ -80,6 +83,7 @@ Unknown errors use the fixed `core.unclassified` code/message/action and a gener
 - Base: a user cancels during a child process; cleanup finishes and the Run becomes `cancelled` with no failure.
 - Bad: `anyhow`, SDK, reqwest, IO, or serde error text is returned through `CommandFailure` or persisted directly.
 - Bad: an artifact handler discards `ArtifactError` and substitutes `core.unclassified`.
+- Bad: a compile failure discards stdout/stderr and generated source, or copies either into RunRecord/IPC.
 - Bad: React converts a rejected object with `String(error)` and displays its token/path canary.
 
 ## Required Tests

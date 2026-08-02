@@ -1,0 +1,44 @@
+{
+  "id": "stage2-readiness-stabilization",
+  "name": "stage2-readiness-stabilization",
+  "title": "Stage 2 开工前稳定化与可观测性收口",
+  "description": "",
+  "status": "completed",
+  "dev_type": "backend",
+  "scope": "backend",
+  "priority": "P2",
+  "creator": "codex-agent",
+  "assignee": "codex-agent",
+  "createdAt": "2026-08-02",
+  "completedAt": "2026-08-02",
+  "branch": "rust",
+  "base_branch": "rust",
+  "worktree_path": null,
+  "current_phase": 3,
+  "next_action": [
+    {
+      "phase": 1,
+      "action": "implement"
+    },
+    {
+      "phase": 2,
+      "action": "check"
+    },
+    {
+      "phase": 3,
+      "action": "finish"
+    },
+    {
+      "phase": 4,
+      "action": "create-pr"
+    }
+  ],
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "2026-08-02 Stage 2 readiness gate 已完成并由用户确认：compile failure run-scoped typed/redacted diagnostics、Truth Snapshot OS app-data 隔离、Run UI 终态轮询、Pack-neutral package fixture 和 STS2 耦合库存均已收口。GUI E2E 5/5、workspace test/clippy/check、frontend tests/typecheck/build 与定向回归全部通过；未重建 release candidate，未推送或变基。",
+  "meta": {}
+}

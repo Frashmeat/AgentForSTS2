@@ -11,13 +11,93 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::{fs as std_fs, io::Write};
+use std::thread;
+use std::time::Duration;
+use std::{fs as std_fs, io, io::Write};
 
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 
 /// 进程内单调计数器，保证并发写同一目标时临时文件名不撞。
 static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+pub(crate) const RENAME_RETRY_DELAYS: [Duration; 5] = [
+    Duration::from_millis(50),
+    Duration::from_millis(100),
+    Duration::from_millis(200),
+    Duration::from_millis(400),
+    Duration::from_millis(800),
+];
+
+/// Rename within one filesystem, retrying only bounded transient Windows conflicts.
+///
+/// Callers retain ownership of rollback and cleanup when the final attempt fails.
+pub(crate) fn rename_with_retry(
+    source: &Path,
+    destination: &Path,
+    operation: &'static str,
+) -> io::Result<()> {
+    rename_with_retry_with(
+        source,
+        destination,
+        operation,
+        |from, to| std_fs::rename(from, to),
+        thread::sleep,
+        is_transient_rename_error,
+    )
+}
+
+pub(crate) fn rename_with_retry_with<R, S, C>(
+    source: &Path,
+    destination: &Path,
+    operation: &'static str,
+    mut rename: R,
+    mut sleep: S,
+    is_retryable: C,
+) -> io::Result<()>
+where
+    R: FnMut(&Path, &Path) -> io::Result<()>,
+    S: FnMut(Duration),
+    C: Fn(&io::Error) -> bool,
+{
+    let mut attempt = 1_u8;
+    loop {
+        match rename(source, destination) {
+            Ok(()) => return Ok(()),
+            Err(error)
+                if is_retryable(&error) && usize::from(attempt) <= RENAME_RETRY_DELAYS.len() =>
+            {
+                let delay = RENAME_RETRY_DELAYS[usize::from(attempt) - 1];
+                tracing::warn!(
+                    operation,
+                    attempt,
+                    next_attempt = attempt + 1,
+                    delay_ms = delay.as_millis(),
+                    io_kind = ?error.kind(),
+                    "atomic directory rename was temporarily unavailable; retrying"
+                );
+                sleep(delay);
+                attempt += 1;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+pub(crate) fn is_transient_rename_error(error: &io::Error) -> bool {
+    if error.kind() == io::ErrorKind::Interrupted {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        error.kind() == io::ErrorKind::PermissionDenied
+            || matches!(error.raw_os_error(), Some(5 | 32 | 33))
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
 
 /// 原子写 `bytes` 到 `path`：写同目录唯一临时文件 → flush → rename。
 ///
@@ -144,5 +224,122 @@ mod tests {
         write_atomic_sync(&path, b"v1").unwrap();
         write_atomic_sync(&path, b"v2").unwrap();
         assert_eq!(std_fs::read(&path).unwrap(), b"v2");
+    }
+
+    #[test]
+    fn rename_retries_transient_conflicts_then_succeeds() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let source = temp.path().join("source");
+        let destination = temp.path().join("destination");
+        std_fs::create_dir(&source).unwrap();
+        std_fs::write(source.join("complete.txt"), b"complete").unwrap();
+        let mut attempts = 0_u8;
+        let mut delays = Vec::new();
+
+        rename_with_retry_with(
+            &source,
+            &destination,
+            "test_rename",
+            |from, to| {
+                attempts += 1;
+                if attempts <= 2 {
+                    Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "sharing violation canary",
+                    ))
+                } else {
+                    std_fs::rename(from, to)
+                }
+            },
+            |delay| delays.push(delay),
+            |error| error.kind() == io::ErrorKind::PermissionDenied,
+        )
+        .unwrap();
+
+        assert_eq!(attempts, 3);
+        assert_eq!(delays, RENAME_RETRY_DELAYS[..2]);
+        assert!(!source.exists());
+        assert_eq!(
+            std_fs::read(destination.join("complete.txt")).unwrap(),
+            b"complete"
+        );
+    }
+
+    #[test]
+    fn rename_exhausts_bounded_attempts() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let source = temp.path().join("source");
+        let destination = temp.path().join("destination");
+        std_fs::create_dir(&source).unwrap();
+        let mut attempts = 0_u8;
+
+        let error = rename_with_retry_with(
+            &source,
+            &destination,
+            "test_rename",
+            |_, _| {
+                attempts += 1;
+                Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "sharing violation canary",
+                ))
+            },
+            |_| {},
+            |_| true,
+        )
+        .unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(usize::from(attempts), RENAME_RETRY_DELAYS.len() + 1);
+        assert!(source.exists());
+        assert!(!destination.exists());
+    }
+
+    #[test]
+    fn rename_does_not_retry_deterministic_errors() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let source = temp.path().join("source");
+        let destination = temp.path().join("destination");
+        std_fs::create_dir(&source).unwrap();
+        let mut attempts = 0_u8;
+        let mut sleeps = 0_u8;
+
+        let error = rename_with_retry_with(
+            &source,
+            &destination,
+            "test_rename",
+            |_, _| {
+                attempts += 1;
+                Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "deterministic canary",
+                ))
+            },
+            |_| sleeps += 1,
+            |_| false,
+        )
+        .unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(attempts, 1);
+        assert_eq!(sleeps, 0);
+    }
+
+    #[test]
+    fn rename_classifier_is_platform_bounded() {
+        assert!(is_transient_rename_error(&io::Error::new(
+            io::ErrorKind::Interrupted,
+            "interrupted canary",
+        )));
+        assert!(!is_transient_rename_error(&io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "deterministic canary",
+        )));
+
+        let permission = io::Error::new(io::ErrorKind::PermissionDenied, "permission canary");
+        #[cfg(windows)]
+        assert!(is_transient_rename_error(&permission));
+        #[cfg(not(windows))]
+        assert!(!is_transient_rename_error(&permission));
     }
 }

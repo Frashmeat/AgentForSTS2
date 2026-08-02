@@ -3,9 +3,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use futures_util::StreamExt;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-use super::asset_compile::AssetCompileValidator;
+use super::asset_compile::{
+    ASSET_COMPILE_DIAGNOSTIC_SCHEMA_VERSION, AssetCompileError, AssetCompileValidator,
+    sanitize_compile_output,
+};
 use super::code_generate::{
     extract_first_code_block, sanitize_entity_name, validate_generated_code_skein,
 };
@@ -13,6 +16,7 @@ use super::common::{ProgressEvent, ProgressSink};
 use crate::codegen::{
     AssetCodegenRequest, asset_localization_key_segment, validate_localization_rich_text,
 };
+use crate::failure::FailureIoKind;
 use crate::game_pack::{
     AssetResourceSpec, LoadedGamePack, ResourceImageRole, ResourceImageTransform, ValidationRule,
 };
@@ -132,6 +136,11 @@ impl AssetBundleGeneration {
         let cs_path = planned.cs_path.clone();
         let localization_paths = planned.localization_paths.clone();
         let runtime_image_paths = planned.runtime_image_paths.clone();
+        let diagnostic_bundle_paths = planned
+            .writes
+            .iter()
+            .map(|write| write.path.clone())
+            .collect::<Vec<_>>();
         let transaction = ProjectFileTransaction::apply(planned.writes)
             .await
             .map_err(|_| AssetBundleError::Write)?;
@@ -156,10 +165,28 @@ impl AssetBundleGeneration {
             }
             return Err(AssetBundleError::Cancelled);
         }
-        if compile.is_err() {
+        if let Err(error) = compile {
+            if matches!(error, AssetCompileError::Cancelled) {
+                return match transaction.rollback().await {
+                    Ok(()) => Err(AssetBundleError::Cancelled),
+                    Err(_) => Err(AssetBundleError::Write),
+                };
+            }
+            let diagnostics = write_compile_diagnostics(
+                &request.project_root,
+                run_id,
+                &diagnostic_bundle_paths,
+                &error,
+            )
+            .await;
             let rollback = transaction.rollback().await;
-            let _ = rollback;
-            return Err(AssetBundleError::Compile);
+            if diagnostics.is_err() {
+                return Err(AssetBundleError::Diagnostics);
+            }
+            if rollback.is_err() {
+                return Err(AssetBundleError::Write);
+            }
+            return Err(AssetBundleError::Compile(error));
         }
         Ok(WrittenAssetBundle {
             model: final_model,
@@ -266,8 +293,151 @@ pub(crate) enum AssetBundleError {
     Stream(LlmError),
     ModelOutput,
     Write,
-    Compile,
+    Compile(AssetCompileError),
+    Diagnostics,
     Cancelled,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AssetCompileDiagnostic {
+    schema_version: u32,
+    tool: &'static str,
+    arguments: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    operation: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    io_kind: Option<FailureIoKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    exit_code: Option<i32>,
+    stdout_tail: String,
+    stderr_tail: String,
+    generated_files: Vec<String>,
+}
+
+async fn write_compile_diagnostics(
+    project_root: &Path,
+    run_id: &RunId,
+    generated_paths: &[PathBuf],
+    error: &AssetCompileError,
+) -> Result<(), String> {
+    let target_root = project_root
+        .join(".ats")
+        .join("diagnostics")
+        .join(&run_id.0);
+    let result =
+        write_compile_diagnostics_inner(project_root, &target_root, generated_paths, error).await;
+    if result.is_err() {
+        let _ = tokio::fs::remove_dir_all(target_root.join("generated")).await;
+        let _ = tokio::fs::remove_file(target_root.join("asset-compile.json")).await;
+        let _ = tokio::fs::remove_dir(&target_root).await;
+    }
+    result
+}
+
+async fn write_compile_diagnostics_inner(
+    project_root: &Path,
+    target_root: &Path,
+    generated_paths: &[PathBuf],
+    error: &AssetCompileError,
+) -> Result<(), String> {
+    let generated_root = target_root.join("generated");
+    tokio::fs::create_dir_all(&generated_root)
+        .await
+        .map_err(|_| "create compile diagnostic directory".to_string())?;
+
+    let mut generated_files = Vec::with_capacity(generated_paths.len());
+    for source in generated_paths {
+        let relative = diagnostic_relative_path(project_root, source)?;
+        let metadata = tokio::fs::symlink_metadata(source)
+            .await
+            .map_err(|_| "inspect generated diagnostic source".to_string())?;
+        if !metadata.is_file() || metadata.file_type().is_symlink() {
+            return Err("generated diagnostic source is not a regular file".into());
+        }
+        let bytes = tokio::fs::read(source)
+            .await
+            .map_err(|_| "read generated diagnostic source".to_string())?;
+        let destination = generated_root.join(&relative);
+        if let Some(parent) = destination.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|_| "create generated diagnostic parent".to_string())?;
+        }
+        crate::fs_atomic::write_atomic(&destination, &bytes)
+            .await
+            .map_err(|_| "write generated diagnostic source".to_string())?;
+        generated_files.push(path_to_forward_slashes(&relative)?);
+    }
+    generated_files.sort();
+
+    let (operation, io_kind, exit_code, stdout_tail, stderr_tail) = match error {
+        AssetCompileError::Rejected(report) => (
+            None,
+            None,
+            Some(report.exit_code),
+            sanitize_compile_output(project_root, &report.stdout_tail),
+            sanitize_compile_output(project_root, &report.stderr_tail),
+        ),
+        AssetCompileError::Io { operation, kind } => (
+            Some(operation.as_str()),
+            Some(FailureIoKind::from(*kind)),
+            None,
+            String::new(),
+            String::new(),
+        ),
+        AssetCompileError::Cancelled => {
+            return Err("cancelled compile has no failure diagnostic".into());
+        }
+    };
+    let diagnostic = AssetCompileDiagnostic {
+        schema_version: ASSET_COMPILE_DIAGNOSTIC_SCHEMA_VERSION,
+        tool: "dotnet",
+        arguments: vec![
+            "build".into(),
+            "--nologo".into(),
+            "-p:ModsPath=<project>/.ats/compile-gate/<run-id>/".into(),
+        ],
+        operation,
+        io_kind,
+        exit_code,
+        stdout_tail,
+        stderr_tail,
+        generated_files,
+    };
+    let mut bytes = serde_json::to_vec_pretty(&diagnostic)
+        .map_err(|_| "serialize compile diagnostic".to_string())?;
+    bytes.push(b'\n');
+    crate::fs_atomic::write_atomic(&target_root.join("asset-compile.json"), &bytes)
+        .await
+        .map_err(|_| "write compile diagnostic report".to_string())
+}
+
+fn diagnostic_relative_path(project_root: &Path, path: &Path) -> Result<PathBuf, String> {
+    let relative = path
+        .strip_prefix(project_root)
+        .map_err(|_| "generated diagnostic path is outside the project".to_string())?;
+    if relative.as_os_str().is_empty()
+        || relative
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err("generated diagnostic path is unsafe".into());
+    }
+    Ok(relative.to_path_buf())
+}
+
+fn path_to_forward_slashes(path: &Path) -> Result<String, String> {
+    path.components()
+        .map(|component| match component {
+            std::path::Component::Normal(value) => value
+                .to_str()
+                .map(str::to_owned)
+                .ok_or_else(|| "generated diagnostic path is not UTF-8".to_string()),
+            _ => Err("generated diagnostic path is unsafe".to_string()),
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(|parts| parts.join("/"))
 }
 
 struct RawCompletion {
@@ -740,6 +910,7 @@ impl ProjectFileTransaction {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::platform::application::handlers::asset_compile::CompileValidation;
 
     fn sts2_pack() -> LoadedGamePack {
         crate::game_pack::GamePackRegistry::built_in()
@@ -964,6 +1135,39 @@ mod tests {
         transaction.rollback().await.unwrap();
         assert_eq!(tokio::fs::read(old).await.unwrap(), b"old");
         assert!(!new.exists());
+    }
+
+    #[tokio::test]
+    async fn failed_compile_diagnostic_write_preserves_existing_run_diagnostics() {
+        let td = tempfile::TempDir::new().unwrap();
+        let run_id = RunId("run-diagnostic-cleanup".into());
+        let diagnostics = td.path().join(".ats/diagnostics").join(&run_id.0);
+        tokio::fs::create_dir_all(&diagnostics).await.unwrap();
+        let existing = diagnostics.join("source-image.png");
+        tokio::fs::write(&existing, b"existing evidence")
+            .await
+            .unwrap();
+
+        let error = write_compile_diagnostics(
+            td.path(),
+            &run_id,
+            &[td.path().join("Generated/missing.cs")],
+            &AssetCompileError::Rejected(CompileValidation {
+                exit_code: 1,
+                stdout_tail: String::new(),
+                stderr_tail: String::new(),
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error, "inspect generated diagnostic source");
+        assert_eq!(
+            tokio::fs::read(existing).await.unwrap(),
+            b"existing evidence"
+        );
+        assert!(!diagnostics.join("generated").exists());
+        assert!(!diagnostics.join("asset-compile.json").exists());
     }
 
     #[test]

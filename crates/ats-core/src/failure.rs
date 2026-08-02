@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 
+use crate::game_pack::{TruthSnapshotError, TruthSnapshotRefreshError};
 use crate::image_gen::ImageGenError;
 use crate::image_proc::ImageProcError;
 use crate::llm::LlmError;
@@ -658,6 +659,80 @@ impl FailureNormalizer {
     }
 
     #[must_use]
+    pub fn truth_snapshot(stage: &str, error: &TruthSnapshotRefreshError) -> ActionableFailure {
+        match error {
+            TruthSnapshotRefreshError::Cancelled => ActionableFailure::interrupted(stage),
+            TruthSnapshotRefreshError::Busy(_) => failure(
+                "truth_snapshot.busy",
+                FailureCategory::State,
+                stage,
+                "A Truth Snapshot refresh is already running for this Game Pack.",
+                RecoveryAction::Retry,
+                true,
+            ),
+            TruthSnapshotRefreshError::MissingLocalInput { .. }
+            | TruthSnapshotRefreshError::LocalInputNotFile { .. } => failure(
+                "truth_snapshot.input_invalid",
+                FailureCategory::Configuration,
+                stage,
+                "A required Truth Snapshot source is missing or invalid.",
+                RecoveryAction::OpenSettings,
+                false,
+            ),
+            TruthSnapshotRefreshError::Fetch { .. } => failure(
+                "truth_snapshot.fetch_failed",
+                FailureCategory::Network,
+                stage,
+                "A declared Truth Snapshot source could not be downloaded.",
+                RecoveryAction::Retry,
+                true,
+            ),
+            TruthSnapshotRefreshError::Index { .. } | TruthSnapshotRefreshError::Tool(_) => {
+                failure(
+                    "truth_snapshot.index_failed",
+                    FailureCategory::Toolchain,
+                    stage,
+                    "A Truth Snapshot source could not be indexed. Check the local indexer and source.",
+                    RecoveryAction::InstallDependency,
+                    false,
+                )
+            }
+            TruthSnapshotRefreshError::Worker(_) => ActionableFailure::unclassified(stage),
+            TruthSnapshotRefreshError::Snapshot(TruthSnapshotError::Io { source, .. })
+            | TruthSnapshotRefreshError::Io { source, .. } => {
+                let locked = source.kind() == std::io::ErrorKind::PermissionDenied;
+                let mut normalized = io_failure(
+                    if locked {
+                        "truth_snapshot.storage_locked"
+                    } else {
+                        "truth_snapshot.storage_failed"
+                    },
+                    stage,
+                    if locked {
+                        "Truth Snapshot storage is locked or not writable. Close tools watching the runtime directory and retry."
+                    } else {
+                        "Truth Snapshot storage could not be read or updated."
+                    },
+                    source,
+                );
+                if locked {
+                    normalized.action = RecoveryAction::CheckPath;
+                    normalized.retryable = false;
+                }
+                normalized
+            }
+            TruthSnapshotRefreshError::Snapshot(_) => failure(
+                "truth_snapshot.invalid",
+                FailureCategory::Validation,
+                stage,
+                "The refreshed Truth Snapshot did not satisfy its integrity contract.",
+                RecoveryAction::Retry,
+                false,
+            ),
+        }
+    }
+
+    #[must_use]
     pub fn toolchain(stage: &str, error: &GodotValidationError) -> ActionableFailure {
         match error {
             GodotValidationError::NotAFile(_) => failure(
@@ -1088,6 +1163,29 @@ mod tests {
         assert_eq!(failure.action, RecoveryAction::CheckPath);
         assert!(!failure.retryable);
         assert!(!serialized.contains("private"));
+    }
+
+    #[test]
+    fn truth_snapshot_lock_is_typed_and_redacted() {
+        let canary = "C:\\Users\\private\\runtime\\game-packs\\fixture";
+        let error = TruthSnapshotRefreshError::Io {
+            action: "activate immutable truth snapshot directory",
+            path: Path::new(canary).to_path_buf(),
+            source: std::io::Error::new(std::io::ErrorKind::PermissionDenied, canary),
+        };
+        let failure = FailureNormalizer::truth_snapshot("truth_snapshot.refresh", &error);
+        let serialized = serde_json::to_string(&failure).unwrap();
+
+        assert_eq!(failure.code, "truth_snapshot.storage_locked");
+        assert_eq!(failure.category, FailureCategory::Filesystem);
+        assert_eq!(failure.action, RecoveryAction::CheckPath);
+        assert!(!failure.retryable);
+        assert_eq!(
+            failure.diagnostic.unwrap().io_kind,
+            Some(FailureIoKind::PermissionDenied)
+        );
+        assert!(!serialized.contains("private"));
+        assert!(!serialized.contains("game-packs"));
     }
 
     #[test]

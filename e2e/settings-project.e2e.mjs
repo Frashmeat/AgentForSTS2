@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -39,81 +40,60 @@ const selectValue = async (testId, value) => {
   assert.equal(selected, value, `${testId} did not select ${value}`);
 };
 
-const waitForJob = async (kind, status, timeout = 180_000) => {
-  await browser.waitUntil(
-    async () => browser.execute((expectedKind, expectedStatus) => Array.from(
-      document.querySelectorAll('[data-testid="job-row"]'),
-    ).some((row) => row.getAttribute("data-job-kind") === expectedKind
-      && row.getAttribute("data-job-status") === expectedStatus), kind, status),
-    { timeout, timeoutMsg: `${kind} did not reach ${status}` },
-  );
-};
-
 const setChecked = async (testId, checked) => {
   const element = await $(`[data-testid="${testId}"]`);
   if ((await element.isSelected()) !== checked) await element.click();
   assert.equal(await element.isSelected(), checked, `${testId} did not change checked state`);
 };
 
-const listedJobIds = async (kind) => browser.execute((expectedKind) => Array.from(
-  document.querySelectorAll('[data-testid="job-row"]'),
-).filter((row) => row.getAttribute("data-job-kind") === expectedKind)
-  .map((row) => row.getAttribute("data-job-id"))
+const listedRunIds = async (kind) => browser.execute((expectedKind) => Array.from(
+  document.querySelectorAll('[data-testid="run-row"]'),
+).filter((row) => row.getAttribute("data-run-kind") === expectedKind)
+  .map((row) => row.getAttribute("data-run-id"))
   .filter(Boolean), kind);
 
-const waitForNewJob = async (kind, status, previousIds, timeout = 240_000) => {
-  let jobId = null;
+const waitForNewRun = async (kind, status, previousIds, timeout = 240_000) => {
+  let runId = null;
   await browser.waitUntil(
     async () => browser.execute((expectedKind, expectedStatus, oldIds) => {
-      const row = Array.from(document.querySelectorAll('[data-testid="job-row"]')).find(
-        (candidate) => candidate.getAttribute("data-job-kind") === expectedKind
-          && candidate.getAttribute("data-job-status") === expectedStatus
-          && !oldIds.includes(candidate.getAttribute("data-job-id")),
+      const row = Array.from(document.querySelectorAll('[data-testid="run-row"]')).find(
+        (candidate) => candidate.getAttribute("data-run-kind") === expectedKind
+          && candidate.getAttribute("data-run-status") === expectedStatus
+          && !oldIds.includes(candidate.getAttribute("data-run-id")),
       );
-      return row?.getAttribute("data-job-id") ?? null;
+      return row?.getAttribute("data-run-id") ?? null;
     }, kind, status, previousIds).then((id) => {
-      jobId = id;
+      runId = id;
       return Boolean(id);
     }),
-    { timeout, timeoutMsg: `new ${kind} job did not reach ${status}` },
+    { timeout, timeoutMsg: `new ${kind} run did not reach ${status}` },
   );
-  return jobId;
+  return runId;
 };
 
-const openJobResult = async (jobId) => {
+const openRunResult = async (runId) => {
   const clicked = await browser.execute((expectedId) => {
-    const row = Array.from(document.querySelectorAll('[data-testid="job-row"]')).find(
-      (candidate) => candidate.getAttribute("data-job-id") === expectedId,
+    const row = Array.from(document.querySelectorAll('[data-testid="run-row"]')).find(
+      (candidate) => candidate.getAttribute("data-run-id") === expectedId,
     );
     const button = row?.querySelector("button");
     button?.click();
     return Boolean(button);
-  }, jobId);
-  assert.equal(clicked, true, `job row ${jobId} was not clickable`);
+  }, runId);
+  assert.equal(clicked, true, `run row ${runId} was not clickable`);
   await browser.waitUntil(
     async () => browser.execute((expectedId) => (
-      document.querySelector('[data-testid="job-detail"]')?.getAttribute("data-job-id")
+      document.querySelector('[data-testid="run-detail"]')?.getAttribute("data-run-id")
         === expectedId
-    ), jobId),
-    { timeout: 15_000, timeoutMsg: `job detail ${jobId} did not open` },
+    ), runId),
+    { timeout: 15_000, timeoutMsg: `run detail ${runId} did not open` },
   );
-  return JSON.parse(await $('[data-testid="job-detail-result"]').getText());
+  return JSON.parse(await $('[data-testid="run-detail-result"]').getText());
 };
 
-const countFilesWithExtension = async (root, extension) => {
-  let count = 0;
-  const pending = [root];
-  while (pending.length > 0) {
-    const current = pending.pop();
-    const entries = await fs.readdir(current, { withFileTypes: true });
-    for (const entry of entries) {
-      const entryPath = path.join(current, entry.name);
-      if (entry.isDirectory()) pending.push(entryPath);
-      else if (entry.isFile() && path.extname(entry.name).toLowerCase() === extension) count += 1;
-    }
-  }
-  return count;
-};
+const sha256File = async (filePath) => createHash("sha256")
+  .update(await fs.readFile(filePath))
+  .digest("hex");
 
 describe("Godot toolchain settings and project creation", () => {
   it("rejects an invalid Godot path, persists 4.5.1, and synchronizes local.props", async () => {
@@ -132,7 +112,7 @@ describe("Godot toolchain settings and project creation", () => {
     await $('[data-testid="settings-save"]').click();
     const error = await $('[data-testid="settings-error"]');
     await error.waitForDisplayed();
-    assert.match(await error.getText(), /not a file/i);
+    assert.match(await error.getText(), /not (?:a file|found)/i);
 
     const validGodotInput = await $('[data-testid="godot-exe-path"]');
     await validGodotInput.setValue(godotPath);
@@ -162,6 +142,87 @@ describe("Godot toolchain settings and project creation", () => {
     assert.equal(recents.items[0].path, projectRoot);
     const localProps = await fs.readFile(path.join(projectRoot, "local.props"), "utf8");
     assert.match(localProps, /<GodotPath>[^<]*Godot_v4\.5\.1[^<]*<\/GodotPath>/);
+  });
+
+  it("refreshes Truth Snapshot under app-data outside the workspace", async () => {
+    const appDataRoot = requiredEnv("SPIREFORGE_APP_DATA_ROOT");
+
+    await navigate("/system?tab=ops");
+    await waitForTestId("run-kind");
+    await selectValue("run-kind", "truth_snapshot_refresh");
+    await setChecked("run-truth-snapshot-force", true);
+    const previousIds = await listedRunIds("truth_snapshot_refresh");
+    await $('[data-testid="run-submit"]').click();
+    const runId = await waitForNewRun("truth_snapshot_refresh", "succeeded", previousIds);
+    const result = await openRunResult(runId);
+    assert.equal(result.kind, "truth_snapshot_refresh");
+    assert.equal(result.gamePackId, "sts2");
+    assert.equal(result.sourceCount, 2);
+    assert.equal(result.indexCount, 2);
+
+    const storeRoot = path.join(appDataRoot, "game-packs", "sts2");
+    const current = JSON.parse(await fs.readFile(path.join(storeRoot, "current.json"), "utf8"));
+    assert.equal(current.snapshotId, result.snapshotId);
+    await fs.access(path.join(storeRoot, "snapshots", result.snapshotId, "snapshot.json"));
+    const stagingEntries = await fs.readdir(path.join(storeRoot, ".staging"));
+    assert.deepEqual(stagingEntries, []);
+    assert.ok(!storeRoot.includes(path.join("AgentTheSpire", "runtime")));
+  });
+
+  it("publishes a deterministic asset and retains a typed compile-failure diagnostic", async () => {
+    const root = requiredEnv("ATS_E2E_ROOT");
+    const projectRoot = path.join(root, "projects", "E2EMod");
+
+    await navigate("/system?tab=ops");
+    await waitForTestId("run-kind");
+    await selectValue("run-kind", "asset_generate");
+    await selectValue("run-asset-type", "relic");
+    await $('[data-testid="run-asset-name"]').setValue("GuiRelic");
+    await $('[data-testid="run-asset-project-root"]').setValue(projectRoot);
+    await $('[data-testid="run-asset-description"]').setValue("deterministic success fixture");
+    await $('[data-testid="run-asset-image-prompt"]').setValue("");
+    const beforeSuccess = await listedRunIds("asset_generate");
+    await $('[data-testid="run-submit"]').click();
+    const successRunId = await waitForNewRun("asset_generate", "succeeded", beforeSuccess);
+    const success = await openRunResult(successRunId);
+    const manifestPath = path.join(projectRoot, success.artifactManifestRef);
+    assert.equal(await sha256File(manifestPath), success.manifestSha256);
+    const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+    assert.equal(manifest.producingRunId, successRunId);
+    assert.equal(manifest.gameContext.gamePackId, "sts2");
+    const runRoot = path.dirname(manifestPath);
+    for (const file of manifest.files) {
+      const snapshotPath = path.join(runRoot, file.snapshotRelativePath);
+      assert.equal((await fs.stat(snapshotPath)).size, file.byteLength);
+      assert.equal(await sha256File(snapshotPath), file.sha256);
+    }
+    const runsRoot = path.dirname(runRoot);
+    assert.ok(!(await fs.readdir(runsRoot)).some((name) => name.startsWith(".staging-")));
+    await assert.rejects(fs.access(path.join(projectRoot, ".ats", "diagnostics", successRunId)));
+
+    await $('[data-testid="run-asset-name"]').setValue("CompileFailureRelic");
+    await $('[data-testid="run-asset-description"]').setValue("deterministic compile failure fixture");
+    const beforeFailure = await listedRunIds("asset_generate");
+    await $('[data-testid="run-submit"]').click();
+    const failureRunId = await waitForNewRun("asset_generate", "failed", beforeFailure);
+    const failed = await openRunResult(failureRunId);
+    assert.equal(failed.status, "failed");
+    assert.equal(failed.failure.code, "artifact.compile_failed");
+    assert.equal(failed.failure.diagnostic.id, failureRunId);
+
+    const diagnostics = path.join(projectRoot, ".ats", "diagnostics", failureRunId);
+    await fs.access(path.join(diagnostics, "generated", "Generated", "CompileFailureRelic.cs"));
+    const compileReportText = await fs.readFile(path.join(diagnostics, "asset-compile.json"), "utf8");
+    const compileReport = JSON.parse(compileReportText);
+    assert.equal(compileReport.schemaVersion, 1);
+    assert.notEqual(compileReport.exitCode, 0);
+    assert.match(`${compileReport.stdoutTail}\n${compileReport.stderrTail}`, /MissingType|CS0246/);
+    assert.doesNotMatch(compileReportText, /[A-Z]:\\Users\\/i);
+    await assert.rejects(fs.access(path.join(projectRoot, "Generated", "CompileFailureRelic.cs")));
+    await assert.rejects(fs.access(path.join(projectRoot, "artifacts", "CompileFailureRelic", "runs", failureRunId)));
+    const failureRunsRoot = path.join(projectRoot, "artifacts", "CompileFailureRelic", "runs");
+    const failureRunEntries = await fs.readdir(failureRunsRoot).catch(() => []);
+    assert.ok(!failureRunEntries.some((name) => name.startsWith(".staging-")));
   });
 
   it("restores a delayed asset job across routes and completes build/package", async () => {
@@ -200,101 +261,26 @@ describe("Godot toolchain settings and project creation", () => {
     assert.match(syncedProps, /<E2EMarker>preserve-me<\/E2EMarker>/);
 
     await navigate("/system?tab=ops");
-    await waitForTestId("job-kind");
-    await selectValue("job-kind", "build_project");
-    await waitForTestId("job-build-project-root");
-    await $('[data-testid="job-build-project-root"]').setValue(projectRoot);
-    await $('[data-testid="job-submit"]').click();
-    await waitForJob("build_project", "completed");
+    await waitForTestId("run-kind");
+    await selectValue("run-kind", "build_project");
+    await waitForTestId("run-build-project-root");
+    await $('[data-testid="run-build-project-root"]').setValue(projectRoot);
+    const beforeBuild = await listedRunIds("build_project");
+    await $('[data-testid="run-submit"]').click();
+    await waitForNewRun("build_project", "succeeded", beforeBuild);
 
     const builtModRoot = path.join(modsRoot, "E2EMod");
     await fs.access(path.join(builtModRoot, "E2EMod.dll"));
     await fs.access(path.join(builtModRoot, "E2EMod.pck"));
 
-    await selectValue("job-kind", "package_project");
-    await waitForTestId("job-package-source-dir");
-    await $('[data-testid="job-package-source-dir"]').setValue(builtModRoot);
-    await $('[data-testid="job-package-output-path"]').setValue(packagePath);
-    await $('[data-testid="job-submit"]').click();
-    await waitForJob("package_project", "completed");
+    await selectValue("run-kind", "package_project");
+    await waitForTestId("run-package-source-dir");
+    await $('[data-testid="run-package-source-dir"]').setValue(modsRoot);
+    await $('[data-testid="run-package-output-path"]').setValue(packagePath);
+    const beforePackage = await listedRunIds("package_project");
+    await $('[data-testid="run-submit"]').click();
+    await waitForNewRun("package_project", "succeeded", beforePackage);
     await fs.access(packagePath);
-  });
-
-  it("refreshes the complete knowledge source and exposes actionable BaseLib auth errors", async () => {
-    const root = requiredEnv("ATS_E2E_ROOT");
-    const configPath = requiredEnv("SPIREFORGE_CONFIG_PATH");
-    const sts2DllPath = requiredEnv("ATS_E2E_STS2_DLL_PATH");
-
-    await navigate("/system?tab=ops");
-    await waitForTestId("job-kind");
-    await selectValue("job-kind", "knowledge_refresh");
-    await waitForTestId("job-knowledge-dll-path");
-    await $('[data-testid="job-knowledge-dll-path"]').setValue(sts2DllPath);
-    await setChecked("job-knowledge-force", true);
-    const beforeRefresh = await listedJobIds("knowledge_refresh");
-    await $('[data-testid="job-submit"]').click();
-    const refreshJobId = await waitForNewJob(
-      "knowledge_refresh",
-      "completed",
-      beforeRefresh,
-    );
-    const refreshResult = await openJobResult(refreshJobId);
-    assert.equal(refreshResult.baselibIncluded, false);
-    assert.equal(refreshResult.gameCacheHit, false);
-    assert.ok(refreshResult.gameCsFileCount > 2_000);
-
-    const knowledgeRoot = path.join(root, "knowledge");
-    const manifest = JSON.parse(await fs.readFile(
-      path.join(knowledgeRoot, "knowledge-manifest.json"),
-      "utf8",
-    ));
-    const actualCsFiles = await countFilesWithExtension(path.join(knowledgeRoot, "game"), ".cs");
-    assert.equal(actualCsFiles, manifest.game.csFileCount);
-    assert.equal(actualCsFiles, refreshResult.gameCsFileCount);
-    await fs.access(path.join(
-      knowledgeRoot,
-      "game",
-      "MegaCrit.Sts2.Core.Nodes.Screens.Settings",
-      "NSettingsScreen.cs",
-    ));
-
-    for (const scenario of [
-      {
-        token: "e2e-401",
-        status: 401,
-        expected: /invalid or expired.*runtime\.workstation\.github_token/i,
-      },
-      {
-        token: "e2e-403",
-        status: 403,
-        expected: /rate limit.*valid GitHub token/i,
-      },
-    ]) {
-      await navigate("/system?tab=config");
-      await waitForTestId("github-token");
-      await $('[data-testid="github-token"]').setValue(scenario.token);
-      await $('[data-testid="settings-save"]').click();
-      await browser.waitUntil(async () => {
-        const persisted = JSON.parse(await fs.readFile(configPath, "utf8"));
-        return persisted.runtime?.workstation?.github_token === scenario.token;
-      }, { timeout: 15_000, timeoutMsg: `GitHub token for ${scenario.status} was not persisted` });
-
-      await navigate("/system?tab=ops");
-      await waitForTestId("job-kind");
-      await selectValue("job-kind", "knowledge_refresh");
-      await waitForTestId("job-knowledge-dll-path");
-      await $('[data-testid="job-knowledge-dll-path"]').setValue(sts2DllPath);
-      await setChecked("job-knowledge-include-baselib", true);
-      const previousIds = await listedJobIds("knowledge_refresh");
-      await $('[data-testid="job-submit"]').click();
-      const jobId = await waitForNewJob("knowledge_refresh", "completed", previousIds);
-      const result = await openJobResult(jobId);
-      assert.equal(result.gameCacheHit, true);
-      assert.equal(result.baselibStatus, "warning");
-      assert.match(result.baselibError, new RegExp(`API responded ${scenario.status}`));
-      assert.match(result.baselibError, scenario.expected);
-      assert.doesNotMatch(result.baselibError, /must-not-leak|Bad credentials|203\.0\.113\.1/i);
-    }
   });
 
   it("persists an explicit Godot clear and blocks build submission", async () => {
@@ -312,15 +298,15 @@ describe("Godot toolchain settings and project creation", () => {
     assert.equal(persisted.toolchain.godot_exe_path, "");
 
     await navigate("/system?tab=ops");
-    await waitForTestId("job-kind");
-    await selectValue("job-kind", "build_project");
-    await waitForTestId("job-build-project-root");
-    await $('[data-testid="job-build-project-root"]').setValue(projectRoot);
-    await $('[data-testid="job-submit"]').click();
-    await waitForTestId("job-error");
+    await waitForTestId("run-kind");
+    await selectValue("run-kind", "build_project");
+    await waitForTestId("run-build-project-root");
+    await $('[data-testid="run-build-project-root"]').setValue(projectRoot);
+    await $('[data-testid="run-submit"]').click();
+    await waitForTestId("run-error");
     assert.match(
-      await $('[data-testid="job-error"]').getText(),
-      /toolchain\.godot_exe_path is not configured/i,
+      await $('[data-testid="run-error"]').getText(),
+      /required local toolchain input is not configured/i,
     );
   });
 });

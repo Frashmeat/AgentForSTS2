@@ -631,7 +631,7 @@ mod tests {
     };
     use crate::platform::application::RunApplicationService;
     use crate::platform::application::handlers::asset_compile::{
-        AssetCompileValidator, CompileValidation,
+        AssetCompileError, AssetCompileValidator, CompileValidation,
     };
     use crate::platform::domain::RunRepository;
     use crate::platform::domain::RunStatus;
@@ -772,7 +772,7 @@ mod tests {
             _project_root: &Path,
             _run_id: &RunId,
             _cancellation: &CancellationToken,
-        ) -> Result<CompileValidation, String> {
+        ) -> Result<CompileValidation, AssetCompileError> {
             Ok(CompileValidation {
                 exit_code: 0,
                 stdout_tail: "Build succeeded. 0 Error(s)".into(),
@@ -790,8 +790,12 @@ mod tests {
             _project_root: &Path,
             _run_id: &RunId,
             _cancellation: &CancellationToken,
-        ) -> Result<CompileValidation, String> {
-            Err("simulated compile failure".into())
+        ) -> Result<CompileValidation, AssetCompileError> {
+            Err(AssetCompileError::Rejected(CompileValidation {
+                exit_code: 1,
+                stdout_tail: r"C:\Users\private\project\Generated\RollbackCard.cs(7,3): error CS1002: ; expected".into(),
+                stderr_tail: "deterministic compile failure".into(),
+            }))
         }
     }
 
@@ -807,7 +811,7 @@ mod tests {
             _project_root: &Path,
             _run_id: &RunId,
             _cancellation: &CancellationToken,
-        ) -> Result<CompileValidation, String> {
+        ) -> Result<CompileValidation, AssetCompileError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             Ok(CompileValidation {
                 exit_code: 0,
@@ -1111,8 +1115,12 @@ mod tests {
         assert_eq!(res["entityName"], "AlphaCard");
         let manifest_path = td.path().join(res["artifactManifestRef"].as_str().unwrap());
         assert!(manifest_path.is_file());
-        let manifest: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(manifest_path).unwrap()).unwrap();
+        let manifest_bytes = std::fs::read(&manifest_path).unwrap();
+        assert_eq!(
+            sha256_bytes(&manifest_bytes),
+            res["manifestSha256"].as_str().unwrap()
+        );
+        let manifest: serde_json::Value = serde_json::from_slice(&manifest_bytes).unwrap();
         assert_eq!(manifest["producingRunId"], id.0);
         assert_eq!(manifest["schemaVersion"], 2);
         assert_eq!(manifest["imageProcessing"]["processor"], "simple");
@@ -1132,6 +1140,21 @@ mod tests {
             item["source"]
                 .as_str()
                 .is_some_and(|source| source.contains("AlphaCard.cs"))
+        }));
+        let run_root = manifest_path.parent().unwrap();
+        for file in manifest["files"].as_array().unwrap() {
+            let snapshot_path = run_root.join(file["snapshotRelativePath"].as_str().unwrap());
+            let bytes = std::fs::read(&snapshot_path).unwrap();
+            assert_eq!(bytes.len() as u64, file["byteLength"].as_u64().unwrap());
+            assert_eq!(sha256_bytes(&bytes), file["sha256"].as_str().unwrap());
+        }
+        let runs_root = run_root.parent().unwrap();
+        assert!(std::fs::read_dir(runs_root).unwrap().all(|entry| {
+            !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".staging-")
         }));
     }
 
@@ -1773,8 +1796,10 @@ mod tests {
         let run = service.get(&id).await.unwrap();
         assert_eq!(run.status, RunStatus::Failed);
         let failure = run.failure.as_ref().unwrap();
-        assert_eq!(failure.code, "core.unclassified");
+        assert_eq!(failure.code, "artifact.compile_failed");
         assert_eq!(failure.stage, "asset_bundle.compile");
+        assert!(!failure.retryable);
+        assert_eq!(failure.diagnostic.as_ref().unwrap().id, id.0);
         assert_eq!(
             std::fs::read_to_string(generated.join("RollbackCard.cs")).unwrap(),
             "public class OldVersion {}"
@@ -1803,5 +1828,36 @@ mod tests {
                 .is_file(),
             "raw image artifact should remain for diagnosis"
         );
+        let diagnostics = td.path().join(".ats/diagnostics").join(&id.0);
+        assert!(
+            diagnostics
+                .join("generated/Generated/RollbackCard.cs")
+                .is_file()
+        );
+        assert!(
+            diagnostics
+                .join("generated/DemoMod/localization/eng/cards.json")
+                .is_file()
+        );
+        assert!(
+            diagnostics
+                .join("generated/DemoMod/localization/zhs/cards.json")
+                .is_file()
+        );
+        let compile_report =
+            std::fs::read_to_string(diagnostics.join("asset-compile.json")).unwrap();
+        let report: serde_json::Value = serde_json::from_str(&compile_report).unwrap();
+        assert_eq!(report["schemaVersion"], 1);
+        assert_eq!(report["tool"], "dotnet");
+        assert_eq!(report["exitCode"], 1);
+        assert!(
+            report["stdoutTail"]
+                .as_str()
+                .unwrap()
+                .contains("error CS1002")
+        );
+        assert!(!compile_report.contains("C:\\Users\\private"));
+        assert!(!compile_report.contains(&td.path().display().to_string()));
+        assert!(!artifacts.join("RollbackCard/runs").exists());
     }
 }

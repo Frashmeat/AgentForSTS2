@@ -4,6 +4,8 @@
 // 父级通过 ref 触发 refresh（提交完后调）。
 
 import {
+  useCallback,
+  useEffect,
   forwardRef,
   useImperativeHandle,
   useState,
@@ -44,14 +46,22 @@ export const RunsList = forwardRef<RunsListHandle, Props>(function RunsList(
   const [active, setActive] = useState<RunRecord | null>(null);
   const [liveDeltaById, setLiveDeltaById] = useState<Record<string, string>>({});
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     try {
       const items = (await api.listRuns()) as RunSummary[];
       setList(items);
     } catch (e: unknown) {
       onError(toActionableFailure(e));
     }
-  }
+  }, [onError]);
+
+  useEffect(() => {
+    if (!list.some((run) => run.status === "pending" || run.status === "running")) {
+      return;
+    }
+    const timer = window.setInterval(() => void refresh(), 500);
+    return () => window.clearInterval(timer);
+  }, [list, refresh]);
 
   useImperativeHandle(ref, () => ({ refresh }));
 

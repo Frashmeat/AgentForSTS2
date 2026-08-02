@@ -211,3 +211,23 @@ Game Pack 模板只保留工程文件、目录、依赖、入口、资源路径�
 - 最终隔离桌面 E2E 已完成 Snapshot refresh、生成、compile、build、PCK 和精确 ZIP 检查。模板固定 BaseLib `3.3.8` 与 ModAnalyzers `0.1.9`，自动证据位于 `.tmp/e2e-runs/1785417051-99088/gate0-candidate-evidence.json`。
 - 本 ADR 的人工验收边界保持不变：真实游戏行为、视觉、加载、稳定性和日志由用户完成，自动结果不替代该结论。2026-07-30 最终候选已通过该人工验收。
 - Stage 1 不将当前单一 STS2 workstation Settings/发现 UI 或有限 `Sts2CodeFactsProvider` 宣称为完整多游戏产品；第二个真实游戏出现后再依据共同需求提升这些边界，避免提前扩张 schema。
+
+## 13. Stage 2 开工前耦合库存（2026-08-02）
+
+这份库存只说明当前基线和后续决策触发条件，不定义 Stage 2 的具体产品目标，也不要求在选定第二个真实用例前消除所有 STS2 名称。
+
+| 当前耦合 | 所有者与现状 | Stage 2 处理门槛 |
+| --- | --- | --- |
+| `game_pack/registry.rs` 内嵌 STS2 manifest/resources | 交付组合层负责安装当前唯一内置 Pack；loader、registry 查询和 Pack 校验本身不按 `game_id` 分支 | 只有确认第二个内置 Pack 或动态安装时，才扩展安装/发现机制；不得把 STS2 资源搬回通用 handler |
+| `knowledge/sts2_*` 与 `sts2_code_facts` provider | 当前唯一真实源码事实执行器；Pack 声明选择它，Snapshot identity 绑定 provider/indexer | 新游戏需要不同事实模型时先做真实样本；可复用部分才提升为通用 provider，不能只改名伪装通用化 |
+| `config.knowledge.sts2_dll_path`、STS2 discovery、前端 `INSTALLED_GAME_PACK_ID` | workstation 和当前单 Pack UI 的显式产品限制，不是工程 schema 的隐式默认；工程仍持久化并校验 `game_id` | 第二个 Pack 需要可配置本地输入或 UI 选择时，改为 Pack input map/installed Pack 列表，并保持未知或缺失 ID 确定性拒绝 |
+| structured asset 的 `csharp` bundle、固定资产类型和 `dotnet` compile gate | 当前 STS2 资产生成纵向链仍以 C#/.NET 为真实样本；资源路径、尺寸和富文本标签已由 Pack 声明 | 只有 Stage 2 目标需要另一语言、资产族或编译器时扩展 capability/executor；不得把 C#/Godot/BaseLib 写成所有 Game Pack 的必填字段 |
+| `dotnet_project` / `dotnet_file` indexer 与 `dotnet_publish` build runner | loader 只允许有限、可审查的 runner/indexer；package executor 已按声明精确取文件 | 新目标先复用现有有限执行器；确需新增时使用稳定 ID、typed failure、取消/回滚和 Good/Base/Bad fixture，禁止 shell 逃生口 |
+| STS2 package layout 与真实 DLL/PCK/BaseLib 文件 | 仅存在于 `game_packs/sts2/`；Core package handler 的非 STS2 fixture 使用 generic `.bundle` 布局 | 新 Pack 应只声明自己的布局；通用打包器不得出现 STS2 ID、C#、Godot、BaseLib 或 DLL/PCK 常量 |
+
+Readiness gate 的结论边界：
+
+- 通用 Core 不存在 `game_id == "sts2"` 的生产分支；已声明化的 guidance/template/resource/validation/build/package 内容继续由 Pack 所有。
+- Pack-neutral package fixture 只证明声明校验、精确布局和原子 ZIP 执行器不依赖 STS2 技术栈；它不宣称当前 structured asset、provider 或 UI 已支持任意游戏。
+- 第二个真实用例优先按“只新增 Game Pack”实现；只有现有 capability 无法表达且新能力具备跨游戏复用价值时，才扩展 Core。
+- 任何新增 executor 必须同时给出输入/输出 schema、typed failure、取消、回滚、脱敏、确定性 fixture 和真实用例证据，不能用任意 shell/plugin 执行绕过边界。

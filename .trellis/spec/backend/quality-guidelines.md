@@ -109,10 +109,12 @@ RunApplicationService::submit_asset_generate(...) -> RunRepositoryResult<RunId>
 validate_localization_rich_text(value, allowed_tags) -> Result<(), String>
 ```
 
-Compile gate:
+Compile gate and diagnostic:
 
 ```text
 dotnet build --nologo -p:ModsPath=<project>/.ats/compile-gate/<run-id>/
+.ats/diagnostics/<run-id>/asset-compile.json
+.ats/diagnostics/<run-id>/generated/<project-relative-path>
 ```
 
 On Windows, cwd may retain `\\?\`, but the `ModsPath` MSBuild property must use a normal drive or UNC absolute path. The template appends child paths, and mixed verbatim/forward-slash paths are invalid for the MSBuild `Copy` task.
@@ -137,7 +139,7 @@ Rust owns all paths. The ModId is `project.json.csharp_name`; prompt and validat
 
 The active resource specification owns `localization.allowed_rich_text_tags`. Prompt assembly renders that exact list, and bundle validation accepts only exact lower-case, balanced and correctly nested pairs. Unknown tags such as `[yellow]`, attribute forms such as `[color=yellow]`, unmatched tags, and raw ASCII square-bracket text are rejected before project or artifact writes. STS2 currently declares the registered color tags `aqua`, `blue`, `gold`, `green`, `orange`, `pink`, `purple`, and `red`; generated numeric values use `[blue]...[/blue]`.
 
-Committed writes are `Generated/<name>.cs`, both `<ModId>/localization/<locale>/<table>.json`, and generated runtime images under `<ModId>/images/`. Relics receive normal/outline/big paths; cards and powers receive normal/big paths. Compile failures roll back formal writes and retain only run-scoped diagnostics under `.ats/diagnostics/<run-id>/`.
+Committed writes are `Generated/<name>.cs`, both `<ModId>/localization/<locale>/<table>.json`, and generated runtime images under `<ModId>/images/`. Relics receive normal/outline/big paths; cards and powers receive normal/big paths. Compile failures roll back formal writes and retain only run-scoped diagnostics under `.ats/diagnostics/<run-id>/`. `asset-compile.json` schema v1 records only the stable tool/argument summary, operation or exit code, bounded redacted stdout/stderr tails, and project-relative generated file list; `generated/` contains the exact failed bundle. Absolute paths, provider bodies, prompts, credentials and raw process errors are forbidden.
 
 ### 4. Validation & Error Matrix
 
@@ -148,7 +150,8 @@ Committed writes are `Generated/<name>.cs`, both `<ModId>/localization/<locale>/
 | Missing/mismatched locale keys, wrong prefix, empty value | retry once, then `Failed` | no project writes |
 | Unknown, malformed, or unbalanced localization rich-text tag | retry once, then `Failed` | no project writes; compile gate is not called |
 | Existing localization is not a flat string map | `Failed` | existing files preserved |
-| Compile failure | `Failed` with `asset compile gate` | C#, localization, and runtime image writes rolled back |
+| Compile rejection | `Failed + artifact.compile_failed` and Run diagnostic ID | C#, localization, and runtime image writes rolled back; redacted compile report and failed bundle retained |
+| Compile process/output unavailable | `Failed + artifact.compile_unavailable` and Run diagnostic ID | formal writes rolled back; stable operation/`ioKind` retained without raw error text |
 | Cancellation during stream/compile | `Cancelled` | writes rolled back; success cannot overwrite cancellation |
 | Compile success | `Succeeded` | transaction committed after ArtifactManifest publication |
 
@@ -159,7 +162,7 @@ Committed writes are `Generated/<name>.cs`, both `<ModId>/localization/<locale>/
 - Base: first stream is empty and second is valid; Run succeeds and usage accumulates.
 - Base: plain localization contains no ASCII square brackets and passes even when it uses no rich-text tags.
 - Bad: both model attempts contain `[yellow]1[/yellow]`; the Run fails as `run.input_invalid / asset_bundle.output`, compile is never called, and no C#, localization, or Artifact file is written.
-- Bad: JSON is valid but C# does not compile; prior files are restored and new runtime files are removed.
+- Bad: JSON is valid but generated source does not compile; prior files are restored, new runtime files are removed, no final Artifact/staging remains, and the run-scoped bundle/report reproduce the failure.
 
 ### 6. Tests Required
 
@@ -169,7 +172,7 @@ cargo clippy -p ats-core --all-targets -- -D warnings
 cargo check -p agentthespire-desktop
 ```
 
-Assertions must cover type/acronym normalization, inline project context, strict bundle parsing, Pack-owned rich-text tags, unknown/unbalanced tag rejection before writes and compile, locale merge, empty-output retry, Windows MSBuild path normalization, compile rollback including images, cancellation finalization, and scaffold PCK include/exclude rules.
+Assertions must cover type/acronym normalization, inline project context, strict bundle parsing, Pack-owned rich-text tags, unknown/unbalanced tag rejection before writes and compile, locale merge, empty-output retry, Windows MSBuild path normalization, compile rollback including images, typed failure/diagnostic ID, generated diagnostic bundle, bounded path-redacted stdout/stderr, no final Artifact/staging, cancellation finalization, manifest/file hash recomputation, and scaffold PCK include/exclude rules.
 
 ### 7. Wrong vs Correct
 
@@ -450,6 +453,8 @@ runtime/game-packs/<game-id>/
   current.json
 ```
 
+Desktop composition anchors `runtime` at OS app-data (`AppConfig::runtime_dir()`), independently from the config file path and repository. Web composition may continue to use an explicitly selected server runtime. Development/GUI E2E must inject app-data outside the repository; mutable Snapshot indexes never use the checked-out workspace as their default root.
+
 ### 3. Contracts
 
 - `LoadedGamePack.content_sha256` is the SHA-256 of the exact manifest bytes accepted by `GamePackLoader`. A remote `github_release_asset.sha256` is required, validated as exactly 64 hexadecimal characters, and normalized to lowercase.
@@ -458,6 +463,7 @@ runtime/game-packs/<game-id>/
 - Index tree identity sorts UTF-8 relative paths and binds each path, byte size, and file SHA-256. Symbolic links and non-regular index entries are rejected.
 - Snapshot identity binds snapshot schema, Pack ID/schema/content SHA-256, sorted source identities, indexer/provider/tree summaries, and non-empty tool versions. `created_at` and draft names are excluded, so identical verified content reuses one snapshot ID and directory.
 - Drafts and final snapshots are on the same volume. A verified draft is renamed into `snapshots/<snapshot-id>` before the atomic `current.json` pointer is replaced. A failed draft never changes the previous pointer.
+- Snapshot activation does not use an unbounded or watcher-length retry. A persistent access denial remains a typed `truth_snapshot.storage_locked` failure with the previous pointer unchanged.
 - Opening a snapshot recomputes its identity and verifies Pack binding, manifest pointer checksum, every source hash/size, and every index tree. Snapshot IDs and manifest-relative paths cannot escape the store.
 - `VerifiedTruthSnapshot` can only be constructed by store verification. A Run holds one handle for its lifetime; activating a new current snapshot does not retarget that handle.
 - Snapshot acquisition and provider execution are implemented by the Pack-driven refresh and verified context paths. Snapshot import/export and garbage collection remain unsupported and must not bypass store verification.
@@ -476,6 +482,8 @@ runtime/game-packs/<game-id>/
 | Source or index bytes changed after activation | Reopen fails with checksum/integrity mismatch |
 | Index contains a symlink | Return `InvalidIndexEntry`; do not activate |
 | A newer snapshot becomes current | Existing Run handle remains bound to its original root and ID |
+| Desktop config is inside a repository | Snapshot data still uses OS app-data, not the config parent |
+| Snapshot directory is persistently watched/locked | Fail as non-retryable `truth_snapshot.storage_locked`; do not claim activation |
 
 ### 5. Good / Base / Bad Cases
 
@@ -656,7 +664,7 @@ Project Runs: <project>/.ats/history
 Historical `<runtime>/knowledge/jobs` are not read by the product.
 ```
 
-The Tauri submit command derives `game_id` from the active project and local source bindings from workstation configuration. The request cannot provide a Pack ID, source path, release, asset, checksum, indexer, or provider.
+The Tauri submit command derives `game_id` from the active project and local source bindings from workstation configuration. Snapshot storage is rooted at desktop app-data, not at the configuration file or repository. The request cannot provide a Pack ID, source path, release, asset, checksum, indexer, or provider.
 
 ### 3. Contracts
 
@@ -688,6 +696,7 @@ The Tauri submit command derives `game_id` from the active project and local sou
 | Local input key is absent or not a file | Reject before Run creation |
 | Current pointer or bytes are corrupt | Status is `invalid`; generation cannot open a context |
 | Refresh is already locked | Fail with a deterministic busy error; do not race Snapshot directory activation |
+| Runtime activation receives persistent permission denial | Fail as `truth_snapshot.storage_locked`, preserve current and expose only stable `ioKind` |
 
 ### 5. Good / Base / Bad Cases
 
@@ -706,7 +715,7 @@ cargo check -p ats-web
 npx tsc -b --pretty false
 ```
 
-Assertions must cover successful activation, cache hit, local source change, pinned release URL, exact remote SHA, interrupted-body resume, mismatched `Content-Range` rejection, normalized tool version, index failure, missing local input, `ready/missing/invalid`, token non-forwarding, and Run result identity/counts.
+Assertions must cover successful activation, cache hit, local source change, pinned release URL, exact remote SHA, interrupted-body resume, mismatched `Content-Range` rejection, normalized tool version, index failure, missing local input, `ready/missing/invalid`, token non-forwarding, typed/redacted storage lock, desktop app-data isolation, empty staging after GUI E2E, and Run result identity/counts.
 
 ### 7. Wrong vs Correct
 

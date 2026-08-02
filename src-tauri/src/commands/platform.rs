@@ -203,7 +203,7 @@ pub async fn submit_truth_snapshot_refresh_run(
     let indexer = IlspycmdTruthIndexer::discover(explicit_ilspycmd)
         .map_err(|_| CommandFailure::unclassified("truth_snapshot.indexer"))?;
     let refresher = TruthSnapshotRefresher::new(Arc::new(github), Arc::new(indexer));
-    let store = TruthSnapshotStore::new(&config.status_snapshot().runtime_dir(), &pack);
+    let store = TruthSnapshotStore::new(&config.runtime_dir(), &pack);
     let run_id = session
         .submit(service.submit_truth_snapshot_refresh(
             request,
@@ -369,7 +369,7 @@ fn session_game_context(
     let game_id = session.meta().game_id.clone();
     let registry = GamePackRegistry::built_in()
         .map_err(|_| CommandFailure::unclassified("project.game_pack_registry"))?;
-    VerifiedGameContext::open_current(&config.status_snapshot().runtime_dir(), &registry, &game_id)
+    VerifiedGameContext::open_current(&config.runtime_dir(), &registry, &game_id)
         .map_err(|_| CommandFailure::unclassified("project.game_context"))
 }
 

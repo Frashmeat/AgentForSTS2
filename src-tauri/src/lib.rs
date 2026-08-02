@@ -23,6 +23,7 @@ const APP_DATA_ROOT_ENV: &str = "SPIREFORGE_APP_DATA_ROOT";
 /// clone，避免持锁跨 await。
 pub struct AppConfig {
     inner: RwLock<AppConfigInner>,
+    runtime_dir: PathBuf,
 }
 
 pub struct AppConfigInner {
@@ -32,10 +33,18 @@ pub struct AppConfigInner {
 
 impl AppConfig {
     #[must_use]
-    pub fn new(settings: Settings, status: ConfigStatus) -> Self {
+    pub fn new(settings: Settings, status: ConfigStatus, runtime_dir: PathBuf) -> Self {
         Self {
             inner: RwLock::new(AppConfigInner { settings, status }),
+            runtime_dir,
         }
+    }
+
+    /// Mutable runtime data (Truth Snapshots and future Pack state) is anchored
+    /// in OS app-data, independently from the config file location.
+    #[must_use]
+    pub fn runtime_dir(&self) -> PathBuf {
+        self.runtime_dir.clone()
     }
 
     /// 克隆当前 settings + status。clone 廉价（Settings 只是嵌套小结构体），
@@ -139,7 +148,7 @@ pub fn run() {
             });
             Ok(())
         })
-        .manage(AppConfig::new(settings, status))
+        .manage(AppConfig::new(settings, status, app_data.root.clone()))
         .manage(AppPaths { data: app_data })
         .manage(ActiveProject::new())
         .manage(AppShutdown::new())

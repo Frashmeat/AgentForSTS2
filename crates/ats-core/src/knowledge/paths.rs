@@ -17,7 +17,9 @@ pub struct KnowledgePaths {
 const BASELIB_DECOMPILED_FILE: &str = "BaseLib.decompiled.cs";
 
 impl KnowledgePaths {
-    /// `runtime_dir` 应指向 `<workspace>/runtime/`，由调用方（一般通过 `ConfigStatus::runtime_dir()`）传入。
+    /// `runtime_dir` points at the role-owned mutable runtime root. Desktop
+    /// composition uses OS app-data; Web composition may explicitly anchor it
+    /// beside the server config.
     #[must_use]
     pub fn from_runtime_dir(runtime_dir: &Path) -> Self {
         let root = runtime_dir.join("knowledge");

@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::failure::ActionableFailure;
+use crate::failure::{ActionableFailure, FailureNormalizer};
 use crate::game_pack::{LoadedGamePack, TruthSnapshotRefresher, TruthSnapshotStore};
 use crate::platform::application::CancellationToken;
 use crate::platform::contracts::SubmitTruthSnapshotRefreshRequest;
@@ -61,12 +61,12 @@ pub async fn run_truth_snapshot_refresh(
             }
             return;
         }
-        Err(_) => {
+        Err(error) => {
             finalize_with_failure(
                 &repo,
                 &run_id,
                 &sink,
-                ActionableFailure::unclassified("truth_snapshot.refresh"),
+                FailureNormalizer::truth_snapshot("truth_snapshot.refresh", &error),
             )
             .await;
             return;
