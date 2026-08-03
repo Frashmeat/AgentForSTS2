@@ -40,6 +40,10 @@ Any DAG change requires an approved architecture change plus this spec, script f
 
 `ats-game-context` loads pinned Pack schema v2, resolves exact Feature slots, verifies immutable Truth Snapshot v2 and returns bounded Evidence. STS2 and synthetic fixtures use the same contracts. Missing contribution, Pack/Snapshot mismatch, unsafe path, unknown Primitive or hash mismatch fails before product work.
 
+`mod.plan` result v2 owns descriptive `evidenceRequirements`. `pack.mod-generate-single` v2 owns
+per-item `evidenceQueries` with explicit symbol/term fields. Single generation requires every Pack
+query to match the active Truth Snapshot and never interprets Plan prose as an index key.
+
 Pack may contain declarations/templates/resources and registered Primitive IDs. It cannot contain arbitrary script, native plugin, provider credential, or complete workflow implementation.
 
 ## 5. Resource Workspace

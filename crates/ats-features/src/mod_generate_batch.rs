@@ -5,9 +5,8 @@ use ats_game_context::{
 };
 use ats_kernel::{ContributionId, FailureCode, FeatureId, SchemaId, SchemaRef, SchemaVersion};
 use ats_runtime::{
-    ArtifactPublisher, CancellationToken, ModelClient, PayloadError, ProjectFileWriter, RunFailure,
-    RunId, RunLifecycleError, RunRecord, RunStatus, RunTransition, ValidationRunner,
-    VersionedPayload,
+    ArtifactPublisher, CancellationToken, ModelClient, PayloadError, ProjectFileWriter, RunId,
+    RunLifecycleError, RunRecord, RunStatus, RunTransition, ValidationRunner, VersionedPayload,
 };
 use ats_workspace::ResourceRepository;
 use chrono::Utc;
@@ -32,7 +31,7 @@ impl FeatureSpec for BatchGenerateFeature {
     }
 
     fn request_schema() -> SchemaRef {
-        schema("feature.mod-generate-batch-request")
+        schema_version("feature.mod-generate-batch-request", 2)
     }
 
     fn result_schema() -> SchemaRef {
@@ -198,8 +197,8 @@ impl<'a> BatchGenerateService<'a> {
                     failure_code: None,
                 }),
                 Err(error) => {
-                    let code = FailureCode::parse("feature.single_failed")
-                        .expect("built-in failure code is valid");
+                    let failure = error.run_failure();
+                    let code = failure.code.clone();
                     if cancellation.is_cancelled() {
                         child.apply_transition(
                             RunTransition::Cancel {
@@ -210,16 +209,7 @@ impl<'a> BatchGenerateService<'a> {
                             Utc::now(),
                         )?;
                     } else {
-                        child.apply_transition(
-                            RunTransition::Fail {
-                                failure: RunFailure::new(
-                                    code.clone(),
-                                    "mod.generate.batch.item",
-                                    None,
-                                )?,
-                            },
-                            Utc::now(),
-                        )?;
+                        child.apply_transition(RunTransition::Fail { failure }, Utc::now())?;
                     }
                     items.push(BatchItemResult {
                         child_run_id: child.id().clone(),
@@ -239,7 +229,6 @@ impl<'a> BatchGenerateService<'a> {
                     if request.fail_fast {
                         break;
                     }
-                    let _ = error;
                     continue;
                 }
             }
@@ -336,8 +325,12 @@ fn batch_slot() -> ContributionId {
 }
 
 fn schema(id: &str) -> SchemaRef {
+    schema_version(id, 1)
+}
+
+fn schema_version(id: &str, version: u32) -> SchemaRef {
     SchemaRef {
         id: SchemaId::parse(id).expect("built-in schema ID is valid"),
-        version: SchemaVersion::new(1).expect("built-in schema version is valid"),
+        version: SchemaVersion::new(version).expect("built-in schema version is valid"),
     }
 }

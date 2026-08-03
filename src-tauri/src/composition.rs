@@ -231,9 +231,7 @@ impl Stage2Composition {
                         cancellation,
                     )
                     .await
-                    .map_err(|_| {
-                        failure("feature.execution_failed", "mod.generate.single.execute")
-                    })?;
+                    .map_err(|error| error.run_failure())?;
             }
             "mod.generate.batch" => {
                 let request = self.decode::<BatchGenerateFeature>(&run)?;
@@ -654,7 +652,7 @@ mod tests {
                     "summary": "A deterministic facade fixture",
                     "behaviorIntent": ["Expose a fixture type"],
                     "implementationConstraints": [],
-                    "requiredEvidence": ["Fixture.Symbol"],
+                    "evidenceRequirements": ["A verified fixture type declaration"],
                     "requiredResourceRoles": [],
                     "acceptanceCriteria": ["The project compiles"]
                 })
@@ -865,7 +863,7 @@ mod tests {
         let source_bytes = b"public class FixtureGenerated {}";
         let evidence = vec![TruthEvidenceRecord {
             source_id: "fixture-source".into(),
-            symbol: "Fixture.Symbol".into(),
+            symbol: "ICustomModel".into(),
             purpose: "Prove the fixture type contract".into(),
             bounded_excerpt: "public class FixtureGenerated".into(),
             relative_path: "sources/fixture.cs".into(),

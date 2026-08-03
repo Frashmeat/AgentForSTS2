@@ -37,6 +37,11 @@ Feature Prompt Recipe
 
 所有 slot 精确匹配、顺序确定并参与请求 hash。缺失、重复、未知或 schema/hash 不匹配都在模型调用前失败。
 
+规划与证据检索使用两个不同合同：`mod.plan` result v2 的 `evidenceRequirements`
+只描述生成时需要证明的事实；Game Pack `pack.mod-generate-single` v2 为每个 item type
+声明结构化 `evidenceQueries { symbols, terms }`。模型不需要知道 Truth 索引键，Feature 也不把
+自然语言要求临时拆词或猜测为 symbol。
+
 ## 2. 唯一所有者
 
 | 内容 | 唯一真源 | 示例 |
@@ -57,9 +62,9 @@ Feature Recipe 不包含 STS2 hook、BaseLib 类型或具体资源路径；Pack 
 `crates/ats-features/recipes/` 当前包含：
 
 ```text
-mod-plan.v1.json
-mod-generate-single.v1.json
-log-analyze.v1.json
+mod-plan.json
+mod-generate-single.json
+log-analyze.json
 ```
 
 Batch 复用 Single，Complex 组合 Plan、Batch/Single、Build 和 Package，因此不再维护第二套长 Prompt。Build、Package、Project create 和 file-based Resource prepare 是确定性执行，不需要模型 Recipe。
@@ -74,7 +79,7 @@ STS2 当前真源是：
 game_packs/sts2/stage2-game-pack.json
 ```
 
-它声明 Feature contribution、item type、生成文件角色/目标、资源规格、日志规则、验证/build/package Primitive 和工程模板引用。Pack 先经过 schema 与 pinned SHA 校验，再由 `ContributionResolver` 按 Feature required slot 选择。
+它声明 Feature contribution、item type、生成文件角色/目标、Evidence 查询、资源规格、日志规则、验证/build/package Primitive 和工程模板引用。Pack 先经过 schema 与 pinned SHA 校验，再由 `ContributionResolver` 按 Feature required slot 选择。`evidenceQueries` 是 Pack 的可执行数据合同：每组查询必须至少命中一条当前 Truth，最终 Evidence 有界去重；任一组无命中即返回 `truth.evidence_missing`，不能继续调用模型。
 
 新增游戏应新增独立 Pack 与 Truth 来源。不得把游戏自然语言、hook、C#/Godot/BaseLib 约束重新写入通用 Feature 或 Shell。
 
@@ -93,6 +98,11 @@ relative_path
 ```
 
 缺少 current Snapshot、Pack 身份不匹配或任一 source/index hash 失败时，依赖 Truth 的 Feature 必须返回 typed failure，不能退回手写知识或旧 Prompt。
+
+Plan 的 `evidenceRequirements` 用于保留用户意图和验收语义，不直接进入 Truth 索引查询。
+精确 `symbols` 和全文 `terms` 只来自经过 schema/hash 校验的 Pack contribution。新增游戏或
+item type 必须同时提供可在其 Truth Snapshot 中命中的查询；不得要求最终用户在需求中填写
+内部 symbol 才能生成。
 
 ## 6. Resource 文本与媒体
 

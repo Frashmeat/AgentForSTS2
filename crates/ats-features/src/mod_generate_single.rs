@@ -6,15 +6,15 @@ use ats_game_context::{
     TruthEvidenceRecord, VerifiedContributionSet, VerifiedTruthSnapshot,
 };
 use ats_kernel::{
-    ContributionId, FeatureId, PrimitiveId, ResourceId, SchemaId, SchemaRef, SchemaVersion,
-    Sha256Digest,
+    ContributionId, FailureCode, FeatureId, PrimitiveId, ResourceId, SchemaId, SchemaRef,
+    SchemaVersion, Sha256Digest,
 };
 use ats_runtime::{
     ArtifactFileInput, ArtifactPublishRequest, ArtifactPublisher, CancellationToken, FinishReason,
     ModelClient, ModelError, ModelGamePackRef, ModelRequestError, ModelRequestSnapshot,
     ModelResourceRef, PayloadError, ProjectFileWrite, ProjectFileWriter, ProjectWriteError,
-    PublishedArtifact, RunLifecycleError, RunRecord, RunStatus, RunTransition, TokenUsage,
-    ValidationError, ValidationRequest, ValidationRunner, VersionedPayload,
+    PublishedArtifact, RunFailure, RunLifecycleError, RunRecord, RunStatus, RunTransition,
+    TokenUsage, ValidationError, ValidationRequest, ValidationRunner, VersionedPayload,
 };
 use ats_workspace::{ResourceAsset, ResourceRepository};
 use chrono::Utc;
@@ -42,7 +42,7 @@ impl FeatureSpec for SingleGenerateFeature {
     }
 
     fn request_schema() -> SchemaRef {
-        schema("feature.mod-generate-single-request")
+        schema_version("feature.mod-generate-single-request", 2)
     }
 
     fn result_schema() -> SchemaRef {
@@ -59,7 +59,7 @@ impl SingleGenerateFeature {
     pub fn contribution_requirement() -> ats_game_context::ContributionRequirement {
         ats_game_context::ContributionRequirement {
             slot_id: generation_slot(),
-            schema: schema("pack.mod-generate-single"),
+            schema: schema_version("pack.mod-generate-single", 2),
         }
     }
 }
@@ -112,7 +112,15 @@ struct GenerateContribution {
 struct GenerateItemType {
     id: String,
     generated_files: Vec<GeneratedFileSpec>,
+    evidence_queries: Vec<PackEvidenceQuery>,
     required_resource_roles: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PackEvidenceQuery {
+    symbols: Vec<String>,
+    terms: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -245,7 +253,7 @@ impl SingleGenerateService {
             .map_err(|_| SingleGenerateError::InvalidResourceSpecs)?;
         validate_required_roles(&request.plan, item_spec)?;
 
-        let evidence = query_evidence(context.truth, &request.plan)?;
+        let evidence = query_evidence(context.truth, item_spec)?;
         let selected =
             load_resources(dependencies.resources, &request, item_spec, &resource_specs)?;
         let resource_refs = selected
@@ -447,6 +455,102 @@ pub enum SingleGenerateError {
     Lifecycle(#[from] RunLifecycleError),
 }
 
+impl SingleGenerateError {
+    #[must_use]
+    pub fn run_failure(&self) -> RunFailure {
+        let (code, stage) = match self {
+            Self::InvalidInput | Self::InvalidRun => {
+                ("run.input_invalid", "mod.generate.single.request")
+            }
+            Self::ContextIdentityMismatch => {
+                ("truth.context_mismatch", "mod.generate.single.context")
+            }
+            Self::InvalidPackContribution | Self::Contribution(_) => {
+                ("pack.contribution_invalid", "mod.generate.single.pack")
+            }
+            Self::InvalidResourceSpecs => {
+                ("resource.spec_invalid", "mod.generate.single.resources")
+            }
+            Self::UnsupportedItemType => {
+                ("feature.item_type_unsupported", "mod.generate.single.plan")
+            }
+            Self::ResourceRoleMismatch => {
+                ("resource.role_mismatch", "mod.generate.single.resources")
+            }
+            Self::InvalidSelectedResource => (
+                "resource.selection_invalid",
+                "mod.generate.single.resources",
+            ),
+            Self::MissingEvidence => ("truth.evidence_missing", "mod.generate.single.truth"),
+            Self::InvalidRecipeContract | Self::Recipe(_) => {
+                ("feature.recipe_invalid", "mod.generate.single.recipe")
+            }
+            Self::TruncatedModelOutput => ("model.output_truncated", "mod.generate.single.model"),
+            Self::InvalidModelOutput => ("model.output_invalid", "mod.generate.single.model"),
+            Self::ArtifactPublication => ("artifact.publish_failed", "mod.generate.single.publish"),
+            Self::ArtifactCleanup => ("artifact.cleanup_failed", "mod.generate.single.cleanup"),
+            Self::RunTransition | Self::Lifecycle(_) => {
+                ("run.transition_failed", "mod.generate.single.result")
+            }
+            Self::Cancelled => ("run.cancelled", "mod.generate.single.execute"),
+            Self::ResourceRepository => {
+                ("resource.storage_failed", "mod.generate.single.resources")
+            }
+            Self::EvidenceQuery(_) => ("truth.query_invalid", "mod.generate.single.truth"),
+            Self::ModelRequest(_) => ("model.request_invalid", "mod.generate.single.model"),
+            Self::Model(ModelError::Authentication) => {
+                ("model.authentication", "mod.generate.single.model")
+            }
+            Self::Model(ModelError::RateLimited { .. }) => {
+                ("model.rate_limited", "mod.generate.single.model")
+            }
+            Self::Model(ModelError::Configuration) => {
+                ("model.configuration", "mod.generate.single.model")
+            }
+            Self::Model(ModelError::Transport) => {
+                ("model.transport_failed", "mod.generate.single.model")
+            }
+            Self::Model(ModelError::Rejected) => {
+                ("model.request_rejected", "mod.generate.single.model")
+            }
+            Self::Model(ModelError::InvalidResponse) => {
+                ("model.response_invalid", "mod.generate.single.model")
+            }
+            Self::Model(ModelError::Cancelled) => ("run.cancelled", "mod.generate.single.model"),
+            Self::ProjectWrite(ProjectWriteError::InvalidWrite)
+            | Self::ProjectWrite(ProjectWriteError::DuplicatePath) => {
+                ("artifact.write_invalid", "mod.generate.single.write")
+            }
+            Self::ProjectWrite(ProjectWriteError::Io { .. }) => {
+                ("artifact.write_failed", "mod.generate.single.write")
+            }
+            Self::Validation(ValidationError::UnknownPrimitive) => (
+                "validation.primitive_unknown",
+                "mod.generate.single.validate",
+            ),
+            Self::Validation(ValidationError::Rejected(_)) => {
+                ("validation.rejected", "mod.generate.single.validate")
+            }
+            Self::Validation(ValidationError::Unavailable { .. }) => {
+                ("validation.unavailable", "mod.generate.single.validate")
+            }
+            Self::Validation(ValidationError::InvalidReport) => {
+                ("validation.report_invalid", "mod.generate.single.validate")
+            }
+            Self::Validation(ValidationError::Cancelled) => {
+                ("run.cancelled", "mod.generate.single.validate")
+            }
+            Self::Payload(_) => ("run.result_invalid", "mod.generate.single.result"),
+        };
+        RunFailure::new(
+            FailureCode::parse(code).expect("built-in failure code is valid"),
+            stage,
+            None,
+        )
+        .expect("built-in Run failure is valid")
+    }
+}
+
 struct LoadedResource {
     reference: ModelResourceRef,
     bytes: Vec<u8>,
@@ -478,6 +582,13 @@ impl GenerateContribution {
                 || !item_ids.insert(item.id.as_str())
                 || item.generated_files.is_empty()
                 || item.generated_files.len() > 64
+                || item.evidence_queries.is_empty()
+                || item.evidence_queries.len() > usize::from(MAX_EVIDENCE_RECORDS)
+                || item.evidence_queries.iter().any(|query| {
+                    (query.symbols.is_empty() && query.terms.is_empty())
+                        || !valid_text_list(&query.symbols, 16, 128, true)
+                        || !valid_text_list(&query.terms, 16, 128, true)
+                })
             {
                 return Err(SingleGenerateError::InvalidPackContribution);
             }
@@ -585,20 +696,50 @@ fn validate_required_roles(
 
 fn query_evidence(
     truth: &VerifiedTruthSnapshot,
-    plan: &PlanItem,
+    item_spec: &GenerateItemType,
 ) -> Result<Vec<TruthEvidenceRecord>, SingleGenerateError> {
-    if plan.required_evidence.is_empty() {
-        return Err(SingleGenerateError::MissingEvidence);
+    let mut matched = Vec::with_capacity(item_spec.evidence_queries.len());
+    for query in &item_spec.evidence_queries {
+        let records = truth.query(&EvidenceQuery {
+            symbols: query.symbols.clone(),
+            terms: query.terms.clone(),
+            limit: MAX_EVIDENCE_RECORDS,
+        })?;
+        if records.is_empty() {
+            return Err(SingleGenerateError::MissingEvidence);
+        }
+        matched.push(records);
     }
-    let evidence = truth.query(&EvidenceQuery {
-        symbols: plan.required_evidence.clone(),
-        terms: Vec::new(),
-        limit: MAX_EVIDENCE_RECORDS,
-    })?;
-    if evidence.is_empty() {
-        return Err(SingleGenerateError::MissingEvidence);
+
+    let mut evidence = Vec::new();
+    let mut identities = BTreeSet::new();
+    for records in &matched {
+        push_unique_evidence(&mut evidence, &mut identities, records[0].clone());
+    }
+    for records in matched {
+        for record in records {
+            if evidence.len() >= usize::from(MAX_EVIDENCE_RECORDS) {
+                return Ok(evidence);
+            }
+            push_unique_evidence(&mut evidence, &mut identities, record);
+        }
     }
     Ok(evidence)
+}
+
+fn push_unique_evidence(
+    evidence: &mut Vec<TruthEvidenceRecord>,
+    identities: &mut BTreeSet<(String, String, String)>,
+    record: TruthEvidenceRecord,
+) {
+    let identity = (
+        record.source_id.clone(),
+        record.symbol.clone(),
+        record.relative_path.clone(),
+    );
+    if identities.insert(identity) {
+        evidence.push(record);
+    }
 }
 
 fn load_resources<R: ResourceRepository + ?Sized>(
@@ -935,9 +1076,13 @@ fn resource_specs_slot() -> ContributionId {
 }
 
 fn schema(id: &str) -> SchemaRef {
+    schema_version(id, 1)
+}
+
+fn schema_version(id: &str, version: u32) -> SchemaRef {
     SchemaRef {
         id: SchemaId::parse(id).expect("built-in schema ID is valid"),
-        version: SchemaVersion::new(1).expect("built-in schema version is valid"),
+        version: SchemaVersion::new(version).expect("built-in schema version is valid"),
     }
 }
 
@@ -962,7 +1107,7 @@ mod tests {
                 {
                     "slotId": "mod.generate.single",
                     "featureId": "mod.generate.single",
-                    "schema": {"id":"pack.mod-generate-single", "version":1},
+                    "schema": {"id":"pack.mod-generate-single", "version":2},
                     "requiredPrimitives": ["code.fixture-validate"],
                     "payload": {
                         "validationPrimitive": "code.fixture-validate",
@@ -972,6 +1117,10 @@ mod tests {
                             "generatedFiles": [{
                                 "role": "metadata",
                                 "targetPath": "{mod_id}/metadata.json"
+                            }],
+                            "evidenceQueries": [{
+                                "symbols": ["Fixture.Symbol"],
+                                "terms": []
                             }],
                             "requiredResourceRoles": ["fixture.icon"]
                         }]
@@ -1014,6 +1163,14 @@ mod tests {
 
         let contribution: GenerateContribution = generate.decode(&generation_slot()).unwrap();
         contribution.validate().unwrap();
+        let mut missing_evidence_queries = contribution.clone();
+        missing_evidence_queries.item_types[0]
+            .evidence_queries
+            .clear();
+        assert!(matches!(
+            missing_evidence_queries.validate(),
+            Err(SingleGenerateError::InvalidPackContribution)
+        ));
         let specs: ResourceSpecs = resources.decode(&resource_specs_slot()).unwrap();
         specs.validate().unwrap();
         assert_eq!(
@@ -1025,5 +1182,29 @@ mod tests {
             .unwrap(),
             "fixture_mod/metadata.json"
         );
+    }
+
+    #[test]
+    fn single_generation_errors_keep_stable_typed_run_failures() {
+        let missing = SingleGenerateError::MissingEvidence.run_failure();
+        assert_eq!(missing.code.as_str(), "truth.evidence_missing");
+        assert_eq!(missing.stage, "mod.generate.single.truth");
+
+        let publish = SingleGenerateError::ArtifactPublication.run_failure();
+        assert_eq!(publish.code.as_str(), "artifact.publish_failed");
+        assert_eq!(publish.stage, "mod.generate.single.publish");
+
+        let authentication = SingleGenerateError::Model(ModelError::Authentication).run_failure();
+        assert_eq!(authentication.code.as_str(), "model.authentication");
+
+        let rejected = SingleGenerateError::Validation(ValidationError::Rejected(
+            ats_runtime::ValidationReport {
+                exit_code: 1,
+                stdout_tail: String::new(),
+                stderr_tail: "fixture failure".into(),
+            },
+        ))
+        .run_failure();
+        assert_eq!(rejected.code.as_str(), "validation.rejected");
     }
 }

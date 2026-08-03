@@ -59,7 +59,7 @@ impl ModelClient for CompositionModel {
                 "summary":"A composed fixture item",
                 "behaviorIntent":["Expose a compiled fixture type"],
                 "implementationConstraints":[],
-                "requiredEvidence":["Fixture.Symbol"],
+                "evidenceRequirements":["A verified fixture type declaration"],
                 "requiredResourceRoles":[],
                 "acceptanceCriteria":["The project publishes"]
             })
@@ -491,7 +491,7 @@ fn single_request(id: &str) -> SingleGenerateRequest {
             summary: "A batch fixture item".into(),
             behavior_intent: vec!["Expose one fixture type".into()],
             implementation_constraints: Vec::new(),
-            required_evidence: vec!["Fixture.Symbol".into()],
+            evidence_requirements: vec!["A verified fixture type declaration".into()],
             required_resource_roles: Vec::new(),
             acceptance_criteria: vec!["The project compiles".into()],
         },
@@ -520,7 +520,7 @@ fn running_run<S: FeatureSpec, T: serde::Serialize>(request: &T) -> RunRecord {
 fn truth(pack: &LoadedGamePack) -> VerifiedTruthSnapshot {
     let evidence = vec![TruthEvidenceRecord {
         source_id: "fixture-source".into(),
-        symbol: "Fixture.Symbol".into(),
+        symbol: "ICustomModel".into(),
         purpose: "Prove the fixture type".into(),
         bounded_excerpt: "public class Fixture".into(),
         relative_path: "sources/fixture.cs".into(),

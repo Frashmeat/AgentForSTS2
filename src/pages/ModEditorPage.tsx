@@ -89,11 +89,29 @@ export function ModEditorPage() {
 }
 
 function decodePlan(run: RunRecord): PlanItem | null {
-  if (run.result?.schema.id !== "feature.mod-plan-result") return null;
+  if (run.result?.schema.id !== "feature.mod-plan-result" || run.result.schema.version !== 2) {
+    return null;
+  }
   const value = run.result.payload;
-  return typeof value.itemId === "string" && typeof value.itemType === "string"
-    ? value as PlanItem
-    : null;
+  return isPlanItem(value) ? value : null;
+}
+
+function isPlanItem(value: Record<string, unknown>): value is PlanItem {
+  return (
+    typeof value.itemId === "string" &&
+    typeof value.itemType === "string" &&
+    typeof value.name === "string" &&
+    typeof value.summary === "string" &&
+    isStringArray(value.behaviorIntent) &&
+    isStringArray(value.implementationConstraints) &&
+    isStringArray(value.evidenceRequirements) &&
+    isStringArray(value.requiredResourceRoles) &&
+    isStringArray(value.acceptanceCriteria)
+  );
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
 function RunResult({ run }: { run: RunRecord }) {

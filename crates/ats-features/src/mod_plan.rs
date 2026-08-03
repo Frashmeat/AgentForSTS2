@@ -15,7 +15,7 @@ use crate::FeatureSpec;
 use crate::prompt::{FeatureRecipe, FeatureRecipeError, FeatureRecipeLoader};
 
 const RECIPE_BYTES: &[u8] = include_bytes!("../recipes/mod-plan.json");
-const RECIPE_SHA256: &str = "2a5a1dd5004f0fa1798decc921fa28798155022695c5a4b9191f3680134a83c2";
+const RECIPE_SHA256: &str = "f5ccde586606aaee85af44f5af958929c69171e20d4cdfb8eecf6a5ebeb98d98";
 
 pub struct ModPlanFeature;
 
@@ -33,7 +33,7 @@ impl FeatureSpec for ModPlanFeature {
     }
 
     fn result_schema() -> SchemaRef {
-        schema("feature.mod-plan-result")
+        schema_version("feature.mod-plan-result", 2)
     }
 
     fn artifact_extension_schema() -> SchemaRef {
@@ -68,7 +68,7 @@ pub struct PlanItem {
     pub summary: String,
     pub behavior_intent: Vec<String>,
     pub implementation_constraints: Vec<String>,
-    pub required_evidence: Vec<String>,
+    pub evidence_requirements: Vec<String>,
     pub required_resource_roles: Vec<String>,
     pub acceptance_criteria: Vec<String>,
 }
@@ -81,7 +81,7 @@ impl PlanItem {
             || !valid_text(&self.summary, 2_000)
             || !valid_list(&self.behavior_intent, 32, 1_000, false)
             || !valid_list(&self.implementation_constraints, 32, 1_000, true)
-            || !valid_list(&self.required_evidence, 32, 512, true)
+            || !valid_list(&self.evidence_requirements, 32, 512, true)
             || !valid_list(&self.required_resource_roles, 32, 128, true)
             || !valid_list(&self.acceptance_criteria, 32, 1_000, false)
             || self
@@ -307,9 +307,13 @@ fn guidance_slot() -> ContributionId {
 }
 
 fn schema(id: &str) -> SchemaRef {
+    schema_version(id, 1)
+}
+
+fn schema_version(id: &str, version: u32) -> SchemaRef {
     SchemaRef {
         id: SchemaId::parse(id).expect("built-in schema ID is valid"),
-        version: SchemaVersion::new(1).expect("built-in schema version is valid"),
+        version: SchemaVersion::new(version).expect("built-in schema version is valid"),
     }
 }
 
@@ -439,7 +443,7 @@ mod tests {
                     "summary":"A bounded fixture item",
                     "behaviorIntent":["Produce one observable behavior"],
                     "implementationConstraints":[],
-                    "requiredEvidence":["Fixture.Symbol"],
+                    "evidenceRequirements":["A verified fixture type declaration"],
                     "requiredResourceRoles":[],
                     "acceptanceCriteria":["The fixture compiles"]
                 })

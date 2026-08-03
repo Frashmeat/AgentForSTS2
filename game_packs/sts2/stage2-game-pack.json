@@ -26,7 +26,7 @@
     {
       "slotId": "mod.generate.single",
       "featureId": "mod.generate.single",
-      "schema": { "id": "pack.mod-generate-single", "version": 1 },
+      "schema": { "id": "pack.mod-generate-single", "version": 2 },
       "requiredPrimitives": ["code.dotnet-validate"],
       "payload": {
         "validationPrimitive": "code.dotnet-validate",
@@ -41,6 +41,9 @@
             "generatedFiles": [
               { "role": "source", "targetPath": "Generated/{item_id}.cs" }
             ],
+            "evidenceQueries": [
+              { "symbols": ["ICustomModel"], "terms": [] }
+            ],
             "requiredResourceRoles": []
           },
           {
@@ -49,6 +52,11 @@
               { "role": "source", "targetPath": "Generated/{item_id}.cs" },
               { "role": "localization.eng", "targetPath": "{mod_id}/localization/eng/relics.json" },
               { "role": "localization.zhs", "targetPath": "{mod_id}/localization/zhs/relics.json" }
+            ],
+            "evidenceQueries": [
+              { "symbols": ["CustomRelicModel"], "terms": [] },
+              { "symbols": ["CustomContentDictionary.AddModel"], "terms": [] },
+              { "symbols": ["RelicModel"], "terms": [] }
             ],
             "requiredResourceRoles": ["relic.normal", "relic.outline", "relic.big"]
           }

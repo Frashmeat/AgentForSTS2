@@ -169,7 +169,7 @@ impl Fixture {
                 summary: "A compile-test fixture relic".into(),
                 behavior_intent: vec!["Expose a testable fixture type".into()],
                 implementation_constraints: vec![],
-                required_evidence: vec!["Fixture.Symbol".into()],
+                evidence_requirements: vec!["A verified relic declaration".into()],
                 required_resource_roles: vec![
                     "relic.normal".into(),
                     "relic.outline".into(),
@@ -384,13 +384,23 @@ async fn compile_artifact_and_cancellation_failures_restore_project_files() {
 
 fn truth(pack: &ats_game_context::LoadedGamePack) -> VerifiedTruthSnapshot {
     let source_bytes = b"fixture-source";
-    let evidence = vec![TruthEvidenceRecord {
+    let evidence = [
+        ("CustomRelicModel", "public abstract class CustomRelicModel"),
+        (
+            "CustomContentDictionary.AddModel",
+            "public static void AddModel(Type modelType)",
+        ),
+        ("RelicModel", "public abstract class RelicModel"),
+    ]
+    .into_iter()
+    .map(|(symbol, excerpt)| TruthEvidenceRecord {
         source_id: "fixture-source".into(),
-        symbol: "Fixture.Symbol".into(),
-        purpose: "Prove the fixture type contract".into(),
-        bounded_excerpt: "public class FixtureRelic".into(),
+        symbol: symbol.into(),
+        purpose: "Prove the fixture relic contract".into(),
+        bounded_excerpt: excerpt.into(),
         relative_path: "sources/fixture.cs".into(),
-    }];
+    })
+    .collect::<Vec<_>>();
     let index_bytes = serde_json::to_vec(&evidence).unwrap();
     let manifest = TruthSnapshotManifest::new(
         pack,
@@ -407,7 +417,7 @@ fn truth(pack: &ats_game_context::LoadedGamePack) -> VerifiedTruthSnapshot {
             provider: PrimitiveId::parse("truth.fixture-index").unwrap(),
             relative_path: "indexes/fixture.json".into(),
             sha256: sha256(&index_bytes),
-            record_count: 1,
+            record_count: u32::try_from(evidence.len()).unwrap(),
         }],
         BTreeMap::from([("fixture-tool".into(), "1".into())]),
         Utc::now(),

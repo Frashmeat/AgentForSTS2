@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import { toActionableFailure } from "./actionableFailure";
+import { buildFeatureSubmission } from "./featureSubmission";
 export { isActionableFailure, toActionableFailure } from "./actionableFailure";
 export type { ActionableFailure, RecoveryAction } from "./actionableFailure";
 
@@ -170,7 +171,7 @@ export interface PlanItem extends Record<string, unknown> {
   summary: string;
   behaviorIntent: string[];
   implementationConstraints: string[];
-  requiredEvidence: string[];
+  evidenceRequirements: string[];
   requiredResourceRoles: string[];
   acceptanceCriteria: string[];
 }
@@ -240,11 +241,11 @@ export function submitModPlan(request: ModPlanRequest): Promise<string> {
 }
 
 export function submitSingleGenerate(request: SingleGenerateRequest): Promise<string> {
-  return submit("mod.generate.single", "feature.mod-generate-single-request", request);
+  return submit("mod.generate.single", "feature.mod-generate-single-request", request, 2);
 }
 
 export function submitBatchGenerate(request: BatchGenerateRequest): Promise<string> {
-  return submit("mod.generate.batch", "feature.mod-generate-batch-request", request);
+  return submit("mod.generate.batch", "feature.mod-generate-batch-request", request, 2);
 }
 
 export function submitComplexGenerate(request: ComplexGenerateRequest): Promise<string> {
@@ -259,7 +260,7 @@ export function submitResourcePrepare(
   request: ResourcePrepareRequest,
   sourcePath?: string,
 ): Promise<string> {
-  return submit("resource.prepare", "feature.resource-prepare-request", request, sourcePath);
+  return submit("resource.prepare", "feature.resource-prepare-request", request, 1, sourcePath);
 }
 
 export function submitProjectBuild(request: ProjectBuildRequest = {}): Promise<string> {
@@ -274,14 +275,11 @@ function submit(
   featureId: string,
   schemaId: string,
   payload: Record<string, unknown>,
+  schemaVersion = 1,
   sourcePath?: string,
 ): Promise<string> {
   return invokeCommand<string>("submit_feature", {
-    submission: {
-      featureId,
-      request: { schema: { id: schemaId, version: 1 }, payload },
-      ...(sourcePath ? { sourcePath } : {}),
-    },
+    submission: buildFeatureSubmission(featureId, schemaId, payload, schemaVersion, sourcePath),
   });
 }
 

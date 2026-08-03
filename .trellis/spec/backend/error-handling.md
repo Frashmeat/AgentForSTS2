@@ -20,6 +20,11 @@ code, stage, optional versioned safe details
 
 It is not an arbitrary error string. The composition boundary maps internal Feature/Adapter errors to stable `RunFailure`; Shell commands map product rejection to `ActionableFailure`.
 
+Single generation must retain the originating class across direct and Batch execution. Current
+stable families include `truth.evidence_missing`, `pack.contribution_invalid`, `resource.*`,
+`model.*`, `validation.*`, `artifact.*`, and `run.*`; Batch child Runs reuse the Single
+classification. Do not collapse these known errors to `feature.execution_failed`.
+
 ## Ownership
 
 - Kernel owns serialized shape and validation.
