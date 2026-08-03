@@ -74,6 +74,113 @@ Feature Recipe owns cross-game task language. Pack owns game-specific guidance. 
 
 Recipe and Pack resources are pinned by SHA-256. Slot resolution is exact and deterministic. Model requests must be replay-auditable without persisting secrets or provider bodies.
 
+### Scenario: Transport A Typed Output Contract To HTTP Providers
+
+#### 1. Scope / Trigger
+
+This contract applies whenever `ats-adapters::HttpModelClient` sends an
+`ats-runtime::ModelRequest`. The request already contains a validated
+`ModelOutputContract { schema, json_schema }`; dropping it at the HTTP boundary turns a typed
+request into prompt-only JSON and can produce `model.output_invalid` for an otherwise valid Run.
+
+#### 2. Signatures
+
+```rust
+// crates/ats-runtime/src/model.rs
+pub struct ModelRequest {
+    pub messages: Vec<ModelMessage>,
+    pub output_contract: ModelOutputContract,
+    pub max_output_tokens: u32,
+    pub temperature: Option<f32>,
+    pub model: Option<String>,
+}
+
+// crates/ats-adapters/src/model_client.rs
+fn openai_request_body(request: &ModelRequest, model: &str) -> serde_json::Value;
+fn anthropic_request_body(request: &ModelRequest, model: &str) -> serde_json::Value;
+```
+
+#### 3. Contracts
+
+| Runtime field | OpenAI-compatible Chat Completions | Anthropic Messages |
+| --- | --- | --- |
+| `messages` | `messages[]`; all roles retained | system roles joined into `system`; other roles in `messages[]` |
+| `output_contract.json_schema` | `response_format.json_schema.schema` | `output_config.format.schema` |
+| strict type | `response_format.type=json_schema`, `json_schema.strict=true` | `output_config.format.type=json_schema` |
+| schema name | fixed provider-safe `agentthespire_output` | not required |
+| `max_output_tokens` | `max_tokens` | `max_tokens` |
+| optional `temperature` | present only when configured | present only when configured |
+
+The Adapter sends no Feature/Game Pack prompt of its own and never persists or logs the request,
+Authorization header, or provider body.
+
+#### 4. Validation & Error Matrix
+
+| Provider result | Adapter result | Persisted Feature family |
+| --- | --- | --- |
+| 2xx with a normal completion envelope | `ModelResponse`; Feature performs authoritative typed decode | `succeeded` or `model.output_invalid` |
+| 2xx with malformed/empty completion envelope | `ModelError::InvalidResponse` | `model.response_invalid` |
+| 400/other non-retryable rejection, including unsupported structured output | `ModelError::Rejected` | `model.request_rejected` |
+| 401/403 | `ModelError::Authentication` | `model.authentication` |
+| 429 | `ModelError::RateLimited` | `model.rate_limited` |
+| transport/5xx after bounded retries | `ModelError::Transport` | `model.transport_failed` |
+
+An incompatible proxy is a configuration/provider failure. It must not trigger a second
+prompt-only request, code-fence stripping, first-object extraction, or a fabricated success.
+
+#### 5. Good / Base / Bad Cases
+
+- Good: a capable provider receives the exact Recipe JSON Schema and returns one contract-valid
+  object; Feature code still revalidates the decoded type.
+- Base: `temperature=None` omits the provider field, while the output contract is still mandatory.
+- Bad: the provider rejects `response_format`/`output_config`; the Run retains a typed model failure
+  and no fallback request is issued.
+- Bad: the provider returns Markdown fences or extra fields; Feature strict decoding fails with
+  `model.output_invalid` rather than accepting a partial object.
+
+#### 6. Tests Required
+
+```powershell
+cargo test -p ats-adapters model_client -- --nocapture
+cargo test --workspace --all-targets
+cargo clippy --workspace --all-targets -- -D warnings
+```
+
+Required assertions:
+
+- `openai_request_enforces_the_core_output_contract`: exact schema, `json_schema`, fixed name and
+  `strict=true` are present.
+- `openai_request_omits_an_absent_temperature`: optional transport fields do not weaken the schema.
+- `anthropic_request_enforces_the_core_output_contract`: system-message handling and
+  `output_config.format.schema` are both preserved.
+- A real-provider acceptance uses a normal natural-language Plan and proves the persisted typed
+  result; it is environment acceptance, not a deterministic machine gate.
+
+#### 7. Wrong vs Correct
+
+Wrong — the schema exists only as prompt text:
+
+```rust
+json!({ "model": model, "messages": messages, "max_tokens": request.max_output_tokens })
+```
+
+Correct — the provider request carries the Runtime-owned contract:
+
+```rust
+json!({
+    "model": model,
+    "messages": messages,
+    "response_format": {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "agentthespire_output",
+            "strict": true,
+            "schema": request.output_contract.json_schema,
+        }
+    }
+})
+```
+
 Every constraint enforced on model output that JSON Schema can express must also be present in the
 Recipe output contract shown to the model, including identifier patterns, string bounds and array
 bounds. Code validation remains authoritative, but it must not rely on a stricter hidden shape that

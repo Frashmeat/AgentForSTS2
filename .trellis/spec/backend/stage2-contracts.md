@@ -61,6 +61,11 @@ Pinned Feature Recipe + verified Pack contribution + bounded Truth Evidence + se
 
 Runtime owns provider-neutral `ModelClient`; Adapters own HTTP. Long Mod/game Prompt strings are forbidden in handler/Shell/Adapter code. Protocol roles, schema/slot IDs, JSON contracts, escaping, truncation and redaction remain code contracts.
 
+HTTP Adapters map the Runtime-owned output contract to native strict structured output:
+OpenAI-compatible `response_format.json_schema` and Anthropic
+`output_config.format.json_schema`. Provider rejection remains typed; prompt-only fallback and
+permissive extraction are forbidden.
+
 Recipe output JSON Schema exposes all expressible identifier, length and collection constraints
 enforced by the typed Feature validator. The validator remains authoritative and its failures retain
 their typed classification through composition and persisted Run state.

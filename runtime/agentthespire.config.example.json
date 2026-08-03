@@ -30,7 +30,7 @@
       "github_token": ""
     }
   },
-  "_llm_provider_help": "provider 字段决定客户端协议：留空或 'anthropic' → Anthropic Messages API；'openai' / 'openai_compatible' / 'new_api' / 'one_api' → OpenAI Chat Completions（兼容 new-api / one-api / litellm / vLLM 等代理）。base_url 留空时走对应官方端点，填写后走第三方代理。",
+  "_llm_provider_help": "provider 字段决定客户端协议：留空或 'anthropic' → Anthropic Messages API；'openai' / 'openai_compatible' / 'new_api' / 'one_api' → OpenAI Chat Completions。目标模型或代理必须支持原生 JSON Schema 结构化输出（Anthropic output_config.format 或 OpenAI response_format.json_schema）；不支持时请求会失败，不会退回仅靠提示词的 JSON。base_url 留空时走对应官方端点，填写后走第三方代理。",
   "_llm_examples": {
     "anthropic_official": { "provider": "anthropic", "model": "claude-sonnet-4-6", "base_url": "" },
     "anthropic_proxy": { "provider": "anthropic", "model": "claude-sonnet-4-6", "base_url": "https://your-anthropic-proxy.example/" },

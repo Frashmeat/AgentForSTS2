@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use ats_runtime::{
-    CancellationToken, FinishReason, ModelClient, ModelError, ModelMessageRole,
+    CancellationToken, FinishReason, ModelClient, ModelError, ModelMessageRole, ModelRequest,
     ModelRequestSnapshot, ModelResponse, ModelStream, ModelStreamEvent, TokenUsage,
 };
 use futures_util::stream;
@@ -84,24 +84,7 @@ impl HttpModelClient {
         let future = async {
             match self.protocol {
                 Protocol::OpenAi => {
-                    let messages = request
-                        .messages
-                        .iter()
-                        .map(|message| {
-                            json!({
-                                "role": role(message.role),
-                                "content": message.content,
-                            })
-                        })
-                        .collect::<Vec<_>>();
-                    let mut body = json!({
-                        "model": model,
-                        "messages": messages,
-                        "max_tokens": request.max_output_tokens,
-                    });
-                    if let Some(temperature) = request.temperature {
-                        body["temperature"] = json!(temperature);
-                    }
+                    let body = openai_request_body(request, &model);
                     let response = self
                         .client
                         .post(format!("{}/chat/completions", self.base_url))
@@ -113,35 +96,7 @@ impl HttpModelClient {
                     parse_openai(response).await
                 }
                 Protocol::Anthropic => {
-                    let system = request
-                        .messages
-                        .iter()
-                        .filter(|message| message.role == ModelMessageRole::System)
-                        .map(|message| message.content.as_str())
-                        .collect::<Vec<_>>()
-                        .join("\n\n");
-                    let messages = request
-                        .messages
-                        .iter()
-                        .filter(|message| message.role != ModelMessageRole::System)
-                        .map(|message| {
-                            json!({
-                                "role": role(message.role),
-                                "content": message.content,
-                            })
-                        })
-                        .collect::<Vec<_>>();
-                    let mut body = json!({
-                        "model": model,
-                        "messages": messages,
-                        "max_tokens": request.max_output_tokens,
-                    });
-                    if !system.is_empty() {
-                        body["system"] = Value::String(system);
-                    }
-                    if let Some(temperature) = request.temperature {
-                        body["temperature"] = json!(temperature);
-                    }
+                    let body = anthropic_request_body(request, &model);
                     let response = self
                         .client
                         .post(format!("{}/messages", self.base_url))
@@ -281,6 +236,75 @@ fn role(role: ModelMessageRole) -> &'static str {
     }
 }
 
+fn openai_request_body(request: &ModelRequest, model: &str) -> Value {
+    let messages = request
+        .messages
+        .iter()
+        .map(|message| {
+            json!({
+                "role": role(message.role),
+                "content": message.content,
+            })
+        })
+        .collect::<Vec<_>>();
+    let mut body = json!({
+        "model": model,
+        "messages": messages,
+        "max_tokens": request.max_output_tokens,
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "agentthespire_output",
+                "strict": true,
+                "schema": request.output_contract.json_schema,
+            },
+        },
+    });
+    if let Some(temperature) = request.temperature {
+        body["temperature"] = json!(temperature);
+    }
+    body
+}
+
+fn anthropic_request_body(request: &ModelRequest, model: &str) -> Value {
+    let system = request
+        .messages
+        .iter()
+        .filter(|message| message.role == ModelMessageRole::System)
+        .map(|message| message.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let messages = request
+        .messages
+        .iter()
+        .filter(|message| message.role != ModelMessageRole::System)
+        .map(|message| {
+            json!({
+                "role": role(message.role),
+                "content": message.content,
+            })
+        })
+        .collect::<Vec<_>>();
+    let mut body = json!({
+        "model": model,
+        "messages": messages,
+        "max_tokens": request.max_output_tokens,
+        "output_config": {
+            "format": {
+                "type": "json_schema",
+                "schema": request.output_contract.json_schema,
+            },
+        },
+    });
+    if !system.is_empty() {
+        body["system"] = Value::String(system);
+    }
+    if let Some(temperature) = request.temperature {
+        body["temperature"] = json!(temperature);
+    }
+    body
+}
+
 fn text<'a>(value: &'a Value, key: &str) -> Result<&'a str, ModelError> {
     value
         .get(key)
@@ -325,5 +349,135 @@ fn value_or(value: &str, fallback: &str) -> String {
         fallback.into()
     } else {
         value.trim().into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ats_kernel::{SchemaId, SchemaRef, SchemaVersion};
+    use ats_runtime::{ModelMessage, ModelOutputContract};
+
+    use super::*;
+
+    #[test]
+    fn openai_request_enforces_the_core_output_contract() {
+        let schema = json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["itemId"],
+            "properties": {
+                "itemId": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_-]*$"
+                }
+            }
+        });
+        let request = ModelRequest {
+            messages: vec![ModelMessage {
+                role: ModelMessageRole::User,
+                content: "fixture".into(),
+            }],
+            output_contract: ModelOutputContract {
+                schema: SchemaRef {
+                    id: SchemaId::parse("feature.fixture-output").unwrap(),
+                    version: SchemaVersion::new(1).unwrap(),
+                },
+                json_schema: schema.clone(),
+            },
+            max_output_tokens: 512,
+            temperature: Some(0.25),
+            model: None,
+        };
+
+        let body = openai_request_body(&request, "fixture-model");
+
+        assert_eq!(body["model"], json!("fixture-model"));
+        assert_eq!(body["max_tokens"], json!(512));
+        assert_eq!(body["temperature"], json!(0.25));
+        assert_eq!(body["messages"][0]["role"], json!("user"));
+        assert_eq!(body["response_format"]["type"], json!("json_schema"));
+        assert_eq!(
+            body["response_format"]["json_schema"]["name"],
+            json!("agentthespire_output")
+        );
+        assert_eq!(
+            body["response_format"]["json_schema"]["strict"],
+            json!(true)
+        );
+        assert_eq!(body["response_format"]["json_schema"]["schema"], schema);
+    }
+
+    #[test]
+    fn openai_request_omits_an_absent_temperature() {
+        let request = ModelRequest {
+            messages: vec![ModelMessage {
+                role: ModelMessageRole::System,
+                content: "fixture".into(),
+            }],
+            output_contract: ModelOutputContract {
+                schema: SchemaRef {
+                    id: SchemaId::parse("feature.fixture-output").unwrap(),
+                    version: SchemaVersion::new(1).unwrap(),
+                },
+                json_schema: json!({"type": "object"}),
+            },
+            max_output_tokens: 128,
+            temperature: None,
+            model: None,
+        };
+
+        let body = openai_request_body(&request, "fixture-model");
+
+        assert!(body.get("temperature").is_none());
+    }
+
+    #[test]
+    fn anthropic_request_enforces_the_core_output_contract() {
+        let schema = json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["ok"],
+            "properties": { "ok": { "type": "boolean" } }
+        });
+        let request = ModelRequest {
+            messages: vec![
+                ModelMessage {
+                    role: ModelMessageRole::System,
+                    content: "system one".into(),
+                },
+                ModelMessage {
+                    role: ModelMessageRole::System,
+                    content: "system two".into(),
+                },
+                ModelMessage {
+                    role: ModelMessageRole::User,
+                    content: "fixture".into(),
+                },
+            ],
+            output_contract: ModelOutputContract {
+                schema: SchemaRef {
+                    id: SchemaId::parse("feature.fixture-output").unwrap(),
+                    version: SchemaVersion::new(1).unwrap(),
+                },
+                json_schema: schema.clone(),
+            },
+            max_output_tokens: 256,
+            temperature: Some(0.5),
+            model: None,
+        };
+
+        let body = anthropic_request_body(&request, "fixture-model");
+
+        assert_eq!(body["model"], json!("fixture-model"));
+        assert_eq!(body["max_tokens"], json!(256));
+        assert_eq!(body["temperature"], json!(0.5));
+        assert_eq!(body["system"], json!("system one\n\nsystem two"));
+        assert_eq!(body["messages"].as_array().unwrap().len(), 1);
+        assert_eq!(body["messages"][0]["role"], json!("user"));
+        assert_eq!(
+            body["output_config"]["format"]["type"],
+            json!("json_schema")
+        );
+        assert_eq!(body["output_config"]["format"]["schema"], schema);
     }
 }

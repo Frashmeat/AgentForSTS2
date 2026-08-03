@@ -53,7 +53,7 @@ Feature Prompt Recipe
 | 用户/AI/Pack 资源 | Resource Workspace v1 | resource ID、selected version、provenance |
 | 工程上下文 | composition root 生成的脱敏摘要 | 工程名、Mod ID、Pack ID |
 | 用户运行时补充指令 | `llm.custom_prompt` | 本次运行附加偏好 |
-| 模型 transport | `ats-runtime::ModelClient` + `ats-adapters::HttpModelClient` | provider-neutral request/response |
+| 模型 transport | `ats-runtime::ModelClient` + `ats-adapters::HttpModelClient` | provider-neutral request/response；原生严格 JSON Schema 输出 |
 
 Feature Recipe 不包含 STS2 hook、BaseLib 类型或具体资源路径；Pack 不拥有完整工作流；Truth 不保存用户偏好；runtime custom instructions 不能覆盖 schema、安全、证据或验证合同。
 
@@ -131,6 +131,11 @@ Selected Resource 通过 `resourceId + selectedVersion` 进入请求，模型看
 ## 8. 安全与复验
 
 Run/Artifact 可以保存 schema/hash、Pack/Snapshot/Resource identity 和安全 provenance，但不能保存 API key、Authorization、完整 provider body、绝对私有路径或未经边界控制的 Prompt/输出。`ModelRequestSnapshot` 是 run-scoped 可复验请求合同，日志不成为第二真源。
+
+HTTP Adapter 必须把 Snapshot 的 typed output contract 映射到 provider 原生结构化输出：
+OpenAI-compatible 使用 `response_format.type=json_schema`，Anthropic 使用
+`output_config.format.type=json_schema`。provider 不支持时保持 typed failure；不得接受代码块、
+截取首个 JSON 对象或静默重试为 prompt-only 模式。
 
 当前残留门禁：
 
