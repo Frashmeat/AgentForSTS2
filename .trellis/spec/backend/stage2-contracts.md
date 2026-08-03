@@ -70,6 +70,12 @@ Recipe output JSON Schema exposes all expressible identifier, length and collect
 enforced by the typed Feature validator. The validator remains authoritative and its failures retain
 their typed classification through composition and persisted Run state.
 
+For `mod.generate.single`, the selected Pack item type compiles into a run-scoped bundle v2 schema.
+`files` is a role-keyed object with exactly the Pack-owned generated-file roles required and no
+additional properties. Recipe rendering, `ModelRequestSnapshot`, provider-native structured output,
+typed decoding, and final role validation therefore share one contract; Pack roles cannot remain a
+hidden post-provider constraint.
+
 ## 7. Feature Composition
 
 The shared registry contains exactly 9 current Features. Single generation owns the validated model bundle -> rollback-capable project writes -> real validation -> immutable Artifact -> Run success order. Batch invokes Single child Runs. Complex invokes Plan, Batch/Single, Build and Package. Neither composition creates an alternative Prompt, Resource, file transaction, build or package implementation.

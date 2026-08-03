@@ -37,6 +37,12 @@ Feature Prompt Recipe
 
 所有 slot 精确匹配、顺序确定并参与请求 hash。缺失、重复、未知或 schema/hash 不匹配都在模型调用前失败。
 
+`mod.generate.single` 在选择并验证 Pack item type 后，将其 `generatedFiles[].role` 编译为
+run-scoped bundle v2 Schema：`files` 是以角色为固定键的对象，所有声明角色均 required，且
+`additionalProperties=false`。同一份动态 Schema 同时进入 `output.contract` Prompt slot、
+`ModelRequestSnapshot` 和 provider 原生结构化输出。Runtime 保留二次校验，但不再隐藏比模型可见
+Schema 更严格的文件数量/角色合同。
+
 规划与证据检索使用两个不同合同：`mod.plan` result v2 的 `evidenceRequirements`
 只描述生成时需要证明的事实；Game Pack `pack.mod-generate-single` v2 为每个 item type
 声明结构化 `evidenceQueries { symbols, terms }`。模型不需要知道 Truth 索引键，Feature 也不把
@@ -79,7 +85,7 @@ STS2 当前真源是：
 game_packs/sts2/stage2-game-pack.json
 ```
 
-它声明 Feature contribution、item type、生成文件角色/目标、Evidence 查询、资源规格、日志规则、验证/build/package Primitive 和工程模板引用。Pack 先经过 schema 与 pinned SHA 校验，再由 `ContributionResolver` 按 Feature required slot 选择。`evidenceQueries` 是 Pack 的可执行数据合同：每组查询必须至少命中一条当前 Truth，最终 Evidence 有界去重；任一组无命中即返回 `truth.evidence_missing`，不能继续调用模型。
+它声明 Feature contribution、item type、生成文件角色/目标、Evidence 查询、资源规格、日志规则、验证/build/package Primitive 和工程模板引用。Pack 先经过 schema 与 pinned SHA 校验，再由 `ContributionResolver` 按 Feature required slot 选择。Single Prompt 只接收所选 item type 的 guidance 与生成文件角色；目标路径仍由 Feature 确定性展开，不由模型作者化。`evidenceQueries` 是 Pack 的可执行数据合同：每组查询必须至少命中一条当前 Truth，最终 Evidence 有界去重；任一组无命中即返回 `truth.evidence_missing`，不能继续调用模型。
 
 新增游戏应新增独立 Pack 与 Truth 来源。不得把游戏自然语言、hook、C#/Godot/BaseLib 约束重新写入通用 Feature 或 Shell。
 

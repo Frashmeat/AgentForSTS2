@@ -56,6 +56,29 @@ impl FeatureRecipe {
         values: &BTreeMap<String, String>,
         model: Option<String>,
     ) -> Result<ModelRequest, FeatureRecipeError> {
+        self.render_with_output_contract(values, model, self.output_contract.clone())
+    }
+
+    pub fn render_with_output_contract(
+        &self,
+        values: &BTreeMap<String, String>,
+        model: Option<String>,
+        output_contract: ModelOutputContract,
+    ) -> Result<ModelRequest, FeatureRecipeError> {
+        if output_contract.schema != self.output_contract.schema
+            || !output_contract.json_schema.is_object()
+            || serde_json::to_vec(&output_contract.json_schema)
+                .map_or(true, |bytes| bytes.len() > 32_000)
+        {
+            return Err(FeatureRecipeError::InvalidContract);
+        }
+        if let Some(rendered) = values.get("output.contract") {
+            let expected = serde_json::to_string_pretty(&output_contract.json_schema)
+                .map_err(|_| FeatureRecipeError::InvalidContract)?;
+            if rendered != &expected {
+                return Err(FeatureRecipeError::InvalidContract);
+            }
+        }
         if values.keys().any(|id| !self.slots.contains_key(id)) {
             return Err(FeatureRecipeError::UnexpectedSlot);
         }
@@ -83,7 +106,7 @@ impl FeatureRecipe {
             .collect::<Result<Vec<_>, FeatureRecipeError>>()?;
         Ok(ModelRequest {
             messages,
-            output_contract: self.output_contract.clone(),
+            output_contract,
             max_output_tokens: self.max_output_tokens,
             temperature: self.temperature,
             model,
@@ -424,6 +447,60 @@ mod tests {
                 None
             ),
             Err(FeatureRecipeError::SlotTooLarge)
+        ));
+    }
+
+    #[test]
+    fn renderer_accepts_only_a_run_scoped_contract_with_the_recipe_schema_identity() {
+        let bytes = br#"{
+          "schemaVersion":1,
+          "id":"recipe.fixture",
+          "featureId":"fixture.analyze",
+          "version":1,
+          "messages":[{"role":"user","template":"{{output.contract}}"}],
+          "slots":[{"id":"output.contract","required":true,"maxChars":1000}],
+          "outputContract":{"schema":{"id":"feature.fixture-result","version":1},"jsonSchema":{"type":"object"}},
+          "maxOutputTokens":128,
+          "temperature":null
+        }"#;
+        let recipe = load(bytes);
+        let contract = ModelOutputContract {
+            schema: recipe.output_contract().schema.clone(),
+            json_schema: serde_json::json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["value"],
+                "properties": {"value": {"type": "string"}}
+            }),
+        };
+        let rendered = serde_json::to_string_pretty(&contract.json_schema).unwrap();
+        let request = recipe
+            .render_with_output_contract(
+                &BTreeMap::from([("output.contract".into(), rendered.clone())]),
+                None,
+                contract.clone(),
+            )
+            .unwrap();
+        assert_eq!(request.output_contract, contract);
+
+        assert!(matches!(
+            recipe.render_with_output_contract(
+                &BTreeMap::from([("output.contract".into(), "different".into())]),
+                None,
+                contract.clone(),
+            ),
+            Err(FeatureRecipeError::InvalidContract)
+        ));
+
+        let mut wrong_identity = contract;
+        wrong_identity.schema.version = SchemaVersion::new(2).unwrap();
+        assert!(matches!(
+            recipe.render_with_output_contract(
+                &BTreeMap::from([("output.contract".into(), rendered)]),
+                None,
+                wrong_identity,
+            ),
+            Err(FeatureRecipeError::InvalidContract)
         ));
     }
 

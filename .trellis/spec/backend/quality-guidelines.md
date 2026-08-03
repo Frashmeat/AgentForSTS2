@@ -194,6 +194,124 @@ Never treat model-authored prose as an exact Truth symbol or require users to kn
 keys. Do not add heuristic token splitting in a generic Feature; new game/item evidence discovery is
 a versioned Pack contribution contract.
 
+### Scenario: Compile Pack File Roles Into A Run-Scoped Generate Contract
+
+#### 1. Scope / Trigger
+
+This contract applies after `SingleGenerateService` resolves the selected
+`pack.mod-generate-single` item type and before it calls `ModelClient`. Pack-owned generated-file
+roles vary by item type, so a fixed Recipe schema cannot truthfully express the required model
+response shape.
+
+#### 2. Signatures
+
+```rust
+// crates/ats-features/src/prompt/mod.rs
+pub fn render_with_output_contract(
+    &self,
+    values: &BTreeMap<String, String>,
+    model: Option<String>,
+    output_contract: ModelOutputContract,
+) -> Result<ModelRequest, FeatureRecipeError>;
+
+// crates/ats-features/src/mod_generate_single.rs
+fn run_scoped_output_contract(item_spec: &GenerateItemType) -> ModelOutputContract;
+
+struct GeneratedModBundle {
+    files: BTreeMap<String, String>,
+    acceptance_notes: Vec<String>,
+}
+```
+
+The Recipe declares `feature.mod-generate-single-bundle` v2. The selected item type supplies
+`generatedFiles[].role`; target paths remain Feature-owned and are never model-authored.
+
+#### 3. Contracts
+
+| Source | Run-scoped destination |
+| --- | --- |
+| `itemType.id` | `pack.contribution.itemType` |
+| `contribution.guidance[]` | `pack.contribution.guidance[]` |
+| `itemType.generatedFiles[].role` | `pack.contribution.generatedFileRoles[]` |
+| same role set | `output_contract.json_schema.properties.files.properties` keys |
+| same role set | `properties.files.required[]` |
+| dynamic JSON Schema | exact serialized `output.contract` Prompt slot |
+| dynamic JSON Schema | `ModelRequestSnapshot.request.outputContract` and provider-native schema |
+
+Bundle v2 uses a role-keyed object:
+
+```json
+{
+  "files": {
+    "source": "complete generated source"
+  },
+  "acceptanceNotes": []
+}
+```
+
+`files.additionalProperties=false`; every declared role is required. Each content string is
+non-blank, NUL-free, and bounded to 16 MiB. Acceptance notes are optional as an empty array and are
+otherwise non-blank, NUL-free, at most 64 items and 2,000 characters each.
+
+#### 4. Validation & Error Matrix
+
+| Condition | Boundary result | Persisted Run family |
+| --- | --- | --- |
+| Recipe schema identity differs from dynamic contract | `FeatureRecipeError::InvalidContract` before HTTP | `feature.recipe_invalid` |
+| serialized `output.contract` differs from Snapshot contract | `FeatureRecipeError::InvalidContract` before HTTP | `feature.recipe_invalid` |
+| provider rejects the dynamic schema | `ModelError::Rejected` | `model.request_rejected` |
+| malformed JSON, wrong shape, missing/extra role, blank/NUL/oversized content | typed decode or `validate_bundle` rejection | `model.output_invalid` |
+| exact roles and bounded content | continue to project transaction, validation and Artifact publication | later typed stage or `succeeded` |
+
+Code validation remains authoritative. It must reject an incompatible provider response even when a
+proxy falsely claims strict-schema support, but it cannot keep JSON-Schema-expressible role/count
+requirements hidden from the request.
+
+#### 5. Good / Base / Bad Cases
+
+- Good: `custom_code` compiles one required `source` property into Prompt, Snapshot and provider
+  schema; a matching object reaches compile validation.
+- Base: `relic` compiles `source`, `localization.eng`, and `localization.zhs`; Pack order controls
+  deterministic project writes while JSON object key order is irrelevant.
+- Bad: a generic `files: [{ role: string, content: string }]` schema lets the provider return an
+  arbitrary role that Runtime later rejects; this caused the installed-candidate failure.
+- Bad: Prompt displays one schema while the HTTP request carries another; Recipe rendering rejects
+  this mismatch before model work.
+
+#### 6. Tests Required
+
+```powershell
+cargo test -p ats-features --all-targets
+cargo test -p ats-adapters model_client -- --nocapture
+cargo test -p agentthespire-desktop --test stage2_single_mod --test stage2_composition
+cargo test -p agentthespire-desktop --lib composition::tests::facade_persists_plan_generation_artifact_and_releases_project_lock -- --exact
+```
+
+Required assertions:
+
+- exact role keys appear in both `properties` and `required`, with `additionalProperties=false`;
+- Prompt contains the exact pretty-serialized Snapshot schema once;
+- Prompt Pack contribution exposes item type, guidance and generated roles;
+- wrong role fails `model.output_invalid`; correct multi-role output compiles and publishes;
+- provider transport tests preserve the `ModelRequest` schema without rewriting it;
+- facade E2E still proves Run v3, Artifact v3/hash, no staging and lock reacquisition.
+
+#### 7. Wrong vs Correct
+
+Wrong - fixed generic roles plus a stricter hidden validator:
+
+```json
+{"files":{"type":"array","items":{"properties":{"role":{"type":"string"}}}}}
+```
+
+Correct - specialize the verified Pack roles once and reuse that exact contract:
+
+```rust
+let output_contract = run_scoped_output_contract(item_spec);
+let rendered = serialize(&output_contract.json_schema)?;
+let request = recipe.render_with_output_contract(&slots, model, output_contract)?;
+```
+
 ## 7. File And Process Work
 
 - External IO is behind Runtime/Workspace ports and Adapter implementations.

@@ -673,10 +673,9 @@ mod tests {
                 }
             } else {
                 serde_json::json!({
-                    "files": [{
-                        "role": "source",
-                        "content": "public class FixtureGenerated {}"
-                    }],
+                    "files": {
+                        "source": "public class FixtureGenerated {}"
+                    },
                     "acceptanceNotes": ["deterministic facade fixture"]
                 })
                 .to_string()

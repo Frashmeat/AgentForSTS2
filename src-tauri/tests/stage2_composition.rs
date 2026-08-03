@@ -77,7 +77,7 @@ impl ModelClient for CompositionModel {
             }
             let class_name = format!("Generated{}", *generated);
             serde_json::json!({
-                "files":[{"role":"source","content":format!("public class {class_name} {{}}") }],
+                "files":{"source":format!("public class {class_name} {{}}")},
                 "acceptanceNotes":["fixture generated"]
             })
             .to_string()

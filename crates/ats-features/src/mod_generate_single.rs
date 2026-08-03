@@ -11,10 +11,11 @@ use ats_kernel::{
 };
 use ats_runtime::{
     ArtifactFileInput, ArtifactPublishRequest, ArtifactPublisher, CancellationToken, FinishReason,
-    ModelClient, ModelError, ModelGamePackRef, ModelRequestError, ModelRequestSnapshot,
-    ModelResourceRef, PayloadError, ProjectFileWrite, ProjectFileWriter, ProjectWriteError,
-    PublishedArtifact, RunFailure, RunLifecycleError, RunRecord, RunStatus, RunTransition,
-    TokenUsage, ValidationError, ValidationRequest, ValidationRunner, VersionedPayload,
+    ModelClient, ModelError, ModelGamePackRef, ModelOutputContract, ModelRequestError,
+    ModelRequestSnapshot, ModelResourceRef, PayloadError, ProjectFileWrite, ProjectFileWriter,
+    ProjectWriteError, PublishedArtifact, RunFailure, RunLifecycleError, RunRecord, RunStatus,
+    RunTransition, TokenUsage, ValidationError, ValidationRequest, ValidationRunner,
+    VersionedPayload,
 };
 use ats_workspace::{ResourceAsset, ResourceRepository};
 use chrono::Utc;
@@ -27,7 +28,7 @@ use crate::prompt::{FeatureRecipe, FeatureRecipeError, FeatureRecipeLoader};
 use crate::resource_prepare::{ResourcePrepareFeature, ResourceSpecs, expand_target_template};
 
 const RECIPE_BYTES: &[u8] = include_bytes!("../recipes/mod-generate-single.json");
-const RECIPE_SHA256: &str = "ca176463b8c05058bdb49d359e4098b0b5ae9450004bb3c0ab83fc84de86e3e2";
+const RECIPE_SHA256: &str = "fac372e212cacf16036160c8bdfae7b9935d8e42d36279a2ef0aa82c666a0269";
 const MAX_EVIDENCE_RECORDS: u16 = 20;
 
 pub struct SingleGenerateFeature;
@@ -133,15 +134,16 @@ struct GeneratedFileSpec {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct GeneratedModBundle {
-    files: Vec<GeneratedTextFile>,
+    files: BTreeMap<String, String>,
     acceptance_notes: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct GeneratedTextFile {
-    role: String,
-    content: String,
+struct GeneratePromptContribution<'a> {
+    item_type: &'a str,
+    guidance: &'a [String],
+    generated_file_roles: Vec<&'a str>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -260,8 +262,14 @@ impl SingleGenerateService {
             .iter()
             .map(|item| item.reference.clone())
             .collect::<Vec<_>>();
-        let snapshot =
-            self.assemble_request(&request, &context, &contribution, &evidence, &resource_refs)?;
+        let snapshot = self.assemble_request(
+            &request,
+            &context,
+            &contribution,
+            item_spec,
+            &evidence,
+            &resource_refs,
+        )?;
         check_cancelled(cancellation)?;
         let response = dependencies
             .model
@@ -363,15 +371,26 @@ impl SingleGenerateService {
         request: &SingleGenerateRequest,
         context: &SingleGenerateContext<'_>,
         contribution: &GenerateContribution,
+        item_spec: &GenerateItemType,
         evidence: &[TruthEvidenceRecord],
         resources: &[ModelResourceRef],
     ) -> Result<ModelRequestSnapshot, SingleGenerateError> {
+        let output_contract = run_scoped_output_contract(item_spec);
+        let pack_contribution = GeneratePromptContribution {
+            item_type: &item_spec.id,
+            guidance: &contribution.guidance,
+            generated_file_roles: item_spec
+                .generated_files
+                .iter()
+                .map(|file| file.role.as_str())
+                .collect(),
+        };
         let slots = BTreeMap::from([
             (
                 "output.contract".into(),
-                serialize(&self.recipe.output_contract().json_schema)?,
+                serialize(&output_contract.json_schema)?,
             ),
-            ("pack.guidance".into(), serialize(&contribution.guidance)?),
+            ("pack.contribution".into(), serialize(&pack_contribution)?),
             ("truth.evidence".into(), serialize(evidence)?),
             ("resources.selected".into(), serialize(resources)?),
             (
@@ -384,7 +403,11 @@ impl SingleGenerateService {
             ),
             ("request.plan".into(), serialize(&request.plan)?),
         ]);
-        let model_request = self.recipe.render(&slots, context.model.clone())?;
+        let model_request = self.recipe.render_with_output_contract(
+            &slots,
+            context.model.clone(),
+            output_contract,
+        )?;
         Ok(ModelRequestSnapshot::new(
             SingleGenerateFeature::id(),
             self.recipe.recipe_ref(),
@@ -811,6 +834,55 @@ fn validate_selected_asset(
     Ok(())
 }
 
+fn run_scoped_output_contract(item_spec: &GenerateItemType) -> ModelOutputContract {
+    let file_properties = item_spec
+        .generated_files
+        .iter()
+        .map(|file| {
+            (
+                file.role.clone(),
+                serde_json::json!({
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 16 * 1024 * 1024,
+                    "pattern": r"^[^\u0000]*\S[^\u0000]*$"
+                }),
+            )
+        })
+        .collect::<serde_json::Map<_, _>>();
+    let required_roles = item_spec
+        .generated_files
+        .iter()
+        .map(|file| file.role.as_str())
+        .collect::<Vec<_>>();
+    ModelOutputContract {
+        schema: bundle_schema(),
+        json_schema: serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["files", "acceptanceNotes"],
+            "properties": {
+                "files": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": required_roles,
+                    "properties": file_properties
+                },
+                "acceptanceNotes": {
+                    "type": "array",
+                    "maxItems": 64,
+                    "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2_000,
+                        "pattern": r"^[^\u0000]*\S[^\u0000]*$"
+                    }
+                }
+            }
+        }),
+    }
+}
+
 fn validate_bundle(
     request: &SingleGenerateRequest,
     item_spec: &GenerateItemType,
@@ -818,20 +890,16 @@ fn validate_bundle(
 ) -> Result<ValidatedBundle, SingleGenerateError> {
     if bundle.files.len() != item_spec.generated_files.len()
         || !valid_text_list(&bundle.acceptance_notes, 64, 2_000, true)
+        || bundle.files.iter().any(|(role, content)| {
+            !valid_role(role)
+                || content.trim().is_empty()
+                || content.len() > 16 * 1024 * 1024
+                || content.contains('\0')
+        })
     {
         return Err(SingleGenerateError::InvalidModelOutput);
     }
-    let mut by_role = BTreeMap::new();
-    for file in bundle.files {
-        if !valid_role(&file.role)
-            || file.content.trim().is_empty()
-            || file.content.len() > 16 * 1024 * 1024
-            || file.content.contains('\0')
-            || by_role.insert(file.role, file.content).is_some()
-        {
-            return Err(SingleGenerateError::InvalidModelOutput);
-        }
-    }
+    let mut by_role = bundle.files;
     let mut files = Vec::with_capacity(item_spec.generated_files.len());
     for spec in &item_spec.generated_files {
         let content = by_role
@@ -1087,7 +1155,7 @@ fn schema_version(id: &str, version: u32) -> SchemaRef {
 }
 
 fn bundle_schema() -> SchemaRef {
-    schema("feature.mod-generate-single-bundle")
+    schema_version("feature.mod-generate-single-bundle", 2)
 }
 
 #[cfg(test)]
@@ -1182,6 +1250,84 @@ mod tests {
             .unwrap(),
             "fixture_mod/metadata.json"
         );
+    }
+
+    #[test]
+    fn run_scoped_bundle_contract_exposes_and_enforces_exact_pack_roles() {
+        let item_spec = GenerateItemType {
+            id: "fixture_item".into(),
+            generated_files: vec![
+                GeneratedFileSpec {
+                    role: "source".into(),
+                    target_path: "Generated/{item_id}.cs".into(),
+                },
+                GeneratedFileSpec {
+                    role: "localization.eng".into(),
+                    target_path: "{mod_id}/localization/eng/items.json".into(),
+                },
+            ],
+            evidence_queries: vec![PackEvidenceQuery {
+                symbols: vec!["Fixture.Symbol".into()],
+                terms: Vec::new(),
+            }],
+            required_resource_roles: Vec::new(),
+        };
+        let contract = run_scoped_output_contract(&item_spec);
+        assert_eq!(contract.schema, bundle_schema());
+        assert_eq!(
+            contract.json_schema["properties"]["files"]["required"],
+            serde_json::json!(["source", "localization.eng"])
+        );
+        assert_eq!(
+            contract.json_schema["properties"]["files"]["additionalProperties"],
+            false
+        );
+        assert_eq!(
+            contract.json_schema["properties"]["files"]["properties"]
+                .as_object()
+                .unwrap()
+                .len(),
+            2
+        );
+
+        let request = SingleGenerateRequest {
+            artifact_id: "fixture-artifact".into(),
+            mod_id: "FixtureMod".into(),
+            plan: PlanItem {
+                item_id: "fixture_item".into(),
+                item_type: "fixture_item".into(),
+                name: "Fixture Item".into(),
+                summary: "Fixture summary".into(),
+                behavior_intent: vec!["Expose a fixture".into()],
+                implementation_constraints: Vec::new(),
+                evidence_requirements: Vec::new(),
+                required_resource_roles: Vec::new(),
+                acceptance_criteria: vec!["The fixture compiles".into()],
+            },
+            selected_resources: Vec::new(),
+        };
+        let wrong = GeneratedModBundle {
+            files: BTreeMap::from([
+                ("source".into(), "public class Fixture {}".into()),
+                ("localization.zhs".into(), "{}".into()),
+            ]),
+            acceptance_notes: Vec::new(),
+        };
+        assert!(matches!(
+            validate_bundle(&request, &item_spec, wrong),
+            Err(SingleGenerateError::InvalidModelOutput)
+        ));
+
+        let valid = GeneratedModBundle {
+            files: BTreeMap::from([
+                ("source".into(), "public class Fixture {}".into()),
+                ("localization.eng".into(), "{}".into()),
+            ]),
+            acceptance_notes: Vec::new(),
+        };
+        let generated = validate_bundle(&request, &item_spec, valid).unwrap();
+        assert_eq!(generated.files[0].0, "source");
+        assert_eq!(generated.files[1].0, "localization.eng");
     }
 
     #[test]

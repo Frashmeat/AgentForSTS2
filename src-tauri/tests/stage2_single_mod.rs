@@ -45,11 +45,11 @@ impl ModelClient for FixtureModel {
         Ok(ModelResponse {
             model: "fixture-model".into(),
             content: serde_json::json!({
-                "files": [
-                    {"role":"source", "content":self.source},
-                    {"role":"localization.eng", "content":"{}"},
-                    {"role":"localization.zhs", "content":"{}"}
-                ],
+                "files": {
+                    "source": self.source,
+                    "localization.eng": "{}",
+                    "localization.zhs": "{}"
+                },
                 "acceptanceNotes": ["fixture bundle assembled"]
             })
             .to_string(),
@@ -276,9 +276,31 @@ async fn real_compile_artifact_and_run_chain_succeeds_without_staging_residue() 
     let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(value["schemaVersion"], 3);
     assert_eq!(value["files"].as_array().unwrap().len(), 6);
+    let snapshots = model.snapshots.lock().unwrap();
+    let request = snapshots[0].request();
+    let files_contract = &request.output_contract.json_schema["properties"]["files"];
     assert_eq!(
-        model.snapshots.lock().unwrap()[0]
-            .request()
+        files_contract["required"],
+        serde_json::json!(["source", "localization.eng", "localization.zhs"])
+    );
+    assert_eq!(files_contract["additionalProperties"], false);
+    assert_eq!(files_contract["properties"].as_object().unwrap().len(), 3);
+    let rendered_contract =
+        serde_json::to_string_pretty(&request.output_contract.json_schema).unwrap();
+    assert_eq!(
+        request
+            .messages
+            .iter()
+            .filter(|message| message.content.contains(&rendered_contract))
+            .count(),
+        1
+    );
+    assert!(request.messages.iter().any(|message| {
+        message.content.contains("generatedFileRoles")
+            && message.content.contains("localization.eng")
+    }));
+    assert_eq!(
+        request
             .messages
             .iter()
             .map(|message| message.content.as_str())
