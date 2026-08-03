@@ -16,7 +16,7 @@ use crate::FeatureSpec;
 use crate::prompt::{FeatureRecipe, FeatureRecipeError, FeatureRecipeLoader};
 
 const RECIPE_BYTES: &[u8] = include_bytes!("../recipes/mod-plan.json");
-const RECIPE_SHA256: &str = "94d518cc76da261f4a75a30071b2b8ac61c439604f24656d72473adb11d11dbd";
+const RECIPE_SHA256: &str = "a587644ad3984be36178626fb5c62c5a65a2108a57cc64f1f3f79a503975947b";
 
 pub struct ModPlanFeature;
 
@@ -47,7 +47,7 @@ impl ModPlanFeature {
     pub fn contribution_requirement() -> ats_game_context::ContributionRequirement {
         ats_game_context::ContributionRequirement {
             slot_id: guidance_slot(),
-            schema: schema("pack.mod-plan-guidance"),
+            schema: schema_version("pack.mod-plan-guidance", 2),
         }
     }
 }
@@ -89,10 +89,45 @@ impl PlanItem {
                 .required_resource_roles
                 .iter()
                 .any(|role| !valid_role(role))
+            || self
+                .required_resource_roles
+                .iter()
+                .collect::<BTreeSet<_>>()
+                .len()
+                != self.required_resource_roles.len()
         {
             return Err(ModPlanError::InvalidModelOutput);
         }
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ModelPlanItem {
+    item_id: String,
+    item_type: String,
+    name: String,
+    summary: String,
+    behavior_intent: Vec<String>,
+    implementation_constraints: Vec<String>,
+    evidence_requirements: Vec<String>,
+    acceptance_criteria: Vec<String>,
+}
+
+impl ModelPlanItem {
+    fn into_plan_item(self, required_resource_roles: Vec<String>) -> PlanItem {
+        PlanItem {
+            item_id: self.item_id,
+            item_type: self.item_type,
+            name: self.name,
+            summary: self.summary,
+            behavior_intent: self.behavior_intent,
+            implementation_constraints: self.implementation_constraints,
+            evidence_requirements: self.evidence_requirements,
+            required_resource_roles,
+            acceptance_criteria: self.acceptance_criteria,
+        }
     }
 }
 
@@ -105,29 +140,51 @@ pub struct ModPlanArtifactExtension {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PlanGuidance {
-    supported_item_types: Vec<String>,
+    item_types: Vec<PlanItemTypeGuidance>,
     guidance: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PlanItemTypeGuidance {
+    id: String,
+    required_resource_roles: Vec<String>,
 }
 
 impl PlanGuidance {
     fn validate(&self) -> Result<(), ModPlanError> {
-        if self.supported_item_types.is_empty()
-            || self.supported_item_types.len() > 64
+        if self.item_types.is_empty()
+            || self.item_types.len() > 64
+            || self.item_types.iter().any(|item| {
+                !valid_slug(&item.id)
+                    || !valid_list(&item.required_resource_roles, 32, 128, true)
+                    || item
+                        .required_resource_roles
+                        .iter()
+                        .any(|role| !valid_role(role))
+                    || item
+                        .required_resource_roles
+                        .iter()
+                        .collect::<BTreeSet<_>>()
+                        .len()
+                        != item.required_resource_roles.len()
+            })
             || self
-                .supported_item_types
+                .item_types
                 .iter()
-                .any(|item| !valid_slug(item))
-            || self
-                .supported_item_types
-                .iter()
+                .map(|item| &item.id)
                 .collect::<BTreeSet<_>>()
                 .len()
-                != self.supported_item_types.len()
+                != self.item_types.len()
             || !valid_list(&self.guidance, 64, 2_000, false)
         {
             return Err(ModPlanError::InvalidPackGuidance);
         }
         Ok(())
+    }
+
+    fn item_type(&self, id: &str) -> Option<&PlanItemTypeGuidance> {
+        self.item_types.iter().find(|item| item.id == id)
     }
 }
 
@@ -160,7 +217,7 @@ impl ModPlanService {
 
     pub fn from_recipe(recipe: FeatureRecipe) -> Result<Self, ModPlanError> {
         if recipe.feature_id() != &ModPlanFeature::id()
-            || recipe.output_contract().schema != ModPlanFeature::result_schema()
+            || recipe.output_contract().schema != model_output_schema()
         {
             return Err(ModPlanError::InvalidRecipeContract);
         }
@@ -189,12 +246,11 @@ impl ModPlanService {
         }
         let guidance: PlanGuidance = context.contributions.decode(&guidance_slot())?;
         guidance.validate()?;
-        if request.item_type.as_ref().is_some_and(|item_type| {
-            !guidance
-                .supported_item_types
-                .iter()
-                .any(|supported| supported == item_type)
-        }) {
+        if request
+            .item_type
+            .as_ref()
+            .is_some_and(|item_type| guidance.item_type(item_type).is_none())
+        {
             return Err(ModPlanError::UnsupportedItemType);
         }
 
@@ -237,20 +293,20 @@ impl ModPlanService {
         if response.finish_reason == FinishReason::MaxTokens {
             return Err(ModPlanError::TruncatedModelOutput);
         }
-        let item: PlanItem = serde_json::from_str(&response.content)
+        let model_item: ModelPlanItem = serde_json::from_str(&response.content)
             .map_err(|_| ModPlanError::InvalidModelOutput)?;
-        item.validate()?;
-        if !guidance
-            .supported_item_types
-            .iter()
-            .any(|supported| supported == &item.item_type)
-            || request
-                .item_type
-                .as_ref()
-                .is_some_and(|requested| requested != &item.item_type)
+        let item_guidance = guidance
+            .item_type(&model_item.item_type)
+            .ok_or(ModPlanError::UnsupportedItemType)?;
+        if request
+            .item_type
+            .as_ref()
+            .is_some_and(|requested| requested != &model_item.item_type)
         {
             return Err(ModPlanError::UnsupportedItemType);
         }
+        let item = model_item.into_plan_item(item_guidance.required_resource_roles.clone());
+        item.validate()?;
         Ok(ModPlanExecution {
             item,
             request_snapshot: snapshot,
@@ -343,6 +399,10 @@ fn guidance_slot() -> ContributionId {
     ContributionId::parse("mod.plan.guidance").expect("built-in contribution ID is valid")
 }
 
+fn model_output_schema() -> SchemaRef {
+    schema("feature.mod-plan-model-output")
+}
+
 fn schema(id: &str) -> SchemaRef {
     schema_version(id, 1)
 }
@@ -412,6 +472,7 @@ mod tests {
     use sha2::{Digest, Sha256};
 
     use super::*;
+    use crate::mod_generate_single::SingleGenerateFeature;
 
     struct MockModel {
         snapshots: Mutex<Vec<ModelRequestSnapshot>>,
@@ -443,6 +504,10 @@ mod tests {
     }
 
     fn pack(label: &str, item_type: &str) -> LoadedGamePack {
+        pack_with_roles(label, item_type, &[])
+    }
+
+    fn pack_with_roles(label: &str, item_type: &str, required_roles: &[&str]) -> LoadedGamePack {
         let value = serde_json::json!({
             "schemaVersion":2,
             "id":format!("fixture-{label}"),
@@ -450,8 +515,14 @@ mod tests {
             "contributions":[{
                 "slotId":"mod.plan.guidance",
                 "featureId":"mod.plan",
-                "schema":{"id":"pack.mod-plan-guidance","version":1},
-                "payload":{"supportedItemTypes":[item_type],"guidance":[format!("{label} guidance")]}
+                "schema":{"id":"pack.mod-plan-guidance","version":2},
+                "payload":{
+                    "itemTypes":[{
+                        "id":item_type,
+                        "requiredResourceRoles":required_roles
+                    }],
+                    "guidance":[format!("{label} guidance")]
+                }
             }]
         });
         let bytes = serde_json::to_vec(&value).unwrap();
@@ -481,7 +552,6 @@ mod tests {
                     "behaviorIntent":["Produce one observable behavior"],
                     "implementationConstraints":[],
                     "evidenceRequirements":["A verified fixture type declaration"],
-                    "requiredResourceRoles":[],
                     "acceptanceCriteria":["The fixture compiles"]
                 })
                 .to_string(),
@@ -557,12 +627,101 @@ mod tests {
         ));
     }
 
+    #[tokio::test]
+    async fn pack_roles_are_attached_without_model_authorship() {
+        let pack = pack_with_roles("roles", "fixture_type", &["fixture.icon"]);
+        let contributions = contributions(&pack);
+        let execution = ModPlanService::built_in()
+            .unwrap()
+            .execute(
+                &model("fixture_type"),
+                ModPlanRequest {
+                    requirements: "fixture".into(),
+                    item_type: Some("fixture_type".into()),
+                },
+                ModPlanContext {
+                    pack: &pack,
+                    contributions: &contributions,
+                    project_context: None,
+                    custom_instructions: None,
+                    model: None,
+                },
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(execution.item.required_resource_roles, ["fixture.icon"]);
+        let rendered = execution
+            .request_snapshot
+            .request()
+            .messages
+            .iter()
+            .map(|message| message.content.as_str())
+            .collect::<String>();
+        assert!(rendered.contains("fixture.icon"));
+    }
+
+    #[test]
+    fn built_in_pack_plan_and_generation_roles_match() {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct SingleRoles {
+            item_types: Vec<SingleRoleItem>,
+        }
+
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct SingleRoleItem {
+            id: String,
+            required_resource_roles: Vec<String>,
+        }
+
+        let pack = GamePackLoader::load_built_in_sts2().unwrap();
+        let resolver =
+            ContributionResolver::new([PrimitiveId::parse("code.dotnet-validate").unwrap()]);
+        let plan: PlanGuidance = resolver
+            .resolve(
+                &pack,
+                &ModPlanFeature::id(),
+                &[ModPlanFeature::contribution_requirement()],
+            )
+            .unwrap()
+            .decode(&guidance_slot())
+            .unwrap();
+        let single: SingleRoles = resolver
+            .resolve(
+                &pack,
+                &SingleGenerateFeature::id(),
+                &[SingleGenerateFeature::contribution_requirement()],
+            )
+            .unwrap()
+            .decode(&ContributionId::parse("mod.generate.single").unwrap())
+            .unwrap();
+        let plan_roles = plan
+            .item_types
+            .into_iter()
+            .map(|item| (item.id, item.required_resource_roles))
+            .collect::<BTreeMap<_, _>>();
+        let single_roles = single
+            .item_types
+            .into_iter()
+            .map(|item| (item.id, item.required_resource_roles))
+            .collect::<BTreeMap<_, _>>();
+
+        assert_eq!(plan_roles, single_roles);
+    }
+
     #[test]
     fn recipe_exposes_plan_item_validation_constraints() {
         let service = ModPlanService::built_in().unwrap();
         let properties = service.recipe.output_contract().json_schema["properties"]
             .as_object()
             .unwrap();
+        assert_eq!(
+            service.recipe.output_contract().schema,
+            model_output_schema()
+        );
         assert_eq!(
             properties["itemId"]["pattern"],
             serde_json::json!("^[a-z][a-z0-9_-]*$")
@@ -580,10 +739,7 @@ mod tests {
             properties["evidenceRequirements"]["items"]["maxLength"],
             serde_json::json!(512)
         );
-        assert_eq!(
-            properties["requiredResourceRoles"]["items"]["pattern"],
-            serde_json::json!("^[a-z][a-z0-9._-]*$")
-        );
+        assert!(!properties.contains_key("requiredResourceRoles"));
         assert_eq!(
             properties["acceptanceCriteria"]["minItems"],
             serde_json::json!(1)

@@ -60,7 +60,6 @@ impl ModelClient for CompositionModel {
                 "behaviorIntent":["Expose a compiled fixture type"],
                 "implementationConstraints":[],
                 "evidenceRequirements":["A verified fixture type declaration"],
-                "requiredResourceRoles":[],
                 "acceptanceCriteria":["The project publishes"]
             })
             .to_string()

@@ -44,6 +44,11 @@ Any DAG change requires an approved architecture change plus this spec, script f
 per-item `evidenceQueries` with explicit symbol/term fields. Single generation requires every Pack
 query to match the active Truth Snapshot and never interprets Plan prose as an index key.
 
+`pack.mod-plan-guidance` v2 owns each item type's `requiredResourceRoles`. The Plan model-output
+contract excludes those internal role IDs; `ModPlanService` attaches the Pack values to the public
+Plan result v2 after typed model validation. The built-in Pack gate requires Plan and Single
+contributions to declare identical roles for every item type.
+
 Pack may contain declarations/templates/resources and registered Primitive IDs. It cannot contain arbitrary script, native plugin, provider credential, or complete workflow implementation.
 
 ## 5. Resource Workspace

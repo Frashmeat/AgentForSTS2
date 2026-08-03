@@ -655,7 +655,6 @@ mod tests {
                         "behaviorIntent": ["Expose a fixture type"],
                         "implementationConstraints": [],
                         "evidenceRequirements": ["A verified fixture type declaration"],
-                        "requiredResourceRoles": [],
                         "acceptanceCriteria": ["The project compiles"]
                     })
                     .to_string()
@@ -668,7 +667,6 @@ mod tests {
                         "behaviorIntent": ["Expose a fixture type"],
                         "implementationConstraints": [],
                         "evidenceRequirements": ["A verified fixture type declaration"],
-                        "requiredResourceRoles": [],
                         "acceptanceCriteria": ["The project compiles"]
                     })
                     .to_string()
