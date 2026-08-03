@@ -1,0 +1,44 @@
+{
+  "id": "stage2-wo8-final-gates-candidate-acceptance",
+  "name": "stage2-wo8-final-gates-candidate-acceptance",
+  "title": "Stage 2 Work Order 8：最终独立门禁、候选与人工验收",
+  "description": "Run independent Stage 2 final gates, bind a new candidate to the cutover commit, and collect final installed-app acceptance without reusing prior evidence.",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "Independent Stage 2 gates, new Windows candidate verification, and installed-app human acceptance",
+  "priority": "P1",
+  "creator": "codex-agent",
+  "assignee": "codex-agent",
+  "createdAt": "2026-08-03",
+  "completedAt": "2026-08-03",
+  "branch": null,
+  "base_branch": "rust",
+  "worktree_path": null,
+  "current_phase": 3,
+  "next_action": [
+    {
+      "phase": 1,
+      "action": "implement"
+    },
+    {
+      "phase": 2,
+      "action": "check"
+    },
+    {
+      "phase": 3,
+      "action": "finish"
+    },
+    {
+      "phase": 4,
+      "action": "create-pr"
+    }
+  ],
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "Preserve interrupted rc-20260802T200726Z-b8587cd608c3, defect-discovery candidate rc-20260803T005017Z-b8587cd608c3, all later candidates, and real E2E evidence. Final candidate rc-20260803T125802Z-bde2d64969d9 binds clean commit bde2d64969d9b8d0b41357dfc3bb36932e9b1056 and passed 10/10 candidate steps, both variants, BuildInfo, 4/4 installer hash recomputation, and zero candidate residue; installers remain NotSigned. Installed ML E2E opened ATSReleaseSmoke and produced new succeeded v3 Run run-000000000000000018c84e0f201446d8-00000001 plus immutable v3 Artifact run-scoped-contract-gate-20260803-2114; manifest/file hashes and published file matched, this Artifact had zero staging, and normal exit released the project lock for reacquisition. The two 2026-08-01 staging directories remain preserved historical evidence. User explicitly confirmed acceptance on 2026-08-03. No real game behavior, signing, SmartScreen, push, or rebase claim is included.",
+  "meta": {}
+}
