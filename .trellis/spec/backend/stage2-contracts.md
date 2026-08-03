@@ -56,6 +56,10 @@ Pinned Feature Recipe + verified Pack contribution + bounded Truth Evidence + se
 
 Runtime owns provider-neutral `ModelClient`; Adapters own HTTP. Long Mod/game Prompt strings are forbidden in handler/Shell/Adapter code. Protocol roles, schema/slot IDs, JSON contracts, escaping, truncation and redaction remain code contracts.
 
+Recipe output JSON Schema exposes all expressible identifier, length and collection constraints
+enforced by the typed Feature validator. The validator remains authoritative and its failures retain
+their typed classification through composition and persisted Run state.
+
 ## 7. Feature Composition
 
 The shared registry contains exactly 9 current Features. Single generation owns the validated model bundle -> rollback-capable project writes -> real validation -> immutable Artifact -> Run success order. Batch invokes Single child Runs. Complex invokes Plan, Batch/Single, Build and Package. Neither composition creates an alternative Prompt, Resource, file transaction, build or package implementation.

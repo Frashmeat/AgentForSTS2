@@ -2,11 +2,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use ats_game_context::{ContributionResolverError, LoadedGamePack, VerifiedContributionSet};
 use ats_kernel::{
-    ContributionId, FeatureId, RecipeId, SchemaId, SchemaRef, SchemaVersion, Sha256Digest,
+    ContributionId, FailureCode, FeatureId, RecipeId, SchemaId, SchemaRef, SchemaVersion,
+    Sha256Digest,
 };
 use ats_runtime::{
     CancellationToken, FinishReason, ModelClient, ModelError, ModelGamePackRef, ModelRequestError,
-    ModelRequestSnapshot, TokenUsage,
+    ModelRequestSnapshot, RunFailure, TokenUsage,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -15,7 +16,7 @@ use crate::FeatureSpec;
 use crate::prompt::{FeatureRecipe, FeatureRecipeError, FeatureRecipeLoader};
 
 const RECIPE_BYTES: &[u8] = include_bytes!("../recipes/mod-plan.json");
-const RECIPE_SHA256: &str = "f5ccde586606aaee85af44f5af958929c69171e20d4cdfb8eecf6a5ebeb98d98";
+const RECIPE_SHA256: &str = "94d518cc76da261f4a75a30071b2b8ac61c439604f24656d72473adb11d11dbd";
 
 pub struct ModPlanFeature;
 
@@ -292,6 +293,42 @@ pub enum ModPlanError {
     Model(#[from] ModelError),
 }
 
+impl ModPlanError {
+    #[must_use]
+    pub fn run_failure(&self) -> RunFailure {
+        let (code, stage) = match self {
+            Self::InvalidInput => ("run.input_invalid", "mod.plan.request"),
+            Self::ContextIdentityMismatch => ("truth.context_mismatch", "mod.plan.context"),
+            Self::InvalidPackGuidance | Self::Contribution(_) => {
+                ("pack.contribution_invalid", "mod.plan.pack")
+            }
+            Self::UnsupportedItemType => ("feature.item_type_unsupported", "mod.plan.request"),
+            Self::InvalidRecipeContract | Self::Recipe(_) => {
+                ("feature.recipe_invalid", "mod.plan.recipe")
+            }
+            Self::TruncatedModelOutput => ("model.output_truncated", "mod.plan.model"),
+            Self::InvalidModelOutput => ("model.output_invalid", "mod.plan.model"),
+            Self::Cancelled => ("run.cancelled", "mod.plan.execute"),
+            Self::Request(_) => ("model.request_invalid", "mod.plan.model"),
+            Self::Model(ModelError::Authentication) => ("model.authentication", "mod.plan.model"),
+            Self::Model(ModelError::RateLimited { .. }) => ("model.rate_limited", "mod.plan.model"),
+            Self::Model(ModelError::Configuration) => ("model.configuration", "mod.plan.model"),
+            Self::Model(ModelError::Transport) => ("model.transport_failed", "mod.plan.model"),
+            Self::Model(ModelError::Rejected) => ("model.request_rejected", "mod.plan.model"),
+            Self::Model(ModelError::InvalidResponse) => {
+                ("model.response_invalid", "mod.plan.model")
+            }
+            Self::Model(ModelError::Cancelled) => ("run.cancelled", "mod.plan.model"),
+        };
+        RunFailure::new(
+            FailureCode::parse(code).expect("built-in failure code is valid"),
+            stage,
+            None,
+        )
+        .expect("built-in Run failure is valid")
+    }
+}
+
 fn validate_context(context: &ModPlanContext<'_>) -> Result<(), ModPlanError> {
     if context.contributions.feature_id() != &ModPlanFeature::id()
         || context.contributions.game_pack_id() != context.pack.id()
@@ -518,5 +555,53 @@ mod tests {
                 .await,
             Err(ModPlanError::UnsupportedItemType)
         ));
+    }
+
+    #[test]
+    fn recipe_exposes_plan_item_validation_constraints() {
+        let service = ModPlanService::built_in().unwrap();
+        let properties = service.recipe.output_contract().json_schema["properties"]
+            .as_object()
+            .unwrap();
+        assert_eq!(
+            properties["itemId"]["pattern"],
+            serde_json::json!("^[a-z][a-z0-9_-]*$")
+        );
+        assert_eq!(properties["itemId"]["maxLength"], serde_json::json!(128));
+        assert_eq!(
+            properties["behaviorIntent"]["minItems"],
+            serde_json::json!(1)
+        );
+        assert_eq!(
+            properties["behaviorIntent"]["items"]["pattern"],
+            serde_json::json!(r"^[^\u0000]*\S[^\u0000]*$")
+        );
+        assert_eq!(
+            properties["evidenceRequirements"]["items"]["maxLength"],
+            serde_json::json!(512)
+        );
+        assert_eq!(
+            properties["requiredResourceRoles"]["items"]["pattern"],
+            serde_json::json!("^[a-z][a-z0-9._-]*$")
+        );
+        assert_eq!(
+            properties["acceptanceCriteria"]["minItems"],
+            serde_json::json!(1)
+        );
+    }
+
+    #[test]
+    fn plan_failures_retain_stable_classification() {
+        let invalid_output = ModPlanError::InvalidModelOutput.run_failure();
+        assert_eq!(invalid_output.code.as_str(), "model.output_invalid");
+        assert_eq!(invalid_output.stage, "mod.plan.model");
+
+        let authentication = ModPlanError::Model(ModelError::Authentication).run_failure();
+        assert_eq!(authentication.code.as_str(), "model.authentication");
+        assert_eq!(authentication.stage, "mod.plan.model");
+
+        let cancelled = ModPlanError::Cancelled.run_failure();
+        assert_eq!(cancelled.code.as_str(), "run.cancelled");
+        assert_eq!(cancelled.stage, "mod.plan.execute");
     }
 }

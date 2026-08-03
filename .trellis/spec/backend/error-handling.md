@@ -25,6 +25,11 @@ stable families include `truth.evidence_missing`, `pack.contribution_invalid`, `
 `model.*`, `validation.*`, `artifact.*`, and `run.*`; Batch child Runs reuse the Single
 classification. Do not collapse these known errors to `feature.execution_failed`.
 
+Planning follows the same rule. Invalid or truncated typed model output, provider failures,
+Pack/Recipe rejection, cancellation, and invalid input persist distinct `model.*`, `pack.*`,
+`feature.*`, or `run.*` failures from `ModPlanError`; the Shell must not replace them with a
+generic execution failure.
+
 ## Ownership
 
 - Kernel owns serialized shape and validation.

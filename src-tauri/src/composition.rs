@@ -196,7 +196,7 @@ impl Stage2Composition {
                         cancellation,
                     )
                     .await
-                    .map_err(|_| failure("feature.execution_failed", "mod.plan.execute"))?;
+                    .map_err(|error| error.run_failure())?;
                 succeed::<ModPlanFeature, _>(&mut run, &execution.item)?;
             }
             "mod.generate.single" => {
@@ -635,6 +635,7 @@ mod tests {
 
     struct FixtureModel {
         snapshots: Mutex<Vec<ModelRequestSnapshot>>,
+        invalid_plan: bool,
     }
 
     #[async_trait]
@@ -645,18 +646,33 @@ mod tests {
             _: &CancellationToken,
         ) -> Result<ModelResponse, ModelError> {
             let content = if request.feature_id() == &ModPlanFeature::id() {
-                serde_json::json!({
-                    "itemId": "fixture_item",
-                    "itemType": "custom_code",
-                    "name": "Fixture Item",
-                    "summary": "A deterministic facade fixture",
-                    "behaviorIntent": ["Expose a fixture type"],
-                    "implementationConstraints": [],
-                    "evidenceRequirements": ["A verified fixture type declaration"],
-                    "requiredResourceRoles": [],
-                    "acceptanceCriteria": ["The project compiles"]
-                })
-                .to_string()
+                if self.invalid_plan {
+                    serde_json::json!({
+                        "itemId": "EvidenceQueryAcceptance20260803",
+                        "itemType": "custom_code",
+                        "name": "EvidenceQueryAcceptance20260803",
+                        "summary": "An invalid facade fixture",
+                        "behaviorIntent": ["Expose a fixture type"],
+                        "implementationConstraints": [],
+                        "evidenceRequirements": ["A verified fixture type declaration"],
+                        "requiredResourceRoles": [],
+                        "acceptanceCriteria": ["The project compiles"]
+                    })
+                    .to_string()
+                } else {
+                    serde_json::json!({
+                        "itemId": "fixture_item",
+                        "itemType": "custom_code",
+                        "name": "Fixture Item",
+                        "summary": "A deterministic facade fixture",
+                        "behaviorIntent": ["Expose a fixture type"],
+                        "implementationConstraints": [],
+                        "evidenceRequirements": ["A verified fixture type declaration"],
+                        "requiredResourceRoles": [],
+                        "acceptanceCriteria": ["The project compiles"]
+                    })
+                    .to_string()
+                }
             } else {
                 serde_json::json!({
                     "files": [{
@@ -720,6 +736,7 @@ mod tests {
         ));
         let model = Arc::new(FixtureModel {
             snapshots: Mutex::new(Vec::new()),
+            invalid_plan: false,
         });
 
         let plan_run = RunRecord::new(
@@ -815,6 +832,55 @@ mod tests {
             .unwrap();
         session.release_project_lock().unwrap();
         assert!(ProjectFolder::open(&project_root).is_ok());
+    }
+
+    #[tokio::test]
+    async fn facade_persists_typed_plan_output_failure() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let composition = Arc::new(
+            Stage2Composition::built_in(temp.path().join("runtime"))
+                .expect("fixture composition must load"),
+        );
+        let template = built_in_project_template(composition.pack(), "sts2.default").unwrap();
+        let folder = ProjectFolder::create(
+            temp.path(),
+            "InvalidPlan",
+            composition.pack().id(),
+            &template,
+        )
+        .unwrap();
+        let session = ProjectSession::open(folder).unwrap();
+        let config = Arc::new(AppConfig::new(
+            Settings::default(),
+            ConfigStatus {
+                path: None,
+                file_present: false,
+                loaded: false,
+                errors: Vec::new(),
+            },
+        ));
+        let model = Arc::new(FixtureModel {
+            snapshots: Mutex::new(Vec::new()),
+            invalid_plan: true,
+        });
+        let run = RunRecord::new(
+            ModPlanFeature::id(),
+            VersionedPayload::from_typed(
+                ModPlanFeature::request_schema(),
+                &ModPlanRequest {
+                    requirements: "Create a C# type named EvidenceQueryAcceptance20260803".into(),
+                    item_type: Some("custom_code".into()),
+                },
+            )
+            .unwrap(),
+        );
+
+        let id = submit_fixture_run(&session, composition, config, model, run).await;
+        let record = wait_for_terminal(&session, &id).await;
+        assert_eq!(record.status(), RunStatus::Failed);
+        let failure = record.failure().unwrap();
+        assert_eq!(failure.code.as_str(), "model.output_invalid");
+        assert_eq!(failure.stage, "mod.plan.model");
     }
 
     async fn submit_fixture_run(

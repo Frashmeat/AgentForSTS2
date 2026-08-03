@@ -71,6 +71,11 @@ Feature Recipe owns cross-game task language. Pack owns game-specific guidance. 
 
 Recipe and Pack resources are pinned by SHA-256. Slot resolution is exact and deterministic. Model requests must be replay-auditable without persisting secrets or provider bodies.
 
+Every constraint enforced on model output that JSON Schema can express must also be present in the
+Recipe output contract shown to the model, including identifier patterns, string bounds and array
+bounds. Code validation remains authoritative, but it must not rely on a stricter hidden shape that
+the model cannot see.
+
 Never treat model-authored prose as an exact Truth symbol or require users to know internal index
 keys. Do not add heuristic token splitting in a generic Feature; new game/item evidence discovery is
 a versioned Pack contribution contract.
