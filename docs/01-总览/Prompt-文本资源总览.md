@@ -44,9 +44,9 @@ run-scoped bundle v2 Schema：`files` 是以角色为固定键的对象，所有
 Schema 更严格的文件数量/角色合同。
 
 规划与证据检索使用两个不同合同：`mod.plan` result v2 的 `evidenceRequirements`
-只描述生成时需要证明的事实；Game Pack `pack.mod-generate-single` v2 为每个 item type
-声明结构化 `evidenceQueries { symbols, terms }`。模型不需要知道 Truth 索引键，Feature 也不把
-自然语言要求临时拆词或猜测为 symbol。
+只描述生成时需要证明的事实；Game Pack v3 顶层 `itemTypes` 为每个类型声明结构化
+`evidenceQueries { symbols, terms }`。Readiness 和 Single Generate 消费同一目录；模型不需要
+知道 Truth 索引键，Feature 也不把自然语言要求临时拆词或猜测为 symbol。
 
 ## 2. 唯一所有者
 
@@ -54,7 +54,8 @@ Schema 更严格的文件数量/角色合同。
 | --- | --- | --- |
 | 跨游戏任务结构 | `crates/ats-features/recipes/*.json` | plan、single generate、log analyze |
 | Feature request/result | `crates/ats-features/src/*.rs` | typed schema、验证和组合 |
-| 游戏指导和 Mod 类型模板 | `game_packs/<id>/stage2-game-pack.json` | STS2 custom code/relic/log contribution |
+| 游戏 Mod 类型目录与指导 | `game_packs/<id>/stage2-game-pack.json` | Pack v3 item fields/locales/Truth queries/Resource roles + Feature contributions |
+| 工程 Item 定义 | `.ats` Item repository（ItemDefinition v1 合同已落地，持久化在后续 Order 接入） | stable item ID、canonical fields、locale status、resource version binding、definition hash |
 | 当前游戏事实 | verified Truth Snapshot v2 | symbol、purpose、bounded excerpt、source hash |
 | 用户/AI/Pack 资源 | Resource Workspace v1 | resource ID、selected version、provenance |
 | 工程上下文 | composition root 生成的脱敏摘要 | 工程名、Mod ID、Pack ID |

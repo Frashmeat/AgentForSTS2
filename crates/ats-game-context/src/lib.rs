@@ -1,6 +1,7 @@
 //! Validated Game Pack contribution and immutable Truth Evidence contracts.
 
 mod contribution;
+mod item;
 mod pack;
 mod template;
 mod truth;
@@ -9,6 +10,11 @@ pub use ats_kernel::GamePackId;
 pub use contribution::{
     ContributionRequirement, ContributionResolver, ContributionResolverError,
     VerifiedContributionSet,
+};
+pub use item::{
+    CapabilityEvaluationError, ItemCapabilityBlocker, ItemCapabilityCatalog, ItemCatalogError,
+    ItemChoiceOption, ItemEvidenceQuery, ItemFieldSpec, ItemFieldValueSpec, ItemTypeCapability,
+    ItemTypeDescriptor,
 };
 pub use pack::{
     GAME_PACK_SCHEMA_VERSION, GamePackLoadError, GamePackLoader, GamePackRegistry,

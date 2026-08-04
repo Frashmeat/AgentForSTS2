@@ -114,6 +114,82 @@ qualified_id!(FailureCode, "failure code");
 qualified_id!(ResourceId, "resource ID");
 qualified_id!(RecipeId, "recipe ID");
 
+macro_rules! slug_id {
+    ($name:ident, $kind:literal, $max_len:literal) => {
+        #[derive(Debug, Clone, Serialize, Eq, PartialEq, Ord, PartialOrd, Hash)]
+        #[serde(transparent)]
+        pub struct $name(String);
+
+        impl $name {
+            pub fn parse(value: impl Into<String>) -> Result<Self, ContractValueError> {
+                let value = value.into();
+                if value.len() <= $max_len
+                    && value
+                        .bytes()
+                        .next()
+                        .is_some_and(|byte| byte.is_ascii_lowercase())
+                    && value.bytes().all(|byte| {
+                        byte.is_ascii_lowercase()
+                            || byte.is_ascii_digit()
+                            || matches!(byte, b'-' | b'_')
+                    })
+                {
+                    Ok(Self(value))
+                } else {
+                    Err(ContractValueError::InvalidSlugId { kind: $kind })
+                }
+            }
+
+            #[must_use]
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl TryFrom<String> for $name {
+            type Error = ContractValueError;
+
+            fn try_from(value: String) -> Result<Self, Self::Error> {
+                Self::parse(value)
+            }
+        }
+
+        impl TryFrom<&str> for $name {
+            type Error = ContractValueError;
+
+            fn try_from(value: &str) -> Result<Self, Self::Error> {
+                Self::parse(value)
+            }
+        }
+
+        impl From<$name> for String {
+            fn from(value: $name) -> Self {
+                value.0
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str(&self.0)
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                Self::parse(String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+            }
+        }
+    };
+}
+
+slug_id!(ItemId, "item ID", 128);
+slug_id!(ItemTypeId, "item type ID", 64);
+slug_id!(ItemFieldId, "item field ID", 64);
+slug_id!(LocaleId, "locale ID", 16);
+
 #[derive(Debug, Clone, Serialize, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[serde(transparent)]
 pub struct GamePackId(String);
@@ -320,6 +396,11 @@ mod tests {
         assert!(GamePackId::parse("sts2").is_ok());
         assert!(GamePackId::parse("fixture-game").is_ok());
         assert!(GamePackId::parse("Bad/Game").is_err());
+        assert!(ItemId::parse("burning-blood").is_ok());
+        assert!(ItemTypeId::parse("relic").is_ok());
+        assert!(ItemFieldId::parse("energy_cost").is_ok());
+        assert!(LocaleId::parse("zhs").is_ok());
+        assert!(ItemId::parse("Generated/Relic").is_err());
     }
 
     #[test]

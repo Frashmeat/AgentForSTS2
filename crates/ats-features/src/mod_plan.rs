@@ -1,9 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use ats_game_context::{ContributionResolverError, LoadedGamePack, VerifiedContributionSet};
+use ats_game_context::{
+    ContributionResolverError, ItemTypeDescriptor, LoadedGamePack, VerifiedContributionSet,
+};
 use ats_kernel::{
-    ContributionId, FailureCode, FeatureId, RecipeId, SchemaId, SchemaRef, SchemaVersion,
-    Sha256Digest,
+    ContributionId, FailureCode, FeatureId, ItemTypeId, RecipeId, SchemaId, SchemaRef,
+    SchemaVersion, Sha256Digest,
 };
 use ats_runtime::{
     CancellationToken, FinishReason, ModelClient, ModelError, ModelGamePackRef, ModelRequestError,
@@ -47,7 +49,7 @@ impl ModPlanFeature {
     pub fn contribution_requirement() -> ats_game_context::ContributionRequirement {
         ats_game_context::ContributionRequirement {
             slot_id: guidance_slot(),
-            schema: schema_version("pack.mod-plan-guidance", 2),
+            schema: schema_version("pack.mod-plan-guidance", 3),
         }
     }
 }
@@ -140,52 +142,23 @@ pub struct ModPlanArtifactExtension {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PlanGuidance {
-    item_types: Vec<PlanItemTypeGuidance>,
     guidance: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct PlanItemTypeGuidance {
-    id: String,
-    required_resource_roles: Vec<String>,
 }
 
 impl PlanGuidance {
     fn validate(&self) -> Result<(), ModPlanError> {
-        if self.item_types.is_empty()
-            || self.item_types.len() > 64
-            || self.item_types.iter().any(|item| {
-                !valid_slug(&item.id)
-                    || !valid_list(&item.required_resource_roles, 32, 128, true)
-                    || item
-                        .required_resource_roles
-                        .iter()
-                        .any(|role| !valid_role(role))
-                    || item
-                        .required_resource_roles
-                        .iter()
-                        .collect::<BTreeSet<_>>()
-                        .len()
-                        != item.required_resource_roles.len()
-            })
-            || self
-                .item_types
-                .iter()
-                .map(|item| &item.id)
-                .collect::<BTreeSet<_>>()
-                .len()
-                != self.item_types.len()
-            || !valid_list(&self.guidance, 64, 2_000, false)
-        {
+        if !valid_list(&self.guidance, 64, 2_000, false) {
             return Err(ModPlanError::InvalidPackGuidance);
         }
         Ok(())
     }
+}
 
-    fn item_type(&self, id: &str) -> Option<&PlanItemTypeGuidance> {
-        self.item_types.iter().find(|item| item.id == id)
-    }
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlanPromptPack<'a> {
+    item_types: Vec<&'a ItemTypeDescriptor>,
+    guidance: &'a [String],
 }
 
 pub struct ModPlanContext<'a> {
@@ -246,20 +219,29 @@ impl ModPlanService {
         }
         let guidance: PlanGuidance = context.contributions.decode(&guidance_slot())?;
         guidance.validate()?;
-        if request
+        let requested_item_type = request
             .item_type
+            .as_deref()
+            .map(ItemTypeId::parse)
+            .transpose()
+            .map_err(|_| ModPlanError::UnsupportedItemType)?;
+        if requested_item_type
             .as_ref()
-            .is_some_and(|item_type| guidance.item_type(item_type).is_none())
+            .is_some_and(|item_type| context.pack.item_type(item_type).is_none())
         {
             return Err(ModPlanError::UnsupportedItemType);
         }
+        let prompt_pack = PlanPromptPack {
+            item_types: context.pack.item_types().values().collect(),
+            guidance: &guidance.guidance,
+        };
 
         let slots = BTreeMap::from([
             (
                 "output.contract".into(),
                 serialize(&self.recipe.output_contract().json_schema)?,
             ),
-            ("pack.guidance".into(), serialize(&guidance)?),
+            ("pack.guidance".into(), serialize(&prompt_pack)?),
             (
                 "project.context".into(),
                 bounded_optional(context.project_context, 8_000)?,
@@ -295,8 +277,11 @@ impl ModPlanService {
         }
         let model_item: ModelPlanItem = serde_json::from_str(&response.content)
             .map_err(|_| ModPlanError::InvalidModelOutput)?;
-        let item_guidance = guidance
-            .item_type(&model_item.item_type)
+        let model_item_type = ItemTypeId::parse(model_item.item_type.as_str())
+            .map_err(|_| ModPlanError::UnsupportedItemType)?;
+        let item_descriptor = context
+            .pack
+            .item_type(&model_item_type)
             .ok_or(ModPlanError::UnsupportedItemType)?;
         if request
             .item_type
@@ -305,7 +290,13 @@ impl ModPlanService {
         {
             return Err(ModPlanError::UnsupportedItemType);
         }
-        let item = model_item.into_plan_item(item_guidance.required_resource_roles.clone());
+        let item = model_item.into_plan_item(
+            item_descriptor
+                .required_resource_roles()
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+        );
         item.validate()?;
         Ok(ModPlanExecution {
             item,
@@ -509,18 +500,22 @@ mod tests {
 
     fn pack_with_roles(label: &str, item_type: &str, required_roles: &[&str]) -> LoadedGamePack {
         let value = serde_json::json!({
-            "schemaVersion":2,
+            "schemaVersion":3,
             "id":format!("fixture-{label}"),
             "displayName":format!("Fixture {label}"),
+            "itemTypes":[{
+                "id":item_type,
+                "displayNames":{"eng":"Fixture type"},
+                "requiredLocales":[],
+                "fields":[],
+                "evidenceQueries":[{"symbols":["FixtureType"],"terms":[]}],
+                "requiredResourceRoles":required_roles
+            }],
             "contributions":[{
                 "slotId":"mod.plan.guidance",
                 "featureId":"mod.plan",
-                "schema":{"id":"pack.mod-plan-guidance","version":2},
+                "schema":{"id":"pack.mod-plan-guidance","version":3},
                 "payload":{
-                    "itemTypes":[{
-                        "id":item_type,
-                        "requiredResourceRoles":required_roles
-                    }],
                     "guidance":[format!("{label} guidance")]
                 }
             }]
@@ -663,7 +658,7 @@ mod tests {
     }
 
     #[test]
-    fn built_in_pack_plan_and_generation_roles_match() {
+    fn built_in_generation_contribution_covers_item_catalog() {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct SingleRoles {
@@ -674,7 +669,6 @@ mod tests {
         #[serde(rename_all = "camelCase")]
         struct SingleRoleItem {
             id: String,
-            required_resource_roles: Vec<String>,
         }
 
         let pack = GamePackLoader::load_built_in_sts2().unwrap();
@@ -698,18 +692,19 @@ mod tests {
             .unwrap()
             .decode(&ContributionId::parse("mod.generate.single").unwrap())
             .unwrap();
-        let plan_roles = plan
+        let catalog_ids = pack
+            .item_types()
+            .keys()
+            .map(ToString::to_string)
+            .collect::<BTreeSet<_>>();
+        let single_ids = single
             .item_types
             .into_iter()
-            .map(|item| (item.id, item.required_resource_roles))
-            .collect::<BTreeMap<_, _>>();
-        let single_roles = single
-            .item_types
-            .into_iter()
-            .map(|item| (item.id, item.required_resource_roles))
-            .collect::<BTreeMap<_, _>>();
+            .map(|item| item.id)
+            .collect::<BTreeSet<_>>();
 
-        assert_eq!(plan_roles, single_roles);
+        plan.validate().unwrap();
+        assert_eq!(catalog_ids, single_ids);
     }
 
     #[test]

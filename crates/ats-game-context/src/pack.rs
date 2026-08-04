@@ -5,9 +5,11 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-pub const GAME_PACK_SCHEMA_VERSION: u32 = 2;
+use crate::{ItemCatalogError, ItemTypeDescriptor};
+
+pub const GAME_PACK_SCHEMA_VERSION: u32 = 3;
 const BUILT_IN_STS2_SHA256: &str =
-    "fe7afa7b90b52888351cef0aa4abc8caed9cf5efe49841ed95eeac804c09caea";
+    "352bb98d3eda870a8521375875e0d13a1e67e57c4e58a1fdc0f104139878225b";
 const BUILT_IN_STS2: &[u8] = include_bytes!("../../../game_packs/sts2/stage2-game-pack.json");
 
 #[derive(Debug, Clone)]
@@ -53,6 +55,7 @@ pub struct LoadedGamePack {
     id: GamePackId,
     display_name: String,
     content_sha256: Sha256Digest,
+    item_types: BTreeMap<ats_kernel::ItemTypeId, ItemTypeDescriptor>,
     contributions: BTreeMap<ContributionId, PackContribution>,
 }
 
@@ -77,6 +80,16 @@ impl LoadedGamePack {
         &self.content_sha256
     }
 
+    #[must_use]
+    pub fn item_types(&self) -> &BTreeMap<ats_kernel::ItemTypeId, ItemTypeDescriptor> {
+        &self.item_types
+    }
+
+    #[must_use]
+    pub fn item_type(&self, id: &ats_kernel::ItemTypeId) -> Option<&ItemTypeDescriptor> {
+        self.item_types.get(id)
+    }
+
     pub(crate) fn contribution(&self, slot_id: &ContributionId) -> Option<&PackContribution> {
         self.contributions.get(slot_id)
     }
@@ -98,6 +111,10 @@ pub enum GamePackLoadError {
     DuplicateContribution,
     #[error("game pack contribution contains duplicate required primitives")]
     DuplicatePrimitive,
+    #[error("game pack item type catalog is empty or contains duplicate item types")]
+    InvalidItemTypes,
+    #[error("game pack item type descriptor is invalid")]
+    InvalidItemType(#[source] ItemCatalogError),
 }
 
 #[derive(Debug, Deserialize)]
@@ -106,6 +123,7 @@ struct RawManifest {
     schema_version: u32,
     id: GamePackId,
     display_name: String,
+    item_types: Vec<ItemTypeDescriptor>,
     contributions: Vec<RawContribution>,
 }
 
@@ -140,6 +158,22 @@ impl GamePackLoader {
             return Err(GamePackLoadError::InvalidDisplayName);
         }
 
+        if raw.item_types.is_empty() || raw.item_types.len() > 64 {
+            return Err(GamePackLoadError::InvalidItemTypes);
+        }
+        let mut item_types = BTreeMap::new();
+        for item_type in raw.item_types {
+            item_type
+                .validate()
+                .map_err(GamePackLoadError::InvalidItemType)?;
+            if item_types
+                .insert(item_type.id().clone(), item_type)
+                .is_some()
+            {
+                return Err(GamePackLoadError::InvalidItemTypes);
+            }
+        }
+
         let mut contributions = BTreeMap::new();
         for raw_contribution in raw.contributions {
             if !raw_contribution.payload.is_object() {
@@ -170,6 +204,7 @@ impl GamePackLoader {
             id: raw.id,
             display_name: raw.display_name,
             content_sha256: actual,
+            item_types,
             contributions,
         })
     }
@@ -237,9 +272,17 @@ mod tests {
     #[test]
     fn pinned_loader_accepts_synthetic_and_rejects_hash_schema_and_duplicates() {
         let json = r#"{
-          "schemaVersion":2,
+          "schemaVersion":3,
           "id":"fixture-game",
           "displayName":"Fixture Game",
+          "itemTypes":[{
+            "id":"relic",
+            "displayNames":{"eng":"Relic"},
+            "requiredLocales":["eng"],
+            "fields":[],
+            "evidenceQueries":[{"symbols":["CustomRelicModel"],"terms":[]}],
+            "requiredResourceRoles":[]
+          }],
           "contributions":[{
             "slotId":"log.analyze.rules",
             "featureId":"log.analyze",
@@ -257,7 +300,7 @@ mod tests {
             Err(GamePackLoadError::ContentHashMismatch)
         ));
 
-        let bad_schema = json.replace("\"schemaVersion\":2", "\"schemaVersion\":1");
+        let bad_schema = json.replace("\"schemaVersion\":3", "\"schemaVersion\":1");
         assert!(matches!(
             load_fixture(&bad_schema),
             Err(GamePackLoadError::UnsupportedSchema)
@@ -278,5 +321,42 @@ mod tests {
         let pack = GamePackLoader::load_built_in_sts2().unwrap();
         assert_eq!(pack.id().as_str(), "sts2");
         assert!(!pack.contributions.is_empty());
+    }
+
+    #[test]
+    fn item_catalog_rejects_duplicate_types_and_invalid_field_constraints() {
+        let json = r#"{
+          "schemaVersion":3,
+          "id":"fixture-game",
+          "displayName":"Fixture Game",
+          "itemTypes":[{
+            "id":"relic",
+            "displayNames":{"eng":"Relic"},
+            "fields":[],
+            "evidenceQueries":[{"symbols":["CustomRelicModel"],"terms":[]}]
+          }],
+          "contributions":[]
+        }"#;
+        let mut duplicate: serde_json::Value = serde_json::from_str(json).unwrap();
+        let item = duplicate["itemTypes"][0].clone();
+        duplicate["itemTypes"].as_array_mut().unwrap().push(item);
+        assert!(matches!(
+            load_fixture(&serde_json::to_string(&duplicate).unwrap()),
+            Err(GamePackLoadError::InvalidItemTypes)
+        ));
+
+        let mut invalid_field: serde_json::Value = serde_json::from_str(json).unwrap();
+        invalid_field["itemTypes"][0]["fields"] = serde_json::json!([{
+            "id":"cost",
+            "displayNames":{"eng":"Cost"},
+            "required":true,
+            "value":{"kind":"integer","min":5,"max":1}
+        }]);
+        assert!(matches!(
+            load_fixture(&serde_json::to_string(&invalid_field).unwrap()),
+            Err(GamePackLoadError::InvalidItemType(
+                ItemCatalogError::InvalidFields
+            ))
+        ));
     }
 }

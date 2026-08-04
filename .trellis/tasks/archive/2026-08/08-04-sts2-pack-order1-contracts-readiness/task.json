@@ -1,0 +1,52 @@
+{
+  "id": "sts2-pack-order1-contracts-readiness",
+  "name": "sts2-pack-order1-contracts-readiness",
+  "title": "Order 1: Pack Item contracts and readiness",
+  "description": "Pack v3 Item catalog, ItemDefinition v1/hash and Truth-scoped capability readiness",
+  "status": "completed",
+  "dev_type": "backend",
+  "scope": "cross-layer contracts",
+  "priority": "P2",
+  "creator": "codex-agent",
+  "assignee": "codex-agent",
+  "createdAt": "2026-08-04",
+  "completedAt": "2026-08-04",
+  "branch": null,
+  "base_branch": "rust",
+  "worktree_path": null,
+  "current_phase": 3,
+  "next_action": [
+    {
+      "phase": 1,
+      "action": "implement"
+    },
+    {
+      "phase": 2,
+      "action": "check"
+    },
+    {
+      "phase": 3,
+      "action": "finish"
+    },
+    {
+      "phase": 4,
+      "action": "create-pr"
+    }
+  ],
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "08-04-sts2-pack-types-resource-experience",
+  "relatedFiles": [
+    "game_packs/sts2/stage2-game-pack.json",
+    "crates/ats-kernel/src/lib.rs",
+    "crates/ats-workspace/src/item.rs",
+    "crates/ats-game-context/src/item.rs",
+    "crates/ats-game-context/src/pack.rs",
+    "crates/ats-features/src/mod_plan.rs",
+    "crates/ats-features/src/mod_generate_single.rs"
+  ],
+  "notes": "Implementation and machine gates complete. User authorized this commit and future per-Order automatic commits on 2026-08-04; push, rebase, release candidate and publication remain separately gated.",
+  "meta": {}
+}

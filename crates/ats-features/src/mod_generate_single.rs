@@ -2,12 +2,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use ats_game_context::{
-    ContributionResolverError, EvidenceQuery, EvidenceQueryError, LoadedGamePack,
+    ContributionResolverError, EvidenceQueryError, ItemTypeDescriptor, LoadedGamePack,
     TruthEvidenceRecord, VerifiedContributionSet, VerifiedTruthSnapshot,
 };
 use ats_kernel::{
-    ContributionId, FailureCode, FeatureId, PrimitiveId, ResourceId, SchemaId, SchemaRef,
-    SchemaVersion, Sha256Digest,
+    ContributionId, FailureCode, FeatureId, ItemTypeId, PrimitiveId, ResourceId, SchemaId,
+    SchemaRef, SchemaVersion, Sha256Digest,
 };
 use ats_runtime::{
     ArtifactFileInput, ArtifactPublishRequest, ArtifactPublisher, CancellationToken, FinishReason,
@@ -60,7 +60,7 @@ impl SingleGenerateFeature {
     pub fn contribution_requirement() -> ats_game_context::ContributionRequirement {
         ats_game_context::ContributionRequirement {
             slot_id: generation_slot(),
-            schema: schema_version("pack.mod-generate-single", 2),
+            schema: schema_version("pack.mod-generate-single", 3),
         }
     }
 }
@@ -113,15 +113,6 @@ struct GenerateContribution {
 struct GenerateItemType {
     id: String,
     generated_files: Vec<GeneratedFileSpec>,
-    evidence_queries: Vec<PackEvidenceQuery>,
-    required_resource_roles: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct PackEvidenceQuery {
-    symbols: Vec<String>,
-    terms: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -241,11 +232,17 @@ impl SingleGenerateService {
         check_cancelled(cancellation)?;
 
         let contribution: GenerateContribution = context.contributions.decode(&generation_slot())?;
-        contribution.validate()?;
+        contribution.validate(context.pack)?;
         let item_spec = contribution
             .item_types
             .iter()
             .find(|item| item.id == request.plan.item_type)
+            .ok_or(SingleGenerateError::UnsupportedItemType)?;
+        let item_type = ItemTypeId::parse(request.plan.item_type.as_str())
+            .map_err(|_| SingleGenerateError::UnsupportedItemType)?;
+        let item_descriptor = context
+            .pack
+            .item_type(&item_type)
             .ok_or(SingleGenerateError::UnsupportedItemType)?;
         let resource_specs: ResourceSpecs = context
             .resource_contributions
@@ -253,11 +250,15 @@ impl SingleGenerateService {
         resource_specs
             .validate()
             .map_err(|_| SingleGenerateError::InvalidResourceSpecs)?;
-        validate_required_roles(&request.plan, item_spec)?;
+        validate_required_roles(&request.plan, item_descriptor)?;
 
-        let evidence = query_evidence(context.truth, item_spec)?;
-        let selected =
-            load_resources(dependencies.resources, &request, item_spec, &resource_specs)?;
+        let evidence = query_evidence(context.truth, item_descriptor)?;
+        let selected = load_resources(
+            dependencies.resources,
+            &request,
+            item_descriptor,
+            &resource_specs,
+        )?;
         let resource_refs = selected
             .iter()
             .map(|item| item.reference.clone())
@@ -591,7 +592,7 @@ impl ValidatedBundle {
 }
 
 impl GenerateContribution {
-    fn validate(&self) -> Result<(), SingleGenerateError> {
+    fn validate(&self, pack: &LoadedGamePack) -> Result<(), SingleGenerateError> {
         if self.validation_primitive.as_str().is_empty()
             || !valid_text_list(&self.guidance, 64, 2_000, false)
             || self.item_types.is_empty()
@@ -601,17 +602,10 @@ impl GenerateContribution {
         }
         let mut item_ids = BTreeSet::new();
         for item in &self.item_types {
-            if !valid_segment(&item.id)
+            if ItemTypeId::parse(item.id.as_str()).is_err()
                 || !item_ids.insert(item.id.as_str())
                 || item.generated_files.is_empty()
                 || item.generated_files.len() > 64
-                || item.evidence_queries.is_empty()
-                || item.evidence_queries.len() > usize::from(MAX_EVIDENCE_RECORDS)
-                || item.evidence_queries.iter().any(|query| {
-                    (query.symbols.is_empty() && query.terms.is_empty())
-                        || !valid_text_list(&query.symbols, 16, 128, true)
-                        || !valid_text_list(&query.terms, 16, 128, true)
-                })
             {
                 return Err(SingleGenerateError::InvalidPackContribution);
             }
@@ -627,20 +621,14 @@ impl GenerateContribution {
                     return Err(SingleGenerateError::InvalidPackContribution);
                 }
             }
-            if item.required_resource_roles.len() > 64
-                || item
-                    .required_resource_roles
-                    .iter()
-                    .any(|role| !valid_role(role))
-                || item
-                    .required_resource_roles
-                    .iter()
-                    .collect::<BTreeSet<_>>()
-                    .len()
-                    != item.required_resource_roles.len()
-            {
-                return Err(SingleGenerateError::InvalidPackContribution);
-            }
+        }
+        let catalog_ids = pack
+            .item_types()
+            .keys()
+            .map(|id| id.as_str())
+            .collect::<BTreeSet<_>>();
+        if item_ids != catalog_ids {
+            return Err(SingleGenerateError::InvalidPackContribution);
         }
         Ok(())
     }
@@ -704,12 +692,17 @@ fn validate_request(request: &SingleGenerateRequest) -> Result<(), SingleGenerat
 
 fn validate_required_roles(
     plan: &PlanItem,
-    item_spec: &GenerateItemType,
+    item_descriptor: &ItemTypeDescriptor,
 ) -> Result<(), SingleGenerateError> {
-    let planned = plan.required_resource_roles.iter().collect::<BTreeSet<_>>();
-    let required = item_spec
+    let planned = plan
         .required_resource_roles
         .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    let required = item_descriptor
+        .required_resource_roles()
+        .iter()
+        .map(ResourceId::as_str)
         .collect::<BTreeSet<_>>();
     if planned != required {
         return Err(SingleGenerateError::ResourceRoleMismatch);
@@ -719,15 +712,11 @@ fn validate_required_roles(
 
 fn query_evidence(
     truth: &VerifiedTruthSnapshot,
-    item_spec: &GenerateItemType,
+    item_descriptor: &ItemTypeDescriptor,
 ) -> Result<Vec<TruthEvidenceRecord>, SingleGenerateError> {
-    let mut matched = Vec::with_capacity(item_spec.evidence_queries.len());
-    for query in &item_spec.evidence_queries {
-        let records = truth.query(&EvidenceQuery {
-            symbols: query.symbols.clone(),
-            terms: query.terms.clone(),
-            limit: MAX_EVIDENCE_RECORDS,
-        })?;
+    let mut matched = Vec::with_capacity(item_descriptor.evidence_queries().len());
+    for query in item_descriptor.evidence_queries() {
+        let records = truth.query(&query.as_query())?;
         if records.is_empty() {
             return Err(SingleGenerateError::MissingEvidence);
         }
@@ -768,10 +757,10 @@ fn push_unique_evidence(
 fn load_resources<R: ResourceRepository + ?Sized>(
     repository: &R,
     request: &SingleGenerateRequest,
-    item_spec: &GenerateItemType,
+    item_descriptor: &ItemTypeDescriptor,
     specs: &ResourceSpecs,
 ) -> Result<Vec<LoadedResource>, SingleGenerateError> {
-    if request.selected_resources.len() != item_spec.required_resource_roles.len() {
+    if request.selected_resources.len() != item_descriptor.required_resource_roles().len() {
         return Err(SingleGenerateError::ResourceRoleMismatch);
     }
     let mut loaded = Vec::with_capacity(request.selected_resources.len());
@@ -780,7 +769,7 @@ fn load_resources<R: ResourceRepository + ?Sized>(
         let asset = repository
             .load(&selected.resource_id)
             .map_err(|_| SingleGenerateError::ResourceRepository)?;
-        validate_selected_asset(&asset, selected, item_spec, specs)?;
+        validate_selected_asset(&asset, selected, item_descriptor, specs)?;
         if !roles.insert(asset.logical_role().to_owned()) {
             return Err(SingleGenerateError::ResourceRoleMismatch);
         }
@@ -797,10 +786,10 @@ fn load_resources<R: ResourceRepository + ?Sized>(
             bytes,
         });
     }
-    let expected = item_spec
-        .required_resource_roles
+    let expected = item_descriptor
+        .required_resource_roles()
         .iter()
-        .cloned()
+        .map(ToString::to_string)
         .collect::<BTreeSet<_>>();
     if roles != expected {
         return Err(SingleGenerateError::ResourceRoleMismatch);
@@ -816,15 +805,15 @@ fn load_resources<R: ResourceRepository + ?Sized>(
 fn validate_selected_asset(
     asset: &ResourceAsset,
     selected: &SelectedResource,
-    item_spec: &GenerateItemType,
+    item_descriptor: &ItemTypeDescriptor,
     specs: &ResourceSpecs,
 ) -> Result<(), SingleGenerateError> {
     if asset.resource_id() != &selected.resource_id
         || asset.selected_version() != &selected.selected_version
-        || !item_spec
-            .required_resource_roles
+        || !item_descriptor
+            .required_resource_roles()
             .iter()
-            .any(|role| role == asset.logical_role())
+            .any(|role| role.as_str() == asset.logical_role())
         || specs
             .require_role(asset.logical_role(), &asset.selected().blob.media_type)
             .is_err()
@@ -1168,14 +1157,25 @@ mod tests {
     #[test]
     fn synthetic_pack_uses_the_same_generation_and_resource_contracts() {
         let value = serde_json::json!({
-            "schemaVersion": 2,
+            "schemaVersion": 3,
             "id": "fixture-game",
             "displayName": "Fixture Game",
+            "itemTypes": [{
+                "id": "fixture_item",
+                "displayNames": {"eng":"Fixture item"},
+                "requiredLocales": [],
+                "fields": [],
+                "evidenceQueries": [{
+                    "symbols": ["Fixture.Symbol"],
+                    "terms": []
+                }],
+                "requiredResourceRoles": ["fixture.icon"]
+            }],
             "contributions": [
                 {
                     "slotId": "mod.generate.single",
                     "featureId": "mod.generate.single",
-                    "schema": {"id":"pack.mod-generate-single", "version":2},
+                    "schema": {"id":"pack.mod-generate-single", "version":3},
                     "requiredPrimitives": ["code.fixture-validate"],
                     "payload": {
                         "validationPrimitive": "code.fixture-validate",
@@ -1185,12 +1185,7 @@ mod tests {
                             "generatedFiles": [{
                                 "role": "metadata",
                                 "targetPath": "{mod_id}/metadata.json"
-                            }],
-                            "evidenceQueries": [{
-                                "symbols": ["Fixture.Symbol"],
-                                "terms": []
-                            }],
-                            "requiredResourceRoles": ["fixture.icon"]
+                            }]
                         }]
                     }
                 },
@@ -1230,13 +1225,11 @@ mod tests {
                 .unwrap();
 
         let contribution: GenerateContribution = generate.decode(&generation_slot()).unwrap();
-        contribution.validate().unwrap();
-        let mut missing_evidence_queries = contribution.clone();
-        missing_evidence_queries.item_types[0]
-            .evidence_queries
-            .clear();
+        contribution.validate(&pack).unwrap();
+        let mut incomplete_generation_catalog = contribution.clone();
+        incomplete_generation_catalog.item_types.clear();
         assert!(matches!(
-            missing_evidence_queries.validate(),
+            incomplete_generation_catalog.validate(&pack),
             Err(SingleGenerateError::InvalidPackContribution)
         ));
         let specs: ResourceSpecs = resources.decode(&resource_specs_slot()).unwrap();
@@ -1266,11 +1259,6 @@ mod tests {
                     target_path: "{mod_id}/localization/eng/items.json".into(),
                 },
             ],
-            evidence_queries: vec![PackEvidenceQuery {
-                symbols: vec!["Fixture.Symbol".into()],
-                terms: Vec::new(),
-            }],
-            required_resource_roles: Vec::new(),
         };
         let contract = run_scoped_output_contract(&item_spec);
         assert_eq!(contract.schema, bundle_schema());

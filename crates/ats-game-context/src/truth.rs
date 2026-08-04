@@ -526,7 +526,7 @@ mod tests {
     use super::*;
 
     fn pack() -> LoadedGamePack {
-        let json = br#"{"schemaVersion":2,"id":"fixture-game","displayName":"Fixture","contributions":[]}"#;
+        let json = br#"{"schemaVersion":3,"id":"fixture-game","displayName":"Fixture","itemTypes":[{"id":"fixture_item","displayNames":{"eng":"Fixture item"},"evidenceQueries":[{"symbols":["Player.StartTurn"],"terms":[]}]}],"contributions":[]}"#;
         GamePackLoader::load(json, &sha256_bytes(json)).unwrap()
     }
 

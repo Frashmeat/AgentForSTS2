@@ -348,9 +348,14 @@ mod tests {
     #[test]
     fn synthetic_pack_uses_the_same_build_and_package_contracts() {
         let value = serde_json::json!({
-            "schemaVersion":2,
+            "schemaVersion":3,
             "id":"fixture-game",
             "displayName":"Fixture Game",
+            "itemTypes":[{
+                "id":"fixture_item",
+                "displayNames":{"eng":"Fixture item"},
+                "evidenceQueries":[{"symbols":["Fixture.Symbol"],"terms":[]}]
+            }],
             "contributions":[
                 {
                     "slotId":"project.build.recipe",

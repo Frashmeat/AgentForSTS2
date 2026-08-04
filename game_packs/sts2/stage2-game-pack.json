@@ -1,7 +1,48 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "id": "sts2",
   "displayName": "Slay the Spire 2",
+  "itemTypes": [
+    {
+      "id": "custom_code",
+      "displayNames": { "eng": "Custom code", "zhs": "自定义代码" },
+      "requiredLocales": [],
+      "fields": [],
+      "evidenceQueries": [
+        { "symbols": ["ICustomModel"], "terms": [] }
+      ],
+      "requiredResourceRoles": []
+    },
+    {
+      "id": "relic",
+      "displayNames": { "eng": "Relic", "zhs": "遗物" },
+      "requiredLocales": ["eng", "zhs"],
+      "fields": [
+        {
+          "id": "rarity",
+          "displayNames": { "eng": "Rarity", "zhs": "稀有度" },
+          "required": true,
+          "value": {
+            "kind": "choice",
+            "options": [
+              { "value": "common", "displayNames": { "eng": "Common", "zhs": "普通" } },
+              { "value": "uncommon", "displayNames": { "eng": "Uncommon", "zhs": "罕见" } },
+              { "value": "rare", "displayNames": { "eng": "Rare", "zhs": "稀有" } },
+              { "value": "boss", "displayNames": { "eng": "Boss", "zhs": "Boss" } },
+              { "value": "shop", "displayNames": { "eng": "Shop", "zhs": "商店" } },
+              { "value": "starter", "displayNames": { "eng": "Starter", "zhs": "初始" } }
+            ]
+          }
+        }
+      ],
+      "evidenceQueries": [
+        { "symbols": ["CustomRelicModel"], "terms": [] },
+        { "symbols": ["CustomContentDictionary.AddModel"], "terms": [] },
+        { "symbols": ["RelicModel"], "terms": [] }
+      ],
+      "requiredResourceRoles": ["relic.normal", "relic.outline", "relic.big"]
+    }
+  ],
   "contributions": [
     {
       "slotId": "project.create.template",
@@ -13,15 +54,8 @@
     {
       "slotId": "mod.plan.guidance",
       "featureId": "mod.plan",
-      "schema": { "id": "pack.mod-plan-guidance", "version": 2 },
+      "schema": { "id": "pack.mod-plan-guidance", "version": 3 },
       "payload": {
-        "itemTypes": [
-          { "id": "custom_code", "requiredResourceRoles": [] },
-          {
-            "id": "relic",
-            "requiredResourceRoles": ["relic.normal", "relic.outline", "relic.big"]
-          }
-        ],
         "guidance": [
           "Plan one independently testable Mod item at a time.",
           "Describe behavior intent and acceptance criteria without inventing lifecycle hook names.",
@@ -32,7 +66,7 @@
     {
       "slotId": "mod.generate.single",
       "featureId": "mod.generate.single",
-      "schema": { "id": "pack.mod-generate-single", "version": 2 },
+      "schema": { "id": "pack.mod-generate-single", "version": 3 },
       "requiredPrimitives": ["code.dotnet-validate"],
       "payload": {
         "validationPrimitive": "code.dotnet-validate",
@@ -46,11 +80,7 @@
             "id": "custom_code",
             "generatedFiles": [
               { "role": "source", "targetPath": "Generated/{item_id}.cs" }
-            ],
-            "evidenceQueries": [
-              { "symbols": ["ICustomModel"], "terms": [] }
-            ],
-            "requiredResourceRoles": []
+            ]
           },
           {
             "id": "relic",
@@ -58,13 +88,7 @@
               { "role": "source", "targetPath": "Generated/{item_id}.cs" },
               { "role": "localization.eng", "targetPath": "{mod_id}/localization/eng/relics.json" },
               { "role": "localization.zhs", "targetPath": "{mod_id}/localization/zhs/relics.json" }
-            ],
-            "evidenceQueries": [
-              { "symbols": ["CustomRelicModel"], "terms": [] },
-              { "symbols": ["CustomContentDictionary.AddModel"], "terms": [] },
-              { "symbols": ["RelicModel"], "terms": [] }
-            ],
-            "requiredResourceRoles": ["relic.normal", "relic.outline", "relic.big"]
+            ]
           }
         ]
       }
