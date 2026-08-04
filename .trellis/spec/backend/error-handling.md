@@ -30,6 +30,12 @@ Pack/Recipe rejection, cancellation, and invalid input persist distinct `model.*
 `feature.*`, or `run.*` failures from `ModPlanError`; the Shell must not replace them with a
 generic execution failure.
 
+Resource Prepare maps decoded media/shape/alpha rejection to `resource.media_invalid`, unsupported
+Pack roles to `resource.unsupported`, wrong source entry to `resource.source_invalid`, repository
+failure to `resource.storage_failed`, and graph/Primitive/version drift to
+`pack.contribution_invalid`. These known failures must never collapse to
+`feature.execution_failed`.
+
 ## Ownership
 
 - Kernel owns serialized shape and validation.

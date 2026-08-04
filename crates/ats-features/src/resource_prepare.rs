@@ -7,10 +7,12 @@ use ats_kernel::{
 };
 use ats_runtime::{CancellationToken, MediaClient, MediaError, MediaRequest, MediaRequestSnapshot};
 use ats_workspace::{
-    ResourceAsset, ResourceBytesIngestRequest, ResourceIngestRequest, ResourceOrigin,
-    ResourceRepository,
+    PreparedResourceMedia, ResourceAsset, ResourceBlob, ResourceBytesIngestRequest,
+    ResourceMediaProcessor, ResourceOrigin, ResourceRepository, ResourceTransformOperation,
+    ResourceVersionProvenance,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::FeatureSpec;
@@ -27,11 +29,11 @@ impl FeatureSpec for ResourcePrepareFeature {
     }
 
     fn request_schema() -> SchemaRef {
-        schema("feature.resource-prepare-request")
+        schema_version("feature.resource-prepare-request", 2)
     }
 
     fn result_schema() -> SchemaRef {
-        schema("feature.resource-prepare-result")
+        schema_version("feature.resource-prepare-result", 2)
     }
 
     fn artifact_extension_schema() -> SchemaRef {
@@ -44,7 +46,7 @@ impl ResourcePrepareFeature {
     pub fn contribution_requirement() -> ats_game_context::ContributionRequirement {
         ats_game_context::ContributionRequirement {
             slot_id: resource_specs_slot(),
-            schema: schema("pack.resource-specs"),
+            schema: schema_version("pack.resource-specs", 2),
         }
     }
 }
@@ -63,7 +65,6 @@ pub enum ResourcePrepareSource {
     UserUpload,
     AiGenerated {
         prompt: String,
-        file_name: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         model: Option<String>,
     },
@@ -73,18 +74,28 @@ pub enum ResourcePrepareSource {
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ResourcePrepareResult {
+    pub candidates: Vec<ResourceCandidateResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ResourceCandidateResult {
     pub resource_id: ResourceId,
     pub logical_role: String,
     pub origin: ResourceOrigin,
-    pub selected_version: Sha256Digest,
+    pub candidate_version: Sha256Digest,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_version: Option<Sha256Digest>,
     pub media_type: String,
+    pub width: u32,
+    pub height: u32,
+    pub has_alpha: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ResourcePrepareArtifactExtension {
-    pub resource_id: ResourceId,
-    pub selected_version: Sha256Digest,
+    pub candidate_count: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -100,7 +111,44 @@ pub(crate) struct ResourceRoleSpec {
     pub(crate) media_types: Vec<String>,
     pub(crate) width: u32,
     pub(crate) height: u32,
-    pub(crate) target_path: String,
+    pub(crate) require_alpha: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) target_path: Option<String>,
+    pub(crate) source: ResourceRoleSource,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub(crate) enum ResourceRoleSource {
+    Master,
+    Derived {
+        source_role: String,
+        transform: ResourceTransformSpec,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(
+    tag = "operation",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub(crate) enum ResourceTransformSpec {
+    Resize {
+        primitive: ats_kernel::PrimitiveId,
+        version: u32,
+    },
+    Outline {
+        primitive: ats_kernel::PrimitiveId,
+        version: u32,
+        radius: u32,
+    },
 }
 
 impl ResourceSpecs {
@@ -121,8 +169,39 @@ impl ResourceSpecs {
                 || role.width > 16_384
                 || role.height == 0
                 || role.height > 16_384
-                || !valid_target_template(&role.target_path)
                 || !ids.insert(role.id.as_str())
+            {
+                return Err(ResourcePrepareError::InvalidPackSpecs);
+            }
+            match &role.source {
+                ResourceRoleSource::Master => {
+                    if role.target_path.is_some() {
+                        return Err(ResourcePrepareError::InvalidPackSpecs);
+                    }
+                }
+                ResourceRoleSource::Derived {
+                    source_role,
+                    transform,
+                } => {
+                    if !valid_role(source_role)
+                        || source_role == &role.id
+                        || role
+                            .target_path
+                            .as_deref()
+                            .is_none_or(|path| !valid_target_template(path))
+                        || !transform.validate()
+                    {
+                        return Err(ResourcePrepareError::InvalidPackSpecs);
+                    }
+                }
+            }
+        }
+        for role in &self.roles {
+            if let ResourceRoleSource::Derived { source_role, .. } = &role.source
+                && !self.roles.iter().any(|candidate| {
+                    candidate.id == *source_role
+                        && matches!(candidate.source, ResourceRoleSource::Master)
+                })
             {
                 return Err(ResourcePrepareError::InvalidPackSpecs);
             }
@@ -146,6 +225,76 @@ impl ResourceSpecs {
             })
             .ok_or(ResourcePrepareError::UnsupportedResource)
     }
+
+    pub(crate) fn validate_blob(
+        &self,
+        role: &str,
+        blob: &ResourceBlob,
+    ) -> Result<(), ResourcePrepareError> {
+        let spec = self.require_role(role, &blob.media_type)?;
+        if spec.accepts_media(&blob.media_type, blob.width, blob.height, blob.has_alpha) {
+            Ok(())
+        } else {
+            Err(ResourcePrepareError::InvalidMedia)
+        }
+    }
+
+    fn derived_from<'a>(
+        &'a self,
+        source_role: &'a str,
+    ) -> impl Iterator<Item = &'a ResourceRoleSpec> {
+        self.roles.iter().filter(move |role| {
+            matches!(
+                &role.source,
+                ResourceRoleSource::Derived { source_role: source, .. } if source == source_role
+            )
+        })
+    }
+}
+
+impl ResourceTransformSpec {
+    fn validate(&self) -> bool {
+        match self {
+            Self::Resize { version, .. } => *version == 1,
+            Self::Outline {
+                version, radius, ..
+            } => *version == 1 && (1..=64).contains(radius),
+        }
+    }
+
+    fn primitive(&self) -> &ats_kernel::PrimitiveId {
+        match self {
+            Self::Resize { primitive, .. } | Self::Outline { primitive, .. } => primitive,
+        }
+    }
+
+    fn version(&self) -> u32 {
+        match self {
+            Self::Resize { version, .. } | Self::Outline { version, .. } => *version,
+        }
+    }
+
+    fn operation(&self, width: u32, height: u32) -> ResourceTransformOperation {
+        match self {
+            Self::Resize { .. } => ResourceTransformOperation::Resize { width, height },
+            Self::Outline { radius, .. } => ResourceTransformOperation::Outline {
+                width,
+                height,
+                radius: *radius,
+            },
+        }
+    }
+}
+
+impl ResourceRoleSpec {
+    fn accepts_media(&self, media_type: &str, width: u32, height: u32, has_alpha: bool) -> bool {
+        self.media_types
+            .iter()
+            .any(|supported| supported == media_type)
+            && width == self.width
+            && height == self.height
+            && (!self.require_alpha || has_alpha)
+    }
 }
 
 pub struct ResourcePrepareContext<'a> {
@@ -156,18 +305,20 @@ pub struct ResourcePrepareContext<'a> {
 pub struct ResourcePrepareService;
 
 impl ResourcePrepareService {
-    pub fn prepare_file<R>(
+    pub fn prepare_file<P, R>(
         &self,
+        processor: &P,
         repository: &R,
         request: ResourcePrepareRequest,
         source_path: PathBuf,
         context: ResourcePrepareContext<'_>,
     ) -> Result<ResourcePrepareResult, ResourcePrepareError>
     where
+        P: ResourceMediaProcessor,
         R: ResourceRepository,
     {
         let specs = validate_request_and_context(&request, &context)?;
-        specs.require_role(&request.logical_role, &request.media_type)?;
+        let spec = specs.require_role(&request.logical_role, &request.media_type)?;
         let origin = match request.source {
             ResourcePrepareSource::UserUpload => ResourceOrigin::UserUpload,
             ResourcePrepareSource::PackDefault => ResourceOrigin::PackDefault {
@@ -179,20 +330,24 @@ impl ResourcePrepareService {
                 return Err(ResourcePrepareError::WrongSourceMode);
             }
         };
-        let asset = repository
-            .ingest(ResourceIngestRequest {
-                logical_role: request.logical_role,
-                origin,
-                media_type: request.media_type,
-                source_path,
-            })
-            .map_err(|_| ResourcePrepareError::Repository)?;
-        Ok(result_from_asset(&asset))
+        let media = processor
+            .prepare_file(&source_path, &request.media_type)
+            .map_err(|_| ResourcePrepareError::InvalidMedia)?;
+        prepare_candidates(
+            processor,
+            repository,
+            &specs,
+            spec,
+            media,
+            origin,
+            context.pack,
+        )
     }
 
-    pub async fn prepare_ai<M, R>(
+    pub async fn prepare_ai<M, P, R>(
         &self,
         media: &M,
+        processor: &P,
         repository: &R,
         request: ResourcePrepareRequest,
         context: ResourcePrepareContext<'_>,
@@ -200,16 +355,12 @@ impl ResourcePrepareService {
     ) -> Result<ResourcePrepareResult, ResourcePrepareError>
     where
         M: MediaClient + ?Sized,
+        P: ResourceMediaProcessor,
         R: ResourceRepository,
     {
         let specs = validate_request_and_context(&request, &context)?;
         let spec = specs.require_role(&request.logical_role, &request.media_type)?;
-        let ResourcePrepareSource::AiGenerated {
-            prompt,
-            file_name,
-            model,
-        } = request.source
-        else {
+        let ResourcePrepareSource::AiGenerated { prompt, model } = request.source else {
             return Err(ResourcePrepareError::WrongSourceMode);
         };
         let snapshot = MediaRequestSnapshot::new(MediaRequest {
@@ -229,20 +380,23 @@ impl ResourcePrepareService {
                 ResourcePrepareError::InvalidMediaResponse
             });
         }
-        let asset = repository
-            .ingest_bytes(ResourceBytesIngestRequest {
-                logical_role: request.logical_role,
-                origin: ResourceOrigin::AiGenerated {
-                    provider: response.provider,
-                    model: response.model,
-                    request_sha256: snapshot.request_sha256().clone(),
-                },
-                media_type: request.media_type,
-                file_name,
-                bytes: response.bytes,
-            })
-            .map_err(|_| ResourcePrepareError::Repository)?;
-        Ok(result_from_asset(&asset))
+        let origin = ResourceOrigin::AiGenerated {
+            provider: response.provider,
+            model: response.model,
+            request_sha256: snapshot.request_sha256().clone(),
+        };
+        let prepared = processor
+            .prepare_bytes(response.bytes, &request.media_type)
+            .map_err(|_| ResourcePrepareError::InvalidMedia)?;
+        prepare_candidates(
+            processor,
+            repository,
+            &specs,
+            spec,
+            prepared,
+            origin,
+            context.pack,
+        )
     }
 
     pub fn select<R>(
@@ -256,16 +410,22 @@ impl ResourcePrepareService {
         R: ResourceRepository,
     {
         validate_context(&context)?;
-        let specs: ResourceSpecs = context.contributions.decode(&resource_specs_slot())?;
-        specs.validate()?;
+        let specs = validate_specs_and_primitives(&context)?;
         let current = repository
             .load(resource_id)
             .map_err(|_| ResourcePrepareError::Repository)?;
-        specs.require_role(current.logical_role(), &current.selected().blob.media_type)?;
+        let candidate = current
+            .versions()
+            .iter()
+            .find(|candidate| &candidate.id == version)
+            .ok_or(ResourcePrepareError::Repository)?;
+        specs.validate_blob(current.logical_role(), &candidate.blob)?;
         let asset = repository
             .select(resource_id, version)
             .map_err(|_| ResourcePrepareError::Repository)?;
-        Ok(result_from_asset(&asset))
+        Ok(ResourcePrepareResult {
+            candidates: vec![result_from_asset(&asset, version)?],
+        })
     }
 }
 
@@ -283,6 +443,8 @@ pub enum ResourcePrepareError {
     WrongSourceMode,
     #[error("resource media response does not match the request")]
     InvalidMediaResponse,
+    #[error("resource media bytes or dimensions do not match the Pack contract")]
+    InvalidMedia,
     #[error("resource preparation was cancelled")]
     Cancelled,
     #[error("resource repository operation failed")]
@@ -301,8 +463,24 @@ fn validate_request_and_context(
         return Err(ResourcePrepareError::InvalidInput);
     }
     validate_context(context)?;
+    let specs = validate_specs_and_primitives(context)?;
+    Ok(specs)
+}
+
+fn validate_specs_and_primitives(
+    context: &ResourcePrepareContext<'_>,
+) -> Result<ResourceSpecs, ResourcePrepareError> {
     let specs: ResourceSpecs = context.contributions.decode(&resource_specs_slot())?;
     specs.validate()?;
+    for role in &specs.roles {
+        if let ResourceRoleSource::Derived { transform, .. } = &role.source
+            && !context
+                .contributions
+                .declares_primitive(&resource_specs_slot(), transform.primitive())?
+        {
+            return Err(ResourcePrepareError::InvalidPackSpecs);
+        }
+    }
     Ok(specs)
 }
 
@@ -316,14 +494,119 @@ fn validate_context(context: &ResourcePrepareContext<'_>) -> Result<(), Resource
     Ok(())
 }
 
-fn result_from_asset(asset: &ResourceAsset) -> ResourcePrepareResult {
-    ResourcePrepareResult {
+fn prepare_candidates<P, R>(
+    processor: &P,
+    repository: &R,
+    specs: &ResourceSpecs,
+    requested_spec: &ResourceRoleSpec,
+    media: PreparedResourceMedia,
+    origin: ResourceOrigin,
+    pack: &LoadedGamePack,
+) -> Result<ResourcePrepareResult, ResourcePrepareError>
+where
+    P: ResourceMediaProcessor,
+    R: ResourceRepository,
+{
+    validate_media(requested_spec, &media)?;
+    let source_version = sha256_bytes(&media.bytes);
+    let mut requests = vec![ResourceBytesIngestRequest {
+        logical_role: requested_spec.id.clone(),
+        origin: origin.clone(),
+        file_name: file_name_for_role(&requested_spec.id),
+        media: media.clone(),
+        provenance: ResourceVersionProvenance::Original,
+    }];
+    if matches!(requested_spec.source, ResourceRoleSource::Master) {
+        for derived in specs.derived_from(&requested_spec.id) {
+            let ResourceRoleSource::Derived { transform, .. } = &derived.source else {
+                continue;
+            };
+            let operation = transform.operation(derived.width, derived.height);
+            let transformed = processor
+                .transform(&media, &operation)
+                .map_err(|_| ResourcePrepareError::InvalidMedia)?;
+            validate_media(derived, &transformed)?;
+            let parameters = serde_json::to_vec(transform)
+                .map_err(|_| ResourcePrepareError::InvalidPackSpecs)?;
+            requests.push(ResourceBytesIngestRequest {
+                logical_role: derived.id.clone(),
+                origin: origin.clone(),
+                file_name: file_name_for_role(&derived.id),
+                media: transformed,
+                provenance: ResourceVersionProvenance::Derived {
+                    source_role: requested_spec.id.clone(),
+                    source_version: source_version.clone(),
+                    transform: transform.primitive().clone(),
+                    transform_version: transform.version(),
+                    parameters_sha256: sha256_bytes(&parameters),
+                    game_pack_id: pack.id().clone(),
+                    game_pack_sha256: pack.content_sha256().clone(),
+                },
+            });
+        }
+    }
+    let assets = repository
+        .ingest_batch(requests)
+        .map_err(|_| ResourcePrepareError::Repository)?;
+    let candidates = assets
+        .iter()
+        .map(|asset| {
+            let version = asset
+                .versions()
+                .first()
+                .ok_or(ResourcePrepareError::Repository)?;
+            result_from_asset(asset, &version.id)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(ResourcePrepareResult { candidates })
+}
+
+fn validate_media(
+    spec: &ResourceRoleSpec,
+    media: &PreparedResourceMedia,
+) -> Result<(), ResourcePrepareError> {
+    if !spec.accepts_media(
+        &media.media_type,
+        media.width,
+        media.height,
+        media.has_alpha,
+    ) || media.bytes.is_empty()
+    {
+        Err(ResourcePrepareError::InvalidMedia)
+    } else {
+        Ok(())
+    }
+}
+
+fn file_name_for_role(role: &str) -> String {
+    format!("{}.png", role.replace('.', "-"))
+}
+
+fn sha256_bytes(bytes: &[u8]) -> Sha256Digest {
+    Sha256Digest::parse(format!("{:x}", Sha256::digest(bytes)))
+        .expect("SHA-256 formatter is a valid digest")
+}
+
+fn result_from_asset(
+    asset: &ResourceAsset,
+    candidate_version: &Sha256Digest,
+) -> Result<ResourceCandidateResult, ResourcePrepareError> {
+    let candidate = asset
+        .versions()
+        .iter()
+        .find(|version| &version.id == candidate_version)
+        .ok_or(ResourcePrepareError::Repository)?;
+    Ok(ResourceCandidateResult {
         resource_id: asset.resource_id().clone(),
         logical_role: asset.logical_role().to_owned(),
         origin: asset.origin().clone(),
-        selected_version: asset.selected_version().clone(),
-        media_type: asset.selected().blob.media_type.clone(),
-    }
+        candidate_version: candidate.id.clone(),
+        selected_version: asset.selected_version().cloned(),
+        media_type: candidate.blob.media_type.clone(),
+        width: candidate.blob.width,
+        height: candidate.blob.height,
+        has_alpha: candidate.blob.has_alpha,
+    })
 }
 
 pub(crate) fn expand_target_template(
@@ -393,9 +676,13 @@ fn resource_specs_slot() -> ContributionId {
 }
 
 fn schema(id: &str) -> SchemaRef {
+    schema_version(id, 1)
+}
+
+fn schema_version(id: &str, version: u32) -> SchemaRef {
     SchemaRef {
         id: SchemaId::parse(id).expect("built-in schema ID is valid"),
-        version: SchemaVersion::new(1).expect("built-in schema version is valid"),
+        version: SchemaVersion::new(version).expect("built-in schema version is valid"),
     }
 }
 
@@ -421,50 +708,53 @@ mod tests {
     impl ResourceRepository for MemoryRepository {
         type Error = WorkspaceError;
 
-        fn ingest(&self, request: ResourceIngestRequest) -> Result<ResourceAsset, Self::Error> {
-            let bytes =
-                std::fs::read(request.source_path).map_err(|_| WorkspaceError::PathInvalid)?;
-            self.ingest_bytes(ResourceBytesIngestRequest {
-                logical_role: request.logical_role,
-                origin: request.origin,
-                media_type: request.media_type,
-                file_name: "fixture.bin".into(),
-                bytes,
-            })
-        }
-
         fn ingest_bytes(
             &self,
             request: ResourceBytesIngestRequest,
         ) -> Result<ResourceAsset, Self::Error> {
-            let digest =
-                Sha256Digest::parse(format!("{:x}", Sha256::digest(&request.bytes))).unwrap();
-            let id = ResourceId::parse(format!(
-                "resource.fixture-{}",
-                self.assets.lock().unwrap().len()
-            ))
-            .unwrap();
-            let asset = ResourceAsset::new(
-                id.clone(),
-                request.logical_role,
-                request.origin,
-                ats_workspace::ResourceVersion {
-                    id: digest.clone(),
-                    parent_version: None,
-                    blob: ats_workspace::ResourceBlob {
-                        relative_path: format!("versions/{digest}/original.bin"),
-                        media_type: request.media_type,
-                        byte_length: request.bytes.len() as u64,
-                        sha256: digest,
+            self.ingest_batch(vec![request])?
+                .pop()
+                .ok_or(WorkspaceError::InvalidManifest)
+        }
+
+        fn ingest_batch(
+            &self,
+            requests: Vec<ResourceBytesIngestRequest>,
+        ) -> Result<Vec<ResourceAsset>, Self::Error> {
+            let mut stored = self.assets.lock().unwrap();
+            let mut pending = Vec::with_capacity(requests.len());
+            for (offset, request) in requests.into_iter().enumerate() {
+                let digest =
+                    Sha256Digest::parse(format!("{:x}", Sha256::digest(&request.media.bytes)))
+                        .unwrap();
+                let id = ResourceId::parse(format!("resource.fixture-{}", stored.len() + offset))
+                    .unwrap();
+                let asset = ResourceAsset::new(
+                    id.clone(),
+                    request.logical_role,
+                    request.origin,
+                    ats_workspace::ResourceVersion {
+                        id: digest.clone(),
+                        parent_version: None,
+                        blob: ats_workspace::ResourceBlob {
+                            relative_path: format!("versions/{digest}/original.bin"),
+                            media_type: request.media.media_type,
+                            byte_length: request.media.bytes.len() as u64,
+                            sha256: digest,
+                            width: request.media.width,
+                            height: request.media.height,
+                            has_alpha: request.media.has_alpha,
+                        },
+                        provenance: request.provenance,
                     },
-                    provenance: ats_workspace::ResourceVersionProvenance::Original,
-                },
-            )?;
-            self.assets
-                .lock()
-                .unwrap()
-                .insert(id, (asset.clone(), request.bytes));
-            Ok(asset)
+                )?;
+                pending.push((id, asset, request.media.bytes));
+            }
+            let assets = pending.iter().map(|(_, asset, _)| asset.clone()).collect();
+            for (id, asset, bytes) in pending {
+                stored.insert(id, (asset, bytes));
+            }
+            Ok(assets)
         }
 
         fn add_version(&self, _: ResourceDeriveRequest) -> Result<ResourceAsset, Self::Error> {
@@ -499,9 +789,109 @@ mod tests {
                 .lock()
                 .unwrap()
                 .get(resource_id)
-                .filter(|(asset, _)| asset.selected_version() == selected_version)
+                .filter(|(asset, _)| asset.selected_version() == Some(selected_version))
                 .map(|(_, bytes)| bytes.clone())
                 .ok_or(WorkspaceError::VersionNotFound)
+        }
+
+        fn list(&self) -> Result<Vec<ResourceAsset>, Self::Error> {
+            Ok(self
+                .assets
+                .lock()
+                .unwrap()
+                .values()
+                .map(|(asset, _)| asset.clone())
+                .collect())
+        }
+    }
+
+    struct MockProcessor;
+
+    impl ResourceMediaProcessor for MockProcessor {
+        type Error = WorkspaceError;
+
+        fn prepare_file(
+            &self,
+            source_path: &std::path::Path,
+            declared_media_type: &str,
+        ) -> Result<PreparedResourceMedia, Self::Error> {
+            let bytes = std::fs::read(source_path).map_err(|_| WorkspaceError::PathInvalid)?;
+            self.prepare_bytes(bytes, declared_media_type)
+        }
+
+        fn prepare_bytes(
+            &self,
+            bytes: Vec<u8>,
+            declared_media_type: &str,
+        ) -> Result<PreparedResourceMedia, Self::Error> {
+            Ok(PreparedResourceMedia {
+                media_type: declared_media_type.into(),
+                width: 512,
+                height: 512,
+                has_alpha: true,
+                bytes,
+            })
+        }
+
+        fn transform(
+            &self,
+            source: &PreparedResourceMedia,
+            operation: &ResourceTransformOperation,
+        ) -> Result<PreparedResourceMedia, Self::Error> {
+            let (width, height) = match operation {
+                ResourceTransformOperation::Resize { width, height }
+                | ResourceTransformOperation::Outline { width, height, .. } => (*width, *height),
+            };
+            let mut bytes = source.bytes.clone();
+            bytes.extend_from_slice(format!("{width}x{height}:{operation:?}").as_bytes());
+            Ok(PreparedResourceMedia {
+                media_type: "image/png".into(),
+                width,
+                height,
+                has_alpha: true,
+                bytes,
+            })
+        }
+    }
+
+    struct FixedProcessor {
+        width: u32,
+        height: u32,
+        has_alpha: bool,
+        bytes: Vec<u8>,
+    }
+
+    impl ResourceMediaProcessor for FixedProcessor {
+        type Error = WorkspaceError;
+
+        fn prepare_file(
+            &self,
+            _: &std::path::Path,
+            declared_media_type: &str,
+        ) -> Result<PreparedResourceMedia, Self::Error> {
+            self.prepare_bytes(self.bytes.clone(), declared_media_type)
+        }
+
+        fn prepare_bytes(
+            &self,
+            bytes: Vec<u8>,
+            declared_media_type: &str,
+        ) -> Result<PreparedResourceMedia, Self::Error> {
+            Ok(PreparedResourceMedia {
+                media_type: declared_media_type.into(),
+                width: self.width,
+                height: self.height,
+                has_alpha: self.has_alpha,
+                bytes,
+            })
+        }
+
+        fn transform(
+            &self,
+            _: &PreparedResourceMedia,
+            _: &ResourceTransformOperation,
+        ) -> Result<PreparedResourceMedia, Self::Error> {
+            Err(WorkspaceError::InvalidManifest)
         }
     }
 
@@ -549,9 +939,10 @@ mod tests {
         };
         let upload = service
             .prepare_file(
+                &MockProcessor,
                 &repository,
                 ResourcePrepareRequest {
-                    logical_role: "relic.normal".into(),
+                    logical_role: "relic.master".into(),
                     media_type: "image/png".into(),
                     source: ResourcePrepareSource::UserUpload,
                 },
@@ -561,9 +952,10 @@ mod tests {
             .unwrap();
         let default = service
             .prepare_file(
+                &MockProcessor,
                 &repository,
                 ResourcePrepareRequest {
-                    logical_role: "relic.outline".into(),
+                    logical_role: "relic.master".into(),
                     media_type: "image/png".into(),
                     source: ResourcePrepareSource::PackDefault,
                 },
@@ -574,13 +966,13 @@ mod tests {
         let ai = service
             .prepare_ai(
                 &MockMedia,
+                &MockProcessor,
                 &repository,
                 ResourcePrepareRequest {
-                    logical_role: "relic.big".into(),
+                    logical_role: "relic.master".into(),
                     media_type: "image/png".into(),
                     source: ResourcePrepareSource::AiGenerated {
                         prompt: "fixture".into(),
-                        file_name: "fixture.png".into(),
                         model: None,
                     },
                 },
@@ -589,10 +981,235 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(matches!(upload.origin, ResourceOrigin::UserUpload));
-        assert!(matches!(default.origin, ResourceOrigin::PackDefault { .. }));
-        assert!(matches!(ai.origin, ResourceOrigin::AiGenerated { .. }));
-        assert_eq!(repository.assets.lock().unwrap().len(), 3);
+        assert!(matches!(
+            upload.candidates[0].origin,
+            ResourceOrigin::UserUpload
+        ));
+        assert!(matches!(
+            default.candidates[0].origin,
+            ResourceOrigin::PackDefault { .. }
+        ));
+        assert!(matches!(
+            ai.candidates[0].origin,
+            ResourceOrigin::AiGenerated { .. }
+        ));
+        assert_eq!(upload.candidates.len(), 4);
+        assert!(
+            upload
+                .candidates
+                .iter()
+                .all(|candidate| candidate.selected_version.is_none())
+        );
+        assert_eq!(repository.assets.lock().unwrap().len(), 12);
+    }
+
+    #[test]
+    fn master_derivation_is_deterministic_selectable_and_records_exact_provenance() {
+        let (pack, contributions) = context();
+        let repository = MemoryRepository::default();
+        let temp = tempfile::TempDir::new().unwrap();
+        let source = temp.path().join("fixture.png");
+        std::fs::write(&source, b"upload").unwrap();
+        let prepare = || {
+            ResourcePrepareService.prepare_file(
+                &MockProcessor,
+                &repository,
+                ResourcePrepareRequest {
+                    logical_role: "relic.master".into(),
+                    media_type: "image/png".into(),
+                    source: ResourcePrepareSource::UserUpload,
+                },
+                source.clone(),
+                ResourcePrepareContext {
+                    pack: &pack,
+                    contributions: &contributions,
+                },
+            )
+        };
+        let first = prepare().unwrap();
+        let second = prepare().unwrap();
+        assert_eq!(first.candidates.len(), 4);
+        assert_eq!(
+            first
+                .candidates
+                .iter()
+                .map(|candidate| (&candidate.logical_role, &candidate.candidate_version))
+                .collect::<BTreeMap<_, _>>(),
+            second
+                .candidates
+                .iter()
+                .map(|candidate| (&candidate.logical_role, &candidate.candidate_version))
+                .collect::<BTreeMap<_, _>>()
+        );
+        assert!(
+            first
+                .candidates
+                .iter()
+                .all(|candidate| candidate.selected_version.is_none())
+        );
+
+        let master = first
+            .candidates
+            .iter()
+            .find(|candidate| candidate.logical_role == "relic.master")
+            .unwrap();
+        let normal = first
+            .candidates
+            .iter()
+            .find(|candidate| candidate.logical_role == "relic.normal")
+            .unwrap();
+        let normal_asset = repository.load(&normal.resource_id).unwrap();
+        let ResourceVersionProvenance::Derived {
+            source_role,
+            source_version,
+            transform,
+            transform_version,
+            parameters_sha256,
+            game_pack_id,
+            game_pack_sha256,
+        } = &normal_asset.versions()[0].provenance
+        else {
+            panic!("normal candidate must retain derived provenance");
+        };
+        let specs: ResourceSpecs = contributions.decode(&resource_specs_slot()).unwrap();
+        let ResourceRoleSource::Derived {
+            transform: expected_transform,
+            ..
+        } = &specs
+            .roles
+            .iter()
+            .find(|role| role.id == "relic.normal")
+            .unwrap()
+            .source
+        else {
+            panic!("normal role must be derived");
+        };
+        assert_eq!(source_role, "relic.master");
+        assert_eq!(source_version, &master.candidate_version);
+        assert_eq!(transform, expected_transform.primitive());
+        assert_eq!(*transform_version, expected_transform.version());
+        assert_eq!(
+            parameters_sha256,
+            &sha256_bytes(&serde_json::to_vec(expected_transform).unwrap())
+        );
+        assert_eq!(game_pack_id, pack.id());
+        assert_eq!(game_pack_sha256, pack.content_sha256());
+
+        let selected = ResourcePrepareService
+            .select(
+                &repository,
+                &normal.resource_id,
+                &normal.candidate_version,
+                ResourcePrepareContext {
+                    pack: &pack,
+                    contributions: &contributions,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            selected.candidates[0].selected_version.as_ref(),
+            Some(&normal.candidate_version)
+        );
+    }
+
+    #[test]
+    fn invalid_dimensions_and_alpha_fail_before_repository_mutation() {
+        let (pack, contributions) = context();
+        for processor in [
+            FixedProcessor {
+                width: 511,
+                height: 512,
+                has_alpha: true,
+                bytes: b"wrong-size".to_vec(),
+            },
+            FixedProcessor {
+                width: 512,
+                height: 512,
+                has_alpha: false,
+                bytes: b"no-alpha".to_vec(),
+            },
+            FixedProcessor {
+                width: 512,
+                height: 512,
+                has_alpha: true,
+                bytes: Vec::new(),
+            },
+        ] {
+            let repository = MemoryRepository::default();
+            let result = ResourcePrepareService.prepare_file(
+                &processor,
+                &repository,
+                ResourcePrepareRequest {
+                    logical_role: "relic.master".into(),
+                    media_type: "image/png".into(),
+                    source: ResourcePrepareSource::UserUpload,
+                },
+                PathBuf::from("unused"),
+                ResourcePrepareContext {
+                    pack: &pack,
+                    contributions: &contributions,
+                },
+            );
+            assert!(matches!(result, Err(ResourcePrepareError::InvalidMedia)));
+            assert!(repository.assets.lock().unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn pack_transform_version_and_primitive_drift_are_rejected() {
+        for (field, value) in [
+            ("version", serde_json::json!(2)),
+            ("primitive", serde_json::json!("image.undeclared")),
+        ] {
+            let mut pack_value: serde_json::Value = serde_json::from_slice(include_bytes!(
+                "../../../game_packs/sts2/stage2-game-pack.json"
+            ))
+            .unwrap();
+            let contribution = pack_value["contributions"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|candidate| candidate["slotId"] == "resource.prepare.specs")
+                .unwrap();
+            let role = contribution["payload"]["roles"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|candidate| candidate["id"] == "relic.normal")
+                .unwrap();
+            role["source"]["transform"][field] = value;
+            let bytes = serde_json::to_vec(&pack_value).unwrap();
+            let digest = Sha256Digest::parse(format!("{:x}", Sha256::digest(&bytes))).unwrap();
+            let pack = GamePackLoader::load(&bytes, &digest).unwrap();
+            let contributions =
+                ContributionResolver::new([PrimitiveId::parse("image.role-transform").unwrap()])
+                    .resolve(
+                        &pack,
+                        &ResourcePrepareFeature::id(),
+                        &[ResourcePrepareFeature::contribution_requirement()],
+                    )
+                    .unwrap();
+            let repository = MemoryRepository::default();
+            let result = ResourcePrepareService.prepare_file(
+                &MockProcessor,
+                &repository,
+                ResourcePrepareRequest {
+                    logical_role: "relic.master".into(),
+                    media_type: "image/png".into(),
+                    source: ResourcePrepareSource::UserUpload,
+                },
+                PathBuf::from("unused"),
+                ResourcePrepareContext {
+                    pack: &pack,
+                    contributions: &contributions,
+                },
+            );
+            assert!(matches!(
+                result,
+                Err(ResourcePrepareError::InvalidPackSpecs)
+            ));
+            assert!(repository.assets.lock().unwrap().is_empty());
+        }
     }
 
     #[test]
@@ -600,6 +1217,7 @@ mod tests {
         let (pack, contributions) = context();
         let repository = MemoryRepository::default();
         let result = ResourcePrepareService.prepare_file(
+            &MockProcessor,
             &repository,
             ResourcePrepareRequest {
                 logical_role: "unknown.role".into(),

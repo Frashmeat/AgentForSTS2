@@ -231,7 +231,7 @@ export interface ResourcePrepareRequest extends Record<string, unknown> {
   source:
     | { kind: "user_upload" }
     | { kind: "pack_default" }
-    | { kind: "ai_generated"; prompt: string; fileName: string; model?: string | null };
+    | { kind: "ai_generated"; prompt: string; model?: string | null };
 }
 
 export interface ProjectBuildRequest extends Record<string, unknown> {}
@@ -260,7 +260,7 @@ export function submitResourcePrepare(
   request: ResourcePrepareRequest,
   sourcePath?: string,
 ): Promise<string> {
-  return submit("resource.prepare", "feature.resource-prepare-request", request, 1, sourcePath);
+  return submit("resource.prepare", "feature.resource-prepare-request", request, 2, sourcePath);
 }
 
 export function submitProjectBuild(request: ProjectBuildRequest = {}): Promise<string> {

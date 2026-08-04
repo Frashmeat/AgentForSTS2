@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use ats_adapters::{
     FileArtifactStore, FileProjectWriter, FileResourceRepository, FileTruthSnapshotRepository,
-    HttpMediaClient, HttpModelClient, RegisteredBuildRunner, RegisteredValidationRunner,
-    ZipPackageWriter,
+    HttpMediaClient, HttpModelClient, PngResourceMediaProcessor, RegisteredBuildRunner,
+    RegisteredValidationRunner, ZipPackageWriter,
 };
 use ats_features::FeatureSpec;
 use ats_features::log_analyze::{LogAnalyzeContext, LogAnalyzeFeature, LogAnalyzeService};
@@ -106,6 +106,7 @@ impl Stage2Composition {
         project: &ProjectMeta,
         run: RunRecord,
         repository: &dyn RunRepository,
+        resources: &FileResourceRepository,
         source_path: Option<PathBuf>,
         cancellation: &CancellationToken,
     ) -> Result<RunRecord, RunFailure> {
@@ -115,6 +116,7 @@ impl Stage2Composition {
             project,
             run,
             repository,
+            resources,
             source_path,
             cancellation,
             None,
@@ -131,6 +133,7 @@ impl Stage2Composition {
         project: &ProjectMeta,
         run: RunRecord,
         repository: &dyn RunRepository,
+        resources: &FileResourceRepository,
         source_path: Option<PathBuf>,
         cancellation: &CancellationToken,
         model: &dyn ModelClient,
@@ -141,6 +144,7 @@ impl Stage2Composition {
             project,
             run,
             repository,
+            resources,
             source_path,
             cancellation,
             Some(model),
@@ -156,6 +160,7 @@ impl Stage2Composition {
         project: &ProjectMeta,
         mut run: RunRecord,
         repository: &dyn RunRepository,
+        resources: &FileResourceRepository,
         source_path: Option<PathBuf>,
         cancellation: &CancellationToken,
         model_override: Option<&dyn ModelClient>,
@@ -215,7 +220,7 @@ impl Stage2Composition {
                 SingleGenerateService::built_in()
                     .map_err(|_| failure("feature.recipe_invalid", "mod.generate.single.recipe"))?
                     .execute(
-                        adapters.dependencies(model.client()),
+                        adapters.dependencies(model.client(), resources),
                         &mut run,
                         request,
                         SingleGenerateContext {
@@ -254,7 +259,7 @@ impl Stage2Composition {
                     .map_err(|_| failure("feature.recipe_invalid", "mod.generate.batch.recipe"))?;
                 let execution = BatchGenerateService::new(&single)
                     .execute(
-                        adapters.dependencies(model.client()),
+                        adapters.dependencies(model.client(), resources),
                         &mut run,
                         request,
                         BatchGenerateContext {
@@ -320,7 +325,6 @@ impl Stage2Composition {
                 let batch = BatchGenerateService::new(&single);
                 let build = ProjectBuildService;
                 let package = ProjectPackageService;
-                let resources = FileResourceRepository::new(project_root.to_path_buf());
                 let writer = FileProjectWriter;
                 let validator = RegisteredValidationRunner;
                 let artifacts = FileArtifactStore::new(project_root.to_path_buf());
@@ -330,7 +334,7 @@ impl Stage2Composition {
                     .execute(
                         ComplexGenerateDependencies {
                             model: model.client(),
-                            resources: &resources,
+                            resources,
                             writer: &writer,
                             validator: &validator,
                             artifacts: &artifacts,
@@ -401,7 +405,6 @@ impl Stage2Composition {
                     &ResourcePrepareFeature::id(),
                     &[ResourcePrepareFeature::contribution_requirement()],
                 )?;
-                let repository = FileResourceRepository::new(project_root.to_path_buf());
                 let context = ResourcePrepareContext {
                     pack: &self.pack,
                     contributions: &contributions,
@@ -412,7 +415,14 @@ impl Stage2Composition {
                         failure("resource.media_configuration", "resource.prepare.media")
                     })?;
                     ResourcePrepareService
-                        .prepare_ai(&media, &repository, request, context, cancellation)
+                        .prepare_ai(
+                            &media,
+                            &PngResourceMediaProcessor,
+                            resources,
+                            request,
+                            context,
+                            cancellation,
+                        )
                         .await
                         .map_err(resource_prepare_failure)?
                 } else {
@@ -421,7 +431,13 @@ impl Stage2Composition {
                             failure("resource.source_missing", "resource.prepare.source")
                         })?;
                     ResourcePrepareService
-                        .prepare_file(&repository, request, source_path, context)
+                        .prepare_file(
+                            &PngResourceMediaProcessor,
+                            resources,
+                            request,
+                            source_path,
+                            context,
+                        )
                         .map_err(resource_prepare_failure)?
                 };
                 succeed::<ResourcePrepareFeature, _>(&mut run, &result)?;
@@ -513,7 +529,6 @@ fn select_model<'a>(
 }
 
 struct SingleAdapters {
-    resources: FileResourceRepository,
     writer: FileProjectWriter,
     validator: RegisteredValidationRunner,
     artifacts: FileArtifactStore,
@@ -522,7 +537,6 @@ struct SingleAdapters {
 impl SingleAdapters {
     fn new(project_root: &Path) -> Self {
         Self {
-            resources: FileResourceRepository::new(project_root.to_path_buf()),
             writer: FileProjectWriter,
             validator: RegisteredValidationRunner,
             artifacts: FileArtifactStore::new(project_root.to_path_buf()),
@@ -532,6 +546,7 @@ impl SingleAdapters {
     fn dependencies<'a>(
         &'a self,
         model: &'a dyn ModelClient,
+        resources: &'a FileResourceRepository,
     ) -> SingleGenerateDependencies<
         'a,
         dyn ModelClient + 'a,
@@ -542,7 +557,7 @@ impl SingleAdapters {
     > {
         SingleGenerateDependencies {
             model,
-            resources: &self.resources,
+            resources,
             writer: &self.writer,
             validator: &self.validator,
             artifacts: &self.artifacts,
@@ -593,7 +608,23 @@ fn resource_prepare_failure(error: ResourcePrepareError) -> RunFailure {
         ResourcePrepareError::Repository => {
             failure("resource.storage_failed", "resource.prepare.store")
         }
-        _ => failure("feature.execution_failed", "resource.prepare.execute"),
+        ResourcePrepareError::InvalidInput => {
+            failure("validation.input_invalid", "resource.prepare.input")
+        }
+        ResourcePrepareError::ContextIdentityMismatch
+        | ResourcePrepareError::InvalidPackSpecs
+        | ResourcePrepareError::Contribution(_) => {
+            failure("pack.contribution_invalid", "resource.prepare.pack")
+        }
+        ResourcePrepareError::UnsupportedResource => {
+            failure("resource.unsupported", "resource.prepare.input")
+        }
+        ResourcePrepareError::WrongSourceMode => {
+            failure("resource.source_invalid", "resource.prepare.source")
+        }
+        ResourcePrepareError::InvalidMediaResponse | ResourcePrepareError::InvalidMedia => {
+            failure("resource.media_invalid", "resource.prepare.media")
+        }
     }
 }
 
@@ -696,6 +727,21 @@ mod tests {
         ) -> Result<ModelStream, ModelError> {
             Ok(Box::pin(stream::empty()))
         }
+    }
+
+    #[test]
+    fn resource_prepare_failures_keep_stable_typed_families() {
+        let invalid_media = resource_prepare_failure(ResourcePrepareError::InvalidMedia);
+        assert_eq!(invalid_media.code.as_str(), "resource.media_invalid");
+        assert_eq!(invalid_media.stage, "resource.prepare.media");
+
+        let invalid_pack = resource_prepare_failure(ResourcePrepareError::InvalidPackSpecs);
+        assert_eq!(invalid_pack.code.as_str(), "pack.contribution_invalid");
+        assert_eq!(invalid_pack.stage, "resource.prepare.pack");
+
+        let unsupported = resource_prepare_failure(ResourcePrepareError::UnsupportedResource);
+        assert_eq!(unsupported.code.as_str(), "resource.unsupported");
+        assert_eq!(unsupported.stage, "resource.prepare.input");
     }
 
     #[tokio::test]
@@ -889,6 +935,7 @@ mod tests {
     ) -> RunId {
         let project_root = session.path().to_path_buf();
         let project = session.meta().clone();
+        let resources = session.resource_repository();
         session
             .submit(run, move |run, cancellation, repository| async move {
                 composition
@@ -898,6 +945,7 @@ mod tests {
                         &project,
                         run,
                         repository.as_ref(),
+                        resources.as_ref(),
                         None,
                         &cancellation,
                         model.as_ref(),

@@ -57,6 +57,7 @@ pub async fn submit_feature(
     let meta = session.meta().clone();
     let composition = Arc::clone(composition.inner());
     let config = Arc::clone(config.inner());
+    let resources = session.resource_repository();
     let source_path = submission.source_path.map(PathBuf::from);
     session
         .submit(run, move |run, cancellation, repository| async move {
@@ -67,6 +68,7 @@ pub async fn submit_feature(
                     &meta,
                     run,
                     repository.as_ref(),
+                    resources.as_ref(),
                     source_path,
                     &cancellation,
                 )

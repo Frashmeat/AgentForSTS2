@@ -24,7 +24,10 @@ use ats_runtime::{
     RunRecord, RunStatus, RunTransition, TokenUsage, ValidationError, ValidationReport,
     ValidationRequest, ValidationRunner, VersionedPayload,
 };
-use ats_workspace::{ResourceBytesIngestRequest, ResourceOrigin, ResourceRepository};
+use ats_workspace::{
+    PreparedResourceMedia, ResourceBytesIngestRequest, ResourceOrigin, ResourceRepository,
+    ResourceVersionProvenance,
+};
 use chrono::Utc;
 use futures_util::stream;
 use sha2::{Digest, Sha256};
@@ -145,18 +148,32 @@ impl Fixture {
         let resources = FileResourceRepository::new(project.clone());
         let mut selected_resources = Vec::new();
         for role in ["relic.normal", "relic.outline", "relic.big"] {
-            let asset = resources
+            let (width, height) = if role == "relic.big" {
+                (256, 256)
+            } else {
+                (128, 128)
+            };
+            let candidate = resources
                 .ingest_bytes(ResourceBytesIngestRequest {
                     logical_role: role.into(),
                     origin: ResourceOrigin::UserUpload,
-                    media_type: "image/png".into(),
                     file_name: format!("{}.png", role.replace('.', "-")),
-                    bytes: format!("fixture-{role}").into_bytes(),
+                    media: PreparedResourceMedia {
+                        media_type: "image/png".into(),
+                        width,
+                        height,
+                        has_alpha: true,
+                        bytes: format!("fixture-{role}").into_bytes(),
+                    },
+                    provenance: ResourceVersionProvenance::Original,
                 })
+                .unwrap();
+            let asset = resources
+                .select(candidate.resource_id(), &candidate.versions()[0].id)
                 .unwrap();
             selected_resources.push(SelectedResource {
                 resource_id: asset.resource_id().clone(),
-                selected_version: asset.selected_version().clone(),
+                selected_version: asset.selected_version().unwrap().clone(),
             });
         }
         let request = SingleGenerateRequest {

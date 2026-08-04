@@ -302,7 +302,147 @@ session.submit(run, worker).await
 
 ## 5. Resource Workspace
 
-`ats-workspace` stores immutable Resource versions with origin/provenance and explicit selection. A Feature references only `resourceId + selectedVersion`; stale or tampered bytes fail. User upload, Pack default, and AI media use the same contract. The registered HTTP Media Adapter supports Images/Chat protocols, cancellation, typed status mapping, bounded bytes, and request-hash provenance; health reports registration, not provider connectivity.
+`ats-workspace` stores ResourceAsset schema v2 with immutable candidates and explicit selection. A Feature references only `resourceId + selectedVersion`; a new upload, Pack default, AI response, or deterministic derived output has `selectedVersion=null` until an explicit select succeeds. Stale or tampered bytes fail. The registered HTTP Media Adapter supports Images/Chat protocols, cancellation, typed status mapping, bounded bytes, and request-hash provenance; health reports registration, not provider connectivity.
+
+### Scenario: Prepare And Select A Deterministic PNG Resource Graph
+
+#### 1. Scope / Trigger
+
+This contract applies whenever a Pack adds or changes a Resource role, transform Primitive/version,
+exact media dimensions, alpha requirement or generated-file target, and whenever Resource Prepare
+ingests upload, AI or Pack-default bytes. It also applies before Single generation consumes a
+selected Resource version.
+
+#### 2. Signatures And Layout
+
+```rust
+// crates/ats-workspace/src/resource.rs
+pub trait ResourceMediaProcessor {
+    fn prepare_file(&self, source_path: &Path, declared_media_type: &str)
+        -> Result<PreparedResourceMedia, Self::Error>;
+    fn prepare_bytes(&self, bytes: Vec<u8>, declared_media_type: &str)
+        -> Result<PreparedResourceMedia, Self::Error>;
+    fn transform(&self, source: &PreparedResourceMedia, operation: &ResourceTransformOperation)
+        -> Result<PreparedResourceMedia, Self::Error>;
+}
+
+pub trait ResourceRepository {
+    fn ingest_batch(&self, requests: Vec<ResourceBytesIngestRequest>)
+        -> Result<Vec<ResourceAsset>, Self::Error>;
+    fn select(&self, resource_id: &ResourceId, version: &Sha256Digest)
+        -> Result<ResourceAsset, Self::Error>;
+    fn list(&self) -> Result<Vec<ResourceAsset>, Self::Error>;
+}
+
+// crates/ats-features/src/resource_prepare.rs
+ResourcePrepareService::prepare_file(...)
+ResourcePrepareService::prepare_ai(...)
+ResourcePrepareService::select(...)
+```
+
+```text
+.ats/resources/<resourceId>/
+  resource-manifest.json
+  versions/<candidateSha256>/original.png
+```
+
+`ProjectSession` owns one `Arc<FileResourceRepository>` for the open project. Run composition and
+future Resource commands reuse it; per-call repositories with independent mutexes are forbidden.
+
+#### 3. Contracts
+
+`feature.resource-prepare-request` and result are schema v2. The request is:
+
+```json
+{
+  "logicalRole": "relic.master",
+  "mediaType": "image/png",
+  "source": {"kind": "user_upload"}
+}
+```
+
+AI source adds `prompt` and optional `model`; it does not carry a user-authored file name because
+the Pack role determines the stored candidate name. The result contains `candidates[]` with
+`resourceId`, `logicalRole`, `candidateVersion`, optional `selectedVersion`, media type, width,
+height, alpha fact and origin.
+
+`pack.resource-specs` is schema v2. Every role declares exact dimensions, supported media types,
+alpha requirement and either `master` or one direct `derived` source. A derived role references an
+existing master plus a registered transform Primitive at version exactly `1`. Current operations
+are deterministic nearest-neighbor `resize` and white-alpha `outline`; Pack payloads cannot supply
+code. STS2 `relic.master` is 512x512 and produces `relic.normal` 128x128,
+`relic.outline` 128x128 radius 4 and `relic.big` 256x256.
+
+The PNG Adapter validates a regular non-symlink file, `image/png`, complete decode/CRC, maximum
+64 MiB decoded RGBA and maximum 16384 per dimension. It records decoded width/height and whether
+the source has an alpha channel. All probe and transform work completes before repository mutation.
+
+A master request stages the master and every direct derived candidate as one batch. Every new
+asset has `selectedVersion=null`. Derived provenance stores source role/version, Primitive/version,
+canonical transform-parameters SHA-256 and pinned Pack ID/SHA-256. Candidate version is the output
+byte SHA-256 and must be identical for repeated input and Pack identity. Explicit select atomically
+updates only the manifest; Single generation checks the exact selected version and its Pack media
+shape before reading bytes.
+
+#### 4. Validation And Error Matrix
+
+| Condition | Boundary result | Side effect |
+| --- | --- | --- |
+| malformed/oversized PNG, media mismatch, wrong dimensions or missing alpha channel | `resource.media_invalid` | no Resource final or selection change |
+| unknown role/media type | `resource.unsupported` | none |
+| wrong execution source mode | `resource.source_invalid` | none |
+| Pack graph, undeclared Primitive or transform version drift | `pack.contribution_invalid` | none |
+| media Provider auth/rate/config/transport failure | stable `resource.media_*` family | no candidate |
+| repository stage/publish/select failure | `resource.storage_failed` | staged batch rolled back; prior selection unchanged |
+| valid candidate batch | result with all `selectedVersion=null` | immutable final candidate directories |
+| explicit valid select | selected candidate result | one atomic manifest pointer update |
+
+#### 5. Good / Base / Bad Cases
+
+- Good: one valid 512x512 RGBA master produces four unselected candidates; repeated bytes produce
+  the same four version hashes and exact provenance; selecting `relic.normal` admits Single.
+- Base: upload a valid 128x128 `relic.normal` override; it creates one unselected original
+  candidate and does not rerun the master graph.
+- Bad: trust `.png` extension or request dimensions without decoding; malformed or RGB-only bytes
+  could enter a role requiring alpha.
+- Bad: publish each derived candidate independently without rollback; a late transform/store
+  failure could leave a partial graph or replace an existing selection.
+- Bad: construct a new filesystem repository in every command/Run; concurrent select and consume
+  operations would bypass the intended project-scoped mutex.
+
+#### 6. Tests Required
+
+```powershell
+cargo test -p ats-workspace resource::tests -- --nocapture
+cargo test -p ats-adapters resource_media::tests -- --nocapture
+cargo test -p ats-adapters resource_store::tests -- --nocapture
+cargo test -p ats-features resource_prepare::tests -- --nocapture
+cargo test -p ats-features mod_generate_single::tests -- --nocapture
+cargo test -p agentthespire-desktop --lib composition::tests -- --nocapture
+```
+
+Assertions must cover malformed/type-mismatched PNG, real RGB alpha detection, exact dimensions,
+four-candidate output, null selection, deterministic output hashes, exact derived provenance,
+Primitive/version drift, explicit selection, Single rejection before selection, batch rollback,
+unchanged prior selection, no staging residue and stable failure codes.
+
+#### 7. Wrong Vs Correct
+
+Wrong - trust declared metadata and select during ingest:
+
+```rust
+let asset = repository.ingest(bytes, request.media_type, request.width, request.height)?;
+asset.select(asset.original_version())?;
+```
+
+Correct - probe/derive first, publish one candidate batch, then select explicitly:
+
+```rust
+let master = processor.prepare_file(path, "image/png")?;
+let candidates = prepare_candidates(&master, verified_pack_specs)?;
+let assets = repository.ingest_batch(candidates)?; // selectedVersion is null
+let selected = repository.select(resource_id, candidate_version)?;
+```
 
 ## 6. Prompt And Model
 

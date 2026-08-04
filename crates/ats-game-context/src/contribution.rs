@@ -112,6 +112,19 @@ impl VerifiedContributionSet {
             .decode()
             .map_err(ContributionResolverError::Decode)
     }
+
+    pub fn declares_primitive(
+        &self,
+        slot_id: &ContributionId,
+        primitive: &PrimitiveId,
+    ) -> Result<bool, ContributionResolverError> {
+        Ok(self
+            .contributions
+            .get(slot_id)
+            .ok_or(ContributionResolverError::MissingSlot)?
+            .required_primitives()
+            .contains(primitive))
+    }
 }
 
 #[cfg(test)]

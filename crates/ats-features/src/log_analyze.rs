@@ -225,13 +225,18 @@ impl LogAnalyzeService {
         let resource_refs = context
             .selected_resources
             .iter()
-            .map(|resource| ModelResourceRef {
-                resource_id: resource.resource_id().clone(),
-                logical_role: resource.logical_role().to_owned(),
-                selected_version: resource.selected_version().clone(),
-                media_type: resource.selected().blob.media_type.clone(),
+            .map(|resource| {
+                let selected = resource
+                    .selected()
+                    .ok_or(LogAnalyzeError::InvalidResource)?;
+                Ok(ModelResourceRef {
+                    resource_id: resource.resource_id().clone(),
+                    logical_role: resource.logical_role().to_owned(),
+                    selected_version: selected.id.clone(),
+                    media_type: selected.blob.media_type.clone(),
+                })
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, LogAnalyzeError>>()?;
 
         let slots = BTreeMap::from([
             (
@@ -303,6 +308,8 @@ pub enum LogAnalyzeError {
     TooMuchEvidence,
     #[error("log analysis selected too many resources")]
     TooManyResources,
+    #[error("log analysis resource is not explicitly selected")]
+    InvalidResource,
     #[error("log analysis Recipe does not match its typed Feature contract")]
     InvalidRecipeContract,
     #[error("log analysis model output was truncated")]

@@ -781,7 +781,12 @@ fn load_resources<R: ResourceRepository + ?Sized>(
                 resource_id: selected.resource_id.clone(),
                 logical_role: asset.logical_role().to_owned(),
                 selected_version: selected.selected_version.clone(),
-                media_type: asset.selected().blob.media_type.clone(),
+                media_type: asset
+                    .selected()
+                    .ok_or(SingleGenerateError::InvalidSelectedResource)?
+                    .blob
+                    .media_type
+                    .clone(),
             },
             bytes,
         });
@@ -809,14 +814,16 @@ fn validate_selected_asset(
     specs: &ResourceSpecs,
 ) -> Result<(), SingleGenerateError> {
     if asset.resource_id() != &selected.resource_id
-        || asset.selected_version() != &selected.selected_version
+        || asset.selected_version() != Some(&selected.selected_version)
         || !item_descriptor
             .required_resource_roles()
             .iter()
             .any(|role| role.as_str() == asset.logical_role())
-        || specs
-            .require_role(asset.logical_role(), &asset.selected().blob.media_type)
-            .is_err()
+        || asset.selected().is_none_or(|version| {
+            specs
+                .validate_blob(asset.logical_role(), &version.blob)
+                .is_err()
+        })
     {
         return Err(SingleGenerateError::InvalidSelectedResource);
     }
@@ -930,9 +937,14 @@ fn build_writes(
                 &resource.reference.media_type,
             )
             .map_err(|_| SingleGenerateError::InvalidResourceSpecs)?;
-        let path =
-            expand_target_template(&spec.target_path, &request.mod_id, &request.plan.item_id)
-                .map_err(|_| SingleGenerateError::InvalidResourceSpecs)?;
+        let path = expand_target_template(
+            spec.target_path
+                .as_deref()
+                .ok_or(SingleGenerateError::InvalidResourceSpecs)?,
+            &request.mod_id,
+            &request.plan.item_id,
+        )
+        .map_err(|_| SingleGenerateError::InvalidResourceSpecs)?;
         writes.push(ProjectFileWrite::new(path, resource.bytes.clone())?);
     }
     ats_runtime::validate_project_writes(&writes)?;
@@ -969,9 +981,14 @@ fn artifact_request(
                 &resource.reference.media_type,
             )
             .map_err(|_| SingleGenerateError::InvalidResourceSpecs)?;
-        let relative_path =
-            expand_target_template(&spec.target_path, &request.mod_id, &request.plan.item_id)
-                .map_err(|_| SingleGenerateError::InvalidResourceSpecs)?;
+        let relative_path = expand_target_template(
+            spec.target_path
+                .as_deref()
+                .ok_or(SingleGenerateError::InvalidResourceSpecs)?,
+            &request.mod_id,
+            &request.plan.item_id,
+        )
+        .map_err(|_| SingleGenerateError::InvalidResourceSpecs)?;
         files.push(ArtifactFileInput {
             role: resource.reference.logical_role.clone(),
             source_path: context.project_root.join(&relative_path),
@@ -1192,15 +1209,35 @@ mod tests {
                 {
                     "slotId": "resource.prepare.specs",
                     "featureId": "resource.prepare",
-                    "schema": {"id":"pack.resource-specs", "version":1},
+                    "schema": {"id":"pack.resource-specs", "version":2},
                     "requiredPrimitives": ["image.fixture-transform"],
-                    "payload": {"roles": [{
-                        "id": "fixture.icon",
-                        "mediaTypes": ["image/png"],
-                        "width": 64,
-                        "height": 64,
-                        "targetPath": "{mod_id}/images/{item_id}.png"
-                    }]}
+                    "payload": {"roles": [
+                        {
+                            "id": "fixture.master",
+                            "mediaTypes": ["image/png"],
+                            "width": 128,
+                            "height": 128,
+                            "requireAlpha": true,
+                            "source": {"kind":"master"}
+                        },
+                        {
+                            "id": "fixture.icon",
+                            "mediaTypes": ["image/png"],
+                            "width": 64,
+                            "height": 64,
+                            "requireAlpha": true,
+                            "targetPath": "{mod_id}/images/{item_id}.png",
+                            "source": {
+                                "kind":"derived",
+                                "sourceRole":"fixture.master",
+                                "transform": {
+                                    "operation":"resize",
+                                    "primitive":"image.fixture-transform",
+                                    "version":1
+                                }
+                            }
+                        }
+                    ]}
                 }
             ]
         });
@@ -1316,6 +1353,68 @@ mod tests {
         let generated = validate_bundle(&request, &item_spec, valid).unwrap();
         assert_eq!(generated.files[0].0, "source");
         assert_eq!(generated.files[1].0, "localization.eng");
+    }
+
+    #[test]
+    fn single_accepts_only_explicitly_selected_pack_conformant_resource_versions() {
+        let pack = GamePackLoader::load_built_in_sts2().unwrap();
+        let item_type = ItemTypeId::parse("relic").unwrap();
+        let descriptor = pack.item_type(&item_type).unwrap();
+        let contributions =
+            ContributionResolver::new([PrimitiveId::parse("image.role-transform").unwrap()])
+                .resolve(
+                    &pack,
+                    &ResourcePrepareFeature::id(),
+                    &[ResourcePrepareFeature::contribution_requirement()],
+                )
+                .unwrap();
+        let specs: ResourceSpecs = contributions.decode(&resource_specs_slot()).unwrap();
+        let digest = Sha256Digest::parse("a".repeat(64)).unwrap();
+        let make_asset = |width| {
+            ResourceAsset::new(
+                ResourceId::parse(format!("resource.relic-normal-{width}")).unwrap(),
+                "relic.normal".into(),
+                ats_workspace::ResourceOrigin::UserUpload,
+                ats_workspace::ResourceVersion {
+                    id: digest.clone(),
+                    parent_version: None,
+                    blob: ats_workspace::ResourceBlob {
+                        relative_path: format!("versions/{digest}/original.png"),
+                        media_type: "image/png".into(),
+                        byte_length: 4,
+                        sha256: digest.clone(),
+                        width,
+                        height: 128,
+                        has_alpha: true,
+                    },
+                    provenance: ats_workspace::ResourceVersionProvenance::Original,
+                },
+            )
+            .unwrap()
+        };
+
+        let mut asset = make_asset(128);
+        let selected = SelectedResource {
+            resource_id: asset.resource_id().clone(),
+            selected_version: digest.clone(),
+        };
+        assert!(matches!(
+            validate_selected_asset(&asset, &selected, descriptor, &specs),
+            Err(SingleGenerateError::InvalidSelectedResource)
+        ));
+        asset.select(&digest).unwrap();
+        validate_selected_asset(&asset, &selected, descriptor, &specs).unwrap();
+
+        let mut wrong_dimensions = make_asset(127);
+        let wrong_selected = SelectedResource {
+            resource_id: wrong_dimensions.resource_id().clone(),
+            selected_version: digest.clone(),
+        };
+        wrong_dimensions.select(&digest).unwrap();
+        assert!(matches!(
+            validate_selected_asset(&wrong_dimensions, &wrong_selected, descriptor, &specs),
+            Err(SingleGenerateError::InvalidSelectedResource)
+        ));
     }
 
     #[test]

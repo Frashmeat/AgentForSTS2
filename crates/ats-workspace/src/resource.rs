@@ -1,11 +1,11 @@
 use std::collections::BTreeSet;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, Path};
 
 use ats_kernel::{ContributionId, GamePackId, PrimitiveId, ResourceId, Sha256Digest};
 use serde::{Deserialize, Deserializer, Serialize};
 use thiserror::Error;
 
-pub const RESOURCE_ASSET_SCHEMA_VERSION: u32 = 1;
+pub const RESOURCE_ASSET_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -35,20 +35,12 @@ impl ResourceOrigin {
 }
 
 #[derive(Debug, Clone)]
-pub struct ResourceIngestRequest {
-    pub logical_role: String,
-    pub origin: ResourceOrigin,
-    pub media_type: String,
-    pub source_path: PathBuf,
-}
-
-#[derive(Debug, Clone)]
 pub struct ResourceBytesIngestRequest {
     pub logical_role: String,
     pub origin: ResourceOrigin,
-    pub media_type: String,
     pub file_name: String,
-    pub bytes: Vec<u8>,
+    pub media: PreparedResourceMedia,
+    pub provenance: ResourceVersionProvenance,
 }
 
 #[derive(Debug, Clone)]
@@ -57,8 +49,54 @@ pub struct ResourceDeriveRequest {
     pub parent_version: Sha256Digest,
     pub transform: PrimitiveId,
     pub parameters_sha256: Sha256Digest,
+    pub media: PreparedResourceMedia,
+    pub source_role: String,
+    pub source_version: Sha256Digest,
+    pub transform_version: u32,
+    pub game_pack_id: GamePackId,
+    pub game_pack_sha256: Sha256Digest,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct PreparedResourceMedia {
     pub media_type: String,
-    pub source_path: PathBuf,
+    pub width: u32,
+    pub height: u32,
+    pub has_alpha: bool,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum ResourceTransformOperation {
+    Resize {
+        width: u32,
+        height: u32,
+    },
+    Outline {
+        width: u32,
+        height: u32,
+        radius: u32,
+    },
+}
+
+pub trait ResourceMediaProcessor: Send + Sync {
+    type Error: std::error::Error + Send + Sync + 'static;
+
+    fn prepare_file(
+        &self,
+        source_path: &Path,
+        declared_media_type: &str,
+    ) -> Result<PreparedResourceMedia, Self::Error>;
+    fn prepare_bytes(
+        &self,
+        bytes: Vec<u8>,
+        declared_media_type: &str,
+    ) -> Result<PreparedResourceMedia, Self::Error>;
+    fn transform(
+        &self,
+        source: &PreparedResourceMedia,
+        operation: &ResourceTransformOperation,
+    ) -> Result<PreparedResourceMedia, Self::Error>;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -68,6 +106,9 @@ pub struct ResourceBlob {
     pub media_type: String,
     pub byte_length: u64,
     pub sha256: Sha256Digest,
+    pub width: u32,
+    pub height: u32,
+    pub has_alpha: bool,
 }
 
 impl ResourceBlob {
@@ -78,6 +119,10 @@ impl ResourceBlob {
             || self.media_type.len() > 128
             || self.media_type.chars().any(char::is_control)
             || self.byte_length == 0
+            || self.width == 0
+            || self.width > 16_384
+            || self.height == 0
+            || self.height > 16_384
         {
             return Err(WorkspaceError::InvalidManifest);
         }
@@ -86,12 +131,22 @@ impl ResourceBlob {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 pub enum ResourceVersionProvenance {
     Original,
     Derived {
+        source_role: String,
+        source_version: Sha256Digest,
         transform: PrimitiveId,
+        transform_version: u32,
         parameters_sha256: Sha256Digest,
+        game_pack_id: GamePackId,
+        game_pack_sha256: Sha256Digest,
     },
 }
 
@@ -117,8 +172,26 @@ impl ResourceVersion {
             return Err(WorkspaceError::InvalidManifest);
         }
         match (&self.parent_version, &self.provenance) {
-            (None, ResourceVersionProvenance::Original)
-            | (Some(_), ResourceVersionProvenance::Derived { .. }) => Ok(()),
+            (None, ResourceVersionProvenance::Original) => Ok(()),
+            (
+                None,
+                ResourceVersionProvenance::Derived {
+                    source_role,
+                    transform_version,
+                    ..
+                },
+            ) if valid_role(source_role) && *transform_version > 0 => Ok(()),
+            (
+                Some(parent),
+                ResourceVersionProvenance::Derived {
+                    source_role,
+                    source_version,
+                    transform_version,
+                    ..
+                },
+            ) if valid_role(source_role) && source_version == parent && *transform_version > 0 => {
+                Ok(())
+            }
             _ => Err(WorkspaceError::InvalidProvenance),
         }
     }
@@ -132,7 +205,8 @@ pub struct ResourceAsset {
     logical_role: String,
     origin: ResourceOrigin,
     original_version: Sha256Digest,
-    selected_version: Sha256Digest,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    selected_version: Option<Sha256Digest>,
     versions: Vec<ResourceVersion>,
 }
 
@@ -149,7 +223,7 @@ impl ResourceAsset {
             logical_role,
             origin,
             original_version: original.id.clone(),
-            selected_version: original.id.clone(),
+            selected_version: None,
             versions: vec![original],
         };
         asset.validate()?;
@@ -196,7 +270,7 @@ impl ResourceAsset {
         {
             return Err(WorkspaceError::VersionNotFound);
         }
-        self.selected_version = version.clone();
+        self.selected_version = Some(version.clone());
         self.validate()
     }
 
@@ -221,15 +295,16 @@ impl ResourceAsset {
             .find(|version| version.id == self.original_version)
             .ok_or(WorkspaceError::InvalidManifest)?;
         if original.parent_version.is_some()
-            || original.provenance != ResourceVersionProvenance::Original
-            || !self
-                .versions
-                .iter()
-                .any(|version| version.id == self.selected_version)
+            || self.selected_version.as_ref().is_some_and(|selected| {
+                !self.versions.iter().any(|version| &version.id == selected)
+            })
         {
             return Err(WorkspaceError::InvalidManifest);
         }
         for version in &self.versions {
+            if version.id != self.original_version && version.parent_version.is_none() {
+                return Err(WorkspaceError::InvalidManifest);
+            }
             if let Some(parent) = &version.parent_version
                 && !ids.contains(parent)
             {
@@ -247,7 +322,7 @@ impl ResourceAsset {
                     .find(|candidate| &candidate.id == parent)
                     .ok_or(WorkspaceError::InvalidManifest)?;
             }
-            if cursor.id != self.original_version {
+            if version.parent_version.is_some() && cursor.id != self.original_version {
                 return Err(WorkspaceError::InvalidManifest);
             }
         }
@@ -270,8 +345,8 @@ impl ResourceAsset {
     }
 
     #[must_use]
-    pub fn selected_version(&self) -> &Sha256Digest {
-        &self.selected_version
+    pub fn selected_version(&self) -> Option<&Sha256Digest> {
+        self.selected_version.as_ref()
     }
 
     #[must_use]
@@ -280,11 +355,10 @@ impl ResourceAsset {
     }
 
     #[must_use]
-    pub fn selected(&self) -> &ResourceVersion {
-        self.versions
-            .iter()
-            .find(|version| version.id == self.selected_version)
-            .expect("validated ResourceAsset always contains selected version")
+    pub fn selected(&self) -> Option<&ResourceVersion> {
+        self.selected_version
+            .as_ref()
+            .and_then(|selected| self.versions.iter().find(|version| &version.id == selected))
     }
 }
 
@@ -301,7 +375,7 @@ impl<'de> Deserialize<'de> for ResourceAsset {
             logical_role: String,
             origin: ResourceOrigin,
             original_version: Sha256Digest,
-            selected_version: Sha256Digest,
+            selected_version: Option<Sha256Digest>,
             versions: Vec<ResourceVersion>,
         }
 
@@ -323,11 +397,14 @@ impl<'de> Deserialize<'de> for ResourceAsset {
 pub trait ResourceRepository: Send + Sync {
     type Error: std::error::Error + Send + Sync + 'static;
 
-    fn ingest(&self, request: ResourceIngestRequest) -> Result<ResourceAsset, Self::Error>;
     fn ingest_bytes(
         &self,
         request: ResourceBytesIngestRequest,
     ) -> Result<ResourceAsset, Self::Error>;
+    fn ingest_batch(
+        &self,
+        requests: Vec<ResourceBytesIngestRequest>,
+    ) -> Result<Vec<ResourceAsset>, Self::Error>;
     fn add_version(&self, request: ResourceDeriveRequest) -> Result<ResourceAsset, Self::Error>;
     fn select(
         &self,
@@ -340,6 +417,7 @@ pub trait ResourceRepository: Send + Sync {
         resource_id: &ResourceId,
         selected_version: &Sha256Digest,
     ) -> Result<Vec<u8>, Self::Error>;
+    fn list(&self) -> Result<Vec<ResourceAsset>, Self::Error>;
 }
 
 #[derive(Debug, Error, Eq, PartialEq)]
@@ -412,6 +490,9 @@ mod tests {
                 media_type: "image/png".into(),
                 byte_length: 10,
                 sha256: digest('a'),
+                width: 1,
+                height: 1,
+                has_alpha: true,
             },
             provenance: ResourceVersionProvenance::Original,
         }
@@ -462,22 +543,104 @@ mod tests {
                 media_type: "image/png".into(),
                 byte_length: 8,
                 sha256: digest('d'),
+                width: 1,
+                height: 1,
+                has_alpha: true,
             },
             provenance: ResourceVersionProvenance::Derived {
+                source_role: "relic.master".into(),
+                source_version: digest('a'),
                 transform: PrimitiveId::parse("image.outline").unwrap(),
+                transform_version: 1,
                 parameters_sha256: digest('e'),
+                game_pack_id: GamePackId::parse("sts2").unwrap(),
+                game_pack_sha256: digest('c'),
             },
         };
         assert!(asset.add_version(derived.clone()).unwrap());
         assert!(!asset.add_version(derived).unwrap());
         asset.select(&digest('d')).unwrap();
-        assert_eq!(asset.selected_version(), &digest('d'));
+        assert_eq!(asset.selected_version(), Some(&digest('d')));
         let before = asset.clone();
         assert_eq!(
             asset.select(&digest('f')),
             Err(WorkspaceError::VersionNotFound)
         );
         assert_eq!(asset, before);
+    }
+
+    #[test]
+    fn derived_roots_are_valid_but_additional_roots_and_parent_drift_are_rejected() {
+        let derived_root = ResourceVersion {
+            id: digest('a'),
+            parent_version: None,
+            blob: ResourceBlob {
+                relative_path: format!("versions/{}/original.png", digest('a')),
+                media_type: "image/png".into(),
+                byte_length: 10,
+                sha256: digest('a'),
+                width: 128,
+                height: 128,
+                has_alpha: true,
+            },
+            provenance: ResourceVersionProvenance::Derived {
+                source_role: "relic.master".into(),
+                source_version: digest('b'),
+                transform: PrimitiveId::parse("image.role-transform").unwrap(),
+                transform_version: 1,
+                parameters_sha256: digest('c'),
+                game_pack_id: GamePackId::parse("sts2").unwrap(),
+                game_pack_sha256: digest('d'),
+            },
+        };
+        let mut asset = ResourceAsset::new(
+            ResourceId::parse("resource.derived-root").unwrap(),
+            "relic.normal".into(),
+            ResourceOrigin::UserUpload,
+            derived_root,
+        )
+        .unwrap();
+
+        let mut additional_root = original();
+        additional_root.id = digest('e');
+        additional_root.blob.sha256 = digest('e');
+        additional_root.blob.relative_path = format!("versions/{}/original.png", digest('e'));
+        asset.versions.push(additional_root);
+        assert_eq!(asset.validate(), Err(WorkspaceError::InvalidManifest));
+
+        let mut asset = ResourceAsset::new(
+            ResourceId::parse("resource.parent-drift").unwrap(),
+            "relic.normal".into(),
+            ResourceOrigin::UserUpload,
+            original(),
+        )
+        .unwrap();
+        let drifted = ResourceVersion {
+            id: digest('e'),
+            parent_version: Some(digest('a')),
+            blob: ResourceBlob {
+                relative_path: format!("versions/{}/derived.png", digest('e')),
+                media_type: "image/png".into(),
+                byte_length: 10,
+                sha256: digest('e'),
+                width: 128,
+                height: 128,
+                has_alpha: true,
+            },
+            provenance: ResourceVersionProvenance::Derived {
+                source_role: "relic.normal".into(),
+                source_version: digest('f'),
+                transform: PrimitiveId::parse("image.role-transform").unwrap(),
+                transform_version: 1,
+                parameters_sha256: digest('c'),
+                game_pack_id: GamePackId::parse("sts2").unwrap(),
+                game_pack_sha256: digest('d'),
+            },
+        };
+        assert_eq!(
+            asset.add_version(drifted),
+            Err(WorkspaceError::InvalidProvenance)
+        );
     }
 
     #[test]

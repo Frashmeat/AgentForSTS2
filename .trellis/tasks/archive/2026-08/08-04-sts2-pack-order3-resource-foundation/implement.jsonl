@@ -1,0 +1,5 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Resource typed failure mapping"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Resource Workspace and atomic persistence contracts"}
+{"file": ".trellis/spec/backend/stage2-contracts.md", "reason": "Cross-layer Resource v2 schema and ProjectSession ownership"}

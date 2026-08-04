@@ -8,8 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use ats_kernel::{ResourceId, Sha256Digest};
 use ats_workspace::{
     ResourceAsset, ResourceBlob, ResourceBytesIngestRequest, ResourceDeriveRequest,
-    ResourceIngestRequest, ResourceRepository, ResourceVersion, ResourceVersionProvenance,
-    WorkspaceError,
+    ResourceRepository, ResourceVersion, ResourceVersionProvenance, WorkspaceError,
 };
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -128,18 +127,20 @@ impl FileResourceRepository {
         result
     }
 
-    fn ingest_unlocked(
+    fn stage_ingest(
         &self,
-        logical_role: String,
-        origin: ats_workspace::ResourceOrigin,
-        media_type: String,
-        source_name: &Path,
-        bytes: Vec<u8>,
-    ) -> Result<ResourceAsset, ResourceStoreError> {
-        if bytes.is_empty() || bytes.len() > 64 * 1024 * 1024 {
+        resources_root: &Path,
+        request: ResourceBytesIngestRequest,
+    ) -> Result<(ResourceAsset, PathBuf, PathBuf), ResourceStoreError> {
+        let source_name = Path::new(&request.file_name);
+        if source_name.file_name().and_then(|name| name.to_str())
+            != Some(request.file_name.as_str())
+            || request.media.bytes.is_empty()
+            || request.media.bytes.len() > 64 * 1024 * 1024
+        {
             return Err(ResourceStoreError::PathInvalid);
         }
-        let digest = sha256_bytes(&bytes);
+        let digest = sha256_bytes(&request.media.bytes);
         let extension = safe_extension(source_name);
         let resource_id = new_resource_id();
         let blob_relative = format!("versions/{digest}/original.{extension}");
@@ -148,15 +149,22 @@ impl FileResourceRepository {
             parent_version: None,
             blob: ResourceBlob {
                 relative_path: blob_relative.clone(),
-                media_type,
-                byte_length: u64::try_from(bytes.len())
+                media_type: request.media.media_type,
+                byte_length: u64::try_from(request.media.bytes.len())
                     .map_err(|_| ResourceStoreError::PathInvalid)?,
                 sha256: digest,
+                width: request.media.width,
+                height: request.media.height,
+                has_alpha: request.media.has_alpha,
             },
-            provenance: ResourceVersionProvenance::Original,
+            provenance: request.provenance,
         };
-        let asset = ResourceAsset::new(resource_id.clone(), logical_role, origin, original)?;
-        let resources_root = self.prepare_root()?;
+        let asset = ResourceAsset::new(
+            resource_id.clone(),
+            request.logical_role,
+            request.origin,
+            original,
+        )?;
         let final_root = resources_root.join(resource_id.as_str());
         if fs::symlink_metadata(&final_root).is_ok() {
             return Err(WorkspaceError::ImmutableConflict.into());
@@ -172,39 +180,58 @@ impl FileResourceRepository {
             let blob_path = staging_root.join(&blob_relative);
             fs::create_dir_all(blob_path.parent().ok_or(ResourceStoreError::PathInvalid)?)
                 .map_err(|error| io_error("create_resource_version", error))?;
-            fs::write(&blob_path, &bytes)
+            fs::write(&blob_path, &request.media.bytes)
                 .map_err(|error| io_error("write_resource_blob", error))?;
             let manifest = serde_json::to_vec_pretty(&asset).map_err(ResourceStoreError::Json)?;
             fs::write(staging_root.join(MANIFEST_FILE), manifest)
                 .map_err(|error| io_error("write_resource_manifest", error))?;
-            fs::rename(&staging_root, &final_root)
-                .map_err(|error| io_error("publish_resource", error))?;
-            Ok(asset)
+            Ok((asset, staging_root.clone(), final_root))
         })();
         if result.is_err() {
             let _ = fs::remove_dir_all(staging_root);
         }
         result
     }
+
+    fn ingest_batch_unlocked(
+        &self,
+        requests: Vec<ResourceBytesIngestRequest>,
+    ) -> Result<Vec<ResourceAsset>, ResourceStoreError> {
+        if requests.is_empty() || requests.len() > 128 {
+            return Err(ResourceStoreError::PathInvalid);
+        }
+        let resources_root = self.prepare_root()?;
+        let mut staged = Vec::with_capacity(requests.len());
+        for request in requests {
+            match self.stage_ingest(&resources_root, request) {
+                Ok(value) => staged.push(value),
+                Err(error) => {
+                    for (_, path, _) in staged {
+                        let _ = fs::remove_dir_all(path);
+                    }
+                    return Err(error);
+                }
+            }
+        }
+        let mut published = Vec::new();
+        for (_, staging, final_root) in &staged {
+            if let Err(error) = fs::rename(staging, final_root) {
+                for path in &published {
+                    let _ = fs::remove_dir_all(path);
+                }
+                for (_, pending, _) in &staged {
+                    let _ = fs::remove_dir_all(pending);
+                }
+                return Err(io_error("publish_resource_batch", error));
+            }
+            published.push(final_root.clone());
+        }
+        Ok(staged.into_iter().map(|(asset, _, _)| asset).collect())
+    }
 }
 
 impl ResourceRepository for FileResourceRepository {
     type Error = ResourceStoreError;
-
-    fn ingest(&self, request: ResourceIngestRequest) -> Result<ResourceAsset, Self::Error> {
-        let _guard = self
-            .gate
-            .lock()
-            .map_err(|_| ResourceStoreError::LockUnavailable)?;
-        let bytes = read_source(&request.source_path)?;
-        self.ingest_unlocked(
-            request.logical_role,
-            request.origin,
-            request.media_type,
-            &request.source_path,
-            bytes,
-        )
-    }
 
     fn ingest_bytes(
         &self,
@@ -214,18 +241,20 @@ impl ResourceRepository for FileResourceRepository {
             .gate
             .lock()
             .map_err(|_| ResourceStoreError::LockUnavailable)?;
-        let file_name = Path::new(&request.file_name);
-        if file_name.file_name().and_then(|name| name.to_str()) != Some(request.file_name.as_str())
-        {
-            return Err(ResourceStoreError::PathInvalid);
-        }
-        self.ingest_unlocked(
-            request.logical_role,
-            request.origin,
-            request.media_type,
-            file_name,
-            request.bytes,
-        )
+        self.ingest_batch_unlocked(vec![request])?
+            .pop()
+            .ok_or(ResourceStoreError::PathInvalid)
+    }
+
+    fn ingest_batch(
+        &self,
+        requests: Vec<ResourceBytesIngestRequest>,
+    ) -> Result<Vec<ResourceAsset>, Self::Error> {
+        let _guard = self
+            .gate
+            .lock()
+            .map_err(|_| ResourceStoreError::LockUnavailable)?;
+        self.ingest_batch_unlocked(requests)
     }
 
     fn add_version(&self, request: ResourceDeriveRequest) -> Result<ResourceAsset, Self::Error> {
@@ -234,23 +263,31 @@ impl ResourceRepository for FileResourceRepository {
             .lock()
             .map_err(|_| ResourceStoreError::LockUnavailable)?;
         let mut asset = self.load_unlocked(&request.resource_id)?;
-        let bytes = read_source(&request.source_path)?;
+        let bytes = request.media.bytes;
         let digest = sha256_bytes(&bytes);
-        let extension = safe_extension(&request.source_path);
+        let extension = "png";
         let relative_path = format!("versions/{digest}/derived.{extension}");
         let version = ResourceVersion {
             id: digest.clone(),
             parent_version: Some(request.parent_version),
             blob: ResourceBlob {
                 relative_path: relative_path.clone(),
-                media_type: request.media_type,
+                media_type: request.media.media_type,
                 byte_length: u64::try_from(bytes.len())
                     .map_err(|_| ResourceStoreError::PathInvalid)?,
                 sha256: digest.clone(),
+                width: request.media.width,
+                height: request.media.height,
+                has_alpha: request.media.has_alpha,
             },
             provenance: ResourceVersionProvenance::Derived {
+                source_role: request.source_role,
+                source_version: request.source_version,
                 transform: request.transform,
+                transform_version: request.transform_version,
                 parameters_sha256: request.parameters_sha256,
+                game_pack_id: request.game_pack_id,
+                game_pack_sha256: request.game_pack_sha256,
             },
         };
         if !asset.add_version(version)? {
@@ -319,14 +356,48 @@ impl ResourceRepository for FileResourceRepository {
             .lock()
             .map_err(|_| ResourceStoreError::LockUnavailable)?;
         let asset = self.load_unlocked(resource_id)?;
-        if asset.selected_version() != selected_version {
+        if asset.selected_version() != Some(selected_version) {
             return Err(WorkspaceError::VersionNotFound.into());
         }
-        let path = self
-            .resources_root()
-            .join(resource_id.as_str())
-            .join(&asset.selected().blob.relative_path);
+        let path = self.resources_root().join(resource_id.as_str()).join(
+            &asset
+                .selected()
+                .ok_or(WorkspaceError::VersionNotFound)?
+                .blob
+                .relative_path,
+        );
         read_regular_file(&path, "read_selected_resource")
+    }
+
+    fn list(&self) -> Result<Vec<ResourceAsset>, Self::Error> {
+        let _guard = self
+            .gate
+            .lock()
+            .map_err(|_| ResourceStoreError::LockUnavailable)?;
+        let resources_root = self.prepare_root()?;
+        let mut assets = Vec::new();
+        for entry in
+            fs::read_dir(resources_root).map_err(|error| io_error("list_resources", error))?
+        {
+            let entry = entry.map_err(|error| io_error("list_resources", error))?;
+            let name = entry
+                .file_name()
+                .to_str()
+                .ok_or(ResourceStoreError::PathInvalid)?
+                .to_owned();
+            if name.starts_with(".staging-")
+                || !entry
+                    .file_type()
+                    .map_err(|error| io_error("inspect_resource", error))?
+                    .is_dir()
+            {
+                return Err(ResourceStoreError::PathInvalid);
+            }
+            let id = ResourceId::parse(name).map_err(|_| ResourceStoreError::PathInvalid)?;
+            assets.push(self.load_unlocked(&id)?);
+        }
+        assets.sort_by(|left, right| left.resource_id().cmp(right.resource_id()));
+        Ok(assets)
     }
 }
 
@@ -337,19 +408,6 @@ fn new_resource_id() -> ResourceId {
         .map_or(0, |duration| duration.as_nanos());
     ResourceId::parse(format!("resource.r{nanos:032x}{counter:016x}"))
         .expect("generated resource ID is qualified lowercase ASCII")
-}
-
-fn read_source(path: &Path) -> Result<Vec<u8>, ResourceStoreError> {
-    let metadata =
-        fs::symlink_metadata(path).map_err(|error| io_error("inspect_resource_source", error))?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err(ResourceStoreError::PathInvalid);
-    }
-    let bytes = fs::read(path).map_err(|error| io_error("read_resource_source", error))?;
-    if bytes.is_empty() {
-        return Err(WorkspaceError::InvalidManifest.into());
-    }
-    Ok(bytes)
 }
 
 fn safe_extension(path: &Path) -> String {
@@ -438,10 +496,24 @@ mod tests {
 
     use super::*;
 
-    fn write_source(root: &Path, name: &str, bytes: &[u8]) -> PathBuf {
-        let path = root.join(name);
-        fs::write(&path, bytes).unwrap();
-        path
+    fn candidate(
+        logical_role: &str,
+        origin: ResourceOrigin,
+        bytes: &[u8],
+    ) -> ResourceBytesIngestRequest {
+        ResourceBytesIngestRequest {
+            logical_role: logical_role.into(),
+            origin,
+            file_name: "fixture.png".into(),
+            media: ats_workspace::PreparedResourceMedia {
+                media_type: "image/png".into(),
+                width: 1,
+                height: 1,
+                has_alpha: true,
+                bytes: bytes.to_vec(),
+            },
+            provenance: ResourceVersionProvenance::Original,
+        }
     }
 
     #[test]
@@ -451,39 +523,47 @@ mod tests {
         fs::create_dir(&project).unwrap();
         let source_root = temp.path().join("inputs");
         fs::create_dir(&source_root).unwrap();
-        let original_path = write_source(&source_root, "original.png", b"original-png");
-        let derived_path = write_source(&source_root, "derived.png", b"derived-png");
         let repository = FileResourceRepository::new(project.clone());
 
         let original = repository
-            .ingest(ResourceIngestRequest {
-                logical_role: "relic.normal".into(),
-                origin: ats_workspace::ResourceOrigin::UserUpload,
-                media_type: "image/png".into(),
-                source_path: original_path,
-            })
+            .ingest_bytes(candidate(
+                "relic.normal",
+                ResourceOrigin::UserUpload,
+                b"original-png",
+            ))
             .unwrap();
+        assert_eq!(original.selected_version(), None);
         let derived = repository
             .add_version(ResourceDeriveRequest {
                 resource_id: original.resource_id().clone(),
-                parent_version: original.selected_version().clone(),
+                parent_version: original.versions()[0].id.clone(),
                 transform: PrimitiveId::parse("image.outline").unwrap(),
                 parameters_sha256: sha256_bytes(b"radius=4"),
-                media_type: "image/png".into(),
-                source_path: derived_path,
+                media: ats_workspace::PreparedResourceMedia {
+                    media_type: "image/png".into(),
+                    width: 1,
+                    height: 1,
+                    has_alpha: true,
+                    bytes: b"derived-png".to_vec(),
+                },
+                source_role: "relic.master".into(),
+                source_version: original.versions()[0].id.clone(),
+                transform_version: 1,
+                game_pack_id: GamePackId::parse("sts2").unwrap(),
+                game_pack_sha256: sha256_bytes(b"pack"),
             })
             .unwrap();
         let derived_id = derived
             .versions()
             .iter()
-            .find(|version| version.id != *original.selected_version())
+            .find(|version| version.id != original.versions()[0].id)
             .unwrap()
             .id
             .clone();
         let selected = repository
             .select(original.resource_id(), &derived_id)
             .unwrap();
-        assert_eq!(selected.selected_version(), &derived_id);
+        assert_eq!(selected.selected_version(), Some(&derived_id));
         assert_eq!(repository.load(original.resource_id()).unwrap(), selected);
         assert_eq!(
             repository
@@ -492,7 +572,7 @@ mod tests {
             b"derived-png"
         );
         assert!(matches!(
-            repository.read_selected_bytes(original.resource_id(), original.selected_version()),
+            repository.read_selected_bytes(original.resource_id(), &original.versions()[0].id),
             Err(ResourceStoreError::Contract(
                 WorkspaceError::VersionNotFound
             ))
@@ -520,7 +600,6 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         let project = temp.path().join("project");
         fs::create_dir(&project).unwrap();
-        let source = write_source(temp.path(), "source.bin", b"same-content");
         let repository = FileResourceRepository::new(project);
         let origins = [
             ResourceOrigin::UserUpload,
@@ -538,17 +617,53 @@ mod tests {
         let mut version_ids = Vec::new();
         for origin in origins {
             let asset = repository
-                .ingest(ResourceIngestRequest {
-                    logical_role: "fixture.binary".into(),
-                    origin: origin.clone(),
-                    media_type: "application/octet-stream".into(),
-                    source_path: source.clone(),
-                })
+                .ingest_bytes(candidate("fixture.binary", origin.clone(), b"same-content"))
                 .unwrap();
             assert_eq!(asset.origin(), &origin);
-            version_ids.push(asset.selected_version().clone());
+            assert_eq!(asset.selected_version(), None);
+            version_ids.push(asset.versions()[0].id.clone());
         }
         assert!(version_ids.windows(2).all(|ids| ids[0] == ids[1]));
+    }
+
+    #[test]
+    fn invalid_batch_candidate_rolls_back_every_staging_directory() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let project = temp.path().join("project");
+        fs::create_dir(&project).unwrap();
+        let repository = FileResourceRepository::new(project.clone());
+        let existing = repository
+            .ingest_bytes(candidate(
+                "relic.outline",
+                ResourceOrigin::UserUpload,
+                b"existing",
+            ))
+            .unwrap();
+        let existing = repository
+            .select(existing.resource_id(), &existing.versions()[0].id)
+            .unwrap();
+        let valid = candidate("relic.normal", ResourceOrigin::UserUpload, b"valid");
+        let mut invalid = candidate("relic.big", ResourceOrigin::UserUpload, b"invalid");
+        invalid.file_name = "nested/invalid.png".into();
+
+        assert!(repository.ingest_batch(vec![valid, invalid]).is_err());
+        let entries = fs::read_dir(project.join(".ats/resources"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect::<Vec<_>>();
+        assert_eq!(entries.len(), 1);
+        assert!(
+            entries
+                .iter()
+                .all(|entry| !entry.file_name().to_string_lossy().starts_with(".staging-"))
+        );
+        assert_eq!(
+            repository
+                .load(existing.resource_id())
+                .unwrap()
+                .selected_version(),
+            existing.selected_version()
+        );
     }
 
     #[test]
@@ -556,15 +671,19 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         let project = temp.path().join("project");
         fs::create_dir(&project).unwrap();
-        let source = write_source(temp.path(), "source.png", b"source");
         let repository = FileResourceRepository::new(project.clone());
+        let candidate_asset = repository
+            .ingest_bytes(candidate(
+                "card.normal",
+                ResourceOrigin::UserUpload,
+                b"source",
+            ))
+            .unwrap();
         let asset = repository
-            .ingest(ResourceIngestRequest {
-                logical_role: "card.normal".into(),
-                origin: ats_workspace::ResourceOrigin::UserUpload,
-                media_type: "image/png".into(),
-                source_path: source,
-            })
+            .select(
+                candidate_asset.resource_id(),
+                &candidate_asset.versions()[0].id,
+            )
             .unwrap();
         let manifest_path = project
             .join(".ats/resources")
@@ -581,7 +700,7 @@ mod tests {
         let blob_path = manifest_path
             .parent()
             .unwrap()
-            .join(&asset.selected().blob.relative_path);
+            .join(&asset.selected().unwrap().blob.relative_path);
         fs::write(blob_path, b"tampered").unwrap();
         assert!(matches!(
             repository.load(asset.resource_id()),
@@ -591,33 +710,8 @@ mod tests {
         ));
         assert!(
             repository
-                .read_selected_bytes(asset.resource_id(), asset.selected_version())
+                .read_selected_bytes(asset.resource_id(), asset.selected_version().unwrap())
                 .is_err()
         );
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn rejects_symlink_uploads() {
-        use std::os::windows::fs::symlink_file;
-
-        let temp = tempfile::TempDir::new().unwrap();
-        let project = temp.path().join("project");
-        fs::create_dir(&project).unwrap();
-        let target = write_source(temp.path(), "target.png", b"target");
-        let link = temp.path().join("link.png");
-        if symlink_file(target, &link).is_err() {
-            return;
-        }
-        let repository = FileResourceRepository::new(project);
-        assert!(matches!(
-            repository.ingest(ResourceIngestRequest {
-                logical_role: "card.normal".into(),
-                origin: ats_workspace::ResourceOrigin::UserUpload,
-                media_type: "image/png".into(),
-                source_path: link,
-            }),
-            Err(ResourceStoreError::PathInvalid)
-        ));
     }
 }

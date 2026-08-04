@@ -20,6 +20,7 @@ figment = { version = "0.10", features = ["json", "env"] }
 futures-util = "0.3"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 regex = "1"
+png = "0.18"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"

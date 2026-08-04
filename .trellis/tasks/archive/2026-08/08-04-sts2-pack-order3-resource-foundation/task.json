@@ -1,0 +1,44 @@
+{
+  "id": "sts2-pack-order3-resource-foundation",
+  "name": "sts2-pack-order3-resource-foundation",
+  "title": "Order 3: Resource Prepare v2 foundation",
+  "description": "Resource v2 candidates, real PNG probe and deterministic master derivation",
+  "status": "completed",
+  "dev_type": "backend",
+  "scope": "workspace resource and media adapters",
+  "priority": "P2",
+  "creator": "codex-agent",
+  "assignee": "codex-agent",
+  "createdAt": "2026-08-04",
+  "completedAt": "2026-08-04",
+  "branch": null,
+  "base_branch": "rust",
+  "worktree_path": null,
+  "current_phase": 3,
+  "next_action": [
+    {
+      "phase": 1,
+      "action": "implement"
+    },
+    {
+      "phase": 2,
+      "action": "check"
+    },
+    {
+      "phase": 3,
+      "action": "finish"
+    },
+    {
+      "phase": 4,
+      "action": "create-pr"
+    }
+  ],
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "08-04-sts2-pack-types-resource-experience",
+  "relatedFiles": [],
+  "notes": "Resource Prepare v2 machine gates passed: 126 workspace tests, check/clippy, ML/E2E compile, frontend 15/type/build, DAG, CLI, fmt/diff.",
+  "meta": {}
+}

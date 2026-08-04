@@ -171,30 +171,69 @@
     {
       "slotId": "resource.prepare.specs",
       "featureId": "resource.prepare",
-      "schema": { "id": "pack.resource-specs", "version": 1 },
+      "schema": { "id": "pack.resource-specs", "version": 2 },
       "requiredPrimitives": ["image.role-transform"],
       "payload": {
         "roles": [
+          {
+            "id": "relic.master",
+            "mediaTypes": ["image/png"],
+            "width": 512,
+            "height": 512,
+            "requireAlpha": true,
+            "source": { "kind": "master" }
+          },
           {
             "id": "relic.normal",
             "mediaTypes": ["image/png"],
             "width": 128,
             "height": 128,
-            "targetPath": "{mod_id}/images/relics/{item_id}.png"
+            "requireAlpha": true,
+            "targetPath": "{mod_id}/images/relics/{item_id}.png",
+            "source": {
+              "kind": "derived",
+              "sourceRole": "relic.master",
+              "transform": {
+                "operation": "resize",
+                "primitive": "image.role-transform",
+                "version": 1
+              }
+            }
           },
           {
             "id": "relic.outline",
             "mediaTypes": ["image/png"],
             "width": 128,
             "height": 128,
-            "targetPath": "{mod_id}/images/relics/{item_id}_outline.png"
+            "requireAlpha": true,
+            "targetPath": "{mod_id}/images/relics/{item_id}_outline.png",
+            "source": {
+              "kind": "derived",
+              "sourceRole": "relic.master",
+              "transform": {
+                "operation": "outline",
+                "primitive": "image.role-transform",
+                "version": 1,
+                "radius": 4
+              }
+            }
           },
           {
             "id": "relic.big",
             "mediaTypes": ["image/png"],
             "width": 256,
             "height": 256,
-            "targetPath": "{mod_id}/images/relics/{item_id}_big.png"
+            "requireAlpha": true,
+            "targetPath": "{mod_id}/images/relics/{item_id}_big.png",
+            "source": {
+              "kind": "derived",
+              "sourceRole": "relic.master",
+              "transform": {
+                "operation": "resize",
+                "primitive": "image.role-transform",
+                "version": 1
+              }
+            }
           }
         ]
       }

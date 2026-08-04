@@ -16,7 +16,8 @@ pub use project::{
 };
 
 pub use resource::{
-    RESOURCE_ASSET_SCHEMA_VERSION, ResourceAsset, ResourceBlob, ResourceBytesIngestRequest,
-    ResourceDeriveRequest, ResourceIngestRequest, ResourceOrigin, ResourceRepository,
-    ResourceVersion, ResourceVersionProvenance, WorkspaceError, normalize_relative_path,
+    PreparedResourceMedia, RESOURCE_ASSET_SCHEMA_VERSION, ResourceAsset, ResourceBlob,
+    ResourceBytesIngestRequest, ResourceDeriveRequest, ResourceMediaProcessor, ResourceOrigin,
+    ResourceRepository, ResourceTransformOperation, ResourceVersion, ResourceVersionProvenance,
+    WorkspaceError, normalize_relative_path,
 };
