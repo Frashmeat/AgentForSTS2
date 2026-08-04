@@ -62,7 +62,7 @@ impl SingleGenerateFeature {
     pub fn contribution_requirement() -> ats_game_context::ContributionRequirement {
         ats_game_context::ContributionRequirement {
             slot_id: generation_slot(),
-            schema: schema_version("pack.mod-generate-single", 3),
+            schema: schema_version("pack.mod-generate-single", 4),
         }
     }
 }
@@ -108,6 +108,7 @@ struct GenerateContribution {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct GenerateItemType {
     id: String,
+    guidance: Vec<String>,
     generated_files: Vec<GeneratedFileSpec>,
 }
 
@@ -129,7 +130,8 @@ struct GeneratedModBundle {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct GeneratePromptContribution<'a> {
     item_type: &'a str,
-    guidance: &'a [String],
+    common_guidance: &'a [String],
+    item_guidance: &'a [String],
     generated_file_roles: Vec<&'a str>,
 }
 
@@ -389,7 +391,8 @@ impl SingleGenerateService {
         let output_contract = run_scoped_output_contract(item_spec);
         let pack_contribution = GeneratePromptContribution {
             item_type: &item_spec.id,
-            guidance: &contribution.guidance,
+            common_guidance: &contribution.guidance,
+            item_guidance: &item_spec.guidance,
             generated_file_roles: item_spec
                 .generated_files
                 .iter()
@@ -672,6 +675,7 @@ impl GenerateContribution {
         for item in &self.item_types {
             if ItemTypeId::parse(item.id.as_str()).is_err()
                 || !item_ids.insert(item.id.as_str())
+                || !valid_text_list(&item.guidance, 64, 2_000, false)
                 || item.generated_files.is_empty()
                 || item.generated_files.len() > 64
             {
@@ -1293,13 +1297,14 @@ mod tests {
                 {
                     "slotId": "mod.generate.single",
                     "featureId": "mod.generate.single",
-                    "schema": {"id":"pack.mod-generate-single", "version":3},
+                    "schema": {"id":"pack.mod-generate-single", "version":4},
                     "requiredPrimitives": ["code.fixture-validate"],
                     "payload": {
                         "validationPrimitive": "code.fixture-validate",
                         "guidance": ["Use fixture evidence."],
                         "itemTypes": [{
                             "id": "fixture_item",
+                            "guidance": ["Use the fixture item contract."],
                             "generatedFiles": [{
                                 "role": "metadata",
                                 "targetPath": "{mod_id}/metadata.json"
@@ -1387,6 +1392,7 @@ mod tests {
     fn run_scoped_bundle_contract_exposes_and_enforces_exact_pack_roles() {
         let item_spec = GenerateItemType {
             id: "fixture_item".into(),
+            guidance: vec!["Use the fixture item contract.".into()],
             generated_files: vec![
                 GeneratedFileSpec {
                     role: "source".into(),

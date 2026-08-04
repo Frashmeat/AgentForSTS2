@@ -41,6 +41,102 @@
         { "symbols": ["RelicModel"], "terms": [] }
       ],
       "requiredResourceRoles": ["relic.normal", "relic.outline", "relic.big"]
+    },
+    {
+      "id": "card",
+      "displayNames": { "eng": "Card", "zhs": "卡牌" },
+      "requiredLocales": ["eng", "zhs"],
+      "fields": [
+        {
+          "id": "pool",
+          "displayNames": { "eng": "Card pool", "zhs": "卡池" },
+          "required": true,
+          "value": {
+            "kind": "choice",
+            "options": [
+              { "value": "ironclad", "displayNames": { "eng": "Ironclad", "zhs": "铁甲战士" } },
+              { "value": "silent", "displayNames": { "eng": "Silent", "zhs": "静默猎手" } },
+              { "value": "defect", "displayNames": { "eng": "Defect", "zhs": "故障机器人" } },
+              { "value": "regent", "displayNames": { "eng": "Regent", "zhs": "储君" } },
+              { "value": "necrobinder", "displayNames": { "eng": "Necrobinder", "zhs": "亡灵契约师" } },
+              { "value": "colorless", "displayNames": { "eng": "Colorless", "zhs": "无色" } },
+              { "value": "curse", "displayNames": { "eng": "Curse", "zhs": "诅咒" } },
+              { "value": "status", "displayNames": { "eng": "Status", "zhs": "状态" } }
+            ]
+          }
+        },
+        {
+          "id": "card_type",
+          "displayNames": { "eng": "Card type", "zhs": "卡牌类型" },
+          "required": true,
+          "value": {
+            "kind": "choice",
+            "options": [
+              { "value": "attack", "displayNames": { "eng": "Attack", "zhs": "攻击" } },
+              { "value": "skill", "displayNames": { "eng": "Skill", "zhs": "技能" } },
+              { "value": "power", "displayNames": { "eng": "Power", "zhs": "能力" } },
+              { "value": "status", "displayNames": { "eng": "Status", "zhs": "状态" } },
+              { "value": "curse", "displayNames": { "eng": "Curse", "zhs": "诅咒" } },
+              { "value": "quest", "displayNames": { "eng": "Quest", "zhs": "任务" } }
+            ]
+          }
+        },
+        {
+          "id": "rarity",
+          "displayNames": { "eng": "Rarity", "zhs": "稀有度" },
+          "required": true,
+          "value": {
+            "kind": "choice",
+            "options": [
+              { "value": "none", "displayNames": { "eng": "None", "zhs": "无" } },
+              { "value": "basic", "displayNames": { "eng": "Basic", "zhs": "基础" } },
+              { "value": "common", "displayNames": { "eng": "Common", "zhs": "普通" } },
+              { "value": "uncommon", "displayNames": { "eng": "Uncommon", "zhs": "罕见" } },
+              { "value": "rare", "displayNames": { "eng": "Rare", "zhs": "稀有" } },
+              { "value": "ancient", "displayNames": { "eng": "Ancient", "zhs": "远古" } },
+              { "value": "event", "displayNames": { "eng": "Event", "zhs": "事件" } },
+              { "value": "token", "displayNames": { "eng": "Token", "zhs": "衍生" } },
+              { "value": "status", "displayNames": { "eng": "Status", "zhs": "状态" } },
+              { "value": "curse", "displayNames": { "eng": "Curse", "zhs": "诅咒" } },
+              { "value": "quest", "displayNames": { "eng": "Quest", "zhs": "任务" } }
+            ]
+          }
+        },
+        {
+          "id": "target",
+          "displayNames": { "eng": "Target", "zhs": "目标" },
+          "required": true,
+          "value": {
+            "kind": "choice",
+            "options": [
+              { "value": "none", "displayNames": { "eng": "None", "zhs": "无" } },
+              { "value": "self", "displayNames": { "eng": "Self", "zhs": "自身" } },
+              { "value": "any_enemy", "displayNames": { "eng": "Any enemy", "zhs": "任意敌人" } },
+              { "value": "all_enemies", "displayNames": { "eng": "All enemies", "zhs": "所有敌人" } },
+              { "value": "random_enemy", "displayNames": { "eng": "Random enemy", "zhs": "随机敌人" } },
+              { "value": "any_player", "displayNames": { "eng": "Any player", "zhs": "任意玩家" } },
+              { "value": "any_ally", "displayNames": { "eng": "Any ally", "zhs": "任意盟友" } },
+              { "value": "all_allies", "displayNames": { "eng": "All allies", "zhs": "所有盟友" } },
+              { "value": "targeted_no_creature", "displayNames": { "eng": "Targeted without creature", "zhs": "指定非生物目标" } },
+              { "value": "osty", "displayNames": { "eng": "Osty", "zhs": "Osty" } }
+            ]
+          }
+        },
+        {
+          "id": "base_cost",
+          "displayNames": { "eng": "Base cost", "zhs": "基础费用" },
+          "required": true,
+          "value": { "kind": "integer", "min": -1, "max": 9 }
+        }
+      ],
+      "evidenceQueries": [
+        { "symbols": ["CustomCardModel"], "terms": [] },
+        { "symbols": ["PoolAttribute"], "terms": [] },
+        { "symbols": ["CardType"], "terms": [] },
+        { "symbols": ["CardRarity"], "terms": [] },
+        { "symbols": ["TargetType"], "terms": [] }
+      ],
+      "requiredResourceRoles": ["card.portrait", "card.big"]
     }
   ],
   "contributions": [
@@ -66,7 +162,7 @@
     {
       "slotId": "mod.generate.single",
       "featureId": "mod.generate.single",
-      "schema": { "id": "pack.mod-generate-single", "version": 3 },
+      "schema": { "id": "pack.mod-generate-single", "version": 4 },
       "requiredPrimitives": ["code.dotnet-validate"],
       "payload": {
         "validationPrimitive": "code.dotnet-validate",
@@ -78,16 +174,37 @@
         "itemTypes": [
           {
             "id": "custom_code",
+            "guidance": [
+              "Implement only the requested behavior and keep all game API claims grounded in Truth Evidence."
+            ],
             "generatedFiles": [
               { "role": "source", "targetPath": "Generated/{item_id}.cs" }
             ]
           },
           {
             "id": "relic",
+            "guidance": [
+              "Generate one STS2 relic implementation whose locked rarity and bilingual localization match the ItemDefinition.",
+              "Use only relic lifecycle and registration APIs present in Truth Evidence; do not invent hooks.",
+              "Emit flat localization key-value JSON for both required locales."
+            ],
             "generatedFiles": [
               { "role": "source", "targetPath": "Generated/{item_id}.cs" },
               { "role": "localization.eng", "targetPath": "{mod_id}/localization/eng/relics.json" },
               { "role": "localization.zhs", "targetPath": "{mod_id}/localization/zhs/relics.json" }
+            ]
+          },
+          {
+            "id": "card",
+            "guidance": [
+              "Generate one STS2 card implementation and map pool, card_type, rarity, target, and base_cost exactly from the ItemDefinition.",
+              "Declare the selected card pool and use only card APIs and enum values supported by Truth Evidence; do not invent lifecycle hooks.",
+              "Emit flat localization key-value JSON with title, description, and upgrade_description values for both required locales."
+            ],
+            "generatedFiles": [
+              { "role": "source", "targetPath": "Generated/{item_id}.cs" },
+              { "role": "localization.eng", "targetPath": "{mod_id}/localization/eng/cards.json" },
+              { "role": "localization.zhs", "targetPath": "{mod_id}/localization/zhs/cards.json" }
             ]
           }
         ]
@@ -228,6 +345,48 @@
             "source": {
               "kind": "derived",
               "sourceRole": "relic.master",
+              "transform": {
+                "operation": "resize",
+                "primitive": "image.role-transform",
+                "version": 1
+              }
+            }
+          },
+          {
+            "id": "card.master",
+            "mediaTypes": ["image/png"],
+            "width": 1000,
+            "height": 760,
+            "requireAlpha": false,
+            "source": { "kind": "master" }
+          },
+          {
+            "id": "card.portrait",
+            "mediaTypes": ["image/png"],
+            "width": 250,
+            "height": 190,
+            "requireAlpha": false,
+            "targetPath": "{mod_id}/images/card_portraits/{item_id}.png",
+            "source": {
+              "kind": "derived",
+              "sourceRole": "card.master",
+              "transform": {
+                "operation": "resize",
+                "primitive": "image.role-transform",
+                "version": 1
+              }
+            }
+          },
+          {
+            "id": "card.big",
+            "mediaTypes": ["image/png"],
+            "width": 1000,
+            "height": 760,
+            "requireAlpha": false,
+            "targetPath": "{mod_id}/images/card_portraits/big/{item_id}.png",
+            "source": {
+              "kind": "derived",
+              "sourceRole": "card.master",
               "transform": {
                 "operation": "resize",
                 "primitive": "image.role-transform",

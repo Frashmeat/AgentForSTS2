@@ -1281,7 +1281,7 @@ mod tests {
             })
             .unwrap();
         assert_eq!(catalog.game_pack_sha256, *pack.content_sha256());
-        assert_eq!(catalog.roles.len(), 4);
+        assert_eq!(catalog.roles.len(), specs.roles.len());
         assert!(matches!(
             catalog
                 .roles

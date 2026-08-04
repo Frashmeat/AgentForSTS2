@@ -21,10 +21,10 @@ use ats_kernel::{
     ItemFieldId, ItemId, ItemTypeId, LocaleId, PrimitiveId, ResourceId, Sha256Digest,
 };
 use ats_runtime::{
-    ArtifactPublishRequest, ArtifactPublisher, CancellationReason, CancellationToken, FinishReason,
-    ModelClient, ModelError, ModelRequestSnapshot, ModelResponse, ModelStream, PublishedArtifact,
-    RunRecord, RunStatus, RunTransition, TokenUsage, ValidationError, ValidationReport,
-    ValidationRequest, ValidationRunner, VersionedPayload,
+    ArtifactManifest, ArtifactPublishRequest, ArtifactPublisher, CancellationReason,
+    CancellationToken, FinishReason, ModelClient, ModelError, ModelRequestSnapshot, ModelResponse,
+    ModelStream, PublishedArtifact, RunRecord, RunStatus, RunTransition, TokenUsage,
+    ValidationError, ValidationReport, ValidationRequest, ValidationRunner, VersionedPayload,
 };
 use ats_workspace::{
     ItemDefinition, ItemFieldValue, ItemLocalization, ItemResourceBinding, LocalizationStatus,
@@ -237,6 +237,86 @@ impl Fixture {
         }
     }
 
+    fn card() -> Self {
+        let mut fixture = Self::new();
+        let mut definition = ItemDefinition::new(
+            ItemId::parse("fixture_card").unwrap(),
+            ItemTypeId::parse("card").unwrap(),
+        );
+        for (field, value) in [
+            ("pool", ItemFieldValue::Choice("ironclad".into())),
+            ("card_type", ItemFieldValue::Choice("attack".into())),
+            ("rarity", ItemFieldValue::Choice("common".into())),
+            ("target", ItemFieldValue::Choice("any_enemy".into())),
+            ("base_cost", ItemFieldValue::Integer(1)),
+        ] {
+            definition
+                .canonical_fields
+                .insert(ItemFieldId::parse(field).unwrap(), value);
+        }
+        definition.behavior_intent = vec!["Deal testable damage and upgrade once".into()];
+        for (locale, name) in [("eng", "Fixture Card"), ("zhs", "Fixture Card ZHS")] {
+            definition.localizations.insert(
+                LocaleId::parse(locale).unwrap(),
+                ItemLocalization {
+                    name: name.into(),
+                    description: "A compile-test fixture card.".into(),
+                    status: LocalizationStatus::Confirmed,
+                    translated_from: None,
+                },
+            );
+        }
+        for (role, width, height) in [("card.portrait", 250, 190), ("card.big", 1000, 760)] {
+            let candidate = fixture
+                .resources
+                .ingest_bytes(ResourceBytesIngestRequest {
+                    logical_role: role.into(),
+                    origin: ResourceOrigin::UserUpload,
+                    file_name: format!("{}.png", role.replace('.', "-")),
+                    media: PreparedResourceMedia {
+                        media_type: "image/png".into(),
+                        width,
+                        height,
+                        has_alpha: false,
+                        bytes: format!("fixture-{role}").into_bytes(),
+                    },
+                    provenance: ResourceVersionProvenance::Original,
+                })
+                .unwrap();
+            let asset = fixture
+                .resources
+                .select(candidate.resource_id(), &candidate.versions()[0].id)
+                .unwrap();
+            definition.resource_bindings.insert(
+                ResourceId::parse(role).unwrap(),
+                ItemResourceBinding {
+                    resource_id: asset.resource_id().clone(),
+                    selected_version: asset.selected_version().unwrap().clone(),
+                },
+            );
+        }
+        fixture.request = SingleGenerateRequest {
+            artifact_id: "fixture-card".into(),
+            mod_id: "FixtureMod".into(),
+            plan: PlanItem {
+                item_id: "fixture_card".into(),
+                item_type: "card".into(),
+                name: "Fixture Card".into(),
+                summary: "A compile-test fixture card".into(),
+                behavior_intent: vec!["Deal testable damage and upgrade once".into()],
+                implementation_constraints: vec![],
+                evidence_requirements: vec!["Verified Card model and enum declarations".into()],
+                required_resource_roles: vec!["card.portrait".into(), "card.big".into()],
+                acceptance_criteria: vec!["The generated project compiles".into()],
+            },
+            definition: StoredItemDefinition {
+                definition_hash: definition.definition_hash().unwrap(),
+                definition,
+            },
+        };
+        fixture
+    }
+
     fn run(&self) -> RunRecord {
         let payload =
             VersionedPayload::from_typed(SingleGenerateFeature::request_schema(), &self.request)
@@ -248,11 +328,18 @@ impl Fixture {
     }
 
     fn context(&self) -> SingleGenerateContext<'_> {
+        self.context_with_truth(&self.truth)
+    }
+
+    fn context_with_truth<'a>(
+        &'a self,
+        truth: &'a VerifiedTruthSnapshot,
+    ) -> SingleGenerateContext<'a> {
         SingleGenerateContext {
             pack: &self.pack,
             contributions: &self.generate_contributions,
             resource_contributions: &self.resource_contributions,
-            truth: &self.truth,
+            truth,
             project_root: &self.project,
             project_context: "An isolated SDK-style test project.",
             custom_instructions: Some("CUSTOM-CANARY"),
@@ -385,6 +472,139 @@ async fn real_compile_artifact_and_run_chain_succeeds_without_staging_residue() 
 }
 
 #[tokio::test]
+async fn card_pack_truth_resources_prompt_and_artifact_form_one_vertical_contract() {
+    let fixture = Fixture::card();
+    let service = SingleGenerateService::built_in().unwrap();
+    let writer = FileProjectWriter;
+    let validator = RegisteredValidationRunner;
+    let artifacts = FileArtifactStore::new(fixture.project.clone());
+
+    for missing in ["truth", "resource"] {
+        let model = FixtureModel {
+            source: "public class MustNotRun {}",
+            snapshots: Mutex::new(Vec::new()),
+        };
+        let mut request = fixture.request.clone();
+        let missing_truth = truth_without(&fixture.pack, "TargetType");
+        if missing == "resource" {
+            request
+                .definition
+                .definition
+                .resource_bindings
+                .remove(&ResourceId::parse("card.big").unwrap());
+            request.definition.definition_hash =
+                request.definition.definition.definition_hash().unwrap();
+        }
+        let payload =
+            VersionedPayload::from_typed(SingleGenerateFeature::request_schema(), &request)
+                .unwrap();
+        let mut run = RunRecord::new(SingleGenerateFeature::id(), payload);
+        run.apply_transition(RunTransition::Start, Utc::now())
+            .unwrap();
+        let context = if missing == "truth" {
+            fixture.context_with_truth(&missing_truth)
+        } else {
+            fixture.context()
+        };
+        assert!(
+            service
+                .execute(
+                    SingleGenerateDependencies {
+                        model: &model,
+                        resources: &fixture.resources,
+                        writer: &writer,
+                        validator: &validator,
+                        artifacts: &artifacts,
+                    },
+                    &mut run,
+                    request,
+                    context,
+                    &CancellationToken::new(),
+                )
+                .await
+                .is_err()
+        );
+        assert!(model.snapshots.lock().unwrap().is_empty());
+    }
+
+    let model = FixtureModel {
+        source: "public class FixtureCard {}",
+        snapshots: Mutex::new(Vec::new()),
+    };
+    let mut run = fixture.run();
+    let execution = service
+        .execute(
+            SingleGenerateDependencies {
+                model: &model,
+                resources: &fixture.resources,
+                writer: &writer,
+                validator: &validator,
+                artifacts: &artifacts,
+            },
+            &mut run,
+            fixture.request.clone(),
+            fixture.context(),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(run.status(), RunStatus::Succeeded);
+    assert_eq!(execution.result.generated_file_count, 3);
+    let manifest_path = fixture
+        .project
+        .join(&execution.result.artifact_manifest_ref);
+    let manifest_bytes = fs::read(&manifest_path).unwrap();
+    assert_eq!(sha256(&manifest_bytes), execution.result.manifest_sha256);
+    let manifest: ArtifactManifest = serde_json::from_slice(&manifest_bytes).unwrap();
+    assert_eq!(manifest.files.len(), 5);
+    assert_eq!(
+        manifest.feature_extension.payload()["definitionHash"],
+        fixture.request.definition.definition_hash.as_str()
+    );
+    for file in &manifest.files {
+        let bytes = fs::read(
+            manifest_path
+                .parent()
+                .unwrap()
+                .join(&file.snapshot_relative_path),
+        )
+        .unwrap();
+        assert_eq!(u64::try_from(bytes.len()).unwrap(), file.byte_length);
+        assert_eq!(sha256(&bytes), file.sha256);
+    }
+    let published = manifest
+        .files
+        .iter()
+        .filter_map(|file| file.published_relative_path.as_deref())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert!(published.contains("Generated/fixture_card.cs"));
+    assert!(published.contains("FixtureMod/localization/eng/cards.json"));
+    assert!(published.contains("FixtureMod/localization/zhs/cards.json"));
+    assert!(published.contains("FixtureMod/images/card_portraits/fixture_card.png"));
+    assert!(published.contains("FixtureMod/images/card_portraits/big/fixture_card.png"));
+
+    let snapshots = model.snapshots.lock().unwrap();
+    let prompt = snapshots[0]
+        .request()
+        .messages
+        .iter()
+        .map(|message| message.content.as_str())
+        .collect::<String>();
+    assert!(prompt.contains("map pool, card_type, rarity, target, and base_cost exactly"));
+    assert!(!prompt.contains("Generate one STS2 relic implementation"));
+    assert!(prompt.contains(fixture.request.definition.definition_hash.as_str()));
+    assert!(!has_staging(&fixture.project.join("artifacts")));
+    assert!(
+        !fixture
+            .project
+            .join(".ats/transactions")
+            .join(run.id().as_str())
+            .exists()
+    );
+}
+
+#[tokio::test]
 async fn compile_artifact_and_cancellation_failures_restore_project_files() {
     let service = SingleGenerateService::built_in().unwrap();
     for failure in ["compile", "artifact", "cancel"] {
@@ -470,6 +690,13 @@ async fn compile_artifact_and_cancellation_failures_restore_project_files() {
 }
 
 fn truth(pack: &ats_game_context::LoadedGamePack) -> VerifiedTruthSnapshot {
+    truth_without(pack, "")
+}
+
+fn truth_without(
+    pack: &ats_game_context::LoadedGamePack,
+    excluded_symbol: &str,
+) -> VerifiedTruthSnapshot {
     let source_bytes = b"fixture-source";
     let evidence = [
         ("CustomRelicModel", "public abstract class CustomRelicModel"),
@@ -478,8 +705,14 @@ fn truth(pack: &ats_game_context::LoadedGamePack) -> VerifiedTruthSnapshot {
             "public static void AddModel(Type modelType)",
         ),
         ("RelicModel", "public abstract class RelicModel"),
+        ("CustomCardModel", "public abstract class CustomCardModel"),
+        ("PoolAttribute", "public sealed class PoolAttribute"),
+        ("CardType", "public enum CardType"),
+        ("CardRarity", "public enum CardRarity"),
+        ("TargetType", "public enum TargetType"),
     ]
     .into_iter()
+    .filter(|(symbol, _)| *symbol != excluded_symbol)
     .map(|(symbol, excerpt)| TruthEvidenceRecord {
         source_id: "fixture-source".into(),
         symbol: symbol.into(),

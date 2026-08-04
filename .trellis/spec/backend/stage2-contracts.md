@@ -48,8 +48,9 @@ Snapshot blocks only affected types with typed, query-indexed reasons.
 
 The Pack v3 item catalog also owns each item type's `requiredResourceRoles`.
 `pack.mod-plan-guidance` v3 owns only cross-item planning guidance;
-`pack.mod-generate-single` v3 owns only generation guidance, validation Primitive and exact
-generated-file roles. The Plan model-output contract excludes internal Resource role IDs;
+`pack.mod-generate-single` v4 owns bounded common guidance, required per-item guidance, validation
+Primitive and exact generated-file roles. Single exposes `commonGuidance` plus only the selected
+`itemGuidance` to the Prompt. The Plan model-output contract excludes internal Resource role IDs;
 `ModPlanService` attaches catalog values after typed model validation. The Single contribution
 must cover exactly the catalog's item type IDs, preventing a declared-but-unexecutable type.
 
@@ -142,6 +143,7 @@ are ordered maps. The definition SHA-256 covers the complete validated wire obje
 | empty/duplicate/more than 64 `itemTypes` | `GamePackLoadError::InvalidItemTypes` | none |
 | invalid locale/field/query/role descriptor | `GamePackLoadError::InvalidItemType(ItemCatalogError::*)` | none |
 | Single generation types differ from catalog IDs | `SingleGenerateError::InvalidPackContribution` | no model/IO |
+| missing/invalid per-item generation guidance | `SingleGenerateError::InvalidPackContribution` | no model/IO |
 | no current verified Truth | every declared type blocked with `truth.snapshot_unavailable` | caller must reject submit/model work |
 | one Evidence Query has zero records | affected type blocked with `truth.evidence_missing + queryIndex` | caller admits other ready types only |
 | Truth belongs to another Pack/hash | `CapabilityEvaluationError::TruthPackMismatch` | none |
@@ -172,6 +174,9 @@ are ordered maps. The definition SHA-256 covers the complete validated wire obje
   content and schema tampering fail before identity.
 - `ats-features::mod_plan::built_in_generation_contribution_covers_item_catalog`: assert the generation
   contribution covers exactly the Pack catalog IDs.
+- `agentthespire-desktop::stage2_single_mod::card_pack_truth_resources_prompt_and_artifact_form_one_vertical_contract`:
+  assert Card guidance is selected without Relic leakage, missing Truth/resource stops before
+  model work, and complete Card generation publishes five hash-verifiable files.
 - Run `cargo test --workspace --all-targets`, workspace Clippy, DAG self-test/real gate, rustfmt and
   `git diff --check` after any catalog contract change.
 
