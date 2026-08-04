@@ -244,6 +244,7 @@ dependencies = [
  "ats-kernel",
  "ats-runtime",
  "ats-workspace",
+ "base64 0.22.1",
  "chrono",
  "futures-util",
  "serde",

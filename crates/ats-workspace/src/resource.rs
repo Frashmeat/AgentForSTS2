@@ -417,6 +417,11 @@ pub trait ResourceRepository: Send + Sync {
         resource_id: &ResourceId,
         selected_version: &Sha256Digest,
     ) -> Result<Vec<u8>, Self::Error>;
+    fn read_version_bytes(
+        &self,
+        resource_id: &ResourceId,
+        version: &Sha256Digest,
+    ) -> Result<Vec<u8>, Self::Error>;
     fn list(&self) -> Result<Vec<ResourceAsset>, Self::Error>;
 }
 

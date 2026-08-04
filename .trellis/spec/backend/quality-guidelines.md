@@ -65,6 +65,9 @@ Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-sp
 - ItemDefinition schema v1 is validated on construction/deserialization and hashed from ordered
   canonical content. Run/Artifact consumers bind the exact hash; they never reconstruct locked
   fields from prose or mutate an older snapshot.
+- Single request schema v3 carries one `StoredItemDefinition`; Batch v3 embeds Single v3 and
+  Complex v2 carries one definition per planning item. `selectedResources` is forbidden at these
+  boundaries. Plan identity is checked or deterministically normalized to the pinned definition.
 - ResourceAsset schema v2 keeps new upload, Pack default, AI and deterministic derived outputs as
   immutable candidates with `selectedVersion=null`; only an explicit select may move the pointer.
   Master derivation uses one staged batch, and a failure preserves every prior selection.
@@ -77,7 +80,7 @@ Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-sp
 ## 6. Prompt And Model Request
 
 ```text
-Feature Recipe + Pack Contribution + Truth Evidence + Selected Resources
+Feature Recipe + Pack Contribution + Item Definition + Truth Evidence + Selected Resources
 + Project Context + Runtime Custom Instructions + Typed Output Contract
 = ModelRequestSnapshot
 ```

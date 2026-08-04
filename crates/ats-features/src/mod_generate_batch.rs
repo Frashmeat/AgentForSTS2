@@ -31,7 +31,7 @@ impl FeatureSpec for BatchGenerateFeature {
     }
 
     fn request_schema() -> SchemaRef {
-        schema_version("feature.mod-generate-batch-request", 2)
+        schema_version("feature.mod-generate-batch-request", 3)
     }
 
     fn result_schema() -> SchemaRef {

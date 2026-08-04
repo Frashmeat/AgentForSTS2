@@ -9,7 +9,7 @@ use ats_runtime::{
     ProjectFileWriter, RunId, RunLifecycleError, RunRecord, RunStatus, RunTransition,
     ValidationRunner, VersionedPayload,
 };
-use ats_workspace::ResourceRepository;
+use ats_workspace::{ResourceRepository, StoredItemDefinition};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -19,9 +19,7 @@ use crate::mod_generate_batch::{
     BatchGenerateContext, BatchGenerateError, BatchGenerateRequest, BatchGenerateResult,
     BatchGenerateService,
 };
-use crate::mod_generate_single::{
-    SelectedResource, SingleGenerateDependencies, SingleGenerateRequest,
-};
+use crate::mod_generate_single::{SingleGenerateDependencies, SingleGenerateRequest};
 use crate::mod_plan::{
     ModPlanContext, ModPlanError, ModPlanFeature, ModPlanRequest, ModPlanService, PlanItem,
 };
@@ -46,7 +44,7 @@ impl FeatureSpec for ComplexGenerateFeature {
     }
 
     fn request_schema() -> SchemaRef {
-        schema("feature.mod-generate-complex-request")
+        schema_version("feature.mod-generate-complex-request", 2)
     }
 
     fn result_schema() -> SchemaRef {
@@ -82,7 +80,7 @@ pub struct ComplexGenerateRequest {
 pub struct ComplexPlanningItem {
     pub request: ModPlanRequest,
     pub artifact_id: String,
-    pub selected_resources: Vec<SelectedResource>,
+    pub definition: StoredItemDefinition,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -196,6 +194,12 @@ impl<'a> ComplexGenerateService<'a> {
         if request.planning_items.is_empty()
             || request.planning_items.len() > 64
             || request.package.mod_id != request.mod_id
+            || request.planning_items.iter().any(|item| {
+                item.definition.validate().is_err()
+                    || item.request.item_type.as_deref().is_some_and(|item_type| {
+                        item_type != item.definition.definition.item_type.as_str()
+                    })
+            })
         {
             return Err(ComplexGenerateError::InvalidInput);
         }
@@ -226,8 +230,11 @@ impl<'a> ComplexGenerateService<'a> {
                     cancellation,
                 )
                 .await?;
+            let mut planned = execution.item;
+            planned.item_id = item.definition.definition.item_id.to_string();
+            planned.item_type = item.definition.definition.item_type.to_string();
             let plan_payload =
-                VersionedPayload::from_typed(ModPlanFeature::result_schema(), &execution.item)?;
+                VersionedPayload::from_typed(ModPlanFeature::result_schema(), &planned)?;
             plan_run.apply_transition(
                 RunTransition::Succeed {
                     result: plan_payload,
@@ -237,10 +244,10 @@ impl<'a> ComplexGenerateService<'a> {
             singles.push(SingleGenerateRequest {
                 artifact_id: item.artifact_id.clone(),
                 mod_id: request.mod_id.clone(),
-                plan: execution.item.clone(),
-                selected_resources: item.selected_resources.clone(),
+                plan: planned.clone(),
+                definition: item.definition.clone(),
             });
-            plans.push(execution.item);
+            plans.push(planned);
             child_runs.push(plan_run);
         }
 
@@ -438,8 +445,12 @@ fn complex_slot() -> ContributionId {
 }
 
 fn schema(id: &str) -> SchemaRef {
+    schema_version(id, 1)
+}
+
+fn schema_version(id: &str, version: u32) -> SchemaRef {
     SchemaRef {
         id: SchemaId::parse(id).expect("built-in schema ID is valid"),
-        version: SchemaVersion::new(1).expect("built-in schema version is valid"),
+        version: SchemaVersion::new(version).expect("built-in schema version is valid"),
     }
 }

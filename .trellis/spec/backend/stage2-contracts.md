@@ -332,11 +332,16 @@ pub trait ResourceRepository {
     fn select(&self, resource_id: &ResourceId, version: &Sha256Digest)
         -> Result<ResourceAsset, Self::Error>;
     fn list(&self) -> Result<Vec<ResourceAsset>, Self::Error>;
+    fn read_version_bytes(&self, resource_id: &ResourceId, version: &Sha256Digest)
+        -> Result<Vec<u8>, Self::Error>;
 }
 
 // crates/ats-features/src/resource_prepare.rs
 ResourcePrepareService::prepare_file(...)
 ResourcePrepareService::prepare_ai(...)
+ResourcePrepareService::catalog(...)
+ResourcePrepareService::list(...)
+ResourcePrepareService::preview(...)
 ResourcePrepareService::select(...)
 ```
 
@@ -383,6 +388,12 @@ canonical transform-parameters SHA-256 and pinned Pack ID/SHA-256. Candidate ver
 byte SHA-256 and must be identical for repeated input and Pack identity. Explicit select atomically
 updates only the manifest; Single generation checks the exact selected version and its Pack media
 shape before reading bytes.
+
+Desktop exposes typed `get_resource_catalog`, `list_resource_assets`, `get_resource_preview` and
+`select_resource` commands. They all reuse the open `ProjectSession` repository. Preview returns a
+bounded `data:image/png;base64,...` value and never a filesystem path. List and preview may expose
+intrinsically valid historical candidates so the Shell can mark stale bindings; only select and
+generation enforce the current Pack shape.
 
 #### 4. Validation And Error Matrix
 
@@ -446,7 +457,7 @@ let selected = repository.select(resource_id, candidate_version)?;
 
 ## 6. Prompt And Model
 
-Pinned Feature Recipe + verified Pack contribution + bounded Truth Evidence + selected Resource identities + sanitized project context + one runtime custom-instruction slot + typed output contract produce `ModelRequestSnapshot` v1.
+Pinned Feature Recipe + verified Pack contribution + exact StoredItemDefinition + bounded Truth Evidence + selected Resource identities + sanitized project context + one runtime custom-instruction slot + typed output contract produce `ModelRequestSnapshot` v1.
 
 Runtime owns provider-neutral `ModelClient`; Adapters own HTTP. Long Mod/game Prompt strings are forbidden in handler/Shell/Adapter code. Protocol roles, schema/slot IDs, JSON contracts, escaping, truncation and redaction remain code contracts.
 
@@ -464,6 +475,15 @@ For `mod.generate.single`, the selected Pack item type compiles into a run-scope
 additional properties. Recipe rendering, `ModelRequestSnapshot`, provider-native structured output,
 typed decoding, and final role validation therefore share one contract; Pack roles cannot remain a
 hidden post-provider constraint.
+
+`mod.generate.single` request schema v3 removes caller-authored `selectedResources` and carries the
+exact `StoredItemDefinition`. The service validates its hash, Ready mode, Plan identity and all
+role-keyed `resourceBindings` before model work. The Recipe owns one required `item.definition`
+slot. Artifact extension schema v2 and dedicated provenance both record `definitionHash`.
+
+`mod.generate.batch` request schema v3 embeds Single v3 unchanged. `mod.generate.complex` request
+schema v2 places one StoredItemDefinition beside each Plan request, then deterministically replaces
+model-authored Plan item ID/type with that definition identity before invoking Batch/Single.
 
 ## 7. Feature Composition
 

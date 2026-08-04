@@ -28,15 +28,28 @@ use ats_game_context::{
     ContributionResolver, GamePackLoader, LoadedGamePack, TruthEvidenceRecord, TruthSnapshotIndex,
     TruthSnapshotManifest, TruthSnapshotSource, VerifiedContributionSet, VerifiedTruthSnapshot,
 };
-use ats_kernel::{PrimitiveId, Sha256Digest};
+use ats_kernel::{ItemId, ItemTypeId, PrimitiveId, Sha256Digest};
 use ats_runtime::{
     ArtifactPublishRequest, ArtifactPublisher, CancellationToken, FinishReason, ModelClient,
     ModelError, ModelRequestSnapshot, ModelResponse, ModelStream, PublishedArtifact, RunRecord,
     RunStatus, RunTransition, TokenUsage, VersionedPayload,
 };
+use ats_workspace::{ItemDefinition, StoredItemDefinition};
 use chrono::Utc;
 use futures_util::stream;
 use sha2::{Digest, Sha256};
+
+fn custom_code_definition(id: &str) -> StoredItemDefinition {
+    let mut definition = ItemDefinition::new(
+        ItemId::parse(id).unwrap(),
+        ItemTypeId::parse("custom_code").unwrap(),
+    );
+    definition.behavior_intent = vec!["Expose one fixture type.".into()];
+    StoredItemDefinition {
+        definition_hash: definition.definition_hash().unwrap(),
+        definition,
+    }
+}
 
 struct CompositionModel {
     generated: Mutex<u32>,
@@ -347,7 +360,7 @@ async fn complex_composes_plan_batch_real_build_and_package() {
                 item_type: Some("custom_code".into()),
             },
             artifact_id: "complex-item".into(),
-            selected_resources: Vec::new(),
+            definition: custom_code_definition("planned_item"),
         }],
         fail_fast: true,
         package: ProjectPackageRequest {
@@ -494,7 +507,7 @@ fn single_request(id: &str) -> SingleGenerateRequest {
             required_resource_roles: Vec::new(),
             acceptance_criteria: vec!["The project compiles".into()],
         },
-        selected_resources: Vec::new(),
+        definition: custom_code_definition(id),
     }
 }
 

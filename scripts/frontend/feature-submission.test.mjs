@@ -22,12 +22,12 @@ test("feature submissions preserve explicit breaking schema versions", () => {
       "mod.generate.single",
       "feature.mod-generate-single-request",
       { artifactId: "fixture" },
-      2,
+      3,
     ),
     {
       featureId: "mod.generate.single",
       request: {
-        schema: { id: "feature.mod-generate-single-request", version: 2 },
+        schema: { id: "feature.mod-generate-single-request", version: 3 },
         payload: { artifactId: "fixture" },
       },
     },

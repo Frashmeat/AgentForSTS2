@@ -181,16 +181,11 @@ export interface ModPlanRequest extends Record<string, unknown> {
   itemType?: string | null;
 }
 
-export interface SelectedResource extends Record<string, unknown> {
-  resourceId: string;
-  selectedVersion: string;
-}
-
 export interface SingleGenerateRequest extends Record<string, unknown> {
   artifactId: string;
   modId: string;
   plan: PlanItem;
-  selectedResources: SelectedResource[];
+  definition: StoredItemDefinition;
 }
 
 export interface BatchGenerateRequest extends Record<string, unknown> {
@@ -201,7 +196,7 @@ export interface BatchGenerateRequest extends Record<string, unknown> {
 export interface ComplexPlanningItem extends Record<string, unknown> {
   request: ModPlanRequest;
   artifactId: string;
-  selectedResources: SelectedResource[];
+  definition: StoredItemDefinition;
 }
 
 export interface ProjectPackageRequest extends Record<string, unknown> {
@@ -241,15 +236,15 @@ export function submitModPlan(request: ModPlanRequest): Promise<string> {
 }
 
 export function submitSingleGenerate(request: SingleGenerateRequest): Promise<string> {
-  return submit("mod.generate.single", "feature.mod-generate-single-request", request, 2);
+  return submit("mod.generate.single", "feature.mod-generate-single-request", request, 3);
 }
 
 export function submitBatchGenerate(request: BatchGenerateRequest): Promise<string> {
-  return submit("mod.generate.batch", "feature.mod-generate-batch-request", request, 2);
+  return submit("mod.generate.batch", "feature.mod-generate-batch-request", request, 3);
 }
 
 export function submitComplexGenerate(request: ComplexGenerateRequest): Promise<string> {
-  return submit("mod.generate.complex", "feature.mod-generate-complex-request", request);
+  return submit("mod.generate.complex", "feature.mod-generate-complex-request", request, 2);
 }
 
 export function submitLogAnalyze(request: LogAnalyzeRequest): Promise<string> {
@@ -406,6 +401,103 @@ export interface StoredItemDefinition {
   definition: ItemDefinition;
 }
 
+export type ResourceOrigin =
+  | { kind: "user_upload" }
+  | { kind: "ai_generated"; provider: string; model: string; request_sha256: string }
+  | {
+      kind: "pack_default";
+      game_pack_id: string;
+      game_pack_sha256: string;
+      contribution_slot: string;
+    };
+
+export type ResourceVersionProvenance =
+  | { kind: "original" }
+  | {
+      kind: "derived";
+      sourceRole: string;
+      sourceVersion: string;
+      transform: string;
+      transformVersion: number;
+      parametersSha256: string;
+      gamePackId: string;
+      gamePackSha256: string;
+    };
+
+export interface ResourceBlob {
+  relativePath: string;
+  mediaType: string;
+  byteLength: number;
+  sha256: string;
+  width: number;
+  height: number;
+  hasAlpha: boolean;
+}
+
+export interface ResourceVersion {
+  id: string;
+  parentVersion?: string | null;
+  blob: ResourceBlob;
+  provenance: ResourceVersionProvenance;
+}
+
+export interface ResourceAsset {
+  schemaVersion: 2;
+  resourceId: string;
+  logicalRole: string;
+  origin: ResourceOrigin;
+  originalVersion: string;
+  selectedVersion?: string | null;
+  versions: ResourceVersion[];
+}
+
+export type ResourceRoleSource =
+  | { kind: "master" }
+  | { kind: "derived"; sourceRole: string };
+
+export interface ResourceRoleDescriptor {
+  id: string;
+  mediaTypes: string[];
+  width: number;
+  height: number;
+  requireAlpha: boolean;
+  targetPath?: string | null;
+  source: ResourceRoleSource;
+}
+
+export interface ResourceCatalog {
+  gamePackId: string;
+  gamePackSha256: string;
+  roles: ResourceRoleDescriptor[];
+}
+
+export interface ResourcePreview {
+  resourceId: string;
+  logicalRole: string;
+  version: string;
+  mediaType: string;
+  width: number;
+  height: number;
+  hasAlpha: boolean;
+  dataUrl: string;
+}
+
+export interface ResourceCandidateResult {
+  resourceId: string;
+  logicalRole: string;
+  origin: ResourceOrigin;
+  candidateVersion: string;
+  selectedVersion?: string | null;
+  mediaType: string;
+  width: number;
+  height: number;
+  hasAlpha: boolean;
+}
+
+export interface ResourcePrepareResult {
+  candidates: ResourceCandidateResult[];
+}
+
 export async function getItemCapabilities(): Promise<ItemCapabilityCatalog> {
   const value = await invokeCommand<unknown>("get_item_capabilities");
   if (!isItemCapabilityCatalog(value)) throw toActionableFailure(undefined);
@@ -437,6 +529,38 @@ export async function saveItemDefinition(
 ): Promise<StoredItemDefinition> {
   const value = await invokeCommand<unknown>("save_item_definition", { definition });
   if (!isStoredItemDefinition(value)) throw toActionableFailure(undefined);
+  return value;
+}
+
+export async function getResourceCatalog(): Promise<ResourceCatalog> {
+  const value = await invokeCommand<unknown>("get_resource_catalog");
+  if (!isResourceCatalog(value)) throw toActionableFailure(undefined);
+  return value;
+}
+
+export async function listResourceAssets(): Promise<ResourceAsset[]> {
+  const value = await invokeCommand<unknown>("list_resource_assets");
+  if (!Array.isArray(value) || !value.every(isResourceAsset)) {
+    throw toActionableFailure(undefined);
+  }
+  return value;
+}
+
+export async function getResourcePreview(
+  resourceId: string,
+  version: string,
+): Promise<ResourcePreview> {
+  const value = await invokeCommand<unknown>("get_resource_preview", { resourceId, version });
+  if (!isResourcePreview(value)) throw toActionableFailure(undefined);
+  return value;
+}
+
+export async function selectResource(
+  resourceId: string,
+  version: string,
+): Promise<ResourcePrepareResult> {
+  const value = await invokeCommand<unknown>("select_resource", { resourceId, version });
+  if (!isResourcePrepareResult(value)) throw toActionableFailure(undefined);
   return value;
 }
 
@@ -649,6 +773,136 @@ function isItemLocalization(value: unknown): value is ItemLocalization {
 
 function isItemResourceBinding(value: unknown): value is ItemResourceBinding {
   return isRecord(value) && typeof value.resourceId === "string" && isSha256(value.selectedVersion);
+}
+
+function isResourceCatalog(value: unknown): value is ResourceCatalog {
+  return (
+    isRecord(value) &&
+    typeof value.gamePackId === "string" &&
+    isSha256(value.gamePackSha256) &&
+    Array.isArray(value.roles) &&
+    value.roles.every(isResourceRoleDescriptor)
+  );
+}
+
+function isResourceRoleDescriptor(value: unknown): value is ResourceRoleDescriptor {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    isStringArrayValue(value.mediaTypes) &&
+    isPositiveInteger(value.width) &&
+    isPositiveInteger(value.height) &&
+    typeof value.requireAlpha === "boolean" &&
+    (value.targetPath === undefined || value.targetPath === null || typeof value.targetPath === "string") &&
+    isRecord(value.source) &&
+    (value.source.kind === "master" ||
+      (value.source.kind === "derived" && typeof value.source.sourceRole === "string"))
+  );
+}
+
+function isResourceAsset(value: unknown): value is ResourceAsset {
+  return (
+    isRecord(value) &&
+    value.schemaVersion === 2 &&
+    typeof value.resourceId === "string" &&
+    typeof value.logicalRole === "string" &&
+    isResourceOrigin(value.origin) &&
+    isSha256(value.originalVersion) &&
+    (value.selectedVersion === undefined || value.selectedVersion === null || isSha256(value.selectedVersion)) &&
+    Array.isArray(value.versions) &&
+    value.versions.length > 0 &&
+    value.versions.every(isResourceVersion)
+  );
+}
+
+function isResourceOrigin(value: unknown): value is ResourceOrigin {
+  if (!isRecord(value)) return false;
+  if (value.kind === "user_upload") return true;
+  if (value.kind === "ai_generated") {
+    return typeof value.provider === "string" && typeof value.model === "string" && isSha256(value.request_sha256);
+  }
+  return (
+    value.kind === "pack_default" &&
+    typeof value.game_pack_id === "string" &&
+    isSha256(value.game_pack_sha256) &&
+    typeof value.contribution_slot === "string"
+  );
+}
+
+function isResourceVersion(value: unknown): value is ResourceVersion {
+  return (
+    isRecord(value) &&
+    isSha256(value.id) &&
+    (value.parentVersion === undefined || value.parentVersion === null || isSha256(value.parentVersion)) &&
+    isResourceBlob(value.blob) &&
+    isResourceVersionProvenance(value.provenance)
+  );
+}
+
+function isResourceBlob(value: unknown): value is ResourceBlob {
+  return (
+    isRecord(value) &&
+    typeof value.relativePath === "string" &&
+    typeof value.mediaType === "string" &&
+    isPositiveInteger(value.byteLength) &&
+    isSha256(value.sha256) &&
+    isPositiveInteger(value.width) &&
+    isPositiveInteger(value.height) &&
+    typeof value.hasAlpha === "boolean"
+  );
+}
+
+function isResourceVersionProvenance(value: unknown): value is ResourceVersionProvenance {
+  if (!isRecord(value)) return false;
+  if (value.kind === "original") return true;
+  return (
+    value.kind === "derived" &&
+    typeof value.sourceRole === "string" &&
+    isSha256(value.sourceVersion) &&
+    typeof value.transform === "string" &&
+    isPositiveInteger(value.transformVersion) &&
+    isSha256(value.parametersSha256) &&
+    typeof value.gamePackId === "string" &&
+    isSha256(value.gamePackSha256)
+  );
+}
+
+function isResourcePreview(value: unknown): value is ResourcePreview {
+  return (
+    isRecord(value) &&
+    typeof value.resourceId === "string" &&
+    typeof value.logicalRole === "string" &&
+    isSha256(value.version) &&
+    value.mediaType === "image/png" &&
+    isPositiveInteger(value.width) &&
+    isPositiveInteger(value.height) &&
+    typeof value.hasAlpha === "boolean" &&
+    typeof value.dataUrl === "string" &&
+    value.dataUrl.startsWith("data:image/png;base64,")
+  );
+}
+
+function isResourcePrepareResult(value: unknown): value is ResourcePrepareResult {
+  return isRecord(value) && Array.isArray(value.candidates) && value.candidates.every(isResourceCandidateResult);
+}
+
+function isResourceCandidateResult(value: unknown): value is ResourceCandidateResult {
+  return (
+    isRecord(value) &&
+    typeof value.resourceId === "string" &&
+    typeof value.logicalRole === "string" &&
+    isResourceOrigin(value.origin) &&
+    isSha256(value.candidateVersion) &&
+    (value.selectedVersion === undefined || value.selectedVersion === null || isSha256(value.selectedVersion)) &&
+    typeof value.mediaType === "string" &&
+    isPositiveInteger(value.width) &&
+    isPositiveInteger(value.height) &&
+    typeof value.hasAlpha === "boolean"
+  );
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) > 0;
 }
 
 function isSha256(value: unknown): value is string {

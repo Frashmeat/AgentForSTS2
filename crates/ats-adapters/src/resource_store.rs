@@ -369,6 +369,28 @@ impl ResourceRepository for FileResourceRepository {
         read_regular_file(&path, "read_selected_resource")
     }
 
+    fn read_version_bytes(
+        &self,
+        resource_id: &ResourceId,
+        version: &Sha256Digest,
+    ) -> Result<Vec<u8>, Self::Error> {
+        let _guard = self
+            .gate
+            .lock()
+            .map_err(|_| ResourceStoreError::LockUnavailable)?;
+        let asset = self.load_unlocked(resource_id)?;
+        let candidate = asset
+            .versions()
+            .iter()
+            .find(|candidate| &candidate.id == version)
+            .ok_or(WorkspaceError::VersionNotFound)?;
+        let path = self
+            .resources_root()
+            .join(resource_id.as_str())
+            .join(&candidate.blob.relative_path);
+        read_regular_file(&path, "read_resource_version")
+    }
+
     fn list(&self) -> Result<Vec<ResourceAsset>, Self::Error> {
         let _guard = self
             .gate

@@ -652,17 +652,29 @@ mod tests {
         TruthEvidenceRecord, TruthSnapshotIndex, TruthSnapshotManifest, TruthSnapshotSource,
         built_in_project_template,
     };
-    use ats_kernel::{PrimitiveId, Sha256Digest};
+    use ats_kernel::{ItemId, ItemTypeId, PrimitiveId, Sha256Digest};
     use ats_runtime::{
         ArtifactManifest, CancellationReason, FinishReason, ModelError, ModelRequestSnapshot,
         ModelResponse, ModelStream, RunId, TokenUsage,
     };
-    use ats_workspace::ProjectFolder;
+    use ats_workspace::{ItemDefinition, ProjectFolder, StoredItemDefinition};
     use futures_util::stream;
     use sha2::{Digest, Sha256};
 
     use super::*;
     use crate::project_session::ProjectSession;
+
+    fn custom_code_definition() -> StoredItemDefinition {
+        let mut definition = ItemDefinition::new(
+            ItemId::parse("fixture_item").unwrap(),
+            ItemTypeId::parse("custom_code").unwrap(),
+        );
+        definition.behavior_intent = vec!["Expose a fixture type.".into()];
+        StoredItemDefinition {
+            definition_hash: definition.definition_hash().unwrap(),
+            definition,
+        }
+    }
 
     struct FixtureModel {
         snapshots: Mutex<Vec<ModelRequestSnapshot>>,
@@ -817,7 +829,7 @@ mod tests {
                     artifact_id: "fixture-artifact".into(),
                     mod_id: "FacadeFixture".into(),
                     plan,
-                    selected_resources: Vec::new(),
+                    definition: custom_code_definition(),
                 },
             )
             .unwrap(),

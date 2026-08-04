@@ -51,6 +51,12 @@ StoredItemDefinition:
 Malformed values map through the fixed local `toActionableFailure(undefined)` fallback. Do not
 render `String(error)`, accept `query_index`, or cast IPC data directly to the target interface.
 
+Resource IPC follows the same rule. Runtime guards validate `ResourceCatalog`, ResourceAsset v2,
+every immutable version/blob/provenance, bounded PNG `ResourcePreview`, and select results. A data
+URL must begin with `data:image/png;base64,`; absolute or relative workspace paths are never a
+preview transport. Single v3 carries `definition: StoredItemDefinition` and has no
+`selectedResources` field.
+
 ---
 
 ## Common Patterns

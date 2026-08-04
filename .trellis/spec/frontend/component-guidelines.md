@@ -55,8 +55,12 @@ getItemCapabilities
   locale also makes it outdated; `confirmLocalization` is the only transition back to confirmed.
 - A translation whose `translatedFrom` locale is absent is a client-visible Draft issue and cannot
   be submitted as a malformed Tauri argument.
-- The temporary Plan/Single bridge must be visibly labeled and must not claim ItemDefinition-hash
-  acceptance until the definition-bound generation Order replaces it.
+- Resource Workbench renders role, media shape and source dependencies from `ResourceCatalog`; it
+  must not branch on `relic` or another game type. Upload and AI create candidates, preview is lazy,
+  and only explicit select may write a role-keyed ItemDefinition binding.
+- Generation accepts only the current saved `StoredItemDefinition`. Unsaved edits, missing roles,
+  stale selected pointers and Pack-shape mismatch keep the action disabled; backend preflight is
+  authoritative and repeats the same gate before creating a Run.
 
 ---
 

@@ -1,19 +1,28 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use ats_adapters::{FileTruthSnapshotRepository, ItemStoreError, Sts2TruthImporter};
+use ats_adapters::{
+    FileResourceRepository, FileTruthSnapshotRepository, ItemStoreError, Sts2TruthImporter,
+};
 use ats_features::item_definition::{ItemDefinitionValidationMode, ItemDefinitionValidator};
 use ats_features::mod_generate_batch::{BatchGenerateFeature, BatchGenerateRequest};
 use ats_features::mod_generate_complex::{ComplexGenerateFeature, ComplexGenerateRequest};
-use ats_features::mod_generate_single::{SingleGenerateFeature, SingleGenerateRequest};
+use ats_features::mod_generate_single::{
+    SingleGenerateError, SingleGenerateFeature, SingleGenerateRequest,
+    validate_definition_resources, validate_single_generation_readiness,
+};
 use ats_features::mod_plan::{ModPlanFeature, ModPlanRequest};
+use ats_features::resource_prepare::{
+    ResourceCatalog, ResourcePrepareContext, ResourcePrepareError, ResourcePrepareFeature,
+    ResourcePrepareResult, ResourcePrepareService, ResourcePreview,
+};
 use ats_features::{FeatureContract, FeatureSpec, built_in_feature_contracts};
 use ats_game_context::{ItemCapabilityCatalog, TruthSnapshotRepository};
 use ats_kernel::{FeatureId, ItemId, ItemTypeId, Sha256Digest};
 use ats_runtime::{
     CancellationReason, CancellationToken, RunId, RunRecord, RunSummary, VersionedPayload,
 };
-use ats_workspace::{ItemDefinition, ItemRepository, StoredItemDefinition};
+use ats_workspace::{ItemDefinition, ItemRepository, ResourceAsset, StoredItemDefinition};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -51,7 +60,11 @@ pub async fn submit_feature(
     submission: SubmitFeatureRequest,
 ) -> CommandResult<RunId> {
     let session = current_session(&active, "run.submit")?;
-    ensure_submission_ready(composition.inner(), &submission)?;
+    ensure_submission_ready(
+        composition.inner(),
+        session.resource_repository().as_ref(),
+        &submission,
+    )?;
     let run = RunRecord::new(submission.feature_id, submission.request);
     let root = session.path().to_path_buf();
     let meta = session.meta().clone();
@@ -147,6 +160,89 @@ pub fn save_item_definition(
 }
 
 #[tauri::command]
+pub fn get_resource_catalog(
+    composition: State<'_, Arc<Stage2Composition>>,
+) -> CommandResult<ResourceCatalog> {
+    let contributions = resource_contributions(composition.inner(), "resource.catalog")?;
+    ResourcePrepareService
+        .catalog(ResourcePrepareContext {
+            pack: composition.pack(),
+            contributions: &contributions,
+        })
+        .map_err(|error| map_resource_error(error, "resource.catalog"))
+}
+
+#[tauri::command]
+pub fn list_resource_assets(
+    active: State<'_, ActiveProject>,
+    composition: State<'_, Arc<Stage2Composition>>,
+) -> CommandResult<Vec<ResourceAsset>> {
+    let session = current_session(&active, "resource.list")?;
+    let contributions = resource_contributions(composition.inner(), "resource.list")?;
+    ResourcePrepareService
+        .list(
+            session.resource_repository().as_ref(),
+            ResourcePrepareContext {
+                pack: composition.pack(),
+                contributions: &contributions,
+            },
+        )
+        .map_err(|error| map_resource_error(error, "resource.list"))
+}
+
+#[tauri::command]
+pub fn get_resource_preview(
+    active: State<'_, ActiveProject>,
+    composition: State<'_, Arc<Stage2Composition>>,
+    resource_id: String,
+    version: String,
+) -> CommandResult<ResourcePreview> {
+    let session = current_session(&active, "resource.preview")?;
+    let resource_id = ats_kernel::ResourceId::parse(resource_id)
+        .map_err(|_| CommandFailure::resource_invalid("resource.preview"))?;
+    let version = Sha256Digest::parse(version)
+        .map_err(|_| CommandFailure::resource_invalid("resource.preview"))?;
+    let contributions = resource_contributions(composition.inner(), "resource.preview")?;
+    ResourcePrepareService
+        .preview(
+            session.resource_repository().as_ref(),
+            &resource_id,
+            &version,
+            ResourcePrepareContext {
+                pack: composition.pack(),
+                contributions: &contributions,
+            },
+        )
+        .map_err(|error| map_resource_error(error, "resource.preview"))
+}
+
+#[tauri::command]
+pub fn select_resource(
+    active: State<'_, ActiveProject>,
+    composition: State<'_, Arc<Stage2Composition>>,
+    resource_id: String,
+    version: String,
+) -> CommandResult<ResourcePrepareResult> {
+    let session = current_session(&active, "resource.select")?;
+    let resource_id = ats_kernel::ResourceId::parse(resource_id)
+        .map_err(|_| CommandFailure::resource_invalid("resource.select"))?;
+    let version = Sha256Digest::parse(version)
+        .map_err(|_| CommandFailure::resource_invalid("resource.select"))?;
+    let contributions = resource_contributions(composition.inner(), "resource.select")?;
+    ResourcePrepareService
+        .select(
+            session.resource_repository().as_ref(),
+            &resource_id,
+            &version,
+            ResourcePrepareContext {
+                pack: composition.pack(),
+                contributions: &contributions,
+            },
+        )
+        .map_err(|error| map_resource_error(error, "resource.select"))
+}
+
+#[tauri::command]
 pub fn get_run(active: State<'_, ActiveProject>, run_id: String) -> CommandResult<RunRecord> {
     let session = current_session(&active, "run.get")?;
     let id = RunId::parse(run_id).map_err(|_| CommandFailure::invalid_input("run.get"))?;
@@ -232,6 +328,7 @@ fn item_capabilities(composition: &Stage2Composition) -> CommandResult<ItemCapab
 
 fn ensure_submission_ready(
     composition: &Stage2Composition,
+    resources: &FileResourceRepository,
     submission: &SubmitFeatureRequest,
 ) -> CommandResult<()> {
     let requested = requested_item_types(composition, submission)?;
@@ -251,7 +348,62 @@ fn ensure_submission_ready(
             ));
         }
     }
+    validate_generation_submission(composition, resources, submission)?;
     Ok(())
+}
+
+fn validate_generation_submission(
+    composition: &Stage2Composition,
+    resources: &FileResourceRepository,
+    submission: &SubmitFeatureRequest,
+) -> CommandResult<()> {
+    let validate_single = |request: &SingleGenerateRequest| {
+        let contributions = resource_contributions(composition, "run.submit.resources")?;
+        validate_single_generation_readiness(composition.pack(), &contributions, resources, request)
+            .map_err(map_generation_readiness)
+    };
+    match submission.feature_id.as_str() {
+        "mod.generate.single" => {
+            let request = submission
+                .request
+                .decode::<SingleGenerateRequest>(&SingleGenerateFeature::request_schema())
+                .map_err(|_| CommandFailure::item_invalid("run.submit.readiness"))?;
+            validate_single(&request)
+        }
+        "mod.generate.batch" => {
+            let request = submission
+                .request
+                .decode::<BatchGenerateRequest>(&BatchGenerateFeature::request_schema())
+                .map_err(|_| CommandFailure::item_invalid("run.submit.readiness"))?;
+            for item in &request.items {
+                validate_single(item)?;
+            }
+            Ok(())
+        }
+        "mod.generate.complex" => {
+            let request = submission
+                .request
+                .decode::<ComplexGenerateRequest>(&ComplexGenerateFeature::request_schema())
+                .map_err(|_| CommandFailure::item_invalid("run.submit.readiness"))?;
+            let contributions = resource_contributions(composition, "run.submit.resources")?;
+            for item in &request.planning_items {
+                if item.request.item_type.as_deref().is_some_and(|item_type| {
+                    item_type != item.definition.definition.item_type.as_str()
+                }) {
+                    return Err(CommandFailure::item_invalid("run.submit.readiness"));
+                }
+                validate_definition_resources(
+                    composition.pack(),
+                    &contributions,
+                    resources,
+                    &item.definition,
+                )
+                .map_err(map_generation_readiness)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
 }
 
 fn requested_item_types(
@@ -280,7 +432,7 @@ fn requested_item_types(
                 .request
                 .decode::<SingleGenerateRequest>(&SingleGenerateFeature::request_schema())
                 .map_err(|_| CommandFailure::item_invalid("run.submit.readiness"))?;
-            Ok(vec![parse(&request.plan.item_type)?])
+            Ok(vec![request.definition.definition.item_type])
         }
         "mod.generate.batch" => {
             let request = submission
@@ -290,7 +442,7 @@ fn requested_item_types(
             request
                 .items
                 .iter()
-                .map(|item| parse(&item.plan.item_type))
+                .map(|item| Ok(item.definition.definition.item_type.clone()))
                 .collect()
         }
         "mod.generate.complex" => {
@@ -298,15 +450,11 @@ fn requested_item_types(
                 .request
                 .decode::<ComplexGenerateRequest>(&ComplexGenerateFeature::request_schema())
                 .map_err(|_| CommandFailure::item_invalid("run.submit.readiness"))?;
-            let mut result = Vec::new();
-            for item in request.planning_items {
-                if let Some(item_type) = item.request.item_type {
-                    result.push(parse(&item_type)?);
-                } else {
-                    result.extend(all());
-                }
-            }
-            Ok(result)
+            Ok(request
+                .planning_items
+                .into_iter()
+                .map(|item| item.definition.definition.item_type)
+                .collect())
         }
         _ => Ok(Vec::new()),
     }
@@ -325,14 +473,66 @@ fn map_item_store_error(error: ItemStoreError, stage: &str) -> CommandFailure {
     }
 }
 
+fn resource_contributions(
+    composition: &Stage2Composition,
+    stage: &str,
+) -> CommandResult<ats_game_context::VerifiedContributionSet> {
+    composition
+        .resolve(
+            &ResourcePrepareFeature::id(),
+            &[ResourcePrepareFeature::contribution_requirement()],
+        )
+        .map_err(|_| CommandFailure::pack_invalid(stage))
+}
+
+fn map_resource_error(error: ResourcePrepareError, stage: &str) -> CommandFailure {
+    match error {
+        ResourcePrepareError::InvalidMedia | ResourcePrepareError::InvalidMediaResponse => {
+            CommandFailure::resource_media_invalid(stage)
+        }
+        ResourcePrepareError::Repository => CommandFailure::resource_storage(stage),
+        ResourcePrepareError::ContextIdentityMismatch
+        | ResourcePrepareError::InvalidPackSpecs
+        | ResourcePrepareError::Contribution(_) => CommandFailure::pack_invalid(stage),
+        ResourcePrepareError::InvalidInput
+        | ResourcePrepareError::UnsupportedResource
+        | ResourcePrepareError::WrongSourceMode
+        | ResourcePrepareError::Cancelled
+        | ResourcePrepareError::Media(_) => CommandFailure::resource_invalid(stage),
+    }
+}
+
+fn map_generation_readiness(error: SingleGenerateError) -> CommandFailure {
+    let failure = error.run_failure();
+    match failure.code.as_str() {
+        "item.definition_invalid" | "run.input_invalid" | "feature.item_type_unsupported" => {
+            CommandFailure::item_invalid("run.submit.readiness")
+        }
+        "pack.contribution_invalid" | "resource.spec_invalid" | "truth.context_mismatch" => {
+            CommandFailure::pack_invalid("run.submit.readiness")
+        }
+        "resource.storage_failed" => CommandFailure::resource_storage("run.submit.readiness"),
+        _ => CommandFailure::resource_invalid("run.submit.readiness"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use ats_features::mod_generate_complex::ComplexPlanningItem;
-    use ats_features::mod_generate_single::SelectedResource;
     use ats_features::mod_plan::PlanItem;
     use ats_features::project_package::ProjectPackageRequest;
+    use ats_kernel::ItemId;
 
     use super::*;
+
+    fn stored_definition(item_type: &ItemTypeId) -> StoredItemDefinition {
+        let definition =
+            ItemDefinition::new(ItemId::parse("fixture-item").unwrap(), item_type.clone());
+        StoredItemDefinition {
+            definition_hash: definition.definition_hash().unwrap(),
+            definition,
+        }
+    }
 
     fn submission<T: Serialize>(
         feature_id: &str,
@@ -365,7 +565,7 @@ mod tests {
             artifact_id: "fixture-artifact".into(),
             mod_id: "FixtureMod".into(),
             plan: plan(item_type),
-            selected_resources: Vec::<SelectedResource>::new(),
+            definition: stored_definition(item_type),
         }
     }
 
@@ -425,7 +625,7 @@ mod tests {
                         item_type: Some(selected.as_str().into()),
                     },
                     artifact_id: "fixture-artifact".into(),
-                    selected_resources: Vec::new(),
+                    definition: stored_definition(&selected),
                 }],
                 fail_fast: false,
                 package: ProjectPackageRequest {
@@ -447,6 +647,9 @@ mod tests {
     fn readiness_rejects_item_runs_before_run_record_creation() {
         let temp = tempfile::tempdir().unwrap();
         let composition = Stage2Composition::built_in(temp.path().join("runtime")).unwrap();
+        let project = temp.path().join("project");
+        std::fs::create_dir(&project).unwrap();
+        let resources = FileResourceRepository::new(project);
         let request = submission(
             "mod.plan",
             ModPlanFeature::request_schema(),
@@ -456,7 +659,7 @@ mod tests {
             },
         );
 
-        let error = ensure_submission_ready(&composition, &request).unwrap_err();
+        let error = ensure_submission_ready(&composition, &resources, &request).unwrap_err();
         let encoded = serde_json::to_value(error).unwrap();
         assert_eq!(encoded["code"], "truth.evidence_missing");
         assert_eq!(encoded["stage"], "run.submit.readiness");
@@ -469,9 +672,10 @@ mod tests {
                 item_type: Some("undeclared".into()),
             },
         );
-        let encoded =
-            serde_json::to_value(ensure_submission_ready(&composition, &undeclared).unwrap_err())
-                .unwrap();
+        let encoded = serde_json::to_value(
+            ensure_submission_ready(&composition, &resources, &undeclared).unwrap_err(),
+        )
+        .unwrap();
         assert_eq!(encoded["code"], "item.definition_invalid");
 
         let unrelated = SubmitFeatureRequest {
@@ -479,6 +683,6 @@ mod tests {
             request: request.request,
             source_path: None,
         };
-        ensure_submission_ready(&composition, &unrelated).unwrap();
+        ensure_submission_ready(&composition, &resources, &unrelated).unwrap();
     }
 }

@@ -14,7 +14,6 @@ import type {
   ItemFieldValue,
   PlanItem,
   RunRecord,
-  SelectedResource,
   StoredItemDefinition,
 } from "@/services/tauriApi";
 import {
@@ -27,13 +26,14 @@ import {
   setFieldValue,
   setLocalizationText,
 } from "./itemEditorModel";
+import { ResourceWorkbench } from "./ResourceWorkbench";
 
 export function ModEditorPage() {
   const [project, setProject] = useState<CurrentProject | null>(null);
   const [catalog, setCatalog] = useState<ItemCapabilityCatalog | null>(null);
   const [items, setItems] = useState<StoredItemDefinition[]>([]);
   const [draft, setDraft] = useState<ItemDefinition | null>(null);
-  const [definitionHash, setDefinitionHash] = useState<string | null>(null);
+  const [storedDefinition, setStoredDefinition] = useState<StoredItemDefinition | null>(null);
   const [newItemId, setNewItemId] = useState("");
   const [newItemType, setNewItemType] = useState("");
   const [primaryLocale, setPrimaryLocale] = useState("eng");
@@ -43,9 +43,9 @@ export function ModEditorPage() {
   const [requirements, setRequirements] = useState("");
   const [generationItemType, setGenerationItemType] = useState("");
   const [artifactId, setArtifactId] = useState("mod-item");
-  const [resourcesJson, setResourcesJson] = useState("[]");
   const [plan, setPlan] = useState<PlanItem | null>(null);
   const [run, setRun] = useState<RunRecord | null>(null);
+  const [resourceIssues, setResourceIssues] = useState<string[]>([]);
 
   const selectedCapability = useMemo(
     () => catalog?.itemTypes.find((item) => item.descriptor.id === draft?.itemType) ?? null,
@@ -54,6 +54,12 @@ export function ModEditorPage() {
   const issues = useMemo(
     () => draft && selectedCapability ? draftIssues(draft, selectedCapability.descriptor) : [],
     [draft, selectedCapability],
+  );
+  const currentStoredDefinition = useMemo(
+    () => draft && storedDefinition && JSON.stringify(draft) === JSON.stringify(storedDefinition.definition)
+      ? storedDefinition
+      : null,
+    [draft, storedDefinition],
   );
 
   useEffect(() => {
@@ -82,16 +88,17 @@ export function ModEditorPage() {
     if (!capability?.ready) return;
     const next = createItemDraft(capability, newItemId.trim());
     setDraft(next);
-    setDefinitionHash(null);
+    setStoredDefinition(null);
     setPrimaryLocale(capability.descriptor.requiredLocales[0] ?? "eng");
     setGenerationItemType(next.itemType);
     setArtifactId(next.itemId || "mod-item");
     setPlan(null);
+    setResourceIssues([]);
   }
 
   function openItem(item: StoredItemDefinition) {
     setDraft(item.definition);
-    setDefinitionHash(item.definitionHash);
+    setStoredDefinition(item);
     const capability = catalog?.itemTypes.find(
       (candidate) => candidate.descriptor.id === item.definition.itemType,
     );
@@ -100,6 +107,7 @@ export function ModEditorPage() {
     setArtifactId(item.definition.itemId);
     setRequirements(item.definition.behaviorIntent.join("\n"));
     setPlan(null);
+    setResourceIssues([]);
   }
 
   async function saveDraft() {
@@ -109,7 +117,7 @@ export function ModEditorPage() {
     try {
       const stored = await api.saveItemDefinition(draft);
       setDraft(stored.definition);
-      setDefinitionHash(stored.definitionHash);
+      setStoredDefinition(stored);
       setItems(await api.listItemDefinitions());
     } catch (error: unknown) {
       setFailure(toActionableFailure(error));
@@ -127,7 +135,7 @@ export function ModEditorPage() {
       const terminal = await waitForRun(id, setRun);
       if (terminal.status === "succeeded") {
         const value = decodePlan(terminal);
-        if (value) setPlan(value);
+        if (value && draft) setPlan({ ...value, itemId: draft.itemId, itemType: draft.itemType });
       }
     } catch (error: unknown) {
       setFailure(toActionableFailure(error));
@@ -137,17 +145,15 @@ export function ModEditorPage() {
   }
 
   async function generate() {
-    if (!plan || !project) return;
+    if (!plan || !project || !currentStoredDefinition) return;
     setBusy(true);
     setFailure(null);
     try {
-      const selectedResources = JSON.parse(resourcesJson) as SelectedResource[];
-      if (!Array.isArray(selectedResources)) throw new Error("invalid resources");
       const id = await api.submitSingleGenerate({
         artifactId,
         modId: project.csharpName,
         plan,
-        selectedResources,
+        definition: currentStoredDefinition,
       });
       await waitForRun(id, setRun);
     } catch (error: unknown) {
@@ -222,7 +228,7 @@ export function ModEditorPage() {
         <Card
           eyebrow="definition v1"
           title={draft?.itemId || "Create or open an item"}
-          subtitle={draft ? `${draft.itemType} · ${definitionHash ?? "unsaved draft"}` : "The form is rendered from the selected Pack descriptor."}
+          subtitle={draft ? `${draft.itemType} · ${currentStoredDefinition?.definitionHash ?? "unsaved changes"}` : "The form is rendered from the selected Pack descriptor."}
           actions={draft && <Button variant="success" disabled={busy || issues.length > 0 || !selectedCapability?.ready} onClick={() => void saveDraft()}><Save size={14} /> Save snapshot</Button>}
         >
           {!draft || !selectedCapability ? (
@@ -276,6 +282,17 @@ export function ModEditorPage() {
                   </>
                 )}
               </CardSection>
+              <CardSection title="Resources">
+                <ResourceWorkbench
+                  definition={draft}
+                  requiredRoles={selectedCapability.descriptor.requiredResourceRoles}
+                  onChange={setDraft}
+                  onRun={setRun}
+                  onFailure={setFailure}
+                  onIssuesChange={setResourceIssues}
+                />
+                {resourceIssues.length > 0 && <Notice variant="warn" title="Resource checks">{resourceIssues.join(" ")}</Notice>}
+              </CardSection>
               <CardSection title="Typed definition preview">
                 <pre className="pre-block max-h-72">{JSON.stringify(draft, null, 2)}</pre>
               </CardSection>
@@ -284,8 +301,7 @@ export function ModEditorPage() {
         </Card>
       </div>
 
-      <Card eyebrow="generation bridge" title="Plan and generate" subtitle="Preserves the current Stage 2 path. Definition-hash-bound generation replaces this bridge in the Relic Gate Order.">
-        <Notice variant="warn" title="Temporary boundary">This bridge does not yet bind the saved definition hash. Do not treat its Run as ItemDefinition acceptance evidence.</Notice>
+      <Card eyebrow="definition-bound generation" title="Plan and generate" subtitle={currentStoredDefinition ? `Pinned definition ${currentStoredDefinition.definitionHash.slice(0, 12)}` : "Save the current definition snapshot before generation."}>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-3">
           <div className="space-y-3">
             <Field label="Ready item type">
@@ -299,8 +315,7 @@ export function ModEditorPage() {
           <div className="space-y-3">
             {plan && <pre className="pre-block max-h-48">{JSON.stringify(plan, null, 2)}</pre>}
             <Field label="Artifact ID"><input className="input-mono" value={artifactId} onChange={(event) => setArtifactId(event.target.value)} /></Field>
-            <Field label="Selected resources"><textarea className="input-mono min-h-20" value={resourcesJson} onChange={(event) => setResourcesJson(event.target.value)} /></Field>
-            <Button variant="success" disabled={busy || !plan || !artifactId.trim()} onClick={() => void generate()}><Play size={15} /> Generate</Button>
+            <Button variant="success" disabled={busy || !plan || !artifactId.trim() || !currentStoredDefinition || resourceIssues.length > 0} onClick={() => void generate()}><Play size={15} /> Generate</Button>
           </div>
         </div>
       </Card>

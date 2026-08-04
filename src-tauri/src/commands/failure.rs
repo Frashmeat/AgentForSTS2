@@ -107,6 +107,50 @@ impl CommandFailure {
         )
     }
 
+    pub fn pack_invalid(stage: &str) -> Self {
+        fixed(
+            "pack.contribution_invalid",
+            "pack",
+            stage,
+            "The active Game Pack resource contract is invalid.",
+            RecoveryAction::None,
+            false,
+        )
+    }
+
+    pub fn resource_invalid(stage: &str) -> Self {
+        fixed(
+            "resource.selection_invalid",
+            "input",
+            stage,
+            "The selected resource does not match the active Game Pack contract.",
+            RecoveryAction::ReplaceResource,
+            false,
+        )
+    }
+
+    pub fn resource_media_invalid(stage: &str) -> Self {
+        fixed(
+            "resource.media_invalid",
+            "input",
+            stage,
+            "The resource media does not match the required role shape.",
+            RecoveryAction::ReplaceResource,
+            false,
+        )
+    }
+
+    pub fn resource_storage(stage: &str) -> Self {
+        fixed(
+            "resource.storage_failed",
+            "storage",
+            stage,
+            "The resource workspace could not update its local state.",
+            RecoveryAction::Retry,
+            true,
+        )
+    }
+
     pub fn storage(stage: &str) -> Self {
         fixed(
             "run.storage_failed",

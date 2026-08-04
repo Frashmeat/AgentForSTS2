@@ -8,7 +8,7 @@ use ats_adapters::{
 };
 use ats_features::FeatureSpec;
 use ats_features::mod_generate_single::{
-    SelectedResource, SingleGenerateContext, SingleGenerateDependencies, SingleGenerateFeature,
+    SingleGenerateContext, SingleGenerateDependencies, SingleGenerateFeature,
     SingleGenerateRequest, SingleGenerateService,
 };
 use ats_features::mod_plan::PlanItem;
@@ -17,7 +17,9 @@ use ats_game_context::{
     ContributionResolver, GamePackLoader, TruthEvidenceRecord, TruthSnapshotIndex,
     TruthSnapshotManifest, TruthSnapshotSource, VerifiedContributionSet, VerifiedTruthSnapshot,
 };
-use ats_kernel::{PrimitiveId, Sha256Digest};
+use ats_kernel::{
+    ItemFieldId, ItemId, ItemTypeId, LocaleId, PrimitiveId, ResourceId, Sha256Digest,
+};
 use ats_runtime::{
     ArtifactPublishRequest, ArtifactPublisher, CancellationReason, CancellationToken, FinishReason,
     ModelClient, ModelError, ModelRequestSnapshot, ModelResponse, ModelStream, PublishedArtifact,
@@ -25,8 +27,9 @@ use ats_runtime::{
     ValidationRequest, ValidationRunner, VersionedPayload,
 };
 use ats_workspace::{
+    ItemDefinition, ItemFieldValue, ItemLocalization, ItemResourceBinding, LocalizationStatus,
     PreparedResourceMedia, ResourceBytesIngestRequest, ResourceOrigin, ResourceRepository,
-    ResourceVersionProvenance,
+    ResourceVersionProvenance, StoredItemDefinition,
 };
 use chrono::Utc;
 use futures_util::stream;
@@ -146,7 +149,26 @@ impl Fixture {
                 .unwrap();
         let truth = truth(&pack);
         let resources = FileResourceRepository::new(project.clone());
-        let mut selected_resources = Vec::new();
+        let mut definition = ItemDefinition::new(
+            ItemId::parse("fixture_relic").unwrap(),
+            ItemTypeId::parse("relic").unwrap(),
+        );
+        definition.canonical_fields.insert(
+            ItemFieldId::parse("rarity").unwrap(),
+            ItemFieldValue::Choice("common".into()),
+        );
+        definition.behavior_intent = vec!["Expose a testable fixture type".into()];
+        for (locale, name) in [("eng", "Fixture Relic"), ("zhs", "Fixture Relic ZHS")] {
+            definition.localizations.insert(
+                LocaleId::parse(locale).unwrap(),
+                ItemLocalization {
+                    name: name.into(),
+                    description: "A compile-test fixture relic.".into(),
+                    status: LocalizationStatus::Confirmed,
+                    translated_from: None,
+                },
+            );
+        }
         for role in ["relic.normal", "relic.outline", "relic.big"] {
             let (width, height) = if role == "relic.big" {
                 (256, 256)
@@ -171,11 +193,18 @@ impl Fixture {
             let asset = resources
                 .select(candidate.resource_id(), &candidate.versions()[0].id)
                 .unwrap();
-            selected_resources.push(SelectedResource {
-                resource_id: asset.resource_id().clone(),
-                selected_version: asset.selected_version().unwrap().clone(),
-            });
+            definition.resource_bindings.insert(
+                ResourceId::parse(role).unwrap(),
+                ItemResourceBinding {
+                    resource_id: asset.resource_id().clone(),
+                    selected_version: asset.selected_version().unwrap().clone(),
+                },
+            );
         }
+        let definition = StoredItemDefinition {
+            definition_hash: definition.definition_hash().unwrap(),
+            definition,
+        };
         let request = SingleGenerateRequest {
             artifact_id: "fixture-relic".into(),
             mod_id: "FixtureMod".into(),
@@ -194,7 +223,7 @@ impl Fixture {
                 ],
                 acceptance_criteria: vec!["The generated project compiles".into()],
             },
-            selected_resources,
+            definition,
         };
         Self {
             _temp: temp,
@@ -293,6 +322,15 @@ async fn real_compile_artifact_and_run_chain_succeeds_without_staging_residue() 
     let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(value["schemaVersion"], 3);
     assert_eq!(value["files"].as_array().unwrap().len(), 6);
+    assert_eq!(
+        value["featureExtension"]["payload"]["definitionHash"],
+        fixture.request.definition.definition_hash.as_str()
+    );
+    assert!(value["provenance"].as_array().unwrap().iter().any(|entry| {
+        entry["schema"]["id"] == "artifact.item-definition-provenance"
+            && entry["payload"]["definitionHash"]
+                == fixture.request.definition.definition_hash.as_str()
+    }));
     let snapshots = model.snapshots.lock().unwrap();
     let request = snapshots[0].request();
     let files_contract = &request.output_contract.json_schema["properties"]["files"];
@@ -316,6 +354,16 @@ async fn real_compile_artifact_and_run_chain_succeeds_without_staging_residue() 
         message.content.contains("generatedFileRoles")
             && message.content.contains("localization.eng")
     }));
+    assert_eq!(
+        request
+            .messages
+            .iter()
+            .map(|message| message.content.as_str())
+            .collect::<String>()
+            .matches(fixture.request.definition.definition_hash.as_str())
+            .count(),
+        1
+    );
     assert_eq!(
         request
             .messages

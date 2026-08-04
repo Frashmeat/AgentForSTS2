@@ -19,6 +19,10 @@ import type {
   ItemCapabilityCatalog,
   ItemDefinition,
   StoredItemDefinition,
+  ResourceAsset,
+  ResourceCatalog,
+  ResourcePreview,
+  ResourcePrepareResult,
 } from "./tauriApi";
 import type { ActionableFailure } from "./actionableFailure";
 export { isActionableFailure, toActionableFailure } from "./actionableFailure";
@@ -48,6 +52,10 @@ export function getItemCapabilities(): Promise<ItemCapabilityCatalog> { return r
 export function listItemDefinitions(): Promise<StoredItemDefinition[]> { return Promise.resolve([]); }
 export function getItemDefinition(_itemId: string, _definitionHash?: string): Promise<StoredItemDefinition> { return reject("getItemDefinition"); }
 export function saveItemDefinition(_definition: ItemDefinition): Promise<StoredItemDefinition> { return reject("saveItemDefinition"); }
+export function getResourceCatalog(): Promise<ResourceCatalog> { return reject("getResourceCatalog"); }
+export function listResourceAssets(): Promise<ResourceAsset[]> { return Promise.resolve([]); }
+export function getResourcePreview(_resourceId: string, _version: string): Promise<ResourcePreview> { return reject("getResourcePreview"); }
+export function selectResource(_resourceId: string, _version: string): Promise<ResourcePrepareResult> { return reject("selectResource"); }
 export function getRun(_runId: string): Promise<RunRecord> { return reject("getRun"); }
 export function listRuns(): Promise<RunSummary[]> { return Promise.resolve([]); }
 export function cancelRun(_runId: string): Promise<boolean> { return reject("cancelRun"); }

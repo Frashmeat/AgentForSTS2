@@ -2,7 +2,7 @@
 
 > 本文描述 Stage 2 当前生产 Prompt 的唯一所有权与装配链。旧 `crates/ats-core/prompts/`、Prompt preview 和旧 assembler 已删除。
 >
-> 最后更新：2026-08-03
+> 最后更新：2026-08-04
 
 ## 1. 一次请求如何形成
 
@@ -10,6 +10,7 @@
 flowchart TB
     Input[Typed Feature Request] --> Recipe[Versioned Feature Recipe]
     Pack[Verified Pack Contribution] --> Slots[Exact Slot Resolution]
+    Item[Stored ItemDefinition] --> Slots
     Truth[Bounded Truth Evidence] --> Slots
     Resources[Selected Resource References] --> Slots
     Project[Sanitized Project Context] --> Slots
@@ -27,6 +28,7 @@ flowchart TB
 ```text
 Feature Prompt Recipe
 + Pack Contribution
++ Stored ItemDefinition
 + Truth Evidence
 + Selected Resources
 + Project Context
@@ -37,10 +39,10 @@ Feature Prompt Recipe
 
 所有 slot 精确匹配、顺序确定并参与请求 hash。缺失、重复、未知或 schema/hash 不匹配都在模型调用前失败。
 
-`mod.generate.single` 在选择并验证 Pack item type 后，将其 `generatedFiles[].role` 编译为
+`mod.generate.single` v3 在验证精确 StoredItemDefinition/hash 与 Pack item type 后，将其 `generatedFiles[].role` 编译为
 run-scoped bundle v2 Schema：`files` 是以角色为固定键的对象，所有声明角色均 required，且
 `additionalProperties=false`。同一份动态 Schema 同时进入 `output.contract` Prompt slot、
-`ModelRequestSnapshot` 和 provider 原生结构化输出。Runtime 保留二次校验，但不再隐藏比模型可见
+`ModelRequestSnapshot` 和 provider 原生结构化输出。Recipe 的 `item.definition` slot 同时绑定 canonical fields、behavior、locale 和 resource bindings；Runtime 保留二次校验，但不再隐藏比模型可见
 Schema 更严格的文件数量/角色合同。
 
 规划与证据检索使用两个不同合同：`mod.plan` result v2 的 `evidenceRequirements`
@@ -55,9 +57,9 @@ Schema 更严格的文件数量/角色合同。
 | 跨游戏任务结构 | `crates/ats-features/recipes/*.json` | plan、single generate、log analyze |
 | Feature request/result | `crates/ats-features/src/*.rs` | typed schema、验证和组合 |
 | 游戏 Mod 类型目录与指导 | `game_packs/<id>/stage2-game-pack.json` | Pack v3 item fields/locales/Truth queries/Resource roles + Feature contributions |
-| 工程 Item 定义 | `.ats` Item repository（ItemDefinition v1 合同已落地，持久化在后续 Order 接入） | stable item ID、canonical fields、locale status、resource version binding、definition hash |
+| 工程 Item 定义 | `.ats/items-v1` Item repository | stable item ID、canonical fields、locale status、resource version binding、definition hash |
 | 当前游戏事实 | verified Truth Snapshot v2 | symbol、purpose、bounded excerpt、source hash |
-| 用户/AI/Pack 资源 | Resource Workspace v1 | resource ID、selected version、provenance |
+| 用户/AI/Pack 资源 | ResourceAsset / Workspace v2 | resource ID、candidate/selected version、provenance |
 | 工程上下文 | composition root 生成的脱敏摘要 | 工程名、Mod ID、Pack ID |
 | 用户运行时补充指令 | `llm.custom_prompt` | 本次运行附加偏好 |
 | 模型 transport | `ats-runtime::ModelClient` + `ats-adapters::HttpModelClient` | provider-neutral request/response；原生严格 JSON Schema 输出 |

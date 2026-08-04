@@ -11,11 +11,14 @@ use ats_workspace::{
     ResourceMediaProcessor, ResourceOrigin, ResourceRepository, ResourceTransformOperation,
     ResourceVersionProvenance,
 };
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::FeatureSpec;
+
+const MAX_PREVIEW_BYTES: usize = 8 * 1024 * 1024;
 
 pub struct ResourcePrepareFeature;
 
@@ -90,6 +93,52 @@ pub struct ResourceCandidateResult {
     pub width: u32,
     pub height: u32,
     pub has_alpha: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ResourceCatalog {
+    pub game_pack_id: ats_kernel::GamePackId,
+    pub game_pack_sha256: Sha256Digest,
+    pub roles: Vec<ResourceRoleDescriptor>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ResourceRoleDescriptor {
+    pub id: String,
+    pub media_types: Vec<String>,
+    pub width: u32,
+    pub height: u32,
+    pub require_alpha: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_path: Option<String>,
+    pub source: ResourceRoleSourceDescriptor,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum ResourceRoleSourceDescriptor {
+    Master,
+    Derived { source_role: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ResourcePreview {
+    pub resource_id: ResourceId,
+    pub logical_role: String,
+    pub version: Sha256Digest,
+    pub media_type: String,
+    pub width: u32,
+    pub height: u32,
+    pub has_alpha: bool,
+    pub data_url: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -305,6 +354,101 @@ pub struct ResourcePrepareContext<'a> {
 pub struct ResourcePrepareService;
 
 impl ResourcePrepareService {
+    pub fn catalog(
+        &self,
+        context: ResourcePrepareContext<'_>,
+    ) -> Result<ResourceCatalog, ResourcePrepareError> {
+        validate_context(&context)?;
+        let specs = validate_specs_and_primitives(&context)?;
+        Ok(ResourceCatalog {
+            game_pack_id: context.pack.id().clone(),
+            game_pack_sha256: context.pack.content_sha256().clone(),
+            roles: specs
+                .roles
+                .into_iter()
+                .map(|role| ResourceRoleDescriptor {
+                    id: role.id,
+                    media_types: role.media_types,
+                    width: role.width,
+                    height: role.height,
+                    require_alpha: role.require_alpha,
+                    target_path: role.target_path,
+                    source: match role.source {
+                        ResourceRoleSource::Master => ResourceRoleSourceDescriptor::Master,
+                        ResourceRoleSource::Derived { source_role, .. } => {
+                            ResourceRoleSourceDescriptor::Derived { source_role }
+                        }
+                    },
+                })
+                .collect(),
+        })
+    }
+
+    pub fn list<R>(
+        &self,
+        repository: &R,
+        context: ResourcePrepareContext<'_>,
+    ) -> Result<Vec<ResourceAsset>, ResourcePrepareError>
+    where
+        R: ResourceRepository,
+    {
+        validate_context(&context)?;
+        validate_specs_and_primitives(&context)?;
+        repository
+            .list()
+            .map_err(|_| ResourcePrepareError::Repository)
+    }
+
+    pub fn preview<R>(
+        &self,
+        repository: &R,
+        resource_id: &ResourceId,
+        version: &Sha256Digest,
+        context: ResourcePrepareContext<'_>,
+    ) -> Result<ResourcePreview, ResourcePrepareError>
+    where
+        R: ResourceRepository,
+    {
+        validate_context(&context)?;
+        let specs = validate_specs_and_primitives(&context)?;
+        let asset = repository
+            .load(resource_id)
+            .map_err(|_| ResourcePrepareError::Repository)?;
+        let candidate = asset
+            .versions()
+            .iter()
+            .find(|candidate| &candidate.id == version)
+            .ok_or(ResourcePrepareError::Repository)?;
+        if !specs
+            .roles
+            .iter()
+            .any(|role| role.id == asset.logical_role())
+        {
+            return Err(ResourcePrepareError::UnsupportedResource);
+        }
+        let bytes = repository
+            .read_version_bytes(resource_id, version)
+            .map_err(|_| ResourcePrepareError::Repository)?;
+        if bytes.is_empty()
+            || bytes.len() > MAX_PREVIEW_BYTES
+            || u64::try_from(bytes.len()).ok() != Some(candidate.blob.byte_length)
+            || sha256_bytes(&bytes) != candidate.blob.sha256
+        {
+            return Err(ResourcePrepareError::InvalidMedia);
+        }
+        let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+        Ok(ResourcePreview {
+            resource_id: resource_id.clone(),
+            logical_role: asset.logical_role().to_owned(),
+            version: version.clone(),
+            media_type: candidate.blob.media_type.clone(),
+            width: candidate.blob.width,
+            height: candidate.blob.height,
+            has_alpha: candidate.blob.has_alpha,
+            data_url: format!("data:{};base64,{encoded}", candidate.blob.media_type),
+        })
+    }
+
     pub fn prepare_file<P, R>(
         &self,
         processor: &P,
@@ -793,6 +937,25 @@ mod tests {
                 .map(|(_, bytes)| bytes.clone())
                 .ok_or(WorkspaceError::VersionNotFound)
         }
+        fn read_version_bytes(
+            &self,
+            resource_id: &ResourceId,
+            version: &Sha256Digest,
+        ) -> Result<Vec<u8>, Self::Error> {
+            let assets = self.assets.lock().unwrap();
+            let (asset, bytes) = assets
+                .get(resource_id)
+                .ok_or(WorkspaceError::ResourceNotFound)?;
+            if asset
+                .versions()
+                .iter()
+                .any(|candidate| &candidate.id == version)
+            {
+                Ok(bytes.clone())
+            } else {
+                Err(WorkspaceError::VersionNotFound)
+            }
+        }
 
         fn list(&self) -> Result<Vec<ResourceAsset>, Self::Error> {
             Ok(self
@@ -1110,6 +1273,51 @@ mod tests {
             selected.candidates[0].selected_version.as_ref(),
             Some(&normal.candidate_version)
         );
+
+        let catalog = ResourcePrepareService
+            .catalog(ResourcePrepareContext {
+                pack: &pack,
+                contributions: &contributions,
+            })
+            .unwrap();
+        assert_eq!(catalog.game_pack_sha256, *pack.content_sha256());
+        assert_eq!(catalog.roles.len(), 4);
+        assert!(matches!(
+            catalog
+                .roles
+                .iter()
+                .find(|role| role.id == "relic.normal")
+                .unwrap()
+                .source,
+            ResourceRoleSourceDescriptor::Derived { ref source_role }
+                if source_role == "relic.master"
+        ));
+        assert_eq!(
+            ResourcePrepareService
+                .list(
+                    &repository,
+                    ResourcePrepareContext {
+                        pack: &pack,
+                        contributions: &contributions,
+                    },
+                )
+                .unwrap()
+                .len(),
+            8
+        );
+        let preview = ResourcePrepareService
+            .preview(
+                &repository,
+                &normal.resource_id,
+                &normal.candidate_version,
+                ResourcePrepareContext {
+                    pack: &pack,
+                    contributions: &contributions,
+                },
+            )
+            .unwrap();
+        assert!(preview.data_url.starts_with("data:image/png;base64,"));
+        assert!(!preview.data_url.contains("versions/"));
     }
 
     #[test]

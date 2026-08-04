@@ -17,18 +17,20 @@ use ats_runtime::{
     RunTransition, TokenUsage, ValidationError, ValidationRequest, ValidationRunner,
     VersionedPayload,
 };
+use ats_workspace::{ItemResourceBinding, StoredItemDefinition};
 use ats_workspace::{ResourceAsset, ResourceRepository};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::FeatureSpec;
+use crate::item_definition::{ItemDefinitionValidationMode, ItemDefinitionValidator};
 use crate::mod_plan::PlanItem;
 use crate::prompt::{FeatureRecipe, FeatureRecipeError, FeatureRecipeLoader};
 use crate::resource_prepare::{ResourcePrepareFeature, ResourceSpecs, expand_target_template};
 
 const RECIPE_BYTES: &[u8] = include_bytes!("../recipes/mod-generate-single.json");
-const RECIPE_SHA256: &str = "fac372e212cacf16036160c8bdfae7b9935d8e42d36279a2ef0aa82c666a0269";
+const RECIPE_SHA256: &str = "a387246f80806441de58a852f3cff3516103e1da2b9b43f8244657854f5a6210";
 const MAX_EVIDENCE_RECORDS: u16 = 20;
 
 pub struct SingleGenerateFeature;
@@ -43,7 +45,7 @@ impl FeatureSpec for SingleGenerateFeature {
     }
 
     fn request_schema() -> SchemaRef {
-        schema_version("feature.mod-generate-single-request", 2)
+        schema_version("feature.mod-generate-single-request", 3)
     }
 
     fn result_schema() -> SchemaRef {
@@ -51,7 +53,7 @@ impl FeatureSpec for SingleGenerateFeature {
     }
 
     fn artifact_extension_schema() -> SchemaRef {
-        schema("feature.mod-generate-single-artifact-extension")
+        schema_version("feature.mod-generate-single-artifact-extension", 2)
     }
 }
 
@@ -71,14 +73,7 @@ pub struct SingleGenerateRequest {
     pub artifact_id: String,
     pub mod_id: String,
     pub plan: PlanItem,
-    pub selected_resources: Vec<SelectedResource>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct SelectedResource {
-    pub resource_id: ResourceId,
-    pub selected_version: Sha256Digest,
+    pub definition: StoredItemDefinition,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -95,6 +90,7 @@ pub struct SingleGenerateResult {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SingleGenerateArtifactExtension {
     pub model_request_sha256: Sha256Digest,
+    pub definition_hash: Sha256Digest,
     pub generated_file_count: u32,
     pub validation_primitive: PrimitiveId,
     pub acceptance_notes: Vec<String>,
@@ -157,6 +153,12 @@ struct ArtifactModelProvenance {
 #[serde(rename_all = "camelCase")]
 struct ArtifactResourceProvenance {
     selected_resources: Vec<ModelResourceRef>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ArtifactItemDefinitionProvenance {
+    definition_hash: Sha256Digest,
 }
 
 pub struct SingleGenerateContext<'a> {
@@ -244,6 +246,13 @@ impl SingleGenerateService {
             .pack
             .item_type(&item_type)
             .ok_or(SingleGenerateError::UnsupportedItemType)?;
+        ItemDefinitionValidator::validate(
+            context.pack,
+            &request.definition.definition,
+            ItemDefinitionValidationMode::Ready,
+        )
+        .map_err(|_| SingleGenerateError::InvalidItemDefinition)?;
+        validate_definition_identity(&request)?;
         let resource_specs: ResourceSpecs = context
             .resource_contributions
             .decode(&resource_specs_slot())?;
@@ -255,7 +264,7 @@ impl SingleGenerateService {
         let evidence = query_evidence(context.truth, item_descriptor)?;
         let selected = load_resources(
             dependencies.resources,
-            &request,
+            &request.definition,
             item_descriptor,
             &resource_specs,
         )?;
@@ -315,6 +324,7 @@ impl SingleGenerateService {
 
         let extension = SingleGenerateArtifactExtension {
             model_request_sha256: snapshot.request_sha256().clone(),
+            definition_hash: request.definition.definition_hash.clone(),
             generated_file_count: u32::try_from(generated.len())
                 .map_err(|_| SingleGenerateError::InvalidModelOutput)?,
             validation_primitive: contribution.validation_primitive.clone(),
@@ -394,6 +404,7 @@ impl SingleGenerateService {
             ("pack.contribution".into(), serialize(&pack_contribution)?),
             ("truth.evidence".into(), serialize(evidence)?),
             ("resources.selected".into(), serialize(resources)?),
+            ("item.definition".into(), serialize(&request.definition)?),
             (
                 "project.context".into(),
                 bounded(context.project_context, 12_000)?.to_owned(),
@@ -423,10 +434,64 @@ impl SingleGenerateService {
     }
 }
 
+pub fn validate_definition_resources<R: ResourceRepository + ?Sized>(
+    pack: &LoadedGamePack,
+    resource_contributions: &VerifiedContributionSet,
+    repository: &R,
+    definition: &StoredItemDefinition,
+) -> Result<(), SingleGenerateError> {
+    definition
+        .validate()
+        .map_err(|_| SingleGenerateError::InvalidItemDefinition)?;
+    ItemDefinitionValidator::validate(
+        pack,
+        &definition.definition,
+        ItemDefinitionValidationMode::Ready,
+    )
+    .map_err(|_| SingleGenerateError::InvalidItemDefinition)?;
+    if resource_contributions.feature_id() != &ResourcePrepareFeature::id()
+        || resource_contributions.game_pack_id() != pack.id()
+        || resource_contributions.game_pack_sha256() != pack.content_sha256()
+    {
+        return Err(SingleGenerateError::ContextIdentityMismatch);
+    }
+    let descriptor = pack
+        .item_type(&definition.definition.item_type)
+        .ok_or(SingleGenerateError::UnsupportedItemType)?;
+    let specs: ResourceSpecs = resource_contributions.decode(&resource_specs_slot())?;
+    specs
+        .validate()
+        .map_err(|_| SingleGenerateError::InvalidResourceSpecs)?;
+    load_resources(repository, definition, descriptor, &specs)?;
+    Ok(())
+}
+
+pub fn validate_single_generation_readiness<R: ResourceRepository + ?Sized>(
+    pack: &LoadedGamePack,
+    resource_contributions: &VerifiedContributionSet,
+    repository: &R,
+    request: &SingleGenerateRequest,
+) -> Result<(), SingleGenerateError> {
+    validate_request(request)?;
+    validate_definition_identity(request)?;
+    let descriptor = pack
+        .item_type(&request.definition.definition.item_type)
+        .ok_or(SingleGenerateError::UnsupportedItemType)?;
+    validate_required_roles(&request.plan, descriptor)?;
+    validate_definition_resources(
+        pack,
+        resource_contributions,
+        repository,
+        &request.definition,
+    )
+}
+
 #[derive(Debug, Error)]
 pub enum SingleGenerateError {
     #[error("single Mod generation input is invalid")]
     InvalidInput,
+    #[error("single Mod ItemDefinition is invalid or does not match the Plan")]
+    InvalidItemDefinition,
     #[error("single Mod generation Run does not match the typed request")]
     InvalidRun,
     #[error("single Mod generation context identities do not match")]
@@ -485,6 +550,9 @@ impl SingleGenerateError {
         let (code, stage) = match self {
             Self::InvalidInput | Self::InvalidRun => {
                 ("run.input_invalid", "mod.generate.single.request")
+            }
+            Self::InvalidItemDefinition => {
+                ("item.definition_invalid", "mod.generate.single.definition")
             }
             Self::ContextIdentityMismatch => {
                 ("truth.context_mismatch", "mod.generate.single.context")
@@ -674,18 +742,23 @@ fn validate_request(request: &SingleGenerateRequest) -> Result<(), SingleGenerat
         .plan
         .validate()
         .map_err(|_| SingleGenerateError::InvalidInput)?;
-    if !valid_segment(&request.artifact_id)
-        || !valid_segment(&request.mod_id)
-        || request.selected_resources.len() > 64
-        || request
-            .selected_resources
-            .iter()
-            .map(|resource| &resource.resource_id)
-            .collect::<BTreeSet<_>>()
-            .len()
-            != request.selected_resources.len()
-    {
+    request
+        .definition
+        .validate()
+        .map_err(|_| SingleGenerateError::InvalidItemDefinition)?;
+    if !valid_segment(&request.artifact_id) || !valid_segment(&request.mod_id) {
         return Err(SingleGenerateError::InvalidInput);
+    }
+    Ok(())
+}
+
+fn validate_definition_identity(
+    request: &SingleGenerateRequest,
+) -> Result<(), SingleGenerateError> {
+    if request.definition.definition.item_id.as_str() != request.plan.item_id
+        || request.definition.definition.item_type.as_str() != request.plan.item_type
+    {
+        return Err(SingleGenerateError::InvalidItemDefinition);
     }
     Ok(())
 }
@@ -756,20 +829,27 @@ fn push_unique_evidence(
 
 fn load_resources<R: ResourceRepository + ?Sized>(
     repository: &R,
-    request: &SingleGenerateRequest,
+    definition: &StoredItemDefinition,
     item_descriptor: &ItemTypeDescriptor,
     specs: &ResourceSpecs,
 ) -> Result<Vec<LoadedResource>, SingleGenerateError> {
-    if request.selected_resources.len() != item_descriptor.required_resource_roles().len() {
+    let bindings = &definition.definition.resource_bindings;
+    if bindings.len() != item_descriptor.required_resource_roles().len() {
         return Err(SingleGenerateError::ResourceRoleMismatch);
     }
-    let mut loaded = Vec::with_capacity(request.selected_resources.len());
+    let mut loaded = Vec::with_capacity(bindings.len());
     let mut roles = BTreeSet::new();
-    for selected in &request.selected_resources {
+    for (logical_role, selected) in bindings {
         let asset = repository
             .load(&selected.resource_id)
             .map_err(|_| SingleGenerateError::ResourceRepository)?;
-        validate_selected_asset(&asset, selected, item_descriptor, specs)?;
+        validate_selected_asset(
+            &asset,
+            logical_role.as_str(),
+            selected,
+            item_descriptor,
+            specs,
+        )?;
         if !roles.insert(asset.logical_role().to_owned()) {
             return Err(SingleGenerateError::ResourceRoleMismatch);
         }
@@ -809,12 +889,14 @@ fn load_resources<R: ResourceRepository + ?Sized>(
 
 fn validate_selected_asset(
     asset: &ResourceAsset,
-    selected: &SelectedResource,
+    logical_role: &str,
+    selected: &ItemResourceBinding,
     item_descriptor: &ItemTypeDescriptor,
     specs: &ResourceSpecs,
 ) -> Result<(), SingleGenerateError> {
     if asset.resource_id() != &selected.resource_id
         || asset.selected_version() != Some(&selected.selected_version)
+        || asset.logical_role() != logical_role
         || !item_descriptor
             .required_resource_roles()
             .iter()
@@ -1010,6 +1092,12 @@ fn artifact_request(
         )?],
         provenance: vec![
             VersionedPayload::from_typed(
+                schema("artifact.item-definition-provenance"),
+                &ArtifactItemDefinitionProvenance {
+                    definition_hash: request.definition.definition_hash.clone(),
+                },
+            )?,
+            VersionedPayload::from_typed(
                 schema("artifact.model-provenance"),
                 &ArtifactModelProvenance {
                     request_sha256: snapshot.request_sha256().clone(),
@@ -1167,9 +1255,22 @@ fn bundle_schema() -> SchemaRef {
 #[cfg(test)]
 mod tests {
     use ats_game_context::{ContributionResolver, GamePackLoader};
+    use ats_kernel::ItemId;
+    use ats_workspace::ItemDefinition;
     use sha2::{Digest, Sha256};
 
     use super::*;
+
+    fn stored_definition(item_id: &str, item_type: &str) -> StoredItemDefinition {
+        let definition = ItemDefinition::new(
+            ItemId::parse(item_id).unwrap(),
+            ItemTypeId::parse(item_type).unwrap(),
+        );
+        StoredItemDefinition {
+            definition_hash: definition.definition_hash().unwrap(),
+            definition,
+        }
+    }
 
     #[test]
     fn synthetic_pack_uses_the_same_generation_and_resource_contracts() {
@@ -1329,7 +1430,7 @@ mod tests {
                 required_resource_roles: Vec::new(),
                 acceptance_criteria: vec!["The fixture compiles".into()],
             },
-            selected_resources: Vec::new(),
+            definition: stored_definition("fixture_item", "fixture_item"),
         };
         let wrong = GeneratedModBundle {
             files: BTreeMap::from([
@@ -1394,25 +1495,31 @@ mod tests {
         };
 
         let mut asset = make_asset(128);
-        let selected = SelectedResource {
+        let selected = ItemResourceBinding {
             resource_id: asset.resource_id().clone(),
             selected_version: digest.clone(),
         };
         assert!(matches!(
-            validate_selected_asset(&asset, &selected, descriptor, &specs),
+            validate_selected_asset(&asset, "relic.normal", &selected, descriptor, &specs),
             Err(SingleGenerateError::InvalidSelectedResource)
         ));
         asset.select(&digest).unwrap();
-        validate_selected_asset(&asset, &selected, descriptor, &specs).unwrap();
+        validate_selected_asset(&asset, "relic.normal", &selected, descriptor, &specs).unwrap();
 
         let mut wrong_dimensions = make_asset(127);
-        let wrong_selected = SelectedResource {
+        let wrong_selected = ItemResourceBinding {
             resource_id: wrong_dimensions.resource_id().clone(),
             selected_version: digest.clone(),
         };
         wrong_dimensions.select(&digest).unwrap();
         assert!(matches!(
-            validate_selected_asset(&wrong_dimensions, &wrong_selected, descriptor, &specs),
+            validate_selected_asset(
+                &wrong_dimensions,
+                "relic.normal",
+                &wrong_selected,
+                descriptor,
+                &specs
+            ),
             Err(SingleGenerateError::InvalidSelectedResource)
         ));
     }
