@@ -95,6 +95,11 @@ resources. Settings own `llm.custom_prompt`. Code owns protocol/safety/schema on
 
 Recipe and Pack resources are pinned by SHA-256. Slot resolution is exact and deterministic. Model requests must be replay-auditable without persisting secrets or provider bodies.
 
+`mod-plan` pretty-serializes the complete verified `itemTypes` catalog plus plan guidance into the
+required `pack.guidance` slot. That slot is bounded to 32,000 characters. A built-in Pack expansion
+must keep the rendered value within this bound and pass the desktop facade Plan tests; overflow is
+`FeatureRecipeError::SlotTooLarge`, persists as `feature.recipe_invalid`, and must not call the model.
+
 ### Scenario: Transport A Typed Output Contract To HTTP Providers
 
 #### 1. Scope / Trigger

@@ -137,6 +137,68 @@
         { "symbols": ["TargetType"], "terms": [] }
       ],
       "requiredResourceRoles": ["card.portrait", "card.big"]
+    },
+    {
+      "id": "potion",
+      "displayNames": { "eng": "Potion", "zhs": "药水" },
+      "requiredLocales": ["eng", "zhs"],
+      "fields": [
+        {
+          "id": "rarity",
+          "displayNames": { "eng": "Rarity", "zhs": "稀有度" },
+          "required": true,
+          "value": {
+            "kind": "choice",
+            "options": [
+              { "value": "common", "displayNames": { "eng": "Common", "zhs": "普通" } },
+              { "value": "uncommon", "displayNames": { "eng": "Uncommon", "zhs": "罕见" } },
+              { "value": "rare", "displayNames": { "eng": "Rare", "zhs": "稀有" } }
+            ]
+          }
+        },
+        {
+          "id": "usage",
+          "displayNames": { "eng": "Usage", "zhs": "使用时机" },
+          "required": true,
+          "value": {
+            "kind": "choice",
+            "options": [
+              { "value": "combat_only", "displayNames": { "eng": "Combat only", "zhs": "仅战斗中" } },
+              { "value": "any_time", "displayNames": { "eng": "Any time", "zhs": "任意时机" } },
+              { "value": "outside_combat", "displayNames": { "eng": "Outside combat", "zhs": "战斗外" } }
+            ]
+          }
+        },
+        {
+          "id": "target",
+          "displayNames": { "eng": "Target", "zhs": "目标" },
+          "required": true,
+          "value": {
+            "kind": "choice",
+            "options": [
+              { "value": "none", "displayNames": { "eng": "None", "zhs": "无" } },
+              { "value": "self", "displayNames": { "eng": "Self", "zhs": "自身" } },
+              { "value": "any_enemy", "displayNames": { "eng": "Any enemy", "zhs": "任意敌人" } },
+              { "value": "all_enemies", "displayNames": { "eng": "All enemies", "zhs": "所有敌人" } },
+              { "value": "random_enemy", "displayNames": { "eng": "Random enemy", "zhs": "随机敌人" } },
+              { "value": "any_player", "displayNames": { "eng": "Any player", "zhs": "任意玩家" } },
+              { "value": "any_ally", "displayNames": { "eng": "Any ally", "zhs": "任意盟友" } },
+              { "value": "all_allies", "displayNames": { "eng": "All allies", "zhs": "所有盟友" } },
+              { "value": "targeted_no_creature", "displayNames": { "eng": "Targeted without creature", "zhs": "指定非生物目标" } },
+              { "value": "osty", "displayNames": { "eng": "Osty", "zhs": "Osty" } }
+            ]
+          }
+        }
+      ],
+      "evidenceQueries": [
+        { "symbols": ["CustomPotionModel"], "terms": [] },
+        { "symbols": ["PoolAttribute"], "terms": [] },
+        { "symbols": ["SharedPotionPool"], "terms": [] },
+        { "symbols": ["PotionRarity"], "terms": [] },
+        { "symbols": ["PotionUsage"], "terms": [] },
+        { "symbols": ["TargetType"], "terms": [] }
+      ],
+      "requiredResourceRoles": ["potion.icon"]
     }
   ],
   "contributions": [
@@ -205,6 +267,19 @@
               { "role": "source", "targetPath": "Generated/{item_id}.cs" },
               { "role": "localization.eng", "targetPath": "{mod_id}/localization/eng/cards.json" },
               { "role": "localization.zhs", "targetPath": "{mod_id}/localization/zhs/cards.json" }
+            ]
+          },
+          {
+            "id": "potion",
+            "guidance": [
+              "Generate one STS2 potion implementation and map rarity, usage, and target exactly from the ItemDefinition.",
+              "Register the potion in the shared potion pool and use only model, pool, enum, and effect APIs supported by Truth Evidence.",
+              "Use the selected potion.icon resource through a custom packed image path and emit flat title/description localization JSON for both required locales."
+            ],
+            "generatedFiles": [
+              { "role": "source", "targetPath": "Generated/{item_id}.cs" },
+              { "role": "localization.eng", "targetPath": "{mod_id}/localization/eng/potions.json" },
+              { "role": "localization.zhs", "targetPath": "{mod_id}/localization/zhs/potions.json" }
             ]
           }
         ]
@@ -387,6 +462,31 @@
             "source": {
               "kind": "derived",
               "sourceRole": "card.master",
+              "transform": {
+                "operation": "resize",
+                "primitive": "image.role-transform",
+                "version": 1
+              }
+            }
+          },
+          {
+            "id": "potion.master",
+            "mediaTypes": ["image/png"],
+            "width": 128,
+            "height": 128,
+            "requireAlpha": true,
+            "source": { "kind": "master" }
+          },
+          {
+            "id": "potion.icon",
+            "mediaTypes": ["image/png"],
+            "width": 128,
+            "height": 128,
+            "requireAlpha": true,
+            "targetPath": "{mod_id}/images/potions/{item_id}.png",
+            "source": {
+              "kind": "derived",
+              "sourceRole": "potion.master",
               "transform": {
                 "operation": "resize",
                 "primitive": "image.role-transform",

@@ -317,6 +317,82 @@ impl Fixture {
         fixture
     }
 
+    fn potion() -> Self {
+        let mut fixture = Self::new();
+        let mut definition = ItemDefinition::new(
+            ItemId::parse("fixture_potion").unwrap(),
+            ItemTypeId::parse("potion").unwrap(),
+        );
+        for (field, value) in [
+            ("rarity", ItemFieldValue::Choice("common".into())),
+            ("usage", ItemFieldValue::Choice("combat_only".into())),
+            ("target", ItemFieldValue::Choice("any_enemy".into())),
+        ] {
+            definition
+                .canonical_fields
+                .insert(ItemFieldId::parse(field).unwrap(), value);
+        }
+        definition.behavior_intent = vec!["Apply a testable temporary effect".into()];
+        for (locale, name) in [("eng", "Fixture Potion"), ("zhs", "Fixture Potion ZHS")] {
+            definition.localizations.insert(
+                LocaleId::parse(locale).unwrap(),
+                ItemLocalization {
+                    name: name.into(),
+                    description: "A compile-test fixture potion.".into(),
+                    status: LocalizationStatus::Confirmed,
+                    translated_from: None,
+                },
+            );
+        }
+        let candidate = fixture
+            .resources
+            .ingest_bytes(ResourceBytesIngestRequest {
+                logical_role: "potion.icon".into(),
+                origin: ResourceOrigin::UserUpload,
+                file_name: "potion-icon.png".into(),
+                media: PreparedResourceMedia {
+                    media_type: "image/png".into(),
+                    width: 128,
+                    height: 128,
+                    has_alpha: true,
+                    bytes: b"fixture-potion.icon".to_vec(),
+                },
+                provenance: ResourceVersionProvenance::Original,
+            })
+            .unwrap();
+        let asset = fixture
+            .resources
+            .select(candidate.resource_id(), &candidate.versions()[0].id)
+            .unwrap();
+        definition.resource_bindings.insert(
+            ResourceId::parse("potion.icon").unwrap(),
+            ItemResourceBinding {
+                resource_id: asset.resource_id().clone(),
+                selected_version: asset.selected_version().unwrap().clone(),
+            },
+        );
+        fixture.request = SingleGenerateRequest {
+            artifact_id: "fixture-potion".into(),
+            mod_id: "FixtureMod".into(),
+            plan: PlanItem {
+                item_id: "fixture_potion".into(),
+                item_type: "potion".into(),
+                name: "Fixture Potion".into(),
+                summary: "A compile-test fixture potion".into(),
+                behavior_intent: vec!["Apply a testable temporary effect".into()],
+                implementation_constraints: vec![],
+                evidence_requirements: vec!["Verified Potion model and enum declarations".into()],
+                required_resource_roles: vec!["potion.icon".into()],
+                acceptance_criteria: vec!["The generated project compiles".into()],
+            },
+            definition: StoredItemDefinition {
+                definition_hash: definition.definition_hash().unwrap(),
+                definition,
+            },
+        };
+        fixture
+    }
+
     fn run(&self) -> RunRecord {
         let payload =
             VersionedPayload::from_typed(SingleGenerateFeature::request_schema(), &self.request)
@@ -562,6 +638,11 @@ async fn card_pack_truth_resources_prompt_and_artifact_form_one_vertical_contrac
         manifest.feature_extension.payload()["definitionHash"],
         fixture.request.definition.definition_hash.as_str()
     );
+    assert!(manifest.provenance.iter().any(|entry| {
+        entry.schema().id.as_str() == "artifact.item-definition-provenance"
+            && entry.payload()["definitionHash"]
+                == fixture.request.definition.definition_hash.as_str()
+    }));
     for file in &manifest.files {
         let bytes = fs::read(
             manifest_path
@@ -592,6 +673,154 @@ async fn card_pack_truth_resources_prompt_and_artifact_form_one_vertical_contrac
         .map(|message| message.content.as_str())
         .collect::<String>();
     assert!(prompt.contains("map pool, card_type, rarity, target, and base_cost exactly"));
+    assert!(!prompt.contains("Generate one STS2 relic implementation"));
+    assert!(prompt.contains(fixture.request.definition.definition_hash.as_str()));
+    assert!(!has_staging(&fixture.project.join("artifacts")));
+    assert!(
+        !fixture
+            .project
+            .join(".ats/transactions")
+            .join(run.id().as_str())
+            .exists()
+    );
+}
+
+#[tokio::test]
+async fn potion_pack_truth_resources_prompt_and_artifact_form_one_vertical_contract() {
+    let fixture = Fixture::potion();
+    let service = SingleGenerateService::built_in().unwrap();
+    let writer = FileProjectWriter;
+    let validator = RegisteredValidationRunner;
+    let artifacts = FileArtifactStore::new(fixture.project.clone());
+
+    assert_eq!(
+        fixture.request.definition.definition.canonical_fields.len(),
+        3
+    );
+    assert!(["eng", "zhs"].into_iter().all(|locale| {
+        fixture.request.definition.definition.localizations[&LocaleId::parse(locale).unwrap()]
+            .status
+            == LocalizationStatus::Confirmed
+    }));
+
+    for missing in ["truth", "resource"] {
+        let model = FixtureModel {
+            source: "public class MustNotRun {}",
+            snapshots: Mutex::new(Vec::new()),
+        };
+        let mut request = fixture.request.clone();
+        let missing_truth = truth_without(&fixture.pack, "PotionUsage");
+        if missing == "resource" {
+            request
+                .definition
+                .definition
+                .resource_bindings
+                .remove(&ResourceId::parse("potion.icon").unwrap());
+            request.definition.definition_hash =
+                request.definition.definition.definition_hash().unwrap();
+        }
+        let payload =
+            VersionedPayload::from_typed(SingleGenerateFeature::request_schema(), &request)
+                .unwrap();
+        let mut run = RunRecord::new(SingleGenerateFeature::id(), payload);
+        run.apply_transition(RunTransition::Start, Utc::now())
+            .unwrap();
+        let context = if missing == "truth" {
+            fixture.context_with_truth(&missing_truth)
+        } else {
+            fixture.context()
+        };
+        assert!(
+            service
+                .execute(
+                    SingleGenerateDependencies {
+                        model: &model,
+                        resources: &fixture.resources,
+                        writer: &writer,
+                        validator: &validator,
+                        artifacts: &artifacts,
+                    },
+                    &mut run,
+                    request,
+                    context,
+                    &CancellationToken::new(),
+                )
+                .await
+                .is_err()
+        );
+        assert!(model.snapshots.lock().unwrap().is_empty());
+    }
+
+    let model = FixtureModel {
+        source: "public class FixturePotion {}",
+        snapshots: Mutex::new(Vec::new()),
+    };
+    let mut run = fixture.run();
+    let execution = service
+        .execute(
+            SingleGenerateDependencies {
+                model: &model,
+                resources: &fixture.resources,
+                writer: &writer,
+                validator: &validator,
+                artifacts: &artifacts,
+            },
+            &mut run,
+            fixture.request.clone(),
+            fixture.context(),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(run.status(), RunStatus::Succeeded);
+    assert_eq!(execution.result.generated_file_count, 3);
+    let manifest_path = fixture
+        .project
+        .join(&execution.result.artifact_manifest_ref);
+    let manifest_bytes = fs::read(&manifest_path).unwrap();
+    assert_eq!(sha256(&manifest_bytes), execution.result.manifest_sha256);
+    let manifest: ArtifactManifest = serde_json::from_slice(&manifest_bytes).unwrap();
+    assert_eq!(manifest.files.len(), 4);
+    assert_eq!(
+        manifest.feature_extension.payload()["definitionHash"],
+        fixture.request.definition.definition_hash.as_str()
+    );
+    assert!(manifest.provenance.iter().any(|entry| {
+        entry.schema().id.as_str() == "artifact.item-definition-provenance"
+            && entry.payload()["definitionHash"]
+                == fixture.request.definition.definition_hash.as_str()
+    }));
+    for file in &manifest.files {
+        let bytes = fs::read(
+            manifest_path
+                .parent()
+                .unwrap()
+                .join(&file.snapshot_relative_path),
+        )
+        .unwrap();
+        assert_eq!(u64::try_from(bytes.len()).unwrap(), file.byte_length);
+        assert_eq!(sha256(&bytes), file.sha256);
+    }
+    let published = manifest
+        .files
+        .iter()
+        .filter_map(|file| file.published_relative_path.as_deref())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert!(published.contains("Generated/fixture_potion.cs"));
+    assert!(published.contains("FixtureMod/localization/eng/potions.json"));
+    assert!(published.contains("FixtureMod/localization/zhs/potions.json"));
+    assert!(published.contains("FixtureMod/images/potions/fixture_potion.png"));
+
+    let snapshots = model.snapshots.lock().unwrap();
+    let prompt = snapshots[0]
+        .request()
+        .messages
+        .iter()
+        .map(|message| message.content.as_str())
+        .collect::<String>();
+    assert!(prompt.contains("map rarity, usage, and target exactly"));
+    assert!(!prompt.contains("Generate one STS2 card implementation"));
     assert!(!prompt.contains("Generate one STS2 relic implementation"));
     assert!(prompt.contains(fixture.request.definition.definition_hash.as_str()));
     assert!(!has_staging(&fixture.project.join("artifacts")));
@@ -710,6 +939,13 @@ fn truth_without(
         ("CardType", "public enum CardType"),
         ("CardRarity", "public enum CardRarity"),
         ("TargetType", "public enum TargetType"),
+        (
+            "CustomPotionModel",
+            "public abstract class CustomPotionModel",
+        ),
+        ("SharedPotionPool", "public static class SharedPotionPool"),
+        ("PotionRarity", "public enum PotionRarity"),
+        ("PotionUsage", "public enum PotionUsage"),
     ]
     .into_iter()
     .filter(|(symbol, _)| *symbol != excluded_symbol)
