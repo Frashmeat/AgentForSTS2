@@ -90,7 +90,7 @@ STS2 当前真源是：
 game_packs/sts2/stage2-game-pack.json
 ```
 
-它声明 Feature contribution、item type、生成文件角色/目标、Evidence 查询、资源规格、日志规则、验证/build/package Primitive 和工程模板引用。Pack 先经过 schema 与 pinned SHA 校验，再由 `ContributionResolver` 按 Feature required slot 选择。`pack.mod-generate-single` v4 分离全局 `guidance` 与 `itemTypes[].guidance`；Single Prompt 只序列化 `commonGuidance` 和当前类型的 `itemGuidance`，Card、Potion 等类型专属规则不得进入其他类型请求。目标路径仍由 Feature 确定性展开，不由模型作者化。`evidenceQueries` 是 Pack 的可执行数据合同：每组查询必须至少命中一条当前 Truth，最终 Evidence 有界去重；任一组无命中即返回 `truth.evidence_missing`，不能继续调用模型。
+它声明 Feature contribution、item type、生成文件角色/目标、Evidence 查询、资源规格、日志规则、验证/build/package Primitive 和工程模板引用。Pack 先经过 schema 与 pinned SHA 校验，再由 `ContributionResolver` 按 Feature required slot 选择。`pack.mod-generate-single` v4 分离全局 `guidance` 与 `itemTypes[].guidance`；Single Prompt 只序列化 `commonGuidance` 和当前类型的 `itemGuidance`，Card、Potion、Power 等类型专属规则不得进入其他类型请求。目标路径仍由 Feature 确定性展开，不由模型作者化。`evidenceQueries` 是 Pack 的可执行数据合同：每组查询必须至少命中一条当前 Truth，最终 Evidence 有界去重；任一组无命中即返回 `truth.evidence_missing`，不能继续调用模型。
 
 新增游戏应新增独立 Pack 与 Truth 来源。不得把游戏自然语言、hook、C#/Godot/BaseLib 约束重新写入通用 Feature 或 Shell。
 

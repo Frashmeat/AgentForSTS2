@@ -393,6 +393,87 @@ impl Fixture {
         fixture
     }
 
+    fn power() -> Self {
+        let mut fixture = Self::new();
+        let mut definition = ItemDefinition::new(
+            ItemId::parse("fixture_power").unwrap(),
+            ItemTypeId::parse("power").unwrap(),
+        );
+        for (field, value) in [
+            ("power_type", ItemFieldValue::Choice("buff".into())),
+            ("stack_type", ItemFieldValue::Choice("counter".into())),
+            ("instance_type", ItemFieldValue::Choice("none".into())),
+            ("allow_negative", ItemFieldValue::Boolean(false)),
+        ] {
+            definition
+                .canonical_fields
+                .insert(ItemFieldId::parse(field).unwrap(), value);
+        }
+        definition.behavior_intent = vec!["Grant a testable turn-scoped effect".into()];
+        for (locale, name) in [("eng", "Fixture Power"), ("zhs", "Fixture Power ZHS")] {
+            definition.localizations.insert(
+                LocaleId::parse(locale).unwrap(),
+                ItemLocalization {
+                    name: name.into(),
+                    description: "A compile-test fixture power.".into(),
+                    status: LocalizationStatus::Confirmed,
+                    translated_from: None,
+                },
+            );
+        }
+        for (role, width, height) in [("power.icon", 48, 48), ("power.big", 192, 192)] {
+            let candidate = fixture
+                .resources
+                .ingest_bytes(ResourceBytesIngestRequest {
+                    logical_role: role.into(),
+                    origin: ResourceOrigin::UserUpload,
+                    file_name: format!("{}.png", role.replace('.', "-")),
+                    media: PreparedResourceMedia {
+                        media_type: "image/png".into(),
+                        width,
+                        height,
+                        has_alpha: true,
+                        bytes: format!("fixture-{role}").into_bytes(),
+                    },
+                    provenance: ResourceVersionProvenance::Original,
+                })
+                .unwrap();
+            let asset = fixture
+                .resources
+                .select(candidate.resource_id(), &candidate.versions()[0].id)
+                .unwrap();
+            definition.resource_bindings.insert(
+                ResourceId::parse(role).unwrap(),
+                ItemResourceBinding {
+                    resource_id: asset.resource_id().clone(),
+                    selected_version: asset.selected_version().unwrap().clone(),
+                },
+            );
+        }
+        fixture.request = SingleGenerateRequest {
+            artifact_id: "fixture-power".into(),
+            mod_id: "FixtureMod".into(),
+            plan: PlanItem {
+                item_id: "fixture_power".into(),
+                item_type: "power".into(),
+                name: "Fixture Power".into(),
+                summary: "A compile-test fixture power".into(),
+                behavior_intent: vec!["Grant a testable turn-scoped effect".into()],
+                implementation_constraints: vec![],
+                evidence_requirements: vec![
+                    "Verified Power lifecycle and stack declarations".into(),
+                ],
+                required_resource_roles: vec!["power.icon".into(), "power.big".into()],
+                acceptance_criteria: vec!["The generated project compiles".into()],
+            },
+            definition: StoredItemDefinition {
+                definition_hash: definition.definition_hash().unwrap(),
+                definition,
+            },
+        };
+        fixture
+    }
+
     fn run(&self) -> RunRecord {
         let payload =
             VersionedPayload::from_typed(SingleGenerateFeature::request_schema(), &self.request)
@@ -834,6 +915,158 @@ async fn potion_pack_truth_resources_prompt_and_artifact_form_one_vertical_contr
 }
 
 #[tokio::test]
+async fn power_pack_truth_resources_prompt_and_artifact_form_one_vertical_contract() {
+    let fixture = Fixture::power();
+    let service = SingleGenerateService::built_in().unwrap();
+    let writer = FileProjectWriter;
+    let validator = RegisteredValidationRunner;
+    let artifacts = FileArtifactStore::new(fixture.project.clone());
+
+    assert_eq!(
+        fixture.request.definition.definition.canonical_fields.len(),
+        4
+    );
+    assert!(["eng", "zhs"].into_iter().all(|locale| {
+        fixture.request.definition.definition.localizations[&LocaleId::parse(locale).unwrap()]
+            .status
+            == LocalizationStatus::Confirmed
+    }));
+
+    for missing in ["truth", "resource"] {
+        let model = FixtureModel {
+            source: "public class MustNotRun {}",
+            snapshots: Mutex::new(Vec::new()),
+        };
+        let mut request = fixture.request.clone();
+        let missing_truth = truth_without(&fixture.pack, "PowerStackType");
+        if missing == "resource" {
+            request
+                .definition
+                .definition
+                .resource_bindings
+                .remove(&ResourceId::parse("power.big").unwrap());
+            request.definition.definition_hash =
+                request.definition.definition.definition_hash().unwrap();
+        }
+        let payload =
+            VersionedPayload::from_typed(SingleGenerateFeature::request_schema(), &request)
+                .unwrap();
+        let mut run = RunRecord::new(SingleGenerateFeature::id(), payload);
+        run.apply_transition(RunTransition::Start, Utc::now())
+            .unwrap();
+        let context = if missing == "truth" {
+            fixture.context_with_truth(&missing_truth)
+        } else {
+            fixture.context()
+        };
+        assert!(
+            service
+                .execute(
+                    SingleGenerateDependencies {
+                        model: &model,
+                        resources: &fixture.resources,
+                        writer: &writer,
+                        validator: &validator,
+                        artifacts: &artifacts,
+                    },
+                    &mut run,
+                    request,
+                    context,
+                    &CancellationToken::new(),
+                )
+                .await
+                .is_err()
+        );
+        assert!(model.snapshots.lock().unwrap().is_empty());
+    }
+
+    let model = FixtureModel {
+        source: "public class FixturePower {}",
+        snapshots: Mutex::new(Vec::new()),
+    };
+    let mut run = fixture.run();
+    let execution = service
+        .execute(
+            SingleGenerateDependencies {
+                model: &model,
+                resources: &fixture.resources,
+                writer: &writer,
+                validator: &validator,
+                artifacts: &artifacts,
+            },
+            &mut run,
+            fixture.request.clone(),
+            fixture.context(),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(run.status(), RunStatus::Succeeded);
+    assert_eq!(execution.result.generated_file_count, 3);
+    let manifest_path = fixture
+        .project
+        .join(&execution.result.artifact_manifest_ref);
+    let manifest_bytes = fs::read(&manifest_path).unwrap();
+    assert_eq!(sha256(&manifest_bytes), execution.result.manifest_sha256);
+    let manifest: ArtifactManifest = serde_json::from_slice(&manifest_bytes).unwrap();
+    assert_eq!(manifest.files.len(), 5);
+    assert_eq!(
+        manifest.feature_extension.payload()["definitionHash"],
+        fixture.request.definition.definition_hash.as_str()
+    );
+    assert!(manifest.provenance.iter().any(|entry| {
+        entry.schema().id.as_str() == "artifact.item-definition-provenance"
+            && entry.payload()["definitionHash"]
+                == fixture.request.definition.definition_hash.as_str()
+    }));
+    for file in &manifest.files {
+        let bytes = fs::read(
+            manifest_path
+                .parent()
+                .unwrap()
+                .join(&file.snapshot_relative_path),
+        )
+        .unwrap();
+        assert_eq!(u64::try_from(bytes.len()).unwrap(), file.byte_length);
+        assert_eq!(sha256(&bytes), file.sha256);
+    }
+    let published = manifest
+        .files
+        .iter()
+        .filter_map(|file| file.published_relative_path.as_deref())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert!(published.contains("Generated/fixture_power.cs"));
+    assert!(published.contains("FixtureMod/localization/eng/powers.json"));
+    assert!(published.contains("FixtureMod/localization/zhs/powers.json"));
+    assert!(published.contains("FixtureMod/images/powers/fixture_power.png"));
+    assert!(published.contains("FixtureMod/images/powers/big/fixture_power.png"));
+
+    let snapshots = model.snapshots.lock().unwrap();
+    let prompt = snapshots[0]
+        .request()
+        .messages
+        .iter()
+        .map(|message| message.content.as_str())
+        .collect::<String>();
+    assert!(
+        prompt.contains("map power_type, stack_type, instance_type, and allow_negative exactly")
+    );
+    assert!(!prompt.contains("Generate one STS2 card implementation"));
+    assert!(!prompt.contains("Generate one STS2 relic implementation"));
+    assert!(!prompt.contains("Generate one STS2 potion implementation"));
+    assert!(prompt.contains(fixture.request.definition.definition_hash.as_str()));
+    assert!(!has_staging(&fixture.project.join("artifacts")));
+    assert!(
+        !fixture
+            .project
+            .join(".ats/transactions")
+            .join(run.id().as_str())
+            .exists()
+    );
+}
+
+#[tokio::test]
 async fn compile_artifact_and_cancellation_failures_restore_project_files() {
     let service = SingleGenerateService::built_in().unwrap();
     for failure in ["compile", "artifact", "cancel"] {
@@ -946,6 +1179,12 @@ fn truth_without(
         ("SharedPotionPool", "public static class SharedPotionPool"),
         ("PotionRarity", "public enum PotionRarity"),
         ("PotionUsage", "public enum PotionUsage"),
+        ("CustomPowerModel", "public abstract class CustomPowerModel"),
+        ("PowerModel", "public abstract class PowerModel"),
+        ("PowerType", "public enum PowerType"),
+        ("PowerStackType", "public enum PowerStackType"),
+        ("PowerInstanceType", "public enum PowerInstanceType"),
+        ("PowerCmd", "public static class PowerCmd"),
     ]
     .into_iter()
     .filter(|(symbol, _)| *symbol != excluded_symbol)

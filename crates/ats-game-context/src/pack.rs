@@ -9,7 +9,7 @@ use crate::{ItemCatalogError, ItemTypeDescriptor};
 
 pub const GAME_PACK_SCHEMA_VERSION: u32 = 3;
 const BUILT_IN_STS2_SHA256: &str =
-    "9978773b4e7014f393f05eefad6af015b61cad33e8951a844238bc29b741d4ce";
+    "5bb8158fdfd1f05c92af5cf5110e4a2ceed8ab73a086dfa876429b97756ecc03";
 const BUILT_IN_STS2: &[u8] = include_bytes!("../../../game_packs/sts2/stage2-game-pack.json");
 
 #[derive(Debug, Clone)]
@@ -347,6 +347,19 @@ mod tests {
                 .map(ResourceId::as_str)
                 .collect::<Vec<_>>(),
             ["potion.icon"]
+        );
+        let power = pack
+            .item_type(&ItemTypeId::parse("power").unwrap())
+            .expect("built-in STS2 Pack declares Power");
+        assert_eq!(power.fields().len(), 4);
+        assert_eq!(power.evidence_queries().len(), 6);
+        assert_eq!(
+            power
+                .required_resource_roles()
+                .iter()
+                .map(ResourceId::as_str)
+                .collect::<Vec<_>>(),
+            ["power.icon", "power.big"]
         );
     }
 

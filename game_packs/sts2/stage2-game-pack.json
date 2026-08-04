@@ -199,6 +199,67 @@
         { "symbols": ["TargetType"], "terms": [] }
       ],
       "requiredResourceRoles": ["potion.icon"]
+    },
+    {
+      "id": "power",
+      "displayNames": { "eng": "Power", "zhs": "能力" },
+      "requiredLocales": ["eng", "zhs"],
+      "fields": [
+        {
+          "id": "power_type",
+          "displayNames": { "eng": "Power type", "zhs": "能力类型" },
+          "required": true,
+          "value": {
+            "kind": "choice",
+            "options": [
+              { "value": "none", "displayNames": { "eng": "None", "zhs": "无" } },
+              { "value": "buff", "displayNames": { "eng": "Buff", "zhs": "增益" } },
+              { "value": "debuff", "displayNames": { "eng": "Debuff", "zhs": "减益" } }
+            ]
+          }
+        },
+        {
+          "id": "stack_type",
+          "displayNames": { "eng": "Stack type", "zhs": "叠层类型" },
+          "required": true,
+          "value": {
+            "kind": "choice",
+            "options": [
+              { "value": "none", "displayNames": { "eng": "None", "zhs": "无" } },
+              { "value": "counter", "displayNames": { "eng": "Counter", "zhs": "计数" } },
+              { "value": "single", "displayNames": { "eng": "Single", "zhs": "单层" } }
+            ]
+          }
+        },
+        {
+          "id": "instance_type",
+          "displayNames": { "eng": "Instance type", "zhs": "实例策略" },
+          "required": true,
+          "value": {
+            "kind": "choice",
+            "options": [
+              { "value": "none", "displayNames": { "eng": "Shared", "zhs": "共享实例" } },
+              { "value": "instanced", "displayNames": { "eng": "Instanced", "zhs": "独立实例" } },
+              { "value": "instanced_per_applier", "displayNames": { "eng": "Per applier", "zhs": "按施加者实例化" } }
+            ]
+          }
+        },
+        {
+          "id": "allow_negative",
+          "displayNames": { "eng": "Allow negative amount", "zhs": "允许负层数" },
+          "required": true,
+          "value": { "kind": "boolean" }
+        }
+      ],
+      "evidenceQueries": [
+        { "symbols": ["CustomPowerModel"], "terms": [] },
+        { "symbols": ["PowerModel"], "terms": [] },
+        { "symbols": ["PowerType"], "terms": [] },
+        { "symbols": ["PowerStackType"], "terms": [] },
+        { "symbols": ["PowerInstanceType"], "terms": [] },
+        { "symbols": ["PowerCmd"], "terms": [] }
+      ],
+      "requiredResourceRoles": ["power.icon", "power.big"]
     }
   ],
   "contributions": [
@@ -280,6 +341,19 @@
               { "role": "source", "targetPath": "Generated/{item_id}.cs" },
               { "role": "localization.eng", "targetPath": "{mod_id}/localization/eng/potions.json" },
               { "role": "localization.zhs", "targetPath": "{mod_id}/localization/zhs/potions.json" }
+            ]
+          },
+          {
+            "id": "power",
+            "guidance": [
+              "Generate one STS2 power implementation and map power_type, stack_type, instance_type, and allow_negative exactly from the ItemDefinition.",
+              "Extend CustomPowerModel and use only lifecycle hooks, stacking behavior, and PowerCmd operations supported by Truth Evidence; do not invent hooks.",
+              "Use the selected power.icon and power.big resources through the custom packed and big icon paths, and emit flat title/description localization JSON for both required locales."
+            ],
+            "generatedFiles": [
+              { "role": "source", "targetPath": "Generated/{item_id}.cs" },
+              { "role": "localization.eng", "targetPath": "{mod_id}/localization/eng/powers.json" },
+              { "role": "localization.zhs", "targetPath": "{mod_id}/localization/zhs/powers.json" }
             ]
           }
         ]
@@ -487,6 +561,48 @@
             "source": {
               "kind": "derived",
               "sourceRole": "potion.master",
+              "transform": {
+                "operation": "resize",
+                "primitive": "image.role-transform",
+                "version": 1
+              }
+            }
+          },
+          {
+            "id": "power.master",
+            "mediaTypes": ["image/png"],
+            "width": 192,
+            "height": 192,
+            "requireAlpha": true,
+            "source": { "kind": "master" }
+          },
+          {
+            "id": "power.icon",
+            "mediaTypes": ["image/png"],
+            "width": 48,
+            "height": 48,
+            "requireAlpha": true,
+            "targetPath": "{mod_id}/images/powers/{item_id}.png",
+            "source": {
+              "kind": "derived",
+              "sourceRole": "power.master",
+              "transform": {
+                "operation": "resize",
+                "primitive": "image.role-transform",
+                "version": 1
+              }
+            }
+          },
+          {
+            "id": "power.big",
+            "mediaTypes": ["image/png"],
+            "width": 192,
+            "height": 192,
+            "requireAlpha": true,
+            "targetPath": "{mod_id}/images/powers/big/{item_id}.png",
+            "source": {
+              "kind": "derived",
+              "sourceRole": "power.master",
               "transform": {
                 "operation": "resize",
                 "primitive": "image.role-transform",
