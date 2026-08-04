@@ -1,0 +1,44 @@
+{
+  "id": "sts2-pack-final-candidate-installed-acceptance",
+  "name": "sts2-pack-final-candidate-installed-acceptance",
+  "title": "STS2 Pack 最终候选与安装态验收",
+  "description": "Record the e00f0fa8 Windows candidate, installed-app E2E evidence, explicit human acceptance, and remaining external-provider/game/signing boundaries.",
+  "status": "completed",
+  "dev_type": "fullstack",
+  "scope": "Windows candidate verification and installed desktop acceptance for STS2 Pack Orders 1-8",
+  "priority": "P1",
+  "creator": "codex-agent",
+  "assignee": "codex-agent",
+  "createdAt": "2026-08-04",
+  "completedAt": "2026-08-04",
+  "branch": null,
+  "base_branch": "rust",
+  "worktree_path": null,
+  "current_phase": 3,
+  "next_action": [
+    {
+      "phase": 1,
+      "action": "implement"
+    },
+    {
+      "phase": 2,
+      "action": "check"
+    },
+    {
+      "phase": 3,
+      "action": "finish"
+    },
+    {
+      "phase": 4,
+      "action": "create-pr"
+    }
+  ],
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "Candidate rc-20260804T132520Z-e00f0fa8545e binds clean commit e00f0fa8545ef4113e6b14d932b980c03f548b33 and passed 10/10 steps, both variants, BuildInfo, 4/4 installer size/hash recomputation, and zero candidate residue; all installers remain NotSigned. Installed ML E2E used fresh Pack v3 Truth and ItemDefinition, completed Batch v4 plus Complex v3 with nine succeeded v3 Runs, real dotnet/Godot Build and exact six-file Package, independently matching Artifact/file/ZIP hashes, zero new staging/transaction children, and lock reacquisition after normal exit. User explicitly confirmed acceptance on 2026-08-04. Real external Provider/image quality, real STS2 game behavior, signing/SmartScreen, push, rebase and release are not claimed.",
+  "meta": {}
+}
