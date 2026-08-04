@@ -1,0 +1,52 @@
+{
+  "id": "sts2-pack-order2-item-editor",
+  "name": "sts2-pack-order2-item-editor",
+  "title": "Order 2: Item repository and generic editor",
+  "description": "Versioned Item repository, typed desktop transport and Pack-driven generic editor",
+  "status": "completed",
+  "dev_type": "fullstack",
+  "scope": "workspace item library and editor",
+  "priority": "P2",
+  "creator": "codex-agent",
+  "assignee": "codex-agent",
+  "createdAt": "2026-08-04",
+  "completedAt": "2026-08-04",
+  "branch": null,
+  "base_branch": "rust",
+  "worktree_path": null,
+  "current_phase": 3,
+  "next_action": [
+    {
+      "phase": 1,
+      "action": "implement"
+    },
+    {
+      "phase": 2,
+      "action": "check"
+    },
+    {
+      "phase": 3,
+      "action": "finish"
+    },
+    {
+      "phase": 4,
+      "action": "create-pr"
+    }
+  ],
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "08-04-sts2-pack-types-resource-experience",
+  "relatedFiles": [
+    "crates/ats-workspace/src/item.rs",
+    "crates/ats-adapters/src/item_store.rs",
+    "crates/ats-features/src/item_definition.rs",
+    "src-tauri/src/commands/stage2.rs",
+    "src/pages/ModEditorPage.tsx",
+    "src/pages/itemEditorModel.ts",
+    "src/services/tauriApi.ts"
+  ],
+  "notes": "Implementation, specs and all machine gates passed. Auto-commit authorized by the user; push, rebase, release candidate and real-environment acceptance remain separately gated.",
+  "meta": {}
+}

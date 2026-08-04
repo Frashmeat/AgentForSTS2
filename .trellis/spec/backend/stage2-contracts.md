@@ -189,6 +189,117 @@ Correct: declare once, then reference the selected catalog descriptor.
 {"itemTypes":[{"id":"relic","evidenceQueries":[{"symbols":["RelicModel"],"terms":[]}]}]}
 ```
 
+### Scenario: Persist Item Versions And Gate Desktop Commands Before Run Creation
+
+#### 1. Scope / Trigger
+
+This contract applies whenever the desktop lists, loads or saves an ItemDefinition, and whenever
+Plan, Single, Batch or Complex submission names an Item type. It keeps editable drafts versioned
+without weakening Pack/Truth readiness or creating a rejected Run.
+
+#### 2. Signatures And Layout
+
+```rust
+// crates/ats-workspace/src/item.rs
+pub trait ItemRepository {
+    fn save(&self, definition: &ItemDefinition) -> Result<StoredItemDefinition, Self::Error>;
+    fn load_current(&self, item_id: &ItemId) -> Result<StoredItemDefinition, Self::Error>;
+    fn load_version(&self, item_id: &ItemId, hash: &Sha256Digest)
+        -> Result<StoredItemDefinition, Self::Error>;
+    fn list_current(&self) -> Result<Vec<StoredItemDefinition>, Self::Error>;
+}
+
+// src-tauri/src/commands/stage2.rs
+get_item_capabilities() -> ItemCapabilityCatalog
+list_item_definitions() -> Vec<StoredItemDefinition>
+get_item_definition(itemId, definitionHash?) -> StoredItemDefinition
+save_item_definition(definition) -> StoredItemDefinition
+```
+
+```text
+.ats/items-v1/<itemId>/
+  current.json
+  definitions/<definitionHash>.json
+```
+
+`ProjectSession` owns one `Arc<FileItemRepository>` for the open project. Commands must not create
+independent per-call repositories because their mutexes would not serialize concurrent current
+pointer updates.
+
+#### 3. Contracts
+
+| Operation | Required behavior |
+| --- | --- |
+| save new content | validate ItemDefinition and Pack Draft mode; write one immutable hash snapshot; atomically replace only `current.json` |
+| save same content | reuse the exact snapshot and move the pointer idempotently |
+| save existing itemId | itemType must equal every committed or crash-orphaned snapshot for that ID |
+| load by hash | recompute and match the path hash; reject changed bytes, symlinks and path drift |
+| list | return only validated current pointers, sorted by stable itemId |
+| capability wire | use camelCase, including blocker `queryIndex`; React runtime guards reject malformed shapes |
+| Item save | selected type must be ready for the pinned Pack/current verified Truth before storage |
+| Run submit | decode Plan/Single/Batch/Complex typed requests and check every requested type before `RunRecord::new` |
+
+Saving uses `ItemDefinitionValidationMode::Draft`, so incomplete authoring snapshots can be kept.
+`Ready` validation is reserved for definition-bound execution. Readiness and structural completeness
+are separate facts and must not be collapsed.
+
+#### 4. Validation And Error Matrix
+
+| Condition | Boundary result | Side effect |
+| --- | --- | --- |
+| blocked/missing Truth for Item save | `truth.evidence_missing`, `item.save` | no snapshot/pointer write |
+| blocked type in Plan/Single/Batch/Complex | `truth.evidence_missing`, `run.submit.readiness` | no RunRecord created |
+| schema/type/Pack drift | `item.definition_invalid` | no write/Run |
+| missing current/hash | `item.not_found` | none |
+| IO or in-process repository lock failure | `item.storage_failed` | no fabricated success |
+| existing itemId changes itemType | `ItemStoreError::TypeConflict` -> `item.definition_invalid` | old pointer/history unchanged |
+| tampered snapshot/hash/path/symlink | typed invalid/storage mapping | no unverified definition returned |
+| valid changed content | new definition hash and current pointer | old snapshot remains immutable |
+
+#### 5. Good / Base / Bad Cases
+
+- Good: edit a Pack-declared ready Item, save two hashes, load either hash, and list the second as
+  current while the first remains unchanged.
+- Base: save an incomplete Draft with valid fields and locale candidates; later Ready validation may
+  still block generation without deleting the Draft.
+- Bad: create a new `FileItemRepository` inside every command; concurrent saves bypass the intended
+  mutex and can race type/pointer checks.
+- Bad: write a definition snapshot, fail before the pointer, then allow the same itemId under another
+  type because `current.json` is absent. Existing orphaned versions still reserve the type.
+- Bad: call `RunRecord::new` before readiness and persist a Pending Run that can never execute.
+
+#### 6. Tests Required
+
+```powershell
+cargo test -p ats-adapters item_store -- --nocapture
+cargo test -p agentthespire-desktop --lib commands::stage2::tests -- --nocapture
+cargo test --workspace --all-targets
+npm run test:frontend
+npx tsc -b --pretty false
+```
+
+Assertions must cover immutable/history/current behavior, same-hash idempotence, tamper/path/type
+rejection, orphaned-snapshot type reservation, exact `queryIndex` serialization, all four
+Item-bearing request shapes, and readiness rejection before Run creation.
+
+#### 7. Wrong Vs Correct
+
+Wrong - validate readiness only inside the asynchronous worker:
+
+```rust
+let run = RunRecord::new(submission.feature_id, submission.request);
+session.submit(run, |run, ..| execute_and_discover_blocked_type(run)).await
+```
+
+Correct - reject before any Run identity or repository side effect:
+
+```rust
+let session = current_session(&active, "run.submit")?;
+ensure_submission_ready(composition, &submission)?;
+let run = RunRecord::new(submission.feature_id, submission.request);
+session.submit(run, worker).await
+```
+
 ## 5. Resource Workspace
 
 `ats-workspace` stores immutable Resource versions with origin/provenance and explicit selection. A Feature references only `resourceId + selectedVersion`; stale or tampered bytes fail. User upload, Pack default, and AI media use the same contract. The registered HTTP Media Adapter supports Images/Chat protocols, cancellation, typed status mapping, bounded bytes, and request-hash provenance; health reports registration, not provider connectivity.

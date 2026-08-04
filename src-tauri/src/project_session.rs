@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, RwLock};
 use std::time::Duration;
 
-use ats_adapters::FileRunRepository;
+use ats_adapters::{FileItemRepository, FileRunRepository};
 use ats_runtime::{
     CancellationReason, CancellationToken, RunFailure, RunId, RunRecord, RunRepository,
     RunRepositoryError, RunStatus, RunTransition,
@@ -46,6 +46,7 @@ pub struct ProjectSession {
     root: PathBuf,
     meta: ProjectMeta,
     repository: Arc<FileRunRepository>,
+    item_repository: Arc<FileItemRepository>,
     closing: AtomicBool,
     tasks: Mutex<HashMap<RunId, TrackedRun>>,
     finished: Arc<Notify>,
@@ -72,11 +73,13 @@ impl ProjectSession {
     pub fn open(project: ProjectFolder) -> Result<Arc<Self>, RunRepositoryError> {
         let repository = Arc::new(FileRunRepository::new(project.run_history_dir())?);
         repository.reconcile_interrupted()?;
+        let item_repository = Arc::new(FileItemRepository::new(project.path().to_path_buf()));
         Ok(Arc::new(Self {
             root: project.path().to_path_buf(),
             meta: project.meta().clone(),
             project_lock: StdMutex::new(Some(project)),
             repository,
+            item_repository,
             closing: AtomicBool::new(false),
             tasks: Mutex::new(HashMap::new()),
             finished: Arc::new(Notify::new()),
@@ -96,6 +99,11 @@ impl ProjectSession {
     #[must_use]
     pub fn repository(&self) -> Arc<dyn RunRepository> {
         Arc::clone(&self.repository) as Arc<dyn RunRepository>
+    }
+
+    #[must_use]
+    pub fn item_repository(&self) -> Arc<FileItemRepository> {
+        Arc::clone(&self.item_repository)
     }
 
     pub fn release_project_lock(&self) -> Result<(), ()> {

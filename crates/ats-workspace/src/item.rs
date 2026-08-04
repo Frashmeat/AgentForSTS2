@@ -58,6 +58,35 @@ pub struct ItemDefinition {
     pub resource_bindings: BTreeMap<ResourceId, ItemResourceBinding>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StoredItemDefinition {
+    pub definition_hash: Sha256Digest,
+    pub definition: ItemDefinition,
+}
+
+impl StoredItemDefinition {
+    pub fn validate(&self) -> Result<(), ItemDefinitionError> {
+        if self.definition.definition_hash()? != self.definition_hash {
+            return Err(ItemDefinitionError::InvalidHash);
+        }
+        Ok(())
+    }
+}
+
+pub trait ItemRepository: Send + Sync {
+    type Error: std::error::Error + Send + Sync + 'static;
+
+    fn save(&self, definition: &ItemDefinition) -> Result<StoredItemDefinition, Self::Error>;
+    fn load_current(&self, item_id: &ItemId) -> Result<StoredItemDefinition, Self::Error>;
+    fn load_version(
+        &self,
+        item_id: &ItemId,
+        definition_hash: &Sha256Digest,
+    ) -> Result<StoredItemDefinition, Self::Error>;
+    fn list_current(&self) -> Result<Vec<StoredItemDefinition>, Self::Error>;
+}
+
 impl ItemDefinition {
     #[must_use]
     pub fn new(item_id: ItemId, item_type: ItemTypeId) -> Self {

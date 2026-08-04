@@ -3,6 +3,7 @@
 mod artifact_store;
 mod build_runner;
 mod config;
+mod item_store;
 mod media_client;
 mod model_client;
 mod package_writer;
@@ -21,6 +22,7 @@ pub use config::{
     ConfigStatus, ImageGenerationConfig, LlmConfig, RuntimeConfig, Settings, SettingsStore,
     ToolchainConfig, TruthSourceConfig,
 };
+pub use item_store::{FileItemRepository, ItemStoreError};
 pub use media_client::HttpMediaClient;
 pub use model_client::HttpModelClient;
 pub use package_writer::ZipPackageWriter;

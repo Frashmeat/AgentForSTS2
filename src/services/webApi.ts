@@ -16,6 +16,9 @@ import type {
   BatchGenerateRequest,
   ComplexGenerateRequest,
   TruthStatus,
+  ItemCapabilityCatalog,
+  ItemDefinition,
+  StoredItemDefinition,
 } from "./tauriApi";
 import type { ActionableFailure } from "./actionableFailure";
 export { isActionableFailure, toActionableFailure } from "./actionableFailure";
@@ -41,6 +44,10 @@ export function currentProject(): Promise<CurrentProject | null> { return Promis
 export function forgetRecentProject(_path: string): Promise<void> { return reject("forgetRecentProject"); }
 export function getTruthStatus(): Promise<TruthStatus> { return reject("getTruthStatus"); }
 export function importTruth(): Promise<TruthStatus> { return reject("importTruth"); }
+export function getItemCapabilities(): Promise<ItemCapabilityCatalog> { return reject("getItemCapabilities"); }
+export function listItemDefinitions(): Promise<StoredItemDefinition[]> { return Promise.resolve([]); }
+export function getItemDefinition(_itemId: string, _definitionHash?: string): Promise<StoredItemDefinition> { return reject("getItemDefinition"); }
+export function saveItemDefinition(_definition: ItemDefinition): Promise<StoredItemDefinition> { return reject("saveItemDefinition"); }
 export function getRun(_runId: string): Promise<RunRecord> { return reject("getRun"); }
 export function listRuns(): Promise<RunSummary[]> { return Promise.resolve([]); }
 export function cancelRun(_runId: string): Promise<boolean> { return reject("cancelRun"); }

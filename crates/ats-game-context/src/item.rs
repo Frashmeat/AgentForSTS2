@@ -332,7 +332,10 @@ pub enum ItemCapabilityBlocker {
     #[serde(rename = "truth.snapshot_unavailable")]
     TruthSnapshotUnavailable,
     #[serde(rename = "truth.evidence_missing")]
-    MissingEvidence { query_index: u32 },
+    MissingEvidence {
+        #[serde(rename = "queryIndex")]
+        query_index: u32,
+    },
 }
 
 #[derive(Debug, Error, Eq, PartialEq)]
@@ -498,6 +501,8 @@ mod tests {
         );
         let encoded = serde_json::to_value(blocked).unwrap();
         assert_eq!(encoded["blockers"][0]["code"], "truth.evidence_missing");
+        assert_eq!(encoded["blockers"][0]["queryIndex"], 0);
+        assert!(encoded["blockers"][0].get("query_index").is_none());
     }
 
     #[test]

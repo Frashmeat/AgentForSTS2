@@ -327,6 +327,119 @@ export function importTruth(): Promise<TruthStatus> {
   return invokeCommand<TruthStatus>("import_truth");
 }
 
+export type ItemFieldValueSpec =
+  | { kind: "text"; multiline: boolean; minLength: number; maxLength: number }
+  | { kind: "integer"; min: number; max: number }
+  | { kind: "boolean" }
+  | { kind: "choice"; options: ItemChoiceOption[] }
+  | { kind: "string_list"; minItems: number; maxItems: number; itemMaxLength: number };
+
+export interface ItemChoiceOption {
+  value: string;
+  displayNames: Record<string, string>;
+}
+
+export interface ItemFieldSpec {
+  id: string;
+  displayNames: Record<string, string>;
+  required: boolean;
+  value: ItemFieldValueSpec;
+}
+
+export interface ItemTypeDescriptor {
+  id: string;
+  displayNames: Record<string, string>;
+  requiredLocales: string[];
+  fields: ItemFieldSpec[];
+  evidenceQueries: { symbols: string[]; terms: string[] }[];
+  requiredResourceRoles: string[];
+}
+
+export type ItemCapabilityBlocker =
+  | { code: "truth.snapshot_unavailable" }
+  | { code: "truth.evidence_missing"; queryIndex: number };
+
+export interface ItemTypeCapability {
+  descriptor: ItemTypeDescriptor;
+  ready: boolean;
+  blockers: ItemCapabilityBlocker[];
+}
+
+export interface ItemCapabilityCatalog {
+  gamePackId: string;
+  gamePackSha256: string;
+  truthSnapshotId?: string | null;
+  itemTypes: ItemTypeCapability[];
+}
+
+export type ItemFieldValue =
+  | { kind: "text"; value: string }
+  | { kind: "integer"; value: number }
+  | { kind: "boolean"; value: boolean }
+  | { kind: "choice"; value: string }
+  | { kind: "string_list"; value: string[] };
+
+export interface ItemLocalization {
+  name: string;
+  description: string;
+  status: "confirmed" | "outdated";
+  translatedFrom?: string | null;
+}
+
+export interface ItemResourceBinding {
+  resourceId: string;
+  selectedVersion: string;
+}
+
+export interface ItemDefinition {
+  schemaVersion: 1;
+  itemId: string;
+  itemType: string;
+  canonicalFields: Record<string, ItemFieldValue>;
+  behaviorIntent: string[];
+  localizations: Record<string, ItemLocalization>;
+  resourceBindings: Record<string, ItemResourceBinding>;
+}
+
+export interface StoredItemDefinition {
+  definitionHash: string;
+  definition: ItemDefinition;
+}
+
+export async function getItemCapabilities(): Promise<ItemCapabilityCatalog> {
+  const value = await invokeCommand<unknown>("get_item_capabilities");
+  if (!isItemCapabilityCatalog(value)) throw toActionableFailure(undefined);
+  return value;
+}
+
+export async function listItemDefinitions(): Promise<StoredItemDefinition[]> {
+  const value = await invokeCommand<unknown>("list_item_definitions");
+  if (!Array.isArray(value) || !value.every(isStoredItemDefinition)) {
+    throw toActionableFailure(undefined);
+  }
+  return value;
+}
+
+export async function getItemDefinition(
+  itemId: string,
+  definitionHash?: string,
+): Promise<StoredItemDefinition> {
+  const value = await invokeCommand<unknown>("get_item_definition", {
+    itemId,
+    definitionHash: definitionHash ?? null,
+  });
+  if (!isStoredItemDefinition(value)) throw toActionableFailure(undefined);
+  return value;
+}
+
+export async function saveItemDefinition(
+  definition: ItemDefinition,
+): Promise<StoredItemDefinition> {
+  const value = await invokeCommand<unknown>("save_item_definition", { definition });
+  if (!isStoredItemDefinition(value)) throw toActionableFailure(undefined);
+  return value;
+}
+
 export interface LlmSnapshot {
   provider: string;
   model: string;
@@ -408,4 +521,144 @@ function isRunSummary(value: unknown): value is RunSummary {
     typeof value.featureId === "string" &&
     isRunStatus(value.status)
   );
+}
+
+function isItemCapabilityCatalog(value: unknown): value is ItemCapabilityCatalog {
+  return (
+    isRecord(value) &&
+    typeof value.gamePackId === "string" &&
+    isSha256(value.gamePackSha256) &&
+    (value.truthSnapshotId === undefined || value.truthSnapshotId === null || isSha256(value.truthSnapshotId)) &&
+    Array.isArray(value.itemTypes) &&
+    value.itemTypes.every(isItemTypeCapability)
+  );
+}
+
+function isItemTypeCapability(value: unknown): value is ItemTypeCapability {
+  return (
+    isRecord(value) &&
+    typeof value.ready === "boolean" &&
+    isItemTypeDescriptor(value.descriptor) &&
+    Array.isArray(value.blockers) &&
+    value.blockers.every(isItemCapabilityBlocker)
+  );
+}
+
+function isItemCapabilityBlocker(value: unknown): value is ItemCapabilityBlocker {
+  if (!isRecord(value) || typeof value.code !== "string") return false;
+  return value.code === "truth.snapshot_unavailable"
+    ? Object.keys(value).length === 1
+    : value.code === "truth.evidence_missing" &&
+        Object.keys(value).length === 2 &&
+        Number.isInteger(value.queryIndex) &&
+        (value.queryIndex as number) >= 0;
+}
+
+function isItemTypeDescriptor(value: unknown): value is ItemTypeDescriptor {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    isStringRecord(value.displayNames) &&
+    isStringArrayValue(value.requiredLocales) &&
+    Array.isArray(value.fields) &&
+    value.fields.every(isItemFieldSpec) &&
+    Array.isArray(value.evidenceQueries) &&
+    value.evidenceQueries.every(
+      (query) => isRecord(query) && isStringArrayValue(query.symbols) && isStringArrayValue(query.terms),
+    ) &&
+    isStringArrayValue(value.requiredResourceRoles)
+  );
+}
+
+function isItemFieldSpec(value: unknown): value is ItemFieldSpec {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.required === "boolean" &&
+    isStringRecord(value.displayNames) &&
+    isItemFieldValueSpec(value.value)
+  );
+}
+
+function isItemFieldValueSpec(value: unknown): value is ItemFieldValueSpec {
+  if (!isRecord(value) || typeof value.kind !== "string") return false;
+  switch (value.kind) {
+    case "text":
+      return typeof value.multiline === "boolean" && Number.isInteger(value.minLength) && Number.isInteger(value.maxLength);
+    case "integer":
+      return Number.isInteger(value.min) && Number.isInteger(value.max);
+    case "boolean":
+      return true;
+    case "choice":
+      return Array.isArray(value.options) && value.options.every(
+        (option) => isRecord(option) && typeof option.value === "string" && isStringRecord(option.displayNames),
+      );
+    case "string_list":
+      return Number.isInteger(value.minItems) && Number.isInteger(value.maxItems) && Number.isInteger(value.itemMaxLength);
+    default:
+      return false;
+  }
+}
+
+function isStoredItemDefinition(value: unknown): value is StoredItemDefinition {
+  return isRecord(value) && isSha256(value.definitionHash) && isItemDefinition(value.definition);
+}
+
+function isItemDefinition(value: unknown): value is ItemDefinition {
+  return (
+    isRecord(value) &&
+    value.schemaVersion === 1 &&
+    typeof value.itemId === "string" &&
+    typeof value.itemType === "string" &&
+    isRecord(value.canonicalFields) &&
+    Object.values(value.canonicalFields).every(isItemFieldValue) &&
+    isStringArrayValue(value.behaviorIntent) &&
+    isRecord(value.localizations) &&
+    Object.values(value.localizations).every(isItemLocalization) &&
+    isRecord(value.resourceBindings) &&
+    Object.values(value.resourceBindings).every(isItemResourceBinding)
+  );
+}
+
+function isItemFieldValue(value: unknown): value is ItemFieldValue {
+  if (!isRecord(value) || typeof value.kind !== "string") return false;
+  switch (value.kind) {
+    case "text":
+    case "choice":
+      return typeof value.value === "string";
+    case "integer":
+      return Number.isInteger(value.value);
+    case "boolean":
+      return typeof value.value === "boolean";
+    case "string_list":
+      return isStringArrayValue(value.value);
+    default:
+      return false;
+  }
+}
+
+function isItemLocalization(value: unknown): value is ItemLocalization {
+  return (
+    isRecord(value) &&
+    typeof value.name === "string" &&
+    typeof value.description === "string" &&
+    (value.status === "confirmed" || value.status === "outdated") &&
+    (value.translatedFrom === undefined || value.translatedFrom === null || typeof value.translatedFrom === "string")
+  );
+}
+
+function isItemResourceBinding(value: unknown): value is ItemResourceBinding {
+  return isRecord(value) && typeof value.resourceId === "string" && isSha256(value.selectedVersion);
+}
+
+function isSha256(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+  return isRecord(value) && Object.values(value).every((item) => typeof item === "string");
+}
+
+function isStringArrayValue(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
 }

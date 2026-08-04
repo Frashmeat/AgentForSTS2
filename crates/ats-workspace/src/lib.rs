@@ -6,7 +6,8 @@ mod resource;
 
 pub use item::{
     ITEM_DEFINITION_SCHEMA_VERSION, ItemDefinition, ItemDefinitionError, ItemFieldValue,
-    ItemLocalization, ItemResourceBinding, LocalizationStatus,
+    ItemLocalization, ItemRepository, ItemResourceBinding, LocalizationStatus,
+    StoredItemDefinition,
 };
 
 pub use project::{

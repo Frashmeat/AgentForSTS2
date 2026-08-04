@@ -63,6 +63,50 @@ impl CommandFailure {
         )
     }
 
+    pub fn truth_evidence_missing(stage: &str) -> Self {
+        fixed(
+            "truth.evidence_missing",
+            "truth",
+            stage,
+            "The selected item type is not ready for the current game evidence.",
+            RecoveryAction::RefreshTruth,
+            false,
+        )
+    }
+
+    pub fn item_invalid(stage: &str) -> Self {
+        fixed(
+            "item.definition_invalid",
+            "input",
+            stage,
+            "The item definition does not match the selected Game Pack contract.",
+            RecoveryAction::None,
+            false,
+        )
+    }
+
+    pub fn item_not_found(stage: &str) -> Self {
+        fixed(
+            "item.not_found",
+            "state",
+            stage,
+            "The requested item definition was not found.",
+            RecoveryAction::None,
+            false,
+        )
+    }
+
+    pub fn item_storage(stage: &str) -> Self {
+        fixed(
+            "item.storage_failed",
+            "storage",
+            stage,
+            "The item library could not update its local state.",
+            RecoveryAction::Retry,
+            true,
+        )
+    }
+
     pub fn storage(stage: &str) -> Self {
         fixed(
             "run.storage_failed",

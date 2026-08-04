@@ -31,6 +31,33 @@ Questions to answer:
 - 管理端页面不要再维护一次性 `error/message` 状态条，也不要直接调用 `window.confirm`。
 - 页面内的业务状态展示可以保留，例如健康状态徽标、不可用原因提示、接口返回的最后错误字段；这些是数据展示，不是操作通知。
 
+### Pack-Driven Item Editor
+
+`src/pages/ModEditorPage.tsx` renders Item types and canonical fields exclusively from
+`ItemCapabilityCatalog`. Game-specific type IDs and option lists are forbidden in React.
+
+```text
+getItemCapabilities
+  -> ready/blocked descriptor
+  -> createItemDraft(descriptor)
+  -> generic field controls
+  -> saveItemDefinition
+  -> StoredItemDefinition(definitionHash + definition)
+```
+
+- `text`, `integer`, `boolean`, `choice` and `string_list` are the complete generic field-control
+  switch; adding a game Item type must not add another component branch.
+- Blocked descriptors remain visible with `capabilityReason`, but new/save/generation actions are
+  disabled. The backend repeats the authoritative readiness check.
+- Item lists show the current pointer and definition hash. Historical definitions are loaded by
+  `itemId + definitionHash`; React never mutates a previously returned snapshot in place.
+- Primary locale edits mark derived translations outdated. Editing an already confirmed secondary
+  locale also makes it outdated; `confirmLocalization` is the only transition back to confirmed.
+- A translation whose `translatedFrom` locale is absent is a client-visible Draft issue and cannot
+  be submitted as a malformed Tauri argument.
+- The temporary Plan/Single bridge must be visibly labeled and must not claim ItemDefinition-hash
+  acceptance until the definition-bound generation Order replaces it.
+
 ---
 
 ## Props Conventions
