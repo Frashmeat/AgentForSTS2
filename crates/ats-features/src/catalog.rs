@@ -20,6 +20,7 @@ pub fn built_in_feature_contracts() -> Vec<FeatureContract> {
         contract::<SingleGenerateFeature>(&["mod.generate.single", "resource.prepare.specs"]),
         contract::<BatchGenerateFeature>(&[
             "mod.generate.batch",
+            "mod.plan.guidance",
             "mod.generate.single",
             "resource.prepare.specs",
         ]),
@@ -74,6 +75,23 @@ mod tests {
     fn built_in_catalog_has_unique_feature_contracts() {
         let contracts = built_in_feature_contracts();
         assert_eq!(contracts.len(), 9);
+        let batch = contracts
+            .iter()
+            .find(|contract| contract.id.as_str() == "mod.generate.batch")
+            .expect("batch contract is built in");
+        assert_eq!(
+            batch
+                .required_contributions
+                .iter()
+                .map(ContributionId::as_str)
+                .collect::<Vec<_>>(),
+            vec![
+                "mod.generate.batch",
+                "mod.plan.guidance",
+                "mod.generate.single",
+                "resource.prepare.specs",
+            ]
+        );
         assert_eq!(
             contracts
                 .iter()

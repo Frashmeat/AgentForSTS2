@@ -305,6 +305,62 @@ let run = RunRecord::new(submission.feature_id, submission.request);
 session.submit(run, worker).await
 ```
 
+### Scenario: Definition-Driven Batch And Complex Composition
+
+#### 1. Scope / Trigger
+
+This contract applies whenever the desktop submits, displays or retries Batch/Complex generation.
+It prevents the Shell from authoring `PlanItem`, keeps every retry pinned to immutable Item input,
+and makes child outcomes persistable even when every selected Item fails.
+
+#### 2. Schemas
+
+`feature.mod-generate-batch-request` v4 is:
+
+```text
+modId
+items[] = artifactId + StoredItemDefinition
+failFast
+```
+
+Batch deterministically converts `definition.behaviorIntent` to `ModPlanRequest.requirements`, runs
+Plan, pins the typed result back to the same `itemId/itemType`, then invokes Single v3. Batch result
+v2 records `total/processed/succeeded/failed` plus, per processed Item, `definitionHash`,
+`planRunId`, optional `generationRunId`, terminal status, typed failure, Plan and Single result.
+
+`feature.mod-generate-complex-request` v3 contains the exact Batch v4 request plus Package request.
+Complex result v2 always contains the Batch result. Build/Package Run IDs and results are present
+only when `processed == total && failed == 0`; otherwise delivery is skipped.
+
+#### 3. Contracts
+
+- Every Plan and Single attempt is a terminal persisted child `RunRecord`; no progress event or
+  parent summary may replace the repository record.
+- A completed Batch parent is `succeeded` even when Item results are failed. Product callers must
+  inspect `failed/items`; cancellation and composition contract/infrastructure errors remain parent
+  failures or cancellation.
+- `failFast=true` stops after the first failed Item. Unprocessed request Items have no child Run and
+  are identified by the request/result difference; no skipped Run may be fabricated.
+- Retry submits only failed items copied from the previous parent Run request. Loading a newer
+  current Item pointer is forbidden because it changes the pinned definition hash.
+- Desktop preflight validates every definition, non-empty behavior intent, Pack/Truth readiness and
+  selected Resource media before `RunRecord::new` or model work.
+- Plan/Single execution remains serial because project writes, rollback and Artifact publication
+  share one project transaction boundary.
+
+#### 4. Required Tests
+
+```powershell
+cargo test -p agentthespire-desktop --test stage2_composition -- --nocapture
+cargo test -p agentthespire-desktop --test stage2_single_mod -- --nocapture
+npm run test:frontend
+npx tsc -b --pretty false
+```
+
+Tests must cover Plan failure without a Single child, generation failure with both children,
+fail-fast unprocessed inputs, Complex delivery skip, exact-hash retry, malformed payload rejection,
+and a four-type Relic/Card/Potion/Power Batch with real compile and hash-verifiable Artifacts.
+
 ## 5. Resource Workspace
 
 `ats-workspace` stores ResourceAsset schema v2 with immutable candidates and explicit selection. A Feature references only `resourceId + selectedVersion`; a new upload, Pack default, AI response, or deterministic derived output has `selectedVersion=null` until an explicit select succeeds. Stale or tampered bytes fail. The registered HTTP Media Adapter supports Images/Chat protocols, cancellation, typed status mapping, bounded bytes, and request-hash provenance; health reports registration, not provider connectivity.

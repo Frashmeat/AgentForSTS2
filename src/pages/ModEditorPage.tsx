@@ -171,7 +171,7 @@ export function ModEditorPage() {
         subtitle={project?.name ?? "No project open"}
         actions={<Button onClick={() => void loadWorkspace()}><BookOpen size={14} /> Refresh</Button>}
       />
-      <ActionableErrorNotice failure={failure} />
+      {failure && <div data-testid="item-editor-error"><ActionableErrorNotice failure={failure} /></div>}
       {!project && <Notice variant="warn" title="Project required">Open a project from Dashboard.</Notice>}
       {catalog && (
         <Notice variant={catalog.truthSnapshotId ? "ok" : "warn"} title="Pack capability identity">
@@ -182,7 +182,7 @@ export function ModEditorPage() {
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(260px,0.7fr)_minmax(0,1.8fr)] gap-4">
         <Card eyebrow="library" title="Saved items" subtitle="Current pointers; older definition hashes remain immutable.">
           <Field label="New item type">
-            <select value={newItemType} onChange={(event) => setNewItemType(event.target.value)}>
+            <select data-testid="new-item-type" value={newItemType} onChange={(event) => setNewItemType(event.target.value)}>
               {catalog?.itemTypes.map((capability) => (
                 <option key={capability.descriptor.id} value={capability.descriptor.id} disabled={!capability.ready}>
                   {localizedLabel(capability.descriptor.displayNames)} · {capabilityReason(capability)}
@@ -191,9 +191,9 @@ export function ModEditorPage() {
             </select>
           </Field>
           <Field label="Stable item ID" hint="Lowercase letters, digits, underscore or hyphen.">
-            <input className="input-mono" value={newItemId} onChange={(event) => setNewItemId(event.target.value)} placeholder="burning-blood" />
+            <input data-testid="new-item-id" className="input-mono" value={newItemId} onChange={(event) => setNewItemId(event.target.value)} placeholder="burning-blood" />
           </Field>
-          <Button variant="accent" disabled={!project || !newItemId.trim() || busy} onClick={createDraft}>
+          <Button data-testid="new-item-submit" variant="accent" disabled={!project || !newItemId.trim() || busy} onClick={createDraft}>
             <Plus size={14} /> New item
           </Button>
           <CardSection title="Current definitions">
@@ -229,7 +229,7 @@ export function ModEditorPage() {
           eyebrow="definition v1"
           title={draft?.itemId || "Create or open an item"}
           subtitle={draft ? `${draft.itemType} · ${currentStoredDefinition?.definitionHash ?? "unsaved changes"}` : "The form is rendered from the selected Pack descriptor."}
-          actions={draft && <Button variant="success" disabled={busy || issues.length > 0 || !selectedCapability?.ready} onClick={() => void saveDraft()}><Save size={14} /> Save snapshot</Button>}
+          actions={draft && <Button data-testid="item-save" variant="success" disabled={busy || issues.length > 0 || !selectedCapability?.ready} onClick={() => void saveDraft()}><Save size={14} /> Save snapshot</Button>}
         >
           {!draft || !selectedCapability ? (
             <Notice variant="muted" title="No item selected">Choose a ready Pack type or open an existing definition.</Notice>
@@ -246,7 +246,7 @@ export function ModEditorPage() {
               </CardSection>
               <CardSection title="Behavior intent">
                 <Field label="One intent per line" hint="Structured fields remain canonical; use this area for behavior that a form cannot express.">
-                  <textarea className="input-mono min-h-32" value={draft.behaviorIntent.join("\n")} onChange={(event) => setDraft(setBehaviorText(draft, event.target.value))} />
+                  <textarea data-testid="item-behavior-intent" className="input-mono min-h-32" value={draft.behaviorIntent.join("\n")} onChange={(event) => setDraft(setBehaviorText(draft, event.target.value))} />
                 </Field>
               </CardSection>
               <CardSection title="Localization">
@@ -294,6 +294,7 @@ export function ModEditorPage() {
                 {resourceIssues.length > 0 && <Notice variant="warn" title="Resource checks">{resourceIssues.join(" ")}</Notice>}
               </CardSection>
               <CardSection title="Typed definition preview">
+                {currentStoredDefinition && <div data-testid="item-saved-hash" className="font-mono text-xs mb-2">{currentStoredDefinition.definitionHash}</div>}
                 <pre className="pre-block max-h-72">{JSON.stringify(draft, null, 2)}</pre>
               </CardSection>
             </>

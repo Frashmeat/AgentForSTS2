@@ -1,0 +1,44 @@
+{
+  "id": "sts2-pack-types-resource-experience",
+  "name": "sts2-pack-types-resource-experience",
+  "title": "brainstorm: STS2 Pack Mod 类型与资源体验",
+  "description": "Pack-driven STS2 Item and Resource foundation followed by relic/card/potion/power expansion",
+  "status": "completed",
+  "dev_type": "fullstack",
+  "scope": "game pack item and resource experience",
+  "priority": "P2",
+  "creator": "codex-agent",
+  "assignee": "codex-agent",
+  "createdAt": "2026-08-04",
+  "completedAt": "2026-08-04",
+  "branch": null,
+  "base_branch": "rust",
+  "worktree_path": null,
+  "current_phase": 3,
+  "next_action": [
+    {
+      "phase": 1,
+      "action": "implement"
+    },
+    {
+      "phase": 2,
+      "action": "check"
+    },
+    {
+      "phase": 3,
+      "action": "finish"
+    },
+    {
+      "phase": 4,
+      "action": "create-pr"
+    }
+  ],
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "Orders 1-8 implementation and machine gates are complete. A new release candidate, installer acceptance, real Provider and real game behavior remain separate authorization gates.",
+  "meta": {}
+}

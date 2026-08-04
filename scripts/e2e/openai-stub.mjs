@@ -10,57 +10,24 @@ const baseLibPath = process.env.ATS_E2E_BASELIB_PATH;
 if (!baseLibPath) throw new Error("ATS_E2E_BASELIB_PATH is required");
 
 const plan = {
-  id: "gui_relic",
-  type: "relic",
-  name: "GuiRelic",
-  name_zhs: "界面遗物",
-  description: "A deterministic relic for GUI verification.",
-  goal: "Verify the desktop delivery chain.",
-  detailed_description: "用于本地 GUI E2E。固定输出，不调用外部模型。",
-  implementation_notes: "Compile a minimal deterministic C# declaration.",
-  needs_image: true,
-  image_description: "A simple green crystal relic on a transparent background.",
-  depends_on_item_ids: [],
-  scope_boundary: "No gameplay behavior beyond compilation.",
-  relationship_reason: "Independent verification asset.",
-  acceptance_notes: "C#, localization, images, DLL, PCK and zip exist.",
-  affected_targets: ["player"],
-  relationship_type: "independent",
-  clarification_status: "",
-  clarification_questions: [],
-  provided_image_b64: "",
+  itemId: "gui-code",
+  itemType: "custom_code",
+  name: "GUI Code",
+  summary: "A deterministic custom-code item for GUI verification.",
+  behaviorIntent: ["Expose one compile-test fixture type."],
+  implementationConstraints: ["Compile as a minimal C# declaration."],
+  evidenceRequirements: ["Use the verified custom-code contract."],
+  acceptanceCriteria: ["The generated project compiles."],
 };
 
 const bundle = {
-  csharp: "public sealed class GuiRelic {}",
-  localization: {
-    eng: {
-      "E2EMOD-GUI_RELIC.title": "GUI Relic",
-      "E2EMOD-GUI_RELIC.description": "A deterministic verification relic.",
-      "E2EMOD-GUI_RELIC.flavor": "Built by the local E2E stub.",
-    },
-    zhs: {
-      "E2EMOD-GUI_RELIC.title": "界面遗物",
-      "E2EMOD-GUI_RELIC.description": "用于确定性验证的遗物。",
-      "E2EMOD-GUI_RELIC.flavor": "由本地 E2E stub 构建。",
-    },
-  },
+  files: { source: "public sealed class GuiCode {}" },
+  acceptanceNotes: ["The deterministic custom-code bundle was assembled."],
 };
 
 const compileFailureBundle = {
-  csharp: "public sealed class CompileFailureRelic { private MissingType value; }",
-  localization: {
-    eng: {
-      "E2EMOD-COMPILE_FAILURE_RELIC.title": "Compile Failure Relic",
-      "E2EMOD-COMPILE_FAILURE_RELIC.description": "A deterministic compile failure.",
-      "E2EMOD-COMPILE_FAILURE_RELIC.flavor": "Retained only as run diagnostics.",
-    },
-    zhs: {
-      "E2EMOD-COMPILE_FAILURE_RELIC.title": "编译失败遗物",
-      "E2EMOD-COMPILE_FAILURE_RELIC.description": "用于确定性编译失败验证。",
-      "E2EMOD-COMPILE_FAILURE_RELIC.flavor": "仅保留为本轮诊断。",
-    },
-  },
+  files: { source: "public sealed class CompileFailureCode { private MissingType value; }" },
+  acceptanceNotes: ["The deterministic compile failure was assembled."],
 };
 
 function crc32(bytes) {
@@ -126,34 +93,15 @@ async function record(kind) {
   await fs.appendFile(path.join(root, "stub-requests.jsonl"), `${JSON.stringify({ kind })}\n`);
 }
 
-async function streamCompletion(response, content, initialDelay) {
-  response.writeHead(200, {
-    "content-type": "text/event-stream",
-    "cache-control": "no-cache",
-    connection: "keep-alive",
-  });
+async function completeResponse(response, content, initialDelay) {
   await delay(initialDelay);
-  response.write(`data: ${JSON.stringify({
+  response.writeHead(200, { "content-type": "application/json" });
+  response.end(JSON.stringify({
     id: "e2e-stub",
     model: "e2e-stub",
-    choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }],
-  })}\n\n`);
-  const middle = Math.ceil(content.length / 2);
-  for (const text of [content.slice(0, middle), content.slice(middle)]) {
-    response.write(`data: ${JSON.stringify({
-      id: "e2e-stub",
-      model: "e2e-stub",
-      choices: [{ index: 0, delta: { content: text }, finish_reason: null }],
-    })}\n\n`);
-    await delay(50);
-  }
-  response.write(`data: ${JSON.stringify({
-    id: "e2e-stub",
-    model: "e2e-stub",
-    choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+    choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }],
     usage: { prompt_tokens: 10, completion_tokens: 10 },
-  })}\n\n`);
-  response.end("data: [DONE]\n\n");
+  }));
 }
 
 const server = http.createServer(async (request, response) => {
@@ -192,13 +140,14 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "POST" && request.url === "/v1/chat/completions") {
       const body = await readJson(request);
       const isPlan = body.messages?.some((message) =>
-        message.role === "system" && String(message.content).includes("PlanItem"));
+        message.role === "system"
+          && String(message.content).includes("Plan exactly one independently testable item"));
       const promptText = body.messages
         ?.map((message) => String(message.content ?? ""))
         .join("\n") ?? "";
       const isCompileFailure = promptText.includes("CompileFailureRelic");
       await record(isPlan ? "plan" : isCompileFailure ? "asset_bundle_compile_failure" : "asset_bundle");
-      await streamCompletion(
+      await completeResponse(
         response,
         JSON.stringify(isPlan ? plan : isCompileFailure ? compileFailureBundle : bundle),
         isPlan ? 1_200 : 100,

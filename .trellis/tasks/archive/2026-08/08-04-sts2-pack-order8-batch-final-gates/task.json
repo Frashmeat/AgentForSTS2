@@ -1,0 +1,51 @@
+{
+  "id": "sts2-pack-order8-batch-final-gates",
+  "name": "sts2-pack-order8-batch-final-gates",
+  "title": "Order 8: Visual Batch Complex and final gates",
+  "description": "Item Library driven Batch/Complex, child Run retry and final Stage 2 gates",
+  "status": "completed",
+  "dev_type": "fullstack",
+  "scope": "Batch v4, Complex v3, desktop composition and visual workflow",
+  "priority": "P2",
+  "creator": "codex-agent",
+  "assignee": "codex-agent",
+  "createdAt": "2026-08-04",
+  "completedAt": "2026-08-04",
+  "branch": null,
+  "base_branch": "rust",
+  "worktree_path": null,
+  "current_phase": 3,
+  "next_action": [
+    {
+      "phase": 1,
+      "action": "implement"
+    },
+    {
+      "phase": 2,
+      "action": "check"
+    },
+    {
+      "phase": 3,
+      "action": "finish"
+    },
+    {
+      "phase": 4,
+      "action": "create-pr"
+    }
+  ],
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "08-04-sts2-pack-types-resource-experience",
+  "relatedFiles": [
+    "crates/ats-features/src/mod_generate_batch.rs",
+    "crates/ats-features/src/mod_generate_complex.rs",
+    "src-tauri/src/composition.rs",
+    "src-tauri/src/commands/stage2.rs",
+    "src/services/tauriApi.ts",
+    "src/pages/BatchGenerationPage.tsx"
+  ],
+  "notes": "Batch v4 accepts pinned StoredItemDefinition inputs and owns Plan to Single composition; Complex v3 reuses Batch and gates Build/Package on all-item success.",
+  "meta": {}
+}

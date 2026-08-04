@@ -188,15 +188,42 @@ export interface SingleGenerateRequest extends Record<string, unknown> {
   definition: StoredItemDefinition;
 }
 
+export interface BatchDefinitionItem extends Record<string, unknown> {
+  artifactId: string;
+  definition: StoredItemDefinition;
+}
+
 export interface BatchGenerateRequest extends Record<string, unknown> {
-  items: SingleGenerateRequest[];
+  modId: string;
+  items: BatchDefinitionItem[];
   failFast: boolean;
 }
 
-export interface ComplexPlanningItem extends Record<string, unknown> {
-  request: ModPlanRequest;
-  artifactId: string;
-  definition: StoredItemDefinition;
+export interface SingleGenerateResult extends Record<string, unknown> {
+  artifactManifestRef: string;
+  manifestSha256: string;
+  generatedFileCount: number;
+  validationPrimitive: string;
+  acceptanceNotes: string[];
+}
+
+export interface BatchItemResult extends Record<string, unknown> {
+  itemId: string;
+  definitionHash: string;
+  planRunId: string;
+  generationRunId?: string | null;
+  status: RunStatus;
+  plan?: PlanItem | null;
+  result?: SingleGenerateResult | null;
+  failureCode?: string | null;
+}
+
+export interface BatchGenerateResult extends Record<string, unknown> {
+  total: number;
+  processed: number;
+  succeeded: number;
+  failed: number;
+  items: BatchItemResult[];
 }
 
 export interface ProjectPackageRequest extends Record<string, unknown> {
@@ -208,10 +235,17 @@ export interface ProjectPackageRequest extends Record<string, unknown> {
 }
 
 export interface ComplexGenerateRequest extends Record<string, unknown> {
-  modId: string;
-  planningItems: ComplexPlanningItem[];
-  failFast: boolean;
+  batch: BatchGenerateRequest;
   package: ProjectPackageRequest;
+}
+
+export interface ComplexGenerateResult extends Record<string, unknown> {
+  batchRunId: string;
+  batch: BatchGenerateResult;
+  buildRunId?: string | null;
+  build?: Record<string, unknown> | null;
+  packageRunId?: string | null;
+  package?: Record<string, unknown> | null;
 }
 
 export interface LogAnalyzeRequest extends Record<string, unknown> {
@@ -240,11 +274,11 @@ export function submitSingleGenerate(request: SingleGenerateRequest): Promise<st
 }
 
 export function submitBatchGenerate(request: BatchGenerateRequest): Promise<string> {
-  return submit("mod.generate.batch", "feature.mod-generate-batch-request", request, 3);
+  return submit("mod.generate.batch", "feature.mod-generate-batch-request", request, 4);
 }
 
 export function submitComplexGenerate(request: ComplexGenerateRequest): Promise<string> {
-  return submit("mod.generate.complex", "feature.mod-generate-complex-request", request, 2);
+  return submit("mod.generate.complex", "feature.mod-generate-complex-request", request, 3);
 }
 
 export function submitLogAnalyze(request: LogAnalyzeRequest): Promise<string> {

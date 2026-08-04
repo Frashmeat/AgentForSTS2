@@ -50,6 +50,34 @@ async function resolvePinnedBaseLib() {
   throw new Error("ATS_E2E_BASELIB_PATH or a pinned local BaseLib v3.3.8 source is required");
 }
 
+async function seedLegacyTruthFixture(appDataRoot) {
+  const sourceRoot = path.join(repoRoot, "runtime", "game-packs", "sts2");
+  const pointerPath = path.join(sourceRoot, "current.json");
+  const pointerBytes = await fsp.readFile(pointerPath);
+  const pointer = JSON.parse(pointerBytes.toString("utf8"));
+  if (
+    pointer.schemaVersion !== 1
+    || !/^[a-f0-9]{64}$/.test(pointer.snapshotId)
+    || !/^[a-f0-9]{64}$/.test(pointer.manifestSha256)
+  ) {
+    throw new Error("pinned Stage 1 Truth pointer is invalid");
+  }
+  const snapshotRoot = path.join(sourceRoot, "snapshots", pointer.snapshotId);
+  const manifestBytes = await fsp.readFile(path.join(snapshotRoot, "snapshot.json"));
+  const manifestSha256 = createHash("sha256").update(manifestBytes).digest("hex");
+  if (manifestSha256 !== pointer.manifestSha256) {
+    throw new Error("pinned Stage 1 Truth manifest hash does not match its pointer");
+  }
+  const destinationRoot = path.join(appDataRoot, "game-packs", "sts2");
+  assertInsideRoot(appDataRoot, destinationRoot, "Stage 1 Truth fixture");
+  await fsp.mkdir(path.join(destinationRoot, "snapshots"), { recursive: true });
+  await fsp.writeFile(path.join(destinationRoot, "current.json"), pointerBytes);
+  await fsp.cp(snapshotRoot, path.join(destinationRoot, "snapshots", pointer.snapshotId), {
+    recursive: true,
+    errorOnExist: true,
+  });
+}
+
 function assertInsideRoot(root, candidate, label) {
   const relative = path.relative(root, candidate);
   if (relative.startsWith("..") || path.isAbsolute(relative)) {
@@ -148,6 +176,7 @@ for (const [label, candidate] of [
 await fsp.mkdir(appDataRoot, { recursive: true });
 await fsp.mkdir(projectsRoot, { recursive: true });
 await fsp.mkdir(modsRoot, { recursive: true });
+await seedLegacyTruthFixture(appDataRoot);
 
 let passed = false;
 let stubProcess;
@@ -161,14 +190,14 @@ try {
         provider: "openai",
         model: "e2e-stub",
         api_key: "e2e-local-only",
-        base_url: stub.url,
+        base_url: `${stub.url}/v1`,
       },
       image_gen: {
         provider: "openai",
         protocol: "images_api",
         model: "e2e-image-stub",
         api_key: "e2e-local-only",
-        base_url: stub.url,
+        base_url: `${stub.url}/v1`,
         size: "1024x1024",
       },
       knowledge: { sts2_dll_path: sts2Path },

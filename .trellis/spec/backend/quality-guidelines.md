@@ -26,7 +26,7 @@ node scripts/check-stage2-dependency-dag.mjs
 
 Every product capability has one `FeatureId`, request schema, result schema, validator, and registry entry. Current catalog contains exactly 9 Features: project create, plan, resource prepare, single/batch/complex generation, log analyze, build, and package.
 
-Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-specific implementation, or duplicate Prompt pipeline. Batch reuses Single; Complex composes Plan, Batch/Single, Build, and Package.
+Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-specific implementation, or duplicate Prompt pipeline. Batch v4 owns definition-driven Plan -> Single child composition; Complex v3 reuses that exact Batch request/result and adds Build/Package only after every Item succeeds.
 
 ## 3. RunRecord v3
 
@@ -65,9 +65,12 @@ Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-sp
 - ItemDefinition schema v1 is validated on construction/deserialization and hashed from ordered
   canonical content. Run/Artifact consumers bind the exact hash; they never reconstruct locked
   fields from prose or mutate an older snapshot.
-- Single request schema v3 carries one `StoredItemDefinition`; Batch v3 embeds Single v3 and
-  Complex v2 carries one definition per planning item. `selectedResources` is forbidden at these
-  boundaries. Plan identity is checked or deterministically normalized to the pinned definition.
+- Single request schema v3 carries one `StoredItemDefinition`; Batch request v4 carries pinned
+  definitions and derives Plan requirements from canonical behavior intent. It persists Plan and
+  Single child Runs and returns per-item result v2 outcomes even if every Item fails. Complex v3
+  embeds the exact Batch request and omits Build/Package results unless all Items succeed.
+  `selectedResources` and caller-authored Batch Plan objects are forbidden at these boundaries.
+  Failed retry must reuse the original parent request definition snapshot, not a newer pointer.
 - ResourceAsset schema v2 keeps new upload, Pack default, AI and deterministic derived outputs as
   immutable candidates with `selectedVersion=null`; only an explicit select may move the pointer.
   Master derivation uses one staged batch, and a failure preserves every prior selection.

@@ -7,11 +7,15 @@ use ats_adapters::{
     FileArtifactStore, FileProjectWriter, FileResourceRepository, RegisteredValidationRunner,
 };
 use ats_features::FeatureSpec;
+use ats_features::mod_generate_batch::{
+    BatchDefinitionItem, BatchGenerateContext, BatchGenerateFeature, BatchGenerateRequest,
+    BatchGenerateService,
+};
 use ats_features::mod_generate_single::{
     SingleGenerateContext, SingleGenerateDependencies, SingleGenerateFeature,
     SingleGenerateRequest, SingleGenerateService,
 };
-use ats_features::mod_plan::PlanItem;
+use ats_features::mod_plan::{ModPlanFeature, ModPlanService, PlanItem};
 use ats_features::resource_prepare::ResourcePrepareFeature;
 use ats_game_context::{
     ContributionResolver, GamePackLoader, TruthEvidenceRecord, TruthSnapshotIndex,
@@ -59,6 +63,70 @@ impl ModelClient for FixtureModel {
                 "acceptanceNotes": ["fixture bundle assembled"]
             })
             .to_string(),
+            finish_reason: FinishReason::EndTurn,
+            usage: TokenUsage::default(),
+        })
+    }
+
+    async fn stream(
+        &self,
+        _: ModelRequestSnapshot,
+        _: &CancellationToken,
+    ) -> Result<ModelStream, ModelError> {
+        Ok(Box::pin(stream::empty()))
+    }
+}
+
+struct BatchFixtureModel {
+    generated: Mutex<u32>,
+}
+
+#[async_trait]
+impl ModelClient for BatchFixtureModel {
+    async fn complete(
+        &self,
+        request: ModelRequestSnapshot,
+        _: &CancellationToken,
+    ) -> Result<ModelResponse, ModelError> {
+        let content = if request.feature_id() == &ModPlanFeature::id() {
+            let prompt = request
+                .request()
+                .messages
+                .iter()
+                .map(|message| message.content.as_str())
+                .collect::<String>();
+            let item_type = prompt
+                .split("<requested-item-type>\n")
+                .nth(1)
+                .and_then(|value| value.split("\n</requested-item-type>").next())
+                .unwrap();
+            serde_json::json!({
+                "itemId": "planned_item",
+                "itemType": item_type,
+                "name": format!("Batch {item_type}"),
+                "summary": format!("Batch fixture for {item_type}"),
+                "behaviorIntent": [format!("Generate the {item_type} fixture")],
+                "implementationConstraints": [],
+                "evidenceRequirements": ["Use verified Pack evidence"],
+                "acceptanceCriteria": ["Compile and publish the item"]
+            })
+            .to_string()
+        } else {
+            let mut generated = self.generated.lock().unwrap();
+            *generated += 1;
+            serde_json::json!({
+                "files": {
+                    "source": format!("public class BatchGenerated{} {{}}", *generated),
+                    "localization.eng": "{}",
+                    "localization.zhs": "{}"
+                },
+                "acceptanceNotes": ["batch fixture assembled"]
+            })
+            .to_string()
+        };
+        Ok(ModelResponse {
+            model: "fixture-model".into(),
+            content,
             finish_reason: FinishReason::EndTurn,
             usage: TokenUsage::default(),
         })
@@ -127,7 +195,7 @@ impl Fixture {
         fs::create_dir(&project).unwrap();
         fs::write(
             project.join("Fixture.csproj"),
-            br#"<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>"#,
+            br#"<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup><ItemGroup><Compile Remove="artifacts/**" /><Compile Remove=".ats/**" /></ItemGroup></Project>"#,
         )
         .unwrap();
         let pack = GamePackLoader::load_built_in_sts2().unwrap();
@@ -1067,6 +1135,113 @@ async fn power_pack_truth_resources_prompt_and_artifact_form_one_vertical_contra
 }
 
 #[tokio::test]
+async fn batch_generates_all_four_definition_bound_sts2_types_with_real_compile() {
+    let fixture = Fixture::new();
+    let mut items = vec![BatchDefinitionItem {
+        artifact_id: fixture.request.artifact_id.clone(),
+        definition: fixture.request.definition.clone(),
+    }];
+    for source in [Fixture::card(), Fixture::potion(), Fixture::power()] {
+        items.push(copy_batch_item(&source, &fixture));
+    }
+    let plan_contributions = ContributionResolver::new([])
+        .resolve(
+            &fixture.pack,
+            &ModPlanFeature::id(),
+            &[ModPlanFeature::contribution_requirement()],
+        )
+        .unwrap();
+    let batch_contributions = ContributionResolver::new([])
+        .resolve(
+            &fixture.pack,
+            &BatchGenerateFeature::id(),
+            &[BatchGenerateFeature::contribution_requirement()],
+        )
+        .unwrap();
+    let request = BatchGenerateRequest {
+        mod_id: "FixtureMod".into(),
+        items,
+        fail_fast: false,
+    };
+    let payload =
+        VersionedPayload::from_typed(BatchGenerateFeature::request_schema(), &request).unwrap();
+    let mut run = RunRecord::new(BatchGenerateFeature::id(), payload);
+    run.apply_transition(RunTransition::Start, Utc::now())
+        .unwrap();
+    let model = BatchFixtureModel {
+        generated: Mutex::new(0),
+    };
+    let plan = ModPlanService::built_in().unwrap();
+    let single = SingleGenerateService::built_in().unwrap();
+    let batch = BatchGenerateService::new(&plan, &single);
+    let writer = FileProjectWriter;
+    let validator = RegisteredValidationRunner;
+    let artifacts = FileArtifactStore::new(fixture.project.clone());
+    let execution = batch
+        .execute(
+            SingleGenerateDependencies {
+                model: &model,
+                resources: &fixture.resources,
+                writer: &writer,
+                validator: &validator,
+                artifacts: &artifacts,
+            },
+            &mut run,
+            request,
+            BatchGenerateContext {
+                pack: &fixture.pack,
+                batch_contributions: &batch_contributions,
+                plan_contributions: &plan_contributions,
+                single_contributions: &fixture.generate_contributions,
+                resource_contributions: &fixture.resource_contributions,
+                truth: &fixture.truth,
+                project_root: &fixture.project,
+                project_context: "Four definition-bound STS2 items.",
+                custom_instructions: None,
+                model: None,
+            },
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(run.status(), RunStatus::Succeeded);
+    assert_eq!(execution.result.total, 4);
+    assert_eq!(
+        execution.result.succeeded, 4,
+        "{:#?}",
+        execution.result.items
+    );
+    assert_eq!(execution.result.failed, 0);
+    assert_eq!(execution.child_runs.len(), 8);
+    assert!(
+        execution
+            .child_runs
+            .iter()
+            .all(|child| child.status() == RunStatus::Succeeded)
+    );
+    for item in execution.result.items {
+        let generated = item.result.unwrap();
+        let manifest_bytes =
+            fs::read(fixture.project.join(&generated.artifact_manifest_ref)).unwrap();
+        assert_eq!(sha256(&manifest_bytes), generated.manifest_sha256);
+        let manifest: ArtifactManifest = serde_json::from_slice(&manifest_bytes).unwrap();
+        assert_eq!(
+            manifest.feature_extension.payload()["definitionHash"],
+            item.definition_hash.as_str(),
+        );
+    }
+    assert!(!has_staging(&fixture.project.join("artifacts")));
+    assert!(
+        !fixture
+            .project
+            .join(".ats/transactions")
+            .read_dir()
+            .is_ok_and(|mut entries| entries.next().is_some())
+    );
+}
+
+#[tokio::test]
 async fn compile_artifact_and_cancellation_failures_restore_project_files() {
     let service = SingleGenerateService::built_in().unwrap();
     for failure in ["compile", "artifact", "cancel"] {
@@ -1148,6 +1323,45 @@ async fn compile_artifact_and_cancellation_failures_restore_project_files() {
         assert!(result.is_err(), "{failure} unexpectedly succeeded");
         assert_eq!(run.status(), RunStatus::Running);
         fixture.assert_clean_rollback(&run);
+    }
+}
+
+fn copy_batch_item(source: &Fixture, target: &Fixture) -> BatchDefinitionItem {
+    let mut stored = source.request.definition.clone();
+    for binding in stored.definition.resource_bindings.values_mut() {
+        let asset = source.resources.load(&binding.resource_id).unwrap();
+        let selected = asset.selected().unwrap().clone();
+        let bytes = source
+            .resources
+            .read_selected_bytes(&binding.resource_id, &binding.selected_version)
+            .unwrap();
+        let candidate = target
+            .resources
+            .ingest_bytes(ResourceBytesIngestRequest {
+                logical_role: asset.logical_role().into(),
+                origin: ResourceOrigin::UserUpload,
+                file_name: format!("{}.png", asset.logical_role().replace('.', "-")),
+                media: PreparedResourceMedia {
+                    media_type: selected.blob.media_type,
+                    width: selected.blob.width,
+                    height: selected.blob.height,
+                    has_alpha: selected.blob.has_alpha,
+                    bytes,
+                },
+                provenance: ResourceVersionProvenance::Original,
+            })
+            .unwrap();
+        let selected = target
+            .resources
+            .select(candidate.resource_id(), &candidate.versions()[0].id)
+            .unwrap();
+        binding.resource_id = selected.resource_id().clone();
+        binding.selected_version = selected.selected_version().unwrap().clone();
+    }
+    stored.definition_hash = stored.definition.definition_hash().unwrap();
+    BatchDefinitionItem {
+        artifact_id: source.request.artifact_id.clone(),
+        definition: stored,
     }
 }
 

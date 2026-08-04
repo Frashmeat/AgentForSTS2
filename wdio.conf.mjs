@@ -38,5 +38,6 @@ export const config = {
   mochaOpts: {
     ui: "bdd",
     timeout: 300_000,
+    bail: true,
   },
 };

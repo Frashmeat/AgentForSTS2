@@ -245,6 +245,10 @@ impl Stage2Composition {
                     &BatchGenerateFeature::id(),
                     &[BatchGenerateFeature::contribution_requirement()],
                 )?;
+                let plan_contributions = self.resolve(
+                    &ModPlanFeature::id(),
+                    &[ModPlanFeature::contribution_requirement()],
+                )?;
                 let single_contributions = self.resolve(
                     &SingleGenerateFeature::id(),
                     &[SingleGenerateFeature::contribution_requirement()],
@@ -255,9 +259,12 @@ impl Stage2Composition {
                 )?;
                 let model = select_model(model_override, &settings.llm)?;
                 let adapters = SingleAdapters::new(project_root);
+                let plan = ModPlanService::built_in().map_err(|_| {
+                    failure("feature.recipe_invalid", "mod.generate.batch.plan_recipe")
+                })?;
                 let single = SingleGenerateService::built_in()
                     .map_err(|_| failure("feature.recipe_invalid", "mod.generate.batch.recipe"))?;
-                let execution = BatchGenerateService::new(&single)
+                let execution = BatchGenerateService::new(&plan, &single)
                     .execute(
                         adapters.dependencies(model.client(), resources),
                         &mut run,
@@ -265,6 +272,7 @@ impl Stage2Composition {
                         BatchGenerateContext {
                             pack: &self.pack,
                             batch_contributions: &batch_contributions,
+                            plan_contributions: &plan_contributions,
                             single_contributions: &single_contributions,
                             resource_contributions: &resource_contributions,
                             truth: &truth,
@@ -322,7 +330,7 @@ impl Stage2Composition {
                         "mod.generate.complex.single_recipe",
                     )
                 })?;
-                let batch = BatchGenerateService::new(&single);
+                let batch = BatchGenerateService::new(&plan, &single);
                 let build = ProjectBuildService;
                 let package = ProjectPackageService;
                 let writer = FileProjectWriter;
@@ -330,7 +338,7 @@ impl Stage2Composition {
                 let artifacts = FileArtifactStore::new(project_root.to_path_buf());
                 let build_runner = RegisteredBuildRunner;
                 let package_writer = ZipPackageWriter;
-                let execution = ComplexGenerateService::new(&plan, &batch, &build, &package)
+                let execution = ComplexGenerateService::new(&batch, &build, &package)
                     .execute(
                         ComplexGenerateDependencies {
                             model: model.client(),

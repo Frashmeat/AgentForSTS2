@@ -9,16 +9,17 @@ use ats_adapters::{
 };
 use ats_features::FeatureSpec;
 use ats_features::mod_generate_batch::{
-    BatchGenerateContext, BatchGenerateFeature, BatchGenerateRequest, BatchGenerateService,
+    BatchDefinitionItem, BatchGenerateContext, BatchGenerateFeature, BatchGenerateRequest,
+    BatchGenerateService,
 };
 use ats_features::mod_generate_complex::{
     ComplexGenerateContext, ComplexGenerateDependencies, ComplexGenerateFeature,
-    ComplexGenerateRequest, ComplexGenerateService, ComplexPlanningItem,
+    ComplexGenerateRequest, ComplexGenerateService,
 };
 use ats_features::mod_generate_single::{
-    SingleGenerateDependencies, SingleGenerateFeature, SingleGenerateRequest, SingleGenerateService,
+    SingleGenerateDependencies, SingleGenerateFeature, SingleGenerateService,
 };
-use ats_features::mod_plan::{ModPlanFeature, ModPlanRequest, ModPlanService, PlanItem};
+use ats_features::mod_plan::{ModPlanFeature, ModPlanService};
 use ats_features::project_build::{ProjectBuildFeature, ProjectBuildService};
 use ats_features::project_package::{
     ProjectPackageContext, ProjectPackageFeature, ProjectPackageRequest, ProjectPackageService,
@@ -54,6 +55,7 @@ fn custom_code_definition(id: &str) -> StoredItemDefinition {
 struct CompositionModel {
     generated: Mutex<u32>,
     fail_generation_calls: Vec<u32>,
+    fail_plan: bool,
     cancel_after_completion: Option<CancellationToken>,
 }
 
@@ -64,7 +66,9 @@ impl ModelClient for CompositionModel {
         request: ModelRequestSnapshot,
         _: &CancellationToken,
     ) -> Result<ModelResponse, ModelError> {
-        let content = if request.feature_id() == &ModPlanFeature::id() {
+        let content = if request.feature_id() == &ModPlanFeature::id() && self.fail_plan {
+            "not-json".into()
+        } else if request.feature_id() == &ModPlanFeature::id() {
             serde_json::json!({
                 "itemId":"planned_item",
                 "itemType":"custom_code",
@@ -202,6 +206,7 @@ impl Fixture {
         BatchGenerateContext {
             pack: &self.pack,
             batch_contributions: &self.batch,
+            plan_contributions: &self.plan,
             single_contributions: &self.single,
             resource_contributions: &self.resources,
             truth: &self.truth,
@@ -234,12 +239,15 @@ async fn batch_invokes_single_twice_without_parallel_codegen() {
     let model = CompositionModel {
         generated: Mutex::new(0),
         fail_generation_calls: Vec::new(),
+        fail_plan: false,
         cancel_after_completion: None,
     };
     let single = SingleGenerateService::built_in().unwrap();
-    let batch = BatchGenerateService::new(&single);
+    let plan = ModPlanService::built_in().unwrap();
+    let batch = BatchGenerateService::new(&plan, &single);
     let request = BatchGenerateRequest {
-        items: vec![single_request("one"), single_request("two")],
+        mod_id: "FixtureMod".into(),
+        items: vec![batch_item("one"), batch_item("two")],
         fail_fast: true,
     };
     let mut run = running_run::<BatchGenerateFeature, _>(&request);
@@ -256,7 +264,7 @@ async fn batch_invokes_single_twice_without_parallel_codegen() {
 
     assert_eq!(run.status(), RunStatus::Succeeded);
     assert_eq!(result.result.succeeded, 2);
-    assert_eq!(result.child_runs.len(), 2);
+    assert_eq!(result.child_runs.len(), 4);
     assert!(
         result
             .child_runs
@@ -273,12 +281,15 @@ async fn batch_continue_and_fail_fast_preserve_child_outcomes() {
         let model = CompositionModel {
             generated: Mutex::new(0),
             fail_generation_calls: vec![0],
+            fail_plan: false,
             cancel_after_completion: None,
         };
         let single = SingleGenerateService::built_in().unwrap();
-        let batch = BatchGenerateService::new(&single);
+        let plan = ModPlanService::built_in().unwrap();
+        let batch = BatchGenerateService::new(&plan, &single);
         let request = BatchGenerateRequest {
-            items: vec![single_request("one"), single_request("two")],
+            mod_id: "FixtureMod".into(),
+            items: vec![batch_item("one"), batch_item("two")],
             fail_fast,
         };
         let mut run = running_run::<BatchGenerateFeature, _>(&request);
@@ -292,14 +303,17 @@ async fn batch_continue_and_fail_fast_preserve_child_outcomes() {
             )
             .await;
         if fail_fast {
-            assert!(result.is_err());
+            let execution = result.unwrap();
+            assert_eq!(execution.result.processed, 1);
+            assert_eq!(execution.result.failed, 1);
+            assert_eq!(execution.child_runs.len(), 2);
             assert_eq!(*model.generated.lock().unwrap(), 1);
         } else {
             let execution = result.unwrap();
             assert_eq!(execution.result.succeeded, 1);
             assert_eq!(execution.result.failed, 1);
-            assert_eq!(execution.child_runs[0].status(), RunStatus::Failed);
-            assert_eq!(execution.child_runs[1].status(), RunStatus::Succeeded);
+            assert_eq!(execution.child_runs[1].status(), RunStatus::Failed);
+            assert_eq!(execution.child_runs[3].status(), RunStatus::Succeeded);
             assert_eq!(*model.generated.lock().unwrap(), 2);
         }
     }
@@ -312,12 +326,15 @@ async fn batch_cancellation_stops_before_project_writes() {
     let model = CompositionModel {
         generated: Mutex::new(0),
         fail_generation_calls: Vec::new(),
+        fail_plan: false,
         cancel_after_completion: Some(cancellation.clone()),
     };
     let single = SingleGenerateService::built_in().unwrap();
-    let batch = BatchGenerateService::new(&single);
+    let plan = ModPlanService::built_in().unwrap();
+    let batch = BatchGenerateService::new(&plan, &single);
     let request = BatchGenerateRequest {
-        items: vec![single_request("one"), single_request("two")],
+        mod_id: "FixtureMod".into(),
+        items: vec![batch_item("one"), batch_item("two")],
         fail_fast: false,
     };
     let mut run = running_run::<BatchGenerateFeature, _>(&request);
@@ -331,7 +348,7 @@ async fn batch_cancellation_stops_before_project_writes() {
         )
         .await;
     assert!(result.is_err());
-    assert_eq!(*model.generated.lock().unwrap(), 1);
+    assert_eq!(*model.generated.lock().unwrap(), 0);
     assert!(!fixture.project.join("Generated").exists());
     assert!(!fixture.project.join("artifacts").exists());
 }
@@ -344,25 +361,21 @@ async fn complex_composes_plan_batch_real_build_and_package() {
     let model = CompositionModel {
         generated: Mutex::new(0),
         fail_generation_calls: Vec::new(),
+        fail_plan: false,
         cancel_after_completion: None,
     };
     let plan = ModPlanService::built_in().unwrap();
     let single = SingleGenerateService::built_in().unwrap();
-    let batch = BatchGenerateService::new(&single);
+    let batch = BatchGenerateService::new(&plan, &single);
     let build = ProjectBuildService;
     let package = ProjectPackageService;
-    let complex = ComplexGenerateService::new(&plan, &batch, &build, &package);
+    let complex = ComplexGenerateService::new(&batch, &build, &package);
     let request = ComplexGenerateRequest {
-        mod_id: "FixtureMod".into(),
-        planning_items: vec![ComplexPlanningItem {
-            request: ModPlanRequest {
-                requirements: "Create one fixture type".into(),
-                item_type: Some("custom_code".into()),
-            },
-            artifact_id: "complex-item".into(),
-            definition: custom_code_definition("planned_item"),
-        }],
-        fail_fast: true,
+        batch: BatchGenerateRequest {
+            mod_id: "FixtureMod".into(),
+            items: vec![batch_item("planned_item")],
+            fail_fast: true,
+        },
         package: ProjectPackageRequest {
             artifact_id: "complex-package".into(),
             mod_id: "FixtureMod".into(),
@@ -406,10 +419,12 @@ async fn complex_composes_plan_batch_real_build_and_package() {
         .unwrap();
 
     assert_eq!(run.status(), RunStatus::Succeeded);
-    assert_eq!(execution.result.plans.len(), 1);
     assert_eq!(execution.result.batch.succeeded, 1);
-    assert_eq!(execution.result.build.steps.len(), 1);
-    assert_eq!(execution.result.package.report.file_count, 6);
+    assert_eq!(execution.result.build.as_ref().unwrap().steps.len(), 1);
+    assert_eq!(
+        execution.result.package.as_ref().unwrap().report.file_count,
+        6
+    );
     assert!(
         execution
             .child_runs
@@ -419,6 +434,115 @@ async fn complex_composes_plan_batch_real_build_and_package() {
     let zip_file = fs::File::open(fixture.project.join("packages/FixtureMod.zip")).unwrap();
     let archive = zip::ZipArchive::new(zip_file).unwrap();
     assert_eq!(archive.len(), 6);
+    assert!(!has_transaction_residue(&fixture.project));
+}
+
+#[tokio::test]
+async fn batch_plan_failure_is_persistable_without_single_child() {
+    let fixture = Fixture::new();
+    let model = CompositionModel {
+        generated: Mutex::new(0),
+        fail_generation_calls: Vec::new(),
+        fail_plan: true,
+        cancel_after_completion: None,
+    };
+    let plan = ModPlanService::built_in().unwrap();
+    let single = SingleGenerateService::built_in().unwrap();
+    let batch = BatchGenerateService::new(&plan, &single);
+    let request = BatchGenerateRequest {
+        mod_id: "FixtureMod".into(),
+        items: vec![batch_item("plan-failure")],
+        fail_fast: true,
+    };
+    let mut run = running_run::<BatchGenerateFeature, _>(&request);
+    let execution = batch
+        .execute(
+            single_dependencies(&fixture, &model),
+            &mut run,
+            request,
+            fixture.single_context(),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(run.status(), RunStatus::Succeeded);
+    assert_eq!(execution.result.failed, 1);
+    assert_eq!(execution.result.items[0].generation_run_id, None);
+    assert_eq!(execution.child_runs.len(), 1);
+    assert_eq!(execution.child_runs[0].feature_id(), &ModPlanFeature::id());
+    assert_eq!(execution.child_runs[0].status(), RunStatus::Failed);
+    assert_eq!(*model.generated.lock().unwrap(), 0);
+}
+
+#[tokio::test]
+async fn complex_skips_build_and_package_when_an_item_fails() {
+    let fixture = Fixture::new();
+    let model = CompositionModel {
+        generated: Mutex::new(0),
+        fail_generation_calls: vec![0],
+        fail_plan: false,
+        cancel_after_completion: None,
+    };
+    let plan = ModPlanService::built_in().unwrap();
+    let single = SingleGenerateService::built_in().unwrap();
+    let batch = BatchGenerateService::new(&plan, &single);
+    let build = ProjectBuildService;
+    let package = ProjectPackageService;
+    let complex = ComplexGenerateService::new(&batch, &build, &package);
+    let request = ComplexGenerateRequest {
+        batch: BatchGenerateRequest {
+            mod_id: "FixtureMod".into(),
+            items: vec![batch_item("failed-item")],
+            fail_fast: false,
+        },
+        package: ProjectPackageRequest {
+            artifact_id: "skipped-package".into(),
+            mod_id: "FixtureMod".into(),
+            source_relative_root: "delivery".into(),
+            output_relative_path: "packages/FixtureMod.zip".into(),
+            compression_level: None,
+        },
+    };
+    let mut run = running_run::<ComplexGenerateFeature, _>(&request);
+    let execution = complex
+        .execute(
+            ComplexGenerateDependencies {
+                model: &model,
+                resources: &fixture.repository,
+                writer: &fixture.writer,
+                validator: &fixture.validator,
+                artifacts: &fixture.artifacts,
+                build_runner: &RegisteredBuildRunner,
+                package_writer: &ZipPackageWriter,
+            },
+            &mut run,
+            request,
+            ComplexGenerateContext {
+                pack: &fixture.pack,
+                complex_contributions: &fixture.complex,
+                plan_contributions: &fixture.plan,
+                batch_contributions: &fixture.batch,
+                single_contributions: &fixture.single,
+                resource_contributions: &fixture.resources,
+                build_contributions: &fixture.build,
+                package_contributions: &fixture.package,
+                truth: &fixture.truth,
+                project_root: &fixture.project,
+                project_context: "Isolated SDK-style project",
+                custom_instructions: None,
+                model: None,
+            },
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(run.status(), RunStatus::Succeeded);
+    assert_eq!(execution.result.batch.failed, 1);
+    assert!(execution.result.build_run_id.is_none());
+    assert!(execution.result.package_run_id.is_none());
+    assert!(!fixture.project.join("packages/FixtureMod.zip").exists());
     assert!(!has_transaction_residue(&fixture.project));
 }
 
@@ -492,21 +616,9 @@ fn single_dependencies<'a>(
     }
 }
 
-fn single_request(id: &str) -> SingleGenerateRequest {
-    SingleGenerateRequest {
+fn batch_item(id: &str) -> BatchDefinitionItem {
+    BatchDefinitionItem {
         artifact_id: format!("artifact-{id}"),
-        mod_id: "FixtureMod".into(),
-        plan: PlanItem {
-            item_id: id.into(),
-            item_type: "custom_code".into(),
-            name: format!("Item {id}"),
-            summary: "A batch fixture item".into(),
-            behavior_intent: vec!["Expose one fixture type".into()],
-            implementation_constraints: Vec::new(),
-            evidence_requirements: vec!["A verified fixture type declaration".into()],
-            required_resource_roles: Vec::new(),
-            acceptance_criteria: vec!["The project compiles".into()],
-        },
         definition: custom_code_definition(id),
     }
 }

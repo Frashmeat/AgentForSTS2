@@ -41,10 +41,10 @@ export function SystemPage() {
         <div className="flex gap-2">
           <Button size="sm" onClick={() => void reload()} disabled={busy}><RefreshCw size={15} /> Reload</Button>
           <Button size="sm" variant="accent" onClick={() => void api.openConfigInEditor()} disabled={busy}><ExternalLink size={15} /> Open</Button>
-          <Button size="sm" variant="success" onClick={() => void save()} disabled={busy || !form}><Save size={15} /> Save</Button>
+          <Button data-testid="settings-save" size="sm" variant="success" onClick={() => void save()} disabled={busy || !form}><Save size={15} /> Save</Button>
         </div>
       } />
-      <ActionableErrorNotice failure={failure} />
+      {failure && <div data-testid="settings-error"><ActionableErrorNotice failure={failure} /></div>}
       {snapshot && form && (
         <>
           <Card eyebrow="model" title="LLM" actions={<Badge variant={snapshot.llm.apiKeyConfigured ? "ok" : "warn"}>{snapshot.llm.apiKeyConfigured ? "configured" : "missing key"}</Badge>}>
@@ -66,8 +66,8 @@ export function SystemPage() {
             <Field label="API key"><input type="password" className="input-mono" value={form.imageApiKey} placeholder={snapshot.imageGen.apiKeyConfigured ? "unchanged" : ""} onChange={(event) => setForm({ ...form, imageApiKey: event.target.value, imageApiKeyTouched: true })} /></Field>
           </Card>
           <Card eyebrow="local" title="Paths and credentials">
-            <Field label="STS2 assembly"><input className="input-mono" value={form.sts2DllPath} onChange={(event) => setForm({ ...form, sts2DllPath: event.target.value })} /></Field>
-            <Field label="Godot executable"><input className="input-mono" value={form.godotExePath} onChange={(event) => setForm({ ...form, godotExePath: event.target.value })} /></Field>
+            <Field label="STS2 assembly"><input data-testid="sts2-dll-path" className="input-mono" value={form.sts2DllPath} onChange={(event) => setForm({ ...form, sts2DllPath: event.target.value })} /></Field>
+            <Field label="Godot executable"><input data-testid="godot-exe-path" className="input-mono" value={form.godotExePath} onChange={(event) => setForm({ ...form, godotExePath: event.target.value })} /></Field>
             <Field label="GitHub token"><input type="password" className="input-mono" value={form.githubToken} placeholder={snapshot.runtimeWorkstation.githubTokenMasked !== "<empty>" ? "unchanged" : ""} onChange={(event) => setForm({ ...form, githubToken: event.target.value, githubTokenTouched: true })} /></Field>
           </Card>
         </>

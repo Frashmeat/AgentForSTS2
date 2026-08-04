@@ -8,7 +8,7 @@ use ats_runtime::{
     ArtifactPublisher, CancellationToken, ModelClient, PayloadError, ProjectFileWriter, RunId,
     RunLifecycleError, RunRecord, RunStatus, RunTransition, ValidationRunner, VersionedPayload,
 };
-use ats_workspace::ResourceRepository;
+use ats_workspace::{ResourceRepository, StoredItemDefinition};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -18,6 +18,7 @@ use crate::mod_generate_single::{
     SingleGenerateContext, SingleGenerateDependencies, SingleGenerateError, SingleGenerateRequest,
     SingleGenerateResult, SingleGenerateService,
 };
+use crate::mod_plan::{ModPlanContext, ModPlanFeature, ModPlanRequest, ModPlanService, PlanItem};
 
 pub struct BatchGenerateFeature;
 
@@ -31,11 +32,11 @@ impl FeatureSpec for BatchGenerateFeature {
     }
 
     fn request_schema() -> SchemaRef {
-        schema_version("feature.mod-generate-batch-request", 3)
+        schema_version("feature.mod-generate-batch-request", 4)
     }
 
     fn result_schema() -> SchemaRef {
-        schema("feature.mod-generate-batch-result")
+        schema_version("feature.mod-generate-batch-result", 2)
     }
 
     fn artifact_extension_schema() -> SchemaRef {
@@ -56,14 +57,23 @@ impl BatchGenerateFeature {
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BatchGenerateRequest {
-    pub items: Vec<SingleGenerateRequest>,
+    pub mod_id: String,
+    pub items: Vec<BatchDefinitionItem>,
     pub fail_fast: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BatchDefinitionItem {
+    pub artifact_id: String,
+    pub definition: StoredItemDefinition,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BatchGenerateResult {
     pub total: u32,
+    pub processed: u32,
     pub succeeded: u32,
     pub failed: u32,
     pub items: Vec<BatchItemResult>,
@@ -72,9 +82,14 @@ pub struct BatchGenerateResult {
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BatchItemResult {
-    pub child_run_id: RunId,
     pub item_id: String,
+    pub definition_hash: ats_kernel::Sha256Digest,
+    pub plan_run_id: RunId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation_run_id: Option<RunId>,
     pub status: RunStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<PlanItem>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result: Option<SingleGenerateResult>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -96,6 +111,7 @@ struct BatchContribution {
 pub struct BatchGenerateContext<'a> {
     pub pack: &'a LoadedGamePack,
     pub batch_contributions: &'a VerifiedContributionSet,
+    pub plan_contributions: &'a VerifiedContributionSet,
     pub single_contributions: &'a VerifiedContributionSet,
     pub resource_contributions: &'a VerifiedContributionSet,
     pub truth: &'a VerifiedTruthSnapshot,
@@ -111,13 +127,14 @@ pub struct BatchGenerateExecution {
 }
 
 pub struct BatchGenerateService<'a> {
+    plan: &'a ModPlanService,
     single: &'a SingleGenerateService,
 }
 
 impl<'a> BatchGenerateService<'a> {
     #[must_use]
-    pub fn new(single: &'a SingleGenerateService) -> Self {
-        Self { single }
+    pub fn new(plan: &'a ModPlanService, single: &'a SingleGenerateService) -> Self {
+        Self { plan, single }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -138,9 +155,7 @@ impl<'a> BatchGenerateService<'a> {
     {
         validate_run(run, &request)?;
         validate_context(&context)?;
-        if request.items.is_empty() || request.items.len() > 128 {
-            return Err(BatchGenerateError::InvalidInput);
-        }
+        validate_batch_generation_input(&request)?;
         let contribution: BatchContribution = context.batch_contributions.decode(&batch_slot())?;
         if contribution.compose != crate::mod_generate_single::SingleGenerateFeature::id() {
             return Err(BatchGenerateError::InvalidContribution);
@@ -148,15 +163,98 @@ impl<'a> BatchGenerateService<'a> {
 
         let total =
             u32::try_from(request.items.len()).map_err(|_| BatchGenerateError::InvalidInput)?;
-        let mut child_runs = Vec::with_capacity(request.items.len());
+        let mut child_runs = Vec::with_capacity(request.items.len() * 2);
         let mut items = Vec::with_capacity(request.items.len());
         for item in request.items {
             if cancellation.is_cancelled() {
                 return Err(BatchGenerateError::Cancelled);
             }
+            let plan_request = ModPlanRequest {
+                requirements: item.definition.definition.behavior_intent.join("\n"),
+                item_type: Some(item.definition.definition.item_type.to_string()),
+            };
+            let request_payload =
+                VersionedPayload::from_typed(ModPlanFeature::request_schema(), &plan_request)?;
+            let mut child = RunRecord::new(ModPlanFeature::id(), request_payload);
+            child.apply_transition(RunTransition::Start, Utc::now())?;
+            let plan_result = self
+                .plan
+                .execute(
+                    dependencies.model,
+                    plan_request,
+                    ModPlanContext {
+                        pack: context.pack,
+                        contributions: context.plan_contributions,
+                        project_context: Some(context.project_context),
+                        custom_instructions: context.custom_instructions,
+                        model: context.model.clone(),
+                    },
+                    cancellation,
+                )
+                .await;
+            let mut plan = match plan_result {
+                Ok(execution) => execution.item,
+                Err(error) => {
+                    let failure = error.run_failure();
+                    let code = failure.code.clone();
+                    if cancellation.is_cancelled() {
+                        child.apply_transition(
+                            RunTransition::Cancel {
+                                reason: cancellation
+                                    .reason()
+                                    .expect("cancelled token has a reason"),
+                            },
+                            Utc::now(),
+                        )?;
+                    } else {
+                        child.apply_transition(RunTransition::Fail { failure }, Utc::now())?;
+                    }
+                    items.push(BatchItemResult {
+                        item_id: item.definition.definition.item_id.to_string(),
+                        definition_hash: item.definition.definition_hash.clone(),
+                        plan_run_id: child.id().clone(),
+                        generation_run_id: None,
+                        status: child.status(),
+                        plan: None,
+                        result: None,
+                        failure_code: if cancellation.is_cancelled() {
+                            None
+                        } else {
+                            Some(code)
+                        },
+                    });
+                    child_runs.push(child);
+                    if cancellation.is_cancelled() {
+                        return Err(BatchGenerateError::Cancelled);
+                    }
+                    if request.fail_fast {
+                        break;
+                    }
+                    continue;
+                }
+            };
+            plan.item_id = item.definition.definition.item_id.to_string();
+            plan.item_type = item.definition.definition.item_type.to_string();
+            let plan_payload =
+                VersionedPayload::from_typed(ModPlanFeature::result_schema(), &plan)?;
+            child.apply_transition(
+                RunTransition::Succeed {
+                    result: plan_payload,
+                },
+                Utc::now(),
+            )?;
+            let plan_run_id = child.id().clone();
+            child_runs.push(child);
+
+            let single_request = SingleGenerateRequest {
+                artifact_id: item.artifact_id,
+                mod_id: request.mod_id.clone(),
+                plan: plan.clone(),
+                definition: item.definition.clone(),
+            };
             let request_payload = VersionedPayload::from_typed(
                 crate::mod_generate_single::SingleGenerateFeature::request_schema(),
-                &item,
+                &single_request,
             )?;
             let mut child = RunRecord::new(
                 crate::mod_generate_single::SingleGenerateFeature::id(),
@@ -174,7 +272,7 @@ impl<'a> BatchGenerateService<'a> {
                         artifacts: dependencies.artifacts,
                     },
                     &mut child,
-                    item.clone(),
+                    single_request,
                     SingleGenerateContext {
                         pack: context.pack,
                         contributions: context.single_contributions,
@@ -190,9 +288,12 @@ impl<'a> BatchGenerateService<'a> {
                 .await;
             match result {
                 Ok(execution) => items.push(BatchItemResult {
-                    child_run_id: child.id().clone(),
-                    item_id: item.plan.item_id.clone(),
+                    item_id: item.definition.definition.item_id.to_string(),
+                    definition_hash: item.definition.definition_hash.clone(),
+                    plan_run_id,
+                    generation_run_id: Some(child.id().clone()),
                     status: child.status(),
+                    plan: Some(plan),
                     result: Some(execution.result),
                     failure_code: None,
                 }),
@@ -212,9 +313,12 @@ impl<'a> BatchGenerateService<'a> {
                         child.apply_transition(RunTransition::Fail { failure }, Utc::now())?;
                     }
                     items.push(BatchItemResult {
-                        child_run_id: child.id().clone(),
-                        item_id: item.plan.item_id.clone(),
+                        item_id: item.definition.definition.item_id.to_string(),
+                        definition_hash: item.definition.definition_hash.clone(),
+                        plan_run_id,
+                        generation_run_id: Some(child.id().clone()),
                         status: child.status(),
+                        plan: Some(plan),
                         result: None,
                         failure_code: if cancellation.is_cancelled() {
                             None
@@ -241,14 +345,11 @@ impl<'a> BatchGenerateService<'a> {
                 .count(),
         )
         .map_err(|_| BatchGenerateError::InvalidInput)?;
-        let failed = u32::try_from(items.len())
-            .map_err(|_| BatchGenerateError::InvalidInput)?
-            .saturating_sub(succeeded);
-        if succeeded == 0 {
-            return Err(BatchGenerateError::AllItemsFailed);
-        }
+        let processed = u32::try_from(items.len()).map_err(|_| BatchGenerateError::InvalidInput)?;
+        let failed = processed.saturating_sub(succeeded);
         let result = BatchGenerateResult {
             total,
+            processed,
             succeeded,
             failed,
             items,
@@ -269,8 +370,6 @@ pub enum BatchGenerateError {
     ContextIdentityMismatch,
     #[error("batch generation Pack contribution is invalid")]
     InvalidContribution,
-    #[error("all batch items failed")]
-    AllItemsFailed,
     #[error("batch generation was cancelled")]
     Cancelled,
     #[error(transparent)]
@@ -300,6 +399,7 @@ fn validate_run(run: &RunRecord, request: &BatchGenerateRequest) -> Result<(), B
 fn validate_context(context: &BatchGenerateContext<'_>) -> Result<(), BatchGenerateError> {
     for contributions in [
         context.batch_contributions,
+        context.plan_contributions,
         context.single_contributions,
         context.resource_contributions,
     ] {
@@ -310,6 +410,7 @@ fn validate_context(context: &BatchGenerateContext<'_>) -> Result<(), BatchGener
         }
     }
     if context.batch_contributions.feature_id() != &BatchGenerateFeature::id()
+        || context.plan_contributions.feature_id() != &ModPlanFeature::id()
         || context.single_contributions.feature_id()
             != &crate::mod_generate_single::SingleGenerateFeature::id()
         || context.resource_contributions.feature_id()
@@ -318,6 +419,32 @@ fn validate_context(context: &BatchGenerateContext<'_>) -> Result<(), BatchGener
         return Err(BatchGenerateError::ContextIdentityMismatch);
     }
     Ok(())
+}
+
+fn valid_segment(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+}
+
+pub fn validate_batch_generation_input(
+    request: &BatchGenerateRequest,
+) -> Result<(), BatchGenerateError> {
+    if request.items.is_empty()
+        || request.items.len() > 128
+        || !valid_segment(&request.mod_id)
+        || request.items.iter().any(|item| {
+            !valid_segment(&item.artifact_id)
+                || item.definition.validate().is_err()
+                || item.definition.definition.behavior_intent.is_empty()
+        })
+    {
+        Err(BatchGenerateError::InvalidInput)
+    } else {
+        Ok(())
+    }
 }
 
 fn batch_slot() -> ContributionId {

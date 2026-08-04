@@ -5,7 +5,9 @@ use ats_adapters::{
     FileResourceRepository, FileTruthSnapshotRepository, ItemStoreError, Sts2TruthImporter,
 };
 use ats_features::item_definition::{ItemDefinitionValidationMode, ItemDefinitionValidator};
-use ats_features::mod_generate_batch::{BatchGenerateFeature, BatchGenerateRequest};
+use ats_features::mod_generate_batch::{
+    BatchGenerateFeature, BatchGenerateRequest, validate_batch_generation_input,
+};
 use ats_features::mod_generate_complex::{ComplexGenerateFeature, ComplexGenerateRequest};
 use ats_features::mod_generate_single::{
     SingleGenerateError, SingleGenerateFeature, SingleGenerateRequest,
@@ -375,8 +377,17 @@ fn validate_generation_submission(
                 .request
                 .decode::<BatchGenerateRequest>(&BatchGenerateFeature::request_schema())
                 .map_err(|_| CommandFailure::item_invalid("run.submit.readiness"))?;
+            validate_batch_generation_input(&request)
+                .map_err(|_| CommandFailure::item_invalid("run.submit.readiness"))?;
+            let contributions = resource_contributions(composition, "run.submit.resources")?;
             for item in &request.items {
-                validate_single(item)?;
+                validate_definition_resources(
+                    composition.pack(),
+                    &contributions,
+                    resources,
+                    &item.definition,
+                )
+                .map_err(map_generation_readiness)?;
             }
             Ok(())
         }
@@ -385,13 +396,13 @@ fn validate_generation_submission(
                 .request
                 .decode::<ComplexGenerateRequest>(&ComplexGenerateFeature::request_schema())
                 .map_err(|_| CommandFailure::item_invalid("run.submit.readiness"))?;
+            validate_batch_generation_input(&request.batch)
+                .map_err(|_| CommandFailure::item_invalid("run.submit.readiness"))?;
+            if request.package.mod_id != request.batch.mod_id {
+                return Err(CommandFailure::item_invalid("run.submit.readiness"));
+            }
             let contributions = resource_contributions(composition, "run.submit.resources")?;
-            for item in &request.planning_items {
-                if item.request.item_type.as_deref().is_some_and(|item_type| {
-                    item_type != item.definition.definition.item_type.as_str()
-                }) {
-                    return Err(CommandFailure::item_invalid("run.submit.readiness"));
-                }
+            for item in &request.batch.items {
                 validate_definition_resources(
                     composition.pack(),
                     &contributions,
@@ -451,7 +462,8 @@ fn requested_item_types(
                 .decode::<ComplexGenerateRequest>(&ComplexGenerateFeature::request_schema())
                 .map_err(|_| CommandFailure::item_invalid("run.submit.readiness"))?;
             Ok(request
-                .planning_items
+                .batch
+                .items
                 .into_iter()
                 .map(|item| item.definition.definition.item_type)
                 .collect())
@@ -518,7 +530,7 @@ fn map_generation_readiness(error: SingleGenerateError) -> CommandFailure {
 
 #[cfg(test)]
 mod tests {
-    use ats_features::mod_generate_complex::ComplexPlanningItem;
+    use ats_features::mod_generate_batch::BatchDefinitionItem;
     use ats_features::mod_plan::PlanItem;
     use ats_features::project_package::ProjectPackageRequest;
     use ats_kernel::ItemId;
@@ -526,8 +538,9 @@ mod tests {
     use super::*;
 
     fn stored_definition(item_type: &ItemTypeId) -> StoredItemDefinition {
-        let definition =
+        let mut definition =
             ItemDefinition::new(ItemId::parse("fixture-item").unwrap(), item_type.clone());
+        definition.behavior_intent = vec!["Create one fixture item.".into()];
         StoredItemDefinition {
             definition_hash: definition.definition_hash().unwrap(),
             definition,
@@ -605,7 +618,17 @@ mod tests {
             "mod.generate.batch",
             BatchGenerateFeature::request_schema(),
             &BatchGenerateRequest {
-                items: vec![single(&selected), single(&selected)],
+                mod_id: "FixtureMod".into(),
+                items: vec![
+                    BatchDefinitionItem {
+                        artifact_id: "fixture-one".into(),
+                        definition: stored_definition(&selected),
+                    },
+                    BatchDefinitionItem {
+                        artifact_id: "fixture-two".into(),
+                        definition: stored_definition(&selected),
+                    },
+                ],
                 fail_fast: false,
             },
         );
@@ -618,16 +641,14 @@ mod tests {
             "mod.generate.complex",
             ComplexGenerateFeature::request_schema(),
             &ComplexGenerateRequest {
-                mod_id: "FixtureMod".into(),
-                planning_items: vec![ComplexPlanningItem {
-                    request: ModPlanRequest {
-                        requirements: "Create one fixture item.".into(),
-                        item_type: Some(selected.as_str().into()),
-                    },
-                    artifact_id: "fixture-artifact".into(),
-                    definition: stored_definition(&selected),
-                }],
-                fail_fast: false,
+                batch: BatchGenerateRequest {
+                    mod_id: "FixtureMod".into(),
+                    items: vec![BatchDefinitionItem {
+                        artifact_id: "fixture-artifact".into(),
+                        definition: stored_definition(&selected),
+                    }],
+                    fail_fast: false,
+                },
                 package: ProjectPackageRequest {
                     artifact_id: "fixture-package".into(),
                     mod_id: "FixtureMod".into(),

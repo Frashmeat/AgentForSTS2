@@ -57,6 +57,18 @@ URL must begin with `data:image/png;base64,`; absolute or relative workspace pat
 preview transport. Single v3 carries `definition: StoredItemDefinition` and has no
 `selectedResources` field.
 
+Batch/Complex feature payloads are decoded only after matching exact schema identities:
+
+```text
+Batch request v4 / result v2
+Complex request v3 / result v2
+```
+
+The feature-specific decoder in `src/pages/batchGenerationModel.ts` checks StoredItemDefinition
+hashes, terminal per-item status, Plan/Single result shape,
+counter invariants, optional child Run IDs and all-or-none Complex delivery fields. A malformed
+payload returns the local actionable fallback; UI code must not cast `RunRecord.result.payload`.
+
 ---
 
 ## Common Patterns

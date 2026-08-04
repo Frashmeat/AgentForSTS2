@@ -62,6 +62,21 @@ getItemCapabilities
   stale selected pointers and Pack-shape mismatch keep the action disabled; backend preflight is
   authoritative and repeats the same gate before creating a Run.
 
+### Visual Batch And Complex
+
+`src/pages/BatchGenerationPage.tsx` selects current `StoredItemDefinition` pointers from the Item
+Library. React contains no editable JSON request state and no game-specific type branches.
+
+- Batch request items use deterministic `artifactId = itemId`; the exact definition hash is visible
+  in the selection and read-only typed request preview.
+- Pack-declared but blocked Item types remain visible and disabled. Empty behavior intent also keeps
+  selection disabled; desktop preflight remains authoritative.
+- Complex embeds the same Batch request and derives Package `modId` from the open project.
+- Child rows are loaded through `getRun` using IDs from a validated terminal result. Never invent a
+  failed/skipped Run from progress or from the request/result difference.
+- Retry copies only failed inputs from the previous parent Run request. It must not substitute a
+  newer Item Library pointer.
+
 ---
 
 ## Props Conventions

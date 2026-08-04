@@ -9,7 +9,7 @@ use ats_runtime::{
     ProjectFileWriter, RunId, RunLifecycleError, RunRecord, RunStatus, RunTransition,
     ValidationRunner, VersionedPayload,
 };
-use ats_workspace::{ResourceRepository, StoredItemDefinition};
+use ats_workspace::ResourceRepository;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -19,10 +19,8 @@ use crate::mod_generate_batch::{
     BatchGenerateContext, BatchGenerateError, BatchGenerateRequest, BatchGenerateResult,
     BatchGenerateService,
 };
-use crate::mod_generate_single::{SingleGenerateDependencies, SingleGenerateRequest};
-use crate::mod_plan::{
-    ModPlanContext, ModPlanError, ModPlanFeature, ModPlanRequest, ModPlanService, PlanItem,
-};
+use crate::mod_generate_single::SingleGenerateDependencies;
+use crate::mod_plan::ModPlanFeature;
 use crate::project_build::{
     ProjectBuildContext, ProjectBuildError, ProjectBuildFeature, ProjectBuildRequest,
     ProjectBuildResult, ProjectBuildService,
@@ -44,11 +42,11 @@ impl FeatureSpec for ComplexGenerateFeature {
     }
 
     fn request_schema() -> SchemaRef {
-        schema_version("feature.mod-generate-complex-request", 2)
+        schema_version("feature.mod-generate-complex-request", 3)
     }
 
     fn result_schema() -> SchemaRef {
-        schema("feature.mod-generate-complex-result")
+        schema_version("feature.mod-generate-complex-result", 2)
     }
 
     fn artifact_extension_schema() -> SchemaRef {
@@ -69,31 +67,23 @@ impl ComplexGenerateFeature {
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ComplexGenerateRequest {
-    pub mod_id: String,
-    pub planning_items: Vec<ComplexPlanningItem>,
-    pub fail_fast: bool,
+    pub batch: BatchGenerateRequest,
     pub package: ProjectPackageRequest,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ComplexPlanningItem {
-    pub request: ModPlanRequest,
-    pub artifact_id: String,
-    pub definition: StoredItemDefinition,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ComplexGenerateResult {
-    pub plans: Vec<PlanItem>,
-    pub plan_run_ids: Vec<RunId>,
     pub batch_run_id: RunId,
     pub batch: BatchGenerateResult,
-    pub build_run_id: RunId,
-    pub build: ProjectBuildResult,
-    pub package_run_id: RunId,
-    pub package: ProjectPackageResult,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build_run_id: Option<RunId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build: Option<ProjectBuildResult>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package_run_id: Option<RunId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package: Option<ProjectPackageResult>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -149,7 +139,6 @@ pub struct ComplexGenerateExecution {
 }
 
 pub struct ComplexGenerateService<'a> {
-    plan: &'a ModPlanService,
     batch: &'a BatchGenerateService<'a>,
     build: &'a ProjectBuildService,
     package: &'a ProjectPackageService,
@@ -158,13 +147,11 @@ pub struct ComplexGenerateService<'a> {
 impl<'a> ComplexGenerateService<'a> {
     #[must_use]
     pub fn new(
-        plan: &'a ModPlanService,
         batch: &'a BatchGenerateService<'a>,
         build: &'a ProjectBuildService,
         package: &'a ProjectPackageService,
     ) -> Self {
         Self {
-            plan,
             batch,
             build,
             package,
@@ -191,16 +178,7 @@ impl<'a> ComplexGenerateService<'a> {
     {
         validate_run(run, &request)?;
         validate_context(&context)?;
-        if request.planning_items.is_empty()
-            || request.planning_items.len() > 64
-            || request.package.mod_id != request.mod_id
-            || request.planning_items.iter().any(|item| {
-                item.definition.validate().is_err()
-                    || item.request.item_type.as_deref().is_some_and(|item_type| {
-                        item_type != item.definition.definition.item_type.as_str()
-                    })
-            })
-        {
+        if request.batch.items.len() > 64 || request.package.mod_id != request.batch.mod_id {
             return Err(ComplexGenerateError::InvalidInput);
         }
         let contribution: ComplexContribution =
@@ -210,52 +188,8 @@ impl<'a> ComplexGenerateService<'a> {
         }
 
         let mut child_runs = Vec::new();
-        let mut plans = Vec::with_capacity(request.planning_items.len());
-        let mut singles = Vec::with_capacity(request.planning_items.len());
-        for item in &request.planning_items {
-            check_cancelled(cancellation)?;
-            let mut plan_run = running_run::<ModPlanFeature, _>(&item.request)?;
-            let execution = self
-                .plan
-                .execute(
-                    dependencies.model,
-                    item.request.clone(),
-                    ModPlanContext {
-                        pack: context.pack,
-                        contributions: context.plan_contributions,
-                        project_context: Some(context.project_context),
-                        custom_instructions: context.custom_instructions,
-                        model: context.model.clone(),
-                    },
-                    cancellation,
-                )
-                .await?;
-            let mut planned = execution.item;
-            planned.item_id = item.definition.definition.item_id.to_string();
-            planned.item_type = item.definition.definition.item_type.to_string();
-            let plan_payload =
-                VersionedPayload::from_typed(ModPlanFeature::result_schema(), &planned)?;
-            plan_run.apply_transition(
-                RunTransition::Succeed {
-                    result: plan_payload,
-                },
-                Utc::now(),
-            )?;
-            singles.push(SingleGenerateRequest {
-                artifact_id: item.artifact_id.clone(),
-                mod_id: request.mod_id.clone(),
-                plan: planned.clone(),
-                definition: item.definition.clone(),
-            });
-            plans.push(planned);
-            child_runs.push(plan_run);
-        }
-
         check_cancelled(cancellation)?;
-        let batch_request = BatchGenerateRequest {
-            items: singles,
-            fail_fast: request.fail_fast,
-        };
+        let batch_request = request.batch;
         let mut batch_run =
             running_run::<crate::mod_generate_batch::BatchGenerateFeature, _>(&batch_request)?;
         let batch_execution = self
@@ -273,6 +207,7 @@ impl<'a> ComplexGenerateService<'a> {
                 BatchGenerateContext {
                     pack: context.pack,
                     batch_contributions: context.batch_contributions,
+                    plan_contributions: context.plan_contributions,
                     single_contributions: context.single_contributions,
                     resource_contributions: context.resource_contributions,
                     truth: context.truth,
@@ -287,6 +222,23 @@ impl<'a> ComplexGenerateService<'a> {
         let batch_run_id = batch_run.id().clone();
         child_runs.extend(batch_execution.child_runs);
         child_runs.push(batch_run);
+
+        if batch_execution.result.processed != batch_execution.result.total
+            || batch_execution.result.failed > 0
+        {
+            let result = ComplexGenerateResult {
+                batch_run_id,
+                batch: batch_execution.result,
+                build_run_id: None,
+                build: None,
+                package_run_id: None,
+                package: None,
+            };
+            let payload =
+                VersionedPayload::from_typed(ComplexGenerateFeature::result_schema(), &result)?;
+            run.apply_transition(RunTransition::Succeed { result: payload }, Utc::now())?;
+            return Ok(ComplexGenerateExecution { result, child_runs });
+        }
 
         check_cancelled(cancellation)?;
         let build_request = ProjectBuildRequest {};
@@ -325,20 +277,13 @@ impl<'a> ComplexGenerateService<'a> {
         let package_run_id = package_run.id().clone();
         child_runs.push(package_run);
 
-        let plan_run_ids = child_runs
-            .iter()
-            .filter(|child| child.feature_id() == &ModPlanFeature::id())
-            .map(|child| child.id().clone())
-            .collect();
         let result = ComplexGenerateResult {
-            plans,
-            plan_run_ids,
             batch_run_id,
             batch: batch_execution.result,
-            build_run_id,
-            build: build_result,
-            package_run_id,
-            package: package_result,
+            build_run_id: Some(build_run_id),
+            build: Some(build_result),
+            package_run_id: Some(package_run_id),
+            package: Some(package_result),
         };
         let payload =
             VersionedPayload::from_typed(ComplexGenerateFeature::result_schema(), &result)?;
@@ -361,8 +306,6 @@ pub enum ComplexGenerateError {
     Cancelled,
     #[error(transparent)]
     Contribution(#[from] ContributionResolverError),
-    #[error(transparent)]
-    Plan(#[from] ModPlanError),
     #[error(transparent)]
     Batch(#[from] BatchGenerateError),
     #[error(transparent)]

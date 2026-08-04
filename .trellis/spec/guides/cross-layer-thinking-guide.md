@@ -92,3 +92,20 @@ Create detailed flow docs when:
 - Multiple teams are involved
 - Data format is complex
 - Feature has caused bugs before
+
+## GUI E2E Contract Propagation
+
+Desktop E2E is a cross-layer consumer of Shell routes, control anchors, Tauri commands, runtime
+schemas, local fixture layout and provider protocols. A change to any of those boundaries must update
+the E2E runner and spec in the same Order.
+
+- UI tests use stable `data-testid` anchors for workflow controls; a route or control replacement must
+  update the test before the old surface is removed.
+- Runner fixtures declare their prerequisite schema and verify pinned hashes before copying data into
+  an isolated app-data root. Product code must not synthesize missing Truth or resources for tests.
+- Provider stubs match the adapter's configured API root and response mode. Base-path and
+  streaming/non-streaming assumptions are explicit test contracts.
+- Run assertions wait for both a new Run ID and its persisted terminal status. A previous succeeded
+  result on the same page is never evidence for a new submission.
+- Sequential workflow suites enable fail-fast behavior so a setup failure does not produce misleading
+  downstream timeouts.

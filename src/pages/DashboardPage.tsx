@@ -52,7 +52,7 @@ export function DashboardPage() {
           <RefreshCw size={15} /> Refresh
         </Button>
       } />
-      <ActionableErrorNotice failure={failure} />
+      {failure && <div data-testid="dashboard-error"><ActionableErrorNotice failure={failure} /></div>}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card eyebrow="runtime" title="Build and contracts">
           <KVList>
@@ -61,11 +61,11 @@ export function DashboardPage() {
             <KV k="build_id">{health?.build?.buildId ?? "n/a"}</KV>
             <KV k="game_pack">{health?.gamePackId ?? "sts2"}</KV>
             <KV k="features">{health?.featureCount ?? 0}</KV>
-            <KV k="truth">{truth?.ready ? "ready" : "missing"}</KV>
+            <KV k="truth"><span data-testid="truth-status">{truth?.ready ? "ready" : "missing"}</span></KV>
           </KVList>
           {__IS_TAURI__ && !truth?.ready && (
             <div className="mt-4">
-              <Button variant="accent" disabled={busy} onClick={() => void action(() => api.importTruth())}>
+              <Button data-testid="truth-import" variant="accent" disabled={busy} onClick={() => void action(() => api.importTruth())}>
                 <Database size={15} /> Import Truth
               </Button>
             </div>
@@ -77,19 +77,19 @@ export function DashboardPage() {
           </Button>
         )}>
           {project ? (
-            <KVList>
+            <div data-testid="project-current"><KVList>
               <KV k="path"><code className="break-all">{project.path}</code></KV>
               <KV k="mod_id">{project.csharpName}</KV>
               <KV k="game_pack">{project.gameId}</KV>
               <KV k="state">{project.closing ? "closing" : "open"}</KV>
-            </KVList>
+            </KVList></div>
           ) : __IS_TAURI__ ? (
             <div className="space-y-3">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <Field label="Parent directory"><input className="input-mono" value={parentDir} onChange={(event) => setParentDir(event.target.value)} /></Field>
-                <Field label="Project name"><input className="input-mono" value={projectName} onChange={(event) => setProjectName(event.target.value)} /></Field>
+                <Field label="Parent directory"><input data-testid="project-parent-dir" className="input-mono" value={parentDir} onChange={(event) => setParentDir(event.target.value)} /></Field>
+                <Field label="Project name"><input data-testid="project-name" className="input-mono" value={projectName} onChange={(event) => setProjectName(event.target.value)} /></Field>
               </div>
-              <Button variant="success" disabled={busy || !parentDir || !projectName} onClick={() => void action(() => api.createProject(parentDir, projectName))}>
+              <Button data-testid="project-create-submit" variant="success" disabled={busy || !parentDir || !projectName} onClick={() => void action(() => api.createProject(parentDir, projectName))}>
                 <Plus size={15} /> Create
               </Button>
               <Field label="Existing project"><input className="input-mono" value={openPath} onChange={(event) => setOpenPath(event.target.value)} /></Field>
