@@ -64,6 +64,12 @@ typed reference bindings and optional composition-profile provenance.
 Validated Serde and deterministic ordered serialization produce the definition SHA-256 used by
 future Run/Artifact provenance; Runtime remains unaware of game-specific types.
 
+`ats-workspace` also owns CompositionDraft schema v1 and the repository ports for Draft CAS and
+atomic multi-definition saves. Drafts are review state, not ready Items. `ats-adapters` persists
+them below `.ats/composition-drafts-v1` and uses a recoverable pointer journal when confirming more
+than one definition. `ats-features` owns closed-subgraph confirmation and `ResolvedItemGraph` v1;
+Adapters do not import or reimplement graph rules.
+
 Pack may contain declarations/templates/resources and registered Primitive IDs. It cannot contain arbitrary script, native plugin, provider credential, or complete workflow implementation.
 
 ### Scenario: Pack v4 Item Catalog, Definition Identity, And Readiness
@@ -405,6 +411,99 @@ npx tsc -b --pretty false
 Tests must cover Plan failure without a Single child, generation failure with both children,
 fail-fast unprocessed inputs, Complex delivery skip, exact-hash retry, malformed payload rejection,
 and a four-type Relic/Card/Potion/Power Batch with real compile and hash-verifiable Artifacts.
+
+### Scenario: Persist And Resolve A Composition Draft
+
+#### 1. Scope / Trigger
+
+Use this contract when a set-level plan creates editable Item nodes, when the user confirms any
+closed subset, or before a composition generation Run consumes a root definition. Draft persistence
+must survive restart without creating pseudo-ready Items, and graph resolution must finish before
+model or project mutation.
+
+#### 2. Signatures
+
+```rust
+CompositionDraftRepository::{create, load, compare_and_set, list}
+
+AtomicItemRepository::save_batch(
+    request: &AtomicItemSaveRequest,
+) -> Result<Vec<StoredItemDefinition>, AtomicItemSaveError<Self::Error>>
+
+CompositionConfirmationService::confirm(pack, draft, selected_item_ids, item_repository)
+    -> Result<CompositionConfirmation, CompositionConfirmationError>
+
+ResolvedItemGraph::resolve(
+    pack, truth, resource_contributions, item_repository, resource_repository,
+    root, draft_ref,
+) -> Result<ResolvedItemGraph, CompositionGraphError>
+```
+
+#### 3. Contracts
+
+- CompositionDraft schema v1 stores `draftId`, monotonic `revision`, pinned Pack ID/hash, one root
+  Item ID, exact profile source/parameters, 1-128 ItemDefinition nodes, per-node expected current
+  hash, and creation/update timestamps. The root definition must carry the same profile provenance.
+- Draft create requires revision 1. Update uses revision CAS, preserves Pack/root/creation identity,
+  increments exactly once and never overwrites a concurrent edit.
+- Confirmation validates every Draft node against the Pack, requires the selected subset to be
+  closed, validates Ready-mode structure, computes immutable hashes, then submits one atomic batch.
+  A selected pinned edge may target another selected node or an already persisted exact version;
+  identity affiliation must resolve inside the resulting selected/pinned closure.
+- Atomic batch input contains 1-128 unique definitions and exactly one expected current value for
+  every Item ID. All type and optimistic-current checks complete before any pointer changes.
+  Immutable snapshots may remain as history after failure; current pointers change all-or-none.
+- Filesystem confirmation writes a `prepared` pointer journal before replacements. Recovery rolls a
+  prepared journal back to the expected pointers and rolls a `committed` journal forward to the new
+  pointers, then removes the journal. This is recovery, not a second authority.
+- ResolvedItemGraph expands only pinned edges. Identity edges do not load a version; after pinned
+  closure resolution they must target an Item in that closure with the expected type. Exact target
+  hash, Pack allowed type, Truth capability, locale/behavior, Resource selection/version and the
+  128-node limit are checked before the graph is returned.
+- Nodes and edges are sorted before serialization. Graph provenance binds schema, Pack ID/hash,
+  Truth Snapshot ID, optional Draft ID/revision, root ID/hash, profile parameters, exact definition
+  snapshots and both edge sets. `graphDigest` is SHA-256 of that canonical material.
+
+#### 4. Validation & Error Matrix
+
+| Condition | Stable result | Mutation |
+| --- | --- | --- |
+| invalid Draft wire/root/profile/node | `composition.draft.invalid` | none |
+| stale Draft revision | Draft repository conflict | existing Draft retained |
+| duplicate/unknown/non-closed confirmation selection | `composition.confirm.selection_invalid` or `composition.graph.item_missing` | no current pointer change |
+| one expected current changed | `composition.confirm.conflict` | no current pointer change |
+| batch storage failure after one replacement | `composition.confirm.storage_failed` | all pointers rolled back; Draft retained |
+| prepared journal after process interruption | recovery rollback | expected pointers restored |
+| committed journal after process interruption | recovery roll-forward | new pointers restored |
+| missing exact Item/storage failure/hash tamper/wrong type | `composition.graph.item_missing` / `storage_failed` / `hash_mismatch` / `type_mismatch` | no model/project mutation |
+| incompatible versions or pinned cycle | `composition.graph.version_conflict` / `cycle` | no model/project mutation |
+| Truth/locale/behavior/Resource not ready | `composition.graph.not_ready` | no model/project mutation |
+| more than 128 resolved nodes | `composition.graph.node_limit` | no model/project mutation |
+
+#### 5. Good / Base / Bad Cases
+
+- **Good**: Character and selected Cards are confirmed together; Character pinned edges expand exact
+  Card hashes, Card identity edges point back to the Character identity, and one stable graph digest
+  is produced.
+- **Base**: a selected subset references an already confirmed exact version. Confirmation succeeds
+  only when that target exists and the combined subgraph is closed.
+- **Bad**: one Draft pointer became current after the Draft was created. The entire batch returns a
+  typed conflict; no other selected Item pointer moves.
+- **Bad**: the process stops after the first pointer replacement. The next repository access reads
+  the prepared journal and restores every previous pointer before serving data.
+
+#### 6. Tests Required
+
+```powershell
+cargo test -p ats-workspace composition -- --nocapture
+cargo test -p ats-adapters item_store -- --nocapture
+cargo test -p ats-adapters composition_draft_store -- --nocapture
+cargo test -p ats-features composition -- --nocapture
+```
+
+Tests must cover Draft wire/CAS, stale current, mid-commit rollback, prepared-journal crash recovery,
+closed/partial confirmation, identity plus pinned resolution, missing/type/hash/readiness/cycle
+failures and deterministic graph/confirmation digests.
 
 ## 5. Resource Workspace
 

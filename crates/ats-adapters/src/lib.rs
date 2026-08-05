@@ -2,6 +2,7 @@
 
 mod artifact_store;
 mod build_runner;
+mod composition_draft_store;
 mod config;
 mod item_store;
 mod media_client;
@@ -19,6 +20,7 @@ use ats_kernel::{PrimitiveId, SchemaRef};
 
 pub use artifact_store::{ArtifactStoreError, FileArtifactStore};
 pub use build_runner::RegisteredBuildRunner;
+pub use composition_draft_store::{CompositionDraftStoreError, FileCompositionDraftRepository};
 pub use config::{
     ConfigStatus, ImageGenerationConfig, LlmConfig, RuntimeConfig, Settings, SettingsStore,
     ToolchainConfig, TruthSourceConfig,

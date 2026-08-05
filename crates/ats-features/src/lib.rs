@@ -1,6 +1,7 @@
 //! Product Feature contracts and vertical workflow ownership.
 
 mod catalog;
+pub mod composition;
 pub mod item_definition;
 pub mod log_analyze;
 pub mod mod_generate_batch;

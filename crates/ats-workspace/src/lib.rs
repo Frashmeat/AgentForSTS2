@@ -1,13 +1,19 @@
 //! Project and versioned resource workspace contracts.
 
+mod composition;
 mod item;
 mod project;
 mod resource;
 
+pub use composition::{
+    COMPOSITION_DRAFT_SCHEMA_VERSION, CompositionDraft, CompositionDraftError,
+    CompositionDraftNode, CompositionDraftRepository,
+};
 pub use item::{
+    AtomicItemRepository, AtomicItemSaveError, AtomicItemSaveRequest,
     ITEM_DEFINITION_SCHEMA_VERSION, ItemCompositionProfile, ItemCompositionSource, ItemDefinition,
     ItemDefinitionError, ItemFieldValue, ItemLocalization, ItemReferenceBinding, ItemRepository,
-    ItemResourceBinding, LocalizationStatus, StoredItemDefinition,
+    ItemRepositoryErrorKind, ItemResourceBinding, LocalizationStatus, StoredItemDefinition,
 };
 
 pub use project::{

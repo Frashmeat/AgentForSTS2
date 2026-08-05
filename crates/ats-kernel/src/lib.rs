@@ -192,6 +192,7 @@ slug_id!(ItemReferenceSlotId, "item reference slot ID", 64);
 slug_id!(LocalizationFieldId, "localization field ID", 64);
 slug_id!(ResourceProfileId, "resource profile ID", 64);
 slug_id!(CompositionId, "composition ID", 64);
+slug_id!(CompositionDraftId, "composition draft ID", 128);
 slug_id!(CompositionProfileId, "composition profile ID", 64);
 slug_id!(CompositionParameterId, "composition parameter ID", 64);
 slug_id!(LocaleId, "locale ID", 16);
@@ -409,6 +410,7 @@ mod tests {
         assert!(LocalizationFieldId::parse("pronoun_subject").is_ok());
         assert!(ResourceProfileId::parse("branded_placeholder").is_ok());
         assert!(CompositionId::parse("character_suite").is_ok());
+        assert!(CompositionDraftId::parse("character-suite-draft-1").is_ok());
         assert!(CompositionProfileId::parse("standard").is_ok());
         assert!(CompositionParameterId::parse("reward_common_cards").is_ok());
         assert!(LocaleId::parse("zhs").is_ok());

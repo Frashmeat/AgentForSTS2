@@ -73,6 +73,12 @@ Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-sp
 - Pack v4 `compositionProfiles` own Standard/Prototype presets, Custom bounds, cross-parameter
   constraints and the hard <=128-node estimate. Feature/UI interpret this generic schema and do
   not embed STS2 composition counts.
+- CompositionDraft v1 is persisted separately from ItemDefinition with revision CAS. Atomic
+  confirmation validates a closed selected subgraph and updates every affected current pointer
+  through one recoverable prepared/committed journal; failure never exposes a partial pointer set.
+- ResolvedItemGraph v1 expands exact pinned edges, validates identity edges against the resolved
+  closure, applies Pack/Truth/locale/Resource readiness and hashes sorted nodes, edges and pinned
+  Pack/Truth/Draft/profile provenance. It completes before model or project mutation.
 - Single request schema v3 carries one `StoredItemDefinition`; Batch request v4 carries pinned
   definitions and derives Plan requirements from canonical behavior intent. It persists Plan and
   Single child Runs and returns per-item result v2 outcomes even if every Item fails. Complex v3

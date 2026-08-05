@@ -479,9 +479,10 @@ fn map_item_store_error(error: ItemStoreError, stage: &str) -> CommandFailure {
         | ItemStoreError::TypeConflict
         | ItemStoreError::PathInvalid
         | ItemStoreError::Json(_) => CommandFailure::item_invalid(stage),
-        ItemStoreError::Io { .. } | ItemStoreError::LockUnavailable => {
-            CommandFailure::item_storage(stage)
-        }
+        ItemStoreError::Conflict
+        | ItemStoreError::Io { .. }
+        | ItemStoreError::LockUnavailable
+        | ItemStoreError::TransactionInvalid => CommandFailure::item_storage(stage),
     }
 }
 

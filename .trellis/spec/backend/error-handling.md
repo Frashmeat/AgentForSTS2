@@ -36,6 +36,12 @@ failure to `resource.storage_failed`, and graph/Primitive/version drift to
 `pack.contribution_invalid`. These known failures must never collapse to
 `feature.execution_failed`.
 
+Composition Draft and graph failures use stable `composition.*` families. Invalid Draft/selection,
+stale current conflicts, storage failure, missing exact Item, hash/type/version mismatch, not-ready
+nodes, pinned cycles and node-limit failure remain distinct. Repository/OS text and absolute paths
+must not enter these failures. A confirmation storage failure returns only after all current pointer
+replacements have rolled back or a recovery journal remains for the next repository access.
+
 ## Ownership
 
 - Kernel owns serialized shape and validation.

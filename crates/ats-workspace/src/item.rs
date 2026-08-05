@@ -142,6 +142,10 @@ impl StoredItemDefinition {
 pub trait ItemRepository: Send + Sync {
     type Error: std::error::Error + Send + Sync + 'static;
 
+    fn classify_error(_error: &Self::Error) -> ItemRepositoryErrorKind {
+        ItemRepositoryErrorKind::Storage
+    }
+
     fn save(&self, definition: &ItemDefinition) -> Result<StoredItemDefinition, Self::Error>;
     fn load_current(&self, item_id: &ItemId) -> Result<StoredItemDefinition, Self::Error>;
     fn load_version(
@@ -150,6 +154,61 @@ pub trait ItemRepository: Send + Sync {
         definition_hash: &Sha256Digest,
     ) -> Result<StoredItemDefinition, Self::Error>;
     fn list_current(&self) -> Result<Vec<StoredItemDefinition>, Self::Error>;
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum ItemRepositoryErrorKind {
+    NotFound,
+    Storage,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct AtomicItemSaveRequest {
+    pub definitions: Vec<ItemDefinition>,
+    pub expected_current: BTreeMap<ItemId, Option<Sha256Digest>>,
+}
+
+impl AtomicItemSaveRequest {
+    pub fn validate(&self) -> Result<(), ItemDefinitionError> {
+        if self.definitions.is_empty() || self.definitions.len() > 128 {
+            return Err(ItemDefinitionError::InvalidAtomicSave);
+        }
+        let item_ids = self
+            .definitions
+            .iter()
+            .map(|definition| &definition.item_id)
+            .collect::<BTreeSet<_>>();
+        if item_ids.len() != self.definitions.len()
+            || item_ids != self.expected_current.keys().collect::<BTreeSet<_>>()
+            || self
+                .definitions
+                .iter()
+                .any(|definition| definition.validate().is_err())
+        {
+            return Err(ItemDefinitionError::InvalidAtomicSave);
+        }
+        Ok(())
+    }
+}
+
+pub trait AtomicItemRepository: ItemRepository {
+    fn save_batch(
+        &self,
+        request: &AtomicItemSaveRequest,
+    ) -> Result<Vec<StoredItemDefinition>, AtomicItemSaveError<Self::Error>>;
+}
+
+#[derive(Debug, Error)]
+pub enum AtomicItemSaveError<E>
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    #[error("atomic item definition save request is invalid")]
+    InvalidRequest,
+    #[error("one or more item current pointers changed")]
+    Conflict,
+    #[error("atomic item definition storage failed")]
+    Repository(#[source] E),
 }
 
 impl ItemDefinition {
@@ -301,6 +360,8 @@ pub enum ItemDefinitionError {
     InvalidReferenceBindings,
     #[error("item definition composition profile is invalid")]
     InvalidCompositionProfile,
+    #[error("atomic item definition save request is invalid")]
+    InvalidAtomicSave,
     #[error("item definition cannot be serialized")]
     Serialize(#[source] serde_json::Error),
     #[error("item definition identity cannot be represented")]

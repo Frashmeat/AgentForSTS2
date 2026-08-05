@@ -5,12 +5,17 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use ats_kernel::{ItemId, Sha256Digest};
-use ats_workspace::{ItemDefinition, ItemDefinitionError, ItemRepository, StoredItemDefinition};
+use ats_workspace::{
+    AtomicItemRepository, AtomicItemSaveError, AtomicItemSaveRequest, ItemDefinition,
+    ItemDefinitionError, ItemRepository, ItemRepositoryErrorKind, StoredItemDefinition,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 const POINTER_SCHEMA_VERSION: u32 = 1;
 const CURRENT_FILE: &str = "current.json";
+const TRANSACTION_SCHEMA_VERSION: u32 = 1;
+const TRANSACTION_FILE: &str = ".pointer-transaction-v1.json";
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Error)]
@@ -21,6 +26,8 @@ pub enum ItemStoreError {
     NotFound,
     #[error("item identity cannot change type")]
     TypeConflict,
+    #[error("item current definition changed since the composition Draft was created")]
+    Conflict,
     #[error("item workspace path is invalid")]
     PathInvalid,
     #[error("item workspace JSON is invalid")]
@@ -34,6 +41,8 @@ pub enum ItemStoreError {
     },
     #[error("item workspace lock is unavailable")]
     LockUnavailable,
+    #[error("item pointer transaction is invalid")]
+    TransactionInvalid,
 }
 
 impl From<ItemDefinitionError> for ItemStoreError {
@@ -116,24 +125,36 @@ impl FileItemRepository {
         &self,
         definition: &ItemDefinition,
     ) -> Result<StoredItemDefinition, ItemStoreError> {
+        self.validate_item_type_unlocked(definition)?;
+        let stored = self.store_snapshot_unlocked(definition)?;
+        self.write_pointer_unlocked(&stored.definition.item_id, &stored.definition_hash)?;
+        Ok(stored)
+    }
+
+    fn validate_item_type_unlocked(
+        &self,
+        definition: &ItemDefinition,
+    ) -> Result<(), ItemStoreError> {
+        match self.load_current_unlocked(&definition.item_id) {
+            Ok(current) if current.definition.item_type != definition.item_type => {
+                Err(ItemStoreError::TypeConflict)
+            }
+            Ok(_) => Ok(()),
+            Err(ItemStoreError::NotFound) => self.ensure_existing_versions_match_type(definition),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn store_snapshot_unlocked(
+        &self,
+        definition: &ItemDefinition,
+    ) -> Result<StoredItemDefinition, ItemStoreError> {
         let definition_hash = definition.definition_hash()?;
         let items_root = self.prepare_root()?;
         let item_root = items_root.join(definition.item_id.as_str());
         ensure_directory(&item_root, "create_item_root")?;
         let definitions_root = item_root.join("definitions");
         ensure_directory(&definitions_root, "create_definitions_root")?;
-
-        match self.load_current_unlocked(&definition.item_id) {
-            Ok(current) if current.definition.item_type != definition.item_type => {
-                return Err(ItemStoreError::TypeConflict);
-            }
-            Ok(_) => {}
-            Err(ItemStoreError::NotFound) => {
-                self.ensure_existing_versions_match_type(definition)?;
-            }
-            Err(error) => return Err(error),
-        }
-
         let stored = StoredItemDefinition {
             definition_hash: definition_hash.clone(),
             definition: definition.clone(),
@@ -154,13 +175,154 @@ impl FileItemRepository {
             }
             Err(error) => return Err(error),
         }
+        Ok(stored)
+    }
 
+    fn write_pointer_unlocked(
+        &self,
+        item_id: &ItemId,
+        definition_hash: &Sha256Digest,
+    ) -> Result<(), ItemStoreError> {
+        let item_root = self.items_root().join(item_id.as_str());
+        ensure_directory(&item_root, "create_item_root")?;
         let pointer = ItemPointer {
             schema_version: POINTER_SCHEMA_VERSION,
-            item_id: definition.item_id.clone(),
-            definition_hash,
+            item_id: item_id.clone(),
+            definition_hash: definition_hash.clone(),
         };
-        write_json_atomic(&item_root.join(CURRENT_FILE), &pointer)?;
+        write_json_atomic(&item_root.join(CURRENT_FILE), &pointer)
+    }
+
+    fn current_hash_unlocked(
+        &self,
+        item_id: &ItemId,
+    ) -> Result<Option<Sha256Digest>, ItemStoreError> {
+        match self.load_current_unlocked(item_id) {
+            Ok(stored) => Ok(Some(stored.definition_hash)),
+            Err(ItemStoreError::NotFound) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn recover_pointer_transaction_unlocked(&self) -> Result<(), ItemStoreError> {
+        let transaction_path = self.items_root().join(TRANSACTION_FILE);
+        let bytes = match read_regular_file(&transaction_path, "read_item_transaction") {
+            Ok(bytes) => bytes,
+            Err(ItemStoreError::Io {
+                kind: io::ErrorKind::NotFound,
+                ..
+            }) => return Ok(()),
+            Err(error) => return Err(error),
+        };
+        let transaction: PointerTransaction =
+            serde_json::from_slice(&bytes).map_err(ItemStoreError::Json)?;
+        transaction.validate()?;
+        match transaction.state {
+            PointerTransactionState::Prepared => {
+                self.restore_transaction_entries(&transaction.entries, false)?;
+            }
+            PointerTransactionState::Committed => {
+                self.restore_transaction_entries(&transaction.entries, true)?;
+            }
+        }
+        fs::remove_file(transaction_path)
+            .map_err(|error| io_error("remove_item_transaction", error))
+    }
+
+    fn restore_transaction_entries(
+        &self,
+        entries: &[PointerTransactionEntry],
+        use_next: bool,
+    ) -> Result<(), ItemStoreError> {
+        for entry in entries {
+            let hash = if use_next {
+                Some(&entry.next_definition_hash)
+            } else {
+                entry.previous_definition_hash.as_ref()
+            };
+            if let Some(hash) = hash {
+                self.write_pointer_unlocked(&entry.item_id, hash)?;
+            } else {
+                let path = self
+                    .items_root()
+                    .join(entry.item_id.as_str())
+                    .join(CURRENT_FILE);
+                match fs::remove_file(path) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(io_error("remove_item_pointer", error)),
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn save_batch_unlocked_with_hook<F>(
+        &self,
+        request: &AtomicItemSaveRequest,
+        mut before_pointer_write: F,
+    ) -> Result<Vec<StoredItemDefinition>, ItemStoreError>
+    where
+        F: FnMut(usize) -> Result<(), ItemStoreError>,
+    {
+        request.validate()?;
+        self.prepare_root()?;
+        let mut definitions = request.definitions.iter().collect::<Vec<_>>();
+        definitions.sort_by(|left, right| left.item_id.cmp(&right.item_id));
+        for definition in &definitions {
+            self.validate_item_type_unlocked(definition)?;
+            let current = self.current_hash_unlocked(&definition.item_id)?;
+            if request.expected_current.get(&definition.item_id) != Some(&current) {
+                return Err(ItemStoreError::Conflict);
+            }
+        }
+        let stored = definitions
+            .iter()
+            .map(|definition| self.store_snapshot_unlocked(definition))
+            .collect::<Result<Vec<_>, _>>()?;
+        let entries = stored
+            .iter()
+            .map(|definition| PointerTransactionEntry {
+                item_id: definition.definition.item_id.clone(),
+                previous_definition_hash: request
+                    .expected_current
+                    .get(&definition.definition.item_id)
+                    .cloned()
+                    .flatten(),
+                next_definition_hash: definition.definition_hash.clone(),
+            })
+            .collect::<Vec<_>>();
+        let transaction_path = self.items_root().join(TRANSACTION_FILE);
+        let mut transaction = PointerTransaction {
+            schema_version: TRANSACTION_SCHEMA_VERSION,
+            state: PointerTransactionState::Prepared,
+            entries,
+        };
+        write_json_atomic(&transaction_path, &transaction)?;
+
+        let write_result = transaction
+            .entries
+            .iter()
+            .enumerate()
+            .try_for_each(|(index, entry)| {
+                before_pointer_write(index)?;
+                self.write_pointer_unlocked(&entry.item_id, &entry.next_definition_hash)
+            });
+        if let Err(error) = write_result {
+            self.restore_transaction_entries(&transaction.entries, false)?;
+            fs::remove_file(&transaction_path)
+                .map_err(|source| io_error("remove_item_transaction", source))?;
+            return Err(error);
+        }
+
+        transaction.state = PointerTransactionState::Committed;
+        if let Err(error) = write_json_atomic(&transaction_path, &transaction) {
+            self.restore_transaction_entries(&transaction.entries, false)?;
+            fs::remove_file(&transaction_path)
+                .map_err(|source| io_error("remove_item_transaction", source))?;
+            return Err(error);
+        }
+        let _ = fs::remove_file(transaction_path);
         Ok(stored)
     }
 
@@ -172,9 +334,12 @@ impl FileItemRepository {
             .items_root()
             .join(definition.item_id.as_str())
             .join("definitions");
-        for entry in fs::read_dir(&definitions_root)
-            .map_err(|error| io_error("list_item_versions", error))?
-        {
+        let entries = match fs::read_dir(&definitions_root) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(io_error("list_item_versions", error)),
+        };
+        for entry in entries {
             let entry = entry.map_err(|error| io_error("list_item_versions", error))?;
             let file_type = entry
                 .file_type()
@@ -205,11 +370,21 @@ impl FileItemRepository {
 impl ItemRepository for FileItemRepository {
     type Error = ItemStoreError;
 
+    fn classify_error(error: &Self::Error) -> ItemRepositoryErrorKind {
+        if matches!(error, ItemStoreError::NotFound) {
+            ItemRepositoryErrorKind::NotFound
+        } else {
+            ItemRepositoryErrorKind::Storage
+        }
+    }
+
     fn save(&self, definition: &ItemDefinition) -> Result<StoredItemDefinition, Self::Error> {
         let _guard = self
             .gate
             .lock()
             .map_err(|_| ItemStoreError::LockUnavailable)?;
+        self.prepare_root()?;
+        self.recover_pointer_transaction_unlocked()?;
         self.save_unlocked(definition)
     }
 
@@ -218,6 +393,8 @@ impl ItemRepository for FileItemRepository {
             .gate
             .lock()
             .map_err(|_| ItemStoreError::LockUnavailable)?;
+        self.prepare_root()?;
+        self.recover_pointer_transaction_unlocked()?;
         self.load_current_unlocked(item_id)
     }
 
@@ -230,6 +407,8 @@ impl ItemRepository for FileItemRepository {
             .gate
             .lock()
             .map_err(|_| ItemStoreError::LockUnavailable)?;
+        self.prepare_root()?;
+        self.recover_pointer_transaction_unlocked()?;
         self.load_version_unlocked(item_id, definition_hash)
     }
 
@@ -239,6 +418,7 @@ impl ItemRepository for FileItemRepository {
             .lock()
             .map_err(|_| ItemStoreError::LockUnavailable)?;
         let items_root = self.prepare_root()?;
+        self.recover_pointer_transaction_unlocked()?;
         let mut items = Vec::new();
         for entry in fs::read_dir(&items_root).map_err(|error| io_error("list_items", error))? {
             let entry = entry.map_err(|error| io_error("list_items", error))?;
@@ -261,12 +441,80 @@ impl ItemRepository for FileItemRepository {
     }
 }
 
+impl AtomicItemRepository for FileItemRepository {
+    fn save_batch(
+        &self,
+        request: &AtomicItemSaveRequest,
+    ) -> Result<Vec<StoredItemDefinition>, AtomicItemSaveError<Self::Error>> {
+        let _guard = self
+            .gate
+            .lock()
+            .map_err(|_| AtomicItemSaveError::Repository(ItemStoreError::LockUnavailable))?;
+        self.prepare_root()
+            .map_err(AtomicItemSaveError::Repository)?;
+        self.recover_pointer_transaction_unlocked()
+            .map_err(AtomicItemSaveError::Repository)?;
+        self.save_batch_unlocked_with_hook(request, |_| Ok(()))
+            .map_err(|error| match error {
+                ItemStoreError::Conflict => AtomicItemSaveError::Conflict,
+                ItemStoreError::Contract(ItemDefinitionError::InvalidAtomicSave) => {
+                    AtomicItemSaveError::InvalidRequest
+                }
+                other => AtomicItemSaveError::Repository(other),
+            })
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ItemPointer {
     schema_version: u32,
     item_id: ItemId,
     definition_hash: Sha256Digest,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+enum PointerTransactionState {
+    Prepared,
+    Committed,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PointerTransaction {
+    schema_version: u32,
+    state: PointerTransactionState,
+    entries: Vec<PointerTransactionEntry>,
+}
+
+impl PointerTransaction {
+    fn validate(&self) -> Result<(), ItemStoreError> {
+        if self.schema_version != TRANSACTION_SCHEMA_VERSION
+            || self.entries.is_empty()
+            || self.entries.len() > 128
+            || self
+                .entries
+                .iter()
+                .map(|entry| &entry.item_id)
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                != self.entries.len()
+        {
+            Err(ItemStoreError::TransactionInvalid)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PointerTransactionEntry {
+    item_id: ItemId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    previous_definition_hash: Option<Sha256Digest>,
+    next_definition_hash: Sha256Digest,
 }
 
 impl ItemPointer {
@@ -366,7 +614,9 @@ mod tests {
     use std::collections::BTreeMap;
 
     use ats_kernel::{ItemFieldId, ItemTypeId};
-    use ats_workspace::{ItemFieldValue, ItemRepository};
+    use ats_workspace::{
+        AtomicItemRepository, AtomicItemSaveRequest, ItemFieldValue, ItemRepository,
+    };
 
     use super::*;
 
@@ -451,5 +701,136 @@ mod tests {
             repository.save(&changed_type),
             Err(ItemStoreError::TypeConflict)
         ));
+    }
+
+    #[test]
+    fn atomic_batch_rolls_back_every_pointer_after_a_mid_commit_failure() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir(temp.path().join(".ats")).unwrap();
+        let repository = FileItemRepository::new(temp.path().to_path_buf());
+        let first_a = repository.save(&definition("fixture-a", "common")).unwrap();
+        let first_b = repository.save(&definition("fixture-b", "common")).unwrap();
+        let request = AtomicItemSaveRequest {
+            definitions: vec![
+                definition("fixture-a", "rare"),
+                definition("fixture-b", "rare"),
+            ],
+            expected_current: BTreeMap::from([
+                (
+                    ItemId::parse("fixture-a").unwrap(),
+                    Some(first_a.definition_hash.clone()),
+                ),
+                (
+                    ItemId::parse("fixture-b").unwrap(),
+                    Some(first_b.definition_hash.clone()),
+                ),
+            ]),
+        };
+        let result = repository.save_batch_unlocked_with_hook(&request, |index| {
+            if index == 1 {
+                Err(io_error(
+                    "injected_pointer_failure",
+                    io::Error::other("injected"),
+                ))
+            } else {
+                Ok(())
+            }
+        });
+        assert!(result.is_err());
+        assert_eq!(
+            repository
+                .load_current(&ItemId::parse("fixture-a").unwrap())
+                .unwrap(),
+            first_a
+        );
+        assert_eq!(
+            repository
+                .load_current(&ItemId::parse("fixture-b").unwrap())
+                .unwrap(),
+            first_b
+        );
+        assert!(!repository.items_root().join(TRANSACTION_FILE).exists());
+    }
+
+    #[test]
+    fn prepared_crash_journal_rolls_back_partial_pointer_updates() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir(temp.path().join(".ats")).unwrap();
+        let repository = FileItemRepository::new(temp.path().to_path_buf());
+        let first_a = repository.save(&definition("fixture-a", "common")).unwrap();
+        let first_b = repository.save(&definition("fixture-b", "common")).unwrap();
+        let next_a = repository
+            .store_snapshot_unlocked(&definition("fixture-a", "rare"))
+            .unwrap();
+        let next_b = repository
+            .store_snapshot_unlocked(&definition("fixture-b", "rare"))
+            .unwrap();
+        let transaction = PointerTransaction {
+            schema_version: TRANSACTION_SCHEMA_VERSION,
+            state: PointerTransactionState::Prepared,
+            entries: vec![
+                PointerTransactionEntry {
+                    item_id: ItemId::parse("fixture-a").unwrap(),
+                    previous_definition_hash: Some(first_a.definition_hash.clone()),
+                    next_definition_hash: next_a.definition_hash.clone(),
+                },
+                PointerTransactionEntry {
+                    item_id: ItemId::parse("fixture-b").unwrap(),
+                    previous_definition_hash: Some(first_b.definition_hash.clone()),
+                    next_definition_hash: next_b.definition_hash,
+                },
+            ],
+        };
+        write_json_atomic(
+            &repository.items_root().join(TRANSACTION_FILE),
+            &transaction,
+        )
+        .unwrap();
+        repository
+            .write_pointer_unlocked(
+                &ItemId::parse("fixture-a").unwrap(),
+                &next_a.definition_hash,
+            )
+            .unwrap();
+
+        let reopened = FileItemRepository::new(temp.path().to_path_buf());
+        assert_eq!(
+            reopened
+                .load_current(&ItemId::parse("fixture-a").unwrap())
+                .unwrap(),
+            first_a
+        );
+        assert_eq!(
+            reopened
+                .load_current(&ItemId::parse("fixture-b").unwrap())
+                .unwrap(),
+            first_b
+        );
+        assert!(!reopened.items_root().join(TRANSACTION_FILE).exists());
+    }
+
+    #[test]
+    fn atomic_batch_rejects_stale_expected_current_without_pointer_changes() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir(temp.path().join(".ats")).unwrap();
+        let repository = FileItemRepository::new(temp.path().to_path_buf());
+        let current = repository.save(&definition("fixture", "common")).unwrap();
+        let request = AtomicItemSaveRequest {
+            definitions: vec![definition("fixture", "rare")],
+            expected_current: BTreeMap::from([(
+                ItemId::parse("fixture").unwrap(),
+                Some(Sha256Digest::parse("a".repeat(64)).unwrap()),
+            )]),
+        };
+        assert!(matches!(
+            repository.save_batch(&request),
+            Err(AtomicItemSaveError::Conflict)
+        ));
+        assert_eq!(
+            repository
+                .load_current(&ItemId::parse("fixture").unwrap())
+                .unwrap(),
+            current
+        );
     }
 }
