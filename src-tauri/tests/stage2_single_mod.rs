@@ -22,7 +22,8 @@ use ats_game_context::{
     TruthSnapshotManifest, TruthSnapshotSource, VerifiedContributionSet, VerifiedTruthSnapshot,
 };
 use ats_kernel::{
-    ItemFieldId, ItemId, ItemTypeId, LocaleId, PrimitiveId, ResourceId, Sha256Digest,
+    ItemFieldId, ItemId, ItemTypeId, LocaleId, LocalizationFieldId, PrimitiveId, ResourceId,
+    Sha256Digest,
 };
 use ats_runtime::{
     ArtifactManifest, ArtifactPublishRequest, ArtifactPublisher, CancellationReason,
@@ -42,6 +43,20 @@ use sha2::{Digest, Sha256};
 struct FixtureModel {
     source: &'static str,
     snapshots: Mutex<Vec<ModelRequestSnapshot>>,
+}
+
+fn item_localization(name: &str, description: &str) -> ItemLocalization {
+    ItemLocalization {
+        fields: BTreeMap::from([
+            (LocalizationFieldId::parse("name").unwrap(), name.into()),
+            (
+                LocalizationFieldId::parse("description").unwrap(),
+                description.into(),
+            ),
+        ]),
+        status: LocalizationStatus::Confirmed,
+        translated_from: None,
+    }
 }
 
 #[async_trait]
@@ -229,12 +244,7 @@ impl Fixture {
         for (locale, name) in [("eng", "Fixture Relic"), ("zhs", "Fixture Relic ZHS")] {
             definition.localizations.insert(
                 LocaleId::parse(locale).unwrap(),
-                ItemLocalization {
-                    name: name.into(),
-                    description: "A compile-test fixture relic.".into(),
-                    status: LocalizationStatus::Confirmed,
-                    translated_from: None,
-                },
+                item_localization(name, "A compile-test fixture relic."),
             );
         }
         for role in ["relic.normal", "relic.outline", "relic.big"] {
@@ -326,12 +336,7 @@ impl Fixture {
         for (locale, name) in [("eng", "Fixture Card"), ("zhs", "Fixture Card ZHS")] {
             definition.localizations.insert(
                 LocaleId::parse(locale).unwrap(),
-                ItemLocalization {
-                    name: name.into(),
-                    description: "A compile-test fixture card.".into(),
-                    status: LocalizationStatus::Confirmed,
-                    translated_from: None,
-                },
+                item_localization(name, "A compile-test fixture card."),
             );
         }
         for (role, width, height) in [("card.portrait", 250, 190), ("card.big", 1000, 760)] {
@@ -404,12 +409,7 @@ impl Fixture {
         for (locale, name) in [("eng", "Fixture Potion"), ("zhs", "Fixture Potion ZHS")] {
             definition.localizations.insert(
                 LocaleId::parse(locale).unwrap(),
-                ItemLocalization {
-                    name: name.into(),
-                    description: "A compile-test fixture potion.".into(),
-                    status: LocalizationStatus::Confirmed,
-                    translated_from: None,
-                },
+                item_localization(name, "A compile-test fixture potion."),
             );
         }
         let candidate = fixture
@@ -481,12 +481,7 @@ impl Fixture {
         for (locale, name) in [("eng", "Fixture Power"), ("zhs", "Fixture Power ZHS")] {
             definition.localizations.insert(
                 LocaleId::parse(locale).unwrap(),
-                ItemLocalization {
-                    name: name.into(),
-                    description: "A compile-test fixture power.".into(),
-                    status: LocalizationStatus::Confirmed,
-                    translated_from: None,
-                },
+                item_localization(name, "A compile-test fixture power."),
             );
         }
         for (role, width, height) in [("power.icon", 48, 48), ("power.big", 192, 192)] {

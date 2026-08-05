@@ -31,13 +31,14 @@ export function createItemDraft(
     }
   }
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     itemId,
     itemType: capability.descriptor.id,
     canonicalFields,
     behaviorIntent: [],
     localizations: {},
     resourceBindings: {},
+    referenceBindings: {},
   };
 }
 
@@ -65,22 +66,18 @@ export function setBehaviorText(
   };
 }
 
-export function setLocalizationText(
+export function setLocalizationFieldText(
   definition: ItemDefinition,
   locale: string,
   primaryLocale: string,
-  patch: Partial<Pick<ItemLocalization, "name" | "description">>,
+  fieldId: string,
+  value: string,
 ): ItemDefinition {
   const previous = definition.localizations[locale];
-  const name = patch.name ?? previous?.name ?? "";
-  const description = patch.description ?? previous?.description ?? "";
-  const changed =
-    previous === undefined ||
-    previous.name !== name ||
-    previous.description !== description;
+  const fields = { ...previous?.fields, [fieldId]: value };
+  const changed = previous === undefined || previous.fields[fieldId] !== value;
   const current: ItemLocalization = {
-    name,
-    description,
+    fields,
     status:
       locale === primaryLocale
         ? "confirmed"
@@ -104,9 +101,12 @@ export function setLocalizationText(
 export function confirmLocalization(
   definition: ItemDefinition,
   locale: string,
+  descriptor: ItemTypeDescriptor,
 ): ItemDefinition {
   const localization = definition.localizations[locale];
-  if (!localization?.name.trim() || !localization.description.trim()) return definition;
+  if (!localization || descriptor.localizationFields.some(
+    (field) => field.required && !localization.fields[field.id]?.trim(),
+  )) return definition;
   return {
     ...definition,
     localizations: {
@@ -130,8 +130,15 @@ export function draftIssues(
     }
   }
   for (const [locale, value] of Object.entries(definition.localizations)) {
-    if (!value.name.trim() || !value.description.trim()) {
-      issues.push(`${locale} localization is incomplete.`);
+    for (const fieldId of Object.keys(value.fields)) {
+      if (!descriptor.localizationFields.some((field) => field.id === fieldId)) {
+        issues.push(`${locale} has unknown localization field: ${fieldId}.`);
+      }
+    }
+    for (const field of descriptor.localizationFields) {
+      if (field.required && !value.fields[field.id]?.trim()) {
+        issues.push(`${locale} ${localizedLabel(field.displayNames)} is incomplete.`);
+      }
     }
     if (
       value.translatedFrom &&
@@ -143,6 +150,20 @@ export function draftIssues(
     }
   }
   return issues;
+}
+
+export function requiredResourceRoles(
+  definition: ItemDefinition,
+  descriptor: ItemTypeDescriptor,
+): string[] {
+  if (descriptor.resourceProfiles.length === 0) return [];
+  if (!descriptor.resourceProfileField) {
+    return descriptor.resourceProfiles[0]?.requiredResourceRoles ?? [];
+  }
+  const selected = definition.canonicalFields[descriptor.resourceProfileField];
+  if (selected?.kind !== "choice") return [];
+  return descriptor.resourceProfiles.find((profile) => profile.id === selected.value)
+    ?.requiredResourceRoles ?? [];
 }
 
 export function capabilityReason(capability: ItemTypeCapability): string {

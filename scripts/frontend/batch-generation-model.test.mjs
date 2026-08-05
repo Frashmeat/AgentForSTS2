@@ -13,19 +13,21 @@ const {
   failedRequestItems,
   unprocessedRequestItems,
 } = await vite.ssrLoadModule("/src/pages/batchGenerationModel.ts");
+const { isStoredItemDefinition } = await vite.ssrLoadModule("/src/services/itemContractGuards.ts");
 
 const hash = "a".repeat(64);
 const manifestHash = "b".repeat(64);
 const definition = {
   definitionHash: hash,
   definition: {
-    schemaVersion: 1,
+    schemaVersion: 2,
     itemId: "fixture-item",
     itemType: "relic",
     canonicalFields: {},
     behaviorIntent: ["Create a fixture relic."],
     localizations: {},
     resourceBindings: {},
+    referenceBindings: {},
   },
 };
 
@@ -58,6 +60,21 @@ test("library definitions deterministically build Batch and Complex requests", (
     outputRelativePath: "packages/FixtureMod.zip",
   });
   assert.equal(complex.batch, batch);
+});
+
+test("ItemDefinition v2 guard rejects stale schema and malformed typed references", () => {
+  assert.equal(isStoredItemDefinition(definition), true);
+  const stale = structuredClone(definition);
+  stale.definition.schemaVersion = 1;
+  assert.equal(isStoredItemDefinition(stale), false);
+  const malformed = structuredClone(definition);
+  malformed.definition.referenceBindings.starting_deck = [{
+    kind: "pinned",
+    itemId: "fixture-card",
+    definitionHash: "invalid",
+    quantity: 1,
+  }];
+  assert.equal(isStoredItemDefinition(malformed), false);
 });
 
 test("Batch result decodes child Runs and pins failed retry input", () => {

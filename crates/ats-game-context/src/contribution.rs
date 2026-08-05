@@ -150,7 +150,7 @@ mod tests {
     }
 
     fn pack() -> LoadedGamePack {
-        let json = r#"{"schemaVersion":3,"id":"fixture-game","displayName":"Fixture","itemTypes":[{"id":"fixture_item","displayNames":{"eng":"Fixture item"},"evidenceQueries":[{"symbols":["Fixture.Symbol"],"terms":[]}]}],"contributions":[{"slotId":"log.analyze.rules","featureId":"log.analyze","schema":{"id":"pack.log-rules","version":1},"requiredPrimitives":["log.parser"],"payload":{"format":"fixture"}}]}"#;
+        let json = r#"{"schemaVersion":4,"id":"fixture-game","displayName":"Fixture","itemTypes":[{"id":"fixture_item","displayNames":{"eng":"Fixture item"},"evidenceQueries":[{"symbols":["Fixture.Symbol"],"terms":[]}]}],"contributions":[{"slotId":"log.analyze.rules","featureId":"log.analyze","schema":{"id":"pack.log-rules","version":1},"requiredPrimitives":["log.parser"],"payload":{"format":"fixture"}}]}"#;
         let hash = Sha256Digest::parse(format!("{:x}", Sha256::digest(json.as_bytes()))).unwrap();
         GamePackLoader::load(json.as_bytes(), &hash).unwrap()
     }

@@ -22,9 +22,10 @@ import {
   createItemDraft,
   draftIssues,
   localizedLabel,
+  requiredResourceRoles,
   setBehaviorText,
   setFieldValue,
-  setLocalizationText,
+  setLocalizationFieldText,
 } from "./itemEditorModel";
 import { ResourceWorkbench } from "./ResourceWorkbench";
 
@@ -53,6 +54,12 @@ export function ModEditorPage() {
   );
   const issues = useMemo(
     () => draft && selectedCapability ? draftIssues(draft, selectedCapability.descriptor) : [],
+    [draft, selectedCapability],
+  );
+  const requiredRoles = useMemo(
+    () => draft && selectedCapability
+      ? requiredResourceRoles(draft, selectedCapability.descriptor)
+      : [],
     [draft, selectedCapability],
   );
   const currentStoredDefinition = useMemo(
@@ -226,7 +233,7 @@ export function ModEditorPage() {
         </Card>
 
         <Card
-          eyebrow="definition v1"
+          eyebrow="definition v2"
           title={draft?.itemId || "Create or open an item"}
           subtitle={draft ? `${draft.itemType} · ${currentStoredDefinition?.definitionHash ?? "unsaved changes"}` : "The form is rendered from the selected Pack descriptor."}
           actions={draft && <Button data-testid="item-save" variant="success" disabled={busy || issues.length > 0 || !selectedCapability?.ready} onClick={() => void saveDraft()}><Save size={14} /> Save snapshot</Button>}
@@ -272,9 +279,16 @@ export function ModEditorPage() {
                               <strong className="font-mono text-xs">{locale}</strong>
                               <Badge variant={status === "confirmed" ? "ok" : "warn"}>{status}</Badge>
                             </div>
-                            <Field label="Name"><input value={value?.name ?? ""} onChange={(event) => setDraft(setLocalizationText(draft, locale, primaryLocale, { name: event.target.value }))} /></Field>
-                            <Field label="Description"><textarea className="min-h-24" value={value?.description ?? ""} onChange={(event) => setDraft(setLocalizationText(draft, locale, primaryLocale, { description: event.target.value }))} /></Field>
-                            {locale !== primaryLocale && <Button size="sm" disabled={!value?.name.trim() || !value.description.trim()} onClick={() => setDraft(confirmLocalization(draft, locale))}>Confirm candidate</Button>}
+                            {selectedCapability.descriptor.localizationFields.map((field) => (
+                              <Field key={field.id} label={localizedLabel(field.displayNames)}>
+                                {field.multiline ? (
+                                  <textarea className="min-h-24" value={value?.fields[field.id] ?? ""} onChange={(event) => setDraft(setLocalizationFieldText(draft, locale, primaryLocale, field.id, event.target.value))} />
+                                ) : (
+                                  <input value={value?.fields[field.id] ?? ""} onChange={(event) => setDraft(setLocalizationFieldText(draft, locale, primaryLocale, field.id, event.target.value))} />
+                                )}
+                              </Field>
+                            ))}
+                            {locale !== primaryLocale && <Button size="sm" disabled={!value || selectedCapability.descriptor.localizationFields.some((field) => field.required && !value.fields[field.id]?.trim())} onClick={() => setDraft(confirmLocalization(draft, locale, selectedCapability.descriptor))}>Confirm candidate</Button>}
                           </div>
                         );
                       })}
@@ -285,7 +299,7 @@ export function ModEditorPage() {
               <CardSection title="Resources">
                 <ResourceWorkbench
                   definition={draft}
-                  requiredRoles={selectedCapability.descriptor.requiredResourceRoles}
+                  requiredRoles={requiredRoles}
                   onChange={setDraft}
                   onRun={setRun}
                   onFailure={setFailure}

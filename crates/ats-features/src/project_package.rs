@@ -348,7 +348,7 @@ mod tests {
     #[test]
     fn synthetic_pack_uses_the_same_build_and_package_contracts() {
         let value = serde_json::json!({
-            "schemaVersion":3,
+            "schemaVersion":4,
             "id":"fixture-game",
             "displayName":"Fixture Game",
             "itemTypes":[{

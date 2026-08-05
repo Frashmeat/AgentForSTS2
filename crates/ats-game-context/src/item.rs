@@ -1,6 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use ats_kernel::{GamePackId, ItemFieldId, ItemTypeId, LocaleId, ResourceId, Sha256Digest};
+use ats_kernel::{
+    CompositionId, CompositionParameterId, CompositionProfileId, GamePackId, ItemFieldId,
+    ItemReferenceSlotId, ItemTypeId, LocaleId, LocalizationFieldId, ResourceId, ResourceProfileId,
+    Sha256Digest,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -17,9 +21,15 @@ pub struct ItemTypeDescriptor {
     required_locales: Vec<LocaleId>,
     #[serde(default)]
     fields: Vec<ItemFieldSpec>,
-    evidence_queries: Vec<ItemEvidenceQuery>,
     #[serde(default)]
-    required_resource_roles: Vec<ResourceId>,
+    localization_fields: Vec<LocalizationFieldSpec>,
+    #[serde(default)]
+    reference_slots: Vec<ItemReferenceSlotSpec>,
+    #[serde(default)]
+    resource_profile_field: Option<ItemFieldId>,
+    #[serde(default)]
+    resource_profiles: Vec<ItemResourceProfileSpec>,
+    evidence_queries: Vec<ItemEvidenceQuery>,
 }
 
 impl ItemTypeDescriptor {
@@ -44,13 +54,28 @@ impl ItemTypeDescriptor {
     }
 
     #[must_use]
-    pub fn evidence_queries(&self) -> &[ItemEvidenceQuery] {
-        &self.evidence_queries
+    pub fn localization_fields(&self) -> &[LocalizationFieldSpec] {
+        &self.localization_fields
     }
 
     #[must_use]
-    pub fn required_resource_roles(&self) -> &[ResourceId] {
-        &self.required_resource_roles
+    pub fn reference_slots(&self) -> &[ItemReferenceSlotSpec] {
+        &self.reference_slots
+    }
+
+    #[must_use]
+    pub fn resource_profile_field(&self) -> Option<&ItemFieldId> {
+        self.resource_profile_field.as_ref()
+    }
+
+    #[must_use]
+    pub fn resource_profiles(&self) -> &[ItemResourceProfileSpec] {
+        &self.resource_profiles
+    }
+
+    #[must_use]
+    pub fn evidence_queries(&self) -> &[ItemEvidenceQuery] {
+        &self.evidence_queries
     }
 
     pub(crate) fn validate(&self) -> Result<(), ItemCatalogError> {
@@ -70,6 +95,25 @@ impl ItemTypeDescriptor {
         {
             return Err(ItemCatalogError::InvalidFields);
         }
+        if self.localization_fields.len() > 64
+            || has_duplicates_by(&self.localization_fields, LocalizationFieldSpec::id)
+            || self
+                .localization_fields
+                .iter()
+                .any(|field| field.validate().is_err())
+            || (!self.required_locales.is_empty() && self.localization_fields.is_empty())
+        {
+            return Err(ItemCatalogError::InvalidLocalizationFields);
+        }
+        if self.reference_slots.len() > 64
+            || has_duplicates_by(&self.reference_slots, ItemReferenceSlotSpec::id)
+            || self
+                .reference_slots
+                .iter()
+                .any(|slot| slot.validate().is_err())
+        {
+            return Err(ItemCatalogError::InvalidReferenceSlots);
+        }
         if self.evidence_queries.is_empty()
             || self.evidence_queries.len() > 64
             || self
@@ -79,11 +123,220 @@ impl ItemTypeDescriptor {
         {
             return Err(ItemCatalogError::InvalidEvidenceQueries);
         }
-        if self.required_resource_roles.len() > 128 || has_duplicates(&self.required_resource_roles)
-        {
-            return Err(ItemCatalogError::InvalidResourceRoles);
-        }
+        self.validate_resource_profiles()?;
         Ok(())
+    }
+
+    fn validate_resource_profiles(&self) -> Result<(), ItemCatalogError> {
+        if self.resource_profiles.len() > 32
+            || has_duplicates_by(&self.resource_profiles, ItemResourceProfileSpec::id)
+            || self
+                .resource_profiles
+                .iter()
+                .any(|profile| profile.validate().is_err())
+        {
+            return Err(ItemCatalogError::InvalidResourceProfiles);
+        }
+        let Some(selector) = &self.resource_profile_field else {
+            return if self.resource_profiles.len() <= 1 {
+                Ok(())
+            } else {
+                Err(ItemCatalogError::InvalidResourceProfiles)
+            };
+        };
+        let Some(ItemFieldSpec {
+            required: true,
+            value: ItemFieldValueSpec::Choice { options },
+            ..
+        }) = self.fields.iter().find(|field| field.id() == selector)
+        else {
+            return Err(ItemCatalogError::InvalidResourceProfiles);
+        };
+        let option_ids = options
+            .iter()
+            .map(|option| option.value.as_str())
+            .collect::<BTreeSet<_>>();
+        let profile_ids = self
+            .resource_profiles
+            .iter()
+            .map(|profile| profile.id.as_str())
+            .collect::<BTreeSet<_>>();
+        if option_ids == profile_ids {
+            Ok(())
+        } else {
+            Err(ItemCatalogError::InvalidResourceProfiles)
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LocalizationFieldSpec {
+    id: LocalizationFieldId,
+    display_names: BTreeMap<LocaleId, String>,
+    required: bool,
+    multiline: bool,
+    min_length: u32,
+    max_length: u32,
+}
+
+impl LocalizationFieldSpec {
+    #[must_use]
+    pub fn id(&self) -> &LocalizationFieldId {
+        &self.id
+    }
+
+    #[must_use]
+    pub fn display_names(&self) -> &BTreeMap<LocaleId, String> {
+        &self.display_names
+    }
+
+    #[must_use]
+    pub const fn required(&self) -> bool {
+        self.required
+    }
+
+    #[must_use]
+    pub const fn multiline(&self) -> bool {
+        self.multiline
+    }
+
+    #[must_use]
+    pub const fn min_length(&self) -> u32 {
+        self.min_length
+    }
+
+    #[must_use]
+    pub const fn max_length(&self) -> u32 {
+        self.max_length
+    }
+
+    fn validate(&self) -> Result<(), ItemCatalogError> {
+        validate_display_names(&self.display_names)?;
+        if self.min_length <= self.max_length && self.max_length <= 8_000 {
+            Ok(())
+        } else {
+            Err(ItemCatalogError::InvalidLocalizationFields)
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ItemReferenceKind {
+    Identity,
+    Pinned,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ItemReferenceSlotSpec {
+    id: ItemReferenceSlotId,
+    display_names: BTreeMap<LocaleId, String>,
+    kind: ItemReferenceKind,
+    allowed_item_types: Vec<ItemTypeId>,
+    min_items: u32,
+    max_items: u32,
+    min_quantity: u32,
+    max_quantity: u32,
+}
+
+impl ItemReferenceSlotSpec {
+    #[must_use]
+    pub fn id(&self) -> &ItemReferenceSlotId {
+        &self.id
+    }
+
+    #[must_use]
+    pub fn display_names(&self) -> &BTreeMap<LocaleId, String> {
+        &self.display_names
+    }
+
+    #[must_use]
+    pub const fn kind(&self) -> ItemReferenceKind {
+        self.kind
+    }
+
+    #[must_use]
+    pub fn allowed_item_types(&self) -> &[ItemTypeId] {
+        &self.allowed_item_types
+    }
+
+    #[must_use]
+    pub const fn min_items(&self) -> u32 {
+        self.min_items
+    }
+
+    #[must_use]
+    pub const fn max_items(&self) -> u32 {
+        self.max_items
+    }
+
+    #[must_use]
+    pub const fn min_quantity(&self) -> u32 {
+        self.min_quantity
+    }
+
+    #[must_use]
+    pub const fn max_quantity(&self) -> u32 {
+        self.max_quantity
+    }
+
+    fn validate(&self) -> Result<(), ItemCatalogError> {
+        validate_display_names(&self.display_names)?;
+        let quantity_valid = self.min_quantity >= 1
+            && self.min_quantity <= self.max_quantity
+            && self.max_quantity <= 999
+            && (self.kind == ItemReferenceKind::Pinned
+                || (self.min_quantity == 1 && self.max_quantity == 1));
+        if !self.allowed_item_types.is_empty()
+            && self.allowed_item_types.len() <= 32
+            && !has_duplicates(&self.allowed_item_types)
+            && self.min_items <= self.max_items
+            && self.max_items <= 128
+            && quantity_valid
+        {
+            Ok(())
+        } else {
+            Err(ItemCatalogError::InvalidReferenceSlots)
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ItemResourceProfileSpec {
+    id: ResourceProfileId,
+    display_names: BTreeMap<LocaleId, String>,
+    #[serde(default)]
+    required_resource_roles: Vec<ResourceId>,
+}
+
+impl ItemResourceProfileSpec {
+    #[must_use]
+    pub fn id(&self) -> &ResourceProfileId {
+        &self.id
+    }
+
+    #[must_use]
+    pub fn display_names(&self) -> &BTreeMap<LocaleId, String> {
+        &self.display_names
+    }
+
+    #[must_use]
+    pub fn required_resource_roles(&self) -> &[ResourceId] {
+        &self.required_resource_roles
+    }
+
+    fn validate(&self) -> Result<(), ItemCatalogError> {
+        validate_display_names(&self.display_names)?;
+        if self.required_resource_roles.len() <= 128
+            && !has_duplicates(&self.required_resource_roles)
+        {
+            Ok(())
+        } else {
+            Err(ItemCatalogError::InvalidResourceProfiles)
+        }
     }
 }
 
@@ -208,6 +461,262 @@ pub struct ItemEvidenceQuery {
     terms: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CompositionProfileSet {
+    id: CompositionId,
+    display_names: BTreeMap<LocaleId, String>,
+    root_item_type: ItemTypeId,
+    default_profile: CompositionProfileId,
+    custom_base_profile: CompositionProfileId,
+    max_nodes: u32,
+    base_node_count: u32,
+    parameters: Vec<CompositionParameterSpec>,
+    profiles: Vec<CompositionProfileSpec>,
+    #[serde(default)]
+    constraints: Vec<CompositionConstraintSpec>,
+}
+
+impl CompositionProfileSet {
+    #[must_use]
+    pub fn id(&self) -> &CompositionId {
+        &self.id
+    }
+
+    #[must_use]
+    pub fn display_names(&self) -> &BTreeMap<LocaleId, String> {
+        &self.display_names
+    }
+
+    #[must_use]
+    pub fn root_item_type(&self) -> &ItemTypeId {
+        &self.root_item_type
+    }
+
+    #[must_use]
+    pub fn default_profile(&self) -> &CompositionProfileId {
+        &self.default_profile
+    }
+
+    #[must_use]
+    pub fn custom_base_profile(&self) -> &CompositionProfileId {
+        &self.custom_base_profile
+    }
+
+    #[must_use]
+    pub const fn max_nodes(&self) -> u32 {
+        self.max_nodes
+    }
+
+    #[must_use]
+    pub const fn base_node_count(&self) -> u32 {
+        self.base_node_count
+    }
+
+    #[must_use]
+    pub fn parameters(&self) -> &[CompositionParameterSpec] {
+        &self.parameters
+    }
+
+    #[must_use]
+    pub fn profiles(&self) -> &[CompositionProfileSpec] {
+        &self.profiles
+    }
+
+    #[must_use]
+    pub fn constraints(&self) -> &[CompositionConstraintSpec] {
+        &self.constraints
+    }
+
+    pub fn validate_parameters(
+        &self,
+        values: &BTreeMap<CompositionParameterId, u32>,
+    ) -> Result<(), CompositionProfileError> {
+        if values.len() != self.parameters.len() {
+            return Err(CompositionProfileError::InvalidParameters);
+        }
+        let mut node_count = self.base_node_count;
+        for parameter in &self.parameters {
+            let Some(value) = values.get(parameter.id()) else {
+                return Err(CompositionProfileError::InvalidParameters);
+            };
+            if !(parameter.min..=parameter.max).contains(value) {
+                return Err(CompositionProfileError::InvalidParameters);
+            }
+            node_count = node_count
+                .checked_add(value.saturating_mul(parameter.node_weight))
+                .ok_or(CompositionProfileError::InvalidNodeLimit)?;
+        }
+        if node_count > self.max_nodes {
+            return Err(CompositionProfileError::InvalidNodeLimit);
+        }
+        for constraint in &self.constraints {
+            match constraint {
+                CompositionConstraintSpec::LessOrEqual { left, right }
+                    if values.get(left).is_none_or(|left_value| {
+                        values
+                            .get(right)
+                            .is_none_or(|right_value| left_value > right_value)
+                    }) =>
+                {
+                    return Err(CompositionProfileError::ConstraintViolation);
+                }
+                CompositionConstraintSpec::LessOrEqual { .. } => {}
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate(&self) -> Result<(), CompositionProfileError> {
+        validate_display_names(&self.display_names)
+            .map_err(|_| CompositionProfileError::InvalidDisplayNames)?;
+        if self.max_nodes == 0
+            || self.max_nodes > 128
+            || self.base_node_count == 0
+            || self.base_node_count > self.max_nodes
+            || self.parameters.is_empty()
+            || self.parameters.len() > 64
+            || has_duplicates_by(&self.parameters, CompositionParameterSpec::id)
+            || self
+                .parameters
+                .iter()
+                .any(|parameter| !parameter.is_valid())
+            || self.profiles.is_empty()
+            || self.profiles.len() > 16
+            || has_duplicates_by(&self.profiles, CompositionProfileSpec::id)
+            || self.profiles.iter().any(|profile| !profile.is_valid())
+            || self.constraints.len() > 32
+        {
+            return Err(CompositionProfileError::InvalidContract);
+        }
+        let parameter_ids = self
+            .parameters
+            .iter()
+            .map(CompositionParameterSpec::id)
+            .collect::<BTreeSet<_>>();
+        if self.constraints.iter().any(|constraint| match constraint {
+            CompositionConstraintSpec::LessOrEqual { left, right } => {
+                left == right || !parameter_ids.contains(left) || !parameter_ids.contains(right)
+            }
+        }) {
+            return Err(CompositionProfileError::InvalidContract);
+        }
+        let profile_ids = self
+            .profiles
+            .iter()
+            .map(CompositionProfileSpec::id)
+            .collect::<BTreeSet<_>>();
+        if !profile_ids.contains(&self.default_profile)
+            || !profile_ids.contains(&self.custom_base_profile)
+            || self
+                .profiles
+                .iter()
+                .any(|profile| self.validate_parameters(&profile.values).is_err())
+        {
+            return Err(CompositionProfileError::InvalidContract);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CompositionParameterSpec {
+    id: CompositionParameterId,
+    display_names: BTreeMap<LocaleId, String>,
+    min: u32,
+    max: u32,
+    node_weight: u32,
+}
+
+impl CompositionParameterSpec {
+    #[must_use]
+    pub fn id(&self) -> &CompositionParameterId {
+        &self.id
+    }
+
+    #[must_use]
+    pub fn display_names(&self) -> &BTreeMap<LocaleId, String> {
+        &self.display_names
+    }
+
+    #[must_use]
+    pub const fn min(&self) -> u32 {
+        self.min
+    }
+
+    #[must_use]
+    pub const fn max(&self) -> u32 {
+        self.max
+    }
+
+    #[must_use]
+    pub const fn node_weight(&self) -> u32 {
+        self.node_weight
+    }
+
+    fn is_valid(&self) -> bool {
+        self.min <= self.max
+            && self.max <= 128
+            && self.node_weight <= 128
+            && validate_display_names(&self.display_names).is_ok()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CompositionProfileSpec {
+    id: CompositionProfileId,
+    display_names: BTreeMap<LocaleId, String>,
+    values: BTreeMap<CompositionParameterId, u32>,
+}
+
+impl CompositionProfileSpec {
+    #[must_use]
+    pub fn id(&self) -> &CompositionProfileId {
+        &self.id
+    }
+
+    #[must_use]
+    pub fn display_names(&self) -> &BTreeMap<LocaleId, String> {
+        &self.display_names
+    }
+
+    #[must_use]
+    pub fn values(&self) -> &BTreeMap<CompositionParameterId, u32> {
+        &self.values
+    }
+
+    fn is_valid(&self) -> bool {
+        !self.values.is_empty()
+            && self.values.len() <= 64
+            && validate_display_names(&self.display_names).is_ok()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum CompositionConstraintSpec {
+    LessOrEqual {
+        left: CompositionParameterId,
+        right: CompositionParameterId,
+    },
+}
+
+#[derive(Debug, Error, Eq, PartialEq)]
+pub enum CompositionProfileError {
+    #[error("composition profile display names are invalid")]
+    InvalidDisplayNames,
+    #[error("composition profile contract is invalid")]
+    InvalidContract,
+    #[error("composition profile parameters are invalid")]
+    InvalidParameters,
+    #[error("composition profile exceeds the node limit")]
+    InvalidNodeLimit,
+    #[error("composition profile constraint is violated")]
+    ConstraintViolation,
+}
+
 impl ItemEvidenceQuery {
     #[must_use]
     pub fn symbols(&self) -> &[String] {
@@ -253,10 +762,14 @@ pub enum ItemCatalogError {
     InvalidLocales,
     #[error("item type field descriptors are invalid")]
     InvalidFields,
+    #[error("item type localization field descriptors are invalid")]
+    InvalidLocalizationFields,
+    #[error("item type reference slots are invalid")]
+    InvalidReferenceSlots,
     #[error("item type evidence queries are invalid")]
     InvalidEvidenceQueries,
-    #[error("item type resource roles are invalid")]
-    InvalidResourceRoles,
+    #[error("item type Resource profiles are invalid")]
+    InvalidResourceProfiles,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -267,6 +780,7 @@ pub struct ItemCapabilityCatalog {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub truth_snapshot_id: Option<Sha256Digest>,
     pub item_types: Vec<ItemTypeCapability>,
+    pub composition_profiles: Vec<CompositionProfileSet>,
 }
 
 impl ItemCapabilityCatalog {
@@ -314,6 +828,7 @@ impl ItemCapabilityCatalog {
             game_pack_sha256: pack.content_sha256().clone(),
             truth_snapshot_id: truth.map(|snapshot| snapshot.manifest().snapshot_id().clone()),
             item_types,
+            composition_profiles: pack.composition_profiles().values().cloned().collect(),
         })
     }
 }
@@ -395,7 +910,7 @@ mod tests {
 
     fn pack() -> LoadedGamePack {
         let value = serde_json::json!({
-            "schemaVersion": 3,
+            "schemaVersion": 4,
             "id": "fixture-game",
             "displayName": "Fixture Game",
             "itemTypes": [
@@ -415,8 +930,22 @@ mod tests {
                             }]
                         }
                     }],
+                    "localizationFields": [
+                        {
+                            "id":"name",
+                            "displayNames":{"eng":"Name", "zhs":"名称"},
+                            "required":true,
+                            "multiline":false,
+                            "minLength":1,
+                            "maxLength":256
+                        }
+                    ],
                     "evidenceQueries": [{"symbols":["Fixture.Symbol"],"terms":[]}],
-                    "requiredResourceRoles": ["fixture.icon"]
+                    "resourceProfiles": [{
+                        "id":"default",
+                        "displayNames":{"eng":"Default"},
+                        "requiredResourceRoles":["fixture.icon"]
+                    }]
                 },
                 {
                     "id": "blocked_item",
@@ -517,7 +1046,7 @@ mod tests {
             ItemFieldValueSpec::Choice { options } if options[0].value() == "common"
         ));
         assert_eq!(
-            descriptor.required_resource_roles()[0].as_str(),
+            descriptor.resource_profiles()[0].required_resource_roles()[0].as_str(),
             "fixture.icon"
         );
     }

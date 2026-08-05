@@ -5,11 +5,11 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::{ItemCatalogError, ItemTypeDescriptor};
+use crate::{CompositionProfileError, CompositionProfileSet, ItemCatalogError, ItemTypeDescriptor};
 
-pub const GAME_PACK_SCHEMA_VERSION: u32 = 3;
+pub const GAME_PACK_SCHEMA_VERSION: u32 = 4;
 const BUILT_IN_STS2_SHA256: &str =
-    "5bb8158fdfd1f05c92af5cf5110e4a2ceed8ab73a086dfa876429b97756ecc03";
+    "46402a5eb9d095e2d4ba7a12d41944f8fba965f89051ed8169d141a784517be5";
 const BUILT_IN_STS2: &[u8] = include_bytes!("../../../game_packs/sts2/stage2-game-pack.json");
 
 #[derive(Debug, Clone)]
@@ -56,6 +56,7 @@ pub struct LoadedGamePack {
     display_name: String,
     content_sha256: Sha256Digest,
     item_types: BTreeMap<ats_kernel::ItemTypeId, ItemTypeDescriptor>,
+    composition_profiles: BTreeMap<ats_kernel::CompositionId, CompositionProfileSet>,
     contributions: BTreeMap<ContributionId, PackContribution>,
 }
 
@@ -90,6 +91,21 @@ impl LoadedGamePack {
         self.item_types.get(id)
     }
 
+    #[must_use]
+    pub fn composition_profiles(
+        &self,
+    ) -> &BTreeMap<ats_kernel::CompositionId, CompositionProfileSet> {
+        &self.composition_profiles
+    }
+
+    #[must_use]
+    pub fn composition_profile(
+        &self,
+        id: &ats_kernel::CompositionId,
+    ) -> Option<&CompositionProfileSet> {
+        self.composition_profiles.get(id)
+    }
+
     pub(crate) fn contribution(&self, slot_id: &ContributionId) -> Option<&PackContribution> {
         self.contributions.get(slot_id)
     }
@@ -115,6 +131,10 @@ pub enum GamePackLoadError {
     InvalidItemTypes,
     #[error("game pack item type descriptor is invalid")]
     InvalidItemType(#[source] ItemCatalogError),
+    #[error("game pack composition profile contract is invalid")]
+    InvalidCompositionProfile(#[source] CompositionProfileError),
+    #[error("game pack contains duplicate composition profiles or an unknown root item type")]
+    InvalidCompositionProfiles,
 }
 
 #[derive(Debug, Deserialize)]
@@ -124,6 +144,8 @@ struct RawManifest {
     id: GamePackId,
     display_name: String,
     item_types: Vec<ItemTypeDescriptor>,
+    #[serde(default)]
+    composition_profiles: Vec<CompositionProfileSet>,
     contributions: Vec<RawContribution>,
 }
 
@@ -174,6 +196,23 @@ impl GamePackLoader {
             }
         }
 
+        if raw.composition_profiles.len() > 16 {
+            return Err(GamePackLoadError::InvalidCompositionProfiles);
+        }
+        let mut composition_profiles = BTreeMap::new();
+        for profile in raw.composition_profiles {
+            profile
+                .validate()
+                .map_err(GamePackLoadError::InvalidCompositionProfile)?;
+            if !item_types.contains_key(profile.root_item_type())
+                || composition_profiles
+                    .insert(profile.id().clone(), profile)
+                    .is_some()
+            {
+                return Err(GamePackLoadError::InvalidCompositionProfiles);
+            }
+        }
+
         let mut contributions = BTreeMap::new();
         for raw_contribution in raw.contributions {
             if !raw_contribution.payload.is_object() {
@@ -205,6 +244,7 @@ impl GamePackLoader {
             display_name: raw.display_name,
             content_sha256: actual,
             item_types,
+            composition_profiles,
             contributions,
         })
     }
@@ -263,7 +303,7 @@ fn sha256_bytes(bytes: &[u8]) -> Sha256Digest {
 
 #[cfg(test)]
 mod tests {
-    use ats_kernel::{ItemTypeId, ResourceId};
+    use ats_kernel::{CompositionId, CompositionParameterId, ItemTypeId, ResourceId};
 
     use super::*;
 
@@ -274,7 +314,7 @@ mod tests {
     #[test]
     fn pinned_loader_accepts_synthetic_and_rejects_hash_schema_and_duplicates() {
         let json = r#"{
-          "schemaVersion":3,
+          "schemaVersion":4,
           "id":"fixture-game",
           "displayName":"Fixture Game",
           "itemTypes":[{
@@ -282,8 +322,9 @@ mod tests {
             "displayNames":{"eng":"Relic"},
             "requiredLocales":["eng"],
             "fields":[],
+            "localizationFields":[{"id":"name","displayNames":{"eng":"Name"},"required":true,"multiline":false,"minLength":1,"maxLength":256}],
             "evidenceQueries":[{"symbols":["CustomRelicModel"],"terms":[]}],
-            "requiredResourceRoles":[]
+            "resourceProfiles":[{"id":"default","displayNames":{"eng":"Default"},"requiredResourceRoles":[]}]
           }],
           "contributions":[{
             "slotId":"log.analyze.rules",
@@ -302,7 +343,7 @@ mod tests {
             Err(GamePackLoadError::ContentHashMismatch)
         ));
 
-        let bad_schema = json.replace("\"schemaVersion\":3", "\"schemaVersion\":1");
+        let bad_schema = json.replace("\"schemaVersion\":4", "\"schemaVersion\":1");
         assert!(matches!(
             load_fixture(&bad_schema),
             Err(GamePackLoadError::UnsupportedSchema)
@@ -329,7 +370,8 @@ mod tests {
         assert_eq!(card.fields().len(), 5);
         assert_eq!(card.evidence_queries().len(), 5);
         assert_eq!(
-            card.required_resource_roles()
+            card.resource_profiles()[0]
+                .required_resource_roles()
                 .iter()
                 .map(ResourceId::as_str)
                 .collect::<Vec<_>>(),
@@ -341,7 +383,7 @@ mod tests {
         assert_eq!(potion.fields().len(), 3);
         assert_eq!(potion.evidence_queries().len(), 6);
         assert_eq!(
-            potion
+            potion.resource_profiles()[0]
                 .required_resource_roles()
                 .iter()
                 .map(ResourceId::as_str)
@@ -354,7 +396,7 @@ mod tests {
         assert_eq!(power.fields().len(), 4);
         assert_eq!(power.evidence_queries().len(), 6);
         assert_eq!(
-            power
+            power.resource_profiles()[0]
                 .required_resource_roles()
                 .iter()
                 .map(ResourceId::as_str)
@@ -366,7 +408,7 @@ mod tests {
     #[test]
     fn item_catalog_rejects_duplicate_types_and_invalid_field_constraints() {
         let json = r#"{
-          "schemaVersion":3,
+          "schemaVersion":4,
           "id":"fixture-game",
           "displayName":"Fixture Game",
           "itemTypes":[{
@@ -397,6 +439,106 @@ mod tests {
             Err(GamePackLoadError::InvalidItemType(
                 ItemCatalogError::InvalidFields
             ))
+        ));
+    }
+
+    #[test]
+    fn pack_v4_validates_reference_resource_localization_and_composition_profiles() {
+        let value = serde_json::json!({
+            "schemaVersion":4,
+            "id":"fixture-game",
+            "displayName":"Fixture Game",
+            "itemTypes":[
+                {
+                    "id":"character",
+                    "displayNames":{"eng":"Character"},
+                    "requiredLocales":["eng"],
+                    "fields":[{
+                        "id":"visual_profile",
+                        "displayNames":{"eng":"Visual profile"},
+                        "required":true,
+                        "value":{"kind":"choice","options":[
+                            {"value":"placeholder","displayNames":{"eng":"Placeholder"}},
+                            {"value":"branded_placeholder","displayNames":{"eng":"Branded"}}
+                        ]}
+                    }],
+                    "localizationFields":[{
+                        "id":"title",
+                        "displayNames":{"eng":"Title"},
+                        "required":true,
+                        "multiline":false,
+                        "minLength":1,
+                        "maxLength":256
+                    }],
+                    "referenceSlots":[{
+                        "id":"starting_deck",
+                        "displayNames":{"eng":"Starting deck"},
+                        "kind":"pinned",
+                        "allowedItemTypes":["card"],
+                        "minItems":1,
+                        "maxItems":8,
+                        "minQuantity":1,
+                        "maxQuantity":10
+                    }],
+                    "resourceProfileField":"visual_profile",
+                    "resourceProfiles":[
+                        {"id":"placeholder","displayNames":{"eng":"Placeholder"},"requiredResourceRoles":[]},
+                        {"id":"branded_placeholder","displayNames":{"eng":"Branded"},"requiredResourceRoles":["character.select_icon"]}
+                    ],
+                    "evidenceQueries":[{"symbols":["CharacterModel"],"terms":[]}]
+                },
+                {
+                    "id":"card",
+                    "displayNames":{"eng":"Card"},
+                    "evidenceQueries":[{"symbols":["CardModel"],"terms":[]}]
+                }
+            ],
+            "compositionProfiles":[{
+                "id":"character_suite",
+                "displayNames":{"eng":"Character suite"},
+                "rootItemType":"character",
+                "defaultProfile":"standard",
+                "customBaseProfile":"standard",
+                "maxNodes":128,
+                "baseNodeCount":1,
+                "parameters":[
+                    {"id":"starter_card_types","displayNames":{"eng":"Starter card types"},"min":1,"max":16,"nodeWeight":1},
+                    {"id":"starting_deck_size","displayNames":{"eng":"Starting deck size"},"min":1,"max":20,"nodeWeight":0}
+                ],
+                "profiles":[
+                    {"id":"prototype","displayNames":{"eng":"Prototype"},"values":{"starter_card_types":3,"starting_deck_size":10}},
+                    {"id":"standard","displayNames":{"eng":"Standard"},"values":{"starter_card_types":4,"starting_deck_size":10}}
+                ],
+                "constraints":[{"kind":"less_or_equal","left":"starter_card_types","right":"starting_deck_size"}]
+            }],
+            "contributions":[]
+        });
+        let json = serde_json::to_string(&value).unwrap();
+        let pack = load_fixture(&json).unwrap();
+        let profiles = pack
+            .composition_profile(&CompositionId::parse("character_suite").unwrap())
+            .unwrap();
+        assert_eq!(profiles.default_profile().as_str(), "standard");
+        let custom = BTreeMap::from([
+            (
+                CompositionParameterId::parse("starter_card_types").unwrap(),
+                8,
+            ),
+            (
+                CompositionParameterId::parse("starting_deck_size").unwrap(),
+                10,
+            ),
+        ]);
+        profiles.validate_parameters(&custom).unwrap();
+
+        let mut invalid = value;
+        invalid["compositionProfiles"][0]["profiles"][1]["values"]["starter_card_types"] =
+            serde_json::json!(11);
+        invalid["compositionProfiles"][0]["profiles"][1]["values"]["starting_deck_size"] =
+            serde_json::json!(10);
+        assert!(matches!(
+            load_fixture(&serde_json::to_string(&invalid).unwrap()),
+            Err(GamePackLoadError::InvalidCompositionProfile(_))
         ));
     }
 }

@@ -188,6 +188,12 @@ macro_rules! slug_id {
 slug_id!(ItemId, "item ID", 128);
 slug_id!(ItemTypeId, "item type ID", 64);
 slug_id!(ItemFieldId, "item field ID", 64);
+slug_id!(ItemReferenceSlotId, "item reference slot ID", 64);
+slug_id!(LocalizationFieldId, "localization field ID", 64);
+slug_id!(ResourceProfileId, "resource profile ID", 64);
+slug_id!(CompositionId, "composition ID", 64);
+slug_id!(CompositionProfileId, "composition profile ID", 64);
+slug_id!(CompositionParameterId, "composition parameter ID", 64);
 slug_id!(LocaleId, "locale ID", 16);
 
 #[derive(Debug, Clone, Serialize, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -399,6 +405,12 @@ mod tests {
         assert!(ItemId::parse("burning-blood").is_ok());
         assert!(ItemTypeId::parse("relic").is_ok());
         assert!(ItemFieldId::parse("energy_cost").is_ok());
+        assert!(ItemReferenceSlotId::parse("starting_deck").is_ok());
+        assert!(LocalizationFieldId::parse("pronoun_subject").is_ok());
+        assert!(ResourceProfileId::parse("branded_placeholder").is_ok());
+        assert!(CompositionId::parse("character_suite").is_ok());
+        assert!(CompositionProfileId::parse("standard").is_ok());
+        assert!(CompositionParameterId::parse("reward_common_cards").is_ok());
         assert!(LocaleId::parse("zhs").is_ok());
         assert!(ItemId::parse("Generated/Relic").is_err());
     }

@@ -2,7 +2,7 @@
 
 > 本文描述 Stage 2 当前生产 Prompt 的唯一所有权与装配链。旧 `crates/ats-core/prompts/`、Prompt preview 和旧 assembler 已删除。
 >
-> 最后更新：2026-08-04
+> 最后更新：2026-08-05
 
 ## 1. 一次请求如何形成
 
@@ -45,8 +45,13 @@ run-scoped bundle v2 Schema：`files` 是以角色为固定键的对象，所有
 `ModelRequestSnapshot` 和 provider 原生结构化输出。Recipe 的 `item.definition` slot 同时绑定 canonical fields、behavior、locale 和 resource bindings；Runtime 保留二次校验，但不再隐藏比模型可见
 Schema 更严格的文件数量/角色合同。
 
+ItemDefinition v2 的 localization field IDs、selected Resource profile、typed references 和
+composition parameters 都属于结构化 `item.definition` 数据。Prompt 可以接收 resolver 已验证的
+run-scoped 表示，但不得从自然语言重新猜测引用、自动升级 pinned hash，或把 Standard/Custom
+数量常量写回 Feature Recipe。
+
 规划与证据检索使用两个不同合同：`mod.plan` result v2 的 `evidenceRequirements`
-只描述生成时需要证明的事实；Game Pack v3 顶层 `itemTypes` 为每个类型声明结构化
+只描述生成时需要证明的事实；Game Pack v4 顶层 `itemTypes` 为每个类型声明结构化
 `evidenceQueries { symbols, terms }`。Readiness 和 Single Generate 消费同一目录；模型不需要
 知道 Truth 索引键，Feature 也不把自然语言要求临时拆词或猜测为 symbol。
 
@@ -56,8 +61,8 @@ Schema 更严格的文件数量/角色合同。
 | --- | --- | --- |
 | 跨游戏任务结构 | `crates/ats-features/recipes/*.json` | plan、single generate、log analyze |
 | Feature request/result | `crates/ats-features/src/*.rs` | typed schema、验证和组合 |
-| 游戏 Mod 类型目录与指导 | `game_packs/<id>/stage2-game-pack.json` | Pack v3 item fields/locales/Truth queries/Resource roles + Feature contributions |
-| 工程 Item 定义 | `.ats/items-v1` Item repository | stable item ID、canonical fields、locale status、resource version binding、definition hash |
+| 游戏 Mod 类型目录与指导 | `game_packs/<id>/stage2-game-pack.json` | Pack v4 canonical/localization fields、reference slots、composition/resource profiles、Truth queries + Feature contributions |
+| 工程 Item 定义 | `.ats/items-v2` Item repository | stable item ID、canonical/localization fields、typed references、composition provenance、resource binding、definition hash |
 | 当前游戏事实 | verified Truth Snapshot v2 | symbol、purpose、bounded excerpt、source hash |
 | 用户/AI/Pack 资源 | ResourceAsset / Workspace v2 | resource ID、candidate/selected version、provenance |
 | 工程上下文 | composition root 生成的脱敏摘要 | 工程名、Mod ID、Pack ID |

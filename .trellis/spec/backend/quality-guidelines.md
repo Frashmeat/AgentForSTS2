@@ -48,13 +48,13 @@ Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-sp
 
 ## 5. Pack, Truth, And Resource
 
-- Pack bytes/schema/hash are validated before registration.
+- Pack v4 bytes/schema/hash are validated before registration.
 - A Feature declares required Contribution slots; missing/duplicate/unknown slots fail before work.
 - Pack data may reference only registered Primitive IDs and cannot execute arbitrary script/native code.
 - Truth Snapshot sources/indexes and current pointer are content-addressed and verified for the active Pack.
 - Evidence is bounded and traceable; missing/invalid current Truth stops dependent Features.
 - Plan v2 stores descriptive `evidenceRequirements`; executable `symbols`/`terms` queries belong to
-  each item type in the Pack v3 top-level catalog. Every query group must match current verified
+  each item type in the Pack v4 top-level catalog. Every query group must match current verified
   Truth before model work, and final Evidence is bounded and deduplicated.
 - Required Resource role IDs are Pack-owned execution facts in the same item catalog. The Plan
   model output cannot author them; the Feature deterministically attaches them to Plan result v2.
@@ -62,9 +62,17 @@ Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-sp
 - Item capability readiness is computed from the pinned Pack plus current verified Truth before
   model work. Undeclared types are absent; declared types with missing Truth are disabled with
   typed blockers and do not create a Run.
-- ItemDefinition schema v1 is validated on construction/deserialization and hashed from ordered
-  canonical content. Run/Artifact consumers bind the exact hash; they never reconstruct locked
-  fields from prose or mutate an older snapshot.
+- ItemDefinition schema v2 is validated on construction/deserialization and hashed from ordered
+  canonical content. It carries Pack-keyed localization fields, exact Resource bindings, typed
+  identity/pinned references and optional composition-profile provenance. Run/Artifact consumers
+  bind the exact hash; they never reconstruct locked fields from prose or mutate an older snapshot.
+- Pack v4 `referenceSlots` own kind/target/cardinality/quantity rules. Identity edges never expand
+  a version hash; pinned edges expand exact definitions and must form an acyclic closure.
+- Pack v4 `resourceProfiles` own conditional required roles. The selector is a required canonical
+  choice whose options exactly cover profile IDs; Single resolves only the selected profile.
+- Pack v4 `compositionProfiles` own Standard/Prototype presets, Custom bounds, cross-parameter
+  constraints and the hard <=128-node estimate. Feature/UI interpret this generic schema and do
+  not embed STS2 composition counts.
 - Single request schema v3 carries one `StoredItemDefinition`; Batch request v4 carries pinned
   definitions and derives Plan requirements from canonical behavior intent. It persists Plan and
   Single child Runs and returns per-item result v2 outcomes even if every Item fails. Complex v3

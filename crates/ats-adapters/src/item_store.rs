@@ -58,7 +58,7 @@ impl FileItemRepository {
     }
 
     fn items_root(&self) -> PathBuf {
-        self.project_root.join(".ats").join("items-v1")
+        self.project_root.join(".ats").join("items-v2")
     }
 
     fn prepare_root(&self) -> Result<PathBuf, ItemStoreError> {
@@ -404,7 +404,7 @@ mod tests {
             first
         );
         assert_eq!(repository.list_current().unwrap().len(), 1);
-        let residues = fs::read_dir(temp.path().join(".ats/items-v1/fixture"))
+        let residues = fs::read_dir(temp.path().join(".ats/items-v2/fixture"))
             .unwrap()
             .filter_map(Result::ok)
             .filter(|entry| entry.file_name().to_string_lossy().contains(".tmp"))
@@ -427,7 +427,7 @@ mod tests {
 
         let path = temp
             .path()
-            .join(".ats/items-v1/fixture/definitions")
+            .join(".ats/items-v2/fixture/definitions")
             .join(format!("{}.json", stored.definition_hash));
         fs::write(path, b"{}").unwrap();
         assert!(
@@ -443,7 +443,7 @@ mod tests {
         fs::create_dir(temp.path().join(".ats")).unwrap();
         let repository = FileItemRepository::new(temp.path().to_path_buf());
         repository.save(&definition("fixture", "common")).unwrap();
-        fs::remove_file(temp.path().join(".ats/items-v1/fixture/current.json")).unwrap();
+        fs::remove_file(temp.path().join(".ats/items-v2/fixture/current.json")).unwrap();
 
         let mut changed_type = definition("fixture", "rare");
         changed_type.item_type = ItemTypeId::parse("card").unwrap();

@@ -17,7 +17,7 @@ use ats_runtime::{
     RunTransition, TokenUsage, ValidationError, ValidationRequest, ValidationRunner,
     VersionedPayload,
 };
-use ats_workspace::{ItemResourceBinding, StoredItemDefinition};
+use ats_workspace::{ItemDefinition, ItemResourceBinding, StoredItemDefinition};
 use ats_workspace::{ResourceAsset, ResourceRepository};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -261,7 +261,11 @@ impl SingleGenerateService {
         resource_specs
             .validate()
             .map_err(|_| SingleGenerateError::InvalidResourceSpecs)?;
-        validate_required_roles(&request.plan, item_descriptor)?;
+        validate_required_roles(
+            &request.plan,
+            item_descriptor,
+            &request.definition.definition,
+        )?;
 
         let evidence = query_evidence(context.truth, item_descriptor)?;
         let selected = load_resources(
@@ -480,7 +484,7 @@ pub fn validate_single_generation_readiness<R: ResourceRepository + ?Sized>(
     let descriptor = pack
         .item_type(&request.definition.definition.item_type)
         .ok_or(SingleGenerateError::UnsupportedItemType)?;
-    validate_required_roles(&request.plan, descriptor)?;
+    validate_required_roles(&request.plan, descriptor, &request.definition.definition)?;
     validate_definition_resources(
         pack,
         resource_contributions,
@@ -770,14 +774,17 @@ fn validate_definition_identity(
 fn validate_required_roles(
     plan: &PlanItem,
     item_descriptor: &ItemTypeDescriptor,
+    definition: &ItemDefinition,
 ) -> Result<(), SingleGenerateError> {
     let planned = plan
         .required_resource_roles
         .iter()
         .map(String::as_str)
         .collect::<BTreeSet<_>>();
-    let required = item_descriptor
-        .required_resource_roles()
+    let required_roles =
+        ItemDefinitionValidator::required_resource_roles(item_descriptor, definition)
+            .map_err(|_| SingleGenerateError::InvalidItemDefinition)?;
+    let required = required_roles
         .iter()
         .map(ResourceId::as_str)
         .collect::<BTreeSet<_>>();
@@ -838,7 +845,10 @@ fn load_resources<R: ResourceRepository + ?Sized>(
     specs: &ResourceSpecs,
 ) -> Result<Vec<LoadedResource>, SingleGenerateError> {
     let bindings = &definition.definition.resource_bindings;
-    if bindings.len() != item_descriptor.required_resource_roles().len() {
+    let required_roles =
+        ItemDefinitionValidator::required_resource_roles(item_descriptor, &definition.definition)
+            .map_err(|_| SingleGenerateError::InvalidItemDefinition)?;
+    if bindings.len() != required_roles.len() {
         return Err(SingleGenerateError::ResourceRoleMismatch);
     }
     let mut loaded = Vec::with_capacity(bindings.len());
@@ -851,7 +861,7 @@ fn load_resources<R: ResourceRepository + ?Sized>(
             &asset,
             logical_role.as_str(),
             selected,
-            item_descriptor,
+            &required_roles,
             specs,
         )?;
         if !roles.insert(asset.logical_role().to_owned()) {
@@ -875,8 +885,7 @@ fn load_resources<R: ResourceRepository + ?Sized>(
             bytes,
         });
     }
-    let expected = item_descriptor
-        .required_resource_roles()
+    let expected = required_roles
         .iter()
         .map(ToString::to_string)
         .collect::<BTreeSet<_>>();
@@ -895,14 +904,13 @@ fn validate_selected_asset(
     asset: &ResourceAsset,
     logical_role: &str,
     selected: &ItemResourceBinding,
-    item_descriptor: &ItemTypeDescriptor,
+    required_roles: &[ResourceId],
     specs: &ResourceSpecs,
 ) -> Result<(), SingleGenerateError> {
     if asset.resource_id() != &selected.resource_id
         || asset.selected_version() != Some(&selected.selected_version)
         || asset.logical_role() != logical_role
-        || !item_descriptor
-            .required_resource_roles()
+        || !required_roles
             .iter()
             .any(|role| role.as_str() == asset.logical_role())
         || asset.selected().is_none_or(|version| {
@@ -1279,7 +1287,7 @@ mod tests {
     #[test]
     fn synthetic_pack_uses_the_same_generation_and_resource_contracts() {
         let value = serde_json::json!({
-            "schemaVersion": 3,
+            "schemaVersion": 4,
             "id": "fixture-game",
             "displayName": "Fixture Game",
             "itemTypes": [{
@@ -1291,7 +1299,11 @@ mod tests {
                     "symbols": ["Fixture.Symbol"],
                     "terms": []
                 }],
-                "requiredResourceRoles": ["fixture.icon"]
+                "resourceProfiles": [{
+                    "id":"default",
+                    "displayNames":{"eng":"Default"},
+                    "requiredResourceRoles":["fixture.icon"]
+                }]
             }],
             "contributions": [
                 {
@@ -1476,6 +1488,7 @@ mod tests {
                 )
                 .unwrap();
         let specs: ResourceSpecs = contributions.decode(&resource_specs_slot()).unwrap();
+        let required_roles = descriptor.resource_profiles()[0].required_resource_roles();
         let digest = Sha256Digest::parse("a".repeat(64)).unwrap();
         let make_asset = |width| {
             ResourceAsset::new(
@@ -1506,11 +1519,11 @@ mod tests {
             selected_version: digest.clone(),
         };
         assert!(matches!(
-            validate_selected_asset(&asset, "relic.normal", &selected, descriptor, &specs),
+            validate_selected_asset(&asset, "relic.normal", &selected, required_roles, &specs),
             Err(SingleGenerateError::InvalidSelectedResource)
         ));
         asset.select(&digest).unwrap();
-        validate_selected_asset(&asset, "relic.normal", &selected, descriptor, &specs).unwrap();
+        validate_selected_asset(&asset, "relic.normal", &selected, required_roles, &specs).unwrap();
 
         let mut wrong_dimensions = make_asset(127);
         let wrong_selected = ItemResourceBinding {
@@ -1523,7 +1536,7 @@ mod tests {
                 &wrong_dimensions,
                 "relic.normal",
                 &wrong_selected,
-                descriptor,
+                required_roles,
                 &specs
             ),
             Err(SingleGenerateError::InvalidSelectedResource)

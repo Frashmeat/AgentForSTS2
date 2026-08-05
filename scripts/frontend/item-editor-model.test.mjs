@@ -14,7 +14,7 @@ const {
   draftIssues,
   setBehaviorText,
   setFieldValue,
-  setLocalizationText,
+  setLocalizationFieldText,
 } = await vite.ssrLoadModule("/src/pages/itemEditorModel.ts");
 
 const capability = {
@@ -24,7 +24,12 @@ const capability = {
     id: "relic",
     displayNames: { eng: "Relic", zhs: "遗物" },
     requiredLocales: ["eng", "zhs"],
-    requiredResourceRoles: [],
+    localizationFields: [
+      { id: "name", displayNames: { eng: "Name" }, required: true, multiline: false, minLength: 1, maxLength: 256 },
+      { id: "description", displayNames: { eng: "Description" }, required: true, multiline: true, minLength: 1, maxLength: 8000 },
+    ],
+    referenceSlots: [],
+    resourceProfiles: [{ id: "default", displayNames: { eng: "Default" }, requiredResourceRoles: [] }],
     evidenceQueries: [],
     fields: [{
       id: "rarity",
@@ -53,23 +58,23 @@ test("field and behavior edits return new typed drafts", () => {
 
 test("editing the source locale marks confirmed translations outdated", () => {
   let draft = createItemDraft(capability, "fixture-relic");
-  draft = setLocalizationText(draft, "eng", "eng", { name: "Fixture", description: "Source" });
-  draft = setLocalizationText(draft, "zhs", "eng", { name: "测试", description: "译文" });
-  draft = confirmLocalization(draft, "zhs");
+  draft = setLocalizationFieldText(draft, "eng", "eng", "name", "Fixture");
+  draft = setLocalizationFieldText(draft, "eng", "eng", "description", "Source");
+  draft = setLocalizationFieldText(draft, "zhs", "eng", "name", "测试");
+  draft = setLocalizationFieldText(draft, "zhs", "eng", "description", "译文");
+  draft = confirmLocalization(draft, "zhs", capability.descriptor);
   assert.equal(draft.localizations.zhs.status, "confirmed");
-  draft = setLocalizationText(draft, "zhs", "eng", { description: "人工修订" });
+  draft = setLocalizationFieldText(draft, "zhs", "eng", "description", "人工修订");
   assert.equal(draft.localizations.zhs.status, "outdated");
-  draft = confirmLocalization(draft, "zhs");
-  draft = setLocalizationText(draft, "eng", "eng", { description: "Changed source" });
+  draft = confirmLocalization(draft, "zhs", capability.descriptor);
+  draft = setLocalizationFieldText(draft, "eng", "eng", "description", "Changed source");
   assert.equal(draft.localizations.zhs.status, "outdated");
 });
 
 test("a translation cannot be saved before its declared source locale", () => {
   let draft = createItemDraft(capability, "fixture-relic");
-  draft = setLocalizationText(draft, "zhs", "eng", {
-    name: "测试",
-    description: "译文",
-  });
+  draft = setLocalizationFieldText(draft, "zhs", "eng", "name", "测试");
+  draft = setLocalizationFieldText(draft, "zhs", "eng", "description", "译文");
   assert.deepEqual(draftIssues(draft, capability.descriptor), [
     "zhs translation source eng must be created first.",
   ]);

@@ -292,8 +292,11 @@ impl ModPlanService {
         }
         let item = model_item.into_plan_item(
             item_descriptor
-                .required_resource_roles()
+                .resource_profiles()
                 .iter()
+                .flat_map(|profile| profile.required_resource_roles())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
                 .map(ToString::to_string)
                 .collect(),
         );
@@ -500,7 +503,7 @@ mod tests {
 
     fn pack_with_roles(label: &str, item_type: &str, required_roles: &[&str]) -> LoadedGamePack {
         let value = serde_json::json!({
-            "schemaVersion":3,
+            "schemaVersion":4,
             "id":format!("fixture-{label}"),
             "displayName":format!("Fixture {label}"),
             "itemTypes":[{
@@ -509,7 +512,11 @@ mod tests {
                 "requiredLocales":[],
                 "fields":[],
                 "evidenceQueries":[{"symbols":["FixtureType"],"terms":[]}],
-                "requiredResourceRoles":required_roles
+                "resourceProfiles":[{
+                    "id":"default",
+                    "displayNames":{"eng":"Default"},
+                    "requiredResourceRoles":required_roles
+                }]
             }],
             "contributions":[{
                 "slotId":"mod.plan.guidance",

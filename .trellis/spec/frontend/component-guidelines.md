@@ -45,11 +45,19 @@ getItemCapabilities
   -> StoredItemDefinition(definitionHash + definition)
 ```
 
-- `text`, `integer`, `boolean`, `choice` and `string_list` are the complete generic field-control
-  switch; adding a game Item type must not add another component branch.
+- `text`, `integer`, `boolean`, `choice` and `string_list` are the complete generic canonical-field
+  control switch. `localizationFields` independently drives localized inputs, labels, multiline
+  behavior and required completeness; React must not assume every type has only name/description.
+  Adding a game Item type must not add another component branch.
+- `referenceSlots` and `compositionProfiles` are generic typed descriptor contracts. Their first
+  editing surface may arrive in Character Studio, but React must render slot/profile metadata and
+  parameter bounds rather than branch on `character`, `card` or STS2.
+- `resourceProfileField` selects one Pack-declared `resourceProfiles[]` entry from the current
+  canonical choice. Resource Workbench receives only that profile's required roles; it cannot use
+  the union or a Character-specific list.
 - Blocked descriptors remain visible with `capabilityReason`, but new/save/generation actions are
   disabled. The backend repeats the authoritative readiness check.
-- Item lists show the current pointer and definition hash. Historical definitions are loaded by
+- Item lists show the current ItemDefinition v2 pointer and definition hash. Historical v2 definitions are loaded by
   `itemId + definitionHash`; React never mutates a previously returned snapshot in place.
 - Primary locale edits mark derived translations outdated. Editing an already confirmed secondary
   locale also makes it outdated; `confirmLocalization` is the only transition back to confirmed.

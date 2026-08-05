@@ -1,11 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use ats_kernel::{ItemFieldId, ItemId, ItemTypeId, LocaleId, ResourceId, Sha256Digest};
+use ats_kernel::{
+    CompositionId, CompositionParameterId, CompositionProfileId, ItemFieldId, ItemId,
+    ItemReferenceSlotId, ItemTypeId, LocaleId, LocalizationFieldId, ResourceId, Sha256Digest,
+};
 use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-pub const ITEM_DEFINITION_SCHEMA_VERSION: u32 = 1;
+pub const ITEM_DEFINITION_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(
@@ -32,11 +35,70 @@ pub enum LocalizationStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ItemLocalization {
-    pub name: String,
-    pub description: String,
+    pub fields: BTreeMap<LocalizationFieldId, String>,
     pub status: LocalizationStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub translated_from: Option<LocaleId>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum ItemReferenceBinding {
+    Identity {
+        item_id: ItemId,
+        expected_item_type: ItemTypeId,
+    },
+    Pinned {
+        item_id: ItemId,
+        definition_hash: Sha256Digest,
+        quantity: u32,
+    },
+}
+
+impl ItemReferenceBinding {
+    #[must_use]
+    pub fn item_id(&self) -> &ItemId {
+        match self {
+            Self::Identity { item_id, .. } | Self::Pinned { item_id, .. } => item_id,
+        }
+    }
+
+    #[must_use]
+    pub const fn quantity(&self) -> u32 {
+        match self {
+            Self::Identity { .. } => 1,
+            Self::Pinned { quantity, .. } => *quantity,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum ItemCompositionSource {
+    Preset {
+        profile_id: CompositionProfileId,
+    },
+    Custom {
+        base_profile_id: CompositionProfileId,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ItemCompositionProfile {
+    pub composition_id: CompositionId,
+    pub source: ItemCompositionSource,
+    pub parameters: BTreeMap<CompositionParameterId, u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -56,6 +118,9 @@ pub struct ItemDefinition {
     pub behavior_intent: Vec<String>,
     pub localizations: BTreeMap<LocaleId, ItemLocalization>,
     pub resource_bindings: BTreeMap<ResourceId, ItemResourceBinding>,
+    pub reference_bindings: BTreeMap<ItemReferenceSlotId, Vec<ItemReferenceBinding>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub composition_profile: Option<ItemCompositionProfile>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -98,6 +163,8 @@ impl ItemDefinition {
             behavior_intent: Vec::new(),
             localizations: BTreeMap::new(),
             resource_bindings: BTreeMap::new(),
+            reference_bindings: BTreeMap::new(),
+            composition_profile: None,
         }
     }
 
@@ -128,8 +195,9 @@ impl ItemDefinition {
         }
         if self.localizations.len() > 32
             || self.localizations.iter().any(|(locale, value)| {
-                !valid_text(&value.name, 256)
-                    || !valid_text(&value.description, 8_000)
+                value.fields.is_empty()
+                    || value.fields.len() > 64
+                    || value.fields.values().any(|field| !valid_text(field, 8_000))
                     || value.translated_from.as_ref() == Some(locale)
                     || (value.status == LocalizationStatus::Outdated
                         && value.translated_from.is_none())
@@ -143,6 +211,30 @@ impl ItemDefinition {
         }
         if self.resource_bindings.len() > 128 {
             return Err(ItemDefinitionError::InvalidResourceBindings);
+        }
+        if self.reference_bindings.len() > 64
+            || self.reference_bindings.values().any(|bindings| {
+                bindings.is_empty()
+                    || bindings.len() > 128
+                    || bindings.iter().any(|binding| {
+                        matches!(binding, ItemReferenceBinding::Pinned { quantity: 0, .. })
+                    })
+                    || bindings
+                        .iter()
+                        .map(ItemReferenceBinding::item_id)
+                        .collect::<BTreeSet<_>>()
+                        .len()
+                        != bindings.len()
+            })
+        {
+            return Err(ItemDefinitionError::InvalidReferenceBindings);
+        }
+        if self
+            .composition_profile
+            .as_ref()
+            .is_some_and(|profile| profile.parameters.is_empty() || profile.parameters.len() > 64)
+        {
+            return Err(ItemDefinitionError::InvalidCompositionProfile);
         }
         Ok(())
     }
@@ -170,6 +262,10 @@ impl<'de> Deserialize<'de> for ItemDefinition {
             behavior_intent: Vec<String>,
             localizations: BTreeMap<LocaleId, ItemLocalization>,
             resource_bindings: BTreeMap<ResourceId, ItemResourceBinding>,
+            #[serde(default)]
+            reference_bindings: BTreeMap<ItemReferenceSlotId, Vec<ItemReferenceBinding>>,
+            #[serde(default)]
+            composition_profile: Option<ItemCompositionProfile>,
         }
 
         let wire = Wire::deserialize(deserializer)?;
@@ -181,6 +277,8 @@ impl<'de> Deserialize<'de> for ItemDefinition {
             behavior_intent: wire.behavior_intent,
             localizations: wire.localizations,
             resource_bindings: wire.resource_bindings,
+            reference_bindings: wire.reference_bindings,
+            composition_profile: wire.composition_profile,
         };
         definition.validate().map_err(serde::de::Error::custom)?;
         Ok(definition)
@@ -199,6 +297,10 @@ pub enum ItemDefinitionError {
     InvalidLocalization,
     #[error("item definition resource bindings are invalid")]
     InvalidResourceBindings,
+    #[error("item definition reference bindings are invalid")]
+    InvalidReferenceBindings,
+    #[error("item definition composition profile is invalid")]
+    InvalidCompositionProfile,
     #[error("item definition cannot be serialized")]
     Serialize(#[source] serde_json::Error),
     #[error("item definition identity cannot be represented")]
@@ -240,8 +342,16 @@ mod tests {
         definition.localizations.insert(
             LocaleId::parse("eng").unwrap(),
             ItemLocalization {
-                name: "Burning Blood".into(),
-                description: "At the end of combat, heal 6 HP.".into(),
+                fields: BTreeMap::from([
+                    (
+                        LocalizationFieldId::parse("name").unwrap(),
+                        "Burning Blood".into(),
+                    ),
+                    (
+                        LocalizationFieldId::parse("description").unwrap(),
+                        "At the end of combat, heal 6 HP.".into(),
+                    ),
+                ]),
                 status: LocalizationStatus::Confirmed,
                 translated_from: None,
             },
@@ -279,5 +389,48 @@ mod tests {
         let mut value = serde_json::to_value(definition()).unwrap();
         value["schemaVersion"] = serde_json::json!(99);
         assert!(serde_json::from_value::<ItemDefinition>(value).is_err());
+    }
+
+    #[test]
+    fn definition_v2_hash_covers_typed_references_and_composition_provenance() {
+        let mut value = definition();
+        value.reference_bindings.insert(
+            ItemReferenceSlotId::parse("starting_deck").unwrap(),
+            vec![ItemReferenceBinding::Pinned {
+                item_id: ItemId::parse("fixture-strike").unwrap(),
+                definition_hash: Sha256Digest::parse("a".repeat(64)).unwrap(),
+                quantity: 4,
+            }],
+        );
+        value.composition_profile = Some(ItemCompositionProfile {
+            composition_id: CompositionId::parse("character_suite").unwrap(),
+            source: ItemCompositionSource::Custom {
+                base_profile_id: CompositionProfileId::parse("standard").unwrap(),
+            },
+            parameters: BTreeMap::from([(
+                CompositionParameterId::parse("starter_card_types").unwrap(),
+                4,
+            )]),
+        });
+        let first = value.definition_hash().unwrap();
+        let wire = serde_json::to_value(&value).unwrap();
+        assert_eq!(wire["schemaVersion"], 2);
+        assert_eq!(
+            wire["referenceBindings"]["starting_deck"][0]["definitionHash"],
+            "a".repeat(64)
+        );
+        assert!(
+            wire["referenceBindings"]["starting_deck"][0]
+                .get("definition_hash")
+                .is_none()
+        );
+
+        let mut changed = value;
+        if let ItemReferenceBinding::Pinned { quantity, .. } =
+            &mut changed.reference_bindings.values_mut().next().unwrap()[0]
+        {
+            *quantity = 5;
+        }
+        assert_ne!(first, changed.definition_hash().unwrap());
     }
 }

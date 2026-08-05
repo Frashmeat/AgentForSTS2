@@ -37,13 +37,14 @@ const asset = {
   }],
 };
 const definition = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   itemId: "fixture-relic",
   itemType: "relic",
   canonicalFields: {},
   behaviorIntent: [],
   localizations: {},
   resourceBindings: {},
+  referenceBindings: {},
 };
 
 test("required derived roles include their Pack-owned master", () => {

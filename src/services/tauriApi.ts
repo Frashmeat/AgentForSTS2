@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import { toActionableFailure } from "./actionableFailure";
 import { buildFeatureSubmission } from "./featureSubmission";
+import { isStoredItemDefinition } from "./itemContractGuards";
 export { isActionableFailure, toActionableFailure } from "./actionableFailure";
 export type { ActionableFailure, RecoveryAction } from "./actionableFailure";
 
@@ -375,13 +376,69 @@ export interface ItemFieldSpec {
   value: ItemFieldValueSpec;
 }
 
+export interface LocalizationFieldSpec {
+  id: string;
+  displayNames: Record<string, string>;
+  required: boolean;
+  multiline: boolean;
+  minLength: number;
+  maxLength: number;
+}
+
+export interface ItemReferenceSlotSpec {
+  id: string;
+  displayNames: Record<string, string>;
+  kind: "identity" | "pinned";
+  allowedItemTypes: string[];
+  minItems: number;
+  maxItems: number;
+  minQuantity: number;
+  maxQuantity: number;
+}
+
+export interface ItemResourceProfileSpec {
+  id: string;
+  displayNames: Record<string, string>;
+  requiredResourceRoles: string[];
+}
+
 export interface ItemTypeDescriptor {
   id: string;
   displayNames: Record<string, string>;
   requiredLocales: string[];
   fields: ItemFieldSpec[];
+  localizationFields: LocalizationFieldSpec[];
+  referenceSlots: ItemReferenceSlotSpec[];
+  resourceProfileField?: string | null;
+  resourceProfiles: ItemResourceProfileSpec[];
   evidenceQueries: { symbols: string[]; terms: string[] }[];
-  requiredResourceRoles: string[];
+}
+
+export interface CompositionParameterSpec {
+  id: string;
+  displayNames: Record<string, string>;
+  min: number;
+  max: number;
+  nodeWeight: number;
+}
+
+export interface CompositionProfileSpec {
+  id: string;
+  displayNames: Record<string, string>;
+  values: Record<string, number>;
+}
+
+export interface CompositionProfileSet {
+  id: string;
+  displayNames: Record<string, string>;
+  rootItemType: string;
+  defaultProfile: string;
+  customBaseProfile: string;
+  maxNodes: number;
+  baseNodeCount: number;
+  parameters: CompositionParameterSpec[];
+  profiles: CompositionProfileSpec[];
+  constraints: { kind: "less_or_equal"; left: string; right: string }[];
 }
 
 export type ItemCapabilityBlocker =
@@ -399,6 +456,7 @@ export interface ItemCapabilityCatalog {
   gamePackSha256: string;
   truthSnapshotId?: string | null;
   itemTypes: ItemTypeCapability[];
+  compositionProfiles: CompositionProfileSet[];
 }
 
 export type ItemFieldValue =
@@ -409,10 +467,23 @@ export type ItemFieldValue =
   | { kind: "string_list"; value: string[] };
 
 export interface ItemLocalization {
-  name: string;
-  description: string;
+  fields: Record<string, string>;
   status: "confirmed" | "outdated";
   translatedFrom?: string | null;
+}
+
+export type ItemReferenceBinding =
+  | { kind: "identity"; itemId: string; expectedItemType: string }
+  | { kind: "pinned"; itemId: string; definitionHash: string; quantity: number };
+
+export type ItemCompositionSource =
+  | { kind: "preset"; profileId: string }
+  | { kind: "custom"; baseProfileId: string };
+
+export interface ItemCompositionProfile {
+  compositionId: string;
+  source: ItemCompositionSource;
+  parameters: Record<string, number>;
 }
 
 export interface ItemResourceBinding {
@@ -421,13 +492,15 @@ export interface ItemResourceBinding {
 }
 
 export interface ItemDefinition {
-  schemaVersion: 1;
+  schemaVersion: 2;
   itemId: string;
   itemType: string;
   canonicalFields: Record<string, ItemFieldValue>;
   behaviorIntent: string[];
   localizations: Record<string, ItemLocalization>;
   resourceBindings: Record<string, ItemResourceBinding>;
+  referenceBindings: Record<string, ItemReferenceBinding[]>;
+  compositionProfile?: ItemCompositionProfile | null;
 }
 
 export interface StoredItemDefinition {
@@ -688,7 +761,9 @@ function isItemCapabilityCatalog(value: unknown): value is ItemCapabilityCatalog
     isSha256(value.gamePackSha256) &&
     (value.truthSnapshotId === undefined || value.truthSnapshotId === null || isSha256(value.truthSnapshotId)) &&
     Array.isArray(value.itemTypes) &&
-    value.itemTypes.every(isItemTypeCapability)
+    value.itemTypes.every(isItemTypeCapability) &&
+    Array.isArray(value.compositionProfiles) &&
+    value.compositionProfiles.every(isCompositionProfileSet)
   );
 }
 
@@ -720,12 +795,57 @@ function isItemTypeDescriptor(value: unknown): value is ItemTypeDescriptor {
     isStringArrayValue(value.requiredLocales) &&
     Array.isArray(value.fields) &&
     value.fields.every(isItemFieldSpec) &&
+    Array.isArray(value.localizationFields) &&
+    value.localizationFields.every(isLocalizationFieldSpec) &&
+    Array.isArray(value.referenceSlots) &&
+    value.referenceSlots.every(isItemReferenceSlotSpec) &&
+    (value.resourceProfileField === undefined || value.resourceProfileField === null || typeof value.resourceProfileField === "string") &&
+    Array.isArray(value.resourceProfiles) &&
+    value.resourceProfiles.every(isItemResourceProfileSpec) &&
     Array.isArray(value.evidenceQueries) &&
     value.evidenceQueries.every(
       (query) => isRecord(query) && isStringArrayValue(query.symbols) && isStringArrayValue(query.terms),
-    ) &&
-    isStringArrayValue(value.requiredResourceRoles)
+    )
   );
+}
+
+function isLocalizationFieldSpec(value: unknown): value is LocalizationFieldSpec {
+  return isRecord(value) && typeof value.id === "string" && isStringRecord(value.displayNames) &&
+    typeof value.required === "boolean" && typeof value.multiline === "boolean" &&
+    Number.isInteger(value.minLength) && Number.isInteger(value.maxLength);
+}
+
+function isItemReferenceSlotSpec(value: unknown): value is ItemReferenceSlotSpec {
+  return isRecord(value) && typeof value.id === "string" && isStringRecord(value.displayNames) &&
+    (value.kind === "identity" || value.kind === "pinned") && isStringArrayValue(value.allowedItemTypes) &&
+    Number.isInteger(value.minItems) && Number.isInteger(value.maxItems) &&
+    Number.isInteger(value.minQuantity) && Number.isInteger(value.maxQuantity);
+}
+
+function isItemResourceProfileSpec(value: unknown): value is ItemResourceProfileSpec {
+  return isRecord(value) && typeof value.id === "string" && isStringRecord(value.displayNames) &&
+    isStringArrayValue(value.requiredResourceRoles);
+}
+
+function isCompositionProfileSet(value: unknown): value is CompositionProfileSet {
+  return isRecord(value) && typeof value.id === "string" && isStringRecord(value.displayNames) &&
+    typeof value.rootItemType === "string" && typeof value.defaultProfile === "string" &&
+    typeof value.customBaseProfile === "string" && isPositiveInteger(value.maxNodes) &&
+    isPositiveInteger(value.baseNodeCount) && Array.isArray(value.parameters) &&
+    value.parameters.every(isCompositionParameterSpec) && Array.isArray(value.profiles) &&
+    value.profiles.every(isCompositionProfileSpec) && Array.isArray(value.constraints) &&
+    value.constraints.every((constraint) => isRecord(constraint) && constraint.kind === "less_or_equal" &&
+      typeof constraint.left === "string" && typeof constraint.right === "string");
+}
+
+function isCompositionParameterSpec(value: unknown): value is CompositionParameterSpec {
+  return isRecord(value) && typeof value.id === "string" && isStringRecord(value.displayNames) &&
+    Number.isInteger(value.min) && Number.isInteger(value.max) && Number.isInteger(value.nodeWeight);
+}
+
+function isCompositionProfileSpec(value: unknown): value is CompositionProfileSpec {
+  return isRecord(value) && typeof value.id === "string" && isStringRecord(value.displayNames) &&
+    isRecord(value.values) && Object.values(value.values).every(Number.isInteger);
 }
 
 function isItemFieldSpec(value: unknown): value is ItemFieldSpec {
@@ -756,57 +876,6 @@ function isItemFieldValueSpec(value: unknown): value is ItemFieldValueSpec {
     default:
       return false;
   }
-}
-
-function isStoredItemDefinition(value: unknown): value is StoredItemDefinition {
-  return isRecord(value) && isSha256(value.definitionHash) && isItemDefinition(value.definition);
-}
-
-function isItemDefinition(value: unknown): value is ItemDefinition {
-  return (
-    isRecord(value) &&
-    value.schemaVersion === 1 &&
-    typeof value.itemId === "string" &&
-    typeof value.itemType === "string" &&
-    isRecord(value.canonicalFields) &&
-    Object.values(value.canonicalFields).every(isItemFieldValue) &&
-    isStringArrayValue(value.behaviorIntent) &&
-    isRecord(value.localizations) &&
-    Object.values(value.localizations).every(isItemLocalization) &&
-    isRecord(value.resourceBindings) &&
-    Object.values(value.resourceBindings).every(isItemResourceBinding)
-  );
-}
-
-function isItemFieldValue(value: unknown): value is ItemFieldValue {
-  if (!isRecord(value) || typeof value.kind !== "string") return false;
-  switch (value.kind) {
-    case "text":
-    case "choice":
-      return typeof value.value === "string";
-    case "integer":
-      return Number.isInteger(value.value);
-    case "boolean":
-      return typeof value.value === "boolean";
-    case "string_list":
-      return isStringArrayValue(value.value);
-    default:
-      return false;
-  }
-}
-
-function isItemLocalization(value: unknown): value is ItemLocalization {
-  return (
-    isRecord(value) &&
-    typeof value.name === "string" &&
-    typeof value.description === "string" &&
-    (value.status === "confirmed" || value.status === "outdated") &&
-    (value.translatedFrom === undefined || value.translatedFrom === null || typeof value.translatedFrom === "string")
-  );
-}
-
-function isItemResourceBinding(value: unknown): value is ItemResourceBinding {
-  return isRecord(value) && typeof value.resourceId === "string" && isSha256(value.selectedVersion);
 }
 
 function isResourceCatalog(value: unknown): value is ResourceCatalog {

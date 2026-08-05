@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "id": "sts2",
   "displayName": "Slay the Spire 2",
   "itemTypes": [
@@ -8,10 +8,14 @@
       "displayNames": { "eng": "Custom code", "zhs": "自定义代码" },
       "requiredLocales": [],
       "fields": [],
+      "localizationFields": [],
+      "referenceSlots": [],
+      "resourceProfiles": [
+        { "id": "default", "displayNames": { "eng": "Default", "zhs": "默认" }, "requiredResourceRoles": [] }
+      ],
       "evidenceQueries": [
         { "symbols": ["ICustomModel"], "terms": [] }
-      ],
-      "requiredResourceRoles": []
+      ]
     },
     {
       "id": "relic",
@@ -35,12 +39,19 @@
           }
         }
       ],
+      "localizationFields": [
+        { "id": "name", "displayNames": { "eng": "Name", "zhs": "名称" }, "required": true, "multiline": false, "minLength": 1, "maxLength": 256 },
+        { "id": "description", "displayNames": { "eng": "Description", "zhs": "描述" }, "required": true, "multiline": true, "minLength": 1, "maxLength": 8000 }
+      ],
+      "referenceSlots": [],
+      "resourceProfiles": [
+        { "id": "default", "displayNames": { "eng": "Default", "zhs": "默认" }, "requiredResourceRoles": ["relic.normal", "relic.outline", "relic.big"] }
+      ],
       "evidenceQueries": [
         { "symbols": ["CustomRelicModel"], "terms": [] },
         { "symbols": ["CustomContentDictionary.AddModel"], "terms": [] },
         { "symbols": ["RelicModel"], "terms": [] }
-      ],
-      "requiredResourceRoles": ["relic.normal", "relic.outline", "relic.big"]
+      ]
     },
     {
       "id": "card",
@@ -129,14 +140,21 @@
           "value": { "kind": "integer", "min": -1, "max": 9 }
         }
       ],
+      "localizationFields": [
+        { "id": "name", "displayNames": { "eng": "Name", "zhs": "名称" }, "required": true, "multiline": false, "minLength": 1, "maxLength": 256 },
+        { "id": "description", "displayNames": { "eng": "Description", "zhs": "描述" }, "required": true, "multiline": true, "minLength": 1, "maxLength": 8000 }
+      ],
+      "referenceSlots": [],
+      "resourceProfiles": [
+        { "id": "default", "displayNames": { "eng": "Default", "zhs": "默认" }, "requiredResourceRoles": ["card.portrait", "card.big"] }
+      ],
       "evidenceQueries": [
         { "symbols": ["CustomCardModel"], "terms": [] },
         { "symbols": ["PoolAttribute"], "terms": [] },
         { "symbols": ["CardType"], "terms": [] },
         { "symbols": ["CardRarity"], "terms": [] },
         { "symbols": ["TargetType"], "terms": [] }
-      ],
-      "requiredResourceRoles": ["card.portrait", "card.big"]
+      ]
     },
     {
       "id": "potion",
@@ -190,6 +208,14 @@
           }
         }
       ],
+      "localizationFields": [
+        { "id": "name", "displayNames": { "eng": "Name", "zhs": "名称" }, "required": true, "multiline": false, "minLength": 1, "maxLength": 256 },
+        { "id": "description", "displayNames": { "eng": "Description", "zhs": "描述" }, "required": true, "multiline": true, "minLength": 1, "maxLength": 8000 }
+      ],
+      "referenceSlots": [],
+      "resourceProfiles": [
+        { "id": "default", "displayNames": { "eng": "Default", "zhs": "默认" }, "requiredResourceRoles": ["potion.icon"] }
+      ],
       "evidenceQueries": [
         { "symbols": ["CustomPotionModel"], "terms": [] },
         { "symbols": ["PoolAttribute"], "terms": [] },
@@ -197,8 +223,7 @@
         { "symbols": ["PotionRarity"], "terms": [] },
         { "symbols": ["PotionUsage"], "terms": [] },
         { "symbols": ["TargetType"], "terms": [] }
-      ],
-      "requiredResourceRoles": ["potion.icon"]
+      ]
     },
     {
       "id": "power",
@@ -251,6 +276,14 @@
           "value": { "kind": "boolean" }
         }
       ],
+      "localizationFields": [
+        { "id": "name", "displayNames": { "eng": "Name", "zhs": "名称" }, "required": true, "multiline": false, "minLength": 1, "maxLength": 256 },
+        { "id": "description", "displayNames": { "eng": "Description", "zhs": "描述" }, "required": true, "multiline": true, "minLength": 1, "maxLength": 8000 }
+      ],
+      "referenceSlots": [],
+      "resourceProfiles": [
+        { "id": "default", "displayNames": { "eng": "Default", "zhs": "默认" }, "requiredResourceRoles": ["power.icon", "power.big"] }
+      ],
       "evidenceQueries": [
         { "symbols": ["CustomPowerModel"], "terms": [] },
         { "symbols": ["PowerModel"], "terms": [] },
@@ -258,10 +291,10 @@
         { "symbols": ["PowerStackType"], "terms": [] },
         { "symbols": ["PowerInstanceType"], "terms": [] },
         { "symbols": ["PowerCmd"], "terms": [] }
-      ],
-      "requiredResourceRoles": ["power.icon", "power.big"]
+      ]
     }
   ],
+  "compositionProfiles": [],
   "contributions": [
     {
       "slotId": "project.create.template",

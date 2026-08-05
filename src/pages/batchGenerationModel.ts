@@ -11,6 +11,7 @@ import type {
   SingleGenerateResult,
   StoredItemDefinition,
 } from "@/services/tauriApi";
+import { isStoredItemDefinition } from "@/services/itemContractGuards";
 
 export interface GenerationComposition {
   request: BatchGenerateRequest;
@@ -205,21 +206,6 @@ function isProjectPackageRequest(value: unknown): value is ProjectPackageRequest
     typeof value.sourceRelativeRoot === "string" &&
     typeof value.outputRelativePath === "string" &&
     (value.compressionLevel === undefined || value.compressionLevel === null || isNonNegativeInteger(value.compressionLevel));
-}
-
-function isStoredItemDefinition(value: unknown): value is StoredItemDefinition {
-  return isRecord(value) && isSha256(value.definitionHash) && isItemDefinition(value.definition);
-}
-
-function isItemDefinition(value: unknown): value is StoredItemDefinition["definition"] {
-  return isRecord(value) &&
-    value.schemaVersion === 1 &&
-    typeof value.itemId === "string" &&
-    typeof value.itemType === "string" &&
-    isRecord(value.canonicalFields) &&
-    isStringArray(value.behaviorIntent) &&
-    isRecord(value.localizations) &&
-    isRecord(value.resourceBindings);
 }
 
 function isTerminalStatus(value: unknown): value is BatchItemResult["status"] {

@@ -40,13 +40,19 @@ For Pack-driven Item state, Rust and TypeScript use the exact camelCase wire fie
 
 ```text
 ItemCapabilityCatalog:
-  gamePackId, gamePackSha256, truthSnapshotId?, itemTypes[]
+  gamePackId, gamePackSha256, truthSnapshotId?, itemTypes[], compositionProfiles[]
 ItemCapabilityBlocker:
   {code:"truth.snapshot_unavailable"}
   {code:"truth.evidence_missing", queryIndex:u32}
 StoredItemDefinition:
   definitionHash, definition
 ```
+
+Pack v4 descriptor guards must validate `localizationFields`, `referenceSlots`, optional
+`resourceProfileField`, `resourceProfiles` and bounded `compositionProfiles`. ItemDefinition v2
+guards require field-keyed localization maps, `referenceBindings`, optional typed
+`compositionProfile`, exact camelCase enum payload fields and schemaVersion 2. A TypeScript union
+or `as` cast does not replace these runtime checks.
 
 Malformed values map through the fixed local `toActionableFailure(undefined)` fallback. Do not
 render `String(error)`, accept `query_index`, or cast IPC data directly to the target interface.

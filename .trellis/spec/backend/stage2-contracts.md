@@ -38,15 +38,19 @@ Any DAG change requires an approved architecture change plus this spec, script f
 
 ## 4. Pack, Truth, And Contributions
 
-`ats-game-context` loads pinned Pack schema v3, resolves exact Feature slots, verifies immutable Truth Snapshot v2 and returns bounded Evidence. Pack v3 has one top-level `itemTypes` catalog containing validated localized names, restricted generic field descriptors, required locales, executable Evidence Queries and required Resource roles. STS2 and synthetic fixtures use the same contracts. Missing/duplicate item types or fields, invalid constraints, missing contribution, Pack/Snapshot mismatch, unsafe path, unknown Primitive or hash mismatch fails before product work.
+`ats-game-context` loads pinned Pack schema v4, resolves exact Feature slots, verifies immutable Truth Snapshot v2 and returns bounded Evidence. Pack v4 has one top-level `itemTypes` catalog containing validated localized names, restricted generic field descriptors, Pack-declared localization fields, typed reference slots, conditional Resource profiles, required locales and executable Evidence Queries. Optional top-level `compositionProfiles` declare bounded preset/custom parameter contracts. STS2 and synthetic fixtures use the same contracts. Missing/duplicate types or fields, invalid reference/profile constraints, missing contribution, Pack/Snapshot mismatch, unsafe path, unknown Primitive or hash mismatch fails before product work.
 
-`mod.plan` result v2 owns descriptive `evidenceRequirements`. The Pack v3 item catalog owns
+`mod.plan` result v2 owns descriptive `evidenceRequirements`. The Pack v4 item catalog owns
 per-item `evidenceQueries` with explicit symbol/term fields. Capability readiness and Single
 generation require every query group to match the active Truth Snapshot and never interpret Plan
 prose as an index key. A missing current Snapshot blocks every declared type; a partially matching
 Snapshot blocks only affected types with typed, query-indexed reasons.
 
-The Pack v3 item catalog also owns each item type's `requiredResourceRoles`.
+Pack v4 replaces each item's unconditional `requiredResourceRoles` with `resourceProfiles`. A type
+without a selector has at most one profile; a type with `resourceProfileField` must point to one
+required choice field whose options exactly match the profile IDs. Definition-bound readiness
+resolves only the selected profile. Plan may expose the bounded union for legacy leaf-item planning,
+but Single/Composition execution always uses the exact definition selector.
 `pack.mod-plan-guidance` v3 owns only cross-item planning guidance;
 `pack.mod-generate-single` v4 owns bounded common guidance, required per-item guidance, validation
 Primitive and exact generated-file roles. Single exposes `commonGuidance` plus only the selected
@@ -54,14 +58,15 @@ Primitive and exact generated-file roles. Single exposes `commonGuidance` plus o
 `ModPlanService` attaches catalog values after typed model validation. The Single contribution
 must cover exactly the catalog's item type IDs, preventing a declared-but-unexecutable type.
 
-`ats-workspace` owns ItemDefinition schema v1: stable Item identity/type, canonical structured
-field values, behavior intent, explicit localization status and exact Resource version bindings.
+`ats-workspace` owns ItemDefinition schema v2: stable Item identity/type, canonical structured
+field values, behavior intent, Pack-keyed localization field maps, exact Resource version bindings,
+typed reference bindings and optional composition-profile provenance.
 Validated Serde and deterministic ordered serialization produce the definition SHA-256 used by
 future Run/Artifact provenance; Runtime remains unaware of game-specific types.
 
 Pack may contain declarations/templates/resources and registered Primitive IDs. It cannot contain arbitrary script, native plugin, provider credential, or complete workflow implementation.
 
-### Scenario: Pack v3 Item Catalog, Definition Identity, And Readiness
+### Scenario: Pack v4 Item Catalog, Definition Identity, And Readiness
 
 #### 1. Scope / Trigger
 
@@ -94,17 +99,25 @@ Implementations live in `crates/ats-game-context/src/pack.rs`,
 
 #### 3. Contracts
 
-The Pack payload is schema v3. The top-level shape is:
+The Pack payload is schema v4. A leaf type shape is:
 
 ```json
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "id": "sts2",
   "displayName": "Slay the Spire 2",
   "itemTypes": [{
     "id": "relic",
     "displayNames": {"eng": "Relic", "zhs": "遗物"},
     "requiredLocales": ["eng", "zhs"],
+    "localizationFields": [{
+      "id": "name",
+      "displayNames": {"eng": "Name"},
+      "required": true,
+      "multiline": false,
+      "minLength": 1,
+      "maxLength": 256
+    }],
     "fields": [{
       "id": "rarity",
       "displayNames": {"eng": "Rarity", "zhs": "稀有度"},
@@ -115,7 +128,12 @@ The Pack payload is schema v3. The top-level shape is:
       }
     }],
     "evidenceQueries": [{"symbols": ["CustomRelicModel"], "terms": []}],
-    "requiredResourceRoles": ["relic.normal"]
+    "referenceSlots": [],
+    "resourceProfiles": [{
+      "id": "default",
+      "displayNames": {"eng": "Default"},
+      "requiredResourceRoles": ["relic.normal"]
+    }]
   }],
   "contributions": []
 }
@@ -124,13 +142,31 @@ The Pack payload is schema v3. The top-level shape is:
 Allowed field `value.kind` values are `text`, `integer`, `boolean`, `choice` and `string_list`,
 with the bounded fields represented by `ItemFieldValueSpec`. No descriptor contains UI code.
 
+Reference slots are data-only Pack contracts:
+
+```text
+identity binding = itemId + expectedItemType
+pinned binding   = itemId + definitionHash + quantity
+```
+
+- Identity slots express affiliation such as Card -> owner Character. They validate target identity/type in a resolved composition but do not expand a version hash.
+- Pinned slots express reproducible composition such as Character -> StartingDeck/StartingRelics. Their exact definitions expand the immutable closure and their edges must be acyclic.
+- Slot kind, allowed target types, entry cardinality and quantity bounds are Pack-owned. Definition serde performs structural validation; `ItemDefinitionValidator` applies the Pack slot; `ResolvedItemGraph` later proves target existence/type/hash/closure.
+
+`compositionProfiles[]` groups one composition/root Item type with `defaultProfile`,
+`customBaseProfile`, a hard `maxNodes <= 128`, bounded numeric parameter descriptors, immutable
+presets and cross-parameter constraints. `nodeWeight` plus `baseNodeCount` provides a generic
+pre-model estimate. ItemDefinition v2 records the chosen preset or Custom base and the complete
+resolved parameter map; Run/Artifact graph provenance is added by the composition Feature.
+
 Capability response entries contain `descriptor`, `ready` and `blockers`. Blocker code is exactly
 `truth.snapshot_unavailable` or `truth.evidence_missing`; the latter includes zero-based
 `queryIndex`. The response also carries `gamePackId`, `gamePackSha256` and optional
 `truthSnapshotId`, so clients must replace rather than merge results from another identity.
 
-ItemDefinition schema v1 fields are `itemId`, `itemType`, `canonicalFields`, `behaviorIntent`,
-`localizations` and `resourceBindings`. `canonicalFields`, `localizations` and `resourceBindings`
+ItemDefinition schema v2 fields are `itemId`, `itemType`, `canonicalFields`, `behaviorIntent`,
+`localizations`, `resourceBindings`, `referenceBindings` and optional `compositionProfile`.
+`canonicalFields`, locale field maps, bindings and composition parameters
 are ordered maps. The definition SHA-256 covers the complete validated wire object including
 `schemaVersion`; it does not include repository timestamps or a mutable selected pointer.
 
@@ -139,9 +175,10 @@ are ordered maps. The definition SHA-256 covers the complete validated wire obje
 | Input/state | Result | Work allowed |
 | --- | --- | --- |
 | Pack bytes do not match pinned SHA-256 | `GamePackLoadError::ContentHashMismatch` | none |
-| `schemaVersion != 3` | `GamePackLoadError::UnsupportedSchema` | none |
+| `schemaVersion != 4` | `GamePackLoadError::UnsupportedSchema` | none |
 | empty/duplicate/more than 64 `itemTypes` | `GamePackLoadError::InvalidItemTypes` | none |
-| invalid locale/field/query/role descriptor | `GamePackLoadError::InvalidItemType(ItemCatalogError::*)` | none |
+| invalid locale/field/query/reference/resource-profile descriptor | `GamePackLoadError::InvalidItemType(ItemCatalogError::*)` | none |
+| invalid preset/custom bounds, profile constraint, root type or >128 estimated nodes | `GamePackLoadError::InvalidCompositionProfile*` | none |
 | Single generation types differ from catalog IDs | `SingleGenerateError::InvalidPackContribution` | no model/IO |
 | missing/invalid per-item generation guidance | `SingleGenerateError::InvalidPackContribution` | no model/IO |
 | no current verified Truth | every declared type blocked with `truth.snapshot_unavailable` | caller must reject submit/model work |
@@ -166,12 +203,20 @@ are ordered maps. The definition SHA-256 covers the complete validated wire obje
 
 - `ats-game-context::pack::item_catalog_rejects_duplicate_types_and_invalid_field_constraints`:
   assert duplicate IDs and inverted integer bounds fail during Pack load.
+- `ats-game-context::pack::pack_v4_validates_reference_resource_localization_and_composition_profiles`:
+  assert selector/profile exact coverage, typed reference slots, default Standard/custom base,
+  parameter bounds, cross-field constraints and <=128 node estimation.
 - `ats-game-context::item::capability_catalog_is_pack_driven_and_truth_scoped`: assert no-Truth,
   matching and missing-query states plus exact `truth.evidence_missing` serialization.
 - `ats-workspace::item::definition_hash_is_stable_and_covers_canonical_content`: assert wire
   round-trip preserves identity and one canonical content change changes the hash.
 - `ats-workspace::item::invalid_definition_content_cannot_receive_an_identity`: assert invalid
   content and schema tampering fail before identity.
+- `ats-workspace::item::definition_v2_hash_covers_typed_references_and_composition_provenance`:
+  assert exact camelCase wire, reference quantity/profile parameter hash coverage and v1 rejection.
+- `ats-features::item_definition::ready_validation_resolves_profile_references_and_composition_parameters`:
+  assert selected Resource profile, localization fields, Pack reference cardinality/quantity and
+  preset parameter identity are authoritative before execution.
 - `ats-features::mod_plan::built_in_generation_contribution_covers_item_catalog`: assert the generation
   contribution covers exactly the Pack catalog IDs.
 - `agentthespire-desktop::stage2_single_mod::card_pack_truth_resources_prompt_and_artifact_form_one_vertical_contract`:
@@ -222,7 +267,7 @@ save_item_definition(definition) -> StoredItemDefinition
 ```
 
 ```text
-.ats/items-v1/<itemId>/
+.ats/items-v2/<itemId>/
   current.json
   definitions/<definitionHash>.json
 ```
@@ -542,9 +587,9 @@ exact `StoredItemDefinition`. The service validates its hash, Ready mode, Plan i
 role-keyed `resourceBindings` before model work. The Recipe owns one required `item.definition`
 slot. Artifact extension schema v2 and dedicated provenance both record `definitionHash`.
 
-`mod.generate.batch` request schema v3 embeds Single v3 unchanged. `mod.generate.complex` request
-schema v2 places one StoredItemDefinition beside each Plan request, then deterministically replaces
-model-authored Plan item ID/type with that definition identity before invoking Batch/Single.
+`mod.generate.batch` request schema v4 embeds exact StoredItemDefinition snapshots and derives each
+Plan request from canonical behavior intent. `mod.generate.complex` request schema v3 embeds Batch
+v4 unchanged and invokes Build/Package only after every Item outcome succeeds.
 
 ## 7. Feature Composition
 
