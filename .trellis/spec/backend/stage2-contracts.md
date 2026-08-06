@@ -727,6 +727,9 @@ Wrong - trust declared metadata and select during ingest:
 ```rust
 let asset = repository.ingest(bytes, request.media_type, request.width, request.height)?;
 asset.select(asset.original_version())?;
+
+// Also wrong: a caller-controlled path cannot represent a Pack default.
+service.prepare_file(processor, repository, pack_default_request, caller_path, context)?;
 ```
 
 Correct - probe/derive first, publish one candidate batch, then select explicitly:
@@ -736,6 +739,14 @@ let master = processor.prepare_file(path, "image/png")?;
 let candidates = prepare_candidates(&master, verified_pack_specs)?;
 let assets = repository.ingest_batch(candidates)?; // selectedVersion is null
 let selected = repository.select(resource_id, candidate_version)?;
+
+let candidates = service.prepare_default(
+    processor,
+    repository,
+    pack_default_request,
+    |pack, asset_id| built_in_game_pack_asset(pack, asset_id).ok(),
+    context,
+)?; // exact Pack ID/SHA + asset ID + declared asset SHA; still unselected
 ```
 
 ## 6. Prompt And Model
