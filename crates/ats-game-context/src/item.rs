@@ -377,7 +377,12 @@ impl ItemFieldSpec {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 pub enum ItemFieldValueSpec {
     Text {
         multiline: bool,
@@ -929,6 +934,26 @@ mod tests {
                                 "displayNames":{"eng":"Common", "zhs":"普通"}
                             }]
                         }
+                    }, {
+                        "id": "name_color",
+                        "displayNames": {"eng":"Name color", "zhs":"名称颜色"},
+                        "required": true,
+                        "value": {
+                            "kind": "text",
+                            "multiline": false,
+                            "minLength": 6,
+                            "maxLength": 8
+                        }
+                    }, {
+                        "id": "tags",
+                        "displayNames": {"eng":"Tags", "zhs":"标签"},
+                        "required": false,
+                        "value": {
+                            "kind": "string_list",
+                            "minItems": 0,
+                            "maxItems": 4,
+                            "itemMaxLength": 64
+                        }
                     }],
                     "localizationFields": [
                         {
@@ -1032,6 +1057,30 @@ mod tests {
         assert_eq!(encoded["blockers"][0]["code"], "truth.evidence_missing");
         assert_eq!(encoded["blockers"][0]["queryIndex"], 0);
         assert!(encoded["blockers"][0].get("query_index").is_none());
+
+        let catalog_wire = serde_json::to_value(&catalog).unwrap();
+        let ready_wire = catalog_wire["itemTypes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["descriptor"]["id"] == "ready_item")
+            .unwrap();
+        let fields = ready_wire["descriptor"]["fields"].as_array().unwrap();
+        let text = fields
+            .iter()
+            .find(|field| field["id"] == "name_color")
+            .unwrap();
+        assert_eq!(text["value"]["minLength"], 6);
+        assert_eq!(text["value"]["maxLength"], 8);
+        assert!(text["value"].get("min_length").is_none());
+        assert!(text["value"].get("max_length").is_none());
+        let string_list = fields.iter().find(|field| field["id"] == "tags").unwrap();
+        assert_eq!(string_list["value"]["minItems"], 0);
+        assert_eq!(string_list["value"]["maxItems"], 4);
+        assert_eq!(string_list["value"]["itemMaxLength"], 64);
+        assert!(string_list["value"].get("min_items").is_none());
+        assert!(string_list["value"].get("max_items").is_none());
+        assert!(string_list["value"].get("item_max_length").is_none());
     }
 
     #[test]

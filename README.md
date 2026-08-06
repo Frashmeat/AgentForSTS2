@@ -23,7 +23,7 @@ crates/
   ats-runtime/       Run/Artifact envelope、取消和模型/执行端口
   ats-game-context/  Game Pack、Contribution、Truth/Evidence、工程模板
   ats-workspace/     工程锁、recents、资源版本和工程文件夹
-  ats-features/      9 个 typed Feature、Recipe 和组合服务
+  ats-features/      12 个 typed Feature、Recipe 和组合服务
   ats-adapters/      HTTP、文件仓储、dotnet、ZIP 等基础设施实现
   ats-web/           health、Feature catalog 和静态 SPA
   ats-cli/           deploy 工具与共享 Feature catalog
@@ -40,6 +40,9 @@ game_packs/sts2/     STS2 contribution、资源规格和工程模板
 
 - `project.create`
 - `mod.plan`
+- `composition.plan`
+- `composition.retry-node`
+- `composition.generate`
 - `resource.prepare`
 - `mod.generate.single`
 - `mod.generate.batch`

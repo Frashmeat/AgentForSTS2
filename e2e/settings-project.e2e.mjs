@@ -27,7 +27,30 @@ const waitForTestId = async (testId, timeout = 15_000) => {
   );
 };
 
-const selectValue = async (testId, value) => {
+const selectValue = async (testId, value, timeout = 30_000) => {
+  try {
+    await browser.waitUntil(
+      async () => browser.execute((id, nextValue) => {
+        const element = document.querySelector(`[data-testid="${id}"]`);
+        if (!(element instanceof HTMLSelectElement)) return false;
+        const option = Array.from(element.options).find((candidate) => candidate.value === nextValue);
+        return Boolean(option && !option.disabled);
+      }, testId, value),
+      { timeout, timeoutMsg: `${testId} option ${value} did not become ready` },
+    );
+  } catch {
+    const state = await browser.execute((id) => {
+      const element = document.querySelector(`[data-testid="${id}"]`);
+      const options = element instanceof HTMLSelectElement
+        ? Array.from(element.options).map((option) => ({ value: option.value, disabled: option.disabled }))
+        : [];
+      return {
+        options,
+        error: document.querySelector('[data-testid="item-editor-error"]')?.textContent?.trim() ?? "",
+      };
+    }, testId);
+    throw new Error(`${testId} option ${value} did not become ready: ${JSON.stringify(state)}`);
+  }
   const selected = await browser.execute((id, nextValue) => {
     const element = document.querySelector(`[data-testid="${id}"]`);
     if (!(element instanceof HTMLSelectElement)) return null;

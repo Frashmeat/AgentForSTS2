@@ -219,7 +219,9 @@ are ordered maps. The definition SHA-256 covers the complete validated wire obje
   assert selector/profile exact coverage, typed reference slots, default Standard/custom base,
   parameter bounds, cross-field constraints and <=128 node estimation.
 - `ats-game-context::item::capability_catalog_is_pack_driven_and_truth_scoped`: assert no-Truth,
-  matching and missing-query states plus exact `truth.evidence_missing` serialization.
+  matching and missing-query states plus exact `truth.evidence_missing` serialization. The complete
+  catalog wire must expose tagged `text` fields as `minLength`/`maxLength` and `string_list` fields
+  as `minItems`/`maxItems`/`itemMaxLength`, with no snake_case aliases in serialized output.
 - `ats-workspace::item::definition_hash_is_stable_and_covers_canonical_content`: assert wire
   round-trip preserves identity and one canonical content change changes the hash.
 - `ats-workspace::item::invalid_definition_content_cannot_receive_an_identity`: assert invalid
@@ -301,7 +303,7 @@ pointer updates.
 | save existing itemId | itemType must equal every committed or crash-orphaned snapshot for that ID |
 | load by hash | recompute and match the path hash; reject changed bytes, symlinks and path drift |
 | list | return only validated current pointers, sorted by stable itemId |
-| capability wire | use camelCase, including blocker `queryIndex`; React runtime guards reject malformed shapes |
+| capability wire | use camelCase, including tagged-enum payload fields and blocker `queryIndex`; React runtime guards reject malformed shapes |
 | Item save | selected type must be ready for the pinned Pack/current verified Truth before storage |
 | Run submit | decode Plan/Single/Batch/Complex typed requests and check every requested type before `RunRecord::new` |
 

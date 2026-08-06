@@ -53,7 +53,7 @@
           "id": "name_color",
           "displayNames": { "eng": "Name color", "zhs": "名称颜色" },
           "required": true,
-          "value": { "kind": "text", "multiline": false, "min_length": 6, "max_length": 8 }
+          "value": { "kind": "text", "multiline": false, "minLength": 6, "maxLength": 8 }
         },
         {
           "id": "gender",

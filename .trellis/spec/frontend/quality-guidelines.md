@@ -46,6 +46,9 @@ Questions to answer:
 - 敏感字段表单至少覆盖：未触碰不写回、输入新值、明确清空三种情况。
 - GUI E2E 的 Run 失败路径必须等待列表读到真实 `failed` RunRecord，并核对 typed failure/diagnostic；测试不能直接读 history 文件来绕过陈旧 UI 状态。
 - GUI E2E 使用稳定 `data-testid` 作为工作流合同；Shell route、页面拆分或控件替换时必须在同一 Order 更新 E2E，顺序型 suite 应 fail fast，避免 setup 失败产生级联超时。
+- GUI E2E must wait for the semantic ready state it consumes, not only for a control shell to
+  exist. For an asynchronously populated select, wait until the exact target option exists and is
+  enabled before changing its value; an empty select rendered before capability loading is not ready.
 - 重复提交必须同时等待新的 Run ID 和持久化 terminal status；页面上残留的上一条 terminal Run 不能作为本次结果。
 - 隔离 E2E runner 必须显式准备并校验 pinned fixture、Provider API base path 与响应模式，不得要求生产代码为测试伪造 Truth/Resource。
 - Batch 模型测试至少覆盖 request 构造、精确 hash 失败重试、fail-fast 未执行差集和 malformed
