@@ -18,6 +18,114 @@
       ]
     },
     {
+      "id": "character",
+      "displayNames": { "eng": "Character", "zhs": "角色" },
+      "requiredLocales": ["eng", "zhs"],
+      "fields": [
+        {
+          "id": "visual_profile",
+          "displayNames": { "eng": "Visual profile", "zhs": "视觉方案" },
+          "required": true,
+          "value": {
+            "kind": "choice",
+            "options": [
+              { "value": "placeholder", "displayNames": { "eng": "Placeholder", "zhs": "占位资源" } }
+            ]
+          }
+        },
+        {
+          "id": "placeholder_id",
+          "displayNames": { "eng": "Placeholder character", "zhs": "占位角色" },
+          "required": true,
+          "value": {
+            "kind": "choice",
+            "options": [
+              { "value": "ironclad", "displayNames": { "eng": "Ironclad", "zhs": "铁甲战士" } },
+              { "value": "silent", "displayNames": { "eng": "Silent", "zhs": "静默猎手" } },
+              { "value": "defect", "displayNames": { "eng": "Defect", "zhs": "故障机器人" } },
+              { "value": "regent", "displayNames": { "eng": "Regent", "zhs": "储君" } },
+              { "value": "necrobinder", "displayNames": { "eng": "Necrobinder", "zhs": "亡灵契约师" } }
+            ]
+          }
+        },
+        {
+          "id": "name_color",
+          "displayNames": { "eng": "Name color", "zhs": "名称颜色" },
+          "required": true,
+          "value": { "kind": "text", "multiline": false, "min_length": 6, "max_length": 8 }
+        },
+        {
+          "id": "gender",
+          "displayNames": { "eng": "Gender", "zhs": "性别" },
+          "required": true,
+          "value": {
+            "kind": "choice",
+            "options": [
+              { "value": "neutral", "displayNames": { "eng": "Neutral", "zhs": "中性" } },
+              { "value": "feminine", "displayNames": { "eng": "Feminine", "zhs": "女性" } },
+              { "value": "masculine", "displayNames": { "eng": "Masculine", "zhs": "男性" } }
+            ]
+          }
+        },
+        {
+          "id": "starting_hp",
+          "displayNames": { "eng": "Starting HP", "zhs": "初始生命" },
+          "required": true,
+          "value": { "kind": "integer", "min": 1, "max": 999 }
+        },
+        {
+          "id": "starting_gold",
+          "displayNames": { "eng": "Starting gold", "zhs": "初始金币" },
+          "required": true,
+          "value": { "kind": "integer", "min": 0, "max": 999 }
+        },
+        {
+          "id": "max_energy",
+          "displayNames": { "eng": "Maximum energy", "zhs": "最大能量" },
+          "required": true,
+          "value": { "kind": "integer", "min": 1, "max": 9 }
+        }
+      ],
+      "localizationFields": [
+        { "id": "title", "displayNames": { "eng": "Title", "zhs": "名称" }, "required": true, "multiline": false, "minLength": 1, "maxLength": 256 },
+        { "id": "title_object", "displayNames": { "eng": "Object title", "zhs": "宾格名称" }, "required": true, "multiline": false, "minLength": 1, "maxLength": 256 },
+        { "id": "description", "displayNames": { "eng": "Selection description", "zhs": "选择页描述" }, "required": true, "multiline": true, "minLength": 1, "maxLength": 8000 },
+        { "id": "pronoun_object", "displayNames": { "eng": "Object pronoun", "zhs": "宾格代词" }, "required": true, "multiline": false, "minLength": 1, "maxLength": 128 },
+        { "id": "pronoun_subject", "displayNames": { "eng": "Subject pronoun", "zhs": "主格代词" }, "required": true, "multiline": false, "minLength": 1, "maxLength": 128 },
+        { "id": "pronoun_possessive", "displayNames": { "eng": "Possessive pronoun", "zhs": "所有格代词" }, "required": true, "multiline": false, "minLength": 1, "maxLength": 128 },
+        { "id": "possessive_adjective", "displayNames": { "eng": "Possessive adjective", "zhs": "物主限定词" }, "required": true, "multiline": false, "minLength": 1, "maxLength": 128 },
+        { "id": "aroma_principle", "displayNames": { "eng": "Aroma principle", "zhs": "香气原则文本" }, "required": true, "multiline": true, "minLength": 1, "maxLength": 2000 },
+        { "id": "end_turn_ping_alive", "displayNames": { "eng": "End-turn line", "zhs": "结束回合台词" }, "required": true, "multiline": true, "minLength": 1, "maxLength": 2000 },
+        { "id": "end_turn_ping_dead", "displayNames": { "eng": "Dead end-turn line", "zhs": "阵亡结束回合台词" }, "required": true, "multiline": true, "minLength": 1, "maxLength": 2000 },
+        { "id": "event_death_prevention", "displayNames": { "eng": "Death-prevention line", "zhs": "免死事件台词" }, "required": true, "multiline": true, "minLength": 1, "maxLength": 2000 },
+        { "id": "gold_monologue", "displayNames": { "eng": "Gold monologue", "zhs": "金币独白" }, "required": true, "multiline": true, "minLength": 1, "maxLength": 2000 },
+        { "id": "cards_modifier_title", "displayNames": { "eng": "Card modifier title", "zhs": "卡牌修改器标题" }, "required": true, "multiline": false, "minLength": 1, "maxLength": 256 },
+        { "id": "cards_modifier_description", "displayNames": { "eng": "Card modifier description", "zhs": "卡牌修改器描述" }, "required": true, "multiline": true, "minLength": 1, "maxLength": 2000 }
+      ],
+      "referenceSlots": [
+        { "id": "starting_deck", "displayNames": { "eng": "Starting deck", "zhs": "初始牌组" }, "kind": "pinned", "allowedItemTypes": ["card"], "minItems": 1, "maxItems": 16, "minQuantity": 1, "maxQuantity": 20 },
+        { "id": "cards", "displayNames": { "eng": "Card pool", "zhs": "角色卡池" }, "kind": "pinned", "allowedItemTypes": ["card"], "minItems": 1, "maxItems": 64, "minQuantity": 1, "maxQuantity": 1 },
+        { "id": "starting_relics", "displayNames": { "eng": "Starting relics", "zhs": "初始遗物" }, "kind": "pinned", "allowedItemTypes": ["relic"], "minItems": 1, "maxItems": 2, "minQuantity": 1, "maxQuantity": 1 },
+        { "id": "relics", "displayNames": { "eng": "Relic pool", "zhs": "角色遗物池" }, "kind": "pinned", "allowedItemTypes": ["relic"], "minItems": 1, "maxItems": 16, "minQuantity": 1, "maxQuantity": 1 },
+        { "id": "potions", "displayNames": { "eng": "Potion pool", "zhs": "角色药水池" }, "kind": "pinned", "allowedItemTypes": ["potion"], "minItems": 0, "maxItems": 16, "minQuantity": 1, "maxQuantity": 1 },
+        { "id": "powers", "displayNames": { "eng": "Supporting powers", "zhs": "配套能力" }, "kind": "pinned", "allowedItemTypes": ["power"], "minItems": 0, "maxItems": 16, "minQuantity": 1, "maxQuantity": 1 }
+      ],
+      "resourceProfileField": "visual_profile",
+      "resourceProfiles": [
+        { "id": "placeholder", "displayNames": { "eng": "Placeholder", "zhs": "占位资源" }, "requiredResourceRoles": [] }
+      ],
+      "evidenceQueries": [
+        { "symbols": ["PlaceholderCharacterModel"], "terms": [] },
+        { "symbols": ["CustomCharacterModel"], "terms": [] },
+        { "symbols": ["CustomContentDictionary.AddCharacter"], "terms": [] },
+        { "symbols": ["CharacterModel"], "terms": [] },
+        { "symbols": ["CharacterGender"], "terms": [] },
+        { "symbols": ["CustomCardPoolModel"], "terms": [] },
+        { "symbols": ["CustomRelicPoolModel"], "terms": [] },
+        { "symbols": ["CustomPotionPoolModel"], "terms": [] }
+      ]
+    },
+    {
       "id": "relic",
       "displayNames": { "eng": "Relic", "zhs": "遗物" },
       "requiredLocales": ["eng", "zhs"],
@@ -43,14 +151,17 @@
         { "id": "name", "displayNames": { "eng": "Name", "zhs": "名称" }, "required": true, "multiline": false, "minLength": 1, "maxLength": 256 },
         { "id": "description", "displayNames": { "eng": "Description", "zhs": "描述" }, "required": true, "multiline": true, "minLength": 1, "maxLength": 8000 }
       ],
-      "referenceSlots": [],
+      "referenceSlots": [
+        { "id": "owner_character", "displayNames": { "eng": "Owner character", "zhs": "所属角色" }, "kind": "identity", "allowedItemTypes": ["character"], "minItems": 0, "maxItems": 1, "minQuantity": 1, "maxQuantity": 1 }
+      ],
       "resourceProfiles": [
         { "id": "default", "displayNames": { "eng": "Default", "zhs": "默认" }, "requiredResourceRoles": ["relic.normal", "relic.outline", "relic.big"] }
       ],
       "evidenceQueries": [
         { "symbols": ["CustomRelicModel"], "terms": [] },
         { "symbols": ["CustomContentDictionary.AddModel"], "terms": [] },
-        { "symbols": ["RelicModel"], "terms": [] }
+        { "symbols": ["RelicModel"], "terms": [] },
+        { "symbols": ["CustomRelicPoolModel"], "terms": [] }
       ]
     },
     {
@@ -72,7 +183,8 @@
               { "value": "necrobinder", "displayNames": { "eng": "Necrobinder", "zhs": "亡灵契约师" } },
               { "value": "colorless", "displayNames": { "eng": "Colorless", "zhs": "无色" } },
               { "value": "curse", "displayNames": { "eng": "Curse", "zhs": "诅咒" } },
-              { "value": "status", "displayNames": { "eng": "Status", "zhs": "状态" } }
+              { "value": "status", "displayNames": { "eng": "Status", "zhs": "状态" } },
+              { "value": "custom_character", "displayNames": { "eng": "Custom character", "zhs": "自定义角色" } }
             ]
           }
         },
@@ -144,7 +256,9 @@
         { "id": "name", "displayNames": { "eng": "Name", "zhs": "名称" }, "required": true, "multiline": false, "minLength": 1, "maxLength": 256 },
         { "id": "description", "displayNames": { "eng": "Description", "zhs": "描述" }, "required": true, "multiline": true, "minLength": 1, "maxLength": 8000 }
       ],
-      "referenceSlots": [],
+      "referenceSlots": [
+        { "id": "owner_character", "displayNames": { "eng": "Owner character", "zhs": "所属角色" }, "kind": "identity", "allowedItemTypes": ["character"], "minItems": 0, "maxItems": 1, "minQuantity": 1, "maxQuantity": 1 }
+      ],
       "resourceProfiles": [
         { "id": "default", "displayNames": { "eng": "Default", "zhs": "默认" }, "requiredResourceRoles": ["card.portrait", "card.big"] }
       ],
@@ -153,7 +267,8 @@
         { "symbols": ["PoolAttribute"], "terms": [] },
         { "symbols": ["CardType"], "terms": [] },
         { "symbols": ["CardRarity"], "terms": [] },
-        { "symbols": ["TargetType"], "terms": [] }
+        { "symbols": ["TargetType"], "terms": [] },
+        { "symbols": ["CustomCardPoolModel"], "terms": [] }
       ]
     },
     {
@@ -212,7 +327,9 @@
         { "id": "name", "displayNames": { "eng": "Name", "zhs": "名称" }, "required": true, "multiline": false, "minLength": 1, "maxLength": 256 },
         { "id": "description", "displayNames": { "eng": "Description", "zhs": "描述" }, "required": true, "multiline": true, "minLength": 1, "maxLength": 8000 }
       ],
-      "referenceSlots": [],
+      "referenceSlots": [
+        { "id": "owner_character", "displayNames": { "eng": "Owner character", "zhs": "所属角色" }, "kind": "identity", "allowedItemTypes": ["character"], "minItems": 0, "maxItems": 1, "minQuantity": 1, "maxQuantity": 1 }
+      ],
       "resourceProfiles": [
         { "id": "default", "displayNames": { "eng": "Default", "zhs": "默认" }, "requiredResourceRoles": ["potion.icon"] }
       ],
@@ -222,7 +339,8 @@
         { "symbols": ["SharedPotionPool"], "terms": [] },
         { "symbols": ["PotionRarity"], "terms": [] },
         { "symbols": ["PotionUsage"], "terms": [] },
-        { "symbols": ["TargetType"], "terms": [] }
+        { "symbols": ["TargetType"], "terms": [] },
+        { "symbols": ["CustomPotionPoolModel"], "terms": [] }
       ]
     },
     {
@@ -294,7 +412,35 @@
       ]
     }
   ],
-  "compositionProfiles": [],
+  "compositionProfiles": [
+    {
+      "id": "character_suite",
+      "displayNames": { "eng": "Character suite", "zhs": "角色套装" },
+      "rootItemType": "character",
+      "defaultProfile": "standard",
+      "customBaseProfile": "standard",
+      "maxNodes": 128,
+      "baseNodeCount": 1,
+      "parameters": [
+        { "id": "starter_card_types", "displayNames": { "eng": "Starter card types", "zhs": "初始卡牌种类" }, "min": 1, "max": 8, "nodeWeight": 1 },
+        { "id": "starting_deck_size", "displayNames": { "eng": "Starting deck size", "zhs": "初始牌组张数" }, "min": 1, "max": 20, "nodeWeight": 0 },
+        { "id": "common_cards", "displayNames": { "eng": "Common reward cards", "zhs": "普通奖励卡" }, "min": 0, "max": 24, "nodeWeight": 1 },
+        { "id": "uncommon_cards", "displayNames": { "eng": "Uncommon reward cards", "zhs": "罕见奖励卡" }, "min": 0, "max": 16, "nodeWeight": 1 },
+        { "id": "rare_cards", "displayNames": { "eng": "Rare reward cards", "zhs": "稀有奖励卡" }, "min": 0, "max": 8, "nodeWeight": 1 },
+        { "id": "starter_relics", "displayNames": { "eng": "Starter relics", "zhs": "初始遗物" }, "min": 1, "max": 2, "nodeWeight": 1 },
+        { "id": "relics", "displayNames": { "eng": "Reward relics", "zhs": "奖励遗物" }, "min": 0, "max": 8, "nodeWeight": 1 },
+        { "id": "potions", "displayNames": { "eng": "Potions", "zhs": "药水" }, "min": 0, "max": 8, "nodeWeight": 1 },
+        { "id": "powers", "displayNames": { "eng": "Supporting powers", "zhs": "配套能力" }, "min": 0, "max": 8, "nodeWeight": 1 }
+      ],
+      "profiles": [
+        { "id": "prototype", "displayNames": { "eng": "Prototype", "zhs": "原型" }, "values": { "starter_card_types": 3, "starting_deck_size": 10, "common_cards": 3, "uncommon_cards": 2, "rare_cards": 1, "starter_relics": 1, "relics": 0, "potions": 0, "powers": 0 } },
+        { "id": "standard", "displayNames": { "eng": "Standard", "zhs": "标准" }, "values": { "starter_card_types": 4, "starting_deck_size": 10, "common_cards": 12, "uncommon_cards": 8, "rare_cards": 4, "starter_relics": 1, "relics": 3, "potions": 2, "powers": 0 } }
+      ],
+      "constraints": [
+        { "kind": "less_or_equal", "left": "starter_card_types", "right": "starting_deck_size" }
+      ]
+    }
+  ],
   "contributions": [
     {
       "slotId": "project.create.template",
@@ -319,7 +465,48 @@
       "slotId": "composition.plan.guidance",
       "featureId": "composition.plan",
       "schema": { "id": "pack.composition-plan-guidance", "version": 1 },
-      "payload": { "compositions": [] }
+      "payload": {
+        "compositions": [
+          {
+            "compositionId": "character_suite",
+            "allowedItemTypes": ["character", "card", "relic", "potion", "power"],
+            "nodeTypeRules": [
+              { "itemType": "character", "baseCount": 1, "parameterMultiplier": 0 },
+              { "itemType": "card", "baseCount": 0, "parameterId": "starter_card_types", "parameterMultiplier": 1 },
+              { "itemType": "card", "baseCount": 0, "parameterId": "common_cards", "parameterMultiplier": 1 },
+              { "itemType": "card", "baseCount": 0, "parameterId": "uncommon_cards", "parameterMultiplier": 1 },
+              { "itemType": "card", "baseCount": 0, "parameterId": "rare_cards", "parameterMultiplier": 1 },
+              { "itemType": "relic", "baseCount": 0, "parameterId": "starter_relics", "parameterMultiplier": 1 },
+              { "itemType": "relic", "baseCount": 0, "parameterId": "relics", "parameterMultiplier": 1 },
+              { "itemType": "potion", "baseCount": 0, "parameterId": "potions", "parameterMultiplier": 1 },
+              { "itemType": "power", "baseCount": 0, "parameterId": "powers", "parameterMultiplier": 1 }
+            ],
+            "referenceBindingRules": [
+              { "sourceItemType": "character", "slotId": "starting_deck", "measure": "bindings", "baseCount": 0, "parameterId": "starter_card_types", "parameterMultiplier": 1 },
+              { "sourceItemType": "character", "slotId": "starting_deck", "measure": "total_quantity", "baseCount": 0, "parameterId": "starting_deck_size", "parameterMultiplier": 1 },
+              { "sourceItemType": "character", "slotId": "cards", "measure": "bindings", "baseCount": 0, "parameterId": "starter_card_types", "parameterMultiplier": 1 },
+              { "sourceItemType": "character", "slotId": "cards", "measure": "bindings", "baseCount": 0, "parameterId": "common_cards", "parameterMultiplier": 1 },
+              { "sourceItemType": "character", "slotId": "cards", "measure": "bindings", "baseCount": 0, "parameterId": "uncommon_cards", "parameterMultiplier": 1 },
+              { "sourceItemType": "character", "slotId": "cards", "measure": "bindings", "baseCount": 0, "parameterId": "rare_cards", "parameterMultiplier": 1 },
+              { "sourceItemType": "character", "slotId": "starting_relics", "measure": "bindings", "baseCount": 0, "parameterId": "starter_relics", "parameterMultiplier": 1 },
+              { "sourceItemType": "character", "slotId": "relics", "measure": "bindings", "baseCount": 0, "parameterId": "starter_relics", "parameterMultiplier": 1 },
+              { "sourceItemType": "character", "slotId": "relics", "measure": "bindings", "baseCount": 0, "parameterId": "relics", "parameterMultiplier": 1 },
+              { "sourceItemType": "character", "slotId": "potions", "measure": "bindings", "baseCount": 0, "parameterId": "potions", "parameterMultiplier": 1 },
+              { "sourceItemType": "character", "slotId": "powers", "measure": "bindings", "baseCount": 0, "parameterId": "powers", "parameterMultiplier": 1 },
+              { "sourceItemType": "card", "slotId": "owner_character", "measure": "bindings", "baseCount": 1, "parameterMultiplier": 0 },
+              { "sourceItemType": "relic", "slotId": "owner_character", "measure": "bindings", "baseCount": 1, "parameterMultiplier": 0 },
+              { "sourceItemType": "potion", "slotId": "owner_character", "measure": "bindings", "baseCount": 1, "parameterMultiplier": 0 }
+            ],
+            "guidance": [
+              "Plan exactly one PlaceholderCharacterModel root and the Pack-profiled Card, Relic, Potion, and Power nodes.",
+              "Set visual_profile to placeholder and map HP, gold, energy, gender, name color, placeholder identity, and every declared localization field explicitly.",
+              "Pin every Card in the Character cards slot, every Relic in relics, every Potion in potions, and every Power in powers so the root reaches the complete closure.",
+              "Use starting_deck quantities to close exactly to starting_deck_size, and include exactly starter_card_types distinct starting Card definitions.",
+              "Bind every Card, Relic, and Potion owner_character identity to the root; Character registration is CustomContentDictionary.AddCharacter through CustomCharacterModel, while PoolAttribute is only for Card, Relic, and Potion pool membership."
+            ]
+          }
+        ]
+      }
     },
     {
       "slotId": "mod.generate.single",
@@ -344,42 +531,61 @@
             ]
           },
           {
+            "id": "character",
+            "guidance": [
+              "Generate one PlaceholderCharacterModel plus its CustomCardPoolModel, CustomRelicPoolModel, and CustomPotionPoolModel in the declared source role.",
+              "Map visual_profile, placeholder_id, name_color, gender, starting_hp, starting_gold, and max_energy exactly from the ItemDefinition.",
+              "For BaseLib 3.3.8, implement the CustomCardPoolModel Title, IsColorless, and DeckEntryCardColor requirements; CustomPotionPoolModel has no ParentPool override.",
+              "Build StartingDeck and StartingRelics only from pinned reference bindings, preserving quantities; use the complete Card, Relic, and Potion pinned sets for the corresponding custom pools.",
+              "Do not put PoolAttribute on the Character. CustomCharacterModel registers through CustomContentDictionary.AddCharacter; PoolAttribute remains required on owned Card, Relic, and Potion models.",
+              "Emit every Pack-declared Character localization field under the exact STS2 characters table key for both locales.",
+              "Emit the four required THE_ARCHITECT Character dialogue keys in the STS2 ancients table for both locales."
+            ],
+            "generatedFiles": [
+              { "role": "source", "targetPath": "Generated/{item_id}.cs" },
+              { "role": "localization.eng", "targetPath": "{mod_id}/localization/eng/characters.json", "compositionMerge": "json_object" },
+              { "role": "localization.zhs", "targetPath": "{mod_id}/localization/zhs/characters.json", "compositionMerge": "json_object" },
+              { "role": "localization.ancients.eng", "targetPath": "{mod_id}/localization/eng/ancients.json", "compositionMerge": "json_object" },
+              { "role": "localization.ancients.zhs", "targetPath": "{mod_id}/localization/zhs/ancients.json", "compositionMerge": "json_object" }
+            ]
+          },
+          {
             "id": "relic",
             "guidance": [
               "Generate one STS2 relic implementation whose locked rarity and bilingual localization match the ItemDefinition.",
-              "Use only relic lifecycle and registration APIs present in Truth Evidence; do not invent hooks.",
+              "Use owner_character when present to select the Character's CustomRelicPoolModel; otherwise use the shared pool. Use only registration APIs present in Truth Evidence.",
               "Emit flat localization key-value JSON for both required locales."
             ],
             "generatedFiles": [
               { "role": "source", "targetPath": "Generated/{item_id}.cs" },
-              { "role": "localization.eng", "targetPath": "{mod_id}/localization/eng/relics.json" },
-              { "role": "localization.zhs", "targetPath": "{mod_id}/localization/zhs/relics.json" }
+              { "role": "localization.eng", "targetPath": "{mod_id}/localization/eng/relics.json", "compositionMerge": "json_object" },
+              { "role": "localization.zhs", "targetPath": "{mod_id}/localization/zhs/relics.json", "compositionMerge": "json_object" }
             ]
           },
           {
             "id": "card",
             "guidance": [
               "Generate one STS2 card implementation and map pool, card_type, rarity, target, and base_cost exactly from the ItemDefinition.",
-              "Declare the selected card pool and use only card APIs and enum values supported by Truth Evidence; do not invent lifecycle hooks.",
+              "When pool is custom_character, derive the custom CardPool type from owner_character; otherwise declare the selected built-in pool. Use only supported card APIs and enum values.",
               "Emit flat localization key-value JSON with title, description, and upgrade_description values for both required locales."
             ],
             "generatedFiles": [
               { "role": "source", "targetPath": "Generated/{item_id}.cs" },
-              { "role": "localization.eng", "targetPath": "{mod_id}/localization/eng/cards.json" },
-              { "role": "localization.zhs", "targetPath": "{mod_id}/localization/zhs/cards.json" }
+              { "role": "localization.eng", "targetPath": "{mod_id}/localization/eng/cards.json", "compositionMerge": "json_object" },
+              { "role": "localization.zhs", "targetPath": "{mod_id}/localization/zhs/cards.json", "compositionMerge": "json_object" }
             ]
           },
           {
             "id": "potion",
             "guidance": [
               "Generate one STS2 potion implementation and map rarity, usage, and target exactly from the ItemDefinition.",
-              "Register the potion in the shared potion pool and use only model, pool, enum, and effect APIs supported by Truth Evidence.",
+              "Use owner_character when present to select the Character's CustomPotionPoolModel; otherwise register in the shared potion pool. Use only supported APIs.",
               "Use the selected potion.icon resource through a custom packed image path and emit flat title/description localization JSON for both required locales."
             ],
             "generatedFiles": [
               { "role": "source", "targetPath": "Generated/{item_id}.cs" },
-              { "role": "localization.eng", "targetPath": "{mod_id}/localization/eng/potions.json" },
-              { "role": "localization.zhs", "targetPath": "{mod_id}/localization/zhs/potions.json" }
+              { "role": "localization.eng", "targetPath": "{mod_id}/localization/eng/potions.json", "compositionMerge": "json_object" },
+              { "role": "localization.zhs", "targetPath": "{mod_id}/localization/zhs/potions.json", "compositionMerge": "json_object" }
             ]
           },
           {
@@ -391,8 +597,8 @@
             ],
             "generatedFiles": [
               { "role": "source", "targetPath": "Generated/{item_id}.cs" },
-              { "role": "localization.eng", "targetPath": "{mod_id}/localization/eng/powers.json" },
-              { "role": "localization.zhs", "targetPath": "{mod_id}/localization/zhs/powers.json" }
+              { "role": "localization.eng", "targetPath": "{mod_id}/localization/eng/powers.json", "compositionMerge": "json_object" },
+              { "role": "localization.zhs", "targetPath": "{mod_id}/localization/zhs/powers.json", "compositionMerge": "json_object" }
             ]
           }
         ]

@@ -127,6 +127,14 @@ struct GenerateItemType {
 struct GeneratedFileSpec {
     role: String,
     target_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    composition_merge: Option<CompositionFileMerge>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum CompositionFileMerge {
+    JsonObject,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -205,6 +213,7 @@ pub struct SingleGenerationProvenance {
 pub struct ProposedArtifactFile {
     pub role: String,
     pub relative_path: String,
+    pub composition_merge: Option<CompositionFileMerge>,
 }
 
 pub struct SingleGenerateProposal {
@@ -459,7 +468,7 @@ impl SingleGenerateService {
             acceptance_notes: generated.acceptance_notes.clone(),
         };
         let artifact_files =
-            proposed_artifact_files(request, &generated, &selected, &resource_specs)?;
+            proposed_artifact_files(request, item_spec, &generated, &selected, &resource_specs)?;
         let provenance = SingleGenerationProvenance {
             definition_hash: request.definition.definition_hash.clone(),
             model_request_sha256: snapshot.request_sha256().clone(),
@@ -1098,6 +1107,12 @@ fn validate_bundle(
         let content = by_role
             .remove(&spec.role)
             .ok_or(SingleGenerateError::InvalidModelOutput)?;
+        if spec.composition_merge == Some(CompositionFileMerge::JsonObject)
+            && !serde_json::from_str::<BTreeMap<String, serde_json::Value>>(&content)
+                .is_ok_and(|values| values.values().all(serde_json::Value::is_string))
+        {
+            return Err(SingleGenerateError::InvalidModelOutput);
+        }
         let path = expand_generated_target_template(
             &spec.target_path,
             &request.mod_id,
@@ -1240,6 +1255,7 @@ fn artifact_request(
 
 fn proposed_artifact_files(
     request: &SingleGenerateRequest,
+    item_spec: &GenerateItemType,
     generated: &ValidatedBundle,
     resources: &[LoadedResource],
     resource_specs: &ResourceSpecs,
@@ -1247,9 +1263,11 @@ fn proposed_artifact_files(
     let mut files = generated
         .files
         .iter()
-        .map(|(role, relative_path, _)| ProposedArtifactFile {
+        .zip(&item_spec.generated_files)
+        .map(|((role, relative_path, _), spec)| ProposedArtifactFile {
             role: role.clone(),
             relative_path: relative_path.clone(),
+            composition_merge: spec.composition_merge,
         })
         .collect::<Vec<_>>();
     for resource in resources {
@@ -1270,6 +1288,7 @@ fn proposed_artifact_files(
         files.push(ProposedArtifactFile {
             role: resource.reference.logical_role.clone(),
             relative_path,
+            composition_merge: None,
         });
     }
     Ok(files)
@@ -1550,10 +1569,12 @@ mod tests {
                 GeneratedFileSpec {
                     role: "source".into(),
                     target_path: "Generated/{item_id}.cs".into(),
+                    composition_merge: None,
                 },
                 GeneratedFileSpec {
                     role: "localization.eng".into(),
                     target_path: "{mod_id}/localization/eng/items.json".into(),
+                    composition_merge: Some(CompositionFileMerge::JsonObject),
                 },
             ],
         };

@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use ats_game_context::{
@@ -22,9 +22,9 @@ use thiserror::Error;
 use crate::FeatureSpec;
 use crate::composition::{CompositionDraftRef, CompositionGraphError, ResolvedItemGraph};
 use crate::mod_generate_single::{
-    SingleGenerateContext, SingleGenerateError, SingleGenerateFeature, SingleGenerateProposal,
-    SingleGenerateRequest, SingleGenerateResult, SingleGenerateService, SingleGenerationProvenance,
-    SingleProposalDependencies,
+    CompositionFileMerge, ProposedArtifactFile, SingleGenerateContext, SingleGenerateError,
+    SingleGenerateFeature, SingleGenerateProposal, SingleGenerateRequest, SingleGenerateResult,
+    SingleGenerateService, SingleGenerationProvenance, SingleProposalDependencies,
 };
 use crate::mod_plan::{
     ModPlanContext, ModPlanError, ModPlanFeature, ModPlanRequest, ModPlanService,
@@ -390,10 +390,7 @@ impl<'a> CompositionGenerateService<'a> {
         {
             return Err(CompositionGenerateError::ValidationPrimitiveMismatch);
         }
-        let generated_writes = proposals
-            .iter()
-            .flat_map(|proposal| proposal.writes.iter().cloned())
-            .collect::<Vec<_>>();
+        let (generated_writes, generated_artifact_files) = consolidate_proposed_files(&proposals)?;
         ats_runtime::validate_project_writes(&generated_writes)?;
 
         let stage = dependencies.stager.stage(ProjectStageRequest {
@@ -511,19 +508,21 @@ impl<'a> CompositionGenerateService<'a> {
             composition_profile: graph.composition_profile.clone(),
             node_count: u32::try_from(graph.nodes.len())
                 .map_err(|_| CompositionGenerateError::InvalidInput)?,
-            generated_file_count: u32::try_from(
-                proposals
-                    .iter()
-                    .map(|proposal| proposal.artifact_files.len())
-                    .sum::<usize>(),
-            )
-            .map_err(|_| CompositionGenerateError::InvalidInput)?,
+            generated_file_count: u32::try_from(generated_artifact_files.len())
+                .map_err(|_| CompositionGenerateError::InvalidInput)?,
             child_run_ids: child_runs.iter().map(|child| child.id().clone()).collect(),
             package_output_relative_path: package.output_relative_path.clone(),
             package_report: package.report.clone(),
         };
-        let artifact_request =
-            composition_artifact_request(&request, &context, run, &graph, &proposals, &extension)?;
+        let artifact_request = composition_artifact_request(
+            &request,
+            &context,
+            run,
+            &graph,
+            &proposals,
+            &generated_artifact_files,
+            &extension,
+        )?;
         let published = match dependencies.artifacts.publish(artifact_request) {
             Ok(published) => published,
             Err(_) => {
@@ -604,6 +603,8 @@ pub enum CompositionGenerateError {
     InvalidContribution,
     #[error("composition nodes do not share one validation Primitive")]
     ValidationPrimitiveMismatch,
+    #[error("composition generated files cannot be merged safely")]
+    GeneratedFileConflict,
     #[error("composition Artifact publication failed")]
     ArtifactPublication,
     #[error("composition Artifact cleanup failed")]
@@ -654,6 +655,7 @@ impl CompositionGenerateError {
                 "composition.generate.validation_mismatch",
                 "composition.generate.propose",
             ),
+            Self::GeneratedFileConflict => ("model.output_invalid", "composition.generate.merge"),
             Self::ArtifactPublication => {
                 ("artifact.publish_failed", "composition.generate.publish")
             }
@@ -691,29 +693,109 @@ impl CompositionGenerateError {
     }
 }
 
+fn consolidate_proposed_files(
+    proposals: &[SingleGenerateProposal],
+) -> Result<(Vec<ProjectFileWrite>, Vec<ProposedArtifactFile>), CompositionGenerateError> {
+    struct PendingFile {
+        role: String,
+        merge: Option<CompositionFileMerge>,
+        contents: Vec<Vec<u8>>,
+    }
+
+    let mut pending = BTreeMap::<String, PendingFile>::new();
+    for proposal in proposals {
+        if proposal.writes.len() != proposal.artifact_files.len() {
+            return Err(CompositionGenerateError::GeneratedFileConflict);
+        }
+        for (write, file) in proposal.writes.iter().zip(&proposal.artifact_files) {
+            if write.relative_path() != file.relative_path || write.source_path().is_some() {
+                return Err(CompositionGenerateError::GeneratedFileConflict);
+            }
+            let bytes = write
+                .bytes()
+                .ok_or(CompositionGenerateError::GeneratedFileConflict)?;
+            match pending.get_mut(write.relative_path()) {
+                Some(existing)
+                    if existing.role == file.role
+                        && existing.merge == Some(CompositionFileMerge::JsonObject)
+                        && file.composition_merge == existing.merge =>
+                {
+                    existing.contents.push(bytes.to_vec());
+                }
+                Some(_) => return Err(CompositionGenerateError::GeneratedFileConflict),
+                None => {
+                    pending.insert(
+                        write.relative_path().to_owned(),
+                        PendingFile {
+                            role: file.role.clone(),
+                            merge: file.composition_merge,
+                            contents: vec![bytes.to_vec()],
+                        },
+                    );
+                }
+            }
+        }
+    }
+
+    let mut writes = Vec::with_capacity(pending.len());
+    let mut artifact_files = Vec::with_capacity(pending.len());
+    for (path, file) in pending {
+        let bytes = if file.merge == Some(CompositionFileMerge::JsonObject) {
+            merge_json_objects(&file.contents)?
+        } else if file.contents.len() == 1 {
+            file.contents.into_iter().next().unwrap_or_default()
+        } else {
+            return Err(CompositionGenerateError::GeneratedFileConflict);
+        };
+        writes.push(ProjectFileWrite::new(path.clone(), bytes)?);
+        artifact_files.push(ProposedArtifactFile {
+            role: file.role,
+            relative_path: path,
+            composition_merge: file.merge,
+        });
+    }
+    Ok((writes, artifact_files))
+}
+
+fn merge_json_objects(contents: &[Vec<u8>]) -> Result<Vec<u8>, CompositionGenerateError> {
+    let mut merged = BTreeMap::<String, serde_json::Value>::new();
+    for bytes in contents {
+        let values = serde_json::from_slice::<BTreeMap<String, serde_json::Value>>(bytes)
+            .map_err(|_| CompositionGenerateError::GeneratedFileConflict)?;
+        if values.values().any(|value| !value.is_string()) {
+            return Err(CompositionGenerateError::GeneratedFileConflict);
+        }
+        for (key, value) in values {
+            if merged.insert(key, value).is_some() {
+                return Err(CompositionGenerateError::GeneratedFileConflict);
+            }
+        }
+    }
+    serde_json::to_vec_pretty(&merged).map_err(|_| CompositionGenerateError::GeneratedFileConflict)
+}
+
 fn composition_artifact_request(
     request: &CompositionGenerateRequest,
     context: &CompositionGenerateContext<'_>,
     run: &RunRecord,
     graph: &ResolvedItemGraph,
     proposals: &[SingleGenerateProposal],
+    artifact_files: &[ProposedArtifactFile],
     extension: &CompositionGenerateArtifactExtension,
 ) -> Result<ArtifactPublishRequest, CompositionGenerateError> {
     let mut paths = BTreeSet::new();
     let mut files = Vec::new();
-    for proposal in proposals {
-        for file in &proposal.artifact_files {
-            if !paths.insert(file.relative_path.clone()) {
-                return Err(CompositionGenerateError::ProjectWrite(
-                    ProjectWriteError::DuplicatePath,
-                ));
-            }
-            files.push(ArtifactFileInput {
-                role: file.role.clone(),
-                source_path: context.project_root.join(&file.relative_path),
-                published_relative_path: Some(file.relative_path.clone()),
-            });
+    for file in artifact_files {
+        if !paths.insert(file.relative_path.clone()) {
+            return Err(CompositionGenerateError::ProjectWrite(
+                ProjectWriteError::DuplicatePath,
+            ));
         }
+        files.push(ArtifactFileInput {
+            role: file.role.clone(),
+            source_path: context.project_root.join(&file.relative_path),
+            published_relative_path: Some(file.relative_path.clone()),
+        });
     }
     if !paths.insert(request.package.output_relative_path.clone()) {
         return Err(CompositionGenerateError::ProjectWrite(
@@ -896,5 +978,39 @@ fn schema(id: &str) -> SchemaRef {
     SchemaRef {
         id: SchemaId::parse(id).expect("built-in schema ID is valid"),
         version: SchemaVersion::new(1).expect("built-in schema version is valid"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn json_object_merge_is_sorted_and_rejects_invalid_or_duplicate_entries() {
+        let merged =
+            merge_json_objects(&[br#"{"b":"two"}"#.to_vec(), br#"{"a":"one"}"#.to_vec()]).unwrap();
+        assert_eq!(
+            String::from_utf8(merged).unwrap(),
+            "{\n  \"a\": \"one\",\n  \"b\": \"two\"\n}"
+        );
+        assert!(matches!(
+            merge_json_objects(&[br#"{"a":"one"}"#.to_vec(), br#"{"a":"two"}"#.to_vec()]),
+            Err(CompositionGenerateError::GeneratedFileConflict)
+        ));
+        assert!(matches!(
+            merge_json_objects(&[br#"{"a":{"nested":true}}"#.to_vec()]),
+            Err(CompositionGenerateError::GeneratedFileConflict)
+        ));
+        assert!(matches!(
+            merge_json_objects(&[b"not-json".to_vec()]),
+            Err(CompositionGenerateError::GeneratedFileConflict)
+        ));
+        assert_eq!(
+            CompositionGenerateError::GeneratedFileConflict
+                .run_failure()
+                .code
+                .as_str(),
+            "model.output_invalid"
+        );
     }
 }

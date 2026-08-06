@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use ats_game_context::{
-    CompositionProfileSet, ContributionResolverError, EvidenceQueryError, LoadedGamePack,
-    TruthEvidenceRecord, VerifiedContributionSet, VerifiedTruthSnapshot,
+    CompositionProfileSet, ContributionResolverError, EvidenceQueryError, ItemReferenceKind,
+    LoadedGamePack, TruthEvidenceRecord, VerifiedContributionSet, VerifiedTruthSnapshot,
 };
 use ats_kernel::{
     CompositionDraftId, CompositionId, ContributionId, FailureCode, FeatureId, ItemFieldId, ItemId,
@@ -102,6 +102,8 @@ struct CompositionPlanGuidance {
     composition_id: CompositionId,
     allowed_item_types: Vec<ItemTypeId>,
     node_type_rules: Vec<CompositionNodeTypeRule>,
+    #[serde(default)]
+    reference_binding_rules: Vec<CompositionReferenceBindingRule>,
     guidance: Vec<String>,
 }
 
@@ -109,6 +111,25 @@ struct CompositionPlanGuidance {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CompositionNodeTypeRule {
     item_type: ItemTypeId,
+    base_count: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    parameter_id: Option<ats_kernel::CompositionParameterId>,
+    parameter_multiplier: u32,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
+#[serde(rename_all = "snake_case")]
+enum ReferenceBindingMeasure {
+    Bindings,
+    TotalQuantity,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CompositionReferenceBindingRule {
+    source_item_type: ItemTypeId,
+    slot_id: ItemReferenceSlotId,
+    measure: ReferenceBindingMeasure,
     base_count: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     parameter_id: Option<ats_kernel::CompositionParameterId>,
@@ -364,12 +385,50 @@ impl CompositionPlanContribution {
                 || entry.guidance.len() > 64
                 || entry.guidance.iter().any(|value| !valid_text(value, 2_000))
                 || !valid_node_type_rules(profile, entry)
+                || !valid_reference_binding_rules(pack, profile, entry)
             {
                 return Err(CompositionPlanError::InvalidPackGuidance);
             }
         }
         Ok(())
     }
+}
+
+fn valid_reference_binding_rules(
+    pack: &LoadedGamePack,
+    profile: &CompositionProfileSet,
+    guidance: &CompositionPlanGuidance,
+) -> bool {
+    if guidance.reference_binding_rules.len() > 128 {
+        return false;
+    }
+    guidance.reference_binding_rules.iter().all(|rule| {
+        let Some(descriptor) = pack.item_type(&rule.source_item_type) else {
+            return false;
+        };
+        let Some(slot) = descriptor
+            .reference_slots()
+            .iter()
+            .find(|slot| slot.id() == &rule.slot_id)
+        else {
+            return false;
+        };
+        guidance.allowed_item_types.contains(&rule.source_item_type)
+            && rule.base_count <= 128
+            && rule.parameter_multiplier <= 128
+            && (rule.measure != ReferenceBindingMeasure::TotalQuantity
+                || slot.kind() == ItemReferenceKind::Pinned)
+            && match &rule.parameter_id {
+                None => rule.parameter_multiplier == 0,
+                Some(parameter_id) => {
+                    rule.parameter_multiplier > 0
+                        && profile
+                            .parameters()
+                            .iter()
+                            .any(|parameter| parameter.id() == parameter_id)
+                }
+            }
+    })
 }
 
 fn valid_node_type_rules(
@@ -514,6 +573,8 @@ fn build_definitions(
         return Err(CompositionPlanError::ProfileCountMismatch);
     }
     validate_reference_targets(&source)?;
+    validate_reference_binding_counts(guidance, profile, &source)?;
+    validate_root_pinned_closure(&root_id, &source)?;
     let mut resolved = BTreeMap::new();
     let mut active = BTreeSet::new();
     let ids = source.keys().cloned().collect::<Vec<_>>();
@@ -529,6 +590,95 @@ fn build_definitions(
         )?;
     }
     Ok(resolved.into_values().collect())
+}
+
+fn validate_reference_binding_counts(
+    guidance: &CompositionPlanGuidance,
+    profile: &ItemCompositionProfile,
+    nodes: &BTreeMap<ItemId, ModelCompositionNode>,
+) -> Result<(), CompositionPlanError> {
+    let mut expected = BTreeMap::new();
+    for rule in &guidance.reference_binding_rules {
+        let parameter_count = rule
+            .parameter_id
+            .as_ref()
+            .and_then(|id| profile.parameters.get(id))
+            .copied()
+            .unwrap_or_default();
+        let count = rule
+            .base_count
+            .checked_add(parameter_count.saturating_mul(rule.parameter_multiplier))
+            .ok_or(CompositionPlanError::InvalidProfile)?;
+        let key = (
+            rule.source_item_type.clone(),
+            rule.slot_id.clone(),
+            rule.measure,
+        );
+        let current = expected.entry(key).or_insert(0_u32);
+        *current = current
+            .checked_add(count)
+            .ok_or(CompositionPlanError::InvalidProfile)?;
+    }
+
+    for ((source_type, slot_id, measure), expected_count) in expected {
+        for node in nodes.values().filter(|node| node.item_type == source_type) {
+            let bindings = node
+                .reference_bindings
+                .get(&slot_id)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            let unique_targets = bindings
+                .iter()
+                .map(|binding| match binding {
+                    PlannedReference::Identity { item_id, .. }
+                    | PlannedReference::Pinned { item_id, .. } => item_id,
+                })
+                .collect::<BTreeSet<_>>();
+            if unique_targets.len() != bindings.len() {
+                return Err(CompositionPlanError::InvalidModelOutput);
+            }
+            let actual = match measure {
+                ReferenceBindingMeasure::Bindings => u32::try_from(bindings.len())
+                    .map_err(|_| CompositionPlanError::InvalidModelOutput)?,
+                ReferenceBindingMeasure::TotalQuantity => bindings
+                    .iter()
+                    .try_fold(0_u32, |sum, binding| match binding {
+                        PlannedReference::Pinned { quantity, .. } => sum.checked_add(*quantity),
+                        PlannedReference::Identity { .. } => None,
+                    })
+                    .ok_or(CompositionPlanError::InvalidModelOutput)?,
+            };
+            if actual != expected_count {
+                return Err(CompositionPlanError::ProfileCountMismatch);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_root_pinned_closure(
+    root_id: &ItemId,
+    nodes: &BTreeMap<ItemId, ModelCompositionNode>,
+) -> Result<(), CompositionPlanError> {
+    let mut visited = BTreeSet::new();
+    let mut pending = vec![root_id];
+    while let Some(item_id) = pending.pop() {
+        if !visited.insert(item_id) {
+            continue;
+        }
+        let node = nodes
+            .get(item_id)
+            .ok_or(CompositionPlanError::InvalidModelOutput)?;
+        for binding in node.reference_bindings.values().flatten() {
+            if let PlannedReference::Pinned { item_id, .. } = binding {
+                pending.push(item_id);
+            }
+        }
+    }
+    if visited.len() != nodes.len() {
+        return Err(CompositionPlanError::InvalidModelOutput);
+    }
+    Ok(())
 }
 
 fn validate_reference_targets(
@@ -1063,6 +1213,89 @@ mod tests {
             BTreeMap::from([("symbols".into(), records)]),
         )
         .unwrap()
+    }
+
+    fn model_nodes(value: serde_json::Value) -> BTreeMap<ItemId, ModelCompositionNode> {
+        serde_json::from_value::<Vec<ModelCompositionNode>>(value)
+            .unwrap()
+            .into_iter()
+            .map(|node| (node.item_id.clone(), node))
+            .collect()
+    }
+
+    #[test]
+    fn root_closure_rejects_nodes_reachable_only_by_identity() {
+        let nodes = model_nodes(serde_json::json!([
+            {
+                "itemId":"fixture-root","itemType":"root","canonicalFields":{},
+                "behaviorIntent":["Root"],"localizations":{},"referenceBindings":{}
+            },
+            {
+                "itemId":"fixture-child","itemType":"child","canonicalFields":{},
+                "behaviorIntent":["Child"],"localizations":{},
+                "referenceBindings":{"owner":[{
+                    "kind":"identity","itemId":"fixture-root","expectedItemType":"root"
+                }]}
+            }
+        ]));
+
+        assert!(matches!(
+            validate_root_pinned_closure(&ItemId::parse("fixture-root").unwrap(), &nodes),
+            Err(CompositionPlanError::InvalidModelOutput)
+        ));
+    }
+
+    #[test]
+    fn total_quantity_rule_accepts_exact_sum_and_rejects_duplicate_target() {
+        let profile = ItemCompositionProfile {
+            composition_id: CompositionId::parse("fixture_suite").unwrap(),
+            source: ItemCompositionSource::Preset {
+                profile_id: CompositionProfileId::parse("standard").unwrap(),
+            },
+            parameters: BTreeMap::from([(
+                CompositionParameterId::parse("child_count").unwrap(),
+                1,
+            )]),
+        };
+        let guidance = CompositionPlanGuidance {
+            composition_id: CompositionId::parse("fixture_suite").unwrap(),
+            allowed_item_types: vec![
+                ItemTypeId::parse("root").unwrap(),
+                ItemTypeId::parse("child").unwrap(),
+            ],
+            node_type_rules: Vec::new(),
+            reference_binding_rules: vec![CompositionReferenceBindingRule {
+                source_item_type: ItemTypeId::parse("root").unwrap(),
+                slot_id: ItemReferenceSlotId::parse("children").unwrap(),
+                measure: ReferenceBindingMeasure::TotalQuantity,
+                base_count: 10,
+                parameter_id: None,
+                parameter_multiplier: 0,
+            }],
+            guidance: vec!["Fixture".into()],
+        };
+        let exact = model_nodes(serde_json::json!([{
+            "itemId":"fixture-root","itemType":"root","canonicalFields":{},
+            "behaviorIntent":["Root"],"localizations":{},
+            "referenceBindings":{"children":[
+                {"kind":"pinned","itemId":"fixture-child-a","quantity":4},
+                {"kind":"pinned","itemId":"fixture-child-b","quantity":6}
+            ]}
+        }]));
+        assert!(validate_reference_binding_counts(&guidance, &profile, &exact).is_ok());
+
+        let duplicate = model_nodes(serde_json::json!([{
+            "itemId":"fixture-root","itemType":"root","canonicalFields":{},
+            "behaviorIntent":["Root"],"localizations":{},
+            "referenceBindings":{"children":[
+                {"kind":"pinned","itemId":"fixture-child","quantity":4},
+                {"kind":"pinned","itemId":"fixture-child","quantity":6}
+            ]}
+        }]));
+        assert!(matches!(
+            validate_reference_binding_counts(&guidance, &profile, &duplicate),
+            Err(CompositionPlanError::InvalidModelOutput)
+        ));
     }
 
     #[tokio::test]

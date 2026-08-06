@@ -11,6 +11,12 @@
 | `ColorlessCardPool` | All characters | truly neutral cards only |
 | `MyCharCardPool : CustomCardPoolModel` | New mod character | create if adding a new character |
 
+For BaseLib 3.3.8, a custom Character card pool must provide `Title`, `IsColorless`, and
+`DeckEntryCardColor`; `CardFrameMaterialPath` and `ShaderColor` may customize its frame. A
+`CustomPotionPoolModel` does not expose the old `ParentPool` override. Characters register through
+`CustomContentDictionary.AddCharacter`; `[Pool]` applies only to owned Card, Relic, and Potion
+models.
+
 ### Base classes (use exact names)
 - Card: `CustomCardModel` — ctor params: `baseCost, CardType, CardRarity, TargetType`
 - Relic: `CustomRelicModel` — abstract prop: `RelicRarity Rarity`

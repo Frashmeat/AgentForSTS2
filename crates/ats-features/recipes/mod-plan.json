@@ -15,7 +15,7 @@
   ],
   "slots": [
     { "id": "output.contract", "required": true, "maxChars": 32000 },
-    { "id": "pack.guidance", "required": true, "maxChars": 32000 },
+    { "id": "pack.guidance", "required": true, "maxChars": 64000 },
     { "id": "project.context", "required": false, "maxChars": 8000 },
     { "id": "runtime.custom_instructions", "required": false, "maxChars": 4000 },
     { "id": "request.item_type", "required": false, "maxChars": 128 },

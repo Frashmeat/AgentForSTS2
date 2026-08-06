@@ -1371,6 +1371,18 @@ fn truth_without(
             "CustomContentDictionary.AddModel",
             "public static void AddModel(Type modelType)",
         ),
+        (
+            "CustomCardPoolModel",
+            "public abstract class CustomCardPoolModel",
+        ),
+        (
+            "CustomRelicPoolModel",
+            "public abstract class CustomRelicPoolModel",
+        ),
+        (
+            "CustomPotionPoolModel",
+            "public abstract class CustomPotionPoolModel",
+        ),
         ("RelicModel", "public abstract class RelicModel"),
         ("CustomCardModel", "public abstract class CustomCardModel"),
         ("PoolAttribute", "public sealed class PoolAttribute"),

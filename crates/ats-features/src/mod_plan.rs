@@ -18,7 +18,7 @@ use crate::FeatureSpec;
 use crate::prompt::{FeatureRecipe, FeatureRecipeError, FeatureRecipeLoader};
 
 const RECIPE_BYTES: &[u8] = include_bytes!("../recipes/mod-plan.json");
-const RECIPE_SHA256: &str = "efd695f87099d9c1bebc670e61885210641dbd3abd89d11099568fd8e8b5954c";
+const RECIPE_SHA256: &str = "36c0e7971fda34bf437950ffb2f37fd0771701432f3287f64172aa5c810cf4f1";
 
 pub struct ModPlanFeature;
 

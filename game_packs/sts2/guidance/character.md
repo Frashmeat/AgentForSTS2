@@ -70,11 +70,9 @@ public class ArcanistCardPool : CustomCardPoolModel
 // RelicPool
 public class ArcanistRelicPool : CustomRelicPoolModel { }
 
-// PotionPool — needs to point to a parent pool (SharedPotionPool recommended)
-public class ArcanistPotionPool : CustomPotionPoolModel
-{
-    public override PotionPoolModel? ParentPool => ModelDb.PotionPool<SharedPotionPool>();
-}
+// PotionPool — BaseLib 3.3.8 registers owned potions through [Pool].
+// CustomPotionPoolModel has no ParentPool override in this version.
+public class ArcanistPotionPool : CustomPotionPoolModel { }
 ```
 
 ### ModelDb pool accessors (add to sts2_api_reference if missing)
@@ -84,15 +82,33 @@ ModelDb.RelicPool<T>()   where T : RelicPoolModel
 ModelDb.PotionPool<T>()  where T : PotionPoolModel
 ```
 
-### Character localization — requires a THIRD json file: characters.json
+### Character localization — characters.json plus Architect dialogue
 ```json
 // localization/eng/characters.json
 {
-  "S09_ARCANIST-ARCANIST.name": "Arcanist",
-  "S09_ARCANIST-ARCANIST.description": "A wielder of arcane energies."
+  "MYMODCHARACTERS-ARCANIST.title": "The Arcanist",
+  "MYMODCHARACTERS-ARCANIST.titleObject": "the Arcanist",
+  "MYMODCHARACTERS-ARCANIST.description": "A wielder of arcane energies.",
+  "MYMODCHARACTERS-ARCANIST.pronounObject": "them",
+  "MYMODCHARACTERS-ARCANIST.possessiveAdjective": "their",
+  "MYMODCHARACTERS-ARCANIST.pronounPossessive": "theirs",
+  "MYMODCHARACTERS-ARCANIST.pronounSubject": "they",
+  "MYMODCHARACTERS-ARCANIST.goldMonologue": "Power has a price.",
+  "MYMODCHARACTERS-ARCANIST.eventDeathPrevention": "Not yet.",
+  "MYMODCHARACTERS-ARCANIST.aromaPrinciple": "Arcane ozone.",
+  "MYMODCHARACTERS-ARCANIST.cardsModifierTitle": "Arcanist cards",
+  "MYMODCHARACTERS-ARCANIST.cardsModifierDescription": "Arcanist cards now appear in rewards and shops.",
+  "MYMODCHARACTERS-ARCANIST.banter.alive.endTurnPing": "Ready.",
+  "MYMODCHARACTERS-ARCANIST.banter.dead.endTurnPing": "..."
 }
 ```
-All three files needed: `cards.json`, `relics.json`, `characters.json` (eng + zhs).
+
+`localization/<locale>/ancients.json` also requires the four
+`THE_ARCHITECT.talk.MYMODCHARACTERS-ARCANIST.*` keys reported by the STS2 analyzer.
+Cards require `title/description`, Relics require `title/description/flavor`, and all generated
+localization tables must exist for both `eng` and `zhs`.
 
 ### Registration
-Characters register via `[Pool]` attribute (same mechanism as relics/cards) — no manual `ModelDb.Inject()` call needed if `PlaceholderCharacterModel` is used.
+`CustomCharacterModel` registers itself through `CustomContentDictionary.AddCharacter`.
+Do not put `[Pool]` on a Character. `[Pool]` is only for Card, Relic, and Potion membership in the
+Character's custom pool.

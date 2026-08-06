@@ -68,6 +68,10 @@ Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-sp
   bind the exact hash; they never reconstruct locked fields from prose or mutate an older snapshot.
 - Pack v4 `referenceSlots` own kind/target/cardinality/quantity rules. Identity edges never expand
   a version hash; pinned edges expand exact definitions and must form an acyclic closure.
+- Composition guidance `referenceBindingRules` generically constrain per-source slot binding count
+  or pinned total quantity. Duplicate targets and Draft nodes disconnected from the root pinned
+  closure are rejected before definitions are enriched or persisted; identity edges do not satisfy
+  closure reachability.
 - Pack v4 `resourceProfiles` own conditional required roles. The selector is a required canonical
   choice whose options exactly cover profile IDs; Single resolves only the selected profile.
 - Pack v4 `compositionProfiles` own Standard/Prototype presets, Custom bounds, cross-parameter
@@ -102,6 +106,11 @@ Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-sp
   `itemTypes[].guidance`; Single serializes only the selected type as `itemGuidance`. Generation
   entries must cover exactly the top-level catalog IDs and declare exact file roles. Type-specific
   rules must never be appended to common guidance or selected by a code branch.
+- A generated file path may repeat across composition nodes only when every matching Pack file role
+  declares `compositionMerge=json_object`. The merger accepts only flat string-valued JSON objects,
+  rejects duplicate keys deterministically, and writes one sorted object before staging. STS2 uses
+  this for Card/Relic/Character tables and keeps Character's four Architect lines in separate
+  `ancients.json` roles for both locales.
 
 ## 6. Prompt And Model Request
 
@@ -275,9 +284,11 @@ to a normalized directory below the staged project.
 | Evidence | Parent result/Artifact bind graph digest, exact root/profile/Draft provenance, every node definition/model request/resource identity, all child Run IDs, package report and every final file hash |
 | React | Select only confirmed Pack-declared composition roots, submit the typed request, and render persisted Run terminal state without a Character/game branch |
 
-Generated target paths and the package output path must be unique. Every node must resolve the same
-validation Primitive. Pack data cannot choose commands, arguments, arbitrary environment variables
-or an output path outside the isolated stage.
+The package output path must be unique. Generated target paths are unique unless every collision
+declares the same `compositionMerge=json_object` contract; those inputs are flat-string validated,
+duplicate-key checked and deterministically consolidated before staging. Every node must resolve the
+same validation Primitive. Pack data cannot choose commands, arguments, arbitrary environment
+variables or an output path outside the isolated stage.
 
 #### 4. Validation And Error Matrix
 
@@ -325,7 +336,7 @@ package/final-commit rollback, zero real-project mutation on failure, zero stagi
 Character/STS2 branch in generic Feature/Shell/React code.
 
 `mod-plan` pretty-serializes the complete verified `itemTypes` catalog plus plan guidance into the
-required `pack.guidance` slot. That slot is bounded to 32,000 characters. A built-in Pack expansion
+required `pack.guidance` slot. That slot is bounded to 64,000 characters. A built-in Pack expansion
 must keep the rendered value within this bound and pass the desktop facade Plan tests; overflow is
 `FeatureRecipeError::SlotTooLarge`, persists as `feature.recipe_invalid`, and must not call the model.
 

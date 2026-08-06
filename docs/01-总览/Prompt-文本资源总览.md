@@ -2,7 +2,7 @@
 
 > 本文描述 Stage 2 当前生产 Prompt 的唯一所有权与装配链。旧 `crates/ats-core/prompts/`、Prompt preview 和旧 assembler 已删除。
 >
-> 最后更新：2026-08-05
+> 最后更新：2026-08-06
 
 ## 1. 一次请求如何形成
 
@@ -86,7 +86,7 @@ Batch 复用 Single，Complex 组合 Plan、Batch/Single、Build 和 Package；`
 
 Recipe 文件以编译时字节和 pinned SHA 加载。修改文本必须同时更新 hash，并由 loader/assembly 测试证明 schema、slot 与渲染顺序。
 
-`mod-plan` 会把完整 verified `itemTypes` 目录与规划 guidance 以 pretty JSON 装入 `pack.guidance`；该槽位保持 32,000 字符有界，当前 Recipe SHA-256 为 `efd695f87099d9c1bebc670e61885210641dbd3abd89d11099568fd8e8b5954c`。新增 Pack 类型必须通过 desktop facade Plan Gate，不能因目录增长在模型调用前退化为 `feature.recipe_invalid`。
+`mod-plan` 会把完整 verified `itemTypes` 目录与规划 guidance 以 pretty JSON 装入 `pack.guidance`；加入完整 Character catalog 后该槽位保持 64,000 字符有界，当前 Recipe SHA-256 为 `36c0e7971fda34bf437950ffb2f37fd0771701432f3287f64172aa5c810cf4f1`。新增 Pack 类型必须通过 desktop facade Plan Gate，不能因目录增长在模型调用前退化为 `feature.recipe_invalid`。
 
 `composition-plan` 的 Recipe SHA-256 为 `c05cb1527f125f51cdb9a9c106df1d233ba5fb496934012cdc35752d591862b0`。它装配 Pack composition guidance、resolved profile、bounded Truth、工程上下文和运行时指令；模型只返回节点内容与逻辑引用。Feature 计算 pinned definition hash、profile provenance 和 expected-current 状态后创建 Draft，模型不能选择 Resource 或更新 Item current pointer。
 
@@ -99,6 +99,13 @@ game_packs/sts2/stage2-game-pack.json
 ```
 
 它声明 Feature contribution、item type、生成文件角色/目标、Evidence 查询、资源规格、日志规则、验证/build/package Primitive 和工程模板引用。Pack 先经过 schema 与 pinned SHA 校验，再由 `ContributionResolver` 按 Feature required slot 选择。`pack.mod-generate-single` v4 分离全局 `guidance` 与 `itemTypes[].guidance`；Single Prompt 只序列化 `commonGuidance` 和当前类型的 `itemGuidance`，Card、Potion、Power 等类型专属规则不得进入其他类型请求。目标路径仍由 Feature 确定性展开，不由模型作者化。`evidenceQueries` 是 Pack 的可执行数据合同：每组查询必须至少命中一条当前 Truth，最终 Evidence 有界去重；任一组无命中即返回 `truth.evidence_missing`，不能继续调用模型。
+
+STS2 Character 同样没有代码内专用 Prompt：Character 的 7 个 canonical fields、14 个
+`CharacterLoc` 字段、6 个 typed reference slots、Placeholder/BaseLib 3.3.8 指导，以及
+`characters.json`/`ancients.json` 文件角色都在 Pack contribution 中。Prototype 的“3 种初始
+Card、总计 10 张”和 root pinned closure 由通用 `referenceBindingRules` 与 graph 校验执行；
+identity `owner_character` 不扩展闭包。Composition 将 Pack 明示为 `json_object` 的同路径
+localization 输出确定性合并，重复 key 或未声明合并的路径冲突在发布前失败。
 
 新增游戏应新增独立 Pack 与 Truth 来源。不得把游戏自然语言、hook、C#/Godot/BaseLib 约束重新写入通用 Feature 或 Shell。
 

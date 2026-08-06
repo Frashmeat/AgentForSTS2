@@ -158,6 +158,11 @@ pinned binding   = itemId + definitionHash + quantity
 - Identity slots express affiliation such as Card -> owner Character. They validate target identity/type in a resolved composition but do not expand a version hash.
 - Pinned slots express reproducible composition such as Character -> StartingDeck/StartingRelics. Their exact definitions expand the immutable closure and their edges must be acyclic.
 - Slot kind, allowed target types, entry cardinality and quantity bounds are Pack-owned. Definition serde performs structural validation; `ItemDefinitionValidator` applies the Pack slot; `ResolvedItemGraph` later proves target existence/type/hash/closure.
+- `pack.composition-plan-guidance` may add generic `referenceBindingRules` keyed by source Item type,
+  slot and `bindings` or `total_quantity`. Multiple rules for one key aggregate their base/parameter
+  contributions. Every planned node of the source type must match the exact result, duplicate targets
+  in one slot are invalid, and every Draft node must be reachable from the declared root through
+  pinned edges. Identity edges never make an otherwise disconnected Draft node reachable.
 
 `compositionProfiles[]` groups one composition/root Item type with `defaultProfile`,
 `customBaseProfile`, a hard `maxNodes <= 128`, bounded numeric parameter descriptors, immutable
@@ -185,6 +190,7 @@ are ordered maps. The definition SHA-256 covers the complete validated wire obje
 | empty/duplicate/more than 64 `itemTypes` | `GamePackLoadError::InvalidItemTypes` | none |
 | invalid locale/field/query/reference/resource-profile descriptor | `GamePackLoadError::InvalidItemType(ItemCatalogError::*)` | none |
 | invalid preset/custom bounds, profile constraint, root type or >128 estimated nodes | `GamePackLoadError::InvalidCompositionProfile*` | none |
+| duplicate reference target, binding/quantity mismatch or disconnected planned node | `model.output_invalid` or `composition.profile.count_mismatch` | no Draft/Item/project mutation |
 | Single generation types differ from catalog IDs | `SingleGenerateError::InvalidPackContribution` | no model/IO |
 | missing/invalid per-item generation guidance | `SingleGenerateError::InvalidPackContribution` | no model/IO |
 | no current verified Truth | every declared type blocked with `truth.snapshot_unavailable` | caller must reject submit/model work |
@@ -228,6 +234,10 @@ are ordered maps. The definition SHA-256 covers the complete validated wire obje
 - `agentthespire-desktop::stage2_single_mod::card_pack_truth_resources_prompt_and_artifact_form_one_vertical_contract`:
   assert Card guidance is selected without Relic leakage, missing Truth/resource stops before
   model work, and complete Card generation publishes five hash-verifiable files.
+- `agentthespire-desktop::stage2_character_composition` with STS2 assembly/Godot environment:
+  assert the Pack-declared 11-node Placeholder Prototype has three starter Card identities totaling
+  ten cards, 23 model requests, real dotnet validation/publish, Godot PCK, ZIP, one recomputable
+  composition Artifact, merged Character/Card/Ancients localization and zero staging residue.
 - Run `cargo test --workspace --all-targets`, workspace Clippy, DAG self-test/real gate, rustfmt and
   `git diff --check` after any catalog contract change.
 

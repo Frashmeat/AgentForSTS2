@@ -9,7 +9,7 @@ use crate::{CompositionProfileError, CompositionProfileSet, ItemCatalogError, It
 
 pub const GAME_PACK_SCHEMA_VERSION: u32 = 4;
 const BUILT_IN_STS2_SHA256: &str =
-    "5005de1cf10e453934f370403288e6a1a78ca9bcf87da79bc6e472bb16e727ca";
+    "b87291d3242b095eb9c16e0d5d8908eb5a311df3538c32ca1f51018afedc23bb";
 const BUILT_IN_STS2: &[u8] = include_bytes!("../../../game_packs/sts2/stage2-game-pack.json");
 
 #[derive(Debug, Clone)]
@@ -364,11 +364,42 @@ mod tests {
         let pack = GamePackLoader::load_built_in_sts2().unwrap();
         assert_eq!(pack.id().as_str(), "sts2");
         assert!(!pack.contributions.is_empty());
+        assert_eq!(pack.item_types().len(), 6);
+        let character = pack
+            .item_type(&ItemTypeId::parse("character").unwrap())
+            .expect("built-in STS2 Pack declares Character");
+        assert_eq!(character.fields().len(), 7);
+        assert_eq!(character.localization_fields().len(), 14);
+        assert_eq!(character.reference_slots().len(), 6);
+        assert_eq!(character.evidence_queries().len(), 8);
+        assert!(
+            character.resource_profiles()[0]
+                .required_resource_roles()
+                .is_empty()
+        );
+        let character_suite = pack
+            .composition_profile(&CompositionId::parse("character_suite").unwrap())
+            .expect("built-in STS2 Pack declares the Character suite");
+        assert_eq!(character_suite.default_profile().as_str(), "standard");
+        let prototype = character_suite
+            .profiles()
+            .iter()
+            .find(|profile| profile.id().as_str() == "prototype")
+            .unwrap();
+        assert_eq!(
+            character_suite.parameters().iter().fold(
+                character_suite.base_node_count(),
+                |count, parameter| {
+                    count + prototype.values()[parameter.id()] * parameter.node_weight()
+                },
+            ),
+            11
+        );
         let card = pack
             .item_type(&ItemTypeId::parse("card").unwrap())
             .expect("built-in STS2 Pack declares Card");
         assert_eq!(card.fields().len(), 5);
-        assert_eq!(card.evidence_queries().len(), 5);
+        assert_eq!(card.evidence_queries().len(), 6);
         assert_eq!(
             card.resource_profiles()[0]
                 .required_resource_roles()
@@ -381,7 +412,7 @@ mod tests {
             .item_type(&ItemTypeId::parse("potion").unwrap())
             .expect("built-in STS2 Pack declares Potion");
         assert_eq!(potion.fields().len(), 3);
-        assert_eq!(potion.evidence_queries().len(), 6);
+        assert_eq!(potion.evidence_queries().len(), 7);
         assert_eq!(
             potion.resource_profiles()[0]
                 .required_resource_roles()

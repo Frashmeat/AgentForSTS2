@@ -41,6 +41,10 @@ stale current conflicts, storage failure, missing exact Item, hash/type/version 
 nodes, pinned cycles and node-limit failure remain distinct. Repository/OS text and absolute paths
 must not enter these failures. A confirmation storage failure returns only after all current pointer
 replacements have rolled back or a recovery journal remains for the next repository access.
+Composition Plan output with duplicate slot targets or nodes outside the root pinned closure is
+`model.output_invalid`; a Pack-declared binding count or total-quantity mismatch is
+`composition.profile.count_mismatch`. Both fail before Draft or Item persistence and are never
+reclassified as `core.unclassified`.
 
 Whole-closure generation preserves the originating Plan/Single/Build/Package failure family.
 Staging uses `composition.staging.*`; final project writes use `composition.publication.*`; the one
