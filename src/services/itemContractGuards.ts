@@ -1,4 +1,7 @@
 import type {
+  CompositionConfirmation,
+  CompositionDraft,
+  CompositionDraftNode,
   ItemCompositionProfile,
   ItemDefinition,
   ItemFieldValue,
@@ -7,6 +10,45 @@ import type {
   ItemResourceBinding,
   StoredItemDefinition,
 } from "./tauriApi";
+
+export function isCompositionDraft(value: unknown): value is CompositionDraft {
+  return (
+    isRecord(value) &&
+    value.schemaVersion === 1 &&
+    typeof value.draftId === "string" &&
+    isPositiveInteger(value.revision) &&
+    typeof value.gamePackId === "string" &&
+    isSha256(value.gamePackSha256) &&
+    typeof value.rootItemId === "string" &&
+    isItemCompositionProfile(value.profile) &&
+    isRecord(value.nodes) &&
+    Object.values(value.nodes).every(isCompositionDraftNode) &&
+    typeof value.createdAt === "string" &&
+    typeof value.updatedAt === "string"
+  );
+}
+
+export function isCompositionConfirmation(value: unknown): value is CompositionConfirmation {
+  return (
+    isRecord(value) &&
+    isRecord(value.draft) &&
+    typeof value.draft.draftId === "string" &&
+    isPositiveInteger(value.draft.revision) &&
+    Array.isArray(value.definitions) &&
+    value.definitions.every(isStoredItemDefinition) &&
+    isSha256(value.confirmationDigest)
+  );
+}
+
+function isCompositionDraftNode(value: unknown): value is CompositionDraftNode {
+  return (
+    isRecord(value) &&
+    isItemDefinition(value.definition) &&
+    (value.expectedCurrentDefinitionHash === undefined ||
+      value.expectedCurrentDefinitionHash === null ||
+      isSha256(value.expectedCurrentDefinitionHash))
+  );
+}
 
 export function isStoredItemDefinition(value: unknown): value is StoredItemDefinition {
   return isRecord(value) && isSha256(value.definitionHash) && isItemDefinition(value.definition);

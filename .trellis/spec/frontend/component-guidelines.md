@@ -85,6 +85,22 @@ Library. React contains no editable JSON request state and no game-specific type
 - Retry copies only failed inputs from the previous parent Run request. It must not substitute a
   newer Item Library pointer.
 
+### Pack-Driven Composition Studio
+
+`src/pages/CompositionStudioPage.tsx` renders `compositionProfiles` and Draft nodes without game or
+Item-type branches. The Pack default profile is selected initially; Custom starts from the declared
+`customBaseProfile` and uses only Pack min/max/constraint metadata.
+
+- Draft list/get/update/delete and confirmation use the ProjectSession-owned repository. React sends
+  the exact revision for every mutation and refreshes after a typed conflict.
+- Type/status/search filtering, pagination and batch selection are generic Draft projections. Partial
+  confirmation is enabled only for a pinned-closed selection; the backend repeats authoritative
+  Draft/Pack/readiness/graph validation.
+- A model Plan creates Draft state only. Review edits and replacements do not write Item current
+  pointers until explicit atomic confirmation.
+- An empty Pack `compositionProfiles` catalog renders an unavailable state. React must not synthesize
+  a Character workflow before the Pack declares one.
+
 ---
 
 ## Props Conventions

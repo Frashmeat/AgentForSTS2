@@ -692,7 +692,7 @@ v4 unchanged and invokes Build/Package only after every Item outcome succeeds.
 
 ## 7. Feature Composition
 
-The shared registry contains exactly 9 current Features. Single generation owns the validated model bundle -> rollback-capable project writes -> real validation -> immutable Artifact -> Run success order. Batch invokes Single child Runs. Complex invokes Plan, Batch/Single, Build and Package. Neither composition creates an alternative Prompt, Resource, file transaction, build or package implementation.
+The shared registry contains exactly 10 current Features, including `composition.plan`. Composition planning persists reviewable Draft state and never publishes Item pointers or project files. Single generation owns the validated model bundle -> rollback-capable project writes -> real validation -> immutable Artifact -> Run success order. Batch invokes Single child Runs. Complex invokes Plan, Batch/Single, Build and Package. Neither composition creates an alternative Prompt, Resource, file transaction, build or package implementation.
 
 ## 8. Shell Cutover
 

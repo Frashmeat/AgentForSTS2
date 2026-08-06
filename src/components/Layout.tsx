@@ -4,6 +4,7 @@ import { NavLink, Outlet } from "react-router-dom";
 const LINKS = [
   { to: "/", label: "Dashboard", end: true },
   { to: "/editor", label: "Mod" },
+  { to: "/composition", label: "Composition" },
   { to: "/batch", label: "Batch" },
   { to: "/log", label: "Log" },
   { to: "/runs", label: "Runs" },

@@ -1,9 +1,15 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use ats_adapters::{
-    FileResourceRepository, FileTruthSnapshotRepository, ItemStoreError, Sts2TruthImporter,
+    CompositionDraftStoreError, FileResourceRepository, FileTruthSnapshotRepository,
+    ItemStoreError, Sts2TruthImporter,
 };
+use ats_features::composition::{
+    CompositionConfirmation, CompositionConfirmationError, CompositionConfirmationService,
+};
+use ats_features::composition_plan::{CompositionPlanFeature, CompositionPlanRequest};
 use ats_features::item_definition::{ItemDefinitionValidationMode, ItemDefinitionValidator};
 use ats_features::mod_generate_batch::{
     BatchGenerateFeature, BatchGenerateRequest, validate_batch_generation_input,
@@ -20,11 +26,14 @@ use ats_features::resource_prepare::{
 };
 use ats_features::{FeatureContract, FeatureSpec, built_in_feature_contracts};
 use ats_game_context::{ItemCapabilityCatalog, TruthSnapshotRepository};
-use ats_kernel::{FeatureId, ItemId, ItemTypeId, Sha256Digest};
+use ats_kernel::{CompositionDraftId, FeatureId, ItemId, ItemTypeId, Sha256Digest};
 use ats_runtime::{
     CancellationReason, CancellationToken, RunId, RunRecord, RunSummary, VersionedPayload,
 };
-use ats_workspace::{ItemDefinition, ItemRepository, ResourceAsset, StoredItemDefinition};
+use ats_workspace::{
+    CompositionDraft, CompositionDraftNode, CompositionDraftRepository, ItemDefinition,
+    ItemRepository, ResourceAsset, StoredItemDefinition,
+};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -73,6 +82,8 @@ pub async fn submit_feature(
     let composition = Arc::clone(composition.inner());
     let config = Arc::clone(config.inner());
     let resources = session.resource_repository();
+    let items = session.item_repository();
+    let drafts = session.composition_draft_repository();
     let source_path = submission.source_path.map(PathBuf::from);
     session
         .submit(run, move |run, cancellation, repository| async move {
@@ -83,6 +94,8 @@ pub async fn submit_feature(
                     &meta,
                     run,
                     repository.as_ref(),
+                    items.as_ref(),
+                    drafts.as_ref(),
                     resources.as_ref(),
                     source_path,
                     &cancellation,
@@ -159,6 +172,117 @@ pub fn save_item_definition(
         .item_repository()
         .save(&definition)
         .map_err(|error| map_item_store_error(error, "item.save"))
+}
+
+#[tauri::command]
+pub fn list_composition_drafts(
+    active: State<'_, ActiveProject>,
+) -> CommandResult<Vec<CompositionDraft>> {
+    current_session(&active, "composition.draft.list")?
+        .composition_draft_repository()
+        .list()
+        .map_err(|error| map_draft_store_error(error, "composition.draft.list"))
+}
+
+#[tauri::command]
+pub fn get_composition_draft(
+    active: State<'_, ActiveProject>,
+    draft_id: String,
+) -> CommandResult<CompositionDraft> {
+    let id = CompositionDraftId::parse(draft_id)
+        .map_err(|_| CommandFailure::composition_invalid("composition.draft.get"))?;
+    current_session(&active, "composition.draft.get")?
+        .composition_draft_repository()
+        .load(&id)
+        .map_err(|error| map_draft_store_error(error, "composition.draft.get"))
+}
+
+#[tauri::command]
+pub fn update_composition_draft(
+    active: State<'_, ActiveProject>,
+    composition: State<'_, Arc<Stage2Composition>>,
+    draft_id: String,
+    expected_revision: u64,
+    nodes: BTreeMap<ItemId, CompositionDraftNode>,
+) -> CommandResult<CompositionDraft> {
+    let id = CompositionDraftId::parse(draft_id)
+        .map_err(|_| CommandFailure::composition_invalid("composition.draft.update"))?;
+    let session = current_session(&active, "composition.draft.update")?;
+    let repository = session.composition_draft_repository();
+    let current = repository
+        .load(&id)
+        .map_err(|error| map_draft_store_error(error, "composition.draft.update"))?;
+    if current.revision != expected_revision
+        || current.game_pack_id != *composition.pack().id()
+        || current.game_pack_sha256 != *composition.pack().content_sha256()
+    {
+        return Err(CommandFailure::composition_conflict(
+            "composition.draft.update",
+        ));
+    }
+    for node in nodes.values() {
+        ItemDefinitionValidator::validate(
+            composition.pack(),
+            &node.definition,
+            ItemDefinitionValidationMode::Draft,
+        )
+        .map_err(|_| CommandFailure::composition_invalid("composition.draft.update"))?;
+    }
+    let next = current
+        .revised(nodes, chrono::Utc::now())
+        .map_err(|_| CommandFailure::composition_invalid("composition.draft.update"))?;
+    repository
+        .compare_and_set(expected_revision, &next)
+        .map_err(|error| map_draft_store_error(error, "composition.draft.update"))?;
+    Ok(next)
+}
+
+#[tauri::command]
+pub fn delete_composition_draft(
+    active: State<'_, ActiveProject>,
+    draft_id: String,
+    expected_revision: u64,
+) -> CommandResult<()> {
+    let id = CompositionDraftId::parse(draft_id)
+        .map_err(|_| CommandFailure::composition_invalid("composition.draft.delete"))?;
+    current_session(&active, "composition.draft.delete")?
+        .composition_draft_repository()
+        .delete(&id, expected_revision)
+        .map_err(|error| map_draft_store_error(error, "composition.draft.delete"))
+}
+
+#[tauri::command]
+pub fn confirm_composition_draft(
+    active: State<'_, ActiveProject>,
+    composition: State<'_, Arc<Stage2Composition>>,
+    draft_id: String,
+    expected_revision: u64,
+    selected_item_ids: Vec<String>,
+) -> CommandResult<CompositionConfirmation> {
+    let id = CompositionDraftId::parse(draft_id)
+        .map_err(|_| CommandFailure::composition_invalid("composition.draft.confirm"))?;
+    let selected = selected_item_ids
+        .into_iter()
+        .map(ItemId::parse)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| CommandFailure::composition_invalid("composition.draft.confirm"))?;
+    let session = current_session(&active, "composition.draft.confirm")?;
+    let draft = session
+        .composition_draft_repository()
+        .load(&id)
+        .map_err(|error| map_draft_store_error(error, "composition.draft.confirm"))?;
+    if draft.revision != expected_revision {
+        return Err(CommandFailure::composition_conflict(
+            "composition.draft.confirm",
+        ));
+    }
+    CompositionConfirmationService::confirm(
+        composition.pack(),
+        &draft,
+        &selected,
+        session.item_repository().as_ref(),
+    )
+    .map_err(map_confirmation_error)
 }
 
 #[tauri::command]
@@ -426,6 +550,17 @@ fn requested_item_types(
         ItemTypeId::parse(value).map_err(|_| CommandFailure::item_invalid("run.submit.readiness"))
     };
     match submission.feature_id.as_str() {
+        "composition.plan" => {
+            let request = submission
+                .request
+                .decode::<CompositionPlanRequest>(&CompositionPlanFeature::request_schema())
+                .map_err(|_| CommandFailure::item_invalid("run.submit.readiness"))?;
+            composition
+                .pack()
+                .composition_profile(&request.composition_id)
+                .map(|profile| vec![profile.root_item_type().clone()])
+                .ok_or_else(|| CommandFailure::item_invalid("run.submit.readiness"))
+        }
         "mod.plan" => {
             let request = submission
                 .request
@@ -483,6 +618,31 @@ fn map_item_store_error(error: ItemStoreError, stage: &str) -> CommandFailure {
         | ItemStoreError::Io { .. }
         | ItemStoreError::LockUnavailable
         | ItemStoreError::TransactionInvalid => CommandFailure::item_storage(stage),
+    }
+}
+
+fn map_draft_store_error(error: CompositionDraftStoreError, stage: &str) -> CommandFailure {
+    match error {
+        CompositionDraftStoreError::NotFound => CommandFailure::composition_not_found(stage),
+        CompositionDraftStoreError::Conflict => CommandFailure::composition_conflict(stage),
+        CompositionDraftStoreError::Contract(_)
+        | CompositionDraftStoreError::PathInvalid
+        | CompositionDraftStoreError::Json(_) => CommandFailure::composition_invalid(stage),
+        CompositionDraftStoreError::Io { .. } | CompositionDraftStoreError::LockUnavailable => {
+            CommandFailure::composition_storage(stage)
+        }
+    }
+}
+
+fn map_confirmation_error(error: CompositionConfirmationError) -> CommandFailure {
+    match error {
+        CompositionConfirmationError::Conflict => {
+            CommandFailure::composition_conflict("composition.draft.confirm")
+        }
+        CompositionConfirmationError::Storage => {
+            CommandFailure::composition_storage("composition.draft.confirm")
+        }
+        _ => CommandFailure::composition_invalid("composition.draft.confirm"),
     }
 }
 

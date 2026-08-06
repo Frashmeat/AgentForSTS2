@@ -23,6 +23,10 @@ import type {
   ResourceCatalog,
   ResourcePreview,
   ResourcePrepareResult,
+  CompositionPlanRequest,
+  CompositionDraft,
+  CompositionDraftNode,
+  CompositionConfirmation,
 } from "./tauriApi";
 import type { ActionableFailure } from "./actionableFailure";
 export { isActionableFailure, toActionableFailure } from "./actionableFailure";
@@ -52,6 +56,11 @@ export function getItemCapabilities(): Promise<ItemCapabilityCatalog> { return r
 export function listItemDefinitions(): Promise<StoredItemDefinition[]> { return Promise.resolve([]); }
 export function getItemDefinition(_itemId: string, _definitionHash?: string): Promise<StoredItemDefinition> { return reject("getItemDefinition"); }
 export function saveItemDefinition(_definition: ItemDefinition): Promise<StoredItemDefinition> { return reject("saveItemDefinition"); }
+export function listCompositionDrafts(): Promise<CompositionDraft[]> { return Promise.resolve([]); }
+export function getCompositionDraft(_draftId: string): Promise<CompositionDraft> { return reject("getCompositionDraft"); }
+export function updateCompositionDraft(_draftId: string, _expectedRevision: number, _nodes: Record<string, CompositionDraftNode>): Promise<CompositionDraft> { return reject("updateCompositionDraft"); }
+export function deleteCompositionDraft(_draftId: string, _expectedRevision: number): Promise<void> { return reject("deleteCompositionDraft"); }
+export function confirmCompositionDraft(_draftId: string, _expectedRevision: number, _selectedItemIds: string[]): Promise<CompositionConfirmation> { return reject("confirmCompositionDraft"); }
 export function getResourceCatalog(): Promise<ResourceCatalog> { return reject("getResourceCatalog"); }
 export function listResourceAssets(): Promise<ResourceAsset[]> { return Promise.resolve([]); }
 export function getResourcePreview(_resourceId: string, _version: string): Promise<ResourcePreview> { return reject("getResourcePreview"); }
@@ -60,6 +69,7 @@ export function getRun(_runId: string): Promise<RunRecord> { return reject("getR
 export function listRuns(): Promise<RunSummary[]> { return Promise.resolve([]); }
 export function cancelRun(_runId: string): Promise<boolean> { return reject("cancelRun"); }
 export function submitModPlan(_request: ModPlanRequest): Promise<string> { return reject("submitModPlan"); }
+export function submitCompositionPlan(_request: CompositionPlanRequest): Promise<string> { return reject("submitCompositionPlan"); }
 export function submitSingleGenerate(_request: SingleGenerateRequest): Promise<string> { return reject("submitSingleGenerate"); }
 export function submitBatchGenerate(_request: BatchGenerateRequest): Promise<string> { return reject("submitBatchGenerate"); }
 export function submitComplexGenerate(_request: ComplexGenerateRequest): Promise<string> { return reject("submitComplexGenerate"); }

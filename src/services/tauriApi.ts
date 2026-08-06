@@ -2,7 +2,11 @@ import { invoke } from "@tauri-apps/api/core";
 
 import { toActionableFailure } from "./actionableFailure";
 import { buildFeatureSubmission } from "./featureSubmission";
-import { isStoredItemDefinition } from "./itemContractGuards";
+import {
+  isCompositionConfirmation,
+  isCompositionDraft,
+  isStoredItemDefinition,
+} from "./itemContractGuards";
 export { isActionableFailure, toActionableFailure } from "./actionableFailure";
 export type { ActionableFailure, RecoveryAction } from "./actionableFailure";
 
@@ -182,6 +186,14 @@ export interface ModPlanRequest extends Record<string, unknown> {
   itemType?: string | null;
 }
 
+export interface CompositionPlanRequest extends Record<string, unknown> {
+  draftId: string;
+  compositionId: string;
+  concept: string;
+  source: ItemCompositionSource;
+  parameters: Record<string, number>;
+}
+
 export interface SingleGenerateRequest extends Record<string, unknown> {
   artifactId: string;
   modId: string;
@@ -268,6 +280,10 @@ export interface ProjectBuildRequest extends Record<string, unknown> {}
 
 export function submitModPlan(request: ModPlanRequest): Promise<string> {
   return submit("mod.plan", "feature.mod-plan-request", request);
+}
+
+export function submitCompositionPlan(request: CompositionPlanRequest): Promise<string> {
+  return submit("composition.plan", "feature.composition-plan-request", request);
 }
 
 export function submitSingleGenerate(request: SingleGenerateRequest): Promise<string> {
@@ -508,6 +524,30 @@ export interface StoredItemDefinition {
   definition: ItemDefinition;
 }
 
+export interface CompositionDraftNode {
+  definition: ItemDefinition;
+  expectedCurrentDefinitionHash?: string | null;
+}
+
+export interface CompositionDraft {
+  schemaVersion: 1;
+  draftId: string;
+  revision: number;
+  gamePackId: string;
+  gamePackSha256: string;
+  rootItemId: string;
+  profile: ItemCompositionProfile;
+  nodes: Record<string, CompositionDraftNode>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CompositionConfirmation {
+  draft: { draftId: string; revision: number };
+  definitions: StoredItemDefinition[];
+  confirmationDigest: string;
+}
+
 export type ResourceOrigin =
   | { kind: "user_upload" }
   | { kind: "ai_generated"; provider: string; model: string; request_sha256: string }
@@ -636,6 +676,55 @@ export async function saveItemDefinition(
 ): Promise<StoredItemDefinition> {
   const value = await invokeCommand<unknown>("save_item_definition", { definition });
   if (!isStoredItemDefinition(value)) throw toActionableFailure(undefined);
+  return value;
+}
+
+export async function listCompositionDrafts(): Promise<CompositionDraft[]> {
+  const value = await invokeCommand<unknown>("list_composition_drafts");
+  if (!Array.isArray(value) || !value.every(isCompositionDraft)) {
+    throw toActionableFailure(undefined);
+  }
+  return value;
+}
+
+export async function getCompositionDraft(draftId: string): Promise<CompositionDraft> {
+  const value = await invokeCommand<unknown>("get_composition_draft", { draftId });
+  if (!isCompositionDraft(value)) throw toActionableFailure(undefined);
+  return value;
+}
+
+export async function updateCompositionDraft(
+  draftId: string,
+  expectedRevision: number,
+  nodes: Record<string, CompositionDraftNode>,
+): Promise<CompositionDraft> {
+  const value = await invokeCommand<unknown>("update_composition_draft", {
+    draftId,
+    expectedRevision,
+    nodes,
+  });
+  if (!isCompositionDraft(value)) throw toActionableFailure(undefined);
+  return value;
+}
+
+export function deleteCompositionDraft(
+  draftId: string,
+  expectedRevision: number,
+): Promise<void> {
+  return invokeCommand<void>("delete_composition_draft", { draftId, expectedRevision });
+}
+
+export async function confirmCompositionDraft(
+  draftId: string,
+  expectedRevision: number,
+  selectedItemIds: string[],
+): Promise<CompositionConfirmation> {
+  const value = await invokeCommand<unknown>("confirm_composition_draft", {
+    draftId,
+    expectedRevision,
+    selectedItemIds,
+  });
+  if (!isCompositionConfirmation(value)) throw toActionableFailure(undefined);
   return value;
 }
 

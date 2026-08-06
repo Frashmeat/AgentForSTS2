@@ -9,7 +9,7 @@ use crate::{CompositionProfileError, CompositionProfileSet, ItemCatalogError, It
 
 pub const GAME_PACK_SCHEMA_VERSION: u32 = 4;
 const BUILT_IN_STS2_SHA256: &str =
-    "46402a5eb9d095e2d4ba7a12d41944f8fba965f89051ed8169d141a784517be5";
+    "098af21f048781ea0102f6f2bf92095576655b1fd3167288b7175fa10027dc45";
 const BUILT_IN_STS2: &[u8] = include_bytes!("../../../game_packs/sts2/stage2-game-pack.json");
 
 #[derive(Debug, Clone)]

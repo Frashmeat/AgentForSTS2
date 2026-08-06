@@ -89,6 +89,22 @@ impl CompositionDraft {
         }
         Ok(())
     }
+
+    pub fn revised(
+        &self,
+        nodes: BTreeMap<ItemId, CompositionDraftNode>,
+        updated_at: DateTime<Utc>,
+    ) -> Result<Self, CompositionDraftError> {
+        let mut next = self.clone();
+        next.revision = self
+            .revision
+            .checked_add(1)
+            .ok_or(CompositionDraftError::InvalidMetadata)?;
+        next.nodes = nodes;
+        next.updated_at = updated_at;
+        next.validate()?;
+        Ok(next)
+    }
 }
 
 impl<'de> Deserialize<'de> for CompositionDraft {
@@ -132,6 +148,10 @@ impl<'de> Deserialize<'de> for CompositionDraft {
 pub trait CompositionDraftRepository: Send + Sync {
     type Error: std::error::Error + Send + Sync + 'static;
 
+    fn classify_error(_error: &Self::Error) -> CompositionDraftRepositoryErrorKind {
+        CompositionDraftRepositoryErrorKind::Storage
+    }
+
     fn create(&self, draft: &CompositionDraft) -> Result<(), Self::Error>;
     fn load(&self, draft_id: &CompositionDraftId) -> Result<CompositionDraft, Self::Error>;
     fn compare_and_set(
@@ -140,6 +160,18 @@ pub trait CompositionDraftRepository: Send + Sync {
         next: &CompositionDraft,
     ) -> Result<(), Self::Error>;
     fn list(&self) -> Result<Vec<CompositionDraft>, Self::Error>;
+    fn delete(
+        &self,
+        draft_id: &CompositionDraftId,
+        expected_revision: u64,
+    ) -> Result<(), Self::Error>;
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum CompositionDraftRepositoryErrorKind {
+    NotFound,
+    Conflict,
+    Storage,
 }
 
 #[derive(Debug, Error, Eq, PartialEq)]
@@ -220,5 +252,16 @@ mod tests {
             draft.validate(),
             Err(CompositionDraftError::InvalidRootProfile)
         );
+    }
+
+    #[test]
+    fn revision_preserves_identity_and_advances_cas_version() {
+        let draft = draft();
+        let updated_at = draft.updated_at + chrono::Duration::seconds(1);
+        let revised = draft.revised(draft.nodes.clone(), updated_at).unwrap();
+        assert_eq!(revised.revision, 2);
+        assert_eq!(revised.draft_id, draft.draft_id);
+        assert_eq!(revised.created_at, draft.created_at);
+        assert_eq!(revised.updated_at, updated_at);
     }
 }

@@ -316,6 +316,12 @@
       }
     },
     {
+      "slotId": "composition.plan.guidance",
+      "featureId": "composition.plan",
+      "schema": { "id": "pack.composition-plan-guidance", "version": 1 },
+      "payload": { "compositions": [] }
+    },
+    {
       "slotId": "mod.generate.single",
       "featureId": "mod.generate.single",
       "schema": { "id": "pack.mod-generate-single", "version": 4 },

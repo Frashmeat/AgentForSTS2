@@ -5,7 +5,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, RwLock};
 use std::time::Duration;
 
-use ats_adapters::{FileItemRepository, FileResourceRepository, FileRunRepository};
+use ats_adapters::{
+    FileCompositionDraftRepository, FileItemRepository, FileResourceRepository, FileRunRepository,
+};
 use ats_runtime::{
     CancellationReason, CancellationToken, RunFailure, RunId, RunRecord, RunRepository,
     RunRepositoryError, RunStatus, RunTransition,
@@ -47,6 +49,7 @@ pub struct ProjectSession {
     meta: ProjectMeta,
     repository: Arc<FileRunRepository>,
     item_repository: Arc<FileItemRepository>,
+    composition_draft_repository: Arc<FileCompositionDraftRepository>,
     resource_repository: Arc<FileResourceRepository>,
     closing: AtomicBool,
     tasks: Mutex<HashMap<RunId, TrackedRun>>,
@@ -75,6 +78,9 @@ impl ProjectSession {
         let repository = Arc::new(FileRunRepository::new(project.run_history_dir())?);
         repository.reconcile_interrupted()?;
         let item_repository = Arc::new(FileItemRepository::new(project.path().to_path_buf()));
+        let composition_draft_repository = Arc::new(FileCompositionDraftRepository::new(
+            project.path().to_path_buf(),
+        ));
         let resource_repository =
             Arc::new(FileResourceRepository::new(project.path().to_path_buf()));
         Ok(Arc::new(Self {
@@ -83,6 +89,7 @@ impl ProjectSession {
             project_lock: StdMutex::new(Some(project)),
             repository,
             item_repository,
+            composition_draft_repository,
             resource_repository,
             closing: AtomicBool::new(false),
             tasks: Mutex::new(HashMap::new()),
@@ -108,6 +115,11 @@ impl ProjectSession {
     #[must_use]
     pub fn item_repository(&self) -> Arc<FileItemRepository> {
         Arc::clone(&self.item_repository)
+    }
+
+    #[must_use]
+    pub fn composition_draft_repository(&self) -> Arc<FileCompositionDraftRepository> {
+        Arc::clone(&self.composition_draft_repository)
     }
 
     #[must_use]

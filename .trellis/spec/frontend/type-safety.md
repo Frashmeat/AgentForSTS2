@@ -63,6 +63,11 @@ URL must begin with `data:image/png;base64,`; absolute or relative workspace pat
 preview transport. Single v3 carries `definition: StoredItemDefinition` and has no
 `selectedResources` field.
 
+Composition IPC guards validate CompositionDraft v1 identity/revision/Pack hash/root/profile,
+field-keyed nodes and exact ItemDefinition v2 shapes. Confirmation guards validate the Draft ref,
+every StoredItemDefinition and the confirmation digest. A TypeScript interface or direct cast is not
+accepted for list/get/update/confirm responses.
+
 Batch/Complex feature payloads are decoded only after matching exact schema identities:
 
 ```text

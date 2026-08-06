@@ -107,6 +107,50 @@ impl CommandFailure {
         )
     }
 
+    pub fn composition_invalid(stage: &str) -> Self {
+        fixed(
+            "composition.draft.invalid",
+            "input",
+            stage,
+            "The composition Draft does not match the active Game Pack contract.",
+            RecoveryAction::None,
+            false,
+        )
+    }
+
+    pub fn composition_not_found(stage: &str) -> Self {
+        fixed(
+            "composition.draft.not_found",
+            "state",
+            stage,
+            "The requested composition Draft was not found.",
+            RecoveryAction::None,
+            false,
+        )
+    }
+
+    pub fn composition_conflict(stage: &str) -> Self {
+        fixed(
+            "composition.draft.conflict",
+            "state",
+            stage,
+            "The composition Draft changed. Refresh it before retrying.",
+            RecoveryAction::Retry,
+            true,
+        )
+    }
+
+    pub fn composition_storage(stage: &str) -> Self {
+        fixed(
+            "composition.draft.storage_failed",
+            "storage",
+            stage,
+            "The composition Draft repository could not update its local state.",
+            RecoveryAction::Retry,
+            true,
+        )
+    }
+
     pub fn pack_invalid(stage: &str) -> Self {
         fixed(
             "pack.contribution_invalid",

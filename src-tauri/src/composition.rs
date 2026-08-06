@@ -1,11 +1,14 @@
 use std::path::{Path, PathBuf};
 
 use ats_adapters::{
-    FileArtifactStore, FileProjectWriter, FileResourceRepository, FileTruthSnapshotRepository,
-    HttpMediaClient, HttpModelClient, PngResourceMediaProcessor, RegisteredBuildRunner,
-    RegisteredValidationRunner, ZipPackageWriter,
+    FileArtifactStore, FileCompositionDraftRepository, FileItemRepository, FileProjectWriter,
+    FileResourceRepository, FileTruthSnapshotRepository, HttpMediaClient, HttpModelClient,
+    PngResourceMediaProcessor, RegisteredBuildRunner, RegisteredValidationRunner, ZipPackageWriter,
 };
 use ats_features::FeatureSpec;
+use ats_features::composition_plan::{
+    CompositionPlanContext, CompositionPlanFeature, CompositionPlanService,
+};
 use ats_features::log_analyze::{LogAnalyzeContext, LogAnalyzeFeature, LogAnalyzeService};
 use ats_features::mod_generate_batch::{
     BatchGenerateContext, BatchGenerateFeature, BatchGenerateService,
@@ -106,6 +109,8 @@ impl Stage2Composition {
         project: &ProjectMeta,
         run: RunRecord,
         repository: &dyn RunRepository,
+        items: &FileItemRepository,
+        drafts: &FileCompositionDraftRepository,
         resources: &FileResourceRepository,
         source_path: Option<PathBuf>,
         cancellation: &CancellationToken,
@@ -116,6 +121,8 @@ impl Stage2Composition {
             project,
             run,
             repository,
+            items,
+            drafts,
             resources,
             source_path,
             cancellation,
@@ -138,12 +145,16 @@ impl Stage2Composition {
         cancellation: &CancellationToken,
         model: &dyn ModelClient,
     ) -> Result<RunRecord, RunFailure> {
+        let items = FileItemRepository::new(project_root.to_path_buf());
+        let drafts = FileCompositionDraftRepository::new(project_root.to_path_buf());
         self.execute_inner(
             config,
             project_root,
             project,
             run,
             repository,
+            &items,
+            &drafts,
             resources,
             source_path,
             cancellation,
@@ -160,6 +171,8 @@ impl Stage2Composition {
         project: &ProjectMeta,
         mut run: RunRecord,
         repository: &dyn RunRepository,
+        items: &FileItemRepository,
+        drafts: &FileCompositionDraftRepository,
         resources: &FileResourceRepository,
         source_path: Option<PathBuf>,
         cancellation: &CancellationToken,
@@ -179,6 +192,35 @@ impl Stage2Composition {
             (!settings.llm.model.trim().is_empty()).then_some(settings.llm.model.clone());
 
         match run.feature_id().as_str() {
+            "composition.plan" => {
+                let request = self.decode::<CompositionPlanFeature>(&run)?;
+                let truth = self.current_truth()?;
+                let contributions = self.resolve(
+                    &CompositionPlanFeature::id(),
+                    &[CompositionPlanFeature::contribution_requirement()],
+                )?;
+                let model = select_model(model_override, &settings.llm)?;
+                let execution = CompositionPlanService::built_in()
+                    .map_err(|_| failure("feature.recipe_invalid", "composition.plan.recipe"))?
+                    .execute(
+                        model.client(),
+                        items,
+                        drafts,
+                        request,
+                        CompositionPlanContext {
+                            pack: &self.pack,
+                            contributions: &contributions,
+                            truth: &truth,
+                            project_context: Some(&project_context),
+                            custom_instructions,
+                            model: model_name,
+                        },
+                        cancellation,
+                    )
+                    .await
+                    .map_err(|error| error.run_failure())?;
+                succeed::<CompositionPlanFeature, _>(&mut run, &execution.result)?;
+            }
             "mod.plan" => {
                 let request = self.decode::<ModPlanFeature>(&run)?;
                 let contributions = self.resolve(

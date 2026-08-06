@@ -168,7 +168,7 @@ mod tests {
             feature_count: built_in_feature_contracts().len(),
             project_execution_available: false,
         };
-        assert_eq!(report.feature_count, 9);
+        assert_eq!(report.feature_count, 10);
         assert!(!report.project_execution_available);
     }
 

@@ -77,6 +77,7 @@ Feature Recipe 不包含 STS2 hook、BaseLib 类型或具体资源路径；Pack 
 
 ```text
 mod-plan.json
+composition-plan.json
 mod-generate-single.json
 log-analyze.json
 ```
@@ -86,6 +87,8 @@ Batch 复用 Single，Complex 组合 Plan、Batch/Single、Build 和 Package，�
 Recipe 文件以编译时字节和 pinned SHA 加载。修改文本必须同时更新 hash，并由 loader/assembly 测试证明 schema、slot 与渲染顺序。
 
 `mod-plan` 会把完整 verified `itemTypes` 目录与规划 guidance 以 pretty JSON 装入 `pack.guidance`；该槽位保持 32,000 字符有界，当前 Recipe SHA-256 为 `efd695f87099d9c1bebc670e61885210641dbd3abd89d11099568fd8e8b5954c`。新增 Pack 类型必须通过 desktop facade Plan Gate，不能因目录增长在模型调用前退化为 `feature.recipe_invalid`。
+
+`composition-plan` 的 Recipe SHA-256 为 `c05cb1527f125f51cdb9a9c106df1d233ba5fb496934012cdc35752d591862b0`。它装配 Pack composition guidance、resolved profile、bounded Truth、工程上下文和运行时指令；模型只返回节点内容与逻辑引用。Feature 计算 pinned definition hash、profile provenance 和 expected-current 状态后创建 Draft，模型不能选择 Resource 或更新 Item current pointer。
 
 ## 4. Game Pack Contribution
 

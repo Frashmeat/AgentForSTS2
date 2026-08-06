@@ -24,7 +24,7 @@ node scripts/check-stage2-dependency-dag.mjs
 
 ## 2. Feature Contract
 
-Every product capability has one `FeatureId`, request schema, result schema, validator, and registry entry. Current catalog contains exactly 9 Features: project create, plan, resource prepare, single/batch/complex generation, log analyze, build, and package.
+Every product capability has one `FeatureId`, request schema, result schema, validator, and registry entry. Current catalog contains exactly 10 Features: project create, single-item plan, composition plan, resource prepare, single/batch/complex generation, log analyze, build, and package.
 
 Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-specific implementation, or duplicate Prompt pipeline. Batch v4 owns definition-driven Plan -> Single child composition; Complex v3 reuses that exact Batch request/result and adds Build/Package only after every Item succeeds.
 
@@ -76,6 +76,11 @@ Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-sp
 - CompositionDraft v1 is persisted separately from ItemDefinition with revision CAS. Atomic
   confirmation validates a closed selected subgraph and updates every affected current pointer
   through one recoverable prepared/committed journal; failure never exposes a partial pointer set.
+- `composition.plan` owns one pinned Recipe and one `pack.composition-plan-guidance` contribution.
+  The model describes Draft nodes and logical identity/pinned references; the Feature validates the
+  selected Pack profile, queries bounded Truth, computes pinned definition hashes, attaches exact
+  profile provenance/current expectations and persists only a CompositionDraft. The model cannot
+  author selected Resources, expected-current hashes or Item current pointers.
 - ResolvedItemGraph v1 expands exact pinned edges, validates identity edges against the resolved
   closure, applies Pack/Truth/locale/Resource readiness and hashes sorted nodes, edges and pinned
   Pack/Truth/Draft/profile provenance. It completes before model or project mutation.
@@ -111,6 +116,115 @@ selected-item game guidance separately. Truth owns current facts. Workspace owns
 resources. Settings own `llm.custom_prompt`. Code owns protocol/safety/schema only.
 
 Recipe and Pack resources are pinned by SHA-256. Slot resolution is exact and deterministic. Model requests must be replay-auditable without persisting secrets or provider bodies.
+
+### Scenario: Plan, Review, And Confirm A Composition Draft
+
+#### 1. Scope / Trigger
+
+This contract applies when a Pack declares one or more `compositionProfiles` and a caller uses
+`composition.plan` or the Draft IPC commands. Planning creates review state only; Item current
+pointers and project files must remain unchanged until explicit confirmation.
+
+#### 2. Signatures
+
+```rust
+// crates/ats-features/src/composition_plan.rs
+pub struct CompositionPlanRequest {
+    pub draft_id: CompositionDraftId,
+    pub composition_id: CompositionId,
+    pub concept: String,
+    pub source: ItemCompositionSource,
+    pub parameters: BTreeMap<CompositionParameterId, u32>,
+}
+
+// crates/ats-workspace/src/composition.rs
+fn compare_and_set(expected_revision: u64, next: &CompositionDraft) -> Result<(), Error>;
+fn delete(draft_id: &CompositionDraftId, expected_revision: u64) -> Result<(), Error>;
+
+// src-tauri/src/commands/stage2.rs
+list_composition_drafts() -> Vec<CompositionDraft>;
+get_composition_draft(draft_id) -> CompositionDraft;
+update_composition_draft(draft_id, expected_revision, nodes) -> CompositionDraft;
+delete_composition_draft(draft_id, expected_revision) -> ();
+confirm_composition_draft(draft_id, expected_revision, selected_item_ids)
+    -> CompositionConfirmation;
+```
+
+#### 3. Contracts
+
+| Boundary | Required behavior |
+| --- | --- |
+| Pack | `pack.composition-plan-guidance` covers exactly every `compositionProfiles[].id`, declares bounded guidance, Pack-known allowed Item types and `nodeTypeRules`; rule base counts equal `baseNodeCount`, parameter multipliers equal each parameter `nodeWeight`, and the root type has a base node |
+| Request | Preset parameters exactly match the selected immutable preset; Custom names a Pack preset base and passes all Pack bounds, constraints and <=128-node estimate |
+| Model output | Contains only node content and logical identity/pinned references; no Resource selection, expected-current hash, definition hash, current pointer or project file |
+| Feature enrichment | Queries bounded Truth for every allowed type, checks exact node count/root/type/reference targets, rejects pinned cycles, computes pinned hashes bottom-up, attaches root profile provenance and current expectations |
+| Draft repository | Creates `.ats/composition-drafts-v1/<draftId>.json`; update/delete require exact revision CAS; ProjectSession owns the sole repository instance |
+| Confirmation | Accepts only a non-empty pinned-closed selection, repeats Pack Draft/Ready/graph checks and performs one recoverable atomic Item pointer transaction |
+| React | Receives IPC as `unknown`, validates CompositionDraft/Confirmation guards, renders Pack metadata only and never branches on Character or a game ID |
+
+`composition.plan` result is `draftId + revision + rootItemId + nodeCount + modelRequestSha256`.
+The complete graph remains authoritative in the Draft repository rather than being duplicated in the
+Run result.
+
+#### 4. Validation & Error Matrix
+
+| Failure | Stable result | Mutation |
+| --- | --- | --- |
+| Unknown composition or invalid preset/custom values | `composition.profile.*` | no model call, Draft or Item mutation |
+| Missing/stale Truth or invalid Pack contribution | `truth.*` / `pack.contribution_invalid` | no model call when preflight can decide; no Draft/Item mutation |
+| Truncated/malformed/count-mismatched output or pinned cycle | `model.output_*` / `composition.profile.count_mismatch` / `composition.graph.cycle` | no Draft/Item mutation |
+| Existing Draft ID or stale update/delete revision | `composition.draft.conflict` | existing Draft preserved |
+| Draft filesystem failure | `composition.draft.storage_failed` | no fabricated success; owned temporary file cleaned on repository access |
+| Invalid/open confirmation selection | `composition.draft.invalid` or typed `composition.confirm.*` internally | no Item current pointer changes |
+| Atomic confirmation conflict/storage failure | `composition.draft.conflict` / `composition.draft.storage_failed` at Shell | all current pointers rolled back or recovery journal retained |
+| Success | succeeded Plan Run or `CompositionConfirmation` | planning writes one Draft; confirmation writes only the selected closed definition set |
+
+#### 5. Good / Base / Bad Cases
+
+- Good: Pack Standard is selected by default, model returns the exact estimated node count, Feature
+  computes child hashes and persists revision 1; a closed subset confirms atomically.
+- Base: Pack has empty `compositionProfiles` and an empty composition contribution catalog; registry
+  and UI remain valid, while the Studio displays unavailable and no Plan can be submitted.
+- Bad: React invents Standard counts or a `character` branch; Pack expansion would require code and
+  violates the generic boundary.
+- Bad: model authors a `definitionHash` or `expectedCurrentDefinitionHash`; this would let untrusted
+  output bypass deterministic provenance.
+- Bad: update omits `expectedRevision`, or confirmation saves nodes individually; concurrent edits or
+  failures could expose lost updates/partial current pointers.
+
+#### 6. Tests Required
+
+```powershell
+cargo test -p ats-features composition_plan -- --nocapture
+cargo test -p ats-workspace composition -- --nocapture
+cargo test -p ats-adapters composition_draft -- --nocapture
+cargo test --workspace --all-targets
+npm run test:frontend
+npx tsc -b --pretty false
+```
+
+Assertions must cover: Pack/profile/Truth binding in the request snapshot; deterministic pinned hash
+enrichment; Draft-only persistence; revision CAS/delete; closed partial confirmation; malformed IPC
+guards; Pack-default Standard; Custom bounds; deterministic filtering/pagination. O5 adds the first
+real STS2 Character model/compile path; O8 owns installed real-game acceptance.
+
+#### 7. Wrong vs Correct
+
+Wrong: trust model-authored hashes and publish definitions during Plan.
+
+```text
+model nodes + model definitionHash -> save each Item current pointer
+```
+
+Correct: enrich deterministic provenance, persist review state, then confirm explicitly.
+
+```text
+Pack profile + Truth + logical model nodes
+  -> Feature validates/counts/computes pinned hashes
+  -> CompositionDraft revision 1
+  -> guarded review/update
+  -> closed selection + atomic confirmation
+```
 
 `mod-plan` pretty-serializes the complete verified `itemTypes` catalog plus plan guidance into the
 required `pack.guidance` slot. That slot is bounded to 32,000 characters. A built-in Pack expansion

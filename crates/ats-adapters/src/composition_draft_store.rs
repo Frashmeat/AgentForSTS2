@@ -5,7 +5,10 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use ats_kernel::CompositionDraftId;
-use ats_workspace::{CompositionDraft, CompositionDraftError, CompositionDraftRepository};
+use ats_workspace::{
+    CompositionDraft, CompositionDraftError, CompositionDraftRepository,
+    CompositionDraftRepositoryErrorKind,
+};
 use serde::Serialize;
 use thiserror::Error;
 
@@ -90,6 +93,14 @@ impl FileCompositionDraftRepository {
 
 impl CompositionDraftRepository for FileCompositionDraftRepository {
     type Error = CompositionDraftStoreError;
+
+    fn classify_error(error: &Self::Error) -> CompositionDraftRepositoryErrorKind {
+        match error {
+            CompositionDraftStoreError::NotFound => CompositionDraftRepositoryErrorKind::NotFound,
+            CompositionDraftStoreError::Conflict => CompositionDraftRepositoryErrorKind::Conflict,
+            _ => CompositionDraftRepositoryErrorKind::Storage,
+        }
+    }
 
     fn create(&self, draft: &CompositionDraft) -> Result<(), Self::Error> {
         let _guard = self
@@ -186,6 +197,24 @@ impl CompositionDraftRepository for FileCompositionDraftRepository {
         }
         drafts.sort_by(|left, right| left.draft_id.cmp(&right.draft_id));
         Ok(drafts)
+    }
+
+    fn delete(
+        &self,
+        draft_id: &CompositionDraftId,
+        expected_revision: u64,
+    ) -> Result<(), Self::Error> {
+        let _guard = self
+            .gate
+            .lock()
+            .map_err(|_| CompositionDraftStoreError::LockUnavailable)?;
+        self.prepare_root()?;
+        let current = self.load_unlocked(draft_id)?;
+        if current.revision != expected_revision {
+            return Err(CompositionDraftStoreError::Conflict);
+        }
+        fs::remove_file(self.path(draft_id))
+            .map_err(|error| io_error("delete_composition_draft", error))
     }
 }
 
@@ -378,6 +407,23 @@ mod tests {
         assert!(matches!(
             repository.compare_and_set(1, &stale),
             Err(CompositionDraftStoreError::Conflict)
+        ));
+    }
+
+    #[test]
+    fn delete_requires_the_current_revision() {
+        let temp = tempfile::tempdir().unwrap();
+        let repository = FileCompositionDraftRepository::new(temp.path().to_path_buf());
+        let draft = draft();
+        repository.create(&draft).unwrap();
+        assert!(matches!(
+            repository.delete(&draft.draft_id, draft.revision + 1),
+            Err(CompositionDraftStoreError::Conflict)
+        ));
+        repository.delete(&draft.draft_id, draft.revision).unwrap();
+        assert!(matches!(
+            repository.load(&draft.draft_id),
+            Err(CompositionDraftStoreError::NotFound)
         ));
     }
 }
