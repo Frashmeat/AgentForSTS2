@@ -194,6 +194,13 @@ export interface CompositionPlanRequest extends Record<string, unknown> {
   parameters: Record<string, number>;
 }
 
+export interface CompositionRetryNodeRequest extends Record<string, unknown> {
+  draftId: string;
+  expectedRevision: number;
+  itemId: string;
+  instructions: string;
+}
+
 export interface SingleGenerateRequest extends Record<string, unknown> {
   artifactId: string;
   modId: string;
@@ -307,6 +314,10 @@ export function submitModPlan(request: ModPlanRequest): Promise<string> {
 
 export function submitCompositionPlan(request: CompositionPlanRequest): Promise<string> {
   return submit("composition.plan", "feature.composition-plan-request", request);
+}
+
+export function submitCompositionRetryNode(request: CompositionRetryNodeRequest): Promise<string> {
+  return submit("composition.retry-node", "feature.composition-retry-node-request", request);
 }
 
 export function submitCompositionGenerate(request: CompositionGenerateRequest): Promise<string> {

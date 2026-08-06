@@ -24,7 +24,7 @@ node scripts/check-stage2-dependency-dag.mjs
 
 ## 2. Feature Contract
 
-Every product capability has one `FeatureId`, request schema, result schema, validator, and registry entry. Current catalog contains exactly 11 Features: project create, single-item plan, composition plan/generate, resource prepare, single/batch/complex generation, log analyze, build, and package.
+Every product capability has one `FeatureId`, request schema, result schema, validator, and registry entry. Current catalog contains exactly 12 Features: project create, single-item plan, composition plan/targeted retry/generate, resource prepare, single/batch/complex generation, log analyze, build, and package.
 
 Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-specific implementation, or duplicate Prompt pipeline. Batch v4 owns definition-driven Plan -> Single child composition; Complex v3 reuses that exact Batch request/result and adds Build/Package only after every Item succeeds.
 
@@ -85,6 +85,11 @@ Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-sp
   selected Pack profile, queries bounded Truth, computes pinned definition hashes, attaches exact
   profile provenance/current expectations and persists only a CompositionDraft. The model cannot
   author selected Resources, expected-current hashes or Item current pointers.
+- `composition.retry-node` binds one Draft ID, expected revision and target Item ID. Its model output
+  is exactly one logical node with the same identity/type. The Feature reuses composition Plan
+  structure/count/closure rules, preserves every code-owned Resource binding and expected-current
+  baseline, recomputes the complete pinned graph and persists one Draft CAS revision. A retry Pack
+  contribution adds only retry semantics; it must not duplicate node/reference quantity rules.
 - ResolvedItemGraph v1 expands exact pinned edges, validates identity edges against the resolved
   closure, applies Pack/Truth/locale/Resource readiness and hashes sorted nodes, edges and pinned
   Pack/Truth/Draft/profile provenance. It completes before model or project mutation.
@@ -235,6 +240,68 @@ Pack profile + Truth + logical model nodes
   -> closed selection + atomic confirmation
 ```
 
+### Scenario: Retry One Composition Draft Node
+
+#### 1. Scope / Signatures
+
+`composition.retry-node` revises review state only. It never confirms Items or writes project files.
+
+```rust
+// crates/ats-features/src/composition_plan.rs
+pub struct CompositionRetryNodeRequest {
+    pub draft_id: CompositionDraftId,
+    pub expected_revision: u64,
+    pub item_id: ItemId,
+    pub instructions: String,
+}
+
+pub struct CompositionRetryNodeResult {
+    pub draft_id: CompositionDraftId,
+    pub revision: u64,
+    pub item_id: ItemId,
+    pub definition_hash: Sha256Digest,
+    pub model_request_sha256: Sha256Digest,
+}
+```
+
+React sends exact camelCase `draftId`, `expectedRevision`, `itemId`, `instructions` through the
+generic `submit_feature` command and waits for the persisted terminal Run.
+
+#### 2. Contracts And Errors
+
+| Boundary | Required behavior |
+| --- | --- |
+| Pack | Reuse verified `composition.plan.guidance` structure/count rules; `composition.retry-node.guidance` adds retry semantics only |
+| Prompt | Serialize the logical Draft graph without Resource bindings, expected-current values or definition hashes; query Truth for the target type |
+| Model output | Exactly one node whose Item ID/type match the target; no whole-plan envelope |
+| Enrichment | Restore every existing Resource binding/current baseline, replace the target, rerun full count/reference/root-closure/cycle validation and recompute pinned hashes |
+| Persistence | `CompositionDraftRepository::compare_and_set(expected_revision, revised)` is the sole mutation |
+
+| Failure | Stable result | Mutation |
+| --- | --- | --- |
+| missing target/Draft | `composition.draft.*` | no model call when known; Draft unchanged |
+| stale revision | `composition.draft.conflict` | no model call; Draft unchanged |
+| changed target identity/type or malformed node | `model.output_invalid` | Draft unchanged |
+| invalid count/reference/closure/cycle after replacement | `composition.profile.count_mismatch`, `model.output_invalid` or `composition.graph.cycle` | Draft unchanged |
+| CAS/storage failure | `composition.draft.conflict` / `composition.draft.storage_failed` | prior revision remains authoritative |
+| success | succeeded Run | one Draft revision; Item pointers/project files unchanged |
+
+Good: retry a child, advance revision once and update every ancestor pinned hash. Base: retry the
+root with unchanged references. Bad: use a whole-plan response, follow a newer Item current pointer,
+or let model output replace Resource bindings.
+
+Required tests:
+
+```powershell
+cargo test -p ats-features composition_plan -- --nocapture
+cargo test -p agentthespire-desktop --lib commands::stage2
+npm run test:frontend
+```
+
+Assertions cover one model call, identity/type preservation, revision CAS, root hash recomputation,
+absence of code-owned fields from the prompt, stale retry before a second model call and frontend
+request trimming.
+
 ### Scenario: Generate And Publish A Whole Composition Closure
 
 #### 1. Scope / Trigger
@@ -302,11 +369,13 @@ variables or an output path outside the isolated stage.
 | package commit, final write, Artifact publish or parent transition failure | typed `artifact.*`, `composition.publication.*` or `run.*` | all still-rollback-capable project state is restored; no fabricated success |
 | success | succeeded parent + all terminal children | exactly one composition Artifact and final source/package set; no `.staging` or composition stage residue |
 
-Ordinary in-process failures must complete cleanup before return. Durable recovery from a process
-stop during final project transaction commit is an O6 contract; O4 must not claim that crash gate.
-The filesystem writer makes its commit decision with one same-directory transaction-directory
-rename. A rename failure retains complete backups and rolls back before returning; a successful
-decision may leave only a cleanup-only `.committed-<runId>` directory, which the next writer removes.
+Ordinary in-process failures must complete cleanup before return. `FileProjectWriter` persists one
+versioned immutable `record-<index>.json` per write below `.ats/transactions/<runId>` before moving
+the old target. The same-directory rename to `.committed-<runId>` is the durable commit decision.
+`FileProjectWriter::recover(project_root)` rolls back prepared targets/backups/temporary files and
+run-created empty directories, while committed recovery preserves published bytes and removes only
+journal state. `ProjectSession::open` runs this before Run reconciliation. Unknown, duplicate,
+symlinked or escaping records fail recovery without guessing a result.
 
 #### 5. Good / Base / Bad Cases
 
@@ -325,6 +394,8 @@ decision may leave only a cleanup-only `.committed-<runId>` directory, which the
 ```powershell
 cargo test -p agentthespire-desktop --test composition_generation -- --nocapture
 cargo test -p ats-adapters project_stager -- --nocapture
+cargo test -p ats-adapters project_writer -- --nocapture
+cargo test -p agentthespire-desktop --lib project_session -- --nocapture
 cargo test --workspace --all-targets
 npm run test:frontend
 npx tsc -b --pretty false

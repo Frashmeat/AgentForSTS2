@@ -68,6 +68,10 @@ field-keyed nodes and exact ItemDefinition v2 shapes. Confirmation guards valida
 every StoredItemDefinition and the confirmation digest. A TypeScript interface or direct cast is not
 accepted for list/get/update/confirm responses.
 
+Composition targeted retry uses the generic Feature submission boundary with exact camelCase
+`draftId`, `expectedRevision`, `itemId` and `instructions`. React derives this request from the
+currently loaded Draft; it does not send definition content, Resources or caller-authored hashes.
+
 Composition generation submits request schema v1 with an exact `StoredItemDefinition`, optional
 Draft ref and nested Package request. Single result v2 and Package result v2 use the exact
 `published | composition_staged` discriminator. Published results require Artifact ref/hash;

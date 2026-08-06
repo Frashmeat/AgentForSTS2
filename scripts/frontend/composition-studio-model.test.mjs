@@ -8,6 +8,7 @@ after(async () => vite.close());
 
 const {
   buildCompositionPlanRequest,
+  buildCompositionRetryNodeRequest,
   buildCompositionGenerateRequest,
   closedSelection,
   compositionRoots,
@@ -120,6 +121,19 @@ test("Draft filtering, pagination, and partial closure are deterministic", () =>
   assert.equal(closedSelection(draft, new Set(["fixture-root"])), false);
   assert.equal(closedSelection(draft, new Set(["fixture-root", "fixture-child"])), true);
   assert.equal(closedSelection(draft, new Set(["fixture-child"])), true);
+});
+
+test("targeted retry pins the Draft revision and trims only runtime instructions", () => {
+  assert.deepEqual(buildCompositionRetryNodeRequest(
+    draft,
+    "fixture-child",
+    "  revise the child behavior  ",
+  ), {
+    draftId: "fixture-draft",
+    expectedRevision: 1,
+    itemId: "fixture-child",
+    instructions: "revise the child behavior",
+  });
 });
 
 test("confirmed roots build one exact whole-closure request", () => {

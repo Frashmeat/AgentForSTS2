@@ -4,8 +4,11 @@ use std::path::{Path, PathBuf};
 
 use ats_runtime::{
     PendingProjectWrites, ProjectFileWrite, ProjectFileWriter, ProjectWriteError, RunId,
-    validate_project_writes,
+    normalize_relative_path, validate_project_writes,
 };
+use serde::{Deserialize, Serialize};
+
+const TRANSACTION_RECORD_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Default)]
 pub struct FileProjectWriter;
@@ -26,7 +29,7 @@ impl ProjectFileWriter for FileProjectWriter {
             &transactions_root,
             "create_transactions",
         )?;
-        cleanup_committed_transactions(&transactions_root)?;
+        recover_transactions(project_root, &transactions_root)?;
         let transaction_root = transactions_root.join(run_id.as_str());
         fs::create_dir(&transaction_root).map_err(|error| io_error("create_transaction", error))?;
         let committed_root = transactions_root.join(format!(".committed-{}", run_id.as_str()));
@@ -45,6 +48,32 @@ impl ProjectFileWriter for FileProjectWriter {
         }
         Ok(Box::new(transaction))
     }
+}
+
+impl FileProjectWriter {
+    pub fn recover(project_root: &Path) -> Result<(), ProjectWriteError> {
+        validate_directory(project_root, "inspect_project_root")?;
+        let transactions_root = project_root.join(".ats/transactions");
+        match fs::symlink_metadata(&transactions_root) {
+            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+                recover_transactions(project_root, &transactions_root)
+            }
+            Ok(_) => Err(ProjectWriteError::InvalidWrite),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(io_error("inspect_transactions", error)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TransactionWriteRecord {
+    schema_version: u32,
+    relative_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    backup_file: Option<String>,
+    temporary_relative_path: String,
+    created_directories: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -68,9 +97,9 @@ impl FileProjectTransaction {
         index: usize,
         write: ProjectFileWrite,
     ) -> Result<(), ProjectWriteError> {
-        let target = project_root.join(write.relative_path());
+        let relative_path = write.relative_path().to_owned();
+        let target = project_root.join(&relative_path);
         let parent = target.parent().ok_or(ProjectWriteError::InvalidWrite)?;
-        ensure_nested_directories(project_root, parent, &mut self.created_directories)?;
         let metadata = match fs::symlink_metadata(&target) {
             Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
                 Some(metadata)
@@ -80,14 +109,38 @@ impl FileProjectTransaction {
             Err(error) => return Err(io_error("inspect_target", error)),
         };
 
-        let temp = parent.join(format!(".ats-write-{}-{index}.tmp", std::process::id()));
+        let temporary_name = format!(".ats-write-{}-{index}.tmp", std::process::id());
+        let temp = parent.join(&temporary_name);
+        let temporary_relative_path = parent
+            .strip_prefix(project_root)
+            .map_err(|_| ProjectWriteError::InvalidWrite)?
+            .join(&temporary_name);
+        let planned_directories = planned_nested_directories(project_root, parent)?;
+        let record = TransactionWriteRecord {
+            schema_version: TRANSACTION_RECORD_SCHEMA_VERSION,
+            relative_path,
+            backup_file: metadata.is_some().then(|| format!("backup-{index}")),
+            temporary_relative_path: normalized(&temporary_relative_path)?,
+            created_directories: planned_directories
+                .iter()
+                .map(|path| {
+                    path.strip_prefix(project_root)
+                        .map_err(|_| ProjectWriteError::InvalidWrite)
+                        .and_then(normalized)
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        };
+        persist_transaction_record(&self.transaction_root, index, &record)?;
+        create_planned_directories(&planned_directories, &mut self.created_directories)?;
         match (write.bytes(), write.source_path()) {
             (Some(bytes), None) => write_new_file(&temp, bytes, "write_temporary")?,
             (None, Some(source)) => copy_new_file(source, &temp)?,
             _ => return Err(ProjectWriteError::InvalidWrite),
         }
         let backup = if metadata.is_some() {
-            let backup = self.transaction_root.join(format!("backup-{index}"));
+            let backup = self
+                .transaction_root
+                .join(record.backup_file.as_deref().unwrap_or_default());
             if let Err(error) = fs::rename(&target, &backup) {
                 let _ = fs::remove_file(&temp);
                 return Err(io_error("backup_existing", error));
@@ -159,7 +212,10 @@ impl PendingProjectWrites for FileProjectTransaction {
     }
 }
 
-fn cleanup_committed_transactions(transactions_root: &Path) -> Result<(), ProjectWriteError> {
+fn recover_transactions(
+    project_root: &Path,
+    transactions_root: &Path,
+) -> Result<(), ProjectWriteError> {
     for entry in
         fs::read_dir(transactions_root).map_err(|error| io_error("list_transactions", error))?
     {
@@ -168,40 +224,216 @@ fn cleanup_committed_transactions(transactions_root: &Path) -> Result<(), Projec
         let Some(name) = name.to_str() else {
             continue;
         };
-        if !name.starts_with(".committed-") {
-            continue;
-        }
         let metadata = fs::symlink_metadata(entry.path())
-            .map_err(|error| io_error("inspect_committed_transaction", error))?;
+            .map_err(|error| io_error("inspect_transaction", error))?;
         if !metadata.is_dir() || metadata.file_type().is_symlink() {
             return Err(ProjectWriteError::InvalidWrite);
         }
-        fs::remove_dir_all(entry.path())
-            .map_err(|error| io_error("cleanup_committed_transaction", error))?;
+        if name.starts_with(".committed-") {
+            fs::remove_dir_all(entry.path())
+                .map_err(|error| io_error("cleanup_committed_transaction", error))?;
+        } else if name.starts_with('.') || name.is_empty() {
+            return Err(ProjectWriteError::InvalidWrite);
+        } else {
+            recover_prepared_transaction(project_root, &entry.path())?;
+        }
     }
     Ok(())
 }
 
-fn ensure_nested_directories(
+fn persist_transaction_record(
+    transaction_root: &Path,
+    index: usize,
+    record: &TransactionWriteRecord,
+) -> Result<(), ProjectWriteError> {
+    validate_transaction_record(record)?;
+    let bytes = serde_json::to_vec_pretty(record).map_err(|_| ProjectWriteError::InvalidWrite)?;
+    write_new_file(
+        &transaction_root.join(format!("record-{index}.json")),
+        &bytes,
+        "write_transaction_record",
+    )
+}
+
+fn recover_prepared_transaction(
+    project_root: &Path,
+    transaction_root: &Path,
+) -> Result<(), ProjectWriteError> {
+    let mut records = Vec::new();
+    let mut known_backups = std::collections::BTreeSet::new();
+    let mut relative_paths = std::collections::BTreeSet::new();
+    let mut temporary_paths = std::collections::BTreeSet::new();
+    let mut declared_backup_names = std::collections::BTreeSet::new();
+    for entry in fs::read_dir(transaction_root)
+        .map_err(|error| io_error("list_transaction_records", error))?
+    {
+        let entry = entry.map_err(|error| io_error("read_transaction_record", error))?;
+        let metadata = fs::symlink_metadata(entry.path())
+            .map_err(|error| io_error("inspect_transaction_record", error))?;
+        if !metadata.is_file() || metadata.file_type().is_symlink() {
+            return Err(ProjectWriteError::InvalidWrite);
+        }
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            return Err(ProjectWriteError::InvalidWrite);
+        };
+        if name.starts_with("record-") && name.ends_with(".json") {
+            let bytes = fs::read(entry.path())
+                .map_err(|error| io_error("read_transaction_record", error))?;
+            let record = serde_json::from_slice::<TransactionWriteRecord>(&bytes)
+                .map_err(|_| ProjectWriteError::InvalidWrite)?;
+            validate_transaction_record(&record)?;
+            if !relative_paths.insert(record.relative_path.clone())
+                || !temporary_paths.insert(record.temporary_relative_path.clone())
+                || record
+                    .backup_file
+                    .as_ref()
+                    .is_some_and(|backup| !declared_backup_names.insert(backup.clone()))
+            {
+                return Err(ProjectWriteError::InvalidWrite);
+            }
+            records.push(record);
+        } else if name.starts_with("backup-") {
+            known_backups.insert(name.to_owned());
+        } else {
+            return Err(ProjectWriteError::InvalidWrite);
+        }
+    }
+    records.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+    if known_backups
+        .iter()
+        .any(|backup| !declared_backup_names.contains(backup))
+    {
+        return Err(ProjectWriteError::InvalidWrite);
+    }
+
+    for record in records.iter().rev() {
+        remove_optional_regular_file(
+            &project_root.join(&record.temporary_relative_path),
+            "remove_recovery_temporary",
+        )?;
+        let target = project_root.join(&record.relative_path);
+        if let Some(backup_name) = &record.backup_file {
+            let backup = transaction_root.join(backup_name);
+            match fs::symlink_metadata(&backup) {
+                Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
+                    remove_optional_regular_file(&target, "remove_recovery_target")?;
+                    fs::rename(&backup, &target)
+                        .map_err(|error| io_error("restore_recovery_backup", error))?;
+                }
+                Ok(_) => return Err(ProjectWriteError::InvalidWrite),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(io_error("inspect_recovery_backup", error)),
+            }
+        } else {
+            remove_optional_regular_file(&target, "remove_recovery_target")?;
+        }
+    }
+
+    let mut created_directories = records
+        .iter()
+        .flat_map(|record| record.created_directories.iter())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    created_directories.sort_by_key(|path| std::cmp::Reverse(path.matches('/').count()));
+    for relative in created_directories {
+        let directory = project_root.join(relative);
+        if let Err(error) = fs::remove_dir(&directory)
+            && !matches!(
+                error.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::DirectoryNotEmpty
+            )
+        {
+            return Err(io_error("remove_recovery_directory", error));
+        }
+    }
+    fs::remove_dir_all(transaction_root)
+        .map_err(|error| io_error("remove_recovered_transaction", error))?;
+    Ok(())
+}
+
+fn validate_transaction_record(record: &TransactionWriteRecord) -> Result<(), ProjectWriteError> {
+    if record.schema_version != TRANSACTION_RECORD_SCHEMA_VERSION
+        || normalized(Path::new(&record.relative_path))? != record.relative_path
+        || record.relative_path.starts_with(".ats/")
+        || normalized(Path::new(&record.temporary_relative_path))? != record.temporary_relative_path
+        || Path::new(&record.temporary_relative_path).parent()
+            != Path::new(&record.relative_path).parent()
+        || Path::new(&record.temporary_relative_path)
+            .file_name()
+            .and_then(|value| value.to_str())
+            .is_none_or(|name| !name.starts_with(".ats-write-") || !name.ends_with(".tmp"))
+        || record.backup_file.as_ref().is_some_and(|name| {
+            !name.starts_with("backup-")
+                || name.len() > 32
+                || !name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        })
+    {
+        return Err(ProjectWriteError::InvalidWrite);
+    }
+    let target_parent = Path::new(&record.relative_path).parent();
+    for directory in &record.created_directories {
+        if normalized(Path::new(directory))? != *directory
+            || directory.starts_with(".ats/")
+            || target_parent.is_none_or(|parent| !parent.starts_with(directory))
+        {
+            return Err(ProjectWriteError::InvalidWrite);
+        }
+    }
+    Ok(())
+}
+
+fn remove_optional_regular_file(
+    path: &Path,
+    operation: &'static str,
+) -> Result<(), ProjectWriteError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
+            fs::remove_file(path).map_err(|error| io_error(operation, error))
+        }
+        Ok(_) => Err(ProjectWriteError::InvalidWrite),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(io_error(operation, error)),
+    }
+}
+
+fn normalized(path: &Path) -> Result<String, ProjectWriteError> {
+    Ok(normalize_relative_path(path)?)
+}
+
+fn planned_nested_directories(
     project_root: &Path,
     target_parent: &Path,
-    created: &mut Vec<PathBuf>,
-) -> Result<(), ProjectWriteError> {
+) -> Result<Vec<PathBuf>, ProjectWriteError> {
     let relative = target_parent
         .strip_prefix(project_root)
         .map_err(|_| ProjectWriteError::InvalidWrite)?;
     let mut current = project_root.to_path_buf();
+    let mut planned = Vec::new();
     for component in relative.components() {
         current.push(component);
         match fs::symlink_metadata(&current) {
             Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
             Ok(_) => return Err(ProjectWriteError::InvalidWrite),
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                fs::create_dir(&current).map_err(|error| io_error("create_parent", error))?;
-                created.push(current.clone());
+                planned.push(current.clone());
             }
             Err(error) => return Err(io_error("inspect_parent", error)),
         }
+    }
+    Ok(planned)
+}
+
+fn create_planned_directories(
+    planned: &[PathBuf],
+    created: &mut Vec<PathBuf>,
+) -> Result<(), ProjectWriteError> {
+    for directory in planned {
+        fs::create_dir(directory).map_err(|error| io_error("create_parent", error))?;
+        created.push(directory.clone());
     }
     Ok(())
 }
@@ -386,5 +618,105 @@ mod tests {
             b"package-bytes"
         );
         pending.commit().unwrap();
+    }
+
+    #[test]
+    fn prepared_process_stop_is_rolled_back_before_the_project_is_reused() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let project = temp.path().join("project");
+        fs::create_dir(&project).unwrap();
+        fs::create_dir(project.join("Generated")).unwrap();
+        fs::write(project.join("Generated/Existing.cs"), b"old").unwrap();
+        let run_id = RunId::new();
+        let pending = FileProjectWriter
+            .apply(
+                &project,
+                &run_id,
+                vec![
+                    ProjectFileWrite::new("Generated/Existing.cs", b"new".to_vec()).unwrap(),
+                    ProjectFileWrite::new("Nested/New.cs", b"created".to_vec()).unwrap(),
+                ],
+            )
+            .unwrap();
+        drop(pending);
+
+        assert_eq!(
+            fs::read(project.join("Generated/Existing.cs")).unwrap(),
+            b"new"
+        );
+        assert!(project.join("Nested/New.cs").is_file());
+        FileProjectWriter::recover(&project).unwrap();
+        assert_eq!(
+            fs::read(project.join("Generated/Existing.cs")).unwrap(),
+            b"old"
+        );
+        assert!(!project.join("Nested/New.cs").exists());
+        assert!(!project.join("Nested").exists());
+        assert!(
+            !project
+                .join(".ats/transactions")
+                .read_dir()
+                .unwrap()
+                .any(|_| true)
+        );
+    }
+
+    #[test]
+    fn committed_process_stop_keeps_published_bytes_and_cleans_only_journal_state() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let project = temp.path().join("project");
+        fs::create_dir(&project).unwrap();
+        fs::create_dir(project.join("Generated")).unwrap();
+        fs::write(project.join("Generated/One.cs"), b"old").unwrap();
+        let run_id = RunId::new();
+        let pending = FileProjectWriter
+            .apply(
+                &project,
+                &run_id,
+                vec![ProjectFileWrite::new("Generated/One.cs", b"new".to_vec()).unwrap()],
+            )
+            .unwrap();
+        let transactions = project.join(".ats/transactions");
+        fs::rename(
+            transactions.join(run_id.as_str()),
+            transactions.join(format!(".committed-{}", run_id.as_str())),
+        )
+        .unwrap();
+        drop(pending);
+
+        FileProjectWriter::recover(&project).unwrap();
+        assert_eq!(fs::read(project.join("Generated/One.cs")).unwrap(), b"new");
+        assert!(!transactions.read_dir().unwrap().any(|_| true));
+    }
+
+    #[test]
+    fn recovery_rejects_duplicate_write_records_without_mutating_the_project() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let project = temp.path().join("project");
+        fs::create_dir(&project).unwrap();
+        fs::create_dir(project.join("Generated")).unwrap();
+        fs::write(project.join("Generated/One.cs"), b"old").unwrap();
+        let run_id = RunId::new();
+        let pending = FileProjectWriter
+            .apply(
+                &project,
+                &run_id,
+                vec![ProjectFileWrite::new("Generated/One.cs", b"new".to_vec()).unwrap()],
+            )
+            .unwrap();
+        let transaction = project.join(".ats/transactions").join(run_id.as_str());
+        fs::copy(
+            transaction.join("record-0.json"),
+            transaction.join("record-1.json"),
+        )
+        .unwrap();
+        drop(pending);
+
+        assert!(matches!(
+            FileProjectWriter::recover(&project),
+            Err(ProjectWriteError::InvalidWrite)
+        ));
+        assert_eq!(fs::read(project.join("Generated/One.cs")).unwrap(), b"new");
+        assert!(transaction.exists());
     }
 }

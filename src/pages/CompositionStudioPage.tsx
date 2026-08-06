@@ -25,6 +25,7 @@ import type {
 } from "@/services/tauriApi";
 import {
   buildCompositionPlanRequest,
+  buildCompositionRetryNodeRequest,
   buildCompositionGenerateRequest,
   closedSelection,
   compositionRoots,
@@ -66,6 +67,8 @@ export function CompositionStudioPage() {
   const [outputPath, setOutputPath] = useState("packages/mod.zip");
   const [lastGenerationRunId, setLastGenerationRunId] = useState("");
   const [lastGenerationRun, setLastGenerationRun] = useState<RunRecord | null>(null);
+  const [retryInstructions, setRetryInstructions] = useState("");
+  const [lastRetryRun, setLastRetryRun] = useState<RunRecord | null>(null);
 
   const profile = useMemo(
     () => catalog?.compositionProfiles.find((value) => value.id === compositionId) ?? null,
@@ -209,6 +212,31 @@ export function CompositionStudioPage() {
         definition: { ...selectedNode.definition, behaviorIntent },
       },
     });
+  }
+
+  async function retryNode() {
+    if (!draft || !selectedNode || !retryInstructions.trim()) return;
+    setBusy(true);
+    setFailure(null);
+    setLastRetryRun(null);
+    try {
+      const runId = await api.submitCompositionRetryNode(buildCompositionRetryNodeRequest(
+        draft,
+        selectedNode.definition.itemId,
+        retryInstructions,
+      ));
+      const terminal = await waitForRun(runId, setLastRetryRun);
+      if (terminal.status === "succeeded") {
+        const itemId = selectedNode.definition.itemId;
+        await load(draft.draftId);
+        setSelectedNodeId(itemId);
+        setRetryInstructions("");
+      }
+    } catch (error: unknown) {
+      setFailure(toActionableFailure(error));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function confirmSelected() {
@@ -418,6 +446,30 @@ export function CompositionStudioPage() {
                     <Button size="sm" disabled={busy} onClick={() => void saveBehavior(selectedNode.definition.behaviorIntent.join("\n"))}><Save size={13} /> Save node</Button>
                     <Button size="sm" disabled={busy || !definitions.some((value) => value.definition.itemId === selectedNode.definition.itemId && value.definition.itemType === selectedNode.definition.itemType)} onClick={() => void replaceNode()}><RefreshCw size={13} /> Replace from library</Button>
                   </div>
+                  <Field label="Retry instructions" hint="The model revises this node only; the complete Draft is revalidated before revision advances.">
+                    <textarea
+                      data-testid="composition-retry-instructions"
+                      className="min-h-24"
+                      value={retryInstructions}
+                      onChange={(event) => setRetryInstructions(event.target.value)}
+                    />
+                  </Field>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Button
+                      data-testid="composition-retry-node"
+                      size="sm"
+                      disabled={busy || !retryInstructions.trim()}
+                      onClick={() => void retryNode()}
+                    >
+                      <RefreshCw size={13} /> Retry node
+                    </Button>
+                    {lastRetryRun && <Badge variant={lastRetryRun.status === "succeeded" ? "ok" : lastRetryRun.status === "failed" ? "error" : "warn"}>{lastRetryRun.status}</Badge>}
+                  </div>
+                  {lastRetryRun?.failure && (
+                    <Notice variant="error" title={lastRetryRun.failure.code}>
+                      {lastRetryRun.failure.stage}
+                    </Notice>
+                  )}
                 </CardSection>
               )}
             </>

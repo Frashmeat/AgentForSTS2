@@ -24,6 +24,7 @@ import type {
   ResourcePreview,
   ResourcePrepareResult,
   CompositionPlanRequest,
+  CompositionRetryNodeRequest,
   CompositionGenerateRequest,
   CompositionDraft,
   CompositionDraftNode,
@@ -71,6 +72,7 @@ export function listRuns(): Promise<RunSummary[]> { return Promise.resolve([]); 
 export function cancelRun(_runId: string): Promise<boolean> { return reject("cancelRun"); }
 export function submitModPlan(_request: ModPlanRequest): Promise<string> { return reject("submitModPlan"); }
 export function submitCompositionPlan(_request: CompositionPlanRequest): Promise<string> { return reject("submitCompositionPlan"); }
+export function submitCompositionRetryNode(_request: CompositionRetryNodeRequest): Promise<string> { return reject("submitCompositionRetryNode"); }
 export function submitCompositionGenerate(_request: CompositionGenerateRequest): Promise<string> { return reject("submitCompositionGenerate"); }
 export function submitSingleGenerate(_request: SingleGenerateRequest): Promise<string> { return reject("submitSingleGenerate"); }
 export function submitBatchGenerate(_request: BatchGenerateRequest): Promise<string> { return reject("submitBatchGenerate"); }

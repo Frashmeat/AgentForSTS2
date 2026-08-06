@@ -751,7 +751,7 @@ v4 unchanged and invokes Build/Package only after every Item outcome succeeds.
 
 ## 7. Feature Composition
 
-The shared registry contains exactly 11 current Features, including `composition.plan` and `composition.generate`. Composition planning persists reviewable Draft state and never publishes Item pointers or project files. Composition generation reuses Plan, Single proposal, Build and Package services but owns one whole-closure publication boundary. Single generation owns the validated model bundle -> rollback-capable project writes -> real validation -> immutable Artifact -> Run success order. Batch invokes Single child Runs. Complex invokes Plan, Batch/Single, Build and Package. No composition creates an alternative Prompt, Resource, file transaction, build or package implementation.
+The shared registry contains exactly 12 current Features, including `composition.plan`, `composition.retry-node` and `composition.generate`. Composition planning persists reviewable Draft state and never publishes Item pointers or project files. Targeted retry replaces exactly one logical Draft node, then reuses the full Plan graph validator and Draft revision CAS; it never follows a newer Item pointer or lets the model author Resource/current/hash state. Composition generation reuses Plan, Single proposal, Build and Package services but owns one whole-closure publication boundary. Single generation owns the validated model bundle -> rollback-capable project writes -> real validation -> immutable Artifact -> Run success order. Batch invokes Single child Runs. Complex invokes Plan, Batch/Single, Build and Package. No composition creates an alternative Prompt, Resource, file transaction, build or package implementation.
 
 ## 8. Shell Cutover
 
@@ -763,7 +763,7 @@ The shared registry contains exactly 11 current Features, including `composition
 
 ## 9. Project Session
 
-One session owns the OS lock, v3 repository, cancellation tokens, and task handles. Submit and closing are serialized so no untracked Pending Run exists. Close/switch/shutdown cancels, drains and then releases the lock; timeout retains closing state and lock. Reopen reconciles interrupted records before exposure.
+One session owns the OS lock, v3 repository, cancellation tokens, and task handles. Submit and closing are serialized so no untracked Pending Run exists. Close/switch/shutdown cancels, drains and then releases the lock; timeout retains closing state and lock. Reopen first recovers `.ats/transactions`: prepared records roll back old/new targets and run-created directories, while a same-directory `.committed-*` decision preserves published files and only removes journal state. Corrupt, duplicate, symlink or escaping records fail open. Run reconciliation happens only after project publication recovery and before exposure.
 
 ## 10. Machine Acceptance
 

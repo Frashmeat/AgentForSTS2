@@ -2,6 +2,7 @@ import type {
   CompositionDraft,
   CompositionDraftNode,
   CompositionPlanRequest,
+  CompositionRetryNodeRequest,
   CompositionGenerateRequest,
   CompositionProfileSet,
   ItemCompositionSource,
@@ -77,6 +78,19 @@ export function buildCompositionPlanRequest(
     concept: concept.trim(),
     source,
     parameters: { ...parameters },
+  };
+}
+
+export function buildCompositionRetryNodeRequest(
+  draft: CompositionDraft,
+  itemId: string,
+  instructions: string,
+): CompositionRetryNodeRequest {
+  return {
+    draftId: draft.draftId,
+    expectedRevision: draft.revision,
+    itemId,
+    instructions: instructions.trim(),
   };
 }
 

@@ -6,7 +6,8 @@ use std::sync::{Arc, Mutex as StdMutex, RwLock};
 use std::time::Duration;
 
 use ats_adapters::{
-    FileCompositionDraftRepository, FileItemRepository, FileResourceRepository, FileRunRepository,
+    FileCompositionDraftRepository, FileItemRepository, FileProjectWriter, FileResourceRepository,
+    FileRunRepository,
 };
 use ats_runtime::{
     CancellationReason, CancellationToken, RunFailure, RunId, RunRecord, RunRepository,
@@ -15,6 +16,7 @@ use ats_runtime::{
 use ats_workspace::{ProjectFolder, ProjectMeta};
 use chrono::Utc;
 use futures_util::FutureExt;
+use thiserror::Error;
 use tokio::sync::{Mutex, Notify};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
@@ -68,13 +70,22 @@ pub enum SubmitError {
     Repository,
 }
 
+#[derive(Debug, Error)]
+pub enum ProjectSessionOpenError {
+    #[error("project write recovery failed")]
+    ProjectRecovery(#[from] ats_runtime::ProjectWriteError),
+    #[error(transparent)]
+    RunRepository(#[from] RunRepositoryError),
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct DrainTimeout {
     pub blocked_runs: Vec<RunId>,
 }
 
 impl ProjectSession {
-    pub fn open(project: ProjectFolder) -> Result<Arc<Self>, RunRepositoryError> {
+    pub fn open(project: ProjectFolder) -> Result<Arc<Self>, ProjectSessionOpenError> {
+        FileProjectWriter::recover(project.path())?;
         let repository = Arc::new(FileRunRepository::new(project.run_history_dir())?);
         repository.reconcile_interrupted()?;
         let item_repository = Arc::new(FileItemRepository::new(project.path().to_path_buf()));
@@ -271,5 +282,58 @@ impl ProjectSession {
                 return Err(DrainTimeout { blocked_runs });
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use ats_runtime::{ProjectFileWrite, ProjectFileWriter};
+
+    use super::*;
+
+    #[test]
+    fn opening_a_project_recovers_prepared_publication_before_exposing_the_session() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("project");
+        fs::create_dir_all(project.join(".ats/runs-v3")).unwrap();
+        fs::create_dir(project.join("Generated")).unwrap();
+        fs::write(project.join(".ats/version"), b"2").unwrap();
+        fs::write(
+            project.join("project.json"),
+            serde_json::to_vec(&ProjectMeta {
+                name: "RecoveryProject".into(),
+                csharp_name: "RecoveryProject".into(),
+                game_id: "sts2".into(),
+                scaffolded: true,
+                generated_files: Vec::new(),
+                build_output_dir: None,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        fs::write(project.join("Generated/One.cs"), b"old").unwrap();
+        let pending = FileProjectWriter
+            .apply(
+                &project,
+                &RunId::new(),
+                vec![ProjectFileWrite::new("Generated/One.cs", b"new".to_vec()).unwrap()],
+            )
+            .unwrap();
+        drop(pending);
+        assert_eq!(fs::read(project.join("Generated/One.cs")).unwrap(), b"new");
+
+        let folder = ProjectFolder::open(&project).unwrap();
+        let session = ProjectSession::open(folder).unwrap();
+        assert_eq!(fs::read(project.join("Generated/One.cs")).unwrap(), b"old");
+        assert!(
+            !project
+                .join(".ats/transactions")
+                .read_dir()
+                .unwrap()
+                .any(|_| true)
+        );
+        session.release_project_lock().unwrap();
     }
 }

@@ -13,6 +13,7 @@ use ats_features::composition_generate::{
 };
 use ats_features::composition_plan::{
     CompositionPlanContext, CompositionPlanFeature, CompositionPlanService,
+    CompositionRetryNodeContext, CompositionRetryNodeFeature, CompositionRetryNodeService,
 };
 use ats_features::log_analyze::{LogAnalyzeContext, LogAnalyzeFeature, LogAnalyzeService};
 use ats_features::mod_generate_batch::{
@@ -311,6 +312,41 @@ impl Stage2Composition {
                     .await
                     .map_err(|error| error.run_failure())?;
                 succeed::<CompositionPlanFeature, _>(&mut run, &execution.result)?;
+            }
+            "composition.retry-node" => {
+                let request = self.decode::<CompositionRetryNodeFeature>(&run)?;
+                let truth = self.current_truth()?;
+                let plan_contributions = self.resolve(
+                    &CompositionPlanFeature::id(),
+                    &[CompositionPlanFeature::contribution_requirement()],
+                )?;
+                let retry_contributions = self.resolve(
+                    &CompositionRetryNodeFeature::id(),
+                    &[CompositionRetryNodeFeature::contribution_requirement()],
+                )?;
+                let model = select_model(model_override, &settings.llm)?;
+                let execution = CompositionRetryNodeService::built_in()
+                    .map_err(|_| {
+                        failure("feature.recipe_invalid", "composition.retry-node.recipe")
+                    })?
+                    .execute(
+                        model.client(),
+                        drafts,
+                        request,
+                        CompositionRetryNodeContext {
+                            pack: &self.pack,
+                            plan_contributions: &plan_contributions,
+                            retry_contributions: &retry_contributions,
+                            truth: &truth,
+                            project_context: Some(&project_context),
+                            custom_instructions,
+                            model: model_name,
+                        },
+                        cancellation,
+                    )
+                    .await
+                    .map_err(|error| error.run_failure())?;
+                succeed::<CompositionRetryNodeFeature, _>(&mut run, &execution.result)?;
             }
             "mod.plan" => {
                 let request = self.decode::<ModPlanFeature>(&run)?;

@@ -98,6 +98,9 @@ Item-type branches. The Pack default profile is selected initially; Custom start
   Draft/Pack/readiness/graph validation.
 - A model Plan creates Draft state only. Review edits and replacements do not write Item current
   pointers until explicit atomic confirmation.
+- Targeted retry sends the exact Draft revision, selected Item ID and bounded user instructions.
+  The UI waits for the new persisted `composition.retry-node` Run terminal state, refreshes the
+  Draft only on success and never submits a whole-plan response as single-node evidence.
 - An empty Pack `compositionProfiles` catalog renders an unavailable state. React must not synthesize
   a Character workflow before the Pack declares one.
 - Whole-closure generation lists only confirmed definitions whose type is a Pack-declared

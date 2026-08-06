@@ -78,6 +78,7 @@ Feature Recipe 不包含 STS2 hook、BaseLib 类型或具体资源路径；Pack 
 ```text
 mod-plan.json
 composition-plan.json
+composition-retry-node.json
 mod-generate-single.json
 log-analyze.json
 ```
@@ -89,6 +90,8 @@ Recipe 文件以编译时字节和 pinned SHA 加载。修改文本必须同时�
 `mod-plan` 会把完整 verified `itemTypes` 目录与规划 guidance 以 pretty JSON 装入 `pack.guidance`；加入完整 Character catalog 后该槽位保持 64,000 字符有界，当前 Recipe SHA-256 为 `36c0e7971fda34bf437950ffb2f37fd0771701432f3287f64172aa5c810cf4f1`。新增 Pack 类型必须通过 desktop facade Plan Gate，不能因目录增长在模型调用前退化为 `feature.recipe_invalid`。
 
 `composition-plan` 的 Recipe SHA-256 为 `c05cb1527f125f51cdb9a9c106df1d233ba5fb496934012cdc35752d591862b0`。它装配 Pack composition guidance、resolved profile、bounded Truth、工程上下文和运行时指令；模型只返回节点内容与逻辑引用。Feature 计算 pinned definition hash、profile provenance 和 expected-current 状态后创建 Draft，模型不能选择 Resource 或更新 Item current pointer。
+
+`composition-retry-node` 的 Recipe SHA-256 为 `900cff35c5565c6b709d247b53b00601198ead84dbad05ba963677ef3011d667`。它绑定现有 Draft revision 与目标 Item，只要求模型返回一个同 identity/type 的逻辑节点。结构和数量合同继续来自 `composition.plan.guidance`，Pack 的 `composition.retry-node.guidance` 只补充游戏重试语义；Feature 在模型外保留 Resource bindings/current 基线并重新解析完整 Draft graph。
 
 ## 4. Game Pack Contribution
 

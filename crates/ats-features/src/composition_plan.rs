@@ -6,8 +6,8 @@ use ats_game_context::{
 };
 use ats_kernel::{
     CompositionDraftId, CompositionId, ContributionId, FailureCode, FeatureId, ItemFieldId, ItemId,
-    ItemReferenceSlotId, ItemTypeId, LocaleId, LocalizationFieldId, RecipeId, SchemaId, SchemaRef,
-    SchemaVersion, Sha256Digest,
+    ItemReferenceSlotId, ItemTypeId, LocaleId, LocalizationFieldId, RecipeId, ResourceId, SchemaId,
+    SchemaRef, SchemaVersion, Sha256Digest,
 };
 use ats_runtime::{
     CancellationToken, FinishReason, ModelClient, ModelError, ModelGamePackRef, ModelRequestError,
@@ -17,7 +17,7 @@ use ats_workspace::{
     CompositionDraft, CompositionDraftNode, CompositionDraftRepository,
     CompositionDraftRepositoryErrorKind, ItemCompositionProfile, ItemCompositionSource,
     ItemDefinition, ItemFieldValue, ItemLocalization, ItemReferenceBinding, ItemRepository,
-    ItemRepositoryErrorKind, LocalizationStatus, StoredItemDefinition,
+    ItemRepositoryErrorKind, ItemResourceBinding, LocalizationStatus, StoredItemDefinition,
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -29,8 +29,13 @@ use crate::prompt::{FeatureRecipe, FeatureRecipeError, FeatureRecipeLoader};
 
 const RECIPE_BYTES: &[u8] = include_bytes!("../recipes/composition-plan.json");
 const RECIPE_SHA256: &str = "c05cb1527f125f51cdb9a9c106df1d233ba5fb496934012cdc35752d591862b0";
+const RETRY_RECIPE_BYTES: &[u8] = include_bytes!("../recipes/composition-retry-node.json");
+const RETRY_RECIPE_SHA256: &str =
+    "900cff35c5565c6b709d247b53b00601198ead84dbad05ba963677ef3011d667";
 
 pub struct CompositionPlanFeature;
+
+pub struct CompositionRetryNodeFeature;
 
 impl FeatureSpec for CompositionPlanFeature {
     type Request = CompositionPlanRequest;
@@ -64,6 +69,38 @@ impl CompositionPlanFeature {
     }
 }
 
+impl FeatureSpec for CompositionRetryNodeFeature {
+    type Request = CompositionRetryNodeRequest;
+    type Result = CompositionRetryNodeResult;
+    type ArtifactExtension = CompositionRetryNodeArtifactExtension;
+
+    fn id() -> FeatureId {
+        FeatureId::parse("composition.retry-node").expect("built-in Feature ID is valid")
+    }
+
+    fn request_schema() -> SchemaRef {
+        schema("feature.composition-retry-node-request")
+    }
+
+    fn result_schema() -> SchemaRef {
+        schema("feature.composition-retry-node-result")
+    }
+
+    fn artifact_extension_schema() -> SchemaRef {
+        schema("feature.composition-retry-node-artifact-extension")
+    }
+}
+
+impl CompositionRetryNodeFeature {
+    #[must_use]
+    pub fn contribution_requirement() -> ats_game_context::ContributionRequirement {
+        ats_game_context::ContributionRequirement {
+            slot_id: retry_contribution_slot(),
+            schema: schema("pack.composition-retry-node-guidance"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CompositionPlanRequest {
@@ -90,6 +127,31 @@ pub struct CompositionPlanArtifactExtension {
     pub model_request_sha256: Sha256Digest,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CompositionRetryNodeRequest {
+    pub draft_id: CompositionDraftId,
+    pub expected_revision: u64,
+    pub item_id: ItemId,
+    pub instructions: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CompositionRetryNodeResult {
+    pub draft_id: CompositionDraftId,
+    pub revision: u64,
+    pub item_id: ItemId,
+    pub definition_hash: Sha256Digest,
+    pub model_request_sha256: Sha256Digest,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CompositionRetryNodeArtifactExtension {
+    pub model_request_sha256: Sha256Digest,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CompositionPlanContribution {
@@ -104,6 +166,19 @@ struct CompositionPlanGuidance {
     node_type_rules: Vec<CompositionNodeTypeRule>,
     #[serde(default)]
     reference_binding_rules: Vec<CompositionReferenceBindingRule>,
+    guidance: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CompositionRetryContribution {
+    compositions: Vec<CompositionRetryGuidance>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CompositionRetryGuidance {
+    composition_id: CompositionId,
     guidance: Vec<String>,
 }
 
@@ -136,14 +211,14 @@ struct CompositionReferenceBindingRule {
     parameter_multiplier: u32,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ModelCompositionPlan {
     root_item_id: ItemId,
     nodes: Vec<ModelCompositionNode>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ModelCompositionNode {
     item_id: ItemId,
@@ -154,7 +229,7 @@ struct ModelCompositionNode {
     reference_bindings: BTreeMap<ItemReferenceSlotId, Vec<PlannedReference>>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
     rename_all = "snake_case",
@@ -181,6 +256,16 @@ pub struct CompositionPlanContext<'a> {
     pub model: Option<String>,
 }
 
+pub struct CompositionRetryNodeContext<'a> {
+    pub pack: &'a LoadedGamePack,
+    pub plan_contributions: &'a VerifiedContributionSet,
+    pub retry_contributions: &'a VerifiedContributionSet,
+    pub truth: &'a VerifiedTruthSnapshot,
+    pub project_context: Option<&'a str>,
+    pub custom_instructions: Option<&'a str>,
+    pub model: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct CompositionPlanExecution {
     pub result: CompositionPlanResult,
@@ -191,6 +276,10 @@ pub struct CompositionPlanExecution {
 }
 
 pub struct CompositionPlanService {
+    recipe: FeatureRecipe,
+}
+
+pub struct CompositionRetryNodeService {
     recipe: FeatureRecipe,
 }
 
@@ -282,8 +371,14 @@ impl CompositionPlanService {
         }
         let planned: ModelCompositionPlan = serde_json::from_str(&response.content)
             .map_err(|_| CompositionPlanError::InvalidModelOutput)?;
-        let definitions =
-            build_definitions(context.pack, profile_set, guidance, &profile, planned)?;
+        let definitions = build_definitions(
+            context.pack,
+            profile_set,
+            guidance,
+            &profile,
+            planned,
+            &BTreeMap::new(),
+        )?;
         let mut nodes = BTreeMap::new();
         for stored in definitions {
             let expected_current_definition_hash =
@@ -355,6 +450,266 @@ impl CompositionPlanService {
     }
 }
 
+impl CompositionRetryNodeService {
+    pub fn built_in() -> Result<Self, CompositionRetryNodeError> {
+        let expected = Sha256Digest::parse(RETRY_RECIPE_SHA256)
+            .map_err(|_| CompositionRetryNodeError::InvalidRecipeContract)?;
+        Self::from_recipe(FeatureRecipeLoader::load(RETRY_RECIPE_BYTES, &expected)?)
+    }
+
+    pub fn from_recipe(recipe: FeatureRecipe) -> Result<Self, CompositionRetryNodeError> {
+        if recipe.feature_id() != &CompositionRetryNodeFeature::id()
+            || recipe.output_contract().schema != retry_model_output_schema()
+        {
+            return Err(CompositionRetryNodeError::InvalidRecipeContract);
+        }
+        Ok(Self { recipe })
+    }
+
+    pub async fn execute<C, D>(
+        &self,
+        client: &C,
+        drafts: &D,
+        request: CompositionRetryNodeRequest,
+        context: CompositionRetryNodeContext<'_>,
+        cancellation: &CancellationToken,
+    ) -> Result<CompositionRetryNodeExecution, CompositionRetryNodeError>
+    where
+        C: ModelClient + ?Sized,
+        D: CompositionDraftRepository + ?Sized,
+    {
+        validate_retry_context(&context)?;
+        if request.expected_revision == 0 || !valid_text(&request.instructions, 16_000) {
+            return Err(CompositionRetryNodeError::InvalidInput);
+        }
+        let draft =
+            drafts
+                .load(&request.draft_id)
+                .map_err(|error| match D::classify_error(&error) {
+                    CompositionDraftRepositoryErrorKind::NotFound => {
+                        CompositionRetryNodeError::DraftNotFound
+                    }
+                    CompositionDraftRepositoryErrorKind::Conflict => {
+                        CompositionRetryNodeError::DraftConflict
+                    }
+                    CompositionDraftRepositoryErrorKind::Storage => {
+                        CompositionRetryNodeError::DraftStorage
+                    }
+                })?;
+        if draft.revision != request.expected_revision {
+            return Err(CompositionRetryNodeError::DraftConflict);
+        }
+        if &draft.game_pack_id != context.pack.id()
+            || &draft.game_pack_sha256 != context.pack.content_sha256()
+        {
+            return Err(CompositionRetryNodeError::ContextIdentityMismatch);
+        }
+        let target = draft
+            .nodes
+            .get(&request.item_id)
+            .ok_or(CompositionRetryNodeError::TargetNotFound)?;
+        let profile_set = context
+            .pack
+            .composition_profile(&draft.profile.composition_id)
+            .ok_or(CompositionRetryNodeError::UnsupportedComposition)?;
+        profile_set
+            .validate_parameters(&draft.profile.parameters)
+            .map_err(|_| CompositionRetryNodeError::InvalidProfile)?;
+        let source_valid = match &draft.profile.source {
+            ItemCompositionSource::Preset { profile_id } => {
+                profile_set.profiles().iter().any(|profile| {
+                    profile.id() == profile_id && profile.values() == &draft.profile.parameters
+                })
+            }
+            ItemCompositionSource::Custom { base_profile_id } => profile_set
+                .profiles()
+                .iter()
+                .any(|profile| profile.id() == base_profile_id),
+        };
+        if !source_valid {
+            return Err(CompositionRetryNodeError::InvalidProfile);
+        }
+
+        let plan_contribution: CompositionPlanContribution =
+            context.plan_contributions.decode(&contribution_slot())?;
+        plan_contribution
+            .validate(context.pack)
+            .map_err(map_retry_plan_error)?;
+        let structure = plan_contribution
+            .compositions
+            .iter()
+            .find(|value| value.composition_id == draft.profile.composition_id)
+            .ok_or(CompositionRetryNodeError::UnsupportedComposition)?;
+        let retry_contribution: CompositionRetryContribution = context
+            .retry_contributions
+            .decode(&retry_contribution_slot())?;
+        retry_contribution.validate(context.pack)?;
+        let retry_guidance = retry_contribution
+            .compositions
+            .iter()
+            .find(|value| value.composition_id == draft.profile.composition_id)
+            .ok_or(CompositionRetryNodeError::UnsupportedComposition)?;
+        let evidence = query_evidence(
+            context.truth,
+            context.pack,
+            std::slice::from_ref(&target.definition.item_type),
+        )
+        .map_err(map_retry_plan_error)?;
+        check_cancelled(cancellation).map_err(map_retry_plan_error)?;
+
+        let logical_nodes = draft
+            .nodes
+            .values()
+            .map(|node| definition_to_model_node(&node.definition))
+            .collect::<Vec<_>>();
+        let slots = BTreeMap::from([
+            (
+                "output.contract".into(),
+                serialize(&self.recipe.output_contract().json_schema)
+                    .map_err(map_retry_plan_error)?,
+            ),
+            (
+                "pack.contribution".into(),
+                serialize(&(structure, retry_guidance)).map_err(map_retry_plan_error)?,
+            ),
+            (
+                "truth.evidence".into(),
+                serialize(&evidence).map_err(map_retry_plan_error)?,
+            ),
+            (
+                "draft.context".into(),
+                serialize(&serde_json::json!({
+                    "draftId": draft.draft_id,
+                    "revision": draft.revision,
+                    "rootItemId": draft.root_item_id,
+                    "profile": draft.profile,
+                    "targetItemId": request.item_id,
+                    "nodes": logical_nodes,
+                }))
+                .map_err(map_retry_plan_error)?,
+            ),
+            (
+                "project.context".into(),
+                bounded_optional(context.project_context, 8_000).map_err(map_retry_plan_error)?,
+            ),
+            (
+                "runtime.custom_instructions".into(),
+                bounded_optional(context.custom_instructions, 4_000)
+                    .map_err(map_retry_plan_error)?,
+            ),
+            ("request.instructions".into(), request.instructions.clone()),
+        ]);
+        let model_request = self.recipe.render(&slots, context.model)?;
+        let snapshot = ModelRequestSnapshot::new(
+            CompositionRetryNodeFeature::id(),
+            self.recipe.recipe_ref(),
+            ModelGamePackRef {
+                id: context.pack.id().clone(),
+                sha256: context.pack.content_sha256().clone(),
+            },
+            Some(context.truth.manifest().snapshot_id().clone()),
+            Vec::new(),
+            model_request,
+        )?;
+        let response = client.complete(snapshot.clone(), cancellation).await?;
+        check_cancelled(cancellation).map_err(map_retry_plan_error)?;
+        if response.finish_reason == FinishReason::MaxTokens {
+            return Err(CompositionRetryNodeError::TruncatedModelOutput);
+        }
+        let replacement: ModelCompositionNode = serde_json::from_str(&response.content)
+            .map_err(|_| CompositionRetryNodeError::InvalidModelOutput)?;
+        if replacement.item_id != request.item_id
+            || replacement.item_type != target.definition.item_type
+        {
+            return Err(CompositionRetryNodeError::TargetIdentityMismatch);
+        }
+
+        let mut source = draft
+            .nodes
+            .values()
+            .map(|node| {
+                let logical = definition_to_model_node(&node.definition);
+                (logical.item_id.clone(), logical)
+            })
+            .collect::<BTreeMap<_, _>>();
+        source.insert(request.item_id.clone(), replacement);
+        let resource_bindings = draft
+            .nodes
+            .iter()
+            .map(|(item_id, node)| (item_id.clone(), node.definition.resource_bindings.clone()))
+            .collect();
+        let definitions = build_definitions(
+            context.pack,
+            profile_set,
+            structure,
+            &draft.profile,
+            ModelCompositionPlan {
+                root_item_id: draft.root_item_id.clone(),
+                nodes: source.into_values().collect(),
+            },
+            &resource_bindings,
+        )
+        .map_err(map_retry_plan_error)?;
+        let mut nodes = BTreeMap::new();
+        let mut replacement_hash = None;
+        for stored in definitions {
+            let item_id = stored.definition.item_id.clone();
+            let expected_current_definition_hash = draft.nodes[&item_id]
+                .expected_current_definition_hash
+                .clone();
+            if item_id == request.item_id {
+                replacement_hash = Some(stored.definition_hash.clone());
+            }
+            nodes.insert(
+                item_id,
+                CompositionDraftNode {
+                    definition: stored.definition,
+                    expected_current_definition_hash,
+                },
+            );
+        }
+        let next = draft
+            .revised(nodes, Utc::now())
+            .map_err(|_| CompositionRetryNodeError::InvalidModelOutput)?;
+        drafts
+            .compare_and_set(request.expected_revision, &next)
+            .map_err(|error| match D::classify_error(&error) {
+                CompositionDraftRepositoryErrorKind::Conflict => {
+                    CompositionRetryNodeError::DraftConflict
+                }
+                CompositionDraftRepositoryErrorKind::NotFound => {
+                    CompositionRetryNodeError::DraftNotFound
+                }
+                CompositionDraftRepositoryErrorKind::Storage => {
+                    CompositionRetryNodeError::DraftStorage
+                }
+            })?;
+        Ok(CompositionRetryNodeExecution {
+            result: CompositionRetryNodeResult {
+                draft_id: next.draft_id.clone(),
+                revision: next.revision,
+                item_id: request.item_id,
+                definition_hash: replacement_hash
+                    .ok_or(CompositionRetryNodeError::InvalidModelOutput)?,
+                model_request_sha256: snapshot.request_sha256().clone(),
+            },
+            draft: next,
+            request_snapshot: snapshot,
+            response_model: response.model,
+            usage: response.usage,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CompositionRetryNodeExecution {
+    pub result: CompositionRetryNodeResult,
+    pub draft: CompositionDraft,
+    pub request_snapshot: ModelRequestSnapshot,
+    pub response_model: String,
+    pub usage: TokenUsage,
+}
+
 impl CompositionPlanContribution {
     fn validate(&self, pack: &LoadedGamePack) -> Result<(), CompositionPlanError> {
         if self.compositions.len() != pack.composition_profiles().len()
@@ -389,6 +744,27 @@ impl CompositionPlanContribution {
             {
                 return Err(CompositionPlanError::InvalidPackGuidance);
             }
+        }
+        Ok(())
+    }
+}
+
+impl CompositionRetryContribution {
+    fn validate(&self, pack: &LoadedGamePack) -> Result<(), CompositionRetryNodeError> {
+        if self.compositions.len() != pack.composition_profiles().len()
+            || self.compositions.len() > 16
+        {
+            return Err(CompositionRetryNodeError::InvalidPackGuidance);
+        }
+        let mut ids = BTreeSet::new();
+        if self.compositions.iter().any(|entry| {
+            pack.composition_profile(&entry.composition_id).is_none()
+                || !ids.insert(&entry.composition_id)
+                || entry.guidance.is_empty()
+                || entry.guidance.len() > 32
+                || entry.guidance.iter().any(|value| !valid_text(value, 2_000))
+        }) {
+            return Err(CompositionRetryNodeError::InvalidPackGuidance);
         }
         Ok(())
     }
@@ -512,6 +888,7 @@ fn build_definitions(
     guidance: &CompositionPlanGuidance,
     profile: &ItemCompositionProfile,
     planned: ModelCompositionPlan,
+    resource_bindings: &BTreeMap<ItemId, BTreeMap<ResourceId, ItemResourceBinding>>,
 ) -> Result<Vec<StoredItemDefinition>, CompositionPlanError> {
     let expected_count = profile_set
         .parameters()
@@ -585,6 +962,7 @@ fn build_definitions(
             &root_id,
             profile,
             &id,
+            resource_bindings,
             &mut resolved,
             &mut active,
         )?;
@@ -713,6 +1091,7 @@ fn resolve_node(
     root_id: &ItemId,
     profile: &ItemCompositionProfile,
     item_id: &ItemId,
+    resource_bindings: &BTreeMap<ItemId, BTreeMap<ResourceId, ItemResourceBinding>>,
     resolved: &mut BTreeMap<ItemId, StoredItemDefinition>,
     active: &mut BTreeSet<ItemId>,
 ) -> Result<StoredItemDefinition, CompositionPlanError> {
@@ -742,6 +1121,7 @@ fn resolve_node(
             )
         })
         .collect();
+    definition.resource_bindings = resource_bindings.get(item_id).cloned().unwrap_or_default();
     if item_id == root_id {
         definition.composition_profile = Some(profile.clone());
     }
@@ -757,8 +1137,16 @@ fn resolve_node(
                     expected_item_type: expected_item_type.clone(),
                 },
                 PlannedReference::Pinned { item_id, quantity } => {
-                    let target =
-                        resolve_node(pack, source, root_id, profile, item_id, resolved, active)?;
+                    let target = resolve_node(
+                        pack,
+                        source,
+                        root_id,
+                        profile,
+                        item_id,
+                        resource_bindings,
+                        resolved,
+                        active,
+                    )?;
                     ItemReferenceBinding::Pinned {
                         item_id: item_id.clone(),
                         definition_hash: target.definition_hash,
@@ -782,6 +1170,47 @@ fn resolve_node(
     };
     resolved.insert(item_id.clone(), stored.clone());
     Ok(stored)
+}
+
+fn definition_to_model_node(definition: &ItemDefinition) -> ModelCompositionNode {
+    ModelCompositionNode {
+        item_id: definition.item_id.clone(),
+        item_type: definition.item_type.clone(),
+        canonical_fields: definition.canonical_fields.clone(),
+        behavior_intent: definition.behavior_intent.clone(),
+        localizations: definition
+            .localizations
+            .iter()
+            .map(|(locale, localization)| (locale.clone(), localization.fields.clone()))
+            .collect(),
+        reference_bindings: definition
+            .reference_bindings
+            .iter()
+            .map(|(slot_id, bindings)| {
+                (
+                    slot_id.clone(),
+                    bindings
+                        .iter()
+                        .map(|binding| match binding {
+                            ItemReferenceBinding::Identity {
+                                item_id,
+                                expected_item_type,
+                            } => PlannedReference::Identity {
+                                item_id: item_id.clone(),
+                                expected_item_type: expected_item_type.clone(),
+                            },
+                            ItemReferenceBinding::Pinned {
+                                item_id, quantity, ..
+                            } => PlannedReference::Pinned {
+                                item_id: item_id.clone(),
+                                quantity: *quantity,
+                            },
+                        })
+                        .collect(),
+                )
+            })
+            .collect(),
+    }
 }
 
 fn query_evidence(
@@ -827,6 +1256,23 @@ fn validate_context(context: &CompositionPlanContext<'_>) -> Result<(), Composit
         || manifest.game_pack_sha256() != context.pack.content_sha256()
     {
         return Err(CompositionPlanError::ContextIdentityMismatch);
+    }
+    Ok(())
+}
+
+fn validate_retry_context(
+    context: &CompositionRetryNodeContext<'_>,
+) -> Result<(), CompositionRetryNodeError> {
+    if context.plan_contributions.game_pack_id() != context.pack.id()
+        || context.plan_contributions.game_pack_sha256() != context.pack.content_sha256()
+        || context.plan_contributions.feature_id() != &CompositionPlanFeature::id()
+        || context.retry_contributions.game_pack_id() != context.pack.id()
+        || context.retry_contributions.game_pack_sha256() != context.pack.content_sha256()
+        || context.retry_contributions.feature_id() != &CompositionRetryNodeFeature::id()
+        || context.truth.manifest().game_pack_id() != context.pack.id()
+        || context.truth.manifest().game_pack_sha256() != context.pack.content_sha256()
+    {
+        return Err(CompositionRetryNodeError::ContextIdentityMismatch);
     }
     Ok(())
 }
@@ -953,12 +1399,170 @@ impl CompositionPlanError {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum CompositionRetryNodeError {
+    #[error("composition retry input is invalid")]
+    InvalidInput,
+    #[error("composition retry context identities do not match")]
+    ContextIdentityMismatch,
+    #[error("composition retry Pack guidance is invalid")]
+    InvalidPackGuidance,
+    #[error("composition type is unsupported by the Pack")]
+    UnsupportedComposition,
+    #[error("composition profile parameters are invalid")]
+    InvalidProfile,
+    #[error("composition graph no longer matches the profile")]
+    ProfileCountMismatch,
+    #[error("composition retry Recipe is invalid")]
+    InvalidRecipeContract,
+    #[error("composition retry model output was truncated")]
+    TruncatedModelOutput,
+    #[error("composition retry model output is invalid")]
+    InvalidModelOutput,
+    #[error("composition retry target identity changed")]
+    TargetIdentityMismatch,
+    #[error("composition retry target does not exist")]
+    TargetNotFound,
+    #[error("composition pinned references contain a cycle")]
+    PinnedCycle,
+    #[error("composition retry Truth evidence is missing")]
+    MissingEvidence,
+    #[error("composition Draft does not exist")]
+    DraftNotFound,
+    #[error("composition Draft revision changed")]
+    DraftConflict,
+    #[error("composition Draft storage failed")]
+    DraftStorage,
+    #[error("composition retry was cancelled")]
+    Cancelled,
+    #[error(transparent)]
+    Contribution(#[from] ContributionResolverError),
+    #[error(transparent)]
+    Evidence(#[from] EvidenceQueryError),
+    #[error(transparent)]
+    Recipe(#[from] FeatureRecipeError),
+    #[error(transparent)]
+    Request(#[from] ModelRequestError),
+    #[error(transparent)]
+    Model(#[from] ModelError),
+}
+
+impl CompositionRetryNodeError {
+    #[must_use]
+    pub fn run_failure(&self) -> RunFailure {
+        let (code, stage) = match self {
+            Self::InvalidInput => ("run.input_invalid", "composition.retry-node.request"),
+            Self::ContextIdentityMismatch => {
+                ("truth.context_mismatch", "composition.retry-node.context")
+            }
+            Self::InvalidPackGuidance | Self::Contribution(_) => {
+                ("pack.contribution_invalid", "composition.retry-node.pack")
+            }
+            Self::UnsupportedComposition => (
+                "composition.profile.unsupported",
+                "composition.retry-node.profile",
+            ),
+            Self::InvalidProfile => (
+                "composition.profile.invalid",
+                "composition.retry-node.profile",
+            ),
+            Self::ProfileCountMismatch => (
+                "composition.profile.count_mismatch",
+                "composition.retry-node.graph",
+            ),
+            Self::InvalidRecipeContract | Self::Recipe(_) => {
+                ("feature.recipe_invalid", "composition.retry-node.recipe")
+            }
+            Self::TruncatedModelOutput => {
+                ("model.output_truncated", "composition.retry-node.model")
+            }
+            Self::InvalidModelOutput | Self::TargetIdentityMismatch => {
+                ("model.output_invalid", "composition.retry-node.model")
+            }
+            Self::TargetNotFound => ("composition.draft.invalid", "composition.retry-node.target"),
+            Self::PinnedCycle => ("composition.graph.cycle", "composition.retry-node.graph"),
+            Self::MissingEvidence => ("truth.evidence_missing", "composition.retry-node.truth"),
+            Self::Evidence(_) => ("truth.query_invalid", "composition.retry-node.truth"),
+            Self::DraftNotFound => ("composition.draft.not_found", "composition.retry-node.load"),
+            Self::DraftConflict => (
+                "composition.draft.conflict",
+                "composition.retry-node.persist",
+            ),
+            Self::DraftStorage => (
+                "composition.draft.storage_failed",
+                "composition.retry-node.persist",
+            ),
+            Self::Cancelled | Self::Model(ModelError::Cancelled) => {
+                ("run.cancelled", "composition.retry-node.execute")
+            }
+            Self::Request(_) => ("model.request_invalid", "composition.retry-node.model"),
+            Self::Model(ModelError::Authentication) => {
+                ("model.authentication", "composition.retry-node.model")
+            }
+            Self::Model(ModelError::RateLimited { .. }) => {
+                ("model.rate_limited", "composition.retry-node.model")
+            }
+            Self::Model(ModelError::Configuration) => {
+                ("model.configuration", "composition.retry-node.model")
+            }
+            Self::Model(ModelError::Transport) => {
+                ("model.transport_failed", "composition.retry-node.model")
+            }
+            Self::Model(ModelError::Rejected) => {
+                ("model.request_rejected", "composition.retry-node.model")
+            }
+            Self::Model(ModelError::InvalidResponse) => {
+                ("model.response_invalid", "composition.retry-node.model")
+            }
+        };
+        RunFailure::new(
+            FailureCode::parse(code).expect("built-in failure code is valid"),
+            stage,
+            None,
+        )
+        .expect("built-in Run failure is valid")
+    }
+}
+
+fn map_retry_plan_error(error: CompositionPlanError) -> CompositionRetryNodeError {
+    match error {
+        CompositionPlanError::InvalidInput => CompositionRetryNodeError::InvalidInput,
+        CompositionPlanError::ContextIdentityMismatch => {
+            CompositionRetryNodeError::ContextIdentityMismatch
+        }
+        CompositionPlanError::InvalidPackGuidance | CompositionPlanError::Contribution(_) => {
+            CompositionRetryNodeError::InvalidPackGuidance
+        }
+        CompositionPlanError::UnsupportedComposition => {
+            CompositionRetryNodeError::UnsupportedComposition
+        }
+        CompositionPlanError::InvalidProfile => CompositionRetryNodeError::InvalidProfile,
+        CompositionPlanError::ProfileCountMismatch => {
+            CompositionRetryNodeError::ProfileCountMismatch
+        }
+        CompositionPlanError::PinnedCycle => CompositionRetryNodeError::PinnedCycle,
+        CompositionPlanError::MissingEvidence => CompositionRetryNodeError::MissingEvidence,
+        CompositionPlanError::Evidence(error) => CompositionRetryNodeError::Evidence(error),
+        CompositionPlanError::Cancelled => CompositionRetryNodeError::Cancelled,
+        _ => CompositionRetryNodeError::InvalidModelOutput,
+    }
+}
+
 fn contribution_slot() -> ContributionId {
     ContributionId::parse("composition.plan.guidance").expect("built-in contribution ID is valid")
 }
 
+fn retry_contribution_slot() -> ContributionId {
+    ContributionId::parse("composition.retry-node.guidance")
+        .expect("built-in contribution ID is valid")
+}
+
 fn model_output_schema() -> SchemaRef {
     schema("feature.composition-plan-model-output")
+}
+
+fn retry_model_output_schema() -> SchemaRef {
+    schema("feature.composition-retry-node-model-output")
 }
 
 fn schema(id: &str) -> SchemaRef {
@@ -1054,8 +1658,20 @@ mod tests {
             self.0.lock().unwrap().clone().ok_or(MemoryError)
         }
 
-        fn compare_and_set(&self, _: u64, _: &CompositionDraft) -> Result<(), Self::Error> {
-            Err(MemoryError)
+        fn compare_and_set(
+            &self,
+            expected_revision: u64,
+            next: &CompositionDraft,
+        ) -> Result<(), Self::Error> {
+            let mut stored = self.0.lock().unwrap();
+            if stored
+                .as_ref()
+                .is_none_or(|draft| draft.revision != expected_revision)
+            {
+                return Err(MemoryError);
+            }
+            *stored = Some(next.clone());
+            Ok(())
         }
 
         fn list(&self) -> Result<Vec<CompositionDraft>, Self::Error> {
@@ -1068,6 +1684,10 @@ mod tests {
     }
 
     struct MockModel {
+        snapshots: Mutex<Vec<ModelRequestSnapshot>>,
+    }
+
+    struct RetryModel {
         snapshots: Mutex<Vec<ModelRequestSnapshot>>,
     }
 
@@ -1106,6 +1726,41 @@ mod tests {
                         }
                     ]
                 }).to_string(),
+                finish_reason: FinishReason::EndTurn,
+                usage: TokenUsage::default(),
+            })
+        }
+
+        async fn stream(
+            &self,
+            _: ModelRequestSnapshot,
+            _: &CancellationToken,
+        ) -> Result<ModelStream, ModelError> {
+            Ok(Box::pin(stream::empty()))
+        }
+    }
+
+    #[async_trait]
+    impl ModelClient for RetryModel {
+        async fn complete(
+            &self,
+            request: ModelRequestSnapshot,
+            _: &CancellationToken,
+        ) -> Result<ModelResponse, ModelError> {
+            self.snapshots.lock().unwrap().push(request);
+            Ok(ModelResponse {
+                model: "fixture-retry".into(),
+                content: serde_json::json!({
+                    "itemId":"fixture-child",
+                    "itemType":"child",
+                    "canonicalFields":{},
+                    "behaviorIntent":["Provide revised child behavior."],
+                    "localizations":{},
+                    "referenceBindings":{
+                        "owner":[{"kind":"identity","itemId":"fixture-root","expectedItemType":"root"}]
+                    }
+                })
+                .to_string(),
                 finish_reason: FinishReason::EndTurn,
                 usage: TokenUsage::default(),
             })
@@ -1167,6 +1822,13 @@ mod tests {
                         {"itemType":"child","baseCount":0,"parameterId":"child_count","parameterMultiplier":1}
                     ],
                     "guidance":["Plan one root and its children."]
+                }]}
+            },{
+                "slotId":"composition.retry-node.guidance","featureId":"composition.retry-node",
+                "schema":{"id":"pack.composition-retry-node-guidance","version":1},
+                "payload":{"compositions":[{
+                    "compositionId":"fixture_suite",
+                    "guidance":["Revise only the requested fixture node."]
                 }]}
             }]
         });
@@ -1362,5 +2024,146 @@ mod tests {
         };
         assert_eq!(definition_hash, &child.definition_hash().unwrap());
         assert!(execution.request_snapshot.truth_snapshot_id().is_some());
+    }
+
+    #[tokio::test]
+    async fn targeted_retry_revises_one_node_and_recomputes_the_complete_graph() {
+        let pack = pack();
+        let truth = truth(&pack);
+        let resolver = ContributionResolver::new(Vec::<PrimitiveId>::new());
+        let plan_contributions = resolver
+            .resolve(
+                &pack,
+                &CompositionPlanFeature::id(),
+                &[CompositionPlanFeature::contribution_requirement()],
+            )
+            .unwrap();
+        let retry_contributions = resolver
+            .resolve(
+                &pack,
+                &CompositionRetryNodeFeature::id(),
+                &[CompositionRetryNodeFeature::contribution_requirement()],
+            )
+            .unwrap();
+        let drafts = MemoryDrafts::default();
+        let plan_model = MockModel {
+            snapshots: Mutex::new(Vec::new()),
+        };
+        let planned = CompositionPlanService::built_in()
+            .unwrap()
+            .execute(
+                &plan_model,
+                &MemoryItems,
+                &drafts,
+                CompositionPlanRequest {
+                    draft_id: CompositionDraftId::parse("fixture-retry-draft").unwrap(),
+                    composition_id: CompositionId::parse("fixture_suite").unwrap(),
+                    concept: "Create a retryable fixture suite.".into(),
+                    source: ItemCompositionSource::Preset {
+                        profile_id: CompositionProfileId::parse("standard").unwrap(),
+                    },
+                    parameters: BTreeMap::from([(
+                        CompositionParameterId::parse("child_count").unwrap(),
+                        1,
+                    )]),
+                },
+                CompositionPlanContext {
+                    pack: &pack,
+                    contributions: &plan_contributions,
+                    truth: &truth,
+                    project_context: None,
+                    custom_instructions: None,
+                    model: None,
+                },
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let old_root_hash = planned.draft.nodes[&planned.draft.root_item_id]
+            .definition
+            .definition_hash()
+            .unwrap();
+        let retry_model = RetryModel {
+            snapshots: Mutex::new(Vec::new()),
+        };
+        let request = CompositionRetryNodeRequest {
+            draft_id: planned.draft.draft_id.clone(),
+            expected_revision: planned.draft.revision,
+            item_id: ItemId::parse("fixture-child").unwrap(),
+            instructions: "Make the child behavior more explicit.".into(),
+        };
+        let retried = CompositionRetryNodeService::built_in()
+            .unwrap()
+            .execute(
+                &retry_model,
+                &drafts,
+                request.clone(),
+                CompositionRetryNodeContext {
+                    pack: &pack,
+                    plan_contributions: &plan_contributions,
+                    retry_contributions: &retry_contributions,
+                    truth: &truth,
+                    project_context: None,
+                    custom_instructions: None,
+                    model: None,
+                },
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(retried.result.revision, 2);
+        assert_eq!(retried.draft.nodes.len(), 2);
+        let child = &retried.draft.nodes[&request.item_id].definition;
+        assert_eq!(
+            child.behavior_intent,
+            vec!["Provide revised child behavior."]
+        );
+        assert_eq!(
+            retried.result.definition_hash,
+            child.definition_hash().unwrap()
+        );
+        let root = &retried.draft.nodes[&retried.draft.root_item_id].definition;
+        assert_ne!(root.definition_hash().unwrap(), old_root_hash);
+        let ItemReferenceBinding::Pinned {
+            definition_hash, ..
+        } = &root.reference_bindings[&ItemReferenceSlotId::parse("children").unwrap()][0]
+        else {
+            panic!("root reference must remain pinned")
+        };
+        assert_eq!(definition_hash, &retried.result.definition_hash);
+        let prompt = retry_model.snapshots.lock().unwrap()[0]
+            .request()
+            .messages
+            .iter()
+            .map(|message| message.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!prompt.contains("definitionHash"));
+        assert!(!prompt.contains("resourceBindings"));
+
+        let stale = CompositionRetryNodeService::built_in()
+            .unwrap()
+            .execute(
+                &retry_model,
+                &drafts,
+                request,
+                CompositionRetryNodeContext {
+                    pack: &pack,
+                    plan_contributions: &plan_contributions,
+                    retry_contributions: &retry_contributions,
+                    truth: &truth,
+                    project_context: None,
+                    custom_instructions: None,
+                    model: None,
+                },
+                &CancellationToken::new(),
+            )
+            .await;
+        assert!(matches!(
+            stale,
+            Err(CompositionRetryNodeError::DraftConflict)
+        ));
+        assert_eq!(retry_model.snapshots.lock().unwrap().len(), 1);
     }
 }

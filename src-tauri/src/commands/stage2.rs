@@ -3,15 +3,18 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use ats_adapters::{
-    CompositionDraftStoreError, FileResourceRepository, FileTruthSnapshotRepository,
-    ItemStoreError, Sts2TruthImporter,
+    CompositionDraftStoreError, FileCompositionDraftRepository, FileResourceRepository,
+    FileTruthSnapshotRepository, ItemStoreError, Sts2TruthImporter,
 };
 use ats_features::composition::{
     CompositionConfirmation, CompositionConfirmationError, CompositionConfirmationService,
     CompositionGraphError, ResolvedItemGraph,
 };
 use ats_features::composition_generate::{CompositionGenerateFeature, CompositionGenerateRequest};
-use ats_features::composition_plan::{CompositionPlanFeature, CompositionPlanRequest};
+use ats_features::composition_plan::{
+    CompositionPlanFeature, CompositionPlanRequest, CompositionRetryNodeFeature,
+    CompositionRetryNodeRequest,
+};
 use ats_features::item_definition::{ItemDefinitionValidationMode, ItemDefinitionValidator};
 use ats_features::mod_generate_batch::{
     BatchGenerateFeature, BatchGenerateRequest, validate_batch_generation_input,
@@ -73,9 +76,11 @@ pub async fn submit_feature(
     submission: SubmitFeatureRequest,
 ) -> CommandResult<RunId> {
     let session = current_session(&active, "run.submit")?;
+    let drafts = session.composition_draft_repository();
     ensure_submission_ready(
         composition.inner(),
         session.item_repository().as_ref(),
+        drafts.as_ref(),
         session.resource_repository().as_ref(),
         &submission,
     )?;
@@ -86,7 +91,6 @@ pub async fn submit_feature(
     let config = Arc::clone(config.inner());
     let resources = session.resource_repository();
     let items = session.item_repository();
-    let drafts = session.composition_draft_repository();
     let source_path = submission.source_path.map(PathBuf::from);
     session
         .submit(run, move |run, cancellation, repository| async move {
@@ -458,10 +462,11 @@ fn item_capabilities(composition: &Stage2Composition) -> CommandResult<ItemCapab
 fn ensure_submission_ready(
     composition: &Stage2Composition,
     items: &ats_adapters::FileItemRepository,
+    drafts: &FileCompositionDraftRepository,
     resources: &FileResourceRepository,
     submission: &SubmitFeatureRequest,
 ) -> CommandResult<()> {
-    let requested = requested_item_types(composition, submission)?;
+    let requested = requested_item_types(composition, drafts, submission)?;
     if requested.is_empty() {
         return Ok(());
     }
@@ -569,6 +574,7 @@ fn validate_generation_submission(
 
 fn requested_item_types(
     composition: &Stage2Composition,
+    drafts: &FileCompositionDraftRepository,
     submission: &SubmitFeatureRequest,
 ) -> CommandResult<Vec<ItemTypeId>> {
     let all = || composition.pack().item_types().keys().cloned().collect();
@@ -593,6 +599,25 @@ fn requested_item_types(
                 .composition_profile(&request.composition_id)
                 .map(|profile| vec![profile.root_item_type().clone()])
                 .ok_or_else(|| CommandFailure::item_invalid("run.submit.readiness"))
+        }
+        "composition.retry-node" => {
+            let request = submission
+                .request
+                .decode::<CompositionRetryNodeRequest>(
+                    &CompositionRetryNodeFeature::request_schema(),
+                )
+                .map_err(|_| CommandFailure::composition_invalid("run.submit.readiness"))?;
+            let draft = drafts
+                .load(&request.draft_id)
+                .map_err(|error| map_draft_store_error(error, "run.submit.readiness"))?;
+            if draft.revision != request.expected_revision {
+                return Err(CommandFailure::composition_conflict("run.submit.readiness"));
+            }
+            draft
+                .nodes
+                .get(&request.item_id)
+                .map(|node| vec![node.definition.item_type.clone()])
+                .ok_or_else(|| CommandFailure::composition_invalid("run.submit.readiness"))
         }
         "mod.plan" => {
             let request = submission
@@ -740,7 +765,8 @@ mod tests {
     use ats_features::mod_generate_batch::BatchDefinitionItem;
     use ats_features::mod_plan::PlanItem;
     use ats_features::project_package::ProjectPackageRequest;
-    use ats_kernel::ItemId;
+    use ats_kernel::{CompositionId, CompositionProfileId, ItemId};
+    use ats_workspace::{ItemCompositionProfile, ItemCompositionSource};
 
     use super::*;
 
@@ -793,6 +819,7 @@ mod tests {
     fn requested_item_types_are_decoded_from_each_generation_shape() {
         let temp = tempfile::tempdir().unwrap();
         let composition = Stage2Composition::built_in(temp.path().join("runtime")).unwrap();
+        let drafts = FileCompositionDraftRepository::new(temp.path().join("project"));
         let all = composition
             .pack()
             .item_types()
@@ -809,7 +836,10 @@ mod tests {
                 item_type: None,
             },
         );
-        assert_eq!(requested_item_types(&composition, &plan_all).unwrap(), all);
+        assert_eq!(
+            requested_item_types(&composition, &drafts, &plan_all).unwrap(),
+            all
+        );
 
         let single_request = submission(
             "mod.generate.single",
@@ -817,7 +847,7 @@ mod tests {
             &single(&selected),
         );
         assert_eq!(
-            requested_item_types(&composition, &single_request).unwrap(),
+            requested_item_types(&composition, &drafts, &single_request).unwrap(),
             vec![selected.clone()]
         );
 
@@ -840,7 +870,7 @@ mod tests {
             },
         );
         assert_eq!(
-            requested_item_types(&composition, &batch_request).unwrap(),
+            requested_item_types(&composition, &drafts, &batch_request).unwrap(),
             vec![selected.clone(), selected.clone()]
         );
 
@@ -866,8 +896,62 @@ mod tests {
             },
         );
         assert_eq!(
-            requested_item_types(&composition, &complex_request).unwrap(),
+            requested_item_types(&composition, &drafts, &complex_request).unwrap(),
             vec![selected]
+        );
+
+        std::fs::create_dir_all(temp.path().join("project")).unwrap();
+        let root_id = ItemId::parse("fixture-character").unwrap();
+        let composition_id = CompositionId::parse("character_suite").unwrap();
+        let profile_set = composition
+            .pack()
+            .composition_profile(&composition_id)
+            .unwrap();
+        let standard = profile_set
+            .profiles()
+            .iter()
+            .find(|profile| profile.id().as_str() == "standard")
+            .unwrap();
+        let profile = ItemCompositionProfile {
+            composition_id,
+            source: ItemCompositionSource::Preset {
+                profile_id: CompositionProfileId::parse("standard").unwrap(),
+            },
+            parameters: standard.values().clone(),
+        };
+        let mut definition =
+            ItemDefinition::new(root_id.clone(), profile_set.root_item_type().clone());
+        definition.composition_profile = Some(profile.clone());
+        let draft = CompositionDraft::new(
+            CompositionDraftId::parse("fixture-retry-draft").unwrap(),
+            composition.pack().id().clone(),
+            composition.pack().content_sha256().clone(),
+            root_id.clone(),
+            profile,
+            BTreeMap::from([(
+                root_id.clone(),
+                CompositionDraftNode {
+                    definition,
+                    expected_current_definition_hash: None,
+                },
+            )]),
+            chrono::Utc::now(),
+        )
+        .unwrap();
+        drafts.create(&draft).unwrap();
+        let retry = submission(
+            "composition.retry-node",
+            CompositionRetryNodeFeature::request_schema(),
+            &CompositionRetryNodeRequest {
+                draft_id: draft.draft_id,
+                expected_revision: draft.revision,
+                item_id: root_id,
+                instructions: "Revise this node.".into(),
+            },
+        );
+        assert_eq!(
+            requested_item_types(&composition, &drafts, &retry).unwrap(),
+            vec![profile_set.root_item_type().clone()]
         );
     }
 
@@ -878,6 +962,7 @@ mod tests {
         let project = temp.path().join("project");
         std::fs::create_dir(&project).unwrap();
         let resources = FileResourceRepository::new(project.clone());
+        let drafts = FileCompositionDraftRepository::new(project.clone());
         let items = ats_adapters::FileItemRepository::new(project);
         let request = submission(
             "mod.plan",
@@ -888,8 +973,8 @@ mod tests {
             },
         );
 
-        let error =
-            ensure_submission_ready(&composition, &items, &resources, &request).unwrap_err();
+        let error = ensure_submission_ready(&composition, &items, &drafts, &resources, &request)
+            .unwrap_err();
         let encoded = serde_json::to_value(error).unwrap();
         assert_eq!(encoded["code"], "truth.evidence_missing");
         assert_eq!(encoded["stage"], "run.submit.readiness");
@@ -903,7 +988,8 @@ mod tests {
             },
         );
         let encoded = serde_json::to_value(
-            ensure_submission_ready(&composition, &items, &resources, &undeclared).unwrap_err(),
+            ensure_submission_ready(&composition, &items, &drafts, &resources, &undeclared)
+                .unwrap_err(),
         )
         .unwrap();
         assert_eq!(encoded["code"], "item.definition_invalid");
@@ -913,6 +999,6 @@ mod tests {
             request: request.request,
             source_path: None,
         };
-        ensure_submission_ready(&composition, &items, &resources, &unrelated).unwrap();
+        ensure_submission_ready(&composition, &items, &drafts, &resources, &unrelated).unwrap();
     }
 }

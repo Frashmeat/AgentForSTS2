@@ -509,6 +509,23 @@
       }
     },
     {
+      "slotId": "composition.retry-node.guidance",
+      "featureId": "composition.retry-node",
+      "schema": { "id": "pack.composition-retry-node-guidance", "version": 1 },
+      "payload": {
+        "compositions": [
+          {
+            "compositionId": "character_suite",
+            "guidance": [
+              "Revise only the requested Character suite node while preserving its declared role in the surrounding suite.",
+              "Keep its behavior, bilingual localization, ownership, and root reachability coherent with the supplied Draft graph.",
+              "Follow the shared composition structure rules supplied with this request; do not add, remove, or rename another node."
+            ]
+          }
+        ]
+      }
+    },
+    {
       "slotId": "mod.generate.single",
       "featureId": "mod.generate.single",
       "schema": { "id": "pack.mod-generate-single", "version": 4 },

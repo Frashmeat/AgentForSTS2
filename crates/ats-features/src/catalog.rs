@@ -1,7 +1,7 @@
 use ats_kernel::ContributionId;
 
 use crate::composition_generate::CompositionGenerateFeature;
-use crate::composition_plan::CompositionPlanFeature;
+use crate::composition_plan::{CompositionPlanFeature, CompositionRetryNodeFeature};
 use crate::log_analyze::LogAnalyzeFeature;
 use crate::mod_generate_batch::BatchGenerateFeature;
 use crate::mod_generate_complex::ComplexGenerateFeature;
@@ -19,6 +19,10 @@ pub fn built_in_feature_contracts() -> Vec<FeatureContract> {
         contract::<ProjectCreateFeature>(&["project.create.template"]),
         contract::<ModPlanFeature>(&["mod.plan.guidance"]),
         contract::<CompositionPlanFeature>(&["composition.plan.guidance"]),
+        contract::<CompositionRetryNodeFeature>(&[
+            "composition.plan.guidance",
+            "composition.retry-node.guidance",
+        ]),
         contract::<CompositionGenerateFeature>(&[
             "composition.generate",
             "mod.plan.guidance",
@@ -55,6 +59,7 @@ pub fn built_in_feature_registry() -> Result<FeatureRegistry, FeatureRegistryErr
     registry.register::<ProjectCreateFeature>()?;
     registry.register::<ModPlanFeature>()?;
     registry.register::<CompositionPlanFeature>()?;
+    registry.register::<CompositionRetryNodeFeature>()?;
     registry.register::<CompositionGenerateFeature>()?;
     registry.register::<ResourcePrepareFeature>()?;
     registry.register::<SingleGenerateFeature>()?;
@@ -87,7 +92,7 @@ mod tests {
     #[test]
     fn built_in_catalog_has_unique_feature_contracts() {
         let contracts = built_in_feature_contracts();
-        assert_eq!(contracts.len(), 11);
+        assert_eq!(contracts.len(), 12);
         let batch = contracts
             .iter()
             .find(|contract| contract.id.as_str() == "mod.generate.batch")

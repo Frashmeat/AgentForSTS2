@@ -388,6 +388,139 @@ async fn sts2_placeholder_prototype_compiles_builds_packages_and_publishes_one_c
     }
 }
 
+#[tokio::test]
+async fn sts2_standard_and_custom_profiles_build_valid_35_to_43_node_drafts() {
+    let temp = tempfile::tempdir().unwrap();
+    let pack = GamePackLoader::load_built_in_sts2().unwrap();
+    let truth = truth(&pack);
+    let resolver = ContributionResolver::new(Vec::<PrimitiveId>::new());
+    let contributions = resolve::<CompositionPlanFeature>(
+        &resolver,
+        &pack,
+        CompositionPlanFeature::contribution_requirement(),
+    );
+    let profile_set = pack
+        .composition_profile(&CompositionId::parse("character_suite").unwrap())
+        .unwrap();
+    let standard = profile_set
+        .profiles()
+        .iter()
+        .find(|profile| profile.id().as_str() == "standard")
+        .unwrap();
+    let mut cases = vec![(
+        "standard-scale-draft",
+        ItemCompositionSource::Preset {
+            profile_id: CompositionProfileId::parse("standard").unwrap(),
+        },
+        standard.values().clone(),
+        35_u32,
+    )];
+    let mut custom = standard.values().clone();
+    custom.insert(
+        ats_kernel::CompositionParameterId::parse("powers").unwrap(),
+        8,
+    );
+    cases.push((
+        "custom-scale-draft",
+        ItemCompositionSource::Custom {
+            base_profile_id: CompositionProfileId::parse("standard").unwrap(),
+        },
+        custom,
+        43,
+    ));
+
+    for (draft_id, source, parameters, expected_nodes) in cases {
+        let project = temp.path().join(draft_id);
+        fs::create_dir_all(&project).unwrap();
+        let items = FileItemRepository::new(project.clone());
+        let drafts = FileCompositionDraftRepository::new(project);
+        let model = QueueModel {
+            responses: Mutex::new(VecDeque::from([scale_plan_response(&parameters)])),
+            snapshots: Mutex::new(Vec::new()),
+        };
+        let execution = CompositionPlanService::built_in()
+            .unwrap()
+            .execute(
+                &model,
+                &items,
+                &drafts,
+                CompositionPlanRequest {
+                    draft_id: CompositionDraftId::parse(draft_id).unwrap(),
+                    composition_id: CompositionId::parse("character_suite").unwrap(),
+                    concept: "Build a deterministic scale-gate Character suite.".into(),
+                    source,
+                    parameters,
+                },
+                CompositionPlanContext {
+                    pack: &pack,
+                    contributions: &contributions,
+                    truth: &truth,
+                    project_context: Some("O6 scale gate"),
+                    custom_instructions: None,
+                    model: None,
+                },
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(execution.result.node_count, expected_nodes);
+        assert_eq!(execution.draft.nodes.len(), expected_nodes as usize);
+        let mut nodes = execution.draft.nodes.clone();
+        for (item_id, node) in &mut nodes {
+            let roles: &[&str] = match node.definition.item_type.as_str() {
+                "card" => &["card.portrait", "card.big"],
+                "relic" => &["relic.normal", "relic.outline", "relic.big"],
+                "potion" => &["potion.icon"],
+                "power" => &["power.icon", "power.big"],
+                _ => &[],
+            };
+            for role in roles {
+                node.definition.resource_bindings.insert(
+                    ResourceId::parse(*role).unwrap(),
+                    ItemResourceBinding {
+                        resource_id: ResourceId::parse(format!(
+                            "resource.{}-{}",
+                            item_id.as_str(),
+                            role.replace('.', "-")
+                        ))
+                        .unwrap(),
+                        selected_version: Sha256Digest::parse("a".repeat(64)).unwrap(),
+                    },
+                );
+            }
+        }
+        let child_hashes = nodes
+            .iter()
+            .map(|(item_id, node)| (item_id.clone(), node.definition.definition_hash().unwrap()))
+            .collect::<BTreeMap<_, _>>();
+        for binding in nodes
+            .get_mut(&execution.draft.root_item_id)
+            .unwrap()
+            .definition
+            .reference_bindings
+            .values_mut()
+            .flatten()
+        {
+            if let ats_workspace::ItemReferenceBinding::Pinned {
+                item_id,
+                definition_hash,
+                ..
+            } = binding
+            {
+                *definition_hash = child_hashes[item_id].clone();
+            }
+        }
+        let ready = execution
+            .draft
+            .revised(nodes, execution.draft.updated_at + Duration::seconds(1))
+            .unwrap();
+        let selected = ready.nodes.keys().cloned().collect::<Vec<_>>();
+        let confirmation =
+            CompositionConfirmationService::confirm(&pack, &ready, &selected, &items).unwrap();
+        assert_eq!(confirmation.definitions.len(), expected_nodes as usize);
+    }
+}
+
 struct MachinePaths {
     sts2_assembly: PathBuf,
     godot: PathBuf,
@@ -565,6 +698,140 @@ fn prototype_plan_response() -> String {
     nodes.push(root);
     nodes.push(relic);
     json!({"rootItemId":ROOT_ID,"nodes":nodes}).to_string()
+}
+
+fn scale_plan_response(parameters: &BTreeMap<ats_kernel::CompositionParameterId, u32>) -> String {
+    let count = |id: &str| parameters[&ats_kernel::CompositionParameterId::parse(id).unwrap()];
+    let starter_cards = count("starter_card_types");
+    let card_count =
+        starter_cards + count("common_cards") + count("uncommon_cards") + count("rare_cards");
+    let starter_relics = count("starter_relics");
+    let relic_count = starter_relics + count("relics");
+    let potion_count = count("potions");
+    let power_count = count("powers");
+    let root_id = "scale-character";
+
+    let mut nodes = Vec::new();
+    for index in 1..=card_count {
+        nodes.push(json!({
+            "itemId":format!("scale-card-{index:02}"),
+            "itemType":"card",
+            "canonicalFields":{
+                "pool":{"kind":"choice","value":"custom_character"},
+                "card_type":{"kind":"choice","value":if index % 2 == 0 {"skill"} else {"attack"}},
+                "rarity":{"kind":"choice","value":if index <= starter_cards {"basic"} else {"common"}},
+                "target":{"kind":"choice","value":if index % 2 == 0 {"self"} else {"any_enemy"}},
+                "base_cost":{"kind":"integer","value":1}
+            },
+            "behaviorIntent":[format!("Provide scale card {index} behavior.")],
+            "localizations":localized_name_description(&format!("Scale Card {index}")),
+            "referenceBindings":{
+                "owner_character":[{"kind":"identity","itemId":root_id,"expectedItemType":"character"}]
+            }
+        }));
+    }
+    for index in 1..=relic_count {
+        nodes.push(json!({
+            "itemId":format!("scale-relic-{index:02}"),
+            "itemType":"relic",
+            "canonicalFields":{"rarity":{"kind":"choice","value":if index <= starter_relics {"starter"} else {"common"}}},
+            "behaviorIntent":[format!("Provide scale relic {index} behavior.")],
+            "localizations":localized_name_description(&format!("Scale Relic {index}")),
+            "referenceBindings":{
+                "owner_character":[{"kind":"identity","itemId":root_id,"expectedItemType":"character"}]
+            }
+        }));
+    }
+    for index in 1..=potion_count {
+        nodes.push(json!({
+            "itemId":format!("scale-potion-{index:02}"),
+            "itemType":"potion",
+            "canonicalFields":{
+                "rarity":{"kind":"choice","value":"common"},
+                "usage":{"kind":"choice","value":"combat_only"},
+                "target":{"kind":"choice","value":"any_enemy"}
+            },
+            "behaviorIntent":[format!("Provide scale potion {index} behavior.")],
+            "localizations":localized_name_description(&format!("Scale Potion {index}")),
+            "referenceBindings":{
+                "owner_character":[{"kind":"identity","itemId":root_id,"expectedItemType":"character"}]
+            }
+        }));
+    }
+    for index in 1..=power_count {
+        nodes.push(json!({
+            "itemId":format!("scale-power-{index:02}"),
+            "itemType":"power",
+            "canonicalFields":{
+                "power_type":{"kind":"choice","value":"buff"},
+                "stack_type":{"kind":"choice","value":"counter"},
+                "instance_type":{"kind":"choice","value":"none"},
+                "allow_negative":{"kind":"boolean","value":false}
+            },
+            "behaviorIntent":[format!("Provide scale power {index} behavior.")],
+            "localizations":localized_name_description(&format!("Scale Power {index}")),
+            "referenceBindings":{}
+        }));
+    }
+
+    let card_refs = (1..=card_count)
+        .map(
+            |index| json!({"kind":"pinned","itemId":format!("scale-card-{index:02}"),"quantity":1}),
+        )
+        .collect::<Vec<_>>();
+    let deck_size = count("starting_deck_size");
+    let base_quantity = deck_size / starter_cards;
+    let remainder = deck_size % starter_cards;
+    let starting_deck = (1..=starter_cards)
+        .map(|index| {
+            json!({
+                "kind":"pinned",
+                "itemId":format!("scale-card-{index:02}"),
+                "quantity":base_quantity + u32::from(index <= remainder)
+            })
+        })
+        .collect::<Vec<_>>();
+    let relic_refs = (1..=relic_count)
+        .map(|index| json!({"kind":"pinned","itemId":format!("scale-relic-{index:02}"),"quantity":1}))
+        .collect::<Vec<_>>();
+    let starting_relic_refs = (1..=starter_relics)
+        .map(|index| json!({"kind":"pinned","itemId":format!("scale-relic-{index:02}"),"quantity":1}))
+        .collect::<Vec<_>>();
+    let potion_refs = (1..=potion_count)
+        .map(|index| json!({"kind":"pinned","itemId":format!("scale-potion-{index:02}"),"quantity":1}))
+        .collect::<Vec<_>>();
+    let power_refs = (1..=power_count)
+        .map(|index| json!({"kind":"pinned","itemId":format!("scale-power-{index:02}"),"quantity":1}))
+        .collect::<Vec<_>>();
+    let mut root_bindings = serde_json::Map::from_iter([
+        ("starting_deck".into(), json!(starting_deck)),
+        ("cards".into(), json!(card_refs)),
+        ("starting_relics".into(), json!(starting_relic_refs)),
+        ("relics".into(), json!(relic_refs)),
+    ]);
+    if !potion_refs.is_empty() {
+        root_bindings.insert("potions".into(), json!(potion_refs));
+    }
+    if !power_refs.is_empty() {
+        root_bindings.insert("powers".into(), json!(power_refs));
+    }
+    nodes.push(json!({
+        "itemId":root_id,
+        "itemType":"character",
+        "canonicalFields":{
+            "visual_profile":{"kind":"choice","value":"placeholder"},
+            "placeholder_id":{"kind":"choice","value":"ironclad"},
+            "name_color":{"kind":"text","value":"7D3FC8FF"},
+            "gender":{"kind":"choice","value":"neutral"},
+            "starting_hp":{"kind":"integer","value":70},
+            "starting_gold":{"kind":"integer","value":99},
+            "max_energy":{"kind":"integer","value":3}
+        },
+        "behaviorIntent":["Provide one deterministic scale-gate Character."],
+        "localizations":character_localizations(),
+        "referenceBindings":root_bindings
+    }));
+    json!({"rootItemId":root_id,"nodes":nodes}).to_string()
 }
 
 fn localized_name_description(name: &str) -> Value {
