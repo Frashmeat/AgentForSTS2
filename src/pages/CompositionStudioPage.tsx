@@ -3,6 +3,7 @@ import {
   ChevronLeft,
   ChevronRight,
   FileCheck2,
+  Hammer,
   ListFilter,
   RefreshCw,
   Save,
@@ -11,7 +12,7 @@ import {
 } from "lucide-react";
 
 import { ActionableErrorNotice } from "@/components/ActionableErrorNotice";
-import { Button, Card, CardSection, Field, Notice, PageHero } from "@/components/ui";
+import { Badge, Button, Card, CardSection, Field, Notice, PageHero } from "@/components/ui";
 import { api } from "@/services/api";
 import { toActionableFailure, type ActionableFailure } from "@/services/actionableFailure";
 import { waitForRun } from "@/services/runPolling";
@@ -19,11 +20,14 @@ import type {
   CompositionDraft,
   CompositionProfileSet,
   ItemCapabilityCatalog,
+  RunRecord,
   StoredItemDefinition,
 } from "@/services/tauriApi";
 import {
   buildCompositionPlanRequest,
+  buildCompositionGenerateRequest,
   closedSelection,
+  compositionRoots,
   defaultProfileChoice,
   displayName,
   draftRows,
@@ -55,6 +59,13 @@ export function CompositionStudioPage() {
   const [page, setPage] = useState(1);
   const [failure, setFailure] = useState<ActionableFailure | null>(null);
   const [busy, setBusy] = useState(false);
+  const [selectedRootKey, setSelectedRootKey] = useState("");
+  const [artifactId, setArtifactId] = useState("");
+  const [modId, setModId] = useState("");
+  const [sourceRoot, setSourceRoot] = useState("delivery");
+  const [outputPath, setOutputPath] = useState("packages/mod.zip");
+  const [lastGenerationRunId, setLastGenerationRunId] = useState("");
+  const [lastGenerationRun, setLastGenerationRun] = useState<RunRecord | null>(null);
 
   const profile = useMemo(
     () => catalog?.compositionProfiles.find((value) => value.id === compositionId) ?? null,
@@ -75,6 +86,11 @@ export function CompositionStudioPage() {
     () => Array.from(new Set(Object.values(draft?.nodes ?? {}).map((node) => node.definition.itemType))).sort(),
     [draft],
   );
+  const roots = useMemo(
+    () => compositionRoots(definitions, catalog?.compositionProfiles ?? []),
+    [definitions, catalog],
+  );
+  const selectedRoot = roots.find((value) => definitionKey(value) === selectedRootKey) ?? roots[0] ?? null;
 
   useEffect(() => {
     if (!__IS_TAURI__) return;
@@ -93,6 +109,17 @@ export function CompositionStudioPage() {
       setProjectOpen(current !== null);
       setDrafts(nextDrafts);
       setDefinitions(nextDefinitions);
+      setSelectedRootKey((value) => {
+        const nextRoots = compositionRoots(nextDefinitions, nextCatalog.compositionProfiles);
+        return nextRoots.some((definition) => definitionKey(definition) === value)
+          ? value
+          : nextRoots[0] ? definitionKey(nextRoots[0]) : "";
+      });
+      if (current) {
+        setModId((value) => value || current.csharpName);
+        setArtifactId((value) => value || `${current.csharpName}-composition`);
+        setOutputPath((value) => value === "packages/mod.zip" ? `packages/${current.csharpName}.zip` : value);
+      }
       const nextProfile = nextCatalog.compositionProfiles.find((value) => value.id === compositionId)
         ?? nextCatalog.compositionProfiles[0];
       if (nextProfile && (!profile || profile.id !== nextProfile.id)) selectComposition(nextProfile);
@@ -189,8 +216,37 @@ export function CompositionStudioPage() {
     setBusy(true);
     setFailure(null);
     try {
-      await api.confirmCompositionDraft(draft.draftId, draft.revision, Array.from(selectedIds));
-      setDefinitions(await api.listItemDefinitions());
+      const confirmation = await api.confirmCompositionDraft(draft.draftId, draft.revision, Array.from(selectedIds));
+      const nextDefinitions = await api.listItemDefinitions();
+      setDefinitions(nextDefinitions);
+      const root = confirmation.definitions.find((value) => value.definition.itemId === draft.rootItemId);
+      if (root) setSelectedRootKey(definitionKey(root));
+    } catch (error: unknown) {
+      setFailure(toActionableFailure(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function generateComposition() {
+    if (!selectedRoot || !artifactId.trim() || !modId.trim() || !sourceRoot.trim() || !outputPath.trim()) return;
+    setBusy(true);
+    setFailure(null);
+    try {
+      const runId = await api.submitCompositionGenerate(buildCompositionGenerateRequest(
+        artifactId,
+        modId,
+        selectedRoot,
+        draft,
+        {
+          sourceRelativeRoot: sourceRoot,
+          outputRelativePath: outputPath,
+          compressionLevel: 6,
+        },
+      ));
+      setLastGenerationRunId(runId);
+      setLastGenerationRun(null);
+      await waitForRun(runId, setLastGenerationRun);
     } catch (error: unknown) {
       setFailure(toActionableFailure(error));
     } finally {
@@ -263,6 +319,50 @@ export function CompositionStudioPage() {
         </Card>
       )}
 
+      {catalog && catalog.compositionProfiles.length > 0 && (
+        <Card eyebrow="whole-closure publication" title="Generate composition" subtitle="Generate every pinned definition in one isolated build and publish only after the complete closure passes.">
+          {roots.length === 0 ? (
+            <Notice variant="muted" title="No confirmed root">Confirm a complete composition root before generation.</Notice>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                <Field label="Composition root">
+                  <select data-testid="composition-generate-root" value={selectedRoot ? definitionKey(selectedRoot) : ""} onChange={(event) => setSelectedRootKey(event.target.value)}>
+                    {roots.map((value) => <option key={definitionKey(value)} value={definitionKey(value)}>{value.definition.itemId} · {value.definitionHash.slice(0, 12)}</option>)}
+                  </select>
+                </Field>
+                <Field label="Artifact ID"><input data-testid="composition-artifact-id" className="input-mono" value={artifactId} onChange={(event) => setArtifactId(event.target.value)} /></Field>
+                <Field label="Mod ID"><input data-testid="composition-mod-id" className="input-mono" value={modId} onChange={(event) => setModId(event.target.value)} /></Field>
+                <Field label="Build output root"><input data-testid="composition-source-root" className="input-mono" value={sourceRoot} onChange={(event) => setSourceRoot(event.target.value)} /></Field>
+                <Field label="Package output"><input data-testid="composition-output-path" className="input-mono" value={outputPath} onChange={(event) => setOutputPath(event.target.value)} /></Field>
+              </div>
+              <div className="flex items-center gap-3 mt-3 flex-wrap">
+                <Button data-testid="composition-generate" variant="accent" disabled={busy || !projectOpen || !selectedRoot || !artifactId.trim() || !modId.trim() || !sourceRoot.trim() || !outputPath.trim()} onClick={() => void generateComposition()}><Hammer size={14} /> Generate and package</Button>
+                {lastGenerationRunId && <span className="font-mono text-xs text-ink-mute">{lastGenerationRunId}</span>}
+              </div>
+            </>
+          )}
+        </Card>
+      )}
+
+      {lastGenerationRun && (
+        <Card
+          eyebrow="composition run"
+          title={lastGenerationRun.featureId}
+          actions={(
+            <Badge variant={lastGenerationRun.status === "succeeded" ? "ok" : lastGenerationRun.status === "failed" ? "error" : "warn"}>
+              {lastGenerationRun.status}
+            </Badge>
+          )}
+        >
+          {lastGenerationRun.failure && (
+            <Notice variant="error" title={lastGenerationRun.failure.code}>
+              {lastGenerationRun.failure.stage}
+            </Notice>
+          )}
+        </Card>
+      )}
+
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(260px,0.65fr)_minmax(0,1.9fr)] gap-4">
         <Card eyebrow="draft repository" title="Drafts">
           <div className="space-y-2">
@@ -326,4 +426,8 @@ export function CompositionStudioPage() {
       </div>
     </div>
   );
+}
+
+function definitionKey(definition: StoredItemDefinition): string {
+  return `${definition.definition.itemId}:${definition.definitionHash}`;
 }

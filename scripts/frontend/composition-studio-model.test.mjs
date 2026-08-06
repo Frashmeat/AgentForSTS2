@@ -8,7 +8,9 @@ after(async () => vite.close());
 
 const {
   buildCompositionPlanRequest,
+  buildCompositionGenerateRequest,
   closedSelection,
+  compositionRoots,
   defaultProfileChoice,
   draftRows,
   pageRows,
@@ -117,7 +119,42 @@ test("Draft filtering, pagination, and partial closure are deterministic", () =>
   assert.deepEqual(pageRows([1, 2, 3], 2, 2), { rows: [3], page: 2, pageCount: 2 });
   assert.equal(closedSelection(draft, new Set(["fixture-root"])), false);
   assert.equal(closedSelection(draft, new Set(["fixture-root", "fixture-child"])), true);
-  assert.equal(closedSelection(draft, new Set(["fixture-child"])), false);
+  assert.equal(closedSelection(draft, new Set(["fixture-child"])), true);
+});
+
+test("confirmed roots build one exact whole-closure request", () => {
+  const root = {
+    definitionHash: hash,
+    definition: {
+      ...definition("fixture-root", "root"),
+      compositionProfile: draft.profile,
+    },
+  };
+  const child = { definitionHash: hash, definition: definition("fixture-child", "child") };
+  assert.deepEqual(compositionRoots([child, root], [profile]), [root]);
+  assert.deepEqual(buildCompositionGenerateRequest(
+    " fixture-composition ",
+    " FixtureMod ",
+    root,
+    draft,
+    {
+      sourceRelativeRoot: " delivery ",
+      outputRelativePath: " packages/FixtureMod.zip ",
+      compressionLevel: 6,
+    },
+  ), {
+    artifactId: "fixture-composition",
+    modId: "FixtureMod",
+    root,
+    draft: { draftId: "fixture-draft", revision: 1 },
+    package: {
+      artifactId: "fixture-composition",
+      modId: "FixtureMod",
+      sourceRelativeRoot: "delivery",
+      outputRelativePath: "packages/FixtureMod.zip",
+      compressionLevel: 6,
+    },
+  });
 });
 
 test("IPC guards reject malformed Draft and confirmation payloads", () => {

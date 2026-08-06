@@ -213,8 +213,9 @@ export interface BatchGenerateRequest extends Record<string, unknown> {
 }
 
 export interface SingleGenerateResult extends Record<string, unknown> {
-  artifactManifestRef: string;
-  manifestSha256: string;
+  publication: "published" | "composition_staged";
+  artifactManifestRef?: string | null;
+  manifestSha256?: string | null;
   generatedFileCount: number;
   validationPrimitive: string;
   acceptanceNotes: string[];
@@ -247,6 +248,26 @@ export interface ProjectPackageRequest extends Record<string, unknown> {
   compressionLevel?: number | null;
 }
 
+export interface ProjectPackageResult extends Record<string, unknown> {
+  publication: "published" | "composition_staged";
+  artifactManifestRef?: string | null;
+  manifestSha256?: string | null;
+  outputRelativePath: string;
+  report: {
+    fileCount: number;
+    uncompressedBytes: number;
+    packageBytes: number;
+  };
+}
+
+export interface CompositionGenerateRequest extends Record<string, unknown> {
+  artifactId: string;
+  modId: string;
+  root: StoredItemDefinition;
+  draft?: { draftId: string; revision: number } | null;
+  package: ProjectPackageRequest;
+}
+
 export interface ComplexGenerateRequest extends Record<string, unknown> {
   batch: BatchGenerateRequest;
   package: ProjectPackageRequest;
@@ -258,7 +279,7 @@ export interface ComplexGenerateResult extends Record<string, unknown> {
   buildRunId?: string | null;
   build?: Record<string, unknown> | null;
   packageRunId?: string | null;
-  package?: Record<string, unknown> | null;
+  package?: ProjectPackageResult | null;
 }
 
 export interface LogAnalyzeRequest extends Record<string, unknown> {
@@ -276,7 +297,9 @@ export interface ResourcePrepareRequest extends Record<string, unknown> {
     | { kind: "ai_generated"; prompt: string; model?: string | null };
 }
 
-export interface ProjectBuildRequest extends Record<string, unknown> {}
+export interface ProjectBuildRequest extends Record<string, unknown> {
+  outputRelativeRoot?: string | null;
+}
 
 export function submitModPlan(request: ModPlanRequest): Promise<string> {
   return submit("mod.plan", "feature.mod-plan-request", request);
@@ -284,6 +307,10 @@ export function submitModPlan(request: ModPlanRequest): Promise<string> {
 
 export function submitCompositionPlan(request: CompositionPlanRequest): Promise<string> {
   return submit("composition.plan", "feature.composition-plan-request", request);
+}
+
+export function submitCompositionGenerate(request: CompositionGenerateRequest): Promise<string> {
+  return submit("composition.generate", "feature.composition-generate-request", request);
 }
 
 export function submitSingleGenerate(request: SingleGenerateRequest): Promise<string> {
@@ -310,7 +337,7 @@ export function submitResourcePrepare(
 }
 
 export function submitProjectBuild(request: ProjectBuildRequest = {}): Promise<string> {
-  return submit("project.build", "feature.project-build-request", request);
+  return submit("project.build", "feature.project-build-request", request, 2);
 }
 
 export function submitProjectPackage(request: ProjectPackageRequest): Promise<string> {

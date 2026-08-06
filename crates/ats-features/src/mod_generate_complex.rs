@@ -241,7 +241,9 @@ impl<'a> ComplexGenerateService<'a> {
         }
 
         check_cancelled(cancellation)?;
-        let build_request = ProjectBuildRequest {};
+        let build_request = ProjectBuildRequest {
+            output_relative_root: None,
+        };
         let mut build_run = running_run::<ProjectBuildFeature, _>(&build_request)?;
         let build_result = self
             .build

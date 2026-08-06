@@ -8,7 +8,9 @@ use ats_adapters::{
 };
 use ats_features::composition::{
     CompositionConfirmation, CompositionConfirmationError, CompositionConfirmationService,
+    CompositionGraphError, ResolvedItemGraph,
 };
+use ats_features::composition_generate::{CompositionGenerateFeature, CompositionGenerateRequest};
 use ats_features::composition_plan::{CompositionPlanFeature, CompositionPlanRequest};
 use ats_features::item_definition::{ItemDefinitionValidationMode, ItemDefinitionValidator};
 use ats_features::mod_generate_batch::{
@@ -73,6 +75,7 @@ pub async fn submit_feature(
     let session = current_session(&active, "run.submit")?;
     ensure_submission_ready(
         composition.inner(),
+        session.item_repository().as_ref(),
         session.resource_repository().as_ref(),
         &submission,
     )?;
@@ -454,6 +457,7 @@ fn item_capabilities(composition: &Stage2Composition) -> CommandResult<ItemCapab
 
 fn ensure_submission_ready(
     composition: &Stage2Composition,
+    items: &ats_adapters::FileItemRepository,
     resources: &FileResourceRepository,
     submission: &SubmitFeatureRequest,
 ) -> CommandResult<()> {
@@ -474,12 +478,13 @@ fn ensure_submission_ready(
             ));
         }
     }
-    validate_generation_submission(composition, resources, submission)?;
+    validate_generation_submission(composition, items, resources, submission)?;
     Ok(())
 }
 
 fn validate_generation_submission(
     composition: &Stage2Composition,
+    items: &ats_adapters::FileItemRepository,
     resources: &FileResourceRepository,
     submission: &SubmitFeatureRequest,
 ) -> CommandResult<()> {
@@ -489,6 +494,27 @@ fn validate_generation_submission(
             .map_err(map_generation_readiness)
     };
     match submission.feature_id.as_str() {
+        "composition.generate" => {
+            let request = submission
+                .request
+                .decode::<CompositionGenerateRequest>(&CompositionGenerateFeature::request_schema())
+                .map_err(|_| CommandFailure::composition_invalid("run.submit.readiness"))?;
+            let truth = composition
+                .current_truth()
+                .map_err(|_| CommandFailure::truth_missing("run.submit.readiness"))?;
+            let contributions = resource_contributions(composition, "run.submit.resources")?;
+            ResolvedItemGraph::resolve(
+                composition.pack(),
+                &truth,
+                &contributions,
+                items,
+                resources,
+                request.root,
+                request.draft,
+            )
+            .map(|_| ())
+            .map_err(map_composition_graph)
+        }
         "mod.generate.single" => {
             let request = submission
                 .request
@@ -550,6 +576,13 @@ fn requested_item_types(
         ItemTypeId::parse(value).map_err(|_| CommandFailure::item_invalid("run.submit.readiness"))
     };
     match submission.feature_id.as_str() {
+        "composition.generate" => {
+            let request = submission
+                .request
+                .decode::<CompositionGenerateRequest>(&CompositionGenerateFeature::request_schema())
+                .map_err(|_| CommandFailure::composition_invalid("run.submit.readiness"))?;
+            Ok(vec![request.root.definition.item_type])
+        }
         "composition.plan" => {
             let request = submission
                 .request
@@ -604,6 +637,19 @@ fn requested_item_types(
                 .collect())
         }
         _ => Ok(Vec::new()),
+    }
+}
+
+fn map_composition_graph(error: CompositionGraphError) -> CommandFailure {
+    match error {
+        CompositionGraphError::Storage => {
+            CommandFailure::composition_storage("run.submit.readiness")
+        }
+        CompositionGraphError::ItemMissing => {
+            CommandFailure::composition_not_found("run.submit.readiness")
+        }
+        CompositionGraphError::Readiness => CommandFailure::item_invalid("run.submit.readiness"),
+        _ => CommandFailure::composition_invalid("run.submit.readiness"),
     }
 }
 
@@ -831,7 +877,8 @@ mod tests {
         let composition = Stage2Composition::built_in(temp.path().join("runtime")).unwrap();
         let project = temp.path().join("project");
         std::fs::create_dir(&project).unwrap();
-        let resources = FileResourceRepository::new(project);
+        let resources = FileResourceRepository::new(project.clone());
+        let items = ats_adapters::FileItemRepository::new(project);
         let request = submission(
             "mod.plan",
             ModPlanFeature::request_schema(),
@@ -841,7 +888,8 @@ mod tests {
             },
         );
 
-        let error = ensure_submission_ready(&composition, &resources, &request).unwrap_err();
+        let error =
+            ensure_submission_ready(&composition, &items, &resources, &request).unwrap_err();
         let encoded = serde_json::to_value(error).unwrap();
         assert_eq!(encoded["code"], "truth.evidence_missing");
         assert_eq!(encoded["stage"], "run.submit.readiness");
@@ -855,7 +903,7 @@ mod tests {
             },
         );
         let encoded = serde_json::to_value(
-            ensure_submission_ready(&composition, &resources, &undeclared).unwrap_err(),
+            ensure_submission_ready(&composition, &items, &resources, &undeclared).unwrap_err(),
         )
         .unwrap();
         assert_eq!(encoded["code"], "item.definition_invalid");
@@ -865,6 +913,6 @@ mod tests {
             request: request.request,
             source_path: None,
         };
-        ensure_submission_ready(&composition, &resources, &unrelated).unwrap();
+        ensure_submission_ready(&composition, &items, &resources, &unrelated).unwrap();
     }
 }

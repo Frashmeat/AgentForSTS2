@@ -2,10 +2,12 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use ats_game_context::{ContributionResolverError, LoadedGamePack, VerifiedContributionSet};
-use ats_kernel::{ContributionId, FeatureId, PrimitiveId, SchemaId, SchemaRef, SchemaVersion};
+use ats_kernel::{
+    ContributionId, FailureCode, FeatureId, PrimitiveId, SchemaId, SchemaRef, SchemaVersion,
+};
 use ats_runtime::{
     BuildError, BuildRunner, BuildStepReport, BuildStepRequest, CancellationToken, PayloadError,
-    RunLifecycleError, RunRecord, RunStatus, RunTransition, VersionedPayload,
+    RunFailure, RunLifecycleError, RunRecord, RunStatus, RunTransition, VersionedPayload,
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -25,7 +27,7 @@ impl FeatureSpec for ProjectBuildFeature {
     }
 
     fn request_schema() -> SchemaRef {
-        schema("feature.project-build-request")
+        schema_version("feature.project-build-request", 2)
     }
 
     fn result_schema() -> SchemaRef {
@@ -49,7 +51,10 @@ impl ProjectBuildFeature {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ProjectBuildRequest {}
+pub struct ProjectBuildRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_relative_root: Option<String>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -81,6 +86,8 @@ struct BuildRecipe {
 struct BuildStep {
     id: String,
     primitive: PrimitiveId,
+    #[serde(default)]
+    isolated_output_property: Option<String>,
 }
 
 impl BuildRecipe {
@@ -90,7 +97,13 @@ impl BuildRecipe {
         }
         let mut ids = BTreeSet::new();
         for step in &self.steps {
-            if !valid_id(&step.id) || !ids.insert(step.id.as_str()) {
+            if !valid_id(&step.id)
+                || !ids.insert(step.id.as_str())
+                || step
+                    .isolated_output_property
+                    .as_deref()
+                    .is_some_and(|property| !valid_property(property))
+            {
                 return Err(ProjectBuildError::InvalidRecipe);
             }
         }
@@ -117,8 +130,17 @@ impl ProjectBuildService {
     ) -> Result<ProjectBuildResult, ProjectBuildError> {
         validate_run(run, &request)?;
         validate_context(&context)?;
+        validate_request(&request)?;
         let recipe: BuildRecipe = context.contributions.decode(&build_slot())?;
         recipe.validate()?;
+        if request.output_relative_root.is_some()
+            && recipe
+                .steps
+                .iter()
+                .any(|step| step.isolated_output_property.is_none())
+        {
+            return Err(ProjectBuildError::InvalidRecipe);
+        }
         let mut steps = Vec::with_capacity(recipe.steps.len());
         for step in recipe.steps {
             if cancellation.is_cancelled() {
@@ -130,6 +152,11 @@ impl ProjectBuildService {
                         primitive: step.primitive,
                         project_root: context.project_root.to_path_buf(),
                         run_id: run.id().clone(),
+                        isolated_output_property: request
+                            .output_relative_root
+                            .as_ref()
+                            .and(step.isolated_output_property),
+                        output_relative_root: request.output_relative_root.clone(),
                     },
                     cancellation,
                 )
@@ -170,6 +197,45 @@ pub enum ProjectBuildError {
     Lifecycle(#[from] RunLifecycleError),
 }
 
+impl ProjectBuildError {
+    #[must_use]
+    pub fn run_failure(&self) -> RunFailure {
+        let (code, stage) = match self {
+            Self::InvalidRun => ("run.input_invalid", "project.build.request"),
+            Self::ContextIdentityMismatch => ("truth.context_mismatch", "project.build.context"),
+            Self::InvalidRecipe | Self::Contribution(_) => {
+                ("pack.contribution_invalid", "project.build.pack")
+            }
+            Self::Cancelled | Self::Build(BuildError::Cancelled) => {
+                ("run.cancelled", "project.build.execute")
+            }
+            Self::Build(BuildError::InvalidRequest) => {
+                ("validation.input_invalid", "project.build.request")
+            }
+            Self::Build(BuildError::UnknownPrimitive) => {
+                ("validation.primitive_unknown", "project.build.execute")
+            }
+            Self::Build(BuildError::Rejected(_)) => {
+                ("validation.rejected", "project.build.execute")
+            }
+            Self::Build(BuildError::Unavailable { .. }) => {
+                ("validation.unavailable", "project.build.execute")
+            }
+            Self::Build(BuildError::InvalidReport) => {
+                ("validation.report_invalid", "project.build.execute")
+            }
+            Self::Payload(_) => ("run.result_invalid", "project.build.result"),
+            Self::Lifecycle(_) => ("run.transition_failed", "project.build.result"),
+        };
+        RunFailure::new(
+            FailureCode::parse(code).expect("built-in failure code is valid"),
+            stage,
+            None,
+        )
+        .expect("built-in Run failure is valid")
+    }
+}
+
 fn validate_run(run: &RunRecord, request: &ProjectBuildRequest) -> Result<(), ProjectBuildError> {
     if run.feature_id() != &ProjectBuildFeature::id() || run.status() != RunStatus::Running {
         return Err(ProjectBuildError::InvalidRun);
@@ -194,6 +260,17 @@ fn validate_context(context: &ProjectBuildContext<'_>) -> Result<(), ProjectBuil
     Ok(())
 }
 
+fn validate_request(request: &ProjectBuildRequest) -> Result<(), ProjectBuildError> {
+    if request.output_relative_root.as_deref().is_some_and(|path| {
+        path.starts_with(".ats/")
+            || ats_runtime::normalize_relative_path(Path::new(path)).as_deref() != Ok(path)
+    }) {
+        Err(ProjectBuildError::InvalidRecipe)
+    } else {
+        Ok(())
+    }
+}
+
 fn valid_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
@@ -206,13 +283,25 @@ fn valid_id(value: &str) -> bool {
         })
 }
 
+fn valid_property(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+}
+
 fn build_slot() -> ContributionId {
     ContributionId::parse("project.build.recipe").expect("built-in contribution ID is valid")
 }
 
 fn schema(id: &str) -> SchemaRef {
+    schema_version(id, 1)
+}
+
+fn schema_version(id: &str, version: u32) -> SchemaRef {
     SchemaRef {
         id: SchemaId::parse(id).expect("built-in schema ID is valid"),
-        version: SchemaVersion::new(1).expect("built-in schema version is valid"),
+        version: SchemaVersion::new(version).expect("built-in schema version is valid"),
     }
 }

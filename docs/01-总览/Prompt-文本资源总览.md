@@ -82,7 +82,7 @@ mod-generate-single.json
 log-analyze.json
 ```
 
-Batch 复用 Single，Complex 组合 Plan、Batch/Single、Build 和 Package，因此不再维护第二套长 Prompt。Build、Package、Project create 和 file-based Resource prepare 是确定性执行，不需要模型 Recipe。
+Batch 复用 Single，Complex 组合 Plan、Batch/Single、Build 和 Package；`composition.generate` 同样按 resolved graph 逐节点复用 `mod-plan` 与 `mod-generate-single` Recipe，只把工程发布边界提升到 whole closure，因此都不维护第二套长 Prompt。Build、Package、Project create 和 file-based Resource prepare 是确定性执行，不需要模型 Recipe。
 
 Recipe 文件以编译时字节和 pinned SHA 加载。修改文本必须同时更新 hash，并由 loader/assembly 测试证明 schema、slot 与渲染顺序。
 

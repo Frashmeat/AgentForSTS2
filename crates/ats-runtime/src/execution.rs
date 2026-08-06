@@ -42,6 +42,7 @@ impl CancellationToken {
 pub struct ProjectFileWrite {
     relative_path: String,
     bytes: Vec<u8>,
+    source_path: Option<PathBuf>,
 }
 
 impl ProjectFileWrite {
@@ -60,6 +61,25 @@ impl ProjectFileWrite {
         Ok(Self {
             relative_path,
             bytes,
+            source_path: None,
+        })
+    }
+
+    pub fn from_source(
+        relative_path: impl Into<String>,
+        source_path: PathBuf,
+    ) -> Result<Self, ProjectWriteError> {
+        let relative_path = relative_path.into();
+        if normalize_relative_path(Path::new(&relative_path))? != relative_path
+            || relative_path.starts_with(".ats/")
+            || source_path.as_os_str().is_empty()
+        {
+            return Err(ProjectWriteError::InvalidWrite);
+        }
+        Ok(Self {
+            relative_path,
+            bytes: Vec::new(),
+            source_path: Some(source_path),
         })
     }
 
@@ -69,8 +89,13 @@ impl ProjectFileWrite {
     }
 
     #[must_use]
-    pub fn bytes(&self) -> &[u8] {
-        &self.bytes
+    pub fn bytes(&self) -> Option<&[u8]> {
+        self.source_path.is_none().then_some(self.bytes.as_slice())
+    }
+
+    #[must_use]
+    pub fn source_path(&self) -> Option<&Path> {
+        self.source_path.as_deref()
     }
 }
 
@@ -86,6 +111,39 @@ pub trait ProjectFileWriter: Send + Sync {
         run_id: &RunId,
         writes: Vec<ProjectFileWrite>,
     ) -> Result<Box<dyn PendingProjectWrites>, ProjectWriteError>;
+}
+
+#[derive(Debug, Clone)]
+pub struct ProjectStageRequest {
+    pub project_root: PathBuf,
+    pub run_id: RunId,
+}
+
+pub trait PendingProjectStage: Send {
+    fn root(&self) -> &Path;
+    fn cleanup(self: Box<Self>) -> Result<(), ProjectStageError>;
+}
+
+pub trait ProjectStager: Send + Sync {
+    fn stage(
+        &self,
+        request: ProjectStageRequest,
+    ) -> Result<Box<dyn PendingProjectStage>, ProjectStageError>;
+}
+
+#[derive(Debug, Error)]
+pub enum ProjectStageError {
+    #[error("project stage source is invalid")]
+    InvalidSource,
+    #[error("project stage exceeds the bounded copy limits")]
+    LimitExceeded,
+    #[error("project staging failed during {operation}")]
+    Io {
+        operation: &'static str,
+        kind: std::io::ErrorKind,
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 #[derive(Debug, Error)]
@@ -213,6 +271,10 @@ mod tests {
         assert!(ProjectFileWrite::new("../escape", b"one".to_vec()).is_err());
         assert!(ProjectFileWrite::new(".ats/internal", b"one".to_vec()).is_err());
         assert!(ProjectFileWrite::new("Generated/Empty.cs", Vec::new()).is_err());
+        assert!(
+            ProjectFileWrite::from_source("packages/mod.zip", PathBuf::from("stage/mod.zip"))
+                .is_ok()
+        );
         let same = ProjectFileWrite::new("Generated/Same.cs", b"same".to_vec()).unwrap();
         assert!(matches!(
             validate_project_writes(&[same.clone(), same]),

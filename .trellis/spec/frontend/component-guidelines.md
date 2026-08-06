@@ -100,6 +100,12 @@ Item-type branches. The Pack default profile is selected initially; Custom start
   pointers until explicit atomic confirmation.
 - An empty Pack `compositionProfiles` catalog renders an unavailable state. React must not synthesize
   a Character workflow before the Pack declares one.
+- Whole-closure generation lists only confirmed definitions whose type is a Pack-declared
+  composition root and whose definition carries composition-profile provenance. The request pins
+  the exact root hash plus optional matching Draft revision; React does not enumerate dependencies
+  or author a second graph.
+- Generation displays the persisted `composition.generate` Run status and safe failure code/stage.
+  A returned Run ID or completed polling loop is not success evidence.
 
 ---
 

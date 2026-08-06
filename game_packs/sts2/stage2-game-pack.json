@@ -653,13 +653,30 @@
       }
     },
     {
+      "slotId": "composition.generate",
+      "featureId": "composition.generate",
+      "schema": { "id": "pack.composition-generate", "version": 1 },
+      "payload": {
+        "compose": [
+          "mod.plan",
+          "mod.generate.single",
+          "project.build",
+          "project.package"
+        ]
+      }
+    },
+    {
       "slotId": "project.build.recipe",
       "featureId": "project.build",
       "schema": { "id": "pack.build-recipe", "version": 1 },
       "requiredPrimitives": ["process.dotnet-publish"],
       "payload": {
         "steps": [
-          { "id": "publish", "primitive": "process.dotnet-publish" }
+          {
+            "id": "publish",
+            "primitive": "process.dotnet-publish",
+            "isolatedOutputProperty": "ModsPath"
+          }
         ]
       }
     },

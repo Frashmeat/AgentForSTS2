@@ -1,11 +1,16 @@
 use std::path::{Path, PathBuf};
 
 use ats_adapters::{
-    FileArtifactStore, FileCompositionDraftRepository, FileItemRepository, FileProjectWriter,
-    FileResourceRepository, FileTruthSnapshotRepository, HttpMediaClient, HttpModelClient,
-    PngResourceMediaProcessor, RegisteredBuildRunner, RegisteredValidationRunner, ZipPackageWriter,
+    FileArtifactStore, FileCompositionDraftRepository, FileItemRepository, FileProjectStager,
+    FileProjectWriter, FileResourceRepository, FileTruthSnapshotRepository, HttpMediaClient,
+    HttpModelClient, PngResourceMediaProcessor, RegisteredBuildRunner, RegisteredValidationRunner,
+    ZipPackageWriter,
 };
 use ats_features::FeatureSpec;
+use ats_features::composition_generate::{
+    CompositionGenerateContext, CompositionGenerateDependencies, CompositionGenerateFeature,
+    CompositionGenerateService,
+};
 use ats_features::composition_plan::{
     CompositionPlanContext, CompositionPlanFeature, CompositionPlanService,
 };
@@ -192,6 +197,92 @@ impl Stage2Composition {
             (!settings.llm.model.trim().is_empty()).then_some(settings.llm.model.clone());
 
         match run.feature_id().as_str() {
+            "composition.generate" => {
+                let request = self.decode::<CompositionGenerateFeature>(&run)?;
+                let truth = self.current_truth()?;
+                let composition_contributions = self.resolve(
+                    &CompositionGenerateFeature::id(),
+                    &[CompositionGenerateFeature::contribution_requirement()],
+                )?;
+                let plan_contributions = self.resolve(
+                    &ModPlanFeature::id(),
+                    &[ModPlanFeature::contribution_requirement()],
+                )?;
+                let single_contributions = self.resolve(
+                    &SingleGenerateFeature::id(),
+                    &[SingleGenerateFeature::contribution_requirement()],
+                )?;
+                let resource_contributions = self.resolve(
+                    &ResourcePrepareFeature::id(),
+                    &[ResourcePrepareFeature::contribution_requirement()],
+                )?;
+                let build_contributions = self.resolve(
+                    &ProjectBuildFeature::id(),
+                    &[ProjectBuildFeature::contribution_requirement()],
+                )?;
+                let package_contributions = self.resolve(
+                    &ProjectPackageFeature::id(),
+                    &[ProjectPackageFeature::contribution_requirement()],
+                )?;
+                let model = select_model(model_override, &settings.llm)?;
+                let plan = ModPlanService::built_in().map_err(|_| {
+                    failure("feature.recipe_invalid", "composition.generate.plan_recipe")
+                })?;
+                let single = SingleGenerateService::built_in().map_err(|_| {
+                    failure(
+                        "feature.recipe_invalid",
+                        "composition.generate.single_recipe",
+                    )
+                })?;
+                let build = ProjectBuildService;
+                let package = ProjectPackageService;
+                let writer = FileProjectWriter;
+                let stager = FileProjectStager;
+                let validator = RegisteredValidationRunner;
+                let artifacts = FileArtifactStore::new(project_root.to_path_buf());
+                let build_runner = RegisteredBuildRunner;
+                let package_writer = ZipPackageWriter;
+                let outcome = CompositionGenerateService::new(&plan, &single, &build, &package)
+                    .execute(
+                        CompositionGenerateDependencies {
+                            model: model.client(),
+                            items,
+                            resources,
+                            writer: &writer,
+                            stager: &stager,
+                            validator: &validator,
+                            artifacts: &artifacts,
+                            build_runner: &build_runner,
+                            package_writer: &package_writer,
+                        },
+                        &mut run,
+                        request,
+                        CompositionGenerateContext {
+                            pack: &self.pack,
+                            composition_contributions: &composition_contributions,
+                            plan_contributions: &plan_contributions,
+                            single_contributions: &single_contributions,
+                            resource_contributions: &resource_contributions,
+                            build_contributions: &build_contributions,
+                            package_contributions: &package_contributions,
+                            truth: &truth,
+                            project_root,
+                            project_context: &project_context,
+                            custom_instructions,
+                            model: model_name,
+                        },
+                        cancellation,
+                    )
+                    .await;
+                match outcome {
+                    Ok(execution) => persist_children(repository, execution.child_runs)?,
+                    Err(failed) => {
+                        let failure = failed.run_failure();
+                        persist_children(repository, failed.child_runs)?;
+                        return Err(failure);
+                    }
+                }
+            }
             "composition.plan" => {
                 let request = self.decode::<CompositionPlanFeature>(&run)?;
                 let truth = self.current_truth()?;
@@ -696,7 +787,9 @@ mod tests {
 
     use async_trait::async_trait;
     use ats_adapters::{ConfigStatus, Settings};
-    use ats_features::mod_generate_single::{SingleGenerateRequest, SingleGenerateResult};
+    use ats_features::mod_generate_single::{
+        SingleGeneratePublication, SingleGenerateRequest, SingleGenerateResult,
+    };
     use ats_features::mod_plan::{ModPlanRequest, PlanItem};
     use ats_game_context::{
         TruthEvidenceRecord, TruthSnapshotIndex, TruthSnapshotManifest, TruthSnapshotSource,
@@ -899,9 +992,21 @@ mod tests {
             .unwrap()
             .decode(&SingleGenerateFeature::result_schema())
             .unwrap();
-        let manifest_path = project_root.join(&result.artifact_manifest_ref);
+        assert_eq!(result.publication, SingleGeneratePublication::Published);
+        let manifest_path = project_root.join(
+            result
+                .artifact_manifest_ref
+                .as_deref()
+                .expect("published Single result has a manifest ref"),
+        );
         let manifest_bytes = fs::read(&manifest_path).unwrap();
-        assert_eq!(sha256(&manifest_bytes), result.manifest_sha256);
+        assert_eq!(
+            &sha256(&manifest_bytes),
+            result
+                .manifest_sha256
+                .as_ref()
+                .expect("published Single result has a manifest hash")
+        );
         let manifest: ArtifactManifest = serde_json::from_slice(&manifest_bytes).unwrap();
         assert_eq!(manifest.producing_run_id, generate_id);
         for file in &manifest.files {

@@ -22,8 +22,9 @@ pub use delivery::{
     validate_package_request,
 };
 pub use execution::{
-    CancellationToken, PendingProjectWrites, ProjectFileWrite, ProjectFileWriter,
-    ProjectWriteError, ValidationError, ValidationReport, ValidationRequest, ValidationRunner,
+    CancellationToken, PendingProjectStage, PendingProjectWrites, ProjectFileWrite,
+    ProjectFileWriter, ProjectStageError, ProjectStageRequest, ProjectStager, ProjectWriteError,
+    ValidationError, ValidationReport, ValidationRequest, ValidationRunner,
     validate_project_writes,
 };
 pub use media::{MediaClient, MediaError, MediaRequest, MediaRequestSnapshot, MediaResponse};

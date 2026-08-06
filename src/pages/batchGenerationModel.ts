@@ -7,6 +7,7 @@ import type {
   ComplexGenerateResult,
   PlanItem,
   ProjectPackageRequest,
+  ProjectPackageResult,
   RunRecord,
   SingleGenerateResult,
   StoredItemDefinition,
@@ -168,7 +169,7 @@ function isComplexGenerateResult(value: unknown): value is ComplexGenerateResult
     return false;
   }
   const buildPresent = typeof value.buildRunId === "string" && isRecord(value.build);
-  const packagePresent = typeof value.packageRunId === "string" && isRecord(value.package);
+  const packagePresent = typeof value.packageRunId === "string" && isPublishedPackageResult(value.package);
   const deliveryAbsent =
     (value.buildRunId === undefined || value.buildRunId === null) &&
     (value.build === undefined || value.build === null) &&
@@ -177,8 +178,20 @@ function isComplexGenerateResult(value: unknown): value is ComplexGenerateResult
   return (buildPresent && packagePresent) || deliveryAbsent;
 }
 
+function isPublishedPackageResult(value: unknown): value is ProjectPackageResult {
+  if (!isRecord(value) || !isRecord(value.report)) return false;
+  return value.publication === "published" &&
+    typeof value.artifactManifestRef === "string" &&
+    isSha256(value.manifestSha256) &&
+    typeof value.outputRelativePath === "string" &&
+    isNonNegativeInteger(value.report.fileCount) &&
+    isNonNegativeInteger(value.report.uncompressedBytes) &&
+    isNonNegativeInteger(value.report.packageBytes);
+}
+
 function isSingleGenerateResult(value: unknown): value is SingleGenerateResult {
   return isRecord(value) &&
+    value.publication === "published" &&
     typeof value.artifactManifestRef === "string" &&
     isSha256(value.manifestSha256) &&
     isNonNegativeInteger(value.generatedFileCount) &&

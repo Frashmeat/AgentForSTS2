@@ -138,6 +138,7 @@ test("fail-fast exposes unprocessed definitions without inventing child Runs", (
         requiredResourceRoles: [], acceptanceCriteria: [],
       },
       result: {
+        publication: "published",
         artifactManifestRef: "artifacts/fixture/manifest.json",
         manifestSha256: manifestHash,
         generatedFileCount: 1,
@@ -161,5 +162,71 @@ test("malformed schema or counters are rejected", () => {
     "mod.generate.batch",
     { id: "feature.mod-generate-batch-request", version: 3 }, request,
     { id: "feature.mod-generate-batch-result", version: 2 }, malformed,
+  )), null);
+});
+
+test("Complex accepts only a published Package v2 terminal result", () => {
+  const request = buildBatchRequest("FixtureMod", [definition], false);
+  const batch = {
+    total: 1,
+    processed: 1,
+    succeeded: 1,
+    failed: 0,
+    items: [{
+      itemId: "fixture-item",
+      definitionHash: hash,
+      planRunId: "plan-run",
+      generationRunId: "single-run",
+      status: "succeeded",
+      plan: {
+        itemId: "fixture-item", itemType: "relic", name: "Fixture", summary: "Fixture",
+        behaviorIntent: [], implementationConstraints: [], evidenceRequirements: [],
+        requiredResourceRoles: [], acceptanceCriteria: [],
+      },
+      result: {
+        publication: "published",
+        artifactManifestRef: "artifacts/item/manifest.json",
+        manifestSha256: manifestHash,
+        generatedFileCount: 1,
+        validationPrimitive: "code.dotnet-validate",
+        acceptanceNotes: [],
+      },
+    }],
+  };
+  const complexRequest = buildComplexRequest(request, {
+    artifactId: "fixture-package",
+    modId: "FixtureMod",
+    sourceRelativeRoot: "delivery",
+    outputRelativePath: "packages/FixtureMod.zip",
+  });
+  const result = {
+    batchRunId: "batch-run",
+    batch,
+    buildRunId: "build-run",
+    build: { steps: [] },
+    packageRunId: "package-run",
+    package: {
+      publication: "published",
+      artifactManifestRef: "artifacts/package/manifest.json",
+      manifestSha256: manifestHash,
+      outputRelativePath: "packages/FixtureMod.zip",
+      report: { fileCount: 1, uncompressedBytes: 10, packageBytes: 8 },
+    },
+  };
+  const valid = decodeGenerationComposition(run(
+    "mod.generate.complex",
+    { id: "feature.mod-generate-complex-request", version: 3 }, complexRequest,
+    { id: "feature.mod-generate-complex-result", version: 2 }, result,
+  ));
+  assert.deepEqual(valid.childRunIds, ["batch-run", "plan-run", "single-run", "build-run", "package-run"]);
+
+  const staged = structuredClone(result);
+  staged.package.publication = "composition_staged";
+  staged.package.artifactManifestRef = null;
+  staged.package.manifestSha256 = null;
+  assert.equal(decodeGenerationComposition(run(
+    "mod.generate.complex",
+    { id: "feature.mod-generate-complex-request", version: 3 }, complexRequest,
+    { id: "feature.mod-generate-complex-result", version: 2 }, staged,
   )), null);
 });

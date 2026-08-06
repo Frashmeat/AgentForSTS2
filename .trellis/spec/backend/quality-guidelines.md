@@ -24,7 +24,7 @@ node scripts/check-stage2-dependency-dag.mjs
 
 ## 2. Feature Contract
 
-Every product capability has one `FeatureId`, request schema, result schema, validator, and registry entry. Current catalog contains exactly 10 Features: project create, single-item plan, composition plan, resource prepare, single/batch/complex generation, log analyze, build, and package.
+Every product capability has one `FeatureId`, request schema, result schema, validator, and registry entry. Current catalog contains exactly 11 Features: project create, single-item plan, composition plan/generate, resource prepare, single/batch/complex generation, log analyze, build, and package.
 
 Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-specific implementation, or duplicate Prompt pipeline. Batch v4 owns definition-driven Plan -> Single child composition; Complex v3 reuses that exact Batch request/result and adds Build/Package only after every Item succeeds.
 
@@ -225,6 +225,104 @@ Pack profile + Truth + logical model nodes
   -> guarded review/update
   -> closed selection + atomic confirmation
 ```
+
+### Scenario: Generate And Publish A Whole Composition Closure
+
+#### 1. Scope / Trigger
+
+This contract applies when `composition.generate` consumes one confirmed composition root. The
+complete pinned closure is one publication unit; a node may produce successful Plan/Generate child
+evidence without publishing its files independently.
+
+#### 2. Signatures And Schemas
+
+```rust
+pub struct CompositionGenerateRequest {
+    pub artifact_id: String,
+    pub mod_id: String,
+    pub root: StoredItemDefinition,
+    pub draft: Option<CompositionDraftRef>,
+    pub package: ProjectPackageRequest,
+}
+
+SingleGenerateService::propose(...) -> SingleGenerateProposal
+ProjectPackageService::prepare(...) -> PreparedProjectPackage
+ProjectStager::stage(ProjectStageRequest) -> Box<dyn PendingProjectStage>
+```
+
+The parent request/result/Artifact extension use schema v1. `SingleGenerateResult` and
+`ProjectPackageResult` use schema v2 and an exact `publication` discriminator:
+
+```text
+published          -> final Artifact refs are required
+composition_staged -> final Artifact refs are absent
+```
+
+`ProjectBuildRequest` is schema v2 with optional `outputRelativeRoot`. A Pack build step may name
+one `isolatedOutputProperty`; the registered Adapter currently accepts only `ModsPath` and binds it
+to a normalized directory below the staged project.
+
+#### 3. Contracts
+
+| Boundary | Required behavior |
+| --- | --- |
+| Preflight | Resolve and validate the complete `ResolvedItemGraph` before Run creation and repeat it inside the Feature before model or project work |
+| Node execution | Sorted graph nodes each produce one terminal Plan child and one terminal `composition_staged` Single child; no per-node project write, validation or Artifact publish occurs |
+| Staging | Copy one bounded, non-symlink project worktree below `.ats/composition-staging/<parentRunId>` and exclude mutable evidence/build roots |
+| Validation | Apply every proposed write to the isolated copy, validate once, then Build once with a Pack-declared isolated output property |
+| Package | Prepare one ZIP inside the isolated copy; its child result remains `composition_staged` |
+| Publication | Stream generated files plus the prepared ZIP through one rollback-capable real-project transaction, clean the isolated stage, publish one composition Artifact, then complete the parent Run |
+| Evidence | Parent result/Artifact bind graph digest, exact root/profile/Draft provenance, every node definition/model request/resource identity, all child Run IDs, package report and every final file hash |
+| React | Select only confirmed Pack-declared composition roots, submit the typed request, and render persisted Run terminal state without a Character/game branch |
+
+Generated target paths and the package output path must be unique. Every node must resolve the same
+validation Primitive. Pack data cannot choose commands, arguments, arbitrary environment variables
+or an output path outside the isolated stage.
+
+#### 4. Validation And Error Matrix
+
+| Failure | Stable family | Required mutation result |
+| --- | --- | --- |
+| stale/missing/wrong graph node, resource or Truth | `composition.graph.*` | no model call when preflight decides; no staging/project/Artifact mutation |
+| one Plan/Single failure or cancellation | originating `model.*`, `truth.*`, `resource.*`, `pack.*` or `run.*` | completed child Runs retained; no real-project publication |
+| invalid/oversized/symlinked staging source | `composition.staging.*` | owned stage removed; real project unchanged |
+| whole-closure validation rejection | `validation.rejected` | staged copy removed; real project/Artifact unchanged |
+| Build/Package rejection | typed Build/`artifact.*` family | child Run terminal; staged copy removed; real project unchanged |
+| package commit, final write, Artifact publish or parent transition failure | typed `artifact.*`, `composition.publication.*` or `run.*` | all still-rollback-capable project state is restored; no fabricated success |
+| success | succeeded parent + all terminal children | exactly one composition Artifact and final source/package set; no `.staging` or composition stage residue |
+
+Ordinary in-process failures must complete cleanup before return. Durable recovery from a process
+stop during final project transaction commit is an O6 contract; O4 must not claim that crash gate.
+The filesystem writer makes its commit decision with one same-directory transaction-directory
+rename. A rename failure retains complete backups and rolls back before returning; a successful
+decision may leave only a cleanup-only `.committed-<runId>` directory, which the next writer removes.
+
+#### 5. Good / Base / Bad Cases
+
+- Good: a two-node identity+pinned graph creates four Plan/Single children plus Build and Package,
+  validates/builds once, publishes two sources and one ZIP in one composition Artifact and leaves no
+  staging directory.
+- Base: validation rejects after every proposal. Four successful proposal child Runs remain valid
+  evidence, while the real project, package and Artifact roots remain unchanged.
+- Bad: invoke ordinary Single independently for each node. The first node could publish before a
+  later cross-reference fails and whole-closure compilation would never be proven.
+- Bad: point normal Build output at the real game Mods directory. An isolated rejection could still
+  mutate external published state.
+
+#### 6. Tests Required
+
+```powershell
+cargo test -p agentthespire-desktop --test composition_generation -- --nocapture
+cargo test -p ats-adapters project_stager -- --nocapture
+cargo test --workspace --all-targets
+npm run test:frontend
+npx tsc -b --pretty false
+```
+
+Assertions must cover graph/root identity, exact child count/status, staged discriminators, one
+validation/build/package, source-file ZIP streaming, manifest/hash recomputation, validation and
+package/final-commit rollback, zero real-project mutation on failure, zero staging residue, and no
+Character/STS2 branch in generic Feature/Shell/React code.
 
 `mod-plan` pretty-serializes the complete verified `itemTypes` catalog plus plan guidance into the
 required `pack.guidance` slot. That slot is bounded to 32,000 characters. A built-in Pack expansion

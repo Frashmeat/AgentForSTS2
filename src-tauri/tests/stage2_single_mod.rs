@@ -13,7 +13,7 @@ use ats_features::mod_generate_batch::{
 };
 use ats_features::mod_generate_single::{
     SingleGenerateContext, SingleGenerateDependencies, SingleGenerateFeature,
-    SingleGenerateRequest, SingleGenerateService,
+    SingleGeneratePublication, SingleGenerateRequest, SingleGenerateResult, SingleGenerateService,
 };
 use ats_features::mod_plan::{ModPlanFeature, ModPlanService, PlanItem};
 use ats_features::resource_prepare::ResourcePrepareFeature;
@@ -621,11 +621,10 @@ async fn real_compile_artifact_and_run_chain_succeeds_without_staging_residue() 
 
     assert_eq!(run.status(), RunStatus::Succeeded);
     assert_eq!(execution.result.generated_file_count, 3);
-    let manifest = fixture
-        .project
-        .join(&execution.result.artifact_manifest_ref);
+    let (manifest_ref, manifest_sha256) = published_artifact(&execution.result);
+    let manifest = fixture.project.join(manifest_ref);
     let bytes = fs::read(&manifest).unwrap();
-    assert_eq!(sha256(&bytes), execution.result.manifest_sha256);
+    assert_eq!(&sha256(&bytes), manifest_sha256);
     let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(value["schemaVersion"], 3);
     assert_eq!(value["files"].as_array().unwrap().len(), 6);
@@ -771,11 +770,10 @@ async fn card_pack_truth_resources_prompt_and_artifact_form_one_vertical_contrac
 
     assert_eq!(run.status(), RunStatus::Succeeded);
     assert_eq!(execution.result.generated_file_count, 3);
-    let manifest_path = fixture
-        .project
-        .join(&execution.result.artifact_manifest_ref);
+    let (manifest_ref, manifest_sha256) = published_artifact(&execution.result);
+    let manifest_path = fixture.project.join(manifest_ref);
     let manifest_bytes = fs::read(&manifest_path).unwrap();
-    assert_eq!(sha256(&manifest_bytes), execution.result.manifest_sha256);
+    assert_eq!(&sha256(&manifest_bytes), manifest_sha256);
     let manifest: ArtifactManifest = serde_json::from_slice(&manifest_bytes).unwrap();
     assert_eq!(manifest.files.len(), 5);
     assert_eq!(
@@ -919,11 +917,10 @@ async fn potion_pack_truth_resources_prompt_and_artifact_form_one_vertical_contr
 
     assert_eq!(run.status(), RunStatus::Succeeded);
     assert_eq!(execution.result.generated_file_count, 3);
-    let manifest_path = fixture
-        .project
-        .join(&execution.result.artifact_manifest_ref);
+    let (manifest_ref, manifest_sha256) = published_artifact(&execution.result);
+    let manifest_path = fixture.project.join(manifest_ref);
     let manifest_bytes = fs::read(&manifest_path).unwrap();
-    assert_eq!(sha256(&manifest_bytes), execution.result.manifest_sha256);
+    assert_eq!(&sha256(&manifest_bytes), manifest_sha256);
     let manifest: ArtifactManifest = serde_json::from_slice(&manifest_bytes).unwrap();
     assert_eq!(manifest.files.len(), 4);
     assert_eq!(
@@ -1067,11 +1064,10 @@ async fn power_pack_truth_resources_prompt_and_artifact_form_one_vertical_contra
 
     assert_eq!(run.status(), RunStatus::Succeeded);
     assert_eq!(execution.result.generated_file_count, 3);
-    let manifest_path = fixture
-        .project
-        .join(&execution.result.artifact_manifest_ref);
+    let (manifest_ref, manifest_sha256) = published_artifact(&execution.result);
+    let manifest_path = fixture.project.join(manifest_ref);
     let manifest_bytes = fs::read(&manifest_path).unwrap();
-    assert_eq!(sha256(&manifest_bytes), execution.result.manifest_sha256);
+    assert_eq!(&sha256(&manifest_bytes), manifest_sha256);
     let manifest: ArtifactManifest = serde_json::from_slice(&manifest_bytes).unwrap();
     assert_eq!(manifest.files.len(), 5);
     assert_eq!(
@@ -1217,9 +1213,9 @@ async fn batch_generates_all_four_definition_bound_sts2_types_with_real_compile(
     );
     for item in execution.result.items {
         let generated = item.result.unwrap();
-        let manifest_bytes =
-            fs::read(fixture.project.join(&generated.artifact_manifest_ref)).unwrap();
-        assert_eq!(sha256(&manifest_bytes), generated.manifest_sha256);
+        let (manifest_ref, manifest_sha256) = published_artifact(&generated);
+        let manifest_bytes = fs::read(fixture.project.join(manifest_ref)).unwrap();
+        assert_eq!(&sha256(&manifest_bytes), manifest_sha256);
         let manifest: ArtifactManifest = serde_json::from_slice(&manifest_bytes).unwrap();
         assert_eq!(
             manifest.feature_extension.payload()["definitionHash"],
@@ -1433,6 +1429,20 @@ fn truth_without(
         BTreeMap::from([("fixture-index".into(), evidence)]),
     )
     .unwrap()
+}
+
+fn published_artifact(result: &SingleGenerateResult) -> (&str, &Sha256Digest) {
+    assert_eq!(result.publication, SingleGeneratePublication::Published);
+    (
+        result
+            .artifact_manifest_ref
+            .as_deref()
+            .expect("published Single result has a manifest ref"),
+        result
+            .manifest_sha256
+            .as_ref()
+            .expect("published Single result has a manifest hash"),
+    )
 }
 
 fn sha256(bytes: &[u8]) -> Sha256Digest {

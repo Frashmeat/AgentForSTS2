@@ -26,11 +26,14 @@ impl ProjectFileWriter for FileProjectWriter {
             &transactions_root,
             "create_transactions",
         )?;
+        cleanup_committed_transactions(&transactions_root)?;
         let transaction_root = transactions_root.join(run_id.as_str());
         fs::create_dir(&transaction_root).map_err(|error| io_error("create_transaction", error))?;
+        let committed_root = transactions_root.join(format!(".committed-{}", run_id.as_str()));
 
         let mut transaction = FileProjectTransaction {
             transaction_root,
+            committed_root,
             records: Vec::new(),
             created_directories: Vec::new(),
         };
@@ -53,6 +56,7 @@ struct WriteRecord {
 #[derive(Debug)]
 struct FileProjectTransaction {
     transaction_root: PathBuf,
+    committed_root: PathBuf,
     records: Vec<WriteRecord>,
     created_directories: Vec<PathBuf>,
 }
@@ -77,7 +81,11 @@ impl FileProjectTransaction {
         };
 
         let temp = parent.join(format!(".ats-write-{}-{index}.tmp", std::process::id()));
-        write_new_file(&temp, write.bytes(), "write_temporary")?;
+        match (write.bytes(), write.source_path()) {
+            (Some(bytes), None) => write_new_file(&temp, bytes, "write_temporary")?,
+            (None, Some(source)) => copy_new_file(source, &temp)?,
+            _ => return Err(ProjectWriteError::InvalidWrite),
+        }
         let backup = if metadata.is_some() {
             let backup = self.transaction_root.join(format!("backup-{index}"));
             if let Err(error) = fs::rename(&target, &backup) {
@@ -130,14 +138,48 @@ impl FileProjectTransaction {
 }
 
 impl PendingProjectWrites for FileProjectTransaction {
-    fn commit(self: Box<Self>) -> Result<(), ProjectWriteError> {
-        fs::remove_dir_all(&self.transaction_root)
-            .map_err(|error| io_error("commit_transaction", error))
+    fn commit(mut self: Box<Self>) -> Result<(), ProjectWriteError> {
+        if let Err(error) = fs::rename(&self.transaction_root, &self.committed_root) {
+            let commit_error = io_error("commit_transaction", error);
+            self.rollback_in_place()?;
+            return Err(commit_error);
+        }
+
+        // The same-directory rename is the durable commit decision. Cleanup may be retried by the
+        // next writer without changing the already-published project state.
+        self.transaction_root.clone_from(&self.committed_root);
+        self.records.clear();
+        self.created_directories.clear();
+        let _ = fs::remove_dir_all(&self.committed_root);
+        Ok(())
     }
 
     fn rollback(mut self: Box<Self>) -> Result<(), ProjectWriteError> {
         self.rollback_in_place()
     }
+}
+
+fn cleanup_committed_transactions(transactions_root: &Path) -> Result<(), ProjectWriteError> {
+    for entry in
+        fs::read_dir(transactions_root).map_err(|error| io_error("list_transactions", error))?
+    {
+        let entry = entry.map_err(|error| io_error("read_transaction", error))?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !name.starts_with(".committed-") {
+            continue;
+        }
+        let metadata = fs::symlink_metadata(entry.path())
+            .map_err(|error| io_error("inspect_committed_transaction", error))?;
+        if !metadata.is_dir() || metadata.file_type().is_symlink() {
+            return Err(ProjectWriteError::InvalidWrite);
+        }
+        fs::remove_dir_all(entry.path())
+            .map_err(|error| io_error("cleanup_committed_transaction", error))?;
+    }
+    Ok(())
 }
 
 fn ensure_nested_directories(
@@ -204,6 +246,31 @@ fn write_new_file(
         .map_err(|error| io_error(operation, error))
 }
 
+fn copy_new_file(source: &Path, target: &Path) -> Result<(), ProjectWriteError> {
+    use std::io::Write;
+
+    let metadata =
+        fs::symlink_metadata(source).map_err(|error| io_error("inspect_source", error))?;
+    if !metadata.is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.len() == 0
+        || metadata.len() > 512 * 1024 * 1024
+    {
+        return Err(ProjectWriteError::InvalidWrite);
+    }
+    let mut input = fs::File::open(source).map_err(|error| io_error("open_source", error))?;
+    let mut output = fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(target)
+        .map_err(|error| io_error("create_temporary", error))?;
+    io::copy(&mut input, &mut output).map_err(|error| io_error("copy_source", error))?;
+    output
+        .flush()
+        .and_then(|()| output.sync_all())
+        .map_err(|error| io_error("sync_temporary", error))
+}
+
 fn io_error(operation: &'static str, source: io::Error) -> ProjectWriteError {
     ProjectWriteError::Io {
         operation,
@@ -266,5 +333,58 @@ mod tests {
         );
         assert!(!project.join("Nested/New.cs").exists());
         assert!(!project.join("Nested").exists());
+    }
+
+    #[test]
+    fn commit_decision_failure_rolls_back_before_returning_error() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let project = temp.path().join("project");
+        fs::create_dir(&project).unwrap();
+        fs::create_dir(project.join("Generated")).unwrap();
+        fs::write(project.join("Generated/One.cs"), b"old").unwrap();
+        let run_id = RunId::new();
+        let pending = FileProjectWriter
+            .apply(
+                &project,
+                &run_id,
+                vec![ProjectFileWrite::new("Generated/One.cs", b"new".to_vec()).unwrap()],
+            )
+            .unwrap();
+        let blocker = project
+            .join(".ats/transactions")
+            .join(format!(".committed-{}", run_id.as_str()));
+        fs::create_dir(&blocker).unwrap();
+        fs::write(blocker.join("blocker"), b"occupied").unwrap();
+
+        assert!(pending.commit().is_err());
+        assert_eq!(fs::read(project.join("Generated/One.cs")).unwrap(), b"old");
+        assert!(blocker.exists());
+        assert!(
+            !project
+                .join(".ats/transactions")
+                .join(run_id.as_str())
+                .exists()
+        );
+    }
+
+    #[test]
+    fn source_file_write_is_streamed_through_the_same_transaction() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let project = temp.path().join("project");
+        fs::create_dir(&project).unwrap();
+        let source = temp.path().join("package.zip");
+        fs::write(&source, b"package-bytes").unwrap();
+        let pending = FileProjectWriter
+            .apply(
+                &project,
+                &RunId::new(),
+                vec![ProjectFileWrite::from_source("packages/mod.zip", source).unwrap()],
+            )
+            .unwrap();
+        assert_eq!(
+            fs::read(project.join("packages/mod.zip")).unwrap(),
+            b"package-bytes"
+        );
+        pending.commit().unwrap();
     }
 }

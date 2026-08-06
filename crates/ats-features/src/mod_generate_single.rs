@@ -49,7 +49,7 @@ impl FeatureSpec for SingleGenerateFeature {
     }
 
     fn result_schema() -> SchemaRef {
-        schema("feature.mod-generate-single-result")
+        schema_version("feature.mod-generate-single-result", 2)
     }
 
     fn artifact_extension_schema() -> SchemaRef {
@@ -79,11 +79,21 @@ pub struct SingleGenerateRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SingleGenerateResult {
-    pub artifact_manifest_ref: String,
-    pub manifest_sha256: Sha256Digest,
+    pub publication: SingleGeneratePublication,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_manifest_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest_sha256: Option<Sha256Digest>,
     pub generated_file_count: u32,
     pub validation_primitive: PrimitiveId,
     pub acceptance_notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum SingleGeneratePublication {
+    Published,
+    CompositionStaged,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -180,6 +190,43 @@ pub struct SingleGenerateExecution {
     pub request_snapshot: ModelRequestSnapshot,
 }
 
+#[derive(Debug, Clone, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SingleGenerationProvenance {
+    pub definition_hash: Sha256Digest,
+    pub model_request_sha256: Sha256Digest,
+    pub model: String,
+    pub usage: TokenUsage,
+    pub selected_resources: Vec<ModelResourceRef>,
+}
+
+#[derive(Debug, Clone, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProposedArtifactFile {
+    pub role: String,
+    pub relative_path: String,
+}
+
+pub struct SingleGenerateProposal {
+    pub result: SingleGenerateResult,
+    pub request_snapshot: ModelRequestSnapshot,
+    pub writes: Vec<ProjectFileWrite>,
+    pub artifact_files: Vec<ProposedArtifactFile>,
+    pub provenance: SingleGenerationProvenance,
+    generated: ValidatedBundle,
+    selected: Vec<LoadedResource>,
+    extension: SingleGenerateArtifactExtension,
+}
+
+pub struct SingleProposalDependencies<'a, C, R>
+where
+    C: ModelClient + ?Sized,
+    R: ResourceRepository + ?Sized,
+{
+    pub model: &'a C,
+    pub resources: &'a R,
+}
+
 pub struct SingleGenerateDependencies<'a, C, R, W, V, A>
 where
     C: ModelClient + ?Sized,
@@ -230,11 +277,116 @@ impl SingleGenerateService {
         V: ValidationRunner + ?Sized,
         A: ArtifactPublisher + ?Sized,
     {
-        validate_run(run, &request)?;
-        validate_context(&context)?;
-        validate_request(&request)?;
-        check_cancelled(cancellation)?;
+        let proposal = self
+            .propose(
+                SingleProposalDependencies {
+                    model: dependencies.model,
+                    resources: dependencies.resources,
+                },
+                run,
+                &request,
+                &context,
+                cancellation,
+            )
+            .await?;
 
+        let pending =
+            dependencies
+                .writer
+                .apply(context.project_root, run.id(), proposal.writes.clone())?;
+        if let Err(error) = check_cancelled(cancellation) {
+            rollback(pending)?;
+            return Err(error);
+        }
+        let validation = dependencies
+            .validator
+            .validate(
+                ValidationRequest {
+                    primitive: proposal.extension.validation_primitive.clone(),
+                    project_root: context.project_root.to_path_buf(),
+                    run_id: run.id().clone(),
+                },
+                cancellation,
+            )
+            .await;
+        if let Err(error) = validation {
+            rollback(pending)?;
+            return Err(error.into());
+        }
+        if let Err(error) = check_cancelled(cancellation) {
+            rollback(pending)?;
+            return Err(error);
+        }
+
+        let publish_request = artifact_request(
+            &request,
+            &context,
+            run,
+            &proposal.request_snapshot,
+            &proposal.provenance.model,
+            proposal.provenance.usage.clone(),
+            &proposal.generated,
+            &proposal.selected,
+            proposal.extension.clone(),
+        )?;
+        let published = match dependencies.artifacts.publish(publish_request) {
+            Ok(published) => published,
+            Err(_) => {
+                rollback(pending)?;
+                return Err(SingleGenerateError::ArtifactPublication);
+            }
+        };
+        if let Err(error) = check_cancelled(cancellation) {
+            let cleanup_result =
+                cleanup_published(dependencies.artifacts, &request.artifact_id, run.id());
+            let rollback_result = rollback(pending);
+            cleanup_result?;
+            rollback_result?;
+            return Err(error);
+        }
+
+        let result = result_from_published(&published, &proposal.extension);
+        let result_payload =
+            VersionedPayload::from_typed(SingleGenerateFeature::result_schema(), &result)?;
+        if run
+            .apply_transition(
+                RunTransition::Succeed {
+                    result: result_payload,
+                },
+                Utc::now(),
+            )
+            .is_err()
+        {
+            let cleanup_result =
+                cleanup_published(dependencies.artifacts, &request.artifact_id, run.id());
+            let rollback_result = rollback(pending);
+            cleanup_result?;
+            rollback_result?;
+            return Err(SingleGenerateError::RunTransition);
+        }
+        pending.commit()?;
+        Ok(SingleGenerateExecution {
+            result,
+            request_snapshot: proposal.request_snapshot,
+        })
+    }
+
+    pub async fn propose<C, R>(
+        &self,
+        dependencies: SingleProposalDependencies<'_, C, R>,
+        run: &RunRecord,
+        request: &SingleGenerateRequest,
+        context: &SingleGenerateContext<'_>,
+        cancellation: &CancellationToken,
+    ) -> Result<SingleGenerateProposal, SingleGenerateError>
+    where
+        C: ModelClient + ?Sized,
+        R: ResourceRepository + ?Sized,
+    {
+        validate_run(run, request)?;
+        validate_context(context)?;
+        validate_request(request)?;
+        check_cancelled(cancellation)?;
         let contribution: GenerateContribution = context.contributions.decode(&generation_slot())?;
         contribution.validate(context.pack)?;
         let item_spec = contribution
@@ -254,7 +406,7 @@ impl SingleGenerateService {
             ItemDefinitionValidationMode::Ready,
         )
         .map_err(|_| SingleGenerateError::InvalidItemDefinition)?;
-        validate_definition_identity(&request)?;
+        validate_definition_identity(request)?;
         let resource_specs: ResourceSpecs = context
             .resource_contributions
             .decode(&resource_specs_slot())?;
@@ -266,7 +418,6 @@ impl SingleGenerateService {
             item_descriptor,
             &request.definition.definition,
         )?;
-
         let evidence = query_evidence(context.truth, item_descriptor)?;
         let selected = load_resources(
             dependencies.resources,
@@ -279,8 +430,8 @@ impl SingleGenerateService {
             .map(|item| item.reference.clone())
             .collect::<Vec<_>>();
         let snapshot = self.assemble_request(
-            &request,
-            &context,
+            request,
+            context,
             &contribution,
             item_spec,
             &evidence,
@@ -297,89 +448,41 @@ impl SingleGenerateService {
         }
         let bundle: GeneratedModBundle = serde_json::from_str(&response.content)
             .map_err(|_| SingleGenerateError::InvalidModelOutput)?;
-        let generated = validate_bundle(&request, item_spec, bundle)?;
-        let writes = build_writes(&request, &generated, &selected, &resource_specs)?;
-        check_cancelled(cancellation)?;
-
-        let pending = dependencies
-            .writer
-            .apply(context.project_root, run.id(), writes)?;
-        if let Err(error) = check_cancelled(cancellation) {
-            rollback(pending)?;
-            return Err(error);
-        }
-        let validation = dependencies
-            .validator
-            .validate(
-                ValidationRequest {
-                    primitive: contribution.validation_primitive.clone(),
-                    project_root: context.project_root.to_path_buf(),
-                    run_id: run.id().clone(),
-                },
-                cancellation,
-            )
-            .await;
-        if let Err(error) = validation {
-            rollback(pending)?;
-            return Err(error.into());
-        }
-        if let Err(error) = check_cancelled(cancellation) {
-            rollback(pending)?;
-            return Err(error);
-        }
-
+        let generated = validate_bundle(request, item_spec, bundle)?;
+        let writes = build_writes(request, &generated, &selected, &resource_specs)?;
         let extension = SingleGenerateArtifactExtension {
             model_request_sha256: snapshot.request_sha256().clone(),
             definition_hash: request.definition.definition_hash.clone(),
             generated_file_count: u32::try_from(generated.len())
                 .map_err(|_| SingleGenerateError::InvalidModelOutput)?,
-            validation_primitive: contribution.validation_primitive.clone(),
+            validation_primitive: contribution.validation_primitive,
             acceptance_notes: generated.acceptance_notes.clone(),
         };
-        let publish_request = artifact_request(
-            &request,
-            &context,
-            run,
-            &snapshot,
-            &response.model,
-            response.usage,
-            &generated,
-            &selected,
-            extension.clone(),
-        )?;
-        let published = match dependencies.artifacts.publish(publish_request) {
-            Ok(published) => published,
-            Err(_) => {
-                rollback(pending)?;
-                return Err(SingleGenerateError::ArtifactPublication);
-            }
+        let artifact_files =
+            proposed_artifact_files(request, &generated, &selected, &resource_specs)?;
+        let provenance = SingleGenerationProvenance {
+            definition_hash: request.definition.definition_hash.clone(),
+            model_request_sha256: snapshot.request_sha256().clone(),
+            model: response.model,
+            usage: response.usage,
+            selected_resources: resource_refs,
         };
-        if let Err(error) = check_cancelled(cancellation) {
-            cleanup_published(dependencies.artifacts, &request.artifact_id, run.id())?;
-            rollback(pending)?;
-            return Err(error);
-        }
-
-        let result = result_from_published(&published, &extension);
-        let result_payload =
-            VersionedPayload::from_typed(SingleGenerateFeature::result_schema(), &result)?;
-        if run
-            .apply_transition(
-                RunTransition::Succeed {
-                    result: result_payload,
-                },
-                Utc::now(),
-            )
-            .is_err()
-        {
-            cleanup_published(dependencies.artifacts, &request.artifact_id, run.id())?;
-            rollback(pending)?;
-            return Err(SingleGenerateError::RunTransition);
-        }
-        pending.commit()?;
-        Ok(SingleGenerateExecution {
-            result,
+        Ok(SingleGenerateProposal {
+            result: SingleGenerateResult {
+                publication: SingleGeneratePublication::CompositionStaged,
+                artifact_manifest_ref: None,
+                manifest_sha256: None,
+                generated_file_count: extension.generated_file_count,
+                validation_primitive: extension.validation_primitive.clone(),
+                acceptance_notes: extension.acceptance_notes.clone(),
+            },
             request_snapshot: snapshot,
+            writes,
+            artifact_files,
+            provenance,
+            generated,
+            selected,
+            extension,
         })
     }
 
@@ -1135,13 +1238,51 @@ fn artifact_request(
     })
 }
 
+fn proposed_artifact_files(
+    request: &SingleGenerateRequest,
+    generated: &ValidatedBundle,
+    resources: &[LoadedResource],
+    resource_specs: &ResourceSpecs,
+) -> Result<Vec<ProposedArtifactFile>, SingleGenerateError> {
+    let mut files = generated
+        .files
+        .iter()
+        .map(|(role, relative_path, _)| ProposedArtifactFile {
+            role: role.clone(),
+            relative_path: relative_path.clone(),
+        })
+        .collect::<Vec<_>>();
+    for resource in resources {
+        let spec = resource_specs
+            .require_role(
+                &resource.reference.logical_role,
+                &resource.reference.media_type,
+            )
+            .map_err(|_| SingleGenerateError::InvalidResourceSpecs)?;
+        let relative_path = expand_target_template(
+            spec.target_path
+                .as_deref()
+                .ok_or(SingleGenerateError::InvalidResourceSpecs)?,
+            &request.mod_id,
+            &request.plan.item_id,
+        )
+        .map_err(|_| SingleGenerateError::InvalidResourceSpecs)?;
+        files.push(ProposedArtifactFile {
+            role: resource.reference.logical_role.clone(),
+            relative_path,
+        });
+    }
+    Ok(files)
+}
+
 fn result_from_published(
     published: &PublishedArtifact,
     extension: &SingleGenerateArtifactExtension,
 ) -> SingleGenerateResult {
     SingleGenerateResult {
-        artifact_manifest_ref: published.artifact_manifest_ref.clone(),
-        manifest_sha256: published.manifest_sha256.clone(),
+        publication: SingleGeneratePublication::Published,
+        artifact_manifest_ref: Some(published.artifact_manifest_ref.clone()),
+        manifest_sha256: Some(published.manifest_sha256.clone()),
         generated_file_count: extension.generated_file_count,
         validation_primitive: extension.validation_primitive.clone(),
         acceptance_notes: extension.acceptance_notes.clone(),

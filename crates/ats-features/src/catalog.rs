@@ -1,5 +1,6 @@
 use ats_kernel::ContributionId;
 
+use crate::composition_generate::CompositionGenerateFeature;
 use crate::composition_plan::CompositionPlanFeature;
 use crate::log_analyze::LogAnalyzeFeature;
 use crate::mod_generate_batch::BatchGenerateFeature;
@@ -18,6 +19,14 @@ pub fn built_in_feature_contracts() -> Vec<FeatureContract> {
         contract::<ProjectCreateFeature>(&["project.create.template"]),
         contract::<ModPlanFeature>(&["mod.plan.guidance"]),
         contract::<CompositionPlanFeature>(&["composition.plan.guidance"]),
+        contract::<CompositionGenerateFeature>(&[
+            "composition.generate",
+            "mod.plan.guidance",
+            "mod.generate.single",
+            "resource.prepare.specs",
+            "project.build.recipe",
+            "project.package.layout",
+        ]),
         contract::<ResourcePrepareFeature>(&["resource.prepare.specs"]),
         contract::<SingleGenerateFeature>(&["mod.generate.single", "resource.prepare.specs"]),
         contract::<BatchGenerateFeature>(&[
@@ -46,6 +55,7 @@ pub fn built_in_feature_registry() -> Result<FeatureRegistry, FeatureRegistryErr
     registry.register::<ProjectCreateFeature>()?;
     registry.register::<ModPlanFeature>()?;
     registry.register::<CompositionPlanFeature>()?;
+    registry.register::<CompositionGenerateFeature>()?;
     registry.register::<ResourcePrepareFeature>()?;
     registry.register::<SingleGenerateFeature>()?;
     registry.register::<BatchGenerateFeature>()?;
@@ -77,7 +87,7 @@ mod tests {
     #[test]
     fn built_in_catalog_has_unique_feature_contracts() {
         let contracts = built_in_feature_contracts();
-        assert_eq!(contracts.len(), 10);
+        assert_eq!(contracts.len(), 11);
         let batch = contracts
             .iter()
             .find(|contract| contract.id.as_str() == "mod.generate.batch")

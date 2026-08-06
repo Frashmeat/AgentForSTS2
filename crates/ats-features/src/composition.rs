@@ -12,7 +12,7 @@ use ats_workspace::{
     ItemCompositionProfile, ItemReferenceBinding, ItemRepository, ItemRepositoryErrorKind,
     ResourceRepository, StoredItemDefinition,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
@@ -21,7 +21,7 @@ use crate::mod_generate_single::validate_definition_resources;
 
 pub const RESOLVED_ITEM_GRAPH_SCHEMA_VERSION: u32 = 1;
 
-#[derive(Debug, Clone, Serialize, Eq, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CompositionDraftRef {
     pub draft_id: CompositionDraftId,

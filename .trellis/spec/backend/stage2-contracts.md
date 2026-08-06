@@ -505,6 +505,55 @@ Tests must cover Draft wire/CAS, stale current, mid-commit rollback, prepared-jo
 closed/partial confirmation, identity plus pinned resolution, missing/type/hash/readiness/cycle
 failures and deterministic graph/confirmation digests.
 
+### Scenario: Publish A Resolved Composition As One Unit
+
+`composition.generate` is the eleventh catalog Feature. Request v1 pins the root
+`StoredItemDefinition`, optional Draft revision, artifact/mod identity and Package request. The
+Feature repeats `ResolvedItemGraph` resolution, then executes sorted nodes as proposed Plan/Single
+children without calling Single's project/Artifact publication path.
+
+```text
+ResolvedItemGraph
+  -> N x (Plan child + composition_staged Single child)
+  -> bounded isolated project copy
+  -> apply all proposals + one validation
+  -> one isolated Build + composition_staged Package child
+  -> one rollback-capable real-project write transaction
+  -> one composition Artifact
+  -> parent succeeded terminal
+```
+
+- Single result v2 and Package result v2 distinguish `published` from `composition_staged`; staged
+  results contain no fabricated Artifact ref/hash.
+- Build request v2 accepts an optional normalized output root. Pack build recipe steps may declare
+  `isolatedOutputProperty`; the registered process Adapter permits only `ModsPath` and resolves it
+  below the staged project.
+- `.ats`, `.git`, `.godot`, `artifacts`, `delivery`, `dist` and `target` are excluded from the bounded
+  project copy. Symlinks, more than 50,000 files or more than 2 GiB fail before model output is
+  published.
+- The final ZIP is streamed from the stage through the same project writer transaction as generated
+  source. Artifact input paths reference that pending real-project state and are hash-verified by
+  `ArtifactManifest` v3.
+- Final project commit uses a same-directory transaction-directory rename as its decision point.
+  Pre-decision rename failure rolls back complete backups before return; post-decision cleanup-only
+  directories are retried on the next writer access.
+- Validation, Build, Package, final-write, Artifact and cancellation failure retain completed child
+  Runs but restore real-project files and remove owned stage/Artifact state before returning.
+- The composition Artifact extension binds graph/root/Draft/profile provenance, node/file counts,
+  every child Run ID and the Package report. No node receives an independent final Artifact.
+- Process-stop recovery during final project transaction commit remains O6 scope; ordinary returned
+  errors are not allowed to leave an advertised partial publication.
+
+Required deterministic gate:
+
+```powershell
+cargo test -p agentthespire-desktop --test composition_generation -- --nocapture
+```
+
+It must prove successful whole-closure publication, validation rejection and package-commit failure,
+including exact child terminal counts, recomputable composition manifest files and zero real-project,
+Artifact or staging residue on failed paths.
+
 ## 5. Resource Workspace
 
 `ats-workspace` stores ResourceAsset schema v2 with immutable candidates and explicit selection. A Feature references only `resourceId + selectedVersion`; a new upload, Pack default, AI response, or deterministic derived output has `selectedVersion=null` until an explicit select succeeds. Stale or tampered bytes fail. The registered HTTP Media Adapter supports Images/Chat protocols, cancellation, typed status mapping, bounded bytes, and request-hash provenance; health reports registration, not provider connectivity.
@@ -692,7 +741,7 @@ v4 unchanged and invokes Build/Package only after every Item outcome succeeds.
 
 ## 7. Feature Composition
 
-The shared registry contains exactly 10 current Features, including `composition.plan`. Composition planning persists reviewable Draft state and never publishes Item pointers or project files. Single generation owns the validated model bundle -> rollback-capable project writes -> real validation -> immutable Artifact -> Run success order. Batch invokes Single child Runs. Complex invokes Plan, Batch/Single, Build and Package. Neither composition creates an alternative Prompt, Resource, file transaction, build or package implementation.
+The shared registry contains exactly 11 current Features, including `composition.plan` and `composition.generate`. Composition planning persists reviewable Draft state and never publishes Item pointers or project files. Composition generation reuses Plan, Single proposal, Build and Package services but owns one whole-closure publication boundary. Single generation owns the validated model bundle -> rollback-capable project writes -> real validation -> immutable Artifact -> Run success order. Batch invokes Single child Runs. Complex invokes Plan, Batch/Single, Build and Package. No composition creates an alternative Prompt, Resource, file transaction, build or package implementation.
 
 ## 8. Shell Cutover
 

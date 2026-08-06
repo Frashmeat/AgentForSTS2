@@ -42,6 +42,12 @@ nodes, pinned cycles and node-limit failure remain distinct. Repository/OS text 
 must not enter these failures. A confirmation storage failure returns only after all current pointer
 replacements have rolled back or a recovery journal remains for the next repository access.
 
+Whole-closure generation preserves the originating Plan/Single/Build/Package failure family.
+Staging uses `composition.staging.*`; final project writes use `composition.publication.*`; the one
+final Artifact uses `artifact.*`. Cleanup attempts are independent: an Artifact cleanup error must
+not skip a still-available project rollback, and a package commit error must not drop a pending
+real-project transaction.
+
 ## Ownership
 
 - Kernel owns serialized shape and validation.

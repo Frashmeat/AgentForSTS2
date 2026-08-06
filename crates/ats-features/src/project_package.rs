@@ -2,10 +2,12 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use ats_game_context::{ContributionResolverError, LoadedGamePack, VerifiedContributionSet};
-use ats_kernel::{ContributionId, FeatureId, SchemaId, SchemaRef, SchemaVersion, Sha256Digest};
+use ats_kernel::{
+    ContributionId, FailureCode, FeatureId, SchemaId, SchemaRef, SchemaVersion, Sha256Digest,
+};
 use ats_runtime::{
     ArtifactFileInput, ArtifactPublishRequest, ArtifactPublisher, CancellationToken, PackageEntry,
-    PackageError, PackagePrepareRequest, PackageReport, PackageWriter, PayloadError,
+    PackageError, PackagePrepareRequest, PackageReport, PackageWriter, PayloadError, RunFailure,
     RunLifecycleError, RunRecord, RunStatus, RunTransition, VersionedPayload,
 };
 use chrono::Utc;
@@ -30,7 +32,7 @@ impl FeatureSpec for ProjectPackageFeature {
     }
 
     fn result_schema() -> SchemaRef {
-        schema("feature.project-package-result")
+        schema_version("feature.project-package-result", 2)
     }
 
     fn artifact_extension_schema() -> SchemaRef {
@@ -62,10 +64,20 @@ pub struct ProjectPackageRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProjectPackageResult {
-    pub artifact_manifest_ref: String,
-    pub manifest_sha256: Sha256Digest,
+    pub publication: PackagePublication,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_manifest_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest_sha256: Option<Sha256Digest>,
     pub output_relative_path: String,
     pub report: PackageReport,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum PackagePublication {
+    Published,
+    CompositionStaged,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -107,6 +119,7 @@ struct PackageContext {
     contribution_slot: ContributionId,
 }
 
+#[derive(Clone, Copy)]
 pub struct ProjectPackageContext<'a> {
     pub pack: &'a LoadedGamePack,
     pub contributions: &'a VerifiedContributionSet,
@@ -115,23 +128,48 @@ pub struct ProjectPackageContext<'a> {
 
 pub struct ProjectPackageService;
 
+pub struct PreparedProjectPackage {
+    pending: Box<dyn ats_runtime::PendingPackageOutput>,
+    result: ProjectPackageResult,
+}
+
+impl PreparedProjectPackage {
+    #[must_use]
+    pub fn result(&self) -> &ProjectPackageResult {
+        &self.result
+    }
+
+    #[must_use]
+    pub fn output_path(&self) -> &Path {
+        self.pending.output_path()
+    }
+
+    pub fn commit(self) -> Result<ProjectPackageResult, ProjectPackageError> {
+        self.pending.commit()?;
+        Ok(self.result)
+    }
+
+    pub fn rollback(self) -> Result<(), ProjectPackageError> {
+        self.pending.rollback()?;
+        Ok(())
+    }
+}
+
 impl ProjectPackageService {
-    pub fn execute<W, A>(
+    pub fn prepare<W>(
         &self,
         writer: &W,
-        artifacts: &A,
-        run: &mut RunRecord,
-        request: ProjectPackageRequest,
+        run: &RunRecord,
+        request: &ProjectPackageRequest,
         context: ProjectPackageContext<'_>,
         cancellation: &CancellationToken,
-    ) -> Result<ProjectPackageResult, ProjectPackageError>
+    ) -> Result<PreparedProjectPackage, ProjectPackageError>
     where
         W: PackageWriter + ?Sized,
-        A: ArtifactPublisher + ?Sized,
     {
-        validate_run(run, &request)?;
+        validate_run(run, request)?;
         validate_context(&context)?;
-        validate_request(&request)?;
+        validate_request(request)?;
         check_cancelled(cancellation)?;
         let layout: PackageLayout = context.contributions.decode(&package_slot())?;
         let entries = layout.entries(&request.mod_id)?;
@@ -150,9 +188,35 @@ impl ProjectPackageService {
             pending.rollback()?;
             return Err(error);
         }
+        Ok(PreparedProjectPackage {
+            result: ProjectPackageResult {
+                publication: PackagePublication::CompositionStaged,
+                artifact_manifest_ref: None,
+                manifest_sha256: None,
+                output_relative_path: pending.output_relative_path().to_owned(),
+                report: pending.report().clone(),
+            },
+            pending,
+        })
+    }
+
+    pub fn execute<W, A>(
+        &self,
+        writer: &W,
+        artifacts: &A,
+        run: &mut RunRecord,
+        request: ProjectPackageRequest,
+        context: ProjectPackageContext<'_>,
+        cancellation: &CancellationToken,
+    ) -> Result<ProjectPackageResult, ProjectPackageError>
+    where
+        W: PackageWriter + ?Sized,
+        A: ArtifactPublisher + ?Sized,
+    {
+        let prepared = self.prepare(writer, run, &request, context, cancellation)?;
         let extension = ProjectPackageArtifactExtension {
-            output_relative_path: pending.output_relative_path().to_owned(),
-            report: pending.report().clone(),
+            output_relative_path: prepared.result.output_relative_path.clone(),
+            report: prepared.result.report.clone(),
         };
         let published = match artifacts.publish(ArtifactPublishRequest {
             artifact_id: request.artifact_id.clone(),
@@ -174,24 +238,27 @@ impl ProjectPackageService {
             )?,
             files: vec![ArtifactFileInput {
                 role: "package.zip".into(),
-                source_path: pending.output_path().to_path_buf(),
-                published_relative_path: Some(pending.output_relative_path().to_owned()),
+                source_path: prepared.output_path().to_path_buf(),
+                published_relative_path: Some(prepared.result.output_relative_path.clone()),
             }],
         }) {
             Ok(published) => published,
             Err(_) => {
-                pending.rollback()?;
+                prepared.rollback()?;
                 return Err(ProjectPackageError::ArtifactPublication);
             }
         };
         if let Err(error) = check_cancelled(cancellation) {
-            cleanup(artifacts, &request.artifact_id, run.id())?;
-            pending.rollback()?;
+            let cleanup_result = cleanup(artifacts, &request.artifact_id, run.id());
+            let rollback_result = prepared.rollback();
+            cleanup_result?;
+            rollback_result?;
             return Err(error);
         }
         let result = ProjectPackageResult {
-            artifact_manifest_ref: published.artifact_manifest_ref,
-            manifest_sha256: published.manifest_sha256,
+            publication: PackagePublication::Published,
+            artifact_manifest_ref: Some(published.artifact_manifest_ref),
+            manifest_sha256: Some(published.manifest_sha256),
             output_relative_path: extension.output_relative_path,
             report: extension.report,
         };
@@ -201,11 +268,13 @@ impl ProjectPackageService {
             .apply_transition(RunTransition::Succeed { result: payload }, Utc::now())
             .is_err()
         {
-            cleanup(artifacts, &request.artifact_id, run.id())?;
-            pending.rollback()?;
+            let cleanup_result = cleanup(artifacts, &request.artifact_id, run.id());
+            let rollback_result = prepared.rollback();
+            cleanup_result?;
+            rollback_result?;
             return Err(ProjectPackageError::RunTransition);
         }
-        pending.commit()?;
+        let _ = prepared.commit()?;
         Ok(result)
     }
 }
@@ -236,6 +305,45 @@ pub enum ProjectPackageError {
     Payload(#[from] PayloadError),
     #[error(transparent)]
     Lifecycle(#[from] RunLifecycleError),
+}
+
+impl ProjectPackageError {
+    #[must_use]
+    pub fn run_failure(&self) -> RunFailure {
+        let (code, stage) = match self {
+            Self::InvalidInput | Self::InvalidRun => {
+                ("run.input_invalid", "project.package.request")
+            }
+            Self::ContextIdentityMismatch => ("truth.context_mismatch", "project.package.context"),
+            Self::InvalidLayout | Self::Contribution(_) => {
+                ("pack.contribution_invalid", "project.package.pack")
+            }
+            Self::ArtifactPublication => ("artifact.publish_failed", "project.package.publish"),
+            Self::ArtifactCleanup => ("artifact.cleanup_failed", "project.package.cleanup"),
+            Self::RunTransition | Self::Lifecycle(_) => {
+                ("run.transition_failed", "project.package.result")
+            }
+            Self::Cancelled | Self::Package(PackageError::Cancelled) => {
+                ("run.cancelled", "project.package.execute")
+            }
+            Self::Package(PackageError::InvalidRequest | PackageError::DuplicateEntry) => {
+                ("artifact.path_invalid", "project.package.prepare")
+            }
+            Self::Package(PackageError::InvalidSource | PackageError::InvalidOutput) => {
+                ("artifact.path_invalid", "project.package.prepare")
+            }
+            Self::Package(PackageError::Io { .. } | PackageError::Archive) => {
+                ("artifact.write_failed", "project.package.prepare")
+            }
+            Self::Payload(_) => ("run.result_invalid", "project.package.result"),
+        };
+        RunFailure::new(
+            FailureCode::parse(code).expect("built-in failure code is valid"),
+            stage,
+            None,
+        )
+        .expect("built-in Run failure is valid")
+    }
 }
 
 fn validate_run(
@@ -331,9 +439,13 @@ fn package_slot() -> ContributionId {
 }
 
 fn schema(id: &str) -> SchemaRef {
+    schema_version(id, 1)
+}
+
+fn schema_version(id: &str, version: u32) -> SchemaRef {
     SchemaRef {
         id: SchemaId::parse(id).expect("built-in schema ID is valid"),
-        version: SchemaVersion::new(1).expect("built-in schema version is valid"),
+        version: SchemaVersion::new(version).expect("built-in schema version is valid"),
     }
 }
 

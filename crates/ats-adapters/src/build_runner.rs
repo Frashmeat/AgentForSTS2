@@ -4,7 +4,10 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use ats_runtime::{BuildError, BuildRunner, BuildStepReport, BuildStepRequest, CancellationToken};
+use ats_runtime::{
+    BuildError, BuildRunner, BuildStepReport, BuildStepRequest, CancellationToken,
+    normalize_relative_path,
+};
 use tokio::process::Command;
 
 #[derive(Debug, Default)]
@@ -23,6 +26,7 @@ impl BuildRunner for RegisteredBuildRunner {
         if cancellation.is_cancelled() {
             return Err(BuildError::Cancelled);
         }
+        let isolated_output = isolated_output(&request)?;
         let metadata = fs::symlink_metadata(&request.project_root)
             .map_err(|error| unavailable("inspect_project", error))?;
         if !metadata.is_dir() || metadata.file_type().is_symlink() {
@@ -45,8 +49,12 @@ impl BuildRunner for RegisteredBuildRunner {
                 .map_err(|error| unavailable("create_stdout", error))?;
             let stderr_file = fs::File::create(&stderr_path)
                 .map_err(|error| unavailable("create_stderr", error))?;
-            let mut child = Command::new("dotnet")
-                .args(["publish", "--nologo"])
+            let mut command = Command::new("dotnet");
+            command.args(["publish", "--nologo"]);
+            if let Some((property, output)) = &isolated_output {
+                command.arg(format!("-p:{property}={}/", output.display()));
+            }
+            let mut child = command
                 .current_dir(&request.project_root)
                 .stdout(Stdio::from(stdout_file))
                 .stderr(Stdio::from(stderr_file))
@@ -91,6 +99,30 @@ impl BuildRunner for RegisteredBuildRunner {
     }
 }
 
+fn isolated_output(
+    request: &BuildStepRequest,
+) -> Result<Option<(String, std::path::PathBuf)>, BuildError> {
+    match (
+        request.isolated_output_property.as_deref(),
+        request.output_relative_root.as_deref(),
+    ) {
+        (None, None) => Ok(None),
+        (Some("ModsPath"), Some(relative)) => {
+            if relative.starts_with(".ats/")
+                || normalize_relative_path(std::path::Path::new(relative)).as_deref()
+                    != Ok(relative)
+            {
+                return Err(BuildError::InvalidRequest);
+            }
+            let output = request.project_root.join(relative);
+            fs::create_dir_all(&output)
+                .map_err(|error| unavailable("create_isolated_output", error))?;
+            Ok(Some(("ModsPath".into(), output)))
+        }
+        _ => Err(BuildError::InvalidRequest),
+    }
+}
+
 fn sanitize_tail(value: &str, project_root: &str) -> String {
     let redacted = value.replace(project_root, "<project>");
     let count = redacted.chars().count();
@@ -122,6 +154,8 @@ mod tests {
                     primitive: PrimitiveId::parse("process.unknown").unwrap(),
                     project_root: "missing".into(),
                     run_id: ats_runtime::RunId::new(),
+                    isolated_output_property: None,
+                    output_relative_root: None,
                 },
                 &CancellationToken::new(),
             )
@@ -142,6 +176,8 @@ mod tests {
                     primitive: PrimitiveId::parse("process.dotnet-publish").unwrap(),
                     project_root: temp.path().to_path_buf(),
                     run_id: run_id.clone(),
+                    isolated_output_property: None,
+                    output_relative_root: None,
                 },
                 &CancellationToken::new(),
             )
@@ -173,6 +209,8 @@ mod tests {
                     primitive: PrimitiveId::parse("process.dotnet-publish").unwrap(),
                     project_root: temp.path().to_path_buf(),
                     run_id: run_id.clone(),
+                    isolated_output_property: None,
+                    output_relative_root: None,
                 },
                 &CancellationToken::new(),
             )

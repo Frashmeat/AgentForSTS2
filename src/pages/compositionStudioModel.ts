@@ -2,8 +2,11 @@ import type {
   CompositionDraft,
   CompositionDraftNode,
   CompositionPlanRequest,
+  CompositionGenerateRequest,
   CompositionProfileSet,
   ItemCompositionSource,
+  ProjectPackageRequest,
+  StoredItemDefinition,
 } from "@/services/tauriApi";
 
 export type CompositionProfileChoice =
@@ -117,11 +120,51 @@ export function closedSelection(draft: CompositionDraft, selected: Set<string>):
     if (!node) return false;
     for (const bindings of Object.values(node.definition.referenceBindings)) {
       for (const binding of bindings) {
-        if (!selected.has(binding.itemId)) return false;
+        if (binding.kind === "pinned" && !selected.has(binding.itemId)) return false;
       }
     }
   }
   return true;
+}
+
+export function compositionRoots(
+  definitions: StoredItemDefinition[],
+  profiles: CompositionProfileSet[],
+): StoredItemDefinition[] {
+  const rootTypes = new Set(profiles.map((profile) => profile.rootItemType));
+  return definitions
+    .filter((definition) =>
+      definition.definition.compositionProfile !== undefined &&
+      definition.definition.compositionProfile !== null &&
+      rootTypes.has(definition.definition.itemType))
+    .sort((left, right) => left.definition.itemId.localeCompare(right.definition.itemId));
+}
+
+export function buildCompositionGenerateRequest(
+  artifactId: string,
+  modId: string,
+  root: StoredItemDefinition,
+  draft: CompositionDraft | null,
+  packageRequest: Pick<
+    ProjectPackageRequest,
+    "sourceRelativeRoot" | "outputRelativePath" | "compressionLevel"
+  >,
+): CompositionGenerateRequest {
+  return {
+    artifactId: artifactId.trim(),
+    modId: modId.trim(),
+    root,
+    draft: draft && draft.rootItemId === root.definition.itemId
+      ? { draftId: draft.draftId, revision: draft.revision }
+      : null,
+    package: {
+      artifactId: artifactId.trim(),
+      modId: modId.trim(),
+      sourceRelativeRoot: packageRequest.sourceRelativeRoot.trim(),
+      outputRelativePath: packageRequest.outputRelativePath.trim(),
+      compressionLevel: packageRequest.compressionLevel,
+    },
+  };
 }
 
 export function displayName(names: Record<string, string>): string {

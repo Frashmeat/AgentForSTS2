@@ -13,6 +13,8 @@ pub struct BuildStepRequest {
     pub primitive: PrimitiveId,
     pub project_root: PathBuf,
     pub run_id: RunId,
+    pub isolated_output_property: Option<String>,
+    pub output_relative_root: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -39,6 +41,8 @@ impl BuildStepReport {
 
 #[derive(Debug, Error)]
 pub enum BuildError {
+    #[error("build request is invalid")]
+    InvalidRequest,
     #[error("build Primitive is not registered")]
     UnknownPrimitive,
     #[error("build step rejected the project")]

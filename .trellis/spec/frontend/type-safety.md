@@ -68,6 +68,13 @@ field-keyed nodes and exact ItemDefinition v2 shapes. Confirmation guards valida
 every StoredItemDefinition and the confirmation digest. A TypeScript interface or direct cast is not
 accepted for list/get/update/confirm responses.
 
+Composition generation submits request schema v1 with an exact `StoredItemDefinition`, optional
+Draft ref and nested Package request. Single result v2 and Package result v2 use the exact
+`published | composition_staged` discriminator. Published results require Artifact ref/hash;
+composition-staged child results must not be presented as independently published Artifacts.
+Project Build request v2 carries only optional `outputRelativeRoot`; Pack-owned isolation property
+names never enter the React request.
+
 Batch/Complex feature payloads are decoded only after matching exact schema identities:
 
 ```text
