@@ -8,8 +8,8 @@ use thiserror::Error;
 use crate::{CompositionProfileError, CompositionProfileSet, ItemCatalogError, ItemTypeDescriptor};
 
 pub const GAME_PACK_SCHEMA_VERSION: u32 = 4;
-const BUILT_IN_STS2_SHA256: &str =
-    "7a879ebdad765af1221418224e0f66fefea316ff51eae24e9ba090acac2e28cf";
+pub(crate) const BUILT_IN_STS2_SHA256: &str =
+    "2bf6e692d812bcc0adfb008b5741693365d136e4fd6c54c0bdc3b7c66545484a";
 const BUILT_IN_STS2: &[u8] = include_bytes!("../../../game_packs/sts2/stage2-game-pack.json");
 
 #[derive(Debug, Clone)]
@@ -372,10 +372,33 @@ mod tests {
         assert_eq!(character.localization_fields().len(), 14);
         assert_eq!(character.reference_slots().len(), 6);
         assert_eq!(character.evidence_queries().len(), 8);
+        assert_eq!(character.resource_profiles().len(), 2);
         assert!(
-            character.resource_profiles()[0]
+            character
+                .resource_profiles()
+                .iter()
+                .find(|profile| profile.id().as_str() == "placeholder")
+                .unwrap()
                 .required_resource_roles()
                 .is_empty()
+        );
+        assert_eq!(
+            character
+                .resource_profiles()
+                .iter()
+                .find(|profile| profile.id().as_str() == "branded_placeholder")
+                .unwrap()
+                .required_resource_roles()
+                .iter()
+                .map(ResourceId::as_str)
+                .collect::<Vec<_>>(),
+            [
+                "character.top_panel_icon",
+                "character.top_panel_icon_outline",
+                "character.select_icon",
+                "character.select_locked_icon",
+                "character.map_marker",
+            ]
         );
         let character_suite = pack
             .composition_profile(&CompositionId::parse("character_suite").unwrap())

@@ -60,7 +60,10 @@ render `String(error)`, accept `query_index`, or cast IPC data directly to the t
 Resource IPC follows the same rule. Runtime guards validate `ResourceCatalog`, ResourceAsset v2,
 every immutable version/blob/provenance, bounded PNG `ResourcePreview`, and select results. A data
 URL must begin with `data:image/png;base64,`; absolute or relative workspace paths are never a
-preview transport. Single v3 carries `definition: StoredItemDefinition` and has no
+preview transport. Every `ResourceRoleDescriptor` requires boolean `packDefaultAvailable`; absence
+is a malformed IPC response, not equivalent to `false`. A Pack default prepare source has the exact
+wire shape `{kind:"pack_default"}` and never carries `sourcePath`. Single v3 carries
+`definition: StoredItemDefinition` and has no
 `selectedResources` field.
 
 Composition IPC guards validate CompositionDraft v1 identity/revision/Pack hash/root/profile,

@@ -864,7 +864,7 @@ mod tests {
             "contributions":[{
                 "slotId":"resource.prepare.specs",
                 "featureId":"resource.prepare",
-                "schema":{"id":"pack.resource-specs","version":2},
+                "schema":{"id":"pack.resource-specs","version":3},
                 "requiredPrimitives":[],
                 "payload":{"roles":[{
                     "id":"fixture.icon","mediaTypes":["image/png"],

@@ -49,7 +49,7 @@ impl ResourcePrepareFeature {
     pub fn contribution_requirement() -> ats_game_context::ContributionRequirement {
         ats_game_context::ContributionRequirement {
             slot_id: resource_specs_slot(),
-            schema: schema_version("pack.resource-specs", 2),
+            schema: schema_version("pack.resource-specs", 3),
         }
     }
 }
@@ -111,6 +111,7 @@ pub struct ResourceRoleDescriptor {
     pub width: u32,
     pub height: u32,
     pub require_alpha: bool,
+    pub pack_default_available: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_path: Option<String>,
     pub source: ResourceRoleSourceDescriptor,
@@ -162,8 +163,17 @@ pub(crate) struct ResourceRoleSpec {
     pub(crate) height: u32,
     pub(crate) require_alpha: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) default_asset: Option<PackDefaultAssetSpec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) target_path: Option<String>,
     pub(crate) source: ResourceRoleSource,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct PackDefaultAssetSpec {
+    pub(crate) id: String,
+    pub(crate) sha256: Sha256Digest,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -224,7 +234,12 @@ impl ResourceSpecs {
             }
             match &role.source {
                 ResourceRoleSource::Master => {
-                    if role.target_path.is_some() {
+                    if role.target_path.is_some()
+                        || role
+                            .default_asset
+                            .as_ref()
+                            .is_some_and(|asset| !valid_role(&asset.id))
+                    {
                         return Err(ResourcePrepareError::InvalidPackSpecs);
                     }
                 }
@@ -234,6 +249,7 @@ impl ResourceSpecs {
                 } => {
                     if !valid_role(source_role)
                         || source_role == &role.id
+                        || role.default_asset.is_some()
                         || role
                             .target_path
                             .as_deref()
@@ -372,6 +388,7 @@ impl ResourcePrepareService {
                     width: role.width,
                     height: role.height,
                     require_alpha: role.require_alpha,
+                    pack_default_available: role.default_asset.is_some(),
                     target_path: role.target_path,
                     source: match role.source {
                         ResourceRoleSource::Master => ResourceRoleSourceDescriptor::Master,
@@ -465,12 +482,7 @@ impl ResourcePrepareService {
         let spec = specs.require_role(&request.logical_role, &request.media_type)?;
         let origin = match request.source {
             ResourcePrepareSource::UserUpload => ResourceOrigin::UserUpload,
-            ResourcePrepareSource::PackDefault => ResourceOrigin::PackDefault {
-                game_pack_id: context.pack.id().clone(),
-                game_pack_sha256: context.pack.content_sha256().clone(),
-                contribution_slot: resource_specs_slot(),
-            },
-            ResourcePrepareSource::AiGenerated { .. } => {
+            ResourcePrepareSource::PackDefault | ResourcePrepareSource::AiGenerated { .. } => {
                 return Err(ResourcePrepareError::WrongSourceMode);
             }
         };
@@ -484,6 +496,51 @@ impl ResourcePrepareService {
             spec,
             media,
             origin,
+            context.pack,
+        )
+    }
+
+    pub fn prepare_default<P, R, F>(
+        &self,
+        processor: &P,
+        repository: &R,
+        request: ResourcePrepareRequest,
+        resolve_asset: F,
+        context: ResourcePrepareContext<'_>,
+    ) -> Result<ResourcePrepareResult, ResourcePrepareError>
+    where
+        P: ResourceMediaProcessor,
+        R: ResourceRepository,
+        F: FnOnce(&LoadedGamePack, &str) -> Option<&'static [u8]>,
+    {
+        let specs = validate_request_and_context(&request, &context)?;
+        let spec = specs.require_role(&request.logical_role, &request.media_type)?;
+        if !matches!(request.source, ResourcePrepareSource::PackDefault) {
+            return Err(ResourcePrepareError::WrongSourceMode);
+        }
+        let asset = spec
+            .default_asset
+            .as_ref()
+            .ok_or(ResourcePrepareError::PackAssetUnavailable)?;
+        let bytes = resolve_asset(context.pack, &asset.id)
+            .ok_or(ResourcePrepareError::PackAssetUnavailable)?;
+        if sha256_bytes(bytes) != asset.sha256 {
+            return Err(ResourcePrepareError::PackAssetInvalid);
+        }
+        let media = processor
+            .prepare_bytes(bytes.to_vec(), &request.media_type)
+            .map_err(|_| ResourcePrepareError::InvalidMedia)?;
+        prepare_candidates(
+            processor,
+            repository,
+            &specs,
+            spec,
+            media,
+            ResourceOrigin::PackDefault {
+                game_pack_id: context.pack.id().clone(),
+                game_pack_sha256: context.pack.content_sha256().clone(),
+                contribution_slot: resource_specs_slot(),
+            },
             context.pack,
         )
     }
@@ -589,6 +646,10 @@ pub enum ResourcePrepareError {
     InvalidMediaResponse,
     #[error("resource media bytes or dimensions do not match the Pack contract")]
     InvalidMedia,
+    #[error("resource Pack default asset is unavailable")]
+    PackAssetUnavailable,
+    #[error("resource Pack default asset does not match its pinned hash")]
+    PackAssetInvalid,
     #[error("resource preparation was cancelled")]
     Cancelled,
     #[error("resource repository operation failed")]
@@ -836,7 +897,7 @@ mod tests {
     use std::sync::Mutex;
 
     use async_trait::async_trait;
-    use ats_game_context::{ContributionResolver, GamePackLoader};
+    use ats_game_context::{ContributionResolver, GamePackLoader, built_in_game_pack_asset};
     use ats_kernel::PrimitiveId;
     use ats_runtime::{MediaRequestSnapshot, MediaResponse};
     use ats_workspace::{ResourceDeriveRequest, WorkspaceError};
@@ -1114,15 +1175,15 @@ mod tests {
             )
             .unwrap();
         let default = service
-            .prepare_file(
+            .prepare_default(
                 &MockProcessor,
                 &repository,
                 ResourcePrepareRequest {
-                    logical_role: "relic.master".into(),
+                    logical_role: "character.identity_master".into(),
                     media_type: "image/png".into(),
                     source: ResourcePrepareSource::PackDefault,
                 },
-                source,
+                |pack, asset_id| built_in_game_pack_asset(pack, asset_id).ok(),
                 make_context(),
             )
             .unwrap();
@@ -1157,13 +1218,159 @@ mod tests {
             ResourceOrigin::AiGenerated { .. }
         ));
         assert_eq!(upload.candidates.len(), 4);
+        assert_eq!(default.candidates.len(), 6);
         assert!(
             upload
                 .candidates
                 .iter()
                 .all(|candidate| candidate.selected_version.is_none())
         );
-        assert_eq!(repository.assets.lock().unwrap().len(), 12);
+        assert!(
+            default
+                .candidates
+                .iter()
+                .all(|candidate| candidate.selected_version.is_none())
+        );
+        assert_eq!(repository.assets.lock().unwrap().len(), 14);
+    }
+
+    #[test]
+    fn pack_default_requires_the_dedicated_entry_and_exact_asset_hash() {
+        let (pack, contributions) = context();
+        let make_context = || ResourcePrepareContext {
+            pack: &pack,
+            contributions: &contributions,
+        };
+        let request = || ResourcePrepareRequest {
+            logical_role: "character.identity_master".into(),
+            media_type: "image/png".into(),
+            source: ResourcePrepareSource::PackDefault,
+        };
+
+        let repository = MemoryRepository::default();
+        assert!(matches!(
+            ResourcePrepareService.prepare_file(
+                &MockProcessor,
+                &repository,
+                request(),
+                PathBuf::from("caller-controlled.png"),
+                make_context(),
+            ),
+            Err(ResourcePrepareError::WrongSourceMode)
+        ));
+        assert!(matches!(
+            ResourcePrepareService.prepare_default(
+                &MockProcessor,
+                &repository,
+                request(),
+                |_, _| None,
+                make_context(),
+            ),
+            Err(ResourcePrepareError::PackAssetUnavailable)
+        ));
+        assert!(matches!(
+            ResourcePrepareService.prepare_default(
+                &MockProcessor,
+                &repository,
+                request(),
+                |_, _| Some(b"wrong-pack-asset"),
+                make_context(),
+            ),
+            Err(ResourcePrepareError::PackAssetInvalid)
+        ));
+        assert!(matches!(
+            ResourcePrepareService.prepare_default(
+                &MockProcessor,
+                &repository,
+                ResourcePrepareRequest {
+                    logical_role: "relic.master".into(),
+                    media_type: "image/png".into(),
+                    source: ResourcePrepareSource::PackDefault,
+                },
+                |_, _| Some(b"unused"),
+                make_context(),
+            ),
+            Err(ResourcePrepareError::PackAssetUnavailable)
+        ));
+        assert!(repository.assets.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn character_default_catalog_and_candidate_batch_match_the_pack_contract() {
+        let (pack, contributions) = context();
+        let repository = MemoryRepository::default();
+        let context = || ResourcePrepareContext {
+            pack: &pack,
+            contributions: &contributions,
+        };
+        let catalog = ResourcePrepareService.catalog(context()).unwrap();
+        let expected = [
+            ("character.identity_master", 512, 512, true),
+            ("character.top_panel_icon", 85, 85, false),
+            ("character.top_panel_icon_outline", 85, 85, false),
+            ("character.select_icon", 132, 195, false),
+            ("character.select_locked_icon", 132, 195, false),
+            ("character.map_marker", 49, 64, false),
+        ];
+        for (role_id, width, height, default_available) in expected {
+            let role = catalog
+                .roles
+                .iter()
+                .find(|role| role.id == role_id)
+                .unwrap();
+            assert_eq!((role.width, role.height), (width, height));
+            assert_eq!(role.pack_default_available, default_available);
+        }
+
+        let result = ResourcePrepareService
+            .prepare_default(
+                &MockProcessor,
+                &repository,
+                ResourcePrepareRequest {
+                    logical_role: "character.identity_master".into(),
+                    media_type: "image/png".into(),
+                    source: ResourcePrepareSource::PackDefault,
+                },
+                |pack, asset_id| built_in_game_pack_asset(pack, asset_id).ok(),
+                context(),
+            )
+            .unwrap();
+        assert_eq!(result.candidates.len(), expected.len());
+        for candidate in &result.candidates {
+            assert!(candidate.selected_version.is_none());
+            assert!(matches!(
+                candidate.origin,
+                ResourceOrigin::PackDefault { .. }
+            ));
+        }
+        assert_eq!(repository.assets.lock().unwrap().len(), expected.len());
+    }
+
+    #[test]
+    fn failed_character_default_derivation_has_no_partial_repository_mutation() {
+        let (pack, contributions) = context();
+        let repository = MemoryRepository::default();
+        let result = ResourcePrepareService.prepare_default(
+            &FixedProcessor {
+                width: 512,
+                height: 512,
+                has_alpha: true,
+                bytes: b"valid-master".to_vec(),
+            },
+            &repository,
+            ResourcePrepareRequest {
+                logical_role: "character.identity_master".into(),
+                media_type: "image/png".into(),
+                source: ResourcePrepareSource::PackDefault,
+            },
+            |pack, asset_id| built_in_game_pack_asset(pack, asset_id).ok(),
+            ResourcePrepareContext {
+                pack: &pack,
+                contributions: &contributions,
+            },
+        );
+        assert!(matches!(result, Err(ResourcePrepareError::InvalidMedia)));
+        assert!(repository.assets.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -1418,6 +1625,49 @@ mod tests {
             ));
             assert!(repository.assets.lock().unwrap().is_empty());
         }
+    }
+
+    #[test]
+    fn derived_roles_cannot_declare_pack_default_assets() {
+        let mut pack_value: serde_json::Value = serde_json::from_slice(include_bytes!(
+            "../../../game_packs/sts2/stage2-game-pack.json"
+        ))
+        .unwrap();
+        let contribution = pack_value["contributions"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|candidate| candidate["slotId"] == "resource.prepare.specs")
+            .unwrap();
+        let role = contribution["payload"]["roles"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|candidate| candidate["id"] == "relic.normal")
+            .unwrap();
+        role["defaultAsset"] = serde_json::json!({
+            "id": "relic.invalid_default",
+            "sha256": "a".repeat(64)
+        });
+        let bytes = serde_json::to_vec(&pack_value).unwrap();
+        let digest = Sha256Digest::parse(format!("{:x}", Sha256::digest(&bytes))).unwrap();
+        let pack = GamePackLoader::load(&bytes, &digest).unwrap();
+        let contributions =
+            ContributionResolver::new([PrimitiveId::parse("image.role-transform").unwrap()])
+                .resolve(
+                    &pack,
+                    &ResourcePrepareFeature::id(),
+                    &[ResourcePrepareFeature::contribution_requirement()],
+                )
+                .unwrap();
+
+        assert!(matches!(
+            ResourcePrepareService.catalog(ResourcePrepareContext {
+                pack: &pack,
+                contributions: &contributions,
+            }),
+            Err(ResourcePrepareError::InvalidPackSpecs)
+        ));
     }
 
     #[test]

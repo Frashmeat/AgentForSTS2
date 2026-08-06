@@ -19,8 +19,8 @@ const catalog = {
   gamePackId: "sts2",
   gamePackSha256: "b".repeat(64),
   roles: [
-    { id: "relic.master", mediaTypes: ["image/png"], width: 512, height: 512, requireAlpha: true, source: { kind: "master" } },
-    { id: "relic.normal", mediaTypes: ["image/png"], width: 128, height: 128, requireAlpha: true, targetPath: "x", source: { kind: "derived", sourceRole: "relic.master" } },
+    { id: "relic.master", mediaTypes: ["image/png"], width: 512, height: 512, requireAlpha: true, packDefaultAvailable: true, source: { kind: "master" } },
+    { id: "relic.normal", mediaTypes: ["image/png"], width: 128, height: 128, requireAlpha: true, packDefaultAvailable: false, targetPath: "x", source: { kind: "derived", sourceRole: "relic.master" } },
   ],
 };
 const asset = {
@@ -48,10 +48,13 @@ const definition = {
 };
 
 test("required derived roles include their Pack-owned master", () => {
-  assert.deepEqual(workbenchRoles(catalog, ["relic.normal"]).map((role) => role.id), [
+  const roles = workbenchRoles(catalog, ["relic.normal"]);
+  assert.deepEqual(roles.map((role) => role.id), [
     "relic.master",
     "relic.normal",
   ]);
+  assert.equal(roles[0].packDefaultAvailable, true);
+  assert.equal(roles[1].packDefaultAvailable, false);
 });
 
 test("candidate grouping is driven only by logical role", () => {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, Eye, ImagePlus, RefreshCw, Sparkles } from "lucide-react";
+import { Check, Eye, ImagePlus, PackageOpen, RefreshCw, Sparkles } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 
 import { Badge, Button, Field } from "@/components/ui";
@@ -87,10 +87,17 @@ export function ResourceWorkbench({
     await prepare(roleId, mediaType, { kind: "ai_generated", prompt: aiPrompt.trim() });
   }
 
+  async function prepareDefault(roleId: string, mediaType: string) {
+    await prepare(roleId, mediaType, { kind: "pack_default" });
+  }
+
   async function prepare(
     roleId: string,
     mediaType: string,
-    source: { kind: "user_upload" } | { kind: "ai_generated"; prompt: string },
+    source:
+      | { kind: "user_upload" }
+      | { kind: "pack_default" }
+      | { kind: "ai_generated"; prompt: string },
     sourcePath?: string,
   ) {
     setBusyRole(roleId);
@@ -168,6 +175,17 @@ export function ResourceWorkbench({
                 <Button size="sm" disabled={busyRole !== null} onClick={() => void prepareUpload(role.id, role.mediaTypes[0])}>
                   <ImagePlus size={13} /> Upload
                 </Button>
+                {role.packDefaultAvailable && (
+                  <Button
+                    size="sm"
+                    disabled={busyRole !== null}
+                    data-testid={`resource-default-${role.id}`}
+                    onClick={() => void prepareDefault(role.id, role.mediaTypes[0])}
+                    title="Prepare Pack default"
+                  >
+                    <PackageOpen size={13} /> Default
+                  </Button>
+                )}
                 <Button size="sm" variant="accent" disabled={busyRole !== null || !aiPrompt.trim()} onClick={() => void prepareAi(role.id, role.mediaTypes[0])}>
                   <Sparkles size={13} /> AI
                 </Button>

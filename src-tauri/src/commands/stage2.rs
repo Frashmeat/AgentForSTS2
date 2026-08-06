@@ -741,6 +741,8 @@ fn map_resource_error(error: ResourcePrepareError, stage: &str) -> CommandFailur
         ResourcePrepareError::InvalidInput
         | ResourcePrepareError::UnsupportedResource
         | ResourcePrepareError::WrongSourceMode
+        | ResourcePrepareError::PackAssetUnavailable
+        | ResourcePrepareError::PackAssetInvalid
         | ResourcePrepareError::Cancelled
         | ResourcePrepareError::Media(_) => CommandFailure::resource_invalid(stage),
     }

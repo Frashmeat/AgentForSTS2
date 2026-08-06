@@ -580,7 +580,7 @@ fn pack() -> LoadedGamePack {
             },
             {
                 "slotId":"resource.prepare.specs","featureId":"resource.prepare",
-                "schema":{"id":"pack.resource-specs","version":2},
+                "schema":{"id":"pack.resource-specs","version":3},
                 "payload":{"roles":[{
                     "id":"fixture.unused","mediaTypes":["image/png"],
                     "width":1,"height":1,"requireAlpha":false,"source":{"kind":"master"}

@@ -33,7 +33,9 @@ generic execution failure.
 Resource Prepare maps decoded media/shape/alpha rejection to `resource.media_invalid`, unsupported
 Pack roles to `resource.unsupported`, wrong source entry to `resource.source_invalid`, repository
 failure to `resource.storage_failed`, and graph/Primitive/version drift to
-`pack.contribution_invalid`. These known failures must never collapse to
+`pack.contribution_invalid`. An unavailable built-in asset for the exact Pack identity is
+`resource.pack_asset_missing`; bytes that differ from Pack `defaultAsset.sha256` are
+`resource.pack_asset_invalid`. These known failures must never collapse to
 `feature.execution_failed`.
 
 Composition Draft and graph failures use stable `composition.*` families. Invalid Draft/selection,

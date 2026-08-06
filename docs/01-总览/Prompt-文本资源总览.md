@@ -110,6 +110,12 @@ Card、总计 10 张”和 root pinned closure 由通用 `referenceBindingRules`
 identity `owner_character` 不扩展闭包。Composition 将 Pack 明示为 `json_object` 的同路径
 localization 输出确定性合并，重复 key 或未声明合并的路径冲突在发布前失败。
 
+Branded Placeholder 的领域指导也只在 Pack：`visual_profile=branded_placeholder` 时，Single
+使用五个已选择 Resource target path 覆盖 BaseLib 3.3.8 的 `CustomIconTexturePath`、
+`CustomIconPath`、`CustomCharacterSelectIconPath`、`CustomCharacterSelectLockedIconPath` 和
+`CustomMapMarkerPath`；`placeholder` 不覆盖这些路径。代码只验证 profile、binding、shape 和
+selected version，不包含 STS2 属性名或条件 Prompt。
+
 新增游戏应新增独立 Pack 与 Truth 来源。不得把游戏自然语言、hook、C#/Godot/BaseLib 约束重新写入通用 Feature 或 Shell。
 
 ## 5. Truth 与 Evidence
@@ -136,6 +142,8 @@ item type 必须同时提供可在其 Truth Snapshot 中命中的查询；不得
 ## 6. Resource 文本与媒体
 
 Selected Resource 通过 `resourceId + selectedVersion` 进入请求，模型看到的是验证后的角色、媒体类型和 provenance 摘要。用户上传、Pack default 与 AI media 都进入同一 Resource Workspace；AI 请求来自 typed `resource.prepare` payload 和 Pack resource spec，不使用隐藏的 handler Prompt。
+
+`pack.resource-specs` v3 允许 master 声明 `defaultAsset {id, sha256}`。这不是 Prompt，也不是调用方路径：Shell 以精确 Pack ID/SHA 和 asset ID 解析受审查的内嵌 bytes，Feature 复核 asset hash 后再走通用 PNG/derivation/candidate pipeline。React 只根据 catalog 的 `packDefaultAvailable` 显示 Default 操作，不能按游戏或角色写分支。
 
 未来扩展动画或新的媒体类型时，媒体模型请求仍应由 typed Feature request + Pack resource contribution 装配，生成结果先进入 Resource Workspace，再由 Mod Feature 显式选择。
 

@@ -602,6 +602,7 @@ pub trait ResourceRepository {
 
 // crates/ats-features/src/resource_prepare.rs
 ResourcePrepareService::prepare_file(...)
+ResourcePrepareService::prepare_default(..., resolve_asset, ...)
 ResourcePrepareService::prepare_ai(...)
 ResourcePrepareService::catalog(...)
 ResourcePrepareService::list(...)
@@ -635,12 +636,21 @@ the Pack role determines the stored candidate name. The result contains `candida
 `resourceId`, `logicalRole`, `candidateVersion`, optional `selectedVersion`, media type, width,
 height, alpha fact and origin.
 
-`pack.resource-specs` is schema v2. Every role declares exact dimensions, supported media types,
+`pack.resource-specs` is schema v3. Every role declares exact dimensions, supported media types,
 alpha requirement and either `master` or one direct `derived` source. A derived role references an
 existing master plus a registered transform Primitive at version exactly `1`. Current operations
 are deterministic nearest-neighbor `resize` and white-alpha `outline`; Pack payloads cannot supply
 code. STS2 `relic.master` is 512x512 and produces `relic.normal` 128x128,
 `relic.outline` 128x128 radius 4 and `relic.big` 256x256.
+
+A master may declare `defaultAsset { id, sha256 }`. The caller sends only
+`source: {"kind":"pack_default"}` and no `sourcePath`; the Shell resolves bytes from a reviewed
+built-in asset registry bound to the exact loaded Pack ID/SHA-256 and asset ID. The Feature verifies
+the declared asset SHA-256 before PNG decode or repository mutation. Derived roles cannot declare a
+default asset. STS2 `character.identity_master` is a 512x512 embedded PNG and deterministically
+produces five Branded Placeholder roles: 85x85 top-panel icon/outline, 132x195 select/locked icon,
+and 49x64 map marker. BaseLib 3.3.8 maps these to `CustomIconTexturePath`, `CustomIconPath`,
+`CustomCharacterSelectIconPath`, `CustomCharacterSelectLockedIconPath`, and `CustomMapMarkerPath`.
 
 The PNG Adapter validates a regular non-symlink file, `image/png`, complete decode/CRC, maximum
 64 MiB decoded RGBA and maximum 16384 per dimension. It records decoded width/height and whether
@@ -666,6 +676,8 @@ generation enforce the current Pack shape.
 | malformed/oversized PNG, media mismatch, wrong dimensions or missing alpha channel | `resource.media_invalid` | no Resource final or selection change |
 | unknown role/media type | `resource.unsupported` | none |
 | wrong execution source mode | `resource.source_invalid` | none |
+| Pack default asset ID unavailable for the exact pinned Pack | `resource.pack_asset_missing` | none |
+| Pack default bytes do not match declared SHA-256 | `resource.pack_asset_invalid` | none |
 | Pack graph, undeclared Primitive or transform version drift | `pack.contribution_invalid` | none |
 | media Provider auth/rate/config/transport failure | stable `resource.media_*` family | no candidate |
 | repository stage/publish/select failure | `resource.storage_failed` | staged batch rolled back; prior selection unchanged |
@@ -674,8 +686,11 @@ generation enforce the current Pack shape.
 
 #### 5. Good / Base / Bad Cases
 
-- Good: one valid 512x512 RGBA master produces four unselected candidates; repeated bytes produce
-  the same four version hashes and exact provenance; selecting `relic.normal` admits Single.
+- Good: the pinned STS2 Character default resolves without a caller path and produces one master
+  plus five unselected derived candidates; selecting and binding all five derived roles admits a
+  Branded Placeholder Character Single/Composition run.
+- Good: one valid 512x512 RGBA relic master produces four unselected candidates; repeated bytes
+  produce the same four version hashes and exact provenance; selecting `relic.normal` admits Single.
 - Base: upload a valid 128x128 `relic.normal` override; it creates one unselected original
   candidate and does not rerun the master graph.
 - Bad: trust `.png` extension or request dimensions without decoding; malformed or RGB-only bytes
@@ -684,6 +699,8 @@ generation enforce the current Pack shape.
   failure could leave a partial graph or replace an existing selection.
 - Bad: construct a new filesystem repository in every command/Run; concurrent select and consume
   operations would bypass the intended project-scoped mutex.
+- Bad: accept a caller file path for `pack_default`, skip the asset hash, or resolve by Pack ID only;
+  any of these can present unreviewed bytes as a pinned Pack default.
 
 #### 6. Tests Required
 
@@ -694,12 +711,14 @@ cargo test -p ats-adapters resource_store::tests -- --nocapture
 cargo test -p ats-features resource_prepare::tests -- --nocapture
 cargo test -p ats-features mod_generate_single::tests -- --nocapture
 cargo test -p agentthespire-desktop --lib composition::tests -- --nocapture
+cargo test -p agentthespire-desktop --test stage2_character_composition -- --nocapture
 ```
 
 Assertions must cover malformed/type-mismatched PNG, real RGB alpha detection, exact dimensions,
-four-candidate output, null selection, deterministic output hashes, exact derived provenance,
+four/six-candidate output, null selection, deterministic output hashes, exact derived provenance,
 Primitive/version drift, explicit selection, Single rejection before selection, batch rollback,
-unchanged prior selection, no staging residue and stable failure codes.
+missing/unselected/stale/wrong-shape Character readiness before model work, exact Pack asset
+ID/SHA resolution, unchanged prior selection, no staging residue and stable failure codes.
 
 #### 7. Wrong Vs Correct
 

@@ -39,6 +39,7 @@ use ats_features::{FeatureRegistry, built_in_feature_registry};
 use ats_game_context::{
     ContributionRequirement, ContributionResolver, EvidenceQuery, GamePackLoader, LoadedGamePack,
     TruthSnapshotRepository, VerifiedContributionSet, VerifiedTruthSnapshot,
+    built_in_game_pack_asset,
 };
 use ats_kernel::{FailureCode, FeatureId, PrimitiveId};
 use ats_runtime::{
@@ -586,36 +587,47 @@ impl Stage2Composition {
                     pack: &self.pack,
                     contributions: &contributions,
                 };
-                let result = if matches!(&request.source, ResourcePrepareSource::AiGenerated { .. })
-                {
-                    let media = HttpMediaClient::new(&settings.image_gen).map_err(|_| {
-                        failure("resource.media_configuration", "resource.prepare.media")
-                    })?;
-                    ResourcePrepareService
-                        .prepare_ai(
-                            &media,
-                            &PngResourceMediaProcessor,
-                            resources,
-                            request,
-                            context,
-                            cancellation,
-                        )
-                        .await
-                        .map_err(resource_prepare_failure)?
-                } else {
-                    let source_path =
-                        source_path.filter(|path| path.is_file()).ok_or_else(|| {
-                            failure("resource.source_missing", "resource.prepare.source")
+                let result = match &request.source {
+                    ResourcePrepareSource::AiGenerated { .. } => {
+                        let media = HttpMediaClient::new(&settings.image_gen).map_err(|_| {
+                            failure("resource.media_configuration", "resource.prepare.media")
                         })?;
-                    ResourcePrepareService
-                        .prepare_file(
+                        ResourcePrepareService
+                            .prepare_ai(
+                                &media,
+                                &PngResourceMediaProcessor,
+                                resources,
+                                request,
+                                context,
+                                cancellation,
+                            )
+                            .await
+                            .map_err(resource_prepare_failure)?
+                    }
+                    ResourcePrepareSource::PackDefault => ResourcePrepareService
+                        .prepare_default(
                             &PngResourceMediaProcessor,
                             resources,
                             request,
-                            source_path,
+                            |pack, asset_id| built_in_game_pack_asset(pack, asset_id).ok(),
                             context,
                         )
-                        .map_err(resource_prepare_failure)?
+                        .map_err(resource_prepare_failure)?,
+                    ResourcePrepareSource::UserUpload => {
+                        let source_path =
+                            source_path.filter(|path| path.is_file()).ok_or_else(|| {
+                                failure("resource.source_missing", "resource.prepare.source")
+                            })?;
+                        ResourcePrepareService
+                            .prepare_file(
+                                &PngResourceMediaProcessor,
+                                resources,
+                                request,
+                                source_path,
+                                context,
+                            )
+                            .map_err(resource_prepare_failure)?
+                    }
                 };
                 succeed::<ResourcePrepareFeature, _>(&mut run, &result)?;
             }
@@ -802,6 +814,12 @@ fn resource_prepare_failure(error: ResourcePrepareError) -> RunFailure {
         ResourcePrepareError::InvalidMediaResponse | ResourcePrepareError::InvalidMedia => {
             failure("resource.media_invalid", "resource.prepare.media")
         }
+        ResourcePrepareError::PackAssetUnavailable => {
+            failure("resource.pack_asset_missing", "resource.prepare.pack_asset")
+        }
+        ResourcePrepareError::PackAssetInvalid => {
+            failure("resource.pack_asset_invalid", "resource.prepare.pack_asset")
+        }
     }
 }
 
@@ -933,6 +951,14 @@ mod tests {
         let unsupported = resource_prepare_failure(ResourcePrepareError::UnsupportedResource);
         assert_eq!(unsupported.code.as_str(), "resource.unsupported");
         assert_eq!(unsupported.stage, "resource.prepare.input");
+
+        let missing = resource_prepare_failure(ResourcePrepareError::PackAssetUnavailable);
+        assert_eq!(missing.code.as_str(), "resource.pack_asset_missing");
+        assert_eq!(missing.stage, "resource.prepare.pack_asset");
+
+        let invalid = resource_prepare_failure(ResourcePrepareError::PackAssetInvalid);
+        assert_eq!(invalid.code.as_str(), "resource.pack_asset_invalid");
+        assert_eq!(invalid.stage, "resource.prepare.pack_asset");
     }
 
     #[tokio::test]

@@ -646,6 +646,7 @@ export interface ResourceRoleDescriptor {
   width: number;
   height: number;
   requireAlpha: boolean;
+  packDefaultAvailable: boolean;
   targetPath?: string | null;
   source: ResourceRoleSource;
 }
@@ -1023,6 +1024,7 @@ function isResourceRoleDescriptor(value: unknown): value is ResourceRoleDescript
     isPositiveInteger(value.width) &&
     isPositiveInteger(value.height) &&
     typeof value.requireAlpha === "boolean" &&
+    typeof value.packDefaultAvailable === "boolean" &&
     (value.targetPath === undefined || value.targetPath === null || typeof value.targetPath === "string") &&
     isRecord(value.source) &&
     (value.source.kind === "master" ||

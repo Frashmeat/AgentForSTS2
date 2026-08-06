@@ -50,6 +50,8 @@ Questions to answer:
 - 隔离 E2E runner 必须显式准备并校验 pinned fixture、Provider API base path 与响应模式，不得要求生产代码为测试伪造 Truth/Resource。
 - Batch 模型测试至少覆盖 request 构造、精确 hash 失败重试、fail-fast 未执行差集和 malformed
   schema/counter canary。
+- Resource Workbench 模型测试必须证明 required derived roles 自动包含 Pack-owned master，且
+  `packDefaultAvailable` 仅控制通用 Default 操作；不得通过 Character/STS2 字面量决定按钮或角色。
 
 ---
 

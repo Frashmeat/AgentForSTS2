@@ -29,7 +29,8 @@
           "value": {
             "kind": "choice",
             "options": [
-              { "value": "placeholder", "displayNames": { "eng": "Placeholder", "zhs": "占位资源" } }
+              { "value": "placeholder", "displayNames": { "eng": "Placeholder", "zhs": "占位资源" } },
+              { "value": "branded_placeholder", "displayNames": { "eng": "Branded placeholder", "zhs": "品牌占位资源" } }
             ]
           }
         },
@@ -112,7 +113,18 @@
       ],
       "resourceProfileField": "visual_profile",
       "resourceProfiles": [
-        { "id": "placeholder", "displayNames": { "eng": "Placeholder", "zhs": "占位资源" }, "requiredResourceRoles": [] }
+        { "id": "placeholder", "displayNames": { "eng": "Placeholder", "zhs": "占位资源" }, "requiredResourceRoles": [] },
+        {
+          "id": "branded_placeholder",
+          "displayNames": { "eng": "Branded placeholder", "zhs": "品牌占位资源" },
+          "requiredResourceRoles": [
+            "character.top_panel_icon",
+            "character.top_panel_icon_outline",
+            "character.select_icon",
+            "character.select_locked_icon",
+            "character.map_marker"
+          ]
+        }
       ],
       "evidenceQueries": [
         { "symbols": ["PlaceholderCharacterModel"], "terms": [] },
@@ -552,6 +564,8 @@
             "guidance": [
               "Generate one PlaceholderCharacterModel plus its CustomCardPoolModel, CustomRelicPoolModel, and CustomPotionPoolModel in the declared source role.",
               "Map visual_profile, placeholder_id, name_color, gender, starting_hp, starting_gold, and max_energy exactly from the ItemDefinition.",
+              "When visual_profile is branded_placeholder, override CustomIconTexturePath, CustomIconPath, CustomCharacterSelectIconPath, CustomCharacterSelectLockedIconPath, and CustomMapMarkerPath with the five selected Resource paths under {mod_id}/images/characters/{item_id}; keep PlaceholderID scene, animation, transition, energy, hand, and audio reuse unchanged.",
+              "When visual_profile is placeholder, do not override any static Character image path and require no selected Character Resources.",
               "For BaseLib 3.3.8, implement the CustomCardPoolModel Title, IsColorless, and DeckEntryCardColor requirements; CustomPotionPoolModel has no ParentPool override.",
               "Build StartingDeck and StartingRelics only from pinned reference bindings, preserving quantities; use the complete Card, Relic, and Potion pinned sets for the corresponding custom pools.",
               "Do not put PoolAttribute on the Character. CustomCharacterModel registers through CustomContentDictionary.AddCharacter; PoolAttribute remains required on owned Card, Relic, and Potion models.",
@@ -699,10 +713,109 @@
     {
       "slotId": "resource.prepare.specs",
       "featureId": "resource.prepare",
-      "schema": { "id": "pack.resource-specs", "version": 2 },
+      "schema": { "id": "pack.resource-specs", "version": 3 },
       "requiredPrimitives": ["image.role-transform"],
       "payload": {
         "roles": [
+          {
+            "id": "character.identity_master",
+            "mediaTypes": ["image/png"],
+            "width": 512,
+            "height": 512,
+            "requireAlpha": true,
+            "defaultAsset": {
+              "id": "character.default_identity",
+              "sha256": "ec1b4f15aeb864166e0ec60936acfa390de9a0e9f2e06e41c5dc5a729a34c393"
+            },
+            "source": { "kind": "master" }
+          },
+          {
+            "id": "character.top_panel_icon",
+            "mediaTypes": ["image/png"],
+            "width": 85,
+            "height": 85,
+            "requireAlpha": true,
+            "targetPath": "{mod_id}/images/characters/{item_id}/top_panel.png",
+            "source": {
+              "kind": "derived",
+              "sourceRole": "character.identity_master",
+              "transform": {
+                "operation": "resize",
+                "primitive": "image.role-transform",
+                "version": 1
+              }
+            }
+          },
+          {
+            "id": "character.top_panel_icon_outline",
+            "mediaTypes": ["image/png"],
+            "width": 85,
+            "height": 85,
+            "requireAlpha": true,
+            "targetPath": "{mod_id}/images/characters/{item_id}/top_panel_outline.png",
+            "source": {
+              "kind": "derived",
+              "sourceRole": "character.identity_master",
+              "transform": {
+                "operation": "outline",
+                "primitive": "image.role-transform",
+                "version": 1,
+                "radius": 3
+              }
+            }
+          },
+          {
+            "id": "character.select_icon",
+            "mediaTypes": ["image/png"],
+            "width": 132,
+            "height": 195,
+            "requireAlpha": true,
+            "targetPath": "{mod_id}/images/characters/{item_id}/select.png",
+            "source": {
+              "kind": "derived",
+              "sourceRole": "character.identity_master",
+              "transform": {
+                "operation": "resize",
+                "primitive": "image.role-transform",
+                "version": 1
+              }
+            }
+          },
+          {
+            "id": "character.select_locked_icon",
+            "mediaTypes": ["image/png"],
+            "width": 132,
+            "height": 195,
+            "requireAlpha": true,
+            "targetPath": "{mod_id}/images/characters/{item_id}/select_locked.png",
+            "source": {
+              "kind": "derived",
+              "sourceRole": "character.identity_master",
+              "transform": {
+                "operation": "outline",
+                "primitive": "image.role-transform",
+                "version": 1,
+                "radius": 4
+              }
+            }
+          },
+          {
+            "id": "character.map_marker",
+            "mediaTypes": ["image/png"],
+            "width": 49,
+            "height": 64,
+            "requireAlpha": true,
+            "targetPath": "{mod_id}/images/characters/{item_id}/map_marker.png",
+            "source": {
+              "kind": "derived",
+              "sourceRole": "character.identity_master",
+              "transform": {
+                "operation": "resize",
+                "primitive": "image.role-transform",
+                "version": 1
+              }
+            }
+          },
           {
             "id": "relic.master",
             "mediaTypes": ["image/png"],

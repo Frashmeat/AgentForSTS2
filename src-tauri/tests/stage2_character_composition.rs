@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -6,8 +6,8 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 use ats_adapters::{
     FileArtifactStore, FileCompositionDraftRepository, FileItemRepository, FileProjectStager,
-    FileProjectWriter, FileResourceRepository, RegisteredBuildRunner, RegisteredValidationRunner,
-    ZipPackageWriter,
+    FileProjectWriter, FileResourceRepository, PngResourceMediaProcessor, RegisteredBuildRunner,
+    RegisteredValidationRunner, ZipPackageWriter,
 };
 use ats_features::FeatureSpec;
 use ats_features::composition::{CompositionConfirmationService, CompositionDraftRef};
@@ -18,16 +18,23 @@ use ats_features::composition_generate::{
 use ats_features::composition_plan::{
     CompositionPlanContext, CompositionPlanFeature, CompositionPlanRequest, CompositionPlanService,
 };
-use ats_features::mod_generate_single::{SingleGenerateFeature, SingleGenerateService};
+use ats_features::mod_generate_single::{
+    SingleGenerateError, SingleGenerateFeature, SingleGenerateService,
+    validate_definition_resources,
+};
 use ats_features::mod_plan::{ModPlanFeature, ModPlanService};
 use ats_features::project_build::{ProjectBuildFeature, ProjectBuildService};
 use ats_features::project_package::{
     ProjectPackageFeature, ProjectPackageRequest, ProjectPackageService,
 };
-use ats_features::resource_prepare::ResourcePrepareFeature;
+use ats_features::resource_prepare::{
+    ResourcePrepareContext, ResourcePrepareFeature, ResourcePrepareRequest, ResourcePrepareService,
+    ResourcePrepareSource,
+};
 use ats_game_context::{
     ContributionResolver, GamePackLoader, LoadedGamePack, TruthEvidenceRecord, TruthSnapshotIndex,
     TruthSnapshotManifest, TruthSnapshotSource, VerifiedContributionSet, VerifiedTruthSnapshot,
+    built_in_game_pack_asset,
 };
 use ats_kernel::{
     CompositionDraftId, CompositionId, CompositionProfileId, ItemId, PrimitiveId, ResourceId,
@@ -41,6 +48,7 @@ use ats_runtime::{
 use ats_workspace::{
     CompositionDraftRepository, ItemCompositionSource, ItemResourceBinding, PreparedResourceMedia,
     ResourceBytesIngestRequest, ResourceOrigin, ResourceRepository, ResourceVersionProvenance,
+    StoredItemDefinition,
 };
 use chrono::{Duration, Utc};
 use futures_util::stream;
@@ -89,7 +97,7 @@ impl ModelClient for QueueModel {
 }
 
 #[tokio::test]
-async fn sts2_placeholder_prototype_compiles_builds_packages_and_publishes_one_closure() {
+async fn sts2_branded_placeholder_prototype_prepares_resources_and_publishes_one_closure() {
     let Some(machine) = MachinePaths::from_environment() else {
         eprintln!(
             "skipped STS2 machine gate: ATS_TEST_STS2_ASSEMBLY_PATH and ATS_TEST_GODOT_PATH are required"
@@ -116,6 +124,11 @@ async fn sts2_placeholder_prototype_compiles_builds_packages_and_publishes_one_c
         &pack,
         CompositionPlanFeature::contribution_requirement(),
     );
+    let resource = resolve::<ResourcePrepareFeature>(
+        &resolver,
+        &pack,
+        ResourcePrepareFeature::contribution_requirement(),
+    );
 
     let mut queued = VecDeque::from([prototype_plan_response()]);
     for item_id in prototype_item_ids() {
@@ -139,7 +152,7 @@ async fn sts2_placeholder_prototype_compiles_builds_packages_and_publishes_one_c
     let plan_request = CompositionPlanRequest {
         draft_id: CompositionDraftId::parse("prototype-character-draft").unwrap(),
         composition_id: CompositionId::parse("character_suite").unwrap(),
-        concept: "A small deterministic placeholder Character suite.".into(),
+        concept: "A small deterministic branded placeholder Character suite.".into(),
         source: ItemCompositionSource::Preset {
             profile_id: CompositionProfileId::parse("prototype").unwrap(),
         },
@@ -169,6 +182,50 @@ async fn sts2_placeholder_prototype_compiles_builds_packages_and_publishes_one_c
     assert!(plan_prompt.contains("CustomContentDictionary.AddCharacter"));
     assert!(plan_prompt.contains("starting_deck_size"));
     assert!(plan_prompt.contains("referenceBindingRules"));
+
+    let prepared = ResourcePrepareService
+        .prepare_default(
+            &PngResourceMediaProcessor,
+            &resources,
+            ResourcePrepareRequest {
+                logical_role: "character.identity_master".into(),
+                media_type: "image/png".into(),
+                source: ResourcePrepareSource::PackDefault,
+            },
+            |pack, asset_id| built_in_game_pack_asset(pack, asset_id).ok(),
+            ResourcePrepareContext {
+                pack: &pack,
+                contributions: &resource,
+            },
+        )
+        .unwrap();
+    assert_eq!(prepared.candidates.len(), 6);
+    let mut character_bindings = BTreeMap::new();
+    for candidate in prepared
+        .candidates
+        .into_iter()
+        .filter(|candidate| candidate.logical_role != "character.identity_master")
+    {
+        ResourcePrepareService
+            .select(
+                &resources,
+                &candidate.resource_id,
+                &candidate.candidate_version,
+                ResourcePrepareContext {
+                    pack: &pack,
+                    contributions: &resource,
+                },
+            )
+            .unwrap();
+        character_bindings.insert(
+            ResourceId::parse(&candidate.logical_role).unwrap(),
+            ItemResourceBinding {
+                resource_id: candidate.resource_id,
+                selected_version: candidate.candidate_version,
+            },
+        );
+    }
+    assert_eq!(character_bindings.len(), 5);
 
     let mut nodes = planned.draft.nodes.clone();
     for (item_id, node) in &mut nodes {
@@ -210,6 +267,9 @@ async fn sts2_placeholder_prototype_compiles_builds_packages_and_publishes_one_c
                     );
                 }
             }
+            "character" => {
+                node.definition.resource_bindings = character_bindings.clone();
+            }
             _ => {}
         }
     }
@@ -246,6 +306,67 @@ async fn sts2_placeholder_prototype_compiles_builds_packages_and_publishes_one_c
         .unwrap()
         .clone();
 
+    let required_character_roles = [
+        "character.top_panel_icon",
+        "character.top_panel_icon_outline",
+        "character.select_icon",
+        "character.select_locked_icon",
+        "character.map_marker",
+    ];
+    let repin = |definition: ats_workspace::ItemDefinition| StoredItemDefinition {
+        definition_hash: definition.definition_hash().unwrap(),
+        definition,
+    };
+    let mut missing = root.definition.clone();
+    missing
+        .resource_bindings
+        .remove(&ResourceId::parse(required_character_roles[0]).unwrap());
+    assert!(matches!(
+        validate_definition_resources(&pack, &resource, &resources, &repin(missing)),
+        Err(SingleGenerateError::InvalidItemDefinition)
+    ));
+
+    let mut unselected = root.definition.clone();
+    bind_unselected_resource(
+        &resources,
+        &mut unselected,
+        &ItemId::parse(ROOT_ID).unwrap(),
+        required_character_roles[0],
+        85,
+        85,
+    );
+    assert!(matches!(
+        validate_definition_resources(&pack, &resource, &resources, &repin(unselected)),
+        Err(SingleGenerateError::InvalidSelectedResource)
+    ));
+
+    let mut stale = root.definition.clone();
+    stale
+        .resource_bindings
+        .get_mut(&ResourceId::parse(required_character_roles[0]).unwrap())
+        .unwrap()
+        .selected_version = sha256(b"stale-character-resource");
+    assert!(matches!(
+        validate_definition_resources(&pack, &resource, &resources, &repin(stale)),
+        Err(SingleGenerateError::InvalidSelectedResource)
+    ));
+
+    let mut wrong_shape = root.definition.clone();
+    bind_resource(
+        &resources,
+        &mut wrong_shape,
+        &ItemId::parse(ROOT_ID).unwrap(),
+        required_character_roles[0],
+        84,
+        85,
+        true,
+    );
+    assert!(matches!(
+        validate_definition_resources(&pack, &resource, &resources, &repin(wrong_shape)),
+        Err(SingleGenerateError::InvalidSelectedResource)
+    ));
+    assert_eq!(model.snapshots.lock().unwrap().len(), 1);
+
     let composition = resolve::<CompositionGenerateFeature>(
         &resolver,
         &pack,
@@ -257,11 +378,6 @@ async fn sts2_placeholder_prototype_compiles_builds_packages_and_publishes_one_c
         &resolver,
         &pack,
         SingleGenerateFeature::contribution_requirement(),
-    );
-    let resource = resolve::<ResourcePrepareFeature>(
-        &resolver,
-        &pack,
-        ResourcePrepareFeature::contribution_requirement(),
     );
     let build = resolve::<ProjectBuildFeature>(
         &resolver,
@@ -347,6 +463,27 @@ async fn sts2_placeholder_prototype_compiles_builds_packages_and_publishes_one_c
             .all(|child| child.status() == RunStatus::Succeeded)
     );
     assert_eq!(model.snapshots.lock().unwrap().len(), 23);
+    let model_character_resource_roles = {
+        let snapshots = model.snapshots.lock().unwrap();
+        snapshots
+            .iter()
+            .filter(|snapshot| snapshot.feature_id() == &SingleGenerateFeature::id())
+            .map(ModelRequestSnapshot::selected_resources)
+            .find(|resources| resources.len() == required_character_roles.len())
+            .unwrap()
+            .iter()
+            .map(|resource| resource.logical_role.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        model_character_resource_roles
+            .iter()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>(),
+        required_character_roles
+            .into_iter()
+            .collect::<BTreeSet<_>>()
+    );
     assert!(model.responses.lock().unwrap().is_empty());
     assert_eq!(execution.result.build.steps.len(), 1);
     assert_eq!(execution.result.package.report.file_count, 6);
@@ -361,6 +498,19 @@ async fn sts2_placeholder_prototype_compiles_builds_packages_and_publishes_one_c
     )
     .unwrap();
     assert_eq!(characters.len(), 14);
+    for path in [
+        "top_panel.png",
+        "top_panel_outline.png",
+        "select.png",
+        "select_locked.png",
+        "map_marker.png",
+    ] {
+        assert!(
+            project
+                .join(format!("{MOD_ID}/images/characters/{ROOT_ID}/{path}"))
+                .is_file()
+        );
+    }
     assert!(project.join(format!("packages/{MOD_ID}.zip")).is_file());
     assert!(!project.join(".ats/composition-staging").exists());
     assert!(!has_staging(&project));
@@ -374,6 +524,28 @@ async fn sts2_placeholder_prototype_compiles_builds_packages_and_publishes_one_c
     assert_eq!(
         manifest.files.len(),
         execution.result.generated_file_count as usize + 1
+    );
+    let manifest_value = serde_json::to_value(&manifest).unwrap();
+    let character_provenance = manifest_value["provenance"][0]["payload"]["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|node| {
+            node["selectedResources"]
+                .as_array()
+                .is_some_and(|resources| resources.len() == required_character_roles.len())
+        })
+        .unwrap();
+    assert_eq!(
+        character_provenance["selectedResources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|resource| resource["logicalRole"].as_str().unwrap())
+            .collect::<BTreeSet<_>>(),
+        required_character_roles
+            .into_iter()
+            .collect::<BTreeSet<_>>()
     );
     for file in &manifest.files {
         let bytes = fs::read(
@@ -628,6 +800,38 @@ fn bind_resource(
     );
 }
 
+fn bind_unselected_resource(
+    repository: &FileResourceRepository,
+    definition: &mut ats_workspace::ItemDefinition,
+    item_id: &ItemId,
+    role: &str,
+    width: u32,
+    height: u32,
+) {
+    let candidate = repository
+        .ingest_bytes(ResourceBytesIngestRequest {
+            logical_role: role.into(),
+            origin: ResourceOrigin::UserUpload,
+            file_name: format!("{}-unselected.png", item_id.as_str()),
+            media: PreparedResourceMedia {
+                media_type: "image/png".into(),
+                width,
+                height,
+                has_alpha: true,
+                bytes: format!("unselected:{}:{role}", item_id.as_str()).into_bytes(),
+            },
+            provenance: ResourceVersionProvenance::Original,
+        })
+        .unwrap();
+    definition.resource_bindings.insert(
+        ResourceId::parse(role).unwrap(),
+        ItemResourceBinding {
+            resource_id: candidate.resource_id().clone(),
+            selected_version: candidate.versions()[0].id.clone(),
+        },
+    );
+}
+
 fn prototype_plan_response() -> String {
     let cards = (1..=9)
         .map(|index| {
@@ -667,7 +871,7 @@ fn prototype_plan_response() -> String {
         "itemId": ROOT_ID,
         "itemType": "character",
         "canonicalFields": {
-            "visual_profile": {"kind":"choice","value":"placeholder"},
+            "visual_profile": {"kind":"choice","value":"branded_placeholder"},
             "placeholder_id": {"kind":"choice","value":"ironclad"},
             "name_color": {"kind":"text","value":"7D3FC8FF"},
             "gender": {"kind":"choice","value":"neutral"},
@@ -1020,6 +1224,11 @@ public sealed class PrototypePotionPool : CustomPotionPoolModel { }
 public sealed class PrototypeCharacter : PlaceholderCharacterModel
 {
     public override string PlaceholderID => "ironclad";
+    public override string? CustomIconTexturePath => "PrototypeCharacterGate/images/characters/prototype-character/top_panel.png";
+    public override string? CustomIconPath => "PrototypeCharacterGate/images/characters/prototype-character/top_panel_outline.png";
+    public override string? CustomCharacterSelectIconPath => "PrototypeCharacterGate/images/characters/prototype-character/select.png";
+    public override string? CustomCharacterSelectLockedIconPath => "PrototypeCharacterGate/images/characters/prototype-character/select_locked.png";
+    public override string? CustomMapMarkerPath => "PrototypeCharacterGate/images/characters/prototype-character/map_marker.png";
     public override Color NameColor => new("7D3FC8FF");
     public override CharacterGender Gender => CharacterGender.Neutral;
     public override int StartingHp => 70;
