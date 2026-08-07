@@ -189,9 +189,13 @@ impl SettingsStore {
         let Some(legacy_path) = legacy_path.filter(|candidate| candidate.is_file()) else {
             return Self::load_path(path);
         };
-        let (settings, legacy_status) = Self::load_path(legacy_path.to_path_buf());
-        if !legacy_status.loaded || Self::save(&path, &settings).is_err() {
+        let (settings, legacy_status) =
+            Self::load_path_without_environment(legacy_path.to_path_buf());
+        if !legacy_status.loaded {
             return (settings, legacy_status);
+        }
+        if Self::save(&path, &settings).is_err() {
+            return Self::load_path(legacy_path.to_path_buf());
         }
         Self::load_path(path)
     }
@@ -204,12 +208,25 @@ impl SettingsStore {
     }
 
     fn load_path(path: PathBuf) -> (Settings, ConfigStatus) {
+        Self::load_path_with_environment(path, true)
+    }
+
+    fn load_path_without_environment(path: PathBuf) -> (Settings, ConfigStatus) {
+        Self::load_path_with_environment(path, false)
+    }
+
+    fn load_path_with_environment(
+        path: PathBuf,
+        merge_environment: bool,
+    ) -> (Settings, ConfigStatus) {
         let present = path.is_file();
         let mut figment = Figment::new().merge(Serialized::defaults(Settings::default()));
         if present {
             figment = figment.merge(Json::file(&path));
         }
-        figment = figment.merge(Env::prefixed(ENV_PREFIX).split("__"));
+        if merge_environment {
+            figment = figment.merge(Env::prefixed(ENV_PREFIX).split("__"));
+        }
         let (settings, errors) = match figment.extract::<Settings>() {
             Ok(settings) => (settings, Vec::new()),
             Err(_) => (
@@ -331,5 +348,89 @@ mod tests {
         );
         assert!(default.is_file());
         assert!(legacy.is_file());
+        let persisted: Settings = serde_json::from_slice(&fs::read(&default).unwrap()).unwrap();
+        assert_eq!(persisted.llm.model, "fixture-model");
+    }
+
+    #[test]
+    fn desktop_explicit_path_wins_without_attempting_legacy_migration() {
+        let root = tempdir().unwrap();
+        let default = root.path().join("app-data/config.json");
+        let legacy = root
+            .path()
+            .join("install/runtime/agentthespire.config.json");
+        let configured = root.path().join("explicit/config.json");
+        let mut settings = Settings::default();
+        settings.llm.model = "explicit-model".into();
+        SettingsStore::save(&configured, &settings).unwrap();
+        settings.llm.model = "legacy-model".into();
+        SettingsStore::save(&legacy, &settings).unwrap();
+
+        let (loaded, status) =
+            SettingsStore::load_desktop_from(&default, Some(&legacy), Some(configured.as_os_str()));
+
+        assert_eq!(loaded.llm.model, "explicit-model");
+        assert_eq!(
+            status.path.as_deref(),
+            Some(configured.to_string_lossy().as_ref())
+        );
+        assert!(status.loaded);
+        assert!(!default.exists());
+        assert!(legacy.exists());
+    }
+
+    #[test]
+    fn desktop_missing_or_invalid_legacy_never_fabricates_appdata_success() {
+        let root = tempdir().unwrap();
+        let default = root.path().join("app-data/config.json");
+        let missing = root
+            .path()
+            .join("install/runtime/agentthespire.config.json");
+
+        let (_, missing_status) = SettingsStore::load_desktop_from(&default, Some(&missing), None);
+        assert_eq!(
+            missing_status.path.as_deref(),
+            Some(default.to_string_lossy().as_ref())
+        );
+        assert!(!missing_status.file_present);
+        assert!(!missing_status.loaded);
+
+        fs::create_dir_all(missing.parent().unwrap()).unwrap();
+        fs::write(&missing, b"{ invalid json").unwrap();
+        let (_, invalid_status) = SettingsStore::load_desktop_from(&default, Some(&missing), None);
+        assert_eq!(
+            invalid_status.path.as_deref(),
+            Some(missing.to_string_lossy().as_ref())
+        );
+        assert!(invalid_status.file_present);
+        assert!(!invalid_status.loaded);
+        assert!(!invalid_status.errors.is_empty());
+        assert!(!default.exists());
+        assert!(missing.exists());
+    }
+
+    #[test]
+    fn desktop_migration_write_failure_keeps_legacy_status_and_source() {
+        let root = tempdir().unwrap();
+        let legacy = root
+            .path()
+            .join("install/runtime/agentthespire.config.json");
+        let blocked_parent = root.path().join("app-data");
+        let default = blocked_parent.join("config.json");
+        let mut settings = Settings::default();
+        settings.llm.model = "legacy-model".into();
+        SettingsStore::save(&legacy, &settings).unwrap();
+        fs::write(&blocked_parent, b"not a directory").unwrap();
+
+        let (loaded, status) = SettingsStore::load_desktop_from(&default, Some(&legacy), None);
+
+        assert_eq!(loaded.llm.model, "legacy-model");
+        assert_eq!(
+            status.path.as_deref(),
+            Some(legacy.to_string_lossy().as_ref())
+        );
+        assert!(status.loaded);
+        assert!(!default.exists());
+        assert!(legacy.exists());
     }
 }

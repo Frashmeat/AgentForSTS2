@@ -231,10 +231,13 @@ npm run test:frontend
 npx tsc -b --pretty false
 ```
 
-Assertions must cover: Pack/profile/Truth binding in the request snapshot; deterministic pinned hash
+Assertions must cover: Pack/profile/Truth binding in the request snapshot; exact run-scoped total,
+nonzero Item variants and Pack-owned field/locale/reference schema; the <=32 KiB compact contract;
+safe versioned failure details without model/Prompt/Provider text; deterministic pinned hash
 enrichment; Draft-only persistence; revision CAS/delete; closed partial confirmation; malformed IPC
-guards; Pack-default Standard; Custom bounds; deterministic filtering/pagination. O5 adds the first
-real STS2 Character model/compile path; O8 owns installed real-game acceptance.
+guards; persisted failed Plan Run display; Pack-default Standard; Custom bounds; deterministic
+filtering/pagination. O5 adds the first real STS2 Character model/compile path; O8 owns installed
+real-game acceptance.
 
 #### 7. Wrong vs Correct
 
@@ -675,12 +678,97 @@ let request = recipe.render_with_output_contract(&slots, model, output_contract)
 
 Tauri invokes only `Stage2Composition` for product execution. React uses runtime guards for v3 DTOs and treats persisted `get_run` as terminal authority. Web exposes health/catalog/SPA only until a real Web execution composition is designed. CLI catalog comes from the shared registry.
 
-Desktop settings default to `AppDataPaths.config_path`; `SPIREFORGE_CONFIG_PATH` is the only
-environment override. Desktop startup must not search the process working directory or ancestors,
-because an installed executable may be launched from an unrelated repository or shell directory.
-When AppData has no config, one valid legacy config beside the installed executable may be copied
-once without deleting the source; invalid or failed migration never fabricates a loaded AppData
-status. Web/CLI explicit configuration behavior remains independent.
+### Scenario: Resolve Desktop Configuration Independently Of CWD
+
+#### 1. Scope / Trigger
+
+This contract applies during installed Tauri desktop startup. The process working directory is not
+a stable installation identity and must not choose the desktop configuration file. Web/CLI keep
+their existing `SettingsStore::load` cwd behavior and are outside this desktop-only migration.
+
+#### 2. Signatures
+
+```rust
+// crates/ats-adapters/src/config.rs
+pub fn SettingsStore::load_desktop(
+    default_path: &Path,
+    legacy_path: Option<&Path>,
+) -> (Settings, ConfigStatus);
+
+pub fn SettingsStore::desktop_legacy_config_path(
+    executable_path: &Path,
+) -> Option<PathBuf>;
+
+// src-tauri/src/lib.rs
+let app_data = AppDataPaths::resolve();
+let legacy_config = std::env::current_exe()
+    .ok()
+    .as_deref()
+    .and_then(SettingsStore::desktop_legacy_config_path);
+let (settings, status) =
+    SettingsStore::load_desktop(&app_data.config_path, legacy_config.as_deref());
+```
+
+#### 3. Contracts
+
+| Input/state | Selected path and behavior |
+| --- | --- |
+| non-empty `SPIREFORGE_CONFIG_PATH` | resolve it to an absolute path, load it directly and do not attempt legacy migration |
+| AppData `AgentTheSpire/config.json` exists | load AppData directly |
+| AppData missing; valid EXE-sibling `runtime/agentthespire.config.json` exists | validate file values without environment overlays, save them to AppData, reload AppData with runtime overlays and keep the legacy source |
+| AppData and legacy both missing | use default Settings with `ConfigStatus.path=AppData`, `filePresent=false`, `loaded=false` |
+| legacy invalid or AppData save fails | return the real legacy status/path; do not claim AppData loaded |
+
+`SPIREFORGE_*` value overrides such as `SPIREFORGE_LLM__API_KEY` are merged only when loading the
+selected runtime path; they are not serialized into AppData by legacy migration.
+`SPIREFORGE_CONFIG_PATH` is the only environment override for the configuration-file path. Desktop
+resolution never calls the cwd/ancestor search in `resolve_path`.
+
+#### 4. Validation & Error Matrix
+
+| Failure | Observable state | Forbidden result |
+| --- | --- | --- |
+| explicit file missing | explicit path, `filePresent=false`, `loaded=false` | fallback to cwd or legacy |
+| explicit/AppData JSON invalid | selected path, `loaded=false`, bounded configuration error | raw serde/IO text or another path silently loaded |
+| legacy JSON invalid | legacy path/status remains authoritative; AppData absent | fabricated AppData success |
+| legacy-to-AppData save failure | validated legacy Settings with runtime overlays and legacy status returned | deleting legacy or reporting AppData loaded |
+| valid migration | file-authored values are persisted; AppData path/status is loaded with runtime overlays and source still exists | destructive move/rename of legacy source or persistence of environment-only values |
+
+#### 5. Good / Base / Bad Cases
+
+- Good: installed desktop starts from any cwd and loads the same AppData config.
+- Good: one valid legacy file is copied once, then later starts load AppData without touching source.
+- Base: no file exists; defaults load while Settings UI reports the AppData target as absent.
+- Bad: repository `runtime/agentthespire.config.json` wins because the app was launched from that
+  repository; installed behavior would depend on an unrelated cwd.
+- Bad: migration copies invalid JSON or deletes the only legacy file.
+
+#### 6. Tests Required
+
+```powershell
+cargo test -p ats-adapters config -- --nocapture
+cargo check -p agentthespire-desktop --all-targets
+```
+
+Assertions must cover explicit-path precedence, cwd independence, valid non-destructive migration,
+file-only persistence before environment overlays, missing-file base status, invalid legacy status
+and migration-write failure without fake AppData success.
+
+#### 7. Wrong vs Correct
+
+Wrong:
+
+```rust
+SettingsStore::load(None) // searches current_dir().ancestors()
+```
+
+Correct:
+
+```rust
+let legacy = current_exe().ok().as_deref()
+    .and_then(SettingsStore::desktop_legacy_config_path);
+SettingsStore::load_desktop(&app_data.config_path, legacy.as_deref())
+```
 
 Raw LLM completion, Prompt preview, old planning/codegen routes, v2 submission commands, and Shell-owned filesystem transactions are forbidden.
 

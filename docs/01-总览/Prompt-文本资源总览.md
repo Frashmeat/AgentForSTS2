@@ -2,7 +2,7 @@
 
 > 本文描述 Stage 2 当前生产 Prompt 的唯一所有权与装配链。旧 `crates/ats-core/prompts/`、Prompt preview 和旧 assembler 已删除。
 >
-> 最后更新：2026-08-06
+> 最后更新：2026-08-07
 
 ## 1. 一次请求如何形成
 

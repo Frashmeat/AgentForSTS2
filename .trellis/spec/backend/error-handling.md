@@ -54,6 +54,16 @@ and already-validated Item/type/slot IDs. JSON parser text, complete model outpu
 URLs and paths remain forbidden. A failure without valid versioned details is still represented by
 its stable code/stage; React must reject malformed optional details and fall back to code/stage.
 
+The exact camelCase payload is `reasonCode` plus optional `expectedCount`, `actualCount`, `itemId`,
+`itemType` and `slotId`. Rust authors `reasonCode` only through the closed enum in
+`crates/ats-features/src/composition_plan.rs`; current wire values are `json_decode`,
+`root_profile_missing`, `draft_graph_invalid`, `node_count_overflow`, `node_total`,
+`item_type_unsupported`, `item_id_duplicate`, `root_missing_or_wrong_type`, `item_type_count`,
+`reference_target_duplicate`, `reference_count_overflow`, `reference_quantity_invalid`,
+`reference_binding_count`, `reference_total_quantity`, `pinned_target_missing`,
+`root_pinned_closure`, `reference_target_missing`, `identity_target_type`,
+`resolved_node_missing`, `item_definition_invalid` and `item_definition_hash_invalid`.
+
 Whole-closure generation preserves the originating Plan/Single/Build/Package failure family.
 Staging uses `composition.staging.*`; final project writes use `composition.publication.*`; the one
 final Artifact uses `artifact.*`. Cleanup attempts are independent: an Artifact cleanup error must

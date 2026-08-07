@@ -79,6 +79,10 @@ currently loaded Draft; it does not send definition content, Resources or caller
 Composition-specific display additionally requires schema
 `feature.composition-plan-failure-details` v1 and validates bounded reason/count/identifier fields;
 unknown schemas or malformed payloads fall back to the already validated failure stage.
+The only interpreted payload fields are `reasonCode`, `expectedCount`, `actualCount`, `itemId`,
+`itemType` and `slotId`. `reasonCode` is a 1-64 character qualified identifier; Item/type/slot IDs
+are 1-128 character qualified identifiers; counts are integers in `0..=u32::MAX`. Expected/actual
+are displayed only as a valid pair. Every other field is ignored, never stringified into the UI.
 
 Composition generation submits request schema v1 with an exact `StoredItemDefinition`, optional
 Draft ref and nested Package request. Single result v2 and Package result v2 use the exact
