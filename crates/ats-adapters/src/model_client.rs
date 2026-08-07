@@ -130,8 +130,9 @@ impl ModelClient for HttpModelClient {
             attempt = attempt.saturating_add(1);
             match self.complete_once(&request, cancellation).await {
                 Err(error) if error.is_retryable() && attempt < 3 => {
+                    let delay = retry_delay(&error, attempt);
                     tokio::select! {
-                        () = tokio::time::sleep(Duration::from_millis(u64::from(attempt) * 250)) => {},
+                        () = tokio::time::sleep(delay) => {},
                         () = wait_cancelled(cancellation) => return Err(ModelError::Cancelled),
                     }
                 }
@@ -225,6 +226,25 @@ fn check_status(response: &reqwest::Response) -> Result<(), ModelError> {
         }),
         status if status.is_server_error() => Err(ModelError::Transport),
         _ => Err(ModelError::Rejected),
+    }
+}
+
+fn retry_delay(error: &ModelError, attempt: u32) -> Duration {
+    const MIN_RETRY_AFTER_MS: u64 = 1_000;
+    const MAX_RETRY_AFTER_MS: u64 = 120_000;
+
+    if let ModelError::RateLimited {
+        retry_after_ms: Some(retry_after_ms),
+    } = error
+    {
+        return Duration::from_millis(
+            (*retry_after_ms).clamp(MIN_RETRY_AFTER_MS, MAX_RETRY_AFTER_MS),
+        );
+    }
+
+    match attempt {
+        0 | 1 => Duration::from_secs(10),
+        _ => Duration::from_secs(30),
     }
 }
 
@@ -479,5 +499,57 @@ mod tests {
             json!("json_schema")
         );
         assert_eq!(body["output_config"]["format"]["schema"], schema);
+    }
+
+    #[test]
+    fn retry_delay_honors_bounded_provider_guidance() {
+        assert_eq!(
+            retry_delay(
+                &ModelError::RateLimited {
+                    retry_after_ms: Some(25_000),
+                },
+                1,
+            ),
+            Duration::from_secs(25)
+        );
+        assert_eq!(
+            retry_delay(
+                &ModelError::RateLimited {
+                    retry_after_ms: Some(0),
+                },
+                1,
+            ),
+            Duration::from_secs(1)
+        );
+        assert_eq!(
+            retry_delay(
+                &ModelError::RateLimited {
+                    retry_after_ms: Some(300_000),
+                },
+                1,
+            ),
+            Duration::from_secs(120)
+        );
+    }
+
+    #[test]
+    fn retry_delay_uses_spaced_fallbacks_without_provider_guidance() {
+        assert_eq!(
+            retry_delay(&ModelError::Transport, 1),
+            Duration::from_secs(10)
+        );
+        assert_eq!(
+            retry_delay(&ModelError::Transport, 2),
+            Duration::from_secs(30)
+        );
+        assert_eq!(
+            retry_delay(
+                &ModelError::RateLimited {
+                    retry_after_ms: None,
+                },
+                1,
+            ),
+            Duration::from_secs(10)
+        );
     }
 }

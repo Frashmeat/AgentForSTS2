@@ -30,6 +30,11 @@ Pack/Recipe rejection, cancellation, and invalid input persist distinct `model.*
 `feature.*`, or `run.*` failures from `ModPlanError`; the Shell must not replace them with a
 generic execution failure.
 
+The HTTP Model Adapter owns one bounded retry policy for retryable provider failures: at most three
+attempts, cancellation-aware waits, numeric `Retry-After` clamped to one through 120 seconds, and
+10/30-second fallbacks when the provider gives no delay. Features must not layer another retry loop
+or turn an exhausted transport/rate-limit result into success.
+
 Resource Prepare maps decoded media/shape/alpha rejection to `resource.media_invalid`, unsupported
 Pack roles to `resource.unsupported`, wrong source entry to `resource.source_invalid`, repository
 failure to `resource.storage_failed`, and graph/Primitive/version drift to

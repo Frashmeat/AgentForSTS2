@@ -479,6 +479,11 @@ Authorization header, or provider body.
 | 429 | `ModelError::RateLimited` | `model.rate_limited` |
 | transport/5xx after bounded retries | `ModelError::Transport` | `model.transport_failed` |
 
+The HTTP Model Adapter makes at most three attempts. Retryable failures wait through a
+cancellation-aware bounded delay: a numeric provider `Retry-After` is honored between one and 120
+seconds; otherwise the first and second retries wait 10 and 30 seconds. Feature code must not add a
+second retry loop, and a terminal Run records only the final typed provider family.
+
 An incompatible proxy is a configuration/provider failure. It must not trigger a second
 prompt-only request, code-fence stripping, first-object extraction, or a fabricated success.
 
@@ -507,6 +512,10 @@ Required assertions:
 - `openai_request_omits_an_absent_temperature`: optional transport fields do not weaken the schema.
 - `anthropic_request_enforces_the_core_output_contract`: system-message handling and
   `output_config.format.schema` are both preserved.
+- `retry_delay_honors_bounded_provider_guidance`: numeric `Retry-After` is honored and clamped to
+  the documented one-to-120-second boundary.
+- `retry_delay_uses_spaced_fallbacks_without_provider_guidance`: transport failures and rate limits
+  without `Retry-After` use the documented 10/30-second fallback schedule.
 - A real-provider acceptance uses a normal natural-language Plan and proves the persisted typed
   result; it is environment acceptance, not a deterministic machine gate.
 
