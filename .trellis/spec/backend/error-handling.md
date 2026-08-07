@@ -48,6 +48,12 @@ Composition Plan output with duplicate slot targets or nodes outside the root pi
 `composition.profile.count_mismatch`. Both fail before Draft or Item persistence and are never
 reclassified as `core.unclassified`.
 
+These two Composition Plan families persist `feature.composition-plan-failure-details` v1 when a
+typed model response reaches validation. Details contain only stable reason codes, bounded counts
+and already-validated Item/type/slot IDs. JSON parser text, complete model output, Provider bodies,
+URLs and paths remain forbidden. A failure without valid versioned details is still represented by
+its stable code/stage; React must reject malformed optional details and fall back to code/stage.
+
 Whole-closure generation preserves the originating Plan/Single/Build/Package failure family.
 Staging uses `composition.staging.*`; final project writes use `composition.publication.*`; the one
 final Artifact uses `artifact.*`. Cleanup attempts are independent: an Artifact cleanup error must

@@ -7,6 +7,7 @@ import type {
   CompositionProfileSet,
   ItemCompositionSource,
   ProjectPackageRequest,
+  RunFailure,
   StoredItemDefinition,
 } from "@/services/tauriApi";
 
@@ -183,4 +184,38 @@ export function buildCompositionGenerateRequest(
 
 export function displayName(names: Record<string, string>): string {
   return names.zhs ?? names.eng ?? Object.values(names)[0] ?? "Unnamed";
+}
+
+export function compositionFailureSummary(failure: RunFailure): string {
+  const details = failure.details;
+  if (
+    !details ||
+    details.schema.id !== "feature.composition-plan-failure-details" ||
+    details.schema.version !== 1
+  ) return failure.stage;
+  const payload = details.payload;
+  const reasonCode = safeFailureIdentifier(payload.reasonCode, 64);
+  if (!reasonCode) return failure.stage;
+  const parts = [failure.stage, reasonCode];
+  const itemId = safeFailureIdentifier(payload.itemId, 128);
+  const itemType = safeFailureIdentifier(payload.itemType, 128);
+  const slotId = safeFailureIdentifier(payload.slotId, 128);
+  if (itemId) parts.push(`item=${itemId}`);
+  if (itemType) parts.push(`type=${itemType}`);
+  if (slotId) parts.push(`slot=${slotId}`);
+  if (safeCount(payload.expectedCount) && safeCount(payload.actualCount)) {
+    parts.push(`expected=${payload.expectedCount}`, `actual=${payload.actualCount}`);
+  }
+  return parts.join(" · ");
+}
+
+function safeFailureIdentifier(value: unknown, maxLength: number): string | null {
+  return typeof value === "string" && value.length > 0 && value.length <= maxLength &&
+    /^[a-z][a-z0-9_.-]*$/.test(value)
+    ? value
+    : null;
+}
+
+function safeCount(value: unknown): value is number {
+  return Number.isInteger(value) && (value as number) >= 0 && (value as number) <= 0xffff_ffff;
 }

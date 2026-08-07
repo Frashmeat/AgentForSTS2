@@ -85,6 +85,12 @@ Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-sp
   selected Pack profile, queries bounded Truth, computes pinned definition hashes, attaches exact
   profile provenance/current expectations and persists only a CompositionDraft. The model cannot
   author selected Resources, expected-current hashes or Item current pointers.
+- `composition.plan` compiles the selected Pack profile into one run-scoped output contract. The
+  prompt receives resolved node/type/reference counts; JSON Schema fixes the total node count and
+  exposes only profile-required Item types plus Pack-owned field/locale/reference shapes. Typed
+  validation remains authoritative for per-type counts, quantity sums, target identity and pinned
+  closure. Model violations persist bounded versioned details with stable reason codes and optional
+  expected/actual counts or validated Item/slot IDs; raw model output is forbidden.
 - `composition.retry-node` binds one Draft ID, expected revision and target Item ID. Its model output
   is exactly one logical node with the same identity/type. The Feature reuses composition Plan
   structure/count/closure rules, preserves every code-owned Resource binding and expected-current
@@ -172,7 +178,7 @@ confirm_composition_draft(draft_id, expected_revision, selected_item_ids)
 | --- | --- |
 | Pack | `pack.composition-plan-guidance` covers exactly every `compositionProfiles[].id`, declares bounded guidance, Pack-known allowed Item types and `nodeTypeRules`; rule base counts equal `baseNodeCount`, parameter multipliers equal each parameter `nodeWeight`, and the root type has a base node |
 | Request | Preset parameters exactly match the selected immutable preset; Custom names a Pack preset base and passes all Pack bounds, constraints and <=128-node estimate |
-| Model output | Contains only node content and logical identity/pinned references; no Resource selection, expected-current hash, definition hash, current pointer or project file |
+| Model request/output | Feature resolves exact node/type/reference counts and compiles a <=32 KiB run-scoped JSON Schema with the exact total node count plus Pack-owned Item field/locale/reference shapes. Output contains only node content and logical identity/pinned references; no Resource selection, expected-current hash, definition hash, current pointer or project file |
 | Feature enrichment | Queries bounded Truth for every allowed type, checks exact node count/root/type/reference targets, rejects pinned cycles, computes pinned hashes bottom-up, attaches root profile provenance and current expectations |
 | Draft repository | Creates `.ats/composition-drafts-v1/<draftId>.json`; update/delete require exact revision CAS; ProjectSession owns the sole repository instance |
 | Confirmation | Accepts only a non-empty pinned-closed selection, repeats Pack Draft/Ready/graph checks and performs one recoverable atomic Item pointer transaction |
@@ -181,6 +187,12 @@ confirm_composition_draft(draft_id, expected_revision, selected_item_ids)
 `composition.plan` result is `draftId + revision + rootItemId + nodeCount + modelRequestSha256`.
 The complete graph remains authoritative in the Draft repository rather than being duplicated in the
 Run result.
+
+`composition.profile.count_mismatch` and `model.output_invalid` may carry
+`feature.composition-plan-failure-details` v1. Its payload is limited to a stable `reasonCode`,
+optional expected/actual counts and validated Item/type/slot identifiers. Provider bodies, Prompt
+text, parse messages and paths are never persisted. Composition Studio polls and displays the real
+terminal Plan Run; it must not silently discard a failed terminal result.
 
 #### 4. Validation & Error Matrix
 
@@ -662,6 +674,13 @@ let request = recipe.render_with_output_contract(&slots, model, output_contract)
 ## 8. Shell Boundary
 
 Tauri invokes only `Stage2Composition` for product execution. React uses runtime guards for v3 DTOs and treats persisted `get_run` as terminal authority. Web exposes health/catalog/SPA only until a real Web execution composition is designed. CLI catalog comes from the shared registry.
+
+Desktop settings default to `AppDataPaths.config_path`; `SPIREFORGE_CONFIG_PATH` is the only
+environment override. Desktop startup must not search the process working directory or ancestors,
+because an installed executable may be launched from an unrelated repository or shell directory.
+When AppData has no config, one valid legacy config beside the installed executable may be copied
+once without deleting the source; invalid or failed migration never fabricates a loaded AppData
+status. Web/CLI explicit configuration behavior remains independent.
 
 Raw LLM completion, Prompt preview, old planning/codegen routes, v2 submission commands, and Shell-owned filesystem transactions are forbidden.
 

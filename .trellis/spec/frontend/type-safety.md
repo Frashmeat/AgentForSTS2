@@ -75,6 +75,11 @@ Composition targeted retry uses the generic Feature submission boundary with exa
 `draftId`, `expectedRevision`, `itemId` and `instructions`. React derives this request from the
 currently loaded Draft; it does not send definition content, Resources or caller-authored hashes.
 
+`RunFailure.details`, when present, must pass the generic `VersionedPayload` runtime guard.
+Composition-specific display additionally requires schema
+`feature.composition-plan-failure-details` v1 and validates bounded reason/count/identifier fields;
+unknown schemas or malformed payloads fall back to the already validated failure stage.
+
 Composition generation submits request schema v1 with an exact `StoredItemDefinition`, optional
 Draft ref and nested Package request. Single result v2 and Package result v2 use the exact
 `published | composition_staged` discriminator. Published results require Artifact ref/hash;

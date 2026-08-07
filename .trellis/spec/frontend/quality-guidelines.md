@@ -50,6 +50,7 @@ Questions to answer:
   exist. For an asynchronously populated select, wait until the exact target option exists and is
   enabled before changing its value; an empty select rendered before capability loading is not ready.
 - 重复提交必须同时等待新的 Run ID 和持久化 terminal status；页面上残留的上一条 terminal Run 不能作为本次结果。
+- Composition Plan 提交必须保留本次 persisted terminal Run；失败不得因 Draft 未创建而在 Studio 中静默消失，安全 details 展示需有纯函数 canary。
 - 隔离 E2E runner 必须显式准备并校验 pinned fixture、Provider API base path 与响应模式，不得要求生产代码为测试伪造 Truth/Resource。
 - Batch 模型测试至少覆盖 request 构造、精确 hash 失败重试、fail-fast 未执行差集和 malformed
   schema/counter canary。

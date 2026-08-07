@@ -163,6 +163,11 @@ pinned binding   = itemId + definitionHash + quantity
   contributions. Every planned node of the source type must match the exact result, duplicate targets
   in one slot are invalid, and every Draft node must be reachable from the declared root through
   pinned edges. Identity edges never make an otherwise disconnected Draft node reachable.
+- Composition Plan resolves those Pack rules before model work and compiles a run-scoped output
+  contract: exact total nodes, only nonzero profile Item types, Pack field/localization shapes and
+  profile-specific reference cardinalities. Per-type counts, quantity sums and root closure remain
+  typed Feature validation. Model violations may persist only the bounded
+  `feature.composition-plan-failure-details` v1 reason/count/validated-ID payload.
 
 `compositionProfiles[]` groups one composition/root Item type with `defaultProfile`,
 `customBaseProfile`, a hard `maxNodes <= 128`, bounded numeric parameter descriptors, immutable

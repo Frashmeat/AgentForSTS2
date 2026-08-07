@@ -1,8 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use ats_game_context::{
-    CompositionProfileSet, ContributionResolverError, EvidenceQueryError, ItemReferenceKind,
-    LoadedGamePack, TruthEvidenceRecord, VerifiedContributionSet, VerifiedTruthSnapshot,
+    CompositionProfileSet, ContributionResolverError, EvidenceQueryError, ItemFieldValueSpec,
+    ItemReferenceKind, ItemTypeDescriptor, LoadedGamePack, TruthEvidenceRecord,
+    VerifiedContributionSet, VerifiedTruthSnapshot,
 };
 use ats_kernel::{
     CompositionDraftId, CompositionId, ContributionId, FailureCode, FeatureId, ItemFieldId, ItemId,
@@ -10,8 +11,9 @@ use ats_kernel::{
     SchemaRef, SchemaVersion, Sha256Digest,
 };
 use ats_runtime::{
-    CancellationToken, FinishReason, ModelClient, ModelError, ModelGamePackRef, ModelRequestError,
-    ModelRequestSnapshot, RunFailure, TokenUsage,
+    CancellationToken, FinishReason, ModelClient, ModelError, ModelGamePackRef,
+    ModelOutputContract, ModelRequestError, ModelRequestSnapshot, RunFailure, TokenUsage,
+    VersionedPayload,
 };
 use ats_workspace::{
     CompositionDraft, CompositionDraftNode, CompositionDraftRepository,
@@ -28,7 +30,7 @@ use crate::item_definition::{ItemDefinitionValidationMode, ItemDefinitionValidat
 use crate::prompt::{FeatureRecipe, FeatureRecipeError, FeatureRecipeLoader};
 
 const RECIPE_BYTES: &[u8] = include_bytes!("../recipes/composition-plan.json");
-const RECIPE_SHA256: &str = "c05cb1527f125f51cdb9a9c106df1d233ba5fb496934012cdc35752d591862b0";
+const RECIPE_SHA256: &str = "ebf895d74318d5798c9cd6c97e5c8d43b71d9723e26fd5e7f2e6cbc174e687c6";
 const RETRY_RECIPE_BYTES: &[u8] = include_bytes!("../recipes/composition-retry-node.json");
 const RETRY_RECIPE_SHA256: &str =
     "900cff35c5565c6b709d247b53b00601198ead84dbad05ba963677ef3011d667";
@@ -229,6 +231,112 @@ struct ModelCompositionNode {
     reference_bindings: BTreeMap<ItemReferenceSlotId, Vec<PlannedReference>>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResolvedCompositionProfile<'a> {
+    composition_id: &'a CompositionId,
+    root_item_type: &'a ItemTypeId,
+    max_nodes: u32,
+    selected_profile: &'a ItemCompositionProfile,
+    expected_node_count: u32,
+    expected_node_type_counts: Vec<ResolvedNodeTypeCount>,
+    expected_reference_bindings: Vec<ResolvedReferenceBindingCount>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResolvedNodeTypeCount {
+    item_type: ItemTypeId,
+    count: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResolvedReferenceBindingCount {
+    source_item_type: ItemTypeId,
+    slot_id: ItemReferenceSlotId,
+    measure: ReferenceBindingMeasure,
+    count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CompositionPlanFailureDetails {
+    reason_code: CompositionPlanFailureReason,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expected_count: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    actual_count: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    item_id: Option<ItemId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    item_type: Option<ItemTypeId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    slot_id: Option<ItemReferenceSlotId>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+enum CompositionPlanFailureReason {
+    JsonDecode,
+    RootProfileMissing,
+    DraftGraphInvalid,
+    NodeCountOverflow,
+    NodeTotal,
+    ItemTypeUnsupported,
+    ItemIdDuplicate,
+    RootMissingOrWrongType,
+    ItemTypeCount,
+    ReferenceTargetDuplicate,
+    ReferenceCountOverflow,
+    ReferenceQuantityInvalid,
+    ReferenceBindingCount,
+    ReferenceTotalQuantity,
+    PinnedTargetMissing,
+    RootPinnedClosure,
+    ReferenceTargetMissing,
+    IdentityTargetType,
+    ResolvedNodeMissing,
+    ItemDefinitionInvalid,
+    ItemDefinitionHashInvalid,
+}
+
+impl CompositionPlanFailureDetails {
+    fn reason(reason_code: CompositionPlanFailureReason) -> Self {
+        Self {
+            reason_code,
+            expected_count: None,
+            actual_count: None,
+            item_id: None,
+            item_type: None,
+            slot_id: None,
+        }
+    }
+
+    fn counts(
+        reason_code: CompositionPlanFailureReason,
+        expected_count: u32,
+        actual_count: u32,
+    ) -> Self {
+        Self {
+            expected_count: Some(expected_count),
+            actual_count: Some(actual_count),
+            ..Self::reason(reason_code)
+        }
+    }
+
+    fn with_item(mut self, item_id: &ItemId, item_type: &ItemTypeId) -> Self {
+        self.item_id = Some(item_id.clone());
+        self.item_type = Some(item_type.clone());
+        self
+    }
+
+    fn with_slot(mut self, slot_id: &ItemReferenceSlotId) -> Self {
+        self.slot_id = Some(slot_id.clone());
+        self
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
@@ -331,17 +439,17 @@ impl CompositionPlanService {
             source: request.source.clone(),
             parameters: request.parameters.clone(),
         };
+        let resolved_profile = resolve_composition_profile(profile_set, guidance, &profile)?;
+        let output_contract =
+            composition_plan_output_contract(context.pack, guidance, &resolved_profile)?;
         let slots = BTreeMap::from([
             (
                 "output.contract".into(),
-                serialize(&self.recipe.output_contract().json_schema)?,
+                serialize(&output_contract.json_schema)?,
             ),
             ("pack.contribution".into(), serialize(guidance)?),
             ("truth.evidence".into(), serialize(&evidence)?),
-            (
-                "composition.profile".into(),
-                serialize(&(profile_set, &profile))?,
-            ),
+            ("composition.profile".into(), serialize(&resolved_profile)?),
             (
                 "project.context".into(),
                 bounded_optional(context.project_context, 8_000)?,
@@ -352,7 +460,9 @@ impl CompositionPlanService {
             ),
             ("request.concept".into(), request.concept.clone()),
         ]);
-        let model_request = self.recipe.render(&slots, context.model)?;
+        let model_request =
+            self.recipe
+                .render_with_output_contract(&slots, context.model, output_contract)?;
         let snapshot = ModelRequestSnapshot::new(
             CompositionPlanFeature::id(),
             self.recipe.recipe_ref(),
@@ -369,8 +479,12 @@ impl CompositionPlanService {
         if response.finish_reason == FinishReason::MaxTokens {
             return Err(CompositionPlanError::TruncatedModelOutput);
         }
-        let planned: ModelCompositionPlan = serde_json::from_str(&response.content)
-            .map_err(|_| CompositionPlanError::InvalidModelOutput)?;
+        let planned: ModelCompositionPlan =
+            serde_json::from_str(&response.content).map_err(|_| {
+                CompositionPlanError::InvalidModelOutput(CompositionPlanFailureDetails::reason(
+                    CompositionPlanFailureReason::JsonDecode,
+                ))
+            })?;
         let definitions = build_definitions(
             context.pack,
             profile_set,
@@ -410,12 +524,20 @@ impl CompositionPlanService {
                 .values()
                 .find(|node| node.definition.composition_profile.is_some())
                 .map(|node| node.definition.item_id.clone())
-                .ok_or(CompositionPlanError::InvalidModelOutput)?,
+                .ok_or_else(|| {
+                    CompositionPlanError::InvalidModelOutput(CompositionPlanFailureDetails::reason(
+                        CompositionPlanFailureReason::RootProfileMissing,
+                    ))
+                })?,
             profile,
             nodes,
             Utc::now(),
         )
-        .map_err(|_| CompositionPlanError::InvalidModelOutput)?;
+        .map_err(|_| {
+            CompositionPlanError::InvalidModelOutput(CompositionPlanFailureDetails::reason(
+                CompositionPlanFailureReason::DraftGraphInvalid,
+            ))
+        })?;
         drafts
             .create(&draft)
             .map_err(|error| match D::classify_error(&error) {
@@ -431,8 +553,11 @@ impl CompositionPlanService {
             draft_id: draft.draft_id.clone(),
             revision: draft.revision,
             root_item_id: draft.root_item_id.clone(),
-            node_count: u32::try_from(draft.nodes.len())
-                .map_err(|_| CompositionPlanError::InvalidModelOutput)?,
+            node_count: u32::try_from(draft.nodes.len()).map_err(|_| {
+                CompositionPlanError::InvalidModelOutput(CompositionPlanFailureDetails::reason(
+                    CompositionPlanFailureReason::NodeCountOverflow,
+                ))
+            })?,
             model_request_sha256: snapshot.request_sha256().clone(),
         };
         Ok(CompositionPlanExecution {
@@ -882,6 +1007,406 @@ fn validate_request<'a>(
     Ok(profile)
 }
 
+fn resolve_composition_profile<'a>(
+    profile_set: &'a CompositionProfileSet,
+    guidance: &CompositionPlanGuidance,
+    profile: &'a ItemCompositionProfile,
+) -> Result<ResolvedCompositionProfile<'a>, CompositionPlanError> {
+    let expected_node_count = profile_set
+        .parameters()
+        .iter()
+        .try_fold(profile_set.base_node_count(), |count, parameter| {
+            count.checked_add(
+                profile
+                    .parameters
+                    .get(parameter.id())
+                    .copied()
+                    .unwrap_or_default()
+                    .saturating_mul(parameter.node_weight()),
+            )
+        })
+        .ok_or(CompositionPlanError::InvalidProfile)?;
+    let node_counts = expected_node_type_counts(guidance, profile)?;
+    if node_counts.values().copied().sum::<u32>() != expected_node_count {
+        return Err(CompositionPlanError::InvalidPackGuidance);
+    }
+    let reference_counts = expected_reference_binding_counts(guidance, profile)?;
+    Ok(ResolvedCompositionProfile {
+        composition_id: profile_set.id(),
+        root_item_type: profile_set.root_item_type(),
+        max_nodes: profile_set.max_nodes(),
+        selected_profile: profile,
+        expected_node_count,
+        expected_node_type_counts: node_counts
+            .into_iter()
+            .filter(|(_, count)| *count > 0)
+            .map(|(item_type, count)| ResolvedNodeTypeCount { item_type, count })
+            .collect(),
+        expected_reference_bindings: reference_counts
+            .into_iter()
+            .map(
+                |((source_item_type, slot_id, measure), count)| ResolvedReferenceBindingCount {
+                    source_item_type,
+                    slot_id,
+                    measure,
+                    count,
+                },
+            )
+            .collect(),
+    })
+}
+
+fn expected_node_type_counts(
+    guidance: &CompositionPlanGuidance,
+    profile: &ItemCompositionProfile,
+) -> Result<BTreeMap<ItemTypeId, u32>, CompositionPlanError> {
+    let mut expected = BTreeMap::new();
+    for rule in &guidance.node_type_rules {
+        let parameter_count = rule
+            .parameter_id
+            .as_ref()
+            .and_then(|id| profile.parameters.get(id))
+            .copied()
+            .unwrap_or_default();
+        let count = rule
+            .base_count
+            .checked_add(parameter_count.saturating_mul(rule.parameter_multiplier))
+            .ok_or(CompositionPlanError::InvalidProfile)?;
+        let current = expected.entry(rule.item_type.clone()).or_insert(0_u32);
+        *current = current
+            .checked_add(count)
+            .ok_or(CompositionPlanError::InvalidProfile)?;
+    }
+    Ok(expected)
+}
+
+fn expected_reference_binding_counts(
+    guidance: &CompositionPlanGuidance,
+    profile: &ItemCompositionProfile,
+) -> Result<
+    BTreeMap<(ItemTypeId, ItemReferenceSlotId, ReferenceBindingMeasure), u32>,
+    CompositionPlanError,
+> {
+    let mut expected = BTreeMap::new();
+    for rule in &guidance.reference_binding_rules {
+        let parameter_count = rule
+            .parameter_id
+            .as_ref()
+            .and_then(|id| profile.parameters.get(id))
+            .copied()
+            .unwrap_or_default();
+        let count = rule
+            .base_count
+            .checked_add(parameter_count.saturating_mul(rule.parameter_multiplier))
+            .ok_or(CompositionPlanError::InvalidProfile)?;
+        let key = (
+            rule.source_item_type.clone(),
+            rule.slot_id.clone(),
+            rule.measure,
+        );
+        let current = expected.entry(key).or_insert(0_u32);
+        *current = current
+            .checked_add(count)
+            .ok_or(CompositionPlanError::InvalidProfile)?;
+    }
+    Ok(expected)
+}
+
+fn composition_plan_output_contract(
+    pack: &LoadedGamePack,
+    guidance: &CompositionPlanGuidance,
+    resolved: &ResolvedCompositionProfile<'_>,
+) -> Result<ModelOutputContract, CompositionPlanError> {
+    let binding_counts = resolved
+        .expected_reference_bindings
+        .iter()
+        .filter(|rule| rule.measure == ReferenceBindingMeasure::Bindings)
+        .map(|rule| {
+            (
+                (rule.source_item_type.clone(), rule.slot_id.clone()),
+                rule.count,
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let node_variants = resolved
+        .expected_node_type_counts
+        .iter()
+        .map(|expected| {
+            let descriptor = pack
+                .item_type(&expected.item_type)
+                .ok_or(CompositionPlanError::InvalidPackGuidance)?;
+            composition_node_schema(descriptor, &binding_counts)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if node_variants.is_empty()
+        || resolved.expected_node_count == 0
+        || resolved.expected_node_count > resolved.max_nodes
+        || resolved
+            .expected_node_type_counts
+            .iter()
+            .any(|count| !guidance.allowed_item_types.contains(&count.item_type))
+    {
+        return Err(CompositionPlanError::InvalidPackGuidance);
+    }
+    Ok(ModelOutputContract {
+        schema: model_output_schema(),
+        json_schema: serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["rootItemId", "nodes"],
+            "properties": {
+                "rootItemId": item_id_schema(),
+                "nodes": {
+                    "type": "array",
+                    "minItems": resolved.expected_node_count,
+                    "maxItems": resolved.expected_node_count,
+                    "items": { "oneOf": node_variants }
+                }
+            }
+        }),
+    })
+}
+
+fn composition_node_schema(
+    descriptor: &ItemTypeDescriptor,
+    binding_counts: &BTreeMap<(ItemTypeId, ItemReferenceSlotId), u32>,
+) -> Result<serde_json::Value, CompositionPlanError> {
+    let field_properties = descriptor
+        .fields()
+        .iter()
+        .map(|field| {
+            (
+                field.id().as_str().into(),
+                item_field_value_schema(field.value()),
+            )
+        })
+        .collect::<serde_json::Map<_, _>>();
+    let required_fields = descriptor
+        .fields()
+        .iter()
+        .filter(|field| field.required())
+        .map(|field| field.id().as_str())
+        .collect::<Vec<_>>();
+
+    let localization_fields = descriptor.localization_fields().iter().collect::<Vec<_>>();
+    let required_localization_fields = descriptor
+        .localization_fields()
+        .iter()
+        .filter(|field| field.required())
+        .collect::<Vec<_>>();
+    let localization_properties = descriptor
+        .required_locales()
+        .iter()
+        .map(|locale| {
+            let properties = localization_fields
+                .iter()
+                .map(|field| {
+                    (
+                        field.id().as_str().into(),
+                        serde_json::json!({
+                            "type": "string",
+                            "minLength": field.min_length(),
+                            "maxLength": field.max_length()
+                        }),
+                    )
+                })
+                .collect::<serde_json::Map<_, _>>();
+            let required = required_localization_fields
+                .iter()
+                .map(|field| field.id().as_str())
+                .collect::<Vec<_>>();
+            (
+                locale.as_str().into(),
+                serde_json::json!({
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": required,
+                    "properties": properties
+                }),
+            )
+        })
+        .collect::<serde_json::Map<_, _>>();
+    let required_locales = descriptor
+        .required_locales()
+        .iter()
+        .map(|locale| locale.as_str())
+        .collect::<Vec<_>>();
+
+    let mut reference_properties = serde_json::Map::new();
+    let mut required_reference_slots = Vec::new();
+    for slot in descriptor.reference_slots() {
+        let exact = binding_counts.get(&(descriptor.id().clone(), slot.id().clone()));
+        let (min_items, max_items) = exact
+            .copied()
+            .map(|count| (count, count))
+            .unwrap_or((slot.min_items(), slot.max_items()));
+        if max_items == 0 {
+            continue;
+        }
+        let item_schema = match slot.kind() {
+            ItemReferenceKind::Identity => serde_json::json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "itemId", "expectedItemType"],
+                "properties": {
+                    "kind": { "const": "identity" },
+                    "itemId": item_id_schema(),
+                    "expectedItemType": {
+                        "type": "string",
+                        "enum": slot.allowed_item_types().iter().map(|value| value.as_str()).collect::<Vec<_>>()
+                    }
+                }
+            }),
+            ItemReferenceKind::Pinned => serde_json::json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "itemId", "quantity"],
+                "properties": {
+                    "kind": { "const": "pinned" },
+                    "itemId": item_id_schema(),
+                    "quantity": {
+                        "type": "integer",
+                        "minimum": slot.min_quantity(),
+                        "maximum": slot.max_quantity()
+                    }
+                }
+            }),
+        };
+        reference_properties.insert(
+            slot.id().as_str().into(),
+            serde_json::json!({
+                "type": "array",
+                "minItems": min_items,
+                "maxItems": max_items,
+                "items": item_schema
+            }),
+        );
+        if min_items > 0 {
+            required_reference_slots.push(slot.id().as_str());
+        }
+    }
+
+    Ok(serde_json::json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+            "itemId",
+            "itemType",
+            "canonicalFields",
+            "behaviorIntent",
+            "localizations",
+            "referenceBindings"
+        ],
+        "properties": {
+            "itemId": item_id_schema(),
+            "itemType": { "const": descriptor.id().as_str() },
+            "canonicalFields": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": required_fields,
+                "properties": field_properties
+            },
+            "behaviorIntent": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 32,
+                "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1_000,
+                    "pattern": "^[^\\u0000]*\\S[^\\u0000]*$"
+                }
+            },
+            "localizations": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": required_locales,
+                "properties": localization_properties
+            },
+            "referenceBindings": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": required_reference_slots,
+                "properties": reference_properties
+            }
+        }
+    }))
+}
+
+fn item_field_value_schema(spec: &ItemFieldValueSpec) -> serde_json::Value {
+    match spec {
+        ItemFieldValueSpec::Text {
+            min_length,
+            max_length,
+            ..
+        } => serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "value"],
+            "properties": {
+                "kind": { "const": "text" },
+                "value": { "type": "string", "minLength": min_length, "maxLength": max_length }
+            }
+        }),
+        ItemFieldValueSpec::Integer { min, max } => serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "value"],
+            "properties": {
+                "kind": { "const": "integer" },
+                "value": { "type": "integer", "minimum": min, "maximum": max }
+            }
+        }),
+        ItemFieldValueSpec::Boolean => serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "value"],
+            "properties": {
+                "kind": { "const": "boolean" },
+                "value": { "type": "boolean" }
+            }
+        }),
+        ItemFieldValueSpec::Choice { options } => serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "value"],
+            "properties": {
+                "kind": { "const": "choice" },
+                "value": {
+                    "type": "string",
+                    "enum": options.iter().map(|option| option.value()).collect::<Vec<_>>()
+                }
+            }
+        }),
+        ItemFieldValueSpec::StringList {
+            min_items,
+            max_items,
+            item_max_length,
+        } => serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "value"],
+            "properties": {
+                "kind": { "const": "string_list" },
+                "value": {
+                    "type": "array",
+                    "minItems": min_items,
+                    "maxItems": max_items,
+                    "items": { "type": "string", "maxLength": item_max_length }
+                }
+            }
+        }),
+    }
+}
+
+fn item_id_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_-]*$",
+        "maxLength": 128
+    })
+}
+
 fn build_definitions(
     pack: &LoadedGamePack,
     profile_set: &CompositionProfileSet,
@@ -905,49 +1430,75 @@ fn build_definitions(
         })
         .ok_or(CompositionPlanError::InvalidProfile)?;
     if planned.nodes.len() != usize::try_from(expected_count).unwrap_or(usize::MAX) {
-        return Err(CompositionPlanError::ProfileCountMismatch);
+        return Err(CompositionPlanError::ProfileCountMismatch(
+            CompositionPlanFailureDetails::counts(
+                CompositionPlanFailureReason::NodeTotal,
+                expected_count,
+                u32::try_from(planned.nodes.len()).unwrap_or(u32::MAX),
+            ),
+        ));
     }
     let root_id = planned.root_item_id;
     let mut source = BTreeMap::new();
     for node in planned.nodes {
-        if !guidance.allowed_item_types.contains(&node.item_type)
-            || source.insert(node.item_id.clone(), node).is_some()
-        {
-            return Err(CompositionPlanError::InvalidModelOutput);
+        if !guidance.allowed_item_types.contains(&node.item_type) {
+            return Err(CompositionPlanError::InvalidModelOutput(
+                CompositionPlanFailureDetails::reason(
+                    CompositionPlanFailureReason::ItemTypeUnsupported,
+                )
+                .with_item(&node.item_id, &node.item_type),
+            ));
+        }
+        let item_id = node.item_id.clone();
+        let item_type = node.item_type.clone();
+        if source.insert(item_id.clone(), node).is_some() {
+            return Err(CompositionPlanError::InvalidModelOutput(
+                CompositionPlanFailureDetails::reason(
+                    CompositionPlanFailureReason::ItemIdDuplicate,
+                )
+                .with_item(&item_id, &item_type),
+            ));
         }
     }
     if source
         .get(&root_id)
         .is_none_or(|node| &node.item_type != profile_set.root_item_type())
     {
-        return Err(CompositionPlanError::InvalidModelOutput);
+        return Err(CompositionPlanError::InvalidModelOutput(
+            CompositionPlanFailureDetails::reason(
+                CompositionPlanFailureReason::RootMissingOrWrongType,
+            ),
+        ));
     }
     let actual_counts = source.values().fold(BTreeMap::new(), |mut counts, node| {
         *counts.entry(node.item_type.clone()).or_insert(0_u32) += 1;
         counts
     });
-    let mut expected_counts = BTreeMap::new();
-    for rule in &guidance.node_type_rules {
-        let parameter_count = rule
-            .parameter_id
-            .as_ref()
-            .and_then(|id| profile.parameters.get(id))
-            .copied()
-            .unwrap_or_default();
-        let count = rule
-            .base_count
-            .checked_add(parameter_count.saturating_mul(rule.parameter_multiplier))
-            .ok_or(CompositionPlanError::InvalidProfile)?;
-        let current = expected_counts
-            .entry(rule.item_type.clone())
-            .or_insert(0_u32);
-        *current = current
-            .checked_add(count)
-            .ok_or(CompositionPlanError::InvalidProfile)?;
-    }
+    let mut expected_counts = expected_node_type_counts(guidance, profile)?;
     expected_counts.retain(|_, count| *count > 0);
     if actual_counts != expected_counts {
-        return Err(CompositionPlanError::ProfileCountMismatch);
+        let mismatched_type = actual_counts
+            .keys()
+            .chain(expected_counts.keys())
+            .find(|item_type| actual_counts.get(*item_type) != expected_counts.get(*item_type))
+            .cloned();
+        let expected = mismatched_type
+            .as_ref()
+            .and_then(|item_type| expected_counts.get(item_type))
+            .copied()
+            .unwrap_or_default();
+        let actual = mismatched_type
+            .as_ref()
+            .and_then(|item_type| actual_counts.get(item_type))
+            .copied()
+            .unwrap_or_default();
+        let mut details = CompositionPlanFailureDetails::counts(
+            CompositionPlanFailureReason::ItemTypeCount,
+            expected,
+            actual,
+        );
+        details.item_type = mismatched_type;
+        return Err(CompositionPlanError::ProfileCountMismatch(details));
     }
     validate_reference_targets(&source)?;
     validate_reference_binding_counts(guidance, profile, &source)?;
@@ -975,28 +1526,7 @@ fn validate_reference_binding_counts(
     profile: &ItemCompositionProfile,
     nodes: &BTreeMap<ItemId, ModelCompositionNode>,
 ) -> Result<(), CompositionPlanError> {
-    let mut expected = BTreeMap::new();
-    for rule in &guidance.reference_binding_rules {
-        let parameter_count = rule
-            .parameter_id
-            .as_ref()
-            .and_then(|id| profile.parameters.get(id))
-            .copied()
-            .unwrap_or_default();
-        let count = rule
-            .base_count
-            .checked_add(parameter_count.saturating_mul(rule.parameter_multiplier))
-            .ok_or(CompositionPlanError::InvalidProfile)?;
-        let key = (
-            rule.source_item_type.clone(),
-            rule.slot_id.clone(),
-            rule.measure,
-        );
-        let current = expected.entry(key).or_insert(0_u32);
-        *current = current
-            .checked_add(count)
-            .ok_or(CompositionPlanError::InvalidProfile)?;
-    }
+    let expected = expected_reference_binding_counts(guidance, profile)?;
 
     for ((source_type, slot_id, measure), expected_count) in expected {
         for node in nodes.values().filter(|node| node.item_type == source_type) {
@@ -1013,21 +1543,56 @@ fn validate_reference_binding_counts(
                 })
                 .collect::<BTreeSet<_>>();
             if unique_targets.len() != bindings.len() {
-                return Err(CompositionPlanError::InvalidModelOutput);
+                return Err(CompositionPlanError::InvalidModelOutput(
+                    CompositionPlanFailureDetails::reason(
+                        CompositionPlanFailureReason::ReferenceTargetDuplicate,
+                    )
+                    .with_item(&node.item_id, &node.item_type)
+                    .with_slot(&slot_id),
+                ));
             }
             let actual = match measure {
-                ReferenceBindingMeasure::Bindings => u32::try_from(bindings.len())
-                    .map_err(|_| CompositionPlanError::InvalidModelOutput)?,
+                ReferenceBindingMeasure::Bindings => {
+                    u32::try_from(bindings.len()).map_err(|_| {
+                        CompositionPlanError::InvalidModelOutput(
+                            CompositionPlanFailureDetails::reason(
+                                CompositionPlanFailureReason::ReferenceCountOverflow,
+                            )
+                            .with_item(&node.item_id, &node.item_type)
+                            .with_slot(&slot_id),
+                        )
+                    })?
+                }
                 ReferenceBindingMeasure::TotalQuantity => bindings
                     .iter()
                     .try_fold(0_u32, |sum, binding| match binding {
                         PlannedReference::Pinned { quantity, .. } => sum.checked_add(*quantity),
                         PlannedReference::Identity { .. } => None,
                     })
-                    .ok_or(CompositionPlanError::InvalidModelOutput)?,
+                    .ok_or_else(|| {
+                        CompositionPlanError::InvalidModelOutput(
+                            CompositionPlanFailureDetails::reason(
+                                CompositionPlanFailureReason::ReferenceQuantityInvalid,
+                            )
+                            .with_item(&node.item_id, &node.item_type)
+                            .with_slot(&slot_id),
+                        )
+                    })?,
             };
             if actual != expected_count {
-                return Err(CompositionPlanError::ProfileCountMismatch);
+                let reason = match measure {
+                    ReferenceBindingMeasure::Bindings => {
+                        CompositionPlanFailureReason::ReferenceBindingCount
+                    }
+                    ReferenceBindingMeasure::TotalQuantity => {
+                        CompositionPlanFailureReason::ReferenceTotalQuantity
+                    }
+                };
+                return Err(CompositionPlanError::ProfileCountMismatch(
+                    CompositionPlanFailureDetails::counts(reason, expected_count, actual)
+                        .with_item(&node.item_id, &node.item_type)
+                        .with_slot(&slot_id),
+                ));
             }
         }
     }
@@ -1044,9 +1609,11 @@ fn validate_root_pinned_closure(
         if !visited.insert(item_id) {
             continue;
         }
-        let node = nodes
-            .get(item_id)
-            .ok_or(CompositionPlanError::InvalidModelOutput)?;
+        let node = nodes.get(item_id).ok_or_else(|| {
+            CompositionPlanError::InvalidModelOutput(CompositionPlanFailureDetails::reason(
+                CompositionPlanFailureReason::PinnedTargetMissing,
+            ))
+        })?;
         for binding in node.reference_bindings.values().flatten() {
             if let PlannedReference::Pinned { item_id, .. } = binding {
                 pending.push(item_id);
@@ -1054,7 +1621,13 @@ fn validate_root_pinned_closure(
         }
     }
     if visited.len() != nodes.len() {
-        return Err(CompositionPlanError::InvalidModelOutput);
+        return Err(CompositionPlanError::InvalidModelOutput(
+            CompositionPlanFailureDetails::counts(
+                CompositionPlanFailureReason::RootPinnedClosure,
+                u32::try_from(nodes.len()).unwrap_or(u32::MAX),
+                u32::try_from(visited.len()).unwrap_or(u32::MAX),
+            ),
+        ));
     }
     Ok(())
 }
@@ -1072,11 +1645,21 @@ fn validate_reference_targets(
                     } => (item_id, Some(expected_item_type)),
                     PlannedReference::Pinned { item_id, .. } => (item_id, None),
                 };
-                let target = nodes
-                    .get(target_id)
-                    .ok_or(CompositionPlanError::InvalidModelOutput)?;
+                let target = nodes.get(target_id).ok_or_else(|| {
+                    CompositionPlanError::InvalidModelOutput(
+                        CompositionPlanFailureDetails::reason(
+                            CompositionPlanFailureReason::ReferenceTargetMissing,
+                        )
+                        .with_item(&node.item_id, &node.item_type),
+                    )
+                })?;
                 if expected_type.is_some_and(|value| value != &target.item_type) {
-                    return Err(CompositionPlanError::InvalidModelOutput);
+                    return Err(CompositionPlanError::InvalidModelOutput(
+                        CompositionPlanFailureDetails::reason(
+                            CompositionPlanFailureReason::IdentityTargetType,
+                        )
+                        .with_item(&node.item_id, &node.item_type),
+                    ));
                 }
             }
         }
@@ -1101,9 +1684,11 @@ fn resolve_node(
     if !active.insert(item_id.clone()) {
         return Err(CompositionPlanError::PinnedCycle);
     }
-    let node = source
-        .get(item_id)
-        .ok_or(CompositionPlanError::InvalidModelOutput)?;
+    let node = source.get(item_id).ok_or_else(|| {
+        CompositionPlanError::InvalidModelOutput(CompositionPlanFailureDetails::reason(
+            CompositionPlanFailureReason::ResolvedNodeMissing,
+        ))
+    })?;
     let mut definition = ItemDefinition::new(node.item_id.clone(), node.item_type.clone());
     definition.canonical_fields = node.canonical_fields.clone();
     definition.behavior_intent = node.behavior_intent.clone();
@@ -1161,11 +1746,23 @@ fn resolve_node(
     }
     active.remove(item_id);
     ItemDefinitionValidator::validate(pack, &definition, ItemDefinitionValidationMode::Draft)
-        .map_err(|_| CompositionPlanError::InvalidModelOutput)?;
+        .map_err(|_| {
+            CompositionPlanError::InvalidModelOutput(
+                CompositionPlanFailureDetails::reason(
+                    CompositionPlanFailureReason::ItemDefinitionInvalid,
+                )
+                .with_item(&node.item_id, &node.item_type),
+            )
+        })?;
     let stored = StoredItemDefinition {
-        definition_hash: definition
-            .definition_hash()
-            .map_err(|_| CompositionPlanError::InvalidModelOutput)?,
+        definition_hash: definition.definition_hash().map_err(|_| {
+            CompositionPlanError::InvalidModelOutput(
+                CompositionPlanFailureDetails::reason(
+                    CompositionPlanFailureReason::ItemDefinitionHashInvalid,
+                )
+                .with_item(&node.item_id, &node.item_type),
+            )
+        })?,
         definition,
     };
     resolved.insert(item_id.clone(), stored.clone());
@@ -1298,13 +1895,13 @@ pub enum CompositionPlanError {
     #[error("composition profile parameters are invalid")]
     InvalidProfile,
     #[error("composition model node count does not match the profile")]
-    ProfileCountMismatch,
+    ProfileCountMismatch(CompositionPlanFailureDetails),
     #[error("composition planning Recipe is invalid")]
     InvalidRecipeContract,
     #[error("composition model output was truncated")]
     TruncatedModelOutput,
     #[error("composition model output is invalid")]
-    InvalidModelOutput,
+    InvalidModelOutput(CompositionPlanFailureDetails),
     #[error("composition pinned references contain a cycle")]
     PinnedCycle,
     #[error("composition planning Truth evidence is missing")]
@@ -1334,6 +1931,13 @@ pub enum CompositionPlanError {
 impl CompositionPlanError {
     #[must_use]
     pub fn run_failure(&self) -> RunFailure {
+        let details = match self {
+            Self::ProfileCountMismatch(details) | Self::InvalidModelOutput(details) => Some(
+                VersionedPayload::from_typed(composition_plan_failure_details_schema(), details)
+                    .expect("built-in composition failure details are valid"),
+            ),
+            _ => None,
+        };
         let (code, stage) = match self {
             Self::InvalidInput => ("run.input_invalid", "composition.plan.request"),
             Self::ContextIdentityMismatch => ("truth.context_mismatch", "composition.plan.context"),
@@ -1345,7 +1949,7 @@ impl CompositionPlanError {
                 "composition.plan.profile",
             ),
             Self::InvalidProfile => ("composition.profile.invalid", "composition.plan.profile"),
-            Self::ProfileCountMismatch => (
+            Self::ProfileCountMismatch(_) => (
                 "composition.profile.count_mismatch",
                 "composition.plan.model",
             ),
@@ -1353,7 +1957,7 @@ impl CompositionPlanError {
                 ("feature.recipe_invalid", "composition.plan.recipe")
             }
             Self::TruncatedModelOutput => ("model.output_truncated", "composition.plan.model"),
-            Self::InvalidModelOutput => ("model.output_invalid", "composition.plan.model"),
+            Self::InvalidModelOutput(_) => ("model.output_invalid", "composition.plan.model"),
             Self::PinnedCycle => ("composition.graph.cycle", "composition.plan.graph"),
             Self::MissingEvidence => ("truth.evidence_missing", "composition.plan.truth"),
             Self::Evidence(_) => ("truth.query_invalid", "composition.plan.truth"),
@@ -1393,7 +1997,7 @@ impl CompositionPlanError {
         RunFailure::new(
             FailureCode::parse(code).expect("built-in failure code is valid"),
             stage,
-            None,
+            details,
         )
         .expect("built-in Run failure is valid")
     }
@@ -1537,7 +2141,7 @@ fn map_retry_plan_error(error: CompositionPlanError) -> CompositionRetryNodeErro
             CompositionRetryNodeError::UnsupportedComposition
         }
         CompositionPlanError::InvalidProfile => CompositionRetryNodeError::InvalidProfile,
-        CompositionPlanError::ProfileCountMismatch => {
+        CompositionPlanError::ProfileCountMismatch(_) => {
             CompositionRetryNodeError::ProfileCountMismatch
         }
         CompositionPlanError::PinnedCycle => CompositionRetryNodeError::PinnedCycle,
@@ -1559,6 +2163,10 @@ fn retry_contribution_slot() -> ContributionId {
 
 fn model_output_schema() -> SchemaRef {
     schema("feature.composition-plan-model-output")
+}
+
+fn composition_plan_failure_details_schema() -> SchemaRef {
+    schema("feature.composition-plan-failure-details")
 }
 
 fn retry_model_output_schema() -> SchemaRef {
@@ -1903,7 +2511,7 @@ mod tests {
 
         assert!(matches!(
             validate_root_pinned_closure(&ItemId::parse("fixture-root").unwrap(), &nodes),
-            Err(CompositionPlanError::InvalidModelOutput)
+            Err(CompositionPlanError::InvalidModelOutput(_))
         ));
     }
 
@@ -1956,7 +2564,7 @@ mod tests {
         }]));
         assert!(matches!(
             validate_reference_binding_counts(&guidance, &profile, &duplicate),
-            Err(CompositionPlanError::InvalidModelOutput)
+            Err(CompositionPlanError::InvalidModelOutput(_))
         ));
     }
 
@@ -2024,6 +2632,121 @@ mod tests {
         };
         assert_eq!(definition_hash, &child.definition_hash().unwrap());
         assert!(execution.request_snapshot.truth_snapshot_id().is_some());
+        let snapshots = model.snapshots.lock().unwrap();
+        let request = snapshots[0].request();
+        assert_eq!(
+            request.output_contract.json_schema["properties"]["nodes"]["minItems"],
+            serde_json::json!(2)
+        );
+        assert_eq!(
+            request.output_contract.json_schema["properties"]["nodes"]["maxItems"],
+            serde_json::json!(2)
+        );
+        assert_eq!(
+            request.output_contract.json_schema["properties"]["nodes"]["items"]["oneOf"]
+                .as_array()
+                .map(Vec::len),
+            Some(2)
+        );
+        let prompt = request
+            .messages
+            .iter()
+            .map(|message| message.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(prompt.contains("\"expectedNodeCount\": 2"));
+        assert!(prompt.contains("\"expectedNodeTypeCounts\""));
+    }
+
+    #[test]
+    fn composition_model_failures_persist_only_safe_versioned_details() {
+        let failure = CompositionPlanError::ProfileCountMismatch(
+            CompositionPlanFailureDetails::counts(
+                CompositionPlanFailureReason::ReferenceTotalQuantity,
+                10,
+                9,
+            )
+            .with_item(
+                &ItemId::parse("fixture-root").unwrap(),
+                &ItemTypeId::parse("root").unwrap(),
+            )
+            .with_slot(&ItemReferenceSlotId::parse("children").unwrap()),
+        )
+        .run_failure();
+
+        assert_eq!(failure.code.as_str(), "composition.profile.count_mismatch");
+        assert_eq!(
+            failure.details.as_ref().map(VersionedPayload::schema),
+            Some(&composition_plan_failure_details_schema())
+        );
+        assert_eq!(
+            failure.details.as_ref().map(VersionedPayload::payload),
+            Some(&serde_json::json!({
+                "reasonCode": "reference_total_quantity",
+                "expectedCount": 10,
+                "actualCount": 9,
+                "itemId": "fixture-root",
+                "itemType": "root",
+                "slotId": "children"
+            }))
+        );
+    }
+
+    #[test]
+    fn sts2_prototype_compiles_to_one_bounded_run_scoped_output_contract() {
+        let pack = GamePackLoader::load_built_in_sts2().unwrap();
+        let contributions = ContributionResolver::new(Vec::<PrimitiveId>::new())
+            .resolve(
+                &pack,
+                &CompositionPlanFeature::id(),
+                &[CompositionPlanFeature::contribution_requirement()],
+            )
+            .unwrap();
+        let contribution: CompositionPlanContribution =
+            contributions.decode(&contribution_slot()).unwrap();
+        let guidance = contribution
+            .compositions
+            .iter()
+            .find(|value| value.composition_id.as_str() == "character_suite")
+            .unwrap();
+        let profile_set = pack
+            .composition_profile(&CompositionId::parse("character_suite").unwrap())
+            .unwrap();
+        let prototype = profile_set
+            .profiles()
+            .iter()
+            .find(|profile| profile.id().as_str() == "prototype")
+            .unwrap();
+        let profile = ItemCompositionProfile {
+            composition_id: profile_set.id().clone(),
+            source: ItemCompositionSource::Preset {
+                profile_id: prototype.id().clone(),
+            },
+            parameters: prototype.values().clone(),
+        };
+        let resolved = resolve_composition_profile(profile_set, guidance, &profile).unwrap();
+        let contract = composition_plan_output_contract(&pack, guidance, &resolved).unwrap();
+        let encoded = serde_json::to_vec(&contract.json_schema).unwrap();
+
+        assert!(
+            encoded.len() <= 32_000,
+            "contract size was {}",
+            encoded.len()
+        );
+        assert_eq!(
+            contract.json_schema["properties"]["nodes"]["minItems"],
+            serde_json::json!(11)
+        );
+        assert_eq!(
+            contract.json_schema["properties"]["nodes"]["maxItems"],
+            serde_json::json!(11)
+        );
+        assert_eq!(
+            contract.json_schema["properties"]["nodes"]["items"]["oneOf"]
+                .as_array()
+                .map(Vec::len),
+            Some(3)
+        );
     }
 
     #[tokio::test]

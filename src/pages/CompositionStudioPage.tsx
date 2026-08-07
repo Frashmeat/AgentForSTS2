@@ -28,6 +28,7 @@ import {
   buildCompositionRetryNodeRequest,
   buildCompositionGenerateRequest,
   closedSelection,
+  compositionFailureSummary,
   compositionRoots,
   defaultProfileChoice,
   displayName,
@@ -67,6 +68,7 @@ export function CompositionStudioPage() {
   const [outputPath, setOutputPath] = useState("packages/mod.zip");
   const [lastGenerationRunId, setLastGenerationRunId] = useState("");
   const [lastGenerationRun, setLastGenerationRun] = useState<RunRecord | null>(null);
+  const [lastPlanRun, setLastPlanRun] = useState<RunRecord | null>(null);
   const [retryInstructions, setRetryInstructions] = useState("");
   const [lastRetryRun, setLastRetryRun] = useState<RunRecord | null>(null);
 
@@ -150,11 +152,12 @@ export function CompositionStudioPage() {
     if (!profile || !choice || issues.length > 0) return;
     setBusy(true);
     setFailure(null);
+    setLastPlanRun(null);
     try {
       const runId = await api.submitCompositionPlan(
         buildCompositionPlanRequest(draftId, profile, choice, parameters, concept),
       );
-      const terminal = await waitForRun(runId);
+      const terminal = await waitForRun(runId, setLastPlanRun);
       if (terminal.status === "succeeded") await load(draftId.trim());
     } catch (error: unknown) {
       setFailure(toActionableFailure(error));
@@ -344,6 +347,24 @@ export function CompositionStudioPage() {
           <Field label="Concept"><textarea data-testid="composition-concept" className="min-h-28 mt-3" value={concept} onChange={(event) => setConcept(event.target.value)} /></Field>
           {issues.length > 0 && <Notice variant="warn" title="Profile checks">{issues.join(" ")}</Notice>}
           <Button data-testid="composition-plan" variant="accent" disabled={busy || !projectOpen || !draftId.trim() || !concept.trim() || issues.length > 0} onClick={() => void planComposition()}><Sparkles size={14} /> Plan Draft</Button>
+        </Card>
+      )}
+
+      {lastPlanRun && (
+        <Card
+          eyebrow="composition plan run"
+          title={lastPlanRun.featureId}
+          actions={(
+            <Badge variant={lastPlanRun.status === "succeeded" ? "ok" : lastPlanRun.status === "failed" ? "error" : "warn"}>
+              {lastPlanRun.status}
+            </Badge>
+          )}
+        >
+          {lastPlanRun.failure && (
+            <Notice variant="error" title={lastPlanRun.failure.code}>
+              {compositionFailureSummary(lastPlanRun.failure)}
+            </Notice>
+          )}
         </Card>
       )}
 

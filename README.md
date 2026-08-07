@@ -105,7 +105,7 @@ npm run build
 
 ## 配置
 
-默认配置：`runtime/agentthespire.config.json`。LLM 支持 Anthropic 与 OpenAI-compatible HTTP provider，并允许 `llm.custom_prompt` 作为本次运行的附加指令；密钥不会进入 Run、Artifact、IPC 错误或共享验证文件。
+桌面默认配置位于用户 AppData 的 `AgentTheSpire/config.json`，不依赖启动工作目录；`SPIREFORGE_CONFIG_PATH` 可显式覆盖。AppData 尚无配置时，桌面会验证并复制安装 EXE 旁的旧 `runtime/agentthespire.config.json`，原文件保留。Web/CLI 未显式指定时仍从当前工作目录的 `runtime/agentthespire.config.json` 解析。LLM 支持 Anthropic 与 OpenAI-compatible HTTP provider，并允许 `llm.custom_prompt` 作为本次运行的附加指令；密钥不会进入 Run、Artifact、IPC 错误或共享验证文件。
 
 桌面工程是自包含目录：
 

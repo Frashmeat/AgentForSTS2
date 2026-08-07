@@ -165,6 +165,45 @@ impl SettingsStore {
     #[must_use]
     pub fn load(explicit_path: Option<&Path>) -> (Settings, ConfigStatus) {
         let path = resolve_path(explicit_path);
+        Self::load_path(path)
+    }
+
+    #[must_use]
+    pub fn load_desktop(
+        default_path: &Path,
+        legacy_path: Option<&Path>,
+    ) -> (Settings, ConfigStatus) {
+        let configured = std::env::var_os(CONFIG_PATH_ENV).filter(|value| !value.is_empty());
+        Self::load_desktop_from(default_path, legacy_path, configured.as_deref())
+    }
+
+    fn load_desktop_from(
+        default_path: &Path,
+        legacy_path: Option<&Path>,
+        configured: Option<&std::ffi::OsStr>,
+    ) -> (Settings, ConfigStatus) {
+        let path = resolve_default_path(default_path, configured);
+        if configured.is_some() || path.is_file() {
+            return Self::load_path(path);
+        }
+        let Some(legacy_path) = legacy_path.filter(|candidate| candidate.is_file()) else {
+            return Self::load_path(path);
+        };
+        let (settings, legacy_status) = Self::load_path(legacy_path.to_path_buf());
+        if !legacy_status.loaded || Self::save(&path, &settings).is_err() {
+            return (settings, legacy_status);
+        }
+        Self::load_path(path)
+    }
+
+    #[must_use]
+    pub fn desktop_legacy_config_path(executable_path: &Path) -> Option<PathBuf> {
+        executable_path
+            .parent()
+            .map(|parent| parent.join(DEFAULT_CONFIG_PATH))
+    }
+
+    fn load_path(path: PathBuf) -> (Settings, ConfigStatus) {
         let present = path.is_file();
         let mut figment = Figment::new().merge(Serialized::defaults(Settings::default()));
         if present {
@@ -228,6 +267,13 @@ fn resolve_path(explicit: Option<&Path>) -> PathBuf {
     cwd.join(DEFAULT_CONFIG_PATH)
 }
 
+fn resolve_default_path(default_path: &Path, configured: Option<&std::ffi::OsStr>) -> PathBuf {
+    configured
+        .map(Path::new)
+        .map(absolute)
+        .unwrap_or_else(|| absolute(default_path))
+}
+
 fn absolute(path: &Path) -> PathBuf {
     if path.is_absolute() {
         path.to_path_buf()
@@ -245,4 +291,45 @@ fn loopback_origins(port: u16) -> Vec<String> {
         "http://localhost:5173".into(),
         "http://127.0.0.1:5173".into(),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn desktop_default_path_is_stable_and_allows_an_explicit_environment_override() {
+        let root = std::env::temp_dir().join("agentthespire-config-path-fixture");
+        let default = root.join("app-data/config.json");
+        let configured = root.join("explicit/config.json");
+
+        assert_eq!(resolve_default_path(&default, None), default);
+        assert_eq!(
+            resolve_default_path(&default, Some(configured.as_os_str())),
+            configured
+        );
+    }
+
+    #[test]
+    fn desktop_migrates_a_valid_executable_sibling_config_without_removing_it() {
+        let root = tempdir().unwrap();
+        let executable = root.path().join("install/agentthespire-desktop.exe");
+        let legacy = SettingsStore::desktop_legacy_config_path(&executable).unwrap();
+        let default = root.path().join("app-data/config.json");
+        let mut settings = Settings::default();
+        settings.llm.model = "fixture-model".into();
+        SettingsStore::save(&legacy, &settings).unwrap();
+
+        let (loaded, status) = SettingsStore::load_desktop_from(&default, Some(&legacy), None);
+
+        assert_eq!(loaded.llm.model, "fixture-model");
+        assert!(status.loaded);
+        assert_eq!(
+            status.path.as_deref(),
+            Some(default.to_string_lossy().as_ref())
+        );
+        assert!(default.is_file());
+        assert!(legacy.is_file());
+    }
 }

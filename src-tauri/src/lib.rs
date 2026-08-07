@@ -83,12 +83,17 @@ pub fn build_info() -> ats_kernel::BuildInfo {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let (settings, status) = SettingsStore::load(None);
     let app_data = std::env::var_os(APP_DATA_ROOT_ENV)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
         .map(AppDataPaths::from_root)
         .unwrap_or_else(AppDataPaths::resolve);
+    let legacy_config = std::env::current_exe()
+        .ok()
+        .as_deref()
+        .and_then(SettingsStore::desktop_legacy_config_path);
+    let (settings, status) =
+        SettingsStore::load_desktop(&app_data.config_path, legacy_config.as_deref());
     if let Err(error) = app_data.ensure_dirs() {
         eprintln!("ats-desktop: app data initialization failed: {error}");
     }

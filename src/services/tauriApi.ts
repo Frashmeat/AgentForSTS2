@@ -871,7 +871,10 @@ function isRunStatus(value: unknown): value is RunStatus {
   return ["pending", "running", "succeeded", "failed", "cancelled"].includes(String(value));
 }
 function isRunFailure(value: unknown): value is RunFailure {
-  return isRecord(value) && typeof value.code === "string" && typeof value.stage === "string";
+  return isRecord(value) &&
+    typeof value.code === "string" &&
+    typeof value.stage === "string" &&
+    (value.details === undefined || value.details === null || isVersionedPayload(value.details));
 }
 function isRunSummary(value: unknown): value is RunSummary {
   return (

@@ -14,7 +14,7 @@
     }
   ],
   "slots": [
-    { "id": "output.contract", "required": true, "maxChars": 32000 },
+    { "id": "output.contract", "required": true, "maxChars": 64000 },
     { "id": "pack.contribution", "required": true, "maxChars": 32000 },
     { "id": "truth.evidence", "required": true, "maxChars": 64000 },
     { "id": "composition.profile", "required": true, "maxChars": 16000 },

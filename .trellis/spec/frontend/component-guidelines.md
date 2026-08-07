@@ -111,6 +111,9 @@ Item-type branches. The Pack default profile is selected initially; Custom start
   or author a second graph.
 - Generation displays the persisted `composition.generate` Run status and safe failure code/stage.
   A returned Run ID or completed polling loop is not success evidence.
+- Planning likewise retains and renders the persisted `composition.plan` terminal Run. Safe v1
+  failure details may add reason/expected/actual/Item/slot context; malformed or unknown details
+  fall back to code/stage and never cause raw Provider output to be rendered.
 
 ---
 

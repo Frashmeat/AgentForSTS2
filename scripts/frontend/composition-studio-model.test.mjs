@@ -11,6 +11,7 @@ const {
   buildCompositionRetryNodeRequest,
   buildCompositionGenerateRequest,
   closedSelection,
+  compositionFailureSummary,
   compositionRoots,
   defaultProfileChoice,
   draftRows,
@@ -181,4 +182,30 @@ test("IPC guards reject malformed Draft and confirmation payloads", () => {
     confirmationDigest: hash,
   }), true);
   assert.equal(isCompositionConfirmation({ draft: {}, definitions: [], confirmationDigest: hash }), false);
+});
+
+test("composition failure details remain bounded and actionable", () => {
+  assert.equal(compositionFailureSummary({
+    code: "composition.profile.count_mismatch",
+    stage: "composition.plan.model",
+    details: {
+      schema: { id: "feature.composition-plan-failure-details", version: 1 },
+      payload: {
+        reasonCode: "reference_total_quantity",
+        itemId: "fixture-root",
+        itemType: "root",
+        slotId: "children",
+        expectedCount: 10,
+        actualCount: 9,
+      },
+    },
+  }), "composition.plan.model · reference_total_quantity · item=fixture-root · type=root · slot=children · expected=10 · actual=9");
+  assert.equal(compositionFailureSummary({
+    code: "model.output_invalid",
+    stage: "composition.plan.model",
+    details: {
+      schema: { id: "feature.composition-plan-failure-details", version: 1 },
+      payload: { reasonCode: "unsafe value from provider" },
+    },
+  }), "composition.plan.model");
 });

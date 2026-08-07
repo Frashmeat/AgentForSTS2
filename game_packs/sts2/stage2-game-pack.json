@@ -511,7 +511,7 @@
             ],
             "guidance": [
               "Plan exactly one PlaceholderCharacterModel root and the Pack-profiled Card, Relic, Potion, and Power nodes.",
-              "Set visual_profile to placeholder and map HP, gold, energy, gender, name color, placeholder identity, and every declared localization field explicitly.",
+              "Set visual_profile to the Pack-declared placeholder or branded_placeholder requested by the concept; default to placeholder only when no branded identity is requested. Map HP, gold, energy, gender, name color, placeholder identity, and every declared localization field explicitly.",
               "Pin every Card in the Character cards slot, every Relic in relics, every Potion in potions, and every Power in powers so the root reaches the complete closure.",
               "Use starting_deck quantities to close exactly to starting_deck_size, and include exactly starter_card_types distinct starting Card definitions.",
               "Bind every Card, Relic, and Potion owner_character identity to the root; Character registration is CustomContentDictionary.AddCharacter through CustomCharacterModel, while PoolAttribute is only for Card, Relic, and Potion pool membership."
