@@ -107,5 +107,9 @@ the E2E runner and spec in the same Order.
   streaming/non-streaming assumptions are explicit test contracts.
 - Run assertions wait for both a new Run ID and its persisted terminal status. A previous succeeded
   result on the same page is never evidence for a new submission.
+- Retry and timeout budgets are one cross-layer contract. When a Provider, build, package or other
+  backend Run budget changes, inspect every frontend poller and E2E deadline. A shared UI poller must
+  not abandon an authoritative backend Run while it can still legally be running; default polling
+  follows persisted terminal state, while any shorter caller deadline must be explicit and tested.
 - Sequential workflow suites enable fail-fast behavior so a setup failure does not produce misleading
   downstream timeouts.

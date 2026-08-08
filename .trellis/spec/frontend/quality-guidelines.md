@@ -32,6 +32,7 @@ Questions to answer:
 - secret/token 输入框初始值为空；未触碰表示保留原值，触碰后精确写入用户输入，包括空字符串清空语义。
 - 可独立验证的表单转换与 patch 组装逻辑应抽成纯函数。
 - `run-progress` 事件只用于提示刷新，不能作为 Run 终态权威；事件可能先于后端 terminal CAS 到达。Runs UI 在列表存在 `pending` / `running` 时必须继续有界轮询 `listRuns()`，读到全部终态后停止。
+- Shared polling for one submitted Run must not default to a fixed timeout shorter than the worst-case backend Feature budget. It reads the persisted `RunRecord` until terminal by default; only callers with a separate explicit deadline contract, or tests, pass a polling timeout.
 - 选中详情和列表状态必须来自持久化 `RunRecord`。不得因为收到包含 `error` / `failed` 的 progress stage 就在前端自行伪造 failed payload。
 - Batch/Complex 不得维护可编辑 JSON request 或 caller-authored Plan。Item 选择、只读 preview、
   child Run 展示和失败重试必须由纯模型函数覆盖；重试复用父 Run request 中的 exact
@@ -50,12 +51,32 @@ Questions to answer:
   exist. For an asynchronously populated select, wait until the exact target option exists and is
   enabled before changing its value; an empty select rendered before capability loading is not ready.
 - 重复提交必须同时等待新的 Run ID 和持久化 terminal status；页面上残留的上一条 terminal Run 不能作为本次结果。
+- Run polling tests must cover a real terminal state that arrives after the former frontend wait window, plus deterministic failure for an explicit caller deadline. Increasing Provider retries, backoff or external-tool budgets requires checking every frontend consumer in the same change.
 - Composition Plan 提交必须保留本次 persisted terminal Run；失败不得因 Draft 未创建而在 Studio 中静默消失，安全 details 展示需有纯函数 canary。
 - 隔离 E2E runner 必须显式准备并校验 pinned fixture、Provider API base path 与响应模式，不得要求生产代码为测试伪造 Truth/Resource。
 - Batch 模型测试至少覆盖 request 构造、精确 hash 失败重试、fail-fast 未执行差集和 malformed
   schema/counter canary。
 - Resource Workbench 模型测试必须证明 required derived roles 自动包含 Pack-owned master，且
   `packDefaultAvailable` 仅控制通用 Default 操作；不得通过 Character/STS2 字面量决定按钮或角色。
+
+## Single Run Polling Contract
+
+`src/services/runPolling.ts::waitForRun(runId, onUpdate?, options?)` is the shared consumer for a
+submitted Feature Run. `options.timeoutMs` is optional; omission means polling the validated,
+persisted `RunRecord` until `succeeded`, `failed` or `cancelled`. `options.intervalMs` controls only
+read frequency. `readRun`, `sleep` and `now` are dependency seams for deterministic tests and do not
+change the production Run authority.
+
+| Case | Persisted state / option | Required result |
+| --- | --- | --- |
+| Good | `running` remains valid beyond an old UI deadline, then becomes terminal | Continue polling and return the exact terminal record; every observed record reaches `onUpdate` |
+| Base | No `timeoutMs` is supplied | Use no frontend deadline; backend Run lifecycle, cancellation and reconciliation remain authoritative |
+| Bad | Caller supplies an explicit deadline and no terminal record arrives before it | Throw `run polling timed out`; do not fabricate or mutate a terminal Run |
+| Error | `get_run` transport or runtime validation fails | Propagate the actionable IPC failure; do not retain it as a fake Run status |
+
+Run `npm run test:frontend` and keep `scripts/frontend/run-polling.test.mjs` assertions for both the
+Good/Base terminal path and the explicit Bad deadline. Any backend retry, timeout, build or package
+budget change must review this contract and every `waitForRun` caller in the same change.
 
 ---
 
