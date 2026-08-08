@@ -105,7 +105,7 @@ npm run build
 
 ## 配置
 
-桌面默认配置位于用户 AppData 的 `AgentTheSpire/config.json`，不依赖启动工作目录；`SPIREFORGE_CONFIG_PATH` 可显式覆盖。AppData 尚无配置时，桌面会验证安装 EXE 旁旧 `runtime/agentthespire.config.json` 的文件值并迁移到 AppData，原文件保留；`SPIREFORGE_*` 运行时覆盖在迁移后加载时应用，不会因迁移写入配置文件。Web/CLI 未显式指定时仍从当前工作目录的 `runtime/agentthespire.config.json` 解析。LLM 支持 Anthropic 与 OpenAI-compatible HTTP provider，并允许 `llm.custom_prompt` 作为本次运行的附加指令；密钥不会进入 Run、Artifact、IPC 错误或共享验证文件。
+桌面默认配置位于用户 AppData 的 `AgentTheSpire/config.json`，不依赖启动工作目录；`SPIREFORGE_CONFIG_PATH` 可显式覆盖。AppData 尚无配置时，桌面会验证安装 EXE 旁旧 `runtime/agentthespire.config.json` 的文件值并迁移到 AppData，原文件保留；`SPIREFORGE_*` 运行时覆盖在迁移后加载时应用，不会因迁移写入配置文件。Web/CLI 未显式指定时仍从当前工作目录的 `runtime/agentthespire.config.json` 解析。LLM 支持 Anthropic 与 OpenAI-compatible HTTP provider，并允许 `llm.custom_prompt` 作为本次运行的附加指令。桌面模型任务共享一个 FIFO 单飞队列；无 Provider 指引的重试默认等待 120 秒和 300 秒，可通过 `llm.retry_initial_delay_ms`、`llm.retry_followup_delay_ms` 或对应 `SPIREFORGE_LLM__*` 环境覆盖调整。密钥、队列状态和 Provider 原始错误不会进入 Run、Artifact、IPC 错误或共享验证文件。
 
 桌面工程是自包含目录：
 

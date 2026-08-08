@@ -32,8 +32,17 @@ generic execution failure.
 
 The HTTP Model Adapter owns one bounded retry policy for retryable provider failures: at most three
 attempts, cancellation-aware waits, numeric `Retry-After` clamped to one through 120 seconds, and
-10/30-second fallbacks when the provider gives no delay. Features must not layer another retry loop
-or turn an exhausted transport/rate-limit result into success.
+120/300-second defaults when the provider gives no delay. The fallback values are configurable as
+`llm.retry_initial_delay_ms` and `llm.retry_followup_delay_ms`, must be within one millisecond
+through one hour, and old configuration files receive the defaults through `serde(default)`.
+Features must not layer another retry loop or turn an exhausted transport/rate-limit result into
+success.
+
+Every HTTP-backed model task also enters the one FIFO `ModelRequestQueue` owned by the desktop
+composition root. A task holds its slot through all attempts, retry waits, parsing and terminal
+return; the next task cannot start an HTTP attempt first. Cancellation while waiting for the queue
+returns `ModelError::Cancelled` without acquiring a slot. Constructing one private queue per Run or
+releasing the slot between retries is forbidden because either pattern recreates provider bursts.
 
 Resource Prepare maps decoded media/shape/alpha rejection to `resource.media_invalid`, unsupported
 Pack roles to `resource.unsupported`, wrong source entry to `resource.source_invalid`, repository
@@ -121,6 +130,7 @@ Artifact validation, path, IO, publish, rollback, codegen, batch and package fai
 ```powershell
 cargo test -p ats-kernel product
 cargo test -p ats-runtime --all-targets
+cargo test -p ats-adapters model_client -- --nocapture
 cargo test -p agentthespire-desktop --lib commands::failure
 cargo test -p agentthespire-desktop --lib commands::stage2::tests::confirmation_readiness_maps_to_a_resource_action -- --exact
 npm run test:frontend

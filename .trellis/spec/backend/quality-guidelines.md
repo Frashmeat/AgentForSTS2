@@ -453,8 +453,27 @@ pub struct ModelRequest {
 }
 
 // crates/ats-adapters/src/model_client.rs
+pub struct ModelRequestQueue { /* one FIFO slot */ }
+impl ModelRequestQueue {
+    pub fn new() -> Self;
+}
+
+impl HttpModelClient {
+    pub fn new_with_queue(
+        config: &LlmConfig,
+        queue: Arc<ModelRequestQueue>,
+    ) -> Result<Self, ModelError>;
+}
+
 fn openai_request_body(request: &ModelRequest, model: &str) -> serde_json::Value;
 fn anthropic_request_body(request: &ModelRequest, model: &str) -> serde_json::Value;
+
+// crates/ats-adapters/src/config.rs
+pub struct LlmConfig {
+    // existing provider/model/credential fields omitted
+    pub retry_initial_delay_ms: u64,
+    pub retry_followup_delay_ms: u64,
+}
 ```
 
 #### 3. Contracts
@@ -471,6 +490,13 @@ fn anthropic_request_body(request: &ModelRequest, model: &str) -> serde_json::Va
 The Adapter sends no Feature/Game Pack prompt of its own and never persists or logs the request,
 Authorization header, or provider body.
 
+`Stage2Composition::built_in` creates exactly one `Arc<ModelRequestQueue>`. Every production call
+to `select_model` passes that same Arc to `HttpModelClient::new_with_queue`; the public
+`HttpModelClient::new` private-queue convenience is not used by the desktop composition path.
+`llm.retry_initial_delay_ms` and `llm.retry_followup_delay_ms` default to `120000` and `300000`.
+Figment environment overrides use `SPIREFORGE_LLM__RETRY_INITIAL_DELAY_MS` and
+`SPIREFORGE_LLM__RETRY_FOLLOWUP_DELAY_MS`.
+
 #### 4. Validation & Error Matrix
 
 | Provider result | Adapter result | Persisted Feature family |
@@ -481,11 +507,21 @@ Authorization header, or provider body.
 | 401/403 | `ModelError::Authentication` | `model.authentication` |
 | 429 | `ModelError::RateLimited` | `model.rate_limited` |
 | transport/5xx after bounded retries | `ModelError::Transport` | `model.transport_failed` |
+| retry delay is zero or above 3,600,000 ms | construction returns `ModelError::Configuration`; no queue/HTTP work | `model.configuration` / composition-root configuration mapping |
+| another task owns the FIFO slot | wait cancellation-aware; issue no HTTP request | Run remains `running` until acquired or cancelled |
+| cancellation wins while queued | `ModelError::Cancelled`; slot is not retained | `cancelled` through the Run supervisor |
 
 The HTTP Model Adapter makes at most three attempts. Retryable failures wait through a
 cancellation-aware bounded delay: a numeric provider `Retry-After` is honored between one and 120
-seconds; otherwise the first and second retries wait 10 and 30 seconds. Feature code must not add a
-second retry loop, and a terminal Run records only the final typed provider family.
+seconds; otherwise the first and second retries use the validated
+`llm.retry_initial_delay_ms`/`llm.retry_followup_delay_ms` values, whose compatible defaults are
+120 and 300 seconds. Feature code must not add a second retry loop, and a terminal Run records only
+the final typed provider family.
+
+Every desktop HTTP model task enters the one FIFO `ModelRequestQueue` owned by the composition
+root. One logical task holds its slot through all attempts, retry waits, response parsing and
+terminal return. A queued task observes cancellation without issuing an HTTP request. Queue state
+is process-local Adapter scheduling state and never enters a Prompt, Run, Artifact or Shell DTO.
 
 An incompatible proxy is a configuration/provider failure. It must not trigger a second
 prompt-only request, code-fence stripping, first-object extraction, or a fabricated success.
@@ -494,11 +530,16 @@ prompt-only request, code-fence stripping, first-object extraction, or a fabrica
 
 - Good: a capable provider receives the exact Recipe JSON Schema and returns one contract-valid
   object; Feature code still revalidates the decoded type.
+- Good: concurrently submitted Plan and Single Runs share one queue; the earlier task completes all
+  attempts and retry waits before the later task can send its first HTTP request.
 - Base: `temperature=None` omits the provider field, while the output contract is still mandatory.
+- Base: a config file without the two retry fields deserializes to 120/300-second defaults.
 - Bad: the provider rejects `response_format`/`output_config`; the Run retains a typed model failure
   and no fallback request is issued.
 - Bad: the provider returns Markdown fences or extra fields; Feature strict decoding fails with
   `model.output_invalid` rather than accepting a partial object.
+- Bad: each Run constructs its own queue, or a task releases the queue between retries; both allow
+  a later Run to recreate a provider burst.
 
 #### 6. Tests Required
 
@@ -518,7 +559,12 @@ Required assertions:
 - `retry_delay_honors_bounded_provider_guidance`: numeric `Retry-After` is honored and clamped to
   the documented one-to-120-second boundary.
 - `retry_delay_uses_spaced_fallbacks_without_provider_guidance`: transport failures and rate limits
-  without `Retry-After` use the documented 10/30-second fallback schedule.
+  without `Retry-After` use the documented configured 120/300-second default schedule.
+- `model_request_queue_is_fifo_across_clients`: clients sharing one queue complete in arrival order.
+- `queued_model_request_observes_cancellation`: a cancelled waiter never acquires the queue slot.
+- `model_clients_can_share_one_request_queue`: independently constructed clients use the same
+  composition-root queue and retry policy.
+- `retry_configuration_is_bounded`: zero and values above one hour fail before any HTTP request.
 - A real-provider acceptance uses a normal natural-language Plan and proves the persisted typed
   result; it is environment acceptance, not a deterministic machine gate.
 
@@ -545,6 +591,22 @@ json!({
         }
     }
 })
+```
+
+Wrong — each Run receives an unrelated queue:
+
+```rust
+let model = HttpModelClient::new(config)?;
+```
+
+Correct — the composition root owns the queue and every Run shares it:
+
+```rust
+pub struct Stage2Composition {
+    model_queue: Arc<ModelRequestQueue>,
+}
+
+let model = HttpModelClient::new_with_queue(config, Arc::clone(&self.model_queue))?;
 ```
 
 Every constraint enforced on model output that JSON Schema can express must also be present in the

@@ -1,10 +1,11 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use ats_adapters::{
     FileArtifactStore, FileCompositionDraftRepository, FileItemRepository, FileProjectStager,
     FileProjectWriter, FileResourceRepository, FileTruthSnapshotRepository, HttpMediaClient,
-    HttpModelClient, PngResourceMediaProcessor, RegisteredBuildRunner, RegisteredValidationRunner,
-    ZipPackageWriter,
+    HttpModelClient, ModelRequestQueue, PngResourceMediaProcessor, RegisteredBuildRunner,
+    RegisteredValidationRunner, ZipPackageWriter,
 };
 use ats_features::FeatureSpec;
 use ats_features::composition_generate::{
@@ -56,6 +57,7 @@ pub struct Stage2Composition {
     contributions: ContributionResolver,
     registry: FeatureRegistry,
     runtime_root: PathBuf,
+    model_queue: Arc<ModelRequestQueue>,
 }
 
 impl Stage2Composition {
@@ -78,6 +80,7 @@ impl Stage2Composition {
             contributions,
             registry,
             runtime_root,
+            model_queue: Arc::new(ModelRequestQueue::new()),
         })
     }
 
@@ -226,7 +229,8 @@ impl Stage2Composition {
                     &ProjectPackageFeature::id(),
                     &[ProjectPackageFeature::contribution_requirement()],
                 )?;
-                let model = select_model(model_override, &settings.llm)?;
+                let model =
+                    select_model(model_override, &settings.llm, Arc::clone(&self.model_queue))?;
                 let plan = ModPlanService::built_in().map_err(|_| {
                     failure("feature.recipe_invalid", "composition.generate.plan_recipe")
                 })?;
@@ -292,7 +296,8 @@ impl Stage2Composition {
                     &CompositionPlanFeature::id(),
                     &[CompositionPlanFeature::contribution_requirement()],
                 )?;
-                let model = select_model(model_override, &settings.llm)?;
+                let model =
+                    select_model(model_override, &settings.llm, Arc::clone(&self.model_queue))?;
                 let execution = CompositionPlanService::built_in()
                     .map_err(|_| failure("feature.recipe_invalid", "composition.plan.recipe"))?
                     .execute(
@@ -325,7 +330,8 @@ impl Stage2Composition {
                     &CompositionRetryNodeFeature::id(),
                     &[CompositionRetryNodeFeature::contribution_requirement()],
                 )?;
-                let model = select_model(model_override, &settings.llm)?;
+                let model =
+                    select_model(model_override, &settings.llm, Arc::clone(&self.model_queue))?;
                 let execution = CompositionRetryNodeService::built_in()
                     .map_err(|_| {
                         failure("feature.recipe_invalid", "composition.retry-node.recipe")
@@ -355,7 +361,8 @@ impl Stage2Composition {
                     &ModPlanFeature::id(),
                     &[ModPlanFeature::contribution_requirement()],
                 )?;
-                let model = select_model(model_override, &settings.llm)?;
+                let model =
+                    select_model(model_override, &settings.llm, Arc::clone(&self.model_queue))?;
                 let execution = ModPlanService::built_in()
                     .map_err(|_| failure("feature.recipe_invalid", "mod.plan.recipe"))?
                     .execute(
@@ -385,7 +392,8 @@ impl Stage2Composition {
                     &ResourcePrepareFeature::id(),
                     &[ResourcePrepareFeature::contribution_requirement()],
                 )?;
-                let model = select_model(model_override, &settings.llm)?;
+                let model =
+                    select_model(model_override, &settings.llm, Arc::clone(&self.model_queue))?;
                 let adapters = SingleAdapters::new(project_root);
                 SingleGenerateService::built_in()
                     .map_err(|_| failure("feature.recipe_invalid", "mod.generate.single.recipe"))?
@@ -427,7 +435,8 @@ impl Stage2Composition {
                     &ResourcePrepareFeature::id(),
                     &[ResourcePrepareFeature::contribution_requirement()],
                 )?;
-                let model = select_model(model_override, &settings.llm)?;
+                let model =
+                    select_model(model_override, &settings.llm, Arc::clone(&self.model_queue))?;
                 let adapters = SingleAdapters::new(project_root);
                 let plan = ModPlanService::built_in().map_err(|_| {
                     failure("feature.recipe_invalid", "mod.generate.batch.plan_recipe")
@@ -490,7 +499,8 @@ impl Stage2Composition {
                     &ProjectPackageFeature::id(),
                     &[ProjectPackageFeature::contribution_requirement()],
                 )?;
-                let model = select_model(model_override, &settings.llm)?;
+                let model =
+                    select_model(model_override, &settings.llm, Arc::clone(&self.model_queue))?;
                 let plan = ModPlanService::built_in().map_err(|_| {
                     failure("feature.recipe_invalid", "mod.generate.complex.plan_recipe")
                 })?;
@@ -551,7 +561,8 @@ impl Stage2Composition {
                     &LogAnalyzeFeature::id(),
                     &[LogAnalyzeFeature::contribution_requirement()],
                 )?;
-                let model = select_model(model_override, &settings.llm)?;
+                let model =
+                    select_model(model_override, &settings.llm, Arc::clone(&self.model_queue))?;
                 let execution = LogAnalyzeService::built_in()
                     .map_err(|_| failure("feature.recipe_invalid", "log.analyze.recipe"))?
                     .execute(
@@ -706,10 +717,11 @@ impl SelectedModel<'_> {
 fn select_model<'a>(
     model: Option<&'a dyn ModelClient>,
     config: &ats_adapters::LlmConfig,
+    queue: Arc<ModelRequestQueue>,
 ) -> Result<SelectedModel<'a>, RunFailure> {
     model.map_or_else(
         || {
-            HttpModelClient::new(config)
+            HttpModelClient::new_with_queue(config, queue)
                 .map(SelectedModel::Owned)
                 .map_err(|_| failure("llm.configuration", "feature.model"))
         },

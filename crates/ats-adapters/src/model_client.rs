@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -8,6 +9,7 @@ use ats_runtime::{
 use futures_util::stream;
 use reqwest::{Client, StatusCode};
 use serde_json::{Value, json};
+use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use crate::LlmConfig;
 
@@ -24,13 +26,64 @@ pub struct HttpModelClient {
     base_url: String,
     api_key: String,
     default_model: String,
+    queue: Arc<ModelRequestQueue>,
+    retry_policy: RetryPolicy,
+}
+
+#[derive(Debug, Default)]
+pub struct ModelRequestQueue {
+    slot: Arc<Mutex<()>>,
+}
+
+impl ModelRequestQueue {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    async fn acquire(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<OwnedMutexGuard<()>, ModelError> {
+        if cancellation.is_cancelled() {
+            return Err(ModelError::Cancelled);
+        }
+        tokio::select! {
+            biased;
+            () = wait_cancelled(cancellation) => Err(ModelError::Cancelled),
+            guard = Arc::clone(&self.slot).lock_owned() => {
+                if cancellation.is_cancelled() {
+                    Err(ModelError::Cancelled)
+                } else {
+                    Ok(guard)
+                }
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RetryPolicy {
+    initial_delay: Duration,
+    followup_delay: Duration,
 }
 
 impl HttpModelClient {
     pub fn new(config: &LlmConfig) -> Result<Self, ModelError> {
+        Self::new_with_queue(config, Arc::new(ModelRequestQueue::new()))
+    }
+
+    pub fn new_with_queue(
+        config: &LlmConfig,
+        queue: Arc<ModelRequestQueue>,
+    ) -> Result<Self, ModelError> {
         if config.api_key.is_empty()
             || config.api_key.contains(['\r', '\n'])
             || config.base_url.contains(['\r', '\n'])
+            || config.retry_initial_delay_ms == 0
+            || config.retry_followup_delay_ms == 0
+            || config.retry_initial_delay_ms > 3_600_000
+            || config.retry_followup_delay_ms > 3_600_000
         {
             return Err(ModelError::Configuration);
         }
@@ -65,6 +118,11 @@ impl HttpModelClient {
             base_url: base_url.trim_end_matches('/').into(),
             api_key: config.api_key.clone(),
             default_model,
+            queue,
+            retry_policy: RetryPolicy {
+                initial_delay: Duration::from_millis(config.retry_initial_delay_ms),
+                followup_delay: Duration::from_millis(config.retry_followup_delay_ms),
+            },
         })
     }
 
@@ -125,12 +183,13 @@ impl ModelClient for HttpModelClient {
         cancellation: &CancellationToken,
     ) -> Result<ModelResponse, ModelError> {
         request.verify().map_err(|_| ModelError::Configuration)?;
+        let _queue_guard = self.queue.acquire(cancellation).await?;
         let mut attempt = 0_u32;
         loop {
             attempt = attempt.saturating_add(1);
             match self.complete_once(&request, cancellation).await {
                 Err(error) if error.is_retryable() && attempt < 3 => {
-                    let delay = retry_delay(&error, attempt);
+                    let delay = retry_delay(&error, attempt, self.retry_policy);
                     tokio::select! {
                         () = tokio::time::sleep(delay) => {},
                         () = wait_cancelled(cancellation) => return Err(ModelError::Cancelled),
@@ -229,7 +288,7 @@ fn check_status(response: &reqwest::Response) -> Result<(), ModelError> {
     }
 }
 
-fn retry_delay(error: &ModelError, attempt: u32) -> Duration {
+fn retry_delay(error: &ModelError, attempt: u32, policy: RetryPolicy) -> Duration {
     const MIN_RETRY_AFTER_MS: u64 = 1_000;
     const MAX_RETRY_AFTER_MS: u64 = 120_000;
 
@@ -243,8 +302,8 @@ fn retry_delay(error: &ModelError, attempt: u32) -> Duration {
     }
 
     match attempt {
-        0 | 1 => Duration::from_secs(10),
-        _ => Duration::from_secs(30),
+        0 | 1 => policy.initial_delay,
+        _ => policy.followup_delay,
     }
 }
 
@@ -374,10 +433,19 @@ fn value_or(value: &str, fallback: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex as StdMutex;
+
     use ats_kernel::{SchemaId, SchemaRef, SchemaVersion};
-    use ats_runtime::{ModelMessage, ModelOutputContract};
+    use ats_runtime::{CancellationReason, ModelMessage, ModelOutputContract};
 
     use super::*;
+
+    fn fixture_retry_policy() -> RetryPolicy {
+        RetryPolicy {
+            initial_delay: Duration::from_secs(120),
+            followup_delay: Duration::from_secs(300),
+        }
+    }
 
     #[test]
     fn openai_request_enforces_the_core_output_contract() {
@@ -509,6 +577,7 @@ mod tests {
                     retry_after_ms: Some(25_000),
                 },
                 1,
+                fixture_retry_policy(),
             ),
             Duration::from_secs(25)
         );
@@ -518,6 +587,7 @@ mod tests {
                     retry_after_ms: Some(0),
                 },
                 1,
+                fixture_retry_policy(),
             ),
             Duration::from_secs(1)
         );
@@ -527,6 +597,7 @@ mod tests {
                     retry_after_ms: Some(300_000),
                 },
                 1,
+                fixture_retry_policy(),
             ),
             Duration::from_secs(120)
         );
@@ -535,12 +606,12 @@ mod tests {
     #[test]
     fn retry_delay_uses_spaced_fallbacks_without_provider_guidance() {
         assert_eq!(
-            retry_delay(&ModelError::Transport, 1),
-            Duration::from_secs(10)
+            retry_delay(&ModelError::Transport, 1, fixture_retry_policy()),
+            Duration::from_secs(120)
         );
         assert_eq!(
-            retry_delay(&ModelError::Transport, 2),
-            Duration::from_secs(30)
+            retry_delay(&ModelError::Transport, 2, fixture_retry_policy()),
+            Duration::from_secs(300)
         );
         assert_eq!(
             retry_delay(
@@ -548,8 +619,95 @@ mod tests {
                     retry_after_ms: None,
                 },
                 1,
+                fixture_retry_policy(),
             ),
-            Duration::from_secs(10)
+            Duration::from_secs(120)
         );
+    }
+
+    #[tokio::test]
+    async fn model_request_queue_is_fifo_across_clients() {
+        let queue = Arc::new(ModelRequestQueue::new());
+        let first_token = CancellationToken::new();
+        let first = queue.acquire(&first_token).await.unwrap();
+        let order = Arc::new(StdMutex::new(Vec::new()));
+
+        let second_queue = Arc::clone(&queue);
+        let second_order = Arc::clone(&order);
+        let second = tokio::spawn(async move {
+            let token = CancellationToken::new();
+            let _guard = second_queue.acquire(&token).await.unwrap();
+            second_order.lock().unwrap().push(2_u8);
+        });
+        tokio::task::yield_now().await;
+
+        let third_queue = Arc::clone(&queue);
+        let third_order = Arc::clone(&order);
+        let third = tokio::spawn(async move {
+            let token = CancellationToken::new();
+            let _guard = third_queue.acquire(&token).await.unwrap();
+            third_order.lock().unwrap().push(3_u8);
+        });
+        tokio::task::yield_now().await;
+
+        drop(first);
+        second.await.unwrap();
+        third.await.unwrap();
+        assert_eq!(*order.lock().unwrap(), vec![2, 3]);
+    }
+
+    #[tokio::test]
+    async fn queued_model_request_observes_cancellation() {
+        let queue = Arc::new(ModelRequestQueue::new());
+        let active = CancellationToken::new();
+        let first = queue.acquire(&active).await.unwrap();
+        let waiting = CancellationToken::new();
+        let waiting_task = {
+            let queue = Arc::clone(&queue);
+            let waiting = waiting.clone();
+            tokio::spawn(async move { queue.acquire(&waiting).await })
+        };
+        tokio::task::yield_now().await;
+
+        assert!(waiting.cancel(CancellationReason::User));
+        let result = tokio::time::timeout(Duration::from_secs(1), waiting_task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(result, Err(ModelError::Cancelled)));
+        drop(first);
+    }
+
+    #[test]
+    fn model_clients_can_share_one_request_queue() {
+        let queue = Arc::new(ModelRequestQueue::new());
+        let config = LlmConfig {
+            provider: "openai".into(),
+            api_key: "fixture-key".into(),
+            ..LlmConfig::default()
+        };
+        let first = HttpModelClient::new_with_queue(&config, Arc::clone(&queue)).unwrap();
+        let second = HttpModelClient::new_with_queue(&config, Arc::clone(&queue)).unwrap();
+
+        assert!(Arc::ptr_eq(&first.queue, &second.queue));
+        assert_eq!(first.retry_policy.initial_delay, Duration::from_secs(120));
+        assert_eq!(first.retry_policy.followup_delay, Duration::from_secs(300));
+    }
+
+    #[test]
+    fn retry_configuration_is_bounded() {
+        let queue = Arc::new(ModelRequestQueue::new());
+        for invalid in [0_u64, 3_600_001] {
+            let config = LlmConfig {
+                provider: "openai".into(),
+                api_key: "fixture-key".into(),
+                retry_initial_delay_ms: invalid,
+                ..LlmConfig::default()
+            };
+            assert!(matches!(
+                HttpModelClient::new_with_queue(&config, Arc::clone(&queue)),
+                Err(ModelError::Configuration)
+            ));
+        }
     }
 }

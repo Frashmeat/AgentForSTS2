@@ -28,7 +28,7 @@ pub use config::{
 };
 pub use item_store::{FileItemRepository, ItemStoreError};
 pub use media_client::HttpMediaClient;
-pub use model_client::HttpModelClient;
+pub use model_client::{HttpModelClient, ModelRequestQueue};
 pub use package_writer::ZipPackageWriter;
 pub use project_stager::FileProjectStager;
 pub use project_writer::FileProjectWriter;

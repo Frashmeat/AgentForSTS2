@@ -40,7 +40,7 @@ pub struct RuntimeConfig {
     pub github_token: String,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "snake_case")]
 pub struct LlmConfig {
     pub mode: String,
@@ -50,6 +50,24 @@ pub struct LlmConfig {
     pub api_key: String,
     pub base_url: String,
     pub custom_prompt: String,
+    pub retry_initial_delay_ms: u64,
+    pub retry_followup_delay_ms: u64,
+}
+
+impl Default for LlmConfig {
+    fn default() -> Self {
+        Self {
+            mode: String::new(),
+            agent_backend: String::new(),
+            provider: String::new(),
+            model: String::new(),
+            api_key: String::new(),
+            base_url: String::new(),
+            custom_prompt: String::new(),
+            retry_initial_delay_ms: 120_000,
+            retry_followup_delay_ms: 300_000,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -314,6 +332,23 @@ fn loopback_origins(port: u16) -> Vec<String> {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn old_llm_config_uses_bounded_long_retry_defaults() {
+        let settings: Settings = serde_json::from_str(
+            r#"{
+                "llm": {
+                    "provider": "openai",
+                    "model": "fixture-model",
+                    "api_key": "fixture-key"
+                }
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(settings.llm.retry_initial_delay_ms, 120_000);
+        assert_eq!(settings.llm.retry_followup_delay_ms, 300_000);
+    }
 
     #[test]
     fn desktop_default_path_is_stable_and_allows_an_explicit_environment_override() {
