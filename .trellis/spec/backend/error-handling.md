@@ -48,6 +48,11 @@ stale current conflicts, storage failure, missing exact Item, hash/type/version 
 nodes, pinned cycles and node-limit failure remain distinct. Repository/OS text and absolute paths
 must not enter these failures. A confirmation storage failure returns only after all current pointer
 replacements have rolled back or a recovery journal remains for the next repository access.
+At the Tauri confirmation boundary, both `CompositionConfirmationError::NotReady` and
+`CompositionGraphError::Readiness` map to `composition.confirm.not_ready` at
+`composition.draft.confirm`, category `validation`, action `replace_resource`, and
+`retryable=false`. They must not fall through to `composition.draft.invalid`; the caller needs the
+resource-repair action to make the same Draft ready before another confirmation attempt.
 Composition Plan output with duplicate slot targets or nodes outside the root pinned closure is
 `model.output_invalid`; a Pack-declared binding count or total-quantity mismatch is
 `composition.profile.count_mismatch`. Both fail before Draft or Item persistence and are never
@@ -117,6 +122,7 @@ Artifact validation, path, IO, publish, rollback, codegen, batch and package fai
 cargo test -p ats-kernel product
 cargo test -p ats-runtime --all-targets
 cargo test -p agentthespire-desktop --lib commands::failure
+cargo test -p agentthespire-desktop --lib commands::stage2::tests::confirmation_readiness_maps_to_a_resource_action -- --exact
 npm run test:frontend
 npx tsc -b --pretty false
 ```

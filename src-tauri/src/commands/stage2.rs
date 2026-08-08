@@ -707,6 +707,10 @@ fn map_draft_store_error(error: CompositionDraftStoreError, stage: &str) -> Comm
 
 fn map_confirmation_error(error: CompositionConfirmationError) -> CommandFailure {
     match error {
+        CompositionConfirmationError::NotReady
+        | CompositionConfirmationError::Graph(CompositionGraphError::Readiness) => {
+            CommandFailure::composition_not_ready("composition.draft.confirm")
+        }
         CompositionConfirmationError::Conflict => {
             CommandFailure::composition_conflict("composition.draft.confirm")
         }
@@ -771,6 +775,23 @@ mod tests {
     use ats_workspace::{ItemCompositionProfile, ItemCompositionSource};
 
     use super::*;
+
+    #[test]
+    fn confirmation_readiness_maps_to_a_resource_action() {
+        for error in [
+            CompositionConfirmationError::NotReady,
+            CompositionConfirmationError::Graph(CompositionGraphError::Readiness),
+        ] {
+            let failure = map_confirmation_error(error);
+            assert_eq!(failure.0.code.as_str(), "composition.confirm.not_ready");
+            assert_eq!(failure.0.stage, "composition.draft.confirm");
+            assert_eq!(
+                failure.0.action,
+                ats_kernel::RecoveryAction::ReplaceResource
+            );
+            assert!(!failure.0.retryable);
+        }
+    }
 
     fn stored_definition(item_type: &ItemTypeId) -> StoredItemDefinition {
         let mut definition =

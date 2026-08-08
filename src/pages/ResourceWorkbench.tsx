@@ -23,7 +23,7 @@ import {
 interface ResourceWorkbenchProps {
   definition: ItemDefinition;
   requiredRoles: string[];
-  onChange: (definition: ItemDefinition) => void;
+  onChange: (definition: ItemDefinition) => void | Promise<void>;
   onRun: (run: RunRecord) => void;
   onFailure: (failure: ActionableFailure) => void;
   onIssuesChange: (issues: string[]) => void;
@@ -135,7 +135,7 @@ export function ResourceWorkbench({
       setAssets(nextAssets);
       const selected = nextAssets.find((candidate) => candidate.resourceId === asset.resourceId);
       if (!selected) throw new Error("selected resource disappeared");
-      onChange(bindSelectedResource(definition, asset.logicalRole, selected, version));
+      await onChange(bindSelectedResource(definition, asset.logicalRole, selected, version));
     } catch (error: unknown) {
       onFailure(toActionableFailure(error));
     } finally {

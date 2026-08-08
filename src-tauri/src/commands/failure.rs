@@ -140,6 +140,17 @@ impl CommandFailure {
         )
     }
 
+    pub fn composition_not_ready(stage: &str) -> Self {
+        fixed(
+            "composition.confirm.not_ready",
+            "validation",
+            stage,
+            "Prepare and bind every required resource before confirming the composition Draft.",
+            RecoveryAction::ReplaceResource,
+            false,
+        )
+    }
+
     pub fn composition_storage(stage: &str) -> Self {
         fixed(
             "composition.draft.storage_failed",

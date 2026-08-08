@@ -103,6 +103,15 @@ Item-type branches. The Pack default profile is selected initially; Custom start
 - Targeted retry sends the exact Draft revision, selected Item ID and bounded user instructions.
   The UI waits for the new persisted `composition.retry-node` Run terminal state, refreshes the
   Draft only on success and never submits a whole-plan response as single-node evidence.
+- Plan output intentionally contains no Resource selection. Node review therefore reuses the generic
+  `ResourceWorkbench`, derives required roles from the selected node's Pack capability descriptor,
+  and persists only that node's updated `ItemDefinition` through `updateCompositionDraft`. The
+  existing `expectedCurrentDefinitionHash` is preserved, every select awaits the revision-CAS, and
+  the Workbench remains busy until that write completes. A failed CAS must stay visible and must not
+  be represented as a bound Draft resource.
+- `composition.confirm.not_ready` is a resource-repair state. Composition Studio keeps the Draft
+  open and exposes the Workbench; it must not collapse this result into an invalid-Draft message or
+  retry confirmation without a user-visible resource correction.
 - An empty Pack `compositionProfiles` catalog renders an unavailable state. React must not synthesize
   a Character workflow before the Pack declares one.
 - Whole-closure generation lists only confirmed definitions whose type is a Pack-declared

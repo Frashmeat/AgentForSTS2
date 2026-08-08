@@ -182,7 +182,7 @@ confirm_composition_draft(draft_id, expected_revision, selected_item_ids)
 | Feature enrichment | Queries bounded Truth for every allowed type, checks exact node count/root/type/reference targets, rejects pinned cycles, computes pinned hashes bottom-up, attaches root profile provenance and current expectations |
 | Draft repository | Creates `.ats/composition-drafts-v1/<draftId>.json`; update/delete require exact revision CAS; ProjectSession owns the sole repository instance |
 | Confirmation | Accepts only a non-empty pinned-closed selection, repeats Pack Draft/Ready/graph checks and performs one recoverable atomic Item pointer transaction |
-| React | Receives IPC as `unknown`, validates CompositionDraft/Confirmation guards, renders Pack metadata only and never branches on Character or a game ID |
+| React | Receives IPC as `unknown`, validates CompositionDraft/Confirmation guards, renders Pack metadata only, prepares and binds each Plan-authored node's required Resources through the shared Workbench plus Draft revision-CAS, and never branches on Character or a game ID |
 
 `composition.plan` result is `draftId + revision + rootItemId + nodeCount + modelRequestSha256`.
 The complete graph remains authoritative in the Draft repository rather than being duplicated in the
@@ -204,6 +204,7 @@ terminal Plan Run; it must not silently discard a failed terminal result.
 | Existing Draft ID or stale update/delete revision | `composition.draft.conflict` | existing Draft preserved |
 | Draft filesystem failure | `composition.draft.storage_failed` | no fabricated success; owned temporary file cleaned on repository access |
 | Invalid/open confirmation selection | `composition.draft.invalid` or typed `composition.confirm.*` internally | no Item current pointer changes |
+| Draft node fails Ready Resource validation | `composition.confirm.not_ready`, `replace_resource`, non-retryable | Draft remains editable; no Item current pointer changes |
 | Atomic confirmation conflict/storage failure | `composition.draft.conflict` / `composition.draft.storage_failed` at Shell | all current pointers rolled back or recovery journal retained |
 | Success | succeeded Plan Run or `CompositionConfirmation` | planning writes one Draft; confirmation writes only the selected closed definition set |
 
@@ -237,7 +238,9 @@ safe versioned failure details without model/Prompt/Provider text; deterministic
 enrichment; Draft-only persistence; revision CAS/delete; closed partial confirmation; malformed IPC
 guards; persisted failed Plan Run display; Pack-default Standard; Custom bounds; deterministic
 filtering/pagination. O5 adds the first real STS2 Character model/compile path; O8 owns installed
-real-game acceptance.
+real-game acceptance. Frontend model tests also prove that a Draft resource edit replaces only the
+selected definition while preserving every node's optimistic-current baseline; the Tauri mapping
+test fixes the not-ready code, stage, action and retryability.
 
 #### 7. Wrong vs Correct
 

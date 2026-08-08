@@ -20,6 +20,7 @@ import type {
   CompositionDraft,
   CompositionProfileSet,
   ItemCapabilityCatalog,
+  ItemDefinition,
   RunRecord,
   StoredItemDefinition,
 } from "@/services/tauriApi";
@@ -36,9 +37,12 @@ import {
   pageRows,
   parametersForChoice,
   profileIssues,
+  replaceDraftNodeDefinition,
   type CompositionProfileChoice,
   type DraftNodeStatus,
 } from "./compositionStudioModel";
+import { requiredResourceRoles } from "./itemEditorModel";
+import { ResourceWorkbench } from "./ResourceWorkbench";
 
 const PAGE_SIZE = 12;
 
@@ -71,6 +75,8 @@ export function CompositionStudioPage() {
   const [lastPlanRun, setLastPlanRun] = useState<RunRecord | null>(null);
   const [retryInstructions, setRetryInstructions] = useState("");
   const [lastRetryRun, setLastRetryRun] = useState<RunRecord | null>(null);
+  const [lastResourceRun, setLastResourceRun] = useState<RunRecord | null>(null);
+  const [resourceIssues, setResourceIssues] = useState<string[]>([]);
 
   const profile = useMemo(
     () => catalog?.compositionProfiles.find((value) => value.id === compositionId) ?? null,
@@ -86,6 +92,18 @@ export function CompositionStudioPage() {
   );
   const paged = useMemo(() => pageRows(rows, page, PAGE_SIZE), [rows, page]);
   const selectedNode = draft && selectedNodeId ? draft.nodes[selectedNodeId] : null;
+  const selectedCapability = useMemo(
+    () => catalog?.itemTypes.find(
+      (item) => item.descriptor.id === selectedNode?.definition.itemType,
+    ) ?? null,
+    [catalog, selectedNode?.definition.itemType],
+  );
+  const selectedRequiredRoles = useMemo(
+    () => selectedNode && selectedCapability
+      ? requiredResourceRoles(selectedNode.definition, selectedCapability.descriptor)
+      : [],
+    [selectedNode, selectedCapability],
+  );
   const issues = profile ? profileIssues(profile, parameters) : [];
   const itemTypes = useMemo(
     () => Array.from(new Set(Object.values(draft?.nodes ?? {}).map((node) => node.definition.itemType))).sort(),
@@ -101,6 +119,11 @@ export function CompositionStudioPage() {
     if (!__IS_TAURI__) return;
     void load();
   }, []);
+
+  useEffect(() => {
+    setLastResourceRun(null);
+    setResourceIssues([]);
+  }, [selectedDraftId, selectedNodeId]);
 
   async function load(preferredDraftId?: string) {
     setFailure(null);
@@ -215,6 +238,13 @@ export function CompositionStudioPage() {
         definition: { ...selectedNode.definition, behaviorIntent },
       },
     });
+  }
+
+  async function saveNodeDefinition(definition: ItemDefinition) {
+    if (!draft || !selectedNode) return;
+    const nodes = replaceDraftNodeDefinition(draft, selectedNode.definition.itemId, definition);
+    if (nodes === draft.nodes) return;
+    await persistNodes(nodes);
   }
 
   async function retryNode() {
@@ -490,6 +520,34 @@ export function CompositionStudioPage() {
                     <Notice variant="error" title={lastRetryRun.failure.code}>
                       {lastRetryRun.failure.stage}
                     </Notice>
+                  )}
+                  {selectedCapability && (
+                    <CardSection title="Resources">
+                      <ResourceWorkbench
+                        key={selectedNode.definition.itemId}
+                        definition={selectedNode.definition}
+                        requiredRoles={selectedRequiredRoles}
+                        onChange={saveNodeDefinition}
+                        onRun={setLastResourceRun}
+                        onFailure={setFailure}
+                        onIssuesChange={setResourceIssues}
+                      />
+                      {lastResourceRun && (
+                        <Badge variant={lastResourceRun.status === "succeeded" ? "ok" : lastResourceRun.status === "failed" ? "error" : "warn"}>
+                          {lastResourceRun.featureId} · {lastResourceRun.status}
+                        </Badge>
+                      )}
+                      {lastResourceRun?.failure && (
+                        <Notice variant="error" title={lastResourceRun.failure.code}>
+                          {lastResourceRun.failure.stage}
+                        </Notice>
+                      )}
+                      {resourceIssues.length > 0 && (
+                        <Notice variant="warn" title="Resource checks">
+                          {resourceIssues.join(" ")}
+                        </Notice>
+                      )}
+                    </CardSection>
                   )}
                 </CardSection>
               )}

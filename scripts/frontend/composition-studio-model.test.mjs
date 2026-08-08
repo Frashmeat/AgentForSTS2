@@ -18,6 +18,7 @@ const {
   pageRows,
   parametersForChoice,
   profileIssues,
+  replaceDraftNodeDefinition,
 } = await vite.ssrLoadModule("/src/pages/compositionStudioModel.ts");
 const { isCompositionConfirmation, isCompositionDraft } = await vite.ssrLoadModule(
   "/src/services/itemContractGuards.ts",
@@ -122,6 +123,26 @@ test("Draft filtering, pagination, and partial closure are deterministic", () =>
   assert.equal(closedSelection(draft, new Set(["fixture-root"])), false);
   assert.equal(closedSelection(draft, new Set(["fixture-root", "fixture-child"])), true);
   assert.equal(closedSelection(draft, new Set(["fixture-child"])), true);
+});
+
+test("Draft resource edits replace only the selected definition and preserve CAS baselines", () => {
+  const resourceDefinition = {
+    ...draft.nodes["fixture-child"].definition,
+    resourceBindings: {
+      "child.icon": { resourceId: "child-icon", selectedVersion: hash },
+    },
+  };
+  const nodes = replaceDraftNodeDefinition(draft, "fixture-child", resourceDefinition);
+  assert.deepEqual(nodes["fixture-child"], {
+    definition: resourceDefinition,
+    expectedCurrentDefinitionHash: hash,
+  });
+  assert.equal(nodes["fixture-root"], draft.nodes["fixture-root"]);
+  assert.equal(replaceDraftNodeDefinition(
+    draft,
+    "fixture-child",
+    { ...resourceDefinition, itemId: "other-child" },
+  ), draft.nodes);
 });
 
 test("targeted retry pins the Draft revision and trims only runtime instructions", () => {

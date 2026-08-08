@@ -467,6 +467,10 @@ ResolvedItemGraph::resolve(
   closed, validates Ready-mode structure, computes immutable hashes, then submits one atomic batch.
   A selected pinned edge may target another selected node or an already persisted exact version;
   identity affiliation must resolve inside the resulting selected/pinned closure.
+- Planning never authors Resource selection. Before confirmation, Shell review may replace only one
+  node's `definition.resourceBindings` through `update_composition_draft(draft_id,
+  expected_revision, nodes)`. The node's Item ID/type and `expectedCurrentDefinitionHash` remain
+  unchanged, and the repository revision CAS remains authoritative.
 - Atomic batch input contains 1-128 unique definitions and exactly one expected current value for
   every Item ID. All type and optimistic-current checks complete before any pointer changes.
   Immutable snapshots may remain as history after failure; current pointers change all-or-none.
@@ -488,6 +492,7 @@ ResolvedItemGraph::resolve(
 | invalid Draft wire/root/profile/node | `composition.draft.invalid` | none |
 | stale Draft revision | Draft repository conflict | existing Draft retained |
 | duplicate/unknown/non-closed confirmation selection | `composition.confirm.selection_invalid` or `composition.graph.item_missing` | no current pointer change |
+| selected node missing a required, selected, exact-shape Resource binding | internal `NotReady`/`Readiness`; Shell `composition.confirm.not_ready`, action `replace_resource` | Draft retained; no current pointer change |
 | one expected current changed | `composition.confirm.conflict` | no current pointer change |
 | batch storage failure after one replacement | `composition.confirm.storage_failed` | all pointers rolled back; Draft retained |
 | prepared journal after process interruption | recovery rollback | expected pointers restored |

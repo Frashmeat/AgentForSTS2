@@ -5,6 +5,7 @@ import type {
   CompositionRetryNodeRequest,
   CompositionGenerateRequest,
   CompositionProfileSet,
+  ItemDefinition,
   ItemCompositionSource,
   ProjectPackageRequest,
   RunFailure,
@@ -140,6 +141,26 @@ export function closedSelection(draft: CompositionDraft, selected: Set<string>):
     }
   }
   return true;
+}
+
+export function replaceDraftNodeDefinition(
+  draft: CompositionDraft,
+  itemId: string,
+  definition: ItemDefinition,
+): CompositionDraft["nodes"] {
+  const node = draft.nodes[itemId];
+  if (
+    !node ||
+    definition.itemId !== node.definition.itemId ||
+    definition.itemType !== node.definition.itemType
+  ) return draft.nodes;
+  return {
+    ...draft.nodes,
+    [itemId]: {
+      ...node,
+      definition,
+    },
+  };
 }
 
 export function compositionRoots(
