@@ -11,7 +11,7 @@ use reqwest::{Client, StatusCode};
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
-use crate::LlmConfig;
+use crate::{LlmConfig, OpenAiResponseFormat};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum Protocol {
@@ -26,6 +26,7 @@ pub struct HttpModelClient {
     base_url: String,
     api_key: String,
     default_model: String,
+    openai_response_format: OpenAiResponseFormat,
     queue: Arc<ModelRequestQueue>,
     retry_policy: RetryPolicy,
 }
@@ -118,6 +119,7 @@ impl HttpModelClient {
             base_url: base_url.trim_end_matches('/').into(),
             api_key: config.api_key.clone(),
             default_model,
+            openai_response_format: config.openai_response_format,
             queue,
             retry_policy: RetryPolicy {
                 initial_delay: Duration::from_millis(config.retry_initial_delay_ms),
@@ -142,7 +144,7 @@ impl HttpModelClient {
         let future = async {
             match self.protocol {
                 Protocol::OpenAi => {
-                    let body = openai_request_body(request, &model);
+                    let body = openai_request_body(request, &model, self.openai_response_format);
                     let response = self
                         .client
                         .post(format!("{}/chat/completions", self.base_url))
@@ -315,7 +317,11 @@ fn role(role: ModelMessageRole) -> &'static str {
     }
 }
 
-fn openai_request_body(request: &ModelRequest, model: &str) -> Value {
+fn openai_request_body(
+    request: &ModelRequest,
+    model: &str,
+    response_format: OpenAiResponseFormat,
+) -> Value {
     let messages = request
         .messages
         .iter()
@@ -326,18 +332,24 @@ fn openai_request_body(request: &ModelRequest, model: &str) -> Value {
             })
         })
         .collect::<Vec<_>>();
-    let mut body = json!({
-        "model": model,
-        "messages": messages,
-        "max_tokens": request.max_output_tokens,
-        "response_format": {
+    let response_format = match response_format {
+        OpenAiResponseFormat::JsonSchema => json!({
             "type": "json_schema",
             "json_schema": {
                 "name": "agentthespire_output",
                 "strict": true,
                 "schema": request.output_contract.json_schema,
             },
-        },
+        }),
+        OpenAiResponseFormat::JsonObject => json!({
+            "type": "json_object",
+        }),
+    };
+    let mut body = json!({
+        "model": model,
+        "messages": messages,
+        "max_tokens": request.max_output_tokens,
+        "response_format": response_format,
     });
     if let Some(temperature) = request.temperature {
         body["temperature"] = json!(temperature);
@@ -477,7 +489,7 @@ mod tests {
             model: None,
         };
 
-        let body = openai_request_body(&request, "fixture-model");
+        let body = openai_request_body(&request, "fixture-model", OpenAiResponseFormat::JsonSchema);
 
         assert_eq!(body["model"], json!("fixture-model"));
         assert_eq!(body["max_tokens"], json!(512));
@@ -514,9 +526,42 @@ mod tests {
             model: None,
         };
 
-        let body = openai_request_body(&request, "fixture-model");
+        let body = openai_request_body(&request, "fixture-model", OpenAiResponseFormat::JsonSchema);
 
         assert!(body.get("temperature").is_none());
+    }
+
+    #[test]
+    fn openai_json_object_format_is_explicit_and_keeps_the_prompt_contract() {
+        let request = ModelRequest {
+            messages: vec![ModelMessage {
+                role: ModelMessageRole::System,
+                content: "Return the exact contract shown in this prompt.".into(),
+            }],
+            output_contract: ModelOutputContract {
+                schema: SchemaRef {
+                    id: SchemaId::parse("feature.fixture-output").unwrap(),
+                    version: SchemaVersion::new(1).unwrap(),
+                },
+                json_schema: json!({
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["ok"],
+                    "properties": { "ok": { "type": "boolean" } }
+                }),
+            },
+            max_output_tokens: 128,
+            temperature: None,
+            model: None,
+        };
+
+        let body = openai_request_body(&request, "fixture-model", OpenAiResponseFormat::JsonObject);
+
+        assert_eq!(body["response_format"], json!({ "type": "json_object" }));
+        assert_eq!(
+            body["messages"][0]["content"],
+            json!("Return the exact contract shown in this prompt.")
+        );
     }
 
     #[test]

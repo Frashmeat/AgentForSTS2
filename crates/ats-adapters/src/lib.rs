@@ -23,8 +23,8 @@ pub use artifact_store::{ArtifactStoreError, FileArtifactStore};
 pub use build_runner::RegisteredBuildRunner;
 pub use composition_draft_store::{CompositionDraftStoreError, FileCompositionDraftRepository};
 pub use config::{
-    ConfigStatus, ImageGenerationConfig, LlmConfig, RuntimeConfig, Settings, SettingsStore,
-    ToolchainConfig, TruthSourceConfig,
+    ConfigStatus, ImageGenerationConfig, LlmConfig, OpenAiResponseFormat, RuntimeConfig, Settings,
+    SettingsStore, ToolchainConfig, TruthSourceConfig,
 };
 pub use item_store::{FileItemRepository, ItemStoreError};
 pub use media_client::HttpMediaClient;

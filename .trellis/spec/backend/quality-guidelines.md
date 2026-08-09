@@ -465,12 +465,22 @@ impl HttpModelClient {
     ) -> Result<Self, ModelError>;
 }
 
-fn openai_request_body(request: &ModelRequest, model: &str) -> serde_json::Value;
+fn openai_request_body(
+    request: &ModelRequest,
+    model: &str,
+    response_format: OpenAiResponseFormat,
+) -> serde_json::Value;
 fn anthropic_request_body(request: &ModelRequest, model: &str) -> serde_json::Value;
 
 // crates/ats-adapters/src/config.rs
+pub enum OpenAiResponseFormat {
+    JsonSchema,
+    JsonObject,
+}
+
 pub struct LlmConfig {
     // existing provider/model/credential fields omitted
+    pub openai_response_format: OpenAiResponseFormat,
     pub retry_initial_delay_ms: u64,
     pub retry_followup_delay_ms: u64,
 }
@@ -478,17 +488,25 @@ pub struct LlmConfig {
 
 #### 3. Contracts
 
-| Runtime field | OpenAI-compatible Chat Completions | Anthropic Messages |
+| Runtime/config field | OpenAI-compatible Chat Completions | Anthropic Messages |
 | --- | --- | --- |
 | `messages` | `messages[]`; all roles retained | system roles joined into `system`; other roles in `messages[]` |
-| `output_contract.json_schema` | `response_format.json_schema.schema` | `output_config.format.schema` |
-| strict type | `response_format.type=json_schema`, `json_schema.strict=true` | `output_config.format.type=json_schema` |
-| schema name | fixed provider-safe `agentthespire_output` | not required |
+| `output_contract.json_schema` | exact schema remains in the rendered Recipe Prompt for both configured modes | `output_config.format.schema` |
+| `openai_response_format=json_schema` | `response_format.type=json_schema`, fixed name `agentthespire_output`, `strict=true`, exact schema | not applicable |
+| `openai_response_format=json_object` | exactly `response_format.type=json_object`; no unsupported schema member is sent | not applicable |
 | `max_output_tokens` | `max_tokens` | `max_tokens` |
 | optional `temperature` | present only when configured | present only when configured |
 
 The Adapter sends no Feature/Game Pack prompt of its own and never persists or logs the request,
 Authorization header, or provider body.
+
+`llm.openai_response_format` is an explicit compatibility choice, not a runtime fallback. It
+defaults to `json_schema` for old configuration files. `json_object` is allowed only for an
+OpenAI-compatible proxy that demonstrably ignores or rejects native JSON Schema while honoring
+JSON Object mode. The Adapter sends exactly one configured format and never retries the same
+logical request with a weaker format. In both modes the Feature performs the same authoritative
+typed decode and validation against `ModelOutputContract`; `json_object` does not enable Markdown
+stripping, first-object extraction, missing-field defaults or partial success.
 
 `Stage2Composition::built_in` creates exactly one `Arc<ModelRequestQueue>`. Every production call
 to `select_model` passes that same Arc to `HttpModelClient::new_with_queue`; the public
@@ -507,6 +525,7 @@ Figment environment overrides use `SPIREFORGE_LLM__RETRY_INITIAL_DELAY_MS` and
 | 401/403 | `ModelError::Authentication` | `model.authentication` |
 | 429 | `ModelError::RateLimited` | `model.rate_limited` |
 | transport/5xx after bounded retries | `ModelError::Transport` | `model.transport_failed` |
+| unknown `openai_response_format` during configuration load | configuration remains invalid before model work | `model.configuration` / configuration status |
 | retry delay is zero or above 3,600,000 ms | construction returns `ModelError::Configuration`; no queue/HTTP work | `model.configuration` / composition-root configuration mapping |
 | another task owns the FIFO slot | wait cancellation-aware; issue no HTTP request | Run remains `running` until acquired or cancelled |
 | cancellation wins while queued | `ModelError::Cancelled`; slot is not retained | `cancelled` through the Run supervisor |
@@ -523,21 +542,29 @@ root. One logical task holds its slot through all attempts, retry waits, respons
 terminal return. A queued task observes cancellation without issuing an HTTP request. Queue state
 is process-local Adapter scheduling state and never enters a Prompt, Run, Artifact or Shell DTO.
 
-An incompatible proxy is a configuration/provider failure. It must not trigger a second
-prompt-only request, code-fence stripping, first-object extraction, or a fabricated success.
+An incompatible proxy is a configuration/provider failure unless the operator explicitly selects
+its verified `json_object` capability before the Run. A terminal provider or typed-output failure
+must not trigger a second prompt-only request, a format downgrade, code-fence stripping,
+first-object extraction, or a fabricated success.
 
 #### 5. Good / Base / Bad Cases
 
 - Good: a capable provider receives the exact Recipe JSON Schema and returns one contract-valid
   object; Feature code still revalidates the decoded type.
+- Good: a proxy proven to support JSON Object but not JSON Schema is configured once with
+  `openai_response_format=json_object`; one request returns JSON and the Feature applies its full
+  typed contract locally.
 - Good: concurrently submitted Plan and Single Runs share one queue; the earlier task completes all
   attempts and retry waits before the later task can send its first HTTP request.
 - Base: `temperature=None` omits the provider field, while the output contract is still mandatory.
-- Base: a config file without the two retry fields deserializes to 120/300-second defaults.
+- Base: a config file without `openai_response_format` uses `json_schema`; missing retry fields use
+  120/300-second defaults.
 - Bad: the provider rejects `response_format`/`output_config`; the Run retains a typed model failure
   and no fallback request is issued.
 - Bad: the provider returns Markdown fences or extra fields; Feature strict decoding fails with
   `model.output_invalid` rather than accepting a partial object.
+- Bad: a failed `json_schema` request is automatically retried as `json_object`; this changes one
+  Run's contract after dispatch and can duplicate expensive provider work.
 - Bad: each Run constructs its own queue, or a task releases the queue between retries; both allow
   a later Run to recreate a provider burst.
 
@@ -554,6 +581,13 @@ Required assertions:
 - `openai_request_enforces_the_core_output_contract`: exact schema, `json_schema`, fixed name and
   `strict=true` are present.
 - `openai_request_omits_an_absent_temperature`: optional transport fields do not weaken the schema.
+- `openai_json_object_format_is_explicit_and_keeps_the_prompt_contract`: the selected request has
+  exactly `response_format.type=json_object`, while messages retain the Recipe-rendered contract.
+- `old_llm_config_uses_bounded_long_retry_defaults`: old config also defaults to `json_schema`.
+- `llm_config_accepts_an_explicit_openai_json_object_format`: the compatibility value round-trips
+  through the typed configuration.
+- `llm_config_rejects_an_unknown_openai_response_format`: unsupported compatibility values fail
+  configuration parsing instead of selecting a prompt-only or implicit mode.
 - `anthropic_request_enforces_the_core_output_contract`: system-message handling and
   `output_config.format.schema` are both preserved.
 - `retry_delay_honors_bounded_provider_guidance`: numeric `Retry-After` is honored and clamped to
@@ -570,27 +604,22 @@ Required assertions:
 
 #### 7. Wrong vs Correct
 
-Wrong — the schema exists only as prompt text:
+Wrong — the Adapter silently downgrades after a provider failure:
 
 ```rust
-json!({ "model": model, "messages": messages, "max_tokens": request.max_output_tokens })
+client.complete(with_json_schema)
+    .or_else(|_| client.complete(with_json_object))
 ```
 
-Correct — the provider request carries the Runtime-owned contract:
+Correct — configuration selects one provider-native shape before the Run, while the same Recipe
+Prompt and local typed validator remain authoritative:
 
 ```rust
-json!({
-    "model": model,
-    "messages": messages,
-    "response_format": {
-        "type": "json_schema",
-        "json_schema": {
-            "name": "agentthespire_output",
-            "strict": true,
-            "schema": request.output_contract.json_schema,
-        }
-    }
-})
+let response_format = match config.openai_response_format {
+    OpenAiResponseFormat::JsonSchema => native_json_schema(&request.output_contract),
+    OpenAiResponseFormat::JsonObject => json!({ "type": "json_object" }),
+};
+client.complete_once(response_format)
 ```
 
 Wrong — each Run receives an unrelated queue:

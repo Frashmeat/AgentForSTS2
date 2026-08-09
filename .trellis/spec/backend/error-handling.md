@@ -38,6 +38,12 @@ through one hour, and old configuration files receive the defaults through `serd
 Features must not layer another retry loop or turn an exhausted transport/rate-limit result into
 success.
 
+OpenAI-compatible structured-output compatibility is selected before a Run through the typed
+`llm.openai_response_format` value (`json_schema` by default, or explicit `json_object`). A
+provider or output failure never changes that value for the in-flight Run and never triggers a
+second weaker-format request. Both modes retain the same Feature-owned typed decode; invalid JSON
+or shape remains `model.output_invalid` without raw Provider content in persisted details.
+
 Every HTTP-backed model task also enters the one FIFO `ModelRequestQueue` owned by the desktop
 composition root. A task holds its slot through all attempts, retry waits, parsing and terminal
 return; the next task cannot start an HTTP attempt first. Cancellation while waiting for the queue

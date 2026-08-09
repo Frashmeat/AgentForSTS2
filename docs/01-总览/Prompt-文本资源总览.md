@@ -170,9 +170,12 @@ Selected Resource 通过 `resourceId + selectedVersion` 进入请求，模型看
 Run/Artifact 可以保存 schema/hash、Pack/Snapshot/Resource identity 和安全 provenance，但不能保存 API key、Authorization、完整 provider body、绝对私有路径或未经边界控制的 Prompt/输出。`ModelRequestSnapshot` 是 run-scoped 可复验请求合同，日志不成为第二真源。
 
 HTTP Adapter 必须把 Snapshot 的 typed output contract 映射到 provider 原生结构化输出：
-OpenAI-compatible 使用 `response_format.type=json_schema`，Anthropic 使用
-`output_config.format.type=json_schema`。provider 不支持时保持 typed failure；不得接受代码块、
-截取首个 JSON 对象或静默重试为 prompt-only 模式。
+OpenAI-compatible 默认使用 `response_format.type=json_schema`；经证明不转发 schema
+但支持 JSON Object 的代理可在 Run 前显式选择
+`llm.openai_response_format=json_object`。Anthropic 使用
+`output_config.format.type=json_schema`。两种 OpenAI 模式都在 Recipe Prompt 中携带完整
+typed contract 并由 Feature 严格验证；provider 失败后不得降级重发、接受代码块、
+截取首个 JSON 对象或伪造成功。
 
 当前残留门禁：
 

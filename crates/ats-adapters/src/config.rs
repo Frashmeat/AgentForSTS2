@@ -50,8 +50,17 @@ pub struct LlmConfig {
     pub api_key: String,
     pub base_url: String,
     pub custom_prompt: String,
+    pub openai_response_format: OpenAiResponseFormat,
     pub retry_initial_delay_ms: u64,
     pub retry_followup_delay_ms: u64,
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OpenAiResponseFormat {
+    #[default]
+    JsonSchema,
+    JsonObject,
 }
 
 impl Default for LlmConfig {
@@ -64,6 +73,7 @@ impl Default for LlmConfig {
             api_key: String::new(),
             base_url: String::new(),
             custom_prompt: String::new(),
+            openai_response_format: OpenAiResponseFormat::JsonSchema,
             retry_initial_delay_ms: 120_000,
             retry_followup_delay_ms: 300_000,
         }
@@ -348,6 +358,48 @@ mod tests {
 
         assert_eq!(settings.llm.retry_initial_delay_ms, 120_000);
         assert_eq!(settings.llm.retry_followup_delay_ms, 300_000);
+        assert_eq!(
+            settings.llm.openai_response_format,
+            OpenAiResponseFormat::JsonSchema
+        );
+    }
+
+    #[test]
+    fn llm_config_accepts_an_explicit_openai_json_object_format() {
+        let settings: Settings = serde_json::from_str(
+            r#"{
+                "llm": {
+                    "provider": "openai",
+                    "model": "fixture-model",
+                    "api_key": "fixture-key",
+                    "openai_response_format": "json_object"
+                }
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            settings.llm.openai_response_format,
+            OpenAiResponseFormat::JsonObject
+        );
+        assert_eq!(
+            serde_json::to_value(&settings).unwrap()["llm"]["openai_response_format"],
+            serde_json::json!("json_object")
+        );
+    }
+
+    #[test]
+    fn llm_config_rejects_an_unknown_openai_response_format() {
+        let result = serde_json::from_str::<Settings>(
+            r#"{
+                "llm": {
+                    "provider": "openai",
+                    "openai_response_format": "prompt_only"
+                }
+            }"#,
+        );
+
+        assert!(result.is_err());
     }
 
     #[test]

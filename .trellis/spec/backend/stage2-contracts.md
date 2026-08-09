@@ -767,10 +767,13 @@ Pinned Feature Recipe + verified Pack contribution + exact StoredItemDefinition 
 
 Runtime owns provider-neutral `ModelClient`; Adapters own HTTP. Long Mod/game Prompt strings are forbidden in handler/Shell/Adapter code. Protocol roles, schema/slot IDs, JSON contracts, escaping, truncation and redaction remain code contracts.
 
-HTTP Adapters map the Runtime-owned output contract to native strict structured output:
-OpenAI-compatible `response_format.json_schema` and Anthropic
-`output_config.format.json_schema`. Provider rejection remains typed; prompt-only fallback and
-permissive extraction are forbidden.
+HTTP Adapters map the Runtime-owned output contract to provider-native structured output.
+Anthropic always uses `output_config.format.json_schema`. OpenAI-compatible configuration defaults
+to `llm.openai_response_format=json_schema`, which sends the exact schema with `strict=true`; an
+operator may explicitly select `json_object` only for a proxy verified to honor JSON Object while
+ignoring or rejecting native JSON Schema. The exact output contract remains in the Recipe Prompt
+and Feature validation in both modes. Provider rejection remains typed; automatic format fallback,
+prompt-only retry and permissive extraction are forbidden.
 
 Recipe output JSON Schema exposes all expressible identifier, length and collection constraints
 enforced by the typed Feature validator. The validator remains authoritative and its failures retain

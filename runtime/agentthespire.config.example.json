@@ -30,7 +30,7 @@
       "github_token": ""
     }
   },
-  "_llm_provider_help": "provider 字段决定客户端协议：留空或 'anthropic' → Anthropic Messages API；'openai' / 'openai_compatible' / 'new_api' / 'one_api' → OpenAI Chat Completions。目标模型或代理必须支持原生 JSON Schema 结构化输出（Anthropic output_config.format 或 OpenAI response_format.json_schema）；不支持时请求会失败，不会退回仅靠提示词的 JSON。base_url 留空时走对应官方端点，填写后走第三方代理。",
+  "_llm_provider_help": "provider 字段决定客户端协议：留空或 'anthropic' → Anthropic Messages API；'openai' / 'openai_compatible' / 'new_api' / 'one_api' → OpenAI Chat Completions。openai_response_format 默认 json_schema；仅当兼容代理不转发 JSON Schema、但明确支持 JSON Object 时设为 json_object。两种模式都由 Feature 对返回值执行严格类型校验，不会在失败后静默重发。base_url 留空时走对应官方端点，填写后走第三方代理。",
   "_llm_examples": {
     "anthropic_official": { "provider": "anthropic", "model": "claude-sonnet-4-6", "base_url": "" },
     "anthropic_proxy": { "provider": "anthropic", "model": "claude-sonnet-4-6", "base_url": "https://your-anthropic-proxy.example/" },
@@ -43,7 +43,8 @@
     "provider": "",
     "model": "",
     "api_key": "",
-    "base_url": ""
+    "base_url": "",
+    "openai_response_format": "json_schema"
   },
   "_image_gen_help": "protocol 留空 / \"images_api\" → 标准 DALL-E /v1/images/generations；\"chat_completions\" → 通过 Chat Completions 生图（Nano Banana / Gemini）。size 留空→1024x1024。chat_completions 时 size 映射为 Gemini aspect_ratio + image_size。",
   "image_gen": {
