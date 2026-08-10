@@ -96,26 +96,33 @@ const waitForBatchRun = async (status, timeout = 240_000, previousRunId = null) 
 
 const waitForCompositionGraph = async (
   status,
-  { timeout = 180_000, graphId = null, previousRunId = null } = {},
+  {
+    timeout = 180_000,
+    graphId = null,
+    previousRunId = null,
+    runStatus = null,
+  } = {},
 ) => {
   let result = null;
   await browser.waitUntil(
-    async () => browser.execute((expectedStatus, expectedGraphId, oldRunId) => {
+    async () => browser.execute((expectedStatus, expectedGraphId, oldRunId, expectedRunStatus) => {
       const element = document.querySelector('[data-testid="composition-execution-graph"]');
       if (!element || element.getAttribute("data-execution-status") !== expectedStatus) return null;
       const currentGraphId = element.getAttribute("data-execution-graph-id");
       const runId = element.getAttribute("data-plan-run-id");
+      const currentRunStatus = element.getAttribute("data-plan-run-status");
       if (expectedGraphId && currentGraphId !== expectedGraphId) return null;
       if (!runId || runId === oldRunId) return null;
+      if (expectedRunStatus && currentRunStatus !== expectedRunStatus) return null;
       return {
         graphId: currentGraphId,
         status: expectedStatus,
         runId,
-        runStatus: element.getAttribute("data-plan-run-status"),
+        runStatus: currentRunStatus,
         completedNodes: Number(element.getAttribute("data-completed-nodes")),
         totalNodes: Number(element.getAttribute("data-total-nodes")),
       };
-    }, status, graphId, previousRunId).then((value) => {
+    }, status, graphId, previousRunId, runStatus).then((value) => {
       result = value;
       return Boolean(value?.graphId && value?.runId);
     }),
@@ -338,6 +345,7 @@ describe("current desktop Stage 2 workflow", () => {
     const succeeded = await waitForCompositionGraph("succeeded", {
       graphId: paused.graphId,
       previousRunId: paused.runId,
+      runStatus: "succeeded",
     });
     assert.equal(succeeded.completedNodes, 15);
     assert.equal(succeeded.totalNodes, 15);

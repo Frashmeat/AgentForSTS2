@@ -182,7 +182,7 @@ async fn sts2_branded_placeholder_prototype_prepares_resources_and_publishes_one
     let plan_prompt = snapshot_text(&planned.request_snapshot);
     assert!(plan_prompt.contains("CustomContentDictionary.AddCharacter"));
     assert!(plan_prompt.contains("starting_deck_size"));
-    assert!(plan_prompt.contains("referenceBindingRules"));
+    assert!(plan_prompt.contains("bindingRules"));
 
     let prepared = ResourcePrepareService
         .prepare_default(
@@ -272,21 +272,6 @@ async fn sts2_branded_placeholder_prototype_prepares_resources_and_publishes_one
                 node.definition.resource_bindings = character_bindings.clone();
             }
             _ => {}
-        }
-    }
-    let child_hashes = nodes
-        .iter()
-        .map(|(item_id, node)| (item_id.clone(), node.definition.definition_hash().unwrap()))
-        .collect::<BTreeMap<_, _>>();
-    let root = nodes.get_mut(&ItemId::parse(ROOT_ID).unwrap()).unwrap();
-    for binding in root.definition.reference_bindings.values_mut().flatten() {
-        if let ats_workspace::ItemReferenceBinding::Pinned {
-            item_id,
-            definition_hash,
-            ..
-        } = binding
-        {
-            *definition_hash = child_hashes[item_id].clone();
         }
     }
     let revised = planned
@@ -661,27 +646,6 @@ async fn sts2_standard_and_custom_profiles_build_valid_35_to_43_node_drafts() {
                         selected_version: Sha256Digest::parse("a".repeat(64)).unwrap(),
                     },
                 );
-            }
-        }
-        let child_hashes = nodes
-            .iter()
-            .map(|(item_id, node)| (item_id.clone(), node.definition.definition_hash().unwrap()))
-            .collect::<BTreeMap<_, _>>();
-        for binding in nodes
-            .get_mut(&execution.draft.root_item_id)
-            .unwrap()
-            .definition
-            .reference_bindings
-            .values_mut()
-            .flatten()
-        {
-            if let ats_workspace::ItemReferenceBinding::Pinned {
-                item_id,
-                definition_hash,
-                ..
-            } = binding
-            {
-                *definition_hash = child_hashes[item_id].clone();
             }
         }
         let ready = execution

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use ats_kernel::{CompositionDraftId, ExecutionGraphId, GamePackId, ItemId, Sha256Digest};
 use chrono::{DateTime, Utc};
@@ -6,7 +6,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::{ItemCompositionProfile, ItemDefinition};
+use crate::{ItemCompositionProfile, ItemDefinition, ItemReferenceBinding};
 
 pub const COMPOSITION_DRAFT_SCHEMA_VERSION: u32 = 2;
 
@@ -45,9 +45,10 @@ impl CompositionDraft {
         game_pack_sha256: Sha256Digest,
         root_item_id: ItemId,
         profile: ItemCompositionProfile,
-        nodes: BTreeMap<ItemId, CompositionDraftNode>,
+        mut nodes: BTreeMap<ItemId, CompositionDraftNode>,
         created_at: DateTime<Utc>,
     ) -> Result<Self, CompositionDraftError> {
+        rebind_internal_pinned_hashes(&mut nodes)?;
         let draft = Self {
             schema_version: COMPOSITION_DRAFT_SCHEMA_VERSION,
             draft_id,
@@ -138,9 +139,10 @@ impl CompositionDraft {
 
     pub fn revised(
         &self,
-        nodes: BTreeMap<ItemId, CompositionDraftNode>,
+        mut nodes: BTreeMap<ItemId, CompositionDraftNode>,
         updated_at: DateTime<Utc>,
     ) -> Result<Self, CompositionDraftError> {
+        rebind_internal_pinned_hashes(&mut nodes)?;
         let mut next = self.clone();
         next.revision = self
             .revision
@@ -151,6 +153,70 @@ impl CompositionDraft {
         next.validate()?;
         Ok(next)
     }
+}
+
+fn rebind_internal_pinned_hashes(
+    nodes: &mut BTreeMap<ItemId, CompositionDraftNode>,
+) -> Result<(), CompositionDraftError> {
+    fn resolve(
+        item_id: &ItemId,
+        nodes: &mut BTreeMap<ItemId, CompositionDraftNode>,
+        active: &mut BTreeSet<ItemId>,
+        resolved: &mut BTreeMap<ItemId, Sha256Digest>,
+    ) -> Result<Sha256Digest, CompositionDraftError> {
+        if let Some(hash) = resolved.get(item_id) {
+            return Ok(hash.clone());
+        }
+        if !active.insert(item_id.clone()) {
+            return Err(CompositionDraftError::PinnedCycle);
+        }
+        let internal_targets = nodes
+            .get(item_id)
+            .ok_or(CompositionDraftError::InvalidNode)?
+            .definition
+            .reference_bindings
+            .values()
+            .flatten()
+            .filter_map(|binding| match binding {
+                ItemReferenceBinding::Pinned { item_id, .. } if nodes.contains_key(item_id) => {
+                    Some(item_id.clone())
+                }
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        for target in internal_targets {
+            resolve(&target, nodes, active, resolved)?;
+        }
+        let node = nodes
+            .get_mut(item_id)
+            .ok_or(CompositionDraftError::InvalidNode)?;
+        for binding in node.definition.reference_bindings.values_mut().flatten() {
+            if let ItemReferenceBinding::Pinned {
+                item_id,
+                definition_hash,
+                ..
+            } = binding
+                && let Some(target_hash) = resolved.get(item_id)
+            {
+                *definition_hash = target_hash.clone();
+            }
+        }
+        let hash = node
+            .definition
+            .definition_hash()
+            .map_err(|_| CompositionDraftError::InvalidNode)?;
+        active.remove(item_id);
+        resolved.insert(item_id.clone(), hash.clone());
+        Ok(hash)
+    }
+
+    let item_ids = nodes.keys().cloned().collect::<Vec<_>>();
+    let mut active = BTreeSet::new();
+    let mut resolved = BTreeMap::new();
+    for item_id in item_ids {
+        resolve(&item_id, nodes, &mut active, &mut resolved)?;
+    }
+    Ok(())
 }
 
 impl<'de> Deserialize<'de> for CompositionDraft {
@@ -249,16 +315,21 @@ pub enum CompositionDraftError {
     InvalidRootProfile,
     #[error("composition draft node is invalid")]
     InvalidNode,
+    #[error("composition draft pinned references contain a cycle")]
+    PinnedCycle,
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
 
-    use ats_kernel::{CompositionId, CompositionParameterId, CompositionProfileId, ItemTypeId};
+    use ats_kernel::{
+        CompositionId, CompositionParameterId, CompositionProfileId, ItemReferenceSlotId,
+        ItemTypeId, ResourceId,
+    };
 
     use super::*;
-    use crate::{ItemCompositionSource, ItemDefinition};
+    use crate::{ItemCompositionSource, ItemDefinition, ItemReferenceBinding, ItemResourceBinding};
 
     fn draft() -> CompositionDraft {
         let root_id = ItemId::parse("fixture-root").unwrap();
@@ -326,5 +397,137 @@ mod tests {
         assert_eq!(revised.draft_id, draft.draft_id);
         assert_eq!(revised.created_at, draft.created_at);
         assert_eq!(revised.updated_at, updated_at);
+    }
+
+    #[test]
+    fn revision_rebinds_changed_leaf_hashes_through_the_pinned_dag() {
+        let root_id = ItemId::parse("fixture-root").unwrap();
+        let branch_id = ItemId::parse("fixture-branch").unwrap();
+        let leaf_id = ItemId::parse("fixture-leaf").unwrap();
+        let profile = ItemCompositionProfile {
+            composition_id: CompositionId::parse("fixture-suite").unwrap(),
+            source: ItemCompositionSource::Preset {
+                profile_id: CompositionProfileId::parse("standard").unwrap(),
+            },
+            parameters: BTreeMap::from([(CompositionParameterId::parse("node_count").unwrap(), 3)]),
+        };
+        let pinned = |item_id| ItemReferenceBinding::Pinned {
+            item_id,
+            definition_hash: Sha256Digest::parse("0".repeat(64)).unwrap(),
+            quantity: 1,
+        };
+        let mut root = ItemDefinition::new(
+            root_id.clone(),
+            ItemTypeId::parse("fixture-root-type").unwrap(),
+        );
+        root.composition_profile = Some(profile.clone());
+        root.reference_bindings.insert(
+            ItemReferenceSlotId::parse("children").unwrap(),
+            vec![pinned(branch_id.clone())],
+        );
+        let mut branch = ItemDefinition::new(
+            branch_id.clone(),
+            ItemTypeId::parse("fixture-branch-type").unwrap(),
+        );
+        branch.reference_bindings.insert(
+            ItemReferenceSlotId::parse("children").unwrap(),
+            vec![pinned(leaf_id.clone())],
+        );
+        let leaf = ItemDefinition::new(
+            leaf_id.clone(),
+            ItemTypeId::parse("fixture-leaf-type").unwrap(),
+        );
+        let expected_current = Sha256Digest::parse("b".repeat(64)).unwrap();
+        let draft = CompositionDraft::new(
+            CompositionDraftId::parse("fixture-draft-dag").unwrap(),
+            GamePackId::parse("fixture-game").unwrap(),
+            Sha256Digest::parse("a".repeat(64)).unwrap(),
+            root_id.clone(),
+            profile,
+            BTreeMap::from([
+                (
+                    root_id.clone(),
+                    CompositionDraftNode {
+                        definition: root,
+                        expected_current_definition_hash: None,
+                    },
+                ),
+                (
+                    branch_id.clone(),
+                    CompositionDraftNode {
+                        definition: branch,
+                        expected_current_definition_hash: None,
+                    },
+                ),
+                (
+                    leaf_id.clone(),
+                    CompositionDraftNode {
+                        definition: leaf,
+                        expected_current_definition_hash: Some(expected_current.clone()),
+                    },
+                ),
+            ]),
+            Utc::now(),
+        )
+        .unwrap();
+        let old_branch_hash = draft.nodes[&branch_id]
+            .definition
+            .definition_hash()
+            .unwrap();
+        let old_root_hash = draft.nodes[&root_id].definition.definition_hash().unwrap();
+
+        let mut nodes = draft.nodes.clone();
+        nodes
+            .get_mut(&leaf_id)
+            .unwrap()
+            .definition
+            .resource_bindings
+            .insert(
+                ResourceId::parse("fixture.icon").unwrap(),
+                ItemResourceBinding {
+                    resource_id: ResourceId::parse("resource.fixture").unwrap(),
+                    selected_version: Sha256Digest::parse("c".repeat(64)).unwrap(),
+                },
+            );
+        let revised = draft
+            .revised(nodes, draft.updated_at + chrono::Duration::seconds(1))
+            .unwrap();
+        let leaf_hash = revised.nodes[&leaf_id]
+            .definition
+            .definition_hash()
+            .unwrap();
+        let branch_hash = revised.nodes[&branch_id]
+            .definition
+            .definition_hash()
+            .unwrap();
+        let root_hash = revised.nodes[&root_id]
+            .definition
+            .definition_hash()
+            .unwrap();
+
+        assert_ne!(branch_hash, old_branch_hash);
+        assert_ne!(root_hash, old_root_hash);
+        assert_eq!(
+            revised.nodes[&branch_id].definition.reference_bindings
+                [&ItemReferenceSlotId::parse("children").unwrap()][0],
+            ItemReferenceBinding::Pinned {
+                item_id: leaf_id.clone(),
+                definition_hash: leaf_hash,
+                quantity: 1,
+            }
+        );
+        assert_eq!(
+            revised.nodes[&root_id].definition.reference_bindings
+                [&ItemReferenceSlotId::parse("children").unwrap()][0],
+            ItemReferenceBinding::Pinned {
+                item_id: branch_id,
+                definition_hash: branch_hash,
+                quantity: 1,
+            }
+        );
+        assert_eq!(
+            revised.nodes[&leaf_id].expected_current_definition_hash,
+            Some(expected_current)
+        );
     }
 }

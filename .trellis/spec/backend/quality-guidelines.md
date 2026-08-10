@@ -85,6 +85,10 @@ Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-sp
   closed selected subgraph and updates every affected current pointer through one recoverable
   prepared/committed journal; failure never exposes a partial pointer set. Old v1 files remain
   preserved and are not rewritten.
+- Draft construction and every revision deterministically recompute internal pinned definition
+  hashes bottom-up across the complete Draft DAG. Resource, behavior or replacement edits may
+  change only one submitted node, but every affected ancestor hash is code-owned and advances in
+  the same revision while optimistic-current baselines and staged provenance remain unchanged.
 - `composition.plan` owns pinned whole-plan, Suite Brief and single-node Recipes plus one
   `pack.composition-plan-guidance` v2 contribution. The desktop product path compiles a deterministic
   Blueprint and asks the model only for a bounded brief and one node's normalized content at a time.
