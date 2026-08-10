@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "id": "recipe.composition-plan-node",
+  "featureId": "composition.plan",
+  "version": 1,
+  "messages": [
+    {
+      "role": "system",
+      "template": "Define exactly one item for a precompiled composition node. The item identity, type, dependency edges, references, resources, and hashes are local facts and must not be returned. Ground fields and localization in the supplied Pack descriptor and Truth evidence. Return only one JSON object matching this contract:\n{{output.contract}}"
+    },
+    {
+      "role": "user",
+      "template": "<pack-guidance>\n{{pack.guidance}}\n</pack-guidance>\n\n<item-descriptor>\n{{item.descriptor}}\n</item-descriptor>\n\n<node-identity>\n{{node.identity}}\n</node-identity>\n\n<suite-brief>\n{{suite.brief}}\n</suite-brief>\n\n<truth-evidence>\n{{truth.evidence}}\n</truth-evidence>\n\n<concept>\n{{request.concept}}\n</concept>\n\n<project-context>\n{{project.context}}\n</project-context>\n\n<runtime-custom-instructions>\n{{runtime.custom_instructions}}\n</runtime-custom-instructions>"
+    }
+  ],
+  "slots": [
+    { "id": "output.contract", "required": true, "maxChars": 64000 },
+    { "id": "pack.guidance", "required": true, "maxChars": 16000 },
+    { "id": "item.descriptor", "required": true, "maxChars": 32000 },
+    { "id": "node.identity", "required": true, "maxChars": 8000 },
+    { "id": "suite.brief", "required": false, "maxChars": 64000 },
+    { "id": "truth.evidence", "required": true, "maxChars": 32000 },
+    { "id": "request.concept", "required": true, "maxChars": 16000 },
+    { "id": "project.context", "required": false, "maxChars": 8000 },
+    { "id": "runtime.custom_instructions", "required": false, "maxChars": 4000 }
+  ],
+  "outputContract": {
+    "schema": { "id": "feature.composition-plan-node-checkpoint", "version": 1 },
+    "jsonSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["canonicalFields", "behaviorIntent", "localizations"],
+      "properties": {
+        "canonicalFields": { "type": "object" },
+        "behaviorIntent": { "type": "array" },
+        "localizations": { "type": "object" }
+      }
+    }
+  },
+  "maxOutputTokens": 12288,
+  "temperature": 0.3
+}

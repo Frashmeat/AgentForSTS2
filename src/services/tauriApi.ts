@@ -72,7 +72,7 @@ export function getFeatureCatalog(): Promise<FeatureContract[]> {
 }
 
 export type RunStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
-export type CancellationReason = "user" | "project_close" | "project_switch" | "app_shutdown";
+export type CancellationReason = "user" | "pause" | "project_close" | "project_switch" | "app_shutdown";
 export type RunTimelineEventKind =
   | "created"
   | "started"
@@ -167,6 +167,64 @@ export async function listRuns(): Promise<RunSummary[]> {
 
 export function cancelRun(runId: string): Promise<boolean> {
   return invokeCommand<boolean>("cancel_run", { runId });
+}
+
+export type ExecutionGraphStatus =
+  | "running"
+  | "pause_requested"
+  | "paused"
+  | "cancel_requested"
+  | "cancelled"
+  | "commit_prepared"
+  | "commit_blocked"
+  | "succeeded";
+
+export interface ExecutionGraphView {
+  executionGraphId: string;
+  revision: number;
+  status: ExecutionGraphStatus;
+  activeRunId: string | null;
+  previousRunId: string | null;
+  completedNodes: number;
+  totalNodes: number;
+  currentNodeId: string | null;
+  currentRoleId: string | null;
+  failureCode: string | null;
+  canPause: boolean;
+  canResume: boolean;
+  canCancel: boolean;
+}
+
+export async function listExecutionGraphs(): Promise<ExecutionGraphView[]> {
+  const values = await invokeCommand<unknown>("list_execution_graphs");
+  if (!Array.isArray(values) || !values.every(isExecutionGraphView)) {
+    throw toActionableFailure(undefined);
+  }
+  return values;
+}
+
+export async function getExecutionGraph(executionGraphId: string): Promise<ExecutionGraphView> {
+  const value = await invokeCommand<unknown>("get_execution_graph", { executionGraphId });
+  if (!isExecutionGraphView(value)) throw toActionableFailure(undefined);
+  return value;
+}
+
+export function pauseExecutionGraph(executionGraphId: string): Promise<boolean> {
+  return invokeCommand<boolean>("pause_execution_graph", { executionGraphId });
+}
+
+export function cancelExecutionGraph(executionGraphId: string): Promise<boolean> {
+  return invokeCommand<boolean>("cancel_execution_graph", { executionGraphId });
+}
+
+export function resumeCompositionPlan(
+  executionGraphId: string,
+  expectedRevision: number,
+): Promise<string> {
+  return invokeCommand<string>("resume_composition_plan", {
+    executionGraphId,
+    expectedRevision,
+  });
 }
 
 export interface PlanItem extends Record<string, unknown> {
@@ -568,7 +626,7 @@ export interface CompositionDraftNode {
 }
 
 export interface CompositionDraft {
-  schemaVersion: 1;
+  schemaVersion: 2;
   draftId: string;
   revision: number;
   gamePackId: string;
@@ -576,6 +634,8 @@ export interface CompositionDraft {
   rootItemId: string;
   profile: ItemCompositionProfile;
   nodes: Record<string, CompositionDraftNode>;
+  sourceExecutionGraphId?: string | null;
+  validatedContentDigest?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -869,6 +929,38 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 function isRunStatus(value: unknown): value is RunStatus {
   return ["pending", "running", "succeeded", "failed", "cancelled"].includes(String(value));
+}
+
+function isExecutionGraphView(value: unknown): value is ExecutionGraphView {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.executionGraphId === "string" &&
+    Number.isInteger(value.revision) &&
+    isExecutionGraphStatus(value.status) &&
+    (value.activeRunId === null || typeof value.activeRunId === "string") &&
+    (value.previousRunId === null || typeof value.previousRunId === "string") &&
+    Number.isInteger(value.completedNodes) &&
+    Number.isInteger(value.totalNodes) &&
+    (value.currentNodeId === null || typeof value.currentNodeId === "string") &&
+    (value.currentRoleId === null || typeof value.currentRoleId === "string") &&
+    (value.failureCode === null || typeof value.failureCode === "string") &&
+    typeof value.canPause === "boolean" &&
+    typeof value.canResume === "boolean" &&
+    typeof value.canCancel === "boolean"
+  );
+}
+
+function isExecutionGraphStatus(value: unknown): value is ExecutionGraphStatus {
+  return typeof value === "string" && [
+    "running",
+    "pause_requested",
+    "paused",
+    "cancel_requested",
+    "cancelled",
+    "commit_prepared",
+    "commit_blocked",
+    "succeeded",
+  ].includes(value);
 }
 function isRunFailure(value: unknown): value is RunFailure {
   return isRecord(value) &&

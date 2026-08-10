@@ -31,9 +31,14 @@ use ats_features::resource_prepare::{
 };
 use ats_features::{FeatureContract, FeatureSpec, built_in_feature_contracts};
 use ats_game_context::{ItemCapabilityCatalog, TruthSnapshotRepository};
-use ats_kernel::{CompositionDraftId, FeatureId, ItemId, ItemTypeId, Sha256Digest};
+use ats_kernel::{
+    CompositionDraftId, ExecutionGraphId, ExecutionNodeId, FailureCode, FeatureId, ItemId,
+    ItemTypeId, Sha256Digest,
+};
 use ats_runtime::{
-    CancellationReason, CancellationToken, RunId, RunRecord, RunSummary, VersionedPayload,
+    CancellationReason, CancellationToken, ExecutionGraphRecord, ExecutionGraphRepository,
+    ExecutionGraphStatus, ExecutionNodeStatus, RunId, RunRecord, RunRepository, RunRepositoryError,
+    RunStatus, RunSummary, VersionedPayload,
 };
 use ats_workspace::{
     CompositionDraft, CompositionDraftNode, CompositionDraftRepository, ItemDefinition,
@@ -63,6 +68,24 @@ pub struct TruthStatus {
     pub snapshot_id: Option<Sha256Digest>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionGraphView {
+    pub execution_graph_id: ExecutionGraphId,
+    pub revision: u64,
+    pub status: ExecutionGraphStatus,
+    pub active_run_id: Option<RunId>,
+    pub previous_run_id: Option<RunId>,
+    pub completed_nodes: u32,
+    pub total_nodes: u32,
+    pub current_node_id: Option<ExecutionNodeId>,
+    pub current_role_id: Option<String>,
+    pub failure_code: Option<FailureCode>,
+    pub can_pause: bool,
+    pub can_resume: bool,
+    pub can_cancel: bool,
+}
+
 #[tauri::command]
 pub fn get_feature_catalog() -> Vec<FeatureContract> {
     built_in_feature_contracts()
@@ -84,36 +107,231 @@ pub async fn submit_feature(
         session.resource_repository().as_ref(),
         &submission,
     )?;
-    let run = RunRecord::new(submission.feature_id, submission.request);
+    let candidate_run_id = RunId::new();
+    let (run, execution_graph) = if submission.feature_id == CompositionPlanFeature::id() {
+        let request = submission
+            .request
+            .decode::<CompositionPlanRequest>(&CompositionPlanFeature::request_schema())
+            .map_err(|_| CommandFailure::composition_invalid("run.submit"))?;
+        if request.execution.is_some() {
+            return Err(CommandFailure::composition_invalid("run.submit"));
+        }
+        let staged = composition
+            .prepare_composition_plan_start(request, candidate_run_id.clone())
+            .map_err(map_plan_prepare_failure)?;
+        let request =
+            VersionedPayload::from_typed(CompositionPlanFeature::request_schema(), &staged.request)
+                .map_err(|_| CommandFailure::composition_invalid("run.submit"))?;
+        (
+            RunRecord::new_with_id(candidate_run_id, CompositionPlanFeature::id(), request),
+            Some(staged.graph),
+        )
+    } else {
+        (
+            RunRecord::new_with_id(candidate_run_id, submission.feature_id, submission.request),
+            None,
+        )
+    };
     let root = session.path().to_path_buf();
     let meta = session.meta().clone();
     let composition = Arc::clone(composition.inner());
     let config = Arc::clone(config.inner());
     let resources = session.resource_repository();
     let items = session.item_repository();
+    let graphs = session.execution_graph_repository();
     let source_path = submission.source_path.map(PathBuf::from);
-    session
-        .submit(run, move |run, cancellation, repository| async move {
-            composition
-                .execute(
-                    &config,
-                    &root,
-                    &meta,
-                    run,
-                    repository.as_ref(),
-                    items.as_ref(),
-                    drafts.as_ref(),
-                    resources.as_ref(),
-                    source_path,
-                    &cancellation,
-                )
-                .await
+    let worker = move |run: RunRecord,
+                       cancellation: CancellationToken,
+                       repository: Arc<dyn ats_runtime::RunRepository>| async move {
+        composition
+            .execute(
+                &config,
+                &root,
+                &meta,
+                run,
+                repository.as_ref(),
+                items.as_ref(),
+                drafts.as_ref(),
+                graphs.as_ref(),
+                resources.as_ref(),
+                source_path,
+                &cancellation,
+            )
+            .await
+    };
+    let submitted: Result<RunId, SubmitError> = match execution_graph {
+        Some(graph) => session.submit_claimed(run, graph, worker).await,
+        None => session.submit(run, worker).await,
+    };
+    submitted.map_err(|error| match error {
+        SubmitError::Closing => CommandFailure::project_closing("run.submit"),
+        SubmitError::Repository => CommandFailure::storage("run.submit"),
+    })
+}
+
+#[tauri::command]
+pub fn list_execution_graphs(
+    active: State<'_, ActiveProject>,
+) -> CommandResult<Vec<ExecutionGraphView>> {
+    let session = current_session(&active, "execution.list")?;
+    let graphs = session
+        .execution_graph_repository()
+        .list()
+        .map_err(|_| CommandFailure::storage("execution.list"))?;
+    let runs = session.repository();
+    graphs
+        .iter()
+        .map(|graph| {
+            can_reconcile_succeeded_graph(graph, runs.as_ref())
+                .map(|can_reconcile| execution_graph_view(graph, can_reconcile))
         })
-        .await
-        .map_err(|error| match error {
-            SubmitError::Closing => CommandFailure::project_closing("run.submit"),
-            SubmitError::Repository => CommandFailure::storage("run.submit"),
-        })
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| CommandFailure::storage("execution.list"))
+}
+
+#[tauri::command]
+pub fn get_execution_graph(
+    active: State<'_, ActiveProject>,
+    execution_graph_id: String,
+) -> CommandResult<ExecutionGraphView> {
+    let id = ExecutionGraphId::parse(execution_graph_id)
+        .map_err(|_| CommandFailure::composition_invalid("execution.get"))?;
+    let session = current_session(&active, "execution.get")?;
+    let graph = session
+        .execution_graph_repository()
+        .get(&id)
+        .map_err(|_| CommandFailure::storage("execution.get"))?;
+    let can_reconcile_succeeded =
+        can_reconcile_succeeded_graph(&graph, session.repository().as_ref())
+            .map_err(|_| CommandFailure::storage("execution.get"))?;
+    Ok(execution_graph_view(&graph, can_reconcile_succeeded))
+}
+
+#[tauri::command]
+pub async fn pause_execution_graph(
+    active: State<'_, ActiveProject>,
+    execution_graph_id: String,
+) -> CommandResult<bool> {
+    let id = ExecutionGraphId::parse(execution_graph_id)
+        .map_err(|_| CommandFailure::composition_invalid("execution.pause"))?;
+    let session = current_session(&active, "execution.pause")?;
+    let graph = session
+        .execution_graph_repository()
+        .get(&id)
+        .map_err(|_| CommandFailure::storage("execution.pause"))?;
+    let run_id = graph
+        .active_run_id()
+        .ok_or_else(|| CommandFailure::composition_conflict("execution.pause"))?;
+    Ok(session.cancel_run(run_id, CancellationReason::Pause).await)
+}
+
+#[tauri::command]
+pub async fn cancel_execution_graph(
+    active: State<'_, ActiveProject>,
+    execution_graph_id: String,
+) -> CommandResult<bool> {
+    let id = ExecutionGraphId::parse(execution_graph_id)
+        .map_err(|_| CommandFailure::composition_invalid("execution.cancel"))?;
+    let session = current_session(&active, "execution.cancel")?;
+    let repository = session.execution_graph_repository();
+    let mut graph = repository
+        .get(&id)
+        .map_err(|_| CommandFailure::storage("execution.cancel"))?;
+    if let Some(run_id) = graph.active_run_id() {
+        return Ok(session.cancel_run(run_id, CancellationReason::User).await);
+    }
+    let revision = graph.revision();
+    graph
+        .cancel(None, chrono::Utc::now())
+        .map_err(|_| CommandFailure::composition_conflict("execution.cancel"))?;
+    repository
+        .compare_and_set(revision, &graph)
+        .map_err(|_| CommandFailure::composition_conflict("execution.cancel"))?;
+    Ok(true)
+}
+
+#[tauri::command]
+pub async fn resume_composition_plan(
+    active: State<'_, ActiveProject>,
+    composition: State<'_, Arc<Stage2Composition>>,
+    config: State<'_, Arc<AppConfig>>,
+    execution_graph_id: String,
+    expected_revision: u64,
+) -> CommandResult<RunId> {
+    let id = ExecutionGraphId::parse(execution_graph_id)
+        .map_err(|_| CommandFailure::composition_invalid("execution.resume"))?;
+    let session = current_session(&active, "execution.resume")?;
+    let graphs = session.execution_graph_repository();
+    let graph = graphs
+        .get(&id)
+        .map_err(|_| CommandFailure::storage("execution.resume"))?;
+    let run_id = RunId::new();
+    let staged = composition
+        .prepare_composition_plan_resume(graph, expected_revision, run_id.clone())
+        .map_err(map_plan_prepare_failure)?;
+    let request =
+        VersionedPayload::from_typed(CompositionPlanFeature::request_schema(), &staged.request)
+            .map_err(|_| CommandFailure::composition_invalid("execution.resume"))?;
+    let run = RunRecord::new_with_id(run_id, CompositionPlanFeature::id(), request);
+    let root = session.path().to_path_buf();
+    let meta = session.meta().clone();
+    let composition = Arc::clone(composition.inner());
+    let config = Arc::clone(config.inner());
+    let resources = session.resource_repository();
+    let items = session.item_repository();
+    let drafts = session.composition_draft_repository();
+    let worker_graphs = Arc::clone(&graphs);
+    let already_succeeded = staged.graph.status() == ExecutionGraphStatus::Succeeded;
+    let submitted = if already_succeeded {
+        session
+            .submit(run, move |run, cancellation, repository| async move {
+                composition
+                    .execute(
+                        &config,
+                        &root,
+                        &meta,
+                        run,
+                        repository.as_ref(),
+                        items.as_ref(),
+                        drafts.as_ref(),
+                        worker_graphs.as_ref(),
+                        resources.as_ref(),
+                        None,
+                        &cancellation,
+                    )
+                    .await
+            })
+            .await
+    } else {
+        session
+            .submit_resumed(
+                run,
+                expected_revision,
+                staged.graph,
+                move |run, cancellation, repository| async move {
+                    composition
+                        .execute(
+                            &config,
+                            &root,
+                            &meta,
+                            run,
+                            repository.as_ref(),
+                            items.as_ref(),
+                            drafts.as_ref(),
+                            worker_graphs.as_ref(),
+                            resources.as_ref(),
+                            None,
+                            &cancellation,
+                        )
+                        .await
+                },
+            )
+            .await
+    };
+    submitted.map_err(|error| match error {
+        SubmitError::Closing => CommandFailure::project_closing("execution.resume"),
+        SubmitError::Repository => CommandFailure::composition_conflict("execution.resume"),
+    })
 }
 
 #[tauri::command]
@@ -763,6 +981,95 @@ fn map_generation_readiness(error: SingleGenerateError) -> CommandFailure {
         }
         "resource.storage_failed" => CommandFailure::resource_storage("run.submit.readiness"),
         _ => CommandFailure::resource_invalid("run.submit.readiness"),
+    }
+}
+
+fn map_plan_prepare_failure(failure: ats_runtime::RunFailure) -> CommandFailure {
+    match failure.code.as_str() {
+        "truth.missing" | "truth.evidence_missing" => {
+            CommandFailure::truth_missing("run.submit.plan")
+        }
+        "pack.contribution_invalid" | "truth.context_mismatch" => {
+            CommandFailure::pack_invalid("run.submit.plan")
+        }
+        "run.input_invalid" | "composition.profile.invalid" | "composition.profile.unsupported" => {
+            CommandFailure::composition_invalid("run.submit.plan")
+        }
+        _ => CommandFailure::unclassified("run.submit.plan"),
+    }
+}
+
+fn execution_graph_view(
+    graph: &ExecutionGraphRecord,
+    can_reconcile_succeeded: bool,
+) -> ExecutionGraphView {
+    let completed_nodes = graph
+        .nodes()
+        .values()
+        .filter(|node| node.status == ExecutionNodeStatus::Succeeded)
+        .count();
+    let current = graph
+        .nodes()
+        .values()
+        .find(|node| node.status == ExecutionNodeStatus::Running)
+        .or_else(|| {
+            graph.nodes().values().find(|node| {
+                node.status == ExecutionNodeStatus::Pending
+                    && node.depends_on.iter().all(|dependency| {
+                        graph
+                            .nodes()
+                            .get(dependency)
+                            .is_some_and(|value| value.status == ExecutionNodeStatus::Succeeded)
+                    })
+            })
+        });
+    let failure_code = graph
+        .nodes()
+        .values()
+        .filter_map(|node| node.safe_failure.as_ref())
+        .next_back()
+        .map(|failure| failure.code.clone());
+    ExecutionGraphView {
+        execution_graph_id: graph.id().clone(),
+        revision: graph.revision(),
+        status: graph.status(),
+        active_run_id: graph.active_run_id().cloned(),
+        previous_run_id: graph.previous_run_id().cloned(),
+        completed_nodes: u32::try_from(completed_nodes).unwrap_or(u32::MAX),
+        total_nodes: u32::try_from(graph.nodes().len()).unwrap_or(u32::MAX),
+        current_node_id: current.map(|node| node.node_id.clone()),
+        current_role_id: current.map(|node| node.role_id.clone()),
+        failure_code,
+        can_pause: graph.status() == ExecutionGraphStatus::Running,
+        can_resume: matches!(
+            graph.status(),
+            ExecutionGraphStatus::Paused | ExecutionGraphStatus::CommitPrepared
+        ) && graph.active_run_id().is_none()
+            || can_reconcile_succeeded,
+        can_cancel: !matches!(
+            graph.status(),
+            ExecutionGraphStatus::Succeeded | ExecutionGraphStatus::Cancelled
+        ) && graph.status() != ExecutionGraphStatus::CommitPrepared,
+    }
+}
+
+fn can_reconcile_succeeded_graph(
+    graph: &ExecutionGraphRecord,
+    runs: &dyn RunRepository,
+) -> Result<bool, RunRepositoryError> {
+    if graph.status() != ExecutionGraphStatus::Succeeded {
+        return Ok(false);
+    }
+    let Some(run_id) = graph.previous_run_id() else {
+        return Ok(false);
+    };
+    match runs.get(run_id) {
+        Ok(run) => Ok(run.status() == RunStatus::Failed
+            && run
+                .failure()
+                .is_some_and(|failure| failure.code.as_str() == "run.interrupted")),
+        Err(RunRepositoryError::NotFound) => Ok(false),
+        Err(error) => Err(error),
     }
 }
 

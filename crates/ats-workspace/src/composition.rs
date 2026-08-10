@@ -1,13 +1,14 @@
 use std::collections::BTreeMap;
 
-use ats_kernel::{CompositionDraftId, GamePackId, ItemId, Sha256Digest};
+use ats_kernel::{CompositionDraftId, ExecutionGraphId, GamePackId, ItemId, Sha256Digest};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::{ItemCompositionProfile, ItemDefinition};
 
-pub const COMPOSITION_DRAFT_SCHEMA_VERSION: u32 = 1;
+pub const COMPOSITION_DRAFT_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -28,6 +29,10 @@ pub struct CompositionDraft {
     pub root_item_id: ItemId,
     pub profile: ItemCompositionProfile,
     pub nodes: BTreeMap<ItemId, CompositionDraftNode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_execution_graph_id: Option<ExecutionGraphId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validated_content_digest: Option<Sha256Digest>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -52,9 +57,38 @@ impl CompositionDraft {
             root_item_id,
             profile,
             nodes,
+            source_execution_graph_id: None,
+            validated_content_digest: None,
             created_at,
             updated_at: created_at,
         };
+        draft.validate()?;
+        Ok(draft)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_staged(
+        draft_id: CompositionDraftId,
+        game_pack_id: GamePackId,
+        game_pack_sha256: Sha256Digest,
+        root_item_id: ItemId,
+        profile: ItemCompositionProfile,
+        nodes: BTreeMap<ItemId, CompositionDraftNode>,
+        source_execution_graph_id: ExecutionGraphId,
+        validated_content_digest: Sha256Digest,
+        created_at: DateTime<Utc>,
+    ) -> Result<Self, CompositionDraftError> {
+        let mut draft = Self::new(
+            draft_id,
+            game_pack_id,
+            game_pack_sha256,
+            root_item_id,
+            profile,
+            nodes,
+            created_at,
+        )?;
+        draft.source_execution_graph_id = Some(source_execution_graph_id);
+        draft.validated_content_digest = Some(validated_content_digest);
         draft.validate()?;
         Ok(draft)
     }
@@ -75,6 +109,9 @@ impl CompositionDraft {
         {
             return Err(CompositionDraftError::InvalidMetadata);
         }
+        if self.source_execution_graph_id.is_some() != self.validated_content_digest.is_some() {
+            return Err(CompositionDraftError::InvalidMetadata);
+        }
         let root = self
             .nodes
             .get(&self.root_item_id)
@@ -88,6 +125,15 @@ impl CompositionDraft {
             return Err(CompositionDraftError::InvalidNode);
         }
         Ok(())
+    }
+
+    pub fn payload_sha256(&self) -> Result<Sha256Digest, CompositionDraftError> {
+        let value =
+            serde_json::to_value(self).map_err(|_| CompositionDraftError::InvalidMetadata)?;
+        let bytes =
+            serde_json::to_vec(&value).map_err(|_| CompositionDraftError::InvalidMetadata)?;
+        Sha256Digest::parse(format!("{:x}", Sha256::digest(bytes)))
+            .map_err(|_| CompositionDraftError::InvalidMetadata)
     }
 
     pub fn revised(
@@ -123,6 +169,10 @@ impl<'de> Deserialize<'de> for CompositionDraft {
             root_item_id: ItemId,
             profile: ItemCompositionProfile,
             nodes: BTreeMap<ItemId, CompositionDraftNode>,
+            #[serde(default)]
+            source_execution_graph_id: Option<ExecutionGraphId>,
+            #[serde(default)]
+            validated_content_digest: Option<Sha256Digest>,
             created_at: DateTime<Utc>,
             updated_at: DateTime<Utc>,
         }
@@ -137,6 +187,8 @@ impl<'de> Deserialize<'de> for CompositionDraft {
             root_item_id: wire.root_item_id,
             profile: wire.profile,
             nodes: wire.nodes,
+            source_execution_graph_id: wire.source_execution_graph_id,
+            validated_content_digest: wire.validated_content_digest,
             created_at: wire.created_at,
             updated_at: wire.updated_at,
         };
@@ -153,6 +205,11 @@ pub trait CompositionDraftRepository: Send + Sync {
     }
 
     fn create(&self, draft: &CompositionDraft) -> Result<(), Self::Error>;
+    fn create_or_match(
+        &self,
+        draft: &CompositionDraft,
+        expected_payload_sha256: &Sha256Digest,
+    ) -> Result<CompositionDraftCreateOrMatch, Self::Error>;
     fn load(&self, draft_id: &CompositionDraftId) -> Result<CompositionDraft, Self::Error>;
     fn compare_and_set(
         &self,
@@ -165,6 +222,12 @@ pub trait CompositionDraftRepository: Send + Sync {
         draft_id: &CompositionDraftId,
         expected_revision: u64,
     ) -> Result<(), Self::Error>;
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum CompositionDraftCreateOrMatch {
+    Created,
+    Matched,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -231,7 +294,7 @@ mod tests {
     fn draft_round_trip_preserves_profile_nodes_and_revision() {
         let draft = draft();
         let wire = serde_json::to_value(&draft).unwrap();
-        assert_eq!(wire["schemaVersion"], 1);
+        assert_eq!(wire["schemaVersion"], 2);
         assert_eq!(wire["revision"], 1);
         assert_eq!(wire["rootItemId"], "fixture-root");
         assert!(wire.get("root_item_id").is_none());

@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "id": "recipe.composition-suite-brief",
+  "featureId": "composition.plan",
+  "version": 1,
+  "messages": [
+    {
+      "role": "system",
+      "template": "Coordinate one bounded multi-item composition. Treat every supplied identifier and rule as immutable data. Return a concise theme, one responsibility for every declared item node, and only the requested quantity distributions. Return only one JSON object matching this contract:\n{{output.contract}}"
+    },
+    {
+      "role": "user",
+      "template": "<pack-guidance>\n{{pack.guidance}}\n</pack-guidance>\n\n<composition-blueprint>\n{{composition.blueprint}}\n</composition-blueprint>\n\n<concept>\n{{request.concept}}\n</concept>\n\n<project-context>\n{{project.context}}\n</project-context>\n\n<runtime-custom-instructions>\n{{runtime.custom_instructions}}\n</runtime-custom-instructions>"
+    }
+  ],
+  "slots": [
+    { "id": "output.contract", "required": true, "maxChars": 64000 },
+    { "id": "pack.guidance", "required": true, "maxChars": 16000 },
+    { "id": "composition.blueprint", "required": true, "maxChars": 64000 },
+    { "id": "request.concept", "required": true, "maxChars": 16000 },
+    { "id": "project.context", "required": false, "maxChars": 8000 },
+    { "id": "runtime.custom_instructions", "required": false, "maxChars": 4000 }
+  ],
+  "outputContract": {
+    "schema": { "id": "feature.composition-suite-brief", "version": 1 },
+    "jsonSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["theme", "nodeResponsibilities", "quantityDistributions"],
+      "properties": {
+        "theme": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "nodeResponsibilities": { "type": "object" },
+        "quantityDistributions": { "type": "object" }
+      }
+    }
+  },
+  "maxOutputTokens": 8192,
+  "temperature": 0.2
+}

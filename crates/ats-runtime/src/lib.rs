@@ -3,6 +3,7 @@
 mod artifact;
 mod delivery;
 mod execution;
+mod execution_graph;
 mod media;
 mod model;
 mod payload;
@@ -27,6 +28,12 @@ pub use execution::{
     ValidationError, ValidationReport, ValidationRequest, ValidationRunner,
     validate_project_writes,
 };
+pub use execution_graph::{
+    EXECUTION_GRAPH_SCHEMA_VERSION, ExecutionCommitIntent, ExecutionFailure, ExecutionGraphError,
+    ExecutionGraphRecord, ExecutionGraphStatus, ExecutionNodeRecord, ExecutionNodeSpec,
+    ExecutionNodeStatus, HashedExecutionPayload, LogicalAttemptOutcome, LogicalNodeAttempt,
+    hash_json,
+};
 pub use media::{MediaClient, MediaError, MediaRequest, MediaRequestSnapshot, MediaResponse};
 pub use model::{
     FinishReason, ModelClient, ModelError, ModelGamePackRef, ModelMessage, ModelMessageRole,
@@ -34,7 +41,10 @@ pub use model::{
     ModelResponse, ModelStream, ModelStreamEvent, RecipeRef, TokenUsage,
 };
 pub use payload::{PayloadError, VersionedPayload};
-pub use repository::{RunRepository, RunRepositoryError};
+pub use repository::{
+    ExecutionGraphRecovery, ExecutionGraphRepository, ExecutionGraphRepositoryError, RunRepository,
+    RunRepositoryError,
+};
 pub use run::{
     CancellationReason, RUN_RECORD_SCHEMA_VERSION, RunFailure, RunId, RunLifecycleError,
     RunProgress, RunRecord, RunStatus, RunSummary, RunTimelineEvent, RunTimelineEventKind,

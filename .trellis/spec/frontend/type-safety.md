@@ -66,10 +66,13 @@ wire shape `{kind:"pack_default"}` and never carries `sourcePath`. Single v3 car
 `definition: StoredItemDefinition` and has no
 `selectedResources` field.
 
-Composition IPC guards validate CompositionDraft v1 identity/revision/Pack hash/root/profile,
-field-keyed nodes and exact ItemDefinition v2 shapes. Confirmation guards validate the Draft ref,
-every StoredItemDefinition and the confirmation digest. A TypeScript interface or direct cast is not
-accepted for list/get/update/confirm responses.
+Composition IPC guards validate CompositionDraft v2 identity/revision/Pack hash/root/profile,
+optional paired `sourceExecutionGraphId`/`validatedContentDigest`, field-keyed nodes and exact
+ItemDefinition v2 shapes. ExecutionGraph guards validate only the bounded View projection
+(`executionGraphId`, revision/status, Run IDs, progress/current node, safe failure and action flags);
+React must not receive or decode checkpoints, Blueprint payloads or commit intent. Confirmation
+guards validate the Draft ref, every StoredItemDefinition and the confirmation digest. A TypeScript
+interface or direct cast is not accepted for list/get/update/confirm/status responses.
 
 Composition targeted retry uses the generic Feature submission boundary with exact camelCase
 `draftId`, `expectedRevision`, `itemId` and `instructions`. React derives this request from the

@@ -1,6 +1,7 @@
 //! Stable value objects shared by the Stage 2 responsibility domains.
 
 use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Deserializer, Serialize};
 use thiserror::Error;
@@ -196,6 +197,110 @@ slug_id!(CompositionDraftId, "composition draft ID", 128);
 slug_id!(CompositionProfileId, "composition profile ID", 64);
 slug_id!(CompositionParameterId, "composition parameter ID", 64);
 slug_id!(LocaleId, "locale ID", 16);
+
+#[derive(Debug, Clone, Serialize, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[serde(transparent)]
+pub struct ExecutionGraphId(String);
+
+impl ExecutionGraphId {
+    #[must_use]
+    pub fn new() -> Self {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let counter = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_nanos());
+        Self(format!("graph-{nanos:032x}-{counter:08x}"))
+    }
+
+    pub fn parse(value: impl Into<String>) -> Result<Self, ContractValueError> {
+        let value = value.into();
+        if valid_execution_id(&value, 128) {
+            Ok(Self(value))
+        } else {
+            Err(ContractValueError::InvalidSlugId {
+                kind: "execution graph ID",
+            })
+        }
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Default for ExecutionGraphId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Display for ExecutionGraphId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for ExecutionGraphId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Self::parse(String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[serde(transparent)]
+pub struct ExecutionNodeId(String);
+
+impl ExecutionNodeId {
+    pub fn parse(value: impl Into<String>) -> Result<Self, ContractValueError> {
+        let value = value.into();
+        if valid_execution_id(&value, 160) {
+            Ok(Self(value))
+        } else {
+            Err(ContractValueError::InvalidSlugId {
+                kind: "execution node ID",
+            })
+        }
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for ExecutionNodeId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for ExecutionNodeId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Self::parse(String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+    }
+}
+
+fn valid_execution_id(value: &str, max_len: usize) -> bool {
+    !value.is_empty()
+        && value.len() <= max_len
+        && value
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_lowercase())
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase()
+                || byte.is_ascii_digit()
+                || matches!(byte, b'-' | b'_' | b'.' | b':')
+        })
+}
 
 #[derive(Debug, Clone, Serialize, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[serde(transparent)]

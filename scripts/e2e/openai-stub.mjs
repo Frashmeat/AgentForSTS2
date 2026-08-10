@@ -95,6 +95,7 @@ async function record(kind) {
 
 async function completeResponse(response, content, initialDelay) {
   await delay(initialDelay);
+  if (response.destroyed || response.writableEnded) return;
   response.writeHead(200, { "content-type": "application/json" });
   response.end(JSON.stringify({
     id: "e2e-stub",
@@ -102,6 +103,129 @@ async function completeResponse(response, content, initialDelay) {
     choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }],
     usage: { prompt_tokens: 10, completion_tokens: 10 },
   }));
+}
+
+const stagedFailures = new Set();
+
+function taggedJson(promptText, tag) {
+  const match = promptText.match(new RegExp(`<${tag}>\\s*([\\s\\S]*?)\\s*</${tag}>`));
+  if (!match) throw new Error(`${tag} was not present in the staged prompt`);
+  return JSON.parse(match[1]);
+}
+
+function stagedScenario(promptText) {
+  if (promptText.includes("GUI staged control-state E2E")) return "controls";
+  if (promptText.includes("GUI staged recovery E2E")) return "recovery";
+  return "default";
+}
+
+async function recordStaged(kind, scenario, details = {}) {
+  await fs.appendFile(
+    path.join(root, "stub-requests.jsonl"),
+    `${JSON.stringify({ kind, scenario, ...details })}\n`,
+  );
+}
+
+function localizedNameDescription(name) {
+  return {
+    eng: { name, description: `${name} deterministic E2E description.` },
+    zhs: { name, description: `${name} deterministic E2E description.` },
+  };
+}
+
+function characterLocalizations() {
+  const fields = {
+    title: "Queue Adept",
+    title_object: "Queue Adept",
+    description: "A deterministic staged-composition Character.",
+    pronoun_object: "them",
+    pronoun_subject: "they",
+    pronoun_possessive: "theirs",
+    possessive_adjective: "their",
+    aroma_principle: "Resolve one bounded step at a time.",
+    end_turn_ping_alive: "The queue advances.",
+    end_turn_ping_dead: "The queue is still.",
+    event_death_prevention: "Resume from the last checkpoint.",
+    gold_monologue: "Every coin has an owner.",
+    cards_modifier_title: "Ordered Draw",
+    cards_modifier_description: "Cards retain their deterministic order.",
+  };
+  return { eng: fields, zhs: fields };
+}
+
+function suiteBrief(blueprint) {
+  const nodeResponsibilities = Object.fromEntries(
+    blueprint.itemNodes.map((node) => [
+      node.executionNodeId,
+      `Provide the bounded ${node.groupId} item at ordinal ${node.ordinal}.`,
+    ]),
+  );
+  const quantityDistributions = {};
+  for (const rule of blueprint.bindingRules) {
+    if (rule.quantityPolicy?.kind !== "brief_distribution") continue;
+    const targets = blueprint.itemNodes.filter((node) =>
+      rule.targetGroupIds.includes(node.groupId));
+    const total = blueprint.profile.parameters[rule.quantityPolicy.totalParameterId];
+    const base = Math.floor(total / targets.length);
+    const remainder = total % targets.length;
+    quantityDistributions[`${rule.sourceGroupId}.${rule.slotId}`] = Object.fromEntries(
+      targets.map((node, index) => [node.executionNodeId, base + (index < remainder ? 1 : 0)]),
+    );
+  }
+  return {
+    theme: "A deterministic queue-driven Character suite.",
+    nodeResponsibilities,
+    quantityDistributions,
+  };
+}
+
+function stagedNodeCheckpoint(identity) {
+  const ordinal = identity.ordinal + 1;
+  const name = `${identity.groupId.replaceAll("_", " ")} ${ordinal}`;
+  if (identity.itemType === "character") {
+    return {
+      canonicalFields: {
+        visual_profile: { kind: "choice", value: "branded_placeholder" },
+        placeholder_id: { kind: "choice", value: "ironclad" },
+        name_color: { kind: "text", value: "7D3FC8FF" },
+        gender: { kind: "choice", value: "neutral" },
+        starting_hp: { kind: "integer", value: 70 },
+        starting_gold: { kind: "integer", value: 99 },
+        max_energy: { kind: "integer", value: 3 },
+      },
+      behaviorIntent: ["Provide a playable deterministic Character with locally bound pools."],
+      localizations: characterLocalizations(),
+    };
+  }
+  if (identity.itemType === "card") {
+    const rarity = {
+      starter_cards: "basic",
+      common_cards: "common",
+      uncommon_cards: "uncommon",
+      rare_cards: "rare",
+    }[identity.groupId];
+    return {
+      canonicalFields: {
+        pool: { kind: "choice", value: "custom_character" },
+        card_type: { kind: "choice", value: ordinal % 2 === 0 ? "skill" : "attack" },
+        rarity: { kind: "choice", value: rarity },
+        target: { kind: "choice", value: ordinal % 2 === 0 ? "self" : "any_enemy" },
+        base_cost: { kind: "integer", value: 1 },
+      },
+      behaviorIntent: [`Provide deterministic ${identity.groupId} card ${ordinal}.`],
+      localizations: localizedNameDescription(name),
+    };
+  }
+  if (identity.itemType === "relic") {
+    return {
+      canonicalFields: {
+        rarity: { kind: "choice", value: identity.groupId === "starter_relics" ? "starter" : "common" },
+      },
+      behaviorIntent: [`Provide deterministic ${identity.groupId} Relic ${ordinal}.`],
+      localizations: localizedNameDescription(name),
+    };
+  }
+  throw new Error(`unsupported staged E2E item type: ${identity.itemType}`);
 }
 
 const server = http.createServer(async (request, response) => {
@@ -139,12 +263,44 @@ const server = http.createServer(async (request, response) => {
     }
     if (request.method === "POST" && request.url === "/v1/chat/completions") {
       const body = await readJson(request);
-      const isPlan = body.messages?.some((message) =>
-        message.role === "system"
-          && String(message.content).includes("Plan exactly one independently testable item"));
       const promptText = body.messages
         ?.map((message) => String(message.content ?? ""))
         .join("\n") ?? "";
+      const isSuiteBrief = promptText.includes("Coordinate one bounded multi-item composition");
+      const isStagedNode = promptText.includes("Define exactly one item for a precompiled composition node");
+      if (isSuiteBrief) {
+        const scenario = stagedScenario(promptText);
+        const blueprint = taggedJson(promptText, "composition-blueprint");
+        await recordStaged("composition_suite_brief", scenario);
+        await completeResponse(
+          response,
+          JSON.stringify(suiteBrief(blueprint)),
+          scenario === "controls" ? 1_500 : 50,
+        );
+        return;
+      }
+      if (isStagedNode) {
+        const scenario = stagedScenario(promptText);
+        const identity = taggedJson(promptText, "node-identity");
+        const failureKey = `${scenario}:${identity.executionNodeId}`;
+        const failOnce = scenario === "recovery"
+          && identity.itemType === "character"
+          && !stagedFailures.has(failureKey);
+        if (failOnce) stagedFailures.add(failureKey);
+        await recordStaged("composition_node", scenario, {
+          nodeId: identity.executionNodeId,
+          outcome: failOnce ? "invalid" : "valid",
+        });
+        await completeResponse(
+          response,
+          failOnce ? "{" : JSON.stringify(stagedNodeCheckpoint(identity)),
+          scenario === "controls" ? 1_500 : 50,
+        );
+        return;
+      }
+      const isPlan = body.messages?.some((message) =>
+        message.role === "system"
+          && String(message.content).includes("Plan exactly one independently testable item"));
       const isCompileFailure = promptText.includes("CompileFailureRelic");
       await record(isPlan ? "plan" : isCompileFailure ? "asset_bundle_compile_failure" : "asset_bundle");
       await completeResponse(

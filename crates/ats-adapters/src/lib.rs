@@ -4,6 +4,7 @@ mod artifact_store;
 mod build_runner;
 mod composition_draft_store;
 mod config;
+mod execution_graph_store;
 mod item_store;
 mod media_client;
 mod model_client;
@@ -26,6 +27,7 @@ pub use config::{
     ConfigStatus, ImageGenerationConfig, LlmConfig, OpenAiResponseFormat, RuntimeConfig, Settings,
     SettingsStore, ToolchainConfig, TruthSourceConfig,
 };
+pub use execution_graph_store::FileExecutionGraphRepository;
 pub use item_store::{FileItemRepository, ItemStoreError};
 pub use media_client::HttpMediaClient;
 pub use model_client::{HttpModelClient, ModelRequestQueue};

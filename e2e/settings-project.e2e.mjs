@@ -94,6 +94,63 @@ const waitForBatchRun = async (status, timeout = 240_000, previousRunId = null) 
   return result;
 };
 
+const waitForCompositionGraph = async (
+  status,
+  { timeout = 180_000, graphId = null, previousRunId = null } = {},
+) => {
+  let result = null;
+  await browser.waitUntil(
+    async () => browser.execute((expectedStatus, expectedGraphId, oldRunId) => {
+      const element = document.querySelector('[data-testid="composition-execution-graph"]');
+      if (!element || element.getAttribute("data-execution-status") !== expectedStatus) return null;
+      const currentGraphId = element.getAttribute("data-execution-graph-id");
+      const runId = element.getAttribute("data-plan-run-id");
+      if (expectedGraphId && currentGraphId !== expectedGraphId) return null;
+      if (!runId || runId === oldRunId) return null;
+      return {
+        graphId: currentGraphId,
+        status: expectedStatus,
+        runId,
+        runStatus: element.getAttribute("data-plan-run-status"),
+        completedNodes: Number(element.getAttribute("data-completed-nodes")),
+        totalNodes: Number(element.getAttribute("data-total-nodes")),
+      };
+    }, status, graphId, previousRunId).then((value) => {
+      result = value;
+      return Boolean(value?.graphId && value?.runId);
+    }),
+    { timeout, timeoutMsg: `Composition graph did not reach ${status}` },
+  );
+  return result;
+};
+
+const waitForEnabled = async (testId, timeout = 30_000) => browser.waitUntil(
+  async () => browser.execute((id) => {
+    const element = document.querySelector(`[data-testid="${id}"]`);
+    return element instanceof HTMLButtonElement && !element.disabled;
+  }, testId),
+  { timeout, timeoutMsg: `${testId} did not become enabled` },
+);
+
+const readStubRequests = async (root) => (await fs.readFile(
+  path.join(root, "stub-requests.jsonl"),
+  "utf8",
+)).trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+
+const assertNoAtomicWriteResidue = async (projectRoot) => {
+  for (const relativeRoot of [
+    ".ats/execution-graphs-v1",
+    ".ats/composition-drafts-v2",
+    ".ats/runs-v3",
+  ]) {
+    const entries = await fs.readdir(path.join(projectRoot, relativeRoot)).catch(() => []);
+    assert.ok(
+      entries.every((entry) => !entry.endsWith(".tmp") && !entry.endsWith(".bak") && !entry.startsWith(".staging")),
+      `${relativeRoot} retained atomic-write residue: ${entries.join(", ")}`,
+    );
+  }
+};
+
 const sha256File = async (filePath) => createHash("sha256")
   .update(await fs.readFile(filePath))
   .digest("hex");
@@ -176,6 +233,153 @@ describe("current desktop Stage 2 workflow", () => {
     await fs.access(path.join(storeRoot, "snapshots", current.snapshotId, "truth-snapshot.json"));
     assert.deepEqual(await fs.readdir(path.join(storeRoot, ".staging")), []);
     assert.ok(!storeRoot.includes(path.join("projects", "E2EMod")));
+  });
+
+  it("drives staged Composition pause, resume, and cancel through one persisted graph", async () => {
+    const root = requiredEnv("ATS_E2E_ROOT");
+    const projectRoot = path.join(root, "projects", "E2EMod");
+    const draftId = "gui-staged-controls";
+
+    await navigate("/composition");
+    await waitForTestId("composition-profile", 60_000);
+    await selectValue("composition-profile", "prototype");
+    await $('[data-testid="composition-draft-id"]').setValue(draftId);
+    await $('[data-testid="composition-concept"]').setValue("GUI staged control-state E2E");
+    await $('[data-testid="composition-plan"]').click();
+
+    const running = await waitForCompositionGraph("running");
+    await waitForEnabled("composition-execution-pause");
+    await $('[data-testid="composition-execution-pause"]').click();
+    const paused = await waitForCompositionGraph("paused", { graphId: running.graphId });
+    assert.equal(paused.graphId, running.graphId);
+    await assert.rejects(() => fs.access(path.join(
+      projectRoot,
+      ".ats",
+      "composition-drafts-v2",
+      `${draftId}.json`,
+    )));
+
+    await waitForEnabled("composition-execution-resume");
+    await $('[data-testid="composition-execution-resume"]').click();
+    const resumed = await waitForCompositionGraph("running", {
+      graphId: running.graphId,
+      previousRunId: running.runId,
+    });
+    await waitForEnabled("composition-execution-cancel");
+    await $('[data-testid="composition-execution-cancel"]').click();
+    const cancelled = await waitForCompositionGraph("cancelled", {
+      graphId: running.graphId,
+      previousRunId: running.runId,
+    });
+    assert.equal(cancelled.runId, resumed.runId);
+
+    const graph = JSON.parse(await fs.readFile(path.join(
+      projectRoot,
+      ".ats",
+      "execution-graphs-v1",
+      `${running.graphId}.json`,
+    ), "utf8"));
+    assert.equal(graph.status, "cancelled");
+    assert.equal(graph.activeRunId, null);
+    assert.ok(Object.values(graph.nodes).every((node) => node.status !== "running"));
+    await assertNoTransactionResidue(projectRoot);
+    await assertNoAtomicWriteResidue(projectRoot);
+  });
+
+  it("resumes only the invalid staged node and atomically commits Draft v2 provenance", async () => {
+    const root = requiredEnv("ATS_E2E_ROOT");
+    const projectRoot = path.join(root, "projects", "E2EMod");
+    const draftId = "gui-staged-recovery";
+
+    await navigate("/composition");
+    await waitForTestId("composition-profile", 60_000);
+    await selectValue("composition-profile", "prototype");
+    await $('[data-testid="composition-draft-id"]').setValue(draftId);
+    await $('[data-testid="composition-concept"]').setValue("GUI staged recovery E2E");
+    await $('[data-testid="composition-plan"]').click();
+
+    const paused = await waitForCompositionGraph("paused");
+    assert.equal(paused.totalNodes, 15);
+    assert.equal(paused.completedNodes, 11);
+    const graphPath = path.join(
+      projectRoot,
+      ".ats",
+      "execution-graphs-v1",
+      `${paused.graphId}.json`,
+    );
+    const pausedGraph = JSON.parse(await fs.readFile(graphPath, "utf8"));
+    assert.equal(pausedGraph.status, "paused");
+    assert.equal(pausedGraph.activeRunId, null);
+    const firstRun = JSON.parse(await fs.readFile(path.join(
+      projectRoot,
+      ".ats",
+      "runs-v3",
+      `${paused.runId}.json`,
+    ), "utf8"));
+    assert.equal(firstRun.status, "failed");
+    assert.equal(firstRun.failure.code, "model.output_invalid");
+    await assert.rejects(() => fs.access(path.join(
+      projectRoot,
+      ".ats",
+      "composition-drafts-v2",
+      `${draftId}.json`,
+    )));
+
+    const beforeResume = (await readStubRequests(root)).filter(
+      (entry) => entry.scenario === "recovery",
+    );
+    assert.equal(beforeResume.filter((entry) => entry.kind === "composition_suite_brief").length, 1);
+    const initialNodeRequests = beforeResume.filter((entry) => entry.kind === "composition_node");
+    assert.equal(initialNodeRequests.length, 11);
+    assert.equal(initialNodeRequests.filter((entry) => entry.outcome === "invalid").length, 1);
+
+    await waitForEnabled("composition-execution-resume");
+    await $('[data-testid="composition-execution-resume"]').click();
+    const succeeded = await waitForCompositionGraph("succeeded", {
+      graphId: paused.graphId,
+      previousRunId: paused.runId,
+    });
+    assert.equal(succeeded.completedNodes, 15);
+    assert.equal(succeeded.totalNodes, 15);
+    assert.equal(succeeded.runStatus, "succeeded");
+
+    const committedGraph = JSON.parse(await fs.readFile(graphPath, "utf8"));
+    assert.equal(committedGraph.status, "succeeded");
+    assert.equal(committedGraph.activeRunId, null);
+    assert.ok(committedGraph.finalResultRef);
+    assert.ok(Object.values(committedGraph.nodes).every((node) => node.status === "succeeded"));
+    const draft = JSON.parse(await fs.readFile(path.join(
+      projectRoot,
+      ".ats",
+      "composition-drafts-v2",
+      `${draftId}.json`,
+    ), "utf8"));
+    assert.equal(draft.schemaVersion, 2);
+    assert.equal(draft.sourceExecutionGraphId, paused.graphId);
+    assert.match(draft.validatedContentDigest, /^[a-f0-9]{64}$/);
+    assert.equal(Object.keys(draft.nodes).length, 11);
+    const resumedRun = JSON.parse(await fs.readFile(path.join(
+      projectRoot,
+      ".ats",
+      "runs-v3",
+      `${succeeded.runId}.json`,
+    ), "utf8"));
+    assert.equal(resumedRun.status, "succeeded");
+
+    const afterResume = (await readStubRequests(root)).filter(
+      (entry) => entry.scenario === "recovery",
+    );
+    assert.equal(afterResume.filter((entry) => entry.kind === "composition_suite_brief").length, 1);
+    const allNodeRequests = afterResume.filter((entry) => entry.kind === "composition_node");
+    assert.equal(allNodeRequests.length, 12);
+    const countsByNode = new Map();
+    for (const entry of allNodeRequests) {
+      countsByNode.set(entry.nodeId, (countsByNode.get(entry.nodeId) ?? 0) + 1);
+    }
+    assert.equal(Array.from(countsByNode.values()).filter((count) => count === 2).length, 1);
+    assert.equal(Array.from(countsByNode.values()).filter((count) => count === 1).length, 10);
+    await assertNoTransactionResidue(projectRoot);
+    await assertNoAtomicWriteResidue(projectRoot);
   });
 
   it("saves a definition and executes Batch v4 through persisted child Runs", async () => {

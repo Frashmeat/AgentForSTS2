@@ -2,10 +2,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use ats_adapters::{
-    FileArtifactStore, FileCompositionDraftRepository, FileItemRepository, FileProjectStager,
-    FileProjectWriter, FileResourceRepository, FileTruthSnapshotRepository, HttpMediaClient,
-    HttpModelClient, ModelRequestQueue, PngResourceMediaProcessor, RegisteredBuildRunner,
-    RegisteredValidationRunner, ZipPackageWriter,
+    FileArtifactStore, FileCompositionDraftRepository, FileExecutionGraphRepository,
+    FileItemRepository, FileProjectStager, FileProjectWriter, FileResourceRepository,
+    FileTruthSnapshotRepository, HttpMediaClient, HttpModelClient, ModelRequestQueue,
+    PngResourceMediaProcessor, RegisteredBuildRunner, RegisteredValidationRunner, ZipPackageWriter,
 };
 use ats_features::FeatureSpec;
 use ats_features::composition_generate::{
@@ -13,8 +13,9 @@ use ats_features::composition_generate::{
     CompositionGenerateService,
 };
 use ats_features::composition_plan::{
-    CompositionPlanContext, CompositionPlanFeature, CompositionPlanService,
+    CompositionPlanContext, CompositionPlanFeature, CompositionPlanRequest, CompositionPlanService,
     CompositionRetryNodeContext, CompositionRetryNodeFeature, CompositionRetryNodeService,
+    StagedCompositionStart,
 };
 use ats_features::log_analyze::{LogAnalyzeContext, LogAnalyzeFeature, LogAnalyzeService};
 use ats_features::mod_generate_batch::{
@@ -111,6 +112,62 @@ impl Stage2Composition {
             .ok_or_else(|| failure("truth.missing", "feature.truth"))
     }
 
+    pub fn prepare_composition_plan_start(
+        &self,
+        request: CompositionPlanRequest,
+        run_id: ats_runtime::RunId,
+    ) -> Result<StagedCompositionStart, RunFailure> {
+        let truth = self.current_truth()?;
+        let contributions = self.resolve(
+            &CompositionPlanFeature::id(),
+            &[CompositionPlanFeature::contribution_requirement()],
+        )?;
+        CompositionPlanService::built_in()
+            .map_err(|_| failure("feature.recipe_invalid", "composition.plan.recipe"))?
+            .prepare_staged_start(
+                request,
+                CompositionPlanContext {
+                    pack: &self.pack,
+                    contributions: &contributions,
+                    truth: &truth,
+                    project_context: None,
+                    custom_instructions: None,
+                    model: None,
+                },
+                run_id,
+            )
+            .map_err(|error| error.run_failure())
+    }
+
+    pub fn prepare_composition_plan_resume(
+        &self,
+        graph: ats_runtime::ExecutionGraphRecord,
+        expected_revision: u64,
+        run_id: ats_runtime::RunId,
+    ) -> Result<StagedCompositionStart, RunFailure> {
+        let truth = self.current_truth()?;
+        let contributions = self.resolve(
+            &CompositionPlanFeature::id(),
+            &[CompositionPlanFeature::contribution_requirement()],
+        )?;
+        CompositionPlanService::built_in()
+            .map_err(|_| failure("feature.recipe_invalid", "composition.plan.recipe"))?
+            .prepare_staged_resume(
+                graph,
+                expected_revision,
+                run_id,
+                CompositionPlanContext {
+                    pack: &self.pack,
+                    contributions: &contributions,
+                    truth: &truth,
+                    project_context: None,
+                    custom_instructions: None,
+                    model: None,
+                },
+            )
+            .map_err(|error| error.run_failure())
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub async fn execute(
         &self,
@@ -121,6 +178,7 @@ impl Stage2Composition {
         repository: &dyn RunRepository,
         items: &FileItemRepository,
         drafts: &FileCompositionDraftRepository,
+        graphs: &FileExecutionGraphRepository,
         resources: &FileResourceRepository,
         source_path: Option<PathBuf>,
         cancellation: &CancellationToken,
@@ -133,6 +191,7 @@ impl Stage2Composition {
             repository,
             items,
             drafts,
+            graphs,
             resources,
             source_path,
             cancellation,
@@ -157,6 +216,7 @@ impl Stage2Composition {
     ) -> Result<RunRecord, RunFailure> {
         let items = FileItemRepository::new(project_root.to_path_buf());
         let drafts = FileCompositionDraftRepository::new(project_root.to_path_buf());
+        let graphs = FileExecutionGraphRepository::new(project_root.to_path_buf());
         self.execute_inner(
             config,
             project_root,
@@ -165,6 +225,7 @@ impl Stage2Composition {
             repository,
             &items,
             &drafts,
+            &graphs,
             resources,
             source_path,
             cancellation,
@@ -183,6 +244,7 @@ impl Stage2Composition {
         repository: &dyn RunRepository,
         items: &FileItemRepository,
         drafts: &FileCompositionDraftRepository,
+        graphs: &FileExecutionGraphRepository,
         resources: &FileResourceRepository,
         source_path: Option<PathBuf>,
         cancellation: &CancellationToken,
@@ -298,26 +360,34 @@ impl Stage2Composition {
                 )?;
                 let model =
                     select_model(model_override, &settings.llm, Arc::clone(&self.model_queue))?;
-                let execution = CompositionPlanService::built_in()
-                    .map_err(|_| failure("feature.recipe_invalid", "composition.plan.recipe"))?
-                    .execute(
+                let service = CompositionPlanService::built_in()
+                    .map_err(|_| failure("feature.recipe_invalid", "composition.plan.recipe"))?;
+                let plan_context = CompositionPlanContext {
+                    pack: &self.pack,
+                    contributions: &contributions,
+                    truth: &truth,
+                    project_context: Some(&project_context),
+                    custom_instructions,
+                    model: model_name,
+                };
+                if request.execution.is_none() {
+                    return Err(failure("run.input_invalid", "composition.plan.execution"));
+                }
+                let result = service
+                    .execute_staged(
                         model.client(),
                         items,
                         drafts,
+                        graphs,
+                        run.id(),
                         request,
-                        CompositionPlanContext {
-                            pack: &self.pack,
-                            contributions: &contributions,
-                            truth: &truth,
-                            project_context: Some(&project_context),
-                            custom_instructions,
-                            model: model_name,
-                        },
+                        plan_context,
                         cancellation,
                     )
                     .await
-                    .map_err(|error| error.run_failure())?;
-                succeed::<CompositionPlanFeature, _>(&mut run, &execution.result)?;
+                    .map_err(|error| error.run_failure())?
+                    .result;
+                succeed::<CompositionPlanFeature, _>(&mut run, &result)?;
             }
             "composition.retry-node" => {
                 let request = self.decode::<CompositionRetryNodeFeature>(&run)?;

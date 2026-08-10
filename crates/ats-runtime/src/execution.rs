@@ -237,6 +237,7 @@ pub trait ValidationRunner: Send + Sync {
 fn encode_reason(reason: CancellationReason) -> u8 {
     match reason {
         CancellationReason::User => 1,
+        CancellationReason::Pause => 5,
         CancellationReason::ProjectClose => 2,
         CancellationReason::ProjectSwitch => 3,
         CancellationReason::AppShutdown => 4,
@@ -249,6 +250,7 @@ fn decode_reason(value: u8) -> Option<CancellationReason> {
         2 => Some(CancellationReason::ProjectClose),
         3 => Some(CancellationReason::ProjectSwitch),
         4 => Some(CancellationReason::AppShutdown),
+        5 => Some(CancellationReason::Pause),
         _ => None,
     }
 }

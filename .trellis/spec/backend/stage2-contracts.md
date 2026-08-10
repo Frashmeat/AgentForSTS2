@@ -64,11 +64,13 @@ typed reference bindings and optional composition-profile provenance.
 Validated Serde and deterministic ordered serialization produce the definition SHA-256 used by
 future Run/Artifact provenance; Runtime remains unaware of game-specific types.
 
-`ats-workspace` also owns CompositionDraft schema v1 and the repository ports for Draft CAS and
-atomic multi-definition saves. Drafts are review state, not ready Items. `ats-adapters` persists
-them below `.ats/composition-drafts-v1` and uses a recoverable pointer journal when confirming more
-than one definition. `ats-features` owns closed-subgraph confirmation and `ResolvedItemGraph` v1;
-Adapters do not import or reimplement graph rules.
+`ats-workspace` also owns CompositionDraft schema v2 and the repository ports for Draft CAS,
+payload-hash `createOrMatch`, and atomic multi-definition saves. Drafts are review state, not ready
+Items. `ats-adapters` persists them below `.ats/composition-drafts-v2`; v2 records optional exact
+`sourceExecutionGraphId` plus `validatedContentDigest`, and the Adapter uses a recoverable pointer
+journal when confirming more than one definition. Old v1 files are preserved and not rewritten.
+`ats-features` owns closed-subgraph confirmation and `ResolvedItemGraph` v1; Adapters do not import
+or reimplement graph rules.
 
 Pack may contain declarations/templates/resources and registered Primitive IDs. It cannot contain arbitrary script, native plugin, provider credential, or complete workflow implementation.
 
@@ -797,6 +799,157 @@ v4 unchanged and invokes Build/Package only after every Item outcome succeeds.
 ## 7. Feature Composition
 
 The shared registry contains exactly 12 current Features, including `composition.plan`, `composition.retry-node` and `composition.generate`. Composition planning persists reviewable Draft state and never publishes Item pointers or project files. Targeted retry replaces exactly one logical Draft node, then reuses the full Plan graph validator and Draft revision CAS; it never follows a newer Item pointer or lets the model author Resource/current/hash state. Composition generation reuses Plan, Single proposal, Build and Package services but owns one whole-closure publication boundary. Single generation owns the validated model bundle -> rollback-capable project writes -> real validation -> immutable Artifact -> Run success order. Batch invokes Single child Runs. Complex invokes Plan, Batch/Single, Build and Package. No composition creates an alternative Prompt, Resource, file transaction, build or package implementation.
+
+### Scenario: Resume Large Composition Planning From Durable Node Checkpoints
+
+#### 1. Scope / Trigger
+
+This contract applies when a Pack v2 composition blueprint expands a large or cross-item plan into
+multiple model nodes. Small bounded Single requests keep their direct path. The public registry
+remains exactly 12 Features; execution nodes are not Features or child Runs.
+
+#### 2. Signatures
+
+```rust
+// ats-kernel
+pub struct ExecutionGraphId(String);
+pub struct ExecutionNodeId(String);
+
+// ats-runtime
+pub trait ExecutionGraphRepository: Send + Sync {
+    fn create_claimed(
+        &self,
+        graph: &ExecutionGraphRecord,
+        run_id: &RunId,
+    ) -> Result<(), ExecutionGraphRepositoryError>;
+    fn get(&self, id: &ExecutionGraphId)
+        -> Result<ExecutionGraphRecord, ExecutionGraphRepositoryError>;
+    fn compare_and_set(
+        &self,
+        expected_revision: u64,
+        next: &ExecutionGraphRecord,
+    ) -> Result<(), ExecutionGraphRepositoryError>;
+    fn list(&self) -> Result<Vec<ExecutionGraphRecord>, ExecutionGraphRepositoryError>;
+    fn recover_structure(&self, runs: &dyn RunRepository)
+        -> Result<ExecutionGraphRecovery, ExecutionGraphRepositoryError>;
+}
+
+// ats-workspace
+pub trait CompositionDraftRepository {
+    fn create_or_match(
+        &self,
+        draft: &CompositionDraft,
+        expected_payload_sha256: &Sha256Digest,
+    ) -> Result<CreateOrMatch, Self::Error>;
+}
+```
+
+`ExecutionGraphRecord` v1 contains `executionGraphId`, `ownerFeatureId`,
+`requestSnapshotHash`, monotonic `revision`, graph `status`, `activeRunId`, `previousRunId`,
+versioned+hashed `blueprint`, ordered nodes, optional immutable `commitIntent`, and optional
+`finalResultRef`. Each node contains stable ID/role/dependencies, status, logical attempts,
+request-snapshot hash, optional versioned+hashed normalized checkpoint, and optional safe failure.
+
+#### 3. Contracts
+
+- Start atomically creates and claims a graph for its candidate Run. Resume atomically claims the
+  same graph with `expectedRevision`, a new Run ID and `previousRunId`. A losing claimant creates no
+  Pending/Running Run.
+- One graph has at most one active Run. A logical node attempt belongs to the public parent Run;
+  Adapter HTTP retries remain internal transport attempts.
+- Nodes execute in stable blueprint order with default model concurrency one. A node becomes ready
+  only after every declared dependency succeeded.
+- A succeeded model node has a checkpoint whose SHA-256 recomputes from the canonical versioned
+  domain payload. Prompt, provider request/body, raw completion, credentials, stack traces and raw
+  errors are forbidden in checkpoints.
+- Decode, typed validation or exhausted transport failure pauses the graph. Retry/resume is an
+  explicit user action that creates a new parent Run; Features do not add an automatic semantic
+  retry loop or silently change model/response format.
+- After all nodes succeed, Feature finalization binds local identities, pinned hashes and Resource
+  provenance, then reuses the complete composition graph validator.
+- `validatedContentDigest` covers immutable owner/request/blueprint identity, every ordered
+  successful node identity/dependencies/checkpoint identity, and local finalization output. It
+  excludes graph revision/status, Runs, attempts, timestamps, failure, commit metadata and final
+  reference.
+- `commitIntent` fixes Draft ID, complete canonical Draft payload, payload SHA-256,
+  `validatedContentDigest`, and timestamps before publication. The only success order is
+  `commit_prepared -> Draft createOrMatch -> graph succeeded -> Run succeeded`.
+- `commit_prepared` is roll-forward-only. Draft absence creates the exact intent payload; an exact
+  provenance+bytes match is idempotent; a mismatch becomes stable `commit_blocked` and
+  `composition.commit.conflict`. It never overwrites a Draft or regenerates timestamps/IDs.
+- Project open order is publication recovery, execution-graph structural recovery, Run
+  reconciliation, session exposure, then Feature payload compatibility validation. An unsupported
+  blueprint/checkpoint pauses only that graph and does not prevent the project from opening.
+- Graceful close/switch/shutdown requests pause and drains active staged graphs before releasing the
+  project lock. Explicit Cancel preserves graph, Run, Draft intent and all other evidence.
+
+Pack `pack.composition-plan-guidance` v2 owns strict node groups, group dependencies, deterministic
+count rules, optional suite-brief guidance, and group-targeted binding/quantity rules. Features
+compile stable node/Item IDs and generic stages; Pack data cannot specify threads, HTTP retries,
+paths, commands or Provider settings.
+
+#### 4. Validation & Error Matrix
+
+| Condition | Result |
+| --- | --- |
+| duplicate node/group, missing dependency, cycle, invalid count/binding target | typed preflight failure before HTTP |
+| CAS/claim revision mismatch or active Run exists | typed conflict; no new Run |
+| node response malformed, wrong typed shape or transport retries exhausted | checkpoint unchanged; graph paused; Run failed/interrupted |
+| checkpoint hash/state mismatch or corrupt graph JSON | structural recovery failure for that graph; no guessed recovery |
+| Run create fails after graph claim | CAS compensation to paused; project-open recovery handles a failed compensation |
+| crash before `commit_prepared` | preserve succeeded checkpoints and resume remaining nodes |
+| crash after `commit_prepared`, before Draft | create exact intent Draft and roll forward |
+| matching Draft exists, graph not succeeded | match exact payload/provenance and roll forward |
+| conflicting Draft ID exists | graph `commit_blocked`; never overwrite or retry model nodes |
+| graph succeeded before old Run terminal write | old Run becomes interrupted; explicit resume creates an idempotent succeeded Run |
+
+#### 5. Good / Base / Bad Cases
+
+- Good: an eleven-node Character graph persists each validated node and resumes at node six after a
+  Provider outage without repeating nodes one through five.
+- Base: a bounded single-item generation continues to use one direct request and one Run.
+- Bad: store raw completions as checkpoints or expose partial Items in the library.
+- Bad: create the Run before winning the graph claim, downgrade `commit_prepared` to paused, or
+  recompute a Draft during recovery.
+- Bad: let React infer dependency readiness or decode versioned Feature checkpoint payloads.
+
+#### 6. Tests Required
+
+```powershell
+cargo test -p ats-runtime execution_graph -- --nocapture
+cargo test -p ats-adapters execution_graph_store -- --nocapture
+cargo test -p ats-workspace composition -- --nocapture
+cargo test -p ats-features staged_generation -- --nocapture
+cargo test -p agentthespire-desktop --test stage2_composition -- --nocapture
+npm run test:frontend -- --run
+```
+
+Assertions cover ID/schema validation, DAG/cycle checks, transition legality, checkpoint hashes,
+CAS conflicts, one active claim, FIFO serial node execution, explicit retry as a new Run, crash at
+each commit boundary, exact Draft match/conflict, recovery ordering, cancellation/drain behavior,
+typed progress/actions, exact 12-Feature catalog and no partial Draft/Item publication.
+
+#### 7. Wrong Vs Correct
+
+Wrong - keep one large response and retry the whole graph:
+
+```rust
+let plan = model.complete(render_entire_graph())?;
+drafts.create(decode_and_validate(plan)?)?;
+```
+
+Correct - persist only typed domain checkpoints and publish once:
+
+```rust
+let claimed = graphs.claim(expected_revision, new_run_id, previous_run_id)?;
+for ready_node in claimed.ready_nodes() {
+    let checkpoint = feature.generate_and_validate(ready_node)?;
+    graphs.compare_and_set(claimed.revision(), claimed.with_checkpoint(checkpoint)?)?;
+}
+let intent = feature.prepare_commit(graphs.get(id)?)?;
+drafts.create_or_match(intent.draft(), intent.draft_payload_sha256())?;
+graphs.mark_succeeded(intent.final_ref())?;
+```
 
 ## 8. Shell Cutover
 

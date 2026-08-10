@@ -55,7 +55,7 @@ const definition = (itemId, itemType, referenceBindings = {}) => ({
 });
 
 const draft = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   draftId: "fixture-draft",
   revision: 1,
   gamePackId: "fixture-game",

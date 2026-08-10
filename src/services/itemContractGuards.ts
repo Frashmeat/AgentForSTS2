@@ -14,7 +14,7 @@ import type {
 export function isCompositionDraft(value: unknown): value is CompositionDraft {
   return (
     isRecord(value) &&
-    value.schemaVersion === 1 &&
+    value.schemaVersion === 2 &&
     typeof value.draftId === "string" &&
     isPositiveInteger(value.revision) &&
     typeof value.gamePackId === "string" &&
@@ -22,6 +22,12 @@ export function isCompositionDraft(value: unknown): value is CompositionDraft {
     typeof value.rootItemId === "string" &&
     isItemCompositionProfile(value.profile) &&
     isRecord(value.nodes) &&
+    (value.sourceExecutionGraphId === undefined ||
+      value.sourceExecutionGraphId === null ||
+      typeof value.sourceExecutionGraphId === "string") &&
+    (value.validatedContentDigest === undefined ||
+      value.validatedContentDigest === null ||
+      typeof value.validatedContentDigest === "string") &&
     Object.values(value.nodes).every(isCompositionDraftNode) &&
     typeof value.createdAt === "string" &&
     typeof value.updatedAt === "string"

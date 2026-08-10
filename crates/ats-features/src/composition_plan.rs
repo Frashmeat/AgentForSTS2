@@ -6,9 +6,9 @@ use ats_game_context::{
     VerifiedContributionSet, VerifiedTruthSnapshot,
 };
 use ats_kernel::{
-    CompositionDraftId, CompositionId, ContributionId, FailureCode, FeatureId, ItemFieldId, ItemId,
-    ItemReferenceSlotId, ItemTypeId, LocaleId, LocalizationFieldId, RecipeId, ResourceId, SchemaId,
-    SchemaRef, SchemaVersion, Sha256Digest,
+    CompositionDraftId, CompositionId, ContributionId, ExecutionGraphId, FailureCode, FeatureId,
+    ItemFieldId, ItemId, ItemReferenceSlotId, ItemTypeId, LocaleId, LocalizationFieldId, RecipeId,
+    ResourceId, SchemaId, SchemaRef, SchemaVersion, Sha256Digest,
 };
 use ats_runtime::{
     CancellationToken, FinishReason, ModelClient, ModelError, ModelGamePackRef,
@@ -28,6 +28,9 @@ use thiserror::Error;
 use crate::FeatureSpec;
 use crate::item_definition::{ItemDefinitionValidationMode, ItemDefinitionValidator};
 use crate::prompt::{FeatureRecipe, FeatureRecipeError, FeatureRecipeLoader};
+
+mod staged;
+pub use staged::*;
 
 const RECIPE_BYTES: &[u8] = include_bytes!("../recipes/composition-plan.json");
 const RECIPE_SHA256: &str = "ebf895d74318d5798c9cd6c97e5c8d43b71d9723e26fd5e7f2e6cbc174e687c6";
@@ -66,7 +69,7 @@ impl CompositionPlanFeature {
     pub fn contribution_requirement() -> ats_game_context::ContributionRequirement {
         ats_game_context::ContributionRequirement {
             slot_id: contribution_slot(),
-            schema: schema("pack.composition-plan-guidance"),
+            schema: schema_version("pack.composition-plan-guidance", 2),
         }
     }
 }
@@ -111,6 +114,26 @@ pub struct CompositionPlanRequest {
     pub concept: String,
     pub source: ItemCompositionSource,
     pub parameters: BTreeMap<ats_kernel::CompositionParameterId, u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<CompositionExecutionRequest>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum CompositionExecutionRequest {
+    Start {
+        execution_graph_id: ExecutionGraphId,
+    },
+    Resume {
+        execution_graph_id: ExecutionGraphId,
+        expected_revision: u64,
+        previous_run_id: ats_runtime::RunId,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -121,6 +144,10 @@ pub struct CompositionPlanResult {
     pub root_item_id: ItemId,
     pub node_count: u32,
     pub model_request_sha256: Sha256Digest,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_graph_id: Option<ExecutionGraphId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validated_content_digest: Option<Sha256Digest>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -164,11 +191,23 @@ struct CompositionPlanContribution {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CompositionPlanGuidance {
     composition_id: CompositionId,
-    allowed_item_types: Vec<ItemTypeId>,
-    node_type_rules: Vec<CompositionNodeTypeRule>,
+    node_groups: Vec<CompositionNodeGroup>,
     #[serde(default)]
-    reference_binding_rules: Vec<CompositionReferenceBindingRule>,
+    coordination: CompositionCoordination,
+    #[serde(default)]
+    binding_rules: Vec<CompositionBindingRule>,
     guidance: Vec<String>,
+}
+
+impl CompositionPlanGuidance {
+    fn allowed_item_types(&self) -> Vec<ItemTypeId> {
+        self.node_groups
+            .iter()
+            .map(|group| group.item_type.clone())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -186,12 +225,44 @@ struct CompositionRetryGuidance {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CompositionNodeTypeRule {
+struct CompositionNodeGroup {
+    id: String,
     item_type: ItemTypeId,
+    count: CompositionCountRule,
+    #[serde(default)]
+    depends_on_group_ids: Vec<String>,
+    generation_kind: CompositionGenerationKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CompositionCountRule {
     base_count: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     parameter_id: Option<ats_kernel::CompositionParameterId>,
-    parameter_multiplier: u32,
+    multiplier: u32,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+enum CompositionGenerationKind {
+    ModelItem,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CompositionCoordination {
+    #[serde(default)]
+    suite_brief: CompositionSuiteBrief,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CompositionSuiteBrief {
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default)]
+    guidance: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
@@ -203,14 +274,30 @@ enum ReferenceBindingMeasure {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CompositionReferenceBindingRule {
-    source_item_type: ItemTypeId,
+struct CompositionBindingRule {
+    source_group_id: String,
     slot_id: ItemReferenceSlotId,
+    target_group_ids: Vec<String>,
     measure: ReferenceBindingMeasure,
-    base_count: u32,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    parameter_id: Option<ats_kernel::CompositionParameterId>,
-    parameter_multiplier: u32,
+    quantity_policy: CompositionQuantityPolicy,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+enum CompositionQuantityPolicy {
+    Constant {
+        value: u32,
+    },
+    BriefDistribution {
+        total_parameter_id: ats_kernel::CompositionParameterId,
+        min_per_target: u32,
+        max_per_target: u32,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -385,6 +472,7 @@ pub struct CompositionPlanExecution {
 
 pub struct CompositionPlanService {
     recipe: FeatureRecipe,
+    staged_recipes: StagedRecipes,
 }
 
 pub struct CompositionRetryNodeService {
@@ -404,7 +492,10 @@ impl CompositionPlanService {
         {
             return Err(CompositionPlanError::InvalidRecipeContract);
         }
-        Ok(Self { recipe })
+        Ok(Self {
+            recipe,
+            staged_recipes: StagedRecipes::built_in()?,
+        })
     }
 
     pub async fn execute<C, I, D>(
@@ -431,7 +522,7 @@ impl CompositionPlanService {
             .iter()
             .find(|value| value.composition_id == request.composition_id)
             .ok_or(CompositionPlanError::UnsupportedComposition)?;
-        let evidence = query_evidence(context.truth, context.pack, &guidance.allowed_item_types)?;
+        let evidence = query_evidence(context.truth, context.pack, &guidance.allowed_item_types())?;
         check_cancelled(cancellation)?;
 
         let profile = ItemCompositionProfile {
@@ -559,6 +650,8 @@ impl CompositionPlanService {
                 ))
             })?,
             model_request_sha256: snapshot.request_sha256().clone(),
+            execution_graph_id: None,
+            validated_content_digest: None,
         };
         Ok(CompositionPlanExecution {
             result,
@@ -848,24 +941,20 @@ impl CompositionPlanContribution {
                 return Err(CompositionPlanError::InvalidPackGuidance);
             };
             if !ids.insert(&entry.composition_id)
-                || entry.allowed_item_types.is_empty()
-                || entry.allowed_item_types.len() > 64
-                || entry
-                    .allowed_item_types
-                    .iter()
-                    .collect::<BTreeSet<_>>()
-                    .len()
-                    != entry.allowed_item_types.len()
-                || !entry.allowed_item_types.contains(profile.root_item_type())
-                || entry
-                    .allowed_item_types
-                    .iter()
-                    .any(|id| pack.item_type(id).is_none())
                 || entry.guidance.is_empty()
                 || entry.guidance.len() > 64
                 || entry.guidance.iter().any(|value| !valid_text(value, 2_000))
-                || !valid_node_type_rules(profile, entry)
-                || !valid_reference_binding_rules(pack, profile, entry)
+                || entry.coordination.suite_brief.guidance.len() > 32
+                || entry
+                    .coordination
+                    .suite_brief
+                    .guidance
+                    .iter()
+                    .any(|value| !valid_text(value, 2_000))
+                || (!entry.coordination.suite_brief.enabled
+                    && !entry.coordination.suite_brief.guidance.is_empty())
+                || !valid_node_groups(pack, profile, entry)
+                || !valid_binding_rules(pack, profile, entry)
             {
                 return Err(CompositionPlanError::InvalidPackGuidance);
             }
@@ -895,16 +984,25 @@ impl CompositionRetryContribution {
     }
 }
 
-fn valid_reference_binding_rules(
+fn valid_binding_rules(
     pack: &LoadedGamePack,
     profile: &CompositionProfileSet,
     guidance: &CompositionPlanGuidance,
 ) -> bool {
-    if guidance.reference_binding_rules.len() > 128 {
+    if guidance.binding_rules.len() > 128 {
         return false;
     }
-    guidance.reference_binding_rules.iter().all(|rule| {
-        let Some(descriptor) = pack.item_type(&rule.source_item_type) else {
+    let groups = guidance
+        .node_groups
+        .iter()
+        .map(|group| (group.id.as_str(), group))
+        .collect::<BTreeMap<_, _>>();
+    let mut identities = BTreeSet::new();
+    guidance.binding_rules.iter().all(|rule| {
+        let Some(source_group) = groups.get(rule.source_group_id.as_str()) else {
+            return false;
+        };
+        let Some(descriptor) = pack.item_type(&source_group.item_type) else {
             return false;
         };
         let Some(slot) = descriptor
@@ -914,68 +1012,139 @@ fn valid_reference_binding_rules(
         else {
             return false;
         };
-        guidance.allowed_item_types.contains(&rule.source_item_type)
-            && rule.base_count <= 128
-            && rule.parameter_multiplier <= 128
+        let targets = rule
+            .target_group_ids
+            .iter()
+            .filter_map(|id| groups.get(id.as_str()))
+            .collect::<Vec<_>>();
+        !rule.target_group_ids.is_empty()
+            && targets.len() == rule.target_group_ids.len()
+            && rule.target_group_ids.iter().collect::<BTreeSet<_>>().len()
+                == rule.target_group_ids.len()
+            && targets
+                .iter()
+                .all(|group| slot.allowed_item_types().contains(&group.item_type))
+            && identities.insert((rule.source_group_id.as_str(), &rule.slot_id, rule.measure))
             && (rule.measure != ReferenceBindingMeasure::TotalQuantity
                 || slot.kind() == ItemReferenceKind::Pinned)
-            && match &rule.parameter_id {
-                None => rule.parameter_multiplier == 0,
-                Some(parameter_id) => {
-                    rule.parameter_multiplier > 0
+            && match &rule.quantity_policy {
+                CompositionQuantityPolicy::Constant { value } => {
+                    (1..=slot.max_quantity()).contains(value)
+                }
+                CompositionQuantityPolicy::BriefDistribution {
+                    total_parameter_id,
+                    min_per_target,
+                    max_per_target,
+                } => {
+                    rule.measure == ReferenceBindingMeasure::TotalQuantity
+                        && slot.kind() == ItemReferenceKind::Pinned
+                        && guidance.coordination.suite_brief.enabled
+                        && min_per_target <= max_per_target
+                        && *min_per_target >= slot.min_quantity()
+                        && *max_per_target <= slot.max_quantity()
                         && profile
                             .parameters()
                             .iter()
-                            .any(|parameter| parameter.id() == parameter_id)
+                            .any(|parameter| parameter.id() == total_parameter_id)
                 }
             }
     })
 }
 
-fn valid_node_type_rules(
+fn valid_node_groups(
+    pack: &LoadedGamePack,
     profile: &CompositionProfileSet,
     guidance: &CompositionPlanGuidance,
 ) -> bool {
-    if guidance.node_type_rules.is_empty() || guidance.node_type_rules.len() > 64 {
+    if guidance.node_groups.is_empty() || guidance.node_groups.len() > 64 {
         return false;
     }
-    let base_count = guidance
-        .node_type_rules
+    let ids = guidance
+        .node_groups
         .iter()
-        .try_fold(0_u32, |sum, rule| sum.checked_add(rule.base_count));
-    if base_count != Some(profile.base_node_count())
-        || guidance
-            .node_type_rules
-            .iter()
-            .filter(|rule| &rule.item_type == profile.root_item_type())
-            .map(|rule| rule.base_count)
-            .sum::<u32>()
-            == 0
-        || guidance.node_type_rules.iter().any(|rule| {
-            !guidance.allowed_item_types.contains(&rule.item_type)
-                || rule.base_count > 128
-                || rule.parameter_multiplier > 128
-                || (rule.parameter_id.is_none() && rule.parameter_multiplier != 0)
-                || rule.parameter_id.as_ref().is_some_and(|id| {
+        .map(|group| group.id.as_str())
+        .collect::<BTreeSet<_>>();
+    if ids.len() != guidance.node_groups.len()
+        || guidance.node_groups.iter().any(|group| {
+            !valid_group_id(&group.id)
+                || pack.item_type(&group.item_type).is_none()
+                || group.count.base_count > 128
+                || group.count.multiplier > 128
+                || (group.count.parameter_id.is_none() && group.count.multiplier != 0)
+                || group.count.parameter_id.as_ref().is_some_and(|id| {
                     !profile
                         .parameters()
                         .iter()
                         .any(|parameter| parameter.id() == id)
-                        || rule.parameter_multiplier == 0
+                        || group.count.multiplier == 0
                 })
+                || group
+                    .depends_on_group_ids
+                    .iter()
+                    .any(|dependency| dependency == &group.id || !ids.contains(dependency.as_str()))
+                || group
+                    .depends_on_group_ids
+                    .iter()
+                    .collect::<BTreeSet<_>>()
+                    .len()
+                    != group.depends_on_group_ids.len()
         })
+        || group_dependencies_are_cyclic(&guidance.node_groups)
+    {
+        return false;
+    }
+    let base_count = guidance
+        .node_groups
+        .iter()
+        .try_fold(0_u32, |sum, group| sum.checked_add(group.count.base_count));
+    if base_count != Some(profile.base_node_count())
+        || guidance
+            .node_groups
+            .iter()
+            .filter(|group| &group.item_type == profile.root_item_type())
+            .map(|group| group.count.base_count)
+            .sum::<u32>()
+            == 0
     {
         return false;
     }
     profile.parameters().iter().all(|parameter| {
         guidance
-            .node_type_rules
+            .node_groups
             .iter()
-            .filter(|rule| rule.parameter_id.as_ref() == Some(parameter.id()))
-            .map(|rule| rule.parameter_multiplier)
+            .filter(|group| group.count.parameter_id.as_ref() == Some(parameter.id()))
+            .map(|group| group.count.multiplier)
             .sum::<u32>()
             == parameter.node_weight()
     })
+}
+
+fn group_dependencies_are_cyclic(groups: &[CompositionNodeGroup]) -> bool {
+    let mut pending = groups
+        .iter()
+        .map(|group| (group.id.as_str(), group.depends_on_group_ids.len()))
+        .collect::<BTreeMap<_, _>>();
+    let mut ready = pending
+        .iter()
+        .filter_map(|(id, count)| (*count == 0).then_some(*id))
+        .collect::<BTreeSet<_>>();
+    let mut visited = 0_usize;
+    while let Some(id) = ready.pop_first() {
+        visited += 1;
+        for group in groups
+            .iter()
+            .filter(|group| group.depends_on_group_ids.iter().any(|value| value == id))
+        {
+            let Some(count) = pending.get_mut(group.id.as_str()) else {
+                return true;
+            };
+            *count -= 1;
+            if *count == 0 {
+                ready.insert(group.id.as_str());
+            }
+        }
+    }
+    visited != groups.len()
 }
 
 fn validate_request<'a>(
@@ -1061,18 +1230,20 @@ fn expected_node_type_counts(
     profile: &ItemCompositionProfile,
 ) -> Result<BTreeMap<ItemTypeId, u32>, CompositionPlanError> {
     let mut expected = BTreeMap::new();
-    for rule in &guidance.node_type_rules {
-        let parameter_count = rule
+    for group in &guidance.node_groups {
+        let parameter_count = group
+            .count
             .parameter_id
             .as_ref()
             .and_then(|id| profile.parameters.get(id))
             .copied()
             .unwrap_or_default();
-        let count = rule
+        let count = group
+            .count
             .base_count
-            .checked_add(parameter_count.saturating_mul(rule.parameter_multiplier))
+            .checked_add(parameter_count.saturating_mul(group.count.multiplier))
             .ok_or(CompositionPlanError::InvalidProfile)?;
-        let current = expected.entry(rule.item_type.clone()).or_insert(0_u32);
+        let current = expected.entry(group.item_type.clone()).or_insert(0_u32);
         *current = current
             .checked_add(count)
             .ok_or(CompositionPlanError::InvalidProfile)?;
@@ -1088,28 +1259,75 @@ fn expected_reference_binding_counts(
     CompositionPlanError,
 > {
     let mut expected = BTreeMap::new();
-    for rule in &guidance.reference_binding_rules {
-        let parameter_count = rule
-            .parameter_id
-            .as_ref()
-            .and_then(|id| profile.parameters.get(id))
-            .copied()
-            .unwrap_or_default();
-        let count = rule
-            .base_count
-            .checked_add(parameter_count.saturating_mul(rule.parameter_multiplier))
-            .ok_or(CompositionPlanError::InvalidProfile)?;
+    for rule in &guidance.binding_rules {
+        let source_group = guidance
+            .node_groups
+            .iter()
+            .find(|group| group.id == rule.source_group_id)
+            .ok_or(CompositionPlanError::InvalidPackGuidance)?;
+        let target_count = rule.target_group_ids.iter().try_fold(0_u32, |total, id| {
+            let group = guidance
+                .node_groups
+                .iter()
+                .find(|group| &group.id == id)
+                .ok_or(CompositionPlanError::InvalidPackGuidance)?;
+            total
+                .checked_add(resolve_group_count(group, profile)?)
+                .ok_or(CompositionPlanError::InvalidProfile)
+        })?;
+        let count = match (&rule.measure, &rule.quantity_policy) {
+            (ReferenceBindingMeasure::Bindings, _) => target_count,
+            (
+                ReferenceBindingMeasure::TotalQuantity,
+                CompositionQuantityPolicy::Constant { value },
+            ) => target_count
+                .checked_mul(*value)
+                .ok_or(CompositionPlanError::InvalidProfile)?,
+            (
+                ReferenceBindingMeasure::TotalQuantity,
+                CompositionQuantityPolicy::BriefDistribution {
+                    total_parameter_id, ..
+                },
+            ) => profile
+                .parameters
+                .get(total_parameter_id)
+                .copied()
+                .ok_or(CompositionPlanError::InvalidProfile)?,
+        };
         let key = (
-            rule.source_item_type.clone(),
+            source_group.item_type.clone(),
             rule.slot_id.clone(),
             rule.measure,
         );
-        let current = expected.entry(key).or_insert(0_u32);
-        *current = current
-            .checked_add(count)
-            .ok_or(CompositionPlanError::InvalidProfile)?;
+        match expected.get(&key) {
+            Some(existing) if *existing != count => {
+                return Err(CompositionPlanError::InvalidPackGuidance);
+            }
+            Some(_) => {}
+            None => {
+                expected.insert(key, count);
+            }
+        }
     }
     Ok(expected)
+}
+
+fn resolve_group_count(
+    group: &CompositionNodeGroup,
+    profile: &ItemCompositionProfile,
+) -> Result<u32, CompositionPlanError> {
+    let parameter_count = group
+        .count
+        .parameter_id
+        .as_ref()
+        .and_then(|id| profile.parameters.get(id))
+        .copied()
+        .unwrap_or_default();
+    group
+        .count
+        .base_count
+        .checked_add(parameter_count.saturating_mul(group.count.multiplier))
+        .ok_or(CompositionPlanError::InvalidProfile)
 }
 
 fn composition_plan_output_contract(
@@ -1144,7 +1362,7 @@ fn composition_plan_output_contract(
         || resolved
             .expected_node_type_counts
             .iter()
-            .any(|count| !guidance.allowed_item_types.contains(&count.item_type))
+            .any(|count| !guidance.allowed_item_types().contains(&count.item_type))
     {
         return Err(CompositionPlanError::InvalidPackGuidance);
     }
@@ -1441,7 +1659,7 @@ fn build_definitions(
     let root_id = planned.root_item_id;
     let mut source = BTreeMap::new();
     for node in planned.nodes {
-        if !guidance.allowed_item_types.contains(&node.item_type) {
+        if !guidance.allowed_item_types().contains(&node.item_type) {
             return Err(CompositionPlanError::InvalidModelOutput(
                 CompositionPlanFailureDetails::reason(
                     CompositionPlanFailureReason::ItemTypeUnsupported,
@@ -1910,6 +2128,12 @@ pub enum CompositionPlanError {
     DraftConflict,
     #[error("composition Draft storage failed")]
     DraftStorage,
+    #[error("composition execution graph revision changed")]
+    ExecutionGraphConflict,
+    #[error("composition execution graph storage failed")]
+    ExecutionGraphStorage,
+    #[error("composition commit conflicts with an existing Draft")]
+    CommitConflict,
     #[error("composition Item storage failed")]
     ItemStorage,
     #[error("composition Item identity has a different type")]
@@ -1966,6 +2190,15 @@ impl CompositionPlanError {
                 "composition.draft.storage_failed",
                 "composition.plan.persist",
             ),
+            Self::ExecutionGraphConflict => (
+                "composition.execution.conflict",
+                "composition.plan.execution",
+            ),
+            Self::ExecutionGraphStorage => (
+                "composition.execution.storage_failed",
+                "composition.plan.execution",
+            ),
+            Self::CommitConflict => ("composition.commit.conflict", "composition.plan.commit"),
             Self::ItemStorage => ("item.storage_failed", "composition.plan.current"),
             Self::ItemTypeConflict => (
                 "composition.draft.item_type_conflict",
@@ -2174,9 +2407,13 @@ fn retry_model_output_schema() -> SchemaRef {
 }
 
 fn schema(id: &str) -> SchemaRef {
+    schema_version(id, 1)
+}
+
+fn schema_version(id: &str, version: u32) -> SchemaRef {
     SchemaRef {
         id: SchemaId::parse(id).expect("built-in schema ID is valid"),
-        version: SchemaVersion::new(1).expect("built-in schema version is valid"),
+        version: SchemaVersion::new(version).expect("built-in schema version is valid"),
     }
 }
 
@@ -2196,8 +2433,21 @@ fn valid_text(value: &str, max: usize) -> bool {
     !value.trim().is_empty() && value.chars().count() <= max && !value.contains('\0')
 }
 
+fn valid_group_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_lowercase())
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_')
+        })
+}
+
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
     use std::sync::Mutex;
 
     use async_trait::async_trait;
@@ -2206,7 +2456,11 @@ mod tests {
         TruthSnapshotSource,
     };
     use ats_kernel::{CompositionParameterId, CompositionProfileId, PrimitiveId};
-    use ats_runtime::{ModelResponse, ModelStream};
+    use ats_runtime::{
+        ExecutionGraphRecord, ExecutionGraphRecovery, ExecutionGraphRepository,
+        ExecutionGraphRepositoryError, ExecutionGraphStatus, ModelResponse, ModelStream,
+        RunRepository,
+    };
     use futures_util::stream;
     use sha2::{Digest, Sha256};
 
@@ -2262,6 +2516,27 @@ mod tests {
             Ok(())
         }
 
+        fn create_or_match(
+            &self,
+            draft: &CompositionDraft,
+            expected_payload_sha256: &Sha256Digest,
+        ) -> Result<ats_workspace::CompositionDraftCreateOrMatch, Self::Error> {
+            if &draft.payload_sha256().map_err(|_| MemoryError)? != expected_payload_sha256 {
+                return Err(MemoryError);
+            }
+            let mut stored = self.0.lock().unwrap();
+            match stored.as_ref() {
+                Some(existing) if existing == draft => {
+                    Ok(ats_workspace::CompositionDraftCreateOrMatch::Matched)
+                }
+                Some(_) => Err(MemoryError),
+                None => {
+                    *stored = Some(draft.clone());
+                    Ok(ats_workspace::CompositionDraftCreateOrMatch::Created)
+                }
+            }
+        }
+
         fn load(&self, _: &CompositionDraftId) -> Result<CompositionDraft, Self::Error> {
             self.0.lock().unwrap().clone().ok_or(MemoryError)
         }
@@ -2297,6 +2572,103 @@ mod tests {
 
     struct RetryModel {
         snapshots: Mutex<Vec<ModelRequestSnapshot>>,
+    }
+
+    struct StagedModel {
+        responses: Mutex<VecDeque<String>>,
+        snapshots: Mutex<Vec<ModelRequestSnapshot>>,
+    }
+
+    #[async_trait]
+    impl ModelClient for StagedModel {
+        async fn complete(
+            &self,
+            request: ModelRequestSnapshot,
+            _: &CancellationToken,
+        ) -> Result<ModelResponse, ModelError> {
+            self.snapshots.lock().unwrap().push(request);
+            let content = self
+                .responses
+                .lock()
+                .unwrap()
+                .pop_front()
+                .ok_or(ModelError::Transport)?;
+            Ok(ModelResponse {
+                model: "fixture-staged".into(),
+                content,
+                finish_reason: FinishReason::EndTurn,
+                usage: TokenUsage::default(),
+            })
+        }
+
+        async fn stream(
+            &self,
+            _: ModelRequestSnapshot,
+            _: &CancellationToken,
+        ) -> Result<ModelStream, ModelError> {
+            Ok(Box::pin(stream::empty()))
+        }
+    }
+
+    #[derive(Default)]
+    struct MemoryGraphs(Mutex<Option<ExecutionGraphRecord>>);
+
+    impl ExecutionGraphRepository for MemoryGraphs {
+        fn create_claimed(
+            &self,
+            graph: &ExecutionGraphRecord,
+            run_id: &ats_runtime::RunId,
+        ) -> Result<(), ExecutionGraphRepositoryError> {
+            if graph.active_run_id() != Some(run_id) {
+                return Err(ExecutionGraphRepositoryError::InvalidRecord);
+            }
+            let mut stored = self.0.lock().unwrap();
+            if stored.is_some() {
+                return Err(ExecutionGraphRepositoryError::AlreadyExists);
+            }
+            *stored = Some(graph.clone());
+            Ok(())
+        }
+
+        fn get(
+            &self,
+            id: &ExecutionGraphId,
+        ) -> Result<ExecutionGraphRecord, ExecutionGraphRepositoryError> {
+            self.0
+                .lock()
+                .unwrap()
+                .clone()
+                .filter(|graph| graph.id() == id)
+                .ok_or(ExecutionGraphRepositoryError::NotFound)
+        }
+
+        fn compare_and_set(
+            &self,
+            expected_revision: u64,
+            next: &ExecutionGraphRecord,
+        ) -> Result<(), ExecutionGraphRepositoryError> {
+            let mut stored = self.0.lock().unwrap();
+            if stored.as_ref().is_none_or(|graph| {
+                graph.id() != next.id()
+                    || graph.revision() != expected_revision
+                    || next.revision() != expected_revision + 1
+            }) {
+                return Err(ExecutionGraphRepositoryError::Conflict);
+            }
+            *stored = Some(next.clone());
+            Ok(())
+        }
+
+        fn list(&self) -> Result<Vec<ExecutionGraphRecord>, ExecutionGraphRepositoryError> {
+            Ok(self.0.lock().unwrap().clone().into_iter().collect())
+        }
+
+        fn recover_structure(
+            &self,
+            _: &dyn RunRepository,
+        ) -> Result<ExecutionGraphRecovery, ExecutionGraphRepositoryError> {
+            Ok(ExecutionGraphRecovery::default())
+        }
     }
 
     #[async_trait]
@@ -2422,12 +2794,17 @@ mod tests {
             }],
             "contributions":[{
                 "slotId":"composition.plan.guidance","featureId":"composition.plan",
-                "schema":{"id":"pack.composition-plan-guidance","version":1},
+                "schema":{"id":"pack.composition-plan-guidance","version":2},
                 "payload":{"compositions":[{
-                    "compositionId":"fixture_suite","allowedItemTypes":["root","child"],
-                    "nodeTypeRules":[
-                        {"itemType":"root","baseCount":1,"parameterMultiplier":0},
-                        {"itemType":"child","baseCount":0,"parameterId":"child_count","parameterMultiplier":1}
+                    "compositionId":"fixture_suite",
+                    "nodeGroups":[
+                        {"id":"root","itemType":"root","count":{"baseCount":1,"multiplier":0},"dependsOnGroupIds":["children"],"generationKind":"model_item"},
+                        {"id":"children","itemType":"child","count":{"baseCount":0,"parameterId":"child_count","multiplier":1},"generationKind":"model_item"}
+                    ],
+                    "coordination":{"suiteBrief":{"enabled":true,"guidance":["Coordinate the fixture nodes."]}},
+                    "bindingRules":[
+                        {"sourceGroupId":"root","slotId":"children","targetGroupIds":["children"],"measure":"bindings","quantityPolicy":{"kind":"constant","value":1}},
+                        {"sourceGroupId":"children","slotId":"owner","targetGroupIds":["root"],"measure":"bindings","quantityPolicy":{"kind":"constant","value":1}}
                     ],
                     "guidance":["Plan one root and its children."]
                 }]}
@@ -2529,18 +2906,37 @@ mod tests {
         };
         let guidance = CompositionPlanGuidance {
             composition_id: CompositionId::parse("fixture_suite").unwrap(),
-            allowed_item_types: vec![
-                ItemTypeId::parse("root").unwrap(),
-                ItemTypeId::parse("child").unwrap(),
+            node_groups: vec![
+                CompositionNodeGroup {
+                    id: "root".into(),
+                    item_type: ItemTypeId::parse("root").unwrap(),
+                    count: CompositionCountRule {
+                        base_count: 1,
+                        parameter_id: None,
+                        multiplier: 0,
+                    },
+                    depends_on_group_ids: Vec::new(),
+                    generation_kind: CompositionGenerationKind::ModelItem,
+                },
+                CompositionNodeGroup {
+                    id: "children".into(),
+                    item_type: ItemTypeId::parse("child").unwrap(),
+                    count: CompositionCountRule {
+                        base_count: 2,
+                        parameter_id: None,
+                        multiplier: 0,
+                    },
+                    depends_on_group_ids: Vec::new(),
+                    generation_kind: CompositionGenerationKind::ModelItem,
+                },
             ],
-            node_type_rules: Vec::new(),
-            reference_binding_rules: vec![CompositionReferenceBindingRule {
-                source_item_type: ItemTypeId::parse("root").unwrap(),
+            coordination: CompositionCoordination::default(),
+            binding_rules: vec![CompositionBindingRule {
+                source_group_id: "root".into(),
                 slot_id: ItemReferenceSlotId::parse("children").unwrap(),
+                target_group_ids: vec!["children".into()],
                 measure: ReferenceBindingMeasure::TotalQuantity,
-                base_count: 10,
-                parameter_id: None,
-                parameter_multiplier: 0,
+                quantity_policy: CompositionQuantityPolicy::Constant { value: 5 },
             }],
             guidance: vec!["Fixture".into()],
         };
@@ -2600,6 +2996,7 @@ mod tests {
                         CompositionParameterId::parse("child_count").unwrap(),
                         1,
                     )]),
+                    execution: None,
                 },
                 CompositionPlanContext {
                     pack: &pack,
@@ -2658,6 +3055,316 @@ mod tests {
         assert!(prompt.contains("\"expectedNodeTypeCounts\""));
     }
 
+    #[tokio::test]
+    async fn staged_plan_resumes_only_the_failed_node_and_commits_exact_draft() {
+        let pack = pack();
+        let truth = truth(&pack);
+        let contributions = ContributionResolver::new(Vec::<PrimitiveId>::new())
+            .resolve(
+                &pack,
+                &CompositionPlanFeature::id(),
+                &[CompositionPlanFeature::contribution_requirement()],
+            )
+            .unwrap();
+        let service = CompositionPlanService::built_in().unwrap();
+        let request = CompositionPlanRequest {
+            draft_id: CompositionDraftId::parse("staged-fixture-draft").unwrap(),
+            composition_id: CompositionId::parse("fixture_suite").unwrap(),
+            concept: "Create one recoverable fixture suite.".into(),
+            source: ItemCompositionSource::Preset {
+                profile_id: CompositionProfileId::parse("standard").unwrap(),
+            },
+            parameters: BTreeMap::from([(
+                CompositionParameterId::parse("child_count").unwrap(),
+                1,
+            )]),
+            execution: None,
+        };
+        let first_run = ats_runtime::RunId::parse("run-staged-first").unwrap();
+        let start = service
+            .prepare_staged_start(
+                request,
+                CompositionPlanContext {
+                    pack: &pack,
+                    contributions: &contributions,
+                    truth: &truth,
+                    project_context: None,
+                    custom_instructions: None,
+                    model: None,
+                },
+                first_run.clone(),
+            )
+            .unwrap();
+        let graph_id = start.graph.id().clone();
+        let graphs = MemoryGraphs::default();
+        graphs.create_claimed(&start.graph, &first_run).unwrap();
+        let drafts = MemoryDrafts::default();
+        let first_model = StagedModel {
+            responses: Mutex::new(VecDeque::from([
+                serde_json::json!({
+                    "theme":"A bounded fixture theme.",
+                    "nodeResponsibilities":{
+                        "item.generate:children:000":"Provide the child behavior.",
+                        "item.generate:root:000":"Coordinate the root behavior."
+                    },
+                    "quantityDistributions":{}
+                })
+                .to_string(),
+                serde_json::json!({
+                    "canonicalFields":{},
+                    "behaviorIntent":["Provide the child behavior."],
+                    "localizations":{}
+                })
+                .to_string(),
+            ])),
+            snapshots: Mutex::new(Vec::new()),
+        };
+        let first_error = service
+            .execute_staged(
+                &first_model,
+                &MemoryItems,
+                &drafts,
+                &graphs,
+                &first_run,
+                start.request,
+                CompositionPlanContext {
+                    pack: &pack,
+                    contributions: &contributions,
+                    truth: &truth,
+                    project_context: None,
+                    custom_instructions: None,
+                    model: None,
+                },
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                first_error,
+                CompositionPlanError::Model(ModelError::Transport)
+            ),
+            "unexpected staged failure after {} requests: {first_error:?}",
+            first_model.snapshots.lock().unwrap().len()
+        );
+        assert_eq!(first_model.snapshots.lock().unwrap().len(), 3);
+        let paused = graphs.get(&graph_id).unwrap();
+        assert_eq!(paused.status(), ExecutionGraphStatus::Paused);
+        assert!(drafts.0.lock().unwrap().is_none());
+
+        let expected_revision = paused.revision();
+        let second_run = ats_runtime::RunId::parse("run-staged-second").unwrap();
+        let resumed = service
+            .prepare_staged_resume(
+                paused,
+                expected_revision,
+                second_run.clone(),
+                CompositionPlanContext {
+                    pack: &pack,
+                    contributions: &contributions,
+                    truth: &truth,
+                    project_context: None,
+                    custom_instructions: None,
+                    model: None,
+                },
+            )
+            .unwrap();
+        graphs
+            .compare_and_set(expected_revision, &resumed.graph)
+            .unwrap();
+        let second_model = StagedModel {
+            responses: Mutex::new(VecDeque::from([serde_json::json!({
+                "canonicalFields":{},
+                "behaviorIntent":["Coordinate the root behavior."],
+                "localizations":{}
+            })
+            .to_string()])),
+            snapshots: Mutex::new(Vec::new()),
+        };
+        let outcome = service
+            .execute_staged(
+                &second_model,
+                &MemoryItems,
+                &drafts,
+                &graphs,
+                &second_run,
+                resumed.request,
+                CompositionPlanContext {
+                    pack: &pack,
+                    contributions: &contributions,
+                    truth: &truth,
+                    project_context: None,
+                    custom_instructions: None,
+                    model: None,
+                },
+                &CancellationToken::new(),
+            )
+            .await;
+        assert!(
+            outcome.is_ok(),
+            "resume failed with {:?}; graph: {:?}",
+            outcome.as_ref().err(),
+            graphs.get(&graph_id).unwrap()
+        );
+        let execution = outcome.unwrap();
+        assert_eq!(second_model.snapshots.lock().unwrap().len(), 1);
+        assert_eq!(execution.request_snapshots.len(), 1);
+        assert_eq!(
+            execution.draft.source_execution_graph_id,
+            Some(graph_id.clone())
+        );
+        assert!(execution.draft.validated_content_digest.is_some());
+        assert_eq!(
+            graphs.get(&graph_id).unwrap().status(),
+            ExecutionGraphStatus::Succeeded
+        );
+        assert_eq!(drafts.0.lock().unwrap().as_ref(), Some(&execution.draft));
+
+        let committed_graph = graphs.get(&graph_id).unwrap();
+        let committed_revision = committed_graph.revision();
+        let committed_result = execution.result.clone();
+        let committed_draft = execution.draft.clone();
+        let reconciliation_run = ats_runtime::RunId::parse("run-staged-reconcile").unwrap();
+        let reconciliation = service
+            .prepare_staged_resume(
+                committed_graph,
+                committed_revision,
+                reconciliation_run.clone(),
+                CompositionPlanContext {
+                    pack: &pack,
+                    contributions: &contributions,
+                    truth: &truth,
+                    project_context: None,
+                    custom_instructions: None,
+                    model: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(reconciliation.graph.revision(), committed_revision);
+        let reconciliation_model = StagedModel {
+            responses: Mutex::new(VecDeque::new()),
+            snapshots: Mutex::new(Vec::new()),
+        };
+        let reconciled = service
+            .execute_staged(
+                &reconciliation_model,
+                &MemoryItems,
+                &drafts,
+                &graphs,
+                &reconciliation_run,
+                reconciliation.request,
+                CompositionPlanContext {
+                    pack: &pack,
+                    contributions: &contributions,
+                    truth: &truth,
+                    project_context: None,
+                    custom_instructions: None,
+                    model: None,
+                },
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert!(reconciliation_model.snapshots.lock().unwrap().is_empty());
+        assert!(reconciled.request_snapshots.is_empty());
+        assert_eq!(reconciled.result, committed_result);
+        assert_eq!(reconciled.draft, committed_draft);
+        assert_eq!(
+            graphs.get(&graph_id).unwrap().revision(),
+            committed_revision
+        );
+    }
+
+    #[tokio::test]
+    async fn staged_plan_preflight_cancellation_preserves_pause_and_cancel_semantics() {
+        let pack = pack();
+        let truth = truth(&pack);
+        let contributions = ContributionResolver::new(Vec::<PrimitiveId>::new())
+            .resolve(
+                &pack,
+                &CompositionPlanFeature::id(),
+                &[CompositionPlanFeature::contribution_requirement()],
+            )
+            .unwrap();
+        let service = CompositionPlanService::built_in().unwrap();
+
+        for (suffix, reason, expected_status) in [
+            (
+                "pause",
+                ats_runtime::CancellationReason::Pause,
+                ExecutionGraphStatus::Paused,
+            ),
+            (
+                "cancel",
+                ats_runtime::CancellationReason::User,
+                ExecutionGraphStatus::Cancelled,
+            ),
+        ] {
+            let run_id = ats_runtime::RunId::parse(format!("run-staged-{suffix}")).unwrap();
+            let start = service
+                .prepare_staged_start(
+                    CompositionPlanRequest {
+                        draft_id: CompositionDraftId::parse(format!(
+                            "staged-{suffix}-fixture-draft"
+                        ))
+                        .unwrap(),
+                        composition_id: CompositionId::parse("fixture_suite").unwrap(),
+                        concept: "Exercise staged cancellation semantics.".into(),
+                        source: ItemCompositionSource::Preset {
+                            profile_id: CompositionProfileId::parse("standard").unwrap(),
+                        },
+                        parameters: BTreeMap::from([(
+                            CompositionParameterId::parse("child_count").unwrap(),
+                            1,
+                        )]),
+                        execution: None,
+                    },
+                    CompositionPlanContext {
+                        pack: &pack,
+                        contributions: &contributions,
+                        truth: &truth,
+                        project_context: None,
+                        custom_instructions: None,
+                        model: None,
+                    },
+                    run_id.clone(),
+                )
+                .unwrap();
+            let graph_id = start.graph.id().clone();
+            let graphs = MemoryGraphs::default();
+            graphs.create_claimed(&start.graph, &run_id).unwrap();
+            let model = StagedModel {
+                responses: Mutex::new(VecDeque::new()),
+                snapshots: Mutex::new(Vec::new()),
+            };
+            let cancellation = CancellationToken::new();
+            assert!(cancellation.cancel(reason));
+
+            let result = service
+                .execute_staged(
+                    &model,
+                    &MemoryItems,
+                    &MemoryDrafts::default(),
+                    &graphs,
+                    &run_id,
+                    start.request,
+                    CompositionPlanContext {
+                        pack: &pack,
+                        contributions: &contributions,
+                        truth: &truth,
+                        project_context: None,
+                        custom_instructions: None,
+                        model: None,
+                    },
+                    &cancellation,
+                )
+                .await;
+            assert!(matches!(result, Err(CompositionPlanError::Cancelled)));
+            assert!(model.snapshots.lock().unwrap().is_empty());
+            assert_eq!(graphs.get(&graph_id).unwrap().status(), expected_status);
+        }
+    }
+
     #[test]
     fn composition_model_failures_persist_only_safe_versioned_details() {
         let failure = CompositionPlanError::ProfileCountMismatch(
@@ -2693,7 +3400,7 @@ mod tests {
     }
 
     #[test]
-    fn sts2_prototype_compiles_to_one_bounded_run_scoped_output_contract() {
+    fn sts2_prototype_compiles_to_v2_stable_groups_and_eleven_business_nodes() {
         let pack = GamePackLoader::load_built_in_sts2().unwrap();
         let contributions = ContributionResolver::new(Vec::<PrimitiveId>::new())
             .resolve(
@@ -2725,28 +3432,24 @@ mod tests {
             parameters: prototype.values().clone(),
         };
         let resolved = resolve_composition_profile(profile_set, guidance, &profile).unwrap();
-        let contract = composition_plan_output_contract(&pack, guidance, &resolved).unwrap();
-        let encoded = serde_json::to_vec(&contract.json_schema).unwrap();
-
+        assert_eq!(resolved.expected_node_count, 11);
+        assert_eq!(guidance.node_groups.len(), 9);
+        assert!(guidance.coordination.suite_brief.enabled);
         assert!(
-            encoded.len() <= 32_000,
-            "contract size was {}",
-            encoded.len()
+            guidance
+                .node_groups
+                .iter()
+                .any(|group| { group.id == "starter_cards" && group.item_type.as_str() == "card" })
         );
-        assert_eq!(
-            contract.json_schema["properties"]["nodes"]["minItems"],
-            serde_json::json!(11)
-        );
-        assert_eq!(
-            contract.json_schema["properties"]["nodes"]["maxItems"],
-            serde_json::json!(11)
-        );
-        assert_eq!(
-            contract.json_schema["properties"]["nodes"]["items"]["oneOf"]
-                .as_array()
-                .map(Vec::len),
-            Some(3)
-        );
+        assert!(guidance.binding_rules.iter().any(|rule| {
+            rule.source_group_id == "character"
+                && rule.slot_id.as_str() == "starting_deck"
+                && rule.target_group_ids == ["starter_cards"]
+                && matches!(
+                    rule.quantity_policy,
+                    CompositionQuantityPolicy::BriefDistribution { .. }
+                )
+        }));
     }
 
     #[tokio::test]
@@ -2789,6 +3492,7 @@ mod tests {
                         CompositionParameterId::parse("child_count").unwrap(),
                         1,
                     )]),
+                    execution: None,
                 },
                 CompositionPlanContext {
                     pack: &pack,

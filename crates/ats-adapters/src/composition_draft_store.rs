@@ -6,8 +6,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use ats_kernel::CompositionDraftId;
 use ats_workspace::{
-    CompositionDraft, CompositionDraftError, CompositionDraftRepository,
-    CompositionDraftRepositoryErrorKind,
+    CompositionDraft, CompositionDraftCreateOrMatch, CompositionDraftError,
+    CompositionDraftRepository, CompositionDraftRepositoryErrorKind,
 };
 use serde::Serialize;
 use thiserror::Error;
@@ -59,7 +59,7 @@ impl FileCompositionDraftRepository {
     }
 
     fn drafts_root(&self) -> PathBuf {
-        self.project_root.join(".ats").join("composition-drafts-v1")
+        self.project_root.join(".ats").join("composition-drafts-v2")
     }
 
     fn prepare_root(&self) -> Result<PathBuf, CompositionDraftStoreError> {
@@ -125,6 +125,48 @@ impl CompositionDraftRepository for FileCompositionDraftRepository {
             } => CompositionDraftStoreError::Conflict,
             other => other,
         })
+    }
+
+    fn create_or_match(
+        &self,
+        draft: &CompositionDraft,
+        expected_payload_sha256: &ats_kernel::Sha256Digest,
+    ) -> Result<CompositionDraftCreateOrMatch, Self::Error> {
+        let _guard = self
+            .gate
+            .lock()
+            .map_err(|_| CompositionDraftStoreError::LockUnavailable)?;
+        draft.validate()?;
+        if draft.revision != 1 || &draft.payload_sha256()? != expected_payload_sha256 {
+            return Err(CompositionDraftStoreError::Conflict);
+        }
+        self.prepare_root()?;
+        match self.load_unlocked(&draft.draft_id) {
+            Ok(existing)
+                if existing == *draft && existing.payload_sha256()? == *expected_payload_sha256 =>
+            {
+                Ok(CompositionDraftCreateOrMatch::Matched)
+            }
+            Ok(_) => Err(CompositionDraftStoreError::Conflict),
+            Err(CompositionDraftStoreError::NotFound) => {
+                let bytes =
+                    serde_json::to_vec_pretty(draft).map_err(CompositionDraftStoreError::Json)?;
+                write_new_synced(
+                    &self.path(&draft.draft_id),
+                    &bytes,
+                    "create_or_match_composition_draft",
+                )
+                .map_err(|error| match error {
+                    CompositionDraftStoreError::Io {
+                        kind: io::ErrorKind::AlreadyExists,
+                        ..
+                    } => CompositionDraftStoreError::Conflict,
+                    other => other,
+                })?;
+                Ok(CompositionDraftCreateOrMatch::Created)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     fn load(&self, draft_id: &CompositionDraftId) -> Result<CompositionDraft, Self::Error> {
@@ -342,8 +384,8 @@ mod tests {
         ItemTypeId, Sha256Digest,
     };
     use ats_workspace::{
-        CompositionDraftNode, CompositionDraftRepository, ItemCompositionProfile,
-        ItemCompositionSource, ItemDefinition,
+        CompositionDraftCreateOrMatch, CompositionDraftNode, CompositionDraftRepository,
+        ItemCompositionProfile, ItemCompositionSource, ItemDefinition,
     };
     use chrono::{Duration, Utc};
 
@@ -396,7 +438,7 @@ mod tests {
 
         let temporary = temp
             .path()
-            .join(".ats/composition-drafts-v1/.fixture-draft.json.1.1.tmp");
+            .join(".ats/composition-drafts-v2/.fixture-draft.json.1.1.tmp");
         fs::write(&temporary, b"partial").unwrap();
         assert_eq!(repository.list().unwrap(), vec![second.clone()]);
         assert!(!temporary.exists());
@@ -425,5 +467,43 @@ mod tests {
             repository.load(&draft.draft_id),
             Err(CompositionDraftStoreError::NotFound)
         ));
+    }
+
+    #[test]
+    fn create_or_match_is_idempotent_and_never_overwrites_a_conflict() {
+        let temp = tempfile::tempdir().unwrap();
+        let repository = FileCompositionDraftRepository::new(temp.path().to_path_buf());
+        let first = draft();
+        let digest = first.payload_sha256().unwrap();
+        assert_eq!(
+            repository.create_or_match(&first, &digest).unwrap(),
+            CompositionDraftCreateOrMatch::Created
+        );
+        assert_eq!(
+            repository.create_or_match(&first, &digest).unwrap(),
+            CompositionDraftCreateOrMatch::Matched
+        );
+
+        let mut conflicting = first;
+        conflicting
+            .nodes
+            .get_mut(&conflicting.root_item_id)
+            .unwrap()
+            .definition
+            .behavior_intent
+            .push("Conflicting content.".into());
+        let conflicting_digest = conflicting.payload_sha256().unwrap();
+        assert!(matches!(
+            repository.create_or_match(&conflicting, &conflicting_digest),
+            Err(CompositionDraftStoreError::Conflict)
+        ));
+        assert_ne!(
+            repository
+                .load(&conflicting.draft_id)
+                .unwrap()
+                .payload_sha256()
+                .unwrap(),
+            conflicting_digest
+        );
     }
 }

@@ -157,6 +157,7 @@ async fn sts2_branded_placeholder_prototype_prepares_resources_and_publishes_one
             profile_id: CompositionProfileId::parse("prototype").unwrap(),
         },
         parameters,
+        execution: None,
     };
     let planned = CompositionPlanService::built_in()
         .unwrap()
@@ -622,6 +623,7 @@ async fn sts2_standard_and_custom_profiles_build_valid_35_to_43_node_drafts() {
                     concept: "Build a deterministic scale-gate Character suite.".into(),
                     source,
                     parameters,
+                    execution: None,
                 },
                 CompositionPlanContext {
                     pack: &pack,

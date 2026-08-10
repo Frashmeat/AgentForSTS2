@@ -6,8 +6,9 @@ mod project;
 mod resource;
 
 pub use composition::{
-    COMPOSITION_DRAFT_SCHEMA_VERSION, CompositionDraft, CompositionDraftError,
-    CompositionDraftNode, CompositionDraftRepository, CompositionDraftRepositoryErrorKind,
+    COMPOSITION_DRAFT_SCHEMA_VERSION, CompositionDraft, CompositionDraftCreateOrMatch,
+    CompositionDraftError, CompositionDraftNode, CompositionDraftRepository,
+    CompositionDraftRepositoryErrorKind,
 };
 pub use item::{
     AtomicItemRepository, AtomicItemSaveError, AtomicItemSaveRequest,

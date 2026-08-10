@@ -6,12 +6,13 @@ use std::sync::{Arc, Mutex as StdMutex, RwLock};
 use std::time::Duration;
 
 use ats_adapters::{
-    FileCompositionDraftRepository, FileItemRepository, FileProjectWriter, FileResourceRepository,
-    FileRunRepository,
+    FileCompositionDraftRepository, FileExecutionGraphRepository, FileItemRepository,
+    FileProjectWriter, FileResourceRepository, FileRunRepository,
 };
 use ats_runtime::{
-    CancellationReason, CancellationToken, RunFailure, RunId, RunRecord, RunRepository,
-    RunRepositoryError, RunStatus, RunTransition,
+    CancellationReason, CancellationToken, ExecutionGraphRecord, ExecutionGraphRepository,
+    ExecutionGraphRepositoryError, RunFailure, RunId, RunRecord, RunRepository, RunRepositoryError,
+    RunStatus, RunTransition,
 };
 use ats_workspace::{ProjectFolder, ProjectMeta};
 use chrono::Utc;
@@ -50,6 +51,7 @@ pub struct ProjectSession {
     root: PathBuf,
     meta: ProjectMeta,
     repository: Arc<FileRunRepository>,
+    execution_graph_repository: Arc<FileExecutionGraphRepository>,
     item_repository: Arc<FileItemRepository>,
     composition_draft_repository: Arc<FileCompositionDraftRepository>,
     resource_repository: Arc<FileResourceRepository>,
@@ -76,6 +78,8 @@ pub enum ProjectSessionOpenError {
     ProjectRecovery(#[from] ats_runtime::ProjectWriteError),
     #[error(transparent)]
     RunRepository(#[from] RunRepositoryError),
+    #[error(transparent)]
+    ExecutionGraphRepository(#[from] ExecutionGraphRepositoryError),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -87,6 +91,10 @@ impl ProjectSession {
     pub fn open(project: ProjectFolder) -> Result<Arc<Self>, ProjectSessionOpenError> {
         FileProjectWriter::recover(project.path())?;
         let repository = Arc::new(FileRunRepository::new(project.run_history_dir())?);
+        let execution_graph_repository = Arc::new(FileExecutionGraphRepository::new(
+            project.path().to_path_buf(),
+        ));
+        execution_graph_repository.recover_structure(repository.as_ref())?;
         repository.reconcile_interrupted()?;
         let item_repository = Arc::new(FileItemRepository::new(project.path().to_path_buf()));
         let composition_draft_repository = Arc::new(FileCompositionDraftRepository::new(
@@ -99,6 +107,7 @@ impl ProjectSession {
             meta: project.meta().clone(),
             project_lock: StdMutex::new(Some(project)),
             repository,
+            execution_graph_repository,
             item_repository,
             composition_draft_repository,
             resource_repository,
@@ -121,6 +130,11 @@ impl ProjectSession {
     #[must_use]
     pub fn repository(&self) -> Arc<dyn RunRepository> {
         Arc::clone(&self.repository) as Arc<dyn RunRepository>
+    }
+
+    #[must_use]
+    pub fn execution_graph_repository(&self) -> Arc<FileExecutionGraphRepository> {
+        Arc::clone(&self.execution_graph_repository)
     }
 
     #[must_use]
@@ -153,20 +167,72 @@ impl ProjectSession {
         F: FnOnce(RunRecord, CancellationToken, Arc<dyn RunRepository>) -> Fut + Send + 'static,
         Fut: Future<Output = Result<RunRecord, RunFailure>> + Send + 'static,
     {
+        self.submit_internal(&mut run, None, worker).await
+    }
+
+    pub async fn submit_claimed<F, Fut>(
+        &self,
+        mut run: RunRecord,
+        graph: ExecutionGraphRecord,
+        worker: F,
+    ) -> Result<RunId, SubmitError>
+    where
+        F: FnOnce(RunRecord, CancellationToken, Arc<dyn RunRepository>) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<RunRecord, RunFailure>> + Send + 'static,
+    {
+        self.submit_internal(&mut run, Some((None, graph)), worker)
+            .await
+    }
+
+    pub async fn submit_resumed<F, Fut>(
+        &self,
+        mut run: RunRecord,
+        expected_revision: u64,
+        graph: ExecutionGraphRecord,
+        worker: F,
+    ) -> Result<RunId, SubmitError>
+    where
+        F: FnOnce(RunRecord, CancellationToken, Arc<dyn RunRepository>) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<RunRecord, RunFailure>> + Send + 'static,
+    {
+        self.submit_internal(&mut run, Some((Some(expected_revision), graph)), worker)
+            .await
+    }
+
+    async fn submit_internal<F, Fut>(
+        &self,
+        run: &mut RunRecord,
+        graph: Option<(Option<u64>, ExecutionGraphRecord)>,
+        worker: F,
+    ) -> Result<RunId, SubmitError>
+    where
+        F: FnOnce(RunRecord, CancellationToken, Arc<dyn RunRepository>) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<RunRecord, RunFailure>> + Send + 'static,
+    {
         let mut tasks = self.tasks.lock().await;
         if self.is_closing() {
             return Err(SubmitError::Closing);
         }
-        self.repository
-            .create(&run)
+        if let Some((expected_revision, graph)) = &graph {
+            match expected_revision {
+                Some(expected_revision) => self
+                    .execution_graph_repository
+                    .compare_and_set(*expected_revision, graph),
+                None => self
+                    .execution_graph_repository
+                    .create_claimed(graph, run.id()),
+            }
             .map_err(|_| SubmitError::Repository)?;
-        run.apply_transition(RunTransition::Start, Utc::now())
-            .map_err(|_| SubmitError::Repository)?;
-        self.repository
-            .persist(&run, RunStatus::Pending)
-            .map_err(|_| SubmitError::Repository)?;
+        }
+        persist_started_run(
+            self.repository.as_ref(),
+            self.execution_graph_repository.as_ref(),
+            run,
+            graph.as_ref().map(|(_, graph)| graph),
+        )?;
 
         let id = run.id().clone();
+        let run = run.clone();
         let cancellation = CancellationToken::new();
         let worker_cancellation = cancellation.clone();
         let repository = self.repository();
@@ -285,13 +351,150 @@ impl ProjectSession {
     }
 }
 
+fn persist_started_run<R, G>(
+    runs: &R,
+    graphs: &G,
+    run: &mut RunRecord,
+    claimed_graph: Option<&ExecutionGraphRecord>,
+) -> Result<(), SubmitError>
+where
+    R: RunRepository + ?Sized,
+    G: ExecutionGraphRepository + ?Sized,
+{
+    let result = runs
+        .create(run)
+        .map_err(|_| SubmitError::Repository)
+        .and_then(|()| {
+            run.apply_transition(RunTransition::Start, Utc::now())
+                .map_err(|_| SubmitError::Repository)
+        })
+        .and_then(|()| {
+            runs.persist(run, RunStatus::Pending)
+                .map_err(|_| SubmitError::Repository)
+        });
+    if result.is_err()
+        && let Some(graph) = claimed_graph
+    {
+        let _ = compensate_graph_claim(graphs, graph.clone());
+    }
+    result
+}
+
+fn compensate_graph_claim<G>(
+    repository: &G,
+    mut graph: ExecutionGraphRecord,
+) -> Result<(), ExecutionGraphRepositoryError>
+where
+    G: ExecutionGraphRepository + ?Sized,
+{
+    let expected_revision = graph.revision();
+    graph
+        .recover_stale_claim(Utc::now())
+        .map_err(|_| ExecutionGraphRepositoryError::InvalidRecord)?;
+    repository.compare_and_set(expected_revision, &graph)
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
 
-    use ats_runtime::{ProjectFileWrite, ProjectFileWriter};
+    use ats_kernel::{
+        ExecutionGraphId, ExecutionNodeId, FeatureId, SchemaId, SchemaRef, SchemaVersion,
+        Sha256Digest,
+    };
+    use ats_runtime::{
+        ExecutionGraphRecord, ExecutionGraphRepository, ExecutionGraphStatus, ExecutionNodeSpec,
+        ProjectFileWrite, ProjectFileWriter, RunSummary, VersionedPayload,
+    };
 
     use super::*;
+
+    #[derive(Default)]
+    struct PersistFailingRunRepository {
+        created: StdMutex<Option<RunRecord>>,
+    }
+
+    impl RunRepository for PersistFailingRunRepository {
+        fn create(&self, run: &RunRecord) -> Result<(), RunRepositoryError> {
+            *self.created.lock().unwrap() = Some(run.clone());
+            Ok(())
+        }
+
+        fn get(&self, id: &RunId) -> Result<RunRecord, RunRepositoryError> {
+            self.created
+                .lock()
+                .unwrap()
+                .clone()
+                .filter(|run| run.id() == id)
+                .ok_or(RunRepositoryError::NotFound)
+        }
+
+        fn list(&self) -> Result<Vec<RunSummary>, RunRepositoryError> {
+            Ok(self
+                .created
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(RunSummary::from)
+                .into_iter()
+                .collect())
+        }
+
+        fn persist(&self, _: &RunRecord, _: RunStatus) -> Result<(), RunRepositoryError> {
+            Err(RunRepositoryError::Conflict)
+        }
+
+        fn reconcile_interrupted(&self) -> Result<u32, RunRepositoryError> {
+            Ok(0)
+        }
+    }
+
+    #[test]
+    fn run_start_persist_failure_releases_the_execution_graph_claim() {
+        let temp = tempfile::tempdir().unwrap();
+        let payload = VersionedPayload::from_typed(
+            SchemaRef {
+                id: SchemaId::parse("fixture.request").unwrap(),
+                version: SchemaVersion::new(1).unwrap(),
+            },
+            &serde_json::json!({"value": 1}),
+        )
+        .unwrap();
+        let run_id = RunId::parse("run-persist-failure").unwrap();
+        let mut run = RunRecord::new_with_id(
+            run_id.clone(),
+            FeatureId::parse("composition.plan").unwrap(),
+            payload.clone(),
+        );
+        let graph = ExecutionGraphRecord::new_claimed(
+            ExecutionGraphId::parse("graph-persist-failure").unwrap(),
+            FeatureId::parse("composition.plan").unwrap(),
+            Sha256Digest::parse("a".repeat(64)).unwrap(),
+            payload,
+            vec![ExecutionNodeSpec {
+                node_id: ExecutionNodeId::parse("node.pending").unwrap(),
+                role_id: "item.generate".into(),
+                depends_on: Vec::new(),
+                request_snapshot_hash: Sha256Digest::parse("b".repeat(64)).unwrap(),
+            }],
+            run_id.clone(),
+            Utc::now(),
+        )
+        .unwrap();
+        let graphs = FileExecutionGraphRepository::new(temp.path().to_path_buf());
+        graphs.create_claimed(&graph, &run_id).unwrap();
+        let runs = PersistFailingRunRepository::default();
+
+        assert!(matches!(
+            persist_started_run(&runs, &graphs, &mut run, Some(&graph)),
+            Err(SubmitError::Repository)
+        ));
+        let recovered = graphs.get(graph.id()).unwrap();
+        assert_eq!(recovered.status(), ExecutionGraphStatus::Paused);
+        assert_eq!(recovered.active_run_id(), None);
+        assert_eq!(recovered.previous_run_id(), Some(&run_id));
+        assert_eq!(runs.get(&run_id).unwrap().status(), RunStatus::Pending);
+    }
 
     #[test]
     fn opening_a_project_recovers_prepared_publication_before_exposing_the_session() {
@@ -333,6 +536,76 @@ mod tests {
                 .read_dir()
                 .unwrap()
                 .any(|_| true)
+        );
+        session.release_project_lock().unwrap();
+    }
+
+    #[test]
+    fn opening_a_project_pauses_graphs_before_interrupting_their_runs() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("project");
+        fs::create_dir_all(project.join(".ats/runs-v3")).unwrap();
+        fs::write(project.join(".ats/version"), b"2").unwrap();
+        fs::write(
+            project.join("project.json"),
+            serde_json::to_vec(&ProjectMeta {
+                name: "GraphRecoveryProject".into(),
+                csharp_name: "GraphRecoveryProject".into(),
+                game_id: "sts2".into(),
+                scaffolded: true,
+                generated_files: Vec::new(),
+                build_output_dir: None,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let payload = VersionedPayload::from_typed(
+            SchemaRef {
+                id: SchemaId::parse("fixture.request").unwrap(),
+                version: SchemaVersion::new(1).unwrap(),
+            },
+            &serde_json::json!({"value": 1}),
+        )
+        .unwrap();
+        let runs = FileRunRepository::new(project.join(".ats/runs-v3")).unwrap();
+        let mut run = RunRecord::new(
+            FeatureId::parse("composition.plan").unwrap(),
+            payload.clone(),
+        );
+        runs.create(&run).unwrap();
+        run.apply_transition(RunTransition::Start, Utc::now())
+            .unwrap();
+        runs.persist(&run, RunStatus::Pending).unwrap();
+        let graph = ExecutionGraphRecord::new_claimed(
+            ExecutionGraphId::parse("graph-recovery").unwrap(),
+            FeatureId::parse("composition.plan").unwrap(),
+            Sha256Digest::parse("a".repeat(64)).unwrap(),
+            payload,
+            vec![ExecutionNodeSpec {
+                node_id: ExecutionNodeId::parse("node.pending").unwrap(),
+                role_id: "item.generate".into(),
+                depends_on: Vec::new(),
+                request_snapshot_hash: Sha256Digest::parse("b".repeat(64)).unwrap(),
+            }],
+            run.id().clone(),
+            Utc::now(),
+        )
+        .unwrap();
+        let graphs = FileExecutionGraphRepository::new(project.clone());
+        graphs.create_claimed(&graph, run.id()).unwrap();
+
+        let session = ProjectSession::open(ProjectFolder::open(&project).unwrap()).unwrap();
+        assert_eq!(
+            session
+                .execution_graph_repository()
+                .get(graph.id())
+                .unwrap()
+                .status(),
+            ExecutionGraphStatus::Paused
+        );
+        assert_eq!(
+            session.repository.get(run.id()).unwrap().status(),
+            RunStatus::Failed
         );
         session.release_project_lock().unwrap();
     }

@@ -72,25 +72,31 @@ Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-sp
   or pinned total quantity. Duplicate targets and Draft nodes disconnected from the root pinned
   closure are rejected before definitions are enriched or persisted; identity edges do not satisfy
   closure reachability.
+- A binding rule whose resolved target-group union is empty authors no `referenceBindings` entry.
+  It must not persist an empty slot array because ItemDefinition v2 rejects empty binding lists;
+  zero-count optional groups remain represented by the selected composition profile and Blueprint.
 - Pack v4 `resourceProfiles` own conditional required roles. The selector is a required canonical
   choice whose options exactly cover profile IDs; Single resolves only the selected profile.
 - Pack v4 `compositionProfiles` own Standard/Prototype presets, Custom bounds, cross-parameter
   constraints and the hard <=128-node estimate. Feature/UI interpret this generic schema and do
   not embed STS2 composition counts.
-- CompositionDraft v1 is persisted separately from ItemDefinition with revision CAS. Atomic
-  confirmation validates a closed selected subgraph and updates every affected current pointer
-  through one recoverable prepared/committed journal; failure never exposes a partial pointer set.
-- `composition.plan` owns one pinned Recipe and one `pack.composition-plan-guidance` contribution.
-  The model describes Draft nodes and logical identity/pinned references; the Feature validates the
-  selected Pack profile, queries bounded Truth, computes pinned definition hashes, attaches exact
-  profile provenance/current expectations and persists only a CompositionDraft. The model cannot
-  author selected Resources, expected-current hashes or Item current pointers.
-- `composition.plan` compiles the selected Pack profile into one run-scoped output contract. The
-  prompt receives resolved node/type/reference counts; JSON Schema fixes the total node count and
-  exposes only profile-required Item types plus Pack-owned field/locale/reference shapes. Typed
-  validation remains authoritative for per-type counts, quantity sums, target identity and pinned
-  closure. Model violations persist bounded versioned details with stable reason codes and optional
-  expected/actual counts or validated Item/slot IDs; raw model output is forbidden.
+- CompositionDraft v2 is persisted separately from ItemDefinition with revision CAS, optional
+  execution-graph provenance and payload-hash `createOrMatch`. Atomic confirmation validates a
+  closed selected subgraph and updates every affected current pointer through one recoverable
+  prepared/committed journal; failure never exposes a partial pointer set. Old v1 files remain
+  preserved and are not rewritten.
+- `composition.plan` owns pinned whole-plan, Suite Brief and single-node Recipes plus one
+  `pack.composition-plan-guidance` v2 contribution. The desktop product path compiles a deterministic
+  Blueprint and asks the model only for a bounded brief and one node's normalized content at a time.
+  The Feature validates the selected Pack profile, queries bounded Truth, binds references locally,
+  computes pinned definition hashes, attaches exact profile/current/graph provenance and persists
+  only one complete CompositionDraft. The model cannot author references, selected Resources,
+  expected-current hashes or Item current pointers.
+- Each staged model response has a strict run-scoped output contract for its one role. Complete
+  per-type counts, quantity sums, target identity, pinned closure and definition hashes remain local
+  typed validation after checkpoints are assembled. Model violations persist bounded versioned
+  details with stable reason codes and optional expected/actual counts or validated Item/slot IDs;
+  raw model output is forbidden from checkpoints and persisted failures.
 - `composition.retry-node` binds one Draft ID, expected revision and target Item ID. Its model output
   is exactly one logical node with the same identity/type. The Feature reuses composition Plan
   structure/count/closure rules, preserves every code-owned Resource binding and expected-current
@@ -176,15 +182,16 @@ confirm_composition_draft(draft_id, expected_revision, selected_item_ids)
 
 | Boundary | Required behavior |
 | --- | --- |
-| Pack | `pack.composition-plan-guidance` covers exactly every `compositionProfiles[].id`, declares bounded guidance, Pack-known allowed Item types and `nodeTypeRules`; rule base counts equal `baseNodeCount`, parameter multipliers equal each parameter `nodeWeight`, and the root type has a base node |
+| Pack | `pack.composition-plan-guidance` v2 covers exactly every `compositionProfiles[].id` and declares stable node groups, group dependencies, count rules, group-targeted binding/quantity rules and optional Suite Brief guidance; resolved group counts still match the selected profile and <=128-node limit |
 | Request | Preset parameters exactly match the selected immutable preset; Custom names a Pack preset base and passes all Pack bounds, constraints and <=128-node estimate |
-| Model request/output | Feature resolves exact node/type/reference counts and compiles a <=32 KiB run-scoped JSON Schema with the exact total node count plus Pack-owned Item field/locale/reference shapes. Output contains only node content and logical identity/pinned references; no Resource selection, expected-current hash, definition hash, current pointer or project file |
-| Feature enrichment | Queries bounded Truth for every allowed type, checks exact node count/root/type/reference targets, rejects pinned cycles, computes pinned hashes bottom-up, attaches root profile provenance and current expectations |
-| Draft repository | Creates `.ats/composition-drafts-v1/<draftId>.json`; update/delete require exact revision CAS; ProjectSession owns the sole repository instance |
+| Model request/output | Feature compiles one bounded Suite Brief schema and one strict single-Item schema per Blueprint node. Node output contains only normalized domain content; references, Resources, expected-current hashes, definition hashes, current pointers and project files remain local/code-owned |
+| Feature enrichment | Queries bounded Truth, persists hashed normalized checkpoints, binds identity/pinned references locally, reuses complete count/root/type/reference/closure validation, computes pinned hashes bottom-up and attaches root profile/current/graph provenance |
+| Draft repository | Creates `.ats/composition-drafts-v2/<draftId>.json` only after graph validation through payload-hash `createOrMatch`; update/delete require exact revision CAS; ProjectSession owns the sole repository instance |
 | Confirmation | Accepts only a non-empty pinned-closed selection, repeats Pack Draft/Ready/graph checks and performs one recoverable atomic Item pointer transaction |
 | React | Receives IPC as `unknown`, validates CompositionDraft/Confirmation guards, renders Pack metadata only, prepares and binds each Plan-authored node's required Resources through the shared Workbench plus Draft revision-CAS, and never branches on Character or a game ID |
 
-`composition.plan` result is `draftId + revision + rootItemId + nodeCount + modelRequestSha256`.
+`composition.plan` result is `draftId + revision + rootItemId + nodeCount + modelRequestSha256`
+plus optional `executionGraphId + validatedContentDigest` provenance for staged execution.
 The complete graph remains authoritative in the Draft repository rather than being duplicated in the
 Run result.
 

@@ -96,6 +96,7 @@ pub struct RunProgress {
 #[serde(rename_all = "snake_case")]
 pub enum CancellationReason {
     User,
+    Pause,
     ProjectClose,
     ProjectSwitch,
     AppShutdown,
@@ -248,10 +249,15 @@ pub struct RunRecord {
 impl RunRecord {
     #[must_use]
     pub fn new(feature_id: FeatureId, request: VersionedPayload) -> Self {
+        Self::new_with_id(RunId::new(), feature_id, request)
+    }
+
+    #[must_use]
+    pub fn new_with_id(id: RunId, feature_id: FeatureId, request: VersionedPayload) -> Self {
         let created_at = Utc::now();
         Self {
             schema_version: RUN_RECORD_SCHEMA_VERSION,
-            id: RunId::new(),
+            id,
             feature_id,
             status: RunStatus::Pending,
             created_at,

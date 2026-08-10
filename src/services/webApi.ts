@@ -29,6 +29,7 @@ import type {
   CompositionDraft,
   CompositionDraftNode,
   CompositionConfirmation,
+  ExecutionGraphView,
 } from "./tauriApi";
 import type { ActionableFailure } from "./actionableFailure";
 export { isActionableFailure, toActionableFailure } from "./actionableFailure";
@@ -70,6 +71,11 @@ export function selectResource(_resourceId: string, _version: string): Promise<R
 export function getRun(_runId: string): Promise<RunRecord> { return reject("getRun"); }
 export function listRuns(): Promise<RunSummary[]> { return Promise.resolve([]); }
 export function cancelRun(_runId: string): Promise<boolean> { return reject("cancelRun"); }
+export function listExecutionGraphs(): Promise<ExecutionGraphView[]> { return Promise.resolve([]); }
+export function getExecutionGraph(_executionGraphId: string): Promise<ExecutionGraphView> { return reject("getExecutionGraph"); }
+export function pauseExecutionGraph(_executionGraphId: string): Promise<boolean> { return reject("pauseExecutionGraph"); }
+export function cancelExecutionGraph(_executionGraphId: string): Promise<boolean> { return reject("cancelExecutionGraph"); }
+export function resumeCompositionPlan(_executionGraphId: string, _expectedRevision: number): Promise<string> { return reject("resumeCompositionPlan"); }
 export function submitModPlan(_request: ModPlanRequest): Promise<string> { return reject("submitModPlan"); }
 export function submitCompositionPlan(_request: CompositionPlanRequest): Promise<string> { return reject("submitCompositionPlan"); }
 export function submitCompositionRetryNode(_request: CompositionRetryNodeRequest): Promise<string> { return reject("submitCompositionRetryNode"); }

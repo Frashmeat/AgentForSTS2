@@ -5,10 +5,13 @@ import {
   FileCheck2,
   Hammer,
   ListFilter,
+  Pause,
+  Play,
   RefreshCw,
   Save,
   Sparkles,
   Trash2,
+  X,
 } from "lucide-react";
 
 import { ActionableErrorNotice } from "@/components/ActionableErrorNotice";
@@ -19,6 +22,7 @@ import { waitForRun } from "@/services/runPolling";
 import type {
   CompositionDraft,
   CompositionProfileSet,
+  ExecutionGraphView,
   ItemCapabilityCatalog,
   ItemDefinition,
   RunRecord,
@@ -73,6 +77,7 @@ export function CompositionStudioPage() {
   const [lastGenerationRunId, setLastGenerationRunId] = useState("");
   const [lastGenerationRun, setLastGenerationRun] = useState<RunRecord | null>(null);
   const [lastPlanRun, setLastPlanRun] = useState<RunRecord | null>(null);
+  const [executionGraph, setExecutionGraph] = useState<ExecutionGraphView | null>(null);
   const [retryInstructions, setRetryInstructions] = useState("");
   const [lastRetryRun, setLastRetryRun] = useState<RunRecord | null>(null);
   const [lastResourceRun, setLastResourceRun] = useState<RunRecord | null>(null);
@@ -130,13 +135,20 @@ export function CompositionStudioPage() {
     try {
       const nextCatalog = await api.getItemCapabilities();
       const current = await api.currentProject();
-      const [nextDrafts, nextDefinitions] = current
-        ? await Promise.all([api.listCompositionDrafts(), api.listItemDefinitions()])
-        : [[], []];
+      const [nextDrafts, nextDefinitions, nextGraphs] = current
+        ? await Promise.all([
+            api.listCompositionDrafts(),
+            api.listItemDefinitions(),
+            api.listExecutionGraphs(),
+          ])
+        : [[], [], []];
       setCatalog(nextCatalog);
       setProjectOpen(current !== null);
       setDrafts(nextDrafts);
       setDefinitions(nextDefinitions);
+      setExecutionGraph((value) => value
+        ? nextGraphs.find((graph) => graph.executionGraphId === value.executionGraphId) ?? value
+        : nextGraphs[nextGraphs.length - 1] ?? null);
       setSelectedRootKey((value) => {
         const nextRoots = compositionRoots(nextDefinitions, nextCatalog.compositionProfiles);
         return nextRoots.some((definition) => definitionKey(definition) === value)
@@ -180,12 +192,67 @@ export function CompositionStudioPage() {
       const runId = await api.submitCompositionPlan(
         buildCompositionPlanRequest(draftId, profile, choice, parameters, concept),
       );
-      const terminal = await waitForRun(runId, setLastPlanRun);
-      if (terminal.status === "succeeded") await load(draftId.trim());
+      await monitorCompositionPlan(runId, draftId.trim());
     } catch (error: unknown) {
       setFailure(toActionableFailure(error));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function monitorCompositionPlan(runId: string, preferredDraftId?: string) {
+    const initial = await api.getRun(runId);
+    setLastPlanRun(initial);
+    const graphId = executionGraphIdFromRun(initial);
+    if (graphId) setExecutionGraph(await api.getExecutionGraph(graphId));
+    const timer = graphId ? window.setInterval(() => {
+      void api.getExecutionGraph(graphId).then(setExecutionGraph).catch(() => undefined);
+    }, 750) : undefined;
+    try {
+      const terminal = await waitForRun(runId, setLastPlanRun);
+      if (graphId) setExecutionGraph(await api.getExecutionGraph(graphId));
+      if (terminal.status === "succeeded") await load(preferredDraftId);
+    } finally {
+      if (timer !== undefined) window.clearInterval(timer);
+    }
+  }
+
+  async function pausePlan() {
+    if (!executionGraph?.canPause) return;
+    setFailure(null);
+    try {
+      await api.pauseExecutionGraph(executionGraph.executionGraphId);
+      setExecutionGraph(await api.getExecutionGraph(executionGraph.executionGraphId));
+    } catch (error: unknown) {
+      setFailure(toActionableFailure(error));
+    }
+  }
+
+  async function resumePlan() {
+    if (!executionGraph?.canResume) return;
+    setBusy(true);
+    setFailure(null);
+    try {
+      const runId = await api.resumeCompositionPlan(
+        executionGraph.executionGraphId,
+        executionGraph.revision,
+      );
+      await monitorCompositionPlan(runId, draftId.trim() || undefined);
+    } catch (error: unknown) {
+      setFailure(toActionableFailure(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cancelPlan() {
+    if (!executionGraph?.canCancel) return;
+    setFailure(null);
+    try {
+      await api.cancelExecutionGraph(executionGraph.executionGraphId);
+      setExecutionGraph(await api.getExecutionGraph(executionGraph.executionGraphId));
+    } catch (error: unknown) {
+      setFailure(toActionableFailure(error));
     }
   }
 
@@ -380,17 +447,51 @@ export function CompositionStudioPage() {
         </Card>
       )}
 
-      {lastPlanRun && (
+      {(lastPlanRun || executionGraph) && (
         <Card
           eyebrow="composition plan run"
-          title={lastPlanRun.featureId}
+          title={lastPlanRun?.featureId ?? "composition.plan"}
           actions={(
-            <Badge variant={lastPlanRun.status === "succeeded" ? "ok" : lastPlanRun.status === "failed" ? "error" : "warn"}>
-              {lastPlanRun.status}
+            <Badge variant={executionGraph?.status === "succeeded" ? "ok" : executionGraph?.status === "commit_blocked" ? "error" : "warn"}>
+              {executionGraph?.status ?? lastPlanRun?.status}
             </Badge>
           )}
         >
-          {lastPlanRun.failure && (
+          {executionGraph && (
+            <div
+              className="space-y-2"
+              data-testid="composition-execution-graph"
+              data-execution-graph-id={executionGraph.executionGraphId}
+              data-execution-status={executionGraph.status}
+              data-completed-nodes={executionGraph.completedNodes}
+              data-total-nodes={executionGraph.totalNodes}
+              data-plan-run-id={lastPlanRun?.id ?? ""}
+              data-plan-run-status={lastPlanRun?.status ?? ""}
+            >
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <span className="font-mono truncate">{executionGraph.currentNodeId ?? executionGraph.executionGraphId}</span>
+                <span className="font-mono shrink-0">{executionGraph.completedNodes} / {executionGraph.totalNodes}</span>
+              </div>
+              <progress
+                data-testid="composition-execution-progress"
+                className="w-full h-2"
+                max={Math.max(1, executionGraph.totalNodes)}
+                value={executionGraph.completedNodes}
+              />
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button data-testid="composition-execution-pause" size="sm" title="Pause" disabled={!executionGraph.canPause} onClick={() => void pausePlan()}><Pause size={13} /></Button>
+                <Button data-testid="composition-execution-resume" size="sm" title="Resume" disabled={!executionGraph.canResume} onClick={() => void resumePlan()}><Play size={13} /></Button>
+                <Button data-testid="composition-execution-cancel" size="sm" variant="danger" title="Cancel" disabled={!executionGraph.canCancel} onClick={() => void cancelPlan()}><X size={13} /></Button>
+                {executionGraph.currentRoleId && <span className="text-xs text-ink-mute">{executionGraph.currentRoleId}</span>}
+              </div>
+              {executionGraph.failureCode && (
+                <Notice variant="error" title={executionGraph.failureCode}>
+                  {executionGraph.currentNodeId ?? executionGraph.status}
+                </Notice>
+              )}
+            </div>
+          )}
+          {lastPlanRun?.failure && (
             <Notice variant="error" title={lastPlanRun.failure.code}>
               {compositionFailureSummary(lastPlanRun.failure)}
             </Notice>
@@ -557,6 +658,13 @@ export function CompositionStudioPage() {
       </div>
     </div>
   );
+}
+
+function executionGraphIdFromRun(run: RunRecord): string | null {
+  const execution = run.request.payload.execution;
+  if (typeof execution !== "object" || execution === null || Array.isArray(execution)) return null;
+  const graphId = (execution as Record<string, unknown>).executionGraphId;
+  return typeof graphId === "string" ? graphId : null;
 }
 
 function definitionKey(definition: StoredItemDefinition): string {

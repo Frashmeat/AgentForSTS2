@@ -476,38 +476,46 @@
     {
       "slotId": "composition.plan.guidance",
       "featureId": "composition.plan",
-      "schema": { "id": "pack.composition-plan-guidance", "version": 1 },
+      "schema": { "id": "pack.composition-plan-guidance", "version": 2 },
       "payload": {
         "compositions": [
           {
             "compositionId": "character_suite",
-            "allowedItemTypes": ["character", "card", "relic", "potion", "power"],
-            "nodeTypeRules": [
-              { "itemType": "character", "baseCount": 1, "parameterMultiplier": 0 },
-              { "itemType": "card", "baseCount": 0, "parameterId": "starter_card_types", "parameterMultiplier": 1 },
-              { "itemType": "card", "baseCount": 0, "parameterId": "common_cards", "parameterMultiplier": 1 },
-              { "itemType": "card", "baseCount": 0, "parameterId": "uncommon_cards", "parameterMultiplier": 1 },
-              { "itemType": "card", "baseCount": 0, "parameterId": "rare_cards", "parameterMultiplier": 1 },
-              { "itemType": "relic", "baseCount": 0, "parameterId": "starter_relics", "parameterMultiplier": 1 },
-              { "itemType": "relic", "baseCount": 0, "parameterId": "relics", "parameterMultiplier": 1 },
-              { "itemType": "potion", "baseCount": 0, "parameterId": "potions", "parameterMultiplier": 1 },
-              { "itemType": "power", "baseCount": 0, "parameterId": "powers", "parameterMultiplier": 1 }
+            "nodeGroups": [
+              { "id": "character", "itemType": "character", "count": { "baseCount": 1, "multiplier": 0 }, "dependsOnGroupIds": ["starter_cards", "common_cards", "uncommon_cards", "rare_cards", "starter_relics", "relics", "potions", "powers"], "generationKind": "model_item" },
+              { "id": "starter_cards", "itemType": "card", "count": { "baseCount": 0, "parameterId": "starter_card_types", "multiplier": 1 }, "generationKind": "model_item" },
+              { "id": "common_cards", "itemType": "card", "count": { "baseCount": 0, "parameterId": "common_cards", "multiplier": 1 }, "generationKind": "model_item" },
+              { "id": "uncommon_cards", "itemType": "card", "count": { "baseCount": 0, "parameterId": "uncommon_cards", "multiplier": 1 }, "generationKind": "model_item" },
+              { "id": "rare_cards", "itemType": "card", "count": { "baseCount": 0, "parameterId": "rare_cards", "multiplier": 1 }, "generationKind": "model_item" },
+              { "id": "starter_relics", "itemType": "relic", "count": { "baseCount": 0, "parameterId": "starter_relics", "multiplier": 1 }, "generationKind": "model_item" },
+              { "id": "relics", "itemType": "relic", "count": { "baseCount": 0, "parameterId": "relics", "multiplier": 1 }, "generationKind": "model_item" },
+              { "id": "potions", "itemType": "potion", "count": { "baseCount": 0, "parameterId": "potions", "multiplier": 1 }, "generationKind": "model_item" },
+              { "id": "powers", "itemType": "power", "count": { "baseCount": 0, "parameterId": "powers", "multiplier": 1 }, "generationKind": "model_item" }
             ],
-            "referenceBindingRules": [
-              { "sourceItemType": "character", "slotId": "starting_deck", "measure": "bindings", "baseCount": 0, "parameterId": "starter_card_types", "parameterMultiplier": 1 },
-              { "sourceItemType": "character", "slotId": "starting_deck", "measure": "total_quantity", "baseCount": 0, "parameterId": "starting_deck_size", "parameterMultiplier": 1 },
-              { "sourceItemType": "character", "slotId": "cards", "measure": "bindings", "baseCount": 0, "parameterId": "starter_card_types", "parameterMultiplier": 1 },
-              { "sourceItemType": "character", "slotId": "cards", "measure": "bindings", "baseCount": 0, "parameterId": "common_cards", "parameterMultiplier": 1 },
-              { "sourceItemType": "character", "slotId": "cards", "measure": "bindings", "baseCount": 0, "parameterId": "uncommon_cards", "parameterMultiplier": 1 },
-              { "sourceItemType": "character", "slotId": "cards", "measure": "bindings", "baseCount": 0, "parameterId": "rare_cards", "parameterMultiplier": 1 },
-              { "sourceItemType": "character", "slotId": "starting_relics", "measure": "bindings", "baseCount": 0, "parameterId": "starter_relics", "parameterMultiplier": 1 },
-              { "sourceItemType": "character", "slotId": "relics", "measure": "bindings", "baseCount": 0, "parameterId": "starter_relics", "parameterMultiplier": 1 },
-              { "sourceItemType": "character", "slotId": "relics", "measure": "bindings", "baseCount": 0, "parameterId": "relics", "parameterMultiplier": 1 },
-              { "sourceItemType": "character", "slotId": "potions", "measure": "bindings", "baseCount": 0, "parameterId": "potions", "parameterMultiplier": 1 },
-              { "sourceItemType": "character", "slotId": "powers", "measure": "bindings", "baseCount": 0, "parameterId": "powers", "parameterMultiplier": 1 },
-              { "sourceItemType": "card", "slotId": "owner_character", "measure": "bindings", "baseCount": 1, "parameterMultiplier": 0 },
-              { "sourceItemType": "relic", "slotId": "owner_character", "measure": "bindings", "baseCount": 1, "parameterMultiplier": 0 },
-              { "sourceItemType": "potion", "slotId": "owner_character", "measure": "bindings", "baseCount": 1, "parameterMultiplier": 0 }
+            "coordination": {
+              "suiteBrief": {
+                "enabled": true,
+                "guidance": [
+                  "Define one coherent Character playstyle and a distinct bounded responsibility for every stable item node.",
+                  "Distribute starting_deck_size exactly across every starter_cards target within the declared per-target bounds."
+                ]
+              }
+            },
+            "bindingRules": [
+              { "sourceGroupId": "character", "slotId": "starting_deck", "targetGroupIds": ["starter_cards"], "measure": "bindings", "quantityPolicy": { "kind": "constant", "value": 1 } },
+              { "sourceGroupId": "character", "slotId": "starting_deck", "targetGroupIds": ["starter_cards"], "measure": "total_quantity", "quantityPolicy": { "kind": "brief_distribution", "totalParameterId": "starting_deck_size", "minPerTarget": 1, "maxPerTarget": 10 } },
+              { "sourceGroupId": "character", "slotId": "cards", "targetGroupIds": ["starter_cards", "common_cards", "uncommon_cards", "rare_cards"], "measure": "bindings", "quantityPolicy": { "kind": "constant", "value": 1 } },
+              { "sourceGroupId": "character", "slotId": "starting_relics", "targetGroupIds": ["starter_relics"], "measure": "bindings", "quantityPolicy": { "kind": "constant", "value": 1 } },
+              { "sourceGroupId": "character", "slotId": "relics", "targetGroupIds": ["starter_relics", "relics"], "measure": "bindings", "quantityPolicy": { "kind": "constant", "value": 1 } },
+              { "sourceGroupId": "character", "slotId": "potions", "targetGroupIds": ["potions"], "measure": "bindings", "quantityPolicy": { "kind": "constant", "value": 1 } },
+              { "sourceGroupId": "character", "slotId": "powers", "targetGroupIds": ["powers"], "measure": "bindings", "quantityPolicy": { "kind": "constant", "value": 1 } },
+              { "sourceGroupId": "starter_cards", "slotId": "owner_character", "targetGroupIds": ["character"], "measure": "bindings", "quantityPolicy": { "kind": "constant", "value": 1 } },
+              { "sourceGroupId": "common_cards", "slotId": "owner_character", "targetGroupIds": ["character"], "measure": "bindings", "quantityPolicy": { "kind": "constant", "value": 1 } },
+              { "sourceGroupId": "uncommon_cards", "slotId": "owner_character", "targetGroupIds": ["character"], "measure": "bindings", "quantityPolicy": { "kind": "constant", "value": 1 } },
+              { "sourceGroupId": "rare_cards", "slotId": "owner_character", "targetGroupIds": ["character"], "measure": "bindings", "quantityPolicy": { "kind": "constant", "value": 1 } },
+              { "sourceGroupId": "starter_relics", "slotId": "owner_character", "targetGroupIds": ["character"], "measure": "bindings", "quantityPolicy": { "kind": "constant", "value": 1 } },
+              { "sourceGroupId": "relics", "slotId": "owner_character", "targetGroupIds": ["character"], "measure": "bindings", "quantityPolicy": { "kind": "constant", "value": 1 } },
+              { "sourceGroupId": "potions", "slotId": "owner_character", "targetGroupIds": ["character"], "measure": "bindings", "quantityPolicy": { "kind": "constant", "value": 1 } }
             ],
             "guidance": [
               "Plan exactly one PlaceholderCharacterModel root and the Pack-profiled Card, Relic, Potion, and Power nodes.",
