@@ -217,11 +217,11 @@ export function cancelExecutionGraph(executionGraphId: string): Promise<boolean>
   return invokeCommand<boolean>("cancel_execution_graph", { executionGraphId });
 }
 
-export function resumeCompositionPlan(
+export function resumeExecutionGraph(
   executionGraphId: string,
   expectedRevision: number,
 ): Promise<string> {
-  return invokeCommand<string>("resume_composition_plan", {
+  return invokeCommand<string>("resume_execution_graph", {
     executionGraphId,
     expectedRevision,
   });
@@ -331,6 +331,15 @@ export interface CompositionGenerateRequest extends Record<string, unknown> {
   root: StoredItemDefinition;
   draft?: { draftId: string; revision: number } | null;
   package: ProjectPackageRequest;
+  execution?:
+    | { kind: "start"; executionGraphId: string }
+    | {
+        kind: "resume";
+        executionGraphId: string;
+        expectedRevision: number;
+        previousRunId: string;
+      }
+    | null;
 }
 
 export interface ComplexGenerateRequest extends Record<string, unknown> {
@@ -379,7 +388,7 @@ export function submitCompositionRetryNode(request: CompositionRetryNodeRequest)
 }
 
 export function submitCompositionGenerate(request: CompositionGenerateRequest): Promise<string> {
-  return submit("composition.generate", "feature.composition-generate-request", request);
+  return submit("composition.generate", "feature.composition-generate-request", request, 2);
 }
 
 export function submitSingleGenerate(request: SingleGenerateRequest): Promise<string> {

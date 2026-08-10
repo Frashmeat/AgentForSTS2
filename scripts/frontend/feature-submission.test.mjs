@@ -32,6 +32,15 @@ test("feature submissions preserve explicit breaking schema versions", () => {
       },
     },
   );
+  assert.deepEqual(
+    buildFeatureSubmission(
+      "composition.generate",
+      "feature.composition-generate-request",
+      { artifactId: "fixture-composition" },
+      2,
+    ).request.schema,
+    { id: "feature.composition-generate-request", version: 2 },
+  );
 });
 
 test("source paths remain outside the typed request payload", () => {

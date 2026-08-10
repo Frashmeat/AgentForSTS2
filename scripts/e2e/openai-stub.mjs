@@ -50,16 +50,26 @@ function pngChunk(type, data) {
   return Buffer.concat([length, typeBytes, data, checksum]);
 }
 
-function deterministicSubjectPng() {
-  const width = 64;
-  const height = 64;
+function imageDimensions(size) {
+  const match = /^([1-9]\d{0,4})x([1-9]\d{0,4})$/u.exec(String(size));
+  if (!match) throw new Error(`invalid Images API size: ${size}`);
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (width > 4_096 || height > 4_096 || width * height > 16_777_216) {
+    throw new Error(`Images API size exceeds the E2E fixture limit: ${size}`);
+  }
+  return { width, height };
+}
+
+function deterministicSubjectPng(width, height) {
   const scanlines = Buffer.alloc(height * (1 + width * 4));
   for (let y = 0; y < height; y += 1) {
     const row = y * (1 + width * 4);
     scanlines[row] = 0;
     for (let x = 0; x < width; x += 1) {
       const offset = row + 1 + x * 4;
-      const subject = x >= 16 && x < 48 && y >= 16 && y < 48;
+      const subject = x >= width / 4 && x < width * 3 / 4
+        && y >= height / 4 && y < height * 3 / 4;
       scanlines[offset] = subject ? 200 : 255;
       scanlines[offset + 1] = subject ? 40 : 255;
       scanlines[offset + 2] = subject ? 30 : 255;
@@ -78,8 +88,6 @@ function deterministicSubjectPng() {
     pngChunk("IEND", Buffer.alloc(0)),
   ]);
 }
-
-const pngBase64 = deterministicSubjectPng().toString("base64");
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -106,11 +114,18 @@ async function completeResponse(response, content, initialDelay) {
 }
 
 const stagedFailures = new Set();
+const compositionSingleFailures = new Set();
 
 function taggedJson(promptText, tag) {
   const match = promptText.match(new RegExp(`<${tag}>\\s*([\\s\\S]*?)\\s*</${tag}>`));
   if (!match) throw new Error(`${tag} was not present in the staged prompt`);
   return JSON.parse(match[1]);
+}
+
+function taggedText(promptText, tag) {
+  const match = promptText.match(new RegExp(`<${tag}>\\s*([\\s\\S]*?)\\s*</${tag}>`));
+  if (!match || !match[1].trim()) throw new Error(`${tag} was not present in the staged prompt`);
+  return match[1].trim();
 }
 
 function stagedScenario(promptText) {
@@ -185,7 +200,7 @@ function stagedNodeCheckpoint(identity) {
   if (identity.itemType === "character") {
     return {
       canonicalFields: {
-        visual_profile: { kind: "choice", value: "branded_placeholder" },
+        visual_profile: { kind: "choice", value: "placeholder" },
         placeholder_id: { kind: "choice", value: "ironclad" },
         name_color: { kind: "text", value: "7D3FC8FF" },
         gender: { kind: "choice", value: "neutral" },
@@ -226,6 +241,220 @@ function stagedNodeCheckpoint(identity) {
     };
   }
   throw new Error(`unsupported staged E2E item type: ${identity.itemType}`);
+}
+
+function modelType(itemId) {
+  const value = String(itemId)
+    .split(/[^A-Za-z0-9]+/u)
+    .filter(Boolean)
+    .map((part) => `${part[0].toUpperCase()}${part.slice(1)}`)
+    .join("");
+  return `E2e${/^\d/u.test(value) ? `Item${value}` : value}`;
+}
+
+function compositionGeneratePlan(promptText) {
+  const itemType = taggedText(promptText, "requested-item-type");
+  if (!["character", "card", "relic"].includes(itemType)) {
+    throw new Error(`unsupported composition Generate plan item type: ${itemType}`);
+  }
+  return {
+    ...plan,
+    itemId: `e2e-${itemType}`,
+    itemType,
+    name: `E2E ${itemType}`,
+    summary: `Deterministic ${itemType} plan for recoverable composition GUI E2E.`,
+  };
+}
+
+function bindings(definition, slotId, kind) {
+  return (definition.referenceBindings?.[slotId] ?? []).filter((binding) => binding.kind === kind);
+}
+
+function localization(prefix, values) {
+  return JSON.stringify(Object.fromEntries(
+    Object.entries(values).map(([suffix, value]) => [`E2EMOD-${prefix}.${suffix}`, value]),
+  ));
+}
+
+function localizationPrefix(itemId) {
+  return modelType(itemId)
+    .replace(/([a-z0-9])([A-Z])/gu, "$1_$2")
+    .toUpperCase();
+}
+
+function architectLocalization(prefix, title) {
+  return JSON.stringify({
+    [`THE_ARCHITECT.talk.E2EMOD-${prefix}.0-0r.char`]: title,
+    [`THE_ARCHITECT.talk.E2EMOD-${prefix}.0-0r.next`]: "Continue",
+    [`THE_ARCHITECT.talk.E2EMOD-${prefix}.0-1r.ancient`]: "The Architect answers.",
+    [`THE_ARCHITECT.talk.E2EMOD-${prefix}.0-attack`]: "Both",
+  });
+}
+
+function compositionCharacterSource(definition) {
+  const type = modelType(definition.itemId);
+  const startingDeck = bindings(definition, "starting_deck", "pinned")
+    .flatMap((binding) => Array.from(
+      { length: binding.quantity },
+      () => `ModelDb.Card<${modelType(binding.itemId)}>()`,
+    ));
+  const startingRelics = bindings(definition, "starting_relics", "pinned")
+    .map((binding) => `ModelDb.Relic<${modelType(binding.itemId)}>()`);
+  const fields = definition.canonicalFields;
+  const gender = String(fields.gender.value);
+  const genderName = `${gender[0].toUpperCase()}${gender.slice(1)}`;
+  return `using BaseLib.Abstracts;
+using Godot;
+using MegaCrit.Sts2.Core.Entities.Characters;
+using MegaCrit.Sts2.Core.Models;
+
+namespace E2EMod;
+
+public sealed class ${type}CardPool : CustomCardPoolModel
+{
+    public override string Title => "e2e";
+    public override bool IsColorless => false;
+    public override Color ShaderColor => new("${fields.name_color.value}");
+    public override Color DeckEntryCardColor => new("${fields.name_color.value}");
+}
+
+public sealed class ${type}RelicPool : CustomRelicPoolModel { }
+public sealed class ${type}PotionPool : CustomPotionPoolModel { }
+
+public sealed class ${type} : PlaceholderCharacterModel
+{
+    public override string PlaceholderID => "${fields.placeholder_id.value}";
+    public override Color NameColor => new("${fields.name_color.value}");
+    public override CharacterGender Gender => CharacterGender.${genderName};
+    public override int StartingHp => ${fields.starting_hp.value};
+    public override int StartingGold => ${fields.starting_gold.value};
+    public override int MaxEnergy => ${fields.max_energy.value};
+    public override CardPoolModel CardPool => ModelDb.CardPool<${type}CardPool>();
+    public override RelicPoolModel RelicPool => ModelDb.RelicPool<${type}RelicPool>();
+    public override PotionPoolModel PotionPool => ModelDb.PotionPool<${type}PotionPool>();
+    public override IEnumerable<CardModel> StartingDeck => [${startingDeck.join(", ")}];
+    public override IReadOnlyList<RelicModel> StartingRelics => [${startingRelics.join(", ")}];
+}`;
+}
+
+function compositionCardSource(definition) {
+  const type = modelType(definition.itemId);
+  const owner = bindings(definition, "owner_character", "identity")[0];
+  if (!owner) throw new Error(`card ${definition.itemId} has no owner_character`);
+  const ownerType = modelType(owner.itemId);
+  const fields = definition.canonicalFields;
+  const cardType = fields.card_type.value === "skill" ? "Skill" : "Attack";
+  const target = fields.target.value === "self" ? "Self" : "AnyEnemy";
+  const rarity = `${String(fields.rarity.value)[0].toUpperCase()}${String(fields.rarity.value).slice(1)}`;
+  return `using BaseLib.Abstracts;
+using BaseLib.Utils;
+using MegaCrit.Sts2.Core.Entities.Cards;
+using MegaCrit.Sts2.Core.GameActions.Multiplayer;
+
+namespace E2EMod;
+
+[Pool(typeof(${ownerType}CardPool))]
+public sealed class ${type}() : CustomCardModel(${fields.base_cost.value}, CardType.${cardType}, CardRarity.${rarity}, TargetType.${target})
+{
+    protected override Task OnPlay(PlayerChoiceContext choiceContext, CardPlay cardPlay) => Task.CompletedTask;
+}`;
+}
+
+function compositionRelicSource(definition) {
+  const type = modelType(definition.itemId);
+  const owner = bindings(definition, "owner_character", "identity")[0];
+  if (!owner) throw new Error(`relic ${definition.itemId} has no owner_character`);
+  const ownerType = modelType(owner.itemId);
+  const rarity = `${String(definition.canonicalFields.rarity.value)[0].toUpperCase()}${String(definition.canonicalFields.rarity.value).slice(1)}`;
+  return `using BaseLib.Abstracts;
+using BaseLib.Utils;
+using MegaCrit.Sts2.Core.Entities.Relics;
+
+namespace E2EMod;
+
+[Pool(typeof(${ownerType}RelicPool))]
+public sealed class ${type} : CustomRelicModel
+{
+    public override RelicRarity Rarity => RelicRarity.${rarity};
+}`;
+}
+
+function compositionBundle(stored) {
+  const definition = stored.definition;
+  const prefix = localizationPrefix(definition.itemId);
+  if (definition.itemType === "character") {
+    const characterValues = (locale) => {
+      const fields = definition.localizations[locale].fields;
+      return {
+        title: fields.title,
+        titleObject: fields.title_object,
+        description: fields.description,
+        pronounObject: fields.pronoun_object,
+        pronounSubject: fields.pronoun_subject,
+        pronounPossessive: fields.pronoun_possessive,
+        possessiveAdjective: fields.possessive_adjective,
+        aromaPrinciple: fields.aroma_principle,
+        "banter.alive.endTurnPing": fields.end_turn_ping_alive,
+        "banter.dead.endTurnPing": fields.end_turn_ping_dead,
+        eventDeathPrevention: fields.event_death_prevention,
+        goldMonologue: fields.gold_monologue,
+        cardsModifierTitle: fields.cards_modifier_title,
+        cardsModifierDescription: fields.cards_modifier_description,
+      };
+    };
+    return {
+      files: {
+        source: compositionCharacterSource(definition),
+        "localization.eng": localization(prefix, characterValues("eng")),
+        "localization.zhs": localization(prefix, characterValues("zhs")),
+        "localization.ancients.eng": architectLocalization(
+          prefix,
+          definition.localizations.eng.fields.title,
+        ),
+        "localization.ancients.zhs": architectLocalization(
+          prefix,
+          definition.localizations.zhs.fields.title,
+        ),
+      },
+      acceptanceNotes: ["Generated for recoverable composition GUI E2E."],
+    };
+  }
+  const localizedValues = (locale) => definition.localizations[locale].fields;
+  if (definition.itemType === "card") {
+    return {
+      files: {
+        source: compositionCardSource(definition),
+        "localization.eng": localization(prefix, {
+          title: localizedValues("eng").name,
+          description: localizedValues("eng").description,
+        }),
+        "localization.zhs": localization(prefix, {
+          title: localizedValues("zhs").name,
+          description: localizedValues("zhs").description,
+        }),
+      },
+      acceptanceNotes: ["Generated for recoverable composition GUI E2E."],
+    };
+  }
+  if (definition.itemType === "relic") {
+    return {
+      files: {
+        source: compositionRelicSource(definition),
+        "localization.eng": localization(prefix, {
+          title: localizedValues("eng").name,
+          description: localizedValues("eng").description,
+          flavor: "Deterministic E2E relic.",
+        }),
+        "localization.zhs": localization(prefix, {
+          title: localizedValues("zhs").name,
+          description: localizedValues("zhs").description,
+          flavor: "Deterministic E2E relic.",
+        }),
+      },
+      acceptanceNotes: ["Generated for recoverable composition GUI E2E."],
+    };
+  }
+  throw new Error(`unsupported composition Generate item type: ${definition.itemType}`);
 }
 
 const server = http.createServer(async (request, response) => {
@@ -298,20 +527,57 @@ const server = http.createServer(async (request, response) => {
         );
         return;
       }
+      const isSingle = body.messages?.some((message) =>
+        message.role === "system"
+          && String(message.content).includes("Generate one complete Mod item as a strict text-file bundle"));
+      if (isSingle
+        && promptText.includes("<item-definition>")
+        && /"itemType"\s*:\s*"(?:character|card|relic)"/u.test(promptText)) {
+        const stored = taggedJson(promptText, "item-definition");
+        const itemId = stored.definition.itemId;
+        const itemType = stored.definition.itemType;
+        const failOnce = itemType === "character" && !compositionSingleFailures.has(itemId);
+        if (failOnce) compositionSingleFailures.add(itemId);
+        await recordStaged("composition_generate_single", "generate", {
+          itemId,
+          itemType,
+          outcome: failOnce ? "invalid" : "valid",
+        });
+        await completeResponse(
+          response,
+          failOnce ? "{" : JSON.stringify(compositionBundle(stored)),
+          50,
+        );
+        return;
+      }
       const isPlan = body.messages?.some((message) =>
         message.role === "system"
           && String(message.content).includes("Plan exactly one independently testable item"));
       const isCompileFailure = promptText.includes("CompileFailureRelic");
-      await record(isPlan ? "plan" : isCompileFailure ? "asset_bundle_compile_failure" : "asset_bundle");
+      const isCompositionGeneratePlan = isPlan
+        && (promptText.includes("Provide deterministic")
+          || promptText.includes("Provide a playable deterministic"));
+      const planResponse = isCompositionGeneratePlan
+        ? compositionGeneratePlan(promptText)
+        : plan;
+      if (isCompositionGeneratePlan) {
+        await recordStaged("composition_generate_plan", "generate", {
+          itemType: planResponse.itemType,
+        });
+      } else {
+        await record(isPlan ? "plan" : isCompileFailure ? "asset_bundle_compile_failure" : "asset_bundle");
+      }
       await completeResponse(
         response,
-        JSON.stringify(isPlan ? plan : isCompileFailure ? compileFailureBundle : bundle),
+        JSON.stringify(isPlan ? planResponse : isCompileFailure ? compileFailureBundle : bundle),
         isPlan ? 1_200 : 100,
       );
       return;
     }
     if (request.method === "POST" && request.url === "/v1/images/generations") {
-      await readJson(request);
+      const body = await readJson(request);
+      const { width, height } = imageDimensions(body.size);
+      const pngBase64 = deterministicSubjectPng(width, height).toString("base64");
       await record("image");
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({

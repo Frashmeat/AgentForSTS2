@@ -10,7 +10,7 @@ use ats_adapters::{
 use ats_features::FeatureSpec;
 use ats_features::composition_generate::{
     CompositionGenerateContext, CompositionGenerateDependencies, CompositionGenerateFeature,
-    CompositionGenerateService,
+    CompositionGenerateRequest, CompositionGenerateService, StagedCompositionGenerateStart,
 };
 use ats_features::composition_plan::{
     CompositionPlanContext, CompositionPlanFeature, CompositionPlanRequest, CompositionPlanService,
@@ -168,6 +168,144 @@ impl Stage2Composition {
             .map_err(|error| error.run_failure())
     }
 
+    pub fn prepare_composition_generate_start(
+        &self,
+        request: CompositionGenerateRequest,
+        run_id: ats_runtime::RunId,
+        project_root: &Path,
+        items: &FileItemRepository,
+        resources: &FileResourceRepository,
+    ) -> Result<StagedCompositionGenerateStart, RunFailure> {
+        let truth = self.current_truth()?;
+        let composition_contributions = self.resolve(
+            &CompositionGenerateFeature::id(),
+            &[CompositionGenerateFeature::contribution_requirement()],
+        )?;
+        let plan_contributions = self.resolve(
+            &ModPlanFeature::id(),
+            &[ModPlanFeature::contribution_requirement()],
+        )?;
+        let single_contributions = self.resolve(
+            &SingleGenerateFeature::id(),
+            &[SingleGenerateFeature::contribution_requirement()],
+        )?;
+        let resource_contributions = self.resolve(
+            &ResourcePrepareFeature::id(),
+            &[ResourcePrepareFeature::contribution_requirement()],
+        )?;
+        let build_contributions = self.resolve(
+            &ProjectBuildFeature::id(),
+            &[ProjectBuildFeature::contribution_requirement()],
+        )?;
+        let package_contributions = self.resolve(
+            &ProjectPackageFeature::id(),
+            &[ProjectPackageFeature::contribution_requirement()],
+        )?;
+        let plan = ModPlanService::built_in()
+            .map_err(|_| failure("feature.recipe_invalid", "composition.generate.plan_recipe"))?;
+        let single = SingleGenerateService::built_in().map_err(|_| {
+            failure(
+                "feature.recipe_invalid",
+                "composition.generate.single_recipe",
+            )
+        })?;
+        CompositionGenerateService::new(
+            &plan,
+            &single,
+            &ProjectBuildService,
+            &ProjectPackageService,
+        )
+        .prepare_staged_start(
+            request,
+            CompositionGenerateContext {
+                pack: &self.pack,
+                composition_contributions: &composition_contributions,
+                plan_contributions: &plan_contributions,
+                single_contributions: &single_contributions,
+                resource_contributions: &resource_contributions,
+                build_contributions: &build_contributions,
+                package_contributions: &package_contributions,
+                truth: &truth,
+                project_root,
+                project_context: "",
+                custom_instructions: None,
+                model: None,
+            },
+            items,
+            resources,
+            run_id,
+        )
+        .map_err(|error| error.run_failure())
+    }
+
+    pub fn prepare_composition_generate_resume(
+        &self,
+        graph: ats_runtime::ExecutionGraphRecord,
+        expected_revision: u64,
+        run_id: ats_runtime::RunId,
+        project_root: &Path,
+    ) -> Result<StagedCompositionGenerateStart, RunFailure> {
+        let truth = self.current_truth()?;
+        let composition_contributions = self.resolve(
+            &CompositionGenerateFeature::id(),
+            &[CompositionGenerateFeature::contribution_requirement()],
+        )?;
+        let plan_contributions = self.resolve(
+            &ModPlanFeature::id(),
+            &[ModPlanFeature::contribution_requirement()],
+        )?;
+        let single_contributions = self.resolve(
+            &SingleGenerateFeature::id(),
+            &[SingleGenerateFeature::contribution_requirement()],
+        )?;
+        let resource_contributions = self.resolve(
+            &ResourcePrepareFeature::id(),
+            &[ResourcePrepareFeature::contribution_requirement()],
+        )?;
+        let build_contributions = self.resolve(
+            &ProjectBuildFeature::id(),
+            &[ProjectBuildFeature::contribution_requirement()],
+        )?;
+        let package_contributions = self.resolve(
+            &ProjectPackageFeature::id(),
+            &[ProjectPackageFeature::contribution_requirement()],
+        )?;
+        let plan = ModPlanService::built_in()
+            .map_err(|_| failure("feature.recipe_invalid", "composition.generate.plan_recipe"))?;
+        let single = SingleGenerateService::built_in().map_err(|_| {
+            failure(
+                "feature.recipe_invalid",
+                "composition.generate.single_recipe",
+            )
+        })?;
+        CompositionGenerateService::new(
+            &plan,
+            &single,
+            &ProjectBuildService,
+            &ProjectPackageService,
+        )
+        .prepare_staged_resume(
+            graph,
+            expected_revision,
+            run_id,
+            CompositionGenerateContext {
+                pack: &self.pack,
+                composition_contributions: &composition_contributions,
+                plan_contributions: &plan_contributions,
+                single_contributions: &single_contributions,
+                resource_contributions: &resource_contributions,
+                build_contributions: &build_contributions,
+                package_contributions: &package_contributions,
+                truth: &truth,
+                project_root,
+                project_context: "",
+                custom_instructions: None,
+                model: None,
+            },
+        )
+        .map_err(|error| error.run_failure())
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub async fn execute(
         &self,
@@ -310,8 +448,8 @@ impl Stage2Composition {
                 let artifacts = FileArtifactStore::new(project_root.to_path_buf());
                 let build_runner = RegisteredBuildRunner;
                 let package_writer = ZipPackageWriter;
-                let outcome = CompositionGenerateService::new(&plan, &single, &build, &package)
-                    .execute(
+                CompositionGenerateService::new(&plan, &single, &build, &package)
+                    .execute_staged(
                         CompositionGenerateDependencies {
                             model: model.client(),
                             items,
@@ -323,6 +461,8 @@ impl Stage2Composition {
                             build_runner: &build_runner,
                             package_writer: &package_writer,
                         },
+                        repository,
+                        graphs,
                         &mut run,
                         request,
                         CompositionGenerateContext {
@@ -341,15 +481,8 @@ impl Stage2Composition {
                         },
                         cancellation,
                     )
-                    .await;
-                match outcome {
-                    Ok(execution) => persist_children(repository, execution.child_runs)?,
-                    Err(failed) => {
-                        let failure = failed.run_failure();
-                        persist_children(repository, failed.child_runs)?;
-                        return Err(failure);
-                    }
-                }
+                    .await
+                    .map_err(|error| error.run_failure())?;
             }
             "composition.plan" => {
                 let request = self.decode::<CompositionPlanFeature>(&run)?;

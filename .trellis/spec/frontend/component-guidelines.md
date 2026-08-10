@@ -120,6 +120,12 @@ Item-type branches. The Pack default profile is selected initially; Custom start
   or author a second graph.
 - Generation displays the persisted `composition.generate` Run status and safe failure code/stage.
   A returned Run ID or completed polling loop is not success evidence.
+- Generation v2 also carries a backend-authored execution identity. After submit or resume, Studio
+  extracts only `executionGraphId` from the validated persisted Run request, polls the bounded
+  `ExecutionGraphView`, and uses the same Pause/Resume/Cancel controls as staged planning. Resume
+  calls generic `resume_execution_graph`; the backend dispatches by graph owner, while React routes
+  the returned Run to Plan or Generate monitoring by its validated `featureId`. React never decodes
+  proposal checkpoints, infers dependencies or resubmits the root request as a retry.
 - Planning likewise retains and renders the persisted `composition.plan` terminal Run. Safe v1
   failure details may add reason/expected/actual/Item/slot context; malformed or unknown details
   fall back to code/stage and never cause raw Provider output to be rendered.

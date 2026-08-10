@@ -51,6 +51,9 @@ without a selector has at most one profile; a type with `resourceProfileField` m
 required choice field whose options exactly match the profile IDs. Definition-bound readiness
 resolves only the selected profile. Plan may expose the bounded union for legacy leaf-item planning,
 but Single/Composition execution always uses the exact definition selector.
+The Plan union and the definition-selected exact role set are different contracts and must never be
+compared for equality. `validate_plan_roles` validates the union against the Pack descriptor;
+`load_resources` independently validates the selected definition profile and immutable bindings.
 `pack.mod-plan-guidance` v3 owns only cross-item planning guidance;
 `pack.mod-generate-single` v4 owns bounded common guidance, required per-item guidance, validation
 Primitive and exact generated-file roles. Single exposes `commonGuidance` plus only the selected
@@ -949,6 +952,141 @@ for ready_node in claimed.ready_nodes() {
 let intent = feature.prepare_commit(graphs.get(id)?)?;
 drafts.create_or_match(intent.draft(), intent.draft_payload_sha256())?;
 graphs.mark_succeeded(intent.final_ref())?;
+```
+
+### Scenario: Resume Whole-Closure Generation Without Repeating Successful Model Work
+
+#### 1. Scope / Trigger
+
+This contract applies to `composition.generate`. A resolved closure may contain dozens of Items and
+requires one Plan plus one Single proposal per Item, so one invalid or truncated response must not
+discard every earlier successful model result. Direct `mod.generate.single` remains a bounded
+single-request path and does not create an execution graph.
+
+#### 2. Signatures
+
+```rust
+pub struct CompositionGenerateRequest { // feature.composition-generate-request v2
+    pub artifact_id: String,
+    pub mod_id: String,
+    pub root: StoredItemDefinition,
+    pub draft: Option<CompositionDraftRef>,
+    pub package: ProjectPackageRequest,
+    pub execution: Option<CompositionGenerateExecutionRequest>,
+}
+
+SingleGenerateProposal::checkpoint() -> SingleGenerateProposalCheckpoint;
+SingleGenerateService::restore_composition_proposal(
+    resources, request, context, checkpoint,
+) -> Result<SingleGenerateCompositionProposal, SingleGenerateError>;
+
+CompositionGenerateService::prepare_staged_start(...)
+    -> Result<StagedCompositionGenerateStart, CompositionGenerateError>;
+CompositionGenerateService::prepare_staged_resume(...)
+    -> Result<StagedCompositionGenerateStart, CompositionGenerateError>;
+CompositionGenerateService::execute_staged(...)
+    -> Result<StagedCompositionGenerateExecution, CompositionGenerateError>;
+```
+
+`resume_execution_graph(executionGraphId, expectedRevision)` dispatches by the persisted graph
+`ownerFeatureId`; callers do not choose a resume Feature or author an internal execution identity.
+
+#### 3. Contracts
+
+The backend enriches an initial v2 request with `execution.kind=start`. Resume creates a new parent
+Run and enriches the exact blueprint request with `kind=resume`, the graph ID, expected revision and
+previous Run ID. The graph contains exactly two model nodes per resolved Item plus one local node:
+
+```text
+item.000.plan -> item.000.single -> item.001.plan -> item.001.single -> ...
+                                                                    -> composition.finalize
+```
+
+- Dependencies impose stable FIFO-style Item order even before the shared HTTP queue is considered.
+- A Plan checkpoint contains the normalized typed Plan and its terminal child Run.
+- A Single checkpoint contains the validated `composition_staged` result, canonical generated role
+  contents and safe definition/model/resource provenance. It excludes the Prompt, request messages,
+  Provider body and raw completion envelope.
+- Restore revalidates the exact definition hash, Pack-generated role set, selected immutable
+  Resource versions, normalized bundle and project writes without calling `ModelClient`.
+- Child Runs are persisted create-or-match by exact Run ID and bytes after checkpoint CAS. A crash
+  between graph CAS and child persistence is repaired from the checkpoint; a different existing Run
+  is a storage failure.
+- `composition.finalize` reconstructs every proposal, enforces one validation Primitive, merges
+  files and validates writes locally. Only then may the graph enter `commit_prepared` with a hashed
+  publication intent.
+- Build, Package, real-project transaction and the one composition Artifact execute only after all
+  model nodes and finalize succeed. A finalization failure releases the `commit_prepared` claim for
+  explicit resume and never reruns successful model nodes.
+- Result and Artifact extension are v2 and include the execution graph ID. The public Feature
+  catalog remains exactly 12 entries; execution nodes are not Features.
+- A succeeded graph reconciliation decodes the final result, succeeds a new parent Run and performs
+  zero model, validation, Build, Package, project-write or Artifact work.
+
+Runtime `ExecutionCommitIntent` accepts exactly one legacy Draft intent or one generic publication
+intent. Mixed forms, unsafe target IDs or payload-hash mismatch are invalid graph records. Existing
+Draft-intent graph JSON remains readable without rewriting historical evidence.
+
+#### 4. Validation & Error Matrix
+
+| Condition | Graph / Run result | Work retained |
+| --- | --- | --- |
+| Plan or Single typed output invalid/truncated | current node Pending with safe failure; graph paused; parent failed | every earlier succeeded checkpoint and child Run |
+| explicit resume revision/claim conflict | `composition.execution.conflict`; no new Running Run | unchanged graph |
+| checkpoint schema/hash/domain mismatch | `composition.execution.invalid` | no guessed output or model fallback |
+| child Run create conflicts with different bytes | `run.storage_failed` | checkpoint remains authoritative; no overwrite |
+| local merge/Primitive/write validation fails | finalize node fails and graph pauses | all Plan/Single checkpoints |
+| Build/Package/validation/publication fails after prepare | claim is released while commit remains roll-forward | all model checkpoints and publication intent |
+| crash with an active model node | structural recovery interrupts that attempt and pauses graph | all earlier succeeded nodes |
+| graph already succeeded but parent is not authoritative | new reconciliation Run succeeds from final result | zero model/publication work |
+
+#### 5. Good / Base / Bad Cases
+
+- Good: Item zero Plan succeeds, Item zero Single returns invalid JSON, and resume requests only that
+  Single followed by later Items; a repository re-instantiation proves restart recovery.
+- Base: a two-Item closure completes four model nodes, one local finalize, one validation, one Build,
+  one Package, one project transaction and one composition Artifact.
+- Bad: restart `composition.generate` from the root request after one node fails, store a complete
+  Prompt/request snapshot in a checkpoint, or expose a partially generated project/Artifact.
+- Bad: add automatic Feature-level semantic retry or model/format fallback; resume is explicit and
+  Adapter transport retry remains the only bounded automatic retry layer.
+
+#### 6. Tests Required
+
+```powershell
+cargo test -p ats-runtime execution_graph -- --nocapture
+cargo test -p agentthespire-desktop --test composition_generation -- --nocapture
+cargo test -p agentthespire-desktop --test stage2_composition -- --nocapture
+npm run test:frontend
+npx tsc -b --pretty false
+```
+
+Assertions must cover Plan success plus Single invalid pause, repository re-instantiation, resume
+request count excluding successful nodes, stable serial order, exact child Run create-or-match,
+local finalize, one final publication path, succeeded reconciliation with zero model requests,
+claim CAS, Pause/Cancel and no staging/transaction residue.
+
+#### 7. Wrong Vs Correct
+
+Wrong - repeat the entire closure after one semantic failure:
+
+```rust
+for definition in resolved.nodes {
+    plans.push(plan_model(definition).await?);
+    proposals.push(single_model(definition).await?);
+} // any error discards every previous result
+```
+
+Correct - persist validated domain checkpoints and restore proposals locally:
+
+```rust
+if node.status != Succeeded {
+    let proposal = single.propose(...).await?;
+    graph.complete_node(node.id, proposal.checkpoint())?;
+}
+let proposal = single.restore_composition_proposal(
+    resources, &request, &context, decode_checkpoint(node)?,
+)?;
 ```
 
 ## 8. Shell Cutover

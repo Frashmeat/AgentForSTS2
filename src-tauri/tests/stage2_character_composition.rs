@@ -390,6 +390,7 @@ async fn sts2_branded_placeholder_prototype_prepares_resources_and_publishes_one
             output_relative_path: format!("packages/{MOD_ID}.zip"),
             compression_level: Some(6),
         },
+        execution: None,
     };
     let mut run = running_run::<CompositionGenerateFeature, _>(&request);
     let run_id = run.id().clone();

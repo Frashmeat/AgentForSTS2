@@ -5,7 +5,8 @@ use ats_game_context::{
     ContributionResolverError, LoadedGamePack, VerifiedContributionSet, VerifiedTruthSnapshot,
 };
 use ats_kernel::{
-    ContributionId, FailureCode, FeatureId, SchemaId, SchemaRef, SchemaVersion, Sha256Digest,
+    ContributionId, ExecutionGraphId, FailureCode, FeatureId, SchemaId, SchemaRef, SchemaVersion,
+    Sha256Digest,
 };
 use ats_runtime::{
     ArtifactFileInput, ArtifactPublishRequest, ArtifactPublisher, BuildRunner, CancellationToken,
@@ -22,9 +23,10 @@ use thiserror::Error;
 use crate::FeatureSpec;
 use crate::composition::{CompositionDraftRef, CompositionGraphError, ResolvedItemGraph};
 use crate::mod_generate_single::{
-    CompositionFileMerge, ProposedArtifactFile, SingleGenerateContext, SingleGenerateError,
-    SingleGenerateFeature, SingleGenerateProposal, SingleGenerateRequest, SingleGenerateResult,
-    SingleGenerateService, SingleGenerationProvenance, SingleProposalDependencies,
+    CompositionFileMerge, ProposedArtifactFile, SingleGenerateCompositionProposal,
+    SingleGenerateContext, SingleGenerateError, SingleGenerateFeature, SingleGenerateRequest,
+    SingleGenerateResult, SingleGenerateService, SingleGenerationProvenance,
+    SingleProposalDependencies,
 };
 use crate::mod_plan::{
     ModPlanContext, ModPlanError, ModPlanFeature, ModPlanRequest, ModPlanService,
@@ -38,6 +40,9 @@ use crate::project_package::{
     ProjectPackageResult, ProjectPackageService,
 };
 
+mod staged;
+pub use staged::{StagedCompositionGenerateExecution, StagedCompositionGenerateStart};
+
 pub struct CompositionGenerateFeature;
 
 impl FeatureSpec for CompositionGenerateFeature {
@@ -50,15 +55,15 @@ impl FeatureSpec for CompositionGenerateFeature {
     }
 
     fn request_schema() -> SchemaRef {
-        schema("feature.composition-generate-request")
+        schema_version("feature.composition-generate-request", 2)
     }
 
     fn result_schema() -> SchemaRef {
-        schema("feature.composition-generate-result")
+        schema_version("feature.composition-generate-result", 2)
     }
 
     fn artifact_extension_schema() -> SchemaRef {
-        schema("feature.composition-generate-artifact-extension")
+        schema_version("feature.composition-generate-artifact-extension", 2)
     }
 }
 
@@ -81,6 +86,26 @@ pub struct CompositionGenerateRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub draft: Option<CompositionDraftRef>,
     pub package: ProjectPackageRequest,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<CompositionGenerateExecutionRequest>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum CompositionGenerateExecutionRequest {
+    Start {
+        execution_graph_id: ExecutionGraphId,
+    },
+    Resume {
+        execution_graph_id: ExecutionGraphId,
+        expected_revision: u64,
+        previous_run_id: RunId,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -106,6 +131,8 @@ pub struct CompositionGenerateResult {
     pub build: ProjectBuildResult,
     pub package_run_id: RunId,
     pub package: ProjectPackageResult,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_graph_id: Option<ExecutionGraphId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -123,6 +150,8 @@ pub struct CompositionGenerateArtifactExtension {
     pub child_run_ids: Vec<RunId>,
     pub package_output_relative_path: String,
     pub package_report: ats_runtime::PackageReport,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_graph_id: Option<ExecutionGraphId>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -377,7 +406,7 @@ impl<'a> CompositionGenerateService<'a> {
                 generation: proposal.result.clone(),
             });
             child_runs.push(generation_run);
-            proposals.push(proposal);
+            proposals.push(proposal.into_composition());
         }
 
         let validation_primitive = proposals
@@ -513,6 +542,12 @@ impl<'a> CompositionGenerateService<'a> {
             child_run_ids: child_runs.iter().map(|child| child.id().clone()).collect(),
             package_output_relative_path: package.output_relative_path.clone(),
             package_report: package.report.clone(),
+            execution_graph_id: request.execution.as_ref().map(|execution| match execution {
+                CompositionGenerateExecutionRequest::Start { execution_graph_id }
+                | CompositionGenerateExecutionRequest::Resume {
+                    execution_graph_id, ..
+                } => execution_graph_id.clone(),
+            }),
         };
         let artifact_request = composition_artifact_request(
             &request,
@@ -550,6 +585,7 @@ impl<'a> CompositionGenerateService<'a> {
             build,
             package_run_id,
             package,
+            execution_graph_id: extension.execution_graph_id.clone(),
         };
         let payload =
             VersionedPayload::from_typed(CompositionGenerateFeature::result_schema(), &result)?;
@@ -611,6 +647,14 @@ pub enum CompositionGenerateError {
     ArtifactCleanup,
     #[error("composition Run transition failed")]
     RunTransition,
+    #[error("composition execution graph revision or claim conflicts")]
+    ExecutionGraphConflict,
+    #[error("composition execution graph storage failed")]
+    ExecutionGraphStorage,
+    #[error("composition child Run storage failed")]
+    RunStorage,
+    #[error("composition generation checkpoint is invalid")]
+    InvalidCheckpoint,
     #[error("composition generation was cancelled")]
     Cancelled,
     #[error(transparent)]
@@ -663,6 +707,19 @@ impl CompositionGenerateError {
             Self::RunTransition | Self::Lifecycle(_) => {
                 ("run.transition_failed", "composition.generate.result")
             }
+            Self::ExecutionGraphConflict => (
+                "composition.execution.conflict",
+                "composition.generate.execution",
+            ),
+            Self::ExecutionGraphStorage => (
+                "composition.execution.storage_failed",
+                "composition.generate.execution",
+            ),
+            Self::RunStorage => ("run.storage_failed", "composition.generate.child_run"),
+            Self::InvalidCheckpoint => (
+                "composition.execution.invalid",
+                "composition.generate.checkpoint",
+            ),
             Self::Cancelled => ("run.cancelled", "composition.generate.execute"),
             Self::Graph(error) => (error.code(), "composition.generate.graph"),
             Self::Plan(error) => return error.run_failure(),
@@ -694,7 +751,7 @@ impl CompositionGenerateError {
 }
 
 fn consolidate_proposed_files(
-    proposals: &[SingleGenerateProposal],
+    proposals: &[SingleGenerateCompositionProposal],
 ) -> Result<(Vec<ProjectFileWrite>, Vec<ProposedArtifactFile>), CompositionGenerateError> {
     struct PendingFile {
         role: String,
@@ -779,7 +836,7 @@ fn composition_artifact_request(
     context: &CompositionGenerateContext<'_>,
     run: &RunRecord,
     graph: &ResolvedItemGraph,
-    proposals: &[SingleGenerateProposal],
+    proposals: &[SingleGenerateCompositionProposal],
     artifact_files: &[ProposedArtifactFile],
     extension: &CompositionGenerateArtifactExtension,
 ) -> Result<ArtifactPublishRequest, CompositionGenerateError> {
@@ -975,9 +1032,13 @@ fn generation_slot() -> ContributionId {
 }
 
 fn schema(id: &str) -> SchemaRef {
+    schema_version(id, 1)
+}
+
+fn schema_version(id: &str, version: u32) -> SchemaRef {
     SchemaRef {
         id: SchemaId::parse(id).expect("built-in schema ID is valid"),
-        version: SchemaVersion::new(1).expect("built-in schema version is valid"),
+        version: SchemaVersion::new(version).expect("built-in schema version is valid"),
     }
 }
 

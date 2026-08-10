@@ -31,8 +31,8 @@ pub use execution::{
 pub use execution_graph::{
     EXECUTION_GRAPH_SCHEMA_VERSION, ExecutionCommitIntent, ExecutionFailure, ExecutionGraphError,
     ExecutionGraphRecord, ExecutionGraphStatus, ExecutionNodeRecord, ExecutionNodeSpec,
-    ExecutionNodeStatus, HashedExecutionPayload, LogicalAttemptOutcome, LogicalNodeAttempt,
-    hash_json,
+    ExecutionNodeStatus, ExecutionPublicationIntent, HashedExecutionPayload, LogicalAttemptOutcome,
+    LogicalNodeAttempt, hash_json,
 };
 pub use media::{MediaClient, MediaError, MediaRequest, MediaRequestSnapshot, MediaResponse};
 pub use model::{

@@ -138,18 +138,85 @@ pub struct ExecutionNodeSpec {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ExecutionCommitIntent {
-    pub draft_id: CompositionDraftId,
-    pub canonical_draft: VersionedPayload,
-    pub draft_payload_sha256: Sha256Digest,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub draft_id: Option<CompositionDraftId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub canonical_draft: Option<VersionedPayload>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub draft_payload_sha256: Option<Sha256Digest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publication: Option<ExecutionPublicationIntent>,
     pub validated_content_digest: Sha256Digest,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExecutionPublicationIntent {
+    pub target_id: String,
+    pub canonical_payload: VersionedPayload,
+    pub payload_sha256: Sha256Digest,
+}
+
 impl ExecutionCommitIntent {
+    #[must_use]
+    pub fn draft(
+        draft_id: CompositionDraftId,
+        canonical_draft: VersionedPayload,
+        draft_payload_sha256: Sha256Digest,
+        validated_content_digest: Sha256Digest,
+    ) -> Self {
+        Self {
+            draft_id: Some(draft_id),
+            canonical_draft: Some(canonical_draft),
+            draft_payload_sha256: Some(draft_payload_sha256),
+            publication: None,
+            validated_content_digest,
+        }
+    }
+
+    #[must_use]
+    pub fn publication(
+        target_id: impl Into<String>,
+        canonical_payload: VersionedPayload,
+        payload_sha256: Sha256Digest,
+        validated_content_digest: Sha256Digest,
+    ) -> Self {
+        Self {
+            draft_id: None,
+            canonical_draft: None,
+            draft_payload_sha256: None,
+            publication: Some(ExecutionPublicationIntent {
+                target_id: target_id.into(),
+                canonical_payload,
+                payload_sha256,
+            }),
+            validated_content_digest,
+        }
+    }
+
     pub fn validate(&self) -> Result<(), ExecutionGraphError> {
-        if hash_json(self.canonical_draft.payload())? == self.draft_payload_sha256 {
-            Ok(())
-        } else {
-            Err(ExecutionGraphError::PayloadHashMismatch)
+        match (
+            &self.draft_id,
+            &self.canonical_draft,
+            &self.draft_payload_sha256,
+            &self.publication,
+        ) {
+            (Some(_), Some(payload), Some(expected), None)
+                if hash_json(payload.payload())? == *expected =>
+            {
+                Ok(())
+            }
+            (None, None, None, Some(publication))
+                if valid_target_id(&publication.target_id)
+                    && hash_json(publication.canonical_payload.payload())?
+                        == publication.payload_sha256 =>
+            {
+                Ok(())
+            }
+            (Some(_), Some(_), Some(_), None) | (None, None, None, Some(_)) => {
+                Err(ExecutionGraphError::PayloadHashMismatch)
+            }
+            _ => Err(ExecutionGraphError::InvalidMetadata),
         }
     }
 }
@@ -937,6 +1004,14 @@ fn valid_role(value: &str) -> bool {
         })
 }
 
+fn valid_target_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+}
+
 pub fn hash_json(value: &impl Serialize) -> Result<Sha256Digest, ExecutionGraphError> {
     let bytes = serde_json::to_vec(value).map_err(ExecutionGraphError::Serialize)?;
     Sha256Digest::parse(format!("{:x}", Sha256::digest(bytes)))
@@ -1082,12 +1157,12 @@ mod tests {
                 .unwrap();
         }
         let draft = payload("composition.canonical-draft", 1);
-        let intent = ExecutionCommitIntent {
-            draft_id: CompositionDraftId::parse("draft-fixture").unwrap(),
-            draft_payload_sha256: hash_json(draft.payload()).unwrap(),
-            canonical_draft: draft,
-            validated_content_digest: digest("d"),
-        };
+        let intent = ExecutionCommitIntent::draft(
+            CompositionDraftId::parse("draft-fixture").unwrap(),
+            draft.clone(),
+            hash_json(draft.payload()).unwrap(),
+            digest("d"),
+        );
         graph.prepare_commit(&run_id, intent, Utc::now()).unwrap();
         assert_eq!(graph.status(), ExecutionGraphStatus::CommitPrepared);
         graph.recover_stale_claim(Utc::now()).unwrap();
@@ -1101,6 +1176,44 @@ mod tests {
             .unwrap();
         assert_eq!(graph.status(), ExecutionGraphStatus::Succeeded);
         assert!(graph.final_result_ref().is_some());
+    }
+
+    #[test]
+    fn publication_commit_intent_is_hashed_and_exclusive() {
+        let payload = payload("composition.publication-intent", 7);
+        let intent = ExecutionCommitIntent::publication(
+            "fixture-artifact",
+            payload.clone(),
+            hash_json(payload.payload()).unwrap(),
+            digest("e"),
+        );
+        intent.validate().unwrap();
+        let encoded = serde_json::to_vec(&intent).unwrap();
+        let decoded: ExecutionCommitIntent = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(decoded, intent);
+
+        let mut mixed = intent;
+        mixed.draft_id = Some(CompositionDraftId::parse("draft-fixture").unwrap());
+        assert!(matches!(
+            mixed.validate(),
+            Err(ExecutionGraphError::InvalidMetadata)
+        ));
+
+        let mut tampered = ExecutionCommitIntent::publication(
+            "fixture-artifact",
+            payload,
+            digest("f"),
+            digest("e"),
+        );
+        assert!(matches!(
+            tampered.validate(),
+            Err(ExecutionGraphError::PayloadHashMismatch)
+        ));
+        tampered.publication.as_mut().unwrap().target_id = "unsafe/path".into();
+        assert!(matches!(
+            tampered.validate(),
+            Err(ExecutionGraphError::PayloadHashMismatch)
+        ));
     }
 
     #[test]

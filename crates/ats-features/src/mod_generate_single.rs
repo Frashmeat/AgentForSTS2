@@ -17,7 +17,7 @@ use ats_runtime::{
     RunTransition, TokenUsage, ValidationError, ValidationRequest, ValidationRunner,
     VersionedPayload,
 };
-use ats_workspace::{ItemDefinition, ItemResourceBinding, StoredItemDefinition};
+use ats_workspace::{ItemResourceBinding, StoredItemDefinition};
 use ats_workspace::{ResourceAsset, ResourceRepository};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -198,7 +198,7 @@ pub struct SingleGenerateExecution {
     pub request_snapshot: ModelRequestSnapshot,
 }
 
-#[derive(Debug, Clone, Serialize, Eq, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SingleGenerationProvenance {
     pub definition_hash: Sha256Digest,
@@ -225,6 +225,47 @@ pub struct SingleGenerateProposal {
     generated: ValidatedBundle,
     selected: Vec<LoadedResource>,
     extension: SingleGenerateArtifactExtension,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SingleGenerateProposalCheckpoint {
+    pub result: SingleGenerateResult,
+    pub provenance: SingleGenerationProvenance,
+    files: BTreeMap<String, String>,
+}
+
+pub struct SingleGenerateCompositionProposal {
+    pub result: SingleGenerateResult,
+    pub writes: Vec<ProjectFileWrite>,
+    pub artifact_files: Vec<ProposedArtifactFile>,
+    pub provenance: SingleGenerationProvenance,
+}
+
+impl SingleGenerateProposal {
+    #[must_use]
+    pub fn checkpoint(&self) -> SingleGenerateProposalCheckpoint {
+        SingleGenerateProposalCheckpoint {
+            result: self.result.clone(),
+            provenance: self.provenance.clone(),
+            files: self
+                .generated
+                .files
+                .iter()
+                .map(|(role, _, content)| (role.clone(), content.clone()))
+                .collect(),
+        }
+    }
+
+    #[must_use]
+    pub fn into_composition(self) -> SingleGenerateCompositionProposal {
+        SingleGenerateCompositionProposal {
+            result: self.result,
+            writes: self.writes,
+            artifact_files: self.artifact_files,
+            provenance: self.provenance,
+        }
+    }
 }
 
 pub struct SingleProposalDependencies<'a, C, R>
@@ -422,11 +463,7 @@ impl SingleGenerateService {
         resource_specs
             .validate()
             .map_err(|_| SingleGenerateError::InvalidResourceSpecs)?;
-        validate_required_roles(
-            &request.plan,
-            item_descriptor,
-            &request.definition.definition,
-        )?;
+        validate_plan_roles(&request.plan, item_descriptor)?;
         let evidence = query_evidence(context.truth, item_descriptor)?;
         let selected = load_resources(
             dependencies.resources,
@@ -492,6 +529,102 @@ impl SingleGenerateService {
             generated,
             selected,
             extension,
+        })
+    }
+
+    pub fn restore_composition_proposal<R>(
+        &self,
+        resources: &R,
+        request: &SingleGenerateRequest,
+        context: &SingleGenerateContext<'_>,
+        checkpoint: &SingleGenerateProposalCheckpoint,
+    ) -> Result<SingleGenerateCompositionProposal, SingleGenerateError>
+    where
+        R: ResourceRepository + ?Sized,
+    {
+        validate_context(context)?;
+        validate_request(request)?;
+        let contribution: GenerateContribution = context.contributions.decode(&generation_slot())?;
+        contribution.validate(context.pack)?;
+        let item_spec = contribution
+            .item_types
+            .iter()
+            .find(|item| item.id == request.plan.item_type)
+            .ok_or(SingleGenerateError::UnsupportedItemType)?;
+        let item_type = ItemTypeId::parse(request.plan.item_type.as_str())
+            .map_err(|_| SingleGenerateError::UnsupportedItemType)?;
+        let item_descriptor = context
+            .pack
+            .item_type(&item_type)
+            .ok_or(SingleGenerateError::UnsupportedItemType)?;
+        ItemDefinitionValidator::validate(
+            context.pack,
+            &request.definition.definition,
+            ItemDefinitionValidationMode::Ready,
+        )
+        .map_err(|_| SingleGenerateError::InvalidItemDefinition)?;
+        validate_definition_identity(request)?;
+        validate_plan_roles(&request.plan, item_descriptor)?;
+        let resource_specs: ResourceSpecs = context
+            .resource_contributions
+            .decode(&resource_specs_slot())?;
+        resource_specs
+            .validate()
+            .map_err(|_| SingleGenerateError::InvalidResourceSpecs)?;
+        let selected = load_resources(
+            resources,
+            &request.definition,
+            item_descriptor,
+            &resource_specs,
+        )?;
+        let resource_refs = selected
+            .iter()
+            .map(|item| item.reference.clone())
+            .collect::<Vec<_>>();
+        if checkpoint.provenance.definition_hash != request.definition.definition_hash
+            || checkpoint.provenance.selected_resources != resource_refs
+            || checkpoint.provenance.model.trim().is_empty()
+        {
+            return Err(SingleGenerateError::InvalidModelOutput);
+        }
+        let generated = validate_bundle(
+            request,
+            item_spec,
+            GeneratedModBundle {
+                files: checkpoint.files.clone(),
+                acceptance_notes: checkpoint.result.acceptance_notes.clone(),
+            },
+        )?;
+        let extension = SingleGenerateArtifactExtension {
+            model_request_sha256: checkpoint.provenance.model_request_sha256.clone(),
+            definition_hash: request.definition.definition_hash.clone(),
+            generated_file_count: u32::try_from(generated.len())
+                .map_err(|_| SingleGenerateError::InvalidModelOutput)?,
+            validation_primitive: contribution.validation_primitive,
+            acceptance_notes: generated.acceptance_notes.clone(),
+        };
+        let result = SingleGenerateResult {
+            publication: SingleGeneratePublication::CompositionStaged,
+            artifact_manifest_ref: None,
+            manifest_sha256: None,
+            generated_file_count: extension.generated_file_count,
+            validation_primitive: extension.validation_primitive.clone(),
+            acceptance_notes: extension.acceptance_notes.clone(),
+        };
+        if checkpoint.result != result {
+            return Err(SingleGenerateError::InvalidModelOutput);
+        }
+        Ok(SingleGenerateCompositionProposal {
+            result,
+            writes: build_writes(request, &generated, &selected, &resource_specs)?,
+            artifact_files: proposed_artifact_files(
+                request,
+                item_spec,
+                &generated,
+                &selected,
+                &resource_specs,
+            )?,
+            provenance: checkpoint.provenance.clone(),
         })
     }
 
@@ -596,7 +729,7 @@ pub fn validate_single_generation_readiness<R: ResourceRepository + ?Sized>(
     let descriptor = pack
         .item_type(&request.definition.definition.item_type)
         .ok_or(SingleGenerateError::UnsupportedItemType)?;
-    validate_required_roles(&request.plan, descriptor, &request.definition.definition)?;
+    validate_plan_roles(&request.plan, descriptor)?;
     validate_definition_resources(
         pack,
         resource_contributions,
@@ -883,24 +1016,22 @@ fn validate_definition_identity(
     Ok(())
 }
 
-fn validate_required_roles(
+fn validate_plan_roles(
     plan: &PlanItem,
     item_descriptor: &ItemTypeDescriptor,
-    definition: &ItemDefinition,
 ) -> Result<(), SingleGenerateError> {
     let planned = plan
         .required_resource_roles
         .iter()
         .map(String::as_str)
         .collect::<BTreeSet<_>>();
-    let required_roles =
-        ItemDefinitionValidator::required_resource_roles(item_descriptor, definition)
-            .map_err(|_| SingleGenerateError::InvalidItemDefinition)?;
-    let required = required_roles
+    let catalog = item_descriptor
+        .resource_profiles()
         .iter()
+        .flat_map(|profile| profile.required_resource_roles())
         .map(ResourceId::as_str)
         .collect::<BTreeSet<_>>();
-    if planned != required {
+    if planned != catalog {
         return Err(SingleGenerateError::ResourceRoleMismatch);
     }
     Ok(())
@@ -1427,8 +1558,8 @@ fn bundle_schema() -> SchemaRef {
 #[cfg(test)]
 mod tests {
     use ats_game_context::{ContributionResolver, GamePackLoader};
-    use ats_kernel::ItemId;
-    use ats_workspace::ItemDefinition;
+    use ats_kernel::{ItemFieldId, ItemId};
+    use ats_workspace::{ItemDefinition, ItemFieldValue};
     use sha2::{Digest, Sha256};
 
     use super::*;
@@ -1702,6 +1833,54 @@ mod tests {
                 &specs
             ),
             Err(SingleGenerateError::InvalidSelectedResource)
+        ));
+    }
+
+    #[test]
+    fn conditional_profile_plan_union_is_distinct_from_selected_definition_roles() {
+        let pack = GamePackLoader::load_built_in_sts2().unwrap();
+        let descriptor = pack
+            .item_type(&ItemTypeId::parse("character").unwrap())
+            .unwrap();
+        let catalog_roles = descriptor
+            .resource_profiles()
+            .iter()
+            .flat_map(|profile| profile.required_resource_roles())
+            .map(ToString::to_string)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let mut plan = PlanItem {
+            item_id: "fixture-character".into(),
+            item_type: "character".into(),
+            name: "Fixture Character".into(),
+            summary: "A conditional Resource profile fixture.".into(),
+            behavior_intent: vec!["Provide one observable Character behavior.".into()],
+            implementation_constraints: Vec::new(),
+            evidence_requirements: Vec::new(),
+            required_resource_roles: catalog_roles,
+            acceptance_criteria: vec!["The fixture compiles.".into()],
+        };
+        validate_plan_roles(&plan, descriptor).unwrap();
+
+        let mut placeholder = ItemDefinition::new(
+            ItemId::parse("fixture-character").unwrap(),
+            ItemTypeId::parse("character").unwrap(),
+        );
+        placeholder.canonical_fields.insert(
+            ItemFieldId::parse("visual_profile").unwrap(),
+            ItemFieldValue::Choice("placeholder".into()),
+        );
+        assert!(
+            ItemDefinitionValidator::required_resource_roles(descriptor, &placeholder)
+                .unwrap()
+                .is_empty()
+        );
+
+        plan.required_resource_roles.clear();
+        assert!(matches!(
+            validate_plan_roles(&plan, descriptor),
+            Err(SingleGenerateError::ResourceRoleMismatch)
         ));
     }
 

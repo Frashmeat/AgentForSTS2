@@ -100,11 +100,13 @@ pub async fn submit_feature(
 ) -> CommandResult<RunId> {
     let session = current_session(&active, "run.submit")?;
     let drafts = session.composition_draft_repository();
+    let items = session.item_repository();
+    let resources = session.resource_repository();
     ensure_submission_ready(
         composition.inner(),
-        session.item_repository().as_ref(),
+        items.as_ref(),
         drafts.as_ref(),
-        session.resource_repository().as_ref(),
+        resources.as_ref(),
         &submission,
     )?;
     let candidate_run_id = RunId::new();
@@ -126,6 +128,32 @@ pub async fn submit_feature(
             RunRecord::new_with_id(candidate_run_id, CompositionPlanFeature::id(), request),
             Some(staged.graph),
         )
+    } else if submission.feature_id == CompositionGenerateFeature::id() {
+        let request = submission
+            .request
+            .decode::<CompositionGenerateRequest>(&CompositionGenerateFeature::request_schema())
+            .map_err(|_| CommandFailure::composition_invalid("run.submit"))?;
+        if request.execution.is_some() {
+            return Err(CommandFailure::composition_invalid("run.submit"));
+        }
+        let staged = composition
+            .prepare_composition_generate_start(
+                request,
+                candidate_run_id.clone(),
+                session.path(),
+                items.as_ref(),
+                resources.as_ref(),
+            )
+            .map_err(map_generation_prepare_failure)?;
+        let request = VersionedPayload::from_typed(
+            CompositionGenerateFeature::request_schema(),
+            &staged.request,
+        )
+        .map_err(|_| CommandFailure::composition_invalid("run.submit"))?;
+        (
+            RunRecord::new_with_id(candidate_run_id, CompositionGenerateFeature::id(), request),
+            Some(staged.graph),
+        )
     } else {
         (
             RunRecord::new_with_id(candidate_run_id, submission.feature_id, submission.request),
@@ -136,8 +164,6 @@ pub async fn submit_feature(
     let meta = session.meta().clone();
     let composition = Arc::clone(composition.inner());
     let config = Arc::clone(config.inner());
-    let resources = session.resource_repository();
-    let items = session.item_repository();
     let graphs = session.execution_graph_repository();
     let source_path = submission.source_path.map(PathBuf::from);
     let worker = move |run: RunRecord,
@@ -251,7 +277,7 @@ pub async fn cancel_execution_graph(
 }
 
 #[tauri::command]
-pub async fn resume_composition_plan(
+pub async fn resume_execution_graph(
     active: State<'_, ActiveProject>,
     composition: State<'_, Arc<Stage2Composition>>,
     config: State<'_, Arc<AppConfig>>,
@@ -266,13 +292,39 @@ pub async fn resume_composition_plan(
         .get(&id)
         .map_err(|_| CommandFailure::storage("execution.resume"))?;
     let run_id = RunId::new();
-    let staged = composition
-        .prepare_composition_plan_resume(graph, expected_revision, run_id.clone())
-        .map_err(map_plan_prepare_failure)?;
-    let request =
-        VersionedPayload::from_typed(CompositionPlanFeature::request_schema(), &staged.request)
-            .map_err(|_| CommandFailure::composition_invalid("execution.resume"))?;
-    let run = RunRecord::new_with_id(run_id, CompositionPlanFeature::id(), request);
+    let owner = graph.owner_feature_id().clone();
+    let (run, claimed_graph) = if owner == CompositionPlanFeature::id() {
+        let staged = composition
+            .prepare_composition_plan_resume(graph, expected_revision, run_id.clone())
+            .map_err(map_plan_prepare_failure)?;
+        let request =
+            VersionedPayload::from_typed(CompositionPlanFeature::request_schema(), &staged.request)
+                .map_err(|_| CommandFailure::composition_invalid("execution.resume"))?;
+        (
+            RunRecord::new_with_id(run_id, CompositionPlanFeature::id(), request),
+            staged.graph,
+        )
+    } else if owner == CompositionGenerateFeature::id() {
+        let staged = composition
+            .prepare_composition_generate_resume(
+                graph,
+                expected_revision,
+                run_id.clone(),
+                session.path(),
+            )
+            .map_err(map_generation_prepare_failure)?;
+        let request = VersionedPayload::from_typed(
+            CompositionGenerateFeature::request_schema(),
+            &staged.request,
+        )
+        .map_err(|_| CommandFailure::composition_invalid("execution.resume"))?;
+        (
+            RunRecord::new_with_id(run_id, CompositionGenerateFeature::id(), request),
+            staged.graph,
+        )
+    } else {
+        return Err(CommandFailure::composition_invalid("execution.resume"));
+    };
     let root = session.path().to_path_buf();
     let meta = session.meta().clone();
     let composition = Arc::clone(composition.inner());
@@ -281,7 +333,7 @@ pub async fn resume_composition_plan(
     let items = session.item_repository();
     let drafts = session.composition_draft_repository();
     let worker_graphs = Arc::clone(&graphs);
-    let already_succeeded = staged.graph.status() == ExecutionGraphStatus::Succeeded;
+    let already_succeeded = claimed_graph.status() == ExecutionGraphStatus::Succeeded;
     let submitted = if already_succeeded {
         session
             .submit(run, move |run, cancellation, repository| async move {
@@ -307,7 +359,7 @@ pub async fn resume_composition_plan(
             .submit_resumed(
                 run,
                 expected_revision,
-                staged.graph,
+                claimed_graph,
                 move |run, cancellation, repository| async move {
                     composition
                         .execute(
@@ -999,6 +1051,27 @@ fn map_plan_prepare_failure(failure: ats_runtime::RunFailure) -> CommandFailure 
     }
 }
 
+fn map_generation_prepare_failure(failure: ats_runtime::RunFailure) -> CommandFailure {
+    match failure.code.as_str() {
+        "truth.missing" | "truth.evidence_missing" => {
+            CommandFailure::truth_missing("run.submit.generation")
+        }
+        "pack.contribution_invalid" | "truth.context_mismatch" => {
+            CommandFailure::pack_invalid("run.submit.generation")
+        }
+        "composition.execution.conflict" => {
+            CommandFailure::composition_conflict("run.submit.generation")
+        }
+        "run.input_invalid"
+        | "composition.graph.invalid"
+        | "composition.graph.not_ready"
+        | "composition.execution.invalid" => {
+            CommandFailure::composition_invalid("run.submit.generation")
+        }
+        _ => CommandFailure::unclassified("run.submit.generation"),
+    }
+}
+
 fn execution_graph_view(
     graph: &ExecutionGraphRecord,
     can_reconcile_succeeded: bool,
@@ -1064,10 +1137,9 @@ fn can_reconcile_succeeded_graph(
         return Ok(false);
     };
     match runs.get(run_id) {
-        Ok(run) => Ok(run.status() == RunStatus::Failed
-            && run
-                .failure()
-                .is_some_and(|failure| failure.code.as_str() == "run.interrupted")),
+        Ok(run) => {
+            Ok(run.feature_id() == graph.owner_feature_id() && run.status() == RunStatus::Failed)
+        }
         Err(RunRepositoryError::NotFound) => Ok(false),
         Err(error) => Err(error),
     }
@@ -1075,10 +1147,16 @@ fn can_reconcile_succeeded_graph(
 
 #[cfg(test)]
 mod tests {
+    use ats_adapters::FileRunRepository;
     use ats_features::mod_generate_batch::BatchDefinitionItem;
     use ats_features::mod_plan::PlanItem;
     use ats_features::project_package::ProjectPackageRequest;
-    use ats_kernel::{CompositionId, CompositionProfileId, ItemId};
+    use ats_kernel::{
+        CompositionId, CompositionProfileId, ItemId, SchemaId, SchemaRef, SchemaVersion,
+    };
+    use ats_runtime::{
+        ExecutionCommitIntent, ExecutionNodeSpec, RunFailure, RunTransition, hash_json,
+    };
     use ats_workspace::{ItemCompositionProfile, ItemCompositionSource};
 
     use super::*;
@@ -1098,6 +1176,99 @@ mod tests {
             );
             assert!(!failure.0.retryable);
         }
+    }
+
+    #[test]
+    fn failed_parent_can_reconcile_an_already_succeeded_graph() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("project");
+        std::fs::create_dir(&project).unwrap();
+        let runs = FileRunRepository::new(project).unwrap();
+        let feature_id = CompositionGenerateFeature::id();
+        let run_id = RunId::parse("run-reconcile-fixture").unwrap();
+        let schema = |id: &str| SchemaRef {
+            id: SchemaId::parse(id).unwrap(),
+            version: SchemaVersion::new(1).unwrap(),
+        };
+        let zero = Sha256Digest::parse("0".repeat(64)).unwrap();
+        let node_id = ExecutionNodeId::parse("composition.finalize").unwrap();
+        let mut graph = ExecutionGraphRecord::new_claimed(
+            ExecutionGraphId::parse("graph-reconcile-fixture").unwrap(),
+            feature_id.clone(),
+            zero.clone(),
+            VersionedPayload::from_typed(schema("fixture.blueprint"), &serde_json::json!({}))
+                .unwrap(),
+            vec![ExecutionNodeSpec {
+                node_id: node_id.clone(),
+                role_id: "composition.finalize".into(),
+                depends_on: Vec::new(),
+                request_snapshot_hash: zero,
+            }],
+            run_id.clone(),
+            chrono::Utc::now(),
+        )
+        .unwrap();
+        graph
+            .start_node(&node_id, &run_id, chrono::Utc::now())
+            .unwrap();
+        graph
+            .complete_node(
+                &node_id,
+                &run_id,
+                VersionedPayload::from_typed(schema("fixture.checkpoint"), &serde_json::json!({}))
+                    .unwrap(),
+                chrono::Utc::now(),
+            )
+            .unwrap();
+        let publication =
+            VersionedPayload::from_typed(schema("fixture.publication"), &serde_json::json!({}))
+                .unwrap();
+        graph
+            .prepare_commit(
+                &run_id,
+                ExecutionCommitIntent::publication(
+                    "fixture-artifact",
+                    publication.clone(),
+                    hash_json(publication.payload()).unwrap(),
+                    Sha256Digest::parse("1".repeat(64)).unwrap(),
+                ),
+                chrono::Utc::now(),
+            )
+            .unwrap();
+        graph
+            .mark_succeeded(
+                &run_id,
+                VersionedPayload::from_typed(schema("fixture.result"), &serde_json::json!({}))
+                    .unwrap(),
+                chrono::Utc::now(),
+            )
+            .unwrap();
+
+        let request = VersionedPayload::from_typed(
+            CompositionGenerateFeature::request_schema(),
+            &serde_json::json!({}),
+        )
+        .unwrap();
+        let mut run = RunRecord::new_with_id(run_id, feature_id, request);
+        runs.create(&run).unwrap();
+        run.apply_transition(RunTransition::Start, chrono::Utc::now())
+            .unwrap();
+        runs.persist(&run, RunStatus::Pending).unwrap();
+        run.apply_transition(
+            RunTransition::Fail {
+                failure: RunFailure::new(
+                    FailureCode::parse("run.transition_failed").unwrap(),
+                    "composition.generate.result",
+                    None,
+                )
+                .unwrap(),
+            },
+            chrono::Utc::now(),
+        )
+        .unwrap();
+        runs.persist(&run, RunStatus::Running).unwrap();
+
+        assert!(can_reconcile_succeeded_graph(&graph, &runs).unwrap());
     }
 
     fn stored_definition(item_type: &ItemTypeId) -> StoredItemDefinition {

@@ -95,6 +95,15 @@ final Artifact uses `artifact.*`. Cleanup attempts are independent: an Artifact 
 not skip a still-available project rollback, and a package commit error must not drop a pending
 real-project transaction.
 
+Recoverable whole-closure generation additionally uses `composition.execution.conflict` for a lost
+graph revision/claim, `composition.execution.storage_failed` for graph repository failure and
+`composition.execution.invalid` for a checkpoint/blueprint/publication-intent mismatch. A known
+Plan or Single `model.*` failure keeps its original code and stage while the graph pauses the exact
+node; it must not be reclassified as an execution failure. Child Run create-or-match failure is
+`run.storage_failed`. Resume is explicit and never converts one of these failures into an automatic
+semantic retry. Failure after `commit_prepared` releases only the active claim and preserves the
+roll-forward publication intent plus every successful model checkpoint.
+
 ## Ownership
 
 - Kernel owns serialized shape and validation.

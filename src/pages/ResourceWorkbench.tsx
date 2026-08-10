@@ -147,7 +147,7 @@ export function ResourceWorkbench({
     <div className="space-y-4">
       <div className="flex flex-col md:flex-row gap-2 md:items-end">
         <Field label="AI image intent">
-          <input value={aiPrompt} onChange={(event) => setAiPrompt(event.target.value)} />
+          <input data-testid="resource-ai-prompt" value={aiPrompt} onChange={(event) => setAiPrompt(event.target.value)} />
         </Field>
         <Button size="sm" onClick={() => void refresh()} title="Refresh resources">
           <RefreshCw size={13} /> Refresh
@@ -186,7 +186,7 @@ export function ResourceWorkbench({
                     <PackageOpen size={13} /> Default
                   </Button>
                 )}
-                <Button size="sm" variant="accent" disabled={busyRole !== null || !aiPrompt.trim()} onClick={() => void prepareAi(role.id, role.mediaTypes[0])}>
+                <Button data-testid={`resource-ai-${role.id}`} size="sm" variant="accent" disabled={busyRole !== null || !aiPrompt.trim()} onClick={() => void prepareAi(role.id, role.mediaTypes[0])}>
                   <Sparkles size={13} /> AI
                 </Button>
               </div>

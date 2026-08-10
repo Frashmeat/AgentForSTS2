@@ -109,8 +109,8 @@ const waitForCompositionGraph = async (
       const element = document.querySelector('[data-testid="composition-execution-graph"]');
       if (!element || element.getAttribute("data-execution-status") !== expectedStatus) return null;
       const currentGraphId = element.getAttribute("data-execution-graph-id");
-      const runId = element.getAttribute("data-plan-run-id");
-      const currentRunStatus = element.getAttribute("data-plan-run-status");
+      const runId = element.getAttribute("data-run-id");
+      const currentRunStatus = element.getAttribute("data-run-status");
       if (expectedGraphId && currentGraphId !== expectedGraphId) return null;
       if (!runId || runId === oldRunId) return null;
       if (expectedRunStatus && currentRunStatus !== expectedRunStatus) return null;
@@ -138,6 +138,33 @@ const waitForEnabled = async (testId, timeout = 30_000) => browser.waitUntil(
   }, testId),
   { timeout, timeoutMsg: `${testId} did not become enabled` },
 );
+
+const resourceActionCount = async (label) => browser.execute((expectedLabel) =>
+  Array.from(document.querySelectorAll("button"))
+    .filter((button) => button.textContent?.trim() === expectedLabel).length,
+label);
+
+const bindRequiredResourceCandidates = async (expectedCount, timeout = 180_000) => {
+  await browser.waitUntil(
+    async () => (await resourceActionCount("Select")) >= expectedCount,
+    { timeout, timeoutMsg: `${expectedCount} resource candidates did not become selectable` },
+  );
+  for (let index = 0; index < expectedCount; index += 1) {
+    const before = await resourceActionCount("Bound");
+    const clicked = await browser.execute(() => {
+      const button = Array.from(document.querySelectorAll("button"))
+        .find((candidate) => candidate.textContent?.trim() === "Select" && !candidate.disabled);
+      if (!(button instanceof HTMLButtonElement)) return false;
+      button.click();
+      return true;
+    });
+    assert.equal(clicked, true, "a required Resource candidate was not selectable");
+    await browser.waitUntil(
+      async () => (await resourceActionCount("Bound")) === before + 1,
+      { timeout, timeoutMsg: "selected Resource candidate did not become bound" },
+    );
+  }
+};
 
 const readStubRequests = async (root) => (await fs.readFile(
   path.join(root, "stub-requests.jsonl"),
@@ -386,6 +413,163 @@ describe("current desktop Stage 2 workflow", () => {
     }
     assert.equal(Array.from(countsByNode.values()).filter((count) => count === 2).length, 1);
     assert.equal(Array.from(countsByNode.values()).filter((count) => count === 1).length, 10);
+    await assertNoTransactionResidue(projectRoot);
+    await assertNoAtomicWriteResidue(projectRoot);
+  });
+
+  it("resumes only the invalid Generate Single and publishes one complete closure", async () => {
+    const root = requiredEnv("ATS_E2E_ROOT");
+    const projectRoot = path.join(root, "projects", "E2EMod");
+    const draftId = "gui-staged-recovery";
+    const artifactId = "gui-composition";
+
+    await navigate("/composition");
+    await waitForTestId(`composition-draft-${draftId}`, 60_000);
+    await $(`[data-testid="composition-draft-${draftId}"]`).click();
+    const draft = JSON.parse(await fs.readFile(path.join(
+      projectRoot,
+      ".ats",
+      "composition-drafts-v2",
+      `${draftId}.json`,
+    ), "utf8"));
+    const cards = Object.values(draft.nodes)
+      .filter((node) => node.definition.itemType === "card")
+      .map((node) => node.definition.itemId);
+    const relics = Object.values(draft.nodes)
+      .filter((node) => node.definition.itemType === "relic")
+      .map((node) => node.definition.itemId);
+    assert.equal(cards.length, 9);
+    assert.equal(relics.length, 1);
+    for (const [index, itemId] of cards.entries()) {
+      await $(`[data-testid="composition-node-${itemId}"]`).click();
+      if (index === 0) {
+        await waitForTestId("resource-ai-prompt", 60_000);
+        await $('[data-testid="resource-ai-prompt"]').setValue("Deterministic card identity art");
+        await waitForEnabled("resource-ai-card.master", 60_000);
+        await $('[data-testid="resource-ai-card.master"]').click();
+      }
+      await bindRequiredResourceCandidates(2);
+    }
+    for (const [index, itemId] of relics.entries()) {
+      await $(`[data-testid="composition-node-${itemId}"]`).click();
+      if (index === 0) {
+        await waitForTestId("resource-ai-prompt", 60_000);
+        await $('[data-testid="resource-ai-prompt"]').setValue("Deterministic relic identity art");
+        await waitForEnabled("resource-ai-relic.master", 60_000);
+        await $('[data-testid="resource-ai-relic.master"]').click();
+      }
+      await bindRequiredResourceCandidates(3);
+    }
+    await browser.execute(() => {
+      const button = Array.from(document.querySelectorAll("button"))
+        .find((candidate) => candidate.textContent?.includes("Select filtered"));
+      if (!(button instanceof HTMLButtonElement)) throw new Error("Select filtered button is missing");
+      button.click();
+    });
+    await waitForEnabled("composition-confirm");
+    await $('[data-testid="composition-confirm"]').click();
+    await waitForTestId("composition-generate-root", 60_000);
+    await browser.waitUntil(
+      async () => browser.execute(() => {
+        const element = document.querySelector('[data-testid="composition-generate-root"]');
+        return element instanceof HTMLSelectElement && element.options.length > 0 && Boolean(element.value);
+      }),
+      { timeout: 60_000, timeoutMsg: "confirmed composition root did not become available" },
+    );
+    await $('[data-testid="composition-artifact-id"]').setValue(artifactId);
+    await $('[data-testid="composition-mod-id"]').setValue("E2EMod");
+    await $('[data-testid="composition-source-root"]').setValue("delivery");
+    await $('[data-testid="composition-output-path"]').setValue("packages/E2EMod-composition.zip");
+    await $('[data-testid="composition-generate"]').click();
+
+    const paused = await waitForCompositionGraph("paused", {
+      timeout: 300_000,
+      runStatus: "failed",
+    });
+    assert.equal(paused.totalNodes, 23);
+    assert.ok(paused.completedNodes > 0 && paused.completedNodes < paused.totalNodes);
+    assert.equal(paused.runStatus, "failed");
+    const graphPath = path.join(
+      projectRoot,
+      ".ats",
+      "execution-graphs-v1",
+      `${paused.graphId}.json`,
+    );
+    const pausedGraph = JSON.parse(await fs.readFile(graphPath, "utf8"));
+    assert.equal(pausedGraph.status, "paused");
+    assert.equal(pausedGraph.activeRunId, null);
+    const failedRun = JSON.parse(await fs.readFile(path.join(
+      projectRoot,
+      ".ats",
+      "runs-v3",
+      `${paused.runId}.json`,
+    ), "utf8"));
+    assert.equal(failedRun.status, "failed");
+    assert.equal(failedRun.failure.code, "model.output_invalid");
+    await assert.rejects(() => fs.access(path.join(projectRoot, "artifacts", artifactId)));
+    await assert.rejects(() => fs.access(path.join(projectRoot, "Generated")));
+
+    const beforeResume = (await readStubRequests(root)).filter(
+      (entry) => entry.kind === "composition_generate_single",
+    );
+    assert.equal(beforeResume.filter((entry) => entry.outcome === "invalid").length, 1);
+    await waitForEnabled("composition-execution-resume");
+    await $('[data-testid="composition-execution-resume"]').click();
+    const succeeded = await waitForCompositionGraph("succeeded", {
+      graphId: paused.graphId,
+      previousRunId: paused.runId,
+      runStatus: "succeeded",
+      timeout: 360_000,
+    });
+    assert.equal(succeeded.completedNodes, 23);
+    assert.equal(succeeded.totalNodes, 23);
+
+    const committedGraph = JSON.parse(await fs.readFile(graphPath, "utf8"));
+    assert.equal(committedGraph.status, "succeeded");
+    assert.equal(committedGraph.activeRunId, null);
+    assert.ok(Object.values(committedGraph.nodes).every((node) => node.status === "succeeded"));
+    const succeededRun = JSON.parse(await fs.readFile(path.join(
+      projectRoot,
+      ".ats",
+      "runs-v3",
+      `${succeeded.runId}.json`,
+    ), "utf8"));
+    assert.equal(succeededRun.status, "succeeded");
+    const payload = succeededRun.result.payload;
+    assert.equal(payload.executionGraphId, paused.graphId);
+    assert.equal(payload.nodeCount, 11);
+    assert.equal(payload.items.length, 11);
+    const manifestPath = path.join(projectRoot, payload.artifactManifestRef);
+    assert.equal(await sha256File(manifestPath), payload.manifestSha256);
+    const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+    assert.equal(manifest.producingRunId, succeeded.runId);
+    assert.equal(manifest.featureExtension.payload.executionGraphId, paused.graphId);
+    const artifactRuns = await fs.readdir(path.join(projectRoot, "artifacts", artifactId, "runs"));
+    assert.deepEqual(artifactRuns, [succeeded.runId]);
+    await fs.access(path.join(projectRoot, payload.package.outputRelativePath));
+
+    const afterResume = (await readStubRequests(root)).filter(
+      (entry) => entry.kind === "composition_generate_single",
+    );
+    assert.equal(afterResume.length, 12);
+    const singleCounts = new Map();
+    for (const entry of afterResume) {
+      singleCounts.set(entry.itemId, (singleCounts.get(entry.itemId) ?? 0) + 1);
+    }
+    assert.equal(Array.from(singleCounts.values()).filter((count) => count === 2).length, 1);
+    assert.equal(Array.from(singleCounts.values()).filter((count) => count === 1).length, 10);
+    const generatePlans = (await readStubRequests(root)).filter(
+      (entry) => entry.kind === "composition_generate_plan",
+    );
+    assert.equal(generatePlans.length, 11);
+    assert.deepEqual(
+      Object.fromEntries(["character", "card", "relic"].map((itemType) => [
+        itemType,
+        generatePlans.filter((entry) => entry.itemType === itemType).length,
+      ])),
+      { character: 1, card: 9, relic: 1 },
+    );
+    assert.deepEqual(await fs.readdir(path.join(projectRoot, ".ats", "composition-staging")).catch(() => []), []);
     await assertNoTransactionResidue(projectRoot);
     await assertNoAtomicWriteResidue(projectRoot);
   });

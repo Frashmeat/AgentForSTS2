@@ -119,6 +119,12 @@ export function CompositionStudioPage() {
     [definitions, catalog],
   );
   const selectedRoot = roots.find((value) => definitionKey(value) === selectedRootKey) ?? roots[0] ?? null;
+  const executionRun = useMemo(() => {
+    if (!executionGraph) return null;
+    return [lastGenerationRun, lastPlanRun].find(
+      (run) => run && executionGraphIdFromRun(run) === executionGraph.executionGraphId,
+    ) ?? null;
+  }, [executionGraph, lastGenerationRun, lastPlanRun]);
 
   useEffect(() => {
     if (!__IS_TAURI__) return;
@@ -233,11 +239,16 @@ export function CompositionStudioPage() {
     setBusy(true);
     setFailure(null);
     try {
-      const runId = await api.resumeCompositionPlan(
+      const runId = await api.resumeExecutionGraph(
         executionGraph.executionGraphId,
         executionGraph.revision,
       );
-      await monitorCompositionPlan(runId, draftId.trim() || undefined);
+      const resumed = await api.getRun(runId);
+      if (resumed.featureId === "composition.generate") {
+        await monitorCompositionGeneration(runId);
+      } else {
+        await monitorCompositionPlan(runId, draftId.trim() || undefined);
+      }
     } catch (error: unknown) {
       setFailure(toActionableFailure(error));
     } finally {
@@ -374,11 +385,27 @@ export function CompositionStudioPage() {
       ));
       setLastGenerationRunId(runId);
       setLastGenerationRun(null);
-      await waitForRun(runId, setLastGenerationRun);
+      await monitorCompositionGeneration(runId);
     } catch (error: unknown) {
       setFailure(toActionableFailure(error));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function monitorCompositionGeneration(runId: string) {
+    const initial = await api.getRun(runId);
+    setLastGenerationRun(initial);
+    const graphId = executionGraphIdFromRun(initial);
+    if (graphId) setExecutionGraph(await api.getExecutionGraph(graphId));
+    const timer = graphId ? window.setInterval(() => {
+      void api.getExecutionGraph(graphId).then(setExecutionGraph).catch(() => undefined);
+    }, 750) : undefined;
+    try {
+      await waitForRun(runId, setLastGenerationRun);
+      if (graphId) setExecutionGraph(await api.getExecutionGraph(graphId));
+    } finally {
+      if (timer !== undefined) window.clearInterval(timer);
     }
   }
 
@@ -453,7 +480,7 @@ export function CompositionStudioPage() {
           title={lastPlanRun?.featureId ?? "composition.plan"}
           actions={(
             <Badge variant={executionGraph?.status === "succeeded" ? "ok" : executionGraph?.status === "commit_blocked" ? "error" : "warn"}>
-              {executionGraph?.status ?? lastPlanRun?.status}
+              {executionGraph?.status ?? executionRun?.status}
             </Badge>
           )}
         >
@@ -465,8 +492,8 @@ export function CompositionStudioPage() {
               data-execution-status={executionGraph.status}
               data-completed-nodes={executionGraph.completedNodes}
               data-total-nodes={executionGraph.totalNodes}
-              data-plan-run-id={lastPlanRun?.id ?? ""}
-              data-plan-run-status={lastPlanRun?.status ?? ""}
+              data-run-id={executionRun?.id ?? ""}
+              data-run-status={executionRun?.status ?? ""}
             >
               <div className="flex items-center justify-between gap-3 text-xs">
                 <span className="font-mono truncate">{executionGraph.currentNodeId ?? executionGraph.executionGraphId}</span>
@@ -491,9 +518,11 @@ export function CompositionStudioPage() {
               )}
             </div>
           )}
-          {lastPlanRun?.failure && (
-            <Notice variant="error" title={lastPlanRun.failure.code}>
-              {compositionFailureSummary(lastPlanRun.failure)}
+          {executionRun?.failure && (
+            <Notice variant="error" title={executionRun.failure.code}>
+              {executionRun.featureId === "composition.plan"
+                ? compositionFailureSummary(executionRun.failure)
+                : executionRun.failure.stage}
             </Notice>
           )}
         </Card>
@@ -576,7 +605,7 @@ export function CompositionStudioPage() {
                 {paged.rows.map((row) => (
                   <div key={row.itemId} className="grid grid-cols-[auto_minmax(0,1fr)_auto] gap-3 items-center p-2 border-b border-rule-soft last:border-b-0">
                     <input type="checkbox" aria-label={`Select ${row.itemId}`} checked={selectedIds.has(row.itemId)} onChange={(event) => setSelectedIds((values) => { const next = new Set(values); if (event.target.checked) next.add(row.itemId); else next.delete(row.itemId); return next; })} />
-                    <button type="button" className="text-left min-w-0" onClick={() => setSelectedNodeId(row.itemId)}>
+                    <button data-testid={`composition-node-${row.itemId}`} type="button" className="text-left min-w-0" onClick={() => setSelectedNodeId(row.itemId)}>
                       <span className="font-mono text-xs block truncate">{row.itemId}</span>
                       <span className="text-xs text-ink-mute">{row.node.definition.itemType} · {row.status}</span>
                     </button>

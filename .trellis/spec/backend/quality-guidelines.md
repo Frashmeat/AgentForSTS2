@@ -77,6 +77,11 @@ Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-sp
   zero-count optional groups remain represented by the selected composition profile and Blueprint.
 - Pack v4 `resourceProfiles` own conditional required roles. The selector is a required canonical
   choice whose options exactly cover profile IDs; Single resolves only the selected profile.
+- `ModPlan.requiredResourceRoles` is the bounded union across a type's Pack profiles, while
+  definition-bound Single/Composition readiness is the exact selected-profile set. Do not compare
+  these sets for equality: validate the Plan union against the descriptor, then validate selected
+  Resource bindings independently against the definition selector. Cover an empty-role Placeholder
+  and a five-role Branded Placeholder in the same regression.
 - Pack v4 `compositionProfiles` own Standard/Prototype presets, Custom bounds, cross-parameter
   constraints and the hard <=128-node estimate. Feature/UI interpret this generic schema and do
   not embed STS2 composition counts.
@@ -350,14 +355,17 @@ pub struct CompositionGenerateRequest {
     pub root: StoredItemDefinition,
     pub draft: Option<CompositionDraftRef>,
     pub package: ProjectPackageRequest,
+    pub execution: Option<CompositionGenerateExecutionRequest>,
 }
 
 SingleGenerateService::propose(...) -> SingleGenerateProposal
+SingleGenerateService::restore_composition_proposal(...) -> SingleGenerateCompositionProposal
 ProjectPackageService::prepare(...) -> PreparedProjectPackage
 ProjectStager::stage(ProjectStageRequest) -> Box<dyn PendingProjectStage>
 ```
 
-The parent request/result/Artifact extension use schema v1. `SingleGenerateResult` and
+The parent request/result and Artifact extension use schema v2. The backend authors `execution`
+only after it wins a start/resume graph claim. `SingleGenerateResult` and
 `ProjectPackageResult` use schema v2 and an exact `publication` discriminator:
 
 ```text
@@ -374,7 +382,8 @@ to a normalized directory below the staged project.
 | Boundary | Required behavior |
 | --- | --- |
 | Preflight | Resolve and validate the complete `ResolvedItemGraph` before Run creation and repeat it inside the Feature before model or project work |
-| Node execution | Sorted graph nodes each produce one terminal Plan child and one terminal `composition_staged` Single child; no per-node project write, validation or Artifact publish occurs |
+| Node execution | ExecutionGraph stores a strict serial `Plan -> Single` pair per sorted Item and one local finalize node; succeeded normalized checkpoints and exact terminal child Runs survive parent failure/restart |
+| Resume | A new parent Run claims the same graph and restores successful Single proposals from typed checkpoints plus immutable Resources; it does not call the model for those nodes |
 | Staging | Copy one bounded, non-symlink project worktree below `.ats/composition-staging/<parentRunId>` and exclude mutable evidence/build roots |
 | Validation | Apply every proposed write to the isolated copy, validate once, then Build once with a Pack-declared isolated output property |
 | Package | Prepare one ZIP inside the isolated copy; its child result remains `composition_staged` |
@@ -393,7 +402,8 @@ variables or an output path outside the isolated stage.
 | Failure | Stable family | Required mutation result |
 | --- | --- | --- |
 | stale/missing/wrong graph node, resource or Truth | `composition.graph.*` | no model call when preflight decides; no staging/project/Artifact mutation |
-| one Plan/Single failure or cancellation | originating `model.*`, `truth.*`, `resource.*`, `pack.*` or `run.*` | completed child Runs retained; no real-project publication |
+| one Plan/Single failure or cancellation | originating `model.*`, `truth.*`, `resource.*`, `pack.*` or `run.*` | graph paused at that node; completed checkpoints/child Runs retained; no real-project publication |
+| graph claim/checkpoint/storage failure | `composition.execution.*` or `run.storage_failed` | no overwrite or guessed recovery; successful checkpoints remain immutable |
 | invalid/oversized/symlinked staging source | `composition.staging.*` | owned stage removed; real project unchanged |
 | whole-closure validation rejection | `validation.rejected` | staged copy removed; real project/Artifact unchanged |
 | Build/Package rejection | typed Build/`artifact.*` family | child Run terminal; staged copy removed; real project unchanged |
@@ -413,6 +423,8 @@ symlinked or escaping records fail recovery without guessing a result.
 - Good: a two-node identity+pinned graph creates four Plan/Single children plus Build and Package,
   validates/builds once, publishes two sources and one ZIP in one composition Artifact and leaves no
   staging directory.
+- Good: the first Single output is invalid after its Plan succeeds; a new repository instance and
+  new parent Run resume that Single, then continue later Items without repeating the Plan.
 - Base: validation rejects after every proposal. Four successful proposal child Runs remain valid
   evidence, while the real project, package and Artifact roots remain unchanged.
 - Bad: invoke ordinary Single independently for each node. The first node could publish before a
@@ -435,7 +447,9 @@ npx tsc -b --pretty false
 Assertions must cover graph/root identity, exact child count/status, staged discriminators, one
 validation/build/package, source-file ZIP streaming, manifest/hash recomputation, validation and
 package/final-commit rollback, zero real-project mutation on failure, zero staging residue, and no
-Character/STS2 branch in generic Feature/Shell/React code.
+Character/STS2 branch in generic Feature/Shell/React code. They must also cover restart recovery,
+successful-node request counts, exact child Run create-or-match and succeeded reconciliation with
+zero model requests.
 
 `mod-plan` pretty-serializes the complete verified `itemTypes` catalog plus plan guidance into the
 required `pack.guidance` slot. That slot is bounded to 64,000 characters. A built-in Pack expansion

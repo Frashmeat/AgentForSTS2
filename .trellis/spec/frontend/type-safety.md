@@ -87,8 +87,12 @@ The only interpreted payload fields are `reasonCode`, `expectedCount`, `actualCo
 are 1-128 character qualified identifiers; counts are integers in `0..=u32::MAX`. Expected/actual
 are displayed only as a valid pair. Every other field is ignored, never stringified into the UI.
 
-Composition generation submits request schema v1 with an exact `StoredItemDefinition`, optional
-Draft ref and nested Package request. Single result v2 and Package result v2 use the exact
+Composition generation submits request schema v2 with an exact `StoredItemDefinition`, optional
+Draft ref, nested Package request and optional backend-authored tagged `execution`. The only
+execution forms are `start {executionGraphId}` and
+`resume {executionGraphId, expectedRevision, previousRunId}`; the request builder for an initial
+user submission omits this field. Result and Artifact extension v2 include the graph ID. Single
+result v2 and Package result v2 use the exact
 `published | composition_staged` discriminator. Published results require Artifact ref/hash;
 composition-staged child results must not be presented as independently published Artifacts.
 Project Build request v2 carries only optional `outputRelativeRoot`; Pack-owned isolation property

@@ -668,16 +668,16 @@ impl CompositionPlanService {
             let canonical_draft =
                 VersionedPayload::from_typed(composition_draft_payload_schema(), &checkpoint.draft)
                     .map_err(|_| invalid_staged_output())?;
-            let intent = ExecutionCommitIntent {
-                draft_id: checkpoint.draft.draft_id.clone(),
+            let intent = ExecutionCommitIntent::draft(
+                checkpoint.draft.draft_id.clone(),
                 canonical_draft,
-                draft_payload_sha256: checkpoint.draft_payload_sha256,
-                validated_content_digest: checkpoint
+                checkpoint.draft_payload_sha256,
+                checkpoint
                     .draft
                     .validated_content_digest
                     .clone()
                     .ok_or_else(invalid_staged_output)?,
-            };
+            );
             mutate_graph(&mut graph, graphs, |graph| {
                 graph.prepare_commit(run_id, intent, Utc::now())
             })?;
@@ -687,11 +687,18 @@ impl CompositionPlanService {
             .commit_intent()
             .cloned()
             .ok_or_else(invalid_staged_output)?;
-        let draft: CompositionDraft = intent
+        let canonical_draft = intent
             .canonical_draft
+            .as_ref()
+            .ok_or_else(invalid_staged_output)?;
+        let draft_payload_sha256 = intent
+            .draft_payload_sha256
+            .as_ref()
+            .ok_or_else(invalid_staged_output)?;
+        let draft: CompositionDraft = canonical_draft
             .decode(&composition_draft_payload_schema())
             .map_err(|_| invalid_staged_output())?;
-        match drafts.create_or_match(&draft, &intent.draft_payload_sha256) {
+        match drafts.create_or_match(&draft, draft_payload_sha256) {
             Ok(CompositionDraftCreateOrMatch::Created | CompositionDraftCreateOrMatch::Matched) => {
             }
             Err(error)
