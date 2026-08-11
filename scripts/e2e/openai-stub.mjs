@@ -271,9 +271,9 @@ function bindings(definition, slotId, kind) {
 }
 
 function localization(prefix, values) {
-  return JSON.stringify(Object.fromEntries(
+  return Object.fromEntries(
     Object.entries(values).map(([suffix, value]) => [`E2EMOD-${prefix}.${suffix}`, value]),
-  ));
+  );
 }
 
 function localizationPrefix(itemId) {
@@ -283,12 +283,12 @@ function localizationPrefix(itemId) {
 }
 
 function architectLocalization(prefix, title) {
-  return JSON.stringify({
+  return {
     [`THE_ARCHITECT.talk.E2EMOD-${prefix}.0-0r.char`]: title,
     [`THE_ARCHITECT.talk.E2EMOD-${prefix}.0-0r.next`]: "Continue",
     [`THE_ARCHITECT.talk.E2EMOD-${prefix}.0-1r.ancient`]: "The Architect answers.",
     [`THE_ARCHITECT.talk.E2EMOD-${prefix}.0-attack`]: "Both",
-  });
+  };
 }
 
 function compositionCharacterSource(definition) {

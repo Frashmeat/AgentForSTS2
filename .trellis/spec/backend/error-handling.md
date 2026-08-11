@@ -54,6 +54,11 @@ or shape remains `model.output_invalid` without raw Provider content in persiste
 `mod.generate.single.model`. Details never include completion fragments, parser messages, paths,
 Provider metadata or unvalidated model-authored role names.
 
+`merge_content` means a Pack `compositionMerge=json_object` role was not the directly typed flat
+object required by the run-scoped output contract, contained a non-string value, or could not be
+normalized within the bounded content limit. A JSON-encoded object inside a string is invalid; the
+Feature never repairs or heuristically extracts it.
+
 Every HTTP-backed model task also enters the one FIFO `ModelRequestQueue` owned by the desktop
 composition root. A task holds its slot through all attempts, retry waits, parsing and terminal
 return; the next task cannot start an HTTP attempt first. Cancellation while waiting for the queue

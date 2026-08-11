@@ -72,8 +72,8 @@ impl ModelClient for FixtureModel {
             content: serde_json::json!({
                 "files": {
                     "source": self.source,
-                    "localization.eng": "{}",
-                    "localization.zhs": "{}"
+                    "localization.eng": {},
+                    "localization.zhs": {}
                 },
                 "acceptanceNotes": ["fixture bundle assembled"]
             })
@@ -132,8 +132,8 @@ impl ModelClient for BatchFixtureModel {
             serde_json::json!({
                 "files": {
                     "source": format!("public class BatchGenerated{} {{}}", *generated),
-                    "localization.eng": "{}",
-                    "localization.zhs": "{}"
+                    "localization.eng": {},
+                    "localization.zhs": {}
                 },
                 "acceptanceNotes": ["batch fixture assembled"]
             })
@@ -646,6 +646,15 @@ async fn real_compile_artifact_and_run_chain_succeeds_without_staging_residue() 
     );
     assert_eq!(files_contract["additionalProperties"], false);
     assert_eq!(files_contract["properties"].as_object().unwrap().len(), 3);
+    assert_eq!(files_contract["properties"]["source"]["type"], "string");
+    assert_eq!(
+        files_contract["properties"]["localization.eng"]["type"],
+        "object"
+    );
+    assert_eq!(
+        files_contract["properties"]["localization.eng"]["additionalProperties"]["type"],
+        "string"
+    );
     let rendered_contract =
         serde_json::to_string_pretty(&request.output_contract.json_schema).unwrap();
     assert_eq!(

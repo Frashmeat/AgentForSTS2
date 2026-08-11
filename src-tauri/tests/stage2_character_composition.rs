@@ -1107,7 +1107,7 @@ fn bundle_response(item_id: &str, item_type: &str) -> String {
     json!({"files":files,"acceptanceNotes":["Generated for the Prototype closure."]}).to_string()
 }
 
-fn localization_object(prefix: &str, entries: Vec<(&str, &str)>) -> String {
+fn localization_object(prefix: &str, entries: Vec<(&str, &str)>) -> Value {
     Value::Object(
         entries
             .into_iter()
@@ -1119,7 +1119,6 @@ fn localization_object(prefix: &str, entries: Vec<(&str, &str)>) -> String {
             })
             .collect(),
     )
-    .to_string()
 }
 
 fn character_loc_entries(title: &str) -> Vec<(&'static str, &str)> {
@@ -1141,7 +1140,7 @@ fn character_loc_entries(title: &str) -> Vec<(&'static str, &str)> {
     ]
 }
 
-fn architect_localization_object(character: &str) -> String {
+fn architect_localization_object(character: &str) -> Value {
     Value::Object(
         [
             (
@@ -1165,7 +1164,6 @@ fn architect_localization_object(character: &str) -> String {
         .map(|(key, value)| (key.to_owned(), Value::String(value.into())))
         .collect(),
     )
-    .to_string()
 }
 
 fn character_source() -> &'static str {

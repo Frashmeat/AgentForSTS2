@@ -140,7 +140,7 @@ pub enum CompositionFileMerge {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct GeneratedModBundle {
-    files: BTreeMap<String, String>,
+    files: BTreeMap<String, serde_json::Value>,
     acceptance_notes: Vec<String>,
 }
 
@@ -621,7 +621,7 @@ impl SingleGenerateService {
             request,
             item_spec,
             GeneratedModBundle {
-                files: checkpoint.files.clone(),
+                files: decode_checkpoint_files(item_spec, &checkpoint.files)?,
                 acceptance_notes: checkpoint.result.acceptance_notes.clone(),
             },
         )?;
@@ -1216,15 +1216,23 @@ fn run_scoped_output_contract(item_spec: &GenerateItemType) -> ModelOutputContra
         .generated_files
         .iter()
         .map(|file| {
-            (
-                file.role.clone(),
-                serde_json::json!({
+            let content_schema = match file.composition_merge {
+                Some(CompositionFileMerge::JsonObject) => serde_json::json!({
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string",
+                        "maxLength": 16 * 1024 * 1024,
+                        "pattern": r"^[^\u0000]*$"
+                    }
+                }),
+                None => serde_json::json!({
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 16 * 1024 * 1024,
                     "pattern": r"^[^\u0000]*\S[^\u0000]*$"
                 }),
-            )
+            };
+            (file.role.clone(), content_schema)
         })
         .collect::<serde_json::Map<_, _>>();
     let required_roles = item_spec
@@ -1273,14 +1281,9 @@ fn validate_bundle(
             SingleGenerateFailureReason::AcceptanceNotes,
         ));
     }
-    for (role, content) in &bundle.files {
+    for role in bundle.files.keys() {
         if !valid_role(role) {
             return Err(invalid_model_output(SingleGenerateFailureReason::FileRole));
-        }
-        if content.trim().is_empty() || content.len() > 16 * 1024 * 1024 || content.contains('\0') {
-            return Err(invalid_model_output(
-                SingleGenerateFailureReason::FileContent,
-            ));
         }
     }
     let mut by_role = bundle.files;
@@ -1289,14 +1292,7 @@ fn validate_bundle(
         let content = by_role
             .remove(&spec.role)
             .ok_or_else(|| invalid_model_output(SingleGenerateFailureReason::FileRole))?;
-        if spec.composition_merge == Some(CompositionFileMerge::JsonObject)
-            && !serde_json::from_str::<BTreeMap<String, serde_json::Value>>(&content)
-                .is_ok_and(|values| values.values().all(serde_json::Value::is_string))
-        {
-            return Err(invalid_model_output(
-                SingleGenerateFailureReason::MergeContent,
-            ));
-        }
+        let content = normalize_generated_content(spec, content)?;
         let path = expand_generated_target_template(
             &spec.target_path,
             &request.mod_id,
@@ -1311,6 +1307,75 @@ fn validate_bundle(
         files,
         acceptance_notes: bundle.acceptance_notes,
     })
+}
+
+fn normalize_generated_content(
+    spec: &GeneratedFileSpec,
+    content: serde_json::Value,
+) -> Result<String, SingleGenerateError> {
+    match spec.composition_merge {
+        None => {
+            let content = content
+                .as_str()
+                .ok_or_else(|| invalid_model_output(SingleGenerateFailureReason::FileContent))?;
+            if content.trim().is_empty()
+                || content.len() > 16 * 1024 * 1024
+                || content.contains('\0')
+            {
+                return Err(invalid_model_output(
+                    SingleGenerateFailureReason::FileContent,
+                ));
+            }
+            Ok(content.to_owned())
+        }
+        Some(CompositionFileMerge::JsonObject) => {
+            let values = content
+                .as_object()
+                .ok_or_else(|| invalid_model_output(SingleGenerateFailureReason::MergeContent))?;
+            let values = values
+                .iter()
+                .map(|(key, value)| {
+                    value
+                        .as_str()
+                        .filter(|value| !value.contains('\0'))
+                        .map(|value| (key.clone(), value.to_owned()))
+                        .ok_or_else(|| {
+                            invalid_model_output(SingleGenerateFailureReason::MergeContent)
+                        })
+                })
+                .collect::<Result<BTreeMap<_, _>, _>>()?;
+            let content = serde_json::to_string(&values)
+                .map_err(|_| invalid_model_output(SingleGenerateFailureReason::MergeContent))?;
+            if content.len() > 16 * 1024 * 1024 {
+                return Err(invalid_model_output(
+                    SingleGenerateFailureReason::MergeContent,
+                ));
+            }
+            Ok(content)
+        }
+    }
+}
+
+fn decode_checkpoint_files(
+    item_spec: &GenerateItemType,
+    files: &BTreeMap<String, String>,
+) -> Result<BTreeMap<String, serde_json::Value>, SingleGenerateError> {
+    files
+        .iter()
+        .map(|(role, content)| {
+            let content = match item_spec
+                .generated_files
+                .iter()
+                .find(|spec| &spec.role == role)
+                .and_then(|spec| spec.composition_merge)
+            {
+                Some(CompositionFileMerge::JsonObject) => serde_json::from_str(content)
+                    .map_err(|_| invalid_model_output(SingleGenerateFailureReason::MergeContent))?,
+                None => serde_json::Value::String(content.clone()),
+            };
+            Ok((role.clone(), content))
+        })
+        .collect()
 }
 
 fn invalid_model_output(reason: SingleGenerateFailureReason) -> SingleGenerateError {
@@ -1787,6 +1852,19 @@ mod tests {
                 .len(),
             2
         );
+        assert_eq!(
+            contract.json_schema["properties"]["files"]["properties"]["source"]["type"],
+            "string"
+        );
+        assert_eq!(
+            contract.json_schema["properties"]["files"]["properties"]["localization.eng"]["type"],
+            "object"
+        );
+        assert_eq!(
+            contract.json_schema["properties"]["files"]["properties"]["localization.eng"]["additionalProperties"]
+                ["type"],
+            "string"
+        );
 
         let request = SingleGenerateRequest {
             artifact_id: "fixture-artifact".into(),
@@ -1806,8 +1884,11 @@ mod tests {
         };
         let wrong = GeneratedModBundle {
             files: BTreeMap::from([
-                ("source".into(), "public class Fixture {}".into()),
-                ("localization.zhs".into(), "{}".into()),
+                (
+                    "source".into(),
+                    serde_json::Value::String("public class Fixture {}".into()),
+                ),
+                ("localization.zhs".into(), serde_json::json!({})),
             ]),
             acceptance_notes: Vec::new(),
         };
@@ -1818,14 +1899,88 @@ mod tests {
 
         let valid = GeneratedModBundle {
             files: BTreeMap::from([
-                ("source".into(), "public class Fixture {}".into()),
-                ("localization.eng".into(), "{}".into()),
+                (
+                    "source".into(),
+                    serde_json::Value::String("public class Fixture {}".into()),
+                ),
+                (
+                    "localization.eng".into(),
+                    serde_json::json!({"FIXTURE.title": "Fixture"}),
+                ),
             ]),
             acceptance_notes: Vec::new(),
         };
         let generated = validate_bundle(&request, &item_spec, valid).unwrap();
         assert_eq!(generated.files[0].0, "source");
         assert_eq!(generated.files[1].0, "localization.eng");
+        assert_eq!(generated.files[1].2, r#"{"FIXTURE.title":"Fixture"}"#);
+
+        for invalid_content in [
+            serde_json::Value::String(r#"{"FIXTURE.title":"Fixture"}"#.into()),
+            serde_json::json!({"FIXTURE.title": {"nested": "Fixture"}}),
+            serde_json::json!({"FIXTURE.title": 42}),
+            serde_json::json!({"FIXTURE.title": "Fixture\0"}),
+        ] {
+            let invalid = GeneratedModBundle {
+                files: BTreeMap::from([
+                    (
+                        "source".into(),
+                        serde_json::Value::String("public class Fixture {}".into()),
+                    ),
+                    ("localization.eng".into(), invalid_content),
+                ]),
+                acceptance_notes: Vec::new(),
+            };
+            assert!(matches!(
+                validate_bundle(&request, &item_spec, invalid),
+                Err(SingleGenerateError::InvalidModelOutput(details))
+                    if details.reason_code == SingleGenerateFailureReason::MergeContent
+            ));
+        }
+
+        let oversized = GeneratedModBundle {
+            files: BTreeMap::from([
+                (
+                    "source".into(),
+                    serde_json::Value::String("public class Fixture {}".into()),
+                ),
+                (
+                    "localization.eng".into(),
+                    serde_json::json!({"FIXTURE.title": "x".repeat(16 * 1024 * 1024)}),
+                ),
+            ]),
+            acceptance_notes: Vec::new(),
+        };
+        assert!(matches!(
+            validate_bundle(&request, &item_spec, oversized),
+            Err(SingleGenerateError::InvalidModelOutput(details))
+                if details.reason_code == SingleGenerateFailureReason::MergeContent
+        ));
+
+        let checkpoint_files = generated
+            .files
+            .iter()
+            .map(|(role, _, content)| (role.clone(), content.clone()))
+            .collect::<BTreeMap<_, _>>();
+        let restored = GeneratedModBundle {
+            files: decode_checkpoint_files(&item_spec, &checkpoint_files).unwrap(),
+            acceptance_notes: Vec::new(),
+        };
+        assert_eq!(
+            validate_bundle(&request, &item_spec, restored)
+                .unwrap()
+                .files,
+            generated.files
+        );
+        let corrupt_checkpoint = BTreeMap::from([
+            ("source".into(), "public class Fixture {}".into()),
+            ("localization.eng".into(), "not-json".into()),
+        ]);
+        assert!(matches!(
+            decode_checkpoint_files(&item_spec, &corrupt_checkpoint),
+            Err(SingleGenerateError::InvalidModelOutput(details))
+                if details.reason_code == SingleGenerateFailureReason::MergeContent
+        ));
     }
 
     #[test]

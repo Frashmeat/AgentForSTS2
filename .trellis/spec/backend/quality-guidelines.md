@@ -707,7 +707,7 @@ pub fn render_with_output_contract(
 fn run_scoped_output_contract(item_spec: &GenerateItemType) -> ModelOutputContract;
 
 struct GeneratedModBundle {
-    files: BTreeMap<String, String>,
+    files: BTreeMap<String, serde_json::Value>,
     acceptance_notes: Vec<String>,
 }
 ```
@@ -724,6 +724,8 @@ The Recipe declares `feature.mod-generate-single-bundle` v2. The selected item t
 | `itemType.generatedFiles[].role` | `pack.contribution.generatedFileRoles[]` |
 | same role set | `output_contract.json_schema.properties.files.properties` keys |
 | same role set | `properties.files.required[]` |
+| role without `compositionMerge` | one non-blank bounded string property |
+| role with `compositionMerge=json_object` | one object property whose values are bounded strings |
 | dynamic JSON Schema | exact serialized `output.contract` Prompt slot |
 | dynamic JSON Schema | `ModelRequestSnapshot.request.outputContract` and provider-native schema |
 
@@ -732,15 +734,21 @@ Bundle v2 uses a role-keyed object:
 ```json
 {
   "files": {
-    "source": "complete generated source"
+    "source": "complete generated source",
+    "localization.eng": {
+      "MOD-ITEM.title": "Generated title"
+    }
   },
   "acceptanceNotes": []
 }
 ```
 
-`files.additionalProperties=false`; every declared role is required. Each content string is
-non-blank, NUL-free, and bounded to 16 MiB. Acceptance notes are optional as an empty array and are
-otherwise non-blank, NUL-free, at most 64 items and 2,000 characters each.
+`files.additionalProperties=false`; every declared role is required. A normal role is one
+non-blank, NUL-free string bounded to 16 MiB. A `compositionMerge=json_object` role is directly a
+flat JSON object with string values; it is never a JSON-encoded string. The Feature orders and
+serializes that object locally, enforces the same aggregate 16 MiB bound, and stores only the
+normalized string in durable checkpoints and project writes. Acceptance notes are optional as an
+empty array and are otherwise non-blank, NUL-free, at most 64 items and 2,000 characters each.
 
 #### 4. Validation & Error Matrix
 
@@ -764,6 +772,8 @@ requirements hidden from the request.
   deterministic project writes while JSON object key order is irrelevant.
 - Bad: a generic `files: [{ role: string, content: string }]` schema lets the provider return an
   arbitrary role that Runtime later rejects; this caused the installed-candidate failure.
+- Bad: declare a merge role as a string and ask the model to JSON-encode a flat object inside that
+  string; this hides the merge shape from structured output and makes correctness model-dependent.
 - Bad: Prompt displays one schema while the HTTP request carries another; Recipe rendering rejects
   this mismatch before model work.
 

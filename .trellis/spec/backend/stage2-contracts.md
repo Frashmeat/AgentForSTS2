@@ -796,9 +796,12 @@ their typed classification through composition and persisted Run state.
 
 For `mod.generate.single`, the selected Pack item type compiles into a run-scoped bundle v2 schema.
 `files` is a role-keyed object with exactly the Pack-owned generated-file roles required and no
-additional properties. Recipe rendering, `ModelRequestSnapshot`, provider-native structured output,
-typed decoding, and final role validation therefore share one contract; Pack roles cannot remain a
-hidden post-provider constraint.
+additional properties. Normal file roles are bounded strings; roles declared with
+`compositionMerge=json_object` are flat objects with string values and are deterministically
+serialized by the Feature before checkpoint or project writes. Merge JSON is never double-encoded
+inside a model-authored string. Recipe rendering, `ModelRequestSnapshot`, provider-native structured
+output, typed decoding, and final role validation therefore share one contract; Pack roles and
+merge shapes cannot remain hidden post-provider constraints.
 
 `mod.generate.single` request schema v3 removes caller-authored `selectedResources` and carries the
 exact `StoredItemDefinition`. The service validates its hash, Ready mode, Plan identity and all
