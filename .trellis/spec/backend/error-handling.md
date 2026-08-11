@@ -46,6 +46,14 @@ provider or output failure never changes that value for the in-flight Run and ne
 second weaker-format request. Both modes retain the same Feature-owned typed decode; invalid JSON
 or shape remains `model.output_invalid` without raw Provider content in persisted details.
 
+`mod.generate.single` model-output failures persist optional
+`feature.mod-generate-single-failure-details` v1. Its payload contains exactly one closed
+`reasonCode`: `output_truncated`, `json_decode`, `file_count`, `acceptance_notes`, `file_role`,
+`file_content`, `merge_content`, `generated_file_count_overflow`, `checkpoint_provenance` or
+`checkpoint_result`. The code/stage remains `model.output_invalid` or `model.output_truncated` at
+`mod.generate.single.model`. Details never include completion fragments, parser messages, paths,
+Provider metadata or unvalidated model-authored role names.
+
 Every HTTP-backed model task also enters the one FIFO `ModelRequestQueue` owned by the desktop
 composition root. A task holds its slot through all attempts, retry waits, parsing and terminal
 return; the next task cannot start an HTTP attempt first. Cancellation while waiting for the queue

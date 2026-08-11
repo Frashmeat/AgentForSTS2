@@ -577,6 +577,7 @@ impl Stage2Composition {
                             project_context: Some(&project_context),
                             custom_instructions,
                             model: model_name,
+                            authoritative_definition: None,
                         },
                         cancellation,
                     )

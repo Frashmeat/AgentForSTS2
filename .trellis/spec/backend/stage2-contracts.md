@@ -69,6 +69,14 @@ typed reference bindings and optional composition-profile provenance.
 Validated Serde and deterministic ordered serialization produce the definition SHA-256 used by
 future Run/Artifact provenance; Runtime remains unaware of game-specific types.
 
+Definition-bound Plan execution receives the complete validated `StoredItemDefinition` through
+Feature context while retaining the public `mod.plan` request schema. The Recipe exposes that
+definition as authoritative context. After typed model decode, Features deterministically rebind
+`itemId`, `itemType` and `behaviorIntent` from the definition before persisting the Plan. Plan prose
+may add implementation/evidence/acceptance guidance but cannot override canonical fields,
+localizations, Resource bindings or reference bindings. Single always resolves a conflict in favor
+of the exact definition; free-text fact extraction or heuristic conflict validation is forbidden.
+
 `ats-workspace` also owns CompositionDraft schema v2 and the repository ports for Draft CAS,
 payload-hash `createOrMatch`, and atomic multi-definition saves. Drafts are review state, not ready
 Items. `ats-adapters` persists them below `.ats/composition-drafts-v2`; v2 records optional exact
@@ -796,6 +804,10 @@ hidden post-provider constraint.
 exact `StoredItemDefinition`. The service validates its hash, Ready mode, Plan identity and all
 role-keyed `resourceBindings` before model work. The Recipe owns one required `item.definition`
 slot. Artifact extension schema v2 and dedicated provenance both record `definitionHash`.
+The Recipe treats ItemDefinition as authoritative over Plan prose and permits up to 16,384 output
+tokens for complete multi-file Items. Invalid or truncated output persists only
+`feature.mod-generate-single-failure-details` v1 with one closed `reasonCode`; raw completion,
+parser text, Provider body and model-authored role text are never persisted.
 
 `mod.generate.batch` request schema v4 embeds exact StoredItemDefinition snapshots and derives each
 Plan request from canonical behavior intent. `mod.generate.complex` request schema v3 embeds Batch

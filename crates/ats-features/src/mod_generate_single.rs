@@ -30,7 +30,7 @@ use crate::prompt::{FeatureRecipe, FeatureRecipeError, FeatureRecipeLoader};
 use crate::resource_prepare::{ResourcePrepareFeature, ResourceSpecs, expand_target_template};
 
 const RECIPE_BYTES: &[u8] = include_bytes!("../recipes/mod-generate-single.json");
-const RECIPE_SHA256: &str = "a387246f80806441de58a852f3cff3516103e1da2b9b43f8244657854f5a6210";
+const RECIPE_SHA256: &str = "b01e82d8206ef361cd72f564ba67c831103110547a974c24d07fb0814ec0a980";
 const MAX_EVIDENCE_RECORDS: u16 = 20;
 
 pub struct SingleGenerateFeature;
@@ -142,6 +142,33 @@ pub enum CompositionFileMerge {
 struct GeneratedModBundle {
     files: BTreeMap<String, String>,
     acceptance_notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SingleGenerateFailureDetails {
+    reason_code: SingleGenerateFailureReason,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+enum SingleGenerateFailureReason {
+    OutputTruncated,
+    JsonDecode,
+    FileCount,
+    AcceptanceNotes,
+    FileRole,
+    FileContent,
+    MergeContent,
+    GeneratedFileCountOverflow,
+    CheckpointProvenance,
+    CheckpointResult,
+}
+
+impl SingleGenerateFailureDetails {
+    fn reason(reason_code: SingleGenerateFailureReason) -> Self {
+        Self { reason_code }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -493,14 +520,15 @@ impl SingleGenerateService {
             return Err(SingleGenerateError::TruncatedModelOutput);
         }
         let bundle: GeneratedModBundle = serde_json::from_str(&response.content)
-            .map_err(|_| SingleGenerateError::InvalidModelOutput)?;
+            .map_err(|_| invalid_model_output(SingleGenerateFailureReason::JsonDecode))?;
         let generated = validate_bundle(request, item_spec, bundle)?;
         let writes = build_writes(request, &generated, &selected, &resource_specs)?;
         let extension = SingleGenerateArtifactExtension {
             model_request_sha256: snapshot.request_sha256().clone(),
             definition_hash: request.definition.definition_hash.clone(),
-            generated_file_count: u32::try_from(generated.len())
-                .map_err(|_| SingleGenerateError::InvalidModelOutput)?,
+            generated_file_count: u32::try_from(generated.len()).map_err(|_| {
+                invalid_model_output(SingleGenerateFailureReason::GeneratedFileCountOverflow)
+            })?,
             validation_primitive: contribution.validation_primitive,
             acceptance_notes: generated.acceptance_notes.clone(),
         };
@@ -585,7 +613,9 @@ impl SingleGenerateService {
             || checkpoint.provenance.selected_resources != resource_refs
             || checkpoint.provenance.model.trim().is_empty()
         {
-            return Err(SingleGenerateError::InvalidModelOutput);
+            return Err(invalid_model_output(
+                SingleGenerateFailureReason::CheckpointProvenance,
+            ));
         }
         let generated = validate_bundle(
             request,
@@ -598,8 +628,9 @@ impl SingleGenerateService {
         let extension = SingleGenerateArtifactExtension {
             model_request_sha256: checkpoint.provenance.model_request_sha256.clone(),
             definition_hash: request.definition.definition_hash.clone(),
-            generated_file_count: u32::try_from(generated.len())
-                .map_err(|_| SingleGenerateError::InvalidModelOutput)?,
+            generated_file_count: u32::try_from(generated.len()).map_err(|_| {
+                invalid_model_output(SingleGenerateFailureReason::GeneratedFileCountOverflow)
+            })?,
             validation_primitive: contribution.validation_primitive,
             acceptance_notes: generated.acceptance_notes.clone(),
         };
@@ -612,7 +643,9 @@ impl SingleGenerateService {
             acceptance_notes: extension.acceptance_notes.clone(),
         };
         if checkpoint.result != result {
-            return Err(SingleGenerateError::InvalidModelOutput);
+            return Err(invalid_model_output(
+                SingleGenerateFailureReason::CheckpointResult,
+            ));
         }
         Ok(SingleGenerateCompositionProposal {
             result,
@@ -765,7 +798,7 @@ pub enum SingleGenerateError {
     #[error("single Mod model output was truncated")]
     TruncatedModelOutput,
     #[error("single Mod model output failed typed validation")]
-    InvalidModelOutput,
+    InvalidModelOutput(SingleGenerateFailureDetails),
     #[error("single Mod Artifact publication failed")]
     ArtifactPublication,
     #[error("single Mod Artifact cleanup failed")]
@@ -799,6 +832,17 @@ pub enum SingleGenerateError {
 impl SingleGenerateError {
     #[must_use]
     pub fn run_failure(&self) -> RunFailure {
+        let details = match self {
+            Self::TruncatedModelOutput => Some(SingleGenerateFailureDetails::reason(
+                SingleGenerateFailureReason::OutputTruncated,
+            )),
+            Self::InvalidModelOutput(details) => Some(details.clone()),
+            _ => None,
+        }
+        .map(|details| {
+            VersionedPayload::from_typed(single_generate_failure_details_schema(), &details)
+                .expect("built-in single generation failure details are valid")
+        });
         let (code, stage) = match self {
             Self::InvalidInput | Self::InvalidRun => {
                 ("run.input_invalid", "mod.generate.single.request")
@@ -830,7 +874,7 @@ impl SingleGenerateError {
                 ("feature.recipe_invalid", "mod.generate.single.recipe")
             }
             Self::TruncatedModelOutput => ("model.output_truncated", "mod.generate.single.model"),
-            Self::InvalidModelOutput => ("model.output_invalid", "mod.generate.single.model"),
+            Self::InvalidModelOutput(_) => ("model.output_invalid", "mod.generate.single.model"),
             Self::ArtifactPublication => ("artifact.publish_failed", "mod.generate.single.publish"),
             Self::ArtifactCleanup => ("artifact.cleanup_failed", "mod.generate.single.cleanup"),
             Self::RunTransition | Self::Lifecycle(_) => {
@@ -889,7 +933,7 @@ impl SingleGenerateError {
         RunFailure::new(
             FailureCode::parse(code).expect("built-in failure code is valid"),
             stage,
-            None,
+            details,
         )
         .expect("built-in Run failure is valid")
     }
@@ -1221,28 +1265,37 @@ fn validate_bundle(
     item_spec: &GenerateItemType,
     bundle: GeneratedModBundle,
 ) -> Result<ValidatedBundle, SingleGenerateError> {
-    if bundle.files.len() != item_spec.generated_files.len()
-        || !valid_text_list(&bundle.acceptance_notes, 64, 2_000, true)
-        || bundle.files.iter().any(|(role, content)| {
-            !valid_role(role)
-                || content.trim().is_empty()
-                || content.len() > 16 * 1024 * 1024
-                || content.contains('\0')
-        })
-    {
-        return Err(SingleGenerateError::InvalidModelOutput);
+    if bundle.files.len() != item_spec.generated_files.len() {
+        return Err(invalid_model_output(SingleGenerateFailureReason::FileCount));
+    }
+    if !valid_text_list(&bundle.acceptance_notes, 64, 2_000, true) {
+        return Err(invalid_model_output(
+            SingleGenerateFailureReason::AcceptanceNotes,
+        ));
+    }
+    for (role, content) in &bundle.files {
+        if !valid_role(role) {
+            return Err(invalid_model_output(SingleGenerateFailureReason::FileRole));
+        }
+        if content.trim().is_empty() || content.len() > 16 * 1024 * 1024 || content.contains('\0') {
+            return Err(invalid_model_output(
+                SingleGenerateFailureReason::FileContent,
+            ));
+        }
     }
     let mut by_role = bundle.files;
     let mut files = Vec::with_capacity(item_spec.generated_files.len());
     for spec in &item_spec.generated_files {
         let content = by_role
             .remove(&spec.role)
-            .ok_or(SingleGenerateError::InvalidModelOutput)?;
+            .ok_or_else(|| invalid_model_output(SingleGenerateFailureReason::FileRole))?;
         if spec.composition_merge == Some(CompositionFileMerge::JsonObject)
             && !serde_json::from_str::<BTreeMap<String, serde_json::Value>>(&content)
                 .is_ok_and(|values| values.values().all(serde_json::Value::is_string))
         {
-            return Err(SingleGenerateError::InvalidModelOutput);
+            return Err(invalid_model_output(
+                SingleGenerateFailureReason::MergeContent,
+            ));
         }
         let path = expand_generated_target_template(
             &spec.target_path,
@@ -1252,12 +1305,16 @@ fn validate_bundle(
         files.push((spec.role.clone(), path, content));
     }
     if !by_role.is_empty() {
-        return Err(SingleGenerateError::InvalidModelOutput);
+        return Err(invalid_model_output(SingleGenerateFailureReason::FileRole));
     }
     Ok(ValidatedBundle {
         files,
         acceptance_notes: bundle.acceptance_notes,
     })
+}
+
+fn invalid_model_output(reason: SingleGenerateFailureReason) -> SingleGenerateError {
+    SingleGenerateError::InvalidModelOutput(SingleGenerateFailureDetails::reason(reason))
 }
 
 fn build_writes(
@@ -1555,6 +1612,10 @@ fn bundle_schema() -> SchemaRef {
     schema_version("feature.mod-generate-single-bundle", 2)
 }
 
+fn single_generate_failure_details_schema() -> SchemaRef {
+    schema("feature.mod-generate-single-failure-details")
+}
+
 #[cfg(test)]
 mod tests {
     use ats_game_context::{ContributionResolver, GamePackLoader};
@@ -1752,7 +1813,7 @@ mod tests {
         };
         assert!(matches!(
             validate_bundle(&request, &item_spec, wrong),
-            Err(SingleGenerateError::InvalidModelOutput)
+            Err(SingleGenerateError::InvalidModelOutput(_))
         ));
 
         let valid = GeneratedModBundle {
@@ -1896,6 +1957,25 @@ mod tests {
 
         let authentication = SingleGenerateError::Model(ModelError::Authentication).run_failure();
         assert_eq!(authentication.code.as_str(), "model.authentication");
+
+        let invalid = invalid_model_output(SingleGenerateFailureReason::JsonDecode).run_failure();
+        assert_eq!(invalid.code.as_str(), "model.output_invalid");
+        assert_eq!(invalid.stage, "mod.generate.single.model");
+        assert_eq!(
+            invalid.details.as_ref().map(VersionedPayload::schema),
+            Some(&single_generate_failure_details_schema())
+        );
+        assert_eq!(
+            invalid.details.as_ref().map(VersionedPayload::payload),
+            Some(&serde_json::json!({"reasonCode": "json_decode"}))
+        );
+
+        let truncated = SingleGenerateError::TruncatedModelOutput.run_failure();
+        assert_eq!(truncated.code.as_str(), "model.output_truncated");
+        assert_eq!(
+            truncated.details.as_ref().map(VersionedPayload::payload),
+            Some(&serde_json::json!({"reasonCode": "output_truncated"}))
+        );
 
         let rejected = SingleGenerateError::Validation(ValidationError::Rejected(
             ats_runtime::ValidationReport {

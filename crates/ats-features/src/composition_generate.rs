@@ -341,6 +341,7 @@ impl<'a> CompositionGenerateService<'a> {
                         project_context: Some(context.project_context),
                         custom_instructions: context.custom_instructions,
                         model: context.model.clone(),
+                        authoritative_definition: Some(definition),
                     },
                     cancellation,
                 )

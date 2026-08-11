@@ -188,6 +188,7 @@ impl<'a> BatchGenerateService<'a> {
                         project_context: Some(context.project_context),
                         custom_instructions: context.custom_instructions,
                         model: context.model.clone(),
+                        authoritative_definition: Some(&item.definition),
                     },
                     cancellation,
                 )
@@ -235,6 +236,7 @@ impl<'a> BatchGenerateService<'a> {
             };
             plan.item_id = item.definition.definition.item_id.to_string();
             plan.item_type = item.definition.definition.item_type.to_string();
+            plan.behavior_intent = item.definition.definition.behavior_intent.clone();
             let plan_payload =
                 VersionedPayload::from_typed(ModPlanFeature::result_schema(), &plan)?;
             child.apply_transition(

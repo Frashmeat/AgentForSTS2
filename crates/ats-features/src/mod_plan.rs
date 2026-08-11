@@ -11,6 +11,7 @@ use ats_runtime::{
     CancellationToken, FinishReason, ModelClient, ModelError, ModelGamePackRef, ModelRequestError,
     ModelRequestSnapshot, RunFailure, TokenUsage,
 };
+use ats_workspace::StoredItemDefinition;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -18,7 +19,7 @@ use crate::FeatureSpec;
 use crate::prompt::{FeatureRecipe, FeatureRecipeError, FeatureRecipeLoader};
 
 const RECIPE_BYTES: &[u8] = include_bytes!("../recipes/mod-plan.json");
-const RECIPE_SHA256: &str = "36c0e7971fda34bf437950ffb2f37fd0771701432f3287f64172aa5c810cf4f1";
+const RECIPE_SHA256: &str = "f177a49d4f7d7bdeb091469f54d2c48dacb6d8a7d7c94ddfb32d8ae7f11f0bfb";
 
 pub struct ModPlanFeature;
 
@@ -167,6 +168,7 @@ pub struct ModPlanContext<'a> {
     pub project_context: Option<&'a str>,
     pub custom_instructions: Option<&'a str>,
     pub model: Option<String>,
+    pub authoritative_definition: Option<&'a StoredItemDefinition>,
 }
 
 #[derive(Debug, Clone)]
@@ -214,6 +216,21 @@ impl ModPlanService {
             return Err(ModPlanError::InvalidInput);
         }
         validate_context(&context)?;
+        let authoritative_definition = context.authoritative_definition;
+        if let Some(definition) = authoritative_definition {
+            definition
+                .validate()
+                .map_err(|_| ModPlanError::InvalidItemDefinition)?;
+            if request.item_type.as_deref() != Some(definition.definition.item_type.as_str())
+                || request.requirements != definition.definition.behavior_intent.join("\n")
+                || context
+                    .pack
+                    .item_type(&definition.definition.item_type)
+                    .is_none()
+            {
+                return Err(ModPlanError::InvalidItemDefinition);
+            }
+        }
         if cancellation.is_cancelled() {
             return Err(ModPlanError::Cancelled);
         }
@@ -249,6 +266,10 @@ impl ModPlanService {
             (
                 "runtime.custom_instructions".into(),
                 bounded_optional(context.custom_instructions, 4_000)?,
+            ),
+            (
+                "item.definition".into(),
+                authoritative_definition.map_or_else(|| Ok(String::new()), serialize)?,
             ),
             (
                 "request.item_type".into(),
@@ -290,7 +311,7 @@ impl ModPlanService {
         {
             return Err(ModPlanError::UnsupportedItemType);
         }
-        let item = model_item.into_plan_item(
+        let mut item = model_item.into_plan_item(
             item_descriptor
                 .resource_profiles()
                 .iter()
@@ -300,6 +321,11 @@ impl ModPlanService {
                 .map(ToString::to_string)
                 .collect(),
         );
+        if let Some(definition) = authoritative_definition {
+            item.item_id = definition.definition.item_id.to_string();
+            item.item_type = definition.definition.item_type.to_string();
+            item.behavior_intent = definition.definition.behavior_intent.clone();
+        }
         item.validate()?;
         Ok(ModPlanExecution {
             item,
@@ -319,6 +345,8 @@ impl ModPlanService {
 pub enum ModPlanError {
     #[error("Mod plan input is invalid")]
     InvalidInput,
+    #[error("Mod plan authoritative ItemDefinition is invalid")]
+    InvalidItemDefinition,
     #[error("Mod plan context identities do not match")]
     ContextIdentityMismatch,
     #[error("Mod plan Pack guidance is invalid")]
@@ -348,6 +376,7 @@ impl ModPlanError {
     pub fn run_failure(&self) -> RunFailure {
         let (code, stage) = match self {
             Self::InvalidInput => ("run.input_invalid", "mod.plan.request"),
+            Self::InvalidItemDefinition => ("item.definition_invalid", "mod.plan.definition"),
             Self::ContextIdentityMismatch => ("truth.context_mismatch", "mod.plan.context"),
             Self::InvalidPackGuidance | Self::Contribution(_) => {
                 ("pack.contribution_invalid", "mod.plan.pack")
@@ -460,8 +489,9 @@ mod tests {
 
     use async_trait::async_trait;
     use ats_game_context::{ContributionResolver, GamePackLoader};
-    use ats_kernel::PrimitiveId;
+    use ats_kernel::{ItemId, PrimitiveId};
     use ats_runtime::{ModelResponse, ModelStream};
+    use ats_workspace::ItemDefinition;
     use futures_util::stream;
     use sha2::{Digest, Sha256};
 
@@ -541,6 +571,18 @@ mod tests {
             .unwrap()
     }
 
+    fn stored_definition(item_id: &str, item_type: &str) -> StoredItemDefinition {
+        let mut definition = ItemDefinition::new(
+            ItemId::parse(item_id).unwrap(),
+            ItemTypeId::parse(item_type).unwrap(),
+        );
+        definition.behavior_intent = vec!["Use the confirmed behavior exactly".into()];
+        StoredItemDefinition {
+            definition_hash: definition.definition_hash().unwrap(),
+            definition,
+        }
+    }
+
     fn model(item_type: &str) -> MockModel {
         MockModel {
             snapshots: Mutex::new(Vec::new()),
@@ -583,6 +625,7 @@ mod tests {
                         project_context: None,
                         custom_instructions: Some("CUSTOM-CANARY"),
                         model: None,
+                        authoritative_definition: None,
                     },
                     &CancellationToken::new(),
                 )
@@ -620,7 +663,8 @@ mod tests {
                         contributions: &contributions,
                         project_context: None,
                         custom_instructions: None,
-                        model: None
+                        model: None,
+                        authoritative_definition: None
                     },
                     &CancellationToken::new()
                 )
@@ -647,6 +691,7 @@ mod tests {
                     project_context: None,
                     custom_instructions: None,
                     model: None,
+                    authoritative_definition: None,
                 },
                 &CancellationToken::new(),
             )
@@ -662,6 +707,50 @@ mod tests {
             .map(|message| message.content.as_str())
             .collect::<String>();
         assert!(rendered.contains("fixture.icon"));
+    }
+
+    #[tokio::test]
+    async fn definition_bound_plan_uses_the_complete_definition_and_rebinds_authoritative_fields() {
+        let pack = pack("definition", "fixture_type");
+        let contributions = contributions(&pack);
+        let definition = stored_definition("confirmed_item", "fixture_type");
+        let model = model("fixture_type");
+        let execution = ModPlanService::built_in()
+            .unwrap()
+            .execute(
+                &model,
+                ModPlanRequest {
+                    requirements: definition.definition.behavior_intent.join("\n"),
+                    item_type: Some("fixture_type".into()),
+                },
+                ModPlanContext {
+                    pack: &pack,
+                    contributions: &contributions,
+                    project_context: None,
+                    custom_instructions: None,
+                    model: None,
+                    authoritative_definition: Some(&definition),
+                },
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(execution.item.item_id, "confirmed_item");
+        assert_eq!(execution.item.item_type, "fixture_type");
+        assert_eq!(
+            execution.item.behavior_intent,
+            definition.definition.behavior_intent
+        );
+        let rendered = model.snapshots.lock().unwrap()[0]
+            .request()
+            .messages
+            .iter()
+            .map(|message| message.content.as_str())
+            .collect::<String>();
+        assert!(rendered.contains(definition.definition_hash.as_str()));
+        assert!(rendered.contains("authoritative-item-definition"));
+        assert!(rendered.contains("sole source of item identity"));
     }
 
     #[test]

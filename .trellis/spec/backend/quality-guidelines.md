@@ -68,6 +68,11 @@ Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-sp
   canonical content. It carries Pack-keyed localization fields, exact Resource bindings, typed
   identity/pinned references and optional composition-profile provenance. Run/Artifact consumers
   bind the exact hash; they never reconstruct locked fields from prose or mutate an older snapshot.
+- Definition-bound Plan passes the complete validated StoredItemDefinition as authoritative Feature
+  context without changing the public Plan request wire. The Recipe may ask for implementation,
+  evidence and acceptance guidance, but Features rebind Plan identity/type/behavior from the
+  definition and Single resolves every prose conflict in favor of that definition. Do not compare
+  or heuristically parse Plan prose to reconstruct canonical/localization/Resource/reference facts.
 - Pack v4 `referenceSlots` own kind/target/cardinality/quantity rules. Identity edges never expand
   a version hash; pinned edges expand exact definitions and must form an acyclic closure.
 - Composition guidance `referenceBindingRules` generically constrain per-source slot binding count

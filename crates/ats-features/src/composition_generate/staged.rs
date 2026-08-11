@@ -335,6 +335,7 @@ impl CompositionGenerateService<'_> {
                                 project_context: Some(context.project_context),
                                 custom_instructions: context.custom_instructions,
                                 model: context.model.clone(),
+                                authoritative_definition: Some(definition),
                             },
                             cancellation,
                         )
@@ -376,6 +377,7 @@ impl CompositionGenerateService<'_> {
                     let mut plan = execution.item;
                     plan.item_id = definition.definition.item_id.to_string();
                     plan.item_type = definition.definition.item_type.to_string();
+                    plan.behavior_intent = definition.definition.behavior_intent.clone();
                     succeed_child::<ModPlanFeature, _>(&mut child_run, &plan)?;
                     let checkpoint = StagedPlanCheckpoint { plan, child_run };
                     complete_node(
