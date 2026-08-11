@@ -1,6 +1,8 @@
 # Stage 2 Contracts And Dependency DAG
 
-> Executable current contract for the Stage 2 modular monolith after the Work Order 7 production cutover.
+> Executable current contract for the Stage 2 modular monolith, including durable composition Plan/Generate execution graphs.
+>
+> Use this file for cross-layer ownership, persisted schemas and recovery invariants. Failure serialization and redaction belong to [`error-handling.md`](./error-handling.md); implementation quality and required gates belong to [`quality-guidelines.md`](./quality-guidelines.md). Task status and candidate evidence do not belong in stable specs.
 
 ## 1. Kernel Values
 

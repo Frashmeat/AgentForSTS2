@@ -1,6 +1,8 @@
 # Backend Quality Guidelines
 
 > Executable Stage 2 contracts for the modular monolith. Historical `ats-core` v1/v2 contracts are not active production guidance.
+>
+> This file defines implementation discipline, scenario-level checks and required gates. Authoritative persisted contracts live in [`stage2-contracts.md`](./stage2-contracts.md), while failure/redaction rules live in [`error-handling.md`](./error-handling.md). Candidate results and task completion state are evidence, not stable quality rules.
 
 ## 1. Dependency Direction
 

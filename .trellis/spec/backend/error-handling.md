@@ -1,6 +1,8 @@
 # Error Handling
 
 > Active Stage 2 failure, cancellation, shell mapping, and redaction contract.
+>
+> This file owns failure classification and safe serialization only. Persisted graph/Draft/Run recovery invariants belong to [`stage2-contracts.md`](./stage2-contracts.md); test breadth and forbidden implementation patterns belong to [`quality-guidelines.md`](./quality-guidelines.md). Task-specific Provider bodies, paths and candidate timelines stay in the task evidence ledger.
 
 ## Serialized Product Failure
 
