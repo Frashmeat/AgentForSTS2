@@ -80,6 +80,45 @@ try {
     if (-not (Test-Path -LiteralPath (Join-Path $release 'release-manifest.json'))) {
         throw 'release manifest file was not written'
     }
+
+    $gitFixture = Join-Path $tempRoot 'git-fixture'
+    New-Item -ItemType Directory -Path $gitFixture | Out-Null
+    & git -C $gitFixture init --quiet
+    if ($LASTEXITCODE -ne 0) { throw 'could not initialize Git cleanliness fixture' }
+    & git -C $gitFixture config user.name 'AgentTheSpire Test'
+    & git -C $gitFixture config user.email 'agentthespire-test@example.invalid'
+    & git -C $gitFixture config core.autocrlf false
+    $trackedPath = Join-Path $gitFixture 'tracked.txt'
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($trackedPath, "original`n", $utf8NoBom)
+    & git -C $gitFixture add tracked.txt
+    & git -C $gitFixture commit --quiet -m 'fixture'
+    if ($LASTEXITCODE -ne 0) { throw 'could not commit Git cleanliness fixture' }
+
+    if (-not (Test-GitWorkingTreeClean -RepositoryRoot $gitFixture)) {
+        throw 'clean Git fixture was reported dirty'
+    }
+    [System.IO.File]::WriteAllText($trackedPath, "original`n", $utf8NoBom)
+    [System.IO.File]::SetLastWriteTimeUtc($trackedPath, [DateTime]::UtcNow.AddSeconds(2))
+    if (-not (Test-GitWorkingTreeClean -RepositoryRoot $gitFixture)) {
+        throw 'content-identical tracked rewrite was reported dirty'
+    }
+
+    [System.IO.File]::WriteAllText($trackedPath, "modified`n", $utf8NoBom)
+    if (Test-GitWorkingTreeClean -RepositoryRoot $gitFixture) {
+        throw 'tracked working tree change was reported clean'
+    }
+    & git -C $gitFixture add tracked.txt
+    if (Test-GitWorkingTreeClean -RepositoryRoot $gitFixture) {
+        throw 'staged change was reported clean'
+    }
+
+    [System.IO.File]::WriteAllText($trackedPath, "original`n", $utf8NoBom)
+    & git -C $gitFixture add tracked.txt
+    [System.IO.File]::WriteAllText((Join-Path $gitFixture 'untracked.txt'), "untracked`n", $utf8NoBom)
+    if (Test-GitWorkingTreeClean -RepositoryRoot $gitFixture) {
+        throw 'untracked file was reported clean'
+    }
 } finally {
     $resolvedTemp = [System.IO.Path]::GetFullPath($tempRoot)
     if ($resolvedTemp.StartsWith($tempBase, [System.StringComparison]::OrdinalIgnoreCase) -and

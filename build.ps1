@@ -89,9 +89,7 @@ if ($TauriArgsExtra | Where-Object { $_ -eq '--features' -or $_ -eq '-F' -or $_ 
     throw 'Cargo features are controlled exclusively by -Variant'
 }
 
-$workingTreeChanges = @(& git status --porcelain --untracked-files=normal)
-if ($LASTEXITCODE -ne 0) { throw 'Git working tree status could not be determined' }
-$workingTreeClean = $workingTreeChanges.Count -eq 0
+$workingTreeClean = Test-GitWorkingTreeClean -RepositoryRoot $PSScriptRoot
 
 $features = @()
 $tauriArgs = @()

@@ -1,3 +1,38 @@
+function Test-GitWorkingTreeClean {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$RepositoryRoot
+    )
+
+    $root = [System.IO.Path]::GetFullPath($RepositoryRoot)
+
+    & git -c core.safecrlf=false -C $root diff --quiet --ignore-submodules=none -- *> $null
+    $worktreeExitCode = $LASTEXITCODE
+    if ($worktreeExitCode -gt 1) {
+        throw 'Git working tree diff could not be determined'
+    }
+    if ($worktreeExitCode -eq 1) {
+        $global:LASTEXITCODE = 0
+        return $false
+    }
+
+    & git -c core.safecrlf=false -C $root diff --cached --quiet --ignore-submodules=none -- *> $null
+    $indexExitCode = $LASTEXITCODE
+    if ($indexExitCode -gt 1) {
+        throw 'Git index diff could not be determined'
+    }
+    if ($indexExitCode -eq 1) {
+        $global:LASTEXITCODE = 0
+        return $false
+    }
+
+    $untrackedFiles = @(& git -C $root ls-files --others --exclude-standard 2>$null)
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Git untracked files could not be determined'
+    }
+    return $untrackedFiles.Count -eq 0
+}
+
 function Publish-IsolatedBundle {
     [CmdletBinding()]
     param(

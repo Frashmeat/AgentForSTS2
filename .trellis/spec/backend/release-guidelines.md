@@ -40,6 +40,9 @@ verify-<variant>
 
 - PlanOnly reads authoritative variant plans and writes no candidate files.
 - A real candidate requires a clean Git worktree and a candidate root that does not already exist.
+- Worktree cleanliness is content-based: unstaged diffs, staged diffs, and non-ignored untracked
+  files are all rejected. A tracked file rewritten to byte-identical content may have stale Git
+  stat metadata after a tool build and must not block a later variant in the same candidate.
 - Any nonzero/exception marks the current step failed, later pending steps skipped, overall status failed, and the script process nonzero.
 - The CLI maps closed step IDs to fixed commands. It has no arbitrary command/scriptblock/feature parameter.
 
@@ -70,6 +73,7 @@ Variant verification recomputes manifest identity, path containment, allowed ins
 | Baseline-only | No ML step or stale ML result |
 | All variants succeed | Same commit/build ID, exact feature sets, all hashes match, overall succeeded |
 | Dirty worktree | Preflight failed before expensive commands |
+| Content-identical tracked rewrite | Remains clean; a later candidate variant may proceed |
 | Existing candidate root | Reject without overwriting prior evidence |
 | Build/manifest identity mismatch | Verify step failed; no success summary |
 | Artifact traversal/missing/size/hash mismatch | Verify step failed |
