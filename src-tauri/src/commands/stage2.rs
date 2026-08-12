@@ -82,6 +82,7 @@ pub struct ExecutionGraphView {
     pub current_role_id: Option<String>,
     pub failure_code: Option<FailureCode>,
     pub repair_round: u32,
+    pub feedback_phase: Option<ats_runtime::ExecutionFeedbackPhase>,
     pub can_pause: bool,
     pub can_resume: bool,
     pub can_cancel: bool,
@@ -1108,7 +1109,21 @@ fn execution_graph_view(
                 .next_back()
                 .map(|failure| failure.code.clone())
         });
-    let repair_round = graph.nodes().values().map(|node| node.repair_round).sum();
+    let repair_round = graph
+        .nodes()
+        .values()
+        .filter_map(|node| node.feedback_state.as_ref().map(|state| state.round))
+        .sum();
+    let feedback_phase = current
+        .and_then(|node| node.feedback_state.as_ref())
+        .or_else(|| {
+            graph
+                .nodes()
+                .values()
+                .filter_map(|node| node.feedback_state.as_ref())
+                .next_back()
+        })
+        .map(|state| state.phase);
     ExecutionGraphView {
         execution_graph_id: graph.id().clone(),
         revision: graph.revision(),
@@ -1121,6 +1136,7 @@ fn execution_graph_view(
         current_role_id: current.map(|node| node.role_id.clone()),
         failure_code,
         repair_round,
+        feedback_phase,
         can_pause: matches!(
             graph.status(),
             ExecutionGraphStatus::Running

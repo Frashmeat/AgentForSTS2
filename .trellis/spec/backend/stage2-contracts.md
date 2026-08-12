@@ -989,7 +989,7 @@ single-request path and does not create an execution graph.
 #### 2. Signatures
 
 ```rust
-pub struct CompositionGenerateRequest { // feature.composition-generate-request v3
+pub struct CompositionGenerateRequest { // feature.composition-generate-request v4
     pub artifact_id: String,
     pub mod_id: String,
     pub root: StoredItemDefinition,
@@ -1017,8 +1017,10 @@ CompositionGenerateService::execute_staged(...)
 
 #### 3. Contracts
 
-The backend enriches an initial v3 request with `execution.kind=start`. The immutable request also
-fixes `until_passed` or `max_rounds(1..20)`. Resume creates a new parent
+The backend enriches an initial v4 request with `execution.kind=start`. The immutable request also
+fixes `until_passed` or `max_rounds(1..20)` as the complete graph's semantic-feedback budget;
+`until_passed` still has the absolute 20-round safety ceiling.
+Resume creates a new parent
 Run and enriches the exact blueprint request with `kind=resume`, the graph ID, expected revision and
 previous Run ID. The graph contains exactly two model nodes per resolved Item plus one local node:
 
@@ -1032,6 +1034,20 @@ item.000.plan -> item.000.single -> item.001.plan -> item.001.single -> ...
 - A Single checkpoint contains the validated `composition_staged` result, canonical generated role
   contents and safe definition/model/resource provenance. It excludes the Prompt, request messages,
   Provider body and raw completion envelope.
+- Before a Single checkpoint exists, closed output-contract failures (`output_truncated`, JSON
+  decode, file/role/content/merge shape or acceptance-note contract) may produce one typed
+  `feature.generation-feedback` v1 envelope. The graph CAS-persists that envelope, its diagnostic
+  fingerprint and the complete completion-byte SHA-256 before another model call. The next child
+  Run requests a complete bundle through the same Recipe/output contract; it never sends the raw
+  rejected candidate or applies a local compatibility conversion.
+- Each semantic model call has its own terminal child Run. Failed rounds remain Run evidence; the
+  successful Single checkpoint references only the final succeeded child Run. A semantic round does
+  not increment graph node attempt count. Process recovery preserves feedback state, interrupts the
+  active attempt and resumes from the persisted envelope in a new node attempt.
+- Runtime receives checkpoint-free output evidence through one provider-neutral
+  `ExecutionOutputFeedback { diagnostic_fingerprint, candidate_sha256, feedback }` value object.
+  `record_output_feedback` and `record_repair_output_feedback` share this input; the latter adds only
+  the active checkpoint hash. Runtime never decodes Feature diagnostics or model content.
 - Restore revalidates the exact definition hash, Pack-generated role set, selected immutable
   Resource versions, normalized bundle and project writes without calling `ModelClient`.
 - Child Runs are persisted create-or-match by exact Run ID and bytes after checkpoint CAS. A crash
@@ -1039,7 +1055,7 @@ item.000.plan -> item.000.single -> item.001.plan -> item.001.single -> ...
   is a storage failure.
 - `composition.finalize` reconstructs every proposal, enforces one validation Primitive, merges
   files and validates writes locally. The graph then enters `validating`, not `commit_prepared`.
-- A repair request contains typed issues and the owning Item's current complete role files. Single
+- A generated-content repair request contains typed issues and the owning Item's current complete role files. Single
   reuses the original Pack/Truth/definition/resource/output contracts; a valid replacement CAS
   replaces only the active Single checkpoint, then finalize and the complete validator rerun.
 - Build, Package, real-project transaction and the one composition Artifact execute only after all
@@ -1051,14 +1067,14 @@ item.000.plan -> item.000.single -> item.001.plan -> item.001.single -> ...
   zero model, validation, Build, Package, project-write or Artifact work.
 
 Runtime `ExecutionCommitIntent` accepts exactly one Draft intent or one generic publication intent.
-Mixed forms, unsafe target IDs or payload-hash mismatch are invalid graph records. Graph v1 JSON is
-not read or rewritten.
+Mixed forms, unsafe target IDs or payload-hash mismatch are invalid graph records. ExecutionGraph
+v1/v2 JSON is not read, migrated or rewritten; v3 uses only `.ats/execution-graphs-v3`.
 
 #### 4. Validation & Error Matrix
 
 | Condition | Graph / Run result | Work retained |
 | --- | --- | --- |
-| Plan or Single typed output invalid/truncated | current node Pending with safe failure; graph paused; parent failed | every earlier succeeded checkpoint and child Run |
+| non-repairable Plan/Single failure, exhausted policy or repeated identical output | current node Pending with safe failure; graph paused; parent failed | earlier checkpoints, terminal child Runs and hashed safe feedback state |
 | explicit resume revision/claim conflict | `composition.execution.conflict`; no new Running Run | unchanged graph |
 | checkpoint schema/hash/domain mismatch | `composition.execution.invalid` | no guessed output or model fallback |
 | child Run create conflicts with different bytes | `run.storage_failed` | checkpoint remains authoritative; no overwrite |
@@ -1067,20 +1083,25 @@ not read or rewritten.
 | Build/Package/publication fails after prepare | claim is released while commit remains roll-forward | all model checkpoints and publication intent |
 | crash with an active model node | structural recovery interrupts that attempt and pauses graph | all earlier succeeded nodes |
 | graph already succeeded but parent is not authoritative | new reconciliation Run succeeds from final result | zero model/publication work |
+| User cancellation during output/generated feedback | graph `cancelled`; parent/active child cancel through first-reason-wins | terminal earlier children and current safe feedback |
+| Pause/project close/switch/shutdown during validating or repairing | graph `paused`; active claim released and resumable | every succeeded checkpoint and safe feedback |
 
 #### 5. Good / Base / Bad Cases
 
-- Good: Item zero Plan succeeds, Item zero Single returns invalid JSON, and resume requests only that
-  Single followed by later Items; a repository re-instantiation proves restart recovery.
+- Good: Item zero Plan succeeds, Item zero Single returns invalid JSON, the controller persists typed
+  feedback and a new child Run returns a strictly valid complete bundle; later Items then execute.
+- Good: the same invalid completion repeats, no-progress pauses the graph, and Resume requests only
+  the failed Single using the persisted feedback before later Items; repository re-instantiation
+  proves restart recovery.
 - Base: a two-Item closure completes four model nodes, one local finalize, one validation, one Build,
   one Package, one project transaction and one composition Artifact.
 - Bad: restart `composition.generate` from the root request after one node fails, store a complete
   Prompt/request snapshot in a checkpoint, or expose a partially generated project/Artifact.
-- Bad: retry Provider transport, decode/typed-output rejection, local-environment failure, a shared
-  merge file or an ambiguously owned diagnostic from Feature code; silently switch model, endpoint
-  or response format; or continue after an unchanged replacement, repeated diagnostic on the same
-  checkpoint or exhausted policy. Registered-validation repair is the sole Feature-owned semantic
-  loop and replaces complete declared roles before rerunning the whole validation closure.
+- Bad: retry Provider transport from Feature code; feed configuration/local-environment/storage or
+  ambiguous ownership failures to the model; silently switch model, endpoint or response format;
+  accept double-encoded JSON; retain raw completions; or continue after identical
+  diagnostic+candidate, unchanged replacement, repeated diagnostic+checkpoint or exhausted policy.
+  Output-contract and registered-validation feedback share one Feature-owned policy/state contract.
 
 #### 6. Tests Required
 
@@ -1092,12 +1113,15 @@ npm run test:frontend
 npx tsc -b --pretty false
 ```
 
-Assertions must cover Plan success plus Single invalid pause, repository re-instantiation, resume
-request count excluding successful nodes, stable serial order, exact child Run create-or-match,
-local finalize, registered-validation repair success, every repair stop condition, repair crash
-recovery, absence of `commit_prepared` before validation success, one final publication path,
-succeeded reconciliation with zero model requests, claim CAS, Pause/Cancel and no
-staging/transaction residue.
+Assertions must cover output failure -> typed feedback -> strict success, identical-candidate
+no-progress, graph-total budget, repository re-instantiation, resume request count excluding
+successful nodes, stable serial order, exact child Run evidence, local finalize,
+registered-validation repair success, every feedback stop condition, feedback/repair crash recovery,
+absence of `commit_prepared` before validation success, one final publication path, succeeded
+reconciliation with zero model requests, claim CAS, Pause/Cancel and no staging/transaction residue.
+The GUI E2E success case must assert that one repairable invalid Single creates one failed terminal
+child Run and one persisted `output_contract` feedback state, then succeeds the same parent Run and
+graph without a user Resume. A separate no-progress/exhaustion case owns the Paused/Resume contract.
 
 #### 6.1 Project-Local Tool Input Resolution
 

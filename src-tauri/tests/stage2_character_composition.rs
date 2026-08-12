@@ -5,8 +5,9 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 use ats_adapters::{
-    FileArtifactStore, FileCompositionDraftRepository, FileItemRepository, FileProjectStager,
-    FileProjectWriter, FileResourceRepository, PngResourceMediaProcessor, RegisteredBuildRunner,
+    FileArtifactStore, FileCompositionDraftRepository, FileExecutionGraphRepository,
+    FileItemRepository, FileProjectStager, FileProjectWriter, FileResourceRepository,
+    FileRunRepository, PngResourceMediaProcessor, RegisteredBuildRunner,
     RegisteredValidationRunner, ZipPackageWriter,
 };
 use ats_features::FeatureSpec;
@@ -41,9 +42,9 @@ use ats_kernel::{
     Sha256Digest,
 };
 use ats_runtime::{
-    ArtifactManifest, CancellationToken, FinishReason, ModelClient, ModelError,
-    ModelRequestSnapshot, ModelResponse, ModelStream, ModelStreamEvent, RunRecord, RunStatus,
-    RunTransition, TokenUsage, VersionedPayload,
+    ArtifactManifest, CancellationToken, ExecutionGraphRepository, FinishReason, ModelClient,
+    ModelError, ModelRequestSnapshot, ModelResponse, ModelStream, ModelStreamEvent, RunRecord,
+    RunRepository, RunStatus, RunTransition, TokenUsage, VersionedPayload,
 };
 use ats_workspace::{
     CompositionDraftRepository, ItemCompositionSource, ItemResourceBinding, PreparedResourceMedia,
@@ -395,62 +396,91 @@ async fn sts2_branded_placeholder_prototype_prepares_resources_and_publishes_one
         },
         execution: None,
     };
-    let mut run = running_run::<CompositionGenerateFeature, _>(&request);
-    let run_id = run.id().clone();
-    let result = CompositionGenerateService::new(
-        &ModPlanService::built_in().unwrap(),
-        &SingleGenerateService::built_in().unwrap(),
+    let run_id = ats_runtime::RunId::new();
+    let context = || CompositionGenerateContext {
+        pack: &pack,
+        composition_contributions: &composition,
+        plan_contributions: &plan,
+        single_contributions: &single,
+        resource_contributions: &resource,
+        build_contributions: &build,
+        package_contributions: &package,
+        truth: &truth,
+        project_root: &project,
+        project_context: "Fresh STS2 Character machine-gate project",
+        custom_instructions: None,
+        model: None,
+    };
+    let plan_service = ModPlanService::built_in().unwrap();
+    let single_service = SingleGenerateService::built_in().unwrap();
+    let service = CompositionGenerateService::new(
+        &plan_service,
+        &single_service,
         &ProjectBuildService,
         &ProjectPackageService,
-    )
-    .execute(
-        CompositionGenerateDependencies {
-            model: &model,
-            items: &items,
-            resources: &resources,
-            writer: &FileProjectWriter,
-            stager: &FileProjectStager,
-            validator: &RegisteredValidationRunner,
-            artifacts: &artifacts,
-            build_runner: &RegisteredBuildRunner,
-            package_writer: &ZipPackageWriter,
-        },
-        &mut run,
-        request,
-        CompositionGenerateContext {
-            pack: &pack,
-            composition_contributions: &composition,
-            plan_contributions: &plan,
-            single_contributions: &single,
-            resource_contributions: &resource,
-            build_contributions: &build,
-            package_contributions: &package,
-            truth: &truth,
-            project_root: &project,
-            project_context: "Fresh STS2 Character machine-gate project",
-            custom_instructions: None,
-            model: None,
-        },
-        &CancellationToken::new(),
-    )
-    .await;
+    );
+    let start = service
+        .prepare_staged_start(request, context(), &items, &resources, run_id.clone())
+        .unwrap();
+    let graphs = FileExecutionGraphRepository::new(project.clone());
+    graphs.create_claimed(&start.graph, &run_id).unwrap();
+    let runs = FileRunRepository::new(project.clone()).unwrap();
+    let mut run = RunRecord::new_with_id(
+        run_id.clone(),
+        CompositionGenerateFeature::id(),
+        VersionedPayload::from_typed(CompositionGenerateFeature::request_schema(), &start.request)
+            .unwrap(),
+    );
+    run.apply_transition(RunTransition::Start, Utc::now())
+        .unwrap();
+    let result = service
+        .execute_staged(
+            CompositionGenerateDependencies {
+                model: &model,
+                items: &items,
+                resources: &resources,
+                writer: &FileProjectWriter,
+                stager: &FileProjectStager,
+                validator: &RegisteredValidationRunner,
+                artifacts: &artifacts,
+                build_runner: &RegisteredBuildRunner,
+                package_writer: &ZipPackageWriter,
+            },
+            &runs,
+            &graphs,
+            &mut run,
+            start.request,
+            context(),
+            &CancellationToken::new(),
+        )
+        .await;
     let execution = match result {
         Ok(execution) => execution,
-        Err(failure) => panic!(
+        Err(error) => panic!(
             "Character composition generation failed: {} ({:?})",
-            failure.run_failure().code,
-            failure.error
+            error.run_failure().code,
+            error
         ),
     };
 
     assert_eq!(run.status(), RunStatus::Succeeded);
     assert_eq!(execution.result.node_count, 11);
-    assert_eq!(execution.child_runs.len(), 24);
+    let child_runs = runs.list().unwrap();
+    assert_eq!(child_runs.len(), 24);
     assert!(
-        execution
-            .child_runs
+        child_runs
             .iter()
-            .all(|child| child.status() == RunStatus::Succeeded)
+            .all(|child| child.status == RunStatus::Succeeded)
+    );
+    let graph = graphs
+        .get(execution.result.execution_graph_id.as_ref().unwrap())
+        .unwrap();
+    assert_eq!(graph.status(), ats_runtime::ExecutionGraphStatus::Succeeded);
+    assert!(
+        graph
+            .nodes()
+            .values()
+            .all(|node| node.feedback_state.is_none())
     );
     assert_eq!(model.snapshots.lock().unwrap().len(), 23);
     let model_character_resource_roles = {
@@ -1340,16 +1370,6 @@ fn resolve<F: FeatureSpec>(
     requirement: ats_game_context::ContributionRequirement,
 ) -> VerifiedContributionSet {
     resolver.resolve(pack, &F::id(), &[requirement]).unwrap()
-}
-
-fn running_run<F: FeatureSpec, T: serde::Serialize>(request: &T) -> RunRecord {
-    let mut run = RunRecord::new(
-        F::id(),
-        VersionedPayload::from_typed(F::request_schema(), request).unwrap(),
-    );
-    run.apply_transition(RunTransition::Start, Utc::now())
-        .unwrap();
-    run
 }
 
 fn snapshot_text(snapshot: &ModelRequestSnapshot) -> String {

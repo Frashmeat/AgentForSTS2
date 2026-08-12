@@ -24,13 +24,18 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::FeatureSpec;
+use crate::generation_feedback::{
+    ExpectedOutputShape, GenerationFeedbackEnvelope, GenerationFeedbackMode,
+    GenerationFeedbackPhase, ObservedJsonShape, OutputContractDiagnostic,
+    OutputContractDiagnosticCode, candidate_sha256,
+};
 use crate::item_definition::{ItemDefinitionValidationMode, ItemDefinitionValidator};
 use crate::mod_plan::PlanItem;
 use crate::prompt::{FeatureRecipe, FeatureRecipeError, FeatureRecipeLoader};
 use crate::resource_prepare::{ResourcePrepareFeature, ResourceSpecs, expand_target_template};
 
 const RECIPE_BYTES: &[u8] = include_bytes!("../recipes/mod-generate-single.json");
-const RECIPE_SHA256: &str = "cbc1c5a76151d35647e42a56eb6140aea9788b91bce6cf2610e1212384799cff";
+const RECIPE_SHA256: &str = "c0599b393dae05e4bf344c06f225fcc6bfefcbf9298b5c011176745235e1a08c";
 const MAX_EVIDENCE_RECORDS: u16 = 20;
 
 pub struct SingleGenerateFeature;
@@ -148,6 +153,8 @@ struct GeneratedModBundle {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SingleGenerateFailureDetails {
     reason_code: SingleGenerateFailureReason,
+    #[serde(skip)]
+    output_feedback: Option<SingleOutputFeedbackEvidence>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Eq, PartialEq)]
@@ -167,8 +174,29 @@ enum SingleGenerateFailureReason {
 
 impl SingleGenerateFailureDetails {
     fn reason(reason_code: SingleGenerateFailureReason) -> Self {
-        Self { reason_code }
+        Self {
+            reason_code,
+            output_feedback: None,
+        }
     }
+
+    fn with_output_feedback(
+        mut self,
+        diagnostic: OutputContractDiagnostic,
+        candidate_sha256: Sha256Digest,
+    ) -> Self {
+        self.output_feedback = Some(SingleOutputFeedbackEvidence {
+            envelope: GenerationFeedbackEnvelope::output_contract(diagnostic),
+            candidate_sha256,
+        });
+        self
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct SingleOutputFeedbackEvidence {
+    pub envelope: GenerationFeedbackEnvelope,
+    pub candidate_sha256: Sha256Digest,
 }
 
 #[derive(Debug, Serialize)]
@@ -276,6 +304,13 @@ pub struct SingleGenerateProposalCheckpoint {
 pub struct SingleRepairRequest {
     pub current_files: BTreeMap<String, String>,
     pub issues: Vec<ValidationIssue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_feedback: Option<GenerationFeedbackEnvelope>,
+}
+
+enum SingleFeedbackContext<'a> {
+    GeneratedContent(&'a SingleRepairRequest),
+    OutputContract(&'a GenerationFeedbackEnvelope),
 }
 
 pub struct SingleGenerateCompositionProposal {
@@ -608,7 +643,90 @@ impl SingleGenerateService {
                 evidence: &evidence,
                 resources: &resource_refs,
             },
-            Some(repair),
+            Some(SingleFeedbackContext::GeneratedContent(repair)),
+        )?;
+        self.complete_proposal_from_model(
+            dependencies.model,
+            request,
+            item_spec,
+            selected,
+            resource_refs,
+            &resource_specs,
+            contribution.validation_primitive,
+            snapshot,
+            cancellation,
+        )
+        .await
+    }
+
+    pub async fn feedback_propose<C, R>(
+        &self,
+        dependencies: SingleProposalDependencies<'_, C, R>,
+        run: &RunRecord,
+        request: &SingleGenerateRequest,
+        context: &SingleGenerateContext<'_>,
+        feedback: &GenerationFeedbackEnvelope,
+        cancellation: &CancellationToken,
+    ) -> Result<SingleGenerateProposal, SingleGenerateError>
+    where
+        C: ModelClient + ?Sized,
+        R: ResourceRepository + ?Sized,
+    {
+        if !feedback.is_valid() || feedback.phase != GenerationFeedbackPhase::OutputContract {
+            return Err(SingleGenerateError::InvalidInput);
+        }
+        validate_run(run, request)?;
+        validate_context(context)?;
+        validate_request(request)?;
+        check_cancelled(cancellation)?;
+        let contribution: GenerateContribution = context.contributions.decode(&generation_slot())?;
+        contribution.validate(context.pack)?;
+        let item_spec = contribution
+            .item_types
+            .iter()
+            .find(|item| item.id == request.plan.item_type)
+            .ok_or(SingleGenerateError::UnsupportedItemType)?;
+        let item_type = ItemTypeId::parse(request.plan.item_type.as_str())
+            .map_err(|_| SingleGenerateError::UnsupportedItemType)?;
+        let descriptor = context
+            .pack
+            .item_type(&item_type)
+            .ok_or(SingleGenerateError::UnsupportedItemType)?;
+        ItemDefinitionValidator::validate(
+            context.pack,
+            &request.definition.definition,
+            ItemDefinitionValidationMode::Ready,
+        )
+        .map_err(|_| SingleGenerateError::InvalidItemDefinition)?;
+        validate_definition_identity(request)?;
+        validate_plan_roles(&request.plan, descriptor)?;
+        let resource_specs: ResourceSpecs = context
+            .resource_contributions
+            .decode(&resource_specs_slot())?;
+        resource_specs
+            .validate()
+            .map_err(|_| SingleGenerateError::InvalidResourceSpecs)?;
+        let selected = load_resources(
+            dependencies.resources,
+            &request.definition,
+            descriptor,
+            &resource_specs,
+        )?;
+        let resource_refs = selected
+            .iter()
+            .map(|item| item.reference.clone())
+            .collect::<Vec<_>>();
+        let evidence = query_evidence(context.truth, descriptor)?;
+        let snapshot = self.assemble_request(
+            SingleRequestAssemblyContext {
+                request,
+                context,
+                contribution: &contribution,
+                item_spec,
+                evidence: &evidence,
+                resources: &resource_refs,
+            },
+            Some(SingleFeedbackContext::OutputContract(feedback)),
         )?;
         self.complete_proposal_from_model(
             dependencies.model,
@@ -640,12 +758,31 @@ impl SingleGenerateService {
         check_cancelled(cancellation)?;
         let response = model.complete(snapshot.clone(), cancellation).await?;
         check_cancelled(cancellation)?;
+        let response_sha256 = candidate_sha256(response.content.as_bytes());
         if response.finish_reason == FinishReason::MaxTokens {
-            return Err(SingleGenerateError::TruncatedModelOutput);
+            return Err(SingleGenerateError::TruncatedModelOutput(
+                SingleGenerateFailureDetails::reason(SingleGenerateFailureReason::OutputTruncated)
+                    .with_output_feedback(
+                        output_contract_diagnostic(
+                            SingleGenerateFailureReason::OutputTruncated,
+                            &response.content,
+                            item_spec,
+                        ),
+                        response_sha256,
+                    ),
+            ));
         }
-        let bundle: GeneratedModBundle = serde_json::from_str(&response.content)
-            .map_err(|_| invalid_model_output(SingleGenerateFailureReason::JsonDecode))?;
-        let generated = validate_bundle(request, item_spec, bundle)?;
+        let bundle: GeneratedModBundle = serde_json::from_str(&response.content).map_err(|_| {
+            invalid_model_output_with_feedback(
+                SingleGenerateFailureReason::JsonDecode,
+                &response.content,
+                item_spec,
+                response_sha256.clone(),
+            )
+        })?;
+        let generated = validate_bundle(request, item_spec, bundle).map_err(|error| {
+            attach_output_feedback(error, &response.content, item_spec, response_sha256)
+        })?;
         let writes = build_writes(request, &generated, &selected, resource_specs)?;
         let extension = SingleGenerateArtifactExtension {
             model_request_sha256: snapshot.request_sha256().clone(),
@@ -788,7 +925,7 @@ impl SingleGenerateService {
     fn assemble_request(
         &self,
         assembly: SingleRequestAssemblyContext<'_>,
-        repair: Option<&SingleRepairRequest>,
+        feedback: Option<SingleFeedbackContext<'_>>,
     ) -> Result<ModelRequestSnapshot, SingleGenerateError> {
         let SingleRequestAssemblyContext {
             request,
@@ -829,7 +966,11 @@ impl SingleGenerateService {
             ("request.plan".into(), serialize(&request.plan)?),
             (
                 "repair.context".into(),
-                repair.map_or_else(|| Ok(String::new()), serialize)?,
+                match feedback {
+                    None => String::new(),
+                    Some(SingleFeedbackContext::GeneratedContent(repair)) => serialize(repair)?,
+                    Some(SingleFeedbackContext::OutputContract(feedback)) => serialize(feedback)?,
+                },
             ),
         ]);
         let model_request = self.recipe.render_with_output_contract(
@@ -928,7 +1069,7 @@ pub enum SingleGenerateError {
     #[error("single Mod generation Recipe does not match its typed contract")]
     InvalidRecipeContract,
     #[error("single Mod model output was truncated")]
-    TruncatedModelOutput,
+    TruncatedModelOutput(SingleGenerateFailureDetails),
     #[error("single Mod model output failed typed validation")]
     InvalidModelOutput(SingleGenerateFailureDetails),
     #[error("single Mod Artifact publication failed")]
@@ -963,11 +1104,19 @@ pub enum SingleGenerateError {
 
 impl SingleGenerateError {
     #[must_use]
+    pub fn output_feedback(&self) -> Option<&SingleOutputFeedbackEvidence> {
+        match self {
+            Self::TruncatedModelOutput(details) | Self::InvalidModelOutput(details) => {
+                details.output_feedback.as_ref()
+            }
+            _ => None,
+        }
+    }
+
+    #[must_use]
     pub fn run_failure(&self) -> RunFailure {
         let details = match self {
-            Self::TruncatedModelOutput => Some(SingleGenerateFailureDetails::reason(
-                SingleGenerateFailureReason::OutputTruncated,
-            )),
+            Self::TruncatedModelOutput(details) => Some(details.clone()),
             Self::InvalidModelOutput(details) => Some(details.clone()),
             _ => None,
         }
@@ -1005,7 +1154,9 @@ impl SingleGenerateError {
             Self::InvalidRecipeContract | Self::Recipe(_) => {
                 ("feature.recipe_invalid", "mod.generate.single.recipe")
             }
-            Self::TruncatedModelOutput => ("model.output_truncated", "mod.generate.single.model"),
+            Self::TruncatedModelOutput(_) => {
+                ("model.output_truncated", "mod.generate.single.model")
+            }
             Self::InvalidModelOutput(_) => ("model.output_invalid", "mod.generate.single.model"),
             Self::ArtifactPublication => ("artifact.publish_failed", "mod.generate.single.publish"),
             Self::ArtifactCleanup => ("artifact.cleanup_failed", "mod.generate.single.cleanup"),
@@ -1451,6 +1602,12 @@ fn validate_repair_request(
         || repair.issues.iter().any(|issue| {
             issue.repairability != ats_runtime::ValidationIssueRepairability::GeneratedContent
         })
+        || repair.output_feedback.as_ref().is_some_and(|feedback| {
+            !feedback.is_valid()
+                || feedback.phase != GenerationFeedbackPhase::OutputContract
+                || feedback.mode != GenerationFeedbackMode::ReplaceCompleteRoles
+                || feedback.validation_issues != repair.issues
+        })
         || item_spec.generated_files.iter().any(|spec| {
             repair
                 .current_files
@@ -1534,6 +1691,158 @@ fn decode_checkpoint_files(
 
 fn invalid_model_output(reason: SingleGenerateFailureReason) -> SingleGenerateError {
     SingleGenerateError::InvalidModelOutput(SingleGenerateFailureDetails::reason(reason))
+}
+
+fn invalid_model_output_with_feedback(
+    reason: SingleGenerateFailureReason,
+    content: &str,
+    item_spec: &GenerateItemType,
+    candidate_sha256: Sha256Digest,
+) -> SingleGenerateError {
+    SingleGenerateError::InvalidModelOutput(
+        SingleGenerateFailureDetails::reason(reason).with_output_feedback(
+            output_contract_diagnostic(reason, content, item_spec),
+            candidate_sha256,
+        ),
+    )
+}
+
+fn attach_output_feedback(
+    error: SingleGenerateError,
+    content: &str,
+    item_spec: &GenerateItemType,
+    candidate_sha256: Sha256Digest,
+) -> SingleGenerateError {
+    let SingleGenerateError::InvalidModelOutput(mut details) = error else {
+        return error;
+    };
+    if is_repairable_output_reason(details.reason_code) {
+        let reason = details.reason_code;
+        details = details.with_output_feedback(
+            output_contract_diagnostic(reason, content, item_spec),
+            candidate_sha256,
+        );
+    }
+    SingleGenerateError::InvalidModelOutput(details)
+}
+
+fn is_repairable_output_reason(reason: SingleGenerateFailureReason) -> bool {
+    matches!(
+        reason,
+        SingleGenerateFailureReason::OutputTruncated
+            | SingleGenerateFailureReason::JsonDecode
+            | SingleGenerateFailureReason::FileCount
+            | SingleGenerateFailureReason::AcceptanceNotes
+            | SingleGenerateFailureReason::FileRole
+            | SingleGenerateFailureReason::FileContent
+            | SingleGenerateFailureReason::MergeContent
+    )
+}
+
+fn output_contract_diagnostic(
+    reason: SingleGenerateFailureReason,
+    content: &str,
+    item_spec: &GenerateItemType,
+) -> OutputContractDiagnostic {
+    let parsed = serde_json::from_str::<serde_json::Value>(content).ok();
+    let files = parsed
+        .as_ref()
+        .and_then(|value| value.get("files"))
+        .and_then(serde_json::Value::as_object);
+    let role = match reason {
+        SingleGenerateFailureReason::FileContent => item_spec.generated_files.iter().find(|spec| {
+            spec.composition_merge.is_none()
+                && files
+                    .and_then(|values| values.get(&spec.role))
+                    .is_none_or(|value| {
+                        value
+                            .as_str()
+                            .is_none_or(|text| text.trim().is_empty() || text.contains('\0'))
+                    })
+        }),
+        SingleGenerateFailureReason::MergeContent => {
+            item_spec.generated_files.iter().find(|spec| {
+                spec.composition_merge == Some(CompositionFileMerge::JsonObject)
+                    && files
+                        .and_then(|values| values.get(&spec.role))
+                        .is_none_or(|value| {
+                            value.as_object().is_none_or(|object| {
+                                object.values().any(|entry| {
+                                    entry.as_str().is_none_or(|text| text.contains('\0'))
+                                })
+                            })
+                        })
+            })
+        }
+        _ => None,
+    };
+    let observed = role
+        .and_then(|spec| files.and_then(|values| values.get(&spec.role)))
+        .or(parsed.as_ref());
+    OutputContractDiagnostic {
+        code: match reason {
+            SingleGenerateFailureReason::OutputTruncated => {
+                OutputContractDiagnosticCode::OutputTruncated
+            }
+            SingleGenerateFailureReason::JsonDecode => OutputContractDiagnosticCode::JsonDecode,
+            SingleGenerateFailureReason::FileCount => OutputContractDiagnosticCode::FileCount,
+            SingleGenerateFailureReason::AcceptanceNotes => {
+                OutputContractDiagnosticCode::AcceptanceNotes
+            }
+            SingleGenerateFailureReason::FileRole => OutputContractDiagnosticCode::FileRole,
+            SingleGenerateFailureReason::FileContent => OutputContractDiagnosticCode::FileContent,
+            SingleGenerateFailureReason::MergeContent => OutputContractDiagnosticCode::MergeShape,
+            SingleGenerateFailureReason::GeneratedFileCountOverflow
+            | SingleGenerateFailureReason::CheckpointProvenance
+            | SingleGenerateFailureReason::CheckpointResult => {
+                unreachable!("system failures do not produce output feedback")
+            }
+        },
+        role_id: role.map(|spec| spec.role.clone()),
+        expected_shape: match reason {
+            SingleGenerateFailureReason::MergeContent => ExpectedOutputShape::FlatStringObject,
+            SingleGenerateFailureReason::FileContent => ExpectedOutputShape::NonEmptyString,
+            SingleGenerateFailureReason::FileCount | SingleGenerateFailureReason::FileRole => {
+                ExpectedOutputShape::ExactDeclaredRoles
+            }
+            SingleGenerateFailureReason::AcceptanceNotes => ExpectedOutputShape::BoundedStringArray,
+            _ => ExpectedOutputShape::CompleteBundle,
+        },
+        observed_shape: if reason == SingleGenerateFailureReason::OutputTruncated {
+            ObservedJsonShape::Truncated
+        } else {
+            observed_json_shape(observed)
+        },
+    }
+}
+
+fn observed_json_shape(value: Option<&serde_json::Value>) -> ObservedJsonShape {
+    match value {
+        None => ObservedJsonShape::Unparseable,
+        Some(serde_json::Value::Null) => ObservedJsonShape::Null,
+        Some(serde_json::Value::Bool(_)) => ObservedJsonShape::Boolean,
+        Some(serde_json::Value::Number(_)) => ObservedJsonShape::Number,
+        Some(serde_json::Value::String(value)) => {
+            if serde_json::from_str::<serde_json::Value>(value).is_ok() {
+                ObservedJsonShape::JsonEncodedString
+            } else {
+                ObservedJsonShape::String
+            }
+        }
+        Some(serde_json::Value::Array(_)) => ObservedJsonShape::Array,
+        Some(serde_json::Value::Object(values)) => {
+            if values
+                .values()
+                .any(|value| value.is_array() || value.is_object())
+            {
+                ObservedJsonShape::ObjectWithNestedValue
+            } else if values.values().any(|value| !value.is_string()) {
+                ObservedJsonShape::ObjectWithNonStringValue
+            } else {
+                ObservedJsonShape::Object
+            }
+        }
+    }
 }
 
 fn build_writes(
@@ -2138,6 +2447,58 @@ mod tests {
     }
 
     #[test]
+    fn output_feedback_reports_only_trusted_shapes_and_candidate_hashes() {
+        let item_spec = GenerateItemType {
+            id: "fixture_item".into(),
+            guidance: Vec::new(),
+            generated_files: vec![GeneratedFileSpec {
+                role: "localization.eng".into(),
+                target_path: "localization/eng.json".into(),
+                composition_merge: Some(CompositionFileMerge::JsonObject),
+            }],
+        };
+        let secret = "SECRET_LOCALIZATION_VALUE";
+        let cases = [
+            (
+                format!(
+                    r#"{{"files":{{"localization.eng":"{{\"title\":\"{secret}\"}}"}},"acceptanceNotes":[]}}"#
+                ),
+                ObservedJsonShape::JsonEncodedString,
+            ),
+            (
+                format!(
+                    r#"{{"files":{{"localization.eng":{{"title":{{"nested":"{secret}"}}}}}},"acceptanceNotes":[]}}"#
+                ),
+                ObservedJsonShape::ObjectWithNestedValue,
+            ),
+            (
+                r#"{"files":{"localization.eng":{"title":42}},"acceptanceNotes":[]}"#.into(),
+                ObservedJsonShape::ObjectWithNonStringValue,
+            ),
+        ];
+        let mut fingerprint = None;
+        for (content, expected_shape) in cases {
+            let diagnostic = output_contract_diagnostic(
+                SingleGenerateFailureReason::MergeContent,
+                &content,
+                &item_spec,
+            );
+            assert_eq!(diagnostic.code, OutputContractDiagnosticCode::MergeShape);
+            assert_eq!(diagnostic.role_id.as_deref(), Some("localization.eng"));
+            assert_eq!(diagnostic.observed_shape, expected_shape);
+            let envelope = GenerationFeedbackEnvelope::output_contract(diagnostic);
+            let encoded = serde_json::to_string(&envelope).unwrap();
+            assert!(!encoded.contains(secret));
+            let current = crate::generation_feedback::diagnostic_fingerprint(&envelope).unwrap();
+            fingerprint.get_or_insert(current);
+        }
+        assert_ne!(
+            candidate_sha256(b"candidate-a"),
+            candidate_sha256(b"candidate-b")
+        );
+    }
+
+    #[test]
     fn single_accepts_only_explicitly_selected_pack_conformant_resource_versions() {
         let pack = GamePackLoader::load_built_in_sts2().unwrap();
         let item_type = ItemTypeId::parse("relic").unwrap();
@@ -2279,7 +2640,10 @@ mod tests {
             Some(&serde_json::json!({"reasonCode": "json_decode"}))
         );
 
-        let truncated = SingleGenerateError::TruncatedModelOutput.run_failure();
+        let truncated = SingleGenerateError::TruncatedModelOutput(
+            SingleGenerateFailureDetails::reason(SingleGenerateFailureReason::OutputTruncated),
+        )
+        .run_failure();
         assert_eq!(truncated.code.as_str(), "model.output_truncated");
         assert_eq!(
             truncated.details.as_ref().map(VersionedPayload::payload),

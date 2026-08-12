@@ -33,6 +33,7 @@ import type {
 } from "./tauriApi";
 import type { ActionableFailure } from "./actionableFailure";
 export { isActionableFailure, toActionableFailure } from "./actionableFailure";
+export { isExecutionGraphView } from "./executionGraphContract";
 
 const API_BASE = "/api";
 

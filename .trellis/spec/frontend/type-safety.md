@@ -33,8 +33,10 @@ Questions to answer:
 <!-- Runtime validation patterns (Zod, Yup, io-ts, etc.) -->
 
 Desktop IPC results that carry Run, capability, Item or Resource state are received as `unknown`
-and checked by runtime guards in `src/services/tauriApi.ts`. A TypeScript interface alone is not
-proof of a Tauri response shape.
+and checked by runtime guards. Tauri-only guards may remain in `src/services/tauriApi.ts`; contracts
+shared by both backend implementations, such as `ExecutionGraphView`, live in a pure shared module
+(`src/services/executionGraphContract.ts`) and are re-exported identically by `tauriApi.ts` and
+`webApi.ts`. A TypeScript interface alone is not proof of a response shape.
 
 For Pack-driven Item state, Rust and TypeScript use the exact camelCase wire fields:
 
@@ -70,7 +72,8 @@ Composition IPC guards validate CompositionDraft v2 identity/revision/Pack hash/
 optional paired `sourceExecutionGraphId`/`validatedContentDigest`, field-keyed nodes and exact
 ItemDefinition v2 shapes. ExecutionGraph guards validate only the bounded View projection
 (`executionGraphId`, revision/status including `validating`/`repairing`, Run IDs,
-progress/current node, safe failure, aggregate `repairRound` and action flags);
+progress/current node, safe failure, aggregate `repairRound`, nullable exact `feedbackPhase`
+(`output_contract | generated_content`) and action flags);
 React must not receive or decode checkpoints, Blueprint payloads or commit intent. Confirmation
 guards validate the Draft ref, every StoredItemDefinition and the confirmation digest. A TypeScript
 interface or direct cast is not accepted for list/get/update/confirm/status responses.
@@ -88,10 +91,12 @@ The only interpreted payload fields are `reasonCode`, `expectedCount`, `actualCo
 are 1-128 character qualified identifiers; counts are integers in `0..=u32::MAX`. Expected/actual
 are displayed only as a valid pair. Every other field is ignored, never stringified into the UI.
 
-Composition generation submits request schema v3 with an exact `StoredItemDefinition`, optional
+Composition generation submits request schema v4 with an exact `StoredItemDefinition`, optional
 Draft ref, nested Package request, immutable `repairPolicy` and optional backend-authored tagged
 `execution`. `repairPolicy` is exactly `{kind:"until_passed"}` or
 `{kind:"max_rounds", maxRounds:1..20}`. The only
+backend semantic difference is whether the user chooses a smaller limit; both stop at the absolute
+20-round graph-total safety ceiling. The only
 execution forms are `start {executionGraphId}` and
 `resume {executionGraphId, expectedRevision, previousRunId}`; the request builder for an initial
 user submission omits this field. Result and Artifact extension v2 include the graph ID. Single

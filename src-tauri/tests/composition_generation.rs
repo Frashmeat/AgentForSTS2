@@ -199,15 +199,14 @@ impl ExecutionGraphRepository for CrashAfterRepairedSingleCheckpoint {
         next: &ExecutionGraphRecord,
     ) -> Result<(), ExecutionGraphRepositoryError> {
         let repaired_single_was_persisted = next.nodes().values().any(|node| {
-            node.repair_round > 0
-                && node
-                    .diagnostic_checkpoint_hash
-                    .as_ref()
-                    .is_some_and(|diagnostic| {
-                        node.active_checkpoint
-                            .as_ref()
-                            .is_some_and(|checkpoint| &checkpoint.sha256 != diagnostic)
-                    })
+            node.feedback_state
+                .as_ref()
+                .and_then(|state| state.checkpoint_hash.as_ref())
+                .is_some_and(|diagnostic| {
+                    node.active_checkpoint
+                        .as_ref()
+                        .is_some_and(|checkpoint| &checkpoint.sha256 != diagnostic)
+                })
         });
         self.inner.compare_and_set(expected_revision, next)?;
         if repaired_single_was_persisted && !self.interrupted.swap(true, Ordering::SeqCst) {
@@ -257,12 +256,12 @@ impl BuildRunner for FixtureBuild {
 #[tokio::test]
 async fn whole_closure_publishes_once_and_cleans_stage() {
     let fixture = Fixture::new();
-    let (result, parent_run_id) = fixture.execute(false, false).await;
+    let (result, parent_run_id, child_runs) = fixture.execute(false, false).await;
     let execution = match result {
         Ok(execution) => execution,
-        Err(failure) => panic!(
+        Err(error) => panic!(
             "composition generation failed: {}",
-            failure.run_failure().code
+            error.run_failure().code
         ),
     };
 
@@ -272,12 +271,11 @@ async fn whole_closure_publishes_once_and_cleans_stage() {
         execution.result.package.publication,
         PackagePublication::CompositionStaged
     );
-    assert_eq!(execution.child_runs.len(), 6);
+    assert_eq!(child_runs.len(), 6);
     assert!(
-        execution
-            .child_runs
+        child_runs
             .iter()
-            .all(|run| run.status() == RunStatus::Succeeded)
+            .all(|run| run.status == RunStatus::Succeeded)
     );
     assert!(fixture.project.join("Generated/fixture-child.cs").is_file());
     assert!(fixture.project.join("Generated/fixture-root.cs").is_file());
@@ -295,16 +293,59 @@ async fn whole_closure_publishes_once_and_cleans_stage() {
 }
 
 #[tokio::test]
+async fn output_contract_feedback_regenerates_complete_bundle_and_publishes() {
+    let fixture = Fixture::new();
+    let (result, _, child_runs) = fixture
+        .execute_with_responses(
+            false,
+            false,
+            VecDeque::from([
+                plan_response("child"),
+                "not-json".into(),
+                bundle_response("child"),
+                plan_response("root"),
+                bundle_response("root"),
+            ]),
+        )
+        .await;
+    let execution = result.unwrap();
+    assert_eq!(child_runs.len(), 7);
+    assert_eq!(
+        child_runs
+            .iter()
+            .filter(|run| run.status == RunStatus::Failed)
+            .count(),
+        1
+    );
+    let graph = FileExecutionGraphRepository::new(fixture.project.clone())
+        .get(execution.result.execution_graph_id.as_ref().unwrap())
+        .unwrap();
+    let feedback = graph
+        .nodes()
+        .values()
+        .find_map(|node| node.feedback_state.as_ref())
+        .unwrap();
+    assert_eq!(feedback.round, 1);
+    assert_eq!(
+        feedback.phase,
+        ats_runtime::ExecutionFeedbackPhase::OutputContract
+    );
+    assert!(fixture.project.join("Generated/fixture-child.cs").is_file());
+    assert!(fixture.project.join("Generated/fixture-root.cs").is_file());
+    assert!(fixture.project.join("packages/FixtureMod.zip").is_file());
+}
+
+#[tokio::test]
 async fn validation_failure_keeps_real_project_and_artifacts_unchanged() {
     let fixture = Fixture::new();
-    let (result, _) = fixture.execute(true, false).await;
-    let failed = match result {
+    let (result, _, child_runs) = fixture.execute(true, false).await;
+    let error = match result {
         Ok(_) => panic!("composition generation unexpectedly succeeded"),
-        Err(failure) => failure,
+        Err(error) => error,
     };
 
-    assert_eq!(failed.run_failure().code.as_str(), "validation.rejected");
-    assert_eq!(failed.child_runs.len(), 4);
+    assert_eq!(error.run_failure().code.as_str(), "validation.rejected");
+    assert_eq!(child_runs.len(), 4);
     assert!(!fixture.project.join("Generated").exists());
     assert!(!fixture.project.join("packages/FixtureMod.zip").exists());
     assert!(!fixture.project.join("artifacts").exists());
@@ -314,14 +355,14 @@ async fn validation_failure_keeps_real_project_and_artifacts_unchanged() {
 #[tokio::test]
 async fn package_commit_failure_rolls_back_real_project_and_cleans_stage() {
     let fixture = Fixture::new();
-    let (result, _) = fixture.execute(false, true).await;
-    let failed = match result {
+    let (result, _, child_runs) = fixture.execute(false, true).await;
+    let error = match result {
         Ok(_) => panic!("composition generation unexpectedly succeeded"),
-        Err(failure) => failure,
+        Err(error) => error,
     };
 
-    assert_eq!(failed.run_failure().code.as_str(), "artifact.write_failed");
-    assert_eq!(failed.child_runs.len(), 6);
+    assert_eq!(error.run_failure().code.as_str(), "artifact.write_failed");
+    assert_eq!(child_runs.len(), 6);
     assert!(!fixture.project.join("Generated").exists());
     assert!(!fixture.project.join("packages/FixtureMod.zip").exists());
     assert!(!fixture.project.join("artifacts").exists());
@@ -412,7 +453,11 @@ async fn staged_generation_resumes_only_the_failed_single_node() {
         .apply_transition(RunTransition::Start, Utc::now())
         .unwrap();
     let first_model = QueueModel {
-        responses: Mutex::new(VecDeque::from([plan_response("child"), "not-json".into()])),
+        responses: Mutex::new(VecDeque::from([
+            plan_response("child"),
+            "not-json".into(),
+            "not-json".into(),
+        ])),
         requests: AtomicUsize::new(0),
     };
     let writer = FileProjectWriter;
@@ -448,7 +493,7 @@ async fn staged_generation_resumes_only_the_failed_single_node() {
         Err(error) => error,
     };
     assert_eq!(first.run_failure().code.as_str(), "model.output_invalid");
-    assert_eq!(first_model.requests.load(Ordering::SeqCst), 2);
+    assert_eq!(first_model.requests.load(Ordering::SeqCst), 3);
     let paused = graphs.get(start.graph.id()).unwrap();
     assert_eq!(paused.status(), ats_runtime::ExecutionGraphStatus::Paused);
     let persisted_graph = serde_json::to_string(&paused).unwrap();
@@ -456,6 +501,28 @@ async fn staged_generation_resumes_only_the_failed_single_node() {
     assert!(!persisted_graph.contains("messages"));
     assert!(!persisted_graph.contains("response_format"));
     assert!(!persisted_graph.contains("provider"));
+    let feedback = paused
+        .nodes()
+        .values()
+        .find_map(|node| node.feedback_state.as_ref())
+        .unwrap();
+    assert_eq!(feedback.round, 1);
+    assert_eq!(
+        feedback.phase,
+        ats_runtime::ExecutionFeedbackPhase::OutputContract
+    );
+    assert!(feedback.candidate_sha256.is_some());
+    assert!(feedback.checkpoint_hash.is_none());
+    assert_eq!(
+        paused
+            .nodes()
+            .values()
+            .find_map(|node| node.safe_failure.as_ref())
+            .unwrap()
+            .code
+            .as_str(),
+        "model.feedback_no_progress"
+    );
     assert_eq!(
         paused
             .nodes()
@@ -664,6 +731,7 @@ async fn staged_validation_repairs_one_owned_file_then_revalidates_the_whole_clo
             bundle_response("child"),
             plan_response("root"),
             bundle_response("root"),
+            "not-json".into(),
             repaired_bundle_response("child"),
         ])),
         requests: AtomicUsize::new(0),
@@ -695,7 +763,7 @@ async fn staged_validation_repairs_one_owned_file_then_revalidates_the_whole_clo
         )
         .await
         .unwrap();
-    assert_eq!(model.requests.load(Ordering::SeqCst), 5);
+    assert_eq!(model.requests.load(Ordering::SeqCst), 6);
     assert_eq!(validator.calls.load(Ordering::SeqCst), 2);
     let graph = graphs
         .get(execution.result.execution_graph_id.as_ref().unwrap())
@@ -705,10 +773,21 @@ async fn staged_validation_repairs_one_owned_file_then_revalidates_the_whole_clo
         graph
             .nodes()
             .values()
-            .map(|node| node.repair_round)
+            .filter_map(|node| node.feedback_state.as_ref().map(|state| state.round))
             .sum::<u32>(),
-        1
+        2
     );
+    let feedback = graph
+        .nodes()
+        .values()
+        .find_map(|node| node.feedback_state.as_ref())
+        .unwrap();
+    assert_eq!(
+        feedback.phase,
+        ats_runtime::ExecutionFeedbackPhase::OutputContract
+    );
+    assert!(feedback.candidate_sha256.is_some());
+    assert!(feedback.checkpoint_hash.is_some());
     assert!(!fixture.project.join(".ats/composition-staging").exists());
 }
 
@@ -854,7 +933,7 @@ async fn repaired_single_checkpoint_resumes_before_finalize_without_another_mode
         persisted
             .nodes()
             .values()
-            .map(|node| node.repair_round)
+            .filter_map(|node| node.feedback_state.as_ref().map(|state| state.round))
             .sum::<u32>(),
         1
     );
@@ -1052,18 +1131,40 @@ impl Fixture {
         reject_package_commit: bool,
     ) -> (
         Result<
-            ats_features::composition_generate::CompositionGenerateExecution,
-            ats_features::composition_generate::CompositionGenerateFailure,
+            ats_features::composition_generate::StagedCompositionGenerateExecution,
+            ats_features::composition_generate::CompositionGenerateError,
         >,
         ats_runtime::RunId,
+        Vec<ats_runtime::RunSummary>,
     ) {
-        let model = QueueModel {
-            responses: Mutex::new(VecDeque::from([
+        self.execute_with_responses(
+            reject_validation,
+            reject_package_commit,
+            VecDeque::from([
                 plan_response("child"),
                 bundle_response("child"),
                 plan_response("root"),
                 bundle_response("root"),
-            ])),
+            ]),
+        )
+        .await
+    }
+
+    async fn execute_with_responses(
+        &self,
+        reject_validation: bool,
+        reject_package_commit: bool,
+        responses: VecDeque<String>,
+    ) -> (
+        Result<
+            ats_features::composition_generate::StagedCompositionGenerateExecution,
+            ats_features::composition_generate::CompositionGenerateError,
+        >,
+        ats_runtime::RunId,
+        Vec<ats_runtime::RunSummary>,
+    ) {
+        let model = QueueModel {
+            responses: Mutex::new(responses),
             requests: AtomicUsize::new(0),
         };
         let resolver = ContributionResolver::new([
@@ -1113,55 +1214,72 @@ impl Fixture {
         let package_writer = FixturePackageWriter {
             reject_commit: reject_package_commit,
         };
-        let mut run = RunRecord::new(
+        let run_id = ats_runtime::RunId::new();
+        let context = || CompositionGenerateContext {
+            pack: &self.pack,
+            composition_contributions: &composition,
+            plan_contributions: &plan,
+            single_contributions: &single,
+            resource_contributions: &resource,
+            build_contributions: &build,
+            package_contributions: &package,
+            truth: &self.truth,
+            project_root: &self.project,
+            project_context: "Fixture project",
+            custom_instructions: None,
+            model: None,
+        };
+        let service = CompositionGenerateService::new(
+            &plan_service,
+            &single_service,
+            &build_service,
+            &package_service,
+        );
+        let start = service
+            .prepare_staged_start(
+                self.request.clone(),
+                context(),
+                &self.items,
+                &self.resources,
+                run_id.clone(),
+            )
+            .unwrap();
+        let graphs = FileExecutionGraphRepository::new(self.project.clone());
+        graphs.create_claimed(&start.graph, &run_id).unwrap();
+        let runs = FileRunRepository::new(self.project.clone()).unwrap();
+        let mut run = RunRecord::new_with_id(
+            run_id.clone(),
             CompositionGenerateFeature::id(),
             VersionedPayload::from_typed(
                 CompositionGenerateFeature::request_schema(),
-                &self.request,
+                &start.request,
             )
             .unwrap(),
         );
         run.apply_transition(RunTransition::Start, Utc::now())
             .unwrap();
-        let run_id = run.id().clone();
-        let result = CompositionGenerateService::new(
-            &plan_service,
-            &single_service,
-            &build_service,
-            &package_service,
-        )
-        .execute(
-            CompositionGenerateDependencies {
-                model: &model,
-                items: &self.items,
-                resources: &self.resources,
-                writer: &writer,
-                stager: &stager,
-                validator: &validator,
-                artifacts: &artifacts,
-                build_runner: &FixtureBuild,
-                package_writer: &package_writer,
-            },
-            &mut run,
-            self.request.clone(),
-            CompositionGenerateContext {
-                pack: &self.pack,
-                composition_contributions: &composition,
-                plan_contributions: &plan,
-                single_contributions: &single,
-                resource_contributions: &resource,
-                build_contributions: &build,
-                package_contributions: &package,
-                truth: &self.truth,
-                project_root: &self.project,
-                project_context: "Fixture project",
-                custom_instructions: None,
-                model: None,
-            },
-            &CancellationToken::new(),
-        )
-        .await;
-        (result, run_id)
+        let result = service
+            .execute_staged(
+                CompositionGenerateDependencies {
+                    model: &model,
+                    items: &self.items,
+                    resources: &self.resources,
+                    writer: &writer,
+                    stager: &stager,
+                    validator: &validator,
+                    artifacts: &artifacts,
+                    build_runner: &FixtureBuild,
+                    package_writer: &package_writer,
+                },
+                &runs,
+                &graphs,
+                &mut run,
+                start.request,
+                context(),
+                &CancellationToken::new(),
+            )
+            .await;
+        (result, run_id, runs.list().unwrap())
     }
 }
 

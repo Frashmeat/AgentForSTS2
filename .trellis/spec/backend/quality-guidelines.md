@@ -146,14 +146,22 @@ Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-sp
   rejects duplicate keys deterministically, and writes one sorted object before staging. STS2 uses
   this for Card/Relic/Character tables and keeps Character's four Architect lines in separate
   `ancients.json` roles for both locales.
-- ExecutionGraphRecord v2 directly replaces v1 and persists only the current normalized checkpoint,
-  attempt count/active attempt, repair round and latest diagnostic fingerprint/checkpoint hash. The
-  graph repository reads only `.ats/execution-graphs-v2`; no v1 fallback, migration or repair archive
-  is allowed.
-- Composition Generate request v3 fixes `until_passed` or `max_rounds(1..20)` before graph creation.
-  Registered validation runs before commit intent. A repair round may replace exactly one uniquely
-  owned Single checkpoint using complete role contents, then must rebuild finalize output and rerun
-  the complete validator suite. `commit_prepared` is unreachable before validation succeeds.
+- ExecutionGraphRecord v3 directly replaces v2 and persists only the current normalized checkpoint,
+  attempt count/active attempt and one hashed safe feedback state. Feedback state contains round,
+  phase, diagnostic fingerprint, either candidate SHA-256 or checkpoint hash, and a versioned typed
+  envelope. The repository reads only `.ats/execution-graphs-v3`; no v1/v2 fallback, migration,
+  dual write or repair archive is allowed. Old directories remain untouched evidence.
+- Checkpoint-free and repair-output evidence enters Runtime as the common
+  `ExecutionOutputFeedback` value object. Do not grow parallel positional-argument APIs or decode
+  `GenerationFeedbackEnvelope` below Feature code.
+- Composition Generate request v4 fixes `until_passed` or `max_rounds(1..20)` before graph creation.
+  The limit is the total semantic-feedback budget across the complete graph, never a per-node
+  multiplier. `until_passed` uses the same absolute 20-round safety ceiling; it does not mean
+  unbounded requests. Direct `mod.generate.single` remains strict and single-request. Composition may feed
+  back repairable output-contract diagnostics before checkpoint creation or uniquely owned
+  generated-content issues after registered validation. Every feedback call returns a complete
+  bundle/role set and reruns the same strict decode and validation closure. `commit_prepared` is
+  unreachable before registered validation succeeds.
 - Project-local `local.props` manages only `Sts2AssemblyPath` and `GodotPath`, preserving `ModsPath`
   and unknown XML. Create requires a valid configured pair. Existing Open/Generate/Build/Package
   call `sync_or_validate_project_local_props`: a valid configured pair atomically updates the

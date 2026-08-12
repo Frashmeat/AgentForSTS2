@@ -10,7 +10,7 @@ use thiserror::Error;
 
 use crate::{RunId, VersionedPayload};
 
-pub const EXECUTION_GRAPH_SCHEMA_VERSION: u32 = 2;
+pub const EXECUTION_GRAPH_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -51,6 +51,13 @@ pub enum LogicalAttemptOutcome {
     Failed,
     Interrupted,
     Cancelled,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionFeedbackPhase {
+    OutputContract,
+    GeneratedContent,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -129,11 +136,28 @@ pub struct ExecutionNodeRecord {
     pub active_checkpoint: Option<HashedExecutionPayload>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub safe_failure: Option<ExecutionFailure>,
-    pub repair_round: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub diagnostic_fingerprint: Option<Sha256Digest>,
+    pub feedback_state: Option<ExecutionNodeFeedbackState>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExecutionNodeFeedbackState {
+    pub round: u32,
+    pub phase: ExecutionFeedbackPhase,
+    pub diagnostic_fingerprint: Sha256Digest,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub diagnostic_checkpoint_hash: Option<Sha256Digest>,
+    pub candidate_sha256: Option<Sha256Digest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkpoint_hash: Option<Sha256Digest>,
+    pub feedback: HashedExecutionPayload,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExecutionOutputFeedback {
+    pub diagnostic_fingerprint: Sha256Digest,
+    pub candidate_sha256: Sha256Digest,
+    pub feedback: VersionedPayload,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -277,9 +301,7 @@ impl ExecutionGraphRecord {
                         request_snapshot_hash: spec.request_snapshot_hash,
                         active_checkpoint: None,
                         safe_failure: None,
-                        repair_round: 0,
-                        diagnostic_fingerprint: None,
-                        diagnostic_checkpoint_hash: None,
+                        feedback_state: None,
                     },
                 )
                 .is_some()
@@ -513,7 +535,10 @@ impl ExecutionGraphRecord {
             if next.active_run_id.as_ref() != Some(run_id)
                 || !matches!(
                     next.status,
-                    ExecutionGraphStatus::Running | ExecutionGraphStatus::PauseRequested
+                    ExecutionGraphStatus::Running
+                        | ExecutionGraphStatus::Validating
+                        | ExecutionGraphStatus::Repairing
+                        | ExecutionGraphStatus::PauseRequested
                 )
             {
                 return Err(ExecutionGraphError::InvalidTransition);
@@ -574,6 +599,7 @@ impl ExecutionGraphRecord {
         run_id: &RunId,
         fingerprint: Sha256Digest,
         checkpoint_hash: Sha256Digest,
+        feedback: VersionedPayload,
         at: DateTime<Utc>,
     ) -> Result<(), ExecutionGraphError> {
         self.mutate(at, |next| {
@@ -588,21 +614,151 @@ impl ExecutionGraphRecord {
                 .ok_or(ExecutionGraphError::NodeNotFound)?;
             if node.status != ExecutionNodeStatus::Succeeded
                 || node.active_checkpoint.is_none()
-                || node.diagnostic_fingerprint.as_ref() == Some(&fingerprint)
-                    && node.diagnostic_checkpoint_hash.as_ref() == Some(&checkpoint_hash)
+                || node.feedback_state.as_ref().is_some_and(|state| {
+                    state.diagnostic_fingerprint == fingerprint
+                        && state.checkpoint_hash.as_ref() == Some(&checkpoint_hash)
+                })
                 || node.active_checkpoint.as_ref().map(|value| &value.sha256)
                     != Some(&checkpoint_hash)
             {
                 return Err(ExecutionGraphError::InvalidTransition);
             }
-            node.repair_round = node
-                .repair_round
+            let round = node
+                .feedback_state
+                .as_ref()
+                .map_or(0, |state| state.round)
                 .checked_add(1)
                 .ok_or(ExecutionGraphError::InvalidAttempt)?;
-            node.diagnostic_fingerprint = Some(fingerprint);
-            node.diagnostic_checkpoint_hash = Some(checkpoint_hash);
+            node.feedback_state = Some(ExecutionNodeFeedbackState {
+                round,
+                phase: ExecutionFeedbackPhase::GeneratedContent,
+                diagnostic_fingerprint: fingerprint,
+                candidate_sha256: None,
+                checkpoint_hash: Some(checkpoint_hash),
+                feedback: HashedExecutionPayload::new(feedback)?,
+            });
             next.status = ExecutionGraphStatus::Repairing;
             next.graph_failure = None;
+            Ok(())
+        })
+    }
+
+    pub fn resume_repair(
+        &mut self,
+        run_id: &RunId,
+        at: DateTime<Utc>,
+    ) -> Result<(), ExecutionGraphError> {
+        self.mutate(at, |next| {
+            if next.status != ExecutionGraphStatus::Validating
+                || next.active_run_id.as_ref() != Some(run_id)
+                || !next.nodes.values().any(|node| {
+                    node.status == ExecutionNodeStatus::Succeeded
+                        && node.active_checkpoint.as_ref().is_some_and(|checkpoint| {
+                            node.feedback_state.as_ref().is_some_and(|state| {
+                                state.phase == ExecutionFeedbackPhase::OutputContract
+                                    && state.candidate_sha256.is_some()
+                                    && state.checkpoint_hash.as_ref() == Some(&checkpoint.sha256)
+                            })
+                        })
+                })
+            {
+                return Err(ExecutionGraphError::InvalidTransition);
+            }
+            next.status = ExecutionGraphStatus::Repairing;
+            next.graph_failure = None;
+            Ok(())
+        })
+    }
+
+    pub fn record_output_feedback(
+        &mut self,
+        node_id: &ExecutionNodeId,
+        run_id: &RunId,
+        output: ExecutionOutputFeedback,
+        at: DateTime<Utc>,
+    ) -> Result<(), ExecutionGraphError> {
+        self.mutate(at, |next| {
+            if next.status != ExecutionGraphStatus::Running
+                || next.active_run_id.as_ref() != Some(run_id)
+            {
+                return Err(ExecutionGraphError::InvalidTransition);
+            }
+            let node = next
+                .nodes
+                .get_mut(node_id)
+                .ok_or(ExecutionGraphError::NodeNotFound)?;
+            let _ = active_attempt_mut(node, run_id)?;
+            if node.active_checkpoint.is_some()
+                || node.feedback_state.as_ref().is_some_and(|state| {
+                    state.phase != ExecutionFeedbackPhase::OutputContract
+                        || state.diagnostic_fingerprint == output.diagnostic_fingerprint
+                            && state.candidate_sha256.as_ref() == Some(&output.candidate_sha256)
+                })
+            {
+                return Err(ExecutionGraphError::InvalidTransition);
+            }
+            let round = node
+                .feedback_state
+                .as_ref()
+                .map_or(0, |state| state.round)
+                .checked_add(1)
+                .ok_or(ExecutionGraphError::InvalidAttempt)?;
+            node.feedback_state = Some(ExecutionNodeFeedbackState {
+                round,
+                phase: ExecutionFeedbackPhase::OutputContract,
+                diagnostic_fingerprint: output.diagnostic_fingerprint,
+                candidate_sha256: Some(output.candidate_sha256),
+                checkpoint_hash: None,
+                feedback: HashedExecutionPayload::new(output.feedback)?,
+            });
+            Ok(())
+        })
+    }
+
+    pub fn record_repair_output_feedback(
+        &mut self,
+        node_id: &ExecutionNodeId,
+        run_id: &RunId,
+        checkpoint_hash: Sha256Digest,
+        output: ExecutionOutputFeedback,
+        at: DateTime<Utc>,
+    ) -> Result<(), ExecutionGraphError> {
+        self.mutate(at, |next| {
+            if next.status != ExecutionGraphStatus::Repairing
+                || next.active_run_id.as_ref() != Some(run_id)
+            {
+                return Err(ExecutionGraphError::InvalidTransition);
+            }
+            let node = next
+                .nodes
+                .get_mut(node_id)
+                .ok_or(ExecutionGraphError::NodeNotFound)?;
+            if node.status != ExecutionNodeStatus::Succeeded
+                || node.active_checkpoint.as_ref().map(|value| &value.sha256)
+                    != Some(&checkpoint_hash)
+                || node.feedback_state.as_ref().is_some_and(|state| {
+                    state.phase == ExecutionFeedbackPhase::OutputContract
+                        && state.diagnostic_fingerprint == output.diagnostic_fingerprint
+                        && state.candidate_sha256.as_ref() == Some(&output.candidate_sha256)
+                        && state.checkpoint_hash.as_ref() == Some(&checkpoint_hash)
+                })
+            {
+                return Err(ExecutionGraphError::InvalidTransition);
+            }
+            let round = node
+                .feedback_state
+                .as_ref()
+                .map_or(0, |state| state.round)
+                .checked_add(1)
+                .ok_or(ExecutionGraphError::InvalidAttempt)?;
+            node.feedback_state = Some(ExecutionNodeFeedbackState {
+                round,
+                phase: ExecutionFeedbackPhase::OutputContract,
+                diagnostic_fingerprint: output.diagnostic_fingerprint,
+                candidate_sha256: Some(output.candidate_sha256),
+                checkpoint_hash: Some(checkpoint_hash),
+                feedback: HashedExecutionPayload::new(output.feedback)?,
+            });
             Ok(())
         })
     }
@@ -666,7 +822,10 @@ impl ExecutionGraphRecord {
         self.mutate(at, |next| {
             if next.status != ExecutionGraphStatus::Running
                 || next.active_run_id.as_ref() != Some(run_id)
-                || !next.nodes.values().any(|node| node.repair_round > 0)
+                || !next
+                    .nodes
+                    .values()
+                    .any(|node| node.feedback_state.is_some())
             {
                 return Err(ExecutionGraphError::InvalidTransition);
             }
@@ -676,7 +835,7 @@ impl ExecutionGraphRecord {
                 .ok_or(ExecutionGraphError::NodeNotFound)?;
             if node.status != ExecutionNodeStatus::Succeeded
                 || node.active_checkpoint.is_none()
-                || node.repair_round != 0
+                || node.feedback_state.is_some()
             {
                 return Err(ExecutionGraphError::InvalidTransition);
             }
@@ -1122,10 +1281,19 @@ fn validate_node_state(node: &ExecutionNodeRecord) -> Result<(), ExecutionGraphE
             || attempt.completed_at.is_some()
             || attempt.outcome != LogicalAttemptOutcome::Running
             || attempt.failure.is_some()
-    }) || node.diagnostic_fingerprint.is_some() != (node.repair_round > 0)
-        || node.diagnostic_checkpoint_hash.is_some() != (node.repair_round > 0)
-    {
+    }) {
         return Err(ExecutionGraphError::InvalidAttempt);
+    }
+    if let Some(state) = &node.feedback_state {
+        if state.round == 0
+            || state.phase == ExecutionFeedbackPhase::OutputContract
+                && state.candidate_sha256.is_none()
+            || state.phase == ExecutionFeedbackPhase::GeneratedContent
+                && (state.candidate_sha256.is_some() || state.checkpoint_hash.is_none())
+        {
+            return Err(ExecutionGraphError::InvalidAttempt);
+        }
+        state.feedback.validate()?;
     }
     match node.status {
         ExecutionNodeStatus::Pending
@@ -1229,6 +1397,10 @@ mod tests {
             &serde_json::json!({"value": value}),
         )
         .unwrap()
+    }
+
+    fn feedback(value: i32) -> VersionedPayload {
+        payload("generation.feedback", value)
     }
 
     fn graph() -> (ExecutionGraphRecord, RunId) {
@@ -1368,6 +1540,7 @@ mod tests {
                 &run_id,
                 fingerprint.clone(),
                 previous_hash.clone(),
+                feedback(1),
                 Utc::now(),
             )
             .unwrap();
@@ -1377,7 +1550,10 @@ mod tests {
             .replace_checkpoint(&node, &run_id, replacement, Utc::now())
             .unwrap();
         graph.begin_validation(&run_id, Utc::now()).unwrap();
-        assert_eq!(graph.nodes()[&node].repair_round, 1);
+        assert_eq!(
+            graph.nodes()[&node].feedback_state.as_ref().unwrap().round,
+            1
+        );
         let active_hash = &graph.nodes()[&node]
             .active_checkpoint
             .as_ref()
@@ -1391,13 +1567,252 @@ mod tests {
                 &run_id,
                 fingerprint.clone(),
                 replacement_hash.clone(),
+                feedback(2),
                 Utc::now(),
             )
             .unwrap();
         graph.begin_validation(&run_id, Utc::now()).unwrap();
         assert!(matches!(
-            graph.begin_repair(&node, &run_id, fingerprint, replacement_hash, Utc::now()),
+            graph.begin_repair(
+                &node,
+                &run_id,
+                fingerprint,
+                replacement_hash,
+                feedback(3),
+                Utc::now()
+            ),
             Err(ExecutionGraphError::InvalidTransition)
+        ));
+    }
+
+    #[test]
+    fn output_feedback_is_hashed_recoverable_and_stops_only_on_identical_output() {
+        let (mut graph, first_run) = graph();
+        let node = ExecutionNodeId::parse("node.a").unwrap();
+        let fingerprint = digest("d");
+        let first_candidate = digest("e");
+        graph.start_node(&node, &first_run, Utc::now()).unwrap();
+        graph
+            .record_output_feedback(
+                &node,
+                &first_run,
+                ExecutionOutputFeedback {
+                    diagnostic_fingerprint: fingerprint.clone(),
+                    candidate_sha256: first_candidate.clone(),
+                    feedback: feedback(1),
+                },
+                Utc::now(),
+            )
+            .unwrap();
+        let state = graph.nodes()[&node].feedback_state.as_ref().unwrap();
+        assert_eq!(state.round, 1);
+        assert_eq!(state.phase, ExecutionFeedbackPhase::OutputContract);
+        assert_eq!(state.candidate_sha256.as_ref(), Some(&first_candidate));
+        assert!(matches!(
+            graph.record_output_feedback(
+                &node,
+                &first_run,
+                ExecutionOutputFeedback {
+                    diagnostic_fingerprint: fingerprint.clone(),
+                    candidate_sha256: first_candidate,
+                    feedback: feedback(2),
+                },
+                Utc::now(),
+            ),
+            Err(ExecutionGraphError::InvalidTransition)
+        ));
+        graph
+            .record_output_feedback(
+                &node,
+                &first_run,
+                ExecutionOutputFeedback {
+                    diagnostic_fingerprint: fingerprint,
+                    candidate_sha256: digest("f"),
+                    feedback: feedback(2),
+                },
+                Utc::now(),
+            )
+            .unwrap();
+        assert_eq!(
+            graph.nodes()[&node].feedback_state.as_ref().unwrap().round,
+            2
+        );
+
+        graph.pause_interrupted(&first_run, Utc::now()).unwrap();
+        assert_eq!(graph.nodes()[&node].status, ExecutionNodeStatus::Pending);
+        assert_eq!(
+            graph.nodes()[&node].feedback_state.as_ref().unwrap().round,
+            2
+        );
+        let second_run = RunId::parse("run-fixture-feedback-resume").unwrap();
+        graph
+            .claim(graph.revision(), second_run.clone(), first_run, Utc::now())
+            .unwrap();
+        graph.start_node(&node, &second_run, Utc::now()).unwrap();
+        graph
+            .complete_node(
+                &node,
+                &second_run,
+                payload("composition.node-checkpoint", 1),
+                Utc::now(),
+            )
+            .unwrap();
+        assert_eq!(
+            graph.nodes()[&node].feedback_state.as_ref().unwrap().round,
+            2
+        );
+    }
+
+    #[test]
+    fn pause_interrupted_accepts_validation_and_repair_feedback_phases() {
+        for repair in [false, true] {
+            let (mut graph, run_id) = graph();
+            for (id, value) in [("node.a", 1), ("node.b", 2)] {
+                let id = ExecutionNodeId::parse(id).unwrap();
+                graph.start_node(&id, &run_id, Utc::now()).unwrap();
+                graph
+                    .complete_node(
+                        &id,
+                        &run_id,
+                        payload("composition.node-checkpoint", value),
+                        Utc::now(),
+                    )
+                    .unwrap();
+            }
+            graph.begin_validation(&run_id, Utc::now()).unwrap();
+            if repair {
+                let node = ExecutionNodeId::parse("node.a").unwrap();
+                let checkpoint_hash = graph.nodes()[&node]
+                    .active_checkpoint
+                    .as_ref()
+                    .unwrap()
+                    .sha256
+                    .clone();
+                graph
+                    .begin_repair(
+                        &node,
+                        &run_id,
+                        digest("d"),
+                        checkpoint_hash,
+                        feedback(1),
+                        Utc::now(),
+                    )
+                    .unwrap();
+            }
+
+            graph.pause_interrupted(&run_id, Utc::now()).unwrap();
+            assert_eq!(graph.status(), ExecutionGraphStatus::Paused);
+            assert!(graph.active_run_id().is_none());
+            assert!(
+                graph
+                    .nodes()
+                    .values()
+                    .all(|node| node.status == ExecutionNodeStatus::Succeeded)
+            );
+        }
+    }
+
+    #[test]
+    fn repair_output_feedback_retains_checkpoint_identity_across_recovery() {
+        let (mut graph, first_run) = graph();
+        for (id, value) in [("node.a", 1), ("node.b", 2)] {
+            let id = ExecutionNodeId::parse(id).unwrap();
+            graph.start_node(&id, &first_run, Utc::now()).unwrap();
+            graph
+                .complete_node(
+                    &id,
+                    &first_run,
+                    payload("composition.node-checkpoint", value),
+                    Utc::now(),
+                )
+                .unwrap();
+        }
+        graph.begin_validation(&first_run, Utc::now()).unwrap();
+        let node = ExecutionNodeId::parse("node.a").unwrap();
+        let checkpoint_hash = graph.nodes()[&node]
+            .active_checkpoint
+            .as_ref()
+            .unwrap()
+            .sha256
+            .clone();
+        graph
+            .begin_repair(
+                &node,
+                &first_run,
+                digest("d"),
+                checkpoint_hash.clone(),
+                feedback(1),
+                Utc::now(),
+            )
+            .unwrap();
+        graph
+            .record_repair_output_feedback(
+                &node,
+                &first_run,
+                checkpoint_hash.clone(),
+                ExecutionOutputFeedback {
+                    diagnostic_fingerprint: digest("e"),
+                    candidate_sha256: digest("f"),
+                    feedback: feedback(2),
+                },
+                Utc::now(),
+            )
+            .unwrap();
+        let state = graph.nodes()[&node].feedback_state.as_ref().unwrap();
+        assert_eq!(state.round, 2);
+        assert_eq!(state.phase, ExecutionFeedbackPhase::OutputContract);
+        assert_eq!(state.candidate_sha256.as_ref(), Some(&digest("f")));
+        assert_eq!(state.checkpoint_hash.as_ref(), Some(&checkpoint_hash));
+
+        graph.recover_stale_claim(Utc::now()).unwrap();
+        let second_run = RunId::parse("run-fixture-repair-resume").unwrap();
+        graph
+            .claim(graph.revision(), second_run.clone(), first_run, Utc::now())
+            .unwrap();
+        graph.begin_validation(&second_run, Utc::now()).unwrap();
+        graph.resume_repair(&second_run, Utc::now()).unwrap();
+        assert_eq!(graph.status(), ExecutionGraphStatus::Repairing);
+    }
+
+    #[test]
+    fn rejects_tampered_feedback_hash_and_legacy_schema() {
+        let (mut tampered_graph, run_id) = graph();
+        let node = ExecutionNodeId::parse("node.a").unwrap();
+        tampered_graph
+            .start_node(&node, &run_id, Utc::now())
+            .unwrap();
+        tampered_graph
+            .record_output_feedback(
+                &node,
+                &run_id,
+                ExecutionOutputFeedback {
+                    diagnostic_fingerprint: digest("d"),
+                    candidate_sha256: digest("e"),
+                    feedback: feedback(1),
+                },
+                Utc::now(),
+            )
+            .unwrap();
+        tampered_graph
+            .nodes
+            .get_mut(&node)
+            .unwrap()
+            .feedback_state
+            .as_mut()
+            .unwrap()
+            .feedback
+            .sha256 = digest("f");
+        assert!(matches!(
+            tampered_graph.validate(),
+            Err(ExecutionGraphError::PayloadHashMismatch)
+        ));
+
+        let (graph, _) = graph();
+        let mut encoded = serde_json::to_value(graph).unwrap();
+        encoded["schemaVersion"] = serde_json::json!(2);
+        assert!(matches!(
+            serde_json::from_value::<ExecutionGraphRecord>(encoded),
+            Err(error) if error.to_string().contains("execution graph metadata is invalid")
         ));
     }
 

@@ -7,8 +7,15 @@ import {
   isCompositionDraft,
   isStoredItemDefinition,
 } from "./itemContractGuards";
+import { isExecutionGraphView } from "./executionGraphContract";
+import type { ExecutionGraphView } from "./executionGraphContract";
 export { isActionableFailure, toActionableFailure } from "./actionableFailure";
 export type { ActionableFailure, RecoveryAction } from "./actionableFailure";
+export { isExecutionGraphView } from "./executionGraphContract";
+export type {
+  ExecutionGraphStatus,
+  ExecutionGraphView,
+} from "./executionGraphContract";
 
 export async function invokeCommand<T>(
   command: string,
@@ -167,35 +174,6 @@ export async function listRuns(): Promise<RunSummary[]> {
 
 export function cancelRun(runId: string): Promise<boolean> {
   return invokeCommand<boolean>("cancel_run", { runId });
-}
-
-export type ExecutionGraphStatus =
-  | "running"
-  | "validating"
-  | "repairing"
-  | "pause_requested"
-  | "paused"
-  | "cancel_requested"
-  | "cancelled"
-  | "commit_prepared"
-  | "commit_blocked"
-  | "succeeded";
-
-export interface ExecutionGraphView {
-  executionGraphId: string;
-  revision: number;
-  status: ExecutionGraphStatus;
-  activeRunId: string | null;
-  previousRunId: string | null;
-  completedNodes: number;
-  totalNodes: number;
-  currentNodeId: string | null;
-  currentRoleId: string | null;
-  failureCode: string | null;
-  repairRound: number;
-  canPause: boolean;
-  canResume: boolean;
-  canCancel: boolean;
 }
 
 export async function listExecutionGraphs(): Promise<ExecutionGraphView[]> {
@@ -394,7 +372,7 @@ export function submitCompositionRetryNode(request: CompositionRetryNodeRequest)
 }
 
 export function submitCompositionGenerate(request: CompositionGenerateRequest): Promise<string> {
-  return submit("composition.generate", "feature.composition-generate-request", request, 3);
+  return submit("composition.generate", "feature.composition-generate-request", request, 4);
 }
 
 export function submitSingleGenerate(request: SingleGenerateRequest): Promise<string> {
@@ -946,42 +924,6 @@ function isRunStatus(value: unknown): value is RunStatus {
   return ["pending", "running", "succeeded", "failed", "cancelled"].includes(String(value));
 }
 
-function isExecutionGraphView(value: unknown): value is ExecutionGraphView {
-  if (!isRecord(value)) return false;
-  return (
-    typeof value.executionGraphId === "string" &&
-    Number.isInteger(value.revision) &&
-    isExecutionGraphStatus(value.status) &&
-    (value.activeRunId === null || typeof value.activeRunId === "string") &&
-    (value.previousRunId === null || typeof value.previousRunId === "string") &&
-    Number.isInteger(value.completedNodes) &&
-    Number.isInteger(value.totalNodes) &&
-    (value.currentNodeId === null || typeof value.currentNodeId === "string") &&
-    (value.currentRoleId === null || typeof value.currentRoleId === "string") &&
-    (value.failureCode === null || typeof value.failureCode === "string") &&
-    typeof value.repairRound === "number" &&
-    Number.isInteger(value.repairRound) &&
-    value.repairRound >= 0 &&
-    typeof value.canPause === "boolean" &&
-    typeof value.canResume === "boolean" &&
-    typeof value.canCancel === "boolean"
-  );
-}
-
-function isExecutionGraphStatus(value: unknown): value is ExecutionGraphStatus {
-  return typeof value === "string" && [
-    "running",
-    "validating",
-    "repairing",
-    "pause_requested",
-    "paused",
-    "cancel_requested",
-    "cancelled",
-    "commit_prepared",
-    "commit_blocked",
-    "succeeded",
-  ].includes(value);
-}
 function isRunFailure(value: unknown): value is RunFailure {
   return isRecord(value) &&
     typeof value.code === "string" &&

@@ -173,7 +173,7 @@ const readStubRequests = async (root) => (await fs.readFile(
 
 const assertNoAtomicWriteResidue = async (projectRoot) => {
   for (const relativeRoot of [
-    ".ats/execution-graphs-v2",
+    ".ats/execution-graphs-v3",
     ".ats/composition-drafts-v2",
     ".ats/runs-v3",
   ]) {
@@ -310,10 +310,10 @@ describe("current desktop Stage 2 workflow", () => {
     const graph = JSON.parse(await fs.readFile(path.join(
       projectRoot,
       ".ats",
-      "execution-graphs-v2",
+      "execution-graphs-v3",
       `${running.graphId}.json`,
     ), "utf8"));
-    assert.equal(graph.schemaVersion, 2);
+    assert.equal(graph.schemaVersion, 3);
     assert.equal(graph.status, "cancelled");
     assert.equal(graph.activeRunId, null);
     assert.ok(Object.values(graph.nodes).every((node) => node.status !== "running"));
@@ -339,11 +339,11 @@ describe("current desktop Stage 2 workflow", () => {
     const graphPath = path.join(
       projectRoot,
       ".ats",
-      "execution-graphs-v2",
+      "execution-graphs-v3",
       `${paused.graphId}.json`,
     );
     const pausedGraph = JSON.parse(await fs.readFile(graphPath, "utf8"));
-    assert.equal(pausedGraph.schemaVersion, 2);
+    assert.equal(pausedGraph.schemaVersion, 3);
     assert.equal(pausedGraph.status, "paused");
     assert.equal(pausedGraph.activeRunId, null);
     const firstRun = JSON.parse(await fs.readFile(path.join(
@@ -419,7 +419,7 @@ describe("current desktop Stage 2 workflow", () => {
     await assertNoAtomicWriteResidue(projectRoot);
   });
 
-  it("resumes only the invalid Generate Single and publishes one complete closure", async () => {
+  it("feeds back one invalid Generate Single and publishes one complete closure", async () => {
     const root = requiredEnv("ATS_E2E_ROOT");
     const projectRoot = path.join(root, "projects", "E2EMod");
     const draftId = "gui-staged-recovery";
@@ -484,53 +484,40 @@ describe("current desktop Stage 2 workflow", () => {
     await $('[data-testid="composition-output-path"]').setValue("packages/E2EMod-composition.zip");
     await $('[data-testid="composition-generate"]').click();
 
-    const paused = await waitForCompositionGraph("paused", {
-      timeout: 300_000,
-      runStatus: "failed",
-    });
-    assert.equal(paused.totalNodes, 23);
-    assert.ok(paused.completedNodes > 0 && paused.completedNodes < paused.totalNodes);
-    assert.equal(paused.runStatus, "failed");
-    const graphPath = path.join(
-      projectRoot,
-      ".ats",
-      "execution-graphs-v2",
-      `${paused.graphId}.json`,
-    );
-    const pausedGraph = JSON.parse(await fs.readFile(graphPath, "utf8"));
-    assert.equal(pausedGraph.schemaVersion, 2);
-    assert.equal(pausedGraph.status, "paused");
-    assert.equal(pausedGraph.activeRunId, null);
-    const failedRun = JSON.parse(await fs.readFile(path.join(
-      projectRoot,
-      ".ats",
-      "runs-v3",
-      `${paused.runId}.json`,
-    ), "utf8"));
-    assert.equal(failedRun.status, "failed");
-    assert.equal(failedRun.failure.code, "model.output_invalid");
-    await assert.rejects(() => fs.access(path.join(projectRoot, "artifacts", artifactId)));
-    await assert.rejects(() => fs.access(path.join(projectRoot, "Generated")));
-
-    const beforeResume = (await readStubRequests(root)).filter(
-      (entry) => entry.kind === "composition_generate_single",
-    );
-    assert.equal(beforeResume.filter((entry) => entry.outcome === "invalid").length, 1);
-    await waitForEnabled("composition-execution-resume");
-    await $('[data-testid="composition-execution-resume"]').click();
+    const running = await waitForCompositionGraph("running", { timeout: 60_000 });
     const succeeded = await waitForCompositionGraph("succeeded", {
-      graphId: paused.graphId,
-      previousRunId: paused.runId,
+      graphId: running.graphId,
       runStatus: "succeeded",
       timeout: 360_000,
     });
+    assert.equal(succeeded.runId, running.runId);
     assert.equal(succeeded.completedNodes, 23);
     assert.equal(succeeded.totalNodes, 23);
-
+    const graphPath = path.join(
+      projectRoot,
+      ".ats",
+      "execution-graphs-v3",
+      `${succeeded.graphId}.json`,
+    );
     const committedGraph = JSON.parse(await fs.readFile(graphPath, "utf8"));
+    assert.equal(committedGraph.schemaVersion, 3);
     assert.equal(committedGraph.status, "succeeded");
     assert.equal(committedGraph.activeRunId, null);
     assert.ok(Object.values(committedGraph.nodes).every((node) => node.status === "succeeded"));
+    const feedbackNodes = Object.values(committedGraph.nodes).filter(
+      (node) => node.feedbackState,
+    );
+    assert.equal(feedbackNodes.length, 1);
+    assert.equal(feedbackNodes[0].roleId, "mod.generate.single");
+    assert.equal(feedbackNodes[0].attemptCount, 1);
+    assert.equal(feedbackNodes[0].feedbackState.round, 1);
+    assert.equal(feedbackNodes[0].feedbackState.phase, "output_contract");
+    assert.match(feedbackNodes[0].feedbackState.candidateSha256, /^[a-f0-9]{64}$/);
+    assert.equal(feedbackNodes[0].feedbackState.checkpointHash, undefined);
+    assert.deepEqual(feedbackNodes[0].feedbackState.feedback.payload.schema, {
+      id: "feature.generation-feedback",
+      version: 1,
+    });
     const succeededRun = JSON.parse(await fs.readFile(path.join(
       projectRoot,
       ".ats",
@@ -539,28 +526,44 @@ describe("current desktop Stage 2 workflow", () => {
     ), "utf8"));
     assert.equal(succeededRun.status, "succeeded");
     const payload = succeededRun.result.payload;
-    assert.equal(payload.executionGraphId, paused.graphId);
+    assert.equal(payload.executionGraphId, succeeded.graphId);
     assert.equal(payload.nodeCount, 11);
     assert.equal(payload.items.length, 11);
     const manifestPath = path.join(projectRoot, payload.artifactManifestRef);
     assert.equal(await sha256File(manifestPath), payload.manifestSha256);
     const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
     assert.equal(manifest.producingRunId, succeeded.runId);
-    assert.equal(manifest.featureExtension.payload.executionGraphId, paused.graphId);
+    assert.equal(manifest.featureExtension.payload.executionGraphId, succeeded.graphId);
     const artifactRuns = await fs.readdir(path.join(projectRoot, "artifacts", artifactId, "runs"));
     assert.deepEqual(artifactRuns, [succeeded.runId]);
     await fs.access(path.join(projectRoot, payload.package.outputRelativePath));
 
-    const afterResume = (await readStubRequests(root)).filter(
+    const generateRequests = (await readStubRequests(root)).filter(
       (entry) => entry.kind === "composition_generate_single",
     );
-    assert.equal(afterResume.length, 12);
+    assert.equal(generateRequests.length, 12);
+    assert.equal(generateRequests.filter((entry) => entry.outcome === "invalid").length, 1);
     const singleCounts = new Map();
-    for (const entry of afterResume) {
+    for (const entry of generateRequests) {
       singleCounts.set(entry.itemId, (singleCounts.get(entry.itemId) ?? 0) + 1);
     }
     assert.equal(Array.from(singleCounts.values()).filter((count) => count === 2).length, 1);
     assert.equal(Array.from(singleCounts.values()).filter((count) => count === 1).length, 10);
+    const singleRuns = await Promise.all((await fs.readdir(path.join(
+      projectRoot,
+      ".ats",
+      "runs-v3",
+    ))).map(async (file) => JSON.parse(await fs.readFile(path.join(
+      projectRoot,
+      ".ats",
+      "runs-v3",
+      file,
+    ), "utf8"))));
+    const failedSingleRuns = singleRuns.filter(
+      (run) => run.featureId === "mod.generate.single" && run.status === "failed",
+    );
+    assert.equal(failedSingleRuns.length, 1);
+    assert.equal(failedSingleRuns[0].failure.code, "model.output_invalid");
     const generatePlans = (await readStubRequests(root)).filter(
       (entry) => entry.kind === "composition_generate_plan",
     );

@@ -53,10 +53,15 @@ Questions to answer:
 - 重复提交必须同时等待新的 Run ID 和持久化 terminal status；页面上残留的上一条 terminal Run 不能作为本次结果。
 - Run polling tests must cover a real terminal state that arrives after the former frontend wait window, plus deterministic failure for an explicit caller deadline. Increasing Provider retries, backoff or external-tool budgets requires checking every frontend consumer in the same change.
 - Composition Plan 提交必须保留本次 persisted terminal Run；失败不得因 Draft 未创建而在 Studio 中静默消失，安全 details 展示需有纯函数 canary。
-- Composition Generate v3 提交后必须像 Plan 一样轮询对应 `ExecutionGraphView`。通用 Resume
+- Composition Generate v4 提交后必须像 Plan 一样轮询对应 `ExecutionGraphView`。通用 Resume
   返回新 Run ID 后，前端以 validated `featureId` 选择 Plan 或 Generate monitor；不得默认按
   Plan 刷新 Draft，也不得通过重新提交原 root request 伪造节点恢复。API canary 必须固定
-  generate request schema v3、repair policy wire 和 `resume_execution_graph` command 名称。
+  generate request schema v4、graph-total repair policy wire、`feedbackPhase` 和
+  `resume_execution_graph` command 名称。
+- GUI E2E must follow the semantic feedback policy. A repairable output-contract failure creates a
+  failed child Run but may keep the same parent Run/Graph active until success; the test must assert
+  the persisted feedback state and same parent identity instead of waiting for Paused. Only a typed
+  no-progress, exhausted-policy or system failure may drive the explicit Resume path.
 - 隔离 E2E runner 必须显式准备并校验 pinned fixture、Provider API base path 与响应模式，不得要求生产代码为测试伪造 Truth/Resource。
 - Batch 模型测试至少覆盖 request 构造、精确 hash 失败重试、fail-fast 未执行差集和 malformed
   schema/counter canary。

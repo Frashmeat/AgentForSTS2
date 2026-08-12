@@ -515,6 +515,11 @@ export function CompositionStudioPage() {
                 <Button data-testid="composition-execution-resume" size="sm" title="Resume" disabled={!executionGraph.canResume} onClick={() => void resumePlan()}><Play size={13} /></Button>
                 <Button data-testid="composition-execution-cancel" size="sm" variant="danger" title="Cancel" disabled={!executionGraph.canCancel} onClick={() => void cancelPlan()}><X size={13} /></Button>
                 {executionGraph.currentRoleId && <span className="text-xs text-ink-mute">{executionGraph.currentRoleId}</span>}
+                {executionGraph.feedbackPhase && (
+                  <span className="text-xs text-ink-mute">
+                    {executionGraph.feedbackPhase === "output_contract" ? "output contract" : "generated content"} · round {executionGraph.repairRound}
+                  </span>
+                )}
               </div>
               {executionGraph.failureCode && (
                 <Notice variant="error" title={executionGraph.failureCode}>

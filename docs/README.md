@@ -6,7 +6,7 @@
 >
 > 权威规则：协作与文档治理以仓库根目录 `PROJECT_SPEC.md` 为准。
 >
-> 最后更新：2026-08-11
+> 最后更新：2026-08-12
 
 ## 1. 阅读顺序
 
@@ -28,6 +28,7 @@
 | [`当前方案`](./03-当前方案/当前方案.md) | 当前阶段目标、范围、约束、顺序和完成条件 | 历史候选账本 |
 | [`Stage 2 分层能力与资源架构`](./03-当前方案/2026-08-02-Stage-2分层能力与资源架构方案.md) | Feature、Pack、Truth、Workspace、Resource 和 Shell 的稳定职责 | O8 执行状态 |
 | [`可恢复分阶段 Mod 生成`](./03-当前方案/2026-08-10-可恢复分阶段Mod生成架构方案.md) | ExecutionGraph、checkpoint、claim、resume、commit 和控制语义 | 逐次 E2E 记录 |
+| [`统一生成反馈闭环`](./03-当前方案/2026-08-12-统一生成反馈闭环架构方案.md) | strict output、typed diagnosis、semantic feedback、统一 repair controller 和安全停止语义 | 特定模型兼容补丁或当前已实现事实 |
 
 ## 3. 稳定合同
 

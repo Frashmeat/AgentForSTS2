@@ -46,6 +46,14 @@ provider or output failure never changes that value for the in-flight Run and ne
 second weaker-format request. Both modes retain the same Feature-owned typed decode; invalid JSON
 or shape remains `model.output_invalid` without raw Provider content in persisted details.
 
+Direct `mod.generate.single` returns that failure after one logical model call. Inside
+`composition.generate` request v4, repairable output-contract failures may enter the Feature-owned
+semantic feedback controller without changing model, endpoint, response format or Provider retry
+rules. Before the next model call, ExecutionGraph v3 CAS-persists a hashed
+`feature.generation-feedback` v1 envelope plus the complete candidate SHA-256. The envelope contains
+only closed diagnostic codes, a Pack-trusted optional role ID, expected/observed shape enums and no
+raw completion, parser text or model-authored unknown role.
+
 `mod.generate.single` model-output failures persist optional
 `feature.mod-generate-single-failure-details` v1. Its payload contains exactly one closed
 `reasonCode`: `output_truncated`, `json_decode`, `file_count`, `acceptance_notes`, `file_role`,
@@ -58,6 +66,17 @@ Provider metadata or unvalidated model-authored role names.
 object required by the run-scoped output contract, contained a non-string value, or could not be
 normalized within the bounded content limit. A JSON-encoded object inside a string is invalid; the
 Feature never repairs or heuristically extracts it.
+
+Output feedback stops without another model request when the graph-wide policy is exhausted or the
+same typed diagnostic fingerprint and same complete candidate SHA-256 recur. The same diagnostic
+with different candidate bytes is not by itself no progress. Generated-content repair retains its
+same-fingerprint plus same-checkpoint and unchanged-replacement stops. Provider/configuration,
+storage, Truth, checkpoint, publication and cancellation failures never enter semantic feedback.
+Cancellation observed during validation feedback must use the graph's common cancellation
+transition. `CancellationReason::User` makes the graph terminal `cancelled`; Pause, project
+close/switch and shutdown produce `paused` with the claim released. `pause_interrupted` therefore
+accepts `running`, `validating`, `repairing` and `pause_requested`; a feedback branch must not turn a
+User cancellation into `pause_after_graph_failure("run.cancelled")`.
 
 Every HTTP-backed model task also enters the one FIFO `ModelRequestQueue` owned by the desktop
 composition root. A task holds its slot through all attempts, retry waits, parsing and terminal

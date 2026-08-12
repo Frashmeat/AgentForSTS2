@@ -4,6 +4,7 @@ mod catalog;
 pub mod composition;
 pub mod composition_generate;
 pub mod composition_plan;
+pub mod generation_feedback;
 pub mod item_definition;
 pub mod log_analyze;
 pub mod mod_generate_batch;

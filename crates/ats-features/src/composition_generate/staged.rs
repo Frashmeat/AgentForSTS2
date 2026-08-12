@@ -6,6 +6,10 @@ use ats_runtime::{
 };
 
 use super::*;
+use crate::generation_feedback::{
+    GenerationFeedbackEnvelope, GenerationFeedbackMode, GenerationFeedbackPhase,
+    diagnostic_fingerprint as feedback_fingerprint, generation_feedback_schema,
+};
 use crate::mod_generate_single::{
     SingleGenerateCompositionProposal, SingleGenerateProposalCheckpoint, SingleRepairRequest,
 };
@@ -156,7 +160,7 @@ impl CompositionGenerateService<'_> {
             request_snapshot_hash: zero_digest()?,
         });
         let blueprint = StagedCompositionGenerateBlueprint {
-            schema_version: 1,
+            schema_version: 2,
             game_pack_id: context.pack.id().clone(),
             game_pack_sha256: context.pack.content_sha256().clone(),
             truth_snapshot_id: context.truth.manifest().snapshot_id().clone(),
@@ -412,55 +416,153 @@ impl CompositionGenerateService<'_> {
                         run.id(),
                         request_hash::<SingleGenerateFeature, _>(&single_request)?,
                     )?;
-                    let mut child_run = running_run::<SingleGenerateFeature, _>(&single_request)?;
-                    let proposal = match self
-                        .single
-                        .propose(
-                            SingleProposalDependencies {
-                                model: dependencies.model,
-                                resources: dependencies.resources,
-                            },
-                            &child_run,
-                            &single_request,
-                            &single_context(&context),
-                            cancellation,
-                        )
-                        .await
-                    {
-                        Ok(proposal) => proposal,
-                        Err(error) => {
-                            finish_failed_child(&mut child_run, error.run_failure(), cancellation)?;
-                            if let Err(storage_error) = persist_child(runs, &child_run) {
-                                pause_failed_node(
-                                    &mut graph,
-                                    graphs,
-                                    &item.single_node_id,
-                                    run.id(),
-                                    &storage_error,
-                                )?;
-                                return Err(storage_error);
-                            }
-                            if cancellation.is_cancelled() {
-                                return handle_cancellation(
-                                    &mut graph,
-                                    graphs,
-                                    run.id(),
+                    let proposal = loop {
+                        let persisted_feedback = graph.nodes()[&item.single_node_id]
+                            .feedback_state
+                            .as_ref()
+                            .filter(|state| {
+                                state.phase == ats_runtime::ExecutionFeedbackPhase::OutputContract
+                            })
+                            .map(|state| {
+                                state.feedback.payload.decode::<GenerationFeedbackEnvelope>(
+                                    &generation_feedback_schema(),
+                                )
+                            })
+                            .transpose()
+                            .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
+                        if persisted_feedback.as_ref().is_some_and(|feedback| {
+                            !feedback.is_valid()
+                                || feedback.phase != GenerationFeedbackPhase::OutputContract
+                        }) {
+                            return Err(CompositionGenerateError::InvalidCheckpoint);
+                        }
+                        let mut child_run =
+                            running_run::<SingleGenerateFeature, _>(&single_request)?;
+                        let generated = if let Some(feedback) = &persisted_feedback {
+                            self.single
+                                .feedback_propose(
+                                    SingleProposalDependencies {
+                                        model: dependencies.model,
+                                        resources: dependencies.resources,
+                                    },
+                                    &child_run,
+                                    &single_request,
+                                    &single_context(&context),
+                                    feedback,
                                     cancellation,
                                 )
-                                .and(Err(CompositionGenerateError::Cancelled));
+                                .await
+                        } else {
+                            self.single
+                                .propose(
+                                    SingleProposalDependencies {
+                                        model: dependencies.model,
+                                        resources: dependencies.resources,
+                                    },
+                                    &child_run,
+                                    &single_request,
+                                    &single_context(&context),
+                                    cancellation,
+                                )
+                                .await
+                        };
+                        match generated {
+                            Ok(proposal) => {
+                                succeed_child::<SingleGenerateFeature, _>(
+                                    &mut child_run,
+                                    &proposal.result,
+                                )?;
+                                break (proposal, child_run);
                             }
-                            let error = CompositionGenerateError::Single(error);
-                            pause_failed_node(
-                                &mut graph,
-                                graphs,
-                                &item.single_node_id,
-                                run.id(),
-                                &error,
-                            )?;
-                            return Err(error);
+                            Err(error) => {
+                                finish_failed_child(
+                                    &mut child_run,
+                                    error.run_failure(),
+                                    cancellation,
+                                )?;
+                                if let Err(storage_error) = persist_child(runs, &child_run) {
+                                    pause_failed_node(
+                                        &mut graph,
+                                        graphs,
+                                        &item.single_node_id,
+                                        run.id(),
+                                        &storage_error,
+                                    )?;
+                                    return Err(storage_error);
+                                }
+                                if cancellation.is_cancelled() {
+                                    return handle_cancellation(
+                                        &mut graph,
+                                        graphs,
+                                        run.id(),
+                                        cancellation,
+                                    )
+                                    .and(Err(CompositionGenerateError::Cancelled));
+                                }
+                                let Some(evidence) = error.output_feedback().cloned() else {
+                                    let error = CompositionGenerateError::Single(error);
+                                    pause_failed_node(
+                                        &mut graph,
+                                        graphs,
+                                        &item.single_node_id,
+                                        run.id(),
+                                        &error,
+                                    )?;
+                                    return Err(error);
+                                };
+                                let completed_rounds = completed_feedback_rounds(&graph)?;
+                                if !request.repair_policy.permits(completed_rounds) {
+                                    pause_running_node_with_code(
+                                        &mut graph,
+                                        graphs,
+                                        &item.single_node_id,
+                                        run.id(),
+                                        "model.feedback_exhausted",
+                                    )?;
+                                    return Err(CompositionGenerateError::Single(error));
+                                }
+                                let fingerprint = feedback_fingerprint(&evidence.envelope)
+                                    .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
+                                if graph.nodes()[&item.single_node_id]
+                                    .feedback_state
+                                    .as_ref()
+                                    .is_some_and(|state| {
+                                        state.diagnostic_fingerprint == fingerprint
+                                            && state.candidate_sha256.as_ref()
+                                                == Some(&evidence.candidate_sha256)
+                                    })
+                                {
+                                    pause_running_node_with_code(
+                                        &mut graph,
+                                        graphs,
+                                        &item.single_node_id,
+                                        run.id(),
+                                        "model.feedback_no_progress",
+                                    )?;
+                                    return Err(CompositionGenerateError::Single(error));
+                                }
+                                mutate_graph(&mut graph, graphs, |graph| {
+                                    graph.record_output_feedback(
+                                        &item.single_node_id,
+                                        run.id(),
+                                        ats_runtime::ExecutionOutputFeedback {
+                                            diagnostic_fingerprint: fingerprint,
+                                            candidate_sha256: evidence.candidate_sha256,
+                                            feedback: VersionedPayload::from_typed(
+                                                generation_feedback_schema(),
+                                                &evidence.envelope,
+                                            )
+                                            .map_err(|_| {
+                                                ats_runtime::ExecutionGraphError::InvalidMetadata
+                                            })?,
+                                        },
+                                        Utc::now(),
+                                    )
+                                })?;
+                            }
                         }
                     };
-                    succeed_child::<SingleGenerateFeature, _>(&mut child_run, &proposal.result)?;
+                    let (proposal, child_run) = proposal;
                     let checkpoint = StagedSingleCheckpoint {
                         proposal: proposal.checkpoint(),
                         child_run,
@@ -571,7 +673,10 @@ impl CompositionGenerateService<'_> {
         )?;
         if persisted_finalize != finalize_checkpoint {
             if graph.status() != ExecutionGraphStatus::Running
-                || !graph.nodes().values().any(|node| node.repair_round > 0)
+                || !graph
+                    .nodes()
+                    .values()
+                    .any(|node| node.feedback_state.is_some())
             {
                 return Err(CompositionGenerateError::InvalidCheckpoint);
             }
@@ -957,7 +1062,7 @@ impl CompositionGenerateService<'_> {
         let repair_rounds = graph
             .nodes()
             .values()
-            .map(|node| node.repair_round)
+            .filter_map(|node| node.feedback_state.as_ref().map(|state| state.round))
             .sum::<u32>();
         if !request.repair_policy.permits(repair_rounds) {
             pause_validation_graph(graph, graphs, run_id, "validation.repair_limit")?;
@@ -978,8 +1083,30 @@ impl CompositionGenerateService<'_> {
             .sha256
             .clone();
         let node = &graph.nodes()[&item.single_node_id];
-        if node.diagnostic_fingerprint.as_ref() == Some(&fingerprint)
-            && node.diagnostic_checkpoint_hash.as_ref() == Some(&checkpoint_hash)
+        let persisted_repair_output = node
+            .feedback_state
+            .as_ref()
+            .filter(|state| {
+                state.phase == ats_runtime::ExecutionFeedbackPhase::OutputContract
+                    && state.checkpoint_hash.as_ref() == Some(&checkpoint_hash)
+            })
+            .and_then(|state| {
+                state
+                    .feedback
+                    .payload
+                    .decode::<GenerationFeedbackEnvelope>(&generation_feedback_schema())
+                    .ok()
+            })
+            .filter(|feedback| {
+                feedback.is_valid()
+                    && feedback.mode == GenerationFeedbackMode::ReplaceCompleteRoles
+                    && feedback.validation_issues == owned_issues
+            });
+        if persisted_repair_output.is_none()
+            && node.feedback_state.as_ref().is_some_and(|state| {
+                state.diagnostic_fingerprint == fingerprint
+                    && state.checkpoint_hash.as_ref() == Some(&checkpoint_hash)
+            })
         {
             pause_validation_graph(graph, graphs, run_id, "validation.repair_repeated")?;
             return Err(CompositionGenerateError::Validation(
@@ -991,15 +1118,26 @@ impl CompositionGenerateService<'_> {
                 }),
             ));
         }
-        mutate_graph(graph, graphs, |graph| {
-            graph.begin_repair(
-                &item.single_node_id,
-                run_id,
-                fingerprint,
-                checkpoint_hash,
-                Utc::now(),
-            )
-        })?;
+        if persisted_repair_output.is_none() {
+            mutate_graph(graph, graphs, |graph| {
+                graph.begin_repair(
+                    &item.single_node_id,
+                    run_id,
+                    fingerprint,
+                    checkpoint_hash.clone(),
+                    VersionedPayload::from_typed(
+                        generation_feedback_schema(),
+                        &GenerationFeedbackEnvelope::generated_content(&owned_issues),
+                    )
+                    .map_err(|_| ats_runtime::ExecutionGraphError::InvalidMetadata)?,
+                    Utc::now(),
+                )
+            })?;
+        } else if graph.status() == ExecutionGraphStatus::Validating {
+            mutate_graph(graph, graphs, |graph| {
+                graph.resume_repair(run_id, Utc::now())
+            })?;
+        }
         let definition = &resolved.nodes[item_index];
         let plan = decode_plan_checkpoint(graph, item, definition)?;
         let current = decode_single_checkpoint(graph, item, definition)?;
@@ -1009,33 +1147,24 @@ impl CompositionGenerateService<'_> {
             plan: plan.plan,
             definition: definition.clone(),
         };
-        let mut child_run = running_run::<SingleGenerateFeature, _>(&single_request)?;
-        let proposal = match self
-            .single
-            .repair_propose(
-                SingleProposalDependencies { model, resources },
-                &child_run,
+        let (proposal, mut child_run) = self
+            .run_validation_repair_feedback(
+                model,
+                resources,
+                runs,
+                graphs,
+                graph,
+                run_id,
+                request,
+                context,
+                item,
+                checkpoint_hash,
                 &single_request,
-                &single_context(context),
-                &SingleRepairRequest {
-                    current_files: current.proposal.files.clone(),
-                    issues: owned_issues,
-                },
+                &current.proposal.files,
+                &owned_issues,
                 cancellation,
             )
-            .await
-        {
-            Ok(value) => value,
-            Err(error) => {
-                finish_failed_child(&mut child_run, error.run_failure(), cancellation)?;
-                if let Err(storage_error) = persist_child(runs, &child_run) {
-                    pause_validation_graph(graph, graphs, run_id, "run.storage_failed")?;
-                    return Err(storage_error);
-                }
-                pause_validation_graph(graph, graphs, run_id, "validation.repair_failed")?;
-                return Err(error.into());
-            }
-        };
+            .await?;
         if proposal.checkpoint().files == current.proposal.files {
             pause_after_unchanged_repair(
                 runs,
@@ -1105,6 +1234,144 @@ impl CompositionGenerateService<'_> {
         })?;
         Ok((proposals, writes, files, finalize))
     }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn run_validation_repair_feedback<C, R, RR, G>(
+        &self,
+        model: &C,
+        resources: &R,
+        runs: &RR,
+        graphs: &G,
+        graph: &mut ExecutionGraphRecord,
+        run_id: &RunId,
+        request: &CompositionGenerateRequest,
+        context: &CompositionGenerateContext<'_>,
+        item: &StagedCompositionGenerateItem,
+        checkpoint_hash: Sha256Digest,
+        single_request: &SingleGenerateRequest,
+        current_files: &BTreeMap<String, String>,
+        issues: &[ats_runtime::ValidationIssue],
+        cancellation: &CancellationToken,
+    ) -> Result<
+        (
+            crate::mod_generate_single::SingleGenerateProposal,
+            RunRecord,
+        ),
+        CompositionGenerateError,
+    >
+    where
+        C: ModelClient + ?Sized,
+        R: ResourceRepository + ?Sized,
+        RR: RunRepository + ?Sized,
+        G: ExecutionGraphRepository + ?Sized,
+    {
+        loop {
+            let output_feedback = graph.nodes()[&item.single_node_id]
+                .feedback_state
+                .as_ref()
+                .filter(|state| {
+                    state.phase == ats_runtime::ExecutionFeedbackPhase::OutputContract
+                        && state.checkpoint_hash.as_ref() == Some(&checkpoint_hash)
+                })
+                .map(|state| {
+                    state
+                        .feedback
+                        .payload
+                        .decode::<GenerationFeedbackEnvelope>(&generation_feedback_schema())
+                })
+                .transpose()
+                .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
+            if output_feedback.as_ref().is_some_and(|feedback| {
+                !feedback.is_valid()
+                    || feedback.mode != GenerationFeedbackMode::ReplaceCompleteRoles
+                    || feedback.validation_issues != issues
+            }) {
+                return Err(CompositionGenerateError::InvalidCheckpoint);
+            }
+            let mut child_run = running_run::<SingleGenerateFeature, _>(single_request)?;
+            let generated = self
+                .single
+                .repair_propose(
+                    SingleProposalDependencies { model, resources },
+                    &child_run,
+                    single_request,
+                    &single_context(context),
+                    &SingleRepairRequest {
+                        current_files: current_files.clone(),
+                        issues: issues.to_vec(),
+                        output_feedback,
+                    },
+                    cancellation,
+                )
+                .await;
+            match generated {
+                Ok(proposal) => return Ok((proposal, child_run)),
+                Err(error) => {
+                    finish_failed_child(&mut child_run, error.run_failure(), cancellation)?;
+                    if let Err(storage_error) = persist_child(runs, &child_run) {
+                        pause_validation_graph(graph, graphs, run_id, "run.storage_failed")?;
+                        return Err(storage_error);
+                    }
+                    if cancellation.is_cancelled() {
+                        return handle_cancellation(graph, graphs, run_id, cancellation)
+                            .and(Err(CompositionGenerateError::Cancelled));
+                    }
+                    let Some(evidence) = error.output_feedback().cloned() else {
+                        pause_validation_graph(graph, graphs, run_id, "validation.repair_failed")?;
+                        return Err(error.into());
+                    };
+                    if !request
+                        .repair_policy
+                        .permits(completed_feedback_rounds(graph)?)
+                    {
+                        pause_validation_graph(graph, graphs, run_id, "model.feedback_exhausted")?;
+                        return Err(error.into());
+                    }
+                    let envelope = GenerationFeedbackEnvelope::repair_output_contract(
+                        evidence.envelope.output_diagnostics[0].clone(),
+                        issues,
+                    );
+                    let fingerprint = feedback_fingerprint(&envelope)
+                        .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
+                    if graph.nodes()[&item.single_node_id]
+                        .feedback_state
+                        .as_ref()
+                        .is_some_and(|state| {
+                            state.diagnostic_fingerprint == fingerprint
+                                && state.candidate_sha256.as_ref()
+                                    == Some(&evidence.candidate_sha256)
+                                && state.checkpoint_hash.as_ref() == Some(&checkpoint_hash)
+                        })
+                    {
+                        pause_validation_graph(
+                            graph,
+                            graphs,
+                            run_id,
+                            "model.feedback_no_progress",
+                        )?;
+                        return Err(error.into());
+                    }
+                    mutate_graph(graph, graphs, |graph| {
+                        graph.record_repair_output_feedback(
+                            &item.single_node_id,
+                            run_id,
+                            checkpoint_hash.clone(),
+                            ats_runtime::ExecutionOutputFeedback {
+                                diagnostic_fingerprint: fingerprint,
+                                candidate_sha256: evidence.candidate_sha256,
+                                feedback: VersionedPayload::from_typed(
+                                    generation_feedback_schema(),
+                                    &envelope,
+                                )
+                                .map_err(|_| ats_runtime::ExecutionGraphError::InvalidMetadata)?,
+                            },
+                            Utc::now(),
+                        )
+                    })?;
+                }
+            }
+        }
+    }
 }
 
 impl StagedCompositionGenerateBlueprint {
@@ -1112,7 +1379,7 @@ impl StagedCompositionGenerateBlueprint {
         &self,
         context: &CompositionGenerateContext<'_>,
     ) -> Result<(), CompositionGenerateError> {
-        if self.schema_version != 1
+        if self.schema_version != 2
             || self.game_pack_id != *context.pack.id()
             || self.game_pack_sha256 != *context.pack.content_sha256()
             || self.truth_snapshot_id != *context.truth.manifest().snapshot_id()
@@ -1595,6 +1862,34 @@ fn pause_failed_node<G: ExecutionGraphRepository + ?Sized>(
     })
 }
 
+fn completed_feedback_rounds(
+    graph: &ExecutionGraphRecord,
+) -> Result<u32, CompositionGenerateError> {
+    graph
+        .nodes()
+        .values()
+        .filter_map(|node| node.feedback_state.as_ref().map(|state| state.round))
+        .try_fold(0_u32, |total, round| total.checked_add(round))
+        .ok_or(CompositionGenerateError::InvalidCheckpoint)
+}
+
+fn pause_running_node_with_code<G: ExecutionGraphRepository + ?Sized>(
+    graph: &mut ExecutionGraphRecord,
+    repository: &G,
+    node_id: &ExecutionNodeId,
+    run_id: &RunId,
+    code: &str,
+) -> Result<(), CompositionGenerateError> {
+    let failure = ExecutionFailure::new(
+        FailureCode::parse(code).map_err(|_| CompositionGenerateError::InvalidCheckpoint)?,
+        "composition.generate.feedback",
+    )
+    .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
+    mutate_graph(graph, repository, |graph| {
+        graph.pause_after_node_failure(node_id, run_id, failure, Utc::now())
+    })
+}
+
 fn handle_cancellation<G: ExecutionGraphRepository + ?Sized>(
     graph: &mut ExecutionGraphRecord,
     repository: &G,
@@ -1684,7 +1979,7 @@ fn succeed_parent(
 }
 
 fn blueprint_schema() -> SchemaRef {
-    schema(BLUEPRINT_SCHEMA_ID)
+    schema_version(BLUEPRINT_SCHEMA_ID, 2)
 }
 
 fn plan_checkpoint_schema() -> SchemaRef {
@@ -1701,6 +1996,13 @@ fn finalize_checkpoint_schema() -> SchemaRef {
 
 fn commit_intent_schema() -> SchemaRef {
     schema(COMMIT_INTENT_SCHEMA_ID)
+}
+
+fn schema_version(id: &str, version: u32) -> SchemaRef {
+    SchemaRef {
+        id: SchemaId::parse(id).expect("built-in staged schema ID is valid"),
+        version: SchemaVersion::new(version).expect("built-in staged schema version is valid"),
+    }
 }
 
 #[cfg(test)]
@@ -2072,6 +2374,72 @@ mod tests {
             "validation.repair_no_change"
         );
         assert_eq!(graphs.get(graph.id()).unwrap(), graph);
+    }
+
+    #[test]
+    fn validation_feedback_cancellation_preserves_user_and_pause_semantics() {
+        for (reason, suffix, expected_status) in [
+            (
+                ats_runtime::CancellationReason::User,
+                "user",
+                ExecutionGraphStatus::Cancelled,
+            ),
+            (
+                ats_runtime::CancellationReason::Pause,
+                "pause",
+                ExecutionGraphStatus::Paused,
+            ),
+        ] {
+            let parent_run_id = RunId::parse(format!("run-cancel-{suffix}")).unwrap();
+            let node_id = ExecutionNodeId::parse("item.000.single").unwrap();
+            let zero = zero_digest().unwrap();
+            let mut graph = ExecutionGraphRecord::new_claimed(
+                ExecutionGraphId::parse(format!("graph-cancel-{suffix}")).unwrap(),
+                FeatureId::parse("composition.generate").unwrap(),
+                zero.clone(),
+                VersionedPayload::from_typed(
+                    blueprint_schema(),
+                    &serde_json::json!({"fixture": true}),
+                )
+                .unwrap(),
+                vec![ExecutionNodeSpec {
+                    node_id: node_id.clone(),
+                    role_id: "mod.generate.single".into(),
+                    depends_on: Vec::new(),
+                    request_snapshot_hash: zero,
+                }],
+                parent_run_id.clone(),
+                Utc::now(),
+            )
+            .unwrap();
+            graph
+                .start_node(&node_id, &parent_run_id, Utc::now())
+                .unwrap();
+            graph
+                .complete_node(
+                    &node_id,
+                    &parent_run_id,
+                    VersionedPayload::from_typed(
+                        single_checkpoint_schema(),
+                        &serde_json::json!({"fixture": true}),
+                    )
+                    .unwrap(),
+                    Utc::now(),
+                )
+                .unwrap();
+            graph.begin_validation(&parent_run_id, Utc::now()).unwrap();
+            let graphs = MemoryGraphRepository(Mutex::new(graph.clone()));
+            let cancellation = CancellationToken::new();
+            assert!(cancellation.cancel(reason));
+
+            assert!(matches!(
+                handle_cancellation(&mut graph, &graphs, &parent_run_id, &cancellation,),
+                Err(CompositionGenerateError::Cancelled)
+            ));
+            assert_eq!(graph.status(), expected_status);
+            assert!(graph.active_run_id().is_none());
+            assert_eq!(graphs.get(graph.id()).unwrap(), graph);
+        }
     }
 
     fn proposal(
