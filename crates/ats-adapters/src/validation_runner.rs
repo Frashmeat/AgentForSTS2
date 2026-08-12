@@ -1,12 +1,16 @@
 use std::fs;
 use std::io;
 use std::process::Stdio;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use ats_runtime::{
-    CancellationToken, ValidationError, ValidationReport, ValidationRequest, ValidationRunner,
+    CancellationToken, ValidationError, ValidationIssue, ValidationIssueRepairability,
+    ValidationIssueSeverity, ValidationReport, ValidationRequest, ValidationRunner,
 };
+use regex::Regex;
+use sha2::{Digest, Sha256};
 use tokio::process::Command;
 
 #[derive(Debug, Default)]
@@ -80,6 +84,7 @@ impl ValidationRunner for RegisteredValidationRunner {
             exit_code: status.code().unwrap_or(-1),
             stdout_tail: sanitize_tail(&stdout, &request.project_root.to_string_lossy()),
             stderr_tail: sanitize_tail(&stderr, &request.project_root.to_string_lossy()),
+            issues: parse_validation_issues(&stdout, &stderr, &request.project_root),
         };
         report.validate()?;
         if status.success() {
@@ -87,6 +92,157 @@ impl ValidationRunner for RegisteredValidationRunner {
         } else {
             Err(ValidationError::Rejected(report))
         }
+    }
+}
+
+fn parse_validation_issues(
+    stdout: &str,
+    stderr: &str,
+    project_root: &std::path::Path,
+) -> Vec<ValidationIssue> {
+    let mut issues = Vec::new();
+    for line in stdout.lines().chain(stderr.lines()) {
+        if issues.len() == 256 {
+            break;
+        }
+        let issue =
+            parse_environment_issue(line).or_else(|| parse_msbuild_issue(line, project_root));
+        if let Some(issue) = issue
+            && !issues
+                .iter()
+                .any(|existing: &ValidationIssue| existing.fingerprint == issue.fingerprint)
+        {
+            issues.push(issue);
+        }
+    }
+    issues
+}
+
+fn parse_environment_issue(line: &str) -> Option<ValidationIssue> {
+    let (code, message) = if line.contains("Slay the Spire 2 data not found at path") {
+        (
+            "local.sts2_data_missing",
+            "The configured Slay the Spire 2 assembly path is unavailable.",
+        )
+    } else if line.contains("Godot not found at path") {
+        (
+            "local.godot_missing",
+            "The configured Godot executable path is unavailable.",
+        )
+    } else {
+        return None;
+    };
+    Some(issue(
+        code,
+        ValidationIssueSeverity::Error,
+        None,
+        None,
+        None,
+        message,
+        None,
+        ValidationIssueRepairability::LocalEnvironment,
+    ))
+}
+
+fn parse_msbuild_issue(line: &str, project_root: &std::path::Path) -> Option<ValidationIssue> {
+    static DIAGNOSTIC: OnceLock<Regex> = OnceLock::new();
+    let captures = DIAGNOSTIC
+        .get_or_init(|| {
+            Regex::new(
+                r"^(?P<path>.+?)\((?P<line>\d+),(?P<column>\d+)\): (?P<severity>error|warning) (?P<code>[A-Za-z]+\d+): (?P<message>.*?)(?: \[[^\]]+\])?$",
+            )
+            .expect("MSBuild diagnostic regex is valid")
+        })
+        .captures(line.trim())?;
+    let relative_path = normalized_diagnostic_path(&captures["path"], project_root)?;
+    let repairability = if relative_path.starts_with("Generated/") {
+        ValidationIssueRepairability::GeneratedContent
+    } else {
+        ValidationIssueRepairability::NonRepairable
+    };
+    let severity = match &captures["severity"] {
+        "error" => ValidationIssueSeverity::Error,
+        _ => ValidationIssueSeverity::Warning,
+    };
+    let message = sanitize_issue_message(&captures["message"], project_root);
+    Some(issue(
+        &captures["code"],
+        severity,
+        Some(relative_path),
+        captures["line"].parse().ok(),
+        captures["column"].parse().ok(),
+        &message,
+        extract_symbol(&message),
+        repairability,
+    ))
+}
+
+fn normalized_diagnostic_path(value: &str, project_root: &std::path::Path) -> Option<String> {
+    let path = std::path::Path::new(value.trim());
+    let relative = if path.is_absolute() {
+        path.strip_prefix(project_root).ok()?
+    } else {
+        path
+    };
+    ats_runtime::normalize_relative_path(relative).ok()
+}
+
+fn sanitize_issue_message(value: &str, project_root: &std::path::Path) -> String {
+    static WINDOWS_PATH: OnceLock<Regex> = OnceLock::new();
+    static UNIX_PATH: OnceLock<Regex> = OnceLock::new();
+    let redacted = value.replace(&project_root.to_string_lossy().to_string(), "<project>");
+    let redacted = WINDOWS_PATH
+        .get_or_init(|| Regex::new(r#"(?i)\b[A-Z]:[\\/][^\s'\"\]]+"#).unwrap())
+        .replace_all(&redacted, "<path>");
+    let redacted = UNIX_PATH
+        .get_or_init(|| Regex::new(r#"(^|[\s'\"])/[^\s'\"\]]+"#).unwrap())
+        .replace_all(&redacted, "$1<path>");
+    redacted.chars().take(2_000).collect()
+}
+
+fn extract_symbol(message: &str) -> Option<String> {
+    static SYMBOL: OnceLock<Regex> = OnceLock::new();
+    let value = SYMBOL
+        .get_or_init(|| Regex::new(r"'([A-Za-z_][A-Za-z0-9_.]{0,127})'").unwrap())
+        .captures(message)?
+        .get(1)?
+        .as_str();
+    Some(value.into())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn issue(
+    code: &str,
+    severity: ValidationIssueSeverity,
+    relative_path: Option<String>,
+    line: Option<u32>,
+    column: Option<u32>,
+    message: &str,
+    symbol: Option<String>,
+    repairability: ValidationIssueRepairability,
+) -> ValidationIssue {
+    let canonical = format!(
+        "code.dotnet-validate\0{code}\0{severity:?}\0{}\0{}\0{}\0{message}\0{}\0{repairability:?}",
+        relative_path.as_deref().unwrap_or_default(),
+        line.map_or_else(String::new, |value| value.to_string()),
+        column.map_or_else(String::new, |value| value.to_string()),
+        symbol.as_deref().unwrap_or_default(),
+    );
+    ValidationIssue {
+        validator_id: "code.dotnet-validate".into(),
+        code: code.into(),
+        severity,
+        relative_path,
+        line,
+        column,
+        message: message.into(),
+        symbol,
+        repairability,
+        fingerprint: ats_kernel::Sha256Digest::parse(format!(
+            "{:x}",
+            Sha256::digest(canonical.as_bytes())
+        ))
+        .expect("SHA-256 formatter is valid"),
     }
 }
 
@@ -157,6 +313,7 @@ mod tests {
             if let Err(ValidationError::Rejected(report)) = result {
                 assert!(!report.stderr_tail.contains(&project.display().to_string()));
                 assert!(!report.stdout_tail.contains(&project.display().to_string()));
+                assert!(!report.issues.is_empty());
             }
             assert!(
                 !project
@@ -165,5 +322,58 @@ mod tests {
                     .is_ok_and(|mut entries| entries.next().is_some())
             );
         }
+    }
+
+    #[test]
+    fn parses_generated_compiler_and_local_environment_issues_without_absolute_paths() {
+        let project = std::path::Path::new(r"C:\fixture\project");
+        let output = concat!(
+            "C:\\fixture\\project\\Generated\\card.cs(12,29): error CS0246: The type or namespace name 'ImaginaryType' could not be found [C:\\fixture\\project\\Fixture.csproj]\n",
+            "C:\\fixture\\project\\Fixture.csproj : error : Slay the Spire 2 data not found at path 'J:\\private'\n",
+        );
+        let issues = parse_validation_issues(output, "", project);
+        assert_eq!(issues.len(), 2);
+        assert_eq!(
+            issues[0].relative_path.as_deref(),
+            Some("Generated/card.cs")
+        );
+        assert_eq!(issues[0].line, Some(12));
+        assert_eq!(issues[0].column, Some(29));
+        assert_eq!(issues[0].symbol.as_deref(), Some("ImaginaryType"));
+        assert_eq!(
+            issues[0].repairability,
+            ValidationIssueRepairability::GeneratedContent
+        );
+        assert_eq!(
+            issues[1].repairability,
+            ValidationIssueRepairability::LocalEnvironment
+        );
+        assert!(
+            issues
+                .iter()
+                .all(|issue| !issue.message.contains("J:\\private"))
+        );
+    }
+
+    #[test]
+    fn diagnostic_fingerprints_are_stable_and_duplicate_lines_are_collapsed() {
+        let project = std::path::Path::new(r"C:\fixture\project");
+        let line = "C:\\fixture\\project\\Generated\\card.cs(1,2): error CS1002: ; expected";
+        let issues = parse_validation_issues(&format!("{line}\n{line}"), "", project);
+        assert_eq!(issues.len(), 1);
+        assert_eq!(
+            issues[0].fingerprint,
+            parse_validation_issues(line, "", project)[0].fingerprint
+        );
+    }
+
+    #[test]
+    fn compiler_issue_messages_redact_absolute_paths_outside_the_project() {
+        let project = std::path::Path::new(r"C:\fixture\project");
+        let line = "C:\\fixture\\project\\Generated\\card.cs(1,2): error CS0001: See J:\\private\\sdk.dll and /opt/private/sdk.dll";
+        let issues = parse_validation_issues(line, "", project);
+        assert_eq!(issues.len(), 1);
+        assert!(!issues[0].message.contains("J:\\private"));
+        assert!(!issues[0].message.contains("/opt/private"));
     }
 }

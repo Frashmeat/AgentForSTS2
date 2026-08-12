@@ -864,11 +864,13 @@ pub trait CompositionDraftRepository {
 }
 ```
 
-`ExecutionGraphRecord` v1 contains `executionGraphId`, `ownerFeatureId`,
+`ExecutionGraphRecord` v2 contains `executionGraphId`, `ownerFeatureId`,
 `requestSnapshotHash`, monotonic `revision`, graph `status`, `activeRunId`, `previousRunId`,
 versioned+hashed `blueprint`, ordered nodes, optional immutable `commitIntent`, and optional
-`finalResultRef`. Each node contains stable ID/role/dependencies, status, logical attempts,
-request-snapshot hash, optional versioned+hashed normalized checkpoint, and optional safe failure.
+`finalResultRef`. Each node contains stable ID/role/dependencies, status, attempt count/current
+attempt, request-snapshot hash, current versioned+hashed normalized checkpoint, safe failure,
+repair round, and latest diagnostic fingerprint/checkpoint hash. The graph may retain one safe
+graph-level failure. v2 has no v1 reader, migration or generated-file history.
 
 #### 3. Contracts
 
@@ -882,9 +884,9 @@ request-snapshot hash, optional versioned+hashed normalized checkpoint, and opti
 - A succeeded model node has a checkpoint whose SHA-256 recomputes from the canonical versioned
   domain payload. Prompt, provider request/body, raw completion, credentials, stack traces and raw
   errors are forbidden in checkpoints.
-- Decode, typed validation or exhausted transport failure pauses the graph. Retry/resume is an
-  explicit user action that creates a new parent Run; Features do not add an automatic semantic
-  retry loop or silently change model/response format.
+- Decode, typed output validation or exhausted transport failure pauses the graph. Retry/resume is
+  an explicit user action that creates a new parent Run. Registered-validation-guided repair is the
+  sole automatic semantic loop and never changes model, endpoint or response format.
 - After all nodes succeed, Feature finalization binds local identities, pinned hashes and Resource
   provenance, then reuses the complete composition graph validator.
 - `validatedContentDigest` covers immutable owner/request/blueprint identity, every ordered
@@ -893,7 +895,9 @@ request-snapshot hash, optional versioned+hashed normalized checkpoint, and opti
   reference.
 - `commitIntent` fixes Draft ID, complete canonical Draft payload, payload SHA-256,
   `validatedContentDigest`, and timestamps before publication. The only success order is
-  `commit_prepared -> Draft createOrMatch -> graph succeeded -> Run succeeded`.
+  For Generate the success order is `registered validation -> commit_prepared -> Build/Package/
+  publication -> graph succeeded -> Run succeeded`; for Plan it remains `complete local validation
+  -> commit_prepared -> Draft createOrMatch -> graph succeeded -> Run succeeded`.
 - `commit_prepared` is roll-forward-only. Draft absence creates the exact intent payload; an exact
   provenance+bytes match is idempotent; a mismatch becomes stable `commit_blocked` and
   `composition.commit.conflict`. It never overwrites a Draft or regenerates timestamps/IDs.
@@ -915,6 +919,8 @@ paths, commands or Provider settings.
 | duplicate node/group, missing dependency, cycle, invalid count/binding target | typed preflight failure before HTTP |
 | CAS/claim revision mismatch or active Run exists | typed conflict; no new Run |
 | node response malformed, wrong typed shape or transport retries exhausted | checkpoint unchanged; graph paused; Run failed/interrupted |
+| generated-content validation issue uniquely owned by one non-merge file and policy permits | replace all roles for that Single checkpoint; rebuild finalize; rerun complete validator suite |
+| local/non-repairable/ambiguous issue, unchanged replacement, repeated fingerprint+checkpoint, or policy exhausted | graph paused with safe graph failure; current checkpoint retained |
 | checkpoint hash/state mismatch or corrupt graph JSON | structural recovery failure for that graph; no guessed recovery |
 | Run create fails after graph claim | CAS compensation to paused; project-open recovery handles a failed compensation |
 | crash before `commit_prepared` | preserve succeeded checkpoints and resume remaining nodes |
@@ -983,12 +989,13 @@ single-request path and does not create an execution graph.
 #### 2. Signatures
 
 ```rust
-pub struct CompositionGenerateRequest { // feature.composition-generate-request v2
+pub struct CompositionGenerateRequest { // feature.composition-generate-request v3
     pub artifact_id: String,
     pub mod_id: String,
     pub root: StoredItemDefinition,
     pub draft: Option<CompositionDraftRef>,
     pub package: ProjectPackageRequest,
+    pub repair_policy: RepairPolicy,
     pub execution: Option<CompositionGenerateExecutionRequest>,
 }
 
@@ -1010,7 +1017,8 @@ CompositionGenerateService::execute_staged(...)
 
 #### 3. Contracts
 
-The backend enriches an initial v2 request with `execution.kind=start`. Resume creates a new parent
+The backend enriches an initial v3 request with `execution.kind=start`. The immutable request also
+fixes `until_passed` or `max_rounds(1..20)`. Resume creates a new parent
 Run and enriches the exact blueprint request with `kind=resume`, the graph ID, expected revision and
 previous Run ID. The graph contains exactly two model nodes per resolved Item plus one local node:
 
@@ -1030,19 +1038,21 @@ item.000.plan -> item.000.single -> item.001.plan -> item.001.single -> ...
   between graph CAS and child persistence is repaired from the checkpoint; a different existing Run
   is a storage failure.
 - `composition.finalize` reconstructs every proposal, enforces one validation Primitive, merges
-  files and validates writes locally. Only then may the graph enter `commit_prepared` with a hashed
-  publication intent.
+  files and validates writes locally. The graph then enters `validating`, not `commit_prepared`.
+- A repair request contains typed issues and the owning Item's current complete role files. Single
+  reuses the original Pack/Truth/definition/resource/output contracts; a valid replacement CAS
+  replaces only the active Single checkpoint, then finalize and the complete validator rerun.
 - Build, Package, real-project transaction and the one composition Artifact execute only after all
-  model nodes and finalize succeed. A finalization failure releases the `commit_prepared` claim for
-  explicit resume and never reruns successful model nodes.
+  model nodes, finalize and registered validation succeed. Only then is the publication intent
+  fixed and graph moved to roll-forward-only `commit_prepared`.
 - Result and Artifact extension are v2 and include the execution graph ID. The public Feature
   catalog remains exactly 12 entries; execution nodes are not Features.
 - A succeeded graph reconciliation decodes the final result, succeeds a new parent Run and performs
   zero model, validation, Build, Package, project-write or Artifact work.
 
-Runtime `ExecutionCommitIntent` accepts exactly one legacy Draft intent or one generic publication
-intent. Mixed forms, unsafe target IDs or payload-hash mismatch are invalid graph records. Existing
-Draft-intent graph JSON remains readable without rewriting historical evidence.
+Runtime `ExecutionCommitIntent` accepts exactly one Draft intent or one generic publication intent.
+Mixed forms, unsafe target IDs or payload-hash mismatch are invalid graph records. Graph v1 JSON is
+not read or rewritten.
 
 #### 4. Validation & Error Matrix
 
@@ -1053,7 +1063,8 @@ Draft-intent graph JSON remains readable without rewriting historical evidence.
 | checkpoint schema/hash/domain mismatch | `composition.execution.invalid` | no guessed output or model fallback |
 | child Run create conflicts with different bytes | `run.storage_failed` | checkpoint remains authoritative; no overwrite |
 | local merge/Primitive/write validation fails | finalize node fails and graph pauses | all Plan/Single checkpoints |
-| Build/Package/validation/publication fails after prepare | claim is released while commit remains roll-forward | all model checkpoints and publication intent |
+| registered validation fails locally or cannot be repaired | graph pauses before commit intent | all current model checkpoints |
+| Build/Package/publication fails after prepare | claim is released while commit remains roll-forward | all model checkpoints and publication intent |
 | crash with an active model node | structural recovery interrupts that attempt and pauses graph | all earlier succeeded nodes |
 | graph already succeeded but parent is not authoritative | new reconciliation Run succeeds from final result | zero model/publication work |
 
@@ -1065,8 +1076,11 @@ Draft-intent graph JSON remains readable without rewriting historical evidence.
   one Package, one project transaction and one composition Artifact.
 - Bad: restart `composition.generate` from the root request after one node fails, store a complete
   Prompt/request snapshot in a checkpoint, or expose a partially generated project/Artifact.
-- Bad: add automatic Feature-level semantic retry or model/format fallback; resume is explicit and
-  Adapter transport retry remains the only bounded automatic retry layer.
+- Bad: retry Provider transport, decode/typed-output rejection, local-environment failure, a shared
+  merge file or an ambiguously owned diagnostic from Feature code; silently switch model, endpoint
+  or response format; or continue after an unchanged replacement, repeated diagnostic on the same
+  checkpoint or exhausted policy. Registered-validation repair is the sole Feature-owned semantic
+  loop and replaces complete declared roles before rerunning the whole validation closure.
 
 #### 6. Tests Required
 
@@ -1080,8 +1094,10 @@ npx tsc -b --pretty false
 
 Assertions must cover Plan success plus Single invalid pause, repository re-instantiation, resume
 request count excluding successful nodes, stable serial order, exact child Run create-or-match,
-local finalize, one final publication path, succeeded reconciliation with zero model requests,
-claim CAS, Pause/Cancel and no staging/transaction residue.
+local finalize, registered-validation repair success, every repair stop condition, repair crash
+recovery, absence of `commit_prepared` before validation success, one final publication path,
+succeeded reconciliation with zero model requests, claim CAS, Pause/Cancel and no
+staging/transaction residue.
 
 #### 7. Wrong Vs Correct
 

@@ -317,6 +317,7 @@ dependencies = [
  "ats-kernel",
  "chrono",
  "dirs",
+ "quick-xml",
  "serde",
  "serde_json",
  "sha2",

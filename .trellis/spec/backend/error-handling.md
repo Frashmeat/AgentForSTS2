@@ -115,9 +115,26 @@ graph revision/claim, `composition.execution.storage_failed` for graph repositor
 `composition.execution.invalid` for a checkpoint/blueprint/publication-intent mismatch. A known
 Plan or Single `model.*` failure keeps its original code and stage while the graph pauses the exact
 node; it must not be reclassified as an execution failure. Child Run create-or-match failure is
-`run.storage_failed`. Resume is explicit and never converts one of these failures into an automatic
-semantic retry. Failure after `commit_prepared` releases only the active claim and preserves the
-roll-forward publication intent plus every successful model checkpoint.
+`run.storage_failed`. Resume is explicit and never converts transport, decode or typed-output
+failure into an automatic semantic retry. Before `commit_prepared`, a registered validator may
+produce bounded `generated_content` issues for the Feature-owned complete-role repair loop; local,
+unsafe, ambiguous, unchanged, repeated or policy-exhausted outcomes pause through graph-level safe
+failure without another model request. Failure after `commit_prepared` releases only the active
+claim and preserves the roll-forward publication intent plus every successful model checkpoint.
+
+Invalid configured `Sts2AssemblyPath`/`GodotPath` or managed `local.props` XML maps to the one Shell
+code `project.local_environment_invalid`, category `configuration`, action `retry`, and
+`retryable=false`. Create/Open use stage `project.local_props`; Generate/Build/Package persist the
+same code at `feature.local_props` before model or tool work. The failure must not include absolute
+paths or XML/parser/IO text. Create rolls back only its newly created exact project root; Open and
+execution preserve every existing project byte.
+
+| Boundary | Good | Bad |
+| --- | --- | --- |
+| Create/Open | valid plain files -> managed fields synchronize before session exposure | invalid path/XML -> `project.local_environment_invalid`, no exposed half-configured session |
+| Generate/Build/Package | current Settings synchronize before model/tool invocation | local failure enters repair input or is collapsed to `core.unclassified` |
+
+Required canaries: `commands::failure::tests::invalid_project_local_environment_has_one_stable_shell_contract`, Workspace configured-Create rollback, and the Desktop facade fixture with explicit plain local tool files.
 
 ## Ownership
 
@@ -154,6 +171,19 @@ Use stable code/stage, safe relative identifiers, bounded classified details, an
 ## Artifact Failures
 
 Artifact validation, path, IO, publish, rollback, codegen, batch and package failures must remain typed `artifact.*`/Feature stage failures. Only Interrupted, Windows PermissionDenied, and OS errors 5/32/33 are eligible for bounded atomic rename retry. Exhaustion fails, cleans this run's staging, and never synthesizes success.
+
+## Registered Validation And Repair
+
+- Validators return at most 256 bounded `ValidationIssue` values with validator/code/severity,
+  normalized relative path, optional line/column/symbol, repairability and stable fingerprint.
+- Adapter logs may retain sanitized stdout/stderr tails locally; graph failure, Run details, IPC and
+  repair prompts must not contain arbitrary command tails or absolute machine paths.
+- Missing game/tool paths are `local_environment`, never generated-content repair input.
+- Only errors classified `generated_content` and uniquely owned by one non-merge generated file may
+  enter semantic repair. Non-repairable, ambiguous merge-file and storage/configuration failures
+  pause without another model request.
+- Repeated fingerprint against the same checkpoint, unchanged replacement bytes, policy exhaustion,
+  cancellation and Truth insufficiency are stable stop conditions, not retryable Provider errors.
 
 ## Required Tests
 

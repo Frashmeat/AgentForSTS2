@@ -74,6 +74,8 @@ export function CompositionStudioPage() {
   const [modId, setModId] = useState("");
   const [sourceRoot, setSourceRoot] = useState("delivery");
   const [outputPath, setOutputPath] = useState("packages/mod.zip");
+  const [repairMode, setRepairMode] = useState<"max_rounds" | "until_passed">("max_rounds");
+  const [maxRepairRounds, setMaxRepairRounds] = useState(3);
   const [lastGenerationRunId, setLastGenerationRunId] = useState("");
   const [lastGenerationRun, setLastGenerationRun] = useState<RunRecord | null>(null);
   const [lastPlanRun, setLastPlanRun] = useState<RunRecord | null>(null);
@@ -382,6 +384,9 @@ export function CompositionStudioPage() {
           outputRelativePath: outputPath,
           compressionLevel: 6,
         },
+        repairMode === "until_passed"
+          ? { kind: "until_passed" }
+          : { kind: "max_rounds", maxRounds: maxRepairRounds },
       ));
       setLastGenerationRunId(runId);
       setLastGenerationRun(null);
@@ -544,6 +549,24 @@ export function CompositionStudioPage() {
                 <Field label="Mod ID"><input data-testid="composition-mod-id" className="input-mono" value={modId} onChange={(event) => setModId(event.target.value)} /></Field>
                 <Field label="Build output root"><input data-testid="composition-source-root" className="input-mono" value={sourceRoot} onChange={(event) => setSourceRoot(event.target.value)} /></Field>
                 <Field label="Package output"><input data-testid="composition-output-path" className="input-mono" value={outputPath} onChange={(event) => setOutputPath(event.target.value)} /></Field>
+                <Field label="Validation repair">
+                  <select data-testid="composition-repair-mode" value={repairMode} onChange={(event) => setRepairMode(event.target.value as typeof repairMode)}>
+                    <option value="max_rounds">Limit repair rounds</option>
+                    <option value="until_passed">Until validation passes</option>
+                  </select>
+                </Field>
+                {repairMode === "max_rounds" && (
+                  <Field label="Maximum rounds">
+                    <input
+                      data-testid="composition-repair-rounds"
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={maxRepairRounds}
+                      onChange={(event) => setMaxRepairRounds(Math.min(20, Math.max(1, Number(event.target.value) || 1)))}
+                    />
+                  </Field>
+                )}
               </div>
               <div className="flex items-center gap-3 mt-3 flex-wrap">
                 <Button data-testid="composition-generate" variant="accent" disabled={busy || !projectOpen || !selectedRoot || !artifactId.trim() || !modId.trim() || !sourceRoot.trim() || !outputPath.trim()} onClick={() => void generateComposition()}><Hammer size={14} /> Generate and package</Button>

@@ -663,6 +663,12 @@ impl CompositionPlanService {
         }
 
         if graph.status() == ExecutionGraphStatus::Running {
+            mutate_graph(&mut graph, graphs, |graph| {
+                graph.begin_validation(run_id, Utc::now())
+            })?;
+        }
+
+        if graph.status() == ExecutionGraphStatus::Validating {
             let checkpoint: StagedCommitCheckpoint =
                 decode_checkpoint(&graph, &commit_id, &commit_checkpoint_schema())?;
             let canonical_draft =
@@ -1437,7 +1443,10 @@ fn validated_content_digest(
         .iter()
         .filter(|(id, node)| *id != excluded_node && node.status == ExecutionNodeStatus::Succeeded)
         .map(|(id, node)| {
-            let checkpoint = node.checkpoint.as_ref().ok_or_else(invalid_staged_output)?;
+            let checkpoint = node
+                .active_checkpoint
+                .as_ref()
+                .ok_or_else(invalid_staged_output)?;
             Ok(serde_json::json!({
                 "nodeId": id,
                 "roleId": node.role_id,
@@ -1476,7 +1485,7 @@ fn decode_checkpoint<T: for<'de> Deserialize<'de>>(
     graph
         .nodes()
         .get(node_id)
-        .and_then(|node| node.checkpoint.as_ref())
+        .and_then(|node| node.active_checkpoint.as_ref())
         .ok_or_else(invalid_staged_output)?
         .payload
         .decode(schema)

@@ -188,6 +188,7 @@ impl ValidationRunner for CancellingValidator {
             exit_code: 0,
             stdout_tail: String::new(),
             stderr_tail: String::new(),
+            issues: Vec::new(),
         })
     }
 }

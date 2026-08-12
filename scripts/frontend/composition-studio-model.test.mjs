@@ -178,6 +178,7 @@ test("confirmed roots build one exact whole-closure request", () => {
       outputRelativePath: " packages/FixtureMod.zip ",
       compressionLevel: 6,
     },
+    { kind: "max_rounds", maxRounds: 3 },
   ), {
     artifactId: "fixture-composition",
     modId: "FixtureMod",
@@ -190,6 +191,7 @@ test("confirmed roots build one exact whole-closure request", () => {
       outputRelativePath: "packages/FixtureMod.zip",
       compressionLevel: 6,
     },
+    repairPolicy: { kind: "max_rounds", maxRounds: 3 },
   });
 });
 

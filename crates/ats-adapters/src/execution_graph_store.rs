@@ -28,7 +28,7 @@ impl FileExecutionGraphRepository {
     }
 
     fn root(&self) -> PathBuf {
-        self.project_root.join(".ats").join("execution-graphs-v1")
+        self.project_root.join(".ats").join("execution-graphs-v2")
     }
 
     fn path(&self, id: &ExecutionGraphId) -> PathBuf {

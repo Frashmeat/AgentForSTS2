@@ -25,8 +25,8 @@ pub use delivery::{
 pub use execution::{
     CancellationToken, PendingProjectStage, PendingProjectWrites, ProjectFileWrite,
     ProjectFileWriter, ProjectStageError, ProjectStageRequest, ProjectStager, ProjectWriteError,
-    ValidationError, ValidationReport, ValidationRequest, ValidationRunner,
-    validate_project_writes,
+    ValidationError, ValidationIssue, ValidationIssueRepairability, ValidationIssueSeverity,
+    ValidationReport, ValidationRequest, ValidationRunner, validate_project_writes,
 };
 pub use execution_graph::{
     EXECUTION_GRAPH_SCHEMA_VERSION, ExecutionCommitIntent, ExecutionFailure, ExecutionGraphError,

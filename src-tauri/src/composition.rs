@@ -48,7 +48,7 @@ use ats_runtime::{
     CancellationToken, MediaError, ModelClient, RunFailure, RunRecord, RunRepository, RunStatus,
     RunTransition, VersionedPayload,
 };
-use ats_workspace::ProjectMeta;
+use ats_workspace::{LocalBuildPaths, ProjectMeta, sync_project_local_props};
 use chrono::Utc;
 
 use crate::AppConfig;
@@ -392,6 +392,24 @@ impl Stage2Composition {
             .validate_request(run.feature_id(), run.request())
             .map_err(|_| failure("run.input_invalid", "feature.request"))?;
         let settings = config.settings_snapshot();
+        if matches!(
+            run.feature_id().as_str(),
+            "composition.generate"
+                | "mod.generate.single"
+                | "mod.generate.batch"
+                | "mod.generate.complex"
+                | "project.build"
+                | "project.package"
+        ) {
+            sync_project_local_props(
+                project_root,
+                &LocalBuildPaths {
+                    sts2_assembly_path: settings.knowledge.sts2_dll_path.clone().into(),
+                    godot_executable_path: settings.toolchain.godot_exe_path.clone().into(),
+                },
+            )
+            .map_err(|_| failure("project.local_environment_invalid", "feature.local_props"))?;
+        }
         let project_context = format!(
             "Project name: {}; Mod ID: {}; Game Pack: {}.",
             project.name, project.csharp_name, project.game_id
@@ -1201,6 +1219,12 @@ mod tests {
         let session = ProjectSession::open(folder).unwrap();
         let mut settings = Settings::default();
         settings.llm.custom_prompt = "FACADE-CUSTOM-CANARY".into();
+        let sts2 = temp.path().join("sts2.dll");
+        let godot = temp.path().join("godot.exe");
+        fs::write(&sts2, b"fixture assembly").unwrap();
+        fs::write(&godot, b"fixture tool").unwrap();
+        settings.knowledge.sts2_dll_path = sts2.to_string_lossy().into_owned();
+        settings.toolchain.godot_exe_path = godot.to_string_lossy().into_owned();
         let config = Arc::new(AppConfig::new(
             settings,
             ConfigStatus {

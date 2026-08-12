@@ -10,12 +10,14 @@ use thiserror::Error;
 
 use crate::{RunId, VersionedPayload};
 
-pub const EXECUTION_GRAPH_SCHEMA_VERSION: u32 = 1;
+pub const EXECUTION_GRAPH_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecutionGraphStatus {
     Running,
+    Validating,
+    Repairing,
     PauseRequested,
     Paused,
     CancelRequested,
@@ -119,12 +121,19 @@ pub struct ExecutionNodeRecord {
     pub role_id: String,
     pub depends_on: Vec<ExecutionNodeId>,
     pub status: ExecutionNodeStatus,
-    pub logical_attempts: Vec<LogicalNodeAttempt>,
+    pub attempt_count: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_attempt: Option<LogicalNodeAttempt>,
     pub request_snapshot_hash: Sha256Digest,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub checkpoint: Option<HashedExecutionPayload>,
+    pub active_checkpoint: Option<HashedExecutionPayload>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub safe_failure: Option<ExecutionFailure>,
+    pub repair_round: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostic_fingerprint: Option<Sha256Digest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostic_checkpoint_hash: Option<Sha256Digest>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -236,6 +245,7 @@ pub struct ExecutionGraphRecord {
     updated_at: DateTime<Utc>,
     blueprint: HashedExecutionPayload,
     nodes: BTreeMap<ExecutionNodeId, ExecutionNodeRecord>,
+    graph_failure: Option<ExecutionFailure>,
     commit_intent: Option<ExecutionCommitIntent>,
     final_result_ref: Option<HashedExecutionPayload>,
 }
@@ -262,10 +272,14 @@ impl ExecutionGraphRecord {
                         role_id: spec.role_id,
                         depends_on: spec.depends_on,
                         status: ExecutionNodeStatus::Pending,
-                        logical_attempts: Vec::new(),
+                        attempt_count: 0,
+                        active_attempt: None,
                         request_snapshot_hash: spec.request_snapshot_hash,
-                        checkpoint: None,
+                        active_checkpoint: None,
                         safe_failure: None,
+                        repair_round: 0,
+                        diagnostic_fingerprint: None,
+                        diagnostic_checkpoint_hash: None,
                     },
                 )
                 .is_some()
@@ -286,6 +300,7 @@ impl ExecutionGraphRecord {
             updated_at: at,
             blueprint: HashedExecutionPayload::new(blueprint)?,
             nodes,
+            graph_failure: None,
             commit_intent: None,
             final_result_ref: None,
         };
@@ -312,6 +327,7 @@ impl ExecutionGraphRecord {
         self.mutate(at, |next| {
             if next.status == ExecutionGraphStatus::Paused {
                 next.status = ExecutionGraphStatus::Running;
+                next.graph_failure = None;
             }
             next.active_run_id = Some(run_id);
             next.previous_run_id = Some(previous_run_id);
@@ -355,13 +371,14 @@ impl ExecutionGraphRecord {
                 .nodes
                 .get_mut(node_id)
                 .ok_or(ExecutionGraphError::NodeNotFound)?;
-            let ordinal = u32::try_from(node.logical_attempts.len())
-                .ok()
-                .and_then(|value| value.checked_add(1))
+            let ordinal = node
+                .attempt_count
+                .checked_add(1)
                 .ok_or(ExecutionGraphError::InvalidAttempt)?;
+            node.attempt_count = ordinal;
             node.status = ExecutionNodeStatus::Running;
             node.safe_failure = None;
-            node.logical_attempts.push(LogicalNodeAttempt {
+            node.active_attempt = Some(LogicalNodeAttempt {
                 run_id: run_id.clone(),
                 ordinal,
                 started_at: at,
@@ -419,7 +436,8 @@ impl ExecutionGraphRecord {
             attempt.outcome = LogicalAttemptOutcome::Succeeded;
             attempt.completed_at = Some(at);
             node.status = ExecutionNodeStatus::Succeeded;
-            node.checkpoint = Some(HashedExecutionPayload::new(checkpoint)?);
+            node.active_checkpoint = Some(HashedExecutionPayload::new(checkpoint)?);
+            node.active_attempt = None;
             node.safe_failure = None;
             Ok(())
         })
@@ -447,6 +465,7 @@ impl ExecutionGraphRecord {
             attempt.outcome = LogicalAttemptOutcome::Failed;
             attempt.completed_at = Some(at);
             attempt.failure = Some(failure.clone());
+            node.active_attempt = None;
             node.status = ExecutionNodeStatus::Pending;
             node.safe_failure = Some(failure);
             next.status = ExecutionGraphStatus::Paused;
@@ -513,12 +532,155 @@ impl ExecutionGraphRecord {
         at: DateTime<Utc>,
     ) -> Result<(), ExecutionGraphError> {
         self.mutate(at, |next| {
-            if next.status != ExecutionGraphStatus::Running
-                || next.active_run_id.as_ref() != Some(run_id)
+            if !matches!(
+                next.status,
+                ExecutionGraphStatus::Running
+                    | ExecutionGraphStatus::Validating
+                    | ExecutionGraphStatus::Repairing
+            ) || next.active_run_id.as_ref() != Some(run_id)
             {
                 return Err(ExecutionGraphError::InvalidTransition);
             }
             next.status = ExecutionGraphStatus::PauseRequested;
+            Ok(())
+        })
+    }
+
+    pub fn begin_validation(
+        &mut self,
+        run_id: &RunId,
+        at: DateTime<Utc>,
+    ) -> Result<(), ExecutionGraphError> {
+        self.mutate(at, |next| {
+            if !matches!(
+                next.status,
+                ExecutionGraphStatus::Running | ExecutionGraphStatus::Repairing
+            ) || next.active_run_id.as_ref() != Some(run_id)
+                || next
+                    .nodes
+                    .values()
+                    .any(|node| node.status != ExecutionNodeStatus::Succeeded)
+            {
+                return Err(ExecutionGraphError::InvalidTransition);
+            }
+            next.status = ExecutionGraphStatus::Validating;
+            Ok(())
+        })
+    }
+
+    pub fn begin_repair(
+        &mut self,
+        node_id: &ExecutionNodeId,
+        run_id: &RunId,
+        fingerprint: Sha256Digest,
+        checkpoint_hash: Sha256Digest,
+        at: DateTime<Utc>,
+    ) -> Result<(), ExecutionGraphError> {
+        self.mutate(at, |next| {
+            if next.status != ExecutionGraphStatus::Validating
+                || next.active_run_id.as_ref() != Some(run_id)
+            {
+                return Err(ExecutionGraphError::InvalidTransition);
+            }
+            let node = next
+                .nodes
+                .get_mut(node_id)
+                .ok_or(ExecutionGraphError::NodeNotFound)?;
+            if node.status != ExecutionNodeStatus::Succeeded
+                || node.active_checkpoint.is_none()
+                || node.diagnostic_fingerprint.as_ref() == Some(&fingerprint)
+                    && node.diagnostic_checkpoint_hash.as_ref() == Some(&checkpoint_hash)
+                || node.active_checkpoint.as_ref().map(|value| &value.sha256)
+                    != Some(&checkpoint_hash)
+            {
+                return Err(ExecutionGraphError::InvalidTransition);
+            }
+            node.repair_round = node
+                .repair_round
+                .checked_add(1)
+                .ok_or(ExecutionGraphError::InvalidAttempt)?;
+            node.diagnostic_fingerprint = Some(fingerprint);
+            node.diagnostic_checkpoint_hash = Some(checkpoint_hash);
+            next.status = ExecutionGraphStatus::Repairing;
+            next.graph_failure = None;
+            Ok(())
+        })
+    }
+
+    pub fn pause_after_graph_failure(
+        &mut self,
+        run_id: &RunId,
+        failure: ExecutionFailure,
+        at: DateTime<Utc>,
+    ) -> Result<(), ExecutionGraphError> {
+        failure.validate()?;
+        self.mutate(at, |next| {
+            if !matches!(
+                next.status,
+                ExecutionGraphStatus::Validating | ExecutionGraphStatus::Repairing
+            ) || next.active_run_id.as_ref() != Some(run_id)
+            {
+                return Err(ExecutionGraphError::InvalidTransition);
+            }
+            next.graph_failure = Some(failure);
+            next.status = ExecutionGraphStatus::Paused;
+            next.previous_run_id = next.active_run_id.clone();
+            next.active_run_id = None;
+            Ok(())
+        })
+    }
+
+    pub fn replace_checkpoint(
+        &mut self,
+        node_id: &ExecutionNodeId,
+        run_id: &RunId,
+        checkpoint: VersionedPayload,
+        at: DateTime<Utc>,
+    ) -> Result<(), ExecutionGraphError> {
+        self.mutate(at, |next| {
+            if next.status != ExecutionGraphStatus::Repairing
+                || next.active_run_id.as_ref() != Some(run_id)
+            {
+                return Err(ExecutionGraphError::InvalidTransition);
+            }
+            let node = next
+                .nodes
+                .get_mut(node_id)
+                .ok_or(ExecutionGraphError::NodeNotFound)?;
+            if node.status != ExecutionNodeStatus::Succeeded || node.active_checkpoint.is_none() {
+                return Err(ExecutionGraphError::InvalidTransition);
+            }
+            node.active_checkpoint = Some(HashedExecutionPayload::new(checkpoint)?);
+            node.safe_failure = None;
+            Ok(())
+        })
+    }
+
+    pub fn replace_checkpoint_while_running(
+        &mut self,
+        node_id: &ExecutionNodeId,
+        run_id: &RunId,
+        checkpoint: VersionedPayload,
+        at: DateTime<Utc>,
+    ) -> Result<(), ExecutionGraphError> {
+        self.mutate(at, |next| {
+            if next.status != ExecutionGraphStatus::Running
+                || next.active_run_id.as_ref() != Some(run_id)
+                || !next.nodes.values().any(|node| node.repair_round > 0)
+            {
+                return Err(ExecutionGraphError::InvalidTransition);
+            }
+            let node = next
+                .nodes
+                .get_mut(node_id)
+                .ok_or(ExecutionGraphError::NodeNotFound)?;
+            if node.status != ExecutionNodeStatus::Succeeded
+                || node.active_checkpoint.is_none()
+                || node.repair_round != 0
+            {
+                return Err(ExecutionGraphError::InvalidTransition);
+            }
+            node.active_checkpoint = Some(HashedExecutionPayload::new(checkpoint)?);
             Ok(())
         })
     }
@@ -531,7 +693,7 @@ impl ExecutionGraphRecord {
     ) -> Result<(), ExecutionGraphError> {
         intent.validate()?;
         self.mutate(at, |next| {
-            if next.status != ExecutionGraphStatus::Running
+            if next.status != ExecutionGraphStatus::Validating
                 || next.active_run_id.as_ref() != Some(run_id)
                 || next
                     .nodes
@@ -599,11 +761,12 @@ impl ExecutionGraphRecord {
             }
             for node in next.nodes.values_mut() {
                 if node.status == ExecutionNodeStatus::Running
-                    && let Some(attempt) = node.logical_attempts.last_mut()
+                    && let Some(attempt) = node.active_attempt.as_mut()
                 {
                     attempt.outcome = LogicalAttemptOutcome::Cancelled;
                     attempt.completed_at = Some(at);
                 }
+                node.active_attempt = None;
                 if node.status != ExecutionNodeStatus::Succeeded {
                     node.status = ExecutionNodeStatus::Cancelled;
                 }
@@ -621,7 +784,10 @@ impl ExecutionGraphRecord {
             .ok_or(ExecutionGraphError::InvalidTransition)?;
         self.mutate(at, |next| {
             match next.status {
-                ExecutionGraphStatus::Running | ExecutionGraphStatus::PauseRequested => {
+                ExecutionGraphStatus::Running
+                | ExecutionGraphStatus::Validating
+                | ExecutionGraphStatus::Repairing
+                | ExecutionGraphStatus::PauseRequested => {
                     interrupt_running_node(next, &run_id, at)?;
                     next.status = ExecutionGraphStatus::Paused;
                 }
@@ -672,8 +838,12 @@ impl ExecutionGraphRecord {
         }
         validate_nodes(&self.nodes)?;
         match self.status {
-            ExecutionGraphStatus::Running | ExecutionGraphStatus::PauseRequested => {
+            ExecutionGraphStatus::Running
+            | ExecutionGraphStatus::Validating
+            | ExecutionGraphStatus::Repairing
+            | ExecutionGraphStatus::PauseRequested => {
                 if self.active_run_id.is_none()
+                    || self.graph_failure.is_some()
                     || self.commit_intent.is_some()
                     || self.final_result_ref.is_some()
                 {
@@ -694,6 +864,7 @@ impl ExecutionGraphRecord {
             }
             ExecutionGraphStatus::CommitPrepared => {
                 if self.commit_intent.is_none()
+                    || self.graph_failure.is_some()
                     || self.final_result_ref.is_some()
                     || self
                         .nodes
@@ -705,6 +876,7 @@ impl ExecutionGraphRecord {
             }
             ExecutionGraphStatus::CommitBlocked => {
                 if self.active_run_id.is_some()
+                    || self.graph_failure.is_some()
                     || self.commit_intent.is_none()
                     || self.final_result_ref.is_some()
                 {
@@ -713,6 +885,7 @@ impl ExecutionGraphRecord {
             }
             ExecutionGraphStatus::Succeeded => {
                 if self.active_run_id.is_some()
+                    || self.graph_failure.is_some()
                     || self.commit_intent.is_none()
                     || self.final_result_ref.is_none()
                     || self
@@ -724,7 +897,10 @@ impl ExecutionGraphRecord {
                 }
             }
             ExecutionGraphStatus::CancelRequested => {
-                if self.active_run_id.is_none() || self.commit_intent.is_some() {
+                if self.active_run_id.is_none()
+                    || self.commit_intent.is_some()
+                    || self.graph_failure.is_some()
+                {
                     return Err(ExecutionGraphError::InvalidState);
                 }
             }
@@ -793,6 +969,11 @@ impl ExecutionGraphRecord {
     }
 
     #[must_use]
+    pub fn graph_failure(&self) -> Option<&ExecutionFailure> {
+        self.graph_failure.as_ref()
+    }
+
+    #[must_use]
     pub fn commit_intent(&self) -> Option<&ExecutionCommitIntent> {
         self.commit_intent.as_ref()
     }
@@ -823,6 +1004,7 @@ impl<'de> Deserialize<'de> for ExecutionGraphRecord {
             updated_at: DateTime<Utc>,
             blueprint: HashedExecutionPayload,
             nodes: BTreeMap<ExecutionNodeId, ExecutionNodeRecord>,
+            graph_failure: Option<ExecutionFailure>,
             commit_intent: Option<ExecutionCommitIntent>,
             final_result_ref: Option<HashedExecutionPayload>,
         }
@@ -840,6 +1022,7 @@ impl<'de> Deserialize<'de> for ExecutionGraphRecord {
             updated_at: wire.updated_at,
             blueprint: wire.blueprint,
             nodes: wire.nodes,
+            graph_failure: wire.graph_failure,
             commit_intent: wire.commit_intent,
             final_result_ref: wire.final_result_ref,
         };
@@ -856,8 +1039,8 @@ fn active_attempt_mut<'a>(
         return Err(ExecutionGraphError::InvalidTransition);
     }
     let attempt = node
-        .logical_attempts
-        .last_mut()
+        .active_attempt
+        .as_mut()
         .ok_or(ExecutionGraphError::InvalidAttempt)?;
     if &attempt.run_id != run_id || attempt.outcome != LogicalAttemptOutcome::Running {
         return Err(ExecutionGraphError::InvalidAttempt);
@@ -875,6 +1058,7 @@ fn interrupt_running_node(
             let attempt = active_attempt_mut(node, run_id)?;
             attempt.outcome = LogicalAttemptOutcome::Interrupted;
             attempt.completed_at = Some(at);
+            node.active_attempt = None;
             node.status = ExecutionNodeStatus::Pending;
         }
     }
@@ -933,55 +1117,29 @@ fn validate_nodes(
 }
 
 fn validate_node_state(node: &ExecutionNodeRecord) -> Result<(), ExecutionGraphError> {
-    if node.logical_attempts.len() > u32::MAX as usize
-        || node
-            .logical_attempts
-            .iter()
-            .enumerate()
-            .any(|(index, attempt)| {
-                attempt.ordinal != u32::try_from(index + 1).unwrap_or(u32::MAX)
-                    || attempt
-                        .completed_at
-                        .is_some_and(|value| value < attempt.started_at)
-                    || (attempt.outcome == LogicalAttemptOutcome::Running)
-                        != attempt.completed_at.is_none()
-                    || (attempt.outcome == LogicalAttemptOutcome::Failed)
-                        != attempt.failure.is_some()
-                    || attempt
-                        .failure
-                        .as_ref()
-                        .is_some_and(|value| value.validate().is_err())
-            })
+    if node.active_attempt.as_ref().is_some_and(|attempt| {
+        attempt.ordinal != node.attempt_count
+            || attempt.completed_at.is_some()
+            || attempt.outcome != LogicalAttemptOutcome::Running
+            || attempt.failure.is_some()
+    }) || node.diagnostic_fingerprint.is_some() != (node.repair_round > 0)
+        || node.diagnostic_checkpoint_hash.is_some() != (node.repair_round > 0)
     {
         return Err(ExecutionGraphError::InvalidAttempt);
     }
-    let running_attempts = node
-        .logical_attempts
-        .iter()
-        .filter(|attempt| attempt.outcome == LogicalAttemptOutcome::Running)
-        .count();
     match node.status {
-        ExecutionNodeStatus::Pending if node.checkpoint.is_none() && running_attempts == 0 => {}
+        ExecutionNodeStatus::Pending
+            if node.active_checkpoint.is_none() && node.active_attempt.is_none() => {}
         ExecutionNodeStatus::Running
-            if node.checkpoint.is_none()
-                && running_attempts == 1
-                && node
-                    .logical_attempts
-                    .last()
-                    .is_some_and(|attempt| attempt.outcome == LogicalAttemptOutcome::Running) => {}
+            if node.active_checkpoint.is_none() && node.active_attempt.is_some() => {}
         ExecutionNodeStatus::Succeeded
-            if node.checkpoint.is_some()
+            if node.active_checkpoint.is_some()
                 && node.safe_failure.is_none()
-                && running_attempts == 0
-                && node
-                    .logical_attempts
-                    .last()
-                    .is_some_and(|attempt| attempt.outcome == LogicalAttemptOutcome::Succeeded) => {
-        }
-        ExecutionNodeStatus::Cancelled if running_attempts == 0 => {}
+                && node.active_attempt.is_none() => {}
+        ExecutionNodeStatus::Cancelled if node.active_attempt.is_none() => {}
         _ => return Err(ExecutionGraphError::InvalidState),
     }
-    if let Some(checkpoint) = &node.checkpoint {
+    if let Some(checkpoint) = &node.active_checkpoint {
         checkpoint.validate()?;
     }
     if let Some(failure) = &node.safe_failure {
@@ -1138,7 +1296,8 @@ mod tests {
             )
             .unwrap();
         graph.start_node(&node_b, &second_run, Utc::now()).unwrap();
-        assert_eq!(graph.nodes()[&node_a].logical_attempts.len(), 2);
+        assert_eq!(graph.nodes()[&node_a].attempt_count, 2);
+        assert!(graph.nodes()[&node_a].active_attempt.is_none());
     }
 
     #[test]
@@ -1163,6 +1322,7 @@ mod tests {
             hash_json(draft.payload()).unwrap(),
             digest("d"),
         );
+        graph.begin_validation(&run_id, Utc::now()).unwrap();
         graph.prepare_commit(&run_id, intent, Utc::now()).unwrap();
         assert_eq!(graph.status(), ExecutionGraphStatus::CommitPrepared);
         graph.recover_stale_claim(Utc::now()).unwrap();
@@ -1176,6 +1336,69 @@ mod tests {
             .unwrap();
         assert_eq!(graph.status(), ExecutionGraphStatus::Succeeded);
         assert!(graph.final_result_ref().is_some());
+    }
+
+    #[test]
+    fn repair_replaces_only_active_checkpoint_and_stops_only_on_same_candidate_fingerprint() {
+        let (mut graph, run_id) = graph();
+        for (id, value) in [("node.a", 1), ("node.b", 2)] {
+            let id = ExecutionNodeId::parse(id).unwrap();
+            graph.start_node(&id, &run_id, Utc::now()).unwrap();
+            graph
+                .complete_node(
+                    &id,
+                    &run_id,
+                    payload("composition.node-checkpoint", value),
+                    Utc::now(),
+                )
+                .unwrap();
+        }
+        graph.begin_validation(&run_id, Utc::now()).unwrap();
+        let node = ExecutionNodeId::parse("node.a").unwrap();
+        let fingerprint = digest("e");
+        let previous_hash = graph.nodes()[&node]
+            .active_checkpoint
+            .as_ref()
+            .unwrap()
+            .sha256
+            .clone();
+        graph
+            .begin_repair(
+                &node,
+                &run_id,
+                fingerprint.clone(),
+                previous_hash.clone(),
+                Utc::now(),
+            )
+            .unwrap();
+        let replacement = payload("composition.node-checkpoint", 3);
+        let replacement_hash = hash_json(&replacement).unwrap();
+        graph
+            .replace_checkpoint(&node, &run_id, replacement, Utc::now())
+            .unwrap();
+        graph.begin_validation(&run_id, Utc::now()).unwrap();
+        assert_eq!(graph.nodes()[&node].repair_round, 1);
+        let active_hash = &graph.nodes()[&node]
+            .active_checkpoint
+            .as_ref()
+            .unwrap()
+            .sha256;
+        assert_ne!(active_hash, &previous_hash);
+        assert_eq!(active_hash, &replacement_hash);
+        graph
+            .begin_repair(
+                &node,
+                &run_id,
+                fingerprint.clone(),
+                replacement_hash.clone(),
+                Utc::now(),
+            )
+            .unwrap();
+        graph.begin_validation(&run_id, Utc::now()).unwrap();
+        assert!(matches!(
+            graph.begin_repair(&node, &run_id, fingerprint, replacement_hash, Utc::now()),
+            Err(ExecutionGraphError::InvalidTransition)
+        ));
     }
 
     #[test]
@@ -1256,7 +1479,7 @@ mod tests {
             )
             .unwrap();
         let mut wire = serde_json::to_value(&graph).unwrap();
-        wire["nodes"]["node.a"]["checkpoint"]["sha256"] = serde_json::json!("f".repeat(64));
+        wire["nodes"]["node.a"]["activeCheckpoint"]["sha256"] = serde_json::json!("f".repeat(64));
         assert!(serde_json::from_value::<ExecutionGraphRecord>(wire).is_err());
     }
 }

@@ -3,7 +3,7 @@ use std::fs;
 use std::io;
 use std::path::Path;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 use ats_adapters::{
@@ -33,11 +33,13 @@ use ats_kernel::{
 };
 use ats_runtime::{
     ArtifactManifest, BuildError, BuildRunner, BuildStepReport, BuildStepRequest,
-    CancellationToken, ExecutionGraphRepository, FinishReason, ModelClient, ModelError,
-    ModelRequestSnapshot, ModelResponse, ModelStream, ModelStreamEvent, PackageError,
-    PackagePrepareRequest, PackageReport, PackageWriter, PendingPackageOutput, RunRecord,
-    RunStatus, RunTransition, TokenUsage, ValidationError, ValidationReport, ValidationRequest,
-    ValidationRunner, VersionedPayload,
+    CancellationToken, ExecutionGraphRecord, ExecutionGraphRecovery, ExecutionGraphRepository,
+    ExecutionGraphRepositoryError, FinishReason, ModelClient, ModelError, ModelRequestSnapshot,
+    ModelResponse, ModelStream, ModelStreamEvent, PackageError, PackagePrepareRequest,
+    PackageReport, PackageWriter, PendingPackageOutput, RunRecord, RunRepository, RunStatus,
+    RunTransition, TokenUsage, ValidationError, ValidationIssue, ValidationIssueRepairability,
+    ValidationIssueSeverity, ValidationReport, ValidationRequest, ValidationRunner,
+    VersionedPayload,
 };
 use ats_workspace::{
     ItemCompositionProfile, ItemCompositionSource, ItemDefinition, ItemReferenceBinding,
@@ -111,12 +113,118 @@ impl ValidationRunner for FixtureValidation {
             exit_code: i32::from(self.reject),
             stdout_tail: String::new(),
             stderr_tail: String::new(),
+            issues: Vec::new(),
         };
         if self.reject {
             Err(ValidationError::Rejected(report))
         } else {
             Ok(report)
         }
+    }
+}
+
+struct RepairOnceValidation {
+    calls: AtomicUsize,
+}
+
+#[async_trait]
+impl ValidationRunner for RepairOnceValidation {
+    async fn validate(
+        &self,
+        _: ValidationRequest,
+        _: &CancellationToken,
+    ) -> Result<ValidationReport, ValidationError> {
+        if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+            let issue = ValidationIssue {
+                validator_id: "code.dotnet-validate".into(),
+                code: "CS0246".into(),
+                severity: ValidationIssueSeverity::Error,
+                relative_path: Some("Generated/fixture-child.cs".into()),
+                line: Some(1),
+                column: Some(1),
+                message: "The type 'ImaginaryType' could not be found.".into(),
+                symbol: Some("ImaginaryType".into()),
+                repairability: ValidationIssueRepairability::GeneratedContent,
+                fingerprint: Sha256Digest::parse("d".repeat(64)).unwrap(),
+            };
+            return Err(ValidationError::Rejected(ValidationReport {
+                exit_code: 1,
+                stdout_tail: String::new(),
+                stderr_tail: String::new(),
+                issues: vec![issue],
+            }));
+        }
+        Ok(ValidationReport {
+            exit_code: 0,
+            stdout_tail: String::new(),
+            stderr_tail: String::new(),
+            issues: Vec::new(),
+        })
+    }
+}
+
+struct CrashAfterRepairedSingleCheckpoint {
+    inner: FileExecutionGraphRepository,
+    interrupted: AtomicBool,
+}
+
+impl CrashAfterRepairedSingleCheckpoint {
+    fn new(project_root: &Path) -> Self {
+        Self {
+            inner: FileExecutionGraphRepository::new(project_root.to_path_buf()),
+            interrupted: AtomicBool::new(false),
+        }
+    }
+}
+
+impl ExecutionGraphRepository for CrashAfterRepairedSingleCheckpoint {
+    fn create_claimed(
+        &self,
+        graph: &ExecutionGraphRecord,
+        run_id: &ats_runtime::RunId,
+    ) -> Result<(), ExecutionGraphRepositoryError> {
+        self.inner.create_claimed(graph, run_id)
+    }
+
+    fn get(
+        &self,
+        id: &ats_kernel::ExecutionGraphId,
+    ) -> Result<ExecutionGraphRecord, ExecutionGraphRepositoryError> {
+        self.inner.get(id)
+    }
+
+    fn compare_and_set(
+        &self,
+        expected_revision: u64,
+        next: &ExecutionGraphRecord,
+    ) -> Result<(), ExecutionGraphRepositoryError> {
+        let repaired_single_was_persisted = next.nodes().values().any(|node| {
+            node.repair_round > 0
+                && node
+                    .diagnostic_checkpoint_hash
+                    .as_ref()
+                    .is_some_and(|diagnostic| {
+                        node.active_checkpoint
+                            .as_ref()
+                            .is_some_and(|checkpoint| &checkpoint.sha256 != diagnostic)
+                    })
+        });
+        self.inner.compare_and_set(expected_revision, next)?;
+        if repaired_single_was_persisted && !self.interrupted.swap(true, Ordering::SeqCst) {
+            return Err(ExecutionGraphRepositoryError::Conflict);
+        }
+        Ok(())
+    }
+
+    fn list(&self) -> Result<Vec<ExecutionGraphRecord>, ExecutionGraphRepositoryError> {
+        self.inner.list()
+    }
+
+    fn recover_structure(
+        &self,
+        runs: &dyn RunRepository,
+    ) -> Result<ExecutionGraphRecovery, ExecutionGraphRepositoryError> {
+        self.inner.recover_structure(runs)
     }
 }
 
@@ -470,6 +578,366 @@ async fn staged_generation_resumes_only_the_failed_single_node() {
     assert_eq!(third_run.status(), RunStatus::Succeeded);
 }
 
+#[tokio::test]
+async fn staged_validation_repairs_one_owned_file_then_revalidates_the_whole_closure() {
+    let fixture = Fixture::new();
+    let resolver = ContributionResolver::new([
+        PrimitiveId::parse("code.fixture-validate").unwrap(),
+        PrimitiveId::parse("process.fixture-build").unwrap(),
+    ]);
+    let composition = resolve::<CompositionGenerateFeature>(
+        &resolver,
+        &fixture.pack,
+        CompositionGenerateFeature::contribution_requirement(),
+    );
+    let plan = resolve::<ModPlanFeature>(
+        &resolver,
+        &fixture.pack,
+        ModPlanFeature::contribution_requirement(),
+    );
+    let single = resolve::<SingleGenerateFeature>(
+        &resolver,
+        &fixture.pack,
+        SingleGenerateFeature::contribution_requirement(),
+    );
+    let resource = resolve::<ResourcePrepareFeature>(
+        &resolver,
+        &fixture.pack,
+        ResourcePrepareFeature::contribution_requirement(),
+    );
+    let build = resolve::<ProjectBuildFeature>(
+        &resolver,
+        &fixture.pack,
+        ProjectBuildFeature::contribution_requirement(),
+    );
+    let package = resolve::<ProjectPackageFeature>(
+        &resolver,
+        &fixture.pack,
+        ProjectPackageFeature::contribution_requirement(),
+    );
+    let plan_service = ModPlanService::built_in().unwrap();
+    let single_service = SingleGenerateService::built_in().unwrap();
+    let service = CompositionGenerateService::new(
+        &plan_service,
+        &single_service,
+        &ProjectBuildService,
+        &ProjectPackageService,
+    );
+    let context = || CompositionGenerateContext {
+        pack: &fixture.pack,
+        composition_contributions: &composition,
+        plan_contributions: &plan,
+        single_contributions: &single,
+        resource_contributions: &resource,
+        build_contributions: &build,
+        package_contributions: &package,
+        truth: &fixture.truth,
+        project_root: &fixture.project,
+        project_context: "Fixture project",
+        custom_instructions: None,
+        model: None,
+    };
+    let graphs = FileExecutionGraphRepository::new(fixture.project.clone());
+    let runs = FileRunRepository::new(fixture.project.clone()).unwrap();
+    let run_id = ats_runtime::RunId::new();
+    let start = service
+        .prepare_staged_start(
+            fixture.request.clone(),
+            context(),
+            &fixture.items,
+            &fixture.resources,
+            run_id.clone(),
+        )
+        .unwrap();
+    graphs.create_claimed(&start.graph, &run_id).unwrap();
+    let mut run = RunRecord::new_with_id(
+        run_id,
+        CompositionGenerateFeature::id(),
+        VersionedPayload::from_typed(CompositionGenerateFeature::request_schema(), &start.request)
+            .unwrap(),
+    );
+    run.apply_transition(RunTransition::Start, Utc::now())
+        .unwrap();
+    let model = QueueModel {
+        responses: Mutex::new(VecDeque::from([
+            plan_response("child"),
+            bundle_response("child"),
+            plan_response("root"),
+            bundle_response("root"),
+            repaired_bundle_response("child"),
+        ])),
+        requests: AtomicUsize::new(0),
+    };
+    let validator = RepairOnceValidation {
+        calls: AtomicUsize::new(0),
+    };
+    let execution = service
+        .execute_staged(
+            CompositionGenerateDependencies {
+                model: &model,
+                items: &fixture.items,
+                resources: &fixture.resources,
+                writer: &FileProjectWriter,
+                stager: &FileProjectStager,
+                validator: &validator,
+                artifacts: &FileArtifactStore::new(fixture.project.clone()),
+                build_runner: &FixtureBuild,
+                package_writer: &FixturePackageWriter {
+                    reject_commit: false,
+                },
+            },
+            &runs,
+            &graphs,
+            &mut run,
+            start.request,
+            context(),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(model.requests.load(Ordering::SeqCst), 5);
+    assert_eq!(validator.calls.load(Ordering::SeqCst), 2);
+    let graph = graphs
+        .get(execution.result.execution_graph_id.as_ref().unwrap())
+        .unwrap();
+    assert_eq!(graph.status(), ats_runtime::ExecutionGraphStatus::Succeeded);
+    assert_eq!(
+        graph
+            .nodes()
+            .values()
+            .map(|node| node.repair_round)
+            .sum::<u32>(),
+        1
+    );
+    assert!(!fixture.project.join(".ats/composition-staging").exists());
+}
+
+#[tokio::test]
+async fn repaired_single_checkpoint_resumes_before_finalize_without_another_model_request() {
+    let fixture = Fixture::new();
+    let resolver = ContributionResolver::new([
+        PrimitiveId::parse("code.fixture-validate").unwrap(),
+        PrimitiveId::parse("process.fixture-build").unwrap(),
+    ]);
+    let composition = resolve::<CompositionGenerateFeature>(
+        &resolver,
+        &fixture.pack,
+        CompositionGenerateFeature::contribution_requirement(),
+    );
+    let plan = resolve::<ModPlanFeature>(
+        &resolver,
+        &fixture.pack,
+        ModPlanFeature::contribution_requirement(),
+    );
+    let single = resolve::<SingleGenerateFeature>(
+        &resolver,
+        &fixture.pack,
+        SingleGenerateFeature::contribution_requirement(),
+    );
+    let resource = resolve::<ResourcePrepareFeature>(
+        &resolver,
+        &fixture.pack,
+        ResourcePrepareFeature::contribution_requirement(),
+    );
+    let build = resolve::<ProjectBuildFeature>(
+        &resolver,
+        &fixture.pack,
+        ProjectBuildFeature::contribution_requirement(),
+    );
+    let package = resolve::<ProjectPackageFeature>(
+        &resolver,
+        &fixture.pack,
+        ProjectPackageFeature::contribution_requirement(),
+    );
+    let plan_service = ModPlanService::built_in().unwrap();
+    let single_service = SingleGenerateService::built_in().unwrap();
+    let service = CompositionGenerateService::new(
+        &plan_service,
+        &single_service,
+        &ProjectBuildService,
+        &ProjectPackageService,
+    );
+    let context = || CompositionGenerateContext {
+        pack: &fixture.pack,
+        composition_contributions: &composition,
+        plan_contributions: &plan,
+        single_contributions: &single,
+        resource_contributions: &resource,
+        build_contributions: &build,
+        package_contributions: &package,
+        truth: &fixture.truth,
+        project_root: &fixture.project,
+        project_context: "Fixture project",
+        custom_instructions: None,
+        model: None,
+    };
+    let crashing_graphs = CrashAfterRepairedSingleCheckpoint::new(&fixture.project);
+    let runs = FileRunRepository::new(fixture.project.clone()).unwrap();
+    let first_run_id = ats_runtime::RunId::new();
+    let start = service
+        .prepare_staged_start(
+            fixture.request.clone(),
+            context(),
+            &fixture.items,
+            &fixture.resources,
+            first_run_id.clone(),
+        )
+        .unwrap();
+    crashing_graphs
+        .create_claimed(&start.graph, &first_run_id)
+        .unwrap();
+    let mut first_run = RunRecord::new_with_id(
+        first_run_id,
+        CompositionGenerateFeature::id(),
+        VersionedPayload::from_typed(CompositionGenerateFeature::request_schema(), &start.request)
+            .unwrap(),
+    );
+    first_run
+        .apply_transition(RunTransition::Start, Utc::now())
+        .unwrap();
+    let first_model = QueueModel {
+        responses: Mutex::new(VecDeque::from([
+            plan_response("child"),
+            bundle_response("child"),
+            plan_response("root"),
+            bundle_response("root"),
+            repaired_bundle_response("child"),
+        ])),
+        requests: AtomicUsize::new(0),
+    };
+    let validator = RepairOnceValidation {
+        calls: AtomicUsize::new(0),
+    };
+    let interrupted = service
+        .execute_staged(
+            CompositionGenerateDependencies {
+                model: &first_model,
+                items: &fixture.items,
+                resources: &fixture.resources,
+                writer: &FileProjectWriter,
+                stager: &FileProjectStager,
+                validator: &validator,
+                artifacts: &FileArtifactStore::new(fixture.project.clone()),
+                build_runner: &FixtureBuild,
+                package_writer: &FixturePackageWriter {
+                    reject_commit: false,
+                },
+            },
+            &runs,
+            &crashing_graphs,
+            &mut first_run,
+            start.request,
+            context(),
+            &CancellationToken::new(),
+        )
+        .await;
+    let interrupted = match interrupted {
+        Ok(_) => panic!("staged generation unexpectedly survived the injected crash window"),
+        Err(error) => error,
+    };
+    assert_eq!(
+        interrupted.run_failure().code.as_str(),
+        "composition.execution.conflict"
+    );
+    assert_eq!(first_model.requests.load(Ordering::SeqCst), 5);
+    assert_eq!(validator.calls.load(Ordering::SeqCst), 1);
+
+    let persisted = crashing_graphs.get(start.graph.id()).unwrap();
+    let stale_finalize_hash = persisted
+        .nodes()
+        .values()
+        .find(|node| node.role_id == "composition.finalize")
+        .and_then(|node| node.active_checkpoint.as_ref())
+        .map(|checkpoint| checkpoint.sha256.clone())
+        .unwrap();
+    assert_eq!(
+        persisted
+            .nodes()
+            .values()
+            .map(|node| node.repair_round)
+            .sum::<u32>(),
+        1
+    );
+
+    let reopened_graphs = FileExecutionGraphRepository::new(fixture.project.clone());
+    assert_eq!(
+        reopened_graphs.recover_structure(&runs).unwrap().recovered,
+        1
+    );
+    let paused = reopened_graphs.get(start.graph.id()).unwrap();
+    assert_eq!(paused.status(), ats_runtime::ExecutionGraphStatus::Paused);
+    let paused_revision = paused.revision();
+    let second_run_id = ats_runtime::RunId::new();
+    let resumed = service
+        .prepare_staged_resume(paused, paused_revision, second_run_id.clone(), context())
+        .unwrap();
+    reopened_graphs
+        .compare_and_set(paused_revision, &resumed.graph)
+        .unwrap();
+    let mut second_run = RunRecord::new_with_id(
+        second_run_id,
+        CompositionGenerateFeature::id(),
+        VersionedPayload::from_typed(
+            CompositionGenerateFeature::request_schema(),
+            &resumed.request,
+        )
+        .unwrap(),
+    );
+    second_run
+        .apply_transition(RunTransition::Start, Utc::now())
+        .unwrap();
+    let no_model = QueueModel {
+        responses: Mutex::new(VecDeque::new()),
+        requests: AtomicUsize::new(0),
+    };
+    let execution = service
+        .execute_staged(
+            CompositionGenerateDependencies {
+                model: &no_model,
+                items: &fixture.items,
+                resources: &fixture.resources,
+                writer: &FileProjectWriter,
+                stager: &FileProjectStager,
+                validator: &validator,
+                artifacts: &FileArtifactStore::new(fixture.project.clone()),
+                build_runner: &FixtureBuild,
+                package_writer: &FixturePackageWriter {
+                    reject_commit: false,
+                },
+            },
+            &runs,
+            &reopened_graphs,
+            &mut second_run,
+            resumed.request,
+            context(),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(no_model.requests.load(Ordering::SeqCst), 0);
+    assert_eq!(validator.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(second_run.status(), RunStatus::Succeeded);
+    let succeeded = reopened_graphs
+        .get(execution.result.execution_graph_id.as_ref().unwrap())
+        .unwrap();
+    assert_eq!(
+        succeeded.status(),
+        ats_runtime::ExecutionGraphStatus::Succeeded
+    );
+    let rebuilt_finalize_hash = succeeded
+        .nodes()
+        .values()
+        .find(|node| node.role_id == "composition.finalize")
+        .and_then(|node| node.active_checkpoint.as_ref())
+        .map(|checkpoint| checkpoint.sha256.clone())
+        .unwrap();
+    assert_ne!(rebuilt_finalize_hash, stale_finalize_hash);
+    assert!(fixture.project.join("Generated/fixture-child.cs").is_file());
+    assert!(fixture.project.join("Generated/fixture-root.cs").is_file());
+    assert!(fixture.project.join("packages/FixtureMod.zip").is_file());
+    assert!(!fixture.project.join(".ats/composition-staging").exists());
+}
+
 struct FixturePackageWriter {
     reject_commit: bool,
 }
@@ -561,6 +1029,9 @@ impl Fixture {
                 source_relative_root: "delivery".into(),
                 output_relative_path: "packages/FixtureMod.zip".into(),
                 compression_level: Some(6),
+            },
+            repair_policy: ats_features::composition_generate::RepairPolicy::MaxRounds {
+                max_rounds: 3,
             },
             execution: None,
         };
@@ -767,6 +1238,14 @@ fn bundle_response(item_type: &str) -> String {
     serde_json::json!({
         "files":{"source":format!("public class Fixture{item_type} {{}}")},
         "acceptanceNotes":["Generated in the isolated composition stage."]
+    })
+    .to_string()
+}
+
+fn repaired_bundle_response(item_type: &str) -> String {
+    serde_json::json!({
+        "files":{"source":format!("public class Fixture{item_type} {{ public bool Repaired => true; }}")},
+        "acceptanceNotes":["Repaired from a registered validation diagnostic."]
     })
     .to_string()
 }

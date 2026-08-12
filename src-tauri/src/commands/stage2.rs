@@ -81,6 +81,7 @@ pub struct ExecutionGraphView {
     pub current_node_id: Option<ExecutionNodeId>,
     pub current_role_id: Option<String>,
     pub failure_code: Option<FailureCode>,
+    pub repair_round: u32,
     pub can_pause: bool,
     pub can_resume: bool,
     pub can_cancel: bool,
@@ -1097,11 +1098,17 @@ fn execution_graph_view(
             })
         });
     let failure_code = graph
-        .nodes()
-        .values()
-        .filter_map(|node| node.safe_failure.as_ref())
-        .next_back()
-        .map(|failure| failure.code.clone());
+        .graph_failure()
+        .map(|failure| failure.code.clone())
+        .or_else(|| {
+            graph
+                .nodes()
+                .values()
+                .filter_map(|node| node.safe_failure.as_ref())
+                .next_back()
+                .map(|failure| failure.code.clone())
+        });
+    let repair_round = graph.nodes().values().map(|node| node.repair_round).sum();
     ExecutionGraphView {
         execution_graph_id: graph.id().clone(),
         revision: graph.revision(),
@@ -1113,7 +1120,13 @@ fn execution_graph_view(
         current_node_id: current.map(|node| node.node_id.clone()),
         current_role_id: current.map(|node| node.role_id.clone()),
         failure_code,
-        can_pause: graph.status() == ExecutionGraphStatus::Running,
+        repair_round,
+        can_pause: matches!(
+            graph.status(),
+            ExecutionGraphStatus::Running
+                | ExecutionGraphStatus::Validating
+                | ExecutionGraphStatus::Repairing
+        ),
         can_resume: matches!(
             graph.status(),
             ExecutionGraphStatus::Paused | ExecutionGraphStatus::CommitPrepared
@@ -1220,6 +1233,7 @@ mod tests {
                 chrono::Utc::now(),
             )
             .unwrap();
+        graph.begin_validation(&run_id, chrono::Utc::now()).unwrap();
         let publication =
             VersionedPayload::from_typed(schema("fixture.publication"), &serde_json::json!({}))
                 .unwrap();

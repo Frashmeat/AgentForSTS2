@@ -171,6 +171,8 @@ export function cancelRun(runId: string): Promise<boolean> {
 
 export type ExecutionGraphStatus =
   | "running"
+  | "validating"
+  | "repairing"
   | "pause_requested"
   | "paused"
   | "cancel_requested"
@@ -190,6 +192,7 @@ export interface ExecutionGraphView {
   currentNodeId: string | null;
   currentRoleId: string | null;
   failureCode: string | null;
+  repairRound: number;
   canPause: boolean;
   canResume: boolean;
   canCancel: boolean;
@@ -331,6 +334,9 @@ export interface CompositionGenerateRequest extends Record<string, unknown> {
   root: StoredItemDefinition;
   draft?: { draftId: string; revision: number } | null;
   package: ProjectPackageRequest;
+  repairPolicy:
+    | { kind: "until_passed" }
+    | { kind: "max_rounds"; maxRounds: number };
   execution?:
     | { kind: "start"; executionGraphId: string }
     | {
@@ -388,7 +394,7 @@ export function submitCompositionRetryNode(request: CompositionRetryNodeRequest)
 }
 
 export function submitCompositionGenerate(request: CompositionGenerateRequest): Promise<string> {
-  return submit("composition.generate", "feature.composition-generate-request", request, 2);
+  return submit("composition.generate", "feature.composition-generate-request", request, 3);
 }
 
 export function submitSingleGenerate(request: SingleGenerateRequest): Promise<string> {
@@ -953,6 +959,9 @@ function isExecutionGraphView(value: unknown): value is ExecutionGraphView {
     (value.currentNodeId === null || typeof value.currentNodeId === "string") &&
     (value.currentRoleId === null || typeof value.currentRoleId === "string") &&
     (value.failureCode === null || typeof value.failureCode === "string") &&
+    typeof value.repairRound === "number" &&
+    Number.isInteger(value.repairRound) &&
+    value.repairRound >= 0 &&
     typeof value.canPause === "boolean" &&
     typeof value.canResume === "boolean" &&
     typeof value.canCancel === "boolean"
@@ -962,6 +971,8 @@ function isExecutionGraphView(value: unknown): value is ExecutionGraphView {
 function isExecutionGraphStatus(value: unknown): value is ExecutionGraphStatus {
   return typeof value === "string" && [
     "running",
+    "validating",
+    "repairing",
     "pause_requested",
     "paused",
     "cancel_requested",

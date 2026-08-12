@@ -146,6 +146,24 @@ Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-sp
   rejects duplicate keys deterministically, and writes one sorted object before staging. STS2 uses
   this for Card/Relic/Character tables and keeps Character's four Architect lines in separate
   `ancients.json` roles for both locales.
+- ExecutionGraphRecord v2 directly replaces v1 and persists only the current normalized checkpoint,
+  attempt count/active attempt, repair round and latest diagnostic fingerprint/checkpoint hash. The
+  graph repository reads only `.ats/execution-graphs-v2`; no v1 fallback, migration or repair archive
+  is allowed.
+- Composition Generate request v3 fixes `until_passed` or `max_rounds(1..20)` before graph creation.
+  Registered validation runs before commit intent. A repair round may replace exactly one uniquely
+  owned Single checkpoint using complete role contents, then must rebuild finalize output and rerun
+  the complete validator suite. `commit_prepared` is unreachable before validation succeeds.
+- Project-local `local.props` synchronizes only `Sts2AssemblyPath` and `GodotPath` from Settings,
+  preserving `ModsPath` and unknown XML. Create/Open synchronize before session exposure;
+  Generate/Build/Package synchronize before work. Missing/non-file paths fail locally before model
+  or tool execution, and absolute values do not enter Run/Artifact/IPC.
+- `ProjectFolder::create_configured(parent, name, game_id, template, local_build_paths)` owns the
+  Create transaction: template files, metadata, version, managed `local.props` and the lock must all
+  succeed before the folder is returned. Any failure removes only the exact root newly created by
+  that call. Open/sync of an existing project never uses this rollback and must not delete existing
+  content. Tests must cover invalid template `local.props` -> `ProjectError::LocalConfig` -> absent
+  new root, plus preservation of unmanaged properties on an existing file.
 
 ## 6. Prompt And Model Request
 

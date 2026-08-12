@@ -18,8 +18,9 @@ pub use item::{
 };
 
 pub use project::{
-    AppDataPaths, PROJECT_SCHEMA_VERSION, ProjectError, ProjectFolder, ProjectMeta, RecentEntry,
-    RecentProjects, derive_project_identifier,
+    AppDataPaths, LocalBuildPaths, PROJECT_SCHEMA_VERSION, ProjectError, ProjectFolder,
+    ProjectLocalConfigError, ProjectMeta, RecentEntry, RecentProjects, derive_project_identifier,
+    sync_project_local_props,
 };
 
 pub use resource::{

@@ -6,15 +6,18 @@ use ats_features::project_create::{
     ProjectCreateError, ProjectCreateFeature, ProjectCreateRequest, ProjectCreateService,
 };
 use ats_runtime::{CancellationReason, RunRecord, RunTransition, VersionedPayload};
-use ats_workspace::{ProjectError, ProjectFolder, RecentEntry, RecentProjects};
+use ats_workspace::{
+    LocalBuildPaths, ProjectError, ProjectFolder, RecentEntry, RecentProjects,
+    sync_project_local_props,
+};
 use chrono::Utc;
 use serde::Serialize;
 use tauri::State;
 
-use crate::AppPaths;
 use crate::commands::failure::{CommandFailure, CommandResult};
 use crate::composition::Stage2Composition;
 use crate::project_session::{ActiveProject, PROJECT_DRAIN_TIMEOUT, ProjectSession};
+use crate::{AppConfig, AppPaths};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -35,10 +38,12 @@ pub fn list_recent_projects(paths: State<'_, AppPaths>) -> Vec<RecentEntry> {
 pub async fn create_project(
     active: State<'_, ActiveProject>,
     paths: State<'_, AppPaths>,
+    config: State<'_, Arc<AppConfig>>,
     composition: State<'_, Arc<Stage2Composition>>,
     parent_dir: String,
     name: String,
 ) -> CommandResult<CurrentProject> {
+    let local_paths = configured_local_build_paths(&config)?;
     let _lifecycle = active.lifecycle.lock().await;
     drain_previous(&active, CancellationReason::ProjectSwitch).await?;
     let request = ProjectCreateRequest { name };
@@ -54,6 +59,7 @@ pub async fn create_project(
             &request,
             composition.pack(),
             &contributions,
+            &local_paths,
         )
         .map_err(|error| project_create_failure("project.create", error))?;
     let session = ProjectSession::open(folder)
@@ -88,9 +94,11 @@ pub async fn create_project(
 pub async fn open_project(
     active: State<'_, ActiveProject>,
     paths: State<'_, AppPaths>,
+    config: State<'_, Arc<AppConfig>>,
     composition: State<'_, Arc<Stage2Composition>>,
     path: String,
 ) -> CommandResult<CurrentProject> {
+    let local_paths = configured_local_build_paths(&config)?;
     let _lifecycle = active.lifecycle.lock().await;
     drain_previous(&active, CancellationReason::ProjectSwitch).await?;
     let folder = ProjectFolder::open(Path::new(&path))
@@ -98,6 +106,7 @@ pub async fn open_project(
     if folder.meta().game_id != composition.pack().id().as_str() {
         return Err(CommandFailure::invalid_input("project.open_pack"));
     }
+    sync_local_config(folder.path(), &local_paths)?;
     let session = ProjectSession::open(folder)
         .map_err(|_| CommandFailure::storage("project.open_session"))?;
     record_recent(&paths, &session)?;
@@ -169,6 +178,23 @@ fn snapshot(session: &ProjectSession) -> CurrentProject {
     }
 }
 
+fn configured_local_build_paths(config: &AppConfig) -> CommandResult<LocalBuildPaths> {
+    let settings = config.settings_snapshot();
+    let paths = LocalBuildPaths {
+        sts2_assembly_path: settings.knowledge.sts2_dll_path.into(),
+        godot_executable_path: settings.toolchain.godot_exe_path.into(),
+    };
+    paths
+        .validate()
+        .map_err(|_| CommandFailure::project_local_environment("project.local_props"))?;
+    Ok(paths)
+}
+
+fn sync_local_config(project_root: &Path, paths: &LocalBuildPaths) -> CommandResult<()> {
+    sync_project_local_props(project_root, paths)
+        .map_err(|_| CommandFailure::project_local_environment("project.local_props"))
+}
+
 fn project_failure(stage: &str, error: ProjectError) -> CommandFailure {
     match error {
         ProjectError::Locked => CommandFailure::project_locked(stage),
@@ -178,6 +204,7 @@ fn project_failure(stage: &str, error: ProjectError) -> CommandFailure {
         | ProjectError::InvalidMetadata
         | ProjectError::UnsupportedSchema
         | ProjectError::InvalidTemplate => CommandFailure::invalid_input(stage),
+        ProjectError::LocalConfig(_) => CommandFailure::project_local_environment(stage),
         ProjectError::Io(_) | ProjectError::Json(_) => CommandFailure::storage(stage),
     }
 }

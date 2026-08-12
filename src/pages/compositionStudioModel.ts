@@ -185,6 +185,7 @@ export function buildCompositionGenerateRequest(
     ProjectPackageRequest,
     "sourceRelativeRoot" | "outputRelativePath" | "compressionLevel"
   >,
+  repairPolicy: CompositionGenerateRequest["repairPolicy"],
 ): CompositionGenerateRequest {
   return {
     artifactId: artifactId.trim(),
@@ -200,6 +201,7 @@ export function buildCompositionGenerateRequest(
       outputRelativePath: packageRequest.outputRelativePath.trim(),
       compressionLevel: packageRequest.compressionLevel,
     },
+    repairPolicy,
   };
 }
 

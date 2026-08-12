@@ -55,7 +55,7 @@ impl FeatureSpec for CompositionGenerateFeature {
     }
 
     fn request_schema() -> SchemaRef {
-        schema_version("feature.composition-generate-request", 2)
+        schema_version("feature.composition-generate-request", 3)
     }
 
     fn result_schema() -> SchemaRef {
@@ -86,8 +86,40 @@ pub struct CompositionGenerateRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub draft: Option<CompositionDraftRef>,
     pub package: ProjectPackageRequest,
+    pub repair_policy: RepairPolicy,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution: Option<CompositionGenerateExecutionRequest>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum RepairPolicy {
+    UntilPassed,
+    MaxRounds { max_rounds: u32 },
+}
+
+impl RepairPolicy {
+    const MAX_ROUNDS: u32 = 20;
+
+    fn validate(&self) -> Result<(), CompositionGenerateError> {
+        match self {
+            Self::UntilPassed => Ok(()),
+            Self::MaxRounds { max_rounds } if (1..=Self::MAX_ROUNDS).contains(max_rounds) => Ok(()),
+            Self::MaxRounds { .. } => Err(CompositionGenerateError::InvalidInput),
+        }
+    }
+
+    fn permits(&self, completed_rounds: u32) -> bool {
+        match self {
+            Self::UntilPassed => true,
+            Self::MaxRounds { max_rounds } => completed_rounds < *max_rounds,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -955,7 +987,7 @@ fn validate_request(request: &CompositionGenerateRequest) -> Result<(), Composit
     {
         Err(CompositionGenerateError::InvalidInput)
     } else {
-        Ok(())
+        request.repair_policy.validate()
     }
 }
 
@@ -1073,6 +1105,33 @@ mod tests {
                 .code
                 .as_str(),
             "model.output_invalid"
+        );
+    }
+
+    #[test]
+    fn repair_policy_validates_bounds_and_counts_completed_rounds() {
+        assert!(RepairPolicy::UntilPassed.validate().is_ok());
+        assert!(RepairPolicy::UntilPassed.permits(u32::MAX));
+
+        let one = RepairPolicy::MaxRounds { max_rounds: 1 };
+        assert!(one.validate().is_ok());
+        assert!(one.permits(0));
+        assert!(!one.permits(1));
+
+        assert!(
+            RepairPolicy::MaxRounds { max_rounds: 0 }
+                .validate()
+                .is_err()
+        );
+        assert!(
+            RepairPolicy::MaxRounds { max_rounds: 20 }
+                .validate()
+                .is_ok()
+        );
+        assert!(
+            RepairPolicy::MaxRounds { max_rounds: 21 }
+                .validate()
+                .is_err()
         );
     }
 }

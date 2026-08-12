@@ -14,8 +14,8 @@ use ats_runtime::{
     ModelClient, ModelError, ModelGamePackRef, ModelOutputContract, ModelRequestError,
     ModelRequestSnapshot, ModelResourceRef, PayloadError, ProjectFileWrite, ProjectFileWriter,
     ProjectWriteError, PublishedArtifact, RunFailure, RunLifecycleError, RunRecord, RunStatus,
-    RunTransition, TokenUsage, ValidationError, ValidationRequest, ValidationRunner,
-    VersionedPayload,
+    RunTransition, TokenUsage, ValidationError, ValidationIssue, ValidationRequest,
+    ValidationRunner, VersionedPayload,
 };
 use ats_workspace::{ItemResourceBinding, StoredItemDefinition};
 use ats_workspace::{ResourceAsset, ResourceRepository};
@@ -30,7 +30,7 @@ use crate::prompt::{FeatureRecipe, FeatureRecipeError, FeatureRecipeLoader};
 use crate::resource_prepare::{ResourcePrepareFeature, ResourceSpecs, expand_target_template};
 
 const RECIPE_BYTES: &[u8] = include_bytes!("../recipes/mod-generate-single.json");
-const RECIPE_SHA256: &str = "b01e82d8206ef361cd72f564ba67c831103110547a974c24d07fb0814ec0a980";
+const RECIPE_SHA256: &str = "cbc1c5a76151d35647e42a56eb6140aea9788b91bce6cf2610e1212384799cff";
 const MAX_EVIDENCE_RECORDS: u16 = 20;
 
 pub struct SingleGenerateFeature;
@@ -180,6 +180,15 @@ struct GeneratePromptContribution<'a> {
     generated_file_roles: Vec<&'a str>,
 }
 
+struct SingleRequestAssemblyContext<'a> {
+    request: &'a SingleGenerateRequest,
+    context: &'a SingleGenerateContext<'a>,
+    contribution: &'a GenerateContribution,
+    item_spec: &'a GenerateItemType,
+    evidence: &'a [TruthEvidenceRecord],
+    resources: &'a [ModelResourceRef],
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ArtifactGameContext {
@@ -259,7 +268,14 @@ pub struct SingleGenerateProposal {
 pub struct SingleGenerateProposalCheckpoint {
     pub result: SingleGenerateResult,
     pub provenance: SingleGenerationProvenance,
-    files: BTreeMap<String, String>,
+    pub(crate) files: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SingleRepairRequest {
+    pub current_files: BTreeMap<String, String>,
+    pub issues: Vec<ValidationIssue>,
 }
 
 pub struct SingleGenerateCompositionProposal {
@@ -503,18 +519,126 @@ impl SingleGenerateService {
             .map(|item| item.reference.clone())
             .collect::<Vec<_>>();
         let snapshot = self.assemble_request(
-            request,
-            context,
-            &contribution,
-            item_spec,
-            &evidence,
-            &resource_refs,
+            SingleRequestAssemblyContext {
+                request,
+                context,
+                contribution: &contribution,
+                item_spec,
+                evidence: &evidence,
+                resources: &resource_refs,
+            },
+            None,
         )?;
+        self.complete_proposal_from_model(
+            dependencies.model,
+            request,
+            item_spec,
+            selected,
+            resource_refs,
+            &resource_specs,
+            contribution.validation_primitive,
+            snapshot,
+            cancellation,
+        )
+        .await
+    }
+
+    pub async fn repair_propose<C, R>(
+        &self,
+        dependencies: SingleProposalDependencies<'_, C, R>,
+        run: &RunRecord,
+        request: &SingleGenerateRequest,
+        context: &SingleGenerateContext<'_>,
+        repair: &SingleRepairRequest,
+        cancellation: &CancellationToken,
+    ) -> Result<SingleGenerateProposal, SingleGenerateError>
+    where
+        C: ModelClient + ?Sized,
+        R: ResourceRepository + ?Sized,
+    {
+        validate_run(run, request)?;
+        validate_context(context)?;
+        validate_request(request)?;
         check_cancelled(cancellation)?;
-        let response = dependencies
-            .model
-            .complete(snapshot.clone(), cancellation)
-            .await?;
+        let contribution: GenerateContribution = context.contributions.decode(&generation_slot())?;
+        contribution.validate(context.pack)?;
+        let item_spec = contribution
+            .item_types
+            .iter()
+            .find(|item| item.id == request.plan.item_type)
+            .ok_or(SingleGenerateError::UnsupportedItemType)?;
+        let item_type = ItemTypeId::parse(request.plan.item_type.as_str())
+            .map_err(|_| SingleGenerateError::UnsupportedItemType)?;
+        let descriptor = context
+            .pack
+            .item_type(&item_type)
+            .ok_or(SingleGenerateError::UnsupportedItemType)?;
+        ItemDefinitionValidator::validate(
+            context.pack,
+            &request.definition.definition,
+            ItemDefinitionValidationMode::Ready,
+        )
+        .map_err(|_| SingleGenerateError::InvalidItemDefinition)?;
+        validate_definition_identity(request)?;
+        validate_plan_roles(&request.plan, descriptor)?;
+        validate_repair_request(item_spec, repair)?;
+        let resource_specs: ResourceSpecs = context
+            .resource_contributions
+            .decode(&resource_specs_slot())?;
+        resource_specs
+            .validate()
+            .map_err(|_| SingleGenerateError::InvalidResourceSpecs)?;
+        let selected = load_resources(
+            dependencies.resources,
+            &request.definition,
+            descriptor,
+            &resource_specs,
+        )?;
+        let resource_refs = selected
+            .iter()
+            .map(|item| item.reference.clone())
+            .collect::<Vec<_>>();
+        let evidence = query_evidence(context.truth, descriptor)?;
+        let snapshot = self.assemble_request(
+            SingleRequestAssemblyContext {
+                request,
+                context,
+                contribution: &contribution,
+                item_spec,
+                evidence: &evidence,
+                resources: &resource_refs,
+            },
+            Some(repair),
+        )?;
+        self.complete_proposal_from_model(
+            dependencies.model,
+            request,
+            item_spec,
+            selected,
+            resource_refs,
+            &resource_specs,
+            contribution.validation_primitive,
+            snapshot,
+            cancellation,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn complete_proposal_from_model<C: ModelClient + ?Sized>(
+        &self,
+        model: &C,
+        request: &SingleGenerateRequest,
+        item_spec: &GenerateItemType,
+        selected: Vec<LoadedResource>,
+        resource_refs: Vec<ModelResourceRef>,
+        resource_specs: &ResourceSpecs,
+        validation_primitive: PrimitiveId,
+        snapshot: ModelRequestSnapshot,
+        cancellation: &CancellationToken,
+    ) -> Result<SingleGenerateProposal, SingleGenerateError> {
+        check_cancelled(cancellation)?;
+        let response = model.complete(snapshot.clone(), cancellation).await?;
         check_cancelled(cancellation)?;
         if response.finish_reason == FinishReason::MaxTokens {
             return Err(SingleGenerateError::TruncatedModelOutput);
@@ -522,18 +646,18 @@ impl SingleGenerateService {
         let bundle: GeneratedModBundle = serde_json::from_str(&response.content)
             .map_err(|_| invalid_model_output(SingleGenerateFailureReason::JsonDecode))?;
         let generated = validate_bundle(request, item_spec, bundle)?;
-        let writes = build_writes(request, &generated, &selected, &resource_specs)?;
+        let writes = build_writes(request, &generated, &selected, resource_specs)?;
         let extension = SingleGenerateArtifactExtension {
             model_request_sha256: snapshot.request_sha256().clone(),
             definition_hash: request.definition.definition_hash.clone(),
             generated_file_count: u32::try_from(generated.len()).map_err(|_| {
                 invalid_model_output(SingleGenerateFailureReason::GeneratedFileCountOverflow)
             })?,
-            validation_primitive: contribution.validation_primitive,
+            validation_primitive,
             acceptance_notes: generated.acceptance_notes.clone(),
         };
         let artifact_files =
-            proposed_artifact_files(request, item_spec, &generated, &selected, &resource_specs)?;
+            proposed_artifact_files(request, item_spec, &generated, &selected, resource_specs)?;
         let provenance = SingleGenerationProvenance {
             definition_hash: request.definition.definition_hash.clone(),
             model_request_sha256: snapshot.request_sha256().clone(),
@@ -663,13 +787,17 @@ impl SingleGenerateService {
 
     fn assemble_request(
         &self,
-        request: &SingleGenerateRequest,
-        context: &SingleGenerateContext<'_>,
-        contribution: &GenerateContribution,
-        item_spec: &GenerateItemType,
-        evidence: &[TruthEvidenceRecord],
-        resources: &[ModelResourceRef],
+        assembly: SingleRequestAssemblyContext<'_>,
+        repair: Option<&SingleRepairRequest>,
     ) -> Result<ModelRequestSnapshot, SingleGenerateError> {
+        let SingleRequestAssemblyContext {
+            request,
+            context,
+            contribution,
+            item_spec,
+            evidence,
+            resources,
+        } = assembly;
         let output_contract = run_scoped_output_contract(item_spec);
         let pack_contribution = GeneratePromptContribution {
             item_type: &item_spec.id,
@@ -699,6 +827,10 @@ impl SingleGenerateService {
                 bounded(context.custom_instructions.unwrap_or(""), 4_000)?.to_owned(),
             ),
             ("request.plan".into(), serialize(&request.plan)?),
+            (
+                "repair.context".into(),
+                repair.map_or_else(|| Ok(String::new()), serialize)?,
+            ),
         ]);
         let model_request = self.recipe.render_with_output_contract(
             &slots,
@@ -1307,6 +1439,28 @@ fn validate_bundle(
         files,
         acceptance_notes: bundle.acceptance_notes,
     })
+}
+
+fn validate_repair_request(
+    item_spec: &GenerateItemType,
+    repair: &SingleRepairRequest,
+) -> Result<(), SingleGenerateError> {
+    if repair.issues.is_empty()
+        || repair.issues.len() > 256
+        || repair.current_files.len() != item_spec.generated_files.len()
+        || repair.issues.iter().any(|issue| {
+            issue.repairability != ats_runtime::ValidationIssueRepairability::GeneratedContent
+        })
+        || item_spec.generated_files.iter().any(|spec| {
+            repair
+                .current_files
+                .get(&spec.role)
+                .is_none_or(|content| content.trim().is_empty() || content.contains('\0'))
+        })
+    {
+        return Err(SingleGenerateError::InvalidInput);
+    }
+    Ok(())
 }
 
 fn normalize_generated_content(
@@ -2137,6 +2291,7 @@ mod tests {
                 exit_code: 1,
                 stdout_tail: String::new(),
                 stderr_tail: "fixture failure".into(),
+                issues: Vec::new(),
             },
         ))
         .run_failure();

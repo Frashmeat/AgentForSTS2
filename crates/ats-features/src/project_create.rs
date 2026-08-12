@@ -5,7 +5,7 @@ use ats_game_context::{
     built_in_project_template,
 };
 use ats_kernel::{ContributionId, FeatureId, SchemaId, SchemaRef, SchemaVersion};
-use ats_workspace::{ProjectError, ProjectFolder};
+use ats_workspace::{LocalBuildPaths, ProjectError, ProjectFolder};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -80,6 +80,7 @@ impl ProjectCreateService {
         request: &ProjectCreateRequest,
         pack: &LoadedGamePack,
         contributions: &VerifiedContributionSet,
+        local_build_paths: &LocalBuildPaths,
     ) -> Result<(ProjectFolder, ProjectCreateResult), ProjectCreateError> {
         if request.name.trim().is_empty() || request.name.chars().count() > 128 {
             return Err(ProjectCreateError::InvalidInput);
@@ -92,7 +93,13 @@ impl ProjectCreateService {
         }
         let contribution: TemplateContribution = contributions.decode(&template_slot())?;
         let template = built_in_project_template(pack, &contribution.template_id)?;
-        let folder = ProjectFolder::create(parent, &request.name, pack.id(), &template)?;
+        let folder = ProjectFolder::create_configured(
+            parent,
+            &request.name,
+            pack.id(),
+            &template,
+            local_build_paths,
+        )?;
         let result = ProjectCreateResult {
             name: folder.meta().name.clone(),
             csharp_name: folder.meta().csharp_name.clone(),

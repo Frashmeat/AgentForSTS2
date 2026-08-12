@@ -193,6 +193,8 @@ pub struct ValidationReport {
     pub exit_code: i32,
     pub stdout_tail: String,
     pub stderr_tail: String,
+    #[serde(default)]
+    pub issues: Vec<ValidationIssue>,
 }
 
 impl ValidationReport {
@@ -201,11 +203,79 @@ impl ValidationReport {
             || self.stderr_tail.chars().count() > 8_000
             || self.stdout_tail.contains('\0')
             || self.stderr_tail.contains('\0')
+            || self.issues.len() > 256
+            || self.issues.iter().any(|issue| issue.validate().is_err())
         {
             return Err(ValidationError::InvalidReport);
         }
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ValidationIssueSeverity {
+    Warning,
+    Error,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ValidationIssueRepairability {
+    GeneratedContent,
+    LocalEnvironment,
+    NonRepairable,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ValidationIssue {
+    pub validator_id: String,
+    pub code: String,
+    pub severity: ValidationIssueSeverity,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relative_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub column: Option<u32>,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symbol: Option<String>,
+    pub repairability: ValidationIssueRepairability,
+    pub fingerprint: ats_kernel::Sha256Digest,
+}
+
+impl ValidationIssue {
+    fn validate(&self) -> Result<(), ValidationError> {
+        if !valid_issue_id(&self.validator_id)
+            || !valid_issue_id(&self.code)
+            || self.message.trim().is_empty()
+            || self.message.chars().count() > 2_000
+            || self.message.contains('\0')
+            || self.relative_path.as_ref().is_some_and(|path| {
+                path.is_empty()
+                    || path.len() > 512
+                    || path.contains('\0')
+                    || crate::normalize_relative_path(std::path::Path::new(path)).as_deref()
+                        != Ok(path.as_str())
+            })
+            || self.symbol.as_ref().is_some_and(|symbol| {
+                symbol.is_empty() || symbol.len() > 256 || symbol.contains('\0')
+            })
+        {
+            return Err(ValidationError::InvalidReport);
+        }
+        Ok(())
+    }
+}
+
+fn valid_issue_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
 #[derive(Debug, Error)]

@@ -69,7 +69,8 @@ wire shape `{kind:"pack_default"}` and never carries `sourcePath`. Single v3 car
 Composition IPC guards validate CompositionDraft v2 identity/revision/Pack hash/root/profile,
 optional paired `sourceExecutionGraphId`/`validatedContentDigest`, field-keyed nodes and exact
 ItemDefinition v2 shapes. ExecutionGraph guards validate only the bounded View projection
-(`executionGraphId`, revision/status, Run IDs, progress/current node, safe failure and action flags);
+(`executionGraphId`, revision/status including `validating`/`repairing`, Run IDs,
+progress/current node, safe failure, aggregate `repairRound` and action flags);
 React must not receive or decode checkpoints, Blueprint payloads or commit intent. Confirmation
 guards validate the Draft ref, every StoredItemDefinition and the confirmation digest. A TypeScript
 interface or direct cast is not accepted for list/get/update/confirm/status responses.
@@ -87,8 +88,10 @@ The only interpreted payload fields are `reasonCode`, `expectedCount`, `actualCo
 are 1-128 character qualified identifiers; counts are integers in `0..=u32::MAX`. Expected/actual
 are displayed only as a valid pair. Every other field is ignored, never stringified into the UI.
 
-Composition generation submits request schema v2 with an exact `StoredItemDefinition`, optional
-Draft ref, nested Package request and optional backend-authored tagged `execution`. The only
+Composition generation submits request schema v3 with an exact `StoredItemDefinition`, optional
+Draft ref, nested Package request, immutable `repairPolicy` and optional backend-authored tagged
+`execution`. `repairPolicy` is exactly `{kind:"until_passed"}` or
+`{kind:"max_rounds", maxRounds:1..20}`. The only
 execution forms are `start {executionGraphId}` and
 `resume {executionGraphId, expectedRevision, previousRunId}`; the request builder for an initial
 user submission omits this field. Result and Artifact extension v2 include the graph ID. Single

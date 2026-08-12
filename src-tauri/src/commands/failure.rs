@@ -52,6 +52,17 @@ impl CommandFailure {
         )
     }
 
+    pub fn project_local_environment(stage: &str) -> Self {
+        fixed(
+            "project.local_environment_invalid",
+            "configuration",
+            stage,
+            "Configure valid game assembly and Godot executable paths before generating or building.",
+            RecoveryAction::Retry,
+            false,
+        )
+    }
+
     pub fn truth_missing(stage: &str) -> Self {
         fixed(
             "truth.missing",
@@ -259,5 +270,15 @@ mod tests {
         assert_eq!(value["stage"], "run.list");
         assert!(value.get("diagnostic").is_none());
         assert!(!value.to_string().contains("C:\\Users"));
+    }
+
+    #[test]
+    fn invalid_project_local_environment_has_one_stable_shell_contract() {
+        let failure = CommandFailure::project_local_environment("project.local_props");
+        assert_eq!(failure.0.code.as_str(), "project.local_environment_invalid");
+        assert_eq!(failure.0.category, "configuration");
+        assert_eq!(failure.0.stage, "project.local_props");
+        assert_eq!(failure.0.action, RecoveryAction::Retry);
+        assert!(!failure.0.retryable);
     }
 }
