@@ -1099,6 +1099,28 @@ recovery, absence of `commit_prepared` before validation success, one final publ
 succeeded reconciliation with zero model requests, claim CAS, Pause/Cancel and no
 staging/transaction residue.
 
+#### 6.1 Project-Local Tool Input Resolution
+
+```rust
+ats_workspace::sync_or_validate_project_local_props(
+    project_root: &Path,
+    configured_paths: &LocalBuildPaths,
+) -> Result<LocalBuildPaths, ProjectLocalConfigError>
+```
+
+Create remains strict and calls `sync_project_local_props` with two configured plain files. Existing
+Open and every Generate/Build/Package entry call the resolver above before model/tool work. A fully
+valid configured pair updates only `Sts2AssemblyPath` and `GodotPath`; otherwise the resolver does
+not write and structurally parses those exact fields from existing `local.props`, including XML
+predefined/character references. Missing, duplicate, nested, malformed, non-file or symlink values
+return `ProjectLocalConfigError` and map to the stable local-environment failure.
+
+| Case | Configured pair | Existing `local.props` | Result |
+| --- | --- | --- | --- |
+| Good | two valid plain files | valid XML | atomically synchronize managed fields and return configured paths |
+| Base | empty/invalid pair | two valid project-local plain files | return project paths; file bytes remain unchanged |
+| Bad | empty/invalid pair | missing/malformed/duplicate/non-file values | fail before model/tool invocation; no mutation |
+
 #### 7. Wrong Vs Correct
 
 Wrong - repeat the entire closure after one semantic failure:

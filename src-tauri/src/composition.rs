@@ -48,7 +48,7 @@ use ats_runtime::{
     CancellationToken, MediaError, ModelClient, RunFailure, RunRecord, RunRepository, RunStatus,
     RunTransition, VersionedPayload,
 };
-use ats_workspace::{LocalBuildPaths, ProjectMeta, sync_project_local_props};
+use ats_workspace::{LocalBuildPaths, ProjectMeta, sync_or_validate_project_local_props};
 use chrono::Utc;
 
 use crate::AppConfig;
@@ -401,7 +401,7 @@ impl Stage2Composition {
                 | "project.build"
                 | "project.package"
         ) {
-            sync_project_local_props(
+            sync_or_validate_project_local_props(
                 project_root,
                 &LocalBuildPaths {
                     sts2_assembly_path: settings.knowledge.sts2_dll_path.clone().into(),

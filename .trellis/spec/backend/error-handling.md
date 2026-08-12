@@ -124,17 +124,21 @@ claim and preserves the roll-forward publication intent plus every successful mo
 
 Invalid configured `Sts2AssemblyPath`/`GodotPath` or managed `local.props` XML maps to the one Shell
 code `project.local_environment_invalid`, category `configuration`, action `retry`, and
-`retryable=false`. Create/Open use stage `project.local_props`; Generate/Build/Package persist the
-same code at `feature.local_props` before model or tool work. The failure must not include absolute
-paths or XML/parser/IO text. Create rolls back only its newly created exact project root; Open and
-execution preserve every existing project byte.
+`retryable=false`. Create requires both configured paths as valid plain files. Existing-project
+Open/Generate/Build/Package use `sync_or_validate_project_local_props`: both configured paths valid
+means atomically update the two managed fields; otherwise preserve the file byte-for-byte and
+structurally read/validate both project-local fields. Failure uses stage `project.local_props` for
+Open and `feature.local_props` before model/tool work. It must not include absolute paths or
+XML/parser/IO text. Create rolls back only its newly created exact project root; Open and execution
+preserve every existing project byte.
 
 | Boundary | Good | Bad |
 | --- | --- | --- |
-| Create/Open | valid plain files -> managed fields synchronize before session exposure | invalid path/XML -> `project.local_environment_invalid`, no exposed half-configured session |
-| Generate/Build/Package | current Settings synchronize before model/tool invocation | local failure enters repair input or is collapsed to `core.unclassified` |
+| Create | both configured paths are valid plain files -> managed fields synchronize before session exposure | missing/invalid configured path or XML -> `project.local_environment_invalid`, no half-created root |
+| Existing Open/Generate/Build/Package | valid configured pair updates managed fields; otherwise valid existing project-local pair is preserved and used | invalid configured pair overwrites a valid project file, or both sources are invalid but work continues |
+| Local failure | one stable typed failure before model/tool invocation | failure enters repair input, leaks a path/parser message or collapses to `core.unclassified` |
 
-Required canaries: `commands::failure::tests::invalid_project_local_environment_has_one_stable_shell_contract`, Workspace configured-Create rollback, and the Desktop facade fixture with explicit plain local tool files.
+Required canaries: `commands::failure::tests::invalid_project_local_environment_has_one_stable_shell_contract`, Workspace configured-Create rollback plus sync/fallback/no-mutation tests, and the GUI Build case that clears global Godot while retaining a valid project-local input.
 
 ## Ownership
 

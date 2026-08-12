@@ -173,7 +173,7 @@ const readStubRequests = async (root) => (await fs.readFile(
 
 const assertNoAtomicWriteResidue = async (projectRoot) => {
   for (const relativeRoot of [
-    ".ats/execution-graphs-v1",
+    ".ats/execution-graphs-v2",
     ".ats/composition-drafts-v2",
     ".ats/runs-v3",
   ]) {
@@ -310,9 +310,10 @@ describe("current desktop Stage 2 workflow", () => {
     const graph = JSON.parse(await fs.readFile(path.join(
       projectRoot,
       ".ats",
-      "execution-graphs-v1",
+      "execution-graphs-v2",
       `${running.graphId}.json`,
     ), "utf8"));
+    assert.equal(graph.schemaVersion, 2);
     assert.equal(graph.status, "cancelled");
     assert.equal(graph.activeRunId, null);
     assert.ok(Object.values(graph.nodes).every((node) => node.status !== "running"));
@@ -338,10 +339,11 @@ describe("current desktop Stage 2 workflow", () => {
     const graphPath = path.join(
       projectRoot,
       ".ats",
-      "execution-graphs-v1",
+      "execution-graphs-v2",
       `${paused.graphId}.json`,
     );
     const pausedGraph = JSON.parse(await fs.readFile(graphPath, "utf8"));
+    assert.equal(pausedGraph.schemaVersion, 2);
     assert.equal(pausedGraph.status, "paused");
     assert.equal(pausedGraph.activeRunId, null);
     const firstRun = JSON.parse(await fs.readFile(path.join(
@@ -492,10 +494,11 @@ describe("current desktop Stage 2 workflow", () => {
     const graphPath = path.join(
       projectRoot,
       ".ats",
-      "execution-graphs-v1",
+      "execution-graphs-v2",
       `${paused.graphId}.json`,
     );
     const pausedGraph = JSON.parse(await fs.readFile(graphPath, "utf8"));
+    assert.equal(pausedGraph.schemaVersion, 2);
     assert.equal(pausedGraph.status, "paused");
     assert.equal(pausedGraph.activeRunId, null);
     const failedRun = JSON.parse(await fs.readFile(path.join(

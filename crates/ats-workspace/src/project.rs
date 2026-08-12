@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use ats_kernel::{GamePackId, ProjectTemplateBundle};
 use chrono::{DateTime, Utc};
+use quick_xml::escape::resolve_xml_entity;
 use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
 use quick_xml::{Reader, Writer};
 use serde::{Deserialize, Serialize};
@@ -80,6 +81,198 @@ pub fn sync_project_local_props(
     let rendered = update_local_props_xml(&existing, paths)?;
     write_atomic_replace(&target, rendered.as_bytes())?;
     Ok(())
+}
+
+pub fn sync_or_validate_project_local_props(
+    project_root: &Path,
+    configured_paths: &LocalBuildPaths,
+) -> Result<LocalBuildPaths, ProjectLocalConfigError> {
+    if configured_paths.validate().is_ok() {
+        sync_project_local_props(project_root, configured_paths)?;
+        return Ok(configured_paths.clone());
+    }
+    read_project_local_props(project_root)
+}
+
+pub fn read_project_local_props(
+    project_root: &Path,
+) -> Result<LocalBuildPaths, ProjectLocalConfigError> {
+    if !is_plain_directory(project_root) {
+        return Err(ProjectLocalConfigError::InvalidPath);
+    }
+    let source = fs::read_to_string(project_root.join("local.props"))?;
+    let values = read_local_props_xml(&source)?;
+    let paths = LocalBuildPaths {
+        sts2_assembly_path: values[0].clone().into(),
+        godot_executable_path: values[1].clone().into(),
+    };
+    paths.validate()?;
+    Ok(paths)
+}
+
+fn read_local_props_xml(source: &str) -> Result<[String; 2], ProjectLocalConfigError> {
+    let mut reader = Reader::from_str(source);
+    reader.config_mut().trim_text(false);
+    let mut values: [Option<String>; 2] = [None, None];
+    let mut project_depth = 0_u32;
+    let mut property_group_depth: Option<u32> = None;
+    let mut saw_project = false;
+    let mut closed_project = false;
+    loop {
+        match reader
+            .read_event()
+            .map_err(|_| ProjectLocalConfigError::InvalidDocument)?
+        {
+            Event::Start(ref start) if start.name().as_ref() == b"Project" => {
+                if saw_project || closed_project || project_depth != 0 {
+                    return Err(ProjectLocalConfigError::InvalidDocument);
+                }
+                saw_project = true;
+                project_depth = 1;
+            }
+            Event::End(ref end) if end.name().as_ref() == b"Project" => {
+                if project_depth != 1 || property_group_depth.is_some() {
+                    return Err(ProjectLocalConfigError::InvalidDocument);
+                }
+                project_depth = 0;
+                closed_project = true;
+            }
+            Event::Empty(ref empty) if empty.name().as_ref() == b"Project" => {
+                if saw_project || closed_project || project_depth != 0 {
+                    return Err(ProjectLocalConfigError::InvalidDocument);
+                }
+                saw_project = true;
+                closed_project = true;
+            }
+            Event::Start(ref start) if start.name().as_ref() == b"PropertyGroup" => {
+                if project_depth != 1 || property_group_depth.is_some() {
+                    return Err(ProjectLocalConfigError::InvalidDocument);
+                }
+                project_depth = 2;
+                property_group_depth = Some(1);
+            }
+            Event::End(ref end) if end.name().as_ref() == b"PropertyGroup" => {
+                if project_depth != 2 || property_group_depth != Some(1) {
+                    return Err(ProjectLocalConfigError::InvalidDocument);
+                }
+                project_depth = 1;
+                property_group_depth = None;
+            }
+            Event::Empty(ref empty) if empty.name().as_ref() == b"PropertyGroup" => {
+                if project_depth != 1 || property_group_depth.is_some() {
+                    return Err(ProjectLocalConfigError::InvalidDocument);
+                }
+            }
+            Event::Start(ref start) => {
+                if let Some(index) = managed_property_index(start.name().as_ref()) {
+                    if project_depth != 2
+                        || property_group_depth != Some(1)
+                        || values[index].is_some()
+                    {
+                        return Err(ProjectLocalConfigError::InvalidDocument);
+                    }
+                    values[index] = Some(read_local_property(&mut reader, start)?);
+                } else {
+                    if project_depth == 0 || closed_project {
+                        return Err(ProjectLocalConfigError::InvalidDocument);
+                    }
+                    project_depth = project_depth.saturating_add(1);
+                    if let Some(depth) = property_group_depth.as_mut() {
+                        *depth = (*depth).saturating_add(1);
+                    }
+                }
+            }
+            Event::End(_) => {
+                if project_depth <= 1 {
+                    return Err(ProjectLocalConfigError::InvalidDocument);
+                }
+                project_depth -= 1;
+                if let Some(depth) = property_group_depth.as_mut() {
+                    if *depth <= 1 {
+                        return Err(ProjectLocalConfigError::InvalidDocument);
+                    }
+                    *depth -= 1;
+                }
+            }
+            Event::Empty(ref empty) => {
+                if let Some(index) = managed_property_index(empty.name().as_ref()) {
+                    if project_depth != 2
+                        || property_group_depth != Some(1)
+                        || values[index].is_some()
+                    {
+                        return Err(ProjectLocalConfigError::InvalidDocument);
+                    }
+                    values[index] = Some(String::new());
+                } else if project_depth == 0 || closed_project {
+                    return Err(ProjectLocalConfigError::InvalidDocument);
+                }
+            }
+            Event::Text(ref text) if project_depth == 0 => {
+                let decoded = text
+                    .decode()
+                    .map_err(|_| ProjectLocalConfigError::InvalidDocument)?;
+                if !decoded.trim().is_empty() {
+                    return Err(ProjectLocalConfigError::InvalidDocument);
+                }
+            }
+            Event::CData(_) | Event::GeneralRef(_) if project_depth == 0 => {
+                return Err(ProjectLocalConfigError::InvalidDocument);
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+    if project_depth != 0 || property_group_depth.is_some() || !saw_project || !closed_project {
+        return Err(ProjectLocalConfigError::InvalidDocument);
+    }
+    let [Some(sts2), Some(godot)] = values else {
+        return Err(ProjectLocalConfigError::InvalidPath);
+    };
+    Ok([sts2.trim().to_owned(), godot.trim().to_owned()])
+}
+
+fn read_local_property(
+    reader: &mut Reader<&[u8]>,
+    start: &BytesStart<'_>,
+) -> Result<String, ProjectLocalConfigError> {
+    let expected = start.name();
+    let mut value = String::new();
+    loop {
+        match reader
+            .read_event()
+            .map_err(|_| ProjectLocalConfigError::InvalidDocument)?
+        {
+            Event::End(end) if end.name() == expected => return Ok(value),
+            Event::Text(text) => value.push_str(
+                &text
+                    .decode()
+                    .map_err(|_| ProjectLocalConfigError::InvalidDocument)?,
+            ),
+            Event::CData(text) => value.push_str(
+                &text
+                    .decode()
+                    .map_err(|_| ProjectLocalConfigError::InvalidDocument)?,
+            ),
+            Event::GeneralRef(reference) => {
+                if let Some(character) = reference
+                    .resolve_char_ref()
+                    .map_err(|_| ProjectLocalConfigError::InvalidDocument)?
+                {
+                    value.push(character);
+                } else {
+                    let name = reference
+                        .decode()
+                        .map_err(|_| ProjectLocalConfigError::InvalidDocument)?;
+                    value.push_str(
+                        resolve_xml_entity(&name)
+                            .ok_or(ProjectLocalConfigError::InvalidDocument)?,
+                    );
+                }
+            }
+            Event::Comment(_) => {}
+            _ => return Err(ProjectLocalConfigError::InvalidDocument),
+        }
+    }
 }
 
 fn update_local_props_xml(
@@ -695,6 +888,172 @@ mod tests {
             fs::read_to_string(project.join("local.props")).unwrap(),
             "<Project />"
         );
+    }
+
+    #[test]
+    fn local_props_sync_or_validate_prefers_valid_configured_paths() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let project = temp.path().join("project");
+        fs::create_dir(&project).unwrap();
+        let old_sts2 = temp.path().join("old-sts2.dll");
+        let old_godot = temp.path().join("old-godot.exe");
+        let new_sts2 = temp.path().join("new-sts2.dll");
+        let new_godot = temp.path().join("new-godot.exe");
+        for path in [&old_sts2, &old_godot, &new_sts2, &new_godot] {
+            fs::write(path, b"fixture").unwrap();
+        }
+        sync_project_local_props(
+            &project,
+            &LocalBuildPaths {
+                sts2_assembly_path: old_sts2,
+                godot_executable_path: old_godot,
+            },
+        )
+        .unwrap();
+
+        let configured = LocalBuildPaths {
+            sts2_assembly_path: new_sts2,
+            godot_executable_path: new_godot,
+        };
+        assert_eq!(
+            sync_or_validate_project_local_props(&project, &configured).unwrap(),
+            configured
+        );
+        assert_eq!(read_project_local_props(&project).unwrap(), configured);
+    }
+
+    #[test]
+    fn local_props_sync_or_validate_preserves_valid_project_paths_when_config_is_empty() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let project = temp.path().join("project");
+        fs::create_dir(&project).unwrap();
+        let escaped_root = temp.path().join("tools & sdk");
+        fs::create_dir(&escaped_root).unwrap();
+        let sts2 = escaped_root.join("sts2.dll");
+        let godot = escaped_root.join("godot.exe");
+        fs::write(&sts2, b"dll").unwrap();
+        fs::write(&godot, b"exe").unwrap();
+        let project_paths = LocalBuildPaths {
+            sts2_assembly_path: sts2,
+            godot_executable_path: godot,
+        };
+        sync_project_local_props(&project, &project_paths).unwrap();
+        let before = fs::read(project.join("local.props")).unwrap();
+
+        let resolved = sync_or_validate_project_local_props(
+            &project,
+            &LocalBuildPaths {
+                sts2_assembly_path: PathBuf::new(),
+                godot_executable_path: PathBuf::new(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(resolved, project_paths);
+        assert_eq!(fs::read(project.join("local.props")).unwrap(), before);
+    }
+
+    #[test]
+    fn local_props_sync_or_validate_rejects_invalid_project_fallback_without_mutation() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let project = temp.path().join("project");
+        fs::create_dir(&project).unwrap();
+        let invalid = b"<Project><PropertyGroup><Sts2AssemblyPath>missing.dll</Sts2AssemblyPath><GodotPath /></PropertyGroup></Project>";
+        fs::write(project.join("local.props"), invalid).unwrap();
+
+        assert!(matches!(
+            sync_or_validate_project_local_props(
+                &project,
+                &LocalBuildPaths {
+                    sts2_assembly_path: PathBuf::new(),
+                    godot_executable_path: PathBuf::new(),
+                },
+            ),
+            Err(ProjectLocalConfigError::InvalidPath)
+        ));
+        assert_eq!(fs::read(project.join("local.props")).unwrap(), invalid);
+    }
+
+    #[test]
+    fn local_props_reader_decodes_xml_references_without_mutating_the_file() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let project = temp.path().join("project");
+        fs::create_dir(&project).unwrap();
+        let tools = temp.path().join("tools & sdk");
+        fs::create_dir(&tools).unwrap();
+        let sts2 = tools.join("sts2.dll");
+        let godot = tools.join("godot.exe");
+        fs::write(&sts2, b"dll").unwrap();
+        fs::write(&godot, b"exe").unwrap();
+        let encoded_sts2 = sts2.to_string_lossy().replace('&', "&amp;");
+        let encoded_godot = godot.to_string_lossy().replace('&', "&#38;");
+        let source = format!(
+            "<Project><PropertyGroup><Sts2AssemblyPath>{encoded_sts2}</Sts2AssemblyPath><GodotPath>{encoded_godot}</GodotPath></PropertyGroup></Project>"
+        );
+        fs::write(project.join("local.props"), &source).unwrap();
+
+        assert_eq!(
+            read_project_local_props(&project).unwrap(),
+            LocalBuildPaths {
+                sts2_assembly_path: sts2,
+                godot_executable_path: godot,
+            }
+        );
+        assert_eq!(
+            fs::read_to_string(project.join("local.props")).unwrap(),
+            source
+        );
+    }
+
+    #[test]
+    fn local_props_reader_rejects_duplicate_and_nested_managed_properties() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let project = temp.path().join("project");
+        fs::create_dir(&project).unwrap();
+        let documents = [
+            "<Project><PropertyGroup><Sts2AssemblyPath>a</Sts2AssemblyPath><Sts2AssemblyPath>b</Sts2AssemblyPath><GodotPath>c</GodotPath></PropertyGroup></Project>",
+            "<Project><PropertyGroup><Wrapper><Sts2AssemblyPath>a</Sts2AssemblyPath></Wrapper><GodotPath>c</GodotPath></PropertyGroup></Project>",
+            "<Project><Sts2AssemblyPath>a</Sts2AssemblyPath><PropertyGroup><GodotPath>c</GodotPath></PropertyGroup></Project>",
+        ];
+
+        for source in documents {
+            fs::write(project.join("local.props"), source).unwrap();
+            assert!(matches!(
+                read_project_local_props(&project),
+                Err(ProjectLocalConfigError::InvalidDocument)
+            ));
+            assert_eq!(
+                fs::read_to_string(project.join("local.props")).unwrap(),
+                source
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_props_reader_rejects_symlink_build_inputs() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::TempDir::new().unwrap();
+        let project = temp.path().join("project");
+        fs::create_dir(&project).unwrap();
+        let sts2_target = temp.path().join("sts2-target.dll");
+        let godot = temp.path().join("godot.exe");
+        let sts2_link = temp.path().join("sts2.dll");
+        fs::write(&sts2_target, b"dll").unwrap();
+        fs::write(&godot, b"exe").unwrap();
+        symlink(&sts2_target, &sts2_link).unwrap();
+        let source = format!(
+            "<Project><PropertyGroup><Sts2AssemblyPath>{}</Sts2AssemblyPath><GodotPath>{}</GodotPath></PropertyGroup></Project>",
+            sts2_link.display(),
+            godot.display()
+        );
+        fs::write(project.join("local.props"), source).unwrap();
+
+        assert!(matches!(
+            read_project_local_props(&project),
+            Err(ProjectLocalConfigError::InvalidPath)
+        ));
     }
 
     #[test]

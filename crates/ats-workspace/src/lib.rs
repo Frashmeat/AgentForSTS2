@@ -20,7 +20,7 @@ pub use item::{
 pub use project::{
     AppDataPaths, LocalBuildPaths, PROJECT_SCHEMA_VERSION, ProjectError, ProjectFolder,
     ProjectLocalConfigError, ProjectMeta, RecentEntry, RecentProjects, derive_project_identifier,
-    sync_project_local_props,
+    read_project_local_props, sync_or_validate_project_local_props, sync_project_local_props,
 };
 
 pub use resource::{

@@ -8,7 +8,7 @@ use ats_features::project_create::{
 use ats_runtime::{CancellationReason, RunRecord, RunTransition, VersionedPayload};
 use ats_workspace::{
     LocalBuildPaths, ProjectError, ProjectFolder, RecentEntry, RecentProjects,
-    sync_project_local_props,
+    sync_or_validate_project_local_props,
 };
 use chrono::Utc;
 use serde::Serialize;
@@ -98,7 +98,7 @@ pub async fn open_project(
     composition: State<'_, Arc<Stage2Composition>>,
     path: String,
 ) -> CommandResult<CurrentProject> {
-    let local_paths = configured_local_build_paths(&config)?;
+    let local_paths = configured_local_build_paths_snapshot(&config);
     let _lifecycle = active.lifecycle.lock().await;
     drain_previous(&active, CancellationReason::ProjectSwitch).await?;
     let folder = ProjectFolder::open(Path::new(&path))
@@ -179,19 +179,24 @@ fn snapshot(session: &ProjectSession) -> CurrentProject {
 }
 
 fn configured_local_build_paths(config: &AppConfig) -> CommandResult<LocalBuildPaths> {
-    let settings = config.settings_snapshot();
-    let paths = LocalBuildPaths {
-        sts2_assembly_path: settings.knowledge.sts2_dll_path.into(),
-        godot_executable_path: settings.toolchain.godot_exe_path.into(),
-    };
+    let paths = configured_local_build_paths_snapshot(config);
     paths
         .validate()
         .map_err(|_| CommandFailure::project_local_environment("project.local_props"))?;
     Ok(paths)
 }
 
+fn configured_local_build_paths_snapshot(config: &AppConfig) -> LocalBuildPaths {
+    let settings = config.settings_snapshot();
+    LocalBuildPaths {
+        sts2_assembly_path: settings.knowledge.sts2_dll_path.into(),
+        godot_executable_path: settings.toolchain.godot_exe_path.into(),
+    }
+}
+
 fn sync_local_config(project_root: &Path, paths: &LocalBuildPaths) -> CommandResult<()> {
-    sync_project_local_props(project_root, paths)
+    sync_or_validate_project_local_props(project_root, paths)
+        .map(|_| ())
         .map_err(|_| CommandFailure::project_local_environment("project.local_props"))
 }
 
