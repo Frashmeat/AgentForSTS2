@@ -1099,6 +1099,13 @@ item.000.plan -> item.000.single -> item.001.plan -> item.001.single -> ...
   the active checkpoint hash. Runtime never decodes Feature diagnostics or model content.
 - Restore revalidates the exact definition hash, Pack-generated role set, selected immutable
   Resource versions, normalized bundle and project writes without calling `ModelClient`.
+- Generated role metadata is joined to Pack file specifications by exact role ID. Validated bundle
+  ordering and Pack declaration ordering are independent; positional `zip` association is invalid
+  because it can assign merge ownership to the wrong role and corrupt restart validation.
+- Pack item guidance owns the current Item's source boundary and Truth Evidence exclusively owns
+  version-sensitive API/type/namespace/lifecycle facts. Plan prose is business and acceptance
+  guidance only; it cannot require executable symbols or authorize one Item to redeclare referenced
+  Items.
 - Child Runs are persisted create-or-match by exact Run ID and bytes after checkpoint CAS. A crash
   between graph CAS and child persistence is repaired from the checkpoint; a different existing Run
   is a storage failure.

@@ -35,7 +35,7 @@ use crate::prompt::{FeatureRecipe, FeatureRecipeError, FeatureRecipeLoader};
 use crate::resource_prepare::{ResourcePrepareFeature, ResourceSpecs, expand_target_template};
 
 const RECIPE_BYTES: &[u8] = include_bytes!("../recipes/mod-generate-single.json");
-const RECIPE_SHA256: &str = "c0599b393dae05e4bf344c06f225fcc6bfefcbf9298b5c011176745235e1a08c";
+const RECIPE_SHA256: &str = "f62f6f7f339e3cb30c6e43f321a1fe817a38e47300be3addd6835a87c14e0d3d";
 const MAX_EVIDENCE_RECORDS: u16 = 20;
 
 pub struct SingleGenerateFeature;
@@ -2095,14 +2095,20 @@ fn proposed_artifact_files(
     let mut files = generated
         .files
         .iter()
-        .zip(&item_spec.generated_files)
-        .map(|((role, relative_path, _), spec)| ProposedArtifactFile {
-            role: role.clone(),
-            relative_path: relative_path.clone(),
-            composition_merge: spec.composition_merge,
-            composition_merge_key_policy: spec.composition_merge_key_policy,
+        .map(|(role, relative_path, _)| {
+            let spec = item_spec
+                .generated_files
+                .iter()
+                .find(|spec| spec.role == *role)
+                .ok_or_else(|| invalid_model_output(SingleGenerateFailureReason::FileRole))?;
+            Ok(ProposedArtifactFile {
+                role: role.clone(),
+                relative_path: relative_path.clone(),
+                composition_merge: spec.composition_merge,
+                composition_merge_key_policy: spec.composition_merge_key_policy,
+            })
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, SingleGenerateError>>()?;
     for resource in resources {
         let spec = resource_specs
             .require_role(
@@ -2462,6 +2468,58 @@ mod tests {
                 ["type"],
             "string"
         );
+
+        let generated = ValidatedBundle {
+            // Validated bundles are role-sorted, independently of Pack declaration order.
+            files: vec![
+                (
+                    "localization.eng".into(),
+                    "FixtureMod/localization/eng/items.json".into(),
+                    r#"{"FIXTURE.title":"Fixture"}"#.into(),
+                ),
+                (
+                    "source".into(),
+                    "Generated/fixture_item.cs".into(),
+                    "public class Fixture {}".into(),
+                ),
+            ],
+            acceptance_notes: Vec::new(),
+        };
+        let files = proposed_artifact_files(
+            &SingleGenerateRequest {
+                artifact_id: "fixture-artifact".into(),
+                mod_id: "FixtureMod".into(),
+                plan: PlanItem {
+                    item_id: "fixture_item".into(),
+                    item_type: "fixture_item".into(),
+                    name: "Fixture Item".into(),
+                    summary: "Fixture summary".into(),
+                    behavior_intent: vec!["Expose a fixture".into()],
+                    implementation_constraints: Vec::new(),
+                    evidence_requirements: Vec::new(),
+                    required_resource_roles: Vec::new(),
+                    acceptance_criteria: vec!["The fixture compiles".into()],
+                },
+                definition: stored_definition("fixture_item", "fixture_item"),
+            },
+            &item_spec,
+            &generated,
+            &[],
+            &ResourceSpecs { roles: Vec::new() },
+        )
+        .unwrap();
+        assert_eq!(files[0].role, "localization.eng");
+        assert_eq!(
+            files[0].composition_merge,
+            Some(CompositionFileMerge::JsonObject)
+        );
+        assert_eq!(
+            files[0].composition_merge_key_policy,
+            Some(CompositionMergeKeyPolicy::UniqueKeys)
+        );
+        assert_eq!(files[1].role, "source");
+        assert_eq!(files[1].composition_merge, None);
+        assert_eq!(files[1].composition_merge_key_policy, None);
         let prompt_contribution = GeneratePromptContribution {
             item_type: &item_spec.id,
             common_guidance: &[],

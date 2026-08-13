@@ -134,6 +134,33 @@ function stagedScenario(promptText) {
   return "default";
 }
 
+function isModGenerateSingleRequest(body, promptText) {
+  const schema = body.response_format?.json_schema?.schema;
+  return promptText.includes("<item-definition>")
+    && promptText.includes("<pack-contribution>")
+    && schema?.type === "object"
+    && schema?.properties?.files?.type === "object"
+    && schema?.properties?.acceptanceNotes?.type === "array"
+    && schema?.additionalProperties === false;
+}
+
+if (!isModGenerateSingleRequest({
+  response_format: {
+    json_schema: {
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          files: { type: "object" },
+          acceptanceNotes: { type: "array" },
+        },
+      },
+    },
+  },
+}, "<pack-contribution>{}</pack-contribution><item-definition>{}</item-definition>")) {
+  throw new Error("mod.generate.single E2E request classifier self-test failed");
+}
+
 async function recordStaged(kind, scenario, details = {}) {
   await fs.appendFile(
     path.join(root, "stub-requests.jsonl"),
@@ -527,9 +554,7 @@ const server = http.createServer(async (request, response) => {
         );
         return;
       }
-      const isSingle = body.messages?.some((message) =>
-        message.role === "system"
-          && String(message.content).includes("Generate one complete Mod item as a strict text-file bundle"));
+      const isSingle = isModGenerateSingleRequest(body, promptText);
       if (isSingle
         && promptText.includes("<item-definition>")
         && /"itemType"\s*:\s*"(?:character|card|relic)"/u.test(promptText)) {

@@ -861,6 +861,10 @@ Required assertions:
 - `unique_keys` accepts disjoint runtime keys and assigns a duplicate to the current Single feedback;
 - restore repeats claim validation; one exclusive contribution, duplicate exclusive contribution and
   policy mismatch remain hard failures;
+- generated file metadata is associated with Pack declarations by exact role under deliberately
+  different role/declaration order, never by vector position;
+- a worker that fails before Feature-owned pause leaves a failed terminal Run and a paused Graph
+  with no active claim; an already released or replaced claim remains unchanged;
 - provider transport tests preserve the `ModelRequest` schema without rewriting it;
 - facade E2E still proves Run v3, Artifact v3/hash, no staging and lock reacquisition.
 

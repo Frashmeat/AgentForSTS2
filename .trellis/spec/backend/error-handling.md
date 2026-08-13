@@ -183,6 +183,9 @@ Required canaries: `commands::failure::tests::invalid_project_local_environment_
 - `cancelled`: cancellation reason, no failure and no result.
 - Pending/Running records have neither result nor failure.
 - A Feature returns only after rollback/cleanup; `ProjectSession` supervisor performs the sole persisted terminal transition.
+- After the worker reaches a terminal outcome, the supervisor also releases a still-live execution
+  Graph claim only when `activeRunId` equals that terminal Run. This compensation is idempotent and
+  must not overwrite a Feature-owned pause, cancellation, success or a newer Run claim.
 - Panic or non-terminal worker return becomes fixed `run.task_panic` or `run.incomplete` unless another terminal CAS already won.
 
 ## Cancellation

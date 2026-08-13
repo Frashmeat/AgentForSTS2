@@ -9,6 +9,7 @@ use ats_adapters::{
     FileCompositionDraftRepository, FileExecutionGraphRepository, FileItemRepository,
     FileProjectWriter, FileResourceRepository, FileRunRepository,
 };
+use ats_kernel::ExecutionGraphId;
 use ats_runtime::{
     CancellationReason, CancellationToken, ExecutionGraphRecord, ExecutionGraphRepository,
     ExecutionGraphRepositoryError, RunFailure, RunId, RunRecord, RunRepository, RunRepositoryError,
@@ -237,6 +238,10 @@ impl ProjectSession {
         let worker_cancellation = cancellation.clone();
         let repository = self.repository();
         let supervisor_repository = Arc::clone(&repository);
+        let supervisor_graphs = Arc::clone(&self.execution_graph_repository);
+        let claimed_execution = graph
+            .as_ref()
+            .map(|(_, graph)| (graph.id().clone(), run.id().clone()));
         let finished_flag = Arc::new(AtomicBool::new(false));
         let supervisor_flag = Arc::clone(&finished_flag);
         let finished = Arc::clone(&self.finished);
@@ -284,6 +289,10 @@ impl ProjectSession {
                 }
             };
             if let Some(record) = terminal {
+                if let Some((graph_id, run_id)) = &claimed_execution {
+                    let _ =
+                        release_terminal_graph_claim(supervisor_graphs.as_ref(), graph_id, run_id);
+                }
                 let _ = supervisor_repository.persist(&record, RunStatus::Running);
             }
             supervisor_flag.store(true, Ordering::Release);
@@ -349,6 +358,25 @@ impl ProjectSession {
             }
         }
     }
+}
+
+fn release_terminal_graph_claim<G>(
+    repository: &G,
+    graph_id: &ExecutionGraphId,
+    run_id: &RunId,
+) -> Result<(), ExecutionGraphRepositoryError>
+where
+    G: ExecutionGraphRepository + ?Sized,
+{
+    let mut graph = repository.get(graph_id)?;
+    if graph.active_run_id() != Some(run_id) {
+        return Ok(());
+    }
+    let expected_revision = graph.revision();
+    graph
+        .recover_stale_claim(Utc::now())
+        .map_err(|_| ExecutionGraphRepositoryError::InvalidRecord)?;
+    repository.compare_and_set(expected_revision, &graph)
 }
 
 fn persist_started_run<R, G>(
@@ -494,6 +522,141 @@ mod tests {
         assert_eq!(recovered.active_run_id(), None);
         assert_eq!(recovered.previous_run_id(), Some(&run_id));
         assert_eq!(runs.get(&run_id).unwrap().status(), RunStatus::Pending);
+    }
+
+    #[test]
+    fn terminal_worker_failure_releases_only_its_live_execution_graph_claim() {
+        let temp = tempfile::tempdir().unwrap();
+        let payload = VersionedPayload::from_typed(
+            SchemaRef {
+                id: SchemaId::parse("fixture.request").unwrap(),
+                version: SchemaVersion::new(1).unwrap(),
+            },
+            &serde_json::json!({"value": 1}),
+        )
+        .unwrap();
+        let run_id = RunId::parse("run-worker-failure").unwrap();
+        let graph = ExecutionGraphRecord::new_claimed(
+            ExecutionGraphId::parse("graph-worker-failure").unwrap(),
+            FeatureId::parse("composition.generate").unwrap(),
+            Sha256Digest::parse("a".repeat(64)).unwrap(),
+            payload,
+            vec![ExecutionNodeSpec {
+                node_id: ExecutionNodeId::parse("node.pending").unwrap(),
+                role_id: "item.generate".into(),
+                depends_on: Vec::new(),
+                request_snapshot_hash: Sha256Digest::parse("b".repeat(64)).unwrap(),
+            }],
+            run_id.clone(),
+            Utc::now(),
+        )
+        .unwrap();
+        let graphs = FileExecutionGraphRepository::new(temp.path().to_path_buf());
+        graphs.create_claimed(&graph, &run_id).unwrap();
+
+        release_terminal_graph_claim(&graphs, graph.id(), &run_id).unwrap();
+
+        let recovered = graphs.get(graph.id()).unwrap();
+        assert_eq!(recovered.status(), ExecutionGraphStatus::Paused);
+        assert_eq!(recovered.active_run_id(), None);
+        assert_eq!(recovered.previous_run_id(), Some(&run_id));
+        release_terminal_graph_claim(&graphs, graph.id(), &run_id).unwrap();
+        assert_eq!(graphs.get(graph.id()).unwrap(), recovered);
+    }
+
+    #[tokio::test]
+    async fn supervisor_failure_terminates_the_run_and_releases_its_graph_claim() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("project");
+        fs::create_dir_all(project.join(".ats/runs-v3")).unwrap();
+        fs::write(project.join(".ats/version"), b"2").unwrap();
+        fs::write(
+            project.join("project.json"),
+            serde_json::to_vec(&ProjectMeta {
+                name: "SupervisorFailureProject".into(),
+                csharp_name: "SupervisorFailureProject".into(),
+                game_id: "sts2".into(),
+                scaffolded: true,
+                generated_files: Vec::new(),
+                build_output_dir: None,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let session = ProjectSession::open(ProjectFolder::open(&project).unwrap()).unwrap();
+        let payload = VersionedPayload::from_typed(
+            SchemaRef {
+                id: SchemaId::parse("fixture.request").unwrap(),
+                version: SchemaVersion::new(1).unwrap(),
+            },
+            &serde_json::json!({"value": 1}),
+        )
+        .unwrap();
+        let run_id = RunId::parse("run-supervised-worker-failure").unwrap();
+        let run = RunRecord::new_with_id(
+            run_id.clone(),
+            FeatureId::parse("composition.generate").unwrap(),
+            payload.clone(),
+        );
+        let graph = ExecutionGraphRecord::new_claimed(
+            ExecutionGraphId::parse("graph-supervised-worker-failure").unwrap(),
+            FeatureId::parse("composition.generate").unwrap(),
+            Sha256Digest::parse("a".repeat(64)).unwrap(),
+            payload,
+            vec![ExecutionNodeSpec {
+                node_id: ExecutionNodeId::parse("node.pending").unwrap(),
+                role_id: "item.generate".into(),
+                depends_on: Vec::new(),
+                request_snapshot_hash: Sha256Digest::parse("b".repeat(64)).unwrap(),
+            }],
+            run_id.clone(),
+            Utc::now(),
+        )
+        .unwrap();
+        let graph_id = graph.id().clone();
+        session
+            .submit_claimed(run, graph, |_, _, _| async move {
+                Err::<RunRecord, RunFailure>(
+                    RunFailure::new(
+                        ats_kernel::FailureCode::parse("composition.execution.invalid").unwrap(),
+                        "fixture.worker",
+                        None,
+                    )
+                    .unwrap(),
+                )
+            })
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if session
+                    .repository
+                    .get(&run_id)
+                    .is_ok_and(|run| run.status().is_terminal())
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        session
+            .cancel_and_drain(CancellationReason::AppShutdown, Duration::from_secs(5))
+            .await
+            .unwrap();
+
+        let failed = session.repository.get(&run_id).unwrap();
+        assert_eq!(failed.status(), RunStatus::Failed);
+        assert_eq!(
+            failed.failure().unwrap().code.as_str(),
+            "composition.execution.invalid"
+        );
+        let recovered = session.execution_graph_repository.get(&graph_id).unwrap();
+        assert_eq!(recovered.status(), ExecutionGraphStatus::Paused);
+        assert_eq!(recovered.active_run_id(), None);
+        assert_eq!(recovered.previous_run_id(), Some(&run_id));
+        session.release_project_lock().unwrap();
     }
 
     #[test]
