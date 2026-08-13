@@ -18,6 +18,7 @@ base64 = "0.22"
 chrono = "0.4"
 figment = { version = "0.10", features = ["json", "env"] }
 futures-util = "0.3"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 regex = "1"
 png = "0.18"

@@ -593,7 +593,25 @@ Artifact or staging residue on failed paths.
 
 ## 5. Resource Workspace
 
-`ats-workspace` stores ResourceAsset schema v2 with immutable candidates and explicit selection. A Feature references only `resourceId + selectedVersion`; a new upload, Pack default, AI response, or deterministic derived output has `selectedVersion=null` until an explicit select succeeds. Stale or tampered bytes fail. The registered HTTP Media Adapter supports Images/Chat protocols, cancellation, typed status mapping, bounded bytes, and request-hash provenance; health reports registration, not provider connectivity.
+`ats-workspace` stores ResourceAsset schema v2 with immutable candidates and explicit selection. A Feature references only `resourceId + selectedVersion`; a new upload, Pack default, AI response, or deterministic derived output has `selectedVersion=null` until an explicit select succeeds. Stale or tampered bytes fail. The registered HTTP Media Adapter supports Images/Chat protocols, cancellation, typed status mapping, bounded bytes, and request-hash provenance; health reports registration, not provider connectivity. At the Provider boundary, Images base64 and Chat Markdown/data-URI or HTTPS payloads are decoded only as PNG, JPEG or WebP, bounded before allocation, center-cropped/resized to the immutable request dimensions and re-encoded as PNG. Features and Packs therefore consume one exact `image/png` contract and never branch on Provider/model response conventions.
+
+The executable normalization boundary is `HttpMediaClient::generate` in
+`crates/ats-adapters/src/media_client.rs`. Its input is the verified `MediaRequestSnapshot`
+(`media_type=image/png`, optional paired `width/height`) plus one Provider response. Its output is a
+`MediaResponse` whose bytes are a decoded, bounded RGBA PNG at the exact requested dimensions.
+Provider text/body and decode errors never enter persisted details.
+
+| Case | Provider payload | Required result |
+| --- | --- | --- |
+| Good | Images `b64_json`, or Chat Markdown/data URI / HTTPS body containing PNG, JPEG or WebP | Decode, enforce input/dimension/allocation bounds, normalize to requested dimensions, encode RGBA PNG |
+| Base | Provider image already is PNG and has the exact requested dimensions | Still decode and encode through the same normalization path; no protocol-specific bypass |
+| Bad | Unknown MIME, malformed base64/image, non-image HTTPS body, oversized dimensions/allocation or missing Chat image | `MediaError::InvalidResponse`, mapped to the stable Resource media failure family without raw response content |
+
+Required focused gate:
+
+```powershell
+cargo test -p ats-adapters media_client -- --nocapture
+```
 
 ### Scenario: Prepare And Select A Deterministic PNG Resource Graph
 
