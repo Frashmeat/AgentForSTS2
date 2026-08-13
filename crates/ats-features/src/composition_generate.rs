@@ -24,10 +24,10 @@ use thiserror::Error;
 use crate::FeatureSpec;
 use crate::composition::{CompositionDraftRef, CompositionGraphError, ResolvedItemGraph};
 use crate::mod_generate_single::{
-    CompositionFileMerge, ProposedArtifactFile, SingleGenerateCompositionProposal,
-    SingleGenerateContext, SingleGenerateError, SingleGenerateFeature, SingleGenerateRequest,
-    SingleGenerateResult, SingleGenerateService, SingleGenerationProvenance,
-    SingleProposalDependencies,
+    CompositionFileMerge, CompositionMergeKeyPolicy, ProposedArtifactFile,
+    SingleGenerateCompositionProposal, SingleGenerateContext, SingleGenerateError,
+    SingleGenerateFeature, SingleGenerateRequest, SingleGenerateResult, SingleGenerateService,
+    SingleGenerationProvenance, SingleProposalDependencies,
 };
 use crate::mod_plan::{
     ModPlanContext, ModPlanError, ModPlanFeature, ModPlanRequest, ModPlanService,
@@ -476,6 +476,7 @@ fn consolidate_proposed_files(
     struct PendingFile {
         role: String,
         merge: Option<CompositionFileMerge>,
+        merge_key_policy: Option<CompositionMergeKeyPolicy>,
         contents: Vec<Vec<u8>>,
     }
 
@@ -488,6 +489,9 @@ fn consolidate_proposed_files(
             if write.relative_path() != file.relative_path || write.source_path().is_some() {
                 return Err(CompositionGenerateError::GeneratedFileConflict);
             }
+            if file.composition_merge.is_some() != file.composition_merge_key_policy.is_some() {
+                return Err(CompositionGenerateError::GeneratedFileConflict);
+            }
             let bytes = write
                 .bytes()
                 .ok_or(CompositionGenerateError::GeneratedFileConflict)?;
@@ -495,7 +499,10 @@ fn consolidate_proposed_files(
                 Some(existing)
                     if existing.role == file.role
                         && existing.merge == Some(CompositionFileMerge::JsonObject)
-                        && file.composition_merge == existing.merge =>
+                        && existing.merge_key_policy
+                            == Some(CompositionMergeKeyPolicy::UniqueKeys)
+                        && file.composition_merge == existing.merge
+                        && file.composition_merge_key_policy == existing.merge_key_policy =>
                 {
                     existing.contents.push(bytes.to_vec());
                 }
@@ -506,6 +513,7 @@ fn consolidate_proposed_files(
                         PendingFile {
                             role: file.role.clone(),
                             merge: file.composition_merge,
+                            merge_key_policy: file.composition_merge_key_policy,
                             contents: vec![bytes.to_vec()],
                         },
                     );
@@ -529,6 +537,7 @@ fn consolidate_proposed_files(
             role: file.role,
             relative_path: path,
             composition_merge: file.merge,
+            composition_merge_key_policy: file.merge_key_policy,
         });
     }
     Ok((writes, artifact_files))
@@ -549,6 +558,70 @@ fn merge_json_objects(contents: &[Vec<u8>]) -> Result<Vec<u8>, CompositionGenera
         }
     }
     serde_json::to_vec_pretty(&merged).map_err(|_| CompositionGenerateError::GeneratedFileConflict)
+}
+
+enum NextProposalMergeConflict {
+    DuplicateKey { role: String },
+    Contract,
+}
+
+fn validate_next_proposal_merge_claims(
+    previous: &[SingleGenerateCompositionProposal],
+    current: &SingleGenerateCompositionProposal,
+) -> Result<(), NextProposalMergeConflict> {
+    consolidate_proposed_files(std::slice::from_ref(current))
+        .map_err(|_| NextProposalMergeConflict::Contract)?;
+    let (existing_writes, existing_files) =
+        consolidate_proposed_files(previous).map_err(|_| NextProposalMergeConflict::Contract)?;
+    let existing = existing_writes
+        .iter()
+        .zip(&existing_files)
+        .map(|(write, file)| (write.relative_path(), (write, file)))
+        .collect::<BTreeMap<_, _>>();
+
+    if current.writes.len() != current.artifact_files.len() {
+        return Err(NextProposalMergeConflict::Contract);
+    }
+    for (write, file) in current.writes.iter().zip(&current.artifact_files) {
+        if write.relative_path() != file.relative_path
+            || write.source_path().is_some()
+            || file.composition_merge.is_some() != file.composition_merge_key_policy.is_some()
+        {
+            return Err(NextProposalMergeConflict::Contract);
+        }
+        let Some((existing_write, existing_file)) = existing.get(write.relative_path()) else {
+            continue;
+        };
+        if existing_file.role != file.role
+            || existing_file.composition_merge != Some(CompositionFileMerge::JsonObject)
+            || existing_file.composition_merge_key_policy
+                != Some(CompositionMergeKeyPolicy::UniqueKeys)
+            || file.composition_merge != existing_file.composition_merge
+            || file.composition_merge_key_policy != existing_file.composition_merge_key_policy
+        {
+            return Err(NextProposalMergeConflict::Contract);
+        }
+        let existing_keys =
+            merge_object_keys(existing_write).map_err(|_| NextProposalMergeConflict::Contract)?;
+        let current_keys =
+            merge_object_keys(write).map_err(|_| NextProposalMergeConflict::Contract)?;
+        if existing_keys.iter().any(|key| current_keys.contains(key)) {
+            return Err(NextProposalMergeConflict::DuplicateKey {
+                role: file.role.clone(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn merge_object_keys(write: &ProjectFileWrite) -> Result<BTreeSet<String>, ()> {
+    let bytes = write.bytes().ok_or(())?;
+    let values =
+        serde_json::from_slice::<BTreeMap<String, serde_json::Value>>(bytes).map_err(|_| ())?;
+    if values.values().any(|value| !value.is_string()) {
+        return Err(());
+    }
+    Ok(values.into_keys().collect())
 }
 
 fn composition_artifact_request(
@@ -775,6 +848,39 @@ fn schema_version(id: &str, version: u32) -> SchemaRef {
 mod tests {
     use super::*;
 
+    fn proposal(
+        relative_path: &str,
+        content: &[u8],
+        merge_key_policy: CompositionMergeKeyPolicy,
+    ) -> SingleGenerateCompositionProposal {
+        SingleGenerateCompositionProposal {
+            result: SingleGenerateResult {
+                publication:
+                    crate::mod_generate_single::SingleGeneratePublication::CompositionStaged,
+                artifact_manifest_ref: None,
+                manifest_sha256: None,
+                generated_file_count: 1,
+                validation_primitive: ats_kernel::PrimitiveId::parse("code.fixture-validate")
+                    .unwrap(),
+                acceptance_notes: Vec::new(),
+            },
+            writes: vec![ProjectFileWrite::new(relative_path, content.to_vec()).unwrap()],
+            artifact_files: vec![ProposedArtifactFile {
+                role: "localization.eng".into(),
+                relative_path: relative_path.into(),
+                composition_merge: Some(CompositionFileMerge::JsonObject),
+                composition_merge_key_policy: Some(merge_key_policy),
+            }],
+            provenance: SingleGenerationProvenance {
+                definition_hash: Sha256Digest::parse("a".repeat(64)).unwrap(),
+                model_request_sha256: Sha256Digest::parse("b".repeat(64)).unwrap(),
+                model: "fixture-model".into(),
+                usage: ats_runtime::TokenUsage::default(),
+                selected_resources: Vec::new(),
+            },
+        }
+    }
+
     #[test]
     fn json_object_merge_is_sorted_and_rejects_invalid_or_duplicate_entries() {
         let merged =
@@ -802,6 +908,110 @@ mod tests {
                 .as_str(),
             "model.output_invalid"
         );
+    }
+
+    #[test]
+    fn composition_merge_enforces_shared_and_exclusive_path_policies() {
+        let shared = vec![
+            proposal(
+                "localization/eng/cards.json",
+                br#"{"card_a.title":"A"}"#,
+                CompositionMergeKeyPolicy::UniqueKeys,
+            ),
+            proposal(
+                "localization/eng/cards.json",
+                br#"{"card_b.title":"B"}"#,
+                CompositionMergeKeyPolicy::UniqueKeys,
+            ),
+        ];
+        let (writes, files) = consolidate_proposed_files(&shared).unwrap();
+        assert_eq!(writes.len(), 1);
+        assert_eq!(files.len(), 1);
+        assert_eq!(
+            files[0].composition_merge_key_policy,
+            Some(CompositionMergeKeyPolicy::UniqueKeys)
+        );
+        assert_eq!(
+            String::from_utf8(writes[0].bytes().unwrap().to_vec()).unwrap(),
+            "{\n  \"card_a.title\": \"A\",\n  \"card_b.title\": \"B\"\n}"
+        );
+
+        let exclusive = vec![proposal(
+            "localization/eng/ancients.json",
+            br#"{"THE_ARCHITECT.TALK":"Hello"}"#,
+            CompositionMergeKeyPolicy::ExclusivePath,
+        )];
+        assert!(consolidate_proposed_files(&exclusive).is_ok());
+
+        let duplicate_exclusive = vec![
+            proposal(
+                "localization/eng/ancients.json",
+                br#"{"THE_ARCHITECT.TALK":"Hello"}"#,
+                CompositionMergeKeyPolicy::ExclusivePath,
+            ),
+            proposal(
+                "localization/eng/ancients.json",
+                br#"{"THE_ARCHITECT.TALK_AGAIN":"Hello again"}"#,
+                CompositionMergeKeyPolicy::ExclusivePath,
+            ),
+        ];
+        assert!(matches!(
+            consolidate_proposed_files(&duplicate_exclusive),
+            Err(CompositionGenerateError::GeneratedFileConflict)
+        ));
+
+        let inconsistent = vec![
+            proposal(
+                "localization/eng/items.json",
+                br#"{"item_a.title":"A"}"#,
+                CompositionMergeKeyPolicy::UniqueKeys,
+            ),
+            proposal(
+                "localization/eng/items.json",
+                br#"{"FIXED.TITLE":"B"}"#,
+                CompositionMergeKeyPolicy::ExclusivePath,
+            ),
+        ];
+        assert!(matches!(
+            consolidate_proposed_files(&inconsistent),
+            Err(CompositionGenerateError::GeneratedFileConflict)
+        ));
+    }
+
+    #[test]
+    fn single_boundary_assigns_duplicate_keys_to_the_current_proposal() {
+        let previous = vec![proposal(
+            "localization/eng/cards.json",
+            br#"{"E2EMOD-FIRST_CARD.title":"First"}"#,
+            CompositionMergeKeyPolicy::UniqueKeys,
+        )];
+        let distinct = proposal(
+            "localization/eng/cards.json",
+            br#"{"E2EMOD-SECOND_CARD.title":"Second"}"#,
+            CompositionMergeKeyPolicy::UniqueKeys,
+        );
+        assert!(validate_next_proposal_merge_claims(&previous, &distinct).is_ok());
+
+        let duplicate = proposal(
+            "localization/eng/cards.json",
+            br#"{"E2EMOD-FIRST_CARD.title":"Duplicate"}"#,
+            CompositionMergeKeyPolicy::UniqueKeys,
+        );
+        assert!(matches!(
+            validate_next_proposal_merge_claims(&previous, &duplicate),
+            Err(NextProposalMergeConflict::DuplicateKey { role })
+                if role == "localization.eng"
+        ));
+
+        let exclusive = proposal(
+            "localization/eng/cards.json",
+            br#"{"E2EMOD-SECOND_CARD.title":"Second"}"#,
+            CompositionMergeKeyPolicy::ExclusivePath,
+        );
+        assert!(matches!(
+            validate_next_proposal_merge_claims(&previous, &exclusive),
+            Err(NextProposalMergeConflict::Contract)
+        ));
     }
 
     #[test]

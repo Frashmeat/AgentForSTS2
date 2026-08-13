@@ -27,6 +27,7 @@ pub enum OutputContractDiagnosticCode {
     FileRole,
     FileContent,
     MergeShape,
+    MergeKeyConflict,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
@@ -54,6 +55,7 @@ pub enum ExpectedOutputShape {
     BoundedStringArray,
     NonEmptyString,
     FlatStringObject,
+    UniqueObjectKeys,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -135,7 +137,7 @@ pub fn generation_feedback_schema() -> SchemaRef {
     SchemaRef {
         id: SchemaId::parse("feature.generation-feedback")
             .expect("built-in feedback schema ID is valid"),
-        version: SchemaVersion::new(1).expect("built-in feedback schema version is valid"),
+        version: SchemaVersion::new(2).expect("built-in feedback schema version is valid"),
     }
 }
 

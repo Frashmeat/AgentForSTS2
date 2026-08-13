@@ -1712,7 +1712,7 @@ fn pack() -> LoadedGamePack {
             },
             {
                 "slotId":"mod.generate.single","featureId":"mod.generate.single",
-                "schema":{"id":"pack.mod-generate-single","version":4},
+                "schema":{"id":"pack.mod-generate-single","version":5},
                 "requiredPrimitives":["code.fixture-validate"],
                 "payload":{
                     "validationPrimitive":"code.fixture-validate",

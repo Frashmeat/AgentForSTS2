@@ -67,7 +67,7 @@ impl SingleGenerateFeature {
     pub fn contribution_requirement() -> ats_game_context::ContributionRequirement {
         ats_game_context::ContributionRequirement {
             slot_id: generation_slot(),
-            schema: schema_version("pack.mod-generate-single", 4),
+            schema: schema_version("pack.mod-generate-single", 5),
         }
     }
 }
@@ -134,12 +134,21 @@ struct GeneratedFileSpec {
     target_path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     composition_merge: Option<CompositionFileMerge>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    composition_merge_key_policy: Option<CompositionMergeKeyPolicy>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum CompositionFileMerge {
     JsonObject,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum CompositionMergeKeyPolicy {
+    UniqueKeys,
+    ExclusivePath,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -167,6 +176,7 @@ enum SingleGenerateFailureReason {
     FileRole,
     FileContent,
     MergeContent,
+    MergeKeyConflict,
     GeneratedFileCountOverflow,
     CheckpointProvenance,
     CheckpointResult,
@@ -205,7 +215,17 @@ struct GeneratePromptContribution<'a> {
     item_type: &'a str,
     common_guidance: &'a [String],
     item_guidance: &'a [String],
-    generated_file_roles: Vec<&'a str>,
+    generated_files: Vec<GeneratePromptFileSpec<'a>>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct GeneratePromptFileSpec<'a> {
+    role: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    composition_merge: Option<CompositionFileMerge>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    composition_merge_key_policy: Option<CompositionMergeKeyPolicy>,
 }
 
 struct SingleRequestAssemblyContext<'a> {
@@ -278,6 +298,7 @@ pub struct ProposedArtifactFile {
     pub role: String,
     pub relative_path: String,
     pub composition_merge: Option<CompositionFileMerge>,
+    pub composition_merge_key_policy: Option<CompositionMergeKeyPolicy>,
 }
 
 pub struct SingleGenerateProposal {
@@ -357,6 +378,39 @@ impl SingleGenerateProposal {
             provenance: self.provenance,
         }
     }
+
+    pub(crate) fn composition_proposal(&self) -> SingleGenerateCompositionProposal {
+        SingleGenerateCompositionProposal {
+            result: self.result.clone(),
+            writes: self.writes.clone(),
+            artifact_files: self.artifact_files.clone(),
+            provenance: self.provenance.clone(),
+        }
+    }
+
+    pub(crate) fn merge_key_conflict_error(&self, role: String) -> SingleGenerateError {
+        merge_key_conflict_error(&self.checkpoint(), role)
+    }
+}
+
+fn merge_key_conflict_error(
+    checkpoint: &SingleGenerateProposalCheckpoint,
+    role: String,
+) -> SingleGenerateError {
+    let candidate = serde_json::to_vec(&checkpoint.files)
+        .expect("validated Single checkpoint files are serializable");
+    SingleGenerateError::InvalidModelOutput(
+        SingleGenerateFailureDetails::reason(SingleGenerateFailureReason::MergeKeyConflict)
+            .with_output_feedback(
+                OutputContractDiagnostic {
+                    code: OutputContractDiagnosticCode::MergeKeyConflict,
+                    role_id: Some(role),
+                    expected_shape: ExpectedOutputShape::UniqueObjectKeys,
+                    observed_shape: ObservedJsonShape::Object,
+                },
+                candidate_sha256(&candidate),
+            ),
+    )
 }
 
 pub struct SingleProposalDependencies<'a, C, R>
@@ -953,10 +1007,14 @@ impl SingleGenerateService {
             item_type: &item_spec.id,
             common_guidance: &contribution.guidance,
             item_guidance: &item_spec.guidance,
-            generated_file_roles: item_spec
+            generated_files: item_spec
                 .generated_files
                 .iter()
-                .map(|file| file.role.as_str())
+                .map(|file| GeneratePromptFileSpec {
+                    role: &file.role,
+                    composition_merge: file.composition_merge,
+                    composition_merge_key_policy: file.composition_merge_key_policy,
+                })
                 .collect(),
         };
         let slots = BTreeMap::from([
@@ -1276,6 +1334,8 @@ impl GenerateContribution {
                 if !valid_role(&file.role)
                     || !roles.insert(file.role.as_str())
                     || !paths.insert(file.target_path.as_str())
+                    || (file.composition_merge.is_some()
+                        != file.composition_merge_key_policy.is_some())
                     || expand_generated_target_template(&file.target_path, "fixture", "fixture")
                         .is_err()
                 {
@@ -1718,14 +1778,21 @@ fn decode_checkpoint_files(
     files
         .iter()
         .map(|(role, content)| {
-            let content = match item_spec
+            let spec = item_spec
                 .generated_files
                 .iter()
-                .find(|spec| &spec.role == role)
-                .and_then(|spec| spec.composition_merge)
-            {
-                Some(CompositionFileMerge::JsonObject) => serde_json::from_str(content)
-                    .map_err(|_| invalid_model_output(SingleGenerateFailureReason::MergeContent))?,
+                .find(|spec| &spec.role == role);
+            let content = match spec.and_then(|spec| spec.composition_merge) {
+                Some(CompositionFileMerge::JsonObject) => {
+                    let value: serde_json::Value = serde_json::from_str(content).map_err(|_| {
+                        invalid_model_output(SingleGenerateFailureReason::MergeContent)
+                    })?;
+                    normalize_generated_content(
+                        spec.expect("a merge policy can only come from the matched file spec"),
+                        value.clone(),
+                    )?;
+                    value
+                }
                 None => serde_json::Value::String(content.clone()),
             };
             Ok((role.clone(), content))
@@ -1780,6 +1847,7 @@ fn is_repairable_output_reason(reason: SingleGenerateFailureReason) -> bool {
             | SingleGenerateFailureReason::FileRole
             | SingleGenerateFailureReason::FileContent
             | SingleGenerateFailureReason::MergeContent
+            | SingleGenerateFailureReason::MergeKeyConflict
     )
 }
 
@@ -1836,6 +1904,9 @@ fn output_contract_diagnostic(
             SingleGenerateFailureReason::FileRole => OutputContractDiagnosticCode::FileRole,
             SingleGenerateFailureReason::FileContent => OutputContractDiagnosticCode::FileContent,
             SingleGenerateFailureReason::MergeContent => OutputContractDiagnosticCode::MergeShape,
+            SingleGenerateFailureReason::MergeKeyConflict => {
+                OutputContractDiagnosticCode::MergeKeyConflict
+            }
             SingleGenerateFailureReason::GeneratedFileCountOverflow
             | SingleGenerateFailureReason::CheckpointProvenance
             | SingleGenerateFailureReason::CheckpointResult => {
@@ -1845,6 +1916,7 @@ fn output_contract_diagnostic(
         role_id: role.map(|spec| spec.role.clone()),
         expected_shape: match reason {
             SingleGenerateFailureReason::MergeContent => ExpectedOutputShape::FlatStringObject,
+            SingleGenerateFailureReason::MergeKeyConflict => ExpectedOutputShape::UniqueObjectKeys,
             SingleGenerateFailureReason::FileContent => ExpectedOutputShape::NonEmptyString,
             SingleGenerateFailureReason::FileCount | SingleGenerateFailureReason::FileRole => {
                 ExpectedOutputShape::ExactDeclaredRoles
@@ -2028,6 +2100,7 @@ fn proposed_artifact_files(
             role: role.clone(),
             relative_path: relative_path.clone(),
             composition_merge: spec.composition_merge,
+            composition_merge_key_policy: spec.composition_merge_key_policy,
         })
         .collect::<Vec<_>>();
     for resource in resources {
@@ -2049,6 +2122,7 @@ fn proposed_artifact_files(
             role: resource.reference.logical_role.clone(),
             relative_path,
             composition_merge: None,
+            composition_merge_key_policy: None,
         });
     }
     Ok(files)
@@ -2185,7 +2259,7 @@ fn bundle_schema() -> SchemaRef {
 }
 
 fn single_generate_failure_details_schema() -> SchemaRef {
-    schema("feature.mod-generate-single-failure-details")
+    schema_version("feature.mod-generate-single-failure-details", 2)
 }
 
 #[cfg(test)]
@@ -2233,7 +2307,7 @@ mod tests {
                 {
                     "slotId": "mod.generate.single",
                     "featureId": "mod.generate.single",
-                    "schema": {"id":"pack.mod-generate-single", "version":4},
+                    "schema": {"id":"pack.mod-generate-single", "version":5},
                     "requiredPrimitives": ["code.fixture-validate"],
                     "payload": {
                         "validationPrimitive": "code.fixture-validate",
@@ -2311,6 +2385,20 @@ mod tests {
             incomplete_generation_catalog.validate(&pack),
             Err(SingleGenerateError::InvalidPackContribution)
         ));
+        let mut merge_without_policy = contribution.clone();
+        merge_without_policy.item_types[0].generated_files[0].composition_merge =
+            Some(CompositionFileMerge::JsonObject);
+        assert!(matches!(
+            merge_without_policy.validate(&pack),
+            Err(SingleGenerateError::InvalidPackContribution)
+        ));
+        let mut policy_without_merge = contribution.clone();
+        policy_without_merge.item_types[0].generated_files[0].composition_merge_key_policy =
+            Some(CompositionMergeKeyPolicy::UniqueKeys);
+        assert!(matches!(
+            policy_without_merge.validate(&pack),
+            Err(SingleGenerateError::InvalidPackContribution)
+        ));
         let specs: ResourceSpecs = resources.decode(&resource_specs_slot()).unwrap();
         specs.validate().unwrap();
         assert_eq!(
@@ -2334,11 +2422,13 @@ mod tests {
                     role: "source".into(),
                     target_path: "Generated/{item_id}.cs".into(),
                     composition_merge: None,
+                    composition_merge_key_policy: None,
                 },
                 GeneratedFileSpec {
                     role: "localization.eng".into(),
                     target_path: "{mod_id}/localization/eng/items.json".into(),
                     composition_merge: Some(CompositionFileMerge::JsonObject),
+                    composition_merge_key_policy: Some(CompositionMergeKeyPolicy::UniqueKeys),
                 },
             ],
         };
@@ -2371,6 +2461,29 @@ mod tests {
             contract.json_schema["properties"]["files"]["properties"]["localization.eng"]["additionalProperties"]
                 ["type"],
             "string"
+        );
+        let prompt_contribution = GeneratePromptContribution {
+            item_type: &item_spec.id,
+            common_guidance: &[],
+            item_guidance: &item_spec.guidance,
+            generated_files: item_spec
+                .generated_files
+                .iter()
+                .map(|file| GeneratePromptFileSpec {
+                    role: &file.role,
+                    composition_merge: file.composition_merge,
+                    composition_merge_key_policy: file.composition_merge_key_policy,
+                })
+                .collect(),
+        };
+        let prompt_value = serde_json::to_value(prompt_contribution).unwrap();
+        assert_eq!(
+            prompt_value["generatedFiles"][1],
+            serde_json::json!({
+                "role": "localization.eng",
+                "compositionMerge": "json_object",
+                "compositionMergeKeyPolicy": "unique_keys"
+            })
         );
 
         let request = SingleGenerateRequest {
@@ -2412,7 +2525,7 @@ mod tests {
                 ),
                 (
                     "localization.eng".into(),
-                    serde_json::json!({"FIXTURE.title": "Fixture"}),
+                    serde_json::json!({"E2EMOD-FIXTURE_ITEM.title": "Fixture"}),
                 ),
             ]),
             acceptance_notes: Vec::new(),
@@ -2420,7 +2533,10 @@ mod tests {
         let generated = validate_bundle(&request, &item_spec, valid).unwrap();
         assert_eq!(generated.files[0].0, "source");
         assert_eq!(generated.files[1].0, "localization.eng");
-        assert_eq!(generated.files[1].2, r#"{"FIXTURE.title":"Fixture"}"#);
+        assert_eq!(
+            generated.files[1].2,
+            r#"{"E2EMOD-FIXTURE_ITEM.title":"Fixture"}"#
+        );
 
         for invalid_content in [
             serde_json::Value::String(r#"{"FIXTURE.title":"Fixture"}"#.into()),
@@ -2499,6 +2615,7 @@ mod tests {
                 role: "localization.eng".into(),
                 target_path: "localization/eng.json".into(),
                 composition_merge: Some(CompositionFileMerge::JsonObject),
+                composition_merge_key_policy: Some(CompositionMergeKeyPolicy::UniqueKeys),
             }],
         };
         let secret = "SECRET_LOCALIZATION_VALUE";
@@ -2539,6 +2656,45 @@ mod tests {
         assert_ne!(
             candidate_sha256(b"candidate-a"),
             candidate_sha256(b"candidate-b")
+        );
+    }
+
+    #[test]
+    fn merge_key_conflict_feedback_is_typed_and_redacted() {
+        let checkpoint = SingleGenerateProposalCheckpoint {
+            result: SingleGenerateResult {
+                publication: SingleGeneratePublication::CompositionStaged,
+                artifact_manifest_ref: None,
+                manifest_sha256: None,
+                generated_file_count: 1,
+                validation_primitive: PrimitiveId::parse("code.fixture-validate").unwrap(),
+                acceptance_notes: Vec::new(),
+            },
+            provenance: SingleGenerationProvenance {
+                definition_hash: Sha256Digest::parse("a".repeat(64)).unwrap(),
+                model_request_sha256: Sha256Digest::parse("b".repeat(64)).unwrap(),
+                model: "fixture-model".into(),
+                usage: TokenUsage::default(),
+                selected_resources: Vec::new(),
+            },
+            files: BTreeMap::from([(
+                "localization.eng".into(),
+                r#"{"E2EMOD-CARD.title":"Fixture"}"#.into(),
+            )]),
+        };
+        let error = merge_key_conflict_error(&checkpoint, "localization.eng".into());
+        let evidence = error.output_feedback().unwrap();
+        assert_eq!(
+            evidence.envelope.output_diagnostics[0].code,
+            OutputContractDiagnosticCode::MergeKeyConflict
+        );
+        assert_eq!(
+            evidence.envelope.output_diagnostics[0].expected_shape,
+            ExpectedOutputShape::UniqueObjectKeys
+        );
+        assert_eq!(
+            error.run_failure().details.unwrap().payload(),
+            &serde_json::json!({"reasonCode": "merge_key_conflict"})
         );
     }
 

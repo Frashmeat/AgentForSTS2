@@ -57,11 +57,15 @@ The Plan union and the definition-selected exact role set are different contract
 compared for equality. `validate_plan_roles` validates the union against the Pack descriptor;
 `load_resources` independently validates the selected definition profile and immutable bindings.
 `pack.mod-plan-guidance` v3 owns only cross-item planning guidance;
-`pack.mod-generate-single` v4 owns bounded common guidance, required per-item guidance, validation
+`pack.mod-generate-single` v5 owns bounded common guidance, required per-item guidance, validation
 Primitive and exact generated-file roles. Single exposes `commonGuidance` plus only the selected
 `itemGuidance` to the Prompt. The Plan model-output contract excludes internal Resource role IDs;
 `ModPlanService` attaches catalog values after typed model validation. The Single contribution
-must cover exactly the catalog's item type IDs, preventing a declared-but-unexecutable type.
+must cover exactly the catalog's item type IDs, preventing a declared-but-unexecutable type. It
+also pairs `compositionMerge=json_object` with `unique_keys` or `exclusive_path`. `unique_keys`
+defines contributor ownership only: game runtime key syntax remains Pack/Truth/validator-owned;
+the staged Feature checks current output against prior successful checkpoints before completion,
+repeats the check on every restore path, and retains finalize as a full hard check.
 
 `ats-workspace` owns ItemDefinition schema v2: stable Item identity/type, canonical structured
 field values, behavior intent, Pack-keyed localization field maps, exact Resource version bindings,
@@ -827,7 +831,7 @@ role-keyed `resourceBindings` before model work. The Recipe owns one required `i
 slot. Artifact extension schema v2 and dedicated provenance both record `definitionHash`.
 The Recipe treats ItemDefinition as authoritative over Plan prose and permits up to 16,384 output
 tokens for complete multi-file Items. Invalid or truncated output persists only
-`feature.mod-generate-single-failure-details` v1 with one closed `reasonCode`; raw completion,
+`feature.mod-generate-single-failure-details` v2 with one closed `reasonCode`; raw completion,
 parser text, Provider body and model-authored role text are never persisted.
 
 `mod.generate.batch` request schema v4 embeds exact StoredItemDefinition snapshots and derives each
@@ -1081,7 +1085,7 @@ item.000.plan -> item.000.single -> item.001.plan -> item.001.single -> ...
   Provider body and raw completion envelope.
 - Before a Single checkpoint exists, closed output-contract failures (`output_truncated`, JSON
   decode, file/role/content/merge shape or acceptance-note contract) may produce one typed
-  `feature.generation-feedback` v1 envelope. The graph CAS-persists that envelope, its diagnostic
+  `feature.generation-feedback` v2 envelope. The graph CAS-persists that envelope, its diagnostic
   fingerprint and the complete completion-byte SHA-256 before another model call. The next child
   Run requests a complete bundle through the same Recipe/output contract; it never sends the raw
   rejected candidate or applies a local compatibility conversion.

@@ -516,7 +516,7 @@ describe("current desktop Stage 2 workflow", () => {
     assert.equal(feedbackNodes[0].feedbackState.checkpointHash, undefined);
     assert.deepEqual(feedbackNodes[0].feedbackState.feedback.payload.schema, {
       id: "feature.generation-feedback",
-      version: 1,
+      version: 2,
     });
     const succeededRun = JSON.parse(await fs.readFile(path.join(
       projectRoot,

@@ -137,15 +137,21 @@ Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-sp
   binds source version, transform parameters and pinned Pack identity. `ProjectSession` owns the
   sole filesystem Resource repository for all Runs and commands.
 - Media Adapter registration, provider configuration/connectivity, response decoding and generated-media quality are separate facts. Health reports only registration; failures remain typed. Images and Chat responses accept only bounded PNG/JPEG/WebP payloads, normalize them to the requested dimensions and PNG before ingest, and never add model-name compatibility branches.
-- `pack.mod-generate-single` v4 separates bounded top-level common guidance from required
+- `pack.mod-generate-single` v5 separates bounded top-level common guidance from required
   `itemTypes[].guidance`; Single serializes only the selected type as `itemGuidance`. Generation
   entries must cover exactly the top-level catalog IDs and declare exact file roles. Type-specific
   rules must never be appended to common guidance or selected by a code branch.
 - A generated file path may repeat across composition nodes only when every matching Pack file role
-  declares `compositionMerge=json_object`. The merger accepts only flat string-valued JSON objects,
-  rejects duplicate keys deterministically, and writes one sorted object before staging. STS2 uses
-  this for Card/Relic/Character tables and keeps Character's four Architect lines in separate
-  `ancients.json` roles for both locales.
+  declares `compositionMerge=json_object` plus `compositionMergeKeyPolicy=unique_keys`.
+  That policy owns contributor uniqueness without prescribing a game's runtime key syntax. The Pack,
+  Truth and registered validator own runtime identity. Before a current Single checkpoint succeeds,
+  the Feature compares its claims with every prior successful checkpoint; duplicate keys enter typed
+  output feedback for the current Item. Restore repeats the same claim validation. `exclusive_path`
+  permits game-defined fixed keys but only one composition node may contribute to its target path.
+  The merger never renames model output, accepts only flat string-valued JSON objects, rejects
+  duplicate keys deterministically, and writes one sorted object before staging. STS2 uses `unique_keys` for
+  Card/Relic/Character/Potion/Power tables and `exclusive_path` for Character's four Architect
+  lines in each locale's `ancients.json`.
 - ExecutionGraphRecord v4 directly replaces v3 and persists only current normalized checkpoints,
   attempt/feedback state and at most one dependency-ordered `RepairCampaign`. The campaign stores
   bounded typed diagnostic fingerprints, target Item/node/checkpoint identities, one active cursor,
@@ -727,7 +733,7 @@ a versioned Pack contribution contract.
 #### 1. Scope / Trigger
 
 This contract applies after `SingleGenerateService` resolves the selected
-`pack.mod-generate-single` item type and before it calls `ModelClient`. Pack-owned generated-file
+`pack.mod-generate-single` v5 item type and before it calls `ModelClient`. Pack-owned generated-file
 roles vary by item type, so a fixed Recipe schema cannot truthfully express the required model
 response shape.
 
@@ -743,7 +749,10 @@ pub fn render_with_output_contract(
 ) -> Result<ModelRequest, FeatureRecipeError>;
 
 // crates/ats-features/src/mod_generate_single.rs
-fn run_scoped_output_contract(item_spec: &GenerateItemType) -> ModelOutputContract;
+fn run_scoped_output_contract(
+    item_spec: &GenerateItemType,
+    item_id: &str,
+) -> ModelOutputContract;
 
 struct GeneratedModBundle {
     files: BTreeMap<String, serde_json::Value>,
@@ -752,19 +761,22 @@ struct GeneratedModBundle {
 ```
 
 The Recipe declares `feature.mod-generate-single-bundle` v2. The selected item type supplies
-`generatedFiles[].role`; target paths remain Feature-owned and are never model-authored.
+`generatedFiles[].role`, `compositionMerge` and `compositionMergeKeyPolicy`; target paths remain
+Feature-owned and are never model-authored.
 
 #### 3. Contracts
 
 | Source | Run-scoped destination |
 | --- | --- |
 | `itemType.id` | `pack.contribution.itemType` |
-| `contribution.guidance[]` | `pack.contribution.guidance[]` |
-| `itemType.generatedFiles[].role` | `pack.contribution.generatedFileRoles[]` |
+| `contribution.guidance[]` | `pack.contribution.commonGuidance[]` |
+| `itemType.guidance[]` | `pack.contribution.itemGuidance[]` |
+| `itemType.generatedFiles[].role/merge/policy` | `pack.contribution.generatedFiles[]` |
 | same role set | `output_contract.json_schema.properties.files.properties` keys |
 | same role set | `properties.files.required[]` |
 | role without `compositionMerge` | one non-blank bounded string property |
-| role with `compositionMerge=json_object` | one object property whose values are bounded strings |
+| merge role with `unique_keys` | one flat string object; keys must be disjoint across contributors |
+| merge role with `exclusive_path` | one flat string object; composition permits one target-path contributor |
 | dynamic JSON Schema | exact serialized `output.contract` Prompt slot |
 | dynamic JSON Schema | `ModelRequestSnapshot.request.outputContract` and provider-native schema |
 
@@ -775,7 +787,7 @@ Bundle v2 uses a role-keyed object:
   "files": {
     "source": "complete generated source",
     "localization.eng": {
-      "MOD-ITEM.title": "Generated title"
+      "mod-item.title": "Generated title"
     }
   },
   "acceptanceNotes": []
@@ -784,9 +796,11 @@ Bundle v2 uses a role-keyed object:
 
 `files.additionalProperties=false`; every declared role is required. A normal role is one
 non-blank, NUL-free string bounded to 16 MiB. A `compositionMerge=json_object` role is directly a
-flat JSON object with string values; it is never a JSON-encoded string. The Feature orders and
-serializes that object locally, enforces the same aggregate 16 MiB bound, and stores only the
-normalized string in durable checkpoints and project writes. Acceptance notes are optional as an
+flat JSON object with string values; it is never a JSON-encoded string. `unique_keys` does not
+constrain key text: Pack guidance and Truth define game runtime identity, while the Feature enforces
+cross-contributor uniqueness for new output and checkpoint restoration. The Feature orders and serializes that object locally, enforces
+the same aggregate 16 MiB bound, and stores only the normalized string in durable checkpoints and
+project writes. Acceptance notes are optional as an
 empty array and are otherwise non-blank, NUL-free, at most 64 items and 2,000 characters each.
 
 #### 4. Validation & Error Matrix
@@ -795,8 +809,12 @@ empty array and are otherwise non-blank, NUL-free, at most 64 items and 2,000 ch
 | --- | --- | --- |
 | Recipe schema identity differs from dynamic contract | `FeatureRecipeError::InvalidContract` before HTTP | `feature.recipe_invalid` |
 | serialized `output.contract` differs from Snapshot contract | `FeatureRecipeError::InvalidContract` before HTTP | `feature.recipe_invalid` |
+| Pack merge and key policy are not both present or both absent | `SingleGenerateError::InvalidPackContribution` before HTTP | `pack.contribution_invalid` |
 | provider rejects the dynamic schema | `ModelError::Rejected` | `model.request_rejected` |
-| malformed JSON, wrong shape, missing/extra role, blank/NUL/oversized content | typed decode or `validate_bundle` rejection | `model.output_invalid` |
+| malformed JSON, wrong shape, missing/extra role, or blank/NUL/oversized content | typed decode or `validate_bundle` rejection | `model.output_invalid` |
+| current `unique_keys` proposal duplicates a prior successful claim | typed feedback before current Single checkpoint completion | `model.output_invalid` with `merge_key_conflict` |
+| restored checkpoints have duplicate claims | restore rejection before further execution or publication | `composition.execution.invalid` |
+| second contributor to `exclusive_path` or policy mismatch | Single-boundary/finalize hard rejection | `model.output_invalid` at `composition.generate.merge` |
 | exact roles and bounded content | continue to project transaction, validation and Artifact publication | later typed stage or `succeeded` |
 
 Code validation remains authoritative. It must reject an incompatible provider response even when a
@@ -808,9 +826,18 @@ requirements hidden from the request.
 - Good: `custom_code` compiles one required `source` property into Prompt, Snapshot and provider
   schema; a matching object reaches compile validation.
 - Base: `relic` compiles `source`, `localization.eng`, and `localization.zhs`; Pack order controls
-  deterministic project writes while JSON object key order is irrelevant.
+  deterministic project writes while JSON object key order is irrelevant. Two Card Items may share
+  `cards.json` only when each uses `unique_keys` and contributes disjoint runtime keys.
+- Base: Character owns one `ancients.json` contribution per locale through `exclusive_path`; no
+  second Item may contribute to either target path.
 - Bad: a generic `files: [{ role: string, content: string }]` schema lets the provider return an
   arbitrary role that Runtime later rejects; this caused the installed-candidate failure.
+- Bad: several Items each emit generic `title`/`description` keys and only discover the collision at
+  finalize. v5 assigns the duplicate to the current Single and feeds back a typed conflict before checkpoint completion.
+- Bad: force localization keys into an Item ID prefix in generic Feature code. BaseLib derives the
+  runtime ID from namespace and model type; Pack guidance and validation must retain that game truth.
+- Bad: silently rename duplicate localization keys during merge. The merger must reject the conflict
+  so generated source and localization identity cannot diverge.
 - Bad: declare a merge role as a string and ask the model to JSON-encode a flat object inside that
   string; this hides the merge shape from structured output and makes correctness model-dependent.
 - Bad: Prompt displays one schema while the HTTP request carries another; Recipe rendering rejects
@@ -829,8 +856,11 @@ Required assertions:
 
 - exact role keys appear in both `properties` and `required`, with `additionalProperties=false`;
 - Prompt contains the exact pretty-serialized Snapshot schema once;
-- Prompt Pack contribution exposes item type, guidance and generated roles;
+- Prompt Pack contribution exposes item type, common/item guidance and generated role/merge/policy;
 - wrong role fails `model.output_invalid`; correct multi-role output compiles and publishes;
+- `unique_keys` accepts disjoint runtime keys and assigns a duplicate to the current Single feedback;
+- restore repeats claim validation; one exclusive contribution, duplicate exclusive contribution and
+  policy mismatch remain hard failures;
 - provider transport tests preserve the `ModelRequest` schema without rewriting it;
 - facade E2E still proves Run v3, Artifact v3/hash, no staging and lock reacquisition.
 

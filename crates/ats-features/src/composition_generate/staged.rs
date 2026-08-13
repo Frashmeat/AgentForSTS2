@@ -459,6 +459,7 @@ impl CompositionGenerateService<'_> {
         }
 
         if graph.status() == ExecutionGraphStatus::Running {
+            let mut accepted_proposals = Vec::with_capacity(blueprint.items.len());
             for (item, definition) in blueprint.items.iter().zip(&resolved.nodes) {
                 handle_cancellation(&mut graph, graphs, run.id(), cancellation)?;
                 let plan_checkpoint = if node_status(&graph, &item.plan_node_id)?
@@ -560,13 +561,13 @@ impl CompositionGenerateService<'_> {
                 };
 
                 handle_cancellation(&mut graph, graphs, run.id(), cancellation)?;
+                let single_request = SingleGenerateRequest {
+                    artifact_id: definition.definition.item_id.to_string(),
+                    mod_id: request.mod_id.clone(),
+                    plan: plan_checkpoint.plan.clone(),
+                    definition: definition.clone(),
+                };
                 if node_status(&graph, &item.single_node_id)? != ExecutionNodeStatus::Succeeded {
-                    let single_request = SingleGenerateRequest {
-                        artifact_id: definition.definition.item_id.to_string(),
-                        mod_id: request.mod_id.clone(),
-                        plan: plan_checkpoint.plan.clone(),
-                        definition: definition.clone(),
-                    };
                     bind_and_start_node(
                         &mut graph,
                         graphs,
@@ -623,6 +624,44 @@ impl CompositionGenerateService<'_> {
                                     cancellation,
                                 )
                                 .await
+                        };
+                        let generated = match generated {
+                            Ok(proposal) => match validate_next_proposal_merge_claims(
+                                &accepted_proposals,
+                                &proposal.composition_proposal(),
+                            ) {
+                                Ok(()) => Ok(proposal),
+                                Err(NextProposalMergeConflict::DuplicateKey { role }) => {
+                                    Err(proposal.merge_key_conflict_error(role))
+                                }
+                                Err(NextProposalMergeConflict::Contract) => {
+                                    let error = CompositionGenerateError::GeneratedFileConflict;
+                                    finish_failed_child(
+                                        &mut child_run,
+                                        error.run_failure(),
+                                        cancellation,
+                                    )?;
+                                    if let Err(storage_error) = persist_child(runs, &child_run) {
+                                        pause_failed_node(
+                                            &mut graph,
+                                            graphs,
+                                            &item.single_node_id,
+                                            run.id(),
+                                            &storage_error,
+                                        )?;
+                                        return Err(storage_error);
+                                    }
+                                    pause_failed_node(
+                                        &mut graph,
+                                        graphs,
+                                        &item.single_node_id,
+                                        run.id(),
+                                        &error,
+                                    )?;
+                                    return Err(error);
+                                }
+                            },
+                            Err(error) => Err(error),
                         };
                         match generated {
                             Ok(proposal) => {
@@ -739,8 +778,18 @@ impl CompositionGenerateService<'_> {
                         graphs,
                         run.id(),
                     )?;
+                    accepted_proposals.push(proposal.composition_proposal());
                 } else {
                     let checkpoint = decode_single_checkpoint(&graph, item, definition)?;
+                    let restored = self.single.restore_composition_proposal(
+                        dependencies.resources,
+                        &single_request,
+                        &single_context(&context),
+                        &checkpoint.proposal,
+                    )?;
+                    validate_next_proposal_merge_claims(&accepted_proposals, &restored)
+                        .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
+                    accepted_proposals.push(restored);
                     persist_completed_child(
                         runs,
                         &checkpoint.child_run,
@@ -1363,6 +1412,9 @@ impl CompositionGenerateService<'_> {
                 plan: plan.plan,
                 definition: definition.clone(),
             };
+            let peer_proposals = restore_peer_proposals(
+                self, resources, request, context, resolved, &blueprint, graph, item_index,
+            )?;
             mutate_graph(graph, graphs, |graph| {
                 graph.activate_repair_target(run_id, Utc::now())
             })?;
@@ -1381,6 +1433,7 @@ impl CompositionGenerateService<'_> {
                     &single_request,
                     &current.proposal.files,
                     &revision,
+                    &peer_proposals,
                     cancellation,
                 )
                 .await?;
@@ -1469,6 +1522,7 @@ impl CompositionGenerateService<'_> {
         single_request: &SingleGenerateRequest,
         current_files: &BTreeMap<String, String>,
         revision: &CampaignRevision,
+        peer_proposals: &[SingleGenerateCompositionProposal],
         cancellation: &CancellationToken,
     ) -> Result<
         (
@@ -1543,6 +1597,28 @@ impl CompositionGenerateService<'_> {
                     cancellation,
                 )
                 .await;
+            let generated = match generated {
+                Ok(proposal) => match validate_next_proposal_merge_claims(
+                    peer_proposals,
+                    &proposal.composition_proposal(),
+                ) {
+                    Ok(()) => Ok(proposal),
+                    Err(NextProposalMergeConflict::DuplicateKey { role }) => {
+                        Err(proposal.merge_key_conflict_error(role))
+                    }
+                    Err(NextProposalMergeConflict::Contract) => {
+                        let error = CompositionGenerateError::GeneratedFileConflict;
+                        finish_failed_child(&mut child_run, error.run_failure(), cancellation)?;
+                        if let Err(storage_error) = persist_child(runs, &child_run) {
+                            pause_validation_graph(graph, graphs, run_id, "run.storage_failed")?;
+                            return Err(storage_error);
+                        }
+                        pause_validation_graph(graph, graphs, run_id, "validation.repair_failed")?;
+                        return Err(error);
+                    }
+                },
+                Err(error) => Err(error),
+            };
             match generated {
                 Ok(proposal) => return Ok((proposal, child_run)),
                 Err(error) => {
@@ -1705,6 +1781,8 @@ where
             &single_context(context),
             &single.proposal,
         )?;
+        validate_next_proposal_merge_claims(&proposals, &proposal)
+            .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
         results.push(CompositionItemRunResult {
             item_id: definition.definition.item_id.clone(),
             definition_hash: definition.definition_hash.clone(),
@@ -1715,6 +1793,46 @@ where
         proposals.push(proposal);
     }
     Ok((proposals, results))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn restore_peer_proposals<R>(
+    service: &CompositionGenerateService<'_>,
+    resources: &R,
+    request: &CompositionGenerateRequest,
+    context: &CompositionGenerateContext<'_>,
+    resolved: &ResolvedItemGraph,
+    blueprint: &StagedCompositionGenerateBlueprint,
+    graph: &ExecutionGraphRecord,
+    excluded_index: usize,
+) -> Result<Vec<SingleGenerateCompositionProposal>, CompositionGenerateError>
+where
+    R: ResourceRepository + ?Sized,
+{
+    let mut proposals = Vec::with_capacity(blueprint.items.len().saturating_sub(1));
+    for (index, (item, definition)) in blueprint.items.iter().zip(&resolved.nodes).enumerate() {
+        if index == excluded_index {
+            continue;
+        }
+        let plan = decode_plan_checkpoint(graph, item, definition)?;
+        let single = decode_single_checkpoint(graph, item, definition)?;
+        let single_request = SingleGenerateRequest {
+            artifact_id: definition.definition.item_id.to_string(),
+            mod_id: request.mod_id.clone(),
+            plan: plan.plan,
+            definition: definition.clone(),
+        };
+        let proposal = service.single.restore_composition_proposal(
+            resources,
+            &single_request,
+            &single_context(context),
+            &single.proposal,
+        )?;
+        validate_next_proposal_merge_claims(&proposals, &proposal)
+            .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
+        proposals.push(proposal);
+    }
+    Ok(proposals)
 }
 
 fn decode_plan_checkpoint(
@@ -2255,8 +2373,8 @@ mod tests {
     };
 
     use crate::mod_generate_single::{
-        CompositionFileMerge, ProposedArtifactFile, SingleGeneratePublication,
-        SingleGenerateResult, SingleGenerationProvenance,
+        CompositionFileMerge, CompositionMergeKeyPolicy, ProposedArtifactFile,
+        SingleGeneratePublication, SingleGenerateResult, SingleGenerationProvenance,
     };
 
     use super::*;
@@ -2711,6 +2829,8 @@ mod tests {
                 role: "source".into(),
                 relative_path: relative_path.into(),
                 composition_merge,
+                composition_merge_key_policy: composition_merge
+                    .map(|_| CompositionMergeKeyPolicy::UniqueKeys),
             }],
             provenance: SingleGenerationProvenance {
                 definition_hash: Sha256Digest::parse("a".repeat(64)).unwrap(),

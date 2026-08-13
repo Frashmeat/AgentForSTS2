@@ -548,7 +548,7 @@
     {
       "slotId": "mod.generate.single",
       "featureId": "mod.generate.single",
-      "schema": { "id": "pack.mod-generate-single", "version": 4 },
+      "schema": { "id": "pack.mod-generate-single", "version": 5 },
       "requiredPrimitives": ["code.dotnet-validate"],
       "payload": {
         "validationPrimitive": "code.dotnet-validate",
@@ -577,15 +577,15 @@
               "For BaseLib 3.3.8, implement the CustomCardPoolModel Title, IsColorless, and DeckEntryCardColor requirements; CustomPotionPoolModel has no ParentPool override.",
               "Build StartingDeck and StartingRelics only from pinned reference bindings, preserving quantities; use the complete Card, Relic, and Potion pinned sets for the corresponding custom pools.",
               "Do not put PoolAttribute on the Character. CustomCharacterModel registers through CustomContentDictionary.AddCharacter; PoolAttribute remains required on owned Card, Relic, and Potion models.",
-              "Emit every Pack-declared Character localization field under the exact STS2 characters table key for both locales.",
+              "Emit every Pack-declared Character localization field under the exact BaseLib runtime model ID derived from the generated namespace and model type for both locales.",
               "Emit the four required THE_ARCHITECT Character dialogue keys in the STS2 ancients table for both locales."
             ],
             "generatedFiles": [
               { "role": "source", "targetPath": "Generated/{item_id}.cs" },
-              { "role": "localization.eng", "targetPath": "{mod_id}/localization/eng/characters.json", "compositionMerge": "json_object" },
-              { "role": "localization.zhs", "targetPath": "{mod_id}/localization/zhs/characters.json", "compositionMerge": "json_object" },
-              { "role": "localization.ancients.eng", "targetPath": "{mod_id}/localization/eng/ancients.json", "compositionMerge": "json_object" },
-              { "role": "localization.ancients.zhs", "targetPath": "{mod_id}/localization/zhs/ancients.json", "compositionMerge": "json_object" }
+              { "role": "localization.eng", "targetPath": "{mod_id}/localization/eng/characters.json", "compositionMerge": "json_object", "compositionMergeKeyPolicy": "unique_keys" },
+              { "role": "localization.zhs", "targetPath": "{mod_id}/localization/zhs/characters.json", "compositionMerge": "json_object", "compositionMergeKeyPolicy": "unique_keys" },
+              { "role": "localization.ancients.eng", "targetPath": "{mod_id}/localization/eng/ancients.json", "compositionMerge": "json_object", "compositionMergeKeyPolicy": "exclusive_path" },
+              { "role": "localization.ancients.zhs", "targetPath": "{mod_id}/localization/zhs/ancients.json", "compositionMerge": "json_object", "compositionMergeKeyPolicy": "exclusive_path" }
             ]
           },
           {
@@ -593,12 +593,12 @@
             "guidance": [
               "Generate one STS2 relic implementation whose locked rarity and bilingual localization match the ItemDefinition.",
               "Use owner_character when present to select the Character's CustomRelicPoolModel; otherwise use the shared pool. Use only registration APIs present in Truth Evidence.",
-              "Emit flat localization key-value JSON for both required locales."
+              "Emit flat localization key-value JSON for both required locales. Every key must use the exact BaseLib runtime model ID derived from the generated namespace and model type, and must remain unique across Items sharing the table."
             ],
             "generatedFiles": [
               { "role": "source", "targetPath": "Generated/{item_id}.cs" },
-              { "role": "localization.eng", "targetPath": "{mod_id}/localization/eng/relics.json", "compositionMerge": "json_object" },
-              { "role": "localization.zhs", "targetPath": "{mod_id}/localization/zhs/relics.json", "compositionMerge": "json_object" }
+              { "role": "localization.eng", "targetPath": "{mod_id}/localization/eng/relics.json", "compositionMerge": "json_object", "compositionMergeKeyPolicy": "unique_keys" },
+              { "role": "localization.zhs", "targetPath": "{mod_id}/localization/zhs/relics.json", "compositionMerge": "json_object", "compositionMergeKeyPolicy": "unique_keys" }
             ]
           },
           {
@@ -606,12 +606,12 @@
             "guidance": [
               "Generate one STS2 card implementation and map pool, card_type, rarity, target, and base_cost exactly from the ItemDefinition.",
               "When pool is custom_character, derive the custom CardPool type from owner_character; otherwise declare the selected built-in pool. Use only supported card APIs and enum values.",
-              "Emit flat localization key-value JSON with title, description, and upgrade_description values for both required locales."
+              "Emit flat localization key-value JSON with title, description, and upgrade_description values for both required locales. Every key must use the exact BaseLib runtime model ID derived from the generated namespace and model type, and must remain unique across Items sharing the table."
             ],
             "generatedFiles": [
               { "role": "source", "targetPath": "Generated/{item_id}.cs" },
-              { "role": "localization.eng", "targetPath": "{mod_id}/localization/eng/cards.json", "compositionMerge": "json_object" },
-              { "role": "localization.zhs", "targetPath": "{mod_id}/localization/zhs/cards.json", "compositionMerge": "json_object" }
+              { "role": "localization.eng", "targetPath": "{mod_id}/localization/eng/cards.json", "compositionMerge": "json_object", "compositionMergeKeyPolicy": "unique_keys" },
+              { "role": "localization.zhs", "targetPath": "{mod_id}/localization/zhs/cards.json", "compositionMerge": "json_object", "compositionMergeKeyPolicy": "unique_keys" }
             ]
           },
           {
@@ -619,12 +619,12 @@
             "guidance": [
               "Generate one STS2 potion implementation and map rarity, usage, and target exactly from the ItemDefinition.",
               "Use owner_character when present to select the Character's CustomPotionPoolModel; otherwise register in the shared potion pool. Use only supported APIs.",
-              "Use the selected potion.icon resource through a custom packed image path and emit flat title/description localization JSON for both required locales."
+              "Use the selected potion.icon resource through a custom packed image path and emit flat title/description localization JSON for both required locales. Every key must use the exact BaseLib runtime model ID derived from the generated namespace and model type, and must remain unique across Items sharing the table."
             ],
             "generatedFiles": [
               { "role": "source", "targetPath": "Generated/{item_id}.cs" },
-              { "role": "localization.eng", "targetPath": "{mod_id}/localization/eng/potions.json", "compositionMerge": "json_object" },
-              { "role": "localization.zhs", "targetPath": "{mod_id}/localization/zhs/potions.json", "compositionMerge": "json_object" }
+              { "role": "localization.eng", "targetPath": "{mod_id}/localization/eng/potions.json", "compositionMerge": "json_object", "compositionMergeKeyPolicy": "unique_keys" },
+              { "role": "localization.zhs", "targetPath": "{mod_id}/localization/zhs/potions.json", "compositionMerge": "json_object", "compositionMergeKeyPolicy": "unique_keys" }
             ]
           },
           {
@@ -632,12 +632,12 @@
             "guidance": [
               "Generate one STS2 power implementation and map power_type, stack_type, instance_type, and allow_negative exactly from the ItemDefinition.",
               "Extend CustomPowerModel and use only lifecycle hooks, stacking behavior, and PowerCmd operations supported by Truth Evidence; do not invent hooks.",
-              "Use the selected power.icon and power.big resources through the custom packed and big icon paths, and emit flat title/description localization JSON for both required locales."
+              "Use the selected power.icon and power.big resources through the custom packed and big icon paths, and emit flat title/description localization JSON for both required locales. Every key must use the exact BaseLib runtime model ID derived from the generated namespace and model type, and must remain unique across Items sharing the table."
             ],
             "generatedFiles": [
               { "role": "source", "targetPath": "Generated/{item_id}.cs" },
-              { "role": "localization.eng", "targetPath": "{mod_id}/localization/eng/powers.json", "compositionMerge": "json_object" },
-              { "role": "localization.zhs", "targetPath": "{mod_id}/localization/zhs/powers.json", "compositionMerge": "json_object" }
+              { "role": "localization.eng", "targetPath": "{mod_id}/localization/eng/powers.json", "compositionMerge": "json_object", "compositionMergeKeyPolicy": "unique_keys" },
+              { "role": "localization.zhs", "targetPath": "{mod_id}/localization/zhs/powers.json", "compositionMerge": "json_object", "compositionMergeKeyPolicy": "unique_keys" }
             ]
           }
         ]

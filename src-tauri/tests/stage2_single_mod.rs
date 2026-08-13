@@ -656,6 +656,11 @@ async fn real_compile_artifact_and_run_chain_succeeds_without_staging_residue() 
         files_contract["properties"]["localization.eng"]["additionalProperties"]["type"],
         "string"
     );
+    assert!(
+        files_contract["properties"]["localization.eng"]
+            .get("propertyNames")
+            .is_none()
+    );
     let rendered_contract =
         serde_json::to_string_pretty(&request.output_contract.json_schema).unwrap();
     assert_eq!(
@@ -667,8 +672,10 @@ async fn real_compile_artifact_and_run_chain_succeeds_without_staging_residue() 
         1
     );
     assert!(request.messages.iter().any(|message| {
-        message.content.contains("generatedFileRoles")
+        message.content.contains("generatedFiles")
             && message.content.contains("localization.eng")
+            && message.content.contains("json_object")
+            && message.content.contains("unique_keys")
     }));
     assert_eq!(
         request

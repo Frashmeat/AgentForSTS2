@@ -50,14 +50,14 @@ Direct `mod.generate.single` returns that failure after one logical model call. 
 `composition.generate` request v5, repairable output-contract failures may enter the Feature-owned
 semantic feedback controller without changing model, endpoint, response format or Provider retry
 rules. Before the next model call, ExecutionGraph v4 CAS-persists a hashed
-`feature.generation-feedback` v1 envelope plus the complete candidate SHA-256. The envelope contains
+`feature.generation-feedback` v2 envelope plus the complete candidate SHA-256. The envelope contains
 only closed diagnostic codes, a Pack-trusted optional role ID, expected/observed shape enums and no
 raw completion, parser text or model-authored unknown role.
 
 `mod.generate.single` model-output failures persist optional
-`feature.mod-generate-single-failure-details` v1. Its payload contains exactly one closed
+`feature.mod-generate-single-failure-details` v2. Its payload contains exactly one closed
 `reasonCode`: `output_truncated`, `json_decode`, `file_count`, `acceptance_notes`, `file_role`,
-`file_content`, `merge_content`, `generated_file_count_overflow`, `checkpoint_provenance` or
+`file_content`, `merge_content`, `merge_key_conflict`, `generated_file_count_overflow`, `checkpoint_provenance` or
 `checkpoint_result`. The code/stage remains `model.output_invalid` or `model.output_truncated` at
 `mod.generate.single.model`. Details never include completion fragments, parser messages, paths,
 Provider metadata or unvalidated model-authored role names.
@@ -66,6 +66,12 @@ Provider metadata or unvalidated model-authored role names.
 object required by the run-scoped output contract, contained a non-string value, or could not be
 normalized within the bounded content limit. A JSON-encoded object inside a string is invalid; the
 Feature never repairs or heuristically extracts it.
+
+`merge_key_conflict` means the current `unique_keys` proposal claimed a key already owned by a prior
+successful Single checkpoint for the same target path. It carries only the trusted role ID and shape
+enums into output feedback; raw keys and values are never persisted. Checkpoint restore repeats the
+claim check and treats an inconsistent persisted graph as `composition.execution.invalid` rather
+than requesting new model output.
 
 Output feedback stops without another model request when the graph-wide policy is exhausted or the
 same typed diagnostic fingerprint and same complete candidate SHA-256 recur. The same diagnostic
