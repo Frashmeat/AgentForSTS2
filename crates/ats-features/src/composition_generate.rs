@@ -18,6 +18,7 @@ use ats_runtime::{
 use ats_workspace::{ItemRepository, ResourceRepository, StoredItemDefinition};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::FeatureSpec;
@@ -41,7 +42,10 @@ use crate::project_package::{
 };
 
 mod staged;
-pub use staged::{StagedCompositionGenerateExecution, StagedCompositionGenerateStart};
+pub use staged::{
+    CompositionAdjustmentItem, StagedCompositionGenerateExecution, StagedCompositionGenerateStart,
+    composition_adjustment_items,
+};
 
 pub struct CompositionGenerateFeature;
 
@@ -55,7 +59,7 @@ impl FeatureSpec for CompositionGenerateFeature {
     }
 
     fn request_schema() -> SchemaRef {
-        schema_version("feature.composition-generate-request", 4)
+        schema_version("feature.composition-generate-request", 5)
     }
 
     fn result_schema() -> SchemaRef {
@@ -88,7 +92,52 @@ pub struct CompositionGenerateRequest {
     pub package: ProjectPackageRequest,
     pub repair_policy: RepairPolicy,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adjustment: Option<ItemAdjustment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution: Option<CompositionGenerateExecutionRequest>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ItemAdjustment {
+    pub item_id: ats_kernel::ItemId,
+    pub expected_definition_hash: Sha256Digest,
+    pub instruction: String,
+    pub instruction_sha256: Sha256Digest,
+    pub created_at: chrono::DateTime<Utc>,
+}
+
+impl ItemAdjustment {
+    pub fn new(
+        item_id: ats_kernel::ItemId,
+        expected_definition_hash: Sha256Digest,
+        instruction: impl Into<String>,
+        created_at: chrono::DateTime<Utc>,
+    ) -> Result<Self, CompositionGenerateError> {
+        let instruction = instruction.into().trim().to_owned();
+        let value = Self {
+            instruction_sha256: digest_text(&instruction)?,
+            item_id,
+            expected_definition_hash,
+            instruction,
+            created_at,
+        };
+        value.validate()?;
+        Ok(value)
+    }
+
+    fn validate(&self) -> Result<(), CompositionGenerateError> {
+        if self.instruction.is_empty()
+            || self.instruction.chars().count() > 4_000
+            || self.instruction.contains('\0')
+            || self.instruction.trim() != self.instruction
+            || digest_text(&self.instruction)? != self.instruction_sha256
+        {
+            Err(CompositionGenerateError::AdjustmentInvalid)
+        } else {
+            Ok(())
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -308,6 +357,12 @@ pub enum CompositionGenerateError {
     RunStorage,
     #[error("composition generation checkpoint is invalid")]
     InvalidCheckpoint,
+    #[error("composition adjustment is invalid")]
+    AdjustmentInvalid,
+    #[error("composition adjustment targets a stale definition")]
+    AdjustmentStale,
+    #[error("composition adjustment requires a new composition plan")]
+    AdjustmentRequiresReplan,
     #[error("composition generation was cancelled")]
     Cancelled,
     #[error(transparent)]
@@ -372,6 +427,18 @@ impl CompositionGenerateError {
             Self::InvalidCheckpoint => (
                 "composition.execution.invalid",
                 "composition.generate.checkpoint",
+            ),
+            Self::AdjustmentInvalid => (
+                "composition.adjustment.invalid",
+                "composition.generate.adjustment",
+            ),
+            Self::AdjustmentStale => (
+                "composition.adjustment.stale",
+                "composition.generate.adjustment",
+            ),
+            Self::AdjustmentRequiresReplan => (
+                "composition.adjustment.requires_replan",
+                "composition.generate.adjustment",
             ),
             Self::Cancelled => ("run.cancelled", "composition.generate.execute"),
             Self::Graph(error) => (error.code(), "composition.generate.graph"),
@@ -607,8 +674,17 @@ fn validate_request(request: &CompositionGenerateRequest) -> Result<(), Composit
     {
         Err(CompositionGenerateError::InvalidInput)
     } else {
-        request.repair_policy.validate()
+        request.repair_policy.validate()?;
+        request
+            .adjustment
+            .as_ref()
+            .map_or(Ok(()), ItemAdjustment::validate)
     }
+}
+
+fn digest_text(value: &str) -> Result<Sha256Digest, CompositionGenerateError> {
+    Sha256Digest::parse(format!("{:x}", Sha256::digest(value.as_bytes())))
+        .map_err(|_| CompositionGenerateError::AdjustmentInvalid)
 }
 
 fn running_run<F, T>(request: &T) -> Result<RunRecord, CompositionGenerateError>

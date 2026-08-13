@@ -300,16 +300,29 @@ pub struct SingleGenerateProposalCheckpoint {
 }
 
 #[derive(Debug, Clone, Serialize, Eq, PartialEq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct SingleRepairRequest {
-    pub current_files: BTreeMap<String, String>,
-    pub issues: Vec<ValidationIssue>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output_feedback: Option<GenerationFeedbackEnvelope>,
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum SingleRevisionRequest {
+    GeneratedContent {
+        current_files: BTreeMap<String, String>,
+        issues: Vec<ValidationIssue>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output_feedback: Option<GenerationFeedbackEnvelope>,
+    },
+    OperatorAdjustment {
+        current_files: BTreeMap<String, String>,
+        instruction: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output_feedback: Option<GenerationFeedbackEnvelope>,
+    },
 }
 
 enum SingleFeedbackContext<'a> {
-    GeneratedContent(&'a SingleRepairRequest),
+    Revision(&'a SingleRevisionRequest),
     OutputContract(&'a GenerationFeedbackEnvelope),
 }
 
@@ -578,13 +591,13 @@ impl SingleGenerateService {
         .await
     }
 
-    pub async fn repair_propose<C, R>(
+    pub async fn revision_propose<C, R>(
         &self,
         dependencies: SingleProposalDependencies<'_, C, R>,
         run: &RunRecord,
         request: &SingleGenerateRequest,
         context: &SingleGenerateContext<'_>,
-        repair: &SingleRepairRequest,
+        revision: &SingleRevisionRequest,
         cancellation: &CancellationToken,
     ) -> Result<SingleGenerateProposal, SingleGenerateError>
     where
@@ -616,7 +629,7 @@ impl SingleGenerateService {
         .map_err(|_| SingleGenerateError::InvalidItemDefinition)?;
         validate_definition_identity(request)?;
         validate_plan_roles(&request.plan, descriptor)?;
-        validate_repair_request(item_spec, repair)?;
+        validate_revision_request(item_spec, revision)?;
         let resource_specs: ResourceSpecs = context
             .resource_contributions
             .decode(&resource_specs_slot())?;
@@ -643,7 +656,7 @@ impl SingleGenerateService {
                 evidence: &evidence,
                 resources: &resource_refs,
             },
-            Some(SingleFeedbackContext::GeneratedContent(repair)),
+            Some(SingleFeedbackContext::Revision(revision)),
         )?;
         self.complete_proposal_from_model(
             dependencies.model,
@@ -968,7 +981,7 @@ impl SingleGenerateService {
                 "repair.context".into(),
                 match feedback {
                     None => String::new(),
-                    Some(SingleFeedbackContext::GeneratedContent(repair)) => serialize(repair)?,
+                    Some(SingleFeedbackContext::Revision(revision)) => serialize(revision)?,
                     Some(SingleFeedbackContext::OutputContract(feedback)) => serialize(feedback)?,
                 },
             ),
@@ -1592,25 +1605,56 @@ fn validate_bundle(
     })
 }
 
-fn validate_repair_request(
+fn validate_revision_request(
     item_spec: &GenerateItemType,
-    repair: &SingleRepairRequest,
+    revision: &SingleRevisionRequest,
 ) -> Result<(), SingleGenerateError> {
-    if repair.issues.is_empty()
-        || repair.issues.len() > 256
-        || repair.current_files.len() != item_spec.generated_files.len()
-        || repair.issues.iter().any(|issue| {
-            issue.repairability != ats_runtime::ValidationIssueRepairability::GeneratedContent
-        })
-        || repair.output_feedback.as_ref().is_some_and(|feedback| {
-            !feedback.is_valid()
-                || feedback.phase != GenerationFeedbackPhase::OutputContract
-                || feedback.mode != GenerationFeedbackMode::ReplaceCompleteRoles
-                || feedback.validation_issues != repair.issues
-        })
+    let current_files = match revision {
+        SingleRevisionRequest::GeneratedContent {
+            current_files,
+            issues,
+            output_feedback,
+        } => {
+            if issues.is_empty()
+                || issues.len() > 256
+                || issues.iter().any(|issue| {
+                    issue.repairability
+                        != ats_runtime::ValidationIssueRepairability::GeneratedContent
+                })
+                || output_feedback.as_ref().is_some_and(|feedback| {
+                    !feedback.is_valid()
+                        || feedback.phase != GenerationFeedbackPhase::OutputContract
+                        || feedback.mode != GenerationFeedbackMode::ReplaceCompleteRoles
+                        || feedback.validation_issues != *issues
+                })
+            {
+                return Err(SingleGenerateError::InvalidInput);
+            }
+            current_files
+        }
+        SingleRevisionRequest::OperatorAdjustment {
+            current_files,
+            instruction,
+            output_feedback,
+        } => {
+            if instruction.is_empty()
+                || instruction.trim() != instruction
+                || instruction.chars().count() > 4_000
+                || instruction.contains('\0')
+                || output_feedback.as_ref().is_some_and(|feedback| {
+                    !feedback.is_valid()
+                        || feedback.phase != GenerationFeedbackPhase::OutputContract
+                        || feedback.mode != GenerationFeedbackMode::RegenerateCompleteBundle
+                })
+            {
+                return Err(SingleGenerateError::InvalidInput);
+            }
+            current_files
+        }
+    };
+    if current_files.len() != item_spec.generated_files.len()
         || item_spec.generated_files.iter().any(|spec| {
-            repair
-                .current_files
+            current_files
                 .get(&spec.role)
                 .is_none_or(|content| content.trim().is_empty() || content.contains('\0'))
         })

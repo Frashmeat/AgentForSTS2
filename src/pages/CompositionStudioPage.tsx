@@ -74,9 +74,6 @@ export function CompositionStudioPage() {
   const [modId, setModId] = useState("");
   const [sourceRoot, setSourceRoot] = useState("delivery");
   const [outputPath, setOutputPath] = useState("packages/mod.zip");
-  const [repairMode, setRepairMode] = useState<"max_rounds" | "until_passed">("max_rounds");
-  const [maxRepairRounds, setMaxRepairRounds] = useState(3);
-  const [lastGenerationRunId, setLastGenerationRunId] = useState("");
   const [lastGenerationRun, setLastGenerationRun] = useState<RunRecord | null>(null);
   const [lastPlanRun, setLastPlanRun] = useState<RunRecord | null>(null);
   const [executionGraph, setExecutionGraph] = useState<ExecutionGraphView | null>(null);
@@ -84,6 +81,7 @@ export function CompositionStudioPage() {
   const [lastRetryRun, setLastRetryRun] = useState<RunRecord | null>(null);
   const [lastResourceRun, setLastResourceRun] = useState<RunRecord | null>(null);
   const [resourceIssues, setResourceIssues] = useState<string[]>([]);
+  const [adjustmentInstructions, setAdjustmentInstructions] = useState<Record<string, string>>({});
 
   const profile = useMemo(
     () => catalog?.compositionProfiles.find((value) => value.id === compositionId) ?? null,
@@ -384,11 +382,8 @@ export function CompositionStudioPage() {
           outputRelativePath: outputPath,
           compressionLevel: 6,
         },
-        repairMode === "until_passed"
-          ? { kind: "until_passed" }
-          : { kind: "max_rounds", maxRounds: maxRepairRounds },
+        { kind: "until_passed" },
       ));
-      setLastGenerationRunId(runId);
       setLastGenerationRun(null);
       await monitorCompositionGeneration(runId);
     } catch (error: unknown) {
@@ -411,6 +406,30 @@ export function CompositionStudioPage() {
       if (graphId) setExecutionGraph(await api.getExecutionGraph(graphId));
     } finally {
       if (timer !== undefined) window.clearInterval(timer);
+    }
+  }
+
+  async function adjustGeneratedItem(itemId: string, definitionHash: string) {
+    if (!executionGraph) return;
+    const instruction = adjustmentInstructions[itemId]?.trim();
+    if (!instruction) return;
+    setBusy(true);
+    setFailure(null);
+    try {
+      const runId = await api.adjustCompositionItem({
+        executionGraphId: executionGraph.executionGraphId,
+        expectedRevision: executionGraph.revision,
+        itemId,
+        expectedDefinitionHash: definitionHash,
+        instruction,
+      });
+      setLastGenerationRun(null);
+      await monitorCompositionGeneration(runId);
+      setAdjustmentInstructions((values) => ({ ...values, [itemId]: "" }));
+    } catch (error: unknown) {
+      setFailure(toActionableFailure(error));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -501,8 +520,8 @@ export function CompositionStudioPage() {
               data-run-status={executionRun?.status ?? ""}
             >
               <div className="flex items-center justify-between gap-3 text-xs">
-                <span className="font-mono truncate">{executionGraph.currentNodeId ?? executionGraph.executionGraphId}</span>
-                <span className="font-mono shrink-0">{executionGraph.completedNodes} / {executionGraph.totalNodes}</span>
+                <span>{executionStatusLabel(executionGraph)}</span>
+                <span className="shrink-0">{executionGraph.completedNodes} / {executionGraph.totalNodes}</span>
               </div>
               <progress
                 data-testid="composition-execution-progress"
@@ -514,18 +533,7 @@ export function CompositionStudioPage() {
                 <Button data-testid="composition-execution-pause" size="sm" title="Pause" disabled={!executionGraph.canPause} onClick={() => void pausePlan()}><Pause size={13} /></Button>
                 <Button data-testid="composition-execution-resume" size="sm" title="Resume" disabled={!executionGraph.canResume} onClick={() => void resumePlan()}><Play size={13} /></Button>
                 <Button data-testid="composition-execution-cancel" size="sm" variant="danger" title="Cancel" disabled={!executionGraph.canCancel} onClick={() => void cancelPlan()}><X size={13} /></Button>
-                {executionGraph.currentRoleId && <span className="text-xs text-ink-mute">{executionGraph.currentRoleId}</span>}
-                {executionGraph.feedbackPhase && (
-                  <span className="text-xs text-ink-mute">
-                    {executionGraph.feedbackPhase === "output_contract" ? "output contract" : "generated content"} · round {executionGraph.repairRound}
-                  </span>
-                )}
               </div>
-              {executionGraph.failureCode && (
-                <Notice variant="error" title={executionGraph.failureCode}>
-                  {executionGraph.currentNodeId ?? executionGraph.status}
-                </Notice>
-              )}
             </div>
           )}
           {executionRun?.failure && (
@@ -554,28 +562,9 @@ export function CompositionStudioPage() {
                 <Field label="Mod ID"><input data-testid="composition-mod-id" className="input-mono" value={modId} onChange={(event) => setModId(event.target.value)} /></Field>
                 <Field label="Build output root"><input data-testid="composition-source-root" className="input-mono" value={sourceRoot} onChange={(event) => setSourceRoot(event.target.value)} /></Field>
                 <Field label="Package output"><input data-testid="composition-output-path" className="input-mono" value={outputPath} onChange={(event) => setOutputPath(event.target.value)} /></Field>
-                <Field label="Validation repair">
-                  <select data-testid="composition-repair-mode" value={repairMode} onChange={(event) => setRepairMode(event.target.value as typeof repairMode)}>
-                    <option value="max_rounds">Limit repair rounds</option>
-                    <option value="until_passed">Until validation passes</option>
-                  </select>
-                </Field>
-                {repairMode === "max_rounds" && (
-                  <Field label="Maximum rounds">
-                    <input
-                      data-testid="composition-repair-rounds"
-                      type="number"
-                      min={1}
-                      max={20}
-                      value={maxRepairRounds}
-                      onChange={(event) => setMaxRepairRounds(Math.min(20, Math.max(1, Number(event.target.value) || 1)))}
-                    />
-                  </Field>
-                )}
               </div>
               <div className="flex items-center gap-3 mt-3 flex-wrap">
                 <Button data-testid="composition-generate" variant="accent" disabled={busy || !projectOpen || !selectedRoot || !artifactId.trim() || !modId.trim() || !sourceRoot.trim() || !outputPath.trim()} onClick={() => void generateComposition()}><Hammer size={14} /> Generate and package</Button>
-                {lastGenerationRunId && <span className="font-mono text-xs text-ink-mute">{lastGenerationRunId}</span>}
               </div>
             </>
           )}
@@ -585,7 +574,7 @@ export function CompositionStudioPage() {
       {lastGenerationRun && (
         <Card
           eyebrow="composition run"
-          title={lastGenerationRun.featureId}
+          title="Generated result"
           actions={(
             <Badge variant={lastGenerationRun.status === "succeeded" ? "ok" : lastGenerationRun.status === "failed" ? "error" : "warn"}>
               {lastGenerationRun.status}
@@ -596,6 +585,34 @@ export function CompositionStudioPage() {
             <Notice variant="error" title={lastGenerationRun.failure.code}>
               {lastGenerationRun.failure.stage}
             </Notice>
+          )}
+          {lastGenerationRun.status === "succeeded" && executionGraph?.status === "succeeded" && (
+            <div className="space-y-3" data-testid="composition-adjustments">
+              {executionGraph.adjustableItems.map((item) => (
+                <div key={`${item.itemId}:${item.definitionHash}`} className="border-t border-rule-soft pt-3">
+                  <Field label={item.itemId} hint="Describe the change you want for this item.">
+                    <textarea
+                      data-testid={`composition-adjustment-${item.itemId}`}
+                      className="min-h-20"
+                      maxLength={4000}
+                      value={adjustmentInstructions[item.itemId] ?? ""}
+                      onChange={(event) => setAdjustmentInstructions((values) => ({
+                        ...values,
+                        [item.itemId]: event.target.value,
+                      }))}
+                    />
+                  </Field>
+                  <Button
+                    data-testid={`composition-adjust-${item.itemId}`}
+                    size="sm"
+                    disabled={busy || !(adjustmentInstructions[item.itemId]?.trim())}
+                    onClick={() => void adjustGeneratedItem(item.itemId, item.definitionHash)}
+                  >
+                    <RefreshCw size={13} /> Regenerate item
+                  </Button>
+                </div>
+              ))}
+            </div>
           )}
         </Card>
       )}
@@ -726,4 +743,13 @@ function executionGraphIdFromRun(run: RunRecord): string | null {
 
 function definitionKey(definition: StoredItemDefinition): string {
   return `${definition.definition.itemId}:${definition.definitionHash}`;
+}
+
+function executionStatusLabel(graph: ExecutionGraphView): string {
+  if (graph.status === "repairing") return "Adjusting automatically";
+  if (graph.status === "validating" || graph.status === "commit_prepared") return "Checking result";
+  if (graph.status === "succeeded") return "Ready to preview";
+  if (graph.status === "paused" || graph.status === "commit_blocked") return "Needs attention";
+  if (graph.status === "cancelled" || graph.status === "cancel_requested") return "Cancelled";
+  return "Generating";
 }

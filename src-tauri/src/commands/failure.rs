@@ -173,6 +173,50 @@ impl CommandFailure {
         )
     }
 
+    pub fn composition_adjustment_invalid(stage: &str) -> Self {
+        fixed(
+            "composition.adjustment.invalid",
+            "input",
+            stage,
+            "The selected result cannot accept this item adjustment.",
+            RecoveryAction::None,
+            false,
+        )
+    }
+
+    pub fn composition_adjustment_stale(stage: &str) -> Self {
+        fixed(
+            "composition.adjustment.stale",
+            "state",
+            stage,
+            "The selected item changed. Refresh the result before adjusting it.",
+            RecoveryAction::Retry,
+            false,
+        )
+    }
+
+    pub fn composition_adjustment_requires_replan(stage: &str) -> Self {
+        fixed(
+            "composition.adjustment.requires_replan",
+            "state",
+            stage,
+            "This change requires planning the composition again.",
+            RecoveryAction::Retry,
+            false,
+        )
+    }
+
+    pub fn composition_execution_invalid(stage: &str) -> Self {
+        fixed(
+            "composition.execution.invalid",
+            "state",
+            stage,
+            "The saved generation state does not match the current composition contract.",
+            RecoveryAction::InspectRun,
+            false,
+        )
+    }
+
     pub fn pack_invalid(stage: &str) -> Self {
         fixed(
             "pack.contribution_invalid",
@@ -270,6 +314,19 @@ mod tests {
         assert_eq!(value["stage"], "run.list");
         assert!(value.get("diagnostic").is_none());
         assert!(!value.to_string().contains("C:\\Users"));
+    }
+
+    #[test]
+    fn invalid_execution_state_has_a_stable_safe_failure() {
+        let value = serde_json::to_value(CommandFailure::composition_execution_invalid(
+            "execution.get",
+        ))
+        .unwrap();
+        assert_eq!(value["code"], "composition.execution.invalid");
+        assert_eq!(value["category"], "state");
+        assert_eq!(value["stage"], "execution.get");
+        assert_eq!(value["retryable"], false);
+        assert!(value.get("diagnostic").is_none());
     }
 
     #[test]

@@ -73,7 +73,8 @@ optional paired `sourceExecutionGraphId`/`validatedContentDigest`, field-keyed n
 ItemDefinition v2 shapes. ExecutionGraph guards validate only the bounded View projection
 (`executionGraphId`, revision/status including `validating`/`repairing`, Run IDs,
 progress/current node, safe failure, aggregate `repairRound`, nullable exact `feedbackPhase`
-(`output_contract | generated_content`) and action flags);
+(`output_contract | generated_content`), action flags and bounded `adjustableItems[]` containing only
+`itemId + definitionHash`);
 React must not receive or decode checkpoints, Blueprint payloads or commit intent. Confirmation
 guards validate the Draft ref, every StoredItemDefinition and the confirmation digest. A TypeScript
 interface or direct cast is not accepted for list/get/update/confirm/status responses.
@@ -91,15 +92,17 @@ The only interpreted payload fields are `reasonCode`, `expectedCount`, `actualCo
 are 1-128 character qualified identifiers; counts are integers in `0..=u32::MAX`. Expected/actual
 are displayed only as a valid pair. Every other field is ignored, never stringified into the UI.
 
-Composition generation submits request schema v4 with an exact `StoredItemDefinition`, optional
+Composition generation submits request schema v5 with an exact `StoredItemDefinition`, optional
 Draft ref, nested Package request, immutable `repairPolicy` and optional backend-authored tagged
-`execution`. `repairPolicy` is exactly `{kind:"until_passed"}` or
-`{kind:"max_rounds", maxRounds:1..20}`. The only
-backend semantic difference is whether the user chooses a smaller limit; both stop at the absolute
-20-round graph-total safety ceiling. The only
+`execution` / `adjustment`. Ordinary React always submits the internal `{kind:"until_passed"}`
+policy and does not expose repair-policy or semantic-budget controls. The absolute 20-request
+graph-total safety ceiling still applies. The only
 execution forms are `start {executionGraphId}` and
 `resume {executionGraphId, expectedRevision, previousRunId}`; the request builder for an initial
-user submission omits this field. Result and Artifact extension v2 include the graph ID. Single
+user submission omits both execution and adjustment. `adjust_composition_item` accepts only the
+selected Graph revision plus one `itemId + expectedDefinitionHash + instruction`; Tauri authors the
+instruction hash and timestamp. A succeeded source derives a new Graph/Run/Artifact version, while
+the source evidence remains immutable. Result and Artifact extension v2 include the graph ID. Single
 result v2 and Package result v2 use the exact
 `published | composition_staged` discriminator. Published results require Artifact ref/hash;
 composition-staged child results must not be presented as independently published Artifacts.

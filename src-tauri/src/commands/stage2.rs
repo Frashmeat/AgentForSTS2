@@ -10,7 +10,10 @@ use ats_features::composition::{
     CompositionConfirmation, CompositionConfirmationError, CompositionConfirmationService,
     CompositionGraphError, ResolvedItemGraph,
 };
-use ats_features::composition_generate::{CompositionGenerateFeature, CompositionGenerateRequest};
+use ats_features::composition_generate::{
+    CompositionAdjustmentItem, CompositionGenerateFeature, CompositionGenerateRequest,
+    ItemAdjustment, composition_adjustment_items,
+};
 use ats_features::composition_plan::{
     CompositionPlanFeature, CompositionPlanRequest, CompositionRetryNodeFeature,
     CompositionRetryNodeRequest,
@@ -86,6 +89,17 @@ pub struct ExecutionGraphView {
     pub can_pause: bool,
     pub can_resume: bool,
     pub can_cancel: bool,
+    pub adjustable_items: Vec<CompositionAdjustmentItem>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AdjustCompositionItemRequest {
+    pub execution_graph_id: ExecutionGraphId,
+    pub expected_revision: u64,
+    pub item_id: ItemId,
+    pub expected_definition_hash: Sha256Digest,
+    pub instruction: String,
 }
 
 #[tauri::command]
@@ -135,7 +149,7 @@ pub async fn submit_feature(
             .request
             .decode::<CompositionGenerateRequest>(&CompositionGenerateFeature::request_schema())
             .map_err(|_| CommandFailure::composition_invalid("run.submit"))?;
-        if request.execution.is_some() {
+        if request.execution.is_some() || request.adjustment.is_some() {
             return Err(CommandFailure::composition_invalid("run.submit"));
         }
         let staged = composition
@@ -209,12 +223,13 @@ pub fn list_execution_graphs(
     let runs = session.repository();
     graphs
         .iter()
-        .map(|graph| {
-            can_reconcile_succeeded_graph(graph, runs.as_ref())
-                .map(|can_reconcile| execution_graph_view(graph, can_reconcile))
+        .map(|graph| -> CommandResult<ExecutionGraphView> {
+            let can_reconcile = can_reconcile_succeeded_graph(graph, runs.as_ref())
+                .map_err(|_| CommandFailure::storage("execution.list"))?;
+            execution_graph_view(graph, can_reconcile)
+                .map_err(|_| CommandFailure::composition_execution_invalid("execution.list"))
         })
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| CommandFailure::storage("execution.list"))
+        .collect()
 }
 
 #[tauri::command]
@@ -232,7 +247,8 @@ pub fn get_execution_graph(
     let can_reconcile_succeeded =
         can_reconcile_succeeded_graph(&graph, session.repository().as_ref())
             .map_err(|_| CommandFailure::storage("execution.get"))?;
-    Ok(execution_graph_view(&graph, can_reconcile_succeeded))
+    execution_graph_view(&graph, can_reconcile_succeeded)
+        .map_err(|_| CommandFailure::composition_execution_invalid("execution.get"))
 }
 
 #[tauri::command]
@@ -385,6 +401,89 @@ pub async fn resume_execution_graph(
     submitted.map_err(|error| match error {
         SubmitError::Closing => CommandFailure::project_closing("execution.resume"),
         SubmitError::Repository => CommandFailure::composition_conflict("execution.resume"),
+    })
+}
+
+#[tauri::command]
+pub async fn adjust_composition_item(
+    active: State<'_, ActiveProject>,
+    composition: State<'_, Arc<Stage2Composition>>,
+    config: State<'_, Arc<AppConfig>>,
+    request: AdjustCompositionItemRequest,
+) -> CommandResult<RunId> {
+    let session = current_session(&active, "composition.adjustment")?;
+    let graphs = session.execution_graph_repository();
+    let source = graphs
+        .get(&request.execution_graph_id)
+        .map_err(|_| CommandFailure::composition_adjustment_invalid("composition.adjustment"))?;
+    if source.owner_feature_id() != &CompositionGenerateFeature::id()
+        || source.revision() != request.expected_revision
+    {
+        return Err(CommandFailure::composition_adjustment_stale(
+            "composition.adjustment",
+        ));
+    }
+    let derived = source.status() == ExecutionGraphStatus::Succeeded;
+    let run_id = RunId::new();
+    let adjustment = ItemAdjustment::new(
+        request.item_id,
+        request.expected_definition_hash,
+        request.instruction,
+        chrono::Utc::now(),
+    )
+    .map_err(|_| CommandFailure::composition_adjustment_invalid("composition.adjustment"))?;
+    let staged = composition
+        .prepare_composition_generate_adjustment(
+            source,
+            request.expected_revision,
+            run_id.clone(),
+            adjustment,
+            session.path(),
+        )
+        .map_err(map_adjustment_prepare_failure)?;
+    let payload = VersionedPayload::from_typed(
+        CompositionGenerateFeature::request_schema(),
+        &staged.request,
+    )
+    .map_err(|_| CommandFailure::composition_adjustment_invalid("composition.adjustment"))?;
+    let run = RunRecord::new_with_id(run_id, CompositionGenerateFeature::id(), payload);
+    let root = session.path().to_path_buf();
+    let meta = session.meta().clone();
+    let composition = Arc::clone(composition.inner());
+    let config = Arc::clone(config.inner());
+    let resources = session.resource_repository();
+    let items = session.item_repository();
+    let drafts = session.composition_draft_repository();
+    let worker_graphs = Arc::clone(&graphs);
+    let worker = move |run, cancellation, repository: Arc<dyn RunRepository>| async move {
+        composition
+            .execute(
+                &config,
+                &root,
+                &meta,
+                run,
+                repository.as_ref(),
+                items.as_ref(),
+                drafts.as_ref(),
+                worker_graphs.as_ref(),
+                resources.as_ref(),
+                None,
+                &cancellation,
+            )
+            .await
+    };
+    let submitted = if derived {
+        session.submit_claimed(run, staged.graph, worker).await
+    } else {
+        session
+            .submit_resumed(run, request.expected_revision, staged.graph, worker)
+            .await
+    };
+    submitted.map_err(|error| match error {
+        SubmitError::Closing => CommandFailure::project_closing("composition.adjustment"),
+        SubmitError::Repository => {
+            CommandFailure::composition_adjustment_stale("composition.adjustment")
+        }
     })
 }
 
@@ -1074,10 +1173,31 @@ fn map_generation_prepare_failure(failure: ats_runtime::RunFailure) -> CommandFa
     }
 }
 
+fn map_adjustment_prepare_failure(failure: ats_runtime::RunFailure) -> CommandFailure {
+    match failure.code.as_str() {
+        "composition.adjustment.stale" | "composition.execution.conflict" => {
+            CommandFailure::composition_adjustment_stale("composition.adjustment")
+        }
+        "composition.adjustment.requires_replan" => {
+            CommandFailure::composition_adjustment_requires_replan("composition.adjustment")
+        }
+        "composition.adjustment.invalid" | "composition.execution.invalid" => {
+            CommandFailure::composition_adjustment_invalid("composition.adjustment")
+        }
+        "truth.missing" | "truth.evidence_missing" => {
+            CommandFailure::truth_missing("composition.adjustment")
+        }
+        "pack.contribution_invalid" | "truth.context_mismatch" => {
+            CommandFailure::pack_invalid("composition.adjustment")
+        }
+        _ => CommandFailure::unclassified("composition.adjustment"),
+    }
+}
+
 fn execution_graph_view(
     graph: &ExecutionGraphRecord,
     can_reconcile_succeeded: bool,
-) -> ExecutionGraphView {
+) -> Result<ExecutionGraphView, ats_features::composition_generate::CompositionGenerateError> {
     let completed_nodes = graph
         .nodes()
         .values()
@@ -1109,11 +1229,7 @@ fn execution_graph_view(
                 .next_back()
                 .map(|failure| failure.code.clone())
         });
-    let repair_round = graph
-        .nodes()
-        .values()
-        .filter_map(|node| node.feedback_state.as_ref().map(|state| state.round))
-        .sum();
+    let repair_round = graph.semantic_request_count();
     let feedback_phase = current
         .and_then(|node| node.feedback_state.as_ref())
         .or_else(|| {
@@ -1124,7 +1240,7 @@ fn execution_graph_view(
                 .next_back()
         })
         .map(|state| state.phase);
-    ExecutionGraphView {
+    Ok(ExecutionGraphView {
         execution_graph_id: graph.id().clone(),
         revision: graph.revision(),
         status: graph.status(),
@@ -1152,7 +1268,8 @@ fn execution_graph_view(
             graph.status(),
             ExecutionGraphStatus::Succeeded | ExecutionGraphStatus::Cancelled
         ) && graph.status() != ExecutionGraphStatus::CommitPrepared,
-    }
+        adjustable_items: composition_adjustment_items(graph)?,
+    })
 }
 
 fn can_reconcile_succeeded_graph(

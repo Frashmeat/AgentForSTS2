@@ -29,11 +29,13 @@ pub use execution::{
     ValidationReport, ValidationRequest, ValidationRunner, validate_project_writes,
 };
 pub use execution_graph::{
-    EXECUTION_GRAPH_SCHEMA_VERSION, ExecutionCommitIntent, ExecutionFailure,
+    EXECUTION_GRAPH_SCHEMA_VERSION, ExecutionAdjustment, ExecutionCommitIntent, ExecutionFailure,
     ExecutionFeedbackPhase, ExecutionGraphError, ExecutionGraphRecord, ExecutionGraphStatus,
     ExecutionNodeFeedbackState, ExecutionNodeRecord, ExecutionNodeSpec, ExecutionNodeStatus,
-    ExecutionOutputFeedback, ExecutionPublicationIntent, HashedExecutionPayload,
-    LogicalAttemptOutcome, LogicalNodeAttempt, hash_json,
+    ExecutionOutputFeedback, ExecutionPublicationIntent, ExecutionRepairCampaign,
+    ExecutionRepairTarget, ExecutionRepairTargetSpec, ExecutionRepairTargetStatus,
+    HashedExecutionPayload, LogicalAttemptOutcome, LogicalNodeAttempt, MAX_SEMANTIC_REQUESTS,
+    hash_json,
 };
 pub use media::{MediaClient, MediaError, MediaRequest, MediaRequestSnapshot, MediaResponse};
 pub use model::{

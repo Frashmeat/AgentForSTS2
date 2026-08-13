@@ -146,22 +146,32 @@ Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-sp
   rejects duplicate keys deterministically, and writes one sorted object before staging. STS2 uses
   this for Card/Relic/Character tables and keeps Character's four Architect lines in separate
   `ancients.json` roles for both locales.
-- ExecutionGraphRecord v3 directly replaces v2 and persists only the current normalized checkpoint,
-  attempt count/active attempt and one hashed safe feedback state. Feedback state contains round,
-  phase, diagnostic fingerprint, either candidate SHA-256 or checkpoint hash, and a versioned typed
-  envelope. The repository reads only `.ats/execution-graphs-v3`; no v1/v2 fallback, migration,
+- ExecutionGraphRecord v4 directly replaces v3 and persists only current normalized checkpoints,
+  attempt/feedback state and at most one dependency-ordered `RepairCampaign`. The campaign stores
+  bounded typed diagnostic fingerprints, target Item/node/checkpoint identities, one active cursor,
+  graph-total semantic request count and optional version-bound operator adjustment. The repository
+  reads only `.ats/execution-graphs-v4`; no v1/v2/v3 fallback, migration,
   dual write or repair archive is allowed. Old directories remain untouched evidence.
 - Checkpoint-free and repair-output evidence enters Runtime as the common
   `ExecutionOutputFeedback` value object. Do not grow parallel positional-argument APIs or decode
   `GenerationFeedbackEnvelope` below Feature code.
-- Composition Generate request v4 fixes `until_passed` or `max_rounds(1..20)` before graph creation.
+- Composition Generate request v5 and Blueprint v3 fix `until_passed` or `max_rounds(1..20)` before graph creation.
   The limit is the total semantic-feedback budget across the complete graph, never a per-node
   multiplier. `until_passed` uses the same absolute 20-round safety ceiling; it does not mean
   unbounded requests. Direct `mod.generate.single` remains strict and single-request. Composition may feed
-  back repairable output-contract diagnostics before checkpoint creation or uniquely owned
-  generated-content issues after registered validation. Every feedback call returns a complete
+  back repairable output-contract diagnostics before checkpoint creation or a deterministic campaign
+  of individually owned generated-content issues after registered validation. Every target call returns a complete
   bundle/role set and reruns the same strict decode and validation closure. `commit_prepared` is
   unreachable before registered validation succeeds.
+- Multiple repairable owners are ordered by the resolved graph and repaired serially. A shared,
+  ambiguous, local or non-repairable issue rejects the entire campaign. One target replacement must
+  leave every other checkpoint hash unchanged; campaign completion always reruns whole-closure
+  validation and recompiles diagnostics from scratch.
+- A generated-result adjustment is an operation of `composition.generate`, not Feature 13. The
+  request binds `itemId + expectedDefinitionHash`, stores only a bounded/hashable instruction
+  envelope, replaces one complete Item role set and reruns whole-closure validation. Stale or
+  structural adjustments fail before model work. Ordinary React does not expose Graph IDs,
+  revisions, compiler codes, semantic counters or repair-policy controls.
 - Project-local `local.props` manages only `Sts2AssemblyPath` and `GodotPath`, preserving `ModsPath`
   and unknown XML. Create requires a valid configured pair. Existing Open/Generate/Build/Package
   call `sync_or_validate_project_local_props`: a valid configured pair atomically updates the
@@ -850,7 +860,11 @@ let request = recipe.render_with_output_contract(&slots, model, output_contract)
 
 ## 8. Shell Boundary
 
-Tauri invokes only `Stage2Composition` for product execution. React uses runtime guards for v3 DTOs and treats persisted `get_run` as terminal authority. Web exposes health/catalog/SPA only until a real Web execution composition is designed. CLI catalog comes from the shared registry.
+Tauri invokes only `Stage2Composition` for product execution. React uses runtime guards for v4
+execution DTOs and treats persisted `get_run` as terminal authority. The ordinary composition UI
+maps internal phases to `generating`, `checking`, `auto_adjusting`, `needs_attention` or `preview`
+and offers adjustment only from one concrete Item preview. Web exposes health/catalog/SPA only until
+a real Web execution composition is designed. CLI catalog comes from the shared registry.
 
 ### Scenario: Resolve Desktop Configuration Independently Of CWD
 

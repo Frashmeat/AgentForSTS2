@@ -26,6 +26,7 @@ export interface ExecutionGraphView {
   canPause: boolean;
   canResume: boolean;
   canCancel: boolean;
+  adjustableItems: Array<{ itemId: string; definitionHash: string }>;
 }
 
 export function isExecutionGraphView(value: unknown): value is ExecutionGraphView {
@@ -67,7 +68,15 @@ export function isExecutionGraphView(value: unknown): value is ExecutionGraphVie
       value.feedbackPhase === "generated_content") &&
     typeof value.canPause === "boolean" &&
     typeof value.canResume === "boolean" &&
-    typeof value.canCancel === "boolean"
+    typeof value.canCancel === "boolean" &&
+    Array.isArray(value.adjustableItems) &&
+    value.adjustableItems.every((item) =>
+      isRecord(item) &&
+      typeof item.itemId === "string" &&
+      /^[a-z][a-z0-9_.-]{0,127}$/.test(item.itemId) &&
+      typeof item.definitionHash === "string" &&
+      /^[0-9a-f]{64}$/.test(item.definitionHash)
+    )
   );
 }
 

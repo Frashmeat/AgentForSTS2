@@ -3,6 +3,11 @@ import path from "node:path";
 const appBinary = path.resolve(
   process.env.ATS_E2E_APP_BINARY ?? "target/debug/agentthespire-desktop.exe",
 );
+const embeddedPort = Number.parseInt(process.env.TAURI_WEBDRIVER_PORT ?? "", 10);
+
+if (!Number.isInteger(embeddedPort) || embeddedPort < 1 || embeddedPort > 65535) {
+  throw new Error("TAURI_WEBDRIVER_PORT must be a valid port allocated by the E2E runner");
+}
 
 export const config = {
   runner: "local",
@@ -11,6 +16,7 @@ export const config = {
   services: [["@wdio/tauri-service", {
     appBinaryPath: appBinary,
     driverProvider: "embedded",
+    embeddedPort,
     captureBackendLogs: false,
     captureFrontendLogs: false,
     env: {
@@ -21,6 +27,7 @@ export const config = {
       ATS_E2E_STS2_DLL_PATH: process.env.ATS_E2E_STS2_DLL_PATH,
       ATS_E2E_STUB_URL: process.env.ATS_E2E_STUB_URL,
       ATS_E2E_BASELIB_RELEASE_URL: process.env.ATS_E2E_BASELIB_RELEASE_URL,
+      TAURI_WEBDRIVER_PORT: String(embeddedPort),
     },
   }]],
   capabilities: [{

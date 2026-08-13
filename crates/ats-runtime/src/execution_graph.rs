@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use ats_kernel::{
-    CompositionDraftId, ExecutionGraphId, ExecutionNodeId, FailureCode, FeatureId, Sha256Digest,
+    CompositionDraftId, ExecutionGraphId, ExecutionNodeId, FailureCode, FeatureId, ItemId,
+    Sha256Digest,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -10,7 +11,8 @@ use thiserror::Error;
 
 use crate::{RunId, VersionedPayload};
 
-pub const EXECUTION_GRAPH_SCHEMA_VERSION: u32 = 3;
+pub const EXECUTION_GRAPH_SCHEMA_VERSION: u32 = 4;
+pub const MAX_SEMANTIC_REQUESTS: u32 = 20;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -160,6 +162,54 @@ pub struct ExecutionOutputFeedback {
     pub feedback: VersionedPayload,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionRepairTargetStatus {
+    Pending,
+    Active,
+    Completed,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExecutionRepairTargetSpec {
+    pub item_id: ItemId,
+    pub node_id: ExecutionNodeId,
+    pub checkpoint_hash: Sha256Digest,
+    pub diagnostic_fingerprints: Vec<Sha256Digest>,
+    pub feedback: VersionedPayload,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExecutionRepairTarget {
+    pub item_id: ItemId,
+    pub node_id: ExecutionNodeId,
+    pub checkpoint_hash: Sha256Digest,
+    pub diagnostic_fingerprints: Vec<Sha256Digest>,
+    pub status: ExecutionRepairTargetStatus,
+    pub feedback: HashedExecutionPayload,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExecutionAdjustment {
+    pub item_id: ItemId,
+    pub expected_definition_hash: Sha256Digest,
+    pub instruction_sha256: Sha256Digest,
+    pub created_at: DateTime<Utc>,
+    pub feedback: HashedExecutionPayload,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExecutionRepairCampaign {
+    pub validation_fingerprint: Sha256Digest,
+    pub targets: Vec<ExecutionRepairTarget>,
+    pub current_target: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adjustment: Option<ExecutionAdjustment>,
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ExecutionNodeSpec {
     pub node_id: ExecutionNodeId,
@@ -269,6 +319,8 @@ pub struct ExecutionGraphRecord {
     updated_at: DateTime<Utc>,
     blueprint: HashedExecutionPayload,
     nodes: BTreeMap<ExecutionNodeId, ExecutionNodeRecord>,
+    semantic_request_count: u32,
+    repair_campaign: Option<ExecutionRepairCampaign>,
     graph_failure: Option<ExecutionFailure>,
     commit_intent: Option<ExecutionCommitIntent>,
     final_result_ref: Option<HashedExecutionPayload>,
@@ -322,6 +374,8 @@ impl ExecutionGraphRecord {
             updated_at: at,
             blueprint: HashedExecutionPayload::new(blueprint)?,
             nodes,
+            semantic_request_count: 0,
+            repair_campaign: None,
             graph_failure: None,
             commit_intent: None,
             final_result_ref: None,
@@ -348,13 +402,135 @@ impl ExecutionGraphRecord {
         }
         self.mutate(at, |next| {
             if next.status == ExecutionGraphStatus::Paused {
-                next.status = ExecutionGraphStatus::Running;
+                next.status = if next.repair_campaign.is_some() {
+                    ExecutionGraphStatus::Repairing
+                } else {
+                    ExecutionGraphStatus::Running
+                };
                 next.graph_failure = None;
             }
             next.active_run_id = Some(run_id);
             next.previous_run_id = Some(previous_run_id);
             Ok(())
         })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn claim_adjustment(
+        &mut self,
+        expected_revision: u64,
+        run_id: RunId,
+        previous_run_id: RunId,
+        validation_fingerprint: Sha256Digest,
+        target: ExecutionRepairTargetSpec,
+        adjustment: ExecutionAdjustment,
+        at: DateTime<Utc>,
+    ) -> Result<(), ExecutionGraphError> {
+        if self.revision != expected_revision
+            || self.status != ExecutionGraphStatus::Paused
+            || self.active_run_id.is_some()
+            || self.repair_campaign.is_some()
+            || self.commit_intent.is_some()
+            || self.final_result_ref.is_some()
+        {
+            return Err(ExecutionGraphError::Conflict);
+        }
+        self.mutate(at, |next| {
+            if target.item_id != adjustment.item_id
+                || target.diagnostic_fingerprints.len() != 1
+                || target.feedback != adjustment.feedback.payload
+            {
+                return Err(ExecutionGraphError::InvalidMetadata);
+            }
+            let node = next
+                .nodes
+                .get(&target.node_id)
+                .ok_or(ExecutionGraphError::NodeNotFound)?;
+            if node.status != ExecutionNodeStatus::Succeeded
+                || node.active_checkpoint.as_ref().map(|value| &value.sha256)
+                    != Some(&target.checkpoint_hash)
+            {
+                return Err(ExecutionGraphError::InvalidTransition);
+            }
+            next.repair_campaign = Some(ExecutionRepairCampaign {
+                validation_fingerprint,
+                targets: vec![ExecutionRepairTarget {
+                    item_id: target.item_id,
+                    node_id: target.node_id,
+                    checkpoint_hash: target.checkpoint_hash,
+                    diagnostic_fingerprints: target.diagnostic_fingerprints,
+                    status: ExecutionRepairTargetStatus::Pending,
+                    feedback: HashedExecutionPayload::new(target.feedback)?,
+                }],
+                current_target: 0,
+                adjustment: Some(adjustment),
+            });
+            next.status = ExecutionGraphStatus::Repairing;
+            next.active_run_id = Some(run_id);
+            next.previous_run_id = Some(previous_run_id);
+            next.graph_failure = None;
+            Ok(())
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn derive_adjustment(
+        &self,
+        execution_graph_id: ExecutionGraphId,
+        request_snapshot_hash: Sha256Digest,
+        run_id: RunId,
+        validation_fingerprint: Sha256Digest,
+        target: ExecutionRepairTargetSpec,
+        adjustment: ExecutionAdjustment,
+        at: DateTime<Utc>,
+    ) -> Result<Self, ExecutionGraphError> {
+        if self.status != ExecutionGraphStatus::Succeeded
+            || self.repair_campaign.is_some()
+            || self.final_result_ref.is_none()
+            || target.item_id != adjustment.item_id
+            || target.diagnostic_fingerprints.len() != 1
+            || target.feedback != adjustment.feedback.payload
+        {
+            return Err(ExecutionGraphError::InvalidTransition);
+        }
+        let mut next = self.clone();
+        let node = next
+            .nodes
+            .get(&target.node_id)
+            .ok_or(ExecutionGraphError::NodeNotFound)?;
+        if node.status != ExecutionNodeStatus::Succeeded
+            || node.active_checkpoint.as_ref().map(|value| &value.sha256)
+                != Some(&target.checkpoint_hash)
+        {
+            return Err(ExecutionGraphError::InvalidTransition);
+        }
+        next.execution_graph_id = execution_graph_id;
+        next.request_snapshot_hash = request_snapshot_hash;
+        next.revision = 1;
+        next.status = ExecutionGraphStatus::Repairing;
+        next.active_run_id = Some(run_id);
+        next.previous_run_id = self.previous_run_id.clone();
+        next.created_at = at;
+        next.updated_at = at;
+        next.semantic_request_count = 0;
+        next.repair_campaign = Some(ExecutionRepairCampaign {
+            validation_fingerprint,
+            targets: vec![ExecutionRepairTarget {
+                item_id: target.item_id,
+                node_id: target.node_id,
+                checkpoint_hash: target.checkpoint_hash,
+                diagnostic_fingerprints: target.diagnostic_fingerprints,
+                status: ExecutionRepairTargetStatus::Pending,
+                feedback: HashedExecutionPayload::new(target.feedback)?,
+            }],
+            current_target: 0,
+            adjustment: Some(adjustment),
+        });
+        next.graph_failure = None;
+        next.commit_intent = None;
+        next.final_result_ref = None;
+        next.validate()?;
+        Ok(next)
     }
 
     pub fn start_node(
@@ -544,6 +720,7 @@ impl ExecutionGraphRecord {
                 return Err(ExecutionGraphError::InvalidTransition);
             }
             interrupt_running_node(next, run_id, at)?;
+            interrupt_active_repair_target(next)?;
             next.status = ExecutionGraphStatus::Paused;
             next.previous_run_id = next.active_run_id.clone();
             next.active_run_id = None;
@@ -588,54 +765,86 @@ impl ExecutionGraphRecord {
             {
                 return Err(ExecutionGraphError::InvalidTransition);
             }
+            if next.status == ExecutionGraphStatus::Repairing
+                && let Some(campaign) = next.repair_campaign.as_ref()
+            {
+                if usize::try_from(campaign.current_target).ok() != Some(campaign.targets.len())
+                    || campaign
+                        .targets
+                        .iter()
+                        .any(|target| target.status != ExecutionRepairTargetStatus::Completed)
+                {
+                    return Err(ExecutionGraphError::InvalidTransition);
+                }
+                next.repair_campaign = None;
+            }
             next.status = ExecutionGraphStatus::Validating;
             Ok(())
         })
     }
 
-    pub fn begin_repair(
+    pub fn begin_repair_campaign(
         &mut self,
-        node_id: &ExecutionNodeId,
         run_id: &RunId,
-        fingerprint: Sha256Digest,
-        checkpoint_hash: Sha256Digest,
-        feedback: VersionedPayload,
+        validation_fingerprint: Sha256Digest,
+        targets: Vec<ExecutionRepairTargetSpec>,
+        adjustment: Option<ExecutionAdjustment>,
         at: DateTime<Utc>,
     ) -> Result<(), ExecutionGraphError> {
         self.mutate(at, |next| {
             if next.status != ExecutionGraphStatus::Validating
                 || next.active_run_id.as_ref() != Some(run_id)
+                || targets.is_empty()
+                || targets.len() > next.nodes.len()
             {
                 return Err(ExecutionGraphError::InvalidTransition);
             }
-            let node = next
-                .nodes
-                .get_mut(node_id)
-                .ok_or(ExecutionGraphError::NodeNotFound)?;
-            if node.status != ExecutionNodeStatus::Succeeded
-                || node.active_checkpoint.is_none()
-                || node.feedback_state.as_ref().is_some_and(|state| {
-                    state.diagnostic_fingerprint == fingerprint
-                        && state.checkpoint_hash.as_ref() == Some(&checkpoint_hash)
-                })
-                || node.active_checkpoint.as_ref().map(|value| &value.sha256)
-                    != Some(&checkpoint_hash)
-            {
-                return Err(ExecutionGraphError::InvalidTransition);
+            let mut item_ids = BTreeSet::new();
+            let mut node_ids = BTreeSet::new();
+            let mut campaign_targets = Vec::with_capacity(targets.len());
+            for target in targets {
+                if !item_ids.insert(target.item_id.clone())
+                    || !node_ids.insert(target.node_id.clone())
+                    || target.diagnostic_fingerprints.is_empty()
+                    || target.diagnostic_fingerprints.len() > 256
+                {
+                    return Err(ExecutionGraphError::InvalidMetadata);
+                }
+                let unique = target
+                    .diagnostic_fingerprints
+                    .iter()
+                    .collect::<BTreeSet<_>>();
+                let node = next
+                    .nodes
+                    .get(&target.node_id)
+                    .ok_or(ExecutionGraphError::NodeNotFound)?;
+                if unique.len() != target.diagnostic_fingerprints.len()
+                    || node.status != ExecutionNodeStatus::Succeeded
+                    || node.active_checkpoint.as_ref().map(|value| &value.sha256)
+                        != Some(&target.checkpoint_hash)
+                {
+                    return Err(ExecutionGraphError::InvalidTransition);
+                }
+                campaign_targets.push(ExecutionRepairTarget {
+                    item_id: target.item_id,
+                    node_id: target.node_id,
+                    checkpoint_hash: target.checkpoint_hash,
+                    diagnostic_fingerprints: target.diagnostic_fingerprints,
+                    status: ExecutionRepairTargetStatus::Pending,
+                    feedback: HashedExecutionPayload::new(target.feedback)?,
+                });
             }
-            let round = node
-                .feedback_state
-                .as_ref()
-                .map_or(0, |state| state.round)
-                .checked_add(1)
-                .ok_or(ExecutionGraphError::InvalidAttempt)?;
-            node.feedback_state = Some(ExecutionNodeFeedbackState {
-                round,
-                phase: ExecutionFeedbackPhase::GeneratedContent,
-                diagnostic_fingerprint: fingerprint,
-                candidate_sha256: None,
-                checkpoint_hash: Some(checkpoint_hash),
-                feedback: HashedExecutionPayload::new(feedback)?,
+            if let Some(value) = &adjustment {
+                value.feedback.validate()?;
+                if campaign_targets.len() != 1 || campaign_targets[0].item_id != value.item_id {
+                    return Err(ExecutionGraphError::InvalidMetadata);
+                }
+            }
+            next.repair_campaign = Some(ExecutionRepairCampaign {
+                validation_fingerprint,
+                targets: campaign_targets,
+                current_target: 0,
+                adjustment,
             });
             next.status = ExecutionGraphStatus::Repairing;
             next.graph_failure = None;
@@ -643,29 +852,88 @@ impl ExecutionGraphRecord {
         })
     }
 
-    pub fn resume_repair(
+    pub fn activate_repair_target(
         &mut self,
         run_id: &RunId,
         at: DateTime<Utc>,
     ) -> Result<(), ExecutionGraphError> {
         self.mutate(at, |next| {
-            if next.status != ExecutionGraphStatus::Validating
+            if next.status != ExecutionGraphStatus::Repairing
                 || next.active_run_id.as_ref() != Some(run_id)
-                || !next.nodes.values().any(|node| {
-                    node.status == ExecutionNodeStatus::Succeeded
-                        && node.active_checkpoint.as_ref().is_some_and(|checkpoint| {
-                            node.feedback_state.as_ref().is_some_and(|state| {
-                                state.phase == ExecutionFeedbackPhase::OutputContract
-                                    && state.candidate_sha256.is_some()
-                                    && state.checkpoint_hash.as_ref() == Some(&checkpoint.sha256)
-                            })
-                        })
-                })
+                || next.semantic_request_count >= MAX_SEMANTIC_REQUESTS
             {
                 return Err(ExecutionGraphError::InvalidTransition);
             }
-            next.status = ExecutionGraphStatus::Repairing;
-            next.graph_failure = None;
+            let campaign = next
+                .repair_campaign
+                .as_mut()
+                .ok_or(ExecutionGraphError::InvalidTransition)?;
+            let index = usize::try_from(campaign.current_target)
+                .map_err(|_| ExecutionGraphError::InvalidMetadata)?;
+            let target = campaign
+                .targets
+                .get_mut(index)
+                .ok_or(ExecutionGraphError::InvalidTransition)?;
+            if target.status != ExecutionRepairTargetStatus::Pending {
+                return Err(ExecutionGraphError::InvalidTransition);
+            }
+            target.status = ExecutionRepairTargetStatus::Active;
+            next.semantic_request_count = next
+                .semantic_request_count
+                .checked_add(1)
+                .ok_or(ExecutionGraphError::InvalidAttempt)?;
+            Ok(())
+        })
+    }
+
+    pub fn complete_repair_target(
+        &mut self,
+        node_id: &ExecutionNodeId,
+        run_id: &RunId,
+        checkpoint: VersionedPayload,
+        at: DateTime<Utc>,
+    ) -> Result<(), ExecutionGraphError> {
+        self.mutate(at, |next| {
+            if next.status != ExecutionGraphStatus::Repairing
+                || next.active_run_id.as_ref() != Some(run_id)
+            {
+                return Err(ExecutionGraphError::InvalidTransition);
+            }
+            let campaign = next
+                .repair_campaign
+                .as_mut()
+                .ok_or(ExecutionGraphError::InvalidTransition)?;
+            let index = usize::try_from(campaign.current_target)
+                .map_err(|_| ExecutionGraphError::InvalidMetadata)?;
+            let target = campaign
+                .targets
+                .get_mut(index)
+                .ok_or(ExecutionGraphError::InvalidTransition)?;
+            if target.status != ExecutionRepairTargetStatus::Active || &target.node_id != node_id {
+                return Err(ExecutionGraphError::InvalidTransition);
+            }
+            let node = next
+                .nodes
+                .get_mut(node_id)
+                .ok_or(ExecutionGraphError::NodeNotFound)?;
+            if node.status != ExecutionNodeStatus::Succeeded
+                || node.active_checkpoint.as_ref().map(|value| &value.sha256)
+                    != Some(&target.checkpoint_hash)
+            {
+                return Err(ExecutionGraphError::InvalidTransition);
+            }
+            let replacement = HashedExecutionPayload::new(checkpoint)?;
+            if replacement.sha256 == target.checkpoint_hash {
+                return Err(ExecutionGraphError::InvalidTransition);
+            }
+            target.checkpoint_hash = replacement.sha256.clone();
+            target.status = ExecutionRepairTargetStatus::Completed;
+            node.active_checkpoint = Some(replacement);
+            node.safe_failure = None;
+            campaign.current_target = campaign
+                .current_target
+                .checked_add(1)
+                .ok_or(ExecutionGraphError::InvalidMetadata)?;
             Ok(())
         })
     }
@@ -701,6 +969,13 @@ impl ExecutionGraphRecord {
                 .feedback_state
                 .as_ref()
                 .map_or(0, |state| state.round)
+                .checked_add(1)
+                .ok_or(ExecutionGraphError::InvalidAttempt)?;
+            if next.semantic_request_count >= MAX_SEMANTIC_REQUESTS {
+                return Err(ExecutionGraphError::InvalidTransition);
+            }
+            next.semantic_request_count = next
+                .semantic_request_count
                 .checked_add(1)
                 .ok_or(ExecutionGraphError::InvalidAttempt)?;
             node.feedback_state = Some(ExecutionNodeFeedbackState {
@@ -751,6 +1026,13 @@ impl ExecutionGraphRecord {
                 .map_or(0, |state| state.round)
                 .checked_add(1)
                 .ok_or(ExecutionGraphError::InvalidAttempt)?;
+            if next.semantic_request_count >= MAX_SEMANTIC_REQUESTS {
+                return Err(ExecutionGraphError::InvalidTransition);
+            }
+            next.semantic_request_count = next
+                .semantic_request_count
+                .checked_add(1)
+                .ok_or(ExecutionGraphError::InvalidAttempt)?;
             node.feedback_state = Some(ExecutionNodeFeedbackState {
                 round,
                 phase: ExecutionFeedbackPhase::OutputContract,
@@ -779,6 +1061,7 @@ impl ExecutionGraphRecord {
                 return Err(ExecutionGraphError::InvalidTransition);
             }
             next.graph_failure = Some(failure);
+            interrupt_active_repair_target(next)?;
             next.status = ExecutionGraphStatus::Paused;
             next.previous_run_id = next.active_run_id.clone();
             next.active_run_id = None;
@@ -930,6 +1213,7 @@ impl ExecutionGraphRecord {
                     node.status = ExecutionNodeStatus::Cancelled;
                 }
             }
+            interrupt_active_repair_target(next)?;
             next.status = ExecutionGraphStatus::Cancelled;
             next.active_run_id = None;
             Ok(())
@@ -948,6 +1232,7 @@ impl ExecutionGraphRecord {
                 | ExecutionGraphStatus::Repairing
                 | ExecutionGraphStatus::PauseRequested => {
                     interrupt_running_node(next, &run_id, at)?;
+                    interrupt_active_repair_target(next)?;
                     next.status = ExecutionGraphStatus::Paused;
                 }
                 ExecutionGraphStatus::CommitPrepared => {}
@@ -996,6 +1281,12 @@ impl ExecutionGraphRecord {
             result.validate()?;
         }
         validate_nodes(&self.nodes)?;
+        if self.semantic_request_count > MAX_SEMANTIC_REQUESTS {
+            return Err(ExecutionGraphError::InvalidAttempt);
+        }
+        if let Some(campaign) = &self.repair_campaign {
+            validate_repair_campaign(campaign, &self.nodes, self.status)?;
+        }
         match self.status {
             ExecutionGraphStatus::Running
             | ExecutionGraphStatus::Validating
@@ -1128,6 +1419,16 @@ impl ExecutionGraphRecord {
     }
 
     #[must_use]
+    pub const fn semantic_request_count(&self) -> u32 {
+        self.semantic_request_count
+    }
+
+    #[must_use]
+    pub fn repair_campaign(&self) -> Option<&ExecutionRepairCampaign> {
+        self.repair_campaign.as_ref()
+    }
+
+    #[must_use]
     pub fn graph_failure(&self) -> Option<&ExecutionFailure> {
         self.graph_failure.as_ref()
     }
@@ -1163,6 +1464,8 @@ impl<'de> Deserialize<'de> for ExecutionGraphRecord {
             updated_at: DateTime<Utc>,
             blueprint: HashedExecutionPayload,
             nodes: BTreeMap<ExecutionNodeId, ExecutionNodeRecord>,
+            semantic_request_count: u32,
+            repair_campaign: Option<ExecutionRepairCampaign>,
             graph_failure: Option<ExecutionFailure>,
             commit_intent: Option<ExecutionCommitIntent>,
             final_result_ref: Option<HashedExecutionPayload>,
@@ -1181,6 +1484,8 @@ impl<'de> Deserialize<'de> for ExecutionGraphRecord {
             updated_at: wire.updated_at,
             blueprint: wire.blueprint,
             nodes: wire.nodes,
+            semantic_request_count: wire.semantic_request_count,
+            repair_campaign: wire.repair_campaign,
             graph_failure: wire.graph_failure,
             commit_intent: wire.commit_intent,
             final_result_ref: wire.final_result_ref,
@@ -1220,6 +1525,22 @@ fn interrupt_running_node(
             node.active_attempt = None;
             node.status = ExecutionNodeStatus::Pending;
         }
+    }
+    Ok(())
+}
+
+fn interrupt_active_repair_target(
+    graph: &mut ExecutionGraphRecord,
+) -> Result<(), ExecutionGraphError> {
+    let Some(campaign) = graph.repair_campaign.as_mut() else {
+        return Ok(());
+    };
+    let index = usize::try_from(campaign.current_target)
+        .map_err(|_| ExecutionGraphError::InvalidMetadata)?;
+    if let Some(target) = campaign.targets.get_mut(index)
+        && target.status == ExecutionRepairTargetStatus::Active
+    {
+        target.status = ExecutionRepairTargetStatus::Pending;
     }
     Ok(())
 }
@@ -1273,6 +1594,81 @@ fn validate_nodes(
     } else {
         Err(ExecutionGraphError::CyclicDependency)
     }
+}
+
+fn validate_repair_campaign(
+    campaign: &ExecutionRepairCampaign,
+    nodes: &BTreeMap<ExecutionNodeId, ExecutionNodeRecord>,
+    graph_status: ExecutionGraphStatus,
+) -> Result<(), ExecutionGraphError> {
+    if campaign.targets.is_empty() || campaign.targets.len() > nodes.len() {
+        return Err(ExecutionGraphError::InvalidMetadata);
+    }
+    let current = usize::try_from(campaign.current_target)
+        .map_err(|_| ExecutionGraphError::InvalidMetadata)?;
+    if current > campaign.targets.len() {
+        return Err(ExecutionGraphError::InvalidMetadata);
+    }
+    let mut item_ids = BTreeSet::new();
+    let mut node_ids = BTreeSet::new();
+    for (index, target) in campaign.targets.iter().enumerate() {
+        if !item_ids.insert(target.item_id.clone())
+            || !node_ids.insert(target.node_id.clone())
+            || target.diagnostic_fingerprints.is_empty()
+            || target.diagnostic_fingerprints.len() > 256
+            || target.feedback.validate().is_err()
+        {
+            return Err(ExecutionGraphError::InvalidMetadata);
+        }
+        let unique = target
+            .diagnostic_fingerprints
+            .iter()
+            .collect::<BTreeSet<_>>();
+        let node = nodes
+            .get(&target.node_id)
+            .ok_or(ExecutionGraphError::NodeNotFound)?;
+        if unique.len() != target.diagnostic_fingerprints.len()
+            || node.status != ExecutionNodeStatus::Succeeded
+            || node.active_checkpoint.as_ref().map(|value| &value.sha256)
+                != Some(&target.checkpoint_hash)
+        {
+            return Err(ExecutionGraphError::InvalidState);
+        }
+        let status_is_valid = if index < current {
+            target.status == ExecutionRepairTargetStatus::Completed
+        } else if index > current {
+            target.status == ExecutionRepairTargetStatus::Pending
+        } else {
+            match graph_status {
+                ExecutionGraphStatus::Repairing | ExecutionGraphStatus::PauseRequested => matches!(
+                    target.status,
+                    ExecutionRepairTargetStatus::Pending | ExecutionRepairTargetStatus::Active
+                ),
+                ExecutionGraphStatus::Paused | ExecutionGraphStatus::Cancelled => {
+                    target.status == ExecutionRepairTargetStatus::Pending
+                }
+                _ => false,
+            }
+        };
+        if !status_is_valid {
+            return Err(ExecutionGraphError::InvalidState);
+        }
+    }
+    if current == campaign.targets.len()
+        && campaign
+            .targets
+            .iter()
+            .any(|target| target.status != ExecutionRepairTargetStatus::Completed)
+    {
+        return Err(ExecutionGraphError::InvalidState);
+    }
+    if let Some(adjustment) = &campaign.adjustment {
+        adjustment.feedback.validate()?;
+        if campaign.targets.len() != 1 || campaign.targets[0].item_id != adjustment.item_id {
+            return Err(ExecutionGraphError::InvalidMetadata);
+        }
+    }
+    Ok(())
 }
 
 fn validate_node_state(node: &ExecutionNodeRecord) -> Result<(), ExecutionGraphError> {
@@ -1431,6 +1827,24 @@ mod tests {
         (graph, run_id)
     }
 
+    fn completed_graph() -> (ExecutionGraphRecord, RunId) {
+        let (mut graph, run_id) = graph();
+        for (id, value) in [("node.a", 1), ("node.b", 2)] {
+            let node_id = ExecutionNodeId::parse(id).unwrap();
+            graph.start_node(&node_id, &run_id, Utc::now()).unwrap();
+            graph
+                .complete_node(
+                    &node_id,
+                    &run_id,
+                    payload("composition.node-checkpoint", value),
+                    Utc::now(),
+                )
+                .unwrap();
+        }
+        graph.begin_validation(&run_id, Utc::now()).unwrap();
+        (graph, run_id)
+    }
+
     #[test]
     fn enforces_dependencies_checkpoints_and_explicit_resume() {
         let (mut graph, first_run) = graph();
@@ -1511,78 +1925,302 @@ mod tests {
     }
 
     #[test]
-    fn repair_replaces_only_active_checkpoint_and_stops_only_on_same_candidate_fingerprint() {
-        let (mut graph, run_id) = graph();
-        for (id, value) in [("node.a", 1), ("node.b", 2)] {
-            let id = ExecutionNodeId::parse(id).unwrap();
-            graph.start_node(&id, &run_id, Utc::now()).unwrap();
-            graph
-                .complete_node(
-                    &id,
-                    &run_id,
-                    payload("composition.node-checkpoint", value),
-                    Utc::now(),
-                )
-                .unwrap();
-        }
-        graph.begin_validation(&run_id, Utc::now()).unwrap();
-        let node = ExecutionNodeId::parse("node.a").unwrap();
-        let fingerprint = digest("e");
-        let previous_hash = graph.nodes()[&node]
+    fn repair_campaign_advances_serially_and_preserves_other_checkpoints() {
+        let (mut graph, run_id) = completed_graph();
+        let node_a = ExecutionNodeId::parse("node.a").unwrap();
+        let node_b = ExecutionNodeId::parse("node.b").unwrap();
+        let original_a = graph.nodes()[&node_a]
+            .active_checkpoint
+            .as_ref()
+            .unwrap()
+            .sha256
+            .clone();
+        let original_b = graph.nodes()[&node_b]
             .active_checkpoint
             .as_ref()
             .unwrap()
             .sha256
             .clone();
         graph
-            .begin_repair(
-                &node,
+            .begin_repair_campaign(
                 &run_id,
-                fingerprint.clone(),
-                previous_hash.clone(),
-                feedback(1),
+                digest("9"),
+                vec![
+                    ExecutionRepairTargetSpec {
+                        item_id: ItemId::parse("item-a").unwrap(),
+                        node_id: node_a.clone(),
+                        checkpoint_hash: original_a.clone(),
+                        diagnostic_fingerprints: vec![digest("3")],
+                        feedback: feedback(10),
+                    },
+                    ExecutionRepairTargetSpec {
+                        item_id: ItemId::parse("item-b").unwrap(),
+                        node_id: node_b.clone(),
+                        checkpoint_hash: original_b.clone(),
+                        diagnostic_fingerprints: vec![digest("4"), digest("5")],
+                        feedback: feedback(11),
+                    },
+                ],
+                None,
                 Utc::now(),
             )
             .unwrap();
-        let replacement = payload("composition.node-checkpoint", 3);
-        let replacement_hash = hash_json(&replacement).unwrap();
+        assert_eq!(graph.status(), ExecutionGraphStatus::Repairing);
+        graph.activate_repair_target(&run_id, Utc::now()).unwrap();
+        assert_eq!(graph.semantic_request_count(), 1);
         graph
-            .replace_checkpoint(&node, &run_id, replacement, Utc::now())
+            .complete_repair_target(
+                &node_a,
+                &run_id,
+                payload("composition.node-checkpoint", 3),
+                Utc::now(),
+            )
             .unwrap();
-        graph.begin_validation(&run_id, Utc::now()).unwrap();
-        assert_eq!(
-            graph.nodes()[&node].feedback_state.as_ref().unwrap().round,
-            1
+        assert_ne!(
+            graph.nodes()[&node_a]
+                .active_checkpoint
+                .as_ref()
+                .unwrap()
+                .sha256,
+            original_a
         );
-        let active_hash = &graph.nodes()[&node]
+        assert_eq!(
+            graph.nodes()[&node_b]
+                .active_checkpoint
+                .as_ref()
+                .unwrap()
+                .sha256,
+            original_b
+        );
+        graph.activate_repair_target(&run_id, Utc::now()).unwrap();
+        graph
+            .complete_repair_target(
+                &node_b,
+                &run_id,
+                payload("composition.node-checkpoint", 4),
+                Utc::now(),
+            )
+            .unwrap();
+        assert_eq!(graph.semantic_request_count(), 2);
+        assert_eq!(graph.repair_campaign().unwrap().current_target, 2);
+        graph.begin_validation(&run_id, Utc::now()).unwrap();
+        assert!(graph.repair_campaign().is_none());
+    }
+
+    #[test]
+    fn adjustment_derivation_is_atomic_and_resets_publication_state() {
+        let (mut source, source_run_id) = completed_graph();
+        let node_id = ExecutionNodeId::parse("node.a").unwrap();
+        let original_checkpoint_hash = source.nodes()[&node_id]
             .active_checkpoint
             .as_ref()
             .unwrap()
-            .sha256;
-        assert_ne!(active_hash, &previous_hash);
-        assert_eq!(active_hash, &replacement_hash);
-        graph
-            .begin_repair(
-                &node,
-                &run_id,
-                fingerprint.clone(),
-                replacement_hash.clone(),
-                feedback(2),
-                Utc::now(),
-            )
-            .unwrap();
-        graph.begin_validation(&run_id, Utc::now()).unwrap();
+            .sha256
+            .clone();
+        let repair_target = ExecutionRepairTargetSpec {
+            item_id: ItemId::parse("item-a").unwrap(),
+            node_id: node_id.clone(),
+            checkpoint_hash: original_checkpoint_hash,
+            diagnostic_fingerprints: vec![digest("3")],
+            feedback: feedback(10),
+        };
+
         assert!(matches!(
-            graph.begin_repair(
-                &node,
-                &run_id,
-                fingerprint,
-                replacement_hash,
-                feedback(3),
-                Utc::now()
+            source.derive_adjustment(
+                ExecutionGraphId::parse("graph-adjustment-too-early").unwrap(),
+                digest("4"),
+                RunId::parse("run-adjustment-too-early").unwrap(),
+                digest("5"),
+                repair_target.clone(),
+                ExecutionAdjustment {
+                    item_id: ItemId::parse("item-a").unwrap(),
+                    expected_definition_hash: digest("6"),
+                    instruction_sha256: digest("5"),
+                    created_at: Utc::now(),
+                    feedback: HashedExecutionPayload::new(feedback(10)).unwrap(),
+                },
+                Utc::now(),
             ),
             Err(ExecutionGraphError::InvalidTransition)
         ));
+
+        source
+            .begin_repair_campaign(
+                &source_run_id,
+                digest("7"),
+                vec![repair_target],
+                None,
+                Utc::now(),
+            )
+            .unwrap();
+        source
+            .activate_repair_target(&source_run_id, Utc::now())
+            .unwrap();
+        source
+            .complete_repair_target(
+                &node_id,
+                &source_run_id,
+                payload("composition.node-checkpoint", 11),
+                Utc::now(),
+            )
+            .unwrap();
+        source.begin_validation(&source_run_id, Utc::now()).unwrap();
+        let publication = payload("composition.publication", 12);
+        source
+            .prepare_commit(
+                &source_run_id,
+                ExecutionCommitIntent::publication(
+                    "artifact-source",
+                    publication.clone(),
+                    hash_json(publication.payload()).unwrap(),
+                    digest("8"),
+                ),
+                Utc::now(),
+            )
+            .unwrap();
+        source
+            .mark_succeeded(
+                &source_run_id,
+                payload("composition.final-result", 13),
+                Utc::now(),
+            )
+            .unwrap();
+        assert_eq!(source.semantic_request_count(), 1);
+        assert!(source.commit_intent().is_some());
+        assert!(source.final_result_ref().is_some());
+
+        let source_before_derivation = source.clone();
+        let derived_graph_id = ExecutionGraphId::parse("graph-adjustment-derived").unwrap();
+        let adjustment_run_id = RunId::parse("run-adjustment-derived").unwrap();
+        let instruction_sha256 = digest("9");
+        let adjustment_feedback = feedback(14);
+        let checkpoint_hash = source.nodes()[&node_id]
+            .active_checkpoint
+            .as_ref()
+            .unwrap()
+            .sha256
+            .clone();
+        let derived = source
+            .derive_adjustment(
+                derived_graph_id.clone(),
+                digest("a"),
+                adjustment_run_id.clone(),
+                instruction_sha256.clone(),
+                ExecutionRepairTargetSpec {
+                    item_id: ItemId::parse("item-a").unwrap(),
+                    node_id,
+                    checkpoint_hash,
+                    diagnostic_fingerprints: vec![instruction_sha256.clone()],
+                    feedback: adjustment_feedback.clone(),
+                },
+                ExecutionAdjustment {
+                    item_id: ItemId::parse("item-a").unwrap(),
+                    expected_definition_hash: digest("b"),
+                    instruction_sha256,
+                    created_at: Utc::now(),
+                    feedback: HashedExecutionPayload::new(adjustment_feedback).unwrap(),
+                },
+                Utc::now(),
+            )
+            .unwrap();
+
+        assert_eq!(source, source_before_derivation);
+        assert_eq!(derived.id(), &derived_graph_id);
+        assert_eq!(derived.revision(), 1);
+        assert_eq!(derived.status(), ExecutionGraphStatus::Repairing);
+        assert_eq!(derived.active_run_id(), Some(&adjustment_run_id));
+        assert_eq!(derived.previous_run_id(), Some(&source_run_id));
+        assert_eq!(derived.semantic_request_count(), 0);
+        assert!(derived.commit_intent().is_none());
+        assert!(derived.final_result_ref().is_none());
+        let campaign = derived.repair_campaign().unwrap();
+        assert_eq!(campaign.targets.len(), 1);
+        assert_eq!(campaign.current_target, 0);
+        assert_eq!(
+            campaign.targets[0].status,
+            ExecutionRepairTargetStatus::Pending
+        );
+        assert!(campaign.adjustment.is_some());
+    }
+
+    #[test]
+    fn repair_campaign_resume_retries_only_active_target_without_refunding_budget() {
+        let (mut graph, first_run) = completed_graph();
+        let node = ExecutionNodeId::parse("node.a").unwrap();
+        let checkpoint_hash = graph.nodes()[&node]
+            .active_checkpoint
+            .as_ref()
+            .unwrap()
+            .sha256
+            .clone();
+        graph
+            .begin_repair_campaign(
+                &first_run,
+                digest("9"),
+                vec![ExecutionRepairTargetSpec {
+                    item_id: ItemId::parse("item-a").unwrap(),
+                    node_id: node,
+                    checkpoint_hash,
+                    diagnostic_fingerprints: vec![digest("3")],
+                    feedback: feedback(10),
+                }],
+                None,
+                Utc::now(),
+            )
+            .unwrap();
+        graph
+            .activate_repair_target(&first_run, Utc::now())
+            .unwrap();
+        graph.recover_stale_claim(Utc::now()).unwrap();
+        assert_eq!(graph.status(), ExecutionGraphStatus::Paused);
+        assert_eq!(graph.semantic_request_count(), 1);
+        assert_eq!(
+            graph.repair_campaign().unwrap().targets[0].status,
+            ExecutionRepairTargetStatus::Pending
+        );
+        let second_run = RunId::parse("run-campaign-resume").unwrap();
+        graph
+            .claim(graph.revision(), second_run.clone(), first_run, Utc::now())
+            .unwrap();
+        assert_eq!(graph.status(), ExecutionGraphStatus::Repairing);
+        graph
+            .activate_repair_target(&second_run, Utc::now())
+            .unwrap();
+        assert_eq!(graph.semantic_request_count(), 2);
+    }
+
+    #[test]
+    fn repair_campaign_rejects_duplicate_targets_and_tampered_cursor() {
+        let (mut campaign_graph, run_id) = completed_graph();
+        let node = ExecutionNodeId::parse("node.a").unwrap();
+        let checkpoint_hash = campaign_graph.nodes()[&node]
+            .active_checkpoint
+            .as_ref()
+            .unwrap()
+            .sha256
+            .clone();
+        let target = ExecutionRepairTargetSpec {
+            item_id: ItemId::parse("item-a").unwrap(),
+            node_id: node,
+            checkpoint_hash,
+            diagnostic_fingerprints: vec![digest("3")],
+            feedback: feedback(10),
+        };
+        assert!(matches!(
+            campaign_graph.begin_repair_campaign(
+                &run_id,
+                digest("9"),
+                vec![target.clone(), target],
+                None,
+                Utc::now(),
+            ),
+            Err(ExecutionGraphError::InvalidMetadata)
+        ));
+
+        let (graph, _) = graph();
+        let mut encoded = serde_json::to_value(graph).unwrap();
+        encoded["schemaVersion"] = serde_json::json!(3);
+        assert!(serde_json::from_value::<ExecutionGraphRecord>(encoded).is_err());
     }
 
     #[test]
@@ -1689,12 +2327,17 @@ mod tests {
                     .sha256
                     .clone();
                 graph
-                    .begin_repair(
-                        &node,
+                    .begin_repair_campaign(
                         &run_id,
                         digest("d"),
-                        checkpoint_hash,
-                        feedback(1),
+                        vec![ExecutionRepairTargetSpec {
+                            item_id: ItemId::parse("item-a").unwrap(),
+                            node_id: node,
+                            checkpoint_hash,
+                            diagnostic_fingerprints: vec![digest("d")],
+                            feedback: feedback(1),
+                        }],
+                        None,
                         Utc::now(),
                     )
                     .unwrap();
@@ -1736,14 +2379,22 @@ mod tests {
             .sha256
             .clone();
         graph
-            .begin_repair(
-                &node,
+            .begin_repair_campaign(
                 &first_run,
                 digest("d"),
-                checkpoint_hash.clone(),
-                feedback(1),
+                vec![ExecutionRepairTargetSpec {
+                    item_id: ItemId::parse("item-a").unwrap(),
+                    node_id: node.clone(),
+                    checkpoint_hash: checkpoint_hash.clone(),
+                    diagnostic_fingerprints: vec![digest("d")],
+                    feedback: feedback(1),
+                }],
+                None,
                 Utc::now(),
             )
+            .unwrap();
+        graph
+            .activate_repair_target(&first_run, Utc::now())
             .unwrap();
         graph
             .record_repair_output_feedback(
@@ -1759,7 +2410,7 @@ mod tests {
             )
             .unwrap();
         let state = graph.nodes()[&node].feedback_state.as_ref().unwrap();
-        assert_eq!(state.round, 2);
+        assert_eq!(state.round, 1);
         assert_eq!(state.phase, ExecutionFeedbackPhase::OutputContract);
         assert_eq!(state.candidate_sha256.as_ref(), Some(&digest("f")));
         assert_eq!(state.checkpoint_hash.as_ref(), Some(&checkpoint_hash));
@@ -1769,9 +2420,8 @@ mod tests {
         graph
             .claim(graph.revision(), second_run.clone(), first_run, Utc::now())
             .unwrap();
-        graph.begin_validation(&second_run, Utc::now()).unwrap();
-        graph.resume_repair(&second_run, Utc::now()).unwrap();
         assert_eq!(graph.status(), ExecutionGraphStatus::Repairing);
+        assert_eq!(graph.semantic_request_count(), 2);
     }
 
     #[test]

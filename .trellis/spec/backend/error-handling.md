@@ -47,9 +47,9 @@ second weaker-format request. Both modes retain the same Feature-owned typed dec
 or shape remains `model.output_invalid` without raw Provider content in persisted details.
 
 Direct `mod.generate.single` returns that failure after one logical model call. Inside
-`composition.generate` request v4, repairable output-contract failures may enter the Feature-owned
+`composition.generate` request v5, repairable output-contract failures may enter the Feature-owned
 semantic feedback controller without changing model, endpoint, response format or Provider retry
-rules. Before the next model call, ExecutionGraph v3 CAS-persists a hashed
+rules. Before the next model call, ExecutionGraph v4 CAS-persists a hashed
 `feature.generation-feedback` v1 envelope plus the complete candidate SHA-256. The envelope contains
 only closed diagnostic codes, a Pack-trusted optional role ID, expected/observed shape enums and no
 raw completion, parser text or model-authored unknown role.
@@ -69,8 +69,10 @@ Feature never repairs or heuristically extracts it.
 
 Output feedback stops without another model request when the graph-wide policy is exhausted or the
 same typed diagnostic fingerprint and same complete candidate SHA-256 recur. The same diagnostic
-with different candidate bytes is not by itself no progress. Generated-content repair retains its
-same-fingerprint plus same-checkpoint and unchanged-replacement stops. Provider/configuration,
+with different candidate bytes is not by itself no progress. Generated-content repair campaigns
+retain same-fingerprint plus same-checkpoint and unchanged-replacement stops per target. The
+semantic request count is graph-total across output feedback, all campaign targets and one operator
+adjustment; it is never multiplied by Item count. Provider/configuration,
 storage, Truth, checkpoint, publication and cancellation failures never enter semantic feedback.
 Cancellation observed during validation feedback must use the graph's common cancellation
 transition. `CancellationReason::User` makes the graph terminal `cancelled`; Pause, project
@@ -202,9 +204,16 @@ Artifact validation, path, IO, publish, rollback, codegen, batch and package fai
 - Adapter logs may retain sanitized stdout/stderr tails locally; graph failure, Run details, IPC and
   repair prompts must not contain arbitrary command tails or absolute machine paths.
 - Missing game/tool paths are `local_environment`, never generated-content repair input.
-- Only errors classified `generated_content` and uniquely owned by one non-merge generated file may
-  enter semantic repair. Non-repairable, ambiguous merge-file and storage/configuration failures
-  pause without another model request.
+- Only errors classified `generated_content` and individually owned by exactly one non-merge
+  generated file may enter semantic repair. Multiple valid owners form one deterministic campaign;
+  they do not make the validation globally ambiguous. Any individual shared/ambiguous issue, or any
+  non-repairable, local, storage/configuration issue, rejects the whole campaign before model work.
+- Campaign diagnostics are bounded, redacted, fingerprinted and persisted before target execution.
+  Repair prompts contain only the active Item's issues and current complete role files. Completed
+  targets are not replayed after restart; stale diagnostics are discarded before full revalidation.
+- `composition.adjustment.stale`, `.invalid` and `.requires_replan` are stable pre-model failures.
+  Adjustment details may contain safe Item identity and expected/current hash fingerprints, but no
+  instruction text. Structural changes return to Draft planning and never masquerade as source repair.
 - Repeated fingerprint against the same checkpoint, unchanged replacement bytes, policy exhaustion,
   cancellation and Truth insufficiency are stable stop conditions, not retryable Provider errors.
 

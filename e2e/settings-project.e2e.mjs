@@ -173,7 +173,7 @@ const readStubRequests = async (root) => (await fs.readFile(
 
 const assertNoAtomicWriteResidue = async (projectRoot) => {
   for (const relativeRoot of [
-    ".ats/execution-graphs-v3",
+    ".ats/execution-graphs-v4",
     ".ats/composition-drafts-v2",
     ".ats/runs-v3",
   ]) {
@@ -310,10 +310,10 @@ describe("current desktop Stage 2 workflow", () => {
     const graph = JSON.parse(await fs.readFile(path.join(
       projectRoot,
       ".ats",
-      "execution-graphs-v3",
+      "execution-graphs-v4",
       `${running.graphId}.json`,
     ), "utf8"));
-    assert.equal(graph.schemaVersion, 3);
+    assert.equal(graph.schemaVersion, 4);
     assert.equal(graph.status, "cancelled");
     assert.equal(graph.activeRunId, null);
     assert.ok(Object.values(graph.nodes).every((node) => node.status !== "running"));
@@ -339,11 +339,11 @@ describe("current desktop Stage 2 workflow", () => {
     const graphPath = path.join(
       projectRoot,
       ".ats",
-      "execution-graphs-v3",
+      "execution-graphs-v4",
       `${paused.graphId}.json`,
     );
     const pausedGraph = JSON.parse(await fs.readFile(graphPath, "utf8"));
-    assert.equal(pausedGraph.schemaVersion, 3);
+    assert.equal(pausedGraph.schemaVersion, 4);
     assert.equal(pausedGraph.status, "paused");
     assert.equal(pausedGraph.activeRunId, null);
     const firstRun = JSON.parse(await fs.readFile(path.join(
@@ -496,11 +496,11 @@ describe("current desktop Stage 2 workflow", () => {
     const graphPath = path.join(
       projectRoot,
       ".ats",
-      "execution-graphs-v3",
+      "execution-graphs-v4",
       `${succeeded.graphId}.json`,
     );
     const committedGraph = JSON.parse(await fs.readFile(graphPath, "utf8"));
-    assert.equal(committedGraph.schemaVersion, 3);
+    assert.equal(committedGraph.schemaVersion, 4);
     assert.equal(committedGraph.status, "succeeded");
     assert.equal(committedGraph.activeRunId, null);
     assert.ok(Object.values(committedGraph.nodes).every((node) => node.status === "succeeded"));

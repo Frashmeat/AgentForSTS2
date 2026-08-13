@@ -919,7 +919,7 @@ paths, commands or Provider settings.
 | duplicate node/group, missing dependency, cycle, invalid count/binding target | typed preflight failure before HTTP |
 | CAS/claim revision mismatch or active Run exists | typed conflict; no new Run |
 | node response malformed, wrong typed shape or transport retries exhausted | checkpoint unchanged; graph paused; Run failed/interrupted |
-| generated-content validation issue uniquely owned by one non-merge file and policy permits | replace all roles for that Single checkpoint; rebuild finalize; rerun complete validator suite |
+| every generated-content validation issue individually owns one non-merge file and policy permits | group all owners in dependency order; replace one complete Single checkpoint at a time; rerun complete validator suite |
 | local/non-repairable/ambiguous issue, unchanged replacement, repeated fingerprint+checkpoint, or policy exhausted | graph paused with safe graph failure; current checkpoint retained |
 | checkpoint hash/state mismatch or corrupt graph JSON | structural recovery failure for that graph; no guessed recovery |
 | Run create fails after graph claim | CAS compensation to paused; project-open recovery handles a failed compensation |
@@ -989,15 +989,42 @@ single-request path and does not create an execution graph.
 #### 2. Signatures
 
 ```rust
-pub struct CompositionGenerateRequest { // feature.composition-generate-request v4
+pub struct CompositionGenerateRequest { // feature.composition-generate-request v5
     pub artifact_id: String,
     pub mod_id: String,
     pub root: StoredItemDefinition,
     pub draft: Option<CompositionDraftRef>,
     pub package: ProjectPackageRequest,
     pub repair_policy: RepairPolicy,
+    pub adjustment: Option<ItemAdjustment>,
     pub execution: Option<CompositionGenerateExecutionRequest>,
 }
+
+pub struct ItemAdjustment { // feature.item-adjustment v1
+    pub item_id: ItemId,
+    pub expected_definition_hash: Sha256Digest,
+    pub instruction: String, // trimmed, 1..=4,000 chars, no NUL
+    pub instruction_sha256: Sha256Digest,
+    pub created_at: String, // canonical RFC 3339 UTC
+}
+
+pub struct RepairCampaign { // Runtime-owned, provider/game neutral
+    pub validation_fingerprint: Sha256Digest,
+    pub targets: Vec<RepairTarget>,
+    pub current_target: u32,
+    pub adjustment: Option<ExecutionAdjustment>,
+}
+
+pub struct RepairTarget {
+    pub item_id: ItemId,
+    pub node_id: ExecutionNodeId,
+    pub checkpoint_hash: Sha256Digest,
+    pub diagnostic_fingerprints: Vec<Sha256Digest>,
+    pub status: RepairTargetStatus, // pending | active | completed
+}
+
+// ExecutionGraphRecord v4 owns the one graph-total counter across every campaign/feedback kind.
+pub semantic_request_count: u32,
 
 SingleGenerateProposal::checkpoint() -> SingleGenerateProposalCheckpoint;
 SingleGenerateService::restore_composition_proposal(
@@ -1017,7 +1044,7 @@ CompositionGenerateService::execute_staged(...)
 
 #### 3. Contracts
 
-The backend enriches an initial v4 request with `execution.kind=start`. The immutable request also
+The backend enriches an initial v5 request with `execution.kind=start`. The immutable request also
 fixes `until_passed` or `max_rounds(1..20)` as the complete graph's semantic-feedback budget;
 `until_passed` still has the absolute 20-round safety ceiling.
 Resume creates a new parent
@@ -1055,9 +1082,33 @@ item.000.plan -> item.000.single -> item.001.plan -> item.001.single -> ...
   is a storage failure.
 - `composition.finalize` reconstructs every proposal, enforces one validation Primitive, merges
   files and validates writes locally. The graph then enters `validating`, not `commit_prepared`.
-- A generated-content repair request contains typed issues and the owning Item's current complete role files. Single
-  reuses the original Pack/Truth/definition/resource/output contracts; a valid replacement CAS
-  replaces only the active Single checkpoint, then finalize and the complete validator rerun.
+- Registered validation issues are partitioned by normalized relative file ownership. Every error
+  admitted to a campaign is `generated_content`, maps to exactly one non-shared generated file and
+  therefore exactly one Item/node, and still binds the current Pack, Truth, definition, Resource and
+  checkpoint hashes. Any local, non-repairable, shared or ambiguous error rejects the complete
+  campaign before another model call.
+- Feature orders repair targets by the resolved composition dependency order already compiled into
+  graph nodes, never by filesystem enumeration, diagnostic order or React order. One campaign
+  contains at least one and at most the closure Item count. Duplicate diagnostics are fingerprint-
+  deduplicated and sorted within one target.
+- Runtime persists the complete `RepairCampaign` before the first target request. Exactly one target
+  is active. Each generated-content request contains only that Item's bounded typed issues and
+  current complete role files. Single reuses the original Pack/Truth/definition/resource/output
+  contracts; a valid replacement CAS-replaces only that node's checkpoint and marks the target
+  completed. Other checkpoint hashes must remain byte-identical.
+- After the final target completes, Feature discards the campaign diagnostics, rebuilds finalize and
+  runs the complete registered validator. A new rejection compiles a new campaign from current
+  checkpoints; stale issues are never reused. Crash/Resume continues at `current_target` without
+  repeating completed targets.
+- `semantic_request_count` is graph-total across output feedback, validation campaigns and operator
+  adjustment. Every actual semantic model request consumes one count. `max_rounds` and the absolute
+  20-request ceiling apply before activating the next target, not once per Item.
+- `adjustment` is not a new Feature. A Shell command validates `itemId + expectedDefinitionHash`,
+  compiles one v1 adjustment envelope, and starts `composition.generate` v5 against an existing
+  pre-commit graph. The target Item's complete role set is regenerated once through the same Single
+  contracts, then Item-local checks, finalize and whole-closure validation rerun. No other Item is
+  requested or changed. Structural requests that change Item identity/type, references, Resource
+  profile or closure membership fail with `composition.adjustment.requires_replan`.
 - Build, Package, real-project transaction and the one composition Artifact execute only after all
   model nodes, finalize and registered validation succeed. Only then is the publication intent
   fixed and graph moved to roll-forward-only `commit_prepared`.
@@ -1068,7 +1119,10 @@ item.000.plan -> item.000.single -> item.001.plan -> item.001.single -> ...
 
 Runtime `ExecutionCommitIntent` accepts exactly one Draft intent or one generic publication intent.
 Mixed forms, unsafe target IDs or payload-hash mismatch are invalid graph records. ExecutionGraph
-v1/v2 JSON is not read, migrated or rewritten; v3 uses only `.ats/execution-graphs-v3`.
+v4 uses only `.ats/execution-graphs-v4`; v1/v2/v3 JSON is not read, migrated, copied or rewritten.
+Old directories remain untouched evidence. Composition Generate request v5 and Blueprint v3 are the
+only graph-creation contracts after this cutover; no compatibility reader accepts request v4 or
+Blueprint v2.
 
 #### 4. Validation & Error Matrix
 
@@ -1080,6 +1134,11 @@ v1/v2 JSON is not read, migrated or rewritten; v3 uses only `.ats/execution-grap
 | child Run create conflicts with different bytes | `run.storage_failed` | checkpoint remains authoritative; no overwrite |
 | local merge/Primitive/write validation fails | finalize node fails and graph pauses | all Plan/Single checkpoints |
 | registered validation fails locally or cannot be repaired | graph pauses before commit intent | all current model checkpoints |
+| issues map to two or more uniquely owned Items | persist one dependency-ordered campaign and repair one target at a time | every current checkpoint plus bounded diagnostics |
+| any issue is shared, ambiguous, local or non-repairable | `validation.not_repairable`; no campaign/model call | every current checkpoint plus bounded validation evidence |
+| stale adjustment definition hash or non-member Item | `composition.adjustment.stale` / `composition.adjustment.invalid`; no model call | graph and checkpoints unchanged |
+| adjustment requires closure/reference/resource-profile change | `composition.adjustment.requires_replan`; no model call | graph and Draft/definitions unchanged |
+| adjustment target succeeds but whole closure rejects | compile a new technical campaign when safe, otherwise pause | adjusted target checkpoint and all untouched checkpoints |
 | Build/Package/publication fails after prepare | claim is released while commit remains roll-forward | all model checkpoints and publication intent |
 | crash with an active model node | structural recovery interrupts that attempt and pauses graph | all earlier succeeded nodes |
 | graph already succeeded but parent is not authoritative | new reconciliation Run succeeds from final result | zero model/publication work |
@@ -1093,6 +1152,13 @@ v1/v2 JSON is not read, migrated or rewritten; v3 uses only `.ats/execution-grap
 - Good: the same invalid completion repeats, no-progress pauses the graph, and Resume requests only
   the failed Single using the persisted feedback before later Items; repository re-instantiation
   proves restart recovery.
+- Good: Character, Card and Relic each own compiler errors. Feature persists three targets in
+  resolved dependency order, executes three serial complete-role replacements, then one complete
+  validation passes and one publication occurs.
+- Good: a user adjusts Card B using its current definition hash. Only Card B receives one model
+  request; Card A and Character checkpoint hashes remain unchanged; whole-closure validation passes.
+- Base: a campaign crashes after target two of five. Resume creates a new parent Run, retains the
+  first two completed target/checkpoint identities and starts with target three.
 - Base: a two-Item closure completes four model nodes, one local finalize, one validation, one Build,
   one Package, one project transaction and one composition Artifact.
 - Bad: restart `composition.generate` from the root request after one node fails, store a complete
@@ -1119,6 +1185,9 @@ successful nodes, stable serial order, exact child Run evidence, local finalize,
 registered-validation repair success, every feedback stop condition, feedback/repair crash recovery,
 absence of `commit_prepared` before validation success, one final publication path, succeeded
 reconciliation with zero model requests, claim CAS, Pause/Cancel and no staging/transaction residue.
+Also assert multi-owner grouping and stable dependency order, one active campaign target, completed-
+target crash recovery, graph-total budget across targets, stale adjustment rejection before model
+work, one-Item adjustment isolation, and full validation after every campaign/adjustment.
 The GUI E2E success case must assert that one repairable invalid Single creates one failed terminal
 child Run and one persisted `output_contract` feedback state, then succeeds the same parent Run and
 graph without a user Resume. A separate no-progress/exhaustion case owns the Paused/Resume contract.
@@ -1156,7 +1225,7 @@ for definition in resolved.nodes {
 } // any error discards every previous result
 ```
 
-Correct - persist validated domain checkpoints and restore proposals locally:
+Correct - persist validated domain checkpoints, one campaign cursor and restore proposals locally:
 
 ```rust
 if node.status != Succeeded {
@@ -1166,6 +1235,12 @@ if node.status != Succeeded {
 let proposal = single.restore_composition_proposal(
     resources, &request, &context, decode_checkpoint(node)?,
 )?;
+graph.begin_repair_campaign(expected_revision, campaign)?;
+while let Some(target) = graph.active_repair_target() {
+    replace_complete_roles(target).await?;
+    graph.complete_repair_target(expected_revision, target.node_id, checkpoint)?;
+}
+run_complete_validation_again()?;
 ```
 
 ## 8. Shell Cutover

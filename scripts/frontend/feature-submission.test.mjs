@@ -37,9 +37,9 @@ test("feature submissions preserve explicit breaking schema versions", () => {
       "composition.generate",
       "feature.composition-generate-request",
       { artifactId: "fixture-composition" },
-      4,
+      5,
     ).request.schema,
-    { id: "feature.composition-generate-request", version: 4 },
+    { id: "feature.composition-generate-request", version: 5 },
   );
 });
 

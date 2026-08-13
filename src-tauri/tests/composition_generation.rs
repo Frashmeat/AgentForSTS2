@@ -14,7 +14,7 @@ use ats_features::FeatureSpec;
 use ats_features::composition::CompositionDraftRef;
 use ats_features::composition_generate::{
     CompositionGenerateContext, CompositionGenerateDependencies, CompositionGenerateFeature,
-    CompositionGenerateRequest, CompositionGenerateService,
+    CompositionGenerateRequest, CompositionGenerateService, ItemAdjustment,
 };
 use ats_features::mod_generate_single::{SingleGenerateFeature, SingleGenerateService};
 use ats_features::mod_plan::{ModPlanFeature, ModPlanService};
@@ -163,6 +163,49 @@ impl ValidationRunner for RepairOnceValidation {
     }
 }
 
+struct MultiItemRepairOnceValidation {
+    calls: AtomicUsize,
+}
+
+#[async_trait]
+impl ValidationRunner for MultiItemRepairOnceValidation {
+    async fn validate(
+        &self,
+        _: ValidationRequest,
+        _: &CancellationToken,
+    ) -> Result<ValidationReport, ValidationError> {
+        if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+            let issue = |path: &str, fingerprint: char| ValidationIssue {
+                validator_id: "code.dotnet-validate".into(),
+                code: "CS0246".into(),
+                severity: ValidationIssueSeverity::Error,
+                relative_path: Some(path.into()),
+                line: Some(1),
+                column: Some(1),
+                message: "A generated API symbol could not be found.".into(),
+                symbol: Some("GeneratedApi".into()),
+                repairability: ValidationIssueRepairability::GeneratedContent,
+                fingerprint: Sha256Digest::parse(fingerprint.to_string().repeat(64)).unwrap(),
+            };
+            return Err(ValidationError::Rejected(ValidationReport {
+                exit_code: 1,
+                stdout_tail: String::new(),
+                stderr_tail: String::new(),
+                issues: vec![
+                    issue("Generated/fixture-child.cs", 'd'),
+                    issue("Generated/fixture-root.cs", 'e'),
+                ],
+            }));
+        }
+        Ok(ValidationReport {
+            exit_code: 0,
+            stdout_tail: String::new(),
+            stderr_tail: String::new(),
+            issues: Vec::new(),
+        })
+    }
+}
+
 struct CrashAfterRepairedSingleCheckpoint {
     inner: FileExecutionGraphRepository,
     interrupted: AtomicBool,
@@ -198,14 +241,10 @@ impl ExecutionGraphRepository for CrashAfterRepairedSingleCheckpoint {
         expected_revision: u64,
         next: &ExecutionGraphRecord,
     ) -> Result<(), ExecutionGraphRepositoryError> {
-        let repaired_single_was_persisted = next.nodes().values().any(|node| {
-            node.feedback_state
-                .as_ref()
-                .and_then(|state| state.checkpoint_hash.as_ref())
-                .is_some_and(|diagnostic| {
-                    node.active_checkpoint
-                        .as_ref()
-                        .is_some_and(|checkpoint| &checkpoint.sha256 != diagnostic)
+        let repaired_single_was_persisted = next.repair_campaign().is_some_and(|campaign| {
+            campaign.current_target > 0
+                && campaign.targets.iter().any(|target| {
+                    target.status == ats_runtime::ExecutionRepairTargetStatus::Completed
                 })
         });
         self.inner.compare_and_set(expected_revision, next)?;
@@ -333,6 +372,267 @@ async fn output_contract_feedback_regenerates_complete_bundle_and_publishes() {
     assert!(fixture.project.join("Generated/fixture-child.cs").is_file());
     assert!(fixture.project.join("Generated/fixture-root.cs").is_file());
     assert!(fixture.project.join("packages/FixtureMod.zip").is_file());
+}
+
+#[tokio::test]
+async fn succeeded_composition_adjusts_one_item_in_a_new_graph_and_revalidates_the_closure() {
+    let fixture = Fixture::new();
+    let (initial, source_run_id, _) = fixture.execute(false, false).await;
+    let initial = initial.unwrap();
+    let source_graph_id = initial.result.execution_graph_id.clone().unwrap();
+    let graphs = FileExecutionGraphRepository::new(fixture.project.clone());
+    let source_graph = graphs.get(&source_graph_id).unwrap();
+    let source_revision = source_graph.revision();
+    let source_manifest = fixture.project.join(&initial.result.artifact_manifest_ref);
+    let source_checkpoints = source_graph
+        .nodes()
+        .values()
+        .filter(|node| node.role_id == "mod.generate.single")
+        .map(|node| {
+            (
+                node.node_id.clone(),
+                node.active_checkpoint.as_ref().unwrap().sha256.clone(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    let resolver = ContributionResolver::new([
+        PrimitiveId::parse("code.fixture-validate").unwrap(),
+        PrimitiveId::parse("process.fixture-build").unwrap(),
+    ]);
+    let composition = resolve::<CompositionGenerateFeature>(
+        &resolver,
+        &fixture.pack,
+        CompositionGenerateFeature::contribution_requirement(),
+    );
+    let plan = resolve::<ModPlanFeature>(
+        &resolver,
+        &fixture.pack,
+        ModPlanFeature::contribution_requirement(),
+    );
+    let single = resolve::<SingleGenerateFeature>(
+        &resolver,
+        &fixture.pack,
+        SingleGenerateFeature::contribution_requirement(),
+    );
+    let resource = resolve::<ResourcePrepareFeature>(
+        &resolver,
+        &fixture.pack,
+        ResourcePrepareFeature::contribution_requirement(),
+    );
+    let build = resolve::<ProjectBuildFeature>(
+        &resolver,
+        &fixture.pack,
+        ProjectBuildFeature::contribution_requirement(),
+    );
+    let package = resolve::<ProjectPackageFeature>(
+        &resolver,
+        &fixture.pack,
+        ProjectPackageFeature::contribution_requirement(),
+    );
+    let plan_service = ModPlanService::built_in().unwrap();
+    let single_service = SingleGenerateService::built_in().unwrap();
+    let service = CompositionGenerateService::new(
+        &plan_service,
+        &single_service,
+        &ProjectBuildService,
+        &ProjectPackageService,
+    );
+    let context = || CompositionGenerateContext {
+        pack: &fixture.pack,
+        composition_contributions: &composition,
+        plan_contributions: &plan,
+        single_contributions: &single,
+        resource_contributions: &resource,
+        build_contributions: &build,
+        package_contributions: &package,
+        truth: &fixture.truth,
+        project_root: &fixture.project,
+        project_context: "Fixture project",
+        custom_instructions: None,
+        model: None,
+    };
+    let adjustment_run_id = ats_runtime::RunId::new();
+    let child = fixture
+        .items
+        .load_current(&ItemId::parse("fixture-child").unwrap())
+        .unwrap();
+    let adjustment = ItemAdjustment::new(
+        child.definition.item_id.clone(),
+        child.definition_hash,
+        "Make this item clearer without changing its identity.",
+        Utc::now(),
+    )
+    .unwrap();
+    let start = service
+        .prepare_staged_adjustment(
+            source_graph.clone(),
+            source_revision,
+            adjustment_run_id.clone(),
+            adjustment,
+            context(),
+        )
+        .unwrap();
+    assert_ne!(start.graph.id(), &source_graph_id);
+    graphs
+        .create_claimed(&start.graph, &adjustment_run_id)
+        .unwrap();
+    let runs = FileRunRepository::new(fixture.project.clone()).unwrap();
+    let mut run = RunRecord::new_with_id(
+        adjustment_run_id,
+        CompositionGenerateFeature::id(),
+        VersionedPayload::from_typed(CompositionGenerateFeature::request_schema(), &start.request)
+            .unwrap(),
+    );
+    run.apply_transition(RunTransition::Start, Utc::now())
+        .unwrap();
+    let model = QueueModel {
+        responses: Mutex::new(VecDeque::from([repaired_bundle_response("child")])),
+        requests: AtomicUsize::new(0),
+    };
+    let validator = MultiItemRepairOnceValidation {
+        calls: AtomicUsize::new(1),
+    };
+    let execution = service
+        .execute_staged(
+            CompositionGenerateDependencies {
+                model: &model,
+                items: &fixture.items,
+                resources: &fixture.resources,
+                writer: &FileProjectWriter,
+                stager: &FileProjectStager,
+                validator: &validator,
+                artifacts: &FileArtifactStore::new(fixture.project.clone()),
+                build_runner: &FixtureBuild,
+                package_writer: &FixturePackageWriter {
+                    reject_commit: false,
+                },
+            },
+            &runs,
+            &graphs,
+            &mut run,
+            start.request,
+            context(),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(model.requests.load(Ordering::SeqCst), 1);
+    assert_eq!(validator.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(run.status(), RunStatus::Succeeded);
+    let derived = graphs
+        .get(execution.result.execution_graph_id.as_ref().unwrap())
+        .unwrap();
+    assert_eq!(derived.semantic_request_count(), 1);
+    let changed = derived
+        .nodes()
+        .values()
+        .filter(|node| node.role_id == "mod.generate.single")
+        .filter(|node| {
+            source_checkpoints[&node.node_id] != node.active_checkpoint.as_ref().unwrap().sha256
+        })
+        .count();
+    assert_eq!(changed, 1);
+    assert_eq!(graphs.get(&source_graph_id).unwrap(), source_graph);
+    assert!(source_manifest.is_file());
+    assert!(
+        fixture
+            .project
+            .join(&execution.result.artifact_manifest_ref)
+            .is_file()
+    );
+    assert_ne!(
+        execution.result.artifact_manifest_ref,
+        initial.result.artifact_manifest_ref
+    );
+    assert!(!source_run_id.as_str().is_empty());
+    assert!(!fixture.project.join(".ats/composition-staging").exists());
+}
+
+#[tokio::test]
+async fn composition_adjustment_rejects_a_stale_definition_before_model_work() {
+    let fixture = Fixture::new();
+    let (initial, _, _) = fixture.execute(false, false).await;
+    let initial = initial.unwrap();
+    let graphs = FileExecutionGraphRepository::new(fixture.project.clone());
+    let graph = graphs
+        .get(initial.result.execution_graph_id.as_ref().unwrap())
+        .unwrap();
+    let resolver = ContributionResolver::new([
+        PrimitiveId::parse("code.fixture-validate").unwrap(),
+        PrimitiveId::parse("process.fixture-build").unwrap(),
+    ]);
+    let composition = resolve::<CompositionGenerateFeature>(
+        &resolver,
+        &fixture.pack,
+        CompositionGenerateFeature::contribution_requirement(),
+    );
+    let plan = resolve::<ModPlanFeature>(
+        &resolver,
+        &fixture.pack,
+        ModPlanFeature::contribution_requirement(),
+    );
+    let single = resolve::<SingleGenerateFeature>(
+        &resolver,
+        &fixture.pack,
+        SingleGenerateFeature::contribution_requirement(),
+    );
+    let resource = resolve::<ResourcePrepareFeature>(
+        &resolver,
+        &fixture.pack,
+        ResourcePrepareFeature::contribution_requirement(),
+    );
+    let build = resolve::<ProjectBuildFeature>(
+        &resolver,
+        &fixture.pack,
+        ProjectBuildFeature::contribution_requirement(),
+    );
+    let package = resolve::<ProjectPackageFeature>(
+        &resolver,
+        &fixture.pack,
+        ProjectPackageFeature::contribution_requirement(),
+    );
+    let plan_service = ModPlanService::built_in().unwrap();
+    let single_service = SingleGenerateService::built_in().unwrap();
+    let service = CompositionGenerateService::new(
+        &plan_service,
+        &single_service,
+        &ProjectBuildService,
+        &ProjectPackageService,
+    );
+    let error = service
+        .prepare_staged_adjustment(
+            graph.clone(),
+            graph.revision(),
+            ats_runtime::RunId::new(),
+            ItemAdjustment::new(
+                ItemId::parse("fixture-child").unwrap(),
+                Sha256Digest::parse("f".repeat(64)).unwrap(),
+                "Change this item.",
+                Utc::now(),
+            )
+            .unwrap(),
+            CompositionGenerateContext {
+                pack: &fixture.pack,
+                composition_contributions: &composition,
+                plan_contributions: &plan,
+                single_contributions: &single,
+                resource_contributions: &resource,
+                build_contributions: &build,
+                package_contributions: &package,
+                truth: &fixture.truth,
+                project_root: &fixture.project,
+                project_context: "Fixture project",
+                custom_instructions: None,
+                model: None,
+            },
+        )
+        .unwrap_err();
+    assert_eq!(
+        error.run_failure().code.as_str(),
+        "composition.adjustment.stale"
+    );
+    assert_eq!(graphs.get(graph.id()).unwrap(), graph);
 }
 
 #[tokio::test]
@@ -646,7 +946,7 @@ async fn staged_generation_resumes_only_the_failed_single_node() {
 }
 
 #[tokio::test]
-async fn staged_validation_repairs_one_owned_file_then_revalidates_the_whole_closure() {
+async fn staged_validation_repairs_multiple_items_serially_then_revalidates_the_whole_closure() {
     let fixture = Fixture::new();
     let resolver = ContributionResolver::new([
         PrimitiveId::parse("code.fixture-validate").unwrap(),
@@ -733,10 +1033,11 @@ async fn staged_validation_repairs_one_owned_file_then_revalidates_the_whole_clo
             bundle_response("root"),
             "not-json".into(),
             repaired_bundle_response("child"),
+            repaired_bundle_response("root"),
         ])),
         requests: AtomicUsize::new(0),
     };
-    let validator = RepairOnceValidation {
+    let validator = MultiItemRepairOnceValidation {
         calls: AtomicUsize::new(0),
     };
     let execution = service
@@ -763,25 +1064,21 @@ async fn staged_validation_repairs_one_owned_file_then_revalidates_the_whole_clo
         )
         .await
         .unwrap();
-    assert_eq!(model.requests.load(Ordering::SeqCst), 6);
+    assert_eq!(model.requests.load(Ordering::SeqCst), 7);
     assert_eq!(validator.calls.load(Ordering::SeqCst), 2);
     let graph = graphs
         .get(execution.result.execution_graph_id.as_ref().unwrap())
         .unwrap();
     assert_eq!(graph.status(), ats_runtime::ExecutionGraphStatus::Succeeded);
-    assert_eq!(
-        graph
-            .nodes()
-            .values()
-            .filter_map(|node| node.feedback_state.as_ref().map(|state| state.round))
-            .sum::<u32>(),
-        2
-    );
-    let feedback = graph
+    assert_eq!(graph.semantic_request_count(), 3);
+    assert!(graph.repair_campaign().is_none());
+    let feedback_states = graph
         .nodes()
         .values()
-        .find_map(|node| node.feedback_state.as_ref())
-        .unwrap();
+        .filter_map(|node| node.feedback_state.as_ref())
+        .collect::<Vec<_>>();
+    assert_eq!(feedback_states.len(), 1);
+    let feedback = feedback_states[0];
     assert_eq!(
         feedback.phase,
         ats_runtime::ExecutionFeedbackPhase::OutputContract
@@ -929,14 +1226,8 @@ async fn repaired_single_checkpoint_resumes_before_finalize_without_another_mode
         .and_then(|node| node.active_checkpoint.as_ref())
         .map(|checkpoint| checkpoint.sha256.clone())
         .unwrap();
-    assert_eq!(
-        persisted
-            .nodes()
-            .values()
-            .filter_map(|node| node.feedback_state.as_ref().map(|state| state.round))
-            .sum::<u32>(),
-        1
-    );
+    assert_eq!(persisted.semantic_request_count(), 1);
+    assert_eq!(persisted.repair_campaign().unwrap().current_target, 1);
 
     let reopened_graphs = FileExecutionGraphRepository::new(fixture.project.clone());
     assert_eq!(
@@ -1112,6 +1403,7 @@ impl Fixture {
             repair_policy: ats_features::composition_generate::RepairPolicy::MaxRounds {
                 max_rounds: 3,
             },
+            adjustment: None,
             execution: None,
         };
         Self {

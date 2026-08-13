@@ -1,7 +1,8 @@
 use ats_kernel::{ExecutionNodeId, GamePackId, ItemId};
 use ats_runtime::{
-    ExecutionCommitIntent, ExecutionFailure, ExecutionGraphRecord, ExecutionGraphRepository,
-    ExecutionGraphRepositoryError, ExecutionGraphStatus, ExecutionNodeSpec, ExecutionNodeStatus,
+    ExecutionAdjustment, ExecutionCommitIntent, ExecutionFailure, ExecutionGraphRecord,
+    ExecutionGraphRepository, ExecutionGraphRepositoryError, ExecutionGraphStatus,
+    ExecutionNodeSpec, ExecutionNodeStatus, ExecutionRepairTargetSpec, HashedExecutionPayload,
     RunRepository, RunRepositoryError, hash_json,
 };
 
@@ -11,7 +12,7 @@ use crate::generation_feedback::{
     diagnostic_fingerprint as feedback_fingerprint, generation_feedback_schema,
 };
 use crate::mod_generate_single::{
-    SingleGenerateCompositionProposal, SingleGenerateProposalCheckpoint, SingleRepairRequest,
+    SingleGenerateCompositionProposal, SingleGenerateProposalCheckpoint, SingleRevisionRequest,
 };
 
 const BLUEPRINT_SCHEMA_ID: &str = "feature.composition-generate-blueprint";
@@ -30,6 +31,40 @@ pub struct StagedCompositionGenerateExecution {
     pub result: CompositionGenerateResult,
 }
 
+#[derive(Debug, Clone, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CompositionAdjustmentItem {
+    pub item_id: ItemId,
+    pub definition_hash: Sha256Digest,
+}
+
+pub fn composition_adjustment_items(
+    graph: &ExecutionGraphRecord,
+) -> Result<Vec<CompositionAdjustmentItem>, CompositionGenerateError> {
+    if graph.owner_feature_id() != &CompositionGenerateFeature::id()
+        || !matches!(
+            graph.status(),
+            ExecutionGraphStatus::Paused | ExecutionGraphStatus::Succeeded
+        )
+        || graph.repair_campaign().is_some()
+    {
+        return Ok(Vec::new());
+    }
+    let blueprint: StagedCompositionGenerateBlueprint = graph
+        .blueprint()
+        .payload
+        .decode(&blueprint_schema())
+        .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
+    Ok(blueprint
+        .items
+        .into_iter()
+        .map(|item| CompositionAdjustmentItem {
+            item_id: item.item_id,
+            definition_hash: item.definition_hash,
+        })
+        .collect())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct StagedCompositionGenerateBlueprint {
@@ -41,6 +76,11 @@ struct StagedCompositionGenerateBlueprint {
     graph_digest: Sha256Digest,
     items: Vec<StagedCompositionGenerateItem>,
     finalize_node_id: ExecutionNodeId,
+}
+
+enum CampaignRevision {
+    GeneratedContent(GenerationFeedbackEnvelope),
+    Adjustment(ItemAdjustment),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -160,7 +200,7 @@ impl CompositionGenerateService<'_> {
             request_snapshot_hash: zero_digest()?,
         });
         let blueprint = StagedCompositionGenerateBlueprint {
-            schema_version: 2,
+            schema_version: 3,
             game_pack_id: context.pack.id().clone(),
             game_pack_sha256: context.pack.content_sha256().clone(),
             truth_snapshot_id: context.truth.manifest().snapshot_id().clone(),
@@ -230,6 +270,119 @@ impl CompositionGenerateService<'_> {
         Ok(StagedCompositionGenerateStart { request, graph })
     }
 
+    pub fn prepare_staged_adjustment(
+        &self,
+        mut graph: ExecutionGraphRecord,
+        expected_revision: u64,
+        run_id: RunId,
+        adjustment: ItemAdjustment,
+        context: CompositionGenerateContext<'_>,
+    ) -> Result<StagedCompositionGenerateStart, CompositionGenerateError> {
+        validate_context(&context)?;
+        adjustment.validate()?;
+        if graph.owner_feature_id() != &CompositionGenerateFeature::id()
+            || graph.revision() != expected_revision
+            || !matches!(
+                graph.status(),
+                ExecutionGraphStatus::Paused | ExecutionGraphStatus::Succeeded
+            )
+        {
+            return Err(CompositionGenerateError::AdjustmentRequiresReplan);
+        }
+        let blueprint: StagedCompositionGenerateBlueprint = graph
+            .blueprint()
+            .payload
+            .decode(&blueprint_schema())
+            .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
+        blueprint.validate_identity(&context)?;
+        let item = blueprint
+            .items
+            .iter()
+            .find(|item| item.item_id == adjustment.item_id)
+            .ok_or(CompositionGenerateError::AdjustmentInvalid)?;
+        if item.definition_hash != adjustment.expected_definition_hash {
+            return Err(CompositionGenerateError::AdjustmentStale);
+        }
+        let checkpoint_hash = graph.nodes()[&item.single_node_id]
+            .active_checkpoint
+            .as_ref()
+            .ok_or(CompositionGenerateError::InvalidCheckpoint)?
+            .sha256
+            .clone();
+        let source_run_id = graph
+            .previous_run_id()
+            .cloned()
+            .ok_or(CompositionGenerateError::ExecutionGraphConflict)?;
+        let feedback = VersionedPayload::from_typed(item_adjustment_schema(), &adjustment)?;
+        let runtime_adjustment = ExecutionAdjustment {
+            item_id: adjustment.item_id.clone(),
+            expected_definition_hash: adjustment.expected_definition_hash.clone(),
+            instruction_sha256: adjustment.instruction_sha256.clone(),
+            created_at: adjustment.created_at,
+            feedback: HashedExecutionPayload::new(feedback.clone())
+                .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?,
+        };
+        let adjustment_item_id = adjustment.item_id.clone();
+        let instruction_sha256 = adjustment.instruction_sha256.clone();
+        let mut request = blueprint.request;
+        request.adjustment = Some(adjustment);
+        let target = ExecutionRepairTargetSpec {
+            item_id: adjustment_item_id,
+            node_id: item.single_node_id.clone(),
+            checkpoint_hash,
+            diagnostic_fingerprints: vec![instruction_sha256.clone()],
+            feedback,
+        };
+        match graph.status() {
+            ExecutionGraphStatus::Paused if graph.repair_campaign().is_none() => {
+                graph
+                    .claim_adjustment(
+                        expected_revision,
+                        run_id,
+                        source_run_id.clone(),
+                        instruction_sha256,
+                        target,
+                        runtime_adjustment,
+                        Utc::now(),
+                    )
+                    .map_err(|_| CompositionGenerateError::ExecutionGraphConflict)?;
+                request.execution = Some(CompositionGenerateExecutionRequest::Resume {
+                    execution_graph_id: graph.id().clone(),
+                    expected_revision,
+                    previous_run_id: source_run_id,
+                });
+                Ok(StagedCompositionGenerateStart { request, graph })
+            }
+            ExecutionGraphStatus::Succeeded => {
+                let execution_graph_id = ExecutionGraphId::new();
+                request.execution = Some(CompositionGenerateExecutionRequest::Start {
+                    execution_graph_id: execution_graph_id.clone(),
+                });
+                let request_payload = VersionedPayload::from_typed(
+                    CompositionGenerateFeature::request_schema(),
+                    &request,
+                )?;
+                let derived = graph
+                    .derive_adjustment(
+                        execution_graph_id,
+                        hash_json(&request_payload)
+                            .map_err(|_| CompositionGenerateError::InvalidInput)?,
+                        run_id,
+                        instruction_sha256,
+                        target,
+                        runtime_adjustment,
+                        Utc::now(),
+                    )
+                    .map_err(|_| CompositionGenerateError::AdjustmentRequiresReplan)?;
+                Ok(StagedCompositionGenerateStart {
+                    request,
+                    graph: derived,
+                })
+            }
+            _ => Err(CompositionGenerateError::AdjustmentRequiresReplan),
+        }
+    }
+
     #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
     pub async fn execute_staged<C, I, R, W, S, V, A, B, P, G, RR>(
         &self,
@@ -280,7 +433,12 @@ impl CompositionGenerateService<'_> {
         blueprint.validate(&context, &resolved, &request)?;
         match request.execution.as_ref() {
             Some(CompositionGenerateExecutionRequest::Start { .. })
-                if graph.previous_run_id().is_none() => {}
+                if graph.previous_run_id().is_none() && request.adjustment.is_none() => {}
+            Some(CompositionGenerateExecutionRequest::Start { .. })
+                if request.adjustment.is_some()
+                    && graph.repair_campaign().is_some_and(|campaign| {
+                        campaign.adjustment.is_some() && campaign.targets.len() == 1
+                    }) => {}
             Some(CompositionGenerateExecutionRequest::Resume {
                 previous_run_id, ..
             }) if graph.previous_run_id() == Some(previous_run_id) => {}
@@ -510,7 +668,7 @@ impl CompositionGenerateService<'_> {
                                     )?;
                                     return Err(error);
                                 };
-                                let completed_rounds = completed_feedback_rounds(&graph)?;
+                                let completed_rounds = graph.semantic_request_count();
                                 if !request.repair_policy.permits(completed_rounds) {
                                     pause_running_node_with_code(
                                         &mut graph,
@@ -672,26 +830,39 @@ impl CompositionGenerateService<'_> {
             &finalize_checkpoint_schema(),
         )?;
         if persisted_finalize != finalize_checkpoint {
-            if graph.status() != ExecutionGraphStatus::Running
-                || !graph
+            let checkpoint =
+                VersionedPayload::from_typed(finalize_checkpoint_schema(), &finalize_checkpoint)?;
+            if graph.status() == ExecutionGraphStatus::Repairing
+                && graph.repair_campaign().is_some_and(|campaign| {
+                    usize::try_from(campaign.current_target)
+                        .is_ok_and(|current| current == campaign.targets.len())
+                })
+            {
+                mutate_graph(&mut graph, graphs, |graph| {
+                    graph.replace_checkpoint(
+                        &blueprint.finalize_node_id,
+                        run.id(),
+                        checkpoint,
+                        Utc::now(),
+                    )
+                })?;
+            } else if graph.status() == ExecutionGraphStatus::Running
+                && graph
                     .nodes()
                     .values()
                     .any(|node| node.feedback_state.is_some())
             {
+                mutate_graph(&mut graph, graphs, |graph| {
+                    graph.replace_checkpoint_while_running(
+                        &blueprint.finalize_node_id,
+                        run.id(),
+                        checkpoint,
+                        Utc::now(),
+                    )
+                })?;
+            } else {
                 return Err(CompositionGenerateError::InvalidCheckpoint);
             }
-            mutate_graph(&mut graph, graphs, |graph| {
-                graph.replace_checkpoint_while_running(
-                    &blueprint.finalize_node_id,
-                    run.id(),
-                    VersionedPayload::from_typed(
-                        finalize_checkpoint_schema(),
-                        &finalize_checkpoint,
-                    )
-                    .map_err(|_| ats_runtime::ExecutionGraphError::InvalidMetadata)?,
-                    Utc::now(),
-                )
-            })?;
             persisted_finalize = finalize_checkpoint.clone();
         }
         debug_assert_eq!(persisted_finalize, finalize_checkpoint);
@@ -757,6 +928,34 @@ impl CompositionGenerateService<'_> {
         let mut generated_artifact_files = generated_artifact_files;
         let mut finalize = finalize;
         let (stage, stage_root) = loop {
+            if graph.status() == ExecutionGraphStatus::Repairing
+                && graph.repair_campaign().is_some_and(|campaign| {
+                    usize::try_from(campaign.current_target)
+                        .is_ok_and(|current| current < campaign.targets.len())
+                })
+            {
+                let repaired = self
+                    .repair_rejected_validation(
+                        dependencies.model,
+                        dependencies.resources,
+                        runs,
+                        graphs,
+                        graph,
+                        run.id(),
+                        request,
+                        context,
+                        resolved,
+                        &proposals,
+                        &[],
+                        cancellation,
+                    )
+                    .await?;
+                proposals = repaired.0;
+                generated_writes = repaired.1;
+                generated_artifact_files = repaired.2;
+                finalize = repaired.3;
+                continue;
+            }
             if graph.status() == ExecutionGraphStatus::Running
                 || graph.status() == ExecutionGraphStatus::Repairing
             {
@@ -1044,162 +1243,181 @@ impl CompositionGenerateService<'_> {
             .payload
             .decode(&blueprint_schema())
             .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
-        let Some((item_index, owned_issues)) = repair_owner(current_proposals, issues)? else {
-            pause_validation_graph(graph, graphs, run_id, "validation.not_repairable")?;
-            return Err(CompositionGenerateError::Validation(
-                ValidationError::Rejected(ats_runtime::ValidationReport {
-                    exit_code: 1,
-                    stdout_tail: String::new(),
-                    stderr_tail: String::new(),
-                    issues: issues.to_vec(),
-                }),
-            ));
-        };
-        let item = blueprint
-            .items
-            .get(item_index)
-            .ok_or(CompositionGenerateError::InvalidCheckpoint)?;
-        let repair_rounds = graph
-            .nodes()
-            .values()
-            .filter_map(|node| node.feedback_state.as_ref().map(|state| state.round))
-            .sum::<u32>();
-        if !request.repair_policy.permits(repair_rounds) {
-            pause_validation_graph(graph, graphs, run_id, "validation.repair_limit")?;
-            return Err(CompositionGenerateError::Validation(
-                ValidationError::Rejected(ats_runtime::ValidationReport {
-                    exit_code: 1,
-                    stdout_tail: String::new(),
-                    stderr_tail: String::new(),
-                    issues: issues.to_vec(),
-                }),
-            ));
-        }
-        let fingerprint = diagnostic_fingerprint(&owned_issues)?;
-        let checkpoint_hash = graph.nodes()[&item.single_node_id]
-            .active_checkpoint
-            .as_ref()
-            .ok_or(CompositionGenerateError::InvalidCheckpoint)?
-            .sha256
-            .clone();
-        let node = &graph.nodes()[&item.single_node_id];
-        let persisted_repair_output = node
-            .feedback_state
-            .as_ref()
-            .filter(|state| {
-                state.phase == ats_runtime::ExecutionFeedbackPhase::OutputContract
-                    && state.checkpoint_hash.as_ref() == Some(&checkpoint_hash)
-            })
-            .and_then(|state| {
-                state
-                    .feedback
-                    .payload
-                    .decode::<GenerationFeedbackEnvelope>(&generation_feedback_schema())
-                    .ok()
-            })
-            .filter(|feedback| {
-                feedback.is_valid()
-                    && feedback.mode == GenerationFeedbackMode::ReplaceCompleteRoles
-                    && feedback.validation_issues == owned_issues
-            });
-        if persisted_repair_output.is_none()
-            && node.feedback_state.as_ref().is_some_and(|state| {
-                state.diagnostic_fingerprint == fingerprint
-                    && state.checkpoint_hash.as_ref() == Some(&checkpoint_hash)
-            })
-        {
-            pause_validation_graph(graph, graphs, run_id, "validation.repair_repeated")?;
-            return Err(CompositionGenerateError::Validation(
-                ValidationError::Rejected(ats_runtime::ValidationReport {
-                    exit_code: 1,
-                    stdout_tail: String::new(),
-                    stderr_tail: String::new(),
-                    issues: issues.to_vec(),
-                }),
-            ));
-        }
-        if persisted_repair_output.is_none() {
-            mutate_graph(graph, graphs, |graph| {
-                graph.begin_repair(
-                    &item.single_node_id,
-                    run_id,
-                    fingerprint,
-                    checkpoint_hash.clone(),
-                    VersionedPayload::from_typed(
+        if graph.repair_campaign().is_none() {
+            let Some(targets) = repair_targets(current_proposals, issues)? else {
+                pause_validation_graph(graph, graphs, run_id, "validation.not_repairable")?;
+                return Err(rejected_validation(issues));
+            };
+            if !request
+                .repair_policy
+                .permits(graph.semantic_request_count())
+            {
+                pause_validation_graph(graph, graphs, run_id, "validation.repair_limit")?;
+                return Err(rejected_validation(issues));
+            }
+            let mut specs = Vec::with_capacity(targets.len());
+            for (item_index, owned_issues) in targets {
+                let item = blueprint
+                    .items
+                    .get(item_index)
+                    .ok_or(CompositionGenerateError::InvalidCheckpoint)?;
+                let checkpoint_hash = graph.nodes()[&item.single_node_id]
+                    .active_checkpoint
+                    .as_ref()
+                    .ok_or(CompositionGenerateError::InvalidCheckpoint)?
+                    .sha256
+                    .clone();
+                specs.push(ExecutionRepairTargetSpec {
+                    item_id: item.item_id.clone(),
+                    node_id: item.single_node_id.clone(),
+                    checkpoint_hash,
+                    diagnostic_fingerprints: owned_issues
+                        .iter()
+                        .map(|issue| issue.fingerprint.clone())
+                        .collect(),
+                    feedback: VersionedPayload::from_typed(
                         generation_feedback_schema(),
                         &GenerationFeedbackEnvelope::generated_content(&owned_issues),
-                    )
-                    .map_err(|_| ats_runtime::ExecutionGraphError::InvalidMetadata)?,
+                    )?,
+                });
+            }
+            let validation_fingerprint = diagnostic_fingerprint(issues)?;
+            mutate_graph(graph, graphs, |graph| {
+                graph.begin_repair_campaign(run_id, validation_fingerprint, specs, None, Utc::now())
+            })?;
+        }
+
+        loop {
+            let campaign = graph
+                .repair_campaign()
+                .cloned()
+                .ok_or(CompositionGenerateError::InvalidCheckpoint)?;
+            let target_index = usize::try_from(campaign.current_target)
+                .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
+            for completed in campaign.targets.iter().take(target_index) {
+                let item_index = blueprint
+                    .items
+                    .iter()
+                    .position(|item| item.single_node_id == completed.node_id)
+                    .ok_or(CompositionGenerateError::InvalidCheckpoint)?;
+                let checkpoint = decode_single_checkpoint(
+                    graph,
+                    &blueprint.items[item_index],
+                    &resolved.nodes[item_index],
+                )?;
+                persist_child(runs, &checkpoint.child_run)?;
+            }
+            let Some(target) = campaign.targets.get(target_index) else {
+                break;
+            };
+            if !request
+                .repair_policy
+                .permits(graph.semantic_request_count())
+            {
+                pause_validation_graph(graph, graphs, run_id, "validation.repair_limit")?;
+                return Err(rejected_validation(issues));
+            }
+            let item_index = blueprint
+                .items
+                .iter()
+                .position(|item| {
+                    item.item_id == target.item_id && item.single_node_id == target.node_id
+                })
+                .ok_or(CompositionGenerateError::InvalidCheckpoint)?;
+            let item = &blueprint.items[item_index];
+            let definition = &resolved.nodes[item_index];
+            let revision = if campaign.adjustment.is_some() {
+                let adjustment: ItemAdjustment = target
+                    .feedback
+                    .payload
+                    .decode(&item_adjustment_schema())
+                    .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
+                adjustment.validate()?;
+                if request.adjustment.as_ref() != Some(&adjustment)
+                    || adjustment.item_id != target.item_id
+                    || adjustment.expected_definition_hash
+                        != resolved.nodes[item_index].definition_hash
+                {
+                    return Err(CompositionGenerateError::AdjustmentStale);
+                }
+                CampaignRevision::Adjustment(adjustment)
+            } else {
+                let feedback: GenerationFeedbackEnvelope = target
+                    .feedback
+                    .payload
+                    .decode(&generation_feedback_schema())
+                    .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
+                if !feedback.is_valid()
+                    || feedback.mode != GenerationFeedbackMode::ReplaceCompleteRoles
+                    || feedback.validation_issues.is_empty()
+                {
+                    return Err(CompositionGenerateError::InvalidCheckpoint);
+                }
+                CampaignRevision::GeneratedContent(feedback)
+            };
+            let plan = decode_plan_checkpoint(graph, item, definition)?;
+            let current = decode_single_checkpoint(graph, item, definition)?;
+            let single_request = SingleGenerateRequest {
+                artifact_id: definition.definition.item_id.to_string(),
+                mod_id: request.mod_id.clone(),
+                plan: plan.plan,
+                definition: definition.clone(),
+            };
+            mutate_graph(graph, graphs, |graph| {
+                graph.activate_repair_target(run_id, Utc::now())
+            })?;
+            let (proposal, mut child_run) = self
+                .run_campaign_revision_feedback(
+                    model,
+                    resources,
+                    runs,
+                    graphs,
+                    graph,
+                    run_id,
+                    request,
+                    context,
+                    item,
+                    target.checkpoint_hash.clone(),
+                    &single_request,
+                    &current.proposal.files,
+                    &revision,
+                    cancellation,
+                )
+                .await?;
+            if proposal.checkpoint().files == current.proposal.files {
+                pause_after_unchanged_repair(
+                    runs,
+                    graphs,
+                    graph,
+                    run_id,
+                    &mut child_run,
+                    cancellation,
+                )?;
+                return Err(match &revision {
+                    CampaignRevision::GeneratedContent(feedback) => {
+                        rejected_validation(&feedback.validation_issues)
+                    }
+                    CampaignRevision::Adjustment(_) => CompositionGenerateError::AdjustmentInvalid,
+                });
+            }
+            succeed_child::<SingleGenerateFeature, _>(&mut child_run, &proposal.result)?;
+            let replacement = StagedSingleCheckpoint {
+                proposal: proposal.checkpoint(),
+                child_run,
+            };
+            mutate_graph(graph, graphs, |graph| {
+                graph.complete_repair_target(
+                    &item.single_node_id,
+                    run_id,
+                    VersionedPayload::from_typed(single_checkpoint_schema(), &replacement)
+                        .map_err(|_| ats_runtime::ExecutionGraphError::InvalidMetadata)?,
                     Utc::now(),
                 )
             })?;
-        } else if graph.status() == ExecutionGraphStatus::Validating {
-            mutate_graph(graph, graphs, |graph| {
-                graph.resume_repair(run_id, Utc::now())
-            })?;
-        }
-        let definition = &resolved.nodes[item_index];
-        let plan = decode_plan_checkpoint(graph, item, definition)?;
-        let current = decode_single_checkpoint(graph, item, definition)?;
-        let single_request = SingleGenerateRequest {
-            artifact_id: definition.definition.item_id.to_string(),
-            mod_id: request.mod_id.clone(),
-            plan: plan.plan,
-            definition: definition.clone(),
-        };
-        let (proposal, mut child_run) = self
-            .run_validation_repair_feedback(
-                model,
-                resources,
-                runs,
-                graphs,
-                graph,
-                run_id,
-                request,
-                context,
-                item,
-                checkpoint_hash,
-                &single_request,
-                &current.proposal.files,
-                &owned_issues,
-                cancellation,
-            )
-            .await?;
-        if proposal.checkpoint().files == current.proposal.files {
-            pause_after_unchanged_repair(
-                runs,
-                graphs,
-                graph,
-                run_id,
-                &mut child_run,
-                cancellation,
-            )?;
-            return Err(CompositionGenerateError::Validation(
-                ValidationError::Rejected(ats_runtime::ValidationReport {
-                    exit_code: 1,
-                    stdout_tail: String::new(),
-                    stderr_tail: String::new(),
-                    issues: issues.to_vec(),
-                }),
-            ));
-        }
-        succeed_child::<SingleGenerateFeature, _>(&mut child_run, &proposal.result)?;
-        let replacement = StagedSingleCheckpoint {
-            proposal: proposal.checkpoint(),
-            child_run,
-        };
-        mutate_graph(graph, graphs, |graph| {
-            graph.replace_checkpoint(
-                &item.single_node_id,
-                run_id,
-                VersionedPayload::from_typed(single_checkpoint_schema(), &replacement)
-                    .map_err(|_| ats_runtime::ExecutionGraphError::InvalidMetadata)?,
-                Utc::now(),
-            )
-        })?;
-        if let Err(error) = persist_child(runs, &replacement.child_run) {
-            pause_validation_graph(graph, graphs, run_id, "run.storage_failed")?;
-            return Err(error);
+            if let Err(error) = persist_child(runs, &replacement.child_run) {
+                pause_validation_graph(graph, graphs, run_id, "run.storage_failed")?;
+                return Err(error);
+            }
         }
         let restored = restore_proposals(
             self, resources, request, context, resolved, &blueprint, graph, runs,
@@ -1236,7 +1454,7 @@ impl CompositionGenerateService<'_> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn run_validation_repair_feedback<C, R, RR, G>(
+    async fn run_campaign_revision_feedback<C, R, RR, G>(
         &self,
         model: &C,
         resources: &R,
@@ -1250,7 +1468,7 @@ impl CompositionGenerateService<'_> {
         checkpoint_hash: Sha256Digest,
         single_request: &SingleGenerateRequest,
         current_files: &BTreeMap<String, String>,
-        issues: &[ats_runtime::ValidationIssue],
+        revision: &CampaignRevision,
         cancellation: &CancellationToken,
     ) -> Result<
         (
@@ -1281,26 +1499,47 @@ impl CompositionGenerateService<'_> {
                 })
                 .transpose()
                 .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
-            if output_feedback.as_ref().is_some_and(|feedback| {
-                !feedback.is_valid()
-                    || feedback.mode != GenerationFeedbackMode::ReplaceCompleteRoles
-                    || feedback.validation_issues != issues
-            }) {
+            if output_feedback
+                .as_ref()
+                .is_some_and(|feedback| match revision {
+                    CampaignRevision::GeneratedContent(generated) => {
+                        !feedback.is_valid()
+                            || feedback.mode != GenerationFeedbackMode::ReplaceCompleteRoles
+                            || feedback.validation_issues != generated.validation_issues
+                    }
+                    CampaignRevision::Adjustment(_) => {
+                        !feedback.is_valid()
+                            || feedback.mode != GenerationFeedbackMode::RegenerateCompleteBundle
+                    }
+                })
+            {
                 return Err(CompositionGenerateError::InvalidCheckpoint);
             }
             let mut child_run = running_run::<SingleGenerateFeature, _>(single_request)?;
+            let revision_request = match revision {
+                CampaignRevision::GeneratedContent(generated) => {
+                    SingleRevisionRequest::GeneratedContent {
+                        current_files: current_files.clone(),
+                        issues: generated.validation_issues.clone(),
+                        output_feedback,
+                    }
+                }
+                CampaignRevision::Adjustment(adjustment) => {
+                    SingleRevisionRequest::OperatorAdjustment {
+                        current_files: current_files.clone(),
+                        instruction: adjustment.instruction.clone(),
+                        output_feedback,
+                    }
+                }
+            };
             let generated = self
                 .single
-                .repair_propose(
+                .revision_propose(
                     SingleProposalDependencies { model, resources },
                     &child_run,
                     single_request,
                     &single_context(context),
-                    &SingleRepairRequest {
-                        current_files: current_files.clone(),
-                        issues: issues.to_vec(),
-                        output_feedback,
-                    },
+                    &revision_request,
                     cancellation,
                 )
                 .await;
@@ -1322,15 +1561,20 @@ impl CompositionGenerateService<'_> {
                     };
                     if !request
                         .repair_policy
-                        .permits(completed_feedback_rounds(graph)?)
+                        .permits(graph.semantic_request_count())
                     {
                         pause_validation_graph(graph, graphs, run_id, "model.feedback_exhausted")?;
                         return Err(error.into());
                     }
-                    let envelope = GenerationFeedbackEnvelope::repair_output_contract(
-                        evidence.envelope.output_diagnostics[0].clone(),
-                        issues,
-                    );
+                    let envelope = match revision {
+                        CampaignRevision::GeneratedContent(generated) => {
+                            GenerationFeedbackEnvelope::repair_output_contract(
+                                evidence.envelope.output_diagnostics[0].clone(),
+                                &generated.validation_issues,
+                            )
+                        }
+                        CampaignRevision::Adjustment(_) => evidence.envelope,
+                    };
                     let fingerprint = feedback_fingerprint(&envelope)
                         .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
                     if graph.nodes()[&item.single_node_id]
@@ -1379,7 +1623,7 @@ impl StagedCompositionGenerateBlueprint {
         &self,
         context: &CompositionGenerateContext<'_>,
     ) -> Result<(), CompositionGenerateError> {
-        if self.schema_version != 2
+        if self.schema_version != 3
             || self.game_pack_id != *context.pack.id()
             || self.game_pack_sha256 != *context.pack.content_sha256()
             || self.truth_snapshot_id != *context.truth.manifest().snapshot_id()
@@ -1402,6 +1646,7 @@ impl StagedCompositionGenerateBlueprint {
         self.validate_identity(context)?;
         let mut canonical_request = request.clone();
         canonical_request.execution = None;
+        canonical_request.adjustment = None;
         if canonical_request != self.request
             || self.graph_digest != resolved.graph_digest
             || self.items.len() != resolved.nodes.len()
@@ -1612,10 +1857,12 @@ fn single_context<'a>(context: &'a CompositionGenerateContext<'a>) -> SingleGene
     }
 }
 
-fn repair_owner(
+type RepairTargetIssues = (usize, Vec<ats_runtime::ValidationIssue>);
+
+fn repair_targets(
     proposals: &[SingleGenerateCompositionProposal],
     issues: &[ats_runtime::ValidationIssue],
-) -> Result<Option<(usize, Vec<ats_runtime::ValidationIssue>)>, CompositionGenerateError> {
+) -> Result<Option<Vec<RepairTargetIssues>>, CompositionGenerateError> {
     if issues.is_empty()
         || issues.iter().any(|issue| {
             issue.severity == ats_runtime::ValidationIssueSeverity::Error
@@ -1632,7 +1879,7 @@ fn repair_owner(
     if errors.is_empty() {
         return Ok(None);
     }
-    let mut owner = None;
+    let mut grouped = BTreeMap::<usize, Vec<ats_runtime::ValidationIssue>>::new();
     for issue in errors {
         let Some(path) = issue.relative_path.as_deref() else {
             return Ok(None);
@@ -1648,32 +1895,30 @@ fn repair_owner(
             })
             .map(|(index, _)| index)
             .collect::<Vec<_>>();
-        if matches.len() != 1 || owner.is_some_and(|existing| existing != matches[0]) {
+        if matches.len() != 1 {
             return Ok(None);
         }
-        owner = Some(matches[0]);
+        grouped.entry(matches[0]).or_default().push(issue.clone());
     }
-    let Some(index) = owner else {
+    if grouped.is_empty() {
         return Ok(None);
-    };
-    let owned_paths = proposals[index]
-        .artifact_files
-        .iter()
-        .filter(|file| file.composition_merge.is_none())
-        .map(|file| file.relative_path.as_str())
-        .collect::<BTreeSet<_>>();
-    let owned_issues = issues
-        .iter()
-        .filter(|issue| {
-            issue.severity == ats_runtime::ValidationIssueSeverity::Error
-                && issue
-                    .relative_path
-                    .as_deref()
-                    .is_some_and(|path| owned_paths.contains(path))
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    Ok(Some((index, owned_issues)))
+    }
+    let mut targets = Vec::with_capacity(grouped.len());
+    for (index, mut owned_issues) in grouped {
+        owned_issues.sort_by(|left, right| left.fingerprint.cmp(&right.fingerprint));
+        owned_issues.dedup_by(|left, right| left.fingerprint == right.fingerprint);
+        targets.push((index, owned_issues));
+    }
+    Ok(Some(targets))
+}
+
+fn rejected_validation(issues: &[ats_runtime::ValidationIssue]) -> CompositionGenerateError {
+    CompositionGenerateError::Validation(ValidationError::Rejected(ats_runtime::ValidationReport {
+        exit_code: 1,
+        stdout_tail: String::new(),
+        stderr_tail: String::new(),
+        issues: issues.to_vec(),
+    }))
 }
 
 fn diagnostic_fingerprint(
@@ -1862,17 +2107,6 @@ fn pause_failed_node<G: ExecutionGraphRepository + ?Sized>(
     })
 }
 
-fn completed_feedback_rounds(
-    graph: &ExecutionGraphRecord,
-) -> Result<u32, CompositionGenerateError> {
-    graph
-        .nodes()
-        .values()
-        .filter_map(|node| node.feedback_state.as_ref().map(|state| state.round))
-        .try_fold(0_u32, |total, round| total.checked_add(round))
-        .ok_or(CompositionGenerateError::InvalidCheckpoint)
-}
-
 fn pause_running_node_with_code<G: ExecutionGraphRepository + ?Sized>(
     graph: &mut ExecutionGraphRecord,
     repository: &G,
@@ -1979,7 +2213,11 @@ fn succeed_parent(
 }
 
 fn blueprint_schema() -> SchemaRef {
-    schema_version(BLUEPRINT_SCHEMA_ID, 2)
+    schema_version(BLUEPRINT_SCHEMA_ID, 3)
+}
+
+fn item_adjustment_schema() -> SchemaRef {
+    schema("feature.item-adjustment")
 }
 
 fn plan_checkpoint_schema() -> SchemaRef {
@@ -2216,7 +2454,7 @@ mod tests {
     }
 
     #[test]
-    fn repair_owner_rejects_local_shared_and_ambiguous_diagnostics() {
+    fn repair_targets_rejects_local_shared_and_ambiguous_diagnostics() {
         let proposals = vec![
             proposal("Generated/child.cs", None),
             proposal("Generated/root.cs", None),
@@ -2226,14 +2464,14 @@ mod tests {
             ValidationIssueRepairability::LocalEnvironment,
             '1',
         );
-        assert!(repair_owner(&proposals, &[local]).unwrap().is_none());
+        assert!(repair_targets(&proposals, &[local]).unwrap().is_none());
 
         let shared = vec![proposal(
             "Generated/localization.json",
             Some(CompositionFileMerge::JsonObject),
         )];
         assert!(
-            repair_owner(
+            repair_targets(
                 &shared,
                 &[issue(
                     "Generated/localization.json",
@@ -2250,7 +2488,7 @@ mod tests {
             proposal("Generated/shared.cs", None),
         ];
         assert!(
-            repair_owner(
+            repair_targets(
                 &ambiguous,
                 &[issue(
                     "Generated/shared.cs",
@@ -2274,11 +2512,22 @@ mod tests {
                 '5',
             ),
         ];
-        assert!(repair_owner(&proposals, &cross_owner).unwrap().is_none());
+        let targets = repair_targets(&proposals, &cross_owner).unwrap().unwrap();
+        assert_eq!(targets.len(), 2);
+        assert_eq!(targets[0].0, 0);
+        assert_eq!(
+            targets[0].1[0].fingerprint,
+            Sha256Digest::parse("4".repeat(64)).unwrap()
+        );
+        assert_eq!(targets[1].0, 1);
+        assert_eq!(
+            targets[1].1[0].fingerprint,
+            Sha256Digest::parse("5".repeat(64)).unwrap()
+        );
     }
 
     #[test]
-    fn repair_owner_returns_only_errors_for_one_non_shared_proposal() {
+    fn repair_targets_returns_only_errors_for_one_non_shared_proposal() {
         let proposals = vec![proposal("Generated/child.cs", None)];
         let error = issue(
             "Generated/child.cs",
@@ -2292,11 +2541,12 @@ mod tests {
         );
         warning.severity = ValidationIssueSeverity::Warning;
 
-        let (index, owned) = repair_owner(&proposals, &[error.clone(), warning])
+        let targets = repair_targets(&proposals, &[error.clone(), warning])
             .unwrap()
             .unwrap();
-        assert_eq!(index, 0);
-        assert_eq!(owned, vec![error]);
+        let (index, owned) = &targets[0];
+        assert_eq!(*index, 0);
+        assert_eq!(owned, &vec![error]);
     }
 
     #[test]

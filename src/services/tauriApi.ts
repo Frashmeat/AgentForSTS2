@@ -208,6 +208,18 @@ export function resumeExecutionGraph(
   });
 }
 
+export interface AdjustCompositionItemRequest {
+  executionGraphId: string;
+  expectedRevision: number;
+  itemId: string;
+  expectedDefinitionHash: string;
+  instruction: string;
+}
+
+export function adjustCompositionItem(request: AdjustCompositionItemRequest): Promise<string> {
+  return invokeCommand<string>("adjust_composition_item", { request });
+}
+
 export interface PlanItem extends Record<string, unknown> {
   itemId: string;
   itemType: string;
@@ -315,6 +327,13 @@ export interface CompositionGenerateRequest extends Record<string, unknown> {
   repairPolicy:
     | { kind: "until_passed" }
     | { kind: "max_rounds"; maxRounds: number };
+  adjustment?: {
+    itemId: string;
+    expectedDefinitionHash: string;
+    instruction: string;
+    instructionSha256: string;
+    createdAt: string;
+  } | null;
   execution?:
     | { kind: "start"; executionGraphId: string }
     | {
@@ -372,7 +391,7 @@ export function submitCompositionRetryNode(request: CompositionRetryNodeRequest)
 }
 
 export function submitCompositionGenerate(request: CompositionGenerateRequest): Promise<string> {
-  return submit("composition.generate", "feature.composition-generate-request", request, 4);
+  return submit("composition.generate", "feature.composition-generate-request", request, 5);
 }
 
 export function submitSingleGenerate(request: SingleGenerateRequest): Promise<string> {

@@ -2,6 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import { createHash } from "node:crypto";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -110,6 +111,26 @@ function runNpm(script, env) {
   }
 }
 
+function reserveLoopbackPort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.unref();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        server.close();
+        reject(new Error("failed to allocate an E2E WebDriver port"));
+        return;
+      }
+      server.close((error) => {
+        if (error) reject(error);
+        else resolve(address.port);
+      });
+    });
+  });
+}
+
 function startOpenAiStub(e2eRoot, baseLibPath) {
   const stubPath = path.join(repoRoot, "scripts", "e2e", "openai-stub.mjs");
   return new Promise((resolve, reject) => {
@@ -156,6 +177,7 @@ const sts2Path = configuredPath(
   "knowledge.sts2_dll_path",
 );
 const baseLibPath = await resolvePinnedBaseLib();
+const webdriverPort = await reserveLoopbackPort();
 const e2eRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "ats-gui-e2e-"));
 const configPath = path.join(e2eRoot, "config.json");
 const appDataRoot = path.join(e2eRoot, "app-data");
@@ -212,6 +234,7 @@ try {
     ATS_E2E_STS2_DLL_PATH: sts2Path,
     ATS_E2E_STUB_URL: stub.url,
     ATS_E2E_BASELIB_RELEASE_URL: `${stub.url}/baselib/releases/latest`,
+    TAURI_WEBDRIVER_PORT: String(webdriverPort),
     SPIREFORGE_CONFIG_PATH: configPath,
     SPIREFORGE_APP_DATA_ROOT: appDataRoot,
   };

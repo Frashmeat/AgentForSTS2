@@ -306,6 +306,76 @@ impl Stage2Composition {
         .map_err(|error| error.run_failure())
     }
 
+    pub fn prepare_composition_generate_adjustment(
+        &self,
+        graph: ats_runtime::ExecutionGraphRecord,
+        expected_revision: u64,
+        run_id: ats_runtime::RunId,
+        adjustment: ats_features::composition_generate::ItemAdjustment,
+        project_root: &Path,
+    ) -> Result<StagedCompositionGenerateStart, RunFailure> {
+        let truth = self.current_truth()?;
+        let composition_contributions = self.resolve(
+            &CompositionGenerateFeature::id(),
+            &[CompositionGenerateFeature::contribution_requirement()],
+        )?;
+        let plan_contributions = self.resolve(
+            &ModPlanFeature::id(),
+            &[ModPlanFeature::contribution_requirement()],
+        )?;
+        let single_contributions = self.resolve(
+            &SingleGenerateFeature::id(),
+            &[SingleGenerateFeature::contribution_requirement()],
+        )?;
+        let resource_contributions = self.resolve(
+            &ResourcePrepareFeature::id(),
+            &[ResourcePrepareFeature::contribution_requirement()],
+        )?;
+        let build_contributions = self.resolve(
+            &ProjectBuildFeature::id(),
+            &[ProjectBuildFeature::contribution_requirement()],
+        )?;
+        let package_contributions = self.resolve(
+            &ProjectPackageFeature::id(),
+            &[ProjectPackageFeature::contribution_requirement()],
+        )?;
+        let plan = ModPlanService::built_in()
+            .map_err(|_| failure("feature.recipe_invalid", "composition.generate.plan_recipe"))?;
+        let single = SingleGenerateService::built_in().map_err(|_| {
+            failure(
+                "feature.recipe_invalid",
+                "composition.generate.single_recipe",
+            )
+        })?;
+        CompositionGenerateService::new(
+            &plan,
+            &single,
+            &ProjectBuildService,
+            &ProjectPackageService,
+        )
+        .prepare_staged_adjustment(
+            graph,
+            expected_revision,
+            run_id,
+            adjustment,
+            CompositionGenerateContext {
+                pack: &self.pack,
+                composition_contributions: &composition_contributions,
+                plan_contributions: &plan_contributions,
+                single_contributions: &single_contributions,
+                resource_contributions: &resource_contributions,
+                build_contributions: &build_contributions,
+                package_contributions: &package_contributions,
+                truth: &truth,
+                project_root,
+                project_context: "",
+                custom_instructions: None,
+                model: None,
+            },
+        )
+        .map_err(|error| error.run_failure())
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub async fn execute(
         &self,

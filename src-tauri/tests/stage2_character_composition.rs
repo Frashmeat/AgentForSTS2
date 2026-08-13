@@ -394,6 +394,7 @@ async fn sts2_branded_placeholder_prototype_prepares_resources_and_publishes_one
         repair_policy: ats_features::composition_generate::RepairPolicy::MaxRounds {
             max_rounds: 3,
         },
+        adjustment: None,
         execution: None,
     };
     let run_id = ats_runtime::RunId::new();

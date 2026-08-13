@@ -126,6 +126,13 @@ Item-type branches. The Pack default profile is selected initially; Custom start
   calls generic `resume_execution_graph`; the backend dispatches by graph owner, while React routes
   the returned Run to Plan or Generate monitoring by its validated `featureId`. React never decodes
   proposal checkpoints, infers dependencies or resubmits the root request as a retry.
+- Ordinary generation UI maps persisted Graph state to generating, checking, auto-adjusting,
+  needs-attention or preview-ready product states. Internal node/role/revision/compiler/feedback
+  counters and repair-policy controls are not rendered.
+- A preview adjustment input belongs to exactly one `adjustableItems` entry. React submits only the
+  selected Graph revision, `itemId`, `definitionHash` and bounded instruction. A succeeded result
+  switches monitoring to the newly derived Graph/Run and never represents the source Artifact as
+  overwritten.
 - Planning likewise retains and renders the persisted `composition.plan` terminal Run. Safe v1
   failure details may add reason/expected/actual/Item/slot context; malformed or unknown details
   fall back to code/stage and never cause raw Provider output to be rendered.

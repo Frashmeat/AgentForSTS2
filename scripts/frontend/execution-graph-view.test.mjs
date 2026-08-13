@@ -32,6 +32,7 @@ const base = {
   canPause: true,
   canResume: false,
   canCancel: true,
+  adjustableItems: [{ itemId: "fixture-child", definitionHash: "a".repeat(64) }],
 };
 
 test("ExecutionGraphView accepts only the closed feedback phase wire", () => {
@@ -44,4 +45,5 @@ test("ExecutionGraphView accepts only the closed feedback phase wire", () => {
   assert.equal(isExecutionGraphView({ ...base, feedbackPhase: "provider_retry" }), false);
   const { feedbackPhase: _, ...missing } = base;
   assert.equal(isExecutionGraphView(missing), false);
+  assert.equal(isExecutionGraphView({ ...base, adjustableItems: [{ itemId: "fixture", definitionHash: "bad" }] }), false);
 });
