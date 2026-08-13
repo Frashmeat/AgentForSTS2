@@ -1,10 +1,12 @@
 # Game Pack Stage 1 职责清单与迁移设计
 
+> 归档说明：本文记录已完成的 Stage 1 迁移基线，仅供追溯，不代表当前任务状态。
+>
 > 状态：已完成
 >
 > 对应任务：`.trellis/tasks/archive/2026-07/07-29-game-pack-stage1`
 >
-> 决策依据：[`通用 Mod 流水线与 Game Pack 边界`](./通用Mod流水线与Game-Pack边界.md)
+> 决策依据：[`通用 Mod 流水线与 Game Pack 边界`](../../03-当前方案/通用Mod流水线与Game-Pack边界.md)
 
 ## 1. 结论
 
