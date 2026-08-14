@@ -1125,6 +1125,11 @@ item.000.plan -> item.000.single -> item.001.plan -> item.001.single -> ...
   current complete role files. Single reuses the original Pack/Truth/definition/resource/output
   contracts; a valid replacement CAS-replaces only that node's checkpoint and marks the target
   completed. Other checkpoint hashes must remain byte-identical.
+- A completed target can make the persisted `composition.finalize` checkpoint older than the
+  current Item checkpoints while the campaign still has pending targets. Resume reconstructs the
+  closure from every current checkpoint and CAS-replaces finalize before continuing
+  `current_target`. This is local reconciliation: it consumes no semantic request, never replays a
+  completed target, and must not be classified as `composition.execution.invalid`.
 - After the final target completes, Feature discards the campaign diagnostics, rebuilds finalize and
   runs the complete registered validator. A new rejection compiles a new campaign from current
   checkpoints; stale issues are never reused. Crash/Resume continues at `current_target` without
@@ -1187,7 +1192,8 @@ Blueprint v2.
 - Good: a user adjusts Card B using its current definition hash. Only Card B receives one model
   request; Card A and Character checkpoint hashes remain unchanged; whole-closure validation passes.
 - Base: a campaign crashes after target two of five. Resume creates a new parent Run, retains the
-  first two completed target/checkpoint identities and starts with target three.
+  first two completed target/checkpoint identities, reconciles finalize locally and starts with
+  target three.
 - Base: a two-Item closure completes four model nodes, one local finalize, one validation, one Build,
   one Package, one project transaction and one composition Artifact.
 - Bad: restart `composition.generate` from the root request after one node fails, store a complete
@@ -1215,8 +1221,9 @@ registered-validation repair success, every feedback stop condition, feedback/re
 absence of `commit_prepared` before validation success, one final publication path, succeeded
 reconciliation with zero model requests, claim CAS, Pause/Cancel and no staging/transaction residue.
 Also assert multi-owner grouping and stable dependency order, one active campaign target, completed-
-target crash recovery, graph-total budget across targets, stale adjustment rejection before model
-work, one-Item adjustment isolation, and full validation after every campaign/adjustment.
+target crash recovery with local finalize reconciliation, remaining-target request count without
+replay, graph-total budget across targets, stale adjustment rejection before model work, one-Item
+adjustment isolation, and full validation after every campaign/adjustment.
 The GUI E2E success case must assert that one repairable invalid Single creates one failed terminal
 child Run and one persisted `output_contract` feedback state, then succeeds the same parent Run and
 graph without a user Resume. A separate no-progress/exhaustion case owns the Paused/Resume contract.

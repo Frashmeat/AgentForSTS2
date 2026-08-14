@@ -173,6 +173,9 @@ Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-sp
   ambiguous, local or non-repairable issue rejects the entire campaign. One target replacement must
   leave every other checkpoint hash unchanged; campaign completion always reruns whole-closure
   validation and recompiles diagnostics from scratch.
+- If a parent Run stops after one or more targets complete, Resume must reconcile the local finalize
+  checkpoint from the current Item checkpoints before continuing the cursor. Reconciliation makes
+  no model request, does not replay completed targets and cannot weaken merge or restore checks.
 - A generated-result adjustment is an operation of `composition.generate`, not Feature 13. The
   request binds `itemId + expectedDefinitionHash`, stores only a bounded/hashable instruction
   envelope, replaces one complete Item role set and reruns whole-closure validation. Stale or
@@ -435,7 +438,7 @@ to a normalized directory below the staged project.
 | --- | --- |
 | Preflight | Resolve and validate the complete `ResolvedItemGraph` before Run creation and repeat it inside the Feature before model or project work |
 | Node execution | ExecutionGraph stores a strict serial `Plan -> Single` pair per sorted Item and one local finalize node; succeeded normalized checkpoints and exact terminal child Runs survive parent failure/restart |
-| Resume | A new parent Run claims the same graph and restores successful Single proposals from typed checkpoints plus immutable Resources; it does not call the model for those nodes |
+| Resume | A new parent Run claims the same graph, restores successful Single proposals from typed checkpoints plus immutable Resources, locally reconciles a stale finalize checkpoint, and calls the model only for the current unfinished target |
 | Staging | Copy one bounded, non-symlink project worktree below `.ats/composition-staging/<parentRunId>` and exclude mutable evidence/build roots |
 | Validation | Apply every proposed write to the isolated copy, validate once, then Build once with a Pack-declared isolated output property |
 | Package | Prepare one ZIP inside the isolated copy; its child result remains `composition_staged` |

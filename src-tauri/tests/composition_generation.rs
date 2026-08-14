@@ -123,46 +123,6 @@ impl ValidationRunner for FixtureValidation {
     }
 }
 
-struct RepairOnceValidation {
-    calls: AtomicUsize,
-}
-
-#[async_trait]
-impl ValidationRunner for RepairOnceValidation {
-    async fn validate(
-        &self,
-        _: ValidationRequest,
-        _: &CancellationToken,
-    ) -> Result<ValidationReport, ValidationError> {
-        if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
-            let issue = ValidationIssue {
-                validator_id: "code.dotnet-validate".into(),
-                code: "CS0246".into(),
-                severity: ValidationIssueSeverity::Error,
-                relative_path: Some("Generated/fixture-child.cs".into()),
-                line: Some(1),
-                column: Some(1),
-                message: "The type 'ImaginaryType' could not be found.".into(),
-                symbol: Some("ImaginaryType".into()),
-                repairability: ValidationIssueRepairability::GeneratedContent,
-                fingerprint: Sha256Digest::parse("d".repeat(64)).unwrap(),
-            };
-            return Err(ValidationError::Rejected(ValidationReport {
-                exit_code: 1,
-                stdout_tail: String::new(),
-                stderr_tail: String::new(),
-                issues: vec![issue],
-            }));
-        }
-        Ok(ValidationReport {
-            exit_code: 0,
-            stdout_tail: String::new(),
-            stderr_tail: String::new(),
-            issues: Vec::new(),
-        })
-    }
-}
-
 struct MultiItemRepairOnceValidation {
     calls: AtomicUsize,
 }
@@ -1089,7 +1049,7 @@ async fn staged_validation_repairs_multiple_items_serially_then_revalidates_the_
 }
 
 #[tokio::test]
-async fn repaired_single_checkpoint_resumes_before_finalize_without_another_model_request() {
+async fn partially_completed_multi_item_repair_resumes_before_finalize_without_replay() {
     let fixture = Fixture::new();
     let resolver = ContributionResolver::new([
         PrimitiveId::parse("code.fixture-validate").unwrap(),
@@ -1181,7 +1141,7 @@ async fn repaired_single_checkpoint_resumes_before_finalize_without_another_mode
         ])),
         requests: AtomicUsize::new(0),
     };
-    let validator = RepairOnceValidation {
+    let validator = MultiItemRepairOnceValidation {
         calls: AtomicUsize::new(0),
     };
     let interrupted = service
@@ -1227,7 +1187,9 @@ async fn repaired_single_checkpoint_resumes_before_finalize_without_another_mode
         .map(|checkpoint| checkpoint.sha256.clone())
         .unwrap();
     assert_eq!(persisted.semantic_request_count(), 1);
-    assert_eq!(persisted.repair_campaign().unwrap().current_target, 1);
+    let campaign = persisted.repair_campaign().unwrap();
+    assert_eq!(campaign.current_target, 1);
+    assert_eq!(campaign.targets.len(), 2);
 
     let reopened_graphs = FileExecutionGraphRepository::new(fixture.project.clone());
     assert_eq!(
@@ -1256,14 +1218,14 @@ async fn repaired_single_checkpoint_resumes_before_finalize_without_another_mode
     second_run
         .apply_transition(RunTransition::Start, Utc::now())
         .unwrap();
-    let no_model = QueueModel {
-        responses: Mutex::new(VecDeque::new()),
+    let remaining_model = QueueModel {
+        responses: Mutex::new(VecDeque::from([repaired_bundle_response("root")])),
         requests: AtomicUsize::new(0),
     };
     let execution = service
         .execute_staged(
             CompositionGenerateDependencies {
-                model: &no_model,
+                model: &remaining_model,
                 items: &fixture.items,
                 resources: &fixture.resources,
                 writer: &FileProjectWriter,
@@ -1284,7 +1246,7 @@ async fn repaired_single_checkpoint_resumes_before_finalize_without_another_mode
         )
         .await
         .unwrap();
-    assert_eq!(no_model.requests.load(Ordering::SeqCst), 0);
+    assert_eq!(remaining_model.requests.load(Ordering::SeqCst), 1);
     assert_eq!(validator.calls.load(Ordering::SeqCst), 2);
     assert_eq!(second_run.status(), RunStatus::Succeeded);
     let succeeded = reopened_graphs

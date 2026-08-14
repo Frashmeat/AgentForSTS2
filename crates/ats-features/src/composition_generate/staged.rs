@@ -881,12 +881,8 @@ impl CompositionGenerateService<'_> {
         if persisted_finalize != finalize_checkpoint {
             let checkpoint =
                 VersionedPayload::from_typed(finalize_checkpoint_schema(), &finalize_checkpoint)?;
-            if graph.status() == ExecutionGraphStatus::Repairing
-                && graph.repair_campaign().is_some_and(|campaign| {
-                    usize::try_from(campaign.current_target)
-                        .is_ok_and(|current| current == campaign.targets.len())
-                })
-            {
+            if graph.status() == ExecutionGraphStatus::Repairing {
+                // A resumed campaign may contain completed targets newer than finalize.
                 mutate_graph(&mut graph, graphs, |graph| {
                     graph.replace_checkpoint(
                         &blueprint.finalize_node_id,
