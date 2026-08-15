@@ -28,8 +28,6 @@ pub fn built_in_feature_contracts() -> Vec<FeatureContract> {
             "mod.plan.guidance",
             "mod.generate.single",
             "resource.prepare.specs",
-            "project.build.recipe",
-            "project.package.layout",
         ]),
         contract::<ResourcePrepareFeature>(&["resource.prepare.specs"]),
         contract::<SingleGenerateFeature>(&["mod.generate.single", "resource.prepare.specs"]),

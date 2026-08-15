@@ -2,7 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use ats_game_context::{
-    ContributionResolverError, LoadedGamePack, VerifiedContributionSet, VerifiedTruthSnapshot,
+    ContributionResolverError, GamePipelineRegistry, LoadedGamePack, PipelineRegistryError,
+    PipelineSelection, VerifiedContributionSet, VerifiedTruthSnapshot,
 };
 use ats_kernel::{
     ContributionId, ExecutionGraphId, FailureCode, FeatureId, SchemaId, SchemaRef, SchemaVersion,
@@ -59,15 +60,15 @@ impl FeatureSpec for CompositionGenerateFeature {
     }
 
     fn request_schema() -> SchemaRef {
-        schema_version("feature.composition-generate-request", 5)
+        schema_version("feature.composition-generate-request", 6)
     }
 
     fn result_schema() -> SchemaRef {
-        schema_version("feature.composition-generate-result", 2)
+        schema_version("feature.composition-generate-result", 3)
     }
 
     fn artifact_extension_schema() -> SchemaRef {
-        schema_version("feature.composition-generate-artifact-extension", 2)
+        schema_version("feature.composition-generate-artifact-extension", 3)
     }
 }
 
@@ -76,7 +77,7 @@ impl CompositionGenerateFeature {
     pub fn contribution_requirement() -> ats_game_context::ContributionRequirement {
         ats_game_context::ContributionRequirement {
             slot_id: generation_slot(),
-            schema: schema("pack.composition-generate"),
+            schema: schema_version("pack.composition-generate", 2),
         }
     }
 }
@@ -89,7 +90,8 @@ pub struct CompositionGenerateRequest {
     pub root: StoredItemDefinition,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub draft: Option<CompositionDraftRef>,
-    pub package: ProjectPackageRequest,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package: Option<ProjectPackageRequest>,
     pub repair_policy: RepairPolicy,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub adjustment: Option<ItemAdjustment>,
@@ -208,10 +210,14 @@ pub struct CompositionGenerateResult {
     pub node_count: u32,
     pub generated_file_count: u32,
     pub items: Vec<CompositionItemRunResult>,
-    pub build_run_id: RunId,
-    pub build: ProjectBuildResult,
-    pub package_run_id: RunId,
-    pub package: ProjectPackageResult,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build_run_id: Option<RunId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build: Option<ProjectBuildResult>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package_run_id: Option<RunId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package: Option<ProjectPackageResult>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_graph_id: Option<ExecutionGraphId>,
 }
@@ -229,8 +235,10 @@ pub struct CompositionGenerateArtifactExtension {
     pub node_count: u32,
     pub generated_file_count: u32,
     pub child_run_ids: Vec<RunId>,
-    pub package_output_relative_path: String,
-    pub package_report: ats_runtime::PackageReport,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package_output_relative_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package_report: Option<ats_runtime::PackageReport>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_graph_id: Option<ExecutionGraphId>,
 }
@@ -238,7 +246,7 @@ pub struct CompositionGenerateArtifactExtension {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CompositionGenerateContribution {
-    compose: Vec<FeatureId>,
+    pipeline: PipelineSelection,
 }
 
 #[derive(Debug, Serialize)]
@@ -254,8 +262,8 @@ pub struct CompositionGenerateContext<'a> {
     pub plan_contributions: &'a VerifiedContributionSet,
     pub single_contributions: &'a VerifiedContributionSet,
     pub resource_contributions: &'a VerifiedContributionSet,
-    pub build_contributions: &'a VerifiedContributionSet,
-    pub package_contributions: &'a VerifiedContributionSet,
+    pub build_contributions: Option<&'a VerifiedContributionSet>,
+    pub package_contributions: Option<&'a VerifiedContributionSet>,
     pub truth: &'a VerifiedTruthSnapshot,
     pub project_root: &'a Path,
     pub project_context: &'a str,
@@ -291,6 +299,7 @@ pub struct CompositionGenerateService<'a> {
     single: &'a SingleGenerateService,
     build: &'a ProjectBuildService,
     package: &'a ProjectPackageService,
+    pipelines: &'a GamePipelineRegistry,
 }
 
 impl<'a> CompositionGenerateService<'a> {
@@ -300,31 +309,14 @@ impl<'a> CompositionGenerateService<'a> {
         single: &'a SingleGenerateService,
         build: &'a ProjectBuildService,
         package: &'a ProjectPackageService,
+        pipelines: &'a GamePipelineRegistry,
     ) -> Self {
         Self {
             plan,
             single,
             build,
             package,
-        }
-    }
-}
-
-impl CompositionGenerateContribution {
-    fn validate(&self) -> Result<(), CompositionGenerateError> {
-        let actual = self.compose.iter().cloned().collect::<BTreeSet<_>>();
-        let expected = [
-            ModPlanFeature::id(),
-            SingleGenerateFeature::id(),
-            ProjectBuildFeature::id(),
-            ProjectPackageFeature::id(),
-        ]
-        .into_iter()
-        .collect::<BTreeSet<_>>();
-        if self.compose.len() != expected.len() || actual != expected {
-            Err(CompositionGenerateError::InvalidContribution)
-        } else {
-            Ok(())
+            pipelines,
         }
     }
 }
@@ -370,6 +362,8 @@ pub enum CompositionGenerateError {
     #[error(transparent)]
     Contribution(#[from] ContributionResolverError),
     #[error(transparent)]
+    Pipeline(#[from] PipelineRegistryError),
+    #[error(transparent)]
     Plan(#[from] ModPlanError),
     #[error(transparent)]
     Single(#[from] SingleGenerateError),
@@ -403,6 +397,7 @@ impl CompositionGenerateError {
             Self::InvalidContribution | Self::Contribution(_) => {
                 ("pack.contribution_invalid", "composition.generate.pack")
             }
+            Self::Pipeline(_) => ("game.pipeline.invalid", "composition.generate.pipeline"),
             Self::ValidationPrimitiveMismatch => (
                 "composition.generate.validation_mismatch",
                 "composition.generate.propose",
@@ -647,18 +642,18 @@ fn composition_artifact_request(
             published_relative_path: Some(file.relative_path.clone()),
         });
     }
-    if !paths.insert(request.package.output_relative_path.clone()) {
-        return Err(CompositionGenerateError::ProjectWrite(
-            ProjectWriteError::DuplicatePath,
-        ));
+    if let Some(package) = &request.package {
+        if !paths.insert(package.output_relative_path.clone()) {
+            return Err(CompositionGenerateError::ProjectWrite(
+                ProjectWriteError::DuplicatePath,
+            ));
+        }
+        files.push(ArtifactFileInput {
+            role: "package.zip".into(),
+            source_path: context.project_root.join(&package.output_relative_path),
+            published_relative_path: Some(package.output_relative_path.clone()),
+        });
     }
-    files.push(ArtifactFileInput {
-        role: "package.zip".into(),
-        source_path: context
-            .project_root
-            .join(&request.package.output_relative_path),
-        published_relative_path: Some(request.package.output_relative_path.clone()),
-    });
     Ok(ArtifactPublishRequest {
         artifact_id: request.artifact_id.clone(),
         artifact_kind: "composition".into(),
@@ -717,13 +712,22 @@ fn validate_context(
             context.resource_contributions,
             crate::resource_prepare::ResourcePrepareFeature::id(),
         ),
-        (context.build_contributions, ProjectBuildFeature::id()),
-        (context.package_contributions, ProjectPackageFeature::id()),
     ];
     if expected.iter().any(|(contributions, feature_id)| {
         contributions.feature_id() != feature_id
             || contributions.game_pack_id() != context.pack.id()
             || contributions.game_pack_sha256() != context.pack.content_sha256()
+    }) || [
+        (context.build_contributions, ProjectBuildFeature::id()),
+        (context.package_contributions, ProjectPackageFeature::id()),
+    ]
+    .into_iter()
+    .any(|(contributions, feature_id)| {
+        contributions.is_some_and(|contributions| {
+            contributions.feature_id() != &feature_id
+                || contributions.game_pack_id() != context.pack.id()
+                || contributions.game_pack_sha256() != context.pack.content_sha256()
+        })
     }) || context.truth.manifest().game_pack_id() != context.pack.id()
         || context.truth.manifest().game_pack_sha256() != context.pack.content_sha256()
     {
@@ -736,8 +740,9 @@ fn validate_context(
 fn validate_request(request: &CompositionGenerateRequest) -> Result<(), CompositionGenerateError> {
     if !valid_segment(&request.artifact_id)
         || !valid_segment(&request.mod_id)
-        || request.package.artifact_id != request.artifact_id
-        || request.package.mod_id != request.mod_id
+        || request.package.as_ref().is_some_and(|package| {
+            package.artifact_id != request.artifact_id || package.mod_id != request.mod_id
+        })
         || request.root.validate().is_err()
         || request.root.definition.composition_profile.is_none()
         || request

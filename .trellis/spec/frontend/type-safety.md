@@ -92,8 +92,8 @@ The only interpreted payload fields are `reasonCode`, `expectedCount`, `actualCo
 are 1-128 character qualified identifiers; counts are integers in `0..=u32::MAX`. Expected/actual
 are displayed only as a valid pair. Every other field is ignored, never stringified into the UI.
 
-Composition generation submits request schema v5 with an exact `StoredItemDefinition`, optional
-Draft ref, nested Package request, immutable `repairPolicy` and optional backend-authored tagged
+Composition generation submits request schema v6 with an exact `StoredItemDefinition`, optional
+Draft ref, optional nested Package request, immutable `repairPolicy` and optional backend-authored tagged
 `execution` / `adjustment`. Ordinary React always submits the internal `{kind:"until_passed"}`
 policy and does not expose repair-policy or semantic-budget controls. The absolute 20-request
 graph-total safety ceiling still applies. The only

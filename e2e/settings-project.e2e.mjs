@@ -106,6 +106,8 @@ const waitForCompositionGraph = async (
   let result = null;
   await browser.waitUntil(
     async () => browser.execute((expectedStatus, expectedGraphId, oldRunId, expectedRunStatus) => {
+      const error = document.querySelector('[data-testid="composition-error"]');
+      if (error?.textContent?.trim()) return { error: error.textContent.trim() };
       const element = document.querySelector('[data-testid="composition-execution-graph"]');
       if (!element || element.getAttribute("data-execution-status") !== expectedStatus) return null;
       const currentGraphId = element.getAttribute("data-execution-graph-id");
@@ -123,6 +125,7 @@ const waitForCompositionGraph = async (
         totalNodes: Number(element.getAttribute("data-total-nodes")),
       };
     }, status, graphId, previousRunId, runStatus).then((value) => {
+      if (value?.error) throw new Error(`Composition submission failed: ${value.error}`);
       result = value;
       return Boolean(value?.graphId && value?.runId);
     }),

@@ -26,6 +26,7 @@ tauri-build = { version = "2", features = [] }
 ats-adapters = { path = "../crates/ats-adapters" }
 ats-features = { path = "../crates/ats-features" }
 ats-game-context = { path = "../crates/ats-game-context" }
+ats-game-sts2 = { path = "../crates/ats-game-sts2" }
 ats-kernel = { path = "../crates/ats-kernel" }
 ats-runtime = { path = "../crates/ats-runtime" }
 ats-workspace = { path = "../crates/ats-workspace" }

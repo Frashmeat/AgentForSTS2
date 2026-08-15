@@ -4,6 +4,7 @@ mod asset;
 mod contribution;
 mod item;
 mod pack;
+mod pipeline;
 mod template;
 mod truth;
 
@@ -23,6 +24,13 @@ pub use item::{
 pub use pack::{
     GAME_PACK_SCHEMA_VERSION, GamePackLoadError, GamePackLoader, GamePackRegistry,
     GamePackRegistryError, LoadedGamePack, PackContribution,
+};
+pub use pipeline::{
+    GamePipelineProvider, GamePipelineRegistry, PipelineCheckpointPolicy, PipelineGraphError,
+    PipelineNode, PipelineNodePhase, PipelineNodeScope, PipelinePrimitiveBinding,
+    PipelineProviderError, PipelineProviderIdentity, PipelinePublishBarrier, PipelineRegistryError,
+    PipelineResolveRequest, PipelineRetryClass, PipelineSelection, PipelineValueContract,
+    PipelineWorkItem, ResolvedPipelineGraph,
 };
 pub use template::{ProjectTemplateError, built_in_project_template};
 pub use truth::{

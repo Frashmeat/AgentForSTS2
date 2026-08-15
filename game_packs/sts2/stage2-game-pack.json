@@ -999,14 +999,12 @@
     {
       "slotId": "composition.generate",
       "featureId": "composition.generate",
-      "schema": { "id": "pack.composition-generate", "version": 1 },
+      "schema": { "id": "pack.composition-generate", "version": 2 },
       "payload": {
-        "compose": [
-          "mod.plan",
-          "mod.generate.single",
-          "project.build",
-          "project.package"
-        ]
+        "pipeline": {
+          "provider": { "id": "game.sts2", "version": 1 },
+          "profileId": "sts2.composition-generate"
+        }
       }
     },
     {

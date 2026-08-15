@@ -6,7 +6,7 @@
 >
 > 权威规则：协作与文档治理以仓库根目录 `PROJECT_SPEC.md` 为准。
 >
-> 最后更新：2026-08-13
+> 最后更新：2026-08-15
 
 ## 1. 阅读顺序
 
@@ -30,6 +30,7 @@
 | [`可恢复分阶段 Mod 生成`](./03-当前方案/2026-08-10-可恢复分阶段Mod生成架构方案.md) | ExecutionGraph、checkpoint、claim、resume、commit 和控制语义 | 逐次 E2E 记录 |
 | [`统一生成反馈闭环`](./03-当前方案/2026-08-12-统一生成反馈闭环架构方案.md) | strict output、typed diagnosis、semantic feedback、统一 repair controller 和安全停止语义 | 特定模型兼容补丁或当前已实现事实 |
 | [`批次生成自动修复与单项调整`](./03-当前方案/2026-08-13-批次生成自动修复与单项调整架构方案.md) | 多 Item 自动技术修复、简化用户状态和生成后单 Item 调整边界 | 当前代码已实现事实或面向用户的技术诊断控制台 |
+| [`通用执行内核、Game Pipeline Provider 与 Game Pack 边界`](./03-当前方案/通用Mod流水线与Game-Pack边界.md) | 不同游戏如何复用可靠性内核并保留各自生成/构建链路 | 当前已经实现的 Provider 代码合同 |
 
 ## 3. 稳定合同
 
@@ -49,7 +50,7 @@
 
 | 文档 | 定位 |
 | --- | --- |
-| [`通用 Mod 流水线与 Game Pack 边界`](./03-当前方案/通用Mod流水线与Game-Pack边界.md) | 通用流水线和游戏差异的长期边界 |
+| [`通用执行内核、Game Pipeline Provider 与 Game Pack 边界`](./03-当前方案/通用Mod流水线与Game-Pack边界.md) | Core、Pipeline Provider、Game Adapter 与 Pack 的长期边界；Provider foundation 与机器门禁已完成，等待父任务新 candidate 和真实游戏验收 |
 
 已完成的阶段方案已移入归档：
 

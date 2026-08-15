@@ -114,6 +114,8 @@ qualified_id!(SchemaId, "schema ID");
 qualified_id!(FailureCode, "failure code");
 qualified_id!(ResourceId, "resource ID");
 qualified_id!(RecipeId, "recipe ID");
+qualified_id!(PipelineProviderId, "pipeline provider ID");
+qualified_id!(PipelineProfileId, "pipeline profile ID");
 
 macro_rules! slug_id {
     ($name:ident, $kind:literal, $max_len:literal) => {

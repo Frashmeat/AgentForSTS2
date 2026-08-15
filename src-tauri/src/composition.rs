@@ -39,11 +39,12 @@ use ats_features::resource_prepare::{
 };
 use ats_features::{FeatureRegistry, built_in_feature_registry};
 use ats_game_context::{
-    ContributionRequirement, ContributionResolver, EvidenceQuery, GamePackLoader, LoadedGamePack,
-    TruthSnapshotRepository, VerifiedContributionSet, VerifiedTruthSnapshot,
-    built_in_game_pack_asset,
+    ContributionRequirement, ContributionResolver, EvidenceQuery, GamePackLoader,
+    GamePipelineRegistry, LoadedGamePack, TruthSnapshotRepository, VerifiedContributionSet,
+    VerifiedTruthSnapshot, built_in_game_pack_asset,
 };
-use ats_kernel::{FailureCode, FeatureId, PrimitiveId};
+use ats_game_sts2::Sts2PipelineProvider;
+use ats_kernel::{FailureCode, FeatureId, PrimitiveId, SchemaVersion};
 use ats_runtime::{
     CancellationToken, MediaError, ModelClient, RunFailure, RunRecord, RunRepository, RunStatus,
     RunTransition, VersionedPayload,
@@ -59,6 +60,7 @@ pub struct Stage2Composition {
     registry: FeatureRegistry,
     runtime_root: PathBuf,
     model_queue: Arc<ModelRequestQueue>,
+    pipelines: GamePipelineRegistry,
 }
 
 impl Stage2Composition {
@@ -76,12 +78,33 @@ impl Stage2Composition {
             .map(|id| PrimitiveId::parse(id).expect("built-in Primitive ID is valid")),
         );
         let registry = built_in_feature_registry().map_err(|_| ())?;
+        let pipeline_primitives = [
+            "feature.mod-plan",
+            "feature.mod-generate-single",
+            "feature.composition-finalize",
+            "feature.project-build",
+            "feature.project-package",
+            "code.dotnet-validate",
+            "storage.atomic-publish",
+        ]
+        .into_iter()
+        .map(|id| {
+            (
+                PrimitiveId::parse(id).expect("built-in pipeline Primitive ID is valid"),
+                SchemaVersion::new(1).expect("built-in pipeline version is valid"),
+            )
+        });
+        let mut pipelines = GamePipelineRegistry::new(pipeline_primitives).map_err(|_| ())?;
+        pipelines
+            .register(Sts2PipelineProvider::new())
+            .map_err(|_| ())?;
         Ok(Self {
             pack,
             contributions,
             registry,
             runtime_root,
             model_queue: Arc::new(ModelRequestQueue::new()),
+            pipelines,
         })
     }
 
@@ -103,6 +126,18 @@ impl Stage2Composition {
         self.contributions
             .resolve(&self.pack, feature_id, requirements)
             .map_err(|_| failure("pack.contribution_invalid", "feature.contribution"))
+    }
+
+    fn resolve_optional(
+        &self,
+        feature_id: &FeatureId,
+        requirement: ContributionRequirement,
+    ) -> Result<Option<VerifiedContributionSet>, RunFailure> {
+        if self.pack.has_contribution(&requirement.slot_id) {
+            self.resolve(feature_id, &[requirement]).map(Some)
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn current_truth(&self) -> Result<VerifiedTruthSnapshot, RunFailure> {
@@ -193,13 +228,13 @@ impl Stage2Composition {
             &ResourcePrepareFeature::id(),
             &[ResourcePrepareFeature::contribution_requirement()],
         )?;
-        let build_contributions = self.resolve(
+        let build_contributions = self.resolve_optional(
             &ProjectBuildFeature::id(),
-            &[ProjectBuildFeature::contribution_requirement()],
+            ProjectBuildFeature::contribution_requirement(),
         )?;
-        let package_contributions = self.resolve(
+        let package_contributions = self.resolve_optional(
             &ProjectPackageFeature::id(),
-            &[ProjectPackageFeature::contribution_requirement()],
+            ProjectPackageFeature::contribution_requirement(),
         )?;
         let plan = ModPlanService::built_in()
             .map_err(|_| failure("feature.recipe_invalid", "composition.generate.plan_recipe"))?;
@@ -214,6 +249,7 @@ impl Stage2Composition {
             &single,
             &ProjectBuildService,
             &ProjectPackageService,
+            &self.pipelines,
         )
         .prepare_staged_start(
             request,
@@ -223,8 +259,8 @@ impl Stage2Composition {
                 plan_contributions: &plan_contributions,
                 single_contributions: &single_contributions,
                 resource_contributions: &resource_contributions,
-                build_contributions: &build_contributions,
-                package_contributions: &package_contributions,
+                build_contributions: build_contributions.as_ref(),
+                package_contributions: package_contributions.as_ref(),
                 truth: &truth,
                 project_root,
                 project_context: "",
@@ -262,13 +298,13 @@ impl Stage2Composition {
             &ResourcePrepareFeature::id(),
             &[ResourcePrepareFeature::contribution_requirement()],
         )?;
-        let build_contributions = self.resolve(
+        let build_contributions = self.resolve_optional(
             &ProjectBuildFeature::id(),
-            &[ProjectBuildFeature::contribution_requirement()],
+            ProjectBuildFeature::contribution_requirement(),
         )?;
-        let package_contributions = self.resolve(
+        let package_contributions = self.resolve_optional(
             &ProjectPackageFeature::id(),
-            &[ProjectPackageFeature::contribution_requirement()],
+            ProjectPackageFeature::contribution_requirement(),
         )?;
         let plan = ModPlanService::built_in()
             .map_err(|_| failure("feature.recipe_invalid", "composition.generate.plan_recipe"))?;
@@ -283,6 +319,7 @@ impl Stage2Composition {
             &single,
             &ProjectBuildService,
             &ProjectPackageService,
+            &self.pipelines,
         )
         .prepare_staged_resume(
             graph,
@@ -294,8 +331,8 @@ impl Stage2Composition {
                 plan_contributions: &plan_contributions,
                 single_contributions: &single_contributions,
                 resource_contributions: &resource_contributions,
-                build_contributions: &build_contributions,
-                package_contributions: &package_contributions,
+                build_contributions: build_contributions.as_ref(),
+                package_contributions: package_contributions.as_ref(),
                 truth: &truth,
                 project_root,
                 project_context: "",
@@ -331,13 +368,13 @@ impl Stage2Composition {
             &ResourcePrepareFeature::id(),
             &[ResourcePrepareFeature::contribution_requirement()],
         )?;
-        let build_contributions = self.resolve(
+        let build_contributions = self.resolve_optional(
             &ProjectBuildFeature::id(),
-            &[ProjectBuildFeature::contribution_requirement()],
+            ProjectBuildFeature::contribution_requirement(),
         )?;
-        let package_contributions = self.resolve(
+        let package_contributions = self.resolve_optional(
             &ProjectPackageFeature::id(),
-            &[ProjectPackageFeature::contribution_requirement()],
+            ProjectPackageFeature::contribution_requirement(),
         )?;
         let plan = ModPlanService::built_in()
             .map_err(|_| failure("feature.recipe_invalid", "composition.generate.plan_recipe"))?;
@@ -352,6 +389,7 @@ impl Stage2Composition {
             &single,
             &ProjectBuildService,
             &ProjectPackageService,
+            &self.pipelines,
         )
         .prepare_staged_adjustment(
             graph,
@@ -364,8 +402,8 @@ impl Stage2Composition {
                 plan_contributions: &plan_contributions,
                 single_contributions: &single_contributions,
                 resource_contributions: &resource_contributions,
-                build_contributions: &build_contributions,
-                package_contributions: &package_contributions,
+                build_contributions: build_contributions.as_ref(),
+                package_contributions: package_contributions.as_ref(),
                 truth: &truth,
                 project_root,
                 project_context: "",
@@ -509,13 +547,13 @@ impl Stage2Composition {
                     &ResourcePrepareFeature::id(),
                     &[ResourcePrepareFeature::contribution_requirement()],
                 )?;
-                let build_contributions = self.resolve(
+                let build_contributions = self.resolve_optional(
                     &ProjectBuildFeature::id(),
-                    &[ProjectBuildFeature::contribution_requirement()],
+                    ProjectBuildFeature::contribution_requirement(),
                 )?;
-                let package_contributions = self.resolve(
+                let package_contributions = self.resolve_optional(
                     &ProjectPackageFeature::id(),
-                    &[ProjectPackageFeature::contribution_requirement()],
+                    ProjectPackageFeature::contribution_requirement(),
                 )?;
                 let model =
                     select_model(model_override, &settings.llm, Arc::clone(&self.model_queue))?;
@@ -536,7 +574,7 @@ impl Stage2Composition {
                 let artifacts = FileArtifactStore::new(project_root.to_path_buf());
                 let build_runner = RegisteredBuildRunner;
                 let package_writer = ZipPackageWriter;
-                CompositionGenerateService::new(&plan, &single, &build, &package)
+                CompositionGenerateService::new(&plan, &single, &build, &package, &self.pipelines)
                     .execute_staged(
                         CompositionGenerateDependencies {
                             model: model.client(),
@@ -559,8 +597,8 @@ impl Stage2Composition {
                             plan_contributions: &plan_contributions,
                             single_contributions: &single_contributions,
                             resource_contributions: &resource_contributions,
-                            build_contributions: &build_contributions,
-                            package_contributions: &package_contributions,
+                            build_contributions: build_contributions.as_ref(),
+                            package_contributions: package_contributions.as_ref(),
                             truth: &truth,
                             project_root,
                             project_context: &project_context,

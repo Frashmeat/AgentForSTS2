@@ -33,13 +33,14 @@ use ats_features::resource_prepare::{
     ResourcePrepareSource,
 };
 use ats_game_context::{
-    ContributionResolver, GamePackLoader, LoadedGamePack, TruthEvidenceRecord, TruthSnapshotIndex,
-    TruthSnapshotManifest, TruthSnapshotSource, VerifiedContributionSet, VerifiedTruthSnapshot,
-    built_in_game_pack_asset,
+    ContributionResolver, GamePackLoader, GamePipelineRegistry, LoadedGamePack,
+    TruthEvidenceRecord, TruthSnapshotIndex, TruthSnapshotManifest, TruthSnapshotSource,
+    VerifiedContributionSet, VerifiedTruthSnapshot, built_in_game_pack_asset,
 };
+use ats_game_sts2::Sts2PipelineProvider;
 use ats_kernel::{
     CompositionDraftId, CompositionId, CompositionProfileId, ItemId, PrimitiveId, ResourceId,
-    Sha256Digest,
+    SchemaVersion, Sha256Digest,
 };
 use ats_runtime::{
     ArtifactManifest, CancellationToken, ExecutionGraphRepository, FinishReason, ModelClient,
@@ -53,6 +54,28 @@ use ats_workspace::{
 };
 use chrono::{Duration, Utc};
 use futures_util::stream;
+
+fn pipeline_registry() -> GamePipelineRegistry {
+    let primitives = [
+        "feature.mod-plan",
+        "feature.mod-generate-single",
+        "feature.composition-finalize",
+        "feature.project-build",
+        "feature.project-package",
+        "code.dotnet-validate",
+        "storage.atomic-publish",
+    ]
+    .into_iter()
+    .map(|id| {
+        (
+            PrimitiveId::parse(id).unwrap(),
+            SchemaVersion::new(1).unwrap(),
+        )
+    });
+    let mut registry = GamePipelineRegistry::new(primitives).unwrap();
+    registry.register(Sts2PipelineProvider::new()).unwrap();
+    registry
+}
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -384,13 +407,13 @@ async fn sts2_branded_placeholder_prototype_prepares_resources_and_publishes_one
             draft_id: revised.draft_id.clone(),
             revision: revised.revision,
         }),
-        package: ProjectPackageRequest {
+        package: Some(ProjectPackageRequest {
             artifact_id: "prototype-character-composition".into(),
             mod_id: MOD_ID.into(),
             source_relative_root: "delivery".into(),
             output_relative_path: format!("packages/{MOD_ID}.zip"),
             compression_level: Some(6),
-        },
+        }),
         repair_policy: ats_features::composition_generate::RepairPolicy::MaxRounds {
             max_rounds: 3,
         },
@@ -404,8 +427,8 @@ async fn sts2_branded_placeholder_prototype_prepares_resources_and_publishes_one
         plan_contributions: &plan,
         single_contributions: &single,
         resource_contributions: &resource,
-        build_contributions: &build,
-        package_contributions: &package,
+        build_contributions: Some(&build),
+        package_contributions: Some(&package),
         truth: &truth,
         project_root: &project,
         project_context: "Fresh STS2 Character machine-gate project",
@@ -414,11 +437,13 @@ async fn sts2_branded_placeholder_prototype_prepares_resources_and_publishes_one
     };
     let plan_service = ModPlanService::built_in().unwrap();
     let single_service = SingleGenerateService::built_in().unwrap();
+    let pipelines = pipeline_registry();
     let service = CompositionGenerateService::new(
         &plan_service,
         &single_service,
         &ProjectBuildService,
         &ProjectPackageService,
+        &pipelines,
     );
     let start = service
         .prepare_staged_start(request, context(), &items, &resources, run_id.clone())
@@ -506,8 +531,11 @@ async fn sts2_branded_placeholder_prototype_prepares_resources_and_publishes_one
             .collect::<BTreeSet<_>>()
     );
     assert!(model.responses.lock().unwrap().is_empty());
-    assert_eq!(execution.result.build.steps.len(), 1);
-    assert_eq!(execution.result.package.report.file_count, 6);
+    assert_eq!(execution.result.build.as_ref().unwrap().steps.len(), 1);
+    assert_eq!(
+        execution.result.package.as_ref().unwrap().report.file_count,
+        6
+    );
 
     let cards: BTreeMap<String, Value> = serde_json::from_slice(
         &fs::read(project.join(format!("{MOD_ID}/localization/eng/cards.json"))).unwrap(),

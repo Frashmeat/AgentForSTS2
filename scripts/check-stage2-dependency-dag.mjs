@@ -4,6 +4,7 @@ const ALLOWED = new Map([
   ['ats-kernel', []],
   ['ats-runtime', ['ats-kernel']],
   ['ats-game-context', ['ats-kernel']],
+  ['ats-game-sts2', ['ats-game-context', 'ats-kernel']],
   ['ats-workspace', ['ats-kernel']],
   ['ats-features', ['ats-game-context', 'ats-kernel', 'ats-runtime', 'ats-workspace']],
   ['ats-adapters', ['ats-game-context', 'ats-kernel', 'ats-runtime', 'ats-workspace']],

@@ -4,6 +4,7 @@ members = [
     "crates/ats-kernel",
     "crates/ats-runtime",
     "crates/ats-game-context",
+    "crates/ats-game-sts2",
     "crates/ats-workspace",
     "crates/ats-features",
     "crates/ats-adapters",

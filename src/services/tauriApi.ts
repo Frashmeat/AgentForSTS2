@@ -323,7 +323,7 @@ export interface CompositionGenerateRequest extends Record<string, unknown> {
   modId: string;
   root: StoredItemDefinition;
   draft?: { draftId: string; revision: number } | null;
-  package: ProjectPackageRequest;
+  package?: ProjectPackageRequest | null;
   repairPolicy:
     | { kind: "until_passed" }
     | { kind: "max_rounds"; maxRounds: number };
@@ -391,7 +391,7 @@ export function submitCompositionRetryNode(request: CompositionRetryNodeRequest)
 }
 
 export function submitCompositionGenerate(request: CompositionGenerateRequest): Promise<string> {
-  return submit("composition.generate", "feature.composition-generate-request", request, 5);
+  return submit("composition.generate", "feature.composition-generate-request", request, 6);
 }
 
 export function submitSingleGenerate(request: SingleGenerateRequest): Promise<string> {

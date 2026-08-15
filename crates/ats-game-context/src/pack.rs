@@ -9,7 +9,7 @@ use crate::{CompositionProfileError, CompositionProfileSet, ItemCatalogError, It
 
 pub const GAME_PACK_SCHEMA_VERSION: u32 = 4;
 pub(crate) const BUILT_IN_STS2_SHA256: &str =
-    "5e38911e8534dd2f32290be3c897e974cf0d7fe17f1f74b7f17455e36355ad0c";
+    "9dfb4d80a8fb5abae41abcb57869b13443038d6ba60ff1129060137bc3d55254";
 const BUILT_IN_STS2: &[u8] = include_bytes!("../../../game_packs/sts2/stage2-game-pack.json");
 
 #[derive(Debug, Clone)]
@@ -104,6 +104,11 @@ impl LoadedGamePack {
         id: &ats_kernel::CompositionId,
     ) -> Option<&CompositionProfileSet> {
         self.composition_profiles.get(id)
+    }
+
+    #[must_use]
+    pub fn has_contribution(&self, slot_id: &ContributionId) -> bool {
+        self.contributions.contains_key(slot_id)
     }
 
     pub(crate) fn contribution(&self, slot_id: &ContributionId) -> Option<&PackContribution> {

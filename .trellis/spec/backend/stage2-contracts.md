@@ -91,6 +91,127 @@ or reimplement graph rules.
 
 Pack may contain declarations/templates/resources and registered Primitive IDs. It cannot contain arbitrary script, native plugin, provider credential, or complete workflow implementation.
 
+### Scenario: Resolve A Trusted Game Pipeline
+
+#### 1. Scope / Trigger
+
+This contract applies when `composition.generate` resolves game-specific generation and delivery
+stages. It is also the required extension point for a new game whose validation, build or package
+chain differs from STS2. Pack data selects trusted code; it never becomes executable code.
+
+#### 2. Signatures
+
+```rust
+pub trait GamePipelineProvider: Send + Sync {
+    fn identity(&self) -> &PipelineProviderIdentity;
+    fn resolve(
+        &self,
+        request: &PipelineResolveRequest,
+    ) -> Result<ResolvedPipelineGraph, PipelineProviderError>;
+}
+
+pub struct PipelineSelection {
+    pub provider: PipelineProviderIdentity, // exact id + version
+    pub profile_id: PipelineProfileId,
+}
+
+pub struct PipelineNode {
+    pub node_id: ExecutionNodeId,
+    pub scope: PipelineNodeScope,            // composition | exact Item
+    pub phase: PipelineNodePhase,            // prepare | validate | deliver | publish
+    pub primitive_id: PrimitiveId,
+    pub primitive_version: SchemaVersion,
+    pub consumes: Vec<PipelineValueContract>,
+    pub produces: PipelineValueContract,
+    pub depends_on: Vec<ExecutionNodeId>,
+    pub checkpoint_policy: PipelineCheckpointPolicy,
+    pub retry_class: PipelineRetryClass,
+    pub validation: Vec<PipelinePrimitiveBinding>,
+    pub publish_barrier: PipelinePublishBarrier,
+}
+```
+
+#### 3. Contracts
+
+- `pack.composition-generate` v2 contains exactly one `PipelineSelection`; callers cannot supply or
+  override Provider, profile, Primitive, node or dependency data.
+- `GamePipelineRegistry` rejects duplicate Provider identities and duplicate Primitive IDs without
+  replacing the first registration. Resolution pins owner Feature, Pack ID/SHA, Truth snapshot,
+  source item-graph digest and exact work-item definition hashes.
+- `ResolvedPipelineGraph` v1 is canonically sorted and hashed. It validates node/output-slot
+  uniqueness, dependency closure/DAG, phase ordering, referenced producer schema and ancestry,
+  one terminal publish barrier covering the complete graph and exact registered Primitive versions.
+  Resume re-resolves the same request and requires byte-equivalent graph data.
+- Composition Generate request v6 and result v3 make the Package request and Build/Package results
+  optional as matched groups. A package request is required exactly when the resolved graph contains
+  `feature.project-package`; caller presence alone cannot add or skip delivery.
+- Blueprint v6 persists the complete resolved pipeline plus the compiled trusted Prepare executor.
+  Prepare output schemas equal the exact persisted checkpoint schemas; data-only may directly
+  produce the common finalize checkpoint without Plan/Single. Existing ExecutionGraph v4 continues
+  to own generative checkpoints, repair campaigns and the one graph-level validation/commit state
+  machine; Provider execution must not introduce another transaction or recovery runtime.
+- STS2 lives in `ats-game-sts2`. Its current profile owns Plan/Single/finalize, registered
+  validation, `feature.project-build`, `feature.project-package` and atomic publication. Build and
+  Package Features still execute only Pack-reviewed recipes/layouts through finite runners.
+
+#### 4. Validation & Error Matrix
+
+| Condition | Stable result | External work |
+| --- | --- | --- |
+| unknown Provider/profile/version or Primitive drift | `game.pipeline.invalid` | none |
+| Provider graph Pack/Truth/source identity mismatch | `game.pipeline.invalid` | none |
+| duplicate node/dependency, cycle, phase regression or invalid publish barrier | `game.pipeline.invalid` | none |
+| Single validator differs from the Provider validation node | `composition.generate.validation_mismatch` | none |
+| package request presence differs from the Provider graph | `composition.input_invalid` | none |
+| validation/build/package failure | original `validation.*`, `build.*` or `artifact.*` family | no final publication |
+| valid graph and all stages succeed | one parent result, Artifact and project transaction | declared stages only |
+
+No pipeline failure may serialize Provider bodies, credentials, prompts, absolute paths or raw
+process output.
+
+#### 5. Good / Base / Bad Cases
+
+- Good: STS2 selects `game.sts2@1 / sts2.composition-generate`; the Provider graph drives its exact
+  validator, Build and Package before one publication barrier.
+- Base: a trusted synthetic data-only Provider traverses the real Composition service with no
+  model, validator, build, package, dotnet or Godot call and still produces a succeeded Run/Graph,
+  Artifact and final JSON through the common transaction path.
+- Bad: Feature code checks `game_pack_id == "sts2"`, always runs Build/Package, accepts a caller
+  Primitive, or retains a fixed fallback graph when Provider resolution fails.
+
+#### 6. Tests Required
+
+```powershell
+cargo test -p ats-game-context -p ats-game-sts2
+cargo test -p ats-features --all-targets
+cargo test -p agentthespire-desktop --test composition_generation --test stage2_character_composition
+node scripts/check-stage2-dependency-dag.mjs --self-test
+node scripts/check-stage2-dependency-dag.mjs
+```
+
+Assertions cover deterministic digest/order, duplicate registration without replacement, unknown
+Primitive/version, Pack/Truth/work-item drift, cycles/phase regression, typed value flow, one full
+publish closure, Provider/Single validator agreement, Provider-bound package presence, data-only
+zero-call publication, rollback and STS2 closure.
+
+#### 7. Wrong vs Correct
+
+Wrong:
+
+```rust
+validate()?;
+build()?;
+package()?; // fixed for every game
+```
+
+Correct:
+
+```rust
+let graph = pipelines.resolve(&pack_selection, &pinned_request)?;
+let delivery = compile_verified_composition_pipeline(&graph)?;
+execute_with_existing_graph_transaction(delivery).await?;
+```
+
 ### Scenario: Pack v4 Item Catalog, Definition Identity, And Readiness
 
 #### 1. Scope / Trigger
@@ -548,8 +669,8 @@ failures and deterministic graph/confirmation digests.
 
 ### Scenario: Publish A Resolved Composition As One Unit
 
-`composition.generate` is the eleventh catalog Feature. Request v1 pins the root
-`StoredItemDefinition`, optional Draft revision, artifact/mod identity and Package request. The
+`composition.generate` is the eleventh catalog Feature. Request v6 pins the root
+`StoredItemDefinition`, optional Draft revision, artifact/mod identity and Provider-bound optional Package request. The
 Feature repeats `ResolvedItemGraph` resolution, then executes sorted nodes as proposed Plan/Single
 children without calling Single's project/Artifact publication path.
 
@@ -1011,12 +1132,12 @@ single-request path and does not create an execution graph.
 #### 2. Signatures
 
 ```rust
-pub struct CompositionGenerateRequest { // feature.composition-generate-request v5
+pub struct CompositionGenerateRequest { // feature.composition-generate-request v6
     pub artifact_id: String,
     pub mod_id: String,
     pub root: StoredItemDefinition,
     pub draft: Option<CompositionDraftRef>,
-    pub package: ProjectPackageRequest,
+    pub package: Option<ProjectPackageRequest>,
     pub repair_policy: RepairPolicy,
     pub adjustment: Option<ItemAdjustment>,
     pub execution: Option<CompositionGenerateExecutionRequest>,
@@ -1066,7 +1187,7 @@ CompositionGenerateService::execute_staged(...)
 
 #### 3. Contracts
 
-The backend enriches an initial v5 request with `execution.kind=start`. The immutable request also
+The backend enriches an initial v6 request with `execution.kind=start`. The immutable request also
 fixes `until_passed` or `max_rounds(1..20)` as the complete graph's semantic-feedback budget;
 `until_passed` still has the absolute 20-round safety ceiling.
 Resume creates a new parent
@@ -1138,7 +1259,7 @@ item.000.plan -> item.000.single -> item.001.plan -> item.001.single -> ...
   adjustment. Every actual semantic model request consumes one count. `max_rounds` and the absolute
   20-request ceiling apply before activating the next target, not once per Item.
 - `adjustment` is not a new Feature. A Shell command validates `itemId + expectedDefinitionHash`,
-  compiles one v1 adjustment envelope, and starts `composition.generate` v5 against an existing
+  compiles one v1 adjustment envelope, and starts `composition.generate` v6 against an existing
   pre-commit graph. The target Item's complete role set is regenerated once through the same Single
   contracts, then Item-local checks, finalize and whole-closure validation rerun. No other Item is
   requested or changed. Structural requests that change Item identity/type, references, Resource
@@ -1154,9 +1275,9 @@ item.000.plan -> item.000.single -> item.001.plan -> item.001.single -> ...
 Runtime `ExecutionCommitIntent` accepts exactly one Draft intent or one generic publication intent.
 Mixed forms, unsafe target IDs or payload-hash mismatch are invalid graph records. ExecutionGraph
 v4 uses only `.ats/execution-graphs-v4`; v1/v2/v3 JSON is not read, migrated, copied or rewritten.
-Old directories remain untouched evidence. Composition Generate request v5 and Blueprint v3 are the
-only graph-creation contracts after this cutover; no compatibility reader accepts request v4 or
-Blueprint v2.
+Old directories remain untouched evidence. Composition Generate request v6 and Blueprint v6 are the
+only graph-creation contracts after this cutover; no compatibility reader accepts Blueprint v5 or
+earlier schemas.
 
 #### 4. Validation & Error Matrix
 

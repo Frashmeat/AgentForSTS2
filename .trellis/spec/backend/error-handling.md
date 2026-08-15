@@ -47,7 +47,7 @@ second weaker-format request. Both modes retain the same Feature-owned typed dec
 or shape remains `model.output_invalid` without raw Provider content in persisted details.
 
 Direct `mod.generate.single` returns that failure after one logical model call. Inside
-`composition.generate` request v5, repairable output-contract failures may enter the Feature-owned
+`composition.generate` request v6, repairable output-contract failures may enter the Feature-owned
 semantic feedback controller without changing model, endpoint, response format or Provider retry
 rules. Before the next model call, ExecutionGraph v4 CAS-persists a hashed
 `feature.generation-feedback` v2 envelope plus the complete candidate SHA-256. The envelope contains
@@ -114,6 +114,12 @@ Composition Plan output with duplicate slot targets or nodes outside the root pi
 `model.output_invalid`; a Pack-declared binding count or total-quantity mismatch is
 `composition.profile.count_mismatch`. Both fail before Draft or Item persistence and are never
 reclassified as `core.unclassified`.
+
+Game Pipeline resolution and persisted-graph drift map to `game.pipeline.invalid` at
+`composition.generate.pipeline`. Unknown/duplicate Provider identity, unsupported profile,
+Pack/Truth/source context mismatch, invalid DAG/digest/publish barrier and unavailable exact
+Primitive version all fail before model, process or project mutation. These failures never fall
+back to a fixed STS2 graph and never include Provider bodies, Pack payloads or registry internals.
 
 These two Composition Plan families persist `feature.composition-plan-failure-details` v1 when a
 typed model response reaches validation. Details contain only stable reason codes, bounded counts

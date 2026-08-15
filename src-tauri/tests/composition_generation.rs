@@ -24,12 +24,18 @@ use ats_features::project_package::{
 };
 use ats_features::resource_prepare::ResourcePrepareFeature;
 use ats_game_context::{
-    ContributionResolver, GamePackLoader, LoadedGamePack, TruthEvidenceRecord, TruthSnapshotIndex,
-    TruthSnapshotManifest, TruthSnapshotSource, VerifiedContributionSet, VerifiedTruthSnapshot,
+    ContributionResolver, GamePackLoader, GamePipelineProvider, GamePipelineRegistry,
+    LoadedGamePack, PipelineCheckpointPolicy, PipelineNode, PipelineNodePhase, PipelineNodeScope,
+    PipelineProviderError, PipelineProviderIdentity, PipelinePublishBarrier,
+    PipelineResolveRequest, PipelineRetryClass, PipelineValueContract, ResolvedPipelineGraph,
+    TruthEvidenceRecord, TruthSnapshotIndex, TruthSnapshotManifest, TruthSnapshotSource,
+    VerifiedContributionSet, VerifiedTruthSnapshot,
 };
+use ats_game_sts2::Sts2PipelineProvider;
 use ats_kernel::{
-    CompositionDraftId, CompositionId, CompositionParameterId, CompositionProfileId, ItemId,
-    ItemReferenceSlotId, ItemTypeId, PrimitiveId, Sha256Digest,
+    CompositionDraftId, CompositionId, CompositionParameterId, CompositionProfileId,
+    ExecutionNodeId, ItemId, ItemReferenceSlotId, ItemTypeId, PipelineProfileId,
+    PipelineProviderId, PrimitiveId, SchemaId, SchemaRef, SchemaVersion, Sha256Digest,
 };
 use ats_runtime::{
     ArtifactManifest, BuildError, BuildRunner, BuildStepReport, BuildStepRequest,
@@ -52,6 +58,131 @@ use sha2::{Digest, Sha256};
 struct QueueModel {
     responses: Mutex<VecDeque<String>>,
     requests: AtomicUsize,
+}
+
+fn pipeline_registry() -> GamePipelineRegistry {
+    let primitives = [
+        "feature.mod-plan",
+        "feature.mod-generate-single",
+        "feature.composition-finalize",
+        "feature.project-build",
+        "feature.project-package",
+        "code.dotnet-validate",
+        "storage.atomic-publish",
+    ]
+    .into_iter()
+    .map(|id| {
+        (
+            PrimitiveId::parse(id).unwrap(),
+            SchemaVersion::new(1).unwrap(),
+        )
+    });
+    let mut registry = GamePipelineRegistry::new(primitives).unwrap();
+    registry.register(Sts2PipelineProvider::new()).unwrap();
+    registry
+}
+
+struct DataOnlyProvider {
+    identity: PipelineProviderIdentity,
+}
+
+impl DataOnlyProvider {
+    fn new() -> Self {
+        Self {
+            identity: PipelineProviderIdentity {
+                id: PipelineProviderId::parse("fixture.data-only").unwrap(),
+                version: SchemaVersion::new(1).unwrap(),
+            },
+        }
+    }
+}
+
+impl GamePipelineProvider for DataOnlyProvider {
+    fn identity(&self) -> &PipelineProviderIdentity {
+        &self.identity
+    }
+
+    fn resolve(
+        &self,
+        request: &PipelineResolveRequest,
+    ) -> Result<ResolvedPipelineGraph, PipelineProviderError> {
+        if request.profile_id != PipelineProfileId::parse("fixture.data-json").unwrap() {
+            return Err(PipelineProviderError::UnsupportedProfile);
+        }
+        let render_id = ExecutionNodeId::parse("data.render").unwrap();
+        let value = |slot_id: &str, schema_id: &str| PipelineValueContract {
+            slot_id: slot_id.into(),
+            schema: SchemaRef {
+                id: SchemaId::parse(schema_id).unwrap(),
+                version: SchemaVersion::new(1).unwrap(),
+            },
+        };
+        ResolvedPipelineGraph::new(
+            self.identity.clone(),
+            request,
+            vec![
+                PipelineNode {
+                    node_id: render_id.clone(),
+                    scope: PipelineNodeScope::Composition,
+                    phase: PipelineNodePhase::Prepare,
+                    primitive_id: PrimitiveId::parse("data.render-json").unwrap(),
+                    primitive_version: SchemaVersion::new(1).unwrap(),
+                    consumes: Vec::new(),
+                    produces: PipelineValueContract {
+                        slot_id: "composition.prepared-checkpoint".into(),
+                        schema: SchemaRef {
+                            id: SchemaId::parse("feature.composition-generate-finalize-checkpoint")
+                                .unwrap(),
+                            version: SchemaVersion::new(2).unwrap(),
+                        },
+                    },
+                    depends_on: Vec::new(),
+                    checkpoint_policy: PipelineCheckpointPolicy::OnSuccess,
+                    retry_class: PipelineRetryClass::Never,
+                    validation: Vec::new(),
+                    publish_barrier: PipelinePublishBarrier::BeforeCommit,
+                },
+                PipelineNode {
+                    node_id: ExecutionNodeId::parse("data.publish").unwrap(),
+                    scope: PipelineNodeScope::Composition,
+                    phase: PipelineNodePhase::Publish,
+                    primitive_id: PrimitiveId::parse("storage.atomic-publish").unwrap(),
+                    primitive_version: SchemaVersion::new(1).unwrap(),
+                    consumes: vec![PipelineValueContract {
+                        slot_id: "composition.prepared-checkpoint".into(),
+                        schema: SchemaRef {
+                            id: SchemaId::parse("feature.composition-generate-finalize-checkpoint")
+                                .unwrap(),
+                            version: SchemaVersion::new(2).unwrap(),
+                        },
+                    }],
+                    produces: value("data.publication", "pipeline.publication"),
+                    depends_on: vec![render_id],
+                    checkpoint_policy: PipelineCheckpointPolicy::OnSuccess,
+                    retry_class: PipelineRetryClass::LocalTransient,
+                    validation: Vec::new(),
+                    publish_barrier: PipelinePublishBarrier::Commit,
+                },
+            ],
+        )
+        .map_err(Into::into)
+    }
+}
+
+fn data_only_pipeline_registry() -> GamePipelineRegistry {
+    let mut registry = GamePipelineRegistry::new([
+        (
+            PrimitiveId::parse("data.render-json").unwrap(),
+            SchemaVersion::new(1).unwrap(),
+        ),
+        (
+            PrimitiveId::parse("storage.atomic-publish").unwrap(),
+            SchemaVersion::new(1).unwrap(),
+        ),
+    ])
+    .unwrap();
+    registry.register(DataOnlyProvider::new()).unwrap();
+    registry
 }
 
 #[async_trait]
@@ -267,7 +398,7 @@ async fn whole_closure_publishes_once_and_cleans_stage() {
     assert_eq!(execution.result.node_count, 2);
     assert_eq!(execution.result.generated_file_count, 2);
     assert_eq!(
-        execution.result.package.publication,
+        execution.result.package.as_ref().unwrap().publication,
         PackagePublication::CompositionStaged
     );
     assert_eq!(child_runs.len(), 6);
@@ -289,6 +420,154 @@ async fn whole_closure_publishes_once_and_cleans_stage() {
     assert_eq!(manifest.artifact_kind, "composition");
     assert_eq!(manifest.files.len(), 3);
     assert_eq!(manifest.producing_run_id, parent_run_id);
+}
+
+#[tokio::test]
+async fn data_only_provider_executes_without_model_validation_or_toolchain() {
+    let mut fixture = Fixture::new();
+    fixture.pack = data_only_pack();
+    fixture.truth = truth(&fixture.pack);
+    fixture.request.artifact_id = "fixture-data-only".into();
+    fixture.request.package = None;
+
+    let resolver = ContributionResolver::new([
+        PrimitiveId::parse("code.dotnet-validate").unwrap(),
+        PrimitiveId::parse("process.fixture-build").unwrap(),
+    ]);
+    let composition = resolve::<CompositionGenerateFeature>(
+        &resolver,
+        &fixture.pack,
+        CompositionGenerateFeature::contribution_requirement(),
+    );
+    let plan = resolve::<ModPlanFeature>(
+        &resolver,
+        &fixture.pack,
+        ModPlanFeature::contribution_requirement(),
+    );
+    let single = resolve::<SingleGenerateFeature>(
+        &resolver,
+        &fixture.pack,
+        SingleGenerateFeature::contribution_requirement(),
+    );
+    let resource = resolve::<ResourcePrepareFeature>(
+        &resolver,
+        &fixture.pack,
+        ResourcePrepareFeature::contribution_requirement(),
+    );
+    let plan_service = ModPlanService::built_in().unwrap();
+    let single_service = SingleGenerateService::built_in().unwrap();
+    let pipelines = data_only_pipeline_registry();
+    let service = CompositionGenerateService::new(
+        &plan_service,
+        &single_service,
+        &ProjectBuildService,
+        &ProjectPackageService,
+        &pipelines,
+    );
+    let context = || CompositionGenerateContext {
+        pack: &fixture.pack,
+        composition_contributions: &composition,
+        plan_contributions: &plan,
+        single_contributions: &single,
+        resource_contributions: &resource,
+        build_contributions: None,
+        package_contributions: None,
+        truth: &fixture.truth,
+        project_root: &fixture.project,
+        project_context: "Data-only fixture",
+        custom_instructions: None,
+        model: None,
+    };
+    let run_id = ats_runtime::RunId::new();
+    let start = service
+        .prepare_staged_start(
+            fixture.request.clone(),
+            context(),
+            &fixture.items,
+            &fixture.resources,
+            run_id.clone(),
+        )
+        .unwrap();
+    assert_eq!(start.graph.nodes().len(), 1);
+    assert_eq!(
+        start.graph.nodes().values().next().unwrap().role_id,
+        "data.render-json"
+    );
+
+    let graphs = FileExecutionGraphRepository::new(fixture.project.clone());
+    graphs.create_claimed(&start.graph, &run_id).unwrap();
+    let runs = FileRunRepository::new(fixture.project.clone()).unwrap();
+    let mut run = RunRecord::new_with_id(
+        run_id,
+        CompositionGenerateFeature::id(),
+        VersionedPayload::from_typed(CompositionGenerateFeature::request_schema(), &start.request)
+            .unwrap(),
+    );
+    run.apply_transition(RunTransition::Start, Utc::now())
+        .unwrap();
+    let model = QueueModel {
+        responses: Mutex::new(VecDeque::new()),
+        requests: AtomicUsize::new(0),
+    };
+    let execution = service
+        .execute_staged(
+            CompositionGenerateDependencies {
+                model: &model,
+                items: &fixture.items,
+                resources: &fixture.resources,
+                writer: &FileProjectWriter,
+                stager: &FileProjectStager,
+                validator: &FixtureValidation { reject: false },
+                artifacts: &FileArtifactStore::new(fixture.project.clone()),
+                build_runner: &FixtureBuild,
+                package_writer: &FixturePackageWriter {
+                    reject_commit: true,
+                },
+            },
+            &runs,
+            &graphs,
+            &mut run,
+            start.request,
+            context(),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(model.requests.load(Ordering::SeqCst), 0);
+    assert!(runs.list().unwrap().is_empty());
+    assert_eq!(run.status(), RunStatus::Succeeded);
+    assert_eq!(execution.result.generated_file_count, 1);
+    assert!(execution.result.items.is_empty());
+    assert!(execution.result.build.is_none());
+    assert!(execution.result.package.is_none());
+    assert!(fixture.project.join("Generated/items.json").is_file());
+    assert!(!fixture.project.join("delivery").exists());
+    assert!(!fixture.project.join("packages").exists());
+    assert!(!fixture.project.join(".ats/composition-staging").exists());
+    let graph = graphs
+        .get(execution.result.execution_graph_id.as_ref().unwrap())
+        .unwrap();
+    assert_eq!(graph.status(), ats_runtime::ExecutionGraphStatus::Succeeded);
+    assert_eq!(
+        graph
+            .nodes()
+            .values()
+            .filter(|node| node.status == ats_runtime::ExecutionNodeStatus::Succeeded)
+            .count(),
+        1
+    );
+    let manifest: ArtifactManifest = serde_json::from_slice(
+        &fs::read(
+            fixture
+                .project
+                .join(&execution.result.artifact_manifest_ref),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(manifest.files.len(), 1);
+    assert_eq!(manifest.files[0].role, "data.items");
 }
 
 #[tokio::test]
@@ -357,7 +636,7 @@ async fn succeeded_composition_adjusts_one_item_in_a_new_graph_and_revalidates_t
         .collect::<BTreeMap<_, _>>();
 
     let resolver = ContributionResolver::new([
-        PrimitiveId::parse("code.fixture-validate").unwrap(),
+        PrimitiveId::parse("code.dotnet-validate").unwrap(),
         PrimitiveId::parse("process.fixture-build").unwrap(),
     ]);
     let composition = resolve::<CompositionGenerateFeature>(
@@ -392,11 +671,13 @@ async fn succeeded_composition_adjusts_one_item_in_a_new_graph_and_revalidates_t
     );
     let plan_service = ModPlanService::built_in().unwrap();
     let single_service = SingleGenerateService::built_in().unwrap();
+    let pipelines = pipeline_registry();
     let service = CompositionGenerateService::new(
         &plan_service,
         &single_service,
         &ProjectBuildService,
         &ProjectPackageService,
+        &pipelines,
     );
     let context = || CompositionGenerateContext {
         pack: &fixture.pack,
@@ -404,8 +685,8 @@ async fn succeeded_composition_adjusts_one_item_in_a_new_graph_and_revalidates_t
         plan_contributions: &plan,
         single_contributions: &single,
         resource_contributions: &resource,
-        build_contributions: &build,
-        package_contributions: &package,
+        build_contributions: Some(&build),
+        package_contributions: Some(&package),
         truth: &fixture.truth,
         project_root: &fixture.project,
         project_context: "Fixture project",
@@ -519,7 +800,7 @@ async fn composition_adjustment_rejects_a_stale_definition_before_model_work() {
         .get(initial.result.execution_graph_id.as_ref().unwrap())
         .unwrap();
     let resolver = ContributionResolver::new([
-        PrimitiveId::parse("code.fixture-validate").unwrap(),
+        PrimitiveId::parse("code.dotnet-validate").unwrap(),
         PrimitiveId::parse("process.fixture-build").unwrap(),
     ]);
     let composition = resolve::<CompositionGenerateFeature>(
@@ -554,11 +835,13 @@ async fn composition_adjustment_rejects_a_stale_definition_before_model_work() {
     );
     let plan_service = ModPlanService::built_in().unwrap();
     let single_service = SingleGenerateService::built_in().unwrap();
+    let pipelines = pipeline_registry();
     let service = CompositionGenerateService::new(
         &plan_service,
         &single_service,
         &ProjectBuildService,
         &ProjectPackageService,
+        &pipelines,
     );
     let error = service
         .prepare_staged_adjustment(
@@ -578,8 +861,8 @@ async fn composition_adjustment_rejects_a_stale_definition_before_model_work() {
                 plan_contributions: &plan,
                 single_contributions: &single,
                 resource_contributions: &resource,
-                build_contributions: &build,
-                package_contributions: &package,
+                build_contributions: Some(&build),
+                package_contributions: Some(&package),
                 truth: &fixture.truth,
                 project_root: &fixture.project,
                 project_context: "Fixture project",
@@ -633,7 +916,7 @@ async fn package_commit_failure_rolls_back_real_project_and_cleans_stage() {
 async fn staged_generation_resumes_only_the_failed_single_node() {
     let fixture = Fixture::new();
     let resolver = ContributionResolver::new([
-        PrimitiveId::parse("code.fixture-validate").unwrap(),
+        PrimitiveId::parse("code.dotnet-validate").unwrap(),
         PrimitiveId::parse("process.fixture-build").unwrap(),
     ]);
     let composition = resolve::<CompositionGenerateFeature>(
@@ -670,11 +953,13 @@ async fn staged_generation_resumes_only_the_failed_single_node() {
     let single_service = SingleGenerateService::built_in().unwrap();
     let build_service = ProjectBuildService;
     let package_service = ProjectPackageService;
+    let pipelines = pipeline_registry();
     let service = CompositionGenerateService::new(
         &plan_service,
         &single_service,
         &build_service,
         &package_service,
+        &pipelines,
     );
     let context = || CompositionGenerateContext {
         pack: &fixture.pack,
@@ -682,8 +967,8 @@ async fn staged_generation_resumes_only_the_failed_single_node() {
         plan_contributions: &plan,
         single_contributions: &single,
         resource_contributions: &resource,
-        build_contributions: &build,
-        package_contributions: &package,
+        build_contributions: Some(&build),
+        package_contributions: Some(&package),
         truth: &fixture.truth,
         project_root: &fixture.project,
         project_context: "Fixture project",
@@ -760,7 +1045,8 @@ async fn staged_generation_resumes_only_the_failed_single_node() {
     assert!(!persisted_graph.contains("Fixture project"));
     assert!(!persisted_graph.contains("messages"));
     assert!(!persisted_graph.contains("response_format"));
-    assert!(!persisted_graph.contains("provider"));
+    assert!(!persisted_graph.contains("providerBody"));
+    assert!(!persisted_graph.contains("rawCompletion"));
     let feedback = paused
         .nodes()
         .values()
@@ -909,7 +1195,7 @@ async fn staged_generation_resumes_only_the_failed_single_node() {
 async fn staged_validation_repairs_multiple_items_serially_then_revalidates_the_whole_closure() {
     let fixture = Fixture::new();
     let resolver = ContributionResolver::new([
-        PrimitiveId::parse("code.fixture-validate").unwrap(),
+        PrimitiveId::parse("code.dotnet-validate").unwrap(),
         PrimitiveId::parse("process.fixture-build").unwrap(),
     ]);
     let composition = resolve::<CompositionGenerateFeature>(
@@ -944,11 +1230,13 @@ async fn staged_validation_repairs_multiple_items_serially_then_revalidates_the_
     );
     let plan_service = ModPlanService::built_in().unwrap();
     let single_service = SingleGenerateService::built_in().unwrap();
+    let pipelines = pipeline_registry();
     let service = CompositionGenerateService::new(
         &plan_service,
         &single_service,
         &ProjectBuildService,
         &ProjectPackageService,
+        &pipelines,
     );
     let context = || CompositionGenerateContext {
         pack: &fixture.pack,
@@ -956,8 +1244,8 @@ async fn staged_validation_repairs_multiple_items_serially_then_revalidates_the_
         plan_contributions: &plan,
         single_contributions: &single,
         resource_contributions: &resource,
-        build_contributions: &build,
-        package_contributions: &package,
+        build_contributions: Some(&build),
+        package_contributions: Some(&package),
         truth: &fixture.truth,
         project_root: &fixture.project,
         project_context: "Fixture project",
@@ -1052,7 +1340,7 @@ async fn staged_validation_repairs_multiple_items_serially_then_revalidates_the_
 async fn partially_completed_multi_item_repair_resumes_before_finalize_without_replay() {
     let fixture = Fixture::new();
     let resolver = ContributionResolver::new([
-        PrimitiveId::parse("code.fixture-validate").unwrap(),
+        PrimitiveId::parse("code.dotnet-validate").unwrap(),
         PrimitiveId::parse("process.fixture-build").unwrap(),
     ]);
     let composition = resolve::<CompositionGenerateFeature>(
@@ -1087,11 +1375,13 @@ async fn partially_completed_multi_item_repair_resumes_before_finalize_without_r
     );
     let plan_service = ModPlanService::built_in().unwrap();
     let single_service = SingleGenerateService::built_in().unwrap();
+    let pipelines = pipeline_registry();
     let service = CompositionGenerateService::new(
         &plan_service,
         &single_service,
         &ProjectBuildService,
         &ProjectPackageService,
+        &pipelines,
     );
     let context = || CompositionGenerateContext {
         pack: &fixture.pack,
@@ -1099,8 +1389,8 @@ async fn partially_completed_multi_item_repair_resumes_before_finalize_without_r
         plan_contributions: &plan,
         single_contributions: &single,
         resource_contributions: &resource,
-        build_contributions: &build,
-        package_contributions: &package,
+        build_contributions: Some(&build),
+        package_contributions: Some(&package),
         truth: &fixture.truth,
         project_root: &fixture.project,
         project_context: "Fixture project",
@@ -1355,13 +1645,13 @@ impl Fixture {
                 draft_id: CompositionDraftId::parse("fixture-draft").unwrap(),
                 revision: 1,
             }),
-            package: ProjectPackageRequest {
+            package: Some(ProjectPackageRequest {
                 artifact_id: "fixture-composition".into(),
                 mod_id: "FixtureMod".into(),
                 source_relative_root: "delivery".into(),
                 output_relative_path: "packages/FixtureMod.zip".into(),
                 compression_level: Some(6),
-            },
+            }),
             repair_policy: ats_features::composition_generate::RepairPolicy::MaxRounds {
                 max_rounds: 3,
             },
@@ -1422,7 +1712,7 @@ impl Fixture {
             requests: AtomicUsize::new(0),
         };
         let resolver = ContributionResolver::new([
-            PrimitiveId::parse("code.fixture-validate").unwrap(),
+            PrimitiveId::parse("code.dotnet-validate").unwrap(),
             PrimitiveId::parse("process.fixture-build").unwrap(),
         ]);
         let composition = resolve::<CompositionGenerateFeature>(
@@ -1459,6 +1749,7 @@ impl Fixture {
         let single_service = SingleGenerateService::built_in().unwrap();
         let build_service = ProjectBuildService;
         let package_service = ProjectPackageService;
+        let pipelines = pipeline_registry();
         let writer = FileProjectWriter;
         let stager = FileProjectStager;
         let validator = FixtureValidation {
@@ -1475,8 +1766,8 @@ impl Fixture {
             plan_contributions: &plan,
             single_contributions: &single,
             resource_contributions: &resource,
-            build_contributions: &build,
-            package_contributions: &package,
+            build_contributions: Some(&build),
+            package_contributions: Some(&package),
             truth: &self.truth,
             project_root: &self.project,
             project_context: "Fixture project",
@@ -1488,6 +1779,7 @@ impl Fixture {
             &single_service,
             &build_service,
             &package_service,
+            &pipelines,
         );
         let start = service
             .prepare_staged_start(
@@ -1623,6 +1915,14 @@ fn repaired_bundle_response(item_type: &str) -> String {
 }
 
 fn pack() -> LoadedGamePack {
+    pack_with_pipeline("game.sts2", "sts2.composition-generate")
+}
+
+fn data_only_pack() -> LoadedGamePack {
+    pack_with_pipeline("fixture.data-only", "fixture.data-json")
+}
+
+fn pack_with_pipeline(provider_id: &str, profile_id: &str) -> LoadedGamePack {
     let value = serde_json::json!({
         "schemaVersion":4,
         "id":"fixture-game",
@@ -1664,8 +1964,8 @@ fn pack() -> LoadedGamePack {
         "contributions":[
             {
                 "slotId":"composition.generate","featureId":"composition.generate",
-                "schema":{"id":"pack.composition-generate","version":1},
-                "payload":{"compose":["mod.plan","mod.generate.single","project.build","project.package"]}
+                "schema":{"id":"pack.composition-generate","version":2},
+                "payload":{"pipeline":{"provider":{"id":provider_id,"version":1},"profileId":profile_id}}
             },
             {
                 "slotId":"mod.plan.guidance","featureId":"mod.plan",
@@ -1675,9 +1975,9 @@ fn pack() -> LoadedGamePack {
             {
                 "slotId":"mod.generate.single","featureId":"mod.generate.single",
                 "schema":{"id":"pack.mod-generate-single","version":5},
-                "requiredPrimitives":["code.fixture-validate"],
+                "requiredPrimitives":["code.dotnet-validate"],
                 "payload":{
-                    "validationPrimitive":"code.fixture-validate",
+                    "validationPrimitive":"code.dotnet-validate",
                     "guidance":["Generate fixture source."],
                     "itemTypes":[
                         {"id":"root","guidance":["Generate root source."],"generatedFiles":[{"role":"source","targetPath":"Generated/{item_id}.cs"}]},

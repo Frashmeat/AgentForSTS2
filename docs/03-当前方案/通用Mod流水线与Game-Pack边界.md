@@ -1,236 +1,508 @@
-# ADR 0004 — 通用 Mod 生产流水线与 Game Pack 边界
+# ADR 0004 - 通用执行内核、Game Pipeline Provider 与 Game Pack 边界
 
 | 项 | 值 |
 | --- | --- |
-| 状态 | Accepted |
-| 决议日期 | 2026-07-29 |
-| 适用范围 | AgentTheSpire 多游戏 Mod 生成、验证、构建与打包架构 |
-| 当前实施状态 | Stage 1 自动迁移与最终 STS2 真实游戏复验均已完成 |
-| Stage 2 细化 | [Stage 2 分层能力与资源架构方案](./2026-08-02-Stage-2分层能力与资源架构方案.md) |
-| 相关决策 | [ADR 0001 — Rust + Tauri 整体架构](../90-归档/Rust重写过程材料/04-决策/0001-rust-tauri-workspace-architecture.md) |
-| 问题来源 | [真实游戏加载与资产质量问题审查](../90-归档/历史审查与验证/Rust重写/已经完成/2026-07-28-真实游戏加载与资产质量问题审查.md) |
+| 状态 | Accepted; Provider foundation、STS2 cutover、trusted Prepare executor 与机器门禁已完成 |
+| 初始决议 | 2026-07-29 |
+| 本次修订 | 2026-08-15 |
+| 适用范围 | 多游戏 Mod 的生成、验证、构建、打包、恢复与发布 |
+| 当前代码事实 | Provider v1/registry、`ats-game-sts2`、Provider-driven delivery 与 trusted Prepare executor 已接线；synthetic data-only 产品路径和完整机器门禁已通过 |
+| 实施约束 | 本文不授权代码重构、candidate 构建、安装、发布或删除历史证据 |
+| 相关方案 | [Stage 2 分层能力与资源架构](./2026-08-02-Stage-2分层能力与资源架构方案.md) |
 
-## 1. 背景
+## 1. 决议摘要
 
-AgentTheSpire 当前首先服务于 STS2 Mod 开发，但长期目标是接入多个游戏、Mod 框架和技术栈。不同游戏都需要完成资源获取、知识检索、需求规划、代码/资产生成、验证、构建和打包；真正变化的是真相来源、游戏专属资源及各步骤的声明数据。
+AgentTheSpire 不把 STS2 当前的 `C# -> localization -> dotnet -> Godot PCK -> ZIP` 顺序提升为跨游戏固定流水线，也不允许 Game Pack 注入任意命令。
 
-真实游戏验收同时证明，把 STS2 行为示例手写进通用模板，会将过期或错误的时序语义扩散到代码生成。为每个游戏建立一套厚 `GameAdapter` 又会重复生成、构建和打包能力。为每种行为建立持久化“行为契约”则会引入契约选择、版本迁移和错误结论集中扩散的新风险。
-
-## 2. 决策
-
-AgentTheSpire 采用：
-
-> **一条通用 Mod 生产流水线 + 多个可加载的游戏知识与资源包（Game Pack）。**
-
-平台统一提供资源获取、索引检索、LLM 生成、资产处理、验证、构建、打包、Run history、ArtifactManifest 与人工验收串联。Game Pack 只提供真相源声明、游戏专属资源、工程骨架、目标资产规格、稳定验证规则和构建/打包步骤的声明数据；它不重新实现一套游戏专属 handler。
-
-Stage 2 将本文所称“通用引擎”进一步拆分为 Feature Layer、Core Runtime、Infrastructure Adapters、Truth Evidence 和 Project/Resource Workspace。本文的“一条流水线 + 多个 Game Pack”原则继续成立；具体编译依赖、Prompt ownership、Run/Artifact envelope 和资源版本合同以后续 Stage 2 专题方案为准。
-
-### 2.1 总体关系
-
-```mermaid
-flowchart TB
-    User["用户需求"] --> Core
-
-    subgraph Core["AgentTheSpire 通用引擎"]
-        Acquire["资源获取"] --> Index["知识索引与检索"]
-        Index --> Plan["需求规划"]
-        Plan --> Generate["代码与资产生成"]
-        Generate --> Validate["通用验证框架"]
-        Validate --> Build["通用构建执行器"]
-        Build --> Package["通用打包执行器"]
-        Trace["RunRecord / ArtifactManifest"]
-    end
-
-    subgraph Packs["游戏知识与资源包"]
-        STS2["STS2 Game Pack"]
-        GameB["其他游戏 Game Pack"]
-        GameC["数据驱动游戏 Game Pack"]
-    end
-
-    Packs --> Acquire
-    Packs --> Plan
-    Packs --> Validate
-    Packs --> Build
-    Packs --> Package
-    Plan --> Trace
-    Generate --> Trace
-    Validate --> Trace
-    Build --> Trace
-    Package --> Trace
-    Package --> Manual["用户真实游戏人工验收"]
-```
-
-### 2.2 通用引擎与 Game Pack 的边界
-
-| 通用引擎负责 | Game Pack 负责 |
-| --- | --- |
-| 获取、缓存和刷新资源 | 声明获取什么、来自哪里 |
-| 建立索引并检索当前证据 | 提供真相源和专属资源 |
-| 调用 LLM 并处理结构化输出 | 提供稳定工程骨架与上下文 |
-| 生成、变换、写入和回滚资产 | 声明目标资产类型、规格和路径 |
-| 执行结构、schema、质量与回归规则 | 提供稳定约束与已知错误规则数据 |
-| 运行构建图、捕获日志、处理取消 | 描述工具、参数、依赖和预期产物 |
-| 收集、校验、哈希和压缩文件 | 描述必需文件、目录布局与 include/exclude |
-| 记录 Run history、ArtifactManifest 并展示验收项 | 提供游戏和资源版本、人工验收清单 |
-
-这一边界的判定句是：
-
-> **引擎实现“怎么做”；Game Pack 声明“针对当前游戏做什么”。**
-
-## 3. 核心领域术语
-
-| 术语 | 定义 | 非本术语含义 |
-| --- | --- | --- |
-| `Game Pack` | 一个可加载的游戏知识与资源包，包含真相源、专属资源及流水线声明数据 | 不是为某游戏重写一套生成/构建/打包能力的厚 Adapter |
-| `Truth Source` | 当前游戏版本的可追溯事实来源，如 SDK、schema、源码、二进制元数据或反编译结果 | 不是 LLM 对某个功能的持久化语义结论 |
-| `Source Provider` | 可被多个游戏复用的来源获取方式，如本地目录、Git、HTTP 文档、反编译器或 schema provider | 不是游戏专属 handler |
-| `Resource Specification` | Game Pack 对代码、图片、音频、本地化等目标资产的声明 | 不自己实现资产处理算法 |
-| `Build Recipe` | 对构建步骤、工具、参数、依赖与预期产物的声明式描述 | 不是游戏专属构建代码 |
-| `Package Layout` | 对最终交付目录/压缩包布局与收集规则的声明 | 不是游戏专属打包 handler |
-| `Evidence Record` | `ArtifactManifest.evidence[]` 中记录的本次生成实际来源、symbol、bounded excerpt 与用途 | 不是独立 Markdown 文件，也不是下次生成可直接复用的行为答案缓存 |
-
-## 4. Game Pack 的逻辑结构
-
-下列只是目标逻辑布局，不表示本 ADR 已创建了所有目录或锁定了最终文件格式：
+采用四层结构：
 
 ```text
-games/<game-id>/
-  game.json          # 游戏标识、版本与能力需求
-  sources.json       # 真相源与 Source Provider 组合
-  resources/         # SDK、schema、指南、框架依赖等资源
-  templates/         # 稳定工程骨架，不固化易变行为答案
-  asset-specs/       # 目标资产类型、规格和路径
-  validation/        # schema、稳定约束与已知错误规则
-  build.json         # 构建图声明
-  package.json       # 交付布局声明
+Product Feature / User Intent
+              |
+              v
++-----------------------------------------------+
+| Core Execution Kernel                         |
+| DAG / queue / checkpoint / Run / Artifact     |
+| retry / circuit breaker / transaction/publish |
++----------------------+------------------------+
+                       |
+                       v
++-----------------------------------------------+
+| Game Pipeline Contract                        |
+| capability + typed node + input/output schema |
++----------------------+------------------------+
+                       |
+          +------------+-------------+
+          |                          |
+          v                          v
++---------------------+   +---------------------+
+| STS2 Provider       |   | Other Game Provider |
+| C# / BaseLib        |   | its own stages      |
+| dotnet / Godot / ZIP|   | and toolchain       |
++----------+----------+   +----------+----------+
+           ^                         ^
+           | exact ID/version/SHA    |
+           +-----------+-------------+
+                       |
+                  Game Pack
 ```
 
-为了避免过早抽象，第一阶段只需定义当前 STS2 必需的最小字段。只有第二个游戏接入后仍确实共用的结构，才应上升为通用 schema。
+核心原则：
 
-## 5. 真相源优先的生成流程
+- Core 负责可靠地执行一张有类型的图，不决定某个游戏需要哪些阶段。
+- `ats-game-context` 定义 Game Pipeline Provider、capability 和节点合同。
+- 受信任的 Game Adapter 实现游戏专属阶段，并把具体任务物化为执行图。
+- Game Pack 只通过精确 ID、version 和 SHA 选择已注册能力并提供声明数据。
+- AI 是可选 Primitive；没有模型步骤的游戏流水线同样是一等路径。
+- 用户只看到 Item 结果、校验状态和单 Item 调整入口，不直接操作 DAG、重试预算或编译诊断。
 
-游戏行为代码不从持久化“功能答案”直接生成，而是在每次任务中检索当前版本真相源，并将实际使用的证据写入本次任务记录。
+本文取代旧版“一条固定通用流水线 + Pack 声明所有构建步骤”的解释。旧版 Stage 1 已完成事实仍成立，但不再作为多游戏最终边界。
 
-```mermaid
-flowchart TD
-    Request["用户提出 Mod 功能"] --> Select["选择 Game Pack"]
-    Select --> Sync["获取并刷新当前游戏资源"]
-    Sync --> Search["检索官方相似实现、API 和调用顺序"]
-    Search --> Evidence{"证据是否充分？"}
-    Evidence -- "否" --> Draft["输出研究结果或实验草稿<br/>标记 unverified"]
-    Evidence -- "是" --> Generate["生成代码、资源与 Evidence Record"]
-    Generate --> Validate["执行通用验证器和 Game Pack 规则"]
-    Validate --> Gate{"结构、质量和编译是否通过？"}
-    Gate -- "否" --> Reject["拒绝正式写入<br/>保留诊断证据"]
-    Gate -- "是" --> Build["通用构建执行器"]
-    Build --> Package["通用打包执行器"]
-    Package --> Manual["用户真实游戏人工验收"]
+## 2. Scope / Trigger
+
+下列情况必须使用本合同：
+
+- 新接入一个游戏、Mod 框架或不同构建工具链；
+- 为现有游戏增加新的生成、验证、构建、打包或发布路径；
+- 当前 Feature 需要写死新的阶段顺序或游戏名称分支；
+- Pack 需要表达 Core 当前不认识的游戏能力；
+- 一个任务需要跨进程恢复、部分重试或最终原子发布。
+
+下列内容不属于本合同：
+
+- 某个模型或代理的响应格式兼容补丁；
+- 某个游戏 API 的临时 Prompt 修辞；
+- 将任意 shell、脚本或动态插件权限开放给 Pack；
+- 用自动校验替代真实游戏人工行为与视觉验收。
+
+## 3. 当前问题与证据
+
+当前 `composition.generate` 的实际图固定为：
+
+```text
+item.000.plan -> item.000.single -> ... -> composition.finalize
+-> registered validation -> build -> package -> publish
 ```
 
-检索结果可以缓存以减少 IO 和 token 成本，但缓存项必须带有真相源版本并可失效。LLM 对某个功能的语义推导不作为跨任务权威答案。
+这条路径对当前 STS2 Character 有效，也已经具备 checkpoint、Resume、多 Item repair 和原子发布能力。但它混合了两类不同稳定性：
 
-## 6. 模板、验证和构建的边界
-
-### 6.1 模板
-
-Game Pack 模板只保留工程文件、目录、依赖、入口、资源路径和本地化格式等稳定结构。不在通用模板或长期手写 guidance 中固化“某个功能必须使用某个 hook”这类易变行为答案。
-
-### 6.2 验证
-
-验证引擎实现可复用的规则类型，Game Pack 提供规则数据。例如，引擎实现 `forbidden_call_in_method`，STS2 Game Pack 可以提供“`BeforeCombatStart` 中禁止调用 `PlayerCmd.GainEnergy`”的已知回归规则。规则用于表达稳定 schema 或已证实的错误模式，不企图完整建模游戏行为。
-
-### 6.3 构建与打包
-
-通用构建器负责步骤依赖、命令执行、环境、超时、取消、日志、预期产物和失败分类；Game Pack 只描述使用哪些工具、参数和产物。通用打包器负责路径安全、文件收集、哈希、必需文件校验和压缩；Game Pack 只描述布局和 include/exclude。
-
-## 7. STS2 映射示例
-
-| 通用概念 | STS2 当前实例 |
+| 稳定、应跨游戏复用 | 随游戏变化、不应进入 Core |
 | --- | --- |
-| Truth Source | `sts2.dll`、BaseLib、反编译 C#、manifest schema、游戏日志 |
-| Source Provider | 本地文件、GitHub Release、HTTP 下载、`ilspycmd` 反编译 |
-| Resource Specification | relic normal/outline/big、`eng/zhs` 本地化、C# 与 manifest |
-| Build Recipe | `dotnet build/publish` 后调用 Godot `export-pack` |
-| Package Layout | Mod DLL、PCK、manifest 与 BaseLib 依赖布局 |
-| Validation Rule | manifest schema、资源路径、compile gate、已知 hook 错误规则 |
-| Manual Acceptance | 由用户在真实游戏内确认文本、视觉、行为和稳定性 |
+| DAG、claim、CAS、checkpoint、Resume | 是否需要 Plan 或 AI 生成 |
+| FIFO、退避、取消、circuit breaker | 生成源码还是编辑数据文件 |
+| typed failure、Run、Artifact、hash | 使用 C#、Java、Lua 或其他语言 |
+| staging、事务、原子发布、回滚 | 使用 dotnet、Gradle、Godot 或专属工具 |
+| 输入输出 schema 校验 | DLL、JAR、PCK 或游戏目录布局 |
 
-这些是 STS2 Game Pack 的内容，不是 STS2 独占的平台能力。图片处理、质量检测、编译执行、打包、文件事务与任务追踪应保持通用。
+2026-08-15 安装态 STS2 closure 还证明：即使 Core 的串行、退避和恢复机制正确，具体生成结果仍可能在 localization 形状或游戏 API 上失败。把更多 STS2 步骤写进通用 Feature 只会扩大耦合，不能解决多游戏差异。
 
-## 8. 接入新游戏的验收标准
+## 4. 分层职责
 
-当新游戏只使用平台已支持的 Source Provider、资源处理器、验证器、build runner 和 package runner 时：
+### 4.1 Core Execution Kernel
 
-- 只新增 Game Pack 及声明配置。
-- 不新增游戏专属 asset/code/build/package handler。
-- 不复制 Run history、Artifact Store、文件事务或 UI 流程。
-- 通过同一条主链完成资源获取、生成、验证、构建、打包和人工验收。
+建议归属：`ats-runtime`，由 `ats-features` 调用，`ats-workspace` 和 `ats-adapters` 提供持久化与外部端口实现。
 
-只有遇到新的、可跨游戏复用的基础能力时，才修改通用引擎，例如新反编译格式、新资源编码器、新 build runner 或新压缩格式。这类能力不得以游戏名称命名或只能被单个 Game Pack 调用。
+Core 负责：
 
-## 9. 明确不采用的方案
+- 校验并执行有向无环图；
+- claim、revision CAS、checkpoint、Resume 和 crash recovery；
+- 全局/图级队列、速率限制、退避、重试和 circuit breaker；
+- RunRecord、ArtifactManifest、输入输出 hash 和 provenance；
+- typed cancellation、failure、redaction 和 bounded evidence；
+- staging、事务、publish barrier、原子提交和回滚；
+- 只运行已注册、受信任、带版本的 Primitive。
 
-### 9.1 每游戏一套厚 GameAdapter
+Core 禁止认识：
 
-不让 STS2、Unity/BepInEx 或其他游戏分别重写资源生成、构建、打包、Run 与 UI 流程。这会形成平行子系统，增加漂移和维护成本。
+- `character`、`card`、`relic` 等游戏 Item 类型；
+- C#、Java、DLL、JAR、PCK、BaseLib 或 Godot；
+- 某个 Provider/model 的专用 Prompt 或降级逻辑；
+- 某个游戏的目录、hook、资源键或存档语义。
 
-### 9.2 每功能一条持久化行为契约
+### 4.2 Game Pipeline Contract
 
-不建立庞大的“行为配方 SSOT”。它本质上是对某次源码解释的语义缓存，会引入选择错误、过期迁移和“错误契约驱动全链一致犯错”的风险。平台保留当前真相源检索、本次 Evidence Record 和少量确定性回归规则。
+建议归属：`ats-game-context`。
 
-### 9.3 把当前 STS2 实现当成通用抽象
+该层只定义稳定接口和值对象：
 
-不将 C#、Godot、BaseLib、DLL/PCK、relic/card/power 或 STS2 hook 写入通用领域接口。这些只是第一个 Game Pack 的当前内容。
+- `GamePipelineProvider` 注册、身份与版本；
+- `GameCapabilityId`、`PipelineProfileId` 和 readiness；
+- `ResolvedPipelineGraph` 与 typed node schema；
+- 输入、输出、checkpoint、retry、validation 和 publish barrier 合同；
+- Pack 选择 Provider 时的精确绑定和 hash 校验。
 
-## 10. 结果与取舍
+它不实现 HTTP、filesystem、进程调用、Prompt 或某个游戏的 stage。
+
+### 4.3 Game Adapter / Pipeline Provider
+
+建议每个真实游戏使用独立受信任模块，例如后续新增 `ats-game-sts2`；当前 STS2 实现迁移前仍留在既有 Feature/Adapter 代码中。
+
+Provider 负责：
+
+- 判断当前 capability 是否可由该游戏、Pack、Truth 和工具链满足；
+- 把产品请求解析为确定性的 `ResolvedPipelineGraph`；
+- 定义游戏专属 stage 的输入输出和 validator；
+- 组合通用 Primitive 与少量受信任的游戏专属 Primitive；
+- 提供游戏专属失败映射和人工验收清单；
+- 保证图中不出现未注册 executor 或不受控命令。
+
+STS2 的 source/localization 合并、BaseLib 编译约束、Godot export 和 ZIP 布局属于 STS2 Provider，不属于 Core 通用术语。
+
+### 4.4 Game Pack
+
+建议继续位于 `game_packs/<game-id>/`，由 `ats-game-context` 受控加载。
+
+Pack 负责声明：
+
+- 精确 game/pack identity、version 和 content SHA；
+- Item types、fields、locales、references、Resource profiles 和 Truth Queries；
+- 允许选择的 `providerId + providerVersion + pipelineProfileId`；
+- 模板、静态资源、校验数据和受限参数；
+- 当前游戏的用户验收清单。
+
+Pack 不得包含：
+
+- 任意 shell 命令或可拼接命令行；
+- 原生动态插件或未注册二进制；
+- Provider credential、环境秘密或绝对调用方路径；
+- 可绕过 typed node、validation 或 publish barrier 的完整工作流实现。
+
+### 4.5 Product Feature 与 Shell
+
+`ats-features` 继续拥有公开产品能力与用户意图，例如生成一个 Item、生成一个组合、调整一个 Item。Feature 负责请求 Provider 解析图并交给 Core 执行，不再硬编码每个游戏的阶段表。
+
+React/Tauri 只展示：
+
+```text
+准备中 -> 生成中 -> 检查中 -> 构建中 -> 可使用
+                         |
+                         +-> 需要调整 -> 选择具体 Item -> 输入调整词
+```
+
+普通用户不需要选择 Primitive、编辑 DAG、阅读 retry class 或控制每个内部 node。
+
+## 5. Signatures
+
+以下合同的 identity、registry、request、node、graph 和 digest 类型已在 `ats-game-context` 实现；capability/output-ref 的进一步通用化仍属于后续工作：
+
+```rust
+pub trait GamePipelineProvider: Send + Sync {
+    fn identity(&self) -> GamePipelineProviderIdentity;
+
+    fn capabilities(
+        &self,
+        context: &VerifiedGameContext,
+    ) -> Result<Vec<GamePipelineCapability>, PipelineResolutionError>;
+
+    fn resolve(
+        &self,
+        request: ResolveGamePipelineRequest,
+        context: &VerifiedGameContext,
+    ) -> Result<ResolvedPipelineGraph, PipelineResolutionError>;
+}
+
+pub struct ResolveGamePipelineRequest {
+    pub owner_feature_id: FeatureId,
+    pub capability_id: GameCapabilityId,
+    pub pipeline_profile_id: PipelineProfileId,
+    pub root_input: TypedValueRef,
+    pub expected_pack_sha256: Sha256Digest,
+    pub expected_truth_sha256: Sha256Digest,
+}
+
+pub struct ResolvedPipelineGraph {
+    pub schema_version: u32,
+    pub provider: GamePipelineProviderIdentity,
+    pub owner_feature_id: FeatureId,
+    pub nodes: Vec<PipelineNode>,
+    pub outputs: Vec<TypedOutputRef>,
+    pub graph_digest: Sha256Digest,
+}
+
+pub struct PipelineNode {
+    pub id: ExecutionNodeId,
+    pub primitive_id: PrimitiveId,
+    pub primitive_version: u32,
+    pub consumes: Vec<TypedInputRef>,
+    pub produces: Vec<TypedOutputSpec>,
+    pub depends_on: Vec<ExecutionNodeId>,
+    pub checkpoint_policy: CheckpointPolicy,
+    pub retry_class: RetryClass,
+    pub validation: Vec<ValidationBinding>,
+    pub publish_barrier: PublishBarrier,
+}
+```
+
+约束：
+
+- `owner_feature_id` 表示谁拥有用户操作和最终结果；node 不是新的 catalog Feature。
+- `primitive_id + primitive_version` 必须在受信任 registry 中精确注册。
+- `consumes/produces` 使用 schema ID 和 content hash，不使用隐式临时路径传值。
+- `depends_on` 必须闭合、无环且顺序确定；相同输入必须得到相同 graph digest。
+- `checkpoint_policy` 明确可恢复边界，不能由 executor 临时猜测。
+- `retry_class` 只分类失败；具体次数、退避和总预算由 Core policy 固定。
+- 任何对最终目录可见的 node 都必须位于同一个 `publish_barrier` 之后。
+
+## 6. Primitive 与 AI 边界
+
+Primitive 是受信任、版本化、有类型的最小执行能力，例如：
+
+```text
+model.generate.typed@1
+media.generate.raster@1
+resource.transform.png@1
+files.merge.typed@1
+process.dotnet.publish@1
+archive.zip.exact@1
+sts2.localization.validate@1
+sts2.godot.export_pack@1
+```
+
+前六项是否真正通用，由第二个真实游戏用例和测试证明；带 `sts2.` 前缀的能力明确留在 STS2 Provider。
+
+AI 不具有特殊编排地位：
+
+- 需要创作时，Provider 可以加入一个或多个 bounded model/media node；
+- 只转换现有文件时，图可以完全没有 AI node；
+- AI 输出永远先进入 typed validation/checkpoint，不直接写最终工程；
+- 技术修复与用户单 Item 调整仍走同一 Provider 解析出的受控子图；
+- Core 不按模型名称切换格式、Prompt 或游戏逻辑。
+
+## 7. Pipeline 示例
+
+### 7.1 STS2 Character
+
+```text
+resolve typed Item closure
+        |
+        v
+plan/generate each owned source bundle       [optional AI]
+        |
+        v
+merge source + flat localization             [STS2 rule]
+        |
+        v
+validate ownership / API / resources         [STS2 validators]
+        |
+        v
+dotnet publish -> Godot export-pack          [STS2 toolchain]
+        |
+        v
+collect exact DLL/PCK/manifest -> ZIP
+        |
+        v
+one publish barrier -> Artifact + project
+```
+
+### 7.2 数据驱动游戏
+
+```text
+load typed Item definitions
+        |
+        v
+render JSON/data tables                       [no AI required]
+        |
+        v
+schema + reference validation
+        |
+        v
+copy exact assets -> archive -> publish
+```
+
+### 7.3 Java Mod 游戏
+
+```text
+generate or update Java/resources             [AI optional]
+        |
+        v
+game-specific validation -> Gradle build
+        |
+        v
+collect JAR/metadata -> publish
+```
+
+三条路径复用相同的 graph、Run、checkpoint、retry、Artifact 和事务语义，但不共享一张固定阶段表。
+
+## 8. Validation & Error Matrix
+
+| 条件 | 归属与稳定结果 | 是否执行外部工作 |
+| --- | --- | --- |
+| Pack 指向未知 Provider/version/profile | `pack.contribution_invalid` | 否 |
+| Provider 与 pinned Pack/Truth 不匹配 | `game.pipeline.context_mismatch` | 否 |
+| 图有环、缺依赖、重复 node 或 digest 不匹配 | `game.pipeline.invalid` | 否 |
+| Primitive 未注册或版本漂移 | `game.pipeline.primitive_unavailable` | 否 |
+| node 输入 schema/hash 不匹配 | `game.pipeline.input_invalid` | 否 |
+| Provider transport/rate limit | 原始 `model.*`/`media.*`，按 Core bounded retry | 仅当前 node |
+| AI typed output 不合法 | Feature feedback policy；无宽松解析 | 仅受控修订 node |
+| 游戏 validator 发现 generated-content issue | Provider 归属后形成有界 repair subgraph | 不发布 |
+| 本地工具链、锁或配置失败 | typed local failure；不发送给模型 | 不重试 AI |
+| checkpoint 与 pinned context 不一致 | `game.pipeline.checkpoint_invalid` | 不猜测恢复 |
+| build/package 失败 | graph paused/failed；保留 checkpoint | 不发布 |
+| publish 前取消或崩溃 | cleanup/recovery 后 paused/cancelled | 无部分最终目录 |
+| publish intent 已提交后崩溃 | Core 只前滚恢复 | 不回到 AI node |
+| 人工真实游戏验收失败 | 新 adjustment/revision Run | 不篡改旧 Artifact |
+
+所有失败必须保留 typed stage、retryability、safe action 和脱敏 evidence。Provider body、credential、raw completion 和任意用户路径不得进入 Graph、Run 或 IPC。
+
+## 9. Good / Base / Bad Cases
+
+### Good
+
+- STS2 Provider 解析出 C#、localization、dotnet、Godot 和 ZIP 节点；Core 只按 typed DAG 执行。
+- 数据型游戏 Provider 生成一张没有模型节点、没有编译节点的图，仍得到完整 Run 和 Artifact。
+- 某个 Item 修复后只替换该 Item 的 checkpoint，随后运行 Provider 声明的完整闭包验证。
+- 新增游戏时新增 Provider、Pack 和 fixture，不修改 Runtime 的游戏分支。
+
+### Base
+
+- 单 Item、小输出仍可解析为一至数个 node，不强迫所有请求使用大型 composition 图。
+- 多个游戏可以复用相同 Primitive，但各自拥有不同依赖关系、参数 schema 和人工验收项。
+- Provider 可以声明一个步骤不可重试；Core 仍统一记录失败、释放 claim 和清理 staging。
+
+### Bad
+
+- 在 Core 中写 `if game_id == "sts2"` 后执行 Godot。
+- 让所有游戏固定经过 Plan、Single、Build、PCK 和 ZIP。
+- 让 Pack 提供 `command: "..."`、任意参数或动态库路径。
+- 因 Provider 不稳定在同一 Run 内自动换模型、endpoint 或 response format。
+- 将模型输出直接写入最终工程，再尝试验证或回滚。
+- 为兼容旧 Graph 猜测缺失 stage、输入 schema 或 checkpoint 内容。
+
+## 10. Wrong vs Correct
+
+Wrong - Feature 固定跨游戏阶段：
+
+```rust
+plan()?;
+single_generate()?;
+dotnet_build()?;
+godot_export()?;
+zip()?;
+```
+
+Correct - Feature 固定用户意图，Provider 决定阶段，Core 可靠执行：
+
+```rust
+let provider = game_pipeline_registry.resolve(&verified_context)?;
+let graph = provider.resolve(request, &verified_context)?;
+let graph = execution_kernel.validate_and_persist(graph)?;
+execution_kernel.run(graph).await
+```
+
+Wrong - Pack 注入任意命令：
+
+```json
+{ "command": "powershell", "args": ["..."] }
+```
+
+Correct - Pack 选择受信任的版本化能力：
+
+```json
+{
+  "providerId": "sts2",
+  "providerVersion": 1,
+  "pipelineProfileId": "character_mod_v1"
+}
+```
+
+## 11. 物理落点
+
+| 位置 | 目标改动 | 明确不放入 |
+| --- | --- | --- |
+| `ats-kernel` | 稳定 ID、schema/hash value objects | 游戏阶段和 executor |
+| `ats-runtime` | 通用 pipeline graph、queue、retry、checkpoint、commit 状态机 | STS2/语言/工具链名称 |
+| `ats-game-context` | Provider trait、registry、capability、resolved graph schema、Pack binding | 外部 IO 和产品编排 |
+| `ats-workspace` | graph/checkpoint/revision stores 与 publication journal | 游戏规则 |
+| `ats-features` | 用户意图、Provider resolution、执行与结果映射 | 固定游戏 stage list |
+| `ats-adapters` | HTTP、filesystem、process、archive、media 等通用 port 实现 | Feature 或 Pack 业务判断 |
+| `ats-game-sts2`（拟新增） | STS2 Provider、专属 Primitive/validator、图物化 | Core 状态机复制品 |
+| `game_packs/sts2` | pinned data、profile、templates、resources、Truth Queries | 任意脚本和 credential |
+| Tauri / React | typed command、进度投影、Item 结果与调整入口 | DAG 编辑器和技术策略面板 |
+
+若实践证明一个 Primitive 只有 STS2 使用，就保留在 `ats-game-sts2`；只有第二个真实 Provider 复用并且语义一致时，才提升到通用 Adapter。
+
+## 12. 破坏性迁移计划
+
+用户已允许不保留旧数据兼容。实施时采用 schema cutover，不增加兼容读取或双写：
+
+1. 在 `ats-game-context` 定义 Provider v1、Pipeline Graph v1、typed nodes 和 registry；stable specs 同步为可执行合同。
+2. 在 Runtime 抽取通用 graph executor、graph-total policy 和 publish barrier；保留现有 Run/Artifact 不变量。
+3. 建立 STS2 Provider，将当前 `plan -> single -> finalize -> validate -> build -> package` 精确迁移为 STS2 图，先做到行为等价。
+4. 用不含 C#、Godot、DLL/PCK 和 AI 的 synthetic Provider 证明 Core 中没有 STS2 隐式假设。
+5. 将 `composition.generate` 改为请求 Provider 物化图，删除原硬编码阶段表和旧 schema reader。
+6. 完成 focused、workspace、DAG、desktop、frontend、GUI、真实 STS2 build/package 和安装态 E2E。
+7. 代码变化后构建全新 candidate、全新 Truth/Item/Run/Graph/Artifact；旧候选只保留诊断价值。
+
+每一步都必须直接完成 cutover 或保持尚未接线，禁止同时维护“旧固定流程 + 新 Provider 流程”的长期双主链。
+
+## 13. Tests Required
+
+### Contract tests
+
+- Provider identity/version/profile 与 Pack SHA 精确绑定。
+- graph 闭合、DAG、稳定排序、digest、typed input/output 和 Primitive registry。
+- 未注册 Primitive、循环依赖、schema 漂移、unsafe path 在执行前拒绝。
+- Pack 不能表达任意 shell、credential 或动态 plugin。
+
+### Runtime tests
+
+- node success/failure/cancel、claim/CAS、checkpoint、crash/Resume 和 no-replay。
+- FIFO、间隔、bounded retry、circuit breaker 与 graph-total budget。
+- publish barrier 前零最终写入；commit intent 后只前滚。
+- Run/Artifact/hash、redaction、staging cleanup 和 project lock recovery。
+
+### Provider tests
+
+- STS2 Character 的 source/localization/compile/PCK/ZIP 图和当前输出行为等价。
+- synthetic data-only Provider 不调用 AI、dotnet 或 Godot。
+- generated-content issue 只能由 owning Provider 分类并形成有界 repair subgraph。
+- local/toolchain/configuration issue 不进入模型修复。
+
+### End-to-end gates
+
+- 精确 Feature catalog 和 Cargo dependency DAG。
+- workspace tests、check、clippy、frontend tests、TypeScript 和 production build。
+- isolated GUI E2E 覆盖创建、暂停、恢复、取消和单 Item 调整。
+- 新 candidate 的 fresh installed closure、Artifact/ZIP/最终目录/零残留。
+- 用户在真实游戏中完成加载、游玩、奖励、存档恢复和日志验收。
+
+## 14. 影响、风险与授权
 
 ### 正向结果
 
-- 多游戏复用同一条产品主链，避免复制生成、验证、构建和打包能力。
-- 游戏差异收敛为可审查、可更新和可版本化的资源与声明数据。
-- 行为生成以当前真相源为依据，不把历史 Markdown 示例当作永久答案。
-- 新增基础能力时必须能被多个 Game Pack 复用，防止游戏特例渗入通用核心。
+- 不同游戏可以拥有真正不同的构建链路，而不复制可靠性内核。
+- AI 失败、工具链失败和游戏规则失败保持分层，不互相伪装成重试。
+- Pack 仍然可审查、可哈希、可固定，同时不获得任意代码执行能力。
+- 新游戏接入时，改动集中在 Provider + Pack；Core 的变化必须由真实复用需求证明。
 
-### 成本和风险
+### 风险与取舍
 
-- 行为代码每次生成都需要针对当前真相源检索和推理，会增加少量 IO、时间和 token 成本。
-- 声明式 build/package/resource schema 需要在表达能力与复杂度之间保持节制，不应发展成一门新的通用编程语言。
-- 当某游戏确实需要新基础能力时，可能需要扩展 Source Provider、资源处理器或 runner；扩展前必须检查是否可复用。
-- 源码证据与静态/编译验证仍无法完全代替真实游戏行为和视觉验收。
+- 引入 Provider 合同和 STS2 迁移会触及 Composition Generate 主链，影响面高于局部修复。
+- 过度细化 Primitive 会把图变成难维护的内部 DSL；过度粗化又会复制 checkpoint/retry。
+- 只有 STS2 一个真实样本时，不能把所有 STS2 helper 提前改名为“通用”。
+- Provider 是受信任代码，需要随应用发布；Pack 不能在运行时扩展任意执行能力。
 
-## 11. 实施约束
+### Candidate 影响
 
-- 本 ADR 固化目标边界，不授权立即大范围重构现有 STS2 实现。
-- 当前问题修复应优先使用最小可验证的通用抽象：源码取证、轻量回归规则、图片质量门禁和 schema 校验。
-- Game Pack 文件格式、加载路径和 runner 协议属于后续实施设计，需要基于当前代码和第二个游戏用例单独确认。
-- 接入第二个游戏时，以“是否只需新增 Game Pack”作为通用化验收；不在只有 STS2 一个样本时预测并穷举所有游戏差异。
+本轮已经完成跨 crate 代码 cutover 和机器门禁。所有既有 candidate、Truth、Run、Graph 和 Artifact 只能保留诊断价值，不得代表当前实现；取得明确授权后，必须重新构建并使用全新物理验收根。
 
-## 12. Stage 1 实施状态（2026-07-30）
+### 需要明确授权的步骤
 
-- 已实现最小 Game Pack schema、受控 loader/registry、工程 `game_id` 绑定、内容寻址 Truth Snapshot 和固定 Run `VerifiedGameContext`。
-- STS2 的 guidance、稳定工程模板、manifest、资源规格、验证规则、build recipe 和 package layout 已迁移到 `game_packs/sts2/`；Core 只保留有限、可复用的执行器。
-- 旧 `SourceMode` 生成 fallback、Core 内嵌 STS2 guidance/templates、全局 `mod_template` 和专属 build/package 硬编码已从生产链删除；最小非 STS2 fixture 用于防止执行器依赖游戏名称。
-- 最终隔离桌面 E2E 已完成 Snapshot refresh、生成、compile、build、PCK 和精确 ZIP 检查。模板固定 BaseLib `3.3.8` 与 ModAnalyzers `0.1.9`，自动证据位于 `.tmp/e2e-runs/1785417051-99088/gate0-candidate-evidence.json`。
-- 本 ADR 的人工验收边界保持不变：真实游戏行为、视觉、加载、稳定性和日志由用户完成，自动结果不替代该结论。2026-07-30 最终候选已通过该人工验收。
-- Stage 1 不将当前单一 STS2 workstation Settings/发现 UI 或有限 `Sts2CodeFactsProvider` 宣称为完整多游戏产品；第二个真实游戏出现后再依据共同需求提升这些边界，避免提前扩张 schema。
+- 开始跨 crate 的 Provider/Runtime/Feature 代码重构；
+- 构建或安装新的 release candidate；
+- 发布、push、rebase 或历史改写；
+- 操作真实游戏 UI；
+- 删除旧 schema 数据或任何历史验证证据。
 
-## 13. Stage 2 开工前耦合库存（2026-08-02）
+当前已允许未来 schema 破坏性升级，但该允许不等同于删除历史 evidence；旧目录保持只读证据，不做兼容读取。
 
-这份库存只说明当前基线和后续决策触发条件，不定义 Stage 2 的具体产品目标，也不要求在选定第二个真实用例前消除所有 STS2 名称。
+## 15. 完成定义
 
-| 当前耦合 | 所有者与现状 | Stage 2 处理门槛 |
-| --- | --- | --- |
-| `game_pack/registry.rs` 内嵌 STS2 manifest/resources | 交付组合层负责安装当前唯一内置 Pack；loader、registry 查询和 Pack 校验本身不按 `game_id` 分支 | 只有确认第二个内置 Pack 或动态安装时，才扩展安装/发现机制；不得把 STS2 资源搬回通用 handler |
-| `knowledge/sts2_*` 与 `sts2_code_facts` provider | 当前唯一真实源码事实执行器；Pack 声明选择它，Snapshot identity 绑定 provider/indexer | 新游戏需要不同事实模型时先做真实样本；可复用部分才提升为通用 provider，不能只改名伪装通用化 |
-| `config.knowledge.sts2_dll_path`、STS2 discovery、前端 `INSTALLED_GAME_PACK_ID` | workstation 和当前单 Pack UI 的显式产品限制，不是工程 schema 的隐式默认；工程仍持久化并校验 `game_id` | 第二个 Pack 需要可配置本地输入或 UI 选择时，改为 Pack input map/installed Pack 列表，并保持未知或缺失 ID 确定性拒绝 |
-| structured asset 的 `csharp` bundle、固定资产类型和 `dotnet` compile gate | 当前 STS2 资产生成纵向链仍以 C#/.NET 为真实样本；资源路径、尺寸和富文本标签已由 Pack 声明 | 只有 Stage 2 目标需要另一语言、资产族或编译器时扩展 capability/executor；不得把 C#/Godot/BaseLib 写成所有 Game Pack 的必填字段 |
-| `dotnet_project` / `dotnet_file` indexer 与 `dotnet_publish` build runner | loader 只允许有限、可审查的 runner/indexer；package executor 已按声明精确取文件 | 新目标先复用现有有限执行器；确需新增时使用稳定 ID、typed failure、取消/回滚和 Good/Base/Bad fixture，禁止 shell 逃生口 |
-| STS2 package layout 与真实 DLL/PCK/BaseLib 文件 | 仅存在于 `game_packs/sts2/`；Core package handler 的非 STS2 fixture 使用 generic `.bundle` 布局 | 新 Pack 应只声明自己的布局；通用打包器不得出现 STS2 ID、C#、Godot、BaseLib 或 DLL/PCK 常量 |
+Provider foundation 只有同时满足下列机器条件才算实现，而不是仅凭 ADR 标记 Accepted；当前均已满足：
 
-Readiness gate 的结论边界：
-
-- 通用 Core 不存在 `game_id == "sts2"` 的生产分支；已声明化的 guidance/template/resource/validation/build/package 内容继续由 Pack 所有。
-- Pack-neutral package fixture 只证明声明校验、精确布局和原子 ZIP 执行器不依赖 STS2 技术栈；它不宣称当前 structured asset、provider 或 UI 已支持任意游戏。
-- 第二个真实用例优先按“只新增 Game Pack”实现；只有现有 capability 无法表达且新能力具备跨游戏复用价值时，才扩展 Core。
-- 任何新增 executor 必须同时给出输入/输出 schema、typed failure、取消、回滚、脱敏、确定性 fixture 和真实用例证据，不能用任意 shell/plugin 执行绕过边界。
+1. Core 执行图合同不包含游戏、语言、工具链或 AI 必选假设。
+2. STS2 Provider 完整承接当前构建链并通过行为等价门禁。
+3. 至少一个 data-only synthetic Provider 证明不同阶段图可运行。
+4. Pack 只能选择注册能力，无法注入任意执行逻辑。
+5. 所有恢复、失败、事务、Artifact 和用户调整不变量继续成立。
+上述 cutover 与 foundation 机器门禁已经完成；stable backend/frontend specs 和现有实现是当前可执行事实。父任务仍须另行以新 candidate 完成 fresh installed closure，并由用户明确确认真实 STS2 验收；这些 O9 门禁不反向改变 Provider foundation 的机器完成状态。

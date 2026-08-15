@@ -1,3 +1,7 @@
+use ats_game_context::{
+    PipelineCheckpointPolicy, PipelineNodePhase, PipelineNodeScope, PipelineResolveRequest,
+    PipelineWorkItem, ResolvedPipelineGraph,
+};
 use ats_kernel::{ExecutionNodeId, GamePackId, ItemId};
 use ats_runtime::{
     ExecutionAdjustment, ExecutionCommitIntent, ExecutionFailure, ExecutionGraphRecord,
@@ -74,8 +78,39 @@ struct StagedCompositionGenerateBlueprint {
     truth_snapshot_id: Sha256Digest,
     request: CompositionGenerateRequest,
     graph_digest: Sha256Digest,
+    pipeline: ResolvedPipelineGraph,
+    prepare: CompiledPreparePipeline,
     items: Vec<StagedCompositionGenerateItem>,
-    finalize_node_id: ExecutionNodeId,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+enum CompiledPreparePipeline {
+    ItemGeneration { output_node_id: ExecutionNodeId },
+    DataJson { output_node_id: ExecutionNodeId },
+}
+
+impl CompiledPreparePipeline {
+    fn output_node_id(&self) -> &ExecutionNodeId {
+        match self {
+            Self::ItemGeneration { output_node_id } | Self::DataJson { output_node_id } => {
+                output_node_id
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct CompiledDeliveryPipeline {
+    validation: Option<(ExecutionNodeId, ats_kernel::PrimitiveId)>,
+    build_node_id: Option<ExecutionNodeId>,
+    package_node_id: Option<ExecutionNodeId>,
+    publish_node_id: ExecutionNodeId,
 }
 
 enum CampaignRevision {
@@ -110,10 +145,21 @@ struct StagedSingleCheckpoint {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct StagedFinalizeCheckpoint {
     graph_digest: Sha256Digest,
-    validation_primitive: ats_kernel::PrimitiveId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    validation_primitive: Option<ats_kernel::PrimitiveId>,
     generated_file_count: u32,
     items: Vec<CompositionItemRunResult>,
 }
+
+type PreparedCompositionAssembly = Result<
+    (
+        Vec<SingleGenerateCompositionProposal>,
+        Vec<ProjectFileWrite>,
+        Vec<ProposedArtifactFile>,
+        StagedFinalizeCheckpoint,
+    ),
+    CompositionGenerateError,
+>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -145,7 +191,6 @@ impl CompositionGenerateService<'_> {
         let contribution: CompositionGenerateContribution = context
             .composition_contributions
             .decode(&generation_slot())?;
-        contribution.validate()?;
         let resolved = ResolvedItemGraph::resolve(
             context.pack,
             context.truth,
@@ -158,58 +203,23 @@ impl CompositionGenerateService<'_> {
         let execution_graph_id = ExecutionGraphId::new();
         let mut blueprint_request = request.clone();
         blueprint_request.execution = None;
-        let finalize_node_id = ExecutionNodeId::parse("composition.finalize")
-            .map_err(|_| CompositionGenerateError::InvalidInput)?;
-        let mut staged_items = Vec::with_capacity(resolved.nodes.len());
-        let mut specs = Vec::with_capacity(resolved.nodes.len() * 2 + 1);
-        let mut previous_single = None;
-        for (index, definition) in resolved.nodes.iter().enumerate() {
-            let plan_node_id = ExecutionNodeId::parse(format!("item.{index:03}.plan"))
-                .map_err(|_| CompositionGenerateError::InvalidInput)?;
-            let single_node_id = ExecutionNodeId::parse(format!("item.{index:03}.single"))
-                .map_err(|_| CompositionGenerateError::InvalidInput)?;
-            let plan_dependencies = previous_single.iter().cloned().collect::<Vec<_>>();
-            specs.push(ExecutionNodeSpec {
-                node_id: plan_node_id.clone(),
-                role_id: "mod.plan".into(),
-                depends_on: plan_dependencies,
-                request_snapshot_hash: zero_digest()?,
-            });
-            specs.push(ExecutionNodeSpec {
-                node_id: single_node_id.clone(),
-                role_id: "mod.generate.single".into(),
-                depends_on: vec![plan_node_id.clone()],
-                request_snapshot_hash: zero_digest()?,
-            });
-            staged_items.push(StagedCompositionGenerateItem {
-                item_id: definition.definition.item_id.clone(),
-                definition_hash: definition.definition_hash.clone(),
-                plan_node_id,
-                single_node_id: single_node_id.clone(),
-            });
-            previous_single = Some(single_node_id);
-        }
-        let finalize_dependencies = previous_single.into_iter().collect::<Vec<_>>();
-        if finalize_dependencies.is_empty() {
-            return Err(CompositionGenerateError::InvalidInput);
-        }
-        specs.push(ExecutionNodeSpec {
-            node_id: finalize_node_id.clone(),
-            role_id: "composition.finalize".into(),
-            depends_on: finalize_dependencies,
-            request_snapshot_hash: zero_digest()?,
-        });
+        let pipeline_request = pipeline_request(&resolved, &contribution.pipeline.profile_id);
+        let pipeline = self
+            .pipelines
+            .resolve(&contribution.pipeline, &pipeline_request)?;
+        let (prepare, staged_items, _, specs) = compile_generation_nodes(&pipeline, &resolved)?;
         let blueprint = StagedCompositionGenerateBlueprint {
-            schema_version: 3,
+            schema_version: 6,
             game_pack_id: context.pack.id().clone(),
             game_pack_sha256: context.pack.content_sha256().clone(),
             truth_snapshot_id: context.truth.manifest().snapshot_id().clone(),
             request: blueprint_request,
             graph_digest: resolved.graph_digest.clone(),
+            pipeline,
+            prepare,
             items: staged_items,
-            finalize_node_id,
         };
-        blueprint.validate(&context, &resolved, &request)?;
+        blueprint.validate(self.pipelines, &context, &resolved, &request)?;
         request.execution = Some(CompositionGenerateExecutionRequest::Start {
             execution_graph_id: execution_graph_id.clone(),
         });
@@ -246,7 +256,7 @@ impl CompositionGenerateService<'_> {
             .payload
             .decode(&blueprint_schema())
             .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
-        blueprint.validate_identity(&context)?;
+        blueprint.validate_identity(self.pipelines, &context)?;
         let previous_run_id = graph
             .previous_run_id()
             .cloned()
@@ -294,7 +304,7 @@ impl CompositionGenerateService<'_> {
             .payload
             .decode(&blueprint_schema())
             .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
-        blueprint.validate_identity(&context)?;
+        blueprint.validate_identity(self.pipelines, &context)?;
         let item = blueprint
             .items
             .iter()
@@ -420,7 +430,7 @@ impl CompositionGenerateService<'_> {
             .payload
             .decode(&blueprint_schema())
             .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
-        blueprint.validate_identity(&context)?;
+        blueprint.validate_identity(self.pipelines, &context)?;
         let resolved = ResolvedItemGraph::resolve(
             context.pack,
             context.truth,
@@ -430,7 +440,7 @@ impl CompositionGenerateService<'_> {
             request.root.clone(),
             request.draft.clone(),
         )?;
-        blueprint.validate(&context, &resolved, &request)?;
+        blueprint.validate(self.pipelines, &context, &resolved, &request)?;
         match request.execution.as_ref() {
             Some(CompositionGenerateExecutionRequest::Start { .. })
                 if graph.previous_run_id().is_none() && request.adjustment.is_none() => {}
@@ -801,61 +811,59 @@ impl CompositionGenerateService<'_> {
             }
         }
 
+        let output_node_id = blueprint.prepare.output_node_id();
         let finalize_was_pending = graph.status() == ExecutionGraphStatus::Running
-            && node_status(&graph, &blueprint.finalize_node_id)? != ExecutionNodeStatus::Succeeded;
+            && node_status(&graph, output_node_id)? != ExecutionNodeStatus::Succeeded;
         if finalize_was_pending {
-            start_local_node(&mut graph, graphs, &blueprint.finalize_node_id, run.id())?;
+            start_local_node(&mut graph, graphs, output_node_id, run.id())?;
         }
-        let assembled = (|| {
-            let (proposals, item_results) = restore_proposals(
-                self,
-                dependencies.resources,
-                &request,
-                &context,
-                &resolved,
-                &blueprint,
-                &graph,
-                runs,
-            )?;
-            let validation_primitive = proposals
-                .first()
-                .map(|proposal| proposal.result.validation_primitive.clone())
-                .ok_or(CompositionGenerateError::InvalidCheckpoint)?;
-            if proposals
-                .iter()
-                .any(|proposal| proposal.result.validation_primitive != validation_primitive)
-            {
-                return Err(CompositionGenerateError::ValidationPrimitiveMismatch);
-            }
-            let (generated_writes, generated_artifact_files) =
-                consolidate_proposed_files(&proposals)?;
-            ats_runtime::validate_project_writes(&generated_writes)?;
-            let finalize_checkpoint = StagedFinalizeCheckpoint {
-                graph_digest: resolved.graph_digest.clone(),
-                validation_primitive,
-                generated_file_count: u32::try_from(generated_artifact_files.len())
-                    .map_err(|_| CompositionGenerateError::InvalidInput)?,
-                items: item_results,
-            };
-            Ok((
-                proposals,
-                generated_writes,
-                generated_artifact_files,
-                finalize_checkpoint,
-            ))
-        })();
+        let assembled = match &blueprint.prepare {
+            CompiledPreparePipeline::ItemGeneration { .. } => (|| {
+                let (proposals, item_results) = restore_proposals(
+                    self,
+                    dependencies.resources,
+                    &request,
+                    &context,
+                    &resolved,
+                    &blueprint,
+                    &graph,
+                    runs,
+                )?;
+                let validation_primitive = proposals
+                    .first()
+                    .map(|proposal| proposal.result.validation_primitive.clone())
+                    .ok_or(CompositionGenerateError::InvalidCheckpoint)?;
+                if proposals
+                    .iter()
+                    .any(|proposal| proposal.result.validation_primitive != validation_primitive)
+                {
+                    return Err(CompositionGenerateError::ValidationPrimitiveMismatch);
+                }
+                let (generated_writes, generated_artifact_files) =
+                    consolidate_proposed_files(&proposals)?;
+                ats_runtime::validate_project_writes(&generated_writes)?;
+                let finalize_checkpoint = StagedFinalizeCheckpoint {
+                    graph_digest: resolved.graph_digest.clone(),
+                    validation_primitive: Some(validation_primitive),
+                    generated_file_count: u32::try_from(generated_artifact_files.len())
+                        .map_err(|_| CompositionGenerateError::InvalidInput)?,
+                    items: item_results,
+                };
+                Ok((
+                    proposals,
+                    generated_writes,
+                    generated_artifact_files,
+                    finalize_checkpoint,
+                ))
+            })(),
+            CompiledPreparePipeline::DataJson { .. } => render_data_json(&resolved),
+        };
         let (proposals, generated_writes, generated_artifact_files, finalize_checkpoint) =
             match assembled {
                 Ok(value) => value,
                 Err(error) => {
                     if finalize_was_pending {
-                        pause_failed_node(
-                            &mut graph,
-                            graphs,
-                            &blueprint.finalize_node_id,
-                            run.id(),
-                            &error,
-                        )?;
+                        pause_failed_node(&mut graph, graphs, output_node_id, run.id(), &error)?;
                     } else if graph.status() == ExecutionGraphStatus::CommitPrepared
                         && graph.active_run_id() == Some(run.id())
                     {
@@ -868,28 +876,20 @@ impl CompositionGenerateService<'_> {
             complete_node(
                 &mut graph,
                 graphs,
-                &blueprint.finalize_node_id,
+                output_node_id,
                 run.id(),
                 VersionedPayload::from_typed(finalize_checkpoint_schema(), &finalize_checkpoint)?,
             )?;
         }
-        let mut persisted_finalize: StagedFinalizeCheckpoint = decode_checkpoint(
-            &graph,
-            &blueprint.finalize_node_id,
-            &finalize_checkpoint_schema(),
-        )?;
+        let mut persisted_finalize: StagedFinalizeCheckpoint =
+            decode_checkpoint(&graph, output_node_id, &finalize_checkpoint_schema())?;
         if persisted_finalize != finalize_checkpoint {
             let checkpoint =
                 VersionedPayload::from_typed(finalize_checkpoint_schema(), &finalize_checkpoint)?;
             if graph.status() == ExecutionGraphStatus::Repairing {
                 // A resumed campaign may contain completed targets newer than finalize.
                 mutate_graph(&mut graph, graphs, |graph| {
-                    graph.replace_checkpoint(
-                        &blueprint.finalize_node_id,
-                        run.id(),
-                        checkpoint,
-                        Utc::now(),
-                    )
+                    graph.replace_checkpoint(output_node_id, run.id(), checkpoint, Utc::now())
                 })?;
             } else if graph.status() == ExecutionGraphStatus::Running
                 && graph
@@ -899,7 +899,7 @@ impl CompositionGenerateService<'_> {
             {
                 mutate_graph(&mut graph, graphs, |graph| {
                     graph.replace_checkpoint_while_running(
-                        &blueprint.finalize_node_id,
+                        output_node_id,
                         run.id(),
                         checkpoint,
                         Utc::now(),
@@ -921,6 +921,7 @@ impl CompositionGenerateService<'_> {
                 &request,
                 &context,
                 &resolved,
+                &blueprint.pipeline,
                 proposals,
                 generated_writes,
                 generated_artifact_files,
@@ -949,6 +950,7 @@ impl CompositionGenerateService<'_> {
         request: &CompositionGenerateRequest,
         context: &CompositionGenerateContext<'_>,
         resolved: &ResolvedItemGraph,
+        pipeline: &ResolvedPipelineGraph,
         proposals: Vec<SingleGenerateCompositionProposal>,
         generated_writes: Vec<ProjectFileWrite>,
         generated_artifact_files: Vec<ProposedArtifactFile>,
@@ -968,6 +970,7 @@ impl CompositionGenerateService<'_> {
         G: ExecutionGraphRepository + ?Sized,
         RR: RunRepository + ?Sized,
     {
+        let (_, _, delivery, _) = compile_generation_nodes(pipeline, resolved)?;
         let mut proposals = proposals;
         let mut generated_writes = generated_writes;
         let mut generated_artifact_files = generated_artifact_files;
@@ -1018,11 +1021,22 @@ impl CompositionGenerateService<'_> {
                     .writer
                     .apply(&stage_root, run.id(), generated_writes.clone())?;
             staged_writes.commit()?;
+            let Some((_, validation_primitive)) = &delivery.validation else {
+                if finalize.validation_primitive.is_some() {
+                    stage.cleanup()?;
+                    return Err(CompositionGenerateError::ValidationPrimitiveMismatch);
+                }
+                break (stage, stage_root);
+            };
+            if finalize.validation_primitive.as_ref() != Some(validation_primitive) {
+                stage.cleanup()?;
+                return Err(CompositionGenerateError::ValidationPrimitiveMismatch);
+            }
             match dependencies
                 .validator
                 .validate(
                     ValidationRequest {
-                        primitive: finalize.validation_primitive.clone(),
+                        primitive: validation_primitive.clone(),
                         project_root: stage_root.clone(),
                         run_id: run.id().clone(),
                     },
@@ -1083,81 +1097,106 @@ impl CompositionGenerateService<'_> {
         })?;
         validate_publication_intent(graph, request, resolved, &finalize)?;
 
-        let build_request = ProjectBuildRequest {
-            output_relative_root: Some(request.package.source_relative_root.clone()),
-        };
-        let mut build_run = running_run::<ProjectBuildFeature, _>(&build_request)?;
-        let build = match self
-            .build
-            .execute(
-                dependencies.build_runner,
-                &mut build_run,
-                build_request,
-                ProjectBuildContext {
-                    pack: context.pack,
-                    contributions: context.build_contributions,
-                    project_root: &stage_root,
-                },
-                cancellation,
-            )
-            .await
-        {
-            Ok(result) => result,
-            Err(error) => {
-                finish_failed_child(&mut build_run, error.run_failure(), cancellation)?;
-                persist_child(runs, &build_run)?;
-                stage.cleanup()?;
-                release_commit_claim(graph, graphs)?;
-                return Err(error.into());
-            }
-        };
-        if let Err(error) = persist_child(runs, &build_run) {
+        if delivery.package_node_id.is_some() != request.package.is_some() {
             stage.cleanup()?;
             release_commit_claim(graph, graphs)?;
-            return Err(error);
+            return Err(CompositionGenerateError::InvalidInput);
         }
-        let build_run_id = build_run.id().clone();
-
-        let mut package_run = running_run::<ProjectPackageFeature, _>(&request.package)?;
-        let prepared_package = match self.package.prepare(
-            dependencies.package_writer,
-            &package_run,
-            &request.package,
-            ProjectPackageContext {
-                pack: context.pack,
-                contributions: context.package_contributions,
-                project_root: &stage_root,
-            },
-            cancellation,
-        ) {
-            Ok(prepared) => prepared,
-            Err(error) => {
-                finish_failed_child(&mut package_run, error.run_failure(), cancellation)?;
-                if let Err(storage_error) = persist_child(runs, &package_run) {
+        let (build_run_id, build) = if delivery.build_node_id.is_some() {
+            let build_request = ProjectBuildRequest {
+                output_relative_root: request
+                    .package
+                    .as_ref()
+                    .map(|package| package.source_relative_root.clone()),
+            };
+            let mut build_run = running_run::<ProjectBuildFeature, _>(&build_request)?;
+            let build = match self
+                .build
+                .execute(
+                    dependencies.build_runner,
+                    &mut build_run,
+                    build_request,
+                    ProjectBuildContext {
+                        pack: context.pack,
+                        contributions: context
+                            .build_contributions
+                            .ok_or(CompositionGenerateError::InvalidContribution)?,
+                        project_root: &stage_root,
+                    },
+                    cancellation,
+                )
+                .await
+            {
+                Ok(result) => result,
+                Err(error) => {
+                    finish_failed_child(&mut build_run, error.run_failure(), cancellation)?;
+                    persist_child(runs, &build_run)?;
                     stage.cleanup()?;
                     release_commit_claim(graph, graphs)?;
-                    return Err(storage_error);
+                    return Err(error.into());
                 }
+            };
+            if let Err(error) = persist_child(runs, &build_run) {
                 stage.cleanup()?;
                 release_commit_claim(graph, graphs)?;
-                return Err(error.into());
+                return Err(error);
             }
+            (Some(build_run.id().clone()), Some(build))
+        } else {
+            (None, None)
         };
-        let package = prepared_package.result().clone();
-        succeed_child::<ProjectPackageFeature, _>(&mut package_run, &package)?;
-        if let Err(error) = persist_child(runs, &package_run) {
-            prepared_package.rollback()?;
-            stage.cleanup()?;
-            release_commit_claim(graph, graphs)?;
-            return Err(error);
-        }
-        let package_run_id = package_run.id().clone();
+
+        let (package_run_id, package, mut prepared_package) =
+            if let (Some(_), Some(package_request)) =
+                (&delivery.package_node_id, request.package.as_ref())
+            {
+                let mut package_run = running_run::<ProjectPackageFeature, _>(package_request)?;
+                let prepared = match self.package.prepare(
+                    dependencies.package_writer,
+                    &package_run,
+                    package_request,
+                    ProjectPackageContext {
+                        pack: context.pack,
+                        contributions: context
+                            .package_contributions
+                            .ok_or(CompositionGenerateError::InvalidContribution)?,
+                        project_root: &stage_root,
+                    },
+                    cancellation,
+                ) {
+                    Ok(prepared) => prepared,
+                    Err(error) => {
+                        finish_failed_child(&mut package_run, error.run_failure(), cancellation)?;
+                        if let Err(storage_error) = persist_child(runs, &package_run) {
+                            stage.cleanup()?;
+                            release_commit_claim(graph, graphs)?;
+                            return Err(storage_error);
+                        }
+                        stage.cleanup()?;
+                        release_commit_claim(graph, graphs)?;
+                        return Err(error.into());
+                    }
+                };
+                let result = prepared.result().clone();
+                succeed_child::<ProjectPackageFeature, _>(&mut package_run, &result)?;
+                if let Err(error) = persist_child(runs, &package_run) {
+                    prepared.rollback()?;
+                    stage.cleanup()?;
+                    release_commit_claim(graph, graphs)?;
+                    return Err(error);
+                }
+                (Some(package_run.id().clone()), Some(result), Some(prepared))
+            } else {
+                (None, None, None)
+            };
 
         let mut final_writes = generated_writes;
-        final_writes.push(ProjectFileWrite::from_source(
-            package.output_relative_path.clone(),
-            prepared_package.output_path().to_path_buf(),
-        )?);
+        if let (Some(package), Some(prepared)) = (&package, &prepared_package) {
+            final_writes.push(ProjectFileWrite::from_source(
+                package.output_relative_path.clone(),
+                prepared.output_path().to_path_buf(),
+            )?);
+        }
         ats_runtime::validate_project_writes(&final_writes)?;
         let pending = match dependencies
             .writer
@@ -1165,13 +1204,17 @@ impl CompositionGenerateService<'_> {
         {
             Ok(pending) => pending,
             Err(error) => {
-                prepared_package.rollback()?;
+                if let Some(prepared) = prepared_package.take() {
+                    prepared.rollback()?;
+                }
                 stage.cleanup()?;
                 release_commit_claim(graph, graphs)?;
                 return Err(error.into());
             }
         };
-        if let Err(error) = prepared_package.commit() {
+        if let Some(prepared) = prepared_package.take()
+            && let Err(error) = prepared.commit()
+        {
             pending.rollback()?;
             stage.cleanup()?;
             release_commit_claim(graph, graphs)?;
@@ -1188,8 +1231,8 @@ impl CompositionGenerateService<'_> {
             child_run_ids.push(item.plan_run_id.clone());
             child_run_ids.push(item.generation_run_id.clone());
         }
-        child_run_ids.push(build_run_id.clone());
-        child_run_ids.push(package_run_id.clone());
+        child_run_ids.extend(build_run_id.iter().cloned());
+        child_run_ids.extend(package_run_id.iter().cloned());
         let extension = CompositionGenerateArtifactExtension {
             graph_digest: resolved.graph_digest.clone(),
             root_item_id: resolved.root_item_id.clone(),
@@ -1200,8 +1243,10 @@ impl CompositionGenerateService<'_> {
                 .map_err(|_| CompositionGenerateError::InvalidInput)?,
             generated_file_count: finalize.generated_file_count,
             child_run_ids,
-            package_output_relative_path: package.output_relative_path.clone(),
-            package_report: package.report.clone(),
+            package_output_relative_path: package
+                .as_ref()
+                .map(|result| result.output_relative_path.clone()),
+            package_report: package.as_ref().map(|result| result.report.clone()),
             execution_graph_id: Some(graph.id().clone()),
         };
         let artifact_request = composition_artifact_request(
@@ -1485,14 +1530,14 @@ impl CompositionGenerateService<'_> {
         let (writes, files) = consolidate_proposed_files(&proposals)?;
         let finalize = StagedFinalizeCheckpoint {
             graph_digest: resolved.graph_digest.clone(),
-            validation_primitive,
+            validation_primitive: Some(validation_primitive),
             generated_file_count: u32::try_from(files.len())
                 .map_err(|_| CompositionGenerateError::InvalidInput)?,
             items: item_results,
         };
         mutate_graph(graph, graphs, |graph| {
             graph.replace_checkpoint(
-                &blueprint.finalize_node_id,
+                blueprint.prepare.output_node_id(),
                 run_id,
                 VersionedPayload::from_typed(finalize_checkpoint_schema(), &finalize)
                     .map_err(|_| ats_runtime::ExecutionGraphError::InvalidMetadata)?,
@@ -1693,15 +1738,28 @@ impl CompositionGenerateService<'_> {
 impl StagedCompositionGenerateBlueprint {
     fn validate_identity(
         &self,
+        pipelines: &ats_game_context::GamePipelineRegistry,
         context: &CompositionGenerateContext<'_>,
     ) -> Result<(), CompositionGenerateError> {
-        if self.schema_version != 3
+        let contribution: CompositionGenerateContribution = context
+            .composition_contributions
+            .decode(&generation_slot())?;
+        pipelines.validate_resolved(&contribution.pipeline, &self.pipeline)?;
+        if self.schema_version != 6
             || self.game_pack_id != *context.pack.id()
             || self.game_pack_sha256 != *context.pack.content_sha256()
             || self.truth_snapshot_id != *context.truth.manifest().snapshot_id()
+            || self.pipeline.game_pack_id != self.game_pack_id
+            || self.pipeline.game_pack_sha256 != self.game_pack_sha256
+            || self.pipeline.truth_snapshot_id != self.truth_snapshot_id
+            || self.pipeline.source_graph_digest != self.graph_digest
+            || self.pipeline.owner_feature_id != CompositionGenerateFeature::id()
             || self.request.execution.is_some()
-            || self.items.is_empty()
             || self.items.len() > 128
+            || match self.prepare {
+                CompiledPreparePipeline::ItemGeneration { .. } => self.items.is_empty(),
+                CompiledPreparePipeline::DataJson { .. } => !self.items.is_empty(),
+            }
         {
             Err(CompositionGenerateError::InvalidCheckpoint)
         } else {
@@ -1711,30 +1769,300 @@ impl StagedCompositionGenerateBlueprint {
 
     fn validate(
         &self,
+        pipelines: &ats_game_context::GamePipelineRegistry,
         context: &CompositionGenerateContext<'_>,
         resolved: &ResolvedItemGraph,
         request: &CompositionGenerateRequest,
     ) -> Result<(), CompositionGenerateError> {
-        self.validate_identity(context)?;
+        self.validate_identity(pipelines, context)?;
+        let contribution: CompositionGenerateContribution = context
+            .composition_contributions
+            .decode(&generation_slot())?;
+        let expected_pipeline = pipelines.resolve(
+            &contribution.pipeline,
+            &pipeline_request(resolved, &contribution.pipeline.profile_id),
+        )?;
+        let (expected_prepare, expected_items, delivery, _) =
+            compile_generation_nodes(&expected_pipeline, resolved)?;
         let mut canonical_request = request.clone();
         canonical_request.execution = None;
         canonical_request.adjustment = None;
         if canonical_request != self.request
             || self.graph_digest != resolved.graph_digest
-            || self.items.len() != resolved.nodes.len()
-            || self
-                .items
-                .iter()
-                .zip(&resolved.nodes)
-                .any(|(item, definition)| {
-                    item.item_id != definition.definition.item_id
-                        || item.definition_hash != definition.definition_hash
-                })
+            || self.pipeline != expected_pipeline
+            || self.prepare != expected_prepare
+            || self.items != expected_items
+            || delivery.package_node_id.is_some() != request.package.is_some()
         {
             return Err(CompositionGenerateError::InvalidCheckpoint);
         }
         Ok(())
     }
+}
+
+fn pipeline_request(
+    resolved: &ResolvedItemGraph,
+    profile_id: &ats_kernel::PipelineProfileId,
+) -> PipelineResolveRequest {
+    let work_items = resolved
+        .nodes
+        .iter()
+        .map(|definition| {
+            let mut depends_on = resolved
+                .pinned_edges
+                .iter()
+                .filter(|edge| edge.source_item_id == definition.definition.item_id)
+                .map(|edge| edge.target_item_id.clone())
+                .collect::<Vec<_>>();
+            depends_on.sort();
+            depends_on.dedup();
+            PipelineWorkItem {
+                item_id: definition.definition.item_id.clone(),
+                definition_hash: definition.definition_hash.clone(),
+                depends_on,
+            }
+        })
+        .collect();
+    PipelineResolveRequest {
+        owner_feature_id: CompositionGenerateFeature::id(),
+        game_pack_id: resolved.game_pack_id.clone(),
+        game_pack_sha256: resolved.game_pack_sha256.clone(),
+        truth_snapshot_id: resolved.truth_snapshot_id.clone(),
+        source_graph_digest: resolved.graph_digest.clone(),
+        profile_id: profile_id.clone(),
+        work_items,
+    }
+}
+
+fn compile_generation_nodes(
+    pipeline: &ResolvedPipelineGraph,
+    resolved: &ResolvedItemGraph,
+) -> Result<
+    (
+        CompiledPreparePipeline,
+        Vec<StagedCompositionGenerateItem>,
+        CompiledDeliveryPipeline,
+        Vec<ExecutionNodeSpec>,
+    ),
+    CompositionGenerateError,
+> {
+    let validation_nodes = pipeline
+        .nodes
+        .iter()
+        .filter(|node| node.phase == PipelineNodePhase::Validate)
+        .collect::<Vec<_>>();
+    if validation_nodes.len() > 1
+        || validation_nodes
+            .iter()
+            .any(|node| !matches!(node.scope, PipelineNodeScope::Composition))
+    {
+        return Err(CompositionGenerateError::InvalidContribution);
+    }
+    let validation = validation_nodes
+        .first()
+        .map(|node| (node.node_id.clone(), node.primitive_id.clone()));
+
+    let unique_delivery = |primitive_id: &str| {
+        let mut matches = pipeline.nodes.iter().filter(|node| {
+            node.phase == PipelineNodePhase::Deliver
+                && matches!(node.scope, PipelineNodeScope::Composition)
+                && node.primitive_id.as_str() == primitive_id
+        });
+        let node = matches.next();
+        if matches.next().is_some() {
+            None
+        } else {
+            Some(node)
+        }
+    };
+    let build = unique_delivery("feature.project-build")
+        .ok_or(CompositionGenerateError::InvalidContribution)?;
+    let package = unique_delivery("feature.project-package")
+        .ok_or(CompositionGenerateError::InvalidContribution)?;
+    if pipeline.nodes.iter().any(|node| {
+        node.phase == PipelineNodePhase::Deliver
+            && node.primitive_id.as_str() != "feature.project-build"
+            && node.primitive_id.as_str() != "feature.project-package"
+    }) {
+        return Err(CompositionGenerateError::InvalidContribution);
+    }
+    let mut publish = pipeline.nodes.iter().filter(|node| {
+        node.phase == PipelineNodePhase::Publish
+            && matches!(node.scope, PipelineNodeScope::Composition)
+            && node.primitive_id.as_str() == "storage.atomic-publish"
+    });
+    let publish = publish
+        .next()
+        .filter(|_| publish.next().is_none())
+        .ok_or(CompositionGenerateError::InvalidContribution)?;
+    let delivery = CompiledDeliveryPipeline {
+        validation,
+        build_node_id: build.map(|node| node.node_id.clone()),
+        package_node_id: package.map(|node| node.node_id.clone()),
+        publish_node_id: publish.node_id.clone(),
+    };
+
+    let prepare_nodes = pipeline
+        .nodes
+        .iter()
+        .filter(|node| node.phase == PipelineNodePhase::Prepare)
+        .collect::<Vec<_>>();
+    let (prepare, staged_items) =
+        compile_item_generation_prepare(&prepare_nodes, &validation_nodes, &delivery, resolved)
+            .or_else(|| {
+                compile_data_json_prepare(&prepare_nodes).map(|prepare| (prepare, Vec::new()))
+            })
+            .ok_or(CompositionGenerateError::InvalidContribution)?;
+    let specs = pipeline
+        .nodes
+        .iter()
+        .filter(|node| node.phase == PipelineNodePhase::Prepare)
+        .map(|node| {
+            Ok(ExecutionNodeSpec {
+                node_id: node.node_id.clone(),
+                role_id: execution_role_id(node.primitive_id.as_str()).into(),
+                depends_on: node.depends_on.clone(),
+                request_snapshot_hash: zero_digest()?,
+            })
+        })
+        .collect::<Result<Vec<_>, CompositionGenerateError>>()?;
+    Ok((prepare, staged_items, delivery, specs))
+}
+
+fn execution_role_id(primitive_id: &str) -> &str {
+    match primitive_id {
+        "feature.mod-plan" => "mod.plan",
+        "feature.mod-generate-single" => "mod.generate.single",
+        "feature.composition-finalize" => "composition.finalize",
+        other => other,
+    }
+}
+
+fn compile_item_generation_prepare(
+    prepare_nodes: &[&ats_game_context::PipelineNode],
+    validation_nodes: &[&ats_game_context::PipelineNode],
+    delivery: &CompiledDeliveryPipeline,
+    resolved: &ResolvedItemGraph,
+) -> Option<(CompiledPreparePipeline, Vec<StagedCompositionGenerateItem>)> {
+    let mut staged_items = Vec::with_capacity(resolved.nodes.len());
+    let mut claimed = BTreeSet::new();
+    for definition in &resolved.nodes {
+        let item_id = &definition.definition.item_id;
+        let find = |primitive_id: &str| {
+            let mut matches = prepare_nodes.iter().copied().filter(|node| {
+                matches!(
+                    &node.scope,
+                    PipelineNodeScope::Item { item_id: candidate } if candidate == item_id
+                ) && node.primitive_id.as_str() == primitive_id
+            });
+            let node = matches.next()?;
+            matches.next().is_none().then_some(node)
+        };
+        let plan = find("feature.mod-plan")?;
+        let single = find("feature.mod-generate-single")?;
+        if plan.checkpoint_policy != PipelineCheckpointPolicy::OnSuccess
+            || single.checkpoint_policy != PipelineCheckpointPolicy::OnSuccess
+            || plan.produces.schema != plan_checkpoint_schema()
+            || single.produces.schema != single_checkpoint_schema()
+            || !claimed.insert(plan.node_id.clone())
+            || !claimed.insert(single.node_id.clone())
+        {
+            return None;
+        }
+        let valid_binding = match (&delivery.validation, validation_nodes.first()) {
+            (Some((_, primitive)), Some(validation)) => {
+                single.validation.len() == 1
+                    && single.validation[0].id == *primitive
+                    && single.validation[0].version == validation.primitive_version
+            }
+            (None, None) => single.validation.is_empty(),
+            _ => false,
+        };
+        if !valid_binding {
+            return None;
+        }
+        staged_items.push(StagedCompositionGenerateItem {
+            item_id: item_id.clone(),
+            definition_hash: definition.definition_hash.clone(),
+            plan_node_id: plan.node_id.clone(),
+            single_node_id: single.node_id.clone(),
+        });
+    }
+
+    let mut finalize = prepare_nodes.iter().copied().filter(|node| {
+        matches!(node.scope, PipelineNodeScope::Composition)
+            && node.primitive_id.as_str() == "feature.composition-finalize"
+    });
+    let finalize = finalize.next().filter(|_| finalize.next().is_none())?;
+    if finalize.checkpoint_policy != PipelineCheckpointPolicy::OnSuccess
+        || finalize.produces.schema != finalize_checkpoint_schema()
+        || !claimed.insert(finalize.node_id.clone())
+        || claimed.len() != prepare_nodes.len()
+    {
+        return None;
+    }
+    Some((
+        CompiledPreparePipeline::ItemGeneration {
+            output_node_id: finalize.node_id.clone(),
+        },
+        staged_items,
+    ))
+}
+
+fn compile_data_json_prepare(
+    prepare_nodes: &[&ats_game_context::PipelineNode],
+) -> Option<CompiledPreparePipeline> {
+    let [render] = prepare_nodes else {
+        return None;
+    };
+    (matches!(render.scope, PipelineNodeScope::Composition)
+        && render.primitive_id.as_str() == "data.render-json"
+        && render.depends_on.is_empty()
+        && render.validation.is_empty())
+    .then_some(())
+    .filter(|_| {
+        render.checkpoint_policy == PipelineCheckpointPolicy::OnSuccess
+            && render.produces.schema == finalize_checkpoint_schema()
+    })
+    .map(|()| CompiledPreparePipeline::DataJson {
+        output_node_id: render.node_id.clone(),
+    })
+}
+
+fn render_data_json(resolved: &ResolvedItemGraph) -> PreparedCompositionAssembly {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct DataJsonDocument<'a> {
+        schema_version: u32,
+        graph_digest: &'a Sha256Digest,
+        items: &'a [StoredItemDefinition],
+    }
+
+    let relative_path = "Generated/items.json";
+    let bytes = serde_json::to_vec_pretty(&DataJsonDocument {
+        schema_version: 1,
+        graph_digest: &resolved.graph_digest,
+        items: &resolved.nodes,
+    })
+    .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
+    let writes = vec![ProjectFileWrite::new(relative_path, bytes)?];
+    let artifact_files = vec![ProposedArtifactFile {
+        role: "data.items".into(),
+        relative_path: relative_path.into(),
+        composition_merge: None,
+        composition_merge_key_policy: None,
+    }];
+    Ok((
+        Vec::new(),
+        writes,
+        artifact_files,
+        StagedFinalizeCheckpoint {
+            graph_digest: resolved.graph_digest.clone(),
+            validation_primitive: None,
+            generated_file_count: 1,
+            items: Vec::new(),
+        },
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2327,7 +2655,7 @@ fn succeed_parent(
 }
 
 fn blueprint_schema() -> SchemaRef {
-    schema_version(BLUEPRINT_SCHEMA_ID, 3)
+    schema_version(BLUEPRINT_SCHEMA_ID, 6)
 }
 
 fn item_adjustment_schema() -> SchemaRef {
@@ -2343,7 +2671,7 @@ fn single_checkpoint_schema() -> SchemaRef {
 }
 
 fn finalize_checkpoint_schema() -> SchemaRef {
-    schema(FINALIZE_CHECKPOINT_SCHEMA_ID)
+    schema_version(FINALIZE_CHECKPOINT_SCHEMA_ID, 2)
 }
 
 fn commit_intent_schema() -> SchemaRef {

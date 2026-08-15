@@ -53,6 +53,11 @@ Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-sp
 - Pack v4 bytes/schema/hash are validated before registration.
 - A Feature declares required Contribution slots; missing/duplicate/unknown slots fail before work.
 - Pack data may reference only registered Primitive IDs and cannot execute arbitrary script/native code.
+- Pack `pack.composition-generate` v2 selects one exact registered Provider identity and profile.
+  The trusted Provider owns phase/dependency/Primitive selection; Pack and Shell cannot inject nodes,
+  commands or a fallback graph. The resolved v1 graph binds Pack/Truth/source graph/work-item hashes,
+  validates unique typed output slots, producer schema/ancestry and one full terminal publish closure,
+  and has a deterministic canonical digest.
 - Truth Snapshot sources/indexes and current pointer are content-addressed and verified for the active Pack.
 - Evidence is bounded and traceable; missing/invalid current Truth stops dependent Features.
 - Plan v2 stores descriptive `evidenceRequirements`; executable `symbols`/`terms` queries belong to
@@ -161,7 +166,7 @@ Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-sp
 - Checkpoint-free and repair-output evidence enters Runtime as the common
   `ExecutionOutputFeedback` value object. Do not grow parallel positional-argument APIs or decode
   `GenerationFeedbackEnvelope` below Feature code.
-- Composition Generate request v5 and Blueprint v3 fix `until_passed` or `max_rounds(1..20)` before graph creation.
+- Composition Generate request v6 and Blueprint v6 fix `until_passed` or `max_rounds(1..20)` before graph creation.
   The limit is the total semantic-feedback budget across the complete graph, never a per-node
   multiplier. `until_passed` uses the same absolute 20-round safety ceiling; it does not mean
   unbounded requests. Direct `mod.generate.single` remains strict and single-request. Composition may feed
@@ -893,6 +898,9 @@ let request = recipe.render_with_output_contract(&slots, model, output_contract)
 - File updates use explicit transactions and rollback on validation/publication/cancellation failure.
 - Child process cancellation kills/waits before drain success.
 - Tool runners are finite registered Primitives; Pack data cannot inject shell commands.
+- Game-specific phase order belongs to a trusted `ats-game-*` Provider. Generic Feature/Runtime code
+  must not branch on game ID or retain a fixed validation/build/package fallback. A synthetic
+  data-only Provider must remain free of model, dotnet and Godot Primitives.
 - Build/package consume declared inputs and never recurse arbitrary directories into output.
 
 ## 8. Shell Boundary
