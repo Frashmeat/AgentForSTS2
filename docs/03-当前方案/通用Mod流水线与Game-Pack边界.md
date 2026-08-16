@@ -4,11 +4,11 @@
 | --- | --- |
 | 状态 | Accepted; Provider foundation、STS2 cutover、trusted Prepare executor 与机器门禁已完成 |
 | 初始决议 | 2026-07-29 |
-| 本次修订 | 2026-08-15 |
+| 本次修订 | 2026-08-16 |
 | 适用范围 | 多游戏 Mod 的生成、验证、构建、打包、恢复与发布 |
-| 当前代码事实 | Provider v1/registry、`ats-game-sts2`、Provider-driven delivery 与 trusted Prepare executor 已接线；synthetic data-only 产品路径和完整机器门禁已通过 |
+| 当前代码事实 | Provider v1/registry、`ats-game-sts2`、Provider-driven delivery 与 trusted Prepare executor 已接线；synthetic data-only 产品路径和完整机器门禁已通过；当前 O9 candidate 已安装 |
 | 实施约束 | 本文不授权代码重构、candidate 构建、安装、发布或删除历史证据 |
-| 相关方案 | [Stage 2 分层能力与资源架构](./2026-08-02-Stage-2分层能力与资源架构方案.md) |
+| 相关方案 | [Stage 2 分层能力与资源架构](../90-归档/已完成基线/2026-08-02-Stage-2分层能力与资源架构方案.md) |
 
 ## 1. 决议摘要
 
@@ -484,7 +484,7 @@ Correct - Pack 选择受信任的版本化能力：
 
 ### Candidate 影响
 
-本轮已经完成跨 crate 代码 cutover 和机器门禁。所有既有 candidate、Truth、Run、Graph 和 Artifact 只能保留诊断价值，不得代表当前实现；取得明确授权后，必须重新构建并使用全新物理验收根。
+本轮已经完成跨 crate 代码 cutover 和机器门禁。当前 candidate `rc-20260816T084051Z-b9d4547665be` 已绑定最终代码并完成构建、安装和身份核对；更早的 candidate、Truth、Run、Graph 和 Artifact 只能保留诊断价值。下一步取得独立授权后，必须使用当前 candidate 创建全新物理验收根。
 
 ### 需要明确授权的步骤
 
@@ -505,4 +505,4 @@ Provider foundation 只有同时满足下列机器条件才算实现，而不是
 3. 至少一个 data-only synthetic Provider 证明不同阶段图可运行。
 4. Pack 只能选择注册能力，无法注入任意执行逻辑。
 5. 所有恢复、失败、事务、Artifact 和用户调整不变量继续成立。
-上述 cutover 与 foundation 机器门禁已经完成；stable backend/frontend specs 和现有实现是当前可执行事实。父任务仍须另行以新 candidate 完成 fresh installed closure，并由用户明确确认真实 STS2 验收；这些 O9 门禁不反向改变 Provider foundation 的机器完成状态。
+上述 cutover 与 foundation 机器门禁已经完成；stable backend/frontend specs 和现有实现是当前可执行事实。父任务当前 candidate 已安装，仍须另行完成 fresh installed closure，并由用户明确确认真实 STS2 验收；这些 O9 门禁不反向改变 Provider foundation 的机器完成状态。
