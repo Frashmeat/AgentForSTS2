@@ -11,6 +11,9 @@
         "height": 800,
         "minWidth": 960,
         "minHeight": 640,
+        "visible": false,
+        "focus": false,
+        "skipTaskbar": true,
         "decorations": true,
         "resizable": true
       }

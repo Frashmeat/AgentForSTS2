@@ -104,13 +104,26 @@ async function record(kind) {
 async function completeResponse(response, content, initialDelay) {
   await delay(initialDelay);
   if (response.destroyed || response.writableEnded) return;
-  response.writeHead(200, { "content-type": "application/json" });
-  response.end(JSON.stringify({
+  response.writeHead(200, {
+    "cache-control": "no-cache",
+    "content-type": "text/event-stream",
+  });
+  response.write(`data: ${JSON.stringify({
     id: "e2e-stub",
     model: "e2e-stub",
-    choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }],
+    choices: [{
+      index: 0,
+      delta: { role: "assistant", content },
+      finish_reason: "stop",
+    }],
+  })}\n\n`);
+  response.write(`data: ${JSON.stringify({
+    id: "e2e-stub",
+    model: "e2e-stub",
+    choices: [],
     usage: { prompt_tokens: 10, completion_tokens: 10 },
-  }));
+  })}\n\n`);
+  response.end("data: [DONE]\n\n");
 }
 
 const stagedFailures = new Set();
@@ -519,6 +532,9 @@ const server = http.createServer(async (request, response) => {
     }
     if (request.method === "POST" && request.url === "/v1/chat/completions") {
       const body = await readJson(request);
+      if (body.stream !== true || body.stream_options?.include_usage !== true) {
+        throw new Error("chat completions must use SSE with usage reporting");
+      }
       const promptText = body.messages
         ?.map((message) => String(message.content ?? ""))
         .join("\n") ?? "";

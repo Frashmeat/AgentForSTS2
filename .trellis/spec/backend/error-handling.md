@@ -46,6 +46,22 @@ provider or output failure never changes that value for the in-flight Run and ne
 second weaker-format request. Both modes retain the same Feature-owned typed decode; invalid JSON
 or shape remains `model.output_invalid` without raw Provider content in persisted details.
 
+OpenAI-compatible Chat Completions are consumed as SSE even when the Feature calls `complete()`;
+the Adapter aggregates the stream into the existing `ModelResponse` contract. The 180-second
+transport budget applies independently to response headers and each interval between byte chunks,
+not to the total lifetime of an active stream. A malformed event, invalid UTF-8, invalid delta or
+`[DONE]` without bounded output is `ModelError::InvalidResponse`; a byte-stream failure, idle
+timeout or EOF before `[DONE]` is retryable `ModelError::Transport`. User cancellation drops the
+live response and returns `ModelError::Cancelled`.
+
+The primary output is the ordered concatenation of `choices[0].delta.content`. OpenAI-compatible
+reasoning extensions may additionally send `delta.reasoning_content`; those bytes never mix with a
+non-empty content channel. Only when the complete stream contains no content bytes may the exact
+reasoning channel become the response content, after which the same Feature-owned strict JSON/type
+validation applies. The Adapter does not extract JSON fragments, strip prose or branch on Provider
+or model identity. Provider bodies and accumulated content remain excluded from persisted failure
+details and logs.
+
 Direct `mod.generate.single` returns that failure after one logical model call. Inside
 `composition.generate` request v6, repairable output-contract failures may enter the Feature-owned
 semantic feedback controller without changing model, endpoint, response format or Provider retry

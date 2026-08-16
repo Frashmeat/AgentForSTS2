@@ -581,6 +581,7 @@ pub struct LlmConfig {
 | `openai_response_format=json_object` | exactly `response_format.type=json_object`; no unsupported schema member is sent | not applicable |
 | `max_output_tokens` | `max_tokens` | `max_tokens` |
 | optional `temperature` | present only when configured | present only when configured |
+| response transport | `stream=true`, `stream_options.include_usage=true`; SSE aggregated into `ModelResponse` | bounded JSON response |
 
 The Adapter sends no Feature/Game Pack prompt of its own and never persists or logs the request,
 Authorization header, or provider body.
@@ -604,8 +605,10 @@ Figment environment overrides use `SPIREFORGE_LLM__RETRY_INITIAL_DELAY_MS` and
 
 | Provider result | Adapter result | Persisted Feature family |
 | --- | --- | --- |
-| 2xx with a normal completion envelope | `ModelResponse`; Feature performs authoritative typed decode | `succeeded` or `model.output_invalid` |
-| 2xx with malformed/empty completion envelope | `ModelError::InvalidResponse` | `model.response_invalid` |
+| 2xx SSE through `[DONE]` with bounded content | aggregated `ModelResponse`; Feature performs authoritative typed decode | `succeeded` or `model.output_invalid` |
+| malformed/empty SSE event or `[DONE]` without output | `ModelError::InvalidResponse` | `model.response_invalid` |
+| SSE chunk failure, 180-second inactivity, or EOF before `[DONE]` | retryable `ModelError::Transport` | `model.transport_failed` after bounded retries |
+| 2xx SSE Provider error event | `ModelError::Rejected` without retaining its body | `model.request_rejected` |
 | 400/other non-retryable rejection, including unsupported structured output | `ModelError::Rejected` | `model.request_rejected` |
 | 401/403 | `ModelError::Authentication` | `model.authentication` |
 | 429 | `ModelError::RateLimited` | `model.rate_limited` |
@@ -626,6 +629,14 @@ Every desktop HTTP model task enters the one FIFO `ModelRequestQueue` owned by t
 root. One logical task holds its slot through all attempts, retry waits, response parsing and
 terminal return. A queued task observes cancellation without issuing an HTTP request. Queue state
 is process-local Adapter scheduling state and never enters a Prompt, Run, Artifact or Shell DTO.
+
+OpenAI-compatible `complete()` uses the Provider's SSE transport internally and aggregates ordered
+deltas without changing the Runtime/Feature API. The header wait and every inter-chunk wait have a
+180-second inactivity bound; an active long response has no fixed 180-second wall-clock cutoff.
+`content` remains authoritative whenever it is non-empty. A separate `reasoning_content` channel is
+accepted only as an exact whole-response fallback when content is entirely absent, then reaches the
+same strict Feature decoder. The E2E OpenAI stub must require this request shape and answer with SSE;
+a buffered JSON stub is not a valid test double for the production protocol.
 
 An incompatible proxy is a configuration/provider failure unless the operator explicitly selects
 its verified `json_object` capability before the Run. A terminal provider or typed-output failure
@@ -664,7 +675,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 Required assertions:
 
 - `openai_request_enforces_the_core_output_contract`: exact schema, `json_schema`, fixed name and
-  `strict=true` are present.
+  `strict=true`, `stream=true` and usage reporting are present.
 - `openai_request_omits_an_absent_temperature`: optional transport fields do not weaken the schema.
 - `openai_json_object_format_is_explicit_and_keeps_the_prompt_contract`: the selected request has
   exactly `response_format.type=json_object`, while messages retain the Recipe-rendered contract.
@@ -684,6 +695,11 @@ Required assertions:
 - `model_clients_can_share_one_request_queue`: independently constructed clients use the same
   composition-root queue and retry policy.
 - `retry_configuration_is_bounded`: zero and values above one hour fail before any HTTP request.
+- OpenAI SSE tests cover arbitrary byte/UTF-8 boundaries, CRLF and multi-line data, ordered content,
+  reasoning-only fallback, finish reason, usage, malformed/empty/provider-error events, EOF before
+  `[DONE]` and cancellation while waiting for a chunk.
+- The deterministic desktop Provider stub verifies the exact stream request and emits SSE plus
+  `[DONE]`; GUI E2E therefore exercises the same transport contract as production.
 - A real-provider acceptance uses a normal natural-language Plan and proves the persisted typed
   result; it is environment acceptance, not a deterministic machine gate.
 

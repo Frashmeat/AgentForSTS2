@@ -6,12 +6,16 @@ use ats_runtime::{
     CancellationToken, FinishReason, ModelClient, ModelError, ModelMessageRole, ModelRequest,
     ModelRequestSnapshot, ModelResponse, ModelStream, ModelStreamEvent, TokenUsage,
 };
-use futures_util::stream;
+use futures_util::{Stream, StreamExt, stream};
 use reqwest::{Client, StatusCode};
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use crate::{LlmConfig, OpenAiResponseFormat};
+
+const RESPONSE_IDLE_TIMEOUT: Duration = Duration::from_secs(180);
+const MAX_SSE_LINE_BYTES: usize = 4 * 1024 * 1024;
+const MAX_STREAM_CONTENT_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum Protocol {
@@ -110,7 +114,6 @@ impl HttpModelClient {
         reqwest::Url::parse(&base_url).map_err(|_| ModelError::Configuration)?;
         let client = Client::builder()
             .connect_timeout(Duration::from_secs(20))
-            .timeout(Duration::from_secs(180))
             .build()
             .map_err(|_| ModelError::Configuration)?;
         Ok(Self {
@@ -145,15 +148,17 @@ impl HttpModelClient {
             match self.protocol {
                 Protocol::OpenAi => {
                     let body = openai_request_body(request, &model, self.openai_response_format);
-                    let response = self
+                    let send = self
                         .client
                         .post(format!("{}/chat/completions", self.base_url))
                         .bearer_auth(&self.api_key)
                         .json(&body)
-                        .send()
+                        .send();
+                    let response = tokio::time::timeout(RESPONSE_IDLE_TIMEOUT, send)
                         .await
+                        .map_err(|_| ModelError::Transport)?
                         .map_err(|_| ModelError::Transport)?;
-                    parse_openai(response).await
+                    parse_openai_stream(response, cancellation).await
                 }
                 Protocol::Anthropic => {
                     let body = anthropic_request_body(request, &model);
@@ -163,6 +168,7 @@ impl HttpModelClient {
                         .header("x-api-key", &self.api_key)
                         .header("anthropic-version", "2023-06-01")
                         .json(&body)
+                        .timeout(RESPONSE_IDLE_TIMEOUT)
                         .send()
                         .await
                         .map_err(|_| ModelError::Transport)?;
@@ -224,28 +230,222 @@ impl ModelClient for HttpModelClient {
     }
 }
 
-async fn parse_openai(response: reqwest::Response) -> Result<ModelResponse, ModelError> {
+async fn parse_openai_stream(
+    response: reqwest::Response,
+    cancellation: &CancellationToken,
+) -> Result<ModelResponse, ModelError> {
     check_status(&response)?;
-    let value: Value = response
-        .json()
-        .await
-        .map_err(|_| ModelError::InvalidResponse)?;
-    let choice = value
-        .get("choices")
-        .and_then(Value::as_array)
-        .and_then(|values| values.first())
-        .ok_or(ModelError::InvalidResponse)?;
-    Ok(ModelResponse {
-        model: text(&value, "model")?.into(),
-        content: choice
-            .get("message")
-            .and_then(|message| message.get("content"))
-            .and_then(Value::as_str)
-            .ok_or(ModelError::InvalidResponse)?
-            .into(),
-        finish_reason: finish_reason(choice.get("finish_reason").and_then(Value::as_str)),
-        usage: usage(&value),
-    })
+    let chunks = response
+        .bytes_stream()
+        .map(|chunk| chunk.map_err(|_| ModelError::Transport));
+    aggregate_openai_sse(chunks, cancellation).await
+}
+
+async fn aggregate_openai_sse<S, B>(
+    chunks: S,
+    cancellation: &CancellationToken,
+) -> Result<ModelResponse, ModelError>
+where
+    S: Stream<Item = Result<B, ModelError>>,
+    B: AsRef<[u8]>,
+{
+    futures_util::pin_mut!(chunks);
+    let mut decoder = SseDecoder::default();
+    let mut response = OpenAiStreamResponse::default();
+
+    loop {
+        let next = tokio::select! {
+            biased;
+            () = wait_cancelled(cancellation) => return Err(ModelError::Cancelled),
+            result = tokio::time::timeout(RESPONSE_IDLE_TIMEOUT, chunks.next()) => {
+                result.map_err(|_| ModelError::Transport)?
+            },
+        };
+        let Some(chunk) = next else {
+            for data in decoder.finish()? {
+                if response.apply(&data)? {
+                    return response.finish();
+                }
+            }
+            return Err(ModelError::Transport);
+        };
+        for data in decoder.push(chunk?.as_ref())? {
+            if response.apply(&data)? {
+                return response.finish();
+            }
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct SseDecoder {
+    line: Vec<u8>,
+    data_lines: Vec<String>,
+    data_bytes: usize,
+}
+
+impl SseDecoder {
+    fn push(&mut self, bytes: &[u8]) -> Result<Vec<String>, ModelError> {
+        let mut events = Vec::new();
+        for &byte in bytes {
+            if byte == b'\n' {
+                let mut line = std::mem::take(&mut self.line);
+                if line.last() == Some(&b'\r') {
+                    line.pop();
+                }
+                self.process_line(&line, &mut events)?;
+            } else {
+                if self.line.len() >= MAX_SSE_LINE_BYTES {
+                    return Err(ModelError::InvalidResponse);
+                }
+                self.line.push(byte);
+            }
+        }
+        Ok(events)
+    }
+
+    fn finish(&mut self) -> Result<Vec<String>, ModelError> {
+        let mut events = Vec::new();
+        if !self.line.is_empty() {
+            let mut line = std::mem::take(&mut self.line);
+            if line.last() == Some(&b'\r') {
+                line.pop();
+            }
+            self.process_line(&line, &mut events)?;
+        }
+        self.dispatch(&mut events);
+        Ok(events)
+    }
+
+    fn process_line(&mut self, line: &[u8], events: &mut Vec<String>) -> Result<(), ModelError> {
+        if line.is_empty() {
+            self.dispatch(events);
+            return Ok(());
+        }
+        if line.first() == Some(&b':') {
+            return Ok(());
+        }
+
+        let separator = line.iter().position(|byte| *byte == b':');
+        let (field, mut value) = match separator {
+            Some(index) => (&line[..index], &line[index + 1..]),
+            None => (line, &[][..]),
+        };
+        if field != b"data" {
+            return Ok(());
+        }
+        if value.first() == Some(&b' ') {
+            value = &value[1..];
+        }
+        let value = std::str::from_utf8(value).map_err(|_| ModelError::InvalidResponse)?;
+        self.data_bytes = self.data_bytes.saturating_add(value.len());
+        if self.data_bytes > MAX_SSE_LINE_BYTES {
+            return Err(ModelError::InvalidResponse);
+        }
+        self.data_lines.push(value.to_owned());
+        Ok(())
+    }
+
+    fn dispatch(&mut self, events: &mut Vec<String>) {
+        if !self.data_lines.is_empty() {
+            events.push(self.data_lines.join("\n"));
+            self.data_lines.clear();
+            self.data_bytes = 0;
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct OpenAiStreamResponse {
+    model: Option<String>,
+    content: String,
+    reasoning_content: String,
+    finish_reason: FinishReason,
+    usage: TokenUsage,
+}
+
+impl OpenAiStreamResponse {
+    fn apply(&mut self, data: &str) -> Result<bool, ModelError> {
+        if data == "[DONE]" {
+            return Ok(true);
+        }
+
+        let value: Value = serde_json::from_str(data).map_err(|_| ModelError::InvalidResponse)?;
+        if value.get("error").is_some() {
+            return Err(ModelError::Rejected);
+        }
+        if let Some(model) = value.get("model") {
+            let model = model
+                .as_str()
+                .filter(|model| !model.is_empty() && model.len() <= 256)
+                .ok_or(ModelError::InvalidResponse)?;
+            if self
+                .model
+                .as_deref()
+                .is_some_and(|current| current != model)
+            {
+                return Err(ModelError::InvalidResponse);
+            }
+            self.model.get_or_insert_with(|| model.to_owned());
+        }
+        if value.get("usage").is_some_and(|usage| !usage.is_null()) {
+            self.usage = usage(&value);
+        }
+
+        let choices = value
+            .get("choices")
+            .and_then(Value::as_array)
+            .ok_or(ModelError::InvalidResponse)?;
+        if let Some(choice) = choices.first() {
+            let delta = choice
+                .get("delta")
+                .and_then(Value::as_object)
+                .ok_or(ModelError::InvalidResponse)?;
+            append_optional_delta(&mut self.content, delta.get("content"))?;
+            append_optional_delta(&mut self.reasoning_content, delta.get("reasoning_content"))?;
+            match choice.get("finish_reason") {
+                None | Some(Value::Null) => {}
+                Some(Value::String(reason)) => {
+                    self.finish_reason = finish_reason(Some(reason));
+                }
+                Some(_) => return Err(ModelError::InvalidResponse),
+            }
+        }
+        Ok(false)
+    }
+
+    fn finish(self) -> Result<ModelResponse, ModelError> {
+        let content = if self.content.is_empty() {
+            self.reasoning_content
+        } else {
+            self.content
+        };
+        if content.is_empty() {
+            return Err(ModelError::InvalidResponse);
+        }
+        Ok(ModelResponse {
+            model: self.model.ok_or(ModelError::InvalidResponse)?,
+            content,
+            finish_reason: self.finish_reason,
+            usage: self.usage,
+        })
+    }
+}
+
+fn append_optional_delta(target: &mut String, value: Option<&Value>) -> Result<(), ModelError> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    let text = match value {
+        Value::Null => return Ok(()),
+        Value::String(text) => text,
+        _ => return Err(ModelError::InvalidResponse),
+    };
+    if target.len().saturating_add(text.len()) > MAX_STREAM_CONTENT_BYTES {
+        return Err(ModelError::InvalidResponse);
+    }
+    target.push_str(text);
+    Ok(())
 }
 
 async fn parse_anthropic(response: reqwest::Response) -> Result<ModelResponse, ModelError> {
@@ -350,6 +550,10 @@ fn openai_request_body(
         "messages": messages,
         "max_tokens": request.max_output_tokens,
         "response_format": response_format,
+        "stream": true,
+        "stream_options": {
+            "include_usage": true,
+        },
     });
     if let Some(temperature) = request.temperature {
         body["temperature"] = json!(temperature);
@@ -495,6 +699,8 @@ mod tests {
         assert_eq!(body["max_tokens"], json!(512));
         assert_eq!(body["temperature"], json!(0.25));
         assert_eq!(body["messages"][0]["role"], json!("user"));
+        assert_eq!(body["stream"], json!(true));
+        assert_eq!(body["stream_options"]["include_usage"], json!(true));
         assert_eq!(body["response_format"]["type"], json!("json_schema"));
         assert_eq!(
             body["response_format"]["json_schema"]["name"],
@@ -612,6 +818,169 @@ mod tests {
             json!("json_schema")
         );
         assert_eq!(body["output_config"]["format"]["schema"], schema);
+        assert!(body.get("stream").is_none());
+        assert!(body.get("stream_options").is_none());
+    }
+
+    fn sse_data(value: Value) -> String {
+        format!("data: {}\r\n\r\n", serde_json::to_string(&value).unwrap())
+    }
+
+    #[tokio::test]
+    async fn openai_sse_aggregates_split_utf8_content_finish_reason_and_usage() {
+        let mut bytes = String::new();
+        bytes.push_str(": keep-alive\r\n\r\n");
+        bytes.push_str(&sse_data(json!({
+            "model": "deepseek-v4-pro",
+            "choices": [{
+                "index": 0,
+                "delta": {"reasoning_content": "private analysis", "content": "{\"title\":\""},
+                "finish_reason": null
+            }]
+        })));
+        bytes.push_str(&sse_data(json!({
+            "model": "deepseek-v4-pro",
+            "choices": [{
+                "index": 0,
+                "delta": {"content": "测试\"}"},
+                "finish_reason": "stop"
+            }]
+        })));
+        bytes.push_str(&sse_data(json!({
+            "model": "deepseek-v4-pro",
+            "choices": [],
+            "usage": {"prompt_tokens": 41, "completion_tokens": 17}
+        })));
+        bytes.push_str("data: [DONE]\r\n\r\n");
+        let bytes = bytes.into_bytes();
+        let utf8_split = bytes
+            .windows("测".len())
+            .position(|window| window == "测".as_bytes())
+            .unwrap()
+            + 1;
+        let chunks = vec![
+            Ok(bytes[..13].to_vec()),
+            Ok(bytes[13..utf8_split].to_vec()),
+            Ok(bytes[utf8_split..].to_vec()),
+        ];
+
+        let response = aggregate_openai_sse(stream::iter(chunks), &CancellationToken::new())
+            .await
+            .unwrap();
+
+        assert_eq!(response.model, "deepseek-v4-pro");
+        assert_eq!(response.content, "{\"title\":\"测试\"}");
+        assert!(!response.content.contains("private analysis"));
+        assert_eq!(response.finish_reason, FinishReason::EndTurn);
+        assert_eq!(
+            response.usage,
+            TokenUsage {
+                input_tokens: 41,
+                output_tokens: 17,
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn openai_sse_uses_reasoning_content_only_when_content_is_absent() {
+        let body = format!(
+            "{}data: [DONE]\n\n",
+            sse_data(json!({
+                "model": "compatible-reasoner",
+                "choices": [{
+                    "index": 0,
+                    "delta": {"reasoning_content": "{\"ok\":true}"},
+                    "finish_reason": "length"
+                }]
+            }))
+        );
+
+        let response = aggregate_openai_sse(
+            stream::iter(vec![Ok(body.into_bytes())]),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.content, "{\"ok\":true}");
+        assert_eq!(response.finish_reason, FinishReason::MaxTokens);
+    }
+
+    #[tokio::test]
+    async fn openai_sse_accepts_multiline_data_and_ignores_non_data_fields() {
+        let body = concat!(
+            "event: message\n",
+            "id: fixture\n",
+            "data: {\"model\":\"fixture-model\",\n",
+            "data: \"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\n",
+            "data: [DONE]\n\n"
+        );
+
+        let response = aggregate_openai_sse(
+            stream::iter(vec![Ok(body.as_bytes().to_vec())]),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.content, "ok");
+    }
+
+    #[tokio::test]
+    async fn openai_sse_rejects_malformed_empty_and_provider_error_events() {
+        for (body, expected) in [
+            ("data: not-json\n\n", ModelError::InvalidResponse),
+            ("data: [DONE]\n\n", ModelError::InvalidResponse),
+            (
+                "data: {\"error\":{\"message\":\"redacted by adapter\"}}\n\n",
+                ModelError::Rejected,
+            ),
+        ] {
+            let result = aggregate_openai_sse(
+                stream::iter(vec![Ok(body.as_bytes().to_vec())]),
+                &CancellationToken::new(),
+            )
+            .await;
+            assert_eq!(result, Err(expected));
+        }
+    }
+
+    #[tokio::test]
+    async fn openai_sse_treats_eof_before_done_as_retryable_transport_failure() {
+        let body = sse_data(json!({
+            "model": "fixture-model",
+            "choices": [{
+                "index": 0,
+                "delta": {"content": "partial"},
+                "finish_reason": null
+            }]
+        }));
+
+        let result = aggregate_openai_sse(
+            stream::iter(vec![Ok(body.into_bytes())]),
+            &CancellationToken::new(),
+        )
+        .await;
+
+        assert_eq!(result, Err(ModelError::Transport));
+    }
+
+    #[tokio::test]
+    async fn openai_sse_observes_cancellation_while_waiting_for_a_chunk() {
+        let cancellation = CancellationToken::new();
+        let trigger = cancellation.clone();
+        tokio::spawn(async move {
+            tokio::task::yield_now().await;
+            trigger.cancel(CancellationReason::User);
+        });
+
+        let result = aggregate_openai_sse(
+            stream::pending::<Result<Vec<u8>, ModelError>>(),
+            &cancellation,
+        )
+        .await;
+
+        assert_eq!(result, Err(ModelError::Cancelled));
     }
 
     #[test]
